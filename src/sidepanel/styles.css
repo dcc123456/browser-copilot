@@ -1,0 +1,447 @@
+:root {
+  --bg: #14161a;
+  --panel: #1c1f26;
+  --panel-2: #23272f;
+  --border: #333844;
+  --text: #e6e8ec;
+  --muted: #9aa3b2;
+  --accent: #5b8cff;
+  --ok: #4ec9a6;
+  --err: #ff6b6b;
+  --warn: #f0b849;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* --- Tabs --- */
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px 8px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.tab {
+  flex: 1;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
+.tab[data-active='true'] {
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.pane {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+/* --- Chat --- */
+.chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.msg {
+  padding: 8px 10px;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.msg[data-role='user'] {
+  background: #2b3550;
+  align-self: flex-end;
+  max-width: 92%;
+}
+
+.msg[data-role='assistant'] {
+  background: var(--panel-2);
+}
+
+.msg[data-role='status'] {
+  color: var(--muted);
+  font-style: italic;
+  padding: 0 4px;
+}
+
+.msg[data-role='error'] {
+  background: #3a2226;
+  color: var(--err);
+}
+
+.tool-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #2a2f3a;
+  color: var(--muted);
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+}
+
+.confirm-card {
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  padding: 10px;
+  background: #2a2418;
+}
+
+.confirm-card pre {
+  margin: 6px 0;
+  padding: 6px;
+  background: #14161a;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 11px;
+}
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  /* Positioning context for the slash menu, so it can sit directly above the
+     textarea without measuring caret coordinates. */
+  position: relative;
+}
+
+.composer textarea {
+  resize: vertical;
+  min-height: 54px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.composer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+/* --- Forms & controls --- */
+button {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0d1117;
+  font-weight: 600;
+}
+
+button.danger {
+  color: var(--err);
+}
+
+label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.field {
+  margin-bottom: 10px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+}
+
+.row > * {
+  flex: 1;
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: var(--panel);
+}
+
+.card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.card-title {
+  font-weight: 600;
+}
+
+.meta {
+  color: var(--muted);
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.status-ok {
+  color: var(--ok);
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 6px 0 12px;
+}
+
+.hint code {
+  background: var(--panel-2);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 24px 8px;
+}
+
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: none;
+  letter-spacing: normal;
+  margin: 0;
+}
+
+.inline-check input {
+  width: auto;
+}
+
+/* Skills: a labelled checkbox that sits inside a card, unlike .inline-check
+   which is tuned for the composer row. */
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.checkbox input {
+  width: auto;
+  flex: none;
+}
+
+/* Marks the skill currently applied to the conversation. */
+.pill {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent, #2f6feb);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}
+
+/* Long skill instructions need room without pushing the card off-screen. */
+.card textarea {
+  resize: vertical;
+  min-height: 90px;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* --- Slash-command menu ---------------------------------------------------- */
+
+.slash-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 8px;
+  right: 8px;
+  margin-bottom: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  /* Above the chat log, which scrolls underneath it. */
+  z-index: 20;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+}
+
+.slash-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.slash-item[data-active='true'] {
+  background: var(--accent);
+  color: #fff;
+}
+
+.slash-item-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.slash-item-desc {
+  font-size: 11px;
+  opacity: 0.75;
+  /* One line only: descriptions vary wildly in length and would otherwise give
+     each row a different height, which makes keyboard navigation feel unsteady. */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.slash-empty {
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* --- Active-skill chip ----------------------------------------------------- */
+
+.skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 2px 4px 2px 8px;
+  border-radius: 999px;
+  background: rgb(91 140 255 / 20%);
+  border: 1px solid rgb(91 140 255 / 55%);
+  max-width: 100%;
+}
+
+.skill-chip-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.skill-chip-clear {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.skill-chip-clear:hover {
+  background: rgb(255 255 255 / 12%);
+  color: var(--text);
+}
+
+.banner {
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.banner[data-kind='error'] {
+  background: #3a2226;
+  color: var(--err);
+}
+
+.banner[data-kind='ok'] {
+  background: #1d3330;
+  color: var(--ok);
+}

@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+*.crx
+*.pem
+*.zip
+
+# Vite / TypeScript caches
+.vite/
+*.tsbuildinfo
+
+# Test output
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local secrets. API keys belong in the extension's Settings UI (stored in
+# chrome.storage.local), never in a file that could be committed.
+.env
+.env.*
+!.env.example

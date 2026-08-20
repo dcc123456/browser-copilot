@@ -1,0 +1,4 @@
+# pnpm 11+ reads build-script allowlists from here, not package.json.
+# esbuild ships a platform-specific binary that Vite needs at build time.
+allowBuilds:
+  esbuild: true

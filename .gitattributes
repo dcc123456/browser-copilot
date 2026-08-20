@@ -1,0 +1,19 @@
+# Normalize all text files to LF in the repository.
+#
+# Without this, committing from Windows can bake CRLF into history and produce
+# whole-file diffs whenever a collaborator on macOS or Linux touches a file.
+* text=auto eol=lf
+
+# Lockfiles must not be reformatted.
+pnpm-lock.yaml -text linguist-generated=true
+
+# Binary assets: never diff or convert.
+*.png binary
+*.jpg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.zip binary
+*.crx binary
