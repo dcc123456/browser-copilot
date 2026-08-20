@@ -323,7 +323,7 @@ the most recent 200 messages are kept.
 ```bash
 pnpm run dev         # rebuild on change
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest — 184 tests
+pnpm run test        # vitest — 206 tests
 pnpm run build       # production bundle into dist/
 pnpm run icons       # regenerate public/icons
 ```
