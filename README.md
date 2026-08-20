@@ -1,126 +1,234 @@
 # Browser Copilot
 
-A Chrome extension (Manifest V3) that puts an LLM assistant in the browser side
-panel and lets it read the page you are looking at.
+**English** · [简体中文](README.zh-CN.md)
 
-1. **A side-panel chat** — backed by **any OpenAI-compatible endpoint**
-   (DeepSeek, 火山方舟 Volcengine Ark, OpenAI, OpenRouter, a local Ollama).
-2. **Page reading** — pull the current tab's title, URL, selection, and body
-   text into the conversation, either by attaching it yourself or by letting the
-   agent ask.
-3. **Skills** — reusable instruction packs, applied explicitly with `/` or
-   matched automatically by description.
+A Chrome extension (Manifest V3) that puts an AI assistant in the browser side
+panel, able to read the page you are looking at. Works with any
+OpenAI-compatible model — DeepSeek, 火山方舟 Ark, OpenAI, a local Ollama, and
+more.
 
-The UI is available in **English or 简体中文**.
+It reads and advises; it never clicks, types, or navigates. And it does nothing
+on a timer — every action answers something you just did.
 
 ---
 
-## What this extension does and does not do
+## Contents
 
-It is an **observer**, not an operator. It can read the page you are on; it
-cannot click, type, navigate, or submit anything. That boundary is the design,
-not a missing feature: an assistant that reads and advises fails safely, while
-one that acts can fail destructively on a page you were not watching.
-
-It also does **nothing on a timer**. There is no `alarms` permission and no
-background schedule — every action is a direct response to something you just
-did in the panel. If the panel is closed and you are not asking it anything, the
-extension is doing nothing at all.
+- [What it is good for](#what-it-is-good-for)
+- [Install](#install)
+- [Supported models](#supported-models)
+- [Configuring a model](#configuring-a-model)
+- [Using it](#using-it)
+- [Skills](#skills)
+- [Privacy and permissions](#privacy-and-permissions)
+- [Development](#development)
+- [Troubleshooting](#troubleshooting)
+- [Limitations](#limitations)
 
 ---
 
-## Reading a page: how it actually works
+## What it is good for
 
-Page text is obtained by injecting a one-off, read-only script into the tab with
-`chrome.scripting.executeScript`, in the default **isolated world**. The script
-clones the body, strips `script`/`style`/`svg`/`iframe` and similar noise,
-and returns `innerText`; whitespace collapsing and truncation happen back in the
-service worker where they are unit-testable
-([`src/background/page.ts`](src/background/page.ts),
-[`src/lib/extract.ts`](src/lib/extract.ts)).
+The pattern is always the same: open a page, ask a question about it. Below are
+the cases it handles well — each with the honest caveat, because knowing where a
+tool stops is what makes it usable.
 
-Two consequences follow, and both are visible in the UI rather than hidden:
+### Reviewing a pull request
 
-| Constraint | Why |
+Open the **Files changed** tab of a PR and ask for a review — logic errors,
+missing edge cases, naming, whether the change matches its description.
+
+> Review this diff. Focus on error handling and anything that could break
+> existing callers.
+
+**Works best when you select the specific hunk first.** Selected text is
+captured separately from the page body, so highlighting one function gives the
+model a precise target instead of the whole diff. This matters because GitHub
+collapses large diffs behind "Load diff" buttons — the extension only sees what
+is actually rendered, and page text is capped at ~12,000 characters (roughly
+3,000–4,000 English words). For a big PR, review it a few files at a time rather
+than expecting one pass over everything.
+
+It cannot navigate between files or post a comment for you. It reads the tab you
+are on; you act.
+
+### Summarizing a web page
+
+Long articles, documentation, release notes, forum threads, research papers.
+
+> Summarize the key points in five bullets, then list anything the author
+> asserts without evidence.
+
+This is the strongest use case: one page, one read, one answer. Works on any
+ordinary http(s) page.
+
+### Understanding unfamiliar code or docs
+
+Open a file on GitHub, an API reference, or a spec, and ask for an explanation
+at the level you need.
+
+> Explain what this module does and why it might have been written this way.
+
+> What is the minimal request that satisfies this API?
+
+### Analyzing data on a page
+
+Dashboards, HTML tables, query results, log output, pricing pages.
+
+> What is the trend across these quarters, and which row is the outlier?
+
+**Read the caveat.** The model receives the table as *text* and reasons about it
+— nothing is computed. Language models are unreliable at arithmetic over long
+tables, so treat any number as a hypothesis to verify, not a calculation. Ask for
+the reasoning ("which rows led you to that?") rather than a bare total.
+
+### Translating and rewriting
+
+> Translate this page into Chinese, keeping technical terms in English.
+
+> Rewrite this paragraph so a non-specialist understands it.
+
+### Comparing against a standard
+
+Pair this with a [skill](#skills) holding your team's checklist — a code-review
+rubric, a security checklist, a writing style guide — and apply the same
+standard to every page without retyping it.
+
+### What it cannot do
+
+| Not supported | Why |
 | --- | --- |
-| Only **ordinary http(s) pages** | No extension may inject into `chrome://`, `about:`, `file://`, the Web Store, or another extension's pages. No permission changes this. |
-| Only the **top frame** | Subframe text is mostly ads and chrome; merging frames yields context you cannot locate on the page in front of you. |
-
-The rule is a single predicate in [`src/lib/pages.ts`](src/lib/pages.ts), so
-every part of the extension agrees on what is readable. **Settings → Page access
-→ Check active tab** reports the answer for the current tab before you rely on
-it.
-
-### Two paths, one of them gated
-
-- **You attach the page.** Tick *Attach current page* in the composer and the
-  page is scraped and prefixed to your message. No prompt: you already said
-  which page, and when.
-- **The agent asks for it.** A model-initiated `read_current_page` call requires
-  explicit approval, showing the arguments first.
-
-The asymmetry is deliberate. The active tab might be webmail, an internal
-dashboard, or a bank statement, and reading it ships that text to a third-party
-model endpoint. A deliberate attach is consent; a model deciding on its own is
-not.
+| Fill forms, click buttons, navigate | Read-only by design: it observes, you act. |
+| Read several tabs at once | It reads the tab you are looking at, one read at a time. |
+| Read `chrome://`, local files, the Web Store | Chrome forbids extension injection there. No permission changes this. |
+| See content inside iframes | Only the top frame is read (embedded players, some comment widgets). |
+| Run code or compute | It reasons over text. See the data caveat above. |
+| Work on a schedule | There is no timer and no `alarms` permission. |
 
 ---
 
 ## Install
 
-Requires Node.js 20+ and Chrome 116+ (the side panel needs 114+).
+Requires **Node.js 20+** and **Chrome 116+**.
 
 ```bash
+git clone git@github.com:dcc123456/browser-copilot.git
+cd browser-copilot
 pnpm install
 pnpm run build
 ```
 
-Then in Chrome:
+Then load it into Chrome:
 
 1. Open `chrome://extensions`.
-2. Enable **Developer mode**.
-3. Click **Load unpacked** and select the generated `dist/` folder.
-4. Click the extension icon to open the side panel.
+2. Turn on **Developer mode** (top right).
+3. Click **Load unpacked** and select the generated **`dist/`** folder.
+4. Click the extension's toolbar icon to open the side panel.
 
-For iterative work, `pnpm run dev` rebuilds on change; the extension still has
-to be reloaded from `chrome://extensions` after changes to the service worker.
+`npm install && npm run build` works too if you prefer npm.
+
+There is no prebuilt archive to download: the bundle would be unsigned and
+unreviewed, so building from source is the honest distribution path.
+
+### Updating
+
+```bash
+git pull
+pnpm install
+pnpm run build
+```
+
+Then press **Reload** on the extension card in `chrome://extensions`. A rebuild
+alone does not refresh an already-loaded service worker.
 
 ---
 
-## Setup
+## Supported models
 
-Open **Settings → Add a provider**, pick a preset, paste your key, and press
-**Test connection**. You can configure several providers and switch with **Use
-this** — a coding-plan endpoint, a cheap fallback, a local model — without
-retyping credentials.
+Any endpoint that speaks the OpenAI chat-completions protocol. There is no
+vendor-specific code in this extension — a provider is configuration, not a code
+path — so an endpoint not listed here still works, as long as it accepts
+`POST {baseUrl}/chat/completions` with `Bearer` auth and SSE streaming.
 
-Presets exist only to prefill base URLs; every field stays editable.
+These presets exist only to prefill base URLs. Every field stays editable.
 
-| Preset | Base URL | Model examples |
+| Preset | Base URL | Example model |
 | --- | --- | --- |
 | DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat`, `deepseek-reasoner` |
-| 火山方舟 Ark | `https://ark.cn-beijing.volces.com/api/v3` | `doubao-seed-code`, or an endpoint ID `ep-…` |
+| 火山方舟 Volcengine Ark | `https://ark.cn-beijing.volces.com/api/v3` | `doubao-seed-code`, or an endpoint ID `ep-…` |
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
 | OpenRouter | `https://openrouter.ai/api/v1` | `deepseek/deepseek-chat` |
 | Moonshot / Kimi | `https://api.moonshot.cn/v1` | `kimi-k2-0905-preview` |
-| Ollama (local) | `http://localhost:11434/v1` | whatever you have pulled |
+| 阿里云百炼 DashScope | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` |
+| 硅基流动 SiliconFlow | `https://api.siliconflow.cn/v1` | `deepseek-ai/DeepSeek-V3` |
+| Ollama (local) | `http://localhost:11434/v1` | `qwen3:8b` |
+| LM Studio (local) | `http://localhost:1234/v1` | `local-model` |
+| Custom | — | anything OpenAI-compatible |
 
-**Base URL** is everything up to but *not* including `/chat/completions`; a
-pasted full endpoint is trimmed automatically. **Fetch models** queries
-`/models` when the gateway offers it — not all do, and you can always type the
-model name.
+### Choosing a model
 
-There is no vendor-specific code anywhere in the client. Every one of these
-speaks the same contract — `POST {baseUrl}/chat/completions`, `Bearer` auth, SSE
-frames of `chat.completion.chunk`, `tools` function calling, `[DONE]` to
-terminate — so a provider is configuration, not a code path
-([`src/lib/llm.ts`](src/lib/llm.ts)).
+**Function calling is what matters.** The assistant reads a page by calling a
+tool, so a model without function-calling support will chat happily but never
+read anything on its own. Attaching the page manually still works, which keeps
+weaker models usable but less convenient.
 
-### Where your key lives
+- **General use** — `deepseek-chat`, `gpt-4o-mini`, `qwen-plus`: fast and cheap.
+- **Code review and hard reasoning** — `deepseek-reasoner`, `doubao-seed-code`.
+- **Long pages** — prefer a large context window; page text is capped at ~12,000
+  characters, but the conversation grows on top of that.
+- **Local / private** — Ollama or LM Studio, so no page text leaves your machine.
+  Choose a tool-calling model (a recent Qwen, for instance) and expect slower
+  replies.
 
-In `chrome.storage.local`, on this machine only. It is **not** encrypted and
-**not** synced: anyone who can read your browser profile can read it. That is a
-deliberate trade — `storage.sync` would copy keys to every signed-in browser.
+---
+
+## Configuring a model
+
+Open the side panel → **Settings** → **Add a provider**.
+
+1. **Pick a preset.** The base URL and a suggested model are filled in.
+2. **Paste your API key.** Get one from the vendor:
+   [DeepSeek](https://platform.deepseek.com/api_keys) ·
+   [Ark](https://console.volcengine.com/ark) ·
+   [OpenAI](https://platform.openai.com/api-keys) ·
+   [OpenRouter](https://openrouter.ai/keys) ·
+   [Moonshot](https://platform.moonshot.cn/console/api-keys) ·
+   [DashScope](https://bailian.console.aliyun.com/) ·
+   [SiliconFlow](https://cloud.siliconflow.cn/account/ak).
+   For a local Ollama or LM Studio, any non-empty string works.
+3. **Set the model.** Type it, or press **Fetch models** to list what the
+   endpoint offers. Not every gateway implements `/models`, so typing the name is
+   always valid.
+4. **Press Test connection.** This sends one real request and reports whether the
+   key *and* the model both work — better than discovering a typo mid-answer.
+5. **Save.**
+
+### The fields
+
+| Field | Notes |
+| --- | --- |
+| **Label** | Your own name for this profile, e.g. "Ark coding plan". |
+| **Base URL** | Everything up to but **not** including `/chat/completions`. Keep the version segment (`/v1`, `/api/v3`) — vendors disagree about it. A pasted full endpoint is trimmed automatically. |
+| **API key** | Sent as `Authorization: Bearer …`. |
+| **Model** | A model ID, or on Ark a dedicated endpoint ID (`ep-…`). |
+| **Temperature** | Optional. Left blank, the server default applies. |
+| **Max tokens** | Optional response cap. Blank means the server decides. |
+| **Extra headers** | Optional JSON, for gateways needing attribution or routing headers. |
+
+### Several providers at once
+
+Add as many as you like and switch with **Use this** — a strong model for
+review, a cheap one for summaries, a local one for anything sensitive.
+Credentials are kept per profile, so switching never means retyping a key.
+
+### Where the key is stored
+
+In `chrome.storage.local`, on this machine only. Deliberately **not** in
+`storage.sync`, which would copy your keys to every browser you are signed into.
+
+It is **not encrypted**: anyone who can read your browser profile directory can
+read it. That is the normal limit for an extension without a master password — if
+that is unacceptable for a particular key, use a local model instead.
 
 ---
 
@@ -128,60 +236,99 @@ deliberate trade — `storage.sync` would copy keys to every signed-in browser.
 
 ### Chat
 
-Type and press **Enter** (Shift+Enter for a newline). Tick **Attach current
-page** to include the page you are on.
+Type and press **Enter** (**Shift+Enter** for a newline).
 
-The panel can be closed mid-answer. The turn keeps running in the service
-worker, and reopening the panel restores the transcript and rejoins a run still
-in progress.
+Tick **Attach current page** to send the page you are on along with your message.
 
-Assistant replies are rendered as Markdown — headings, **bold**, lists, tables,
-blockquotes, links, and fenced code blocks with a copy button. Code blocks
-scroll horizontally rather than wrapping, because a broken command line reads as
-two commands.
+Close the panel whenever you like: the turn keeps running in the background, and
+reopening restores the transcript and rejoins a reply still in progress.
 
-What *you* type is shown exactly as typed. Asking about `**` or pasting a code
-fence must not make your own question change shape.
+Replies render as Markdown — headings, lists, tables, and code blocks with a copy
+button. What *you* type stays exactly as typed.
 
-### Skills
+### Reading the page: two paths
 
-A skill is a saved instruction pack: the stable part of a prompt ("summarise as
-five bullets", "extract these fields as JSON") without the part that changes.
+- **You attach it.** Tick *Attach current page*. No prompt — you already said
+  which page, and when. For the rest of that message the assistant can also
+  re-read the page without asking, since consent is already given.
+- **The assistant asks.** A model-initiated read of a page you did not attach
+  shows a confirmation first.
 
-- **Skills → New skill** to create one.
-- In Chat, type `/` to pick one for the conversation, or **Use in chat** from
-  the Skills tab.
-- Leave *Let the agent apply this automatically* on and the agent may select the
-  skill itself when your message matches its description.
+The asymmetry is deliberate. The active tab might be webmail, an internal
+dashboard, or a bank statement, and reading it sends that text to a third-party
+model. A deliberate attach is consent; a model deciding on its own is not.
 
-Only names and descriptions are offered to the model up front; the full
-instructions are loaded on demand via a `use_skill` call, so ten skills do not
-cost ten instruction bodies per request
-([`src/lib/skills.ts`](src/lib/skills.ts)).
+The waiver from an attach is scoped to **that page**, compared by origin and path
+(the query string and `#fragment` are ignored, so a single-page app rewriting its
+URL does not re-prompt). Switch tabs mid-reply and the new page is gated again —
+consent covered one page, not every page from then on. Anything that cannot be
+proven identical, including a tab whose URL is unknown, re-prompts.
+
+**Settings → Page access → Check active tab** tells you whether the current tab
+can be read at all, before you rely on it.
 
 ### Language
 
-**Settings → Language**, or *Automatic* to follow the browser.
-
-`chrome.i18n` is deliberately unused: it resolves from the browser's UI language
-with no runtime override, and people routinely run an English Chrome while
-wanting a Chinese panel. The dictionary lives in
-[`src/lib/i18n.ts`](src/lib/i18n.ts) as a closed type, so a key added to one
-locale and forgotten in the other fails `tsc` instead of rendering a blank
-label.
+**Settings → Language**: English, 简体中文, or *Automatic* to follow the browser.
+The panel's language is independent of Chrome's own UI language, since people
+routinely run an English Chrome while wanting a Chinese panel.
 
 ---
 
-## Tools the agent can call
+## Skills
 
-| Tool | Confirmation | What it does |
-| --- | --- | --- |
-| `read_current_page` | **required** | Title, URL, selection, and visible text of the active tab. |
-| `use_skill` | no | Loads a saved skill's instructions by name. Read-only, and the text is your own. |
+A skill is a saved instruction pack — the stable part of a prompt without the part
+that changes.
+
+**Skills → New skill**, give it a name, a one-line description of when it
+applies, and the instructions. Then either:
+
+- type **`/`** in the composer and pick it, or
+- leave *Let the agent apply this automatically* on, and it will be used when
+  your message matches the description.
+
+Useful for a code-review checklist, a summary format you always want, a
+translation glossary, or an extraction schema.
+
+Only names and descriptions are shown to the model up front; full instructions
+load on demand, so ten skills do not cost ten instruction bodies per request.
 
 ---
 
-## Architecture
+## Privacy and permissions
+
+| Permission | Why it is needed |
+| --- | --- |
+| `storage` | Save settings, providers, and skills. |
+| `tabs` | Know which tab is active and read its title/URL. |
+| `scripting` | Inject the one-off read-only scraper when you ask for a page read. |
+| `sidePanel` | Show the panel. |
+| `host_permissions` for `http(s)` | Read page text, and call your model endpoint. |
+
+Notably **absent**: `alarms` (nothing runs on a timer), and any always-on content
+script — nothing is injected into a page until you ask for a read.
+
+**What leaves your machine:** your messages, and page text you attached or
+approved, sent to the model endpoint you configured. Nothing else, nowhere else.
+There is no telemetry, no analytics, and no server belonging to this project.
+
+**Conversation transcripts** live in `chrome.storage.session` — memory-backed and
+cleared when the browser closes, so scraped page text never lands on disk. Only
+the most recent 200 messages are kept.
+
+---
+
+## Development
+
+```bash
+pnpm run dev         # rebuild on change
+pnpm run typecheck   # tsc --noEmit
+pnpm run test        # vitest — 184 tests
+pnpm run build       # production bundle into dist/
+pnpm run icons       # regenerate public/icons
+```
+
+After changing the service worker, press **Reload** in `chrome://extensions`.
 
 ```
 src/
@@ -189,112 +336,68 @@ src/
     index.ts      Service worker: command channel + streaming agent port
     agent.ts      Tool schemas, tool-call loop, confirmation gating
     page.ts       Reads the active tab via one-off script injection
-    keepalive.ts  Reference-counted worker keepalive for in-flight turns
+    keepalive.ts  Reference-counted keepalive for in-flight turns
   lib/
     llm.ts        OpenAI-compatible streaming client + SSE accumulator
     providers.ts  Provider profiles, presets, validation
     storage.ts    chrome.storage access, settings, skills, transcripts
     messages.ts   Panel ↔ worker wire protocol
-    pages.ts      Which URLs may be read at all
+    pages.ts      Which URLs may be read at all, and same-page comparison
     extract.ts    Whitespace collapsing and budget truncation
     skills.ts     Skill validation and prompt composition
     slash.ts      Slash-command parsing for the composer
     markdown.ts   Markdown parser producing a typed tree (no HTML)
     i18n.ts       Message dictionaries
   sidepanel/      React UI: Chat, Skills, Settings
-    Markdown.tsx  Renders the Markdown tree as React elements
 ```
 
-### Choices worth knowing about
+Two design notes worth knowing before changing things:
 
 **Markdown is parsed to a tree, never to HTML.** Assistant text is untrusted —
 the model may have just read an attacker-controlled page — and this panel is
-privileged, since script running here can reach `chrome.storage` where the API
-keys live. So `src/lib/markdown.ts` emits a typed tree and `Markdown.tsx` turns
-it into React elements. There is no HTML string and no
-`dangerouslySetInnerHTML` anywhere, which makes injection structurally
-impossible rather than dependent on sanitizing correctly. Raw HTML in a reply
-renders as literal characters, and link targets are checked against a scheme
-**allowlist** (`https`, `http`, `mailto`, `tel`) — a `javascript:` denylist
-loses to `JaVaScRiPt:` and `java&#9;script:`, while an allowlist fails closed.
-The parser is hand-written for the same reason: a Markdown library would add
-dozens of transitive dependencies to a security-sensitive surface, for
-constructs this panel should refuse anyway.
+privileged, since script here could reach `chrome.storage` where the keys live.
+So no HTML string is ever built and `dangerouslySetInnerHTML` appears nowhere,
+which makes injection structurally impossible rather than dependent on sanitizing
+correctly. Link targets are checked against a scheme **allowlist**.
 
 **Everything durable is in `chrome.storage`.** An MV3 service worker is evicted
-after roughly 30 seconds of inactivity, taking every module-level variable with
-it. Settings and skills go to `storage.local`; conversation transcripts go to
-`storage.session`, which is memory-backed and cleared when the browser closes —
-the right lifetime for a chat, and it keeps scraped page text off disk.
-
-
-**Streaming runs in the worker, not the panel.** Extension pages have no page
-origin to satisfy CORS from, and a panel can be closed mid-turn. The panel holds
-a long-lived port for tokens; an open port also keeps the worker alive, which
-`sendMessage` would not.
-
-**The port heartbeat is not enough on its own.** Closing the panel destroys the
-port, removing exactly the protection that kept the worker awake — and closing
-the panel while work continues is a supported action. So a turn also takes a
-reference-counted keepalive, released in a `finally`
-([`src/background/keepalive.ts`](src/background/keepalive.ts)).
-
-**A dropped port does not abort a turn.** The panel disconnects both when the
-user closes it and when the worker is recycled; in both cases the right
-behaviour is to finish and persist, so the answer is waiting in the transcript.
-Pending confirmations are the exception — nobody can answer them once the panel
-is gone, so they resolve as declined.
-
----
-
-## Development
-
-```bash
-pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest
-pnpm run build       # production bundle into dist/
-pnpm run icons       # regenerate public/icons from scripts/generate-icons.mjs
-```
-
-Tests cover the logic that is worth testing without a browser: SSE frame
-accumulation (split reads, CRLF, multi-fragment tool arguments), transcript
-trimming, provider and settings normalization, the injectable-page predicate,
-skill validation and prompt composition, slash-command parsing, text extraction,
-keepalive reference counting, and dictionary parity between locales.
-
-Markdown is covered twice over. `tests/markdown.spec.ts` asserts on the parsed
-tree; `tests/markdown-render.spec.tsx` renders components through
-`react-dom/server` and asserts on the HTML that actually reaches the DOM —
-because a correct tree rendered carelessly could still inject markup, so the
-guarantee is checked where it is finally observable. Both suites feed every
-prefix of a rich document through the parser, since the renderer runs on each
-streamed token and a prefix that throws would blank the panel mid-answer.
+after ~30 seconds idle, taking every module-level variable with it. A turn also
+holds a reference-counted keepalive, because closing the panel destroys the port
+that was keeping the worker awake — and closing the panel mid-answer is
+supported.
 
 ---
 
 ## Troubleshooting
 
-| Symptom | Cause |
+| Symptom | Cause and fix |
 | --- | --- |
 | "No model provider configured" | Settings → Add a provider. |
-| 401 / 403 | Wrong or expired key, or the key belongs to a different vendor than the base URL. |
-| 404 on send | Base URL missing its version segment (`/v1`, `/api/v3`), or an unknown model name. |
+| 401 / 403 | Wrong or expired key, or a key belonging to a different vendor than the base URL. |
+| 404 when sending | Base URL missing its version segment (`/v1`, `/api/v3`), or an unknown model name. Press **Test connection** to localize it. |
 | "Cannot read this page" | A `chrome://`, `file://`, Web Store, or extension page. No permission can fix this. |
-| Page text is empty | The tab renders its content in a subframe, or after the read. Reload and try again. |
-| The agent chats but never reads the page | The model does not support function calling. |
-| Nothing happens on the toolbar click | Reload the extension in `chrome://extensions`; the service worker may have failed to start. |
+| Page text looks empty or partial | Content is in an iframe, rendered after the read, or behind a "Load more". Reload and retry; select the part you care about. |
+| Assistant chats but never reads the page | The model does not support function calling. Attach the page manually, or switch model. |
+| A long page seems truncated | It is: ~12,000 characters. Select the relevant section first. |
+| Nothing happens on the toolbar click | Reload the extension in `chrome://extensions`; the worker may have failed to start. |
+| A local model refuses the request | Confirm the server is running and its base URL ends in `/v1`. |
 
 ---
 
-## Known limitations
+## Limitations
 
 - Read-only: no clicking, typing, navigation, or form submission.
-- Only the top frame of ordinary http(s) tabs can be read.
-- Page text is truncated to a character budget, so very long pages arrive
-  partially; the truncation is reported in the context handed to the model.
-- The agent needs a model that supports **function calling**. Models without it
-  will chat but never read a page on their own — attaching it manually still
-  works.
-- Providers must accept requests from a browser extension. Public APIs do; an
-  internal gateway with strict origin checks may not.
-- Transcripts are cleared when the browser closes, by design.
+- One tab at a time, top frame only.
+- Page text is capped at ~12,000 characters; truncation is reported to the model
+  so it can say so rather than inventing the rest.
+- Tool calls stop after 5 rounds per turn, to bound a confused model.
+- Autonomous page reads need a function-calling model.
+- The endpoint must accept requests from a browser extension. Public APIs do; a
+  strict internal gateway may not.
+- Transcripts clear when the browser closes, by design.
+
+---
+
+## License
+
+[MIT](LICENSE)

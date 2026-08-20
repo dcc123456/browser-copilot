@@ -14,8 +14,16 @@
  *
  * The deliberate path is deliberately friction-free: ticking **Attach current
  * page** in the composer scrapes the page directly, without going through this
- * tool, because the user has already said which page and when. The prompt
- * therefore only appears when the model decided on its own.
+ * tool, because the user has already said which page and when.
+ *
+ * That attach also *grants* the tool for the rest of the turn (`grantedPageUrl`).
+ * Without it the user still saw a prompt: a model handed page context often calls
+ * `read_current_page` anyway — to re-read a truncated page, or simply because the
+ * tool exists — and being asked to approve reading a page you just attached is
+ * both confusing and pointless, since consent was already given and the text is
+ * already in the request. The grant is scoped to the URL that was attached, so if
+ * the user switches tabs mid-turn the *new* page is still gated: consent covered
+ * one page, not "any page from now on".
  *
  * @module background/agent
  */
@@ -30,8 +38,9 @@ import {
 import type { AgentServerMessage } from '../lib/messages'
 import { renderSkillCatalogue, renderSkillPrompt } from '../lib/skills'
 import { findSkillByName, getActiveProvider, getSkill, listSkills } from '../lib/storage'
+import { isSamePage } from '../lib/pages'
 import type { Skill } from '../lib/types'
-import { readActivePage } from './page'
+import { activeTab, readActivePage } from './page'
 
 /**
  * Tools that must be confirmed by the user before they run.
@@ -51,7 +60,8 @@ You help the user with whatever they are doing in the browser, and you can read 
 Key facts you must respect:
 - You can only read ordinary http(s) pages. Browser settings pages (chrome://), the Chrome Web Store, and local files are off limits, and no permission can change that.
 - You read a page only when you call read_current_page, or when the user attached the page to their message. Never guess or invent page content: if you have not read it, say so and offer to read it.
-- Reading the page needs the user's approval, so ask for what you need in one call rather than reading repeatedly.
+- If the user already attached the page, its text is in their message: use it directly instead of calling read_current_page again.
+- Reading a page the user did not attach needs their approval, so ask for what you need in one call rather than reading repeatedly.
 - You cannot click, type, navigate, or otherwise change the page. You observe and advise; the user acts.
 
 Answer in the language the user writes in. Be concise and concrete.`
@@ -139,6 +149,14 @@ export interface AgentDeps {
    * guess them.
    */
   skillId?: string | undefined
+  /**
+   * URL the user attached to this message, if any.
+   *
+   * Presence means the user already consented to reading this specific page, so
+   * `read_current_page` runs unprompted while the active tab still matches. Held
+   * as a URL rather than a boolean so switching tabs mid-turn re-gates the read.
+   */
+  grantedPageUrl?: string | undefined
 }
 
 /** Parses tool arguments, tolerating the empty string models send for no-arg calls. */
@@ -289,6 +307,31 @@ export async function runAgentTurn(history: WireMessage[], deps: AgentDeps): Pro
   })
 }
 
+/**
+ * Decides whether a tool call must be approved by the user first.
+ *
+ * Pure, and exported for testing: this is a privacy gate, so the decision needs
+ * to be verifiable without standing up a fake browser. The Chrome lookup that
+ * supplies `currentTabUrl` stays in the caller.
+ *
+ * @param name Tool being called.
+ * @param grantedPageUrl Page the user attached to this message, if any.
+ * @param currentTabUrl Active tab as Chrome reports it *now*.
+ */
+export function needsConfirmation(
+  name: string,
+  grantedPageUrl: string | undefined,
+  currentTabUrl: string | undefined,
+): boolean {
+  if (!REQUIRES_CONFIRMATION.has(name)) return false
+  // Only a page read can be waived, and only by an attach of that same page.
+  if (name !== 'read_current_page') return true
+  if (!grantedPageUrl) return true
+  // Compared against the tab right now, not the tab at send time: if the user
+  // switched tabs, this is a different page and consent does not carry over.
+  return !isSamePage(grantedPageUrl, currentTabUrl)
+}
+
 /** Confirms if required, executes, and appends the tool result to history. */
 async function runOneToolCall(
   call: WireToolCall,
@@ -314,13 +357,31 @@ async function runOneToolCall(
   }
 
   if (REQUIRES_CONFIRMATION.has(name)) {
-    const approved = await deps.confirm(name, JSON.stringify(args, null, 2))
-    if (!approved) {
-      pushResult(
-        JSON.stringify({ error: 'The user declined this action. Do not retry it.' }),
-      )
-      deps.send({ type: 'tool.result', name, summary: 'Declined by user' })
-      return
+    /**
+     * A page the user attached is already consented to, so re-asking is noise.
+     *
+     * Resolving the tab needs no injection, so an unapproved page is never
+     * scraped just to make this decision.
+     */
+    let mustConfirm = true
+    try {
+      const tab = name === 'read_current_page' && deps.grantedPageUrl ? await activeTab() : undefined
+      mustConfirm = needsConfirmation(name, deps.grantedPageUrl, tab?.url)
+    } catch {
+      // If the tab cannot be resolved, ask: failing closed is the only safe
+      // direction for a privacy gate.
+      mustConfirm = true
+    }
+
+    if (mustConfirm) {
+      const approved = await deps.confirm(name, JSON.stringify(args, null, 2))
+      if (!approved) {
+        pushResult(
+          JSON.stringify({ error: 'The user declined this action. Do not retry it.' }),
+        )
+        deps.send({ type: 'tool.result', name, summary: 'Declined by user' })
+        return
+      }
     }
   }
 

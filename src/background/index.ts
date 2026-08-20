@@ -309,10 +309,20 @@ chrome.runtime.onConnect.addListener((port) => {
         history = await loadConversation(conversationId)
 
         let text = message.text
+        /**
+         * Set only once a page has actually been read, and used to waive the
+         * confirmation for `read_current_page` during this turn.
+         *
+         * Deliberately not set when the read failed: nothing was disclosed, so
+         * there is nothing to have consented to, and a later model-initiated read
+         * must still be approved.
+         */
+        let grantedPageUrl: string | undefined
         if (message.includePage) {
           send({ type: 'status', text: 'Reading the current page…' })
           try {
             const page = await readActivePage()
+            grantedPageUrl = page.url
             text =
               `Context from the page I am viewing:\n` +
               `Title: ${page.title}\nURL: ${page.url}\n` +
@@ -335,6 +345,7 @@ chrome.runtime.onConnect.addListener((port) => {
           send,
           signal: turnController.signal,
           ...(message.skillId ? { skillId: message.skillId } : {}),
+          ...(grantedPageUrl ? { grantedPageUrl } : {}),
           confirm: (name, argsPreview) =>
             new Promise<boolean>((resolve) => {
               const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
