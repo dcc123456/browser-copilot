@@ -135,6 +135,14 @@ The panel can be closed mid-answer. The turn keeps running in the service
 worker, and reopening the panel restores the transcript and rejoins a run still
 in progress.
 
+Assistant replies are rendered as Markdown — headings, **bold**, lists, tables,
+blockquotes, links, and fenced code blocks with a copy button. Code blocks
+scroll horizontally rather than wrapping, because a broken command line reads as
+two commands.
+
+What *you* type is shown exactly as typed. Asking about `**` or pasting a code
+fence must not make your own question change shape.
+
 ### Skills
 
 A skill is a saved instruction pack: the stable part of a prompt ("summarise as
@@ -191,17 +199,34 @@ src/
     extract.ts    Whitespace collapsing and budget truncation
     skills.ts     Skill validation and prompt composition
     slash.ts      Slash-command parsing for the composer
+    markdown.ts   Markdown parser producing a typed tree (no HTML)
     i18n.ts       Message dictionaries
   sidepanel/      React UI: Chat, Skills, Settings
+    Markdown.tsx  Renders the Markdown tree as React elements
 ```
 
 ### Choices worth knowing about
+
+**Markdown is parsed to a tree, never to HTML.** Assistant text is untrusted —
+the model may have just read an attacker-controlled page — and this panel is
+privileged, since script running here can reach `chrome.storage` where the API
+keys live. So `src/lib/markdown.ts` emits a typed tree and `Markdown.tsx` turns
+it into React elements. There is no HTML string and no
+`dangerouslySetInnerHTML` anywhere, which makes injection structurally
+impossible rather than dependent on sanitizing correctly. Raw HTML in a reply
+renders as literal characters, and link targets are checked against a scheme
+**allowlist** (`https`, `http`, `mailto`, `tel`) — a `javascript:` denylist
+loses to `JaVaScRiPt:` and `java&#9;script:`, while an allowlist fails closed.
+The parser is hand-written for the same reason: a Markdown library would add
+dozens of transitive dependencies to a security-sensitive surface, for
+constructs this panel should refuse anyway.
 
 **Everything durable is in `chrome.storage`.** An MV3 service worker is evicted
 after roughly 30 seconds of inactivity, taking every module-level variable with
 it. Settings and skills go to `storage.local`; conversation transcripts go to
 `storage.session`, which is memory-backed and cleared when the browser closes —
 the right lifetime for a chat, and it keeps scraped page text off disk.
+
 
 **Streaming runs in the worker, not the panel.** Extension pages have no page
 origin to satisfy CORS from, and a panel can be closed mid-turn. The panel holds
@@ -236,6 +261,14 @@ accumulation (split reads, CRLF, multi-fragment tool arguments), transcript
 trimming, provider and settings normalization, the injectable-page predicate,
 skill validation and prompt composition, slash-command parsing, text extraction,
 keepalive reference counting, and dictionary parity between locales.
+
+Markdown is covered twice over. `tests/markdown.spec.ts` asserts on the parsed
+tree; `tests/markdown-render.spec.tsx` renders components through
+`react-dom/server` and asserts on the HTML that actually reaches the DOM —
+because a correct tree rendered carelessly could still inject markup, so the
+guarantee is checked where it is finally observable. Both suites feed every
+prefix of a rich document through the parser, since the renderer runs on each
+streamed token and a prefix that throws would blank the panel mid-answer.
 
 ---
 

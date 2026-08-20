@@ -13,6 +13,8 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['tests/**/*.spec.ts'],
+    // .tsx too: component render tests use react-dom/server, which needs no DOM
+    // environment, so they belong in this same suite.
+    include: ['tests/**/*.spec.ts', 'tests/**/*.spec.tsx'],
   },
 })

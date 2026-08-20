@@ -77,6 +77,16 @@ export interface Messages {
   /** Shown in the slash menu when no skill matches what was typed. */
   chatSlashNoMatch: string
 
+  // Markdown rendering
+  /** Copy button on a fenced code block. */
+  mdCopy: string
+  /** Transient confirmation after a successful copy. */
+  mdCopied: string
+  /** Shown when the browser refused clipboard access. */
+  mdCopyFailed: string
+  /** Language label for a fence with no language given. */
+  mdCodePlain: string
+
   // Skills
   skillsTitle: string
   skillsIntro: string
@@ -187,6 +197,11 @@ const en: Messages = {
   chatPlaceholderWithSkills:
     'Message… (Enter to send, Shift+Enter for a new line, / for skills)',
   chatSlashNoMatch: 'No matching skill',
+
+  mdCopy: 'Copy',
+  mdCopied: 'Copied',
+  mdCopyFailed: 'Copy failed',
+  mdCodePlain: 'text',
 
   skillsTitle: 'Skills',
   skillsIntro:
@@ -303,6 +318,11 @@ const zhCN: Messages = {
   chatSkillActive: ({ name }) => `技能：${name}`,
   chatPlaceholderWithSkills: '输入消息…（Enter 发送，Shift+Enter 换行，/ 选择技能）',
   chatSlashNoMatch: '没有匹配的技能',
+
+  mdCopy: '复制',
+  mdCopied: '已复制',
+  mdCopyFailed: '复制失败',
+  mdCodePlain: '文本',
 
   skillsTitle: '技能',
   skillsIntro:
