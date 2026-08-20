@@ -1,4 +1,8 @@
-import { defineConfig } from 'vite'
+// defineConfig comes from vitest/config, not vite: it is the same function
+// widened to accept the `test` block below. Importing it from 'vite' typechecks
+// only as long as some file in the same program pulls in Vitest's type
+// augmentation, which made this config's validity depend on unrelated includes.
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { crx } from '@crxjs/vite-plugin'
 import manifest from './manifest.config'

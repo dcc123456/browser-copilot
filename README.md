@@ -273,6 +273,19 @@ can be read at all, before you rely on it.
 The panel's language is independent of Chrome's own UI language, since people
 routinely run an English Chrome while wanting a Chinese panel.
 
+### Appearance
+
+The panel follows your **operating system** theme — light or dark — and switches
+live when you change it, with no reload.
+
+There is intentionally no theme switch in the panel. Chrome gives an extension no
+way to read "the browser's theme"; only the OS-level preference is visible. A
+manual toggle would therefore be a second source of truth that could disagree
+with the browser window the panel is docked to.
+
+Both themes are checked against WCAG AA contrast (4.5:1) by the test suite, since
+a colour that reads well in dark mode often fails on white.
+
 ---
 
 ## Skills
@@ -323,7 +336,7 @@ the most recent 200 messages are kept.
 ```bash
 pnpm run dev         # rebuild on change
 pnpm run typecheck   # tsc --noEmit
-pnpm run test        # vitest — 206 tests
+pnpm run test        # vitest — 245 tests
 pnpm run build       # production bundle into dist/
 pnpm run icons       # regenerate public/icons
 ```

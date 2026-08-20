@@ -1,3 +1,25 @@
+/*
+  Theming follows the operating system.
+  ------------------------------------------------------------------------------
+  Every colour in this file is a variable declared here, so a theme is one block
+  of overrides rather than a rule-by-rule audit. The dark values are the default
+  and the light ones arrive through `prefers-color-scheme: light`.
+
+  Dark is the default deliberately: `prefers-color-scheme` resolves to `light`
+  when a browser reports no preference, and this panel opens beside pages in a
+  developer-facing tool where dark is the common setting. Defaulting to dark
+  means the no-preference case matches what most users of this extension expect,
+  and an explicit `light` preference is still honoured.
+
+  There is no in-panel theme switch. Chrome exposes no API for an extension to
+  read "the browser's theme", only the OS-level media query, so a manual toggle
+  would be a second source of truth that could disagree with the surrounding
+  browser UI. Following the system keeps the panel consistent with the window it
+  is docked to.
+
+  `color-scheme` is set alongside the variables so the browser themes what CSS
+  cannot reach: scrollbars, form-control internals, and the default focus ring.
+*/
 :root {
   --bg: #14161a;
   --panel: #1c1f26;
@@ -9,8 +31,72 @@
   --ok: #4ec9a6;
   --err: #ff6b6b;
   --warn: #f0b849;
+
+  /* Text placed on an --accent fill. Dark ink reads better on the blue than
+     white does at these small sizes. */
+  --on-accent: #0d1117;
+  /* The user's own message bubble: a tinted panel, distinct from the assistant's
+     neutral one without shouting. */
+  --user-bubble: #2b3550;
+  /* Tinted surfaces for the three states that need a background, not just text. */
+  --err-surface: #3a2226;
+  --ok-surface: #1d3330;
+  --warn-surface: #2a2418;
+  /* Neutral chip fill for tool-call markers. */
+  --chip: #2a2f3a;
+  /* Recessed surfaces: code blocks and quoted argument previews sit *below* the
+     panel, so in dark mode this is darker than --panel and in light mode it is
+     lighter — hence a variable rather than reusing --bg. */
+  --sunken: #14161a;
+  /* Accent washes for the active-skill chip. */
+  --accent-soft: rgb(91 140 255 / 20%);
+  --accent-soft-border: rgb(91 140 255 / 55%);
+  /* Hover wash on a transparent control; light mode needs black, not white. */
+  --hover-wash: rgb(255 255 255 / 12%);
+  /* Menus float above content and need a shadow that reads on the backdrop. */
+  --menu-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+
   color-scheme: dark;
 }
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #ffffff;
+    --panel: #f4f6f9;
+    --panel-2: #eaeef3;
+    --border: #d3d9e2;
+    /* Not pure black: #1b1f27 on white is easier to read for long replies. */
+    --text: #1b1f27;
+    /* Darkened from the dark-theme muted so it still passes contrast on white. */
+    --muted: #5c6675;
+    /* Darkened accent: the dark theme's #5b8cff fails contrast on white. This
+       value is chosen to clear 4.5:1 against --panel-2 as well as --bg, because
+       links appear inside assistant bubbles, which use --panel-2. */
+    --accent: #1a5fd0;
+    --ok: #0f7b5f;
+    --err: #c62f2f;
+    --warn: #9a6300;
+
+    /* White ink on the darker light-mode accent. */
+    --on-accent: #ffffff;
+    --user-bubble: #dbe6ff;
+    --err-surface: #fdecec;
+    --ok-surface: #e6f6f0;
+    --warn-surface: #fdf3dc;
+    --chip: #e4e9f0;
+    /* Lighter than --panel here: recessed still means "set back", which on a
+       light background reads as less grey rather than darker. */
+    --sunken: #fbfcfe;
+    --accent-soft: rgb(47 111 235 / 12%);
+    --accent-soft-border: rgb(47 111 235 / 40%);
+    --hover-wash: rgb(0 0 0 / 8%);
+    /* Softer and tighter: a heavy shadow looks like dirt on a white panel. */
+    --menu-shadow: 0 6px 18px rgb(15 23 42 / 12%);
+
+    color-scheme: light;
+  }
+}
+
 
 * {
   box-sizing: border-box;
@@ -88,7 +174,7 @@ body {
 }
 
 .msg[data-role='user'] {
-  background: #2b3550;
+  background: var(--user-bubble);
   align-self: flex-end;
   max-width: 92%;
 }
@@ -100,7 +186,7 @@ body {
 }
 
 .msg[data-role='error'] {
-  background: #3a2226;
+  background: var(--err-surface);
   color: var(--err);
 }
 
@@ -108,7 +194,7 @@ body {
   display: inline-block;
   padding: 2px 8px;
   border-radius: 999px;
-  background: #2a2f3a;
+  background: var(--chip);
   color: var(--muted);
   font-size: 11px;
   font-family: ui-monospace, monospace;
@@ -118,13 +204,13 @@ body {
   border: 1px solid var(--warn);
   border-radius: 8px;
   padding: 10px;
-  background: #2a2418;
+  background: var(--warn-surface);
 }
 
 .confirm-card pre {
   margin: 6px 0;
   padding: 6px;
-  background: #14161a;
+  background: var(--sunken);
   border-radius: 6px;
   overflow-x: auto;
   font-size: 11px;
@@ -183,7 +269,7 @@ button:disabled {
 button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #0d1117;
+  color: var(--on-accent);
   font-weight: 600;
 }
 
@@ -318,8 +404,8 @@ textarea {
   margin-left: 6px;
   padding: 1px 6px;
   border-radius: 999px;
-  background: var(--accent, #2f6feb);
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
@@ -351,7 +437,7 @@ textarea {
   background: var(--panel-2);
   /* Above the chat log, which scrolls underneath it. */
   z-index: 20;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+  box-shadow: var(--menu-shadow);
 }
 
 .slash-item {
@@ -370,7 +456,7 @@ textarea {
 
 .slash-item[data-active='true'] {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .slash-item-name {
@@ -403,8 +489,8 @@ textarea {
   align-self: flex-start;
   padding: 2px 4px 2px 8px;
   border-radius: 999px;
-  background: rgb(91 140 255 / 20%);
-  border: 1px solid rgb(91 140 255 / 55%);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-soft-border);
   max-width: 100%;
 }
 
@@ -432,7 +518,7 @@ textarea {
 }
 
 .skill-chip-clear:hover {
-  background: rgb(255 255 255 / 12%);
+  background: var(--hover-wash);
   color: var(--text);
 }
 
@@ -444,12 +530,12 @@ textarea {
 }
 
 .banner[data-kind='error'] {
-  background: #3a2226;
+  background: var(--err-surface);
   color: var(--err);
 }
 
 .banner[data-kind='ok'] {
-  background: #1d3330;
+  background: var(--ok-surface);
   color: var(--ok);
 }
 
@@ -525,7 +611,7 @@ textarea {
 .md-code-inline {
   padding: 1px 5px;
   border-radius: 4px;
-  background: #14161a;
+  background: var(--sunken);
   border: 1px solid var(--border);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   /* 0.9em, not a fixed size, so inline code tracks the heading it sits in. */
@@ -548,7 +634,7 @@ textarea {
   margin: 0 0 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #14161a;
+  background: var(--sunken);
   overflow: hidden;
 }
 

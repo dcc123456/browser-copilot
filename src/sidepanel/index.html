@@ -4,6 +4,37 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Browser Copilot</title>
+    <!--
+      Inlined so the very first paint already matches the theme.
+      The bundled stylesheet arrives a moment after the document, and until it
+      does the browser paints its own default canvas — a white flash every time
+      the panel opens in dark mode. These few declarations mirror the palette in
+      styles.css; the full stylesheet takes over as soon as it loads.
+
+      `color-scheme` is the important half: it tells the browser which defaults
+      to use for the canvas, scrollbars, and form controls before any CSS of ours
+      applies. Dark is the default here for the same reason as in styles.css,
+      where the choice is explained.
+    -->
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        background: #14161a;
+        color: #e6e8ec;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          color-scheme: light;
+        }
+        body {
+          background: #ffffff;
+          color: #1b1f27;
+        }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

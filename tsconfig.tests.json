@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    /*
+      Node types are granted to the test suite only.
+
+      Two theme fixtures are read from disk, which needs `fs`. Adding "node" to
+      the root config instead would let `src/` import Node built-ins that do not
+      exist in a service worker or a side panel — the failure would be a runtime
+      crash in the extension rather than a compile error, so the narrower scope
+      is worth a second config file.
+    */
+    "types": ["chrome", "vite/client", "node"]
+  },
+  "include": ["tests"]
+}
