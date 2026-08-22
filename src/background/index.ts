@@ -24,20 +24,33 @@ import { validateProfile } from '../lib/providers'
 import { normalizeSkill, validateSkill } from '../lib/skills'
 import {
   clearConversation,
+  clearHistory,
+  deleteConversation,
+  deleteHistory,
+  deletePassword,
+  deleteProfile,
   deleteProvider,
   deleteSkill,
   ensureSchema,
   getTurnState,
+  listConversations,
+  listHistory,
+  listPasswords,
+  listProfiles,
   listSkills,
   loadConversation,
+  renameConversation,
   saveConversation,
+  savePassword,
+  saveProfile,
   saveProvider,
   saveSkill,
   setTurnState,
   getSettings,
   setSettings,
+  touchConversation,
 } from '../lib/storage'
-import { runAgentTurn } from './agent'
+import { runAgentTurn, summarizeToolResult } from './agent'
 import { activeTab, readActivePage } from './page'
 
 // --- Lifecycle ---------------------------------------------------------------
@@ -174,9 +187,6 @@ async function handleCommand(command: Command): Promise<CommandResult> {
           reason: 'No active tab was found.',
         }
       }
-      // A plain report, not an exception: "this tab cannot be read" is a normal
-      // answer to this question, and throwing would push it into an error banner
-      // as though something had gone wrong.
       const readable = isInjectablePage(tab.url)
       return {
         type: 'page.check',
@@ -187,10 +197,67 @@ async function handleCommand(command: Command): Promise<CommandResult> {
           ? {}
           : {
               reason:
-                'Only ordinary http(s) pages can be read. Browser pages (chrome://), the Web Store, and local files are off limits to every extension.',
+                'Only ordinary http(s) pages can be automated. Browser pages (chrome://), the Web Store, and local files are off limits to every extension.',
             }),
       }
     }
+
+    case 'profiles.list':
+      return { type: 'profiles.list', profiles: await listProfiles() }
+    case 'profiles.save':
+      await saveProfile(command.profile)
+      return { type: 'profiles.save' }
+    case 'profiles.delete':
+      await deleteProfile(command.id)
+      return { type: 'profiles.delete' }
+
+    case 'passwords.list':
+      return { type: 'passwords.list', entries: await listPasswords() }
+    case 'passwords.save':
+      await savePassword(command.entry)
+      return { type: 'passwords.save' }
+    case 'passwords.delete':
+      await deletePassword(command.id)
+      return { type: 'passwords.delete' }
+
+    case 'history.list':
+      return { type: 'history.list', entries: await listHistory() }
+    case 'history.delete':
+      await deleteHistory(command.id)
+      return { type: 'history.delete' }
+    case 'history.clear':
+      await clearHistory()
+      return { type: 'history.clear' }
+
+    case 'conversations.list':
+      return { type: 'conversations.list', conversations: await listConversations() }
+    case 'conversations.get': {
+      const [meta, messages] = await Promise.all([
+        (async () =>
+          (await listConversations()).find((entry) => entry.id === command.id))(),
+        loadConversation(command.id),
+      ])
+      const visible = messages
+        .filter(
+          (entry): entry is { role: 'user' | 'assistant'; content: string } =>
+            (entry.role === 'user' || entry.role === 'assistant') &&
+            typeof entry.content === 'string' &&
+            entry.content.trim().length > 0,
+        )
+        .map((entry) => ({ role: entry.role, text: entry.content }))
+      return {
+        type: 'conversations.get' as const,
+        id: command.id,
+        title: meta?.title ?? 'Conversation',
+        messages: visible,
+      }
+    }
+    case 'conversations.rename':
+      await renameConversation(command.id, command.title)
+      return { type: 'conversations.rename' }
+    case 'conversations.delete':
+      await deleteConversation(command.id)
+      return { type: 'conversations.delete' }
 
     default: {
       const exhaustive: never = command
@@ -252,16 +319,39 @@ chrome.runtime.onConnect.addListener((port) => {
           loadConversation(conversationId),
           getTurnState(conversationId),
         ])
-        // Only plain user/assistant text is replayed. Tool chips and status lines
-        // are transient UI, and a tool-call turn has no content worth showing.
-        const messages = history
+        // Replay every visible turn: user text, assistant text (including the
+        // empty-content tool-call turns, which carry no text), and tool chips.
+        // This is the full conversation the user saw, not a redacted summary,
+        // so continuing a thread shows exactly where it left off.
+        // Build a tool_call_id -> tool name map from the assistant turns, so a
+        // replayed tool result can be labeled with its action instead of dumped
+        // as raw JSON. The stored tool content is the raw result string; the
+        // human-readable chip is regenerated here the same way live turns do.
+        const toolNames = new Map<string, string>()
+        for (const entry of history) {
+          if (entry.role !== 'assistant' || !entry.tool_calls) continue
+          for (const call of entry.tool_calls) {
+            if (call.id && call.function?.name) toolNames.set(call.id, call.function.name)
+          }
+        }
+        const messages: { role: 'user' | 'assistant' | 'tool'; text: string }[] = history
           .filter(
-            (entry): entry is { role: 'user' | 'assistant'; content: string } =>
-              (entry.role === 'user' || entry.role === 'assistant') &&
-              typeof entry.content === 'string' &&
-              entry.content.trim().length > 0,
+            (entry) =>
+              entry.role === 'user' || entry.role === 'assistant' || entry.role === 'tool',
           )
-          .map((entry) => ({ role: entry.role, text: entry.content }))
+          .map((entry) => {
+            if (entry.role === 'tool') {
+              const name = toolNames.get(entry.tool_call_id) ?? 'tool'
+              return {
+                role: 'tool' as const,
+                text: `← ${name}: ${summarizeToolResult(name, entry.content)}`,
+              }
+            }
+            return {
+              role: entry.role,
+              text: typeof entry.content === 'string' ? entry.content : '',
+            }
+          })
 
         send({
           type: 'restore',
@@ -302,21 +392,12 @@ chrome.runtime.onConnect.addListener((port) => {
     void setTurnState({ conversationId, running: true, at: Date.now() })
 
     void (async () => {
-      // Held across the turn so a failure still persists the user's message.
       let history: WireMessage[] = []
       let failure: string | undefined
       try {
         history = await loadConversation(conversationId)
 
         let text = message.text
-        /**
-         * Set only once a page has actually been read, and used to waive the
-         * confirmation for `read_current_page` during this turn.
-         *
-         * Deliberately not set when the read failed: nothing was disclosed, so
-         * there is nothing to have consented to, and a later model-initiated read
-         * must still be approved.
-         */
         let grantedPageUrl: string | undefined
         if (message.includePage) {
           send({ type: 'status', text: 'Reading the current page…' })
@@ -340,12 +421,23 @@ chrome.runtime.onConnect.addListener((port) => {
         }
 
         history.push({ role: 'user', content: text })
+        // Persist metadata so the conversation appears in the history list.
+        await touchConversation(conversationId, message.text)
 
+        // The mode is read freshly per action (see AgentDeps.getMode), so a
+        // switch in the panel takes effect on the next tool call within the
+        // same turn. We still read once here so the system prompt reflects
+        // the mode at turn start.
+        const getMode = async () => (await getSettings()).mode
+        const getMaxToolRounds = async () => (await getSettings()).maxToolRounds
         await runAgentTurn(history, {
           send,
           signal: turnController.signal,
           ...(message.skillId ? { skillId: message.skillId } : {}),
           ...(grantedPageUrl ? { grantedPageUrl } : {}),
+          conversationId,
+          getMode,
+          getMaxToolRounds,
           confirm: (name, argsPreview) =>
             new Promise<boolean>((resolve) => {
               const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`

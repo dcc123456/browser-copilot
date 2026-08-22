@@ -46,6 +46,7 @@ export interface Messages {
   // Tabs
   tabChat: string
   tabSkills: string
+  tabData: string
   tabSettings: string
 
   // Common
@@ -76,6 +77,16 @@ export interface Messages {
   chatPlaceholderWithSkills: string
   /** Shown in the slash menu when no skill matches what was typed. */
   chatSlashNoMatch: string
+
+  // Agent mode
+  modeLabel: string
+  modeReadonly: string
+  modeSemi: string
+  modeFull: string
+  modeReadonlyHint: string
+  modeSemiHint: string
+  modeFullHint: string
+  modeFullWarning: string
 
   // Markdown rendering
   /** Copy button on a fenced code block. */
@@ -144,6 +155,8 @@ export interface Messages {
   settingsLanguage: string
   settingsLanguageAuto: string
   settingsKeyPlaceholderLocal: string
+  settingsMaxToolRounds: string
+  settingsMaxToolRoundsHint: string
   settingsModelsEmpty: string
   settingsModelsFailed: (params: { message: string }) => string
   settingsSaved: (params: { name: string }) => string
@@ -154,6 +167,63 @@ export interface Messages {
   settingsCheckTab: string
   settingsPageReadable: (params: { title: string }) => string
   settingsPageBlocked: (params: { reason: string }) => string
+
+  // Data / memory
+  dataTitle: string
+  dataIntro: string
+  dataProfiles: string
+  dataProfilesIntro: string
+  dataProfilesEmpty: string
+  dataAddProfile: string
+  dataProfileLabel: string
+  dataFullName: string
+  dataFirstName: string
+  dataLastName: string
+  dataEmail: string
+  dataPhone: string
+  dataAddress: string
+  dataCity: string
+  dataState: string
+  dataPostalCode: string
+  dataCountry: string
+  dataCompany: string
+  dataJobTitle: string
+  dataCustomFields: string
+  dataCustomFieldsHint: string
+  dataPasswords: string
+  dataPasswordsIntro: string
+  dataPasswordsEmpty: string
+  dataAddPassword: string
+  dataPasswordLabel: string
+  dataPasswordUrl: string
+  dataPasswordUsername: string
+  dataPasswordValue: string
+  dataPasswordNotes: string
+  dataPasswordStorageNote: string
+  dataShowPassword: string
+  dataHistory: string
+  dataHistoryIntro: string
+  dataHistoryEmpty: string
+  dataClearHistory: string
+  dataHistoryWhen: string
+  dataConversation: string
+  dataUsed: (params: { count: number }) => string
+
+  // Conversations
+  convTitle: string
+  convNew: string
+  convRename: string
+  convDelete: string
+  convUntitled: string
+  convDeleteConfirm: string
+  convHistory: string
+  convHistoryEmpty: string
+  convContinue: string
+  convPreview: string
+  convUpdated: string
+
+  // Confirm action
+  confirmActionHint: string
 
   // Errors
   errorPanelCrashed: string
@@ -168,6 +238,7 @@ export interface Messages {
 const en: Messages = {
   tabChat: 'Chat',
   tabSkills: 'Skills',
+  tabData: 'Data',
   tabSettings: 'Settings',
 
   save: 'Save',
@@ -197,6 +268,16 @@ const en: Messages = {
   chatPlaceholderWithSkills:
     'Message… (Enter to send, Shift+Enter for a new line, / for skills)',
   chatSlashNoMatch: 'No matching skill',
+
+  modeLabel: 'Mode',
+  modeReadonly: 'Read only',
+  modeSemi: 'Semi-auto',
+  modeFull: 'Full auto',
+  modeReadonlyHint: 'Can read pages and answer, but cannot click, type, or navigate.',
+  modeSemiHint: 'Each action is shown to you for approval before it runs.',
+  modeFullHint: 'The agent acts without asking each time. Watch the log.',
+  modeFullWarning:
+    'Full auto lets the agent click, type, and navigate without each approval. Use only on sites you trust, and review the action history afterwards.',
 
   mdCopy: 'Copy',
   mdCopied: 'Copied',
@@ -267,6 +348,9 @@ const en: Messages = {
   settingsLanguage: 'Language',
   settingsLanguageAuto: 'Automatic (follow browser)',
   settingsKeyPlaceholderLocal: 'any value works locally',
+  settingsMaxToolRounds: 'Max action steps per reply',
+  settingsMaxToolRoundsHint:
+    'The maximum number of actions (clicks, reads, scrolls, …) the agent may take in one turn before it stops to avoid looping. Higher values let long tasks finish on their own; lower values make it check in sooner. Range 1–100.',
   settingsModelsEmpty: 'The endpoint returned an empty model list.',
   settingsModelsFailed: ({ message }) =>
     `${message} — not all gateways expose /models; you can still type the model name.`,
@@ -278,6 +362,66 @@ const en: Messages = {
   settingsCheckTab: 'Check active tab',
   settingsPageReadable: ({ title }) => `The active tab can be read: ${title}`,
   settingsPageBlocked: ({ reason }) => `The active tab cannot be read. ${reason}`,
+
+  dataTitle: 'Personal data',
+  dataIntro:
+    'Saved profiles and credentials are stored locally and only sent to the model as part of a request you approve. The agent uses them to fill forms so you do not have to retype them.',
+  dataProfiles: 'Profiles',
+  dataProfilesIntro:
+    'Name, email, phone, address and other values the agent can use to fill forms automatically.',
+  dataProfilesEmpty: 'No profile yet. Add one to speed up form filling.',
+  dataAddProfile: 'New profile',
+  dataProfileLabel: 'Label (e.g. Personal, Work)',
+  dataFullName: 'Full name',
+  dataFirstName: 'First name',
+  dataLastName: 'Last name',
+  dataEmail: 'Email',
+  dataPhone: 'Phone',
+  dataAddress: 'Address',
+  dataCity: 'City',
+  dataState: 'State / Province',
+  dataPostalCode: 'Postal code',
+  dataCountry: 'Country',
+  dataCompany: 'Company',
+  dataJobTitle: 'Job title',
+  dataCustomFields: 'Custom fields',
+  dataCustomFieldsHint: 'One "key = value" per line, e.g. birthday = 1990-01-01',
+  dataPasswords: 'Passwords & identities',
+  dataPasswordsIntro:
+    'Saved credentials the agent can fill into login forms. The password value is never shown to the model — it is filled directly after you approve.',
+  dataPasswordsEmpty: 'No credentials yet. Add one to enable one-tap login filling.',
+  dataAddPassword: 'New credential',
+  dataPasswordLabel: 'Label (e.g. GitHub, Work)',
+  dataPasswordUrl: 'Site URL (optional)',
+  dataPasswordUsername: 'Username / email',
+  dataPasswordValue: 'Password',
+  dataPasswordNotes: 'Notes (optional)',
+  dataPasswordStorageNote:
+    'Credentials are stored in this extension\'s local storage on this machine (never synced). Anyone with access to your browser profile can read them — do not save high-value passwords on a shared device.',
+  dataShowPassword: 'Show',
+  dataHistory: 'Action history',
+  dataHistoryIntro:
+    'A log of every page action the agent performed, so you can review or delete what happened.',
+  dataHistoryEmpty: 'No actions recorded yet.',
+  dataClearHistory: 'Clear all',
+  dataHistoryWhen: 'When',
+  dataConversation: 'Conversation',
+  dataUsed: ({ count }) => `used ${count}×`,
+
+  convTitle: 'Conversations',
+  convNew: 'New chat',
+  convRename: 'Rename',
+  convDelete: 'Delete',
+  convUntitled: 'New conversation',
+  convDeleteConfirm: 'Delete this conversation and its messages?',
+  convHistory: 'History',
+  convHistoryEmpty: 'No past conversations yet.',
+  convContinue: 'Open',
+  convPreview: 'Preview',
+  convUpdated: 'Updated',
+
+  confirmActionHint:
+    'The assistant wants to perform the action below. Approve to let it run once.',
 
   errorPanelCrashed: 'The panel hit an unexpected error and stopped rendering.',
   errorWhatHappened: 'What happened',
@@ -292,6 +436,7 @@ const en: Messages = {
 const zhCN: Messages = {
   tabChat: '对话',
   tabSkills: '技能',
+  tabData: '数据',
   tabSettings: '设置',
 
   save: '保存',
@@ -318,6 +463,16 @@ const zhCN: Messages = {
   chatSkillActive: ({ name }) => `技能：${name}`,
   chatPlaceholderWithSkills: '输入消息…（Enter 发送，Shift+Enter 换行，/ 选择技能）',
   chatSlashNoMatch: '没有匹配的技能',
+
+  modeLabel: '模式',
+  modeReadonly: '只读',
+  modeSemi: '半自动',
+  modeFull: '全自动',
+  modeReadonlyHint: '只能读取页面和回答问题，不能点击、输入或跳转。',
+  modeSemiHint: '每个改变页面的操作都会先请你确认。',
+  modeFullHint: '智能体直接操作，不再每次询问。请留意操作记录。',
+  modeFullWarning:
+    '全自动模式下智能体可自行点击、输入和跳转，无需逐项确认。建议仅在你信任的网站使用，并事后查看操作记录。',
 
   mdCopy: '复制',
   mdCopied: '已复制',
@@ -382,6 +537,9 @@ const zhCN: Messages = {
   settingsLanguage: '语言',
   settingsLanguageAuto: '自动（跟随浏览器）',
   settingsKeyPlaceholderLocal: '本地服务填任意值即可',
+  settingsMaxToolRounds: '每条回复最多操作步数',
+  settingsMaxToolRoundsHint:
+    '代理在一轮对话中最多可执行的操作次数（点击、读取、滚动等），超过后会自动停止以防死循环。数值越大，长任务越能一次性完成；数值越小，越会早点停下来等你确认。范围 1–100。',
   settingsModelsEmpty: '该接口返回的模型列表为空。',
   settingsModelsFailed: ({ message }) =>
     `${message}——并非所有网关都提供 /models，你仍可手动输入模型名称。`,
@@ -393,6 +551,63 @@ const zhCN: Messages = {
   settingsCheckTab: '检测当前标签页',
   settingsPageReadable: ({ title }) => `当前标签页可以读取：${title}`,
   settingsPageBlocked: ({ reason }) => `当前标签页无法读取。${reason}`,
+
+  dataTitle: '个人数据',
+  dataIntro:
+    '保存的个人资料与凭据仅存在本机，只有在你批准后才会作为请求的一部分发送给模型。助手会用它们自动填写表单，避免重复输入。',
+  dataProfiles: '个人资料',
+  dataProfilesIntro: '姓名、邮箱、电话、地址等，用于自动填表单。',
+  dataProfilesEmpty: '还没有资料。添加一个以加快填表。',
+  dataAddProfile: '新建资料',
+  dataProfileLabel: '名称（如：个人、工作）',
+  dataFullName: '姓名',
+  dataFirstName: '名',
+  dataLastName: '姓',
+  dataEmail: '邮箱',
+  dataPhone: '电话',
+  dataAddress: '地址',
+  dataCity: '城市',
+  dataState: '省/州',
+  dataPostalCode: '邮编',
+  dataCountry: '国家/地区',
+  dataCompany: '公司',
+  dataJobTitle: '职位',
+  dataCustomFields: '自定义字段',
+  dataCustomFieldsHint: '每行一个“键 = 值”，例如 birthday = 1990-01-01',
+  dataPasswords: '密码与账号',
+  dataPasswordsIntro:
+    '保存的凭据可用于填写登录表单。密码值不会发送给模型——在你批准后会直接填入输入框。',
+  dataPasswordsEmpty: '还没有账号。添加后即可一键填写登录信息。',
+  dataAddPassword: '新建账号',
+  dataPasswordLabel: '名称（如：GitHub、工作邮箱）',
+  dataPasswordUrl: '站点 URL（可选）',
+  dataPasswordUsername: '用户名 / 邮箱',
+  dataPasswordValue: '密码',
+  dataPasswordNotes: '备注（可选）',
+  dataPasswordStorageNote:
+    '凭据仅保存在本机此扩展的本地存储中（不会同步）。任何能访问你浏览器配置的人都可以读取——请勿在共用设备上保存高价值密码。',
+  dataShowPassword: '显示',
+  dataHistory: '操作记录',
+  dataHistoryIntro: '助手在网页上执行过的每一步操作记录，可随时查看或删除。',
+  dataHistoryEmpty: '暂无操作记录。',
+  dataClearHistory: '全部清空',
+  dataHistoryWhen: '时间',
+  dataConversation: '会话',
+  dataUsed: ({ count }) => `已使用 ${count} 次`,
+
+  convTitle: '会话',
+  convNew: '新对话',
+  convRename: '重命名',
+  convDelete: '删除',
+  convUntitled: '新对话',
+  convDeleteConfirm: '确定删除该会话及其全部消息吗？',
+  convHistory: '对话历史',
+  convHistoryEmpty: '还没有历史会话。',
+  convContinue: '继续对话',
+  convPreview: '预览',
+  convUpdated: '更新于',
+
+  confirmActionHint: '助手希望执行以下操作，批准后只会执行这一次。',
 
   errorPanelCrashed: '面板遇到意外错误，已停止渲染。',
   errorWhatHappened: '错误信息',

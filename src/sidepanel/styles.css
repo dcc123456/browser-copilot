@@ -31,6 +31,9 @@
   --ok: #4ec9a6;
   --err: #ff6b6b;
   --warn: #f0b849;
+  /* Strong "danger" fill for destructive/full-auto states; needs white ink. */
+  --danger: #c44;
+  --on-danger: #ffffff;
 
   /* Text placed on an --accent fill. Dark ink reads better on the blue than
      white does at these small sizes. */
@@ -55,6 +58,8 @@
   --hover-wash: rgb(255 255 255 / 12%);
   /* Menus float above content and need a shadow that reads on the backdrop. */
   --menu-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+  /* Backdrop behind the history drawer; darker than a menu shadow. */
+  --backdrop: rgb(0 0 0 / 55%);
 
   color-scheme: dark;
 }
@@ -76,6 +81,8 @@
     --ok: #0f7b5f;
     --err: #c62f2f;
     --warn: #9a6300;
+    --danger: #c44;
+    --on-danger: #ffffff;
 
     /* White ink on the darker light-mode accent. */
     --on-accent: #ffffff;
@@ -92,6 +99,7 @@
     --hover-wash: rgb(0 0 0 / 8%);
     /* Softer and tighter: a heavy shadow looks like dirt on a white panel. */
     --menu-shadow: 0 6px 18px rgb(15 23 42 / 12%);
+    --backdrop: rgb(15 23 42 / 35%);
 
     color-scheme: light;
   }
@@ -148,6 +156,192 @@ body {
   padding: 12px;
 }
 
+/* Conversation history drawer */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--backdrop);
+  z-index: 50;
+}
+.drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: min(86%, 320px);
+  background: var(--panel);
+  color: var(--text);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--menu-shadow);
+  z-index: 51;
+}
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.drawer-close {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 8px;
+}
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+}
+.conv-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+.conv-row[data-active='true'] {
+  background: var(--accent-soft);
+  outline: 1px solid var(--accent-soft-border);
+}
+.conv-row-main {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  cursor: pointer;
+  padding: 4px 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.conv-row-title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.conv-row-meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+.conv-row-actions {
+  display: flex;
+  gap: 2px;
+}
+.conv-row-actions button {
+  padding: 2px 6px;
+  font-size: 13px;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 6px;
+}
+.conv-row-actions button:hover {
+  background: var(--hover-wash);
+  color: var(--text);
+}
+.conv-rename {
+  flex: 1;
+  min-width: 0;
+}
+.conv-preview h4 {
+  margin: 8px 0;
+}
+.conv-preview-log {
+  max-height: 55vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.link-btn {
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font-size: 12px;
+}
+
+/* Top chat toolbar: attach-page (left) + history (right), sits below the tabs */
+.chat-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.chat-toolbar .icon-btn {
+  width: auto;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.icon-btn-label {
+  font-size: 12px;
+}
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.icon-btn:hover {
+  background: var(--hover-wash);
+  color: var(--text);
+}
+
+/* Mode selector (bottom-left of composer) */
+.mode-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.mode-select select {
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.mode-info-btn {
+  width: 22px;
+  height: 22px;
+}
+.popover {
+  position: absolute;
+  bottom: 30px;
+  left: 0;
+  width: 240px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  box-shadow: var(--menu-shadow);
+  font-size: 12px;
+  z-index: 20;
+}
+.popover p {
+  margin: 6px 0 0;
+}
+
 /* --- Chat --- */
 .chat-log {
   display: flex;
@@ -160,6 +354,13 @@ body {
   border-radius: 8px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  /* Apply CJK kinsoku: closing punctuation (？。！，）】」etc.) must not be
+     left alone at the start of a wrapped line. `overflow-wrap: anywhere` above
+     would otherwise permit a break between the last character and its trailing
+     punctuation, stranding a fullwidth ？ on its own line. `strict` keeps the
+     punctuation attached to the preceding character while still allowing long
+     unbreakable tokens (URLs, code) to wrap. */
+  line-break: strict;
 }
 
 /*
@@ -207,6 +408,12 @@ body {
   background: var(--warn-surface);
 }
 
+.confirm-action {
+  margin: 6px 0;
+  font-weight: 600;
+  word-break: break-word;
+}
+
 .confirm-card pre {
   margin: 6px 0;
   padding: 6px;
@@ -216,21 +423,46 @@ body {
   font-size: 11px;
 }
 
+.composer-resize-handle {
+  flex: 0 0 auto;
+  height: 7px;
+  margin: 0;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  touch-action: none;
+}
+.composer-resize-handle:hover .composer-resize-grip,
+.composer-resize-handle:active .composer-resize-grip {
+  background: var(--accent);
+}
+.composer-resize-grip {
+  width: 36px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background 120ms ease;
+}
+
 .composer {
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 8px;
-  border-top: 1px solid var(--border);
   background: var(--panel);
   /* Positioning context for the slash menu, so it can sit directly above the
      textarea without measuring caret coordinates. */
   position: relative;
+  overflow: hidden;
 }
 
 .composer textarea {
-  resize: vertical;
-  min-height: 54px;
+  flex: 1;
+  min-height: 0;
+  resize: none;
   padding: 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -554,6 +786,12 @@ textarea {
 
 .md-p {
   margin: 0 0 8px;
+  /* CJK closing punctuation (？。！，）】」) must not be left alone at the
+     start of a wrapped line. `strict` applies the kinsoku rules that keep a
+     trailing punctuation mark attached to the character before it. Without
+     this, a long Chinese sentence that fills the line wraps its final ？ onto
+     a line by itself. */
+  line-break: strict;
 }
 
 .md-heading {

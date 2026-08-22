@@ -13,27 +13,38 @@
 import { LOCALES, type LocaleSetting } from './i18n'
 import type { WireMessage } from './llm'
 import type { ProviderProfile } from './providers'
-import type { Settings, Skill } from './types'
+import type {
+  ConversationMeta,
+  HistoryEntry,
+  PasswordEntry,
+  Settings,
+  Skill,
+  UserProfile,
+} from './types'
 
 const KEY_SCHEMA = 'schemaVersion'
 const KEY_SETTINGS = 'settings'
 const KEY_SKILLS = 'skills'
+const KEY_PROFILES = 'profiles'
+const KEY_PASSWORDS = 'passwords'
+const KEY_HISTORY = 'history'
+const KEY_CONVERSATIONS_META = 'conversations'
 
 /**
  * Storage schema version.
  *
  * - v1: provider profiles plus an active pointer, a locale, and skills.
- *
- * Stamped even though nothing needs migrating yet, because the alternative —
- * adding the marker later — leaves the first release's data indistinguishable
- * from an empty install.
+ * - v2: user profiles, password vault, action history, persistent
+ *   conversations (messages moved to `storage.local`).
  */
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 export const DEFAULT_SETTINGS: Settings = {
   providers: [],
   activeProviderId: '',
   locale: 'auto',
+  mode: 'semi',
+  maxToolRounds: 20,
 }
 
 /**
@@ -47,6 +58,21 @@ function coerceLocale(value: unknown): LocaleSetting {
   return typeof value === 'string' && (LOCALES as readonly string[]).includes(value)
     ? (value as LocaleSetting)
     : 'auto'
+}
+
+/** Bounds for the configurable tool-round cap. */
+export const MIN_TOOL_ROUNDS = 1
+export const MAX_TOOL_ROUNDS_CAP = 100
+
+/**
+ * Clamps the configured tool-round limit to a sane integer range. A value too
+ * low makes multi-step tasks impossible; too high lets a looping model burn
+ * tokens and act on the page for far too long before being stopped.
+ */
+export function coerceMaxToolRounds(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n)) return DEFAULT_SETTINGS.maxToolRounds
+  return Math.min(MAX_TOOL_ROUNDS_CAP, Math.max(MIN_TOOL_ROUNDS, Math.round(n)))
 }
 
 /**
@@ -80,6 +106,8 @@ export function normalizeStoredSettings(raw: unknown): Settings {
     providers,
     activeProviderId: active,
     locale: coerceLocale(value.locale),
+    mode: value.mode === 'readonly' || value.mode === 'full' ? value.mode : 'semi',
+    maxToolRounds: coerceMaxToolRounds(value.maxToolRounds),
   }
 }
 
@@ -90,13 +118,27 @@ export function normalizeStoredSettings(raw: unknown): Settings {
  * rather than being re-checked on every read path.
  */
 export async function ensureSchema(): Promise<void> {
-  const stored = await chrome.storage.local.get([KEY_SCHEMA, KEY_SETTINGS])
+  const stored = await chrome.storage.local.get([
+    KEY_SCHEMA,
+    KEY_SETTINGS,
+    KEY_PROFILES,
+    KEY_PASSWORDS,
+    KEY_HISTORY,
+    KEY_CONVERSATIONS_META,
+  ])
   if (stored[KEY_SCHEMA] === SCHEMA_VERSION) return
 
-  await chrome.storage.local.set({
+  const patch: Record<string, unknown> = {
     [KEY_SCHEMA]: SCHEMA_VERSION,
     [KEY_SETTINGS]: normalizeStoredSettings(stored[KEY_SETTINGS]),
-  })
+  }
+  // Seed new collections as empty arrays so reads never need to special-case
+  // "key absent".
+  if (!Array.isArray(stored[KEY_PROFILES])) patch[KEY_PROFILES] = []
+  if (!Array.isArray(stored[KEY_PASSWORDS])) patch[KEY_PASSWORDS] = []
+  if (!Array.isArray(stored[KEY_HISTORY])) patch[KEY_HISTORY] = []
+  if (!Array.isArray(stored[KEY_CONVERSATIONS_META])) patch[KEY_CONVERSATIONS_META] = []
+  await chrome.storage.local.set(patch)
 }
 
 /** Reads settings, normalizing whatever is on disk. */
@@ -166,36 +208,31 @@ export function newId(): string {
 // --- Conversations -----------------------------------------------------------
 
 /**
- * Conversation history lives in `chrome.storage.session`, not in a worker
- * variable.
+ * Conversation history lives in `chrome.storage.local`, not session storage.
  *
- * An MV3 service worker is evicted after roughly 30 seconds of inactivity, which
- * takes every in-memory `const history` with it. Keeping transcripts in session
- * storage means a reconnecting panel resumes the same conversation instead of
- * silently starting a new one. Session storage is memory-backed and cleared when
- * the browser closes, which is the right lifetime for a chat transcript — and it
- * keeps page text out of on-disk storage.
+ * Earlier versions kept the transcript in `storage.session`, which cleared on
+ * browser exit. Durable local storage lets the user resume a thread days
+ * later — what they expect from a "chat history" feature. Messages are
+ * trimmed to {@link MAX_STORED_MESSAGES} so a long thread cannot grow without
+ * bound.
+ *
+ * Tool/assistant content may include page text; it never leaves this machine
+ * except as part of a model request.
  */
 const CONVERSATION_PREFIX = 'conv:'
 
 /**
- * The single conversation id shared by every panel instance.
- *
- * Closing the panel destroys its JavaScript context, so a per-instance random id
- * would start a brand-new conversation on every reopen — exactly the data loss
- * this design exists to prevent. A fixed id makes "collapse the panel and come
- * back" resume the same thread.
+ * The default conversation id. A fixed id makes collapse-and-return resume
+ * the same thread without the panel having to coordinate a random id across
+ * reconnects.
  */
 export const DEFAULT_CONVERSATION_ID = 'default'
 
 /** Status of a turn, so a reopened panel can tell whether work is still running. */
 export interface TurnState {
   conversationId: string
-  /** True while the worker is streaming or running tools. */
   running: boolean
-  /** Set when the last turn ended with an error. */
   error?: string
-  /** Wall-clock ms of the last state change, for staleness checks. */
   at: number
 }
 
@@ -293,7 +330,7 @@ export function trimConversation(
 /** Loads a conversation, returning an empty history when it is unknown. */
 export async function loadConversation(conversationId: string): Promise<WireMessage[]> {
   const key = conversationKey(conversationId)
-  const stored = await chrome.storage.session.get(key)
+  const stored = await chrome.storage.local.get(key)
   const value = stored[key]
   return Array.isArray(value) ? (value as WireMessage[]) : []
 }
@@ -303,11 +340,290 @@ export async function saveConversation(
   conversationId: string,
   messages: WireMessage[],
 ): Promise<void> {
-  await chrome.storage.session.set({
+  await chrome.storage.local.set({
     [conversationKey(conversationId)]: trimConversation(messages),
   })
 }
 
 export async function clearConversation(conversationId: string): Promise<void> {
-  await chrome.storage.session.remove(conversationKey(conversationId))
+  await chrome.storage.local.remove(conversationKey(conversationId))
+}
+
+// --- Conversation metadata --------------------------------------------------
+
+const DEFAULT_CONVERSATION_TITLE = 'New conversation'
+
+function asMeta(value: unknown): ConversationMeta | null {
+  if (!value || typeof value !== 'object') return null
+  const meta = value as ConversationMeta
+  if (typeof meta.id !== 'string') return null
+  return {
+    id: meta.id,
+    title: typeof meta.title === 'string' && meta.title ? meta.title : DEFAULT_CONVERSATION_TITLE,
+    createdAt: typeof meta.createdAt === 'number' ? meta.createdAt : Date.now(),
+    updatedAt: typeof meta.updatedAt === 'number' ? meta.updatedAt : Date.now(),
+    preview: typeof meta.preview === 'string' ? meta.preview : undefined,
+  }
+}
+
+export async function listConversations(): Promise<ConversationMeta[]> {
+  const stored = await chrome.storage.local.get(KEY_CONVERSATIONS_META)
+  const list = stored[KEY_CONVERSATIONS_META]
+  if (!Array.isArray(list)) return []
+  return list
+    .map(asMeta)
+    .filter((meta): meta is ConversationMeta => meta !== null)
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+export async function getConversationMeta(
+  conversationId: string,
+): Promise<ConversationMeta | undefined> {
+  return (await listConversations()).find((meta) => meta.id === conversationId)
+}
+
+/**
+ * Touches a conversation's metadata, creating it on first message.
+ *
+ * `title` is derived from the first user message and never overwritten, so
+ * the user can rename a thread without the next turn clobbering it.
+ */
+export async function touchConversation(
+  conversationId: string,
+  firstUserText?: string,
+): Promise<ConversationMeta> {
+  const list = await listConversations()
+  const existing = list.find((meta) => meta.id === conversationId)
+  const now = Date.now()
+  if (existing) {
+    existing.updatedAt = now
+    if (firstUserText && (!existing.preview || existing.preview.trim().length === 0)) {
+      existing.preview = firstUserText.slice(0, 120)
+    }
+    if (
+      firstUserText &&
+      (!existing.title || existing.title === DEFAULT_CONVERSATION_TITLE)
+    ) {
+      existing.title = firstUserText.trim().slice(0, 60) || DEFAULT_CONVERSATION_TITLE
+    }
+    await chrome.storage.local.set({ [KEY_CONVERSATIONS_META]: list })
+    return existing
+  }
+  const trimmed = firstUserText?.trim() ?? ''
+  const created: ConversationMeta = {
+    id: conversationId,
+    title: (trimmed.slice(0, 60) || DEFAULT_CONVERSATION_TITLE),
+    createdAt: now,
+    updatedAt: now,
+    preview: trimmed.slice(0, 120) || undefined,
+  }
+  list.push(created)
+  await chrome.storage.local.set({ [KEY_CONVERSATIONS_META]: list })
+  return created
+}
+
+export async function renameConversation(
+  conversationId: string,
+  title: string,
+): Promise<void> {
+  const list = await listConversations()
+  const meta = list.find((entry) => entry.id === conversationId)
+  if (meta) {
+    meta.title = title.trim().slice(0, 80) || DEFAULT_CONVERSATION_TITLE
+    meta.updatedAt = Date.now()
+    await chrome.storage.local.set({ [KEY_CONVERSATIONS_META]: list })
+  }
+}
+
+export async function deleteConversation(conversationId: string): Promise<void> {
+  const [metaList] = await Promise.all([
+    chrome.storage.local.get(KEY_CONVERSATIONS_META),
+    clearConversation(conversationId),
+  ])
+  const list = Array.isArray(metaList[KEY_CONVERSATIONS_META])
+    ? (metaList[KEY_CONVERSATIONS_META] as ConversationMeta[])
+    : []
+  await chrome.storage.local.set({
+    [KEY_CONVERSATIONS_META]: list.filter((meta) => meta.id !== conversationId),
+  })
+  // Also drop turn state and any history for this thread.
+  await chrome.storage.session.remove(`${TURN_STATE_PREFIX}${conversationId}`)
+  const all = await listHistory()
+  await chrome.storage.local.set({
+    [KEY_HISTORY]: all.filter((entry) => entry.conversationId !== conversationId),
+  })
+}
+
+// --- User profiles ----------------------------------------------------------
+
+function asProfile(value: unknown): UserProfile | null {
+  if (!value || typeof value !== 'object') return null
+  const profile = value as Partial<UserProfile>
+  if (typeof profile.id !== 'string') return null
+  const str = (input: unknown): string | undefined =>
+    typeof input === 'string' ? input : undefined
+  return {
+    id: profile.id,
+    label: str(profile.label) ?? 'Profile',
+    fullName: str(profile.fullName),
+    firstName: str(profile.firstName),
+    lastName: str(profile.lastName),
+    email: str(profile.email),
+    phone: str(profile.phone),
+    address: str(profile.address),
+    city: str(profile.city),
+    state: str(profile.state),
+    postalCode: str(profile.postalCode),
+    country: str(profile.country),
+    company: str(profile.company),
+    jobTitle: str(profile.jobTitle),
+    custom:
+      profile.custom && typeof profile.custom === 'object' && !Array.isArray(profile.custom)
+        ? Object.fromEntries(
+            Object.entries(profile.custom as Record<string, unknown>)
+              .filter(([, v]) => typeof v === 'string')
+              .map(([k, v]) => [k, v as string]),
+          )
+        : {},
+    createdAt: typeof profile.createdAt === 'number' ? profile.createdAt : Date.now(),
+    updatedAt: typeof profile.updatedAt === 'number' ? profile.updatedAt : Date.now(),
+  }
+}
+
+export async function listProfiles(): Promise<UserProfile[]> {
+  const stored = await chrome.storage.local.get(KEY_PROFILES)
+  const list = stored[KEY_PROFILES]
+  if (!Array.isArray(list)) return []
+  return list
+    .map(asProfile)
+    .filter((profile): profile is UserProfile => profile !== null)
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+export async function saveProfile(profile: UserProfile): Promise<void> {
+  const list = await listProfiles()
+  const index = list.findIndex((entry) => entry.id === profile.id)
+  const normalized: UserProfile = { ...profile, updatedAt: Date.now() }
+  if (index === -1) list.push(normalized)
+  else list[index] = normalized
+  await chrome.storage.local.set({ [KEY_PROFILES]: list })
+}
+
+export async function deleteProfile(id: string): Promise<void> {
+  const list = await listProfiles()
+  await chrome.storage.local.set({
+    [KEY_PROFILES]: list.filter((profile) => profile.id !== id),
+  })
+}
+
+// --- Password vault ---------------------------------------------------------
+
+function asPassword(value: unknown): PasswordEntry | null {
+  if (!value || typeof value !== 'object') return null
+  const entry = value as PasswordEntry
+  if (typeof entry.id !== 'string' || typeof entry.password !== 'string') return null
+  return {
+    id: entry.id,
+    label: entry.label || 'Credential',
+    url: entry.url,
+    username: entry.username,
+    password: entry.password,
+    notes: entry.notes,
+    createdAt: typeof entry.createdAt === 'number' ? entry.createdAt : Date.now(),
+    updatedAt: typeof entry.updatedAt === 'number' ? entry.updatedAt : Date.now(),
+    useCount: typeof entry.useCount === 'number' ? entry.useCount : 0,
+    lastUsedAt: typeof entry.lastUsedAt === 'number' ? entry.lastUsedAt : undefined,
+  }
+}
+
+export async function listPasswords(): Promise<PasswordEntry[]> {
+  const stored = await chrome.storage.local.get(KEY_PASSWORDS)
+  const list = stored[KEY_PASSWORDS]
+  if (!Array.isArray(list)) return []
+  return list
+    .map(asPassword)
+    .filter((entry): entry is PasswordEntry => entry !== null)
+    .sort((a, b) => {
+      if (!!b.lastUsedAt !== !!a.lastUsedAt) return b.lastUsedAt ? 1 : -1
+      if (b.lastUsedAt && a.lastUsedAt) return b.lastUsedAt - a.lastUsedAt
+      return b.updatedAt - a.updatedAt
+    })
+}
+
+export async function savePassword(entry: PasswordEntry): Promise<void> {
+  const list = await listPasswords()
+  const index = list.findIndex((existing) => existing.id === entry.id)
+  const normalized: PasswordEntry = { ...entry, updatedAt: Date.now() }
+  if (index === -1) list.push(normalized)
+  else list[index] = normalized
+  await chrome.storage.local.set({ [KEY_PASSWORDS]: list })
+}
+
+export async function deletePassword(id: string): Promise<void> {
+  const list = await listPasswords()
+  await chrome.storage.local.set({
+    [KEY_PASSWORDS]: list.filter((entry) => entry.id !== id),
+  })
+}
+
+/** Bumps use counters so the most-used credentials surface first. */
+export async function recordPasswordUse(id: string): Promise<void> {
+  const list = await listPasswords()
+  const entry = list.find((item) => item.id === id)
+  if (entry) {
+    entry.useCount += 1
+    entry.lastUsedAt = Date.now()
+    await chrome.storage.local.set({ [KEY_PASSWORDS]: list })
+  }
+}
+
+// --- Action history ---------------------------------------------------------
+
+/** Hard cap so the audit log cannot grow without bound. */
+export const MAX_HISTORY_ENTRIES = 500
+
+function asHistory(value: unknown): HistoryEntry | null {
+  if (!value || typeof value !== 'object') return null
+  const entry = value as HistoryEntry
+  if (typeof entry.id !== 'string' || typeof entry.action !== 'string') return null
+  return {
+    id: entry.id,
+    at: typeof entry.at === 'number' ? entry.at : Date.now(),
+    conversationId:
+      typeof entry.conversationId === 'string' ? entry.conversationId : DEFAULT_CONVERSATION_ID,
+    action: entry.action,
+    summary: typeof entry.summary === 'string' ? entry.summary : '',
+    host: typeof entry.host === 'string' ? entry.host : undefined,
+    approved: entry.approved !== false,
+    ok: entry.ok !== false,
+  }
+}
+
+export async function listHistory(): Promise<HistoryEntry[]> {
+  const stored = await chrome.storage.local.get(KEY_HISTORY)
+  const list = stored[KEY_HISTORY]
+  if (!Array.isArray(list)) return []
+  return list
+    .map(asHistory)
+    .filter((entry): entry is HistoryEntry => entry !== null)
+    .sort((a, b) => b.at - a.at)
+}
+
+export async function addHistory(entry: HistoryEntry): Promise<void> {
+  const list = await listHistory()
+  list.unshift(entry)
+  // listHistory sorts by time; cap the newest N.
+  const trimmed = list.slice(0, MAX_HISTORY_ENTRIES)
+  await chrome.storage.local.set({ [KEY_HISTORY]: trimmed })
+}
+
+export async function deleteHistory(id: string): Promise<void> {
+  const list = await listHistory()
+  await chrome.storage.local.set({
+    [KEY_HISTORY]: list.filter((entry) => entry.id !== id),
+  })
+}
+
+export async function clearHistory(): Promise<void> {
+  await chrome.storage.local.set({ [KEY_HISTORY]: [] })
 }

@@ -3,17 +3,19 @@ import { effectiveLocale, messagesFor, type Messages } from '../lib/i18n'
 import { sendCommand } from '../lib/messages'
 import type { Skill } from '../lib/types'
 import ChatTab from './ChatTab'
+import DataTab from './DataTab'
 import { I18nProvider } from './i18n'
 import SettingsTab from './SettingsTab'
 import SkillsTab from './SkillsTab'
 
-type TabId = 'chat' | 'skills' | 'settings'
+type TabId = 'chat' | 'skills' | 'data' | 'settings'
 
-const TAB_ORDER: TabId[] = ['chat', 'skills', 'settings']
+const TAB_ORDER: TabId[] = ['chat', 'skills', 'data', 'settings']
 
 const TAB_LABEL: Record<TabId, keyof Messages> = {
   chat: 'tabChat',
   skills: 'tabSkills',
+  data: 'tabData',
   settings: 'tabSettings',
 }
 
@@ -106,6 +108,9 @@ export default function App() {
             if (id) setActive('chat')
           }}
         />
+      </div>
+      <div style={{ display: active === 'data' ? 'contents' : 'none' }}>
+        <DataTab />
       </div>
       <div style={{ display: active === 'settings' ? 'contents' : 'none' }}>
         <SettingsTab onLocaleChange={setLocaleSetting} />

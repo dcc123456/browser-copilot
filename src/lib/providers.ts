@@ -15,6 +15,7 @@
  */
 
 import { LOCALES, type LocaleSetting } from './i18n'
+import type { AgentMode } from './types'
 
 /** A configured endpoint the agent can talk to. */
 export interface ProviderProfile {
@@ -237,6 +238,8 @@ export function normalizeSettingsPayload(raw: unknown): {
   providers: ProviderProfile[]
   activeProviderId: string
   locale: LocaleSetting
+  mode: AgentMode
+  maxToolRounds: number
 } {
   const value = (raw ?? {}) as Record<string, unknown>
   const providers = Array.isArray(value.providers)
@@ -248,6 +251,12 @@ export function normalizeSettingsPayload(raw: unknown): {
   const activeRaw = value.activeProviderId
   const activeProviderId = typeof activeRaw === 'string' ? activeRaw : ''
   const localeRaw = value.locale
+  const modeRaw = value.mode
+  const roundsRaw = value.maxToolRounds
+  const rounds = typeof roundsRaw === 'number' ? roundsRaw : Number(roundsRaw)
+  const maxToolRounds = Number.isFinite(rounds)
+    ? Math.min(100, Math.max(1, Math.round(rounds)))
+    : 20
   return {
     providers,
     // Never point at a profile that is not in the list, or the editor would open
@@ -261,5 +270,7 @@ export function normalizeSettingsPayload(raw: unknown): {
       (typeof localeRaw === 'string' && (LOCALES as readonly string[]).includes(localeRaw))
         ? (localeRaw as LocaleSetting)
         : 'auto',
+    mode: modeRaw === 'readonly' || modeRaw === 'full' ? modeRaw : 'semi',
+    maxToolRounds,
   }
 }

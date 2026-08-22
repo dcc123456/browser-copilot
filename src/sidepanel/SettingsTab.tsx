@@ -471,6 +471,28 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         </div>
       )}
 
+      {/* --- Agent behaviour --- */}
+      <div className="card">
+        <div className="card-title">{t.settingsMaxToolRounds}</div>
+        <p className="hint">{t.settingsMaxToolRoundsHint}</p>
+        <div className="field">
+          <input
+            inputMode="numeric"
+            max={100}
+            min={1}
+            onChange={(event) => {
+              const value = Number(event.target.value)
+              if (!Number.isFinite(value)) return
+              const clamped = Math.min(100, Math.max(1, Math.round(value)))
+              void mutate({ type: 'settings.set', patch: { maxToolRounds: clamped } })
+            }}
+            style={{ maxWidth: 96 }}
+            type="number"
+            value={settings.maxToolRounds}
+          />
+        </div>
+      </div>
+
       {/* --- Language --- */}
       <div className="card">
         <div className="card-title">{t.settingsLanguage}</div>

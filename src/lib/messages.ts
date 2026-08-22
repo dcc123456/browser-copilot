@@ -11,7 +11,15 @@
  */
 
 import type { ProviderProfile } from './providers'
-import type { PageContext, Settings, Skill } from './types'
+import type {
+  ConversationMeta,
+  HistoryEntry,
+  PageContext,
+  PasswordEntry,
+  Settings,
+  Skill,
+  UserProfile,
+} from './types'
 
 /** Port name for the streaming agent channel. */
 export const AGENT_PORT = 'agent'
@@ -31,13 +39,29 @@ export type Command =
   | { type: 'page.read'; maxChars?: number }
   /**
    * Reports whether the active tab can be read at all.
-   *
-   * Separate from `page.read` because the answer is useful before there is
-   * anything to read: "this is a chrome:// page" is a permanent property of the
-   * tab, not a transient scraping failure, and the user needs to hear it as a
-   * diagnostic rather than as an error mid-conversation.
    */
   | { type: 'page.check' }
+
+  // --- User profiles (autofill memory) ---
+  | { type: 'profiles.list' }
+  | { type: 'profiles.save'; profile: UserProfile }
+  | { type: 'profiles.delete'; id: string }
+
+  // --- Password vault ---
+  | { type: 'passwords.list' }
+  | { type: 'passwords.save'; entry: PasswordEntry }
+  | { type: 'passwords.delete'; id: string }
+
+  // --- Action history ---
+  | { type: 'history.list' }
+  | { type: 'history.delete'; id: string }
+  | { type: 'history.clear' }
+
+  // --- Conversations ---
+  | { type: 'conversations.list' }
+  | { type: 'conversations.get'; id: string }
+  | { type: 'conversations.rename'; id: string; title: string }
+  | { type: 'conversations.delete'; id: string }
 
 /** Replies, discriminated by the command that produced them. */
 export type CommandResult =
@@ -53,9 +77,26 @@ export type CommandResult =
       readable: boolean
       tabUrl?: string
       tabTitle?: string
-      /** Present when the tab cannot be read, explaining why. */
       reason?: string
     }
+  | { type: 'profiles.list'; profiles: UserProfile[] }
+  | { type: 'profiles.save' }
+  | { type: 'profiles.delete' }
+  | { type: 'passwords.list'; entries: PasswordEntry[] }
+  | { type: 'passwords.save' }
+  | { type: 'passwords.delete' }
+  | { type: 'history.list'; entries: HistoryEntry[] }
+  | { type: 'history.delete' }
+  | { type: 'history.clear' }
+  | { type: 'conversations.list'; conversations: ConversationMeta[] }
+  | {
+      type: 'conversations.get'
+      id: string
+      title: string
+      messages: { role: 'user' | 'assistant' | 'tool'; text: string }[]
+    }
+  | { type: 'conversations.rename' }
+  | { type: 'conversations.delete' }
 
 /** Envelope so a failed command never looks like a successful one. */
 export type CommandResponse =
@@ -120,7 +161,7 @@ export type AgentServerMessage =
    */
   | {
       type: 'restore'
-      messages: { role: 'user' | 'assistant'; text: string }[]
+      messages: { role: 'user' | 'assistant' | 'tool'; text: string }[]
       running: boolean
     }
 

@@ -119,6 +119,8 @@ describe('normalizeStoredSettings', () => {
         providers: [],
         activeProviderId: '',
         locale: 'auto',
+        mode: 'semi',
+        maxToolRounds: 20,
       })
     }
   })
@@ -128,6 +130,8 @@ describe('normalizeStoredSettings', () => {
       providers: [profile()],
       activeProviderId: 'p1',
       locale: 'auto' as const,
+      mode: 'full' as const,
+      maxToolRounds: 25,
     }
     expect(normalizeStoredSettings(settings)).toEqual(settings)
   })
@@ -150,6 +154,8 @@ describe('normalizeStoredSettings', () => {
       providers: [],
       activeProviderId: '',
       locale: 'auto',
+      mode: 'semi',
+      maxToolRounds: 20,
     })
   })
 
