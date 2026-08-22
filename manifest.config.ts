@@ -35,7 +35,7 @@ export default defineManifest({
   name: 'Browser Copilot',
   version: '0.1.0',
   description:
-    'A side-panel assistant that can read the page you are looking at. Works with any OpenAI-compatible model.',
+    'A side-panel assistant that can read and act on the page you are looking at. Works with any OpenAI-compatible model.',
   minimum_chrome_version: '116',
   permissions: ['storage', 'tabs', 'scripting', 'sidePanel'],
   host_permissions: ['http://*/*', 'https://*/*'],
