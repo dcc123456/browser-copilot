@@ -133,7 +133,23 @@ operation log on the **Data** tab, so a run is auditable afterwards.
 
 ## Install
 
-Requires **Node.js 20+** and **Chrome 116+**.
+Requires **Chrome 116+** (or any Chromium browser that supports Manifest V3 side
+panels).
+
+### Option A — download a release
+
+1. Go to the [**Releases**](https://github.com/dcc123456/browser-copilot/releases)
+   page and download `browser-copilot-<version>.zip` from the latest release.
+2. Unzip it into a folder you will keep (the extension loads from that folder).
+3. Open `chrome://extensions`.
+4. Turn on **Developer mode** (top right).
+5. Click **Load unpacked** and select the unzipped folder — the one containing
+   `manifest.json`.
+6. Click the extension's toolbar icon to open the side panel.
+
+### Option B — build from source
+
+Requires **Node.js 20+**.
 
 ```bash
 git clone git@github.com:dcc123456/browser-copilot.git
@@ -151,8 +167,10 @@ Then load it into Chrome:
 
 `npm install && npm run build` works too if you prefer npm.
 
-There is no prebuilt archive to download: the bundle would be unsigned and
-unreviewed, so building from source is the honest distribution path.
+`pnpm package` (or `npm run package`) builds the extension and additionally
+writes a loadable `releases/browser-copilot-<version>.zip` — the same artifact
+the release workflow attaches to GitHub Releases. Source maps are excluded from
+the zip to keep the download small.
 
 ### Updating
 
@@ -406,8 +424,12 @@ pnpm run dev         # rebuild on change
 pnpm run typecheck   # tsc --noEmit
 pnpm run test        # vitest
 pnpm run build       # production bundle into dist/
+pnpm run package     # build + releases/browser-copilot-<version>.zip
 pnpm run icons       # regenerate public/icons
 ```
+
+Pushing a tag or publishing a GitHub Release runs `.github/workflows/release.yml`,
+which typechecks, tests, builds, and attaches the same loadable zip to the release.
 
 After changing the service worker, press **Reload** in `chrome://extensions`.
 

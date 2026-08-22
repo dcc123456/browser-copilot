@@ -1,0 +1,87 @@
+name: Release
+
+# Builds the extension and attaches a loadable zip to every GitHub Release.
+#
+# Trigger it either by publishing a release in the GitHub UI, or by pushing a
+# tag like v0.1.0 (the workflow will create the release itself). The zip has
+# manifest.json at its root, so users can download it, unzip, and "Load
+# unpacked" the folder. The version in the artifact comes from
+# package.json/manifest, which should match the release tag.
+on:
+  release:
+    types: [published]
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build (for manual runs; defaults to package.json version)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build and package
+        run: pnpm package
+
+      - name: Resolve artifact path
+        id: artifact
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "path=releases/browser-copilot-${version}.zip" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-copilot-${{ steps.artifact.outputs.version }}
+          path: ${{ steps.artifact.outputs.path }}
+          if-no-files-found: error
+
+      - name: Create release from tag
+        id: release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: ${{ steps.artifact.outputs.path }}
+          fail-on-unmatched-files: true
+
+      - name: Attach to existing release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.artifact.outputs.path }}
+          fail-on-unmatched-files: true

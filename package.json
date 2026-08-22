@@ -3,10 +3,11 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "A side-panel browser assistant that can read the page you are looking at. Works with any OpenAI-compatible model.",
+  "description": "A side-panel browser assistant that can read and act on the page you are looking at. Works with any OpenAI-compatible model.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "package": "vite build && node scripts/build-zip.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.tests.json",
     "test": "vitest run",
     "icons": "node scripts/generate-icons.mjs"

@@ -118,7 +118,22 @@ http(s) 页面都可以。
 
 ## 安装
 
-需要 **Node.js 20+** 和 **Chrome 116+**。
+需要 **Chrome 116+**（或任何支持 Manifest V3 侧边栏的 Chromium 浏览器）。
+
+### 方式一：下载发行版
+
+1. 前往 [**Releases**](https://github.com/dcc123456/browser-copilot/releases)
+   页面，下载最新版本里的 `browser-copilot-<版本>.zip`。
+2. 解压到一个会长期保留的文件夹（扩展会从这个文件夹加载）。
+3. 打开 `chrome://extensions`。
+4. 打开右上角的**开发者模式**。
+5. 点击**加载已解压的扩展程序**，选择解压出来的文件夹——即包含
+   `manifest.json` 的那一层。
+6. 点击工具栏上的扩展图标，打开侧边栏。
+
+### 方式二：从源码构建
+
+需要 **Node.js 20+**。
 
 ```bash
 git clone git@github.com:dcc123456/browser-copilot.git
@@ -136,7 +151,9 @@ pnpm run build
 
 习惯用 npm 的话，`npm install && npm run build` 同样可以。
 
-这里不提供预打包下载：那样的包未签名、未经审核，从源码构建是更诚实的分发方式。
+运行 `pnpm package`（或 `npm run package`）会在构建之外额外生成
+`releases/browser-copilot-<版本>.zip`，也就是发布流程挂到 GitHub Releases 上的
+同一个可加载压缩包；为减小体积，压缩包不包含 source map。
 
 ### 更新
 
@@ -356,8 +373,13 @@ pnpm run dev         # 改动即重新构建
 pnpm run typecheck   # tsc --noEmit
 pnpm run test        # vitest
 pnpm run build       # 生产构建输出到 dist/
+pnpm run package     # 构建并生成 releases/browser-copilot-<版本>.zip
 pnpm run icons       # 重新生成 public/icons
 ```
+
+推送 tag 或在 GitHub 上发布 Release 时，会运行
+`.github/workflows/release.yml`：执行类型检查、测试、构建，并把同一个可加载的
+zip 附加到该 Release。
 
 改动 service worker 后，需在 `chrome://extensions` 点**重新加载**。
 
