@@ -31,17 +31,20 @@ jobs:
       - name: Check out
         uses: actions/checkout@v4
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-
+      # pnpm must be installed BEFORE setup-node: setup-node's `cache: pnpm`
+      # needs the pnpm executable present to initialize its cache, and it reads
+      # the packageManager version from package.json to know which one to use.
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 11
           run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
