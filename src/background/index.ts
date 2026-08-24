@@ -87,11 +87,17 @@ chrome.runtime.onStartup.addListener(() => {
 // alarm wake is received even on a cold worker; the bot instance is declared
 // below but the closure only runs when an alarm actually fires.
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === FEISHU_WATCHDOG_ALARM) {
-    feishuBot.onWatchdog()
-    return
+  // Isolate each branch: an exception in one handler must not prevent the other
+  // alarm type from being processed by the same wake.
+  try {
+    if (alarm.name === FEISHU_WATCHDOG_ALARM) {
+      feishuBot.onWatchdog()
+      return
+    }
+    onAlarm(alarm)
+  } catch (error) {
+    console.error('[Browser Copilot] alarm handler failed', alarm.name, error)
   }
-  onAlarm(alarm)
 })
 
 /** Single long-lived Feishu bot connection (reconnects internally). */

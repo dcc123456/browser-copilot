@@ -170,15 +170,33 @@ export function decodeMessage(bytes: Uint8Array): DecodedMessage {
 
 // --- Handshake ---------------------------------------------------------------
 
-/** Field numbers for ClientStreamRequest, per Feishu's published proto. */
+/**
+ * Field numbers for Feishu's `ClientStreamRequest` proto:
+ *   int64 StreamSeqId = 1;
+ *   string Method      = 2;
+ *   string LogID       = 3;
+ *   bytes  Payload     = 6;
+ *   string AppId       = 8;
+ *
+ * We deliberately do NOT write StreamSeqId: the sequence is carried in the
+ * binary frame header, and the published SDKs leave the proto field at its
+ * zero value. Writing the payload to field 6 (not 8) is the fix that lets the
+ * server actually parse the handshake and deliver events.
+ */
 const CLIENT_FIELD = {
-  SEQ_ID: 1,
   METHOD: 2,
-  PAYLOAD: 8,
+  PAYLOAD: 6,
+  APP_ID: 8,
 } as const
 
+/**
+ * Field numbers for Feishu's `ServerStreamResponse` proto:
+ *   int64  StreamSeqId = 1;
+ *   uint64 Code        = 2;   // 0 on the frame carrying the response/ACK
+ *   string Msg         = 3;
+ *   bytes  Data        = 4;   // JSON response body or event callback
+ */
 const SERVER_FIELD = {
-  SEQ_ID: 1,
   CODE: 2,
   MSG: 3,
   DATA: 4,
@@ -203,13 +221,51 @@ export function buildHandshakePayload(input: {
   })
 }
 
-/** Encodes a client request frame. */
-export function encodeRequest(seq: number, method: string, payload: string): Uint8Array {
+/**
+ * Encodes a client request frame.
+ *
+ * For events the client must ACK, use {@link encodeAck} instead.
+ */
+export function encodeRequest(
+  seq: number,
+  method: string,
+  payload: string,
+  appId = '',
+): Uint8Array {
   const out: number[] = []
-  writeVarintField(out, CLIENT_FIELD.SEQ_ID, seq)
   writeStringField(out, CLIENT_FIELD.METHOD, method)
   writeStringField(out, CLIENT_FIELD.PAYLOAD, payload)
+  if (appId) writeStringField(out, CLIENT_FIELD.APP_ID, appId)
   return encodeFrame(FRAME.REQUEST, seq, new Uint8Array(out))
+}
+
+/** Encodes the handshake request specifically (always carries AppId). */
+export function encodeHandshake(
+  seq: number,
+  appId: string,
+  clientId: string,
+  token: string,
+): Uint8Array {
+  return encodeRequest(
+    seq,
+    HANDSHAKE_METHOD,
+    buildHandshakePayload({ appId, clientId, token }),
+    appId,
+  )
+}
+
+/**
+ * Encodes an acknowledgement for a server-sent event.
+ *
+ * Every event arrives as a request frame (type 1) and must be answered with a
+ * response frame (type 2) carrying the same StreamSeqId and Code = 0; without
+ * it Feishu considers the delivery failed and retries, eventually dropping the
+ * connection. The payload is empty.
+ */
+export function encodeAck(seq: number): Uint8Array {
+  const out: number[] = []
+  writeVarintField(out, SERVER_FIELD.CODE, 0)
+  return encodeFrame(FRAME.RESPONSE, seq, new Uint8Array(out))
 }
 
 /** Encodes a pong frame echoing the server's ping sequence id. */
@@ -219,7 +275,7 @@ export function encodePong(seq: number): Uint8Array {
 
 /** What a decoded server frame means to the bot. */
 export type ServerFrame =
-  | { kind: 'handshake-ok'; seq: number }
+  | { kind: 'handshake-ok'; seq: number; data: string }
   | { kind: 'handshake-error'; seq: number; code: number; message: string }
   | { kind: 'ping'; seq: number }
   | { kind: 'event'; seq: number; data: string }
@@ -232,16 +288,19 @@ export function interpretFrame(frame: Frame): ServerFrame {
   }
 
   const msg = decodeMessage(frame.payload)
+  const code = msg.varints.get(SERVER_FIELD.CODE)
+  const message = msg.strings.get(SERVER_FIELD.MSG) ?? ''
+  const data = msg.strings.get(SERVER_FIELD.DATA) ?? ''
+
   if (frame.type === FRAME.RESPONSE) {
-    const code = msg.varints.get(SERVER_FIELD.CODE) ?? -1
-    const message = msg.strings.get(SERVER_FIELD.MSG) ?? ''
-    if (code === 0) return { kind: 'handshake-ok', seq: frame.seq }
-    return { kind: 'handshake-error', seq: frame.seq, code, message }
+    // Code may be omitted on some response frames; treat missing as 0.
+    if ((code ?? 0) === 0) return { kind: 'handshake-ok', seq: frame.seq, data }
+    return { kind: 'handshake-error', seq: frame.seq, code: code ?? -1, message }
   }
 
   if (frame.type === FRAME.REQUEST) {
-    const data = msg.strings.get(SERVER_FIELD.DATA) ?? ''
     return { kind: 'event', seq: frame.seq, data }
+
   }
 
   return { kind: 'other', seq: frame.seq, type: frame.type }

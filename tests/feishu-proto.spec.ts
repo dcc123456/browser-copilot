@@ -5,7 +5,9 @@ import {
   buildHandshakePayload,
   decodeFrame,
   decodeMessage,
+  encodeAck,
   encodeFrame,
+  encodeHandshake,
   encodePong,
   encodeRequest,
   interpretFrame,
@@ -93,8 +95,32 @@ describe('handshake', () => {
     expect(decoded.type).toBe(FRAME.REQUEST)
     const msg = decodeMessage(decoded.payload)
     expect(msg.strings.get(2)).toBe('v2:handshake')
-    const payload = JSON.parse(msg.strings.get(8)!)
+    const payload = JSON.parse(msg.strings.get(6)!)
     expect(payload.ClientId).toBe('c')
+  })
+
+  it('encodes the handshake with AppId at field 8 and Payload at field 6', () => {
+    const frame = encodeHandshake(3, 'cli_app', 'cid', 'tok')
+    const msg = decodeMessage(decodeFrame(frame)!.payload)
+    expect(msg.strings.get(2)).toBe('v2:handshake')
+    const payload = JSON.parse(msg.strings.get(6)!)
+    expect(payload.AppId).toBe('cli_app')
+    expect(payload.ClientId).toBe('cid')
+    expect(payload.Token).toBe('tok')
+    // AppId is also written to proto field 8 per Feishu's ClientStreamRequest.
+    expect(msg.strings.get(8)).toBe('cli_app')
+    // No StreamSeqId in the proto body.
+    expect(msg.varints.has(1)).toBe(false)
+  })
+
+  it('encodes an event ACK as an empty response with code 0', () => {
+    const ack = encodeAck(77)
+    const decoded = decodeFrame(ack)!
+    expect(decoded.type).toBe(FRAME.RESPONSE)
+    expect(decoded.seq).toBe(77)
+    const msg = decodeMessage(decoded.payload)
+    expect(msg.varints.get(2)).toBe(0)
+    expect(decoded.payload.length).toBeGreaterThan(0)
   })
 
   it('encodes a pong frame with empty payload echoing the seq', () => {

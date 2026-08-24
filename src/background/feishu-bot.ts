@@ -41,17 +41,16 @@
 
 import { getWsEndpoint, FeishuError, TenantTokenProvider, sendImText } from '../lib/feishu'
 import {
-  buildHandshakePayload,
   decodeFrame,
+  encodeAck,
+  encodeHandshake,
   encodePong,
-  encodeRequest,
   interpretFrame,
   parseEvent,
 } from '../lib/feishu-proto'
 import { getFeishuConfig, listTasks } from '../lib/task-store'
 import { triggerNow } from './scheduler'
 
-const HANDSHAKE_METHOD = 'v2:handshake' as const
 
 /** Alarm name the watchdog uses; also exported for clearing on stop. */
 export const FEISHU_WATCHDOG_ALARM = 'feishu-bot-watchdog'
@@ -203,14 +202,17 @@ export class FeishuBot {
       this.connected = true
       this.reconnectDelay = 2_000
       try {
-        // 3. Handshake immediately on open.
-        const payload = buildHandshakePayload({
-          appId: this.appId,
-          clientId: endpoint.clientId,
-          token: endpoint.token,
-        })
+        // 3. Handshake immediately on open. AppId is carried in field 8 and the
+        //    handshake JSON in field 6; the server rejects anything else.
         this.seq += 1
-        socket.send(encodeRequest(this.seq, HANDSHAKE_METHOD, payload))
+        socket.send(
+          encodeHandshake(
+            this.seq,
+            this.appId,
+            endpoint.clientId,
+            endpoint.token,
+          ),
+        )
       } catch (error) {
         console.warn('[Browser Copilot] Feishu handshake send failed', error)
         this.teardownAndReconnect()
@@ -268,6 +270,9 @@ export class FeishuBot {
         this.teardownAndReconnect()
         break
       case 'event':
+        // ACK first so Feishu does not retry the delivery or drop us; the
+        // actual work is fire-and-forget after the acknowledgement.
+        this.send(encodeAck(interpreted.seq))
         void this.handleEvent(interpreted.data)
         break
       case 'other':

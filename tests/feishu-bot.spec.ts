@@ -1,6 +1,12 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { FeishuBot } from '../src/background/feishu-bot'
-import { encodeFrame, FRAME, HANDSHAKE_METHOD, encodePong } from '../src/lib/feishu-proto'
+import {
+  encodeFrame,
+  FRAME,
+  encodePong,
+  encodeAck,
+  decodeMessage,
+} from '../src/lib/feishu-proto'
 
 // Mock the task-store and scheduler so the bot's event routing has no side
 // effects; this test focuses purely on the connection state machine.
@@ -126,11 +132,16 @@ describe('FeishuBot connection state machine', () => {
     expect(socket).toBeTruthy()
     expect(socket.url).toContain('token=tok123')
     socket.open()
-    // The first frame sent must be a request frame with the handshake method.
+    // The first frame sent must be a request frame with the handshake method in
+    // field 2 and the handshake JSON in field 6.
     const first = socket.sent[0]!
     expect(first[1]).toBe(FRAME.REQUEST)
-    const payload = new TextDecoder().decode(first.slice(8 + 2)) // skip header + tag for seq
-    expect(payload).toContain(HANDSHAKE_METHOD)
+    const msg = decodeMessage(first.subarray(8))
+    expect(msg.strings.get(2)).toBe('v2:handshake')
+    const body = JSON.parse(msg.strings.get(6)!)
+    expect(body.ClientId).toBe('cid-abc')
+    expect(body.Token).toBe('tok123')
+    expect(msg.strings.get(8)).toBe('cli_test')
     bot.stop()
   })
 
