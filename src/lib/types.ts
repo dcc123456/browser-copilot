@@ -107,15 +107,18 @@ export interface UserProfile {
 }
 
 /**
- * A named secret the agent can offer when filling forms (passwords, card
- * security answers, etc.).
+ * A named secret bundle the agent can offer when filling forms.
+ *
+ * The user defines arbitrary key/value fields (e.g. "username" / "password" /
+ * "card CVV" / "security answer") rather than a fixed username+password shape,
+ * so a single entry can hold whatever credentials a site needs. Legacy entries
+ * may still carry the deprecated `username`/`password`/`url`/`notes` fields;
+ * those are migrated into `fields` on load and the agent's get_secret tool
+ * understands the common keys.
  *
  * SECURITY: values are stored in `chrome.storage.local`, which is unencrypted
  * on disk and readable by anyone with access to the browser profile, exactly
- * like API keys. This is documented in the UI. A future version may add a
- * passphrase-derived encryption layer; doing so without the user entering a
- * passphrase each session would provide no real protection, so the honest
- * baseline is local storage plus a clear warning.
+ * like API keys. This is documented in the UI.
  */
 export interface PasswordEntry {
   id: string
@@ -123,14 +126,45 @@ export interface PasswordEntry {
   label: string
   /** Optional URL/host this credential is associated with. */
   url?: string
-  username?: string
-  password: string
-  notes?: string
+  /** Arbitrary user-defined key/value pairs (the actual credentials). */
+  fields: SecretField[]
   createdAt: number
   updatedAt: number
   /** Number of times the agent used this entry; surfaces frequent ones. */
   useCount: number
   lastUsedAt?: number
+
+  /** Deprecated: superseded by `fields`. Retained for migration only. */
+  username?: string
+  /** Deprecated: superseded by `fields`. Retained for migration only. */
+  password?: string
+  /** Deprecated: superseded by `fields`. Retained for migration only. */
+  notes?: string
+}
+
+/** One labelled key/value pair inside a {@link PasswordEntry}. */
+export interface SecretField {
+  key: string
+  value: string
+  /** When true, the UI masks the value like a password. */
+  secret?: boolean
+}
+
+/** Migration helper: returns an entry's fields including any legacy columns. */
+export function entryFields(entry: PasswordEntry): SecretField[] {
+  const fields = Array.isArray(entry.fields) ? [...entry.fields] : []
+  if (fields.length === 0) {
+    if (entry.username) fields.push({ key: 'username', value: entry.username })
+    if (entry.password) fields.push({ key: 'password', value: entry.password, secret: true })
+    if (entry.notes) fields.push({ key: 'notes', value: entry.notes })
+  }
+  return fields
+}
+
+/** Finds a field value by name (case-insensitive); used by the agent tools. */
+export function findField(entry: PasswordEntry, name: string): SecretField | undefined {
+  const needle = name.toLowerCase()
+  return entryFields(entry).find((field) => field.key.toLowerCase() === needle)
 }
 
 /**
@@ -141,7 +175,7 @@ export interface HistoryEntry {
   id: string
   /** Wall-clock ms. */
   at: number
-  /** Conversation this action belonged to. */
+  /** Conversation or task run this action belonged to. */
   conversationId: string
   /** Tool / action name. */
   action: string
@@ -153,6 +187,12 @@ export interface HistoryEntry {
   approved: boolean
   /** Ok/failed as reported by the driver. */
   ok: boolean
+  /**
+   * Extra detail line(s) for the audit view: e.g. the value typed into a field
+   * (masked for secrets), the button/link label clicked, the option selected,
+   * or the URL opened. One detail per array element, shown as sub-lines.
+   */
+  detail?: string[]
 }
 
 /**

@@ -46,7 +46,7 @@ import {
   getSkill,
 } from '../lib/storage'
 import { isSamePage } from '../lib/pages'
-import type { AgentMode, PasswordEntry, Skill, UserProfile } from '../lib/types'
+import { entryFields, findField, type AgentMode, type PasswordEntry, type Skill, type UserProfile } from '../lib/types'
 import type { Op, OpResult, Target } from '../lib/ops'
 import {
   DriverError,
@@ -377,7 +377,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'list_secrets',
       description:
-        'List saved credentials/identities by label, URL, and username (NOT the password values). Use to find the right entry before calling get_secret. Read-only.',
+        'List saved credential bundles by label and URL, with the names of their fields (e.g. username, password, cvv) — NOT the secret values. Use to find the right entry and field name before calling get_secret. Read-only.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -386,11 +386,12 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'get_secret',
       description:
-        'Fill a password field using a saved credential, identified by its id. The user must approve; the password is filled directly and never shown to you. Pair this with fill for the username if needed.',
+        "Fill a field using a saved credential bundle identified by its id. Pass 'field' to choose which value (e.g. 'username' or 'password'); it defaults to 'password'. The user must approve; the value is filled directly and never shown to you.",
       parameters: {
         type: 'object',
         properties: {
           id: { type: 'string', description: 'The id from list_secrets.' },
+          field: { type: 'string', description: "Field name to fill (defaults to 'password')." },
           target: TARGET_SCHEMA,
           label: { type: 'string' },
         },
@@ -534,6 +535,7 @@ async function recordAction(
   host: string | undefined,
   approved: boolean,
   ok: boolean,
+  detail?: string[],
 ): Promise<void> {
   try {
     await addHistory({
@@ -545,6 +547,7 @@ async function recordAction(
       ...(host ? { host } : {}),
       approved,
       ok,
+      ...(detail && detail.length > 0 ? { detail } : {}),
     })
   } catch {
     /* non-fatal */
@@ -557,6 +560,65 @@ interface ToolContext {
   navigated: boolean
   /** The most recently read URL; used to attach history hosts. */
   lastUrl?: string
+}
+
+/**
+ * Builds detailed audit lines beyond the one-line summary: the element label
+ * interacted with, what was typed/selected, and the URL opened, etc. Secret
+ * values (get_secret / a field marked secret) are masked so the audit log never
+ * stores a password in plain text.
+ */
+function describeDetail(name: string, args: Record<string, unknown>, output?: string): string[] {
+  const lines: string[] = []
+  const target = asTarget(args.target)
+  const element =
+    typeof args.label === 'string'
+      ? args.label
+      : target?.label ?? describeTarget(target)
+  if (element && element !== 'element') lines.push(`Element: ${element}`)
+
+  switch (name) {
+    case 'click':
+      // Nothing beyond the element label.
+      break
+    case 'fill': {
+      const value = typeof args.value === 'string' ? args.value : ''
+      const shown = value.length > 80 ? `${value.slice(0, 80)}…` : value
+      lines.push(`Typed: "${shown}"`)
+      break
+    }
+    case 'select_option':
+      lines.push(`Selected: ${JSON.stringify(args.value)}`)
+      break
+    case 'set_checkbox':
+      lines.push(`Set to: ${args.value === false ? 'unchecked' : 'checked'}`)
+      break
+    case 'press_key':
+      if (args.key) lines.push(`Key: ${String(args.key)}`)
+      break
+    case 'open_url':
+    case 'tab_new':
+      if (args.url) lines.push(`URL: ${String(args.url)}`)
+      break
+    case 'tab_switch':
+      lines.push(`Tab index: ${Number(args.index ?? 0)}`)
+      break
+    case 'get_secret':
+      lines.push(`Field: ${typeof args.field === 'string' ? args.field : 'password'}`)
+      lines.push('Value: •••••••• (hidden)')
+      break
+  }
+
+  if (output) {
+    try {
+      const parsed = JSON.parse(output) as { error?: string; url?: string }
+      if (parsed.error) lines.push(`Result: ${parsed.error}`)
+      else if (parsed.url) lines.push(`Now at: ${parsed.url}`)
+    } catch {
+      /* not JSON */
+    }
+  }
+  return lines
 }
 
 /** Produces the human-readable summary shown on the confirmation card. */
@@ -605,7 +667,9 @@ function describeAction(name: string, args: Record<string, unknown>): string {
     case 'tab_close':
       return 'Close the active tab'
     case 'get_secret':
-      return `Fill the password field ${targetLabel} using a saved credential`
+      return `Fill ${targetLabel} with saved credential${
+        typeof args.field === 'string' && args.field ? ` (${args.field})` : ''
+      }`
     default:
       return name
   }
@@ -770,19 +834,26 @@ async function executeTool(
     }
 
     case 'get_secret': {
-      // Fills directly; the model never receives the password.
+      // Fills directly; the model never receives the secret value. Supports
+      // both the legacy id-only form and an optional field name (e.g. fill
+      // just the "username" or "password" field of a multi-field entry).
       const id = String(args.id ?? '')
+      const fieldName = typeof args.field === 'string' ? args.field : undefined
       const target = asTarget(args.target)
       if (!target) return JSON.stringify({ error: 'get_secret requires a target.' })
       const secret = await resolveSecret(id)
       if (!secret) return JSON.stringify({ error: 'Saved credential not found.' })
+      const field = fieldName
+        ? findField(secret, fieldName)
+        : findField(secret, 'password') ?? entryFields(secret)[0]
+      if (!field) return JSON.stringify({ error: `No "${fieldName ?? 'password'}" field in this credential.` })
       const result = await execOnActiveTab({
         action: 'fill',
         target,
-        value: secret.password,
+        value: field.value,
       })
       void recordPasswordUse(secret.id).catch(() => {})
-      return afterAction(result, ctx, { filled: true, using: secret.label })
+      return afterAction(result, ctx, { filled: true, using: `${secret.label}:${field.key}` })
     }
 
     case 'get_my_profile': {
@@ -797,7 +868,7 @@ async function executeTool(
           id: entry.id,
           label: entry.label,
           ...(entry.url ? { url: entry.url } : {}),
-          ...(entry.username ? { username: entry.username } : {}),
+          fields: entryFields(entry).map((f) => ({ key: f.key, secret: !!f.secret })),
           useCount: entry.useCount,
         })),
       )
@@ -1060,6 +1131,7 @@ async function runOneToolCall(
       ctx.lastUrl ? hostOf(ctx.lastUrl) : undefined,
       false,
       false,
+      describeDetail(name, args),
     )
     return
   }
@@ -1097,6 +1169,7 @@ async function runOneToolCall(
           ctx.lastUrl ? hostOf(ctx.lastUrl) : undefined,
           false,
           false,
+          describeDetail(name, args),
         )
         return
       }
@@ -1122,6 +1195,7 @@ async function runOneToolCall(
       ctx.lastUrl ? hostOf(ctx.lastUrl) : undefined,
       approved,
       ok,
+      describeDetail(name, args, output),
     )
   } catch (error) {
     const message =
@@ -1139,6 +1213,7 @@ async function runOneToolCall(
       ctx.lastUrl ? hostOf(ctx.lastUrl) : undefined,
       approved,
       false,
+      [...describeDetail(name, args), `Error: ${message}`],
     )
   }
 }

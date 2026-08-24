@@ -1530,3 +1530,228 @@ textarea {
   background: var(--warn-surface);
   color: var(--warn);
 }
+
+/* --- Secret key/value editor ---------------------------------------------- */
+
+.kv-fields {
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--sunken);
+}
+
+.kv-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.kv-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.kv-row:last-child {
+  margin-bottom: 0;
+}
+
+.kv-key {
+  width: 38%;
+  flex: none;
+}
+
+.kv-value {
+  flex: 1;
+  min-width: 0;
+}
+
+.kv-secret {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  flex: none;
+}
+
+.kv-secret input {
+  width: auto;
+  flex: none;
+}
+
+.kv-remove {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  line-height: 1;
+  font-size: 16px;
+}
+
+.secret-fields {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.secret-field {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.secret-field-key {
+  min-width: 80px;
+  color: var(--muted);
+}
+
+.secret-field code {
+  word-break: break-all;
+}
+
+/* --- Grouped action history ------------------------------------------------ */
+
+.history-group {
+  padding: 0;
+  overflow: hidden;
+}
+
+.history-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.history-group-head:hover {
+  background: var(--hover-wash);
+}
+
+.history-caret {
+  color: var(--muted);
+  width: 12px;
+}
+
+.history-group-title {
+  flex: 1;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-count {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--chip);
+  color: var(--muted);
+}
+
+.history-stat {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.history-stat-ok {
+  color: var(--ok);
+}
+
+.history-stat-err {
+  color: var(--err);
+}
+
+.history-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.history-step {
+  border-left: 2px solid var(--border);
+  padding: 4px 0 4px 10px;
+}
+
+.history-step-ok {
+  border-left-color: var(--ok);
+}
+
+.history-step-err {
+  border-left-color: var(--err);
+}
+
+.history-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.history-step-time {
+  white-space: nowrap;
+}
+
+.history-host {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-declined {
+  color: var(--warn);
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+.history-delete {
+  margin-left: auto;
+  padding: 0 6px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.history-summary {
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.history-detail {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--sunken);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  word-break: break-word;
+}
+
+.history-detail li {
+  color: var(--muted);
+}

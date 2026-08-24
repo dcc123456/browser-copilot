@@ -8,7 +8,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { sendCommand } from '../lib/messages'
 import { newId } from '../lib/storage'
-import type { HistoryEntry, PasswordEntry, UserProfile } from '../lib/types'
+import type { ConversationMeta, HistoryEntry, PasswordEntry, UserProfile } from '../lib/types'
+import { entryFields } from '../lib/types'
 import { useT } from './i18n'
 
 type Section = 'profiles' | 'passwords' | 'history'
@@ -27,7 +28,11 @@ function emptyPassword(): PasswordEntry {
   return {
     id: newId(),
     label: '',
-    password: '',
+    url: '',
+    fields: [
+      { key: 'username', value: '' },
+      { key: 'password', value: '', secret: true },
+    ],
     createdAt: Date.now(),
     updatedAt: Date.now(),
     useCount: 0,
@@ -69,6 +74,7 @@ export default function DataTab() {
   const [profiles, setProfiles] = useState<UserProfile[] | null>(null)
   const [passwords, setPasswords] = useState<PasswordEntry[] | null>(null)
   const [history, setHistory] = useState<HistoryEntry[] | null>(null)
+  const [conversations, setConversations] = useState<ConversationMeta[]>([])
 
   const [profileDraft, setProfileDraft] = useState<UserProfile | null>(null)
   const [customText, setCustomText] = useState('')
@@ -92,12 +98,17 @@ export default function DataTab() {
     const result = await sendCommand({ type: 'history.list' })
     if (result.type === 'history.list') setHistory(result.entries)
   }, [])
+  const loadConversations = useCallback(async () => {
+    const result = await sendCommand({ type: 'conversations.list' })
+    if (result.type === 'conversations.list') setConversations(result.conversations)
+  }, [])
 
   useEffect(() => {
     void loadProfiles().catch((error) => flash('error', (error as Error).message))
     void loadPasswords().catch((error) => flash('error', (error as Error).message))
     void loadHistory().catch((error) => flash('error', (error as Error).message))
-  }, [loadProfiles, loadPasswords, loadHistory])
+    void loadConversations().catch(() => {})
+  }, [loadProfiles, loadPasswords, loadHistory, loadConversations])
 
   const startProfile = (profile?: UserProfile): void => {
     // Coerce every known field to a string defensively. A panel/worker version
@@ -152,8 +163,13 @@ export default function DataTab() {
 
   const savePassword = async (): Promise<void> => {
     if (!passwordDraft) return
-    if (!(passwordDraft.label ?? '').trim() || !passwordDraft.password) {
-      flash('error', `${t.dataPasswordLabel}, ${t.dataPasswordValue}`)
+    if (!(passwordDraft.label ?? '').trim()) {
+      flash('error', t.dataSecretLabel)
+      return
+    }
+    const hasValue = passwordDraft.fields.some((f) => f.key.trim() && f.value)
+    if (!hasValue) {
+      flash('error', t.dataSecretFieldValue)
       return
     }
     try {
@@ -202,7 +218,7 @@ export default function DataTab() {
               {id === 'profiles'
                 ? t.dataProfiles
                 : id === 'passwords'
-                  ? t.dataPasswords
+                  ? t.dataSecrets
                   : t.dataHistory}
             </button>
           ))}
@@ -245,6 +261,7 @@ export default function DataTab() {
         <HistorySection
           t={t}
           history={history}
+          conversations={conversations}
           onDelete={removeHistory}
           onClear={clearAllHistory}
         />
@@ -411,15 +428,29 @@ function PasswordsSection({
   onSave,
   onCancel,
 }: PasswordsProps) {
+  const updateField = (index: number, patch: Partial<{ key: string; value: string; secret: boolean }>): void => {
+    if (!draft) return
+    const fields = draft.fields.map((f, i) => (i === index ? { ...f, ...patch } : f))
+    onDraftChange({ ...draft, fields })
+  }
+  const addField = (): void => {
+    if (!draft) return
+    onDraftChange({ ...draft, fields: [...draft.fields, { key: '', value: '' }] })
+  }
+  const removeField = (index: number): void => {
+    if (!draft) return
+    onDraftChange({ ...draft, fields: draft.fields.filter((_, i) => i !== index) })
+  }
+
   return (
     <>
       <div className="card">
-        <div className="card-title">{t.dataPasswords}</div>
-        <p className="hint">{t.dataPasswordsIntro}</p>
+        <div className="card-title">{t.dataSecrets}</div>
+        <p className="hint">{t.dataSecretsIntro}</p>
         {!draft && (
           <div className="actions">
             <button className="primary" onClick={onStart} type="button">
-              {t.dataAddPassword}
+              {t.dataAddSecret}
             </button>
           </div>
         )}
@@ -430,39 +461,66 @@ function PasswordsSection({
 
       {draft && (
         <div className="card">
-          <div className="card-title">{draft.label.trim() || t.dataAddPassword}</div>
+          <div className="card-title">{draft.label.trim() || t.dataAddSecret}</div>
           <label className="field">
-            <span>{t.dataPasswordLabel}</span>
+            <span>{t.dataSecretLabel}</span>
             <input
               onChange={(event) => onDraftChange({ ...draft, label: event.target.value })}
               value={draft.label}
             />
           </label>
           <label className="field">
-            <span>{t.dataPasswordUrl}</span>
+            <span>{t.dataSecretUrl}</span>
             <input
               onChange={(event) => onDraftChange({ ...draft, url: event.target.value })}
               placeholder="https://example.com"
               value={draft.url ?? ''}
             />
           </label>
-          <label className="field">
-            <span>{t.dataPasswordUsername}</span>
-            <input
-              autoComplete="off"
-              onChange={(event) => onDraftChange({ ...draft, username: event.target.value })}
-              value={draft.username ?? ''}
-            />
-          </label>
-          <label className="field">
-            <span>{t.dataPasswordValue}</span>
-            <input
-              autoComplete="new-password"
-              onChange={(event) => onDraftChange({ ...draft, password: event.target.value })}
-              type={reveal[draft.id] ? 'text' : 'password'}
-              value={draft.password}
-            />
-          </label>
+
+          <div className="kv-fields">
+            <div className="kv-head">
+              <span>{t.dataSecretFields}</span>
+              <button className="link" onClick={addField} type="button">
+                + {t.dataSecretAddField}
+              </button>
+            </div>
+            {draft.fields.map((field, index) => (
+              <div className="kv-row" key={index}>
+                <input
+                  aria-label={t.dataSecretFieldKey}
+                  className="kv-key"
+                  onChange={(event) => updateField(index, { key: event.target.value })}
+                  placeholder={t.dataSecretFieldKey}
+                  value={field.key}
+                />
+                <input
+                  aria-label={t.dataSecretFieldValue}
+                  autoComplete="new-password"
+                  className="kv-value"
+                  onChange={(event) => updateField(index, { value: event.target.value })}
+                  type={field.secret && !reveal[draft.id] ? 'password' : 'text'}
+                  value={field.value}
+                />
+                <label className="kv-secret" title={t.dataSecretMaskValue}>
+                  <input
+                    checked={!!field.secret}
+                    onChange={(event) => updateField(index, { secret: event.target.checked })}
+                    type="checkbox"
+                  />
+                </label>
+                <button
+                  aria-label={t.delete}
+                  className="danger kv-remove"
+                  onClick={() => removeField(index)}
+                  type="button"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+
           <label className="checkbox">
             <input
               checked={!!reveal[draft.id]}
@@ -470,14 +528,6 @@ function PasswordsSection({
               type="checkbox"
             />
             <span>{t.dataShowPassword}</span>
-          </label>
-          <label className="field">
-            <span>{t.dataPasswordNotes}</span>
-            <textarea
-              onChange={(event) => onDraftChange({ ...draft, notes: event.target.value })}
-              rows={2}
-              value={draft.notes ?? ''}
-            />
           </label>
           <div className="actions">
             <button className="primary" onClick={() => void onSave()} type="button">
@@ -491,7 +541,7 @@ function PasswordsSection({
       )}
 
       {passwords && passwords.length === 0 && !draft && (
-        <div className="empty">{t.dataPasswordsEmpty}</div>
+        <div className="empty">{t.dataSecretsEmpty}</div>
       )}
       {passwords?.map((entry) => (
         <div className="card" key={entry.id}>
@@ -502,14 +552,18 @@ function PasswordsSection({
             )}
           </div>
           {entry.url && <div className="meta">{entry.url}</div>}
-          {entry.username && <div className="meta">{entry.username}</div>}
-          <div className="meta">
-            <code>{reveal[entry.id] ? entry.password : '••••••••'}</code>{' '}
+          <ul className="secret-fields">
+            {entryFields(entry).map((field) => (
+              <li className="secret-field" key={field.key}>
+                <span className="secret-field-key">{field.key}</span>
+                <code>{field.secret && !reveal[entry.id] ? '••••••••' : field.value || '—'}</code>
+              </li>
+            ))}
+          </ul>
+          <div className="actions">
             <button onClick={() => onToggleReveal(entry.id)} type="button">
               {t.dataShowPassword}
             </button>
-          </div>
-          <div className="actions">
             <button onClick={() => onEdit(entry)} type="button">
               {t.edit}
             </button>
@@ -528,11 +582,45 @@ function PasswordsSection({
 interface HistoryProps {
   t: ReturnType<typeof useT>
   history: HistoryEntry[] | null
+  conversations: ConversationMeta[]
   onDelete: (id: string) => void
   onClear: () => void
 }
 
-function HistorySection({ t, history, onDelete, onClear }: HistoryProps) {
+interface HistoryGroup {
+  key: string
+  title: string
+  entries: HistoryEntry[]
+}
+
+function groupHistory(
+  history: HistoryEntry[],
+  conversations: ConversationMeta[],
+): HistoryGroup[] {
+  const titleOf = (id: string): string => {
+    if (id.startsWith('task:')) return id.slice(5) || 'Scheduled task'
+    if (id.startsWith('feishu:')) return 'Feishu'
+    const meta = conversations.find((c) => c.id === id)
+    return meta?.title || id
+  }
+  const order: string[] = []
+  const map = new Map<string, HistoryEntry[]>()
+  for (const entry of history) {
+    const key = entry.conversationId || 'unknown'
+    if (!map.has(key)) {
+      map.set(key, [])
+      order.push(key)
+    }
+    map.get(key)!.push(entry)
+  }
+  // history is already newest-first; groups follow their newest entry.
+  return order.map((key) => ({ key, title: titleOf(key), entries: map.get(key)! }))
+}
+
+function HistorySection({ t, history, conversations, onDelete, onClear }: HistoryProps) {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const groups = history ? groupHistory(history, conversations) : []
+
   return (
     <>
       <div className="card">
@@ -547,38 +635,57 @@ function HistorySection({ t, history, onDelete, onClear }: HistoryProps) {
         )}
       </div>
       {history && history.length === 0 && <div className="empty">{t.dataHistoryEmpty}</div>}
-      {history?.map((entry) => (
-        <div className="card" key={entry.id} data-ok={entry.ok}>
-          <div className="card-head">
-            <span className="card-title">
-              <span
-                style={{
-                  display: 'inline-block',
-                  width: 8,
-                  height: 8,
-                  borderRadius: 8,
-                  background: entry.ok ? '#3a8' : '#e55',
-                  marginRight: 8,
-                }}
-              />
-              {entry.summary || entry.action}
-            </span>
-            <span className="meta">{formatWhen(entry.at)}</span>
-          </div>
-          {(entry.host || entry.conversationId) && (
-            <div className="meta">
-              {entry.host ? entry.host : null}
-              {entry.host && entry.conversationId ? ' · ' : ''}
-              {entry.conversationId ? `${t.dataConversation}: ${entry.conversationId}` : ''}
-            </div>
-          )}
-          <div className="actions">
-            <button className="danger" onClick={() => void onDelete(entry.id)} type="button">
-              {t.delete}
+      {groups.map((group) => {
+        const okCount = group.entries.filter((e) => e.ok && e.approved).length
+        const failCount = group.entries.filter((e) => !e.ok).length
+        const isOpen = expanded[group.key] ?? false
+        return (
+          <div className="card history-group" key={group.key}>
+            <button
+              className="history-group-head"
+              onClick={() => setExpanded((prev) => ({ ...prev, [group.key]: !isOpen }))}
+              type="button"
+            >
+              <span className="history-caret">{isOpen ? '▾' : '▸'}</span>
+              <span className="history-group-title">{group.title}</span>
+              <span className="history-count">{group.entries.length}</span>
+              {failCount > 0 ? (
+                <span className="history-stat history-stat-err">{failCount} ✕</span>
+              ) : (
+                <span className="history-stat history-stat-ok">{okCount} ✓</span>
+              )}
             </button>
+            {isOpen && (
+              <ul className="history-steps">
+                {group.entries.map((entry) => (
+                  <li className={`history-step history-step-${entry.ok ? 'ok' : 'err'}`} key={entry.id}>
+                    <div className="history-step-head">
+                      <span className="history-step-time">{formatWhen(entry.at)}</span>
+                      {entry.host && <span className="history-host">{entry.host}</span>}
+                      {!entry.approved && <span className="history-declined">{t.dataDeclined}</span>}
+                      <button
+                        className="danger history-delete"
+                        onClick={() => void onDelete(entry.id)}
+                        type="button"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <div className="history-summary">{entry.summary || entry.action}</div>
+                    {entry.detail && entry.detail.length > 0 && (
+                      <ul className="history-detail">
+                        {entry.detail.map((line, i) => (
+                          <li key={i}>{line}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-        </div>
-      ))}
+        )
+      })}
     </>
   )
 }

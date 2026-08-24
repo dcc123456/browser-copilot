@@ -17,6 +17,7 @@ import type {
   ConversationMeta,
   HistoryEntry,
   PasswordEntry,
+  SecretField,
   Settings,
   Skill,
   UserProfile,
@@ -521,14 +522,32 @@ export async function deleteProfile(id: string): Promise<void> {
 function asPassword(value: unknown): PasswordEntry | null {
   if (!value || typeof value !== 'object') return null
   const entry = value as PasswordEntry
-  if (typeof entry.id !== 'string' || typeof entry.password !== 'string') return null
+  if (typeof entry.id !== 'string') return null
+
+  // Accept both the new `fields[]` shape and legacy single password. A legacy
+  // entry is valid as long as it has a password string; new entries only need
+  // a label (fields can be edited in afterwards).
+  const hasFields = Array.isArray(entry.fields) && entry.fields.length > 0
+  const hasLegacy = typeof entry.password === 'string'
+  if (!hasFields && !hasLegacy && typeof entry.label !== 'string') return null
+
+  const fields: SecretField[] = hasFields
+    ? entry.fields
+        .filter((f) => f && typeof f.key === 'string')
+        .map((f) => ({ key: f.key, value: String(f.value ?? ''), ...(f.secret ? { secret: true } : {}) }))
+    : hasLegacy
+      ? [
+          ...(entry.username ? [{ key: 'username', value: String(entry.username) }] : []),
+          { key: 'password', value: entry.password as string, secret: true },
+          ...(entry.notes ? [{ key: 'notes', value: String(entry.notes) }] : []),
+        ]
+      : []
+
   return {
     id: entry.id,
-    label: entry.label || 'Credential',
-    url: entry.url,
-    username: entry.username,
-    password: entry.password,
-    notes: entry.notes,
+    label: typeof entry.label === 'string' && entry.label ? entry.label : 'Credential',
+    ...(typeof entry.url === 'string' ? { url: entry.url } : {}),
+    fields,
     createdAt: typeof entry.createdAt === 'number' ? entry.createdAt : Date.now(),
     updatedAt: typeof entry.updatedAt === 'number' ? entry.updatedAt : Date.now(),
     useCount: typeof entry.useCount === 'number' ? entry.useCount : 0,
@@ -553,7 +572,21 @@ export async function listPasswords(): Promise<PasswordEntry[]> {
 export async function savePassword(entry: PasswordEntry): Promise<void> {
   const list = await listPasswords()
   const index = list.findIndex((existing) => existing.id === entry.id)
-  const normalized: PasswordEntry = { ...entry, updatedAt: Date.now() }
+  // Normalise: keep only well-formed fields, drop empty keys, and never persist
+  // the deprecated legacy columns once an entry is in the new shape.
+  const fields = (entry.fields ?? [])
+    .filter((f) => f && f.key.trim() !== '')
+    .map((f) => ({ key: f.key.trim(), value: f.value, ...(f.secret ? { secret: true } : {}) }))
+  const normalized: PasswordEntry = {
+    id: entry.id,
+    label: entry.label?.trim() || 'Credential',
+    ...(entry.url?.trim() ? { url: entry.url.trim() } : {}),
+    fields,
+    createdAt: entry.createdAt ?? Date.now(),
+    updatedAt: Date.now(),
+    useCount: entry.useCount ?? 0,
+    ...(typeof entry.lastUsedAt === 'number' ? { lastUsedAt: entry.lastUsedAt } : {}),
+  }
   if (index === -1) list.push(normalized)
   else list[index] = normalized
   await chrome.storage.local.set({ [KEY_PASSWORDS]: list })
@@ -596,6 +629,9 @@ function asHistory(value: unknown): HistoryEntry | null {
     host: typeof entry.host === 'string' ? entry.host : undefined,
     approved: entry.approved !== false,
     ok: entry.ok !== false,
+    detail: Array.isArray(entry.detail)
+      ? entry.detail.filter((d): d is string => typeof d === 'string')
+      : undefined,
   }
 }
 

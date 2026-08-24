@@ -17,10 +17,13 @@ import { useT } from './i18n'
 /** Editable form state. */
 type Draft = ScheduledTask
 
-function emptyTask(kind: ScheduledTask['kind'] = 'github-review-requests'): Draft {
+function emptyTask(): Draft {
+  // Every new task is a free-form agent prompt. The built-in GitHub review task
+  // is created/edited from its own entry; the editor does not need a type picker
+  // because the prompt is what the user actually writes.
   return createDraft({
-    name: kind === 'github-review-requests' ? 'PRs to review' : '',
-    kind,
+    name: '',
+    kind: 'agent-prompt',
     schedule: { kind: 'daily', hour: 10, minute: 0 },
     prompt: '',
     notifyFeishu: false,
@@ -217,7 +220,7 @@ export default function TasksTab() {
           <button
             className="primary section-action"
             disabled={busy}
-            onClick={() => setDraft(emptyTask('github-review-requests'))}
+            onClick={() => setDraft(emptyTask())}
             type="button"
           >
             + {t.taskNew}
@@ -377,37 +380,21 @@ function TaskEditor({
         <span>{t.taskName}</span>
         <input
           disabled={disabled}
-          onChange={(event) => update('name', event.target.value)}
+          onChange={(event) => onChange({ ...draft, name: event.target.value })}
           value={draft.name}
         />
       </label>
 
       <label className="field">
-        <span>{t.taskKind}</span>
-        <select
+        <span>{t.taskPrompt}</span>
+        <textarea
           disabled={disabled}
-          onChange={(event) =>
-            update('kind', event.target.value as ScheduledTask['kind'])
-          }
-          value={draft.kind}
-        >
-          <option value="github-review-requests">{t.taskKindGithub}</option>
-          <option value="agent-prompt">{t.taskKindPrompt}</option>
-        </select>
+          onChange={(event) => onChange({ ...draft, prompt: event.target.value })}
+          placeholder={t.taskPromptHint}
+          rows={5}
+          value={draft.prompt ?? ''}
+        />
       </label>
-
-      {draft.kind === 'agent-prompt' && (
-        <label className="field">
-          <span>{t.taskPrompt}</span>
-          <textarea
-            disabled={disabled}
-            onChange={(event) => update('prompt', event.target.value)}
-            placeholder={t.taskPromptHint}
-            rows={4}
-            value={draft.prompt ?? ''}
-          />
-        </label>
-      )}
 
       <fieldset className="field">
         <legend>{t.taskSchedule}</legend>

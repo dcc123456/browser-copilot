@@ -266,6 +266,17 @@ export interface Messages {
   dataPasswordValue: string
   dataPasswordNotes: string
   dataPasswordStorageNote: string
+  dataSecrets: string
+  dataSecretsIntro: string
+  dataSecretsEmpty: string
+  dataAddSecret: string
+  dataSecretLabel: string
+  dataSecretUrl: string
+  dataSecretFields: string
+  dataSecretAddField: string
+  dataSecretFieldKey: string
+  dataSecretFieldValue: string
+  dataSecretMaskValue: string
   dataShowPassword: string
   dataHistory: string
   dataHistoryIntro: string
@@ -273,6 +284,7 @@ export interface Messages {
   dataClearHistory: string
   dataHistoryWhen: string
   dataConversation: string
+  dataDeclined: string
   dataUsed: (params: { count: number }) => string
 
   // Conversations
@@ -532,7 +544,19 @@ const en: Messages = {
   dataPasswordNotes: 'Notes (optional)',
   dataPasswordStorageNote:
     'Credentials are stored in this extension\'s local storage on this machine (never synced). Anyone with access to your browser profile can read them — do not save high-value passwords on a shared device.',
-  dataShowPassword: 'Show',
+  dataSecrets: 'Secrets & fields',
+  dataSecretsIntro:
+    'Store any key/value credentials the agent can fill into forms (username, password, CVV, security answers, etc.). Add as many fields as a site needs.',
+  dataSecretsEmpty: 'No secrets yet. Add one to let the agent fill login fields.',
+  dataAddSecret: 'Add secret',
+  dataSecretLabel: 'Label (e.g. GitHub, Work)',
+  dataSecretUrl: 'Site URL (optional)',
+  dataSecretFields: 'Fields',
+  dataSecretAddField: 'Add field',
+  dataSecretFieldKey: 'Field name',
+  dataSecretFieldValue: 'Value',
+  dataSecretMaskValue: 'Mask as password',
+  dataShowPassword: 'Show / hide',
   dataHistory: 'Action history',
   dataHistoryIntro:
     'A log of every page action the agent performed, so you can review or delete what happened.',
@@ -540,6 +564,7 @@ const en: Messages = {
   dataClearHistory: 'Clear all',
   dataHistoryWhen: 'When',
   dataConversation: 'Conversation',
+  dataDeclined: 'declined',
   dataUsed: ({ count }) => `used ${count}×`,
 
   convTitle: 'Conversations',
@@ -788,13 +813,26 @@ const zhCN: Messages = {
   dataPasswordNotes: '备注（可选）',
   dataPasswordStorageNote:
     '凭据仅保存在本机此扩展的本地存储中（不会同步）。任何能访问你浏览器配置的人都可以读取——请勿在共用设备上保存高价值密码。',
-  dataShowPassword: '显示',
+  dataSecrets: '密钥与字段',
+  dataSecretsIntro:
+    '保存任意键值对凭据，智能体可填入表单（用户名、密码、CVV、安全问题答案等）。一个站点需要多少字段就加多少。',
+  dataSecretsEmpty: '还没有密钥。添加后即可让智能体填写登录字段。',
+  dataAddSecret: '添加密钥',
+  dataSecretLabel: '名称（如：GitHub、工作）',
+  dataSecretUrl: '站点 URL（可选）',
+  dataSecretFields: '字段',
+  dataSecretAddField: '添加字段',
+  dataSecretFieldKey: '字段名',
+  dataSecretFieldValue: '值',
+  dataSecretMaskValue: '作为密码隐藏',
+  dataShowPassword: '显示 / 隐藏',
   dataHistory: '操作记录',
   dataHistoryIntro: '助手在网页上执行过的每一步操作记录，可随时查看或删除。',
   dataHistoryEmpty: '暂无操作记录。',
   dataClearHistory: '全部清空',
   dataHistoryWhen: '时间',
   dataConversation: '会话',
+  dataDeclined: '已拒绝',
   dataUsed: ({ count }) => `已使用 ${count} 次`,
 
   convTitle: '会话',
