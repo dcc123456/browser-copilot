@@ -191,3 +191,35 @@ export async function sendImText(
     throw new FeishuError(data.msg ?? `Feishu send failed (HTTP ${response.status})`, data.code ?? response.status)
   }
 }
+
+/**
+ * Obtains a time-limited WebSocket endpoint for the long-connection mode.
+ *
+ * The URL already carries a one-time `token`; the returned clientId must be
+ * echoed in the handshake. Token is obtained from the tenant token provider
+ * rather than being accepted as a raw string, so the app secret never leaves
+ * this module.
+ */
+export async function getWsEndpoint(
+  tokenProvider: TenantTokenProvider,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ url: string; clientId: string; heartbeatSeconds: number; token: string }> {
+  // parseEndpointResponse is kept in feishu-proto to avoid a cycle; import here
+  // lazily to keep the modules decoupled.
+  const { parseEndpointResponse } = await import('./feishu-proto')
+  const token = await tokenProvider.get()
+  const response = await fetchImpl(
+    'https://open.feishu.cn/open-apis/callback/ws/endpoint',
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    },
+  )
+  const json = (await response.json()) as unknown
+  return parseEndpointResponse(json)
+}
+

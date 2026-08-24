@@ -62,7 +62,7 @@ import {
   saveTask,
 } from '../lib/task-store'
 import { rescheduleAll, scheduleTask, triggerNow, onAlarm } from './scheduler'
-import { FeishuBot } from './feishu-bot'
+import { FeishuBot, FEISHU_WATCHDOG_ALARM } from './feishu-bot'
 import { isWebhookUrl, sendWebhookText } from '../lib/feishu'
 
 // --- Lifecycle ---------------------------------------------------------------
@@ -83,8 +83,16 @@ chrome.runtime.onStartup.addListener(() => {
   void feishuBot.reconcile()
 })
 
-// Fires for task alarms; registered synchronously so an alarm wake is received.
-chrome.alarms.onAlarm.addListener(onAlarm)
+// Fires for task alarms and the Feishu watchdog. Registered synchronously so an
+// alarm wake is received even on a cold worker; the bot instance is declared
+// below but the closure only runs when an alarm actually fires.
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === FEISHU_WATCHDOG_ALARM) {
+    feishuBot.onWatchdog()
+    return
+  }
+  onAlarm(alarm)
+})
 
 /** Single long-lived Feishu bot connection (reconnects internally). */
 const feishuBot = new FeishuBot()

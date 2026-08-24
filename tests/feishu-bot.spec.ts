@@ -1,23 +1,227 @@
-import { describe, expect, it } from 'vitest'
-import { isCommand } from '../src/background/feishu-bot'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { FeishuBot } from '../src/background/feishu-bot'
+import { encodeFrame, FRAME, HANDSHAKE_METHOD, encodePong } from '../src/lib/feishu-proto'
 
-describe('isCommand', () => {
-  it('recognises review-PR intents in both languages', () => {
-    expect(isCommand('帮我统计github中有多少pr需要我review')).toBe(true)
-    expect(isCommand('how many PRs need my review')).toBe(true)
-    expect(isCommand('review pr')).toBe(true)
+// Mock the task-store and scheduler so the bot's event routing has no side
+// effects; this test focuses purely on the connection state machine.
+vi.mock('../src/lib/task-store', () => ({
+  getFeishuConfig: vi.fn(async () => ({
+    webhookUrl: '',
+    webhookSecret: '',
+    appId: 'cli_test',
+    appSecret: 'sec_test',
+    botEnabled: true,
+  })),
+  listTasks: vi.fn(async () => []),
+}))
+vi.mock('../src/background/scheduler', () => ({
+  triggerNow: vi.fn(async () => ({ ok: true, summary: 'done', error: null, skipped: false })),
+}))
+
+/** Fake alarm API that records created alarms so the test can fire them. */
+function fakeAlarms() {
+  const alarms = new Map<string, { periodInMinutes?: number }>()
+  return {
+    alarms,
+    api: {
+      create: vi.fn(async (name: string, info: { periodInMinutes?: number }) => {
+        alarms.set(name, info)
+      }),
+      clear: vi.fn(async (name: string) => alarms.delete(name)),
+    },
+  }
+}
+
+function fakeResponse(json: unknown): Response {
+  return new Response(JSON.stringify(json), { status: 200 })
+}
+
+/** A controllable fake WebSocket. */
+class FakeSocket {
+  static last: FakeSocket | null = null
+  static failOpen = false
+  static openEndpoint = ''
+  static createdCount = 0
+  binaryType = ''
+  readyState = 0
+  onopen: ((ev: unknown) => void) | null = null
+  onmessage: ((ev: unknown) => void) | null = null
+  onclose: ((ev: unknown) => void) | null = null
+  onerror: ((ev: unknown) => void) | null = null
+  sent: Uint8Array[] = []
+  closed = false
+  constructor(public url: string) {
+    FakeSocket.last = this
+    FakeSocket.createdCount += 1
+    FakeSocket.openEndpoint = url
+  }
+  send(data: Uint8Array): void {
+    this.sent.push(data)
+  }
+  close(): void {
+    this.closed = true
+  }
+  // Test helpers to drive the socket.
+  open(): void {
+    this.readyState = 1
+    this.onopen?.({})
+  }
+  message(data: Uint8Array): void {
+    this.onmessage?.({ data })
+  }
+  closeEvent(code = 1006, reason = ''): void {
+    this.readyState = 3
+    this.onclose?.({ code, reason })
+  }
+  static reset(): void {
+    FakeSocket.last = null
+    FakeSocket.failOpen = false
+    FakeSocket.openEndpoint = ''
+    FakeSocket.createdCount = 0
+  }
+}
+
+const ENDPOINT_JSON = {
+  code: 0,
+  data: {
+    WebSocket: { URL: 'wss://msg-frontier.feishu.cn/ws/v2?token=tok123' },
+    ClientId: 'cid-abc',
+    HeartbeatInterval: 120,
+  },
+}
+
+const TOKEN_JSON = { code: 0, tenant_access_token: 't-ten', expire: 7200 }
+
+describe('FeishuBot connection state machine', () => {
+  beforeEach(() => {
+    FakeSocket.reset()
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
-  it('recognises generic task-run and status intents', () => {
-    expect(isCommand('run task 日报')).toBe(true)
-    expect(isCommand('执行任务')).toBe(true)
-    expect(isCommand('status')).toBe(true)
-    expect(isCommand('状态')).toBe(true)
+  function makeBot(): { bot: FeishuBot; alarms: ReturnType<typeof fakeAlarms> } {
+    const alarms = fakeAlarms()
+    ;(globalThis as { chrome: unknown }).chrome = {
+      runtime: { getPlatformInfo: vi.fn(async () => ({})) },
+      alarms: alarms.api,
+    }
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/tenant_access_token')) return fakeResponse(TOKEN_JSON)
+      if (url.includes('/callback/ws/endpoint')) return fakeResponse(ENDPOINT_JSON)
+      if (url.includes('/im/v1/messages')) return fakeResponse({ code: 0 })
+      return new Response('{}', { status: 200 })
+    })
+    const bot = new FeishuBot(fetchMock as unknown as typeof fetch, FakeSocket as never)
+    return { bot, alarms }
+  }
+
+  it('resolves an endpoint, opens a socket, and sends a handshake on open', async () => {
+    const { bot } = makeBot()
+    void bot.reconcile()
+    // Let the endpoint HTTP call resolve.
+    await vi.runAllTimersAsync()
+    const socket = FakeSocket.last!
+    expect(socket).toBeTruthy()
+    expect(socket.url).toContain('token=tok123')
+    socket.open()
+    // The first frame sent must be a request frame with the handshake method.
+    const first = socket.sent[0]!
+    expect(first[1]).toBe(FRAME.REQUEST)
+    const payload = new TextDecoder().decode(first.slice(8 + 2)) // skip header + tag for seq
+    expect(payload).toContain(HANDSHAKE_METHOD)
+    bot.stop()
   })
 
-  it('ignores unrelated chatter', () => {
-    expect(isCommand('今天天气怎么样')).toBe(false)
-    expect(isCommand('hello there')).toBe(false)
-    expect(isCommand('')).toBe(false)
+  it('treats a code-0 response frame as a successful handshake', async () => {
+    const { bot } = makeBot()
+    void bot.reconcile()
+    await vi.runAllTimersAsync()
+    const socket = FakeSocket.last!
+    socket.open()
+    // Build a response frame: field 2 (code) varint = 0.
+    const okPayload = new Uint8Array([(2 << 3) | 0, 0])
+    socket.message(encodeFrame(FRAME.RESPONSE, 1, okPayload))
+    expect(bot.isConnected()).toBe(true)
+    bot.stop()
+  })
+
+  it('replies to a ping with a pong echoing the sequence id', async () => {
+    const { bot } = makeBot()
+    void bot.reconcile()
+    await vi.runAllTimersAsync()
+    const socket = FakeSocket.last!
+    socket.open()
+    socket.message(encodeFrame(FRAME.RESPONSE, 1, new Uint8Array([(2 << 3) | 0, 0])))
+    // Server pings with seq 0xdeadbeef.
+    socket.message(encodeFrame(FRAME.PING, 0xdeadbeef, new Uint8Array()))
+    const pong = socket.sent[socket.sent.length - 1]!
+    const view = new DataView(pong.buffer)
+    expect(pong[1]).toBe(FRAME.PONG)
+    expect(view.getUint32(4, false)).toBe(0xdeadbeef)
+    // Sanity: our encoder agrees.
+    expect(pong).toEqual(encodePong(0xdeadbeef))
+    bot.stop()
+  })
+
+  it('reconnects with exponential backoff after an unexpected close', async () => {
+    const { bot } = makeBot()
+    void bot.reconcile()
+    await vi.runAllTimersAsync()
+    const first = FakeSocket.last!
+    first.open()
+    first.message(encodeFrame(FRAME.RESPONSE, 1, new Uint8Array([(2 << 3) | 0, 0])))
+    expect(bot.isConnected()).toBe(true)
+    first.closeEvent(1006)
+    expect(bot.isConnected()).toBe(false)
+    // No new socket yet: backoff is ~2s.
+    expect(FakeSocket.createdCount).toBe(1)
+    await vi.advanceTimersByTimeAsync(2_001)
+    await vi.runAllTimersAsync()
+    expect(FakeSocket.createdCount).toBe(2)
+    bot.stop()
+  })
+
+  it('arms a periodic watchdog alarm and reconnects when it fires while disconnected', async () => {
+    const { bot, alarms } = makeBot()
+    void bot.reconcile()
+    await vi.runAllTimersAsync()
+    expect(alarms.alarms.has('feishu-bot-watchdog')).toBe(true)
+    expect(alarms.alarms.get('feishu-bot-watchdog')!.periodInMinutes).toBe(1)
+    // Drop the socket without scheduling a reconnect (simulate a dead worker).
+    const socket = FakeSocket.last!
+    socket.closed = true
+    // Force the guard state to disconnected.
+    socket.closeEvent(1011, 'worker evicted')
+    // Burn the in-memory backoff timer to isolate the watchdog path.
+    await vi.advanceTimersByTimeAsync(30_000)
+    await vi.runAllTimersAsync()
+    const before = FakeSocket.createdCount
+    bot.onWatchdog()
+    await vi.runAllTimersAsync()
+    expect(FakeSocket.createdCount).toBeGreaterThan(before)
+    bot.stop()
+    expect(alarms.alarms.has('feishu-bot-watchdog')).toBe(false)
+  })
+
+  it('does nothing when the bot is disabled', async () => {
+    const alarms = fakeAlarms()
+    ;(globalThis as { chrome: unknown }).chrome = {
+      runtime: { getPlatformInfo: vi.fn(async () => ({})) },
+      alarms: alarms.api,
+    }
+    const store = await import('../src/lib/task-store')
+    vi.mocked(store.getFeishuConfig).mockResolvedValueOnce({
+      webhookUrl: '', webhookSecret: '', appId: '', appSecret: '', botEnabled: false,
+    })
+    const bot = new FeishuBot(
+      vi.fn(async () => new Response('{}')) as unknown as typeof fetch,
+      FakeSocket as never,
+    )
+    await bot.reconcile()
+    expect(FakeSocket.createdCount).toBe(0)
+    bot.onWatchdog()
+    expect(FakeSocket.createdCount).toBe(0)
   })
 })

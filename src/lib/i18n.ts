@@ -328,11 +328,11 @@ const en: Messages = {
   tasksFeishuAppId: 'App ID',
   tasksFeishuAppSecret: 'App secret',
   tasksFeishuBotHint:
-    'A self-built Feishu app with the long-connection mode. Works best while the browser is active; an idle browser may suspend the connection.',
+    'A self-built Feishu app with the long-connection mode. It reconnects automatically (exponential backoff) and resumes after the browser wakes up.',
   tasksFeishuTest: 'Send test message',
   tasksFeishuTestOk: 'Test message sent.',
   tasksFeishuBotWarn:
-    'Long-connection commands are best-effort in a browser extension. For always-on remote control, add a small relay server.',
+    'While the browser is fully idle or the machine is asleep, the extension cannot be reached; it reconnects within about a minute of waking. For truly always-on remote control, add a small relay server.',
   taskTemplateGithubName: 'PRs to review',
 
   save: 'Save',
@@ -574,11 +574,11 @@ const zhCN: Messages = {
   tasksFeishuAppId: 'App ID',
   tasksFeishuAppSecret: 'App Secret',
   tasksFeishuBotHint:
-    '需要一个开启了长连接模式的企业自建应用。浏览器活跃时最稳定；浏览器长期空闲时连接可能被挂起。',
+    '需要一个开启了长连接模式的企业自建应用。断线会自动重连（指数退避），浏览器唤醒后约一分钟内自动恢复连接。',
   tasksFeishuTest: '发送测试消息',
   tasksFeishuTestOk: '测试消息已发送。',
   tasksFeishuBotWarn:
-    '浏览器扩展中的长连接命令是尽力而为。若需要始终在线的远程控制，建议增加一个小型中继服务。',
+    '浏览器完全空闲或电脑睡眠时扩展无法被触达，唤醒后约一分钟内会自动重连。若需要真正始终在线的远程控制，建议增加一个小型中继服务。',
   taskTemplateGithubName: '待我 review 的 PR',
 
   save: '保存',
