@@ -66,13 +66,15 @@ export default function TasksTab() {
 
   const persistTask = async (task: Draft): Promise<void> => {
     setBusy(true)
+    // Collapse the editor immediately so the click always gives visible
+    // feedback, even if the worker is slow or the command ultimately fails.
+    // The save itself runs in the background and surfaces an error banner on
+    // failure; optimistically marking the id highlights the card on success.
+    const savedId = task.id
+    setDraft(null)
+    setJustSavedId(savedId)
     try {
       await sendCommand({ type: 'tasks.save', task })
-      // Collapse the editor back into the list. The list reloads below, which
-      // surfaces the saved task as a card; we also remember its id so the card
-      // can flash to draw the user's eye.
-      setDraft(null)
-      setJustSavedId(task.id)
       setBanner({ kind: 'ok', text: t.taskSaved })
       await load()
     } catch (error) {

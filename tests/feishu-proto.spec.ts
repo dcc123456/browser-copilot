@@ -99,7 +99,7 @@ describe('handshake', () => {
     expect(payload.ClientId).toBe('c')
   })
 
-  it('encodes the handshake with AppId at field 8 and Payload at field 6', () => {
+  it('encodes the handshake with AppId at field 7 and Payload at field 6', () => {
     const frame = encodeHandshake(3, 'cli_app', 'cid', 'tok')
     const msg = decodeMessage(decodeFrame(frame)!.payload)
     expect(msg.strings.get(2)).toBe('v2:handshake')
@@ -107,8 +107,8 @@ describe('handshake', () => {
     expect(payload.AppId).toBe('cli_app')
     expect(payload.ClientId).toBe('cid')
     expect(payload.Token).toBe('tok')
-    // AppId is also written to proto field 8 per Feishu's ClientStreamRequest.
-    expect(msg.strings.get(8)).toBe('cli_app')
+    // AppId is written to proto field 7 per Feishu's ClientStreamRequest.
+    expect(msg.strings.get(7)).toBe('cli_app')
     // No StreamSeqId in the proto body.
     expect(msg.varints.has(1)).toBe(false)
   })

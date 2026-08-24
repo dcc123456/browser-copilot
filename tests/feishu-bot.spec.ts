@@ -177,7 +177,7 @@ describe('FeishuBot connection state machine', () => {
     const body = JSON.parse(msg.strings.get(6)!)
     expect(body.ClientId).toBe('cid-abc')
     expect(body.Token).toBe('tok123')
-    expect(msg.strings.get(8)).toBe('cli_test')
+    expect(msg.strings.get(7)).toBe('cli_test')
     bot.stop()
   })
 

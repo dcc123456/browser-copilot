@@ -172,21 +172,24 @@ export function decodeMessage(bytes: Uint8Array): DecodedMessage {
 
 /**
  * Field numbers for Feishu's `ClientStreamRequest` proto:
- *   int64 StreamSeqId = 1;
- *   string Method      = 2;
- *   string LogID       = 3;
- *   bytes  Payload     = 6;
- *   string AppId       = 8;
+ *   int64  StreamSeqId = 1;
+ *   string Method       = 2;
+ *   string LogID        = 3;
+ *   bytes  Payload      = 6;
+ *   string AppId        = 7;
+ *   string InstanceId   = 8;
+ *   string ServiceId    = 9;
  *
- * We deliberately do NOT write StreamSeqId: the sequence is carried in the
- * binary frame header, and the published SDKs leave the proto field at its
- * zero value. Writing the payload to field 6 (not 8) is the fix that lets the
- * server actually parse the handshake and deliver events.
+ * We do NOT write StreamSeqId (the sequence lives in the binary frame header).
+ * Payload goes to field 6 and AppId to field 7 per the published SDKs; writing
+ * AppId to field 8 (InstanceId) is the bug that prevented the server from
+ * binding the connection to the app and delivering events.
  */
 const CLIENT_FIELD = {
   METHOD: 2,
   PAYLOAD: 6,
-  APP_ID: 8,
+  APP_ID: 7,
+  SERVICE_ID: 9,
 } as const
 
 /**

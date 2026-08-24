@@ -202,6 +202,7 @@ export class FeishuBot {
     // 1. Resolve a fresh endpoint. Feishu issues one-time tokens, so a stale URL
     //    from a previous connection must never be reused.
     const endpoint = await getWsEndpoint(this.tokens, this.fetchImpl)
+    console.info('[Browser Copilot] Feishu endpoint resolved; opening socket', endpoint.clientId)
 
     // 2. Open the socket. Wrap the event handlers so a synchronous throw during
     //    setup still schedules a reconnect rather than killing the worker.
@@ -213,8 +214,9 @@ export class FeishuBot {
       this.connected = true
       this.reconnectDelay = 2_000
       try {
-        // 3. Handshake immediately on open. AppId is carried in field 8 and the
-        //    handshake JSON in field 6; the server rejects anything else.
+        // 3. Handshake immediately on open. AppId is proto field 7, the
+        //    handshake JSON is field 6; getting these wrong makes the server
+        //    accept the TCP connection but never deliver events.
         this.seq += 1
         socket.send(
           encodeHandshake(
@@ -224,6 +226,7 @@ export class FeishuBot {
             endpoint.token,
           ),
         )
+        console.info('[Browser Copilot] Feishu handshake sent, appId=', this.appId)
       } catch (error) {
         console.warn('[Browser Copilot] Feishu handshake send failed', error)
         this.teardownAndReconnect()
@@ -287,6 +290,9 @@ export class FeishuBot {
         void this.handleEvent(interpreted.data)
         break
       case 'other':
+        // Logged verbosely on purpose: if the protocol drifts or the server
+        // sends a frame type we do not handle, this is the only signal.
+        console.info('[Browser Copilot] Feishu unhandled frame type', interpreted.type, 'seq', interpreted.seq)
         break
     }
   }
