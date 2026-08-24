@@ -133,7 +133,7 @@ async function executeTask(
   addStep(tracked.runId, 'info', task.kind === 'github-review-requests' ? 'Fetching GitHub review requests…' : 'Starting agent task…')
   switch (task.kind) {
     case 'github-review-requests':
-      return runReviewRequests(lang)
+      return runReviewRequests(lang, tracked)
     case 'agent-prompt':
       return runAgentPrompt(task, lang, tracked)
     default: {
@@ -145,15 +145,17 @@ async function executeTask(
   }
 }
 
-async function runReviewRequests(lang: string): Promise<RunOutcome> {
+async function runReviewRequests(lang: string, tracked: RunningTask): Promise<RunOutcome> {
   try {
     const result = await fetchReviewRequests()
     const { headline, body } = formatReviewSummary(result, lang)
-    return {
-      ok: true,
-      skipped: false,
-      summary: [headline, body].filter(Boolean).join('\n'),
+    const summary = [headline, body].filter(Boolean).join('\n')
+    // Surface the full report on the running/finished board so it can be
+    // expanded after the run completes, not just in the persistent run log.
+    for (const line of summary.split('\n').filter(Boolean)) {
+      addStep(tracked.runId, 'result', line)
     }
+    return { ok: true, skipped: false, summary }
   } catch (error) {
     if (error instanceof NotLoggedIn) {
       // The user asked for this exact behaviour: if the session is gone, skip
@@ -163,6 +165,7 @@ async function runReviewRequests(lang: string): Promise<RunOutcome> {
         lang.toLowerCase().startsWith('zh')
           ? '⏸ 未登录 GitHub，本次定时任务已跳过。请打开 github.com 重新登录。'
           : '⏸ Not logged in to GitHub; this run was skipped. Sign in at github.com.'
+      addStep(tracked.runId, 'status', summary)
       return { ok: false, skipped: true, summary, error: error.message }
     }
     throw error

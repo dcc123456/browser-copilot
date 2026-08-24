@@ -7,7 +7,7 @@
  *
  * @module sidepanel/TasksTab
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { sendCommand, type FinishedTaskView, type RunningTaskView } from '../lib/messages'
 import { createDraft } from '../lib/task-store'
 import { describeSchedule } from '../lib/schedule'
@@ -70,17 +70,35 @@ export default function TasksTab() {
   }, [load])
 
   // Poll the running-tasks board while the tab is mounted so progress steps and
-  // start/finish appear live. The list is tiny and cheap to fetch; an interval
-  // also survives the worker being evicted and restarted between polls.
+  // start/finish appear live. When a run transitions out of the "running" set
+  // (it finished, failed, or was cancelled), also reload the persistent task
+  // list and run history — those are written by the worker but would otherwise
+  // stay stale until the tab is reopened. A ref holding the previous running ids
+  // detects the transition without reloading on every 1.5s tick.
+  const prevRunningIds = useRef<Set<string>>(new Set())
   useEffect(() => {
     let active = true
     const refresh = async (): Promise<void> => {
       try {
         const result = await sendCommand({ type: 'tasks.running' })
-        if (active && result.type === 'tasks.running') {
-          setRunning(result.runs)
-          setFinished(result.finished)
+        if (!active || result.type !== 'tasks.running') return
+        setRunning(result.runs)
+        setFinished(result.finished)
+
+        const currentIds = new Set(result.runs.map((r) => r.runId))
+        let anyFinished = false
+        for (const id of prevRunningIds.current) {
+          if (!currentIds.has(id)) {
+            anyFinished = true
+            break
+          }
         }
+        // Also reload the first time running tasks appear empty after having had
+        // activity, so a run that completed between polls is picked up.
+        if (anyFinished || (prevRunningIds.current.size > 0 && currentIds.size === 0)) {
+          void load()
+        }
+        prevRunningIds.current = currentIds
       } catch {
         /* non-fatal; keep polling */
       }
@@ -91,7 +109,7 @@ export default function TasksTab() {
       active = false
       clearInterval(timer)
     }
-  }, [])
+  }, [load])
 
   const cancelRunning = async (runId: string): Promise<void> => {
     setBusy(true)
@@ -712,20 +730,65 @@ function RunningBoard({
         <>
           <div className="running-divider" />
           <h4 className="running-section-title">{t.tasksRecentlyFinished}</h4>
-          <ul className="finished-list">
-            {finished.slice(0, 8).map((run) => (
-              <li className={`finished-row finished-${run.outcome}`} key={run.runId}>
-                <span className={`finished-dot finished-dot-${run.outcome}`} />
-                <span className="finished-name">{run.label || t.taskUntitled}</span>
-                <span className="run-tag">{sourceLabel(run.source)}</span>
-                <span className={`finished-badge finished-badge-${run.outcome}`}>
-                  {outcomeLabel(run.outcome)}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <FinishedList
+            runs={finished.slice(0, 8)}
+            sourceLabel={sourceLabel}
+            outcomeLabel={outcomeLabel}
+            t={t}
+          />
         </>
       )}
     </div>
+  )
+}
+
+/** A recently-finished run whose steps can be expanded inline. */
+function FinishedList({
+  runs,
+  sourceLabel,
+  outcomeLabel,
+  t,
+}: {
+  runs: FinishedTaskView[]
+  sourceLabel: (source: FinishedTaskView['source']) => string
+  outcomeLabel: (outcome: FinishedTaskView['outcome']) => string
+  t: ReturnType<typeof useT>
+}) {
+  const [openId, setOpenId] = useState<string | null>(null)
+  return (
+    <ul className="finished-list">
+      {runs.map((run) => {
+        const isOpen = openId === run.runId
+        return (
+          <li className={`finished-item finished-${run.outcome}`} key={run.runId}>
+            <button
+              className="finished-row"
+              disabled={run.steps.length === 0}
+              onClick={() => setOpenId(isOpen ? null : run.runId)}
+              type="button"
+            >
+              <span className="finished-caret">
+                {run.steps.length > 0 ? (isOpen ? '▾' : '▸') : ''}
+              </span>
+              <span className={`finished-dot finished-dot-${run.outcome}`} />
+              <span className="finished-name">{run.label || t.taskUntitled}</span>
+              <span className="run-tag">{sourceLabel(run.source)}</span>
+              <span className={`finished-badge finished-badge-${run.outcome}`}>
+                {outcomeLabel(run.outcome)}
+              </span>
+            </button>
+            {isOpen && run.steps.length > 0 && (
+              <ul className="running-steps finished-steps">
+                {run.steps.map((step, index) => (
+                  <li className={`running-step running-step-${step.kind}`} key={index}>
+                    {step.text}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        )
+      })}
+    </ul>
   )
 }

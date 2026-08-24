@@ -1455,7 +1455,7 @@ textarea {
   letter-spacing: 0.04em;
 }
 
-/* Compact, single-line recently-finished rows. */
+/* Expandable, single-line recently-finished rows. */
 .finished-list {
   list-style: none;
   margin: 0;
@@ -1464,17 +1464,37 @@ textarea {
   flex-direction: column;
 }
 
+.finished-item {
+  border-bottom: 1px solid var(--border);
+}
+
+.finished-item:last-child {
+  border-bottom: 0;
+}
+
 .finished-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 0;
-  border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  width: 100%;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.finished-row:last-child {
-  border-bottom: 0;
+.finished-row:disabled {
+  cursor: default;
+  opacity: 0.9;
+}
+
+.finished-caret {
+  width: 10px;
+  color: var(--muted);
+  flex-shrink: 0;
 }
 
 .finished-name {
@@ -1484,6 +1504,11 @@ textarea {
   white-space: nowrap;
   color: var(--text);
   opacity: 0.9;
+}
+
+.finished-steps {
+  margin: 0 0 6px 18px;
+  max-height: 200px;
 }
 
 .finished-dot {
