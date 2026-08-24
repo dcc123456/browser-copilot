@@ -53,10 +53,14 @@ import { getWsEndpoint, FeishuError, TenantTokenProvider, sendImText, httpFetch 
 import {
   decodeFrame,
   encodeAck,
-  encodeHandshake,
-  encodePong,
-  interpretFrame,
+  encodePing,
+  encodeFrame,
+  header,
   parseEvent,
+  METHOD,
+  CTRL,
+  DATA,
+  type Frame,
 } from '../lib/feishu-proto'
 import { getFeishuConfig, listTasks } from '../lib/task-store'
 import { triggerNow } from './scheduler'
@@ -113,15 +117,22 @@ function arrayFromMessage(data: unknown): Uint8Array | null {
 
 export class FeishuBot {
   private socket: SocketLike | null = null
-  private tokens: TenantTokenProvider | null = null
   private appId = ''
+  private appSecret = ''
+  /**
+   * Tenant token used only for the IM send API (replying to a message).
+   * Endpoint discovery authenticates with the app id/secret in the body and does
+   * not use this.
+   */
+  private tokenProvider: TenantTokenProvider | null = null
+  /** `service_id` from the WSS URL; set on each connect and used in ping frames. */
+  private serviceId = 0
   private connected = false
-  private handshakeDone = false
   private reconnectDelay = 2_000
   private stopped = true
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null
-  private seq = 0
+  private pingTimer: ReturnType<typeof setTimeout> | null = null
   /** True only while a connect attempt is in flight, to prevent duplicates. */
   private connecting = false
 
@@ -145,10 +156,9 @@ export class FeishuBot {
     }
 
     this.stopped = false
-    if (!this.tokens) {
-      this.appId = config.appId
-      this.tokens = new TenantTokenProvider(config.appId, config.appSecret, this.fetchImpl)
-    }
+    this.appId = config.appId
+    this.appSecret = config.appSecret
+    this.tokenProvider = new TenantTokenProvider(config.appId, config.appSecret, this.fetchImpl)
     // Arm the watchdog first so even a failed connect is retried by it.
     await this.armWatchdog()
     void this.ensureConnected()
@@ -168,9 +178,9 @@ export class FeishuBot {
       this.socket = null
     }
     this.connected = false
-    this.handshakeDone = false
     this.connecting = false
-    this.tokens = null
+    this.tokenProvider = null
+    this.stopPingLoop()
     void chrome.alarms.clear(FEISHU_WATCHDOG_ALARM).catch(() => {})
   }
 
@@ -198,14 +208,20 @@ export class FeishuBot {
   }
 
   private async connect(): Promise<void> {
-    if (!this.tokens) throw new Error('No credentials; call reconcile() first.')
-    // 1. Resolve a fresh endpoint. Feishu issues one-time tokens, so a stale URL
-    //    from a previous connection must never be reused.
-    const endpoint = await getWsEndpoint(this.tokens, this.fetchImpl)
-    console.info('[Browser Copilot] Feishu endpoint resolved; opening socket', endpoint.clientId)
+    if (!this.appId || !this.appSecret) {
+      throw new Error('No credentials; call reconcile() first.')
+    }
+    // 1. Resolve a fresh endpoint. The returned URL carries one-time
+    //    access_key/ticket credentials, so a stale URL from a previous
+    //    connection must never be reused.
+    const endpoint = await getWsEndpoint(this.appId, this.appSecret, this.fetchImpl)
+    this.serviceId = endpoint.serviceId
+    console.info('[Browser Copilot] Feishu endpoint resolved; opening socket', endpoint.deviceId)
 
-    // 2. Open the socket. Wrap the event handlers so a synchronous throw during
-    //    setup still schedules a reconnect rather than killing the worker.
+    // 2. Open the socket. Auth is entirely in the WSS URL — there is no
+    //    in-band handshake frame to send on open. Wrap the event handlers so a
+    //    synchronous throw during setup still schedules a reconnect rather than
+    //    killing the worker.
     const socket = new this.socketCtor(endpoint.url)
     this.socket = socket
     socket.binaryType = 'arraybuffer'
@@ -213,24 +229,12 @@ export class FeishuBot {
     socket.onopen = (): void => {
       this.connected = true
       this.reconnectDelay = 2_000
-      try {
-        // 3. Handshake immediately on open. AppId is proto field 7, the
-        //    handshake JSON is field 6; getting these wrong makes the server
-        //    accept the TCP connection but never deliver events.
-        this.seq += 1
-        socket.send(
-          encodeHandshake(
-            this.seq,
-            this.appId,
-            endpoint.clientId,
-            endpoint.token,
-          ),
-        )
-        console.info('[Browser Copilot] Feishu handshake sent, appId=', this.appId)
-      } catch (error) {
-        console.warn('[Browser Copilot] Feishu handshake send failed', error)
-        this.teardownAndReconnect()
-      }
+      // The server sends a ping every PingInterval (~90 s) and drops the
+      // connection if we don't pong; we also ping proactively so a dead NAT
+      // path is detected before the watchdog runs.
+      this.startPingLoop(endpoint.pingIntervalSeconds)
+      this.startWorkerKeepalive()
+      console.info('[Browser Copilot] Feishu long connection established')
     }
 
     socket.onmessage = (event: { data: unknown }): void => {
@@ -249,7 +253,7 @@ export class FeishuBot {
 
     socket.onclose = (event: { code?: number; reason?: string }): void => {
       this.connected = false
-      this.handshakeDone = false
+      this.stopPingLoop()
       this.stopWorkerKeepalive()
       this.socket = null
       if (!this.stopped) {
@@ -265,37 +269,45 @@ export class FeishuBot {
     const frame = decodeFrame(bytes)
     if (!frame) return
 
-    const interpreted = interpretFrame(frame)
-    switch (interpreted.kind) {
-      case 'ping':
-        // Must reply within the heartbeat window or Feishu drops the connection.
-        this.send(encodePong(interpreted.seq))
-        break
-      case 'handshake-ok':
-        this.handshakeDone = true
-        this.reconnectDelay = 2_000
-        this.startWorkerKeepalive()
-        console.info('[Browser Copilot] Feishu long connection established')
-        break
-      case 'handshake-error':
-        console.warn('[Browser Copilot] Feishu handshake rejected', interpreted.code, interpreted.message)
-        // A bad handshake is likely bad credentials/config; reconnect with the
-        // normal backoff rather than spinning tightly.
-        this.teardownAndReconnect()
-        break
-      case 'event':
-        // ACK first so Feishu does not retry the delivery or drop us; the
-        // actual work is fire-and-forget after the acknowledgement.
-        this.send(encodeAck(interpreted.seq))
-        void this.handleEvent(interpreted.data)
-        break
-      case 'other':
-        // Logged verbosely on purpose: if the protocol drifts or the server
-        // sends a frame type we do not handle, this is the only signal.
-        console.info('[Browser Copilot] Feishu unhandled frame type', interpreted.type, 'seq', interpreted.seq)
-        break
+    // method 0 = control (ping/pong); method 1 = data (events/cards).
+    if (frame.method === METHOD.CONTROL) {
+      const type = header(frame, 'type')
+      if (type === CTRL.PING) {
+        // Reply with a pong carrying the server's ping payload (it holds the
+        // negotiated intervals). Must arrive within the heartbeat window.
+        this.send(this.encodePongFor(frame))
+      }
+      // PONG is a response to our own ping; no action beyond resetting the
+      // liveness timer (which any inbound frame already does implicitly).
+      return
+    }
+
+    if (frame.method === METHOD.DATA) {
+      const type = header(frame, 'type')
+      if (type === DATA.EVENT) {
+        // ACK first so Feishu does not retry delivery or drop us; the actual
+        // work is fire-and-forget after the acknowledgement.
+        this.send(encodeAck(frame))
+        const payload = new TextDecoder().decode(frame.payload)
+        void this.handleEvent(payload)
+      } else {
+        console.info('[Browser Copilot] Feishu unhandled data frame', type)
+      }
     }
   }
+
+  /** Encodes a pong control frame echoing an inbound ping. */
+  private encodePongFor(inbound: Frame): Uint8Array {
+    return encodeFrame({
+      seqId: inbound.seqId,
+      logId: inbound.logId,
+      service: inbound.service,
+      method: METHOD.CONTROL,
+      headers: [{ key: 'type', value: CTRL.PONG }],
+      payload: inbound.payload,
+    })
+  }
+
 
   private send(bytes: Uint8Array): void {
     if (this.socket && this.connected) {
@@ -318,7 +330,7 @@ export class FeishuBot {
       this.socket = null
     }
     this.connected = false
-    this.handshakeDone = false
+    this.stopPingLoop()
     this.stopWorkerKeepalive()
     this.scheduleReconnect()
   }
@@ -364,6 +376,31 @@ export class FeishuBot {
     }
   }
 
+  // --- Ping/pong liveness ----------------------------------------------------
+
+  /**
+   * Sends a ping control frame on the server-advertised interval (defaulting to
+   * 90 s). The server replies with a pong; the traffic itself also keeps the
+   * NAT/firewall path open. The loop is cleared on close/stop.
+   */
+  private startPingLoop(intervalSeconds: number): void {
+    this.stopPingLoop()
+    const intervalMs = Math.max(10_000, (intervalSeconds || 90) * 1000)
+    this.pingTimer = setTimeout(() => {
+      this.pingTimer = null
+      if (!this.connected || !this.socket) return
+      this.send(encodePing(this.serviceId))
+      this.startPingLoop(intervalSeconds)
+    }, intervalMs)
+  }
+
+  private stopPingLoop(): void {
+    if (this.pingTimer !== null) {
+      clearTimeout(this.pingTimer)
+      this.pingTimer = null
+    }
+  }
+
   // --- Watchdog: survives worker eviction ------------------------------------
 
   private async armWatchdog(): Promise<void> {
@@ -386,7 +423,7 @@ export class FeishuBot {
 
   /** Exposed for diagnostics/tests. */
   isConnected(): boolean {
-    return this.connected && this.handshakeDone
+    return this.connected
   }
 
   // --- Inbound events --------------------------------------------------------
@@ -399,8 +436,8 @@ export class FeishuBot {
     // is either a named-task trigger or an ad-hoc instruction for the agent.
     if (text.length === 0) return
 
-    if (!this.tokens) return
-    const token = await this.tokens.get().catch(() => null)
+    if (!this.tokenProvider) return
+    const token = await this.tokenProvider.get().catch(() => null)
     if (!token) return
 
     // 1. Named task? If the message mentions a saved task name, run that task.

@@ -12,6 +12,8 @@
  * @module lib/feishu
  */
 
+import type { WsEndpoint } from './feishu-proto'
+
 /**
  * Bound wrapper around the global `fetch`.
  *
@@ -226,37 +228,36 @@ export async function sendImText(
 }
 
 /**
- * Obtains a time-limited WebSocket endpoint for the long-connection mode.
+ * Obtains a one-time WebSocket endpoint for long-connection mode.
  *
- * The URL already carries a one-time `token`; the returned clientId must be
- * echoed in the handshake. Token is obtained from the tenant token provider
- * rather than being accepted as a raw string, so the app secret never leaves
- * this module.
+ * The discovery call authenticates with the app id + app secret **in the JSON
+ * body** (not via a Bearer token) and hits `/callback/ws/endpoint` (no
+ * `/open-apis` prefix) — this matches the official Feishu Node SDK. The
+ * returned URL already carries the one-time `access_key`/`ticket`/`service_id`
+ * query params; those credentials are consumed when the WebSocket connects, so
+ * a fresh call is required on every reconnect.
  */
 export async function getWsEndpoint(
-  tokenProvider: TenantTokenProvider,
+  appId: string,
+  appSecret: string,
   fetchImpl: typeof fetch = httpFetch,
-): Promise<{ url: string; clientId: string; heartbeatSeconds: number; token: string }> {
+): Promise<WsEndpoint> {
   // parseEndpointResponse is kept in feishu-proto to avoid a cycle; import here
   // lazily to keep the modules decoupled.
   const { parseEndpointResponse } = await import('./feishu-proto')
-  const token = await tokenProvider.get()
-  const response = await fetchImpl(
-    'https://open.feishu.cn/open-apis/callback/ws/endpoint',
-    {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${token}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({}),
+  const response = await fetchImpl('https://open.feishu.cn/callback/ws/endpoint', {
+    method: 'POST',
+    headers: {
+      // `locale: zh` is consumed by the Feishu gateway (as in the official SDK).
+      locale: 'zh',
+      'content-type': 'application/json',
     },
-  )
-  // A 404 here is the documented response when long-connection mode is not
-  // enabled for the app (or the app version that enabled it is not published).
-  // The path itself is correct — it is the one the official Feishu CLI uses — so
-  // a 404 means configuration, and we say so directly instead of surfacing the
-  // raw "404 page not found" text.
+    body: JSON.stringify({ AppID: appId, AppSecret: appSecret }),
+  })
+  // A 404 means the route is absent — typically long-connection mode is not
+  // enabled for the app (or the enabling version was not published). The path
+  // itself is correct, so point the user at configuration rather than logging
+  // the raw "404 page not found" text.
   if (response.status === 404) {
     throw new FeishuError(
       'Feishu returned 404 for the long-connection endpoint. Enable "长连接模式" ' +

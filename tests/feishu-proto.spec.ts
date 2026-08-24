@@ -1,192 +1,133 @@
 import { describe, expect, it } from 'vitest'
 import {
-  FRAME,
-  PROTOCOL_VERSION,
-  buildHandshakePayload,
+  METHOD,
+  CTRL,
+  DATA,
   decodeFrame,
-  decodeMessage,
   encodeAck,
   encodeFrame,
-  encodeHandshake,
-  encodePong,
-  encodeRequest,
-  interpretFrame,
+  encodePing,
+  header,
   parseEndpointResponse,
   parseEvent,
-  varintDecode,
-  varintEncode,
+  type Frame,
 } from '../src/lib/feishu-proto'
 
-describe('varint', () => {
-  it('round-trips small and large uint32 values', () => {
-    for (const n of [0, 1, 127, 128, 300, 16384, 262144, 4294967295]) {
-      const bytes = varintEncode(n)
-      const { value, next } = varintDecode(bytes, 0)
-      expect(value).toBe(n >>> 0)
-      expect(next).toBe(bytes.length)
-    }
-  })
-})
+/** Builds a Frame for tests with sensible defaults. */
+function frame(overrides: Partial<Frame> = {}): Frame {
+  return {
+    seqId: 1n,
+    logId: 2n,
+    service: 33554678,
+    method: METHOD.CONTROL,
+    headers: [],
+    payloadEncoding: '',
+    payloadType: '',
+    payload: new Uint8Array(),
+    logIdNew: '',
+    ...overrides,
+  }
+}
 
-describe('frame encoding', () => {
-  it('writes the 8-byte header big-endian', () => {
-    const payload = new Uint8Array([1, 2, 3])
-    const frame = encodeFrame(FRAME.PING, 0x01020304, payload)
-    expect(frame[0]).toBe(PROTOCOL_VERSION)
-    expect(frame[1]).toBe(FRAME.PING)
-    expect(frame[2]).toBe(0)
-    const view = new DataView(frame.buffer)
-    expect(view.getUint32(4, false)).toBe(0x01020304)
-    expect(Array.from(frame.slice(8))).toEqual([1, 2, 3])
-  })
-
-  it('decodes back to the same frame', () => {
-    const payload = new TextEncoder().encode('hello')
-    const frame = encodeFrame(FRAME.REQUEST, 42, payload)
-    const decoded = decodeFrame(frame)
+describe('frame encoding/decoding', () => {
+  it('round-trips a control ping with a header', () => {
+    const ping = encodePing(33554678)
+    const decoded = decodeFrame(ping)
     expect(decoded).not.toBeNull()
-    expect(decoded!.type).toBe(FRAME.REQUEST)
-    expect(decoded!.seq).toBe(42)
-    expect(new TextDecoder().decode(decoded!.payload)).toBe('hello')
+    expect(decoded!.service).toBe(33554678)
+    expect(decoded!.method).toBe(METHOD.CONTROL)
+    expect(header(decoded!, 'type')).toBe(CTRL.PING)
   })
 
-  it('refuses a truncated frame', () => {
-    expect(decodeFrame(new Uint8Array([1, 9, 0, 0]))).toBeNull()
-  })
-
-  it('refuses an unknown protocol version', () => {
-    const frame = new Uint8Array(8)
-    frame[0] = 9
-    expect(decodeFrame(frame)).toBeNull()
-  })
-})
-
-describe('protobuf decode', () => {
-  it('extracts string and varint fields', () => {
-    // Build a message manually: field 2 (varint) = 0, field 3 (string) = "ok"
-    const parts: number[] = []
-    parts.push((2 << 3) | 0, 0) // field 2 varint 0
-    const s = new TextEncoder().encode('ok')
-    parts.push((3 << 3) | 2, s.length, ...s)
-    const msg = decodeMessage(new Uint8Array(parts))
-    expect(msg.varints.get(2)).toBe(0)
-    expect(msg.strings.get(3)).toBe('ok')
-  })
-})
-
-describe('handshake', () => {
-  it('produces a request frame with the expected JSON fields', () => {
-    const body = buildHandshakePayload({
-      appId: 'cli_xxx',
-      clientId: 'cid-123',
-      token: 'tok-abc',
+  it('round-trips a data frame with headers and a payload', () => {
+    const payload = new TextEncoder().encode('{"hello":1}')
+    const bytes = encodeFrame({
+      seqId: 42n,
+      logId: 7n,
+      service: 123,
+      method: METHOD.DATA,
+      headers: [
+        { key: 'type', value: DATA.EVENT },
+        { key: 'message_id', value: 'om_1' },
+        { key: 'seq', value: '3' },
+      ],
+      payload,
     })
-    const parsed = JSON.parse(body)
-    expect(parsed.AppId).toBe('cli_xxx')
-    expect(parsed.ClientId).toBe('cid-123')
-    expect(parsed.Token).toBe('tok-abc')
+    const decoded = decodeFrame(bytes)!
+    expect(decoded.seqId).toBe(42n)
+    expect(decoded.logId).toBe(7n)
+    expect(decoded.service).toBe(123)
+    expect(decoded.method).toBe(METHOD.DATA)
+    expect(header(decoded, 'type')).toBe(DATA.EVENT)
+    expect(header(decoded, 'message_id')).toBe('om_1')
+    expect(new TextDecoder().decode(decoded.payload)).toBe('{"hello":1}')
   })
 
-  it('encodes a request whose payload decodes back as JSON', () => {
-    const frame = encodeRequest(1, 'v2:handshake', buildHandshakePayload({
-      appId: 'a', clientId: 'c', token: 't',
-    }))
-    const decoded = decodeFrame(frame)!
-    expect(decoded.type).toBe(FRAME.REQUEST)
-    const msg = decodeMessage(decoded.payload)
-    expect(msg.strings.get(2)).toBe('v2:handshake')
-    const payload = JSON.parse(msg.strings.get(6)!)
-    expect(payload.ClientId).toBe('c')
+  it('handles large varints (uint64 service/seq ids)', () => {
+    const big = 2n ** 40n
+    const bytes = encodeFrame({ seqId: big, logId: 0n, service: 1, method: METHOD.CONTROL })
+    const decoded = decodeFrame(bytes)!
+    expect(decoded.seqId).toBe(big)
   })
 
-  it('encodes the handshake with AppId at field 7 and Payload at field 6', () => {
-    const frame = encodeHandshake(3, 'cli_app', 'cid', 'tok')
-    const msg = decodeMessage(decodeFrame(frame)!.payload)
-    expect(msg.strings.get(2)).toBe('v2:handshake')
-    const payload = JSON.parse(msg.strings.get(6)!)
-    expect(payload.AppId).toBe('cli_app')
-    expect(payload.ClientId).toBe('cid')
-    expect(payload.Token).toBe('tok')
-    // AppId is written to proto field 7 per Feishu's ClientStreamRequest.
-    expect(msg.strings.get(7)).toBe('cli_app')
-    // No StreamSeqId in the proto body.
-    expect(msg.varints.has(1)).toBe(false)
+  it('returns null for a truncated varint', () => {
+    // 0x80 without continuation byte -> truncated
+    expect(decodeFrame(new Uint8Array([0x08, 0x80]))).toBeNull()
   })
 
-  it('encodes an event ACK as an empty response with code 0', () => {
-    const ack = encodeAck(77)
-    const decoded = decodeFrame(ack)!
-    expect(decoded.type).toBe(FRAME.RESPONSE)
-    expect(decoded.seq).toBe(77)
-    const msg = decodeMessage(decoded.payload)
-    expect(msg.varints.get(2)).toBe(0)
-    expect(decoded.payload.length).toBeGreaterThan(0)
-  })
-
-  it('encodes a pong frame with empty payload echoing the seq', () => {
-    const pong = encodePong(7)
-    const decoded = decodeFrame(pong)!
-    expect(decoded.type).toBe(FRAME.PONG)
-    expect(decoded.seq).toBe(7)
-    expect(decoded.payload.length).toBe(0)
+  it('skips unknown fields', () => {
+    // field 99, wire type 0 = 1
+    const bytes = encodeFrame({ service: 1, method: METHOD.CONTROL, headers: [] })
+    const withUnknown = new Uint8Array(bytes.length + 2)
+    withUnknown.set(bytes)
+    withUnknown[bytes.length] = (99 << 3) | 0
+    withUnknown[bytes.length + 1] = 1
+    const decoded = decodeFrame(withUnknown)
+    expect(decoded).not.toBeNull()
+    expect(decoded!.service).toBe(1)
   })
 })
 
-describe('interpretFrame', () => {
-  it('recognises a ping by frame type regardless of payload', () => {
-    const frame = { version: 1, type: FRAME.PING, compressed: false, seq: 5, payload: new Uint8Array() }
-    const interpreted = interpretFrame(frame)
-    expect(interpreted.kind).toBe('ping')
-    if (interpreted.kind === 'ping') expect(interpreted.seq).toBe(5)
-  })
-
-  it('treats a response with code 0 as handshake-ok', () => {
-    // field 2 varint = 0
-    const payload = new Uint8Array([(2 << 3) | 0, 0])
-    const frame = { version: 1, type: FRAME.RESPONSE, compressed: false, seq: 1, payload }
-    expect(interpretFrame(frame).kind).toBe('handshake-ok')
-  })
-
-  it('reports a handshake error with the code and message', () => {
-    // field 2 varint = 100, field 3 string = "bad"
-    const s = new TextEncoder().encode('bad')
-    const payload = new Uint8Array([(2 << 3) | 0, 100, (3 << 3) | 2, s.length, ...s])
-    const frame = { version: 1, type: FRAME.RESPONSE, compressed: false, seq: 1, payload }
-    const interpreted = interpretFrame(frame)
-    expect(interpreted.kind).toBe('handshake-error')
-    if (interpreted.kind === 'handshake-error') {
-      expect(interpreted.code).toBe(100)
-      expect(interpreted.message).toBe('bad')
-    }
-  })
-
-  it('extracts event data from a request frame', () => {
-    const s = new TextEncoder().encode('{"hello":1}')
-    // field 4 is the Data string in ServerStreamResponse.
-    const payload = new Uint8Array([(4 << 3) | 2, s.length, ...s])
-    const frame = { version: 1, type: FRAME.REQUEST, compressed: false, seq: 9, payload }
-    const interpreted = interpretFrame(frame)
-    expect(interpreted.kind).toBe('event')
-    if (interpreted.kind === 'event') expect(interpreted.data).toBe('{"hello":1}')
+describe('ack', () => {
+  it('echoes the inbound frame metadata with a {code:0} payload', () => {
+    const inbound = frame({
+      method: METHOD.DATA,
+      headers: [{ key: 'type', value: DATA.EVENT }],
+      payload: new TextEncoder().encode('event-body'),
+    })
+    const ack = decodeFrame(encodeAck(inbound))!
+    expect(ack.seqId).toBe(inbound.seqId)
+    expect(ack.logId).toBe(inbound.logId)
+    expect(ack.service).toBe(inbound.service)
+    expect(ack.method).toBe(METHOD.DATA)
+    expect(header(ack, 'type')).toBe(DATA.EVENT)
+    const body = JSON.parse(new TextDecoder().decode(ack.payload)) as { code: number }
+    expect(body.code).toBe(0)
   })
 })
 
 describe('parseEndpointResponse', () => {
-  it('extracts URL, clientId, heartbeat and token from the query', () => {
+  const url =
+    'wss://msg-frontier.feishu.cn/ws/v2?fpid=493&aid=552564&device_id=7677469797122837778' +
+    '&access_key=abc&service_id=33554678&ticket=xyz'
+
+  it('extracts URL, serviceId, deviceId and ping interval', () => {
     const result = parseEndpointResponse({
       code: 0,
       data: {
-        WebSocket: {
-          URL: 'wss://msg-frontier.feishu.cn/ws/v2?token=abc&service=1',
-        },
-        ClientId: 'cid',
-        HeartbeatInterval: 120,
+        URL: url,
+        ClientConfig: { PingInterval: 90, ReconnectCount: -1, ReconnectInterval: 90, ReconnectNonce: 25 },
       },
     })
-    expect(result.url).toContain('wss://')
-    expect(result.clientId).toBe('cid')
-    expect(result.heartbeatSeconds).toBe(120)
-    expect(result.token).toBe('abc')
+    expect(result.url).toBe(url)
+    expect(result.serviceId).toBe(33554678)
+    expect(result.deviceId).toBe('7677469797122837778')
+    expect(result.pingIntervalSeconds).toBe(90)
+  })
+
+  it('defaults the ping interval to 90 seconds', () => {
+    const result = parseEndpointResponse({ code: 0, data: { URL: url } })
+    expect(result.pingIntervalSeconds).toBe(90)
   })
 
   it('throws on a non-zero code', () => {
@@ -194,7 +135,7 @@ describe('parseEndpointResponse', () => {
   })
 
   it('throws when the URL is missing', () => {
-    expect(() => parseEndpointResponse({ code: 0, data: { ClientId: 'c' } })).toThrow()
+    expect(() => parseEndpointResponse({ code: 0, data: {} })).toThrow()
   })
 })
 
