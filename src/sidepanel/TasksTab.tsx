@@ -8,7 +8,7 @@
  * @module sidepanel/TasksTab
  */
 import { useCallback, useEffect, useState } from 'react'
-import { sendCommand } from '../lib/messages'
+import { sendCommand, type RunningTaskView } from '../lib/messages'
 import { createDraft } from '../lib/task-store'
 import { describeSchedule } from '../lib/schedule'
 import type { FeishuConfig, ScheduledTask, TaskRunLog } from '../lib/scheduler-types'
@@ -31,6 +31,7 @@ export default function TasksTab() {
   const t = useT()
   const [tasks, setTasks] = useState<ScheduledTask[]>([])
   const [runs, setRuns] = useState<TaskRunLog[]>([])
+  const [running, setRunning] = useState<RunningTaskView[]>([])
   const [feishu, setFeishu] = useState<FeishuConfig | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [banner, setBanner] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
@@ -63,6 +64,40 @@ export default function TasksTab() {
   useEffect(() => {
     void load()
   }, [load])
+
+  // Poll the running-tasks board while the tab is mounted so progress steps and
+  // start/finish appear live. The list is tiny and cheap to fetch; an interval
+  // also survives the worker being evicted and restarted between polls.
+  useEffect(() => {
+    let active = true
+    const refresh = async (): Promise<void> => {
+      try {
+        const result = await sendCommand({ type: 'tasks.running' })
+        if (active && result.type === 'tasks.running') setRunning(result.runs)
+      } catch {
+        /* non-fatal; keep polling */
+      }
+    }
+    void refresh()
+    const timer = setInterval(() => void refresh(), 1500)
+    return () => {
+      active = false
+      clearInterval(timer)
+    }
+  }, [])
+
+  const cancelRunning = async (runId: string): Promise<void> => {
+    setBusy(true)
+    try {
+      await sendCommand({ type: 'tasks.cancel', runId })
+      // Refresh immediately; the aborted run removes itself shortly after.
+      const result = await sendCommand({ type: 'tasks.running' })
+      if (result.type === 'tasks.running') setRunning(result.runs)
+      await load()
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const persistTask = async (task: Draft): Promise<void> => {
     setBusy(true)
@@ -161,6 +196,10 @@ export default function TasksTab() {
         <div className={`banner banner-${banner.kind}`} role="status">
           {banner.text}
         </div>
+      )}
+
+      {running.length > 0 && (
+        <RunningBoard runs={running} onCancel={(id) => void cancelRunning(id)} busy={busy} />
       )}
 
       {!draft && (
@@ -543,6 +582,68 @@ function RunLog({ runs, onClear }: { runs: TaskRunLog[]; onClear: () => void }) 
             <span className="run-time">{new Date(run.at).toLocaleString(navigator.language)}</span>
             <span className="run-tag">{triggerLabel(run.trigger)}</span>
             <span className="run-summary">{run.summary || run.error || ''}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+// --- Running board -----------------------------------------------------------
+
+function RunningBoard({
+  runs,
+  onCancel,
+  busy,
+}: {
+  runs: RunningTaskView[]
+  onCancel: (runId: string) => void
+  busy: boolean
+}) {
+  const t = useT()
+  const sourceLabel = (source: RunningTaskView['source']): string =>
+    source === 'feishu'
+      ? t.taskSourceFeishu
+      : source === 'chat'
+        ? t.taskSourceChat
+        : source === 'manual'
+          ? t.taskSourceManual
+          : t.taskSourceSchedule
+
+  return (
+    <div className="card running-board">
+      <div className="card-head">
+        <h3>
+          <span className="running-dot" /> {t.tasksRunning}
+        </h3>
+      </div>
+      <ul className="running-list">
+        {runs.map((run) => (
+          <li className="running-item" key={run.runId}>
+            <div className="running-item-head">
+              <strong className="running-label">{run.label || t.taskUntitled}</strong>
+              <span className="run-tag">{sourceLabel(run.source)}</span>
+              <button
+                className="running-cancel"
+                disabled={busy}
+                onClick={() => onCancel(run.runId)}
+                type="button"
+              >
+                {t.taskTerminate}
+              </button>
+            </div>
+            <div className="running-meta">
+              {t.taskStartedAt}: {new Date(run.startedAt).toLocaleTimeString(navigator.language)}
+            </div>
+            {run.steps.length > 0 && (
+              <ul className="running-steps">
+                {run.steps.slice(-8).map((step, index) => (
+                  <li className={`running-step running-step-${step.kind}`} key={index}>
+                    {step.text}
+                  </li>
+                ))}
+              </ul>
+            )}
           </li>
         ))}
       </ul>

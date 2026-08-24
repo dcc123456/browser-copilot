@@ -65,6 +65,13 @@ import {
 import { getFeishuConfig, listTasks } from '../lib/task-store'
 import { triggerNow } from './scheduler'
 import { runUnattendedPrompt } from './agent-unattended'
+import {
+  addStep,
+  finishRun,
+  listRunning,
+  setOnCancel,
+  startRun,
+} from './running-tasks'
 
 
 /** Alarm name the watchdog uses; also exported for clearing on stop. */
@@ -74,6 +81,9 @@ const WATCHDOG_PERIOD_MINUTES = 1
 
 /** Worker keepalive period, inside Chrome's ~30 s idle window. */
 const WORKER_KEEPALIVE_MS = 20_000
+
+/** How often batched agent steps are flushed to Feishu. */
+const STEP_FLUSH_INTERVAL_MS = 3_000
 
 /** Command prefixes the bot responds to, matched case-insensitively. */
 export const COMMAND_PATTERNS = [
@@ -482,13 +492,7 @@ export class FeishuBot {
     )
     if (named) {
       await safeReply(token, message.chatId, this.ackReply(named.name, text))
-      try {
-        const outcome = await triggerNow(named.id, 'feishu')
-        await sendImText(token, message.chatId, outcome.summary || '(no output)')
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error)
-        await safeReply(token, message.chatId, `Task failed: ${detail}`)
-      }
+      await this.runAndReport(token, message.chatId, named.id, named.name)
       return
     }
 
@@ -497,13 +501,7 @@ export class FeishuBot {
       const reviewTask = tasks.find((task) => task.kind === 'github-review-requests')
       if (reviewTask) {
         await safeReply(token, message.chatId, this.ackReply(reviewTask.name, text))
-        try {
-          const outcome = await triggerNow(reviewTask.id, 'feishu')
-          await sendImText(token, message.chatId, outcome.summary || '(no output)')
-        } catch (error) {
-          const detail = error instanceof Error ? error.message : String(error)
-          await safeReply(token, message.chatId, `Task failed: ${detail}`)
-        }
+        await this.runAndReport(token, message.chatId, reviewTask.id, reviewTask.name)
         return
       }
     }
@@ -511,17 +509,99 @@ export class FeishuBot {
     // 3. Otherwise treat the message as a one-off instruction for the agent.
     //    This is what lets "帮我查看微博现在的热搜是什么" open a tab and answer.
     await safeReply(token, message.chatId, this.thinkingReply(text))
+    const tracked = startRun({
+      label: text.slice(0, 40),
+      source: 'feishu',
+      feishuChatId: message.chatId,
+      onCancel: () => {
+        void safeReply(token, message.chatId, '⏹ 任务已终止。')
+      },
+    })
+    const streamer = new StepStreamer(token, message.chatId)
+    streamer.start()
     try {
       const result = await runUnattendedPrompt(
         this.withBrowserGuidance(text),
         `feishu:${message.messageId || message.chatId}`,
         'full',
+        {
+          signal: tracked.controller.signal,
+          onStep: (kind, stepText) => {
+            addStep(tracked.runId, kind, stepText)
+            streamer.push(stepText)
+          },
+        },
       )
-      const reply = result.answer?.trim() || result.error || '(no answer)'
-      await sendImText(token, message.chatId, reply)
+      streamer.flush()
+      if (result.cancelled) {
+        await safeReply(token, message.chatId, '⏹ 任务已终止。')
+      } else {
+        const reply = result.answer?.trim() || result.error || '(no answer)'
+        await sendImText(token, message.chatId, reply)
+      }
     } catch (error) {
+      streamer.flush()
       const detail = error instanceof Error ? error.message : String(error)
       await safeReply(token, message.chatId, `Failed: ${detail}`)
+    } finally {
+      streamer.stop()
+      finishRun(tracked.runId)
+    }
+  }
+
+  /**
+   * Runs a saved task triggered from Feishu and reports its progress. Named
+   * tasks register their own run in the running-tasks board; we poll that
+   * board's steps and stream them to the chat, batching to avoid spamming, then
+   * send the final summary. The `feishuChatId` on the run lets a manual
+   * termination from the board also reach this chat (via the board watcher).
+   */
+  private async runAndReport(
+    token: string,
+    chatId: string,
+    taskId: string,
+    _name: string,
+  ): Promise<void> {
+    try {
+      const runPromise = triggerNow(taskId, 'feishu', chatId)
+      // Poll the running-tasks board for this task's steps while it runs.
+      const streamer = new StepStreamer(token, chatId)
+      streamer.start()
+      let lastCount = 0
+      const poll = setInterval(() => {
+        const run = listRunning().find((r) => r.taskId === taskId)
+        if (!run) return
+        // Once the task registers itself, wire a cancellation notice so a
+        // terminate click on the board tells this chat too.
+        setOnCancel(run.runId, () => {
+          void safeReply(token, chatId, '⏹ 任务已终止。')
+        })
+        for (let i = lastCount; i < run.steps.length; i += 1) {
+          const step = run.steps[i]!
+          streamer.push(step.text)
+        }
+        lastCount = run.steps.length
+      }, 1_000)
+      try {
+        const outcome = await runPromise
+        streamer.flush()
+        clearInterval(poll)
+        if (outcome.cancelled) {
+          await safeReply(token, chatId, '⏹ 任务已终止。')
+        } else {
+          await sendImText(token, chatId, outcome.summary || '(no output)')
+        }
+      } catch (error) {
+        clearInterval(poll)
+        streamer.flush()
+        const detail = error instanceof Error ? error.message : String(error)
+        await safeReply(token, chatId, `Task failed: ${detail}`)
+      } finally {
+        streamer.stop()
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      await safeReply(token, chatId, `Task failed: ${detail}`)
     }
   }
 
@@ -555,5 +635,45 @@ async function safeReply(token: string, chatId: string, text: string): Promise<v
     await sendImText(token, chatId, text)
   } catch (error) {
     if (error instanceof FeishuError) console.warn('[Browser Copilot] feishu reply failed', error.code)
+  }
+}
+
+/**
+ * Batches per-step progress into fewer Feishu messages.
+ *
+ * An agent turn can emit a tool.start/tool.result pair per action; sending each
+ * as its own IM message floods the chat. This accumulates pushed lines and
+ * flushes them on an interval (and on demand at the end), collapsing a burst of
+ * steps into a single progress update.
+ */
+class StepStreamer {
+  private buffer: string[] = []
+  private timer: ReturnType<typeof setInterval> | null = null
+  constructor(
+    private readonly token: string,
+    private readonly chatId: string,
+  ) {}
+
+  start(): void {
+    if (this.timer) return
+    this.timer = setInterval(() => this.flush(), STEP_FLUSH_INTERVAL_MS)
+  }
+
+  push(text: string): void {
+    if (text) this.buffer.push(text)
+  }
+
+  flush(): void {
+    if (this.buffer.length === 0) return
+    const text = this.buffer.join('\n')
+    this.buffer = []
+    void safeReply(this.token, this.chatId, text)
+  }
+
+  stop(): void {
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = null
+    }
   }
 }

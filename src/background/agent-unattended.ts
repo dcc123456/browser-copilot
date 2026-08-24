@@ -27,6 +27,19 @@ export interface UnattendedResult {
   /** The agent's final text answer, or a short description when there is none. */
   answer: string
   error?: string
+  /** True when the run was stopped via its abort signal rather than finishing. */
+  cancelled?: boolean
+}
+
+export interface UnattendedOptions {
+  /** Abort signal used to cancel a running turn (from the board or Feishu). */
+  signal?: AbortSignal
+  /**
+   * Called for each progress step the agent emits — tool starts/results and
+   * status/error lines. The Feishu bot uses this to stream steps back to chat;
+   * the running-tasks registry records them for the board.
+   */
+  onStep?: (kind: 'tool' | 'status' | 'result' | 'error' | 'info', text: string) => void
 }
 
 /**
@@ -34,11 +47,13 @@ export interface UnattendedResult {
  * @param conversationId Stable id for history/action recording.
  * @param modeOverride When set, forces the autonomy mode for this turn (used by
  *   Feishu commands to run unattended in full mode).
+ * @param options Cancellation and progress callbacks.
  */
 export async function runUnattendedPrompt(
   prompt: string,
   conversationId: string,
   modeOverride?: AgentMode,
+  options: UnattendedOptions = {},
 ): Promise<UnattendedResult> {
   retain()
   try {
@@ -51,11 +66,24 @@ export async function runUnattendedPrompt(
 
     await runAgentTurn(history as never, {
       conversationId,
+      signal: options.signal,
       send: (message) => {
         if (message.type === 'delta') chunks.push(message.text)
-        if (message.type === 'tool.start') collected.push(`→ ${message.name}`)
-        if (message.type === 'tool.result') collected.push(`← ${message.summary}`)
-        if (message.type === 'error') collected.push(`! ${message.message}`)
+        if (message.type === 'tool.start') {
+          collected.push(`→ ${message.name}`)
+          options.onStep?.('tool', `→ ${message.name}`)
+        }
+        if (message.type === 'tool.result') {
+          collected.push(`← ${message.summary}`)
+          options.onStep?.('result', `← ${message.summary}`)
+        }
+        if (message.type === 'status') {
+          options.onStep?.('status', message.text)
+        }
+        if (message.type === 'error') {
+          collected.push(`! ${message.message}`)
+          options.onStep?.('error', message.message)
+        }
       },
       // No human is watching: auto-decline any confirmation. In full mode the
       // agent does not ask in the first place, so this only matters for
@@ -74,6 +102,13 @@ export async function runUnattendedPrompt(
       error: trace ? undefined : 'The agent produced no answer.',
     }
   } catch (error) {
+    // An AbortError is a deliberate cancellation, not a failure to report loudly.
+    if (
+      options.signal?.aborted ||
+      (error instanceof Error && error.name === 'AbortError')
+    ) {
+      return { ok: false, answer: '', cancelled: true, error: 'Cancelled' }
+    }
     return {
       ok: false,
       answer: '',

@@ -64,6 +64,7 @@ import {
 import { rescheduleAll, scheduleTask, triggerNow, onAlarm } from './scheduler'
 import { FeishuBot, FEISHU_WATCHDOG_ALARM } from './feishu-bot'
 import { isWebhookUrl, sendWebhookText } from '../lib/feishu'
+import { addStep, cancelRun, finishRun, listRunning, startRun } from './running-tasks'
 
 // --- Lifecycle ---------------------------------------------------------------
 
@@ -102,6 +103,15 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 /** Single long-lived Feishu bot connection (reconnects internally). */
 const feishuBot = new FeishuBot()
+
+/** Records an agent step onto a running-task board entry, ignoring stale runs. */
+function recordStep(
+  kind: 'tool' | 'status' | 'result' | 'error' | 'info',
+  text: string,
+  runId: string,
+): void {
+  addStep(runId, kind, text)
+}
 
 // An MV3 worker can start cold on any event (an alarm, a port reconnect, a
 // command). Reconcile schedules and the bot connection at module load so a task
@@ -331,6 +341,21 @@ async function handleCommand(command: Command): Promise<CommandResult> {
     case 'tasks.runs.clear':
       await clearRuns(command.taskId)
       return { type: 'tasks.runs.clear' }
+    case 'tasks.running': {
+      return {
+        type: 'tasks.running',
+        runs: listRunning().map((r) => ({
+          runId: r.runId,
+          taskId: r.taskId,
+          label: r.label,
+          source: r.source,
+          startedAt: r.startedAt,
+          steps: r.steps,
+        })),
+      }
+    }
+    case 'tasks.cancel':
+      return { type: 'tasks.cancel', ok: cancelRun(command.runId) }
 
     case 'feishu.get':
       return { type: 'feishu.get', config: await getFeishuConfig() }
@@ -486,6 +511,21 @@ chrome.runtime.onConnect.addListener((port) => {
     activeTurns.add(conversationId)
     const turnController = new AbortController()
     controller = turnController
+    // Surface this chat turn on the running-tasks board so it can be seen and
+    // terminated from the Tasks tab. Reuse the turn's AbortController so the
+    // board's cancel and the panel's cancel are the same signal.
+    const trackedRun = startRun({
+      label: message.text.slice(0, 40),
+      source: 'chat',
+      controller: turnController,
+    })
+    const sendWithTracking = (msg: AgentServerMessage): void => {
+      send(msg)
+      if (msg.type === 'tool.start') recordStep('tool', `→ ${msg.name}`, trackedRun.runId)
+      else if (msg.type === 'tool.result') recordStep('result', `← ${msg.summary}`, trackedRun.runId)
+      else if (msg.type === 'status') recordStep('status', msg.text, trackedRun.runId)
+      else if (msg.type === 'error') recordStep('error', msg.message, trackedRun.runId)
+    }
     // Hold the worker open for the whole turn, so collapsing the panel does not
     // kill work in progress.
     retain()
@@ -500,7 +540,7 @@ chrome.runtime.onConnect.addListener((port) => {
         let text = message.text
         let grantedPageUrl: string | undefined
         if (message.includePage) {
-          send({ type: 'status', text: 'Reading the current page…' })
+          sendWithTracking({ type: 'status', text: 'Reading the current page…' })
           try {
             const page = await readActivePage()
             grantedPageUrl = page.url
@@ -511,7 +551,7 @@ chrome.runtime.onConnect.addListener((port) => {
               `Body${page.truncated ? ' (truncated)' : ''}:\n${page.text}\n\n` +
               `My question: ${message.text}`
           } catch (error) {
-            send({
+            sendWithTracking({
               type: 'status',
               text: `Could not read the page: ${
                 error instanceof Error ? error.message : String(error)
@@ -531,7 +571,7 @@ chrome.runtime.onConnect.addListener((port) => {
         const getMode = async () => (await getSettings()).mode
         const getMaxToolRounds = async () => (await getSettings()).maxToolRounds
         await runAgentTurn(history, {
-          send,
+          send: sendWithTracking,
           signal: turnController.signal,
           ...(message.skillId ? { skillId: message.skillId } : {}),
           ...(grantedPageUrl ? { grantedPageUrl } : {}),
@@ -545,7 +585,7 @@ chrome.runtime.onConnect.addListener((port) => {
               send({ type: 'confirm.request', requestId, name, argsPreview })
             }),
         })
-        send({ type: 'done' })
+        sendWithTracking({ type: 'done' })
       } catch (error) {
         failure =
           error instanceof LlmError
@@ -553,7 +593,7 @@ chrome.runtime.onConnect.addListener((port) => {
             : error instanceof Error
               ? error.message
               : String(error)
-        send({ type: 'error', message: failure })
+        sendWithTracking({ type: 'error', message: failure })
       } finally {
         // Persist whatever was accumulated, including partial tool exchanges, so
         // an interrupted turn does not lose the conversation.
@@ -567,6 +607,7 @@ chrome.runtime.onConnect.addListener((port) => {
           ...(failure ? { error: failure } : {}),
         }).catch(() => {})
         activeTurns.delete(conversationId)
+        finishRun(trackedRun.runId)
         if (controller === turnController) controller = null
         release()
       }

@@ -453,10 +453,10 @@ body {
   gap: 6px;
   padding: 8px;
   background: var(--panel);
-  /* Positioning context for the slash menu, so it can sit directly above the
-     textarea without measuring caret coordinates. */
+  /* Positioning context for the slash menu, which sits directly above the
+     textarea using bottom:100%. It must be allowed to overflow upward; a
+     clipped composer makes the menu render invisibly. */
   position: relative;
-  overflow: hidden;
 }
 
 .composer textarea {
@@ -1135,4 +1135,112 @@ textarea {
 
 .banner-error-inline {
   color: var(--warn);
+}
+
+/* --- Running-tasks board ---------------------------------------------------- */
+
+.running-board {
+  border-color: var(--accent);
+}
+
+.running-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+  animation: running-pulse 1.4s infinite;
+}
+
+@keyframes running-pulse {
+  0% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.running-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.running-item {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--bg);
+}
+
+.running-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.running-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.running-cancel {
+  padding: 3px 10px;
+  border: 1px solid var(--err);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--err);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.running-cancel:hover:not(:disabled) {
+  background: var(--err);
+  color: var(--on-accent);
+}
+
+.running-meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.running-steps {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  max-height: 140px;
+  overflow-y: auto;
+  border-radius: 4px;
+  background: var(--panel-2);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.running-step {
+  white-space: pre-wrap;
+  word-break: break-word;
+  opacity: 0.85;
+}
+
+.running-step-tool {
+  color: var(--accent);
+}
+
+.running-step-result {
+  color: var(--muted);
+}
+
+.running-step-error {
+  color: var(--err);
+}
+
+.running-step-status {
+  color: var(--text);
 }

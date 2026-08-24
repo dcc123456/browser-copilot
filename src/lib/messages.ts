@@ -25,6 +25,17 @@ import type {
   ScheduledTask,
   TaskRunLog,
 } from './scheduler-types'
+import type { RunStep, RunSource } from '../background/running-tasks'
+
+/** A running task as shown on the Tasks tab board. */
+export interface RunningTaskView {
+  runId: string
+  taskId?: string
+  label: string
+  source: RunSource
+  startedAt: number
+  steps: RunStep[]
+}
 
 /** Port name for the streaming agent channel. */
 export const AGENT_PORT = 'agent'
@@ -75,6 +86,8 @@ export type Command =
   | { type: 'tasks.run'; id: string }
   | { type: 'tasks.runs'; taskId?: string }
   | { type: 'tasks.runs.clear'; taskId?: string }
+  | { type: 'tasks.running' }
+  | { type: 'tasks.cancel'; runId: string }
 
   // --- Feishu integration ---
   | { type: 'feishu.get' }
@@ -121,6 +134,8 @@ export type CommandResult =
   | { type: 'tasks.run'; outcome: { ok: boolean; skipped: boolean; summary: string; error?: string } }
   | { type: 'tasks.runs'; runs: TaskRunLog[] }
   | { type: 'tasks.runs.clear' }
+  | { type: 'tasks.running'; runs: RunningTaskView[] }
+  | { type: 'tasks.cancel'; ok: boolean }
   | { type: 'feishu.get'; config: FeishuConfig }
   | { type: 'feishu.save' }
   | { type: 'feishu.test'; ok: boolean; message?: string }

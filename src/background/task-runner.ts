@@ -25,6 +25,12 @@ import {
 } from '../lib/task-store'
 import { runUnattendedPrompt } from './agent-unattended'
 import { retain, release } from './keepalive'
+import {
+  addStep,
+  finishRun,
+  startRun,
+  type RunningTask,
+} from './running-tasks'
 
 export type TaskTrigger = 'schedule' | 'feishu' | 'manual'
 
@@ -33,6 +39,7 @@ export interface RunOutcome {
   skipped: boolean
   summary: string
   error?: string
+  cancelled?: boolean
 }
 
 /**
@@ -41,18 +48,31 @@ export interface RunOutcome {
  * Holds the worker alive for the duration: an alarm wake gives the worker a few
  * hundred ms of headroom, and a task may take seconds (opening a tab, calling a
  * model). The matching `release` is in `finally`.
+ *
+ * Registers itself in the running-tasks board so the Tasks tab can show progress
+ * and terminate it. For agent tasks, each tool step is recorded there (and
+ * streamed to Feishu by the bot when triggered from chat).
  */
 export async function runTask(
   task: ScheduledTask,
   trigger: TaskTrigger,
   locale?: string,
+  feishuChatId?: string,
 ): Promise<RunOutcome> {
   retain()
   const lang = locale ?? effectiveLocale('auto', navigator.language)
-  let outcome: RunOutcome
 
+  const source = trigger === 'feishu' ? 'feishu' : trigger === 'manual' ? 'manual' : 'schedule'
+  const tracked = startRun({
+    label: task.name,
+    source,
+    taskId: task.id,
+    ...(feishuChatId ? { feishuChatId } : {}),
+  })
+
+  let outcome: RunOutcome
   try {
-    outcome = await executeTask(task, lang)
+    outcome = await executeTask(task, lang, tracked)
   } catch (error) {
     outcome = {
       ok: false,
@@ -62,25 +82,30 @@ export async function runTask(
     }
   } finally {
     release()
+    finishRun(tracked.runId)
   }
 
   // Record the run and update the task's last-run state. These are independent
-  // of notification: a run exists even if Feishu is misconfigured.
-  await addRun({
-    taskId: task.id,
-    trigger,
-    ok: outcome.ok,
-    skipped: outcome.skipped,
-    summary: outcome.summary,
-    error: outcome.error,
-  })
-  await recordTaskRun(task.id, {
-    lastStatus: outcome.skipped ? 'skipped' : outcome.ok ? 'ok' : 'failed',
-    lastSummary: outcome.summary,
-    lastError: outcome.error,
-  })
+  // of notification: a run exists even if Feishu is misconfigured. A cancelled
+  // run is not recorded as a failure (it was intentional), but the last-run
+  // state still reflects it so the UI does not look stale.
+  if (!outcome.cancelled) {
+    await addRun({
+      taskId: task.id,
+      trigger,
+      ok: outcome.ok,
+      skipped: outcome.skipped,
+      summary: outcome.summary,
+      error: outcome.error,
+    })
+    await recordTaskRun(task.id, {
+      lastStatus: outcome.skipped ? 'skipped' : outcome.ok ? 'ok' : 'failed',
+      lastSummary: outcome.summary,
+      lastError: outcome.error,
+    })
+  }
 
-  if (task.notifyFeishu && outcome.summary) {
+  if (task.notifyFeishu && outcome.summary && !outcome.cancelled) {
     // Notify failures too: a silently broken daily report is worse than an error
     // message. NotLoggedIn already reads as an instruction to the user.
     await notifyOutcome(task, outcome, lang)
@@ -89,12 +114,17 @@ export async function runTask(
   return outcome
 }
 
-async function executeTask(task: ScheduledTask, lang: string): Promise<RunOutcome> {
+async function executeTask(
+  task: ScheduledTask,
+  lang: string,
+  tracked: RunningTask,
+): Promise<RunOutcome> {
+  addStep(tracked.runId, 'info', task.kind === 'github-review-requests' ? 'Fetching GitHub review requests…' : 'Starting agent task…')
   switch (task.kind) {
     case 'github-review-requests':
       return runReviewRequests(lang)
     case 'agent-prompt':
-      return runAgentPrompt(task, lang)
+      return runAgentPrompt(task, lang, tracked)
     default: {
       // Exhaustiveness guard: a future task kind that isn't wired up fails
       // loudly rather than silently doing nothing. Cast through string so this
@@ -138,20 +168,25 @@ async function runReviewRequests(lang: string): Promise<RunOutcome> {
  * actions — that is the safe default for unattended work. The user must opt into
  * `full` mode for acting tasks.
  */
-async function runAgentPrompt(task: ScheduledTask, _lang: string): Promise<RunOutcome> {
+async function runAgentPrompt(task: ScheduledTask, _lang: string, tracked: RunningTask): Promise<RunOutcome> {
   const prompt = task.prompt?.trim()
   if (!prompt) {
     return { ok: false, skipped: false, summary: '', error: 'This task has no prompt.' }
   }
 
   // Scheduled tasks honor the user's configured autonomy mode; they do not force
-  // full mode the way an explicit Feishu command does.
-  const result = await runUnattendedPrompt(prompt, `task:${task.id}`)
+  // full mode the way an explicit Feishu command does. The abort signal lets the
+  // board terminate a runaway run, and each step is recorded for the UI / Feishu.
+  const result = await runUnattendedPrompt(prompt, `task:${task.id}`, undefined, {
+    signal: tracked.controller.signal,
+    onStep: (kind, text) => addStep(tracked.runId, kind, text),
+  })
   return {
     ok: result.ok,
     skipped: false,
     summary: result.answer,
     error: result.error,
+    cancelled: result.cancelled,
   }
 }
 

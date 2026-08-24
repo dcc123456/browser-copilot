@@ -83,6 +83,14 @@ export interface Messages {
   taskTriggerSchedule: string
   taskTriggerManual: string
   taskTriggerFeishu: string
+  tasksRunning: string
+  taskUntitled: string
+  taskTerminate: string
+  taskStartedAt: string
+  taskSourceChat: string
+  taskSourceSchedule: string
+  taskSourceManual: string
+  taskSourceFeishu: string
   tasksFeishuTitle: string
   tasksFeishuWebhook: string
   tasksFeishuWebhookSecret: string
@@ -322,6 +330,14 @@ const en: Messages = {
   taskTriggerSchedule: 'schedule',
   taskTriggerManual: 'manual',
   taskTriggerFeishu: 'Feishu',
+  tasksRunning: 'Running now',
+  taskUntitled: 'Untitled',
+  taskTerminate: 'Terminate',
+  taskStartedAt: 'Started',
+  taskSourceChat: 'chat',
+  taskSourceSchedule: 'schedule',
+  taskSourceManual: 'manual',
+  taskSourceFeishu: 'Feishu',
   tasksFeishuTitle: 'Feishu',
   tasksFeishuWebhook: 'Custom-bot webhook URL',
   tasksFeishuWebhookSecret: 'Webhook signing secret (if enabled)',
@@ -569,6 +585,14 @@ const zhCN: Messages = {
   taskTriggerSchedule: '定时',
   taskTriggerManual: '手动',
   taskTriggerFeishu: '飞书',
+  tasksRunning: '正在运行',
+  taskUntitled: '未命名',
+  taskTerminate: '终止',
+  taskStartedAt: '开始于',
+  taskSourceChat: '对话',
+  taskSourceSchedule: '定时',
+  taskSourceManual: '手动',
+  taskSourceFeishu: '飞书',
   tasksFeishuTitle: '飞书',
   tasksFeishuWebhook: '自定义机器人 Webhook 地址',
   tasksFeishuWebhookSecret: 'Webhook 签名校验密钥（如启用）',

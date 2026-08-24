@@ -94,12 +94,17 @@ async function handleScheduledRun(taskId: string): Promise<void> {
 
 /**
  * Runs a task immediately (from the UI or Feishu), without disturbing its
- * regular schedule. Returns the runner's outcome.
+ * regular schedule. Returns the runner's outcome. When triggered from Feishu,
+ * pass the chat id so per-step progress can be streamed back to that chat.
  */
-export async function triggerNow(taskId: string, trigger: 'manual' | 'feishu' = 'manual') {
+export async function triggerNow(
+  taskId: string,
+  trigger: 'manual' | 'feishu' = 'manual',
+  feishuChatId?: string,
+) {
   const task = await getTask(taskId)
   if (!task) throw new Error('Task not found.')
-  return runTask(task, trigger)
+  return runTask(task, trigger, undefined, feishuChatId)
 }
 
 // Re-exported so callers can record "just ran" without importing the store

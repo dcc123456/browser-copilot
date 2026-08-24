@@ -940,6 +940,13 @@ export async function runAgentTurn(history: WireMessage[], deps: AgentDeps): Pro
   }
 
   for (let round = 0; round < maxToolRounds; round += 1) {
+    // Bail promptly when the run is cancelled, rather than waiting for the next
+    // in-flight fetch to notice its signal. The streamCompletion catch below
+    // also handles an abort mid-request.
+    if (deps.signal?.aborted) {
+      deps.send({ type: 'status', text: 'Cancelled.' })
+      return
+    }
     const messages: WireMessage[] = [{ role: 'system', content: systemPrompt }, ...history]
 
     let result
@@ -982,6 +989,10 @@ export async function runAgentTurn(history: WireMessage[], deps: AgentDeps): Pro
     })
 
     for (const call of result.toolCalls) {
+      if (deps.signal?.aborted) {
+        deps.send({ type: 'status', text: 'Cancelled.' })
+        return
+      }
       await runOneToolCall(call, history, deps, ctx)
     }
   }
