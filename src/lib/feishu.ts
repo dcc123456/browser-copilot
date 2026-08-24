@@ -12,6 +12,17 @@
  * @module lib/feishu
  */
 
+/**
+ * Bound wrapper around the global `fetch`.
+ *
+ * In an MV3 service worker, storing the bare `fetch` as a class field/default
+ * argument and later calling it as `this.fetchImpl(...)` loses the global
+ * receiver, and Chrome throws "Failed to execute 'fetch' on
+ * 'WorkerGlobalScope': Illegal invocation". Calling through this arrow keeps the
+ * binding intact. Tests may still inject their own fetch implementation.
+ */
+export const httpFetch: typeof fetch = (...args) => fetch(...args)
+
 /** Thrown when Feishu returns a non-zero code or the request fails. */
 export class FeishuError extends Error {
   code: number | string
@@ -130,7 +141,7 @@ export class TenantTokenProvider {
   constructor(
     private readonly appId: string,
     private readonly appSecret: string,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = httpFetch,
   ) {}
 
   async get(): Promise<string> {
@@ -172,7 +183,7 @@ export async function sendImText(
   token: string,
   chatId: string,
   text: string,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = httpFetch,
 ): Promise<void> {
   const response = await fetchImpl('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id', {
     method: 'POST',
@@ -202,7 +213,7 @@ export async function sendImText(
  */
 export async function getWsEndpoint(
   tokenProvider: TenantTokenProvider,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = httpFetch,
 ): Promise<{ url: string; clientId: string; heartbeatSeconds: number; token: string }> {
   // parseEndpointResponse is kept in feishu-proto to avoid a cycle; import here
   // lazily to keep the modules decoupled.

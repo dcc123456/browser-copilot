@@ -49,7 +49,7 @@
  * @module background/feishu-bot
  */
 
-import { getWsEndpoint, FeishuError, TenantTokenProvider, sendImText } from '../lib/feishu'
+import { getWsEndpoint, FeishuError, TenantTokenProvider, sendImText, httpFetch } from '../lib/feishu'
 import {
   decodeFrame,
   encodeAck,
@@ -126,7 +126,7 @@ export class FeishuBot {
   private connecting = false
 
   constructor(
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = httpFetch,
     private readonly socketCtor: SocketCtor = defaultCtor as unknown as SocketCtor,
   ) {}
 
