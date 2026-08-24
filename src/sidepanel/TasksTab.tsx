@@ -197,10 +197,9 @@ export default function TasksTab() {
   return (
     <div className="pane tasks-tab">
       <h2>{t.tasksTitle}</h2>
-      <p className="hint">{t.tasksSubtitle}</p>
 
       {banner && (
-        <div className={`banner banner-${banner.kind}`} role="status">
+        <div className={`banner banner-${banner.kind}`} data-kind={banner.kind} role="status">
           {banner.text}
         </div>
       )}
@@ -212,16 +211,19 @@ export default function TasksTab() {
         busy={busy}
       />
 
-      {!draft && (
-        <button
-          className="primary"
-          disabled={busy}
-          onClick={() => setDraft(emptyTask('github-review-requests'))}
-          type="button"
-        >
-          + {t.taskNew}
-        </button>
-      )}
+      <div className="section-head">
+        <h3>{t.tasksMine}</h3>
+        {!draft && (
+          <button
+            className="primary section-action"
+            disabled={busy}
+            onClick={() => setDraft(emptyTask('github-review-requests'))}
+            type="button"
+          >
+            + {t.taskNew}
+          </button>
+        )}
+      </div>
 
       {draft && (
         <TaskEditor
@@ -233,74 +235,111 @@ export default function TasksTab() {
         />
       )}
 
-      <ul className="task-list">
-        {tasks.map((task) => (
-          <li
-            className={`task-item${justSavedId === task.id ? ' task-item-saved' : ''}`}
-            key={task.id}
-          >
-            <div className="task-item-head">
-              <label className="inline-check">
-                <input
-                  checked={task.enabled}
-                  disabled={busy || draft?.id === task.id}
-                  onChange={(event) =>
-                    void persistTask({ ...task, enabled: event.target.checked })
-                  }
-                  type="checkbox"
-                />
-                <strong>{task.name}</strong>
-              </label>
-              <span className={`task-status task-status-${task.lastStatus ?? 'none'}`}>
-                {task.lastStatus === 'ok'
-                  ? t.taskStatusOk
-                  : task.lastStatus === 'failed'
-                    ? t.taskStatusFailed
-                    : task.lastStatus === 'skipped'
-                      ? t.taskStatusSkipped
-                      : ''}
-              </span>
-            </div>
-            <div className="task-meta">
-              {describeSchedule(task.schedule, zh ? 'zh' : 'en')} ·{' '}
-              {task.kind === 'github-review-requests' ? t.taskKindGithub : t.taskKindPrompt}
-            </div>
-            {task.lastRunAt && (
-              <div className="task-meta">
-                {t.taskLastRun}: {new Date(task.lastRunAt).toLocaleString(locale)}
-                {task.lastSummary ? ` — ${task.lastSummary.split('\n')[0]}` : ''}
+      {tasks.length === 0 && !draft ? (
+        <div className="empty-state">
+          <p>{t.tasksEmpty}</p>
+        </div>
+      ) : (
+        <ul className="task-list">
+          {tasks.map((task) => (
+            <li
+              className={`task-item${justSavedId === task.id ? ' task-item-saved' : ''}${
+                !task.enabled ? ' task-item-disabled' : ''
+              }`}
+              key={task.id}
+            >
+              <div className="task-item-head">
+                <label className="inline-check">
+                  <input
+                    checked={task.enabled}
+                    disabled={busy || draft?.id === task.id}
+                    onChange={(event) =>
+                      void persistTask({ ...task, enabled: event.target.checked })
+                    }
+                    type="checkbox"
+                  />
+                  <strong className="task-item-name">{task.name}</strong>
+                </label>
+                <span className={`task-status task-status-${task.lastStatus ?? 'none'}`}>
+                  {task.lastStatus === 'ok'
+                    ? t.taskStatusOk
+                    : task.lastStatus === 'failed'
+                      ? t.taskStatusFailed
+                      : task.lastStatus === 'skipped'
+                        ? t.taskStatusSkipped
+                        : ''}
+                </span>
               </div>
-            )}
-            <div className="actions">
-              <button disabled={busy || !!draft} onClick={() => void runNow(task.id)} type="button">
-                {t.taskRunNow}
-              </button>
-              <button disabled={busy || !!draft} onClick={() => setDraft({ ...task })} type="button">
-                {t.edit}
-              </button>
-              <button
-                disabled={busy || !!draft}
-                onClick={() => void removeTask(task.id)}
-                type="button"
-              >
-                {t.delete}
-              </button>
-            </div>
-          </li>
-        ))}
-      </ul>
-
-      {feishu && (
-        <FeishuSection
-          config={feishu}
-          disabled={busy}
-          onChange={setFeishu}
-          onSave={saveFeishu}
-          onTest={testFeishu}
-        />
+              <div className="task-meta">
+                <span className="task-chip">
+                  {describeSchedule(task.schedule, zh ? 'zh' : 'en')}
+                </span>
+                <span className="task-chip">
+                  {task.kind === 'github-review-requests' ? t.taskKindGithub : t.taskKindPrompt}
+                </span>
+                {task.notifyFeishu && <span className="task-chip task-chip-feishu">Feishu</span>}
+              </div>
+              {task.lastRunAt && (
+                <div className="task-lastrun">
+                  {t.taskLastRun}: {new Date(task.lastRunAt).toLocaleString(locale)}
+                  {task.lastSummary ? ` — ${task.lastSummary.split('\n')[0]}` : ''}
+                </div>
+              )}
+              <div className="actions task-actions">
+                <button
+                  className="task-action-run"
+                  disabled={busy || !!draft}
+                  onClick={() => void runNow(task.id)}
+                  type="button"
+                >
+                  {t.taskRunNow}
+                </button>
+                <button
+                  disabled={busy || !!draft}
+                  onClick={() => setDraft({ ...task })}
+                  type="button"
+                >
+                  {t.edit}
+                </button>
+                <button
+                  className="danger"
+                  disabled={busy || !!draft}
+                  onClick={() => void removeTask(task.id)}
+                  type="button"
+                >
+                  {t.delete}
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
 
-      <RunLog runs={runs.slice(0, 20)} onClear={() => void sendCommand({ type: 'tasks.runs.clear' }).then(load)} />
+      {feishu && (
+        <details className="collapsible">
+          <summary>
+            <span className="collapsible-title">{t.tasksFeishuSection}</span>
+          </summary>
+          <FeishuSection
+            config={feishu}
+            disabled={busy}
+            onChange={setFeishu}
+            onSave={saveFeishu}
+            onTest={testFeishu}
+          />
+        </details>
+      )}
+
+      <details className="collapsible">
+        <summary>
+          <span className="collapsible-title">{t.tasksRunHistory}</span>
+          {runs.length > 0 && <span className="collapsible-count">{runs.length}</span>}
+        </summary>
+        <RunLog
+          runs={runs.slice(0, 20)}
+          onClear={() => void sendCommand({ type: 'tasks.runs.clear' }).then(load)}
+        />
+      </details>
     </div>
   )
 }
@@ -575,26 +614,31 @@ function FeishuSection({
 
 function RunLog({ runs, onClear }: { runs: TaskRunLog[]; onClear: () => void }) {
   const t = useT()
-  if (runs.length === 0) return null
   const triggerLabel = (trigger: TaskRunLog['trigger']): string =>
     trigger === 'feishu' ? t.taskTriggerFeishu : trigger === 'manual' ? t.taskTriggerManual : t.taskTriggerSchedule
   return (
-    <div className="card">
-      <div className="card-head">
-        <h3>{t.taskRuns}</h3>
+    <div className="run-log-wrap">
+      <div className="run-log-bar">
         <button className="link" onClick={onClear} type="button">
           {t.taskRunsClear}
         </button>
       </div>
-      <ul className="run-log">
-        {runs.map((run) => (
-          <li className={`run-line run-${run.ok ? 'ok' : run.skipped ? 'skipped' : 'err'}`} key={run.id}>
-            <span className="run-time">{new Date(run.at).toLocaleString(navigator.language)}</span>
-            <span className="run-tag">{triggerLabel(run.trigger)}</span>
-            <span className="run-summary">{run.summary || run.error || ''}</span>
-          </li>
-        ))}
-      </ul>
+      {runs.length === 0 ? (
+        <p className="hint">{t.taskRunsEmpty}</p>
+      ) : (
+        <ul className="run-log">
+          {runs.map((run) => (
+            <li
+              className={`run-line run-${run.ok ? 'ok' : run.skipped ? 'skipped' : 'err'}`}
+              key={run.id}
+            >
+              <span className="run-time">{new Date(run.at).toLocaleString(navigator.language)}</span>
+              <span className="run-tag">{triggerLabel(run.trigger)}</span>
+              <span className="run-summary">{run.summary || run.error || ''}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
@@ -631,14 +675,15 @@ function RunningBoard({
           : t.taskOutcomeFailed
 
   return (
-    <div className="card running-board">
+    <div className={`card running-board${running.length > 0 ? ' running-board-active' : ''}`}>
       <div className="card-head">
         <h3>
           {running.length > 0 && <span className="running-dot" />}
-          {t.tasksRunning}
+          {t.tasksActivity}
           {running.length > 0 && <span className="running-count">{running.length}</span>}
         </h3>
       </div>
+
       {running.length === 0 ? (
         <p className="hint running-empty">{t.tasksRunningEmpty}</p>
       ) : (
@@ -647,7 +692,6 @@ function RunningBoard({
             <li className="running-item" key={run.runId}>
               <div className="running-item-head">
                 <strong className="running-label">{run.label || t.taskUntitled}</strong>
-                <span className="run-tag">{sourceLabel(run.source)}</span>
                 <button
                   className="running-cancel"
                   disabled={busy}
@@ -658,7 +702,10 @@ function RunningBoard({
                 </button>
               </div>
               <div className="running-meta">
-                {t.taskStartedAt}: {new Date(run.startedAt).toLocaleTimeString(navigator.language)}
+                <span className="run-tag">{sourceLabel(run.source)}</span>
+                <span>
+                  {t.taskStartedAt}: {new Date(run.startedAt).toLocaleTimeString(navigator.language)}
+                </span>
               </div>
               {run.steps.length > 0 && (
                 <ul className="running-steps">
@@ -678,20 +725,15 @@ function RunningBoard({
         <>
           <div className="running-divider" />
           <h4 className="running-section-title">{t.tasksRecentlyFinished}</h4>
-          <ul className="running-list">
-            {finished.slice(0, 10).map((run) => (
-              <li className={`running-item finished-item finished-${run.outcome}`} key={run.runId}>
-                <div className="running-item-head">
-                  <strong className="running-label">{run.label || t.taskUntitled}</strong>
-                  <span className="run-tag">{sourceLabel(run.source)}</span>
-                  <span className={`finished-badge finished-badge-${run.outcome}`}>
-                    {outcomeLabel(run.outcome)}
-                  </span>
-                </div>
-                <div className="running-meta">
-                  {new Date(run.finishedAt).toLocaleTimeString(navigator.language)}
-                  {run.summary ? ` — ${run.summary.split('\n')[0]}` : ''}
-                </div>
+          <ul className="finished-list">
+            {finished.slice(0, 8).map((run) => (
+              <li className={`finished-row finished-${run.outcome}`} key={run.runId}>
+                <span className={`finished-dot finished-dot-${run.outcome}`} />
+                <span className="finished-name">{run.label || t.taskUntitled}</span>
+                <span className="run-tag">{sourceLabel(run.source)}</span>
+                <span className={`finished-badge finished-badge-${run.outcome}`}>
+                  {outcomeLabel(run.outcome)}
+                </span>
               </li>
             ))}
           </ul>

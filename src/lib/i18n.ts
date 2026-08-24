@@ -85,6 +85,11 @@ export interface Messages {
   taskTriggerFeishu: string
   tasksRunning: string
   tasksRunningEmpty: string
+  tasksActivity: string
+  tasksMine: string
+  tasksEmpty: string
+  tasksFeishuSection: string
+  tasksRunHistory: string
   tasksRecentlyFinished: string
   taskOutcomeOk: string
   taskOutcomeFailed: string
@@ -336,8 +341,13 @@ const en: Messages = {
   taskTriggerSchedule: 'schedule',
   taskTriggerManual: 'manual',
   taskTriggerFeishu: 'Feishu',
-  tasksRunning: 'Running now',
+  tasksRunning: 'Running',
   tasksRunningEmpty: 'No tasks running. Start one from chat, a schedule, or Feishu.',
+  tasksActivity: 'Activity',
+  tasksMine: 'My tasks',
+  tasksEmpty: 'No tasks yet. Create one to get started.',
+  tasksFeishuSection: 'Feishu integration',
+  tasksRunHistory: 'Run history',
   tasksRecentlyFinished: 'Recently finished',
   taskOutcomeOk: 'done',
   taskOutcomeFailed: 'failed',
@@ -597,8 +607,13 @@ const zhCN: Messages = {
   taskTriggerSchedule: '定时',
   taskTriggerManual: '手动',
   taskTriggerFeishu: '飞书',
-  tasksRunning: '正在运行',
+  tasksRunning: '运行中',
   tasksRunningEmpty: '当前没有运行中的任务。可从对话、定时或飞书发起。',
+  tasksActivity: '动态',
+  tasksMine: '我的任务',
+  tasksEmpty: '还没有任务，新建一个开始吧。',
+  tasksFeishuSection: '飞书集成',
+  tasksRunHistory: '运行历史',
   tasksRecentlyFinished: '最近完成',
   taskOutcomeOk: '成功',
   taskOutcomeFailed: '失败',
