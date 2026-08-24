@@ -36,6 +36,16 @@
  * the bot reachable while the machine is asleep. That remains a hard platform
  * limit and is stated in the UI.
  *
+ * ## Routing inbound messages
+ *
+ * Not every message is a hard-coded command. When text arrives:
+ *  1. If it names a saved task, run that task.
+ *  2. If it matches a built-in shorthand (e.g. "review PRs") and such a task
+ *     exists, run it.
+ *  3. Otherwise run it as a one-off agent instruction in `full` autonomy, so the
+ *     agent can open a tab and read the page without a human approving each
+ *     step. This is what makes "帮我查看微博热搜" actually do something.
+ *
  * @module background/feishu-bot
  */
 
@@ -50,6 +60,7 @@ import {
 } from '../lib/feishu-proto'
 import { getFeishuConfig, listTasks } from '../lib/task-store'
 import { triggerNow } from './scheduler'
+import { runUnattendedPrompt } from './agent-unattended'
 
 
 /** Alarm name the watchdog uses; also exported for clearing on stop. */
@@ -377,31 +388,77 @@ export class FeishuBot {
   private async handleEvent(data: string): Promise<void> {
     const message = parseEvent(data)
     if (!message) return
-    if (!isCommand(message.text)) return
-
-    const tasks = await listTasks()
-    const reviewTask = tasks.find((task) => task.kind === 'github-review-requests')
-    const named =
-      tasks.find((task) => task.name && message.text.toLowerCase().includes(task.name.toLowerCase())) ??
-      reviewTask
+    const text = message.text
+    // Ignore very short/empty messages and @-mention noise. Anything substantive
+    // is either a named-task trigger or an ad-hoc instruction for the agent.
+    if (text.length === 0) return
 
     if (!this.tokens) return
     const token = await this.tokens.get().catch(() => null)
     if (!token) return
 
-    if (!named) {
-      await safeReply(token, message.chatId, this.noTaskReply(message.text))
+    // 1. Named task? If the message mentions a saved task name, run that task.
+    const tasks = await listTasks()
+    const named = tasks.find(
+      (task) => task.name && text.toLowerCase().includes(task.name.toLowerCase()),
+    )
+    if (named) {
+      await safeReply(token, message.chatId, this.ackReply(named.name, text))
+      try {
+        const outcome = await triggerNow(named.id, 'feishu')
+        await sendImText(token, message.chatId, outcome.summary || '(no output)')
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        await safeReply(token, message.chatId, `Task failed: ${detail}`)
+      }
       return
     }
 
-    await safeReply(token, message.chatId, this.ackReply(named.name, message.text))
+    // 2. Built-in shorthand: a PR review request without a named task.
+    if (isCommand(text)) {
+      const reviewTask = tasks.find((task) => task.kind === 'github-review-requests')
+      if (reviewTask) {
+        await safeReply(token, message.chatId, this.ackReply(reviewTask.name, text))
+        try {
+          const outcome = await triggerNow(reviewTask.id, 'feishu')
+          await sendImText(token, message.chatId, outcome.summary || '(no output)')
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error)
+          await safeReply(token, message.chatId, `Task failed: ${detail}`)
+        }
+        return
+      }
+    }
+
+    // 3. Otherwise treat the message as a one-off instruction for the agent.
+    //    This is what lets "帮我查看微博现在的热搜是什么" open a tab and answer.
+    await safeReply(token, message.chatId, this.thinkingReply(text))
     try {
-      const outcome = await triggerNow(named.id, 'feishu')
-      await sendImText(token, message.chatId, outcome.summary || '(no output)')
+      const result = await runUnattendedPrompt(
+        this.withBrowserGuidance(text),
+        `feishu:${message.messageId || message.chatId}`,
+        'full',
+      )
+      const reply = result.answer?.trim() || result.error || '(no answer)'
+      await sendImText(token, message.chatId, reply)
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
-      await safeReply(token, message.chatId, `Task failed: ${detail}`)
+      await safeReply(token, message.chatId, `Failed: ${detail}`)
     }
+  }
+
+  /**
+   * Adds a short instruction for browser-driven questions, so the agent knows it
+   * can open a tab and read the page rather than answering from its training
+   * data alone. Kept tiny: the user's own wording is what matters.
+   */
+  private withBrowserGuidance(text: string): string {
+    return (
+      `${text}\n\n` +
+      'You are being driven from a chat. If answering requires current web ' +
+      'content, open the relevant page in a tab, read it, and answer concisely ' +
+      'in the same language as the request.'
+    )
   }
 
   private ackReply(name: string, text: string): string {
@@ -409,11 +466,9 @@ export class FeishuBot {
     return zh ? `收到，正在执行「${name}」…` : `Got it, running "${name}"…`
   }
 
-  private noTaskReply(text: string): string {
+  private thinkingReply(text: string): string {
     const zh = /[\u4e00-\u9fff]/.test(text)
-    return zh
-      ? '没有匹配的任务。在扩展的「任务」里创建一个，并在消息里提到它的名称。'
-      : 'No matching task. Create one in the extension’s Tasks tab and mention its name.'
+    return zh ? '收到，正在处理…' : 'Got it, working on it…'
   }
 }
 

@@ -995,6 +995,21 @@ textarea {
   padding: 8px 10px;
 }
 
+@keyframes task-saved-flash {
+  0% {
+    border-color: var(--ok);
+    box-shadow: 0 0 0 0 var(--ok);
+  }
+  100% {
+    border-color: var(--border);
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.task-item-saved {
+  animation: task-saved-flash 1.8s ease-out;
+}
+
 .task-item-head {
   display: flex;
   align-items: center;

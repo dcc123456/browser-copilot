@@ -23,8 +23,7 @@ import {
   getFeishuConfig,
   recordTaskRun,
 } from '../lib/task-store'
-import { runAgentTurn } from './agent'
-import { getSettings } from '../lib/storage'
+import { runUnattendedPrompt } from './agent-unattended'
 import { retain, release } from './keepalive'
 
 export type TaskTrigger = 'schedule' | 'feishu' | 'manual'
@@ -145,35 +144,14 @@ async function runAgentPrompt(task: ScheduledTask, _lang: string): Promise<RunOu
     return { ok: false, skipped: false, summary: '', error: 'This task has no prompt.' }
   }
 
-  const settings = await getSettings()
-  const collected: string[] = []
-  const chunks: string[] = []
-  const history: { role: string; content: string }[] = [{ role: 'user', content: prompt }]
-
-  await runAgentTurn(history as never, {
-    conversationId: `task:${task.id}`,
-    send: (message) => {
-      if (message.type === 'delta') chunks.push(message.text)
-      if (message.type === 'tool.start') collected.push(`→ ${message.name}`)
-      if (message.type === 'tool.result') collected.push(`← ${message.summary}`)
-      if (message.type === 'error') collected.push(`! ${message.message}`)
-    },
-    confirm: async () => {
-      // Unattended: never approve an action the user cannot see. Sending false
-      // makes the model report that the action was declined and move on.
-      return false
-    },
-    getMode: async () => settings.mode,
-    getMaxToolRounds: async () => settings.maxToolRounds,
-  })
-
-  const answer = chunks.join('').trim()
-  const summary = answer || collected.join('\n')
+  // Scheduled tasks honor the user's configured autonomy mode; they do not force
+  // full mode the way an explicit Feishu command does.
+  const result = await runUnattendedPrompt(prompt, `task:${task.id}`)
   return {
-    ok: answer.length > 0,
+    ok: result.ok,
     skipped: false,
-    summary,
-    error: answer ? undefined : 'The agent produced no answer.',
+    summary: result.answer,
+    error: result.error,
   }
 }
 

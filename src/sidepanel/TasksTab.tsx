@@ -35,6 +35,15 @@ export default function TasksTab() {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [banner, setBanner] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  /** Id of the task just saved, so its card can briefly highlight. */
+  const [justSavedId, setJustSavedId] = useState<string | null>(null)
+
+  // Clear the highlight a short time after it appears, without re-running load.
+  useEffect(() => {
+    if (!justSavedId) return
+    const timer = setTimeout(() => setJustSavedId(null), 1800)
+    return () => clearTimeout(timer)
+  }, [justSavedId])
 
   const load = useCallback(async () => {
     try {
@@ -59,8 +68,12 @@ export default function TasksTab() {
     setBusy(true)
     try {
       await sendCommand({ type: 'tasks.save', task })
+      // Collapse the editor back into the list. The list reloads below, which
+      // surfaces the saved task as a card; we also remember its id so the card
+      // can flash to draw the user's eye.
       setDraft(null)
-      setBanner({ kind: 'ok', text: t.taskSave })
+      setJustSavedId(task.id)
+      setBanner({ kind: 'ok', text: t.taskSaved })
       await load()
     } catch (error) {
       setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
@@ -171,7 +184,10 @@ export default function TasksTab() {
 
       <ul className="task-list">
         {tasks.map((task) => (
-          <li className="task-item" key={task.id}>
+          <li
+            className={`task-item${justSavedId === task.id ? ' task-item-saved' : ''}`}
+            key={task.id}
+          >
             <div className="task-item-head">
               <label className="inline-check">
                 <input

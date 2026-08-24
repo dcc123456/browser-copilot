@@ -75,6 +75,7 @@ export interface Messages {
   taskStatusFailed: string
   taskStatusSkipped: string
   taskSave: string
+  taskSaved: string
   taskDeleteConfirm: string
   taskRuns: string
   taskRunsEmpty: string
@@ -313,6 +314,7 @@ const en: Messages = {
   taskStatusFailed: 'failed',
   taskStatusSkipped: 'skipped',
   taskSave: 'Save task',
+  taskSaved: 'Task saved.',
   taskDeleteConfirm: 'Delete this task? Its run history is removed too.',
   taskRuns: 'Recent runs',
   taskRunsEmpty: 'No runs yet.',
@@ -328,7 +330,7 @@ const en: Messages = {
   tasksFeishuAppId: 'App ID',
   tasksFeishuAppSecret: 'App secret',
   tasksFeishuBotHint:
-    'A self-built Feishu app with the long-connection mode. It reconnects automatically (exponential backoff) and resumes after the browser wakes up.',
+    'A self-built Feishu app with the long-connection mode. Chat to the bot to run a named task, or just say what you want (e.g. "check Weibo hot search") and the agent will open a tab and answer. It reconnects automatically and resumes after the browser wakes up.',
   tasksFeishuTest: 'Send test message',
   tasksFeishuTestOk: 'Test message sent.',
   tasksFeishuBotWarn:
@@ -559,6 +561,7 @@ const zhCN: Messages = {
   taskStatusFailed: '失败',
   taskStatusSkipped: '已跳过',
   taskSave: '保存任务',
+  taskSaved: '任务已保存。',
   taskDeleteConfirm: '删除这个任务？相关的运行记录也会一并删除。',
   taskRuns: '最近运行',
   taskRunsEmpty: '还没有运行记录。',
@@ -574,7 +577,7 @@ const zhCN: Messages = {
   tasksFeishuAppId: 'App ID',
   tasksFeishuAppSecret: 'App Secret',
   tasksFeishuBotHint:
-    '需要一个开启了长连接模式的企业自建应用。断线会自动重连（指数退避），浏览器唤醒后约一分钟内自动恢复连接。',
+    '需要一个开启了长连接模式的企业自建应用。给机器人发消息可以运行同名任务，也可以直接说需求（例如"查一下微博热搜"），智能体会打开页面并回答。断线会自动重连，浏览器唤醒后约一分钟内恢复连接。',
   tasksFeishuTest: '发送测试消息',
   tasksFeishuTestOk: '测试消息已发送。',
   tasksFeishuBotWarn:

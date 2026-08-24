@@ -8,6 +8,39 @@ import {
   decodeMessage,
 } from '../src/lib/feishu-proto'
 
+/** Builds a server request (type 1) frame carrying a Feishu event callback. */
+function eventFrame(seq: number, eventJson: string): Uint8Array {
+  // Field 4 (Data) is a length-delimited string in ServerStreamResponse. Encode
+  // the length as a proper varint so long payloads parse correctly.
+  const s = new TextEncoder().encode(eventJson)
+  const lenBytes: number[] = []
+  let len = s.length
+  do {
+    const byte = len & 0x7f
+    len >>>= 7
+    lenBytes.push(len > 0 ? byte | 0x80 : byte)
+  } while (len > 0)
+  const payload = new Uint8Array(1 + lenBytes.length + s.length)
+  payload[0] = (4 << 3) | 2
+  payload.set(lenBytes, 1)
+  payload.set(s, 1 + lenBytes.length)
+  return encodeFrame(FRAME.REQUEST, seq, payload)
+}
+
+function textMessageEvent(text: string): string {
+  return JSON.stringify({
+    header: { event_type: 'im.message.receive_v1', event_id: 'e1' },
+    event: {
+      message: {
+        chat_id: 'oc_1',
+        message_type: 'text',
+        content: JSON.stringify({ text }),
+        message_id: 'om_1',
+      },
+    },
+  })
+}
+
 // Mock the task-store and scheduler so the bot's event routing has no side
 // effects; this test focuses purely on the connection state machine.
 vi.mock('../src/lib/task-store', () => ({
@@ -22,6 +55,9 @@ vi.mock('../src/lib/task-store', () => ({
 }))
 vi.mock('../src/background/scheduler', () => ({
   triggerNow: vi.fn(async () => ({ ok: true, summary: 'done', error: null, skipped: false })),
+}))
+vi.mock('../src/background/agent-unattended', () => ({
+  runUnattendedPrompt: vi.fn(async () => ({ ok: true, answer: '42', error: undefined })),
 }))
 
 /** Fake alarm API that records created alarms so the test can fire them. */
@@ -234,5 +270,36 @@ describe('FeishuBot connection state machine', () => {
     expect(FakeSocket.createdCount).toBe(0)
     bot.onWatchdog()
     expect(FakeSocket.createdCount).toBe(0)
+  })
+
+  it('routes an unrecognised message to the ad-hoc agent and ACKs it', async () => {
+    vi.useRealTimers()
+    const { bot } = makeBot()
+    void bot.reconcile()
+    // The endpoint/token fetches are mocked but still resolve on the microtask
+    // queue; wait until the socket constructor has run.
+    await vi.waitFor(() => expect(FakeSocket.last).not.toBeNull(), { timeout: 2000 })
+    const socket = FakeSocket.last!
+    socket.open()
+    // Handshake ok.
+    socket.message(encodeFrame(FRAME.RESPONSE, 1, new Uint8Array([(2 << 3) | 0, 0])))
+
+    const unattended = await import('../src/background/agent-unattended')
+    const runSpy = vi.mocked(unattended.runUnattendedPrompt)
+
+    socket.message(eventFrame(55, textMessageEvent('帮我查看微博现在的热搜是什么')))
+    await vi.waitFor(() => expect(runSpy).toHaveBeenCalledTimes(1), { timeout: 2000 })
+
+    // The event must be ACKed with a response frame echoing seq 55.
+    const ack = socket.sent.find((bytes) => bytes[1] === FRAME.RESPONSE)
+    expect(ack).toBeTruthy()
+    const view = new DataView(ack!.buffer)
+    expect(view.getUint32(4, false)).toBe(55)
+
+    const [prompt, convoId, mode] = runSpy.mock.calls[0]!
+    expect(prompt).toContain('微博')
+    expect(convoId).toContain('feishu:')
+    expect(mode).toBe('full')
+    bot.stop()
   })
 })
