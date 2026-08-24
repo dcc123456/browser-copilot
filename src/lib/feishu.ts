@@ -23,6 +23,28 @@
  */
 export const httpFetch: typeof fetch = (...args) => fetch(...args)
 
+/**
+ * Reads a JSON response, but if parsing fails throws with the HTTP status and a
+ * short snippet of the raw body.
+ *
+ * Feishu (or a captive proxy/SSO page in front of it) occasionally returns HTML
+ * or a redirect instead of JSON for a misconfigured request; a bare
+ * "Unexpected token <" gives no way to tell that from a code bug. Including the
+ * status and body preview makes the service-worker log actionable.
+ */
+async function readJson<T>(response: Response, label: string): Promise<T> {
+  const text = await response.text()
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    const snippet = text.slice(0, 300).replace(/\s+/g, ' ')
+    throw new FeishuError(
+      `${label} returned non-JSON (HTTP ${response.status}): ${snippet}`,
+      response.status,
+    )
+  }
+}
+
 /** Thrown when Feishu returns a non-zero code or the request fails. */
 export class FeishuError extends Error {
   code: number | string
@@ -154,12 +176,12 @@ export class TenantTokenProvider {
         body: JSON.stringify({ app_id: this.appId, app_secret: this.appSecret }),
       },
     )
-    const data = (await response.json()) as {
+    const data = await readJson<{
       code?: number
       msg?: string
       tenant_access_token?: string
       expire?: number
-    }
+    }>(response, 'Feishu token request')
     if (data.code !== 0 || !data.tenant_access_token) {
       throw new FeishuError(
         data.msg ?? 'Could not obtain a Feishu tenant access token.',
@@ -197,7 +219,7 @@ export async function sendImText(
       content: JSON.stringify({ text }),
     }),
   })
-  const data = (await response.json()) as { code?: number; msg?: string }
+  const data = await readJson<{ code?: number; msg?: string }>(response, 'Feishu send')
   if (data.code !== 0) {
     throw new FeishuError(data.msg ?? `Feishu send failed (HTTP ${response.status})`, data.code ?? response.status)
   }
@@ -230,7 +252,7 @@ export async function getWsEndpoint(
       body: JSON.stringify({}),
     },
   )
-  const json = (await response.json()) as unknown
+  const json = await readJson<unknown>(response, 'Feishu GetWsEndpoint')
   return parseEndpointResponse(json)
 }
 
