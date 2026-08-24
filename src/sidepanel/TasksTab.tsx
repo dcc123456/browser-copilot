@@ -376,6 +376,11 @@ export default function TasksTab() {
         <RunLog
           runs={runs.slice(0, 20)}
           onClear={() => void sendCommand({ type: 'tasks.runs.clear' }).then(load)}
+          onDelete={(id) =>
+            void sendCommand({ type: 'tasks.runs.delete', id }).then(() => {
+              setRuns((prev) => prev.filter((r) => r.id !== id))
+            })
+          }
         />
       </details>
     </div>
@@ -634,7 +639,15 @@ function FeishuSection({
 
 // --- Run log -----------------------------------------------------------------
 
-function RunLog({ runs, onClear }: { runs: TaskRunLog[]; onClear: () => void }) {
+function RunLog({
+  runs,
+  onClear,
+  onDelete,
+}: {
+  runs: TaskRunLog[]
+  onClear: () => void
+  onDelete: (id: string) => void
+}) {
   const t = useT()
   const [openId, setOpenId] = useState<string | null>(null)
   const sourceLabel = (run: TaskRunLog): string => {
@@ -687,6 +700,18 @@ function RunLog({ runs, onClear }: { runs: TaskRunLog[]; onClear: () => void }) 
                   <span className={`run-badge run-badge-${run.skipped ? 'skipped' : run.ok ? 'ok' : 'err'}`}>
                     {outcomeLabel(run)}
                   </span>
+                  <button
+                    aria-label={t.delete}
+                    className="danger run-delete"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onDelete(run.id)
+                    }}
+                    title={t.delete}
+                    type="button"
+                  >
+                    ×
+                  </button>
                 </button>
                 {(run.summary || run.error) && (
                   <div className="run-summary">{run.summary || run.error}</div>

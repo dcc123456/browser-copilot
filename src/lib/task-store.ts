@@ -240,6 +240,12 @@ export async function clearRuns(taskId?: string): Promise<void> {
   await chrome.storage.local.set({ [KEY_RUNS]: list.filter((run) => run.taskId !== taskId) })
 }
 
+/** Deletes a single run-log entry by its id. */
+export async function deleteRun(id: string): Promise<void> {
+  const list = await listRuns()
+  await chrome.storage.local.set({ [KEY_RUNS]: list.filter((run) => run.id !== id) })
+}
+
 // --- Feishu config -----------------------------------------------------------
 
 function asFeishu(value: unknown): FeishuConfig {

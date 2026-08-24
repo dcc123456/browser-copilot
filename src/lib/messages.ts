@@ -99,6 +99,7 @@ export type Command =
   | { type: 'tasks.run'; id: string }
   | { type: 'tasks.runs'; taskId?: string }
   | { type: 'tasks.runs.clear'; taskId?: string }
+  | { type: 'tasks.runs.delete'; id: string }
   | { type: 'tasks.running' }
   | { type: 'tasks.cancel'; runId: string }
 
@@ -147,6 +148,7 @@ export type CommandResult =
   | { type: 'tasks.run'; outcome: { ok: boolean; skipped: boolean; summary: string; error?: string } }
   | { type: 'tasks.runs'; runs: TaskRunLog[] }
   | { type: 'tasks.runs.clear' }
+  | { type: 'tasks.runs.delete' }
   | { type: 'tasks.running'; runs: RunningTaskView[]; finished: FinishedTaskView[] }
   | { type: 'tasks.cancel'; ok: boolean }
   | { type: 'feishu.get'; config: FeishuConfig }

@@ -218,6 +218,12 @@ export function getRun(runId: string): RunningTask | undefined {
   return runs.get(runId)
 }
 
+/** Removes a finished run from the in-memory "recently completed" board by id. */
+export function forgetFinished(runId: string): void {
+  const index = finished.findIndex((r) => r.runId === runId)
+  if (index !== -1) finished.splice(index, 1)
+}
+
 /**
  * Requests cancellation of a run. The abort signal fires; the agent loop and
  * fetches observe it. The run finishes asynchronously and removes itself.

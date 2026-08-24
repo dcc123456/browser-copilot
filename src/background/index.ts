@@ -54,6 +54,7 @@ import { runAgentTurn, summarizeToolResult } from './agent'
 import { activeTab, readActivePage } from './page'
 import {
   clearRuns,
+  deleteRun,
   deleteTask,
   getFeishuConfig,
   listRuns,
@@ -69,6 +70,7 @@ import {
   addStep,
   cancelRun,
   finishRun,
+  forgetFinished,
   hydrateFinished,
   listFinished,
   listRunning,
@@ -394,6 +396,10 @@ async function handleCommand(command: Command): Promise<CommandResult> {
     case 'tasks.runs.clear':
       await clearRuns(command.taskId)
       return { type: 'tasks.runs.clear' }
+    case 'tasks.runs.delete':
+      await deleteRun(command.id)
+      forgetFinished(command.id)
+      return { type: 'tasks.runs.delete' }
     case 'tasks.running': {
       const mapFinished = (r: ReturnType<typeof listFinished>[number]) => ({
         runId: r.runId,
