@@ -135,6 +135,14 @@ export class FeishuBot {
   private pingTimer: ReturnType<typeof setTimeout> | null = null
   /** True only while a connect attempt is in flight, to prevent duplicates. */
   private connecting = false
+  /**
+   * Recently handled event ids, retained for a short window so a redelivery of
+   * the same event (server retries when it considers an ACK lost, or a worker
+   * restart) does not run a task twice. Sized as a ring buffer; order tracks
+   * arrival so the oldest can be evicted.
+   */
+  private recentEventIds: string[] = []
+  private static readonly MAX_RECENT_EVENT_IDS = 64
 
   constructor(
     private readonly fetchImpl: typeof fetch = httpFetch,
@@ -210,6 +218,17 @@ export class FeishuBot {
   private async connect(): Promise<void> {
     if (!this.appId || !this.appSecret) {
       throw new Error('No credentials; call reconcile() first.')
+    }
+    // If a previous socket is still around (open or half-closed), close it
+    // before opening a replacement so we never have two connections receiving
+    // the same events in parallel.
+    if (this.socket) {
+      try {
+        this.socket.close(1000, 'reconnecting')
+      } catch {
+        // ignore
+      }
+      this.socket = null
     }
     // 1. Resolve a fresh endpoint. The returned URL carries one-time
     //    access_key/ticket credentials, so a stale URL from a previous
@@ -435,6 +454,22 @@ export class FeishuBot {
     // Ignore very short/empty messages and @-mention noise. Anything substantive
     // is either a named-task trigger or an ad-hoc instruction for the agent.
     if (text.length === 0) return
+
+    // Drop duplicate deliveries. Feishu redelivers an event when it does not see
+    // a successful ACK in time (or when the worker reconnects); without this
+    // guard the same task can fire several times in a row. Keyed on event_id
+    // (falling back to message_id), retained in a small ring buffer.
+    const dedupeKey = message.eventId || message.messageId
+    if (dedupeKey && this.recentEventIds.includes(dedupeKey)) {
+      console.info('[Browser Copilot] Feishu ignored duplicate event', dedupeKey)
+      return
+    }
+    if (dedupeKey) {
+      this.recentEventIds.push(dedupeKey)
+      if (this.recentEventIds.length > FeishuBot.MAX_RECENT_EVENT_IDS) {
+        this.recentEventIds.shift()
+      }
+    }
 
     if (!this.tokenProvider) return
     const token = await this.tokenProvider.get().catch(() => null)

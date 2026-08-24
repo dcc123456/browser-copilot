@@ -301,12 +301,14 @@ export function encodePing(service: number): Uint8Array {
 /**
  * Builds the acknowledgement for an inbound event frame.
  *
- * The server requires us to echo the frame's SeqID/LogID/service/headers back
- * with a JSON payload `{"code":0}` (and optionally a base64-encoded response
- * `data`, which we leave blank for fire-and-forget events). The official SDK
- * also appends a `biz_rt` timing header; it is optional so we omit it.
+ * The server requires us to echo the frame's SeqID/LogID/service/method/headers
+ * back, with the payload replaced by a JSON body. Per the official Feishu SDK
+ * the success code is **200** (`HttpStatusCode.ok`), not 0 — sending 0 makes the
+ * server treat the ACK as failed and redeliver the event, which is what causes a
+ * task to run repeatedly. We also preserve `payloadEncoding`/`payloadType` from
+ * the inbound frame so the response matches the server's expectations exactly.
  */
-export function encodeAck(inbound: Frame, code = 0): Uint8Array {
+export function encodeAck(inbound: Frame, code = 200): Uint8Array {
   const payload = new TextEncoder().encode(JSON.stringify({ code }))
   return encodeFrame({
     seqId: inbound.seqId,
@@ -314,6 +316,8 @@ export function encodeAck(inbound: Frame, code = 0): Uint8Array {
     service: inbound.service,
     method: inbound.method,
     headers: inbound.headers,
+    payloadEncoding: inbound.payloadEncoding,
+    payloadType: inbound.payloadType,
     payload,
   })
 }
@@ -383,18 +387,28 @@ export function parseEndpointResponse(json: unknown): WsEndpoint {
 /** The subset of a Feishu v2 event callback the bot cares about. */
 export interface InboundMessage {
   eventType: string
+  /** `event_id` from the event header; used to dedupe redeliveries. */
+  eventId: string
   chatId: string
   /** The decoded text content of a text message. */
   text: string
   messageType: string
   messageId: string
+  /**
+   * Sender type from `event.sender.sender_type`: 'user' for a person, 'app' for
+   * an application/bot. Messages from apps (including our own replies) should
+   * be ignored to avoid reply loops.
+   */
+  senderType: string
+  senderOpenId: string
 }
 
 /**
  * Extracts the relevant fields from an event-callback JSON string.
  *
- * Returns null for anything that is not a text message or is malformed, so the
- * caller can ignore it without a try/catch at every call site.
+ * Returns null for anything that is not a text message, is malformed, or was
+ * sent by an app/bot (so our own replies never trigger another run). Callers
+ * can rely on the result without a try/catch at every call site.
  */
 export function parseEvent(data: string): InboundMessage | null {
   let parsed: unknown
@@ -406,6 +420,10 @@ export function parseEvent(data: string): InboundMessage | null {
   const v = parsed as {
     header?: { event_type?: string; event_id?: string }
     event?: {
+      sender?: {
+        sender_type?: string
+        sender_id?: { open_id?: string; user_id?: string; union_id?: string }
+      }
       message?: {
         chat_id?: string
         message_type?: string
@@ -419,6 +437,12 @@ export function parseEvent(data: string): InboundMessage | null {
   if (eventType !== 'im.message.receive_v1' || !message) return null
   if (message.message_type !== 'text' || !message.chat_id) return null
 
+  // Ignore messages sent by applications/bots. Without this, when we reply in a
+  // chat that reply is itself delivered back to us as a new event, causing an
+  // infinite loop (or at minimum a duplicate-looking run).
+  const senderType = v.event?.sender?.sender_type ?? ''
+  if (senderType === 'app' || senderType === 'ASSISTANT') return null
+
   let text = ''
   try {
     text = (JSON.parse(message.content ?? '{}') as { text?: string }).text ?? ''
@@ -428,9 +452,12 @@ export function parseEvent(data: string): InboundMessage | null {
 
   return {
     eventType,
+    eventId: v.header?.event_id ?? message.message_id ?? '',
     chatId: message.chat_id,
     text: text.trim(),
     messageType: message.message_type,
     messageId: message.message_id ?? '',
+    senderType,
+    senderOpenId: v.event?.sender?.sender_id?.open_id ?? '',
   }
 }

@@ -37,16 +37,22 @@ function pingFrame(service = 33554678): Uint8Array {
   })
 }
 
-function textMessageEvent(text: string): string {
+let eventCounter = 0
+function textMessageEvent(text: string, senderType = 'user'): string {
+  eventCounter += 1
   return JSON.stringify({
     schema: '2.0',
-    header: { event_type: 'im.message.receive_v1', event_id: 'e1' },
+    header: { event_type: 'im.message.receive_v1', event_id: `evt_${eventCounter}` },
     event: {
+      sender: {
+        sender_type: senderType,
+        sender_id: { open_id: senderType === 'app' ? 'ou_bot' : 'ou_user' },
+      },
       message: {
         chat_id: 'oc_1',
         message_type: 'text',
         content: JSON.stringify({ text }),
-        message_id: 'om_1',
+        message_id: `om_${eventCounter}`,
       },
     },
   })
@@ -142,6 +148,8 @@ const TOKEN_JSON = { code: 0, tenant_access_token: 't-ten', expire: 7200 }
 describe('FeishuBot connection state machine', () => {
   beforeEach(() => {
     FakeSocket.reset()
+    eventCounter = 0
+    vi.clearAllMocks()
     vi.useFakeTimers()
   })
   afterEach(() => {
@@ -287,12 +295,45 @@ describe('FeishuBot connection state machine', () => {
     expect(ack.method).toBe(METHOD.DATA)
     expect(ack.seqId).toBe(55n)
     const body = JSON.parse(new TextDecoder().decode(ack.payload)) as { code: number }
-    expect(body.code).toBe(0)
+    expect(body.code).toBe(200)
 
     const [prompt, convoId, mode] = runSpy.mock.calls[0]!
     expect(prompt).toContain('微博')
     expect(convoId).toContain('feishu:')
     expect(mode).toBe('full')
+    bot.stop()
+  })
+
+  it('runs a redelivered event only once (dedup by event_id)', async () => {
+    vi.useRealTimers()
+    const { bot } = makeBot()
+    void bot.reconcile()
+    await vi.waitFor(() => expect(FakeSocket.last).not.toBeNull(), { timeout: 2000 })
+    const socket = FakeSocket.last!
+    socket.open()
+    const unattended = await import('../src/background/agent-unattended')
+    const runSpy = vi.mocked(unattended.runUnattendedPrompt)
+    // Same event payload (same event_id) delivered twice.
+    const payload = textMessageEvent('帮我统计 PR')
+    socket.message(eventFrame(10n, payload))
+    socket.message(eventFrame(11n, payload))
+    await vi.waitFor(() => expect(runSpy).toHaveBeenCalledTimes(1), { timeout: 2000 })
+    bot.stop()
+  })
+
+  it('ignores messages sent by apps/bots to avoid reply loops', async () => {
+    vi.useRealTimers()
+    const { bot } = makeBot()
+    void bot.reconcile()
+    await vi.waitFor(() => expect(FakeSocket.last).not.toBeNull(), { timeout: 2000 })
+    const socket = FakeSocket.last!
+    socket.open()
+    const unattended = await import('../src/background/agent-unattended')
+    const runSpy = vi.mocked(unattended.runUnattendedPrompt)
+    socket.message(eventFrame(20n, textMessageEvent('帮我统计 PR', 'app')))
+    // Give the async handler a chance to (not) run.
+    await new Promise((r) => setTimeout(r, 300))
+    expect(runSpy).not.toHaveBeenCalled()
     bot.stop()
   })
 })

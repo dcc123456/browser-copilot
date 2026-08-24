@@ -102,7 +102,8 @@ describe('ack', () => {
     expect(ack.method).toBe(METHOD.DATA)
     expect(header(ack, 'type')).toBe(DATA.EVENT)
     const body = JSON.parse(new TextDecoder().decode(ack.payload)) as { code: number }
-    expect(body.code).toBe(0)
+    // The official SDK uses HttpStatusCode.ok = 200 here, not 0.
+    expect(body.code).toBe(200)
   })
 })
 
@@ -181,5 +182,13 @@ describe('parseEvent', () => {
 
   it('returns null for malformed JSON', () => {
     expect(parseEvent('{not json')).toBeNull()
+  })
+
+  it('returns null for messages sent by an app/bot (avoids reply loops)', () => {
+    const event = JSON.parse(JSON.stringify(textEvent('hi'))) as {
+      event: { sender?: { sender_type: string } }
+    }
+    event.event.sender = { sender_type: 'app' }
+    expect(parseEvent(JSON.stringify(event))).toBeNull()
   })
 })
