@@ -46,8 +46,54 @@ export interface Messages {
   // Tabs
   tabChat: string
   tabSkills: string
+  tabTasks: string
   tabData: string
   tabSettings: string
+
+  // Tasks
+  tasksTitle: string
+  tasksSubtitle: string
+  taskNew: string
+  taskName: string
+  taskKind: string
+  taskKindGithub: string
+  taskKindPrompt: string
+  taskPrompt: string
+  taskPromptHint: string
+  taskSchedule: string
+  taskSchedDaily: string
+  taskSchedWeekdays: string
+  taskSchedInterval: string
+  taskEvery: string
+  taskMinutes: string
+  taskNotifyFeishu: string
+  taskEnabled: string
+  taskRunNow: string
+  taskLastRun: string
+  taskNever: string
+  taskStatusOk: string
+  taskStatusFailed: string
+  taskStatusSkipped: string
+  taskSave: string
+  taskDeleteConfirm: string
+  taskRuns: string
+  taskRunsEmpty: string
+  taskRunsClear: string
+  taskTriggerSchedule: string
+  taskTriggerManual: string
+  taskTriggerFeishu: string
+  tasksFeishuTitle: string
+  tasksFeishuWebhook: string
+  tasksFeishuWebhookSecret: string
+  tasksFeishuSecretHint: string
+  tasksFeishuBot: string
+  tasksFeishuAppId: string
+  tasksFeishuAppSecret: string
+  tasksFeishuBotHint: string
+  tasksFeishuTest: string
+  tasksFeishuTestOk: string
+  tasksFeishuBotWarn: string
+  taskTemplateGithubName: string
 
   // Common
   save: string
@@ -238,8 +284,56 @@ export interface Messages {
 const en: Messages = {
   tabChat: 'Chat',
   tabSkills: 'Skills',
+  tabTasks: 'Tasks',
   tabData: 'Data',
   tabSettings: 'Settings',
+
+  tasksTitle: 'Scheduled tasks',
+  tasksSubtitle:
+    'Run a task on a schedule and optionally deliver the result to Feishu. Scheduled runs only fire while the browser is open.',
+  taskNew: 'New task',
+  taskName: 'Name',
+  taskKind: 'What it does',
+  taskKindGithub: 'Count PRs waiting for my review on GitHub',
+  taskKindPrompt: 'Run an agent prompt',
+  taskPrompt: 'Prompt',
+  taskPromptHint: 'The instruction the agent runs unattended.',
+  taskSchedule: 'When',
+  taskSchedDaily: 'Daily at',
+  taskSchedWeekdays: 'Weekdays (Mon–Fri) at',
+  taskSchedInterval: 'Every',
+  taskEvery: 'every',
+  taskMinutes: 'minutes',
+  taskNotifyFeishu: 'Notify via Feishu when done',
+  taskEnabled: 'Enabled',
+  taskRunNow: 'Run now',
+  taskLastRun: 'Last run',
+  taskNever: 'never',
+  taskStatusOk: 'ok',
+  taskStatusFailed: 'failed',
+  taskStatusSkipped: 'skipped',
+  taskSave: 'Save task',
+  taskDeleteConfirm: 'Delete this task? Its run history is removed too.',
+  taskRuns: 'Recent runs',
+  taskRunsEmpty: 'No runs yet.',
+  taskRunsClear: 'Clear',
+  taskTriggerSchedule: 'schedule',
+  taskTriggerManual: 'manual',
+  taskTriggerFeishu: 'Feishu',
+  tasksFeishuTitle: 'Feishu',
+  tasksFeishuWebhook: 'Custom-bot webhook URL',
+  tasksFeishuWebhookSecret: 'Webhook signing secret (if enabled)',
+  tasksFeishuSecretHint: 'Only needed if the bot has signature verification on.',
+  tasksFeishuBot: 'Let a Feishu bot trigger tasks',
+  tasksFeishuAppId: 'App ID',
+  tasksFeishuAppSecret: 'App secret',
+  tasksFeishuBotHint:
+    'A self-built Feishu app with the long-connection mode. Works best while the browser is active; an idle browser may suspend the connection.',
+  tasksFeishuTest: 'Send test message',
+  tasksFeishuTestOk: 'Test message sent.',
+  tasksFeishuBotWarn:
+    'Long-connection commands are best-effort in a browser extension. For always-on remote control, add a small relay server.',
+  taskTemplateGithubName: 'PRs to review',
 
   save: 'Save',
   cancel: 'Cancel',
@@ -436,8 +530,56 @@ const en: Messages = {
 const zhCN: Messages = {
   tabChat: '对话',
   tabSkills: '技能',
+  tabTasks: '任务',
   tabData: '数据',
   tabSettings: '设置',
+
+  tasksTitle: '定时任务',
+  tasksSubtitle:
+    '按计划运行任务，并可通过飞书通知结果。定时任务仅在浏览器打开时触发。',
+  taskNew: '新建任务',
+  taskName: '名称',
+  taskKind: '做什么',
+  taskKindGithub: '统计 GitHub 上待我 review 的 PR',
+  taskKindPrompt: '运行一条智能体提示词',
+  taskPrompt: '提示词',
+  taskPromptHint: '无人值守时智能体执行的指令。',
+  taskSchedule: '时间',
+  taskSchedDaily: '每天',
+  taskSchedWeekdays: '工作日（周一至周五）',
+  taskSchedInterval: '每隔',
+  taskEvery: '每隔',
+  taskMinutes: '分钟',
+  taskNotifyFeishu: '完成后通过飞书通知',
+  taskEnabled: '启用',
+  taskRunNow: '立即运行',
+  taskLastRun: '上次运行',
+  taskNever: '从未',
+  taskStatusOk: '成功',
+  taskStatusFailed: '失败',
+  taskStatusSkipped: '已跳过',
+  taskSave: '保存任务',
+  taskDeleteConfirm: '删除这个任务？相关的运行记录也会一并删除。',
+  taskRuns: '最近运行',
+  taskRunsEmpty: '还没有运行记录。',
+  taskRunsClear: '清空',
+  taskTriggerSchedule: '定时',
+  taskTriggerManual: '手动',
+  taskTriggerFeishu: '飞书',
+  tasksFeishuTitle: '飞书',
+  tasksFeishuWebhook: '自定义机器人 Webhook 地址',
+  tasksFeishuWebhookSecret: 'Webhook 签名校验密钥（如启用）',
+  tasksFeishuSecretHint: '仅当机器人开启了签名校验时需要。',
+  tasksFeishuBot: '允许飞书机器人触发任务',
+  tasksFeishuAppId: 'App ID',
+  tasksFeishuAppSecret: 'App Secret',
+  tasksFeishuBotHint:
+    '需要一个开启了长连接模式的企业自建应用。浏览器活跃时最稳定；浏览器长期空闲时连接可能被挂起。',
+  tasksFeishuTest: '发送测试消息',
+  tasksFeishuTestOk: '测试消息已发送。',
+  tasksFeishuBotWarn:
+    '浏览器扩展中的长连接命令是尽力而为。若需要始终在线的远程控制，建议增加一个小型中继服务。',
+  taskTemplateGithubName: '待我 review 的 PR',
 
   save: '保存',
   cancel: '取消',

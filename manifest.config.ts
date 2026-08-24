@@ -11,14 +11,14 @@ import { defineManifest } from '@crxjs/vite-plugin'
  *   whether it can be read at all and to name it in the approval prompt.
  * - `sidePanel`: the chat lives in a side panel so it survives focus changes and
  *   navigation, unlike a popup, which closes the moment the user clicks the page.
+ * - `alarms`: powers scheduled tasks (daily/weekday/interval). An alarm is the
+ *   only MV3 mechanism that can wake an idle service worker at a set time, which
+ *   a daily 10:00 report fundamentally requires.
  *
- * There is deliberately **no** `alarms` permission: this extension does nothing
- * on a timer. Everything it does is a direct response to something the user just
- * did, so a background schedule would be capability the user cannot see.
- *
- * No static content script is declared either: injection is on demand, which
- * keeps this extension out of every page until the user actually asks it to read
- * one.
+ * A static content script is not declared either: page reading injects on demand,
+ * which keeps this extension out of every page until the user actually asks it
+ * to read one. (The scheduler and Feishu bot run entirely in the service worker
+ * and inject nothing into pages unless a task explicitly does.)
  *
  * `icons` and `action.default_icon` are both required. Without them Chrome shows
  * a generic placeholder, which makes a pinned toolbar button impossible to tell
@@ -37,7 +37,7 @@ export default defineManifest({
   description:
     'A side-panel assistant that can read and act on the page you are looking at. Works with any OpenAI-compatible model.',
   minimum_chrome_version: '116',
-  permissions: ['storage', 'tabs', 'scripting', 'sidePanel'],
+  permissions: ['storage', 'tabs', 'scripting', 'sidePanel', 'alarms'],
   host_permissions: ['http://*/*', 'https://*/*'],
   icons: {
     16: 'icons/icon-16.png',

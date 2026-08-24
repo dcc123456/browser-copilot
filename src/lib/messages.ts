@@ -20,6 +20,11 @@ import type {
   Skill,
   UserProfile,
 } from './types'
+import type {
+  FeishuConfig,
+  ScheduledTask,
+  TaskRunLog,
+} from './scheduler-types'
 
 /** Port name for the streaming agent channel. */
 export const AGENT_PORT = 'agent'
@@ -63,6 +68,19 @@ export type Command =
   | { type: 'conversations.rename'; id: string; title: string }
   | { type: 'conversations.delete'; id: string }
 
+  // --- Scheduled tasks ---
+  | { type: 'tasks.list' }
+  | { type: 'tasks.save'; task: ScheduledTask }
+  | { type: 'tasks.delete'; id: string }
+  | { type: 'tasks.run'; id: string }
+  | { type: 'tasks.runs'; taskId?: string }
+  | { type: 'tasks.runs.clear'; taskId?: string }
+
+  // --- Feishu integration ---
+  | { type: 'feishu.get' }
+  | { type: 'feishu.save'; config: FeishuConfig }
+  | { type: 'feishu.test' }
+
 /** Replies, discriminated by the command that produced them. */
 export type CommandResult =
   | { type: 'settings'; settings: Settings }
@@ -97,6 +115,15 @@ export type CommandResult =
     }
   | { type: 'conversations.rename' }
   | { type: 'conversations.delete' }
+  | { type: 'tasks.list'; tasks: ScheduledTask[] }
+  | { type: 'tasks.save' }
+  | { type: 'tasks.delete' }
+  | { type: 'tasks.run'; outcome: { ok: boolean; skipped: boolean; summary: string; error?: string } }
+  | { type: 'tasks.runs'; runs: TaskRunLog[] }
+  | { type: 'tasks.runs.clear' }
+  | { type: 'feishu.get'; config: FeishuConfig }
+  | { type: 'feishu.save' }
+  | { type: 'feishu.test'; ok: boolean; message?: string }
 
 /** Envelope so a failed command never looks like a successful one. */
 export type CommandResponse =

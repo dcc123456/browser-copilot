@@ -977,3 +977,147 @@ textarea {
   font-weight: 600;
   white-space: nowrap;
 }
+
+/* --- Tasks tab --- */
+.task-list {
+  list-style: none;
+  margin: 12px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task-item {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.task-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.task-item-head .inline-check {
+  font-weight: 500;
+}
+
+.task-meta {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.task-status {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+
+.task-status-ok {
+  color: var(--ok);
+  background: var(--ok-surface);
+}
+
+.task-status-failed {
+  color: var(--err);
+  background: var(--err-surface);
+}
+
+.task-status-skipped {
+  color: var(--warn);
+  background: var(--warn-surface);
+}
+
+.task-status-none {
+  display: none;
+}
+
+.task-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.task-editor fieldset.field {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.schedule-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.schedule-row input[type='number'] {
+  width: 64px;
+}
+
+.run-log {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.run-line {
+  font-size: 11px;
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 6px;
+  align-items: baseline;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.run-time {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.run-tag {
+  font-size: 9px;
+  text-transform: uppercase;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+.run-summary {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.run-ok .run-summary {
+  color: var(--text);
+}
+
+.run-skipped .run-summary {
+  color: var(--warn);
+}
+
+.run-err .run-summary {
+  color: var(--err);
+}
+
+.banner-error-inline {
+  color: var(--warn);
+}

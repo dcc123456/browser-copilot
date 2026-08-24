@@ -7,14 +7,16 @@ import DataTab from './DataTab'
 import { I18nProvider } from './i18n'
 import SettingsTab from './SettingsTab'
 import SkillsTab from './SkillsTab'
+import TasksTab from './TasksTab'
 
-type TabId = 'chat' | 'skills' | 'data' | 'settings'
+type TabId = 'chat' | 'skills' | 'tasks' | 'data' | 'settings'
 
-const TAB_ORDER: TabId[] = ['chat', 'skills', 'data', 'settings']
+const TAB_ORDER: TabId[] = ['chat', 'skills', 'tasks', 'data', 'settings']
 
 const TAB_LABEL: Record<TabId, keyof Messages> = {
   chat: 'tabChat',
   skills: 'tabSkills',
+  tasks: 'tabTasks',
   data: 'tabData',
   settings: 'tabSettings',
 }
@@ -108,6 +110,9 @@ export default function App() {
             if (id) setActive('chat')
           }}
         />
+      </div>
+      <div style={{ display: active === 'tasks' ? 'contents' : 'none' }}>
+        <TasksTab />
       </div>
       <div style={{ display: active === 'data' ? 'contents' : 'none' }}>
         <DataTab />

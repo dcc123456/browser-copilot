@@ -52,12 +52,50 @@ import {
 } from '../lib/storage'
 import { runAgentTurn, summarizeToolResult } from './agent'
 import { activeTab, readActivePage } from './page'
+import {
+  clearRuns,
+  deleteTask,
+  getFeishuConfig,
+  listRuns,
+  listTasks,
+  saveFeishuConfig,
+  saveTask,
+} from '../lib/task-store'
+import { rescheduleAll, scheduleTask, triggerNow, onAlarm } from './scheduler'
+import { FeishuBot } from './feishu-bot'
+import { isWebhookUrl, sendWebhookText } from '../lib/feishu'
 
 // --- Lifecycle ---------------------------------------------------------------
 
 chrome.runtime.onInstalled.addListener(() => {
   void ensureSchema()
+  void rescheduleAll().catch((error: unknown) =>
+    console.error('[Browser Copilot] could not reschedule tasks', error),
+  )
 })
+
+// A worker update/startup must also reconcile alarms: chrome.alarms persist across
+// restarts, but code may have changed and a stale enabled flag needs correcting.
+chrome.runtime.onStartup.addListener(() => {
+  void rescheduleAll().catch((error: unknown) =>
+    console.error('[Browser Copilot] could not reschedule tasks', error),
+  )
+  void feishuBot.reconcile()
+})
+
+// Fires for task alarms; registered synchronously so an alarm wake is received.
+chrome.alarms.onAlarm.addListener(onAlarm)
+
+/** Single long-lived Feishu bot connection (reconnects internally). */
+const feishuBot = new FeishuBot()
+
+// An MV3 worker can start cold on any event (an alarm, a port reconnect, a
+// command). Reconcile schedules and the bot connection at module load so a task
+// is never missed because the worker had not run its install/startup handlers.
+void rescheduleAll().catch((error: unknown) =>
+  console.error('[Browser Copilot] could not reschedule tasks', error),
+)
+void feishuBot.reconcile()
 
 /**
  * The toolbar icon is handled manually rather than via `openPanelOnActionClick`,
@@ -258,6 +296,54 @@ async function handleCommand(command: Command): Promise<CommandResult> {
     case 'conversations.delete':
       await deleteConversation(command.id)
       return { type: 'conversations.delete' }
+
+    case 'tasks.list':
+      return { type: 'tasks.list', tasks: await listTasks() }
+    case 'tasks.save':
+      await saveTask(command.task)
+      await scheduleTask(command.task.id)
+      return { type: 'tasks.save' }
+    case 'tasks.delete':
+      await deleteTask(command.id)
+      await scheduleTask(command.id) // clears the alarm for a deleted task
+      await clearRuns(command.id)
+      return { type: 'tasks.delete' }
+    case 'tasks.run': {
+      const outcome = await triggerNow(command.id, 'manual')
+      return { type: 'tasks.run', outcome }
+    }
+    case 'tasks.runs':
+      return { type: 'tasks.runs', runs: await listRuns(command.taskId) }
+    case 'tasks.runs.clear':
+      await clearRuns(command.taskId)
+      return { type: 'tasks.runs.clear' }
+
+    case 'feishu.get':
+      return { type: 'feishu.get', config: await getFeishuConfig() }
+    case 'feishu.save':
+      await saveFeishuConfig(command.config)
+      void feishuBot.reconcile()
+      return { type: 'feishu.save' }
+    case 'feishu.test': {
+      const config = await getFeishuConfig()
+      if (!isWebhookUrl(config.webhookUrl)) {
+        return { type: 'feishu.test', ok: false, message: 'Webhook URL is not set or invalid.' }
+      }
+      try {
+        await sendWebhookText(
+          config.webhookUrl,
+          '✅ Browser Copilot 测试消息：飞书通知已连通。',
+          config.webhookSecret,
+        )
+        return { type: 'feishu.test', ok: true }
+      } catch (error) {
+        return {
+          type: 'feishu.test',
+          ok: false,
+          message: error instanceof Error ? error.message : String(error),
+        }
+      }
+    }
 
     default: {
       const exhaustive: never = command
