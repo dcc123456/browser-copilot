@@ -252,6 +252,20 @@ export async function getWsEndpoint(
       body: JSON.stringify({}),
     },
   )
+  // A 404 here is the documented response when long-connection mode is not
+  // enabled for the app (or the app version that enabled it is not published).
+  // The path itself is correct — it is the one the official Feishu CLI uses — so
+  // a 404 means configuration, and we say so directly instead of surfacing the
+  // raw "404 page not found" text.
+  if (response.status === 404) {
+    throw new FeishuError(
+      'Feishu returned 404 for the long-connection endpoint. Enable "长连接模式" ' +
+        '(long-connection mode) for this app in the Feishu developer console, ' +
+        'subscribe to im.message.receive_v1, and publish a new app version. Then ' +
+        'reload the extension.',
+      404,
+    )
+  }
   const json = await readJson<unknown>(response, 'Feishu GetWsEndpoint')
   return parseEndpointResponse(json)
 }
