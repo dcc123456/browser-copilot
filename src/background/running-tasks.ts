@@ -30,6 +30,9 @@ export interface RunStep {
   text: string
 }
 
+/** How a run ended. */
+export type RunOutcomeKind = 'ok' | 'failed' | 'cancelled' | 'skipped'
+
 /** A tracked in-flight run. */
 export interface RunningTask {
   /** Stable id for this specific execution (distinct from the configured task id). */
@@ -52,7 +55,24 @@ export interface RunningTask {
   onCancel?: () => void
 }
 
+/** A finished run, retained for the "recently completed" section of the board. */
+export interface FinishedTask {
+  runId: string
+  taskId?: string
+  label: string
+  source: RunSource
+  startedAt: number
+  finishedAt: number
+  outcome: RunOutcomeKind
+  /** Final one-line summary or error, when available. */
+  summary?: string
+  steps: RunStep[]
+}
+
 const runs = new Map<string, RunningTask>()
+/** Recent finished runs, newest first. Bounded to keep memory tiny. */
+const finished: FinishedTask[] = []
+const MAX_FINISHED = 30
 
 /** Generates a run id without pulling in a uuid dependency. */
 function newRunId(): string {
@@ -116,14 +136,42 @@ export function setOnCancel(runId: string, onCancel: () => void): void {
   if (task) task.onCancel = onCancel
 }
 
-/** Stops tracking a run. Its controller is left as-is (already settled). */
-export function finishRun(runId: string): void {
+export interface FinishOptions {
+  outcome: RunOutcomeKind
+  summary?: string
+}
+
+/**
+ * Stops tracking a run as in-flight and moves it into the bounded completed
+ * list so the board can show how it ended. The controller is dropped.
+ */
+export function finishRun(runId: string, options?: FinishOptions): void {
+  const task = runs.get(runId)
+  if (!task) return
   runs.delete(runId)
+  const entry: FinishedTask = {
+    runId: task.runId,
+    taskId: task.taskId,
+    label: task.label,
+    source: task.source,
+    startedAt: task.startedAt,
+    finishedAt: Date.now(),
+    outcome: options?.outcome ?? (task.controller.signal.aborted ? 'cancelled' : 'ok'),
+    summary: options?.summary,
+    steps: task.steps,
+  }
+  finished.unshift(entry)
+  if (finished.length > MAX_FINISHED) finished.length = MAX_FINISHED
 }
 
 /** Returns all running tasks, newest first. */
 export function listRunning(): RunningTask[] {
   return [...runs.values()].sort((a, b) => b.startedAt - a.startedAt)
+}
+
+/** Returns recently completed runs, newest first. */
+export function listFinished(): FinishedTask[] {
+  return [...finished]
 }
 
 /** Returns a single run, or undefined. */

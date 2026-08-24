@@ -84,6 +84,12 @@ export interface Messages {
   taskTriggerManual: string
   taskTriggerFeishu: string
   tasksRunning: string
+  tasksRunningEmpty: string
+  tasksRecentlyFinished: string
+  taskOutcomeOk: string
+  taskOutcomeFailed: string
+  taskOutcomeCancelled: string
+  taskOutcomeSkipped: string
   taskUntitled: string
   taskTerminate: string
   taskStartedAt: string
@@ -331,6 +337,12 @@ const en: Messages = {
   taskTriggerManual: 'manual',
   taskTriggerFeishu: 'Feishu',
   tasksRunning: 'Running now',
+  tasksRunningEmpty: 'No tasks running. Start one from chat, a schedule, or Feishu.',
+  tasksRecentlyFinished: 'Recently finished',
+  taskOutcomeOk: 'done',
+  taskOutcomeFailed: 'failed',
+  taskOutcomeCancelled: 'terminated',
+  taskOutcomeSkipped: 'skipped',
   taskUntitled: 'Untitled',
   taskTerminate: 'Terminate',
   taskStartedAt: 'Started',
@@ -586,6 +598,12 @@ const zhCN: Messages = {
   taskTriggerManual: '手动',
   taskTriggerFeishu: '飞书',
   tasksRunning: '正在运行',
+  tasksRunningEmpty: '当前没有运行中的任务。可从对话、定时或飞书发起。',
+  tasksRecentlyFinished: '最近完成',
+  taskOutcomeOk: '成功',
+  taskOutcomeFailed: '失败',
+  taskOutcomeCancelled: '已终止',
+  taskOutcomeSkipped: '已跳过',
   taskUntitled: '未命名',
   taskTerminate: '终止',
   taskStartedAt: '开始于',

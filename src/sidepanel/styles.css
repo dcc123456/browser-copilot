@@ -1143,6 +1143,22 @@ textarea {
   border-color: var(--accent);
 }
 
+.running-count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 7px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.running-empty {
+  margin: 0;
+}
+
 .running-dot {
   display: inline-block;
   width: 8px;
@@ -1243,4 +1259,46 @@ textarea {
 
 .running-step-status {
   color: var(--text);
+}
+
+.running-divider {
+  height: 1px;
+  margin: 10px 0;
+  background: var(--border);
+}
+
+.running-section-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.finished-item {
+  opacity: 0.9;
+}
+
+.finished-badge {
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.finished-badge-ok {
+  background: var(--ok-surface);
+  color: var(--ok);
+}
+
+.finished-badge-failed {
+  background: var(--err-surface);
+  color: var(--err);
+}
+
+.finished-badge-cancelled,
+.finished-badge-skipped {
+  background: var(--warn-surface);
+  color: var(--warn);
 }

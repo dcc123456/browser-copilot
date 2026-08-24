@@ -5,6 +5,7 @@ import {
   cancelRun,
   finishRun,
   getRun,
+  listFinished,
   listRunning,
   startRun,
 } from '../src/background/running-tasks'
@@ -12,7 +13,7 @@ import {
 afterEach(() => _resetRunningForTests())
 
 describe('running-tasks registry', () => {
-  it('tracks a run, records steps, and removes it on finish', () => {
+  it('tracks a run, records steps, and moves it to finished on finish', () => {
     const run = startRun({ label: 'do thing', source: 'feishu', feishuChatId: 'oc_1' })
     expect(run.runId).toBeTruthy()
     addStep(run.runId, 'tool', '→ open_tab')
@@ -21,8 +22,20 @@ describe('running-tasks registry', () => {
     expect(listed).toHaveLength(1)
     expect(listed[0]!.steps).toHaveLength(2)
     expect(listed[0]!.feishuChatId).toBe('oc_1')
-    finishRun(run.runId)
+    finishRun(run.runId, { outcome: 'ok', summary: 'done' })
     expect(listRunning()).toHaveLength(0)
+    const done = listFinished()
+    expect(done).toHaveLength(1)
+    expect(done[0]!.outcome).toBe('ok')
+    expect(done[0]!.summary).toBe('done')
+    expect(done[0]!.steps).toHaveLength(2)
+  })
+
+  it('infers cancelled outcome from an aborted controller when none given', () => {
+    const run = startRun({ label: 'x', source: 'chat' })
+    run.controller.abort()
+    finishRun(run.runId)
+    expect(listFinished()[0]!.outcome).toBe('cancelled')
   })
 
   it('cancels a run via its abort signal', () => {

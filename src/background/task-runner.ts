@@ -30,6 +30,7 @@ import {
   finishRun,
   startRun,
   type RunningTask,
+  type RunOutcomeKind,
 } from './running-tasks'
 
 export type TaskTrigger = 'schedule' | 'feishu' | 'manual'
@@ -70,7 +71,7 @@ export async function runTask(
     ...(feishuChatId ? { feishuChatId } : {}),
   })
 
-  let outcome: RunOutcome
+  let outcome: RunOutcome = { ok: false, skipped: false, summary: '' }
   try {
     outcome = await executeTask(task, lang, tracked)
   } catch (error) {
@@ -82,7 +83,17 @@ export async function runTask(
     }
   } finally {
     release()
-    finishRun(tracked.runId)
+    const boardOutcome: RunOutcomeKind = outcome.cancelled
+      ? 'cancelled'
+      : outcome.skipped
+        ? 'skipped'
+        : outcome.ok
+          ? 'ok'
+          : 'failed'
+    finishRun(tracked.runId, {
+      outcome: boardOutcome,
+      summary: outcome.summary?.split('\n')[0] || outcome.error,
+    })
   }
 
   // Record the run and update the task's last-run state. These are independent

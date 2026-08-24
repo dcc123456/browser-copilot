@@ -64,7 +64,7 @@ import {
 import { rescheduleAll, scheduleTask, triggerNow, onAlarm } from './scheduler'
 import { FeishuBot, FEISHU_WATCHDOG_ALARM } from './feishu-bot'
 import { isWebhookUrl, sendWebhookText } from '../lib/feishu'
-import { addStep, cancelRun, finishRun, listRunning, startRun } from './running-tasks'
+import { addStep, cancelRun, finishRun, listFinished, listRunning, startRun } from './running-tasks'
 
 // --- Lifecycle ---------------------------------------------------------------
 
@@ -342,6 +342,17 @@ async function handleCommand(command: Command): Promise<CommandResult> {
       await clearRuns(command.taskId)
       return { type: 'tasks.runs.clear' }
     case 'tasks.running': {
+      const mapFinished = (r: ReturnType<typeof listFinished>[number]) => ({
+        runId: r.runId,
+        taskId: r.taskId,
+        label: r.label,
+        source: r.source,
+        startedAt: r.startedAt,
+        finishedAt: r.finishedAt,
+        outcome: r.outcome,
+        summary: r.summary,
+        steps: r.steps,
+      })
       return {
         type: 'tasks.running',
         runs: listRunning().map((r) => ({
@@ -352,6 +363,7 @@ async function handleCommand(command: Command): Promise<CommandResult> {
           startedAt: r.startedAt,
           steps: r.steps,
         })),
+        finished: listFinished().map(mapFinished),
       }
     }
     case 'tasks.cancel':
@@ -607,7 +619,14 @@ chrome.runtime.onConnect.addListener((port) => {
           ...(failure ? { error: failure } : {}),
         }).catch(() => {})
         activeTurns.delete(conversationId)
-        finishRun(trackedRun.runId)
+        finishRun(trackedRun.runId, {
+          outcome: turnController.signal.aborted
+            ? 'cancelled'
+            : failure
+              ? 'failed'
+              : 'ok',
+          summary: failure,
+        })
         if (controller === turnController) controller = null
         release()
       }

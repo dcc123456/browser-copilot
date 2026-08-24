@@ -8,7 +8,7 @@
  * @module sidepanel/TasksTab
  */
 import { useCallback, useEffect, useState } from 'react'
-import { sendCommand, type RunningTaskView } from '../lib/messages'
+import { sendCommand, type FinishedTaskView, type RunningTaskView } from '../lib/messages'
 import { createDraft } from '../lib/task-store'
 import { describeSchedule } from '../lib/schedule'
 import type { FeishuConfig, ScheduledTask, TaskRunLog } from '../lib/scheduler-types'
@@ -32,6 +32,7 @@ export default function TasksTab() {
   const [tasks, setTasks] = useState<ScheduledTask[]>([])
   const [runs, setRuns] = useState<TaskRunLog[]>([])
   const [running, setRunning] = useState<RunningTaskView[]>([])
+  const [finished, setFinished] = useState<FinishedTaskView[]>([])
   const [feishu, setFeishu] = useState<FeishuConfig | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [banner, setBanner] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
@@ -73,7 +74,10 @@ export default function TasksTab() {
     const refresh = async (): Promise<void> => {
       try {
         const result = await sendCommand({ type: 'tasks.running' })
-        if (active && result.type === 'tasks.running') setRunning(result.runs)
+        if (active && result.type === 'tasks.running') {
+          setRunning(result.runs)
+          setFinished(result.finished)
+        }
       } catch {
         /* non-fatal; keep polling */
       }
@@ -90,9 +94,12 @@ export default function TasksTab() {
     setBusy(true)
     try {
       await sendCommand({ type: 'tasks.cancel', runId })
-      // Refresh immediately; the aborted run removes itself shortly after.
+      // Refresh immediately; the aborted run moves to the completed list shortly.
       const result = await sendCommand({ type: 'tasks.running' })
-      if (result.type === 'tasks.running') setRunning(result.runs)
+      if (result.type === 'tasks.running') {
+        setRunning(result.runs)
+        setFinished(result.finished)
+      }
       await load()
     } finally {
       setBusy(false)
@@ -198,9 +205,12 @@ export default function TasksTab() {
         </div>
       )}
 
-      {running.length > 0 && (
-        <RunningBoard runs={running} onCancel={(id) => void cancelRunning(id)} busy={busy} />
-      )}
+      <RunningBoard
+        running={running}
+        finished={finished}
+        onCancel={(id) => void cancelRunning(id)}
+        busy={busy}
+      />
 
       {!draft && (
         <button
@@ -592,11 +602,13 @@ function RunLog({ runs, onClear }: { runs: TaskRunLog[]; onClear: () => void }) 
 // --- Running board -----------------------------------------------------------
 
 function RunningBoard({
-  runs,
+  running,
+  finished,
   onCancel,
   busy,
 }: {
-  runs: RunningTaskView[]
+  running: RunningTaskView[]
+  finished: FinishedTaskView[]
   onCancel: (runId: string) => void
   busy: boolean
 }) {
@@ -609,44 +621,82 @@ function RunningBoard({
         : source === 'manual'
           ? t.taskSourceManual
           : t.taskSourceSchedule
+  const outcomeLabel = (outcome: FinishedTaskView['outcome']): string =>
+    outcome === 'ok'
+      ? t.taskOutcomeOk
+      : outcome === 'cancelled'
+        ? t.taskOutcomeCancelled
+        : outcome === 'skipped'
+          ? t.taskOutcomeSkipped
+          : t.taskOutcomeFailed
 
   return (
     <div className="card running-board">
       <div className="card-head">
         <h3>
-          <span className="running-dot" /> {t.tasksRunning}
+          {running.length > 0 && <span className="running-dot" />}
+          {t.tasksRunning}
+          {running.length > 0 && <span className="running-count">{running.length}</span>}
         </h3>
       </div>
-      <ul className="running-list">
-        {runs.map((run) => (
-          <li className="running-item" key={run.runId}>
-            <div className="running-item-head">
-              <strong className="running-label">{run.label || t.taskUntitled}</strong>
-              <span className="run-tag">{sourceLabel(run.source)}</span>
-              <button
-                className="running-cancel"
-                disabled={busy}
-                onClick={() => onCancel(run.runId)}
-                type="button"
-              >
-                {t.taskTerminate}
-              </button>
-            </div>
-            <div className="running-meta">
-              {t.taskStartedAt}: {new Date(run.startedAt).toLocaleTimeString(navigator.language)}
-            </div>
-            {run.steps.length > 0 && (
-              <ul className="running-steps">
-                {run.steps.slice(-8).map((step, index) => (
-                  <li className={`running-step running-step-${step.kind}`} key={index}>
-                    {step.text}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </li>
-        ))}
-      </ul>
+      {running.length === 0 ? (
+        <p className="hint running-empty">{t.tasksRunningEmpty}</p>
+      ) : (
+        <ul className="running-list">
+          {running.map((run) => (
+            <li className="running-item" key={run.runId}>
+              <div className="running-item-head">
+                <strong className="running-label">{run.label || t.taskUntitled}</strong>
+                <span className="run-tag">{sourceLabel(run.source)}</span>
+                <button
+                  className="running-cancel"
+                  disabled={busy}
+                  onClick={() => onCancel(run.runId)}
+                  type="button"
+                >
+                  {t.taskTerminate}
+                </button>
+              </div>
+              <div className="running-meta">
+                {t.taskStartedAt}: {new Date(run.startedAt).toLocaleTimeString(navigator.language)}
+              </div>
+              {run.steps.length > 0 && (
+                <ul className="running-steps">
+                  {run.steps.slice(-8).map((step, index) => (
+                    <li className={`running-step running-step-${step.kind}`} key={index}>
+                      {step.text}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {finished.length > 0 && (
+        <>
+          <div className="running-divider" />
+          <h4 className="running-section-title">{t.tasksRecentlyFinished}</h4>
+          <ul className="running-list">
+            {finished.slice(0, 10).map((run) => (
+              <li className={`running-item finished-item finished-${run.outcome}`} key={run.runId}>
+                <div className="running-item-head">
+                  <strong className="running-label">{run.label || t.taskUntitled}</strong>
+                  <span className="run-tag">{sourceLabel(run.source)}</span>
+                  <span className={`finished-badge finished-badge-${run.outcome}`}>
+                    {outcomeLabel(run.outcome)}
+                  </span>
+                </div>
+                <div className="running-meta">
+                  {new Date(run.finishedAt).toLocaleTimeString(navigator.language)}
+                  {run.summary ? ` — ${run.summary.split('\n')[0]}` : ''}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   )
 }

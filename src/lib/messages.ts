@@ -25,7 +25,7 @@ import type {
   ScheduledTask,
   TaskRunLog,
 } from './scheduler-types'
-import type { RunStep, RunSource } from '../background/running-tasks'
+import type { RunOutcomeKind, RunSource, RunStep } from '../background/running-tasks'
 
 /** A running task as shown on the Tasks tab board. */
 export interface RunningTaskView {
@@ -34,6 +34,19 @@ export interface RunningTaskView {
   label: string
   source: RunSource
   startedAt: number
+  steps: RunStep[]
+}
+
+/** A recently completed task as shown on the Tasks tab board. */
+export interface FinishedTaskView {
+  runId: string
+  taskId?: string
+  label: string
+  source: RunSource
+  startedAt: number
+  finishedAt: number
+  outcome: RunOutcomeKind
+  summary?: string
   steps: RunStep[]
 }
 
@@ -134,7 +147,7 @@ export type CommandResult =
   | { type: 'tasks.run'; outcome: { ok: boolean; skipped: boolean; summary: string; error?: string } }
   | { type: 'tasks.runs'; runs: TaskRunLog[] }
   | { type: 'tasks.runs.clear' }
-  | { type: 'tasks.running'; runs: RunningTaskView[] }
+  | { type: 'tasks.running'; runs: RunningTaskView[]; finished: FinishedTaskView[] }
   | { type: 'tasks.cancel'; ok: boolean }
   | { type: 'feishu.get'; config: FeishuConfig }
   | { type: 'feishu.save' }

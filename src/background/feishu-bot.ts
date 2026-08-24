@@ -519,6 +519,8 @@ export class FeishuBot {
     })
     const streamer = new StepStreamer(token, message.chatId)
     streamer.start()
+    let cancelled = false
+    let failure: string | undefined
     try {
       const result = await runUnattendedPrompt(
         this.withBrowserGuidance(text),
@@ -532,6 +534,8 @@ export class FeishuBot {
           },
         },
       )
+      cancelled = !!result.cancelled
+      failure = result.error
       streamer.flush()
       if (result.cancelled) {
         await safeReply(token, message.chatId, '⏹ 任务已终止。')
@@ -541,11 +545,14 @@ export class FeishuBot {
       }
     } catch (error) {
       streamer.flush()
-      const detail = error instanceof Error ? error.message : String(error)
-      await safeReply(token, message.chatId, `Failed: ${detail}`)
+      failure = error instanceof Error ? error.message : String(error)
+      await safeReply(token, message.chatId, `Failed: ${failure}`)
     } finally {
       streamer.stop()
-      finishRun(tracked.runId)
+      finishRun(tracked.runId, {
+        outcome: cancelled ? 'cancelled' : failure ? 'failed' : 'ok',
+        summary: failure,
+      })
     }
   }
 
