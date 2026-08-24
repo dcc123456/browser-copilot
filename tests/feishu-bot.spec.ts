@@ -156,13 +156,13 @@ describe('FeishuBot connection state machine', () => {
     vi.useRealTimers()
   })
 
-  function makeBot(): { bot: FeishuBot; alarms: ReturnType<typeof fakeAlarms> } {
+  function makeBot() {
     const alarms = fakeAlarms()
     ;(globalThis as { chrome: unknown }).chrome = {
       runtime: { getPlatformInfo: vi.fn(async () => ({})) },
       alarms: alarms.api,
     }
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
       if (typeof url === 'string' && url.includes('/tenant_access_token')) return fakeResponse(TOKEN_JSON)
       if (typeof url === 'string' && url.includes('/callback/ws/endpoint')) {
         // The discovery request must authenticate with AppID/AppSecret in the
@@ -173,9 +173,7 @@ describe('FeishuBot connection state machine', () => {
       return new Response('{}', { status: 200 })
     })
     const bot = new FeishuBot(fetchMock as unknown as typeof fetch, FakeSocket as never)
-    return { bot, alarms, fetchMock } as ReturnType<typeof makeBot> & {
-      fetchMock: ReturnType<typeof vi.fn>
-    }
+    return { bot, alarms, fetchMock }
   }
 
   it('resolves an endpoint via AppID/AppSecret body and opens a socket', async () => {

@@ -60,7 +60,7 @@ function parseXml(xml: string): Document {
       stack.pop()
       continue
     }
-    const el = new FakeElement(tag)
+    const el = new FakeElement(tag ?? '')
     if (attrs) {
       const attrRe = /(\w+)="([^"]*)"/g
       let am: RegExpExecArray | null
