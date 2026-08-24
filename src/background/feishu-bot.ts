@@ -62,7 +62,7 @@ import {
   DATA,
   type Frame,
 } from '../lib/feishu-proto'
-import { addRun, getFeishuConfig, listTasks } from '../lib/task-store'
+import { getFeishuConfig, listTasks } from '../lib/task-store'
 import { triggerNow } from './scheduler'
 import { runUnattendedPrompt } from './agent-unattended'
 import {
@@ -553,18 +553,8 @@ export class FeishuBot {
         outcome: cancelled ? 'cancelled' : failure ? 'failed' : 'ok',
         summary: failure,
       })
-      // Persist ad-hoc Feishu instructions to the run log too, so they appear
-      // in the Tasks tab "Run history" rather than only on the in-memory
-      // recently-finished board (which is lost when the worker is evicted).
-      if (!cancelled) {
-        await addRun({
-          trigger: 'feishu',
-          ok: !failure,
-          skipped: false,
-          summary: text,
-          error: failure,
-        }).catch(() => {})
-      }
+      // The run (with all its steps) is persisted by finishRun's registered
+      // persister, so ad-hoc Feishu instructions survive a worker restart too.
     }
   }
 

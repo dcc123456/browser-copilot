@@ -1262,17 +1262,41 @@ textarea {
 
 .run-line {
   font-size: 11px;
-  display: grid;
-  grid-template-columns: auto auto 1fr;
-  gap: 6px;
-  align-items: baseline;
-  padding: 3px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 0;
   border-bottom: 1px solid var(--border);
+}
+
+.run-line-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.run-line-head:disabled {
+  cursor: default;
+}
+
+.run-caret {
+  width: 10px;
+  color: var(--muted);
+  flex-shrink: 0;
 }
 
 .run-time {
   color: var(--muted);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .run-tag {
@@ -1283,11 +1307,49 @@ textarea {
   border-radius: 4px;
   padding: 0 4px;
   white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.run-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.run-badge {
+  font-size: 9px;
+  text-transform: uppercase;
+  padding: 0 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.run-badge-ok {
+  background: var(--ok-surface);
+  color: var(--ok);
+}
+
+.run-badge-err {
+  background: var(--err-surface);
+  color: var(--err);
+}
+
+.run-badge-skipped {
+  background: var(--warn-surface);
+  color: var(--warn);
 }
 
 .run-summary {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+  margin-left: 16px;
+}
+
+.run-steps {
+  margin: 2px 0 2px 16px;
+  max-height: 220px;
 }
 
 .run-ok .run-summary {

@@ -58,13 +58,66 @@ import {
   getFeishuConfig,
   listRuns,
   listTasks,
+  recordFinishedRun,
   saveFeishuConfig,
   saveTask,
 } from '../lib/task-store'
 import { rescheduleAll, scheduleTask, triggerNow, onAlarm } from './scheduler'
 import { FeishuBot, FEISHU_WATCHDOG_ALARM } from './feishu-bot'
 import { isWebhookUrl, sendWebhookText } from '../lib/feishu'
-import { addStep, cancelRun, finishRun, listFinished, listRunning, startRun } from './running-tasks'
+import {
+  addStep,
+  cancelRun,
+  finishRun,
+  hydrateFinished,
+  listFinished,
+  listRunning,
+  setFinishedPersister,
+  startRun,
+  type FinishedTask,
+} from './running-tasks'
+
+// Persist every finished run (with its steps) so the run log survives a worker
+// eviction/restart. finishRun calls this synchronously; recordFinishedRun is
+// async but fire-and-forget here.
+setFinishedPersister((run: FinishedTask) => {
+  void recordFinishedRun({
+    runId: run.runId,
+    taskId: run.taskId,
+    label: run.label,
+    source: run.source,
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+    outcome: run.outcome,
+    summary: run.summary,
+    steps: run.steps,
+  }).catch((error: unknown) => {
+    console.error('[Browser Copilot] could not persist finished run', error)
+  })
+})
+
+// Seed the in-memory "recently finished" board from persisted logs so runs that
+// completed before a worker restart still show up (with their steps).
+void listRuns()
+  .then((runs) => {
+    hydrateFinished(
+      runs
+        .filter((r) => r.outcome && r.finishedAt)
+        .slice(0, 30)
+        .map((r) => ({
+          runId: r.id,
+          ...(r.taskId ? { taskId: r.taskId } : {}),
+          label: r.label ?? r.summary?.slice(0, 40) ?? '',
+          source: r.source ?? (r.trigger === 'feishu' ? 'feishu' : r.trigger === 'manual' ? 'manual' : 'schedule'),
+          startedAt: r.startedAt ?? r.finishedAt!,
+          finishedAt: r.finishedAt!,
+          outcome: r.outcome!,
+          ...(r.summary ? { summary: r.summary } : {}),
+          steps: r.steps ?? [],
+        })),
+    )
+  })
+  .catch(() => {})
 
 // --- Lifecycle ---------------------------------------------------------------
 

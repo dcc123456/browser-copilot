@@ -50,6 +50,19 @@ export interface ScheduledTask {
 }
 
 /** One execution record, kept for the UI and for debugging missed runs. */
+/** One recorded progress line of a run, persisted for the history view. */
+export interface TaskRunStep {
+  /** Epoch ms when the step was recorded. */
+  at: number
+  /** Machine-ish label: "tool", "status", "result", "error", "info". */
+  kind: 'tool' | 'status' | 'result' | 'error' | 'info'
+  /** Human-readable text. */
+  text: string
+}
+
+/** How a run ended. */
+export type TaskRunOutcome = 'ok' | 'failed' | 'cancelled' | 'skipped'
+
 export interface TaskRunLog {
   id: string
   /**
@@ -58,8 +71,18 @@ export interface TaskRunLog {
    * still show up in the global run history but not under any task card.
    */
   taskId?: string
-  /** 'schedule' (an alarm), 'feishu' (a bot command), or 'manual' (the UI). */
+  /** Display label: task name, or a short label for an ad-hoc run. */
+  label?: string
+  /** Where the run was triggered from. */
+  source?: 'chat' | 'schedule' | 'feishu' | 'manual'
+  /**
+   * 'schedule' (an alarm), 'feishu' (a bot command), or 'manual' (the UI).
+   * @deprecated use `source`; retained for migrating older entries.
+   */
   trigger: 'schedule' | 'feishu' | 'manual'
+  startedAt?: number
+  finishedAt?: number
+  outcome?: TaskRunOutcome
   at: number
   ok: boolean
   /** True when the run was intentionally skipped (e.g. not logged in). */
@@ -68,6 +91,8 @@ export interface TaskRunLog {
   /** True when a Feishu notification was attempted for this run. */
   notified?: boolean
   error?: string
+  /** Detailed progress steps, persisted so history survives a worker restart. */
+  steps?: TaskRunStep[]
 }
 
 /**

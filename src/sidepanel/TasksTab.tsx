@@ -636,8 +636,23 @@ function FeishuSection({
 
 function RunLog({ runs, onClear }: { runs: TaskRunLog[]; onClear: () => void }) {
   const t = useT()
-  const triggerLabel = (trigger: TaskRunLog['trigger']): string =>
-    trigger === 'feishu' ? t.taskTriggerFeishu : trigger === 'manual' ? t.taskTriggerManual : t.taskTriggerSchedule
+  const [openId, setOpenId] = useState<string | null>(null)
+  const sourceLabel = (run: TaskRunLog): string => {
+    const src = run.source ?? (run.trigger === 'feishu' ? 'feishu' : run.trigger === 'manual' ? 'manual' : 'schedule')
+    return src === 'feishu'
+      ? t.taskTriggerFeishu
+      : src === 'manual'
+        ? t.taskTriggerManual
+        : src === 'chat'
+          ? t.taskTriggerChat
+          : t.taskTriggerSchedule
+  }
+  const outcomeLabel = (run: TaskRunLog): string => {
+    if (run.skipped) return t.taskOutcomeSkipped
+    if (run.outcome === 'cancelled') return t.taskOutcomeCancelled
+    if (!run.ok) return t.taskOutcomeFailed
+    return t.taskOutcomeOk
+  }
   return (
     <div className="run-log-wrap">
       <div className="run-log-bar">
@@ -649,16 +664,45 @@ function RunLog({ runs, onClear }: { runs: TaskRunLog[]; onClear: () => void }) 
         <p className="hint">{t.taskRunsEmpty}</p>
       ) : (
         <ul className="run-log">
-          {runs.map((run) => (
-            <li
-              className={`run-line run-${run.ok ? 'ok' : run.skipped ? 'skipped' : 'err'}`}
-              key={run.id}
-            >
-              <span className="run-time">{new Date(run.at).toLocaleString(navigator.language)}</span>
-              <span className="run-tag">{triggerLabel(run.trigger)}</span>
-              <span className="run-summary">{run.summary || run.error || ''}</span>
-            </li>
-          ))}
+          {runs.map((run) => {
+            const isOpen = openId === run.id
+            const hasSteps = !!run.steps && run.steps.length > 0
+            return (
+              <li
+                className={`run-line run-${run.skipped ? 'skipped' : run.ok ? 'ok' : 'err'}`}
+                key={run.id}
+              >
+                <button
+                  className="run-line-head"
+                  disabled={!hasSteps}
+                  onClick={() => setOpenId(isOpen ? null : run.id)}
+                  type="button"
+                >
+                  <span className="run-caret">{hasSteps ? (isOpen ? '▾' : '▸') : ''}</span>
+                  <span className="run-time">
+                    {new Date(run.finishedAt ?? run.at).toLocaleString(navigator.language)}
+                  </span>
+                  <span className="run-tag">{sourceLabel(run)}</span>
+                  <span className="run-name">{run.label || run.summary?.split('\n')[0] || ''}</span>
+                  <span className={`run-badge run-badge-${run.skipped ? 'skipped' : run.ok ? 'ok' : 'err'}`}>
+                    {outcomeLabel(run)}
+                  </span>
+                </button>
+                {(run.summary || run.error) && (
+                  <div className="run-summary">{run.summary || run.error}</div>
+                )}
+                {isOpen && hasSteps && (
+                  <ul className="running-steps run-steps">
+                    {run.steps!.map((step, index) => (
+                      <li className={`running-step running-step-${step.kind}`} key={index}>
+                        {step.text}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            )
+          })}
         </ul>
       )}
     </div>

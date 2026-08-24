@@ -74,6 +74,19 @@ const runs = new Map<string, RunningTask>()
 const finished: FinishedTask[] = []
 const MAX_FINISHED = 30
 
+/**
+ * Hook invoked when a run settles. The background script registers it to
+ * persist the finished run (with its steps) to `chrome.storage` so the run log
+ * survives a service-worker restart. Kept as an injection point so this module
+ * stays free of a `chrome`/storage dependency (and remains unit-testable).
+ */
+let persistFinished: ((run: FinishedTask) => void) | null = null
+
+/** Registers (or clears, with null) the persistence callback for finished runs. */
+export function setFinishedPersister(fn: ((run: FinishedTask) => void) | null): void {
+  persistFinished = fn
+}
+
 /** Generates a run id without pulling in a uuid dependency. */
 function newRunId(): string {
   // crypto.randomUUID exists in MV3 service workers and in tests.
@@ -162,6 +175,14 @@ export function finishRun(runId: string, options?: FinishOptions): void {
   }
   finished.unshift(entry)
   if (finished.length > MAX_FINISHED) finished.length = MAX_FINISHED
+  // Persist asynchronously; failures must never break the in-memory board.
+  if (persistFinished) {
+    try {
+      persistFinished(entry)
+    } catch {
+      /* persistence is best-effort */
+    }
+  }
 }
 
 /** Returns all running tasks, newest first. */
@@ -172,6 +193,24 @@ export function listRunning(): RunningTask[] {
 /** Returns recently completed runs, newest first. */
 export function listFinished(): FinishedTask[] {
   return [...finished]
+}
+
+/**
+ * Seeds the in-memory "recently finished" list from persisted run logs. Called
+ * once at worker startup so completed runs from before an eviction still appear
+ * on the board. Already-present (in-memory) entries win, and the list is capped
+ * to {@link MAX_FINISHED}. Persisted entries without steps are still shown as
+ * summary rows.
+ */
+export function hydrateFinished(persisted: FinishedTask[]): void {
+  const known = new Set(finished.map((r) => r.runId))
+  for (const run of persisted) {
+    if (known.has(run.runId)) continue
+    finished.push(run)
+    known.add(run.runId)
+  }
+  finished.sort((a, b) => b.finishedAt - a.finishedAt)
+  if (finished.length > MAX_FINISHED) finished.length = MAX_FINISHED
 }
 
 /** Returns a single run, or undefined. */

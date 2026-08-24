@@ -83,6 +83,7 @@ export interface Messages {
   taskTriggerSchedule: string
   taskTriggerManual: string
   taskTriggerFeishu: string
+  taskTriggerChat: string
   tasksRunning: string
   tasksRunningEmpty: string
   tasksActivity: string
@@ -353,6 +354,7 @@ const en: Messages = {
   taskTriggerSchedule: 'schedule',
   taskTriggerManual: 'manual',
   taskTriggerFeishu: 'Feishu',
+  taskTriggerChat: 'chat',
   tasksRunning: 'Running',
   tasksRunningEmpty: 'No tasks running. Start one from chat, a schedule, or Feishu.',
   tasksActivity: 'Activity',
@@ -632,6 +634,7 @@ const zhCN: Messages = {
   taskTriggerSchedule: '定时',
   taskTriggerManual: '手动',
   taskTriggerFeishu: '飞书',
+  taskTriggerChat: '对话',
   tasksRunning: '运行中',
   tasksRunningEmpty: '当前没有运行中的任务。可从对话、定时或飞书发起。',
   tasksActivity: '动态',

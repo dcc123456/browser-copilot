@@ -15,6 +15,8 @@ import {
   type ScheduledTask,
   type TaskKind,
   type TaskRunLog,
+  type TaskRunOutcome,
+  type TaskRunStep,
 } from './scheduler-types'
 import { normalizeSchedule } from './schedule'
 
@@ -121,13 +123,43 @@ function asRun(value: unknown): TaskRunLog | null {
   return {
     id: v.id as string,
     ...(typeof v.taskId === 'string' ? { taskId: v.taskId } : {}),
+    ...(typeof v.label === 'string' ? { label: v.label } : {}),
+    ...(v.source === 'chat' || v.source === 'schedule' || v.source === 'feishu' || v.source === 'manual'
+      ? { source: v.source }
+      : {}),
     trigger: v.trigger === 'feishu' || v.trigger === 'manual' ? v.trigger : 'schedule',
+    ...(typeof v.startedAt === 'number' ? { startedAt: v.startedAt } : {}),
+    ...(typeof v.finishedAt === 'number' ? { finishedAt: v.finishedAt } : {}),
+    ...(v.outcome === 'ok' || v.outcome === 'failed' || v.outcome === 'cancelled' || v.outcome === 'skipped'
+      ? { outcome: v.outcome }
+      : {}),
     at: typeof v.at === 'number' ? v.at : Date.now(),
     ok: v.ok === true,
     skipped: v.skipped === true,
     summary: typeof v.summary === 'string' ? v.summary : '',
     notified: v.notified === true,
     error: typeof v.error === 'string' ? v.error : undefined,
+    ...(Array.isArray(v.steps)
+      ? {
+          steps: v.steps
+            .filter(
+              (s): s is TaskRunStep =>
+                !!s &&
+                typeof s === 'object' &&
+                typeof s.text === 'string' &&
+                (s.kind === 'tool' ||
+                  s.kind === 'status' ||
+                  s.kind === 'result' ||
+                  s.kind === 'error' ||
+                  s.kind === 'info'),
+            )
+            .map((s) => ({
+              at: typeof s.at === 'number' ? s.at : 0,
+              kind: s.kind,
+              text: s.text,
+            })),
+        }
+      : {}),
   }
 }
 
@@ -146,6 +178,55 @@ export async function addRun(run: Omit<TaskRunLog, 'id' | 'at'>): Promise<TaskRu
   const list = await listRuns()
   const entry: TaskRunLog = { ...run, id: newId(), at: Date.now() }
   list.unshift(entry)
+  await chrome.storage.local.set({ [KEY_RUNS]: list.slice(0, MAX_RUN_LOGS) })
+  return entry
+}
+
+/**
+ * Persists a fully-finished run (label, source, outcome, steps) into the run
+ * log. This is the single persistence path invoked from running-tasks when a
+ * run settles, so every entry point — chat turns, scheduled/Feishu/manual task
+ * runs, and ad-hoc Feishu instructions — survives a service-worker restart.
+ * The `trigger` field is derived from `source` for back-compat with older UI/
+ * storage versions.
+ */
+export interface FinishedRunInput {
+  runId: string
+  taskId?: string
+  label?: string
+  source: 'chat' | 'schedule' | 'feishu' | 'manual'
+  startedAt?: number
+  finishedAt?: number
+  outcome: TaskRunOutcome
+  summary?: string
+  error?: string
+  steps?: TaskRunStep[]
+}
+
+export async function recordFinishedRun(input: FinishedRunInput): Promise<TaskRunLog> {
+  const list = await listRuns()
+  const trigger: TaskRunLog['trigger'] =
+    input.source === 'feishu' ? 'feishu' : input.source === 'manual' ? 'manual' : 'schedule'
+  const entry: TaskRunLog = {
+    id: input.runId,
+    ...(input.taskId ? { taskId: input.taskId } : {}),
+    ...(input.label ? { label: input.label } : {}),
+    source: input.source,
+    trigger,
+    ...(input.startedAt ? { startedAt: input.startedAt } : {}),
+    finishedAt: input.finishedAt ?? Date.now(),
+    outcome: input.outcome,
+    at: input.finishedAt ?? Date.now(),
+    ok: input.outcome === 'ok',
+    skipped: input.outcome === 'skipped',
+    summary: input.summary ?? '',
+    ...(input.error ? { error: input.error } : {}),
+    ...(input.steps && input.steps.length > 0 ? { steps: input.steps } : {}),
+  }
+  // If a placeholder/earlier record with the same id exists, replace it.
+  const existing = list.findIndex((r) => r.id === input.runId)
+  if (existing !== -1) list[existing] = entry
+  else list.unshift(entry)
   await chrome.storage.local.set({ [KEY_RUNS]: list.slice(0, MAX_RUN_LOGS) })
   return entry
 }

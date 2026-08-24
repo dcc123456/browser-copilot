@@ -96,19 +96,11 @@ export async function runTask(
     })
   }
 
-  // Record the run and update the task's last-run state. These are independent
-  // of notification: a run exists even if Feishu is misconfigured. A cancelled
-  // run is not recorded as a failure (it was intentional), but the last-run
-  // state still reflects it so the UI does not look stale.
+  // Update the task's last-run state. The run itself (with its steps) is
+  // persisted by finishRun via the registered persister; a cancelled run is not
+  // recorded as a failure (it was intentional) but the last-run state still
+  // reflects it so the UI does not look stale.
   if (!outcome.cancelled) {
-    await addRun({
-      taskId: task.id,
-      trigger,
-      ok: outcome.ok,
-      skipped: outcome.skipped,
-      summary: outcome.summary,
-      error: outcome.error,
-    })
     await recordTaskRun(task.id, {
       lastStatus: outcome.skipped ? 'skipped' : outcome.ok ? 'ok' : 'failed',
       lastSummary: outcome.summary,
