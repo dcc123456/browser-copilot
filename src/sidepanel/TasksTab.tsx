@@ -70,12 +70,14 @@ export default function TasksTab() {
   }, [load])
 
   // Poll the running-tasks board while the tab is mounted so progress steps and
-  // start/finish appear live. When a run transitions out of the "running" set
-  // (it finished, failed, or was cancelled), also reload the persistent task
-  // list and run history — those are written by the worker but would otherwise
-  // stay stale until the tab is reopened. A ref holding the previous running ids
-  // detects the transition without reloading on every 1.5s tick.
+  // start/finish appear live. The persistent task list and run history are
+  // written by the worker but would otherwise stay stale until the tab is
+  // reopened, so we also reload them whenever we observe *activity*: a new run
+  // appears, a run leaves the running set, or a new entry shows up in the
+  // recently-finished board. Tracking finished ids (rather than running ids)
+  // catches runs that start and finish entirely between two 1.5s polls.
   const prevRunningIds = useRef<Set<string>>(new Set())
+  const prevFinishedIds = useRef<Set<string>>(new Set())
   useEffect(() => {
     let active = true
     const refresh = async (): Promise<void> => {
@@ -85,20 +87,28 @@ export default function TasksTab() {
         setRunning(result.runs)
         setFinished(result.finished)
 
-        const currentIds = new Set(result.runs.map((r) => r.runId))
-        let anyFinished = false
+        const runningIds = new Set(result.runs.map((r) => r.runId))
+        const finishedIds = new Set(result.finished.map((r) => r.runId))
+        let shouldReload = false
+        // A run we previously saw running is no longer running → it settled.
         for (const id of prevRunningIds.current) {
-          if (!currentIds.has(id)) {
-            anyFinished = true
+          if (!runningIds.has(id)) {
+            shouldReload = true
             break
           }
         }
-        // Also reload the first time running tasks appear empty after having had
-        // activity, so a run that completed between polls is picked up.
-        if (anyFinished || (prevRunningIds.current.size > 0 && currentIds.size === 0)) {
-          void load()
+        // A brand-new entry appeared in the recently-finished board.
+        if (!shouldReload) {
+          for (const id of finishedIds) {
+            if (!prevFinishedIds.current.has(id)) {
+              shouldReload = true
+              break
+            }
+          }
         }
-        prevRunningIds.current = currentIds
+        if (shouldReload) void load()
+        prevRunningIds.current = runningIds
+        prevFinishedIds.current = finishedIds
       } catch {
         /* non-fatal; keep polling */
       }
@@ -351,7 +361,14 @@ export default function TasksTab() {
         </details>
       )}
 
-      <details className="collapsible">
+      <details
+        className="collapsible"
+        onToggle={(event) => {
+          // Refresh the run log the moment the user expands it, so data is
+          // current even if no polled transition was observed.
+          if ((event.currentTarget as HTMLDetailsElement).open) void load()
+        }}
+      >
         <summary>
           <span className="collapsible-title">{t.tasksRunHistory}</span>
           {runs.length > 0 && <span className="collapsible-count">{runs.length}</span>}

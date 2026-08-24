@@ -52,7 +52,12 @@ export interface ScheduledTask {
 /** One execution record, kept for the UI and for debugging missed runs. */
 export interface TaskRunLog {
   id: string
-  taskId: string
+  /**
+   * Configured task id for a saved/scheduled task. Ad-hoc runs (a chat turn or
+   * a one-off Feishu instruction) have no task and leave this undefined, so they
+   * still show up in the global run history but not under any task card.
+   */
+  taskId?: string
   /** 'schedule' (an alarm), 'feishu' (a bot command), or 'manual' (the UI). */
   trigger: 'schedule' | 'feishu' | 'manual'
   at: number

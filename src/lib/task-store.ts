@@ -117,10 +117,10 @@ export async function recordTaskRun(
 function asRun(value: unknown): TaskRunLog | null {
   if (!value || typeof value !== 'object') return null
   const v = value as Partial<TaskRunLog>
-  if (typeof v.id !== 'string' || typeof v.taskId !== 'string') return null
+  if (v.taskId !== undefined && typeof v.taskId !== 'string') return null
   return {
-    id: v.id,
-    taskId: v.taskId,
+    id: v.id as string,
+    ...(typeof v.taskId === 'string' ? { taskId: v.taskId } : {}),
     trigger: v.trigger === 'feishu' || v.trigger === 'manual' ? v.trigger : 'schedule',
     at: typeof v.at === 'number' ? v.at : Date.now(),
     ok: v.ok === true,

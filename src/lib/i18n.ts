@@ -320,7 +320,7 @@ const en: Messages = {
   tabData: 'Data',
   tabSettings: 'Settings',
 
-  tasksTitle: 'Scheduled tasks',
+  tasksTitle: 'Run tasks',
   tasksSubtitle:
     'Run a task on a schedule and optionally deliver the result to Feishu. Scheduled runs only fire while the browser is open.',
   taskNew: 'New task',
@@ -599,7 +599,7 @@ const zhCN: Messages = {
   tabData: '数据',
   tabSettings: '设置',
 
-  tasksTitle: '定时任务',
+  tasksTitle: '运行任务',
   tasksSubtitle:
     '按计划运行任务，并可通过飞书通知结果。定时任务仅在浏览器打开时触发。',
   taskNew: '新建任务',
