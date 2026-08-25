@@ -1104,14 +1104,18 @@ export async function runAgentTurn(
   history: WireMessage[],
   deps: AgentDeps,
 ): Promise<TurnTokenUsage | null> {
-  const provider = await getActiveProvider()
+  // These reads are independent and all hit local storage / the settings cache,
+  // but running them in parallel shaves the serial round trips off the
+  // time-to-first-token — most noticeable for short chat-mode turns.
+  const [provider, skillList, initialMode, toolConfig, maxToolRounds] = await Promise.all([
+    getActiveProvider(),
+    listSkills(),
+    deps.getMode(),
+    deps.getToolConfig(),
+    deps.getMaxToolRounds(),
+  ])
   const activeSkill = deps.skillId ? await getSkill(deps.skillId) : undefined
-  const catalogue = activeSkill ? [] : await listSkills()
-  // The starting mode shapes the system prompt and which tools are advertised.
-  // Per-action gating re-reads the mode before every tool call, so a switch in
-  // the panel takes effect mid-turn without a new message.
-  const initialMode = await deps.getMode()
-  const toolConfig = await deps.getToolConfig()
+  const catalogue = activeSkill ? [] : skillList
   const disabled = new Set(toolConfig.disabledTools)
   const systemPrompt = buildSystemPrompt({
     activeSkill,
@@ -1119,7 +1123,7 @@ export async function runAgentTurn(
     mode: initialMode,
     basePrompt: toolConfig.basePrompt,
   })
-  const maxToolRounds = (await deps.getMaxToolRounds()) || DEFAULT_MAX_TOOL_ROUNDS
+  const roundsCap = maxToolRounds || DEFAULT_MAX_TOOL_ROUNDS
 
   // Filter the advertised tools:
   //  - chat mode sends no tools at all (pure conversation);
@@ -1154,7 +1158,7 @@ export async function runAgentTurn(
     totalTokens: 0,
   }
 
-  for (let round = 0; round < maxToolRounds; round += 1) {
+  for (let round = 0; round < roundsCap; round += 1) {
     // Bail promptly when the run is cancelled, rather than waiting for the next
     // in-flight fetch to notice its signal. The streamCompletion catch below
     // also handles an abort mid-request.
@@ -1233,7 +1237,7 @@ export async function runAgentTurn(
 
   deps.send({
     type: 'status',
-    text: `Stopped after ${maxToolRounds} tool rounds to avoid a loop.`,
+    text: `Stopped after ${roundsCap} tool rounds to avoid a loop.`,
   })
   return totalUsage.totalTokens > 0 ? totalUsage : null
 }
