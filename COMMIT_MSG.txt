@@ -1,0 +1,9 @@
+﻿Fix dropped replies on worker-eviction reconnect
+
+When the service worker had been evicted and the user sent a message,
+post() reconnected with a bare chrome.runtime.connect() that had no
+onMessage listener. The request was delivered but the streamed reply
+had nowhere to land, so the panel appeared to hang until the next
+disconnect/reconnect cycle. Reconnect through the full connect() path
+(listeners, heartbeat, resume) via a connectRef, so a cold worker no
+longer silently swallows the answer.

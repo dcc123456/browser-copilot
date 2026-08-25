@@ -202,6 +202,13 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const [highlight, setHighlight] = useState(0)
 
   const portRef = useRef<chrome.runtime.Port | null>(null)
+  /**
+   * Holds the live connect() routine so post() can trigger a full reconnect
+   * (listener + heartbeat + resume) after the worker was evicted. A bare
+   * `chrome.runtime.connect` in post() would open a port that receives
+   * messages but never listens for them, silently dropping the reply.
+   */
+  const connectRef = useRef<(() => void) | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   /** Tracks an in-progress IME composition so Enter confirms it, not send. */
@@ -375,9 +382,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     }
 
     connect()
+    connectRef.current = connect
 
     return () => {
       closedRef.current = true
+      connectRef.current = null
       window.clearInterval(heartbeat)
       window.clearTimeout(retry)
       portRef.current?.disconnect()
@@ -515,10 +524,12 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       portRef.current.postMessage(message)
       return true
     } catch {
+      // The worker was likely evicted. Reconnect through the full path (which
+      // re-attaches listeners and resumes), then send once the new port exists.
       try {
-        const port = chrome.runtime.connect({ name: AGENT_PORT })
-        portRef.current = port
-        port.postMessage(message)
+        connectRef.current?.()
+        if (!portRef.current) return false
+        portRef.current.postMessage(message)
         return true
       } catch {
         return false
