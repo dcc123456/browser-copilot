@@ -14,12 +14,19 @@ through a whole checkout or setup flow — while you watch or stay hands-off.
   auto; semi-auto shows every click for your approval first.
 - 🧩 **Skills** turn repeatable know-how (review checklists, style guides,
   extraction formats) into one-tap instructions the model must follow.
+- ⏰ **Runs on a schedule while you sleep.** Set recurring tasks — every few
+  minutes, daily, or on weekdays — to run an unattended prompt or summarize
+  your GitHub review queue, with a full run history.
+- 💬 **Picks up work from Feishu/Lark.** Get notified in a group chat when a
+  task finishes, or DM the bot a request from your phone and watch it execute
+  in the browser on your machine and reply with the result.
 - 🔒 **Private by construction.** No accounts, no telemetry, no cloud server.
   Your keys and data stay in your browser; passwords are filled locally and
   never shown to the model.
 
 It never acts on its own initiative — every action is either part of answering
-something you just asked, or a [scheduled task](#scheduled-tasks) you created.
+something you just asked, a [scheduled task](#scheduled-tasks) you created, or a
+command you sent from [Feishu/Lark](#feishu--lark-integration).
 
 ---
 
