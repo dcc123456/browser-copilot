@@ -93,12 +93,12 @@ describe('normalizeSkill', () => {
 describe('renderSkillPrompt', () => {
   it('labels and delimits the instructions', () => {
     const prompt = renderSkillPrompt(skill())
-    expect(prompt).toContain('## Active skill: Summarise')
+    expect(prompt).toContain('## ACTIVE SKILL — APPLY NOW: Summarise')
     expect(prompt).toContain('Reply with at most five bullets.')
   })
 
-  it('states that the user can override the skill', () => {
-    expect(renderSkillPrompt(skill())).toMatch(/unless the user/i)
+  it('tells the model the skill is already active so it does not refuse', () => {
+    expect(renderSkillPrompt(skill())).toMatch(/already\s+active/i)
   })
 
   it('omits the purpose line when there is no description', () => {

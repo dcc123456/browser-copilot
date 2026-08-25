@@ -34,6 +34,27 @@ describe('system prompt', () => {
     expect(prompt).not.toContain('SEMI-AUTO')
     expect(prompt.length).toBeLessThan(260)
   })
+
+  it('places an active skill AFTER the mode line so it is the nearest instruction', () => {
+    const prompt = buildSystemPrompt({
+      mode: 'semi',
+      activeSkill: {
+        id: 's1',
+        name: 'Summarise',
+        description: 'Summarise text',
+        instructions: 'Reply in bullets.',
+        autoMatch: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    })
+    const modeAt = prompt.indexOf('SEMI-AUTO')
+    const skillAt = prompt.indexOf('ACTIVE SKILL')
+    expect(modeAt).toBeGreaterThan(-1)
+    expect(skillAt).toBeGreaterThan(modeAt)
+    // The skill block is the final block in the prompt.
+    expect(prompt.lastIndexOf('Reply in bullets.')).toBeGreaterThan(skillAt)
+  })
 })
 
 describe('tool catalog', () => {

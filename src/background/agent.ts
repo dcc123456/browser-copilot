@@ -106,11 +106,12 @@ export function buildSystemPrompt(options: {
   const override = options.basePrompt?.trim()
   const base = override ? override : SYSTEM_PROMPT
   const parts = [base]
+  // The skill catalogue only matters when no skill is pinned: an active skill's
+  // full instructions are injected below instead.
   if (!options.activeSkill && options.catalogue && options.catalogue.length > 0) {
     const catalogue = renderSkillCatalogue(options.catalogue)
     if (catalogue) parts.push(catalogue)
   }
-  if (options.activeSkill) parts.push(renderSkillPrompt(options.activeSkill))
 
   // State the operating mode so the model does not promise (or attempt) an
   // action the gate will refuse.
@@ -127,6 +128,14 @@ export function buildSystemPrompt(options: {
       'OPERATING MODE: SEMI-AUTO (default). Every action that changes the page is shown to the user for one-shot approval before it runs. Be precise so the approval summary is clear.',
     )
   }
+
+  // The active (pinned) skill goes LAST — closest to the user's message — so the
+  // model treats it as the immediate, overriding instruction rather than a
+  // distant block it may ignore. State explicitly that it is already active and
+  // must be applied now; otherwise a bare "use the active skill" turn can make
+  // the model claim it has no such ability.
+  if (options.activeSkill) parts.push(renderSkillPrompt(options.activeSkill))
+
   return parts.join('\n\n')
 }
 

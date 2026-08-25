@@ -65,12 +65,18 @@ export function normalizeSkill(skill: Skill): Skill {
  */
 export function renderSkillPrompt(skill: Skill): string {
   return [
-    `## Active skill: ${skill.name}`,
+    `## ACTIVE SKILL — APPLY NOW: ${skill.name}`,
     skill.description ? `Purpose: ${skill.description}` : '',
     '',
-    'Follow these instructions for this conversation unless the user overrides them:',
+    'The user has selected this skill for the current conversation. It is already',
+    'active — do not say you cannot use skills or that no skill is loaded. Treat the',
+    'following instructions as your immediate task; the user\'s next message (and any',
+    'selected page text) is the input to process with them. Apply them now and answer',
+    'in the user\'s language:',
     '',
+    '---',
     skill.instructions,
+    '---',
   ]
     .filter((line) => line !== '')
     .join('\n')
