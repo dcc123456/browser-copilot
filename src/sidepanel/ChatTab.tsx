@@ -45,6 +45,15 @@ import Markdown from './Markdown'
  */
 const STORED_CONV_KEY = 'browser-copilot:active-conversation'
 
+/** Empty token tally, used when (re)starting a conversation's counters. */
+const ZERO_USAGE: TurnTokenUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cachedInputTokens: 0,
+  reasoningTokens: 0,
+  totalTokens: 0,
+}
+
 function loadStoredConversationId(): string {
   try {
     return localStorage.getItem(STORED_CONV_KEY) || DEFAULT_CONVERSATION_ID
@@ -101,18 +110,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const [sessionUsage, setSessionUsage] = useState<TurnTokenUsage>(() => ({ ...ZERO_USAGE }))
   const [usageOpen, setUsageOpen] = useState(false)
 
-  const ZERO_USAGE: TurnTokenUsage = {
-    inputTokens: 0,
-    outputTokens: 0,
-    cachedInputTokens: 0,
-    reasoningTokens: 0,
-    totalTokens: 0,
-  }
-
   // Each conversation gets its own token tally; reset when starting or opening
   // another conversation so the chip reflects only the current one.
   const resetUsage = useCallback(() => {
-    setSessionUsage(ZERO_USAGE)
+    setSessionUsage({ ...ZERO_USAGE })
     setLastUsage(null)
   }, [])
   /**
