@@ -140,7 +140,9 @@ export interface Messages {
   chatConfirmTitle: (params: { name: string }) => string
   chatSkillActive: (params: { name: string }) => string
   /** Sent as the user turn when a skill is active but the user typed nothing. */
-  chatSkillGo: string
+  chatSkillGo: (params: { name: string }) => string
+  /** Same as above, but the user also attached their current page selection. */
+  chatSkillGoSelection: (params: { name: string }) => string
   /** Composer hint shown once at least one skill exists. */
   chatPlaceholderWithSkills: string
   /** Shown in the slash menu when no skill matches what was typed. */
@@ -480,7 +482,9 @@ const en: Messages = {
   chatDecline: 'Decline',
   chatConfirmTitle: ({ name }) => `Allow ${name}?`,
   chatSkillActive: ({ name }) => `Skill: ${name}`,
-  chatSkillGo: 'Use the active skill.',
+  chatSkillGo: ({ name }) => `Apply the "${name}" skill now.`,
+  chatSkillGoSelection: ({ name }) =>
+    `Apply the "${name}" skill to the text I selected on the page.`,
   chatPlaceholderWithSkills:
     'Message… (Enter to send, Shift+Enter for a new line, / for skills)',
   chatSlashNoMatch: 'No matching skill',
@@ -833,7 +837,8 @@ const zhCN: Messages = {
   chatDecline: '拒绝',
   chatConfirmTitle: ({ name }) => `是否允许执行 ${name}？`,
   chatSkillActive: ({ name }) => `技能：${name}`,
-  chatSkillGo: '使用当前技能。',
+  chatSkillGo: ({ name }) => `请使用"${name}"技能处理。`,
+  chatSkillGoSelection: ({ name }) => `请用"${name}"技能处理我在页面上选中的内容。`,
   chatPlaceholderWithSkills: '输入消息…（Enter 发送，Shift+Enter 换行，/ 选择技能）',
   chatSlashNoMatch: '没有匹配的技能',
 

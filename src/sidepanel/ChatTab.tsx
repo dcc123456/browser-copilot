@@ -533,9 +533,20 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     // instructions become the task. Otherwise a message is required.
     if (!text && !activeSkillId) return
 
-    // When the user just selected a skill and hit send, give the model an
-    // explicit nudge to follow it, rather than sending an empty user turn.
-    const outgoing = text || t.chatSkillGo
+    // When the user just selected a skill and hit send, name the skill explicitly
+    // so the model ties the turn to the active-skill block in the system prompt
+    // (rather than receiving a vague "use the skill" nudge it may refuse). When
+    // "attach selection" is on, point the skill at the selected text.
+    let outgoing = text
+    if (!outgoing) {
+      const skill = activeSkillId
+        ? skills.find((entry) => entry.id === activeSkillId)
+        : undefined
+      const name = skill?.name ?? ''
+      outgoing = includeSelection
+        ? t.chatSkillGoSelection({ name })
+        : t.chatSkillGo({ name })
+    }
 
     const delivered = post({
       type: 'chat',
