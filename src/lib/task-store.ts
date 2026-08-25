@@ -10,6 +10,7 @@
 
 import { newId } from './storage'
 import {
+  DEFAULT_TASK_MAX_TOOL_ROUNDS,
   EMPTY_FEISHU_CONFIG,
   type FeishuConfig,
   type ScheduledTask,
@@ -19,6 +20,13 @@ import {
   type TaskRunStep,
 } from './scheduler-types'
 import { normalizeSchedule } from './schedule'
+
+/** Clamps a per-task tool-round budget to a sane positive range. */
+function coerceMaxToolRounds(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n)) return DEFAULT_TASK_MAX_TOOL_ROUNDS
+  return Math.min(500, Math.max(1, Math.round(n)))
+}
 
 const KEY_TASKS = 'scheduledTasks'
 const KEY_RUNS = 'scheduledTaskRuns'
@@ -40,6 +48,7 @@ function asTask(value: unknown): ScheduledTask | null {
     schedule: normalizeSchedule(v.schedule),
     kind,
     prompt: typeof v.prompt === 'string' ? v.prompt : undefined,
+    maxToolRounds: coerceMaxToolRounds(v.maxToolRounds),
     notifyFeishu: v.notifyFeishu === true,
     createdAt: typeof v.createdAt === 'number' ? v.createdAt : Date.now(),
     updatedAt: typeof v.updatedAt === 'number' ? v.updatedAt : Date.now(),
@@ -85,6 +94,10 @@ export function createDraft(partial?: Partial<ScheduledTask>): ScheduledTask {
     schedule: partial?.schedule ?? { kind: 'daily', hour: 9, minute: 0 },
     kind: partial?.kind ?? 'agent-prompt',
     prompt: partial?.prompt ?? '',
+    maxToolRounds:
+      partial && typeof partial.maxToolRounds === 'number'
+        ? coerceMaxToolRounds(partial.maxToolRounds)
+        : DEFAULT_TASK_MAX_TOOL_ROUNDS,
     notifyFeishu: partial?.notifyFeishu ?? false,
     createdAt: now,
     updatedAt: now,
@@ -170,6 +183,9 @@ export async function listRuns(taskId?: string): Promise<TaskRunLog[]> {
   return list
     .map(asRun)
     .filter((run): run is TaskRunLog => run !== null)
+    // Chat turns are conversation turns, not task runs — keep them out of the
+    // task run history (and out of the board hydrated from it).
+    .filter((run) => run.source !== 'chat')
     .filter((run) => (taskId ? run.taskId === taskId : true))
     .sort((a, b) => b.at - a.at)
 }
@@ -203,7 +219,10 @@ export interface FinishedRunInput {
   steps?: TaskRunStep[]
 }
 
-export async function recordFinishedRun(input: FinishedRunInput): Promise<TaskRunLog> {
+export async function recordFinishedRun(input: FinishedRunInput): Promise<TaskRunLog | null> {
+  // Chat turns are conversation history, not task runs. Never persist them into
+  // the task run log, so it stays a clean record of scheduled/Feishu/manual runs.
+  if (input.source === 'chat') return null
   const list = await listRuns()
   const trigger: TaskRunLog['trigger'] =
     input.source === 'feishu' ? 'feishu' : input.source === 'manual' ? 'manual' : 'schedule'

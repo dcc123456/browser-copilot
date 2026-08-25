@@ -63,9 +63,15 @@ export interface Messages {
   taskSchedule: string
   taskSchedDaily: string
   taskSchedWeekdays: string
+  taskSchedWeekly: string
   taskSchedInterval: string
   taskEvery: string
   taskMinutes: string
+  taskMaxRounds: string
+  taskMaxRoundsHint: string
+  taskClearFinished: string
+  taskDeleteFinishedConfirm: string
+  taskClearFinishedConfirm: string
   taskNotifyFeishu: string
   taskEnabled: string
   taskRunNow: string
@@ -303,6 +309,8 @@ export interface Messages {
   toolSecretWarn: string
   toolSkill: string
   toolSkillWarn: string
+  toolListTasks: string
+  toolListTasksWarn: string
 
   // Settings · page access
   settingsPageAccess: string
@@ -410,9 +418,16 @@ const en: Messages = {
   taskSchedule: 'When',
   taskSchedDaily: 'Daily at',
   taskSchedWeekdays: 'Weekdays (Mon–Fri) at',
+  taskSchedWeekly: 'On weekdays',
   taskSchedInterval: 'Every',
   taskEvery: 'every',
   taskMinutes: 'minutes',
+  taskMaxRounds: 'Max tool rounds',
+  taskMaxRoundsHint:
+    'How many model↔tool steps this task may run unattended. Independent of the global setting (default 50).',
+  taskClearFinished: 'Clear',
+  taskDeleteFinishedConfirm: 'Remove this finished run from the board?',
+  taskClearFinishedConfirm: 'Clear all finished runs from the board?',
   taskNotifyFeishu: 'Notify via Feishu when done',
   taskEnabled: 'Enabled',
   taskRunNow: 'Run now',
@@ -661,6 +676,9 @@ const en: Messages = {
     'When off: the assistant cannot fill saved passwords or secret fields (you would have to type them).',
   toolSkill: 'Use a skill',
   toolSkillWarn: 'When off: the assistant cannot load or apply saved skills.',
+  toolListTasks: 'List scheduled tasks',
+  toolListTasksWarn:
+    'When off: the assistant cannot tell you which scheduled/recurring tasks are enabled.',
 
   settingsPageAccess: 'Page access',
   settingsPageAccessIntro:
@@ -772,9 +790,16 @@ const zhCN: Messages = {
   taskSchedule: '时间',
   taskSchedDaily: '每天',
   taskSchedWeekdays: '工作日（周一至周五）',
+  taskSchedWeekly: '每周指定日',
   taskSchedInterval: '每隔',
   taskEvery: '每隔',
   taskMinutes: '分钟',
+  taskMaxRounds: '最大调用轮数',
+  taskMaxRoundsHint:
+    '该任务无人值守时最多进行多少轮"模型↔工具"往返。独立于全局设置，默认 50。',
+  taskClearFinished: '清空',
+  taskDeleteFinishedConfirm: '从看板移除这条已完成记录？',
+  taskClearFinishedConfirm: '清空看板上所有已完成记录？',
   taskNotifyFeishu: '完成后通过飞书通知',
   taskEnabled: '启用',
   taskRunNow: '立即运行',
@@ -1006,6 +1031,8 @@ const zhCN: Messages = {
   toolSecretWarn: '关闭后：助手无法填写已保存的密码或密钥字段（需要你手动输入）。',
   toolSkill: '使用技能',
   toolSkillWarn: '关闭后：助手无法加载或应用已保存的技能。',
+  toolListTasks: '列出定时任务',
+  toolListTasksWarn: '关闭后：助手无法告诉你当前启用了哪些定时/周期任务。',
 
   settingsPageAccess: '页面读取权限',
   settingsPageAccessIntro:

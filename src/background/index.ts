@@ -70,6 +70,7 @@ import { isWebhookUrl, sendWebhookText } from '../lib/feishu'
 import {
   addStep,
   cancelRun,
+  clearFinished,
   finishRun,
   forgetFinished,
   hydrateFinished,
@@ -428,6 +429,17 @@ async function handleCommand(command: Command): Promise<CommandResult> {
     }
     case 'tasks.cancel':
       return { type: 'tasks.cancel', ok: cancelRun(command.runId) }
+    case 'tasks.finished.delete':
+      // Remove from the board and its persisted run log entry.
+      forgetFinished(command.runId)
+      await deleteRun(command.runId)
+      return { type: 'tasks.finished.delete' }
+    case 'tasks.finished.clear':
+      // Clear the board and all persisted task-run logs (chat runs are excluded
+      // by the store and never persisted).
+      clearFinished()
+      await clearRuns()
+      return { type: 'tasks.finished.clear' }
 
     case 'feishu.get':
       return { type: 'feishu.get', config: await getFeishuConfig() }

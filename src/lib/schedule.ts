@@ -52,6 +52,24 @@ export function normalizeSchedule(raw: unknown): Schedule {
     const m = (value as { minute?: unknown }).minute
     return { kind: 'weekdays', hour: coerceHour(h), minute: coerceMinute(m) }
   }
+  if (value.kind === 'weekly') {
+    const h = (value as { hour?: unknown }).hour
+    const m = (value as { minute?: unknown }).minute
+    const rawDays = (value as { days?: unknown }).days
+    const days = Array.isArray(rawDays)
+      ? Array.from(
+          new Set(
+            rawDays
+              .map((d) => Number(d))
+              .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6),
+          ),
+        ).sort((a, b) => a - b)
+      : []
+    // A weekly schedule with no selected day is unusable; fall back to daily so
+    // the scheduler never silently does nothing.
+    if (days.length === 0) return { kind: 'daily', hour: coerceHour(h), minute: coerceMinute(m) }
+    return { kind: 'weekly', days, hour: coerceHour(h), minute: coerceMinute(m) }
+  }
   const h = (value as { hour?: unknown }).hour
   const m = (value as { minute?: unknown }).minute
   return { kind: 'daily', hour: coerceHour(h), minute: coerceMinute(m) }
@@ -81,6 +99,9 @@ export function nextRunAt(schedule: Schedule, from: number): number {
 
   if (schedule.kind === 'weekdays') {
     while (isWeekend(candidate)) candidate.setDate(candidate.getDate() + 1)
+  } else if (schedule.kind === 'weekly') {
+    const allowed = new Set(schedule.days)
+    while (!allowed.has(candidate.getDay())) candidate.setDate(candidate.getDate() + 1)
   }
 
   return candidate.getTime()
@@ -96,5 +117,15 @@ export function describeSchedule(schedule: Schedule, locale: string = 'en'): str
   }
   const hhmm = `${pad(coerceHour(schedule.hour))}:${pad(coerceMinute(schedule.minute))}`
   if (schedule.kind === 'weekdays') return zh ? `工作日 ${hhmm}` : `Weekdays ${hhmm}`
+  if (schedule.kind === 'weekly') {
+    // Sunday=0 … Saturday=6. Order labels Monday..Sunday to read naturally.
+    const order = [1, 2, 3, 4, 5, 6, 0]
+    const names = zh
+      ? ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+      : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    const chosen = order.filter((d) => schedule.days.includes(d)).map((d) => names[d])
+    const days = chosen.join(zh ? '、' : ', ')
+    return zh ? `每${days} ${hhmm}` : `${days} ${hhmm}`
+  }
   return zh ? `每天 ${hhmm}` : `Daily ${hhmm}`
 }

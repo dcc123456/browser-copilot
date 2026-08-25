@@ -169,10 +169,11 @@ async function runReviewRequests(lang: string, tracked: RunningTask): Promise<Ru
  *
  * Captures streamed text into a buffer because the task has no panel to stream
  * to. There is no `confirm` callback: a scheduled run happens unattended, so
- * every confirmation would time out. The agent runs in the user's configured
- * mode, but `semi` (per-action approval) effectively degrades to refusal for
- * actions — that is the safe default for unattended work. The user must opt into
- * `full` mode for acting tasks.
+ * every confirmation would time out. Scheduled/manual/Feishu task runs all use
+ * FULL mode — the task is an explicit "go do this", and a hidden confirmation
+ * that can never be answered would make every acting task fail. Each task
+ * carries its own tool-round budget (default 50) so long unattended workflows
+ * aren't bounded by the interactive setting.
  */
 async function runAgentPrompt(task: ScheduledTask, _lang: string, tracked: RunningTask): Promise<RunOutcome> {
   const prompt = task.prompt?.trim()
@@ -180,11 +181,9 @@ async function runAgentPrompt(task: ScheduledTask, _lang: string, tracked: Runni
     return { ok: false, skipped: false, summary: '', error: 'This task has no prompt.' }
   }
 
-  // Scheduled tasks honor the user's configured autonomy mode; they do not force
-  // full mode the way an explicit Feishu command does. The abort signal lets the
-  // board terminate a runaway run, and each step is recorded for the UI / Feishu.
-  const result = await runUnattendedPrompt(prompt, `task:${task.id}`, undefined, {
+  const result = await runUnattendedPrompt(prompt, `task:${task.id}`, 'full', {
     signal: tracked.controller.signal,
+    maxToolRounds: task.maxToolRounds,
     onStep: (kind, text) => addStep(tracked.runId, kind, text),
   })
   return {

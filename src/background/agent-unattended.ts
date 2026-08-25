@@ -8,11 +8,12 @@
  *
  * ## Autonomy
  *
- * Scheduled tasks run in the user's configured mode. Feishu ad-hoc commands are
- * treated as an explicit "go do this" and run in `full` mode — otherwise opening
- * weibo.com and reading it would pop a hidden confirmation that can never be
- * answered, and the command would always fail. Every action is still recorded in
- * the agent history like any other turn.
+ * Every unattended run (scheduled tasks, manual "run now", and Feishu
+ * commands) executes in `full` mode: the task is an explicit "go do this", and
+ * without a panel there is nobody to click a per-action approval, so a hidden
+ * confirmation would make every acting task fail. Each task still carries its
+ * own tool-round budget (default 50) via `options.maxToolRounds`, independent
+ * of the global interactive setting.
  *
  * @module background/agent-unattended
  */
@@ -34,6 +35,12 @@ export interface UnattendedResult {
 export interface UnattendedOptions {
   /** Abort signal used to cancel a running turn (from the board or Feishu). */
   signal?: AbortSignal
+  /**
+   * Per-run cap on model↔tool round trips. Scheduled tasks carry their own
+   * budget (default 50) so they aren't bounded by the interactive setting.
+   * When undefined, the global setting is used.
+   */
+  maxToolRounds?: number
   /**
    * Called for each progress step the agent emits — tool starts/results and
    * status/error lines. The Feishu bot uses this to stream steps back to chat;
@@ -93,7 +100,7 @@ export async function runUnattendedPrompt(
       // read/semi where it makes the model report a refusal and move on.
       confirm: async () => (modeOverride === 'full' ? true : false),
       getMode: async () => modeOverride ?? settings.mode,
-      getMaxToolRounds: async () => settings.maxToolRounds,
+      getMaxToolRounds: async () => options.maxToolRounds ?? settings.maxToolRounds,
       getToolConfig: async () => ({
         disabledTools: settings.disabledTools ?? [],
         basePrompt: settings.systemPromptOverride ?? '',

@@ -17,6 +17,17 @@ import { useT } from './i18n'
 /** Editable form state. */
 type Draft = ScheduledTask
 
+/** Weekday checkboxes, Monday-first; values match Date.getDay() (Sun=0). */
+const WEEKDAY_OPTIONS: { value: number; en: string; zh: string }[] = [
+  { value: 1, en: 'Mon', zh: '周一' },
+  { value: 2, en: 'Tue', zh: '周二' },
+  { value: 3, en: 'Wed', zh: '周三' },
+  { value: 4, en: 'Thu', zh: '周四' },
+  { value: 5, en: 'Fri', zh: '周五' },
+  { value: 6, en: 'Sat', zh: '周六' },
+  { value: 0, en: 'Sun', zh: '周日' },
+]
+
 function emptyTask(): Draft {
   // Every new task is a free-form agent prompt. The built-in GitHub review task
   // is created/edited from its own entry; the editor does not need a type picker
@@ -137,6 +148,42 @@ export default function TasksTab() {
     }
   }
 
+  const deleteFinished = async (runId: string): Promise<void> => {
+    if (!confirm(t.taskDeleteFinishedConfirm)) return
+    setBusy(true)
+    try {
+      await sendCommand({ type: 'tasks.finished.delete', runId })
+      const result = await sendCommand({ type: 'tasks.running' })
+      if (result.type === 'tasks.running') {
+        setRunning(result.runs)
+        setFinished(result.finished)
+      }
+      await load()
+    } catch (error) {
+      setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const clearFinished = async (): Promise<void> => {
+    if (!confirm(t.taskClearFinishedConfirm)) return
+    setBusy(true)
+    try {
+      await sendCommand({ type: 'tasks.finished.clear' })
+      const result = await sendCommand({ type: 'tasks.running' })
+      if (result.type === 'tasks.running') {
+        setRunning(result.runs)
+        setFinished(result.finished)
+      }
+      await load()
+    } catch (error) {
+      setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const persistTask = async (task: Draft): Promise<void> => {
     setBusy(true)
     // Collapse the editor immediately so the click always gives visible
@@ -239,6 +286,8 @@ export default function TasksTab() {
         running={running}
         finished={finished}
         onCancel={(id) => void cancelRunning(id)}
+        onDeleteFinished={(id) => void deleteFinished(id)}
+        onClearFinished={() => void clearFinished()}
         busy={busy}
       />
 
@@ -403,6 +452,7 @@ function TaskEditor({
   disabled: boolean
 }) {
   const t = useT()
+  const zh = navigator.language.toLowerCase().startsWith('zh')
   const update = <K extends keyof Draft>(key: K, value: Draft[K]): void =>
     onChange({ ...draft, [key]: value })
 
@@ -469,6 +519,22 @@ function TaskEditor({
           </label>
           <label>
             <input
+              checked={sched.kind === 'weekly'}
+              onChange={() => {
+                const hour = sched.kind === 'interval' ? 9 : sched.hour
+                const minute = sched.kind === 'interval' ? 0 : sched.minute
+                const days =
+                  sched.kind === 'weekly' && sched.days.length > 0
+                    ? sched.days
+                    : [1, 2, 3, 4, 5]
+                update('schedule', { kind: 'weekly', days, hour, minute })
+              }}
+              type="radio"
+            />{' '}
+            {t.taskSchedWeekly}
+          </label>
+          <label>
+            <input
               checked={sched.kind === 'interval'}
               onChange={() => update('schedule', { kind: 'interval', minutes: 60 })}
               type="radio"
@@ -476,6 +542,30 @@ function TaskEditor({
             {t.taskSchedInterval}
           </label>
         </div>
+
+        {sched.kind === 'weekly' && (
+          <div className="schedule-row weekday-row">
+            {WEEKDAY_OPTIONS.map((day) => {
+              const checked = sched.days.includes(day.value)
+              return (
+                <label className="weekday-chip" key={day.value}>
+                  <input
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={() => {
+                      const next = checked
+                        ? sched.days.filter((d) => d !== day.value)
+                        : [...sched.days, day.value].sort((a, b) => a - b)
+                      update('schedule', { ...sched, days: next })
+                    }}
+                    type="checkbox"
+                  />
+                  {zh ? day.zh : day.en}
+                </label>
+              )
+            })}
+          </div>
+        )}
 
         {sched.kind !== 'interval' ? (
           <div className="schedule-row">
@@ -514,6 +604,24 @@ function TaskEditor({
           </div>
         )}
       </fieldset>
+
+      <label className="field">
+        <span>{t.taskMaxRounds}</span>
+        <input
+          disabled={disabled}
+          min={1}
+          max={500}
+          onChange={(event) =>
+            onChange({
+              ...draft,
+              maxToolRounds: Math.min(500, Math.max(1, Number(event.target.value) || 1)),
+            })
+          }
+          type="number"
+          value={draft.maxToolRounds}
+        />
+        <small className="hint">{t.taskMaxRoundsHint}</small>
+      </label>
 
       <label className="inline-check">
         <input
@@ -740,11 +848,15 @@ function RunningBoard({
   running,
   finished,
   onCancel,
+  onDeleteFinished,
+  onClearFinished,
   busy,
 }: {
   running: RunningTaskView[]
   finished: FinishedTaskView[]
   onCancel: (runId: string) => void
+  onDeleteFinished: (runId: string) => void
+  onClearFinished: () => void
   busy: boolean
 }) {
   const t = useT()
@@ -815,11 +927,22 @@ function RunningBoard({
       {finished.length > 0 && (
         <>
           <div className="running-divider" />
-          <h4 className="running-section-title">{t.tasksRecentlyFinished}</h4>
+          <div className="running-section-head">
+            <h4 className="running-section-title">{t.tasksRecentlyFinished}</h4>
+            <button
+              className="link running-clear"
+              disabled={busy}
+              onClick={onClearFinished}
+              type="button"
+            >
+              {t.taskClearFinished}
+            </button>
+          </div>
           <FinishedList
             runs={finished.slice(0, 8)}
             sourceLabel={sourceLabel}
             outcomeLabel={outcomeLabel}
+            onDelete={onDeleteFinished}
             t={t}
           />
         </>
@@ -833,11 +956,13 @@ function FinishedList({
   runs,
   sourceLabel,
   outcomeLabel,
+  onDelete,
   t,
 }: {
   runs: FinishedTaskView[]
   sourceLabel: (source: FinishedTaskView['source']) => string
   outcomeLabel: (outcome: FinishedTaskView['outcome']) => string
+  onDelete: (runId: string) => void
   t: ReturnType<typeof useT>
 }) {
   const [openId, setOpenId] = useState<string | null>(null)
@@ -862,6 +987,15 @@ function FinishedList({
               <span className={`finished-badge finished-badge-${run.outcome}`}>
                 {outcomeLabel(run.outcome)}
               </span>
+            </button>
+            <button
+              aria-label={t.delete}
+              className="danger finished-delete"
+              onClick={() => onDelete(run.runId)}
+              title={t.delete}
+              type="button"
+            >
+              ×
             </button>
             {isOpen && run.steps.length > 0 && (
               <ul className="running-steps finished-steps">

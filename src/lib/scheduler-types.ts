@@ -9,6 +9,11 @@ export type Schedule =
   | { kind: 'daily'; hour: number; minute: number }
   | { kind: 'weekdays'; hour: number; minute: number }
   /**
+   * Runs on the selected weekdays (0 = Sunday … 6 = Saturday, matching
+   * `Date.getDay()`) at the given local time.
+   */
+  | { kind: 'weekly'; days: number[]; hour: number; minute: number }
+  /**
    * Runs every `minutes`, starting at the time it was last (re)scheduled.
    *
    * The minimum is 1 minute, which is also the floor `chrome.alarms` enforces.
@@ -36,6 +41,13 @@ export interface ScheduledTask {
   kind: TaskKind
   /** Used when `kind === 'agent-prompt'`. */
   prompt?: string
+  /**
+   * Per-task cap on model↔tool round trips for agent-prompt tasks. Scheduled
+   * tasks run unattended in full-auto and can need more steps than an
+   * interactive turn, so each task carries its own budget instead of using the
+   * global setting. Defaults to {@link DEFAULT_TASK_MAX_TOOL_ROUNDS}.
+   */
+  maxToolRounds: number
   /** Whether the result is delivered via Feishu in addition to the run log. */
   notifyFeishu: boolean
   createdAt: number
@@ -125,3 +137,10 @@ export const EMPTY_FEISHU_CONFIG: FeishuConfig = {
   appSecret: '',
   botEnabled: false,
 }
+
+/**
+ * Default model↔tool round budget for a scheduled agent-prompt task. Scheduled
+ * runs are unattended full-auto and often need more steps than an interactive
+ * turn (which uses the global setting), so tasks default to 50.
+ */
+export const DEFAULT_TASK_MAX_TOOL_ROUNDS = 50

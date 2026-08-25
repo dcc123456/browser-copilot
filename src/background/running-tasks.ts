@@ -224,6 +224,11 @@ export function forgetFinished(runId: string): void {
   if (index !== -1) finished.splice(index, 1)
 }
 
+/** Clears every entry from the in-memory "recently completed" board. */
+export function clearFinished(): void {
+  finished.length = 0
+}
+
 /**
  * Requests cancellation of a run. The abort signal fires; the agent loop and
  * fetches observe it. The run finishes asynchronously and removes itself.

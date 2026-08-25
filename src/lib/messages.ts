@@ -111,6 +111,8 @@ export type Command =
   | { type: 'tasks.runs.delete'; id: string }
   | { type: 'tasks.running' }
   | { type: 'tasks.cancel'; runId: string }
+  | { type: 'tasks.finished.delete'; runId: string }
+  | { type: 'tasks.finished.clear' }
 
   // --- Feishu integration ---
   | { type: 'feishu.get' }
@@ -160,6 +162,8 @@ export type CommandResult =
   | { type: 'tasks.runs.delete' }
   | { type: 'tasks.running'; runs: RunningTaskView[]; finished: FinishedTaskView[] }
   | { type: 'tasks.cancel'; ok: boolean }
+  | { type: 'tasks.finished.delete' }
+  | { type: 'tasks.finished.clear' }
   | { type: 'feishu.get'; config: FeishuConfig }
   | { type: 'feishu.save' }
   | { type: 'feishu.test'; ok: boolean; message?: string }

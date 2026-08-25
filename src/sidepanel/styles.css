@@ -1754,11 +1754,67 @@ textarea {
 }
 
 .finished-item {
+  position: relative;
   border-bottom: 1px solid var(--border);
 }
 
 .finished-item:last-child {
   border-bottom: 0;
+}
+
+.finished-delete {
+  position: absolute;
+  top: 4px;
+  right: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  line-height: 1;
+  font-size: 14px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.finished-delete:hover {
+  color: var(--err);
+  background: var(--surface-hover, rgba(127, 127, 127, 0.12));
+}
+
+/* Leave room for the delete button so the row text never slips under it. */
+.finished-row {
+  padding-right: 22px;
+}
+
+.running-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.running-section-head .running-section-title {
+  margin: 0;
+}
+
+.running-clear {
+  font-size: 11px;
+  padding: 2px 4px;
+}
+
+.weekday-row {
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 6px;
+}
+
+.weekday-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
 }
 
 .finished-row {

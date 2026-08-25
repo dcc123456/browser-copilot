@@ -94,6 +94,12 @@ export const TOOL_META: ToolMeta[] = [
   },
   { name: 'get_secret', category: 'data', labelKey: 'toolSecret', warningKey: 'toolSecretWarn' },
   { name: 'use_skill', category: 'data', labelKey: 'toolSkill', warningKey: 'toolSkillWarn' },
+  {
+    name: 'list_scheduled_tasks',
+    category: 'data',
+    labelKey: 'toolListTasks',
+    warningKey: 'toolListTasksWarn',
+  },
 ]
 
 export const TOOL_META_BY_NAME = new Map(TOOL_META.map((meta) => [meta.name, meta]))

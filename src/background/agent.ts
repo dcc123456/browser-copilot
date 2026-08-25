@@ -60,6 +60,8 @@ import {
   switchTab,
 } from './driver'
 import { activeTab, readActivePage } from './page'
+import { listTasks } from '../lib/task-store'
+import { describeSchedule } from '../lib/schedule'
 
 /** Tools that change something and therefore always need approval. */
 const ACTION_TOOLS = new Set([
@@ -421,6 +423,15 @@ export const TOOLS: WireTool[] = [
         properties: { name: { type: 'string' } },
         required: ['name'],
       },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_scheduled_tasks',
+      description:
+        'List the currently enabled scheduled tasks (their name, schedule, kind, prompt, and latest status). Use when the user asks what scheduled/recurring/automated tasks exist, what is running on a timer, or "what are my tasks". Read-only and local; does not need approval.',
+      parameters: { type: 'object', properties: {} },
     },
   },
 ]
@@ -1013,6 +1024,25 @@ async function executeTool(
       })
     }
 
+    case 'list_scheduled_tasks': {
+      const all = await listTasks()
+      const tasks = all
+        .filter((task) => task.enabled)
+        .map((task) => ({
+          name: task.name,
+          kind: task.kind,
+          schedule: describeSchedule(task.schedule, 'en'),
+          ...(task.kind === 'agent-prompt' && task.prompt
+            ? { prompt: task.prompt.slice(0, 500) }
+            : {}),
+          ...(task.lastRunAt ? { lastRunAt: task.lastRunAt } : {}),
+          ...(task.lastStatus ? { lastStatus: task.lastStatus } : {}),
+          ...(task.lastSummary ? { lastSummary: task.lastSummary } : {}),
+          ...(task.notifyFeishu ? { notifyFeishu: true } : {}),
+        }))
+      return JSON.stringify({ count: tasks.length, tasks })
+    }
+
     default:
       throw new Error(`Unknown tool: ${name}`)
   }
@@ -1100,6 +1130,10 @@ function shortSummary(name: string, result: string): string {
     if (name === 'use_skill') {
       const loaded = JSON.parse(result) as { skill?: string; error?: string }
       return loaded.error ? loaded.error : `Using skill "${loaded.skill ?? 'unknown'}"`
+    }
+    if (name === 'list_scheduled_tasks') {
+      const parsed = JSON.parse(result) as { count?: number }
+      return `Listed scheduled tasks (${parsed.count ?? 0})`
     }
     if (parsed.navigated) return `${name} ✓ (page changed)`
     if (parsed.note) return `${name}: ${parsed.note}`
