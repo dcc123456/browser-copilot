@@ -162,6 +162,7 @@ export interface Messages {
   tokenOutput: string
   tokenCached: string
   tokenReasoning: string
+  tokenCacheRate: string
   tokenSession: string
   tokenLastTurn: string
   tokenNone: string
@@ -243,9 +244,15 @@ export interface Messages {
   settingsContextTitle: string
   settingsContextIntro: string
   settingsSystemPrompt: string
-  settingsSystemPromptWarn: string
+  settingsSystemPromptHint: string
+  settingsPromptSave: string
+  settingsPromptReset: string
+  settingsPromptDefault: string
+  settingsPromptCustom: string
   settingsTools: string
   settingsToolsHint: string
+  settingsToolsEnableAll: string
+  settingsToolsDisableAll: string
   toolReadPage: string
   toolReadPageWarn: string
   toolSnapshot: string
@@ -488,6 +495,7 @@ const en: Messages = {
   tokenOutput: 'Output',
   tokenCached: 'Cached input',
   tokenReasoning: 'Reasoning',
+  tokenCacheRate: 'Cache hit rate',
   tokenSession: 'This session',
   tokenLastTurn: 'Last turn',
   tokenNone: 'no usage yet',
@@ -571,13 +579,19 @@ const en: Messages = {
 
   settingsContextTitle: 'Model context & tools',
   settingsContextIntro:
-    'These are sent with every request and make up the fixed token cost. Turn off what you do not use to reduce token usage; toggles take effect on the next message. All are on by default.',
+    'The system prompt and enabled tool definitions are sent with every request and make up the fixed token cost. Edit or turn off what you do not use to reduce token usage; changes take effect on the next message. Tools are all on by default; the prompt starts at the built-in default.',
   settingsSystemPrompt: 'Operating rules (system prompt)',
-  settingsSystemPromptWarn:
-    'Turning this off removes safety and behaviour rules (approval handling, re-snapshotting after navigation, how to fill forms/secrets). The assistant may act unpredictably or fail multi-step tasks. Only disable it for plain chat.',
+  settingsSystemPromptHint:
+    'These rules tell the assistant how to behave: when to snapshot, how to fill forms/secrets, to answer in your language, and so on. You can edit it freely. Leave it empty to use the built-in default. The current autonomy mode and available skills are appended automatically.',
+  settingsPromptSave: 'Save',
+  settingsPromptReset: 'Restore default',
+  settingsPromptDefault: 'Using the built-in default prompt.',
+  settingsPromptCustom: 'Using your custom prompt. Click “Restore default” to revert.',
   settingsTools: 'Tools',
   settingsToolsHint:
     'Each enabled tool adds its parameter definition to every request. Disable tools you never use; the assistant simply will not see them.',
+  settingsToolsEnableAll: 'Enable all',
+  settingsToolsDisableAll: 'Disable all',
   toolReadPage: 'Read page text',
   toolReadPageWarn: 'Disabled: the assistant cannot read the text of the current page.',
   toolSnapshot: 'Snapshot page elements',
@@ -828,6 +842,7 @@ const zhCN: Messages = {
   tokenOutput: '输出',
   tokenCached: '缓存命中',
   tokenReasoning: '推理',
+  tokenCacheRate: '缓存命中率',
   tokenSession: '本次会话',
   tokenLastTurn: '最近一轮',
   tokenNone: '暂无消耗',
@@ -905,13 +920,19 @@ const zhCN: Messages = {
 
   settingsContextTitle: '模型上下文与工具',
   settingsContextIntro:
-    '以下内容会随每次请求发送，构成固定的 token 开销。关闭用不到的项可减少消耗；设置在下一条消息生效。默认全部开启。',
+    '系统提示词和已启用的工具定义会随每次请求发送，构成固定的 token 开销。编辑或关闭用不到的项可减少消耗；更改在下一条消息生效。工具默认全部开启，提示词默认为内置版本。',
   settingsSystemPrompt: '操作规则（系统提示词）',
-  settingsSystemPromptWarn:
-    '关闭后将移除安全和行为规则（确认处理、导航后重新快照、如何填写表单/凭据等），助手可能表现异常或无法完成多步任务。仅建议纯闲聊时关闭。',
+  settingsSystemPromptHint:
+    '这些规则告诉助手如何行事：何时快照、如何填写表单/密钥、用你的语言回答等。你可以自由编辑；留空则使用内置默认规则。当前的自主模式和可用技能会自动追加在后面。',
+  settingsPromptSave: '保存',
+  settingsPromptReset: '恢复默认',
+  settingsPromptDefault: '当前使用内置默认提示词。',
+  settingsPromptCustom: '当前使用你自定义的提示词。点击“恢复默认”可还原。',
   settingsTools: '工具',
   settingsToolsHint:
     '每个启用的工具都会把其参数定义加入每次请求。关闭你用不到的工具，助手就看不到它。',
+  settingsToolsEnableAll: '全部启用',
+  settingsToolsDisableAll: '全部关闭',
   toolReadPage: '读取页面文本',
   toolReadPageWarn: '已关闭：助手无法读取当前页面的文本。',
   toolSnapshot: '快照页面元素',

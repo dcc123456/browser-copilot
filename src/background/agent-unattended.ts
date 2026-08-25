@@ -93,7 +93,7 @@ export async function runUnattendedPrompt(
       getMaxToolRounds: async () => settings.maxToolRounds,
       getToolConfig: async () => ({
         disabledTools: settings.disabledTools ?? [],
-        disableSystemPrompt: settings.disableSystemPrompt === true,
+        basePrompt: settings.systemPromptOverride ?? '',
       }),
     })
 

@@ -46,6 +46,7 @@ import {
   getSkill,
 } from '../lib/storage'
 import { isSamePage } from '../lib/pages'
+import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
 import { entryFields, findField, type AgentMode, type PasswordEntry, type Skill, type UserProfile } from '../lib/types'
 import type { Op, OpResult, Target } from '../lib/ops'
 import {
@@ -80,38 +81,25 @@ const READ_TOOLS = new Set(['read_current_page', 'snapshot_page', 'list_tabs'])
 /** Fallback cap used when settings cannot supply one. */
 const DEFAULT_MAX_TOOL_ROUNDS = 20
 
-const SYSTEM_PROMPT = `You are Browser Copilot, a browser-extension assistant that lives in the side panel.
+/** Re-exported for tests/consumers; the canonical text lives in lib/system-prompt. */
+export { DEFAULT_SYSTEM_PROMPT }
 
-You help the user with what they are doing in the browser. You can READ the current page and, when the user approves, ACT on it: click, type, scroll, switch tabs, fill forms, and navigate.
-
-Key rules you must follow:
-
-1. Only ordinary http(s) pages can be automated. chrome:// pages, the Web Store, local files, and other extensions are off limits; no permission changes that.
-2. Never invent page content. If you have not read a page via read_current_page or snapshot_page, say so and offer to read it. If the user attached the page, its text is in their message — use it directly.
-3. Before acting, you usually need a snapshot. Call snapshot_page to see the interactive elements (each has a ref like e1, e2 and a durable target). Pass the element's \`target\` object verbatim to click/fill/etc. Do not fabricate targets.
-4. After a click that may navigate, or after filling several fields, take a fresh snapshot before deciding the next step — the page changed.
-5. Use scroll to reveal content that is off-screen ("View more", lazy-loaded lists, long articles). After scrolling, snapshot again to see the newly loaded elements. You can scroll a target into view, or the page by pixels, or to top/bottom.
-6. All actions require the user's approval, and they see a summary of what you are about to do. Be precise: name the button/field and the value.
-7. Forms: the user may have saved a profile (name, email, phone, address) and credentials (passwords). To fill personal info, call get_my_profile to see what is available, then fill each field. For a password, call get_secret by its label — the user approves and the value is filled without you seeing it.
-8. Never ask the user to type something you can look up or fill yourself once approved. But never store or change a saved profile/credential unless the user explicitly asks you to.
-9. If a tool returns an error, read it and adjust; do not blindly retry the same call. Tell the user in plain language what happened.
-10. Answer in the language the user writes in. Be concise, and prefer doing over narrating.
-
-Working style: think in small visible steps. For a multi-step task (e.g. "log in and open my reports"), snapshot, fill/click one or two things, snapshot again, then continue. This keeps every action reviewable.`
+// Internal alias used by buildSystemPrompt.
+const SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT
 
 export function buildSystemPrompt(options: {
   activeSkill?: Skill | undefined
   catalogue?: readonly Skill[] | undefined
   mode?: AgentMode
-  /** When true, omit the operating-rules prompt and keep only an identity line. */
-  disableRules?: boolean
+  /**
+   * User-edited base prompt. When a non-empty string it replaces the default
+   * operating rules; an empty/undefined value means use the default.
+   */
+  basePrompt?: string | undefined
 }): string {
-  // When the user has turned off the system prompt, keep a bare identity line so
-  // the model still knows what it is, but drop all the behaviour rules.
-  if (options.disableRules) {
-    return 'You are Browser Copilot, a browser-extension assistant in the side panel. Answer the user directly; follow any per-turn instructions in their message.'
-  }
-  const parts = [SYSTEM_PROMPT]
+  const override = options.basePrompt?.trim()
+  const base = override ? override : SYSTEM_PROMPT
+  const parts = [base]
   if (!options.activeSkill && options.catalogue && options.catalogue.length > 0) {
     const catalogue = renderSkillCatalogue(options.catalogue)
     if (catalogue) parts.push(catalogue)
@@ -445,11 +433,11 @@ export interface AgentDeps {
    */
   getMaxToolRounds: () => Promise<number>
   /**
-   * Returns the names of tools the user has disabled and whether the system
-   * prompt is suppressed. Read at turn start so toggles take effect on the
-   * next request without a worker restart.
+   * Returns the names of tools the user has disabled and their custom base
+   * system prompt (empty string = use the default). Read at turn start so
+   * toggles take effect on the next request without a worker restart.
    */
-  getToolConfig: () => Promise<{ disabledTools: string[]; disableSystemPrompt: boolean }>
+  getToolConfig: () => Promise<{ disabledTools: string[]; basePrompt: string }>
 }
 
 function parseArgs(raw: string): Record<string, unknown> {
@@ -1123,7 +1111,7 @@ export async function runAgentTurn(
     activeSkill,
     catalogue,
     mode: initialMode,
-    disableRules: toolConfig.disableSystemPrompt,
+    basePrompt: toolConfig.basePrompt,
   })
   const maxToolRounds = (await deps.getMaxToolRounds()) || DEFAULT_MAX_TOOL_ROUNDS
 

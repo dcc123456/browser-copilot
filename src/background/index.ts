@@ -645,7 +645,7 @@ chrome.runtime.onConnect.addListener((port) => {
           const s = await getSettings()
           return {
             disabledTools: s.disabledTools ?? [],
-            disableSystemPrompt: s.disableSystemPrompt === true,
+            basePrompt: s.systemPromptOverride ?? '',
           }
         }
         const turnUsage = await runAgentTurn(history, {

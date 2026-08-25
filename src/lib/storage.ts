@@ -47,7 +47,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mode: 'semi',
   maxToolRounds: 20,
   disabledTools: [],
-  disableSystemPrompt: false,
+  systemPromptOverride: '',
 }
 
 /**
@@ -114,7 +114,7 @@ export function normalizeStoredSettings(raw: unknown): Settings {
     disabledTools: Array.isArray(value.disabledTools)
       ? value.disabledTools.filter((n): n is string => typeof n === 'string')
       : [],
-    disableSystemPrompt: value.disableSystemPrompt === true,
+    systemPromptOverride: typeof value.systemPromptOverride === 'string' ? value.systemPromptOverride : '',
   }
 }
 

@@ -97,15 +97,24 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const [modeInfoOpen, setModeInfoOpen] = useState(false)
   /** Token usage of the most recent turn, for the popover breakdown. */
   const [lastUsage, setLastUsage] = useState<TurnTokenUsage | null>(null)
-  /** Summed usage across turns in this panel session. */
-  const [sessionUsage, setSessionUsage] = useState<TurnTokenUsage>(() => ({
+  /** Summed usage across turns in this conversation. */
+  const [sessionUsage, setSessionUsage] = useState<TurnTokenUsage>(() => ({ ...ZERO_USAGE }))
+  const [usageOpen, setUsageOpen] = useState(false)
+
+  const ZERO_USAGE: TurnTokenUsage = {
     inputTokens: 0,
     outputTokens: 0,
     cachedInputTokens: 0,
     reasoningTokens: 0,
     totalTokens: 0,
-  }))
-  const [usageOpen, setUsageOpen] = useState(false)
+  }
+
+  // Each conversation gets its own token tally; reset when starting or opening
+  // another conversation so the chip reflects only the current one.
+  const resetUsage = useCallback(() => {
+    setSessionUsage(ZERO_USAGE)
+    setLastUsage(null)
+  }, [])
   /**
    * Composer height in px, persisted to localStorage. A drag handle on the
    * top edge of the composer adjusts it; the chat log takes the remaining
@@ -432,6 +441,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     setEntries([])
     setConfirms([])
     streamingRef.current = null
+    resetUsage()
     // The port's resume effect fires on conversationId change and restores.
   }
 
@@ -443,6 +453,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     setEntries([])
     setConfirms([])
     streamingRef.current = null
+    resetUsage()
     void refreshConversations()
   }
 
@@ -1065,13 +1076,21 @@ function TokenBreakdown({
   usage: TurnTokenUsage
   t: ReturnType<typeof useT>
 }) {
-  const rows: Array<[string, number, string?]> = [
+  const rows: Array<[string, number]> = [
     [t.tokenTotal, usage.totalTokens],
     [t.tokenInput, usage.inputTokens],
     [t.tokenOutput, usage.outputTokens],
   ]
-  if (usage.cachedInputTokens > 0) rows.push([t.tokenCached, usage.cachedInputTokens])
   if (usage.reasoningTokens > 0) rows.push([t.tokenReasoning, usage.reasoningTokens])
+  if (usage.cachedInputTokens > 0) rows.push([t.tokenCached, usage.cachedInputTokens])
+
+  // Cache hit rate = cached input tokens as a share of all input tokens. Only
+  // meaningful (and shown) once the provider has actually reported input tokens.
+  const cacheRate =
+    usage.inputTokens > 0
+      ? Math.round((usage.cachedInputTokens / usage.inputTokens) * 100)
+      : null
+
   return (
     <div className="token-group">
       <div className="token-group-title">{label}</div>
@@ -1082,6 +1101,12 @@ function TokenBreakdown({
             <dd>{v.toLocaleString()}</dd>
           </div>
         ))}
+        {cacheRate !== null && (
+          <div className="token-row token-rate">
+            <dt>{t.tokenCacheRate}</dt>
+            <dd>{cacheRate}%</dd>
+          </div>
+        )}
       </dl>
     </div>
   )

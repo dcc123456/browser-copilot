@@ -241,7 +241,7 @@ export function normalizeSettingsPayload(raw: unknown): {
   mode: AgentMode
   maxToolRounds: number
   disabledTools: string[]
-  disableSystemPrompt: boolean
+  systemPromptOverride: string
 } {
   const value = (raw ?? {}) as Record<string, unknown>
   const providers = Array.isArray(value.providers)
@@ -262,7 +262,8 @@ export function normalizeSettingsPayload(raw: unknown): {
   const disabledTools = Array.isArray(value.disabledTools)
     ? (value.disabledTools as unknown[]).filter((n): n is string => typeof n === 'string')
     : []
-  const disableSystemPrompt = value.disableSystemPrompt === true
+  const systemPromptOverride =
+    typeof value.systemPromptOverride === 'string' ? value.systemPromptOverride : ''
   return {
     providers,
     // Never point at a profile that is not in the list, or the editor would open
@@ -279,6 +280,6 @@ export function normalizeSettingsPayload(raw: unknown): {
     mode: modeRaw === 'readonly' || modeRaw === 'full' ? modeRaw : 'semi',
     maxToolRounds,
     disabledTools,
-    disableSystemPrompt,
+    systemPromptOverride,
   }
 }

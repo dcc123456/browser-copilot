@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { sendCommand } from '../lib/messages'
 import { LOCALE_LABELS, LOCALES, type LocaleSetting, type Messages } from '../lib/i18n'
 import {
@@ -13,6 +13,7 @@ import {
 } from '../lib/providers'
 import type { Settings } from '../lib/types'
 import { TOOL_META } from '../lib/tool-catalog'
+import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
 import { useT } from './i18n'
 
 /** Editable form state; numbers stay strings so partial input is allowed. */
@@ -116,6 +117,19 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [models, setModels] = useState<string[] | null>(null)
   const [pending, setPending] = useState<'test' | 'models' | null>(null)
+  // Local text for the system-prompt editor. Empty string is a valid value (the
+  // agent falls back to its default when blank); `null` means "not yet loaded".
+  const [promptDraft, setPromptDraft] = useState<string | null>(null)
+  const promptRef = useRef<HTMLTextAreaElement | null>(null)
+
+  // Keep the editor in sync when settings arrive (or change elsewhere), without
+  // clobbering text the user is actively typing.
+  useEffect(() => {
+    if (!settings) return
+    setPromptDraft((current) =>
+      current === null ? settings.systemPromptOverride : current,
+    )
+  }, [settings])
 
   const load = useCallback(async () => {
     try {
@@ -230,6 +244,18 @@ export default function SettingsTab({ onLocaleChange }: Props) {
       setBanner({ kind: 'error', text: (error as Error).message })
     }
   }
+
+  const savePrompt = useCallback(
+    (value: string) => {
+      void mutate({ type: 'settings.set', patch: { systemPromptOverride: value } })
+    },
+    [],
+  )
+
+  const resetPrompt = useCallback(() => {
+    setPromptDraft('')
+    void mutate({ type: 'settings.set', patch: { systemPromptOverride: '' } })
+  }, [])
 
   if (!settings) return <div className="pane empty">{t.loading}</div>
 
@@ -477,25 +503,70 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         <div className="card-title">{t.settingsContextTitle}</div>
         <p className="hint">{t.settingsContextIntro}</p>
 
-        <label className="checkbox context-toggle">
-          <input
-            checked={!settings.disableSystemPrompt}
-            onChange={(event) =>
-              void mutate({
-                type: 'settings.set',
-                patch: { disableSystemPrompt: !event.target.checked },
-              })
+        <div className="context-prompt-head">
+          <b>{t.settingsSystemPrompt}</b>
+          <button
+            className="link-btn"
+            disabled={
+              promptDraft === null || promptDraft === settings.systemPromptOverride
             }
-            type="checkbox"
-          />
-          <span>
-            <b>{t.settingsSystemPrompt}</b>
-          </span>
-        </label>
-        <p className="hint context-warn">{t.settingsSystemPromptWarn}</p>
+            onClick={() => {
+              if (promptDraft !== null) savePrompt(promptDraft)
+            }}
+            type="button"
+          >
+            {t.settingsPromptSave}
+          </button>
+          <button className="link-btn" onClick={resetPrompt} type="button">
+            {t.settingsPromptReset}
+          </button>
+        </div>
+        <p className="hint">{t.settingsSystemPromptHint}</p>
+        <textarea
+          className="prompt-editor"
+          onBlur={(event) => savePrompt(event.target.value)}
+          onChange={(event) => setPromptDraft(event.target.value)}
+          placeholder={DEFAULT_SYSTEM_PROMPT}
+          ref={promptRef}
+          rows={12}
+          spellCheck={false}
+          value={promptDraft ?? ''}
+        />
+        <p className="hint prompt-foot">
+          {promptDraft && promptDraft.trim().length > 0
+            ? t.settingsPromptCustom
+            : t.settingsPromptDefault}
+        </p>
 
         <div className="context-divider" />
-        <div className="context-subhead">{t.settingsTools}</div>
+        <div className="context-tools-head">
+          <div className="context-subhead">{t.settingsTools}</div>
+          <div className="tool-bulk">
+            <button
+              className="link-btn"
+              disabled={settings.disabledTools.length === 0}
+              onClick={() =>
+                void mutate({ type: 'settings.set', patch: { disabledTools: [] } })
+              }
+              type="button"
+            >
+              {t.settingsToolsEnableAll}
+            </button>
+            <button
+              className="link-btn"
+              disabled={settings.disabledTools.length >= TOOL_META.length}
+              onClick={() =>
+                void mutate({
+                  type: 'settings.set',
+                  patch: { disabledTools: TOOL_META.map((m) => m.name) },
+                })
+              }
+              type="button"
+            >
+              {t.settingsToolsDisableAll}
+            </button>
+          </div>
+        </div>
         <p className="hint">{t.settingsToolsHint}</p>
         <div className="tool-toggle-list">
           {TOOL_META.map((meta) => {

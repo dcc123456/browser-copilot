@@ -63,11 +63,10 @@ export interface Settings {
    */
   disabledTools: string[]
   /**
-   * When true, the Browser Copilot system prompt (operating rules) is not sent.
-   * The model still gets a short identity line plus the tools, but behaviour
-   * guardrails are largely removed.
+   * User-edited base system prompt (the operating rules). An empty string means
+   * use the built-in default; non-empty replaces the default rules verbatim.
    */
-  disableSystemPrompt: boolean
+  systemPromptOverride: string
 }
 
 /** Text scraped from a tab, for use as agent context. */
