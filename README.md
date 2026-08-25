@@ -18,8 +18,8 @@ through a whole checkout or setup flow — while you watch or stay hands-off.
   Your keys and data stay in your browser; passwords are filled locally and
   never shown to the model.
 
-It does nothing on a timer — every action is part of answering something you
-just asked.
+It never acts on its own initiative — every action is either part of answering
+something you just asked, or a [scheduled task](#scheduled-tasks) you created.
 
 ---
 
@@ -31,6 +31,8 @@ just asked.
 - [Models](#models)
 - [Using it](#using-it)
 - [Skills](#skills)
+- [Scheduled tasks](#scheduled-tasks)
+- [Feishu / Lark integration](#feishu--lark-integration)
 - [Saved data and privacy](#saved-data-and-privacy)
 - [Development](#development)
 - [Troubleshooting](#troubleshooting)
@@ -141,7 +143,8 @@ Best when a task lives on one page and mixes reading with acting:
 
 It cannot act in Chat or read-only mode, read `chrome://`/local-file/Web-Store
 pages, solve CAPTCHAs or bypass 2FA, guarantee arithmetic over long tables, or
-run on a schedule.
+run a scheduled task when the browser is fully closed (alarms only fire while
+Chrome is open).
 
 ---
 
@@ -227,6 +230,53 @@ beforehand; full instructions load on demand.
 
 ---
 
+## Scheduled tasks
+
+The **Tasks** tab lets the agent run unattended on a schedule — no panel open, no
+button pressed. Create a task, choose what it does and when, and it fires while
+the browser is running.
+
+**What it can do:**
+
+- **Run an agent prompt** — a saved instruction the agent executes exactly as if
+  you had sent it from the chat, including reading or acting on pages (subject to
+  the mode you've set). Use it for recurring checks, daily digests, or
+  fill-and-submit flows.
+- **Count PRs waiting for your review on GitHub** — the built-in task.
+
+**When it runs** (Chrome's `chrome.alarms`, 1-minute minimum):
+
+- Every N minutes,
+- Daily at a set time, or
+- Weekdays (Mon–Fri) at a set time.
+
+Each run is recorded in **Recent runs** with its start time, outcome, steps, and a
+short summary — and can be terminated mid-flight. Tasks only fire while the
+browser is open (the service worker is woken by the alarm); they don't run when
+Chrome is closed. Turn on **Notify via Feishu when done** to push the result out.
+
+---
+
+## Feishu / Lark integration
+
+Browser Copilot can talk to [Feishu/Lark](https://www.feishu.cn) in two
+independent ways, configured on the **Tasks** tab:
+
+- **Outgoing notifications (custom-bot webhook).** Paste a Feishu group custom-bot
+  webhook URL (and optional signing secret) and any task can post its result to
+  that group when it finishes. No app credentials required — this is the simplest
+  path for "tell me when it's done".
+- **Inbound remote control (self-built app, long connection).** Add a Feishu
+  self-built app's App ID and App Secret and enable the bot. You can then DM the
+  bot from Feishu and it runs your message as an agent task on your machine,
+  replying with the result — a way to drive the browser remotely from your phone
+  or another device.
+
+The Feishu connection is kept alive by a watchdog alarm and auto-reconnects if it
+drops. Without app credentials, notifications still work; inbound commands don't.
+
+---
+
 ## Saved data and privacy
 
 The **Data** tab holds a fillable **profile** (name/email/phone/address),
@@ -241,12 +291,15 @@ sent to the model, and passwords are not encrypted at rest.
 | `tabs` | Identify the active tab and open/switch/close tabs when asked. |
 | `scripting` | Inject the page kernel to read or act on a tab. |
 | `sidePanel` | Show the panel. |
-| `http(s)` host access | Interact with pages and call your model endpoint. |
+| `alarms` | Wake the worker to run scheduled tasks and keep the Feishu bot connection alive. |
+| `http(s)` host access | Interact with pages and call your model endpoint (and Feishu, if enabled). |
 
-Absent by design: `alarms` (nothing runs on a timer) and any always-on content
-script (nothing is injected until a turn needs it). Only your messages and the
-page text you attach/approve leave the machine, sent to **your** configured
-endpoint. There is no telemetry, analytics, or project server.
+There is no always-on content script — nothing is injected into a page until a
+turn or a scheduled task needs it. Alarms only run tasks you created (plus a
+Feishu keepalive watchdog when that integration is on). Only your messages and
+the page text you attach/approve leave the machine, sent to **your** configured
+endpoint; task results are only sent to Feishu if you turn that on. There is no
+telemetry, analytics, or project server.
 
 ---
 
