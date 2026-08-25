@@ -139,6 +139,8 @@ export interface Messages {
   chatDecline: string
   chatConfirmTitle: (params: { name: string }) => string
   chatSkillActive: (params: { name: string }) => string
+  /** Sent as the user turn when a skill is active but the user typed nothing. */
+  chatSkillGo: string
   /** Composer hint shown once at least one skill exists. */
   chatPlaceholderWithSkills: string
   /** Shown in the slash menu when no skill matches what was typed. */
@@ -478,6 +480,7 @@ const en: Messages = {
   chatDecline: 'Decline',
   chatConfirmTitle: ({ name }) => `Allow ${name}?`,
   chatSkillActive: ({ name }) => `Skill: ${name}`,
+  chatSkillGo: 'Use the active skill.',
   chatPlaceholderWithSkills:
     'Message… (Enter to send, Shift+Enter for a new line, / for skills)',
   chatSlashNoMatch: 'No matching skill',
@@ -830,6 +833,7 @@ const zhCN: Messages = {
   chatDecline: '拒绝',
   chatConfirmTitle: ({ name }) => `是否允许执行 ${name}？`,
   chatSkillActive: ({ name }) => `技能：${name}`,
+  chatSkillGo: '使用当前技能。',
   chatPlaceholderWithSkills: '输入消息…（Enter 发送，Shift+Enter 换行，/ 选择技能）',
   chatSlashNoMatch: '没有匹配的技能',
 

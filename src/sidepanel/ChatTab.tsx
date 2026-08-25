@@ -527,13 +527,20 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   }
 
   const send = (): void => {
+    if (busy) return
     const text = draft.trim()
-    if (!text || busy) return
+    // An active skill may be invoked with no additional text — the skill's own
+    // instructions become the task. Otherwise a message is required.
+    if (!text && !activeSkillId) return
+
+    // When the user just selected a skill and hit send, give the model an
+    // explicit nudge to follow it, rather than sending an empty user turn.
+    const outgoing = text || t.chatSkillGo
 
     const delivered = post({
       type: 'chat',
       conversationId,
-      text,
+      text: outgoing,
       includeSelection,
       ...(activeSkillId ? { skillId: activeSkillId } : {}),
     })
@@ -545,7 +552,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       return
     }
 
-    append({ role: 'user', text })
+    append({ role: 'user', text: outgoing })
     streamingRef.current = null
     setBusy(true)
     setDraft('')
@@ -981,7 +988,12 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                 {t.chatStop}
               </button>
             )}
-            <button className="primary" disabled={busy || !draft.trim()} onClick={send} type="button">
+            <button
+              className="primary"
+              disabled={busy || (!draft.trim() && !activeSkillId)}
+              onClick={send}
+              type="button"
+            >
               {busy ? t.loading : t.chatSend}
             </button>
           </div>
