@@ -27,30 +27,85 @@ keep every click in your hands, hand off whole tasks, or stay read-only.
 
 ## Quick start
 
-1. **Install the extension.**
-   Download `browser-copilot-<version>.zip` from the
-   [**Releases**](https://github.com/dcc123456/browser-copilot/releases) page,
-   unzip it. In `chrome://extensions`, turn on **Developer mode**, click
-   **Load unpacked**, and select the unzipped folder (the one containing
-   `manifest.json`). Requires Chrome 116+.
+### 1. Install the extension
 
-2. **Add a model.**
-   Open the side panel → **Settings → Add a provider**. Pick a preset, paste
-   your API key, choose a model, press **Test connection**, then **Save**.
-   A local Ollama/LM Studio needs any non-empty key.
+Requires **Chrome 116+** (or any Chromium browser that supports Manifest V3 side
+panels).
 
-   > The model must support **function calling** (tool use), or the assistant
-   > can chat but will never read or act on the page on its own.
+**Option A — download a release (recommended):**
 
-3. **Pick a mode** (bottom-left dropdown): 🔒 Read-only · 🛡 Semi-auto (default) ·
-   ⚡ Full auto.
+1. Go to the
+   [**Releases**](https://github.com/dcc123456/browser-copilot/releases) page
+   and download `browser-copilot-<version>.zip` from the latest release.
+2. Unzip it into a folder you will keep — the extension loads from that folder,
+   so don't delete it afterwards.
+3. Open `chrome://extensions`.
+4. Turn on **Developer mode** (top-right toggle).
+5. Click **Load unpacked** and select the unzipped folder — the one directly
+   containing `manifest.json`.
+6. Click the extension's toolbar icon to open the side panel. Pin it for easy
+   access.
 
-4. **Ask.** Type and press **Enter** (Shift+Enter for a newline). Tick
-   **Attach selection** to send text you highlighted on the page. Type **`/`**
-   to pick a [skill](#skills).
+**Option B — build from source:**
 
-That's it. Click the toolbar icon to reopen the panel; replies keep running in
-the background even when it's closed.
+Requires **Node.js 20+** and `pnpm` (or `npm`).
+
+```bash
+git clone git@github.com:dcc123456/browser-copilot.git
+cd browser-copilot
+pnpm install
+pnpm run build
+```
+
+Then in `chrome://extensions` (Developer mode on), click **Load unpacked** and
+select the generated **`dist/`** folder. After pulling new changes, re-run
+`pnpm run build` and press **Reload** on the extension card — a rebuild alone
+does not refresh an already-loaded service worker.
+
+### 2. Add a model
+
+Open the side panel → **Settings → Add a provider**.
+
+1. **Pick a preset** — the base URL and a suggested model are filled in (DeepSeek,
+   Ark, OpenAI, OpenRouter, Moonshot, DashScope, SiliconFlow, Ollama, etc.). You
+   can also choose **Custom** for any OpenAI-compatible endpoint.
+2. **Paste your API key.** A local Ollama/LM Studio accepts any non-empty string.
+3. **Set the model** — type its ID, or press **Fetch models** to list what the
+   endpoint offers (typing always works even if the gateway lacks `/models`).
+4. Press **Test connection** — it sends one real request and confirms that both
+   the key and the model work.
+5. **Save.** Add as many providers as you like and switch between them with
+   **Use this**.
+
+> The model must support **function calling** (tool use). Without it the
+> assistant can chat but will never read or act on the page on its own. For
+> autonomous use, reliable choices are `deepseek-chat`, `gpt-4o-mini`,
+> `qwen-plus`; use a reasoning model for hard tasks and a local model for
+> privacy.
+
+### 3. Choose how autonomous it is
+
+Use the dropdown at the bottom-left of the chat. The choice applies to the
+**next action**, even mid-reply:
+
+- 🔒 **Read-only** — reads only; no click, type, navigation, or fill.
+- 🛡 **Semi-auto** (default) — every page-changing action is shown to you first
+  for approval.
+- ⚡ **Full auto** — actions run without confirmation.
+
+### 4. Ask away
+
+Type and press **Enter** (Shift+Enter for a newline; with a Chinese/Japanese/
+Korean IME, the first Enter confirms the candidate and the second sends).
+
+- Tick **Attach selection** to send text you highlighted on the page (only the
+  selection, not the whole page).
+- Type **`/`** in the composer to pick a [skill](#skills).
+- When a skill is selected, you can even send an empty message — it applies the
+  skill to your input or selection.
+
+Replies render as Markdown. You can close the panel at any time; the answer
+keeps running in the background and reappears when you reopen it.
 
 ---
 
