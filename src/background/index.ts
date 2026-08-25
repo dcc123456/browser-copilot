@@ -21,7 +21,7 @@ import {
 } from '../lib/messages'
 import { isInjectablePage } from '../lib/pages'
 import { validateProfile } from '../lib/providers'
-import { normalizeSkill, validateSkill } from '../lib/skills'
+import { normalizeSkill, validateSkill, wrapSkillDirective } from '../lib/skills'
 import {
   clearConversation,
   clearHistory,
@@ -48,6 +48,7 @@ import {
   setTurnState,
   getSettings,
   setSettings,
+  getSkill,
   touchConversation,
 } from '../lib/storage'
 import { runAgentTurn, summarizeToolResult } from './agent'
@@ -635,6 +636,15 @@ chrome.runtime.onConnect.addListener((port) => {
               }`,
             })
           }
+        }
+
+        // When a skill is pinned for this turn, bind its directive directly to
+        // the user's message. The full instructions are in the system prompt,
+        // but an imperative wrapper next to the user's own text makes the model
+        // far less likely to ignore or refuse the skill.
+        if (message.skillId) {
+          const pinned = await getSkill(message.skillId)
+          if (pinned) text = wrapSkillDirective(pinned, text)
         }
 
         history.push({ role: 'user', content: text })

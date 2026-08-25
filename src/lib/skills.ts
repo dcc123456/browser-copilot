@@ -83,6 +83,22 @@ export function renderSkillPrompt(skill: Skill): string {
 }
 
 /**
+ * Wraps a user turn with an explicit directive to apply the active skill.
+ *
+ * The skill's full instructions are already in the system prompt, but some
+ * models drift or claim they "can't use a skill". Binding a short, imperative
+ * directive to the user's own message — right next to what they sent — makes it
+ * far harder to ignore. The user's text is delimited so the model can tell the
+ * directive apart from their actual request/selection.
+ */
+export function wrapSkillDirective(skill: Skill, userContent: string): string {
+  return [
+    `[The user has selected the skill "${skill.name}" and it is ACTIVE. You MUST apply that skill's instructions (given in the system prompt) to everything below. Do not say you cannot use skills, and do not answer outside the skill — follow its instructions exactly. Process the following as this skill's input:]`,
+    userContent,
+  ].join('\n\n')
+}
+
+/**
  * Renders the catalogue of auto-matchable skills.
  *
  * Only name and description are included — never the instruction bodies. Sending

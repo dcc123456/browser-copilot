@@ -6,6 +6,7 @@ import {
   renderSkillCatalogue,
   renderSkillPrompt,
   validateSkill,
+  wrapSkillDirective,
 } from '../src/lib/skills'
 import type { Skill } from '../src/lib/types'
 
@@ -144,5 +145,14 @@ describe('renderSkillCatalogue', () => {
     ])
     expect(catalogue).toContain('Keep')
     expect(catalogue).not.toContain('Drop')
+  })
+})
+
+describe('wrapSkillDirective', () => {
+  it('names the skill, mandates applying it, and keeps the user content', () => {
+    const wrapped = wrapSkillDirective(skill(), 'Translate this paragraph.')
+    expect(wrapped).toContain('Summarise')
+    expect(wrapped).toContain('MUST apply')
+    expect(wrapped).toContain('Translate this paragraph.')
   })
 })
