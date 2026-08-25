@@ -180,8 +180,11 @@ export type AgentClientMessage =
       conversationId: string
       /** The user's text for this turn. */
       text: string
-      /** When true, the current page is scraped and prepended as context. */
-      includePage: boolean
+      /**
+       * When true, the user's current text selection on the active tab is
+       * prepended as context (lightweight — only the selection, not the page).
+       */
+      includeSelection: boolean
       /**
        * Skill the user selected for this turn, if any.
        *

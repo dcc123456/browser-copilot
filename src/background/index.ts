@@ -51,7 +51,7 @@ import {
   touchConversation,
 } from '../lib/storage'
 import { runAgentTurn, summarizeToolResult } from './agent'
-import { activeTab, readActivePage } from './page'
+import { activeTab, readActivePage, readActiveSelection } from './page'
 import {
   clearRuns,
   deleteRun,
@@ -610,21 +610,27 @@ chrome.runtime.onConnect.addListener((port) => {
 
         let text = message.text
         let grantedPageUrl: string | undefined
-        if (message.includePage) {
-          sendWithTracking({ type: 'status', text: 'Reading the current page…' })
+        if (message.includeSelection) {
+          sendWithTracking({ type: 'status', text: 'Reading your selection…' })
           try {
-            const page = await readActivePage()
-            grantedPageUrl = page.url
-            text =
-              `Context from the page I am viewing:\n` +
-              `Title: ${page.title}\nURL: ${page.url}\n` +
-              (page.selection ? `Selected text: ${page.selection}\n` : '') +
-              `Body${page.truncated ? ' (truncated)' : ''}:\n${page.text}\n\n` +
-              `My question: ${message.text}`
+            const page = await readActiveSelection()
+            if (page.selection.trim().length > 0) {
+              grantedPageUrl = page.url
+              text =
+                `Content selected on the page I am viewing:\n` +
+                `Title: ${page.title}\nURL: ${page.url}\n` +
+                `Selection:\n${page.selection}\n\n` +
+                `My question: ${message.text}`
+            } else {
+              sendWithTracking({
+                type: 'status',
+                text: 'Nothing is selected on the page — sent your message without a selection.',
+              })
+            }
           } catch (error) {
             sendWithTracking({
               type: 'status',
-              text: `Could not read the page: ${
+              text: `Could not read the selection: ${
                 error instanceof Error ? error.message : String(error)
               }`,
             })

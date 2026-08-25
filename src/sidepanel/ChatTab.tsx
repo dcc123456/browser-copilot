@@ -92,7 +92,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const t = useT()
   const [entries, setEntries] = useState<Entry[]>([])
   const [draft, setDraft] = useState('')
-  const [includePage, setIncludePage] = useState(false)
+  const [includeSelection, setIncludeSelection] = useState(false)
   const [busy, setBusy] = useState(false)
   const [confirms, setConfirms] = useState<PendingConfirm[]>([])
   const [conversationId, setConversationId] = useState<string>(() =>
@@ -534,7 +534,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       type: 'chat',
       conversationId,
       text,
-      includePage,
+      includeSelection,
       ...(activeSkillId ? { skillId: activeSkillId } : {}),
     })
     if (!delivered) {
@@ -733,13 +733,13 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       )}
 
       <div className="chat-toolbar">
-        <label className="inline-check" title={t.chatAttachPage}>
+        <label className="inline-check" title={t.chatAttachSelection}>
           <input
-            checked={includePage}
-            onChange={(event) => setIncludePage(event.target.checked)}
+            checked={includeSelection}
+            onChange={(event) => setIncludeSelection(event.target.checked)}
             type="checkbox"
           />
-          {t.chatAttachPage}
+          {t.chatAttachSelection}
         </label>
         <button
           aria-label={t.convHistory}

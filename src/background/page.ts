@@ -85,3 +85,46 @@ export async function readActivePage(maxChars = DEFAULT_MAX_CHARS): Promise<Page
     truncated,
   }
 }
+
+/**
+ * Reads only the user's current text selection in the active tab, plus the page
+ * title/URL for attribution. Much lighter than {@link readActivePage}: it does
+ * not scrape or transmit the whole body, so attaching a selection costs few
+ * tokens even on long pages.
+ *
+ * @returns the selection text (possibly empty), and `false` for `truncated`
+ *   because selections are not capped here.
+ * @throws {Error} when no tab is available or the page forbids injection.
+ */
+export async function readActiveSelection(): Promise<PageContext> {
+  const tab = await activeTab()
+  if (!tab || typeof tab.id !== 'number') {
+    throw new Error('No active tab to read.')
+  }
+  if (!isInjectablePage(tab.url)) {
+    throw new Error(
+      `Cannot read ${tab.url ?? 'this page'}: browser-internal, local-file, and Web Store pages are off limits to extensions.`,
+    )
+  }
+
+  const [injection] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id, frameIds: [0] },
+    func: () => ({
+      url: location.href,
+      title: document.title,
+      selection: window.getSelection()?.toString() ?? '',
+    }),
+  })
+  const value = injection?.result as
+    | { url: string; title: string; selection: string }
+    | undefined
+  if (!value) throw new Error('Could not read the selection.')
+
+  return {
+    url: value.url,
+    title: value.title,
+    selection: collapseWhitespace(value.selection),
+    text: '',
+    truncated: false,
+  }
+}

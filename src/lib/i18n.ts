@@ -131,8 +131,7 @@ export interface Messages {
   chatSend: string
   chatStop: string
   chatNewChat: string
-  chatAttachPage: string
-  chatReadingPage: string
+  chatAttachSelection: string
   chatReattached: string
   chatConnectionDropped: string
   chatExtensionReloaded: string
@@ -469,8 +468,7 @@ const en: Messages = {
   chatSend: 'Send',
   chatStop: 'Stop',
   chatNewChat: 'New chat',
-  chatAttachPage: 'Attach current page',
-  chatReadingPage: 'Reading the current page…',
+  chatAttachSelection: 'Attach selection',
   chatReattached: 'Still working — reattached to the run.',
   chatConnectionDropped:
     'The connection dropped mid-reply. Any answer was saved to this conversation — send another message to continue.',
@@ -824,8 +822,7 @@ const zhCN: Messages = {
   chatSend: '发送',
   chatStop: '停止',
   chatNewChat: '新对话',
-  chatAttachPage: '附带当前页面',
-  chatReadingPage: '正在读取当前页面…',
+  chatAttachSelection: '附带选中内容',
   chatReattached: '任务仍在进行，已重新接入。',
   chatConnectionDropped: '回复过程中连接中断。已生成的内容已保存到本次对话——再发一条消息即可继续。',
   chatExtensionReloaded: '扩展已重新加载。请在 chrome://extensions 中重载，然后重新打开此面板。',
