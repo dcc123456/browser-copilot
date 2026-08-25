@@ -135,18 +135,29 @@ function extractRepo(url: string): string {
  * @throws {NotLoggedIn} when GitHub served the login page.
  * @throws {Error} on any failure to load or read the tab.
  */
-export async function fetchReviewRequests(): Promise<ReviewRequests> {
+export async function fetchReviewRequests(signal?: AbortSignal): Promise<ReviewRequests> {
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
   const created = await chrome.tabs.create({ url: FEED_URL, active: false })
   const tabId = created.id
   if (typeof tabId !== 'number') {
     throw new Error('Could not open a background tab to read GitHub.')
   }
 
+  // If cancelled while the tab is opening, close it and stop before injecting.
+  const closeTab = (): void => {
+    void chrome.tabs.remove(tabId).catch(() => {})
+  }
+  if (signal?.aborted) {
+    closeTab()
+    throw new DOMException('Aborted', 'AbortError')
+  }
+  signal?.addEventListener('abort', closeTab, { once: true })
+
   try {
     // Wait for the page to settle. Listening for status==='complete' would be
     // ideal, but the feed is tiny; a bounded wait is simpler and robust to the
     // service worker being evicted between events.
-    await waitForTabReady(tabId)
+    await waitForTabReady(tabId, 8000, signal)
 
     const injections = await chrome.scripting.executeScript({
       target: { tabId, frameIds: [0] },
@@ -181,6 +192,7 @@ export async function fetchReviewRequests(): Promise<ReviewRequests> {
     }
     return parsed
   } finally {
+    signal?.removeEventListener('abort', closeTab)
     // Best-effort close; never let a failure leak a tab.
     try {
       await chrome.tabs.remove(tabId)
@@ -197,14 +209,25 @@ export async function fetchReviewRequests(): Promise<ReviewRequests> {
  * task (and the service worker) waiting forever. After the timeout we attempt
  * the read anyway; the feed is small enough to usually be present.
  */
-function waitForTabReady(tabId: number, timeoutMs = 8000): Promise<void> {
-  return new Promise((resolve) => {
+function waitForTabReady(tabId: number, timeoutMs = 8000, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'))
+      return
+    }
     let settled = false
     const finish = (): void => {
       if (settled) return
       settled = true
       chrome.tabs.onUpdated.removeListener(listener)
+      signal?.removeEventListener('abort', onAbort)
       resolve()
+    }
+    const onAbort = (): void => {
+      if (settled) return
+      settled = true
+      chrome.tabs.onUpdated.removeListener(listener)
+      reject(new DOMException('Aborted', 'AbortError'))
     }
     const listener = (
       updatedId: number,
@@ -213,6 +236,7 @@ function waitForTabReady(tabId: number, timeoutMs = 8000): Promise<void> {
       if (updatedId === tabId && info.status === 'complete') finish()
     }
     chrome.tabs.onUpdated.addListener(listener)
+    signal?.addEventListener('abort', onAbort, { once: true })
     setTimeout(finish, timeoutMs)
   })
 }

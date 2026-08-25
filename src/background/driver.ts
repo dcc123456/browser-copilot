@@ -37,8 +37,49 @@ function isContextLost(message: string): boolean {
   return CONTEXT_LOST_PATTERNS.some((pattern) => lower.includes(pattern))
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'))
+      return
+    }
+    const timer = setTimeout(resolve, ms)
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer)
+        reject(new DOMException('Aborted', 'AbortError'))
+      },
+      { once: true },
+    )
+  })
+}
+
+/**
+ * Races a pending operation against an abort signal so a long-running page call
+ * (script injection, navigation settle) returns promptly when the user
+ * terminates the run. The underlying Chrome call may still finish in the
+ * background, but its result is ignored.
+ */
+function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise
+  if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error as Error)
+      },
+    )
+  })
 }
 
 /** A driver error — something the harness owns, distinct from an op failure. */
@@ -50,7 +91,7 @@ export class DriverError extends Error {}
  * @throws {DriverError} when there is no usable tab or injection fails for a
  *   reason other than an expected navigation.
  */
-export async function execOnActiveTab(op: Op): Promise<OpResult> {
+export async function execOnActiveTab(op: Op, signal?: AbortSignal): Promise<OpResult> {
   const tab = await activeTab()
   if (!tab || typeof tab.id !== 'number') {
     throw new DriverError('No active tab to operate on.')
@@ -60,17 +101,22 @@ export async function execOnActiveTab(op: Op): Promise<OpResult> {
       `Cannot act on ${tab.url ?? 'this page'}: only ordinary http(s) pages can be automated.`,
     )
   }
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
 
   let injections: chrome.scripting.InjectionResult<unknown>[]
   try {
-    injections = await chrome.scripting.executeScript({
-      target: { tabId: tab.id, allFrames: true },
-      // Serialized as a bare function: the kernel source must not close over
-      // anything. See src/inpage/kernel.ts.
-      func: runOp as unknown as (...args: unknown[]) => unknown,
-      args: [op as unknown as never],
-    })
+    injections = await abortable(
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id, allFrames: true },
+        // Serialized as a bare function: the kernel source must not close over
+        // anything. See src/inpage/kernel.ts.
+        func: runOp as unknown as (...args: unknown[]) => unknown,
+        args: [op as unknown as never],
+      }),
+      signal,
+    )
   } catch (error) {
+    if ((error as Error)?.name === 'AbortError') throw error
     const message = error instanceof Error ? error.message : String(error)
     if (isContextLost(message)) {
       return {
@@ -117,8 +163,8 @@ export async function snapshotActiveTab(
  * that renders a moment after `load` is handled by the next op's own retry
  * rather than by sleeping here.
  */
-export async function settleAfterNavigation(ms = 400): Promise<void> {
-  await sleep(ms)
+export async function settleAfterNavigation(ms = 400, signal?: AbortSignal): Promise<void> {
+  await sleep(ms, signal)
 }
 
 // --- Tab management ----------------------------------------------------------

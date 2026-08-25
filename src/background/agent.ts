@@ -825,9 +825,14 @@ async function executeTool(
   name: string,
   args: Record<string, unknown>,
   ctx: ToolContext,
+  signal?: AbortSignal,
 ): Promise<string> {
+  const throwIfAborted = (): void => {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+  }
   switch (name) {
     case 'read_current_page': {
+      throwIfAborted()
       const maxChars = typeof args.maxChars === 'number' ? args.maxChars : undefined
       const page = await readActivePage(maxChars)
       ctx.lastUrl = page.url
@@ -835,6 +840,7 @@ async function executeTool(
     }
 
     case 'snapshot_page': {
+      throwIfAborted()
       const maxChars = typeof args.maxChars === 'number' ? args.maxChars : 8000
       const maxElements = typeof args.maxElements === 'number' ? args.maxElements : 120
       const snapshot = await snapshotActiveTab(maxChars, maxElements)
@@ -843,6 +849,7 @@ async function executeTool(
     }
 
     case 'list_tabs': {
+      throwIfAborted()
       const tabs = await listTabs()
       return JSON.stringify(
         tabs.map((tab, index) => ({
@@ -856,51 +863,57 @@ async function executeTool(
     }
 
     case 'click': {
+      throwIfAborted()
       const target = asTarget(args.target)
       if (!target) return JSON.stringify({ error: 'click requires a target.' })
-      const result = await execOnActiveTab({ action: 'click', target })
+      const result = await execOnActiveTab({ action: 'click', target }, signal)
       return afterAction(result, ctx)
     }
 
     case 'fill': {
+      throwIfAborted()
       const target = asTarget(args.target)
       if (!target) return JSON.stringify({ error: 'fill requires a target.' })
       const value = String(args.value ?? '')
       const clear = args.clear === false ? false : true
-      const result = await execOnActiveTab({ action: 'fill', target, value, clear })
+      const result = await execOnActiveTab({ action: 'fill', target, value, clear }, signal)
       return afterAction(result, ctx, value.length > 0 ? { filled: true } : { cleared: true })
     }
 
     case 'select_option': {
+      throwIfAborted()
       const target = asTarget(args.target)
       if (!target) return JSON.stringify({ error: 'select_option requires a target.' })
       const value = (Array.isArray(args.value)
         ? args.value.map(String)
         : String(args.value ?? '')) as string | string[]
-      const result = await execOnActiveTab({ action: 'select_option', target, value })
+      const result = await execOnActiveTab({ action: 'select_option', target, value }, signal)
       return afterAction(result, ctx)
     }
 
     case 'set_checkbox': {
+      throwIfAborted()
       const target = asTarget(args.target)
       if (!target) return JSON.stringify({ error: 'set_checkbox requires a target.' })
       const value = args.value === undefined ? true : args.value === true
-      const result = await execOnActiveTab({ action: 'set_checkbox', target, value })
+      const result = await execOnActiveTab({ action: 'set_checkbox', target, value }, signal)
       return afterAction(result, ctx)
     }
 
     case 'press_key': {
+      throwIfAborted()
       const key = String(args.key ?? '')
       if (!key) return JSON.stringify({ error: 'press_key needs a key.' })
       const target = asTarget(args.target)
       const op: Op = target
         ? { action: 'press_key', target, value: key }
         : { action: 'press_key', value: key }
-      const result = await execOnActiveTab(op)
+      const result = await execOnActiveTab(op, signal)
       return afterAction(result, ctx)
     }
 
     case 'scroll': {
+      throwIfAborted()
       const mode = String(args.mode ?? 'by')
       const target = asTarget(args.target)
       const op: Op =
@@ -918,18 +931,20 @@ async function executeTool(
                     y: typeof args.y === 'number' ? args.y : 600,
                   },
                 }
-      const result = await execOnActiveTab(op)
+      const result = await execOnActiveTab(op, signal)
       return afterAction(result, ctx)
     }
 
     case 'wait_for': {
+      throwIfAborted()
       const target = asTarget(args.target)
       if (!target) return JSON.stringify({ error: 'wait_for requires a target.' })
       // Poll a few times; the kernel itself is synchronous.
       const deadline = Date.now() + 4000
       let last: OpResult | undefined
       while (Date.now() < deadline) {
-        last = await execOnActiveTab({ action: 'wait_for', target })
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+        last = await execOnActiveTab({ action: 'wait_for', target }, signal)
         if (last.ok) break
         await new Promise((resolve) => setTimeout(resolve, 250))
       }
@@ -937,24 +952,27 @@ async function executeTool(
     }
 
     case 'open_url': {
+      throwIfAborted()
       const url = String(args.url ?? '').trim()
       // The driver handles the isInjectablePage check with a clear error.
       await chrome.tabs.update({ url })
       ctx.navigated = true
-      await settleAfterNavigation()
+      await settleAfterNavigation(400, signal)
       return JSON.stringify({ ok: true, navigated: true, url })
     }
 
     case 'tab_new': {
+      throwIfAborted()
       const url = typeof args.url === 'string' ? args.url.trim() : undefined
       const tab = await newTab(url || undefined)
       ctx.navigated = true
       ctx.lastUrl = tab.url
-      await settleAfterNavigation()
+      await settleAfterNavigation(undefined, signal)
       return JSON.stringify({ ok: true, tabId: tab.id, url: tab.url })
     }
 
     case 'tab_switch': {
+      throwIfAborted()
       const index = Number(args.index ?? 0)
       const tab = await switchTab(index)
       ctx.navigated = true
@@ -963,11 +981,13 @@ async function executeTool(
     }
 
     case 'tab_close': {
+      throwIfAborted()
       await closeActiveTab()
       return JSON.stringify({ ok: true })
     }
 
     case 'get_secret': {
+      throwIfAborted()
       // Fills directly; the model never receives the secret value. Supports
       // both the legacy id-only form and an optional field name (e.g. fill
       // just the "username" or "password" field of a multi-field entry).
@@ -981,11 +1001,14 @@ async function executeTool(
         ? findField(secret, fieldName)
         : findField(secret, 'password') ?? entryFields(secret)[0]
       if (!field) return JSON.stringify({ error: `No "${fieldName ?? 'password'}" field in this credential.` })
-      const result = await execOnActiveTab({
-        action: 'fill',
-        target,
-        value: field.value,
-      })
+      const result = await execOnActiveTab(
+        {
+          action: 'fill',
+          target,
+          value: field.value,
+        },
+        signal,
+      )
       void recordPasswordUse(secret.id).catch(() => {})
       return afterAction(result, ctx, { filled: true, using: `${secret.label}:${field.key}` })
     }
@@ -1286,7 +1309,17 @@ export async function runAgentTurn(
         deps.send({ type: 'status', text: 'Cancelled.' })
         return totalUsage.totalTokens > 0 ? totalUsage : null
       }
-      await runOneToolCall(call, history, deps, ctx)
+      try {
+        await runOneToolCall(call, history, deps, ctx)
+      } catch (toolError) {
+        // A termination mid-tool must unwind the turn cleanly rather than
+        // surface as a generic failure in the transcript.
+        if ((toolError as Error)?.name === 'AbortError') {
+          deps.send({ type: 'status', text: 'Cancelled.' })
+          return totalUsage.totalTokens > 0 ? totalUsage : null
+        }
+        throw toolError
+      }
     }
   }
 
@@ -1415,7 +1448,7 @@ async function runOneToolCall(
   }
 
   try {
-    const output = await executeTool(name, args, ctx)
+    const output = await executeTool(name, args, ctx, deps.signal)
     pushResult(output)
     const summary = shortSummary(name, output)
     deps.send({ type: 'tool.result', name, summary })
@@ -1436,6 +1469,9 @@ async function runOneToolCall(
       describeDetail(name, args, output),
     )
   } catch (error) {
+    // A termination must unwind the whole turn, not be recorded as a failed
+    // tool step — otherwise the loop keeps going after the user cancelled.
+    if ((error as Error)?.name === 'AbortError') throw error
     const message =
       error instanceof DriverError
         ? error.message

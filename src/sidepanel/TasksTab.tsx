@@ -53,6 +53,8 @@ export default function TasksTab() {
   const [busy, setBusy] = useState(false)
   /** Id of the task just saved, so its card can briefly highlight. */
   const [justSavedId, setJustSavedId] = useState<string | null>(null)
+  /** Runs whose terminate button was clicked; used to show "Cancelling…". */
+  const [cancellingIds, setCancellingIds] = useState<Set<string>>(new Set())
 
   // Clear the highlight a short time after it appears, without re-running load.
   useEffect(() => {
@@ -100,6 +102,20 @@ export default function TasksTab() {
 
         const runningIds = new Set(result.runs.map((r) => r.runId))
         const finishedIds = new Set(result.finished.map((r) => r.runId))
+
+        // Once a cancelled run leaves the running list, drop its "Cancelling…"
+        // state so a future run never inherits it.
+        setCancellingIds((prev) => {
+          if (prev.size === 0) return prev
+          let changed = false
+          const next = new Set<string>()
+          for (const id of prev) {
+            if (runningIds.has(id)) next.add(id)
+            else changed = true
+          }
+          return changed ? next : prev
+        })
+
         let shouldReload = false
         // A run we previously saw running is no longer running → it settled.
         for (const id of prevRunningIds.current) {
@@ -133,6 +149,11 @@ export default function TasksTab() {
   }, [load])
 
   const cancelRunning = async (runId: string): Promise<void> => {
+    setCancellingIds((prev) => {
+      const next = new Set(prev)
+      next.add(runId)
+      return next
+    })
     setBusy(true)
     try {
       await sendCommand({ type: 'tasks.cancel', runId })
@@ -288,6 +309,7 @@ export default function TasksTab() {
         onCancel={(id) => void cancelRunning(id)}
         onDeleteFinished={(id) => void deleteFinished(id)}
         onClearFinished={() => void clearFinished()}
+        cancellingIds={cancellingIds}
         busy={busy}
       />
 
@@ -883,6 +905,7 @@ function RunningBoard({
   onCancel,
   onDeleteFinished,
   onClearFinished,
+  cancellingIds,
   busy,
 }: {
   running: RunningTaskView[]
@@ -890,6 +913,7 @@ function RunningBoard({
   onCancel: (runId: string) => void
   onDeleteFinished: (runId: string) => void
   onClearFinished: () => void
+  cancellingIds: Set<string>
   busy: boolean
 }) {
   const t = useT()
@@ -924,17 +948,19 @@ function RunningBoard({
         <p className="hint running-empty">{t.tasksRunningEmpty}</p>
       ) : (
         <ul className="running-list">
-          {running.map((run) => (
+          {running.map((run) => {
+            const cancelling = cancellingIds.has(run.runId)
+            return (
             <li className="running-item" key={run.runId}>
               <div className="running-item-head">
                 <strong className="running-label">{run.label || t.taskUntitled}</strong>
                 <button
-                  className="running-cancel"
-                  disabled={busy}
+                  className={`running-cancel${cancelling ? ' running-cancel-busy' : ''}`}
+                  disabled={busy || cancelling}
                   onClick={() => onCancel(run.runId)}
                   type="button"
                 >
-                  {t.taskTerminate}
+                  {cancelling ? t.taskCancelling : t.taskTerminate}
                 </button>
               </div>
               <div className="running-meta">
@@ -953,7 +979,8 @@ function RunningBoard({
                 </ul>
               )}
             </li>
-          ))}
+            )
+          })}
         </ul>
       )}
 

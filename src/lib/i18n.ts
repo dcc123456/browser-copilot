@@ -107,6 +107,7 @@ export interface Messages {
   taskOutcomeSkipped: string
   taskUntitled: string
   taskTerminate: string
+  taskCancelling: string
   taskStartedAt: string
   taskSourceChat: string
   taskSourceSchedule: string
@@ -466,6 +467,7 @@ const en: Messages = {
   taskOutcomeSkipped: 'skipped',
   taskUntitled: 'Untitled',
   taskTerminate: 'Terminate',
+  taskCancelling: 'Cancelling…',
   taskStartedAt: 'Started',
   taskSourceChat: 'chat',
   taskSourceSchedule: 'schedule',
@@ -841,6 +843,7 @@ const zhCN: Messages = {
   taskOutcomeSkipped: '已跳过',
   taskUntitled: '未命名',
   taskTerminate: '终止',
+  taskCancelling: '正在终止…',
   taskStartedAt: '开始于',
   taskSourceChat: '对话',
   taskSourceSchedule: '定时',

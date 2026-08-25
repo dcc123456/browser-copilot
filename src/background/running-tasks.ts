@@ -240,6 +240,10 @@ export function clearFinished(): void {
 export function cancelRun(runId: string): boolean {
   const task = runs.get(runId)
   if (!task) return false
+  // Record immediate feedback so the board shows the termination was accepted
+  // before the in-flight work (an LLM request, a page action, a tab load) has
+  // actually unwound — otherwise the terminate button looks unresponsive.
+  task.steps.push({ at: Date.now(), kind: 'status', text: 'Cancelling…' })
   task.controller.abort()
   if (task.onCancel) {
     try {

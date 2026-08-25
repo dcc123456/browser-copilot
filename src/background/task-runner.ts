@@ -139,7 +139,7 @@ async function executeTask(
 
 async function runReviewRequests(lang: string, tracked: RunningTask): Promise<RunOutcome> {
   try {
-    const result = await fetchReviewRequests()
+    const result = await fetchReviewRequests(tracked.controller.signal)
     const { headline, body } = formatReviewSummary(result, lang)
     const summary = [headline, body].filter(Boolean).join('\n')
     // Surface the full report on the running/finished board so it can be
@@ -149,6 +149,9 @@ async function runReviewRequests(lang: string, tracked: RunningTask): Promise<Ru
     }
     return { ok: true, skipped: false, summary }
   } catch (error) {
+    if ((error as Error)?.name === 'AbortError') {
+      return { ok: false, skipped: false, cancelled: true, summary: '' }
+    }
     if (error instanceof NotLoggedIn) {
       // The user asked for this exact behaviour: if the session is gone, skip
       // rather than fail with a stack trace. It still records and notifies so the

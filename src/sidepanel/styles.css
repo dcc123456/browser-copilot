@@ -1848,6 +1848,15 @@ textarea {
   color: var(--on-danger);
 }
 
+.running-cancel:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.running-cancel-busy {
+  border-style: dashed;
+}
+
 .running-meta {
   display: flex;
   align-items: center;
