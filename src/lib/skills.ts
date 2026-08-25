@@ -92,12 +92,17 @@ export function renderSkillCatalogue(skills: readonly Skill[]): string {
   return [
     '## Available skills',
     '',
-    'These saved skills may fit the user\u2019s request:',
+    'You have the following saved skills. A skill is a reusable set of instructions',
+    'for a specific kind of task. You MUST use one when it matches the user\'s request:',
     '',
     ...lines,
     '',
-    'If one clearly applies, call `use_skill` with its exact name to load its',
-    'instructions before answering. If none apply, just answer normally \u2014 do not',
-    'mention this list.',
+    'How to use a skill:',
+    '1. If one clearly matches what the user is asking, STOP and call the `use_skill`',
+    '   tool with that skill\'s exact name BEFORE you write any answer.',
+    '2. The tool returns the skill\'s full instructions; read them and follow them',
+    '   exactly when producing your answer.',
+    '3. If none clearly apply, just answer normally without mentioning this list.',
+    'Do not answer using a skill\'s description alone — always load it via `use_skill` first.',
   ].join('\n')
 }
