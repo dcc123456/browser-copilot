@@ -1972,7 +1972,9 @@ textarea {
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 5px 0;
+  /* Reserve room on the right so the absolutely-positioned delete button never
+     overlaps the outcome badge. */
+  padding: 5px 28px 5px 0;
   border: 0;
   background: transparent;
   color: var(--text);

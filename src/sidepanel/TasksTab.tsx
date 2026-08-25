@@ -35,7 +35,7 @@ function emptyTask(): Draft {
   return createDraft({
     name: '',
     kind: 'agent-prompt',
-    schedule: { kind: 'daily', hour: 10, minute: 0 },
+    schedule: { kind: 'weekly', days: [1, 2, 3, 4, 5], hour: 10, minute: 0 },
     prompt: '',
     notifyFeishu: false,
   })
@@ -456,7 +456,21 @@ function TaskEditor({
   const update = <K extends keyof Draft>(key: K, value: Draft[K]): void =>
     onChange({ ...draft, [key]: value })
 
-  const sched = draft.schedule
+  const WEEKDAYS = [1, 2, 3, 4, 5]
+  const WEEKEND = [6, 0]
+  const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
+
+  // The editor exposes just two kinds: "weekly" (which covers "daily" and the
+  // old "weekdays" preset via the day chips/shortcuts) and "interval". Older
+  // tasks stored as daily/weekdays are mapped to their weekly equivalents for
+  // display, and any edit writes them back as weekly so they migrate on save.
+  const sched =
+    draft.schedule.kind === 'daily'
+      ? { kind: 'weekly' as const, days: ALL_DAYS, hour: draft.schedule.hour, minute: draft.schedule.minute }
+      : draft.schedule.kind === 'weekdays'
+        ? { kind: 'weekly' as const, days: WEEKDAYS, hour: draft.schedule.hour, minute: draft.schedule.minute }
+        : draft.schedule
+
   const isTimeBased = sched.kind !== 'interval'
   const timeHour = isTimeBased ? sched.hour : 9
   const timeMinute = isTimeBased ? sched.minute : 0
@@ -472,9 +486,6 @@ function TaskEditor({
     setTime(Math.min(23, Math.max(0, Number(match[1]))), Math.min(59, Math.max(0, Number(match[2]))))
   }
 
-  const WEEKDAYS = [1, 2, 3, 4, 5]
-  const WEEKEND = [6, 0]
-  const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
   const setDays = (days: number[]): void => {
     if (sched.kind !== 'weekly') return
     const sorted = Array.from(new Set(days)).sort((a, b) => a - b)
@@ -517,8 +528,6 @@ function TaskEditor({
         <div className="seg-control" role="radiogroup">
           {(
             [
-              { kind: 'daily', label: t.taskSchedDaily },
-              { kind: 'weekdays', label: t.taskSchedWeekdays },
               { kind: 'weekly', label: t.taskSchedWeekly },
               { kind: 'interval', label: t.taskSchedInterval },
             ] as const
@@ -537,15 +546,11 @@ function TaskEditor({
                   }
                   const hour = sched.kind === 'interval' ? 9 : sched.hour
                   const minute = sched.kind === 'interval' ? 0 : sched.minute
-                  if (opt.kind === 'weekly') {
-                    const days =
-                      sched.kind === 'weekly' && sched.days.length > 0
-                        ? sched.days
-                        : WEEKDAYS
-                    update('schedule', { kind: 'weekly', days, hour, minute })
-                  } else {
-                    update('schedule', { kind: opt.kind, hour, minute })
-                  }
+                  const days =
+                    sched.kind === 'weekly' && sched.days.length > 0
+                      ? sched.days
+                      : WEEKDAYS
+                  update('schedule', { kind: 'weekly', days, hour, minute })
                 }}
                 type="radio"
               />
