@@ -45,7 +45,7 @@ export type WireMessage =
       content: string | null
       tool_calls?: WireToolCall[]
     }
-  | { role: 'tool'; tool_call_id: string; content: string }
+  | { role: 'tool'; tool_call_id: string; content: string; name?: string }
 
 /** One in-progress tool call being assembled from deltas. */
 interface PartialToolCall {

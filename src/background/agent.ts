@@ -528,6 +528,53 @@ function summarizeSnapshot(snapshot: {
   }
 }
 
+/**
+ * Cap on the page/snapshot text kept in a single tool result that lands in the
+ * transcript. The raw read can be up to ~12k chars; once it is in history every
+ * later round re-sends it, so we keep a tighter budget here. Element refs/labels
+ * (what the model actually clicks/fills) are preserved; the prose body is
+ * shortened. A page that truly needs more text can pass maxChars explicitly.
+ */
+const TRANSCRIPT_TEXT_CAP = 4000
+
+function compactPageRead(page: {
+  url: string
+  title: string
+  text: string
+  truncated: boolean
+  selection?: string
+}): unknown {
+  const text =
+    page.text.length > TRANSCRIPT_TEXT_CAP
+      ? `${page.text.slice(0, TRANSCRIPT_TEXT_CAP)}…[truncated]`
+      : page.text
+  return {
+    url: page.url,
+    title: page.title,
+    ...(page.selection ? { selection: page.selection } : {}),
+    text,
+    truncated: page.truncated || page.text.length > TRANSCRIPT_TEXT_CAP,
+  }
+}
+
+function compactSnapshot(snapshot: Parameters<typeof summarizeSnapshot>[0]): unknown {
+  const summarized = summarizeSnapshot(snapshot) as {
+    url: string
+    title: string
+    text: string
+    truncated: boolean
+    elementsTruncated: boolean
+    elements: unknown[]
+    forms: unknown
+    scroll: unknown
+  }
+  const text =
+    summarized.text.length > TRANSCRIPT_TEXT_CAP
+      ? `${summarized.text.slice(0, TRANSCRIPT_TEXT_CAP)}…[truncated]`
+      : summarized.text
+  return { ...summarized, text, truncated: summarized.truncated || text.length < summarized.text.length }
+}
+
 async function recordAction(
   conversationId: string,
   action: string,
@@ -560,6 +607,64 @@ interface ToolContext {
   navigated: boolean
   /** The most recently read URL; used to attach history hosts. */
   lastUrl?: string
+}
+
+/**
+ * Tools whose large result is a full page/snapshot and is safe to retire once
+ * the page navigates away. The model is told the snapshot was dropped; it can
+ * re-read if it still needs it.
+ */
+const PAGE_READ_TOOLS = new Set(['read_current_page', 'snapshot_page'])
+
+/**
+ * Token-budget guard for long automated runs. Every prior tool result is
+ * re-sent on each round, so old 4k–12k page reads/snapshots come to dominate
+ * token cost. This compacts read/snapshot tool results IN PLACE in the
+ * transcript, replacing their bulky JSON with a short retired stub the model
+ * can act on (it re-reads if it needs the current page).
+ *
+ * By default the single most recent result is kept (the model is usually
+ * acting on it); after a navigation even that is stale, so callers pass
+ * `retireAll`. Only tool-message `content` (what goes to the model) is touched —
+ * UI step summaries and action history come from separate paths. Exported for
+ * testing.
+ */
+export function retireOldPageReads(history: WireMessage[], retireAll = false): void {
+  let mostRecentReadIndex = -1
+  if (!retireAll) {
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      const msg = history[i]
+      if (msg?.role === 'tool' && PAGE_READ_TOOLS.has((msg as { name?: string }).name ?? '')) {
+        mostRecentReadIndex = i
+        break
+      }
+    }
+  }
+  for (let i = 0; i < history.length; i += 1) {
+    const msg = history[i]
+    if (msg?.role !== 'tool') continue
+    if (i === mostRecentReadIndex) continue
+    const name = (msg as { name?: string }).name ?? ''
+    if (!PAGE_READ_TOOLS.has(name)) continue
+    const content = typeof msg.content === 'string' ? msg.content : ''
+    // Already compacted.
+    if (content.startsWith('{"ok":true,"retired"') || content.includes('"retired":true')) continue
+    let url = ''
+    try {
+      const parsed = JSON.parse(content) as { url?: string; title?: string }
+      url = parsed.url ?? ''
+    } catch {
+      /* not JSON — leave it */
+      continue
+    }
+    msg.content = JSON.stringify({
+      ok: true,
+      retired: true,
+      note:
+        '[Page context retired] This older page read was dropped to save context. Call read_current_page or snapshot_page again if you need the current page.',
+      ...(url ? { url } : {}),
+    })
+  }
 }
 
 /**
@@ -697,7 +802,7 @@ async function executeTool(
       const maxChars = typeof args.maxChars === 'number' ? args.maxChars : undefined
       const page = await readActivePage(maxChars)
       ctx.lastUrl = page.url
-      return JSON.stringify(page)
+      return JSON.stringify(compactPageRead(page))
     }
 
     case 'snapshot_page': {
@@ -705,7 +810,7 @@ async function executeTool(
       const maxElements = typeof args.maxElements === 'number' ? args.maxElements : 120
       const snapshot = await snapshotActiveTab(maxChars, maxElements)
       ctx.lastUrl = snapshot.url
-      return JSON.stringify(summarizeSnapshot(snapshot))
+      return JSON.stringify(compactSnapshot(snapshot))
     }
 
     case 'list_tabs': {
@@ -1018,6 +1123,18 @@ export async function runAgentTurn(history: WireMessage[], deps: AgentDeps): Pro
       deps.send({ type: 'status', text: 'Cancelled.' })
       return
     }
+
+    // Bound page-context growth in long automated runs. Every prior tool result
+    // is re-sent each round, so old reads/snapshots dominate token cost. If the
+    // page navigated, drop ALL prior reads (they describe a page that no longer
+    // exists); otherwise still retire older reads past a small keep window.
+    if (ctx.navigated) {
+      retireOldPageReads(history, true)
+      ctx.navigated = false
+    } else {
+      retireOldPageReads(history, false)
+    }
+
     const messages: WireMessage[] = [{ role: 'system', content: systemPrompt }, ...history]
 
     let result
@@ -1095,7 +1212,7 @@ async function runOneToolCall(
 ): Promise<void> {
   const name = call.function.name
   const pushResult = (content: string): void => {
-    history.push({ role: 'tool', tool_call_id: call.id, content })
+    history.push({ role: 'tool', tool_call_id: call.id, content, name })
   }
 
   let args: Record<string, unknown>
