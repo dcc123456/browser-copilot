@@ -1,9 +1,8 @@
-﻿Fix dropped replies on worker-eviction reconnect
+﻿Add progress phases between send and first token
 
-When the service worker had been evicted and the user sent a message,
-post() reconnected with a bare chrome.runtime.connect() that had no
-onMessage listener. The request was delivered but the streamed reply
-had nowhere to land, so the panel appeared to hang until the next
-disconnect/reconnect cycle. Reconnect through the full connect() path
-(listeners, heartbeat, resume) via a connectRef, so a cold worker no
-longer silently swallows the answer.
+Emits machine-named phases (preparing, reading-page, sending, thinking,
+responding) over the agent port; the panel maps them to localized status
+text and replaces a single transient line, clearing it when the first
+delta/tool result arrives. This makes the gap after pressing Send visible
+instead of looking like a hang. Also routes the unattended agent phases
+to its step callback.

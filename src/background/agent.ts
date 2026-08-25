@@ -1189,6 +1189,12 @@ export async function runAgentTurn(
 
     const messages: WireMessage[] = [{ role: 'system', content: systemPrompt }, ...history]
 
+    // "Thinking" covers the request in flight until either text starts streaming
+    // or a tool call is announced. The first text delta flips it to "Responding";
+    // the panel removes the line on the first delta regardless.
+    deps.send({ type: 'phase', phase: 'thinking' })
+    let announced = false
+
     let result
     try {
       result = await streamCompletion(
@@ -1207,7 +1213,13 @@ export async function runAgentTurn(
           ...(deps.signal ? { signal: deps.signal } : {}),
         },
         {
-          onText: (delta) => deps.send({ type: 'delta', text: delta }),
+          onText: (delta) => {
+            if (!announced) {
+              announced = true
+              deps.send({ type: 'phase', phase: 'responding' })
+            }
+            deps.send({ type: 'delta', text: delta })
+          },
           onToolCallStart: (name) => deps.send({ type: 'tool.start', name }),
           onUsage: (usage) => {
             totalUsage.inputTokens += usage.inputTokens

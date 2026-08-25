@@ -607,12 +607,13 @@ chrome.runtime.onConnect.addListener((port) => {
       let history: WireMessage[] = []
       let failure: string | undefined
       try {
+        sendWithTracking({ type: 'phase', phase: 'preparing' })
         history = await loadConversation(conversationId)
 
         let text = message.text
         let grantedPageUrl: string | undefined
         if (message.includeSelection) {
-          sendWithTracking({ type: 'status', text: 'Reading your selection…' })
+          sendWithTracking({ type: 'phase', phase: 'reading-page' })
           try {
             const page = await readActiveSelection()
             if (page.selection.trim().length > 0) {
@@ -664,6 +665,7 @@ chrome.runtime.onConnect.addListener((port) => {
             basePrompt: s.systemPromptOverride ?? '',
           }
         }
+        sendWithTracking({ type: 'phase', phase: 'sending' })
         const turnUsage = await runAgentTurn(history, {
           send: sendWithTracking,
           signal: turnController.signal,

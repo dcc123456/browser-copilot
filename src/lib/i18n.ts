@@ -135,6 +135,12 @@ export interface Messages {
   chatReattached: string
   chatConnectionDropped: string
   chatExtensionReloaded: string
+  /** Progress phases shown between send and the first token. */
+  phasePreparing: string
+  phaseReadingPage: string
+  phaseSending: string
+  phaseThinking: string
+  phaseResponding: string
   chatApprove: string
   chatDecline: string
   chatConfirmTitle: (params: { name: string }) => string
@@ -478,6 +484,11 @@ const en: Messages = {
     'The connection dropped mid-reply. Any answer was saved to this conversation — send another message to continue.',
   chatExtensionReloaded:
     'The extension was reloaded. Reload it in chrome://extensions, then reopen this panel.',
+  phasePreparing: 'Preparing your request…',
+  phaseReadingPage: 'Reading the page…',
+  phaseSending: 'Sending to the model…',
+  phaseThinking: 'Thinking…',
+  phaseResponding: 'Responding…',
   chatApprove: 'Approve',
   chatDecline: 'Decline',
   chatConfirmTitle: ({ name }) => `Allow ${name}?`,
@@ -833,6 +844,11 @@ const zhCN: Messages = {
   chatReattached: '任务仍在进行，已重新接入。',
   chatConnectionDropped: '回复过程中连接中断。已生成的内容已保存到本次对话——再发一条消息即可继续。',
   chatExtensionReloaded: '扩展已重新加载。请在 chrome://extensions 中重载，然后重新打开此面板。',
+  phasePreparing: '正在准备请求…',
+  phaseReadingPage: '正在读取页面…',
+  phaseSending: '正在发送给模型…',
+  phaseThinking: '模型思考中…',
+  phaseResponding: '正在回复…',
   chatApprove: '允许',
   chatDecline: '拒绝',
   chatConfirmTitle: ({ name }) => `是否允许执行 ${name}？`,

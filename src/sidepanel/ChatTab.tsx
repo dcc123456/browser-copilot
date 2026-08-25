@@ -215,6 +215,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const composingRef = useRef(false)
   /** Id of the assistant entry currently being streamed into. */
   const streamingRef = useRef<string | null>(null)
+  /** Id of the transient "phase" status entry (preparing/sending/…). */
+  const phaseRef = useRef<string | null>(null)
   /** Set once the component unmounts, to stop reconnect attempts. */
   const closedRef = useRef(false)
   /**
@@ -256,6 +258,33 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       streamingRef.current = id
       return [...prev, { id, role: 'assistant', text }]
     })
+  }, [])
+
+  /**
+   * Shows (or replaces) the one-line progress phase between pressing send and
+   * the first token. Reusing a single entry — rather than appending a new line
+   * per phase — keeps the turn from looking like a pile of statuses. The entry
+   * is removed once real text or a tool call starts.
+   */
+  const showPhase = useCallback((label: string) => {
+    setEntries((prev) => {
+      const existing = phaseRef.current
+      if (existing) {
+        return prev.map((entry) =>
+          entry.id === existing ? { ...entry, text: label } : entry,
+        )
+      }
+      const id = nextId()
+      phaseRef.current = id
+      return [...prev, { id, role: 'status' as const, text: label }]
+    })
+  }, [])
+
+  const clearPhase = useCallback(() => {
+    const id = phaseRef.current
+    if (!id) return
+    phaseRef.current = null
+    setEntries((prev) => prev.filter((entry) => entry.id !== id))
   }, [])
 
   useEffect(() => {
@@ -301,9 +330,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             break
           }
           case 'delta':
+            clearPhase()
             appendDelta(message.text)
             break
           case 'tool.start':
+            clearPhase()
             streamingRef.current = null
             append({ role: 'tool', text: `→ ${message.name}` })
             break
@@ -314,9 +345,24 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             setConfirms((prev) => [...prev, message])
             break
           case 'status':
+            // Free-form statuses (selection read results, etc.) replace the
+            // transient phase line too, so they don't pile up.
+            clearPhase()
             append({ role: 'status', text: message.text })
             break
+          case 'phase': {
+            const labels: Record<typeof message.phase, string> = {
+              preparing: tRef.current.phasePreparing,
+              'reading-page': tRef.current.phaseReadingPage,
+              sending: tRef.current.phaseSending,
+              thinking: tRef.current.phaseThinking,
+              responding: tRef.current.phaseResponding,
+            }
+            showPhase(labels[message.phase])
+            break
+          }
           case 'done':
+            clearPhase()
             streamingRef.current = null
             setBusy(false)
             if (message.usage) {
@@ -332,6 +378,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             }
             break
           case 'error':
+            clearPhase()
             streamingRef.current = null
             append({ role: 'error', text: message.message })
             setBusy(false)
@@ -392,7 +439,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       portRef.current?.disconnect()
       portRef.current = null
     }
-  }, [append, appendDelta, conversationId])
+  }, [append, appendDelta, clearPhase, conversationId, showPhase])
 
   // Refresh the conversation list when it changes and on mount.
   const refreshConversations = useCallback(async () => {

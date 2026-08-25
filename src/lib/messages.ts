@@ -221,6 +221,16 @@ export type AgentServerMessage =
       argsPreview: string
     }
   | { type: 'status'; text: string }
+  /**
+   * A short, machine-named progress phase. The panel maps it to localized text
+   * so the worker never has to know the UI language. Emitted at the key points
+   * between "user pressed send" and the first streamed token, which otherwise
+   * looks like a hang.
+   */
+  | {
+      type: 'phase'
+      phase: 'preparing' | 'reading-page' | 'sending' | 'thinking' | 'responding'
+    }
   | { type: 'done'; usage?: TurnTokenUsage }
   | { type: 'error'; message: string }
   | { type: 'pong' }

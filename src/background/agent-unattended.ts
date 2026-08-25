@@ -80,6 +80,9 @@ export async function runUnattendedPrompt(
         if (message.type === 'status') {
           options.onStep?.('status', message.text)
         }
+        if (message.type === 'phase') {
+          options.onStep?.('status', `phase:${message.phase}`)
+        }
         if (message.type === 'error') {
           collected.push(`! ${message.message}`)
           options.onStep?.('error', message.message)
