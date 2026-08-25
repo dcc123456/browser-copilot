@@ -2,11 +2,24 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-A Chrome extension (Manifest V3) that puts an AI assistant in the browser side
-panel. It can **read and act on the page you are looking at** — click, type,
-scroll, switch tabs, fill forms — and works with any OpenAI-compatible model
-(DeepSeek, 火山方舟 Ark, OpenAI, local Ollama, and more). Three modes let you
-keep every click in your hands, hand off whole tasks, or stay read-only.
+Your AI assistant that actually *uses* the web for you. Open the side panel,
+ask in plain language, and Browser Copilot reads the page you're on and takes
+action — clicking buttons, filling forms, scrolling, switching tabs, walking
+through a whole checkout or setup flow — while you watch or stay hands-off.
+
+- 🧠 **Works with the model you already use.** Any OpenAI-compatible endpoint:
+  DeepSeek, 火山方舟 Ark, OpenAI, OpenRouter, Moonshot, DashScope, SiliconFlow,
+  or a local Ollama/LM Studio. Bring your own key.
+- 🎚️ **You choose how autonomous it is.** Four modes from plain chat to full
+  auto; semi-auto shows every click for your approval first.
+- 🧩 **Skills** turn repeatable know-how (review checklists, style guides,
+  extraction formats) into one-tap instructions the model must follow.
+- 🔒 **Private by construction.** No accounts, no telemetry, no cloud server.
+  Your keys and data stay in your browser; passwords are filled locally and
+  never shown to the model.
+
+It does nothing on a timer — every action is part of answering something you
+just asked.
 
 ---
 
@@ -88,6 +101,7 @@ Open the side panel → **Settings → Add a provider**.
 Use the dropdown at the bottom-left of the chat. The choice applies to the
 **next action**, even mid-reply:
 
+- 💬 **Chat** — pure conversation; no reading or acting on the page (cheapest).
 - 🔒 **Read-only** — reads only; no click, type, navigation, or fill.
 - 🛡 **Semi-auto** (default) — every page-changing action is shown to you first
   for approval.
@@ -125,9 +139,9 @@ Best when a task lives on one page and mixes reading with acting:
 - **Apply a repeatable standard** (review rubric, style guide, checklist) via a
   [skill](#skills).
 
-It cannot act in read-only mode, read `chrome://`/local-file/Web-Store pages,
-solve CAPTCHAs or bypass 2FA, guarantee arithmetic over long tables, or run on a
-schedule.
+It cannot act in Chat or read-only mode, read `chrome://`/local-file/Web-Store
+pages, solve CAPTCHAs or bypass 2FA, guarantee arithmetic over long tables, or
+run on a schedule.
 
 ---
 
@@ -138,8 +152,9 @@ while a task runs.
 
 | Mode | Behavior | Best for |
 | --- | --- | --- |
+| 💬 **Chat** | Pure conversation. No page-reading or action tools are sent to the model, so it cannot touch the page and uses the fewest tokens. You can still attach a text selection. | Brainstorming, writing, Q&A, translation — anything where you don't want it acting on the page. |
 | 🔒 **Read-only** | Reads only; no click, type, navigation, or fill. | Review, summary, translation — zero side effects. |
-| 🛡 **Semi-auto** (default) | Every page-changing action is shown for approval first. | Everyday use; stay in control. |
+| 🛡 **Semi-auto** (default) | Every page-changing action is shown for approval first. | Everyday use; stay in control of each click. |
 | ⚡ **Full auto** | Actions run without confirmation. | Repetitive, trusted flows. |
 
 In semi-auto the confirmation card names the exact button/field/URL. In full
