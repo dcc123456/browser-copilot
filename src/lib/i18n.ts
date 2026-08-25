@@ -69,6 +69,9 @@ export interface Messages {
   taskMinutes: string
   taskMaxRounds: string
   taskMaxRoundsHint: string
+  taskDaysAll: string
+  taskDaysWeekdays: string
+  taskDaysWeekend: string
   taskClearFinished: string
   taskDeleteFinishedConfirm: string
   taskClearFinishedConfirm: string
@@ -425,6 +428,9 @@ const en: Messages = {
   taskMaxRounds: 'Max tool rounds',
   taskMaxRoundsHint:
     'How many model↔tool steps this task may run unattended. Independent of the global setting (default 50).',
+  taskDaysAll: 'All',
+  taskDaysWeekdays: 'Weekdays',
+  taskDaysWeekend: 'Weekend',
   taskClearFinished: 'Clear',
   taskDeleteFinishedConfirm: 'Remove this finished run from the board?',
   taskClearFinishedConfirm: 'Clear all finished runs from the board?',
@@ -797,6 +803,9 @@ const zhCN: Messages = {
   taskMaxRounds: '最大调用轮数',
   taskMaxRoundsHint:
     '该任务无人值守时最多进行多少轮"模型↔工具"往返。独立于全局设置，默认 50。',
+  taskDaysAll: '每天',
+  taskDaysWeekdays: '工作日',
+  taskDaysWeekend: '周末',
   taskClearFinished: '清空',
   taskDeleteFinishedConfirm: '从看板移除这条已完成记录？',
   taskClearFinishedConfirm: '清空看板上所有已完成记录？',

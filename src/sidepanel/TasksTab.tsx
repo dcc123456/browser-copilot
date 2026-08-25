@@ -457,9 +457,35 @@ function TaskEditor({
     onChange({ ...draft, [key]: value })
 
   const sched = draft.schedule
+  const isTimeBased = sched.kind !== 'interval'
+  const timeHour = isTimeBased ? sched.hour : 9
+  const timeMinute = isTimeBased ? sched.minute : 0
+  const pad2 = (n: number): string => n.toString().padStart(2, '0')
+  const timeValue = `${pad2(timeHour)}:${pad2(timeMinute)}`
   const setTime = (hour: number, minute: number): void => {
     if (sched.kind === 'interval') return
     onChange({ ...draft, schedule: { ...sched, hour, minute } })
+  }
+  const onTimeChange = (value: string): void => {
+    const match = /^(\d{1,2}):(\d{2})$/.exec(value)
+    if (!match) return
+    setTime(Math.min(23, Math.max(0, Number(match[1]))), Math.min(59, Math.max(0, Number(match[2]))))
+  }
+
+  const WEEKDAYS = [1, 2, 3, 4, 5]
+  const WEEKEND = [6, 0]
+  const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
+  const setDays = (days: number[]): void => {
+    if (sched.kind !== 'weekly') return
+    const sorted = Array.from(new Set(days)).sort((a, b) => a - b)
+    onChange({ ...draft, schedule: { ...sched, days: sorted } })
+  }
+  const toggleDay = (day: number): void => {
+    if (sched.kind !== 'weekly') return
+    const has = sched.days.includes(day)
+    // Keep at least one day selected so the schedule is never empty.
+    if (has && sched.days.length === 1) return
+    setDays(has ? sched.days.filter((d) => d !== day) : [...sched.days, day])
   }
 
   const canSave = draft.name.trim().length > 0
@@ -486,160 +512,162 @@ function TaskEditor({
         />
       </label>
 
-      <fieldset className="field">
+      <fieldset className="field schedule-field">
         <legend>{t.taskSchedule}</legend>
-        <div className="schedule-row">
-          <label>
-            <input
-              checked={sched.kind === 'daily'}
-              onChange={() =>
-                update('schedule', {
-                  kind: 'daily',
-                  hour: sched.kind === 'interval' ? 9 : sched.hour,
-                  minute: sched.kind === 'interval' ? 0 : sched.minute,
-                })
-              }
-              type="radio"
-            />{' '}
-            {t.taskSchedDaily}
-          </label>
-          <label>
-            <input
-              checked={sched.kind === 'weekdays'}
-              onChange={() =>
-                update('schedule', {
-                  kind: 'weekdays',
-                  hour: sched.kind === 'interval' ? 9 : sched.hour,
-                  minute: sched.kind === 'interval' ? 0 : sched.minute,
-                })
-              }
-              type="radio"
-            />{' '}
-            {t.taskSchedWeekdays}
-          </label>
-          <label>
-            <input
-              checked={sched.kind === 'weekly'}
-              onChange={() => {
-                const hour = sched.kind === 'interval' ? 9 : sched.hour
-                const minute = sched.kind === 'interval' ? 0 : sched.minute
-                const days =
-                  sched.kind === 'weekly' && sched.days.length > 0
-                    ? sched.days
-                    : [1, 2, 3, 4, 5]
-                update('schedule', { kind: 'weekly', days, hour, minute })
-              }}
-              type="radio"
-            />{' '}
-            {t.taskSchedWeekly}
-          </label>
-          <label>
-            <input
-              checked={sched.kind === 'interval'}
-              onChange={() => update('schedule', { kind: 'interval', minutes: 60 })}
-              type="radio"
-            />{' '}
-            {t.taskSchedInterval}
-          </label>
+        <div className="seg-control" role="radiogroup">
+          {(
+            [
+              { kind: 'daily', label: t.taskSchedDaily },
+              { kind: 'weekdays', label: t.taskSchedWeekdays },
+              { kind: 'weekly', label: t.taskSchedWeekly },
+              { kind: 'interval', label: t.taskSchedInterval },
+            ] as const
+          ).map((opt) => (
+            <label
+              className={`seg-btn${sched.kind === opt.kind ? ' seg-btn-on' : ''}`}
+              key={opt.kind}
+            >
+              <input
+                checked={sched.kind === opt.kind}
+                disabled={disabled}
+                onChange={() => {
+                  if (opt.kind === 'interval') {
+                    update('schedule', { kind: 'interval', minutes: 60 })
+                    return
+                  }
+                  const hour = sched.kind === 'interval' ? 9 : sched.hour
+                  const minute = sched.kind === 'interval' ? 0 : sched.minute
+                  if (opt.kind === 'weekly') {
+                    const days =
+                      sched.kind === 'weekly' && sched.days.length > 0
+                        ? sched.days
+                        : WEEKDAYS
+                    update('schedule', { kind: 'weekly', days, hour, minute })
+                  } else {
+                    update('schedule', { kind: opt.kind, hour, minute })
+                  }
+                }}
+                type="radio"
+              />
+              <span>{opt.label}</span>
+            </label>
+          ))}
         </div>
 
         {sched.kind === 'weekly' && (
-          <div className="schedule-row weekday-row">
-            {WEEKDAY_OPTIONS.map((day) => {
-              const checked = sched.days.includes(day.value)
-              return (
-                <label className="weekday-chip" key={day.value}>
-                  <input
-                    checked={checked}
+          <div className="weekly-block">
+            <div className="day-chips">
+              {WEEKDAY_OPTIONS.map((day) => {
+                const checked = sched.days.includes(day.value)
+                return (
+                  <button
+                    aria-pressed={checked}
+                    className={`day-chip${checked ? ' day-chip-on' : ''}`}
                     disabled={disabled}
-                    onChange={() => {
-                      const next = checked
-                        ? sched.days.filter((d) => d !== day.value)
-                        : [...sched.days, day.value].sort((a, b) => a - b)
-                      update('schedule', { ...sched, days: next })
-                    }}
-                    type="checkbox"
-                  />
-                  {zh ? day.zh : day.en}
-                </label>
-              )
-            })}
+                    key={day.value}
+                    onClick={() => toggleDay(day.value)}
+                    type="button"
+                  >
+                    {zh ? day.zh : day.en}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="day-quick">
+              <button
+                disabled={disabled}
+                onClick={() => setDays(WEEKDAYS)}
+                type="button"
+              >
+                {t.taskDaysWeekdays}
+              </button>
+              <button
+                disabled={disabled}
+                onClick={() => setDays(WEEKEND)}
+                type="button"
+              >
+                {t.taskDaysWeekend}
+              </button>
+              <button
+                disabled={disabled}
+                onClick={() => setDays(ALL_DAYS)}
+                type="button"
+              >
+                {t.taskDaysAll}
+              </button>
+            </div>
           </div>
         )}
 
-        {sched.kind !== 'interval' ? (
-          <div className="schedule-row">
-            <input
-              disabled={disabled}
-              max={23}
-              min={0}
-              onChange={(event) =>
-                setTime(Number(event.target.value), sched.minute)
-              }
-              type="number"
-              value={sched.hour}
-            />
-            :
-            <input
-              disabled={disabled}
-              max={59}
-              min={0}
-              onChange={(event) => setTime(sched.hour, Number(event.target.value))}
-              type="number"
-              value={sched.minute}
-            />
-          </div>
-        ) : (
-          <div className="schedule-row">
-            <input
-              disabled={disabled}
-              min={1}
-              onChange={(event) =>
-                update('schedule', { kind: 'interval', minutes: Number(event.target.value) })
-              }
-              type="number"
-              value={sched.minutes}
-            />
-            {t.taskMinutes}
-          </div>
-        )}
+        <div className="schedule-config">
+          {isTimeBased ? (
+            <label className="time-input">
+              <input
+                disabled={disabled}
+                onChange={(event) => onTimeChange(event.target.value)}
+                type="time"
+                value={timeValue}
+              />
+            </label>
+          ) : (
+            <label className="interval-input">
+              <input
+                disabled={disabled}
+                min={1}
+                onChange={(event) =>
+                  update('schedule', {
+                    kind: 'interval',
+                    minutes: Number(event.target.value) || 1,
+                  })
+                }
+                type="number"
+                value={sched.minutes}
+              />
+              <span>{t.taskMinutes}</span>
+            </label>
+          )}
+        </div>
+
+        <div className="schedule-preview" aria-live="polite">
+          {describeSchedule(sched, zh ? 'zh' : 'en')}
+        </div>
       </fieldset>
 
-      <label className="field">
-        <span>{t.taskMaxRounds}</span>
-        <input
-          disabled={disabled}
-          min={1}
-          max={500}
-          onChange={(event) =>
-            onChange({
-              ...draft,
-              maxToolRounds: Math.min(500, Math.max(1, Number(event.target.value) || 1)),
-            })
-          }
-          type="number"
-          value={draft.maxToolRounds}
-        />
-        <small className="hint">{t.taskMaxRoundsHint}</small>
-      </label>
-
-      <label className="inline-check">
-        <input
-          checked={draft.notifyFeishu}
-          onChange={(event) => update('notifyFeishu', event.target.checked)}
-          type="checkbox"
-        />
-        {t.taskNotifyFeishu}
-      </label>
-
-      <label className="inline-check">
-        <input
-          checked={draft.enabled}
-          onChange={(event) => update('enabled', event.target.checked)}
-          type="checkbox"
-        />
-        {t.taskEnabled}
-      </label>
+      <div className="option-row">
+        <label className="option-field">
+          <span>{t.taskMaxRounds}</span>
+          <input
+            disabled={disabled}
+            max={500}
+            min={1}
+            onChange={(event) =>
+              onChange({
+                ...draft,
+                maxToolRounds: Math.min(500, Math.max(1, Number(event.target.value) || 1)),
+              })
+            }
+            type="number"
+            value={draft.maxToolRounds}
+          />
+        </label>
+        <label className="inline-check">
+          <input
+            checked={draft.notifyFeishu}
+            onChange={(event) => update('notifyFeishu', event.target.checked)}
+            type="checkbox"
+          />
+          {t.taskNotifyFeishu}
+        </label>
+        <label className="inline-check">
+          <input
+            checked={draft.enabled}
+            onChange={(event) => update('enabled', event.target.checked)}
+            type="checkbox"
+          />
+          {t.taskEnabled}
+        </label>
+      </div>
+      <p className="hint option-hint">{t.taskMaxRoundsHint}</p>
 
       <div className="actions">
         <button className="primary" disabled={disabled || !canSave} onClick={() => onSave(draft)} type="button">

@@ -1433,20 +1433,183 @@ textarea {
 
 .task-editor fieldset.field {
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px;
+  border-radius: 8px;
+  padding: 10px;
+  margin: 10px 0 6px;
 }
 
-.schedule-row {
+/* Segmented control for schedule type */
+.seg-control {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--panel-2);
+  border-radius: 8px;
+}
+
+.seg-btn {
+  flex: 1;
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 6px;
+  justify-content: center;
+  margin: 0;
+  padding: 6px 4px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: center;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.seg-btn input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.seg-btn:hover {
+  color: var(--text);
+}
+
+.seg-btn-on {
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 1px 2px var(--menu-shadow);
+}
+
+/* Weekly day picker */
+.weekly-block {
+  margin-top: 10px;
+}
+
+.day-chips {
+  display: flex;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
-.schedule-row input[type='number'] {
+.day-chip {
+  min-width: 34px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.day-chip:hover {
+  border-color: var(--accent);
+}
+
+.day-chip-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.day-quick {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.day-quick button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.day-quick button:hover {
+  text-decoration: underline;
+}
+
+/* Time / interval row */
+.schedule-config {
+  margin-top: 10px;
+}
+
+.time-input input[type='time'] {
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.interval-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.interval-input input[type='number'] {
+  width: 80px;
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.schedule-preview {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Inline options row: max rounds + checkboxes */
+.option-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 10px;
+}
+
+.option-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.option-field input[type='number'] {
   width: 64px;
+  padding: 4px 6px;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.option-hint {
+  margin: 4px 0 0;
 }
 
 .run-log-wrap {
@@ -1780,7 +1943,7 @@ textarea {
 
 .finished-delete:hover {
   color: var(--err);
-  background: var(--surface-hover, rgba(127, 127, 127, 0.12));
+  background: var(--hover-wash);
 }
 
 /* Leave room for the delete button so the row text never slips under it. */
@@ -1802,19 +1965,6 @@ textarea {
 .running-clear {
   font-size: 11px;
   padding: 2px 4px;
-}
-
-.weekday-row {
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  margin-top: 6px;
-}
-
-.weekday-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
 }
 
 .finished-row {
