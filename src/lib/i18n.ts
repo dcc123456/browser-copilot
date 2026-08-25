@@ -239,6 +239,50 @@ export interface Messages {
   settingsModelsFailed: (params: { message: string }) => string
   settingsSaved: (params: { name: string }) => string
 
+  // Settings · model context (system prompt + tool toggles)
+  settingsContextTitle: string
+  settingsContextIntro: string
+  settingsSystemPrompt: string
+  settingsSystemPromptWarn: string
+  settingsTools: string
+  settingsToolsHint: string
+  toolReadPage: string
+  toolReadPageWarn: string
+  toolSnapshot: string
+  toolSnapshotWarn: string
+  toolListTabs: string
+  toolListTabsWarn: string
+  toolClick: string
+  toolClickWarn: string
+  toolFill: string
+  toolFillWarn: string
+  toolSelect: string
+  toolSelectWarn: string
+  toolCheckbox: string
+  toolCheckboxWarn: string
+  toolPressKey: string
+  toolPressKeyWarn: string
+  toolScroll: string
+  toolScrollWarn: string
+  toolWait: string
+  toolWaitWarn: string
+  toolOpenUrl: string
+  toolOpenUrlWarn: string
+  toolTabNew: string
+  toolTabNewWarn: string
+  toolTabSwitch: string
+  toolTabSwitchWarn: string
+  toolTabClose: string
+  toolTabCloseWarn: string
+  toolProfile: string
+  toolProfileWarn: string
+  toolListSecrets: string
+  toolListSecretsWarn: string
+  toolSecret: string
+  toolSecretWarn: string
+  toolSkill: string
+  toolSkillWarn: string
+
   // Settings · page access
   settingsPageAccess: string
   settingsPageAccessIntro: string
@@ -525,6 +569,59 @@ const en: Messages = {
     `${message} — not all gateways expose /models; you can still type the model name.`,
   settingsSaved: ({ name }) => `Saved “${name}”.`,
 
+  settingsContextTitle: 'Model context & tools',
+  settingsContextIntro:
+    'These are sent with every request and make up the fixed token cost. Turn off what you do not use to reduce token usage; toggles take effect on the next message. All are on by default.',
+  settingsSystemPrompt: 'Operating rules (system prompt)',
+  settingsSystemPromptWarn:
+    'Turning this off removes safety and behaviour rules (approval handling, re-snapshotting after navigation, how to fill forms/secrets). The assistant may act unpredictably or fail multi-step tasks. Only disable it for plain chat.',
+  settingsTools: 'Tools',
+  settingsToolsHint:
+    'Each enabled tool adds its parameter definition to every request. Disable tools you never use; the assistant simply will not see them.',
+  toolReadPage: 'Read page text',
+  toolReadPageWarn: 'Disabled: the assistant cannot read the text of the current page.',
+  toolSnapshot: 'Snapshot page elements',
+  toolSnapshotWarn:
+    'Disabled: the assistant cannot see buttons, links, or fields, so it cannot reliably click or fill anything.',
+  toolListTabs: 'List open tabs',
+  toolListTabsWarn: 'Disabled: the assistant cannot see or refer to your other open tabs.',
+  toolClick: 'Click elements',
+  toolClickWarn: 'Disabled: the assistant cannot click buttons or links.',
+  toolFill: 'Type into fields',
+  toolFillWarn: 'Disabled: the assistant cannot type text into inputs or textareas.',
+  toolSelect: 'Select dropdown options',
+  toolSelectWarn: 'Disabled: the assistant cannot choose options from <select> dropdowns.',
+  toolCheckbox: 'Check / uncheck boxes',
+  toolCheckboxWarn: 'Disabled: the assistant cannot tick or untick checkboxes or radio buttons.',
+  toolPressKey: 'Press keys',
+  toolPressKeyWarn:
+    'Disabled: the assistant cannot press Enter, Tab, Escape, or other keyboard shortcuts.',
+  toolScroll: 'Scroll the page',
+  toolScrollWarn:
+    'Disabled: the assistant cannot reveal off-screen content (lazy-loaded lists, “View more”, long articles).',
+  toolWait: 'Wait for an element',
+  toolWaitWarn:
+    'Disabled: the assistant cannot wait for content to appear after a load or navigation.',
+  toolOpenUrl: 'Open a URL',
+  toolOpenUrlWarn: 'Disabled: the assistant cannot open a URL directly in the current tab.',
+  toolTabNew: 'Open a new tab',
+  toolTabNewWarn: 'Disabled: the assistant cannot open new tabs.',
+  toolTabSwitch: 'Switch tabs',
+  toolTabSwitchWarn: 'Disabled: the assistant cannot switch between open tabs.',
+  toolTabClose: 'Close a tab',
+  toolTabCloseWarn: 'Disabled: the assistant cannot close tabs.',
+  toolProfile: 'Use saved profile',
+  toolProfileWarn:
+    'Disabled: the assistant cannot see your saved name/email/address to auto-fill personal forms.',
+  toolListSecrets: 'List saved secrets',
+  toolListSecretsWarn:
+    'Disabled: the assistant cannot see your saved key/value secrets by label, so it cannot decide which to fill.',
+  toolSecret: 'Fill a saved secret',
+  toolSecretWarn:
+    'Disabled: the assistant cannot fill saved passwords or secret fields (you would have to type them).',
+  toolSkill: 'Use a skill',
+  toolSkillWarn: 'Disabled: the assistant cannot load or apply saved skills.',
+
   settingsPageAccess: 'Page access',
   settingsPageAccessIntro:
     'The assistant reads a page by injecting a one-off read-only script, so it only works on ordinary http(s) tabs — not on chrome:// pages, the Web Store, or local files.',
@@ -805,6 +902,52 @@ const zhCN: Messages = {
   settingsModelsFailed: ({ message }) =>
     `${message}——并非所有网关都提供 /models，你仍可手动输入模型名称。`,
   settingsSaved: ({ name }) => `已保存“${name}”。`,
+
+  settingsContextTitle: '模型上下文与工具',
+  settingsContextIntro:
+    '以下内容会随每次请求发送，构成固定的 token 开销。关闭用不到的项可减少消耗；设置在下一条消息生效。默认全部开启。',
+  settingsSystemPrompt: '操作规则（系统提示词）',
+  settingsSystemPromptWarn:
+    '关闭后将移除安全和行为规则（确认处理、导航后重新快照、如何填写表单/凭据等），助手可能表现异常或无法完成多步任务。仅建议纯闲聊时关闭。',
+  settingsTools: '工具',
+  settingsToolsHint:
+    '每个启用的工具都会把其参数定义加入每次请求。关闭你用不到的工具，助手就看不到它。',
+  toolReadPage: '读取页面文本',
+  toolReadPageWarn: '已关闭：助手无法读取当前页面的文本。',
+  toolSnapshot: '快照页面元素',
+  toolSnapshotWarn: '已关闭：助手无法看到按钮、链接、输入框，因此无法可靠地点击或填写。',
+  toolListTabs: '列出标签页',
+  toolListTabsWarn: '已关闭：助手无法查看或引用你打开的其他标签页。',
+  toolClick: '点击元素',
+  toolClickWarn: '已关闭：助手无法点击按钮或链接。',
+  toolFill: '在输入框中输入',
+  toolFillWarn: '已关闭：助手无法在输入框或文本域中输入文字。',
+  toolSelect: '选择下拉选项',
+  toolSelectWarn: '已关闭：助手无法在下拉框（<select>）中选择选项。',
+  toolCheckbox: '勾选/取消复选框',
+  toolCheckboxWarn: '已关闭：助手无法勾选或取消复选框、单选按钮。',
+  toolPressKey: '按键',
+  toolPressKeyWarn: '已关闭：助手无法按回车、Tab、Esc 等键盘快捷键。',
+  toolScroll: '滚动页面',
+  toolScrollWarn: '已关闭：助手无法显示屏幕外的内容（懒加载列表、“查看更多”、长文章）。',
+  toolWait: '等待元素出现',
+  toolWaitWarn: '已关闭：助手无法在加载或导航后等待内容出现。',
+  toolOpenUrl: '打开网址',
+  toolOpenUrlWarn: '已关闭：助手无法直接在当前标签页打开网址。',
+  toolTabNew: '新建标签页',
+  toolTabNewWarn: '已关闭：助手无法新建标签页。',
+  toolTabSwitch: '切换标签页',
+  toolTabSwitchWarn: '已关闭：助手无法在已打开的标签页之间切换。',
+  toolTabClose: '关闭标签页',
+  toolTabCloseWarn: '已关闭：助手无法关闭标签页。',
+  toolProfile: '使用已保存资料',
+  toolProfileWarn: '已关闭：助手无法读取你保存的姓名/邮箱/地址来自动填写个人表单。',
+  toolListSecrets: '列出已保存密钥',
+  toolListSecretsWarn: '已关闭：助手无法按名称查看你保存的键值密钥，无法决定该填哪一项。',
+  toolSecret: '填写已保存密钥',
+  toolSecretWarn: '已关闭：助手无法填写已保存的密码或密钥字段（需要你手动输入）。',
+  toolSkill: '使用技能',
+  toolSkillWarn: '已关闭：助手无法加载或应用已保存的技能。',
 
   settingsPageAccess: '页面读取权限',
   settingsPageAccessIntro:

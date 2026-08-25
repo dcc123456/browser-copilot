@@ -12,6 +12,7 @@ import {
   type ProviderProfile,
 } from '../lib/providers'
 import type { Settings } from '../lib/types'
+import { TOOL_META } from '../lib/tool-catalog'
 import { useT } from './i18n'
 
 /** Editable form state; numbers stay strings so partial input is allowed. */
@@ -472,6 +473,59 @@ export default function SettingsTab({ onLocaleChange }: Props) {
       )}
 
       {/* --- Agent behaviour --- */}
+      <div className="card">
+        <div className="card-title">{t.settingsContextTitle}</div>
+        <p className="hint">{t.settingsContextIntro}</p>
+
+        <label className="checkbox context-toggle">
+          <input
+            checked={!settings.disableSystemPrompt}
+            onChange={(event) =>
+              void mutate({
+                type: 'settings.set',
+                patch: { disableSystemPrompt: !event.target.checked },
+              })
+            }
+            type="checkbox"
+          />
+          <span>
+            <b>{t.settingsSystemPrompt}</b>
+          </span>
+        </label>
+        <p className="hint context-warn">{t.settingsSystemPromptWarn}</p>
+
+        <div className="context-divider" />
+        <div className="context-subhead">{t.settingsTools}</div>
+        <p className="hint">{t.settingsToolsHint}</p>
+        <div className="tool-toggle-list">
+          {TOOL_META.map((meta) => {
+            const disabled = settings.disabledTools.includes(meta.name)
+            return (
+              <label className="checkbox tool-toggle" key={meta.name}>
+                <input
+                  checked={!disabled}
+                  onChange={() => {
+                    const next = disabled
+                      ? settings.disabledTools.filter((n) => n !== meta.name)
+                      : [...settings.disabledTools, meta.name]
+                    void mutate({
+                      type: 'settings.set',
+                      patch: { disabledTools: next },
+                    })
+                  }}
+                  type="checkbox"
+                />
+                <span>
+                  <b>{t[meta.labelKey]}</b>
+                  <code className="tool-name">{meta.name}</code>
+                  <span className="tool-warn">{t[meta.warningKey]}</span>
+                </span>
+              </label>
+            )
+          })}
+        </div>
+      </div>
+
       <div className="card">
         <div className="card-title">{t.settingsMaxToolRounds}</div>
         <p className="hint">{t.settingsMaxToolRoundsHint}</p>

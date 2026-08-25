@@ -641,6 +641,13 @@ chrome.runtime.onConnect.addListener((port) => {
         // the mode at turn start.
         const getMode = async () => (await getSettings()).mode
         const getMaxToolRounds = async () => (await getSettings()).maxToolRounds
+        const getToolConfig = async () => {
+          const s = await getSettings()
+          return {
+            disabledTools: s.disabledTools ?? [],
+            disableSystemPrompt: s.disableSystemPrompt === true,
+          }
+        }
         const turnUsage = await runAgentTurn(history, {
           send: sendWithTracking,
           signal: turnController.signal,
@@ -649,6 +656,7 @@ chrome.runtime.onConnect.addListener((port) => {
           conversationId,
           getMode,
           getMaxToolRounds,
+          getToolConfig,
           confirm: (name, argsPreview) =>
             new Promise<boolean>((resolve) => {
               const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`

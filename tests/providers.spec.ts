@@ -121,6 +121,8 @@ describe('normalizeStoredSettings', () => {
         locale: 'auto',
         mode: 'semi',
         maxToolRounds: 20,
+        disabledTools: [],
+        disableSystemPrompt: false,
       })
     }
   })
@@ -132,6 +134,8 @@ describe('normalizeStoredSettings', () => {
       locale: 'auto' as const,
       mode: 'full' as const,
       maxToolRounds: 25,
+      disabledTools: [],
+      disableSystemPrompt: false,
     }
     expect(normalizeStoredSettings(settings)).toEqual(settings)
   })
@@ -156,6 +160,8 @@ describe('normalizeStoredSettings', () => {
       locale: 'auto',
       mode: 'semi',
       maxToolRounds: 20,
+      disabledTools: [],
+      disableSystemPrompt: false,
     })
   })
 

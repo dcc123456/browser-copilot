@@ -88,9 +88,13 @@ export async function runUnattendedPrompt(
       // No human is watching: auto-decline any confirmation. In full mode the
       // agent does not ask in the first place, so this only matters for
       // read/semi where it makes the model report a refusal and move on.
-      confirm: async () => modeOverride === 'full' ? true : false,
+      confirm: async () => (modeOverride === 'full' ? true : false),
       getMode: async () => modeOverride ?? settings.mode,
       getMaxToolRounds: async () => settings.maxToolRounds,
+      getToolConfig: async () => ({
+        disabledTools: settings.disabledTools ?? [],
+        disableSystemPrompt: settings.disableSystemPrompt === true,
+      }),
     })
 
     const answer = chunks.join('').trim()

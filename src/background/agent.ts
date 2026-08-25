@@ -103,7 +103,14 @@ export function buildSystemPrompt(options: {
   activeSkill?: Skill | undefined
   catalogue?: readonly Skill[] | undefined
   mode?: AgentMode
+  /** When true, omit the operating-rules prompt and keep only an identity line. */
+  disableRules?: boolean
 }): string {
+  // When the user has turned off the system prompt, keep a bare identity line so
+  // the model still knows what it is, but drop all the behaviour rules.
+  if (options.disableRules) {
+    return 'You are Browser Copilot, a browser-extension assistant in the side panel. Answer the user directly; follow any per-turn instructions in their message.'
+  }
   const parts = [SYSTEM_PROMPT]
   if (!options.activeSkill && options.catalogue && options.catalogue.length > 0) {
     const catalogue = renderSkillCatalogue(options.catalogue)
@@ -437,6 +444,12 @@ export interface AgentDeps {
    * Read at turn start so a settings change applies to the next request.
    */
   getMaxToolRounds: () => Promise<number>
+  /**
+   * Returns the names of tools the user has disabled and whether the system
+   * prompt is suppressed. Read at turn start so toggles take effect on the
+   * next request without a worker restart.
+   */
+  getToolConfig: () => Promise<{ disabledTools: string[]; disableSystemPrompt: boolean }>
 }
 
 function parseArgs(raw: string): Record<string, unknown> {
@@ -607,6 +620,8 @@ interface ToolContext {
   navigated: boolean
   /** The most recently read URL; used to attach history hosts. */
   lastUrl?: string
+  /** Tools the user has disabled; the model should not call them. */
+  disabled: Set<string>
 }
 
 /**
@@ -1102,20 +1117,32 @@ export async function runAgentTurn(
   // Per-action gating re-reads the mode before every tool call, so a switch in
   // the panel takes effect mid-turn without a new message.
   const initialMode = await deps.getMode()
-  const systemPrompt = buildSystemPrompt({ activeSkill, catalogue, mode: initialMode })
+  const toolConfig = await deps.getToolConfig()
+  const disabled = new Set(toolConfig.disabledTools)
+  const systemPrompt = buildSystemPrompt({
+    activeSkill,
+    catalogue,
+    mode: initialMode,
+    disableRules: toolConfig.disableSystemPrompt,
+  })
   const maxToolRounds = (await deps.getMaxToolRounds()) || DEFAULT_MAX_TOOL_ROUNDS
 
-  // In read-only mode, do not even advertise tools that change the page: a
-  // model that cannot see a button is less likely to call it than one that
-  // is told not to.
-  const tools =
-    initialMode === 'readonly'
-      ? TOOLS.filter((tool) => !ACTION_TOOLS.has(tool.function.name))
-      : TOOLS
+  // Filter the advertised tools:
+  //  - read-only mode hides every action that changes the page;
+  //  - the user's disabled-tool list hides specific tools regardless of mode.
+  // The execution switch below still rejects a tool that slips through, so a
+  // stale model call cannot run a disabled tool.
+  const tools = TOOLS.filter((tool) => {
+    const name = tool.function.name
+    if (disabled.has(name)) return false
+    if (initialMode === 'readonly' && ACTION_TOOLS.has(name)) return false
+    return true
+  })
 
   const ctx: ToolContext = {
     conversationId: deps.conversationId,
     navigated: false,
+    disabled,
   }
 
   // Sum usage across every LLM round in this turn (a turn may make several
@@ -1247,6 +1274,15 @@ async function runOneToolCall(
       name,
       summary: `Invalid arguments: ${(error as Error).message}`,
     })
+    return
+  }
+
+  // Defence in depth: a disabled tool's schema is withheld, but a model may
+  // still hallucinate a call to it. Refuse rather than execute.
+  if (ctx.disabled.has(name)) {
+    const message = `The "${name}" tool is disabled in settings.`
+    pushResult(JSON.stringify({ error: message }))
+    deps.send({ type: 'tool.result', name, summary: `Blocked (${name} disabled)` })
     return
   }
 

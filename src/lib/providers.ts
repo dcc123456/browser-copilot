@@ -240,6 +240,8 @@ export function normalizeSettingsPayload(raw: unknown): {
   locale: LocaleSetting
   mode: AgentMode
   maxToolRounds: number
+  disabledTools: string[]
+  disableSystemPrompt: boolean
 } {
   const value = (raw ?? {}) as Record<string, unknown>
   const providers = Array.isArray(value.providers)
@@ -257,6 +259,10 @@ export function normalizeSettingsPayload(raw: unknown): {
   const maxToolRounds = Number.isFinite(rounds)
     ? Math.min(100, Math.max(1, Math.round(rounds)))
     : 20
+  const disabledTools = Array.isArray(value.disabledTools)
+    ? (value.disabledTools as unknown[]).filter((n): n is string => typeof n === 'string')
+    : []
+  const disableSystemPrompt = value.disableSystemPrompt === true
   return {
     providers,
     // Never point at a profile that is not in the list, or the editor would open
@@ -272,5 +278,7 @@ export function normalizeSettingsPayload(raw: unknown): {
         : 'auto',
     mode: modeRaw === 'readonly' || modeRaw === 'full' ? modeRaw : 'semi',
     maxToolRounds,
+    disabledTools,
+    disableSystemPrompt,
   }
 }

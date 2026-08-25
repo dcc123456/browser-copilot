@@ -56,6 +56,18 @@ export interface Settings {
    * agent stops to avoid an infinite loop. Defaults to 20.
    */
   maxToolRounds: number
+  /**
+   * Tool names the user has turned OFF. Only names present here are withheld
+   * from the model; everything else (including tools added in future versions)
+   * stays available, so this behaves as a denylist and degrades gracefully.
+   */
+  disabledTools: string[]
+  /**
+   * When true, the Browser Copilot system prompt (operating rules) is not sent.
+   * The model still gets a short identity line plus the tools, but behaviour
+   * guardrails are largely removed.
+   */
+  disableSystemPrompt: boolean
 }
 
 /** Text scraped from a tab, for use as agent context. */

@@ -887,34 +887,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               <option value="full">⚡ {t.modeFull}</option>
             </select>
             <button
-              aria-label={t.tokenUsage}
-              className={`icon-btn token-btn${usageOpen ? ' token-btn-active' : ''}`}
-              onClick={() => setUsageOpen((open) => !open)}
-              title={t.tokenUsage}
-              type="button"
-            >
-              {formatTokens(sessionUsage.totalTokens)}
-            </button>
-            {usageOpen && (
-              <div className="popover token-popover" role="tooltip">
-                <TokenBreakdown
-                  label={t.tokenSession}
-                  t={t}
-                  usage={sessionUsage}
-                />
-                {lastUsage && (
-                  <TokenBreakdown
-                    label={t.tokenLastTurn}
-                    t={t}
-                    usage={lastUsage}
-                  />
-                )}
-                {!lastUsage && sessionUsage.totalTokens === 0 && (
-                  <p className="token-none">{t.tokenNone}</p>
-                )}
-              </div>
-            )}
-            <button
               aria-label="mode info"
               className="icon-btn mode-info-btn"
               onClick={() => setModeInfoOpen((open) => !open)}
@@ -945,6 +917,34 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                   <br />
                   {t.modeFullHint}
                 </p>
+              </div>
+            )}
+            <button
+              aria-label={t.tokenUsage}
+              className={`token-btn${usageOpen ? ' token-btn-active' : ''}`}
+              onClick={() => setUsageOpen((open) => !open)}
+              title={t.tokenUsage}
+              type="button"
+            >
+              {formatTokens(sessionUsage.totalTokens)}
+            </button>
+            {usageOpen && (
+              <div className="popover token-popover" role="tooltip">
+                <TokenBreakdown
+                  label={t.tokenSession}
+                  t={t}
+                  usage={sessionUsage}
+                />
+                {lastUsage && (
+                  <TokenBreakdown
+                    label={t.tokenLastTurn}
+                    t={t}
+                    usage={lastUsage}
+                  />
+                )}
+                {!lastUsage && sessionUsage.totalTokens === 0 && (
+                  <p className="token-none">{t.tokenNone}</p>
+                )}
               </div>
             )}
           </div>
