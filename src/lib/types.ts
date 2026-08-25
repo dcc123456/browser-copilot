@@ -13,6 +13,9 @@ export type { LocaleSetting }
 /**
  * How autonomously the agent may act on a page.
  *
+ * - `chat`: pure conversation. No operating rules and no tools are sent, so
+ *   the request is just the user's messages — cheapest token cost, no page
+ *   automation.
  * - `readonly`: only read tools; every action that changes the page is
  *   refused and reported back to the model.
  * - `semi`: read tools run as usual; every action requires the user's
@@ -21,7 +24,7 @@ export type { LocaleSetting }
  *   page still follows the attach consent rule, and all actions are still
  *   recorded in history.
  */
-export type AgentMode = 'readonly' | 'semi' | 'full'
+export type AgentMode = 'chat' | 'readonly' | 'semi' | 'full'
 
 /**
  * A reusable instruction pack.

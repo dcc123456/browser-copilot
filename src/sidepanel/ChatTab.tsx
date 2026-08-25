@@ -894,6 +894,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               onChange={(event) => void changeMode(event.target.value as AgentMode)}
               value={mode}
             >
+              <option value="chat">💬 {t.modeChat}</option>
               <option value="readonly">🔒 {t.modeReadonly}</option>
               <option value="semi">🛡 {t.modeSemi}</option>
               <option value="full">⚡ {t.modeFull}</option>
@@ -914,6 +915,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             {modeInfoOpen && (
               <div className="popover" role="tooltip">
                 <strong>{t.modeLabel}</strong>
+                <p>
+                  <b>💬 {t.modeChat}</b>
+                  <br />
+                  {t.modeChatHint}
+                </p>
                 <p>
                   <b>🔒 {t.modeReadonly}</b>
                   <br />

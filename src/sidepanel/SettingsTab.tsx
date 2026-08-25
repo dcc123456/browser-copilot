@@ -121,6 +121,10 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   // agent falls back to its default when blank); `null` means "not yet loaded".
   const [promptDraft, setPromptDraft] = useState<string | null>(null)
   const promptRef = useRef<HTMLTextAreaElement | null>(null)
+  // The prompt and tools blocks are collapsed by default to keep the card short;
+  // the user expands whichever they want to inspect or change.
+  const [promptOpen, setPromptOpen] = useState(false)
+  const [toolsOpen, setToolsOpen] = useState(false)
 
   // Keep the editor in sync when settings arrive (or change elsewhere), without
   // clobbering text the user is actively typing.
@@ -503,98 +507,138 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         <div className="card-title">{t.settingsContextTitle}</div>
         <p className="hint">{t.settingsContextIntro}</p>
 
-        <div className="context-prompt-head">
+        {/* System prompt — collapsed by default */}
+        <button
+          aria-expanded={promptOpen}
+          className="disclosure"
+          onClick={() => setPromptOpen((open) => !open)}
+          type="button"
+        >
+          <span className="disclosure-caret" aria-hidden="true">
+            {promptOpen ? '▾' : '▸'}
+          </span>
           <b>{t.settingsSystemPrompt}</b>
-          <button
-            className="link-btn"
-            disabled={
-              promptDraft === null || promptDraft === settings.systemPromptOverride
-            }
-            onClick={() => {
-              if (promptDraft !== null) savePrompt(promptDraft)
-            }}
-            type="button"
-          >
-            {t.settingsPromptSave}
-          </button>
-          <button className="link-btn" onClick={resetPrompt} type="button">
-            {t.settingsPromptReset}
-          </button>
-        </div>
-        <p className="hint">{t.settingsSystemPromptHint}</p>
-        <textarea
-          className="prompt-editor"
-          onBlur={(event) => savePrompt(event.target.value)}
-          onChange={(event) => setPromptDraft(event.target.value)}
-          placeholder={DEFAULT_SYSTEM_PROMPT}
-          ref={promptRef}
-          rows={12}
-          spellCheck={false}
-          value={promptDraft ?? ''}
-        />
-        <p className="hint prompt-foot">
-          {promptDraft && promptDraft.trim().length > 0
-            ? t.settingsPromptCustom
-            : t.settingsPromptDefault}
-        </p>
-
-        <div className="context-divider" />
-        <div className="context-tools-head">
-          <div className="context-subhead">{t.settingsTools}</div>
-          <div className="tool-bulk">
-            <button
-              className="link-btn"
-              disabled={settings.disabledTools.length === 0}
-              onClick={() =>
-                void mutate({ type: 'settings.set', patch: { disabledTools: [] } })
-              }
-              type="button"
-            >
-              {t.settingsToolsEnableAll}
-            </button>
-            <button
-              className="link-btn"
-              disabled={settings.disabledTools.length >= TOOL_META.length}
-              onClick={() =>
-                void mutate({
-                  type: 'settings.set',
-                  patch: { disabledTools: TOOL_META.map((m) => m.name) },
-                })
-              }
-              type="button"
-            >
-              {t.settingsToolsDisableAll}
-            </button>
+          {!promptDraft || promptDraft.trim().length === 0 ? (
+            <span className="disclosure-state">{t.settingsStateDefault}</span>
+          ) : (
+            <span className="disclosure-state disclosure-state-custom">
+              {t.settingsStateCustom}
+            </span>
+          )}
+        </button>
+        {promptOpen && (
+          <div className="disclosure-body">
+            <div className="context-prompt-head">
+              <button
+                className="link-btn"
+                disabled={
+                  promptDraft === null || promptDraft === settings.systemPromptOverride
+                }
+                onClick={() => {
+                  if (promptDraft !== null) savePrompt(promptDraft)
+                }}
+                type="button"
+              >
+                {t.settingsPromptSave}
+              </button>
+              <button className="link-btn" onClick={resetPrompt} type="button">
+                {t.settingsPromptReset}
+              </button>
+            </div>
+            <p className="hint">{t.settingsSystemPromptHint}</p>
+            <textarea
+              className="prompt-editor"
+              onBlur={(event) => savePrompt(event.target.value)}
+              onChange={(event) => setPromptDraft(event.target.value)}
+              placeholder={DEFAULT_SYSTEM_PROMPT}
+              ref={promptRef}
+              rows={12}
+              spellCheck={false}
+              value={promptDraft ?? ''}
+            />
+            <p className="hint prompt-foot">
+              {promptDraft && promptDraft.trim().length > 0
+                ? t.settingsPromptCustom
+                : t.settingsPromptDefault}
+            </p>
           </div>
-        </div>
-        <p className="hint">{t.settingsToolsHint}</p>
-        <div className="tool-toggle-list">
-          {TOOL_META.map((meta) => {
-            const disabled = settings.disabledTools.includes(meta.name)
-            return (
-              <label className="checkbox tool-toggle" key={meta.name}>
-                <input
-                  checked={!disabled}
-                  onChange={() => {
-                    const next = disabled
-                      ? settings.disabledTools.filter((n) => n !== meta.name)
-                      : [...settings.disabledTools, meta.name]
+        )}
+
+        {/* Tools — collapsed by default */}
+        <button
+          aria-expanded={toolsOpen}
+          className="disclosure"
+          onClick={() => setToolsOpen((open) => !open)}
+          type="button"
+        >
+          <span className="disclosure-caret" aria-hidden="true">
+            {toolsOpen ? '▾' : '▸'}
+          </span>
+          <b>{t.settingsTools}</b>
+          <span className="disclosure-state">
+            {TOOL_META.length - settings.disabledTools.length}/{TOOL_META.length}{' '}
+            {t.settingsToolsEnabled}
+          </span>
+        </button>
+        {toolsOpen && (
+          <div className="disclosure-body">
+            <div className="context-tools-head">
+              <div className="tool-bulk">
+                <button
+                  className="link-btn"
+                  disabled={settings.disabledTools.length === 0}
+                  onClick={() =>
+                    void mutate({ type: 'settings.set', patch: { disabledTools: [] } })
+                  }
+                  type="button"
+                >
+                  {t.settingsToolsEnableAll}
+                </button>
+                <button
+                  className="link-btn"
+                  disabled={settings.disabledTools.length >= TOOL_META.length}
+                  onClick={() =>
                     void mutate({
                       type: 'settings.set',
-                      patch: { disabledTools: next },
+                      patch: { disabledTools: TOOL_META.map((m) => m.name) },
                     })
-                  }}
-                  type="checkbox"
-                />
-                <span>
-                  <b>{t[meta.labelKey]}</b>
-                  <code className="tool-name">{meta.name}</code>
-                  <span className="tool-warn">{t[meta.warningKey]}</span>
-                </span>
-              </label>
-            )
-          })}
-        </div>
+                  }
+                  type="button"
+                >
+                  {t.settingsToolsDisableAll}
+                </button>
+              </div>
+            </div>
+            <p className="hint">{t.settingsToolsHint}</p>
+            <div className="tool-toggle-list">
+              {TOOL_META.map((meta) => {
+                const disabled = settings.disabledTools.includes(meta.name)
+                return (
+                  <label className="checkbox tool-toggle" key={meta.name}>
+                    <input
+                      checked={!disabled}
+                      onChange={() => {
+                        const next = disabled
+                          ? settings.disabledTools.filter((n) => n !== meta.name)
+                          : [...settings.disabledTools, meta.name]
+                        void mutate({
+                          type: 'settings.set',
+                          patch: { disabledTools: next },
+                        })
+                      }}
+                      type="checkbox"
+                    />
+                    <span>
+                      <b>{t[meta.labelKey]}</b>
+                      <code className="tool-name">{meta.name}</code>
+                      <span className="tool-warn">{t[meta.warningKey]}</span>
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="card">

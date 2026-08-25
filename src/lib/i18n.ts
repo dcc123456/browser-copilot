@@ -147,9 +147,11 @@ export interface Messages {
 
   // Agent mode
   modeLabel: string
+  modeChat: string
   modeReadonly: string
   modeSemi: string
   modeFull: string
+  modeChatHint: string
   modeReadonlyHint: string
   modeSemiHint: string
   modeFullHint: string
@@ -249,10 +251,13 @@ export interface Messages {
   settingsPromptReset: string
   settingsPromptDefault: string
   settingsPromptCustom: string
+  settingsStateDefault: string
+  settingsStateCustom: string
   settingsTools: string
   settingsToolsHint: string
   settingsToolsEnableAll: string
   settingsToolsDisableAll: string
+  settingsToolsEnabled: string
   toolReadPage: string
   toolReadPageWarn: string
   toolSnapshot: string
@@ -480,9 +485,11 @@ const en: Messages = {
   chatSlashNoMatch: 'No matching skill',
 
   modeLabel: 'Mode',
+  modeChat: 'Chat',
   modeReadonly: 'Read only',
   modeSemi: 'Semi-auto',
   modeFull: 'Full auto',
+  modeChatHint: 'Plain conversation. No operating rules or tools are sent, so it cannot read or act on the page, and uses the fewest tokens.',
   modeReadonlyHint: 'Can read pages and answer, but cannot click, type, or navigate.',
   modeSemiHint: 'Each action is shown to you for approval before it runs.',
   modeFullHint: 'The agent acts without asking each time. Watch the log.',
@@ -587,54 +594,57 @@ const en: Messages = {
   settingsPromptReset: 'Restore default',
   settingsPromptDefault: 'Using the built-in default prompt.',
   settingsPromptCustom: 'Using your custom prompt. Click “Restore default” to revert.',
+  settingsStateDefault: 'default',
+  settingsStateCustom: 'custom',
   settingsTools: 'Tools',
   settingsToolsHint:
     'Each enabled tool adds its parameter definition to every request. Disable tools you never use; the assistant simply will not see them.',
   settingsToolsEnableAll: 'Enable all',
   settingsToolsDisableAll: 'Disable all',
+  settingsToolsEnabled: 'enabled',
   toolReadPage: 'Read page text',
-  toolReadPageWarn: 'Disabled: the assistant cannot read the text of the current page.',
+  toolReadPageWarn: 'When off: the assistant cannot read the text of the current page.',
   toolSnapshot: 'Snapshot page elements',
   toolSnapshotWarn:
-    'Disabled: the assistant cannot see buttons, links, or fields, so it cannot reliably click or fill anything.',
+    'When off: the assistant cannot see buttons, links, or fields, so it cannot reliably click or fill anything.',
   toolListTabs: 'List open tabs',
-  toolListTabsWarn: 'Disabled: the assistant cannot see or refer to your other open tabs.',
+  toolListTabsWarn: 'When off: the assistant cannot see or refer to your other open tabs.',
   toolClick: 'Click elements',
-  toolClickWarn: 'Disabled: the assistant cannot click buttons or links.',
+  toolClickWarn: 'When off: the assistant cannot click buttons or links.',
   toolFill: 'Type into fields',
-  toolFillWarn: 'Disabled: the assistant cannot type text into inputs or textareas.',
+  toolFillWarn: 'When off: the assistant cannot type text into inputs or textareas.',
   toolSelect: 'Select dropdown options',
-  toolSelectWarn: 'Disabled: the assistant cannot choose options from <select> dropdowns.',
+  toolSelectWarn: 'When off: the assistant cannot choose options from <select> dropdowns.',
   toolCheckbox: 'Check / uncheck boxes',
-  toolCheckboxWarn: 'Disabled: the assistant cannot tick or untick checkboxes or radio buttons.',
+  toolCheckboxWarn: 'When off: the assistant cannot tick or untick checkboxes or radio buttons.',
   toolPressKey: 'Press keys',
   toolPressKeyWarn:
-    'Disabled: the assistant cannot press Enter, Tab, Escape, or other keyboard shortcuts.',
+    'When off: the assistant cannot press Enter, Tab, Escape, or other keyboard shortcuts.',
   toolScroll: 'Scroll the page',
   toolScrollWarn:
-    'Disabled: the assistant cannot reveal off-screen content (lazy-loaded lists, “View more”, long articles).',
+    'When off: the assistant cannot reveal off-screen content (lazy-loaded lists, “View more”, long articles).',
   toolWait: 'Wait for an element',
   toolWaitWarn:
-    'Disabled: the assistant cannot wait for content to appear after a load or navigation.',
+    'When off: the assistant cannot wait for content to appear after a load or navigation.',
   toolOpenUrl: 'Open a URL',
-  toolOpenUrlWarn: 'Disabled: the assistant cannot open a URL directly in the current tab.',
+  toolOpenUrlWarn: 'When off: the assistant cannot open a URL directly in the current tab.',
   toolTabNew: 'Open a new tab',
-  toolTabNewWarn: 'Disabled: the assistant cannot open new tabs.',
+  toolTabNewWarn: 'When off: the assistant cannot open new tabs.',
   toolTabSwitch: 'Switch tabs',
-  toolTabSwitchWarn: 'Disabled: the assistant cannot switch between open tabs.',
+  toolTabSwitchWarn: 'When off: the assistant cannot switch between open tabs.',
   toolTabClose: 'Close a tab',
-  toolTabCloseWarn: 'Disabled: the assistant cannot close tabs.',
+  toolTabCloseWarn: 'When off: the assistant cannot close tabs.',
   toolProfile: 'Use saved profile',
   toolProfileWarn:
-    'Disabled: the assistant cannot see your saved name/email/address to auto-fill personal forms.',
+    'When off: the assistant cannot see your saved name/email/address to auto-fill personal forms.',
   toolListSecrets: 'List saved secrets',
   toolListSecretsWarn:
-    'Disabled: the assistant cannot see your saved key/value secrets by label, so it cannot decide which to fill.',
+    'When off: the assistant cannot see your saved key/value secrets by label, so it cannot decide which to fill.',
   toolSecret: 'Fill a saved secret',
   toolSecretWarn:
-    'Disabled: the assistant cannot fill saved passwords or secret fields (you would have to type them).',
+    'When off: the assistant cannot fill saved passwords or secret fields (you would have to type them).',
   toolSkill: 'Use a skill',
-  toolSkillWarn: 'Disabled: the assistant cannot load or apply saved skills.',
+  toolSkillWarn: 'When off: the assistant cannot load or apply saved skills.',
 
   settingsPageAccess: 'Page access',
   settingsPageAccessIntro:
@@ -827,9 +837,11 @@ const zhCN: Messages = {
   chatSlashNoMatch: '没有匹配的技能',
 
   modeLabel: '模式',
+  modeChat: '聊天',
   modeReadonly: '只读',
   modeSemi: '半自动',
   modeFull: '全自动',
+  modeChatHint: '纯对话。不发送操作规则和工具，因此不能读取或操作页面，token 消耗最低。',
   modeReadonlyHint: '只能读取页面和回答问题，不能点击、输入或跳转。',
   modeSemiHint: '每个改变页面的操作都会先请你确认。',
   modeFullHint: '智能体直接操作，不再每次询问。请留意操作记录。',
@@ -928,47 +940,50 @@ const zhCN: Messages = {
   settingsPromptReset: '恢复默认',
   settingsPromptDefault: '当前使用内置默认提示词。',
   settingsPromptCustom: '当前使用你自定义的提示词。点击“恢复默认”可还原。',
+  settingsStateDefault: '默认',
+  settingsStateCustom: '已自定义',
   settingsTools: '工具',
   settingsToolsHint:
     '每个启用的工具都会把其参数定义加入每次请求。关闭你用不到的工具，助手就看不到它。',
   settingsToolsEnableAll: '全部启用',
   settingsToolsDisableAll: '全部关闭',
+  settingsToolsEnabled: '个已启用',
   toolReadPage: '读取页面文本',
-  toolReadPageWarn: '已关闭：助手无法读取当前页面的文本。',
+  toolReadPageWarn: '关闭后：助手无法读取当前页面的文本。',
   toolSnapshot: '快照页面元素',
-  toolSnapshotWarn: '已关闭：助手无法看到按钮、链接、输入框，因此无法可靠地点击或填写。',
+  toolSnapshotWarn: '关闭后：助手无法看到按钮、链接、输入框，因此无法可靠地点击或填写。',
   toolListTabs: '列出标签页',
-  toolListTabsWarn: '已关闭：助手无法查看或引用你打开的其他标签页。',
+  toolListTabsWarn: '关闭后：助手无法查看或引用你打开的其他标签页。',
   toolClick: '点击元素',
-  toolClickWarn: '已关闭：助手无法点击按钮或链接。',
+  toolClickWarn: '关闭后：助手无法点击按钮或链接。',
   toolFill: '在输入框中输入',
-  toolFillWarn: '已关闭：助手无法在输入框或文本域中输入文字。',
+  toolFillWarn: '关闭后：助手无法在输入框或文本域中输入文字。',
   toolSelect: '选择下拉选项',
-  toolSelectWarn: '已关闭：助手无法在下拉框（<select>）中选择选项。',
+  toolSelectWarn: '关闭后：助手无法在下拉框（<select>）中选择选项。',
   toolCheckbox: '勾选/取消复选框',
-  toolCheckboxWarn: '已关闭：助手无法勾选或取消复选框、单选按钮。',
+  toolCheckboxWarn: '关闭后：助手无法勾选或取消复选框、单选按钮。',
   toolPressKey: '按键',
-  toolPressKeyWarn: '已关闭：助手无法按回车、Tab、Esc 等键盘快捷键。',
+  toolPressKeyWarn: '关闭后：助手无法按回车、Tab、Esc 等键盘快捷键。',
   toolScroll: '滚动页面',
-  toolScrollWarn: '已关闭：助手无法显示屏幕外的内容（懒加载列表、“查看更多”、长文章）。',
+  toolScrollWarn: '关闭后：助手无法显示屏幕外的内容（懒加载列表、“查看更多”、长文章）。',
   toolWait: '等待元素出现',
-  toolWaitWarn: '已关闭：助手无法在加载或导航后等待内容出现。',
+  toolWaitWarn: '关闭后：助手无法在加载或导航后等待内容出现。',
   toolOpenUrl: '打开网址',
-  toolOpenUrlWarn: '已关闭：助手无法直接在当前标签页打开网址。',
+  toolOpenUrlWarn: '关闭后：助手无法直接在当前标签页打开网址。',
   toolTabNew: '新建标签页',
-  toolTabNewWarn: '已关闭：助手无法新建标签页。',
+  toolTabNewWarn: '关闭后：助手无法新建标签页。',
   toolTabSwitch: '切换标签页',
-  toolTabSwitchWarn: '已关闭：助手无法在已打开的标签页之间切换。',
+  toolTabSwitchWarn: '关闭后：助手无法在已打开的标签页之间切换。',
   toolTabClose: '关闭标签页',
-  toolTabCloseWarn: '已关闭：助手无法关闭标签页。',
+  toolTabCloseWarn: '关闭后：助手无法关闭标签页。',
   toolProfile: '使用已保存资料',
-  toolProfileWarn: '已关闭：助手无法读取你保存的姓名/邮箱/地址来自动填写个人表单。',
+  toolProfileWarn: '关闭后：助手无法读取你保存的姓名/邮箱/地址来自动填写个人表单。',
   toolListSecrets: '列出已保存密钥',
-  toolListSecretsWarn: '已关闭：助手无法按名称查看你保存的键值密钥，无法决定该填哪一项。',
+  toolListSecretsWarn: '关闭后：助手无法按名称查看你保存的键值密钥，无法决定该填哪一项。',
   toolSecret: '填写已保存密钥',
-  toolSecretWarn: '已关闭：助手无法填写已保存的密码或密钥字段（需要你手动输入）。',
+  toolSecretWarn: '关闭后：助手无法填写已保存的密码或密钥字段（需要你手动输入）。',
   toolSkill: '使用技能',
-  toolSkillWarn: '已关闭：助手无法加载或应用已保存的技能。',
+  toolSkillWarn: '关闭后：助手无法加载或应用已保存的技能。',
 
   settingsPageAccess: '页面读取权限',
   settingsPageAccessIntro:

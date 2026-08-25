@@ -97,6 +97,12 @@ export function buildSystemPrompt(options: {
    */
   basePrompt?: string | undefined
 }): string {
+  // Chat mode is pure conversation: no operating rules, no skill catalogue, no
+  // mode instructions. Just a short identity line so the model stays in role.
+  if (options.mode === 'chat') {
+    return 'You are Browser Copilot, a browser-extension assistant in the side panel. Answer the user conversationally in their language. You cannot read or act on the page in this mode; keep it concise.'
+  }
+
   const override = options.basePrompt?.trim()
   const base = override ? override : SYSTEM_PROMPT
   const parts = [base]
@@ -1116,16 +1122,20 @@ export async function runAgentTurn(
   const maxToolRounds = (await deps.getMaxToolRounds()) || DEFAULT_MAX_TOOL_ROUNDS
 
   // Filter the advertised tools:
+  //  - chat mode sends no tools at all (pure conversation);
   //  - read-only mode hides every action that changes the page;
   //  - the user's disabled-tool list hides specific tools regardless of mode.
   // The execution switch below still rejects a tool that slips through, so a
   // stale model call cannot run a disabled tool.
-  const tools = TOOLS.filter((tool) => {
-    const name = tool.function.name
-    if (disabled.has(name)) return false
-    if (initialMode === 'readonly' && ACTION_TOOLS.has(name)) return false
-    return true
-  })
+  const tools =
+    initialMode === 'chat'
+      ? []
+      : TOOLS.filter((tool) => {
+          const name = tool.function.name
+          if (disabled.has(name)) return false
+          if (initialMode === 'readonly' && ACTION_TOOLS.has(name)) return false
+          return true
+        })
 
   const ctx: ToolContext = {
     conversationId: deps.conversationId,
@@ -1282,11 +1292,17 @@ async function runOneToolCall(
   // tool isn't even advertised in this mode (when the turn started there),
   // but a turn that began in another mode can be switched to read-only
   // mid-run; actions from that point must stop.
-  if (mode === 'readonly' && ACTION_TOOLS.has(name)) {
-    const message =
-      'Read-only mode is now on. Clicking, typing, navigating, switching tabs, and filling forms are disabled. Ask the user to switch to Semi or Full auto in the panel.'
+  if ((mode === 'readonly' || mode === 'chat') && ACTION_TOOLS.has(name)) {
+    const inChat = mode === 'chat'
+    const message = inChat
+      ? 'Chat mode is on. No page actions or tools are available. Ask the user to switch to Semi or Full auto in the panel to operate the page.'
+      : 'Read-only mode is now on. Clicking, typing, navigating, switching tabs, and filling forms are disabled. Ask the user to switch to Semi or Full auto in the panel.'
     pushResult(JSON.stringify({ error: message }))
-    deps.send({ type: 'tool.result', name, summary: 'Blocked (read-only mode)' })
+    deps.send({
+      type: 'tool.result',
+      name,
+      summary: inChat ? 'Blocked (chat mode)' : 'Blocked (read-only mode)',
+    })
     void recordAction(
       deps.conversationId,
       name,

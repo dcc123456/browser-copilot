@@ -25,6 +25,15 @@ describe('system prompt', () => {
     expect(prompt).toContain('Key rules you must follow')
     expect(prompt).toContain('READ-ONLY')
   })
+
+  it('chat mode uses a tiny identity prompt and ignores overrides/rules', () => {
+    const custom = 'Be terse. Always answer in haiku.'
+    const prompt = buildSystemPrompt({ mode: 'chat', basePrompt: custom })
+    expect(prompt).not.toContain('Key rules you must follow')
+    expect(prompt).not.toContain(custom)
+    expect(prompt).not.toContain('SEMI-AUTO')
+    expect(prompt.length).toBeLessThan(260)
+  })
 })
 
 describe('tool catalog', () => {

@@ -109,7 +109,12 @@ export function normalizeStoredSettings(raw: unknown): Settings {
     providers,
     activeProviderId: active,
     locale: coerceLocale(value.locale),
-    mode: value.mode === 'readonly' || value.mode === 'full' ? value.mode : 'semi',
+    mode:
+      value.mode === 'chat' ||
+      value.mode === 'readonly' ||
+      value.mode === 'full'
+        ? value.mode
+        : 'semi',
     maxToolRounds: coerceMaxToolRounds(value.maxToolRounds),
     disabledTools: Array.isArray(value.disabledTools)
       ? value.disabledTools.filter((n): n is string => typeof n === 'string')

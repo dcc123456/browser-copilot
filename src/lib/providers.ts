@@ -277,7 +277,10 @@ export function normalizeSettingsPayload(raw: unknown): {
       (typeof localeRaw === 'string' && (LOCALES as readonly string[]).includes(localeRaw))
         ? (localeRaw as LocaleSetting)
         : 'auto',
-    mode: modeRaw === 'readonly' || modeRaw === 'full' ? modeRaw : 'semi',
+    mode:
+      modeRaw === 'chat' || modeRaw === 'readonly' || modeRaw === 'full'
+        ? (modeRaw as AgentMode)
+        : 'semi',
     maxToolRounds,
     disabledTools,
     systemPromptOverride,

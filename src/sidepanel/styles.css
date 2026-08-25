@@ -419,16 +419,56 @@ body {
 
 /* --- Settings: model context & tool toggles --- */
 
+.disclosure {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border);
+  padding: 10px 0;
+  margin-top: 2px;
+  text-align: left;
+  font-size: 13px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.disclosure:first-of-type {
+  border-top: none;
+}
+
+.disclosure-caret {
+  color: var(--muted);
+  width: 12px;
+  flex: none;
+}
+
+.disclosure-state {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.disclosure-state-custom {
+  color: var(--accent);
+}
+
+.disclosure-body {
+  padding: 0 0 8px 20px;
+}
+
 .context-prompt-head,
 .context-tools-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 .context-tools-head {
-  justify-content: space-between;
+  justify-content: flex-end;
 }
 
 .tool-bulk {
