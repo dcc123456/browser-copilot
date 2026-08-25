@@ -230,6 +230,15 @@ describe('parseMarkdown · blocks', () => {
     expect(kinds(block.children)).toContain('break')
   })
 
+  it('drops trailing newlines so streamed replies do not end on an extra block', () => {
+    // Providers commonly finish a streamed turn with a trailing "\n"; rendering
+    // it as a <br> pushes the last characters onto a dangling line/block.
+    const block = parseMarkdown('All done.\n')[0]!
+    if (block.kind !== 'paragraph') throw new Error('unreachable')
+    expect(kinds(block.children)).not.toContain('break')
+    expect(kinds(block.children).filter((k) => k === 'text')).toHaveLength(1)
+  })
+
   it('splits paragraphs on a blank line', () => {
     const blocks = parseMarkdown('one\n\ntwo')
     expect(blocks.map((block) => block.kind)).toEqual(['paragraph', 'paragraph'])

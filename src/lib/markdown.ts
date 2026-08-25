@@ -279,6 +279,14 @@ export function parseInline(text: string): Inline[] {
     index += 1
   }
 
+  // Streaming providers often end a turn with a trailing "\n" (or several),
+  // which would otherwise render as a dangling <br> that pushes the last
+  // characters onto an extra line/block. Drop any trailing breaks, which carry
+  // no visible meaning, while keeping intentional breaks in the middle.
+  while (nodes.length > 0 && nodes[nodes.length - 1]?.kind === 'break') {
+    nodes.pop()
+  }
+
   return nodes
 }
 
