@@ -641,7 +641,7 @@ chrome.runtime.onConnect.addListener((port) => {
         // the mode at turn start.
         const getMode = async () => (await getSettings()).mode
         const getMaxToolRounds = async () => (await getSettings()).maxToolRounds
-        await runAgentTurn(history, {
+        const turnUsage = await runAgentTurn(history, {
           send: sendWithTracking,
           signal: turnController.signal,
           ...(message.skillId ? { skillId: message.skillId } : {}),
@@ -656,7 +656,7 @@ chrome.runtime.onConnect.addListener((port) => {
               send({ type: 'confirm.request', requestId, name, argsPreview })
             }),
         })
-        sendWithTracking({ type: 'done' })
+        sendWithTracking({ type: 'done', ...(turnUsage ? { usage: turnUsage } : {}) })
       } catch (error) {
         failure =
           error instanceof LlmError

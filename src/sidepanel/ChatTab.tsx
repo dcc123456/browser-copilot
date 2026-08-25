@@ -19,6 +19,7 @@ import {
   AGENT_PORT,
   type AgentClientMessage,
   type AgentServerMessage,
+  type TurnTokenUsage,
   sendCommand,
 } from '../lib/messages'
 import { DEFAULT_CONVERSATION_ID, newId } from '../lib/storage'
@@ -94,6 +95,17 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const [previewConv, setPreviewConv] = useState<{ id: string; title: string; messages: { role: string; text: string }[] } | null>(null)
   const [mode, setMode] = useState<AgentMode>('semi')
   const [modeInfoOpen, setModeInfoOpen] = useState(false)
+  /** Token usage of the most recent turn, for the popover breakdown. */
+  const [lastUsage, setLastUsage] = useState<TurnTokenUsage | null>(null)
+  /** Summed usage across turns in this panel session. */
+  const [sessionUsage, setSessionUsage] = useState<TurnTokenUsage>(() => ({
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedInputTokens: 0,
+    reasoningTokens: 0,
+    totalTokens: 0,
+  }))
+  const [usageOpen, setUsageOpen] = useState(false)
   /**
    * Composer height in px, persisted to localStorage. A drag handle on the
    * top edge of the composer adjusts it; the chat log takes the remaining
@@ -107,6 +119,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const draggingRef = useRef<{ startY: number; startHeight: number } | null>(null)
 
   const closeModeInfo = useCallback(() => setModeInfoOpen(false), [])
+  const closeUsage = useCallback(() => setUsageOpen(false), [])
 
   useEffect(() => {
     if (!modeInfoOpen) return
@@ -118,6 +131,17 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       document.removeEventListener('click', closeModeInfo)
     }
   }, [modeInfoOpen, closeModeInfo])
+
+  useEffect(() => {
+    if (!usageOpen) return
+    const id = window.setTimeout(() => {
+      document.addEventListener('click', closeUsage, { once: true })
+    }, 0)
+    return () => {
+      window.clearTimeout(id)
+      document.removeEventListener('click', closeUsage)
+    }
+  }, [usageOpen, closeUsage])
 
   // Drag-to-resize for the composer. Pointer events so it works with mouse and
   // touch; dragging up grows the composer (and shrinks the chat log).
@@ -278,6 +302,17 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
           case 'done':
             streamingRef.current = null
             setBusy(false)
+            if (message.usage) {
+              setLastUsage(message.usage)
+              setSessionUsage((prev) => ({
+                inputTokens: prev.inputTokens + message.usage!.inputTokens,
+                outputTokens: prev.outputTokens + message.usage!.outputTokens,
+                cachedInputTokens:
+                  prev.cachedInputTokens + (message.usage!.cachedInputTokens ?? 0),
+                reasoningTokens: prev.reasoningTokens + (message.usage!.reasoningTokens ?? 0),
+                totalTokens: prev.totalTokens + message.usage!.totalTokens,
+              }))
+            }
             break
           case 'error':
             streamingRef.current = null
@@ -852,6 +887,34 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               <option value="full">⚡ {t.modeFull}</option>
             </select>
             <button
+              aria-label={t.tokenUsage}
+              className={`icon-btn token-btn${usageOpen ? ' token-btn-active' : ''}`}
+              onClick={() => setUsageOpen((open) => !open)}
+              title={t.tokenUsage}
+              type="button"
+            >
+              {formatTokens(sessionUsage.totalTokens)}
+            </button>
+            {usageOpen && (
+              <div className="popover token-popover" role="tooltip">
+                <TokenBreakdown
+                  label={t.tokenSession}
+                  t={t}
+                  usage={sessionUsage}
+                />
+                {lastUsage && (
+                  <TokenBreakdown
+                    label={t.tokenLastTurn}
+                    t={t}
+                    usage={lastUsage}
+                  />
+                )}
+                {!lastUsage && sessionUsage.totalTokens === 0 && (
+                  <p className="token-none">{t.tokenNone}</p>
+                )}
+              </div>
+            )}
+            <button
               aria-label="mode info"
               className="icon-btn mode-info-btn"
               onClick={() => setModeInfoOpen((open) => !open)}
@@ -981,6 +1044,45 @@ function ConversationRow({
           🗑
         </button>
       </div>
+    </div>
+  )
+}
+
+/** Compact token count for the chip: 1.2k / 3.4m style. */
+function formatTokens(n: number): string {
+  if (!n) return '0'
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}m`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`
+  return String(n)
+}
+
+function TokenBreakdown({
+  label,
+  usage,
+  t,
+}: {
+  label: string
+  usage: TurnTokenUsage
+  t: ReturnType<typeof useT>
+}) {
+  const rows: Array<[string, number, string?]> = [
+    [t.tokenTotal, usage.totalTokens],
+    [t.tokenInput, usage.inputTokens],
+    [t.tokenOutput, usage.outputTokens],
+  ]
+  if (usage.cachedInputTokens > 0) rows.push([t.tokenCached, usage.cachedInputTokens])
+  if (usage.reasoningTokens > 0) rows.push([t.tokenReasoning, usage.reasoningTokens])
+  return (
+    <div className="token-group">
+      <div className="token-group-title">{label}</div>
+      <dl>
+        {rows.map(([k, v]) => (
+          <div className="token-row" key={k}>
+            <dt>{k}</dt>
+            <dd>{v.toLocaleString()}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   )
 }

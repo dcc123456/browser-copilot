@@ -349,6 +349,68 @@ body {
   margin: 6px 0 0;
 }
 
+.token-btn {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 7px;
+  width: auto;
+  min-width: 34px;
+  color: var(--muted);
+}
+
+.token-btn-active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.token-popover {
+  width: 220px;
+}
+
+.token-group + .token-group {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.token-group-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.token-group dl {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.token-row {
+  display: flex;
+  justify-content: space-between;
+  margin: 0;
+  font-size: 12px;
+}
+
+.token-row dt {
+  color: var(--muted);
+}
+
+.token-row dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.token-none {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 /* --- Chat --- */
 .chat-log {
   display: flex;

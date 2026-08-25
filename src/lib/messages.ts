@@ -27,6 +27,15 @@ import type {
 } from './scheduler-types'
 import type { RunOutcomeKind, RunSource, RunStep } from '../background/running-tasks'
 
+/** Aggregated token usage for one agent turn (summed across all tool rounds). */
+export interface TurnTokenUsage {
+  inputTokens: number
+  outputTokens: number
+  cachedInputTokens: number
+  reasoningTokens: number
+  totalTokens: number
+}
+
 /** A running task as shown on the Tasks tab board. */
 export interface RunningTaskView {
   runId: string
@@ -209,7 +218,7 @@ export type AgentServerMessage =
       argsPreview: string
     }
   | { type: 'status'; text: string }
-  | { type: 'done' }
+  | { type: 'done'; usage?: TurnTokenUsage }
   | { type: 'error'; message: string }
   | { type: 'pong' }
   /**

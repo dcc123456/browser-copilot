@@ -32,7 +32,7 @@ import {
   type WireTool,
   type WireToolCall,
 } from '../lib/llm'
-import type { AgentServerMessage } from '../lib/messages'
+import type { AgentServerMessage, TurnTokenUsage } from '../lib/messages'
 import { renderSkillCatalogue, renderSkillPrompt } from '../lib/skills'
 import {
   addHistory,
@@ -1091,7 +1091,10 @@ function shortSummary(name: string, result: string): string {
   }
 }
 
-export async function runAgentTurn(history: WireMessage[], deps: AgentDeps): Promise<void> {
+export async function runAgentTurn(
+  history: WireMessage[],
+  deps: AgentDeps,
+): Promise<TurnTokenUsage | null> {
   const provider = await getActiveProvider()
   const activeSkill = deps.skillId ? await getSkill(deps.skillId) : undefined
   const catalogue = activeSkill ? [] : await listSkills()
@@ -1115,13 +1118,24 @@ export async function runAgentTurn(history: WireMessage[], deps: AgentDeps): Pro
     navigated: false,
   }
 
+  // Sum usage across every LLM round in this turn (a turn may make several
+  // tool-calling completions before it finally answers). Each round's usage is
+  // reported in its own trailing SSE chunk.
+  const totalUsage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedInputTokens: 0,
+    reasoningTokens: 0,
+    totalTokens: 0,
+  }
+
   for (let round = 0; round < maxToolRounds; round += 1) {
     // Bail promptly when the run is cancelled, rather than waiting for the next
     // in-flight fetch to notice its signal. The streamCompletion catch below
     // also handles an abort mid-request.
     if (deps.signal?.aborted) {
       deps.send({ type: 'status', text: 'Cancelled.' })
-      return
+      return null
     }
 
     // Bound page-context growth in long automated runs. Every prior tool result
@@ -1157,17 +1171,24 @@ export async function runAgentTurn(history: WireMessage[], deps: AgentDeps): Pro
         {
           onText: (delta) => deps.send({ type: 'delta', text: delta }),
           onToolCallStart: (name) => deps.send({ type: 'tool.start', name }),
+          onUsage: (usage) => {
+            totalUsage.inputTokens += usage.inputTokens
+            totalUsage.outputTokens += usage.outputTokens
+            totalUsage.cachedInputTokens += usage.cachedInputTokens ?? 0
+            totalUsage.reasoningTokens += usage.reasoningTokens ?? 0
+            totalUsage.totalTokens += usage.totalTokens
+          },
         },
       )
     } catch (error) {
       if (error instanceof LlmError) throw error
-      if ((error as Error)?.name === 'AbortError') return
+      if ((error as Error)?.name === 'AbortError') return null
       throw error
     }
 
     if (result.toolCalls.length === 0) {
       history.push({ role: 'assistant', content: result.content })
-      return
+      return totalUsage.totalTokens > 0 ? totalUsage : null
     }
 
     history.push({
@@ -1179,7 +1200,7 @@ export async function runAgentTurn(history: WireMessage[], deps: AgentDeps): Pro
     for (const call of result.toolCalls) {
       if (deps.signal?.aborted) {
         deps.send({ type: 'status', text: 'Cancelled.' })
-        return
+        return totalUsage.totalTokens > 0 ? totalUsage : null
       }
       await runOneToolCall(call, history, deps, ctx)
     }
@@ -1189,6 +1210,7 @@ export async function runAgentTurn(history: WireMessage[], deps: AgentDeps): Pro
     type: 'status',
     text: `Stopped after ${maxToolRounds} tool rounds to avoid a loop.`,
   })
+  return totalUsage.totalTokens > 0 ? totalUsage : null
 }
 
 export function needsConfirmation(

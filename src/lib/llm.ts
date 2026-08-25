@@ -55,17 +55,36 @@ interface PartialToolCall {
   arguments: string
 }
 
+/**
+ * Token usage reported by the model for one completion. Fields mirror the
+ * OpenAI usage object; providers that omit a field leave it undefined. Cached
+ * input tokens (prompt token details) are surfaced separately so the UI can
+ * show how much of the input was served from cache.
+ */
+export interface TokenUsage {
+  inputTokens: number
+  outputTokens: number
+  /** Tokens billed for cached prompt input, when the provider reports it. */
+  cachedInputTokens?: number
+  /** Reasoning/output-tokens-before-thinking, for reasoning models. */
+  reasoningTokens?: number
+  totalTokens: number
+}
+
 /** Terminal result of one streamed completion. */
 export interface StreamResult {
   content: string
   toolCalls: WireToolCall[]
   finishReason: string | null
+  usage: TokenUsage | null
 }
 
 /** Incremental events surfaced to the caller. */
 export interface StreamHandlers {
   onText?: (delta: string) => void
   onToolCallStart?: (name: string) => void
+  /** Fired once with the final usage block when the provider reports it. */
+  onUsage?: (usage: TokenUsage) => void
 }
 
 /**
@@ -79,6 +98,7 @@ export class SseAccumulator {
   private buffer = ''
   private content = ''
   private finishReason: string | null = null
+  private usage: TokenUsage | null = null
   private readonly toolCalls = new Map<number, PartialToolCall>()
   private readonly announced = new Set<number>()
   private done = false
@@ -118,7 +138,66 @@ export class SseAccumulator {
         type: 'function' as const,
         function: { name: call.name, arguments: call.arguments },
       }))
-    return { content: this.content, toolCalls, finishReason: this.finishReason }
+    return {
+      content: this.content,
+      toolCalls,
+      finishReason: this.finishReason,
+      usage: this.usage,
+    }
+  }
+
+  /**
+   * Extracts usage from a payload in either the OpenAI shape
+   * (`usage.prompt_tokens` / `completion_tokens` / `total_tokens`, with
+   * `prompt_tokens_details.cached_tokens`) or common variants used by
+   * OpenAI-compatible gateways. Returns null when absent.
+   */
+  private extractUsage(parsed: unknown): TokenUsage | null {
+    if (!parsed || typeof parsed !== 'object') return null
+    const u = (parsed as { usage?: Record<string, unknown> }).usage
+    if (!u || typeof u !== 'object') return null
+    const num = (key: string): number | undefined => {
+      const v = (u as Record<string, unknown>)[key]
+      return typeof v === 'number' && Number.isFinite(v) ? v : undefined
+    }
+    const inputTokens =
+      num('prompt_tokens') ??
+      num('input_tokens') ??
+      num('inputTokens') ??
+      num('promptTokens')
+    const outputTokens =
+      num('completion_tokens') ??
+      num('output_tokens') ??
+      num('outputTokens') ??
+      num('completionTokens')
+    if (inputTokens === undefined && outputTokens === undefined) return null
+    // cached_tokens lives under prompt_tokens_details (OpenAI) or
+    // cache_read_input_tokens (Anthropic-style gateways).
+    const details = u.prompt_tokens_details as Record<string, unknown> | undefined
+    const cachedInputTokens =
+      (details && typeof details.cached_tokens === 'number'
+        ? details.cached_tokens
+        : undefined) ??
+      num('cached_tokens') ??
+      num('cachedTokens') ??
+      num('cache_read_input_tokens') ??
+      num('cacheReadInputTokens')
+    const reasoningTokens =
+      (details &&
+      typeof details.reasoning_tokens === 'number'
+        ? details.reasoning_tokens
+        : undefined) ?? num('reasoning_tokens') ?? num('reasoningTokens')
+    const totalTokens =
+      num('total_tokens') ??
+      num('totalTokens') ??
+      ((inputTokens ?? 0) + (outputTokens ?? 0))
+    return {
+      inputTokens: inputTokens ?? 0,
+      outputTokens: outputTokens ?? 0,
+      ...(cachedInputTokens ? { cachedInputTokens } : {}),
+      ...(reasoningTokens ? { reasoningTokens } : {}),
+      totalTokens,
+    }
   }
 
   private consumeFrame(frame: string): void {
@@ -143,6 +222,14 @@ export class SseAccumulator {
       // A malformed frame must not abort an otherwise good stream.
       return
     }
+
+    // The trailing chunk often carries only usage with no choices.
+    const extracted = this.extractUsage(parsed)
+    if (extracted) {
+      this.usage = extracted
+      this.handlers.onUsage?.(extracted)
+    }
+
     const choice = (parsed as { choices?: unknown[] }).choices?.[0] as
       | { delta?: Record<string, unknown>; finish_reason?: string | null }
       | undefined

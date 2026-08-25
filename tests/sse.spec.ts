@@ -144,3 +144,49 @@ describe('SseAccumulator · tool calls', () => {
     expect(accumulator.finish().toolCalls).toHaveLength(1)
   })
 })
+
+describe('SseAccumulator · usage', () => {
+  it('captures a trailing usage-only chunk and fires onUsage', () => {
+    let received: import('../src/lib/llm').TokenUsage | undefined
+    const accumulator = new SseAccumulator({
+      onUsage: (u) => {
+        received = u
+      },
+    })
+    accumulator.push(
+      frame({
+        choices: [{ delta: { content: 'hi' }, finish_reason: 'stop' }],
+        usage: {
+          prompt_tokens: 100,
+          completion_tokens: 20,
+          total_tokens: 120,
+          prompt_tokens_details: { cached_tokens: 40, reasoning_tokens: 5 },
+        },
+      }),
+    )
+    const result = accumulator.finish()
+    expect(result.usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 20,
+      cachedInputTokens: 40,
+      reasoningTokens: 5,
+      totalTokens: 120,
+    })
+    expect(received).toEqual(result.usage)
+  })
+
+  it('accepts gateway aliases for token fields', () => {
+    const accumulator = new SseAccumulator()
+    accumulator.push(
+      frame({
+        usage: { input_tokens: 30, output_tokens: 10, cache_read_input_tokens: 12 },
+      }),
+    )
+    expect(accumulator.finish().usage).toMatchObject({
+      inputTokens: 30,
+      outputTokens: 10,
+      cachedInputTokens: 12,
+      totalTokens: 40,
+    })
+  })
+})

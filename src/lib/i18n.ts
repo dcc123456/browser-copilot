@@ -155,6 +155,17 @@ export interface Messages {
   modeFullHint: string
   modeFullWarning: string
 
+  // Token usage
+  tokenUsage: string
+  tokenTotal: string
+  tokenInput: string
+  tokenOutput: string
+  tokenCached: string
+  tokenReasoning: string
+  tokenSession: string
+  tokenLastTurn: string
+  tokenNone: string
+
   // Markdown rendering
   /** Copy button on a fenced code block. */
   mdCopy: string
@@ -426,6 +437,16 @@ const en: Messages = {
   modeFullHint: 'The agent acts without asking each time. Watch the log.',
   modeFullWarning:
     'Full auto lets the agent click, type, and navigate without each approval. Use only on sites you trust, and review the action history afterwards.',
+
+  tokenUsage: 'Token usage',
+  tokenTotal: 'Total',
+  tokenInput: 'Input',
+  tokenOutput: 'Output',
+  tokenCached: 'Cached input',
+  tokenReasoning: 'Reasoning',
+  tokenSession: 'This session',
+  tokenLastTurn: 'Last turn',
+  tokenNone: 'no usage yet',
 
   mdCopy: 'Copy',
   mdCopied: 'Copied',
@@ -703,6 +724,16 @@ const zhCN: Messages = {
   modeFullHint: '智能体直接操作，不再每次询问。请留意操作记录。',
   modeFullWarning:
     '全自动模式下智能体可自行点击、输入和跳转，无需逐项确认。建议仅在你信任的网站使用，并事后查看操作记录。',
+
+  tokenUsage: 'Token 消耗',
+  tokenTotal: '合计',
+  tokenInput: '输入',
+  tokenOutput: '输出',
+  tokenCached: '缓存命中',
+  tokenReasoning: '推理',
+  tokenSession: '本次会话',
+  tokenLastTurn: '最近一轮',
+  tokenNone: '暂无消耗',
 
   mdCopy: '复制',
   mdCopied: '已复制',
