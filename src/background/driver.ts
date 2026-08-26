@@ -211,3 +211,131 @@ export async function closeActiveTab(): Promise<void> {
   const tab = await activeTab()
   if (tab?.id) await chrome.tabs.remove(tab.id)
 }
+
+export async function goBack(): Promise<void> {
+  const tab = await activeTab()
+  if (!tab || typeof tab.id !== 'number') throw new DriverError('没有可后退的活动标签页')
+  await chrome.tabs.goBack(tab.id)
+}
+
+export async function goForward(): Promise<void> {
+  const tab = await activeTab()
+  if (!tab || typeof tab.id !== 'number') throw new DriverError('没有可前进的活动标签页')
+  await chrome.tabs.goForward(tab.id)
+}
+
+export interface DriverTabInfo {
+  id: number
+  url: string
+  title: string
+  active: boolean
+}
+
+export async function getActiveTabInfo(): Promise<DriverTabInfo> {
+  const tab = await activeTab()
+  if (!tab || typeof tab.id !== 'number') throw new DriverError('没有活动标签页')
+  return toDriverTab(tab)
+}
+
+export async function listAllTabUrls(): Promise<{ id: number; url: string; title: string }[]> {
+  const tabs = await chrome.tabs.query({ currentWindow: true })
+  return tabs
+    .filter((tab) => typeof tab.id === 'number')
+    .map((tab) => ({ id: tab.id as number, url: tab.url ?? '', title: tab.title ?? '' }))
+}
+
+export async function newWindow(url?: string): Promise<chrome.windows.Window> {
+  return chrome.windows.create({ url, focused: true })
+}
+
+/** Checks whether a CSS selector matches any element in the active tab. */
+export async function elementExists(
+  selector: string,
+  signal?: AbortSignal,
+): Promise<number> {
+  const result = await execOnActiveTab({ action: 'element_exists', value: selector }, signal)
+  return typeof result.data === 'number' ? result.data : result.found ? 1 : 0
+}
+
+/** Counts elements matching a CSS selector in the active tab. */
+export async function countElements(
+  selector: string,
+  signal?: AbortSignal,
+): Promise<number> {
+  const result = await execOnActiveTab({ action: 'count_elements', value: selector }, signal)
+  return typeof result.data === 'number' ? result.data : 0
+}
+
+// --- Cookie helpers (service-worker side, no page needed) --------------------
+
+export async function cookieGetAll(url?: string): Promise<chrome.cookies.Cookie[]> {
+  return chrome.cookies.getAll(url ? { url } : {})
+}
+
+export async function cookieGet(name: string, url?: string): Promise<chrome.cookies.Cookie | null> {
+  const tab = await activeTab()
+  const targetUrl = url ?? tab?.url
+  if (!targetUrl) throw new DriverError('cookie: 需要 URL 才能读取')
+  return chrome.cookies.get({ name, url: targetUrl })
+}
+
+export async function cookieSet(
+  name: string,
+  value: string,
+  url: string,
+  options: { expirationDate?: number } = {},
+): Promise<void> {
+  await chrome.cookies.set({
+    url,
+    name,
+    value,
+    ...(options.expirationDate !== undefined ? { expirationDate: options.expirationDate } : {}),
+  })
+}
+
+export async function cookieRemove(name: string, url: string): Promise<void> {
+  await chrome.cookies.remove({ name, url })
+}
+
+// --- Clipboard helpers (offscreen document) ----------------------------------
+
+let offscreenOpen = false
+
+async function ensureOffscreen(): Promise<void> {
+  const has = await chrome.offscreen.hasDocument()
+  if (has) {
+    offscreenOpen = true
+    return
+  }
+  await chrome.offscreen.createDocument({
+    url: 'src/offscreen/index.html',
+    reasons: ['CLIPBOARD'],
+    justification: 'read/write the system clipboard for the workflow clipboard block',
+  })
+  offscreenOpen = true
+}
+
+interface ClipReply {
+  ok: boolean
+  text?: string
+  error?: string
+}
+
+async function clipboardCall(message: { type: 'clip-get' } | { type: 'clip-set'; text: string }): Promise<string> {
+  await ensureOffscreen()
+  const reply = await chrome.runtime.sendMessage(message)
+  const result = reply as ClipReply | undefined
+  if (!result || !result.ok) {
+    throw new DriverError(`clipboard: ${result?.error ?? '操作失败'}`)
+  }
+  return result.text ?? ''
+}
+
+export async function clipboardGet(): Promise<string> {
+  return clipboardCall({ type: 'clip-get' })
+}
+
+export async function clipboardInsert(text: string): Promise<void> {
+  await clipboardCall({ type: 'clip-set', text })
+  void offscreenOpen
+}

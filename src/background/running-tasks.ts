@@ -66,6 +66,12 @@ export interface FinishedTask {
   outcome: RunOutcomeKind
   /** Final one-line summary or error, when available. */
   summary?: string
+  /**
+   * Full error text for a failed run, when the engine produced one. The
+   * one-line summary is used for the board chip; this is what the history
+   * view shows in the error block.
+   */
+  error?: string
   steps: RunStep[]
 }
 
@@ -152,6 +158,8 @@ export function setOnCancel(runId: string, onCancel: () => void): void {
 export interface FinishOptions {
   outcome: RunOutcomeKind
   summary?: string
+  /** Full error text for a failed run; surfaced in the run history. */
+  error?: string
 }
 
 /**
@@ -171,6 +179,7 @@ export function finishRun(runId: string, options?: FinishOptions): void {
     finishedAt: Date.now(),
     outcome: options?.outcome ?? (task.controller.signal.aborted ? 'cancelled' : 'ok'),
     summary: options?.summary,
+    ...(options?.error ? { error: options.error } : {}),
     steps: task.steps,
   }
   finished.unshift(entry)

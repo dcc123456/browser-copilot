@@ -47,8 +47,34 @@ export interface Messages {
   tabChat: string
   tabSkills: string
   tabTasks: string
+  tabWorkflows: string
   tabData: string
   tabSettings: string
+  tabHistory: string
+  tabMore: string
+
+  // History tab
+  histConversations: string
+  histTasks: string
+  histWorkflows: string
+  histOperations: string
+  histEmpty: string
+  histBatchDelete: string
+  histDeleteSelected: string
+  histSelectAll: string
+  histDeleteConfirm: (params: { count: number }) => string
+  histWorkflowRuns: string
+  histTaskRuns: string
+  histDetailTitle: string
+  histEmptyRuns: string
+  histOutcomeOk: string
+  histOutcomeFailed: string
+  histOutcomeCancelled: string
+  histOutcomeSkipped: string
+  /** Read-only JSON block label for a history entry's arguments. */
+  histArgs: string
+  /** Shown when a run has no recorded steps and is expanded. */
+  histNoSteps: string
 
   // Tasks
   tasksTitle: string
@@ -126,6 +152,27 @@ export interface Messages {
   tasksFeishuBotWarn: string
   taskTemplateGithubName: string
 
+  // Workflows
+  workflowsEmpty: string
+  workflowsNew: string
+  workflowsRunNow: string
+  workflowsEdit: string
+  workflowsDeleteConfirm: string
+  workflowsTriggerManual: string
+  workflowsTriggerScheduled: string
+  workflowsTriggerContextMenu: string
+  workflowsTriggerVisitWeb: string
+  workflowsTriggerGithub: string
+  workflowsTriggerFeishu: string
+  workflowsTriggerNone: string
+  workflowsLastRun: string
+  workflowsRunHistory: string
+  workflowsRunStatusNever: string
+  workflowsExport: string
+  workflowsImport: string
+  workflowsImportInvalid: string
+  workflowsImported: (params: { count: number }) => string
+
   // Common
   save: string
   cancel: string
@@ -163,6 +210,11 @@ export interface Messages {
   chatPlaceholderWithSkills: string
   /** Shown in the slash menu when no skill matches what was typed. */
   chatSlashNoMatch: string
+  /** Ask whether to persist this session's operations as a reusable workflow. */
+  chatSaveWorkflowPrompt: (params: { steps: number }) => string
+  chatSaveWorkflowSave: string
+  chatSaveWorkflowSkip: string
+  chatSaveWorkflowSaved: (params: { name: string }) => string
 
   // Agent mode
   modeLabel: string
@@ -371,6 +423,9 @@ export interface Messages {
   dataHistoryIntro: string
   dataHistoryEmpty: string
   dataClearHistory: string
+  dataHistoryToWorkflow: string
+  dataHistoryToWorkflowDone: string
+  dataHistoryToWorkflowEmpty: string
   dataHistoryWhen: string
   dataConversation: string
   dataDeclined: string
@@ -406,8 +461,33 @@ const en: Messages = {
   tabChat: 'Chat',
   tabSkills: 'Skills',
   tabTasks: 'Tasks',
+  tabWorkflows: 'Workflows',
   tabData: 'Data',
   tabSettings: 'Settings',
+  tabHistory: 'History',
+  tabMore: 'More',
+
+  // History tab
+  histConversations: 'Conversations',
+  histTasks: 'Task runs',
+  histWorkflows: 'Workflows',
+  histOperations: 'Operations',
+  histEmpty: 'No records yet.',
+  histBatchDelete: 'Delete selected',
+  histDeleteSelected: 'Delete selected',
+  histSelectAll: 'Select all',
+  histDeleteConfirm: ({ count }) =>
+    `Delete ${count} selected record${count > 1 ? 's' : ''}? This cannot be undone.`,
+  histWorkflowRuns: 'Workflow runs',
+  histTaskRuns: 'Task runs',
+  histDetailTitle: 'Steps',
+  histEmptyRuns: 'No runs yet.',
+  histOutcomeOk: 'ok',
+  histOutcomeFailed: 'failed',
+  histOutcomeCancelled: 'cancelled',
+  histOutcomeSkipped: 'skipped',
+  histArgs: 'Arguments',
+  histNoSteps: 'No recorded steps.',
 
   tasksTitle: 'Run tasks',
   tasksSubtitle:
@@ -488,6 +568,26 @@ const en: Messages = {
     'While the browser is fully idle or the machine is asleep, the extension cannot be reached; it reconnects within about a minute of waking. For truly always-on remote control, add a small relay server.',
   taskTemplateGithubName: 'PRs to review',
 
+  workflowsEmpty: 'No workflows yet. Create one to start automating.',
+  workflowsNew: 'New',
+  workflowsRunNow: 'Run',
+  workflowsEdit: 'Edit',
+  workflowsDeleteConfirm: 'Delete this workflow?',
+  workflowsTriggerManual: 'Manual',
+  workflowsTriggerScheduled: 'Scheduled',
+  workflowsTriggerContextMenu: 'Context menu',
+  workflowsTriggerVisitWeb: 'Visit web',
+  workflowsTriggerGithub: 'GitHub',
+  workflowsTriggerFeishu: 'Feishu',
+  workflowsTriggerNone: 'No trigger',
+  workflowsLastRun: 'Last run',
+  workflowsRunHistory: 'Run history',
+  workflowsRunStatusNever: 'Never',
+  workflowsExport: 'Export',
+  workflowsImport: 'Import',
+  workflowsImportInvalid: 'Invalid workflow file(s): at least one export could not be read.',
+  workflowsImported: ({ count }) => `Imported ${count} workflow(s).`,
+
   save: 'Save',
   cancel: 'Cancel',
   edit: 'Edit',
@@ -522,6 +622,11 @@ const en: Messages = {
   chatPlaceholderWithSkills:
     'Message… (Enter to send, Shift+Enter for a new line, / for skills)',
   chatSlashNoMatch: 'No matching skill',
+  chatSaveWorkflowPrompt: ({ steps }) =>
+    `This session performed ${steps} step${steps > 1 ? 's' : ''} that can be reused. Save them as a workflow?`,
+  chatSaveWorkflowSave: 'Save as workflow',
+  chatSaveWorkflowSkip: 'Skip',
+  chatSaveWorkflowSaved: ({ name }) => `Saved workflow: ${name}`,
 
   modeLabel: 'Mode',
   modeChat: 'Chat',
@@ -748,6 +853,9 @@ const en: Messages = {
     'A log of every page action the agent performed, so you can review or delete what happened.',
   dataHistoryEmpty: 'No actions recorded yet.',
   dataClearHistory: 'Clear all',
+  dataHistoryToWorkflow: 'Save as workflow',
+  dataHistoryToWorkflowDone: 'Saved the action steps as a workflow.',
+  dataHistoryToWorkflowEmpty: 'No rebuildable workflow steps in this group.',
   dataHistoryWhen: 'When',
   dataConversation: 'Conversation',
   dataDeclined: 'declined',
@@ -782,8 +890,32 @@ const zhCN: Messages = {
   tabChat: '对话',
   tabSkills: '技能',
   tabTasks: '任务',
+  tabWorkflows: '工作流',
   tabData: '数据',
   tabSettings: '设置',
+  tabHistory: '历史',
+  tabMore: '更多',
+
+  // History tab
+  histConversations: '对话记录',
+  histTasks: '任务记录',
+  histWorkflows: '工作流记录',
+  histOperations: '操作记录',
+  histEmpty: '暂无记录',
+  histBatchDelete: '批量删除',
+  histDeleteSelected: '删除选中',
+  histSelectAll: '全选',
+  histDeleteConfirm: ({ count }) => `确认删除选中的 ${count} 条记录？此操作不可撤销。`,
+  histWorkflowRuns: '工作流运行历史',
+  histTaskRuns: '任务运行历史',
+  histDetailTitle: '执行步骤',
+  histEmptyRuns: '暂无运行记录',
+  histOutcomeOk: '成功',
+  histOutcomeFailed: '失败',
+  histOutcomeCancelled: '已取消',
+  histOutcomeSkipped: '已跳过',
+  histArgs: '参数',
+  histNoSteps: '暂无步骤记录',
 
   tasksTitle: '运行任务',
   tasksSubtitle:
@@ -864,6 +996,26 @@ const zhCN: Messages = {
     '浏览器完全空闲或电脑睡眠时扩展无法被触达，唤醒后约一分钟内会自动重连。若需要真正始终在线的远程控制，建议增加一个小型中继服务。',
   taskTemplateGithubName: '待我 review 的 PR',
 
+  workflowsEmpty: '还没有工作流，创建一个开始自动化。',
+  workflowsNew: '新建',
+  workflowsRunNow: '运行',
+  workflowsEdit: '编辑',
+  workflowsDeleteConfirm: '删除该工作流？',
+  workflowsTriggerManual: '手动',
+  workflowsTriggerScheduled: '定时',
+  workflowsTriggerContextMenu: '右键菜单',
+  workflowsTriggerVisitWeb: '访问网页',
+  workflowsTriggerGithub: 'GitHub',
+  workflowsTriggerFeishu: '飞书',
+  workflowsTriggerNone: '无触发器',
+  workflowsLastRun: '上次运行',
+  workflowsRunHistory: '运行历史',
+  workflowsRunStatusNever: '未运行',
+  workflowsExport: '导出',
+  workflowsImport: '导入',
+  workflowsImportInvalid: '无效的工作流文件：至少一个导出无法读取。',
+  workflowsImported: ({ count }) => `已导入 ${count} 个工作流。`,
+
   save: '保存',
   cancel: '取消',
   edit: '编辑',
@@ -894,6 +1046,11 @@ const zhCN: Messages = {
   chatSkillGoSelection: ({ name }) => `请用"${name}"技能处理我在页面上选中的内容。`,
   chatPlaceholderWithSkills: '输入消息…（Enter 发送，Shift+Enter 换行，/ 选择技能）',
   chatSlashNoMatch: '没有匹配的技能',
+  chatSaveWorkflowPrompt: ({ steps }) =>
+    `本次会话共执行了 ${steps} 步可复用操作，是否保存为工作流？`,
+  chatSaveWorkflowSave: '保存为工作流',
+  chatSaveWorkflowSkip: '跳过',
+  chatSaveWorkflowSaved: ({ name }) => `已保存工作流：${name}`,
 
   modeLabel: '模式',
   modeChat: '聊天',
@@ -1104,6 +1261,9 @@ const zhCN: Messages = {
   dataHistoryIntro: '助手在网页上执行过的每一步操作记录，可随时查看或删除。',
   dataHistoryEmpty: '暂无操作记录。',
   dataClearHistory: '全部清空',
+  dataHistoryToWorkflow: '保存为工作流',
+  dataHistoryToWorkflowDone: '已将操作步骤保存为工作流。',
+  dataHistoryToWorkflowEmpty: '该组中没有可重建为工作流的操作。',
   dataHistoryWhen: '时间',
   dataConversation: '会话',
   dataDeclined: '已拒绝',

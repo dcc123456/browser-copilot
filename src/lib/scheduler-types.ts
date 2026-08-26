@@ -31,6 +31,10 @@ export type TaskKind =
    * as it does in the side panel, subject to the configured mode.
    */
   | 'agent-prompt'
+  /**
+   * Runs a stored workflow graph via the workflow engine.
+   */
+  | 'workflow'
 
 /** A configured task. */
 export interface ScheduledTask {
@@ -41,6 +45,8 @@ export interface ScheduledTask {
   kind: TaskKind
   /** Used when `kind === 'agent-prompt'`. */
   prompt?: string
+  /** Used when `kind === 'workflow'`: the stored workflow to execute. */
+  workflowId?: string
   /**
    * Per-task cap on model↔tool round trips for agent-prompt tasks. Scheduled
    * tasks run unattended in full-auto and can need more steps than an

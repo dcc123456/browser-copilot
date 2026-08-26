@@ -610,6 +610,7 @@ async function recordAction(
   approved: boolean,
   ok: boolean,
   detail?: string[],
+  args?: Record<string, unknown>,
 ): Promise<void> {
   try {
     await addHistory({
@@ -622,6 +623,7 @@ async function recordAction(
       approved,
       ok,
       ...(detail && detail.length > 0 ? { detail } : {}),
+      ...(args && typeof args === 'object' ? { args } : {}),
     })
   } catch {
     /* non-fatal */
@@ -1395,7 +1397,7 @@ async function runOneToolCall(
       name,
       summary: inChat ? 'Blocked (chat mode)' : 'Blocked (read-only mode)',
     })
-    void recordAction(
+    await recordAction(
       deps.conversationId,
       name,
       describeAction(name, args),
@@ -1403,6 +1405,7 @@ async function runOneToolCall(
       false,
       false,
       describeDetail(name, args),
+      args,
     )
     return
   }
@@ -1433,7 +1436,7 @@ async function runOneToolCall(
       if (!approved) {
         pushResult(JSON.stringify({ error: 'The user declined this action. Do not retry it.' }))
         deps.send({ type: 'tool.result', name, summary: 'Declined by user' })
-        void recordAction(
+        await recordAction(
           deps.conversationId,
           name,
           describeAction(name, args),
@@ -1441,6 +1444,7 @@ async function runOneToolCall(
           false,
           false,
           describeDetail(name, args),
+          args,
         )
         return
       }
@@ -1459,7 +1463,7 @@ async function runOneToolCall(
     } catch {
       /* keep ok */
     }
-    void recordAction(
+    await recordAction(
       deps.conversationId,
       name,
       describeAction(name, args),
@@ -1467,6 +1471,7 @@ async function runOneToolCall(
       approved,
       ok,
       describeDetail(name, args, output),
+      args,
     )
   } catch (error) {
     // A termination must unwind the whole turn, not be recorded as a failed
@@ -1480,7 +1485,7 @@ async function runOneToolCall(
           : String(error)
     pushResult(JSON.stringify({ error: message }))
     deps.send({ type: 'tool.result', name, summary: `Failed: ${message}` })
-    void recordAction(
+    await recordAction(
       deps.conversationId,
       name,
       describeAction(name, args),
@@ -1488,6 +1493,7 @@ async function runOneToolCall(
       approved,
       false,
       [...describeDetail(name, args), `Error: ${message}`],
+      args,
     )
   }
 }

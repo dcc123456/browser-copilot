@@ -22,7 +22,8 @@ import {
   type TurnTokenUsage,
   sendCommand,
 } from '../lib/messages'
-import { DEFAULT_CONVERSATION_ID, newId } from '../lib/storage'
+import { DEFAULT_CONVERSATION_ID, newId, workflowFromHistory } from '../lib/storage'
+import type { Workflow } from '../lib/workflow/types'
 import type { AgentMode, ConversationMeta } from '../lib/types'
 import {
   applySlashPick,
@@ -238,6 +239,49 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const tRef = useRef(t)
   tRef.current = t
 
+  /**
+   * "Save this session as a workflow?" call-to-action, shown right after a turn
+   * that actually performed page operations in semi/full-auto. `conversationId`
+   * guards against saving another conversation's flow by mistake.
+   */
+  const [workflowPrompt, setWorkflowPrompt] = useState<{
+    conversationId: string
+    workflow: Workflow
+    steps: number
+  } | null>(null)
+  /** Last reuseable-step count we already asked about per conversation. */
+  const promptedRef = useRef<Record<string, number>>({})
+  const conversationsRef = useRef<ConversationMeta[]>(conversations)
+  conversationsRef.current = conversations
+
+  /**
+   * After a turn that performed page operations, offer to persist them as a
+   * reusable workflow. Only actions that actually ran (approved + ok) in this
+   * conversation count; if none map to a block we stay quiet. A per-conversation
+   * counter means we only ask again once new steps have accumulated.
+   */
+  const maybePromptSaveWorkflow = useCallback(async (convId: string) => {
+    let result: Awaited<ReturnType<typeof sendCommand>>
+    try {
+      result = await sendCommand({ type: 'history.list' })
+    } catch {
+      return
+    }
+    if (result.type !== 'history.list') return
+    const session = result.entries
+      .filter((e) => e.conversationId === convId && e.ok && e.approved)
+      .sort((a, b) => a.at - b.at)
+    const meta = conversationsRef.current.find((c) => c.id === convId)
+    const name = (meta?.title ?? '').trim() || `session-${convId.slice(0, 6)}`
+    const workflow = workflowFromHistory(session, name)
+    if (!workflow) return
+    const steps = workflow.drawflow.nodes.length
+    if (steps === 0) return
+    if ((promptedRef.current[convId] ?? 0) >= steps) return
+    promptedRef.current[convId] = steps
+    setWorkflowPrompt({ conversationId: convId, workflow, steps })
+  }, [])
+
   const append = useCallback((entry: Omit<Entry, 'id'>) => {
     setEntries((prev) => [...prev, { id: nextId(), ...entry }])
   }, [])
@@ -365,6 +409,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             clearPhase()
             streamingRef.current = null
             setBusy(false)
+            void maybePromptSaveWorkflow(conversationId)
             if (message.usage) {
               setLastUsage(message.usage)
               setSessionUsage((prev) => ({
@@ -439,7 +484,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       portRef.current?.disconnect()
       portRef.current = null
     }
-  }, [append, appendDelta, clearPhase, conversationId, showPhase])
+  }, [append, appendDelta, clearPhase, conversationId, maybePromptSaveWorkflow, showPhase])
 
   // Refresh the conversation list when it changes and on mount.
   const refreshConversations = useCallback(async () => {
@@ -497,10 +542,27 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     setConversationId(id)
     setEntries([])
     setConfirms([])
+    setWorkflowPrompt(null)
     streamingRef.current = null
     resetUsage()
     // The port's resume effect fires on conversationId change and restores.
   }
+
+  // History tab's "continue chat" button dispatches this window event so it
+  // can resume a conversation without importing ChatTab. The app shell flips
+  // to the Chat tab in parallel; we just open the thread here.
+  useEffect(() => {
+    const handler = (event: Event): void => {
+      const id = (event as CustomEvent<{ id: string }>).detail?.id
+      if (id) openConversation(id)
+    }
+    window.addEventListener('bc:open-conversation', handler)
+    return () => window.removeEventListener('bc:open-conversation', handler)
+    // openConversation references `busy` and several setters; re-binding on
+    // every render is cheap and ensures we never hold a stale closure over
+    // `busy`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  })
 
   const startNewConversation = (): void => {
     if (busy) return
@@ -509,6 +571,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     setConversationId(id)
     setEntries([])
     setConfirms([])
+    setWorkflowPrompt(null)
     streamingRef.current = null
     resetUsage()
     void refreshConversations()
@@ -536,6 +599,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     if (id === conversationId) {
       setEntries([])
       setConfirms([])
+      setWorkflowPrompt(null)
       streamingRef.current = null
       setConversationId(DEFAULT_CONVERSATION_ID)
     }
@@ -625,11 +689,31 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     streamingRef.current = null
     setBusy(true)
     setDraft('')
+    setWorkflowPrompt(null)
   }
 
   const answerConfirm = (requestId: string, approved: boolean): void => {
     post({ type: 'confirm', requestId, approved })
     setConfirms((prev) => prev.filter((item) => item.requestId !== requestId))
+  }
+
+  const savePromptWorkflow = async (): Promise<void> => {
+    const prompt = workflowPrompt
+    if (!prompt) return
+    setWorkflowPrompt(null)
+    try {
+      await sendCommand({ type: 'workflows.save', workflow: prompt.workflow })
+      append({
+        role: 'status',
+        text: tRef.current.chatSaveWorkflowSaved({ name: prompt.workflow.name }),
+      })
+    } catch (error) {
+      append({ role: 'error', text: (error as Error).message })
+    }
+  }
+
+  const dismissPromptWorkflow = (): void => {
+    setWorkflowPrompt(null)
   }
 
   // --- Slash menu ------------------------------------------------------------
@@ -883,6 +967,23 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             </div>
           </div>
         ))}
+
+        {workflowPrompt && (
+          <div className="confirm-card" data-kind="workflow">
+            <strong>{t.chatSaveWorkflowPrompt({ steps: workflowPrompt.steps })}</strong>
+            <p className="hint" style={{ margin: '6px 0' }}>
+              {workflowPrompt.workflow.name}
+            </p>
+            <div className="actions">
+              <button className="primary" onClick={() => void savePromptWorkflow()} type="button">
+                {t.chatSaveWorkflowSave}
+              </button>
+              <button onClick={dismissPromptWorkflow} type="button">
+                {t.chatSaveWorkflowSkip}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div

@@ -26,6 +26,7 @@ import type {
   TaskRunLog,
 } from './scheduler-types'
 import type { RunOutcomeKind, RunSource, RunStep } from '../background/running-tasks'
+import type { Workflow } from './workflow/types'
 
 /** Aggregated token usage for one agent turn (summed across all tool rounds). */
 export interface TurnTokenUsage {
@@ -119,6 +120,14 @@ export type Command =
   | { type: 'feishu.save'; config: FeishuConfig }
   | { type: 'feishu.test' }
 
+  // --- Workflows ---
+  | { type: 'workflows.list' }
+  | { type: 'workflows.get'; id: string }
+  | { type: 'workflows.save'; workflow: Workflow }
+  | { type: 'workflows.delete'; id: string }
+  | { type: 'workflows.run'; id: string }
+  | { type: 'workflows.running' }
+
 /** Replies, discriminated by the command that produced them. */
 export type CommandResult =
   | { type: 'settings'; settings: Settings }
@@ -167,6 +176,14 @@ export type CommandResult =
   | { type: 'feishu.get'; config: FeishuConfig }
   | { type: 'feishu.save' }
   | { type: 'feishu.test'; ok: boolean; message?: string }
+
+  // --- Workflows ---
+  | { type: 'workflows.list'; workflows: Workflow[] }
+  | { type: 'workflows.get'; workflow?: Workflow }
+  | { type: 'workflows.save' }
+  | { type: 'workflows.delete' }
+  | { type: 'workflows.run'; outcome: { ok: boolean; skipped: boolean; summary: string; error?: string } }
+  | { type: 'workflows.running'; runs: RunningTaskView[]; finished: FinishedTaskView[] }
 
 /** Envelope so a failed command never looks like a successful one. */
 export type CommandResponse =

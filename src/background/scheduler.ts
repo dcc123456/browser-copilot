@@ -11,27 +11,43 @@
  *
  * ## Alarm name contract
  *
- * Alarm names are `task:<id>`. On startup we reconcile alarms with stored tasks:
- * tasks without an alarm get one, and stale alarms (deleted tasks) are cleared.
- * This is idempotent, so calling `rescheduleAll` after every change is safe.
+ * Alarm names are `task:<id>`, and `workflow:<id>` for workflow-kind tasks. On
+ * startup we reconcile alarms with stored tasks: tasks without an alarm get one,
+ * and stale alarms (deleted tasks) are cleared. This is idempotent, so calling
+ * `rescheduleAll` after every change is safe.
  *
  * @module background/scheduler
  */
 
 import { nextRunAt } from '../lib/schedule'
 import { getTask, listTasks, saveTask } from '../lib/task-store'
+import type { ScheduledTask } from '../lib/scheduler-types'
 import { runTask } from './task-runner'
 
 const ALARM_PREFIX = 'task:'
+const WORKFLOW_ALARM_PREFIX = 'workflow:'
 /** `chrome.alarms` rejects periods and delays under 1 minute. */
 const MIN_ALARM_DELAY_MS = 60_000
 
+/** Legacy name for a task alarm; workflow-kind tasks use the `workflow:` prefix. */
 function alarmName(taskId: string): string {
   return `${ALARM_PREFIX}${taskId}`
 }
 
+/**
+ * Alarm name for a specific task, chosen by its kind so workflow tasks can be
+ * told apart (and orphan-cleared) independently from plain scheduled tasks.
+ */
+function alarmNameFor(task: ScheduledTask): string {
+  return task.kind === 'workflow'
+    ? `${WORKFLOW_ALARM_PREFIX}${task.id}`
+    : `${ALARM_PREFIX}${task.id}`
+}
+
 export function taskIdFromAlarmName(name: string): string | null {
-  return name.startsWith(ALARM_PREFIX) ? name.slice(ALARM_PREFIX.length) : null
+  if (name.startsWith(WORKFLOW_ALARM_PREFIX)) return name.slice(WORKFLOW_ALARM_PREFIX.length)
+  if (name.startsWith(ALARM_PREFIX)) return name.slice(ALARM_PREFIX.length)
+  return null
 }
 
 /**
@@ -40,7 +56,9 @@ export function taskIdFromAlarmName(name: string): string | null {
  */
 export async function scheduleTask(taskId: string): Promise<void> {
   const task = await getTask(taskId)
-  const name = alarmName(taskId)
+  // Fall back to the legacy `task:` prefix when the task cannot be found, so a
+  // deleted task's alarm is still cleared by the caller's reschedule.
+  const name = task ? alarmNameFor(task) : alarmName(taskId)
   if (!task || !task.enabled) {
     await chrome.alarms.clear(name)
     return
@@ -55,13 +73,18 @@ export async function scheduleTask(taskId: string): Promise<void> {
 /** Clears and recreates alarms for every task, removing orphaned alarms. */
 export async function rescheduleAll(): Promise<void> {
   // Clear anything that no longer corresponds to a known, enabled task first, so
-  // a deleted task cannot fire later.
+  // a deleted task cannot fire later. Orphaned alarms are swept for BOTH the
+  // plain-task and workflow prefixes.
   const existing = await chrome.alarms.getAll()
   const tasks = await listTasks()
-  const known = new Set(tasks.filter((task) => task.enabled).map((task) => alarmName(task.id)))
+  const known = new Set(
+    tasks.filter((task) => task.enabled).map((task) => alarmNameFor(task)),
+  )
 
   for (const alarm of existing) {
-    if (alarm.name.startsWith(ALARM_PREFIX) && !known.has(alarm.name)) {
+    const isOurs =
+      alarm.name.startsWith(ALARM_PREFIX) || alarm.name.startsWith(WORKFLOW_ALARM_PREFIX)
+    if (isOurs && !known.has(alarm.name)) {
       await chrome.alarms.clear(alarm.name)
     }
   }

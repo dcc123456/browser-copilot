@@ -5,13 +5,17 @@
  * All persistence goes through `sendCommand`; the worker owns alarms and the
  * Feishu connection, so saving here both stores and re-arms everything.
  *
+ * Live run progress and the run-history log now live in the History tab's
+ * activity board (see `RunningBoard.tsx`); this tab only manages task
+ * definitions.
+ *
  * @module sidepanel/TasksTab
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { sendCommand, type FinishedTaskView, type RunningTaskView } from '../lib/messages'
+import { useCallback, useEffect, useState } from 'react'
+import { sendCommand } from '../lib/messages'
 import { createDraft } from '../lib/task-store'
 import { describeSchedule } from '../lib/schedule'
-import type { FeishuConfig, ScheduledTask, TaskRunLog } from '../lib/scheduler-types'
+import type { FeishuConfig, ScheduledTask } from '../lib/scheduler-types'
 import { useT } from './i18n'
 
 /** Editable form state. */
@@ -44,17 +48,12 @@ function emptyTask(): Draft {
 export default function TasksTab() {
   const t = useT()
   const [tasks, setTasks] = useState<ScheduledTask[]>([])
-  const [runs, setRuns] = useState<TaskRunLog[]>([])
-  const [running, setRunning] = useState<RunningTaskView[]>([])
-  const [finished, setFinished] = useState<FinishedTaskView[]>([])
   const [feishu, setFeishu] = useState<FeishuConfig | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [banner, setBanner] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
   /** Id of the task just saved, so its card can briefly highlight. */
   const [justSavedId, setJustSavedId] = useState<string | null>(null)
-  /** Runs whose terminate button was clicked; used to show "Cancelling…". */
-  const [cancellingIds, setCancellingIds] = useState<Set<string>>(new Set())
 
   // Clear the highlight a short time after it appears, without re-running load.
   useEffect(() => {
@@ -65,13 +64,11 @@ export default function TasksTab() {
 
   const load = useCallback(async () => {
     try {
-      const [taskResult, runsResult, feishuResult] = await Promise.all([
+      const [taskResult, feishuResult] = await Promise.all([
         sendCommand({ type: 'tasks.list' }),
-        sendCommand({ type: 'tasks.runs' }),
         sendCommand({ type: 'feishu.get' }),
       ])
       if (taskResult.type === 'tasks.list') setTasks(taskResult.tasks)
-      if (runsResult.type === 'tasks.runs') setRuns(runsResult.runs)
       if (feishuResult.type === 'feishu.get') setFeishu(feishuResult.config)
     } catch (error) {
       setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
@@ -81,129 +78,6 @@ export default function TasksTab() {
   useEffect(() => {
     void load()
   }, [load])
-
-  // Poll the running-tasks board while the tab is mounted so progress steps and
-  // start/finish appear live. The persistent task list and run history are
-  // written by the worker but would otherwise stay stale until the tab is
-  // reopened, so we also reload them whenever we observe *activity*: a new run
-  // appears, a run leaves the running set, or a new entry shows up in the
-  // recently-finished board. Tracking finished ids (rather than running ids)
-  // catches runs that start and finish entirely between two 1.5s polls.
-  const prevRunningIds = useRef<Set<string>>(new Set())
-  const prevFinishedIds = useRef<Set<string>>(new Set())
-  useEffect(() => {
-    let active = true
-    const refresh = async (): Promise<void> => {
-      try {
-        const result = await sendCommand({ type: 'tasks.running' })
-        if (!active || result.type !== 'tasks.running') return
-        setRunning(result.runs)
-        setFinished(result.finished)
-
-        const runningIds = new Set(result.runs.map((r) => r.runId))
-        const finishedIds = new Set(result.finished.map((r) => r.runId))
-
-        // Once a cancelled run leaves the running list, drop its "Cancelling…"
-        // state so a future run never inherits it.
-        setCancellingIds((prev) => {
-          if (prev.size === 0) return prev
-          let changed = false
-          const next = new Set<string>()
-          for (const id of prev) {
-            if (runningIds.has(id)) next.add(id)
-            else changed = true
-          }
-          return changed ? next : prev
-        })
-
-        let shouldReload = false
-        // A run we previously saw running is no longer running → it settled.
-        for (const id of prevRunningIds.current) {
-          if (!runningIds.has(id)) {
-            shouldReload = true
-            break
-          }
-        }
-        // A brand-new entry appeared in the recently-finished board.
-        if (!shouldReload) {
-          for (const id of finishedIds) {
-            if (!prevFinishedIds.current.has(id)) {
-              shouldReload = true
-              break
-            }
-          }
-        }
-        if (shouldReload) void load()
-        prevRunningIds.current = runningIds
-        prevFinishedIds.current = finishedIds
-      } catch {
-        /* non-fatal; keep polling */
-      }
-    }
-    void refresh()
-    const timer = setInterval(() => void refresh(), 1500)
-    return () => {
-      active = false
-      clearInterval(timer)
-    }
-  }, [load])
-
-  const cancelRunning = async (runId: string): Promise<void> => {
-    setCancellingIds((prev) => {
-      const next = new Set(prev)
-      next.add(runId)
-      return next
-    })
-    setBusy(true)
-    try {
-      await sendCommand({ type: 'tasks.cancel', runId })
-      // Refresh immediately; the aborted run moves to the completed list shortly.
-      const result = await sendCommand({ type: 'tasks.running' })
-      if (result.type === 'tasks.running') {
-        setRunning(result.runs)
-        setFinished(result.finished)
-      }
-      await load()
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const deleteFinished = async (runId: string): Promise<void> => {
-    if (!confirm(t.taskDeleteFinishedConfirm)) return
-    setBusy(true)
-    try {
-      await sendCommand({ type: 'tasks.finished.delete', runId })
-      const result = await sendCommand({ type: 'tasks.running' })
-      if (result.type === 'tasks.running') {
-        setRunning(result.runs)
-        setFinished(result.finished)
-      }
-      await load()
-    } catch (error) {
-      setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const clearFinished = async (): Promise<void> => {
-    if (!confirm(t.taskClearFinishedConfirm)) return
-    setBusy(true)
-    try {
-      await sendCommand({ type: 'tasks.finished.clear' })
-      const result = await sendCommand({ type: 'tasks.running' })
-      if (result.type === 'tasks.running') {
-        setRunning(result.runs)
-        setFinished(result.finished)
-      }
-      await load()
-    } catch (error) {
-      setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
-    } finally {
-      setBusy(false)
-    }
-  }
 
   const persistTask = async (task: Draft): Promise<void> => {
     setBusy(true)
@@ -302,16 +176,6 @@ export default function TasksTab() {
           {banner.text}
         </div>
       )}
-
-      <RunningBoard
-        running={running}
-        finished={finished}
-        onCancel={(id) => void cancelRunning(id)}
-        onDeleteFinished={(id) => void deleteFinished(id)}
-        onClearFinished={() => void clearFinished()}
-        cancellingIds={cancellingIds}
-        busy={busy}
-      />
 
       <div className="section-head">
         <h3>{t.tasksMine}</h3>
@@ -431,29 +295,6 @@ export default function TasksTab() {
           />
         </details>
       )}
-
-      <details
-        className="collapsible"
-        onToggle={(event) => {
-          // Refresh the run log the moment the user expands it, so data is
-          // current even if no polled transition was observed.
-          if ((event.currentTarget as HTMLDetailsElement).open) void load()
-        }}
-      >
-        <summary>
-          <span className="collapsible-title">{t.tasksRunHistory}</span>
-          {runs.length > 0 && <span className="collapsible-count">{runs.length}</span>}
-        </summary>
-        <RunLog
-          runs={runs.slice(0, 20)}
-          onClear={() => void sendCommand({ type: 'tasks.runs.clear' }).then(load)}
-          onDelete={(id) =>
-            void sendCommand({ type: 'tasks.runs.delete', id }).then(() => {
-              setRuns((prev) => prev.filter((r) => r.id !== id))
-            })
-          }
-        />
-      </details>
     </div>
   )
 }
@@ -797,278 +638,5 @@ function FeishuSection({
         </>
       )}
     </div>
-  )
-}
-
-// --- Run log -----------------------------------------------------------------
-
-function RunLog({
-  runs,
-  onClear,
-  onDelete,
-}: {
-  runs: TaskRunLog[]
-  onClear: () => void
-  onDelete: (id: string) => void
-}) {
-  const t = useT()
-  const [openId, setOpenId] = useState<string | null>(null)
-  const sourceLabel = (run: TaskRunLog): string => {
-    const src = run.source ?? (run.trigger === 'feishu' ? 'feishu' : run.trigger === 'manual' ? 'manual' : 'schedule')
-    return src === 'feishu'
-      ? t.taskTriggerFeishu
-      : src === 'manual'
-        ? t.taskTriggerManual
-        : src === 'chat'
-          ? t.taskTriggerChat
-          : t.taskTriggerSchedule
-  }
-  const outcomeLabel = (run: TaskRunLog): string => {
-    if (run.skipped) return t.taskOutcomeSkipped
-    if (run.outcome === 'cancelled') return t.taskOutcomeCancelled
-    if (!run.ok) return t.taskOutcomeFailed
-    return t.taskOutcomeOk
-  }
-  return (
-    <div className="run-log-wrap">
-      <div className="run-log-bar">
-        <button className="link" onClick={onClear} type="button">
-          {t.taskRunsClear}
-        </button>
-      </div>
-      {runs.length === 0 ? (
-        <p className="hint">{t.taskRunsEmpty}</p>
-      ) : (
-        <ul className="run-log">
-          {runs.map((run) => {
-            const isOpen = openId === run.id
-            const hasSteps = !!run.steps && run.steps.length > 0
-            return (
-              <li
-                className={`run-line run-${run.skipped ? 'skipped' : run.ok ? 'ok' : 'err'}`}
-                key={run.id}
-              >
-                <button
-                  className="run-line-head"
-                  disabled={!hasSteps}
-                  onClick={() => setOpenId(isOpen ? null : run.id)}
-                  type="button"
-                >
-                  <span className="run-caret">{hasSteps ? (isOpen ? '▾' : '▸') : ''}</span>
-                  <span className="run-time">
-                    {new Date(run.finishedAt ?? run.at).toLocaleString(navigator.language)}
-                  </span>
-                  <span className="run-tag">{sourceLabel(run)}</span>
-                  <span className="run-name">{run.label || run.summary?.split('\n')[0] || ''}</span>
-                  <span className={`run-badge run-badge-${run.skipped ? 'skipped' : run.ok ? 'ok' : 'err'}`}>
-                    {outcomeLabel(run)}
-                  </span>
-                  <button
-                    aria-label={t.delete}
-                    className="danger run-delete"
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      onDelete(run.id)
-                    }}
-                    title={t.delete}
-                    type="button"
-                  >
-                    ×
-                  </button>
-                </button>
-                {(run.summary || run.error) && (
-                  <div className="run-summary">{run.summary || run.error}</div>
-                )}
-                {isOpen && hasSteps && (
-                  <ul className="running-steps run-steps">
-                    {run.steps!.map((step, index) => (
-                      <li className={`running-step running-step-${step.kind}`} key={index}>
-                        {step.text}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </li>
-            )
-          })}
-        </ul>
-      )}
-    </div>
-  )
-}
-
-// --- Running board -----------------------------------------------------------
-
-function RunningBoard({
-  running,
-  finished,
-  onCancel,
-  onDeleteFinished,
-  onClearFinished,
-  cancellingIds,
-  busy,
-}: {
-  running: RunningTaskView[]
-  finished: FinishedTaskView[]
-  onCancel: (runId: string) => void
-  onDeleteFinished: (runId: string) => void
-  onClearFinished: () => void
-  cancellingIds: Set<string>
-  busy: boolean
-}) {
-  const t = useT()
-  const sourceLabel = (source: RunningTaskView['source']): string =>
-    source === 'feishu'
-      ? t.taskSourceFeishu
-      : source === 'chat'
-        ? t.taskSourceChat
-        : source === 'manual'
-          ? t.taskSourceManual
-          : t.taskSourceSchedule
-  const outcomeLabel = (outcome: FinishedTaskView['outcome']): string =>
-    outcome === 'ok'
-      ? t.taskOutcomeOk
-      : outcome === 'cancelled'
-        ? t.taskOutcomeCancelled
-        : outcome === 'skipped'
-          ? t.taskOutcomeSkipped
-          : t.taskOutcomeFailed
-
-  return (
-    <div className={`card running-board${running.length > 0 ? ' running-board-active' : ''}`}>
-      <div className="card-head">
-        <h3>
-          {running.length > 0 && <span className="running-dot" />}
-          {t.tasksActivity}
-          {running.length > 0 && <span className="running-count">{running.length}</span>}
-        </h3>
-      </div>
-
-      {running.length === 0 ? (
-        <p className="hint running-empty">{t.tasksRunningEmpty}</p>
-      ) : (
-        <ul className="running-list">
-          {running.map((run) => {
-            const cancelling = cancellingIds.has(run.runId)
-            return (
-            <li className="running-item" key={run.runId}>
-              <div className="running-item-head">
-                <strong className="running-label">{run.label || t.taskUntitled}</strong>
-                <button
-                  className={`running-cancel${cancelling ? ' running-cancel-busy' : ''}`}
-                  disabled={busy || cancelling}
-                  onClick={() => onCancel(run.runId)}
-                  type="button"
-                >
-                  {cancelling ? t.taskCancelling : t.taskTerminate}
-                </button>
-              </div>
-              <div className="running-meta">
-                <span className="run-tag">{sourceLabel(run.source)}</span>
-                <span>
-                  {t.taskStartedAt}: {new Date(run.startedAt).toLocaleTimeString(navigator.language)}
-                </span>
-              </div>
-              {run.steps.length > 0 && (
-                <ul className="running-steps">
-                  {run.steps.slice(-8).map((step, index) => (
-                    <li className={`running-step running-step-${step.kind}`} key={index}>
-                      {step.text}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </li>
-            )
-          })}
-        </ul>
-      )}
-
-      {finished.length > 0 && (
-        <>
-          <div className="running-divider" />
-          <div className="running-section-head">
-            <h4 className="running-section-title">{t.tasksRecentlyFinished}</h4>
-            <button
-              className="link running-clear"
-              disabled={busy}
-              onClick={onClearFinished}
-              type="button"
-            >
-              {t.taskClearFinished}
-            </button>
-          </div>
-          <FinishedList
-            runs={finished.slice(0, 8)}
-            sourceLabel={sourceLabel}
-            outcomeLabel={outcomeLabel}
-            onDelete={onDeleteFinished}
-            t={t}
-          />
-        </>
-      )}
-    </div>
-  )
-}
-
-/** A recently-finished run whose steps can be expanded inline. */
-function FinishedList({
-  runs,
-  sourceLabel,
-  outcomeLabel,
-  onDelete,
-  t,
-}: {
-  runs: FinishedTaskView[]
-  sourceLabel: (source: FinishedTaskView['source']) => string
-  outcomeLabel: (outcome: FinishedTaskView['outcome']) => string
-  onDelete: (runId: string) => void
-  t: ReturnType<typeof useT>
-}) {
-  const [openId, setOpenId] = useState<string | null>(null)
-  return (
-    <ul className="finished-list">
-      {runs.map((run) => {
-        const isOpen = openId === run.runId
-        return (
-          <li className={`finished-item finished-${run.outcome}`} key={run.runId}>
-            <button
-              className="finished-row"
-              disabled={run.steps.length === 0}
-              onClick={() => setOpenId(isOpen ? null : run.runId)}
-              type="button"
-            >
-              <span className="finished-caret">
-                {run.steps.length > 0 ? (isOpen ? '▾' : '▸') : ''}
-              </span>
-              <span className={`finished-dot finished-dot-${run.outcome}`} />
-              <span className="finished-name">{run.label || t.taskUntitled}</span>
-              <span className="run-tag">{sourceLabel(run.source)}</span>
-              <span className={`finished-badge finished-badge-${run.outcome}`}>
-                {outcomeLabel(run.outcome)}
-              </span>
-            </button>
-            <button
-              aria-label={t.delete}
-              className="danger finished-delete"
-              onClick={() => onDelete(run.runId)}
-              title={t.delete}
-              type="button"
-            >
-              ×
-            </button>
-            {isOpen && run.steps.length > 0 && (
-              <ul className="running-steps finished-steps">
-                {run.steps.map((step, index) => (
-                  <li className={`running-step running-step-${step.kind}`} key={index}>
-                    {step.text}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </li>
-        )
-      })}
-    </ul>
   )
 }

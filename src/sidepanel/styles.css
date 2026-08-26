@@ -130,6 +130,7 @@ body {
   padding: 8px 8px 0;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
+  position: relative;
 }
 
 .tab {
@@ -142,12 +143,68 @@ body {
   cursor: pointer;
   font: inherit;
   font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tab[data-active='true'] {
   background: var(--bg);
   color: var(--text);
   box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* "More" tab dropdown for overflow */
+.tab-more-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.tab-more {
+  flex: none;
+  padding: 8px 12px;
+}
+
+.tab-more-caret {
+  margin-left: 4px;
+  font-size: 0.8em;
+}
+
+.tab-more-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--menu-shadow);
+  padding: 4px;
+}
+
+.tab-more-item {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.tab-more-item[data-active='true'] {
+  color: var(--text);
+  background: var(--hover-wash);
+}
+
+.tab-more-item:hover {
+  background: var(--hover-wash);
 }
 
 .pane {
@@ -2149,51 +2206,469 @@ textarea {
   word-break: break-all;
 }
 
-/* --- Grouped action history ------------------------------------------------ */
+/* --- History tab ----------------------------------------------------------- */
 
-.history-group {
-  padding: 0;
-  overflow: hidden;
+.history-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.history-group-head {
+.history-tab .history-sections {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0;
+  padding: 6px 0 4px;
+  background: var(--bg);
+}
+
+.record-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Sticky batch toolbar ----------------------------------------------------- */
+
+.record-batchbar {
+  position: sticky;
+  top: 33px; /* below the sub-section tab strip */
+  z-index: 2;
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 9px 12px;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
-  font: inherit;
+  gap: 10px;
+  padding: 7px 10px;
+  margin: 0;
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 1px 0 var(--border);
 }
 
-.history-group-head:hover {
-  background: var(--hover-wash);
-}
-
-.history-caret {
+.record-batchbar-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
   color: var(--muted);
-  width: 12px;
+  cursor: pointer;
+  margin: 0;
+  white-space: nowrap;
+  flex: none;
 }
 
-.history-group-title {
+.record-batchbar-check input {
+  margin: 0;
+  accent-color: var(--accent);
+  flex: none;
+}
+
+.record-batchbar-count {
   flex: 1;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.record-batchbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.record-batchbar button {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+.record-batchbar button.ghost {
+  background: transparent;
+  color: var(--muted);
+  border-color: transparent;
+}
+
+.record-batchbar button.ghost:hover:not(:disabled) {
+  color: var(--err);
+  background: var(--err-surface);
+}
+
+/* Record cards ------------------------------------------------------------- */
+
+.record-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.record-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.record-head {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+}
+
+.record-head:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent-soft-border);
+  border-radius: 10px;
+}
+
+.record-head input[type='checkbox'].record-check {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Caret drawn as a CSS triangle so it lines up crisply at any DPI. */
+.record-caret {
+  width: 14px;
+  height: 14px;
+  position: relative;
+  flex: none;
+  color: var(--muted);
+  transition: transform 140ms ease;
+}
+
+.record-caret::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  transform: translate(-25%, -50%);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid currentColor;
+}
+
+.record-caret.open {
+  transform: rotate(90deg);
+}
+
+.record-caret-spacer {
+  width: 14px;
+  height: 1px;
+  flex: none;
+}
+
+.record-title {
+  min-width: 0;
+  font-size: 13px;
   font-weight: 600;
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.record-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: none;
+}
+
+.record-source {
+  font-size: 10px;
+  color: var(--muted);
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--chip);
+  white-space: nowrap;
+}
+
+.record-time {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Action icon buttons inside history record rows (delete, rebuild workflow).
+   Scoped to `.record-card` / `.history-step` so we don't hide unrelated
+   `.icon-btn` usages elsewhere (e.g. the mode-info "?" next to the chat
+   mode selector). These reveal on hover/focus of the row. */
+.record-card .icon-btn,
+.history-step .icon-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  flex: none;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.record-head:hover .icon-btn,
+.record-head:focus-within .icon-btn,
+.record-card:hover .record-head .icon-btn,
+.history-step:hover .icon-btn,
+.history-step:focus-within .icon-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.record-card .icon-btn:hover,
+.history-step .icon-btn:hover {
+  background: var(--hover-wash);
+  color: var(--text);
+}
+
+.record-card .icon-btn.danger:hover,
+.history-step .icon-btn.danger:hover {
+  background: var(--err-surface);
+  color: var(--err);
+}
+
+.record-delete {
+  /* uses the scoped .record-card .icon-btn rule above */
+}
+
+.history-rebuild.icon-btn {
+  font-size: 14px;
+}
+
+.record-summary {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 12px 9px 46px; /* align under the title column */
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.record-detail {
+  border-top: 1px solid var(--border);
+  background: var(--sunken);
+  padding: 10px 12px 12px 46px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Outcome badge shared by workflow/task run cards. */
+.status-badge {
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 8px;
+  height: 18px;
+  line-height: 16px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.status-badge.ok {
+  background: var(--ok-surface);
+  color: var(--ok);
+}
+
+.status-badge.err {
+  background: var(--err-surface);
+  color: var(--err);
+}
+
+.status-badge.cancel {
+  background: var(--warn-surface);
+  color: var(--warn);
+}
+
+.status-badge.skip {
+  background: var(--warn-surface);
+  color: var(--warn);
+}
+
+/* Conversation transcripts ------------------------------------------------ */
+
+.conv-msgs {
+  gap: 6px;
+}
+
+.record-msg {
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 10px;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.record-msg-user {
+  align-self: flex-end;
+  background: var(--user-bubble);
+  color: var(--text);
+  max-width: 86%;
+  margin-left: 28px;
+}
+
+.record-msg-assistant {
+  align-self: flex-start;
+  background: var(--panel-2);
+  color: var(--text);
+  max-width: 94%;
+  margin-right: 12px;
+}
+
+.record-msg-tool {
+  align-self: flex-start;
+  background: var(--chip);
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  max-width: 94%;
+  margin-right: 12px;
+}
+
+/* Run steps ---------------------------------------------------------------- */
+
+.record-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.record-step {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  border-left: 2px solid var(--border);
+  padding: 2px 0 2px 10px;
+}
+
+.record-step[data-kind='error'] {
+  border-left-color: var(--err);
+}
+
+.record-step[data-kind='tool'] {
+  border-left-color: var(--accent);
+}
+
+.record-step-time {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.record-step-tag {
+  font-size: 9px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0 6px;
+  height: 16px;
+  line-height: 16px;
+  border-radius: 999px;
+  background: var(--chip);
+  white-space: nowrap;
+}
+
+.record-step-text {
+  min-width: 0;
+  word-break: break-word;
+}
+
+.record-error {
+  font-size: 12px;
+  color: var(--err);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--err);
+  border-radius: 6px;
+  padding: 6px 8px;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/* Failure detail shown on a collapsed run row so broken runs are visible
+   without expanding every failed card. */
+.record-error-inline {
+  font-size: 11px;
+  color: var(--err);
+  background: var(--err-surface);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin: 0 10px 9px 46px;
+  word-break: break-word;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* "Continue chat" CTA at the bottom of an expanded conversation. */
+.conv-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.conv-continue {
+  padding: 5px 14px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+/* Grouped action history --------------------------------------------------- */
+
+.history-group {
+  padding: 0;
+}
+
+.history-group-head {
+  cursor: pointer;
+}
+
+.history-group-title {
+  font-weight: 600;
 }
 
 .history-count {
   font-size: 10px;
   font-weight: 600;
   padding: 0 7px;
+  height: 16px;
+  line-height: 16px;
   border-radius: 999px;
   background: var(--chip);
   color: var(--muted);
+  min-width: 20px;
+  text-align: center;
 }
 
 .history-stat {
@@ -2209,18 +2684,24 @@ textarea {
   color: var(--err);
 }
 
+.history-rebuild.icon-btn {
+  font-size: 14px;
+}
+
 .history-steps {
   list-style: none;
   margin: 0;
-  padding: 0 12px 10px;
+  padding: 0 10px 10px 46px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .history-step {
   border-left: 2px solid var(--border);
-  padding: 4px 0 4px 10px;
+  padding: 6px 8px 6px 10px;
+  border-radius: 0 8px 8px 0;
+  background: var(--sunken);
 }
 
 .history-step-ok {
@@ -2232,21 +2713,39 @@ textarea {
 }
 
 .history-step-head {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   font-size: 11px;
   color: var(--muted);
 }
 
+.history-step-head .record-check {
+  width: 13px;
+  height: 13px;
+}
+
 .history-step-time {
   white-space: nowrap;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.history-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  justify-self: end;
 }
 
 .history-host {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 120px;
+  font-size: 10px;
 }
 
 .history-declined {
@@ -2256,24 +2755,20 @@ textarea {
   letter-spacing: 0.04em;
 }
 
-.history-delete {
-  margin-left: auto;
-  padding: 0 6px;
-  font-size: 14px;
-  line-height: 1;
-}
-
 .history-summary {
   font-size: 12px;
-  margin-top: 2px;
+  margin-top: 4px;
+  color: var(--text);
+  word-break: break-word;
 }
 
 .history-detail {
   list-style: none;
-  margin: 4px 0 0;
+  margin: 6px 0 0;
   padding: 6px 8px;
-  border-radius: 4px;
-  background: var(--sunken);
+  border-radius: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
   font-family: ui-monospace, monospace;
   font-size: 11px;
   line-height: 1.5;
@@ -2286,3 +2781,35 @@ textarea {
 .history-detail li {
   color: var(--muted);
 }
+
+/* JSON arguments dump ----------------------------------------------------- */
+
+.record-args {
+  margin-top: 4px;
+}
+
+.record-json-label {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.record-json {
+  margin: 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+  color: var(--text);
+}
+

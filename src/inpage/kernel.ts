@@ -663,6 +663,47 @@ export function runOp(op: Op): OpResult {
     }
   }
 
+  // --- Capture (full-page / element) -----------------------------------------
+
+  /**
+   * Renders a DOM node (the document or a matched element) to a PNG data URL by
+   * serializing it into an `<svg><foreignObject>`, drawing that into a canvas,
+   * and reading `toDataURL`. Returns `null` when the target is missing or the
+   * canvas is tainted (e.g. cross-origin images without CORS).
+   */
+  async function captureNode(selector: string): Promise<OpResult> {
+    const host = selector
+      ? (document.querySelector(selector) as HTMLElement | null)
+      : document.documentElement
+    if (!host) {
+      return { ...base(), ok: false, found: false, error: `capture: 未找到元素 "${selector}"` }
+    }
+    try {
+      const width = host.scrollWidth || host.offsetWidth || 1280
+      const height = host.scrollHeight || host.offsetHeight || 800
+      const markup = new XMLSerializer().serializeToString(host)
+      const data = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(markup)
+      const image = new Image()
+      const decoded = await new Promise<HTMLImageElement>((resolve, reject) => {
+        image.onload = (): void => resolve(image)
+        image.onerror = (): void => reject(new Error('capture: SVG 加载失败'))
+        image.src = data
+      })
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const context = canvas.getContext('2d')
+      if (!context) throw new Error('capture: 无法创建画布')
+      context.fillStyle = '#ffffff'
+      context.fillRect(0, 0, width, height)
+      context.drawImage(decoded, 0, 0, width, height)
+      return { ...base(), ok: true, found: true, note: 'captured', data: canvas.toDataURL('image/png') }
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error)
+      return { ...base(), ok: false, found: true, error: `capture: ${text}` }
+    }
+  }
+
   // --- Dispatch --------------------------------------------------------------
 
   try {
@@ -671,13 +712,20 @@ export function runOp(op: Op): OpResult {
       return { ...base(), ok: true, found: true, page }
     }
 
+    if (op.action === 'capture') {
+      // Returns a Promise; chrome.scripting.executeScript awaits it. The driver
+      // reads `injection.result` after resolution, which is an OpResult.
+      return captureNode(op.value ? String(op.value) : '') as unknown as OpResult
+    }
+
     if (op.action === 'scroll' && !op.target) {
       const spec = op.scroll ?? { mode: 'by' as const, y: 600 }
+      const behavior: ScrollBehavior = spec.mode === 'incremental' || 'smooth' in spec && spec.smooth ? 'smooth' : 'auto'
       try {
-        if (spec.mode === 'top') window.scrollTo({ top: 0, left: 0 })
+        if (spec.mode === 'top') window.scrollTo({ top: 0, left: 0, behavior })
         else if (spec.mode === 'bottom')
-          window.scrollTo({ top: document.documentElement.scrollHeight ?? 0, left: 0 })
-        else if (spec.mode === 'by') window.scrollBy({ top: spec.y ?? 0, left: spec.x ?? 0 })
+          window.scrollTo({ top: document.documentElement.scrollHeight ?? 0, left: 0, behavior })
+        else window.scrollBy({ top: 'y' in spec ? (spec.y ?? 0) : 0, left: 'x' in spec ? (spec.x ?? 0) : 0, behavior })
       } catch {
         /* no scrolling */
       }
@@ -692,6 +740,75 @@ export function runOp(op: Op): OpResult {
       active.dispatchEvent(new KeyboardEvent('keydown', init))
       active.dispatchEvent(new KeyboardEvent('keyup', init))
       return { ...base(), ok: true, found: true, note: `pressed ${key}` }
+    }
+
+    if (op.action === 'element_exists' || op.action === 'count_elements') {
+      const selector = String(op.value ?? '')
+      const matches = safeQuery(selector)
+      const count = matches.length
+      if (op.action === 'count_elements')
+        return { ...base(), ok: true, found: true, note: `count=${count}`, data: count }
+      return {
+        ...base(),
+        ok: true,
+        found: count > 0,
+        note: count > 0 ? `存在 ${count} 个匹配元素` : '未找到匹配元素',
+        data: count,
+      }
+    }
+
+    if (op.action === 'read_form') {
+      const results: Record<string, unknown> = {}
+      const selector = op.value ? String(op.value) : 'input, select, textarea'
+      const controls = safeQuery(selector)
+      for (let i = 0; i < controls.length; i += 1) {
+        const control = controls[i] as HTMLInputElement | HTMLTextAreaElement
+        const name = control.getAttribute('name') || control.id || `field${i}`
+        if (name in results) continue
+        if (control instanceof HTMLTextAreaElement) {
+          results[name] = control.value
+        } else if (control instanceof HTMLSelectElement) {
+          results[name] = control.multiple
+            ? Array.from(control.selectedOptions).map((o) => o.value)
+            : control.value
+        } else {
+          const type = (control.type || 'text').toLowerCase()
+          if (type === 'checkbox') results[name] = control.checked
+          else if (type === 'radio') {
+            if (control.checked) results[name] = control.value
+          } else results[name] = control.value
+        }
+      }
+      return { ...base(), ok: true, found: true, note: '已读取表单', data: results }
+    }
+
+    if (op.action === 'create_element') {
+      const html = String(op.value ?? '')
+      const wrapper = document.createElement('div')
+      wrapper.innerHTML = html
+      const inserted = Array.prototype.slice.call(wrapper.children) as Element[]
+      for (const child of inserted) document.body.appendChild(child)
+      return { ...base(), ok: true, found: true, note: `created ${inserted.length} element(s)` }
+    }
+
+    if (op.action === 'handle_dialog') {
+      try {
+        // Auto-accept confirm() and suppress beforeunload prompts so a workflow
+        // that navigates or triggers dialogs keeps moving. Goes through
+        // descriptors so pages that froze these globals can still be coerced.
+        const set = (target: unknown, key: string, value: unknown): void => {
+          try {
+            Object.defineProperty(target, key, { value, configurable: true, writable: true })
+          } catch {
+            ;(target as Record<string, unknown>)[key] = value
+          }
+        }
+        set(window, 'onbeforeunload', null)
+        set(window, 'confirm', () => true)
+      } catch {
+        /* handlers may be non-configurable on some pages */
+      }
+      return { ...base(), ok: true, found: true, note: '对话框处理已启用' }
     }
 
     if (!op.target) return fail(`${op.action} needs a target element.`, false)
@@ -724,12 +841,17 @@ export function runOp(op: Op): OpResult {
 
     if (op.action === 'scroll') {
       const spec = op.scroll ?? { mode: 'into_view' as const }
+      const behavior: ScrollBehavior = spec.mode === 'into_view' ? 'auto' : spec.mode === 'incremental' || 'smooth' in spec && spec.smooth ? 'smooth' : 'auto'
       try {
         if (spec.mode === 'into_view') scrollIntoView(element)
-        else if (spec.mode === 'by')
-          element.scrollBy?.({ top: spec.y ?? 0, left: spec.x ?? 0 })
-        else if (spec.mode === 'top') element.scrollTo?.({ top: 0 })
-        else element.scrollTo?.({ top: element.scrollHeight })
+        else if (spec.mode === 'by' || spec.mode === 'incremental') {
+          ;(element as HTMLElement).scrollBy?.({
+            top: 'y' in spec ? (spec.y ?? 0) : 0,
+            left: 'x' in spec ? (spec.x ?? 0) : 0,
+            behavior,
+          })
+        } else if (spec.mode === 'top') (element as HTMLElement).scrollTo?.({ top: 0, behavior })
+        else (element as HTMLElement).scrollTo?.({ top: element.scrollHeight, behavior })
       } catch {
         /* no scrolling */
       }
@@ -850,6 +972,54 @@ export function runOp(op: Op): OpResult {
         found: true,
         ...(ok ? {} : { error: 'The control did not change state.' }),
       })
+    }
+
+    if (op.action === 'get_attribute') {
+      const attribute = String(op.attribute ?? '')
+      if (!attribute) return withMeta(fail('get_attribute needs an attribute name.'))
+      const value = element.getAttribute(attribute) ?? ''
+      return withMeta({ ...base(), ok: true, found: true, note: value, data: value })
+    }
+
+    if (op.action === 'set_attribute') {
+      const attribute = String(op.attribute ?? '')
+      if (!attribute) return withMeta(fail('set_attribute needs an attribute name.'))
+      const value = String(op.value ?? '')
+      if (value === '') element.removeAttribute(attribute)
+      else element.setAttribute(attribute, value)
+      return withMeta({ ...base(), ok: true, found: true, note: `set ${attribute}` })
+    }
+
+    if (op.action === 'click_link') {
+      const href = (element as HTMLAnchorElement).href
+      const tag = element.tagName.toLowerCase()
+      if (tag !== 'a' || !href) return withMeta(fail(`${describeElement(element)} is not a clickable link.`))
+      const target = (element as HTMLAnchorElement).target
+      return withMeta({
+        ...base(),
+        ok: true,
+        found: true,
+        mayNavigate: true,
+        note: href,
+        data: { href, target: target ?? '_self' },
+      })
+    }
+
+    if (op.action === 'trigger_event') {
+      const eventName = String(op.attribute ?? '')
+      if (!eventName) return withMeta(fail('trigger_event needs an event name.'))
+      let detail: unknown
+      try {
+        detail = JSON.parse(String(op.value ?? 'null'))
+      } catch {
+        detail = String(op.value ?? '')
+      }
+      const useBubbles = () => {
+        const maybe = eventName.toLowerCase()
+        return maybe.indexOf('mouse') === -1 && maybe.indexOf('click') === -1
+      }
+      element.dispatchEvent(new CustomEvent(eventName, { bubbles: useBubbles(), detail }))
+      return withMeta({ ...base(), ok: true, found: true, note: `dispatched ${eventName}` })
     }
 
     if (op.action === 'press_key') {

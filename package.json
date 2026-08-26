@@ -13,6 +13,7 @@
     "icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {
+    "@xyflow/react": "^12.11.5",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

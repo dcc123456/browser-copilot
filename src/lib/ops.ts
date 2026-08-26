@@ -45,13 +45,24 @@ export type ActionName =
   | 'scroll'
   | 'wait_for'
   | 'snapshot'
+  | 'element_exists'
+  | 'get_attribute'
+  | 'set_attribute'
+  | 'click_link'
+  | 'read_form'
+  | 'create_element'
+  | 'handle_dialog'
+  | 'count_elements'
+  | 'trigger_event'
+  | 'capture'
 
 /** What `scroll` should do. */
 export type ScrollSpec =
   | { mode: 'into_view' }
-  | { mode: 'by'; x?: number; y?: number }
-  | { mode: 'top' }
-  | { mode: 'bottom' }
+  | { mode: 'by'; x?: number; y?: number; smooth?: boolean }
+  | { mode: 'incremental'; x?: number; y?: number }
+  | { mode: 'top'; smooth?: boolean }
+  | { mode: 'bottom'; smooth?: boolean }
 
 /** One operation, handed across the structured-clone boundary. */
 export interface Op {
@@ -59,6 +70,8 @@ export interface Op {
   target?: Target
   /** Text to type, option to choose, or key to press. */
   value?: string | string[] | boolean
+  /** Attribute name for `get_attribute` / `set_attribute` / `trigger_event`. */
+  attribute?: string
   scroll?: ScrollSpec
   /** Whether to clear an input before typing (default true for `fill`). */
   clear?: boolean
@@ -132,4 +145,6 @@ export interface OpResult {
   page?: PageSnapshot
   mayNavigate?: boolean
   note?: string
+  /** Structured payload for data-producing ops (attribute, form, count). */
+  data?: unknown
 }

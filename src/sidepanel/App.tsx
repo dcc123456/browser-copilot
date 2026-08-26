@@ -4,19 +4,26 @@ import { sendCommand } from '../lib/messages'
 import type { Skill } from '../lib/types'
 import ChatTab from './ChatTab'
 import DataTab from './DataTab'
+import HistoryTab from './HistoryTab'
 import { I18nProvider } from './i18n'
 import SettingsTab from './SettingsTab'
 import SkillsTab from './SkillsTab'
 import TasksTab from './TasksTab'
+import WorkflowsTab from './WorkflowsTab'
 
-type TabId = 'chat' | 'skills' | 'tasks' | 'data' | 'settings'
+type TabId = 'chat' | 'skills' | 'tasks' | 'workflows' | 'history' | 'data' | 'settings'
 
-const TAB_ORDER: TabId[] = ['chat', 'skills', 'tasks', 'data', 'settings']
+/** Always shown in the top bar. */
+const PINNED_TABS: TabId[] = ['chat', 'workflows', 'history', 'tasks']
+/** Collected under the fixed "More" dropdown. */
+const MORE_TABS: TabId[] = ['skills', 'data', 'settings']
 
 const TAB_LABEL: Record<TabId, keyof Messages> = {
   chat: 'tabChat',
   skills: 'tabSkills',
   tasks: 'tabTasks',
+  workflows: 'tabWorkflows',
+  history: 'tabHistory',
   data: 'tabData',
   settings: 'tabSettings',
 }
@@ -72,10 +79,30 @@ export default function App() {
     }
   }, [skills, activeSkillId])
 
+  // --- "More" dropdown menu ------------------------------------------------
+  const [moreOpen, setMoreOpen] = useState(false)
+
+  // Close the "More" menu when clicking outside.
+  useEffect(() => {
+    if (!moreOpen) return
+    const onDown = (): void => setMoreOpen(false)
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [moreOpen])
+
+  // History tab dispatches `bc:open-conversation` when the user clicks
+  // "continue chat" on a past conversation. Switch to the Chat tab and let
+  // ChatTab's own listener do the resume.
+  useEffect(() => {
+    const handler = (): void => setActive('chat')
+    window.addEventListener('bc:open-conversation', handler)
+    return () => window.removeEventListener('bc:open-conversation', handler)
+  }, [])
+
   return (
     <I18nProvider value={i18n}>
       <nav className="tabs">
-        {TAB_ORDER.map((id) => (
+        {PINNED_TABS.map((id) => (
           <button
             key={id}
             className="tab"
@@ -86,6 +113,38 @@ export default function App() {
             {i18n.t[TAB_LABEL[id]] as string}
           </button>
         ))}
+        <div className="tab-more-wrap">
+          <button
+            className="tab tab-more"
+            data-active={MORE_TABS.includes(active)}
+            onClick={(e) => {
+              e.stopPropagation()
+              setMoreOpen((v) => !v)
+            }}
+            type="button"
+          >
+            {i18n.t.tabMore}
+            <span className="tab-more-caret">▾</span>
+          </button>
+          {moreOpen && (
+            <div className="tab-more-menu" onMouseDown={(e) => e.stopPropagation()}>
+              {MORE_TABS.map((id) => (
+                <button
+                  key={id}
+                  className="tab-more-item"
+                  data-active={active === id}
+                  onClick={() => {
+                    setActive(id)
+                    setMoreOpen(false)
+                  }}
+                  type="button"
+                >
+                  {i18n.t[TAB_LABEL[id]] as string}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </nav>
       {/*
         Every tab stays mounted: the chat holds a live port and streaming
@@ -113,6 +172,12 @@ export default function App() {
       </div>
       <div style={{ display: active === 'tasks' ? 'contents' : 'none' }}>
         <TasksTab />
+      </div>
+      <div style={{ display: active === 'workflows' ? 'contents' : 'none' }}>
+        <WorkflowsTab />
+      </div>
+      <div style={{ display: active === 'history' ? 'contents' : 'none' }}>
+        <HistoryTab />
       </div>
       <div style={{ display: active === 'data' ? 'contents' : 'none' }}>
         <DataTab />
