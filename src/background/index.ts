@@ -612,6 +612,16 @@ async function handleCommand(command: Command): Promise<CommandResult> {
       return { type: 'workflows.running', ...boards }
     }
 
+    case 'record.start':
+      // Recording controller lands in P5 (background/record-controller.ts).
+      return { type: 'record.start', recording: false }
+    case 'record.stop':
+      return { type: 'record.stop' }
+    case 'record.status': {
+      const { recordState } = await chrome.storage.local.get('recordState')
+      return { type: 'record.status', recording: recordState?.recording === true }
+    }
+
     default: {
       const exhaustive: never = command
       throw new Error(`Unknown command: ${JSON.stringify(exhaustive)}`)

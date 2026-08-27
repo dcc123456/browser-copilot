@@ -193,7 +193,7 @@ describe('duplicate collapsing', () => {
     )
     const selectors = wf!.drawflow.nodes
       .filter((n) => n.data.blockId !== 'manual')
-      .map((n) => n.data.values.cssSelector)
+      .map((n) => (n.data.values as { cssSelector?: string } | undefined)?.cssSelector)
     expect(selectors).toEqual(['.a', '.b'])
   })
 })

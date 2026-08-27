@@ -1277,6 +1277,12 @@ textarea {
   font-size: 12px;
 }
 
+.section-action.record-active {
+  color: var(--danger);
+  border-color: var(--danger);
+  font-weight: 600;
+}
+
 .empty-state {
   text-align: center;
   padding: 18px 10px;

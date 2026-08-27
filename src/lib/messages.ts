@@ -128,6 +128,14 @@ export type Command =
   | { type: 'workflows.run'; id: string }
   | { type: 'workflows.running' }
 
+  // --- Workflow recording (see background/record-controller.ts) ---
+  /** Start recording: injects the recorder into all http tabs, sets the rec badge. */
+  | { type: 'record.start' }
+  /** Stop recording and convert the captured blocks into a saved workflow. */
+  | { type: 'record.stop' }
+  /** Whether a recording session is currently active. */
+  | { type: 'record.status' }
+
 /** Replies, discriminated by the command that produced them. */
 export type CommandResult =
   | { type: 'settings'; settings: Settings }
@@ -184,6 +192,9 @@ export type CommandResult =
   | { type: 'workflows.delete' }
   | { type: 'workflows.run'; outcome: { ok: boolean; skipped: boolean; summary: string; error?: string } }
   | { type: 'workflows.running'; runs: RunningTaskView[]; finished: FinishedTaskView[] }
+  | { type: 'record.start'; recording: boolean }
+  | { type: 'record.stop'; workflowId?: string }
+  | { type: 'record.status'; recording: boolean }
 
 /** Envelope so a failed command never looks like a successful one. */
 export type CommandResponse =

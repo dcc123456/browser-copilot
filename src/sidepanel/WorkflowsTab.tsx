@@ -100,10 +100,57 @@ export default function WorkflowsTab() {
     }
   }
 
+  const editorUrl = (id?: string): string =>
+    chrome.runtime.getURL(
+      'src/workflow-editor/index.html' + (id ? `?edit=${encodeURIComponent(id)}` : ''),
+    )
+
+  /**
+   * The workflow editor opens in a standalone popup window (no address bar /
+   * browser chrome), matching Automa's separate editor window. A regular tab is
+   * used as a fallback if popup creation is unavailable.
+   */
   const openEditor = (id?: string): void => {
-    void chrome.tabs.create({
-      url: chrome.runtime.getURL('src/workflow-editor/index.html' + (id ? `?edit=${encodeURIComponent(id)}` : '')),
-    })
+    const url = editorUrl(id)
+    void chrome.windows
+      ?.create?.({ url, type: 'popup', width: 1280, height: 860 })
+      ?.catch?.(() => chrome.tabs.create({ url }))
+    // Fallback for environments where `chrome.windows` is unavailable.
+    if (!chrome.windows?.create) void chrome.tabs.create({ url })
+  }
+
+  const [recording, setRecording] = useState(false)
+
+  const refreshRecording = useCallback(async () => {
+    try {
+      const result = await sendCommand({ type: 'record.status' })
+      if (result.type === 'record.status') setRecording(result.recording)
+    } catch {
+      /* recorder not available until background controller lands */ }
+  }, [])
+
+  useEffect(() => {
+    void refreshRecording()
+  }, [refreshRecording])
+
+  const toggleRecording = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      if (recording) {
+        const result = await sendCommand({ type: 'record.stop' })
+        if (result.type === 'record.stop' && result.workflowId) {
+          openEditor(result.workflowId)
+        }
+      } else {
+        await sendCommand({ type: 'record.start' })
+        setRecording(true)
+      }
+    } catch (error) {
+      setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setBusy(false)
+      void refreshRecording()
+    }
   }
 
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -240,6 +287,15 @@ export default function WorkflowsTab() {
             style={{ display: 'none' }}
             onChange={(event) => void importFiles(event.target.files)}
           />
+          <button
+            className={`section-action${recording ? ' record-active' : ''}`}
+            disabled={busy}
+            onClick={() => void toggleRecording()}
+            type="button"
+            title={recording ? '停止录制并生成工作流' : '录制页面操作'}
+          >
+            {recording ? '■ 停止录制' : '● 录制'}
+          </button>
           <button
             className="primary section-action"
             disabled={busy}
