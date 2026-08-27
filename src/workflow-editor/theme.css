@@ -1,0 +1,95 @@
+/*
+ * Workflow editor theme — follows the browser/OS color scheme.
+ *
+ * All editor chrome colors are CSS variables; the dark palette is selected
+ * via prefers-color-scheme so the standalone popup window tracks the browser
+ * theme automatically. Category colors mirror Automa's Tailwind 200 (light)
+ * and 300 (dark) shades. The React Flow surface uses the same variables.
+ */
+
+:root {
+  /* surfaces */
+  --bc-bg: #ffffff;
+  --bc-bg-soft: #f9fafb;      /* gray-50: canvas-adjacent panels      */
+  --bc-bg-input: #f3f4f6;     /* gray-100: inputs, palette cards      */
+  --bc-bg-hover: #eef2ff;     /* indigo-50: hovered rows              */
+  --bc-bg-active: #e0e7ff;    /* indigo-100: selected rows            */
+  --bc-border: #e5e7eb;       /* gray-200                             */
+  --bc-border-strong: #d1d5db;/* gray-300                             */
+
+  /* text */
+  --bc-text: #111827;         /* gray-900                             */
+  --bc-text-dim: #6b7280;     /* gray-500                             */
+  --bc-text-faint: #9ca3af;   /* gray-400                             */
+  --bc-text-on-accent: #ffffff;
+
+  /* accents */
+  --bc-accent: #6366f1;       /* indigo-500 (Automa accent/indigo)    */
+  --bc-accent-soft: #e0e7ff;
+  --bc-danger: #ef4444;
+  --bc-danger-soft: #fecaca;
+  --bc-success: #22c55e;
+
+  /* category icon-chip colors (Automa Tailwind 200) */
+  --cat-interaction: #bbf7d0;
+  --cat-browser: #fed7aa;
+  --cat-general: #fef08a;
+  --cat-onlineServices: #fecaca;
+  --cat-data: #d9f99d;
+  --cat-conditions: #bfdbfe;
+  --cat-package: #a5f3fc;
+
+  /* node chrome */
+  --bc-node-bg: #ffffff;
+  --bc-node-border: #e5e7eb;
+  --bc-node-selected: #6366f1;
+  --bc-edge: #94a3b8;
+  --bc-edge-selected: #6366f1;
+
+  /* remote images inverted in dark mode (none in light) */
+  --bc-icon-invert: none;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bc-bg: #1f2937;         /* gray-800: Automa dark panel          */
+    --bc-bg-soft: #111827;    /* gray-900: canvas-adjacent            */
+    --bc-bg-input: #374151;   /* gray-700: inputs                     */
+    --bc-bg-hover: #374151;
+    --bc-bg-active: #4b5563;  /* gray-600                             */
+    --bc-border: #374151;
+    --bc-border-strong: #4b5563;
+
+    --bc-text: #f9fafb;       /* gray-50                              */
+    --bc-text-dim: #d1d5db;   /* gray-300                             */
+    --bc-text-faint: #9ca3af;
+    --bc-text-on-accent: #111827;
+
+    --bc-accent: #818cf8;     /* indigo-400 for dark contrast         */
+    --bc-accent-soft: #312e81;
+    --bc-danger: #f87171;
+    --bc-danger-soft: #7f1d1d;
+    --bc-success: #4ade80;
+
+    /* Automa dark mode uses the *-300 shades for category chips */
+    --cat-interaction: #86efac;
+    --cat-browser: #fdba74;
+    --cat-general: #fde047;
+    --cat-onlineServices: #fca5a5;
+    --cat-data: #bef264;
+    --cat-conditions: #93c5fd;
+    --cat-package: #67e8f9;
+
+    --bc-node-bg: #1f2937;
+    --bc-node-border: #374151;
+    --bc-node-selected: #818cf8;
+    --bc-edge: #6b7280;
+    --bc-edge-selected: #818cf8;
+
+    --bc-icon-invert: invert(1);
+
+    color-scheme: dark;
+  }
+}
