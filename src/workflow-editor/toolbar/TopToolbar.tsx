@@ -27,6 +27,7 @@ export default function TopToolbar({
   onSave,
   onRun,
   onToggleRecording,
+  onAutoLayout,
   t,
 }: {
   workflowName: string
@@ -44,6 +45,7 @@ export default function TopToolbar({
   onSave: () => void
   onRun: () => void
   onToggleRecording: () => void
+  onAutoLayout: () => void
   t: TranslateFn
 }) {
   return (
@@ -56,6 +58,9 @@ export default function TopToolbar({
           <BlockIcon icon={workflowIcon || 'ri-flow-chart'} size={16} />
           <span className="wf-toolbar-name">{workflowName}</span>
         </span>
+        <button type="button" className="wf-icon-btn" title={t('autoLayout')} onClick={onAutoLayout}>
+          <i className="ri-magic-line" />
+        </button>
       </div>
 
       <div className="wf-toolbar-group wf-toolbar-tabs">

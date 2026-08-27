@@ -55,6 +55,7 @@ import CanvasControls from './toolbar/CanvasControls'
 import { useToast } from './toast'
 import { makeTranslate, resolveEditorLocale } from './i18n'
 import { EditorLocaleContext, makeEditorLocale, type EditorLocale as EditorLocaleValue } from './locale-context'
+import { autoLayout } from './auto-layout'
 import './editor.css'
 
 const DEFAULT_SETTINGS: WorkflowSettings = {
@@ -357,6 +358,26 @@ export default function EditorApp() {
     }
   }, [recording, toast, t])
 
+  const handleAutoLayout = useCallback(() => {
+    setNodes((nds) => {
+      const layoutNodes = nds.map((n) => ({
+        id: n.id,
+        measured: { width: n.measured?.width, height: n.measured?.height },
+      }))
+      const positions = autoLayout(
+        layoutNodes,
+        edges.map((e) => ({ source: e.source, target: e.target })),
+      )
+      return nds.map((n) => {
+        const p = positions.get(n.id)
+        return p ? { ...n, position: p } : n
+      })
+    })
+    // Fit view after React Flow re-renders the moved nodes.
+    setTimeout(() => reactFlow.fitView({ duration: 300, padding: 0.2 }), 60)
+    toast.show(t('autoLayoutDone'), 'ok')
+  }, [edges, reactFlow, toast, t])
+
   // --- keyboard shortcuts ----------------------------------------------------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -471,6 +492,7 @@ export default function EditorApp() {
         onSave={() => void handleSave()}
         onRun={() => void handleRun()}
         onToggleRecording={() => void toggleRecording()}
+        onAutoLayout={handleAutoLayout}
         t={t}
       />
 

@@ -34,6 +34,7 @@ import {
   goForward,
   listAllTabUrls,
   newTab as driverNewTab,
+  resolveAutomationTab,
   newWindow as driverNewWindow,
   switchTab as driverSwitchTab,
 } from '../driver'
@@ -54,6 +55,14 @@ export interface WorkflowExecCtx {
   outputs?: Record<string, string>
   /** The default out-edge target node id; used when the executor returns null. */
   defaultNext?: string | null
+  /**
+   * The tab this run is acting on. Undefined until resolved; navigation blocks
+   * update it when they open/switch tabs so later steps follow the right page
+   * instead of the extension popup that launched the run.
+   */
+  tabId?: number
+  /** Pin the target tab (called by new-tab / link / switch-tab executors). */
+  setTab?: (tabId: number) => void
 }
 
 /**
@@ -113,7 +122,7 @@ function message(error: unknown): string {
 async function runRaw(op: Op, ctx: WorkflowExecCtx): Promise<string | null> {
   assertActive(ctx)
   try {
-    const result = await execOnActiveTab(op, ctx.signal)
+    const result = await execOnActiveTab(op, ctx.signal, ctx.tabId)
     ctx.emit('result', result?.note ?? 'ok')
   } catch (error) {
     ctx.emit('error', message(error))
@@ -172,7 +181,7 @@ const scroll: BlockExecutor = async (data, ctx) => {
       assertActive(ctx)
       const safe = { ...op, scroll: { mode: 'by' as const, x: x / steps, y: y / steps, smooth: true } }
       try {
-        await execOnActiveTab(safe, ctx.signal)
+        await execOnActiveTab(safe, ctx.signal, ctx.tabId)
       } catch (error) {
         ctx.emit('error', message(error))
         break
@@ -209,6 +218,7 @@ const waitFor: BlockExecutor = async (data, ctx) => {
     const result = await execOnActiveTab(
       { action: 'wait_for', target: targetFrom(data) },
       ctx.signal,
+      ctx.tabId,
     )
     if (result?.found) ctx.emit('result', '元素已出现')
     else ctx.emit('error', '等待超时，元素未出现')
@@ -235,7 +245,7 @@ const takeScreenshot: BlockExecutor = async (data, ctx) => {
         }
         op.value = selector
       }
-      const result = await execOnActiveTab(op, ctx.signal)
+      const result = await execOnActiveTab(op, ctx.signal, ctx.tabId)
       if (result.ok && typeof result.data === 'string') {
         ctx.variables[variable] = result.data
         ctx.emit('result', `已截图 (${type})`)
@@ -292,12 +302,13 @@ const openUrl: BlockExecutor = async (data, ctx) => {
     ctx.emit('error', `仅允许打开 http(s) 页面: ${url}`)
     return null
   }
-  const tab = await activeTab()
+  const tab = await resolveAutomationTab(ctx.tabId)
   if (!tab || typeof tab.id !== 'number') {
-    ctx.emit('error', '没有活动标签页')
+    ctx.emit('error', '没有可操作的网页标签页')
     return null
   }
   await chrome.tabs.update(tab.id, { url })
+  ctx.setTab?.(tab.id)
   await waitForTabLoaded(tab.id, ctx.signal)
   ctx.emit('result', `已打开 ${url}`)
   return null
@@ -308,6 +319,7 @@ const newTabExec: BlockExecutor = async (data, ctx) => {
   const url = data['url'] ? String(data['url']) : undefined
   try {
     const tab = await driverNewTab(url)
+    ctx.setTab?.(tab.id)
     if (url && data['waitTabLoaded'] !== false) {
       await waitForTabLoaded(tab.id, ctx.signal)
     }
@@ -322,6 +334,7 @@ const switchTabExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   try {
     const tab = await driverSwitchTab(Number(data['index'] ?? 0))
+    ctx.setTab?.(tab.id)
     ctx.emit('result', `已切换到标签页 #${tab.id}`)
   } catch (error) {
     ctx.emit('error', message(error))
@@ -668,6 +681,7 @@ const linkBlock: BlockExecutor = async (data, ctx) => {
     const result = await execOnActiveTab(
       { action: 'click_link', target: cssTarget(selector) },
       ctx.signal,
+      ctx.tabId,
     )
     const info = result.data as { href?: string; target?: string } | undefined
     const href = info?.href ?? result.note ?? ''
@@ -675,11 +689,12 @@ const linkBlock: BlockExecutor = async (data, ctx) => {
     if (newTab && info?.target === '_self') {
       if (href) {
         const tab = await driverNewTab(href)
+        ctx.setTab?.(tab.id)
         if (waitLoaded) await waitForTabLoaded(tab.id, ctx.signal)
       }
       ctx.emit('result', `已在新标签页打开 ${href}`)
     } else {
-      await execOnActiveTab(withWait({ action: 'click', target: cssTarget(selector) }, data), ctx.signal)
+      await execOnActiveTab(withWait({ action: 'click', target: cssTarget(selector) }, data), ctx.signal, ctx.tabId)
       if (waitLoaded) {
         const tab = await activeTab().catch(() => null)
         if (tab && typeof tab.id === 'number') await waitForTabLoaded(tab.id, ctx.signal)
@@ -704,7 +719,7 @@ const attributeValueExec: BlockExecutor = async (data, ctx) => {
   }
   if (op === 'set') opData.value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
   try {
-    const result = await execOnActiveTab(opData, ctx.signal)
+    const result = await execOnActiveTab(opData, ctx.signal, ctx.tabId)
     if (op === 'get') {
       ctx.variables[variable] = result.data ?? result.note ?? ''
       ctx.emit('result', String(result.data ?? result.note ?? ''))
@@ -794,7 +809,7 @@ const uploadFileExec: BlockExecutor = async (data, ctx) => {
     // to MV3 extensions. We accept a data-url and hand it to the input; a
     // re-run against a blob/data URL produces a usable File for many pipelines.
     const opData: Op = { action: 'fill', target: cssTarget(selector), value: dataUrl }
-    await execOnActiveTab(opData, ctx.signal)
+    await execOnActiveTab(opData, ctx.signal, ctx.tabId)
     ctx.emit('result', '已设置文件输入')
   } catch (error) {
     ctx.emit('error', message(error))
@@ -1038,7 +1053,7 @@ const getForm: BlockExecutor = async (data, ctx) => {
   try {
     const op: Op = { action: 'read_form' }
     if (selector) op.value = selector
-    const result = await execOnActiveTab(op, ctx.signal)
+    const result = await execOnActiveTab(op, ctx.signal, ctx.tabId)
     ctx.variables[variable] = result.data ?? {}
     ctx.emit('result', JSON.stringify(result.data ?? {}).slice(0, 80))
   } catch (error) {

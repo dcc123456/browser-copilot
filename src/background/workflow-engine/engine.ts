@@ -169,6 +169,8 @@ function buildExecCtx(
   outputs: Record<string, string>,
   defaultNext: string | null,
   onStep: (kind: EmitKind, nodeId: string, text: string) => void,
+  tabId: number | undefined,
+  setTab: (id: number) => void,
 ): WorkflowExecCtx {
   return {
     variables,
@@ -176,6 +178,8 @@ function buildExecCtx(
     signal,
     outputs,
     defaultNext,
+    tabId,
+    setTab,
     emit: (kind, text) => onStep(kind, currentId, text),
   }
 }
@@ -235,6 +239,10 @@ async function runCore(
   let error: string | undefined
   let steps = 0
   let currentNodeId = ''
+  // The tab this run drives. Undefined until the first driver call resolves it;
+  // navigation blocks pin it so steps follow the opened/navigated page rather
+  // than the extension popup that launched the run.
+  let targetTabId: number | undefined
 
   /** Run exactly one node; returns the next node id or `null` to finish. */
   async function runNode(nodeId: string): Promise<string | null> {
@@ -324,7 +332,18 @@ async function runCore(
       return null
     }
 
-    const ctx = buildExecCtx(variables, signalToUse, nodeId, outputs, defaultNext, emit)
+    const ctx = buildExecCtx(
+      variables,
+      signalToUse,
+      nodeId,
+      outputs,
+      defaultNext,
+      emit,
+      targetTabId,
+      (id) => {
+        targetTabId = id
+      },
+    )
     const policy = onErrorPolicy(params)
 
     // Execute with Automa's onError semantics: retry up to retryTimes (with

@@ -20,6 +20,44 @@ import type { Op, OpResult, PageSnapshot } from '../lib/ops'
 import { runOp } from '../inpage/kernel'
 import { activeTab } from './page'
 
+/**
+ * Resolve the tab a workflow should act on.
+ *
+ * A run launched from the editor popup or side panel has focus on an
+ * extension page (`chrome-extension://…`), which cannot be scripted. In that
+ * case fall back to the active tab of the most recently focused *normal*
+ * browser window that is on an ordinary http(s) page. When the focused window
+ * already shows an injectable page it is used directly.
+ *
+ * @param preferredTabId an optional tab pinned for this run (e.g. a tab a
+ *   navigation block opened); it wins while still injectable.
+ */
+export async function resolveAutomationTab(
+  preferredTabId?: number,
+): Promise<chrome.tabs.Tab | undefined> {
+  if (typeof preferredTabId === 'number') {
+    const pinned = await chrome.tabs.get(preferredTabId).catch(() => undefined)
+    if (pinned && isInjectablePage(pinned.url)) return pinned
+  }
+
+  const focused = await activeTab()
+  if (focused && isInjectablePage(focused.url)) return focused
+
+  // Focused window is an extension page / not injectable: search normal
+  // windows (most recently focused first) for an active http(s) tab.
+  const windows = await chrome.windows.getAll({ windowTypes: ['normal'] }).catch(() => [])
+  const sorted = (windows as chrome.windows.Window[]).slice().sort((a, b) => (b.id ?? 0) - (a.id ?? 0))
+  for (const win of sorted) {
+    if (typeof win.id !== 'number') continue
+    const tabs = await chrome.tabs.query({ windowId: win.id, active: true }).catch(() => [])
+    const hit = tabs.find((t) => isInjectablePage(t.url))
+    if (hit) return hit
+  }
+  // Last resort: any injectable active tab anywhere.
+  const anyTabs = await chrome.tabs.query({ active: true }).catch(() => [])
+  return anyTabs.find((t) => isInjectablePage(t.url)) ?? focused
+}
+
 /** Fragments Chrome produces when a navigation invalidated the context. */
 const CONTEXT_LOST_PATTERNS = [
   'was removed',
@@ -91,8 +129,12 @@ export class DriverError extends Error {}
  * @throws {DriverError} when there is no usable tab or injection fails for a
  *   reason other than an expected navigation.
  */
-export async function execOnActiveTab(op: Op, signal?: AbortSignal): Promise<OpResult> {
-  const tab = await activeTab()
+export async function execOnActiveTab(
+  op: Op,
+  signal?: AbortSignal,
+  preferredTabId?: number,
+): Promise<OpResult> {
+  const tab = await resolveAutomationTab(preferredTabId)
   if (!tab || typeof tab.id !== 'number') {
     throw new DriverError('No active tab to operate on.')
   }
