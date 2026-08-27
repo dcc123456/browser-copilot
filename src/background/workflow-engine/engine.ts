@@ -17,7 +17,7 @@ import {
   type WorkflowExecCtx,
 } from './executors'
 
-export type EmitKind = 'status' | 'result' | 'error' | 'info'
+export type EmitKind = 'tool' | 'status' | 'result' | 'error' | 'info'
 
 export interface WorkflowRunOptions {
   /** Node id to start from. Defaults to the first trigger or, failing that, the first node. */
@@ -243,6 +243,10 @@ async function runCore(
     const current = nodeById.get(nodeId)
     if (!current) return null
     currentNodeId = nodeId
+
+    // Emit a per-block marker so run logs show every block entered, even ones
+    // that produce no status/result line of their own (click, delay, trigger).
+    emit('tool', nodeId, '')
 
     if (++steps > MAX_STEPS) {
       emit('error', nodeId, '步骤超限，疑似死循环')

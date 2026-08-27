@@ -12,7 +12,19 @@
 import type { Workflow } from '../../lib/workflow/types'
 import { addStep, finishRun, startRun, type RunSource } from '../running-tasks'
 import { countElements } from '../driver'
+import { BLOCK_BY_ID } from '../../lib/workflow/blocks/palette'
 import { runWorkflow } from './engine'
+
+/** Resolve a node id to a human-readable block label for run logs. */
+function nodeLabel(workflow: Workflow, nodeId: string): string {
+  const node = workflow.drawflow.nodes.find((n) => n.id === nodeId)
+  if (!node) return nodeId
+  const blockId = (node.data?.['blockId'] as string) || node.label
+  const block = BLOCK_BY_ID.get(blockId)
+  const desc = (node.data?.['description'] as string) || ''
+  const name = block?.name ?? blockId
+  return desc ? `${name}: ${desc}` : name
+}
 
 export interface ExecuteWorkflowOptions {
   source: RunSource
@@ -43,6 +55,7 @@ export async function executeWorkflow(
     label: workflow.name,
     source: opts.source,
     taskId: opts.taskId,
+    workflowId: workflow.id,
     feishuChatId: opts.feishuChatId,
   })
   const runId = run.runId
@@ -53,10 +66,12 @@ export async function executeWorkflow(
       signal: run.controller.signal,
       loopElementCounter: (selector, signal) => countElements(selector, signal),
       onStep: (kind, nodeId, text) => {
-        // status / result / error / info become progress lines verbatim.
-        addStep(runId, kind, text)
-        // Plus a "tool" marker so logs show which block is on stage.
-        addStep(runId, 'tool', '→ ' + nodeId)
+        if (kind === 'tool') {
+          // Per-block header: resolved block name, not the raw node id.
+          addStep(runId, 'tool', nodeLabel(workflow, nodeId))
+        } else {
+          addStep(runId, kind, text)
+        }
         // Surface to the caller (e.g. Feishu streaming) alongside the run log.
         opts.onStep?.(kind, nodeId, text)
       },

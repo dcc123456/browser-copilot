@@ -1051,12 +1051,128 @@ function placeholder(blockId: string): BlockExecutor {
   }
 }
 
+/** Automa `forms` block: text/select/checkbox/radio input on one selector. */
+const formsBlock: BlockExecutor = async (data, ctx) => {
+  assertActive(ctx)
+  const type = String(data['type'] ?? 'text-field')
+  const value = data['value']
+  const target = targetFrom(data)
+
+  if (type === 'checkbox' || type === 'radio') {
+    const checked = typeof value === 'boolean' ? value : true
+    return runRaw({ action: 'set_checkbox', target, value: checked }, ctx)
+  }
+  if (type === 'select') {
+    return runRaw({ action: 'select_option', target, value: String(value ?? '') }, ctx)
+  }
+  return runRaw({ action: 'fill', target, value: String(value ?? '') }, ctx)
+}
+
+/** Automa `element-scroll` block: scroll an element or the window by X/Y. */
+const elementScroll: BlockExecutor = async (data, ctx) => {
+  assertActive(ctx)
+  const x = Number(data['scrollX'] ?? 0)
+  const y = Number(data['scrollY'] ?? 0)
+  const smooth = data['smooth'] === true
+  const selector = sel(data)
+  if (!selector || selector === 'window' || selector === 'html') {
+    return runRaw({ action: 'scroll', scroll: { mode: 'by', x, y, smooth } }, ctx)
+  }
+  if (data['scrollIntoView']) {
+    return runRaw({ action: 'scroll', target: targetFrom(data), scroll: { mode: 'into_view' } }, ctx)
+  }
+  return runRaw(
+    { action: 'scroll', target: targetFrom(data), scroll: { mode: 'by', x, y, smooth } },
+    ctx,
+  )
+}
+
 /**
- * Block-executor registry, keyed by block id (the same ids defined in
- * `lib/workflow/registry.ts`). The engine resolves the block id from
- * `WorkflowNode.data.blockId` (falling back to the legacy `label` field) and
- * dispatches through this map, then passes the node's `data.values` bag as
- * the executor's `data` argument.
+ * Automa `conditions` block: named output groups each with AND-ed rows; the
+ * groups are OR-ed. A truthy group routes to output-1 (true), otherwise
+ * output-2 (false). Falls back to a `code` expression for the older shape.
+ */
+const conditionsBlock: BlockExecutor = async (data, ctx) => {
+  assertActive(ctx)
+  const code = data['code'] as string | undefined
+  let matched = false
+  if (code) {
+    try {
+      const test = new Function('vars', 'refData', `return (${code})`)
+      matched = Boolean(test(ctx.variables, ctx.refData))
+    } catch {
+      matched = false
+    }
+  } else {
+    // Evaluate condition rows: a group is true when all its rows compare true.
+    const groups = (data['conditions'] as { conditions?: ConditionRow[] }[] | undefined) ?? []
+    matched = groups.some(
+      (g) =>
+        Array.isArray(g.conditions) &&
+        g.conditions.length > 0 &&
+        g.conditions.every((row) => evalConditionRow(row, ctx.variables)),
+    )
+  }
+  ctx.emit('result', matched ? '条件成立' : '条件不成立')
+  return matched
+    ? (ctx.outputs?.['true'] ?? ctx.outputs?.['output-1'] ?? ctx.defaultNext ?? null)
+    : (ctx.outputs?.['false'] ?? ctx.outputs?.['output-2'] ?? ctx.defaultNext ?? null)
+}
+
+interface ConditionRow {
+  /** Value type (value/element data/...); here we interpret `value` literals. */
+  type?: string
+  /** Automa compare operator: eql, nq, cnt, contains, exists, ... */
+  compare?: string
+  value?: unknown
+  /** Variable name referenced by the row, when type is a data lookup. */
+  name?: string
+}
+
+/** Evaluate one Automa condition row against runtime variables. */
+function evalConditionRow(row: ConditionRow, vars: Record<string, unknown>): boolean {
+  const left = row.name !== undefined && row.name !== '' ? vars[row.name] : row.value
+  const right = row.value
+  const present = left !== undefined && left !== null && left !== ''
+  switch (row.compare ?? '') {
+    case 'nq':
+    case 'not-exists':
+    case 'not-visible':
+      return !present
+    case 'exists':
+    case 'visible':
+    case 'visible-screen':
+      return present
+    case 'cnt':
+    case 'contains':
+      return String(left ?? '').includes(String(right ?? ''))
+    case 'nct':
+      return !String(left ?? '').includes(String(right ?? ''))
+    case 'gt':
+      return Number(left) > Number(right)
+    case 'gte':
+      return Number(left) >= Number(right)
+    case 'lt':
+      return Number(left) < Number(right)
+    case 'lte':
+      return Number(left) <= Number(right)
+    case 'eql':
+    case 'eq':
+    default:
+      // Equality with type coercion for numbers, else string compare.
+      if (typeof left === 'number' || typeof right === 'number') return Number(left) === Number(right)
+      return String(left ?? '') === String(right ?? '')
+  }
+}
+
+/** Automa `event-click` / `hover-element` reuse the legacy implementations. */
+const eventClick: BlockExecutor = click
+const hoverElement: BlockExecutor = hover
+
+/**
+ * Block-executor registry, keyed by block id. The engine resolves the block id
+ * from `WorkflowNode.data.blockId` (falling back to the legacy `label` field)
+ * and dispatches through this map.
  */
 export const EXECUTORS: Record<string, BlockExecutor> = {
   // browser
@@ -1131,6 +1247,14 @@ export const EXECUTORS: Record<string, BlockExecutor> = {
   'wait-connections': waitConnections,
   'note': note,
   'blocks-group': blocksGroup,
+  // Automa-catalog ids produced by the editor / recorder.
+  'trigger': noop,
+  'event-click': eventClick,
+  'hover-element': hoverElement,
+  'element-scroll': elementScroll,
+  'forms': formsBlock,
+  'conditions': conditionsBlock,
+  'loop-breakpoint': noop,
   // trigger
   'visit-web': noop,
   'schedule': noop,

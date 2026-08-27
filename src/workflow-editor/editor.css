@@ -881,6 +881,75 @@
   color: var(--bc-success);
 }
 
+/* detailed per-block log lines */
+.wf-log-steps {
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+  gap: 1px;
+}
+.wf-log-line {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 1px 0;
+}
+.wf-log-time {
+  flex: none;
+  color: var(--bc-text-faint);
+  font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
+  width: 52px;
+}
+.wf-log-block {
+  font-weight: 600;
+  color: var(--bc-text);
+}
+.wf-log-block::before {
+  content: "▸ ";
+  color: var(--bc-accent);
+}
+.wf-log-text {
+  color: var(--bc-text-dim);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.wf-log-line-result .wf-log-text {
+  color: var(--bc-success);
+}
+.wf-log-line-error .wf-log-text,
+.wf-log-line-error .wf-log-time {
+  color: var(--bc-danger);
+}
+.wf-log-line-info .wf-log-text {
+  color: var(--bc-text-dim);
+  font-style: italic;
+}
+.wf-log-error {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--bc-danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bc-danger) 35%, transparent);
+  border-radius: 8px;
+  color: var(--bc-danger);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow: auto;
+}
+.wf-log-cancel {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--bc-text-faint);
+  font-style: italic;
+}
+.wf-log-running .wf-log-meta {
+  color: var(--bc-accent);
+}
+
 /* error banner */
 .wf-error-banner {
   position: absolute;

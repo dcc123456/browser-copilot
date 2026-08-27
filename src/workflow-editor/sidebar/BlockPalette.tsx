@@ -13,6 +13,7 @@ import { useMemo, useState } from 'react'
 import { blocksByCategory, CATEGORY_META } from '../../lib/workflow/blocks/palette'
 import { BlockIcon } from '../../lib/workflow/blocks/icons'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
+import { useEditorLocale } from '../locale-context'
 
 const PINNED_KEY = 'bc.palette.pinned'
 
@@ -33,11 +34,12 @@ function BlockCard({
   pinned: boolean
   onTogglePin: () => void
 }) {
+  const { blockName } = useEditorLocale()
   return (
     <div
       className="wf-palette-card"
       draggable
-      title={block.description || block.name}
+      title={block.description || blockName(block.id, block.name)}
       onDragStart={(e) => {
         e.dataTransfer.setData('application/workflow-block', block.id)
         e.dataTransfer.effectAllowed = 'copy'
@@ -65,7 +67,7 @@ function BlockCard({
       </div>
       {block.tag && <div className="wf-palette-tag">{block.tag}</div>}
       <BlockIcon icon={block.icon} size={24} />
-      <p>{block.name}</p>
+      <p>{blockName(block.id, block.name)}</p>
     </div>
   )
 }
@@ -81,6 +83,7 @@ function CategorySection({
   pinned: string[]
   onTogglePin: (id: string) => void
 }) {
+  const { categoryName } = useEditorLocale()
   const [open, setOpen] = useState(true)
   const meta = CATEGORY_META[categoryId as keyof typeof CATEGORY_META]
   return (
@@ -90,7 +93,7 @@ function CategorySection({
           className="wf-palette-dot"
           style={{ backgroundColor: `var(--cat-${categoryId})` }}
         />
-        <span className="wf-palette-title">{meta?.name ?? categoryId}</span>
+        <span className="wf-palette-title">{categoryName(categoryId, meta?.name ?? categoryId)}</span>
         <i className={open ? 'ri-subtract-line' : 'ri-add-line'} />
       </button>
       {open && (

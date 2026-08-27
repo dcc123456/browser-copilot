@@ -16,6 +16,7 @@ import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { BlockIcon } from '../../lib/workflow/blocks/icons'
 import { CATEGORY_META } from '../../lib/workflow/blocks/palette'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
+import { useEditorLocale } from '../locale-context'
 
 /** Extra node-data fields the editor stores alongside the Automa block data. */
 export interface BlockNodeData extends Record<string, unknown> {
@@ -56,6 +57,7 @@ const BRANCH_HANDLES: Record<string, { idSuffix: string; label: string }[]> = {
 }
 
 function BlockNodeComponent({ data, selected }: NodeProps) {
+  const { blockName } = useEditorLocale()
   const node = data as unknown as BlockNodeData
   const block = node.block
   if (!block) return null
@@ -64,6 +66,7 @@ function BlockNodeComponent({ data, selected }: NodeProps) {
   const onError = bd.onError as { enable?: boolean; toDo?: string } | undefined
   const hasFallback = onError?.enable === true && onError?.toDo === 'fallback'
   const cat = CATEGORY_META[block.category]
+  const displayName = blockName(block.id, block.name)
   const description = typeof bd.description === 'string' ? bd.description : ''
   // Selector/URL summary for blocks without a custom description.
   const summary =
@@ -108,7 +111,7 @@ function BlockNodeComponent({ data, selected }: NodeProps) {
         </span>
         <div className="wf-node-text">
           {hasError && <i className="wf-node-alert ri-error-warning-line" />}
-          <p className="wf-node-name">{node.label || block.name}</p>
+          <p className="wf-node-name">{node.label || displayName}</p>
           {summary && <p className="wf-node-desc">{summary}</p>}
           {bd.loopId ? (
             <span className="wf-node-loopid" title="Loop id (click to copy)">

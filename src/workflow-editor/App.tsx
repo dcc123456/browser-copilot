@@ -53,7 +53,8 @@ import EditorLogs from './sidebar/EditorLogs'
 import TopToolbar, { type EditorTab } from './toolbar/TopToolbar'
 import CanvasControls from './toolbar/CanvasControls'
 import { useToast } from './toast'
-import { makeTranslate, resolveEditorLocale, type TranslateFn } from './i18n'
+import { makeTranslate, resolveEditorLocale } from './i18n'
+import { EditorLocaleContext, makeEditorLocale, type EditorLocale as EditorLocaleValue } from './locale-context'
 import './editor.css'
 
 const DEFAULT_SETTINGS: WorkflowSettings = {
@@ -108,7 +109,10 @@ export default function EditorApp() {
   const [recording, setRecording] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [t, setT] = useState<TranslateFn>(() => makeTranslate(resolveEditorLocale(undefined)))
+  const [editorLocale, setEditorLocale] = useState<EditorLocaleValue>(() =>
+    makeEditorLocale(resolveEditorLocale(undefined), makeTranslate(resolveEditorLocale(undefined))),
+  )
+  const t = editorLocale.t
 
   const toast = useToast()
 
@@ -132,7 +136,10 @@ export default function EditorApp() {
   // Resolve language from the stored locale.
   useEffect(() => {
     void getSettings()
-      .then((s) => setT(makeTranslate(resolveEditorLocale((s as { locale?: string }).locale))))
+      .then((s) => {
+        const loc = resolveEditorLocale((s as { locale?: string }).locale)
+        setEditorLocale(makeEditorLocale(loc, makeTranslate(loc)))
+      })
       .catch(() => {})
   }, [])
 
@@ -386,7 +393,7 @@ export default function EditorApp() {
 
   const rightContent =
     tab === 'logs' ? (
-      <EditorLogs t={t} />
+      <EditorLogs workflowId={workflowId} t={t} />
     ) : selectedNode && selectedBlock ? (
       <BlockEditForm
         block={selectedBlock}
@@ -404,6 +411,7 @@ export default function EditorApp() {
     )
 
   return (
+    <EditorLocaleContext.Provider value={editorLocale}>
     <div className="wf-editor">
       <ReactFlow
         nodes={nodes}
@@ -479,5 +487,6 @@ export default function EditorApp() {
         {rightContent}
       </Sidebar>
     </div>
+    </EditorLocaleContext.Provider>
   )
 }

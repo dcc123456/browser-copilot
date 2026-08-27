@@ -42,6 +42,8 @@ export interface RunningTask {
    * one-off Feishu instructions have none.
    */
   taskId?: string
+  /** Saved workflow id, when this run executes a workflow (for editor logs). */
+  workflowId?: string
   /** Display name: task name, or a short label for an ad-hoc run. */
   label: string
   source: RunSource
@@ -59,6 +61,8 @@ export interface RunningTask {
 export interface FinishedTask {
   runId: string
   taskId?: string
+  /** Saved workflow id, when this run executed a workflow (for editor logs). */
+  workflowId?: string
   label: string
   source: RunSource
   startedAt: number
@@ -106,6 +110,7 @@ export interface StartRunOptions {
   label: string
   source: RunSource
   taskId?: string
+  workflowId?: string
   feishuChatId?: string
   controller?: AbortController
   onCancel?: () => void
@@ -121,6 +126,7 @@ export function startRun(options: StartRunOptions): RunningTask {
   const task: RunningTask = {
     runId: newRunId(),
     taskId: options.taskId,
+    workflowId: options.workflowId,
     label: options.label,
     source: options.source,
     feishuChatId: options.feishuChatId,
@@ -173,6 +179,7 @@ export function finishRun(runId: string, options?: FinishOptions): void {
   const entry: FinishedTask = {
     runId: task.runId,
     taskId: task.taskId,
+    workflowId: task.workflowId,
     label: task.label,
     source: task.source,
     startedAt: task.startedAt,

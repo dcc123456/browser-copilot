@@ -17,6 +17,7 @@ import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
 import { EditForms } from '../blocks/EditForms'
 import BlockSettings from '../blocks/shared/BlockSettings'
 import type { TranslateFn } from '../i18n'
+import { useEditorLocale } from '../locale-context'
 
 export interface BlockEditFormProps {
   block: BlockCatalogEntry
@@ -97,6 +98,7 @@ export default function BlockEditForm({
   onBack,
   t,
 }: BlockEditFormProps) {
+  const { blockName } = useEditorLocale()
   const EditComponent = block.editComponent ? EditForms[block.editComponent] : undefined
   const cloud = isCloudBlock(block.id)
 
@@ -109,7 +111,7 @@ export default function BlockEditForm({
         <span className="wf-edit-chip" style={{ backgroundColor: `var(--cat-${block.category})` }}>
           <BlockIcon icon={block.icon} size={16} />
         </span>
-        <p className="wf-edit-title">{nodeName || block.name}</p>
+        <p className="wf-edit-title">{nodeName || blockName(block.id, block.name)}</p>
         <span className="wf-edit-spacer" />
         <a
           href={`https://docs.extension.automa.site/blocks/${block.id}.html`}

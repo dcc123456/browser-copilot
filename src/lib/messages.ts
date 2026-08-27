@@ -126,7 +126,7 @@ export type Command =
   | { type: 'workflows.save'; workflow: Workflow }
   | { type: 'workflows.delete'; id: string }
   | { type: 'workflows.run'; id: string }
-  | { type: 'workflows.running' }
+  | { type: 'workflows.running'; workflowId?: string }
 
   // --- Workflow recording (see background/record-controller.ts) ---
   /** Start recording: injects the recorder into all http tabs, sets the rec badge. */

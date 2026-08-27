@@ -398,31 +398,38 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 // Wire tab/navigation listeners for workflow recording.
 initRecordingLifecycle()
 
-function runningBoardsView(): {
-  runs: { runId: string; taskId?: string; label: string; source: ReturnType<typeof listRunning>[number]['source']; startedAt: number; steps: ReturnType<typeof listRunning>[number]['steps'] }[]
-  finished: { runId: string; taskId?: string; label: string; source: ReturnType<typeof listFinished>[number]['source']; startedAt: number; finishedAt: number; outcome: ReturnType<typeof listFinished>[number]['outcome']; summary?: string; steps: ReturnType<typeof listFinished>[number]['steps'] }[]
+function runningBoardsView(workflowIdFilter?: string): {
+  runs: { runId: string; taskId?: string; workflowId?: string; label: string; source: ReturnType<typeof listRunning>[number]['source']; startedAt: number; steps: ReturnType<typeof listRunning>[number]['steps'] }[]
+  finished: { runId: string; taskId?: string; workflowId?: string; label: string; source: ReturnType<typeof listFinished>[number]['source']; startedAt: number; finishedAt: number; outcome: ReturnType<typeof listFinished>[number]['outcome']; summary?: string; error?: string; steps: ReturnType<typeof listFinished>[number]['steps'] }[]
 } {
   const mapFinished = (r: ReturnType<typeof listFinished>[number]) => ({
     runId: r.runId,
     taskId: r.taskId,
+    workflowId: r.workflowId,
     label: r.label,
     source: r.source,
     startedAt: r.startedAt,
     finishedAt: r.finishedAt,
     outcome: r.outcome,
     summary: r.summary,
+    error: r.error,
     steps: r.steps,
   })
+  const matches = <T extends { workflowId?: string }>(r: T): boolean =>
+    !workflowIdFilter || r.workflowId === workflowIdFilter
   return {
-    runs: listRunning().map((r) => ({
-      runId: r.runId,
-      taskId: r.taskId,
-      label: r.label,
-      source: r.source,
-      startedAt: r.startedAt,
-      steps: r.steps,
-    })),
-    finished: listFinished().map(mapFinished),
+    runs: listRunning()
+      .filter(matches)
+      .map((r) => ({
+        runId: r.runId,
+        taskId: r.taskId,
+        workflowId: r.workflowId,
+        label: r.label,
+        source: r.source,
+        startedAt: r.startedAt,
+        steps: r.steps,
+      })),
+    finished: listFinished().filter(matches).map(mapFinished),
   }
 }
 
@@ -674,7 +681,7 @@ async function handleCommand(command: Command): Promise<CommandResult> {
     }
 
     case 'workflows.running': {
-      const boards = runningBoardsView()
+      const boards = runningBoardsView((command as { workflowId?: string }).workflowId)
       return { type: 'workflows.running', ...boards }
     }
 
