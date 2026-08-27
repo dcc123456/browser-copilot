@@ -21,6 +21,13 @@ import {
 } from '../lib/messages'
 import { isInjectablePage } from '../lib/pages'
 import { handlePickerMessage } from './picker-bridge'
+import {
+  startRecording,
+  stopRecording,
+  isRecording,
+  handleRecordEvent,
+  initRecordingLifecycle,
+} from './record-controller'
 import { validateProfile } from '../lib/providers'
 import { normalizeSkill, validateSkill, wrapSkillDirective } from '../lib/skills'
 import {
@@ -321,9 +328,13 @@ chrome.action.onClicked.addListener((tab) => {
 // they need the raw sender and an immediate async response, and their results
 // are broadcast back to editor windows by picker-bridge.
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (handleRecordEvent(message)) return true
   if (handlePickerMessage(message, sender, sendResponse)) return true
   return undefined
 })
+
+// Wire tab/navigation listeners for workflow recording.
+initRecordingLifecycle()
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   void (async () => {
@@ -622,14 +633,14 @@ async function handleCommand(command: Command): Promise<CommandResult> {
     }
 
     case 'record.start':
-      // Recording controller lands in P5 (background/record-controller.ts).
-      return { type: 'record.start', recording: false }
-    case 'record.stop':
-      return { type: 'record.stop' }
-    case 'record.status': {
-      const { recordState } = await chrome.storage.local.get('recordState')
-      return { type: 'record.status', recording: recordState?.recording === true }
+      await startRecording()
+      return { type: 'record.start', recording: true }
+    case 'record.stop': {
+      const workflowId = await stopRecording()
+      return { type: 'record.stop', workflowId }
     }
+    case 'record.status':
+      return { type: 'record.status', recording: isRecording() }
 
     default: {
       const exhaustive: never = command
