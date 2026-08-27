@@ -130,6 +130,11 @@ export function initRecordingLifecycle(): void {
     appendFlow({
       blockId: details.transitionType === 'link' ? 'link' : 'new-tab',
       url: details.url,
+      // Wait for the page to finish loading before the next recorded step
+      // runs (Automa's "wait until the tab is loaded").
+      waitTabLoaded: true,
+      waitForSelector: true,
+      waitSelectorTimeout: 10000,
       description: details.url,
     })
     // Re-inject recorder after the page context is replaced.

@@ -75,6 +75,13 @@ export interface Op {
   scroll?: ScrollSpec
   /** Whether to clear an input before typing (default true for `fill`). */
   clear?: boolean
+  /**
+   * Poll (in-page) up to this many milliseconds for the target element to
+   * appear before running the action. Mirrors Automa's `waitForSelector`
+   * flag: recorded interaction blocks set it so steps that navigate first
+   * don't race the element that appears after load.
+   */
+  waitFor?: number
   /** Character budget for snapshot text. */
   maxChars?: number
   /** Max interactive elements in a snapshot. */

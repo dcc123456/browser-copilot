@@ -93,6 +93,93 @@ export const startRecorder: RecorderStart = (args) => {
     return (el as HTMLElement).isContentEditable === true
   }
 
+  // --- Text-field recording -------------------------------------------------
+  // Automa attaches the element's selector on focus, then listens for `input`
+  // (debounced). Relying on `change` alone misses fields the user submits via
+  // Enter / button without blurring (the context is torn down before change
+  // fires), so we record on input, on Enter and on change, deduping per field.
+  const TEXT_PENDING = new Map<Element, { selector: string; name: string; timer: ReturnType<typeof setTimeout> | null }>()
+
+  function textFieldValue(el: Element): string {
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return (el as HTMLInputElement).value
+    return (el as HTMLElement).innerText ?? ''
+  }
+  function textFieldName(el: Element): string {
+    const ae = el.getAttribute('aria-label')
+    if (ae) return ae
+    const nm = el.getAttribute('name')
+    return nm ?? ''
+  }
+
+  function recordText(el: Element, immediate: boolean) {
+    if (!isEditable(el)) return
+    const selector = (el as HTMLElement).dataset.__bcSel ?? selectorFor(el)
+    ;(el as HTMLElement).dataset.__bcSel = selector
+    const name = textFieldName(el)
+    const sendForms = () => {
+      send({
+        blockId: 'forms',
+        selector,
+        findBy: 'cssSelector',
+        type: 'text-field',
+        value: textFieldValue(el),
+        clearValue: true,
+        delay: 100,
+        waitForSelector: true,
+        waitSelectorTimeout: 5000,
+        description: name ? `Text field (${name.slice(0, 12)})` : 'Text field',
+      })
+    }
+    if (immediate) {
+      const pending = TEXT_PENDING.get(el)
+      if (pending?.timer) clearTimeout(pending.timer)
+      TEXT_PENDING.delete(el)
+      sendForms()
+      return
+    }
+    const existing = TEXT_PENDING.get(el)
+    if (existing?.timer) clearTimeout(existing.timer)
+    const timer = setTimeout(() => {
+      TEXT_PENDING.delete(el)
+      sendForms()
+    }, 400)
+    TEXT_PENDING.set(el, { selector, name, timer })
+  }
+
+  function onFocusIn(e: FocusEvent) {
+    const el = e.target as Element | null
+    if (!el || isOurUi(el) || !isEditable(el)) return
+    ;(el as HTMLElement).dataset.__bcSel = selectorFor(el)
+    el.addEventListener('input', onInputField, true)
+  }
+  function onFocusOut(e: FocusEvent) {
+    const el = e.target as Element | null
+    if (!el || !isEditable(el)) return
+    el.removeEventListener('input', onInputField, true)
+    // Flush any pending typing into a forms block before the field loses focus.
+    const pending = TEXT_PENDING.get(el)
+    if (pending) {
+      if (pending.timer) clearTimeout(pending.timer)
+      TEXT_PENDING.delete(el)
+      send({
+        blockId: 'forms',
+        selector: pending.selector,
+        findBy: 'cssSelector',
+        type: 'text-field',
+        value: textFieldValue(el),
+        clearValue: true,
+        delay: 100,
+        waitForSelector: true,
+        waitSelectorTimeout: 5000,
+        description: pending.name ? `Text field (${pending.name.slice(0, 12)})` : 'Text field',
+      })
+    }
+  }
+  function onInputField(e: Event) {
+    const el = e.target as Element | null
+    if (el && isEditable(el)) recordText(el, false)
+  }
+
   function onClick(e: MouseEvent) {
     const el = e.target as Element | null
     if (!el || isOurUi(el)) return
@@ -104,6 +191,8 @@ export const startRecorder: RecorderStart = (args) => {
         blockId: 'link',
         selector: selectorFor(anchor),
         findBy: 'cssSelector',
+        waitForSelector: true,
+        waitSelectorTimeout: 5000,
         description: anchor.textContent?.trim().slice(0, 40) ?? '',
       })
       return
@@ -118,12 +207,14 @@ export const startRecorder: RecorderStart = (args) => {
         findBy: 'cssSelector',
         type: input.type,
         value: input.type === 'checkbox' ? input.checked : input.value,
+        waitForSelector: true,
+        waitSelectorTimeout: 5000,
         description: input.name ?? '',
       })
       return
     }
 
-    // Text fields (record on change/blur handled separately) skip here.
+    // Text fields are recorded via focus/input/blur, not on click.
     if (isEditable(el)) return
 
     // Everything else -> event click.
@@ -131,6 +222,8 @@ export const startRecorder: RecorderStart = (args) => {
       blockId: 'event-click',
       selector: selectorFor(el),
       findBy: 'cssSelector',
+      waitForSelector: true,
+      waitSelectorTimeout: 5000,
       description: (el as HTMLElement).innerText?.trim().slice(0, 40) ?? el.tagName.toLowerCase(),
       button: e.button,
     })
@@ -148,22 +241,20 @@ export const startRecorder: RecorderStart = (args) => {
         findBy: 'cssSelector',
         type: 'select',
         value: sel.value,
-        description: sel.name ?? '',
+        delay: 100,
+        waitForSelector: true,
+        waitSelectorTimeout: 5000,
+        description: sel.name ? `Element Name (${sel.name})` : '',
       })
       return
     }
 
-    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
-      const inp = el as HTMLInputElement
-      if (inp.type === 'checkbox' || inp.type === 'radio' || inp.type === 'submit' || inp.type === 'button') return
-      send({
-        blockId: 'forms',
-        selector: selectorFor(inp),
-        findBy: 'cssSelector',
-        type: inp.tagName === 'TEXTAREA' ? 'text' : 'text',
-        value: inp.value,
-        description: inp.name ?? '',
-      })
+    if (isEditable(el)) {
+      // Text fields are recorded on input/Enter/blur; avoid a duplicate here.
+      const pending = TEXT_PENDING.get(el)
+      if (pending?.timer) clearTimeout(pending.timer)
+      TEXT_PENDING.delete(el)
+      recordText(el, true)
     }
   }
 
@@ -176,10 +267,19 @@ export const startRecorder: RecorderStart = (args) => {
   function onKeydown(e: KeyboardEvent) {
     const el = e.target as Element | null
     if (el && isOurUi(el)) return
+    const typing = el ? isEditable(el) : false
+
+    // Enter in a text field commits the typed value NOW (forms block), because
+    // the form may submit and navigate before blur/change fires. Don't then
+    // record Enter as a separate press-key inside a field.
+    if (typing && e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      recordText(el as Element, true)
+      return
+    }
+
     // Record shortcuts (modifier combos) and navigation keys anywhere; only
     // record plain special keys when NOT typing in a field (those are part of
     // text entry, captured as forms).
-    const typing = el ? isEditable(el) : false
     if (typing && !e.ctrlKey && !e.metaKey && !e.altKey && !SPECIAL_KEYS.has(e.key)) return
     if (typing && !e.ctrlKey && !e.metaKey && !e.altKey && e.key !== 'Enter' && e.key !== 'Tab' && e.key !== 'Escape') return
     const key = e.key === ' ' ? 'Space' : e.key
@@ -218,6 +318,8 @@ export const startRecorder: RecorderStart = (args) => {
   document.addEventListener('click', onClick, true)
   document.addEventListener('change', onChange, true)
   document.addEventListener('keydown', onKeydown, true)
+  document.addEventListener('focusin', onFocusIn, true)
+  document.addEventListener('focusout', onFocusOut, true)
   window.addEventListener('scroll', onScroll, { capture: true, passive: true })
 
   w.__bcRecorder = {
@@ -225,6 +327,8 @@ export const startRecorder: RecorderStart = (args) => {
       document.removeEventListener('click', onClick, true)
       document.removeEventListener('change', onChange, true)
       document.removeEventListener('keydown', onKeydown, true)
+      document.removeEventListener('focusin', onFocusIn, true)
+      document.removeEventListener('focusout', onFocusOut, true)
       window.removeEventListener('scroll', onScroll, { capture: true } as EventListenerOptions)
       delete w.__bcRecorder
     },

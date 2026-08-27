@@ -298,6 +298,7 @@ const openUrl: BlockExecutor = async (data, ctx) => {
     return null
   }
   await chrome.tabs.update(tab.id, { url })
+  await waitForTabLoaded(tab.id, ctx.signal)
   ctx.emit('result', `已打开 ${url}`)
   return null
 }
@@ -307,6 +308,9 @@ const newTabExec: BlockExecutor = async (data, ctx) => {
   const url = data['url'] ? String(data['url']) : undefined
   try {
     const tab = await driverNewTab(url)
+    if (url && data['waitTabLoaded'] !== false) {
+      await waitForTabLoaded(tab.id, ctx.signal)
+    }
     ctx.emit('result', `已新建标签页 #${tab.id}`)
   } catch (error) {
     ctx.emit('error', message(error))
@@ -667,11 +671,19 @@ const linkBlock: BlockExecutor = async (data, ctx) => {
     )
     const info = result.data as { href?: string; target?: string } | undefined
     const href = info?.href ?? result.note ?? ''
+    const waitLoaded = data['waitTabLoaded'] !== false
     if (newTab && info?.target === '_self') {
-      if (href) await driverNewTab(href)
+      if (href) {
+        const tab = await driverNewTab(href)
+        if (waitLoaded) await waitForTabLoaded(tab.id, ctx.signal)
+      }
       ctx.emit('result', `已在新标签页打开 ${href}`)
     } else {
-      await execOnActiveTab({ action: 'click', target: cssTarget(selector) }, ctx.signal)
+      await execOnActiveTab(withWait({ action: 'click', target: cssTarget(selector) }, data), ctx.signal)
+      if (waitLoaded) {
+        const tab = await activeTab().catch(() => null)
+        if (tab && typeof tab.id === 'number') await waitForTabLoaded(tab.id, ctx.signal)
+      }
       ctx.emit('result', '已点击链接')
     }
   } catch (error) {
@@ -1051,6 +1063,47 @@ function placeholder(blockId: string): BlockExecutor {
   }
 }
 
+/** Apply Automa's waitForSelector/waitSelectorTimeout to an op. */
+function withWait<T extends Op>(op: T, data: Record<string, unknown>): T {
+  if (data['waitForSelector'] === true) {
+    op.waitFor = Number(data['waitSelectorTimeout'] ?? 5000)
+  }
+  return op
+}
+
+/**
+ * Automa's "wait until the tab is loaded": after a navigation block opens a
+ * URL, wait for that tab to reach status 'complete'. The tab id is optional
+ * (defaults to the active tab); waits up to ~15s.
+ */
+async function waitForTabLoaded(tabId: number | undefined, signal?: AbortSignal): Promise<void> {
+  if (typeof tabId !== 'number' || !chrome?.tabs?.onUpdated) return
+  const check = await chrome.tabs.get(tabId).catch(() => null)
+  if (check?.status === 'complete') return
+  await new Promise<void>((resolve) => {
+    const timeout = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener)
+      signal?.removeEventListener('abort', cancel)
+      resolve()
+    }, 15000)
+    const cancel = () => {
+      clearTimeout(timeout)
+      chrome.tabs.onUpdated.removeListener(listener)
+      resolve()
+    }
+    const listener = (id: number, info: chrome.tabs.TabChangeInfo) => {
+      if (id === tabId && info.status === 'complete') {
+        clearTimeout(timeout)
+        chrome.tabs.onUpdated.removeListener(listener)
+        signal?.removeEventListener('abort', cancel)
+        resolve()
+      }
+    }
+    signal?.addEventListener('abort', cancel, { once: true })
+    chrome.tabs.onUpdated.addListener(listener)
+  })
+}
+
 /** Automa `forms` block: text/select/checkbox/radio input on one selector. */
 const formsBlock: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
@@ -1060,12 +1113,15 @@ const formsBlock: BlockExecutor = async (data, ctx) => {
 
   if (type === 'checkbox' || type === 'radio') {
     const checked = typeof value === 'boolean' ? value : true
-    return runRaw({ action: 'set_checkbox', target, value: checked }, ctx)
+    return runRaw(withWait({ action: 'set_checkbox', target, value: checked }, data), ctx)
   }
   if (type === 'select') {
-    return runRaw({ action: 'select_option', target, value: String(value ?? '') }, ctx)
+    return runRaw(withWait({ action: 'select_option', target, value: String(value ?? '') }, data), ctx)
   }
-  return runRaw({ action: 'fill', target, value: String(value ?? '') }, ctx)
+  return runRaw(
+    withWait({ action: 'fill', target, value: String(value ?? ''), clear: data['clearValue'] !== false }, data),
+    ctx,
+  )
 }
 
 /** Automa `element-scroll` block: scroll an element or the window by X/Y. */
@@ -1079,10 +1135,10 @@ const elementScroll: BlockExecutor = async (data, ctx) => {
     return runRaw({ action: 'scroll', scroll: { mode: 'by', x, y, smooth } }, ctx)
   }
   if (data['scrollIntoView']) {
-    return runRaw({ action: 'scroll', target: targetFrom(data), scroll: { mode: 'into_view' } }, ctx)
+    return runRaw(withWait({ action: 'scroll', target: targetFrom(data), scroll: { mode: 'into_view' } }, data), ctx)
   }
   return runRaw(
-    { action: 'scroll', target: targetFrom(data), scroll: { mode: 'by', x, y, smooth } },
+    withWait({ action: 'scroll', target: targetFrom(data), scroll: { mode: 'by', x, y, smooth } }, data),
     ctx,
   )
 }
@@ -1165,9 +1221,11 @@ function evalConditionRow(row: ConditionRow, vars: Record<string, unknown>): boo
   }
 }
 
-/** Automa `event-click` / `hover-element` reuse the legacy implementations. */
-const eventClick: BlockExecutor = click
-const hoverElement: BlockExecutor = hover
+/** Automa `event-click` / `hover-element` respect waitForSelector too. */
+const eventClick: BlockExecutor = async (data, ctx) =>
+  runRaw(withWait({ action: 'click', target: targetFrom(data) }, data), ctx)
+const hoverElement: BlockExecutor = async (data, ctx) =>
+  runRaw(withWait({ action: 'hover', target: targetFrom(data) }, data), ctx)
 
 /**
  * Block-executor registry, keyed by block id. The engine resolves the block id

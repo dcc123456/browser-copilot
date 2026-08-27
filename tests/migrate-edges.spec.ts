@@ -20,6 +20,7 @@ function wfWithEdges(
       ],
       edges: edges as never,
     },
+    settings: { saveLog: false, debugMode: false, notification: false, reuseLastState: false },
   }
 }
 

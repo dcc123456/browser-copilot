@@ -832,6 +832,30 @@ export function runOp(op: Op): OpResult {
 
     if (!op.target) return fail(`${op.action} needs a target element.`, false)
 
+    // waitForSelector (Automa): recorded interaction blocks poll up to
+    // `waitFor` ms for the element to appear before acting, so steps that
+    // navigate first don't race post-load content. Re-enters runOp once the
+    // element exists (waitFor zeroed to avoid polling again). The returned
+    // Promise is awaited by chrome.scripting, like capture().
+    const waitMs = typeof op.waitFor === 'number' && op.waitFor > 0 ? op.waitFor : 0
+    if (waitMs) {
+      const target = op.target
+      const tried = [target.primary, ...(target.fallbacks ?? [])]
+        .map((spec) => serializeSpec(spec))
+        .join(', ')
+      return (async () => {
+        const deadline = Date.now() + waitMs
+        let res = resolve(target)
+        while (!res && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 120))
+          res = resolve(target)
+        }
+        if (!res) return notFound(`No element matched within ${waitMs}ms. Tried: ${tried}`)
+        op.waitFor = 0
+        return runOp(op)
+      })() as unknown as OpResult
+    }
+
     const resolution = resolve(op.target)
     if (!resolution) {
       const tried = [op.target.primary, ...(op.target.fallbacks ?? [])]
