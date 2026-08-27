@@ -36,8 +36,21 @@ export default function RunningBoard({ onSettled, busy }: RunningBoardProps): Re
   const [finished, setFinished] = useState<FinishedTaskView[]>([])
   const [cancellingIds, setCancellingIds] = useState<Set<string>>(new Set())
   const [localBusy, setLocalBusy] = useState(false)
+  // The board can be collapsed to reclaim vertical space. A newly started run
+  // re-opens it automatically (see effect below); afterwards the user can
+  // re-collapse freely.
+  const [collapsed, setCollapsed] = useState(false)
 
   const anyBusy = Boolean(busy) || localBusy
+
+  const wasRunningRef = useRef(false)
+  useEffect(() => {
+    const wasRunning = wasRunningRef.current
+    wasRunningRef.current = running.length > 0
+    if (!wasRunning && running.length > 0) setCollapsed(false)
+  }, [running.length])
+
+  const toggleCollapsed = (): void => setCollapsed((v) => !v)
 
   const prevRunningIds = useRef<Set<string>>(new Set())
   const prevFinishedIds = useRef<Set<string>>(new Set())
@@ -164,77 +177,97 @@ export default function RunningBoard({ onSettled, busy }: RunningBoardProps): Re
   }
 
   return (
-    <div className={`card running-board${running.length > 0 ? ' running-board-active' : ''}`}>
-      <div className="card-head">
+    <div
+      className={`card running-board${running.length > 0 ? ' running-board-active' : ''}${
+        collapsed ? ' running-board-collapsed' : ''
+      }`}
+    >
+      <button
+        type="button"
+        className="running-board-head"
+        onClick={toggleCollapsed}
+        aria-expanded={!collapsed}
+        title={collapsed ? t.tasksActivityExpand : t.tasksActivityCollapse}
+      >
         <h3>
+          <span className={`running-board-caret${collapsed ? '' : ' open'}`} aria-hidden="true">
+            ▸
+          </span>
           {running.length > 0 && <span className="running-dot" />}
           {t.tasksActivity}
           {running.length > 0 && <span className="running-count">{running.length}</span>}
+          {collapsed && finished.length > 0 && (
+            <span className="running-finished-count">{finished.length}</span>
+          )}
         </h3>
-      </div>
+      </button>
 
-      {running.length === 0 ? (
-        <p className="hint running-empty">{t.tasksRunningEmpty}</p>
-      ) : (
-        <ul className="running-list">
-          {running.map((run) => {
-            const cancelling = cancellingIds.has(run.runId)
-            return (
-              <li className="running-item" key={run.runId}>
-                <div className="running-item-head">
-                  <strong className="running-label">{run.label || t.taskUntitled}</strong>
-                  <button
-                    className={`running-cancel${cancelling ? ' running-cancel-busy' : ''}`}
-                    disabled={anyBusy || cancelling}
-                    onClick={() => void cancelRunning(run.runId)}
-                    type="button"
-                  >
-                    {cancelling ? t.taskCancelling : t.taskTerminate}
-                  </button>
-                </div>
-                <div className="running-meta">
-                  <span className="run-tag">{sourceLabel(run.source)}</span>
-                  <span>
-                    {t.taskStartedAt}: {new Date(run.startedAt).toLocaleTimeString(navigator.language)}
-                  </span>
-                </div>
-                {run.steps.length > 0 && (
-                  <ul className="running-steps">
-                    {run.steps.slice(-8).map((step, index) => (
-                      <li className={`running-step running-step-${step.kind}`} key={index}>
-                        {step.text}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </li>
-            )
-          })}
-        </ul>
-      )}
-
-      {finished.length > 0 && (
+      {!collapsed && (
         <>
-          <div className="running-divider" />
-          <div className="running-section-head">
-            <h4 className="running-section-title">{t.tasksRecentlyFinished}</h4>
-            <button
-              className="link running-clear"
-              disabled={anyBusy}
-              onClick={() => void clearFinished()}
-              type="button"
-            >
-              {t.taskClearFinished}
-            </button>
-          </div>
-          <FinishedList
-            runs={finished.slice(0, 8)}
-            sourceLabel={sourceLabel}
-            outcomeLabel={outcomeLabel}
-            onDelete={(id) => void deleteFinished(id)}
-            disabled={anyBusy}
-            t={t}
-          />
+          {running.length === 0 ? (
+            <p className="hint running-empty">{t.tasksRunningEmpty}</p>
+          ) : (
+            <ul className="running-list">
+              {running.map((run) => {
+                const cancelling = cancellingIds.has(run.runId)
+                return (
+                  <li className="running-item" key={run.runId}>
+                    <div className="running-item-head">
+                      <strong className="running-label">{run.label || t.taskUntitled}</strong>
+                      <button
+                        className={`running-cancel${cancelling ? ' running-cancel-busy' : ''}`}
+                        disabled={anyBusy || cancelling}
+                        onClick={() => void cancelRunning(run.runId)}
+                        type="button"
+                      >
+                        {cancelling ? t.taskCancelling : t.taskTerminate}
+                      </button>
+                    </div>
+                    <div className="running-meta">
+                      <span className="run-tag">{sourceLabel(run.source)}</span>
+                      <span>
+                        {t.taskStartedAt}: {new Date(run.startedAt).toLocaleTimeString(navigator.language)}
+                      </span>
+                    </div>
+                    {run.steps.length > 0 && (
+                      <ul className="running-steps">
+                        {run.steps.slice(-8).map((step, index) => (
+                          <li className={`running-step running-step-${step.kind}`} key={index}>
+                            {step.text}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+
+          {finished.length > 0 && (
+            <>
+              <div className="running-divider" />
+              <div className="running-section-head">
+                <h4 className="running-section-title">{t.tasksRecentlyFinished}</h4>
+                <button
+                  className="link running-clear"
+                  disabled={anyBusy}
+                  onClick={() => void clearFinished()}
+                  type="button"
+                >
+                  {t.taskClearFinished}
+                </button>
+              </div>
+              <FinishedList
+                runs={finished.slice(0, 8)}
+                sourceLabel={sourceLabel}
+                outcomeLabel={outcomeLabel}
+                onDelete={(id) => void deleteFinished(id)}
+                disabled={anyBusy}
+                t={t}
+              />
+            </>
+          )}
         </>
       )}
     </div>

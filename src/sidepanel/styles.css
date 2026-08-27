@@ -1045,6 +1045,41 @@ textarea {
   color: var(--ok);
 }
 
+/* A banner that deep-links somewhere (e.g. failed-run banner → history). */
+.banner-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: border-color 120ms ease, filter 120ms ease;
+}
+
+.banner-link[data-kind='error'] {
+  border-color: color-mix(in srgb, var(--err) 45%, transparent);
+}
+
+.banner-link[data-kind='ok'] {
+  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+}
+
+.banner-link:hover {
+  filter: brightness(1.12);
+}
+
+.banner-link .banner-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.banner-chevron {
+  flex: none;
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 700;
+}
+
 /* --- Markdown replies ---
    Spacing is deliberately tighter than document defaults. The panel is ~360px
    wide, so browser margins (1em on a p, 0.67em on an h2) waste vertical space
@@ -1827,7 +1862,23 @@ textarea {
   box-shadow: 0 0 0 1px var(--accent-soft-border);
 }
 
-.running-board .card-head h3 {
+/* Collapsible board header (replaces the static .card-head). */
+.running-board-head {
+  display: block;
+  width: 100%;
+  padding: 0;
+  margin: 0 0 8px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.running-board-collapsed .running-board-head {
+  margin-bottom: 0;
+}
+
+.running-board-head h3 {
   margin: 0;
   font-size: 12px;
   font-weight: 600;
@@ -1836,6 +1887,37 @@ textarea {
   color: var(--muted);
   display: inline-flex;
   align-items: center;
+  transition: color 120ms ease;
+}
+
+.running-board-head:hover h3 {
+  color: var(--text);
+}
+
+.running-board-caret {
+  display: inline-block;
+  margin-right: 4px;
+  font-size: 11px;
+  transition: transform 140ms ease;
+  transform: rotate(0deg);
+}
+
+.running-board-caret.open {
+  transform: rotate(90deg);
+}
+
+.running-finished-count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 7px;
+  border-radius: 10px;
+  background: var(--chip);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .running-count {
@@ -2249,7 +2331,9 @@ textarea {
   z-index: 2;
   display: flex;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  row-gap: 6px;
+  column-gap: 10px;
   padding: 7px 10px;
   margin: 0;
   border-radius: 8px;
@@ -2276,18 +2360,23 @@ textarea {
 }
 
 .record-batchbar-count {
-  flex: 1;
+  /* Grows into the free space and right-aligns the count so it can never
+     slide under / overlap the "select all" label; on a very narrow panel the
+     whole bar wraps instead of colliding. */
+  flex: 1 1 auto;
+  min-width: 64px;
+  text-align: right;
   font-size: 11px;
   color: var(--muted);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .record-batchbar-actions {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex: none;
+  margin-left: auto;
 }
 
 .record-batchbar button {
@@ -2319,6 +2408,24 @@ textarea {
 
 .record-card:hover {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+/* Brief highlight for a run card deep-linked from another tab. */
+.run-record-flash {
+  border-color: color-mix(in srgb, var(--err) 65%, var(--border));
+  animation: run-flash 2.4s ease-out;
+}
+
+@keyframes run-flash {
+  0% {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--err) 70%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--err) 45%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
 }
 
 .record-head {
@@ -2700,9 +2807,14 @@ textarea {
   font-size: 14px;
 }
 
+.history-rebuild.icon-btn svg {
+  display: block;
+}
+
 .history-steps {
   list-style: none;
   margin: 0;
+  /* Rows no longer carry their own checkbox; align under the group caret. */
   padding: 0 10px 10px 46px;
   display: flex;
   flex-direction: column;
@@ -2726,6 +2838,8 @@ textarea {
 
 .history-step-head {
   display: grid;
+  /* time · host/declined meta · delete button (selection now lives on the
+     group row, so the leading checkbox column is gone). */
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;

@@ -190,7 +190,7 @@ export type CommandResult =
   | { type: 'workflows.get'; workflow?: Workflow }
   | { type: 'workflows.save' }
   | { type: 'workflows.delete' }
-  | { type: 'workflows.run'; outcome: { ok: boolean; skipped: boolean; summary: string; error?: string } }
+  | { type: 'workflows.run'; outcome: { ok: boolean; skipped: boolean; summary: string; error?: string; runId?: string } }
   | { type: 'workflows.running'; runs: RunningTaskView[]; finished: FinishedTaskView[] }
   | { type: 'record.start'; recording: boolean }
   | { type: 'record.stop'; workflowId?: string }

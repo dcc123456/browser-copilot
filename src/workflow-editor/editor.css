@@ -170,6 +170,10 @@
 }
 
 /* edges */
+.react-flow__edge {
+  /* Edges are interactive (double-click to remove); signal the hit area. */
+  cursor: pointer;
+}
 .wf-edge {
   transition: stroke 0.12s;
 }

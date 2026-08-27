@@ -175,6 +175,11 @@ export interface Messages {
   workflowsImport: string
   workflowsImportInvalid: string
   workflowsImported: (params: { count: number }) => string
+  /** Shown on a failed-run banner in the Workflows tab; the banner is clickable and jumps to the run's history entry. */
+  workflowsRunFailedHint: string
+  /** Activity board (History tab) collapse/expand toggle title. */
+  tasksActivityCollapse: string
+  tasksActivityExpand: string
 
   // Common
   save: string
@@ -593,6 +598,9 @@ const en: Messages = {
   workflowsImport: 'Import',
   workflowsImportInvalid: 'Invalid workflow file(s): at least one export could not be read.',
   workflowsImported: ({ count }) => `Imported ${count} workflow(s).`,
+  workflowsRunFailedHint: 'Run failed — click to view details in history',
+  tasksActivityCollapse: 'Collapse activity',
+  tasksActivityExpand: 'Expand activity',
 
   save: 'Save',
   cancel: 'Cancel',
@@ -1024,6 +1032,9 @@ const zhCN: Messages = {
   workflowsImport: '导入',
   workflowsImportInvalid: '无效的工作流文件：至少一个导出无法读取。',
   workflowsImported: ({ count }) => `已导入 ${count} 个工作流。`,
+  workflowsRunFailedHint: '运行失败 — 点击查看历史详情',
+  tasksActivityCollapse: '收起动态',
+  tasksActivityExpand: '展开动态',
 
   save: '保存',
   cancel: '取消',

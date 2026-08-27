@@ -99,6 +99,16 @@ export default function App() {
     return () => window.removeEventListener('bc:open-conversation', handler)
   }, [])
 
+  // Other tabs (e.g. the Workflows tab's failed-run banner) dispatch
+  // `bc:open-history` to deep-link into the History tab. HistoryTab itself
+  // listens for the detail payload (section + run id to expand); App only
+  // needs to flip the active tab.
+  useEffect(() => {
+    const handler = (): void => setActive('history')
+    window.addEventListener('bc:open-history', handler)
+    return () => window.removeEventListener('bc:open-history', handler)
+  }, [])
+
   return (
     <I18nProvider value={i18n}>
       <nav className="tabs">

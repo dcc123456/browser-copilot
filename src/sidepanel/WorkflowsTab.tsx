@@ -20,7 +20,15 @@ export default function WorkflowsTab() {
   const t = useT()
   const [workflows, setWorkflows] = useState<Workflow[]>([])
   const [runs, setRuns] = useState<TaskRunLog[]>([])
-  const [banner, setBanner] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
+  // A failed-run banner carries its run id so clicking it deep-links into the
+  // History tab with that run's detail expanded. Plain info/error banners
+  // (import results, failed deletes…) leave `runId` undefined and stay
+  // dismiss-only.
+  const [banner, setBanner] = useState<{
+    kind: 'ok' | 'error'
+    text: string
+    runId?: string
+  } | null>(null)
   const [busy, setBusy] = useState(false)
 
   const load = useCallback(async () => {
@@ -74,10 +82,20 @@ export default function WorkflowsTab() {
     try {
       const result = await sendCommand({ type: 'workflows.run', id })
       if (result.type === 'workflows.run') {
-        setBanner({
-          kind: result.outcome.ok ? 'ok' : 'error',
-          text: result.outcome.summary || result.outcome.error || t.taskStatusFailed,
-        })
+        if (result.outcome.ok) {
+          setBanner({
+            kind: 'ok',
+            text: result.outcome.summary || t.taskOutcomeOk,
+          })
+        } else {
+          // A failed run banner is clickable: it jumps to the History tab and
+          // expands this exact run so the error details are one click away.
+          setBanner({
+            kind: 'error',
+            text: `${result.outcome.summary || result.outcome.error || t.taskStatusFailed} · ${t.workflowsRunFailedHint}`,
+            runId: result.outcome.runId,
+          })
+        }
       }
       await load()
     } catch (error) {
@@ -85,6 +103,20 @@ export default function WorkflowsTab() {
     } finally {
       setBusy(false)
     }
+  }
+
+  /**
+   * Clicking a failed-run banner deep-links to the History tab: App flips to
+   * the tab on `bc:open-history`, and HistoryTab's own listener expands the
+   * run card. Non-run banners (no runId) just dismiss.
+   */
+  const onBannerClick = (): void => {
+    if (banner?.runId) {
+      window.dispatchEvent(
+        new CustomEvent('bc:open-history', { detail: { section: 'workflowRuns', runId: banner.runId } }),
+      )
+    }
+    setBanner(null)
   }
 
   const removeWorkflow = async (id: string): Promise<void> => {
@@ -258,8 +290,15 @@ export default function WorkflowsTab() {
       <h2>{t.tabWorkflows}</h2>
 
       {banner && (
-        <div className={`banner banner-${banner.kind}`} data-kind={banner.kind} role="status">
-          {banner.text}
+        <div
+          className={`banner banner-${banner.kind}${banner.runId ? ' banner-link' : ''}`}
+          data-kind={banner.kind}
+          role="status"
+          onClick={onBannerClick}
+          title={banner.runId ? t.workflowsRunFailedHint : undefined}
+        >
+          <span className="banner-text">{banner.text}</span>
+          {banner.runId && <span className="banner-chevron" aria-hidden="true">›</span>}
         </div>
       )}
 

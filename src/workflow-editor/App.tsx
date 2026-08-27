@@ -235,6 +235,17 @@ export default function EditorApp() {
     })
   }, [])
 
+  // Double-clicking a connection removes it (matches Automa's edge behaviour).
+  // Selecting the edge first and pressing Delete also works via the default
+  // delete-key handling.
+  const onEdgeDoubleClick = useCallback(
+    (_event: React.MouseEvent, edge: Edge) => {
+      setEdges((eds) => eds.filter((e) => e.id !== edge.id))
+      toast.show(t('edgeDeleted'), 'info')
+    },
+    [toast, t],
+  )
+
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault()
@@ -440,6 +451,7 @@ export default function EditorApp() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onEdgeDoubleClick={onEdgeDoubleClick}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onDrop={onDrop}

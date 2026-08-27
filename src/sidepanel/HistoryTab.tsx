@@ -95,6 +95,9 @@ export default function HistoryTab() {
   // One shared load of the full run log, split by `source` in the two run
   // sections so the service worker is only queried once.
   const [runs, setRuns] = useState<TaskRunLog[] | null>(null);
+  // Deep-linked run (from another tab's failed-run banner): the matching run
+  // card in the run sections auto-expands and briefly highlights itself.
+  const [focusRunId, setFocusRunId] = useState<string | null>(null);
 
   const flash = useCallback((kind: "ok" | "error", text: string): void => {
     setBanner({ kind, text });
@@ -112,6 +115,20 @@ export default function HistoryTab() {
   useEffect(() => {
     void reloadRuns();
   }, [reloadRuns]);
+
+  // Deep links from other tabs (Workflows tab failed-run banner) arrive as a
+  // `bc:open-history` window event; App flips to this tab, and here we switch
+  // sub-section and hand the run id to the matching RunsSection so it can
+  // expand + flash the failing run's detail.
+  useEffect(() => {
+    const handler = (event: Event): void => {
+      const detail = (event as CustomEvent<{ section?: Section; runId?: string }>).detail;
+      if (detail?.section) setSection(detail.section);
+      if (detail?.runId) setFocusRunId(detail.runId);
+    };
+    window.addEventListener("bc:open-history", handler);
+    return () => window.removeEventListener("bc:open-history", handler);
+  }, []);
 
   const sections: Array<{ id: Section; label: string }> = [
     { id: "conversations", label: t.histConversations },
@@ -154,6 +171,8 @@ export default function HistoryTab() {
           runs={runs}
           reload={reloadRuns}
           filter={(run) => run.source === "manual" || run.source === "chat"}
+          focusRunId={focusRunId}
+          onFocused={() => setFocusRunId(null)}
         />
       )}
       {section === "taskRuns" && (
@@ -163,6 +182,8 @@ export default function HistoryTab() {
           runs={runs}
           reload={reloadRuns}
           filter={(run) => run.source === "schedule" || run.source === "feishu"}
+          focusRunId={focusRunId}
+          onFocused={() => setFocusRunId(null)}
         />
       )}
       {section === "operations" && <OperationsSection t={t} flash={flash} />}
@@ -459,15 +480,56 @@ interface RunsSectionProps extends SectionProps {
   runs: TaskRunLog[] | null;
   reload: () => Promise<void>;
   filter: (run: TaskRunLog) => boolean;
+  /** Run id deep-linked from another tab; its card auto-expands + highlights. */
+  focusRunId?: string | null;
+  /** Called once the deep-linked run was found in this section. */
+  onFocused?: () => void;
 }
 
-function RunsSection({ t, flash, runs, reload, filter }: RunsSectionProps) {
+function RunsSection({ t, flash, runs, reload, filter, focusRunId, onFocused }: RunsSectionProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  // Ids of deep-linked cards currently playing the highlight flash.
+  const [flashing, setFlashing] = useState<Set<string>>(new Set());
   const items = (runs ?? [])
     .filter(filter)
     .slice()
     .sort((a, b) => (b.startedAt ?? b.at) - (a.startedAt ?? a.at));
+
+  // Expand + flash a run another tab deep-linked to (e.g. the Workflows tab's
+  // failed-run banner). No-op when the id belongs to the other run section.
+  useEffect(() => {
+    if (!focusRunId) return;
+    const match = items.find((run) => run.id === focusRunId);
+    if (!match) return;
+    setOpen((prev) => (prev[focusRunId] ? prev : { ...prev, [focusRunId]: true }));
+    setFlashing((prev) => {
+      const next = new Set(prev);
+      next.add(focusRunId);
+      return next;
+    });
+    onFocused?.();
+    const timer = setTimeout(() => {
+      setFlashing((prev) => {
+        const next = new Set(prev);
+        next.delete(focusRunId);
+        return next;
+      });
+    }, 2600);
+    // Wait a tick for the card to render before scrolling it into view.
+    const scrollTimer = setTimeout(() => {
+      document
+        .querySelector(`[data-run-id="${focusRunId}"]`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }, 60);
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(scrollTimer);
+    };
+    // items identity changes on every reload; the effect should only refire for
+    // a new deep link.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusRunId]);
 
   const removeOne = useCallback(
     async (id: string): Promise<void> => {
@@ -539,7 +601,11 @@ function RunsSection({ t, flash, runs, reload, filter }: RunsSectionProps) {
         const kind = badgeKind(run);
         const src = sourceLabel(t, run.source);
         return (
-          <div className="record-card run-record" key={run.id}>
+          <div
+            className={`record-card run-record${flashing.has(run.id) ? " run-record-flash" : ""}`}
+            key={run.id}
+            data-run-id={run.id}
+          >
             <div
               className="record-head"
               onClick={() => setOpen((prev) => ({ ...prev, [run.id]: !isOpen }))}
@@ -616,6 +682,8 @@ function RunsSection({ t, flash, runs, reload, filter }: RunsSectionProps) {
 function OperationsSection({ t, flash }: SectionProps) {
   const [entries, setEntries] = useState<HistoryEntry[] | null>(null);
   const [conversations, setConversations] = useState<ConversationMeta[]>([]);
+  // Selection is per CONVERSATION/group, never per individual operation row:
+  // the stored ids are group keys (conversation ids / "task:…" / "feishu:…").
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
@@ -654,22 +722,35 @@ function OperationsSection({ t, flash }: SectionProps) {
     [flash, load],
   );
 
+  // `selected` holds GROUP keys (conversations); deleting removes every action
+  // record inside each selected group.
+  const groups = entries ? groupHistory(entries, conversations) : [];
+  const entryCountOf = (groupKeys: Set<string>): number =>
+    groups.reduce(
+      (sum, g) => sum + (groupKeys.has(g.key) ? g.entries.length : 0),
+      0,
+    );
+
   const removeSelected = useCallback(async (): Promise<void> => {
     if (selected.size === 0) return;
-    if (!confirm(t.histDeleteConfirm({ count: selected.size }))) return;
-    const count = selected.size;
+    const toDelete = (entries ?? []).filter((e) => selected.has(e.conversationId || "unknown"));
+    if (toDelete.length === 0) {
+      setSelected(new Set());
+      return;
+    }
+    if (!confirm(t.histDeleteConfirm({ count: toDelete.length }))) return;
     try {
-      for (const id of selected) {
-        await sendCommand({ type: "history.delete", id });
+      for (const entry of toDelete) {
+        await sendCommand({ type: "history.delete", id: entry.id });
       }
       setSelected(new Set());
       await load();
-      flash("ok", `${count}`);
+      flash("ok", `${toDelete.length}`);
     } catch (error) {
       flash("error", (error as Error).message);
       await load();
     }
-  }, [selected, t, flash, load]);
+  }, [selected, entries, t, flash, load]);
 
   const clearAll = useCallback(async (): Promise<void> => {
     const total = entries?.length ?? 0;
@@ -703,22 +784,27 @@ function OperationsSection({ t, flash }: SectionProps) {
     [flash, t],
   );
 
-  const groups = entries ? groupHistory(entries, conversations) : [];
-  // Select-all only affects entries whose group is currently expanded so the
-  // checkbox never silently selects rows the user cannot see.
-  const visibleEntries = groups.flatMap((g) => (expanded[g.key] ? g.entries : []));
-
   const toggleGroup = (key: string): void => {
     setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const toggleGroupSelected = (key: string): void => {
+    setSelected((prev) => toggleId(prev, key));
   };
 
   return (
     <div className="record-section">
       {entries !== null && entries.length > 0 && (
         <BatchBar
-          count={selected.size}
-          total={visibleEntries.length}
-          onSelectAll={() => setSelected((prev) => selectAllToggle(visibleEntries, prev))}
+          count={entryCountOf(selected)}
+          total={entries.length}
+          onSelectAll={() =>
+            setSelected((prev) =>
+              prev.size === groups.length
+                ? new Set()
+                : new Set(groups.map((g) => g.key)),
+            )
+          }
           onDelete={() => void removeSelected()}
           t={t}
           extra={
@@ -733,6 +819,7 @@ function OperationsSection({ t, flash }: SectionProps) {
         const okCount = group.entries.filter((e) => e.ok && e.approved).length;
         const failCount = group.entries.filter((e) => !e.ok).length;
         const isOpen = expanded[group.key] ?? false;
+        const groupChecked = selected.has(group.key);
         return (
           <div className="record-card history-group" key={group.key}>
             <div
@@ -747,7 +834,14 @@ function OperationsSection({ t, flash }: SectionProps) {
                 }
               }}
             >
-              <span className="record-caret-spacer" aria-hidden="true" />
+              <input
+                type="checkbox"
+                className="record-check"
+                checked={groupChecked}
+                onClick={(e) => e.stopPropagation()}
+                onChange={() => toggleGroupSelected(group.key)}
+                aria-label={group.title}
+              />
               <span className={`record-caret${isOpen ? " open" : ""}`} aria-hidden="true" />
               <span className="record-title history-group-title">{group.title}</span>
               <span className="record-meta">
@@ -768,7 +862,23 @@ function OperationsSection({ t, flash }: SectionProps) {
                 }}
                 type="button"
               >
-                ⟳
+                <svg
+                  viewBox="0 0 24 24"
+                  width="15"
+                  height="15"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                  <rect x="14" y="14" width="7" height="7" rx="1.5" />
+                  <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                  <path d="M10 6.5h4" />
+                  <path d="M6.5 10v4a2 2 0 0 0 2 2h5.5" />
+                </svg>
               </button>
             </div>
             {isOpen && (
@@ -779,14 +889,6 @@ function OperationsSection({ t, flash }: SectionProps) {
                     key={entry.id}
                   >
                     <div className="history-step-head">
-                      <input
-                        type="checkbox"
-                        className="record-check"
-                        checked={selected.has(entry.id)}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={() => setSelected((prev) => toggleId(prev, entry.id))}
-                        aria-label={entry.summary || entry.action}
-                      />
                       <span className="history-step-time">{formatWhen(entry.at)}</span>
                       <span className="history-meta">
                         {entry.host && <span className="history-host">{entry.host}</span>}

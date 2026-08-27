@@ -676,6 +676,7 @@ async function handleCommand(command: Command): Promise<CommandResult> {
           skipped: false,
           summary: r.summary ?? '',
           error: r.outcome === 'failed' ? r.summary : undefined,
+          runId: r.runId,
         },
       }
     }
