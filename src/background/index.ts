@@ -20,6 +20,7 @@ import {
   type CommandResult,
 } from '../lib/messages'
 import { isInjectablePage } from '../lib/pages'
+import { handlePickerMessage } from './picker-bridge'
 import { validateProfile } from '../lib/providers'
 import { normalizeSkill, validateSkill, wrapSkillDirective } from '../lib/skills'
 import {
@@ -315,6 +316,14 @@ chrome.action.onClicked.addListener((tab) => {
 })
 
 // --- Command channel ---------------------------------------------------------
+
+// Element picker messages are handled before the generic command channel:
+// they need the raw sender and an immediate async response, and their results
+// are broadcast back to editor windows by picker-bridge.
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (handlePickerMessage(message, sender, sendResponse)) return true
+  return undefined
+})
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   void (async () => {
