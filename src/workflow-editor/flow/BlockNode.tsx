@@ -32,26 +32,26 @@ export interface BlockNodeData extends Record<string, unknown> {
 }
 
 /** Branch handle labels for multi-output blocks (English, matching Automa). */
-const BRANCH_HANDLES: Record<string, { id: string; label: string }[]> = {
+const BRANCH_HANDLES: Record<string, { idSuffix: string; label: string }[]> = {
   conditions: [
-    { id: 'output-1', label: 'true' },
-    { id: 'output-2', label: 'false' },
+    { idSuffix: 'output-1', label: 'true' },
+    { idSuffix: 'output-2', label: 'false' },
   ],
   'element-exists': [
-    { id: 'output-1', label: 'exists' },
-    { id: 'output-2', label: 'not exists' },
+    { idSuffix: 'output-1', label: 'exists' },
+    { idSuffix: 'output-2', label: 'not exists' },
   ],
   'loop-data': [
-    { id: 'output-1', label: 'loop' },
-    { id: 'output-2', label: 'end' },
+    { idSuffix: 'output-1', label: 'loop' },
+    { idSuffix: 'output-2', label: 'end' },
   ],
   'loop-elements': [
-    { id: 'output-1', label: 'loop' },
-    { id: 'output-2', label: 'end' },
+    { idSuffix: 'output-1', label: 'loop' },
+    { idSuffix: 'output-2', label: 'end' },
   ],
   'while-loop': [
-    { id: 'output-1', label: 'loop' },
-    { id: 'output-2', label: 'end' },
+    { idSuffix: 'output-1', label: 'loop' },
+    { idSuffix: 'output-2', label: 'end' },
   ],
 }
 
@@ -77,8 +77,8 @@ function BlockNodeComponent({ data, selected }: NodeProps) {
     branches ??
     (block.outputs === 2 && block.id === 'repeat-task'
       ? [
-          { id: 'output-1', label: 'loop' },
-          { id: 'output-2', label: 'end' },
+          { idSuffix: 'output-1', label: 'loop' },
+          { idSuffix: 'output-2', label: 'end' },
         ]
       : null)
 
@@ -131,8 +131,8 @@ function BlockNodeComponent({ data, selected }: NodeProps) {
       {/* Branch source handles, spread vertically with labels */}
       {branchHandles?.map((h, i) => (
         <Handle
-          key={h.id}
-          id={h.id}
+          key={h.idSuffix}
+          id={`${block.id}-${h.idSuffix}`}
           type="source"
           position={Position.Right}
           className="wf-handle wf-handle-branch"

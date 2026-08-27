@@ -59,6 +59,7 @@ const MAX_WHILE_ITERATIONS = 1000
 
 /** Block ids that represent launch triggers; used to pick a start node. */
 const TRIGGER_BLOCK_IDS = new Set([
+  'trigger',
   'manual',
   'schedule',
   'scheduled',
@@ -70,6 +71,31 @@ const TRIGGER_BLOCK_IDS = new Set([
   'specific-day',
   'element-change',
 ])
+
+/** Cloud-only blocks that cannot run locally. */
+const CLOUD_BLOCK_IDS = new Set([
+  'ai-workflow',
+  'block-package',
+  'google-sheets',
+  'google-sheets-drive',
+  'google-drive',
+])
+
+/** onError action payload Automa stores per block. */
+interface OnErrorPolicy {
+  enable?: boolean
+  toDo?: 'retry' | 'fallback' | 'error'
+  retryTimes?: number
+  retryInterval?: number
+}
+
+function onErrorPolicy(params: Record<string, unknown>): OnErrorPolicy | null {
+  const raw = params['onError']
+  if (raw && typeof raw === 'object') return raw as OnErrorPolicy
+  return null
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
  * Resolve the canonical block id for a node. Newer workflows store it under
@@ -227,11 +253,52 @@ async function runCore(
 
     const outEdges = outBySource.get(nodeId) ?? []
     const outputs: Record<string, string> = {}
-    for (const edge of outEdges) outputs[edge.sourceHandle ?? 'next'] = edge.target
+    // Semantic branch keys by block, mapped to positional output handles:
+    //   conditions   -> output-1 true / output-2 false
+    //   element-exists -> output-1 exists / output-2 not exists
+    //   loop blocks  -> output-1 loop body / output-2 after-loop
+    const BRANCH_KEYS: Record<string, [string, string]> = {
+      conditions: ['true', 'false'],
+      'element-exists': ['exists', 'notExists'],
+      'loop-data': ['loop', 'end'],
+      'loop-elements': ['loop', 'end'],
+      'while-loop': ['loop', 'end'],
+      'repeat-task': ['loop', 'end'],
+    }
+    for (const edge of outEdges) {
+      const handle = edge.sourceHandle ?? 'next'
+      outputs[handle] = edge.target
+      // Index by bare suffix: `${blockId}-output-1` -> `output-1`.
+      const m = /-(output-\d+|fallback)$/.exec(handle)
+      if (m) outputs[m[1]!] = edge.target
+      // Index semantic keys for this block's branch handles.
+      const pair = BRANCH_KEYS[blockIdOf(current)]
+      if (pair) {
+        if (handle.endsWith('-output-1')) outputs[pair[0]] = edge.target
+        if (handle.endsWith('-output-2')) outputs[pair[1]] = edge.target
+      }
+      if (handle.endsWith('-output-fallback')) outputs['fallback'] = edge.target
+    }
     const defaultNext = outEdges[0]?.target ?? null
 
     const blockId = blockIdOf(current)
     const params = paramsOf(current)
+
+    // Cloud blocks are never executable locally.
+    if (CLOUD_BLOCK_IDS.has(blockId)) {
+      const text = `Block "${blockId}" requires Automa's cloud service and is not supported.`
+      emit('error', nodeId, text)
+      outcome = 'failed'
+      error = text
+      return null
+    }
+
+    // A disabled block is skipped (Automa's disableBlock) but the flow
+    // continues along its default out-edge.
+    if (params['disableBlock'] === true) {
+      completedNodeIds.push(nodeId)
+      return defaultNext
+    }
 
     // Loop and sub-workflow blocks are handled by the engine itself, not by an
     // executor in the registry, so sub-runs and loop bodies recurse here too.
@@ -254,19 +321,49 @@ async function runCore(
     }
 
     const ctx = buildExecCtx(variables, signalToUse, nodeId, outputs, defaultNext, emit)
+    const policy = onErrorPolicy(params)
+
+    // Execute with Automa's onError semantics: retry up to retryTimes (with
+    // retryInterval between attempts), then either route to the fallback handle
+    // or fail.
+    const maxAttempts = policy?.enable && policy.toDo === 'retry'
+      ? 1 + Math.max(0, Number(policy.retryTimes ?? 0))
+      : 1
     let resolver: string | null | undefined
-    try {
-      resolver = await executor(params, ctx)
-    } catch (e) {
+    let lastError: unknown
+    let succeeded = false
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        resolver = await executor(params, ctx)
+        succeeded = true
+        break
+      } catch (e) {
+        lastError = e
+        if (isAbort(e)) break
+        if (attempt < maxAttempts - 1) {
+          const waitMs = Math.max(0, Number(policy?.retryInterval ?? 1000))
+          emit('info', nodeId, `Retrying (${attempt + 1}/${maxAttempts - 1}) after failure: ${message(e)}`)
+          await sleep(waitMs)
+        }
+      }
+    }
+
+    if (!succeeded) {
+      const e = lastError
       const text = message(e)
       emit('error', nodeId, text)
       if (isAbort(e)) {
         outcome = 'cancelled'
         summary = CANCELLED_SUMMARY
-      } else {
-        outcome = 'failed'
-        error = text
+        return null
       }
+      // Fallback routing: follow the edge from the `fallback` handle.
+      if (policy?.enable && policy.toDo === 'fallback' && outputs['fallback']) {
+        completedNodeIds.push(nodeId)
+        return outputs['fallback']
+      }
+      outcome = 'failed'
+      error = text
       return null
     }
 
@@ -360,7 +457,7 @@ async function runCore(
     }
 
     // loop-elements
-    const selector = String(params['cssSelector'] ?? '')
+    const selector = String(params['selector'] ?? params['cssSelector'] ?? '')
     let count = 0
     if (loopElementCounter) {
       count = await loopElementCounter(selector, signalToUse)

@@ -67,14 +67,34 @@ export type BlockExecutor = (
 
 // --- Helpers -----------------------------------------------------------------
 
-/** Read the required `cssSelector` param off a block's data. */
+/**
+ * Read the element selector off a block's data, dual-supporting the Automa
+ * shape (`selector` + `findBy: 'cssSelector'|'xpath'`) and the legacy MVP
+ * shape (`cssSelector`).
+ */
 function sel(data: Record<string, unknown>): string {
-  return data['cssSelector'] as string
+  return (
+    (typeof data['selector'] === 'string' && data['selector']) ||
+    (typeof data['cssSelector'] === 'string' && data['cssSelector']) ||
+    ''
+  )
 }
 
 /** Build a CSS-only `Target` for the driver. */
 function cssTarget(selector: string): Target {
   return { primary: { how: 'css', value: selector }, fallbacks: [] }
+}
+
+/**
+ * Build a `Target` from a block's data. XPath locators are encoded with an
+ * `xpath:` prefix the kernel resolves; CSS uses the css strategy.
+ */
+function targetFrom(data: Record<string, unknown>): Target {
+  const selector = sel(data)
+  if (data['findBy'] === 'xpath') {
+    return { primary: { how: 'css', value: `xpath:${selector}` }, fallbacks: [] }
+  }
+  return cssTarget(selector)
 }
 
 /** Abort fast when the run was cancelled before this step started. */
@@ -111,19 +131,19 @@ function readTextInPage(selector: string): string {
 
 const click: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  return runRaw({ action: 'click', target: cssTarget(sel(data)) }, ctx)
+  return runRaw({ action: 'click', target: targetFrom(data) }, ctx)
 }
 
 const fill: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const value = String(data['value'] ?? '')
-  return runRaw({ action: 'fill', target: cssTarget(sel(data)), value }, ctx)
+  return runRaw({ action: 'fill', target: targetFrom(data), value }, ctx)
 }
 
 const selectOption: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const value = String(data['value'] ?? '')
-  return runRaw({ action: 'select_option', target: cssTarget(sel(data)), value }, ctx)
+  return runRaw({ action: 'select_option', target: targetFrom(data), value }, ctx)
 }
 
 const scroll: BlockExecutor = async (data, ctx) => {
@@ -139,7 +159,7 @@ const scroll: BlockExecutor = async (data, ctx) => {
   else if (mode === 'bottom') scroll = { mode: 'bottom', smooth }
   else scroll = { mode: 'into_view' }
 
-  const selector = (data['cssSelector'] as string | undefined) ?? ''
+  const selector = sel(data)
   const op: Op = { action: 'scroll', scroll }
   if (selector) op.target = cssTarget(selector)
 
@@ -174,20 +194,20 @@ const pressKey: BlockExecutor = async (data, ctx) => {
 
 const hover: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  return runRaw({ action: 'hover', target: cssTarget(sel(data)) }, ctx)
+  return runRaw({ action: 'hover', target: targetFrom(data) }, ctx)
 }
 
 const setCheckbox: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const checked = (data['checked'] as boolean | undefined) ?? true
-  return runRaw({ action: 'set_checkbox', target: cssTarget(sel(data)), value: checked }, ctx)
+  return runRaw({ action: 'set_checkbox', target: targetFrom(data), value: checked }, ctx)
 }
 
 const waitFor: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   try {
     const result = await execOnActiveTab(
-      { action: 'wait_for', target: cssTarget(sel(data)) },
+      { action: 'wait_for', target: targetFrom(data) },
       ctx.signal,
     )
     if (result?.found) ctx.emit('result', '元素已出现')
@@ -201,7 +221,7 @@ const waitFor: BlockExecutor = async (data, ctx) => {
 const takeScreenshot: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const type = (data['type'] as string | undefined) ?? 'page'
-  const selector = (data['cssSelector'] as string | undefined) ?? ''
+  const selector = sel(data)
   const variable = String(data['variableName'] ?? 'lastScreenshot')
 
   // fullpage / element go through the in-page SVG->canvas capture path.
@@ -667,7 +687,7 @@ const attributeValueExec: BlockExecutor = async (data, ctx) => {
   const variable = String(data['variableName'] ?? 'lastAttribute')
   const opData: Op = {
     action: op === 'set' ? 'set_attribute' : 'get_attribute',
-    target: cssTarget(sel(data)),
+    target: targetFrom(data),
     attribute,
   }
   if (op === 'set') opData.value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
@@ -929,7 +949,7 @@ const triggerEventExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const event = String(data['event'] ?? '')
   const detail = interpolate(String(data['detail'] ?? 'null'), ctx.variables, ctx.refData)
-  return runRaw({ action: 'trigger_event', target: cssTarget(sel(data)), attribute: event, value: detail }, ctx)
+  return runRaw({ action: 'trigger_event', target: targetFrom(data), attribute: event, value: detail }, ctx)
 }
 
 const browserEvent: BlockExecutor = async (_data, ctx) => {
@@ -1002,7 +1022,7 @@ const blocksGroup: BlockExecutor = async (_data) => {
 const getForm: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const variable = String(data['variableName'] ?? 'lastForm')
-  const selector = data['cssSelector'] ? (data['cssSelector'] as string) : undefined
+  const selector = sel(data) || undefined
   try {
     const op: Op = { action: 'read_form' }
     if (selector) op.value = selector
@@ -1018,7 +1038,7 @@ const getForm: BlockExecutor = async (data, ctx) => {
 const selectRadio: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const checked = data['value'] !== '' && data['value'] !== false
-  return runRaw({ action: 'set_checkbox', target: cssTarget(sel(data)), value: checked }, ctx)
+  return runRaw({ action: 'set_checkbox', target: targetFrom(data), value: checked }, ctx)
 }
 
 // --- Placeholders for engine-handled blocks ----------------------------------
