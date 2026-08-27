@@ -10,6 +10,7 @@
 
 import { useMemo, useState } from 'react'
 import { useReactFlow, type Node } from '@xyflow/react'
+import type { TranslateFn } from '../i18n'
 
 export interface SearchTarget {
   id: string
@@ -18,7 +19,7 @@ export interface SearchTarget {
   position: { x: number; y: number }
 }
 
-function SearchBlocks({ nodes }: { nodes: SearchTarget[] }) {
+function SearchBlocks({ nodes, t }: { nodes: SearchTarget[]; t: TranslateFn }) {
   const [active, setActive] = useState(false)
   const [query, setQuery] = useState('')
   const { getZoom, setCenter } = useReactFlow()
@@ -48,7 +49,7 @@ function SearchBlocks({ nodes }: { nodes: SearchTarget[] }) {
       <button
         type="button"
         className="wf-icon-btn"
-        title="Search nodes (Ctrl+Shift+F)"
+        title={`${t('searchNodes')} (Ctrl+Shift+F)`}
         onClick={() => setActive(!active)}
       >
         <i className="ri-search-2-line" />
@@ -58,13 +59,13 @@ function SearchBlocks({ nodes }: { nodes: SearchTarget[] }) {
           <input
             autoFocus
             type="search"
-            placeholder="Search nodes"
+            placeholder={t('searchPlaceholder')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
           {query && (
             <div className="wf-search-results">
-              {results.length === 0 && <p className="wf-search-empty">No matches</p>}
+              {results.length === 0 && <p className="wf-search-empty">{t('noMatches')}</p>}
               {results.slice(0, 8).map((n) => (
                 <button key={n.id} type="button" onClick={() => goTo(n)}>
                   <span className="wf-search-name">{n.name}</span>
@@ -98,7 +99,7 @@ function ZoomControls() {
   )
 }
 
-export default function CanvasControls({ nodes }: { nodes: Node[] }) {
+export default function CanvasControls({ nodes, t }: { nodes: Node[]; t: TranslateFn }) {
   const targets: SearchTarget[] = nodes.map((n) => {
     const data = n.data as unknown as {
       block?: { name?: string }
@@ -115,7 +116,7 @@ export default function CanvasControls({ nodes }: { nodes: Node[] }) {
   return (
     <>
       <div className="wf-canvas-bottom wf-canvas-bottom-left">
-        <SearchBlocks nodes={targets} />
+        <SearchBlocks nodes={targets} t={t} />
       </div>
       <div className="wf-canvas-bottom wf-canvas-bottom-right">
         <ZoomControls />

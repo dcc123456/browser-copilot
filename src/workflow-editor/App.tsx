@@ -1,14 +1,12 @@
 /**
- * Workflow editor (standalone popup window) — React port of Automa's editor
- * (newtab/pages/workflows/[id].vue + WorkflowEditor.vue).
+ * Workflow editor (standalone popup window) — React port of Automa's editor.
  *
- * Layout: full-bleed React Flow canvas with left->right nodes; a floating top
- * toolbar (name card / tabs / save-run-record); search (bottom-left) and zoom
- * (bottom-right) controls; a MiniMap; and a resizable right sidebar that shows
- * the workflow details, the selected block's edit form, or the block palette.
- *
- * Node data uses the Automa shape: the catalog block's `data` defaults cloned
- * per node, plus `blockId`. Legacy workflows are migrated on load.
+ * Layout: full-bleed React Flow canvas (left->right nodes); a BLOCK PALETTE
+ * sidebar on the LEFT (Automa's block list), a DETAILS/EDIT/LOGS sidebar on
+ * the RIGHT; a compact floating top toolbar (palette toggle + name /
+ * editor-logs tabs / record-save-run); search (bottom-left) and zoom
+ * (bottom-right) controls; and a MiniMap. Editor chrome is localized; block
+ * names stay English.
  *
  * @module workflow-editor/App
  */
@@ -37,20 +35,25 @@ import type {
   Workflow,
   WorkflowNode,
   WorkflowEdge,
+  WorkflowTrigger,
   WorkflowSettings,
 } from '../lib/workflow/types'
 import { migrateWorkflow } from '../lib/workflow/migrate'
 import { sendCommand } from '../lib/messages'
+import { getSettings } from '../lib/storage'
 import { newId } from '../lib/storage'
 
 import { nodeTypes, type BlockNodeData } from './flow/BlockNode'
 import { edgeTypes } from './flow/CustomEdge'
-import Sidebar, { loadWidth, type SidebarView } from './sidebar/Sidebar'
+import Sidebar, { loadWidth } from './sidebar/Sidebar'
 import BlockPalette from './sidebar/BlockPalette'
 import BlockEditForm from './sidebar/BlockEditForm'
-import WorkflowDetails, { type WorkflowMeta } from './sidebar/WorkflowDetails'
+import WorkflowDetails from './sidebar/WorkflowDetails'
+import EditorLogs from './sidebar/EditorLogs'
 import TopToolbar, { type EditorTab } from './toolbar/TopToolbar'
 import CanvasControls from './toolbar/CanvasControls'
+import { useToast } from './toast'
+import { makeTranslate, resolveEditorLocale, type TranslateFn } from './i18n'
 import './editor.css'
 
 const DEFAULT_SETTINGS: WorkflowSettings = {
@@ -62,7 +65,6 @@ const DEFAULT_SETTINGS: WorkflowSettings = {
 
 type FlowNode = Node<BlockNodeData>
 
-/** Build a React Flow node from a persisted workflow node. */
 function toFlowNode(n: WorkflowNode): FlowNode {
   const blockId = (n.data.blockId as string) ?? n.label
   const block = BLOCK_BY_ID.get(blockId)
@@ -79,7 +81,6 @@ function toFlowNode(n: WorkflowNode): FlowNode {
   }
 }
 
-/** Create a fresh node when a palette block is dropped. */
 function newFlowNode(block: BlockCatalogEntry, position: { x: number; y: number }): FlowNode {
   return {
     id: newId(),
@@ -97,17 +98,27 @@ export default function EditorApp() {
   const [nodes, setNodes] = useState<FlowNode[]>([])
   const [edges, setEdges] = useState<Edge[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [sidebarWidth, setSidebarWidth] = useState(loadWidth)
-  const [view, setView] = useState<SidebarView>('details')
+  const [rightOpen, setRightOpen] = useState(true)
+  const [paletteOpen, setPaletteOpen] = useState(true)
+  const [rightWidth, setRightWidth] = useState(() => loadWidth('right'))
+  const [paletteWidth, setPaletteWidth] = useState(() => loadWidth('left'))
   const [tab, setTab] = useState<EditorTab>('editor')
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
   const [recording, setRecording] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [t, setT] = useState<TranslateFn>(() => makeTranslate(resolveEditorLocale(undefined)))
 
-  const [meta, setMeta] = useState<WorkflowMeta>({
+  const toast = useToast()
+
+  const [meta, setMeta] = useState<{
+    name: string
+    description: string
+    icon: string
+    trigger: WorkflowTrigger
+    settings: WorkflowSettings
+  }>({
     name: 'New workflow',
     description: '',
     icon: 'ri-flow-chart',
@@ -117,6 +128,13 @@ export default function EditorApp() {
 
   const reactFlow = useReactFlow()
   const loadedRef = useRef(false)
+
+  // Resolve language from the stored locale.
+  useEffect(() => {
+    void getSettings()
+      .then((s) => setT(makeTranslate(resolveEditorLocale((s as { locale?: string }).locale))))
+      .catch(() => {})
+  }, [])
 
   // --- load -----------------------------------------------------------------
   useEffect(() => {
@@ -166,7 +184,6 @@ export default function EditorApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // mark dirty on graph changes
   useEffect(() => {
     if (loadedRef.current) setDirty(true)
   }, [nodes, edges, meta])
@@ -181,7 +198,10 @@ export default function EditorApp() {
     }
     if (next !== undefined) {
       setSelectedId(next)
-      if (next) setView('edit')
+      if (next) {
+        setTab('editor')
+        setRightOpen(true)
+      }
     }
   }, [])
 
@@ -192,9 +212,7 @@ export default function EditorApp() {
   const onConnect = useCallback((conn: Connection) => {
     if (!conn.source || !conn.target || conn.source === conn.target) return
     setEdges((eds) => {
-      if (eds.some((e) => e.target === conn.target && e.targetHandle === conn.targetHandle)) {
-        return eds
-      }
+      if (eds.some((e) => e.target === conn.target && e.targetHandle === conn.targetHandle)) return eds
       return [
         ...eds,
         {
@@ -239,7 +257,6 @@ export default function EditorApp() {
     [selectedId],
   )
 
-  // --- save / run ------------------------------------------------------------
   const buildWorkflow = useCallback(async (): Promise<Workflow | null> => {
     if (!workflowId) return null
     const { x, y, zoom } = reactFlow.getViewport()
@@ -258,7 +275,7 @@ export default function EditorApp() {
     }))
     return {
       id: workflowId,
-      name: meta.name || 'Untitled workflow',
+      name: meta.name || t('untitled'),
       description: meta.description,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -266,7 +283,7 @@ export default function EditorApp() {
       trigger: meta.trigger,
       settings: meta.settings,
     }
-  }, [workflowId, nodes, edges, meta, reactFlow])
+  }, [workflowId, nodes, edges, meta, reactFlow, t])
 
   const handleSave = useCallback(async (): Promise<void> => {
     const wf = await buildWorkflow()
@@ -276,12 +293,15 @@ export default function EditorApp() {
     try {
       await sendCommand({ type: 'workflows.save', workflow: wf })
       setDirty(false)
+      toast.show(t('saved'), 'ok')
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      const msg = e instanceof Error ? e.message : String(e)
+      setError(msg)
+      toast.show(`${t('saveFailed')}: ${msg}`, 'error')
     } finally {
       setSaving(false)
     }
-  }, [buildWorkflow])
+  }, [buildWorkflow, toast, t])
 
   const handleRun = useCallback(async () => {
     if (!workflowId) return
@@ -289,21 +309,31 @@ export default function EditorApp() {
     setRunning(true)
     try {
       const r = await sendCommand({ type: 'workflows.run', id: workflowId })
-      if (r.type === 'workflows.run' && !r.outcome.ok) {
-        setError(r.outcome.error ?? r.outcome.summary)
+      if (r.type === 'workflows.run') {
+        if (r.outcome.ok) toast.show(t('runFinished'), 'ok')
+        else {
+          const msg = r.outcome.error ?? r.outcome.summary
+          setError(msg)
+          toast.show(`${t('runFailed')}: ${msg}`, 'error')
+        }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      const msg = e instanceof Error ? e.message : String(e)
+      setError(msg)
+      toast.show(`${t('runFailed')}: ${msg}`, 'error')
     } finally {
       setRunning(false)
+      setTab('logs')
+      setRightOpen(true)
     }
-  }, [workflowId, handleSave])
+  }, [workflowId, handleSave, toast, t])
 
   const toggleRecording = useCallback(async () => {
     try {
       if (recording) {
         const r = await sendCommand({ type: 'record.stop' })
         setRecording(false)
+        toast.show(t('recordingStopped'), 'ok')
         if (r.type === 'record.stop' && r.workflowId) {
           window.location.search = `?edit=${encodeURIComponent(r.workflowId)}`
           window.location.reload()
@@ -311,11 +341,14 @@ export default function EditorApp() {
       } else {
         await sendCommand({ type: 'record.start' })
         setRecording(true)
+        toast.show(t('recordingStarted'), 'info')
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      const msg = e instanceof Error ? e.message : String(e)
+      setError(msg)
+      toast.show(`${t('recordStartFailed')}: ${msg}`, 'error')
     }
-  }, [recording])
+  }, [recording, toast, t])
 
   // --- keyboard shortcuts ----------------------------------------------------
   useEffect(() => {
@@ -332,14 +365,13 @@ export default function EditorApp() {
         document.querySelector<HTMLButtonElement>('.wf-search .wf-icon-btn')?.click()
       } else if (mod && e.key.toLowerCase() === 'b') {
         e.preventDefault()
-        setSidebarOpen((o) => !o)
+        setRightOpen((o) => !o)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [handleSave, handleRun])
 
-  // highlight edges connected to the selected node
   const edgeWithHighlight = useMemo(
     () =>
       edges.map((e) => ({
@@ -352,30 +384,23 @@ export default function EditorApp() {
     [edges, selectedId],
   )
 
-  const sidebarContent =
+  const rightContent =
     tab === 'logs' ? (
-      <div className="wf-sidebar-scroll">
-        <p className="wf-form-note">Run logs appear here after a run (see History tab).</p>
-      </div>
-    ) : view === 'palette' ? (
-      <BlockPalette />
-    ) : view === 'edit' && selectedNode && selectedBlock ? (
+      <EditorLogs t={t} />
+    ) : selectedNode && selectedBlock ? (
       <BlockEditForm
         block={selectedBlock}
         nodeName={String(selectedNode.data.blockData?.description ?? selectedBlock.name)}
         data={selectedNode.data.blockData}
         onChange={patchSelected}
+        t={t}
         onBack={() => {
-          setView('details')
           setSelectedId(null)
           setNodes((nds) => nds.map((n) => ({ ...n, selected: false })))
         }}
       />
     ) : (
-      <WorkflowDetails
-        meta={meta}
-        onChange={(patch) => setMeta((m) => ({ ...m, ...patch }))}
-      />
+      <WorkflowDetails meta={meta} onChange={(patch) => setMeta((m) => ({ ...m, ...patch }))} t={t} />
     )
 
   return (
@@ -394,7 +419,10 @@ export default function EditorApp() {
           e.dataTransfer.dropEffect = 'copy'
         }}
         onNodeDoubleClick={() => {
-          if (selectedId) setView('edit')
+          if (selectedId) {
+            setRightOpen(true)
+            setTab('editor')
+          }
         }}
         fitView
         deleteKeyCode="Delete"
@@ -416,20 +444,18 @@ export default function EditorApp() {
           maskColor="rgba(0,0,0,0.08)"
           bgColor="var(--bc-bg-soft)"
         />
-        <CanvasControls nodes={nodes} />
+        <CanvasControls nodes={nodes} t={t} />
       </ReactFlow>
 
       <TopToolbar
-        workflowName={meta.name}
+        workflowName={meta.name || t('untitled')}
         workflowIcon={meta.icon}
         tab={tab}
         onTabChange={setTab}
-        sidebarOpen={sidebarOpen}
-        onToggleSidebar={() => setSidebarOpen((o) => !o)}
-        onTogglePalette={() => {
-          setSidebarOpen(true)
-          setView(view === 'palette' ? 'details' : 'palette')
-        }}
+        sidebarOpen={rightOpen}
+        paletteOpen={paletteOpen}
+        onToggleSidebar={() => setRightOpen((o) => !o)}
+        onTogglePalette={() => setPaletteOpen((o) => !o)}
         dirty={dirty}
         saving={saving}
         running={running}
@@ -437,12 +463,20 @@ export default function EditorApp() {
         onSave={() => void handleSave()}
         onRun={() => void handleRun()}
         onToggleRecording={() => void toggleRecording()}
+        t={t}
       />
 
-      {error && <div className="wf-error-banner">{error}</div>}
+      {error && <div className="wf-error-banner" onClick={() => setError(null)}>{error}</div>}
+      {toast.node}
 
-      <Sidebar open={sidebarOpen && tab === 'editor'} width={sidebarWidth} onWidthChange={setSidebarWidth}>
-        {sidebarContent}
+      {/* Left: block palette */}
+      <Sidebar open={paletteOpen && tab === 'editor'} width={paletteWidth} onWidthChange={setPaletteWidth} side="left">
+        <BlockPalette />
+      </Sidebar>
+
+      {/* Right: details / edit / logs */}
+      <Sidebar open={rightOpen} width={rightWidth} onWidthChange={setRightWidth} side="right">
+        {rightContent}
       </Sidebar>
     </div>
   )

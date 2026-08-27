@@ -1,12 +1,13 @@
 /**
- * Floating top toolbar — React port of Automa's [id].vue toolbar +
- * EditorLocalActions. Sits in a pointer-events-none strip across the canvas
- * top; each interactive child re-enables pointer events.
+ * Floating top toolbar — compact Automa-style controls across the canvas top.
+ * Left group: palette toggle + name (icon first, name truncated small). Center:
+ * Editor/Logs tabs. Right: record / save / run.
  *
  * @module workflow-editor/toolbar/TopToolbar
  */
 
 import { BlockIcon } from '../../lib/workflow/blocks/icons'
+import type { TranslateFn } from '../i18n'
 
 export type EditorTab = 'editor' | 'logs'
 
@@ -16,6 +17,7 @@ export default function TopToolbar({
   tab,
   onTabChange,
   sidebarOpen,
+  paletteOpen,
   onToggleSidebar,
   onTogglePalette,
   dirty,
@@ -25,12 +27,14 @@ export default function TopToolbar({
   onSave,
   onRun,
   onToggleRecording,
+  t,
 }: {
   workflowName: string
   workflowIcon: string
   tab: EditorTab
   onTabChange: (t: EditorTab) => void
   sidebarOpen: boolean
+  paletteOpen: boolean
   onToggleSidebar: () => void
   onTogglePalette: () => void
   dirty: boolean
@@ -40,41 +44,35 @@ export default function TopToolbar({
   onSave: () => void
   onRun: () => void
   onToggleRecording: () => void
+  t: TranslateFn
 }) {
   return (
     <div className="wf-toolbar">
-      <div className="wf-toolbar-card">
-        <BlockIcon icon={workflowIcon || 'ri-flow-chart'} size={22} />
-        <span className="wf-toolbar-name" title={workflowName}>
-          {workflowName}
+      <div className="wf-toolbar-group">
+        <button type="button" className="wf-icon-btn" title={t('addBlocks')} onClick={onTogglePalette}>
+          <i className={paletteOpen ? 'ri-function-line' : 'ri-add-line'} />
+        </button>
+        <span className="wf-toolbar-mini" title={workflowName}>
+          <BlockIcon icon={workflowIcon || 'ri-flow-chart'} size={16} />
+          <span className="wf-toolbar-name">{workflowName}</span>
         </span>
       </div>
 
-      <div className="wf-toolbar-group">
+      <div className="wf-toolbar-group wf-toolbar-tabs">
         <button
           type="button"
-          className="wf-icon-btn"
-          title="Toggle sidebar"
-          onClick={onToggleSidebar}
+          className={tab === 'editor' ? 'wf-tab wf-tab-active' : 'wf-tab'}
+          onClick={() => onTabChange('editor')}
         >
-          <i className={sidebarOpen ? 'ri-side-bar-fill' : 'ri-side-bar-line'} />
+          {t('editor')}
         </button>
-        <div className="wf-tabs">
-          <button
-            type="button"
-            className={tab === 'editor' ? 'wf-tab wf-tab-active' : 'wf-tab'}
-            onClick={() => onTabChange('editor')}
-          >
-            Editor
-          </button>
-          <button
-            type="button"
-            className={tab === 'logs' ? 'wf-tab wf-tab-active' : 'wf-tab'}
-            onClick={() => onTabChange('logs')}
-          >
-            Logs
-          </button>
-        </div>
+        <button
+          type="button"
+          className={tab === 'logs' ? 'wf-tab wf-tab-active' : 'wf-tab'}
+          onClick={() => onTabChange('logs')}
+        >
+          {t('logs')}
+        </button>
       </div>
 
       <span className="wf-toolbar-spacer" />
@@ -83,23 +81,25 @@ export default function TopToolbar({
         <button
           type="button"
           className="wf-icon-btn"
-          title="Add blocks"
-          onClick={onTogglePalette}
+          title={t('toggleSidebar')}
+          onClick={onToggleSidebar}
         >
-          <i className="ri-add-line" />
+          <i className={sidebarOpen ? 'ri-side-bar-fill' : 'ri-side-bar-line'} />
         </button>
         <button
           type="button"
-          className={`wf-icon-btn${recording ? ' wf-rec-active' : ''}`}
-          title={recording ? 'Stop recording' : 'Record workflow'}
+          className={`wf-icon-btn wf-btn-record${recording ? ' wf-rec-active' : ''}`}
+          title={recording ? t('stopRecord') : t('record')}
           onClick={onToggleRecording}
+          disabled={false}
         >
-          <i className="ri-record-circle-line" />
+          <i className={recording ? 'ri-stop-circle-line' : 'ri-record-circle-line'} />
+          {recording && <span className="wf-rec-label">REC</span>}
         </button>
         <button
           type="button"
           className="wf-icon-btn wf-btn-primary"
-          title="Save (Ctrl+S)"
+          title={`${t('save')} (Ctrl+S)`}
           onClick={onSave}
           disabled={saving}
         >
@@ -109,7 +109,7 @@ export default function TopToolbar({
         <button
           type="button"
           className="wf-icon-btn wf-btn-accent"
-          title="Run (Ctrl+Enter)"
+          title={`${t('run')} (Ctrl+Enter)`}
           onClick={onRun}
           disabled={running}
         >

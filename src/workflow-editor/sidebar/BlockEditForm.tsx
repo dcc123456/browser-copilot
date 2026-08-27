@@ -16,6 +16,7 @@ import { isCloudBlock } from '../../lib/workflow/blocks/cloud-blocks'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
 import { EditForms } from '../blocks/EditForms'
 import BlockSettings from '../blocks/shared/BlockSettings'
+import type { TranslateFn } from '../i18n'
 
 export interface BlockEditFormProps {
   block: BlockCatalogEntry
@@ -23,6 +24,7 @@ export interface BlockEditFormProps {
   data: Record<string, unknown>
   onChange: (patch: Record<string, unknown>) => void
   onBack: () => void
+  t: TranslateFn
 }
 
 function GenericForm({
@@ -93,6 +95,7 @@ export default function BlockEditForm({
   data,
   onChange,
   onBack,
+  t,
 }: BlockEditFormProps) {
   const EditComponent = block.editComponent ? EditForms[block.editComponent] : undefined
   const cloud = isCloudBlock(block.id)
@@ -100,7 +103,7 @@ export default function BlockEditForm({
   return (
     <div className="wf-edit-block">
       <div className="wf-edit-header">
-        <button type="button" onClick={onBack} title="Back" className="wf-icon-btn">
+        <button type="button" onClick={onBack} title={t('back')} className="wf-icon-btn">
           <i className="ri-arrow-left-line" />
         </button>
         <span className="wf-edit-chip" style={{ backgroundColor: `var(--cat-${block.category})` }}>

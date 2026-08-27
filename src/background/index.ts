@@ -351,28 +351,37 @@ chrome.action.onClicked.addListener((tab) => {
   })
 })
 
-// --- Command channel ---------------------------------------------------------
-
-// Element picker messages are handled before the generic command channel:
-// they need the raw sender and an immediate async response, and their results
-// are broadcast back to editor windows by picker-bridge.
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (handleRecordEvent(message)) return true
-  if (handlePickerMessage(message, sender, sendResponse)) return true
-  // Keyboard-shortcut triggers fire from the injected tab listener.
-  void handleShortcutPressed(message).then((handled) => {
-    if (handled) sendResponse({ ok: true })
-  })
-  // handleShortcutPressed is async but rarely blocks; allow async response.
-  return true
-})
-
-// Wire tab/navigation listeners for workflow recording.
-initRecordingLifecycle()
-
+// --- Message channel ---------------------------------------------------------
+//
+// Exactly ONE onMessage listener: special protocols (element picker, workflow
+// recording events, keyboard-shortcut triggers) are claimed BEFORE the generic
+// command switch. Previously each had its own listener, so a non-command
+// message (e.g. picker:start) ALSO reached the command handler, which threw
+// "Unknown command" and raced the real response — the root cause of the picker
+// error and flaky run/record buttons.
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   void (async () => {
     try {
+      // 1. Recording events are one-way (in-page recorder -> controller).
+      if (handleRecordEvent(message)) {
+        sendResponse({ ok: true })
+        return
+      }
+
+      // 2. Element picker start/verify/result/cancel.
+      const picker = await handlePickerMessage(message)
+      if (picker.handled) {
+        sendResponse(picker.response)
+        return
+      }
+
+      // 3. Keyboard-shortcut triggers from the injected tab listener.
+      if (await handleShortcutPressed(message)) {
+        sendResponse({ ok: true })
+        return
+      }
+
+      // 4. Generic command channel (workflows.*, settings, skills, ...).
       const data = await handleCommand(message as Command)
       sendResponse({ ok: true, data } satisfies CommandResponse)
     } catch (error) {
@@ -382,9 +391,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       } satisfies CommandResponse)
     }
   })()
-  // Keeps the response channel open for the async work above.
+  // Keep the response channel open for the async work above.
   return true
 })
+
+// Wire tab/navigation listeners for workflow recording.
+initRecordingLifecycle()
 
 function runningBoardsView(): {
   runs: { runId: string; taskId?: string; label: string; source: ReturnType<typeof listRunning>[number]['source']; startedAt: number; steps: ReturnType<typeof listRunning>[number]['steps'] }[]
