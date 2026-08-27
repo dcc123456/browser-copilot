@@ -53,27 +53,34 @@ export function flowsToWorkflow(
     data: { blockId: 'trigger', type: 'manual', description: '' },
   })
 
-  let prevId = triggerId
+  // React Flow edge handles reference the <Handle id> rendered on each node,
+  // which is keyed by the BLOCK id (e.g. `event-click-output-1`), not the
+  // unique node id — so edges must use block ids, otherwise the handles cannot
+  // be resolved and no connection line is drawn.
+  let prevNodeId = triggerId
+  let prevBlockId = 'trigger'
   flows.forEach((flow, i) => {
     const id = flow.id || newId()
+    const blockId = flow.data.blockId
     nodes.push({
       id,
-      label: flow.data.blockId,
+      label: blockId,
       position: { x: 60 + (i + 1) * X_GAP, y: Y_START },
       data: {
         ...flow.data,
-        blockId: flow.data.blockId,
+        blockId,
         description: flow.description ?? flow.data.description ?? '',
       },
     })
     edges.push({
       id: newId(),
-      source: prevId,
+      source: prevNodeId,
       target: id,
-      sourceHandle: `${prevId}-output-1`,
-      targetHandle: `${id}-input-1`,
+      sourceHandle: `${prevBlockId}-output-1`,
+      targetHandle: `${blockId}-input-1`,
     })
-    prevId = id
+    prevNodeId = id
+    prevBlockId = blockId
   })
 
   const now = Date.now()

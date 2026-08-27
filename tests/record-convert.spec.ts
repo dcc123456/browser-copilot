@@ -36,12 +36,23 @@ describe('flowsToWorkflow', () => {
     const ids = wf.drawflow.nodes.map((n) => n.id)
     expect(wf.drawflow.edges[0]!.source).toBe(ids[0])
     expect(wf.drawflow.edges[0]!.target).toBe(ids[1])
-    expect(wf.drawflow.edges[0]!.sourceHandle).toContain('output-1')
-    expect(wf.drawflow.edges[0]!.targetHandle).toContain('input-1')
     // chain is continuous
     for (let i = 1; i < wf.drawflow.edges.length; i++) {
       expect(wf.drawflow.edges[i]!.source).toBe(wf.drawflow.edges[i - 1]!.target)
     }
+  })
+
+  it('keys edge handles by BLOCK id so React Flow resolves them', () => {
+    const wf = flowsToWorkflow(flows)
+    // trigger -> new-tab
+    expect(wf.drawflow.edges[0]!.sourceHandle).toBe('trigger-output-1')
+    expect(wf.drawflow.edges[0]!.targetHandle).toBe('new-tab-input-1')
+    // new-tab -> event-click
+    expect(wf.drawflow.edges[1]!.sourceHandle).toBe('new-tab-output-1')
+    expect(wf.drawflow.edges[1]!.targetHandle).toBe('event-click-input-1')
+    // event-click -> forms
+    expect(wf.drawflow.edges[2]!.sourceHandle).toBe('event-click-output-1')
+    expect(wf.drawflow.edges[2]!.targetHandle).toBe('forms-input-1')
   })
 
   it('lays nodes out left-to-right with increasing x', () => {
