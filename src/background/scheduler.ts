@@ -19,7 +19,7 @@
  * @module background/scheduler
  */
 
-import { nextRunAt } from '../lib/schedule'
+import { isManualSchedule, nextRunAt } from '../lib/schedule'
 import { getTask, listTasks, saveTask } from '../lib/task-store'
 import type { ScheduledTask } from '../lib/scheduler-types'
 import { runTask } from './task-runner'
@@ -59,11 +59,18 @@ export async function scheduleTask(taskId: string): Promise<void> {
   // Fall back to the legacy `task:` prefix when the task cannot be found, so a
   // deleted task's alarm is still cleared by the caller's reschedule.
   const name = task ? alarmNameFor(task) : alarmName(taskId)
-  if (!task || !task.enabled) {
+  // A manual ("no schedule") task has no next firing: just make sure it holds no
+  // alarm, then leave it to be run by hand / from Feishu.
+  if (!task || !task.enabled || isManualSchedule(task.schedule)) {
     await chrome.alarms.clear(name)
     return
   }
   const when = nextRunAt(task.schedule, Date.now())
+  // nextRunAt only returns null for the manual schedule, handled above.
+  if (when === null) {
+    await chrome.alarms.clear(name)
+    return
+  }
   // Alarms enforce a ~1 minute minimum; clamp and remember that we did. A delay
   // below the minimum is rejected outright with "Error during alarms.create".
   const safeWhen = Math.max(when, Date.now() + MIN_ALARM_DELAY_MS)

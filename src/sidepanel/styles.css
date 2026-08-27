@@ -1429,6 +1429,12 @@ textarea {
   color: var(--accent);
 }
 
+.task-chip-manual {
+  background: var(--chip);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .task-lastrun {
   margin-top: 6px;
   color: var(--muted);

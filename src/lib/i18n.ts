@@ -91,6 +91,9 @@ export interface Messages {
   taskSchedWeekdays: string
   taskSchedWeekly: string
   taskSchedInterval: string
+  taskSchedManual: string
+  taskManualHint: string
+  taskManualChip: string
   taskEvery: string
   taskMinutes: string
   taskMaxRounds: string
@@ -504,6 +507,9 @@ const en: Messages = {
   taskSchedWeekdays: 'Weekdays (Mon–Fri) at',
   taskSchedWeekly: 'On weekdays',
   taskSchedInterval: 'Every',
+  taskSchedManual: 'Manual',
+  taskManualHint: 'No automatic schedule — run it yourself with "Run now" or trigger it from Feishu.',
+  taskManualChip: 'Manual',
   taskEvery: 'every',
   taskMinutes: 'minutes',
   taskMaxRounds: 'Max tool rounds',
@@ -932,6 +938,9 @@ const zhCN: Messages = {
   taskSchedWeekdays: '工作日（周一至周五）',
   taskSchedWeekly: '每周指定日',
   taskSchedInterval: '每隔',
+  taskSchedManual: '手动',
+  taskManualHint: '不自动运行，通过「立即运行」按钮或飞书指令手动触发。',
+  taskManualChip: '手动任务',
   taskEvery: '每隔',
   taskMinutes: '分钟',
   taskMaxRounds: '最大调用轮数',

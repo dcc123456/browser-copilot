@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { sendCommand } from '../lib/messages'
 import { createDraft } from '../lib/task-store'
-import { describeSchedule } from '../lib/schedule'
+import { describeSchedule, isManualSchedule } from '../lib/schedule'
 import type { FeishuConfig, ScheduledTask } from '../lib/scheduler-types'
 import { useT } from './i18n'
 
@@ -207,25 +207,33 @@ export default function TasksTab() {
         </div>
       ) : (
         <ul className="task-list">
-          {tasks.map((task) => (
+          {tasks.map((task) => {
+            const manual = isManualSchedule(task.schedule)
+            return (
             <li
               className={`task-item${justSavedId === task.id ? ' task-item-saved' : ''}${
-                !task.enabled ? ' task-item-disabled' : ''
+                !task.enabled && !manual ? ' task-item-disabled' : ''
               }`}
               key={task.id}
             >
               <div className="task-item-head">
-                <label className="inline-check">
-                  <input
-                    checked={task.enabled}
-                    disabled={busy || draft?.id === task.id}
-                    onChange={(event) =>
-                      void persistTask({ ...task, enabled: event.target.checked })
-                    }
-                    type="checkbox"
-                  />
+                {manual ? (
+                  // A manual task has no schedule to enable/disable; show its
+                  // name plainly instead of an enable checkbox.
                   <strong className="task-item-name">{task.name}</strong>
-                </label>
+                ) : (
+                  <label className="inline-check">
+                    <input
+                      checked={task.enabled}
+                      disabled={busy || draft?.id === task.id}
+                      onChange={(event) =>
+                        void persistTask({ ...task, enabled: event.target.checked })
+                      }
+                      type="checkbox"
+                    />
+                    <strong className="task-item-name">{task.name}</strong>
+                  </label>
+                )}
                 <span className={`task-status task-status-${task.lastStatus ?? 'none'}`}>
                   {task.lastStatus === 'ok'
                     ? t.taskStatusOk
@@ -237,7 +245,7 @@ export default function TasksTab() {
                 </span>
               </div>
               <div className="task-meta">
-                <span className="task-chip">
+                <span className={`task-chip${manual ? ' task-chip-manual' : ''}`}>
                   {describeSchedule(task.schedule, zh ? 'zh' : 'en')}
                 </span>
                 <span className="task-chip">
@@ -277,7 +285,8 @@ export default function TasksTab() {
                 </button>
               </div>
             </li>
-          ))}
+            )
+          })}
         </ul>
       )}
 
@@ -323,24 +332,29 @@ function TaskEditor({
   const WEEKEND = [6, 0]
   const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
 
-  // The editor exposes just two kinds: "weekly" (which covers "daily" and the
-  // old "weekdays" preset via the day chips/shortcuts) and "interval". Older
-  // tasks stored as daily/weekdays are mapped to their weekly equivalents for
-  // display, and any edit writes them back as weekly so they migrate on save.
+  // The editor exposes three "when" modes:
+  //  - "manual": no automatic run (no alarm), triggered by hand / Feishu;
+  //  - "weekly": covers the old "daily" and "weekdays" presets via the day chips;
+  //  - "interval": repeat every N minutes.
+  // Older tasks stored as daily/weekdays are mapped to weekly for display and
+  // migrate back to weekly on save.
+  const isManual = draft.schedule.kind === 'none'
   const sched =
-    draft.schedule.kind === 'daily'
-      ? { kind: 'weekly' as const, days: ALL_DAYS, hour: draft.schedule.hour, minute: draft.schedule.minute }
-      : draft.schedule.kind === 'weekdays'
-        ? { kind: 'weekly' as const, days: WEEKDAYS, hour: draft.schedule.hour, minute: draft.schedule.minute }
-        : draft.schedule
+    draft.schedule.kind === 'none'
+      ? ({ kind: 'none' } as const)
+      : draft.schedule.kind === 'daily'
+        ? { kind: 'weekly' as const, days: ALL_DAYS, hour: draft.schedule.hour, minute: draft.schedule.minute }
+        : draft.schedule.kind === 'weekdays'
+          ? { kind: 'weekly' as const, days: WEEKDAYS, hour: draft.schedule.hour, minute: draft.schedule.minute }
+          : draft.schedule
 
-  const isTimeBased = sched.kind !== 'interval'
+  const isTimeBased = sched.kind === 'weekly'
   const timeHour = isTimeBased ? sched.hour : 9
   const timeMinute = isTimeBased ? sched.minute : 0
   const pad2 = (n: number): string => n.toString().padStart(2, '0')
   const timeValue = `${pad2(timeHour)}:${pad2(timeMinute)}`
   const setTime = (hour: number, minute: number): void => {
-    if (sched.kind === 'interval') return
+    if (sched.kind !== 'weekly') return
     onChange({ ...draft, schedule: { ...sched, hour, minute } })
   }
   const onTimeChange = (value: string): void => {
@@ -391,6 +405,7 @@ function TaskEditor({
         <div className="seg-control" role="radiogroup">
           {(
             [
+              { kind: 'none', label: t.taskSchedManual },
               { kind: 'weekly', label: t.taskSchedWeekly },
               { kind: 'interval', label: t.taskSchedInterval },
             ] as const
@@ -403,16 +418,21 @@ function TaskEditor({
                 checked={sched.kind === opt.kind}
                 disabled={disabled}
                 onChange={() => {
+                  if (opt.kind === 'none') {
+                    // A manual task never fires on a clock, so there is nothing
+                    // to enable/disable — keep it stored as enabled.
+                    onChange({ ...draft, enabled: true, schedule: { kind: 'none' } })
+                    return
+                  }
                   if (opt.kind === 'interval') {
                     update('schedule', { kind: 'interval', minutes: 60 })
                     return
                   }
-                  const hour = sched.kind === 'interval' ? 9 : sched.hour
-                  const minute = sched.kind === 'interval' ? 0 : sched.minute
+                  const hour =
+                    sched.kind === 'weekly' ? sched.hour : sched.kind === 'interval' ? 9 : 9
+                  const minute = sched.kind === 'weekly' ? sched.minute : 0
                   const days =
-                    sched.kind === 'weekly' && sched.days.length > 0
-                      ? sched.days
-                      : WEEKDAYS
+                    sched.kind === 'weekly' && sched.days.length > 0 ? sched.days : WEEKDAYS
                   update('schedule', { kind: 'weekly', days, hour, minute })
                 }}
                 type="radio"
@@ -421,6 +441,15 @@ function TaskEditor({
             </label>
           ))}
         </div>
+
+        {sched.kind === 'none' && (
+          <div className="manual-block">
+            <div className="schedule-preview" aria-live="polite">
+              {describeSchedule(sched, zh ? 'zh' : 'en')}
+            </div>
+            <p className="hint">{t.taskManualHint}</p>
+          </div>
+        )}
 
         {sched.kind === 'weekly' && (
           <div className="weekly-block">
@@ -467,38 +496,42 @@ function TaskEditor({
           </div>
         )}
 
-        <div className="schedule-config">
-          {isTimeBased ? (
-            <label className="time-input">
-              <input
-                disabled={disabled}
-                onChange={(event) => onTimeChange(event.target.value)}
-                type="time"
-                value={timeValue}
-              />
-            </label>
-          ) : (
-            <label className="interval-input">
-              <input
-                disabled={disabled}
-                min={1}
-                onChange={(event) =>
-                  update('schedule', {
-                    kind: 'interval',
-                    minutes: Number(event.target.value) || 1,
-                  })
-                }
-                type="number"
-                value={sched.minutes}
-              />
-              <span>{t.taskMinutes}</span>
-            </label>
-          )}
-        </div>
+        {sched.kind !== 'none' && (
+          <div className="schedule-config">
+            {isTimeBased ? (
+              <label className="time-input">
+                <input
+                  disabled={disabled}
+                  onChange={(event) => onTimeChange(event.target.value)}
+                  type="time"
+                  value={timeValue}
+                />
+              </label>
+            ) : (
+              <label className="interval-input">
+                <input
+                  disabled={disabled}
+                  min={1}
+                  onChange={(event) =>
+                    update('schedule', {
+                      kind: 'interval',
+                      minutes: Number(event.target.value) || 1,
+                    })
+                  }
+                  type="number"
+                  value={sched.minutes}
+                />
+                <span>{t.taskMinutes}</span>
+              </label>
+            )}
+          </div>
+        )}
 
-        <div className="schedule-preview" aria-live="polite">
-          {describeSchedule(sched, zh ? 'zh' : 'en')}
-        </div>
+        {sched.kind !== 'none' && (
+          <div className="schedule-preview" aria-live="polite">
+            {describeSchedule(sched, zh ? 'zh' : 'en')}
+          </div>
+        )}
       </fieldset>
 
       <div className="option-row">
@@ -526,14 +559,16 @@ function TaskEditor({
           />
           {t.taskNotifyFeishu}
         </label>
-        <label className="inline-check">
-          <input
-            checked={draft.enabled}
-            onChange={(event) => update('enabled', event.target.checked)}
-            type="checkbox"
-          />
-          {t.taskEnabled}
-        </label>
+        {!isManual && (
+          <label className="inline-check">
+            <input
+              checked={draft.enabled}
+              onChange={(event) => update('enabled', event.target.checked)}
+              type="checkbox"
+            />
+            {t.taskEnabled}
+          </label>
+        )}
       </div>
       <p className="hint option-hint">{t.taskMaxRoundsHint}</p>
 

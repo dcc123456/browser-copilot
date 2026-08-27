@@ -276,6 +276,29 @@ body, html {
   margin-top: 2px;
 }
 
+.trigger-run-btn {
+  width: 100%;
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.trigger-run-btn:hover:not(:disabled) {
+  border-color: var(--color-primary, #4f7cff);
+  color: var(--color-primary, #4f7cff);
+}
+
+.trigger-run-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .custom-node {
   border: 2px solid var(--color-border);
   border-radius: 8px;

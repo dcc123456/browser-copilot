@@ -6,6 +6,11 @@
 
 /** When a task runs. */
 export type Schedule =
+  /**
+   * No automatic run: the task exists only to be triggered by hand ("Run now"
+   * in the UI, or a Feishu command). It never gets an alarm.
+   */
+  | { kind: 'none' }
   | { kind: 'daily'; hour: number; minute: number }
   | { kind: 'weekdays'; hour: number; minute: number }
   /**

@@ -44,6 +44,9 @@ function coerceMinute(value: unknown): number {
 export function normalizeSchedule(raw: unknown): Schedule {
   if (!raw || typeof raw !== 'object') return { kind: 'daily', hour: 9, minute: 0 }
   const value = raw as Partial<Schedule>
+  if (value.kind === 'none') {
+    return { kind: 'none' }
+  }
   if (value.kind === 'interval') {
     return { kind: 'interval', minutes: coerceIntervalMinutes((value as { minutes?: unknown }).minutes) }
   }
@@ -76,15 +79,26 @@ export function normalizeSchedule(raw: unknown): Schedule {
 }
 
 /**
+ * Returns true when the task has no automatic schedule and only runs when
+ * triggered by hand ("Run now" / Feishu). Such tasks never get an alarm.
+ */
+export function isManualSchedule(schedule: Schedule): boolean {
+  return normalizeSchedule(schedule).kind === 'none'
+}
+
+/**
  * Returns the ms-epoch of the next firing at or after `from`, or null when the
- * schedule is not satisfiable (which none of the current kinds are, but the
- * signature leaves room).
+ * task never fires automatically (a manual `none` schedule), so the caller can
+ * skip arming an alarm.
  *
  * For daily/weekdays, the time-of-day is interpreted in the *local* timezone —
  * "10am" means 10am on this machine, which is what a user scheduling a reminder
  * means. This deliberately does not use UTC.
  */
-export function nextRunAt(schedule: Schedule, from: number): number {
+export function nextRunAt(schedule: Schedule, from: number): number | null {
+  if (schedule.kind === 'none') {
+    return null
+  }
   if (schedule.kind === 'interval') {
     return from + coerceIntervalMinutes(schedule.minutes) * 60_000
   }
@@ -111,6 +125,9 @@ export function nextRunAt(schedule: Schedule, from: number): number {
 export function describeSchedule(schedule: Schedule, locale: string = 'en'): string {
   const zh = locale.toLowerCase().startsWith('zh')
   const pad = (n: number): string => n.toString().padStart(2, '0')
+  if (schedule.kind === 'none') {
+    return zh ? '手动运行' : 'Manual run'
+  }
   if (schedule.kind === 'interval') {
     const m = coerceIntervalMinutes(schedule.minutes)
     return zh ? `每 ${m} 分钟` : `Every ${m} min`

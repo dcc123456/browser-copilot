@@ -797,6 +797,18 @@ export default function EditorApp() {
                 placeholder="0 8 * * * (每天 8 点)"
               />
               <div className="param-desc">Cron 表达式，与定时任务格式一致</div>
+              <button
+                className="trigger-run-btn"
+                disabled={saving || running}
+                onClick={() => void handleRun()}
+                title="立即运行一次，不会影响定时计划（即使触发器未启用也可手动运行）"
+                type="button"
+              >
+                {running ? '运行中…' : '手动运行'}
+              </button>
+              <div className="param-desc">
+                立即执行一次用于测试，不会改变定时计划；触发器未启用时也可手动运行。
+              </div>
             </div>
           )}
 
