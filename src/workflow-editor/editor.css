@@ -665,6 +665,95 @@
   justify-content: center;
 }
 
+/* selector row with pick/verify actions (InteractionBase) */
+.wf-selector-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.wf-selector-findby {
+  flex: none;
+  min-width: 110px;
+}
+.wf-selector-findby select {
+  width: 100%;
+}
+.wf-el-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+.wf-mono {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+/* switch (checkbox styled) */
+.wf-switch {
+  appearance: none;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--bc-border-strong);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s;
+  flex: none;
+}
+.wf-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: left 0.15s;
+}
+.wf-switch:checked {
+  background: var(--bc-accent);
+}
+.wf-switch:checked::after {
+  left: 16px;
+}
+
+/* expand (collapsible section) */
+.wf-expand {
+  margin: 6px 0 12px;
+  border-top: 1px solid var(--bc-border);
+}
+.wf-expand-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 8px 0;
+  cursor: pointer;
+  color: var(--bc-text-dim);
+  font-size: 13px;
+  font-weight: 600;
+}
+.wf-expand-header i {
+  font-size: 18px;
+}
+.wf-expand-body {
+  padding: 4px 0 8px;
+}
+
+/* range sliders in forms */
+.wf-field input[type="range"] {
+  width: 100%;
+}
+
+/* block settings (on error / disable) */
+.wf-block-settings {
+  margin-top: 8px;
+}
+
 /* error banner */
 .wf-error-banner {
   position: absolute;

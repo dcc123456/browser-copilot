@@ -301,6 +301,20 @@ export function runOp(op: Op): OpResult {
       return []
     }
   }
+  /** Resolve an XPath expression to element matches (7 = ORDERED_NODE_SNAPSHOT). */
+  function xpathQuery(xpath: string): Element[] {
+    try {
+      const result = document.evaluate(xpath, document, null, 7, null)
+      const out: Element[] = []
+      for (let i = 0; i < result.snapshotLength; i++) {
+        const n = result.snapshotItem(i)
+        if (n && (n as Node).nodeType === 1) out.push(n as Element)
+      }
+      return out
+    } catch {
+      return []
+    }
+  }
   function queryAll(spec: TargetSpec): Element[] {
     const tagPrefix = spec.tag ?? ''
     switch (spec.how) {
@@ -315,6 +329,11 @@ export function runOp(op: Op): OpResult {
       case 'name':
         return safeQuery(`${tagPrefix}[name=${quoteAttr(spec.value)}]`)
       case 'css':
+        // XPath locators are encoded with an `xpath:` prefix by the engine
+        // (Automa blocks can set findBy='xpath'); resolve them via evaluate.
+        if (spec.value.startsWith('xpath:')) {
+          return xpathQuery(spec.value.slice('xpath:'.length))
+        }
         return safeQuery(spec.value)
       case 'role': {
         const wanted = (spec.role ?? '').toLowerCase()

@@ -28,6 +28,12 @@ import {
   handleRecordEvent,
   initRecordingLifecycle,
 } from './record-controller'
+import {
+  startupWorkflows,
+  initShortcutTriggers,
+  handleShortcutPressed,
+  setWorkflowRunner,
+} from './workflow-triggers'
 import { validateProfile } from '../lib/providers'
 import { normalizeSkill, validateSkill, wrapSkillDirective } from '../lib/skills'
 import {
@@ -160,6 +166,24 @@ chrome.runtime.onStartup.addListener(() => {
     console.error('[Browser Copilot] could not reschedule tasks', error),
   )
   void feishuBot.reconcile()
+  // Run workflows whose trigger block is "on-startup".
+  void startupWorkflows()
+    .then((wfs) => {
+      for (const wf of wfs) void runWorkflowKeepalive(wf.id)
+    })
+    .catch((error: unknown) =>
+      console.error('[Browser Copilot] on-startup workflows failed', error),
+    )
+  void initShortcutTriggers()
+})
+
+// Also fire on-startup workflows once when the service worker boots after install.
+chrome.runtime.onInstalled.addListener(() => {
+  void startupWorkflows()
+    .then((wfs) => {
+      for (const wf of wfs) void runWorkflowKeepalive(wf.id)
+    })
+    .catch(() => {})
 })
 
 // Fires for task alarms and the Feishu watchdog. Registered synchronously so an
@@ -226,6 +250,11 @@ async function runWorkflowKeepalive(workflowId: string): Promise<void> {
     release()
   }
 }
+
+// Let the trigger module launch workflows (keyboard-shortcut triggers).
+setWorkflowRunner((workflowId) => {
+  void runWorkflowKeepalive(workflowId)
+})
 
 // Right-click "run workflow" items. Guarded: the API is not present in tests and
 // may be unavailable on some builds.
@@ -330,7 +359,12 @@ chrome.action.onClicked.addListener((tab) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (handleRecordEvent(message)) return true
   if (handlePickerMessage(message, sender, sendResponse)) return true
-  return undefined
+  // Keyboard-shortcut triggers fire from the injected tab listener.
+  void handleShortcutPressed(message).then((handled) => {
+    if (handled) sendResponse({ ok: true })
+  })
+  // handleShortcutPressed is async but rarely blocks; allow async response.
+  return true
 })
 
 // Wire tab/navigation listeners for workflow recording.

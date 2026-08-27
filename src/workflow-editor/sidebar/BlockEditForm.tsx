@@ -15,6 +15,7 @@ import { BlockIcon } from '../../lib/workflow/blocks/icons'
 import { isCloudBlock } from '../../lib/workflow/blocks/cloud-blocks'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
 import { EditForms } from '../blocks/EditForms'
+import BlockSettings from '../blocks/shared/BlockSettings'
 
 export interface BlockEditFormProps {
   block: BlockCatalogEntry
@@ -126,9 +127,15 @@ export default function BlockEditForm({
       ) : block.disableEdit ? (
         <p className="wf-form-note">This block has no editable settings.</p>
       ) : EditComponent ? (
-        <EditComponent data={data} onChange={onChange} blockId={block.id} />
+        <>
+          <EditComponent data={data} onChange={onChange} blockId={block.id} />
+          <BlockSettings data={data} onChange={onChange} blockId={block.id} />
+        </>
       ) : (
-        <GenericForm data={data} onChange={onChange} />
+        <>
+          <GenericForm data={data} onChange={onChange} />
+          <BlockSettings data={data} onChange={onChange} blockId={block.id} />
+        </>
       )}
     </div>
   )
