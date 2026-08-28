@@ -11,7 +11,7 @@ describe('nextRunAt · daily', () => {
   it('picks today when the time is still ahead', () => {
     // Mon 2024-01-01 08:00 local; target 10:00 same day.
     const from = new Date(2024, 0, 1, 8, 0).getTime()
-    const next = new Date(nextRunAt({ kind: 'daily', hour: 10, minute: 0 }, from))
+    const next = new Date(nextRunAt({ kind: 'daily', hour: 10, minute: 0 }, from) as number)
     expect(next.getFullYear()).toBe(2024)
     expect(next.getMonth()).toBe(0)
     expect(next.getDate()).toBe(1)
@@ -21,7 +21,7 @@ describe('nextRunAt · daily', () => {
 
   it('rolls to tomorrow when the time has passed', () => {
     const from = new Date(2024, 0, 1, 11, 0).getTime()
-    const next = new Date(nextRunAt({ kind: 'daily', hour: 10, minute: 0 }, from))
+    const next = new Date(nextRunAt({ kind: 'daily', hour: 10, minute: 0 }, from) as number)
     expect(next.getDate()).toBe(2)
     expect(next.getHours()).toBe(10)
   })
@@ -29,7 +29,7 @@ describe('nextRunAt · daily', () => {
   it('rolls to tomorrow at an exact match (fires "at or after from")', () => {
     // 10:00 exactly is not strictly after, so the next fire is tomorrow.
     const from = new Date(2024, 0, 1, 10, 0, 0).getTime()
-    const next = new Date(nextRunAt({ kind: 'daily', hour: 10, minute: 0 }, from))
+    const next = new Date(nextRunAt({ kind: 'daily', hour: 10, minute: 0 }, from) as number)
     expect(next.getDate()).toBe(2)
   })
 })
@@ -38,7 +38,7 @@ describe('nextRunAt · weekdays', () => {
   it('skips Saturday and Sunday', () => {
     // Friday 2024-01-05 at 18:00; next weekday 10:00 is Monday the 8th.
     const fri = new Date(2024, 0, 5, 18, 0).getTime()
-    const next = new Date(nextRunAt({ kind: 'weekdays', hour: 10, minute: 0 }, fri))
+    const next = new Date(nextRunAt({ kind: 'weekdays', hour: 10, minute: 0 }, fri) as number)
     expect(next.getDay()).toBe(1) // Monday
     expect(next.getDate()).toBe(8)
   })
@@ -46,14 +46,14 @@ describe('nextRunAt · weekdays', () => {
   it('returns the same weekday when time is ahead', () => {
     // Wed 2024-01-03 08:00 -> 10:00 same day.
     const wed = new Date(2024, 0, 3, 8, 0).getTime()
-    const next = new Date(nextRunAt({ kind: 'weekdays', hour: 10, minute: 0 }, wed))
+    const next = new Date(nextRunAt({ kind: 'weekdays', hour: 10, minute: 0 }, wed) as number)
     expect(next.getDay()).toBe(3)
     expect(next.getDate()).toBe(3)
   })
 
   it('skips a weekend landing two days out from Friday late', () => {
     const fri = new Date(2024, 0, 5, 23, 30).getTime()
-    const next = new Date(nextRunAt({ kind: 'weekdays', hour: 9, minute: 0 }, fri))
+    const next = new Date(nextRunAt({ kind: 'weekdays', hour: 9, minute: 0 }, fri) as number)
     expect(next.getDay()).toBe(1)
   })
 })
@@ -61,7 +61,7 @@ describe('nextRunAt · weekdays', () => {
 describe('nextRunAt · interval', () => {
   it('adds the minutes to "now"', () => {
     const from = new Date(2024, 0, 1, 12, 0).getTime()
-    const next = nextRunAt({ kind: 'interval', minutes: 30 }, from)
+    const next = nextRunAt({ kind: 'interval', minutes: 30 }, from) as number
     expect(next - from).toBe(30 * 60_000)
   })
 })
@@ -71,7 +71,7 @@ describe('nextRunAt · weekly', () => {
     // Mon 2024-01-01 08:00; selected Wed + Fri at 10:00 -> Wed Jan 3.
     const mon = new Date(2024, 0, 1, 8, 0).getTime()
     const next = new Date(
-      nextRunAt({ kind: 'weekly', days: [3, 5], hour: 10, minute: 0 }, mon),
+      nextRunAt({ kind: 'weekly', days: [3, 5], hour: 10, minute: 0 }, mon) as number,
     )
     expect(next.getDay()).toBe(3)
     expect(next.getDate()).toBe(3)
@@ -81,7 +81,7 @@ describe('nextRunAt · weekly', () => {
   it('rolls to the following week when all selected days passed', () => {
     // Fri 2024-01-05 18:00; selected Mon at 09:00 -> Mon Jan 8.
     const fri = new Date(2024, 0, 5, 18, 0).getTime()
-    const next = new Date(nextRunAt({ kind: 'weekly', days: [1], hour: 9, minute: 0 }, fri))
+    const next = new Date(nextRunAt({ kind: 'weekly', days: [1], hour: 9, minute: 0 }, fri) as number)
     expect(next.getDay()).toBe(1)
     expect(next.getDate()).toBe(8)
   })
@@ -89,7 +89,7 @@ describe('nextRunAt · weekly', () => {
   it('can select Sunday', () => {
     // Sat 2024-01-06 10:00; selected Sunday at 09:00 -> Sun Jan 7.
     const sat = new Date(2024, 0, 6, 10, 0).getTime()
-    const next = new Date(nextRunAt({ kind: 'weekly', days: [0], hour: 9, minute: 0 }, sat))
+    const next = new Date(nextRunAt({ kind: 'weekly', days: [0], hour: 9, minute: 0 }, sat) as number)
     expect(next.getDay()).toBe(0)
     expect(next.getDate()).toBe(7)
   })

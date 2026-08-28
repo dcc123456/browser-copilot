@@ -76,6 +76,7 @@ const ACTION_TOOLS = new Set([
   'tab_new',
   'tab_switch',
   'tab_close',
+  'run_javascript',
 ])
 
 const READ_TOOLS = new Set(['read_current_page', 'snapshot_page', 'list_tabs'])
@@ -370,6 +371,24 @@ export const TOOLS: WireTool[] = [
   {
     type: 'function',
     function: {
+      name: 'run_javascript',
+      description:
+        'Run custom JavaScript in the active web page and return its result. Use for data extraction or page manipulation the other tools cannot do. The code runs as a function body in the page; use `return` to send a JSON-serializable value back. This changes the page and requires approval.',
+      parameters: {
+        type: 'object',
+        properties: {
+          code: {
+            type: 'string',
+            description: 'JavaScript statements to execute in the page. Use `return` to send a value back.',
+          },
+        },
+        required: ['code'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'list_tabs',
       description: 'List the tabs open in the current window with their index, title, and URL.',
       parameters: { type: 'object', properties: {} },
@@ -610,6 +629,7 @@ async function recordAction(
   approved: boolean,
   ok: boolean,
   detail?: string[],
+  args?: Record<string, unknown>,
 ): Promise<void> {
   try {
     await addHistory({
@@ -622,6 +642,7 @@ async function recordAction(
       approved,
       ok,
       ...(detail && detail.length > 0 ? { detail } : {}),
+      ...(args && typeof args === 'object' ? { args } : {}),
     })
   } catch {
     /* non-fatal */
@@ -800,6 +821,8 @@ function describeAction(name: string, args: Record<string, unknown>): string {
       return `Switch to tab #${Number(args.index ?? 0)}`
     case 'tab_close':
       return 'Close the active tab'
+    case 'run_javascript':
+      return 'Run JavaScript in the page'
     case 'get_secret':
       return `Fill ${targetLabel} with saved credential${
         typeof args.field === 'string' && args.field ? ` (${args.field})` : ''
@@ -860,6 +883,15 @@ async function executeTool(
           active: tab.active,
         })),
       )
+    }
+
+    case 'run_javascript': {
+      throwIfAborted()
+      const code = String(args.code ?? '')
+      if (!code.trim()) return JSON.stringify({ error: 'run_javascript requires code.' })
+      const result = await execOnActiveTab({ action: 'exec_js', value: code }, signal)
+      if (!result.ok) return JSON.stringify({ error: result.error ?? 'JavaScript execution failed' })
+      return JSON.stringify({ ok: true, result: result.data ?? null })
     }
 
     case 'click': {
@@ -1395,7 +1427,7 @@ async function runOneToolCall(
       name,
       summary: inChat ? 'Blocked (chat mode)' : 'Blocked (read-only mode)',
     })
-    void recordAction(
+    await recordAction(
       deps.conversationId,
       name,
       describeAction(name, args),
@@ -1403,6 +1435,7 @@ async function runOneToolCall(
       false,
       false,
       describeDetail(name, args),
+      args,
     )
     return
   }
@@ -1433,7 +1466,7 @@ async function runOneToolCall(
       if (!approved) {
         pushResult(JSON.stringify({ error: 'The user declined this action. Do not retry it.' }))
         deps.send({ type: 'tool.result', name, summary: 'Declined by user' })
-        void recordAction(
+        await recordAction(
           deps.conversationId,
           name,
           describeAction(name, args),
@@ -1441,6 +1474,7 @@ async function runOneToolCall(
           false,
           false,
           describeDetail(name, args),
+          args,
         )
         return
       }
@@ -1459,7 +1493,7 @@ async function runOneToolCall(
     } catch {
       /* keep ok */
     }
-    void recordAction(
+    await recordAction(
       deps.conversationId,
       name,
       describeAction(name, args),
@@ -1467,6 +1501,7 @@ async function runOneToolCall(
       approved,
       ok,
       describeDetail(name, args, output),
+      args,
     )
   } catch (error) {
     // A termination must unwind the whole turn, not be recorded as a failed
@@ -1480,7 +1515,7 @@ async function runOneToolCall(
           : String(error)
     pushResult(JSON.stringify({ error: message }))
     deps.send({ type: 'tool.result', name, summary: `Failed: ${message}` })
-    void recordAction(
+    await recordAction(
       deps.conversationId,
       name,
       describeAction(name, args),
@@ -1488,6 +1523,7 @@ async function runOneToolCall(
       approved,
       false,
       [...describeDetail(name, args), `Error: ${message}`],
+      args,
     )
   }
 }

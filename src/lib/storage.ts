@@ -22,6 +22,7 @@ import type {
   Skill,
   UserProfile,
 } from './types'
+import type { Workflow, WorkflowEdge, WorkflowNode, WorkflowSettings } from './workflow/types'
 
 const KEY_SCHEMA = 'schemaVersion'
 const KEY_SETTINGS = 'settings'
@@ -643,6 +644,7 @@ function asHistory(value: unknown): HistoryEntry | null {
     detail: Array.isArray(entry.detail)
       ? entry.detail.filter((d): d is string => typeof d === 'string')
       : undefined,
+    ...(entry.args && typeof entry.args === 'object' ? { args: entry.args } : {}),
   }
 }
 
@@ -673,4 +675,224 @@ export async function deleteHistory(id: string): Promise<void> {
 
 export async function clearHistory(): Promise<void> {
   await chrome.storage.local.set({ [KEY_HISTORY]: [] })
+}
+
+// --- Rebuild workflows from action history ----------------------------------
+
+const DEFAULT_WF_SETTINGS: WorkflowSettings = {
+  saveLog: false,
+  debugMode: false,
+  notification: false,
+  reuseLastState: false,
+}
+
+/** Agent tool action → workflow block id. Actions without a block are skipped.
+ *  Ids must exist in the editor's block catalog (BLOCK_BY_ID) so saved workflows
+ *  render on the canvas; the engine runs these catalog ids too. */
+const ACTION_TO_BLOCK: Record<string, string> = {
+  open_url: 'new-tab',
+  tab_new: 'new-tab',
+  tab_switch: 'switch-tab',
+  tab_close: 'close-tab',
+  click: 'click',
+  fill: 'fill',
+  select_option: 'select-option',
+  set_checkbox: 'set-checkbox',
+  press_key: 'press-key',
+  scroll: 'scroll',
+  // The agent's wait-for-selector paces the replay; the delay block is the
+  // catalog's wait primitive (the legacy `wait-for` id has no catalog block).
+  wait_for: 'delay',
+}
+
+/**
+ * Best-effort CSS selector from an agent action's args. An explicit
+ * `selector` wins when present. Otherwise a rich `TargetSpec`'s `primary` is
+ * re-expressed into a CSS selector when it maps cleanly:
+ *   - `how: 'css'`    → the raw selector
+ *   - `how: 'id'`     → `#<value>`
+ *   - `how: 'name'`   → `[name="<value>"]`
+ *   - `how: 'testid'` → `[data-testid="<value>"]`
+ *   - `how: 'tag'`    → the tag name (optionally scoped by `nth`)
+ * `role`/`text` targets can't be safely turned into a plain CSS selector
+ * without knowing the page, so they yield `''` (the user fills them in).
+ */
+function selectorFromArgs(args: Record<string, unknown> | undefined): string {
+  if (!args || typeof args !== 'object') return ''
+  if (typeof args.selector === 'string' && args.selector.trim()) return args.selector.trim()
+  const target = args.target as
+    | { primary?: { how?: string; value?: unknown; tag?: string; nth?: number } }
+    | undefined
+  const primary = target?.primary
+  if (!primary) return ''
+  const nth = typeof primary.nth === 'number' && primary.nth > 0 ? `:nth-of-type(${primary.nth + 1})` : ''
+  const value = primary.value
+  switch (primary.how) {
+    case 'css':
+      return typeof value === 'string' ? value.trim() : ''
+    case 'id':
+      return typeof value === 'string' && value.trim() ? `#${value.trim()}` : ''
+    case 'name':
+      return typeof value === 'string' && value.trim() ? `[name="${value.trim()}"]${nth}` : ''
+    case 'testid':
+      return typeof value === 'string' && value.trim()
+        ? `[data-testid="${value.trim()}"]${nth}`
+        : ''
+    case 'tag':
+      return typeof primary.tag === 'string' && primary.tag.trim()
+        ? `${primary.tag.trim()}${nth}`
+        : ''
+    default:
+      // role / text — cannot be expressed as a stable CSS selector.
+      return ''
+  }
+}
+
+/**
+ * Whether two consecutive history steps describe the same replayable action.
+ * Navigation with the same URL is always a duplicate; element actions are
+ * compared on the signature that actually matters for replay (selector + value).
+ */
+function sameStep(
+  a: { action: string; args: Record<string, unknown> | undefined },
+  b: { action: string; args: Record<string, unknown> | undefined },
+): boolean {
+  if (a.action !== b.action) return false
+  switch (a.action) {
+    case 'open_url':
+    case 'tab_new':
+      return String(a.args?.url ?? '') === String(b.args?.url ?? '')
+    case 'tab_switch':
+      return Number(a.args?.index ?? 0) === Number(b.args?.index ?? 0)
+    case 'tab_close':
+      return true
+    case 'press_key':
+      return String(a.args?.key ?? '') === String(b.args?.key ?? '')
+    case 'click':
+    case 'hover':
+      return selectorFromArgs(a.args) !== '' && selectorFromArgs(a.args) === selectorFromArgs(b.args)
+    case 'fill':
+    case 'select_option':
+      return (
+        selectorFromArgs(a.args) === selectorFromArgs(b.args) &&
+        String(a.args?.value ?? '') === String(b.args?.value ?? '')
+      )
+    case 'set_checkbox':
+      return (
+        selectorFromArgs(a.args) === selectorFromArgs(b.args) &&
+        a.args?.value === b.args?.value
+      )
+    case 'scroll':
+      return (
+        String(a.args?.mode ?? 'into_view') === String(b.args?.mode ?? 'into_view') &&
+        Number(a.args?.x ?? 0) === Number(b.args?.x ?? 0) &&
+        Number(a.args?.y ?? 0) === Number(b.args?.y ?? 0) &&
+        selectorFromArgs(a.args) === selectorFromArgs(b.args)
+      )
+    default:
+      return false
+  }
+}
+
+/** Builds block values for a mapped tool action, best-effort from its args. */
+function valuesFromArgs(action: string, args: Record<string, unknown> | undefined): Record<string, unknown> {
+  const selector = selectorFromArgs(args)
+  switch (action) {
+    case 'open_url':
+    case 'tab_new':
+      return { url: typeof args?.url === 'string' ? args.url : '' }
+    case 'tab_switch':
+      return { index: Number(args?.index ?? 0) }
+    case 'tab_close':
+      return {}
+    case 'click':
+      return { cssSelector: selector }
+    case 'fill':
+      return { cssSelector: selector, value: typeof args?.value === 'string' ? args.value : '' }
+    case 'select_option':
+      return { cssSelector: selector, value: typeof args?.value === 'string' ? args.value : '' }
+    case 'set_checkbox':
+      return { cssSelector: selector, checked: args?.value !== false }
+    case 'press_key':
+      return { key: typeof args?.key === 'string' ? args.key : '' }
+    case 'scroll':
+      return {
+        mode: typeof args?.mode === 'string' ? args.mode : 'into_view',
+        cssSelector: selector,
+        ...(typeof args?.y === 'number' ? { y: args.y } : {}),
+      }
+    case 'wait_for':
+      // Mapped to the `delay` block: replay the agent's pacing as a pause.
+      return { delay: Number(args?.timeout ?? 5000) }
+    default:
+      return {}
+  }
+}
+
+/**
+ * Turns an ordered list of action-history entries (oldest first) into a linear
+ * workflow of mapped browser/navigation steps. Entries with no mapped block are
+ * skipped. Back-to-back identical steps (same action + same effective args) are
+ * collapsed to one node — the model occasionally re-issues the same navigation
+ * or action after a re-read, and a replayable workflow shouldn't repeat them.
+ * Returns `null` when nothing could be mapped.
+ */
+export function workflowFromHistory(entries: HistoryEntry[], name: string): Workflow | null {
+  const mapped = entries
+    .filter((e) => !!ACTION_TO_BLOCK[e.action])
+    .map((e) => ({ action: e.action, args: e.args }))
+
+  // Collapse consecutive steps that are effectively the same. For navigation
+  // (open_url/tab_new) a repeat with the same URL is always redundant — the
+  // page is already there. For element actions we compare a stable signature
+  // (action + selector + value/key) so two clicks on the same button in a row
+  // only become one block, while clicks on different targets are both kept.
+  const steps: typeof mapped = []
+  for (const step of mapped) {
+    const prev = steps[steps.length - 1]
+    if (prev && sameStep(prev, step)) continue
+    steps.push(step)
+  }
+  if (steps.length === 0) return null
+
+  const nodes: WorkflowNode[] = []
+  const edges: WorkflowEdge[] = []
+
+  // Trigger node — the first node in the graph, matching automa's convention.
+  // `label` holds the block id (same as data.blockId); the editor resolves the
+  // localized display name from the block registry at render time. The block
+  // id must be the catalog's `trigger` block (not the trigger TYPE) so the
+  // editor renders it; `values.type` carries the trigger type.
+  const triggerId = newId()
+  nodes.push({
+    id: triggerId,
+    label: 'trigger',
+    position: { x: 160, y: 0 },
+    data: { blockId: 'trigger', values: { type: 'manual' } },
+  })
+  let prevId: string = triggerId
+
+  for (let i = 0; i < steps.length; i += 1) {
+    const step = steps[i]
+    if (!step) continue
+    const id = newId()
+    nodes.push({
+      id,
+      label: ACTION_TO_BLOCK[step.action]!,
+      position: { x: 160, y: 80 + i * 140 },
+      data: { blockId: ACTION_TO_BLOCK[step.action], values: valuesFromArgs(step.action, step.args) },
+    })
+    edges.push({ id: newId(), source: prevId, target: id })
+    prevId = id
+  }
+
+  return {
+    id: newId(),
+    name: name.trim() || 'From history',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    drawflow: { nodes, edges, position: { x: 0, y: 0 }, zoom: 1 },
+    trigger: { type: 'manual', enabled: true },
+    settings: { ...DEFAULT_WF_SETTINGS },
+  }
 }

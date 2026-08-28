@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Side Panel Preview</title>
+  <link rel="stylesheet" href="../dist/assets/design-system-BOTnLkDg.css" />
+  <link rel="stylesheet" href="../dist/assets/index-W1dnx9kZ.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/remixicon@4.9.1/fonts/remixicon.css" />
+  <style>
+    body { width: 380px; margin: 0 auto; border: 1px solid #333; height: 100vh; }
+    #root { display: flex; flex-direction: column; height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <!-- Tabs -->
+    <nav class="tabs">
+      <button class="tab" data-active="true">对话</button>
+      <button class="tab">工作流</button>
+      <button class="tab">历史</button>
+      <button class="tab">任务</button>
+      <div class="tab-more-wrap">
+        <button class="tab tab-more">更多 <span class="tab-more-caret">▾</span></button>
+      </div>
+    </nav>
+
+    <!-- Chat toolbar -->
+    <div class="chat-toolbar">
+      <label class="inline-check">
+        <input type="checkbox" /> <span><i class="ri-cursor-line"></i> 附加所选元素</span>
+      </label>
+      <button class="icon-btn"><i class="ri-history-line"></i><span class="icon-btn-label">历史</span></button>
+    </div>
+
+    <!-- Chat log -->
+    <div class="pane chat-log" style="display:flex; flex-direction:column; gap:10px; flex:1;">
+      <div class="msg" data-role="status">已连接 · 可以开始对话</div>
+
+      <div class="msg" data-role="user" style="align-self:flex-end;">帮我总结一下当前页面的主要内容</div>
+
+      <div class="msg" data-role="assistant">
+        <p class="md-p">我先读取了页面内容。这是一个<strong>浏览器自动化助手</strong>扩展，主要功能包括：</p>
+        <ul class="md-list">
+          <li>侧边栏 AI 对话，可读取并操作当前页面</li>
+          <li>可视化工作流编辑器</li>
+          <li>定时任务与运行历史</li>
+        </ul>
+        <p class="md-p">我需要执行 <code class="md-code-inline">page.snapshot</code> 工具来获取页面结构。</p>
+        <div style="margin:6px 0;"><span class="tool-chip">page.snapshot</span></div>
+      </div>
+
+      <div class="banner" data-kind="ok">
+        <div class="banner-link" data-kind="ok">
+          <i class="ri-checkbox-circle-line"></i>
+          <span class="banner-text">任务已完成，点击查看运行详情</span>
+          <span class="banner-chevron">›</span>
+        </div>
+      </div>
+
+      <div class="skill-chip">
+        <span class="skill-chip-name">技能：数据采集</span>
+        <button class="skill-chip-clear" type="button">✕</button>
+      </div>
+
+      <div class="empty" style="margin-top:auto; border:1px dashed var(--border); border-radius:8px; padding:20px 8px;">
+        <i class="ri-robot-line" style="font-size:26px; display:block; margin-bottom:6px; color:var(--muted);"></i>
+        询问当前页面，或输入 <code>/</code> 选择技能
+      </div>
+    </div>
+
+    <!-- Composer -->
+    <div class="composer" style="height:auto;">
+      <textarea rows="3" placeholder="输入消息，Enter 发送…"></textarea>
+      <div class="composer-row">
+        <div class="mode-select">
+          <button class="icon-btn"><i class="ri-settings-3-line"></i></button>
+          <span style="font-size:12px; color:var(--muted);">模式：标准</span>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button class="link-btn" style="font-size:12px;">1.2k tokens</button>
+          <button class="primary"><i class="ri-send-plane-2-line"></i> 发送</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -81,6 +81,12 @@ export const TOOL_META: ToolMeta[] = [
     warningKey: 'toolTabCloseWarn',
   },
   {
+    name: 'run_javascript',
+    category: 'act',
+    labelKey: 'toolRunJs',
+    warningKey: 'toolRunJsWarn',
+  },
+  {
     name: 'get_my_profile',
     category: 'data',
     labelKey: 'toolProfile',

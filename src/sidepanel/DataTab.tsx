@@ -1,18 +1,17 @@
 /**
- * Data tab: manage saved profiles, password/identity entries, and action
- * history. Everything here lives in `chrome.storage.local`; the worker exposes
- * it via plain commands.
+ * Data tab: manage saved profiles and password/identity entries.
+ * Action history has moved to the History tab.
  *
  * @module sidepanel/DataTab
  */
 import { useCallback, useEffect, useState } from 'react'
 import { sendCommand } from '../lib/messages'
 import { newId } from '../lib/storage'
-import type { ConversationMeta, HistoryEntry, PasswordEntry, UserProfile } from '../lib/types'
+import type { PasswordEntry, UserProfile } from '../lib/types'
 import { entryFields } from '../lib/types'
 import { useT } from './i18n'
 
-type Section = 'profiles' | 'passwords' | 'history'
+type Section = 'profiles' | 'passwords'
 
 function emptyProfile(): UserProfile {
   return {
@@ -57,14 +56,6 @@ function serializeCustom(custom: Record<string, string>): string {
     .join('\n')
 }
 
-function formatWhen(ms: number): string {
-  const date = new Date(ms)
-  const now = new Date()
-  const sameDay = date.toDateString() === now.toDateString()
-  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  if (sameDay) return time
-  return `${date.toLocaleDateString()} ${time}`
-}
 
 export default function DataTab() {
   const t = useT()
@@ -73,8 +64,6 @@ export default function DataTab() {
 
   const [profiles, setProfiles] = useState<UserProfile[] | null>(null)
   const [passwords, setPasswords] = useState<PasswordEntry[] | null>(null)
-  const [history, setHistory] = useState<HistoryEntry[] | null>(null)
-  const [conversations, setConversations] = useState<ConversationMeta[]>([])
 
   const [profileDraft, setProfileDraft] = useState<UserProfile | null>(null)
   const [customText, setCustomText] = useState('')
@@ -94,21 +83,11 @@ export default function DataTab() {
     const result = await sendCommand({ type: 'passwords.list' })
     if (result.type === 'passwords.list') setPasswords(result.entries)
   }, [])
-  const loadHistory = useCallback(async () => {
-    const result = await sendCommand({ type: 'history.list' })
-    if (result.type === 'history.list') setHistory(result.entries)
-  }, [])
-  const loadConversations = useCallback(async () => {
-    const result = await sendCommand({ type: 'conversations.list' })
-    if (result.type === 'conversations.list') setConversations(result.conversations)
-  }, [])
 
   useEffect(() => {
     void loadProfiles().catch((error) => flash('error', (error as Error).message))
     void loadPasswords().catch((error) => flash('error', (error as Error).message))
-    void loadHistory().catch((error) => flash('error', (error as Error).message))
-    void loadConversations().catch(() => {})
-  }, [loadProfiles, loadPasswords, loadHistory, loadConversations])
+  }, [loadProfiles, loadPasswords])
 
   const startProfile = (profile?: UserProfile): void => {
     // Coerce every known field to a string defensively. A panel/worker version
@@ -186,15 +165,6 @@ export default function DataTab() {
     await loadPasswords()
   }
 
-  const removeHistory = async (id: string): Promise<void> => {
-    await sendCommand({ type: 'history.delete', id })
-    await loadHistory()
-  }
-  const clearAllHistory = async (): Promise<void> => {
-    await sendCommand({ type: 'history.clear' })
-    await loadHistory()
-  }
-
   return (
     <div className="pane">
       {banner && (
@@ -207,7 +177,7 @@ export default function DataTab() {
         <div className="card-title">{t.dataTitle}</div>
         <p className="hint">{t.dataIntro}</p>
         <div className="tabs" style={{ margin: '4px 0 0' }}>
-          {(['profiles', 'passwords', 'history'] as Section[]).map((id) => (
+          {(['profiles', 'passwords'] as Section[]).map((id) => (
             <button
               key={id}
               className="tab"
@@ -215,11 +185,7 @@ export default function DataTab() {
               onClick={() => setSection(id)}
               type="button"
             >
-              {id === 'profiles'
-                ? t.dataProfiles
-                : id === 'passwords'
-                  ? t.dataSecrets
-                  : t.dataHistory}
+              {id === 'profiles' ? t.dataProfiles : t.dataSecrets}
             </button>
           ))}
         </div>
@@ -254,16 +220,6 @@ export default function DataTab() {
           onDraftChange={setPasswordDraft}
           onSave={savePassword}
           onCancel={() => setPasswordDraft(null)}
-        />
-      )}
-
-      {section === 'history' && (
-        <HistorySection
-          t={t}
-          history={history}
-          conversations={conversations}
-          onDelete={removeHistory}
-          onClear={clearAllHistory}
         />
       )}
     </div>
@@ -577,115 +533,3 @@ function PasswordsSection({
   )
 }
 
-// --- History ----------------------------------------------------------------
-
-interface HistoryProps {
-  t: ReturnType<typeof useT>
-  history: HistoryEntry[] | null
-  conversations: ConversationMeta[]
-  onDelete: (id: string) => void
-  onClear: () => void
-}
-
-interface HistoryGroup {
-  key: string
-  title: string
-  entries: HistoryEntry[]
-}
-
-function groupHistory(
-  history: HistoryEntry[],
-  conversations: ConversationMeta[],
-): HistoryGroup[] {
-  const titleOf = (id: string): string => {
-    if (id.startsWith('task:')) return id.slice(5) || 'Scheduled task'
-    if (id.startsWith('feishu:')) return 'Feishu'
-    const meta = conversations.find((c) => c.id === id)
-    return meta?.title || id
-  }
-  const order: string[] = []
-  const map = new Map<string, HistoryEntry[]>()
-  for (const entry of history) {
-    const key = entry.conversationId || 'unknown'
-    if (!map.has(key)) {
-      map.set(key, [])
-      order.push(key)
-    }
-    map.get(key)!.push(entry)
-  }
-  // history is already newest-first; groups follow their newest entry.
-  return order.map((key) => ({ key, title: titleOf(key), entries: map.get(key)! }))
-}
-
-function HistorySection({ t, history, conversations, onDelete, onClear }: HistoryProps) {
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
-  const groups = history ? groupHistory(history, conversations) : []
-
-  return (
-    <>
-      <div className="card">
-        <div className="card-title">{t.dataHistory}</div>
-        <p className="hint">{t.dataHistoryIntro}</p>
-        {history && history.length > 0 && (
-          <div className="actions">
-            <button className="danger" onClick={() => void onClear()} type="button">
-              {t.dataClearHistory}
-            </button>
-          </div>
-        )}
-      </div>
-      {history && history.length === 0 && <div className="empty">{t.dataHistoryEmpty}</div>}
-      {groups.map((group) => {
-        const okCount = group.entries.filter((e) => e.ok && e.approved).length
-        const failCount = group.entries.filter((e) => !e.ok).length
-        const isOpen = expanded[group.key] ?? false
-        return (
-          <div className="card history-group" key={group.key}>
-            <button
-              className="history-group-head"
-              onClick={() => setExpanded((prev) => ({ ...prev, [group.key]: !isOpen }))}
-              type="button"
-            >
-              <span className="history-caret">{isOpen ? '▾' : '▸'}</span>
-              <span className="history-group-title">{group.title}</span>
-              <span className="history-count">{group.entries.length}</span>
-              {failCount > 0 ? (
-                <span className="history-stat history-stat-err">{failCount} ✕</span>
-              ) : (
-                <span className="history-stat history-stat-ok">{okCount} ✓</span>
-              )}
-            </button>
-            {isOpen && (
-              <ul className="history-steps">
-                {group.entries.map((entry) => (
-                  <li className={`history-step history-step-${entry.ok ? 'ok' : 'err'}`} key={entry.id}>
-                    <div className="history-step-head">
-                      <span className="history-step-time">{formatWhen(entry.at)}</span>
-                      {entry.host && <span className="history-host">{entry.host}</span>}
-                      {!entry.approved && <span className="history-declined">{t.dataDeclined}</span>}
-                      <button
-                        className="danger history-delete"
-                        onClick={() => void onDelete(entry.id)}
-                        type="button"
-                      >
-                        ×
-                      </button>
-                    </div>
-                    <div className="history-summary">{entry.summary || entry.action}</div>
-                    {entry.detail && entry.detail.length > 0 && (
-                      <ul className="history-detail">
-                        {entry.detail.map((line, i) => (
-                          <li key={i}>{line}</li>
-                        ))}
-                      </ul>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )
-      })}
-    </>
-  )
-}

@@ -301,6 +301,20 @@ export function runOp(op: Op): OpResult {
       return []
     }
   }
+  /** Resolve an XPath expression to element matches (7 = ORDERED_NODE_SNAPSHOT). */
+  function xpathQuery(xpath: string): Element[] {
+    try {
+      const result = document.evaluate(xpath, document, null, 7, null)
+      const out: Element[] = []
+      for (let i = 0; i < result.snapshotLength; i++) {
+        const n = result.snapshotItem(i)
+        if (n && (n as Node).nodeType === 1) out.push(n as Element)
+      }
+      return out
+    } catch {
+      return []
+    }
+  }
   function queryAll(spec: TargetSpec): Element[] {
     const tagPrefix = spec.tag ?? ''
     switch (spec.how) {
@@ -315,6 +329,11 @@ export function runOp(op: Op): OpResult {
       case 'name':
         return safeQuery(`${tagPrefix}[name=${quoteAttr(spec.value)}]`)
       case 'css':
+        // XPath locators are encoded with an `xpath:` prefix by the engine
+        // (Automa blocks can set findBy='xpath'); resolve them via evaluate.
+        if (spec.value.startsWith('xpath:')) {
+          return xpathQuery(spec.value.slice('xpath:'.length))
+        }
         return safeQuery(spec.value)
       case 'role': {
         const wanted = (spec.role ?? '').toLowerCase()
@@ -663,6 +682,47 @@ export function runOp(op: Op): OpResult {
     }
   }
 
+  // --- Capture (full-page / element) -----------------------------------------
+
+  /**
+   * Renders a DOM node (the document or a matched element) to a PNG data URL by
+   * serializing it into an `<svg><foreignObject>`, drawing that into a canvas,
+   * and reading `toDataURL`. Returns `null` when the target is missing or the
+   * canvas is tainted (e.g. cross-origin images without CORS).
+   */
+  async function captureNode(selector: string): Promise<OpResult> {
+    const host = selector
+      ? (document.querySelector(selector) as HTMLElement | null)
+      : document.documentElement
+    if (!host) {
+      return { ...base(), ok: false, found: false, error: `capture: 未找到元素 "${selector}"` }
+    }
+    try {
+      const width = host.scrollWidth || host.offsetWidth || 1280
+      const height = host.scrollHeight || host.offsetHeight || 800
+      const markup = new XMLSerializer().serializeToString(host)
+      const data = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(markup)
+      const image = new Image()
+      const decoded = await new Promise<HTMLImageElement>((resolve, reject) => {
+        image.onload = (): void => resolve(image)
+        image.onerror = (): void => reject(new Error('capture: SVG 加载失败'))
+        image.src = data
+      })
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const context = canvas.getContext('2d')
+      if (!context) throw new Error('capture: 无法创建画布')
+      context.fillStyle = '#ffffff'
+      context.fillRect(0, 0, width, height)
+      context.drawImage(decoded, 0, 0, width, height)
+      return { ...base(), ok: true, found: true, note: 'captured', data: canvas.toDataURL('image/png') }
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error)
+      return { ...base(), ok: false, found: true, error: `capture: ${text}` }
+    }
+  }
+
   // --- Dispatch --------------------------------------------------------------
 
   try {
@@ -671,13 +731,20 @@ export function runOp(op: Op): OpResult {
       return { ...base(), ok: true, found: true, page }
     }
 
+    if (op.action === 'capture') {
+      // Returns a Promise; chrome.scripting.executeScript awaits it. The driver
+      // reads `injection.result` after resolution, which is an OpResult.
+      return captureNode(op.value ? String(op.value) : '') as unknown as OpResult
+    }
+
     if (op.action === 'scroll' && !op.target) {
       const spec = op.scroll ?? { mode: 'by' as const, y: 600 }
+      const behavior: ScrollBehavior = spec.mode === 'incremental' || 'smooth' in spec && spec.smooth ? 'smooth' : 'auto'
       try {
-        if (spec.mode === 'top') window.scrollTo({ top: 0, left: 0 })
+        if (spec.mode === 'top') window.scrollTo({ top: 0, left: 0, behavior })
         else if (spec.mode === 'bottom')
-          window.scrollTo({ top: document.documentElement.scrollHeight ?? 0, left: 0 })
-        else if (spec.mode === 'by') window.scrollBy({ top: spec.y ?? 0, left: spec.x ?? 0 })
+          window.scrollTo({ top: document.documentElement.scrollHeight ?? 0, left: 0, behavior })
+        else window.scrollBy({ top: 'y' in spec ? (spec.y ?? 0) : 0, left: 'x' in spec ? (spec.x ?? 0) : 0, behavior })
       } catch {
         /* no scrolling */
       }
@@ -694,7 +761,100 @@ export function runOp(op: Op): OpResult {
       return { ...base(), ok: true, found: true, note: `pressed ${key}` }
     }
 
+    if (op.action === 'element_exists' || op.action === 'count_elements') {
+      const selector = String(op.value ?? '')
+      const matches = safeQuery(selector)
+      const count = matches.length
+      if (op.action === 'count_elements')
+        return { ...base(), ok: true, found: true, note: `count=${count}`, data: count }
+      return {
+        ...base(),
+        ok: true,
+        found: count > 0,
+        note: count > 0 ? `存在 ${count} 个匹配元素` : '未找到匹配元素',
+        data: count,
+      }
+    }
+
+    if (op.action === 'read_form') {
+      const results: Record<string, unknown> = {}
+      const selector = op.value ? String(op.value) : 'input, select, textarea'
+      const controls = safeQuery(selector)
+      for (let i = 0; i < controls.length; i += 1) {
+        const control = controls[i] as HTMLInputElement | HTMLTextAreaElement
+        const name = control.getAttribute('name') || control.id || `field${i}`
+        if (name in results) continue
+        if (control instanceof HTMLTextAreaElement) {
+          results[name] = control.value
+        } else if (control instanceof HTMLSelectElement) {
+          results[name] = control.multiple
+            ? Array.from(control.selectedOptions).map((o) => o.value)
+            : control.value
+        } else {
+          const type = (control.type || 'text').toLowerCase()
+          if (type === 'checkbox') results[name] = control.checked
+          else if (type === 'radio') {
+            if (control.checked) results[name] = control.value
+          } else results[name] = control.value
+        }
+      }
+      return { ...base(), ok: true, found: true, note: '已读取表单', data: results }
+    }
+
+    if (op.action === 'create_element') {
+      const html = String(op.value ?? '')
+      const wrapper = document.createElement('div')
+      wrapper.innerHTML = html
+      const inserted = Array.prototype.slice.call(wrapper.children) as Element[]
+      for (const child of inserted) document.body.appendChild(child)
+      return { ...base(), ok: true, found: true, note: `created ${inserted.length} element(s)` }
+    }
+
+    if (op.action === 'handle_dialog') {
+      try {
+        // Auto-accept confirm() and suppress beforeunload prompts so a workflow
+        // that navigates or triggers dialogs keeps moving. Goes through
+        // descriptors so pages that froze these globals can still be coerced.
+        const set = (target: unknown, key: string, value: unknown): void => {
+          try {
+            Object.defineProperty(target, key, { value, configurable: true, writable: true })
+          } catch {
+            ;(target as Record<string, unknown>)[key] = value
+          }
+        }
+        set(window, 'onbeforeunload', null)
+        set(window, 'confirm', () => true)
+      } catch {
+        /* handlers may be non-configurable on some pages */
+      }
+      return { ...base(), ok: true, found: true, note: '对话框处理已启用' }
+    }
+
     if (!op.target) return fail(`${op.action} needs a target element.`, false)
+
+    // waitForSelector (Automa): recorded interaction blocks poll up to
+    // `waitFor` ms for the element to appear before acting, so steps that
+    // navigate first don't race post-load content. Re-enters runOp once the
+    // element exists (waitFor zeroed to avoid polling again). The returned
+    // Promise is awaited by chrome.scripting, like capture().
+    const waitMs = typeof op.waitFor === 'number' && op.waitFor > 0 ? op.waitFor : 0
+    if (waitMs) {
+      const target = op.target
+      const tried = [target.primary, ...(target.fallbacks ?? [])]
+        .map((spec) => serializeSpec(spec))
+        .join(', ')
+      return (async () => {
+        const deadline = Date.now() + waitMs
+        let res = resolve(target)
+        while (!res && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 120))
+          res = resolve(target)
+        }
+        if (!res) return notFound(`No element matched within ${waitMs}ms. Tried: ${tried}`)
+        op.waitFor = 0
+        return runOp(op)
+      })() as unknown as OpResult
+    }
 
     const resolution = resolve(op.target)
     if (!resolution) {
@@ -724,12 +884,17 @@ export function runOp(op: Op): OpResult {
 
     if (op.action === 'scroll') {
       const spec = op.scroll ?? { mode: 'into_view' as const }
+      const behavior: ScrollBehavior = spec.mode === 'into_view' ? 'auto' : spec.mode === 'incremental' || 'smooth' in spec && spec.smooth ? 'smooth' : 'auto'
       try {
         if (spec.mode === 'into_view') scrollIntoView(element)
-        else if (spec.mode === 'by')
-          element.scrollBy?.({ top: spec.y ?? 0, left: spec.x ?? 0 })
-        else if (spec.mode === 'top') element.scrollTo?.({ top: 0 })
-        else element.scrollTo?.({ top: element.scrollHeight })
+        else if (spec.mode === 'by' || spec.mode === 'incremental') {
+          ;(element as HTMLElement).scrollBy?.({
+            top: 'y' in spec ? (spec.y ?? 0) : 0,
+            left: 'x' in spec ? (spec.x ?? 0) : 0,
+            behavior,
+          })
+        } else if (spec.mode === 'top') (element as HTMLElement).scrollTo?.({ top: 0, behavior })
+        else (element as HTMLElement).scrollTo?.({ top: element.scrollHeight, behavior })
       } catch {
         /* no scrolling */
       }
@@ -852,6 +1017,54 @@ export function runOp(op: Op): OpResult {
       })
     }
 
+    if (op.action === 'get_attribute') {
+      const attribute = String(op.attribute ?? '')
+      if (!attribute) return withMeta(fail('get_attribute needs an attribute name.'))
+      const value = element.getAttribute(attribute) ?? ''
+      return withMeta({ ...base(), ok: true, found: true, note: value, data: value })
+    }
+
+    if (op.action === 'set_attribute') {
+      const attribute = String(op.attribute ?? '')
+      if (!attribute) return withMeta(fail('set_attribute needs an attribute name.'))
+      const value = String(op.value ?? '')
+      if (value === '') element.removeAttribute(attribute)
+      else element.setAttribute(attribute, value)
+      return withMeta({ ...base(), ok: true, found: true, note: `set ${attribute}` })
+    }
+
+    if (op.action === 'click_link') {
+      const href = (element as HTMLAnchorElement).href
+      const tag = element.tagName.toLowerCase()
+      if (tag !== 'a' || !href) return withMeta(fail(`${describeElement(element)} is not a clickable link.`))
+      const target = (element as HTMLAnchorElement).target
+      return withMeta({
+        ...base(),
+        ok: true,
+        found: true,
+        mayNavigate: true,
+        note: href,
+        data: { href, target: target ?? '_self' },
+      })
+    }
+
+    if (op.action === 'trigger_event') {
+      const eventName = String(op.attribute ?? '')
+      if (!eventName) return withMeta(fail('trigger_event needs an event name.'))
+      let detail: unknown
+      try {
+        detail = JSON.parse(String(op.value ?? 'null'))
+      } catch {
+        detail = String(op.value ?? '')
+      }
+      const useBubbles = () => {
+        const maybe = eventName.toLowerCase()
+        return maybe.indexOf('mouse') === -1 && maybe.indexOf('click') === -1
+      }
+      element.dispatchEvent(new CustomEvent(eventName, { bubbles: useBubbles(), detail }))
+      return withMeta({ ...base(), ok: true, found: true, note: `dispatched ${eventName}` })
+    }
+
     if (op.action === 'press_key') {
       const key = String(op.value ?? '')
       if (!key) return withMeta(fail('press_key needs a key name.'))
@@ -878,3 +1091,311 @@ export function runOp(op: Op): OpResult {
     return { ...base(), error: `In-page failure: ${message}` }
   }
 }
+
+/**
+ * Evaluate user JavaScript in the page's MAIN world.
+ *
+ * This is injected via `chrome.scripting.executeScript({ world: 'MAIN' })`, so
+ * it runs as an ordinary page script — with the page's real `window`/globals
+ * (React DevTools hooks, jQuery, SDKs, etc.), which is what users writing
+ * "JavaScript code" expect. Injecting the static wrapper itself is
+ * extension-trusted and CSP-exempt; compiling the user's source inside it is
+ * the one thing the page's CSP governs, so `new Function` here is governed by
+ * the page (like DevTools console). On pages whose CSP forbids `unsafe-eval`
+ * it throws and the driver reports a clear message.
+ *
+ * Must be self-contained (serialized source only, no closure) like `runOp`.
+ *
+ * Returns a JSON-structured-clone-safe value; never throws.
+ */
+export function runExecJs(input: {
+  code: string
+  argNames?: string[]
+  args?: Record<string, unknown>
+}): { ok: true; data?: unknown } | { ok: false; error: string } {
+  try {
+    const code = String(input.code ?? '')
+    const args = input.args && typeof input.args === 'object' ? input.args : {}
+    const argNames =
+      Array.isArray(input.argNames) && input.argNames.length > 0
+        ? input.argNames
+        : Object.keys(args)
+    const argValues = argNames.map((name) => args[name])
+
+    // Clone the result into structured-clone-safe values: host objects (DOM
+    // nodes, functions) cannot cross back to the worker.
+    const cloneable = (value: unknown): unknown => {
+      if (value === null || value === undefined) return value
+      const t = typeof value
+      if (t === 'string' || t === 'number' || t === 'boolean') return value
+      if (t === 'function') return `[function ${(value as { name?: string }).name || 'anonymous'}]`
+      if (Array.isArray(value)) return value.map(cloneable)
+      if (t === 'object') {
+        if (typeof (value as { nodeType?: unknown }).nodeType === 'number') {
+          const el = value as Element
+          return `[${el.nodeName?.toLowerCase?.() ?? 'node'}${el.id ? `#${el.id}` : ''}]`
+        }
+        const out: Record<string, unknown> = {}
+        for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+          try {
+            out[k] = cloneable(v)
+          } catch {
+            out[k] = `[unserializable ${typeof v}]`
+          }
+        }
+        return out
+      }
+      return String(value)
+    }
+
+    // Prefer expression evaluation for expression-like sources (`1 + 2`,
+    // `document.title`); run statement-bearing sources as a function body so
+    // `return ...` works. Statement-only bodies (no return) yield undefined.
+    const looksLikeStatements =
+      /\b(return|const|let|var|if|for|while|function|await|switch|try|throw|=>)\b/.test(code)
+
+    let result: unknown
+    if (!looksLikeStatements) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+        const expr = new Function(...argNames, `"use strict"; return (${code});`)
+        result = expr(...argValues)
+      } catch {
+        result = undefined
+      }
+    }
+    if (result === undefined && (looksLikeStatements || code.trim() !== '')) {
+      // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+      const body = new Function(...argNames, `"use strict";\n${code}`)
+      result = body(...argValues)
+    }
+    return { ok: true, data: cloneable(result) }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/**
+ * Run a workflow "JavaScript code" block in the page's MAIN world.
+ *
+ * This is the Automa-equivalent harness for `javascript-code`. Compared with
+ * {@link runExecJs} (a one-shot expression/body eval), it:
+ *   - is ASYNC: `await` and Promise-returning user code are supported;
+ *   - exposes Automa-style helper functions (`automaNextBlock`,
+ *     `automaSetVariable`, `automaRefData`, `automaResetTimeout`);
+ *   - captures `console.log/info/warn/error` output so the run log shows it;
+ *   - enforces a timeout (re-armed via `automaResetTimeout()`).
+ *
+ * Like {@link runExecJs} it must be self-contained (serialized source only).
+ *
+ * Returns a structured payload — never throws:
+ *   { ok, data, variables, logs: [{level, args}], error? }
+ */
+export function runWorkflowJs(input: {
+  code: string
+  variables?: Record<string, unknown>
+  timeout?: number
+}): Promise<{
+  ok: true
+  data?: unknown
+  variables?: Record<string, unknown>
+  logs: { level: string; message: string }[]
+} | { ok: false; error: string; logs: { level: string; message: string }[] }> {
+  return new Promise((resolvePromise) => {
+    const logs: { level: string; message: string }[] = []
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    // Clone values crossing back to the worker (strip DOM nodes / functions).
+    const cloneable = (value: unknown): unknown => {
+      if (value === null || value === undefined) return value
+      const t = typeof value
+      if (t === 'string' || t === 'number' || t === 'boolean') return value
+      if (t === 'function') return `[function ${(value as { name?: string }).name || 'anonymous'}]`
+      if (Array.isArray(value)) return value.map(cloneable)
+      if (t === 'object') {
+        if (typeof (value as { nodeType?: unknown }).nodeType === 'number') {
+          const el = value as Element
+          return `[${el.nodeName?.toLowerCase?.() ?? 'node'}${el.id ? `#${el.id}` : ''}]`
+        }
+        const out: Record<string, unknown> = {}
+        for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+          try {
+            out[k] = cloneable(v)
+          } catch {
+            out[k] = `[unserializable ${typeof v}]`
+          }
+        }
+        return out
+      }
+      return String(value)
+    }
+
+    const finish = (payload: { ok: true; data?: unknown; variables?: Record<string, unknown> } | { ok: false; error: string }) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      try {
+        if (payload.ok) {
+          resolvePromise({
+            ok: true,
+            data: cloneable(payload.data),
+            variables: payload.variables ? (cloneable(payload.variables) as Record<string, unknown>) : undefined,
+            logs,
+          })
+        } else {
+          resolvePromise({ ok: false, error: payload.error, logs })
+        }
+      } catch {
+        resolvePromise({ ok: false, error: 'Could not serialize result', logs })
+      }
+    }
+
+    try {
+      const code = String(input.code ?? '')
+      // A working copy the helpers mutate; flushed back on completion.
+      const variables: Record<string, unknown> = { ...(input.variables ?? {}) }
+      const timeoutMs = Math.max(0, Number(input.timeout ?? 20000) || 0)
+
+      // Capture console output for the duration of the block.
+      const consoleLevels = ['log', 'info', 'warn', 'error', 'debug'] as const
+      const originals: Record<string, (...a: unknown[]) => void> = {}
+      const stringify = (args: unknown[]): string =>
+        args
+          .map((a) => {
+            if (typeof a === 'string') return a
+            try {
+              return JSON.stringify(a)
+            } catch {
+              return String(a)
+            }
+          })
+          .join(' ')
+      for (const level of consoleLevels) {
+        const orig = console[level]?.bind(console)
+        originals[level] = orig ?? (() => {})
+        console[level] = (...args: unknown[]) => {
+          logs.push({ level: level === 'debug' ? 'log' : level, message: stringify(args) })
+          try {
+            orig?.(...args)
+          } catch {
+            /* original may be unavailable in isolated contexts */
+          }
+        }
+      }
+      const restoreConsole = () => {
+        for (const level of consoleLevels) {
+          try {
+            ;(console as unknown as Record<string, unknown>)[level] = originals[level]
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+
+      // --- Automa-style helpers ---------------------------------------------
+      let nextData: unknown = undefined
+      let nextCalled = false
+      let returned = false
+
+      const armTimeout = () => {
+        if (timer) clearTimeout(timer)
+        if (timeoutMs > 0) {
+          timer = setTimeout(() => {
+            restoreConsole()
+            finish({ ok: false, error: `JavaScript 代码超时（${timeoutMs}ms）` })
+          }, timeoutMs)
+        }
+      }
+
+      const helpers = {
+        automaNextBlock(data?: unknown) {
+          nextCalled = true
+          nextData = data === undefined ? undefined : data
+        },
+        automaSetVariable(name: string, value: unknown) {
+          variables[String(name)] = value
+        },
+        automaRefData(keyword: string, path = '') {
+          const root: Record<string, unknown> = {
+            variables,
+            table: variables['dataTable'] ?? [],
+            loopData: { loopIndex: variables['loopIndex'], loopItem: variables['loopItem'] },
+            prevBlockData: variables['lastResult'],
+            globalData: variables['globalData'] ?? {},
+            workflow: {},
+          }
+          let value: unknown = root[keyword as string]
+          if (!path) return value
+          for (const seg of String(path).split('.').filter(Boolean)) {
+            if (value && typeof value === 'object') value = (value as Record<string, unknown>)[seg]
+            else {
+              value = undefined
+              break
+            }
+          }
+          return value
+        },
+        automaResetTimeout() {
+          armTimeout()
+        },
+      }
+
+      armTimeout()
+
+      // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+      const fn = new Function(
+        'automaNextBlock',
+        'automaSetVariable',
+        'automaRefData',
+        'automaResetTimeout',
+        'variables',
+        `"use strict";\n${code}`,
+      ) as (
+        a: typeof helpers.automaNextBlock,
+        b: typeof helpers.automaSetVariable,
+        c: typeof helpers.automaRefData,
+        d: typeof helpers.automaResetTimeout,
+        v: Record<string, unknown>,
+      ) => unknown
+
+      let ret: unknown
+      try {
+        ret = fn(
+          helpers.automaNextBlock,
+          helpers.automaSetVariable,
+          helpers.automaRefData,
+          helpers.automaResetTimeout,
+          variables,
+        )
+      } catch (error) {
+        restoreConsole()
+        finish({ ok: false, error: error instanceof Error ? error.message : String(error) })
+        return
+      }
+      returned = true
+
+      const settleWith = (data: unknown) => {
+        restoreConsole()
+        finish({ ok: true, data, variables })
+      }
+
+      Promise.resolve(ret)
+        .then((awaited) => {
+          if (settled) return
+          // automaNextBlock(...) wins if it was called; otherwise use the
+          // returned/awaited value.
+          const data = nextCalled ? nextData : returned ? awaited : undefined
+          settleWith(data)
+        })
+        .catch((error) => {
+          if (settled) return
+          restoreConsole()
+          finish({ ok: false, error: error instanceof Error ? error.message : String(error) })
+        })
+    } catch (error) {
+      finish({ ok: false, error: error instanceof Error ? error.message : String(error) })
+    }
+  })
+}
+

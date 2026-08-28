@@ -20,6 +20,20 @@ import {
   type CommandResult,
 } from '../lib/messages'
 import { isInjectablePage } from '../lib/pages'
+import { handlePickerMessage } from './picker-bridge'
+import {
+  startRecording,
+  stopRecording,
+  isRecording,
+  handleRecordEvent,
+  initRecordingLifecycle,
+} from './record-controller'
+import {
+  startupWorkflows,
+  initShortcutTriggers,
+  handleShortcutPressed,
+  setWorkflowRunner,
+} from './workflow-triggers'
 import { validateProfile } from '../lib/providers'
 import { normalizeSkill, validateSkill, wrapSkillDirective } from '../lib/skills'
 import {
@@ -64,6 +78,14 @@ import {
   saveFeishuConfig,
   saveTask,
 } from '../lib/task-store'
+import {
+  listWorkflows,
+  getWorkflow,
+  saveWorkflow,
+  deleteWorkflow,
+} from '../lib/workflow/storage'
+import { executeWorkflow } from './workflow-engine/run-workflow'
+import { initLastTabTracker } from './last-tab'
 import { rescheduleAll, scheduleTask, triggerNow, onAlarm } from './scheduler'
 import { FeishuBot, FEISHU_WATCHDOG_ALARM } from './feishu-bot'
 import { isWebhookUrl, sendWebhookText } from '../lib/feishu'
@@ -94,6 +116,7 @@ setFinishedPersister((run: FinishedTask) => {
     finishedAt: run.finishedAt,
     outcome: run.outcome,
     summary: run.summary,
+    ...(run.error ? { error: run.error } : {}),
     steps: run.steps,
   }).catch((error: unknown) => {
     console.error('[Browser Copilot] could not persist finished run', error)
@@ -130,6 +153,11 @@ chrome.runtime.onInstalled.addListener(() => {
   void rescheduleAll().catch((error: unknown) =>
     console.error('[Browser Copilot] could not reschedule tasks', error),
   )
+  if (chrome.contextMenus) {
+    void registerContextMenuWorkflows().catch((error: unknown) =>
+      console.error('[Browser Copilot] could not register context-menu workflows', error),
+    )
+  }
 })
 
 // A worker update/startup must also reconcile alarms: chrome.alarms persist across
@@ -139,6 +167,24 @@ chrome.runtime.onStartup.addListener(() => {
     console.error('[Browser Copilot] could not reschedule tasks', error),
   )
   void feishuBot.reconcile()
+  // Run workflows whose trigger block is "on-startup".
+  void startupWorkflows()
+    .then((wfs) => {
+      for (const wf of wfs) void runWorkflowKeepalive(wf.id)
+    })
+    .catch((error: unknown) =>
+      console.error('[Browser Copilot] on-startup workflows failed', error),
+    )
+  void initShortcutTriggers()
+})
+
+// Also fire on-startup workflows once when the service worker boots after install.
+chrome.runtime.onInstalled.addListener(() => {
+  void startupWorkflows()
+    .then((wfs) => {
+      for (const wf of wfs) void runWorkflowKeepalive(wf.id)
+    })
+    .catch(() => {})
 })
 
 // Fires for task alarms and the Feishu watchdog. Registered synchronously so an
@@ -161,6 +207,103 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 /** Single long-lived Feishu bot connection (reconnects internally). */
 const feishuBot = new FeishuBot()
 
+// --- Workflow trigger listeners ------------------------------------------------
+
+/**
+ * (Re)creates a right-click context-menu item for every enabled workflow whose
+ * trigger is `context-menu`. Rebuilding from scratch keeps the menu in sync with
+ * storage: deleted workflows vanish, renames update the label, re-enabled ones
+ * reappear.
+ */
+async function registerContextMenuWorkflows(): Promise<void> {
+  const workflows = (await listWorkflows()).filter(
+    (wf) => wf.trigger?.type === 'context-menu' && wf.trigger.enabled !== false,
+  )
+  try {
+    chrome.contextMenus.removeAll()
+  } catch {
+    /* may already be cleared */
+  }
+  for (const wf of workflows) {
+    try {
+      chrome.contextMenus.create({
+        id: wf.trigger?.menuItemId ?? wf.id,
+        title: wf.name,
+        contexts: ['page'],
+      })
+    } catch (error) {
+      console.error('[Browser Copilot] could not create context menu item', wf.id, error)
+    }
+  }
+}
+
+/**
+ * Runs a workflow, holding the worker alive for the duration so a context-menu
+ * click or navigation that triggers it cannot strand the run mid-way.
+ */
+async function runWorkflowKeepalive(workflowId: string): Promise<void> {
+  const wf = await getWorkflow(workflowId)
+  if (!wf) return
+  retain()
+  try {
+    await executeWorkflow(wf, { source: 'manual' })
+  } finally {
+    release()
+  }
+}
+
+// Let the trigger module launch workflows (keyboard-shortcut triggers).
+setWorkflowRunner((workflowId) => {
+  void runWorkflowKeepalive(workflowId)
+})
+
+// Right-click "run workflow" items. Guarded: the API is not present in tests and
+// may be unavailable on some builds.
+if (chrome.contextMenus?.onClicked) {
+  chrome.contextMenus.onClicked.addListener((info) => {
+    void (async () => {
+      try {
+        const workflows = await listWorkflows()
+        const wf = workflows.find(
+          (w) =>
+            w.trigger?.type === 'context-menu' &&
+            (w.trigger.menuItemId !== undefined ? w.trigger.menuItemId === info.menuItemId : w.id === info.menuItemId),
+        )
+        if (wf) await runWorkflowKeepalive(wf.id)
+      } catch (error) {
+        console.error('[Browser Copilot] context-menu workflow failed', error)
+      }
+    })()
+  })
+}
+
+// Visit-web workflows: fire when a matching page commits navigation. Defensive —
+// ignore any scheme other than http(s), and fall back to substring matching if
+// the stored pattern is not a valid regular expression.
+if (chrome.webNavigation?.onCommitted) {
+  chrome.webNavigation.onCommitted.addListener((details) => {
+    void (async () => {
+      try {
+        const url = details.url
+        if (!/^https?:/i.test(url)) return
+        const href = new URL(url).href
+        const workflows = await listWorkflows()
+        const wf = workflows.find((w) => {
+          if (w.trigger?.type !== 'visit-web' || !w.trigger.urlPattern) return false
+          try {
+            return new RegExp(w.trigger.urlPattern).test(href)
+          } catch {
+            return href.includes(w.trigger.urlPattern)
+          }
+        })
+        if (wf) await runWorkflowKeepalive(wf.id)
+      } catch (error) {
+        console.error('[Browser Copilot] visit-web workflow failed', error)
+      }
+    })()
+  })
+}
+
 /** Records an agent step onto a running-task board entry, ignoring stale runs. */
 function recordStep(
   kind: 'tool' | 'status' | 'result' | 'error' | 'info',
@@ -173,6 +316,7 @@ function recordStep(
 // An MV3 worker can start cold on any event (an alarm, a port reconnect, a
 // command). Reconcile schedules and the bot connection at module load so a task
 // is never missed because the worker had not run its install/startup handlers.
+initLastTabTracker()
 void rescheduleAll().catch((error: unknown) =>
   console.error('[Browser Copilot] could not reschedule tasks', error),
 )
@@ -209,11 +353,37 @@ chrome.action.onClicked.addListener((tab) => {
   })
 })
 
-// --- Command channel ---------------------------------------------------------
-
+// --- Message channel ---------------------------------------------------------
+//
+// Exactly ONE onMessage listener: special protocols (element picker, workflow
+// recording events, keyboard-shortcut triggers) are claimed BEFORE the generic
+// command switch. Previously each had its own listener, so a non-command
+// message (e.g. picker:start) ALSO reached the command handler, which threw
+// "Unknown command" and raced the real response — the root cause of the picker
+// error and flaky run/record buttons.
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   void (async () => {
     try {
+      // 1. Recording events are one-way (in-page recorder -> controller).
+      if (handleRecordEvent(message)) {
+        sendResponse({ ok: true })
+        return
+      }
+
+      // 2. Element picker start/verify/result/cancel.
+      const picker = await handlePickerMessage(message)
+      if (picker.handled) {
+        sendResponse(picker.response)
+        return
+      }
+
+      // 3. Keyboard-shortcut triggers from the injected tab listener.
+      if (await handleShortcutPressed(message)) {
+        sendResponse({ ok: true })
+        return
+      }
+
+      // 4. Generic command channel (workflows.*, settings, skills, ...).
       const data = await handleCommand(message as Command)
       sendResponse({ ok: true, data } satisfies CommandResponse)
     } catch (error) {
@@ -223,9 +393,49 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       } satisfies CommandResponse)
     }
   })()
-  // Keeps the response channel open for the async work above.
+  // Keep the response channel open for the async work above.
   return true
 })
+
+// Wire tab/navigation listeners for workflow recording.
+initRecordingLifecycle()
+
+function runningBoardsView(workflowIdFilter?: string): {
+  runs: { runId: string; taskId?: string; workflowId?: string; label: string; source: ReturnType<typeof listRunning>[number]['source']; startedAt: number; steps: ReturnType<typeof listRunning>[number]['steps'] }[]
+  finished: { runId: string; taskId?: string; workflowId?: string; label: string; source: ReturnType<typeof listFinished>[number]['source']; startedAt: number; finishedAt: number; outcome: ReturnType<typeof listFinished>[number]['outcome']; summary?: string; error?: string; steps: ReturnType<typeof listFinished>[number]['steps'] }[]
+} {
+  const mapFinished = (r: ReturnType<typeof listFinished>[number]) => ({
+    runId: r.runId,
+    taskId: r.taskId,
+    workflowId: r.workflowId,
+    label: r.label,
+    source: r.source,
+    startedAt: r.startedAt,
+    finishedAt: r.finishedAt,
+    outcome: r.outcome,
+    summary: r.summary,
+    error: r.error,
+    steps: r.steps,
+    ...(r.snapshots ? { snapshots: r.snapshots } : {}),
+  })
+  const matches = <T extends { workflowId?: string }>(r: T): boolean =>
+    !workflowIdFilter || r.workflowId === workflowIdFilter
+  return {
+    runs: listRunning()
+      .filter(matches)
+      .map((r) => ({
+        runId: r.runId,
+        taskId: r.taskId,
+        workflowId: r.workflowId,
+        label: r.label,
+        source: r.source,
+        startedAt: r.startedAt,
+        steps: r.steps,
+        ...(r.snapshots ? { snapshots: r.snapshots } : {}),
+      })),
+    finished: listFinished().filter(matches).map(mapFinished),
+  }
+}
 
 async function handleCommand(command: Command): Promise<CommandResult> {
   switch (command.type) {
@@ -402,31 +612,8 @@ async function handleCommand(command: Command): Promise<CommandResult> {
       await deleteRun(command.id)
       forgetFinished(command.id)
       return { type: 'tasks.runs.delete' }
-    case 'tasks.running': {
-      const mapFinished = (r: ReturnType<typeof listFinished>[number]) => ({
-        runId: r.runId,
-        taskId: r.taskId,
-        label: r.label,
-        source: r.source,
-        startedAt: r.startedAt,
-        finishedAt: r.finishedAt,
-        outcome: r.outcome,
-        summary: r.summary,
-        steps: r.steps,
-      })
-      return {
-        type: 'tasks.running',
-        runs: listRunning().map((r) => ({
-          runId: r.runId,
-          taskId: r.taskId,
-          label: r.label,
-          source: r.source,
-          startedAt: r.startedAt,
-          steps: r.steps,
-        })),
-        finished: listFinished().map(mapFinished),
-      }
-    }
+    case 'tasks.running':
+      return { type: 'tasks.running', ...runningBoardsView() }
     case 'tasks.cancel':
       return { type: 'tasks.cancel', ok: cancelRun(command.runId) }
     case 'tasks.finished.delete':
@@ -467,6 +654,55 @@ async function handleCommand(command: Command): Promise<CommandResult> {
         }
       }
     }
+
+    case 'workflows.list':
+      return { type: 'workflows.list', workflows: await listWorkflows() }
+
+    case 'workflows.get':
+      return { type: 'workflows.get', workflow: await getWorkflow(command.id) }
+
+    case 'workflows.save':
+      await saveWorkflow(command.workflow)
+      return { type: 'workflows.save' }
+
+    case 'workflows.delete':
+      await deleteWorkflow(command.id)
+      return { type: 'workflows.delete' }
+
+    case 'workflows.run': {
+      const workflow = await getWorkflow(command.id)
+      if (!workflow) throw new Error('Workflow not found.')
+      const r = await executeWorkflow(workflow, {
+        source: 'manual',
+        startAt: (command as { startAt?: string }).startAt,
+        debug: workflow.settings?.debugMode === true,
+      })
+      return {
+        type: 'workflows.run',
+        outcome: {
+          ok: r.outcome === 'ok',
+          skipped: false,
+          summary: r.summary ?? '',
+          error: r.outcome === 'failed' ? r.summary : undefined,
+          runId: r.runId,
+        },
+      }
+    }
+
+    case 'workflows.running': {
+      const boards = runningBoardsView((command as { workflowId?: string }).workflowId)
+      return { type: 'workflows.running', ...boards }
+    }
+
+    case 'record.start':
+      await startRecording()
+      return { type: 'record.start', recording: true }
+    case 'record.stop': {
+      const workflowId = await stopRecording()
+      return { type: 'record.stop', workflowId }
+    }
+    case 'record.status':
+      return { type: 'record.status', recording: isRecording() }
 
     default: {
       const exhaustive: never = command
@@ -663,6 +899,33 @@ chrome.runtime.onConnect.addListener((port) => {
         history.push({ role: 'user', content: text })
         // Persist metadata so the conversation appears in the history list.
         await touchConversation(conversationId, message.text)
+
+        // Slash-command interception: `/run <workflow>` executes a saved
+        // workflow directly instead of feeding the message to the model. On a
+        // match we report the outcome and finish the turn before `runAgentTurn`
+        // runs; the surrounding try/finally still persists the conversation and
+        // finishes the tracked run exactly once.
+        const runMatch = /^\/run\s+(.+)$/.exec(message.text.trim())
+        if (runMatch) {
+          const nameOrId = runMatch[1]!.trim()
+          const wf = (await listWorkflows()).find(
+            (w) => w.id === nameOrId || w.name.toLowerCase() === nameOrId.toLowerCase(),
+          )
+          if (!wf) {
+            throw new Error(`工作流不存在：${nameOrId}`)
+          }
+          sendWithTracking({ type: 'phase', phase: 'sending' })
+          const result = await executeWorkflow(wf, { source: 'chat' })
+          if (result.outcome === 'ok') {
+            sendWithTracking({ type: 'status', text: result.summary || `工作流「${wf.name}」执行完成。` })
+          } else if (result.outcome === 'cancelled') {
+            sendWithTracking({ type: 'status', text: '工作流已终止。' })
+          } else {
+            sendWithTracking({ type: 'error', message: result.summary || '工作流执行失败。' })
+          }
+          sendWithTracking({ type: 'done' })
+          return
+        }
 
         // The mode is read freshly per action (see AgentDeps.getMode), so a
         // switch in the panel takes effect on the next tool call within the

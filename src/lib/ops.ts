@@ -45,13 +45,26 @@ export type ActionName =
   | 'scroll'
   | 'wait_for'
   | 'snapshot'
+  | 'element_exists'
+  | 'get_attribute'
+  | 'set_attribute'
+  | 'click_link'
+  | 'read_form'
+  | 'create_element'
+  | 'handle_dialog'
+  | 'count_elements'
+  | 'trigger_event'
+  | 'capture'
+  | 'exec_js'
+  | 'exec_workflow_js'
 
 /** What `scroll` should do. */
 export type ScrollSpec =
   | { mode: 'into_view' }
-  | { mode: 'by'; x?: number; y?: number }
-  | { mode: 'top' }
-  | { mode: 'bottom' }
+  | { mode: 'by'; x?: number; y?: number; smooth?: boolean }
+  | { mode: 'incremental'; x?: number; y?: number }
+  | { mode: 'top'; smooth?: boolean }
+  | { mode: 'bottom'; smooth?: boolean }
 
 /** One operation, handed across the structured-clone boundary. */
 export interface Op {
@@ -59,13 +72,30 @@ export interface Op {
   target?: Target
   /** Text to type, option to choose, or key to press. */
   value?: string | string[] | boolean
+  /** Attribute name for `get_attribute` / `set_attribute` / `trigger_event`. */
+  attribute?: string
   scroll?: ScrollSpec
   /** Whether to clear an input before typing (default true for `fill`). */
   clear?: boolean
+  /**
+   * Poll (in-page) up to this many milliseconds for the target element to
+   * appear before running the action. Mirrors Automa's `waitForSelector`
+   * flag: recorded interaction blocks set it so steps that navigate first
+   * don't race the element that appears after load.
+   */
+  waitFor?: number
   /** Character budget for snapshot text. */
   maxChars?: number
   /** Max interactive elements in a snapshot. */
   maxElements?: number
+  /**
+   * Named arguments handed to an `exec_js` evaluation, available as the
+   * function parameters named by `jsArgNames` (e.g. `vars`, `refData`,
+   * `rows`). Values must be structured-cloneable (they cross into the page).
+   */
+  jsArgs?: Record<string, unknown>
+  /** Parameter names for `jsArgs`, in order. Defaults to the keys of jsArgs. */
+  jsArgNames?: string[]
 }
 
 /** A snapshot entry for one interactive element. */
@@ -132,4 +162,6 @@ export interface OpResult {
   page?: PageSnapshot
   mayNavigate?: boolean
   note?: string
+  /** Structured payload for data-producing ops (attribute, form, count). */
+  data?: unknown
 }

@@ -207,6 +207,11 @@ export interface HistoryEntry {
    * or the URL opened. One detail per array element, shown as sub-lines.
    */
   detail?: string[]
+  /**
+   * The raw tool args for this action. Retained so a full-auto session can be
+   * rebuilt into a workflow afterwards.
+   */
+  args?: Record<string, unknown>
 }
 
 /**

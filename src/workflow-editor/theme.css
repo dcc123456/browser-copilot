@@ -1,0 +1,59 @@
+/*
+ * Workflow editor theme — bridges the editor's own variable names onto the
+ * shared design system (src/ui/design-system.css), so the side panel and the
+ * editor window can never drift apart.
+ *
+ * The editor-specific aliases (--we-*) below map onto the shared tokens;
+ * editor.css consumes the aliases. Category icon hues come straight from the
+ * shared file (--cat-*), defined once for both surfaces.
+ */
+
+:root {
+  /* surfaces */
+  --we-bg: var(--bc-panel);             /* app chrome: topbar, sidebars       */
+  --we-bg-soft: var(--bc-sunken);       /* React Flow canvas (recessed)        */
+  --we-bg-input: var(--bc-panel-2);     /* inputs, palette cards               */
+  --we-bg-hover: var(--bc-accent-soft);
+  --we-bg-active: color-mix(in srgb, var(--bc-accent) 24%, transparent);
+  --we-border: var(--bc-border);
+  --we-border-strong: var(--bc-border-strong);
+
+  /* text */
+  --we-text: var(--bc-text);
+  --we-text-dim: var(--bc-muted);
+  --we-text-faint: var(--bc-faint);
+  --we-text-on-accent: var(--bc-on-accent);
+
+  /* accents */
+  --we-accent: var(--bc-accent);
+  --we-accent-soft: var(--bc-accent-soft);
+  --we-danger: var(--bc-danger);
+  --we-danger-soft: var(--bc-err-surface);
+  --we-success: var(--bc-ok);
+
+  /* node chrome + edges. The edge is a dedicated mid-tone (not --we-text-faint,
+     which is reserved for non-essential text and too dim to trace a line) so
+     connections are clearly visible on the canvas in BOTH themes. */
+  --we-node-bg: var(--bc-panel);
+  --we-node-border: var(--bc-border);
+  --we-node-selected: var(--bc-accent);
+  --we-edge: #8a94a6;
+  --we-edge-selected: var(--bc-accent);
+
+  /* Remote Automa block icons ship as dark PNGs; invert them on dark surfaces. */
+  --bc-icon-invert: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bc-icon-invert: invert(1);
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    /* Darker line than the dark theme's, to hold contrast on the near-white
+       canvas. */
+    --we-edge: #94a0b2;
+  }
+}

@@ -25,6 +25,8 @@ import {
 } from '../lib/task-store'
 import { runUnattendedPrompt } from './agent-unattended'
 import { retain, release } from './keepalive'
+import { getWorkflow } from '../lib/workflow/storage'
+import { executeWorkflow } from './workflow-engine/run-workflow'
 import {
   addStep,
   finishRun,
@@ -93,6 +95,7 @@ export async function runTask(
     finishRun(tracked.runId, {
       outcome: boardOutcome,
       summary: outcome.summary?.split('\n')[0] || outcome.error,
+      ...(outcome.error ? { error: outcome.error } : {}),
     })
   }
 
@@ -128,6 +131,8 @@ async function executeTask(
       return runReviewRequests(lang, tracked)
     case 'agent-prompt':
       return runAgentPrompt(task, lang, tracked)
+    case 'workflow':
+      return runWorkflowTask(task, tracked)
     default: {
       // Exhaustiveness guard: a future task kind that isn't wired up fails
       // loudly rather than silently doing nothing. Cast through string so this
@@ -195,6 +200,34 @@ async function runAgentPrompt(task: ScheduledTask, _lang: string, tracked: Runni
     summary: result.answer,
     error: result.error,
     cancelled: result.cancelled,
+  }
+}
+
+/**
+ * Runs a scheduled workflow-kind task through the workflow engine. The engine
+ * already maps its steps onto the tracked run (see `executeWorkflow`), so this
+ * only needs to look the stored workflow up and translate the settling outcome.
+ */
+async function runWorkflowTask(task: ScheduledTask, tracked: RunningTask): Promise<RunOutcome> {
+  const workflow = task.workflowId ? await getWorkflow(task.workflowId) : undefined
+  if (!workflow) {
+    return { ok: false, skipped: false, summary: '', error: 'This task has no workflow.' }
+  }
+  addStep(tracked.runId, 'info', `Running workflow: ${workflow.name}`)
+  const outcome = await executeWorkflow(workflow, {
+    source: 'schedule',
+    taskId: task.id,
+    feishuChatId: tracked.feishuChatId,
+  })
+  return {
+    ok: outcome.outcome === 'ok',
+    skipped: false,
+    summary: outcome.summary ?? '',
+    error:
+      outcome.outcome === 'failed'
+        ? (outcome.error ?? outcome.summary)
+        : undefined,
+    cancelled: outcome.outcome === 'cancelled',
   }
 }
 

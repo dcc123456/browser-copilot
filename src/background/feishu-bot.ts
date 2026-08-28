@@ -63,7 +63,10 @@ import {
   type Frame,
 } from '../lib/feishu-proto'
 import { getFeishuConfig, listTasks } from '../lib/task-store'
+import { listWorkflows } from '../lib/workflow/storage'
+import type { Workflow } from '../lib/workflow/types'
 import { triggerNow } from './scheduler'
+import { executeWorkflow } from './workflow-engine/run-workflow'
 import { runUnattendedPrompt } from './agent-unattended'
 import {
   addStep,
@@ -91,6 +94,9 @@ export const COMMAND_PATTERNS = [
   /run task|执行任务|运行任务/i,
   /status|状态/i,
 ]
+
+/** Slash-style command that runs a named workflow by id or name. */
+export const WORKFLOW_COMMAND = /^\s*(?:\/run\s+workflow|\/workflow|运行工作流|执行工作流)[：: ]?\s*(.+)$/i
 
 /** True when an inbound message text should trigger a task run. Exported for tests. */
 export function isCommand(text: string): boolean {
@@ -485,6 +491,22 @@ export class FeishuBot {
     const token = await this.tokenProvider.get().catch(() => null)
     if (!token) return
 
+    // 0. Workflow command? A `/workflow <name>` (or Chinese equivalent) runs a
+    //    saved workflow directly. Checked before named tasks so a workflow whose
+    //    name collides with a task name still wins when the command form is used.
+    const wfMatch = WORKFLOW_COMMAND.exec(text)
+    if (wfMatch) {
+      const nameOrId = wfMatch[1]!.trim()
+      const wf = (await listWorkflows()).find(
+        (w) => w.id === nameOrId || w.name.toLowerCase() === nameOrId.toLowerCase(),
+      )
+      if (wf) {
+        await safeReply(token, message.chatId, '▶ 开始执行工作流')
+        await this.runWorkflowAndReport(token, message.chatId, wf)
+        return
+      }
+    }
+
     // 1. Named task? If the message mentions a saved task name, run that task.
     const tasks = await listTasks()
     const named = tasks.find(
@@ -611,6 +633,45 @@ export class FeishuBot {
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
       await safeReply(token, chatId, `Task failed: ${detail}`)
+    }
+  }
+
+  /**
+   * Runs a saved workflow triggered from Feishu and reports its progress. Unlike
+   * `runAndReport` (which polls the board for a task's own run), a workflow is
+   * executed inline here — `executeWorkflow` registers its own run on the board
+   * and we stream its engine steps to the chat before replying with the outcome.
+   */
+  private async runWorkflowAndReport(
+    token: string,
+    chatId: string,
+    wf: Workflow,
+  ): Promise<void> {
+    const streamer = new StepStreamer(token, chatId)
+    streamer.start()
+    try {
+      const result = await executeWorkflow(wf, {
+        source: 'feishu',
+        feishuChatId: chatId,
+        onStep: (_kind, nodeId, text) => {
+          streamer.push(text)
+          streamer.push('→ ' + nodeId)
+        },
+      })
+      streamer.flush()
+      if (result.outcome === 'cancelled') {
+        await safeReply(token, chatId, '⏹ 工作流已终止。')
+      } else if (result.outcome === 'failed') {
+        await safeReply(token, chatId, result.summary || '工作流执行失败。')
+      } else {
+        await sendImText(token, chatId, result.summary || `✅ 工作流「${wf.name}」执行完成。`)
+      }
+    } catch (error) {
+      streamer.flush()
+      const detail = error instanceof Error ? error.message : String(error)
+      await safeReply(token, chatId, `工作流执行失败：${detail}`)
+    } finally {
+      streamer.stop()
     }
   }
 

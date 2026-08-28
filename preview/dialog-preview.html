@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>Dialog Preview</title>
+  <link rel="stylesheet" href="../dist/assets/design-system-BOTnLkDg.css" />
+  <style>
+    body { font-family: ui-sans-serif, system-ui, sans-serif; padding: 24px; background: var(--bc-sunken); color: var(--bc-text); }
+  </style>
+</head>
+<body>
+  <h3>弹窗组件预览（静态）</h3>
+
+  <!-- Danger confirm -->
+  <div style="position:relative; height:300px; margin:20px 0; border:1px dashed var(--bc-border); border-radius:12px; overflow:hidden;">
+    <div class="absolute inset-0 flex items-center justify-center p-4" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:16px;">
+      <div style="position:absolute; inset:0; background:rgb(2 6 23 / .55); backdrop-filter:blur(2px);"></div>
+      <div role="dialog" aria-modal="true" style="position:relative; width:100%; max-width:300px; border-radius:12px; border:1px solid var(--bc-border); background:var(--bc-panel); box-shadow:var(--bc-shadow); padding:16px;">
+        <div style="display:flex; align-items:flex-start; gap:12px;">
+          <span style="margin-top:2px; display:flex; height:32px; width:32px; flex:none; align-items:center; justify-content:center; border-radius:9999px; background:var(--bc-err-surface); color:var(--bc-err);">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          </span>
+          <div style="min-width:0; flex:1;">
+            <h2 style="margin:0; font-size:14px; font-weight:600; line-height:1.4; color:var(--bc-text);">确认删除？</h2>
+            <p style="margin:6px 0 0; font-size:12.5px; line-height:1.6; color:var(--bc-muted);">删除该会话及其全部消息？此操作不可撤销。</p>
+          </div>
+        </div>
+        <div style="margin-top:16px; display:flex; justify-content:flex-end; gap:8px;">
+          <button style="height:32px; cursor:pointer; border-radius:8px; border:1px solid var(--bc-border); background:var(--bc-panel-2); padding:0 14px; font-size:13px; font-weight:500; color:var(--bc-muted);">取消</button>
+          <button style="height:32px; cursor:pointer; border-radius:8px; border:1px solid var(--bc-err); background:var(--bc-err); padding:0 14px; font-size:13px; font-weight:600; color:#fff;">删除</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toasts -->
+  <div style="display:flex; flex-direction:column; gap:10px; align-items:flex-start;">
+    <div class="ui-toast ui-toast-ok"><span class="ui-toast-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></span><span>已保存工作流</span></div>
+    <div class="ui-toast ui-toast-error"><span class="ui-toast-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></span><span>未找到匹配的元素</span></div>
+    <div class="ui-toast ui-toast-info"><span class="ui-toast-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span><span>验证通过：匹配 12 个元素</span></div>
+  </div>
+</body>
+</html>

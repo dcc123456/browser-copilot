@@ -6,6 +6,11 @@
 
 /** When a task runs. */
 export type Schedule =
+  /**
+   * No automatic run: the task exists only to be triggered by hand ("Run now"
+   * in the UI, or a Feishu command). It never gets an alarm.
+   */
+  | { kind: 'none' }
   | { kind: 'daily'; hour: number; minute: number }
   | { kind: 'weekdays'; hour: number; minute: number }
   /**
@@ -31,6 +36,10 @@ export type TaskKind =
    * as it does in the side panel, subject to the configured mode.
    */
   | 'agent-prompt'
+  /**
+   * Runs a stored workflow graph via the workflow engine.
+   */
+  | 'workflow'
 
 /** A configured task. */
 export interface ScheduledTask {
@@ -41,6 +50,8 @@ export interface ScheduledTask {
   kind: TaskKind
   /** Used when `kind === 'agent-prompt'`. */
   prompt?: string
+  /** Used when `kind === 'workflow'`: the stored workflow to execute. */
+  workflowId?: string
   /**
    * Per-task cap on model↔tool round trips for agent-prompt tasks. Scheduled
    * tasks run unattended in full-auto and can need more steps than an

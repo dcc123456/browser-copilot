@@ -1,0 +1,98 @@
+/*
+  Workflow editor — base styles.
+  ----------------------------------------------------------------------------
+  React Flow's own stylesheet is imported first (below). All editor chrome
+  lives in editor.css on top of the shared design tokens from
+  src/ui/design-system.css; this file only holds the React Flow surface
+  overrides and the JS-code highlighting editor (CodeInput).
+*/
+
+@import '@xyflow/react/dist/style.css';
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--bc-sunken);
+  color: var(--bc-text);
+}
+
+#root {
+  height: 100%;
+  width: 100%;
+}
+
+/* React Flow canvas follows the recessed surface. */
+.react-flow__background {
+  background: var(--we-bg-soft, var(--bc-sunken));
+}
+.react-flow__attribution {
+  background: transparent;
+  color: var(--bc-faint);
+}
+.react-flow__minimap {
+  background: var(--we-bg, var(--bc-panel)) !important;
+}
+
+/* --- Code input (textarea + highlighted overlay), theme-aware ------------- */
+.code-input {
+  position: relative;
+  min-height: 120px;
+  border: 1px solid var(--bc-border);
+  border-radius: 8px;
+  background: var(--bc-sunken);
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+.code-input:focus-within {
+  border-color: var(--bc-accent);
+}
+
+.code-input pre,
+.code-input textarea {
+  margin: 0;
+  padding: 10px 12px;
+  border: 0;
+  width: 100%;
+  min-height: 120px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, Menlo, monospace);
+  font-size: 13px;
+  line-height: 1.5;
+  tab-size: 2;
+  white-space: pre;
+  box-sizing: border-box;
+  overflow: auto;
+}
+
+.code-input pre {
+  position: absolute;
+  inset: 0;
+  color: var(--bc-text);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.code-input textarea {
+  position: relative;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--bc-accent);
+  resize: vertical;
+  z-index: 1;
+  outline: none;
+}
+
+.code-input textarea::placeholder {
+  color: var(--bc-faint);
+}
+
+/* Syntax tokens — muted editor colors that hold contrast in both themes. */
+.tok-keyword { color: #c479e8; }
+.tok-string  { color: #8fd679; }
+.tok-number  { color: #e0a06a; }
+.tok-comment { color: var(--bc-faint); font-style: italic; }
+.tok-name    { color: #79b8ff; }
+.tok-token   { color: #e5c07b; }

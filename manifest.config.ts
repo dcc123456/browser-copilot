@@ -1,5 +1,8 @@
 import { defineManifest } from '@crxjs/vite-plugin'
 
+/** Flat typing of the crxjs manifest parameter (used to include the MV3 `offscreen` key). */
+type ManifestParam = Parameters<typeof defineManifest>[0]
+
 /**
  * MV3 manifest.
  *
@@ -33,11 +36,11 @@ import { defineManifest } from '@crxjs/vite-plugin'
 export default defineManifest({
   manifest_version: 3,
   name: 'Browser Copilot',
-  version: '0.4.5',
+  version: '0.4.6',
   description:
     'A side-panel assistant that can read and act on the page you are looking at. Works with any OpenAI-compatible model.',
   minimum_chrome_version: '116',
-  permissions: ['storage', 'tabs', 'scripting', 'sidePanel', 'alarms'],
+  permissions: ['storage', 'tabs', 'scripting', 'sidePanel', 'alarms', 'offscreen', 'contextMenus', 'webNavigation', 'cookies', 'downloads', 'clipboardRead', 'debugger'],
   host_permissions: ['http://*/*', 'https://*/*'],
   icons: {
     16: 'icons/icon-16.png',
@@ -61,4 +64,9 @@ export default defineManifest({
   side_panel: {
     default_path: 'src/sidepanel/index.html',
   },
-})
+  offscreen: {
+    document_url: 'src/offscreen/index.html',
+    justification:
+      'Used by the clipboard workflow block to read/write the system clipboard without disturbing the active page.',
+  },
+} as unknown as ManifestParam)

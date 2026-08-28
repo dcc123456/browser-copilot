@@ -40,7 +40,7 @@ function asTask(value: unknown): ScheduledTask | null {
   const v = value as Partial<ScheduledTask>
   if (typeof v.id !== 'string' || typeof v.name !== 'string') return null
   const kind: TaskKind =
-    v.kind === 'github-review-requests' || v.kind === 'agent-prompt' ? v.kind : 'agent-prompt'
+    v.kind === 'workflow' ? 'workflow' : v.kind === 'github-review-requests' || v.kind === 'agent-prompt' ? v.kind : 'agent-prompt'
   return {
     id: v.id,
     name: v.name || 'Task',
@@ -48,6 +48,7 @@ function asTask(value: unknown): ScheduledTask | null {
     schedule: normalizeSchedule(v.schedule),
     kind,
     prompt: typeof v.prompt === 'string' ? v.prompt : undefined,
+    workflowId: typeof v.workflowId === 'string' ? v.workflowId : undefined,
     maxToolRounds: coerceMaxToolRounds(v.maxToolRounds),
     notifyFeishu: v.notifyFeishu === true,
     createdAt: typeof v.createdAt === 'number' ? v.createdAt : Date.now(),

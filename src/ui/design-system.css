@@ -1,0 +1,264 @@
+/*
+  ============================================================================
+  Browser Copilot — shared design system
+  ============================================================================
+  Single source of truth for BOTH extension surfaces:
+    - src/sidepanel/*      (the docked side panel)
+    - src/workflow-editor/* (the standalone workflow editor window)
+
+  Tailwind v4 is loaded here, and its theme maps onto the semantic variables
+  declared below. Hand-written component CSS also reads those variables, so a
+  theme is still one block of overrides and the two surfaces cannot drift.
+
+  Dark is the default (`prefers-color-scheme: light` overrides). The side
+  panel opens beside web pages where dark is the common developer setting;
+  `light` is reported when the user has no explicit preference either, but
+  honoring an explicit light choice matters more — see sidepanel/styles.css
+  for the longer rationale.
+*/
+
+@import 'tailwindcss';
+
+/* --- Tailwind theme bridge --------------------------------------------------
+   `inline` keeps the values as var() references at the utility site instead
+   of copying the hex into :root, so the light/dark switch works for free.
+   Usage: bg-panel text-muted border-border text-accent bg-accent-soft ... */
+@theme inline {
+  --color-bg: var(--bc-bg);
+  --color-panel: var(--bc-panel);
+  --color-panel-2: var(--bc-panel-2);
+  --color-sunken: var(--bc-sunken);
+  --color-border: var(--bc-border);
+  --color-border-strong: var(--bc-border-strong);
+  --color-ink: var(--bc-text);
+  --color-muted: var(--bc-muted);
+  --color-faint: var(--bc-faint);
+  --color-accent: var(--bc-accent);
+  --color-accent-strong: var(--bc-accent-strong);
+  --color-on-accent: var(--bc-on-accent);
+  --color-accent-soft: var(--bc-accent-soft);
+  --color-ok: var(--bc-ok);
+  --color-err: var(--bc-err);
+  --color-warn: var(--bc-warn);
+  --color-danger: var(--bc-danger);
+  --color-ok-surface: var(--bc-ok-surface);
+  --color-err-surface: var(--bc-err-surface);
+  --color-warn-surface: var(--bc-warn-surface);
+  --color-user-bubble: var(--bc-user-bubble);
+  --color-hover: var(--bc-hover);
+
+  /* Workflow-block category hues (icon accents; identical in both themes). */
+  --color-cat-general: var(--cat-general);
+  --color-cat-browser: var(--cat-browser);
+  --color-cat-interaction: var(--cat-interaction);
+  --color-cat-data: var(--cat-data);
+  --color-cat-conditions: var(--cat-conditions);
+  --color-cat-onlineServices: var(--cat-onlineServices);
+  --color-cat-package: var(--cat-package);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+/* --- Dark theme (default) --------------------------------------------------- */
+:root {
+  /* Surfaces: app background → raised panel → inset/recessed. */
+  --bc-bg: #0f1115;
+  --bc-panel: #161a21;
+  --bc-panel-2: #1e232c;
+  --bc-sunken: #0b0d11;
+  --bc-border: #2a303c;
+  --bc-border-strong: #3b4454;
+
+  /* Text. */
+  --bc-text: #e9ecf2;
+  --bc-muted: #9aa4b5;
+  --bc-faint: #687183;
+
+  /* Brand accent: one blue, used everywhere. */
+  --bc-accent: #6ea3ff;
+  --bc-accent-strong: #8bb6ff;
+  --bc-on-accent: #0b1020;
+  --bc-accent-soft: rgb(110 163 255 / 14%);
+  --bc-accent-border: rgb(110 163 255 / 42%);
+  --bc-hover: rgb(255 255 255 / 8%);
+
+  /* Semantic status colors. */
+  --bc-ok: #43c9a3;
+  --bc-err: #ff6f6f;
+  --bc-warn: #f2bb54;
+  --bc-danger: #f06262;
+  --bc-ok-surface: rgb(67 201 163 / 13%);
+  --bc-err-surface: rgb(255 111 111 / 13%);
+  --bc-warn-surface: rgb(242 187 84 / 13%);
+
+  /* Chat: the user's own bubble. */
+  --bc-user-bubble: #2b3a5f;
+
+  /* Elevation. */
+  --bc-shadow: 0 10px 28px rgb(0 0 0 / 52%);
+  --bc-shadow-sm: 0 2px 8px rgb(0 0 0 / 35%);
+
+  color-scheme: dark;
+}
+
+/* --- Light theme ------------------------------------------------------------ */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bc-bg: #ffffff;
+    --bc-panel: #f5f7fa;
+    --bc-panel-2: #ebedf3;
+    --bc-sunken: #fafbfd;
+    --bc-border: #dce2eb;
+    --bc-border-strong: #c2cbd9;
+
+    --bc-text: #18202c;
+    --bc-muted: #556072;
+    --bc-faint: #8b94a5;
+
+    /* Darkened for 4.5:1+ contrast on white AND on panel-2 (links sit in
+       assistant bubbles, which use panel-2). */
+    --bc-accent: #2860cf;
+    --bc-accent-strong: #2050b8;
+    --bc-on-accent: #ffffff;
+    --bc-accent-soft: rgb(40 96 207 / 10%);
+    --bc-accent-border: rgb(40 96 207 / 32%);
+    --bc-hover: rgb(15 23 42 / 6%);
+
+    --bc-ok: #0a865e;
+    --bc-err: #bc3232;
+    --bc-warn: #9a6500;
+    --bc-danger: #d84545;
+    --bc-ok-surface: rgb(10 134 94 / 11%);
+    --bc-err-surface: rgb(188 50 50 / 11%);
+    --bc-warn-surface: rgb(154 101 0 / 12%);
+
+    --bc-user-bubble: #d6e4ff;
+
+    /* Tighter & softer: a heavy black shadow reads as dirt on white. */
+    --bc-shadow: 0 8px 24px rgb(15 23 42 / 14%);
+    --bc-shadow-sm: 0 1px 4px rgb(15 23 42 / 10%);
+
+    color-scheme: light;
+  }
+}
+
+/* --- Workflow-block category hues ------------------------------------------
+   Vibrant icon accents, intentionally the SAME in both themes: the tinted
+   chip background (a 12-18% wash in the component CSS) provides theme
+   adaptation, while the icon stays saturated and recognizable. */
+:root {
+  --cat-general: #eab308;
+  --cat-browser: #f97316;
+  --cat-interaction: #22c55e;
+  --cat-data: #84cc16;
+  --cat-conditions: #3b82f6;
+  --cat-onlineServices: #ef4444;
+  --cat-package: #06b6d4;
+}
+
+/* --- Shared element polish --------------------------------------------------
+   Small, opt-in-feeling upgrades on native elements; the per-surface
+   stylesheets still own layout and most component styling. */
+::selection {
+  background: var(--bc-accent-soft);
+}
+
+:focus-visible {
+  outline: 2px solid var(--bc-accent);
+  outline-offset: 1px;
+}
+
+/* --- Dialog motion --------------------------------------------------------- */
+@keyframes dialog-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Confirm/alert dialog enters from the top. */
+@keyframes dialog-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* --- Shared toast (ui/ToastHost) ------------------------------------------- */
+.ui-toast-stack {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 32px);
+  pointer-events: none;
+}
+
+.ui-toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 9px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--bc-border);
+  background: var(--bc-panel-2);
+  color: var(--bc-text);
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: var(--bc-shadow);
+  animation: dialog-pop 0.18s ease-out;
+}
+
+.ui-toast-icon {
+  display: inline-flex;
+  flex: none;
+}
+
+.ui-toast-ok .ui-toast-icon {
+  color: var(--bc-ok);
+}
+.ui-toast-error .ui-toast-icon {
+  color: var(--bc-err);
+}
+.ui-toast-info .ui-toast-icon {
+  color: var(--bc-accent);
+}
+
+@keyframes dialog-pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
