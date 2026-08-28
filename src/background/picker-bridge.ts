@@ -16,6 +16,7 @@
 
 import { startPicker } from '../inpage/element-picker'
 import { isInjectablePage } from '../lib/pages'
+import { resolveAutomationTab } from './driver'
 
 export interface PickerStartMessage {
   type: 'picker:start'
@@ -43,18 +44,48 @@ async function injectPicker(args: {
   selector?: string
   multiple?: boolean
 }): Promise<{ ok: boolean; error?: string }> {
-  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
-  if (!tab || typeof tab.id !== 'number') {
-    return { ok: false, error: 'No active tab to pick an element from.' }
+  // Resolve the tab the user is actually automating, not the focused window's
+  // active tab. The picker is launched from the standalone editor — a
+  // chrome-extension:// popup — where `{active:true,lastFocusedWindow:true}`
+  // returns the editor tab itself, which cannot be injected. resolveAutomationTab
+  // skips extension pages and, when needed, falls back to the last viewed page.
+  const tab = await resolveAutomationTab().catch(() => undefined)
+  if (!tab || typeof tab.id !== 'number' || !isInjectablePage(tab.url)) {
+    return {
+      ok: false,
+      error:
+        '没有可拾取元素的网页：请先在普通 http(s) 网页标签页上使用拾取（不能在扩展弹窗 / chrome:// 页面上拾取）。',
+    }
   }
-  if (!isInjectablePage(tab.url)) {
-    return { ok: false, error: 'Elements can only be picked on ordinary http(s) pages.' }
+
+  // Bring the target page to the foreground BEFORE injecting: the picker UI is
+  // injected into that tab, but the click came from the standalone editor popup
+  // (a separate window). Without focusing the page the picker card opens on a
+  // background window the user never sees — the editor just looks stuck. This
+  // mirrors Automa, which switches you to the automating tab to pick.
+  try {
+    if (typeof tab.windowId === 'number') {
+      await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {})
+    }
+    await chrome.tabs.update(tab.id, { active: true }).catch(() => {})
+  } catch {
+    /* focusing is best-effort; injection still proceeds */
   }
-  await chrome.scripting.executeScript({
-    target: { tabId: tab.id, allFrames: true },
-    func: startPicker as unknown as (...args: unknown[]) => void,
-    args: [args],
-  })
+
+  try {
+    // Top frame only: the picker card + overlay live in the main document.
+    // Injecting every frame risks the whole call rejecting if any cross-origin
+    // (e.g. about:blank / restricted) iframe throws, which would also strand the
+    // editor's spinner.
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: false },
+      func: startPicker as unknown as (...args: unknown[]) => void,
+      args: [args],
+    })
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    return { ok: false, error: `无法在该页面启动元素拾取：${msg}` }
+  }
   return { ok: true }
 }
 

@@ -10,6 +10,7 @@ import SettingsTab from './SettingsTab'
 import SkillsTab from './SkillsTab'
 import TasksTab from './TasksTab'
 import WorkflowsTab from './WorkflowsTab'
+import { ConfirmHost } from '../ui/confirm'
 
 type TabId = 'chat' | 'skills' | 'tasks' | 'workflows' | 'history' | 'data' | 'settings'
 
@@ -195,6 +196,8 @@ export default function App() {
       <div style={{ display: active === 'settings' ? 'contents' : 'none' }}>
         <SettingsTab onLocaleChange={setLocaleSetting} />
       </div>
+      {/* Shared custom confirm/alert dialog host (replaces window.confirm). */}
+      <ConfirmHost />
     </I18nProvider>
   )
 }

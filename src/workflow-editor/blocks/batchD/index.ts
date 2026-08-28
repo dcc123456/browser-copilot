@@ -18,6 +18,7 @@ import EditExportData from './EditExportData'
 import EditWorkflowState from './EditWorkflowState'
 import EditParameterPrompt from './EditParameterPrompt'
 import EditTrigger from './EditTrigger'
+import EditAiAgent from './EditAiAgent'
 
 export const BatchDForms: Record<string, ComponentType<EditFormProps>> = {
   EditTrigger,
@@ -26,4 +27,6 @@ export const BatchDForms: Record<string, ComponentType<EditFormProps>> = {
   EditNotification,
   EditWorkflowState,
   EditParameterPrompt,
+  // Browser-Copilot extension block (not from Automa's catalog).
+  EditAiAgent,
 }

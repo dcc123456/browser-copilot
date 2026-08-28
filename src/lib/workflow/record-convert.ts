@@ -59,9 +59,30 @@ export function flowsToWorkflow(
   // be resolved and no connection line is drawn.
   let prevNodeId = triggerId
   let prevBlockId = 'trigger'
+  /** Signature of the previous emitted node, used to drop duplicates. */
+  let prevSignature = ''
+
+  // A single fill of a field can arrive more than once (debounced input + Enter
+  // + blur flush + the trailing change event all describe the same field/value).
+  // Collapse consecutive `forms` blocks that target the same field with the
+  // same value so the workflow never contains a duplicated fill step.
+  const signatureOf = (data: RecordedFlow['data']): string => {
+    if (data.blockId === 'forms' && (data.type === 'text-field' || data.type === undefined)) {
+      return `forms:${String(data.selector ?? data.cssSelector ?? '')}:${String(data.value ?? '')}`
+    }
+    return ''
+  }
+
   flows.forEach((flow, i) => {
     const id = flow.id || newId()
     const blockId = flow.data.blockId
+    const signature = signatureOf(flow.data)
+    if (signature && signature === prevSignature) {
+      // Duplicate of the node we just emitted — skip the node but keep the
+      // chain (the previous node remains the predecessor for the next one).
+      return
+    }
+    prevSignature = signature
     nodes.push({
       id,
       label: blockId,

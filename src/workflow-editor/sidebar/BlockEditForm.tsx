@@ -11,11 +11,10 @@
  * @module workflow-editor/sidebar/BlockEditForm
  */
 
-import { BlockIcon } from '../../lib/workflow/blocks/icons'
 import { isCloudBlock } from '../../lib/workflow/blocks/cloud-blocks'
+import { isCustomBlock } from '../../lib/workflow/blocks/custom'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
 import { EditForms } from '../blocks/EditForms'
-import BlockSettings from '../blocks/shared/BlockSettings'
 import type { TranslateFn } from '../i18n'
 import { useEditorLocale } from '../locale-context'
 
@@ -108,20 +107,19 @@ export default function BlockEditForm({
         <button type="button" onClick={onBack} title={t('back')} className="wf-icon-btn">
           <i className="ri-arrow-left-line" />
         </button>
-        <span className="wf-edit-chip" style={{ backgroundColor: `var(--cat-${block.category})` }}>
-          <BlockIcon icon={block.icon} size={16} />
-        </span>
         <p className="wf-edit-title">{nodeName || blockName(block.id, block.name)}</p>
         <span className="wf-edit-spacer" />
-        <a
-          href={`https://docs.extension.automa.site/blocks/${block.id}.html`}
-          target="_blank"
-          rel="noreferrer"
-          title="Docs"
-          className="wf-icon-btn"
-        >
-          <i className="ri-information-line" />
-        </a>
+        {!isCustomBlock(block.id) && (
+          <a
+            href={`https://docs.extension.automa.site/blocks/${block.id}.html`}
+            target="_blank"
+            rel="noreferrer"
+            title="Docs"
+            className="wf-icon-btn"
+          >
+            <i className="ri-information-line" />
+          </a>
+        )}
       </div>
 
       {cloud ? (
@@ -132,15 +130,9 @@ export default function BlockEditForm({
       ) : block.disableEdit ? (
         <p className="wf-form-note">This block has no editable settings.</p>
       ) : EditComponent ? (
-        <>
-          <EditComponent data={data} onChange={onChange} blockId={block.id} />
-          <BlockSettings data={data} onChange={onChange} blockId={block.id} />
-        </>
+        <EditComponent data={data} onChange={onChange} blockId={block.id} />
       ) : (
-        <>
-          <GenericForm data={data} onChange={onChange} />
-          <BlockSettings data={data} onChange={onChange} blockId={block.id} />
-        </>
+        <GenericForm data={data} onChange={onChange} />
       )}
     </div>
   )

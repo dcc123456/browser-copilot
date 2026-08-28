@@ -1091,3 +1091,311 @@ export function runOp(op: Op): OpResult {
     return { ...base(), error: `In-page failure: ${message}` }
   }
 }
+
+/**
+ * Evaluate user JavaScript in the page's MAIN world.
+ *
+ * This is injected via `chrome.scripting.executeScript({ world: 'MAIN' })`, so
+ * it runs as an ordinary page script — with the page's real `window`/globals
+ * (React DevTools hooks, jQuery, SDKs, etc.), which is what users writing
+ * "JavaScript code" expect. Injecting the static wrapper itself is
+ * extension-trusted and CSP-exempt; compiling the user's source inside it is
+ * the one thing the page's CSP governs, so `new Function` here is governed by
+ * the page (like DevTools console). On pages whose CSP forbids `unsafe-eval`
+ * it throws and the driver reports a clear message.
+ *
+ * Must be self-contained (serialized source only, no closure) like `runOp`.
+ *
+ * Returns a JSON-structured-clone-safe value; never throws.
+ */
+export function runExecJs(input: {
+  code: string
+  argNames?: string[]
+  args?: Record<string, unknown>
+}): { ok: true; data?: unknown } | { ok: false; error: string } {
+  try {
+    const code = String(input.code ?? '')
+    const args = input.args && typeof input.args === 'object' ? input.args : {}
+    const argNames =
+      Array.isArray(input.argNames) && input.argNames.length > 0
+        ? input.argNames
+        : Object.keys(args)
+    const argValues = argNames.map((name) => args[name])
+
+    // Clone the result into structured-clone-safe values: host objects (DOM
+    // nodes, functions) cannot cross back to the worker.
+    const cloneable = (value: unknown): unknown => {
+      if (value === null || value === undefined) return value
+      const t = typeof value
+      if (t === 'string' || t === 'number' || t === 'boolean') return value
+      if (t === 'function') return `[function ${(value as { name?: string }).name || 'anonymous'}]`
+      if (Array.isArray(value)) return value.map(cloneable)
+      if (t === 'object') {
+        if (typeof (value as { nodeType?: unknown }).nodeType === 'number') {
+          const el = value as Element
+          return `[${el.nodeName?.toLowerCase?.() ?? 'node'}${el.id ? `#${el.id}` : ''}]`
+        }
+        const out: Record<string, unknown> = {}
+        for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+          try {
+            out[k] = cloneable(v)
+          } catch {
+            out[k] = `[unserializable ${typeof v}]`
+          }
+        }
+        return out
+      }
+      return String(value)
+    }
+
+    // Prefer expression evaluation for expression-like sources (`1 + 2`,
+    // `document.title`); run statement-bearing sources as a function body so
+    // `return ...` works. Statement-only bodies (no return) yield undefined.
+    const looksLikeStatements =
+      /\b(return|const|let|var|if|for|while|function|await|switch|try|throw|=>)\b/.test(code)
+
+    let result: unknown
+    if (!looksLikeStatements) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+        const expr = new Function(...argNames, `"use strict"; return (${code});`)
+        result = expr(...argValues)
+      } catch {
+        result = undefined
+      }
+    }
+    if (result === undefined && (looksLikeStatements || code.trim() !== '')) {
+      // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+      const body = new Function(...argNames, `"use strict";\n${code}`)
+      result = body(...argValues)
+    }
+    return { ok: true, data: cloneable(result) }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/**
+ * Run a workflow "JavaScript code" block in the page's MAIN world.
+ *
+ * This is the Automa-equivalent harness for `javascript-code`. Compared with
+ * {@link runExecJs} (a one-shot expression/body eval), it:
+ *   - is ASYNC: `await` and Promise-returning user code are supported;
+ *   - exposes Automa-style helper functions (`automaNextBlock`,
+ *     `automaSetVariable`, `automaRefData`, `automaResetTimeout`);
+ *   - captures `console.log/info/warn/error` output so the run log shows it;
+ *   - enforces a timeout (re-armed via `automaResetTimeout()`).
+ *
+ * Like {@link runExecJs} it must be self-contained (serialized source only).
+ *
+ * Returns a structured payload — never throws:
+ *   { ok, data, variables, logs: [{level, args}], error? }
+ */
+export function runWorkflowJs(input: {
+  code: string
+  variables?: Record<string, unknown>
+  timeout?: number
+}): Promise<{
+  ok: true
+  data?: unknown
+  variables?: Record<string, unknown>
+  logs: { level: string; message: string }[]
+} | { ok: false; error: string; logs: { level: string; message: string }[] }> {
+  return new Promise((resolvePromise) => {
+    const logs: { level: string; message: string }[] = []
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    // Clone values crossing back to the worker (strip DOM nodes / functions).
+    const cloneable = (value: unknown): unknown => {
+      if (value === null || value === undefined) return value
+      const t = typeof value
+      if (t === 'string' || t === 'number' || t === 'boolean') return value
+      if (t === 'function') return `[function ${(value as { name?: string }).name || 'anonymous'}]`
+      if (Array.isArray(value)) return value.map(cloneable)
+      if (t === 'object') {
+        if (typeof (value as { nodeType?: unknown }).nodeType === 'number') {
+          const el = value as Element
+          return `[${el.nodeName?.toLowerCase?.() ?? 'node'}${el.id ? `#${el.id}` : ''}]`
+        }
+        const out: Record<string, unknown> = {}
+        for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+          try {
+            out[k] = cloneable(v)
+          } catch {
+            out[k] = `[unserializable ${typeof v}]`
+          }
+        }
+        return out
+      }
+      return String(value)
+    }
+
+    const finish = (payload: { ok: true; data?: unknown; variables?: Record<string, unknown> } | { ok: false; error: string }) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      try {
+        if (payload.ok) {
+          resolvePromise({
+            ok: true,
+            data: cloneable(payload.data),
+            variables: payload.variables ? (cloneable(payload.variables) as Record<string, unknown>) : undefined,
+            logs,
+          })
+        } else {
+          resolvePromise({ ok: false, error: payload.error, logs })
+        }
+      } catch {
+        resolvePromise({ ok: false, error: 'Could not serialize result', logs })
+      }
+    }
+
+    try {
+      const code = String(input.code ?? '')
+      // A working copy the helpers mutate; flushed back on completion.
+      const variables: Record<string, unknown> = { ...(input.variables ?? {}) }
+      const timeoutMs = Math.max(0, Number(input.timeout ?? 20000) || 0)
+
+      // Capture console output for the duration of the block.
+      const consoleLevels = ['log', 'info', 'warn', 'error', 'debug'] as const
+      const originals: Record<string, (...a: unknown[]) => void> = {}
+      const stringify = (args: unknown[]): string =>
+        args
+          .map((a) => {
+            if (typeof a === 'string') return a
+            try {
+              return JSON.stringify(a)
+            } catch {
+              return String(a)
+            }
+          })
+          .join(' ')
+      for (const level of consoleLevels) {
+        const orig = console[level]?.bind(console)
+        originals[level] = orig ?? (() => {})
+        console[level] = (...args: unknown[]) => {
+          logs.push({ level: level === 'debug' ? 'log' : level, message: stringify(args) })
+          try {
+            orig?.(...args)
+          } catch {
+            /* original may be unavailable in isolated contexts */
+          }
+        }
+      }
+      const restoreConsole = () => {
+        for (const level of consoleLevels) {
+          try {
+            ;(console as unknown as Record<string, unknown>)[level] = originals[level]
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+
+      // --- Automa-style helpers ---------------------------------------------
+      let nextData: unknown = undefined
+      let nextCalled = false
+      let returned = false
+
+      const armTimeout = () => {
+        if (timer) clearTimeout(timer)
+        if (timeoutMs > 0) {
+          timer = setTimeout(() => {
+            restoreConsole()
+            finish({ ok: false, error: `JavaScript 代码超时（${timeoutMs}ms）` })
+          }, timeoutMs)
+        }
+      }
+
+      const helpers = {
+        automaNextBlock(data?: unknown) {
+          nextCalled = true
+          nextData = data === undefined ? undefined : data
+        },
+        automaSetVariable(name: string, value: unknown) {
+          variables[String(name)] = value
+        },
+        automaRefData(keyword: string, path = '') {
+          const root: Record<string, unknown> = {
+            variables,
+            table: variables['dataTable'] ?? [],
+            loopData: { loopIndex: variables['loopIndex'], loopItem: variables['loopItem'] },
+            prevBlockData: variables['lastResult'],
+            globalData: variables['globalData'] ?? {},
+            workflow: {},
+          }
+          let value: unknown = root[keyword as string]
+          if (!path) return value
+          for (const seg of String(path).split('.').filter(Boolean)) {
+            if (value && typeof value === 'object') value = (value as Record<string, unknown>)[seg]
+            else {
+              value = undefined
+              break
+            }
+          }
+          return value
+        },
+        automaResetTimeout() {
+          armTimeout()
+        },
+      }
+
+      armTimeout()
+
+      // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+      const fn = new Function(
+        'automaNextBlock',
+        'automaSetVariable',
+        'automaRefData',
+        'automaResetTimeout',
+        'variables',
+        `"use strict";\n${code}`,
+      ) as (
+        a: typeof helpers.automaNextBlock,
+        b: typeof helpers.automaSetVariable,
+        c: typeof helpers.automaRefData,
+        d: typeof helpers.automaResetTimeout,
+        v: Record<string, unknown>,
+      ) => unknown
+
+      let ret: unknown
+      try {
+        ret = fn(
+          helpers.automaNextBlock,
+          helpers.automaSetVariable,
+          helpers.automaRefData,
+          helpers.automaResetTimeout,
+          variables,
+        )
+      } catch (error) {
+        restoreConsole()
+        finish({ ok: false, error: error instanceof Error ? error.message : String(error) })
+        return
+      }
+      returned = true
+
+      const settleWith = (data: unknown) => {
+        restoreConsole()
+        finish({ ok: true, data, variables })
+      }
+
+      Promise.resolve(ret)
+        .then((awaited) => {
+          if (settled) return
+          // automaNextBlock(...) wins if it was called; otherwise use the
+          // returned/awaited value.
+          const data = nextCalled ? nextData : returned ? awaited : undefined
+          settleWith(data)
+        })
+        .catch((error) => {
+          if (settled) return
+          restoreConsole()
+          finish({ ok: false, error: error instanceof Error ? error.message : String(error) })
+        })
+    } catch (error) {
+      finish({ ok: false, error: error instanceof Error ? error.message : String(error) })
+    }
+  })
+}
+

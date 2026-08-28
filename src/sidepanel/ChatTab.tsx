@@ -25,6 +25,7 @@ import {
 import { DEFAULT_CONVERSATION_ID, newId, workflowFromHistory } from '../lib/storage'
 import type { Workflow } from '../lib/workflow/types'
 import type { AgentMode, ConversationMeta } from '../lib/types'
+import { confirmDialog } from '../ui/confirm'
 import {
   applySlashPick,
   filterSkills,
@@ -511,7 +512,16 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   }, [])
 
   const changeMode = async (next: AgentMode): Promise<void> => {
-    if (next === 'full' && !window.confirm(t.modeFullWarning)) {
+    if (
+      next === 'full' &&
+      !(await confirmDialog({
+        title: t.dialogWarningTitle,
+        message: t.modeFullWarning,
+        confirmText: t.dialogConfirm,
+        cancelText: t.cancel,
+        danger: true,
+      }))
+    ) {
       return
     }
     setMode(next)
@@ -590,7 +600,14 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
 
   const deleteConversationById = async (id: string): Promise<void> => {
     if (busy) return
-    if (!window.confirm(t.convDeleteConfirm)) return
+    const ok = await confirmDialog({
+      title: t.dialogDeleteTitle,
+      message: t.convDeleteConfirm,
+      confirmText: t.delete,
+      cancelText: t.cancel,
+      danger: true,
+    })
+    if (!ok) return
     try {
       await sendCommand({ type: 'conversations.delete', id })
     } catch {

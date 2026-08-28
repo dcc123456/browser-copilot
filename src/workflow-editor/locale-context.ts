@@ -7,14 +7,19 @@
  */
 
 import { createContext, useContext } from 'react'
-import type { TranslateFn } from './i18n'
+import { makeBlockTranslate, type TranslateFn } from './i18n'
 import { blockDisplayName, categoryDisplayName } from './block-i18n'
 
 export interface EditorLocale {
   /** 'en' or 'zh'. */
   locale: 'en' | 'zh'
-  /** UI string translator. */
+  /** UI chrome string translator. */
   t: TranslateFn
+  /**
+   * Block edit-form translator: pass the English source string, get the
+   * localized rendering (falls back to the English source).
+   */
+  bt: (english: string) => string
   /** Localized block display name (falls back to English). */
   blockName: (blockId: string | undefined, englishName: string) => string
   /** Localized palette category name (falls back to English). */
@@ -24,6 +29,7 @@ export interface EditorLocale {
 const EN: EditorLocale = {
   locale: 'en',
   t: (k) => k,
+  bt: (english) => english,
   blockName: (_id, english) => english,
   categoryName: (_id, english) => english,
 }
@@ -36,9 +42,11 @@ export function useEditorLocale(): EditorLocale {
 
 /** Build the context value for a resolved editor locale + translate fn. */
 export function makeEditorLocale(locale: 'en' | 'zh', t: TranslateFn): EditorLocale {
+  const bt = makeBlockTranslate(locale)
   return {
     locale,
     t,
+    bt,
     blockName: (id, english) => blockDisplayName(id, english, locale),
     categoryName: (id, english) => categoryDisplayName(id, english, locale),
   }

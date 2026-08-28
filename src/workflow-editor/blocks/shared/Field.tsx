@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEditorLocale } from '../../locale-context'
 
 /** Merge a partial patch into the block data (Automa's updateData). */
 export type Patch = (patch: Record<string, unknown>) => void
@@ -23,9 +24,10 @@ export function Field({
   title?: string
   children: ReactNode
 }) {
+  const { bt } = useEditorLocale()
   return (
-    <div className="wf-field" title={title}>
-      {label && <label>{label}</label>}
+    <div className="wf-field" title={title ? bt(title) : undefined}>
+      {label && <label>{bt(label)}</label>}
       {children}
     </div>
   )
@@ -45,11 +47,12 @@ export function TextInput({
   /** Id of a <datalist> for suggestions. */
   list?: string
 }) {
+  const { bt } = useEditorLocale()
   return (
     <input
       type={type}
       value={value ?? ''}
-      placeholder={placeholder}
+      placeholder={placeholder ? bt(placeholder) : placeholder}
       list={list}
       onChange={(e) => onChange(e.target.value)}
     />
@@ -72,6 +75,7 @@ export function TextArea({
   mono?: boolean
   className?: string
 }) {
+  const { bt } = useEditorLocale()
   const ref = useRef<HTMLTextAreaElement>(null)
   useEffect(() => {
     const el = ref.current
@@ -84,7 +88,7 @@ export function TextArea({
       ref={ref}
       rows={rows}
       value={value ?? ''}
-      placeholder={placeholder}
+      placeholder={placeholder ? bt(placeholder) : placeholder}
       className={`${mono ? 'wf-mono' : ''} ${className ?? ''}`}
       onChange={(e) => onChange(e.target.value)}
     />
@@ -100,18 +104,26 @@ export function Select({
   onChange: (v: string) => void
   options: { value: string; label: string }[] | string[]
 }) {
+  const { bt } = useEditorLocale()
   return (
     <select value={value ?? ''} onChange={(e) => onChange(e.target.value)}>
       {options.map((o) => {
         const opt = typeof o === 'string' ? { value: o, label: o } : o
         return (
           <option key={opt.value} value={opt.value}>
-            {opt.label}
+            {bt(opt.label)}
           </option>
         )
       })}
     </select>
   )
+}
+
+/** Localize a checkbox/switch label when it is a plain string; JSX passes through. */
+function LocalizedLabel({ label }: { label: ReactNode }) {
+  const { bt } = useEditorLocale()
+  if (typeof label !== 'string') return <>{label}</>
+  return <>{bt(label)}</>
 }
 
 export function Checkbox({
@@ -122,13 +134,19 @@ export function Checkbox({
 }: {
   checked: boolean
   onChange: (v: boolean) => void
-  label: ReactNode
+  /** Optional: omit to render the bare control (label lives elsewhere). */
+  label?: ReactNode
   title?: string
 }) {
+  const { bt } = useEditorLocale()
   return (
-    <label className="wf-field wf-field-check" title={title}>
+    <label className="wf-field wf-field-check" title={title ? bt(title) : undefined}>
       <input type="checkbox" checked={!!checked} onChange={(e) => onChange(e.target.checked)} />
-      <span>{label}</span>
+      {label != null && (
+        <span>
+          <LocalizedLabel label={label} />
+        </span>
+      )}
     </label>
   )
 }
@@ -140,12 +158,17 @@ export function Switch({
 }: {
   checked: boolean
   onChange: (v: boolean) => void
-  label: ReactNode
+  /** Optional: omit to render the bare track (Automa's inline-flex switch). */
+  label?: ReactNode
 }) {
   return (
     <label className="wf-field wf-field-check">
       <input type="checkbox" className="wf-switch" checked={!!checked} onChange={(e) => onChange(e.target.checked)} />
-      <span>{label}</span>
+      {label != null && (
+        <span>
+          <LocalizedLabel label={label} />
+        </span>
+      )}
     </label>
   )
 }
@@ -160,15 +183,16 @@ export function Expand({
   children: ReactNode
   defaultOpen?: boolean
 }) {
+  const { bt } = useEditorLocale()
   const [open, setOpen] = useState(defaultOpen)
   return (
     <div className="wf-expand">
       <button type="button" className="wf-expand-header" onClick={() => setOpen(!open)}>
         <i
           className="ri-arrow-left-s-line"
-          style={{ transform: `rotate(${open ? 90 : 0}deg)`, transition: 'transform .15s' }}
+          style={{ transform: `rotate(${open ? 90 : -90}deg)`, transition: 'transform .2s' }}
         />
-        <span>{title}</span>
+        <span>{typeof title === 'string' ? bt(title) : title}</span>
       </button>
       {open && <div className="wf-expand-body">{children}</div>}
     </div>
@@ -187,8 +211,9 @@ export function IconButton({
   disabled?: boolean
   onClick?: () => void
 }) {
+  const { bt } = useEditorLocale()
   return (
-    <button type="button" className="wf-icon-btn" title={title} disabled={disabled} onClick={onClick}>
+    <button type="button" className="wf-icon-btn" title={bt(title)} disabled={disabled} onClick={onClick}>
       <i className={icon} />
     </button>
   )

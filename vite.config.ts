@@ -5,11 +5,12 @@
 import { defineConfig } from 'vitest/config'
 import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 import { crx } from '@crxjs/vite-plugin'
 import manifest from './manifest.config'
 
 export default defineConfig({
-  plugins: [react(), crx({ manifest })],
+  plugins: [react(), tailwindcss(), crx({ manifest })],
   build: {
     target: 'chrome116',
     // Extension pages are loaded from disk; readable output helps debugging.

@@ -1,107 +1,55 @@
 /*
   Theming follows the operating system.
   ------------------------------------------------------------------------------
-  Every colour in this file is a variable declared here, so a theme is one block
-  of overrides rather than a rule-by-rule audit. The dark values are the default
-  and the light ones arrive through `prefers-color-scheme: light`.
-
-  Dark is the default deliberately: `prefers-color-scheme` resolves to `light`
-  when a browser reports no preference, and this panel opens beside pages in a
-  developer-facing tool where dark is the common setting. Defaulting to dark
-  means the no-preference case matches what most users of this extension expect,
-  and an explicit `light` preference is still honoured.
-
-  There is no in-panel theme switch. Chrome exposes no API for an extension to
-  read "the browser's theme", only the OS-level media query, so a manual toggle
-  would be a second source of truth that could disagree with the surrounding
-  browser UI. Following the system keeps the panel consistent with the window it
-  is docked to.
-
-  `color-scheme` is set alongside the variables so the browser themes what CSS
-  cannot reach: scrollbars, form-control internals, and the default focus ring.
+  Colour values live ONCE in src/ui/design-system.css (shared with the workflow
+  editor). The variables below are aliases onto that shared system, so the side
+  panel and the editor stay identical in hue without this file duplicating a
+  hex. The side panel uses its own short names (--bg, --panel, …) throughout;
+  they are defined here as references and still switch with the media query in
+  design-system.css, because they resolve to vars that change there.
 */
 :root {
-  --bg: #14161a;
-  --panel: #1c1f26;
-  --panel-2: #23272f;
-  --border: #333844;
-  --text: #e6e8ec;
-  --muted: #9aa3b2;
-  --accent: #5b8cff;
-  --ok: #4ec9a6;
-  --err: #ff6b6b;
-  --warn: #f0b849;
+  --bg: var(--bc-bg);
+  --panel: var(--bc-panel);
+  --panel-2: var(--bc-panel-2);
+  --border: var(--bc-border);
+  --text: var(--bc-text);
+  --muted: var(--bc-muted);
+  --accent: var(--bc-accent);
+  --ok: var(--bc-ok);
+  --err: var(--bc-err);
+  --warn: var(--bc-warn);
   /* Strong "danger" fill for destructive/full-auto states; needs white ink. */
-  --danger: #c44;
+  --danger: var(--bc-danger);
   --on-danger: #ffffff;
 
-  /* Text placed on an --accent fill. Dark ink reads better on the blue than
-     white does at these small sizes. */
-  --on-accent: #0d1117;
-  /* The user's own message bubble: a tinted panel, distinct from the assistant's
-     neutral one without shouting. */
-  --user-bubble: #2b3550;
-  /* Tinted surfaces for the three states that need a background, not just text. */
-  --err-surface: #3a2226;
-  --ok-surface: #1d3330;
-  --warn-surface: #2a2418;
+  /* Text placed on an --accent fill. */
+  --on-accent: var(--bc-on-accent);
+  /* The user's own message bubble. */
+  --user-bubble: var(--bc-user-bubble);
+  /* Tinted surfaces for status backgrounds. */
+  --err-surface: var(--bc-err-surface);
+  --ok-surface: var(--bc-ok-surface);
+  --warn-surface: var(--bc-warn-surface);
   /* Neutral chip fill for tool-call markers. */
-  --chip: #2a2f3a;
-  /* Recessed surfaces: code blocks and quoted argument previews sit *below* the
-     panel, so in dark mode this is darker than --panel and in light mode it is
-     lighter — hence a variable rather than reusing --bg. */
-  --sunken: #14161a;
+  --chip: var(--bc-panel-2);
+  /* Recessed surfaces (code blocks, argument previews). */
+  --sunken: var(--bc-sunken);
   /* Accent washes for the active-skill chip. */
-  --accent-soft: rgb(91 140 255 / 20%);
-  --accent-soft-border: rgb(91 140 255 / 55%);
-  /* Hover wash on a transparent control; light mode needs black, not white. */
-  --hover-wash: rgb(255 255 255 / 12%);
+  --accent-soft: var(--bc-accent-soft);
+  --accent-soft-border: var(--bc-accent-border);
+  /* Hover wash on a transparent control. */
+  --hover-wash: var(--bc-hover);
   /* Menus float above content and need a shadow that reads on the backdrop. */
-  --menu-shadow: 0 8px 24px rgb(0 0 0 / 45%);
-  /* Backdrop behind the history drawer; darker than a menu shadow. */
+  --menu-shadow: var(--bc-shadow);
+  /* Backdrop behind the history drawer. */
   --backdrop: rgb(0 0 0 / 55%);
-
-  color-scheme: dark;
 }
 
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #ffffff;
-    --panel: #f4f6f9;
-    --panel-2: #eaeef3;
-    --border: #d3d9e2;
-    /* Not pure black: #1b1f27 on white is easier to read for long replies. */
-    --text: #1b1f27;
-    /* Darkened from the dark-theme muted so it still passes contrast on white. */
-    --muted: #5c6675;
-    /* Darkened accent: the dark theme's #5b8cff fails contrast on white. This
-       value is chosen to clear 4.5:1 against --panel-2 as well as --bg, because
-       links appear inside assistant bubbles, which use --panel-2. */
-    --accent: #1a5fd0;
-    --ok: #0f7b5f;
-    --err: #c62f2f;
-    --warn: #9a6300;
-    --danger: #c44;
-    --on-danger: #ffffff;
-
-    /* White ink on the darker light-mode accent. */
-    --on-accent: #ffffff;
-    --user-bubble: #dbe6ff;
-    --err-surface: #fdecec;
-    --ok-surface: #e6f6f0;
-    --warn-surface: #fdf3dc;
-    --chip: #e4e9f0;
-    /* Lighter than --panel here: recessed still means "set back", which on a
-       light background reads as less grey rather than darker. */
-    --sunken: #fbfcfe;
-    --accent-soft: rgb(47 111 235 / 12%);
-    --accent-soft-border: rgb(47 111 235 / 40%);
-    --hover-wash: rgb(0 0 0 / 8%);
-    /* Softer and tighter: a heavy shadow looks like dirt on a white panel. */
-    --menu-shadow: 0 6px 18px rgb(15 23 42 / 12%);
+    /* Softer backdrop and shadow on white come from the shared tokens. */
     --backdrop: rgb(15 23 42 / 35%);
-
-    color-scheme: light;
   }
 }
 
@@ -127,7 +75,7 @@ body {
 .tabs {
   display: flex;
   gap: 2px;
-  padding: 8px 8px 0;
+  padding: 10px 10px 0;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
   position: relative;
@@ -135,23 +83,31 @@ body {
 
 .tab {
   flex: 1;
-  padding: 8px 10px;
+  padding: 10px 8px 11px;
   border: none;
-  border-radius: 6px 6px 0 0;
+  border-radius: 9px 9px 0 0;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
   font: inherit;
   font-weight: 600;
+  font-size: 12.5px;
+  letter-spacing: 0.01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.tab:hover {
+  color: var(--text);
+  background: var(--hover-wash);
 }
 
 .tab[data-active='true'] {
   background: var(--bg);
-  color: var(--text);
-  box-shadow: inset 0 -2px 0 var(--accent);
+  color: var(--accent);
+  box-shadow: inset 0 2px 0 var(--accent);
 }
 
 /* "More" tab dropdown for overflow */
@@ -210,14 +166,14 @@ body {
 .pane {
   flex: 1;
   overflow-y: auto;
-  padding: 12px;
+  padding: 16px 14px;
 }
 
 .pane > h2 {
-  margin: 0 0 12px;
-  font-size: 18px;
+  margin: 0 0 14px;
+  font-size: 19px;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
 }
 
 /* Conversation history drawer */
@@ -343,15 +299,20 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 12px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
 }
 .chat-toolbar .icon-btn {
   width: auto;
   gap: 6px;
-  padding: 4px 8px;
+  padding: 5px 10px;
   font-size: 12px;
+  border: 1px solid transparent;
+}
+.chat-toolbar .icon-btn:hover {
+  border-color: var(--border);
+  background: var(--hover-wash);
 }
 .icon-btn-label {
   font-size: 12px;
@@ -620,12 +581,13 @@ body {
 .chat-log {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  padding: 16px 14px;
 }
 
 .msg {
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: 9px 12px;
+  border-radius: 12px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   /* Apply CJK kinsoku: closing punctuation (？。！，）】」etc.) must not be
@@ -645,11 +607,13 @@ body {
 */
 .msg[data-role='assistant'] {
   background: var(--panel-2);
+  border: 1px solid var(--border);
   white-space: normal;
 }
 
 .msg[data-role='user'] {
-  background: var(--user-bubble);
+  background: color-mix(in srgb, var(--accent) 22%, var(--panel-2));
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   align-self: flex-end;
   max-width: 92%;
 }
@@ -724,9 +688,10 @@ body {
 .composer {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px;
+  gap: 8px;
+  padding: 12px 14px 14px;
   background: var(--panel);
+  border-top: 1px solid var(--border);
   /* Positioning context for the slash menu, which sits directly above the
      textarea using bottom:100%. It must be allowed to overflow upward; a
      clipped composer makes the menu render invisibly. */
@@ -737,12 +702,18 @@ body {
   flex: 1;
   min-height: 0;
   resize: none;
-  padding: 8px;
+  padding: 9px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
+  border-radius: 10px;
+  background: var(--sunken);
   color: var(--text);
   font: inherit;
+  line-height: 1.5;
+}
+
+.composer textarea:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .composer-row {
@@ -756,15 +727,21 @@ body {
 button {
   padding: 6px 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--panel-2);
   color: var(--text);
   cursor: pointer;
   font: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
 
 button:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: var(--accent-soft-border);
+  background: var(--hover-wash);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0.5px);
 }
 
 button:disabled {
@@ -779,8 +756,20 @@ button.primary {
   font-weight: 600;
 }
 
+button.primary:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  filter: brightness(1.08);
+}
+
 button.danger {
   color: var(--err);
+  border-color: color-mix(in srgb, var(--err) 40%, transparent);
+}
+
+button.danger:hover:not(:disabled) {
+  background: var(--err-surface);
+  border-color: var(--err);
 }
 
 label {
@@ -796,12 +785,21 @@ input,
 select,
 textarea {
   width: 100%;
-  padding: 6px 8px;
+  padding: 7px 9px;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
+  border-radius: 8px;
+  background: var(--sunken);
   color: var(--text);
   font: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .field {
@@ -819,10 +817,11 @@ textarea {
 
 .card {
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px;
+  border-radius: 10px;
+  padding: 12px;
   margin-bottom: 10px;
   background: var(--panel);
+  transition: border-color 0.15s ease;
 }
 
 .card-head {

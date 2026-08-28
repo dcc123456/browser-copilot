@@ -25,6 +25,7 @@ import { saveWorkflow } from "../lib/workflow/storage";
 import type { ConversationMeta, HistoryEntry } from "../lib/types";
 import type { TaskRunLog } from "../lib/scheduler-types";
 import { useT } from "./i18n";
+import { confirmDialog } from "../ui/confirm";
 import RunningBoard from "./RunningBoard";
 
 type Section = "conversations" | "workflowRuns" | "taskRuns" | "operations";
@@ -367,7 +368,16 @@ function ConversationsSection({ t, flash }: SectionProps) {
 
   const removeSelected = useCallback(async (): Promise<void> => {
     if (selected.size === 0) return;
-    if (!confirm(t.histDeleteConfirm({ count: selected.size }))) return;
+    if (
+      !(await confirmDialog({
+        title: t.dialogDeleteTitle,
+        message: t.histDeleteConfirm({ count: selected.size }),
+        confirmText: t.delete,
+        cancelText: t.cancel,
+        danger: true,
+      }))
+    )
+      return;
     const count = selected.size;
     try {
       for (const id of selected) {
@@ -551,7 +561,16 @@ function RunsSection({ t, flash, runs, reload, filter, focusRunId, onFocused }: 
 
   const removeSelected = useCallback(async (): Promise<void> => {
     if (selected.size === 0) return;
-    if (!confirm(t.histDeleteConfirm({ count: selected.size }))) return;
+    if (
+      !(await confirmDialog({
+        title: t.dialogDeleteTitle,
+        message: t.histDeleteConfirm({ count: selected.size }),
+        confirmText: t.delete,
+        cancelText: t.cancel,
+        danger: true,
+      }))
+    )
+      return;
     const count = selected.size;
     try {
       for (const id of selected) {
@@ -568,7 +587,16 @@ function RunsSection({ t, flash, runs, reload, filter, focusRunId, onFocused }: 
 
   const clearAll = useCallback(async (): Promise<void> => {
     if (items.length === 0) return;
-    if (!confirm(t.histDeleteConfirm({ count: items.length }))) return;
+    if (
+      !(await confirmDialog({
+        title: t.dialogDeleteTitle,
+        message: t.histDeleteConfirm({ count: items.length }),
+        confirmText: t.delete,
+        cancelText: t.cancel,
+        danger: true,
+      }))
+    )
+      return;
     try {
       await sendCommand({ type: "tasks.runs.clear" });
       setSelected(new Set());
@@ -738,7 +766,16 @@ function OperationsSection({ t, flash }: SectionProps) {
       setSelected(new Set());
       return;
     }
-    if (!confirm(t.histDeleteConfirm({ count: toDelete.length }))) return;
+    if (
+      !(await confirmDialog({
+        title: t.dialogDeleteTitle,
+        message: t.histDeleteConfirm({ count: toDelete.length }),
+        confirmText: t.delete,
+        cancelText: t.cancel,
+        danger: true,
+      }))
+    )
+      return;
     try {
       for (const entry of toDelete) {
         await sendCommand({ type: "history.delete", id: entry.id });
@@ -755,7 +792,16 @@ function OperationsSection({ t, flash }: SectionProps) {
   const clearAll = useCallback(async (): Promise<void> => {
     const total = entries?.length ?? 0;
     if (total === 0) return;
-    if (!confirm(t.histDeleteConfirm({ count: total }))) return;
+    if (
+      !(await confirmDialog({
+        title: t.dialogDeleteTitle,
+        message: t.histDeleteConfirm({ count: total }),
+        confirmText: t.delete,
+        cancelText: t.cancel,
+        danger: true,
+      }))
+    )
+      return;
     try {
       await sendCommand({ type: "history.clear" });
       setSelected(new Set());

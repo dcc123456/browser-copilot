@@ -2,11 +2,17 @@
  * Workflow recording controller (service worker).
  *
  * On start, injects the in-page recorder into every injectable tab (and into
- * tabs opened/navigated while recording). Page events arrive as
- * `record:event` runtime messages and are appended to a linear flow list;
- * navigations (new tabs, committed/finished loads) become `new-tab` /
- * `link`-style blocks tracked via tabs + webNavigation. On stop, the flows are
- * converted into a saved workflow via flowsToWorkflow and the editor opens it.
+ * tabs opened/navigated while recording). Page events arrive as `record:event`
+ * runtime messages and are appended to a linear flow list; the controller also
+ * turns tab/URL events the page cannot see into blocks:
+ *   - switching to another open tab            -> `switch-tab`
+ *   - a new tab opened by a link/window.open   -> `new-tab`
+ *   - a full-page navigation in the same tab   -> `open-url`
+ *   - an SPA route change (pushState/replace)  -> `open-url`
+ * The initial page load of tabs open at start is ignored; reloads and the
+ * navigation implied by a recorded anchor click are de-duped. On stop, the
+ * flows are converted into a saved workflow via flowsToWorkflow and the editor
+ * opens it.
  *
  * @module background/record-controller
  */
@@ -21,6 +27,16 @@ interface RecorderState {
   flows: RecordedFlow[]
   /** URLs already turned into a navigation block (dedupe per frame). */
   seenNav: Set<string>
+  /** Tab ids and their URL at the moment recording started (initial load). */
+  initialTabs: Map<number, string>
+  /** Tabs created while recording (target=_blank / window.open / a new tab). */
+  newTabIds: Set<number>
+  /** Epoch ms of the last recorded anchor-click (`link`) block. */
+  lastLinkAt: number
+  /** Epoch ms of the last navigation block we emitted (new-tab/open-url). */
+  lastNavAt: number
+  /** Index of the tab the last `switch-tab` block targeted (dedupe). */
+  lastSwitchIndex: number | null
   badge?: chrome.action.TabIconDetails
 }
 
@@ -55,7 +71,20 @@ async function injectIntoAllTabs(): Promise<void> {
 
 export async function startRecording(): Promise<void> {
   if (state) return
-  state = { flows: [], seenNav: new Set() }
+  const tabs = await chrome.tabs.query({})
+  const initialTabs = new Map<number, string>()
+  for (const tab of tabs) {
+    if (typeof tab.id === 'number') initialTabs.set(tab.id, tab.url ?? '')
+  }
+  state = {
+    flows: [],
+    seenNav: new Set(),
+    initialTabs,
+    newTabIds: new Set(),
+    lastLinkAt: 0,
+    lastNavAt: 0,
+    lastSwitchIndex: null,
+  }
   setBadge(true)
   await injectIntoAllTabs()
 }
@@ -94,6 +123,25 @@ export function isRecording(): boolean {
 function appendFlow(flow: RecordedFlow['data']): void {
   if (!state) return
   state.flows.push({ id: newId(), data: flow })
+  // Remember anchor clicks so a same-tab link navigation that follows can be
+  // recognized as the same action (avoiding a duplicate navigation block).
+  if (flow.blockId === 'link') state.lastLinkAt = Date.now()
+  if (flow.blockId === 'new-tab' || flow.blockId === 'open-url') state.lastNavAt = Date.now()
+}
+
+/** Window-relative index of a tab (what the `switch-tab` block replays). */
+async function tabWindowIndex(tabId: number): Promise<number | null> {
+  try {
+    const target = await chrome.tabs.get(tabId)
+    const siblings = await chrome.tabs.query({ windowId: target.windowId })
+    const ordered = siblings
+      .filter((t) => typeof t.id === 'number')
+      .sort((a, b) => a.index - b.index)
+    const found = ordered.findIndex((t) => t.id === tabId)
+    return found >= 0 ? found : null
+  } catch {
+    return null
+  }
 }
 
 /** Handle `record:event` messages from the injected page recorder. */
@@ -108,30 +156,85 @@ export function handleRecordEvent(message: unknown): boolean {
 
 /** Wire tab/navigation listeners. Call once at service-worker startup. */
 export function initRecordingLifecycle(): void {
+  // A tab opened while recording injects the recorder; its navigation is
+  // captured below as a `new-tab` block (it has an opener).
   chrome.tabs.onCreated.addListener((tab) => {
-    if (state && typeof tab.id === 'number') void injectIntoTab(tab.id, tab.url)
+    if (state && typeof tab.id === 'number') {
+      // Remember tabs opened during recording so their navigation becomes a
+      // `new-tab` block; a freshly opened tab is never an "initial" page.
+      state.newTabIds.add(tab.id)
+      state.initialTabs.delete(tab.id)
+      void injectIntoTab(tab.id, tab.url)
+    }
   })
+
+  // Switching to an already-open tab becomes a `switch-tab` block so replay
+  // follows the user across tabs (otherwise later steps would act on whichever
+  // tab happened to be active). Fired when the user picks another tab.
   chrome.tabs.onActivated.addListener(({ tabId }) => {
     if (!state) return
     void chrome.tabs.get(tabId).then((tab) => injectIntoTab(tabId, tab.url))
+    if (!state) return
+    // Ignore the activation caused by our own newly-opened navigation tab.
+    if (Date.now() - state.lastNavAt < 1500) return
+    void tabWindowIndex(tabId).then((index) => {
+      if (!state || index === null) return
+      if (state.lastSwitchIndex === index) return
+      state.lastSwitchIndex = index
+      appendFlow({
+        blockId: 'switch-tab',
+        index,
+        waitTabLoaded: true,
+        description: `切换到标签页 ${index + 1}`,
+      })
+    })
   })
-  // A committed navigation in a recorded tab becomes a new-tab block (page
-  // reload / link navigation the recorder cannot see itself).
+
+  // Full-page navigation (server render, link that replaces the document, or
+  // a typed URL). We did NOT previously see the change from the page context.
   chrome.webNavigation.onCommitted.addListener((details) => {
     if (!state || details.frameId !== 0) return
     if (!isInjectablePage(details.url)) return
+    if (details.transitionType === 'reload') return
     const key = `${details.tabId}:${details.url}`
     if (state.seenNav.has(key)) return
+
+    // Skip the initial page load of tabs already open when recording began.
+    if (
+      state.initialTabs.has(details.tabId) &&
+      state.initialTabs.get(details.tabId) === details.url
+    ) {
+      state.initialTabs.delete(details.tabId)
+      state.seenNav.add(key)
+      return
+    }
+
+    // A same-tab link navigation right after a recorded anchor click is the
+    // same action — the `link` block already replays it. Don't double it up.
+    const recentLink = Date.now() - state.lastLinkAt < 2500
+    // A tab created while recording (target=_blank / window.open / a new tab)
+    // records its first navigation as `new-tab`; once consumed it behaves like
+    // any other in-place tab, so subsequent navigations become `open-url`.
+    const isNewTab = state.newTabIds.has(details.tabId)
+
     state.seenNav.add(key)
-    // Only record navigations triggered by the user (link click / typed), not
-    // the initial page load where recording began — approximated by skipping
-    // the very first commit per tab after start.
-    if (details.transitionType === 'reload') return
+
+    if (isNewTab) {
+      state.newTabIds.delete(details.tabId)
+      state.initialTabs.delete(details.tabId)
+    }
+
+    if (recentLink && !isNewTab) {
+      // Same-tab link click: the recorded `link` block handles it; still
+      // re-inject so subsequent interactions on the new page are captured.
+      void injectIntoTab(details.tabId, details.url)
+      return
+    }
+
+    state.initialTabs.delete(details.tabId)
     appendFlow({
-      blockId: details.transitionType === 'link' ? 'link' : 'new-tab',
+      blockId: isNewTab ? 'new-tab' : 'open-url',
       url: details.url,
-      // Wait for the page to finish loading before the next recorded step
-      // runs (Automa's "wait until the tab is loaded").
       waitTabLoaded: true,
       waitForSelector: true,
       waitSelectorTimeout: 10000,
@@ -139,6 +242,27 @@ export function initRecordingLifecycle(): void {
     })
     // Re-inject recorder after the page context is replaced.
     void injectIntoTab(details.tabId, details.url)
+  })
+
+  // In-page (SPA) route changes: history.pushState/replaceState. These never
+  // fire onCommitted, so without this listener clicking a client-side router
+  // link changed the URL silently and the replayed workflow stayed on the old
+  // page. `onHistoryStateUpdated` reports frame 0 for the top-frame change.
+  chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
+    if (!state || details.frameId !== 0) return
+    if (!isInjectablePage(details.url)) return
+    // A same-tab link click already replayed via the `link` block; recording a
+    // second navigation would duplicate it.
+    if (Date.now() - state.lastLinkAt < 2500) return
+    const key = `${details.tabId}:spa:${details.url}`
+    if (state.seenNav.has(key)) return
+    state.seenNav.add(key)
+    appendFlow({
+      blockId: 'open-url',
+      url: details.url,
+      waitTabLoaded: false,
+      description: details.url,
+    })
   })
 }
 

@@ -39,4 +39,36 @@ describe('recorder forms blocks', () => {
     const nav = wf.drawflow.nodes.find((n) => n.data.blockId === 'new-tab')
     expect(nav?.data['waitTabLoaded']).toBe(true)
   })
+
+  it('de-duplicates repeated text-field fill blocks for the same field and value', () => {
+    // One physical fill reaches the recorder through input-debounce, Enter,
+    // blur and change — up to four identical `forms` flows. Only one node must
+    // survive, while a genuinely different value is kept.
+    const flows: RecordedFlow[] = [
+      {
+        id: 'f1',
+        data: { blockId: 'forms', selector: 'input[name=q]', findBy: 'cssSelector', type: 'text-field', value: 'abc' },
+      },
+      {
+        id: 'f2',
+        data: { blockId: 'forms', selector: 'input[name=q]', findBy: 'cssSelector', type: 'text-field', value: 'abc' },
+      },
+      {
+        id: 'f3',
+        data: { blockId: 'forms', selector: 'input[name=q]', findBy: 'cssSelector', type: 'text-field', value: 'abc' },
+      },
+      {
+        id: 'f4',
+        data: { blockId: 'forms', selector: 'input[name=other]', findBy: 'cssSelector', type: 'text-field', value: 'xyz' },
+      },
+    ]
+    const wf = flowsToWorkflow(flows)
+    const formsNodes = wf.drawflow.nodes.filter((n) => n.data.blockId === 'forms')
+    // trigger + 2 distinct fills (the three identical 'abc' fills collapse to 1)
+    expect(formsNodes).toHaveLength(2)
+    expect(formsNodes.map((n) => n.data['value'])).toEqual(['abc', 'xyz'])
+    // The chain still links trigger -> first fill -> second fill (no dangling
+    // edge pointing at a removed duplicate).
+    expect(wf.drawflow.edges).toHaveLength(2)
+  })
 })

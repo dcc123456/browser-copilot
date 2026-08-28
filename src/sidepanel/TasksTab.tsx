@@ -17,6 +17,7 @@ import { createDraft } from '../lib/task-store'
 import { describeSchedule, isManualSchedule } from '../lib/schedule'
 import type { FeishuConfig, ScheduledTask } from '../lib/scheduler-types'
 import { useT } from './i18n'
+import { confirmDialog } from '../ui/confirm'
 
 /** Editable form state. */
 type Draft = ScheduledTask
@@ -100,7 +101,14 @@ export default function TasksTab() {
   }
 
   const removeTask = async (id: string): Promise<void> => {
-    if (!confirm(t.taskDeleteConfirm)) return
+    const ok = await confirmDialog({
+      title: t.dialogDeleteTitle,
+      message: t.taskDeleteConfirm,
+      confirmText: t.delete,
+      cancelText: t.cancel,
+      danger: true,
+    })
+    if (!ok) return
     setBusy(true)
     try {
       await sendCommand({ type: 'tasks.delete', id })

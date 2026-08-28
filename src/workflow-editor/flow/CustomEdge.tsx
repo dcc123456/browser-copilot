@@ -57,8 +57,8 @@ function CustomEdgeComponent({
         className={`wf-edge ${active ? 'wf-edge-active' : ''}`}
         interactionWidth={0}
         style={{
-          stroke: active ? 'var(--bc-edge-selected)' : 'var(--bc-edge)',
-          strokeWidth: active ? 2.5 : 1.75,
+          stroke: active ? 'var(--we-edge-selected)' : 'var(--we-edge)',
+          strokeWidth: active ? 2.5 : 2,
         }}
       />
     </>

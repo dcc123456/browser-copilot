@@ -17,6 +17,7 @@
  */
 
 import { BLOCK_CATALOG } from './blocks/catalog'
+import { CUSTOM_BLOCKS } from './blocks/custom'
 import { CATALOG_BY_ID } from './blocks/palette'
 import type { Workflow, WorkflowEdge, WorkflowNode } from './types'
 
@@ -37,9 +38,9 @@ export const LEGACY_ID_TO_AUTOMA: Record<string, string> = {
   breakpoint: 'loop-breakpoint',
 }
 
-/** Catalog defaults by id, looked up once. */
+/** Catalog defaults by id, looked up once (Automa blocks + local extensions). */
 const CATALOG_DEFAULTS = new Map<string, Record<string, unknown>>(
-  BLOCK_CATALOG.map((b) => [b.id, b.data]),
+  [...BLOCK_CATALOG, ...CUSTOM_BLOCKS].map((b) => [b.id, b.data]),
 )
 
 function isRecord(value: unknown): value is Record<string, unknown> {

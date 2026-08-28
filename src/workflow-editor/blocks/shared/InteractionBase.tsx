@@ -56,10 +56,10 @@ export default function InteractionBase({
   return (
     <div className="wf-form">
       {!hideDescription && (
-        <Field label="Description">
+        <Field>
           <TextArea
             value={str(data, 'description')}
-            placeholder="Description (shown on the node)"
+            placeholder="Description"
             onChange={(v) => onChange({ description: v })}
           />
         </Field>
@@ -69,27 +69,26 @@ export default function InteractionBase({
 
       {!hideSelector && (
         <>
-          <Field label="Find element by">
-            <div className="wf-selector-row">
-              <div className="wf-selector-findby">
-                <Select
-                  value={findBy}
-                  onChange={(v) => onChange({ findBy: v })}
-                  options={[
-                    { value: 'cssSelector', label: 'CSS selector' },
-                    { value: 'xpath', label: 'XPath' },
-                  ]}
-                />
-              </div>
-              <ElSelectorActions
-                selector={selector}
-                findBy={findBy === 'xpath' ? 'xpath' : 'cssSelector'}
-                multiple={bool(data, 'multiple')}
-                onSelector={(sel) => onChange({ selector: sel })}
+          {/* Automa: find-by select (flex-1) + pick/verify buttons on ONE row. */}
+          <div className="wf-selector-row">
+            <div className="wf-selector-findby">
+              <Select
+                value={findBy}
+                onChange={(v) => onChange({ findBy: v })}
+                options={[
+                  { value: 'cssSelector', label: 'CSS selector' },
+                  { value: 'xpath', label: 'XPath' },
+                ]}
               />
             </div>
-          </Field>
-          <Field label="Selector">
+            <ElSelectorActions
+              selector={selector}
+              findBy={findBy === 'xpath' ? 'xpath' : 'cssSelector'}
+              multiple={bool(data, 'multiple')}
+              onSelector={(sel) => onChange({ selector: sel })}
+            />
+          </div>
+          <Field>
             <TextArea
               mono
               value={selector}
@@ -99,35 +98,39 @@ export default function InteractionBase({
           </Field>
 
           <Expand title="Selector options">
-            {!hideMultiple && (
+            <div className="wf-selector-options">
+              <div className="wf-selector-options-row">
+                {!hideMultiple && (
+                  <Checkbox
+                    checked={bool(data, 'multiple')}
+                    onChange={(v) => onChange({ multiple: v })}
+                    label="Select multiple elements"
+                    title="Apply the block to every matched element"
+                  />
+                )}
+                {!hideMarkEl && findBy === 'cssSelector' && (
+                  <Checkbox
+                    checked={bool(data, 'markEl')}
+                    onChange={(v) => onChange({ markEl: v })}
+                    label="Mark the element on execution"
+                  />
+                )}
+              </div>
               <Checkbox
-                checked={bool(data, 'multiple')}
-                onChange={(v) => onChange({ multiple: v })}
-                label="Select multiple elements"
-                title="Apply the block to every matched element"
+                checked={bool(data, 'waitForSelector')}
+                onChange={(v) => onChange({ waitForSelector: v })}
+                label="Wait for selector"
               />
-            )}
-            {!hideMarkEl && findBy === 'cssSelector' && (
-              <Checkbox
-                checked={bool(data, 'markEl')}
-                onChange={(v) => onChange({ markEl: v })}
-                label="Mark the element on execution"
-              />
-            )}
-            <Checkbox
-              checked={bool(data, 'waitForSelector')}
-              onChange={(v) => onChange({ waitForSelector: v })}
-              label="Wait for selector"
-            />
-            {bool(data, 'waitForSelector') && (
-              <Field label="Timeout (ms)">
-                <TextInput
-                  type="number"
-                  value={num(data, 'waitSelectorTimeout', 5000)}
-                  onChange={(v) => onChange({ waitSelectorTimeout: Number(v) || 5000 })}
-                />
-              </Field>
-            )}
+              {bool(data, 'waitForSelector') && (
+                <Field label="Timeout (ms)">
+                  <TextInput
+                    type="number"
+                    value={num(data, 'waitSelectorTimeout', 5000)}
+                    onChange={(v) => onChange({ waitSelectorTimeout: Number(v) || 5000 })}
+                  />
+                </Field>
+              )}
+            </div>
           </Expand>
         </>
       )}

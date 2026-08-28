@@ -57,6 +57,7 @@ export const BLOCK_NAMES_ZH: Record<string, string> = {
   'workflow-state': '工作流状态',
   'execute-workflow': '执行工作流',
   'export-data': '导出数据',
+  'ai-agent': 'AI 智能体',
   // Data
   'insert-data': '插入数据',
   'delete-data': '删除数据',

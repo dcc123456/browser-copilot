@@ -55,6 +55,8 @@ export type ActionName =
   | 'count_elements'
   | 'trigger_event'
   | 'capture'
+  | 'exec_js'
+  | 'exec_workflow_js'
 
 /** What `scroll` should do. */
 export type ScrollSpec =
@@ -86,6 +88,14 @@ export interface Op {
   maxChars?: number
   /** Max interactive elements in a snapshot. */
   maxElements?: number
+  /**
+   * Named arguments handed to an `exec_js` evaluation, available as the
+   * function parameters named by `jsArgNames` (e.g. `vars`, `refData`,
+   * `rows`). Values must be structured-cloneable (they cross into the page).
+   */
+  jsArgs?: Record<string, unknown>
+  /** Parameter names for `jsArgs`, in order. Defaults to the keys of jsArgs. */
+  jsArgNames?: string[]
 }
 
 /** A snapshot entry for one interactive element. */

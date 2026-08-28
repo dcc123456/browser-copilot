@@ -125,7 +125,7 @@ export type Command =
   | { type: 'workflows.get'; id: string }
   | { type: 'workflows.save'; workflow: Workflow }
   | { type: 'workflows.delete'; id: string }
-  | { type: 'workflows.run'; id: string }
+  | { type: 'workflows.run'; id: string; /** Run the graph starting at this node id ("run from here"). */ startAt?: string }
   | { type: 'workflows.running'; workflowId?: string }
 
   // --- Workflow recording (see background/record-controller.ts) ---

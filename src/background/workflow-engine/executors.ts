@@ -17,6 +17,7 @@ import { isInjectablePage } from '../../lib/pages'
 import { streamCompletion, type WireMessage } from '../../lib/llm'
 import { getSettings } from '../../lib/storage'
 import { interpolate } from '../../lib/workflow/interpolate'
+import { aiAgent } from './ai-agent-executor'
 import type { Op, ScrollSpec, Target } from '../../lib/ops'
 import { activeTab } from '../page'
 import {
@@ -37,6 +38,8 @@ import {
   resolveAutomationTab,
   newWindow as driverNewWindow,
   switchTab as driverSwitchTab,
+  execJsOnActiveTab,
+  execWorkflowJsOnActiveTab,
 } from '../driver'
 
 /** Execution context handed to every block executor. */
@@ -63,6 +66,12 @@ export interface WorkflowExecCtx {
   tabId?: number
   /** Pin the target tab (called by new-tab / link / switch-tab executors). */
   setTab?: (tabId: number) => void
+  /**
+   * Snapshot the current variables for a block (debug mode). Called by the
+   * engine after each block; the run layer collects them so the logs viewer can
+   * show the variable values at each step.
+   */
+  snapshot?: (nodeId: string, label: string, variables: Record<string, unknown>) => void
 }
 
 /**
@@ -113,6 +122,29 @@ function assertActive(ctx: WorkflowExecCtx): void {
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * Evaluate user JavaScript in the page (the MV3 service worker forbids
+ * `eval`/`new Function` under its CSP). Used by the JS code block and the
+ * JS-expression blocks (conditions, data-mapping). Returns `{ ok, value }`;
+ * on failure an error is emitted and `ok` is false so callers treat it as a
+ * non-fatal block failure (consistent with the other executors).
+ */
+async function evalInPage(
+  code: string,
+  args: Record<string, unknown>,
+  ctx: WorkflowExecCtx,
+): Promise<{ ok: boolean; value?: unknown }> {
+  try {
+    const result = await execJsOnActiveTab(code, args, ctx.signal, ctx.tabId)
+    if (result.ok) return { ok: true, value: result.data }
+    ctx.emit('error', `JS 执行失败: ${result.error ?? '未知错误'}`)
+    return { ok: false }
+  } catch (error) {
+    ctx.emit('error', `JS 执行失败: ${message(error)}`)
+    return { ok: false }
+  }
 }
 
 /**
@@ -449,14 +481,8 @@ const exportData: BlockExecutor = async (data, ctx) => {
 const condition: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const code = String(data['code'] ?? 'true')
-  let ok = false
-  try {
-    const test = new Function('vars', 'refData', `return (${code})`)
-    ok = Boolean(test(ctx.variables, ctx.refData))
-  } catch {
-    ctx.emit('error', '条件表达式错误')
-    ok = false
-  }
+  const evaluated = await evalInPage(`return (${code})`, { vars: ctx.variables, refData: ctx.refData }, ctx)
+  const ok = evaluated.ok ? Boolean(evaluated.value) : false
   return ok
     ? (ctx.outputs?.['true'] ?? ctx.defaultNext ?? null)
     : (ctx.outputs?.['false'] ?? ctx.defaultNext ?? null)
@@ -561,15 +587,159 @@ const notification: BlockExecutor = async (data, ctx) => {
 const javascriptCode: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const code = String(data['code'] ?? '')
-  try {
-    const fn = new Function('vars', 'refData', 'data', `return (()=>{${code}})()`)
-    const result = fn(ctx.variables, ctx.refData, data)
+  if (!code.trim()) {
+    ctx.emit('error', 'javascript-code: 代码为空')
+    return null
+  }
+  const timeout = Math.max(0, Number(data['timeout'] ?? 20000) || 20000)
+
+  // Prefer the in-page harness (Automa helpers + console capture + page DOM).
+  let run: Awaited<ReturnType<typeof execWorkflowJsOnActiveTab>> | null = null
+  let triedPage = false
+  // `chrome.scripting` exists in the real extension; in the pure-engine/tests it
+  // does not, so we fall back to a local evaluation (see below).
+  const hasPageBridge =
+    typeof chrome !== 'undefined' && !!(chrome as { scripting?: unknown }).scripting
+  if (hasPageBridge) {
+    triedPage = true
+    try {
+      run = await execWorkflowJsOnActiveTab(code, ctx.variables, timeout, ctx.signal, ctx.tabId)
+    } catch {
+      run = null
+    }
+  }
+
+  if (run && run.ok) {
+    for (const line of run.logs ?? []) {
+      ctx.emit(line.level === 'error' || line.level === 'warn' ? 'error' : 'info', line.message)
+    }
+    if (run.data.variables) {
+      for (const [k, v] of Object.entries(run.data.variables)) ctx.variables[k] = v
+    }
+    const result = run.data.result
     ctx.variables['lastResult'] = result
-    ctx.emit('result', String(result ?? ''))
-  } catch (error) {
-    ctx.emit('error', message(error))
+    if (result !== undefined) {
+      ctx.emit('result', typeof result === 'string' ? result : safeStringify(result))
+    }
+    return null
+  }
+
+  if (run) {
+    // The harness ran and reported a clean failure (or page CSP/no-tab): surface
+    // any captured console output, then fall through to local eval as a last
+    // resort so simple expression bodies still work off-page.
+    for (const line of run.logs ?? []) {
+      ctx.emit(line.level === 'error' || line.level === 'warn' ? 'error' : 'info', line.message)
+    }
+  }
+
+  // Fallback: evaluate locally in the worker (valid in Node tests; also used by
+  // the agent's JS tooling). The page CSP restricts the *page*, not the worker —
+  // but MV3 workers forbid eval, so this path only succeeds off-page.
+  const local = await evalLocalWorkflowJs(code, ctx.variables, timeout)
+  if (!local.ok) {
+    if (triedPage) {
+      ctx.emit('error', `javascript-code: ${run && !run.ok ? run.error : local.error}`)
+    } else {
+      ctx.emit('error', `javascript-code: ${local.error}`)
+    }
+    return null
+  }
+  for (const [k, v] of Object.entries(local.variables ?? {})) ctx.variables[k] = v
+  ctx.variables['lastResult'] = local.result
+  if (local.result !== undefined) {
+    ctx.emit('result', typeof local.result === 'string' ? local.result : safeStringify(local.result))
   }
   return null
+}
+
+/** JSON.stringify that never throws (cyclic / bigint payloads). */
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? ''
+  } catch {
+    return String(value)
+  }
+}
+
+/**
+ * Local (off-page) evaluation of a workflow JS body. Mirrors the harness contract
+ * (`automaNextBlock` / `automaSetVariable` / `automaRefData`, `return`/await).
+ * Used when no page bridge is available (pure-engine tests, worker contexts that
+ * allow eval). Returns the result value and variables set by the code.
+ */
+async function evalLocalWorkflowJs(
+  code: string,
+  variables: Record<string, unknown>,
+  timeout: number,
+): Promise<{ ok: true; result?: unknown; variables?: Record<string, unknown> } | { ok: false; error: string }> {
+  try {
+    const working = { ...variables }
+    let nextData: unknown
+    let nextCalled = false
+    const helpers = {
+      automaNextBlock(data?: unknown) {
+        nextCalled = true
+        nextData = data
+      },
+      automaSetVariable(name: string, value: unknown) {
+        working[String(name)] = value
+      },
+      automaRefData(keyword: string, path = '') {
+        const root: Record<string, unknown> = {
+          variables: working,
+          table: working['dataTable'] ?? [],
+          loopData: { loopIndex: working['loopIndex'], loopItem: working['loopItem'] },
+          prevBlockData: working['lastResult'],
+          globalData: working['globalData'] ?? {},
+        }
+        let value: unknown = root[keyword]
+        for (const seg of String(path).split('.').filter(Boolean)) {
+          if (value && typeof value === 'object') value = (value as Record<string, unknown>)[seg]
+          else {
+            value = undefined
+            break
+          }
+        }
+        return value
+      },
+      automaResetTimeout() {
+        /* local eval runs to completion; timeout is a page-harness concern */
+      },
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+    const fn = new Function(
+      'automaNextBlock',
+      'automaSetVariable',
+      'automaRefData',
+      'automaResetTimeout',
+      'variables',
+      `"use strict";\n${code}`,
+    ) as (
+      a: typeof helpers.automaNextBlock,
+      b: typeof helpers.automaSetVariable,
+      c: typeof helpers.automaRefData,
+      d: typeof helpers.automaResetTimeout,
+      v: Record<string, unknown>,
+    ) => unknown
+
+    const awaited = await Promise.race([
+      Promise.resolve(fn(
+        helpers.automaNextBlock,
+        helpers.automaSetVariable,
+        helpers.automaRefData,
+        helpers.automaResetTimeout,
+        working,
+      )),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`JavaScript 代码超时（${timeout}ms）`)), Math.max(0, timeout) || 20000),
+      ),
+    ])
+    return { ok: true, result: nextCalled ? nextData : awaited, variables: working }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 const aiPrompt: BlockExecutor = async (data, ctx) => {
@@ -912,17 +1082,18 @@ const dataMapping: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const rows = tableOf(ctx).filter((row): row is Record<string, unknown> => !!row && typeof row === 'object')
   const expression = String(data['mapping'] ?? 'item')
-  let mapped: unknown
-  try {
-    const fn = new Function('item', 'index', 'vars', `return (${expression})`)
-    mapped = rows.map((item, index) => fn(item, index, ctx.variables))
-  } catch (error) {
-    ctx.emit('error', `data-mapping: ${message(error)}`)
+  // Map every row in ONE page injection (rather than one eval per row). The
+  // expression is evaluated with `item`, `index`, and `vars` in scope.
+  const wrapped = `return rows.map((item, index) => (${expression}));`
+  const evaluated = await evalInPage(wrapped, { rows, vars: ctx.variables }, ctx)
+  if (!evaluated.ok) {
+    ctx.emit('error', 'data-mapping: 映射表达式执行失败')
     return null
   }
+  const mapped = Array.isArray(evaluated.value) ? evaluated.value : []
   ctx.variables[String(data['output'] ?? 'mappedData')] = mapped
   ctx.variables['lastMappedData'] = mapped
-  ctx.emit('result', `已映射 ${rows.length} 行`)
+  ctx.emit('result', `已映射 ${mapped.length} 行`)
   return null
 }
 
@@ -1168,12 +1339,12 @@ const conditionsBlock: BlockExecutor = async (data, ctx) => {
   const code = data['code'] as string | undefined
   let matched = false
   if (code) {
-    try {
-      const test = new Function('vars', 'refData', `return (${code})`)
-      matched = Boolean(test(ctx.variables, ctx.refData))
-    } catch {
-      matched = false
-    }
+    const evaluated = await evalInPage(
+      `return (${code})`,
+      { vars: ctx.variables, refData: ctx.refData },
+      ctx,
+    )
+    matched = evaluated.ok ? Boolean(evaluated.value) : false
   } else {
     // Evaluate condition rows: a group is true when all its rows compare true.
     const groups = (data['conditions'] as { conditions?: ConditionRow[] }[] | undefined) ?? []
@@ -1307,6 +1478,7 @@ export const EXECUTORS: Record<string, BlockExecutor> = {
   'notification': notification,
   'javascript-code': javascriptCode,
   'ai-prompt': aiPrompt,
+  'ai-agent': aiAgent,
   'execute-workflow': placeholder('execute-workflow'),
   'parameter-prompt': parameterPrompt,
   'switch-to': switchToExec,

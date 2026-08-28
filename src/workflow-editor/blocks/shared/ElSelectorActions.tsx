@@ -11,11 +11,31 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { toast } from '../../../ui/toast'
+import { useEditorLocale } from '../../locale-context'
 
 let counter = 0
 function newPickerId(): string {
   counter += 1
   return `picker-${Date.now()}-${counter}`
+}
+
+/**
+ * Bring the standalone editor window back to the foreground. Picking switches
+ * focus to the tab being automated; once the user finishes (or cancels) we
+ * return them to the editor, mirroring Automa's makeDashboardFocus().
+ */
+function focusEditorWindow(): void {
+  try {
+    void chrome.windows
+      .getCurrent()
+      .then((win) => {
+        if (win?.id !== undefined) return chrome.windows.update(win.id, { focused: true })
+      })
+      .catch(() => {})
+  } catch {
+    /* older Chrome without windows.getCurrent in this context; best-effort */
+  }
 }
 
 interface PickerResult {
@@ -47,6 +67,19 @@ export default function ElSelectorActions({
 }) {
   const [busy, setBusy] = useState<null | 'pick' | 'verify'>(null)
   const pendingPicker = useRef<{ id: string; mode: 'select' | 'verify' } | null>(null)
+  // Safety timeout: if the picker never reports back (page closed, SW restarted,
+  // response lost), release the spinner instead of spinning forever.
+  const safetyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { bt } = useEditorLocale()
+
+  const clearBusy = useCallback(() => {
+    if (safetyTimer.current) {
+      clearTimeout(safetyTimer.current)
+      safetyTimer.current = null
+    }
+    pendingPicker.current = null
+    setBusy(null)
+  }, [])
 
   const listen = useCallback(
     (message: unknown) => {
@@ -54,13 +87,14 @@ export default function ElSelectorActions({
       const pending = pendingPicker.current
       if (!pending) return
       if (msg.type === 'picker:cancel' && msg.pickerId === pending.id) {
-        pendingPicker.current = null
-        setBusy(null)
+        clearBusy()
+        focusEditorWindow()
         return
       }
       if (msg.type !== 'picker:result' || msg.pickerId !== pending.id) return
-      pendingPicker.current = null
-      setBusy(null)
+      clearBusy()
+      // Return focus to the editor popup now that picking is done.
+      focusEditorWindow()
       if (pending.mode === 'select' && msg.selector) {
         onSelector(msg.selector)
       } else if (pending.mode === 'verify') {
@@ -68,16 +102,19 @@ export default function ElSelectorActions({
         if (n > 0) onMessage?.(`Verified: ${n} element(s) match`, 'ok')
         else {
           onMessage?.('Element not found', 'error')
-          window.alert('Element not found')
+          toast('Element not found', 'error')
         }
       }
     },
-    [onMessage, onSelector],
+    [clearBusy, onMessage, onSelector],
   )
 
   useEffect(() => {
     chrome.runtime.onMessage.addListener(listen)
-    return () => chrome.runtime.onMessage.removeListener(listen)
+    return () => {
+      chrome.runtime.onMessage.removeListener(listen)
+      if (safetyTimer.current) clearTimeout(safetyTimer.current)
+    }
   }, [listen])
 
   const start = useCallback(
@@ -85,6 +122,16 @@ export default function ElSelectorActions({
       const pickerId = newPickerId()
       pendingPicker.current = { id: pickerId, mode }
       setBusy(mode === 'select' ? 'pick' : 'verify')
+      // Picking usually takes as long as the user needs; keep a long safety net
+      // for select, but verify should answer quickly.
+      const safetyMs = mode === 'verify' ? 15000 : 120000
+      if (safetyTimer.current) clearTimeout(safetyTimer.current)
+      safetyTimer.current = setTimeout(() => {
+        if (pendingPicker.current?.id === pickerId) {
+          clearBusy()
+          toast('The element picker did not respond.', 'error')
+        }
+      }, safetyMs)
       try {
         const resp = (await chrome.runtime.sendMessage({
           type: mode === 'select' ? 'picker:start' : 'picker:verify',
@@ -93,18 +140,17 @@ export default function ElSelectorActions({
           multiple,
           ...(mode === 'verify' ? { selector } : {}),
         })) as { ok?: boolean; error?: string } | undefined
-        if (resp && resp.ok === false) {
-          pendingPicker.current = null
-          setBusy(null)
-          window.alert(resp.error ?? 'Could not start the element picker.')
+        // No response (SW restarted) or an explicit failure: stop spinning.
+        if (!resp || resp.ok === false) {
+          clearBusy()
+          toast(resp?.error ?? 'Could not start the element picker.', 'error')
         }
       } catch (error) {
-        pendingPicker.current = null
-        setBusy(null)
-        window.alert(error instanceof Error ? error.message : String(error))
+        clearBusy()
+        toast(error instanceof Error ? error.message : String(error), 'error')
       }
     },
-    [findBy, multiple, selector],
+    [findBy, multiple, selector, clearBusy],
   )
 
   return (
@@ -112,7 +158,7 @@ export default function ElSelectorActions({
       <button
         type="button"
         className="wf-icon-btn"
-        title="Pick element on page"
+        title={bt('Pick element on page')}
         disabled={busy !== null}
         onClick={() => void start('select')}
       >
@@ -121,7 +167,7 @@ export default function ElSelectorActions({
       <button
         type="button"
         className="wf-icon-btn"
-        title="Verify selector"
+        title={bt('Verify selector')}
         disabled={busy !== null || !selector}
         onClick={() => void start('verify')}
       >

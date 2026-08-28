@@ -40,6 +40,7 @@ function BlockCard({
       className="wf-palette-card"
       draggable
       title={block.description || blockName(block.id, block.name)}
+      style={{ ['--cat-color' as string]: `var(--cat-${block.category})` }}
       onDragStart={(e) => {
         e.dataTransfer.setData('application/workflow-block', block.id)
         e.dataTransfer.effectAllowed = 'copy'
@@ -66,7 +67,9 @@ function BlockCard({
         </span>
       </div>
       {block.tag && <div className="wf-palette-tag">{block.tag}</div>}
-      <BlockIcon icon={block.icon} size={24} />
+      <span className="wf-palette-card-icon">
+        <BlockIcon icon={block.icon} size={20} />
+      </span>
       <p>{blockName(block.id, block.name)}</p>
     </div>
   )
@@ -91,7 +94,7 @@ function CategorySection({
       <button type="button" className="wf-palette-header" onClick={() => setOpen(!open)}>
         <span
           className="wf-palette-dot"
-          style={{ backgroundColor: `var(--cat-${categoryId})` }}
+          style={{ ['--cat-dot' as string]: `var(--cat-${categoryId})` }}
         />
         <span className="wf-palette-title">{categoryName(categoryId, meta?.name ?? categoryId)}</span>
         <i className={open ? 'ri-subtract-line' : 'ri-add-line'} />

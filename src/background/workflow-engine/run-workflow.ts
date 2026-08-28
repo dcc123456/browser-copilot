@@ -10,8 +10,8 @@
  */
 
 import type { Workflow } from '../../lib/workflow/types'
-import { addStep, finishRun, startRun, type RunSource } from '../running-tasks'
-import { countElements } from '../driver'
+import { addStep, finishRun, recordSnapshot, startRun, type RunSource } from '../running-tasks'
+import { countElements, execJsOnActiveTab } from '../driver'
 import { BLOCK_BY_ID } from '../../lib/workflow/blocks/palette'
 import { runWorkflow } from './engine'
 
@@ -31,6 +31,10 @@ export interface ExecuteWorkflowOptions {
   taskId?: string
   feishuChatId?: string
   variables?: Record<string, unknown>
+  /** Node id to start execution from ("run workflow from here"); defaults to the trigger/first node. */
+  startAt?: string
+  /** Capture per-block variable snapshots for the logs viewer (debug mode). */
+  debug?: boolean
   /** Optional caller-side sink for each engine step, fired alongside the run log. */
   onStep?: (kind: string, nodeId: string, text: string) => void
 }
@@ -62,15 +66,26 @@ export async function executeWorkflow(
 
   try {
     const result = await runWorkflow(workflow, {
+      startAt: opts.startAt,
       variables: opts.variables,
       signal: run.controller.signal,
       loopElementCounter: (selector, signal) => countElements(selector, signal),
+      // JS conditions run in the page: the service worker CSP forbids eval.
+      evaluateExpression: async (code, vars) => {
+        const result = await execJsOnActiveTab(`return (${code});`, { vars }, run.controller.signal)
+        return result.ok ? result.data : undefined
+      },
+      onSnapshot: opts.debug
+        ? (nodeId, _blockId, variables) => {
+            recordSnapshot(runId, nodeId, nodeLabel(workflow, nodeId), variables)
+          }
+        : undefined,
       onStep: (kind, nodeId, text) => {
         if (kind === 'tool') {
           // Per-block header: resolved block name, not the raw node id.
-          addStep(runId, 'tool', nodeLabel(workflow, nodeId))
+          addStep(runId, 'tool', nodeLabel(workflow, nodeId), { nodeId, label: nodeLabel(workflow, nodeId) })
         } else {
-          addStep(runId, kind, text)
+          addStep(runId, kind, text, { nodeId, label: nodeLabel(workflow, nodeId) })
         }
         // Surface to the caller (e.g. Feishu streaming) alongside the run log.
         opts.onStep?.(kind, nodeId, text)

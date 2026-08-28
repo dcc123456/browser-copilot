@@ -25,10 +25,18 @@ export interface RunStep {
   /** Epoch ms when the step was recorded. */
   at: number
   /** Machine-ish label: "tool", "status", "result", "error", "info". */
-  kind: 'tool' | 'status' | 'result' | 'error' | 'info'
+  kind: RunStepKind
   /** Human-readable text, already suitable for display or sending to Feishu. */
   text: string
+  /** Node id this step belongs to (block header + status/result lines). */
+  nodeId?: string
+  /** Resolved block label, for tool/block lines. */
+  label?: string
+  /** Debug-mode variable snapshot for this block (keyed variable map). */
+  vars?: Record<string, unknown>
 }
+
+export type RunStepKind = 'tool' | 'status' | 'result' | 'error' | 'info'
 
 /** How a run ended. */
 export type RunOutcomeKind = 'ok' | 'failed' | 'cancelled' | 'skipped'
@@ -51,6 +59,12 @@ export interface RunningTask {
   feishuChatId?: string
   startedAt: number
   steps: RunStep[]
+  /**
+   * Debug-mode per-block variable snapshots, in execution order: node id →
+   * { label, at, variables }. Populated only when a workflow runs with debug
+   * mode on; the logs viewer reads them to inspect values at each block.
+   */
+  snapshots?: { nodeId: string; label: string; at: number; variables: Record<string, unknown> }[]
   /** Shared abort signal; call abort() to request cancellation. */
   controller: AbortController
   /** Invoked once when the run is cancelled from the board. */
@@ -77,6 +91,8 @@ export interface FinishedTask {
    */
   error?: string
   steps: RunStep[]
+  /** Debug-mode per-block variable snapshots (see RunningTask.snapshots). */
+  snapshots?: { nodeId: string; label: string; at: number; variables: Record<string, unknown> }[]
 }
 
 const runs = new Map<string, RunningTask>()
@@ -144,10 +160,36 @@ export function addStep(
   runId: string,
   kind: RunStep['kind'],
   text: string,
+  extra?: { nodeId?: string; label?: string; vars?: Record<string, unknown> },
 ): void {
   const task = runs.get(runId)
   if (!task) return
-  task.steps.push({ at: Date.now(), kind, text })
+  task.steps.push({ at: Date.now(), kind, text, ...(extra?.nodeId ? { nodeId: extra.nodeId } : {}), ...(extra?.label ? { label: extra.label } : {}), ...(extra?.vars ? { vars: extra.vars } : {}) })
+}
+
+/**
+ * Records a debug-mode per-block variable snapshot. Also mirrored onto the
+ * matching "tool" step so step rows can reveal the variables at that block.
+ */
+export function recordSnapshot(
+  runId: string,
+  nodeId: string,
+  label: string,
+  variables: Record<string, unknown>,
+): void {
+  const task = runs.get(runId)
+  if (!task) return
+  const entry = { nodeId, label, at: Date.now(), variables }
+  if (!task.snapshots) task.snapshots = []
+  task.snapshots.push(entry)
+  // Attach to the most recent step for this node (the block's tool header).
+  for (let i = task.steps.length - 1; i >= 0; i--) {
+    const step = task.steps[i]
+    if (step && step.nodeId === nodeId && step.kind === 'tool') {
+      step.vars = variables
+      break
+    }
+  }
 }
 
 /**
@@ -188,6 +230,7 @@ export function finishRun(runId: string, options?: FinishOptions): void {
     summary: options?.summary,
     ...(options?.error ? { error: options.error } : {}),
     steps: task.steps,
+    ...(task.snapshots && task.snapshots.length ? { snapshots: task.snapshots } : {}),
   }
   finished.unshift(entry)
   if (finished.length > MAX_FINISHED) finished.length = MAX_FINISHED

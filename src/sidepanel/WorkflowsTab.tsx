@@ -15,6 +15,7 @@ import type { TaskRunLog } from '../lib/scheduler-types'
 import type { Workflow, WorkflowTrigger } from '../lib/workflow/types'
 import { newId } from '../lib/storage'
 import { useT } from './i18n'
+import { confirmDialog } from '../ui/confirm'
 
 export default function WorkflowsTab() {
   const t = useT()
@@ -120,7 +121,14 @@ export default function WorkflowsTab() {
   }
 
   const removeWorkflow = async (id: string): Promise<void> => {
-    if (!confirm(t.workflowsDeleteConfirm)) return
+    const ok = await confirmDialog({
+      title: t.dialogDeleteTitle,
+      message: t.workflowsDeleteConfirm,
+      confirmText: t.delete,
+      cancelText: t.cancel,
+      danger: true,
+    })
+    if (!ok) return
     setBusy(true)
     try {
       await sendCommand({ type: 'workflows.delete', id })

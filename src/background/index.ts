@@ -85,6 +85,7 @@ import {
   deleteWorkflow,
 } from '../lib/workflow/storage'
 import { executeWorkflow } from './workflow-engine/run-workflow'
+import { initLastTabTracker } from './last-tab'
 import { rescheduleAll, scheduleTask, triggerNow, onAlarm } from './scheduler'
 import { FeishuBot, FEISHU_WATCHDOG_ALARM } from './feishu-bot'
 import { isWebhookUrl, sendWebhookText } from '../lib/feishu'
@@ -315,6 +316,7 @@ function recordStep(
 // An MV3 worker can start cold on any event (an alarm, a port reconnect, a
 // command). Reconcile schedules and the bot connection at module load so a task
 // is never missed because the worker had not run its install/startup handlers.
+initLastTabTracker()
 void rescheduleAll().catch((error: unknown) =>
   console.error('[Browser Copilot] could not reschedule tasks', error),
 )
@@ -414,6 +416,7 @@ function runningBoardsView(workflowIdFilter?: string): {
     summary: r.summary,
     error: r.error,
     steps: r.steps,
+    ...(r.snapshots ? { snapshots: r.snapshots } : {}),
   })
   const matches = <T extends { workflowId?: string }>(r: T): boolean =>
     !workflowIdFilter || r.workflowId === workflowIdFilter
@@ -428,6 +431,7 @@ function runningBoardsView(workflowIdFilter?: string): {
         source: r.source,
         startedAt: r.startedAt,
         steps: r.steps,
+        ...(r.snapshots ? { snapshots: r.snapshots } : {}),
       })),
     finished: listFinished().filter(matches).map(mapFinished),
   }
@@ -668,7 +672,11 @@ async function handleCommand(command: Command): Promise<CommandResult> {
     case 'workflows.run': {
       const workflow = await getWorkflow(command.id)
       if (!workflow) throw new Error('Workflow not found.')
-      const r = await executeWorkflow(workflow, { source: 'manual' })
+      const r = await executeWorkflow(workflow, {
+        source: 'manual',
+        startAt: (command as { startAt?: string }).startAt,
+        debug: workflow.settings?.debugMode === true,
+      })
       return {
         type: 'workflows.run',
         outcome: {

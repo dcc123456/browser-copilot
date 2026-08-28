@@ -13,6 +13,13 @@
  * confirm. The chosen selector is reported back through
  * chrome.runtime.sendMessage({ type: 'picker:result', pickerId, selector }).
  *
+ * IMPORTANT: this function is serialized via `func.toString()` and run in the
+ * page world by chrome.scripting.executeScript. EVERYTHING it uses — styles,
+ * icons, helpers — MUST be declared INSIDE the function body. Module-level
+ * constants (or imports) become free variables that do not exist in the page
+ * world and throw ReferenceError the moment the picker tries to mount, which
+ * strands the editor spinner. (Mirrors Automa's self-contained picker bundle.)
+ *
  * @module inpage/element-picker
  */
 
@@ -27,7 +34,11 @@ export interface PickerArgs {
 /** Entry signature used by chrome.scripting.executeScript({ func }). */
 type PickerStart = (args: PickerArgs) => Promise<void>
 
-const PICKER_STYLES = `
+export const startPicker: PickerStart = async (args) => {
+  const { pickerId, mode, findBy = 'cssSelector', selector: initial = '', multiple = false } = args
+
+  // --- styles (inlined so the serialized function is self-contained) --------
+  const PICKER_STYLES = `
 :host { all: initial; }
 * { box-sizing: border-box; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
 .pick-root { position: fixed; inset: 0; z-index: 2147483646; pointer-events: none; }
@@ -37,7 +48,7 @@ const PICKER_STYLES = `
 .pick-card { position: fixed; z-index: 2147483648; width: 330px; background: #fff;
   color: #111827; border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,0.28);
   pointer-events: auto; font-size: 13px; }
-.pick-card-head { display: flex; align-items: center; padding: 12px 14px 6px; }
+.pick-card-head { display: flex; align-items: center; padding: 12px 14px 6px; cursor: move; }
 .pick-title { font-weight: 700; font-size: 15px; }
 .pick-head-actions { margin-left: auto; display: flex; gap: 4px; }
 .pick-iconbtn { border: none; background: transparent; width: 28px; height: 28px;
@@ -68,16 +79,18 @@ const PICKER_STYLES = `
 .pick-err { margin-top: 8px; font-size: 12px; color: #dc2626; }
 `
 
-// --- inline SVG icons (RemixIcon glyphs; webfont unavailable in page world) --
-const ICON = {
-  close: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 10.587l4.95-4.95 1.414 1.414-4.95 4.95 4.95 4.95-1.414 1.414-4.95-4.95-4.95 4.95-1.414-1.414 4.95-4.95-4.95-4.95L7.05 5.637z"/></svg>',
-  up: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M13 7.828V20h-2V7.828l-5.364 5.364-1.414-1.414L12 4l7.778 7.778-1.414 1.414z"/></svg>',
-  down: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12 16-.343.343 5.657 5.657H22v-2h-3.657l-4.95-4.95-1.414 1.414 3.273 3.273L12 16zM2 6h4.686l4.95 4.95-1.414 1.414L6.657 8.657H2V6zm18 2.343L13.343 15 12 13.657l6.657-6.657H15V5h7v7h-2z"/></svg>',
-  check: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m10 15.172 7.071-7.071 1.414 1.414L10 18 5.515 13.515l1.414-1.414z"/></svg>',
-}
+  // --- inline SVG icons (RemixIcon glyphs; webfont unavailable in page world)
+  const ICON = {
+    close: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 10.587l4.95-4.95 1.414 1.414-4.95 4.95 4.95 4.95-1.414 1.414-4.95-4.95-4.95 4.95-1.414-1.414 4.95-4.95-4.95-4.95L7.05 5.637z"/></svg>',
+    up: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M13 7.828V20h-2V7.828l-5.364 5.364-1.414-1.414L12 4l7.778 7.778-1.414 1.414z"/></svg>',
+    down: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12 16-.343.343 5.657 5.657H22v-2h-3.657l-4.95-4.95-1.414 1.414 3.273 3.273L12 16zM2 6h4.686l4.95 4.95-1.414 1.414L6.657 8.657H2V6zm18 2.343L13.343 15 12 13.657l6.657-6.657H15V5h7v7h-2z"/></svg>',
+    check: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m10 15.172 7.071-7.071 1.414 1.414L10 18 5.515 13.515l1.414-1.414z"/></svg>',
+  }
 
-export const startPicker: PickerStart = async (args) => {
-  const { pickerId, mode, findBy = 'cssSelector', selector: initial = '', multiple = false } = args
+  // Idempotency guard (Automa's elementSelectorInstance): a previous picker
+  // mount (e.g. re-injection, or a re-trigger while one is open) is removed
+  // first so cards never stack and listeners never double-bind.
+  document.getElementById('bc-element-picker')?.remove()
 
   // --- selector builder (mirrors build-selector.ts; inlined for injection) ---
   interface Opts { idName: boolean; tagName: boolean; className: boolean; attr: boolean; attrNames: string[]; nthChild: boolean }
@@ -257,9 +270,18 @@ export const startPicker: PickerStart = async (args) => {
     }
   }
   const onClick = (e: MouseEvent) => {
+    // Clicks inside the picker card are retargeted to the shadow host when
+    // observed from the document (composed events cross the shadow boundary
+    // retargeted), so `closest('.pick-card')` can NEVER match at this level.
+    // The old guard fell through and the stopPropagation below killed the
+    // event before it descended into the shadow tree — the card's own
+    // confirm/cancel buttons never fired, `picker:result` was never sent, and
+    // the editor spinner spun forever. Return BEFORE preventDefault /
+    // stopPropagation so card clicks reach their shadow listeners (and
+    // checkbox/select defaults inside the card keep working).
+    if (host.contains(e.target as Node)) return
     e.preventDefault()
     e.stopPropagation()
-    if ((e.target as HTMLElement).closest('.pick-card')) return
     locked = hovered ?? document.elementFromPoint(e.clientX, e.clientY)
     if (locked && !host.contains(locked)) refresh()
   }

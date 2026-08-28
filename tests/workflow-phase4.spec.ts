@@ -30,6 +30,32 @@ vi.mock('../src/lib/storage', async (importActual) => {
   return { ...actual, getSettings: vi.fn() }
 })
 
+/**
+ * JS-expression blocks (javascript-code / condition / conditions / data-mapping
+ * / while-loop) evaluate user code in the PAGE in the MV3 build (the service
+ * worker CSP forbids `eval`/`new Function`). In tests there is no page, so the
+ * driver's page evaluator is replaced with a local `new Function` — the same
+ * semantics the engine falls back to when no evaluator is injected.
+ */
+vi.mock('../src/background/driver', async (importActual) => {
+  const actual = await importActual<typeof import('../src/background/driver')>()
+  return {
+    ...actual,
+    execJsOnActiveTab: vi.fn(
+      async (code: string, args: Record<string, unknown> = {}) => {
+        const names = Object.keys(args)
+        // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+        const fn = new Function(...names, `"use strict";\n${code}`)
+        try {
+          return { ok: true as const, data: fn(...names.map((n) => args[n])) }
+        } catch (error) {
+          return { ok: false as const, error: error instanceof Error ? error.message : String(error) }
+        }
+      },
+    ),
+  }
+})
+
 /** Build a minimal Workflow from nodes + edges. */
 function makeWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[]): Workflow {
   return {

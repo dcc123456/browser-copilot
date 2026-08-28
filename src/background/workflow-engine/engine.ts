@@ -41,6 +41,21 @@ export interface WorkflowRunOptions {
    * tests a stub or a literal `count` value in the node data may be used.
    */
   loopElementCounter?: (cssSelector: string, signal: AbortSignal) => number | Promise<number>
+  /**
+   * Evaluates a JS condition/expression against the run's variables. Injected
+   * by the integration layer so the pure engine stays chrome-free; in the real
+   * MV3 build it runs the code in the page (the service worker CSP forbids
+   * `eval`/`new Function`). Tests may omit it, in which case the engine falls
+   * back to a local `new Function` evaluation (valid in Node).
+   */
+  evaluateExpression?: (code: string, vars: Record<string, unknown>) => unknown | Promise<unknown>
+  /**
+   * Debug mode: when set, the engine captures a snapshot of the run variables
+   * after each executed block (keyed by node id), so a logs viewer can inspect
+   * them. Receives the node id, the resolved block label, and a CLONE of the
+   * variables at that point.
+   */
+  onSnapshot?: (nodeId: string, label: string, variables: Record<string, unknown>) => void
 }
 
 export interface WorkflowRunResult {
@@ -84,15 +99,31 @@ const CLOUD_BLOCK_IDS = new Set([
 /** onError action payload Automa stores per block. */
 interface OnErrorPolicy {
   enable?: boolean
-  toDo?: 'retry' | 'fallback' | 'error'
+  retry?: boolean
+  toDo?: 'retry' | 'fallback' | 'error' | 'continue'
   retryTimes?: number
   retryInterval?: number
+  errorMessage?: string
 }
 
 function onErrorPolicy(params: Record<string, unknown>): OnErrorPolicy | null {
   const raw = params['onError']
-  if (raw && typeof raw === 'object') return raw as OnErrorPolicy
-  return null
+  if (!raw || typeof raw !== 'object') return null
+  const p = raw as OnErrorPolicy
+  // Normalize the editor's Automa-style shape ({retry:true, toDo:'error'|
+  // 'continue'|'fallback', retryInterval in SECONDS}) onto the engine's
+  // internal shape ({toDo:'retry', retryInterval in ms}). Legacy data stored
+  // toDo:'retry' directly with ms intervals and keeps working.
+  const wantsRetry = p.retry === true || p.toDo === 'retry'
+  let interval = Number(p.retryInterval ?? 0)
+  // Automa's UI enters the interval in whole seconds; treat small values (< 60)
+  // as seconds (the old ms form was typically >= 500).
+  if (wantsRetry && interval > 0 && interval < 60) interval = interval * 1000
+  return {
+    ...p,
+    toDo: wantsRetry ? 'retry' : p.toDo === 'continue' ? 'error' : (p.toDo ?? 'error'),
+    retryInterval: interval,
+  }
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -138,8 +169,24 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/** Evaluates a `while-loop` condition expression against the run's variables. */
-function evalLoopCondition(code: string, vars: Record<string, unknown>): boolean {
+/**
+ * Evaluates a condition expression against the run's variables. Prefers the
+ * injected evaluator (which runs the code in the page — the MV3 service worker
+ * CSP forbids `eval`/`new Function`); falls back to a local `new Function`
+ * evaluation in environments where that is allowed (pure-engine tests / Node).
+ */
+async function evalCondition(
+  code: string,
+  vars: Record<string, unknown>,
+  evaluate?: (code: string, vars: Record<string, unknown>) => unknown | Promise<unknown>,
+): Promise<boolean> {
+  if (evaluate) {
+    try {
+      return Boolean(await evaluate(code, vars))
+    } catch {
+      return false
+    }
+  }
   try {
     const test = new Function('vars', 'refData', `return (${code})`)
     return Boolean(test(vars, undefined))
@@ -217,6 +264,8 @@ async function runCore(
     executors = EXECUTORS,
     parentWorkflowIds = new Set<string>(),
     loopElementCounter,
+    evaluateExpression,
+    onSnapshot,
   } = options
 
   const nodes = workflow.drawflow.nodes
@@ -380,18 +429,38 @@ async function runCore(
         summary = CANCELLED_SUMMARY
         return null
       }
+      // Automa toDo='continue': swallow the error and keep flowing down the
+      // normal (non-fallback) edge instead of failing the whole run.
+      if (policy?.enable && policy.toDo === 'continue') {
+        emit('info', nodeId, `Continuing despite error: ${text}`)
+        completedNodeIds.push(nodeId)
+        return defaultNext
+      }
       // Fallback routing: follow the edge from the `fallback` handle.
       if (policy?.enable && policy.toDo === 'fallback' && outputs['fallback']) {
         completedNodeIds.push(nodeId)
         return outputs['fallback']
       }
+      // Custom error message for toDo='error'.
+      if (policy?.enable && policy.toDo === 'error' && policy.errorMessage) {
+        error = policy.errorMessage
+        emit('error', nodeId, policy.errorMessage)
+      }
       outcome = 'failed'
-      error = text
+      error = error || text
       return null
     }
 
     const nextResult = resolver ?? defaultNext
     completedNodeIds.push(nodeId)
+    if (onSnapshot) {
+      try {
+        // A structural clone strips non-serializable values for the viewer.
+        onSnapshot(nodeId, blockId, JSON.parse(JSON.stringify(variables ?? {})))
+      } catch {
+        onSnapshot(nodeId, blockId, {})
+      }
+    }
     return nextResult
   }
 
@@ -463,7 +532,7 @@ async function runCore(
       const code = String(params['code'] ?? 'false')
       if (startId === null) return null
       let iterations = 0
-      while (evalLoopCondition(code, variables)) {
+      while (await evalCondition(code, variables, evaluateExpression)) {
         if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
         variables['loopIndex'] = iterations
         await runSegment(startId, loopNode.id)
@@ -523,6 +592,9 @@ async function runCore(
       signal: signalToUse,
       executors,
       parentWorkflowIds: childStack,
+      loopElementCounter,
+      evaluateExpression,
+      onSnapshot,
       onStep: onStep ? (kind, nodeId, text) => onStep(kind, nodeId, `[子] ${text}`) : undefined,
     })
     return defaultNext

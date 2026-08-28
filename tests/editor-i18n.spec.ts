@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { makeTranslate, resolveEditorLocale, EDITOR_STRINGS } from '../src/workflow-editor/i18n'
+import {
+  makeTranslate,
+  makeBlockTranslate,
+  resolveEditorLocale,
+  EDITOR_STRINGS,
+} from '../src/workflow-editor/i18n'
 
 describe('editor i18n', () => {
   it('resolves stored locale to editor locale', () => {
@@ -28,5 +33,24 @@ describe('editor i18n', () => {
     expect(tEn('run')).toBe('Run')
     expect(tEn('editor')).toBe('Editor')
     expect(tZh('logs')).toBe('日志')
+  })
+})
+
+describe('block-form translator (bt)', () => {
+  it('returns Chinese for known form labels in zh', () => {
+    const bt = makeBlockTranslate('zh')
+    expect(bt('Description')).toBe('描述')
+    expect(bt('JavaScript code')).toBe('JavaScript 代码')
+    expect(bt('Variable name')).toBe('变量名')
+    expect(bt('Timeout (milliseconds)')).toBe('超时（毫秒）')
+    expect(bt('Select multiple elements')).toBe('选择多个元素')
+  })
+
+  it('returns the English source unchanged in en or when untranslated', () => {
+    const btEn = makeBlockTranslate('en')
+    const btZh = makeBlockTranslate('zh')
+    expect(btEn('Description')).toBe('Description')
+    // Unknown key falls back verbatim so nothing renders blank.
+    expect(btZh('Some brand new label')).toBe('Some brand new label')
   })
 })

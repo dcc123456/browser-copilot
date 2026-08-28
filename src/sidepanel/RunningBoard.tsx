@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import { sendCommand, type FinishedTaskView, type RunningTaskView } from '../lib/messages'
 import { useT } from './i18n'
+import { confirmDialog } from '../ui/confirm'
 
 interface RunningBoardProps {
   /**
@@ -138,7 +139,14 @@ export default function RunningBoard({ onSettled, busy }: RunningBoardProps): Re
   }, [refresh])
 
   const clearFinished = useCallback(async (): Promise<void> => {
-    if (!confirm(t.taskClearFinishedConfirm)) return
+    const ok = await confirmDialog({
+      title: t.dialogDeleteTitle,
+      message: t.taskClearFinishedConfirm,
+      confirmText: t.delete,
+      cancelText: t.cancel,
+      danger: true,
+    })
+    if (!ok) return
     setLocalBusy(true)
     try {
       await sendCommand({ type: 'tasks.finished.clear' })

@@ -30,6 +30,11 @@ describe('needsConfirmation · which tools are gated', () => {
     // The original behaviour, unchanged: a model deciding on its own must ask.
     expect(needsConfirmation('read_current_page', undefined, PAGE)).toBe(true)
   })
+
+  it('gates run_javascript because it can change the page', () => {
+    expect(needsConfirmation('run_javascript', undefined, PAGE)).toBe(true)
+    expect(needsConfirmation('run_javascript', PAGE, PAGE)).toBe(true)
+  })
 })
 
 describe('needsConfirmation · waiver after an attach', () => {

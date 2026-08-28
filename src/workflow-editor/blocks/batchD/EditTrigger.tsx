@@ -28,6 +28,7 @@ import type { EditFormProps } from '../EditForms'
 import { Checkbox, Expand, Field, Select, TextArea, TextInput, type Patch } from '../shared/Field'
 import InteractionBase, { bool, num, str } from '../shared/InteractionBase'
 import ParameterFields, { type WorkflowParameter } from './ParameterFields'
+import WorkflowInfoFields from './WorkflowInfoFields'
 
 /** Sub-forms receive the same data/patch channel without needing blockId. */
 interface SubFormProps {
@@ -82,6 +83,10 @@ export default function EditTrigger({ data, onChange }: EditFormProps) {
 
   return (
     <div className="wf-form">
+      {/* Workflow name / description / run settings live on the trigger block
+          (Automa keeps workflow config with the trigger, not a separate tab). */}
+      <WorkflowInfoFields />
+
       <Field label="Description">
         <TextArea
           value={str(data, 'description')}

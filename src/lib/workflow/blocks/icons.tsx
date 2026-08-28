@@ -22,9 +22,36 @@
  * unit tests can import these components without pulling in font/CSS assets.
  */
 
-/** `riFlashlightLine` -> `ri-flashlight-line` (RemixIcon's webfont class). */
-function remixClass(name: string): string {
-  const kebab = name.replace(/([A-Z])/g, '-$1').toLowerCase()
+/**
+ * Pascal `riXxx` names whose straight kebab translation does NOT match the
+ * RemixIcon webfont class, or which Automa points at a glyph this RemixIcon
+ * version doesn't ship:
+ *  - `riHtml5Line` has no dash before the digit (`ri-html5-line`);
+ *  - `riCodeSSlashLine` is two `s` tokens (`ri-code-s-slash-line`);
+ *  - `riAB` (the Conditions block) has no matching glyph in this font version,
+ *    so it is pointed at a branch glyph that exists (`ri-git-branch-line`).
+ */
+const REMIX_CLASS_ALIASES: Record<string, string> = {
+  riHtml5Line: 'ri-html5-line',
+  riCodeSSlashLine: 'ri-code-s-slash-line',
+  riAB: 'ri-git-branch-line',
+}
+
+/**
+ * Convert a Pascal RemixIcon name (`riFlashlightLine`) to its webfont class
+ * (`ri-flashlight-line`). Beyond camelCase splitting, RemixIcon inserts a dash
+ * between a word and a version/number suffix — `riWindow2Line` is
+ * `ri-window-2-line`, `riDeleteBin7Line` is `ri-delete-bin-7-line` — which a
+ * purely "dash before uppercase" rule misses, leaving those glyphs blank.
+ */
+export function remixClass(name: string): string {
+  const alias = REMIX_CLASS_ALIASES[name]
+  if (alias) return alias
+  const kebab = name
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(/([A-Za-z])([0-9]+)/g, '$1-$2')
+    .replace(/([0-9])([A-Za-z])/g, '$1-$2')
+    .toLowerCase()
   // "ri-flashlight-line" — the leading "ri-" prefix comes from `ri` + `-F...`.
   return kebab.startsWith('ri-') ? kebab : `ri-${kebab}`
 }

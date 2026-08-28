@@ -76,6 +76,7 @@ const ACTION_TOOLS = new Set([
   'tab_new',
   'tab_switch',
   'tab_close',
+  'run_javascript',
 ])
 
 const READ_TOOLS = new Set(['read_current_page', 'snapshot_page', 'list_tabs'])
@@ -365,6 +366,24 @@ export const TOOLS: WireTool[] = [
       name: 'tab_close',
       description: 'Close the active tab.',
       parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'run_javascript',
+      description:
+        'Run custom JavaScript in the active web page and return its result. Use for data extraction or page manipulation the other tools cannot do. The code runs as a function body in the page; use `return` to send a JSON-serializable value back. This changes the page and requires approval.',
+      parameters: {
+        type: 'object',
+        properties: {
+          code: {
+            type: 'string',
+            description: 'JavaScript statements to execute in the page. Use `return` to send a value back.',
+          },
+        },
+        required: ['code'],
+      },
     },
   },
   {
@@ -802,6 +821,8 @@ function describeAction(name: string, args: Record<string, unknown>): string {
       return `Switch to tab #${Number(args.index ?? 0)}`
     case 'tab_close':
       return 'Close the active tab'
+    case 'run_javascript':
+      return 'Run JavaScript in the page'
     case 'get_secret':
       return `Fill ${targetLabel} with saved credential${
         typeof args.field === 'string' && args.field ? ` (${args.field})` : ''
@@ -862,6 +883,15 @@ async function executeTool(
           active: tab.active,
         })),
       )
+    }
+
+    case 'run_javascript': {
+      throwIfAborted()
+      const code = String(args.code ?? '')
+      if (!code.trim()) return JSON.stringify({ error: 'run_javascript requires code.' })
+      const result = await execOnActiveTab({ action: 'exec_js', value: code }, signal)
+      if (!result.ok) return JSON.stringify({ error: result.error ?? 'JavaScript execution failed' })
+      return JSON.stringify({ ok: true, result: result.data ?? null })
     }
 
     case 'click': {

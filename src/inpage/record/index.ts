@@ -100,6 +100,17 @@ export const startRecorder: RecorderStart = (args) => {
   // fires), so we record on input, on Enter and on change, deduping per field.
   const TEXT_PENDING = new Map<Element, { selector: string; name: string; timer: ReturnType<typeof setTimeout> | null }>()
 
+  /**
+   * The last text-field value recorded PER FIELD, keyed by element. One physical
+   * fill of a field reaches us through up to four paths — the debounced `input`,
+   * an Enter commit, the `focusout` flush, and the trailing `change` event — and
+   * without this they each emitted a separate `forms` block, duplicating the
+   * node. We only emit a block when the field's value differs from the last one
+   * we recorded for that same element, so a single fill yields one node while
+   * genuinely distinct values are still kept.
+   */
+  const LAST_TEXT_SENT = new WeakMap<Element, string>()
+
   function textFieldValue(el: Element): string {
     if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return (el as HTMLInputElement).value
     return (el as HTMLElement).innerText ?? ''
@@ -111,37 +122,47 @@ export const startRecorder: RecorderStart = (args) => {
     return nm ?? ''
   }
 
+  /** Build the `forms` text-field flow for an element once. */
+  function formsFlowFor(el: Element, selector: string, name: string) {
+    return {
+      blockId: 'forms',
+      selector,
+      findBy: 'cssSelector',
+      type: 'text-field',
+      value: textFieldValue(el),
+      clearValue: true,
+      delay: 100,
+      waitForSelector: true,
+      waitSelectorTimeout: 5000,
+      description: name ? `Text field (${name.slice(0, 12)})` : 'Text field',
+    }
+  }
+
+  /** Emit a text-field `forms` block, skipping a repeat of the last value. */
+  function sendFormsText(el: Element, selector: string, name: string): void {
+    const value = textFieldValue(el)
+    if (LAST_TEXT_SENT.get(el) === value) return
+    LAST_TEXT_SENT.set(el, value)
+    send(formsFlowFor(el, selector, name))
+  }
+
   function recordText(el: Element, immediate: boolean) {
     if (!isEditable(el)) return
     const selector = (el as HTMLElement).dataset.__bcSel ?? selectorFor(el)
     ;(el as HTMLElement).dataset.__bcSel = selector
     const name = textFieldName(el)
-    const sendForms = () => {
-      send({
-        blockId: 'forms',
-        selector,
-        findBy: 'cssSelector',
-        type: 'text-field',
-        value: textFieldValue(el),
-        clearValue: true,
-        delay: 100,
-        waitForSelector: true,
-        waitSelectorTimeout: 5000,
-        description: name ? `Text field (${name.slice(0, 12)})` : 'Text field',
-      })
-    }
     if (immediate) {
       const pending = TEXT_PENDING.get(el)
       if (pending?.timer) clearTimeout(pending.timer)
       TEXT_PENDING.delete(el)
-      sendForms()
+      sendFormsText(el, selector, name)
       return
     }
     const existing = TEXT_PENDING.get(el)
     if (existing?.timer) clearTimeout(existing.timer)
     const timer = setTimeout(() => {
       TEXT_PENDING.delete(el)
-      sendForms()
+      sendFormsText(el, selector, name)
     }, 400)
     TEXT_PENDING.set(el, { selector, name, timer })
   }
@@ -161,19 +182,11 @@ export const startRecorder: RecorderStart = (args) => {
     if (pending) {
       if (pending.timer) clearTimeout(pending.timer)
       TEXT_PENDING.delete(el)
-      send({
-        blockId: 'forms',
-        selector: pending.selector,
-        findBy: 'cssSelector',
-        type: 'text-field',
-        value: textFieldValue(el),
-        clearValue: true,
-        delay: 100,
-        waitForSelector: true,
-        waitSelectorTimeout: 5000,
-        description: pending.name ? `Text field (${pending.name.slice(0, 12)})` : 'Text field',
-      })
     }
+    // Either flush the pending value or, if nothing was debounced, still emit
+    // the blur value — sendFormsText de-dupes against the last recorded value,
+    // so this never duplicates the block a debounced/Enter path already sent.
+    sendFormsText(el, pending?.selector ?? (el as HTMLElement).dataset.__bcSel ?? selectorFor(el), pending?.name ?? textFieldName(el))
   }
   function onInputField(e: Event) {
     const el = e.target as Element | null

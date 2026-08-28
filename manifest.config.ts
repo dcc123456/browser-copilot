@@ -40,7 +40,7 @@ export default defineManifest({
   description:
     'A side-panel assistant that can read and act on the page you are looking at. Works with any OpenAI-compatible model.',
   minimum_chrome_version: '116',
-  permissions: ['storage', 'tabs', 'scripting', 'sidePanel', 'alarms', 'offscreen', 'contextMenus', 'webNavigation', 'cookies', 'downloads', 'clipboardRead'],
+  permissions: ['storage', 'tabs', 'scripting', 'sidePanel', 'alarms', 'offscreen', 'contextMenus', 'webNavigation', 'cookies', 'downloads', 'clipboardRead', 'debugger'],
   host_permissions: ['http://*/*', 'https://*/*'],
   icons: {
     16: 'icons/icon-16.png',

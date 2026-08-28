@@ -17,8 +17,9 @@
 
 import { isInjectablePage } from '../lib/pages'
 import type { Op, OpResult, PageSnapshot } from '../lib/ops'
-import { runOp } from '../inpage/kernel'
+import { runOp, runExecJs, runWorkflowJs } from '../inpage/kernel'
 import { activeTab } from './page'
+import { getLastInjectableTab } from './last-tab'
 
 /**
  * Resolve the tab a workflow should act on.
@@ -41,10 +42,25 @@ export async function resolveAutomationTab(
   }
 
   const focused = await activeTab()
+  const focusedWindowId = typeof focused?.windowId === 'number' ? focused.windowId : undefined
   if (focused && isInjectablePage(focused.url)) return focused
 
-  // Focused window is an extension page / not injectable: search normal
-  // windows (most recently focused first) for an active http(s) tab.
+  // Focused window is an extension page / not injectable. Prefer the active tab
+  // of the LAST FOCUSED *NORMAL* window — Automa's getActiveTab() does exactly
+  // this. The standalone editor is opened as a `popup`-type window, so
+  // getLastFocused({ windowTypes: ['normal'] }) structurally skips it and
+  // returns the ordinary browser window the user was just looking at.
+  const lastNormal = await chrome.windows
+    .getLastFocused({ windowTypes: ['normal'], populate: true })
+    .catch(() => undefined)
+  if (lastNormal && typeof lastNormal.id === 'number') {
+    const active = lastNormal.tabs?.find((t) => t.active)
+    const candidate = active ?? lastNormal.tabs?.find((t) => isInjectablePage(t.url))
+    if (candidate && isInjectablePage(candidate.url)) return candidate
+  }
+
+  // Fallback: search normal windows (most recently focused first) for their
+  // active http(s) tab.
   const windows = await chrome.windows.getAll({ windowTypes: ['normal'] }).catch(() => [])
   const sorted = (windows as chrome.windows.Window[]).slice().sort((a, b) => (b.id ?? 0) - (a.id ?? 0))
   for (const win of sorted) {
@@ -53,9 +69,22 @@ export async function resolveAutomationTab(
     const hit = tabs.find((t) => isInjectablePage(t.url))
     if (hit) return hit
   }
-  // Last resort: any injectable active tab anywhere.
+  // Any injectable active tab anywhere.
   const anyTabs = await chrome.tabs.query({ active: true }).catch(() => [])
-  return anyTabs.find((t) => isInjectablePage(t.url)) ?? focused
+  const anyHit = anyTabs.find((t) => isInjectablePage(t.url))
+  if (anyHit) return anyHit
+
+  // No injectable active tab (typically: launched from the standalone editor
+  // popup, which is a chrome-extension:// window none of the active-tab queries
+  // surface). Fall back to the last ordinary page the user actually viewed,
+  // preferring the focused window. Never fall back to the extension tab itself
+  // — acting on it fails with an opaque "only http(s) pages" error.
+  const remembered = await getLastInjectableTab(focusedWindowId).catch(() => undefined)
+  if (remembered) return remembered
+
+  // Genuinely nothing to automate; return undefined so callers report a clear
+  // error rather than trying to inject into the editor/extension page.
+  return undefined
 }
 
 /** Fragments Chrome produces when a navigation invalidated the context. */
@@ -135,15 +164,25 @@ export async function execOnActiveTab(
   preferredTabId?: number,
 ): Promise<OpResult> {
   const tab = await resolveAutomationTab(preferredTabId)
-  if (!tab || typeof tab.id !== 'number') {
-    throw new DriverError('No active tab to operate on.')
-  }
-  if (!isInjectablePage(tab.url)) {
+  if (!tab || typeof tab.id !== 'number' || !isInjectablePage(tab.url)) {
     throw new DriverError(
-      `Cannot act on ${tab.url ?? 'this page'}: only ordinary http(s) pages can be automated.`,
+      '没有可操作的网页：请先在普通 http(s) 网页标签页上运行工作流（不能在扩展弹窗 / chrome:// 页面上执行页面操作）。',
     )
   }
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+
+  // User JavaScript runs in the page's MAIN world — the page's own JS context
+  // (its window, page globals and libraries), the natural target for "run code
+  // on this page". A static wrapper injection is CSP-exempt; compiling the
+  // user's source inside it is governed by the page's CSP, like DevTools. We
+  // run only the top frame: it is the document's own script context and avoids
+  // re-running user code once per frame.
+  if (op.action === 'exec_js') {
+    return runJsInMainWorld(tab, op, signal)
+  }
+  if (op.action === 'exec_workflow_js') {
+    return runWorkflowJsInMainWorld(tab, op, signal)
+  }
 
   let injections: chrome.scripting.InjectionResult<unknown>[]
   try {
@@ -186,6 +225,289 @@ export async function execOnActiveTab(
     (result.found ? 4 : 0) + (result.ok ? 2 : 0) + (result.isTopFrame ? 1 : 0)
   results.sort((a, b) => rank(b) - rank(a))
   return results[0] as OpResult
+}
+
+/**
+ * Translate a thrown evaluation error into a clear message, recognizing CSP
+ * blocks (the page forbids `unsafe-eval`).
+ */
+export function isCspBlocked(message: string): boolean {
+  const m = message || ''
+  return /content security policy|unsafe-eval|eval.*csp|evaluating a string|cannot call method.*eval|refused to evaluate a string/i.test(
+    m,
+  )
+}
+
+/** Whether the MAIN-world eval failed specifically because the page CSP forbids it. */
+function explainJsError(message: string): string {
+  const m = message || ''
+  if (isCspBlocked(m)) {
+    return (
+      '该页面的内容安全策略（CSP）禁止执行自定义 JavaScript（未允许 unsafe-eval），无法在此页面运行 JS 代码。' +
+      '请在未禁用页面脚本的普通网页上运行，或调整该页面的 CSP（如本地开发服务器可放宽 script-src）。'
+    )
+  }
+  return m
+}
+
+/**
+ * Evaluate code in the page's MAIN world via the Chrome DevTools Protocol
+ * (`chrome.debugger` + `Runtime.evaluate`). This is the CSP bypass Automa uses:
+ * DevTools evaluation runs in the page's real JS context (so `window`, page
+ * globals and the DOM are all visible) but is NOT governed by the page's CSP,
+ * unlike `<script>`/`new Function` injected by `chrome.scripting` MAIN world.
+ *
+ * Attaching the debugger shows Chrome's "extension is debugging this tab"
+ * infobar; we attach on demand and detach immediately after. Resolves the
+ * JSON-serializable result value, or rejects with the runtime/attach error.
+ */
+async function evalViaCdp(tabId: number, expression: string): Promise<unknown> {
+  const target = { tabId }
+  const attach = async (): Promise<void> => {
+    try {
+      await chrome.debugger.attach(target, '1.3')
+    } catch (error) {
+      // Already attached (e.g. a previous run didn't detach) — reuse it.
+      const msg = error instanceof Error ? error.message : String(error)
+      if (!/already attached|already being debugged/i.test(msg)) throw error
+    }
+  }
+
+  await attach()
+  let attached = true
+  const detach = async (): Promise<void> => {
+    if (!attached) return
+    attached = false
+    try {
+      await chrome.debugger.detach(target)
+    } catch {
+      /* may already be detached */
+    }
+  }
+
+  try {
+    const res = (await chrome.debugger.sendCommand(target, 'Runtime.evaluate', {
+      expression,
+      // Evaluate in the page's top frame MAIN world (the default context),
+      // await Promises, and surface thrown errors as exceptionDetails.
+      awaitPromise: true,
+      returnByValue: true,
+      userGesture: false,
+    })) as {
+      result?: { type?: string; value?: unknown }
+      exceptionDetails?: { exception?: { description?: string }; text?: string }
+    }
+
+    if (res.exceptionDetails) {
+      const desc =
+        res.exceptionDetails.exception?.description ??
+        res.exceptionDetails.text ??
+        'JavaScript execution failed'
+      throw new DriverError(desc.split('\n')[0] || desc)
+    }
+    return res.result?.value
+  } finally {
+    await detach()
+  }
+}
+
+/**
+ * Run a self-contained kernel harness function (e.g. `runWorkflowJs`) via CDP
+ * in the page's MAIN world, returning its result. The function source is
+ * serialized and invoked inside a `Runtime.evaluate` expression — it still
+ * compiles user code internally, but that compilation happens under the
+ * DevTools context which the page CSP cannot block.
+ */
+async function callHarnessViaCdp(
+  tabId: number,
+  fn: (...args: unknown[]) => unknown,
+  arg: unknown,
+): Promise<unknown> {
+  // `await` because runWorkflowJs returns a Promise (awaited by CDP).
+  const expression = `(${fn.toString()})(JSON.parse(${JSON.stringify(JSON.stringify(arg))}))`
+  return evalViaCdp(tabId, expression)
+}
+
+/**
+ * Inject `runExecJs` into the tab's MAIN world (top frame) and return an
+ * OpResult-shaped outcome so callers of `execOnActiveTab`/`execJsOnActiveTab`
+ * stay uniform.
+ */
+async function runJsInMainWorld(
+  tab: chrome.tabs.Tab,
+  op: Op,
+  signal: AbortSignal | undefined,
+): Promise<OpResult> {
+  const frameUrl = tab.url ?? ''
+  const base: OpResult = {
+    ok: false,
+    found: true,
+    frameUrl,
+    isTopFrame: true,
+  }
+  if (typeof tab.id !== 'number') return { ...base, error: '当前标签页无法执行脚本。' }
+  try {
+    const injections = await abortable(
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        func: runExecJs as unknown as (...args: unknown[]) => unknown,
+        args: [
+          {
+            code: String(op.value ?? ''),
+            argNames: Array.isArray(op.jsArgNames) ? op.jsArgNames : undefined,
+            args: op.jsArgs ?? {},
+          },
+        ],
+      } as unknown as chrome.scripting.ScriptInjection<unknown[], unknown>),
+      signal,
+    )
+    const value = injections?.[0]?.result as
+      | { ok: true; data?: unknown }
+      | { ok: false; error?: string }
+      | undefined
+    if (!value) {
+      return { ...base, error: 'JS 未返回结果（页面可能刚跳转）。' }
+    }
+    if (value.ok) return { ...base, ok: true, data: value.data }
+    // MAIN-world eval blocked by the page CSP → fall back to CDP (Automa does
+    // the same), which evaluates in the page context without obeying its CSP.
+    if (value.error && isCspBlocked(value.error)) {
+      const cdp = await runExecJsViaCdp(tab.id, op)
+      if (cdp) return { ...base, ok: true, data: cdp.data }
+      return { ...base, error: explainJsError(value.error) }
+    }
+    return { ...base, error: explainJsError(value.error ?? 'JavaScript execution failed') }
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError') throw error
+    const message = error instanceof Error ? error.message : String(error)
+    if (isContextLost(message)) {
+      return {
+        ok: true,
+        found: true,
+        frameUrl,
+        isTopFrame: true,
+        mayNavigate: true,
+        note: 'The page navigated during this step.',
+      }
+    }
+    // Injection itself can surface the CSP error in some builds; try CDP.
+    if (isCspBlocked(message)) {
+      const cdp = await runExecJsViaCdp(tab.id, op)
+      if (cdp) return { ...base, ok: true, data: cdp.data }
+    }
+    return { ...base, error: explainJsError(message) }
+  }
+}
+
+/**
+ * Run the one-shot `runExecJs` expression/body harness through CDP as a CSP
+ * fallback. Returns the harness's `{ ok, data }` or `null` when CDP is
+ * unavailable/fails (so callers keep their normal error path).
+ */
+async function runExecJsViaCdp(
+  tabId: number,
+  op: Op,
+): Promise<{ ok: true; data?: unknown } | null> {
+  if (!chrome?.debugger) return null
+  try {
+    const result = (await callHarnessViaCdp(tabId, runExecJs as unknown as (...a: unknown[]) => unknown, {
+      code: String(op.value ?? ''),
+      argNames: Array.isArray(op.jsArgNames) ? op.jsArgNames : undefined,
+      args: op.jsArgs ?? {},
+    })) as { ok: true; data?: unknown } | { ok: false; error?: string } | undefined
+    if (result && result.ok) return { ok: true, data: result.data }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Inject `runWorkflowJs` (async, Automa-helper harness) into the tab's MAIN
+ * world for the workflow "JavaScript code" block and normalise the result.
+ */
+async function runWorkflowJsInMainWorld(
+  tab: chrome.tabs.Tab,
+  op: Op,
+  signal: AbortSignal | undefined,
+): Promise<OpResult> {
+  const frameUrl = tab.url ?? ''
+  const base: OpResult = { ok: false, found: true, frameUrl, isTopFrame: true }
+  if (typeof tab.id !== 'number') return { ...base, error: '当前标签页无法执行脚本。' }
+  try {
+    const injections = await abortable(
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        func: runWorkflowJs as unknown as (...args: unknown[]) => unknown,
+        args: [
+          {
+            code: String(op.value ?? ''),
+            variables: (op.jsArgs?.['variables'] as Record<string, unknown>) ?? {},
+            timeout: Number(op.jsArgs?.['timeout'] ?? 20000),
+          },
+        ],
+      } as unknown as chrome.scripting.ScriptInjection<unknown[], unknown>),
+      signal,
+    )
+    const value = injections?.[0]?.result as
+      | { ok: true; data?: unknown; variables?: Record<string, unknown>; logs?: { level: string; message: string }[] }
+      | { ok: false; error?: string; logs?: { level: string; message: string }[] }
+      | undefined
+    if (!value) return { ...base, error: 'JS 未返回结果（页面可能刚跳转）。' }
+    if (value.ok) {
+      // Carry the structured harness payload (result value, mutated variables,
+      // captured console logs) back as the op's data.
+      return {
+        ...base,
+        ok: true,
+        data: { result: value.data, variables: value.variables, logs: value.logs ?? [] },
+      }
+    }
+    // CSP blocked the MAIN-world compile → run the same harness via CDP.
+    if (value.error && isCspBlocked(value.error)) {
+      const cdp = await runWorkflowJsViaCdp(tab.id, op)
+      if (cdp) return { ...base, ok: true, data: cdp }
+    }
+    return { ...base, error: explainJsError(value.error ?? 'JavaScript execution failed'), data: { logs: value.logs ?? [] } }
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError') throw error
+    const message = error instanceof Error ? error.message : String(error)
+    if (isCspBlocked(message)) {
+      const cdp = await runWorkflowJsViaCdp(tab.id, op)
+      if (cdp) return { ...base, ok: true, data: cdp }
+    }
+    return { ...base, error: explainJsError(message) }
+  }
+}
+
+/** CSP fallback: run the async `runWorkflowJs` harness through CDP. */
+async function runWorkflowJsViaCdp(
+  tabId: number,
+  op: Op,
+): Promise<{ result?: unknown; variables?: Record<string, unknown>; logs: { level: string; message: string }[] } | null> {
+  if (!chrome?.debugger) return null
+  try {
+    const value = (await callHarnessViaCdp(
+      tabId,
+      runWorkflowJs as unknown as (...a: unknown[]) => unknown,
+      {
+        code: String(op.value ?? ''),
+        variables: (op.jsArgs?.['variables'] as Record<string, unknown>) ?? {},
+        timeout: Number(op.jsArgs?.['timeout'] ?? 20000),
+      },
+    )) as
+      | { ok: true; data?: unknown; variables?: Record<string, unknown>; logs?: { level: string; message: string }[] }
+      | { ok: false }
+      | undefined
+    if (value && value.ok) {
+      return { result: value.data, variables: value.variables, logs: value.logs ?? [] }
+    }
+    return null
+  } catch {
+    return null
+  }
 }
 
 /** Convenience wrapper returning a structured snapshot. */
@@ -306,6 +628,80 @@ export async function countElements(
 ): Promise<number> {
   const result = await execOnActiveTab({ action: 'count_elements', value: selector }, signal)
   return typeof result.data === 'number' ? result.data : 0
+}
+
+/** Result of evaluating user JavaScript in the page. */
+export interface ExecJsResult {
+  ok: boolean
+  data?: unknown
+  error?: string
+}
+
+/**
+ * Evaluate user JavaScript in the active tab's page (MAIN world).
+ *
+ * The MV3 service worker and offscreen document forbid `eval`/`new Function`
+ * under their CSP, so workflow JS blocks and the agent's `run_javascript` tool
+ * execute in the page itself. The wrapper is injected CSP-exempt into the MAIN
+ * world; compiling the user source is governed by the page's CSP (like DevTools)
+ * — pages without `unsafe-eval` report a clear error. `code` is a function body
+ * (use `return` to send a value back); named `args` are parameters.
+ */
+export async function execJsOnActiveTab(
+  code: string,
+  args: Record<string, unknown> = {},
+  signal?: AbortSignal,
+  preferredTabId?: number,
+): Promise<ExecJsResult> {
+  const result = await execOnActiveTab(
+    { action: 'exec_js', value: code, jsArgs: args, jsArgNames: Object.keys(args) },
+    signal,
+    preferredTabId,
+  )
+  if (result.ok) return { ok: true, data: result.data }
+  return { ok: false, error: result.error ?? 'JavaScript execution failed' }
+}
+
+/** Structured result of a workflow "JavaScript code" block. */
+export interface WorkflowJsResult {
+  /** Value passed to automaNextBlock / returned by the code. */
+  result: unknown
+  /** Variables the code set via automaSetVariable, merged into the run. */
+  variables?: Record<string, unknown>
+  /** console.* output captured while the code ran. */
+  logs: { level: string; message: string }[]
+}
+
+/**
+ * Run a workflow "JavaScript code" block in the page's MAIN world with the
+ * Automa helper harness (automaNextBlock / automaSetVariable / automaRefData /
+ * automaResetTimeout), captured console output, a timeout, and async support.
+ */
+export async function execWorkflowJsOnActiveTab(
+  code: string,
+  variables: Record<string, unknown>,
+  timeout: number,
+  signal?: AbortSignal,
+  preferredTabId?: number,
+): Promise<{ ok: true; data: WorkflowJsResult; logs: { level: string; message: string }[] } | { ok: false; error: string; logs: { level: string; message: string }[] }> {
+  const result = await execOnActiveTab(
+    {
+      action: 'exec_workflow_js',
+      value: code,
+      jsArgs: { variables, timeout },
+    },
+    signal,
+    preferredTabId,
+  )
+  const captured =
+    result.data && typeof result.data === 'object'
+      ? (((result.data as { logs?: unknown }).logs as { level: string; message: string }[]) ?? [])
+      : []
+  if (result.ok) {
+    const payload = result.data as Partial<WorkflowJsResult>
+    return { ok: true, data: { result: payload.result, variables: payload.variables, logs: captured }, logs: captured }
+  }
+  return { ok: false, error: result.error ?? 'JavaScript execution failed', logs: captured }
 }
 
 // --- Cookie helpers (service-worker side, no page needed) --------------------

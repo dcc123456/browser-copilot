@@ -48,11 +48,14 @@ import { edgeTypes } from './flow/CustomEdge'
 import Sidebar, { loadWidth } from './sidebar/Sidebar'
 import BlockPalette from './sidebar/BlockPalette'
 import BlockEditForm from './sidebar/BlockEditForm'
-import WorkflowDetails from './sidebar/WorkflowDetails'
-import EditorLogs from './sidebar/EditorLogs'
-import TopToolbar, { type EditorTab } from './toolbar/TopToolbar'
+import BlockSettingsModal from './blocks/shared/BlockSettingsModal'
+import LogsModal from './sidebar/LogsModal'
+import { WorkflowMetaProvider } from './blocks/batchD/WorkflowInfoFields'
+import TopToolbar from './toolbar/TopToolbar'
 import CanvasControls from './toolbar/CanvasControls'
 import { useToast } from './toast'
+import { ToastHost } from '../ui/toast'
+import { ConfirmHost } from '../ui/confirm'
 import { makeTranslate, resolveEditorLocale } from './i18n'
 import { EditorLocaleContext, makeEditorLocale, type EditorLocale as EditorLocaleValue } from './locale-context'
 import { autoLayout } from './auto-layout'
@@ -100,11 +103,14 @@ export default function EditorApp() {
   const [nodes, setNodes] = useState<FlowNode[]>([])
   const [edges, setEdges] = useState<Edge[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  /** Node id whose block-settings modal is open (gear button in hover toolbar). */
+  const [settingsForId, setSettingsForId] = useState<string | null>(null)
+  /** Whether the run-logs / debug viewer modal is open. */
+  const [logsOpen, setLogsOpen] = useState(false)
   const [rightOpen, setRightOpen] = useState(true)
   const [paletteOpen, setPaletteOpen] = useState(true)
   const [rightWidth, setRightWidth] = useState(() => loadWidth('right'))
   const [paletteWidth, setPaletteWidth] = useState(() => loadWidth('left'))
-  const [tab, setTab] = useState<EditorTab>('editor')
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
   const [recording, setRecording] = useState(false)
@@ -186,7 +192,14 @@ export default function EditorApp() {
         loadedRef.current = true
       })()
     } else {
-      setWorkflowId(newId())
+      const id = newId()
+      setWorkflowId(id)
+      // Seed every new workflow with a Trigger block (Automa always does): it is
+      // where the workflow name, trigger type and run settings are edited.
+      const triggerBlock = BLOCK_BY_ID.get('trigger')
+      if (triggerBlock) {
+        setNodes([newFlowNode(triggerBlock, { x: 120, y: 160 })])
+      }
       loadedRef.current = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -207,7 +220,6 @@ export default function EditorApp() {
     if (next !== undefined) {
       setSelectedId(next)
       if (next) {
-        setTab('editor')
         setRightOpen(true)
       }
     }
@@ -276,6 +288,83 @@ export default function EditorApp() {
     [selectedId],
   )
 
+  // --- node hover-toolbar actions (Automa block-menu) ------------------------
+  const openNodeEditor = useCallback((id: string) => {
+    setSelectedId(id)
+    setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === id })))
+    setRightOpen(true)
+  }, [])
+
+  // Gear button: open the block settings + on-error modal (Automa BlockSettings).
+  // Select the node too (without forcing the sidebar open) so the modal edits
+  // the live node data.
+  const openNodeSettings = useCallback((id: string) => {
+    setSelectedId(id)
+    setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === id })))
+    setSettingsForId(id)
+  }, [])
+
+  // Patch an arbitrary node's block data (used by the settings modal, which may
+  // target a node that is not the current sidebar selection).
+  const patchNode = useCallback((id: string, patch: Record<string, unknown>) => {
+    setNodes((nds) =>
+      nds.map((n) =>
+        n.id === id
+          ? { ...n, data: { ...n.data, blockData: { ...n.data.blockData, ...patch } } }
+          : n,
+      ),
+    )
+  }, [])
+
+  const deleteNode = useCallback(
+    (id: string) => {
+      setNodes((nds) => nds.filter((n) => n.id !== id))
+      // Remove edges that were attached to the deleted node.
+      setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id))
+      setSelectedId((cur) => (cur === id ? null : cur))
+      toast.show(t('nodeDeleted'), 'info')
+    },
+    [toast, t],
+  )
+
+  const duplicateNode = useCallback(
+    (id: string) => {
+      setNodes((nds) => {
+        const src = nds.find((n) => n.id === id)
+        if (!src) return nds
+        const copy: FlowNode = {
+          ...src,
+          id: newId(),
+          position: { x: src.position.x + 40, y: src.position.y + 40 },
+          selected: false,
+          data: {
+            ...src.data,
+            blockData: { ...structuredClone(src.data.blockData) },
+          },
+        }
+        toast.show(t('nodeDuplicated'), 'ok')
+        return [...nds, copy]
+      })
+    },
+    [toast, t],
+  )
+
+  const toggleNodeDisabled = useCallback((id: string) => {
+    setNodes((nds) =>
+      nds.map((n) =>
+        n.id === id
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                blockData: { ...n.data.blockData, disableBlock: n.data.blockData.disableBlock !== true },
+              },
+            }
+          : n,
+      ),
+    )
+  }, [])
+
   const buildWorkflow = useCallback(async (): Promise<Workflow | null> => {
     if (!workflowId) return null
     const { x, y, zoom } = reactFlow.getViewport()
@@ -322,30 +411,52 @@ export default function EditorApp() {
     }
   }, [buildWorkflow, toast, t])
 
-  const handleRun = useCallback(async () => {
-    if (!workflowId) return
-    await handleSave()
-    setRunning(true)
-    try {
-      const r = await sendCommand({ type: 'workflows.run', id: workflowId })
-      if (r.type === 'workflows.run') {
-        if (r.outcome.ok) toast.show(t('runFinished'), 'ok')
-        else {
-          const msg = r.outcome.error ?? r.outcome.summary
-          setError(msg)
-          toast.show(`${t('runFailed')}: ${msg}`, 'error')
+  const handleRun = useCallback(
+    async (startNodeId?: string) => {
+      if (!workflowId) return
+      await handleSave()
+      setRunning(true)
+      try {
+        const r = await sendCommand({ type: 'workflows.run', id: workflowId, startAt: startNodeId })
+        if (r.type === 'workflows.run') {
+          if (r.outcome.ok) toast.show(startNodeId ? t('runFromHereFinished') : t('runFinished'), 'ok')
+          else {
+            const msg = r.outcome.error ?? r.outcome.summary
+            setError(msg)
+            toast.show(`${t('runFailed')}: ${msg}`, 'error')
+          }
         }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        setError(msg)
+        toast.show(`${t('runFailed')}: ${msg}`, 'error')
+      } finally {
+        setRunning(false)
+        // Logs are viewed in a modal (Automa's log viewer), not the sidebar.
+        setLogsOpen(true)
       }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      setError(msg)
-      toast.show(`${t('runFailed')}: ${msg}`, 'error')
-    } finally {
-      setRunning(false)
-      setTab('logs')
-      setRightOpen(true)
-    }
-  }, [workflowId, handleSave, toast, t])
+    },
+    [workflowId, handleSave, toast, t],
+  )
+
+  // Stable callbacks injected into every node's hover toolbar.
+  const nodeActions = useMemo(
+    () => ({
+      onDelete: deleteNode,
+      onDuplicate: duplicateNode,
+      onSettings: openNodeSettings,
+      onEdit: openNodeEditor,
+      onToggleDisable: toggleNodeDisabled,
+      onRunFromHere: (id: string) => void handleRun(id),
+    }),
+    [deleteNode, duplicateNode, openNodeSettings, openNodeEditor, toggleNodeDisabled, handleRun],
+  )
+
+  // Nodes as rendered: state nodes plus the injected toolbar callbacks.
+  const flowNodes = useMemo(
+    () => nodes.map((n) => ({ ...n, data: { ...n.data, actions: nodeActions } })),
+    [nodes, nodeActions],
+  )
 
   const toggleRecording = useCallback(async () => {
     try {
@@ -411,6 +522,13 @@ export default function EditorApp() {
     return () => window.removeEventListener('keydown', onKey)
   }, [handleSave, handleRun])
 
+  // Node whose block-settings modal is open (gear in hover toolbar).
+  const settingsNode = useMemo(
+    () => (settingsForId ? nodes.find((n) => n.id === settingsForId) : undefined),
+    [nodes, settingsForId],
+  )
+  const settingsBlock = settingsNode?.data.block ?? null
+
   const edgeWithHighlight = useMemo(
     () =>
       edges.map((e) => ({
@@ -423,30 +541,76 @@ export default function EditorApp() {
     [edges, selectedId],
   )
 
+  // Right panel shows ONLY block edit forms (workflow info lives on the trigger
+  // block; logs open in a modal). When no block is selected we show a prompt to
+  // pick a block rather than a separate workflow-details tab.
+  const patchMeta = useCallback(
+    (patch: Partial<{ name: string; description: string; settings: WorkflowSettings }>) =>
+      setMeta((m) => ({ ...m, ...patch, settings: { ...m.settings, ...(patch.settings ?? {}) } })),
+    [],
+  )
+
   const rightContent =
-    tab === 'logs' ? (
-      <EditorLogs workflowId={workflowId} t={t} />
-    ) : selectedNode && selectedBlock ? (
-      <BlockEditForm
-        block={selectedBlock}
-        nodeName={String(selectedNode.data.blockData?.description ?? selectedBlock.name)}
-        data={selectedNode.data.blockData}
-        onChange={patchSelected}
-        t={t}
-        onBack={() => {
-          setSelectedId(null)
-          setNodes((nds) => nds.map((n) => ({ ...n, selected: false })))
-        }}
-      />
+    selectedNode && selectedBlock ? (
+      <WorkflowMetaProvider
+        meta={{ name: meta.name, description: meta.description, settings: meta.settings }}
+        onMeta={(p) =>
+          patchMeta({
+            ...(p.name !== undefined ? { name: p.name } : {}),
+            ...(p.description !== undefined ? { description: p.description } : {}),
+            ...(p.settings ? { settings: p.settings as WorkflowSettings } : {}),
+          })
+        }
+      >
+        <BlockEditForm
+          block={selectedBlock}
+          nodeName={String(selectedNode.data.blockData?.description ?? selectedBlock.name)}
+          data={selectedNode.data.blockData}
+          onChange={patchSelected}
+          t={t}
+          onBack={() => {
+            setSelectedId(null)
+            setNodes((nds) => nds.map((n) => ({ ...n, selected: false })))
+          }}
+        />
+      </WorkflowMetaProvider>
     ) : (
-      <WorkflowDetails meta={meta} onChange={(patch) => setMeta((m) => ({ ...m, ...patch }))} t={t} />
+      <div className="wf-sidebar-scroll">
+        <div className="wf-empty-hint">
+          <i className="ri-cursor-line" />
+          <p>{t('selectBlockHint')}</p>
+        </div>
+      </div>
     )
 
   return (
     <EditorLocaleContext.Provider value={editorLocale}>
     <div className="wf-editor">
+      <TopToolbar
+        workflowName={meta.name || t('untitled')}
+        workflowIcon={meta.icon}
+        paletteOpen={paletteOpen}
+        onTogglePalette={() => setPaletteOpen((o) => !o)}
+        onRename={(name) => setMeta((m) => ({ ...m, name }))}
+        debugMode={meta.settings.debugMode}
+        onToggleDebug={() =>
+          setMeta((m) => ({ ...m, settings: { ...m.settings, debugMode: !m.settings.debugMode } }))
+        }
+        dirty={dirty}
+        saving={saving}
+        running={running}
+        recording={recording}
+        onSave={() => void handleSave()}
+        onRun={() => void handleRun()}
+        onOpenLogs={() => setLogsOpen(true)}
+        onToggleRecording={() => void toggleRecording()}
+        onAutoLayout={handleAutoLayout}
+        t={t}
+      />
+
+      <div className="wf-canvas-wrap">
       <ReactFlow
-        nodes={nodes}
+        nodes={flowNodes}
         edges={edgeWithHighlight}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
@@ -459,67 +623,66 @@ export default function EditorApp() {
           e.preventDefault()
           e.dataTransfer.dropEffect = 'copy'
         }}
-        onNodeDoubleClick={() => {
-          if (selectedId) {
-            setRightOpen(true)
-            setTab('editor')
-          }
+        onNodeDoubleClick={(_e, node) => {
+          if (node.id) setRightOpen(true)
         }}
         fitView
-        deleteKeyCode="Delete"
+        deleteKeyCode={['Delete', 'Backspace']}
         multiSelectionKeyCode="Control"
         defaultEdgeOptions={{
           type: 'custom',
-          markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color: 'var(--bc-edge)' },
+          markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color: 'var(--we-edge)' },
         }}
       >
-        <Background gap={16} color="var(--bc-border)" />
+        <Background gap={16} color="var(--we-border)" />
         <MiniMap
           pannable
           zoomable
           className="wf-minimap"
           nodeColor={(n) => {
             const block = (n.data as BlockNodeData).block
-            return block ? `var(--cat-${block.category})` : 'var(--bc-border)'
+            return block ? `var(--cat-${block.category})` : 'var(--we-border)'
           }}
-          maskColor="rgba(0,0,0,0.08)"
-          bgColor="var(--bc-bg-soft)"
+          maskColor="rgba(15,23,42,0.10)"
+          bgColor="var(--we-bg-soft)"
         />
         <CanvasControls nodes={nodes} t={t} />
       </ReactFlow>
 
-      <TopToolbar
-        workflowName={meta.name || t('untitled')}
-        workflowIcon={meta.icon}
-        tab={tab}
-        onTabChange={setTab}
-        sidebarOpen={rightOpen}
-        paletteOpen={paletteOpen}
-        onToggleSidebar={() => setRightOpen((o) => !o)}
-        onTogglePalette={() => setPaletteOpen((o) => !o)}
-        dirty={dirty}
-        saving={saving}
-        running={running}
-        recording={recording}
-        onSave={() => void handleSave()}
-        onRun={() => void handleRun()}
-        onToggleRecording={() => void toggleRecording()}
-        onAutoLayout={handleAutoLayout}
-        t={t}
-      />
-
-      {error && <div className="wf-error-banner" onClick={() => setError(null)}>{error}</div>}
-      {toast.node}
-
-      {/* Left: block palette */}
-      <Sidebar open={paletteOpen && tab === 'editor'} width={paletteWidth} onWidthChange={setPaletteWidth} side="left">
+      {/* Left: block palette (overlays the canvas only, never the top bar). */}
+      <Sidebar open={paletteOpen} width={paletteWidth} onWidthChange={setPaletteWidth} side="left">
         <BlockPalette />
       </Sidebar>
 
-      {/* Right: details / edit / logs */}
+      {/* Right: block edit panel only (workflow info lives on the trigger block;
+          logs open in a modal). */}
       <Sidebar open={rightOpen} width={rightWidth} onWidthChange={setRightWidth} side="right">
         {rightContent}
       </Sidebar>
+      </div>
+
+      {error && <div className="wf-error-banner" onClick={() => setError(null)}>{error}</div>}
+      {toast.node}
+      <ToastHost />
+      <ConfirmHost />
+
+      {/* Block settings + on-error modal (gear button in node hover toolbar). */}
+      <BlockSettingsModal
+        open={settingsForId !== null && !!settingsBlock}
+        onClose={() => setSettingsForId(null)}
+        block={settingsBlock}
+        data={settingsNode?.data.blockData ?? {}}
+        onChange={(patch) => settingsForId && patchNode(settingsForId, patch)}
+      />
+
+      {/* Run-logs / debug viewer modal. */}
+      <LogsModal
+        open={logsOpen}
+        onClose={() => setLogsOpen(false)}
+        workflowId={workflowId}
+        debugMode={meta.settings.debugMode}
+        t={t}
+      />
     </div>
     </EditorLocaleContext.Provider>
   )

@@ -189,6 +189,14 @@ export interface Messages {
   loading: string
   tryAgain: string
   reloadPanel: string
+  /** Generic confirm dialog button. */
+  dialogConfirm: string
+  /** Confirm dialog title for destructive deletions. */
+  dialogDeleteTitle: string
+  /** Warning dialog title (e.g. enabling full-auto mode). */
+  dialogWarningTitle: string
+  /** Alert dialog acknowledgement button. */
+  dialogOK: string
 
   // Chat
   chatEmpty: string
@@ -365,6 +373,8 @@ export interface Messages {
   toolTabSwitchWarn: string
   toolTabClose: string
   toolTabCloseWarn: string
+  toolRunJs: string
+  toolRunJsWarn: string
   toolProfile: string
   toolProfileWarn: string
   toolListSecrets: string
@@ -609,6 +619,10 @@ const en: Messages = {
   loading: 'Loading…',
   tryAgain: 'Try again',
   reloadPanel: 'Reload panel',
+  dialogConfirm: 'Confirm',
+  dialogDeleteTitle: 'Delete?',
+  dialogWarningTitle: 'Heads up',
+  dialogOK: 'OK',
 
   chatEmpty: 'Ask about the page you are looking at, or anything else.',
   chatPlaceholder: 'Message… (Enter to send, Shift+Enter for a new line)',
@@ -792,6 +806,8 @@ const en: Messages = {
   toolTabSwitchWarn: 'When off: the assistant cannot switch between open tabs.',
   toolTabClose: 'Close a tab',
   toolTabCloseWarn: 'When off: the assistant cannot close tabs.',
+  toolRunJs: 'Run JavaScript on the page',
+  toolRunJsWarn: 'When off: the assistant cannot run custom JavaScript on the page.',
   toolProfile: 'Use saved profile',
   toolProfileWarn:
     'When off: the assistant cannot see your saved name/email/address to auto-fill personal forms.',
@@ -1043,6 +1059,10 @@ const zhCN: Messages = {
   loading: '加载中…',
   tryAgain: '重试',
   reloadPanel: '重新加载面板',
+  dialogConfirm: '确认',
+  dialogDeleteTitle: '确认删除？',
+  dialogWarningTitle: '请注意',
+  dialogOK: '知道了',
 
   chatEmpty: '可以询问当前正在浏览的页面，或任何其他问题。',
   chatPlaceholder: '输入消息…（Enter 发送，Shift+Enter 换行）',
@@ -1212,6 +1232,8 @@ const zhCN: Messages = {
   toolTabSwitchWarn: '关闭后：助手无法在已打开的标签页之间切换。',
   toolTabClose: '关闭标签页',
   toolTabCloseWarn: '关闭后：助手无法关闭标签页。',
+  toolRunJs: '在页面上执行 JavaScript',
+  toolRunJsWarn: '关闭后：助手无法在页面上运行自定义 JavaScript。',
   toolProfile: '使用已保存资料',
   toolProfileWarn: '关闭后：助手无法读取你保存的姓名/邮箱/地址来自动填写个人表单。',
   toolListSecrets: '列出已保存密钥',

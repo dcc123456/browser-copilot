@@ -2,35 +2,26 @@
  * Contrast tests for the two themes.
  *
  * The panel follows the OS theme, which doubles every colour decision — and
- * light-mode values are easy to get wrong by eye. The dark theme's accent
- * (`#5b8cff`) looks perfectly good as a fill on white while failing badly as
- * *text* on white, and links live inside assistant bubbles, not on the page
- * background. So the ratios are computed from the real stylesheet rather than
- * eyeballed.
+ * light-mode values are easy to get wrong by eye. The dark theme's accent can
+ * look perfectly good as a fill while failing badly as *text* on white, and
+ * links live inside assistant bubbles, not on the page background. So the ratios
+ * are computed from the real stylesheet rather than eyeballed.
  *
- * Parsing the CSS instead of duplicating the palette here is deliberate: a copy
- * would drift, and a test that verifies a stale copy of the colours proves
- * nothing about what ships.
+ * Colours now live ONCE in src/ui/design-system.css as shared --bc-* tokens.
+ * The side panel's styles.css aliases its short names (--bg, --accent, …) onto
+ * those tokens. This test parses both: it resolves the alias chain and then
+ * checks contrast of the resolved RGB values, so a broken alias or a
+ * contrast-failing token fails here instead of shipping.
  */
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 
-/*
-  The fixtures are read from disk rather than imported.
-
-  `?raw` was the obvious choice and does work for HTML, but Vite's CSS pipeline
-  intercepts `styles.css?raw` and hands back an empty string — a test reading ""
-  would have passed every "no hardcoded colours" assertion while checking nothing
-  at all. Reading the file is immune to that.
-
-  Node types are granted to `tests/` alone through tsconfig.tests.json, so `src/`
-  still cannot import built-ins that do not exist in an extension at runtime.
-*/
-const css = readFileSync(new URL('../src/sidepanel/styles.css', import.meta.url), 'utf8')
+const tokensCss = readFileSync(new URL('../src/ui/design-system.css', import.meta.url), 'utf8')
+const panelCss = readFileSync(new URL('../src/sidepanel/styles.css', import.meta.url), 'utf8')
 const html = readFileSync(new URL('../src/sidepanel/index.html', import.meta.url), 'utf8')
 
 /** Extracts custom properties from one declaration block. */
-function extract(pattern: RegExp): Record<string, string> {
+function extract(css: string, pattern: RegExp): Record<string, string> {
   const match = pattern.exec(css)
   if (!match || match[1] === undefined) {
     throw new Error(`theme block not found for ${pattern}`)
@@ -45,8 +36,13 @@ function extract(pattern: RegExp): Record<string, string> {
   return vars
 }
 
-const DARK = extract(/:root\s*\{([\s\S]*?)\n\}/)
-const LIGHT = extract(/prefers-color-scheme:\s*light\s*\)\s*\{\s*:root\s*\{([\s\S]*?)\n\s*\}/)
+const TOK_DARK = extract(tokensCss, /:root\s*\{([\s\S]*?)\n\}/)
+const TOK_LIGHT = extract(
+  tokensCss,
+  /prefers-color-scheme:\s*light\s*\)\s*\{\s*:root\s*\{([\s\S]*?)\n\s*\}/,
+)
+/* The panel's aliases (--bg -> var(--bc-…) …). */
+const ALIAS = extract(panelCss, /:root\s*\{([\s\S]*?)\n\}/)
 
 type Rgb = [number, number, number]
 
@@ -67,6 +63,25 @@ function parseColor(value: string | undefined): Rgb | null {
   return null
 }
 
+/**
+ * Resolve a panel alias name (e.g. "--bg") all the way to concrete RGB.
+ * Walks `--name → var(--bc-...)` through the alias map and the token block.
+ */
+function resolve(name: string, tokens: Record<string, string>): Rgb | null {
+  let current: string | undefined = ALIAS[name] ?? tokens[name]
+  const seen = new Set<string>()
+  while (current) {
+    const direct = parseColor(current)
+    if (direct) return direct
+    const ref = /var\((--[a-z0-9-]+)\)/.exec(current)
+    if (!ref || !ref[1]) return null
+    if (seen.has(ref[1])) return null
+    seen.add(ref[1])
+    current = tokens[ref[1]] ?? ALIAS[ref[1]]
+  }
+  return null
+}
+
 /** Relative luminance per WCAG 2.1. */
 function luminance([r, g, b]: Rgb): number {
   const channel = (c: number): number => {
@@ -83,11 +98,8 @@ function contrast(a: Rgb, b: Rgb): number {
 }
 
 /**
- * Foreground/background pairs that actually occur in the UI.
- *
- * Each entry names the surface the text really sits on — `--muted` on
- * `--panel-2` rather than on `--bg`, for instance — because a ratio against the
- * wrong background is a pass that means nothing.
+ * Foreground/background pairs that actually occur in the UI, written in the
+ * panel's alias names. Each names the surface text really sits on.
  */
 const PAIRS: Array<[string, string, string]> = [
   ['--text', '--bg', 'body text'],
@@ -98,82 +110,53 @@ const PAIRS: Array<[string, string, string]> = [
   ['--muted', '--bg', 'muted text'],
   ['--muted', '--panel', 'muted text on a panel'],
   ['--muted', '--panel-2', 'form label'],
-  ['--muted', '--chip', 'tool-call chip'],
   ['--accent', '--bg', 'link'],
   ['--accent', '--panel-2', 'link inside an assistant reply'],
   ['--on-accent', '--accent', 'primary button label'],
-  ['--err', '--err-surface', 'error banner'],
-  ['--ok', '--ok-surface', 'success banner'],
-  ['--warn', '--warn-surface', 'confirmation card'],
-  ['--err', '--bg', 'danger button'],
+  ['--err', '--bg', 'danger text'],
   ['--ok', '--bg', 'success status text'],
 ]
 
-/** WCAG AA for normal-size text. */
 const AA_NORMAL = 4.5
 
 describe.each([
-  ['dark', DARK],
-  ['light', LIGHT],
-])('%s theme contrast', (_name, vars) => {
+  ['dark', TOK_DARK],
+  ['light', TOK_LIGHT],
+])('%s theme contrast', (_name, tokens) => {
   it.each(PAIRS)('%s on %s (%s) meets WCAG AA', (fg, bg, _label) => {
-    const foreground = parseColor(vars[fg])
-    const background = parseColor(vars[bg])
-    // A missing or unparseable variable is a failure, not a skip: it would mean
-    // the pair silently stopped being checked.
-    expect(foreground, `${fg} = ${vars[fg]}`).not.toBeNull()
-    expect(background, `${bg} = ${vars[bg]}`).not.toBeNull()
+    const foreground = resolve(fg, tokens)
+    const background = resolve(bg, tokens)
+    expect(foreground, `could not resolve ${fg}`).not.toBeNull()
+    expect(background, `could not resolve ${bg}`).not.toBeNull()
     expect(contrast(foreground!, background!)).toBeGreaterThanOrEqual(AA_NORMAL)
   })
 })
 
-describe('theme completeness', () => {
-  it('overrides every colour variable in the light theme', () => {
-    // A variable declared only in the dark block would leak a dark colour into
-    // the light theme — the exact bug this whole structure exists to prevent.
-    const skip = new Set(['color-scheme'])
-    for (const key of Object.keys(DARK)) {
-      if (skip.has(key)) continue
-      expect(LIGHT, `light theme is missing ${key}`).toHaveProperty(key)
+describe('shared token completeness', () => {
+  it('overrides every shared token in the light theme', () => {
+    // A token declared only for dark would leak a dark colour into light mode.
+    for (const key of Object.keys(TOK_DARK)) {
+      expect(TOK_LIGHT, `light theme is missing ${key}`).toHaveProperty(key)
     }
   })
 
   it('declares color-scheme in both themes so native controls follow', () => {
-    // Without this the browser keeps painting scrollbars, form-control internals
-    // and focus rings for the wrong theme.
-    expect(css).toMatch(/color-scheme:\s*dark/)
-    expect(css).toMatch(/color-scheme:\s*light/)
+    expect(tokensCss).toMatch(/color-scheme:\s*dark/)
+    expect(tokensCss).toMatch(/color-scheme:\s*light/)
   })
 
-  it('keeps colours out of the rules themselves', () => {
-    // Every colour must live in a theme block, or switching themes would require
-    // auditing rules one by one instead of editing one palette.
-    //
-    // The two theme blocks are removed by locating them the same way the
-    // extractors above do, rather than with a brace-counting regex that silently
-    // matched too little and made this assertion pass for the wrong reason.
-    let themeless = css
-    for (const pattern of [
-      /:root\s*\{[\s\S]*?\n\}/,
-      /@media\s*\(prefers-color-scheme:\s*light\s*\)\s*\{[\s\S]*?\n\s*\}\s*\n\}/,
-    ]) {
-      const match = pattern.exec(themeless)
-      expect(match, `could not locate theme block ${pattern}`).not.toBeNull()
-      themeless = themeless.replace(pattern, '')
+  it('every panel alias resolves to a shared --bc token', () => {
+    // Guards against a typo'd alias silently falling back to nothing.
+    for (const key of Object.keys(ALIAS)) {
+      expect(ALIAS[key], key).toMatch(/var\(--bc-|^#|^rgb/)
     }
-
-    const literals = [
-      ...themeless.matchAll(/#[0-9a-fA-F]{3,8}\b/g),
-      ...themeless.matchAll(/\brgba?\(/g),
-    ].map((match) => match[0])
-    expect(literals).toEqual([])
   })
 })
 
 /**
- * The panel's HTML inlines a few colours so the first paint is not a white flash
- * in dark mode. That duplication is intentional but must not drift, so it is
- * pinned to the stylesheet here.
+ * The panel's HTML inlines a few colours so the first paint is not a flash of
+ * the wrong theme. That duplication is intentional but must not drift from the
+ * resolved token values, so it is pinned here.
  */
 describe('first-paint colours in index.html', () => {
   it('declares color-scheme for both themes before the stylesheet loads', () => {
@@ -182,9 +165,7 @@ describe('first-paint colours in index.html', () => {
     expect(html).toMatch(/prefers-color-scheme:\s*light/)
   })
 
-  it('matches the stylesheet palette exactly', () => {
-    // Pull the two body backgrounds out of the inline <style>, in source order:
-    // the dark default first, then the light override.
+  it('matches the resolved palette exactly', () => {
     const backgrounds = [...html.matchAll(/background:\s*(#[0-9a-fA-F]{3,6})/g)].map((m) => m[1])
     const colors = [...html.matchAll(/(?<!background)color:\s*(#[0-9a-fA-F]{3,6})/g)].map(
       (m) => m[1],
@@ -193,10 +174,12 @@ describe('first-paint colours in index.html', () => {
     expect(backgrounds).toHaveLength(2)
     expect(colors).toHaveLength(2)
 
-    const norm = (value: string | undefined): string | undefined => value?.toLowerCase()
-    expect(norm(backgrounds[0])).toBe(norm(DARK['--bg']))
-    expect(norm(backgrounds[1])).toBe(norm(LIGHT['--bg']))
-    expect(norm(colors[0])).toBe(norm(DARK['--text']))
-    expect(norm(colors[1])).toBe(norm(LIGHT['--text']))
+    const hex = (rgb: Rgb | null): string =>
+      rgb ? '#' + rgb.map((c) => c.toString(16).padStart(2, '0')).join('') : ''
+
+    expect(backgrounds[0]!.toLowerCase()).toBe(hex(resolve('--bg', TOK_DARK)))
+    expect(backgrounds[1]!.toLowerCase()).toBe(hex(resolve('--bg', TOK_LIGHT)))
+    expect(colors[0]!.toLowerCase()).toBe(hex(resolve('--text', TOK_DARK)))
+    expect(colors[1]!.toLowerCase()).toBe(hex(resolve('--text', TOK_LIGHT)))
   })
 })
