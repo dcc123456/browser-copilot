@@ -74,8 +74,8 @@ describe('last injectable tab tracker', () => {
     const { listeners, store } = fake()
     store.set(1, { id: 1, windowId: 1, url: 'chrome-extension://abc/editor.html' })
     store.set(2, { id: 2, windowId: 2, url: 'https://example.com/' })
-    listeners['onActivated'].forEach((fn) => fn({ tabId: 1 }))
-    listeners['onActivated'].forEach((fn) => fn({ tabId: 2 }))
+    listeners['onActivated']!.forEach((fn) => fn({ tabId: 1 }))
+    listeners['onActivated']!.forEach((fn) => fn({ tabId: 2 }))
     await tick()
 
     const got = await mod.getLastInjectableTab()
@@ -85,12 +85,12 @@ describe('last injectable tab tracker', () => {
   it('forgets a closed tab', async () => {
     const { listeners, store } = fake()
     store.set(5, { id: 5, windowId: 1, url: 'https://news.test/' })
-    listeners['onUpdated'].forEach((fn) => fn(5, { status: 'complete' }, store.get(5)))
+    listeners['onUpdated']!.forEach((fn) => fn(5, { status: 'complete' }, store.get(5)!))
     await tick()
     expect((await mod.getLastInjectableTab())?.id).toBe(5)
 
     store.delete(5)
-    listeners['onRemoved'].forEach((fn) => fn(5, { windowId: 1, isWindowClosing: false }))
+    listeners['onRemoved']!.forEach((fn) => fn(5, { windowId: 1, isWindowClosing: false }))
     await tick()
     expect(await mod.getLastInjectableTab()).toBeUndefined()
   })
