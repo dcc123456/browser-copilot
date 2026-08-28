@@ -36,6 +36,11 @@ export const LEGACY_ID_TO_AUTOMA: Record<string, string> = {
   hover: 'hover-element',
   condition: 'conditions',
   breakpoint: 'loop-breakpoint',
+  // Chat-saved workflow ids that never had catalog blocks (the editor could
+  // not render nodes carrying them; the engine ran them natively):
+  manual: 'trigger',
+  'open-url': 'new-tab',
+  'wait-for': 'delay',
 }
 
 /** Catalog defaults by id, looked up once (Automa blocks + local extensions). */
@@ -68,7 +73,19 @@ export function migrateNodeData(
   // present directly on data already.
   const values = isRecord(source.values) ? source.values : {}
 
-  // Legacy cssSelector -> Automa selector (only when no explicit selector yet).
+  // Apply sources from weakest to strongest so stored data is never clobbered
+  // by the catalog's empty-string placeholders (url: '', selector: '', ...):
+  // defaults < legacy values < flat Automa fields.
+  for (const [key, value] of Object.entries(values)) {
+    if (key === 'cssSelector') continue
+    data[key] = value
+  }
+  for (const [key, value] of Object.entries(source)) {
+    if (key === 'values' || key === 'blockId' || key === 'selector') continue
+    data[key] = value
+  }
+
+  // Legacy cssSelector -> Automa selector (flat selector wins when present).
   const legacySelector =
     (source.selector as string | undefined) ??
     (values.cssSelector as string | undefined) ??
@@ -78,14 +95,11 @@ export function migrateNodeData(
     if (data.findBy === undefined) data.findBy = 'cssSelector'
   }
 
-  // Copy over all other fields: flat Automa fields win, then legacy values.
-  for (const [key, value] of Object.entries(source)) {
-    if (key === 'values' || key === 'blockId' || key === 'selector') continue
-    data[key] = value
-  }
-  for (const [key, value] of Object.entries(values)) {
-    if (key === 'cssSelector') continue
-    if (data[key] === undefined) data[key] = value
+  // Legacy `wait-for` carried a selector + timeout; its catalog replacement
+  // (`delay`) reads `delay` (ms). Translate when the saved node used timeout.
+  if (nextId === 'delay' && data.delay === undefined && typeof data.timeout === 'number') {
+    data.delay = data.timeout
+    delete data.timeout
   }
 
   // Ensure description exists (node subtitle field).

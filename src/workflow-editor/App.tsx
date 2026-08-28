@@ -107,10 +107,11 @@ export default function EditorApp() {
   const [settingsForId, setSettingsForId] = useState<string | null>(null)
   /** Whether the run-logs / debug viewer modal is open. */
   const [logsOpen, setLogsOpen] = useState(false)
-  const [rightOpen, setRightOpen] = useState(true)
   const [paletteOpen, setPaletteOpen] = useState(true)
-  const [rightWidth, setRightWidth] = useState(() => loadWidth('right'))
   const [paletteWidth, setPaletteWidth] = useState(() => loadWidth('left'))
+  /** Node id being edited in the LEFT overlay (Automa: double-click opens the
+   *  edit panel over the block palette; hidden while no node is being edited). */
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
   const [recording, setRecording] = useState(false)
@@ -219,9 +220,6 @@ export default function EditorApp() {
     }
     if (next !== undefined) {
       setSelectedId(next)
-      if (next) {
-        setRightOpen(true)
-      }
     }
   }, [])
 
@@ -271,28 +269,13 @@ export default function EditorApp() {
     [reactFlow],
   )
 
-  const selectedNode = useMemo(() => nodes.find((n) => n.id === selectedId), [nodes, selectedId])
-  const selectedBlock = selectedNode?.data.block
-
-  const patchSelected = useCallback(
-    (patch: Record<string, unknown>) => {
-      if (!selectedId) return
-      setNodes((nds) =>
-        nds.map((n) =>
-          n.id === selectedId
-            ? { ...n, data: { ...n.data, blockData: { ...n.data.blockData, ...patch } } }
-            : n,
-        ),
-      )
-    },
-    [selectedId],
-  )
-
   // --- node hover-toolbar actions (Automa block-menu) ------------------------
+  // Edit opens the LEFT overlay over the palette (Automa's edit panel).
   const openNodeEditor = useCallback((id: string) => {
     setSelectedId(id)
     setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === id })))
-    setRightOpen(true)
+    setEditingId(id)
+    setPaletteOpen(true)
   }, [])
 
   // Gear button: open the block settings + on-error modal (Automa BlockSettings).
@@ -322,6 +305,7 @@ export default function EditorApp() {
       // Remove edges that were attached to the deleted node.
       setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id))
       setSelectedId((cur) => (cur === id ? null : cur))
+      setEditingId((cur) => (cur === id ? null : cur))
       toast.show(t('nodeDeleted'), 'info')
     },
     [toast, t],
@@ -515,7 +499,7 @@ export default function EditorApp() {
         document.querySelector<HTMLButtonElement>('.wf-search .wf-icon-btn')?.click()
       } else if (mod && e.key.toLowerCase() === 'b') {
         e.preventDefault()
-        setRightOpen((o) => !o)
+        setPaletteOpen((o) => !o)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -541,47 +525,45 @@ export default function EditorApp() {
     [edges, selectedId],
   )
 
-  // Right panel shows ONLY block edit forms (workflow info lives on the trigger
-  // block; logs open in a modal). When no block is selected we show a prompt to
-  // pick a block rather than a separate workflow-details tab.
+  // Edit overlay for the LEFT panel (Automa: the edit form replaces/overlays
+  // the block palette while a node is being edited; hidden otherwise).
   const patchMeta = useCallback(
     (patch: Partial<{ name: string; description: string; settings: WorkflowSettings }>) =>
       setMeta((m) => ({ ...m, ...patch, settings: { ...m.settings, ...(patch.settings ?? {}) } })),
     [],
   )
 
-  const rightContent =
-    selectedNode && selectedBlock ? (
-      <WorkflowMetaProvider
-        meta={{ name: meta.name, description: meta.description, settings: meta.settings }}
-        onMeta={(p) =>
-          patchMeta({
-            ...(p.name !== undefined ? { name: p.name } : {}),
-            ...(p.description !== undefined ? { description: p.description } : {}),
-            ...(p.settings ? { settings: p.settings as WorkflowSettings } : {}),
-          })
-        }
-      >
-        <BlockEditForm
-          block={selectedBlock}
-          nodeName={String(selectedNode.data.blockData?.description ?? selectedBlock.name)}
-          data={selectedNode.data.blockData}
-          onChange={patchSelected}
-          t={t}
-          onBack={() => {
-            setSelectedId(null)
-            setNodes((nds) => nds.map((n) => ({ ...n, selected: false })))
-          }}
-        />
-      </WorkflowMetaProvider>
-    ) : (
-      <div className="wf-sidebar-scroll">
-        <div className="wf-empty-hint">
-          <i className="ri-cursor-line" />
-          <p>{t('selectBlockHint')}</p>
-        </div>
+  const editNode = useMemo(() => nodes.find((n) => n.id === editingId), [nodes, editingId])
+  const editBlock = editNode?.data.block ?? null
+
+  const editOverlay =
+    editNode && editBlock ? (
+      <div className="wf-edit-overlay">
+        <WorkflowMetaProvider
+          meta={{ name: meta.name, description: meta.description, settings: meta.settings }}
+          onMeta={(p) =>
+            patchMeta({
+              ...(p.name !== undefined ? { name: p.name } : {}),
+              ...(p.description !== undefined ? { description: p.description } : {}),
+              ...(p.settings ? { settings: p.settings as WorkflowSettings } : {}),
+            })
+          }
+        >
+          <BlockEditForm
+            block={editBlock}
+            nodeName={String(editNode.data.blockData?.description ?? editBlock.name)}
+            data={editNode.data.blockData}
+            onChange={(patch) => patchNode(editNode.id, patch)}
+            t={t}
+            onBack={() => {
+              setEditingId(null)
+              setSelectedId(null)
+              setNodes((nds) => nds.map((n) => ({ ...n, selected: false })))
+            }}
+          />
+        </WorkflowMetaProvider>
       </div>
-    )
+    ) : null
 
   return (
     <EditorLocaleContext.Provider value={editorLocale}>
@@ -624,7 +606,9 @@ export default function EditorApp() {
           e.dataTransfer.dropEffect = 'copy'
         }}
         onNodeDoubleClick={(_e, node) => {
-          if (node.id) setRightOpen(true)
+          // Automa: double-click a block to edit it in the left panel. Note
+          // nodes have no catalog block, so they don't open the editor.
+          if ((node.data as BlockNodeData).block) openNodeEditor(node.id)
         }}
         fitView
         deleteKeyCode={['Delete', 'Backspace']}
@@ -649,15 +633,11 @@ export default function EditorApp() {
         <CanvasControls nodes={nodes} t={t} />
       </ReactFlow>
 
-      {/* Left: block palette (overlays the canvas only, never the top bar). */}
+      {/* Left: block palette; the edit form OVERLAYS it while editing
+          (Automa: double-click a node to edit, back arrow returns). */}
       <Sidebar open={paletteOpen} width={paletteWidth} onWidthChange={setPaletteWidth} side="left">
         <BlockPalette />
-      </Sidebar>
-
-      {/* Right: block edit panel only (workflow info lives on the trigger block;
-          logs open in a modal). */}
-      <Sidebar open={rightOpen} width={rightWidth} onWidthChange={setRightWidth} side="right">
-        {rightContent}
+        {editOverlay}
       </Sidebar>
       </div>
 

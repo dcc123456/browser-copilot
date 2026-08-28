@@ -686,9 +686,11 @@ const DEFAULT_WF_SETTINGS: WorkflowSettings = {
   reuseLastState: false,
 }
 
-/** Agent tool action → workflow block id. Actions without a block are skipped. */
+/** Agent tool action → workflow block id. Actions without a block are skipped.
+ *  Ids must exist in the editor's block catalog (BLOCK_BY_ID) so saved workflows
+ *  render on the canvas; the engine runs these catalog ids too. */
 const ACTION_TO_BLOCK: Record<string, string> = {
-  open_url: 'open-url',
+  open_url: 'new-tab',
   tab_new: 'new-tab',
   tab_switch: 'switch-tab',
   tab_close: 'close-tab',
@@ -698,7 +700,9 @@ const ACTION_TO_BLOCK: Record<string, string> = {
   set_checkbox: 'set-checkbox',
   press_key: 'press-key',
   scroll: 'scroll',
-  wait_for: 'wait-for',
+  // The agent's wait-for-selector paces the replay; the delay block is the
+  // catalog's wait primitive (the legacy `wait-for` id has no catalog block).
+  wait_for: 'delay',
 }
 
 /**
@@ -818,7 +822,8 @@ function valuesFromArgs(action: string, args: Record<string, unknown> | undefine
         ...(typeof args?.y === 'number' ? { y: args.y } : {}),
       }
     case 'wait_for':
-      return { cssSelector: selector, timeout: Number(args?.timeout ?? 5000) }
+      // Mapped to the `delay` block: replay the agent's pacing as a pause.
+      return { delay: Number(args?.timeout ?? 5000) }
     default:
       return {}
   }
@@ -855,13 +860,15 @@ export function workflowFromHistory(entries: HistoryEntry[], name: string): Work
 
   // Trigger node — the first node in the graph, matching automa's convention.
   // `label` holds the block id (same as data.blockId); the editor resolves the
-  // localized display name from the block registry at render time.
+  // localized display name from the block registry at render time. The block
+  // id must be the catalog's `trigger` block (not the trigger TYPE) so the
+  // editor renders it; `values.type` carries the trigger type.
   const triggerId = newId()
   nodes.push({
     id: triggerId,
-    label: 'manual',
+    label: 'trigger',
     position: { x: 160, y: 0 },
-    data: { blockId: 'manual', values: {} },
+    data: { blockId: 'trigger', values: { type: 'manual' } },
   })
   let prevId: string = triggerId
 

@@ -554,6 +554,16 @@
   padding: 18px 16px 28px;
 }
 
+/* Edit overlay (Automa [id].vue): while a node is being edited, the edit form
+   covers the block palette inside the LEFT panel (absolute, z-50). */
+.wf-edit-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  background: var(--we-bg);
+  overflow: hidden;
+}
+
 /* details card */
 .wf-details-head {
   display: flex;

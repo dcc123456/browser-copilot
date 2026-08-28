@@ -35,7 +35,7 @@ function entry(action: string, args?: Args): HistoryEntry {
 /** Returns the `data.values` of all action nodes (skips the trigger node). */
 const nodesValues = (entries: HistoryEntry[], name = 'wf') =>
   (workflowFromHistory(entries, name)?.drawflow.nodes ?? [])
-    .filter((n) => n.data.blockId !== 'manual')
+    .filter((n) => n.data.blockId !== 'trigger')
     .map((n) => n.data.values)
 
 describe('selectorFromArgs target synthesis', () => {
@@ -82,11 +82,11 @@ describe('args fall through to mapped block values', () => {
     expect(values).toEqual([{ mode: 'by', cssSelector: '.x', y: 100 }])
   })
 
-  it('wait_for carries the timeout', () => {
+  it('wait_for becomes a delay block carrying the timeout as delay', () => {
     const values = nodesValues([
       entry('wait_for', { target: { primary: { how: 'css', value: '.a' } }, timeout: 3000 }),
     ])
-    expect(values).toEqual([{ cssSelector: '.a', timeout: 3000 }])
+    expect(values).toEqual([{ delay: 3000 }])
   })
 
   it('tab_switch carries the index', () => {
@@ -110,7 +110,7 @@ describe('trigger node', () => {
     // trigger + 1 action
     expect(wf!.drawflow.nodes).toHaveLength(2)
     expect(wf!.drawflow.edges).toHaveLength(1)
-    expect(wf!.drawflow.nodes[0]!.data.blockId).toBe('manual')
+    expect(wf!.drawflow.nodes[0]!.data.blockId).toBe('trigger')
     expect(wf!.drawflow.edges[0]!.source).toBe(wf!.drawflow.nodes[0]!.id)
     expect(wf!.drawflow.edges[0]!.target).toBe(wf!.drawflow.nodes[1]!.id)
   })
@@ -137,7 +137,7 @@ describe('unmapped actions', () => {
     expect(wf!.drawflow.edges).toHaveLength(2)
     expect(
       wf!.drawflow.nodes
-        .filter((n) => n.data.blockId !== 'manual')
+        .filter((n) => n.data.blockId !== 'trigger')
         .map((n) => n.data.values),
     ).toEqual([{ url: 'https://e.com' }, { cssSelector: '[data-testid="x"]' }])
     // First edge: trigger → first action
@@ -163,7 +163,7 @@ describe('duplicate collapsing', () => {
       'prs',
     )
     expect(wf).not.toBeNull()
-    const actionNodes = wf!.drawflow.nodes.filter((n) => n.data.blockId !== 'manual')
+    const actionNodes = wf!.drawflow.nodes.filter((n) => n.data.blockId !== 'trigger')
     expect(actionNodes).toHaveLength(1)
     expect(actionNodes[0]!.data.values).toEqual({
       url: 'https://github.com/pulls/review-requested',
@@ -178,7 +178,7 @@ describe('duplicate collapsing', () => {
       ],
       'wf',
     )
-    const actionNodes = wf!.drawflow.nodes.filter((n) => n.data.blockId !== 'manual')
+    const actionNodes = wf!.drawflow.nodes.filter((n) => n.data.blockId !== 'trigger')
     expect(actionNodes).toHaveLength(2)
   })
 
@@ -192,7 +192,7 @@ describe('duplicate collapsing', () => {
       'wf',
     )
     const selectors = wf!.drawflow.nodes
-      .filter((n) => n.data.blockId !== 'manual')
+      .filter((n) => n.data.blockId !== 'trigger')
       .map((n) => (n.data.values as { cssSelector?: string } | undefined)?.cssSelector)
     expect(selectors).toEqual(['.a', '.b'])
   })
