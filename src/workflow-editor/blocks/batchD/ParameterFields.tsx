@@ -1,15 +1,21 @@
 /**
- * ParameterFields — React port of the shared parts of Automa's
- * EditWorkflowParameters.vue used by the "Parameter prompt" and "Trigger"
- * blocks. Both blocks store a `parameters` array; each entry has a name,
- * type, placeholder, default value, description and a required flag. The Vue
- * editor offers many parameter types (with custom value components); this
- * port keeps the core types the block runtime understands.
+ * ParameterFields — React port of Automa's EditWorkflowParameters.vue.
+ *
+ * Table layout matching Automa: a Name / Type / Placeholder / Default Value
+ * header over a grid row per parameter, an "Options" fold-out per row
+ * (description + required flag) and a footer with an accent "Add parameter"
+ * button plus the optional "prefer asking parameters in the active tab"
+ * checkbox (rendered when `onPreferTab` is provided — the trigger block wires
+ * it to `preferParamsInTab`).
+ *
+ * Used by the "Trigger" block (inside a modal, Automa-style) and the
+ * "Parameter prompt" block (inline; the grid collapses to two columns there).
  *
  * @module workflow-editor/blocks/batchD/ParameterFields
  */
 
-import { Checkbox, Select, TextArea, TextInput } from '../shared/Field'
+import { Checkbox, Expand, Select, TextArea, TextInput } from '../shared/Field'
+import { useEditorLocale } from '../../locale-context'
 
 export interface WorkflowParameter {
   id?: string
@@ -55,10 +61,16 @@ function asParameters(value: unknown): WorkflowParameter[] {
 export default function ParameterFields({
   value,
   onChange,
+  preferTab,
+  onPreferTab,
 }: {
   value: unknown
   onChange: (parameters: WorkflowParameter[]) => void
+  /** Show the "prefer asking parameters in the active tab" checkbox (trigger). */
+  preferTab?: boolean
+  onPreferTab?: (v: boolean) => void
 }) {
+  const { bt } = useEditorLocale()
   const parameters = asParameters(value)
 
   const update = (index: number, patch: Partial<WorkflowParameter>) => {
@@ -81,54 +93,86 @@ export default function ParameterFields({
 
   return (
     <div className="wf-params">
-      {parameters.length === 0 && <p className="wf-empty">No parameters</p>}
-      {parameters.map((param, index) => (
-        <div className="wf-param" key={param.id ?? index}>
-          <div className="wf-param-row">
-            <TextInput
-              value={param.name}
-              placeholder="Parameter name"
-              onChange={(v) => update(index, { name: v.replace(/\s/g, '_') })}
-            />
-            <Select
-              value={param.type}
-              onChange={(v) => update(index, { type: v })}
-              options={PARAM_TYPES}
-            />
-            <TextInput
-              value={param.placeholder ?? ''}
-              placeholder="A parameter"
-              onChange={(v) => update(index, { placeholder: v })}
-            />
-            <TextInput
-              type={param.type === 'number' ? 'number' : 'text'}
-              value={param.defaultValue ?? ''}
-              placeholder="NULL"
-              onChange={(v) => update(index, { defaultValue: v })}
-            />
-            <button type="button" className="wf-icon-btn" title="Remove parameter" onClick={() => remove(index)}>
-              <i className="ri-delete-bin-7-line" />
-            </button>
-          </div>
-          <div className="wf-param-options">
-            <TextArea
-              value={param.description ?? ''}
-              placeholder="Description"
-              onChange={(v) => update(index, { description: v })}
-            />
-            {(param.type === 'string' || param.type === 'number') && (
-              <Checkbox
-                checked={param.data?.required === true}
-                onChange={(v) => update(index, { data: { ...(param.data ?? {}), required: v } })}
-                label="Parameter required"
-              />
-            )}
-          </div>
-        </div>
-      ))}
-      <button type="button" className="wf-btn" onClick={add}>
-        Add parameter
-      </button>
+      <div className="wf-params-scroll">
+        {parameters.length === 0 ? (
+          <p className="wf-params-empty">{bt('No parameters')}</p>
+        ) : (
+          <section>
+            <div className="wf-params-head">
+              <span>{bt('Name')}</span>
+              <span>{bt('Type')}</span>
+              <span>{bt('Placeholder')}</span>
+              <span>{bt('Default Value')}</span>
+              <span />
+            </div>
+            {parameters.map((param, index) => (
+              <div className="wf-param" key={param.id ?? index}>
+                <div className="wf-param-row">
+                  <TextInput
+                    value={param.name}
+                    placeholder={bt('Parameter name')}
+                    onChange={(v) => update(index, { name: v.replace(/\s/g, '_') })}
+                  />
+                  <Select
+                    value={param.type}
+                    onChange={(v) => update(index, { type: v })}
+                    options={PARAM_TYPES}
+                  />
+                  <TextInput
+                    value={param.placeholder ?? ''}
+                    placeholder={bt('A parameter')}
+                    onChange={(v) => update(index, { placeholder: v })}
+                  />
+                  <TextInput
+                    type={param.type === 'number' ? 'number' : 'text'}
+                    value={param.defaultValue ?? ''}
+                    placeholder="NULL"
+                    onChange={(v) => update(index, { defaultValue: v })}
+                  />
+                  <button
+                    type="button"
+                    className="wf-icon-btn wf-param-delete"
+                    title={bt('Remove parameter')}
+                    onClick={() => remove(index)}
+                  >
+                    <i className="ri-delete-bin-7-line" />
+                  </button>
+                </div>
+                <Expand title="Options">
+                  <div className="wf-param-options">
+                    <TextArea
+                      value={param.description ?? ''}
+                      placeholder="Description"
+                      onChange={(v) => update(index, { description: v })}
+                    />
+                    {(param.type === 'string' || param.type === 'number') && (
+                      <Checkbox
+                        checked={param.data?.required === true}
+                        onChange={(v) => update(index, { data: { ...(param.data ?? {}), required: v } })}
+                        label="Parameter required"
+                      />
+                    )}
+                  </div>
+                </Expand>
+              </div>
+            ))}
+          </section>
+        )}
+      </div>
+      <div className="wf-params-footer">
+        <button type="button" className="wf-params-add" onClick={add}>
+          <i className="ri-add-line" />
+          <span>{bt('Add parameter')}</span>
+        </button>
+        <span className="wf-params-footer-grow" />
+        {onPreferTab && (
+          <Checkbox
+            checked={preferTab === true}
+            onChange={onPreferTab}
+            label="Prefer asking parameters in the active tab"
+          />
+        )}
+      </div>
     </div>
   )
 }

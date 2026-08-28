@@ -27,6 +27,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { EditFormProps } from '../EditForms'
 import { Checkbox, Expand, Field, Select, TextArea, TextInput, type Patch } from '../shared/Field'
 import InteractionBase, { bool, num, str } from '../shared/InteractionBase'
+import Modal from '../../ui/Modal'
+import { useEditorLocale } from '../../locale-context'
 import ParameterFields, { type WorkflowParameter } from './ParameterFields'
 import WorkflowInfoFields from './WorkflowInfoFields'
 
@@ -70,6 +72,8 @@ function clamp(v: number, min: number, max: number): number {
 }
 
 export default function EditTrigger({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
+  const [paramsOpen, setParamsOpen] = useState(false)
   const type = str(data, 'type') || 'manual'
 
   const days = asStringList(data.days).map((d) => String(d))
@@ -87,10 +91,11 @@ export default function EditTrigger({ data, onChange }: EditFormProps) {
           (Automa keeps workflow config with the trigger, not a separate tab). */}
       <WorkflowInfoFields />
 
-      <Field label="Description">
+      {/* Automa EditTrigger: bare description textarea, no label. */}
+      <Field>
         <TextArea
           value={str(data, 'description')}
-          placeholder="Description (shown on the node)"
+          placeholder="Description"
           onChange={(v) => onChange({ description: v })}
         />
       </Field>
@@ -189,14 +194,21 @@ export default function EditTrigger({ data, onChange }: EditFormProps) {
       {type === 'on-startup' && <p className="wf-hint">The workflow runs when the browser starts.</p>}
       {type === 'manual' && <p className="wf-hint">The workflow runs only when started manually.</p>}
 
-      <Expand title="Parameters">
-        <Checkbox
-          checked={bool(data, 'preferParamsInTab')}
-          onChange={(v) => onChange({ preferParamsInTab: v })}
-          label="Prefer asking parameters in the active tab"
+      {/* Automa EditTrigger: a "Parameters" button opens the parameters modal
+          (EditWorkflowParameters) instead of an inline fold-out. */}
+      <button type="button" className="wf-params-btn" onClick={() => setParamsOpen(true)}>
+        <i className="ri-command-line" />
+        <span>{bt('Parameters')}</span>
+      </button>
+
+      <Modal open={paramsOpen} onClose={() => setParamsOpen(false)} title={bt('Parameters')} size="lg">
+        <ParameterFields
+          value={data.parameters}
+          onChange={(parameters: WorkflowParameter[]) => onChange({ parameters })}
+          preferTab={bool(data, 'preferParamsInTab')}
+          onPreferTab={(v) => onChange({ preferParamsInTab: v })}
         />
-        <ParameterFields value={data.parameters} onChange={(parameters: WorkflowParameter[]) => onChange({ parameters })} />
-      </Expand>
+      </Modal>
     </div>
   )
 }

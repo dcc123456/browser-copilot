@@ -1935,6 +1935,120 @@
   width: 224px;
 }
 
+/* Parameters editor (Automa EditWorkflowParameters): table head + grid rows.
+   Inline in the narrow sidebar → compact two columns; inside the trigger's
+   Parameters modal → Automa's 12-col table (3/2/3/4 + delete). */
+.wf-params-scroll {
+  max-height: calc(100vh - 15rem);
+  min-height: 200px;
+  overflow: auto;
+}
+.wf-params-empty {
+  margin: 16px 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--we-text-dim);
+}
+.wf-params-head {
+  display: none;
+  padding: 0 0 6px 4px;
+  font-size: 13px;
+  color: var(--we-text-dim);
+}
+.wf-param {
+  margin-bottom: 16px;
+}
+.wf-param-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-items: center;
+}
+.wf-param-delete {
+  width: 36px;
+  height: 36px;
+}
+.wf-param-delete:hover:not(:disabled) {
+  color: var(--we-danger);
+}
+.wf-param-options {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+  margin: 6px 0 4px;
+}
+.wf-param-options .wf-field {
+  flex: 1;
+  max-width: 400px;
+  margin-bottom: 0;
+}
+.wf-param-options .wf-field-check {
+  margin: 6px 0 0;
+}
+.wf-params-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+.wf-params-footer-grow {
+  flex: 1;
+}
+.wf-params-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: var(--we-accent);
+  color: var(--we-text-on-accent);
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: filter 0.14s ease;
+}
+.wf-params-add:hover {
+  filter: brightness(1.12);
+}
+.wf-params-add i {
+  font-size: 15px;
+}
+/* Parameters open button on the trigger panel (Automa: command icon + label) */
+.wf-params-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: color-mix(in srgb, var(--we-text) 5%, transparent);
+  color: var(--we-text);
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.14s ease;
+  margin-top: 4px;
+}
+.wf-params-btn:hover {
+  background: color-mix(in srgb, var(--we-text) 9%, transparent);
+}
+.wf-params-btn i {
+  font-size: 16px;
+  color: var(--we-text-dim);
+}
+/* Modal context → full Automa table layout */
+.wf-modal-body .wf-params-head {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) minmax(0, 3fr) minmax(0, 4fr) 36px;
+  gap: 8px;
+  align-items: center;
+}
+.wf-modal-body .wf-param-row {
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) minmax(0, 3fr) minmax(0, 4fr) 36px;
+}
+
 /* --- Top-toolbar debug toggle + logs list/run-detail --- */
 .wf-debug-toggle {
   display: inline-flex;
