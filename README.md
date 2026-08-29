@@ -444,4 +444,12 @@ changes apply without a reload.
 
 ## License
 
-[MIT](LICENSE)
+This project is licensed under the
+[PolyForm Noncommercial License 1.0.0](LICENSE): use, modification, and
+distribution are free for personal study, research, education, testing, and
+non-profit organizations, provided license notices are passed along with
+every copy. **Commercial use requires a separate license from the author** —
+open an issue or reach out via the repository page. This is a source-available
+license, not an OSI-approved open-source license. The software comes as is,
+without warranty and without liability. Third-party dependencies remain under
+their own licenses.

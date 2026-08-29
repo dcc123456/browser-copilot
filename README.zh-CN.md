@@ -365,4 +365,9 @@ pnpm run package     # 构建并生成 releases/browser-copilot-<版本>.zip
 
 ## 许可证
 
-[MIT](LICENSE)
+本项目采用 [PolyForm Noncommercial License 1.0.0](LICENSE)（PolyForm 非商业许可）：
+个人学习、研究、实验、教学及非营利组织（慈善、教育、政府机构等，不论资金来源）可
+免费使用、修改和分发，但需随副本附上本许可文本与来源声明；**商业使用需向作者单独
+获取授权**。本协议为"源码可得（source-available）"许可，不属于 OSI 认证的开源协议；
+软件按"现状"提供，不附带任何担保，作者不对使用后果承担责任。第三方依赖仍遵循其
+各自的许可证；商业授权请通过仓库主页联系作者。

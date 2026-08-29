@@ -1,7 +1,8 @@
 {
   "name": "browser-copilot",
   "private": true,
-  "version": "0.5.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "version": "0.5.1",
   "type": "module",
   "description": "A side-panel browser assistant that can read and act on the page you are looking at. Works with any OpenAI-compatible model.",
   "scripts": {
