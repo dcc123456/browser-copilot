@@ -16,10 +16,15 @@
  */
 
 import { isInjectablePage } from '../lib/pages'
-import type { Op, OpResult, PageSnapshot } from '../lib/ops'
+import type { Op, OpResult, PageSnapshot, SnapshotElement, Target } from '../lib/ops'
 import { runOp, runExecJs, runWorkflowJs } from '../inpage/kernel'
 import { activeTab } from './page'
 import { getLastInjectableTab } from './last-tab'
+import {
+  clickClosedShadow,
+  snapshotClosedShadow,
+  type CdpSession,
+} from './cdp-shadow'
 
 /**
  * Resolve the tab a workflow should act on.
@@ -184,6 +189,23 @@ export async function execOnActiveTab(
     return runWorkflowJsInMainWorld(tab, op, signal)
   }
 
+  // Actions on elements inside a CLOSED shadow root cannot be performed by
+  // in-page JS (the root is inaccessible); drive them through CDP trusted
+  // input. Click/hover are supported; other targeted actions report a clear
+  // error instead of the kernel's generic "not matched".
+  if (typeof tab.id === 'number' && targetIsClosedShadow(op.target)) {
+    if (op.action === 'click' || op.action === 'hover') {
+      return runClosedShadowAction(tab.id, tab.url ?? '', op)
+    }
+    return {
+      ok: false,
+      found: true,
+      frameUrl: tab.url ?? '',
+      isTopFrame: true,
+      error: `该元素位于封闭 Shadow DOM 中，暂不支持 ${op.action} 操作；可改用「JavaScript 代码」块在页面主世界执行。`,
+    }
+  }
+
   let injections: chrome.scripting.InjectionResult<unknown>[]
   try {
     injections = await abortable(
@@ -224,7 +246,72 @@ export async function execOnActiveTab(
   const rank = (result: OpResult): number =>
     (result.found ? 4 : 0) + (result.ok ? 2 : 0) + (result.isTopFrame ? 1 : 0)
   results.sort((a, b) => rank(b) - rank(a))
-  return results[0] as OpResult
+  const best = results[0] as OpResult
+
+  // Enrich a snapshot with interactive elements hidden inside CLOSED shadow
+  // roots (in-page JS never sees them). Best-effort: when the debugger is
+  // unavailable or attaching fails, return the kernel snapshot unchanged.
+  // They are PREPENDED and renumbered after the kernel elements so they never
+  // fall beyond the model-facing element cap (shadowed controls are rare and
+  // the whole reason for this enrichment).
+  if (op.action === 'snapshot' && best.ok && best.page && chrome.debugger) {
+    const extra = await readClosedShadowElements(tab.id)
+    if (extra.length > 0) {
+      const kernelCount = best.page.elements.length
+      const renumbered = best.page.elements.map((el, i) => ({ ...el, ref: `e${i + 1}` }))
+      const shadowEntries = extra.map((el, i) => ({ ...el, ref: `e${kernelCount + i + 1}` }))
+      best.page = {
+        ...best.page,
+        elements: shadowEntries.concat(renumbered),
+      }
+    }
+  }
+  return best
+}
+
+/** Snapshot interactive elements inside closed shadow roots via CDP. */
+async function readClosedShadowElements(tabId: number): Promise<SnapshotElement[]> {
+  try {
+    return await withCdpSession(tabId, (session) => snapshotClosedShadow(session, 1))
+  } catch {
+    // User dismissed the infobar / debugger policy / attach failed — degrade
+    // silently: light-DOM and open-shadow elements are already in the snapshot.
+    return []
+  }
+}
+
+/** Run a click/hover on a closed-shadow element via CDP trusted input. */
+async function runClosedShadowAction(
+  tabId: number,
+  frameUrl: string,
+  op: Op,
+): Promise<OpResult> {
+  const base: OpResult = { ok: false, found: true, frameUrl, isTopFrame: true }
+  if (!chrome.debugger) {
+    return {
+      ...base,
+      found: false,
+      error:
+        '该元素位于封闭 Shadow DOM 中，需要调试器（chrome.debugger）权限才能操作；当前环境不可用。',
+    }
+  }
+  try {
+    const kind = op.action === 'hover' ? 'hover' as const : 'click' as const
+    const out = await withCdpSession(tabId, (session) =>
+      clickClosedShadow(session, op.target as Target, kind),
+    )
+    if (out.ok) {
+      return { ...base, ok: true, note: out.note ?? '已操作（封闭 Shadow DOM）' }
+    }
+    return { ...base, found: false, error: out.error ?? '未能点击封闭 Shadow DOM 中的元素。' }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return {
+      ...base,
+      found: false,
+      error: `封闭 Shadow DOM 操作失败：${message}。可尝试在页面上用「JavaScript 代码」块直接操作，或允许扩展调试该标签页。`,
+    }
+  }
 }
 
 /**
@@ -251,6 +338,67 @@ function explainJsError(message: string): string {
 }
 
 /**
+ * Whether a target lives inside a CLOSED shadow root (any spec so marked).
+ * Such targets cannot be resolved by in-page JS; the driver routes them to
+ * the chrome.debugger (CDP) channel.
+ */
+function targetIsClosedShadow(target: Target | undefined): boolean {
+  if (!target) return false
+  return [target.primary, ...(target.fallbacks ?? [])].some(
+    (spec) => spec && (spec.how === 'cdp-shadow' || spec.closedShadow === true),
+  )
+}
+
+/**
+ * Serialize CDP sessions per tab so a CSP-fallback eval and a shadow click
+ * never interleave attach/detach against the same target. Each caller attaches
+ * (tolerating an existing attachment), runs, and detaches; the queue makes
+ * those sessions run one at a time.
+ */
+const cdpQueues = new Map<number, Promise<unknown>>()
+
+function withCdpSession<T>(
+  tabId: number,
+  fn: (session: CdpSession) => Promise<T>,
+): Promise<T> {
+  const run = async (): Promise<T> => {
+    const target = { tabId }
+    try {
+      await chrome.debugger.attach(target, '1.3')
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      if (!/already attached|already being debugged/i.test(msg)) throw error
+    }
+    let attachedByUs = true
+    try {
+      const session: CdpSession = {
+        send: (method: string, params?: Record<string, unknown>) =>
+          chrome.debugger.sendCommand(target, method, params) as Promise<unknown>,
+      }
+      return await fn(session)
+    } finally {
+      // Only detach if we attached; another session may own a long-lived one.
+      if (attachedByUs) {
+        try {
+          await chrome.debugger.detach(target)
+        } catch {
+          /* may already be detached */
+        }
+      }
+    }
+  }
+  const prev = cdpQueues.get(tabId) ?? Promise.resolve()
+  const next = prev.then(run, run)
+  cdpQueues.set(
+    tabId,
+    next.finally(() => {
+      if (cdpQueues.get(tabId) === next) cdpQueues.delete(tabId)
+    }),
+  )
+  return next as Promise<T>
+}
+
+/**
  * Evaluate code in the page's MAIN world via the Chrome DevTools Protocol
  * (`chrome.debugger` + `Runtime.evaluate`). This is the CSP bypass Automa uses:
  * DevTools evaluation runs in the page's real JS context (so `window`, page
@@ -262,31 +410,8 @@ function explainJsError(message: string): string {
  * JSON-serializable result value, or rejects with the runtime/attach error.
  */
 async function evalViaCdp(tabId: number, expression: string): Promise<unknown> {
-  const target = { tabId }
-  const attach = async (): Promise<void> => {
-    try {
-      await chrome.debugger.attach(target, '1.3')
-    } catch (error) {
-      // Already attached (e.g. a previous run didn't detach) — reuse it.
-      const msg = error instanceof Error ? error.message : String(error)
-      if (!/already attached|already being debugged/i.test(msg)) throw error
-    }
-  }
-
-  await attach()
-  let attached = true
-  const detach = async (): Promise<void> => {
-    if (!attached) return
-    attached = false
-    try {
-      await chrome.debugger.detach(target)
-    } catch {
-      /* may already be detached */
-    }
-  }
-
-  try {
-    const res = (await chrome.debugger.sendCommand(target, 'Runtime.evaluate', {
+  return withCdpSession(tabId, async (session) => {
+    const res = (await session.send('Runtime.evaluate', {
       expression,
       // Evaluate in the page's top frame MAIN world (the default context),
       // await Promises, and surface thrown errors as exceptionDetails.
@@ -306,9 +431,7 @@ async function evalViaCdp(tabId: number, expression: string): Promise<unknown> {
       throw new DriverError(desc.split('\n')[0] || desc)
     }
     return res.result?.value
-  } finally {
-    await detach()
-  }
+  })
 }
 
 /**

@@ -26,12 +26,31 @@ export interface Target {
 
 /** One way of locating an element. */
 export interface TargetSpec {
-  how: 'testid' | 'id' | 'name' | 'role' | 'text' | 'css'
+  /**
+   * `cdp-shadow` elements live inside a CLOSED shadow root: in-page JS cannot
+   * see them, so the kernel never resolves such a spec — the driver routes the
+   * op to the chrome.debugger (CDP) channel instead.
+   */
+  how: 'testid' | 'id' | 'name' | 'role' | 'text' | 'css' | 'cdp-shadow'
   value: string
   role?: string
   tag?: string
   /** Zero-based index among visible matches, when a spec matches several. */
   nth?: number
+  /**
+   * Shadow hosts crossed from the document root to the target, outermost
+   * first, each as a CSS selector that matches the host in LIGHT DOM (hosts
+   * always live in light DOM; only their content is shadowed). Empty/absent
+   * for plain light-DOM elements. Used to descend into open shadow roots
+   * in-page, and by the CDP channel to narrow the pierced-tree search.
+   */
+  shadowHosts?: string[]
+  /**
+   * True when the target is inside a CLOSED shadow root. Such a spec can only
+   * be resolved through chrome.debugger (DOM.getDocument pierce / Input
+   * events); the kernel treats it as unresolvable.
+   */
+  closedShadow?: boolean
 }
 
 /** Every action the kernel understands. */

@@ -294,50 +294,131 @@ export function runOp(op: Op): OpResult {
     return parts.join('|')
   }
 
-  function safeQuery(selector: string): Element[] {
-    try {
-      return Array.prototype.slice.call(document.querySelectorAll(selector)) as Element[]
-    } catch {
-      return []
-    }
-  }
-  /** Resolve an XPath expression to element matches (7 = ORDERED_NODE_SNAPSHOT). */
-  function xpathQuery(xpath: string): Element[] {
-    try {
-      const result = document.evaluate(xpath, document, null, 7, null)
-      const out: Element[] = []
-      for (let i = 0; i < result.snapshotLength; i++) {
-        const n = result.snapshotItem(i)
-        if (n && (n as Node).nodeType === 1) out.push(n as Element)
+  /**
+   * Every root the kernel can query: the document plus each OPEN shadow root,
+   * outermost first (shadow roots are discovered by walking hosts). A CLOSED
+   * shadow root's `.shadowRoot` is null — invisible to JS by design; those
+   * targets are resolved by the driver's chrome.debugger (CDP) channel.
+   */
+  function openRoots(): ParentNode[] {
+    const roots: ParentNode[] = [document]
+    const visit = (root: ParentNode): void => {
+      let hosts: NodeListOf<Element>
+      try {
+        hosts = root.querySelectorAll('*')
+      } catch {
+        return
       }
-      return out
-    } catch {
-      return []
+      for (let i = 0; i < hosts.length; i += 1) {
+        const el = hosts[i]
+        if (!el) continue
+        const sr = (el as HTMLElement).shadowRoot
+        if (sr && sr.nodeType === 11) {
+          roots.push(sr)
+          visit(sr)
+        }
+      }
     }
+    visit(document)
+    return roots
   }
+
+  function querySelectorIn(roots: ParentNode[], selector: string): Element[] {
+    const out: Element[] = []
+    for (const root of roots) {
+      try {
+        const list = root.querySelectorAll(selector)
+        for (let i = 0; i < list.length; i += 1) {
+          const el = list[i]
+          if (el) out.push(el)
+        }
+      } catch {
+        /* invalid selector for this root */
+      }
+    }
+    return out
+  }
+
+  /** Query every open root (document + open shadow roots). */
+  function safeQuery(selector: string): Element[] {
+    return querySelectorIn(openRoots(), selector)
+  }
+
+  /** Resolve an XPath in one root (7 = ORDERED_NODE_SNAPSHOT). */
+  function xpathInRoots(roots: ParentNode[], xpath: string): Element[] {
+    const out: Element[] = []
+    for (const root of roots) {
+      try {
+        const doc =
+          root.nodeType === 9 ? (root as Document) : (root as ShadowRoot).ownerDocument
+        if (!doc) continue
+        const result = doc.evaluate(xpath, root, null, 7, null)
+        for (let i = 0; i < result.snapshotLength; i += 1) {
+          const n = result.snapshotItem(i)
+          if (n && (n as Node).nodeType === 1) out.push(n as Element)
+        }
+      } catch {
+        /* bad expression in this root */
+      }
+    }
+    return out
+  }
+
+  /**
+   * Follow a shadow-host chain (each entry a CSS selector for a host within
+   * its parent root) and return the final root to query inside. Returns null
+   * when there is no chain (caller queries every open root), or an empty array
+   * when the chain cannot be followed — notably a CLOSED shadow root, which JS
+   * cannot enter (the driver routes those ops through chrome.debugger).
+   */
+  function descendShadowHosts(hosts: string[] | undefined): ParentNode[] | null {
+    if (!hosts || hosts.length === 0) return null
+    let root: ParentNode = document
+    for (let i = 0; i < hosts.length; i += 1) {
+      const hostSel = hosts[i] as string
+      let host: Element | null = null
+      try {
+        host = root.querySelector(hostSel)
+      } catch {
+        host = null
+      }
+      if (!host) return []
+      const sr = (host as HTMLElement).shadowRoot
+      if (!sr) return [] // closed shadow root (or host changed): unreachable in-page
+      root = sr
+    }
+    return [root]
+  }
+
   function queryAll(spec: TargetSpec): Element[] {
+    // Specs produced for CLOSED shadow-root elements are never resolvable
+    // in-page; the kernel skips them so the driver routes the op through CDP.
+    if (spec.how === 'cdp-shadow' || spec.closedShadow) return []
+    const descended = descendShadowHosts(spec.shadowHosts)
+    const roots = descended ?? openRoots()
+    if (roots.length === 0) return []
     const tagPrefix = spec.tag ?? ''
     switch (spec.how) {
       case 'testid': {
         const sep = spec.value.indexOf('=')
         const attr = sep === -1 ? 'data-testid' : spec.value.slice(0, sep)
         const value = sep === -1 ? spec.value : spec.value.slice(sep + 1)
-        return safeQuery(`${tagPrefix}[${attr}=${quoteAttr(value)}]`)
+        return querySelectorIn(roots, `${tagPrefix}[${attr}=${quoteAttr(value)}]`)
       }
       case 'id':
-        return safeQuery(`${tagPrefix}[id=${quoteAttr(spec.value)}]`)
+        return querySelectorIn(roots, `${tagPrefix}[id=${quoteAttr(spec.value)}]`)
       case 'name':
-        return safeQuery(`${tagPrefix}[name=${quoteAttr(spec.value)}]`)
+        return querySelectorIn(roots, `${tagPrefix}[name=${quoteAttr(spec.value)}]`)
       case 'css':
         // XPath locators are encoded with an `xpath:` prefix by the engine
         // (Automa blocks can set findBy='xpath'); resolve them via evaluate.
         if (spec.value.startsWith('xpath:')) {
-          return xpathQuery(spec.value.slice('xpath:'.length))
+          return xpathInRoots(roots, spec.value.slice('xpath:'.length))
         }
-        return safeQuery(spec.value)
+        return querySelectorIn(roots, spec.value)
       case 'role': {
         const wanted = (spec.role ?? '').toLowerCase()
-        const all = safeQuery('*')
+        const all = querySelectorIn(roots, '*')
         const found: Element[] = []
         for (const candidate of all) {
           if (roleOf(candidate).toLowerCase() !== wanted) continue
@@ -348,7 +429,7 @@ export function runOp(op: Op): OpResult {
       }
       case 'text': {
         const wanted = spec.value
-        const all = safeQuery(tagPrefix || '*')
+        const all = querySelectorIn(roots, tagPrefix || '*')
         const exact: Element[] = []
         for (const candidate of all) {
           if (visibleText(candidate) !== wanted) continue
@@ -368,10 +449,39 @@ export function runOp(op: Op): OpResult {
     }
   }
 
+  /**
+   * For an element inside an OPEN shadow root, the chain of shadow hosts from
+   * the document root to it (outermost first), each as a selector relative to
+   * the root it lives in (cssPath stops at the shadow boundary, so each step is
+   * scoped to its own root). Empty for light-DOM elements. The spec is
+   * annotated with it so `queryAll` descends back into the same open roots.
+   */
+  function shadowHostChain(element: Element): string[] {
+    const hosts: string[] = []
+    let el: Element | null = element
+    let root: Node = el.getRootNode ? el.getRootNode() : el.ownerDocument
+    // nodeType 11 === DOCUMENT_FRAGMENT_NODE (a ShadowRoot). Walk out through
+    // every shadow boundary; cssPath stops at the boundary, so each host step
+    // is relative to the root it lives in.
+    while (root && root.nodeType === 11) {
+      const host = (root as ShadowRoot).host
+      if (!host) break
+      hosts.unshift(cssPath(host))
+      el = host
+      root = host.getRootNode ? host.getRootNode() : host.ownerDocument
+    }
+    void el
+    return hosts
+  }
+
   function specsFor(element: Element): TargetSpec[] {
     const specs: TargetSpec[] = []
     const tag = element.tagName.toLowerCase()
-    const withIndex = (spec: TargetSpec): TargetSpec => {
+    const shadowHosts = shadowHostChain(element)
+    const scope = (spec: TargetSpec): TargetSpec =>
+      shadowHosts.length ? { ...spec, shadowHosts } : spec
+    const withIndex = (raw: TargetSpec): TargetSpec => {
+      const spec = scope(raw)
       const matches = queryAll(spec)
       if (matches.length <= 1) return spec
       const position = matches.indexOf(element)
@@ -554,7 +664,33 @@ export function runOp(op: Op): OpResult {
     const x = rect.left + rect.width / 2
     const y = rect.top + rect.height / 2
     const top = document.elementFromPoint(x, y)
-    if (!top || top === element || element.contains(top) || top.contains(element)) return null
+    if (!top || top === element) return null
+    // Light-DOM containment: the hit target is the element or an ancestor/
+    // descendant of it in the same tree.
+    if (element.contains(top) || top.contains(element)) return null
+    // Shadow DOM: elementFromPoint returns the LIGHT-DOM shadow HOST, never the
+    // shadowed element beneath. The hit reaches `element` when element is on
+    // the hit test's composed path (open shadow), or the hit host is any host
+    // in element's own host chain.
+    const elementRoot = element.getRootNode ? element.getRootNode() : element.ownerDocument
+    if (elementRoot && (elementRoot as ShadowRoot).nodeType === 11) {
+      try {
+        const path = typeof document.elementsFromPoint === 'function'
+          ? document.elementsFromPoint(x, y)
+          : [top]
+        for (let i = 0; i < path.length; i += 1) {
+          if (path[i] === element) return null
+        }
+      } catch {
+        /* fall through to host-chain check */
+      }
+      let root: Node = elementRoot
+      while (root && (root as ShadowRoot).nodeType === 11) {
+        const host = (root as ShadowRoot).host
+        if (host === top) return null
+        root = host && host.getRootNode ? host.getRootNode() : host?.ownerDocument
+      }
+    }
     return top
   }
 
@@ -627,7 +763,26 @@ export function runOp(op: Op): OpResult {
     for (const form of safeQuery('form')) {
       if (!isVisible(form)) continue
       const fields: PageSnapshot['forms'][number]['fields'] = []
-      const controls = form.querySelectorAll('input, select, textarea')
+      // Form controls can live in light DOM or in an open shadow root within
+      // the form's subtree; gather from every open root and keep only those
+      // inside this form's composed subtree (the form itself, or a field whose
+      // host chain leads up to it).
+      const controls: Element[] = []
+      for (const ctrl of querySelectorIn(openRoots(), 'input, select, textarea')) {
+        if (form.contains(ctrl)) {
+          controls.push(ctrl)
+          continue
+        }
+        // Field inside a shadow root contained in the form: walk host chain.
+        let hostNode: Node | null = ctrl.getRootNode ? ctrl.getRootNode() : ctrl.ownerDocument
+        let within = false
+        while (hostNode && (hostNode as ShadowRoot).nodeType === 11) {
+          const h: Element | null = (hostNode as ShadowRoot).host
+          if (h && form.contains(h)) { within = true; break }
+          hostNode = h ? (h.getRootNode ? h.getRootNode() : h.ownerDocument) : null
+        }
+        if (within) controls.push(ctrl)
+      }
       for (let i = 0; i < controls.length; i += 1) {
         const control = controls[i]
         if (!control || !isVisible(control)) continue

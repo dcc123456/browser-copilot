@@ -56,16 +56,46 @@ export const startRecorder: RecorderStart = (args) => {
     }
     return tag + q
   }
+  // Open shadow roots to query across (excluding our own recorder bar / picker
+  // hosts, whose shadow roots are extension UI rather than page content).
+  const openRoots = (): ParentNode[] => {
+    const roots: ParentNode[] = [document]
+    const visit = (root: ParentNode): void => {
+      const list = root.querySelectorAll('*')
+      for (let i = 0; i < list.length; i += 1) {
+        const h = list[i] as Element
+        if (h.id === 'bc-element-picker' || h.id === 'bc-recorder-bar') continue
+        const sr = (h as HTMLElement).shadowRoot
+        if (sr && sr.nodeType === 11) { roots.push(sr); visit(sr) }
+      }
+    }
+    visit(document)
+    return roots
+  }
+  const countInRoots = (sel: string): { count: number; matches: Element[] } => {
+    let count = 0
+    const matches: Element[] = []
+    try {
+      for (const root of openRoots()) {
+        const ms = root.querySelectorAll(sel)
+        count += ms.length
+        ms.forEach((m) => matches.push(m))
+      }
+    } catch {
+      /* invalid selector */
+    }
+    return { count, matches }
+  }
   function selectorFor(el: Element): string {
     const direct = partOf(el)
-    if (direct.startsWith('#') && document.querySelectorAll(direct).length === 1) return direct
+    if (direct.startsWith('#') && countInRoots(direct).count === 1) return direct
     const chain = [direct]
     let node: Element | null = el.parentElement
     let depth = 0
     while (node && depth < 5) {
       const cand = chain.slice().reverse().join(' > ')
-      const ms = document.querySelectorAll(cand)
-      if (ms.length === 1 && ms[0] === el) return cand
+      const { count, matches } = countInRoots(cand)
+      if (count === 1 && matches[0] === el) return cand
       chain.push(partOf(node))
       node = node.parentElement
       depth++
@@ -168,13 +198,13 @@ export const startRecorder: RecorderStart = (args) => {
   }
 
   function onFocusIn(e: FocusEvent) {
-    const el = e.target as Element | null
+    const el = eventTarget(e)
     if (!el || isOurUi(el) || !isEditable(el)) return
     ;(el as HTMLElement).dataset.__bcSel = selectorFor(el)
     el.addEventListener('input', onInputField, true)
   }
   function onFocusOut(e: FocusEvent) {
-    const el = e.target as Element | null
+    const el = eventTarget(e)
     if (!el || !isEditable(el)) return
     el.removeEventListener('input', onInputField, true)
     // Flush any pending typing into a forms block before the field loses focus.
@@ -189,12 +219,12 @@ export const startRecorder: RecorderStart = (args) => {
     sendFormsText(el, pending?.selector ?? (el as HTMLElement).dataset.__bcSel ?? selectorFor(el), pending?.name ?? textFieldName(el))
   }
   function onInputField(e: Event) {
-    const el = e.target as Element | null
+    const el = eventTarget(e)
     if (el && isEditable(el)) recordText(el, false)
   }
 
   function onClick(e: MouseEvent) {
-    const el = e.target as Element | null
+    const el = eventTarget(e)
     if (!el || isOurUi(el)) return
 
     // Anchor -> link block.
@@ -243,7 +273,7 @@ export const startRecorder: RecorderStart = (args) => {
   }
 
   function onChange(e: Event) {
-    const el = e.target as Element | null
+    const el = eventTarget(e)
     if (!el || isOurUi(el)) return
 
     if (el.tagName === 'SELECT') {
@@ -278,7 +308,7 @@ export const startRecorder: RecorderStart = (args) => {
     'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', ' ',
   ])
   function onKeydown(e: KeyboardEvent) {
-    const el = e.target as Element | null
+    const el = eventTarget(e)
     if (el && isOurUi(el)) return
     const typing = el ? isEditable(el) : false
 
@@ -324,8 +354,36 @@ export const startRecorder: RecorderStart = (args) => {
     })
   }
 
+  /**
+   * Deepest event target crossing OPEN shadow boundaries. Capture listeners
+   * see a retargeted host for shadowed events, so e.target would record the
+   * host instead of the button inside. composedPath()[0] is the real element
+   * inside an open root; for a CLOSED root it is the host (unreachable in JS;
+   * those interactions are driven via chrome.debugger, not recorded).
+   */
+  function eventTarget(e: Event): Element | null {
+    const path = e.composedPath?.()
+    const first = path && path[0]
+    if (first && (first as Node).nodeType === 1) return first as Element
+    return (e.target as Element | null) ?? null
+  }
+
+  function isOurUiEl(el: Element | null): boolean {
+    if (!el) return false
+    if (el.closest('#bc-element-picker, #bc-recorder-bar')) return true
+    // Inside an open shadow root: walk the host chain (closest() does not
+    // cross shadow boundaries).
+    let root: Node = el.getRootNode ? el.getRootNode() : el.ownerDocument
+    while (root && (root as ShadowRoot).nodeType === 11) {
+      const host = (root as ShadowRoot).host
+      if (host && host.closest('#bc-element-picker, #bc-recorder-bar')) return true
+      root = host && host.getRootNode ? host.getRootNode() : host?.ownerDocument
+    }
+    return false
+  }
+
   function isOurUi(el: Element): boolean {
-    return !!el.closest('#bc-element-picker, #bc-recorder-bar')
+    return isOurUiEl(el)
   }
 
   document.addEventListener('click', onClick, true)

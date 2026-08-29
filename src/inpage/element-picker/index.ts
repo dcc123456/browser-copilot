@@ -110,17 +110,26 @@ export const startPicker: PickerStart = async (args) => {
     }
     return (opts.tagName ? tag : '') + q
   }
+  // Count matches of a CSS selector across all open roots, and whether `el`
+  // is the (only) match — shadow elements never appear in document queries.
+  const matchesInRoots = (sel: string): Element[] => {
+    const out: Element[] = []
+    for (const root of openRoots()) {
+      try { root.querySelectorAll(sel).forEach((m) => out.push(m)) } catch { /* bad selector */ }
+    }
+    return out
+  }
   function build(el: Element): string {
     const direct = part(el)
-    if (direct.startsWith('#') && document.querySelectorAll(direct).length === 1) return direct
+    if (direct.startsWith('#') && matchesInRoots(direct).length === 1) return direct
     const chain = [direct]
     let node: Element | null = el.parentElement
     let depth = 0
     while (node && depth < 6) {
       const cand = chain.slice().reverse().join(' > ')
-      const ms = document.querySelectorAll(cand)
+      const ms = matchesInRoots(cand)
       if (ms.length === 1 && ms[0] === el) return cand
-      if (opts.idName && node.id) { const withId = `#${esc(node.id)} > ${chain.slice().reverse().join(' > ')}`; if (document.querySelectorAll(withId).length === 1) return withId }
+      if (opts.idName && node.id) { const withId = `#${esc(node.id)} > ${chain.slice().reverse().join(' > ')}`; if (matchesInRoots(withId).length === 1) return withId }
       chain.push(part(node)); node = node.parentElement; depth++
     }
     return chain.slice().reverse().join(' > ')
@@ -140,12 +149,38 @@ export const startPicker: PickerStart = async (args) => {
     }
     return segs.join('')
   }
+  // Collect the document plus every OPEN shadow root (outermost first) so the
+  // selector matcher can reach inside web components. The picker host itself
+  // is excluded (its open shadow root is our own card). Closed shadow roots
+  // are invisible to JS; those targets are driven via chrome.debugger.
+  const openRoots = (): ParentNode[] => {
+    const roots: ParentNode[] = [document]
+    const visit = (root: ParentNode): void => {
+      let list: NodeListOf<Element>
+      try { list = root.querySelectorAll('*') } catch { return }
+      list.forEach((el) => {
+        if (el === host) return
+        const sr = (el as HTMLElement).shadowRoot
+        if (sr && sr.nodeType === 11) { roots.push(sr); visit(sr) }
+      })
+    }
+    visit(document)
+    return roots
+  }
   const count = (sel: string, xp: boolean): number => {
     if (!sel) return 0
+    let n = 0
     try {
-      if (xp) return document.evaluate(sel, document, null, 7, null).snapshotLength
-      return document.querySelectorAll(sel).length
+      for (const root of openRoots()) {
+        if (xp) {
+          const doc = root.nodeType === 9 ? (root as Document) : (root as ShadowRoot).ownerDocument
+          if (doc) n += doc.evaluate(sel, root, null, 7, null).snapshotLength
+        } else {
+          n += root.querySelectorAll(sel).length
+        }
+      }
     } catch { return 0 }
+    return n
   }
 
   // --- DOM scaffold (Shadow DOM) ---
@@ -253,10 +288,26 @@ export const startPicker: PickerStart = async (args) => {
     return
   }
 
+  // Deepest element under a mouse event, crossing OPEN shadow boundaries.
+  // composedPath()[0] is the real target inside an open shadow root; for a
+  // closed root the path is truncated to the host, matching elementFromPoint.
+  const eventTarget = (e: MouseEvent): Element | null => {
+    const path = e.composedPath?.()
+    const first = path && path[0]
+    return (first as Element) ?? document.elementFromPoint(e.clientX, e.clientY)
+  }
+  // Our own UI (the picker card lives in `host`'s open shadow root): any event
+  // whose path passes through `host` is a click inside the card.
+  const isOurUi = (e: MouseEvent): boolean => {
+    const path = e.composedPath?.()
+    if (path && path.indexOf(host) !== -1) return true
+    const t = e.target as Node | null
+    return !!t && host.contains(t)
+  }
   const onMove = (e: MouseEvent) => {
     if (locked) return
-    hovered = document.elementFromPoint(e.clientX, e.clientY)
-    if (hovered && (hovered === card || (card.contains(hovered)) || host.contains(hovered))) {
+    hovered = eventTarget(e)
+    if (hovered && (hovered === card || card.contains(hovered) || host.contains(hovered))) {
       hovered = null
       highlightEl(null)
       return
@@ -279,11 +330,11 @@ export const startPicker: PickerStart = async (args) => {
     // the editor spinner spun forever. Return BEFORE preventDefault /
     // stopPropagation so card clicks reach their shadow listeners (and
     // checkbox/select defaults inside the card keep working).
-    if (host.contains(e.target as Node)) return
+    if (isOurUi(e)) return
     e.preventDefault()
     e.stopPropagation()
-    locked = hovered ?? document.elementFromPoint(e.clientX, e.clientY)
-    if (locked && !host.contains(locked)) refresh()
+    locked = eventTarget(e)
+    if (locked && locked !== host && !host.contains(locked)) refresh()
   }
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape') { cleanup(); void chrome.runtime.sendMessage({ type: 'picker:cancel', pickerId }) }
