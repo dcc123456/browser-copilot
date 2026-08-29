@@ -530,6 +530,7 @@ function summarizeSnapshot(snapshot: {
     checked?: boolean
     required?: boolean
     inViewport: boolean
+    target?: unknown
   }>
   forms: unknown
   scrollY: number
@@ -552,6 +553,10 @@ function summarizeSnapshot(snapshot: {
     ...(el.checked !== undefined ? { checked: el.checked } : {}),
     ...(el.required ? { required: true } : {}),
     inViewport: el.inViewport,
+    // The durable locator the click/fill tools echo back verbatim. This MUST
+    // be present: the tool schema tells the model to copy it from here, and it
+    // carries the closed-shadow marker that routes clicks through CDP.
+    ...(el.target ? { target: el.target } : {}),
   }))
   // Keep the full text but cap so a long page doesn't blow the context.
   const text =
