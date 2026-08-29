@@ -22,6 +22,7 @@
 [定时任务](#定时任务)，要么是你从[飞书](#飞书接入)发来的指令。
 
 ---
+<video src="https://github.com/user-attachments/assets/17a30b54-608c-43a9-a5ee-770c1d809350" controls="controls" width="100%"></video>
 
 ## 目录
 
