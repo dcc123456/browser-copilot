@@ -30,6 +30,8 @@ command you sent from [Feishu/Lark](#feishu--lark-integration).
 
 ---
 
+<video src="https://github.com/user-attachments/assets/17a30b54-608c-43a9-a5ee-770c1d809350" controls="controls" width="100%"></video>
+
 ## Contents
 
 - [Quick start](#quick-start)
