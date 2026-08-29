@@ -14,6 +14,11 @@ through a whole checkout or setup flow — while you watch or stay hands-off.
   auto; semi-auto shows every click for your approval first.
 - 🧩 **Skills** turn repeatable know-how (review checklists, style guides,
   extraction formats) into one-tap instructions the model must follow.
+- 🎬 **Workflows run whole procedures on their own.** Record yourself doing a
+  task once, or assemble it on a visual canvas from 56 block types — clicking,
+  filling, loops, condition branches, even an AI-agent step — then launch it by
+  hand, on a schedule, at startup, with a keyboard shortcut, from a context
+  menu, or when a matching page is opened.
 - ⏰ **Runs on a schedule while you sleep.** Set recurring tasks — every few
   minutes, daily, or on weekdays — to run an unattended prompt or summarize
   your GitHub review queue, with a full run history.
@@ -25,8 +30,9 @@ through a whole checkout or setup flow — while you watch or stay hands-off.
   never shown to the model.
 
 It never acts on its own initiative — every action is either part of answering
-something you just asked, a [scheduled task](#scheduled-tasks) you created, or a
-command you sent from [Feishu/Lark](#feishu--lark-integration).
+something you just asked, a [scheduled task](#scheduled-tasks) you created, a
+[workflow](#workflows) you built with an enabled trigger, or a command you sent
+from [Feishu/Lark](#feishu--lark-integration).
 
 ---
 
@@ -40,6 +46,7 @@ command you sent from [Feishu/Lark](#feishu--lark-integration).
 - [Models](#models)
 - [Using it](#using-it)
 - [Skills](#skills)
+- [Workflows](#workflows)
 - [Scheduled tasks](#scheduled-tasks)
 - [Feishu / Lark integration](#feishu--lark-integration)
 - [Saved data and privacy](#saved-data-and-privacy)
@@ -239,6 +246,65 @@ beforehand; full instructions load on demand.
 
 ---
 
+## Workflows
+
+The **Workflows** tab turns a repeatable browser procedure into a saved,
+re-runnable automation — a node graph built on a visual canvas, modeled after
+[Automa](https://github.com/AutomaApp/automa). Create a workflow there and
+**Edit** opens the full flow editor in its own tab.
+
+**Three ways to get one:**
+
+- **Record it.** Press Record in the editor and do the task once. Clicks, form
+  inputs (text, select, checkbox, radio), scrolling, tab switches, new tabs,
+  full-page navigations and SPA route changes are captured as blocks —
+  including the wait-for-element / wait-for-load pauses. Stop recording and
+  the flow becomes a workflow on the canvas.
+- **Convert a chat.** After a chat turn that actually acted on pages, save the
+  executed actions as a workflow and reuse them without the model in the loop.
+- **Draw it.** Drag blocks from the palette and connect them.
+
+**What's in the palette.** 56 executable blocks ported from Automa: element
+click/hover/scroll, form fill, get text, element exists, loops over data or
+elements, while/repeat, condition branches, variables and `{{token}}`
+interpolation, JavaScript code, cookies, webhook, clipboard, screenshot,
+download handling, new/switch/reload/close tab, delay, and more. (Five Automa
+*cloud* blocks — Google Sheets/Drive, block packages, cloud AI workflows — are
+listed for compatibility but not executable.) Every block has a dedicated edit
+form, can be disabled individually, and can carry its own error handling: retry
+or fall back to another branch on failure.
+
+**Precision targeting.** A built-in element picker generates a CSS or XPath
+selector for any target — hover to highlight, click to lock, walk up or down
+the DOM, switch between CSS and XPath. Targets inside *closed* shadow DOM are
+reached by clicking through the Chrome DevTools Protocol. One click
+auto-lays-out the graph; `Ctrl+S` saves, `Ctrl+Enter` runs from the editor.
+
+**One special block: AI agent.** It hands that step to the same agent loop the
+chat uses — in read-only mode it reads the page (or a specific element) and
+answers without acting; in full-auto mode it may click and navigate. The
+answer is stored in an output variable later blocks can interpolate.
+
+**Launching.** A workflow runs when its trigger fires:
+
+- **Manual** — the Run button in the editor or the Workflows tab;
+- **Scheduled** — same schedule options as [scheduled tasks](#scheduled-tasks)
+  (every N minutes, daily, or chosen weekdays);
+- **At browser startup**, **keyboard shortcut** (per workflow, e.g.
+  `Ctrl+Shift+E`), **context menu**, or **when a page whose URL matches a
+  pattern is opened**.
+
+**Watching runs.** The History tab's activity board shows running and finished
+runs for workflows and tasks alike — live progress, per-block logs, debug
+mode, and mid-run cancellation. The Workflows tab shows each workflow's
+last-run status, and a failed run deep-links straight to its log.
+
+**Portability.** Export a single workflow or all of them as JSON, and import
+JSON back — including files exported from Automa itself. Older
+Browser Copilot workflow formats migrate automatically on load.
+
+---
+
 ## Scheduled tasks
 
 The **Tasks** tab lets the agent run unattended on a schedule — no panel open, no
@@ -296,19 +362,30 @@ sent to the model, and passwords are not encrypted at rest.
 
 | Permission | Purpose |
 | --- | --- |
-| `storage` | Settings, providers, skills, conversations, profile, credentials. |
-| `tabs` | Identify the active tab and open/switch/close tabs when asked. |
-| `scripting` | Inject the page kernel to read or act on a tab. |
+| `storage` | Settings, providers, skills, conversations, workflows, profile, credentials. |
+| `tabs` | Identify the active tab and open/switch/close tabs when asked (and for workflow tab blocks). |
+| `scripting` | Inject the page kernel, workflow recorder, element picker, and shortcut listener to read or act on a tab. |
 | `sidePanel` | Show the panel. |
-| `alarms` | Wake the worker to run scheduled tasks and keep the Feishu bot connection alive. |
+| `alarms` | Wake the worker to run scheduled tasks and workflows and keep the Feishu bot connection alive. |
+| `offscreen` | Run a hidden document so the workflow clipboard block can read/write the system clipboard. |
+| `contextMenus` | Add the right-click item that launches workflows with a context-menu trigger. |
+| `webNavigation` | Detect page navigations for visit-web workflow triggers and for recording. |
+| `cookies` | The workflow Cookie block reads/sets/removes cookies. |
+| `downloads` | The workflow download-handling block observes and manages downloads. |
+| `clipboardRead` | Read the system clipboard for the workflow clipboard block. |
+| `debugger` | Click elements inside closed shadow DOM via the Chrome DevTools Protocol. |
 | `http(s)` host access | Interact with pages and call your model endpoint (and Feishu, if enabled). |
 
 There is no always-on content script — nothing is injected into a page until a
-turn or a scheduled task needs it. Alarms only run tasks you created (plus a
-Feishu keepalive watchdog when that integration is on). Only your messages and
-the page text you attach/approve leave the machine, sent to **your** configured
-endpoint; task results are only sent to Feishu if you turn that on. There is no
-telemetry, analytics, or project server.
+turn, a scheduled task, or a workflow needs it. While you record a workflow,
+use the element picker, or arm a keyboard-shortcut trigger, a small listener is
+injected into the open tabs for exactly that purpose and goes away when you
+stop. Alarms only run tasks and workflow triggers you created (plus a Feishu
+keepalive watchdog when that integration is on). The `debugger` permission is
+exercised only while a workflow clicks inside a closed shadow root. Only your
+messages and the page text you attach/approve leave the machine, sent to
+**your** configured endpoint; task results are only sent to Feishu if you turn
+that on. There is no telemetry, analytics, or project server.
 
 ---
 
