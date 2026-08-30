@@ -219,7 +219,9 @@ describe('ai-agent executor', () => {
     const { ctx, emit } = makeCtx()
     await expect(EXECUTORS['ai-agent']!({ prompt: 'go' }, ctx)).resolves.toBeNull()
     expect(emit).toHaveBeenCalledWith('error', expect.stringContaining('boom'))
-    expect(ctx.variables['lastAIAgent']).toBeUndefined()
+    // Failure pre-sets the variable to '' so downstream {{lastAIAgent}} references
+    // resolve to an empty value instead of raw unresolved tokens.
+    expect(ctx.variables['lastAIAgent']).toBe('')
   })
 
   it('treats a cancelled run quietly', async () => {

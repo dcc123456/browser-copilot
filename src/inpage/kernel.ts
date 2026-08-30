@@ -644,6 +644,289 @@ export function runOp(op: Op): OpResult {
       }
     }
   }
+
+  // --- Simulated typing (stateful rich editors) ------------------------------
+  //
+  // DraftJS editors (Zhihu articles, Medium…) keep their content in React
+  // state: writing `textContent` paints the pixels but the editor's internal
+  // EditorState still says "empty", so word counts stay 0 and publish buttons
+  // stay disabled. The sequence a real keypress produces is what such editors
+  // listen for: Chrome fires a legacy `textInput` TextEvent per insertion
+  // (React's BeforeInputEventPlugin turns it into DraftJS's onBeforeInput),
+  // modern editors (Lexical/Slate/ProseMirror) read `beforeinput` instead, and
+  // Enter/Backspace handling is driven by `keydown`. These helpers replay that
+  // sequence; `typeIntoEditable` verifies the editor actually changed and
+  // reports `registered: false` so the driver can escalate to CDP trusted
+  // keyboard input when it did not.
+
+  function keyCodeForKey(key: string): number {
+    const named: Record<string, number> = {
+      Backspace: 8,
+      Tab: 9,
+      Enter: 13,
+      Shift: 16,
+      Control: 17,
+      Alt: 18,
+      Escape: 27,
+      ' ': 32,
+      PageUp: 33,
+      PageDown: 34,
+      End: 35,
+      Home: 36,
+      ArrowLeft: 37,
+      ArrowUp: 38,
+      ArrowRight: 39,
+      ArrowDown: 40,
+      Insert: 45,
+      Delete: 46,
+    }
+    if (named[key] !== undefined) return named[key]
+    if (key.length === 1) {
+      const code = key.toUpperCase().charCodeAt(0)
+      return code >= 32 && code <= 126 ? code : 0
+    }
+    return 0
+  }
+
+  function codeForKey(key: string): string {
+    if (/^[a-zA-Z]$/.test(key)) return `Key${key.toUpperCase()}`
+    if (/^[0-9]$/.test(key)) return `Digit${key}`
+    return key
+  }
+
+  /**
+   * Dispatch a KeyboardEvent that carries the legacy `keyCode`/`which` fields.
+   * DraftJS's key handling reads `e.which`; Chrome honors the deprecated init
+   * fields but jsdom (and some pages' wrappers) do not, so they are forced onto
+   * the instance when missing.
+   */
+  function dispatchKey(
+    element: Element,
+    type: string,
+    key: string,
+    modifiers: { ctrl?: boolean; meta?: boolean; shift?: boolean; alt?: boolean } = {},
+  ): void {
+    const keyCode = keyCodeForKey(key)
+    const init: KeyboardEventInit = {
+      key,
+      code: codeForKey(key),
+      bubbles: true,
+      cancelable: true,
+      view: document.defaultView ?? undefined,
+      ctrlKey: modifiers.ctrl === true,
+      metaKey: modifiers.meta === true,
+      shiftKey: modifiers.shift === true,
+      altKey: modifiers.alt === true,
+      keyCode,
+      charCode: type === 'keypress' && keyCode ? keyCode : 0,
+    }
+    const event = new KeyboardEvent(type, init)
+    if (keyCode) {
+      if (event.keyCode !== keyCode) Object.defineProperty(event, 'keyCode', { value: keyCode })
+      if (event.which !== keyCode) Object.defineProperty(event, 'which', { value: keyCode })
+    }
+    element.dispatchEvent(event)
+  }
+
+  /**
+   * Build the insertion events for one chunk of text. `beforeinput` for modern
+   * editors, `textInput` for the React/DraftJS pipeline. Both constructors can
+   * be missing (jsdom), so degrade to a plain Event carrying `data`.
+   */
+  function makeDataEvent(type: string, data: string): Event {
+    const init = { data, bubbles: true, cancelable: true }
+    if (type === 'textInput') {
+      try {
+        const Ctor = (window as unknown as {
+          TextEvent?: new (t: string, i: typeof init) => Event
+        }).TextEvent
+        if (typeof Ctor === 'function') return new Ctor(type, init)
+      } catch {
+        /* fall through */
+      }
+    }
+    try {
+      if (typeof InputEvent === 'function') {
+        const event = new InputEvent(type, { ...init, inputType: 'insertText' })
+        if ((event as InputEvent).data === data) return event
+      }
+    } catch {
+      /* fall through */
+    }
+    const event = new Event(type, { bubbles: true, cancelable: true })
+    Object.defineProperty(event, 'data', { value: data })
+    return event
+  }
+
+  /** Dispatch one chunk through both event families editors listen for. */
+  function insertTextEvents(element: Element, text: string): void {
+    element.dispatchEvent(makeDataEvent('beforeinput', text))
+    element.dispatchEvent(makeDataEvent('textInput', text))
+  }
+
+  function placeCaretAtEnd(element: HTMLElement): void {
+    const selection = window.getSelection()
+    if (!selection) return
+    try {
+      const range = document.createRange()
+      range.selectNodeContents(element)
+      range.collapse(false)
+      selection.removeAllRanges()
+      selection.addRange(range)
+    } catch {
+      /* editor without selection support */
+    }
+  }
+
+  function selectAllContents(element: HTMLElement): void {
+    const selection = window.getSelection()
+    if (!selection) return
+    try {
+      const range = document.createRange()
+      range.selectNodeContents(element)
+      selection.removeAllRanges()
+      selection.addRange(range)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Whitespace-free form, so paragraph/block restructuring cannot break the comparison. */
+  function stripWhitespace(text: string): string {
+    return text.replace(/\s+/g, '')
+  }
+
+  /** A document.querySelector path for the element, for the driver's CDP fallback. */
+  function cssPathOf(element: Element): string {
+    const parts: string[] = []
+    let node: Element | null = element
+    while (node && node !== document.documentElement && parts.length < 8) {
+      if (node.id && /^[A-Za-z][\w-]*$/.test(node.id)) {
+        parts.unshift(`#${node.id}`)
+        break
+      }
+      const tag = node.tagName.toLowerCase()
+      let nth = 1
+      let sibling: Element | null = node
+      while ((sibling = sibling.previousElementSibling)) nth += 1
+      parts.unshift(`${tag}:nth-of-type(${nth})`)
+      node = node.parentElement
+    }
+    if (parts.length === 0) return 'body'
+    return (parts[0] ?? '').startsWith('#') ? parts.join(' > ') : `body > ${parts.join(' > ')}`
+  }
+
+  /**
+   * Fill a contenteditable through simulated key events, then verify the
+   * editor registered the input. Returns `ok: false` with
+   * `data.registered: false` + `data.cssPath` when it did not, which the
+   * driver escalates to CDP trusted keyboard input.
+   *
+   * DraftJS flushes its pending beforeInput state on the next React commit,
+   * so every insertion is followed by a short wait: the Enter that splits the
+   * next paragraph must observe the updated caret, not the stale one.
+   */
+  async function typeIntoEditable(
+    element: HTMLElement,
+    value: string,
+    clear: boolean,
+  ): Promise<OpResult> {
+    const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+    const readEditorText = (): string => {
+      const html = element as HTMLElement
+      if (typeof html.innerText === 'string' && html.innerText.length > 0) return html.innerText
+      return element.textContent ?? ''
+    }
+
+    try {
+      focusElement(element)
+      if (clear) {
+        // 1) The editor's own keybinding path: ctrl/meta+A then Backspace
+        //    operate on the internal selection (DraftJS and friends).
+        dispatchKey(element, 'keydown', 'a', { ctrl: true, meta: true })
+        dispatchKey(element, 'keyup', 'a', { ctrl: true, meta: true })
+        await sleep(30)
+        // 2) The generic path: a DOM selection (selectionchange syncs the
+        //    editor's internal caret) + a Backspace keydown.
+        selectAllContents(element)
+        await sleep(30)
+        dispatchKey(element, 'keydown', 'Backspace')
+        dispatchKey(element, 'keyup', 'Backspace')
+        await sleep(60)
+        // 3) Legacy editors that only react to execCommand.
+        if (stripWhitespace(readEditorText()) !== '') {
+          selectAllContents(element)
+          try {
+            document.execCommand?.('delete')
+          } catch {
+            /* unsupported */
+          }
+          await sleep(60)
+        }
+      }
+      placeCaretAtEnd(element)
+      // Let selectionchange handlers sync the editor's internal caret with
+      // the DOM selection just placed.
+      await sleep(60)
+
+      const paragraphs = value.split('\n')
+      for (let i = 0; i < paragraphs.length; i += 1) {
+        if (i > 0) {
+          // Editors split blocks on keydown Enter (DraftJS: 'split-block').
+          dispatchKey(element, 'keydown', 'Enter')
+          dispatchKey(element, 'keyup', 'Enter')
+          await sleep(30)
+        }
+        const paragraph = paragraphs[i] ?? ''
+        if (!paragraph) continue
+        insertTextEvents(element, paragraph)
+        await sleep(30)
+      }
+      // Keep the legacy "set value + input event" contract for editors that
+      // only watch those (harmless for React/DraftJS).
+      fireInputAndChange(element)
+      await sleep(100)
+
+      const expected = stripWhitespace(value)
+      const verify = (): boolean => {
+        const actual = stripWhitespace(readEditorText())
+        if (expected === '') return actual === ''
+        return clear ? actual === expected : actual.endsWith(expected)
+      }
+      let registered = verify()
+      if (!registered) {
+        // Slow React commits / debounced editors get one more chance.
+        await sleep(250)
+        registered = verify()
+      }
+
+      const data = {
+        contenteditable: true,
+        registered,
+        cssPath: cssPathOf(element),
+        textAfter: collapse(readEditorText()).slice(0, 120),
+      }
+      if (registered) {
+        return {
+          ...base(),
+          ok: true,
+          found: true,
+          note: `已模拟键盘输入 ${Array.from(value).length} 字`,
+          data,
+        }
+      }
+      return {
+        ...base(),
+        ok: false,
+        found: true,
+        error: '编辑器未接受模拟输入（内部状态未更新，字数仍为 0）。将尝试通过受信任键盘输入重试。',
+        data,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return fail(`模拟键盘输入失败: ${message}`)
+    }
+  }
   function mayNavigate(element: Element): boolean {
     const tag = element.tagName.toLowerCase()
     if (tag === 'a' && element.hasAttribute('href')) {
@@ -910,9 +1193,9 @@ export function runOp(op: Op): OpResult {
       const key = String(op.value ?? '')
       if (!key) return fail('press_key needs a key name.')
       const active = (document.activeElement ?? document.body) as Element
-      const init: KeyboardEventInit = { key, code: key, bubbles: true, cancelable: true }
-      active.dispatchEvent(new KeyboardEvent('keydown', init))
-      active.dispatchEvent(new KeyboardEvent('keyup', init))
+      dispatchKey(active, 'keydown', key)
+      dispatchKey(active, 'keypress', key)
+      dispatchKey(active, 'keyup', key)
       return { ...base(), ok: true, found: true, note: `pressed ${key}` }
     }
 
@@ -1095,9 +1378,13 @@ export function runOp(op: Op): OpResult {
       const editable = element.getAttribute('contenteditable')
       focusElement(element)
       if (editable === '' || editable === 'true') {
-        ;(element as HTMLElement).textContent = value
-        fireInputAndChange(element)
-        return withMeta({ ...base(), ok: true, found: true })
+        // Stateful rich editors (DraftJS etc.) must be typed through, not
+        // written into: see typeIntoEditable. Async; executeScript awaits it.
+        return typeIntoEditable(
+          element as HTMLElement,
+          value,
+          op.clear !== false,
+        ).then(withMeta) as unknown as OpResult
       }
       const isField =
         element instanceof HTMLInputElement ||
@@ -1224,10 +1511,11 @@ export function runOp(op: Op): OpResult {
       const key = String(op.value ?? '')
       if (!key) return withMeta(fail('press_key needs a key name.'))
       focusElement(element)
-      const init: KeyboardEventInit = { key, code: key, bubbles: true, cancelable: true }
-      element.dispatchEvent(new KeyboardEvent('keydown', init))
-      element.dispatchEvent(new KeyboardEvent('keypress', init))
-      element.dispatchEvent(new KeyboardEvent('keyup', init))
+      // dispatchKey carries keyCode/which — DraftJS-style editors read `e.which`
+      // (a bare `new KeyboardEvent({ key })` reports 0 and is ignored).
+      dispatchKey(element, 'keydown', key)
+      dispatchKey(element, 'keypress', key)
+      dispatchKey(element, 'keyup', key)
       let navigates = false
       if (key === 'Enter') {
         const form = (element as HTMLInputElement).form

@@ -687,47 +687,48 @@ const DEFAULT_WF_SETTINGS: WorkflowSettings = {
 }
 
 /** Agent tool action → workflow block id. Actions without a block are skipped.
- *  Ids must exist in the editor's block catalog (BLOCK_BY_ID) so saved workflows
- *  render on the canvas; the engine runs these catalog ids too. */
+ *  Ids (and the flat block data from {@link blockDataFromArgs}) follow the
+ *  editor's Automa-aligned block catalog, so generated workflows render on the
+ *  canvas and run in the engine in the canonical shape (flat `selector` +
+ *  `findBy` fields) without relying on migration. */
 const ACTION_TO_BLOCK: Record<string, string> = {
   open_url: 'new-tab',
   tab_new: 'new-tab',
   tab_switch: 'switch-tab',
   tab_close: 'close-tab',
-  click: 'click',
-  fill: 'fill',
-  select_option: 'select-option',
-  set_checkbox: 'set-checkbox',
+  click: 'event-click',
+  fill: 'forms',
+  select_option: 'forms',
+  set_checkbox: 'forms',
   press_key: 'press-key',
-  scroll: 'scroll',
+  scroll: 'element-scroll',
   // The agent's wait-for-selector paces the replay; the delay block is the
   // catalog's wait primitive (the legacy `wait-for` id has no catalog block).
   wait_for: 'delay',
+  // JS the agent ran in the page (generating images, DOM surgery, ...) maps
+  // to the catalog's javascript-code block so the workflow replays it.
+  run_javascript: 'javascript-code',
 }
 
-/**
- * Best-effort CSS selector from an agent action's args. An explicit
- * `selector` wins when present. Otherwise a rich `TargetSpec`'s `primary` is
- * re-expressed into a CSS selector when it maps cleanly:
- *   - `how: 'css'`    → the raw selector
- *   - `how: 'id'`     → `#<value>`
- *   - `how: 'name'`   → `[name="<value>"]`
- *   - `how: 'testid'` → `[data-testid="<value>"]`
- *   - `how: 'tag'`    → the tag name (optionally scoped by `nth`)
- * `role`/`text` targets can't be safely turned into a plain CSS selector
- * without knowing the page, so they yield `''` (the user fills them in).
- */
-function selectorFromArgs(args: Record<string, unknown> | undefined): string {
-  if (!args || typeof args !== 'object') return ''
-  if (typeof args.selector === 'string' && args.selector.trim()) return args.selector.trim()
-  const target = args.target as
-    | { primary?: { how?: string; value?: unknown; tag?: string; nth?: number } }
-    | undefined
-  const primary = target?.primary
-  if (!primary) return ''
-  const nth = typeof primary.nth === 'number' && primary.nth > 0 ? `:nth-of-type(${primary.nth + 1})` : ''
-  const value = primary.value
-  switch (primary.how) {
+/** The wait-page-load block inserted after navigation steps. */
+const WAIT_BLOCK_ID = 'wait-connections'
+/** The AI block inserted before form fills whose content should be regenerated. */
+const AI_BLOCK_ID = 'ai-agent'
+
+/** One target spec from an agent tool call (the `TARGET_SCHEMA` in agent.ts). */
+interface TargetSpec {
+  how?: string
+  value?: unknown
+  tag?: string
+  nth?: number
+}
+
+/** Best-effort CSS selector from a single target spec ('' when not expressible). */
+function selectorFromSpec(spec: TargetSpec | undefined): string {
+  if (!spec || typeof spec !== 'object') return ''
+  const nth = typeof spec.nth === 'number' && spec.nth > 0 ? `:nth-of-type(${spec.nth + 1})` : ''
+  const value = spec.value
+  switch (spec.how) {
     case 'css':
       return typeof value === 'string' ? value.trim() : ''
     case 'id':
@@ -739,13 +740,42 @@ function selectorFromArgs(args: Record<string, unknown> | undefined): string {
         ? `[data-testid="${value.trim()}"]${nth}`
         : ''
     case 'tag':
-      return typeof primary.tag === 'string' && primary.tag.trim()
-        ? `${primary.tag.trim()}${nth}`
-        : ''
+      return typeof spec.tag === 'string' && spec.tag.trim() ? `${spec.tag.trim()}${nth}` : ''
     default:
       // role / text — cannot be expressed as a stable CSS selector.
       return ''
   }
+}
+
+/**
+ * Best-effort CSS selector from an agent action's args. An explicit
+ * `selector` wins when present. Otherwise the rich `TargetSpec`'s `primary`
+ * is re-expressed into a CSS selector, and when it does not map (the agent
+ * usually targets elements by role/text) the `fallbacks` are tried in order —
+ * the replayable workflow needs that fallback to carry a usable selector.
+ * Mappable specs:
+ *   - `how: 'css'`    → the raw selector
+ *   - `how: 'id'`     → `#<value>`
+ *   - `how: 'name'`   → `[name="<value>"]`
+ *   - `how: 'testid'` → `[data-testid="<value>"]`
+ *   - `how: 'tag'`    → the tag name (optionally scoped by `nth`)
+ * `role`/`text` targets can't be safely turned into a plain CSS selector
+ * without knowing the page, so they yield `''` (the node keeps the human
+ * description instead).
+ */
+function selectorFromArgs(args: Record<string, unknown> | undefined): string {
+  if (!args || typeof args !== 'object') return ''
+  if (typeof args.selector === 'string' && args.selector.trim()) return args.selector.trim()
+  const target = args.target as { primary?: TargetSpec; fallbacks?: TargetSpec[] } | undefined
+  if (!target) return ''
+  const primary = selectorFromSpec(target.primary)
+  if (primary) return primary
+  const fallbacks = Array.isArray(target.fallbacks) ? target.fallbacks : []
+  for (const spec of fallbacks) {
+    const selector = selectorFromSpec(spec)
+    if (selector) return selector
+  }
+  return ''
 }
 
 /**
@@ -754,8 +784,8 @@ function selectorFromArgs(args: Record<string, unknown> | undefined): string {
  * compared on the signature that actually matters for replay (selector + value).
  */
 function sameStep(
-  a: { action: string; args: Record<string, unknown> | undefined },
-  b: { action: string; args: Record<string, unknown> | undefined },
+  a: Pick<HistoryStep, 'action' | 'args'>,
+  b: Pick<HistoryStep, 'action' | 'args'>,
 ): boolean {
   if (a.action !== b.action) return false
   switch (a.action) {
@@ -794,64 +824,234 @@ function sameStep(
   }
 }
 
-/** Builds block values for a mapped tool action, best-effort from its args. */
-function valuesFromArgs(action: string, args: Record<string, unknown> | undefined): Record<string, unknown> {
+/** A mapped, replayable history step (host kept for page-change detection). */
+interface HistoryStep {
+  action: string
+  args?: Record<string, unknown>
+  host?: string
+  summary?: string
+}
+
+/**
+ * Whether `step` should replace `prev` instead of being appended. Beyond the
+ * exact-duplicate rule ({@link sameStep}), consecutive writes to the SAME form
+ * field collapse too: at replay the last value wins, so the generated workflow
+ * keeps the final fill instead of a chain of corrections.
+ */
+function collapsesWith(prev: HistoryStep, step: HistoryStep): boolean {
+  if (sameStep(prev, step)) return true
+  if (prev.action !== step.action) return false
+  if (prev.action !== 'fill' && prev.action !== 'select_option' && prev.action !== 'set_checkbox') {
+    return false
+  }
+  const prevSelector = selectorFromArgs(prev.args)
+  return prevSelector !== '' && prevSelector === selectorFromArgs(step.args)
+}
+
+/**
+ * The conversation's rich element locator (`args.target`, the `TARGET_SCHEMA`
+ * in agent.ts), passed through verbatim when it is a usable object. The
+ * kernel resolves every spec strategy — role/text included — so replay hits
+ * the same element even when no CSS selector can express it, and the edit
+ * panel has something concrete to show.
+ */
+function richTargetFromArgs(args: Record<string, unknown> | undefined): unknown {
+  const target = args?.target
+  if (!target || typeof target !== 'object') return undefined
+  const primary = (target as { primary?: unknown }).primary
+  if (!primary || typeof primary !== 'object') return undefined
+  const spec = primary as { how?: unknown; value?: unknown }
+  if (typeof spec.how !== 'string' || !spec.how) return undefined
+  if (typeof spec.value !== 'string') return undefined
+  return target
+}
+
+/** Attach the rich locator to flat block data when present. */
+function withRichTarget(
+  data: Record<string, unknown>,
+  target: unknown,
+): Record<string, unknown> {
+  return target ? { ...data, target } : data
+}
+
+/**
+ * Builds the canonical flat block data for a mapped tool action, best-effort
+ * from its args. `aiVar` (set for AI-prefilled fills) replaces the literal
+ * value with a `{{variable}}` reference to the preceding `ai-agent` node.
+ */
+function blockDataFromArgs(
+  action: string,
+  args: Record<string, unknown> | undefined,
+  aiVar?: string,
+): Record<string, unknown> {
   const selector = selectorFromArgs(args)
+  const target = richTargetFromArgs(args)
   switch (action) {
     case 'open_url':
     case 'tab_new':
-      return { url: typeof args?.url === 'string' ? args.url : '' }
+      // The executor waits for the tab to finish loading unless opted out.
+      return { url: typeof args?.url === 'string' ? args.url : '', waitTabLoaded: true }
     case 'tab_switch':
       return { index: Number(args?.index ?? 0) }
     case 'tab_close':
       return {}
     case 'click':
-      return { cssSelector: selector }
+      return withRichTarget({ selector, findBy: 'cssSelector' }, target)
     case 'fill':
-      return { cssSelector: selector, value: typeof args?.value === 'string' ? args.value : '' }
+      return withRichTarget(
+        {
+          selector,
+          findBy: 'cssSelector',
+          type: 'text-field',
+          value: aiVar
+            ? `{{${aiVar}}}`
+            : typeof args?.value === 'string'
+              ? args.value
+              : '',
+          clearValue: true,
+        },
+        target,
+      )
     case 'select_option':
-      return { cssSelector: selector, value: typeof args?.value === 'string' ? args.value : '' }
-    case 'set_checkbox':
-      return { cssSelector: selector, checked: args?.value !== false }
+      return withRichTarget(
+        {
+          selector,
+          findBy: 'cssSelector',
+          type: 'select',
+          value: typeof args?.value === 'string' ? args.value : '',
+        },
+        target,
+      )
+    case 'set_checkbox': {
+      const checked = args?.value !== false
+      // `value` drives the executor; `selected` drives the edit form.
+      return withRichTarget(
+        { selector, findBy: 'cssSelector', type: 'checkbox', value: checked, selected: checked },
+        target,
+      )
+    }
     case 'press_key':
       return { key: typeof args?.key === 'string' ? args.key : '' }
-    case 'scroll':
-      return {
-        mode: typeof args?.mode === 'string' ? args.mode : 'into_view',
-        cssSelector: selector,
-        ...(typeof args?.y === 'number' ? { y: args.y } : {}),
+    case 'scroll': {
+      const mode = typeof args?.mode === 'string' ? args.mode : 'into_view'
+      // into_view keeps its element target even when the locator is role/text
+      // (no CSS selector) — the rich target below carries it.
+      if (mode === 'into_view' && (selector || target)) {
+        return withRichTarget({ selector, findBy: 'cssSelector', scrollIntoView: true }, target)
       }
+      // `element-scroll` models top/bottom/by as an X/Y wheel scroll.
+      const y =
+        mode === 'top' ? 0 : mode === 'bottom' ? 100000 : typeof args?.y === 'number' ? args.y : 600
+      return { scrollX: typeof args?.x === 'number' ? args.x : 0, scrollY: y }
+    }
     case 'wait_for':
       // Mapped to the `delay` block: replay the agent's pacing as a pause.
-      return { delay: Number(args?.timeout ?? 5000) }
+      // `time` is the catalog + edit-form key (what the executor reads).
+      return { time: Number(args?.timeout ?? 5000) }
+    case 'run_javascript':
+      // The agent ran this code in the page's main world; javascript-code
+      // replays it through the same harness. Timeout mirrors the catalog
+      // default so the edit panel shows a real value.
+      return { code: typeof args?.code === 'string' ? args.code : '', timeout: 20000 }
     default:
       return {}
   }
 }
 
+/** Cap the reference value shipped inside the AI block's prompt. */
+const AI_REFERENCE_CAP = 200
+
+/**
+ * Whether a fill value looks like content the model composed (long free text /
+ * multi-line), as opposed to literal data a user would dictate. Explicit data
+ * shapes (email / URL / number / date) never count as composed prose.
+ */
+function looksAiComposed(value: string): boolean {
+  const v = value.trim()
+  if (!v) return false
+  if (!v.includes('\n') && v.length < 24) return false
+  if (/^[\w.+-]+@[\w-]+(\.[\w-]+)+$/.test(v)) return false
+  if (/^https?:\/\//i.test(v)) return false
+  if (/^-?\d+([.,]\d+)?$/.test(v)) return false
+  if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(v)) return false
+  return true
+}
+
+/**
+ * Whether a fill step's content should be regenerated by an `ai-agent` block
+ * at replay time instead of replaying the literal value. The agent self-
+ * reports with `args.generated` (set when it composed the text itself);
+ * history entries without the flag fall back to a conservative length /
+ * multi-line heuristic.
+ */
+function wantsAiPrefill(step: HistoryStep): boolean {
+  if (step.action !== 'fill') return false
+  const generated = step.args?.generated
+  if (generated === true) return true
+  if (generated === false) return false
+  const value = typeof step.args?.value === 'string' ? step.args.value : ''
+  return looksAiComposed(value)
+}
+
+/** Human name of the form field a fill step targeted (for the AI prompt). */
+function fieldLabel(step: HistoryStep): string {
+  const target = step.args?.target as { label?: unknown } | undefined
+  return (
+    (typeof step.args?.label === 'string' && step.args.label.trim()) ||
+    (typeof target?.label === 'string' && target.label.trim() ? target.label.trim() : '') ||
+    (step.summary ?? '') ||
+    selectorFromArgs(step.args) ||
+    '表单字段'
+  )
+}
+
+/**
+ * Human context for the generated node. The agent's short `label` wins; a
+ * step without a usable selector keeps the full summary so the canvas card
+ * still says what the step does (when a selector is present, the card shows
+ * the selector instead).
+ */
+function nodeDescription(step: HistoryStep, selector: string): string {
+  const target = step.args?.target as { label?: unknown } | undefined
+  const label =
+    (typeof step.args?.label === 'string' && step.args.label.trim()) ||
+    (typeof target?.label === 'string' && target.label.trim() ? target.label.trim() : '')
+  if (label) return label
+  return selector === '' && step.summary ? step.summary : ''
+}
+
 /**
  * Turns an ordered list of action-history entries (oldest first) into a linear
- * workflow of mapped browser/navigation steps. Entries with no mapped block are
- * skipped. Back-to-back identical steps (same action + same effective args) are
- * collapsed to one node — the model occasionally re-issues the same navigation
- * or action after a re-read, and a replayable workflow shouldn't repeat them.
+ * workflow of mapped browser/navigation steps in the editor's canonical shape
+ * (Automa block ids + flat `selector`/`findBy` data) — no migration needed for
+ * the editor or the engine to render/run it. Entries with no mapped block are
+ * skipped.
+ *
+ * Consecutive steps that describe the same replayable action — or repeated
+ * writes to the same form field — collapse to one node keeping the FINAL
+ * occurrence, the one that reflects the state the conversation ended in.
+ *
+ * A wait-page-load (`wait-connections`) node follows every navigation step,
+ * and follows a click/keypress whose next step lands on a different host, so
+ * the replay never outruns the page it drives.
+ *
+ * Fill steps whose content the model composed get an `ai-agent` node that
+ * regenerates the content at replay time (see {@link wantsAiPrefill}).
  * Returns `null` when nothing could be mapped.
  */
 export function workflowFromHistory(entries: HistoryEntry[], name: string): Workflow | null {
-  const mapped = entries
-    .filter((e) => !!ACTION_TO_BLOCK[e.action])
-    .map((e) => ({ action: e.action, args: e.args }))
-
-  // Collapse consecutive steps that are effectively the same. For navigation
-  // (open_url/tab_new) a repeat with the same URL is always redundant — the
-  // page is already there. For element actions we compare a stable signature
-  // (action + selector + value/key) so two clicks on the same button in a row
-  // only become one block, while clicks on different targets are both kept.
-  const steps: typeof mapped = []
-  for (const step of mapped) {
+  const steps: HistoryStep[] = []
+  for (const entry of entries) {
+    if (!ACTION_TO_BLOCK[entry.action]) continue
+    const step: HistoryStep = {
+      action: entry.action,
+      ...(entry.args && typeof entry.args === 'object' ? { args: entry.args } : {}),
+      ...(entry.host ? { host: entry.host } : {}),
+      ...(entry.summary ? { summary: entry.summary } : {}),
+    }
     const prev = steps[steps.length - 1]
-    if (prev && sameStep(prev, step)) continue
-    steps.push(step)
+    if (prev && collapsesWith(prev, step)) steps[steps.length - 1] = step
+    else steps.push(step)
   }
   if (steps.length === 0) return null
 
@@ -860,31 +1060,89 @@ export function workflowFromHistory(entries: HistoryEntry[], name: string): Work
 
   // Trigger node — the first node in the graph, matching automa's convention.
   // `label` holds the block id (same as data.blockId); the editor resolves the
-  // localized display name from the block registry at render time. The block
-  // id must be the catalog's `trigger` block (not the trigger TYPE) so the
-  // editor renders it; `values.type` carries the trigger type.
+  // localized display name from the block registry at render time.
   const triggerId = newId()
   nodes.push({
     id: triggerId,
     label: 'trigger',
     position: { x: 160, y: 0 },
-    data: { blockId: 'trigger', values: { type: 'manual' } },
+    data: { blockId: 'trigger', type: 'manual', description: '' },
   })
   let prevId: string = triggerId
+  let aiSeq = 0
 
-  for (let i = 0; i < steps.length; i += 1) {
-    const step = steps[i]
-    if (!step) continue
+  steps.forEach((step, i) => {
+    const y = 80 + i * 140
+    const selector = selectorFromArgs(step.args)
+    const description = nodeDescription(step, selector)
+
+    // AI prefill: an `ai-agent` node regenerates the content at replay time;
+    // the following forms node references it through `{{variableName}}`.
+    let aiVar: string | undefined
+    if (wantsAiPrefill(step)) {
+      aiSeq += 1
+      aiVar = `aiFill${aiSeq}`
+      const rawValue = typeof step.args?.value === 'string' ? step.args.value : ''
+      const reference =
+        rawValue.length > AI_REFERENCE_CAP ? `${rawValue.slice(0, AI_REFERENCE_CAP)}…` : rawValue
+      const aiId = newId()
+      nodes.push({
+        id: aiId,
+        label: AI_BLOCK_ID,
+        position: { x: 160, y },
+        data: {
+          blockId: AI_BLOCK_ID,
+          description: `AI 生成表单内容: ${fieldLabel(step)}`,
+          prompt:
+            `为网页表单字段「${fieldLabel(step)}」生成要填写的内容。` +
+            '直接输出可填入输入框的纯文本，不要解释、不要引号。' +
+            `参考（对话中填写的同用途内容）：${reference}`,
+          findBy: 'cssSelector',
+          selector: '',
+          actOnPage: false,
+          useSnapshot: false,
+          maxToolRounds: 8,
+          variableName: aiVar,
+          // Kept so the save-card toggle can restore the literal value.
+          referenceValue: rawValue,
+        },
+      })
+      edges.push({ id: newId(), source: prevId, target: aiId })
+      prevId = aiId
+    }
+
+    const blockId = ACTION_TO_BLOCK[step.action]!
     const id = newId()
     nodes.push({
       id,
-      label: ACTION_TO_BLOCK[step.action]!,
-      position: { x: 160, y: 80 + i * 140 },
-      data: { blockId: ACTION_TO_BLOCK[step.action], values: valuesFromArgs(step.action, step.args) },
+      label: blockId,
+      position: { x: 160, y },
+      data: { blockId, description, ...blockDataFromArgs(step.action, step.args, aiVar) },
     })
     edges.push({ id: newId(), source: prevId, target: id })
     prevId = id
-  }
+
+    // Pace the replay: always wait after navigation; after a click/keypress
+    // only when the next step lands on a different host (a page change).
+    const next = steps[i + 1]
+    const navigated = step.action === 'open_url' || step.action === 'tab_new'
+    const hostChanged =
+      (step.action === 'click' || step.action === 'press_key') &&
+      !!step.host &&
+      !!next?.host &&
+      step.host !== next.host
+    if (navigated || hostChanged) {
+      const waitId = newId()
+      nodes.push({
+        id: waitId,
+        label: WAIT_BLOCK_ID,
+        position: { x: 160, y },
+        data: { blockId: WAIT_BLOCK_ID, description: '等待页面加载', timeout: 10000 },
+      })
+      edges.push({ id: newId(), source: prevId, target: waitId })
+      prevId = waitId
+    }
+  })
 
   return {
     id: newId(),
@@ -895,4 +1153,89 @@ export function workflowFromHistory(entries: HistoryEntry[], name: string): Work
     trigger: { type: 'manual', enabled: true },
     settings: { ...DEFAULT_WF_SETTINGS },
   }
+}
+
+/** One fill step whose content is wired to an `ai-agent` node. */
+export interface AiPrefillStep {
+  /** The `forms` node id (the save-card toggle key). */
+  nodeId: string
+  /** Human label shown on the save card. */
+  label: string
+  /** The literal value captured in the conversation (fallback when off). */
+  referenceValue: string
+}
+
+const VAR_TOKEN = /^\{\{\s*([^{}\s]+)\s*\}\}$/
+
+/** Lists the AI-prefilled form steps of a generated workflow (save-card rows). */
+export function aiPrefillSteps(workflow: Workflow): AiPrefillStep[] {
+  const nodes = workflow.drawflow.nodes
+  const steps: AiPrefillStep[] = []
+  for (const node of nodes) {
+    if (node.data?.blockId !== 'forms') continue
+    const variableName = VAR_TOKEN.exec(String(node.data.value ?? ''))?.[1]
+    if (!variableName) continue
+    const aiNode = nodes.find(
+      (n) => n.data?.blockId === AI_BLOCK_ID && n.data?.variableName === variableName,
+    )
+    if (!aiNode) continue
+    steps.push({
+      nodeId: node.id,
+      label: String(aiNode.data?.description ?? '').replace(/^AI 生成表单内容: /, ''),
+      referenceValue: String(aiNode.data?.referenceValue ?? ''),
+    })
+  }
+  return steps
+}
+
+/**
+ * Applies the user's save-card choices to a generated workflow: an enabled
+ * step keeps its `ai-agent` node and the `{{variable}}` reference; a disabled
+ * one falls back to the literal conversation value and disables (skips) the
+ * AI node, keeping the graph shape intact. Idempotent in both directions.
+ */
+export function applyAiPrefillOptions(
+  workflow: Workflow,
+  /** forms node id → whether the content should be AI-generated at replay. */
+  selections: Record<string, boolean>,
+): Workflow {
+  const nodes = workflow.drawflow.nodes
+  /** variableName → the ai-agent node wired to it. */
+  const aiByVar = new Map<string, WorkflowNode>()
+  for (const node of nodes) {
+    if (node.data?.blockId !== AI_BLOCK_ID) continue
+    const variableName = String(node.data.variableName ?? '')
+    if (variableName) aiByVar.set(variableName, node)
+  }
+  const nextNodes = nodes.map((node) => {
+    if (node.data?.blockId !== 'forms') return node
+    const variableName = VAR_TOKEN.exec(String(node.data.value ?? ''))?.[1]
+    if (!variableName || !aiByVar.has(variableName)) return node
+    const desired = selections[node.id]
+    if (desired === undefined) return node
+    if (desired) {
+      if (String(node.data.value) === `{{${variableName}}}`) return node
+      return { ...node, data: { ...node.data, value: `{{${variableName}}}` } }
+    }
+    const referenceValue = String(aiByVar.get(variableName)?.data?.referenceValue ?? '')
+    return { ...node, data: { ...node.data, value: referenceValue } }
+  })
+  // Enable/disable each paired ai-agent node alongside its forms step.
+  const finalNodes = nextNodes.map((node) => {
+    if (node.data?.blockId !== AI_BLOCK_ID) return node
+    const variableName = String(node.data.variableName ?? '')
+    // Pair against the ORIGINAL nodes: the disable direction already replaced
+    // the forms `{{var}}` value with the literal above, so the post-update list
+    // no longer contains the token and the owner would never be found.
+    const owner = nodes.find(
+      (other) =>
+        other.data?.blockId === 'forms' &&
+        VAR_TOKEN.exec(String(other.data.value ?? ''))?.[1] === variableName,
+    )
+    const desired = owner ? selections[owner.id] : undefined
+    if (desired === undefined) return node
+    if ((node.data.disableBlock === true) === !desired) return node
+    return { ...node, data: { ...node.data, disableBlock: !desired } }
+  })
+  return { ...workflow, drawflow: { ...workflow.drawflow, nodes: finalNodes } }
 }

@@ -228,6 +228,11 @@ export const TOOLS: WireTool[] = [
           target: TARGET_SCHEMA,
           value: { type: 'string' },
           label: { type: 'string' },
+          generated: {
+            type: 'boolean',
+            description:
+              'Set true when you composed the text yourself (a message, summary, or any content not dictated by the user or read verbatim from the page); false when the text is literal user-dictated data (an email address, URL, name, number).',
+          },
           clear: {
             type: 'boolean',
             description: 'Clear the field first (default true).',

@@ -25,6 +25,7 @@ import {
   snapshotClosedShadow,
   type CdpSession,
 } from './cdp-shadow'
+import { fillViaCdp } from './cdp-typing'
 
 /**
  * Resolve the tab a workflow should act on.
@@ -248,6 +249,44 @@ export async function execOnActiveTab(
   results.sort((a, b) => rank(b) - rank(a))
   const best = results[0] as OpResult
 
+  // Stateful contenteditable editors (DraftJS — Zhihu articles — and friends)
+  // keep their content in React state; when the kernel's simulated typing did
+  // not register (data.registered === false), escalate to CDP trusted
+  // keyboard input before reporting failure.
+  const editableFallback =
+    op.action === 'fill' && !best.ok && best.isTopFrame ? readEditableFallback(best) : null
+  if (editableFallback && chrome.debugger && typeof tab.id === 'number') {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+    const text = op.value === undefined || op.value === null ? '' : String(op.value)
+    try {
+      const out = await withCdpSession(tab.id, (session) =>
+        fillViaCdp(session, {
+          selector: editableFallback.cssPath,
+          text,
+          clear: op.clear !== false,
+        }),
+      )
+      if (out.ok) {
+        return {
+          ...best,
+          ok: true,
+          error: undefined,
+          note: out.note ?? '已通过受信任键盘输入写入（chrome.debugger）',
+        }
+      }
+      return {
+        ...best,
+        error: `${best.error ?? ''}（CDP 受信任键盘输入仍未成功：${out.error ?? '未知原因'}）`,
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return {
+        ...best,
+        error: `${best.error ?? ''}（CDP 受信任键盘输入失败：${message}）`,
+      }
+    }
+  }
+
   // Enrich a snapshot with interactive elements hidden inside CLOSED shadow
   // roots (in-page JS never sees them). Best-effort: when the debugger is
   // unavailable or attaching fails, return the kernel snapshot unchanged.
@@ -335,6 +374,22 @@ function explainJsError(message: string): string {
     )
   }
   return m
+}
+
+/**
+ * Extract the CDP fallback hint from a failed contenteditable fill. The
+ * kernel returns the element's cssPath (computed while the element was in
+ * hand) so the driver can re-resolve it inside the debugger session without
+ * duplicating target resolution.
+ */
+function readEditableFallback(result: OpResult): { cssPath: string } | null {
+  const data = result.data as
+    | { contenteditable?: unknown; registered?: unknown; cssPath?: unknown }
+    | undefined
+  if (!data || typeof data !== 'object') return null
+  if (data.contenteditable !== true || data.registered !== false) return null
+  if (typeof data.cssPath !== 'string' || data.cssPath.length === 0) return null
+  return { cssPath: data.cssPath }
 }
 
 /**

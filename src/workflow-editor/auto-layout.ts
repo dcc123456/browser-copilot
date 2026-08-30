@@ -1,12 +1,21 @@
 /**
  * One-click graph beautify — a dependency-free layered (Sugiyama-style)
- * auto-layout for the left-to-right workflow canvas.
+ * auto-layout for the workflow canvas with Z-shaped row wrapping.
  *
  * Steps: assign each node a layer (longest-path rank from the roots, so a node
  * sits to the right of every predecessor), order nodes within a layer by
- * barycenter sweeps to reduce edge crossings, then stack each layer vertically
- * (centered) and place layers left-to-right. Back-edges (loops) and
- * disconnected nodes are handled gracefully.
+ * barycenter sweeps to reduce edge crossings, then pack whole layers into rows
+ * no wider than `maxRowWidth` (the editor passes the live canvas width).
+ *
+ * Rows read like lines of text: every row flows left→right, and when one row
+ * can't fit the remaining layers the layout wraps to the next row below — the
+ * connector from a row's last node back to the next row's first node draws the
+ * "Z" through the inter-row gap. After the editor's fit-view the whole graph
+ * stays inside the viewport at a readable zoom.
+ *
+ * Because rows never reverse, nodes keep the standard orientation (input on
+ * the left, outputs on the right). Back-edges (loops) and disconnected nodes
+ * are handled gracefully.
  *
  * @module workflow-editor/auto-layout
  */
@@ -34,16 +43,27 @@ export interface AutoLayoutOptions {
   hGap?: number
   /** Vertical gap between nodes in the same layer (px). */
   vGap?: number
+  /** Maximum width of one Z-row before the layout wraps (px). */
+  maxRowWidth?: number
+  /** Vertical gap between rows (px). */
+  rowGap?: number
 }
 
-const DEFAULTS = { nodeWidth: 200, nodeHeight: 64, hGap: 70, vGap: 36 }
+const DEFAULTS = {
+  nodeWidth: 200,
+  nodeHeight: 64,
+  hGap: 70,
+  vGap: 36,
+  maxRowWidth: 1600,
+  rowGap: 90,
+}
 
 export function autoLayout(
   nodes: LayoutInputNode[],
   edges: LayoutInputEdge[],
   opts: AutoLayoutOptions = {},
 ): Map<string, LayoutPoint> {
-  const { nodeWidth, nodeHeight, hGap, vGap } = { ...DEFAULTS, ...opts }
+  const { nodeWidth, nodeHeight, hGap, vGap, maxRowWidth, rowGap } = { ...DEFAULTS, ...opts }
   const dims = new Map<string, { w: number; h: number }>()
   for (const n of nodes) {
     const w = n.measured?.width ?? n.width ?? nodeWidth
@@ -124,24 +144,63 @@ export function autoLayout(
     }
   }
 
-  // --- Position assignment --------------------------------------------------
-  const positions = new Map<string, LayoutPoint>()
-  // x by cumulative max node width per layer.
-  let x = 0
-  const layerX = new Map<number, number>()
-  for (const l of layerKeys) {
-    layerX.set(l, x)
-    const maxW = Math.max(...layers.get(l)!.map((id) => dims.get(id)!.w), nodeWidth)
-    x += maxW + hGap
-  }
-  for (const l of layerKeys) {
+  // --- Z-shaped row packing -------------------------------------------------
+  // Pack whole layers into rows no wider than `maxRowWidth` (a layer is never
+  // split — its nodes share an x column). When a row fills up, the next layers
+  // continue on the row below; the connector from the last layer of one row to
+  // the first layer of the next draws the Z's return stroke.
+  const layerW = (l: number): number =>
+    Math.max(...layers.get(l)!.map((id) => dims.get(id)!.w), nodeWidth)
+  const layerH = (l: number): number => {
     const arr = layers.get(l)!
-    const totalH = arr.reduce((sum, id) => sum + dims.get(id)!.h, 0) + vGap * (arr.length - 1)
-    let y = -totalH / 2
-    for (const id of arr) {
-      positions.set(id, { x: layerX.get(l)!, y })
-      y += dims.get(id)!.h + vGap
+    return arr.reduce((sum, id) => sum + dims.get(id)!.h, 0) + vGap * (arr.length - 1)
+  }
+
+  interface Row {
+    layers: number[]
+    /** Sum of layer widths + inter-layer gaps (no trailing gap). */
+    width: number
+    /** Tallest layer in the row. */
+    height: number
+  }
+
+  const maxWidth = Math.max(maxRowWidth, nodeWidth + hGap)
+  const rows: Row[] = []
+  let current: Row = { layers: [], width: 0, height: 0 }
+  for (const l of layerKeys) {
+    const lw = layerW(l)
+    if (current.layers.length > 0 && current.width + hGap + lw > maxWidth) {
+      rows.push(current)
+      current = { layers: [], width: 0, height: 0 }
     }
+    current.layers.push(l)
+    current.width = current.layers.length === 1 ? lw : current.width + hGap + lw
+    current.height = Math.max(current.height, layerH(l))
+  }
+  if (current.layers.length > 0) rows.push(current)
+
+  // --- Position assignment --------------------------------------------------
+  // Every row starts at the layout's left edge and grows rightward, rows
+  // stacked top→bottom with `rowGap` between them. Nodes keep the standard
+  // left-input / right-output orientation in every row.
+  const totalHeight = rows.reduce((sum, r) => sum + r.height, 0) + rowGap * (rows.length - 1)
+
+  const positions = new Map<string, LayoutPoint>()
+  // Center the whole block on the canvas origin (fit-view re-centers anyway).
+  let rowTop = -totalHeight / 2
+  for (const row of rows) {
+    let cursor = 0
+    for (const l of row.layers) {
+      const arr = layers.get(l)!
+      const colY = rowTop + (row.height - layerH(l)) / 2
+      let y = colY
+      for (const id of arr) {
+        positions.set(id, { x: cursor, y })
+        y += dims.get(id)!.h + vGap
+      }
+      cursor += layerW(l) + hGap
+    }
+    rowTop += row.height + rowGap
   }
 
   return positions

@@ -661,6 +661,44 @@ body {
   font-size: 11px;
 }
 
+/* AI-operator checklist on the save-as-workflow card. A grid keeps rows evenly
+   spaced, and flex-start + a fixed checkbox box keeps every checkbox on one
+   vertical line even when a label wraps to a second line. */
+.ai-prefill-list {
+  margin: 6px 0 2px;
+  display: grid;
+  gap: 5px;
+}
+
+.ai-prefill-list .hint {
+  margin: 0;
+}
+
+.ai-prefill-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  cursor: pointer;
+  line-height: 1.5;
+}
+
+/* 14px box + 3px top offset centers the checkbox on the first text line
+   (13px/1.5 ≈ 19.5px line box); wrapped text hangs below instead of pushing
+   the checkbox to the row's vertical middle. */
+.ai-prefill-item input[type='checkbox'] {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+
+.ai-prefill-item span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .composer-resize-handle {
   flex: 0 0 auto;
   height: 7px;
@@ -2936,5 +2974,77 @@ textarea:focus-visible {
   max-height: 220px;
   overflow: auto;
   color: var(--text);
+}
+
+/* Chat attachments ─────────────────────────────────────────────────────── */
+
+/* Chips row between the slash menu and the textarea: one chip per staged
+   file, with a thumbnail for images and a remove button for each. */
+.composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text);
+}
+
+.attach-chip .attach-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attach-thumb {
+  max-width: 44px;
+  max-height: 32px;
+  border-radius: 4px;
+  object-fit: cover;
+  display: block;
+}
+
+.attach-remove {
+  border: none;
+  background: none;
+  padding: 0 1px;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.attach-remove:hover {
+  color: var(--danger, #d33);
+}
+
+/* Thumbnails/chips under a sent or replayed user message. */
+.msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.msg-attachments .attach-thumb {
+  max-width: 160px;
+  max-height: 120px;
+  width: auto;
+  height: auto;
+  cursor: zoom-in;
+}
+
+.msg-attachments .attach-chip {
+  max-width: 220px;
 }
 

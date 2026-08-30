@@ -15,6 +15,8 @@
  * @module lib/llm
  */
 
+import { isImageAttachment, isTextAttachment } from './attachments'
+import type { AttachmentDescriptor } from './attachments'
 import { normalizeBaseUrl } from './providers'
 
 export interface WireTool {
@@ -33,9 +35,28 @@ export interface WireToolCall {
   function: { name: string; arguments: string }
 }
 
+/**
+ * One content part of a multimodal user message, in the OpenAI-compatible
+ * wire format. Assembled from a turn's text plus its attachments by
+ * {@link toApiMessages}; never stored in the transcript itself.
+ */
+export type UserContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+
 export type WireMessage =
   | { role: 'system'; content: string }
-  | { role: 'user'; content: string }
+  | {
+      role: 'user'
+      content: string
+      /**
+       * Files attached to this turn, persisted with the transcript. Kept
+       * alongside the plain-string `content` (not folded into it) so history
+       * previews and replay stay cheap; {@link toApiMessages} folds them into
+       * multimodal content parts when the request is built.
+       */
+      attachments?: AttachmentDescriptor[]
+    }
   | {
       role: 'assistant'
       /**
@@ -46,6 +67,40 @@ export type WireMessage =
       tool_calls?: WireToolCall[]
     }
   | { role: 'tool'; tool_call_id: string; content: string; name?: string }
+
+/**
+ * Maps stored transcript messages to the request body's `messages` array.
+ *
+ * User turns with attachments become multimodal content parts: the typed text
+ * first (when non-empty), then each image as an `image_url` data URL and each
+ * text file inlined as a labelled fenced block. Everything else passes through
+ * unchanged, and the extension-internal `attachments` field is stripped so
+ * providers never see a field they did not ask for.
+ */
+export function toApiMessages(messages: readonly WireMessage[]): unknown[] {
+  return messages.map((message) => {
+    if (message.role !== 'user' || !message.attachments || message.attachments.length === 0) {
+      return message
+    }
+    const parts: UserContentPart[] = []
+    if (message.content.trim().length > 0) {
+      parts.push({ type: 'text', text: message.content })
+    }
+    for (const attachment of message.attachments) {
+      if (isImageAttachment(attachment)) {
+        // Narrowed by isImageAttachment; asserted for the discriminated union.
+        parts.push({ type: 'image_url', image_url: { url: attachment.dataUrl as string } })
+      } else if (isTextAttachment(attachment)) {
+        // Four backticks: content containing a normal ``` fence cannot break out.
+        parts.push({
+          type: 'text',
+          text: `[Attachment: ${attachment.name}]\n\`\`\`\`\n${attachment.content}\n\`\`\`\``,
+        })
+      }
+    }
+    return { role: 'user', content: parts }
+  })
+}
 
 /** One in-progress tool call being assembled from deltas. */
 interface PartialToolCall {
@@ -324,7 +379,7 @@ export async function streamCompletion(
   const url = `${base}/chat/completions`
   const body: Record<string, unknown> = {
     model: request.model,
-    messages: request.messages,
+    messages: toApiMessages(request.messages),
     stream: true,
   }
   if (request.tools && request.tools.length > 0) body.tools = request.tools

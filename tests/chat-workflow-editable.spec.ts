@@ -47,6 +47,7 @@ describe('chat-generated workflows are editor-renderable', () => {
         entry('open_url', { url: 'https://example.com' }),
         entry('click', { target: { primary: { how: 'css', value: '.btn' } } }),
         entry('fill', { target: { primary: { how: 'id', value: 'q' } }, value: 'hi' }),
+        entry('run_javascript', { code: 'document.title' }),
         entry('wait_for', { target: { primary: { how: 'css', value: '.r' } }, timeout: 2000 }),
         entry('press_key', { key: 'Enter' }),
         entry('tab_switch', { index: 1 }),
@@ -125,6 +126,11 @@ describe('chat-generated workflows expose editable form data', () => {
     expect(nodes).toEqual([
       { blockId: 'trigger', blockData: expect.objectContaining({ type: 'manual' }) },
       { blockId: 'new-tab', blockData: expect.objectContaining({ url: 'https://example.com' }) },
+      // Navigation is always followed by a page-load wait (generator rule).
+      {
+        blockId: 'wait-connections',
+        blockData: expect.objectContaining({ timeout: 10000 }),
+      },
       {
         blockId: 'event-click',
         blockData: expect.objectContaining({ selector: '.btn', findBy: 'cssSelector' }),
@@ -133,7 +139,7 @@ describe('chat-generated workflows expose editable form data', () => {
         blockId: 'forms',
         blockData: expect.objectContaining({ selector: '#q', findBy: 'cssSelector', value: 'hi' }),
       },
-      { blockId: 'delay', blockData: expect.objectContaining({ delay: 2000 }) },
+      { blockId: 'delay', blockData: expect.objectContaining({ time: 2000 }) },
       { blockId: 'press-key', blockData: expect.objectContaining({ key: 'Enter' }) },
       { blockId: 'switch-tab', blockData: expect.objectContaining({ index: 1 }) },
     ])
@@ -175,5 +181,31 @@ describe('chat-generated workflows expose editable form data', () => {
     const { blockId, ...blockData } = actionNode!.data as Record<string, unknown>
     expect(blockId).toBe('new-tab')
     expect(blockData).toEqual(expect.objectContaining({ url: 'https://flat.com' }))
+  })
+
+  it('carries run_javascript through as an editable javascript-code block', () => {
+    const nodes = blockDataList([entry('run_javascript', { code: 'document.title' })])
+    expect(nodes).toEqual([
+      { blockId: 'trigger', blockData: expect.objectContaining({ type: 'manual' }) },
+      {
+        blockId: 'javascript-code',
+        blockData: expect.objectContaining({ code: 'document.title', timeout: 20000 }),
+      },
+    ])
+  })
+
+  it('keeps the rich conversation locator on interaction blocks (edit panel can show it)', () => {
+    const nodes = blockDataList([
+      entry('click', {
+        target: { primary: { how: 'role', value: '提交', role: 'button' }, fallbacks: [] },
+      }),
+    ])
+    const click = nodes.find((n) => n.blockId === 'event-click')!
+    expect(click.blockData).toEqual(
+      expect.objectContaining({
+        selector: '',
+        target: { primary: { how: 'role', value: '提交', role: 'button' }, fallbacks: [] },
+      }),
+    )
   })
 })

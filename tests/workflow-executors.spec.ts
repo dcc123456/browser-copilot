@@ -195,6 +195,71 @@ describe('workflow executors (browser class)', () => {
     })
     expect(driverMock).not.toHaveBeenCalled()
   })
+
+  it('click surfaces a failed op as a block error instead of success', async () => {
+    // The kernel reports failures in-band (ok:false + error), never by throwing.
+    driverMock.mockResolvedValue({
+      ...opResult,
+      ok: false,
+      found: false,
+      error: 'No element matched. Tried: #nope',
+    })
+    const { ctx, emit } = makeCtx()
+    await expect(EXECUTORS['click']!({ cssSelector: '#nope' }, ctx)).rejects.toThrow(
+      'No element matched',
+    )
+    expect(emit).not.toHaveBeenCalled()
+  })
+
+  it('a click that navigated mid-call (ok:true + note) still succeeds', async () => {
+    driverMock.mockResolvedValue({
+      ...opResult,
+      note: 'The page navigated during this step.',
+      mayNavigate: true,
+    })
+    const { ctx, emit } = makeCtx()
+    await EXECUTORS['click']!({ cssSelector: '#nav' }, ctx)
+    expect(emit).toHaveBeenCalledWith('result', 'The page navigated during this step.')
+  })
+
+  it('a rich conversation target becomes fallbacks behind the editable selector', async () => {
+    const { ctx } = makeCtx()
+    await EXECUTORS['event-click']!(
+      {
+        selector: '.btn',
+        findBy: 'cssSelector',
+        target: {
+          primary: { how: 'css', value: '.btn' },
+          fallbacks: [{ how: 'role', value: 'Buy', role: 'button' }],
+        },
+      },
+      ctx,
+    )
+    const [op] = driverMock.mock.calls[0]!
+    expect(op.target?.primary).toEqual({ how: 'css', value: '.btn' })
+    expect(op.target?.fallbacks).toEqual([{ how: 'role', value: 'Buy', role: 'button' }])
+  })
+
+  it('with no selector the rich target is used as-is (role/text replay)', async () => {
+    const { ctx } = makeCtx()
+    const target = {
+      primary: { how: 'role', value: '提交', role: 'button' },
+      fallbacks: [{ how: 'text', value: '提交' }],
+    }
+    await EXECUTORS['event-click']!({ selector: '', findBy: 'cssSelector', target }, ctx)
+    const [op] = driverMock.mock.calls[0]!
+    expect(op.target?.primary).toEqual(target.primary)
+    expect(op.target?.fallbacks).toEqual(target.fallbacks)
+  })
+
+  it('wait-for surfaces a timeout as a block error', async () => {
+    driverMock.mockResolvedValue({ ...opResult, ok: false, found: false, error: 'no match' })
+    const { ctx, emit } = makeCtx()
+    await expect(EXECUTORS['wait-for']!({ cssSelector: '[data-ok]' }, ctx)).rejects.toThrow(
+      '等待超时',
+    )
+    expect(emit).not.toHaveBeenCalled()
+  })
 })
 
 describe('workflow executors (automa-aligned browser actions)', () => {

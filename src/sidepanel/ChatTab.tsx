@@ -22,7 +22,14 @@ import {
   type TurnTokenUsage,
   sendCommand,
 } from '../lib/messages'
-import { DEFAULT_CONVERSATION_ID, newId, workflowFromHistory } from '../lib/storage'
+import {
+  applyAiPrefillOptions,
+  aiPrefillSteps,
+  DEFAULT_CONVERSATION_ID,
+  newId,
+  workflowFromHistory,
+  type AiPrefillStep,
+} from '../lib/storage'
 import type { Workflow } from '../lib/workflow/types'
 import type { AgentMode, ConversationMeta } from '../lib/types'
 import { confirmDialog } from '../ui/confirm'
@@ -34,6 +41,16 @@ import {
   type SlashQuery,
 } from '../lib/slash'
 import type { Skill } from '../lib/types'
+import {
+  FILE_INPUT_ACCEPT,
+  fileToDraft,
+  isImageAttachment,
+  toAttachmentSummaries,
+  validateAttachmentMeta,
+  type AttachmentDescriptor,
+  type AttachmentErrorCode,
+  type AttachmentSummary,
+} from '../lib/attachments'
 import { useT } from './i18n'
 import Markdown from './Markdown'
 
@@ -69,6 +86,8 @@ interface Entry {
   id: string
   role: 'user' | 'assistant' | 'status' | 'error' | 'tool'
   text: string
+  /** Files carried by a user turn, as slimmed summaries (no inline text). */
+  attachments?: AttachmentSummary[]
 }
 
 /** A tool call awaiting the user's decision. */
@@ -80,6 +99,49 @@ interface PendingConfirm {
 
 let counter = 0
 const nextId = (): string => `e${(counter += 1)}`
+
+/** Attachment thumbnails/chips rendered under a message bubble. */
+function MessageAttachments({ attachments }: { attachments?: AttachmentSummary[] }) {
+  if (!attachments || attachments.length === 0) return null
+  return (
+    <div className="msg-attachments">
+      {attachments.map((attachment) =>
+        isImageAttachment(attachment) && attachment.dataUrl ? (
+          <img
+            alt={attachment.name}
+            className="attach-thumb"
+            key={attachment.id}
+            src={attachment.dataUrl}
+            title={attachment.name}
+          />
+        ) : (
+          <span className="attach-chip" key={attachment.id} title={attachment.name}>
+            📎 {attachment.name}
+          </span>
+        ),
+      )}
+    </div>
+  )
+}
+
+/** Localized text for one rejected file, shown as a status line. */
+function attachmentErrorText(
+  t: ReturnType<typeof useT>,
+  name: string,
+  code: AttachmentErrorCode,
+): string {
+  switch (code) {
+    case 'too-many':
+      return t.chatAttachmentTooMany
+    case 'unsupported':
+      return t.chatAttachmentUnsupported({ name })
+    case 'too-large-image':
+    case 'too-large-text':
+      return t.chatAttachmentTooLarge({ name })
+    case 'total-too-large':
+      return t.chatAttachmentTotalTooLarge
+  }
+}
 
 /** Comfortably inside Chrome's ~30s idle eviction window. */
 const HEARTBEAT_MS = 20_000
@@ -94,6 +156,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const t = useT()
   const [entries, setEntries] = useState<Entry[]>([])
   const [draft, setDraft] = useState('')
+  /** Files staged for the next message, mirrored in a ref for sequential validation. */
+  const [pendingAttachments, setPendingAttachments] = useState<AttachmentDescriptor[]>([])
+  const pendingAttachmentsRef = useRef<AttachmentDescriptor[]>([])
+  /** Hidden `<input type="file">` behind the 📎 composer button. */
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [includeSelection, setIncludeSelection] = useState(false)
   const [busy, setBusy] = useState(false)
   const [confirms, setConfirms] = useState<PendingConfirm[]>([])
@@ -103,7 +170,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const [conversations, setConversations] = useState<ConversationMeta[]>([])
   const [showHistory, setShowHistory] = useState(false)
   /** Conversation whose messages are being previewed in the history drawer. */
-  const [previewConv, setPreviewConv] = useState<{ id: string; title: string; messages: { role: string; text: string }[] } | null>(null)
+  const [previewConv, setPreviewConv] = useState<{
+    id: string
+    title: string
+    messages: { role: string; text: string; attachments?: AttachmentSummary[] }[]
+  } | null>(null)
   const [mode, setMode] = useState<AgentMode>('semi')
   const [modeInfoOpen, setModeInfoOpen] = useState(false)
   /** Token usage of the most recent turn, for the popover breakdown. */
@@ -247,6 +318,12 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
    */
   const [workflowPrompt, setWorkflowPrompt] = useState<{
     conversationId: string
+    /** Unmodified workflow the prompt was built from, for re-deriving on toggle. */
+    base: Workflow
+    /** Form fields the generator flagged as AI-composable, with their capture text. */
+    aiSteps: AiPrefillStep[]
+    /** Per-node checkbox state; absent = enabled (the default). */
+    aiSelections: Record<string, boolean>
     workflow: Workflow
     steps: number
   } | null>(null)
@@ -276,11 +353,13 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     const name = (meta?.title ?? '').trim() || `session-${convId.slice(0, 6)}`
     const workflow = workflowFromHistory(session, name)
     if (!workflow) return
+    const aiSteps = aiPrefillSteps(workflow)
+    const aiSelections = Object.fromEntries(aiSteps.map((s) => [s.nodeId, true]))
     const steps = workflow.drawflow.nodes.length
     if (steps === 0) return
     if ((promptedRef.current[convId] ?? 0) >= steps) return
     promptedRef.current[convId] = steps
-    setWorkflowPrompt({ conversationId: convId, workflow, steps })
+    setWorkflowPrompt({ conversationId: convId, base: workflow, workflow, aiSteps, aiSelections, steps })
   }, [])
 
   const append = useCallback((entry: Omit<Entry, 'id'>) => {
@@ -361,6 +440,9 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                 id: nextId(),
                 role: entry.role as 'user' | 'assistant',
                 text: entry.text,
+                ...(entry.role === 'user' && entry.attachments?.length
+                  ? { attachments: entry.attachments }
+                  : {}),
               }
             })
             setEntries(restored)
@@ -665,12 +747,47 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     }
   }
 
+  /** Stages picked/pasted/dropped files, rejecting invalid ones with a status line. */
+  const addFiles = async (files: FileList | File[] | null): Promise<void> => {
+    if (!files || files.length === 0) return
+    for (const file of Array.from(files)) {
+      const code = validateAttachmentMeta(
+        { mimeType: file.type, name: file.name, size: file.size },
+        pendingAttachmentsRef.current,
+      )
+      if (code) {
+        append({ role: 'status', text: attachmentErrorText(t, file.name, code) })
+        continue
+      }
+      try {
+        const staged = await fileToDraft(file)
+        const next = [...pendingAttachmentsRef.current, staged]
+        pendingAttachmentsRef.current = next
+        setPendingAttachments(next)
+      } catch (error) {
+        append({
+          role: 'status',
+          text: `${file.name}: ${error instanceof Error ? error.message : String(error)}`,
+        })
+      }
+    }
+  }
+
+  const removeAttachment = (id: string): void => {
+    const next = pendingAttachmentsRef.current.filter(
+      (attachment) => attachment.id !== id,
+    )
+    pendingAttachmentsRef.current = next
+    setPendingAttachments(next)
+  }
+
   const send = (): void => {
     if (busy) return
     const text = draft.trim()
-    // An active skill may be invoked with no additional text — the skill's own
-    // instructions become the task. Otherwise a message is required.
-    if (!text && !activeSkillId) return
+    // An active skill or a staged attachment may be sent with no additional
+    // text — the skill's own instructions or the files themselves become the
+    // task. Otherwise a message is required.
+    if (!text && !activeSkillId && pendingAttachments.length === 0) return
 
     // When the user just selected a skill and hit send, name the skill explicitly
     // so the model ties the turn to the active-skill block in the system prompt
@@ -693,6 +810,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       text: outgoing,
       includeSelection,
       ...(activeSkillId ? { skillId: activeSkillId } : {}),
+      ...(pendingAttachments.length ? { attachments: pendingAttachments } : {}),
     })
     if (!delivered) {
       append({
@@ -702,10 +820,20 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       return
     }
 
-    append({ role: 'user', text: outgoing })
+    append({
+      role: 'user',
+      text: outgoing,
+      // Summaries only: the full text content went to the worker with the
+      // message, and the transcript rendering never needs it twice.
+      ...(pendingAttachments.length
+        ? { attachments: toAttachmentSummaries(pendingAttachments) }
+        : {}),
+    })
     streamingRef.current = null
     setBusy(true)
     setDraft('')
+    pendingAttachmentsRef.current = []
+    setPendingAttachments([])
     setWorkflowPrompt(null)
   }
 
@@ -731,6 +859,18 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
 
   const dismissPromptWorkflow = (): void => {
     setWorkflowPrompt(null)
+  }
+
+  /**
+   * Toggle one AI-prefill checkbox and rebuild the preview workflow from the
+   * untouched base, so toggling is idempotent regardless of prior state.
+   */
+  const toggleAiPrefill = (nodeId: string, enabled: boolean): void => {
+    setWorkflowPrompt((prev) => {
+      if (!prev) return prev
+      const aiSelections = { ...prev.aiSelections, [nodeId]: enabled }
+      return { ...prev, aiSelections, workflow: applyAiPrefillOptions(prev.base, aiSelections) }
+    })
   }
 
   // --- Slash menu ------------------------------------------------------------
@@ -867,6 +1007,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                     {previewConv.messages.map((message, index) => (
                       <div className="msg" data-role={message.role} key={index}>
                         {message.text}
+                        <MessageAttachments attachments={message.attachments} />
                       </div>
                     ))}
                   </div>
@@ -959,6 +1100,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                 plain text generated by this extension.
               */}
               {entry.role === 'assistant' ? <Markdown text={entry.text} /> : entry.text}
+              <MessageAttachments attachments={entry.attachments} />
             </div>
           ),
         )}
@@ -991,6 +1133,25 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             <p className="hint" style={{ margin: '6px 0' }}>
               {workflowPrompt.workflow.name}
             </p>
+            {workflowPrompt.aiSteps.length > 0 && (
+              <div
+                className="ai-prefill-list"
+                role="group"
+                aria-label={t.chatSaveWorkflowAiTitle}
+              >
+                <p className="hint">{t.chatSaveWorkflowAiTitle}</p>
+                {workflowPrompt.aiSteps.map((step) => (
+                  <label key={step.nodeId} className="ai-prefill-item">
+                    <input
+                      checked={workflowPrompt.aiSelections[step.nodeId] !== false}
+                      onChange={(event) => toggleAiPrefill(step.nodeId, event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>{step.label}</span>
+                  </label>
+                ))}
+              </div>
+            )}
             <div className="actions">
               <button className="primary" onClick={() => void savePromptWorkflow()} type="button">
                 {t.chatSaveWorkflowSave}
@@ -1063,6 +1224,29 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
           </div>
         )}
 
+        {pendingAttachments.length > 0 && (
+          <div className="composer-attachments">
+            {pendingAttachments.map((attachment) => (
+              <span className="attach-chip" key={attachment.id} title={attachment.name}>
+                {isImageAttachment(attachment) && attachment.dataUrl ? (
+                  <img alt={attachment.name} className="attach-thumb" src={attachment.dataUrl} />
+                ) : (
+                  <span aria-hidden="true">📎</span>
+                )}
+                <span className="attach-name">{attachment.name}</span>
+                <button
+                  aria-label={t.chatAttachmentRemove}
+                  className="attach-remove"
+                  onClick={() => removeAttachment(attachment.id)}
+                  title={t.chatAttachmentRemove}
+                  type="button"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <textarea
           onChange={(event) => {
             setDraft(event.target.value)
@@ -1077,6 +1261,18 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
           onBlur={closeMenu}
           onClick={(event) => syncMenu(draft, event.currentTarget.selectionStart)}
           onKeyDown={handleKeyDown}
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault()
+            void addFiles(event.dataTransfer?.files ?? null)
+          }}
+          onPaste={(event) => {
+            const files = event.clipboardData?.files
+            if (files && files.length > 0) {
+              event.preventDefault()
+              void addFiles(files)
+            }
+          }}
           placeholder={skills.length > 0 ? t.chatPlaceholderWithSkills : t.chatPlaceholder}
           ref={textareaRef}
           value={draft}
@@ -1161,6 +1357,27 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             )}
           </div>
           <div className="actions" style={{ margin: 0 }}>
+            <button
+              aria-label={t.chatAttach}
+              className="icon-btn"
+              disabled={busy}
+              onClick={() => fileInputRef.current?.click()}
+              title={t.chatAttach}
+              type="button"
+            >
+              📎
+            </button>
+            <input
+              accept={FILE_INPUT_ACCEPT}
+              multiple
+              onChange={(event) => {
+                void addFiles(event.target.files)
+                event.target.value = ''
+              }}
+              ref={fileInputRef}
+              style={{ display: 'none' }}
+              type="file"
+            />
             {!busy && entries.length > 0 && (
               <button
                 onClick={startNewConversation}
@@ -1177,7 +1394,9 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             )}
             <button
               className="primary"
-              disabled={busy || (!draft.trim() && !activeSkillId)}
+              disabled={
+                busy || (!draft.trim() && !activeSkillId && pendingAttachments.length === 0)
+              }
               onClick={send}
               type="button"
             >

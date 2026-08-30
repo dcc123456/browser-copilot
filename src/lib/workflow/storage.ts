@@ -11,6 +11,7 @@
  */
 
 import { newId } from '../storage'
+import { migrateWorkflow } from './migrate'
 import type {
   Workflow,
   WorkflowEdge,
@@ -130,9 +131,14 @@ export async function saveWorkflow(workflow: Workflow): Promise<void> {
   const list = await listWorkflows()
   const normalized = asWorkflow({ ...workflow, updatedAt: Date.now() })
   if (!normalized) throw new Error('Invalid workflow')
+  // Canonicalize on write: legacy shapes (legacy block ids, `values.*` bags,
+  // handle-less edges) are migrated before persisting so every consumer — the
+  // editor, the engine, exports — reads the canonical flat shape. Idempotent
+  // for already-canonical workflows.
+  const canonical = migrateWorkflow(normalized)
   const index = list.findIndex((existing) => existing.id === workflow.id)
-  if (index >= 0) list[index] = normalized
-  else list.push(normalized)
+  if (index >= 0) list[index] = canonical
+  else list.push(canonical)
   await chrome.storage.local.set({ [KEY_WORKFLOWS]: list })
 }
 

@@ -40,6 +40,35 @@ export function num(data: Record<string, unknown>, key: string, fallback = 0): n
   return typeof v === 'number' ? v : fallback
 }
 
+/** One spec of a conversation locator, as human-readable text. */
+function describeSpec(spec: unknown): string {
+  if (!spec || typeof spec !== 'object') return ''
+  const s = spec as { how?: unknown; value?: unknown; role?: unknown; tag?: unknown; nth?: unknown }
+  if (typeof s.how !== 'string' || !s.how || typeof s.value !== 'string') return ''
+  const tag = typeof s.tag === 'string' && s.tag.trim() ? `${s.tag.trim()} ` : ''
+  const nth = typeof s.nth === 'number' && s.nth > 0 ? ` [#${s.nth + 1}]` : ''
+  if (s.how === 'role') {
+    const role = typeof s.role === 'string' && s.role.trim() ? s.role.trim() : 'element'
+    return `${tag}role=${role} "${s.value}"${nth}`
+  }
+  if (s.how === 'text') return `${tag}text "${s.value}"${nth}`
+  return `${tag}${s.how}=${s.value}${nth}`
+}
+
+/**
+ * Human summary of the node's conversation locator (`data.target`, written by
+ * the chat→workflow generator for role/text targets a CSS selector cannot
+ * express). Empty when the node has none — the plain selector shows instead.
+ */
+function targetSummary(data: Record<string, unknown>): string {
+  const target = data['target'] as { primary?: unknown; fallbacks?: unknown } | undefined
+  const primary = describeSpec(target?.primary)
+  if (!primary) return ''
+  const fallbacks = Array.isArray(target?.fallbacks) ? target.fallbacks : []
+  const extra = fallbacks.map(describeSpec).filter(Boolean)
+  return extra.length > 0 ? `${primary} ｜ fallback: ${extra.join(', ')}` : primary
+}
+
 export default function InteractionBase({
   data,
   onChange,
@@ -52,6 +81,9 @@ export default function InteractionBase({
 }: InteractionBaseProps) {
   const findBy = str(data, 'findBy') || 'cssSelector'
   const selector = str(data, 'selector')
+  // A generated node may carry the conversation's locator instead of a CSS
+  // selector — show it read-only so the edit panel is not blank.
+  const locatorHint = selector ? '' : targetSummary(data)
 
   return (
     <div className="wf-form">
@@ -88,11 +120,18 @@ export default function InteractionBase({
               onSelector={(sel) => onChange({ selector: sel })}
             />
           </div>
+          {locatorHint && <p className="wf-form-note">{locatorHint}</p>}
           <Field>
             <TextArea
               mono
               value={selector}
-              placeholder={findBy === 'xpath' ? '//div[@class="..."]' : '.css-selector'}
+              placeholder={
+                locatorHint
+                  ? 'Leave empty to use the conversation locator above; type a CSS selector to override'
+                  : findBy === 'xpath'
+                    ? '//div[@class="..."]'
+                    : '.css-selector'
+              }
               onChange={(v) => onChange({ selector: v })}
             />
           </Field>

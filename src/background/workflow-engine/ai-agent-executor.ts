@@ -168,9 +168,17 @@ export const aiAgent: BlockExecutor = async (data, ctx) => {
   const variable = String(data['variableName'] ?? 'lastAIAgent') || 'lastAIAgent'
   const rounds = Math.min(50, Math.max(1, Number(data['maxToolRounds'] ?? 20) || 20))
 
-  if (!userPrompt.trim() && !selector) {
-    ctx.emit('error', 'AI 智能体: 请填写提示词或选择目标元素')
+  /** Emit + bail, pre-setting the output variable to '' so a downstream forms
+   *  block's `{{variable}}` reference resolves empty (its guard then skips the
+   *  fill instead of typing a blank or a leftover `{{token}}` literal). */
+  const fail = (kind: 'error' | 'info', text: string): null => {
+    ctx.variables[variable] = ''
+    ctx.emit(kind, text)
     return null
+  }
+
+  if (!userPrompt.trim() && !selector) {
+    return fail('error', 'AI 智能体: 请填写提示词或选择目标元素')
   }
 
   // Fail fast with a clear message when no model is configured (mirrors the
@@ -178,8 +186,7 @@ export const aiAgent: BlockExecutor = async (data, ctx) => {
   const settings = await getSettings()
   const provider = settings.providers.find((p) => p.id === settings.activeProviderId)
   if (!provider || !provider.apiKey.trim()) {
-    ctx.emit('error', 'AI 智能体: 未配置模型 provider / API Key')
-    return null
+    return fail('error', 'AI 智能体: 未配置模型 provider / API Key')
   }
 
   let elementText = ''
@@ -216,15 +223,13 @@ export const aiAgent: BlockExecutor = async (data, ctx) => {
   })
 
   if (result.cancelled) {
-    ctx.emit('info', 'AI 智能体已取消')
-    return null
+    return fail('info', 'AI 智能体已取消')
   }
 
   if (!result.ok) {
     // Emit but do not fail the whole run: other blocks continue on the default
     // edge, matching the engine's per-block error convention.
-    ctx.emit('error', `AI 智能体: ${result.error ?? '运行失败'}`)
-    return null
+    return fail('error', `AI 智能体: ${result.error ?? '运行失败'}`)
   }
 
   const answer = result.answer ?? ''

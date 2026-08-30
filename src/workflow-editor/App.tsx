@@ -465,6 +465,10 @@ export default function EditorApp() {
   }, [recording, toast, t])
 
   const handleAutoLayout = useCallback(() => {
+    // Pack Z-shaped rows to the live canvas width so that, once the editor
+    // fits the view, every node stays inside the viewport at a readable zoom.
+    const rect = document.querySelector('.react-flow')?.getBoundingClientRect()
+    const maxRowWidth = rect && rect.width > 320 ? rect.width - 24 : undefined
     setNodes((nds) => {
       const layoutNodes = nds.map((n) => ({
         id: n.id,
@@ -473,14 +477,21 @@ export default function EditorApp() {
       const positions = autoLayout(
         layoutNodes,
         edges.map((e) => ({ source: e.source, target: e.target })),
+        maxRowWidth ? { maxRowWidth } : undefined,
       )
       return nds.map((n) => {
         const p = positions.get(n.id)
         return p ? { ...n, position: p } : n
       })
     })
-    // Fit view after React Flow re-renders the moved nodes.
-    setTimeout(() => reactFlow.fitView({ duration: 300, padding: 0.2 }), 60)
+    // Fit view once React Flow has rendered the moved nodes. A bare timeout
+    // can fire before the store picks up the new positions and leave nodes
+    // outside the viewport, so wait for two animation frames instead.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        void reactFlow.fitView({ duration: 400, padding: 0.2 })
+      }),
+    )
     toast.show(t('autoLayoutDone'), 'ok')
   }, [edges, reactFlow, toast, t])
 

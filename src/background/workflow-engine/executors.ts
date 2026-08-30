@@ -18,7 +18,7 @@ import { streamCompletion, type WireMessage } from '../../lib/llm'
 import { getSettings } from '../../lib/storage'
 import { interpolate } from '../../lib/workflow/interpolate'
 import { aiAgent } from './ai-agent-executor'
-import type { Op, ScrollSpec, Target } from '../../lib/ops'
+import type { Op, ScrollSpec, Target, TargetSpec } from '../../lib/ops'
 import { activeTab } from '../page'
 import {
   clipboardGet,
@@ -41,6 +41,16 @@ import {
   execJsOnActiveTab,
   execWorkflowJsOnActiveTab,
 } from '../driver'
+
+/**
+ * Params key the ENGINE sets on the interpolated parameter bag, listing the
+ * string params whose `{{token}}` values all resolved to an empty string (e.g.
+ * an `ai-agent` variable whose block produced nothing). Executors that must not
+ * act on an accidentally-empty value (the forms fill) check this key to tell
+ * "the referenced variable produced nothing" apart from a deliberate "".
+ * Never persisted — it exists only on the per-run interpolated copy.
+ */
+export const EMPTY_INTERP_KEY = '__bcEmptyInterp'
 
 /** Execution context handed to every block executor. */
 export interface WorkflowExecCtx {
@@ -104,15 +114,57 @@ function cssTarget(selector: string): Target {
 }
 
 /**
+ * The conversation's rich locator stored on generated nodes (`storage.ts`
+ * keeps the agent's `args.target` under `data.target`). Valid when its
+ * primary spec is resolvable; the kernel handles every strategy natively
+ * (role, text, testid, …), so it is used as-is when no selector exists and
+ * becomes fallbacks behind the editable selector otherwise.
+ */
+function richTargetOf(data: Record<string, unknown>): Target | undefined {
+  const raw = data['target']
+  if (!raw || typeof raw !== 'object') return undefined
+  const target = raw as Partial<Target> & Record<string, unknown>
+  const primary = target.primary as TargetSpec | undefined
+  if (!primary || typeof primary !== 'object') return undefined
+  if (typeof primary.how !== 'string' || !primary.how) return undefined
+  if (typeof primary.value !== 'string') return undefined
+  return {
+    primary,
+    fallbacks: Array.isArray(target.fallbacks) ? (target.fallbacks as TargetSpec[]) : [],
+    ...(typeof target.frameHint === 'string' && target.frameHint
+      ? { frameHint: target.frameHint }
+      : {}),
+    ...(typeof target.label === 'string' && target.label ? { label: target.label } : {}),
+  }
+}
+
+/**
  * Build a `Target` from a block's data. XPath locators are encoded with an
  * `xpath:` prefix the kernel resolves; CSS uses the css strategy.
+ *
+ * Nodes generated from a conversation can carry the agent's original rich
+ * locator under `data.target` (role/text specs a CSS selector cannot
+ * express). It never overrides the editable selector: a non-empty `selector`
+ * stays the primary and the rich specs become fallbacks; with no selector
+ * the rich target is used as-is.
  */
 function targetFrom(data: Record<string, unknown>): Target {
   const selector = sel(data)
+  const rich = richTargetOf(data)
   if (data['findBy'] === 'xpath') {
-    return { primary: { how: 'css', value: `xpath:${selector}` }, fallbacks: [] }
+    const fallbacks = rich ? [rich.primary, ...rich.fallbacks] : []
+    return { primary: { how: 'css', value: `xpath:${selector}` }, fallbacks }
   }
-  return cssTarget(selector)
+  if (!selector) {
+    if (rich) return rich
+    return cssTarget('')
+  }
+  const base = cssTarget(selector)
+  if (!rich) return base
+  const fallbacks = [rich.primary, ...rich.fallbacks].filter(
+    (spec) => !(spec.how === 'css' && spec.value === selector),
+  )
+  return { ...base, fallbacks }
 }
 
 /** Abort fast when the run was cancelled before this step started. */
@@ -148,17 +200,24 @@ async function evalInPage(
 }
 
 /**
- * Run one op on the active tab and report the outcome. A thrown error is
- * emitted (not swallowed) and the engine continues on the default edge.
+ * Run one op on the active tab and report the outcome.
+ *
+ * The kernel never throws — failures come back as `ok: false` with a message
+ * (element not matched, action refused). A failed op is raised as a block
+ * error so the engine's onError machinery (retry / fallback / continue /
+ * fail) applies and a click that never happened no longer reads as success.
+ * Driver-level errors (no usable tab, injection failure) propagate the same
+ * way, and an aborted signal keeps its cancellation semantics upstream. A
+ * click that navigated mid-call is reported by the driver as `ok: true` with
+ * a note — still a success, by design.
  */
 async function runRaw(op: Op, ctx: WorkflowExecCtx): Promise<string | null> {
   assertActive(ctx)
-  try {
-    const result = await execOnActiveTab(op, ctx.signal, ctx.tabId)
-    ctx.emit('result', result?.note ?? 'ok')
-  } catch (error) {
-    ctx.emit('error', message(error))
+  const result = await execOnActiveTab(op, ctx.signal, ctx.tabId)
+  if (result && result.ok === false) {
+    throw new Error(result.error || `${op.action} 失败`)
   }
+  ctx.emit('result', result?.note ?? 'ok')
   return null
 }
 
@@ -246,17 +305,16 @@ const setCheckbox: BlockExecutor = async (data, ctx) => {
 
 const waitFor: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  try {
-    const result = await execOnActiveTab(
-      { action: 'wait_for', target: targetFrom(data) },
-      ctx.signal,
-      ctx.tabId,
-    )
-    if (result?.found) ctx.emit('result', '元素已出现')
-    else ctx.emit('error', '等待超时，元素未出现')
-  } catch (error) {
-    ctx.emit('error', message(error))
-  }
+  // A wait that never saw the element must not read as success: both driver
+  // errors and timeouts surface as block errors for the engine's onError
+  // machinery (retry / continue / fallback / fail) to handle.
+  const result = await execOnActiveTab(
+    { action: 'wait_for', target: targetFrom(data) },
+    ctx.signal,
+    ctx.tabId,
+  )
+  if (result?.found) ctx.emit('result', '元素已出现')
+  else throw new Error('等待超时，元素未出现')
   return null
 }
 
@@ -490,8 +548,10 @@ const condition: BlockExecutor = async (data, ctx) => {
 
 const delay: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const ms = Number(data['ms'] ?? '500')
-  await sleep(ms, ctx.signal)
+  // `time` is the catalog + edit-form key; `ms` kept for legacy graphs.
+  const raw = data['time'] ?? data['ms']
+  const ms = raw === undefined || raw === null || raw === '' ? 500 : Number(raw)
+  await sleep(Number.isFinite(ms) ? ms : 500, ctx.signal)
   ctx.emit('status', `延时 ${ms}ms`)
   return null
 }
@@ -1197,9 +1257,36 @@ const googleDrive: BlockExecutor = async (_data, ctx) => {
   return null
 }
 
-const waitConnections: BlockExecutor = async (_data, ctx) => {
+/**
+ * Automa `wait-connections`: block until the tab the run is driving reaches
+ * load state `complete` (or the configured `timeout` expires). After a click /
+ * keypress that triggers navigation, the tab can still report `complete` for
+ * the previous page, so give the navigation a short settle window before
+ * listening. Best-effort: with no resolvable tab it returns immediately.
+ */
+const waitConnections: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  ctx.emit('info', 'wait-connections: 等待网络连接，当前为占位实现')
+  let tabId = ctx.tabId
+  if (typeof tabId !== 'number') {
+    const tab = await activeTab().catch(() => null)
+    tabId = typeof tab?.id === 'number' ? tab.id : undefined
+  }
+  await new Promise<void>((resolve) => {
+    if (ctx.signal.aborted) return resolve()
+    const timer = setTimeout(resolve, 300)
+    ctx.signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer)
+        resolve()
+      },
+      { once: true },
+    )
+  })
+  if (typeof tabId === 'number') {
+    await waitForTabLoaded(tabId, ctx.signal, Math.max(1000, Number(data['timeout'] ?? 10000)))
+  }
+  ctx.emit('result', '页面已加载')
   return null
 }
 
@@ -1262,7 +1349,11 @@ function withWait<T extends Op>(op: T, data: Record<string, unknown>): T {
  * URL, wait for that tab to reach status 'complete'. The tab id is optional
  * (defaults to the active tab); waits up to ~15s.
  */
-async function waitForTabLoaded(tabId: number | undefined, signal?: AbortSignal): Promise<void> {
+async function waitForTabLoaded(
+  tabId: number | undefined,
+  signal?: AbortSignal,
+  maxMs = 15000,
+): Promise<void> {
   if (typeof tabId !== 'number' || !chrome?.tabs?.onUpdated) return
   const check = await chrome.tabs.get(tabId).catch(() => null)
   if (check?.status === 'complete') return
@@ -1271,7 +1362,7 @@ async function waitForTabLoaded(tabId: number | undefined, signal?: AbortSignal)
       chrome.tabs.onUpdated.removeListener(listener)
       signal?.removeEventListener('abort', cancel)
       resolve()
-    }, 15000)
+    }, maxMs)
     const cancel = () => {
       clearTimeout(timeout)
       chrome.tabs.onUpdated.removeListener(listener)
@@ -1290,7 +1381,15 @@ async function waitForTabLoaded(tabId: number | undefined, signal?: AbortSignal)
   })
 }
 
-/** Automa `forms` block: text/select/checkbox/radio input on one selector. */
+/**
+ * Automa `forms` block: text/select/checkbox/radio input on one selector.
+ *
+ * The typed value supports `{{variable}}` tokens (e.g. the output variable of
+ * an upstream `ai-agent` block). When the value consisted only of tokens that
+ * resolved to an empty string — typically the AI step failed or produced no
+ * text — the fill is skipped with an error instead of typing a blank or a
+ * leftover `{{token}}` literal into the field.
+ */
 const formsBlock: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const type = String(data['type'] ?? 'text-field')
@@ -1301,11 +1400,17 @@ const formsBlock: BlockExecutor = async (data, ctx) => {
     const checked = typeof value === 'boolean' ? value : true
     return runRaw(withWait({ action: 'set_checkbox', target, value: checked }, data), ctx)
   }
+  const raw = String(value ?? '')
+  const filled = interpolate(raw, ctx.variables, ctx.refData)
+  if (raw.includes('{{') && filled.trim() === '') {
+    ctx.emit('error', '表单值引用的变量/AI 结果为空，已跳过本次填写')
+    return null
+  }
   if (type === 'select') {
-    return runRaw(withWait({ action: 'select_option', target, value: String(value ?? '') }, data), ctx)
+    return runRaw(withWait({ action: 'select_option', target, value: filled }, data), ctx)
   }
   return runRaw(
-    withWait({ action: 'fill', target, value: String(value ?? ''), clear: data['clearValue'] !== false }, data),
+    withWait({ action: 'fill', target, value: filled, clear: data['clearValue'] !== false }, data),
     ctx,
   )
 }
@@ -1317,16 +1422,24 @@ const elementScroll: BlockExecutor = async (data, ctx) => {
   const y = Number(data['scrollY'] ?? 0)
   const smooth = data['smooth'] === true
   const selector = sel(data)
-  if (!selector || selector === 'window' || selector === 'html') {
+  if (selector === 'window' || selector === 'html') {
     return runRaw({ action: 'scroll', scroll: { mode: 'by', x, y, smooth } }, ctx)
   }
-  if (data['scrollIntoView']) {
+  if (selector) {
+    if (data['scrollIntoView']) {
+      return runRaw(withWait({ action: 'scroll', target: targetFrom(data), scroll: { mode: 'into_view' } }, data), ctx)
+    }
+    return runRaw(
+      withWait({ action: 'scroll', target: targetFrom(data), scroll: { mode: 'by', x, y, smooth } }, data),
+      ctx,
+    )
+  }
+  // No CSS selector: a conversation-generated node may still carry the rich
+  // locator — scrollIntoView applies to that element.
+  if (data['scrollIntoView'] && richTargetOf(data)) {
     return runRaw(withWait({ action: 'scroll', target: targetFrom(data), scroll: { mode: 'into_view' } }, data), ctx)
   }
-  return runRaw(
-    withWait({ action: 'scroll', target: targetFrom(data), scroll: { mode: 'by', x, y, smooth } }, data),
-    ctx,
-  )
+  return runRaw({ action: 'scroll', scroll: { mode: 'by', x, y, smooth } }, ctx)
 }
 
 /**

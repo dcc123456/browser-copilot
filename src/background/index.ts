@@ -10,6 +10,13 @@
 
 import type { WireMessage } from '../lib/llm'
 import { LlmError, listModels, testConnection } from '../lib/llm'
+import type { AttachmentDescriptor } from '../lib/attachments'
+import {
+  rejectionMessage,
+  sanitizeAttachments,
+  toAttachmentSummaries,
+} from '../lib/attachments'
+import { toRestoreMessages } from './restore'
 import { retain, release } from './keepalive'
 import {
   AGENT_PORT,
@@ -65,7 +72,7 @@ import {
   getSkill,
   touchConversation,
 } from '../lib/storage'
-import { runAgentTurn, summarizeToolResult } from './agent'
+import { runAgentTurn } from './agent'
 import { activeTab, readActivePage, readActiveSelection } from './page'
 import {
   clearRuns,
@@ -568,12 +575,25 @@ async function handleCommand(command: Command): Promise<CommandResult> {
       ])
       const visible = messages
         .filter(
-          (entry): entry is { role: 'user' | 'assistant'; content: string } =>
+          (entry): entry is {
+            role: 'user' | 'assistant'
+            content: string
+            attachments?: AttachmentDescriptor[]
+          } =>
             (entry.role === 'user' || entry.role === 'assistant') &&
             typeof entry.content === 'string' &&
-            entry.content.trim().length > 0,
+            // Keep attachment-only user turns (empty text) so their files
+            // still render when the conversation is reopened.
+            (entry.content.trim().length > 0 ||
+              (entry.role === 'user' && (entry.attachments?.length ?? 0) > 0)),
         )
-        .map((entry) => ({ role: entry.role, text: entry.content }))
+        .map((entry) => ({
+          role: entry.role,
+          text: entry.content,
+          ...(entry.role === 'user' && entry.attachments?.length
+            ? { attachments: toAttachmentSummaries(entry.attachments) }
+            : {}),
+        }))
       return {
         type: 'conversations.get' as const,
         id: command.id,
@@ -768,35 +788,7 @@ chrome.runtime.onConnect.addListener((port) => {
         // empty-content tool-call turns, which carry no text), and tool chips.
         // This is the full conversation the user saw, not a redacted summary,
         // so continuing a thread shows exactly where it left off.
-        // Build a tool_call_id -> tool name map from the assistant turns, so a
-        // replayed tool result can be labeled with its action instead of dumped
-        // as raw JSON. The stored tool content is the raw result string; the
-        // human-readable chip is regenerated here the same way live turns do.
-        const toolNames = new Map<string, string>()
-        for (const entry of history) {
-          if (entry.role !== 'assistant' || !entry.tool_calls) continue
-          for (const call of entry.tool_calls) {
-            if (call.id && call.function?.name) toolNames.set(call.id, call.function.name)
-          }
-        }
-        const messages: { role: 'user' | 'assistant' | 'tool'; text: string }[] = history
-          .filter(
-            (entry) =>
-              entry.role === 'user' || entry.role === 'assistant' || entry.role === 'tool',
-          )
-          .map((entry) => {
-            if (entry.role === 'tool') {
-              const name = toolNames.get(entry.tool_call_id) ?? 'tool'
-              return {
-                role: 'tool' as const,
-                text: `← ${name}: ${summarizeToolResult(name, entry.content)}`,
-              }
-            }
-            return {
-              role: entry.role,
-              text: typeof entry.content === 'string' ? entry.content : '',
-            }
-          })
+        const messages = toRestoreMessages(history)
 
         send({
           type: 'restore',
@@ -831,11 +823,18 @@ chrome.runtime.onConnect.addListener((port) => {
     activeTurns.add(conversationId)
     const turnController = new AbortController()
     controller = turnController
+    // Re-validate panel-supplied attachments up front: drop malformed or
+    // over-limit entries rather than failing the whole turn, and derive a
+    // label so files-only messages are still identifiable on the tasks board.
+    const sanitized = sanitizeAttachments(message.attachments)
+    const attachmentLabel = sanitized.kept
+      .map((attachment) => `[📎 ${attachment.name}]`)
+      .join(' ')
     // Surface this chat turn on the running-tasks board so it can be seen and
     // terminated from the Tasks tab. Reuse the turn's AbortController so the
     // board's cancel and the panel's cancel are the same signal.
     const trackedRun = startRun({
-      label: message.text.slice(0, 40),
+      label: (message.text || attachmentLabel).slice(0, 40),
       source: 'chat',
       controller: turnController,
     })
@@ -896,9 +895,23 @@ chrome.runtime.onConnect.addListener((port) => {
           if (pinned) text = wrapSkillDirective(pinned, text)
         }
 
-        history.push({ role: 'user', content: text })
-        // Persist metadata so the conversation appears in the history list.
-        await touchConversation(conversationId, message.text)
+        // Report anything dropped during sanitization before the turn proper,
+        // so the panel can show why an attachment is missing from the message.
+        for (const rejected of sanitized.rejected) {
+          sendWithTracking({
+            type: 'status',
+            text: `Skipped attachment: ${rejectionMessage(rejected.name, rejected.code)}`,
+          })
+        }
+
+        history.push({
+          role: 'user',
+          content: text,
+          ...(sanitized.kept.length ? { attachments: sanitized.kept } : {}),
+        })
+        // Persist metadata so the conversation appears in the history list;
+        // fall back to an attachment-derived label for files-only messages.
+        await touchConversation(conversationId, message.text || attachmentLabel)
 
         // Slash-command interception: `/run <workflow>` executes a saved
         // workflow directly instead of feeding the message to the model. On a
@@ -968,9 +981,20 @@ chrome.runtime.onConnect.addListener((port) => {
         sendWithTracking({ type: 'error', message: failure })
       } finally {
         // Persist whatever was accumulated, including partial tool exchanges, so
-        // an interrupted turn does not lose the conversation.
+        // an interrupted turn does not lose the conversation. A failed save is
+        // surfaced rather than silently swallowed: losing a transcript the user
+        // just watched being written is worth one status line.
         if (history.length > 0) {
-          await saveConversation(conversationId, history).catch(() => {})
+          try {
+            await saveConversation(conversationId, history)
+          } catch (saveError) {
+            sendWithTracking({
+              type: 'status',
+              text: `Could not save this conversation: ${
+                saveError instanceof Error ? saveError.message : String(saveError)
+              }`,
+            })
+          }
         }
         await setTurnState({
           conversationId,

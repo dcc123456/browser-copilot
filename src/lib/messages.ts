@@ -27,6 +27,7 @@ import type {
 } from './scheduler-types'
 import type { RunOutcomeKind, RunSource, RunStep } from '../background/running-tasks'
 import type { Workflow } from './workflow/types'
+import type { AttachmentDescriptor, AttachmentSummary } from './attachments'
 
 /** Aggregated token usage for one agent turn (summed across all tool rounds). */
 export interface TurnTokenUsage {
@@ -166,7 +167,11 @@ export type CommandResult =
       type: 'conversations.get'
       id: string
       title: string
-      messages: { role: 'user' | 'assistant' | 'tool'; text: string }[]
+      messages: {
+        role: 'user' | 'assistant' | 'tool'
+        text: string
+        attachments?: AttachmentSummary[]
+      }[]
     }
   | { type: 'conversations.rename' }
   | { type: 'conversations.delete' }
@@ -224,6 +229,12 @@ export type AgentClientMessage =
        * be evicted between turns and would otherwise lose the selection.
        */
       skillId?: string
+      /**
+       * Files attached to this turn, sent once with the opening `chat`
+       * message: full descriptors (image data URLs, inline text content).
+       * The worker re-validates them before persisting.
+       */
+      attachments?: AttachmentDescriptor[]
     }
   | { type: 'confirm'; requestId: string; approved: boolean }
   | { type: 'cancel' }
@@ -272,7 +283,11 @@ export type AgentServerMessage =
    */
   | {
       type: 'restore'
-      messages: { role: 'user' | 'assistant' | 'tool'; text: string }[]
+      messages: {
+        role: 'user' | 'assistant' | 'tool'
+        text: string
+        attachments?: AttachmentSummary[]
+      }[]
       running: boolean
     }
 

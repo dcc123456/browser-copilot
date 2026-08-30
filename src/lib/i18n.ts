@@ -205,6 +205,18 @@ export interface Messages {
   chatStop: string
   chatNewChat: string
   chatAttachSelection: string
+  /** Composer 📎 button tooltip. */
+  chatAttach: string
+  /** Remove button on a pending attachment chip. */
+  chatAttachmentRemove: string
+  /** One file exceeds the per-file size limit. */
+  chatAttachmentTooLarge: (params: { name: string }) => string
+  /** One file is neither an allowed image type nor an inlinable text type. */
+  chatAttachmentUnsupported: (params: { name: string }) => string
+  /** More than the allowed number of files on one message. */
+  chatAttachmentTooMany: string
+  /** One message's attachments together exceed the total size cap. */
+  chatAttachmentTotalTooLarge: string
   chatReattached: string
   chatConnectionDropped: string
   chatExtensionReloaded: string
@@ -231,6 +243,8 @@ export interface Messages {
   chatSaveWorkflowSave: string
   chatSaveWorkflowSkip: string
   chatSaveWorkflowSaved: (params: { name: string }) => string
+  /** Title of the AI-prefill checkbox list on the workflow save card. */
+  chatSaveWorkflowAiTitle: string
 
   // Agent mode
   modeLabel: string
@@ -630,6 +644,13 @@ const en: Messages = {
   chatStop: 'Stop',
   chatNewChat: 'New chat',
   chatAttachSelection: 'Attach selection',
+  chatAttach: 'Attach files',
+  chatAttachmentRemove: 'Remove attachment',
+  chatAttachmentTooLarge: ({ name }) =>
+    `${name} is too large (images ≤ 4 MB, text files ≤ 200 KB)`,
+  chatAttachmentUnsupported: ({ name }) => `${name} is not a supported file type`,
+  chatAttachmentTooMany: 'Too many attachments (max 4 per message)',
+  chatAttachmentTotalTooLarge: 'Attachments exceed the total size limit (8 MB)',
   chatReattached: 'Still working — reattached to the run.',
   chatConnectionDropped:
     'The connection dropped mid-reply. Any answer was saved to this conversation — send another message to continue.',
@@ -655,6 +676,7 @@ const en: Messages = {
   chatSaveWorkflowSave: 'Save as workflow',
   chatSaveWorkflowSkip: 'Skip',
   chatSaveWorkflowSaved: ({ name }) => `Saved workflow: ${name}`,
+  chatSaveWorkflowAiTitle: 'AI-generated content (checked = regenerate with AI at replay; unchecked = reuse the captured text)',
 
   modeLabel: 'Mode',
   modeChat: 'Chat',
@@ -1070,6 +1092,12 @@ const zhCN: Messages = {
   chatStop: '停止',
   chatNewChat: '新对话',
   chatAttachSelection: '附带选中内容',
+  chatAttach: '添加附件',
+  chatAttachmentRemove: '移除附件',
+  chatAttachmentTooLarge: ({ name }) => `${name} 过大（图片 ≤ 4 MB，文本 ≤ 200 KB）`,
+  chatAttachmentUnsupported: ({ name }) => `${name} 不是受支持的文件类型`,
+  chatAttachmentTooMany: '附件数量超限（每条消息最多 4 个）',
+  chatAttachmentTotalTooLarge: '附件总大小超出限制（8 MB）',
   chatReattached: '任务仍在进行，已重新接入。',
   chatConnectionDropped: '回复过程中连接中断。已生成的内容已保存到本次对话——再发一条消息即可继续。',
   chatExtensionReloaded: '扩展已重新加载。请在 chrome://extensions 中重载，然后重新打开此面板。',
@@ -1091,6 +1119,7 @@ const zhCN: Messages = {
   chatSaveWorkflowSave: '保存为工作流',
   chatSaveWorkflowSkip: '跳过',
   chatSaveWorkflowSaved: ({ name }) => `已保存工作流：${name}`,
+  chatSaveWorkflowAiTitle: 'AI 生成内容（勾选 = 回放时用 AI 重新生成；取消 = 沿用本次填写的文本）',
 
   modeLabel: '模式',
   modeChat: '聊天',

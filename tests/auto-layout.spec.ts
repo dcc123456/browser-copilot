@@ -51,4 +51,53 @@ describe('autoLayout', () => {
     const pos = autoLayout(nodes, edges)
     expect(pos.size).toBe(3)
   })
+
+  it('keeps a short chain on a single left→right row', () => {
+    const nodes = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
+    const edges = [
+      { source: 'a', target: 'b' },
+      { source: 'b', target: 'c' },
+    ]
+    const pos = autoLayout(nodes, edges)
+    // One row: same y, increasing x.
+    expect(pos.get('a')!.y).toBe(pos.get('b')!.y)
+    expect(pos.get('b')!.x).toBeGreaterThan(pos.get('a')!.x)
+    expect(pos.get('c')!.x).toBeGreaterThan(pos.get('b')!.x)
+  })
+
+  it('wraps a long chain into Z-shaped rows (every row reads left→right)', () => {
+    const nodes = Array.from({ length: 6 }, (_, i) => ({ id: `n${i}` }))
+    const edges = Array.from({ length: 5 }, (_, i) => ({
+      source: `n${i}`,
+      target: `n${i + 1}`,
+    }))
+    // Default columns are 200 wide + 70 gap → three columns fill 740; the
+    // fourth wraps, so this lays out as two rows of three.
+    const pos = autoLayout(nodes, edges, { maxRowWidth: 740 })
+    // Row 0: n0 → n2 left→right.
+    expect(pos.get('n0')!.x).toBeLessThan(pos.get('n1')!.x)
+    expect(pos.get('n1')!.x).toBeLessThan(pos.get('n2')!.x)
+    // Row 1 also reads left→right (Z-shape, not serpentine).
+    expect(pos.get('n3')!.x).toBeLessThan(pos.get('n4')!.x)
+    expect(pos.get('n4')!.x).toBeLessThan(pos.get('n5')!.x)
+    // Row 1 sits below row 0 and starts at the same left edge; the connector
+    // from n2 back to n3 draws the Z's return stroke.
+    expect(pos.get('n3')!.y).toBeGreaterThan(pos.get('n0')!.y)
+    expect(pos.get('n3')!.x).toBe(pos.get('n0')!.x)
+    expect(pos.get('n2')!.x).toBe(pos.get('n5')!.x)
+  })
+
+  it('never splits a layer across rows and positions every node', () => {
+    const nodes = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }]
+    const edges = [
+      { source: 'a', target: 'b' },
+      { source: 'a', target: 'c' },
+      { source: 'b', target: 'd' },
+      { source: 'c', target: 'd' },
+    ]
+    // Even with a tiny row width, b and c keep sharing a column.
+    const pos = autoLayout(nodes, edges, { maxRowWidth: 300 })
+    for (const n of nodes) expect(pos.get(n.id)).toBeDefined()
+    expect(pos.get('b')!.x).toBe(pos.get('c')!.x)
+  })
 })

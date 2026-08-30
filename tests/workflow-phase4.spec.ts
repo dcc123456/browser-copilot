@@ -414,10 +414,14 @@ describe('workflow phase 4 — integration executors', () => {
     vi.clearAllMocks()
   })
 
-  it('delay resolves after a short wait and emits a status', async () => {
+  it('delay resolves after a short wait and emits a status (time key; legacy ms kept)', async () => {
     const { ctx, emit } = makeCtx()
-    await EXECUTORS['delay']!({ ms: '5' }, ctx)
+    await EXECUTORS['delay']!({ time: 5 }, ctx)
     expect(emit).toHaveBeenCalledWith('status', expect.stringContaining('延时'))
+    // Legacy graphs stored the duration under `ms`.
+    const legacy = makeCtx()
+    await EXECUTORS['delay']!({ ms: 5 }, legacy.ctx)
+    expect(legacy.emit).toHaveBeenCalledWith('status', expect.stringContaining('延时'))
   })
 
   it('webhook posts the parsed body and emits result', async () => {
