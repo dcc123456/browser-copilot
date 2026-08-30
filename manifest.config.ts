@@ -1,6 +1,6 @@
 import { defineManifest } from '@crxjs/vite-plugin'
 
-/** Flat typing of the crxjs manifest parameter (used to include the MV3 `offscreen` key). */
+/** Flat typing of the crxjs manifest parameter (some fields below are wider than the typed union allows). */
 type ManifestParam = Parameters<typeof defineManifest>[0]
 
 /**
@@ -63,10 +63,5 @@ export default defineManifest({
   },
   side_panel: {
     default_path: 'src/sidepanel/index.html',
-  },
-  offscreen: {
-    document_url: 'src/offscreen/index.html',
-    justification:
-      'Used by the clipboard workflow block to read/write the system clipboard without disturbing the active page.',
   },
 } as unknown as ManifestParam)

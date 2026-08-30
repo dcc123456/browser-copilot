@@ -14,7 +14,7 @@
  *    worker's session storage keyed by `conversationId`, so the conversation
  *    continues instead of silently restarting.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import {
   AGENT_PORT,
   type AgentClientMessage,
@@ -53,6 +53,9 @@ import {
 } from '../lib/attachments'
 import { useT } from './i18n'
 import Markdown from './Markdown'
+import { downloadAnswer, type AnswerFormat } from '../lib/export-answer'
+import { normalizeSkill } from '../lib/skills'
+import { detectSkillCandidatesFromMarkdown, type DetectedSkill } from '../lib/skill-detect'
 
 /**
  * Fixed default conversation id; other conversations are generated ids.
@@ -88,6 +91,8 @@ interface Entry {
   text: string
   /** Files carried by a user turn, as slimmed summaries (no inline text). */
   attachments?: AttachmentSummary[]
+  /** Token usage of the completed turn this assistant reply belongs to (hover). */
+  usage?: TurnTokenUsage
 }
 
 /** A tool call awaiting the user's decision. */
@@ -119,6 +124,330 @@ function MessageAttachments({ attachments }: { attachments?: AttachmentSummary[]
             📎 {attachment.name}
           </span>
         ),
+      )}
+    </div>
+  )
+}
+
+/**
+ * Copy / download actions rendered on user and assistant bubbles.
+ *
+ * Copying writes the raw `entry.text` (plain text for the user's own words,
+ * raw Markdown for an assistant reply — the form most useful to paste back
+ * into another tool). Assistant bubbles additionally offer a download menu
+ * (Markdown / plain text / printable HTML) driven by `lib/export-answer`.
+ *
+ * The buttons sit in the top-right corner and only show on hover / keyboard
+ * focus, so they never block the transcript on a touch-less desktop.
+ */
+function MsgActions({
+  entry,
+  title,
+  t,
+}: {
+  entry: { role: string; text: string }
+  title: string
+  t: ReturnType<typeof useT>
+}) {
+  if (entry.role !== 'user' && entry.role !== 'assistant') return null
+  const isAssistant = entry.role === 'assistant'
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  const copy = (): void => {
+    void navigator.clipboard
+      .writeText(entry.text)
+      .then(() => setState('copied'))
+      .catch(() => {
+        // Clipboard writes can be refused (unfocused document, a browser
+        // policy); say so rather than look like a no-op — the text stays
+        // selectable, so the user can still copy it by hand.
+        setState('failed')
+      })
+      .finally(() => {
+        window.setTimeout(() => setState('idle'), 1400)
+      })
+  }
+
+  const download = (format: AnswerFormat): void => {
+    setMenuOpen(false)
+    downloadAnswer({ text: entry.text, format, title })
+  }
+
+  // Clicking anywhere outside the open menu closes it (same deferred-listener
+  // trick as the mode popover; see ChatTab above).
+  useEffect(() => {
+    if (!menuOpen) return
+    const close = (): void => setMenuOpen(false)
+    const id = window.setTimeout(() => {
+      document.addEventListener('click', close, { once: true })
+    }, 0)
+    return () => {
+      window.clearTimeout(id)
+      document.removeEventListener('click', close)
+    }
+  }, [menuOpen])
+
+  const copyLabel =
+    state === 'copied' ? t.msgCopied : state === 'failed' ? t.msgCopyFailed : t.msgCopy
+
+  return (
+    <div className="msg-actions">
+      <button
+        aria-label={copyLabel}
+        className="msg-action msg-copy"
+        data-state={state}
+        onClick={copy}
+        title={copyLabel}
+        type="button"
+      >
+        {state === 'copied' ? '✓' : '⧉'}
+      </button>
+      {isAssistant && (
+        <>
+          <button
+            aria-label={t.msgDownload}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            className="msg-action msg-download"
+            onClick={() => setMenuOpen((open) => !open)}
+            title={t.msgDownload}
+            type="button"
+          >
+            ↓
+          </button>
+          {menuOpen && (
+            <div className="msg-download-menu" role="menu">
+              <div className="msg-download-title">{t.msgDownloadAs}</div>
+              <button onClick={() => download('md')} type="button">
+                {t.msgDownloadMd}
+              </button>
+              <button onClick={() => download('txt')} type="button">
+                {t.msgDownloadTxt}
+              </button>
+              <button onClick={() => download('html')} type="button">
+                {t.msgDownloadHtmlPdf}
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+/** Editable fields of a generated-skill card; kept separate from `Skill` so the
+ * form may hold an invalid (or empty) draft while the user is still typing. */
+interface SkillForm {
+  name: string
+  description: string
+  instructions: string
+  autoMatch: boolean
+}
+
+function toSkillForm(skill: Skill): SkillForm {
+  return {
+    name: skill.name,
+    description: skill.description,
+    instructions: skill.instructions,
+    autoMatch: skill.autoMatch,
+  }
+}
+
+/**
+ * Renders the generated-skill cards found in an assistant reply (see
+ * `msg-actions` UI, below). Each assistant message is scanned once and every
+ * recognised skill block becomes a card where the user can save it straight
+ * into the project's skill store, open an inline editor to tweak it first, or
+ * dismiss it.
+ */
+function GeneratedSkillCards({
+  assistantText,
+  t,
+  onSaved,
+}: {
+  assistantText: string
+  t: ReturnType<typeof useT>
+  onSaved: (statusText: string) => void
+}) {
+  const candidates = detectSkillCandidatesFromMarkdown(assistantText)
+  if (candidates.length === 0) return null
+  return (
+    <div className="generated-skill-list">
+      {candidates.map((item, index) => (
+        <GeneratedSkillCard
+          detected={item}
+          key={`${item.draft.name}-${index}`}
+          onSaved={onSaved}
+          t={t}
+        />
+      ))}
+    </div>
+  )
+}
+
+/** One save-an-inline-edited / dismiss card for a detected skill. */
+function GeneratedSkillCard({
+  detected,
+  onSaved,
+  t,
+}: {
+  detected: DetectedSkill
+  onSaved: (statusText: string) => void
+  t: ReturnType<typeof useT>
+}) {
+  const [dismissed, setDismissed] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [form, setForm] = useState<SkillForm>(() => toSkillForm(detected.draft))
+  const [errorText, setErrorText] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  if (dismissed) return null
+
+  // Same validation-code mapping the Skills tab uses, so a name clash or a
+  // missing field reads in the panel's language rather than the worker's.
+  const describeError = (error: Error): string => {
+    const message = error.message
+    if (!message.startsWith('skill:')) return message
+    const codes = message.slice('skill:'.length).split(',')
+    const lookup: Record<string, string> = {
+      nameRequired: t.skillsNameRequired,
+      instructionsRequired: t.skillsInstructionsRequired,
+      nameTaken: t.skillsNameTaken,
+    }
+    return codes
+      .map((code) => lookup[code] ?? code)
+      .filter((text, index, all) => all.indexOf(text) === index)
+      .join(' ')
+  }
+
+  const persist = async (name: string, description: string, instructions: string, autoMatch: boolean): Promise<void> => {
+    const skill: Skill = normalizeSkill({
+      ...detected.draft,
+      name,
+      description,
+      instructions,
+      autoMatch,
+      updatedAt: Date.now(),
+    })
+    setSaving(true)
+    setErrorText(null)
+    try {
+      const result = await sendCommand({ type: 'skills.save', skill })
+      const saved = result.type === 'skills.save' ? result.skill : skill
+      onSaved(t.skillSavedBanner({ name: saved.name }))
+      setDismissed(true)
+    } catch (error) {
+      setErrorText(describeError(error as Error))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const saveAsIs = (): void =>
+    void persist(
+      detected.draft.name,
+      detected.draft.description,
+      detected.draft.instructions,
+      detected.draft.autoMatch,
+    )
+
+  const saveEdited = (): void =>
+    void persist(form.name, form.description, form.instructions, form.autoMatch)
+
+  const startEditing = (): void => {
+    setForm(toSkillForm(detected.draft))
+    setEditing(true)
+    setErrorText(null)
+  }
+
+  return (
+    <div className="card generated-skill-card">
+      {editing ? (
+        <>
+          <div className="card-title">{t.skillSaveEdit}</div>
+          <label className="field">
+            <span>{t.skillName}</span>
+            <input
+              maxLength={60}
+              onChange={(event) => setForm({ ...form, name: event.target.value })}
+              value={form.name}
+            />
+          </label>
+          <label className="field">
+            <span>{t.skillDescription}</span>
+            <input
+              maxLength={300}
+              onChange={(event) => setForm({ ...form, description: event.target.value })}
+              value={form.description}
+            />
+          </label>
+          <label className="field">
+            <span>{t.skillInstructions}</span>
+            <textarea
+              maxLength={8000}
+              onChange={(event) => setForm({ ...form, instructions: event.target.value })}
+              rows={6}
+              value={form.instructions}
+            />
+          </label>
+          <label className="checkbox">
+            <input
+              checked={form.autoMatch}
+              onChange={(event) => setForm({ ...form, autoMatch: event.target.checked })}
+              type="checkbox"
+            />
+            <span>{t.skillAutoMatch}</span>
+          </label>
+          {errorText && (
+            <div className="banner" data-kind="error">
+              {errorText}
+            </div>
+          )}
+          <div className="actions">
+            <button className="primary" disabled={saving} onClick={saveEdited} type="button">
+              {t.save}
+            </button>
+            <button
+              disabled={saving}
+              onClick={() => {
+                setEditing(false)
+                setErrorText(null)
+              }}
+              type="button"
+            >
+              {t.cancel}
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="card-title">{t.skillGeneratedPreview}</div>
+          <div className="generated-skill-name">{detected.draft.name}</div>
+          {detected.draft.description && (
+            <p className="hint">{detected.draft.description}</p>
+          )}
+          <details className="generated-skill-instructions">
+            <summary>{t.skillInstructions}</summary>
+            <pre>{detected.draft.instructions}</pre>
+          </details>
+          {errorText && (
+            <div className="banner" data-kind="error">
+              {errorText}
+            </div>
+          )}
+          <div className="actions">
+            <button className="primary" disabled={saving} onClick={saveAsIs} type="button">
+              {t.skillSave}
+            </button>
+            <button disabled={saving} onClick={startEditing} type="button">
+              {t.skillSaveEdit}
+            </button>
+            <button disabled={saving} onClick={() => setDismissed(true)} type="button">
+              {t.skillDiscard}
+            </button>
+          </div>
+        </>
       )}
     </div>
   )
@@ -177,17 +506,13 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   } | null>(null)
   const [mode, setMode] = useState<AgentMode>('semi')
   const [modeInfoOpen, setModeInfoOpen] = useState(false)
-  /** Token usage of the most recent turn, for the popover breakdown. */
-  const [lastUsage, setLastUsage] = useState<TurnTokenUsage | null>(null)
   /** Summed usage across turns in this conversation. */
   const [sessionUsage, setSessionUsage] = useState<TurnTokenUsage>(() => ({ ...ZERO_USAGE }))
-  const [usageOpen, setUsageOpen] = useState(false)
 
   // Each conversation gets its own token tally; reset when starting or opening
   // another conversation so the chip reflects only the current one.
   const resetUsage = useCallback(() => {
     setSessionUsage({ ...ZERO_USAGE })
-    setLastUsage(null)
   }, [])
   /**
    * Composer height in px, persisted to localStorage. A drag handle on the
@@ -202,7 +527,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const draggingRef = useRef<{ startY: number; startHeight: number } | null>(null)
 
   const closeModeInfo = useCallback(() => setModeInfoOpen(false), [])
-  const closeUsage = useCallback(() => setUsageOpen(false), [])
 
   useEffect(() => {
     if (!modeInfoOpen) return
@@ -214,17 +538,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       document.removeEventListener('click', closeModeInfo)
     }
   }, [modeInfoOpen, closeModeInfo])
-
-  useEffect(() => {
-    if (!usageOpen) return
-    const id = window.setTimeout(() => {
-      document.addEventListener('click', closeUsage, { once: true })
-    }, 0)
-    return () => {
-      window.clearTimeout(id)
-      document.removeEventListener('click', closeUsage)
-    }
-  }, [usageOpen, closeUsage])
 
   // Drag-to-resize for the composer. Pointer events so it works with mouse and
   // touch; dragging up grows the composer (and shrinks the chat log).
@@ -488,13 +801,22 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             showPhase(labels[message.phase])
             break
           }
-          case 'done':
+          case 'done': {
             clearPhase()
+            const finishingId = streamingRef.current
             streamingRef.current = null
             setBusy(false)
             void maybePromptSaveWorkflow(conversationId)
             if (message.usage) {
-              setLastUsage(message.usage)
+              // Tag the just-finished assistant bubble so hovering it shows the
+              // turn's own token breakdown (the flat bar only sums the session).
+              if (finishingId) {
+                setEntries((prev) =>
+                  prev.map((entry) =>
+                    entry.id === finishingId ? { ...entry, usage: message.usage } : entry,
+                  ),
+                )
+              }
               setSessionUsage((prev) => ({
                 inputTokens: prev.inputTokens + message.usage!.inputTokens,
                 outputTokens: prev.outputTokens + message.usage!.outputTokens,
@@ -505,6 +827,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               }))
             }
             break
+          }
           case 'error':
             clearPhase()
             streamingRef.current = null
@@ -876,6 +1199,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   // --- Slash menu ------------------------------------------------------------
 
   const activeSkill = skills.find((skill) => skill.id === activeSkillId) ?? null
+  // Filename base for answer downloads: prefer the active conversation's title,
+  // with a localized fallback for untitled conversations.
+  const convTitle =
+    conversations.find((entry) => entry.id === conversationId)?.title || t.msgDownloadUntitled
   const matches = query ? filterSkills(skills, query.term) : []
   // Only open once there is something to pick, so a stray '/' is not disruptive.
   const menuOpen = query !== null && skills.length > 0
@@ -1085,25 +1412,51 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
           <div className="empty">{t.chatEmpty}</div>
         )}
 
-        {entries.map((entry) =>
-          entry.role === 'tool' ? (
-            <div key={entry.id}>
-              <span className="tool-chip">{entry.text}</span>
-            </div>
-          ) : (
-            <div key={entry.id} className="msg" data-role={entry.role}>
-              {/*
-                Only assistant replies are parsed as Markdown. What the user typed
-                is shown exactly as typed: reformatting their own words would be
-                surprising, and asking about `**` or a code fence must not make
-                the question itself change shape. Status and error lines are
-                plain text generated by this extension.
-              */}
-              {entry.role === 'assistant' ? <Markdown text={entry.text} /> : entry.text}
-              <MessageAttachments attachments={entry.attachments} />
-            </div>
-          ),
-        )}
+        {entries.map((entry) => {
+          if (entry.role === 'tool') {
+            return (
+              <div key={entry.id}>
+                <span className="tool-chip">{entry.text}</span>
+              </div>
+            )
+          }
+          // A keyed fragment keeps `.msg` a direct flex child of `.chat-log`
+          // (so its align-self keeps working) while letting the generated-skill
+          // cards drop in as their own flex items right below the reply.
+          return (
+            <Fragment key={entry.id}>
+              <div className="msg" data-role={entry.role}>
+                {/*
+                  Only assistant replies are parsed as Markdown. What the user typed
+                  is shown exactly as typed: reformatting their own words would be
+                  surprising, and asking about `**` or a code fence must not make
+                  the question itself change shape. Status and error lines are
+                  plain text generated by this extension.
+                */}
+                {entry.role === 'assistant' ? <Markdown text={entry.text} /> : entry.text}
+                <MessageAttachments attachments={entry.attachments} />
+                {entry.role === 'assistant' && entry.usage && (
+                  <div className="msg-token-tip">
+                    <span className="msg-token-tip-title">{t.tokenBarLastTurn}</span>
+                    <span className="msg-token-tip-kv">{t.tokenBarT}:{formatTokens(entry.usage.totalTokens)}</span>
+                    <span className="msg-token-tip-kv">{t.tokenBarI}:{formatTokens(entry.usage.inputTokens)}</span>
+                    <span className="msg-token-tip-kv">{t.tokenBarO}:{formatTokens(entry.usage.outputTokens)}</span>
+                    <span className="msg-token-tip-kv">{t.tokenBarR}:{formatTokens(entry.usage.reasoningTokens ?? 0)}</span>
+                    <span className="msg-token-tip-kv">{t.tokenBarC}:{formatTokens(entry.usage.cachedInputTokens ?? 0)}</span>
+                  </div>
+                )}
+                <MsgActions entry={entry} t={t} title={convTitle} />
+              </div>
+              {entry.role === 'assistant' && (
+                <GeneratedSkillCards
+                  assistantText={entry.text}
+                  onSaved={(text) => append({ role: 'status', text })}
+                  t={t}
+                />
+              )}
+            </Fragment>
+          )
+        })}
 
         {confirms.map((confirm) => (
           <div key={confirm.requestId} className="confirm-card">
@@ -1327,34 +1680,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                 </p>
               </div>
             )}
-            <button
-              aria-label={t.tokenUsage}
-              className={`token-btn${usageOpen ? ' token-btn-active' : ''}`}
-              onClick={() => setUsageOpen((open) => !open)}
-              title={t.tokenUsage}
-              type="button"
-            >
-              {formatTokens(sessionUsage.totalTokens)}
-            </button>
-            {usageOpen && (
-              <div className="popover token-popover" role="tooltip">
-                <TokenBreakdown
-                  label={t.tokenSession}
-                  t={t}
-                  usage={sessionUsage}
-                />
-                {lastUsage && (
-                  <TokenBreakdown
-                    label={t.tokenLastTurn}
-                    t={t}
-                    usage={lastUsage}
-                  />
-                )}
-                {!lastUsage && sessionUsage.totalTokens === 0 && (
-                  <p className="token-none">{t.tokenNone}</p>
-                )}
-              </div>
-            )}
           </div>
           <div className="actions" style={{ margin: 0 }}>
             <button
@@ -1403,6 +1728,9 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               {busy ? t.loading : t.chatSend}
             </button>
           </div>
+        </div>
+        <div className="token-bar">
+          <TokenBarGroup label={t.tokenBarSession} t={t} usage={sessionUsage} />
         </div>
       </div>
     </>
@@ -1492,47 +1820,40 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
-function TokenBreakdown({
+/**
+ * One flat token block on the token bar, summing the current conversation's
+ * usage. Numbers use the compact `formatTokens` form so the whole bar stays
+ * on one or two short lines. Per-turn breakdowns live in the message-bubble
+ * hover tooltip instead (see `.msg-token-tip`).
+ */
+function TokenBarGroup({
   label,
   usage,
   t,
 }: {
   label: string
-  usage: TurnTokenUsage
+  usage: TurnTokenUsage | null
   t: ReturnType<typeof useT>
 }) {
-  const rows: Array<[string, number]> = [
-    [t.tokenTotal, usage.totalTokens],
-    [t.tokenInput, usage.inputTokens],
-    [t.tokenOutput, usage.outputTokens],
-  ]
-  if (usage.reasoningTokens > 0) rows.push([t.tokenReasoning, usage.reasoningTokens])
-  if (usage.cachedInputTokens > 0) rows.push([t.tokenCached, usage.cachedInputTokens])
-
-  // Cache hit rate = cached input tokens as a share of all input tokens. Only
-  // meaningful (and shown) once the provider has actually reported input tokens.
-  const cacheRate =
-    usage.inputTokens > 0
-      ? Math.round((usage.cachedInputTokens / usage.inputTokens) * 100)
-      : null
-
+  const v = (n: number): string => (usage ? formatTokens(n) : t.tokenBarDash)
   return (
-    <div className="token-group">
-      <div className="token-group-title">{label}</div>
-      <dl>
-        {rows.map(([k, v]) => (
-          <div className="token-row" key={k}>
-            <dt>{k}</dt>
-            <dd>{v.toLocaleString()}</dd>
-          </div>
-        ))}
-        {cacheRate !== null && (
-          <div className="token-row token-rate">
-            <dt>{t.tokenCacheRate}</dt>
-            <dd>{cacheRate}%</dd>
-          </div>
-        )}
-      </dl>
-    </div>
+    <span className="token-bar-group">
+      <span className="token-bar-label">{label}</span>
+      <span className="token-bar-kv">
+        {t.tokenBarT}:{v(usage?.totalTokens ?? 0)}
+      </span>
+      <span className="token-bar-kv">
+        {t.tokenBarI}:{v(usage?.inputTokens ?? 0)}
+      </span>
+      <span className="token-bar-kv">
+        {t.tokenBarO}:{v(usage?.outputTokens ?? 0)}
+      </span>
+      <span className="token-bar-kv">
+        {t.tokenBarR}:{v(usage?.reasoningTokens ?? 0)}
+      </span>
+      <span className="token-bar-kv">
+        {t.tokenBarC}:{v(usage?.cachedInputTokens ?? 0)}
+      </span>
+    </span>
   )
 }

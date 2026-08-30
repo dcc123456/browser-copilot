@@ -309,12 +309,16 @@ export interface Messages {
   settingsNoProvider: string
   settingsAddProvider: string
   settingsChoosePreset: string
+  /** Placeholder for the preset-endpoint dropdown in the provider editor. */
+  settingsChooseEndpoint: string
   settingsUseThis: string
   settingsActive: string
   settingsKeyConfigured: string
   settingsNoKey: string
   settingsName: string
   settingsBaseUrl: string
+  /** Label for the preset-endpoint dropdown in the provider editor. */
+  settingsEndpointPresets: string
   settingsBaseUrlHint: string
   settingsApiKey: string
   settingsShowKey: string
@@ -487,6 +491,82 @@ export interface Messages {
   errorMaxTokensInteger: string
   errorHeadersJson: string
   errorHeadersObject: string
+
+  // --- New: chat message actions (copy / download) ---
+  /** Generic copy button on a user/assistant message bubble. */
+  msgCopy: string
+  /** Transient confirmation after a successful message copy. */
+  msgCopied: string
+  /** Shown when the browser refused clipboard access for a message. */
+  msgCopyFailed: string
+  /** Download button tooltip / label on an assistant message bubble. */
+  msgDownload: string
+  /** Title of the format picker opened by the download button. */
+  msgDownloadAs: string
+  /** Markdown (.md) option in the download menu. */
+  msgDownloadMd: string
+  /** Plain text (.txt) option in the download menu. */
+  msgDownloadTxt: string
+  /** Printable HTML / PDF option in the download menu. */
+  msgDownloadHtmlPdf: string
+  /** Filename base used when the conversation has no title. */
+  msgDownloadUntitled: string
+  /** Hint shown after downloading HTML: users can print to PDF. */
+  msgDownloadHtmlHint: string
+
+  // --- New: inline token bar (below composer-row) ---
+  /** Label for the session aggregate block on the token bar. */
+  tokenBarSession: string
+  /** Label for the last-turn aggregate block on the token bar. */
+  tokenBarLastTurn: string
+  /** Short "Total" label used inside the token bar. */
+  tokenBarT: string
+  /** Short "Input" label used inside the token bar. */
+  tokenBarI: string
+  /** Short "Output" label used inside the token bar. */
+  tokenBarO: string
+  /** Short "Reasoning" label used inside the token bar. */
+  tokenBarR: string
+  /** Short "Cached input" label used inside the token bar. */
+  tokenBarC: string
+  /** Placeholder token string when a turn/session has no usage yet. */
+  tokenBarDash: string
+
+  // --- New: in-chat generated skill saving ---
+  /** Headline banner shown above a skill detected from an assistant reply. */
+  skillGeneratedPreview: string
+  /** Button label: save the generated skill as-is. */
+  skillSave: string
+  /** Button label: open an editor before saving this skill. */
+  skillSaveEdit: string
+  /** Button label: dismiss this generated-skill card. */
+  skillDiscard: string
+  /** Banner after a generated skill was successfully saved. */
+  skillSavedBanner: (params: { name: string }) => string
+  /** Checkbox label on the generated-skill form. */
+  skillAutoMatch: string
+  /** Label for the inline name form. */
+  skillName: string
+  /** Label for the inline description form. */
+  skillDescription: string
+  /** Label for the inline instructions form. */
+  skillInstructions: string
+
+  // --- New: skills tab import / export ---
+  /** Skills tab "Import" button label. */
+  skillsImport: string
+  /** Skills tab import tooltip / hint (drag-and-drop). */
+  skillsImportHint: string
+  /** Skills tab import file-dialog button. */
+  skillsImportFile: string
+  /** Skills tab banner: import succeeded. */
+  skillsImportResultOk: (params: { count: number }) => string
+  /** Skills tab banner: import failed for some/all entries. */
+  skillsImportResultFail: (params: { ok: number; failed: number }) => string
+  /** Skills tab "Export all" button label. */
+  skillsExportAll: string
+  /** Imported-skills banner detail: name already taken. */
+  skillsImportNameTaken: (params: { name: string }) => string
 }
 
 const en: Messages = {
@@ -739,12 +819,14 @@ const en: Messages = {
   settingsNoProvider: 'No provider yet. Add one to enable the agent.',
   settingsAddProvider: 'Add a provider',
   settingsChoosePreset: 'Choose a preset…',
+  settingsChooseEndpoint: 'Choose preset endpoint…',
   settingsUseThis: 'Use this',
   settingsActive: 'active',
   settingsKeyConfigured: 'key configured',
   settingsNoKey: 'no key — the agent will fail',
   settingsName: 'Name',
   settingsBaseUrl: 'Base URL',
+  settingsEndpointPresets: 'Preset endpoint',
   settingsBaseUrlHint:
     'Everything up to but not including /chat/completions. A pasted full URL is trimmed automatically.',
   settingsApiKey: 'API key',
@@ -936,6 +1018,49 @@ const en: Messages = {
   errorMaxTokensInteger: 'Max tokens must be a positive whole number.',
   errorHeadersJson: 'Extra headers must be valid JSON.',
   errorHeadersObject: 'Extra headers must be a JSON object.',
+
+  // --- New: chat message actions (en) ---
+  msgCopy: 'Copy',
+  msgCopied: 'Copied',
+  msgCopyFailed: 'Copy failed',
+  msgDownload: 'Download',
+  msgDownloadAs: 'Download as',
+  msgDownloadMd: 'Markdown (.md)',
+  msgDownloadTxt: 'Plain text (.txt)',
+  msgDownloadHtmlPdf: 'HTML / PDF (print)',
+  msgDownloadUntitled: 'conversation',
+  msgDownloadHtmlHint: 'Open the downloaded HTML and use the browser Print dialog to save as PDF.',
+
+  // --- New: inline token bar (en) ---
+  tokenBarSession: 'Session',
+  tokenBarLastTurn: 'Last turn',
+  tokenBarT: 'T',
+  tokenBarI: 'I',
+  tokenBarO: 'O',
+  tokenBarR: 'R',
+  tokenBarC: 'C',
+  tokenBarDash: '-',
+
+  // --- New: in-chat generated skill saving (en) ---
+  skillGeneratedPreview: 'Detected a new skill in this reply. Save it to reuse?',
+  skillSave: 'Save skill',
+  skillSaveEdit: 'Edit & save',
+  skillDiscard: 'Dismiss',
+  skillSavedBanner: ({ name }) => `Skill “${name}” saved. You can now pick it in Chat.`,
+  skillAutoMatch: 'Allow the agent to select this skill automatically',
+  skillName: 'Name',
+  skillDescription: 'When to use it',
+  skillInstructions: 'Instructions',
+
+  // --- New: skills tab import / export (en) ---
+  skillsImport: 'Import',
+  skillsImportHint: 'Drag & drop a .json / .yaml / .md skill file here, or click Import.',
+  skillsImportFile: 'Choose file',
+  skillsImportResultOk: ({ count }) => `Imported ${count} skill${count === 1 ? '' : 's'}.`,
+  skillsImportResultFail: ({ ok, failed }) =>
+    `Import finished: ${ok} succeeded, ${failed} failed. Review problems above.`,
+  skillsExportAll: 'Export all',
+  skillsImportNameTaken: ({ name }) => `Skipped “${name}”: a skill with this name already exists.`,
 }
 
 const zhCN: Messages = {
@@ -1178,12 +1303,14 @@ const zhCN: Messages = {
   settingsNoProvider: '尚未配置服务。添加一个后才能使用 agent。',
   settingsAddProvider: '添加模型服务',
   settingsChoosePreset: '选择预设…',
+  settingsChooseEndpoint: '选择预设端点…',
   settingsUseThis: '使用这个',
   settingsActive: '使用中',
   settingsKeyConfigured: '已配置密钥',
   settingsNoKey: '未配置密钥——agent 将无法工作',
   settingsName: '名称',
   settingsBaseUrl: '接口地址',
+  settingsEndpointPresets: '预设端点',
   settingsBaseUrlHint: '填到 /chat/completions 之前的部分即可。粘贴完整地址会自动裁剪。',
   settingsApiKey: 'API 密钥',
   settingsShowKey: '显示密钥',
@@ -1362,6 +1489,48 @@ const zhCN: Messages = {
   errorMaxTokensInteger: '最大 token 数必须是正整数。',
   errorHeadersJson: '额外请求头必须是合法的 JSON。',
   errorHeadersObject: '额外请求头必须是 JSON 对象。',
+
+  // --- New: chat message actions (zh-CN) ---
+  msgCopy: '复制',
+  msgCopied: '已复制',
+  msgCopyFailed: '复制失败',
+  msgDownload: '下载',
+  msgDownloadAs: '导出格式',
+  msgDownloadMd: 'Markdown (.md)',
+  msgDownloadTxt: '纯文本 (.txt)',
+  msgDownloadHtmlPdf: 'HTML / 打印为 PDF',
+  msgDownloadUntitled: '对话',
+  msgDownloadHtmlHint: '打开下载的 HTML，使用浏览器的“打印”对话框另存为 PDF 即可。',
+
+  // --- New: inline token bar (zh-CN) ---
+  tokenBarSession: '本次会话',
+  tokenBarLastTurn: '上一条消息',
+  tokenBarT: '总',
+  tokenBarI: '输',
+  tokenBarO: '出',
+  tokenBarR: '理',
+  tokenBarC: '缓',
+  tokenBarDash: '-',
+
+  // --- New: in-chat generated skill saving (zh-CN) ---
+  skillGeneratedPreview: '在这条回复中检测到一个新技能，要保存下来复用吗？',
+  skillSave: '保存技能',
+  skillSaveEdit: '编辑后保存',
+  skillDiscard: '忽略',
+  skillSavedBanner: ({ name }) => `已保存技能 “${name}”，现在可以在对话中选择使用。`,
+  skillAutoMatch: '允许助手自动匹配并启用此技能',
+  skillName: '名称',
+  skillDescription: '适用场景',
+  skillInstructions: '技能指令',
+
+  // --- New: skills tab import / export (zh-CN) ---
+  skillsImport: '导入',
+  skillsImportHint: '可将 .json / .yaml / .md 技能文件拖到此处，或点击“导入”。',
+  skillsImportFile: '选择文件',
+  skillsImportResultOk: ({ count }) => `已成功导入 ${count} 个技能。`,
+  skillsImportResultFail: ({ ok, failed }) => `导入完成：成功 ${ok} 个，失败 ${failed} 个，详情见上方提示。`,
+  skillsExportAll: '全部导出',
+  skillsImportNameTaken: ({ name }) => `已跳过 “${name}”：同名技能已存在。`,
 }
 
 const DICTIONARIES: Record<Locale, Messages> = { en, 'zh-CN': zhCN }

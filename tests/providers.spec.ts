@@ -68,6 +68,39 @@ describe('presets', () => {
   })
 })
 
+describe('preset endpoints', () => {
+  it('zhipu exposes three or more candidate endpoints', () => {
+    const zhipu = findPreset('zhipu')!
+    expect(zhipu.endpoints?.length).toBeGreaterThanOrEqual(3)
+    for (const ep of zhipu.endpoints ?? []) {
+      expect(typeof ep.id).toBe('string')
+      expect(typeof ep.title).toBe('string')
+      expect(typeof ep.baseUrl).toBe('string')
+    }
+  })
+
+  it('ark lists a coding-plan endpoint', () => {
+    const ark = findPreset('ark')!
+    const coding = (ark.endpoints ?? []).find((ep) => ep.id === 'ark-coding-plan')
+    expect(coding).toBeDefined()
+    expect(coding?.baseUrl).toBe('https://ark.cn-beijing.volces.com/api/coding/v3')
+  })
+
+  it('keeps preset ids unique and includes the custom escape hatch', () => {
+    const ids = PROVIDER_PRESETS.map((preset) => preset.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids).toContain('custom')
+  })
+
+  it('zhipu base is already normalized (no trailing slash)', () => {
+    const zhipu = findPreset('zhipu')!
+    expect(normalizeBaseUrl(zhipu.baseUrl)).toBe(zhipu.baseUrl)
+    for (const ep of zhipu.endpoints ?? []) {
+      expect(normalizeBaseUrl(ep.baseUrl)).toBe(ep.baseUrl)
+    }
+  })
+})
+
 describe('validateProfile', () => {
   it('accepts a complete profile', () => {
     expect(validateProfile(profile())).toEqual([])

@@ -3,6 +3,7 @@ node_modules/
 .pnpm-store/
 .pnpm-store-local/
 .pnpm-tmp/
+.trae/
 
 # Build output
 dist/

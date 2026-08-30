@@ -265,6 +265,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
 
   const preset = draft ? findPreset(draft.presetId) : undefined
   const localEndpoint = draft ? isLocalEndpoint(draft.baseUrl) : false
+  const presetEndpoints = preset?.endpoints ?? []
 
   return (
     <div className="pane">
@@ -289,7 +290,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
           {settings.providers.map((profile) => {
             const isActive = profile.id === settings.activeProviderId
             return (
-              <div className="card" key={profile.id} style={{ marginBottom: 8 }}>
+              <div className="card provider-card" key={profile.id} style={{ marginBottom: 8 }}>
                 <div className="card-head">
                   <span className="card-title">{profile.label}</span>
                   {isActive ? (
@@ -303,10 +304,25 @@ export default function SettingsTab({ onLocaleChange }: Props) {
                     </button>
                   )}
                 </div>
-                <div className="meta">{profile.model}</div>
-                <div className="meta">{profile.baseUrl}</div>
-                <div className="meta">
-                  {profile.apiKey ? t.settingsKeyConfigured : t.settingsNoKey}
+                <div className="provider-meta">
+                  <div className="meta">
+                    <span className="meta-label">{t.settingsModel}</span>
+                    <span>{profile.model}</span>
+                  </div>
+                  <div className="meta">
+                    <span className="meta-label">{t.settingsBaseUrl}</span>
+                    <span>{profile.baseUrl}</span>
+                  </div>
+                  <div className="meta">
+                    <span className="meta-label">{t.settingsApiKey}</span>
+                    <span>
+                      {profile.apiKey ? (
+                        <span className="status-ok">{t.settingsKeyConfigured}</span>
+                      ) : (
+                        t.settingsNoKey
+                      )}
+                    </span>
+                  </div>
                 </div>
                 <div className="actions">
                   <button
@@ -392,6 +408,32 @@ export default function SettingsTab({ onLocaleChange }: Props) {
               {t.settingsBaseUrlHint}
             </p>
           </div>
+
+          {presetEndpoints.length > 0 && (
+            <div className="field">
+              <label htmlFor="p-endpoint">{t.settingsEndpointPresets}</label>
+              <select
+                defaultValue=""
+                id="p-endpoint"
+                onChange={(event) => {
+                  const endpoint = presetEndpoints.find(
+                    (option) => option.id === event.target.value,
+                  )
+                  if (endpoint) setDraft({ ...draft, baseUrl: endpoint.baseUrl })
+                  event.target.value = ''
+                }}
+              >
+                <option disabled value="">
+                  {t.settingsChooseEndpoint}
+                </option>
+                {presetEndpoints.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="field">
             <label htmlFor="p-key">{t.settingsApiKey}</label>

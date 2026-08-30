@@ -51,6 +51,12 @@ export interface ProviderPreset {
   hint: string
   /** Docs URL for keys/models. */
   docsUrl?: string
+  /**
+   * Candidate endpoints the vendor exposes (e.g. standard, Coding Plan, Agent
+   * Plan). The first entry corresponds to `baseUrl`. Optional — presets without
+   * a differentiated endpoint offering may omit it.
+   */
+  endpoints?: { id: string; title: string; baseUrl: string }[]
 }
 
 /**
@@ -76,6 +82,14 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     defaultModel: 'doubao-seed-code',
     hint: 'Use an Ark API key. For "model", use a model ID such as doubao-seed-code, or your dedicated endpoint ID (ep-…). A coding-plan subscription is billed against the model it covers.',
     docsUrl: 'https://console.volcengine.com/ark',
+    endpoints: [
+      { id: 'ark-standard', title: 'Standard', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3' },
+      {
+        id: 'ark-coding-plan',
+        title: 'Coding Plan (OpenAI)',
+        baseUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3',
+      },
+    ],
   },
   {
     id: 'openai',
@@ -100,6 +114,14 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     defaultModel: 'kimi-k2-0905-preview',
     hint: 'Create a key at platform.moonshot.cn.',
     docsUrl: 'https://platform.moonshot.cn/console/api-keys',
+    endpoints: [
+      { id: 'moonshot-standard', title: 'Standard', baseUrl: 'https://api.moonshot.cn/v1' },
+      {
+        id: 'moonshot-coding-plan',
+        title: 'Coding Plan',
+        baseUrl: 'https://api.kimi.com/coding/v1',
+      },
+    ],
   },
   {
     id: 'dashscope',
@@ -108,6 +130,18 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     defaultModel: 'qwen-plus',
     hint: 'Use the OpenAI-compatible base shown above, not the native DashScope path.',
     docsUrl: 'https://bailian.console.aliyun.com/',
+    endpoints: [
+      {
+        id: 'dashscope-standard',
+        title: 'Standard',
+        baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      },
+      {
+        id: 'dashscope-coding-plan',
+        title: 'Coding Plan',
+        baseUrl: 'https://coding.dashscope.aliyuncs.com/v1',
+      },
+    ],
   },
   {
     id: 'siliconflow',
@@ -138,6 +172,95 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: '',
     defaultModel: '',
     hint: 'Any endpoint exposing POST {baseUrl}/chat/completions with Bearer auth. Enter the base URL up to but not including /chat/completions.',
+  },
+  {
+    id: 'zhipu',
+    label: '智谱 GLM',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    defaultModel: 'glm-4-flash',
+    hint: 'Create a key at open.bigmodel.cn. Models such as glm-4-flash, glm-4-plus.',
+    docsUrl: 'https://open.bigmodel.cn/',
+    endpoints: [
+      { id: 'zhipu-standard', title: 'Standard', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' },
+      {
+        id: 'zhipu-coding-plan',
+        title: 'Coding Plan',
+        baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
+      },
+      {
+        id: 'zhipu-global-coding-plan',
+        title: 'Global Coding Plan',
+        baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+      },
+    ],
+  },
+  {
+    id: 'minimax',
+    label: 'MiniMax',
+    baseUrl: 'https://api.minimaxi.com/v1',
+    defaultModel: 'MiniMax-Text-01',
+    hint: 'Create a key at platform.minimaxi.com. Mainland endpoint vs the international one below.',
+    docsUrl: 'https://platform.minimaxi.com/',
+    endpoints: [
+      { id: 'minimax-cn', title: '中国大陆', baseUrl: 'https://api.minimaxi.com/v1' },
+      { id: 'minimax-global', title: '国际', baseUrl: 'https://api.minimax.io/v1' },
+    ],
+  },
+  {
+    id: 'stepfun',
+    label: '阶跃星辰 StepFun',
+    baseUrl: 'https://api.stepfun.com/v1',
+    defaultModel: 'step-2-mini',
+    hint: 'Create a key at platform.stepfun.com. Models such as step-2-mini.',
+    docsUrl: 'https://platform.stepfun.com/',
+  },
+  {
+    id: 'qianfan',
+    label: '百度千帆 Baidu Qianfan',
+    baseUrl: 'https://qianfan.baidubce.com/v2',
+    defaultModel: 'ernie-4.0-turbo-8k',
+    hint: 'Create a key in the Qianfan console. Models such as ernie-4.0-turbo-8k.',
+    docsUrl: 'https://console.bce.baidu.com/qianfan/',
+  },
+  {
+    id: 'githubmodels',
+    label: 'GitHub Models',
+    baseUrl: 'https://models.github.ai/inference',
+    defaultModel: 'gpt-4.1',
+    hint: 'Free models via your GitHub account. Models such as gpt-4.1.',
+    docsUrl: 'https://github.com/marketplace/models',
+  },
+  {
+    id: 'groq',
+    label: 'Groq',
+    baseUrl: 'https://api.groq.com/openai/v1',
+    defaultModel: 'llama-3.3-70b-versatile',
+    hint: 'Create a key at console.groq.com. Models such as llama-3.3-70b-versatile.',
+    docsUrl: 'https://console.groq.com/keys',
+  },
+  {
+    id: 'mistral',
+    label: 'Mistral',
+    baseUrl: 'https://api.mistral.ai/v1',
+    defaultModel: 'mistral-small-latest',
+    hint: 'Create a key at console.mistral.ai. Models such as mistral-small-latest.',
+    docsUrl: 'https://www.mistral.ai/',
+  },
+  {
+    id: 'xai',
+    label: 'xAI (Grok)',
+    baseUrl: 'https://api.x.ai/v1',
+    defaultModel: 'grok-2-latest',
+    hint: 'Create a key at console.x.ai. Models such as grok-2-latest.',
+    docsUrl: 'https://console.x.ai/',
+  },
+  {
+    id: 'nvidia',
+    label: 'NVIDIA NIM',
+    baseUrl: 'https://integrate.api.nvidia.com/v1',
+    defaultModel: 'meta/llama-3.1-8b-instruct',
+    hint: 'Model IDs are namespaced, e.g. meta/llama-3.1-8b-instruct.',
+    docsUrl: 'https://integrate.api.nvidia.com/',
   },
 ]
 

@@ -367,74 +367,6 @@ body {
   margin: 6px 0 0;
 }
 
-.token-btn {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 0 6px;
-  border: none;
-  background: transparent;
-  color: var(--accent);
-  cursor: pointer;
-  height: 22px;
-  border-radius: 6px;
-}
-
-.token-btn:hover {
-  background: var(--chip);
-}
-
-.token-btn-active {
-  background: var(--chip);
-}
-
-.token-popover {
-  width: 220px;
-}
-
-.token-group + .token-group {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-}
-
-.token-group-title {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-  margin-bottom: 4px;
-}
-
-.token-group dl {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.token-row {
-  display: flex;
-  justify-content: space-between;
-  margin: 0;
-  font-size: 12px;
-}
-
-.token-row dt {
-  color: var(--muted);
-}
-
-.token-row dd {
-  margin: 0;
-  font-variant-numeric: tabular-nums;
-}
-
-.token-none {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-}
-
 /* --- Settings: model context & tool toggles --- */
 
 .disclosure {
@@ -590,6 +522,7 @@ body {
   border-radius: 12px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  position: relative;
   /* Apply CJK kinsoku: closing punctuation (？。！，）】」etc.) must not be
      left alone at the start of a wrapped line. `overflow-wrap: anywhere` above
      would otherwise permit a break between the last character and its trailing
@@ -616,6 +549,207 @@ body {
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   align-self: flex-end;
   max-width: 92%;
+}
+
+/* --- Per-message copy / download actions --------------------------------
+   The action bar is a single, always-visible small row at the bottom of the
+   bubble (in the flex layout), so user and assistant bubbles clear the content
+   above it without the extra right padding that the corner buttons once needed.
+   Status and error lines are plain text without actions and keep the tight
+   padding. */
+
+.msg-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+/* --- Per-message token hover tooltip -------------------------------------
+   Only assistant replies carry usage (tagged when their turn completes). The
+   flat bottom bar sums the session, so per-turn numbers live here, revealed
+   by hovering the bubble — anchored to the bubble's top-right corner, which is
+   now empty since the copy/download actions moved to the bottom bar. */
+.msg-token-tip {
+  display: none;
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  max-width: 94%;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--menu-shadow);
+  padding: 6px 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+  z-index: 15;
+}
+.msg:hover .msg-token-tip,
+.msg:focus-within .msg-token-tip {
+  display: block;
+}
+.msg-token-tip-title {
+  color: var(--text);
+  font-weight: 600;
+  margin-right: 8px;
+  white-space: nowrap;
+}
+.msg-token-tip-kv {
+  margin-right: 10px;
+  white-space: nowrap;
+}
+
+.msg-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.msg-action:hover,
+.msg-action:focus-visible {
+  background: var(--chip);
+  color: var(--text);
+}
+
+.msg-action[data-state='copied'] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.msg-action[data-state='failed'] {
+  color: var(--err);
+  border-color: color-mix(in srgb, var(--err) 40%, transparent);
+}
+
+.msg-download {
+  position: relative;
+}
+
+.msg-download-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: auto;
+  margin-top: 4px;
+  min-width: 168px;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--menu-shadow);
+  z-index: 20;
+  overflow: hidden;
+}
+
+.msg-download-title {
+  padding: 6px 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.msg-download-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.msg-download-menu button:hover,
+.msg-download-menu button:focus-visible {
+  background: var(--chip);
+}
+
+/* --- Inline token bar under the composer -------------------------------- */
+
+.token-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+  padding: 6px 12px 0;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.token-bar-group {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+}
+
+.token-bar-label {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 10px;
+  opacity: 0.85;
+}
+
+.token-bar-kv {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* --- Generated-skill cards under assistant replies ---------------------- */
+
+.generated-skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.generated-skill-card {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.generated-skill-card .card-title {
+  font-size: 12px;
+}
+
+.generated-skill-name {
+  font-weight: 600;
+  margin: 4px 0;
+}
+
+.generated-skill-instructions summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+  user-select: none;
+}
+
+.generated-skill-instructions pre {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  background: var(--sunken);
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .msg[data-role='status'] {
@@ -889,6 +1023,27 @@ textarea:focus-visible {
 
 .status-ok {
   color: var(--ok);
+}
+
+/* Provider list cards (settings): label/value rows under the card head. */
+.provider-meta {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.provider-meta .meta {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  align-items: baseline;
+}
+.provider-meta .meta-label {
+  color: var(--muted);
+  flex: none;
+  min-width: 76px;
 }
 
 .hint {

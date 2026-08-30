@@ -6,9 +6,16 @@
  *
  * @module sidepanel/SkillsTab
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { sendCommand } from '../lib/messages'
 import type { Skill } from '../lib/types'
+import {
+  exportSkillsJson,
+  importSkillsBatch,
+  parseSkillsFiles,
+  type ImportBatchProblem,
+} from '../lib/skills-import'
+import { downloadBlob } from '../lib/export-answer'
 import { useT } from './i18n'
 
 interface Props {
@@ -58,6 +65,34 @@ export default function SkillsTab({ skills, activeSkillId, onChanged, onUseInCha
   const t = useT()
   const [draft, setDraft] = useState<Draft | null>(null)
   const [banner, setBanner] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
+  const [importing, setImporting] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  /** Best-effort human-readable name of a raw import entry, for clash banners. */
+  const rawDisplayName = (raw: unknown): string => {
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      const obj = raw as Record<string, unknown>
+      for (const key of ['name', 'title']) {
+        if (typeof obj[key] === 'string' && (obj[key] as string).trim()) {
+          return (obj[key] as string).trim()
+        }
+      }
+    }
+    return ''
+  }
+
+  /** Translates one rejected import item into localised text lines. */
+  const importProblemTexts = (problem: ImportBatchProblem): string[] =>
+    problem.problems.map((item) => {
+      const code = item.code
+      if (code === 'nameRequired') return t.skillsNameRequired
+      if (code === 'instructionsRequired') return t.skillsInstructionsRequired
+      if (code === 'nameTaken') {
+        const name = rawDisplayName(problem.raw)
+        return t.skillsImportNameTaken({ name: name || t.skillName })
+      }
+      return String(code)
+    })
 
   /**
    * Translates the worker's validation codes into localized text.
@@ -113,8 +148,72 @@ export default function SkillsTab({ skills, activeSkillId, onChanged, onUseInCha
     }
   }
 
+  /**
+   * Parses dropped/picked skill files, validates the batch against the current
+   * list, persists the valid entries one-by-one, and reports a summary banner.
+   */
+  const importFromFiles = async (files: File | File[] | FileList | null): Promise<void> => {
+    if (!files || (files as File[]).length === 0) return
+    setImporting(true)
+    try {
+      const parsed = await parseSkillsFiles(files)
+      const raws: unknown[] = []
+      let fileFailures = 0
+      for (const item of parsed) {
+        if (!item.ok) {
+          fileFailures += 1
+          continue
+        }
+        raws.push(...item.raws)
+      }
+
+      const batch = importSkillsBatch(raws, skills)
+      const detail: string[] = batch.problems.flatMap((problem) => importProblemTexts(problem))
+
+      // Persist each valid skill individually (the existing skills.save protocol
+      // is the single write path; a name clash with another client's storage is
+      // still reported here rather than guessed from the local snapshot).
+      let persisted = 0
+      for (const skill of batch.saved) {
+        try {
+          await sendCommand({ type: 'skills.save', skill })
+          persisted += 1
+        } catch {
+          /* count as a failure below */
+        }
+      }
+
+      const failed = fileFailures + batch.problems.length + (batch.saved.length - persisted)
+      if (failed === 0) {
+        setBanner({ kind: 'ok', text: t.skillsImportResultOk({ count: persisted }) })
+      } else {
+        const summary = t.skillsImportResultFail({ ok: persisted, failed })
+        setBanner({ kind: 'error', text: detail.length ? `${summary} ${detail.join(' ')}` : summary })
+      }
+      if (persisted > 0) onChanged()
+    } catch (error) {
+      setBanner({ kind: 'error', text: (error as Error).message })
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  /** Exports the whole local list as an indented JSON file for later re-import. */
+  const exportAll = (): void => {
+    if (skills.length === 0) {
+      setBanner({ kind: 'error', text: t.skillsEmpty })
+      return
+    }
+    const json = exportSkillsJson(skills)
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    downloadBlob(json, 'application/json', `skills-${stamp}.json`)
+  }
+
   return (
-    <div className="pane">
+    <div className="pane" onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
+      event.preventDefault()
+      void importFromFiles(event.dataTransfer?.files ?? null)
+    }}>
       {banner && (
         <div className="banner" data-kind={banner.kind}>
           {banner.text}
@@ -129,6 +228,34 @@ export default function SkillsTab({ skills, activeSkillId, onChanged, onUseInCha
             <button className="primary" onClick={() => setDraft(emptyDraft())} type="button">
               {t.skillsAdd}
             </button>
+            <button
+              className="skills-import-btn"
+              disabled={importing}
+              onClick={() => fileInputRef.current?.click()}
+              title={t.skillsImportHint}
+              type="button"
+            >
+              {t.skillsImport}
+            </button>
+            <button
+              className="skills-export-btn"
+              disabled={skills.length === 0}
+              onClick={exportAll}
+              type="button"
+            >
+              {t.skillsExportAll}
+            </button>
+            <input
+              accept=".json,.yaml,.yml,.md,.markdown"
+              multiple
+              onChange={(event) => {
+                void importFromFiles(event.target.files)
+                event.target.value = ''
+              }}
+              ref={fileInputRef}
+              style={{ display: 'none' }}
+              type="file"
+            />
           </div>
         )}
       </div>
