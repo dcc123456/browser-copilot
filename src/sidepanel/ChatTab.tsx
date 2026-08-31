@@ -53,7 +53,8 @@ import {
 } from '../lib/attachments'
 import { useT } from './i18n'
 import Markdown from './Markdown'
-import { downloadAnswer, type AnswerFormat } from '../lib/export-answer'
+import { downloadAnswer, hasTables, type AnswerFormat } from '../lib/export-answer'
+import { Check, Copy, Download, Gauge, Paperclip } from 'lucide-react'
 import { normalizeSkill } from '../lib/skills'
 import { detectSkillCandidatesFromMarkdown, type DetectedSkill } from '../lib/skill-detect'
 
@@ -121,7 +122,7 @@ function MessageAttachments({ attachments }: { attachments?: AttachmentSummary[]
           />
         ) : (
           <span className="attach-chip" key={attachment.id} title={attachment.name}>
-            📎 {attachment.name}
+            <Paperclip size={13} aria-hidden="true" /> {attachment.name}
           </span>
         ),
       )}
@@ -144,13 +145,25 @@ function MsgActions({
   entry,
   title,
   t,
+  isLastAssistant,
+  busy,
 }: {
-  entry: { role: string; text: string }
+  entry: Entry
   title: string
   t: ReturnType<typeof useT>
+  isLastAssistant: boolean
+  busy: boolean
 }) {
   if (entry.role !== 'user' && entry.role !== 'assistant') return null
   const isAssistant = entry.role === 'assistant'
+  // While a turn is still answering, intermediate replies (everything except
+  // the newest assistant message) show no actions at all — their content is
+  // still evolving context, not a finished answer worth copying or exporting.
+  if (busy && isAssistant && !isLastAssistant) return null
+  // Download only on the turn's closing answer; earlier replies keep copy
+  // alone. Token usage still rides on the usage tag (providers that never
+  // send it simply show no gauge).
+  const isFinal = isAssistant && isLastAssistant
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [menuOpen, setMenuOpen] = useState(false)
 
@@ -201,7 +214,11 @@ function MsgActions({
         title={copyLabel}
         type="button"
       >
-        {state === 'copied' ? '✓' : '⧉'}
+        {state === 'copied' ? (
+          <Check size={13} aria-hidden="true" />
+        ) : (
+          <Copy size={13} aria-hidden="true" />
+        )}
       </button>
       {isAssistant && (
         <>
@@ -214,7 +231,7 @@ function MsgActions({
             title={t.msgDownload}
             type="button"
           >
-            ↓
+            <Download size={13} aria-hidden="true" />
           </button>
           {menuOpen && (
             <div className="msg-download-menu" role="menu">
@@ -228,6 +245,34 @@ function MsgActions({
               <button onClick={() => download('html')} type="button">
                 {t.msgDownloadHtmlPdf}
               </button>
+              {hasTables(entry.text) && (
+                <button onClick={() => download('csv')} type="button">
+                  {t.msgDownloadCsv}
+                </button>
+              )}
+            </div>
+          )}
+          {isFinal && !!entry.usage && (
+            <div className="msg-token" tabIndex={0} role="button" aria-label={t.msgTokenUsage}>
+              <Gauge size={13} aria-hidden="true" />
+              <div className="msg-token-tip">
+                <span className="msg-token-tip-title">{t.tokenBarLastTurn}</span>
+                <span className="msg-token-tip-kv">
+                  {t.tokenBarT}:{formatTokens(entry.usage!.totalTokens)}
+                </span>
+                <span className="msg-token-tip-kv">
+                  {t.tokenBarI}:{formatTokens(entry.usage!.inputTokens)}
+                </span>
+                <span className="msg-token-tip-kv">
+                  {t.tokenBarO}:{formatTokens(entry.usage!.outputTokens)}
+                </span>
+                <span className="msg-token-tip-kv">
+                  {t.tokenBarR}:{formatTokens(entry.usage!.reasoningTokens ?? 0)}
+                </span>
+                <span className="msg-token-tip-kv">
+                  {t.tokenBarC}:{formatTokens(entry.usage!.cachedInputTokens ?? 0)}
+                </span>
+              </div>
             </div>
           )}
         </>
@@ -321,7 +366,12 @@ function GeneratedSkillCard({
       .join(' ')
   }
 
-  const persist = async (name: string, description: string, instructions: string, autoMatch: boolean): Promise<void> => {
+  const persist = async (
+    name: string,
+    description: string,
+    instructions: string,
+    autoMatch: boolean,
+  ): Promise<void> => {
     const skill: Skill = normalizeSkill({
       ...detected.draft,
       name,
@@ -424,9 +474,7 @@ function GeneratedSkillCard({
         <>
           <div className="card-title">{t.skillGeneratedPreview}</div>
           <div className="generated-skill-name">{detected.draft.name}</div>
-          {detected.draft.description && (
-            <p className="hint">{detected.draft.description}</p>
-          )}
+          {detected.draft.description && <p className="hint">{detected.draft.description}</p>}
           <details className="generated-skill-instructions">
             <summary>{t.skillInstructions}</summary>
             <pre>{detected.draft.instructions}</pre>
@@ -493,21 +541,25 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const [includeSelection, setIncludeSelection] = useState(false)
   const [busy, setBusy] = useState(false)
   const [confirms, setConfirms] = useState<PendingConfirm[]>([])
-  const [conversationId, setConversationId] = useState<string>(() =>
-    loadStoredConversationId(),
-  )
+  const [conversationId, setConversationId] = useState<string>(() => loadStoredConversationId())
   const [conversations, setConversations] = useState<ConversationMeta[]>([])
   const [showHistory, setShowHistory] = useState(false)
   /** Conversation whose messages are being previewed in the history drawer. */
   const [previewConv, setPreviewConv] = useState<{
     id: string
     title: string
-    messages: { role: string; text: string; attachments?: AttachmentSummary[] }[]
+    messages: {
+      role: string
+      text: string
+      attachments?: AttachmentSummary[]
+    }[]
   } | null>(null)
   const [mode, setMode] = useState<AgentMode>('semi')
   const [modeInfoOpen, setModeInfoOpen] = useState(false)
   /** Summed usage across turns in this conversation. */
-  const [sessionUsage, setSessionUsage] = useState<TurnTokenUsage>(() => ({ ...ZERO_USAGE }))
+  const [sessionUsage, setSessionUsage] = useState<TurnTokenUsage>(() => ({
+    ...ZERO_USAGE,
+  }))
 
   // Each conversation gets its own token tally; reset when starting or opening
   // another conversation so the chip reflects only the current one.
@@ -543,7 +595,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   // touch; dragging up grows the composer (and shrinks the chat log).
   const beginResize = (event: React.PointerEvent<HTMLDivElement>): void => {
     event.preventDefault()
-    draggingRef.current = { startY: event.clientY, startHeight: composerHeight }
+    draggingRef.current = {
+      startY: event.clientY,
+      startHeight: composerHeight,
+    }
     const onMove = (move: PointerEvent): void => {
       const start = draggingRef.current
       if (!start) return
@@ -672,7 +727,14 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     if (steps === 0) return
     if ((promptedRef.current[convId] ?? 0) >= steps) return
     promptedRef.current[convId] = steps
-    setWorkflowPrompt({ conversationId: convId, base: workflow, workflow, aiSteps, aiSelections, steps })
+    setWorkflowPrompt({
+      conversationId: convId,
+      base: workflow,
+      workflow,
+      aiSteps,
+      aiSelections,
+      steps,
+    })
   }, [])
 
   const append = useCallback((entry: Omit<Entry, 'id'>) => {
@@ -707,9 +769,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     setEntries((prev) => {
       const existing = phaseRef.current
       if (existing) {
-        return prev.map((entry) =>
-          entry.id === existing ? { ...entry, text: label } : entry,
-        )
+        return prev.map((entry) => (entry.id === existing ? { ...entry, text: label } : entry))
       }
       const id = nextId()
       phaseRef.current = id
@@ -747,7 +807,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             // crash the whole panel.
             const restored = (message.messages ?? []).map((entry) => {
               if (entry.role === 'tool') {
-                return { id: nextId(), role: 'tool' as const, text: entry.text }
+                return {
+                  id: nextId(),
+                  role: 'tool' as const,
+                  text: entry.text,
+                }
               }
               return {
                 id: nextId(),
@@ -759,12 +823,21 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               }
             })
             setEntries(restored)
-            streamingRef.current = null
+            // While a turn is still running, continue its stream into the last
+            // restored assistant entry. Starting a fresh bubble here would
+            // split the reply's tail (often its final line) into a second
+            // paragraph after every reconnect.
+            const lastAssistant = [...restored].reverse().find((e) => e.role === 'assistant')
+            streamingRef.current = message.running && lastAssistant ? lastAssistant.id : null
             setBusy(message.running)
             if (message.running) {
               setEntries((prev) => [
                 ...prev,
-                { id: nextId(), role: 'status', text: tRef.current.chatReattached },
+                {
+                  id: nextId(),
+                  role: 'status',
+                  text: tRef.current.chatReattached,
+                },
               ])
             }
             break
@@ -779,7 +852,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             append({ role: 'tool', text: `→ ${message.name}` })
             break
           case 'tool.result':
-            append({ role: 'tool', text: `← ${message.name}: ${message.summary}` })
+            append({
+              role: 'tool',
+              text: `← ${message.name}: ${message.summary}`,
+            })
             break
           case 'confirm.request':
             setConfirms((prev) => [...prev, message])
@@ -820,8 +896,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               setSessionUsage((prev) => ({
                 inputTokens: prev.inputTokens + message.usage!.inputTokens,
                 outputTokens: prev.outputTokens + message.usage!.outputTokens,
-                cachedInputTokens:
-                  prev.cachedInputTokens + (message.usage!.cachedInputTokens ?? 0),
+                cachedInputTokens: prev.cachedInputTokens + (message.usage!.cachedInputTokens ?? 0),
                 reasoningTokens: prev.reasoningTokens + (message.usage!.reasoningTokens ?? 0),
                 totalTokens: prev.totalTokens + message.usage!.totalTokens,
               }))
@@ -1033,7 +1108,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     try {
       const result = await sendCommand({ type: 'conversations.get', id })
       if (result.type === 'conversations.get') {
-        setPreviewConv({ id: result.id, title: result.title, messages: result.messages })
+        setPreviewConv({
+          id: result.id,
+          title: result.title,
+          messages: result.messages,
+        })
       }
     } catch {
       /* ignore */
@@ -1079,7 +1158,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         pendingAttachmentsRef.current,
       )
       if (code) {
-        append({ role: 'status', text: attachmentErrorText(t, file.name, code) })
+        append({
+          role: 'status',
+          text: attachmentErrorText(t, file.name, code),
+        })
         continue
       }
       try {
@@ -1097,9 +1179,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   }
 
   const removeAttachment = (id: string): void => {
-    const next = pendingAttachmentsRef.current.filter(
-      (attachment) => attachment.id !== id,
-    )
+    const next = pendingAttachmentsRef.current.filter((attachment) => attachment.id !== id)
     pendingAttachmentsRef.current = next
     setPendingAttachments(next)
   }
@@ -1118,13 +1198,9 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     // "attach selection" is on, point the skill at the selected text.
     let outgoing = text
     if (!outgoing) {
-      const skill = activeSkillId
-        ? skills.find((entry) => entry.id === activeSkillId)
-        : undefined
+      const skill = activeSkillId ? skills.find((entry) => entry.id === activeSkillId) : undefined
       const name = skill?.name ?? ''
-      outgoing = includeSelection
-        ? t.chatSkillGoSelection({ name })
-        : t.chatSkillGo({ name })
+      outgoing = includeSelection ? t.chatSkillGoSelection({ name }) : t.chatSkillGo({ name })
     }
 
     const delivered = post({
@@ -1173,7 +1249,9 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       await sendCommand({ type: 'workflows.save', workflow: prompt.workflow })
       append({
         role: 'status',
-        text: tRef.current.chatSaveWorkflowSaved({ name: prompt.workflow.name }),
+        text: tRef.current.chatSaveWorkflowSaved({
+          name: prompt.workflow.name,
+        }),
       })
     } catch (error) {
       append({ role: 'error', text: (error as Error).message })
@@ -1192,7 +1270,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     setWorkflowPrompt((prev) => {
       if (!prev) return prev
       const aiSelections = { ...prev.aiSelections, [nodeId]: enabled }
-      return { ...prev, aiSelections, workflow: applyAiPrefillOptions(prev.base, aiSelections) }
+      return {
+        ...prev,
+        aiSelections,
+        workflow: applyAiPrefillOptions(prev.base, aiSelections),
+      }
     })
   }
 
@@ -1296,6 +1378,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     }
   }
 
+  // Only the final assistant reply (the closing "overall analysis" of the
+  // turn) carries the download action; earlier replies keep copy alone.
+  const lastAssistantId = [...entries].reverse().find((e) => e.role === 'assistant')?.id
+
   return (
     <>
       {/* History drawer (left side) */}
@@ -1319,11 +1405,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             <div className="drawer-body">
               {previewConv ? (
                 <div className="conv-preview">
-                  <button
-                    className="link-btn"
-                    onClick={() => setPreviewConv(null)}
-                    type="button"
-                  >
+                  <button className="link-btn" onClick={() => setPreviewConv(null)} type="button">
                     ← {t.convHistory}
                   </button>
                   <h4>{previewConv.title}</h4>
@@ -1355,9 +1437,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                       ＋ {t.convNew}
                     </button>
                   </div>
-                  {conversations.length === 0 && (
-                    <div className="empty">{t.convHistoryEmpty}</div>
-                  )}
+                  {conversations.length === 0 && <div className="empty">{t.convHistoryEmpty}</div>}
                   {conversations.map((conv) => (
                     <ConversationRow
                       conversation={conv}
@@ -1397,10 +1477,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
           type="button"
         >
           <svg height="16" viewBox="0 0 24 24" width="16" aria-hidden="true">
-            <path
-              d="M13 3a9 9 0 1 0 9 9h-2a7 7 0 1 1-7-7v3l4-4-4-4v3z"
-              fill="currentColor"
-            />
+            <path d="M13 3a9 9 0 1 0 9 9h-2a7 7 0 1 1-7-7v3l4-4-4-4v3z" fill="currentColor" />
             <path d="M12 8v5l4 2-.7 1.2L11 13.5V8z" fill="currentColor" />
           </svg>
           <span className="icon-btn-label">{t.convHistory}</span>
@@ -1435,17 +1512,13 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                 */}
                 {entry.role === 'assistant' ? <Markdown text={entry.text} /> : entry.text}
                 <MessageAttachments attachments={entry.attachments} />
-                {entry.role === 'assistant' && entry.usage && (
-                  <div className="msg-token-tip">
-                    <span className="msg-token-tip-title">{t.tokenBarLastTurn}</span>
-                    <span className="msg-token-tip-kv">{t.tokenBarT}:{formatTokens(entry.usage.totalTokens)}</span>
-                    <span className="msg-token-tip-kv">{t.tokenBarI}:{formatTokens(entry.usage.inputTokens)}</span>
-                    <span className="msg-token-tip-kv">{t.tokenBarO}:{formatTokens(entry.usage.outputTokens)}</span>
-                    <span className="msg-token-tip-kv">{t.tokenBarR}:{formatTokens(entry.usage.reasoningTokens ?? 0)}</span>
-                    <span className="msg-token-tip-kv">{t.tokenBarC}:{formatTokens(entry.usage.cachedInputTokens ?? 0)}</span>
-                  </div>
-                )}
-                <MsgActions entry={entry} t={t} title={convTitle} />
+                <MsgActions
+                  entry={entry}
+                  t={t}
+                  title={convTitle}
+                  isLastAssistant={entry.id === lastAssistantId}
+                  busy={busy}
+                />
               </div>
               {entry.role === 'assistant' && (
                 <GeneratedSkillCards
@@ -1487,11 +1560,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               {workflowPrompt.workflow.name}
             </p>
             {workflowPrompt.aiSteps.length > 0 && (
-              <div
-                className="ai-prefill-list"
-                role="group"
-                aria-label={t.chatSaveWorkflowAiTitle}
-              >
+              <div className="ai-prefill-list" role="group" aria-label={t.chatSaveWorkflowAiTitle}>
                 <p className="hint">{t.chatSaveWorkflowAiTitle}</p>
                 {workflowPrompt.aiSteps.map((step) => (
                   <label key={step.nodeId} className="ai-prefill-item">
@@ -1690,7 +1759,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               title={t.chatAttach}
               type="button"
             >
-              📎
+              <Paperclip size={16} aria-hidden="true" />
             </button>
             <input
               accept={FILE_INPUT_ACCEPT}
@@ -1704,11 +1773,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               type="file"
             />
             {!busy && entries.length > 0 && (
-              <button
-                onClick={startNewConversation}
-                title={t.convNew}
-                type="button"
-              >
+              <button onClick={startNewConversation} title={t.convNew} type="button">
                 ＋ {t.chatNewChat}
               </button>
             )}

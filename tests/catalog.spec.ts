@@ -80,12 +80,12 @@ describe('block catalog', () => {
     // loop/end handles). Assert the component-family wiring that the React
     // node renderers branch on.
     const comp = (id: string) => BLOCK_CATALOG.find((b) => b.id === id)?.component
-    expect(comp('conditions')).toBe('BlockConditions')
-    expect(comp('element-exists')).toBe('BlockElementExists')
-    expect(comp('repeat-task')).toBe('BlockRepeatTask')
-    expect(comp('loop-breakpoint')).toBe('BlockLoopBreakpoint')
-    // while-loop exposes a fallback-capable renderer
-    expect(['BlockBasicWithFallback', 'BlockBasic']).toContain(comp('while-loop'))
+    expect(comp('conditions')).toBe('Conditions')
+    expect(comp('element-exists')).toBe('ElementExists')
+    expect(comp('repeat-task')).toBe('RepeatTask')
+    expect(comp('loop-breakpoint')).toBe('LoopBreakpoint')
+    // while-loop renders through the default node renderer
+    expect(comp('while-loop')).toBe('Default')
     // element-exists statically declares two outputs (exists / not-exists)
     expect(BLOCK_CATALOG.find((b) => b.id === 'element-exists')?.outputs).toBe(2)
   })

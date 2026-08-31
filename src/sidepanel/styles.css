@@ -559,45 +559,71 @@ body {
    padding. */
 
 .msg-actions {
-  display: flex;
+  display: none;
   gap: 4px;
   margin-top: 8px;
+}
+
+.msg:hover .msg-actions,
+.msg:focus-within .msg-actions {
+  display: flex;
 }
 
 /* --- Per-message token hover tooltip -------------------------------------
    Only assistant replies carry usage (tagged when their turn completes). The
    flat bottom bar sums the session, so per-turn numbers live here, revealed
-   by hovering the bubble — anchored to the bubble's top-right corner, which is
-   now empty since the copy/download actions moved to the bottom bar. */
-.msg-token-tip {
+   by hovering the token button in the actions bar — anchored to the button,
+   which sits beside the download button. */
+.msg-token {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: default;
+}
+.msg-token:hover,
+.msg-token:focus-visible {
+  background: var(--chip);
+  color: var(--text);
+}
+.msg-token .msg-token-tip {
   display: none;
   position: absolute;
-  top: 6px;
-  right: 8px;
-  max-width: 94%;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 150px;
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: var(--menu-shadow);
   padding: 6px 10px;
   font-size: 11px;
-  line-height: 1.5;
+  line-height: 1.4;
   color: var(--muted);
-  z-index: 15;
+  white-space: nowrap;
+  z-index: 20;
 }
-.msg:hover .msg-token-tip,
-.msg:focus-within .msg-token-tip {
-  display: block;
+.msg-token:hover .msg-token-tip,
+.msg-token:focus-within .msg-token-tip {
+  display: flex;
 }
 .msg-token-tip-title {
   color: var(--text);
   font-weight: 600;
   margin-right: 8px;
-  white-space: nowrap;
 }
 .msg-token-tip-kv {
   margin-right: 10px;
-  white-space: nowrap;
 }
 
 .msg-action {
@@ -609,10 +635,22 @@ body {
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--panel-2);
-  color: var(--muted);
+  /* Icons inherit this as their stroke. Use the body-text token instead of
+     --muted: the copy glyph is itself an outline rectangle, so a muted gray
+     at 13px blends with our own border and reads as "button frame only",
+     especially on the dark assistant bubble. --text is theme-aware with a
+     strong contrast in both light and dark. */
+  color: var(--text);
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
+}
+
+/* A flex-container <button> shrinks inline <svg> children to zero width in
+   Chrome (the icon then paints nothing), so pin them to their intrinsic
+   size. */
+.msg-action svg {
+  flex-shrink: 0;
 }
 
 .msg-action:hover,
@@ -641,7 +679,7 @@ body {
   left: 0;
   right: auto;
   margin-top: 4px;
-  min-width: 168px;
+  min-width: 176px;
   display: flex;
   flex-direction: column;
   background: var(--panel-2);

@@ -25,7 +25,7 @@ import { Field, IconButton, Select, TextArea, TextInput } from '../shared/Field'
 import { id } from './shared'
 
 // ---------------------------------------------------------------------------
-// conditionBuilder catalog (mirrors automa/src/utils/shared.js)
+// conditionBuilder's local value-type catalog (self-maintained, internal)
 // ---------------------------------------------------------------------------
 
 export interface ValueTypeDef {
@@ -141,7 +141,7 @@ export interface OrGroup {
 }
 
 // ---------------------------------------------------------------------------
-// Factory helpers (mirror Automa getDefaultValues)
+// Factory helpers
 // ---------------------------------------------------------------------------
 
 function newValueItem(): BuilderValueItem {

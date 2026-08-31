@@ -509,10 +509,14 @@ export interface Messages {
   msgDownloadTxt: string
   /** Printable HTML / PDF option in the download menu. */
   msgDownloadHtmlPdf: string
+  /** CSV option in the download menu, shown when the answer contains a table. */
+  msgDownloadCsv: string
   /** Filename base used when the conversation has no title. */
   msgDownloadUntitled: string
   /** Hint shown after downloading HTML: users can print to PDF. */
   msgDownloadHtmlHint: string
+  /** Accessible label for the per-turn token indicator button on the final answer. */
+  msgTokenUsage: string
 
   // --- New: inline token bar (below composer-row) ---
   /** Label for the session aggregate block on the token bar. */
@@ -1028,17 +1032,19 @@ const en: Messages = {
   msgDownloadMd: 'Markdown (.md)',
   msgDownloadTxt: 'Plain text (.txt)',
   msgDownloadHtmlPdf: 'HTML / PDF (print)',
+  msgDownloadCsv: 'CSV (.csv)',
   msgDownloadUntitled: 'conversation',
   msgDownloadHtmlHint: 'Open the downloaded HTML and use the browser Print dialog to save as PDF.',
+  msgTokenUsage: 'Token usage',
 
   // --- New: inline token bar (en) ---
   tokenBarSession: 'Session',
   tokenBarLastTurn: 'Last turn',
-  tokenBarT: 'T',
-  tokenBarI: 'I',
-  tokenBarO: 'O',
-  tokenBarR: 'R',
-  tokenBarC: 'C',
+  tokenBarT: 'Total',
+  tokenBarI: 'Input',
+  tokenBarO: 'Output',
+  tokenBarR: 'Reasoning',
+  tokenBarC: 'Cached',
   tokenBarDash: '-',
 
   // --- New: in-chat generated skill saving (en) ---
@@ -1499,17 +1505,19 @@ const zhCN: Messages = {
   msgDownloadMd: 'Markdown (.md)',
   msgDownloadTxt: '纯文本 (.txt)',
   msgDownloadHtmlPdf: 'HTML / 打印为 PDF',
+  msgDownloadCsv: 'CSV (.csv)',
   msgDownloadUntitled: '对话',
   msgDownloadHtmlHint: '打开下载的 HTML，使用浏览器的“打印”对话框另存为 PDF 即可。',
+  msgTokenUsage: 'Token 消耗',
 
   // --- New: inline token bar (zh-CN) ---
   tokenBarSession: '本次会话',
   tokenBarLastTurn: '上一条消息',
-  tokenBarT: '总',
-  tokenBarI: '输',
-  tokenBarO: '出',
-  tokenBarR: '理',
-  tokenBarC: '缓',
+  tokenBarT: '总计',
+  tokenBarI: '输入',
+  tokenBarO: '输出',
+  tokenBarR: '推理',
+  tokenBarC: '缓存',
   tokenBarDash: '-',
 
   // --- New: in-chat generated skill saving (zh-CN) ---

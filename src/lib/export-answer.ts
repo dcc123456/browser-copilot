@@ -9,7 +9,7 @@
  */
 import { parseMarkdown, type Block, type Inline, type ListItem } from './markdown'
 
-export type AnswerFormat = 'md' | 'txt' | 'html'
+export type AnswerFormat = 'md' | 'txt' | 'html' | 'csv'
 
 /** Returns a filename-safe slug derived from a conversation title. */
 export function slugForFilename(raw: string): string {
@@ -137,6 +137,37 @@ function blocksToText(blocks: Block[], indent = ''): string {
     }
   }
   return out.join('\n\n')
+}
+
+// --- CSV export ----------------------------------------------------------
+
+/** True if the Markdown source contains at least one table block. */
+export function hasTables(mdText: string): boolean {
+  return parseMarkdown(mdText).some((block) => block.kind === 'table')
+}
+
+type TableBlock = Extract<Block, { kind: 'table' }>
+
+/** RFC-4180 escaping: wrap in quotes when needed, doubling internal quotes. */
+function csvEscape(value: string): string {
+  return /["\n,]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
+}
+
+function renderTable(table: TableBlock): string {
+  const rows: Inline[][][] = [table.head, ...table.rows]
+  return rows
+    .map((row) => row.map((cell) => csvEscape(inlineToText(cell))).join(','))
+    .join('\n')
+}
+
+/** Extracts every table block and emits an RFC-4180 CSV payload. */
+export function toCsv(mdText: string): string {
+  if (!mdText) return ''
+  const blocks = parseMarkdown(mdText)
+  return blocks
+    .filter((block): block is TableBlock => block.kind === 'table')
+    .map(renderTable)
+    .join('\n\n')
 }
 
 /** Strips Markdown formatting and returns a readable plain text dump. */
@@ -346,7 +377,11 @@ export const MIME_FOR_FORMAT: Record<AnswerFormat, string> = {
   md: 'text/markdown;charset=utf-8',
   txt: 'text/plain;charset=utf-8',
   html: 'text/html;charset=utf-8',
+  csv: 'text/csv;charset=utf-8',
 }
+
+/** UTF-8 BOM, built via char code so the source file stays ASCII-clean. */
+const BOM = String.fromCharCode(0xfeff)
 
 /** One helper that converts + downloads in a single call. */
 export function downloadAnswer(params: {
@@ -368,6 +403,12 @@ export function downloadAnswer(params: {
       break
     case 'html':
       body = toPrintableHtml(text, title)
+      break
+    case 'csv':
+      // Excel (and most spreadsheet apps) decode CSV as ANSI unless the file
+      // starts with a UTF-8 BOM — without it, non-ASCII text renders as
+      // mojibake (e.g. Chinese columns on a GBK-locale system).
+      body = BOM + toCsv(text)
       break
   }
   downloadBlob(body, MIME_FOR_FORMAT[format], filename)
