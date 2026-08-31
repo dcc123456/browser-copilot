@@ -54,7 +54,13 @@ import {
 import { useT } from './i18n'
 import Markdown from './Markdown'
 import { downloadAnswer, hasTables, type AnswerFormat } from '../lib/export-answer'
-import { Paperclip, Check, Copy, Download, Gauge } from 'lucide-react'
+import {
+  PaperclipIcon,
+  CheckIcon,
+  CopyIcon,
+  DownloadIcon,
+  GaugeIcon,
+} from './icons'
 import { normalizeSkill } from '../lib/skills'
 import { detectSkillCandidatesFromMarkdown, type DetectedSkill } from '../lib/skill-detect'
 
@@ -122,7 +128,7 @@ function MessageAttachments({ attachments }: { attachments?: AttachmentSummary[]
           />
         ) : (
           <span className="attach-chip" key={attachment.id} title={attachment.name}>
-            <Paperclip size={13} aria-hidden="true" /> {attachment.name}
+            <PaperclipIcon size={13} aria-hidden="true" /> {attachment.name}
           </span>
         ),
       )}
@@ -202,7 +208,7 @@ function MsgActions({
         title={copyLabel}
         type="button"
       >
-        {state === 'copied' ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
+        {state === 'copied' ? <CheckIcon size={13} aria-hidden="true" /> : <CopyIcon size={13} aria-hidden="true" />}
       </button>
       {isFinal && (
         <>
@@ -215,7 +221,7 @@ function MsgActions({
             title={t.msgDownload}
             type="button"
           >
-            <Download size={13} aria-hidden="true" />
+            <DownloadIcon size={13} aria-hidden="true" />
           </button>
           {menuOpen && (
             <div className="msg-download-menu" role="menu">
@@ -237,7 +243,7 @@ function MsgActions({
             </div>
           )}
           <div className="msg-token" tabIndex={0} role="button" aria-label={t.msgTokenUsage}>
-            <Gauge size={13} aria-hidden="true" />
+            <GaugeIcon size={13} aria-hidden="true" />
             <div className="msg-token-tip">
               <span className="msg-token-tip-title">{t.tokenBarLastTurn}</span>
               <span className="msg-token-tip-kv">{t.tokenBarT}:{formatTokens(entry.usage!.totalTokens)}</span>
@@ -1697,7 +1703,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               title={t.chatAttach}
               type="button"
             >
-              <Paperclip size={16} aria-hidden="true" />
+              <PaperclipIcon size={16} aria-hidden="true" />
             </button>
             <input
               accept={FILE_INPUT_ACCEPT}

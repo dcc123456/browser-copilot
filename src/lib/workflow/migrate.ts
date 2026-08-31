@@ -4,10 +4,14 @@
  * Two conversions live here:
  * 1. `migrateWorkflow` — Browser Copilot's legacy workflow format (blocks
  *    keyed by the old MVP ids like `click`/`fill` with `data.values`) into the
- *    Automa-aligned model (Automa block ids like `event-click`/`forms` with
- *    Automa's flat `data` fields such as `selector`/`findBy`).
- * 2. `fromAutomaExport` — an Automa-exported JSON file (classic drawflow
- *    `drawflow.Home.data` node map) into this project's `{nodes, edges}` graph.
+ *    interoperable model (the interoperable block ids like `event-click`/`forms`
+ *    with the interoperable flat `data` fields such as `selector`/`findBy`).
+ * 2. `fromAutomaExport` — an external import adapter: it reads an
+ *    Automa-exported workflow JSON (classic drawflow `drawflow.Home.data` node
+ *    map) viewed purely as an external interoperability data format, treating
+ *    the record shape as an import schema rather than aligning with this
+ *    project's own internals, and produces this project's `{nodes, edges}`
+ *    graph.
  *
  * The execution engine also reads the legacy field names during a transition
  * period, so old workflows keep running even before re-save; migration here is
@@ -22,9 +26,11 @@ import { CATALOG_BY_ID } from './blocks/palette'
 import type { Workflow, WorkflowEdge, WorkflowNode } from './types'
 
 /**
- * Legacy Browser Copilot block ids (the MVP registry) -> Automa block ids.
- * Blocks whose id already matches Automa (delay, webhook, cookie, ...) need no
- * entry. Values not listed here keep their id.
+ * Runtime interoperability alias map: legacy Browser Copilot block ids (the MVP
+ * registry) -> the runtime block ids used by the engine and editor. This is an
+ * alias remap at the runtime boundary, not a claim that the legacy ids are
+ * "Automa original ids". Blocks whose runtime id already matches (delay,
+ * webhook, cookie, ...) need no entry. Values not listed here keep their id.
  */
 export const LEGACY_ID_TO_AUTOMA: Record<string, string> = {
   click: 'event-click',
@@ -53,10 +59,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Migrate a single node's payload to the Automa shape:
+ * Migrate a single node's payload to the runtime interoperable shape:
  * - maps the block id via {@link LEGACY_ID_TO_AUTOMA}
- * - flattens the legacy `{ values: { cssSelector, ... } }` into Automa fields
- *   (`selector`, `findBy: 'cssSelector'`)
+ * - flattens the legacy `{ values: { cssSelector, ... } }` into the
+ *   interoperable flat fields (`selector`, `findBy: 'cssSelector'`)
  * - fills catalog defaults so downstream forms/engine always see known keys
  */
 export function migrateNodeData(
@@ -69,13 +75,13 @@ export function migrateNodeData(
 
   const source = isRecord(rawData) ? rawData : {}
 
-  // New-style nodes store blockId/values too; the flat Automa fields may be
-  // present directly on data already.
+  // New-style nodes store blockId/values too; the flat interoperable fields
+  // may be present directly on data already.
   const values = isRecord(source.values) ? source.values : {}
 
   // Apply sources from weakest to strongest so stored data is never clobbered
   // by the catalog's empty-string placeholders (url: '', selector: '', ...):
-  // defaults < legacy values < flat Automa fields.
+  // defaults < legacy values < flat interoperable fields.
   for (const [key, value] of Object.entries(values)) {
     if (key === 'cssSelector') continue
     data[key] = value
@@ -85,7 +91,7 @@ export function migrateNodeData(
     data[key] = value
   }
 
-  // Legacy cssSelector -> Automa selector (flat selector wins when present).
+  // Legacy cssSelector -> interoperable selector field (flat selector wins when present).
   const legacySelector =
     (source.selector as string | undefined) ??
     (values.cssSelector as string | undefined) ??
@@ -116,7 +122,7 @@ export function migrateNodeData(
 /**
  * Rewrite an edge handle to reference the rendered `<Handle id>` for a given
  * block id. The editor keys handles by BLOCK id (`<blockId>-output-1`), so
- * handles stored as bare (`output-1`, Automa exports) or node-id-prefixed
+ * handles stored as bare (`output-1`, from external imports) or node-id-prefixed
  * (`<nodeId>-output-1`, early recorder output) are normalized here.
  */
 function normalizeHandle(
@@ -126,7 +132,7 @@ function normalizeHandle(
 ): string {
   const fallback = `${blockId}-${kind === 'source' ? 'output-1' : 'input-1'}`
   if (!handle) return fallback
-  // Bare suffix (Automa export): "output-1", "true", "input-1", ...
+  // Bare suffix (from external imports): "output-1", "true", "input-1", ...
   if (!handle.includes('-output-') && !handle.includes('-input-') && !handle.includes('-fallback')) {
     // Branch/condition handles may be a bare semantic key ("true"/"false").
     if (kind === 'source' && (handle === 'true' || handle === 'false' || handle === 'loop' || handle === 'end')) {
@@ -177,11 +183,15 @@ export function migrateWorkflow(wf: Workflow): Workflow {
 }
 
 /**
- * Convert an Automa-exported workflow JSON to this project's graph shape.
+ * Import-adapt an Automa-exported workflow JSON into this project's graph
+ * shape. The JSON is treated as an external interoperability data format: its
+ * record layout is read purely as an external import schema, and this project
+ * keeps its own independently defined internal graph model.
  *
- * Automa stores nodes as `drawflow.Home.data` — a record keyed by node id with
- * `{ id, name (blockId), data, positionX, positionY, inputs, outputs }` and
- * connections nested as `outputs[handleId].connections[].{node, output}`.
+ * In the external import format nodes live under `drawflow.Home.data` — a
+ * record keyed by node id with `{ id, name (blockId), data, positionX,
+ * positionY, inputs, outputs }` and connections nested as
+ * `outputs[handleId].connections[].{node, output}`.
  * Returns `null` when the JSON is not an Automa export.
  */
 export function fromAutomaExport(json: unknown): {
@@ -192,7 +202,7 @@ export function fromAutomaExport(json: unknown): {
   const drawflow = isRecord(json.drawflow) ? json.drawflow : null
   const home = drawflow ? (drawflow.Home ?? drawflow.home) : null
   const homeData = isRecord(home) ? (home.data as Record<string, unknown> | undefined) : null
-  // Automa classic format: drawflow.Home.data is a node-id -> node map.
+  // External import format: drawflow.Home.data is a node-id -> node map.
   // Native Browser Copilot format uses a drawflow.nodes *array* — reject it.
   if (!isRecord(homeData) || Array.isArray(drawflow?.nodes)) return null
   const rawNodes = homeData

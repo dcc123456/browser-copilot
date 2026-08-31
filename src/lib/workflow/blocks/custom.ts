@@ -1,15 +1,12 @@
 /**
- * Local (Browser-Copilot-only) block catalog entries.
+ * 本地（仅存在于 Browser Copilot）的块目录条目。
  *
- * The generated {@link BLOCK_CATALOG} (`catalog.ts`, produced by
- * `catalog.gen.mjs` from Automa's shared.js) is byte-aligned with Automa and
- * must stay regenerable, so blocks that only exist in Browser Copilot are NOT
- * added there. They live here instead and are merged into the palette /
- * catalog lookups by `palette.ts`, the same way Automa blocks are consumed by
- * the editor, run logs, migration, and engine label resolution.
+ * 生成的 {@link BLOCK_CATALOG}（`catalog.ts`，本项目自研目录，不依赖第三方
+ * 工作流源）是自有的。因此仅在 Browser Copilot 中存在的块不会被加入其中，
+ * 而是集中定义在此处，
+ * 再由 `palette.ts` 合并进调色板/目录查询，其消费方式与目录块保持一致。
  *
- * Entries mirror {@link BlockCatalogEntry}; `cloud` is always false (these run
- * locally).
+ * 条目镜像 {@link BlockCatalogEntry}；`cloud` 恒为 false（这些块本地运行）。
  *
  * @module lib/workflow/blocks/custom
  */
@@ -17,9 +14,8 @@
 import type { BlockCatalogEntry } from './types'
 
 /**
- * Browser-Copilot extension blocks, appended after the generated catalog.
- * Ids must not collide with Automa block ids (the lookup maps would otherwise
- * shadow one another).
+ * Browser Copilot 扩展块，追加在目录之后。
+ * 其 id 不得与目录块 id 冲突，否则查询映射会相互覆盖。
  */
 export const CUSTOM_BLOCKS: BlockCatalogEntry[] = [
   {
@@ -29,7 +25,7 @@ export const CUSTOM_BLOCKS: BlockCatalogEntry[] = [
       'Read a target element and hand it to an AI agent that can analyze the page and (optionally) act on it.',
     icon: 'riRobot2Line',
     category: 'general',
-    component: 'BlockBasic',
+    component: 'Default',
     editComponent: 'EditAiAgent',
     inputs: 1,
     outputs: 1,

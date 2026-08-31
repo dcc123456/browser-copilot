@@ -3,7 +3,7 @@
  *
  * React port of Automa's EditTriggerEvent.vue and its sub-components under
  * edit/TriggerEvent/ (mouse / touch / keyboard / wheel / input). The event
- * picker selects an event from `eventList` (automa utils/shared.js); the
+ * picker selects an event from `eventList` (块目录定义); the
  * "Options" fold-out holds the shared Bubbles/Cancelable flags plus the
  * event-specific parameters (modifier keys, mouse button & coordinates,
  * wheel deltas, keyboard key details, input-event data, …).
