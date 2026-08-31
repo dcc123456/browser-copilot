@@ -559,22 +559,46 @@ body {
    padding. */
 
 .msg-actions {
-  display: flex;
+  display: none;
   gap: 4px;
   margin-top: 8px;
+}
+
+.msg:hover .msg-actions,
+.msg:focus-within .msg-actions {
+  display: flex;
 }
 
 /* --- Per-message token hover tooltip -------------------------------------
    Only assistant replies carry usage (tagged when their turn completes). The
    flat bottom bar sums the session, so per-turn numbers live here, revealed
-   by hovering the bubble — anchored to the bubble's top-right corner, which is
-   now empty since the copy/download actions moved to the bottom bar. */
-.msg-token-tip {
+   by hovering the token button in the actions bar — anchored to the button,
+   which sits beside the download button. */
+.msg-token {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: default;
+}
+.msg-token:hover,
+.msg-token:focus-visible {
+  background: var(--chip);
+  color: var(--text);
+}
+.msg-token .msg-token-tip {
   display: none;
   position: absolute;
-  top: 6px;
-  right: 8px;
-  max-width: 94%;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  min-width: 150px;
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -583,21 +607,20 @@ body {
   font-size: 11px;
   line-height: 1.5;
   color: var(--muted);
+  white-space: nowrap;
   z-index: 15;
 }
-.msg:hover .msg-token-tip,
-.msg:focus-within .msg-token-tip {
+.msg-token:hover .msg-token-tip,
+.msg-token:focus-within .msg-token-tip {
   display: block;
 }
 .msg-token-tip-title {
   color: var(--text);
   font-weight: 600;
   margin-right: 8px;
-  white-space: nowrap;
 }
 .msg-token-tip-kv {
   margin-right: 10px;
-  white-space: nowrap;
 }
 
 .msg-action {
@@ -641,7 +664,7 @@ body {
   left: 0;
   right: auto;
   margin-top: 4px;
-  min-width: 168px;
+  min-width: 176px;
   display: flex;
   flex-direction: column;
   background: var(--panel-2);

@@ -53,7 +53,8 @@ import {
 } from '../lib/attachments'
 import { useT } from './i18n'
 import Markdown from './Markdown'
-import { downloadAnswer, type AnswerFormat } from '../lib/export-answer'
+import { downloadAnswer, hasTables, type AnswerFormat } from '../lib/export-answer'
+import { Paperclip, Check, Copy, Download, Gauge } from 'lucide-react'
 import { normalizeSkill } from '../lib/skills'
 import { detectSkillCandidatesFromMarkdown, type DetectedSkill } from '../lib/skill-detect'
 
@@ -121,7 +122,7 @@ function MessageAttachments({ attachments }: { attachments?: AttachmentSummary[]
           />
         ) : (
           <span className="attach-chip" key={attachment.id} title={attachment.name}>
-            📎 {attachment.name}
+            <Paperclip size={13} aria-hidden="true" /> {attachment.name}
           </span>
         ),
       )}
@@ -145,12 +146,12 @@ function MsgActions({
   title,
   t,
 }: {
-  entry: { role: string; text: string }
+  entry: Entry
   title: string
   t: ReturnType<typeof useT>
 }) {
   if (entry.role !== 'user' && entry.role !== 'assistant') return null
-  const isAssistant = entry.role === 'assistant'
+  const isFinal = entry.role === 'assistant' && !!entry.usage
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [menuOpen, setMenuOpen] = useState(false)
 
@@ -201,9 +202,9 @@ function MsgActions({
         title={copyLabel}
         type="button"
       >
-        {state === 'copied' ? '✓' : '⧉'}
+        {state === 'copied' ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
       </button>
-      {isAssistant && (
+      {isFinal && (
         <>
           <button
             aria-label={t.msgDownload}
@@ -214,7 +215,7 @@ function MsgActions({
             title={t.msgDownload}
             type="button"
           >
-            ↓
+            <Download size={13} aria-hidden="true" />
           </button>
           {menuOpen && (
             <div className="msg-download-menu" role="menu">
@@ -228,8 +229,24 @@ function MsgActions({
               <button onClick={() => download('html')} type="button">
                 {t.msgDownloadHtmlPdf}
               </button>
+              {hasTables(entry.text) && (
+                <button onClick={() => download('csv')} type="button">
+                  {t.msgDownloadCsv}
+                </button>
+              )}
             </div>
           )}
+          <div className="msg-token" tabIndex={0} role="button" aria-label={t.msgTokenUsage}>
+            <Gauge size={13} aria-hidden="true" />
+            <div className="msg-token-tip">
+              <span className="msg-token-tip-title">{t.tokenBarLastTurn}</span>
+              <span className="msg-token-tip-kv">{t.tokenBarT}:{formatTokens(entry.usage!.totalTokens)}</span>
+              <span className="msg-token-tip-kv">{t.tokenBarI}:{formatTokens(entry.usage!.inputTokens)}</span>
+              <span className="msg-token-tip-kv">{t.tokenBarO}:{formatTokens(entry.usage!.outputTokens)}</span>
+              <span className="msg-token-tip-kv">{t.tokenBarR}:{formatTokens(entry.usage!.reasoningTokens ?? 0)}</span>
+              <span className="msg-token-tip-kv">{t.tokenBarC}:{formatTokens(entry.usage!.cachedInputTokens ?? 0)}</span>
+            </div>
+          </div>
         </>
       )}
     </div>
@@ -1435,16 +1452,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                 */}
                 {entry.role === 'assistant' ? <Markdown text={entry.text} /> : entry.text}
                 <MessageAttachments attachments={entry.attachments} />
-                {entry.role === 'assistant' && entry.usage && (
-                  <div className="msg-token-tip">
-                    <span className="msg-token-tip-title">{t.tokenBarLastTurn}</span>
-                    <span className="msg-token-tip-kv">{t.tokenBarT}:{formatTokens(entry.usage.totalTokens)}</span>
-                    <span className="msg-token-tip-kv">{t.tokenBarI}:{formatTokens(entry.usage.inputTokens)}</span>
-                    <span className="msg-token-tip-kv">{t.tokenBarO}:{formatTokens(entry.usage.outputTokens)}</span>
-                    <span className="msg-token-tip-kv">{t.tokenBarR}:{formatTokens(entry.usage.reasoningTokens ?? 0)}</span>
-                    <span className="msg-token-tip-kv">{t.tokenBarC}:{formatTokens(entry.usage.cachedInputTokens ?? 0)}</span>
-                  </div>
-                )}
                 <MsgActions entry={entry} t={t} title={convTitle} />
               </div>
               {entry.role === 'assistant' && (
@@ -1690,7 +1697,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               title={t.chatAttach}
               type="button"
             >
-              📎
+              <Paperclip size={16} aria-hidden="true" />
             </button>
             <input
               accept={FILE_INPUT_ACCEPT}
