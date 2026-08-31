@@ -380,6 +380,9 @@ export const MIME_FOR_FORMAT: Record<AnswerFormat, string> = {
   csv: 'text/csv;charset=utf-8',
 }
 
+/** UTF-8 BOM, built via char code so the source file stays ASCII-clean. */
+const BOM = String.fromCharCode(0xfeff)
+
 /** One helper that converts + downloads in a single call. */
 export function downloadAnswer(params: {
   text: string
@@ -402,7 +405,10 @@ export function downloadAnswer(params: {
       body = toPrintableHtml(text, title)
       break
     case 'csv':
-      body = toCsv(text)
+      // Excel (and most spreadsheet apps) decode CSV as ANSI unless the file
+      // starts with a UTF-8 BOM — without it, non-ASCII text renders as
+      // mojibake (e.g. Chinese columns on a GBK-locale system).
+      body = BOM + toCsv(text)
       break
   }
   downloadBlob(body, MIME_FOR_FORMAT[format], filename)

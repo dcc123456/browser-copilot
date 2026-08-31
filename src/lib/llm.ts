@@ -381,20 +381,32 @@ export async function streamCompletion(
     model: request.model,
     messages: toApiMessages(request.messages),
     stream: true,
+    // Providers omit per-chunk usage unless the client asks for it; without
+    // this the panel's token statistics stay at zero for the whole stream.
+    stream_options: { include_usage: true },
   }
   if (request.tools && request.tools.length > 0) body.tools = request.tools
   // Omitted rather than defaulted, so the provider's own default applies.
   if (typeof request.temperature === 'number') body.temperature = request.temperature
   if (typeof request.maxTokens === 'number') body.max_tokens = request.maxTokens
 
-  let response: Response
-  try {
-    response = await fetch(url, {
+  const doFetch = (payload: Record<string, unknown>): Promise<Response> =>
+    fetch(url, {
       method: 'POST',
       headers: buildHeaders(request),
-      body: JSON.stringify(body),
+      body: JSON.stringify(payload),
       signal: request.signal,
     })
+
+  let response: Response
+  try {
+    response = await doFetch(body)
+    // A strict gateway may reject the unknown `stream_options` param outright;
+    // retry once without it — losing usage stats beats losing the reply.
+    if (!response.ok && response.status === 400) {
+      const { stream_options: _dropped, ...withoutUsage } = body
+      response = await doFetch(withoutUsage)
+    }
   } catch (error) {
     // Rethrow cancellation untouched so callers can distinguish it from failure.
     if ((error as Error)?.name === 'AbortError') throw error

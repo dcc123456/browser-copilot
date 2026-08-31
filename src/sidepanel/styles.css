@@ -559,9 +559,14 @@ body {
    padding. */
 
 .msg-actions {
-  display: flex;
+  display: none;
   gap: 4px;
   margin-top: 8px;
+}
+
+.msg:hover .msg-actions,
+.msg:focus-within .msg-actions {
+  display: flex;
 }
 
 /* --- Per-message token hover tooltip -------------------------------------
@@ -590,9 +595,9 @@ body {
 .msg-token .msg-token-tip {
   display: none;
   position: absolute;
-  top: 100%;
-  right: 0;
-  margin-top: 4px;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
@@ -630,10 +635,22 @@ body {
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--panel-2);
-  color: var(--muted);
+  /* Icons inherit this as their stroke. Use the body-text token instead of
+     --muted: the copy glyph is itself an outline rectangle, so a muted gray
+     at 13px blends with our own border and reads as "button frame only",
+     especially on the dark assistant bubble. --text is theme-aware with a
+     strong contrast in both light and dark. */
+  color: var(--text);
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
+}
+
+/* A flex-container <button> shrinks inline <svg> children to zero width in
+   Chrome (the icon then paints nothing), so pin them to their intrinsic
+   size. */
+.msg-action svg {
+  flex-shrink: 0;
 }
 
 .msg-action:hover,

@@ -63,10 +63,10 @@ describe('palette block icons', () => {
   it('the digit-suffixed operator blocks render non-blank glyphs', () => {
     const byId = new Map(PALETTE_BLOCKS.map((b) => [b.id, b.icon]))
     // new-window / repeat-task / javascript-code use the digit/SSlash remix names;
-    // cookie uses an inline `path:` SVG (handled separately, no font class).
+    // cookie previously used an inline `path:` SVG, now a RemixIcon name too.
     expect(classExists(remixClass(byId.get('new-window')!))).toBe(true)
     expect(classExists(remixClass(byId.get('repeat-task')!))).toBe(true)
     expect(classExists(remixClass(byId.get('javascript-code')!))).toBe(true)
-    expect(byId.get('cookie')!.startsWith('path:')).toBe(true)
+    expect(classExists(remixClass(byId.get('cookie')!))).toBe(true)
   })
 })
