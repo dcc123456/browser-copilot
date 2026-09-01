@@ -1273,17 +1273,18 @@ const saveLocal: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
   const filename = interpolate(String(data['filename'] ?? 'file.txt'), ctx.variables, ctx.refData)
-  const saveMode = (String(data['saveMode'] ?? 'auto') as SaveMode) || 'auto'
+  const rawSaveMode = String(data['saveMode'] ?? 'auto')
+  const saveMode: SaveMode = rawSaveMode === 'manual' ? 'manual' : rawSaveMode === 'force' ? 'force' : 'auto'
   const variable = String(data['variableName'] ?? 'lastSavedPath')
 
   const settings = await getSettings()
   const dir = await getDownloadDir()
 
-  // 存过期的句柄可能已丢失权限（worker 无法重新申请），故通过一次探测写判断是否仍可用。
+  // 存过期的句柄可能已丢失权限（worker 无法重新申请），用不落盘的权限查询判断其是否仍可用。
   let hasDir = dir !== null
   if (hasDir && dir) {
     try {
-      await dir.getFileHandle('.probe-download-permission', { create: true })
+      hasDir = (await dir.queryPermission({ mode: 'readwrite' })) === 'granted'
     } catch {
       hasDir = false
     }
