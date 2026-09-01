@@ -12,7 +12,14 @@
  * @module lib/storage
  */
 
-import { fileStorageArea } from './fs-store'
+import {
+  FsDirectory,
+  fileStorageArea,
+  getGrantedFsDirectory,
+  SKILLS_DIR,
+  skillPath,
+} from './fs-store'
+import { skillFromMarkdown, skillSlug, skillToMarkdown } from './skills-import'
 import { LOCALES, type LocaleSetting } from './i18n'
 import type { WireMessage } from './llm'
 import type { ProviderProfile } from './providers'
@@ -277,13 +284,20 @@ export async function setTurnState(state: TurnState): Promise<void> {
 // --- Skills ------------------------------------------------------------------
 
 /**
- * Skills live in `storage.local`, not `storage.session`.
- *
- * They are authored deliberately and expected to persist, unlike transcripts. And
- * not in `storage.sync` — instruction text easily exceeds the 8 KB per-item sync
- * quota, which would fail silently once a user writes a detailed skill.
+ * Skills are stored as real files in the general-skill layout — one folder per
+ * skill (`skills/<slug>/SKILL.md`, YAML frontmatter + Markdown body) — so they
+ * look and behave like the skills a user keeps on disk, and hand-edited files
+ * are picked up on the next read. The `skills` key in `chrome.storage.local`
+ * remains the fast mirror/fallback: every write updates both, reads prefer the
+ * files when the handle is granted and fall back to the mirror otherwise.
  */
 export async function listSkills(): Promise<Skill[]> {
+  const handle = await getGrantedFsDirectory()
+  if (handle) {
+    const fromFiles = await readSkillsFromFiles(handle)
+    if (fromFiles) return fromFiles
+  }
+  // Fall back to the chrome.storage mirror when no directory is usable.
   const stored = await area.get(KEY_SKILLS)
   const skills = stored[KEY_SKILLS]
   if (!Array.isArray(skills)) return []
@@ -294,6 +308,24 @@ export async function listSkills(): Promise<Skill[]> {
       typeof (skill as Skill).id === 'string' &&
       typeof (skill as Skill).name === 'string',
   )
+}
+
+/**
+ * Reads every skill folder as a `SKILL.md`; `null` when the `skills` directory
+ * does not exist (nothing on disk yet — the caller falls back to the mirror).
+ */
+async function readSkillsFromFiles(handle: FileSystemDirectoryHandle): Promise<Skill[] | null> {
+  const fs = new FsDirectory(handle)
+  const slugs = await fs.listSubdirectories(SKILLS_DIR)
+  if (slugs === null) return null
+  const skills: Skill[] = []
+  for (const slug of slugs) {
+    const text = await fs.readText(skillPath(slug))
+    if (text === null) continue
+    const skill = skillFromMarkdown(text)
+    if (skill) skills.push(skill)
+  }
+  return skills.sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export async function getSkill(id: string): Promise<Skill | undefined> {
@@ -313,17 +345,39 @@ export async function findSkillByName(name: string): Promise<Skill | undefined> 
 
 /** Inserts or replaces a skill, keeping the list sorted by name. */
 export async function saveSkill(skill: Skill): Promise<void> {
+  // Mirror first: keeps the UI/worker view consistent and fires onChanged.
   const skills = await listSkills()
-  const index = skills.findIndex((existing) => existing.id === skill.id)
-  if (index >= 0) skills[index] = skill
+  const existing = skills.find((entry) => entry.id === skill.id)
+  if (existing) skills[skills.indexOf(existing)] = skill
   else skills.push(skill)
   skills.sort((a, b) => a.name.localeCompare(b.name))
   await area.set({ [KEY_SKILLS]: skills })
+
+  // Durable copy as a folder-per-skill SKILL.md, like the general skills.
+  const handle = await getGrantedFsDirectory()
+  if (!handle) return
+  const fs = new FsDirectory(handle)
+  const slug = skillSlug(skill.name)
+  await fs.writeText(skillPath(slug), skillToMarkdown(skill))
+  // A rename changes the folder name; drop the stale folder so the old name
+  // does not resurface as a duplicate on the next file read.
+  if (existing && skillSlug(existing.name) !== slug) {
+    await fs.removeDirectory([SKILLS_DIR, skillSlug(existing.name)])
+  }
 }
 
 export async function deleteSkill(id: string): Promise<void> {
-  const skills = (await listSkills()).filter((skill) => skill.id !== id)
-  await area.set({ [KEY_SKILLS]: skills })
+  const skills = await listSkills()
+  const victim = skills.find((skill) => skill.id === id)
+  await area.set({
+    [KEY_SKILLS]: skills.filter((skill) => skill.id !== id),
+  })
+
+  const handle = await getGrantedFsDirectory()
+  if (handle && victim) {
+    const fs = new FsDirectory(handle)
+    await fs.removeDirectory([SKILLS_DIR, skillSlug(victim.name)])
+  }
 }
 
 /** Caps stored turns so a long session cannot grow unbounded. */

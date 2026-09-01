@@ -104,6 +104,38 @@ function newSkillId(): string {
 }
 
 /**
+ * Parses a number that may arrive as a string (the YAML frontmatter subset
+ * stores every scalar as a string, so `createdAt: 1720000000000` reaches us
+ * as `"1720000000000"`).
+ */
+function coerceNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() !== '') {
+    const n = Number(value)
+    if (Number.isFinite(n)) return n
+  }
+  return undefined
+}
+
+/**
+ * Filesystem-safe slug for a skill name — the folder name used on disk and the
+ * basis for a derived id when a file omits one. Keeps ASCII letters/digits and
+ * `._-`, replacing everything else with `_` so names like "Web Scraper" map to
+ * a stable folder without colliding with the data JSON files. Mirrors the
+ * storage layer's file-segment sanitization.
+ */
+export function skillSlug(name: string): string {
+  const trimmed = name.trim()
+  if (!trimmed) return 'skill'
+  return trimmed.replace(/[^a-zA-Z0-9._-]/g, '_') || 'skill'
+}
+
+/** A stable id for a skill that does not carry its own (e.g. hand-authored). */
+function derivedSkillId(name: string): string {
+  return `skill-${skillSlug(name)}`
+}
+
+/**
  * Maps a loosely-shaped incoming object (single skill) to a Skill, or returns
  * `null` if the input is clearly not a skill object (e.g. not an object, or
  * none of the required aliases produce even an empty name).
@@ -123,12 +155,8 @@ export function mapAliasedToSkill(raw: unknown): Skill | null {
   ) {
     return null
   }
-  const createdAt = typeof (obj as { createdAt?: unknown }).createdAt === 'number'
-    ? (obj as { createdAt: number }).createdAt
-    : Date.now()
-  const updatedAt = typeof (obj as { updatedAt?: unknown }).updatedAt === 'number'
-    ? (obj as { updatedAt: number }).updatedAt
-    : createdAt
+  const createdAt = coerceNumber((obj as { createdAt?: unknown }).createdAt) ?? Date.now()
+  const updatedAt = coerceNumber((obj as { updatedAt?: unknown }).updatedAt) ?? createdAt
   const base: Skill = {
     id:
       typeof (obj as { id?: unknown }).id === 'string' && (obj as { id: string }).id.length > 0
@@ -530,6 +558,73 @@ export function exportSkillsJson(skills: readonly Skill[]): string {
     autoMatch: skill.autoMatch,
   }))
   return JSON.stringify(stripped, null, 2)
+}
+
+// --- SKILL.md (folder-per-skill) serialization -------------------------------
+
+/**
+ * Escapes a value for use as a YAML scalar in the frontmatter.
+ *
+ * Values that are safe plain scalars are emitted verbatim; anything that could
+ * confuse the parser (or a general skill reader) is double-quoted with the
+ * escapes our own subset understands (`\n`, `\"`, `\\`).
+ */
+function yamlScalar(value: string): string {
+  const text = String(value)
+  const safePlain =
+    text !== '' &&
+    !/[\r\n]/.test(text) &&
+    !/^[\s"'#?\-,[\]{}&*!|>%@`]/.test(text) &&
+    !/:\s/.test(text) &&
+    !/[ \t#-]$/.test(text)
+  if (safePlain) return text
+  return `"${text
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\r/g, '')
+    .replace(/\n/g, '\\n')}"`
+}
+
+/**
+ * Serialises a skill to the general-skill `SKILL.md` layout: YAML frontmatter
+ * (name/description/autoMatch plus the identity fields needed to round-trip the
+ * internal `Skill`) followed by the instruction text as the Markdown body. The
+ * frontmatter stays compatible with a generic skill loader, which reads
+ * name/description and ignores the extra keys.
+ */
+export function skillToMarkdown(skill: Skill): string {
+  const header = [
+    '---',
+    `name: ${yamlScalar(skill.name)}`,
+    `description: ${yamlScalar(skill.description)}`,
+    `autoMatch: ${skill.autoMatch}`,
+    `id: ${yamlScalar(skill.id)}`,
+    `createdAt: ${skill.createdAt}`,
+    `updatedAt: ${skill.updatedAt}`,
+    '---',
+  ].join('\n')
+  const body = skill.instructions.replace(/\r\n/g, '\n').replace(/\n+$/, '')
+  return `${header}\n\n${body}\n`
+}
+
+/**
+ * Parses a `SKILL.md` back into a `Skill`. Identity/timestamps are read from
+ * the frontmatter when present (so a file written by us round-trips exactly);
+ * a hand-authored file without them gets a stable slug-derived id and its
+ * creation time. Returns `null` when the text is not a valid skill file.
+ */
+export function skillFromMarkdown(text: string): Skill | null {
+  const parsed = parseMarkdownSkillsFileText(text)
+  if (!parsed.ok || parsed.raws.length === 0) return null
+  const raw = parsed.raws[0]
+  const mapped = mapAliasedToSkill(raw)
+  if (!mapped) return null
+  const obj = raw as Record<string, unknown>
+  const id =
+    typeof obj.id === 'string' && obj.id.trim() ? obj.id.trim() : derivedSkillId(mapped.name)
+  const createdAt = coerceNumber(obj.createdAt) ?? mapped.createdAt
+  const updatedAt = coerceNumber(obj.updatedAt) ?? createdAt
+  return { ...mapped, id, createdAt, updatedAt }
 }
 
 // Silenced unused reference guards so TypeScript doesn't complain about the

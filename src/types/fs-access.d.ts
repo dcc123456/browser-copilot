@@ -35,6 +35,12 @@ declare global {
     excludeAcceptAllOption?: boolean
   }
 
+  interface FileSystemDirectoryHandle {
+    /** Async iterator over the directory's entries (part of the File System
+     *  Access API that TS's DOM lib does not declare yet). */
+    values(): AsyncIterableIterator<FileSystemHandle>
+  }
+
   interface Window {
     showDirectoryPicker(options?: DirectoryPickerOptions): Promise<FileSystemDirectoryHandle>
   }

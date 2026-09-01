@@ -6,6 +6,9 @@ import {
   parseJsonSkillsText,
   parseSkillsFileText,
   parseYamlSkillsText,
+  skillFromMarkdown,
+  skillSlug,
+  skillToMarkdown,
 } from '../src/lib/skills-import'
 import { normalizeSkill } from '../src/lib/skills'
 import type { Skill } from '../src/lib/types'
@@ -198,5 +201,79 @@ describe('export + import round-trip', () => {
       autoMatch: normalizeSkill(skill).autoMatch,
     })
     expect(saved.map(strip)).toEqual(originals.map(strip))
+  })
+})
+
+describe('skillSlug', () => {
+  it('keeps filesystem-safe characters and replaces the rest', () => {
+    expect(skillSlug('Web Scraper')).toBe('Web_Scraper')
+    expect(skillSlug('a.b-c_d')).toBe('a.b-c_d')
+    // Non-ASCII names map to underscores so the folder stays portable.
+    expect(skillSlug('翻译助手')).toBe('____')
+  })
+
+  it('falls back to a placeholder for blank names', () => {
+    expect(skillSlug('   ')).toBe('skill')
+    expect(skillSlug('')).toBe('skill')
+  })
+})
+
+describe('skillToMarkdown / skillFromMarkdown', () => {
+  it('round-trips a skill through the SKILL.md layout losslessly', () => {
+    const original: Skill = {
+      id: 'skill-web-scraper',
+      name: 'Web Scraper',
+      description: 'scrape pages',
+      instructions:
+        '# Instructions\n\nFetch the page and extract links.\n\n- one\n- two\n\n中文多行内容\n第二行',
+      autoMatch: true,
+      createdAt: 1_720_000_000_000,
+      updatedAt: 1_720_000_000_005,
+    }
+
+    const md = skillToMarkdown(original)
+    expect(md.startsWith('---\nname: Web Scraper\n')).toBe(true)
+    expect(md).toContain('description: scrape pages')
+    expect(md).toContain('autoMatch: true')
+    expect(md).toContain('id: skill-web-scraper')
+    expect(md).toContain('createdAt: 1720000000000')
+    expect(md).toContain('updatedAt: 1720000000005')
+    // The Markdown body carries the instructions verbatim.
+    expect(md.endsWith(original.instructions + '\n')).toBe(true)
+
+    expect(skillFromMarkdown(md)).toEqual(original)
+  })
+
+  it('derives id and creation time for hand-authored files', () => {
+    const md = '---\nname: Manual Skill\ndescription: written by hand\n---\nDo the thing.\n'
+    const parsed = skillFromMarkdown(md)!
+    expect(parsed.name).toBe('Manual Skill')
+    expect(parsed.description).toBe('written by hand')
+    expect(parsed.instructions).toBe('Do the thing.')
+    expect(parsed.autoMatch).toBe(true)
+    expect(parsed.id).toBe('skill-Manual_Skill')
+    expect(parsed.createdAt).toBeTypeOf('number')
+    expect(parsed.updatedAt).toBe(parsed.createdAt)
+  })
+
+  it('quotes frontmatter values that would break a plain scalar', () => {
+    const skill: Skill = {
+      id: 's1',
+      name: 'Colon: Skill',
+      description: 'desc with # hash and trailing space ',
+      instructions: 'body',
+      autoMatch: false,
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    const parsed = skillFromMarkdown(skillToMarkdown(skill))!
+    expect(parsed.name).toBe('Colon: Skill')
+    expect(parsed.description).toBe('desc with # hash and trailing space ')
+    expect(parsed.autoMatch).toBe(false)
+  })
+
+  it('returns null for a file that is not a skill markdown', () => {
+    expect(skillFromMarkdown('# just markdown, no frontmatter')).toBeNull()
+    expect(skillFromMarkdown('')).toBeNull()
   })
 })

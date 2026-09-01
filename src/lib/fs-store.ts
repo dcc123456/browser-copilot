@@ -25,6 +25,8 @@
  *
  * @module lib/fs-store
  */
+import { skillSlug, skillToMarkdown } from './skills-import'
+import type { Skill } from './types'
 
 /**
  * Subfolder inside the picked directory that holds the JSON data files.
@@ -74,6 +76,18 @@ export function keyToPath(key: string): string[] {
     return ['conversations', `${sanitizeFileSegment(key.slice(CONVERSATION_PREFIX.length))}.json`]
   }
   return [`${sanitizeFileSegment(key)}.json`]
+}
+
+/**
+ * Skills are stored as files in the general-skill layout — one folder per skill
+ * containing a `SKILL.md` (YAML frontmatter + Markdown body) — under the data
+ * directory. `skillPath` maps a folder slug to those segments.
+ */
+export const SKILLS_DIR = 'skills'
+const SKILL_FILE = 'SKILL.md'
+
+export function skillPath(slug: string): string[] {
+  return [SKILLS_DIR, sanitizeFileSegment(slug), SKILL_FILE]
 }
 
 // --- IndexedDB: directory-handle persistence ---------------------------------
@@ -217,6 +231,44 @@ export class FsDirectory {
       // Entry already gone — nothing to do.
     }
   }
+
+  /**
+   * Lists the subdirectory names under `segment` inside the data folder, or
+   * `null` when that directory does not exist. `[]` (an existing but empty
+   * directory) is distinct from `null`, so callers can tell "nothing stored
+   * yet" from "nothing on disk".
+   */
+  async listSubdirectories(segment: string): Promise<string[] | null> {
+    const dir = await this.dataDir()
+    try {
+      const sub = await dir.getDirectoryHandle(segment, { create: false })
+      const names: string[] = []
+      for await (const entry of sub.values()) {
+        if (entry.kind === 'directory') names.push(entry.name)
+      }
+      return names.sort()
+    } catch {
+      return null
+    }
+  }
+
+  /** Recursively deletes a directory entry under the data folder. */
+  async removeDirectory(segments: string[]): Promise<void> {
+    const dir = await this.dataDir()
+    let handle: FileSystemDirectoryHandle = dir
+    try {
+      for (let i = 0; i < segments.length - 1; i += 1) {
+        const segment = segments[i]
+        if (!segment) return
+        handle = await handle.getDirectoryHandle(segment, { create: false })
+      }
+      const name = segments[segments.length - 1]
+      if (!name) return
+      await handle.removeEntry(name, { recursive: true })
+    } catch {
+      // Entry already gone — nothing to do.
+    }
+  }
 }
 
 // --- chrome.storage.local mirror ---------------------------------------------
@@ -274,6 +326,9 @@ export function createFileArea(handle: FileSystemDirectoryHandle): StorageArea {
     },
     async set(items) {
       for (const [key, value] of Object.entries(items)) {
+        // Skills live as `skills/<slug>/SKILL.md` files, not as a JSON blob in
+        // the data folder; `storage.ts` writes those files directly.
+        if (key === SKILLS_DIR) continue
         try {
           await fs.writeText(keyToPath(key), JSON.stringify(value))
         } catch {
@@ -432,21 +487,28 @@ export async function clearStorageDirectory(): Promise<void> {
 /**
  * Pushes every key currently in `chrome.storage.local` up to the files. Used to
  * migrate on first setup and to compensate for writes the service worker made
- * while the file handle was unavailable. Idempotent.
+ * while the file handle was unavailable. Idempotent. Skills are synced
+ * separately as folder-per-skill `SKILL.md` files (see {@link syncSkillsToFiles}).
  */
 export async function syncToFiles(): Promise<void> {
   const handle = await resolveHandle(true)
   if (!handle || !hasChromeStorage()) return
   const all = await chrome.storage.local.get(null)
   await syncEntriesToFiles(all as Record<string, unknown>, handle)
+  const skills = (all as Record<string, unknown>)[SKILLS_DIR]
+  if (Array.isArray(skills)) {
+    await syncSkillsToFiles(skills as Skill[], handle)
+  }
 }
 
 /**
  * Writes each provided entry to the file area under `handle`, skipping values
- * that must not be persisted: `undefined` (not representable) and session-only
- * `turn:` state. `createFileArea.set` also re-mirrors each entry to
- * `chrome.storage.local`, so this is idempotent and safe to re-run. Extracted
- * from `syncToFiles` so the migration path is testable with a fake handle.
+ * that must not be persisted: `undefined` (not representable), session-only
+ * `turn:` state, and the `skills` key (skills are written as `SKILL.md` files
+ * via {@link syncSkillsToFiles}). `createFileArea.set` also re-mirrors each
+ * entry to `chrome.storage.local`, so this is idempotent and safe to re-run.
+ * Extracted from `syncToFiles` so the migration path is testable with a fake
+ * handle.
  */
 export async function syncEntriesToFiles(
   entries: Record<string, unknown>,
@@ -457,6 +519,36 @@ export async function syncEntriesToFiles(
     if (value === undefined) continue
     // Turn state is intentionally session-scoped and never persisted as files.
     if (key.startsWith('turn:')) continue
+    // Skills are persisted as markdown files, not as a JSON blob.
+    if (key === SKILLS_DIR) continue
     await area.set({ [key]: value })
   }
+}
+
+/**
+ * Writes each mirrored skill to `skills/<slug>/SKILL.md` (idempotent, best
+ * effort). Runs on first setup and on panel-open sync so browser-created skills
+ * become real files like the general skills on disk.
+ */
+export async function syncSkillsToFiles(
+  skills: readonly Skill[],
+  handle: FileSystemDirectoryHandle,
+): Promise<void> {
+  const fs = new FsDirectory(handle)
+  for (const skill of skills) {
+    try {
+      await fs.writeText(skillPath(skillSlug(skill.name)), skillToMarkdown(skill))
+    } catch {
+      // Best-effort during migration; the mirror still holds the value.
+    }
+  }
+}
+
+/**
+ * The granted root directory handle, or `null` when storage is unconfigured or
+ * its permission is not granted. Used by the persistence modules for file-first
+ * reads of structures (like skills) that do not map to a single JSON key.
+ */
+export async function getGrantedFsDirectory(): Promise<FileSystemDirectoryHandle | null> {
+  return resolveHandle(false)
 }

@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createFileArea,
+  FsDirectory,
   getStorageMode,
   keyToPath,
+  SKILLS_DIR,
+  skillPath,
   syncEntriesToFiles,
+  syncSkillsToFiles,
 } from '../src/lib/fs-store'
+import type { Skill } from '../src/lib/types'
 
 /**
  * In-memory `chrome.storage.local` double used to verify the mirror/fallback
@@ -73,6 +78,11 @@ class FakeDir {
   }
   async removeEntry(name: string): Promise<void> {
     this.node.children.delete(name)
+  }
+  async *values(): AsyncIterableIterator<{ kind: 'file' | 'directory'; name: string }> {
+    for (const [name, entry] of this.node.children) {
+      yield { kind: entry.kind === 'dir' ? 'directory' : 'file', name }
+    }
   }
 }
 
@@ -220,6 +230,19 @@ describe('createFileArea', () => {
     const got = await area.get('settings')
     expect(got.settings).toEqual({ locale: 'en' })
   })
+
+  it('never writes the skills key as a JSON file (SKILL.md is used instead)', async () => {
+    const { handle, node } = makeFakeRoot()
+    const area = createFileArea(handle as FileSystemDirectoryHandle)
+
+    await area.set({ skills: [{ id: 's1', name: 'Scrape' }] })
+
+    const dir = dataDir(node)
+    expect(dir.children.has('skills.json')).toBe(false)
+    expect(dir.children.has('skills')).toBe(false)
+    // The mirror still records the value so reads/onChanged keep working.
+    expect(chrome.store.get('skills')).toEqual([{ id: 's1', name: 'Scrape' }])
+  })
 })
 
 describe('syncEntriesToFiles', () => {
@@ -277,6 +300,102 @@ describe('syncEntriesToFiles', () => {
     const settingsFile = dir.children.get('settings.json') as FileNode
     expect(JSON.parse(settingsFile.content)).toEqual({ locale: 'zh' })
     expect(JSON.parse((dir.children.get('workflows.json') as FileNode).content)).toEqual([])
+  })
+
+  it('never persists the skills key as a JSON file (SKILL.md is used instead)', async () => {
+    const { handle, node } = makeFakeRoot()
+    const mirror = { skills: [{ id: 's1', name: 'Scrape' }] }
+
+    await syncEntriesToFiles(mirror, handle as FileSystemDirectoryHandle)
+
+    const dir = dataDir(node)
+    expect(dir.children.has('skills.json')).toBe(false)
+    expect(dir.children.has('skills')).toBe(false)
+  })
+})
+
+describe('syncSkillsToFiles', () => {
+  it('writes each skill to skills/<slug>/SKILL.md in the general-skill layout', async () => {
+    const { handle, node } = makeFakeRoot()
+    const skills: Skill[] = [
+      {
+        id: 's1',
+        name: 'Web Scraper',
+        description: 'scrape pages',
+        instructions: '# Instructions\nFetch the page.',
+        autoMatch: true,
+        createdAt: 1_720_000_000_000,
+        updatedAt: 1_720_000_000_001,
+      },
+      {
+        id: 's2',
+        name: '翻译助手',
+        description: 'translate',
+        instructions: '把中文翻译成英文',
+        autoMatch: false,
+        createdAt: 1_720_000_000_000,
+        updatedAt: 1_720_000_000_000,
+      },
+    ]
+
+    await syncSkillsToFiles(skills, handle as FileSystemDirectoryHandle)
+
+    const dir = dataDir(node)
+    const skillsDir = dir.children.get('skills') as Extract<Node, { kind: 'dir' }>
+    expect(skillsDir).toBeDefined()
+    // ASCII name keeps its readable folder; non-ASCII collapses to a slug.
+    const scraperDir = skillsDir.children.get('Web_Scraper') as Extract<Node, { kind: 'dir' }>
+    const transDir = skillsDir.children.get('____') as Extract<Node, { kind: 'dir' }>
+    expect(scraperDir).toBeDefined()
+    expect(transDir).toBeDefined()
+
+    const md = (scraperDir.children.get('SKILL.md') as FileNode).content
+    expect(md).toContain('name: Web Scraper')
+    expect(md).toContain('description: scrape pages')
+    expect(md).toContain('autoMatch: true')
+    expect(md).toContain('# Instructions\nFetch the page.')
+  })
+})
+
+describe('FsDirectory skill layout', () => {
+  it('lists existing skill folder slugs', async () => {
+    const { handle } = makeFakeRoot()
+    const fs = new FsDirectory(handle as FileSystemDirectoryHandle)
+    await fs.writeText(skillPath('web_scraper'), 'a')
+    await fs.writeText(skillPath('translator'), 'b')
+
+    expect(await fs.listSubdirectories(SKILLS_DIR)).toEqual(['translator', 'web_scraper'])
+  })
+
+  it('returns null when the skills directory does not exist yet', async () => {
+    const { handle } = makeFakeRoot()
+    const fs = new FsDirectory(handle as FileSystemDirectoryHandle)
+    expect(await fs.listSubdirectories(SKILLS_DIR)).toBeNull()
+  })
+
+  it('removes a skill folder recursively', async () => {
+    const { handle, node } = makeFakeRoot()
+    const fs = new FsDirectory(handle as FileSystemDirectoryHandle)
+    await fs.writeText(skillPath('web_scraper'), 'a')
+
+    await fs.removeDirectory([SKILLS_DIR, 'web_scraper'])
+
+    const dir = dataDir(node)
+    const skillsDir = dir.children.get('skills') as Extract<Node, { kind: 'dir' }>
+    expect(skillsDir.children.has('web_scraper')).toBe(false)
+    // The skills directory itself stays (other skills may remain).
+    expect(dir.children.has('skills')).toBe(true)
+  })
+
+  it('round-trips a skill file through the same read path storage uses', async () => {
+    const { handle } = makeFakeRoot()
+    const fs = new FsDirectory(handle as FileSystemDirectoryHandle)
+    await fs.writeText(skillPath('x'), '# not SKILL.md yet') // placeholder overwrite check
+    await fs.writeText(skillPath('x'), '---\nname: X\ndescription: d\n---\nbody\n')
+
+    const text = await fs.readText(skillPath('x'))
+    expect(text).toContain('name: X')
+    expect(text).toContain('body')
   })
 })
 
