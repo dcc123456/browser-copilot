@@ -43,8 +43,10 @@ import {
   listSkills,
   newId,
   recordPasswordUse,
+  getSettings,
   getSkill,
 } from '../lib/storage'
+import { askSaveViaSidePanel, getDownloadDir, resolveTransferMode, writeFileToDownloadDir } from '../lib/download-dir'
 import { isSamePage } from '../lib/pages'
 import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
 import { entryFields, findField, type AgentMode, type PasswordEntry, type Skill, type UserProfile } from '../lib/types'
@@ -77,6 +79,7 @@ const ACTION_TOOLS = new Set([
   'tab_switch',
   'tab_close',
   'run_javascript',
+  'save_local',
 ])
 
 const READ_TOOLS = new Set(['read_current_page', 'snapshot_page', 'list_tabs'])
@@ -458,6 +461,22 @@ export const TOOLS: WireTool[] = [
       parameters: { type: 'object', properties: {} },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'save_local',
+      description:
+        'Save a piece of text/content as a local file on the user\'s computer. Use this whenever the user asks to download, export, or save some content (a report, summary, transcript, table, or code) to a file. Do NOT build a Blob or <a download> script with run_javascript to download files — save_local uses the configured download folder or asks where to save. Requires approval.',
+      parameters: {
+        type: 'object',
+        properties: {
+          content: { type: 'string', description: 'The full text to save into the file.' },
+          filename: { type: 'string', description: 'Filename with extension, e.g. report.md. Optional; defaults to download.txt.' },
+        },
+        required: ['content'],
+      },
+    },
+  },
 ]
 
 export type ConfirmFn = (name: string, argsPreview: string) => Promise<boolean>
@@ -772,6 +791,15 @@ function describeDetail(name: string, args: Record<string, unknown>, output?: st
       lines.push(`Field: ${typeof args.field === 'string' ? args.field : 'password'}`)
       lines.push('Value: •••••••• (hidden)')
       break
+    case 'save_local': {
+      const name = typeof args.filename === 'string' && args.filename.trim() ? args.filename.trim() : 'download.txt'
+      lines.push(`File: ${name}`)
+      const body = typeof args.content === 'string' ? args.content : ''
+      if (body) {
+        lines.push(`Content (${body.length} chars): ${body.length > 80 ? `${body.slice(0, 80)}…` : body}`)
+      }
+      break
+    }
   }
 
   if (output) {
@@ -837,6 +865,8 @@ function describeAction(name: string, args: Record<string, unknown>): string {
       return `Fill ${targetLabel} with saved credential${
         typeof args.field === 'string' && args.field ? ` (${args.field})` : ''
       }`
+    case 'save_local':
+      return `Save content to ${typeof args.filename === 'string' && args.filename.trim() ? args.filename.trim() : 'a file'}`
     default:
       return name
   }
@@ -902,6 +932,36 @@ async function executeTool(
       const result = await execOnActiveTab({ action: 'exec_js', value: code }, signal)
       if (!result.ok) return JSON.stringify({ error: result.error ?? 'JavaScript execution failed' })
       return JSON.stringify({ ok: true, result: result.data ?? null })
+    }
+
+    case 'save_local': {
+      const content = typeof args.content === 'string' ? args.content : String(args.content ?? '')
+      const filename =
+        typeof args.filename === 'string' && args.filename.trim()
+          ? args.filename.trim()
+          : 'download.txt'
+      const settings = await getSettings()
+      const dir = await getDownloadDir()
+
+      let hasDir = dir !== null
+      if (hasDir && dir) {
+        try {
+          hasDir = (await dir.queryPermission({ mode: 'readwrite' })) === 'granted'
+        } catch {
+          hasDir = false
+        }
+      }
+
+      const transfer = resolveTransferMode('auto', settings.downloadAutoSave, hasDir)
+      if (transfer === 'auto' && dir) {
+        const ok = await writeFileToDownloadDir(dir, filename, content)
+        if (ok) return JSON.stringify({ ok: true, savedPath: filename, mode: 'auto' })
+      }
+
+      const res = await askSaveViaSidePanel(filename)
+      if (res.canceled) return JSON.stringify({ ok: false, canceled: true, error: 'User cancelled.' })
+      if (res.ok) return JSON.stringify({ ok: true, savedPath: filename, mode: 'save-as' })
+      return JSON.stringify({ ok: false, error: 'Could not open the save dialog. Ask the user to open the side panel and retry.' })
     }
 
     case 'click': {
@@ -1199,6 +1259,11 @@ function shortSummary(name: string, result: string): string {
     if (name === 'list_scheduled_tasks') {
       const parsed = JSON.parse(result) as { count?: number }
       return `Listed scheduled tasks (${parsed.count ?? 0})`
+    }
+    if (name === 'save_local') {
+      const parsed = JSON.parse(result) as { savedPath?: string; mode?: string; error?: string }
+      if (parsed.error) return `save_local: ${parsed.error}`.slice(0, 200)
+      return `Saved to ${parsed.savedPath ?? 'file'}${parsed.mode === 'auto' ? ' (auto)' : ''}`
     }
     if (parsed.navigated) return `${name} ✓ (page changed)`
     if (parsed.note) return `${name}: ${parsed.note}`
