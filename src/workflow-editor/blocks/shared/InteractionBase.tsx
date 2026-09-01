@@ -10,7 +10,7 @@
  * @module workflow-editor/blocks/shared/InteractionBase
  */
 
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Checkbox, Expand, Field, Select, TextArea, TextInput } from './Field'
 import ElSelectorActions from './ElSelectorActions'
 import type { Patch } from './Field'
@@ -84,6 +84,10 @@ export default function InteractionBase({
   // A generated node may carry the conversation's locator instead of a CSS
   // selector — show it read-only so the edit panel is not blank.
   const locatorHint = selector ? '' : targetSummary(data)
+  // Latest "verify selector" outcome, shown inline so the operator has feedback
+  // even though ElSelectorActions has no toast host of its own in this popup.
+  const [verifyStatus, setVerifyStatus] = useState<{ text: string; kind: 'ok' | 'error' } | null>(null)
+  const reportVerify = (text: string, kind: 'ok' | 'error'): void => setVerifyStatus({ text, kind })
 
   return (
     <div className="wf-form">
@@ -118,8 +122,12 @@ export default function InteractionBase({
               findBy={findBy === 'xpath' ? 'xpath' : 'cssSelector'}
               multiple={bool(data, 'multiple')}
               onSelector={(sel) => onChange({ selector: sel })}
+              onMessage={reportVerify}
             />
           </div>
+          {verifyStatus && (
+            <p className={`wf-form-note wf-verify-${verifyStatus.kind}`}>{verifyStatus.text}</p>
+          )}
           {locatorHint && <p className="wf-form-note">{locatorHint}</p>}
           <Field>
             <TextArea

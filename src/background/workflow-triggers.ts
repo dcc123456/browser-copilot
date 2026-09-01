@@ -18,8 +18,10 @@
  * @module background/workflow-triggers
  */
 
-import { listWorkflows } from '../lib/workflow/storage'
+import { getWorkflow, listWorkflows } from '../lib/workflow/storage'
 import type { Workflow, WorkflowNode } from '../lib/workflow/types'
+import { coerceIntervalMinutes, nextRunAt } from '../lib/schedule'
+import type { Schedule } from '../lib/scheduler-types'
 
 /** The effective trigger type for a workflow. */
 export type WorkflowTriggerKind =
@@ -208,4 +210,149 @@ export async function handleShortcutPressed(message: unknown): Promise<boolean> 
 let runWorkflowRef: ((workflowId: string) => void) | null = null
 export function setWorkflowRunner(fn: (workflowId: string) => void): void {
   runWorkflowRef = fn
+}
+
+// --- Scheduled workflow triggers ---------------------------------------------
+//
+// Workflows whose trigger block is time-based (`interval`, `specific-day`, or a
+// one-shot `date`) are armed as one-shot alarms, mirroring how tasks are
+// scheduled. `interval` and `specific-day` re-arm themselves after each fire; a
+// `date` trigger fires exactly once and is then cleared. The `scheduled` (cron)
+// trigger is not auto-armed here.
+
+export const WORKFLOW_TRIGGER_ALARM_PREFIX = 'wftrigger:'
+/** `chrome.alarms` rejects delays under 1 minute. */
+const MIN_ALARM_DELAY_MS = 60_000
+
+export function workflowTriggerAlarmName(workflowId: string): string {
+  return `${WORKFLOW_TRIGGER_ALARM_PREFIX}${workflowId}`
+}
+
+/** True when an alarm name belongs to a scheduled workflow trigger. */
+export function isWorkflowTriggerAlarm(name: string): boolean {
+  return name.startsWith(WORKFLOW_TRIGGER_ALARM_PREFIX)
+}
+
+/** The trigger block's data payload, if present, read from the workflow graph. */
+function triggerNodeData(wf: Workflow): Record<string, unknown> | undefined {
+  const node = wf.drawflow.nodes.find(
+    (n: WorkflowNode) => (n.data?.['blockId'] as string) === 'trigger' || n.label === 'trigger',
+  )
+  return node?.data
+}
+
+function clampRange(value: number, min: number, max: number): number {
+  if (Number.isNaN(value)) return min
+  return Math.min(max, Math.max(min, Math.round(value)))
+}
+
+function parseTime(value: unknown): { hour: number; minute: number } {
+  const s = typeof value === 'string' ? value : ''
+  const match = /^(\d{1,2}):(\d{2})$/.exec(s)
+  if (!match) return { hour: 0, minute: 0 }
+  return {
+    hour: clampRange(Number(match[1]), 0, 23),
+    minute: clampRange(Number(match[2]), 0, 59),
+  }
+}
+
+/**
+ * Whether a workflow should be auto-armed from its trigger block.
+ *
+ * - `interval` → a repeating `{ kind: 'interval' }` schedule;
+ * - `specific-day` → `{ kind: 'weekly', days, hour, minute }`;
+ * - `date` → a one-shot run at a specific epoch (`once`).
+ *
+ * Returns `null` when the workflow is off or its trigger is not time-based.
+ */
+export function workflowAutoTrigger(
+  wf: Workflow,
+): { kind: 'schedule'; schedule: Schedule } | { kind: 'once'; epoch: number } | null {
+  if (!triggerEnabled(wf)) return null
+  const data = triggerNodeData(wf)
+  const type = data?.['type']
+  if (type === 'interval') {
+    return { kind: 'schedule', schedule: { kind: 'interval', minutes: coerceIntervalMinutes(data?.['interval']) } }
+  }
+  if (type === 'specific-day') {
+    const rawDays = Array.isArray(data?.['days']) ? (data?.['days'] as unknown[]) : []
+    const days = Array.from(
+      new Set(rawDays.map((d) => Number(d)).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)),
+    )
+    if (days.length === 0) return null
+    const { hour, minute } = parseTime(data?.['time'])
+    return { kind: 'schedule', schedule: { kind: 'weekly', days, hour, minute } }
+  }
+  if (type === 'date') {
+    const dateStr = typeof data?.['date'] === 'string' ? (data?.['date'] as string) : ''
+    if (!dateStr) return null
+    const { hour, minute } = parseTime(data?.['time'])
+    const epoch = new Date(`${dateStr}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`).getTime()
+    if (!Number.isFinite(epoch)) return null
+    return { kind: 'once', epoch }
+  }
+  return null
+}
+
+/** Arms (or clears) the auto-trigger alarm for a single workflow. */
+export async function scheduleWorkflowTrigger(workflowId: string): Promise<void> {
+  const name = workflowTriggerAlarmName(workflowId)
+  const wf = await getWorkflow(workflowId)
+  if (!wf) {
+    await chrome.alarms.clear(name)
+    return
+  }
+  const auto = workflowAutoTrigger(wf)
+  if (!auto) {
+    await chrome.alarms.clear(name)
+    return
+  }
+  let when: number
+  if (auto.kind === 'once') {
+    when = auto.epoch
+  } else {
+    const next = nextRunAt(auto.schedule, Date.now())
+    when = next ?? Date.now() + coerceIntervalMinutes(60) * 60_000
+  }
+  const safeWhen = Math.max(when, Date.now() + MIN_ALARM_DELAY_MS)
+  await chrome.alarms.create(name, { when: safeWhen })
+}
+
+/** Clears stale workflow-trigger alarms and re-arms every configured workflow. */
+export async function rescheduleAllWorkflowTriggers(): Promise<void> {
+  const [existing, workflows] = await Promise.all([chrome.alarms.getAll(), listWorkflows()])
+  const known = new Set(
+    workflows.filter((wf) => workflowAutoTrigger(wf)).map((wf) => workflowTriggerAlarmName(wf.id)),
+  )
+  for (const alarm of existing) {
+    if (alarm.name.startsWith(WORKFLOW_TRIGGER_ALARM_PREFIX) && !known.has(alarm.name)) {
+      await chrome.alarms.clear(alarm.name)
+    }
+  }
+  for (const wf of workflows) {
+    await scheduleWorkflowTrigger(wf.id)
+  }
+}
+
+/**
+ * Handles a workflow-trigger alarm firing: runs the workflow and re-arms if the
+ * trigger recurs. A one-shot `date` trigger is cleared instead so it cannot
+ * fire again.
+ */
+export async function handleWorkflowTriggerAlarm(alarmName: string): Promise<void> {
+  const workflowId = alarmName.slice(WORKFLOW_TRIGGER_ALARM_PREFIX.length)
+  const wf = await getWorkflow(workflowId)
+  if (!wf) {
+    await chrome.alarms.clear(alarmName)
+    return
+  }
+  const auto = workflowAutoTrigger(wf)
+  if (auto && auto.kind === 'schedule') {
+    // Re-arm the next firing before running so a crash does not strand the schedule.
+    await scheduleWorkflowTrigger(workflowId)
+  } else {
+    // One-shot `date` trigger (or a now-invalid trigger): fire once, then stop.
+    await chrome.alarms.clear(alarmName)
+  }
+  runWorkflowRef?.(workflowId)
 }

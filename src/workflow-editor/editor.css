@@ -1624,6 +1624,14 @@
   margin: 4px 0 12px;
 }
 
+/* Verify-selector outcome fed back into the element edit form */
+.wf-form-note.wf-verify-ok {
+  color: #059669;
+}
+.wf-form-note.wf-verify-error {
+  color: #dc2626;
+}
+
 /* Multi-option checkbox grids (weekdays, context types, observer options) */
 .wf-checkbox-grid {
   display: grid;

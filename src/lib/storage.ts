@@ -1,15 +1,25 @@
 /**
- * Persistence. `chrome.storage.local` is the single source of truth: the MV3
- * service worker can be evicted between any two events, so no module-level
- * variable may hold state that matters.
+ * Persistence. Backed by real JSON files on the user's hard drive when a
+ * storage directory is configured (see `lib/fs-store.ts`), with
+ * `chrome.storage.local` as the mirror/fallback. Either way, the MV3 service
+ * worker can be evicted between any two events, so no module-level variable may
+ * hold state that matters.
  *
- * API keys live in `storage.local`, which is unencrypted on disk and readable by
- * anyone who can read the browser profile. `storage.sync` is deliberately
- * avoided so keys never leave this machine.
+ * API keys live in the extension's storage (files / `storage.local`), which is
+ * unencrypted on disk and readable by anyone who can read the browser profile.
+ * `storage.sync` is deliberately avoided so keys never leave this machine.
  *
  * @module lib/storage
  */
 
+import {
+  FsDirectory,
+  fileStorageArea,
+  getGrantedFsDirectory,
+  SKILLS_DIR,
+  skillPath,
+} from './fs-store'
+import { skillFromMarkdown, skillSlug, skillToMarkdown } from './skills-import'
 import { LOCALES, type LocaleSetting } from './i18n'
 import type { WireMessage } from './llm'
 import type { ProviderProfile } from './providers'
@@ -23,6 +33,12 @@ import type {
   UserProfile,
 } from './types'
 import type { Workflow, WorkflowEdge, WorkflowNode, WorkflowSettings } from './workflow/types'
+
+/**
+ * The active storage area: files when a directory is configured and granted,
+ * otherwise the `chrome.storage.local` mirror.
+ */
+const area = fileStorageArea()
 
 const KEY_SCHEMA = 'schemaVersion'
 const KEY_SETTINGS = 'settings'
@@ -131,7 +147,7 @@ export function normalizeStoredSettings(raw: unknown): Settings {
  * rather than being re-checked on every read path.
  */
 export async function ensureSchema(): Promise<void> {
-  const stored = await chrome.storage.local.get([
+  const stored = await area.get([
     KEY_SCHEMA,
     KEY_SETTINGS,
     KEY_PROFILES,
@@ -151,12 +167,12 @@ export async function ensureSchema(): Promise<void> {
   if (!Array.isArray(stored[KEY_PASSWORDS])) patch[KEY_PASSWORDS] = []
   if (!Array.isArray(stored[KEY_HISTORY])) patch[KEY_HISTORY] = []
   if (!Array.isArray(stored[KEY_CONVERSATIONS_META])) patch[KEY_CONVERSATIONS_META] = []
-  await chrome.storage.local.set(patch)
+  await area.set(patch)
 }
 
 /** Reads settings, normalizing whatever is on disk. */
 export async function getSettings(): Promise<Settings> {
-  const stored = await chrome.storage.local.get(KEY_SETTINGS)
+  const stored = await area.get(KEY_SETTINGS)
   return normalizeStoredSettings(stored[KEY_SETTINGS])
 }
 
@@ -168,7 +184,7 @@ export async function setSettings(patch: Partial<Settings>): Promise<Settings> {
   if (!merged.providers.some((profile) => profile.id === merged.activeProviderId)) {
     merged.activeProviderId = merged.providers[0]?.id ?? ''
   }
-  await chrome.storage.local.set({ [KEY_SETTINGS]: merged })
+  await area.set({ [KEY_SETTINGS]: merged })
   return merged
 }
 
@@ -221,7 +237,8 @@ export function newId(): string {
 // --- Conversations -----------------------------------------------------------
 
 /**
- * Conversation history lives in `chrome.storage.local`, not session storage.
+ * Conversation history lives in durable storage (files when a directory is
+ * configured, else `chrome.storage.local`), not session storage.
  *
  * Earlier versions kept the transcript in `storage.session`, which cleared on
  * browser exit. Durable local storage lets the user resume a thread days
@@ -267,14 +284,21 @@ export async function setTurnState(state: TurnState): Promise<void> {
 // --- Skills ------------------------------------------------------------------
 
 /**
- * Skills live in `storage.local`, not `storage.session`.
- *
- * They are authored deliberately and expected to persist, unlike transcripts. And
- * not in `storage.sync` — instruction text easily exceeds the 8 KB per-item sync
- * quota, which would fail silently once a user writes a detailed skill.
+ * Skills are stored as real files in the general-skill layout — one folder per
+ * skill (`skills/<slug>/SKILL.md`, YAML frontmatter + Markdown body) — so they
+ * look and behave like the skills a user keeps on disk, and hand-edited files
+ * are picked up on the next read. The `skills` key in `chrome.storage.local`
+ * remains the fast mirror/fallback: every write updates both, reads prefer the
+ * files when the handle is granted and fall back to the mirror otherwise.
  */
 export async function listSkills(): Promise<Skill[]> {
-  const stored = await chrome.storage.local.get(KEY_SKILLS)
+  const handle = await getGrantedFsDirectory()
+  if (handle) {
+    const fromFiles = await readSkillsFromFiles(handle)
+    if (fromFiles) return fromFiles
+  }
+  // Fall back to the chrome.storage mirror when no directory is usable.
+  const stored = await area.get(KEY_SKILLS)
   const skills = stored[KEY_SKILLS]
   if (!Array.isArray(skills)) return []
   return skills.filter(
@@ -284,6 +308,24 @@ export async function listSkills(): Promise<Skill[]> {
       typeof (skill as Skill).id === 'string' &&
       typeof (skill as Skill).name === 'string',
   )
+}
+
+/**
+ * Reads every skill folder as a `SKILL.md`; `null` when the `skills` directory
+ * does not exist (nothing on disk yet — the caller falls back to the mirror).
+ */
+async function readSkillsFromFiles(handle: FileSystemDirectoryHandle): Promise<Skill[] | null> {
+  const fs = new FsDirectory(handle)
+  const slugs = await fs.listSubdirectories(SKILLS_DIR)
+  if (slugs === null) return null
+  const skills: Skill[] = []
+  for (const slug of slugs) {
+    const text = await fs.readText(skillPath(slug))
+    if (text === null) continue
+    const skill = skillFromMarkdown(text)
+    if (skill) skills.push(skill)
+  }
+  return skills.sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export async function getSkill(id: string): Promise<Skill | undefined> {
@@ -303,17 +345,39 @@ export async function findSkillByName(name: string): Promise<Skill | undefined> 
 
 /** Inserts or replaces a skill, keeping the list sorted by name. */
 export async function saveSkill(skill: Skill): Promise<void> {
+  // Mirror first: keeps the UI/worker view consistent and fires onChanged.
   const skills = await listSkills()
-  const index = skills.findIndex((existing) => existing.id === skill.id)
-  if (index >= 0) skills[index] = skill
+  const existing = skills.find((entry) => entry.id === skill.id)
+  if (existing) skills[skills.indexOf(existing)] = skill
   else skills.push(skill)
   skills.sort((a, b) => a.name.localeCompare(b.name))
-  await chrome.storage.local.set({ [KEY_SKILLS]: skills })
+  await area.set({ [KEY_SKILLS]: skills })
+
+  // Durable copy as a folder-per-skill SKILL.md, like the general skills.
+  const handle = await getGrantedFsDirectory()
+  if (!handle) return
+  const fs = new FsDirectory(handle)
+  const slug = skillSlug(skill.name)
+  await fs.writeText(skillPath(slug), skillToMarkdown(skill))
+  // A rename changes the folder name; drop the stale folder so the old name
+  // does not resurface as a duplicate on the next file read.
+  if (existing && skillSlug(existing.name) !== slug) {
+    await fs.removeDirectory([SKILLS_DIR, skillSlug(existing.name)])
+  }
 }
 
 export async function deleteSkill(id: string): Promise<void> {
-  const skills = (await listSkills()).filter((skill) => skill.id !== id)
-  await chrome.storage.local.set({ [KEY_SKILLS]: skills })
+  const skills = await listSkills()
+  const victim = skills.find((skill) => skill.id === id)
+  await area.set({
+    [KEY_SKILLS]: skills.filter((skill) => skill.id !== id),
+  })
+
+  const handle = await getGrantedFsDirectory()
+  if (handle && victim) {
+    const fs = new FsDirectory(handle)
+    await fs.removeDirectory([SKILLS_DIR, skillSlug(victim.name)])
+  }
 }
 
 /** Caps stored turns so a long session cannot grow unbounded. */
@@ -343,7 +407,7 @@ export function trimConversation(
 /** Loads a conversation, returning an empty history when it is unknown. */
 export async function loadConversation(conversationId: string): Promise<WireMessage[]> {
   const key = conversationKey(conversationId)
-  const stored = await chrome.storage.local.get(key)
+  const stored = await area.get(key)
   const value = stored[key]
   return Array.isArray(value) ? (value as WireMessage[]) : []
 }
@@ -353,13 +417,13 @@ export async function saveConversation(
   conversationId: string,
   messages: WireMessage[],
 ): Promise<void> {
-  await chrome.storage.local.set({
+  await area.set({
     [conversationKey(conversationId)]: trimConversation(messages),
   })
 }
 
 export async function clearConversation(conversationId: string): Promise<void> {
-  await chrome.storage.local.remove(conversationKey(conversationId))
+  await area.remove(conversationKey(conversationId))
 }
 
 // --- Conversation metadata --------------------------------------------------
@@ -380,7 +444,7 @@ function asMeta(value: unknown): ConversationMeta | null {
 }
 
 export async function listConversations(): Promise<ConversationMeta[]> {
-  const stored = await chrome.storage.local.get(KEY_CONVERSATIONS_META)
+  const stored = await area.get(KEY_CONVERSATIONS_META)
   const list = stored[KEY_CONVERSATIONS_META]
   if (!Array.isArray(list)) return []
   return list
@@ -419,7 +483,7 @@ export async function touchConversation(
     ) {
       existing.title = firstUserText.trim().slice(0, 60) || DEFAULT_CONVERSATION_TITLE
     }
-    await chrome.storage.local.set({ [KEY_CONVERSATIONS_META]: list })
+    await area.set({ [KEY_CONVERSATIONS_META]: list })
     return existing
   }
   const trimmed = firstUserText?.trim() ?? ''
@@ -431,7 +495,7 @@ export async function touchConversation(
     preview: trimmed.slice(0, 120) || undefined,
   }
   list.push(created)
-  await chrome.storage.local.set({ [KEY_CONVERSATIONS_META]: list })
+  await area.set({ [KEY_CONVERSATIONS_META]: list })
   return created
 }
 
@@ -444,25 +508,25 @@ export async function renameConversation(
   if (meta) {
     meta.title = title.trim().slice(0, 80) || DEFAULT_CONVERSATION_TITLE
     meta.updatedAt = Date.now()
-    await chrome.storage.local.set({ [KEY_CONVERSATIONS_META]: list })
+    await area.set({ [KEY_CONVERSATIONS_META]: list })
   }
 }
 
 export async function deleteConversation(conversationId: string): Promise<void> {
   const [metaList] = await Promise.all([
-    chrome.storage.local.get(KEY_CONVERSATIONS_META),
+    area.get(KEY_CONVERSATIONS_META),
     clearConversation(conversationId),
   ])
   const list = Array.isArray(metaList[KEY_CONVERSATIONS_META])
     ? (metaList[KEY_CONVERSATIONS_META] as ConversationMeta[])
     : []
-  await chrome.storage.local.set({
+  await area.set({
     [KEY_CONVERSATIONS_META]: list.filter((meta) => meta.id !== conversationId),
   })
   // Also drop turn state and any history for this thread.
   await chrome.storage.session.remove(`${TURN_STATE_PREFIX}${conversationId}`)
   const all = await listHistory()
-  await chrome.storage.local.set({
+  await area.set({
     [KEY_HISTORY]: all.filter((entry) => entry.conversationId !== conversationId),
   })
 }
@@ -504,7 +568,7 @@ function asProfile(value: unknown): UserProfile | null {
 }
 
 export async function listProfiles(): Promise<UserProfile[]> {
-  const stored = await chrome.storage.local.get(KEY_PROFILES)
+  const stored = await area.get(KEY_PROFILES)
   const list = stored[KEY_PROFILES]
   if (!Array.isArray(list)) return []
   return list
@@ -519,12 +583,12 @@ export async function saveProfile(profile: UserProfile): Promise<void> {
   const normalized: UserProfile = { ...profile, updatedAt: Date.now() }
   if (index === -1) list.push(normalized)
   else list[index] = normalized
-  await chrome.storage.local.set({ [KEY_PROFILES]: list })
+  await area.set({ [KEY_PROFILES]: list })
 }
 
 export async function deleteProfile(id: string): Promise<void> {
   const list = await listProfiles()
-  await chrome.storage.local.set({
+  await area.set({
     [KEY_PROFILES]: list.filter((profile) => profile.id !== id),
   })
 }
@@ -568,7 +632,7 @@ function asPassword(value: unknown): PasswordEntry | null {
 }
 
 export async function listPasswords(): Promise<PasswordEntry[]> {
-  const stored = await chrome.storage.local.get(KEY_PASSWORDS)
+  const stored = await area.get(KEY_PASSWORDS)
   const list = stored[KEY_PASSWORDS]
   if (!Array.isArray(list)) return []
   return list
@@ -601,12 +665,12 @@ export async function savePassword(entry: PasswordEntry): Promise<void> {
   }
   if (index === -1) list.push(normalized)
   else list[index] = normalized
-  await chrome.storage.local.set({ [KEY_PASSWORDS]: list })
+  await area.set({ [KEY_PASSWORDS]: list })
 }
 
 export async function deletePassword(id: string): Promise<void> {
   const list = await listPasswords()
-  await chrome.storage.local.set({
+  await area.set({
     [KEY_PASSWORDS]: list.filter((entry) => entry.id !== id),
   })
 }
@@ -618,7 +682,7 @@ export async function recordPasswordUse(id: string): Promise<void> {
   if (entry) {
     entry.useCount += 1
     entry.lastUsedAt = Date.now()
-    await chrome.storage.local.set({ [KEY_PASSWORDS]: list })
+    await area.set({ [KEY_PASSWORDS]: list })
   }
 }
 
@@ -649,7 +713,7 @@ function asHistory(value: unknown): HistoryEntry | null {
 }
 
 export async function listHistory(): Promise<HistoryEntry[]> {
-  const stored = await chrome.storage.local.get(KEY_HISTORY)
+  const stored = await area.get(KEY_HISTORY)
   const list = stored[KEY_HISTORY]
   if (!Array.isArray(list)) return []
   return list
@@ -663,18 +727,18 @@ export async function addHistory(entry: HistoryEntry): Promise<void> {
   list.unshift(entry)
   // listHistory sorts by time; cap the newest N.
   const trimmed = list.slice(0, MAX_HISTORY_ENTRIES)
-  await chrome.storage.local.set({ [KEY_HISTORY]: trimmed })
+  await area.set({ [KEY_HISTORY]: trimmed })
 }
 
 export async function deleteHistory(id: string): Promise<void> {
   const list = await listHistory()
-  await chrome.storage.local.set({
+  await area.set({
     [KEY_HISTORY]: list.filter((entry) => entry.id !== id),
   })
 }
 
 export async function clearHistory(): Promise<void> {
-  await chrome.storage.local.set({ [KEY_HISTORY]: [] })
+  await area.set({ [KEY_HISTORY]: [] })
 }
 
 // --- Rebuild workflows from action history ----------------------------------

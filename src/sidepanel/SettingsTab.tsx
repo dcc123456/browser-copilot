@@ -14,6 +14,14 @@ import {
 import type { Settings } from '../lib/types'
 import { TOOL_META } from '../lib/tool-catalog'
 import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
+import {
+  clearStorageDirectory,
+  ensureFileAccess,
+  getStorageDirectoryName,
+  getStorageMode,
+  pickStorageDirectory,
+  type StorageMode,
+} from '../lib/fs-store'
 import { useT } from './i18n'
 
 /** Editable form state; numbers stay strings so partial input is allowed. */
@@ -125,6 +133,70 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   // the user expands whichever they want to inspect or change.
   const [promptOpen, setPromptOpen] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
+
+  // --- Storage location ------------------------------------------------------
+  const [storageMode, setStorageMode] = useState<StorageMode>('browser')
+  const [storageDirName, setStorageDirName] = useState<string | null>(null)
+  const [storageBusy, setStorageBusy] = useState(false)
+  const [storageNotice, setStorageNotice] = useState<{
+    kind: 'ok' | 'error'
+    text: string
+  } | null>(null)
+
+  const refreshStorage = useCallback(async (): Promise<void> => {
+    const [mode, name] = await Promise.all([getStorageMode(), getStorageDirectoryName()])
+    setStorageMode(mode)
+    setStorageDirName(name)
+  }, [])
+
+  useEffect(() => {
+    void refreshStorage()
+  }, [refreshStorage])
+
+  const chooseFolder = async (): Promise<void> => {
+    setStorageBusy(true)
+    setStorageNotice(null)
+    try {
+      await pickStorageDirectory()
+      const name = (await getStorageDirectoryName()) ?? ''
+      setStorageMode('file')
+      setStorageDirName(name)
+      setStorageNotice({ kind: 'ok', text: t.settingsStorageSynced({ name }) })
+    } catch (error) {
+      setStorageNotice({ kind: 'error', text: (error as Error).message })
+    } finally {
+      setStorageBusy(false)
+    }
+  }
+
+  const reconnectFolder = async (): Promise<void> => {
+    setStorageBusy(true)
+    setStorageNotice(null)
+    try {
+      const mode = await ensureFileAccess()
+      setStorageMode(mode)
+      if (mode === 'file') {
+        const name = (await getStorageDirectoryName()) ?? ''
+        setStorageNotice({ kind: 'ok', text: t.settingsStorageSynced({ name }) })
+      }
+    } catch (error) {
+      setStorageNotice({ kind: 'error', text: (error as Error).message })
+    } finally {
+      setStorageBusy(false)
+    }
+  }
+
+  const removeFolder = async (): Promise<void> => {
+    setStorageBusy(true)
+    setStorageNotice(null)
+    try {
+      await clearStorageDirectory()
+      setStorageMode('browser')
+      setStorageDirName(null)
+    } finally {
+      setStorageBusy(false)
+    }
+  }
 
   // Keep the editor in sync when settings arrive (or change elsewhere), without
   // clobbering text the user is actively typing.
@@ -736,6 +808,59 @@ export default function SettingsTab({ onLocaleChange }: Props) {
           <button onClick={() => void checkPage()} type="button">
             {t.settingsCheckTab}
           </button>
+        </div>
+      </div>
+
+      {/* --- Storage location --- */}
+      <div className="card">
+        <div className="card-title">{t.settingsStorage}</div>
+        <p className="hint">{t.settingsStorageIntro}</p>
+        <p className="hint">
+          {storageDirName
+            ? storageMode === 'file'
+              ? t.settingsStorageFolder({ name: storageDirName })
+              : t.settingsStorageNeedReconnect({ name: storageDirName })
+            : t.settingsStorageBrowser}
+        </p>
+        {storageNotice && (
+          <p className={storageNotice.kind === 'ok' ? 'hint ok' : 'hint error'}>
+            {storageNotice.text}
+          </p>
+        )}
+        <div className="actions">
+          {storageDirName ? (
+            <>
+              <button
+                disabled={storageBusy}
+                onClick={() => void reconnectFolder()}
+                type="button"
+              >
+                {t.settingsReconnectFolder}
+              </button>
+              <button
+                disabled={storageBusy}
+                onClick={() => void chooseFolder()}
+                type="button"
+              >
+                {t.settingsChangeFolder}
+              </button>
+              <button
+                disabled={storageBusy}
+                onClick={() => void removeFolder()}
+                type="button"
+              >
+                {t.settingsUseBrowserStorage}
+              </button>
+            </>
+          ) : (
+            <button
+              disabled={storageBusy}
+              onClick={() => void chooseFolder()}
+              type="button"
+            >
+              {t.settingsChooseFolder}
+            </button>
+          )}
         </div>
       </div>
     </div>

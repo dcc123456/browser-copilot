@@ -16,6 +16,7 @@ import { sendCommand } from '../lib/messages'
 import { createDraft } from '../lib/task-store'
 import { describeSchedule, isManualSchedule } from '../lib/schedule'
 import type { FeishuConfig, ScheduledTask } from '../lib/scheduler-types'
+import type { Workflow } from '../lib/workflow/types'
 import { useT } from './i18n'
 import { confirmDialog } from '../ui/confirm'
 
@@ -49,6 +50,7 @@ function emptyTask(): Draft {
 export default function TasksTab() {
   const t = useT()
   const [tasks, setTasks] = useState<ScheduledTask[]>([])
+  const [workflows, setWorkflows] = useState<Workflow[]>([])
   const [feishu, setFeishu] = useState<FeishuConfig | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [banner, setBanner] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
@@ -65,12 +67,14 @@ export default function TasksTab() {
 
   const load = useCallback(async () => {
     try {
-      const [taskResult, feishuResult] = await Promise.all([
+      const [taskResult, feishuResult, workflowResult] = await Promise.all([
         sendCommand({ type: 'tasks.list' }),
         sendCommand({ type: 'feishu.get' }),
+        sendCommand({ type: 'workflows.list' }),
       ])
       if (taskResult.type === 'tasks.list') setTasks(taskResult.tasks)
       if (feishuResult.type === 'feishu.get') setFeishu(feishuResult.config)
+      if (workflowResult.type === 'workflows.list') setWorkflows(workflowResult.workflows)
     } catch (error) {
       setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
     }
@@ -202,6 +206,7 @@ export default function TasksTab() {
       {draft && (
         <TaskEditor
           draft={draft}
+          workflows={workflows}
           onCancel={() => setDraft(null)}
           onChange={setDraft}
           onSave={persistTask}
@@ -257,7 +262,11 @@ export default function TasksTab() {
                   {describeSchedule(task.schedule, zh ? 'zh' : 'en')}
                 </span>
                 <span className="task-chip">
-                  {task.kind === 'github-review-requests' ? t.taskKindGithub : t.taskKindPrompt}
+                  {task.kind === 'github-review-requests'
+                    ? t.taskKindGithub
+                    : task.kind === 'workflow'
+                      ? t.taskKindWorkflow
+                      : t.taskKindPrompt}
                 </span>
                 {task.notifyFeishu && <span className="task-chip task-chip-feishu">Feishu</span>}
               </div>
@@ -320,12 +329,14 @@ export default function TasksTab() {
 
 function TaskEditor({
   draft,
+  workflows,
   onChange,
   onCancel,
   onSave,
   disabled,
 }: {
   draft: Draft
+  workflows: Workflow[]
   onChange: (task: Draft) => void
   onCancel: () => void
   onSave: (task: Draft) => void
@@ -335,6 +346,19 @@ function TaskEditor({
   const zh = navigator.language.toLowerCase().startsWith('zh')
   const update = <K extends keyof Draft>(key: K, value: Draft[K]): void =>
     onChange({ ...draft, [key]: value })
+
+  // Only the agent-prompt and workflow kinds are configurable in the editor;
+  // the built-in GitHub review task is managed through its own entry.
+  const kind = draft.kind === 'workflow' ? 'workflow' : 'agent-prompt'
+  const selectKind = (next: 'agent-prompt' | 'workflow'): void => {
+    if (kind === next) return
+    onChange({
+      ...draft,
+      kind: next,
+      // Clear the field that no longer applies when switching kinds.
+      ...(next === 'workflow' ? { prompt: undefined } : { workflowId: undefined }),
+    })
+  }
 
   const WEEKDAYS = [1, 2, 3, 4, 5]
   const WEEKEND = [6, 0]
@@ -384,7 +408,9 @@ function TaskEditor({
     setDays(has ? sched.days.filter((d) => d !== day) : [...sched.days, day])
   }
 
-  const canSave = draft.name.trim().length > 0
+  const canSave =
+    draft.name.trim().length > 0 &&
+    (draft.kind !== 'workflow' || !!draft.workflowId)
 
   return (
     <div className="card task-editor">
@@ -397,16 +423,60 @@ function TaskEditor({
         />
       </label>
 
-      <label className="field">
-        <span>{t.taskPrompt}</span>
-        <textarea
-          disabled={disabled}
-          onChange={(event) => onChange({ ...draft, prompt: event.target.value })}
-          placeholder={t.taskPromptHint}
-          rows={5}
-          value={draft.prompt ?? ''}
-        />
-      </label>
+      <fieldset className="field kind-field">
+        <legend>{t.taskKind}</legend>
+        <div className="seg-control" role="radiogroup">
+          {(
+            [
+              { kind: 'agent-prompt', label: t.taskKindPrompt },
+              { kind: 'workflow', label: t.taskKindWorkflow },
+            ] as const
+          ).map((opt) => (
+            <label
+              className={`seg-btn${kind === opt.kind ? ' seg-btn-on' : ''}`}
+              key={opt.kind}
+            >
+              <input
+                checked={kind === opt.kind}
+                disabled={disabled}
+                onChange={() => selectKind(opt.kind)}
+                type="radio"
+              />
+              <span>{opt.label}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
+      {kind === 'workflow' ? (
+        <label className="field">
+          <span>{t.taskWorkflow}</span>
+          <select
+            disabled={disabled || workflows.length === 0}
+            onChange={(event) => update('workflowId', event.target.value || undefined)}
+            value={draft.workflowId ?? ''}
+          >
+            <option value="">{t.taskWorkflowPlaceholder}</option>
+            {workflows.map((wf) => (
+              <option key={wf.id} value={wf.id}>
+                {wf.name}
+              </option>
+            ))}
+          </select>
+          <p className="hint">{t.taskWorkflowHint}</p>
+        </label>
+      ) : (
+        <label className="field">
+          <span>{t.taskPrompt}</span>
+          <textarea
+            disabled={disabled}
+            onChange={(event) => onChange({ ...draft, prompt: event.target.value })}
+            placeholder={t.taskPromptHint}
+            rows={5}
+            value={draft.prompt ?? ''}
+          />
+        </label>
+      )}
 
       <fieldset className="field schedule-field">
         <legend>{t.taskSchedule}</legend>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { effectiveLocale, messagesFor, type Messages } from '../lib/i18n'
 import { sendCommand } from '../lib/messages'
+import { syncToFiles } from '../lib/fs-store'
 import type { Skill } from '../lib/types'
 import ChatTab from './ChatTab'
 import DataTab from './DataTab'
@@ -64,6 +65,10 @@ export default function App() {
       }
     })()
     void refreshSkills()
+    // Best-effort push of any browser-mirror writes the service worker made
+    // while the file handle was unavailable (e.g. right after a restart, before
+    // the panel re-granted access). Idempotent and safe to run on every open.
+    void syncToFiles().catch(() => {})
   }, [refreshSkills])
 
   const locale = effectiveLocale(
