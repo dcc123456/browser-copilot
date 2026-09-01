@@ -130,3 +130,34 @@ export async function writeFileToDownloadDir(
     return false
   }
 }
+
+/**
+ * 内部使用 chrome.runtime 发送消息（仅调用时引用，import 本身不触发，
+ * 因此在无 chrome 的测试环境中导入本模块不受影响）。
+ *
+ * Sends a "please pick a save location" request to the side panel, which is the
+ * only context that can open `showSaveFilePicker` (it needs a document).
+ * Resolves false/false if the panel is closed or does not answer within 4s, so
+ * callers can fall back instead of hanging. Shared by workflow blocks and the
+ * chat agent's `save_local` tool.
+ */
+export async function askSaveViaSidePanel(
+  suggestedName: string,
+): Promise<{ ok: boolean; canceled: boolean }> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ ok: false, canceled: false }), 4000)
+    void chrome.runtime
+      .sendMessage({ type: 'download:save-picker', payload: { suggestedName } })
+      .then(
+        (reply) => {
+          clearTimeout(timer)
+          const r = reply as { ok?: boolean; canceled?: boolean } | undefined
+          resolve({ ok: Boolean(r?.ok), canceled: Boolean(r?.canceled) })
+        },
+        () => {
+          clearTimeout(timer)
+          resolve({ ok: false, canceled: false })
+        },
+      )
+  })
+}

@@ -18,6 +18,7 @@ import { streamCompletion, type WireMessage } from '../../lib/llm'
 import { getSettings } from '../../lib/storage'
 import { interpolate } from '../../lib/workflow/interpolate'
 import {
+  askSaveViaSidePanel,
   getDownloadDir,
   resolveTransferMode,
   writeFileToDownloadDir,
@@ -1243,30 +1244,6 @@ const saveAssetsExec: BlockExecutor = async (_data, ctx) => {
   assertActive(ctx)
   ctx.emit('info', 'save-assets: 资源保存需工作区目标，当前为占位实现')
   return null
-}
-
-/**
- * 请求侧面板弹出“另存为”框来选择保存位置。侧面板是唯一能调用
- * showSaveFilePicker 的上下文（它需要文档与用户手势）；若侧面板未打开则超时，
- * 以便执行器回退为通知用户而不是一直挂起。
- */
-async function askSaveViaSidePanel(suggestedName: string): Promise<{ ok: boolean; canceled: boolean }> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve({ ok: false, canceled: false }), 4000)
-    void chrome.runtime
-      .sendMessage({ type: 'download:save-picker', payload: { suggestedName } })
-      .then(
-        (reply) => {
-          clearTimeout(timer)
-          const r = reply as { ok?: boolean; canceled?: boolean } | undefined
-          resolve({ ok: Boolean(r?.ok), canceled: Boolean(r?.canceled) })
-        },
-        () => {
-          clearTimeout(timer)
-          resolve({ ok: false, canceled: false })
-        },
-      )
-  })
 }
 
 const saveLocal: BlockExecutor = async (data, ctx) => {
