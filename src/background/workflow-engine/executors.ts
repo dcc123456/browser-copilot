@@ -1272,7 +1272,9 @@ async function askSaveViaSidePanel(suggestedName: string): Promise<{ ok: boolean
 const saveLocal: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
-  const filename = interpolate(String(data['filename'] ?? 'file.txt'), ctx.variables, ctx.refData)
+  // 空串也要回退到默认名（`data['filename'] ?? ...` 挡不住 `''`，那会让自动保存
+  // 因非法文件名静默失败）。
+  const filename = interpolate(String(data['filename'] || 'file.txt'), ctx.variables, ctx.refData)
   const rawSaveMode = String(data['saveMode'] ?? 'auto')
   const saveMode: SaveMode = rawSaveMode === 'manual' ? 'manual' : rawSaveMode === 'force' ? 'force' : 'auto'
   const variable = String(data['variableName'] ?? 'lastSavedPath')
@@ -1303,8 +1305,12 @@ const saveLocal: BlockExecutor = async (data, ctx) => {
   }
 
   const res = await askSaveViaSidePanel(filename)
-  if (res.ok || res.canceled) {
-    ctx.emit('result', res.canceled ? '用户取消了保存' : `已通过另存为保存: ${filename}`)
+  if (res.canceled) {
+    ctx.emit('result', '用户取消了保存')
+  } else if (res.ok) {
+    // 与自动保存路径保持一致：另存为成功同样回填输出变量，避免下游读到陈旧值。
+    ctx.variables[variable] = filename
+    ctx.emit('result', `已通过另存为保存: ${filename}`)
   } else {
     ctx.emit('error', '无法弹出保存对话框：请打开侧面板后重试')
   }
