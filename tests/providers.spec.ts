@@ -156,6 +156,7 @@ describe('normalizeStoredSettings', () => {
         maxToolRounds: 20,
         disabledTools: [],
         systemPromptOverride: '',
+        downloadAutoSave: true,
       })
     }
   })
@@ -169,6 +170,7 @@ describe('normalizeStoredSettings', () => {
       maxToolRounds: 25,
       disabledTools: [],
       systemPromptOverride: '',
+      downloadAutoSave: true,
     }
     expect(normalizeStoredSettings(settings)).toEqual(settings)
   })
@@ -195,6 +197,7 @@ describe('normalizeStoredSettings', () => {
       maxToolRounds: 20,
       disabledTools: [],
       systemPromptOverride: '',
+      downloadAutoSave: true,
     })
   })
 
