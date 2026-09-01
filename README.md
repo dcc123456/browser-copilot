@@ -26,8 +26,11 @@ through a whole checkout or setup flow — while you watch or stay hands-off.
   task finishes, or DM the bot a request from your phone and watch it execute
   in the browser on your machine and reply with the result.
 - 🔒 **Private by construction.** No accounts, no telemetry, no cloud server.
-  Your keys and data stay in your browser; passwords are filled locally and
+  Your keys and data stay on your machine; passwords are filled locally and
   never shown to the model.
+- 💾 **Own your data as files.** Pick a folder in Settings and everything —
+  conversations, skills, workflows — is written to real files on your disk;
+  the browser cache is kept as a read mirror.
 
 It never acts on its own initiative — every action is either part of answering
 something you just asked, a [scheduled task](#scheduled-tasks) you created, a
@@ -207,9 +210,9 @@ window for long pages.
 
 Add multiple providers and switch with **Use this**; keys are stored per profile.
 **Max action steps per reply** (default 20, range 1–100) bounds a confused model;
-send "continue" if it hits the cap. Keys live in `chrome.storage.local` on this
-machine only (not synced, not encrypted) — use a local model if that's
-unacceptable.
+send "continue" if it hits the cap. Keys live on this machine only (as files once
+you pick a storage folder — not synced, not encrypted) — use a local model if
+that's unacceptable.
 
 ---
 
@@ -225,9 +228,13 @@ unacceptable.
   copy button); your own text stays as typed.
 - **Language & theme.** Settings → Language (English / 简体中文 / Auto); the
   panel follows the OS light/dark theme live.
+- **Storage location.** Settings → Storage location lets you choose a folder on
+  your disk; everything is then stored as real files there (see
+  [Saved data and privacy](#saved-data-and-privacy)). Until you pick one,
+  data stays in browser storage.
 - **History.** The clock icon opens past conversations — continue, preview,
-  rename, or delete. Threads persist in `chrome.storage.local` (newest 200
-  messages each).
+  rename, or delete. Threads persist on this machine (newest 200 messages
+  each) — as real files once a storage folder is set.
 
 ---
 
@@ -243,6 +250,13 @@ Once a skill is selected, it is forced onto that turn — the full instructions 
 injected into the system prompt and the user's message is bound to apply them, so
 the model cannot answer outside the skill. Only names/descriptions are shown
 beforehand; full instructions load on demand.
+
+**Skills are files, like general skills.** Each skill is stored as its own folder
+named by its slug, holding a `SKILL.md` with YAML frontmatter (`name`,
+`description`, `autoMatch`, …) and a Markdown body with the instructions. Once a
+storage folder is set, they live at `skills/<slug>/SKILL.md` on your disk — you
+can hand-edit them there and Browser Copilot picks up the changes. Without a
+storage folder they fall back to browser storage.
 
 ---
 
@@ -357,8 +371,24 @@ drops. Without app credentials, notifications still work; inbound commands don't
 The **Data** tab holds a fillable **profile** (name/email/phone/address),
 **passwords** (filled via `get_secret`, never returned to the model), and an
 **operation history** (every click/fill/scroll/navigation, with timestamp and
-host). Everything is in `chrome.storage.local` on this machine — not synced, not
-sent to the model, and passwords are not encrypted at rest.
+host). Everything stays on this machine — not synced, not sent to the model,
+and passwords are not encrypted at rest.
+
+**Storage location.** By default data lives in Chrome's `chrome.storage.local`.
+Open **Settings → Storage location** and pick a folder to move it to real files
+on your disk (via the File System Access API). From then on everything is
+written under a `browser-copilot/` folder inside your chosen directory:
+
+- `conversations/<id>.json` — chat transcripts;
+- `skills/<slug>/SKILL.md` — [skills](#skills), one folder per skill;
+- `<key>.json` — everything else: settings, providers, workflows, profile,
+  credentials, and more.
+
+`chrome.storage.local` becomes a read mirror used as a fallback whenever the
+disk is unavailable — nothing is lost if a write fails, and corrupted files
+fall back to the mirror automatically. Switch back to browser storage any time
+from the same settings card; existing data migrates to the folder the first
+time you pick it.
 
 | Permission | Purpose |
 | --- | --- |
@@ -407,9 +437,10 @@ the loadable zip to the GitHub Release.
 
 Key design notes: Markdown is parsed to a typed tree (never HTML, no
 `dangerouslySetInnerHTML`); the in-page kernel is self-contained and injected
-across frames; all durable state lives in `chrome.storage` because MV3 service
-workers are evicted at idle; mode and step cap are read per action so settings
-changes apply without a reload.
+across frames; durable state is persisted to real files when a storage folder is
+chosen (with `chrome.storage.local` as a mirror) so data survives MV3
+service-worker eviction at idle; mode and step cap are read per action so
+settings changes apply without a reload.
 
 ---
 
