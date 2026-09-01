@@ -120,8 +120,11 @@ export async function writeFileToDownloadDir(
   try {
     const fileHandle = await dir.getFileHandle(filename, { create: true })
     const writable = await fileHandle.createWritable()
-    await writable.write(text)
-    await writable.close()
+    try {
+      await writable.write(text)
+    } finally {
+      await writable.close()
+    }
     return true
   } catch {
     return false
