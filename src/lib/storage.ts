@@ -65,6 +65,7 @@ export const DEFAULT_SETTINGS: Settings = {
   maxToolRounds: 20,
   disabledTools: [],
   systemPromptOverride: '',
+  downloadAutoSave: true,
 }
 
 /**
@@ -137,6 +138,8 @@ export function normalizeStoredSettings(raw: unknown): Settings {
       ? value.disabledTools.filter((n): n is string => typeof n === 'string')
       : [],
     systemPromptOverride: typeof value.systemPromptOverride === 'string' ? value.systemPromptOverride : '',
+    downloadAutoSave:
+      typeof value.downloadAutoSave === 'boolean' ? value.downloadAutoSave : true,
   }
 }
 

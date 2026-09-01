@@ -365,6 +365,7 @@ export function normalizeSettingsPayload(raw: unknown): {
   maxToolRounds: number
   disabledTools: string[]
   systemPromptOverride: string
+  downloadAutoSave: boolean
 } {
   const value = (raw ?? {}) as Record<string, unknown>
   const providers = Array.isArray(value.providers)
@@ -387,6 +388,8 @@ export function normalizeSettingsPayload(raw: unknown): {
     : []
   const systemPromptOverride =
     typeof value.systemPromptOverride === 'string' ? value.systemPromptOverride : ''
+  const downloadAutoSave =
+    typeof value.downloadAutoSave === 'boolean' ? value.downloadAutoSave : true
   return {
     providers,
     // Never point at a profile that is not in the list, or the editor would open
@@ -407,5 +410,6 @@ export function normalizeSettingsPayload(raw: unknown): {
     maxToolRounds,
     disabledTools,
     systemPromptOverride,
+    downloadAutoSave,
   }
 }

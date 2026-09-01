@@ -70,6 +70,10 @@ export interface Settings {
    * use the built-in default; non-empty replaces the default rules verbatim.
    */
   systemPromptOverride: string
+  /**
+   * 已设置下载目录时，直接把工作流产生的文件保存到该目录而不询问；关闭（或无目录）时询问用户保存位置。
+   */
+  downloadAutoSave: boolean
 }
 
 /** Text scraped from a tab, for use as agent context. */
