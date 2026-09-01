@@ -115,6 +115,34 @@ export default function App() {
     return () => window.removeEventListener('bc:open-history', handler)
   }, [])
 
+  // Worker asks the side panel to invoke the native "save as" picker. Only the
+  // panel can do this because it needs a user gesture; the worker then gets
+  // `{ ok }` / `{ ok:false, canceled }` back via sendResponse.
+  useEffect(() => {
+    const type = 'download:save-picker'
+    const handler = (
+      message: { type?: string; payload?: { suggestedName?: string } },
+      _sender: chrome.runtime.MessageSender,
+      sendResponse: (response?: unknown) => void,
+    ): boolean | undefined => {
+      if (message?.type !== type) return
+      void (async () => {
+        try {
+          await window.showSaveFilePicker({
+            suggestedName: message.payload?.suggestedName ?? 'file.txt',
+          })
+          sendResponse({ ok: true })
+        } catch (error) {
+          const canceled = error instanceof DOMException && error.name === 'AbortError'
+          sendResponse({ ok: false, canceled })
+        }
+      })()
+      return true
+    }
+    chrome.runtime.onMessage.addListener(handler)
+    return () => chrome.runtime.onMessage.removeListener(handler)
+  }, [])
+
   return (
     <I18nProvider value={i18n}>
       <nav className="tabs">

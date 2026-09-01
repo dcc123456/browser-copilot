@@ -387,6 +387,9 @@ chrome.action.onClicked.addListener((tab) => {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   void (async () => {
     try {
+      // 另存为 picker 请求由侧面板处理，这里直接放行。
+      if (message?.type === 'download:save-picker') return false as unknown as void
+
       // 1. Recording events are one-way (in-page recorder -> controller).
       if (handleRecordEvent(message)) {
         sendResponse({ ok: true })

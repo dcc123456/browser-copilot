@@ -41,7 +41,31 @@ declare global {
     values(): AsyncIterableIterator<FileSystemHandle>
   }
 
+  interface SaveFilePickerOptions {
+    id?: string
+    suggestedName?: string
+    startIn?:
+      | 'desktop'
+      | 'documents'
+      | 'downloads'
+      | 'music'
+      | 'pictures'
+      | 'videos'
+      | FileSystemHandle
+    types?: Array<{ description?: string; accept: Record<string, string[]> }>
+    excludeAcceptAllOption?: boolean
+  }
+
+  interface FileSystemFileHandle {
+    createWritable(options?: FileSystemCreateWritableOptions): Promise<FileSystemWritableFileStream>
+  }
+
+  interface FileSystemCreateWritableOptions {
+    keepExistingData?: boolean
+  }
+
   interface Window {
     showDirectoryPicker(options?: DirectoryPickerOptions): Promise<FileSystemDirectoryHandle>
+    showSaveFilePicker(options?: SaveFilePickerOptions): Promise<FileSystemFileHandle>
   }
 }
