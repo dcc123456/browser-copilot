@@ -637,6 +637,18 @@ export const WORKFLOW_BLOCKS: BlockDefinition[] = [
     ],
   },
   {
+    id: 'save-local',
+    category: 'integration',
+    label: '保存到本地',
+    description: '把变量/数据内容保存为本地文件（可自动保存到下载目录，或让用户选择保存位置）。',
+    params: [
+      { name: 'value', label: '内容', type: 'string' },
+      { name: 'filename', label: '文件名', type: 'string' },
+      { name: 'saveMode', label: '保存方式', type: 'string', default: 'auto' },
+      { name: 'variableName', label: '变量名', type: 'string', default: 'lastSavedPath' },
+    ],
+  },
+  {
     id: 'save-assets',
     category: 'integration',
     label: '保存资源',

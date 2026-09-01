@@ -17,6 +17,12 @@ import { isInjectablePage } from '../../lib/pages'
 import { streamCompletion, type WireMessage } from '../../lib/llm'
 import { getSettings } from '../../lib/storage'
 import { interpolate } from '../../lib/workflow/interpolate'
+import {
+  getDownloadDir,
+  resolveTransferMode,
+  writeFileToDownloadDir,
+  type SaveMode,
+} from '../../lib/download-dir'
 import { aiAgent } from './ai-agent-executor'
 import type { Op, ScrollSpec, Target, TargetSpec } from '../../lib/ops'
 import { activeTab } from '../page'
@@ -1239,6 +1245,71 @@ const saveAssetsExec: BlockExecutor = async (_data, ctx) => {
   return null
 }
 
+/**
+ * 请求侧面板弹出“另存为”框来选择保存位置。侧面板是唯一能调用
+ * showSaveFilePicker 的上下文（它需要文档与用户手势）；若侧面板未打开则超时，
+ * 以便执行器回退为通知用户而不是一直挂起。
+ */
+async function askSaveViaSidePanel(suggestedName: string): Promise<{ ok: boolean; canceled: boolean }> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ ok: false, canceled: false }), 4000)
+    void chrome.runtime
+      .sendMessage({ type: 'download:save-picker', payload: { suggestedName } })
+      .then(
+        (reply) => {
+          clearTimeout(timer)
+          const r = reply as { ok?: boolean; canceled?: boolean } | undefined
+          resolve({ ok: Boolean(r?.ok), canceled: Boolean(r?.canceled) })
+        },
+        () => {
+          clearTimeout(timer)
+          resolve({ ok: false, canceled: false })
+        },
+      )
+  })
+}
+
+const saveLocal: BlockExecutor = async (data, ctx) => {
+  assertActive(ctx)
+  const value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
+  const filename = interpolate(String(data['filename'] ?? 'file.txt'), ctx.variables, ctx.refData)
+  const saveMode = (String(data['saveMode'] ?? 'auto') as SaveMode) || 'auto'
+  const variable = String(data['variableName'] ?? 'lastSavedPath')
+
+  const settings = await getSettings()
+  const dir = await getDownloadDir()
+
+  // 存过期的句柄可能已丢失权限（worker 无法重新申请），故通过一次探测写判断是否仍可用。
+  let hasDir = dir !== null
+  if (hasDir && dir) {
+    try {
+      await dir.getFileHandle('.probe-download-permission', { create: true })
+    } catch {
+      hasDir = false
+    }
+  }
+
+  const transfer = resolveTransferMode(saveMode, settings.downloadAutoSave, hasDir)
+
+  if (transfer === 'auto' && dir) {
+    const ok = await writeFileToDownloadDir(dir, filename, value)
+    if (ok) {
+      ctx.variables[variable] = filename
+      ctx.emit('result', `已自动保存: ${filename}`)
+      return null
+    }
+    ctx.emit('info', '自动保存失败，改为询问保存位置')
+  }
+
+  const res = await askSaveViaSidePanel(filename)
+  if (res.ok || res.canceled) {
+    ctx.emit('result', res.canceled ? '用户取消了保存' : `已通过另存为保存: ${filename}`)
+  } else {
+    ctx.emit('error', '无法弹出保存对话框：请打开侧面板后重试')
+  }
+  return null
+}
+
 const proxyExec: BlockExecutor = async (_data, ctx) => {
   assertActive(ctx)
   ctx.emit('info', 'proxy: 代理配置需浏览器级设置，当前为占位实现')
@@ -1598,6 +1669,7 @@ export const EXECUTORS: Record<string, BlockExecutor> = {
   'trigger-event': triggerEventExec,
   'browser-event': browserEvent,
   'handle-download': handleDownload,
+  'save-local': saveLocal,
   'save-assets': saveAssetsExec,
   'proxy': proxyExec,
   'google-sheets': googleSheets,
