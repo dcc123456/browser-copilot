@@ -1,7 +1,8 @@
 /**
  * Persistence for workflows.
  *
- * Workflows live in `chrome.storage.local` under the single `'workflows'` key,
+ * Workflows live under the single `'workflows'` key in durable storage (real
+ * JSON files when a directory is configured, else `chrome.storage.local`),
  * mirroring the rest of the codebase (see `task-store.ts`). Kept in
  * `lib/workflow/*` rather than shared `storage.ts` because workflows have their
  * own schema and their own normalization rules; lumping them in would widen
@@ -11,6 +12,7 @@
  */
 
 import { newId } from '../storage'
+import { fileStorageArea } from '../fs-store'
 import { migrateWorkflow } from './migrate'
 import type {
   Workflow,
@@ -20,6 +22,12 @@ import type {
 } from './types'
 
 const KEY_WORKFLOWS = 'workflows'
+
+/**
+ * The active storage area: files when a directory is configured and granted,
+ * otherwise the `chrome.storage.local` mirror (see `lib/fs-store.ts`).
+ */
+const area = fileStorageArea()
 
 const DEFAULT_SETTINGS: WorkflowSettings = {
   saveLog: false,
@@ -114,7 +122,7 @@ export function asWorkflow(value: unknown): Workflow | null {
 }
 
 export async function listWorkflows(): Promise<Workflow[]> {
-  const stored = await chrome.storage.local.get(KEY_WORKFLOWS)
+  const stored = await area.get(KEY_WORKFLOWS)
   const list = stored[KEY_WORKFLOWS]
   if (!Array.isArray(list)) return []
   return list
@@ -139,12 +147,12 @@ export async function saveWorkflow(workflow: Workflow): Promise<void> {
   const index = list.findIndex((existing) => existing.id === workflow.id)
   if (index >= 0) list[index] = canonical
   else list.push(canonical)
-  await chrome.storage.local.set({ [KEY_WORKFLOWS]: list })
+  await area.set({ [KEY_WORKFLOWS]: list })
 }
 
 export async function deleteWorkflow(id: string): Promise<void> {
   const list = await listWorkflows()
-  await chrome.storage.local.set({
+  await area.set({
     [KEY_WORKFLOWS]: list.filter((workflow) => workflow.id !== id),
   })
 }

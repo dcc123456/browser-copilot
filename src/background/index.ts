@@ -40,6 +40,9 @@ import {
   initShortcutTriggers,
   handleShortcutPressed,
   setWorkflowRunner,
+  rescheduleAllWorkflowTriggers,
+  isWorkflowTriggerAlarm,
+  handleWorkflowTriggerAlarm,
 } from './workflow-triggers'
 import { validateProfile } from '../lib/providers'
 import { normalizeSkill, validateSkill, wrapSkillDirective } from '../lib/skills'
@@ -160,6 +163,9 @@ chrome.runtime.onInstalled.addListener(() => {
   void rescheduleAll().catch((error: unknown) =>
     console.error('[Browser Copilot] could not reschedule tasks', error),
   )
+  void rescheduleAllWorkflowTriggers().catch((error: unknown) =>
+    console.error('[Browser Copilot] could not reschedule workflow triggers', error),
+  )
   if (chrome.contextMenus) {
     void registerContextMenuWorkflows().catch((error: unknown) =>
       console.error('[Browser Copilot] could not register context-menu workflows', error),
@@ -172,6 +178,9 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onStartup.addListener(() => {
   void rescheduleAll().catch((error: unknown) =>
     console.error('[Browser Copilot] could not reschedule tasks', error),
+  )
+  void rescheduleAllWorkflowTriggers().catch((error: unknown) =>
+    console.error('[Browser Copilot] could not reschedule workflow triggers', error),
   )
   void feishuBot.reconcile()
   // Run workflows whose trigger block is "on-startup".
@@ -203,6 +212,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   try {
     if (alarm.name === FEISHU_WATCHDOG_ALARM) {
       feishuBot.onWatchdog()
+      return
+    }
+    if (isWorkflowTriggerAlarm(alarm.name)) {
+      void handleWorkflowTriggerAlarm(alarm.name)
       return
     }
     onAlarm(alarm)
@@ -326,6 +339,9 @@ function recordStep(
 initLastTabTracker()
 void rescheduleAll().catch((error: unknown) =>
   console.error('[Browser Copilot] could not reschedule tasks', error),
+)
+void rescheduleAllWorkflowTriggers().catch((error: unknown) =>
+  console.error('[Browser Copilot] could not reschedule workflow triggers', error),
 )
 void feishuBot.reconcile()
 
@@ -683,10 +699,12 @@ async function handleCommand(command: Command): Promise<CommandResult> {
 
     case 'workflows.save':
       await saveWorkflow(command.workflow)
+      await rescheduleAllWorkflowTriggers()
       return { type: 'workflows.save' }
 
     case 'workflows.delete':
       await deleteWorkflow(command.id)
+      await rescheduleAllWorkflowTriggers()
       return { type: 'workflows.delete' }
 
     case 'workflows.run': {

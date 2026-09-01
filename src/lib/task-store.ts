@@ -9,6 +9,7 @@
  */
 
 import { newId } from './storage'
+import { fileStorageArea } from './fs-store'
 import {
   DEFAULT_TASK_MAX_TOOL_ROUNDS,
   EMPTY_FEISHU_CONFIG,
@@ -31,6 +32,12 @@ function coerceMaxToolRounds(value: unknown): number {
 const KEY_TASKS = 'scheduledTasks'
 const KEY_RUNS = 'scheduledTaskRuns'
 const KEY_FEISHU = 'feishuConfig'
+
+/**
+ * The active storage area: files when a directory is configured and granted,
+ * otherwise the `chrome.storage.local` mirror (see `lib/fs-store.ts`).
+ */
+const area = fileStorageArea()
 
 /** Hard cap so a daily task running for years cannot grow storage unbounded. */
 export const MAX_RUN_LOGS = 100
@@ -64,7 +71,7 @@ function asTask(value: unknown): ScheduledTask | null {
 }
 
 export async function listTasks(): Promise<ScheduledTask[]> {
-  const stored = await chrome.storage.local.get(KEY_TASKS)
+  const stored = await area.get(KEY_TASKS)
   const list = stored[KEY_TASKS]
   if (!Array.isArray(list)) return []
   return list
@@ -83,7 +90,7 @@ export async function saveTask(task: ScheduledTask): Promise<void> {
   const normalized: ScheduledTask = { ...task, updatedAt: Date.now() }
   if (index >= 0) list[index] = normalized
   else list.push(normalized)
-  await chrome.storage.local.set({ [KEY_TASKS]: list })
+  await area.set({ [KEY_TASKS]: list })
 }
 
 export function createDraft(partial?: Partial<ScheduledTask>): ScheduledTask {
@@ -107,7 +114,7 @@ export function createDraft(partial?: Partial<ScheduledTask>): ScheduledTask {
 
 export async function deleteTask(id: string): Promise<void> {
   const list = await listTasks()
-  await chrome.storage.local.set({
+  await area.set({
     [KEY_TASKS]: list.filter((task) => task.id !== id),
   })
 }
@@ -125,7 +132,7 @@ export async function recordTaskRun(
   task.lastSummary = result.lastSummary
   task.lastError = result.lastError
   task.updatedAt = Date.now()
-  await chrome.storage.local.set({ [KEY_TASKS]: list })
+  await area.set({ [KEY_TASKS]: list })
 }
 
 // --- Run logs ----------------------------------------------------------------
@@ -178,7 +185,7 @@ function asRun(value: unknown): TaskRunLog | null {
 }
 
 export async function listRuns(taskId?: string): Promise<TaskRunLog[]> {
-  const stored = await chrome.storage.local.get(KEY_RUNS)
+  const stored = await area.get(KEY_RUNS)
   const list = stored[KEY_RUNS]
   if (!Array.isArray(list)) return []
   return list
@@ -195,7 +202,7 @@ export async function addRun(run: Omit<TaskRunLog, 'id' | 'at'>): Promise<TaskRu
   const list = await listRuns()
   const entry: TaskRunLog = { ...run, id: newId(), at: Date.now() }
   list.unshift(entry)
-  await chrome.storage.local.set({ [KEY_RUNS]: list.slice(0, MAX_RUN_LOGS) })
+  await area.set({ [KEY_RUNS]: list.slice(0, MAX_RUN_LOGS) })
   return entry
 }
 
@@ -247,23 +254,23 @@ export async function recordFinishedRun(input: FinishedRunInput): Promise<TaskRu
   const existing = list.findIndex((r) => r.id === input.runId)
   if (existing !== -1) list[existing] = entry
   else list.unshift(entry)
-  await chrome.storage.local.set({ [KEY_RUNS]: list.slice(0, MAX_RUN_LOGS) })
+  await area.set({ [KEY_RUNS]: list.slice(0, MAX_RUN_LOGS) })
   return entry
 }
 
 export async function clearRuns(taskId?: string): Promise<void> {
   if (!taskId) {
-    await chrome.storage.local.set({ [KEY_RUNS]: [] })
+    await area.set({ [KEY_RUNS]: [] })
     return
   }
   const list = await listRuns()
-  await chrome.storage.local.set({ [KEY_RUNS]: list.filter((run) => run.taskId !== taskId) })
+  await area.set({ [KEY_RUNS]: list.filter((run) => run.taskId !== taskId) })
 }
 
 /** Deletes a single run-log entry by its id. */
 export async function deleteRun(id: string): Promise<void> {
   const list = await listRuns()
-  await chrome.storage.local.set({ [KEY_RUNS]: list.filter((run) => run.id !== id) })
+  await area.set({ [KEY_RUNS]: list.filter((run) => run.id !== id) })
 }
 
 // --- Feishu config -----------------------------------------------------------
@@ -281,12 +288,12 @@ function asFeishu(value: unknown): FeishuConfig {
 }
 
 export async function getFeishuConfig(): Promise<FeishuConfig> {
-  const stored = await chrome.storage.local.get(KEY_FEISHU)
+  const stored = await area.get(KEY_FEISHU)
   return asFeishu(stored[KEY_FEISHU])
 }
 
 export async function saveFeishuConfig(config: FeishuConfig): Promise<FeishuConfig> {
   const normalized = asFeishu(config)
-  await chrome.storage.local.set({ [KEY_FEISHU]: normalized })
+  await area.set({ [KEY_FEISHU]: normalized })
   return normalized
 }

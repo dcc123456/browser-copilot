@@ -84,8 +84,12 @@ export interface Messages {
   taskKind: string
   taskKindGithub: string
   taskKindPrompt: string
+  taskKindWorkflow: string
   taskPrompt: string
   taskPromptHint: string
+  taskWorkflow: string
+  taskWorkflowPlaceholder: string
+  taskWorkflowHint: string
   taskSchedule: string
   taskSchedDaily: string
   taskSchedWeekdays: string
@@ -411,6 +415,20 @@ export interface Messages {
   settingsPageReadable: (params: { title: string }) => string
   settingsPageBlocked: (params: { reason: string }) => string
 
+  // Settings · storage location
+  settingsStorage: string
+  settingsStorageIntro: string
+  settingsStorageBrowser: string
+  settingsStorageFile: string
+  settingsStorageFolder: (params: { name: string }) => string
+  settingsChooseFolder: string
+  settingsChangeFolder: string
+  settingsReconnectFolder: string
+  settingsUseBrowserStorage: string
+  settingsStorageUnsupported: string
+  settingsStorageSynced: (params: { name: string }) => string
+  settingsStorageNeedReconnect: (params: { name: string }) => string
+
   // Data / memory
   dataTitle: string
   dataIntro: string
@@ -613,8 +631,12 @@ const en: Messages = {
   taskKind: 'What it does',
   taskKindGithub: 'Count PRs waiting for my review on GitHub',
   taskKindPrompt: 'Run an agent prompt',
+  taskKindWorkflow: 'Run a saved workflow',
   taskPrompt: 'Prompt',
   taskPromptHint: 'The instruction the agent runs unattended.',
+  taskWorkflow: 'Workflow',
+  taskWorkflowPlaceholder: 'Select a workflow',
+  taskWorkflowHint: 'This schedule runs the selected workflow unattended.',
   taskSchedule: 'When',
   taskSchedDaily: 'Daily at',
   taskSchedWeekdays: 'Weekdays (Mon–Fri) at',
@@ -938,6 +960,21 @@ const en: Messages = {
   settingsPageReadable: ({ title }) => `The active tab can be read: ${title}`,
   settingsPageBlocked: ({ reason }) => `The active tab cannot be read. ${reason}`,
 
+  settingsStorage: 'Storage location',
+  settingsStorageIntro:
+    'All data (settings, conversations, tasks, workflows) is saved as plain JSON files in a folder you choose, instead of the browser\u2019s internal storage. The browser cache keeps a mirror so the extension keeps working offline.',
+  settingsStorageBrowser: 'Browser storage (default)',
+  settingsStorageFile: 'Files on your computer',
+  settingsStorageFolder: ({ name }) => `Folder: ${name}`,
+  settingsChooseFolder: 'Choose folder',
+  settingsChangeFolder: 'Change folder',
+  settingsReconnectFolder: 'Reconnect folder',
+  settingsUseBrowserStorage: 'Use browser storage',
+  settingsStorageUnsupported: 'This browser does not support saving to a folder.',
+  settingsStorageSynced: ({ name }) => `Data saved to ${name}.`,
+  settingsStorageNeedReconnect: ({ name }) =>
+    `The folder "${name}" was chosen but access expired. Reconnect it to keep saving files.`,
+
   dataTitle: 'Personal data',
   dataIntro:
     'Saved profiles and credentials are stored locally and only sent to the model as part of a request you approve. The agent uses them to fill forms so you do not have to retype them.',
@@ -1108,8 +1145,12 @@ const zhCN: Messages = {
   taskKind: '做什么',
   taskKindGithub: '统计 GitHub 上待我 review 的 PR',
   taskKindPrompt: '运行一条智能体提示词',
+  taskKindWorkflow: '运行已保存的工作流',
   taskPrompt: '提示词',
   taskPromptHint: '无人值守时智能体执行的指令。',
+  taskWorkflow: '工作流',
+  taskWorkflowPlaceholder: '选择工作流',
+  taskWorkflowHint: '此计划将无人值守运行所选工作流。',
   taskSchedule: '时间',
   taskSchedDaily: '每天',
   taskSchedWeekdays: '工作日（周一至周五）',
@@ -1413,6 +1454,21 @@ const zhCN: Messages = {
   settingsCheckTab: '检测当前标签页',
   settingsPageReadable: ({ title }) => `当前标签页可以读取：${title}`,
   settingsPageBlocked: ({ reason }) => `当前标签页无法读取。${reason}`,
+
+  settingsStorage: '存储位置',
+  settingsStorageIntro:
+    '所有数据（设置、对话、任务、工作流）都会以 JSON 文件形式保存在你选择的文件夹中，而不是浏览器内置存储里。浏览器缓存会保留一份镜像，保证插件离线也能正常工作。',
+  settingsStorageBrowser: '浏览器存储（默认）',
+  settingsStorageFile: '保存在你的电脑',
+  settingsStorageFolder: ({ name }) => `文件夹：${name}`,
+  settingsChooseFolder: '选择文件夹',
+  settingsChangeFolder: '更换文件夹',
+  settingsReconnectFolder: '重新连接文件夹',
+  settingsUseBrowserStorage: '改用浏览器存储',
+  settingsStorageUnsupported: '当前浏览器不支持保存到文件夹。',
+  settingsStorageSynced: ({ name }) => `数据已保存到 ${name}。`,
+  settingsStorageNeedReconnect: ({ name }) =>
+    `已选择文件夹「${name}」，但访问权限已失效。重新连接后即可继续保存文件。`,
 
   dataTitle: '个人数据',
   dataIntro:
