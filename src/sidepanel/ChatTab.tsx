@@ -160,9 +160,10 @@ function MsgActions({
   // the newest assistant message) show no actions at all — their content is
   // still evolving context, not a finished answer worth copying or exporting.
   if (busy && isAssistant && !isLastAssistant) return null
-  // Download only on the turn's closing answer; earlier replies keep copy
-  // alone. Token usage still rides on the usage tag (providers that never
-  // send it simply show no gauge).
+  // Only the last assistant reply gets any buttons at all (copy + download +
+  // token); earlier assistant messages show none so the transcript stays calm.
+  if (isAssistant && !isLastAssistant) return null
+  // Download and the token gauge only appear on that turn's closing answer.
   const isFinal = isAssistant && isLastAssistant
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [menuOpen, setMenuOpen] = useState(false)
@@ -220,7 +221,7 @@ function MsgActions({
           <Copy size={13} aria-hidden="true" />
         )}
       </button>
-      {isAssistant && (
+      {isFinal && (
         <>
           <button
             aria-label={t.msgDownload}

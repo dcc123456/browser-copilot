@@ -559,14 +559,9 @@ body {
    padding. */
 
 .msg-actions {
-  display: none;
+  display: flex;
   gap: 4px;
   margin-top: 8px;
-}
-
-.msg:hover .msg-actions,
-.msg:focus-within .msg-actions {
-  display: flex;
 }
 
 /* --- Per-message token hover tooltip -------------------------------------
