@@ -22,6 +22,7 @@ import {
   pickStorageDirectory,
   type StorageMode,
 } from '../lib/fs-store'
+import { clearDownloadDir, getDownloadDir, setDownloadDir } from '../lib/download-dir'
 import { useT } from './i18n'
 
 /** Editable form state; numbers stay strings so partial input is allowed. */
@@ -195,6 +196,46 @@ export default function SettingsTab({ onLocaleChange }: Props) {
       setStorageDirName(null)
     } finally {
       setStorageBusy(false)
+    }
+  }
+
+  // --- Download directory ----------------------------------------------------
+  const [downloadDirName, setDownloadDirName] = useState<string | null>(null)
+  const [downloadBusy, setDownloadBusy] = useState(false)
+  const [downloadNotice, setDownloadNotice] = useState<{
+    kind: 'ok' | 'error'
+    text: string
+  } | null>(null)
+
+  useEffect(() => {
+    void getDownloadDir().then((handle) => setDownloadDirName(handle ? handle.name : null))
+  }, [])
+
+  const chooseDownloadDir = async (): Promise<void> => {
+    setDownloadBusy(true)
+    setDownloadNotice(null)
+    try {
+      const handle = await window.showDirectoryPicker({ mode: 'readwrite' })
+      await setDownloadDir(handle)
+      setDownloadDirName(handle.name)
+      setDownloadNotice({ kind: 'ok', text: t.settingsDownloadDirDone({ name: handle.name }) })
+    } catch (error) {
+      if ((error as DOMException).name === 'AbortError') return
+      setDownloadNotice({ kind: 'error', text: t.settingsDownloadDirFailed })
+    } finally {
+      setDownloadBusy(false)
+    }
+  }
+
+  const removeDownloadDir = async (): Promise<void> => {
+    setDownloadBusy(true)
+    try {
+      await clearDownloadDir()
+      setDownloadDirName(null)
+      await mutate({ type: 'settings.set', patch: { downloadAutoSave: false } })
+      setDownloadNotice(null)
+    } finally {
+      setDownloadBusy(false)
     }
   }
 
@@ -862,6 +903,64 @@ export default function SettingsTab({ onLocaleChange }: Props) {
             </button>
           )}
         </div>
+      </div>
+
+      {/* --- Download directory --- */}
+      <div className="card">
+        <div className="card-title">{t.settingsDownloadDir}</div>
+        <p className="hint">{t.settingsDownloadDirIntro}</p>
+        <p className="hint">
+          {downloadDirName
+            ? t.settingsDownloadDirFolder({ name: downloadDirName })
+            : t.settingsDownloadDirNone}
+        </p>
+        {downloadNotice && (
+          <p className={downloadNotice.kind === 'ok' ? 'hint ok' : 'hint error'}>
+            {downloadNotice.text}
+          </p>
+        )}
+        <div className="actions">
+          {downloadDirName ? (
+            <>
+              <button
+                disabled={downloadBusy}
+                onClick={() => void chooseDownloadDir()}
+                type="button"
+              >
+                {t.settingsChangeFolder}
+              </button>
+              <button
+                disabled={downloadBusy}
+                onClick={() => void removeDownloadDir()}
+                type="button"
+              >
+                {t.settingsDownloadDirDisconnect}
+              </button>
+            </>
+          ) : (
+            <button
+              disabled={downloadBusy}
+              onClick={() => void chooseDownloadDir()}
+              type="button"
+            >
+              {t.settingsChooseFolder}
+            </button>
+          )}
+        </div>
+        <label className="field">
+          <input
+            checked={settings.downloadAutoSave}
+            disabled={!downloadDirName}
+            onChange={(event) =>
+              void mutate({
+                type: 'settings.set',
+                patch: { downloadAutoSave: event.target.checked },
+              })
+            }
+            type="checkbox"
+          />
+          {t.settingsDownloadAutoSave}
+        </label>
       </div>
     </div>
   )

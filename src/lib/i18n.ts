@@ -429,6 +429,16 @@ export interface Messages {
   settingsStorageSynced: (params: { name: string }) => string
   settingsStorageNeedReconnect: (params: { name: string }) => string
 
+  // Settings · download directory
+  settingsDownloadDir: string
+  settingsDownloadDirIntro: string
+  settingsDownloadDirFolder: (params: { name: string }) => string
+  settingsDownloadDirNone: string
+  settingsDownloadDirDone: (params: { name: string }) => string
+  settingsDownloadDirFailed: string
+  settingsDownloadDirDisconnect: string
+  settingsDownloadAutoSave: string
+
   // Data / memory
   dataTitle: string
   dataIntro: string
@@ -975,6 +985,16 @@ const en: Messages = {
   settingsStorageNeedReconnect: ({ name }) =>
     `The folder "${name}" was chosen but access expired. Reconnect it to keep saving files.`,
 
+  settingsDownloadDir: 'Download folder',
+  settingsDownloadDirIntro:
+    'Exported files (such as full conversation transcripts) are saved to a folder you choose. Pick one to enable automatic downloads.',
+  settingsDownloadDirFolder: ({ name }) => `Download folder: ${name}`,
+  settingsDownloadDirNone: 'No download folder configured.',
+  settingsDownloadDirDone: ({ name }) => `Download folder set: ${name}.`,
+  settingsDownloadDirFailed: 'Could not set the download folder.',
+  settingsDownloadDirDisconnect: 'Disconnect',
+  settingsDownloadAutoSave: 'Automatically save exports to this folder',
+
   dataTitle: 'Personal data',
   dataIntro:
     'Saved profiles and credentials are stored locally and only sent to the model as part of a request you approve. The agent uses them to fill forms so you do not have to retype them.',
@@ -1469,6 +1489,16 @@ const zhCN: Messages = {
   settingsStorageSynced: ({ name }) => `数据已保存到 ${name}。`,
   settingsStorageNeedReconnect: ({ name }) =>
     `已选择文件夹「${name}」，但访问权限已失效。重新连接后即可继续保存文件。`,
+
+  settingsDownloadDir: '下载目录',
+  settingsDownloadDirIntro:
+    '导出的文件（如完整对话记录）会保存到你选择的文件夹中。选择一个文件夹即可启用自动下载。',
+  settingsDownloadDirFolder: ({ name }) => `下载目录：${name}`,
+  settingsDownloadDirNone: '暂未配置下载目录。',
+  settingsDownloadDirDone: ({ name }) => `下载目录已设置：${name}。`,
+  settingsDownloadDirFailed: '无法设置下载目录。',
+  settingsDownloadDirDisconnect: '断开',
+  settingsDownloadAutoSave: '自动将导出内容保存到该文件夹',
 
   dataTitle: '个人数据',
   dataIntro:
