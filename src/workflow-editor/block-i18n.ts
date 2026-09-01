@@ -41,6 +41,7 @@ export const BLOCK_NAMES_ZH: Record<string, string> = {
   cookie: 'Cookie',
   'handle-dialog': '处理对话框',
   'handle-download': '处理下载',
+  'save-local': '保存到本地',
   delay: '延时',
   proxy: '代理',
   'wait-connections': '等待连接',

@@ -1362,6 +1362,34 @@ export const BLOCK_CATALOG: BlockCatalogEntry[] = [
     "cloud": false
   },
   {
+    "id": "save-local",
+    "name": "Save to local",
+    "description": "Write a value or data to a local file",
+    "icon": "riSaveLine",
+    "component": "Default",
+    "editComponent": "EditSaveLocal",
+    "category": "browser",
+    "inputs": 1,
+    "outputs": 1,
+    "allowedInputs": true,
+    "maxConnection": 1,
+    "refDataKeys": [
+      "value",
+      "filename",
+      "saveMode",
+      "variableName"
+    ],
+    "data": {
+      "disableBlock": false,
+      "description": "",
+      "value": "",
+      "filename": "",
+      "saveMode": "auto",
+      "variableName": "lastSavedPath"
+    },
+    "cloud": false
+  },
+  {
     "id": "reload-tab",
     "name": "Reload tab",
     "description": "Refresh the active tab",

@@ -2,7 +2,7 @@
  * Batch B block edit forms — React ports of Automa's browser / navigation
  * block forms (new-tab, new-window, switch-tab, close-tab, go-back,
  * forward-page, reload-tab, tab-url, take-screenshot, clipboard, cookie,
- * handle-dialog, handle-download, delay, proxy, wait-connections,
+ * handle-dialog, handle-download, save-local, delay, proxy, wait-connections,
  * save-assets, note).
  *
  * Keys match Automa's `editComponent` names in the block catalog.
@@ -26,6 +26,7 @@ import EditClipboard from './EditClipboard'
 import EditCookie from './EditCookie'
 import EditHandleDialog from './EditHandleDialog'
 import EditHandleDownload from './EditHandleDownload'
+import EditSaveLocal from './EditSaveLocal'
 import EditDelay from './EditDelay'
 import EditProxy from './EditProxy'
 import EditWaitConnections from './EditWaitConnections'
@@ -47,6 +48,7 @@ export const BatchBForms: Record<string, ComponentType<EditFormProps>> = {
   EditCookie,
   EditHandleDialog,
   EditHandleDownload,
+  EditSaveLocal,
   EditDelay,
   EditProxy,
   EditWaitConnections,
