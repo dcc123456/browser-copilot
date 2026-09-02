@@ -74,6 +74,8 @@ export type ActionName =
   | 'count_elements'
   | 'trigger_event'
   | 'capture'
+  | 'page_signature'
+  | 'actionability'
   | 'exec_js'
   | 'exec_workflow_js'
 

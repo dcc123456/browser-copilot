@@ -557,6 +557,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   } | null>(null)
   const [mode, setMode] = useState<AgentMode>('semi')
   const [modeInfoOpen, setModeInfoOpen] = useState(false)
+  /**
+   * 「保存工作流」开关：开启后 agent 逐条执行（不用 run_plan 批量执行），
+   * 每个动作单独入历史，「从历史生成工作流」的算子节点才完整。
+   */
+  const [saveWorkflow, setSaveWorkflow] = useState(false)
   /** Summed usage across turns in this conversation. */
   const [sessionUsage, setSessionUsage] = useState<TurnTokenUsage>(() => ({
     ...ZERO_USAGE,
@@ -985,12 +990,25 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     void (async () => {
       try {
         const result = await sendCommand({ type: 'settings.get' })
-        if (result.type === 'settings') setMode(result.settings.mode)
+        if (result.type === 'settings') {
+          setMode(result.settings.mode)
+          setSaveWorkflow(result.settings.saveWorkflowFromChat === true)
+        }
       } catch {
         /* keep default */
       }
     })()
   }, [])
+
+  const toggleSaveWorkflow = async (): Promise<void> => {
+    const next = !saveWorkflow
+    setSaveWorkflow(next)
+    try {
+      await sendCommand({ type: 'settings.set', patch: { saveWorkflowFromChat: next } })
+    } catch {
+      /* non-fatal; worker will still use default on next turn */
+    }
+  }
 
   const changeMode = async (next: AgentMode): Promise<void> => {
     if (
@@ -1721,6 +1739,21 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               <svg height="14" viewBox="0 0 24 24" width="14" aria-hidden="true">
                 <path
                   d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"
+                  fill="currentColor"
+                />
+              </svg>
+            </button>
+            <button
+              aria-label={t.saveWorkflowLabel}
+              aria-pressed={saveWorkflow}
+              className="icon-btn mode-info-btn save-workflow-btn"
+              onClick={() => void toggleSaveWorkflow()}
+              title={t.saveWorkflowHint}
+              type="button"
+            >
+              <svg height="14" viewBox="0 0 24 24" width="14" aria-hidden="true">
+                <path
+                  d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10v4z"
                   fill="currentColor"
                 />
               </svg>

@@ -1168,6 +1168,39 @@ export function runOp(op: Op): OpResult {
       const page = buildSnapshot(op.maxChars ?? 8000, op.maxElements ?? 120)
       return { ...base(), ok: true, found: true, page }
     }
+    if (op.action === 'page_signature') {
+      // Cheap quiescence probe: the driver polls this and treats two
+      // identical consecutive signatures as "the page has settled" before
+      // capturing an auto-observation, so the snapshot reflects the state
+      // AFTER the action's async handlers (fetch/render) have applied.
+      const sig = `${location.href}|${document.readyState}|${
+        document.documentElement.getElementsByTagName('*').length
+      }|${(document.body ? (document.body.textContent ?? '') : '').length}`
+      return { ...base(), ok: true, found: true, data: sig }
+    }
+    if (op.action === 'actionability') {
+      // One-shot readiness probe for the driver's pre-action poll. The kernel
+      // is synchronous, so animation stability (a rect that keeps moving) is
+      // the DRIVER's job: it samples this op twice and compares rects.
+      const resolution = resolve(op.target)
+      if (!resolution) {
+        return { ...base(), ok: true, found: false, data: { state: 'missing' } }
+      }
+      const element = resolution.element
+      const rect = element.getBoundingClientRect()
+      const visible = isVisible(element) && rect.width > 0 && rect.height > 0
+      const enabled = !isDisabled(element)
+      const occluded = occludedBy(element) != null
+      return {
+        ...base(),
+        ok: true,
+        found: true,
+        data: {
+          state: visible && enabled && !occluded ? 'ready' : 'blocked',
+          rect: { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
+        },
+      }
+    }
 
     if (op.action === 'capture') {
       // Returns a Promise; chrome.scripting.executeScript awaits it. The driver

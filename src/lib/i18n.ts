@@ -252,6 +252,8 @@ export interface Messages {
 
   // Agent mode
   modeLabel: string
+  saveWorkflowLabel: string
+  saveWorkflowHint: string
   modeChat: string
   modeReadonly: string
   modeSemi: string
@@ -384,6 +386,8 @@ export interface Messages {
   toolSnapshotWarn: string
   toolListTabs: string
   toolListTabsWarn: string
+  toolNetworkRequests: string
+  toolNetworkRequestsWarn: string
   toolClick: string
   toolClickWarn: string
   toolFill: string
@@ -406,8 +410,14 @@ export interface Messages {
   toolTabSwitchWarn: string
   toolTabClose: string
   toolTabCloseWarn: string
+  toolPinTab: string
+  toolPinTabWarn: string
+  toolUnpinTab: string
+  toolUnpinTabWarn: string
   toolRunJs: string
   toolRunJsWarn: string
+  toolRunPlan: string
+  toolRunPlanWarn: string
   toolSaveLocal: string
   toolSaveLocalWarn: string
   toolProfile: string
@@ -852,6 +862,9 @@ const en: Messages = {
   chatSaveWorkflowAiTitle: 'AI-generated content (checked = regenerate with AI at replay; unchecked = reuse the captured text)',
 
   modeLabel: 'Mode',
+  saveWorkflowLabel: 'Save workflow',
+  saveWorkflowHint:
+    'Execute step by step (slower) so every action is recorded and can be saved as a workflow.',
   modeChat: 'Chat',
   modeReadonly: 'Read only',
   modeSemi: 'Semi-auto',
@@ -993,6 +1006,9 @@ const en: Messages = {
     'When off: the assistant cannot see buttons, links, or fields, so it cannot reliably click or fill anything.',
   toolListTabs: 'List open tabs',
   toolListTabsWarn: 'When off: the assistant cannot see or refer to your other open tabs.',
+  toolNetworkRequests: 'Inspect recent network requests',
+  toolNetworkRequestsWarn:
+    'When off: the assistant cannot diagnose failed or slow requests after page actions.',
   toolClick: 'Click elements',
   toolClickWarn: 'When off: the assistant cannot click buttons or links.',
   toolFill: 'Type into fields',
@@ -1017,9 +1033,18 @@ const en: Messages = {
   toolTabSwitch: 'Switch tabs',
   toolTabSwitchWarn: 'When off: the assistant cannot switch between open tabs.',
   toolTabClose: 'Close a tab',
+  toolPinTab: 'Pin a tab for subsequent actions',
+  toolPinTabWarn:
+    'When off: the assistant must switch tabs before acting on a non-active tab, costing extra steps.',
+  toolUnpinTab: 'Remove the tab pin',
+  toolUnpinTabWarn:
+    'When off: a pinned tab stays pinned until it expires, which may surprise later actions.',
   toolTabCloseWarn: 'When off: the assistant cannot close tabs.',
   toolRunJs: 'Run JavaScript on the page',
   toolRunJsWarn: 'When off: the assistant cannot run custom JavaScript on the page.',
+  toolRunPlan: 'Run a planned sequence of steps',
+  toolRunPlanWarn:
+    'When off: the assistant must confirm or perform each step individually, making multi-step actions slower.',
   toolSaveLocal: 'Save content to a file',
   toolSaveLocalWarn:
     'When off: the assistant cannot save or download content to a file, and may fall back to building a script instead.',
@@ -1432,6 +1457,8 @@ const zhCN: Messages = {
   chatSaveWorkflowAiTitle: 'AI 生成内容（勾选 = 回放时用 AI 重新生成；取消 = 沿用本次填写的文本）',
 
   modeLabel: '模式',
+  saveWorkflowLabel: '保存工作流',
+  saveWorkflowHint: '逐条执行（较慢），每个动作都会记录，可完整保存为工作流。',
   modeChat: '聊天',
   modeReadonly: '只读',
   modeSemi: '半自动',
@@ -1565,6 +1592,8 @@ const zhCN: Messages = {
   toolSnapshotWarn: '关闭后：助手无法看到按钮、链接、输入框，因此无法可靠地点击或填写。',
   toolListTabs: '列出标签页',
   toolListTabsWarn: '关闭后：助手无法查看或引用你打开的其他标签页。',
+  toolNetworkRequests: '查看最近网络请求',
+  toolNetworkRequestsWarn: '关闭后：助手无法在页面操作后诊断失败或缓慢的请求。',
   toolClick: '点击元素',
   toolClickWarn: '关闭后：助手无法点击按钮或链接。',
   toolFill: '在输入框中输入',
@@ -1587,8 +1616,14 @@ const zhCN: Messages = {
   toolTabSwitchWarn: '关闭后：助手无法在已打开的标签页之间切换。',
   toolTabClose: '关闭标签页',
   toolTabCloseWarn: '关闭后：助手无法关闭标签页。',
+  toolPinTab: '钉住标签页供后续操作',
+  toolPinTabWarn: '关闭后：助手操作非活动标签页前必须先切换，多耗步骤。',
+  toolUnpinTab: '取消钉住标签页',
+  toolUnpinTabWarn: '关闭后：被钉住的标签页在过期前一直生效，可能影响后续操作。',
   toolRunJs: '在页面上执行 JavaScript',
   toolRunJsWarn: '关闭后：助手无法在页面上运行自定义 JavaScript。',
+  toolRunPlan: '按计划连续执行多步操作',
+  toolRunPlanWarn: '关闭后：助手只能逐步确认或执行每个动作，多步任务会明显变慢。',
   toolSaveLocal: '保存内容到文件',
   toolSaveLocalWarn: '关闭后：助手无法将内容保存或下载到文件，可能会退回到构建脚本的方式。',
   toolProfile: '使用已保存资料',

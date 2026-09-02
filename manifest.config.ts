@@ -18,10 +18,11 @@ type ManifestParam = Parameters<typeof defineManifest>[0]
  *   only MV3 mechanism that can wake an idle service worker at a set time, which
  *   a daily 10:00 report fundamentally requires.
  *
- * A static content script is not declared either: page reading injects on demand,
- * which keeps this extension out of every page until the user actually asks it
- * to read one. (The scheduler and Feishu bot run entirely in the service worker
- * and inject nothing into pages unless a task explicitly does.)
+ * One static content script IS declared (see `content_scripts` below): it only
+ * parks the in-page kernel on each frame and is inert until an op arrives, so
+ * the extension still reads and acts on a page only when the user asks it to.
+ * (The scheduler and Feishu bot run entirely in the service worker and inject
+ * nothing into pages unless a task explicitly does.)
  *
  * `icons` and `action.default_icon` are both required. Without them Chrome shows
  * a generic placeholder, which makes a pinned toolbar button impossible to tell
@@ -59,6 +60,19 @@ export default defineManifest({
     service_worker: 'src/background/index.ts',
     type: 'module',
   },
+  // The in-page kernel host (see src/inpage/content-kernel.ts). Previously the
+  // driver re-serialized the whole kernel into every op; now this script parks
+  // it on each frame at document_idle and ops ship only their arguments. It
+  // stays passive until the user triggers an action, so the privacy posture of
+  // the on-demand injection it replaces is unchanged.
+  content_scripts: [
+    {
+      matches: ['http://*/*', 'https://*/*'],
+      js: ['src/inpage/content-kernel.ts'],
+      all_frames: true,
+      run_at: 'document_idle',
+    },
+  ],
   action: {
     default_title: 'Open Browser Copilot',
     default_icon: {

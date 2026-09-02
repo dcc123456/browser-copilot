@@ -148,10 +148,15 @@ describe('mcp-server tools/list wire format', () => {
     expect(clickSchema.properties?.target).toEqual(
       expect.objectContaining({ type: 'object' }),
     )
-    expect(clickSchema.required).toEqual(['target'])
+    // ref is now the preferred element handle; target stays optional for
+    // verbatim compatibility, so click has no required element parameter.
+    expect(clickSchema.properties?.ref).toEqual(
+      expect.objectContaining({ type: 'string' }),
+    )
+    expect(clickSchema.required).toBeUndefined()
     const fill = tools!.find((t) => t.name === 'fill')
     const fillSchema = fill!.inputSchema as { required?: string[] }
-    expect(fillSchema.required).toEqual(['target', 'value'])
+    expect(fillSchema.required).toEqual(['value'])
   })
 
   it(

@@ -16,6 +16,8 @@
  */
 
 import { isInjectablePage } from '../lib/pages'
+import { KERNEL_VERSION } from '../inpage/kernel-version'
+import { ensureTabMonitor, isMonitorHolding } from './cdp-monitor'
 import type { Op, OpResult, PageSnapshot, SnapshotElement, Target } from '../lib/ops'
 import { runOp, runExecJs, runWorkflowJs } from '../inpage/kernel'
 import { activeTab } from './page'
@@ -39,6 +41,53 @@ import { fillViaCdp } from './cdp-typing'
  * @param preferredTabId an optional tab pinned for this run (e.g. a tab a
  *   navigation block opened); it wins while still injectable.
  */
+/**
+ * Cached result of the last successful {@link resolveAutomationTab}. Re-running
+ * the full active-tab search chain (activeTab → getLastFocused → windows.getAll
+ * → tabs.query, each an IPC round trip) before EVERY op is wasted work while
+ * the user has not touched focus. The cache is invalidated by any focus,
+ * activation, removal or navigation event, so a stale hit structurally cannot
+ * outlive the state it describes.
+ */
+let cachedAutomationTab: chrome.tabs.Tab | undefined
+
+function invalidateAutomationTabCache(): void {
+  cachedAutomationTab = undefined
+}
+
+// Registered at import time, so guarded: unit tests import this module in a
+// plain Node environment without a `chrome` global. Inside the service worker
+// the listeners are always present.
+if (typeof chrome !== 'undefined' && chrome.tabs?.onActivated) {
+  chrome.tabs.onActivated.addListener(invalidateAutomationTabCache)
+  chrome.tabs.onRemoved.addListener(invalidateAutomationTabCache)
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (cachedAutomationTab?.id !== tabId) return
+    // A URL change or a fresh load means the tab (and its frames) changed.
+    if (changeInfo.url !== undefined || changeInfo.status === 'loading') {
+      invalidateAutomationTabCache()
+    }
+  })
+  chrome.windows.onFocusChanged.addListener(invalidateAutomationTabCache)
+  chrome.windows.onRemoved.addListener(invalidateAutomationTabCache)
+}
+
+/**
+ * A tab pinned by the `pin_tab` tool: every automation call acts on it until
+ * `unpin` runs or the TTL expires (so a forgotten pin cannot hijack the next
+ * session). Sits between an explicit per-call preferredTabId (which still
+ * wins) and the passive resolution cache.
+ */
+const PIN_TTL_MS = 5 * 60_000
+let pinnedTab: { id: number; at: number } | undefined
+
+function setPinnedTab(tabId: number | undefined): void {
+  pinnedTab = tabId === undefined ? undefined : { id: tabId, at: Date.now() }
+  if (tabId !== undefined) {
+    cachedAutomationTab = undefined // force a fresh resolution for the pin
+  }
+}
+
 export async function resolveAutomationTab(
   preferredTabId?: number,
 ): Promise<chrome.tabs.Tab | undefined> {
@@ -47,6 +96,43 @@ export async function resolveAutomationTab(
     if (pinned && isInjectablePage(pinned.url)) return pinned
   }
 
+  // A `pin_tab` pin wins over everything but an explicit per-call tab.
+  if (pinnedTab && Date.now() - pinnedTab.at < PIN_TTL_MS) {
+    const pinned = await chrome.tabs.get(pinnedTab.id).catch(() => undefined)
+    if (pinned && isInjectablePage(pinned.url)) return pinned
+    pinnedTab = undefined // pinned tab closed or became uninjectable
+  } else if (pinnedTab) {
+    pinnedTab = undefined
+  }
+
+  // A cheap one-call existence check guards the cache; the event listeners
+  // above are the primary invalidation path.
+  const cached = cachedAutomationTab
+  if (cached && typeof cached.id === 'number') {
+    const still = await chrome.tabs.get(cached.id).catch(() => undefined)
+    if (still && isInjectablePage(still.url)) {
+      cachedAutomationTab = still
+      return still
+    }
+    cachedAutomationTab = undefined
+  }
+
+  const resolved = await resolveAutomationTabUncached()
+  if (resolved) cachedAutomationTab = resolved
+  return resolved
+}
+
+/**
+ * Uncached resolution chain. Prefer {@link resolveAutomationTab}, which wraps
+ * this with event-invalidated caching.
+ *
+ * A run launched from the editor popup or side panel has focus on an
+ * extension page (`chrome-extension://…`), which cannot be scripted. In that
+ * case fall back to the active tab of the most recently focused *normal*
+ * browser window that is on an ordinary http(s) page. When the focused window
+ * already shows an injectable page it is used directly.
+ */
+async function resolveAutomationTabUncached(): Promise<chrome.tabs.Tab | undefined> {
   const focused = await activeTab()
   const focusedWindowId = typeof focused?.windowId === 'number' ? focused.windowId : undefined
   if (focused && isInjectablePage(focused.url)) return focused
@@ -158,6 +244,71 @@ function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
 /** A driver error — something the harness owns, distinct from an op failure. */
 export class DriverError extends Error {}
 
+/** Element actions that benefit from an actionability pre-check. */
+const PRECHECK_OPS = new Set(['click', 'fill', 'press_key', 'select_option', 'set_checkbox'])
+
+/**
+ * Waits until the target element is actionable before dispatching the real op
+ * (the devtools-mcp/Puppeteer actionability pattern): the element must exist,
+ * be visible, enabled and unoccluded, and its bounding box must be stable
+ * across two consecutive samples ~120ms apart — a moving rect means an entry
+ * animation is still running and a click would land in the void. Fail-open:
+ * on probe failure or budget exhaustion the real op runs anyway and reports
+ * its own error.
+ */
+async function waitForActionable(
+  tabId: number,
+  target: Target,
+  signal?: AbortSignal,
+): Promise<void> {
+  const deadline = Date.now() + 1200
+  let prevRect: string | null = null
+  while (Date.now() < deadline) {
+    if (signal?.aborted) return
+    const result = await execOnActiveTab({ action: 'actionability', target }, signal, tabId).catch(
+      () => undefined,
+    )
+    const data = result?.data as
+      | { state?: 'ready' | 'blocked' | 'missing'; rect?: { x: number; y: number; w: number; h: number } }
+      | undefined
+    // Probe unsupported (old resident kernel) or the frame unscriptable —
+    // the real op will report whatever is actually wrong.
+    if (!data?.state) return
+    if (data.state !== 'ready') {
+      // Not rendered yet, hidden, disabled or occluded: give the page time.
+      prevRect = null
+      await sleep(120, signal).catch(() => {})
+      continue
+    }
+    const key = data.rect ? `${data.rect.x},${data.rect.y},${data.rect.w},${data.rect.h}` : null
+    if (key !== null && key === prevRect) return // stable across samples → go
+    prevRect = key
+    await sleep(120, signal).catch(() => {})
+  }
+}
+
+/**
+ * Serialized into every frame per op (fast path). Calls the kernel the
+ * persistent content script parked on the ISOLATED world's global
+ * (`__browserCopilotKernel`, see src/inpage/content-kernel.ts). Self-contained
+ * by the kernel's "one rule": no references outside its own body. Returns
+ * nothing in frames where the kernel is not resident — the driver re-injects
+ * the full kernel into those frames.
+ */
+function runOpViaKernel(op: Op): OpResult | undefined {
+  const g = globalThis as {
+    __browserCopilotKernel?: (o: Op) => OpResult
+    __browserCopilotKernelVersion?: number
+  }
+  // Version mismatch = a kernel from a previous extension build still resident
+  // in this frame (reload/update with no navigation since). Treat it as absent:
+  // the driver re-injects the fresh kernel, which overwrites the global.
+  if (g.__browserCopilotKernelVersion !== KERNEL_VERSION) return undefined
+  const kernel = g.__browserCopilotKernel
+  if (typeof kernel !== 'function') return undefined
+  return kernel(op)
+}
+
 /**
  * Runs one op on the active tab.
  *
@@ -194,6 +345,30 @@ export async function execOnActiveTab(
   // in-page JS (the root is inaccessible); drive them through CDP trusted
   // input. Click/hover are supported; other targeted actions report a clear
   // error instead of the kernel's generic "not matched".
+  // Element actions trigger fetches/animations whose events (console errors,
+  // network state) the auto-observation wants to report. Attach the passive
+  // monitor BEFORE the action so the events are captured from the start.
+  // Best-effort and cheap when already attached; ops that only read stay out.
+  if (
+    typeof tab.id === 'number' &&
+    (op.action === 'click' ||
+      op.action === 'hover' ||
+      op.action === 'fill' ||
+      op.action === 'press_key' ||
+      op.action === 'select_option' ||
+      op.action === 'set_checkbox' ||
+      op.action === 'scroll')
+  ) {
+    await ensureTabMonitor(tab.id).catch(() => {})
+  }
+
+  // Actionability pre-check: don't click into a moving/hidden/disabled
+  // element — wait for readiness first (budget-capped, fail-open). Skipped
+  // for closed-shadow targets, which take the CDP path below anyway.
+  if (typeof tab.id === 'number' && PRECHECK_OPS.has(op.action) && op.target) {
+    await waitForActionable(tab.id, op.target, signal)
+  }
+
   if (typeof tab.id === 'number' && targetIsClosedShadow(op.target)) {
     if (op.action === 'click' || op.action === 'hover') {
       return runClosedShadowAction(tab.id, tab.url ?? '', op)
@@ -209,12 +384,17 @@ export async function execOnActiveTab(
 
   let injections: chrome.scripting.InjectionResult<unknown>[]
   try {
+    // Fast path: the persistent content script (src/inpage/content-kernel.ts)
+    // keeps the kernel resident in each frame's ISOLATED world, so this ships
+    // only the op through a tiny trampoline instead of re-serializing the
+    // whole kernel source into every frame on every op. Frames without a
+    // resident kernel return no result and get the full kernel injected below.
+    // Both functions are serialized as bare functions: no module-scope
+    // closures. See src/inpage/kernel.ts.
     injections = await abortable(
       chrome.scripting.executeScript({
         target: { tabId: tab.id, allFrames: true },
-        // Serialized as a bare function: the kernel source must not close over
-        // anything. See src/inpage/kernel.ts.
-        func: runOp as unknown as (...args: unknown[]) => unknown,
+        func: runOpViaKernel as unknown as (...args: unknown[]) => unknown,
         args: [op as unknown as never],
       }),
       signal,
@@ -234,6 +414,44 @@ export async function execOnActiveTab(
     }
     throw new DriverError(`Could not run ${op.action}: ${message}`)
   }
+
+  // Cold frames: the content script has not run yet (fresh navigation racing
+  // document_idle, extension just reloaded, bfcache restore). Prime them with
+  // the full kernel injection, as the driver always did.
+  const coldFrameIds = injections
+    .filter((injection) => injection?.result == null && typeof injection.frameId === 'number')
+    .map((injection) => injection.frameId)
+  const warm = injections.filter((injection) => injection?.result != null)
+  if (coldFrameIds.length > 0 && typeof tab.id === 'number') {
+    try {
+      const primed = await abortable(
+        chrome.scripting.executeScript({
+          target: { tabId: tab.id, frameIds: coldFrameIds },
+          func: runOp as unknown as (...args: unknown[]) => unknown,
+          args: [op as unknown as never],
+        }),
+        signal,
+      )
+      warm.push(...primed)
+    } catch (error) {
+      if ((error as Error)?.name === 'AbortError') throw error
+      const message = error instanceof Error ? error.message : String(error)
+      // A navigation during priming destroyed the context — treat like above.
+      if (isContextLost(message)) {
+        return {
+          ok: true,
+          found: true,
+          frameUrl: tab.url ?? '',
+          isTopFrame: true,
+          mayNavigate: true,
+          note: 'The page navigated during this step.',
+        }
+      }
+      // Otherwise fall through with whatever warm frames answered; if none
+      // did, the guard below raises the normal "could not be scripted" error.
+    }
+  }
+  injections = warm
 
   const results: OpResult[] = []
   for (const injection of injections) {
@@ -407,10 +625,39 @@ function targetIsClosedShadow(target: Target | undefined): boolean {
 /**
  * Serialize CDP sessions per tab so a CSP-fallback eval and a shadow click
  * never interleave attach/detach against the same target. Each caller attaches
- * (tolerating an existing attachment), runs, and detaches; the queue makes
- * those sessions run one at a time.
+ * (tolerating an existing attachment), runs, and hands the attachment to the
+ * idle keep-alive below; the queue makes those sessions run one at a time.
  */
 const cdpQueues = new Map<number, Promise<unknown>>()
+
+/**
+ * How long an attached debugger lingers after its last CDP command before it
+ * detaches itself. Back-to-back CDP ops (contenteditable fill fallback, closed
+ * shadow reads on consecutive snapshots, CSP evals) then skip the attach
+ * handshake entirely, and the "extension is debugging this tab" infobar —
+ * which flickers on every attach/detach cycle — stays up during a run and
+ * disappears on its own once the tab has been idle for this long.
+ */
+const CDP_KEEP_ALIVE_MS = 10_000
+
+const cdpKeepAlive = new Map<number, ReturnType<typeof setTimeout>>()
+
+function scheduleCdpDetach(tabId: number): void {
+  // The event monitor owns a long-lived attachment; our idle detach must not
+  // reap it. The monitor detaches itself when its own idle timer expires.
+  if (isMonitorHolding(tabId)) return
+  const existing = cdpKeepAlive.get(tabId)
+  if (existing) clearTimeout(existing)
+  cdpKeepAlive.set(
+    tabId,
+    setTimeout(() => {
+      cdpKeepAlive.delete(tabId)
+      void chrome.debugger.detach({ tabId }).catch(() => {
+        /* already detached (e.g. the user dismissed the infobar) */
+      })
+    }, CDP_KEEP_ALIVE_MS),
+  )
+}
 
 function withCdpSession<T>(
   tabId: number,
@@ -424,7 +671,7 @@ function withCdpSession<T>(
       const msg = error instanceof Error ? error.message : String(error)
       if (!/already attached|already being debugged/i.test(msg)) throw error
     }
-    let attachedByUs = true
+    // Whatever happens inside, the attachment is now ours to reap.
     try {
       const session: CdpSession = {
         send: (method: string, params?: Record<string, unknown>) =>
@@ -432,14 +679,7 @@ function withCdpSession<T>(
       }
       return await fn(session)
     } finally {
-      // Only detach if we attached; another session may own a long-lived one.
-      if (attachedByUs) {
-        try {
-          await chrome.debugger.detach(target)
-        } catch {
-          /* may already be detached */
-        }
-      }
+      scheduleCdpDetach(tabId)
     }
   }
   const prev = cdpQueues.get(tabId) ?? Promise.resolve()
@@ -699,14 +939,66 @@ export async function snapshotActiveTab(
 }
 
 /**
- * Waits briefly after a navigation so the next op sees the new document.
+ * Waits after a navigation so the next op sees the new document.
  *
- * Deliberately short: the kernel itself re-resolves selectors, so a framework
- * that renders a moment after `load` is handled by the next op's own retry
- * rather than by sleeping here.
+ * Condition-based instead of a fixed sleep: watch `tabs.onUpdated` and return
+ * as soon as the active tab reports `status === 'complete'`. If no load is in
+ * progress, give the just-clicked control a brief window to kick one off — if
+ * none starts, this was not a navigation after all and we return immediately.
+ * The `ms` argument is a hard cap (2s default), never a fixed delay.
  */
-export async function settleAfterNavigation(ms = 400, signal?: AbortSignal): Promise<void> {
-  await sleep(ms, signal)
+export async function settleAfterNavigation(ms = 2000, signal?: AbortSignal): Promise<void> {
+  const deadline = Date.now() + ms
+  const remaining = (): number => Math.max(0, deadline - Date.now())
+
+  const tab = await activeTab().catch(() => undefined)
+  if (!tab || typeof tab.id !== 'number') {
+    await sleep(Math.min(400, ms), signal)
+    return
+  }
+  const tabId = tab.id
+
+  const waitComplete = (timeout: number): Promise<void> =>
+    new Promise((resolve) => {
+      if (timeout <= 0) {
+        resolve()
+        return
+      }
+      let settled = false
+      const finish = (): void => {
+        if (settled) return
+        settled = true
+        chrome.tabs.onUpdated.removeListener(listener)
+        clearTimeout(timer)
+        resolve()
+      }
+      const listener = (id: number, info: chrome.tabs.TabChangeInfo): void => {
+        if (id === tabId && info.status === 'complete') finish()
+      }
+      const timer = setTimeout(finish, timeout)
+      chrome.tabs.onUpdated.addListener(listener)
+    })
+
+  if (tab.status === 'loading') {
+    await abortable(waitComplete(remaining()), signal)
+    return
+  }
+
+  // No load in progress: the navigation may not have started yet. Wait briefly
+  // for a 'loading' event; if none arrives, return without waiting out the cap.
+  const started = await new Promise<boolean>((resolve) => {
+    const listener = (id: number, info: chrome.tabs.TabChangeInfo): void => {
+      if (id === tabId && info.status === 'loading') finish(true)
+    }
+    const timer = setTimeout(() => finish(false), Math.min(150, remaining()))
+    const finish = (v: boolean): void => {
+      chrome.tabs.onUpdated.removeListener(listener)
+      clearTimeout(timer)
+      resolve(v)
+    }
+    chrome.tabs.onUpdated.addListener(listener)
+  })
+  if (started) await abortable(waitComplete(remaining()), signal)
 }
 
 // --- Tab management ----------------------------------------------------------
@@ -747,6 +1039,28 @@ export async function newTab(url?: string): Promise<DriverTab> {
   }
   const created = await chrome.tabs.create({ url, active: true })
   return toDriverTab(created)
+}
+
+/**
+ * Pins a tab (default: the current automation target) so every subsequent
+ * automation call acts on it — no tab_switch round trips when the caller works
+ * across several tabs. Auto-expires via the TTL in resolveAutomationTab.
+ */
+export async function pinActiveTab(tabId?: number): Promise<DriverTab> {
+  const tab =
+    typeof tabId === 'number'
+      ? await chrome.tabs.get(tabId).catch(() => undefined)
+      : await resolveAutomationTab()
+  if (!tab || typeof tab.id !== 'number' || !isInjectablePage(tab.url)) {
+    throw new DriverError('pin_tab: 没有可钉住的 http(s) 标签页。')
+  }
+  setPinnedTab(tab.id)
+  return toDriverTab(tab)
+}
+
+/** Removes the pin; subsequent calls resolve the active tab again. */
+export function unpinTab(): void {
+  setPinnedTab(undefined)
 }
 
 export async function closeActiveTab(): Promise<void> {

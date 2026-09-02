@@ -926,6 +926,15 @@ body {
   align-items: center;
   gap: 8px;
   justify-content: space-between;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+/* Save-workflow toggle sits right of the mode info icon; accent when on. */
+.save-workflow-btn[aria-pressed='true'] {
+  color: var(--accent);
+  border-color: var(--accent-soft-border);
+  background: var(--accent-soft);
 }
 
 /* --- Forms & controls --- */

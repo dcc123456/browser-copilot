@@ -69,6 +69,7 @@ export const DEFAULT_SETTINGS: Settings = {
   maxToolRounds: 20,
   disabledTools: [],
   systemPromptOverride: '',
+  saveWorkflowFromChat: false,
   downloadAutoSave: true,
   imageModel: { providerId: '', model: '' },
   ocrLanguage: 'eng',
@@ -159,6 +160,8 @@ export function normalizeStoredSettings(raw: unknown): Settings {
       ? value.disabledTools.filter((n): n is string => typeof n === 'string')
       : [],
     systemPromptOverride: typeof value.systemPromptOverride === 'string' ? value.systemPromptOverride : '',
+    saveWorkflowFromChat:
+      typeof value.saveWorkflowFromChat === 'boolean' ? value.saveWorkflowFromChat : false,
     downloadAutoSave:
       typeof value.downloadAutoSave === 'boolean' ? value.downloadAutoSave : true,
     imageModel,

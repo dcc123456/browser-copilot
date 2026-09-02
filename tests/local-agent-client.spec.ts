@@ -112,6 +112,7 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     maxToolRounds: 20,
     disabledTools: [],
     systemPromptOverride: '',
+    saveWorkflowFromChat: false,
     downloadAutoSave: true,
     imageModel: { providerId: '', model: '' },
     ocrLanguage: 'eng',

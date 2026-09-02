@@ -41,6 +41,26 @@ import { newId } from '../lib/storage'
 import type { Settings } from '../lib/types'
 import { TOOLS, runToolStandalone } from './agent'
 import { runUnattendedPrompt } from './agent-unattended'
+import { execOnActiveTab, resolveAutomationTab } from './driver'
+import { ensureTabMonitor } from './cdp-monitor'
+
+/**
+ * Session warmup, run when a remote agent pings or lists tools: resolve the
+ * automation tab (fills the resolution cache), attach the CDP monitor and
+ * prime the resident kernel in the tab, so the FIRST real tool call doesn't
+ * pay cold-start costs (tab search chain + kernel injection). Best-effort —
+ * any failure just means the first call warms up instead.
+ */
+async function warmupAutomation(): Promise<void> {
+  try {
+    const tab = await resolveAutomationTab()
+    if (!tab || typeof tab.id !== 'number') return
+    await ensureTabMonitor(tab.id)
+    await execOnActiveTab({ action: 'page_signature' }).catch(() => {})
+  } catch {
+    /* best-effort */
+  }
+}
 
 /** Requests the local adapter can send over the WebSocket connection. */
 export type ExternalAgentRequest =
@@ -136,9 +156,13 @@ export async function processAgentRequest(
 
   switch (req.type) {
     case 'ping':
+      // Await (not fire-and-forget): the reply doubles as a "warmed up" signal,
+      // and awaiting keeps the service worker alive through the work.
+      await warmupAutomation()
       return { ok: true, data: { pong: true } }
 
     case 'tools.list':
+      await warmupAutomation()
       return { ok: true, data: { tools: TOOLS } }
 
     case 'tool': {

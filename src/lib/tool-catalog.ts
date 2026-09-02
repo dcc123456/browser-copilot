@@ -49,6 +49,12 @@ export const TOOL_META: ToolMeta[] = [
     labelKey: 'toolListTabs',
     warningKey: 'toolListTabsWarn',
   },
+  {
+    name: 'list_network_requests',
+    category: 'read',
+    labelKey: 'toolNetworkRequests',
+    warningKey: 'toolNetworkRequestsWarn',
+  },
   { name: 'click', category: 'act', labelKey: 'toolClick', warningKey: 'toolClickWarn' },
   { name: 'fill', category: 'act', labelKey: 'toolFill', warningKey: 'toolFillWarn' },
   {
@@ -93,10 +99,28 @@ export const TOOL_META: ToolMeta[] = [
     warningKey: 'toolTabCloseWarn',
   },
   {
+    name: 'pin_tab',
+    category: 'nav',
+    labelKey: 'toolPinTab',
+    warningKey: 'toolPinTabWarn',
+  },
+  {
+    name: 'unpin_tab',
+    category: 'nav',
+    labelKey: 'toolUnpinTab',
+    warningKey: 'toolUnpinTabWarn',
+  },
+  {
     name: 'run_javascript',
     category: 'act',
     labelKey: 'toolRunJs',
     warningKey: 'toolRunJsWarn',
+  },
+  {
+    name: 'run_plan',
+    category: 'act',
+    labelKey: 'toolRunPlan',
+    warningKey: 'toolRunPlanWarn',
   },
   {
     name: 'save_local',

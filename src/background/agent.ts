@@ -60,10 +60,14 @@ import {
   listTabs,
   newTab,
   ocrImage,
+  pinActiveTab,
+  resolveAutomationTab,
   settleAfterNavigation,
   snapshotActiveTab,
   switchTab,
+  unpinTab,
 } from './driver'
+import { drainConsoleEntries, ensureTabMonitor, getRecentRequests, waitForNetworkIdle } from './cdp-monitor'
 import { activeTab, readActivePage } from './page'
 import { listTasks } from '../lib/task-store'
 import { describeSchedule } from '../lib/schedule'
@@ -81,14 +85,17 @@ const ACTION_TOOLS = new Set([
   'tab_new',
   'tab_switch',
   'tab_close',
+  'pin_tab',
+  'unpin_tab',
   'run_javascript',
   'save_local',
   'recognize_image',
   'screenshot',
   'create_skill',
+  'run_plan',
 ])
 
-const READ_TOOLS = new Set(['read_current_page', 'snapshot_page', 'list_tabs'])
+const READ_TOOLS = new Set(['read_current_page', 'snapshot_page', 'list_tabs', 'list_network_requests'])
 
 /** Fallback cap used when settings cannot supply one. */
 const DEFAULT_MAX_TOOL_ROUNDS = 20
@@ -133,7 +140,7 @@ export function buildSystemPrompt(options: {
     )
   } else if (options.mode === 'full') {
     parts.push(
-      'OPERATING MODE: FULL AUTO. The user has pre-approved actions, so do not ask them to confirm — just perform them step by step, taking a fresh snapshot after each navigation or important change. Still read errors back and stop if something looks dangerous.',
+      'OPERATING MODE: FULL AUTO. The user has pre-approved actions, so do not ask them to confirm — just perform them, issuing multiple tool calls in one response whenever the next steps are unambiguous. Take a fresh snapshot after each navigation or important change. Still read errors back and stop if something looks dangerous.',
     )
   } else {
     parts.push(
@@ -163,6 +170,24 @@ const TARGET_SCHEMA = {
   },
   required: ['primary', 'fallbacks'],
   additionalProperties: true,
+} as const
+
+/**
+ * Optional per-call screenshot flag shared by the action tools. The result's
+ * `observation` then embeds a base64 PNG for multimodal remote clients; the
+ * side-panel agent loop strips the flag (text-only transcript).
+ */
+const SCREENSHOT_ARG = {
+  type: 'boolean',
+  description:
+    'Also attach a base64 screenshot of the page to the result\'s observation, for multimodal remote clients. Ignored by the side-panel agent (its transcript is text-only).',
+} as const
+
+/** Preferred element handle: a short ref from the latest snapshot/observation. */
+const REF_ARG = {
+  type: 'string',
+  description:
+    'Element ref (e.g. "e12") from the latest snapshot_page or an action\'s observation. Preferred over passing a full target object.',
 } as const
 
 const SPEC_SCHEMA = {
@@ -213,14 +238,15 @@ export const TOOLS: WireTool[] = [
     type: 'function',
     function: {
       name: 'click',
-      description: 'Click an element (button, link, tab, etc.) by its target from a snapshot.',
+      description: 'Click an element (button, link, tab, etc.) by its ref from a snapshot.',
       parameters: {
         type: 'object',
         properties: {
+          ref: REF_ARG,
           target: TARGET_SCHEMA,
           label: { type: 'string', description: 'Human label for the confirmation prompt.' },
+          withScreenshot: SCREENSHOT_ARG,
         },
-        required: ['target'],
         $defs: { spec: SPEC_SCHEMA },
       },
     },
@@ -285,9 +311,11 @@ export const TOOLS: WireTool[] = [
       parameters: {
         type: 'object',
         properties: {
+          ref: REF_ARG,
           target: TARGET_SCHEMA,
           value: { type: 'string' },
           label: { type: 'string' },
+          withScreenshot: SCREENSHOT_ARG,
           generated: {
             type: 'boolean',
             description:
@@ -298,7 +326,7 @@ export const TOOLS: WireTool[] = [
             description: 'Clear the field first (default true).',
           },
         },
-        required: ['target', 'value'],
+        required: ['value'],
         $defs: { spec: SPEC_SCHEMA },
       },
     },
@@ -311,13 +339,14 @@ export const TOOLS: WireTool[] = [
       parameters: {
         type: 'object',
         properties: {
+          ref: REF_ARG,
           target: TARGET_SCHEMA,
           value: {
             oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
           },
           label: { type: 'string' },
         },
-        required: ['target', 'value'],
+        required: ['value'],
         $defs: { spec: SPEC_SCHEMA },
       },
     },
@@ -330,11 +359,11 @@ export const TOOLS: WireTool[] = [
       parameters: {
         type: 'object',
         properties: {
+          ref: REF_ARG,
           target: TARGET_SCHEMA,
           value: { type: 'boolean', description: 'Desired checked state (default true).' },
           label: { type: 'string' },
         },
-        required: ['target'],
         $defs: { spec: SPEC_SCHEMA },
       },
     },
@@ -349,6 +378,7 @@ export const TOOLS: WireTool[] = [
         type: 'object',
         properties: {
           key: { type: 'string' },
+          ref: REF_ARG,
           target: TARGET_SCHEMA,
           label: { type: 'string' },
         },
@@ -369,7 +399,9 @@ export const TOOLS: WireTool[] = [
           mode: { type: 'string', enum: ['into_view', 'by', 'top', 'bottom'] },
           x: { type: 'number' },
           y: { type: 'number' },
+          ref: REF_ARG,
           target: TARGET_SCHEMA,
+          withScreenshot: SCREENSHOT_ARG,
         },
         $defs: { spec: SPEC_SCHEMA },
       },
@@ -383,8 +415,7 @@ export const TOOLS: WireTool[] = [
         'Wait briefly until an element becomes visible (e.g. after opening a menu). Returns immediately if it is already visible; otherwise the driver polls briefly.',
       parameters: {
         type: 'object',
-        properties: { target: TARGET_SCHEMA, label: { type: 'string' } },
-        required: ['target'],
+        properties: { ref: REF_ARG, target: TARGET_SCHEMA, label: { type: 'string' } },
         $defs: { spec: SPEC_SCHEMA },
       },
     },
@@ -396,7 +427,10 @@ export const TOOLS: WireTool[] = [
       description: 'Navigate the active tab to a URL.',
       parameters: {
         type: 'object',
-        properties: { url: { type: 'string' } },
+        properties: {
+          url: { type: 'string' },
+          withScreenshot: SCREENSHOT_ARG,
+        },
         required: ['url'],
       },
     },
@@ -436,6 +470,31 @@ export const TOOLS: WireTool[] = [
   {
     type: 'function',
     function: {
+      name: 'pin_tab',
+      description:
+        'Pin a tab so every subsequent action targets it, avoiding tab_switch round trips. Pass a tabId from list_tabs, or nothing to pin the tab that would be acted on anyway. The pin expires after 5 minutes.',
+      parameters: {
+        type: 'object',
+        properties: {
+          tabId: {
+            type: 'number',
+            description: 'Tab to pin. Omit to pin the current automation target.',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'unpin_tab',
+      description: 'Remove the tab pin; subsequent actions target the active tab again.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'run_javascript',
       description:
         'Run custom JavaScript in the active web page and return its result. Use for data extraction or page manipulation the other tools cannot do. The code runs as a function body in the page; use `return` to send a JSON-serializable value back. This changes the page and requires approval.',
@@ -456,6 +515,15 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'list_tabs',
       description: 'List the tabs open in the current window with their index, title, and URL.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_network_requests',
+      description:
+        'List recent network requests of the active tab (URL, method, HTTP status, failures), captured passively since the monitor attached. Use after an action to diagnose failed, slow, or error-status requests. Read-only; requires approval.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -571,6 +639,36 @@ export const TOOLS: WireTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'run_plan',
+      description:
+        'Execute a sequence of already-decided steps in ONE round, in order, stopping at the first failure. Use it when the next steps are unambiguous from the current snapshot (e.g. fill three fields, then click submit, then wait_for the confirmation element). Each step is { tool, args } using the other tool names; steps run exactly like individual tool calls, and an { optional: true } step that fails is skipped instead of stopping the plan. Do NOT use run_plan when a later step depends on what you would learn from an earlier one — do those one at a time. Requires approval.',
+      parameters: {
+        type: 'object',
+        properties: {
+          steps: {
+            type: 'array',
+            description: 'Ordered steps to execute. At most 16.',
+            items: {
+              type: 'object',
+              properties: {
+                tool: { type: 'string', description: 'A tool name other than run_plan.' },
+                args: { type: 'object', description: 'That tool\'s arguments, same schema.' },
+                optional: {
+                  type: 'boolean',
+                  description: 'Skip this step (continue the plan) if it fails. Default false.',
+                },
+              },
+              required: ['tool'],
+            },
+          },
+        },
+        required: ['steps'],
+      },
+    },
+  },
 ]
 
 export type ConfirmFn = (name: string, argsPreview: string) => Promise<boolean>
@@ -671,14 +769,17 @@ function summarizeSnapshot(snapshot: {
     ...(el.checked !== undefined ? { checked: el.checked } : {}),
     ...(el.required ? { required: true } : {}),
     inViewport: el.inViewport,
-    // The durable locator the click/fill tools echo back verbatim. This MUST
-    // be present: the tool schema tells the model to copy it from here, and it
-    // carries the closed-shadow marker that routes clicks through CDP.
-    ...(el.target ? { target: el.target } : {}),
+    // NOTE: the element's durable `target` is deliberately NOT emitted — it
+    // was the single largest token sink in every snapshot. The agent holds the
+    // ref→target mapping in ToolContext.snapshotTargets; the model acts with
+    // the short `ref` (devtools-mcp's uid pattern) and the full target —
+    // including the closed-shadow marker that routes clicks through CDP —
+    // never leaves the extension.
   }))
-  // Keep the full text but cap so a long page doesn't blow the context.
+  // Keep the text but cap it hard: a snapshot is re-sent on every later round
+  // and the model's locators come from the elements, not the prose.
   const text =
-    snapshot.text.length > 6000 ? `${snapshot.text.slice(0, 6000)}…[truncated]` : snapshot.text
+    snapshot.text.length > 3000 ? `${snapshot.text.slice(0, 3000)}…[truncated]` : snapshot.text
   return {
     url: snapshot.url,
     title: snapshot.title,
@@ -780,6 +881,72 @@ interface ToolContext {
   lastUrl?: string
   /** Tools the user has disabled; the model should not call them. */
   disabled: Set<string>
+  /**
+   * Ref → element cache from the LATEST snapshot (the devtools-mcp uid
+   * pattern): snapshots and observations carry only short refs like "e12",
+   * and act tools resolve them here against the full durable target. The
+   * snapshot's raw `target` objects never reach the model — that is where
+   * most of the old snapshot's token weight lived. Cleared on navigation.
+   */
+  snapshotTargets?: Map<string, { target: Target; name: string }>
+}
+
+/**
+ * Resolves an element target from call args: a `ref` ("e12", preferred) or a
+ * full `target` object (legacy/verbatim form, still accepted).
+ */
+function resolveTargetFrom(
+  ctx: ToolContext,
+  args: Record<string, unknown>,
+): { target: Target } | { error: string } {
+  const ref = typeof args.ref === 'string' ? args.ref.trim() : ''
+  if (ref) {
+    const hit = ctx.snapshotTargets?.get(ref)
+    if (!hit) {
+      return {
+        error: `Unknown ref "${ref}". Refs come from the latest snapshot_page or an action's observation — take a fresh snapshot if the page has changed.`,
+      }
+    }
+    return { target: hit.target }
+  }
+  const explicit = asTarget(args.target)
+  if (explicit) return { target: explicit }
+  return {
+    error:
+      'This tool needs an element: pass `ref` from the latest snapshot (preferred) or a full `target` object.',
+  }
+}
+
+/** Stores the latest snapshot's ref→target mapping on the context. */
+function rememberSnapshotTargets(
+  ctx: ToolContext,
+  snapshot: { elements: Array<{ ref?: unknown; name?: unknown; target?: unknown }> },
+): void {
+  const map = new Map<string, { target: Target; name: string }>()
+  for (const el of snapshot.elements) {
+    const target = asTarget(el.target)
+    if (target && typeof el.ref === 'string') {
+      map.set(el.ref, { target, name: typeof el.name === 'string' ? el.name : '' })
+    }
+  }
+  ctx.snapshotTargets = map.size > 0 ? map : undefined
+}
+
+/**
+ * Replaces a ref-only element handle with the resolved durable target for
+ * DOWNSTREAM consumers of the recorded args (workflowFromHistory's
+ * selectorFromArgs reads `args.target`). Model-facing transcripts stay lean —
+ * this only shapes what lands in the action history.
+ */
+function hydrateRecordArgs(
+  ctx: ToolContext,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  if (typeof args.ref === 'string' && !args.target) {
+    const hit = ctx.snapshotTargets?.get(args.ref)
+    if (hit) return { ...args, target: hit.target }
+  }
+  return args
 }
 
 /**
@@ -838,6 +1005,36 @@ export function retireOldPageReads(history: WireMessage[], retireAll = false): v
       ...(url ? { url } : {}),
     })
   }
+
+  // Auto-observations attached to action results: keep only the most recent
+  // one in the transcript. The observation served its purpose the round it
+  // arrived — the model acted on it (or chose not to) — so every older copy
+  // (including any base64 screenshot payload) is replaced by a stub.
+  let lastObservationIndex = -1
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const msg = history[i]
+    if (msg?.role === 'tool' && typeof msg.content === 'string' && msg.content.includes('"observation"')) {
+      lastObservationIndex = i
+      break
+    }
+  }
+  for (let i = 0; i < history.length; i += 1) {
+    if (i === lastObservationIndex) continue
+    const msg = history[i]
+    if (msg?.role !== 'tool' || typeof msg.content !== 'string') continue
+    if (!msg.content.includes('"observation"')) continue
+    try {
+      const parsed = JSON.parse(msg.content) as Record<string, unknown>
+      if (!parsed || typeof parsed !== 'object' || !('observation' in parsed)) continue
+      msg.content = JSON.stringify({
+        ...parsed,
+        observation:
+          '[discarded] This observation from an older action was dropped to save context. Run snapshot_page if you need the current page.',
+      })
+    } catch {
+      /* not JSON — leave it */
+    }
+  }
 }
 
 /**
@@ -846,16 +1043,31 @@ export function retireOldPageReads(history: WireMessage[], retireAll = false): v
  * values (get_secret / a field marked secret) are masked so the audit log never
  * stores a password in plain text.
  */
-function describeDetail(name: string, args: Record<string, unknown>, output?: string): string[] {
+function describeDetail(
+  name: string,
+  args: Record<string, unknown>,
+  snapshotTargets?: ToolContext['snapshotTargets'],
+  output?: string,
+): string[] {
   const lines: string[] = []
-  const target = asTarget(args.target)
+  const target =
+    asTarget(args.target) ??
+    (typeof args.ref === 'string' ? snapshotTargets?.get(args.ref)?.target : undefined)
   const element =
     typeof args.label === 'string'
       ? args.label
-      : target?.label ?? describeTarget(target)
+      : (typeof args.ref === 'string' ? snapshotTargets?.get(args.ref)?.name : undefined) ??
+        target?.label ??
+        describeTarget(target)
   if (element && element !== 'element') lines.push(`Element: ${element}`)
 
   switch (name) {
+    case 'run_plan': {
+      const steps = Array.isArray(args.steps) ? (args.steps as { tool?: unknown }[]) : []
+      const tools = steps.map((step) => String(step?.tool ?? '?')).join(' → ')
+      lines.push(`Plan (${steps.length} steps): ${tools}`)
+      break
+    }
     case 'click':
       // Nothing beyond the element label.
       break
@@ -923,15 +1135,27 @@ function describeDetail(name: string, args: Record<string, unknown>, output?: st
 }
 
 /** Produces the human-readable summary shown on the confirmation card. */
-function describeAction(name: string, args: Record<string, unknown>): string {
+function describeAction(
+  name: string,
+  args: Record<string, unknown>,
+  snapshotTargets?: ToolContext['snapshotTargets'],
+): string {
   const label = typeof args.label === 'string' ? args.label : undefined
+  const refTarget =
+    typeof args.ref === 'string' ? snapshotTargets?.get(args.ref) : undefined
   const targetLabel =
-    label ??
-    (() => {
-      const target = asTarget(args.target)
-      return target?.label ?? describeTarget(target)
-    })()
+    label ?? refTarget?.name ?? describeTarget(asTarget(args.target) ?? refTarget?.target)
   switch (name) {
+    case 'run_plan': {
+      // Approval card for a whole plan: name each step so the user can review
+      // the sequence before it runs.
+      const steps = Array.isArray(args.steps) ? (args.steps as { tool?: unknown; args?: Record<string, unknown> }[]) : []
+      const listed = steps
+        .slice(0, 6)
+        .map((step, i) => `${i + 1}. ${describeAction(String(step?.tool ?? '?'), step?.args ?? {})}`)
+      const more = steps.length > 6 ? `… (+${steps.length - 6} more steps)` : ''
+      return `Run a ${steps.length}-step plan:\n${listed.join('\n')}${more ? `\n${more}` : ''}`
+    }
     case 'read_current_page':
       return 'Read the text of the current page'
     case 'snapshot_page':
@@ -1034,6 +1258,7 @@ async function resolveToolImage(
   rawImage: string,
   selector: string,
   signal?: AbortSignal,
+  opts?: { format?: 'png' | 'jpeg' },
 ): Promise<string | null> {
   if (rawImage) return resolveImageRef(rawImage)
   if (selector) {
@@ -1044,7 +1269,14 @@ async function resolveToolImage(
   const tab = await activeTab()
   if (tab && typeof tab.windowId === 'number') {
     try {
-      return await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
+      // Default PNG: lossless, for OCR/vision accuracy. The observation
+      // screenshot path passes jpeg — a PNG of a full page costs the remote
+      // client 5-10x the tokens for no benefit when just eyeballing state.
+      const format = opts?.format ?? 'png'
+      return await chrome.tabs.captureVisibleTab(tab.windowId, {
+        format,
+        ...(format === 'jpeg' ? { quality: 60 } : {}),
+      })
     } catch {
       return null
     }
@@ -1056,7 +1288,12 @@ async function resolveToolImage(
  * Runs the tool after approval. `approved` is false when the user declined.
  * Returns the JSON string handed back to the model.
  */
-async function executeTool(
+/**
+ * Executes a single browser tool directly (no approval, no audit — those live
+ * in runOneToolCall). Exported for tests covering run_plan's validation paths;
+ * not part of the public agent API.
+ */
+export async function executeTool(
   name: string,
   args: Record<string, unknown>,
   ctx: ToolContext,
@@ -1076,10 +1313,15 @@ async function executeTool(
 
     case 'snapshot_page': {
       throwIfAborted()
-      const maxChars = typeof args.maxChars === 'number' ? args.maxChars : 8000
+      // Default to a lean snapshot: it is re-sent on every later round, so the
+      // interactive elements (what the model acts on) matter more than prose.
+      // A page whose text is genuinely needed can ask for more via maxChars,
+      // or use read_current_page.
+      const maxChars = typeof args.maxChars === 'number' ? args.maxChars : 3000
       const maxElements = typeof args.maxElements === 'number' ? args.maxElements : 120
       const snapshot = await snapshotActiveTab(maxChars, maxElements)
       ctx.lastUrl = snapshot.url
+      rememberSnapshotTargets(ctx, snapshot)
       return JSON.stringify(compactSnapshot(snapshot))
     }
 
@@ -1174,6 +1416,25 @@ async function executeTool(
       return JSON.stringify({ ok: true, text: result.text, model: vision.model })
     }
 
+    case 'list_network_requests': {
+      throwIfAborted()
+      // Reads the passive CDP monitor's buffer; attaching here (best-effort)
+      // makes the tool useful even when called before any action ran.
+      const tab = await resolveAutomationTab()
+      if (!tab || typeof tab.id !== 'number') {
+        return JSON.stringify({ ok: false, error: '没有可读取的标签页。' })
+      }
+      await ensureTabMonitor(tab.id)
+      const requests = getRecentRequests(tab.id)
+      return JSON.stringify({
+        ok: true,
+        requests,
+        ...(requests.length === 0
+          ? { note: 'No requests captured yet. Run an action first, then call again.' }
+          : {}),
+      })
+    }
+
     case 'list_tabs': {
       throwIfAborted()
       const tabs = await listTabs()
@@ -1229,58 +1490,69 @@ async function executeTool(
 
     case 'click': {
       throwIfAborted()
-      const target = asTarget(args.target)
-      if (!target) return JSON.stringify({ error: 'click requires a target.' })
-      const result = await execOnActiveTab({ action: 'click', target }, signal)
-      return afterAction(result, ctx)
+      const resolved = resolveTargetFrom(ctx, args)
+      if ('error' in resolved) return JSON.stringify({ error: resolved.error })
+      const result = await execOnActiveTab({ action: 'click', target: resolved.target }, signal)
+      return afterAction(result, ctx, {}, { withScreenshot: args.withScreenshot === true, signal })
     }
 
     case 'fill': {
       throwIfAborted()
-      const target = asTarget(args.target)
-      if (!target) return JSON.stringify({ error: 'fill requires a target.' })
+      const resolved = resolveTargetFrom(ctx, args)
+      if ('error' in resolved) return JSON.stringify({ error: resolved.error })
+      const target = resolved.target
       const value = String(args.value ?? '')
       const clear = args.clear === false ? false : true
       const result = await execOnActiveTab({ action: 'fill', target, value, clear }, signal)
-      return afterAction(result, ctx, value.length > 0 ? { filled: true } : { cleared: true })
+      return afterAction(
+        result,
+        ctx,
+        value.length > 0 ? { filled: true } : { cleared: true },
+        { withScreenshot: args.withScreenshot === true, signal },
+      )
     }
 
     case 'select_option': {
       throwIfAborted()
-      const target = asTarget(args.target)
-      if (!target) return JSON.stringify({ error: 'select_option requires a target.' })
+      const resolved = resolveTargetFrom(ctx, args)
+      if ('error' in resolved) return JSON.stringify({ error: resolved.error })
+      const target = resolved.target
       const value = (Array.isArray(args.value)
         ? args.value.map(String)
         : String(args.value ?? '')) as string | string[]
       const result = await execOnActiveTab({ action: 'select_option', target, value }, signal)
-      return afterAction(result, ctx)
+      return afterAction(result, ctx, {}, { withScreenshot: args.withScreenshot === true, signal })
     }
 
     case 'set_checkbox': {
       throwIfAborted()
-      const target = asTarget(args.target)
-      if (!target) return JSON.stringify({ error: 'set_checkbox requires a target.' })
+      const resolved = resolveTargetFrom(ctx, args)
+      if ('error' in resolved) return JSON.stringify({ error: resolved.error })
+      const target = resolved.target
       const value = args.value === undefined ? true : args.value === true
       const result = await execOnActiveTab({ action: 'set_checkbox', target, value }, signal)
-      return afterAction(result, ctx)
+      return afterAction(result, ctx, {}, { withScreenshot: args.withScreenshot === true, signal })
     }
 
     case 'press_key': {
       throwIfAborted()
       const key = String(args.key ?? '')
       if (!key) return JSON.stringify({ error: 'press_key needs a key.' })
-      const target = asTarget(args.target)
-      const op: Op = target
-        ? { action: 'press_key', target, value: key }
+      const resolved = args.target || args.ref ? resolveTargetFrom(ctx, args) : undefined
+      if (resolved && 'error' in resolved) return JSON.stringify({ error: resolved.error })
+      const op: Op = resolved
+        ? { action: 'press_key', target: resolved.target, value: key }
         : { action: 'press_key', value: key }
       const result = await execOnActiveTab(op, signal)
-      return afterAction(result, ctx)
+      return afterAction(result, ctx, {}, { withScreenshot: args.withScreenshot === true, signal })
     }
 
     case 'scroll': {
       throwIfAborted()
       const mode = String(args.mode ?? 'by')
-      const target = asTarget(args.target)
+      const resolved = args.target || args.ref ? resolveTargetFrom(ctx, args) : undefined
+      if (resolved && 'error' in resolved) return JSON.stringify({ error: resolved.error })
+      const target = resolved?.target
       const op: Op =
         mode === 'into_view' && target
           ? { action: 'scroll', target, scroll: { mode: 'into_view' } }
@@ -1297,13 +1569,14 @@ async function executeTool(
                   },
                 }
       const result = await execOnActiveTab(op, signal)
-      return afterAction(result, ctx)
+      return afterAction(result, ctx, {}, { withScreenshot: args.withScreenshot === true, signal })
     }
 
     case 'wait_for': {
       throwIfAborted()
-      const target = asTarget(args.target)
-      if (!target) return JSON.stringify({ error: 'wait_for requires a target.' })
+      const resolved = resolveTargetFrom(ctx, args)
+      if ('error' in resolved) return JSON.stringify({ error: resolved.error })
+      const target = resolved.target
       // Poll a few times; the kernel itself is synchronous.
       const deadline = Date.now() + 4000
       let last: OpResult | undefined
@@ -1311,9 +1584,102 @@ async function executeTool(
         if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
         last = await execOnActiveTab({ action: 'wait_for', target }, signal)
         if (last.ok) break
-        await new Promise((resolve) => setTimeout(resolve, 250))
+        await new Promise((resolve) => setTimeout(resolve, 100))
       }
-      return afterAction(last ?? { ok: false, found: false, frameUrl: '', isTopFrame: true }, ctx)
+      return afterAction(
+        last ?? { ok: false, found: false, frameUrl: '', isTopFrame: true },
+        ctx,
+        {},
+        { signal },
+      )
+    }
+
+    case 'run_plan': {
+      throwIfAborted()
+      // Plan-then-execute: the model planned the whole sequence from the last
+      // snapshot; this runner performs it deterministically so the turn costs
+      // one model round instead of one per step. Approval was granted once for
+      // the whole plan (ACTION_TOOLS gating in runOneToolCall), so inner steps
+      // skip the per-action confirm dialog — but they still respect disabled
+      // tools, the 16-step cap and aborts, and the plan stops at the first
+      // non-optional failure so the model can replan from real page state.
+      const steps = Array.isArray(args.steps) ? args.steps : []
+      if (steps.length === 0) {
+        return JSON.stringify({ error: 'run_plan requires a non-empty steps array.' })
+      }
+      if (steps.length > 16) {
+        return JSON.stringify({
+          error: `run_plan accepts at most 16 steps (got ${steps.length}). Split the task.`,
+        })
+      }
+      const outcomes: Record<string, unknown>[] = []
+      for (let i = 0; i < steps.length; i += 1) {
+        throwIfAborted()
+        const step = (steps[i] ?? {}) as {
+          tool?: unknown
+          args?: Record<string, unknown>
+          optional?: unknown
+        }
+        const toolName = String(step.tool ?? '')
+        const stepArgs = (step.args && typeof step.args === 'object'
+          ? step.args
+          : {}) as Record<string, unknown>
+        // Screenshots never belong in the text-only model transcript.
+        delete stepArgs.withScreenshot
+        const fail = (error: string): string => {
+          outcomes.push({ step: i + 1, tool: toolName, ok: false, error })
+          return JSON.stringify({
+            ok: false,
+            stoppedAt: i + 1,
+            error: `run_plan stopped at step ${i + 1} (${toolName}): ${error}`,
+            outcomes,
+          })
+        }
+        if (toolName === 'run_plan' || !TOOLS.some((tool) => tool.function.name === toolName)) {
+          return fail(`unknown tool "${toolName}"`)
+        }
+        if (ctx.disabled.has(toolName)) {
+          return fail(`"${toolName}" is disabled in settings`)
+        }
+        const output = await executeTool(toolName, stepArgs, ctx, signal)
+        let parsed: { ok?: boolean; error?: string }
+        try {
+          parsed = JSON.parse(output) as { ok?: boolean; error?: string }
+        } catch {
+          parsed = { ok: true }
+        }
+        const ok = parsed.ok !== false
+        // Inner steps bypass runOneToolCall (and its audit), so record each
+        // one here — action history is the source for "workflow from history",
+        // and a plan that skips its recording loses operator nodes.
+        await recordAction(
+          ctx.conversationId,
+          toolName,
+          describeAction(toolName, stepArgs, ctx.snapshotTargets),
+          ctx.lastUrl ? hostOf(ctx.lastUrl) : undefined,
+          true, // the whole plan was approved up front
+          ok,
+          describeDetail(toolName, stepArgs, ctx.snapshotTargets),
+          hydrateRecordArgs(ctx, stepArgs),
+        )
+        outcomes.push({
+          step: i + 1,
+          tool: toolName,
+          ok,
+          ...(parsed.error ? { error: parsed.error } : {}),
+        })
+        if (!ok && step.optional !== true) {
+          return JSON.stringify({
+            ok: false,
+            stoppedAt: i + 1,
+            error: `run_plan stopped at step ${i + 1} (${toolName}): ${
+              parsed.error ?? 'the step did not succeed'
+            }`,
+            outcomes,
+          })
+        }
+      }
+      return JSON.stringify({ ok: true, stepsRun: outcomes.length, outcomes })
     }
 
     case 'open_url': {
@@ -1322,8 +1688,14 @@ async function executeTool(
       // The driver handles the isInjectablePage check with a clear error.
       await chrome.tabs.update({ url })
       ctx.navigated = true
-      await settleAfterNavigation(400, signal)
-      return JSON.stringify({ ok: true, navigated: true, url })
+      ctx.snapshotTargets = undefined // old page's refs are gone
+      await settleAfterNavigation(2000, signal)
+      const payload: Record<string, unknown> = { ok: true, navigated: true, url }
+      // The fresh page's observation lets the very next step act on it (often
+      // within the same run_plan), without a separate snapshot round.
+      const observed = await captureObservation(ctx, args.withScreenshot === true, signal)
+      if (observed) payload.observation = observed
+      return JSON.stringify(payload)
     }
 
     case 'tab_new': {
@@ -1332,8 +1704,12 @@ async function executeTool(
       const tab = await newTab(url || undefined)
       ctx.navigated = true
       ctx.lastUrl = tab.url
+      ctx.snapshotTargets = undefined // old page's refs are gone
       await settleAfterNavigation(undefined, signal)
-      return JSON.stringify({ ok: true, tabId: tab.id, url: tab.url })
+      const payload: Record<string, unknown> = { ok: true, tabId: tab.id, url: tab.url }
+      const observed = await captureObservation(ctx, args.withScreenshot === true, signal)
+      if (observed) payload.observation = observed
+      return JSON.stringify(payload)
     }
 
     case 'tab_switch': {
@@ -1342,6 +1718,7 @@ async function executeTool(
       const tab = await switchTab(index)
       ctx.navigated = true
       ctx.lastUrl = tab.url
+      ctx.snapshotTargets = undefined // different page entirely
       return JSON.stringify({ ok: true, index, tabId: tab.id, title: tab.title, url: tab.url })
     }
 
@@ -1351,6 +1728,25 @@ async function executeTool(
       return JSON.stringify({ ok: true })
     }
 
+    case 'pin_tab': {
+      throwIfAborted()
+      const tabId = typeof args.tabId === 'number' ? args.tabId : undefined
+      const tab = await pinActiveTab(tabId)
+      return JSON.stringify({
+        ok: true,
+        pinnedTabId: tab.id,
+        url: tab.url,
+        title: tab.title,
+        note: 'Subsequent actions target this tab until unpin_tab or a 5-minute expiry.',
+      })
+    }
+
+    case 'unpin_tab': {
+      throwIfAborted()
+      unpinTab()
+      return JSON.stringify({ ok: true, note: 'Pin removed; actions target the active tab again.' })
+    }
+
     case 'get_secret': {
       throwIfAborted()
       // Fills directly; the model never receives the secret value. Supports
@@ -1358,8 +1754,9 @@ async function executeTool(
       // just the "username" or "password" field of a multi-field entry).
       const id = String(args.id ?? '')
       const fieldName = typeof args.field === 'string' ? args.field : undefined
-      const target = asTarget(args.target)
-      if (!target) return JSON.stringify({ error: 'get_secret requires a target.' })
+      const resolved = resolveTargetFrom(ctx, args)
+      if ('error' in resolved) return JSON.stringify({ error: resolved.error })
+      const target = resolved.target
       const secret = await resolveSecret(id)
       if (!secret) return JSON.stringify({ error: 'Saved credential not found.' })
       const field = fieldName
@@ -1513,22 +1910,119 @@ function summarizeProfile(profile: UserProfile): unknown {
   return fields
 }
 
+/**
+ * Waits until the page's DOM stops changing before an auto-observation is
+ * captured: polls a cheap `page_signature` kernel op and returns once two
+ * consecutive probes (150ms apart) agree. Without this, a click whose handler
+ * fetches/renders asynchronously (SPA updates — no tab navigation, so
+ * settleAfterNavigation never runs) would be observed in its PRE-action state
+ * and mislead the model. Budget-capped: continuously animating pages settle
+ * at the timeout instead of looping forever.
+ */
+async function waitForPageStable(signal?: AbortSignal, timeout = 1500): Promise<void> {
+  // Preferred verdict: the CDP monitor reports network idle (no in-flight
+  // request for a while) — that sees "the fetch is still running" which a DOM
+  // probe structurally cannot. Falls back to DOM-signature polling when the
+  // monitor is not attached (no debugger access).
+  const tab = await resolveAutomationTab().catch(() => undefined)
+  if (tab && typeof tab.id === 'number') {
+    const idle = await waitForNetworkIdle(tab.id, 400, timeout).catch(() => undefined)
+    if (idle === true) return
+  }
+  const deadline = Date.now() + timeout
+  let prev: string | null = null
+  while (Date.now() < deadline) {
+    if (signal?.aborted) return
+    const result = await execOnActiveTab({ action: 'page_signature' }, signal).catch(
+      () => undefined,
+    )
+    const sig = result && typeof result.data === 'string' ? result.data : null
+    // Unscriptable or racing a navigation: stability will never come.
+    if (sig === null) return
+    if (sig === prev) return
+    prev = sig
+    await new Promise((resolve) => setTimeout(resolve, 150))
+  }
+}
+
+/**
+ * Auto-observation attached to a successful action result: a fresh lean
+ * snapshot (and optionally a screenshot) taken after the page has settled.
+ * The next round can act on the observation's refs directly instead of
+ * spending a whole model round on snapshot_page; retireOldPageReads drops
+ * older observations from the transcript, so history stays flat.
+ *
+ * `withScreenshot` embeds a base64 PNG of the visible page for multimodal
+ * remote clients (the local-agent bridge / Claude Code). The side-panel agent
+ * strips that flag — its transcript is text-only, so a base64 payload there
+ * would be pure token waste.
+ */
+async function captureObservation(
+  ctx: ToolContext,
+  withScreenshot: boolean,
+  signal?: AbortSignal,
+): Promise<{ snapshot: unknown; screenshot?: string; consoleErrors?: string[] } | undefined> {
+  try {
+    // Let the action's async page updates (fetch → render) land first, or the
+    // observation shows the pre-action page.
+    await waitForPageStable(signal)
+    const snapshot = await snapshotActiveTab(1500, 40)
+    // The observation's refs become the model's next action handles.
+    rememberSnapshotTargets(ctx, snapshot)
+    const observed: { snapshot: unknown; screenshot?: string; consoleErrors?: string[] } = {
+      snapshot: summarizeSnapshot(snapshot),
+    }
+    // Fresh console errors since the previous observation — the single most
+    // useful signal when the model is debugging a page after an action.
+    const tab = await resolveAutomationTab().catch(() => undefined)
+    const tabId = typeof tab?.id === 'number' ? tab.id : undefined
+    if (tabId !== undefined) {
+      const errors = drainConsoleEntries(tabId)
+      if (errors.length > 0) {
+        observed.consoleErrors = errors.map((entry) => `[${entry.level}] ${entry.text}`)
+      }
+    }
+    if (withScreenshot) {
+      if (signal?.aborted) return observed
+      const shot = await resolveToolImage('', '', signal, { format: 'jpeg' }).catch(() => null)
+      if (shot) observed.screenshot = shot
+    }
+    return observed
+  } catch {
+    // Best-effort: a navigation racing the capture or an unscriptable page
+    // must never turn a successful action into a failure.
+    return undefined
+  }
+}
+
 async function afterAction(
   result: OpResult,
   ctx: ToolContext,
   extra: Record<string, unknown> = {},
+  opts?: { withScreenshot?: boolean; signal?: AbortSignal },
 ): Promise<string> {
   if (result.mayNavigate) {
     ctx.navigated = true
     await settleAfterNavigation()
   }
   if (result.ok) {
-    return JSON.stringify({
+    const payload: Record<string, unknown> = {
       ok: true,
       ...(result.note ? { note: result.note } : {}),
-      ...(result.mayNavigate ? { navigated: true } : {}),
+      ...(result.mayNavigate
+        ? { navigated: true }
+        : // Save a model round trip: with the page unchanged the refs the
+          // model already holds stay valid, so it should act on them instead
+          // of re-snapshotting before the next step.
+          { pageUnchanged: true, note: 'The page did not navigate; the previous snapshot\'s refs are still valid.' }),
       ...extra,
-    })
+    }
+    // After a navigation the fresh observation shows the new page; when the
+    // page is unchanged it confirms the state. Either way the next round can
+    // act on it without a separate snapshot call.
+    const observed = await captureObservation(ctx, opts?.withScreenshot === true, opts?.signal)
+    if (observed) payload.observation = observed
+    return JSON.stringify(payload)
   }
   return JSON.stringify({
     ok: false,
@@ -1611,6 +2105,12 @@ export async function runAgentTurn(
   const activeSkill = deps.skillId ? await getSkill(deps.skillId) : undefined
   const catalogue = activeSkill ? [] : skillList
   const disabled = new Set(toolConfig.disabledTools)
+  // 「保存工作流」模式：走逐条执行的老路径。run_plan 的内部步骤在
+  // executeTool 里跑、不经过 runOneToolCall 的审计,撤掉它保证每个动作
+  // 单独入历史,「从历史生成工作流」的算子节点才完整。
+  if ((await getSettings()).saveWorkflowFromChat === true) {
+    disabled.add('run_plan')
+  }
   const systemPrompt = buildSystemPrompt({
     activeSkill,
     catalogue,
@@ -1795,6 +2295,17 @@ async function runOneToolCall(
     return
   }
 
+  // The side-panel transcript is text-only, so a base64 screenshot would be
+  // pure token waste here. That flag exists for multimodal remote clients
+  // (local-agent bridge); the panel loop always strips it.
+  delete args.withScreenshot
+
+  // The model acts with a short `ref`, but the audit history is downstream
+  // source data: "workflow from history" (workflowFromHistory →
+  // selectorFromArgs) builds replayable selectors from `args.target`. Persist
+  // the resolved durable target so a ref-only call does not lose the locator.
+  args = hydrateRecordArgs(ctx, args)
+
   // Defence in depth: a disabled tool's schema is withheld, but a model may
   // still hallucinate a call to it. Refuse rather than execute.
   if (ctx.disabled.has(name)) {
@@ -1826,11 +2337,11 @@ async function runOneToolCall(
     await recordAction(
       deps.conversationId,
       name,
-      describeAction(name, args),
+      describeAction(name, args, ctx.snapshotTargets),
       ctx.lastUrl ? hostOf(ctx.lastUrl) : undefined,
       false,
       false,
-      describeDetail(name, args),
+      describeDetail(name, args, ctx.snapshotTargets),
       args,
     )
     return
@@ -1865,11 +2376,11 @@ async function runOneToolCall(
         await recordAction(
           deps.conversationId,
           name,
-          describeAction(name, args),
+          describeAction(name, args, ctx.snapshotTargets),
           ctx.lastUrl ? hostOf(ctx.lastUrl) : undefined,
           false,
           false,
-          describeDetail(name, args),
+          describeDetail(name, args, ctx.snapshotTargets),
           args,
         )
         return
@@ -1892,11 +2403,11 @@ async function runOneToolCall(
     await recordAction(
       deps.conversationId,
       name,
-      describeAction(name, args),
+      describeAction(name, args, ctx.snapshotTargets),
       ctx.lastUrl ? hostOf(ctx.lastUrl) : undefined,
       approved,
       ok,
-      describeDetail(name, args, output),
+      describeDetail(name, args, ctx.snapshotTargets, output),
       args,
     )
   } catch (error) {
@@ -1914,11 +2425,11 @@ async function runOneToolCall(
     await recordAction(
       deps.conversationId,
       name,
-      describeAction(name, args),
+      describeAction(name, args, ctx.snapshotTargets),
       ctx.lastUrl ? hostOf(ctx.lastUrl) : undefined,
       approved,
       false,
-      [...describeDetail(name, args), `Error: ${message}`],
+      [...describeDetail(name, args, ctx.snapshotTargets), `Error: ${message}`],
       args,
     )
   }

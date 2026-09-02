@@ -71,6 +71,12 @@ export interface Settings {
    */
   systemPromptOverride: string
   /**
+   * 对话页「保存工作流」开关。开启后对话 agent 走逐条执行的老路径（不使用
+   * run_plan 批量执行），每个动作单独入历史，保证「从历史生成工作流」的
+   * 算子节点完整。默认关闭（批量执行更快，内部步骤也会补录入历史）。
+   */
+  saveWorkflowFromChat: boolean
+  /**
    * 已设置下载目录时，直接把工作流产生的文件保存到该目录而不询问；关闭（或无目录）时询问用户保存位置。
    */
   downloadAutoSave: boolean
