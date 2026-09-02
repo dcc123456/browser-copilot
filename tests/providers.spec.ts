@@ -157,6 +157,12 @@ describe('normalizeStoredSettings', () => {
         disabledTools: [],
         systemPromptOverride: '',
         downloadAutoSave: true,
+        localAgentEnabled: false,
+        localAgentToken: '',
+        localAgentUrl: 'ws://127.0.0.1:8765',
+        localAgentActiveAgent: '',
+        imageModel: { providerId: '', model: '' },
+        ocrLanguage: 'eng',
       })
     }
   })
@@ -171,6 +177,12 @@ describe('normalizeStoredSettings', () => {
       disabledTools: [],
       systemPromptOverride: '',
       downloadAutoSave: true,
+      localAgentEnabled: false,
+      localAgentToken: '',
+      localAgentUrl: 'ws://127.0.0.1:8765',
+      localAgentActiveAgent: '',
+      imageModel: { providerId: '', model: '' },
+      ocrLanguage: 'chi_sim+eng',
     }
     expect(normalizeStoredSettings(settings)).toEqual(settings)
   })
@@ -198,6 +210,12 @@ describe('normalizeStoredSettings', () => {
       disabledTools: [],
       systemPromptOverride: '',
       downloadAutoSave: true,
+      localAgentEnabled: false,
+      localAgentToken: '',
+      localAgentUrl: 'ws://127.0.0.1:8765',
+      localAgentActiveAgent: '',
+      imageModel: { providerId: '', model: '' },
+      ocrLanguage: 'eng',
     })
   })
 
@@ -228,6 +246,33 @@ describe('normalizeStoredSettings', () => {
         locale: bad,
       })
       expect(result.locale).toBe('auto')
+    }
+  })
+
+  it('falls back to the default localAgentUrl for non-loopback values', () => {
+    for (const bad of [undefined, 'ws://example.com:8765', 'http://127.0.0.1:1', 42, '', 'nope']) {
+      const result = normalizeStoredSettings({ providers: [], localAgentUrl: bad })
+      expect(result.localAgentUrl).toBe('ws://127.0.0.1:8765')
+    }
+  })
+
+  it('keeps a valid loopback localAgentUrl', () => {
+    const result = normalizeStoredSettings({
+      providers: [],
+      localAgentUrl: 'wss://[::1]:9000/agent',
+    })
+    expect(result.localAgentUrl).toBe('wss://[::1]:9000/agent')
+  })
+
+  it('preserves the pinned localAgentActiveAgent id and coerces bad values to empty', () => {
+    expect(
+      normalizeStoredSettings({ providers: [], localAgentActiveAgent: 'agent-abc' })
+        .localAgentActiveAgent,
+    ).toBe('agent-abc')
+    for (const bad of [undefined, null, 42, {}, ['x']]) {
+      expect(normalizeStoredSettings({ providers: [], localAgentActiveAgent: bad }).localAgentActiveAgent).toBe(
+        '',
+      )
     }
   })
 })
@@ -266,6 +311,14 @@ describe('normalizeSettingsPayload · cross-version safety', () => {
     expect(result.activeProviderId).toBe('p1')
   })
 
+  it('defaults ocrLanguage to eng and passes a custom value through', () => {
+    expect(normalizeSettingsPayload({}).ocrLanguage).toBe('eng')
+    expect(
+      normalizeSettingsPayload({ ocrLanguage: 'chi_sim+eng' }).ocrLanguage,
+    ).toBe('chi_sim+eng')
+    expect(normalizeSettingsPayload({ ocrLanguage: 42 }).ocrLanguage).toBe('eng')
+  })
+
   it('repairs an active pointer that names no known profile', () => {
     const result = normalizeSettingsPayload({
       providers: [profile()],
@@ -280,5 +333,15 @@ describe('normalizeSettingsPayload · cross-version safety', () => {
     }
     expect(normalizeSettingsPayload({ locale: 'zh-CN' }).locale).toBe('zh-CN')
     expect(normalizeSettingsPayload({ locale: 'en' }).locale).toBe('en')
+  })
+
+  it('defaults and preserves the localAgentActiveAgent field', () => {
+    expect(normalizeSettingsPayload({}).localAgentActiveAgent).toBe('')
+    expect(normalizeSettingsPayload({ localAgentActiveAgent: 'agent-x' }).localAgentActiveAgent).toBe(
+      'agent-x',
+    )
+    for (const bad of [7, {}, null, undefined]) {
+      expect(normalizeSettingsPayload({ localAgentActiveAgent: bad }).localAgentActiveAgent).toBe('')
+    }
   })
 })

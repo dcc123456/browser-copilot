@@ -1110,6 +1110,12 @@ textarea:focus-visible {
 
 .inline-check input {
   width: auto;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  accent-color: var(--accent);
 }
 
 /* Skills: a labelled checkbox that sits inside a card, unlike .inline-check
@@ -1127,6 +1133,12 @@ textarea:focus-visible {
 .checkbox input {
   width: auto;
   flex: none;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  accent-color: var(--accent);
 }
 
 /* Marks the skill currently applied to the conversation. */

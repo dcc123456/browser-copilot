@@ -74,6 +74,104 @@ export interface Settings {
    * 已设置下载目录时，直接把工作流产生的文件保存到该目录而不询问；关闭（或无目录）时询问用户保存位置。
    */
   downloadAutoSave: boolean
+  /**
+   * 可选的独立图像识别/视觉模型（如 gpt-4o、qwen-vl、glm-4v），用于 `recognize_image`
+   * 工具识别验证码等图片文字。留空时回退到当前激活的聊天 provider（若其支持视觉）。
+   */
+  imageModel: VisionConfig
+  /**
+   * 本地 OCR（Tesseract.js）使用的语言代码，`+` 连接可识别的多种语言，如
+   * `eng`、`chi_sim`、`chi_sim+eng`。`recognize_image` 会先用本地 OCR 识别
+   * （完全离线），结果为空或加载失败时再回退到视觉模型。
+   */
+  ocrLanguage: string
+  /**
+   * 是否启用“本地 Agent 接入”。开启后插件（service worker）作为 WebSocket
+   * 客户端主动连接本机 agent 运行的服务端（见 {@link localAgentUrl}），让 agent
+   * 无需知道扩展 ID 即可精确调用 click/fill 等单个工具。默认关闭。
+   */
+  localAgentEnabled: boolean
+  /**
+   * 可选的共享令牌。agent 发送的每个请求都必须携带相同的 token；
+   * 留空表示不校验令牌。
+   */
+  localAgentToken: string
+  /**
+   * 本机 agent 的 WebSocket 服务端地址。仅允许 loopback 主机
+   * （localhost / 127.0.0.1 / [::1]），其它地址会在归一化时回退到默认值。
+   */
+  localAgentUrl: string
+  /**
+   * 当前选中服务的 Agent 连接 id；`''` 表示服务所有连接（默认）。
+   * 多个 agent 同时接入时，插件只执行被选中连接发来的 tool/prompt 请求，
+   * 其余连接会被拒绝，从而实现“在插件里选择使用哪个连接”。
+   */
+  localAgentActiveAgent: string
+}
+
+/** 本地 Agent 接入默认连接地址。 */
+export const DEFAULT_LOCAL_AGENT_URL = 'ws://127.0.0.1:8765'
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1'])
+
+/**
+ * Coerces a stored `localAgentUrl` into a usable value: only `ws:`/`wss:` URLs
+ * whose host is a loopback address are accepted; anything else (missing,
+ * malformed, remote host, wrong scheme) falls back to the default.
+ */
+export function normalizeLocalAgentUrl(value: unknown): string {
+  if (typeof value !== 'string') return DEFAULT_LOCAL_AGENT_URL
+  try {
+    const url = new URL(value)
+    if ((url.protocol === 'ws:' || url.protocol === 'wss:') && LOOPBACK_HOSTS.has(url.hostname)) {
+      return value
+    }
+  } catch {
+    // fall through to the default
+  }
+  return DEFAULT_LOCAL_AGENT_URL
+}
+
+/** 插件与本地 agent 之间 WebSocket 连接的状态。 */
+export type AgentConnectionState = 'disconnected' | 'connecting' | 'connected'
+
+/** 本地 Agent 接入的实时连接状态，供设置页展示。 */
+export interface AgentStatus {
+  /** 插件是否在目标 url 上建立了（或正在建立）连接。 */
+  enabled: boolean
+  /** 当前连接目标地址；未启用时为默认地址。 */
+  url: string
+  state: AgentConnectionState
+  /** 最近一次失败/断开的原因（无错误时省略）。 */
+  error?: string
+  /** 最近一次连接成功的时间戳（毫秒）。 */
+  connectedAt?: number
+  /** 已接入的 Agent 连接列表（由适配器上报），供选择服务哪个连接。 */
+  agents: AgentConnectionInfo[]
+}
+
+/** 一个已接入本地适配器的 Agent 连接。 */
+export interface AgentConnectionInfo {
+  /** 适配器实例生成的唯一 id。 */
+  id: string
+  /** 易读名称（默认 `agent-<id 前缀>`，可用环境变量指定）。 */
+  name: string
+}
+
+/**
+ * Selection of the optional image-recognition model.
+ *
+ * Instead of re-entering credentials, it references an already-configured chat
+ * provider by id — that provider's base URL and API key are reused, and
+ * `model` optionally overrides the model it was saved with. Kept optional so
+ * non-vision default providers do not force the user to configure anything
+ * unless they need captcha recognition.
+ */
+export interface VisionConfig {
+  /** Provider id whose credentials are reused. Empty = resolve from the active provider. */
+  providerId: string
+  /** Optional model override; empty = use the selected provider's default model. */
+  model: string
 }
 
 /** Text scraped from a tab, for use as agent context. */

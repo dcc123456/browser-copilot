@@ -33,7 +33,7 @@ import {
   type WireToolCall,
 } from '../lib/llm'
 import type { AgentServerMessage, TurnTokenUsage } from '../lib/messages'
-import { renderSkillCatalogue, renderSkillPrompt } from '../lib/skills'
+import { renderSkillCatalogue, renderSkillPrompt, validateSkill } from '../lib/skills'
 import {
   addHistory,
   findSkillByName,
@@ -43,10 +43,12 @@ import {
   listSkills,
   newId,
   recordPasswordUse,
+  saveSkill,
   getSettings,
   getSkill,
 } from '../lib/storage'
 import { askSaveViaSidePanel, getDownloadDir, resolveTransferMode, writeFileToDownloadDir } from '../lib/download-dir'
+import { inspectImage, preprocessImage, recognizeImage, resolveVisionTarget } from '../lib/vision'
 import { isSamePage } from '../lib/pages'
 import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
 import { entryFields, findField, type AgentMode, type PasswordEntry, type Skill, type UserProfile } from '../lib/types'
@@ -57,6 +59,7 @@ import {
   execOnActiveTab,
   listTabs,
   newTab,
+  ocrImage,
   settleAfterNavigation,
   snapshotActiveTab,
   switchTab,
@@ -80,6 +83,9 @@ const ACTION_TOOLS = new Set([
   'tab_close',
   'run_javascript',
   'save_local',
+  'recognize_image',
+  'screenshot',
+  'create_skill',
 ])
 
 const READ_TOOLS = new Set(['read_current_page', 'snapshot_page', 'list_tabs'])
@@ -216,6 +222,57 @@ export const TOOLS: WireTool[] = [
         },
         required: ['target'],
         $defs: { spec: SPEC_SCHEMA },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'recognize_image',
+      description:
+        'Recognize the text/content of an image using an image model. The image can be supplied in two ways: pass an `image` value (a data URL or absolute http(s) URL) that is already available, OR pass a CSS selector to capture that page element; pass nothing to screenshot the visible page. Use when you need to read characters or text that live inside an image, most commonly a CAPTCHA code that you will then type into a field with fill. Requires approval.',
+      parameters: {
+        type: 'object',
+        properties: {
+          image: {
+            type: 'string',
+            description:
+              'The image itself, given as a data URL (data:image/…) or an absolute http(s) URL. The image is recognized as-is — it is attached to the recognition request, so nothing needs to be fetched. Prefer this when an <img> src or a data URL is already in hand.',
+          },
+          selector: {
+            type: 'string',
+            description:
+              'CSS selector of the <img> or element to capture from the active page. Prefer the img\'s own selector, e.g. "#captchaImg" or "img[src*=captcha]". Omit `image` to capture this region. If neither `image` nor `selector` is given, the visible page is used.',
+          },
+          prompt: {
+            type: 'string',
+            description:
+              'Optional custom instruction for what to extract. Defaults to transcribing all visible text/characters (good for CAPTCHA). E.g. "Read the 4-digit code in the top-left corner".',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'screenshot',
+      description:
+        'Take a screenshot of a page element (or the whole visible page) and send it to the image model so it can LOOK at it — read a CAPTCHA or text shown as an image, inspect an element\'s current state, layout, colors, or verify what is actually rendered. Unlike snapshot_page (which returns the DOM text) this shows the visual rendering. Optionally pass a `target` CSS selector to capture just that element; pass nothing to capture the whole page. Requires approval.',
+      parameters: {
+        type: 'object',
+        properties: {
+          target: {
+            type: 'string',
+            description:
+              'CSS selector of the element to screenshot, e.g. "#captchaImg" or "img[src*=captcha]". Omit to capture the whole visible page.',
+          },
+          prompt: {
+            type: 'string',
+            description:
+              'Optional instruction for what the model should look for. Defaults to reading any visible text/CAPTCHA and describing the element. E.g. "Is the submit button disabled?" or "What is displayed in the top-right toast?".',
+          },
+        },
       },
     },
   },
@@ -449,6 +506,43 @@ export const TOOLS: WireTool[] = [
         type: 'object',
         properties: { name: { type: 'string' } },
         required: ['name'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_skill',
+      description:
+        'Create or update a saved skill, making it available in this project immediately (it is written to the skills store as a SKILL.md file). A skill is a reusable set of instructions the agent can auto-apply later. Use when the user asks to make, record, or remember a reusable procedure/skill, or when an active skill-authoring flow asks you to save the result. Requires approval.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Unique skill name (used to trigger it later). Keep it short, e.g. "captcha-helper".',
+          },
+          description: {
+            type: 'string',
+            description:
+              'One concise sentence saying what the skill does AND when to use it — the auto-match trigger. E.g. "Recognizes CAPTCHA codes on login pages. Use when the user needs to read a verification code image."',
+          },
+          instructions: {
+            type: 'string',
+            description:
+              'The skill body as Markdown: imperative steps in the user\'s language. This is the full instruction set applied when the skill runs.',
+          },
+          autoMatch: {
+            type: 'boolean',
+            description: 'Allow the agent to auto-select this skill when it matches, without the user pinning it. Defaults to true.',
+          },
+          id: {
+            type: 'string',
+            description:
+              'Optional existing skill id to update instead of create. You usually should not pass this; omit to create or update by name.',
+          },
+        },
+        required: ['name', 'description', 'instructions'],
       },
     },
   },
@@ -800,6 +894,20 @@ function describeDetail(name: string, args: Record<string, unknown>, output?: st
       }
       break
     }
+    case 'recognize_image':
+      if (typeof args.selector === 'string' && args.selector.trim()) {
+        lines.push(`Image: ${args.selector}`)
+      } else {
+        lines.push('Image: visible page')
+      }
+      break
+    case 'create_skill':
+      lines.push(`Skill: ${String(args.name ?? '')}`)
+      if (typeof args.description === 'string' && args.description) {
+        const d = args.description
+        lines.push(`Description (${d.length} chars): ${d.length > 80 ? `${d.slice(0, 80)}…` : d}`)
+      }
+      break
   }
 
   if (output) {
@@ -867,6 +975,20 @@ function describeAction(name: string, args: Record<string, unknown>): string {
       }`
     case 'save_local':
       return `Save content to ${typeof args.filename === 'string' && args.filename.trim() ? args.filename.trim() : 'a file'}`
+    case 'recognize_image':
+      return `Recognize text in the ${
+        typeof args.selector === 'string' && args.selector.trim()
+          ? `image "${args.selector}"`
+          : 'visible page image'
+      }`
+    case 'screenshot':
+      return `Screenshot ${
+        typeof args.target === 'string' && args.target.trim()
+          ? `the element "${args.target}" and inspect the image`
+          : 'the visible page and inspect the image'
+      }`
+    case 'create_skill':
+      return `Create skill "${String(args.name ?? '')}"`
     default:
       return name
   }
@@ -878,6 +1000,56 @@ function describeTarget(target: Target | undefined): string {
   return spec.how === 'role' || spec.how === 'text'
     ? `"${spec.value}"`
     : `<${spec.tag ?? 'element'} ${spec.how}=${spec.value}>`
+}
+
+/**
+ * Normalizes an `image` argument passed to `recognize_image` into something the
+ * image model can consume: a data URL or an absolute http(s) URL is returned
+ * as-is; a relative URL (e.g. an `<img>` src) is resolved against the active
+ * tab's URL. Returns null when the reference is unusable.
+ */
+async function resolveImageRef(ref: string): Promise<string | null> {
+  if (/^data:image\//i.test(ref)) return ref
+  if (/^https?:\/\//i.test(ref)) return ref
+  const tab = await activeTab()
+  if (tab?.url) {
+    try {
+      return new URL(ref, tab.url).href
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+/**
+ * Resolves what a vision/screenshot tool should analyze into a data URL, in
+ * priority order:
+ * 1. an `image` value (data URL or absolute http(s) URL) — used as-is;
+ * 2. a captured page element when `selector` is given;
+ * 3. otherwise the whole visible page.
+ * Returns null when nothing usable could be produced.
+ */
+async function resolveToolImage(
+  rawImage: string,
+  selector: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  if (rawImage) return resolveImageRef(rawImage)
+  if (selector) {
+    const captured = await execOnActiveTab({ action: 'capture', value: selector }, signal)
+    if (captured.ok && typeof captured.data === 'string') return captured.data
+    return null
+  }
+  const tab = await activeTab()
+  if (tab && typeof tab.windowId === 'number') {
+    try {
+      return await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
+    } catch {
+      return null
+    }
+  }
+  return null
 }
 
 /**
@@ -909,6 +1081,97 @@ async function executeTool(
       const snapshot = await snapshotActiveTab(maxChars, maxElements)
       ctx.lastUrl = snapshot.url
       return JSON.stringify(compactSnapshot(snapshot))
+    }
+
+    case 'recognize_image': {
+      throwIfAborted()
+      const rawImage = typeof args.image === 'string' ? args.image.trim() : ''
+      const selector = typeof args.selector === 'string' ? args.selector.trim() : ''
+      const prompt = typeof args.prompt === 'string' ? args.prompt : undefined
+
+      const dataUrl = await resolveToolImage(rawImage, selector, signal)
+      if (!dataUrl) {
+        return JSON.stringify({
+          ok: false,
+          error: rawImage
+            ? `The image value is not usable: "${rawImage.slice(0, 80)}".`
+            : selector
+              ? `Could not capture the element "${selector}".`
+              : 'Could not capture the page.',
+        })
+      }
+
+      const processed = await preprocessImage(dataUrl)
+      const settings = await getSettings()
+      const provider = await getActiveProvider().catch(() => undefined)
+
+      // The vision model is the accurate path and runs first. Tesseract.js OCR
+      // is only an offline fallback when no image model is configured, since it
+      // is slower and less accurate for noisy/distorted CAPTCHAs.
+      const target = resolveVisionTarget(settings.imageModel, settings.providers, provider)
+      if (target) {
+        const result = await recognizeImage(target, processed, { prompt, signal })
+        if (!result.ok) return JSON.stringify({ ok: false, error: result.error })
+        return JSON.stringify({
+          ok: true,
+          text: result.text,
+          note: `Recognized from the image (${result.text.length} chars). Use this text to fill the CAPTCHA field.`,
+          model: target.model,
+        })
+      }
+
+      const lang = (settings.ocrLanguage || 'eng').trim() || 'eng'
+      const ocr = await ocrImage(processed, lang)
+      if (ocr.ok && ocr.text.trim()) {
+        const text = ocr.text.trim()
+        return JSON.stringify({
+          ok: true,
+          text,
+          note: `Local OCR (Tesseract.js · ${lang}) read ${text.length} chars; use this text to fill the CAPTCHA field.`,
+          model: 'tesseract(ocr)',
+        })
+      }
+      return JSON.stringify({
+        ok: false,
+        error:
+          'No vision-capable image model configured and local OCR could not read the image. ' +
+          (ocr.ok ? '' : `OCR error: ${ocr.error}. `) +
+          'Open Settings → 图片识别模型 to set an image model (e.g. gpt-4o, qwen-vl, or glm-4v).',
+      })
+    }
+
+    case 'screenshot': {
+      throwIfAborted()
+      const target = typeof args.target === 'string' ? args.target.trim() : ''
+      const prompt = typeof args.prompt === 'string' ? args.prompt : undefined
+
+      // screenshot always sends the captured image to the image model for a
+      // visual read; a `target` selector limits it to a single element.
+      const dataUrl = await resolveToolImage('', target, signal)
+      if (!dataUrl) {
+        return JSON.stringify({
+          ok: false,
+          error: target
+            ? `Could not capture the element "${target}".`
+            : 'Could not capture the page.',
+        })
+      }
+
+      const processed = await preprocessImage(dataUrl)
+      const settings = await getSettings()
+      const provider = await getActiveProvider().catch(() => undefined)
+      const vision = resolveVisionTarget(settings.imageModel, settings.providers, provider)
+      if (!vision) {
+        return JSON.stringify({
+          ok: false,
+          error:
+            'The screenshot tool needs a vision-capable image model configured. Open Settings → 图片识别模型 and set a base URL, API key and model (e.g. gpt-4o, qwen-vl, or glm-4v).',
+        })
+      }
+
+      const result = await inspectImage(vision, processed, { prompt, signal })
+      if (!result.ok) return JSON.stringify({ ok: false, error: result.error })
+      return JSON.stringify({ ok: true, text: result.text, model: vision.model })
     }
 
     case 'list_tabs': {
@@ -1149,6 +1412,49 @@ async function executeTool(
       })
     }
 
+    case 'create_skill': {
+      const name = String(args.name ?? '').trim()
+      const description = String(args.description ?? '').trim()
+      const instructions = String(args.instructions ?? '').trim()
+      const autoMatch = args.autoMatch === undefined ? true : args.autoMatch !== false
+      if (!name || !instructions) {
+        return JSON.stringify({ ok: false, error: 'Both "name" and "instructions" are required.' })
+      }
+
+      // Updating an existing skill (by id or by a same-name match) keeps its
+      // identity and creation time; otherwise this is a brand-new skill.
+      const existing = await listSkills()
+      const match =
+        existing.find((entry) => entry.id === args.id) ??
+        existing.find((entry) => entry.name.trim().toLowerCase() === name.toLowerCase())
+      const base: Skill = {
+        id: match?.id ?? newId(),
+        name,
+        description,
+        instructions,
+        autoMatch,
+        createdAt: match?.createdAt ?? Date.now(),
+        updatedAt: Date.now(),
+      }
+
+      const problems = validateSkill(base, existing)
+      if (problems.length > 0) {
+        const reasons = problems
+          .map((p) => (p.code === 'nameTaken' ? 'name is already in use by another skill' : `"${p.field}" is required`))
+          .join('; ')
+        return JSON.stringify({ ok: false, error: `Skill not saved — ${reasons}.` })
+      }
+
+      await saveSkill(base)
+      return JSON.stringify({
+        ok: true,
+        skill: base.name,
+        id: base.id,
+        updated: !!match,
+        note: `Skill "${base.name}" is saved and available. It will be offered to the agent when ${base.description} matches.`,
+      })
+    }
+
     case 'list_scheduled_tasks': {
       const all = await listTasks()
       const tasks = all
@@ -1264,6 +1570,21 @@ function shortSummary(name: string, result: string): string {
       const parsed = JSON.parse(result) as { savedPath?: string; mode?: string; error?: string }
       if (parsed.error) return `save_local: ${parsed.error}`.slice(0, 200)
       return `Saved to ${parsed.savedPath ?? 'file'}${parsed.mode === 'auto' ? ' (auto)' : ''}`
+    }
+    if (name === 'recognize_image') {
+      const parsed = JSON.parse(result) as { text?: string; error?: string }
+      if (parsed.error) return `recognize_image: ${parsed.error}`.slice(0, 200)
+      return `Recognized: "${parsed.text ?? ''}"`
+    }
+    if (name === 'screenshot') {
+      const parsed = JSON.parse(result) as { text?: string; error?: string }
+      if (parsed.error) return `screenshot: ${parsed.error}`.slice(0, 200)
+      return `Inspected screenshot: "${(parsed.text ?? '').slice(0, 120)}"`
+    }
+    if (name === 'create_skill') {
+      const parsed = JSON.parse(result) as { skill?: string; updated?: boolean; error?: string }
+      if (parsed.error) return `create_skill: ${parsed.error}`.slice(0, 200)
+      return `${parsed.updated ? 'Updated' : 'Created'} skill "${parsed.skill ?? 'unknown'}"`
     }
     if (parsed.navigated) return `${name} ✓ (page changed)`
     if (parsed.note) return `${name}: ${parsed.note}`
@@ -1600,5 +1921,40 @@ async function runOneToolCall(
       [...describeDetail(name, args), `Error: ${message}`],
       args,
     )
+  }
+}
+
+/**
+ * Executes a single browser tool directly, without the model loop or the
+ * per-action approval card.
+ *
+ * Used by the local-agent bridge (agent-api.ts): the caller has already checked
+ * that the sender is a trusted localhost page and that the user enabled the
+ * bridge, so per-tool confirmation is intentionally skipped — an unattended
+ * agent cannot click a side-panel button. Tools the user disabled in settings
+ * are still refused as a second line of defense.
+ */
+export async function runToolStandalone(
+  name: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  if (!TOOLS.some((tool) => tool.function.name === name)) {
+    return { ok: false, error: `Unknown tool: ${name}` }
+  }
+  const settings = await getSettings()
+  const disabled = new Set(settings.disabledTools)
+  if (disabled.has(name)) {
+    return { ok: false, error: `The "${name}" tool is disabled in settings.` }
+  }
+  const ctx: ToolContext = {
+    conversationId: `external:${newId()}`,
+    navigated: false,
+    disabled,
+  }
+  const output = await executeTool(name, args, ctx)
+  try {
+    return JSON.parse(output)
+  } catch {
+    return { ok: true, output }
   }
 }

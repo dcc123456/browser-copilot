@@ -324,10 +324,21 @@ export interface Messages {
   /** Label for the preset-endpoint dropdown in the provider editor. */
   settingsEndpointPresets: string
   settingsBaseUrlHint: string
+  settingsImageModel: string
+  settingsImageModelIntro: string
+  settingsImageModelProvider: string
+  settingsImageModelAuto: string
+  settingsImageModelFetchNoProvider: string
+  settingsImageModelProviderMissing: string
+  settingsImageModelSaved: string
+  settingsOcrLanguage: string
+  settingsOcrLanguageIntro: string
+  settingsSaving: string
   settingsApiKey: string
   settingsShowKey: string
   settingsModel: string
   settingsModelsAvailable: (params: { count: number }) => string
+  settingsImageModelSelectHint: string
   settingsShowAdvanced: string
   settingsHideAdvanced: string
   settingsTemperature: string
@@ -397,6 +408,8 @@ export interface Messages {
   toolTabCloseWarn: string
   toolRunJs: string
   toolRunJsWarn: string
+  toolSaveLocal: string
+  toolSaveLocalWarn: string
   toolProfile: string
   toolProfileWarn: string
   toolListSecrets: string
@@ -405,6 +418,12 @@ export interface Messages {
   toolSecretWarn: string
   toolSkill: string
   toolSkillWarn: string
+  toolCreateSkill: string
+  toolCreateSkillWarn: string
+  toolRecognizeImage: string
+  toolRecognizeImageWarn: string
+  toolScreenshot: string
+  toolScreenshotWarn: string
   toolListTasks: string
   toolListTasksWarn: string
 
@@ -438,6 +457,44 @@ export interface Messages {
   settingsDownloadDirFailed: string
   settingsDownloadDirDisconnect: string
   settingsDownloadAutoSave: string
+
+  // Settings · local-agent bridge
+  settingsLocalAgent: string
+  /** Short one-liner introducing the local-agent bridge. */
+  settingsLocalAgentIntro: string
+  settingsLocalAgentEnable: string
+  /** Title of the collapsed "配置接入" configuration section. */
+  settingsLocalAgentConfigure: string
+  settingsLocalAgentUrl: string
+  settingsLocalAgentUrlPlaceholder: string
+  settingsLocalAgentToken: string
+  settingsLocalAgentTokenPlaceholder: string
+  /** Compact connection-state badge (connected / connecting / not connected). */
+  settingsLocalAgentStatusConnected: string
+  settingsLocalAgentStatusConnecting: string
+  settingsLocalAgentStatusDisconnected: string
+  settingsLocalAgentStatusError: (params: { error: string }) => string
+  /** Shown instead of a raw `ERR_CONNECTION_REFUSED` when no adapter is listening. */
+  settingsLocalAgentErrorRefused: string
+  /** Label of the "serve which connection" selector. */
+  settingsLocalAgentActiveAgent: string
+  /** Option value when the plugin serves every connected agent. */
+  settingsLocalAgentActiveAgentAll: string
+  /** Hint explaining the connection selector. */
+  settingsLocalAgentActiveAgentHint: string
+  /** "N agent connection(s) connected" suffix next to the selector hint. */
+  settingsLocalAgentAgentsConnected: (params: { count: number }) => string
+  settingsLocalAgentMcpTitle: string
+  settingsLocalAgentMcpHint: string
+  /** Short tab labels for the MCP snippet switcher. */
+  settingsLocalAgentMcpTabClaude: string
+  settingsLocalAgentMcpTabCodex: string
+  settingsLocalAgentMcpTabTrae: string
+  /** Hint that `__插件目录__` must be replaced with the absolute extension path. */
+  settingsLocalAgentMcpPlaceholderHint: string
+  settingsLocalAgentCopy: string
+  settingsLocalAgentCopied: string
+  settingsLocalAgentWarning: string
 
   // Data / memory
   dataTitle: string
@@ -865,11 +922,26 @@ const en: Messages = {
   settingsEndpointPresets: 'Preset endpoint',
   settingsBaseUrlHint:
     'Everything up to but not including /chat/completions. A pasted full URL is trimmed automatically.',
+  settingsImageModel: 'Image recognition model',
+  settingsImageModelIntro:
+    'Select any already-configured provider to reuse its base URL and API key for the recognize_image tool (CAPTCHA, image text). Re-enter a model only if that provider’s default is not vision-capable.',
+  settingsImageModelProvider: 'Provider',
+  settingsImageModelAuto: 'Auto (use the active chat provider)',
+  settingsImageModelFetchNoProvider:
+    'Select a provider first — its saved credentials are reused and nothing needs to be re-entered.',
+  settingsImageModelProviderMissing:
+    'The selected provider is no longer in the list. Pick another provider or “Auto”.',
+  settingsImageModelSaved: 'Image recognition model saved.',
+  settingsOcrLanguage: 'Local OCR language',
+  settingsOcrLanguageIntro:
+    'Languages Tesseract.js tries when reading text offline. This runs first, before the image model; if it returns nothing, the image model below is used.',
+  settingsSaving: 'Saving…',
   settingsApiKey: 'API key',
   settingsShowKey: 'Show key',
   settingsModel: 'Model',
-  settingsModelsAvailable: ({ count }) =>
-    `${count} model(s) available — click the field for suggestions.`,
+  settingsModelsAvailable: ({ count }) => `${count} model(s) available — pick one from the dropdown.`,
+  settingsImageModelSelectHint:
+    'Pick a model from the dropdown, or keep the provider default. Fetch the list first if it is empty.',
   settingsShowAdvanced: 'Show advanced',
   settingsHideAdvanced: 'Hide advanced',
   settingsTemperature: 'Temperature',
@@ -948,6 +1020,9 @@ const en: Messages = {
   toolTabCloseWarn: 'When off: the assistant cannot close tabs.',
   toolRunJs: 'Run JavaScript on the page',
   toolRunJsWarn: 'When off: the assistant cannot run custom JavaScript on the page.',
+  toolSaveLocal: 'Save content to a file',
+  toolSaveLocalWarn:
+    'When off: the assistant cannot save or download content to a file, and may fall back to building a script instead.',
   toolProfile: 'Use saved profile',
   toolProfileWarn:
     'When off: the assistant cannot see your saved name/email/address to auto-fill personal forms.',
@@ -962,6 +1037,16 @@ const en: Messages = {
   toolListTasks: 'List scheduled tasks',
   toolListTasksWarn:
     'When off: the assistant cannot tell you which scheduled/recurring tasks are enabled.',
+
+  toolRecognizeImage: 'Recognize text in an image (CAPTCHA, etc.)',
+  toolRecognizeImageWarn:
+    'When off: the assistant cannot read text out of a CAPTCHA or other image on the page using the image model.',
+  toolScreenshot: 'Capture an element or the page and inspect the image',
+  toolScreenshotWarn:
+    'When off: the assistant cannot screenshot a page element or captcha and send the image to a vision model for visual inspection.',
+  toolCreateSkill: 'Create or update a skill',
+  toolCreateSkillWarn:
+    'When off: the assistant cannot author and save a reusable skill directly (the built-in skill-generator would fail).',
 
   settingsPageAccess: 'Page access',
   settingsPageAccessIntro:
@@ -994,6 +1079,39 @@ const en: Messages = {
   settingsDownloadDirFailed: 'Could not set the download folder.',
   settingsDownloadDirDisconnect: 'Disconnect',
   settingsDownloadAutoSave: 'Automatically save exports to this folder',
+
+  settingsLocalAgent: 'Local agent access',
+  settingsLocalAgentIntro: 'Connect to the local MCP adapter that coding agents auto-spawn.',
+  settingsLocalAgentEnable: 'Allow localhost pages to control the browser',
+  settingsLocalAgentConfigure: 'Configure connection',
+  settingsLocalAgentUrl: 'Adapter address',
+  settingsLocalAgentUrlPlaceholder: 'ws://127.0.0.1:8765',
+  settingsLocalAgentToken: 'Shared token (optional)',
+  settingsLocalAgentTokenPlaceholder: 'Leave empty to trust localhost only',
+  settingsLocalAgentStatusConnected: 'Connected',
+  settingsLocalAgentStatusConnecting: 'Connecting…',
+  settingsLocalAgentStatusDisconnected: 'Not connected',
+  settingsLocalAgentStatusError: ({ error }) => `Error: ${error}`,
+  settingsLocalAgentErrorRefused:
+    'Adapter not running: start Claude Code / Codex / Trae and it reconnects automatically.',
+  settingsLocalAgentActiveAgent: 'Serve connection',
+  settingsLocalAgentActiveAgentAll: 'All connections (default)',
+  settingsLocalAgentActiveAgentHint:
+    'Only requests from the selected connection are executed; others are refused until you switch back to "all".',
+  settingsLocalAgentAgentsConnected: ({ count }) =>
+    `${count} connection${count === 1 ? '' : 's'} connected`,
+  settingsLocalAgentMcpTitle: 'MCP config',
+  settingsLocalAgentMcpHint:
+    'Add ONE stdio MCP server; it auto-spawns the adapter and the plugin connects automatically.',
+  settingsLocalAgentMcpTabClaude: 'Claude Code',
+  settingsLocalAgentMcpTabCodex: 'Codex',
+  settingsLocalAgentMcpTabTrae: 'Trae',
+  settingsLocalAgentMcpPlaceholderHint:
+    'Replace __插件目录__ with the absolute path of this extension.',
+  settingsLocalAgentCopy: 'Copy',
+  settingsLocalAgentCopied: 'Copied ✓',
+  settingsLocalAgentWarning:
+    'While enabled, any page on this machine can drive the browser. Only enable it while your local agent is running.',
 
   dataTitle: 'Personal data',
   dataIntro:
@@ -1379,10 +1497,24 @@ const zhCN: Messages = {
   settingsBaseUrl: '接口地址',
   settingsEndpointPresets: '预设端点',
   settingsBaseUrlHint: '填到 /chat/completions 之前的部分即可。粘贴完整地址会自动裁剪。',
+  settingsImageModel: '图片识别模型',
+  settingsImageModelIntro:
+    '从已添加的提供商中选择即可复用其接口地址和 API 密钥，用于 recognize_image 工具（验证码、图片文字）。仅当该提供商默认模型不支持视觉时才需要手动填模型名。',
+  settingsImageModelProvider: '模型提供商',
+  settingsImageModelAuto: '自动（使用当前对话模型）',
+  settingsImageModelFetchNoProvider:
+    '请先选择提供商——将复用其已保存的接口地址和 API 密钥，无需重新填写。',
+  settingsImageModelProviderMissing: '所选提供商已不在列表中，请重新选择或使用“自动”。',
+  settingsImageModelSaved: '图片识别模型已保存。',
+  settingsOcrLanguage: '本地 OCR 语言',
+  settingsOcrLanguageIntro:
+    'Tesseract.js 离线识别图片文字时的语言。会先于图像模型执行；若 OCR 无结果，再回退到下方配置的图像模型。',
+  settingsSaving: '保存中…',
   settingsApiKey: 'API 密钥',
   settingsShowKey: '显示密钥',
   settingsModel: '模型',
-  settingsModelsAvailable: ({ count }) => `共 ${count} 个可用模型——点击输入框查看建议。`,
+  settingsModelsAvailable: ({ count }) => `共 ${count} 个可用模型，请从下拉列表中选择。`,
+  settingsImageModelSelectHint: '从下拉列表中选择模型；若列表为空请先点击“获取模型列表”。留空使用该 provider 的默认模型。',
   settingsShowAdvanced: '显示高级选项',
   settingsHideAdvanced: '收起高级选项',
   settingsTemperature: '温度',
@@ -1457,6 +1589,8 @@ const zhCN: Messages = {
   toolTabCloseWarn: '关闭后：助手无法关闭标签页。',
   toolRunJs: '在页面上执行 JavaScript',
   toolRunJsWarn: '关闭后：助手无法在页面上运行自定义 JavaScript。',
+  toolSaveLocal: '保存内容到文件',
+  toolSaveLocalWarn: '关闭后：助手无法将内容保存或下载到文件，可能会退回到构建脚本的方式。',
   toolProfile: '使用已保存资料',
   toolProfileWarn: '关闭后：助手无法读取你保存的姓名/邮箱/地址来自动填写个人表单。',
   toolListSecrets: '列出已保存密钥',
@@ -1467,6 +1601,14 @@ const zhCN: Messages = {
   toolSkillWarn: '关闭后：助手无法加载或应用已保存的技能。',
   toolListTasks: '列出定时任务',
   toolListTasksWarn: '关闭后：助手无法告诉你当前启用了哪些定时/周期任务。',
+
+  toolRecognizeImage: '识别图片中的文字（验证码等）',
+  toolRecognizeImageWarn: '关闭后：助手无法使用图片模型识别页面上的验证码或其他图片文字。',
+  toolScreenshot: '截取元素或页面并进行视觉检查',
+  toolScreenshotWarn: '关闭后：助手无法截取页面元素或验证码并发送给视觉模型进行查看。',
+  toolCreateSkill: '创建或更新技能',
+  toolCreateSkillWarn:
+    '关闭后：助手无法直接编写并保存可复用技能（内置的 skill 生成器将无法工作）。',
 
   settingsPageAccess: '页面读取权限',
   settingsPageAccessIntro:
@@ -1499,6 +1641,35 @@ const zhCN: Messages = {
   settingsDownloadDirFailed: '无法设置下载目录。',
   settingsDownloadDirDisconnect: '断开',
   settingsDownloadAutoSave: '自动将导出内容保存到该文件夹',
+
+  settingsLocalAgent: '本地 Agent 接入',
+  settingsLocalAgentIntro: '连接编程助手自动拉起的本地 MCP 适配器。',
+  settingsLocalAgentEnable: '允许 localhost 页面控制浏览器',
+  settingsLocalAgentConfigure: '配置接入',
+  settingsLocalAgentUrl: '适配器地址',
+  settingsLocalAgentUrlPlaceholder: 'ws://127.0.0.1:8765',
+  settingsLocalAgentToken: '共享令牌（可选）',
+  settingsLocalAgentTokenPlaceholder: '留空则仅信任 localhost 来源',
+  settingsLocalAgentStatusConnected: '已连接',
+  settingsLocalAgentStatusConnecting: '连接中',
+  settingsLocalAgentStatusDisconnected: '未连接',
+  settingsLocalAgentStatusError: ({ error }) => `错误：${error}`,
+  settingsLocalAgentErrorRefused:
+    '本地适配器未运行：启动 Claude Code / Codex / Trae 后会自动重连。',
+  settingsLocalAgentActiveAgent: '服务连接',
+  settingsLocalAgentActiveAgentAll: '全部连接（默认）',
+  settingsLocalAgentActiveAgentHint:
+    '只执行所选连接发来的请求，其余连接会被拒绝，直到切回“全部连接”。',
+  settingsLocalAgentAgentsConnected: ({ count }) => `已接入 ${count} 个连接`,
+  settingsLocalAgentMcpTitle: 'MCP 配置',
+  settingsLocalAgentMcpHint: '添加一个 stdio MCP 服务，助手会自动拉起适配器并自动连上。',
+  settingsLocalAgentMcpTabClaude: 'Claude Code',
+  settingsLocalAgentMcpTabCodex: 'Codex',
+  settingsLocalAgentMcpTabTrae: 'Trae',
+  settingsLocalAgentMcpPlaceholderHint: '将 __插件目录__ 替换为插件的绝对路径。',
+  settingsLocalAgentCopy: '复制',
+  settingsLocalAgentCopied: '已复制 ✓',
+  settingsLocalAgentWarning: '开启后本机任意页面都能驱动浏览器，请仅在本地 agent 运行时开启。',
 
   dataTitle: '个人数据',
   dataIntro:

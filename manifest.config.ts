@@ -41,7 +41,14 @@ export default defineManifest({
     'A side-panel assistant that can read and act on the page you are looking at. Works with any OpenAI-compatible model.',
   minimum_chrome_version: '116',
   permissions: ['storage', 'tabs', 'scripting', 'sidePanel', 'alarms', 'offscreen', 'contextMenus', 'webNavigation', 'cookies', 'downloads', 'clipboardRead', 'debugger'],
-  host_permissions: ['http://*/*', 'https://*/*'],
+  host_permissions: ['http://*/*', 'https://*/*', 'ws://localhost/*', 'ws://127.0.0.1/*', 'ws://[::1]/*'],
+  // Local OCR (Tesseract.js in the offscreen document) needs to compile the
+  // bundled WebAssembly core. `'wasm-unsafe-eval'` permits that while keeping
+  // `script-src 'self'` — no JS eval. The vendored core is fetched from the
+  // extension origin, and the worker is created directly from that URL (no blob).
+  content_security_policy: {
+    extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+  },
   icons: {
     16: 'icons/icon-16.png',
     32: 'icons/icon-32.png',

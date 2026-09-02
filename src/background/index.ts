@@ -99,6 +99,7 @@ import { initLastTabTracker } from './last-tab'
 import { rescheduleAll, scheduleTask, triggerNow, onAlarm } from './scheduler'
 import { FeishuBot, FEISHU_WATCHDOG_ALARM } from './feishu-bot'
 import { isWebhookUrl, sendWebhookText } from '../lib/feishu'
+import { agentClient } from './agent-client'
 import {
   addStep,
   cancelRun,
@@ -344,6 +345,8 @@ void rescheduleAllWorkflowTriggers().catch((error: unknown) =>
   console.error('[Browser Copilot] could not reschedule workflow triggers', error),
 )
 void feishuBot.reconcile()
+// Start/stop the outbound local-agent WebSocket on every worker wake.
+void agentClient.sync()
 
 /**
  * The toolbar icon is handled manually rather than via `openPanelOnActionClick`,
@@ -468,8 +471,15 @@ async function handleCommand(command: Command): Promise<CommandResult> {
     case 'settings.get':
       return { type: 'settings', settings: await getSettings() }
 
-    case 'settings.set':
-      return { type: 'settings', settings: await setSettings(command.patch) }
+    case 'settings.set': {
+      const settings = await setSettings(command.patch)
+      // The local-agent bridge reads settings: reconcile the connection now.
+      void agentClient.sync()
+      return { type: 'settings', settings }
+    }
+
+    case 'agent.status.get':
+      return { type: 'agent.status', status: agentClient.getStatus() }
 
     case 'skills.list':
       return { type: 'skills.list', skills: await listSkills() }

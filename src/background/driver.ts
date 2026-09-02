@@ -913,7 +913,7 @@ export async function cookieRemove(name: string, url: string): Promise<void> {
   await chrome.cookies.remove({ name, url })
 }
 
-// --- Clipboard helpers (offscreen document) ----------------------------------
+// --- Offscreen-document helpers (clipboard + local OCR) -----------------------
 
 let offscreenOpen = false
 
@@ -923,10 +923,14 @@ async function ensureOffscreen(): Promise<void> {
     offscreenOpen = true
     return
   }
+  // A single offscreen document serves both jobs, so every reason the page
+  // uses (or will use) must be declared up front. WORKERS covers the
+  // Tesseract.js worker that loads the WASM core for offline OCR.
   await chrome.offscreen.createDocument({
     url: 'src/offscreen/index.html',
-    reasons: ['CLIPBOARD'],
-    justification: 'read/write the system clipboard for the workflow clipboard block',
+    reasons: ['CLIPBOARD', 'WORKERS'],
+    justification:
+      'read/write the system clipboard for the workflow clipboard block and run the local OCR (Tesseract.js) worker',
   })
   offscreenOpen = true
 }
@@ -954,4 +958,29 @@ export async function clipboardGet(): Promise<string> {
 export async function clipboardInsert(text: string): Promise<void> {
   await clipboardCall({ type: 'clip-set', text })
   void offscreenOpen
+}
+
+interface OcrReply {
+  ok: boolean
+  text?: string
+  error?: string
+}
+
+/**
+ * Runs local OCR (Tesseract.js) on a data URL in the offscreen document.
+ * Returns the recognized text, or `{ ok: false, error }` when the worker could
+ * not load (e.g. the requested language data is not vendored). Recognizes
+ * fully offline — no image model or network required.
+ */
+export async function ocrImage(
+  dataUrl: string,
+  lang = 'eng',
+): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  await ensureOffscreen()
+  const reply = await chrome.runtime.sendMessage({ type: 'ocr-image', image: dataUrl, lang })
+  const result = reply as OcrReply | undefined
+  if (!result || !result.ok) {
+    return { ok: false, error: result?.error ?? 'OCR failed' }
+  }
+  return { ok: true, text: result.text ?? '' }
 }

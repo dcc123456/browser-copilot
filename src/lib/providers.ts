@@ -15,6 +15,7 @@
  */
 
 import { LOCALES, type LocaleSetting } from './i18n'
+import { normalizeLocalAgentUrl } from './types'
 import type { AgentMode } from './types'
 
 /** A configured endpoint the agent can talk to. */
@@ -366,6 +367,12 @@ export function normalizeSettingsPayload(raw: unknown): {
   disabledTools: string[]
   systemPromptOverride: string
   downloadAutoSave: boolean
+  localAgentEnabled: boolean
+  localAgentToken: string
+  localAgentUrl: string
+  localAgentActiveAgent: string
+  imageModel: { providerId: string; model: string }
+  ocrLanguage: string
 } {
   const value = (raw ?? {}) as Record<string, unknown>
   const providers = Array.isArray(value.providers)
@@ -390,6 +397,19 @@ export function normalizeSettingsPayload(raw: unknown): {
     typeof value.systemPromptOverride === 'string' ? value.systemPromptOverride : ''
   const downloadAutoSave =
     typeof value.downloadAutoSave === 'boolean' ? value.downloadAutoSave : true
+  const localAgentEnabled =
+    typeof value.localAgentEnabled === 'boolean' ? value.localAgentEnabled : false
+  const localAgentToken =
+    typeof value.localAgentToken === 'string' ? value.localAgentToken : ''
+  const localAgentUrl = normalizeLocalAgentUrl(value.localAgentUrl)
+  const localAgentActiveAgent =
+    typeof value.localAgentActiveAgent === 'string' ? value.localAgentActiveAgent : ''
+  const rawImage = value.imageModel as { providerId?: unknown; model?: unknown }
+  const imageModel = {
+    providerId: typeof rawImage?.providerId === 'string' ? rawImage.providerId : '',
+    model: typeof rawImage?.model === 'string' ? rawImage.model : '',
+  }
+  const ocrLanguage = typeof value.ocrLanguage === 'string' ? value.ocrLanguage : 'eng'
   return {
     providers,
     // Never point at a profile that is not in the list, or the editor would open
@@ -411,5 +431,11 @@ export function normalizeSettingsPayload(raw: unknown): {
     disabledTools,
     systemPromptOverride,
     downloadAutoSave,
+    localAgentEnabled,
+    localAgentToken,
+    localAgentUrl,
+    localAgentActiveAgent,
+    imageModel,
+    ocrLanguage,
   }
 }

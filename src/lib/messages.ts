@@ -12,6 +12,7 @@
 
 import type { ProviderProfile } from './providers'
 import type {
+  AgentStatus,
   ConversationMeta,
   HistoryEntry,
   PageContext,
@@ -137,6 +138,10 @@ export type Command =
   /** Whether a recording session is currently active. */
   | { type: 'record.status' }
 
+  // --- Local agent bridge (see background/agent-client.ts) ---
+  /** Current outbound WebSocket connection status to the local agent. */
+  | { type: 'agent.status.get' }
+
 /** Replies, discriminated by the command that produced them. */
 export type CommandResult =
   | { type: 'settings'; settings: Settings }
@@ -200,6 +205,9 @@ export type CommandResult =
   | { type: 'record.start'; recording: boolean }
   | { type: 'record.stop'; workflowId?: string }
   | { type: 'record.status'; recording: boolean }
+
+  // --- Local agent bridge ---
+  | { type: 'agent.status'; status: AgentStatus }
 
 /** Envelope so a failed command never looks like a successful one. */
 export type CommandResponse =

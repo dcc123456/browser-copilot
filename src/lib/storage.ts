@@ -20,6 +20,7 @@ import {
   skillPath,
 } from './fs-store'
 import { skillFromMarkdown, skillSlug, skillToMarkdown } from './skills-import'
+import { BUILT_IN_SKILLS } from './builtin-skills'
 import { LOCALES, type LocaleSetting } from './i18n'
 import type { WireMessage } from './llm'
 import type { ProviderProfile } from './providers'
@@ -32,6 +33,7 @@ import type {
   Skill,
   UserProfile,
 } from './types'
+import { DEFAULT_LOCAL_AGENT_URL, normalizeLocalAgentUrl } from './types'
 import type { Workflow, WorkflowEdge, WorkflowNode, WorkflowSettings } from './workflow/types'
 
 /**
@@ -54,8 +56,10 @@ const KEY_CONVERSATIONS_META = 'conversations'
  * - v1: provider profiles plus an active pointer, a locale, and skills.
  * - v2: user profiles, password vault, action history, persistent
  *   conversations (messages moved to `storage.local`).
+ * - v3: `imageModel` (optional vision config) added to settings; the
+ *   built-in `skill-generator` skill is seeded on install/upgrade.
  */
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 export const DEFAULT_SETTINGS: Settings = {
   providers: [],
@@ -66,6 +70,12 @@ export const DEFAULT_SETTINGS: Settings = {
   disabledTools: [],
   systemPromptOverride: '',
   downloadAutoSave: true,
+  imageModel: { providerId: '', model: '' },
+  ocrLanguage: 'eng',
+  localAgentEnabled: false,
+  localAgentToken: '',
+  localAgentUrl: DEFAULT_LOCAL_AGENT_URL,
+  localAgentActiveAgent: '',
 }
 
 /**
@@ -123,6 +133,17 @@ export function normalizeStoredSettings(raw: unknown): Settings {
       ? value.activeProviderId
       : (providers[0]?.id ?? '')
 
+  const rawImage = value.imageModel
+  const imageModel =
+    rawImage && typeof rawImage === 'object'
+      ? {
+          // New shape references a provider id; legacy shape stored credentials
+          // directly, whose model (if any) we keep as an override.
+          providerId: typeof rawImage.providerId === 'string' ? rawImage.providerId : '',
+          model: typeof rawImage.model === 'string' ? rawImage.model : '',
+        }
+      : { ...DEFAULT_SETTINGS.imageModel }
+
   return {
     providers,
     activeProviderId: active,
@@ -140,6 +161,15 @@ export function normalizeStoredSettings(raw: unknown): Settings {
     systemPromptOverride: typeof value.systemPromptOverride === 'string' ? value.systemPromptOverride : '',
     downloadAutoSave:
       typeof value.downloadAutoSave === 'boolean' ? value.downloadAutoSave : true,
+    imageModel,
+    ocrLanguage: typeof value.ocrLanguage === 'string' ? value.ocrLanguage : DEFAULT_SETTINGS.ocrLanguage,
+    localAgentEnabled:
+      typeof value.localAgentEnabled === 'boolean' ? value.localAgentEnabled : false,
+    localAgentToken:
+      typeof value.localAgentToken === 'string' ? value.localAgentToken : '',
+    localAgentUrl: normalizeLocalAgentUrl(value.localAgentUrl),
+    localAgentActiveAgent:
+      typeof value.localAgentActiveAgent === 'string' ? value.localAgentActiveAgent : '',
   }
 }
 
@@ -171,6 +201,24 @@ export async function ensureSchema(): Promise<void> {
   if (!Array.isArray(stored[KEY_HISTORY])) patch[KEY_HISTORY] = []
   if (!Array.isArray(stored[KEY_CONVERSATIONS_META])) patch[KEY_CONVERSATIONS_META] = []
   await area.set(patch)
+
+  // Ship the built-in skills (e.g. the skill-generator) on install/upgrade.
+  await seedBuiltInSkills()
+}
+
+/**
+ * Inserts any built-in skill that does not already exist (matched by name), so
+ * a fresh install or upgrade gets the bundled skills without ever overwriting a
+ * skill the user has created or edited.
+ */
+export async function seedBuiltInSkills(): Promise<void> {
+  const skills = await listSkills()
+  const known = new Set(skills.map((skill) => skill.name.trim().toLowerCase()))
+  for (const builtin of BUILT_IN_SKILLS) {
+    if (!known.has(builtin.name.trim().toLowerCase())) {
+      await saveSkill(builtin)
+    }
+  }
 }
 
 /** Reads settings, normalizing whatever is on disk. */

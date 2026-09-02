@@ -11,7 +11,7 @@ import {
   validateProfile,
   type ProviderProfile,
 } from '../lib/providers'
-import type { Settings } from '../lib/types'
+import type { AgentStatus, Settings } from '../lib/types'
 import { TOOL_META } from '../lib/tool-catalog'
 import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
 import {
@@ -109,6 +109,85 @@ function normalizeSettings(raw: Settings | undefined): Settings {
   return normalizeSettingsPayload(raw)
 }
 
+/**
+ * Copyable stdio MCP config snippets for the local-agent card. The adapter path
+ * is a placeholder (`__插件目录__`) because the panel cannot know the extension's
+ * on-disk location; the user replaces it with their own install path.
+ *
+ * The Claude snippet is written into `claude.json` by `claude mcp add`, so it
+ * is shown as a readable multi-line JSON block (matching what the command
+ * produces) rather than a flattened one-liner.
+ */
+const MCP_SNIPPET_CLAUDE = {
+  text:
+    '{\n' +
+    '  "mcpServers": {\n' +
+    '    "browser-copilot": {\n' +
+    '      "command": "node",\n' +
+    '      "args": ["__插件目录__/examples/local-agent/mcp-server.mjs"],\n' +
+    '      "env": { "BROWSER_COPILOT_TOKEN": "" }\n' +
+    '    }\n' +
+    '  }\n' +
+    '}',
+}
+
+const MCP_SNIPPET_CODEX = {
+  text:
+    '[mcp_servers.browser-copilot]\n' +
+    'command = "node"\n' +
+    'args = ["__插件目录__/examples/local-agent/mcp-server.mjs"]',
+}
+
+const MCP_SNIPPET_TRAE = {
+  text:
+    'MCP 设置面板 → 添加 stdio MCP 服务：\n' +
+    '  command: node\n' +
+    '  args: ["__插件目录__/examples/local-agent/mcp-server.mjs"]',
+}
+
+interface McpSnippetProps {
+  text: string
+  copied: boolean
+  copyLabel: string
+  copiedLabel: string
+  onCopy: () => void
+}
+
+/** A copyable `<pre>` block whose active tab names it; flips to "已复制" briefly. */
+function McpSnippet({ text, copied, copyLabel, copiedLabel, onCopy }: McpSnippetProps) {
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          gap: 8,
+          marginBottom: 4,
+        }}
+      >
+        <button onClick={onCopy} type="button">
+          {copied ? copiedLabel : copyLabel}
+        </button>
+      </div>
+      <pre
+        style={{
+          margin: '4px 0',
+          padding: 8,
+          background: 'var(--sunken)',
+          borderRadius: 6,
+          overflowX: 'auto',
+          fontSize: 11,
+          lineHeight: 1.5,
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+        }}
+      >
+        {text}
+      </pre>
+    </div>
+  )
+}
+
 interface Props {
   /**
    * Lifts a language change to `App` so every tab re-renders at once, rather than
@@ -134,6 +213,27 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   // the user expands whichever they want to inspect or change.
   const [promptOpen, setPromptOpen] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
+  // Local drafts for the local-agent URL and token so typing does not write to
+  // storage on every keystroke; both are committed on blur.
+  const [agentUrlDraft, setAgentUrlDraft] = useState('')
+  const [agentTokenDraft, setAgentTokenDraft] = useState('')
+  // Live connection status of the local-agent WebSocket, refreshed by polling.
+  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null)
+  // Which MCP snippet's copy button currently shows "已复制".
+  const [copiedKey, setCopiedKey] = useState<null | 'claude' | 'codex' | 'trae'>(null)
+  // Which MCP snippet tab is active (Claude Code by default).
+  const [mcpTab, setMcpTab] = useState<'claude' | 'codex' | 'trae'>('claude')
+  const copyTimerRef = useRef<number | null>(null)
+  // Local draft for the image-recognition model selection. Kept separate from
+  // settings so nothing is persisted until the user clicks 保存; the model list
+  // is fetched for the currently selected provider and only refreshed on demand.
+  const [imgDraft, setImgDraft] = useState<{ providerId: string; model: string }>({
+    providerId: '',
+    model: '',
+  })
+  const [imgModels, setImgModels] = useState<string[] | null>(null)
+  const [imgBusy, setImgBusy] = useState<null | 'models' | 'save'>(null)
+  const [imgBanner, setImgBanner] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
 
   // --- Storage location ------------------------------------------------------
   const [storageMode, setStorageMode] = useState<StorageMode>('browser')
@@ -263,6 +363,41 @@ export default function SettingsTab({ onLocaleChange }: Props) {
     void load()
   }, [load])
 
+  // Poll the local-agent connection status while the card is mounted; the worker
+  // owns the socket, so the panel just reads it back every couple of seconds.
+  useEffect(() => {
+    const poll = (): void => {
+      void sendCommand({ type: 'agent.status.get' })
+        .then((result) => {
+          if (result.type === 'agent.status') setAgentStatus(result.status)
+        })
+        .catch(() => {
+          // Worker may be momentarily unavailable; the next tick retries.
+        })
+    }
+    poll()
+    const interval = setInterval(poll, 2000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Reset the MCP copy-button label after a brief pause, and clear the timer on
+  // unmount so it never fires after the panel is gone.
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current)
+    }
+  }, [])
+
+  const copySnippet = (key: 'claude' | 'codex' | 'trae', text: string): void => {
+    void navigator.clipboard.writeText(text)
+    setCopiedKey(key)
+    if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current)
+    copyTimerRef.current = window.setTimeout(() => {
+      setCopiedKey(null)
+      copyTimerRef.current = null
+    }, 1500)
+  }
+
   const startNew = (presetId: string): void => {
     const preset = findPreset(presetId)
     if (!preset) return
@@ -272,7 +407,20 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   }
 
   const applySettings = (next: Settings): void => {
-    setSettings(normalizeSettings(next))
+    const normalized = normalizeSettings(next)
+    setSettings(normalized)
+    // Keep the token/URL drafts in sync with whatever is actually stored, so a
+    // previously saved value re-appears and a committed save clears the "typing"
+    // state.
+    setAgentUrlDraft(normalized.localAgentUrl)
+    setAgentTokenDraft(normalized.localAgentToken)
+    // Reflect the stored image-model selection; on first load this becomes the
+    // starting point for the local image draft.
+    setImgDraft((prev) => {
+      const stored = normalized.imageModel
+      if (prev.providerId === stored.providerId && prev.model === stored.model) return prev
+      return { providerId: stored.providerId, model: stored.model }
+    })
   }
 
   const saveDraft = async (): Promise<void> => {
@@ -328,6 +476,68 @@ export default function SettingsTab({ onLocaleChange }: Props) {
       })
     } finally {
       setPending(null)
+    }
+  }
+
+  // --- Image-recognition model -----------------------------------------------
+  const imgProvider = (providerId: string, fallback: Settings['providers'] = settings?.providers ?? []): ProviderProfile | undefined =>
+    fallback.find((p) => p.id === providerId)
+
+  const fetchImageModels = async (): Promise<void> => {
+    const providers = settings?.providers ?? []
+    setImgBanner(null)
+    // Resolve the provider being edited from the saved list (credentials live
+    // there, so we never add an API-key field to this card).
+    const target = imgProvider(imgDraft.providerId, providers)
+    if (!target || !target.baseUrl || !target.apiKey) {
+      setImgBanner({
+        kind: 'error',
+        text: settings ? t.settingsImageModelFetchNoProvider : t.loading,
+      })
+      return
+    }
+    setImgBusy('models')
+    try {
+      const result = await sendCommand({ type: 'provider.models', profile: target })
+      if (result.type === 'provider.models') {
+        setImgModels(result.models)
+        if (result.models.length === 0) {
+          setImgBanner({ kind: 'error', text: t.settingsModelsEmpty })
+        }
+      }
+    } catch (error) {
+      setImgBanner({
+        kind: 'error',
+        text: t.settingsModelsFailed({ message: (error as Error).message }),
+      })
+    } finally {
+      setImgBusy(null)
+    }
+  }
+
+  const saveImageModel = async (): Promise<void> => {
+    if (!settings) return
+    setImgBanner(null)
+    // The model override may be blank (use the provider's default), but the
+    // selected provider — when non-empty — must actually exist.
+    if (imgDraft.providerId && !imgProvider(imgDraft.providerId)) {
+      setImgBanner({
+        kind: 'error',
+        text: t.settingsImageModelProviderMissing,
+      })
+      return
+    }
+    const model = imgDraft.model.trim()
+    setImgBusy('save')
+    try {
+      await mutate({
+        type: 'settings.set',
+        patch: { imageModel: { providerId: imgDraft.providerId, model } },
+      })
+      setImgModels(null)
+      setImgBanner({ kind: 'ok', text: t.settingsImageModelSaved })
+    } finally {
+      setImgBusy(null)
     }
   }
 
@@ -657,6 +867,96 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         </div>
       )}
 
+      {/* --- Image recognition model --- */}
+      <div className="card">
+        <div className="card-title">{t.settingsImageModel}</div>
+        <p className="hint">{t.settingsImageModelIntro}</p>
+
+        {imgBanner && (
+          <p className={imgBanner.kind === 'ok' ? 'hint ok' : 'hint error'}>{imgBanner.text}</p>
+        )}
+
+        <div className="field">
+          <label htmlFor="img-provider">{t.settingsImageModelProvider}</label>
+          <select
+            id="img-provider"
+            onChange={(event) => {
+              setImgDraft({ ...imgDraft, providerId: event.target.value })
+              setImgModels(null)
+            }}
+            value={imgDraft.providerId}
+          >
+            <option value="">{t.settingsImageModelAuto}</option>
+            {settings.providers.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.label}
+                {profile.model ? ` · ${profile.model}` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="field">
+          <label htmlFor="img-ocr-lang">{t.settingsOcrLanguage}</label>
+          <select
+            id="img-ocr-lang"
+            value={settings.ocrLanguage}
+            onChange={(event) => {
+              void mutate({ type: 'settings.set', patch: { ocrLanguage: event.target.value } })
+            }}
+          >
+            <option value="eng">English (eng)</option>
+            <option value="chi_sim">简体中文 (chi_sim)</option>
+            <option value="chi_sim+eng">中文 + English (chi_sim+eng)</option>
+          </select>
+          <p className="hint" style={{ marginBottom: 0 }}>
+            {t.settingsOcrLanguageIntro}
+          </p>
+        </div>
+
+        <div className="field">
+          <label htmlFor="img-model">{t.settingsModel}</label>
+          <select
+            id="img-model"
+            onChange={(event) => setImgDraft({ ...imgDraft, model: event.target.value })}
+            value={imgDraft.model}
+          >
+            <option value="">{t.settingsProviderDefault}</option>
+            {imgDraft.model && !(imgModels ?? []).includes(imgDraft.model) && (
+              <option value={imgDraft.model}>{imgDraft.model}</option>
+            )}
+            {(imgModels ?? []).map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+          <p className="hint" style={{ marginBottom: 0 }}>
+            {imgModels
+              ? t.settingsModelsAvailable({ count: imgModels.length })
+              : t.settingsImageModelSelectHint}
+          </p>
+        </div>
+
+        <div className="actions">
+          <button
+            className="primary"
+            disabled={imgBusy === 'save'}
+            onClick={() => void saveImageModel()}
+            type="button"
+          >
+            {imgBusy === 'save' ? t.settingsSaving : t.save}
+          </button>
+          <button
+            disabled={imgBusy === 'models' || !imgDraft.providerId}
+            onClick={() => void fetchImageModels()}
+            type="button"
+          >
+            {imgBusy === 'models' ? t.settingsFetchingModels : t.settingsFetchModels}
+          </button>
+        </div>
+      </div>
+
       {/* --- Agent behaviour --- */}
       <div className="card">
         <div className="card-title">{t.settingsContextTitle}</div>
@@ -947,7 +1247,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
             </button>
           )}
         </div>
-        <label className="field">
+        <label className="checkbox">
           <input
             checked={settings.downloadAutoSave}
             disabled={!downloadDirName}
@@ -961,6 +1261,225 @@ export default function SettingsTab({ onLocaleChange }: Props) {
           />
           {t.settingsDownloadAutoSave}
         </label>
+      </div>
+
+      {/* --- Local agent (WebSocket + MCP adapter) --- */}
+      <div className="card">
+        <div className="card-title">{t.settingsLocalAgent}</div>
+        <p className="hint">{t.settingsLocalAgentIntro}</p>
+        <label className="checkbox">
+          <input
+            checked={settings.localAgentEnabled}
+            onChange={(event) =>
+              void mutate({
+                type: 'settings.set',
+                patch: { localAgentEnabled: event.target.checked },
+              })
+            }
+            type="checkbox"
+          />
+          {t.settingsLocalAgentEnable}
+        </label>
+        {settings.localAgentEnabled && (
+          <>
+            {/* Compact status badge; errors surface as a red dot + short hint. */}
+            {agentStatus && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '2px 0 10px' }}>
+                <span
+                  className={`status-badge ${
+                    agentStatus.state === 'connected'
+                      ? 'ok'
+                      : agentStatus.state === 'connecting'
+                        ? 'skip'
+                        : agentStatus.error
+                          ? 'err'
+                          : 'skip'
+                  }`}
+                >
+                  {agentStatus.state === 'connected'
+                    ? t.settingsLocalAgentStatusConnected
+                    : agentStatus.state === 'connecting'
+                      ? t.settingsLocalAgentStatusConnecting
+                      : t.settingsLocalAgentStatusDisconnected}
+                </span>
+                {agentStatus.error && (
+                  <span
+                    className="hint error"
+                    style={{
+                      margin: 0,
+                      flex: 1,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={
+                      /ERR_CONNECTION_REFUSED|ECONNREFUSED|CONNECTION_REFUSED/i.test(
+                        agentStatus.error,
+                      )
+                        ? t.settingsLocalAgentErrorRefused
+                        : t.settingsLocalAgentStatusError({ error: agentStatus.error })
+                    }
+                  >
+                    {'● '}
+                    {/ERR_CONNECTION_REFUSED|ECONNREFUSED|CONNECTION_REFUSED/i.test(
+                      agentStatus.error,
+                    )
+                      ? t.settingsLocalAgentErrorRefused
+                      : t.settingsLocalAgentStatusError({ error: agentStatus.error })}
+                  </span>
+                )}
+              </div>
+            )}
+
+            <details className="collapsible">
+              <summary>
+                <span className="collapsible-title">{t.settingsLocalAgentConfigure}</span>
+              </summary>
+              <div style={{ padding: '0 12px 12px' }}>
+                <label className="field">
+                  <input
+                    onChange={(event) => setAgentUrlDraft(event.target.value)}
+                    onBlur={() =>
+                      void mutate({
+                        type: 'settings.set',
+                        patch: {
+                          localAgentUrl:
+                            agentUrlDraft.trim() || t.settingsLocalAgentUrlPlaceholder,
+                        },
+                      })
+                    }
+                    placeholder={t.settingsLocalAgentUrlPlaceholder}
+                    type="text"
+                    value={agentUrlDraft}
+                  />
+                  <span>{t.settingsLocalAgentUrl}</span>
+                </label>
+                <label className="field">
+                  <input
+                    onChange={(event) => setAgentTokenDraft(event.target.value)}
+                    onBlur={() =>
+                      void mutate({
+                        type: 'settings.set',
+                        patch: { localAgentToken: agentTokenDraft.trim() },
+                      })
+                    }
+                    placeholder={t.settingsLocalAgentTokenPlaceholder}
+                    type="text"
+                    value={agentTokenDraft}
+                  />
+                  <span>{t.settingsLocalAgentToken}</span>
+                </label>
+                {(agentStatus?.agents ?? []).length > 1 && (
+                  <div className="field">
+                    <label htmlFor="agent-serve">{t.settingsLocalAgentActiveAgent}</label>
+                    <select
+                      id="agent-serve"
+                      onChange={(event) =>
+                        void mutate({
+                          type: 'settings.set',
+                          patch: { localAgentActiveAgent: event.target.value },
+                        })
+                      }
+                      value={settings.localAgentActiveAgent}
+                    >
+                      <option value="">{t.settingsLocalAgentActiveAgentAll}</option>
+                      {/* A previously selected connection may have dropped; keep it
+                          listed so the value never renders as a blank select. */}
+                      {settings.localAgentActiveAgent &&
+                        !(agentStatus?.agents ?? []).some(
+                          (agent) => agent.id === settings.localAgentActiveAgent,
+                        ) && (
+                          <option disabled value={settings.localAgentActiveAgent}>
+                            {settings.localAgentActiveAgent} · {t.settingsLocalAgentStatusDisconnected}
+                          </option>
+                        )}
+                      {(agentStatus?.agents ?? []).map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="hint" style={{ marginBottom: 0 }}>
+                      {t.settingsLocalAgentActiveAgentHint}
+                      {` ${t.settingsLocalAgentAgentsConnected({
+                        count: (agentStatus?.agents ?? []).length,
+                      })}`}
+                    </p>
+                  </div>
+                )}
+                <p className="hint error">{t.settingsLocalAgentWarning}</p>
+              </div>
+            </details>
+          </>
+        )}
+
+        <p className="hint" style={{ marginTop: 12, marginBottom: 4 }}>
+          {t.settingsLocalAgentMcpTitle}
+        </p>
+        <p className="hint">{t.settingsLocalAgentMcpHint}</p>
+        <div role="tablist" style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+          {(
+            [
+              ['claude', t.settingsLocalAgentMcpTabClaude],
+              ['codex', t.settingsLocalAgentMcpTabCodex],
+              ['trae', t.settingsLocalAgentMcpTabTrae],
+            ] as const
+          ).map(([key, label]) => {
+            const active = mcpTab === key
+            return (
+              <button
+                aria-selected={active}
+                key={key}
+                onClick={() => setMcpTab(key)}
+                role="tab"
+                style={{
+                  flex: 1,
+                  padding: '4px 8px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 6,
+                  border: '1px solid var(--border)',
+                  background: active ? 'var(--accent)' : 'var(--panel-2)',
+                  color: active ? 'var(--on-accent)' : 'var(--muted)',
+                  cursor: 'pointer',
+                }}
+                type="button"
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+        {mcpTab === 'claude' && (
+          <McpSnippet
+            copied={copiedKey === 'claude'}
+            copyLabel={t.settingsLocalAgentCopy}
+            copiedLabel={t.settingsLocalAgentCopied}
+            onCopy={() => copySnippet('claude', MCP_SNIPPET_CLAUDE.text)}
+            text={MCP_SNIPPET_CLAUDE.text}
+          />
+        )}
+        {mcpTab === 'codex' && (
+          <McpSnippet
+            copied={copiedKey === 'codex'}
+            copyLabel={t.settingsLocalAgentCopy}
+            copiedLabel={t.settingsLocalAgentCopied}
+            onCopy={() => copySnippet('codex', MCP_SNIPPET_CODEX.text)}
+            text={MCP_SNIPPET_CODEX.text}
+          />
+        )}
+        {mcpTab === 'trae' && (
+          <McpSnippet
+            copied={copiedKey === 'trae'}
+            copyLabel={t.settingsLocalAgentCopy}
+            copiedLabel={t.settingsLocalAgentCopied}
+            onCopy={() => copySnippet('trae', MCP_SNIPPET_TRAE.text)}
+            text={MCP_SNIPPET_TRAE.text}
+          />
+        )}
+        <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>
+          {t.settingsLocalAgentMcpPlaceholderHint}
+        </p>
       </div>
     </div>
   )

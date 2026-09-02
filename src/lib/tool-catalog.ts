@@ -66,6 +66,18 @@ export const TOOL_META: ToolMeta[] = [
   { name: 'press_key', category: 'act', labelKey: 'toolPressKey', warningKey: 'toolPressKeyWarn' },
   { name: 'scroll', category: 'act', labelKey: 'toolScroll', warningKey: 'toolScrollWarn' },
   { name: 'wait_for', category: 'act', labelKey: 'toolWait', warningKey: 'toolWaitWarn' },
+  {
+    name: 'recognize_image',
+    category: 'read',
+    labelKey: 'toolRecognizeImage',
+    warningKey: 'toolRecognizeImageWarn',
+  },
+  {
+    name: 'screenshot',
+    category: 'read',
+    labelKey: 'toolScreenshot',
+    warningKey: 'toolScreenshotWarn',
+  },
   { name: 'open_url', category: 'nav', labelKey: 'toolOpenUrl', warningKey: 'toolOpenUrlWarn' },
   { name: 'tab_new', category: 'nav', labelKey: 'toolTabNew', warningKey: 'toolTabNewWarn' },
   {
@@ -87,6 +99,12 @@ export const TOOL_META: ToolMeta[] = [
     warningKey: 'toolRunJsWarn',
   },
   {
+    name: 'save_local',
+    category: 'act',
+    labelKey: 'toolSaveLocal',
+    warningKey: 'toolSaveLocalWarn',
+  },
+  {
     name: 'get_my_profile',
     category: 'data',
     labelKey: 'toolProfile',
@@ -100,6 +118,12 @@ export const TOOL_META: ToolMeta[] = [
   },
   { name: 'get_secret', category: 'data', labelKey: 'toolSecret', warningKey: 'toolSecretWarn' },
   { name: 'use_skill', category: 'data', labelKey: 'toolSkill', warningKey: 'toolSkillWarn' },
+  {
+    name: 'create_skill',
+    category: 'data',
+    labelKey: 'toolCreateSkill',
+    warningKey: 'toolCreateSkillWarn',
+  },
   {
     name: 'list_scheduled_tasks',
     category: 'data',
