@@ -37,7 +37,7 @@ type ManifestParam = Parameters<typeof defineManifest>[0]
 export default defineManifest({
   manifest_version: 3,
   name: 'Browser Copilot',
-  version: '0.5.3',
+  version: '0.5.4',
   description:
     'A side-panel assistant that can read and act on the page you are looking at. Works with any OpenAI-compatible model.',
   minimum_chrome_version: '116',
