@@ -65,7 +65,7 @@ async function readElementText(
   // the normal automation-tab resolution (which, when launched from the editor
   // popup, falls back to the last viewed http(s) tab rather than the extension
   // page).
-  const tab = await resolveAutomationTab(ctx.tabId).catch(() => undefined)
+  const tab = await resolveAutomationTab(ctx.tabId, ctx.scope).catch(() => undefined)
   const tabId = typeof tab?.id === 'number' ? tab.id : undefined
   if (typeof tabId !== 'number') return ''
 

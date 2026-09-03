@@ -204,7 +204,7 @@ async function evalInPage(
   ctx: WorkflowExecCtx,
 ): Promise<{ ok: boolean; value?: unknown }> {
   try {
-    const result = await execJsOnActiveTab(code, args, ctx.signal, ctx.tabId)
+    const result = await execJsOnActiveTab(code, args, ctx.signal, ctx.tabId, ctx.scope)
     if (result.ok) return { ok: true, value: result.data }
     ctx.emit('error', `JS 执行失败: ${result.error ?? '未知错误'}`)
     return { ok: false }
@@ -228,7 +228,7 @@ async function evalInPage(
  */
 async function runRaw(op: Op, ctx: WorkflowExecCtx): Promise<string | null> {
   assertActive(ctx)
-  const result = await execOnActiveTab(op, ctx.signal, ctx.tabId)
+  const result = await execOnActiveTab(op, ctx.signal, ctx.tabId, ctx.scope)
   if (result && result.ok === false) {
     throw new Error(result.error || `${op.action} 失败`)
   }
@@ -287,7 +287,7 @@ const scroll: BlockExecutor = async (data, ctx) => {
       assertActive(ctx)
       const safe = { ...op, scroll: { mode: 'by' as const, x: x / steps, y: y / steps, smooth: true } }
       try {
-        await execOnActiveTab(safe, ctx.signal, ctx.tabId)
+        await execOnActiveTab(safe, ctx.signal, ctx.tabId, ctx.scope)
       } catch (error) {
         ctx.emit('error', message(error))
         break
@@ -327,6 +327,7 @@ const waitFor: BlockExecutor = async (data, ctx) => {
     { action: 'wait_for', target: targetFrom(data) },
     ctx.signal,
     ctx.tabId,
+    ctx.scope,
   )
   if (result?.found) ctx.emit('result', '元素已出现')
   else throw new Error('等待超时，元素未出现')
@@ -350,7 +351,7 @@ const takeScreenshot: BlockExecutor = async (data, ctx) => {
         }
         op.value = selector
       }
-      const result = await execOnActiveTab(op, ctx.signal, ctx.tabId)
+      const result = await execOnActiveTab(op, ctx.signal, ctx.tabId, ctx.scope)
       if (result.ok && typeof result.data === 'string') {
         ctx.variables[variable] = result.data
         ctx.emit('result', `已截图 (${type})`)
@@ -364,7 +365,7 @@ const takeScreenshot: BlockExecutor = async (data, ctx) => {
   }
 
   // Default: visible page snapshot.
-  const tab = await activeTab()
+  const tab = await activeTab(ctx.scope)
   if (!tab || typeof tab.id !== 'number') {
     ctx.emit('error', '没有可截图的活动标签页')
     return null
@@ -382,7 +383,7 @@ const takeScreenshot: BlockExecutor = async (data, ctx) => {
 const getText: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const selector = sel(data)
-  const tab = await activeTab()
+  const tab = await activeTab(ctx.scope)
   if (!tab || typeof tab.id !== 'number') {
     ctx.emit('error', '没有活动标签页')
     return null
@@ -407,7 +408,7 @@ const openUrl: BlockExecutor = async (data, ctx) => {
     ctx.emit('error', `仅允许打开 http(s) 页面: ${url}`)
     return null
   }
-  const tab = await resolveAutomationTab(ctx.tabId)
+  const tab = await resolveAutomationTab(ctx.tabId, ctx.scope)
   if (!tab || typeof tab.id !== 'number') {
     ctx.emit('error', '没有可操作的网页标签页')
     return null
@@ -423,7 +424,7 @@ const newTabExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const url = data['url'] ? String(data['url']) : undefined
   try {
-    const tab = await driverNewTab(url)
+    const tab = await driverNewTab(url, ctx.scope)
     ctx.setTab?.(tab.id)
     if (url && data['waitTabLoaded'] !== false) {
       await waitForTabLoaded(tab.id, ctx.signal)
@@ -438,7 +439,7 @@ const newTabExec: BlockExecutor = async (data, ctx) => {
 const switchTabExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   try {
-    const tab = await driverSwitchTab(Number(data['index'] ?? 0))
+    const tab = await driverSwitchTab(Number(data['index'] ?? 0), ctx.scope)
     ctx.setTab?.(tab.id)
     ctx.emit('result', `已切换到标签页 #${tab.id}`)
   } catch (error) {
@@ -450,7 +451,7 @@ const switchTabExec: BlockExecutor = async (data, ctx) => {
 const closeTabExec: BlockExecutor = async (_data, ctx) => {
   assertActive(ctx)
   try {
-    await closeActiveTab()
+    await closeActiveTab(ctx.scope)
     ctx.emit('result', '已关闭当前标签页')
   } catch (error) {
     ctx.emit('error', message(error))
@@ -460,7 +461,7 @@ const closeTabExec: BlockExecutor = async (_data, ctx) => {
 
 const reloadTabExec: BlockExecutor = async (_data, ctx) => {
   assertActive(ctx)
-  const tab = await activeTab()
+  const tab = await activeTab(ctx.scope)
   if (!tab || typeof tab.id !== 'number') {
     ctx.emit('error', '没有活动标签页')
     return null
@@ -678,7 +679,7 @@ const javascriptCode: BlockExecutor = async (data, ctx) => {
   if (hasPageBridge) {
     triedPage = true
     try {
-      run = await execWorkflowJsOnActiveTab(code, ctx.variables, timeout, ctx.signal, ctx.tabId)
+      run = await execWorkflowJsOnActiveTab(code, ctx.variables, timeout, ctx.signal, ctx.tabId, ctx.scope)
     } catch {
       run = null
     }
@@ -910,7 +911,7 @@ const clipboardBlock: BlockExecutor = async (data, ctx) => {
 
 const elementExistsExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const count = await elementExists(sel(data), ctx.signal)
+  const count = await elementExists(sel(data), ctx.signal, ctx.scope)
   const exists = count > 0
   ctx.emit('result', exists ? `元素存在 (${count})` : '元素不存在')
   return exists
@@ -927,21 +928,22 @@ const linkBlock: BlockExecutor = async (data, ctx) => {
       { action: 'click_link', target: cssTarget(selector) },
       ctx.signal,
       ctx.tabId,
+      ctx.scope,
     )
     const info = result.data as { href?: string; target?: string } | undefined
     const href = info?.href ?? result.note ?? ''
     const waitLoaded = data['waitTabLoaded'] !== false
     if (newTab && info?.target === '_self') {
       if (href) {
-        const tab = await driverNewTab(href)
+        const tab = await driverNewTab(href, ctx.scope)
         ctx.setTab?.(tab.id)
         if (waitLoaded) await waitForTabLoaded(tab.id, ctx.signal)
       }
       ctx.emit('result', `已在新标签页打开 ${href}`)
     } else {
-      await execOnActiveTab(withWait({ action: 'click', target: cssTarget(selector) }, data), ctx.signal, ctx.tabId)
+      await execOnActiveTab(withWait({ action: 'click', target: cssTarget(selector) }, data), ctx.signal, ctx.tabId, ctx.scope)
       if (waitLoaded) {
-        const tab = await activeTab().catch(() => null)
+        const tab = await activeTab(ctx.scope).catch(() => null)
         if (tab && typeof tab.id === 'number') await waitForTabLoaded(tab.id, ctx.signal)
       }
       ctx.emit('result', '已点击链接')
@@ -964,7 +966,7 @@ const attributeValueExec: BlockExecutor = async (data, ctx) => {
   }
   if (op === 'set') opData.value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
   try {
-    const result = await execOnActiveTab(opData, ctx.signal, ctx.tabId)
+    const result = await execOnActiveTab(opData, ctx.signal, ctx.tabId, ctx.scope)
     if (op === 'get') {
       ctx.variables[variable] = result.data ?? result.note ?? ''
       ctx.emit('result', String(result.data ?? result.note ?? ''))
@@ -980,7 +982,7 @@ const attributeValueExec: BlockExecutor = async (data, ctx) => {
 const goBackExec: BlockExecutor = async (_data, ctx) => {
   assertActive(ctx)
   try {
-    await goBack()
+    await goBack(ctx.scope)
     ctx.emit('result', '已后退')
   } catch (error) {
     ctx.emit('error', message(error))
@@ -991,7 +993,7 @@ const goBackExec: BlockExecutor = async (_data, ctx) => {
 const forwardPage: BlockExecutor = async (_data, ctx) => {
   assertActive(ctx)
   try {
-    await goForward()
+    await goForward(ctx.scope)
     ctx.emit('result', '已前进')
   } catch (error) {
     ctx.emit('error', message(error))
@@ -1004,8 +1006,8 @@ const tabUrlExec: BlockExecutor = async (data, ctx) => {
   const variable = String(data['variableName'] ?? 'lastTabUrl')
   try {
     const current = data['scope'] === 'all'
-      ? await listAllTabUrls()
-      : await getActiveTabInfo()
+      ? await listAllTabUrls(ctx.scope)
+      : await getActiveTabInfo(ctx.scope)
     ctx.variables[variable] = current
     ctx.emit('result', Array.isArray(current) ? `共 ${current.length} 个标签页` : current.url)
   } catch (error) {
@@ -1018,7 +1020,7 @@ const activeTabExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const variable = String(data['variableName'] ?? 'lastActiveTab')
   try {
-    const info = await getActiveTabInfo()
+    const info = await getActiveTabInfo(ctx.scope)
     ctx.variables[variable] = info
     ctx.emit('result', `${info.title} · ${info.url}`)
   } catch (error) {
@@ -1054,7 +1056,7 @@ const uploadFileExec: BlockExecutor = async (data, ctx) => {
     // to MV3 extensions. We accept a data-url and hand it to the input; a
     // re-run against a blob/data URL produces a usable File for many pipelines.
     const opData: Op = { action: 'fill', target: cssTarget(selector), value: dataUrl }
-    await execOnActiveTab(opData, ctx.signal, ctx.tabId)
+    await execOnActiveTab(opData, ctx.signal, ctx.tabId, ctx.scope)
     ctx.emit('result', '已设置文件输入')
   } catch (error) {
     ctx.emit('error', message(error))
@@ -1331,7 +1333,7 @@ const waitConnections: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   let tabId = ctx.tabId
   if (typeof tabId !== 'number') {
-    const tab = await activeTab().catch(() => null)
+    const tab = await activeTab(ctx.scope).catch(() => null)
     tabId = typeof tab?.id === 'number' ? tab.id : undefined
   }
   await new Promise<void>((resolve) => {
@@ -1374,7 +1376,7 @@ const getForm: BlockExecutor = async (data, ctx) => {
   try {
     const op: Op = { action: 'read_form' }
     if (selector) op.value = selector
-    const result = await execOnActiveTab(op, ctx.signal, ctx.tabId)
+    const result = await execOnActiveTab(op, ctx.signal, ctx.tabId, ctx.scope)
     ctx.variables[variable] = result.data ?? {}
     ctx.emit('result', JSON.stringify(result.data ?? {}).slice(0, 80))
   } catch (error) {
