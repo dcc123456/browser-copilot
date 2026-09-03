@@ -27,6 +27,15 @@ import {
   type CommandResult,
 } from '../lib/messages'
 import { isInjectablePage } from '../lib/pages'
+import {
+  hasPanelWindows,
+  initScopeWindowCleanup,
+  isPanelWindow,
+  normalScopeFromWindowId,
+  registerPanelWindow,
+  shouldTriggerVisitWeb,
+  unregisterPort,
+} from './automation-scope'
 import { handlePickerMessage } from './picker-bridge'
 import {
   startRecording,
@@ -261,21 +270,30 @@ async function registerContextMenuWorkflows(): Promise<void> {
 /**
  * Runs a workflow, holding the worker alive for the duration so a context-menu
  * click or navigation that triggers it cannot strand the run mid-way.
+ *
+ * `scopeWindowId` pins the run to the window the trigger came from (panel run
+ * button, visit-web match in a panel window, context menu on one of its tabs).
+ * Undefined keeps the legacy global resolution — scheduled/startup/shortcut
+ * alarm runs are unattended and have no window to bind to.
  */
-async function runWorkflowKeepalive(workflowId: string): Promise<void> {
+async function runWorkflowKeepalive(workflowId: string, scopeWindowId?: number): Promise<void> {
   const wf = await getWorkflow(workflowId)
   if (!wf) return
   retain()
   try {
-    await executeWorkflow(wf, { source: 'manual' })
+    await executeWorkflow(wf, {
+      source: 'manual',
+      ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
+    })
   } finally {
     release()
   }
 }
 
-// Let the trigger module launch workflows (keyboard-shortcut triggers).
-setWorkflowRunner((workflowId) => {
-  void runWorkflowKeepalive(workflowId)
+// Let the trigger module launch workflows (keyboard-shortcut triggers carry
+// the window they were pressed in; alarm-driven ones pass nothing).
+setWorkflowRunner((workflowId, scopeWindowId) => {
+  void runWorkflowKeepalive(workflowId, scopeWindowId)
 })
 
 // Right-click "run workflow" items. Guarded: the API is not present in tests and
@@ -290,7 +308,11 @@ if (chrome.contextMenus?.onClicked) {
             w.trigger?.type === 'context-menu' &&
             (w.trigger.menuItemId !== undefined ? w.trigger.menuItemId === info.menuItemId : w.id === info.menuItemId),
         )
-        if (wf) await runWorkflowKeepalive(wf.id)
+        // The user clicked the menu item on a specific tab: run scoped to THAT
+        // window (an explicit gesture acts where it happened). `tab` is present
+        // at runtime but missing from this @types/chrome version's OnClickData.
+        const menuTab = (info as { tab?: chrome.tabs.Tab }).tab
+        if (wf) await runWorkflowKeepalive(wf.id, menuTab?.windowId)
       } catch (error) {
         console.error('[Browser Copilot] context-menu workflow failed', error)
       }
@@ -301,12 +323,21 @@ if (chrome.contextMenus?.onClicked) {
 // Visit-web workflows: fire when a matching page commits navigation. Defensive —
 // ignore any scheme other than http(s), and fall back to substring matching if
 // the stored pattern is not a valid regular expression.
+//
+// Panel-window guard: once any side panel is connected, matching navigations
+// only fire in windows that host a panel — a window without the panel belongs
+// to the user, and an automation starting there would hijack it. With no panel
+// anywhere the guard is a no-op (global listening, the long-standing default).
 if (chrome.webNavigation?.onCommitted) {
   chrome.webNavigation.onCommitted.addListener((details) => {
     void (async () => {
       try {
         const url = details.url
         if (!/^https?:/i.test(url)) return
+        // `windowId` is present at runtime but missing from this
+        // @types/chrome version's WebNavigation callback details.
+        const navWindowId = (details as { windowId?: number }).windowId
+        if (!shouldTriggerVisitWeb(hasPanelWindows(), isPanelWindow(navWindowId))) return
         const href = new URL(url).href
         const workflows = await listWorkflows()
         const wf = workflows.find((w) => {
@@ -317,7 +348,9 @@ if (chrome.webNavigation?.onCommitted) {
             return href.includes(w.trigger.urlPattern)
           }
         })
-        if (wf) await runWorkflowKeepalive(wf.id)
+        // Run scoped to the window the matching page opened in (a panel window
+        // by the guard above); undefined when no panel exists at all.
+        if (wf) await runWorkflowKeepalive(wf.id, isPanelWindow(navWindowId) ? navWindowId : undefined)
       } catch (error) {
         console.error('[Browser Copilot] visit-web workflow failed', error)
       }
@@ -338,6 +371,8 @@ function recordStep(
 // command). Reconcile schedules and the bot connection at module load so a task
 // is never missed because the worker had not run its install/startup handlers.
 initLastTabTracker()
+// Drop closed windows from the panel registry so trigger guards stay honest.
+initScopeWindowCleanup()
 void rescheduleAll().catch((error: unknown) =>
   console.error('[Browser Copilot] could not reschedule tasks', error),
 )
@@ -387,7 +422,7 @@ chrome.action.onClicked.addListener((tab) => {
 // message (e.g. picker:start) ALSO reached the command handler, which threw
 // "Unknown command" and raced the real response — the root cause of the picker
 // error and flaky run/record buttons.
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   void (async () => {
     try {
       // 另存为 picker 请求由侧面板处理，这里直接放行。
@@ -407,13 +442,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
 
       // 3. Keyboard-shortcut triggers from the injected tab listener.
-      if (await handleShortcutPressed(message)) {
+      if (await handleShortcutPressed(message, sender)) {
         sendResponse({ ok: true })
         return
       }
 
       // 4. Generic command channel (workflows.*, settings, skills, ...).
-      const data = await handleCommand(message as Command)
+      const data = await handleCommand(message as Command, sender)
       sendResponse({ ok: true, data } satisfies CommandResponse)
     } catch (error) {
       sendResponse({
@@ -466,7 +501,21 @@ function runningBoardsView(workflowIdFilter?: string): {
   }
 }
 
-async function handleCommand(command: Command): Promise<CommandResult> {
+/**
+ * The window scope of an extension-page sender (side panel / editor): the
+ * sender tab's window, validated to still exist and be `normal`. The editor
+ * popup is a `popup`-type window, so its commands degrade to unscoped.
+ */
+async function scopeOfSender(sender?: chrome.runtime.MessageSender): Promise<number | undefined> {
+  const scope = await normalScopeFromWindowId(sender?.tab?.windowId)
+  return scope?.windowId
+}
+
+async function handleCommand(command: Command, sender?: chrome.runtime.MessageSender): Promise<CommandResult> {
+  // Window scope of the extension page that sent this command, if any.
+  // Page reads and panel-run workflows act inside THAT window; commands from
+  // non-extension senders or the editor popup resolve to undefined (global).
+  const scopeWindowId = await scopeOfSender(sender)
   switch (command.type) {
     case 'settings.get':
       return { type: 'settings', settings: await getSettings() }
@@ -540,11 +589,11 @@ async function handleCommand(command: Command): Promise<CommandResult> {
     case 'page.read':
       return {
         type: 'page.read',
-        page: await readActivePage(command.maxChars),
+        page: await readActivePage(command.maxChars, scopeWindowId === undefined ? undefined : { windowId: scopeWindowId }),
       }
 
     case 'page.check': {
-      const tab = await activeTab()
+      const tab = await activeTab(scopeWindowId === undefined ? undefined : { windowId: scopeWindowId })
       if (!tab || typeof tab.id !== 'number') {
         return {
           type: 'page.check',
@@ -727,6 +776,9 @@ async function handleCommand(command: Command): Promise<CommandResult> {
         source: 'manual',
         startAt: (command as { startAt?: string }).startAt,
         debug: workflow.settings?.debugMode === true,
+        // Panel run button: act inside the panel's window (undefined for the
+        // editor popup, which is not a normal window).
+        ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
       })
       return {
         type: 'workflows.run',
@@ -775,6 +827,12 @@ const activeTurns = new Set<string>()
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== AGENT_PORT) return
+
+  // The side panel lives in a normal browser window: register it so automatic
+  // visit-web triggers stay quiet in the user's other windows, and remember
+  // the id to scope this panel's chat turns.
+  const panelWindowId = port.sender?.tab?.windowId
+  if (typeof panelWindowId === 'number') registerPanelWindow(panelWindowId, port)
 
   /** Pending confirmation resolvers, keyed by request id. */
   const pending = new Map<string, (approved: boolean) => void>()
@@ -985,11 +1043,16 @@ chrome.runtime.onConnect.addListener((port) => {
           }
         }
         sendWithTracking({ type: 'phase', phase: 'sending' })
+        // Scope this turn to the panel's own window (validated; a window that
+        // died before the turn started degrades to the global chain).
+        const scopeWindowId =
+          typeof panelWindowId === 'number' ? (await normalScopeFromWindowId(panelWindowId))?.windowId : undefined
         const turnUsage = await runAgentTurn(history, {
           send: sendWithTracking,
           signal: turnController.signal,
           ...(message.skillId ? { skillId: message.skillId } : {}),
           ...(grantedPageUrl ? { grantedPageUrl } : {}),
+          ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
           conversationId,
           getMode,
           getMaxToolRounds,
@@ -1058,5 +1121,8 @@ chrome.runtime.onConnect.addListener((port) => {
     // gone, so they resolve as declined instead of hanging until the turn caps.
     for (const resolve of pending.values()) resolve(false)
     pending.clear()
+    // The window keeps hosting a panel only while at least one of its ports is
+    // connected; dropping ours may retire it from the trigger guard.
+    unregisterPort(port)
   })
 })

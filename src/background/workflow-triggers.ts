@@ -193,22 +193,31 @@ export function initShortcutTriggers(): boolean {
   return true
 }
 
-/** Handle a `shortcut:pressed` runtime message; runs the bound workflow. */
-export async function handleShortcutPressed(message: unknown): Promise<boolean> {
+/**
+ * Handle a `shortcut:pressed` runtime message; runs the bound workflow.
+ *
+ * A keyboard chord is an explicit gesture on a specific tab, so the run is
+ * scoped to THAT window (`sender.tab.windowId`) — pressing the shortcut in any
+ * window works, and the workflow acts there.
+ */
+export async function handleShortcutPressed(
+  message: unknown,
+  sender?: chrome.runtime.MessageSender,
+): Promise<boolean> {
   const msg = message as { type?: string; shortcut?: string }
   if (msg.type !== 'shortcut:pressed' || !msg.shortcut) return false
   const sh = await shortcutWorkflows()
   const match = sh.find((s) => s.shortcut === msg.shortcut)
   if (match) {
     // The runner is provided by the background index via a callback set below.
-    runWorkflowRef?.(match.wf.id)
+    runWorkflowRef?.(match.wf.id, sender?.tab?.windowId)
   }
   return true
 }
 
 /** Injected by the background index so this module can launch a workflow. */
-let runWorkflowRef: ((workflowId: string) => void) | null = null
-export function setWorkflowRunner(fn: (workflowId: string) => void): void {
+let runWorkflowRef: ((workflowId: string, scopeWindowId?: number) => void) | null = null
+export function setWorkflowRunner(fn: (workflowId: string, scopeWindowId?: number) => void): void {
   runWorkflowRef = fn
 }
 
