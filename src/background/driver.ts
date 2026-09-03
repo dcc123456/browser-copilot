@@ -18,6 +18,7 @@
 import { isInjectablePage } from '../lib/pages'
 import { KERNEL_VERSION } from '../inpage/kernel-version'
 import { ensureTabMonitor, isMonitorHolding } from './cdp-monitor'
+import type { ScopeWindow } from './automation-scope'
 import type { Op, OpResult, PageSnapshot, SnapshotElement, Target } from '../lib/ops'
 import { runOp, runExecJs, runWorkflowJs } from '../inpage/kernel'
 import { activeTab } from './page'
@@ -50,9 +51,17 @@ import { fillViaCdp } from './cdp-typing'
  * outlive the state it describes.
  */
 let cachedAutomationTab: chrome.tabs.Tab | undefined
+/**
+ * The window scope the cache was resolved under. A cached tab from an
+ * unscoped (unattended) run must never satisfy a panel-scoped call — that is
+ * exactly the cross-window leak this module exists to prevent — so the cache
+ * only hits when the scope key matches.
+ */
+let cachedAutomationScopeWindowId: number | undefined
 
 function invalidateAutomationTabCache(): void {
   cachedAutomationTab = undefined
+  cachedAutomationScopeWindowId = undefined
 }
 
 // Registered at import time, so guarded: unit tests import this module in a
@@ -90,6 +99,7 @@ function setPinnedTab(tabId: number | undefined): void {
 
 export async function resolveAutomationTab(
   preferredTabId?: number,
+  scope?: ScopeWindow,
 ): Promise<chrome.tabs.Tab | undefined> {
   if (typeof preferredTabId === 'number') {
     const pinned = await chrome.tabs.get(preferredTabId).catch(() => undefined)
@@ -106,9 +116,12 @@ export async function resolveAutomationTab(
   }
 
   // A cheap one-call existence check guards the cache; the event listeners
-  // above are the primary invalidation path.
+  // above are the primary invalidation path. The cache only hits when it was
+  // resolved under the SAME window scope — a tab cached from an unscoped run
+  // must not leak into a panel-scoped call, or vice versa.
+  const scopeKey = scope?.windowId
   const cached = cachedAutomationTab
-  if (cached && typeof cached.id === 'number') {
+  if (cached && typeof cached.id === 'number' && cachedAutomationScopeWindowId === scopeKey) {
     const still = await chrome.tabs.get(cached.id).catch(() => undefined)
     if (still && isInjectablePage(still.url)) {
       cachedAutomationTab = still
@@ -117,8 +130,11 @@ export async function resolveAutomationTab(
     cachedAutomationTab = undefined
   }
 
-  const resolved = await resolveAutomationTabUncached()
-  if (resolved) cachedAutomationTab = resolved
+  const resolved = await resolveAutomationTabUncached(scope)
+  if (resolved) {
+    cachedAutomationTab = resolved
+    cachedAutomationScopeWindowId = scopeKey
+  }
   return resolved
 }
 
@@ -126,13 +142,39 @@ export async function resolveAutomationTab(
  * Uncached resolution chain. Prefer {@link resolveAutomationTab}, which wraps
  * this with event-invalidated caching.
  *
- * A run launched from the editor popup or side panel has focus on an
- * extension page (`chrome-extension://…`), which cannot be scripted. In that
- * case fall back to the active tab of the most recently focused *normal*
- * browser window that is on an ordinary http(s) page. When the focused window
- * already shows an injectable page it is used directly.
+ * With a panel-window `scope`, resolution stays inside that window: its active
+ * http(s) tab first, then the last http(s) tab remembered for that window. If
+ * the window exists but has no injectable page, this returns undefined so
+ * callers report a clear error — a scoped run must NEVER fall into another
+ * window, which belongs to the user. If the scope window no longer exists
+ * (closed mid-turn; the panel dies with it), resolution degrades to the
+ * legacy global chain below.
+ *
+ * Unscoped (legacy) chain: a run launched from the editor popup or side panel
+ * has focus on an extension page (`chrome-extension://…`), which cannot be
+ * scripted. In that case fall back to the active tab of the most recently
+ * focused *normal* browser window that is on an ordinary http(s) page. When
+ * the focused window already shows an injectable page it is used directly.
  */
-async function resolveAutomationTabUncached(): Promise<chrome.tabs.Tab | undefined> {
+async function resolveAutomationTabUncached(scope?: ScopeWindow): Promise<chrome.tabs.Tab | undefined> {
+  if (scope) {
+    const win = await chrome.windows.get(scope.windowId).catch(() => undefined)
+    if (win) {
+      const [active] = await chrome.tabs
+        .query({ active: true, windowId: scope.windowId })
+        .catch(() => [])
+      if (active && isInjectablePage(active.url)) return active
+      const remembered = await getLastInjectableTab(undefined, scope.windowId).catch(
+        () => undefined,
+      )
+      if (remembered) return remembered
+      // The window exists but has no injectable page (all chrome:// etc.):
+      // report "nothing to act on" rather than reaching into another window.
+      return undefined
+    }
+    // Window gone: fall through to the legacy global chain.
+  }
+
   const focused = await activeTab()
   const focusedWindowId = typeof focused?.windowId === 'number' ? focused.windowId : undefined
   if (focused && isInjectablePage(focused.url)) return focused
@@ -319,11 +361,14 @@ export async function execOnActiveTab(
   op: Op,
   signal?: AbortSignal,
   preferredTabId?: number,
+  scope?: ScopeWindow,
 ): Promise<OpResult> {
-  const tab = await resolveAutomationTab(preferredTabId)
+  const tab = await resolveAutomationTab(preferredTabId, scope)
   if (!tab || typeof tab.id !== 'number' || !isInjectablePage(tab.url)) {
     throw new DriverError(
-      '没有可操作的网页：请先在普通 http(s) 网页标签页上运行工作流（不能在扩展弹窗 / chrome:// 页面上执行页面操作）。',
+      scope
+        ? '插件窗口内没有可操作的网页标签页（不跨窗口查找）。请先在插件窗口打开一个普通 http(s) 页面。'
+        : '没有可操作的网页：请先在普通 http(s) 网页标签页上运行工作流（不能在扩展弹窗 / chrome:// 页面上执行页面操作）。',
     )
   }
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
@@ -932,8 +977,9 @@ async function runWorkflowJsViaCdp(
 export async function snapshotActiveTab(
   maxChars = 8000,
   maxElements = 120,
+  scope?: ScopeWindow,
 ): Promise<PageSnapshot> {
-  const result = await execOnActiveTab({ action: 'snapshot', maxChars, maxElements })
+  const result = await execOnActiveTab({ action: 'snapshot', maxChars, maxElements }, undefined, undefined, scope)
   if (!result.page) throw new DriverError(result.error ?? 'The page could not be read.')
   return result.page
 }
@@ -947,11 +993,15 @@ export async function snapshotActiveTab(
  * none starts, this was not a navigation after all and we return immediately.
  * The `ms` argument is a hard cap (2s default), never a fixed delay.
  */
-export async function settleAfterNavigation(ms = 2000, signal?: AbortSignal): Promise<void> {
+export async function settleAfterNavigation(
+  ms = 2000,
+  signal?: AbortSignal,
+  scope?: ScopeWindow,
+): Promise<void> {
   const deadline = Date.now() + ms
   const remaining = (): number => Math.max(0, deadline - Date.now())
 
-  const tab = await activeTab().catch(() => undefined)
+  const tab = await activeTab(scope).catch(() => undefined)
   if (!tab || typeof tab.id !== 'number') {
     await sleep(Math.min(400, ms), signal)
     return
@@ -1015,29 +1065,39 @@ function toDriverTab(tab: chrome.tabs.Tab): DriverTab {
   return { id: tab.id, url: tab.url ?? '', title: tab.title ?? '', active: tab.active === true }
 }
 
-export async function listTabs(): Promise<DriverTab[]> {
-  const tabs = await chrome.tabs.query({ currentWindow: true })
+export async function listTabs(scope?: ScopeWindow): Promise<DriverTab[]> {
+  // Scoped runs list only the panel window's tabs; unscoped keeps the legacy
+  // "current window" (= last focused, in the service worker) behaviour.
+  const tabs = await chrome.tabs.query(scope ? { windowId: scope.windowId } : { currentWindow: true })
   return tabs
     .filter((tab) => typeof tab.id === 'number')
     .map(toDriverTab)
     .sort((a, b) => a.id - b.id)
 }
 
-export async function switchTab(index: number): Promise<DriverTab> {
-  const tabs = await listTabs()
+export async function switchTab(index: number, scope?: ScopeWindow): Promise<DriverTab> {
+  const tabs = await listTabs(scope)
   const target = tabs[index]
   if (!target) {
     throw new DriverError(`No tab at index ${index}. This window has ${tabs.length} tab(s).`)
   }
+  // Activates the tab inside its own window; this deliberately does NOT focus
+  // the window, so a user working in another window is never interrupted.
   await chrome.tabs.update(target.id, { active: true })
   return target
 }
 
-export async function newTab(url?: string): Promise<DriverTab> {
+export async function newTab(url?: string, scope?: ScopeWindow): Promise<DriverTab> {
   if (url && !isInjectablePage(url)) {
     throw new DriverError(`Cannot open "${url}": only http(s) pages can be automated.`)
   }
-  const created = await chrome.tabs.create({ url, active: true })
+  // Scoped runs create the tab IN the panel window; unscoped keeps the legacy
+  // "create in the current window" behaviour.
+  const created = await chrome.tabs.create({
+    url,
+    active: true,
+    ...(scope ? { windowId: scope.windowId } : {}),
+  })
   return toDriverTab(created)
 }
 
@@ -1046,11 +1106,11 @@ export async function newTab(url?: string): Promise<DriverTab> {
  * automation call acts on it — no tab_switch round trips when the caller works
  * across several tabs. Auto-expires via the TTL in resolveAutomationTab.
  */
-export async function pinActiveTab(tabId?: number): Promise<DriverTab> {
+export async function pinActiveTab(tabId?: number, scope?: ScopeWindow): Promise<DriverTab> {
   const tab =
     typeof tabId === 'number'
       ? await chrome.tabs.get(tabId).catch(() => undefined)
-      : await resolveAutomationTab()
+      : await resolveAutomationTab(undefined, scope)
   if (!tab || typeof tab.id !== 'number' || !isInjectablePage(tab.url)) {
     throw new DriverError('pin_tab: 没有可钉住的 http(s) 标签页。')
   }
@@ -1063,19 +1123,19 @@ export function unpinTab(): void {
   setPinnedTab(undefined)
 }
 
-export async function closeActiveTab(): Promise<void> {
-  const tab = await activeTab()
+export async function closeActiveTab(scope?: ScopeWindow): Promise<void> {
+  const tab = await activeTab(scope)
   if (tab?.id) await chrome.tabs.remove(tab.id)
 }
 
-export async function goBack(): Promise<void> {
-  const tab = await activeTab()
+export async function goBack(scope?: ScopeWindow): Promise<void> {
+  const tab = await activeTab(scope)
   if (!tab || typeof tab.id !== 'number') throw new DriverError('没有可后退的活动标签页')
   await chrome.tabs.goBack(tab.id)
 }
 
-export async function goForward(): Promise<void> {
-  const tab = await activeTab()
+export async function goForward(scope?: ScopeWindow): Promise<void> {
+  const tab = await activeTab(scope)
   if (!tab || typeof tab.id !== 'number') throw new DriverError('没有可前进的活动标签页')
   await chrome.tabs.goForward(tab.id)
 }
@@ -1087,17 +1147,39 @@ export interface DriverTabInfo {
   active: boolean
 }
 
-export async function getActiveTabInfo(): Promise<DriverTabInfo> {
-  const tab = await activeTab()
+export async function getActiveTabInfo(scope?: ScopeWindow): Promise<DriverTabInfo> {
+  const tab = await activeTab(scope)
   if (!tab || typeof tab.id !== 'number') throw new DriverError('没有活动标签页')
   return toDriverTab(tab)
 }
 
-export async function listAllTabUrls(): Promise<{ id: number; url: string; title: string }[]> {
-  const tabs = await chrome.tabs.query({ currentWindow: true })
+export async function listAllTabUrls(scope?: ScopeWindow): Promise<{ id: number; url: string; title: string }[]> {
+  const tabs = await chrome.tabs.query(scope ? { windowId: scope.windowId } : { currentWindow: true })
   return tabs
     .filter((tab) => typeof tab.id === 'number')
     .map((tab) => ({ id: tab.id as number, url: tab.url ?? '', title: tab.title ?? '' }))
+}
+
+/**
+ * Navigates the active tab to `url` — the `open_url` tool's primitive.
+ *
+ * Scoped runs target the panel window's active tab. Injectability is NOT
+ * required here: navigating a `chrome://newtab` to an http(s) URL is a plain
+ * `tabs.update`, which any tab accepts. Unscoped runs keep the legacy
+ * "update the focused window's active tab" behaviour.
+ */
+export async function updateActiveTabUrl(url: string, scope?: ScopeWindow): Promise<void> {
+  if (!scope) {
+    await chrome.tabs.update({ url })
+    return
+  }
+  const [tab] = await chrome.tabs
+    .query({ active: true, windowId: scope.windowId })
+    .catch(() => [])
+  if (!tab || typeof tab.id !== 'number') {
+    throw new DriverError('插件窗口内没有可导航的标签页。')
+  }
+  await chrome.tabs.update(tab.id, { url })
 }
 
 export async function newWindow(url?: string): Promise<chrome.windows.Window> {
@@ -1108,8 +1190,9 @@ export async function newWindow(url?: string): Promise<chrome.windows.Window> {
 export async function elementExists(
   selector: string,
   signal?: AbortSignal,
+  scope?: ScopeWindow,
 ): Promise<number> {
-  const result = await execOnActiveTab({ action: 'element_exists', value: selector }, signal)
+  const result = await execOnActiveTab({ action: 'element_exists', value: selector }, signal, undefined, scope)
   return typeof result.data === 'number' ? result.data : result.found ? 1 : 0
 }
 
@@ -1117,8 +1200,9 @@ export async function elementExists(
 export async function countElements(
   selector: string,
   signal?: AbortSignal,
+  scope?: ScopeWindow,
 ): Promise<number> {
-  const result = await execOnActiveTab({ action: 'count_elements', value: selector }, signal)
+  const result = await execOnActiveTab({ action: 'count_elements', value: selector }, signal, undefined, scope)
   return typeof result.data === 'number' ? result.data : 0
 }
 
@@ -1144,11 +1228,13 @@ export async function execJsOnActiveTab(
   args: Record<string, unknown> = {},
   signal?: AbortSignal,
   preferredTabId?: number,
+  scope?: ScopeWindow,
 ): Promise<ExecJsResult> {
   const result = await execOnActiveTab(
     { action: 'exec_js', value: code, jsArgs: args, jsArgNames: Object.keys(args) },
     signal,
     preferredTabId,
+    scope,
   )
   if (result.ok) return { ok: true, data: result.data }
   return { ok: false, error: result.error ?? 'JavaScript execution failed' }
@@ -1175,6 +1261,7 @@ export async function execWorkflowJsOnActiveTab(
   timeout: number,
   signal?: AbortSignal,
   preferredTabId?: number,
+  scope?: ScopeWindow,
 ): Promise<{ ok: true; data: WorkflowJsResult; logs: { level: string; message: string }[] } | { ok: false; error: string; logs: { level: string; message: string }[] }> {
   const result = await execOnActiveTab(
     {
@@ -1184,6 +1271,7 @@ export async function execWorkflowJsOnActiveTab(
     },
     signal,
     preferredTabId,
+    scope,
   )
   const captured =
     result.data && typeof result.data === 'object'
