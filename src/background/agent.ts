@@ -66,7 +66,9 @@ import {
   snapshotActiveTab,
   switchTab,
   unpinTab,
+  updateActiveTabUrl,
 } from './driver'
+import { normalScopeFromWindowId, type ScopeWindow } from './automation-scope'
 import { drainConsoleEntries, ensureTabMonitor, getRecentRequests, waitForNetworkIdle } from './cdp-monitor'
 import { activeTab, readActivePage } from './page'
 import { listTasks } from '../lib/task-store'
@@ -424,7 +426,8 @@ export const TOOLS: WireTool[] = [
     type: 'function',
     function: {
       name: 'open_url',
-      description: 'Navigate the active tab to a URL.',
+      description:
+        'Navigate the active tab to a URL. The active tab is the one in the panel\'s window (side-panel runs never touch other browser windows).',
       parameters: {
         type: 'object',
         properties: {
@@ -439,7 +442,8 @@ export const TOOLS: WireTool[] = [
     type: 'function',
     function: {
       name: 'tab_new',
-      description: 'Open a new tab, optionally navigating to a URL, and switch to it.',
+      description:
+        'Open a new tab, optionally navigating to a URL, and switch to it. The tab is created in the panel\'s window; other browser windows are never touched.',
       parameters: {
         type: 'object',
         properties: { url: { type: 'string' } },
@@ -451,7 +455,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'tab_switch',
       description:
-        'Switch to another tab in this window by its index (0-based, as returned by list_tabs).',
+        'Switch to another tab in this window by its index (0-based, as returned by list_tabs). "This window" is the panel\'s window; tabs in other windows are out of scope.',
       parameters: {
         type: 'object',
         properties: { index: { type: 'number' } },
@@ -514,7 +518,8 @@ export const TOOLS: WireTool[] = [
     type: 'function',
     function: {
       name: 'list_tabs',
-      description: 'List the tabs open in the current window with their index, title, and URL.',
+      description:
+        'List the tabs open in the panel\'s window (not other windows) with their index, title, and URL. Indices are that window\'s.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -699,6 +704,15 @@ export interface AgentDeps {
    * toggles take effect on the next request without a worker restart.
    */
   getToolConfig: () => Promise<{ disabledTools: string[]; basePrompt: string }>
+  /**
+   * Window id of the side panel that sent this turn's message. Resolved to a
+   * validated {@link ScopeWindow} at turn start and threaded through every
+   * tool call, so a panel-driven turn reads and acts ONLY inside its own
+   * window — other windows belong to the user. Unattended entry points
+   * (scheduled tasks, Feishu, the local-agent bridge) leave it undefined and
+   * keep the legacy global resolution.
+   */
+  scopeWindowId?: number
 }
 
 function parseArgs(raw: string): Record<string, unknown> {
@@ -889,6 +903,13 @@ interface ToolContext {
    * most of the old snapshot's token weight lived. Cleared on navigation.
    */
   snapshotTargets?: Map<string, { target: Target; name: string }>
+  /**
+   * Panel-window scope for this turn: every tab resolution, tab op and page
+   * read stays inside this window. Undefined for unattended runs (legacy
+   * global behaviour). Validated once at turn start via
+   * {@link normalScopeFromWindowId}.
+   */
+  scope?: ScopeWindow
 }
 
 /**
@@ -1259,14 +1280,15 @@ async function resolveToolImage(
   selector: string,
   signal?: AbortSignal,
   opts?: { format?: 'png' | 'jpeg' },
+  scope?: ScopeWindow,
 ): Promise<string | null> {
   if (rawImage) return resolveImageRef(rawImage)
   if (selector) {
-    const captured = await execOnActiveTab({ action: 'capture', value: selector }, signal)
+    const captured = await execOnActiveTab({ action: 'capture', value: selector }, signal, undefined, scope)
     if (captured.ok && typeof captured.data === 'string') return captured.data
     return null
   }
-  const tab = await activeTab()
+  const tab = await activeTab(scope)
   if (tab && typeof tab.windowId === 'number') {
     try {
       // Default PNG: lossless, for OCR/vision accuracy. The observation
@@ -1306,7 +1328,7 @@ export async function executeTool(
     case 'read_current_page': {
       throwIfAborted()
       const maxChars = typeof args.maxChars === 'number' ? args.maxChars : undefined
-      const page = await readActivePage(maxChars)
+      const page = await readActivePage(maxChars, ctx.scope)
       ctx.lastUrl = page.url
       return JSON.stringify(compactPageRead(page))
     }
@@ -1319,7 +1341,7 @@ export async function executeTool(
       // or use read_current_page.
       const maxChars = typeof args.maxChars === 'number' ? args.maxChars : 3000
       const maxElements = typeof args.maxElements === 'number' ? args.maxElements : 120
-      const snapshot = await snapshotActiveTab(maxChars, maxElements)
+      const snapshot = await snapshotActiveTab(maxChars, maxElements, ctx.scope)
       ctx.lastUrl = snapshot.url
       rememberSnapshotTargets(ctx, snapshot)
       return JSON.stringify(compactSnapshot(snapshot))
@@ -1331,7 +1353,7 @@ export async function executeTool(
       const selector = typeof args.selector === 'string' ? args.selector.trim() : ''
       const prompt = typeof args.prompt === 'string' ? args.prompt : undefined
 
-      const dataUrl = await resolveToolImage(rawImage, selector, signal)
+      const dataUrl = await resolveToolImage(rawImage, selector, signal, undefined, ctx.scope)
       if (!dataUrl) {
         return JSON.stringify({
           ok: false,
@@ -1346,22 +1368,12 @@ export async function executeTool(
       const processed = await preprocessImage(dataUrl)
       const settings = await getSettings()
       const provider = await getActiveProvider().catch(() => undefined)
-
-      // The vision model is the accurate path and runs first. Tesseract.js OCR
-      // is only an offline fallback when no image model is configured, since it
-      // is slower and less accurate for noisy/distorted CAPTCHAs.
       const target = resolveVisionTarget(settings.imageModel, settings.providers, provider)
-      if (target) {
-        const result = await recognizeImage(target, processed, { prompt, signal })
-        if (!result.ok) return JSON.stringify({ ok: false, error: result.error })
-        return JSON.stringify({
-          ok: true,
-          text: result.text,
-          note: `Recognized from the image (${result.text.length} chars). Use this text to fill the CAPTCHA field.`,
-          model: target.model,
-        })
-      }
 
+      // Local OCR (Tesseract.js) runs first: it is fully offline, free and,
+      // with the upscale+contrast preprocessing, accurate enough for clean
+      // text. The vision model is the fallback for the noisy/distorted images
+      // OCR comes up empty on.
       const lang = (settings.ocrLanguage || 'eng').trim() || 'eng'
       const ocr = await ocrImage(processed, lang)
       if (ocr.ok && ocr.text.trim()) {
@@ -1373,10 +1385,22 @@ export async function executeTool(
           model: 'tesseract(ocr)',
         })
       }
+
+      if (target) {
+        const result = await recognizeImage(target, processed, { prompt, signal })
+        if (!result.ok) return JSON.stringify({ ok: false, error: result.error })
+        return JSON.stringify({
+          ok: true,
+          text: result.text,
+          note: `Recognized from the image (${result.text.length} chars). Use this text to fill the CAPTCHA field.`,
+          model: target.model,
+        })
+      }
+
       return JSON.stringify({
         ok: false,
         error:
-          'No vision-capable image model configured and local OCR could not read the image. ' +
+          'Local OCR could not read the image and no vision-capable image model is configured. ' +
           (ocr.ok ? '' : `OCR error: ${ocr.error}. `) +
           'Open Settings → 图片识别模型 to set an image model (e.g. gpt-4o, qwen-vl, or glm-4v).',
       })
@@ -1389,7 +1413,7 @@ export async function executeTool(
 
       // screenshot always sends the captured image to the image model for a
       // visual read; a `target` selector limits it to a single element.
-      const dataUrl = await resolveToolImage('', target, signal)
+      const dataUrl = await resolveToolImage('', target, signal, undefined, ctx.scope)
       if (!dataUrl) {
         return JSON.stringify({
           ok: false,
@@ -1420,7 +1444,7 @@ export async function executeTool(
       throwIfAborted()
       // Reads the passive CDP monitor's buffer; attaching here (best-effort)
       // makes the tool useful even when called before any action ran.
-      const tab = await resolveAutomationTab()
+      const tab = await resolveAutomationTab(undefined, ctx.scope)
       if (!tab || typeof tab.id !== 'number') {
         return JSON.stringify({ ok: false, error: '没有可读取的标签页。' })
       }
@@ -1437,7 +1461,7 @@ export async function executeTool(
 
     case 'list_tabs': {
       throwIfAborted()
-      const tabs = await listTabs()
+      const tabs = await listTabs(ctx.scope)
       return JSON.stringify(
         tabs.map((tab, index) => ({
           index,
@@ -1453,7 +1477,7 @@ export async function executeTool(
       throwIfAborted()
       const code = String(args.code ?? '')
       if (!code.trim()) return JSON.stringify({ error: 'run_javascript requires code.' })
-      const result = await execOnActiveTab({ action: 'exec_js', value: code }, signal)
+      const result = await execOnActiveTab({ action: 'exec_js', value: code }, signal, undefined, ctx.scope)
       if (!result.ok) return JSON.stringify({ error: result.error ?? 'JavaScript execution failed' })
       return JSON.stringify({ ok: true, result: result.data ?? null })
     }
@@ -1492,7 +1516,7 @@ export async function executeTool(
       throwIfAborted()
       const resolved = resolveTargetFrom(ctx, args)
       if ('error' in resolved) return JSON.stringify({ error: resolved.error })
-      const result = await execOnActiveTab({ action: 'click', target: resolved.target }, signal)
+      const result = await execOnActiveTab({ action: 'click', target: resolved.target }, signal, undefined, ctx.scope)
       return afterAction(result, ctx, {}, { withScreenshot: args.withScreenshot === true, signal })
     }
 
@@ -1503,7 +1527,7 @@ export async function executeTool(
       const target = resolved.target
       const value = String(args.value ?? '')
       const clear = args.clear === false ? false : true
-      const result = await execOnActiveTab({ action: 'fill', target, value, clear }, signal)
+      const result = await execOnActiveTab({ action: 'fill', target, value, clear }, signal, undefined, ctx.scope)
       return afterAction(
         result,
         ctx,
@@ -1520,7 +1544,7 @@ export async function executeTool(
       const value = (Array.isArray(args.value)
         ? args.value.map(String)
         : String(args.value ?? '')) as string | string[]
-      const result = await execOnActiveTab({ action: 'select_option', target, value }, signal)
+      const result = await execOnActiveTab({ action: 'select_option', target, value }, signal, undefined, ctx.scope)
       return afterAction(result, ctx, {}, { withScreenshot: args.withScreenshot === true, signal })
     }
 
@@ -1530,7 +1554,7 @@ export async function executeTool(
       if ('error' in resolved) return JSON.stringify({ error: resolved.error })
       const target = resolved.target
       const value = args.value === undefined ? true : args.value === true
-      const result = await execOnActiveTab({ action: 'set_checkbox', target, value }, signal)
+      const result = await execOnActiveTab({ action: 'set_checkbox', target, value }, signal, undefined, ctx.scope)
       return afterAction(result, ctx, {}, { withScreenshot: args.withScreenshot === true, signal })
     }
 
@@ -1543,7 +1567,7 @@ export async function executeTool(
       const op: Op = resolved
         ? { action: 'press_key', target: resolved.target, value: key }
         : { action: 'press_key', value: key }
-      const result = await execOnActiveTab(op, signal)
+      const result = await execOnActiveTab(op, signal, undefined, ctx.scope)
       return afterAction(result, ctx, {}, { withScreenshot: args.withScreenshot === true, signal })
     }
 
@@ -1568,7 +1592,7 @@ export async function executeTool(
                     y: typeof args.y === 'number' ? args.y : 600,
                   },
                 }
-      const result = await execOnActiveTab(op, signal)
+      const result = await execOnActiveTab(op, signal, undefined, ctx.scope)
       return afterAction(result, ctx, {}, { withScreenshot: args.withScreenshot === true, signal })
     }
 
@@ -1582,7 +1606,7 @@ export async function executeTool(
       let last: OpResult | undefined
       while (Date.now() < deadline) {
         if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-        last = await execOnActiveTab({ action: 'wait_for', target }, signal)
+        last = await execOnActiveTab({ action: 'wait_for', target }, signal, undefined, ctx.scope)
         if (last.ok) break
         await new Promise((resolve) => setTimeout(resolve, 100))
       }
@@ -1685,11 +1709,13 @@ export async function executeTool(
     case 'open_url': {
       throwIfAborted()
       const url = String(args.url ?? '').trim()
-      // The driver handles the isInjectablePage check with a clear error.
-      await chrome.tabs.update({ url })
+      // Navigates the active tab — inside the panel window for scoped turns —
+      // and the isInjectablePage check does not apply here: any tab (even
+      // chrome://newtab) can be navigated to an http(s) URL.
+      await updateActiveTabUrl(url, ctx.scope)
       ctx.navigated = true
       ctx.snapshotTargets = undefined // old page's refs are gone
-      await settleAfterNavigation(2000, signal)
+      await settleAfterNavigation(2000, signal, ctx.scope)
       const payload: Record<string, unknown> = { ok: true, navigated: true, url }
       // The fresh page's observation lets the very next step act on it (often
       // within the same run_plan), without a separate snapshot round.
@@ -1701,11 +1727,11 @@ export async function executeTool(
     case 'tab_new': {
       throwIfAborted()
       const url = typeof args.url === 'string' ? args.url.trim() : undefined
-      const tab = await newTab(url || undefined)
+      const tab = await newTab(url || undefined, ctx.scope)
       ctx.navigated = true
       ctx.lastUrl = tab.url
       ctx.snapshotTargets = undefined // old page's refs are gone
-      await settleAfterNavigation(undefined, signal)
+      await settleAfterNavigation(undefined, signal, ctx.scope)
       const payload: Record<string, unknown> = { ok: true, tabId: tab.id, url: tab.url }
       const observed = await captureObservation(ctx, args.withScreenshot === true, signal)
       if (observed) payload.observation = observed
@@ -1715,7 +1741,7 @@ export async function executeTool(
     case 'tab_switch': {
       throwIfAborted()
       const index = Number(args.index ?? 0)
-      const tab = await switchTab(index)
+      const tab = await switchTab(index, ctx.scope)
       ctx.navigated = true
       ctx.lastUrl = tab.url
       ctx.snapshotTargets = undefined // different page entirely
@@ -1724,14 +1750,14 @@ export async function executeTool(
 
     case 'tab_close': {
       throwIfAborted()
-      await closeActiveTab()
+      await closeActiveTab(ctx.scope)
       return JSON.stringify({ ok: true })
     }
 
     case 'pin_tab': {
       throwIfAborted()
       const tabId = typeof args.tabId === 'number' ? args.tabId : undefined
-      const tab = await pinActiveTab(tabId)
+      const tab = await pinActiveTab(tabId, ctx.scope)
       return JSON.stringify({
         ok: true,
         pinnedTabId: tab.id,
@@ -1770,6 +1796,8 @@ export async function executeTool(
           value: field.value,
         },
         signal,
+        undefined,
+        ctx.scope,
       )
       void recordPasswordUse(secret.id).catch(() => {})
       return afterAction(result, ctx, { filled: true, using: `${secret.label}:${field.key}` })
@@ -1919,12 +1947,16 @@ function summarizeProfile(profile: UserProfile): unknown {
  * and mislead the model. Budget-capped: continuously animating pages settle
  * at the timeout instead of looping forever.
  */
-async function waitForPageStable(signal?: AbortSignal, timeout = 1500): Promise<void> {
+async function waitForPageStable(
+  signal?: AbortSignal,
+  timeout = 1500,
+  scope?: ScopeWindow,
+): Promise<void> {
   // Preferred verdict: the CDP monitor reports network idle (no in-flight
   // request for a while) — that sees "the fetch is still running" which a DOM
   // probe structurally cannot. Falls back to DOM-signature polling when the
   // monitor is not attached (no debugger access).
-  const tab = await resolveAutomationTab().catch(() => undefined)
+  const tab = await resolveAutomationTab(undefined, scope).catch(() => undefined)
   if (tab && typeof tab.id === 'number') {
     const idle = await waitForNetworkIdle(tab.id, 400, timeout).catch(() => undefined)
     if (idle === true) return
@@ -1933,7 +1965,7 @@ async function waitForPageStable(signal?: AbortSignal, timeout = 1500): Promise<
   let prev: string | null = null
   while (Date.now() < deadline) {
     if (signal?.aborted) return
-    const result = await execOnActiveTab({ action: 'page_signature' }, signal).catch(
+    const result = await execOnActiveTab({ action: 'page_signature' }, signal, undefined, scope).catch(
       () => undefined,
     )
     const sig = result && typeof result.data === 'string' ? result.data : null
@@ -1965,8 +1997,8 @@ async function captureObservation(
   try {
     // Let the action's async page updates (fetch → render) land first, or the
     // observation shows the pre-action page.
-    await waitForPageStable(signal)
-    const snapshot = await snapshotActiveTab(1500, 40)
+    await waitForPageStable(signal, undefined, ctx.scope)
+    const snapshot = await snapshotActiveTab(1500, 40, ctx.scope)
     // The observation's refs become the model's next action handles.
     rememberSnapshotTargets(ctx, snapshot)
     const observed: { snapshot: unknown; screenshot?: string; consoleErrors?: string[] } = {
@@ -1974,7 +2006,7 @@ async function captureObservation(
     }
     // Fresh console errors since the previous observation — the single most
     // useful signal when the model is debugging a page after an action.
-    const tab = await resolveAutomationTab().catch(() => undefined)
+    const tab = await resolveAutomationTab(undefined, ctx.scope).catch(() => undefined)
     const tabId = typeof tab?.id === 'number' ? tab.id : undefined
     if (tabId !== undefined) {
       const errors = drainConsoleEntries(tabId)
@@ -1984,7 +2016,7 @@ async function captureObservation(
     }
     if (withScreenshot) {
       if (signal?.aborted) return observed
-      const shot = await resolveToolImage('', '', signal, { format: 'jpeg' }).catch(() => null)
+      const shot = await resolveToolImage('', '', signal, { format: 'jpeg' }, ctx.scope).catch(() => null)
       if (shot) observed.screenshot = shot
     }
     return observed
@@ -2003,7 +2035,7 @@ async function afterAction(
 ): Promise<string> {
   if (result.mayNavigate) {
     ctx.navigated = true
-    await settleAfterNavigation()
+    await settleAfterNavigation(undefined, undefined, ctx.scope)
   }
   if (result.ok) {
     const payload: Record<string, unknown> = {
@@ -2139,6 +2171,12 @@ export async function runAgentTurn(
     conversationId: deps.conversationId,
     navigated: false,
     disabled,
+    // Panel-scoped turns validate their window once here; a window that died
+    // between the message and this point (or an editor-popup sender) degrades
+    // to undefined = legacy global behaviour.
+    ...(deps.scopeWindowId !== undefined
+      ? { scope: await normalScopeFromWindowId(deps.scopeWindowId) }
+      : {}),
   }
 
   // Sum usage across every LLM round in this turn (a turn may make several
