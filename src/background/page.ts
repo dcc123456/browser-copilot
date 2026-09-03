@@ -10,6 +10,7 @@
 
 import { DEFAULT_MAX_CHARS, collapseWhitespace, truncate } from '../lib/extract'
 import { isInjectablePage } from '../lib/pages'
+import type { ScopeWindow } from './automation-scope'
 import type { PageContext } from '../lib/types'
 
 /** Elements whose text is never useful as reading context. */
@@ -39,8 +40,20 @@ function scrapeInPage(stripSelector: string): {
   return { url: location.href, title: document.title, selection, raw }
 }
 
-/** Resolves the tab to read: the active tab of the focused window. */
-export async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
+/**
+ * Resolves the tab to read: with a panel-window scope, the active tab of THAT
+ * window (never another window's); without one, the active tab of the focused
+ * window (legacy global behaviour). A scoped lookup that comes back empty means
+ * the scope window no longer exists (the panel died with it) — only then does
+ * resolution degrade to the global chain.
+ */
+export async function activeTab(scope?: ScopeWindow): Promise<chrome.tabs.Tab | undefined> {
+  if (scope) {
+    const [scoped] = await chrome.tabs
+      .query({ active: true, windowId: scope.windowId })
+      .catch(() => [])
+    if (scoped) return scoped
+  }
   const [focused] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
   if (focused) return focused
   const [anyActive] = await chrome.tabs.query({ active: true })
@@ -53,8 +66,11 @@ export async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
  * @throws {Error} when no tab is available or the page forbids injection —
  *   surfaced to the model so it can tell the user instead of inventing content.
  */
-export async function readActivePage(maxChars = DEFAULT_MAX_CHARS): Promise<PageContext> {
-  const tab = await activeTab()
+export async function readActivePage(
+  maxChars = DEFAULT_MAX_CHARS,
+  scope?: ScopeWindow,
+): Promise<PageContext> {
+  const tab = await activeTab(scope)
   if (!tab || typeof tab.id !== 'number') {
     throw new Error('No active tab to read.')
   }
@@ -96,8 +112,8 @@ export async function readActivePage(maxChars = DEFAULT_MAX_CHARS): Promise<Page
  *   because selections are not capped here.
  * @throws {Error} when no tab is available or the page forbids injection.
  */
-export async function readActiveSelection(): Promise<PageContext> {
-  const tab = await activeTab()
+export async function readActiveSelection(scope?: ScopeWindow): Promise<PageContext> {
+  const tab = await activeTab(scope)
   if (!tab || typeof tab.id !== 'number') {
     throw new Error('No active tab to read.')
   }
