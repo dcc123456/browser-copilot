@@ -53,10 +53,28 @@ const windowByPort = new Map<chrome.runtime.Port, number>()
 /** Register a panel port as living in `windowId`. Ignored for bad ids. */
 export function registerPanelWindow(windowId: number, port: chrome.runtime.Port): void {
   if (typeof windowId !== 'number') return
+  // Re-homing (a port re-registering to another window) must retire the old
+  // window's entry when it becomes empty, or stale keys would linger here and
+  // in latestPanelWindowId.
+  const previous = windowByPort.get(port)
+  if (typeof previous === 'number' && previous !== windowId) {
+    const old = portsByWindow.get(previous)
+    if (old) {
+      old.delete(port)
+      if (old.size === 0) portsByWindow.delete(previous)
+    }
+  }
   windowByPort.set(port, windowId)
-  const set = portsByWindow.get(windowId)
-  if (set) set.add(port)
-  else portsByWindow.set(windowId, new Set([port]))
+  const existing = portsByWindow.get(windowId)
+  if (existing) {
+    existing.add(port)
+    // Re-insert so Map iteration order (insertion order) keeps the most
+    // recently connected panel window last — what latestPanelWindowId returns.
+    portsByWindow.delete(windowId)
+    portsByWindow.set(windowId, existing)
+  } else {
+    portsByWindow.set(windowId, new Set([port]))
+  }
 }
 
 /** Drop one port; the window stays registered while other ports remain. */
@@ -78,6 +96,26 @@ export function hasPanelWindows(): boolean {
 /** Whether `windowId` hosts a connected side panel. */
 export function isPanelWindow(windowId: number | undefined): boolean {
   return typeof windowId === 'number' && portsByWindow.has(windowId)
+}
+
+/**
+ * The most recently connected panel window, when any exists. Used by runs
+ * that have no natural sender (scheduled tasks, Feishu commands, the
+ * local-agent bridge): they must stay inside the plugin window while one is
+ * open. With several panels open, the most recently connected one wins.
+ */
+export function latestPanelWindowId(): number | undefined {
+  if (portsByWindow.size === 0) return undefined
+  const ids = [...portsByWindow.keys()]
+  return ids[ids.length - 1]
+}
+
+/**
+ * Automation scope for sender-less runs: the panel window while one exists
+ * (validated), undefined — legacy global resolution — when none does.
+ */
+export async function currentPanelScope(): Promise<ScopeWindow | undefined> {
+  return normalScopeFromWindowId(latestPanelWindowId())
 }
 
 /** A closed window cannot host a panel. Safe to call multiple times (guarded). */

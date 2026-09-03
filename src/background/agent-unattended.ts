@@ -19,6 +19,7 @@
  */
 
 import { runAgentTurn } from './agent'
+import { currentPanelScope } from './automation-scope'
 import { getSettings } from '../lib/storage'
 import type { AgentMode } from '../lib/types'
 import { retain, release } from './keepalive'
@@ -65,6 +66,10 @@ export async function runUnattendedPrompt(
   retain()
   try {
     const settings = await getSettings()
+    // While ANY panel window is open, unattended runs stay inside it — the
+    // plugin window is the only monitored/controlled one. With no panel open
+    // (the common unattended case), the legacy global resolution applies.
+    const scope = await currentPanelScope()
     const collected: string[] = []
     const chunks: string[] = []
     const history: { role: string; content: string }[] = [
@@ -74,6 +79,7 @@ export async function runUnattendedPrompt(
     await runAgentTurn(history as never, {
       conversationId,
       signal: options.signal,
+      ...(scope ? { scopeWindowId: scope.windowId } : {}),
       send: (message) => {
         if (message.type === 'delta') chunks.push(message.text)
         if (message.type === 'tool.start') {

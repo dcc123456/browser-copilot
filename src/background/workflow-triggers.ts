@@ -20,6 +20,7 @@
 
 import { getWorkflow, listWorkflows } from '../lib/workflow/storage'
 import type { Workflow, WorkflowNode } from '../lib/workflow/types'
+import { latestPanelWindowId } from './automation-scope'
 import { coerceIntervalMinutes, nextRunAt } from '../lib/schedule'
 import type { Schedule } from '../lib/scheduler-types'
 
@@ -347,6 +348,9 @@ export async function rescheduleAllWorkflowTriggers(): Promise<void> {
  * Handles a workflow-trigger alarm firing: runs the workflow and re-arms if the
  * trigger recurs. A one-shot `date` trigger is cleared instead so it cannot
  * fire again.
+ *
+ * Scoped like every other automation path: while a panel window is open the
+ * run acts inside it; with no panel open the legacy global resolution applies.
  */
 export async function handleWorkflowTriggerAlarm(alarmName: string): Promise<void> {
   const workflowId = alarmName.slice(WORKFLOW_TRIGGER_ALARM_PREFIX.length)
@@ -363,5 +367,5 @@ export async function handleWorkflowTriggerAlarm(alarmName: string): Promise<voi
     // One-shot `date` trigger (or a now-invalid trigger): fire once, then stop.
     await chrome.alarms.clear(alarmName)
   }
-  runWorkflowRef?.(workflowId)
+  runWorkflowRef?.(workflowId, latestPanelWindowId())
 }

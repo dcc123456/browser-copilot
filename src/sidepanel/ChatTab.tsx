@@ -800,6 +800,19 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
 
       const port = chrome.runtime.connect({ name: AGENT_PORT })
       portRef.current = port
+      // The panel is a window-level UI, not a tab, so the worker cannot rely
+      // on port.sender.tab to know which window we belong to. State it
+      // explicitly right after connecting (re-sent on every reconnect, so a
+      // worker restart re-registers too).
+      void chrome.windows.getCurrent().then((win) => {
+        if (typeof win.id === 'number') {
+          try {
+            port.postMessage({ type: 'panel.hello', windowId: win.id } satisfies AgentClientMessage)
+          } catch {
+            /* port closed between connect and hello — the next reconnect resends */
+          }
+        }
+      })
       port.onMessage.addListener((raw) => {
         const message = raw as AgentServerMessage
         switch (message.type) {

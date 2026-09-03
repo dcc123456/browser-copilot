@@ -104,6 +104,31 @@ describe('automation scope', () => {
     })
   })
 
+  describe('latestPanelWindowId / currentPanelScope', () => {
+    it('is undefined with no connected panel', () => {
+      expect(mod.latestPanelWindowId()).toBeUndefined()
+    })
+
+    it('returns the most recently registered panel window', () => {
+      const portA = { name: 'x' } as unknown as chrome.runtime.Port
+      const portB = { name: 'x' } as unknown as chrome.runtime.Port
+      mod.registerPanelWindow(1, portA)
+      expect(mod.latestPanelWindowId()).toBe(1)
+      mod.registerPanelWindow(2, portB)
+      expect(mod.latestPanelWindowId()).toBe(2)
+      // Re-registering the same window keeps it the latest without losing ports.
+      mod.registerPanelWindow(2, portA)
+      expect(mod.latestPanelWindowId()).toBe(2)
+      // The re-homed port left window 1 empty — the entry must be retired.
+      expect(mod.isPanelWindow(1)).toBe(false)
+      // Dropping one port of window 2 keeps the window (portA is still there).
+      mod.unregisterPort(portB)
+      expect(mod.latestPanelWindowId()).toBe(2)
+      mod.unregisterPort(portA)
+      expect(mod.latestPanelWindowId()).toBeUndefined()
+    })
+  })
+
   describe('shouldTriggerVisitWeb', () => {
     it('is global when no panel window exists', () => {
       expect(mod.shouldTriggerVisitWeb(false, false)).toBe(true)

@@ -254,6 +254,15 @@ export type AgentClientMessage =
    */
   | { type: 'resume'; conversationId: string }
   /**
+   * Sent immediately after connecting: the window that hosts this panel. The
+   * side panel is a window-level UI, not a tab, so `port.sender.tab` is
+   * unreliable for it — the panel resolves its own window with
+   * `chrome.windows.getCurrent()` and states it explicitly. The worker uses
+   * this both for the automatic-trigger guard and to scope every chat turn of
+   * this panel to its window.
+   */
+  | { type: 'panel.hello'; windowId: number }
+  /**
    * Idle-timer heartbeat. An MV3 worker is evicted after ~30s without activity,
    * which would drop the port mid-turn; an inbound message resets that timer.
    */

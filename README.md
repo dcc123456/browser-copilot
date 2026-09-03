@@ -220,11 +220,13 @@ that's unacceptable.
 
 - **Window scope.** Everything the panel starts — reading and acting on pages,
   opening/switching/closing tabs, workflows run from the panel — happens in the
-  **browser window the panel is attached to**. Open another window without the
-  panel and use it freely: it is never read, never acted on, and never triggers
-  "run when a matching page opens" workflows. Unattended runs (scheduled tasks,
-  Feishu commands) keep the previous global behaviour while no panel is open;
-  keyboard shortcuts and context-menu runs act in the window where you used them.
+  **browser window the panel is attached to**; unattended runs (scheduled
+  tasks, Feishu commands) stay inside that window too while it is open. Open
+  another window without the panel and use it freely: it is never read, never
+  acted on, and never triggers "run when a matching page opens" workflows.
+  Only when NO panel is open anywhere do unattended runs fall back to the
+  previous global behaviour; keyboard shortcuts and context-menu runs act in
+  the window where you used them.
 - **Reading the page.** Either tick **Attach selection** to send highlighted
   text up front, or let the assistant read it itself (which asks for
   confirmation in semi-auto unless you attached). The grant is scoped to that

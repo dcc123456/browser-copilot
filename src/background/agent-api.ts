@@ -41,6 +41,7 @@ import { newId } from '../lib/storage'
 import type { Settings } from '../lib/types'
 import { TOOLS, runToolStandalone } from './agent'
 import { runUnattendedPrompt } from './agent-unattended'
+import { currentPanelScope } from './automation-scope'
 import { execOnActiveTab, resolveAutomationTab } from './driver'
 import { ensureTabMonitor } from './cdp-monitor'
 
@@ -49,14 +50,16 @@ import { ensureTabMonitor } from './cdp-monitor'
  * automation tab (fills the resolution cache), attach the CDP monitor and
  * prime the resident kernel in the tab, so the FIRST real tool call doesn't
  * pay cold-start costs (tab search chain + kernel injection). Best-effort —
- * any failure just means the first call warms up instead.
+ * any failure just means the first call warms up instead. Scoped to the panel
+ * window when one is open, matching {@link runToolStandalone}.
  */
 async function warmupAutomation(): Promise<void> {
   try {
-    const tab = await resolveAutomationTab()
+    const scope = await currentPanelScope()
+    const tab = await resolveAutomationTab(undefined, scope)
     if (!tab || typeof tab.id !== 'number') return
     await ensureTabMonitor(tab.id)
-    await execOnActiveTab({ action: 'page_signature' }).catch(() => {})
+    await execOnActiveTab({ action: 'page_signature' }, undefined, undefined, scope).catch(() => {})
   } catch {
     /* best-effort */
   }

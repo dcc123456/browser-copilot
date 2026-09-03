@@ -68,7 +68,7 @@ import {
   unpinTab,
   updateActiveTabUrl,
 } from './driver'
-import { normalScopeFromWindowId, type ScopeWindow } from './automation-scope'
+import { normalScopeFromWindowId, currentPanelScope, type ScopeWindow } from './automation-scope'
 import { drainConsoleEntries, ensureTabMonitor, getRecentRequests, waitForNetworkIdle } from './cdp-monitor'
 import { activeTab, readActivePage } from './page'
 import { listTasks } from '../lib/task-store'
@@ -2495,10 +2495,15 @@ export async function runToolStandalone(
   if (disabled.has(name)) {
     return { ok: false, error: `The "${name}" tool is disabled in settings.` }
   }
+  // The bridge has no sender window of its own: while a panel window exists it
+  // is the monitored/controlled one, so scope to it; with no panel open the
+  // legacy global resolution applies.
+  const scope = await currentPanelScope()
   const ctx: ToolContext = {
     conversationId: `external:${newId()}`,
     navigated: false,
     disabled,
+    ...(scope ? { scope } : {}),
   }
   const output = await executeTool(name, args, ctx)
   try {

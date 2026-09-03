@@ -31,11 +31,13 @@ import {
   hasPanelWindows,
   initScopeWindowCleanup,
   isPanelWindow,
+  latestPanelWindowId,
   normalScopeFromWindowId,
   registerPanelWindow,
   shouldTriggerVisitWeb,
   unregisterPort,
 } from './automation-scope'
+import { warmupOcr } from './driver'
 import { handlePickerMessage } from './picker-bridge'
 import {
   startRecording,
@@ -170,6 +172,11 @@ void listRuns()
 
 chrome.runtime.onInstalled.addListener(() => {
   void ensureSchema()
+  // Pre-compile the OCR WASM + language model in the offscreen document so the
+  // first captcha read doesn't pay a multi-second cold start. Best effort.
+  void getSettings()
+    .then((s) => warmupOcr(s.ocrLanguage))
+    .catch(() => {})
   void rescheduleAll().catch((error: unknown) =>
     console.error('[Browser Copilot] could not reschedule tasks', error),
   )
@@ -186,6 +193,9 @@ chrome.runtime.onInstalled.addListener(() => {
 // A worker update/startup must also reconcile alarms: chrome.alarms persist across
 // restarts, but code may have changed and a stale enabled flag needs correcting.
 chrome.runtime.onStartup.addListener(() => {
+  void getSettings()
+    .then((s) => warmupOcr(s.ocrLanguage))
+    .catch(() => {})
   void rescheduleAll().catch((error: unknown) =>
     console.error('[Browser Copilot] could not reschedule tasks', error),
   )
@@ -193,10 +203,11 @@ chrome.runtime.onStartup.addListener(() => {
     console.error('[Browser Copilot] could not reschedule workflow triggers', error),
   )
   void feishuBot.reconcile()
-  // Run workflows whose trigger block is "on-startup".
+  // Run workflows whose trigger block is "on-startup". Scoped to the panel
+  // window when one is already connected (usually none is at browser start).
   void startupWorkflows()
     .then((wfs) => {
-      for (const wf of wfs) void runWorkflowKeepalive(wf.id)
+      for (const wf of wfs) void runWorkflowKeepalive(wf.id, latestPanelWindowId())
     })
     .catch((error: unknown) =>
       console.error('[Browser Copilot] on-startup workflows failed', error),
@@ -208,7 +219,7 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.runtime.onInstalled.addListener(() => {
   void startupWorkflows()
     .then((wfs) => {
-      for (const wf of wfs) void runWorkflowKeepalive(wf.id)
+      for (const wf of wfs) void runWorkflowKeepalive(wf.id, latestPanelWindowId())
     })
     .catch(() => {})
 })
@@ -828,10 +839,12 @@ const activeTurns = new Set<string>()
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== AGENT_PORT) return
 
-  // The side panel lives in a normal browser window: register it so automatic
-  // visit-web triggers stay quiet in the user's other windows, and remember
-  // the id to scope this panel's chat turns.
-  const panelWindowId = port.sender?.tab?.windowId
+  // The side panel lives in a normal browser window: remember its window id so
+  // chat turns scope to it, and register it so automatic visit-web triggers
+  // stay quiet in the user's other windows. `port.sender.tab` is unreliable
+  // for a window-level panel, so this is only a seed — the panel asserts its
+  // real window right after connecting via `panel.hello`.
+  let panelWindowId: number | undefined = port.sender?.tab?.windowId
   if (typeof panelWindowId === 'number') registerPanelWindow(panelWindowId, port)
 
   /** Pending confirmation resolvers, keyed by request id. */
@@ -850,6 +863,16 @@ chrome.runtime.onConnect.addListener((port) => {
     const message = raw as AgentClientMessage
 
     // Heartbeat: receiving it is the point — it resets the worker idle timer.
+    if (message.type === 'panel.hello') {
+      // The panel stated its own window (a window-level UI has no reliable
+      // sender.tab). Register it for the trigger guard and scope this panel's
+      // turns; overrides any sender-derived guess.
+      panelWindowId = message.windowId
+      registerPanelWindow(message.windowId, port)
+      send({ type: 'pong' })
+      return
+    }
+
     if (message.type === 'ping') {
       send({ type: 'pong' })
       return
@@ -946,12 +969,20 @@ chrome.runtime.onConnect.addListener((port) => {
         sendWithTracking({ type: 'phase', phase: 'preparing' })
         history = await loadConversation(conversationId)
 
+        // Scope the whole turn to the panel's own window, resolved once up
+        // front: selection reading, /run workflows and every agent tool call
+        // share it. A window that died before the turn started (or an unknown
+        // one) degrades to undefined = legacy global resolution.
+        const scope = await normalScopeFromWindowId(panelWindowId)
+
         let text = message.text
         let grantedPageUrl: string | undefined
         if (message.includeSelection) {
           sendWithTracking({ type: 'phase', phase: 'reading-page' })
           try {
-            const page = await readActiveSelection()
+            // Scoped: read the selection in the PANEL's window — the focused
+            // window may be another one the user is browsing by hand.
+            const page = await readActiveSelection(scope)
             if (page.selection.trim().length > 0) {
               grantedPageUrl = page.url
               text =
@@ -1017,7 +1048,11 @@ chrome.runtime.onConnect.addListener((port) => {
             throw new Error(`工作流不存在：${nameOrId}`)
           }
           sendWithTracking({ type: 'phase', phase: 'sending' })
-          const result = await executeWorkflow(wf, { source: 'chat' })
+          // /run from the panel acts inside the panel's window too.
+          const result = await executeWorkflow(wf, {
+            source: 'chat',
+            ...(scope ? { scopeWindowId: scope.windowId } : {}),
+          })
           if (result.outcome === 'ok') {
             sendWithTracking({ type: 'status', text: result.summary || `工作流「${wf.name}」执行完成。` })
           } else if (result.outcome === 'cancelled') {
@@ -1043,16 +1078,12 @@ chrome.runtime.onConnect.addListener((port) => {
           }
         }
         sendWithTracking({ type: 'phase', phase: 'sending' })
-        // Scope this turn to the panel's own window (validated; a window that
-        // died before the turn started degrades to the global chain).
-        const scopeWindowId =
-          typeof panelWindowId === 'number' ? (await normalScopeFromWindowId(panelWindowId))?.windowId : undefined
         const turnUsage = await runAgentTurn(history, {
           send: sendWithTracking,
           signal: turnController.signal,
           ...(message.skillId ? { skillId: message.skillId } : {}),
           ...(grantedPageUrl ? { grantedPageUrl } : {}),
-          ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
+          ...(scope ? { scopeWindowId: scope.windowId } : {}),
           conversationId,
           getMode,
           getMaxToolRounds,
