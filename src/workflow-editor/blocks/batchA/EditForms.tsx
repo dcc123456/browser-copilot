@@ -18,6 +18,7 @@
 import { Checkbox, Field, Select, TextArea, TextInput } from '../shared/Field'
 import type { EditFormProps } from '../EditForms'
 import InteractionBase, { bool, str, num } from '../shared/InteractionBase'
+import { useEditorLocale } from '../../locale-context'
 import { AssignVariableFields } from './_shared'
 
 const FORM_TYPES = [
@@ -27,7 +28,13 @@ const FORM_TYPES = [
   { value: 'radio', label: 'Radio' },
 ]
 
+/** What the "Value" box holds, per form type — multilingual via the block dictionary. */
+const VALUE_HINT_TEXT_FIELD =
+  'Content to fill into the field. Supports variable references such as {{lastOcrText}} (the latest OCR result) or {{aiFill1}} (AI-generated content).'
+const VALUE_HINT_SELECT = 'Option value to select. Supports variable references such as {{lastOcrText}}.'
+
 export default function EditForms({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
   const getValue = bool(data, 'getValue')
   const type = str(data, 'type') || 'text-field'
   const selectOptionBy = str(data, 'selectOptionBy') || 'value'
@@ -65,6 +72,7 @@ export default function EditForms({ data, onChange }: EditFormProps) {
                   onChange={(v) => onChange({ value: v })}
                 />
               </Field>
+              <p className="wf-hint">{bt(VALUE_HINT_TEXT_FIELD)}</p>
               <Checkbox
                 checked={bool(data, 'clearValue')}
                 onChange={(v) => onChange({ clearValue: v })}
@@ -96,6 +104,7 @@ export default function EditForms({ data, onChange }: EditFormProps) {
                       onChange={(v) => onChange({ value: v })}
                     />
                   </Field>
+                  <p className="wf-hint">{bt(VALUE_HINT_SELECT)}</p>
                   <Checkbox
                     checked={bool(data, 'clearValue')}
                     onChange={(v) => onChange({ clearValue: v })}

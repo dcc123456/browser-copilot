@@ -17,6 +17,7 @@
  * @module lib/vision
  */
 
+import { computeUpscaleFactor, enhancePixels } from './image-preprocess'
 import { normalizeBaseUrl, type ProviderProfile } from './providers'
 
 export interface VisionConfig {
@@ -126,6 +127,9 @@ function describeFailure(body: string, status: number): string {
  * Soft-fails into `{ ok: false, error }` instead of throwing so the tool can hand
  * a stable message back to the model.
  */
+/** Hard ceiling for a vision-model HTTP call; a hung endpoint must not stall the tool for minutes. */
+const VISION_TIMEOUT_MS = 45_000
+
 /** Shared request/response plumbing for a single vision-model call. */
 async function callVisionModel(
   target: ResolvedVisionTarget,
@@ -135,6 +139,19 @@ async function callVisionModel(
 ): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const url = `${target.baseUrl}/chat/completions`
   const body = buildVisionRequestBody(target, dataUrl, prompt)
+  // Combine the agent's abort signal with a fixed timeout: either one aborts
+  // the in-flight fetch. The timeout rejects with a TimeoutError reason so a
+  // hung endpoint reports as a soft, explanatory failure instead of blocking.
+  const controller = new AbortController()
+  const onOuterAbort = () => controller.abort(signal?.reason)
+  if (signal) {
+    if (signal.aborted) controller.abort(signal.reason)
+    else signal.addEventListener('abort', onOuterAbort, { once: true })
+  }
+  const timer = setTimeout(
+    () => controller.abort(new DOMException(`Vision request timed out after ${VISION_TIMEOUT_MS / 1000}s`, 'TimeoutError')),
+    VISION_TIMEOUT_MS,
+  )
   let response: Response
   try {
     response = await fetch(url, {
@@ -144,11 +161,22 @@ async function callVisionModel(
         Authorization: `Bearer ${target.apiKey}`,
       },
       body: JSON.stringify(body),
-      signal,
+      signal: controller.signal,
     })
   } catch (error) {
     if ((error as Error)?.name === 'AbortError') throw error
+    if ((error as Error)?.name === 'TimeoutError') {
+      return {
+        ok: false,
+        error:
+          `The image model did not respond within ${VISION_TIMEOUT_MS / 1000}s. ` +
+          'Check the model endpoint/base URL, or switch to a faster provider in Settings → 图片识别模型.',
+      }
+    }
     return { ok: false, error: `Cannot reach ${url}: ${(error as Error)?.message ?? String(error)}` }
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener('abort', onOuterAbort)
   }
   if (!response.ok) {
     const text = await response.text().catch(() => '')
@@ -198,11 +226,18 @@ export async function inspectImage(
 }
 
 /**
- * Lightweight captcha preprocessing: grayscale + basic contrast boost to make
- * faint/coloured noise easier for a vision model to read. Uses OffscreenCanvas
- * (service-worker safe). Returns the original data URL unchanged when the
- * runtime has no OffscreenCanvas or decoding fails — recognition should never
- * be blocked by a convenience step.
+ * Captcha preprocessing for better recognition accuracy:
+ *
+ * 1. Upscale — small captures (captchas) are enlarged 3x (capped) because
+ *    Tesseract.js needs ~30-50px glyphs and vision models read short text
+ *    better when it is not minuscule. Large screenshots are kept 1:1.
+ * 2. Grayscale + contrast enhancement — a percentile-based contrast stretch
+ *    plus a final contrast boost, which separates faint/coloured ink from the
+ *    background far more aggressively than a plain gamma tweak.
+ *
+ * Uses OffscreenCanvas (service-worker safe). Returns the original data URL
+ * unchanged when the runtime has no OffscreenCanvas or decoding fails —
+ * recognition should never be blocked by a convenience step.
  */
 export async function preprocessImage(dataUrl: string): Promise<string> {
   if (typeof OffscreenCanvas === 'undefined') return dataUrl
@@ -214,21 +249,17 @@ export async function preprocessImage(dataUrl: string): Promise<string> {
     return dataUrl
   }
   try {
-    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height)
+    const scale = computeUpscaleFactor(bitmap.width, bitmap.height)
+    const width = Math.max(1, Math.round(bitmap.width * scale))
+    const height = Math.max(1, Math.round(bitmap.height * scale))
+    const canvas = new OffscreenCanvas(width, height)
     const ctx = canvas.getContext('2d', { willReadFrequently: true })
     if (!ctx) return dataUrl
-    ctx.drawImage(bitmap, 0, 0)
-    const imageData = ctx.getImageData(0, 0, bitmap.width, bitmap.height)
-    const px = imageData.data
-    for (let i = 0; i < px.length; i += 4) {
-      // Relative luminance → grayscale, then stretch contrast around the mean.
-      const l = 0.299 * px[i]! + 0.587 * px[i + 1]! + 0.114 * px[i + 2]!
-      const boosted = 128 + (l - 128) * 1.5
-      const v = Math.max(0, Math.min(255, boosted))
-      px[i] = v
-      px[i + 1] = v
-      px[i + 2] = v
-    }
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(bitmap, 0, 0, width, height)
+    const imageData = ctx.getImageData(0, 0, width, height)
+    enhancePixels(imageData.data, width, height)
     ctx.putImageData(imageData, 0, 0)
     const blob = await canvas.convertToBlob({ type: 'image/png' })
     return await blobToDataUrl(blob)

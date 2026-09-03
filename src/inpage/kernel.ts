@@ -217,6 +217,41 @@ export function runOp(op: Op): OpResult {
     'data-automation-id',
   ]
 
+  /**
+   * ARIA role names the `role` locator can match. In kernel-built specs the
+   * role lives in `role` and the accessible name in `value`; but targets
+   * authored by a model (or a workflow saved from a conversation) sometimes
+   * carry ONLY the role name in `value` ("role|textbox") — for those, value
+   * is honored as the role. `generic`/`none` are excluded: they match almost
+   * every element and would turn a name-based spec into noise.
+   */
+  const ROLE_NAME_TOKENS = new Set([
+    'textbox',
+    'searchbox',
+    'spinbutton',
+    'slider',
+    'checkbox',
+    'radio',
+    'switch',
+    'button',
+    'combobox',
+    'listbox',
+    'option',
+    'link',
+    'menuitem',
+    'tab',
+    'img',
+    'heading',
+    'list',
+    'listitem',
+    'table',
+    'form',
+    'navigation',
+    'main',
+    'article',
+    'dialog',
+  ])
+
   function looksUnstable(value: string): boolean {
     const trimmed = value.trim()
     if (!trimmed || trimmed.length > 64) return true
@@ -418,10 +453,20 @@ export function runOp(op: Op): OpResult {
         return querySelectorIn(roots, spec.value)
       case 'role': {
         const wanted = (spec.role ?? '').toLowerCase()
+        // A spec with the role name in `value` but no `role` field ("role|
+        // textbox") means "any element of this role": honor that reading so
+        // model-authored targets resolve. Without this, an empty `role` made
+        // the role check skip EVERY element (nothing has an empty role).
+        if (!wanted && ROLE_NAME_TOKENS.has(spec.value.trim().toLowerCase())) {
+          const roleWanted = spec.value.trim().toLowerCase()
+          return querySelectorIn(roots, '*').filter(
+            (candidate) => roleOf(candidate).toLowerCase() === roleWanted,
+          )
+        }
         const all = querySelectorIn(roots, '*')
         const found: Element[] = []
         for (const candidate of all) {
-          if (roleOf(candidate).toLowerCase() !== wanted) continue
+          if (wanted && roleOf(candidate).toLowerCase() !== wanted) continue
           if (spec.value && accessibleName(candidate) !== spec.value) continue
           found.push(candidate)
         }
@@ -1127,13 +1172,40 @@ export function runOp(op: Op): OpResult {
    * serializing it into an `<svg><foreignObject>`, drawing that into a canvas,
    * and reading `toDataURL`. Returns `null` when the target is missing or the
    * canvas is tainted (e.g. cross-origin images without CORS).
+   *
+   * Element lookup prefers `op.target` (the kernel resolver — pierces open
+   * shadow roots, honors fallback specs) and falls back to the raw
+   * `op.value` CSS selector. When the element is missing, `op.waitFor` polls
+   * up to that many milliseconds before failing — workflow ocr blocks run
+   * right after page load, where captcha images often render late.
    */
-  async function captureNode(selector: string): Promise<OpResult> {
-    const host = selector
-      ? (document.querySelector(selector) as HTMLElement | null)
-      : document.documentElement
+  async function captureNode(op: Op): Promise<OpResult> {
+    const selector = op.value ? String(op.value) : ''
+    const waitMs = typeof op.waitFor === 'number' && op.waitFor > 0 ? op.waitFor : 0
+    const findHost = (): HTMLElement | null => {
+      if (op.target) {
+        const resolution = resolve(op.target)
+        if (resolution) return resolution.element as HTMLElement
+      }
+      if (selector) return (document.querySelector(selector) as HTMLElement | null) ?? null
+      // No selector → the whole page, like before.
+      return document.documentElement
+    }
+    let host = findHost()
+    if (!host && waitMs > 0) {
+      const deadline = Date.now() + waitMs
+      while (!host && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 150))
+        host = findHost()
+      }
+    }
     if (!host) {
-      return { ...base(), ok: false, found: false, error: `capture: 未找到元素 "${selector}"` }
+      return {
+        ...base(),
+        ok: false,
+        found: false,
+        error: `capture: 未找到元素 "${selector || (op.target?.primary?.value ?? '')}"`,
+      }
     }
     try {
       const width = host.scrollWidth || host.offsetWidth || 1280
@@ -1143,14 +1215,16 @@ export function runOp(op: Op): OpResult {
       const image = new Image()
       const decoded = await new Promise<HTMLImageElement>((resolve, reject) => {
         image.onload = (): void => resolve(image)
-        image.onerror = (): void => reject(new Error('capture: SVG 加载失败'))
+        // No "capture:" prefix here — the catch below adds it; nesting the
+        // prefix produced "capture: capture: SVG 加载失败".
+        image.onerror = (): void => reject(new Error('SVG 加载失败'))
         image.src = data
       })
       const canvas = document.createElement('canvas')
       canvas.width = width
       canvas.height = height
       const context = canvas.getContext('2d')
-      if (!context) throw new Error('capture: 无法创建画布')
+      if (!context) throw new Error('无法创建画布')
       context.fillStyle = '#ffffff'
       context.fillRect(0, 0, width, height)
       context.drawImage(decoded, 0, 0, width, height)
@@ -1205,7 +1279,7 @@ export function runOp(op: Op): OpResult {
     if (op.action === 'capture') {
       // Returns a Promise; chrome.scripting.executeScript awaits it. The driver
       // reads `injection.result` after resolution, which is an OpResult.
-      return captureNode(op.value ? String(op.value) : '') as unknown as OpResult
+      return captureNode(op) as unknown as OpResult
     }
 
     if (op.action === 'scroll' && !op.target) {

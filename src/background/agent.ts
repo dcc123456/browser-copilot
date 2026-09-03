@@ -47,11 +47,24 @@ import {
   getSettings,
   getSkill,
 } from '../lib/storage'
-import { askSaveViaSidePanel, getDownloadDir, resolveTransferMode, writeFileToDownloadDir } from '../lib/download-dir'
+import {
+  askSaveViaSidePanel,
+  getDownloadDir,
+  resolveTransferMode,
+  writeFileToDownloadDir,
+} from '../lib/download-dir'
 import { inspectImage, preprocessImage, recognizeImage, resolveVisionTarget } from '../lib/vision'
+import { evaluateArithmetic } from '../lib/ocr-candidates'
 import { isSamePage } from '../lib/pages'
 import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
-import { entryFields, findField, type AgentMode, type PasswordEntry, type Skill, type UserProfile } from '../lib/types'
+import {
+  entryFields,
+  findField,
+  type AgentMode,
+  type PasswordEntry,
+  type Skill,
+  type UserProfile,
+} from '../lib/types'
 import type { Op, OpResult, Target } from '../lib/ops'
 import {
   DriverError,
@@ -69,8 +82,15 @@ import {
   updateActiveTabUrl,
 } from './driver'
 import { normalScopeFromWindowId, currentPanelScope, type ScopeWindow } from './automation-scope'
-import { drainConsoleEntries, ensureTabMonitor, getRecentRequests, waitForNetworkIdle } from './cdp-monitor'
+import {
+  drainConsoleEntries,
+  ensureTabMonitor,
+  getRecentRequests,
+  waitForNetworkIdle,
+} from './cdp-monitor'
 import { activeTab, readActivePage } from './page'
+import { captureVisiblePage } from './capture'
+import { captureElementRobust } from './element-capture'
 import { listTasks } from '../lib/task-store'
 import { describeSchedule } from '../lib/schedule'
 
@@ -97,7 +117,12 @@ const ACTION_TOOLS = new Set([
   'run_plan',
 ])
 
-const READ_TOOLS = new Set(['read_current_page', 'snapshot_page', 'list_tabs', 'list_network_requests'])
+const READ_TOOLS = new Set([
+  'read_current_page',
+  'snapshot_page',
+  'list_tabs',
+  'list_network_requests',
+])
 
 /** Fallback cap used when settings cannot supply one. */
 const DEFAULT_MAX_TOOL_ROUNDS = 20
@@ -163,7 +188,7 @@ export function buildSystemPrompt(options: {
 const TARGET_SCHEMA = {
   type: 'object',
   description:
-    'A durable element locator taken verbatim from a snapshot element\'s "target" field.',
+    'A durable element locator. Prefer passing `ref` — only pass a full target copied VERBATIM from a snapshot element\'s "target" field; do not assemble one yourself.',
   properties: {
     primary: { $ref: '#/$defs/spec' },
     fallbacks: { type: 'array', items: { $ref: '#/$defs/spec' } },
@@ -182,7 +207,7 @@ const TARGET_SCHEMA = {
 const SCREENSHOT_ARG = {
   type: 'boolean',
   description:
-    'Also attach a base64 screenshot of the page to the result\'s observation, for multimodal remote clients. Ignored by the side-panel agent (its transcript is text-only).',
+    "Also attach a base64 screenshot of the page to the result's observation, for multimodal remote clients. Ignored by the side-panel agent (its transcript is text-only).",
 } as const
 
 /** Preferred element handle: a short ref from the latest snapshot/observation. */
@@ -194,15 +219,29 @@ const REF_ARG = {
 
 const SPEC_SCHEMA = {
   type: 'object',
+  description:
+    'One locator strategy, copied verbatim from a snapshot element — never invented. ' +
+    '`testid`/`id`/`name`: the attribute value goes in `value`. ' +
+    '`role`: the ARIA role goes in `role` (e.g. "textbox") and the accessible name in `value` — a spec with only the role name in `value` is a common mistake. ' +
+    '`text`: the element\'s visible text in `value`. ' +
+    '`css`: a CSS selector in `value`.',
   properties: {
     how: {
       type: 'string',
       enum: ['testid', 'id', 'name', 'role', 'text', 'css'],
+      description: 'Locator strategy.',
     },
-    value: { type: 'string' },
-    role: { type: 'string' },
-    tag: { type: 'string' },
-    nth: { type: 'number' },
+    value: {
+      type: 'string',
+      description:
+        'Attribute value / accessible name / visible text / CSS selector — see the strategy descriptions.',
+    },
+    role: {
+      type: 'string',
+      description: 'ARIA role for `role` specs (e.g. "textbox", "button"); omit otherwise.',
+    },
+    tag: { type: 'string', description: 'Optional tag-name narrowing.' },
+    nth: { type: 'number', description: 'Zero-based index among visible matches.' },
   },
   required: ['how', 'value'],
   additionalProperties: true,
@@ -258,7 +297,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'recognize_image',
       description:
-        'Recognize the text/content of an image using an image model. The image can be supplied in two ways: pass an `image` value (a data URL or absolute http(s) URL) that is already available, OR pass a CSS selector to capture that page element; pass nothing to screenshot the visible page. Use when you need to read characters or text that live inside an image, most commonly a CAPTCHA code that you will then type into a field with fill. Requires approval.',
+        'Recognize the text/content of an image using an image model. The image can be supplied in two ways: pass an `image` value (a data URL or absolute http(s) URL) that is already available, OR pass a CSS selector to capture that page element; pass nothing to screenshot the visible page. Use when you need to read characters or text that live inside an image, most commonly a CAPTCHA code that you will then type into a field with fill. Check this conversation first: if the same unchanged image was already recognized earlier (or the user attached it and you can see it), reuse that result instead of calling this tool again — re-recognize only when the image changed (e.g. a refreshed CAPTCHA), the earlier call failed, or you cannot tell it is the same image. Requires approval.',
       parameters: {
         type: 'object',
         properties: {
@@ -286,7 +325,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'screenshot',
       description:
-        'Take a screenshot of a page element (or the whole visible page) and send it to the image model so it can LOOK at it — read a CAPTCHA or text shown as an image, inspect an element\'s current state, layout, colors, or verify what is actually rendered. Unlike snapshot_page (which returns the DOM text) this shows the visual rendering. Optionally pass a `target` CSS selector to capture just that element; pass nothing to capture the whole page. Requires approval.',
+        "Take a screenshot of a page element (or the whole visible page) and send it to the image model so it can LOOK at it — inspect an element's current state, layout, colors, or verify what is actually rendered. Unlike snapshot_page (which returns the DOM text) this shows the visual rendering. To READ TEXT that lives inside an image (a CAPTCHA, a label, digits), call recognize_image instead — this tool is for visual inspection, not text extraction. Optionally pass a `target` CSS selector to capture just that element; pass nothing to capture the whole page. Requires approval.",
       parameters: {
         type: 'object',
         properties: {
@@ -427,7 +466,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'open_url',
       description:
-        'Navigate the active tab to a URL. The active tab is the one in the panel\'s window (side-panel runs never touch other browser windows).',
+        "Navigate the active tab to a URL. The active tab is the one in the panel's window (side-panel runs never touch other browser windows).",
       parameters: {
         type: 'object',
         properties: {
@@ -443,7 +482,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'tab_new',
       description:
-        'Open a new tab, optionally navigating to a URL, and switch to it. The tab is created in the panel\'s window; other browser windows are never touched.',
+        "Open a new tab, optionally navigating to a URL, and switch to it. The tab is created in the panel's window; other browser windows are never touched.",
       parameters: {
         type: 'object',
         properties: { url: { type: 'string' } },
@@ -507,7 +546,8 @@ export const TOOLS: WireTool[] = [
         properties: {
           code: {
             type: 'string',
-            description: 'JavaScript statements to execute in the page. Use `return` to send a value back.',
+            description:
+              'JavaScript statements to execute in the page. Use `return` to send a value back. Do NOT use this to fill form fields — use fill/select_option/set_checkbox; JS-assigned values are silently discarded by React/Vue controlled inputs.',
           },
         },
         required: ['code'],
@@ -519,7 +559,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'list_tabs',
       description:
-        'List the tabs open in the panel\'s window (not other windows) with their index, title, and URL. Indices are that window\'s.',
+        "List the tabs open in the panel's window (not other windows) with their index, title, and URL. Indices are that window's.",
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -537,7 +577,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'get_my_profile',
       description:
-        'Get the user\'s saved personal profile(s) (name, email, phone, address, company, etc.) for filling forms. Read-only and local; does not need approval. Returns labels and fields, not passwords.',
+        "Get the user's saved personal profile(s) (name, email, phone, address, company, etc.) for filling forms. Read-only and local; does not need approval. Returns labels and fields, not passwords.",
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -573,8 +613,7 @@ export const TOOLS: WireTool[] = [
     type: 'function',
     function: {
       name: 'use_skill',
-      description:
-        'Load a saved skill\'s full instructions by name and follow them. Read-only.',
+      description: "Load a saved skill's full instructions by name and follow them. Read-only.",
       parameters: {
         type: 'object',
         properties: { name: { type: 'string' } },
@@ -593,7 +632,8 @@ export const TOOLS: WireTool[] = [
         properties: {
           name: {
             type: 'string',
-            description: 'Unique skill name (used to trigger it later). Keep it short, e.g. "captcha-helper".',
+            description:
+              'Unique skill name (used to trigger it later). Keep it short, e.g. "captcha-helper".',
           },
           description: {
             type: 'string',
@@ -603,11 +643,12 @@ export const TOOLS: WireTool[] = [
           instructions: {
             type: 'string',
             description:
-              'The skill body as Markdown: imperative steps in the user\'s language. This is the full instruction set applied when the skill runs.',
+              "The skill body as Markdown: imperative steps in the user's language. This is the full instruction set applied when the skill runs.",
           },
           autoMatch: {
             type: 'boolean',
-            description: 'Allow the agent to auto-select this skill when it matches, without the user pinning it. Defaults to true.',
+            description:
+              'Allow the agent to auto-select this skill when it matches, without the user pinning it. Defaults to true.',
           },
           id: {
             type: 'string',
@@ -633,12 +674,16 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'save_local',
       description:
-        'Save a piece of text/content as a local file on the user\'s computer. Use this whenever the user asks to download, export, or save some content (a report, summary, transcript, table, or code) to a file. Do NOT build a Blob or <a download> script with run_javascript to download files — save_local uses the configured download folder or asks where to save. Requires approval.',
+        "Save a piece of text/content as a local file on the user's computer. Use this whenever the user asks to download, export, or save some content (a report, summary, transcript, table, or code) to a file. Do NOT build a Blob or <a download> script with run_javascript to download files — save_local uses the configured download folder or asks where to save. Requires approval.",
       parameters: {
         type: 'object',
         properties: {
           content: { type: 'string', description: 'The full text to save into the file.' },
-          filename: { type: 'string', description: 'Filename with extension, e.g. report.md. Optional; defaults to download.txt.' },
+          filename: {
+            type: 'string',
+            description:
+              'Filename with extension, e.g. report.md. Optional; defaults to download.txt.',
+          },
         },
         required: ['content'],
       },
@@ -660,7 +705,7 @@ export const TOOLS: WireTool[] = [
               type: 'object',
               properties: {
                 tool: { type: 'string', description: 'A tool name other than run_plan.' },
-                args: { type: 'object', description: 'That tool\'s arguments, same schema.' },
+                args: { type: 'object', description: "That tool's arguments, same schema." },
                 optional: {
                   type: 'boolean',
                   description: 'Skip this step (continue the plan) if it fails. Default false.',
@@ -720,9 +765,7 @@ function parseArgs(raw: string): Record<string, unknown> {
   if (trimmed.length === 0) return {}
   try {
     const parsed = JSON.parse(trimmed)
-    return typeof parsed === 'object' && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : {}
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {}
   } catch {
     throw new Error(`Tool arguments were not valid JSON: ${trimmed.slice(0, 200)}`)
   }
@@ -799,8 +842,7 @@ function summarizeSnapshot(snapshot: {
     title: snapshot.title,
     text,
     truncated: snapshot.truncated,
-    elementsTruncated:
-      snapshot.elementsTruncated || snapshot.elements.length > ELEMENT_LIMIT,
+    elementsTruncated: snapshot.elementsTruncated || snapshot.elements.length > ELEMENT_LIMIT,
     elements,
     forms: snapshot.forms,
     scroll: {
@@ -856,7 +898,11 @@ function compactSnapshot(snapshot: Parameters<typeof summarizeSnapshot>[0]): unk
     summarized.text.length > TRANSCRIPT_TEXT_CAP
       ? `${summarized.text.slice(0, TRANSCRIPT_TEXT_CAP)}…[truncated]`
       : summarized.text
-  return { ...summarized, text, truncated: summarized.truncated || text.length < summarized.text.length }
+  return {
+    ...summarized,
+    text,
+    truncated: summarized.truncated || text.length < summarized.text.length,
+  }
 }
 
 async function recordAction(
@@ -958,17 +1004,23 @@ function rememberSnapshotTargets(
  * DOWNSTREAM consumers of the recorded args (workflowFromHistory's
  * selectorFromArgs reads `args.target`). Model-facing transcripts stay lean —
  * this only shapes what lands in the action history.
+ *
+ * When the model passed BOTH a ref and its own inline `target`, the snapshot
+ * target still wins — it is what {@link resolveTargetFrom} executed. Recording
+ * the inlined guess instead persisted unvalidated locators ("role|textbox")
+ * that later broke workflows built from the conversation's history.
  */
 function hydrateRecordArgs(
   ctx: ToolContext,
   args: Record<string, unknown>,
 ): Record<string, unknown> {
-  if (typeof args.ref === 'string' && !args.target) {
+  if (typeof args.ref === 'string') {
     const hit = ctx.snapshotTargets?.get(args.ref)
     if (hit) return { ...args, target: hit.target }
   }
   return args
 }
+export { hydrateRecordArgs }
 
 /**
  * Tools whose large result is a full page/snapshot and is safe to retire once
@@ -1021,8 +1073,7 @@ export function retireOldPageReads(history: WireMessage[], retireAll = false): v
     msg.content = JSON.stringify({
       ok: true,
       retired: true,
-      note:
-        '[Page context retired] This older page read was dropped to save context. Call read_current_page or snapshot_page again if you need the current page.',
+      note: '[Page context retired] This older page read was dropped to save context. Call read_current_page or snapshot_page again if you need the current page.',
       ...(url ? { url } : {}),
     })
   }
@@ -1034,7 +1085,11 @@ export function retireOldPageReads(history: WireMessage[], retireAll = false): v
   let lastObservationIndex = -1
   for (let i = history.length - 1; i >= 0; i -= 1) {
     const msg = history[i]
-    if (msg?.role === 'tool' && typeof msg.content === 'string' && msg.content.includes('"observation"')) {
+    if (
+      msg?.role === 'tool' &&
+      typeof msg.content === 'string' &&
+      msg.content.includes('"observation"')
+    ) {
       lastObservationIndex = i
       break
     }
@@ -1077,9 +1132,9 @@ function describeDetail(
   const element =
     typeof args.label === 'string'
       ? args.label
-      : (typeof args.ref === 'string' ? snapshotTargets?.get(args.ref)?.name : undefined) ??
+      : ((typeof args.ref === 'string' ? snapshotTargets?.get(args.ref)?.name : undefined) ??
         target?.label ??
-        describeTarget(target)
+        describeTarget(target))
   if (element && element !== 'element') lines.push(`Element: ${element}`)
 
   switch (name) {
@@ -1119,11 +1174,16 @@ function describeDetail(
       lines.push('Value: •••••••• (hidden)')
       break
     case 'save_local': {
-      const name = typeof args.filename === 'string' && args.filename.trim() ? args.filename.trim() : 'download.txt'
+      const name =
+        typeof args.filename === 'string' && args.filename.trim()
+          ? args.filename.trim()
+          : 'download.txt'
       lines.push(`File: ${name}`)
       const body = typeof args.content === 'string' ? args.content : ''
       if (body) {
-        lines.push(`Content (${body.length} chars): ${body.length > 80 ? `${body.slice(0, 80)}…` : body}`)
+        lines.push(
+          `Content (${body.length} chars): ${body.length > 80 ? `${body.slice(0, 80)}…` : body}`,
+        )
       }
       break
     }
@@ -1162,18 +1222,21 @@ function describeAction(
   snapshotTargets?: ToolContext['snapshotTargets'],
 ): string {
   const label = typeof args.label === 'string' ? args.label : undefined
-  const refTarget =
-    typeof args.ref === 'string' ? snapshotTargets?.get(args.ref) : undefined
+  const refTarget = typeof args.ref === 'string' ? snapshotTargets?.get(args.ref) : undefined
   const targetLabel =
     label ?? refTarget?.name ?? describeTarget(asTarget(args.target) ?? refTarget?.target)
   switch (name) {
     case 'run_plan': {
       // Approval card for a whole plan: name each step so the user can review
       // the sequence before it runs.
-      const steps = Array.isArray(args.steps) ? (args.steps as { tool?: unknown; args?: Record<string, unknown> }[]) : []
+      const steps = Array.isArray(args.steps)
+        ? (args.steps as { tool?: unknown; args?: Record<string, unknown> }[])
+        : []
       const listed = steps
         .slice(0, 6)
-        .map((step, i) => `${i + 1}. ${describeAction(String(step?.tool ?? '?'), step?.args ?? {})}`)
+        .map(
+          (step, i) => `${i + 1}. ${describeAction(String(step?.tool ?? '?'), step?.args ?? {})}`,
+        )
       const more = steps.length > 6 ? `… (+${steps.length - 6} more steps)` : ''
       return `Run a ${steps.length}-step plan:\n${listed.join('\n')}${more ? `\n${more}` : ''}`
     }
@@ -1268,12 +1331,50 @@ async function resolveImageRef(ref: string): Promise<string | null> {
 }
 
 /**
+ * Downloads an http(s) image and inlines it as a data URL, so both the local
+ * OCR worker and the vision model receive self-contained bytes instead of a
+ * URL they must each fetch themselves. The response must actually BE an image
+ * (many sites serve JSON/API payloads at their captcha URLs — a fast, explicit
+ * failure here beats slow cascading failures downstream). Cookies are sent:
+ * captchas are commonly session-bound.
+ */
+async function fetchImageAsDataUrl(
+  url: string,
+): Promise<{ ok: true; dataUrl: string } | { ok: false; error: string }> {
+  try {
+    const res = await fetch(url, { credentials: 'include' })
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status} while downloading ${url}` }
+    const type = (res.headers.get('content-type') ?? '').split(';')[0]!.trim()
+    if (!type.startsWith('image/')) {
+      return {
+        ok: false,
+        error:
+          `${url} did not return an image (Content-Type: ${type || 'unknown'}). ` +
+          'That URL likely serves an API/JSON response — capture the rendered element with a selector instead.',
+      }
+    }
+    const bytes = new Uint8Array(await res.arrayBuffer())
+    let binary = ''
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+    }
+    return { ok: true, dataUrl: `data:${type};base64,${btoa(binary)}` }
+  } catch (error) {
+    return {
+      ok: false,
+      error: `Could not download ${url}: ${(error as Error)?.message ?? String(error)}`,
+    }
+  }
+}
+
+/**
  * Resolves what a vision/screenshot tool should analyze into a data URL, in
  * priority order:
  * 1. an `image` value (data URL or absolute http(s) URL) — used as-is;
  * 2. a captured page element when `selector` is given;
  * 3. otherwise the whole visible page.
- * Returns null when nothing usable could be produced.
+ * Returns the reason when nothing usable could be produced, so the tool result
+ * says why instead of the opaque "Could not capture the page."
  */
 async function resolveToolImage(
   rawImage: string,
@@ -1281,29 +1382,33 @@ async function resolveToolImage(
   signal?: AbortSignal,
   opts?: { format?: 'png' | 'jpeg' },
   scope?: ScopeWindow,
-): Promise<string | null> {
-  if (rawImage) return resolveImageRef(rawImage)
-  if (selector) {
-    const captured = await execOnActiveTab({ action: 'capture', value: selector }, signal, undefined, scope)
-    if (captured.ok && typeof captured.data === 'string') return captured.data
-    return null
+): Promise<{ ok: true; dataUrl: string } | { ok: false; error: string }> {
+  if (rawImage) {
+    const ref = await resolveImageRef(rawImage)
+    return ref
+      ? { ok: true, dataUrl: ref }
+      : { ok: false, error: `The image value is not usable: "${rawImage.slice(0, 80)}".` }
   }
-  const tab = await activeTab(scope)
-  if (tab && typeof tab.windowId === 'number') {
-    try {
-      // Default PNG: lossless, for OCR/vision accuracy. The observation
-      // screenshot path passes jpeg — a PNG of a full page costs the remote
-      // client 5-10x the tokens for no benefit when just eyeballing state.
-      const format = opts?.format ?? 'png'
-      return await chrome.tabs.captureVisibleTab(tab.windowId, {
-        format,
-        ...(format === 'jpeg' ? { quality: 60 } : {}),
-      })
-    } catch {
-      return null
+  if (selector) {
+    // Robust shared capture: scroll into view → in-page SVG capture with
+    // waitFor polling → visible-page capture + crop fallback, retried. A
+    // plain single capture op fails on pages whose CSP blocks the SVG data
+    // URL ("SVG 加载失败") — the crop fallback cannot be blocked that way.
+    const captured = await captureElementRobust(selector, { signal, scope })
+    if (captured.ok) return { ok: true, dataUrl: captured.dataUrl }
+    return {
+      ok: false,
+      error: `Could not capture the element "${selector}". (${captured.error})`,
     }
   }
-  return null
+  // Default PNG: lossless, for OCR/vision accuracy. The observation
+  // screenshot path passes jpeg — a PNG of a full page costs the remote
+  // client 5-10x the tokens for no benefit when just eyeballing state.
+  const format = opts?.format ?? 'png'
+  return captureVisiblePage(scope, {
+    format,
+    ...(format === 'jpeg' ? { quality: 60 } : {}),
+  })
 }
 
 /**
@@ -1349,49 +1454,164 @@ export async function executeTool(
 
     case 'recognize_image': {
       throwIfAborted()
+      const totalStart = performance.now()
       const rawImage = typeof args.image === 'string' ? args.image.trim() : ''
       const selector = typeof args.selector === 'string' ? args.selector.trim() : ''
       const prompt = typeof args.prompt === 'string' ? args.prompt : undefined
 
-      const dataUrl = await resolveToolImage(rawImage, selector, signal, undefined, ctx.scope)
-      if (!dataUrl) {
-        return JSON.stringify({
-          ok: false,
-          error: rawImage
-            ? `The image value is not usable: "${rawImage.slice(0, 80)}".`
-            : selector
-              ? `Could not capture the element "${selector}".`
-              : 'Could not capture the page.',
-        })
+      const resolved = await resolveToolImage(rawImage, selector, signal, undefined, ctx.scope)
+      const captureMs = Math.round(performance.now() - totalStart)
+      if (!resolved.ok) {
+        return JSON.stringify({ ok: false, error: resolved.error })
       }
+      const dataUrl = resolved.dataUrl
 
-      const processed = await preprocessImage(dataUrl)
       const settings = await getSettings()
       const provider = await getActiveProvider().catch(() => undefined)
       const target = resolveVisionTarget(settings.imageModel, settings.providers, provider)
-
       // Local OCR (Tesseract.js) runs first: it is fully offline, free and,
       // with the upscale+contrast preprocessing, accurate enough for clean
       // text. The vision model is the fallback for the noisy/distorted images
       // OCR comes up empty on.
       const lang = (settings.ocrLanguage || 'eng').trim() || 'eng'
-      const ocr = await ocrImage(processed, lang)
-      if (ocr.ok && ocr.text.trim()) {
-        const text = ocr.text.trim()
+
+      // An http(s) URL is downloaded here and inlined as a data URL: some
+      // sites (e.g. dounai.pro's captcha endpoint) serve JSON rather than
+      // image bytes at that URL — failing fast here beats letting Tesseract
+      // and the vision provider each discover it after their own slow retries.
+      // Captcha endpoints usually serve a fresh image on every request, so an
+      // untrustworthy OCR read is retried against a RE-FETCHED image, not the
+      // same pixels. Captures and data URLs cannot change → single attempt.
+      const sourceUrl = /^https?:\/\//i.test(dataUrl) ? dataUrl : null
+      const MAX_OCR_ATTEMPTS = 3
+      let processed: string | null = null
+      let preprocessMs = 0
+      let ocrMs = 0
+      let attempts = 0
+      let lastOcrError: string | undefined
+      let best: { text: string; confidence: number; agreed: boolean; alternatives: string[]; attempt: number; rank: number } | null = null
+      const readings: string[] = []
+
+      for (let attempt = 1; attempt <= (sourceUrl ? MAX_OCR_ATTEMPTS : 1); attempt++) {
+        attempts = attempt
+        let imageData = dataUrl
+        if (sourceUrl) {
+          const downloaded = await fetchImageAsDataUrl(sourceUrl)
+          if (!downloaded.ok) {
+            if (best) break // keep the earlier good attempt
+            return JSON.stringify({
+              ok: false,
+              error: downloaded.error,
+              timing: { captureMs, preprocessMs, ocrMs, visionMs: 0, attempts, totalMs: Math.round(performance.now() - totalStart) },
+            })
+          }
+          imageData = downloaded.dataUrl
+        }
+        const tPre = performance.now()
+        processed = await preprocessImage(imageData)
+        preprocessMs += Math.round(performance.now() - tPre)
+        const tOcr = performance.now()
+        const ocr = await ocrImage(processed, lang)
+        ocrMs += Math.round(performance.now() - tOcr)
+        if (!ocr.ok) {
+          // An offscreen/worker failure will not improve by refetching — stop.
+          lastOcrError = ocr.error
+          break
+        }
+        if (ocr.text.trim()) {
+          const text = ocr.text.trim()
+          const confidence = Math.round(ocr.confidence)
+          const alternatives = (ocr.alternatives ?? []).filter((t) => t.trim() && t.trim() !== text)
+          readings.push(text)
+          const answerNow = evaluateArithmetic(text)
+          const rank = (answerNow !== null ? 2000 : 0) + (ocr.agreed ? 200 : 0) + confidence
+          if (!best || rank > best.rank) {
+            best = { text, confidence, agreed: ocr.agreed, alternatives, attempt, rank }
+          }
+          // Trustworthy when the two segmentation passes agree or confidence
+          // is high; otherwise refetch a fresh captcha and try again.
+          if (ocr.agreed || confidence >= 75) break
+        }
+      }
+
+      const timing = {
+        captureMs,
+        preprocessMs,
+        ocrMs,
+        visionMs: 0,
+        attempts,
+        totalMs: Math.round(performance.now() - totalStart),
+      }
+
+      if (best) {
+        const { text, confidence, agreed, alternatives, attempt } = best
+        // Hypothesis comparison: expose runner-up readings (and any arithmetic
+        // answer) so the model can weigh which reading looks right.
+        const answer =
+          evaluateArithmetic(text) ??
+          [...alternatives].map((t) => evaluateArithmetic(t)).find((v) => v !== null) ??
+          undefined
+        const parts: string[] = []
+        if (attempts > 1) {
+          parts.push(
+            `Fetched and read ${attempts} fresh captcha images (the endpoint regenerates per request); ` +
+              `this is the most plausible reading (attempt ${attempt}).`,
+          )
+        }
+        if (readings.length > 1) {
+          parts.push(`All readings: ${readings.join(' | ')} — compare and fill the most plausible one.`)
+        }
+        parts.push(`Local OCR (Tesseract.js · ${lang}) read ${text.length} chars; use this text to fill the CAPTCHA field.`)
+        if (answer !== undefined) {
+          parts.push(`The expression evaluates to ${answer} — fill that value.`)
+        }
+        if (!agreed) {
+          parts.push(
+            `This read is not fully reliable (confidence ${confidence}/100${alternatives.length > 0 ? ', segmentation passes disagree' : ''}). ` +
+              'The CAPTCHA regenerates on every request: if the value is rejected after filling, refresh the page ' +
+              'or click the captcha for a new image and call recognize_image again.',
+          )
+        } else {
+          parts.push(
+            'If the site rejects the value after filling, refresh the CAPTCHA (it regenerates per request) and recognize the fresh image.',
+          )
+        }
         return JSON.stringify({
           ok: true,
           text,
-          note: `Local OCR (Tesseract.js · ${lang}) read ${text.length} chars; use this text to fill the CAPTCHA field.`,
+          // Tesseract self-assessed confidence (0-100). Low values flag reads
+          // the agent may want to double-check with the vision model.
+          confidence,
+          agreed,
+          attempts,
+          ...(alternatives.length > 0 ? { alternatives } : {}),
+          ...(answer !== undefined ? { answer } : {}),
+          timing,
+          note: parts.join(' '),
           model: 'tesseract(ocr)',
         })
       }
 
-      if (target) {
+      if (target && processed) {
+        const visionStart = performance.now()
         const result = await recognizeImage(target, processed, { prompt, signal })
-        if (!result.ok) return JSON.stringify({ ok: false, error: result.error })
+        timing.ocrMs = ocrMs
+        timing.visionMs = Math.round(performance.now() - visionStart)
+        timing.totalMs = Math.round(performance.now() - totalStart)
+        if (!result.ok) {
+          return JSON.stringify({
+            ok: false,
+            error:
+              result.error +
+              ' The CAPTCHA usually regenerates on every request — refresh the page or click the captcha ' +
+              'for a new image, then call recognize_image again.',
+            timing,
+          })
+        }
         return JSON.stringify({
           ok: true,
           text: result.text,
+          timing,
           note: `Recognized from the image (${result.text.length} chars). Use this text to fill the CAPTCHA field.`,
           model: target.model,
         })
@@ -1401,8 +1621,11 @@ export async function executeTool(
         ok: false,
         error:
           'Local OCR could not read the image and no vision-capable image model is configured. ' +
-          (ocr.ok ? '' : `OCR error: ${ocr.error}. `) +
-          'Open Settings → 图片识别模型 to set an image model (e.g. gpt-4o, qwen-vl, or glm-4v).',
+          (lastOcrError ? `OCR error: ${lastOcrError}. ` : '') +
+          'Open Settings → 图片识别模型 to set an image model (e.g. gpt-4o, qwen-vl, or glm-4v). ' +
+          'The CAPTCHA usually regenerates on every request — refresh the page or click the captcha for ' +
+          'a new image, then call recognize_image again.',
+        timing,
       })
     }
 
@@ -1413,15 +1636,11 @@ export async function executeTool(
 
       // screenshot always sends the captured image to the image model for a
       // visual read; a `target` selector limits it to a single element.
-      const dataUrl = await resolveToolImage('', target, signal, undefined, ctx.scope)
-      if (!dataUrl) {
-        return JSON.stringify({
-          ok: false,
-          error: target
-            ? `Could not capture the element "${target}".`
-            : 'Could not capture the page.',
-        })
+      const resolved = await resolveToolImage('', target, signal, undefined, ctx.scope)
+      if (!resolved.ok) {
+        return JSON.stringify({ ok: false, error: resolved.error })
       }
+      const dataUrl = resolved.dataUrl
 
       const processed = await preprocessImage(dataUrl)
       const settings = await getSettings()
@@ -1477,8 +1696,14 @@ export async function executeTool(
       throwIfAborted()
       const code = String(args.code ?? '')
       if (!code.trim()) return JSON.stringify({ error: 'run_javascript requires code.' })
-      const result = await execOnActiveTab({ action: 'exec_js', value: code }, signal, undefined, ctx.scope)
-      if (!result.ok) return JSON.stringify({ error: result.error ?? 'JavaScript execution failed' })
+      const result = await execOnActiveTab(
+        { action: 'exec_js', value: code },
+        signal,
+        undefined,
+        ctx.scope,
+      )
+      if (!result.ok)
+        return JSON.stringify({ error: result.error ?? 'JavaScript execution failed' })
       return JSON.stringify({ ok: true, result: result.data ?? null })
     }
 
@@ -1507,16 +1732,25 @@ export async function executeTool(
       }
 
       const res = await askSaveViaSidePanel(filename)
-      if (res.canceled) return JSON.stringify({ ok: false, canceled: true, error: 'User cancelled.' })
+      if (res.canceled)
+        return JSON.stringify({ ok: false, canceled: true, error: 'User cancelled.' })
       if (res.ok) return JSON.stringify({ ok: true, savedPath: filename, mode: 'save-as' })
-      return JSON.stringify({ ok: false, error: 'Could not open the save dialog. Ask the user to open the side panel and retry.' })
+      return JSON.stringify({
+        ok: false,
+        error: 'Could not open the save dialog. Ask the user to open the side panel and retry.',
+      })
     }
 
     case 'click': {
       throwIfAborted()
       const resolved = resolveTargetFrom(ctx, args)
       if ('error' in resolved) return JSON.stringify({ error: resolved.error })
-      const result = await execOnActiveTab({ action: 'click', target: resolved.target }, signal, undefined, ctx.scope)
+      const result = await execOnActiveTab(
+        { action: 'click', target: resolved.target },
+        signal,
+        undefined,
+        ctx.scope,
+      )
       return afterAction(result, ctx, {}, { withScreenshot: args.withScreenshot === true, signal })
     }
 
@@ -1527,13 +1761,16 @@ export async function executeTool(
       const target = resolved.target
       const value = String(args.value ?? '')
       const clear = args.clear === false ? false : true
-      const result = await execOnActiveTab({ action: 'fill', target, value, clear }, signal, undefined, ctx.scope)
-      return afterAction(
-        result,
-        ctx,
-        value.length > 0 ? { filled: true } : { cleared: true },
-        { withScreenshot: args.withScreenshot === true, signal },
+      const result = await execOnActiveTab(
+        { action: 'fill', target, value, clear },
+        signal,
+        undefined,
+        ctx.scope,
       )
+      return afterAction(result, ctx, value.length > 0 ? { filled: true } : { cleared: true }, {
+        withScreenshot: args.withScreenshot === true,
+        signal,
+      })
     }
 
     case 'select_option': {
@@ -1541,10 +1778,15 @@ export async function executeTool(
       const resolved = resolveTargetFrom(ctx, args)
       if ('error' in resolved) return JSON.stringify({ error: resolved.error })
       const target = resolved.target
-      const value = (Array.isArray(args.value)
-        ? args.value.map(String)
-        : String(args.value ?? '')) as string | string[]
-      const result = await execOnActiveTab({ action: 'select_option', target, value }, signal, undefined, ctx.scope)
+      const value = (
+        Array.isArray(args.value) ? args.value.map(String) : String(args.value ?? '')
+      ) as string | string[]
+      const result = await execOnActiveTab(
+        { action: 'select_option', target, value },
+        signal,
+        undefined,
+        ctx.scope,
+      )
       return afterAction(result, ctx, {}, { withScreenshot: args.withScreenshot === true, signal })
     }
 
@@ -1554,7 +1796,12 @@ export async function executeTool(
       if ('error' in resolved) return JSON.stringify({ error: resolved.error })
       const target = resolved.target
       const value = args.value === undefined ? true : args.value === true
-      const result = await execOnActiveTab({ action: 'set_checkbox', target, value }, signal, undefined, ctx.scope)
+      const result = await execOnActiveTab(
+        { action: 'set_checkbox', target, value },
+        signal,
+        undefined,
+        ctx.scope,
+      )
       return afterAction(result, ctx, {}, { withScreenshot: args.withScreenshot === true, signal })
     }
 
@@ -1645,9 +1892,10 @@ export async function executeTool(
           optional?: unknown
         }
         const toolName = String(step.tool ?? '')
-        const stepArgs = (step.args && typeof step.args === 'object'
-          ? step.args
-          : {}) as Record<string, unknown>
+        const stepArgs = (step.args && typeof step.args === 'object' ? step.args : {}) as Record<
+          string,
+          unknown
+        >
         // Screenshots never belong in the text-only model transcript.
         delete stepArgs.withScreenshot
         const fail = (error: string): string => {
@@ -1787,8 +2035,11 @@ export async function executeTool(
       if (!secret) return JSON.stringify({ error: 'Saved credential not found.' })
       const field = fieldName
         ? findField(secret, fieldName)
-        : findField(secret, 'password') ?? entryFields(secret)[0]
-      if (!field) return JSON.stringify({ error: `No "${fieldName ?? 'password'}" field in this credential.` })
+        : (findField(secret, 'password') ?? entryFields(secret)[0])
+      if (!field)
+        return JSON.stringify({
+          error: `No "${fieldName ?? 'password'}" field in this credential.`,
+        })
       const result = await execOnActiveTab(
         {
           action: 'fill',
@@ -1865,7 +2116,11 @@ export async function executeTool(
       const problems = validateSkill(base, existing)
       if (problems.length > 0) {
         const reasons = problems
-          .map((p) => (p.code === 'nameTaken' ? 'name is already in use by another skill' : `"${p.field}" is required`))
+          .map((p) =>
+            p.code === 'nameTaken'
+              ? 'name is already in use by another skill'
+              : `"${p.field}" is required`,
+          )
           .join('; ')
         return JSON.stringify({ ok: false, error: `Skill not saved — ${reasons}.` })
       }
@@ -1965,9 +2220,12 @@ async function waitForPageStable(
   let prev: string | null = null
   while (Date.now() < deadline) {
     if (signal?.aborted) return
-    const result = await execOnActiveTab({ action: 'page_signature' }, signal, undefined, scope).catch(
-      () => undefined,
-    )
+    const result = await execOnActiveTab(
+      { action: 'page_signature' },
+      signal,
+      undefined,
+      scope,
+    ).catch(() => undefined)
     const sig = result && typeof result.data === 'string' ? result.data : null
     // Unscriptable or racing a navigation: stability will never come.
     if (sig === null) return
@@ -2016,8 +2274,12 @@ async function captureObservation(
     }
     if (withScreenshot) {
       if (signal?.aborted) return observed
-      const shot = await resolveToolImage('', '', signal, { format: 'jpeg' }, ctx.scope).catch(() => null)
-      if (shot) observed.screenshot = shot
+      // Best-effort: the observation screenshot must never fail the action
+      // that produced it, so the capture reason is deliberately dropped here.
+      const shot = await captureVisiblePage(ctx.scope, { format: 'jpeg', quality: 60 }).catch(
+        () => null,
+      )
+      if (shot?.ok) observed.screenshot = shot.dataUrl
     }
     return observed
   } catch {
@@ -2046,7 +2308,10 @@ async function afterAction(
         : // Save a model round trip: with the page unchanged the refs the
           // model already holds stay valid, so it should act on them instead
           // of re-snapshotting before the next step.
-          { pageUnchanged: true, note: 'The page did not navigate; the previous snapshot\'s refs are still valid.' }),
+          {
+            pageUnchanged: true,
+            note: "The page did not navigate; the previous snapshot's refs are still valid.",
+          }),
       ...extra,
     }
     // After a navigation the fresh observation shows the new page; when the
@@ -2079,7 +2344,14 @@ export function summarizeToolResult(name: string, result: string): string {
 function shortSummary(name: string, result: string): string {
   try {
     const parsed = JSON.parse(result) as { error?: string; note?: string; navigated?: boolean }
-    if (parsed.error) return `${name}: ${parsed.error}`.slice(0, 200)
+    if (parsed.error) {
+      // Idempotent prefix: some error strings already carry the tool name
+      // from an inner layer — never render "screenshot: screenshot: …".
+      const prefix = `${name}: `
+      let raw = parsed.error
+      while (raw.startsWith(prefix)) raw = raw.slice(prefix.length)
+      return `${prefix}${raw}`.slice(0, 200)
+    }
     if (name === 'read_current_page') {
       const page = JSON.parse(result) as { title?: string; text?: string }
       return `Read "${page.title ?? 'page'}" (${page.text?.length ?? 0} chars)`
@@ -2250,6 +2522,11 @@ export async function runAgentTurn(
             totalUsage.cachedInputTokens += usage.cachedInputTokens ?? 0
             totalUsage.reasoningTokens += usage.reasoningTokens ?? 0
             totalUsage.totalTokens += usage.totalTokens
+            // Push the running turn total as soon as this request reports it,
+            // so the panel's token bar updates per model request instead of
+            // only when the whole turn finishes. Cumulative snapshot — the
+            // panel adds the delta against the last value it applied.
+            deps.send({ type: 'usage', usage: { ...totalUsage } })
           },
         },
       )

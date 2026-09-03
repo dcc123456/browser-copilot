@@ -55,6 +55,46 @@ export const CUSTOM_BLOCKS: BlockCatalogEntry[] = [
     },
     cloud: false,
   },
+  {
+    id: 'ocr',
+    name: 'OCR text recognition',
+    description:
+      'Run local OCR (Tesseract.js, offline) on an image variable, an img element on the page or the previous page snapshot; outputs the recognized string into the output variable (default lastOcrText).',
+    icon: 'riCharacterRecognitionLine',
+    category: 'browser',
+    component: 'Default',
+    editComponent: 'EditOcr',
+    inputs: 1,
+    outputs: 1,
+    allowedInputs: true,
+    maxConnection: 1,
+    refDataKeys: ['variableName', 'selector', 'lang', 'imageVariable'],
+    data: {
+      disableBlock: false,
+      description: '',
+      // Input — one of: `variable` (an img-typed variable holding an image as
+      // a data URL, a bare base64 payload or an http(s) link — base64 is
+      // decoded through the offscreen canvas, links are fetched first), `element` (an img element
+      // selected on the page), or `page` (the previous page snapshot — the
+      // visible page the run is driving). Output — the recognized string
+      // (type always string), stored in the `variableName` variable.
+      source: 'page',
+      // Element locator (Automa shape) for `source: 'element'`.
+      findBy: 'cssSelector',
+      selector: '',
+      // Variable to read the image data URL from when `source: 'variable'`.
+      imageVariable: 'lastScreenshot',
+      // Tesseract language pack(s), `+`-joined. Empty = the global
+      // "Local OCR language" setting (settings.ocrLanguage).
+      lang: '',
+      // Upscale + contrast enhance before recognition (lib/vision
+      // preprocessImage) — large gains on small captcha glyphs.
+      preprocess: true,
+      // Editable output variable name; the value type is always a string.
+      variableName: 'lastOcrText',
+    },
+    cloud: false,
+  },
 ]
 
 /** Ids of every local extension block. */

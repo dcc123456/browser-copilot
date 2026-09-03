@@ -12,7 +12,13 @@ beforeAll(() => {
   })
 })
 
-import { workflowFromHistory } from '../src/lib/storage'
+import {
+  aiPrefillSteps,
+  applyAiPrefillOptions,
+  fillLikeJsFromCode,
+  looksTextExtractionPrompt,
+  workflowFromHistory,
+} from '../src/lib/storage'
 import type { HistoryEntry } from '../src/lib/types'
 
 type Args = Record<string, unknown>
@@ -360,6 +366,144 @@ describe('run_javascript maps to the javascript-code block', () => {
   })
 })
 
+describe('fill-shaped run_javascript becomes the forms operator', () => {
+  it('a plain querySelector + value assignment converts', () => {
+    const code =
+      "document.querySelector('#email').value = 'a@b.com';\n" +
+      "document.querySelector('#email').dispatchEvent(new Event('change', { bubbles: true }))"
+    expect(fillLikeJsFromCode(code)).toEqual({ selector: '#email', value: 'a@b.com' })
+    expect(actionData([entry('run_javascript', { code })])).toEqual([
+      {
+        blockId: 'forms',
+        description: '',
+        selector: '#email',
+        findBy: 'cssSelector',
+        type: 'text-field',
+        value: 'a@b.com',
+        clearValue: true,
+      },
+    ])
+  })
+
+  it('the React native setter pattern converts', () => {
+    const code = [
+      "const el = document.querySelector('#phone')",
+      "const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set",
+      "setter.call(el, '13800000000')",
+      "el.dispatchEvent(new Event('input', { bubbles: true }))",
+    ].join('\n')
+    expect(fillLikeJsFromCode(code)).toEqual({ selector: '#phone', value: '13800000000' })
+  })
+
+  it('getElementById maps to an #id selector', () => {
+    expect(fillLikeJsFromCode("document.getElementById('pw').value = 's3cret'")).toEqual({
+      selector: '#pw',
+      value: 's3cret',
+    })
+  })
+
+  it('guards keep ambiguous snippets as javascript-code', () => {
+    // a click makes it more than a fill
+    expect(
+      fillLikeJsFromCode("const el = document.querySelector('#a'); el.click(); el.value = 'x'"),
+    ).toBeNull()
+    // two fields in one snippet
+    const twoFields =
+      "document.querySelector('#a').value = '1'; document.querySelector('#b').value = '2'"
+    expect(fillLikeJsFromCode(twoFields)).toBeNull()
+    // variable value — not a literal
+    expect(fillLikeJsFromCode("document.querySelector('#a').value = txt")).toBeNull()
+    // template interpolation — not a literal
+    expect(fillLikeJsFromCode("document.querySelector('#a').value = `${v}`")).toBeNull()
+    // form.submit guard
+    expect(fillLikeJsFromCode("document.querySelector('#f').submit()")).toBeNull()
+    // the workflow keeps the verbatim JS block for guarded snippets
+    expect(actionData([entry('run_javascript', { code: twoFields })])).toEqual([
+      {
+        blockId: 'javascript-code',
+        description: 'run_javascript',
+        code: twoFields,
+        timeout: 20000,
+      },
+    ])
+  })
+})
+
+describe('recognize_image maps to the ocr block', () => {
+  it('a selector becomes an element capture carrying the selector', () => {
+    expect(actionData([entry('recognize_image', { selector: '#captcha' })])).toEqual([
+      {
+        blockId: 'ocr',
+        description: '',
+        source: 'element',
+        selector: '#captcha',
+        findBy: 'cssSelector',
+        preprocess: true,
+        variableName: 'lastOcrText',
+      },
+    ])
+  })
+
+  it('no selector falls back to the page snapshot plus an AI extraction step', () => {
+    expect(actionData([entry('recognize_image', { prompt: '读出图中的验证码' })])).toEqual([
+      {
+        blockId: 'ocr',
+        description: 'recognize_image',
+        source: 'page',
+        selector: '',
+        findBy: 'cssSelector',
+        // Whole-page shots skip the captcha preprocess: it is tuned for small
+        // images and binarizing a full page washes the text out.
+        preprocess: false,
+        variableName: 'lastOcrText',
+      },
+      {
+        blockId: 'ai-agent',
+        description: '提取 OCR 中的关键信息',
+        purpose: 'ocr-extract',
+        prompt: expect.stringContaining('读出图中的验证码'),
+        findBy: 'cssSelector',
+        selector: '',
+        actOnPage: false,
+        useSnapshot: false,
+        maxToolRounds: 8,
+        variableName: 'ocrExtract1',
+      },
+    ])
+    // The extraction prompt feeds the raw OCR dump to the agent.
+    const prompt = actionData([entry('recognize_image', { prompt: '读出图中的验证码' })])[1]!
+      .prompt as string
+    expect(prompt).toContain('{{lastOcrText}}')
+    expect(prompt).toContain('只输出结果本身')
+  })
+
+  it('a transient data-URL image arg is not persisted into the workflow', () => {
+    const data = actionData([
+      entry('recognize_image', { image: 'data:image/png;base64,AAAA', selector: '#captcha' }),
+    ])[0]!
+    expect(data).not.toHaveProperty('image')
+    expect(data['source']).toBe('element')
+  })
+
+  it('keeps its place in the flow between mapped steps', () => {
+    const wf = workflowFromHistory(
+      [
+        entry('open_url', { url: 'https://e.com' }),
+        entry('recognize_image', { selector: '#captcha' }),
+        entry('fill', { target: { primary: { how: 'id', value: 'code' } }, value: 'AB12' }),
+      ],
+      'wf',
+    )
+    expect(wf!.drawflow.nodes.map((n) => n.data.blockId)).toEqual([
+      'trigger',
+      'new-tab',
+      'wait-connections',
+      'ocr',
+      'forms',
+    ])
+  })
+})
+
 describe('rich conversation targets', () => {
   it('role-targeted clicks keep an empty selector plus the verbatim target', () => {
     const target = {
@@ -385,5 +529,250 @@ describe('rich conversation targets', () => {
         target,
       },
     ])
+  })
+})
+
+describe('a fill after recognize_image references the OCR variable', () => {
+  it('a short captcha token links {{lastOcrText}}', () => {
+    const wf = workflowFromHistory(
+      [
+        entry('open_url', { url: 'https://e.com' }),
+        entry('recognize_image', { selector: '#captcha' }),
+        entry('fill', { target: { primary: { how: 'id', value: 'code' } }, value: 'AB12' }),
+      ],
+      'wf',
+    )
+    expect(wf!.drawflow.nodes.map((n) => n.data.blockId)).toEqual([
+      'trigger',
+      'new-tab',
+      'wait-connections',
+      'ocr',
+      'forms',
+    ])
+    const nodes = wf!.drawflow.nodes
+    expect(nodes[nodes.length - 1]!.data.value).toBe('{{lastOcrText}}')
+  })
+
+  it('a JS-filled captcha token links the OCR variable too', () => {
+    const wf = workflowFromHistory(
+      [
+        entry('recognize_image', { selector: '#captcha' }),
+        entry('run_javascript', { code: "document.querySelector('#code').value = 'AB12'" }),
+      ],
+      'wf',
+    )
+    const nodes = wf!.drawflow.nodes
+    expect(nodes.map((n) => n.data.blockId)).toEqual(['trigger', 'ocr', 'forms'])
+    expect(nodes[nodes.length - 1]!.data.value).toBe('{{lastOcrText}}')
+    expect(nodes[nodes.length - 1]!.data.selector).toBe('#code')
+  })
+
+  it('long composed content keeps the AI prefill path', () => {
+    const value = '这是一段由模型自行撰写的、超过短 token 限制的长文本回复内容。'
+    const wf = workflowFromHistory(
+      [
+        entry('recognize_image', { selector: '#img' }),
+        entry('fill', { target: { primary: { how: 'id', value: 'msg' } }, value }),
+      ],
+      'wf',
+    )
+    const nodes = wf!.drawflow.nodes
+    expect(nodes.map((n) => n.data.blockId)).toEqual(['trigger', 'ocr', 'ai-agent', 'forms'])
+    expect(nodes[nodes.length - 1]!.data.value).toBe('{{aiFill1}}')
+  })
+})
+
+describe('text-extraction screenshots replay as the ocr operator', () => {
+  it('a captcha-reading screenshot becomes an element-capture ocr node', () => {
+    const wf = workflowFromHistory(
+      [
+        entry('open_url', { url: 'https://e.com' }),
+        entry('screenshot', { target: '#captchaImg', prompt: 'Read the captcha code in the image' }),
+      ],
+      'wf',
+    )
+    expect(wf!.drawflow.nodes.map((n) => n.data.blockId)).toEqual([
+      'trigger',
+      'new-tab',
+      'wait-connections',
+      'ocr',
+    ])
+    const nodes = wf!.drawflow.nodes
+    const data = nodes[nodes.length - 1]!.data
+    expect(data.source).toBe('element')
+    expect(data.selector).toBe('#captchaImg')
+    expect(data.variableName).toBe('lastOcrText')
+  })
+
+  it('visual-inspection screenshots stay unmapped', () => {
+    expect(
+      workflowFromHistory(
+        [entry('screenshot', { target: '#btn', prompt: 'Is the submit button disabled?' })],
+        'wf',
+      ),
+    ).toBeNull()
+  })
+
+  it('looksTextExtractionPrompt separates extraction from inspection', () => {
+    expect(looksTextExtractionPrompt('读出图中的验证码')).toBe(true)
+    expect(looksTextExtractionPrompt('What are the digits shown?')).toBe(true)
+    expect(looksTextExtractionPrompt('这个按钮是什么颜色')).toBe(false)
+    expect(looksTextExtractionPrompt('Is the layout correct?')).toBe(false)
+  })
+})
+
+describe('generated edges carry block-keyed handles', () => {
+  it('each edge references the rendered handle ids of its endpoints', () => {
+    const wf = workflowFromHistory(
+      [
+        entry('open_url', { url: 'https://e.com' }),
+        entry('recognize_image', { selector: '#captcha' }),
+        entry('fill', { target: { primary: { how: 'id', value: 'code' } }, value: 'AB12' }),
+      ],
+      'wf',
+    )!
+    const edges = wf.drawflow.edges
+    // trigger→new-tab→wait-connections→ocr→forms
+    expect(edges).toHaveLength(4)
+    expect(edges[0]).toMatchObject({
+      sourceHandle: 'trigger-output-1',
+      targetHandle: 'new-tab-input-1',
+    })
+    expect(edges[1]).toMatchObject({
+      sourceHandle: 'new-tab-output-1',
+      targetHandle: 'wait-connections-input-1',
+    })
+    expect(edges[2]).toMatchObject({
+      sourceHandle: 'wait-connections-output-1',
+      targetHandle: 'ocr-input-1',
+    })
+    expect(edges[edges.length - 1]).toMatchObject({
+      sourceHandle: 'ocr-output-1',
+      targetHandle: 'forms-input-1',
+    })
+  })
+
+  it('an ai-agent pre-node is also wired with explicit handles', () => {
+    const wf = workflowFromHistory(
+      [
+        entry('fill', {
+          target: { primary: { how: 'id', value: 'msg' } },
+          value: '这是一段由模型自行撰写的、超过短 token 限制的长文本回复内容。',
+        }),
+      ],
+      'wf',
+    )!
+    expect(wf.drawflow.edges).toHaveLength(2)
+    expect(wf.drawflow.edges[0]).toMatchObject({
+      sourceHandle: 'trigger-output-1',
+      targetHandle: 'ai-agent-input-1',
+    })
+    expect(wf.drawflow.edges[1]).toMatchObject({
+      sourceHandle: 'ai-agent-output-1',
+      targetHandle: 'forms-input-1',
+    })
+  })
+})
+
+describe('a recognition through an http image URL replays via a variable', () => {
+  it('stores the URL first, then reads it with the variable source', () => {
+    expect(
+      actionData([
+        entry('recognize_image', { image: 'https://e.com/captcha.png?id=1', selector: '#captcha' }),
+      ]),
+    ).toEqual([
+      {
+        blockId: 'set-variable',
+        description: '记录识别图片地址',
+        variableName: 'lastOcrImage',
+        value: 'https://e.com/captcha.png?id=1',
+      },
+      {
+        blockId: 'ocr',
+        description: '',
+        source: 'variable',
+        imageVariable: 'lastOcrImage',
+        preprocess: true,
+        variableName: 'lastOcrText',
+      },
+    ])
+  })
+
+  it('a data-URL image arg keeps the transient rule (no variable chain)', () => {
+    const data = actionData([
+      entry('recognize_image', { image: 'data:image/png;base64,AAAA', selector: '#captcha' }),
+    ])
+    expect(data).toHaveLength(1)
+    expect(data[0]).not.toHaveProperty('imageVariable')
+    expect(data[0]!.source).toBe('element')
+  })
+})
+
+describe('the OCR hand-off survives pacing steps and mislabeled fills', () => {
+  it('links across a wait_for between recognition and fill', () => {
+    const wf = workflowFromHistory(
+      [
+        entry('recognize_image', { selector: '#captcha' }),
+        entry('wait_for', { timeout: 2000 }),
+        entry('fill', { target: { primary: { how: 'id', value: 'code' } }, value: 'X7k2' }),
+      ],
+      'wf',
+    )!
+    const nodes = wf.drawflow.nodes
+    expect(nodes.map((n) => n.data.blockId)).toEqual(['trigger', 'ocr', 'delay', 'forms'])
+    const forms = nodes[nodes.length - 1]!
+    expect(forms.data.value).toBe('{{lastOcrText}}')
+  })
+
+  it('a short fill the model mislabeled generated:true still links the OCR variable', () => {
+    const wf = workflowFromHistory(
+      [
+        entry('recognize_image', { selector: '#captcha' }),
+        entry('fill', {
+          target: { primary: { how: 'id', value: 'code' } },
+          value: 'X7k2',
+          generated: true,
+        }),
+      ],
+      'wf',
+    )!
+    const nodes = wf.drawflow.nodes
+    expect(nodes.map((n) => n.data.blockId)).toEqual(['trigger', 'ocr', 'forms'])
+    expect(nodes[nodes.length - 1]!.data.value).toBe('{{lastOcrText}}')
+  })
+})
+
+describe('a whole-page recognition routes its answer through AI extraction', () => {
+  const entries = () => [
+    entry('recognize_image', { prompt: '识别图中的验证码' }),
+    entry('fill', { target: { primary: { how: 'id', value: 'code' } }, value: 'X7k2' }),
+  ]
+
+  it('the fill references the extraction variable, not the raw page dump', () => {
+    const wf = workflowFromHistory(entries(), 'wf')!
+    const nodes = wf.drawflow.nodes
+    expect(nodes.map((n) => n.data.blockId)).toEqual(['trigger', 'ocr', 'ai-agent', 'forms'])
+    expect(nodes[nodes.length - 1]!.data.value).toBe('{{ocrExtract1}}')
+  })
+
+  it('the extraction agent is not a save-card row and cannot be toggled off', () => {
+    const wf = workflowFromHistory(entries(), 'wf')!
+    expect(aiPrefillSteps(wf)).toEqual([])
+    const formsId = wf.drawflow.nodes[wf.drawflow.nodes.length - 1]!.id
+    const applied = applyAiPrefillOptions(wf, { [formsId]: false })
+    const forms = applied.drawflow.nodes.find((n) => n.id === formsId)!
+    expect(forms.data.value).toBe('{{ocrExtract1}}')
+  })
+
+  it('an element-scoped recognition needs no extraction step', () => {
+    const wf = workflowFromHistory(
+      [
+        entry('recognize_image', { selector: '#captcha' }),
+        entry('fill', { target: { primary: { how: 'id', value: 'code' } }, value: 'X7k2' }),
+      ],
+      'wf',
+    )!
+    expect(wf.drawflow.nodes.map((n) => n.data.blockId)).toEqual(['trigger', 'ocr', 'forms'])
+    expect(wf.drawflow.nodes[wf.drawflow.nodes.length - 1]!.data.value).toBe('{{lastOcrText}}')
   })
 })

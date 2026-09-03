@@ -37,12 +37,20 @@ type ManifestParam = Parameters<typeof defineManifest>[0]
 export default defineManifest({
   manifest_version: 3,
   name: 'Browser Copilot',
-  version: '0.5.4',
+  version: '0.5.5',
   description:
     'A side-panel assistant that can read and act on the page you are looking at. Works with any OpenAI-compatible model.',
   minimum_chrome_version: '116',
   permissions: ['storage', 'tabs', 'scripting', 'sidePanel', 'alarms', 'offscreen', 'contextMenus', 'webNavigation', 'cookies', 'downloads', 'clipboardRead', 'debugger'],
-  host_permissions: ['http://*/*', 'https://*/*', 'ws://localhost/*', 'ws://127.0.0.1/*', 'ws://[::1]/*'],
+  // '<all_urls>' is load-bearing for screenshots: chrome.tabs.captureVisibleTab
+  // hard-requires it (or activeTab) and rejects equivalent-looking specific
+  // patterns — 'http://*/*' + 'https://*/*' alone fail with "Either the
+  // '<all_urls>' or 'activeTab' permission is required." activeTab cannot
+  // replace it here: its grant is user-gesture-bound and revoked on
+  // navigation, while the agent screenshots pages it has just driven to.
+  // The http/https/ws patterns are kept below only for readability;
+  // '<all_urls>' already covers them.
+  host_permissions: ['<all_urls>', 'http://*/*', 'https://*/*', 'ws://localhost/*', 'ws://127.0.0.1/*', 'ws://[::1]/*'],
   // Local OCR (Tesseract.js in the offscreen document) needs to compile the
   // bundled WebAssembly core. `'wasm-unsafe-eval'` permits that while keeping
   // `script-src 'self'` — no JS eval. The vendored core is fetched from the

@@ -17,6 +17,7 @@ import { isInjectablePage } from '../../lib/pages'
 import { streamCompletion, type WireMessage } from '../../lib/llm'
 import { getSettings } from '../../lib/storage'
 import { interpolate } from '../../lib/workflow/interpolate'
+import { preprocessImage } from '../../lib/vision'
 import {
   askSaveViaSidePanel,
   getDownloadDir,
@@ -27,6 +28,8 @@ import {
 import { aiAgent } from './ai-agent-executor'
 import type { Op, ScrollSpec, Target, TargetSpec } from '../../lib/ops'
 import { activeTab } from '../page'
+import { captureVisiblePage } from '../capture'
+import { captureElementRobust } from '../element-capture'
 import type { ScopeWindow } from '../automation-scope'
 import {
   clipboardGet,
@@ -43,6 +46,7 @@ import {
   goForward,
   listAllTabUrls,
   newTab as driverNewTab,
+  ocrImage,
   resolveAutomationTab,
   newWindow as driverNewWindow,
   switchTab as driverSwitchTab,
@@ -364,18 +368,15 @@ const takeScreenshot: BlockExecutor = async (data, ctx) => {
     return null
   }
 
-  // Default: visible page snapshot.
-  const tab = await activeTab(ctx.scope)
-  if (!tab || typeof tab.id !== 'number') {
-    ctx.emit('error', '没有可截图的活动标签页')
-    return null
-  }
-  try {
-    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
-    ctx.variables[variable] = dataUrl
+  // Default: visible page snapshot. The shared capture helper restores a
+  // minimized window, retries transient races and — on failure — surfaces the
+  // underlying Chrome error instead of an opaque one.
+  const capture = await captureVisiblePage(ctx.scope, { format: 'png' })
+  if (capture.ok) {
+    ctx.variables[variable] = capture.dataUrl
     ctx.emit('result', '已截图')
-  } catch (error) {
-    ctx.emit('error', message(error))
+  } else {
+    ctx.emit('error', `截图失败: ${capture.error}`)
   }
   return null
 }
@@ -396,6 +397,222 @@ const getText: BlockExecutor = async (data, ctx) => {
   const text = (injection?.result as string | undefined) ?? ''
   ctx.variables['lastText'] = text
   ctx.emit('result', text)
+  return null
+}
+
+/**
+ * Normalizes a variable-supplied image reference into a data URL the offscreen
+ * OCR can draw onto its canvas:
+ *  - `data:image/...` values pass through as-is;
+ *  - an http(s) link is fetched (the extension's host_permissions cover all
+ *    http/https hosts) and re-encoded as a base64 data URL — 转成图片后识别;
+ *  - a bare base64 payload is wrapped in a `data:image/png;base64,` header so
+ *    the offscreen canvas can decode it.
+ * Returns null for anything else. AbortError propagates for cancellation.
+ */
+async function imageInputToDataUrl(raw: string, signal: AbortSignal): Promise<string | null> {
+  const value = raw.trim()
+  if (!value) return null
+  if (/^data:image\//i.test(value)) return value
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      // Credentials included, like the agent's recognize_image downloader:
+      // captcha endpoints are commonly session-bound.
+      const response = await fetch(value, { signal, credentials: 'include' })
+      if (!response.ok) return null
+      const contentType = response.headers.get('content-type') ?? ''
+      const mime = contentType.startsWith('image/') ? contentType : 'image/png'
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      let binary = ''
+      const CHUNK = 0x8000
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+      }
+      return `data:${mime};base64,${btoa(binary)}`
+    } catch (error) {
+      if ((error as Error)?.name === 'AbortError') throw error
+      return null
+    }
+  }
+  const compact = value.replace(/\s+/g, '')
+  if (compact.length >= 32 && /^[A-Za-z0-9+/]+={0,2}$/.test(compact)) {
+    return `data:image/png;base64,${compact}`
+  }
+  return null
+}
+
+/**
+ * Rect probe + crop math live in `../element-capture` (shared with the
+ * agent's recognize/screenshot tools); `cropRectFor` is re-exported for the
+ * editor-facing tests.
+ */
+export { cropRectFor } from '../element-capture'
+
+/**
+ * Captures an element's rendering as a PNG data URL via the shared robust
+ * strategy (scroll into view → in-page SVG capture with `waitFor` polling →
+ * visible-page capture + crop, retried — see ../element-capture). Progress
+ * and the final reason surface through the run's error log.
+ */
+async function captureElementImage(selector: string, ctx: WorkflowExecCtx): Promise<string | null> {
+  const result = await captureElementRobust(selector, {
+    signal: ctx.signal,
+    scope: ctx.scope,
+    preferredTabId: ctx.tabId,
+  })
+  if (result.ok) return result.dataUrl
+  ctx.emit('error', `ocr: ${result.error}`)
+  return null
+}
+
+/**
+ * Automa-style `ocr` block (Browser Copilot extension): run local OCR
+ * (Tesseract.js in the offscreen document — fully offline) and output the
+ * recognized string.
+ *
+ * Input — exactly one of three sources, chosen by `source`:
+ *  - `'variable'` — an img-typed variable (`imageVariable`) holding an image
+ *    as a data URL, a bare base64 payload (wrapped for the canvas) or an
+ *    http(s) link (fetched and re-encoded first), e.g. the output of a
+ *    `take-screenshot` block;
+ *  - `'element'`  — an img element selected on the page (`selector`), captured
+ *    in-page;
+ *  - `'page'`     — the previous page snapshot: a capture of the visible page
+ *    the run has been driving (default).
+ *
+ * Output — the recognized string. The output variable NAME is configurable
+ * (`variableName`, default `lastOcrText`); its type is always a plain string.
+ * Before recognition
+ * the image runs through the captcha preprocessing (upscale + contrast
+ * stretch) unless `preprocess` is false. The Tesseract language is `lang`
+ * (`+`-joined codes), falling back to the global "Local OCR language"
+ * setting. An unreadable image or an empty read raises a block error so the
+ * engine's onError machinery (retry / fallback / continue) can react — an OCR
+ * step that read nothing must not look like success to a downstream fill.
+ */
+/** Short human preview of a value for log lines (single-line, truncated). */
+function logPreview(value: string, max = 120): string {
+  const oneLine = value.replace(/\s+/g, ' ').trim()
+  return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine
+}
+
+/**
+ * Best-effort pixel dimensions of an image data URL, for run-log diagnostics.
+ * Empty string when the worker cannot decode images (tests, old runtimes).
+ */
+async function imageDims(dataUrl: string): Promise<string> {
+  if (typeof createImageBitmap === 'undefined') return ''
+  try {
+    const res = await fetch(dataUrl)
+    const bitmap = await createImageBitmap(await res.blob())
+    const size = `${bitmap.width}×${bitmap.height}`
+    bitmap.close()
+    return size
+  } catch {
+    return ''
+  }
+}
+
+const ocrBlock: BlockExecutor = async (data, ctx) => {
+  assertActive(ctx)
+  const source = String(data['source'] ?? (sel(data) ? 'element' : 'page'))
+
+  let image = ''
+  if (source === 'variable') {
+    const name = String(data['imageVariable'] ?? 'lastScreenshot')
+    const raw = ctx.variables[name]
+    const value = typeof raw === 'string' ? raw.trim() : ''
+    if (!value) {
+      ctx.emit('error', `ocr: 变量 ${name} 为空或不是字符串`)
+      return null
+    }
+    // base64 payloads are wrapped so the offscreen canvas can decode them;
+    // http(s) links are fetched and re-encoded first (转成图片后识别).
+    const normalized = await imageInputToDataUrl(value, ctx.signal)
+    if (!normalized) {
+      ctx.emit('error', `ocr: 变量 ${name} 不是可识别的图片（支持 base64、data URL 或 http(s) 图片链接）`)
+      return null
+    }
+    image = normalized
+  } else if (source === 'element') {
+    const selector = sel(data)
+    if (!selector) {
+      ctx.emit('error', 'ocr: 页面 img 元素识别需要 CSS 选择器')
+      return null
+    }
+    const captured = await captureElementImage(selector, ctx)
+    if (!captured) return null // errors already emitted
+    image = captured
+  } else {
+    const tab = await activeTab(ctx.scope)
+    if (!tab || typeof tab.windowId !== 'number') {
+      ctx.emit('error', 'ocr: 没有可截图的活动标签页')
+      return null
+    }
+    const capture = await captureVisiblePage(ctx.scope, { format: 'png' })
+    if (!capture.ok) {
+      ctx.emit('error', `ocr: ${capture.error}`)
+      return null
+    }
+    image = capture.dataUrl
+  }
+
+  // Input diagnostics — the first thing to check when a read comes back empty.
+  const inputDesc =
+    source === 'variable'
+      ? `变量 ${String(data['imageVariable'] ?? 'lastScreenshot')}`
+      : source === 'element'
+        ? `元素 ${sel(data)}`
+        : '整页截图'
+  const imageChars = image.length
+  const inputDims = await imageDims(image)
+  ctx.emit(
+    'info',
+    `[识别输入] ${inputDesc} · 图像 ${imageChars} 字符${inputDims ? ` (${inputDims})` : ''}`,
+  )
+
+  let processed = image
+  if (data['preprocess'] !== false) {
+    try {
+      const before = image
+      processed = await preprocessImage(before)
+      if (processed !== before) {
+        const dims = await imageDims(processed)
+        ctx.emit(
+          'info',
+          `[识别预处理] ${imageChars} 字符 → ${processed.length} 字符${dims ? ` (${dims})` : ''}`,
+        )
+      }
+    } catch {
+      processed = image // never block recognition on a convenience step
+    }
+  }
+  const preprocessUsed = processed !== image
+
+  const langParam = interpolate(String(data['lang'] ?? ''), ctx.variables, ctx.refData).trim()
+  const lang = langParam || (await getSettings()).ocrLanguage || 'eng'
+
+  const ocr = await ocrImage(processed, lang)
+  if (!ocr.ok || !ocr.text.trim()) {
+    if (!ocr.ok) throw new Error(`ocr: ${ocr.error}`)
+    // Empty read: carry everything needed to tell a blank capture from a
+    // washed-out preprocess from a language mismatch.
+    throw new Error(
+      `ocr: 未识别到文字 (${lang}) — ${inputDesc}, 图像 ${imageChars} 字符` +
+        `${inputDims ? ` ${inputDims}` : ''}` +
+        `${preprocessUsed ? `, 预处理后 ${processed.length} 字符` : ''}` +
+        `, 置信度 ${Math.round(ocr.confidence)}` +
+        '。常见原因: 截图区域空白或图片未加载; 预处理把文字洗白（编辑此算子, 关闭"识别前预处理"重试）; 语言不匹配（检查设置里的本地 OCR 语言）',
+    )
+  }
+  const text = ocr.text.trim()
+
+  // Output contract: the recognized string — the variable NAME is editable
+  // (`variableName`, default `lastOcrText`), the type is always a string.
+  const variable = String(data['variableName'] ?? '').trim() || 'lastOcrText'
+  ctx.variables[variable] = text
+  ctx.emit('info', `[识别输出] ${variable} = ${logPreview(text, 200) || '(空)'}`)
+  ctx.emit('result', `${text.slice(0, 80)} (置信度 ${Math.round(ocr.confidence)})`)
   return null
 }
 
@@ -497,7 +714,7 @@ const setVariable: BlockExecutor = async (data, ctx) => {
   const name = String(data['variableName'] ?? '')
   const value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
   ctx.variables[name] = value
-  ctx.emit('result', `已设置变量 ${name}`)
+  ctx.emit('result', `已设置变量 ${name} = ${logPreview(value) || '(空)'}`)
   return null
 }
 
@@ -1455,6 +1672,15 @@ async function waitForTabLoaded(
  * text — the fill is skipped with an error instead of typing a blank or a
  * leftover `{{token}}` literal into the field.
  */
+/** Human-readable locator summary of a forms/interaction block, for log lines. */
+function describeBlockTarget(data: Record<string, unknown>): string {
+  const selector = sel(data)
+  if (selector) return selector
+  const target = richTargetOf(data)
+  if (target) return `${target.primary.how}|${target.primary.value}`
+  return '(无定位)'
+}
+
 const formsBlock: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const type = String(data['type'] ?? 'text-field')
@@ -1463,14 +1689,21 @@ const formsBlock: BlockExecutor = async (data, ctx) => {
 
   if (type === 'checkbox' || type === 'radio') {
     const checked = typeof value === 'boolean' ? value : true
+    ctx.emit('info', `[表单输入] ${describeBlockTarget(data)} ← ${checked ? '勾选' : '取消勾选'}`)
     return runRaw(withWait({ action: 'set_checkbox', target, value: checked }, data), ctx)
   }
   const raw = String(value ?? '')
   const filled = interpolate(raw, ctx.variables, ctx.refData)
   if (raw.includes('{{') && filled.trim() === '') {
+    // The referenced variable/AI result is empty — echo what the node held so
+    // the log shows WHICH reference resolved to nothing.
+    ctx.emit('info', `[表单输入] 原值: ${logPreview(raw, 120) || '(空)'}`)
     ctx.emit('error', '表单值引用的变量/AI 结果为空，已跳过本次填写')
     return null
   }
+  // Input echo: what will be typed, and where — the two things a "did it fill
+  // the right thing?" investigation needs.
+  ctx.emit('info', `[表单输入] ${describeBlockTarget(data)} ← ${logPreview(filled, 120) || '(空)'}`)
   if (type === 'select') {
     return runRaw(withWait({ action: 'select_option', target, value: filled }, data), ctx)
   }
@@ -1606,6 +1839,7 @@ export const EXECUTORS: Record<string, BlockExecutor> = {
   'wait-for': waitFor,
   'take-screenshot': takeScreenshot,
   'get-text': getText,
+  'ocr': ocrBlock,
   'hover': hover,
   'set-checkbox': setCheckbox,
   'get-form': getForm,

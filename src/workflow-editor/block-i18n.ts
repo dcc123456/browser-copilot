@@ -37,6 +37,7 @@ export const BLOCK_NAMES_ZH: Record<string, string> = {
   'tab-url': '标签页网址',
   'active-tab': '当前标签页',
   'take-screenshot': '截图',
+  ocr: 'OCR 识别',
   clipboard: '剪贴板',
   cookie: 'Cookie',
   'handle-dialog': '处理对话框',

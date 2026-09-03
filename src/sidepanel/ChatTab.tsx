@@ -567,9 +567,35 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     ...ZERO_USAGE,
   }))
 
+  /**
+   * Last cumulative turn usage this panel already folded into `sessionUsage`.
+   * The worker pushes a fresh cumulative snapshot after every model request;
+   * adding the delta against this keeps the live bar exact even if a snapshot
+   * is missed, and the final `done` usage normally contributes zero.
+   */
+  const turnUsageRef = useRef<TurnTokenUsage | null>(null)
+  const applyTurnUsage = useCallback((usage: TurnTokenUsage) => {
+    const last = turnUsageRef.current ?? ZERO_USAGE
+    turnUsageRef.current = { ...usage }
+    // Math.max(0, …) keeps a regressive or out-of-order snapshot from making
+    // the session tally go backwards.
+    setSessionUsage((prev) => ({
+      inputTokens: prev.inputTokens + Math.max(0, usage.inputTokens - last.inputTokens),
+      outputTokens: prev.outputTokens + Math.max(0, usage.outputTokens - last.outputTokens),
+      cachedInputTokens:
+        prev.cachedInputTokens +
+        Math.max(0, (usage.cachedInputTokens ?? 0) - (last.cachedInputTokens ?? 0)),
+      reasoningTokens:
+        prev.reasoningTokens +
+        Math.max(0, (usage.reasoningTokens ?? 0) - (last.reasoningTokens ?? 0)),
+      totalTokens: prev.totalTokens + Math.max(0, usage.totalTokens - last.totalTokens),
+    }))
+  }, [])
+
   // Each conversation gets its own token tally; reset when starting or opening
   // another conversation so the chip reflects only the current one.
   const resetUsage = useCallback(() => {
+    turnUsageRef.current = null
     setSessionUsage({ ...ZERO_USAGE })
   }, [])
   /**
@@ -896,6 +922,22 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             showPhase(labels[message.phase])
             break
           }
+          case 'usage': {
+            // Live token bar: the worker pushes the turn's cumulative usage
+            // after every model request completes. Tag the bubble currently
+            // streaming so its hover breakdown keeps up too; `done` re-tags
+            // the final one with the turn total.
+            const liveId = streamingRef.current
+            if (liveId) {
+              setEntries((prev) =>
+                prev.map((entry) =>
+                  entry.id === liveId ? { ...entry, usage: message.usage } : entry,
+                ),
+              )
+            }
+            applyTurnUsage(message.usage)
+            break
+          }
           case 'done': {
             clearPhase()
             const finishingId = streamingRef.current
@@ -912,13 +954,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                   ),
                 )
               }
-              setSessionUsage((prev) => ({
-                inputTokens: prev.inputTokens + message.usage!.inputTokens,
-                outputTokens: prev.outputTokens + message.usage!.outputTokens,
-                cachedInputTokens: prev.cachedInputTokens + (message.usage!.cachedInputTokens ?? 0),
-                reasoningTokens: prev.reasoningTokens + (message.usage!.reasoningTokens ?? 0),
-                totalTokens: prev.totalTokens + message.usage!.totalTokens,
-              }))
+              // Delta only: per-request `usage` messages already applied the
+              // running total while the turn streamed, so this normally adds
+              // zero — but it still covers a snapshot that never arrived.
+              applyTurnUsage(message.usage)
             }
             break
           }
@@ -984,7 +1023,15 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       portRef.current?.disconnect()
       portRef.current = null
     }
-  }, [append, appendDelta, clearPhase, conversationId, maybePromptSaveWorkflow, showPhase])
+  }, [
+    append,
+    appendDelta,
+    applyTurnUsage,
+    clearPhase,
+    conversationId,
+    maybePromptSaveWorkflow,
+    showPhase,
+  ])
 
   // Refresh the conversation list when it changes and on mount.
   const refreshConversations = useCallback(async () => {
@@ -1261,6 +1308,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         : {}),
     })
     streamingRef.current = null
+    turnUsageRef.current = null
     setBusy(true)
     setDraft('')
     pendingAttachmentsRef.current = []

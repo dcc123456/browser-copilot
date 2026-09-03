@@ -355,6 +355,10 @@ body {
   bottom: 30px;
   left: 0;
   width: 240px;
+  /* Restore wrapping: .composer-row sets white-space: nowrap, which the
+     popover would otherwise inherit, forcing its text onto one long line. */
+  white-space: normal;
+  overflow-wrap: break-word;
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: 8px;

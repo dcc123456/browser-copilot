@@ -59,8 +59,10 @@ function describeSpec(spec: unknown): string {
  * Human summary of the node's conversation locator (`data.target`, written by
  * the chat→workflow generator for role/text targets a CSS selector cannot
  * express). Empty when the node has none — the plain selector shows instead.
+ * Exported for forms that render a selector row outside this skeleton (the
+ * ocr block's element source).
  */
-function targetSummary(data: Record<string, unknown>): string {
+export function targetSummary(data: Record<string, unknown>): string {
   const target = data['target'] as { primary?: unknown; fallbacks?: unknown } | undefined
   const primary = describeSpec(target?.primary)
   if (!primary) return ''

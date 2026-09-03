@@ -25,6 +25,9 @@ through a whole checkout or setup flow — while you watch or stay hands-off.
 - 💬 **Picks up work from Feishu/Lark.** Get notified in a group chat when a
   task finishes, or DM the bot a request from your phone and watch it execute
   in the browser on your machine and reply with the result.
+- 🤝 **Your coding agent can drive it too.** Claude Code, Codex, Trae — any
+  MCP client — gets a browser toolbox through a local adapter and operates
+  your real Chrome (see [Agent integration](#agent-integration-mcp)).
 - 🔒 **Private by construction.** No accounts, no telemetry, no cloud server.
   Your keys and data stay on your machine; passwords are filled locally and
   never shown to the model.
@@ -34,8 +37,9 @@ through a whole checkout or setup flow — while you watch or stay hands-off.
 
 It never acts on its own initiative — every action is either part of answering
 something you just asked, a [scheduled task](#scheduled-tasks) you created, a
-[workflow](#workflows) you built with an enabled trigger, or a command you sent
-from [Feishu/Lark](#feishu--lark-integration).
+[workflow](#workflows) you built with an enabled trigger, a command you sent
+from [Feishu/Lark](#feishu--lark-integration), or a tool call from a coding
+agent you connected over [MCP](#agent-integration-mcp).
 
 ---
 
@@ -52,6 +56,7 @@ from [Feishu/Lark](#feishu--lark-integration).
 - [Workflows](#workflows)
 - [Scheduled tasks](#scheduled-tasks)
 - [Feishu / Lark integration](#feishu--lark-integration)
+- [Agent integration (MCP)](#agent-integration-mcp)
 - [Saved data and privacy](#saved-data-and-privacy)
 - [Development](#development)
 - [Troubleshooting](#troubleshooting)
@@ -372,6 +377,76 @@ independent ways, configured on the **Tasks** tab:
 
 The Feishu connection is kept alive by a watchdog alarm and auto-reconnects if it
 drops. Without app credentials, notifications still work; inbound commands don't.
+
+---
+
+## Agent integration (MCP)
+
+The side panel isn't the only way in. With **Local agent access** turned on,
+Browser Copilot exposes a set of browser tools over
+[MCP](https://modelcontextprotocol.io) to a coding agent running on the same
+machine — Claude Code, Codex, Trae, or any MCP client. The agent can then open
+URLs, read pages, click, fill forms, press keys, switch tabs, run JavaScript,
+recognize CAPTCHA text, and save files — in your real Chrome — which turns
+"change the code, then check it in the browser" into a single conversation.
+
+```
+Claude Code / Codex / Trae   (MCP client)
+     │  stdio · JSON-RPC 2.0 — the agent spawns the adapter itself
+     ▼
+examples/local-agent/mcp-server.mjs   (zero-dependency Node adapter)
+     │  WebSocket · ws://127.0.0.1:8765   (loopback only)
+     ▼
+Browser Copilot extension   (executes every call in your Chrome)
+```
+
+**Requirements.** Node.js ≥ 18 and the extension loaded in Chrome. The adapter
+is one dependency-free file, `examples/local-agent/mcp-server.mjs`, from this
+repository — if you installed from a release zip, download just that one file;
+it does not need to sit inside the extension folder.
+
+**Manual setup, three steps:**
+
+1. Extension panel → **Settings → Local agent access** → turn the switch on.
+   Keep the adapter address `ws://127.0.0.1:8765` and optionally set a shared
+   token; the card shows **Connected** once the link is up.
+2. Register one stdio MCP server named `browser-copilot` that runs Node with
+   `mcp-server.mjs` — copy-ready snippets for Claude Code, Codex, and Trae are
+   right on that settings card.
+3. Start (or restart) your agent — it spawns the adapter over stdio and the
+   extension dials in automatically. No daemon, no `npm install`, no Python.
+
+> 🤖 **Let the AI wire it up.** Copy the prompt below and paste it to your
+> coding agent (Claude Code / Codex / Trae all work) — the agent fetches the
+> setup instructions itself and completes the whole integration; you never
+> need to open a single file:
+>
+> ```text
+> Please set up MCP access to the Browser Copilot Chrome extension for me.
+> The full install guide lives in examples/local-agent/MCP-SETUP-PROMPT.md
+> inside the Browser Copilot repository/plugin folder on this machine. Find
+> that folder, read that file, then follow its setup instructions exactly:
+> check the environment, ask me for the adapter path and an optional shared
+> token, write the MCP config for your own client, walk me through the
+> browser switch, and verify the whole chain with a live call before
+> reporting back. If you cannot find the file, ask me where the Browser
+> Copilot folder is (or fetch it from
+> https://github.com/dcc123456/browser-copilot/blob/main/examples/local-agent/MCP-SETUP-PROMPT.md)
+> instead of guessing paths.
+> ```
+>
+> Curious what the AI will read? The full instructions are in
+> [`examples/local-agent/MCP-SETUP-PROMPT.md`](examples/local-agent/MCP-SETUP-PROMPT.md).
+
+Tools appear as `browser-copilot` MCP tools (`read_current_page`,
+`snapshot_page`, `click`, `fill`, `open_url`, `run_javascript`,
+`recognize_image`, `get_secret`, `use_skill`, …). Security: the adapter binds
+loopback only; an optional shared token keeps other local processes out;
+passwords are filled via `get_secret` without their values ever reaching the
+model; tools you disabled in the extension stay refused even when asked for.
+The full tool table, per-client config examples, and troubleshooting live in
+[`examples/local-agent/README.md`](examples/local-agent/README.md), with a
+detailed [Claude Code manual](examples/local-agent/CLAUDE-CODE.md).
 
 ---
 

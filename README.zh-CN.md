@@ -18,6 +18,9 @@
   无人值守执行一条指令，或汇总你的 GitHub 待评审 PR，并保留完整运行记录。
 - 💬 **从飞书派活、收结果。** 任务完成自动推送到群聊；也可以在手机上私聊机器人下达指令，
   它会在你电脑的浏览器里执行并把结果回复给你。
+- 🤝 **编码助手也能驱动它。** Claude Code、Codex、Trae——任何 MCP 客户端——都能通过
+  本地适配器获得一套浏览器工具，直接操作你真实的 Chrome（见
+  [Agent 接入](#agent-接入mcp)）。
 - 🔒 **天生注重隐私。** 无需账号、无埋点、无云服务器；密钥和数据只保存在你的电脑上，
   密码本地填写、绝不会展示给模型。
 - 💾 **数据就是你硬盘上的文件。** 在设置里选一个文件夹，对话、技能、工作流都会以真实文件
@@ -25,7 +28,8 @@
 
 它不会自作主张地行动——每个动作要么是在执行你刚提出的请求，要么来自你创建的
 [定时任务](#定时任务)，要么来自你搭建并启用了触发器的[工作流](#工作流)，要么是你从
-[飞书](#飞书接入)发来的指令。
+[飞书](#飞书接入)发来的指令，要么是你在[本地接入](#agent-接入mcp)的编码 agent 通过
+MCP 发来的工具调用。
 
 ---
 <video src="https://github.com/user-attachments/assets/17a30b54-608c-43a9-a5ee-770c1d809350" controls="controls" width="100%"></video>
@@ -41,6 +45,7 @@
 - [工作流](#工作流)
 - [定时任务](#定时任务)
 - [飞书接入](#飞书接入)
+- [Agent 接入（MCP）](#agent-接入mcp)
 - [保存的数据与隐私](#保存的数据与隐私)
 - [开发](#开发)
 - [常见问题](#常见问题)
@@ -297,6 +302,64 @@ Browser Copilot 能以两种相互独立的方式接入[飞书](https://www.feis
 
 飞书连接由一个看门狗 alarm 保活，断线会自动重连。没有填应用凭据时，通知仍可用，但无法接收
 指令。
+
+---
+
+## Agent 接入（MCP）
+
+侧边栏不是唯一的入口。开启**本地 Agent 接入**后，Browser Copilot 会通过
+[MCP](https://modelcontextprotocol.io) 向同一台机器上的编码 agent 暴露一组浏览器
+工具——Claude Code、Codex、Trae 或任何 MCP 客户端都行。agent 由此可以打开网址、读取
+页面、点击、填表、按键、切换标签页、执行 JavaScript、识别验证码文字、保存文件——都发生
+在你真实的 Chrome 里，"改完代码、回浏览器验证"从此在一段对话里完成。
+
+```
+Claude Code / Codex / Trae   （MCP 客户端）
+     │  stdio · JSON-RPC 2.0 —— 适配器由 agent 自动拉起
+     ▼
+examples/local-agent/mcp-server.mjs   （零依赖 Node 适配器）
+     │  WebSocket · ws://127.0.0.1:8765   （仅回环）
+     ▼
+Browser Copilot 插件   （在你的 Chrome 中实际执行每个调用）
+```
+
+**环境要求**：Node.js ≥ 18，且 Chrome 已加载本插件。适配器只是仓库里的一个零依赖文件
+`examples/local-agent/mcp-server.mjs`——如果你是用发行版 zip 安装的插件，单独下载这一个
+文件即可，它不必放在插件目录里。
+
+**手动配置，三步**：
+
+1. 插件侧边栏 → **设置 → 本地 Agent 接入** → 打开开关。适配器地址保持
+   `ws://127.0.0.1:8765`，可设置一个共享令牌；链路打通后卡片会显示**已连接**。
+2. 注册一条名为 `browser-copilot` 的 stdio MCP 服务，命令为 `node`、参数指向
+   `mcp-server.mjs`——设置卡片上就有 Claude Code / Codex / Trae 的现成片段可复制。
+3. 启动（或重启）你的 agent——它通过 stdio 自动拉起适配器，插件自动连上。无需常驻
+   进程、无需 `npm install`、无需 Python。
+
+> 🤖 **让 AI 替你接线。** 复制下面这段提示词，整段发给你的编码 agent（Claude Code /
+> Codex / Trae 均可），AI 会自己去找到并读取安装指引，然后完成全部接入——你不需要手动
+> 打开任何文件：
+>
+> ```text
+> 请帮我完成 Browser Copilot 插件的 MCP 接入。完整安装指引在本机 Browser Copilot
+> 仓库/插件目录下的 examples/local-agent/MCP-SETUP-PROMPT.md 文件里：先找到该目录、
+> 读取该文件，然后严格按其中的提示词执行——检查环境、向我询问适配器路径与可选共享
+> 令牌、为你的客户端写入 MCP 配置、引导我在浏览器里开启接入，最后用一次真实调用验证
+> 整条链路并汇报结果。找不到该文件时，先问我 Browser Copilot 目录在哪里，或从
+> https://github.com/dcc123456/browser-copilot/blob/main/examples/local-agent/MCP-SETUP-PROMPT.md
+> 获取，不要臆测路径。
+> ```
+>
+> 想先看看 AI 会读到什么？提示词全文在
+> [`examples/local-agent/MCP-SETUP-PROMPT.md`](examples/local-agent/MCP-SETUP-PROMPT.md)。
+
+工具以 `browser-copilot` 的 MCP 工具出现（`read_current_page`、`snapshot_page`、
+`click`、`fill`、`open_url`、`run_javascript`、`recognize_image`、`get_secret`、
+`use_skill` 等）。安全方面：适配器只绑定回环地址；可选共享令牌挡住本机其它进程；密码
+经 `get_secret` 填入、值从不进入模型；你在插件里禁用的工具即使被请求也会被拒绝。完整的
+工具清单、各客户端配置示例和故障排查见
+[`examples/local-agent/README.md`](examples/local-agent/README.md)，Claude Code 的
+详细手册见 [`examples/local-agent/CLAUDE-CODE.md`](examples/local-agent/CLAUDE-CODE.md)。
 
 ---
 

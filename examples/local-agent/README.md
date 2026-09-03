@@ -12,7 +12,13 @@
 
 ## 安装步骤
 
-> ⚡ **想省事？** 复制 [AUTO-SETUP-PROMPT.md](AUTO-SETUP-PROMPT.md) 里的提示词，整段粘贴给 Claude Code / Trae / Codex，AI 会自动完成下面的安装与验证。
+> ⚡ **想省事？** 把下面一行复制给你的编码 Agent（Claude Code / Codex / Trae 均可），AI 会自动读取 [MCP-SETUP-PROMPT.md](MCP-SETUP-PROMPT.md) 并完成下面的安装与验证：
+>
+> ```text
+> 请阅读 examples/local-agent/MCP-SETUP-PROMPT.md，按其中的提示词完成 Browser Copilot 的 MCP 接入；需要我在浏览器里操作时先询问我。
+> ```
+>
+> Claude Code 用户也可以用 Claude 专用版：[AUTO-SETUP-PROMPT.md](AUTO-SETUP-PROMPT.md)。
 
 1. **安装并启用插件**：在 Chrome 中加载 Browser Copilot 扩展，打开设置，开启 **“本地 Agent 接入 / Local agent access”**（地址默认 `ws://127.0.0.1:8765`）。可选：在插件设置里配置一个**共享 token**，并把它同步到下面 MCP 配置的 `BROWSER_COPILOT_TOKEN`（token 会附加到每个转发给插件的请求上）。
 2. **给编码 Agent 添加一条 stdio MCP 配置**，命令 `node`、参数指向本文件的绝对路径（见下方各 Agent 的配置片段）。

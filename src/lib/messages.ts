@@ -21,11 +21,7 @@ import type {
   Skill,
   UserProfile,
 } from './types'
-import type {
-  FeishuConfig,
-  ScheduledTask,
-  TaskRunLog,
-} from './scheduler-types'
+import type { FeishuConfig, ScheduledTask, TaskRunLog } from './scheduler-types'
 import type { RunOutcomeKind, RunSource, RunStep } from '../background/running-tasks'
 import type { Workflow } from './workflow/types'
 import type { AttachmentDescriptor, AttachmentSummary } from './attachments'
@@ -127,7 +123,11 @@ export type Command =
   | { type: 'workflows.get'; id: string }
   | { type: 'workflows.save'; workflow: Workflow }
   | { type: 'workflows.delete'; id: string }
-  | { type: 'workflows.run'; id: string; /** Run the graph starting at this node id ("run from here"). */ startAt?: string }
+  | {
+      type: 'workflows.run'
+      id: string
+      /** Run the graph starting at this node id ("run from here"). */ startAt?: string
+    }
   | { type: 'workflows.running'; workflowId?: string }
 
   // --- Workflow recording (see background/record-controller.ts) ---
@@ -183,7 +183,10 @@ export type CommandResult =
   | { type: 'tasks.list'; tasks: ScheduledTask[] }
   | { type: 'tasks.save' }
   | { type: 'tasks.delete' }
-  | { type: 'tasks.run'; outcome: { ok: boolean; skipped: boolean; summary: string; error?: string } }
+  | {
+      type: 'tasks.run'
+      outcome: { ok: boolean; skipped: boolean; summary: string; error?: string }
+    }
   | { type: 'tasks.runs'; runs: TaskRunLog[] }
   | { type: 'tasks.runs.clear' }
   | { type: 'tasks.runs.delete' }
@@ -200,7 +203,10 @@ export type CommandResult =
   | { type: 'workflows.get'; workflow?: Workflow }
   | { type: 'workflows.save' }
   | { type: 'workflows.delete' }
-  | { type: 'workflows.run'; outcome: { ok: boolean; skipped: boolean; summary: string; error?: string; runId?: string } }
+  | {
+      type: 'workflows.run'
+      outcome: { ok: boolean; skipped: boolean; summary: string; error?: string; runId?: string }
+    }
   | { type: 'workflows.running'; runs: RunningTaskView[]; finished: FinishedTaskView[] }
   | { type: 'record.start'; recording: boolean }
   | { type: 'record.stop'; workflowId?: string }
@@ -210,9 +216,7 @@ export type CommandResult =
   | { type: 'agent.status'; status: AgentStatus }
 
 /** Envelope so a failed command never looks like a successful one. */
-export type CommandResponse =
-  | { ok: true; data: CommandResult }
-  | { ok: false; error: string }
+export type CommandResponse = { ok: true; data: CommandResult } | { ok: false; error: string }
 
 /** Messages the side panel sends over the agent port. */
 export type AgentClientMessage =
@@ -281,6 +285,15 @@ export type AgentServerMessage =
       argsPreview: string
     }
   | { type: 'status'; text: string }
+  /**
+   * Cumulative token usage of the running turn, pushed after every LLM
+   * request completes (each tool-calling round reports its own trailing
+   * usage chunk). The value is the turn total so far — not the single
+   * round's — so the panel can add the delta against the last value it
+   * applied and the token bar tracks each request live instead of only
+   * updating when the whole turn is done.
+   */
+  | { type: 'usage'; usage: TurnTokenUsage }
   /**
    * A short, machine-named progress phase. The panel maps it to localized text
    * so the worker never has to know the UI language. Emitted at the key points

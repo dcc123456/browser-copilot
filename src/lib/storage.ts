@@ -823,15 +823,34 @@ const ACTION_TO_BLOCK: Record<string, string> = {
   // The agent's wait-for-selector paces the replay; the delay block is the
   // catalog's wait primitive (the legacy `wait-for` id has no catalog block).
   wait_for: 'delay',
-  // JS the agent ran in the page (generating images, DOM surgery, ...) maps
-  // to the catalog's javascript-code block so the workflow replays it.
+  // JS the agent ran in the page maps to the catalog's javascript-code block
+  // so the workflow replays it — EXCEPT fill-shaped code (a single selector +
+  // one literal value write), which becomes the forms operator instead (see
+  // {@link fillLikeJsFromCode}): typing into fields is what the forms block is
+  // for, and the canvas stays declarative.
   run_javascript: 'javascript-code',
+  // The agent's image-text recognition (captchas, image-embedded text) replays
+  // as the local `ocr` block: at run time it re-captures the image from the
+  // page and reads it offline with Tesseract.js.
+  recognize_image: 'ocr',
 }
 
 /** The wait-page-load block inserted after navigation steps. */
 const WAIT_BLOCK_ID = 'wait-connections'
 /** The AI block inserted before form fills whose content should be regenerated. */
 const AI_BLOCK_ID = 'ai-agent'
+/**
+ * Output variable of every generated `ocr` node. A fill that immediately
+ * follows a recognition step references it (`{{lastOcrText}}`), so the replay
+ * fills the FRESHLY recognized text instead of the conversation's now-stale
+ * literal — captchas regenerate on every page load.
+ */
+const OCR_VARIABLE = 'lastOcrText'
+/**
+ * Variable an http(s) recognition image is stored in before the `ocr` node
+ * reads it (source `'variable'`) — see {@link httpImageUrlArg}.
+ */
+const OCR_IMAGE_VARIABLE = 'lastOcrImage'
 
 /** One target spec from an agent tool call (the `TARGET_SCHEMA` in agent.ts). */
 interface TargetSpec {
@@ -993,14 +1012,160 @@ function withRichTarget(
 }
 
 /**
+ * Whether a `screenshot` call's prompt asks for text extraction (a captcha
+ * code, image-embedded characters, digits). A screenshot has no replayable
+ * block by default — it is a visual inspection — but a text-extraction read is
+ * exactly what the `ocr` operator replays, so the generator maps those calls
+ * onto it. Best-effort by design: "is the button disabled?" stays unmapped
+ * while "read the code in the image" becomes an OCR node.
+ */
+const TEXT_EXTRACTION_PROMPT_RE =
+  /captcha|characters?|digits?|\bcode\b|\btext\b|识别|验证码|校验码|文字|字符|数字/i
+
+export function looksTextExtractionPrompt(prompt: string): boolean {
+  return TEXT_EXTRACTION_PROMPT_RE.test(prompt)
+}
+
+/**
+ * Fill-shaped JS detection: recognizes a `run_javascript` snippet that types a
+ * literal into exactly one field and returns the data of the equivalent
+ * `forms` node, so the generated workflow uses the form operator instead of a
+ * JavaScript block. Recognition is deliberately conservative — every condition
+ * must hold, and anything ambiguous stays a javascript-code block (faithful
+ * replay beats a pretty canvas):
+ *   - exactly ONE distinct selector source (`querySelector`/`querySelectorAll`
+ *     /`getElementById` literal);
+ *   - exactly ONE literal value write — a plain `.value = 'x'` assignment or
+ *     the React native-setter pattern (`setter.call(el, 'x')`);
+ *   - no other side effects: `.click(` / `.submit(` refuse the conversion
+ *     (replaying such a snippet as a forms node would silently drop them).
+ * Returns null when the code is not a single-field literal fill — multi-field
+ * batches, variable values (e.g. an OCR result held in a JS variable), clicks,
+ * or plain reads.
+ */
+export function fillLikeJsFromCode(code: string): { selector: string; value: string } | null {
+  if (!code) return null
+  // A click/submit makes the snippet more than a fill — keep it as JS so the
+  // replay performs everything the conversation did.
+  if (/\.click\s*\(|\.submit\s*\(/.test(code)) return null
+
+  // Collect every selector literal; a fill touches exactly one field.
+  const selectors = new Set<string>()
+  const selectorRe =
+    /querySelector(?:All)?\s*\(\s*(['"])([^'"\n]+)\1|getElementById\s*\(\s*(['"])([^'"\n]+)\3/g
+  for (const match of code.matchAll(selectorRe)) {
+    if (match[3] !== undefined) selectors.add(`#${match[4]}`)
+    else selectors.add((match[2] ?? '').trim())
+  }
+  if (selectors.size !== 1) return null
+
+  // A value write must be present: a plain assignment or the React native
+  // setter descriptor (`…getOwnPropertyDescriptor(HTMLInputElement.prototype,
+  // 'value').set` + `setter.call(el, 'x')`).
+  const writesValue =
+    /\.\s*value\s*=/.test(code) ||
+    /getOwnPropertyDescriptor\s*\([^)]*['"]value['"]\s*\)/.test(code)
+  if (!writesValue) return null
+
+  // Exactly one literal value. Template-literal `${…}` interpolations and
+  // bare identifiers are variables, not literals — excluded.
+  const valueRe =
+    /\.\s*value\s*=\s*(['"`])([^'"`\\]*)\1(?!\s*\+)|\.call\s*\(\s*[A-Za-z_$][\w$]*\s*,\s*(['"`])([^'"`\\]*)\3(?!\s*\+)/g
+  const values: string[] = []
+  for (const match of code.matchAll(valueRe)) {
+    const value = match[2] ?? match[4] ?? ''
+    if (value && !value.includes('${')) values.push(value)
+  }
+  if (values.length !== 1) return null
+  return { selector: [...selectors][0]!, value: values[0]! }
+}
+
+/** The literal a fill/select/JS-fill step would write (null when there is none). */
+function literalFillValue(step: HistoryStep): string | null {
+  if (step.action === 'run_javascript') {
+    const code = typeof step.args?.code === 'string' ? step.args.code : ''
+    return fillLikeJsFromCode(code)?.value ?? null
+  }
+  if (step.action !== 'fill' && step.action !== 'select_option') return null
+  const value = step.args?.value
+  return typeof value === 'string' ? value : null
+}
+
+/**
+ * Captcha-token shape: short and single-line — small enough that re-reading
+ * the image at replay is what the user wants, unlike long composed prose
+ * (which goes through the AI prefill path instead).
+ */
+function isShortToken(value: string): boolean {
+  return value.length > 0 && value.length <= 32 && !value.includes('\n')
+}
+
+/**
+ * The catalog block a recorded action maps to. Usually the static
+ * {@link ACTION_TO_BLOCK} entry; fill-shaped `run_javascript` code resolves to
+ * `forms` instead of `javascript-code` — the SAME condition
+ * {@link blockDataFromArgs} uses, so the node id and its data always agree.
+ */
+function blockIdForStep(action: string, args?: Record<string, unknown>): string {
+  if (action === 'run_javascript') {
+    const code = typeof args?.code === 'string' ? args.code : ''
+    if (fillLikeJsFromCode(code)) return 'forms'
+  }
+  return ACTION_TO_BLOCK[action]!
+}
+
+/** Selector synthesized from fill-shaped JS (empty when the step is not one). */
+function jsFillSelector(step: HistoryStep): string {
+  if (step.action !== 'run_javascript') return ''
+  const code = typeof step.args?.code === 'string' ? step.args.code : ''
+  return fillLikeJsFromCode(code)?.selector ?? ''
+}
+
+/**
+ * Index of the recognition step a fill/select/JS-fill step transcribes, or -1.
+ * Walks back a few steps so pacing actions between the recognition and the
+ * fill (wait_for, a captcha-refresh click, a scroll) do not break the
+ * hand-off; stops at ANOTHER form write, which claims the recognition first.
+ */
+function recognitionBefore(steps: HistoryStep[], i: number): number {
+  const action = steps[i]!.action
+  if (action !== 'fill' && action !== 'select_option' && action !== 'run_javascript') return -1
+  for (let j = i - 1; j >= 0 && j >= i - 4; j -= 1) {
+    const step = steps[j]!
+    if (step.action === 'recognize_image') return j
+    // Another form write claims the hand-off before this step does; a
+    // fill-shaped JS snippet is a form write too.
+    if (step.action === 'fill' || step.action === 'select_option') return -1
+    if (step.action === 'run_javascript' && fillLikeJsFromCode(String(step.args?.code ?? ''))) {
+      return -1
+    }
+  }
+  return -1
+}
+
+/**
+ * The http(s) `image` argument of a recognition call, when present. Data URLs
+ * and bare base64 are transient conversation bytes — never persisted; an
+ * http(s) URL, by contrast, is what the conversation actually READ from, and
+ * is replayable (the ocr block's variable source fetches it fresh).
+ */
+function httpImageUrlArg(args: Record<string, unknown> | undefined): string {
+  const image = typeof args?.image === 'string' ? args.image.trim() : ''
+  return /^https?:\/\//i.test(image) ? image : ''
+}
+
+/**
  * Builds the canonical flat block data for a mapped tool action, best-effort
  * from its args. `aiVar` (set for AI-prefilled fills) replaces the literal
- * value with a `{{variable}}` reference to the preceding `ai-agent` node.
+ * value with a `{{variable}}` reference to the preceding `ai-agent` node;
+ * `ocrVar` (set for fills that immediately follow a recognition step) does the
+ * same against the preceding `ocr` node, so the replay reads the FRESH text.
  */
 function blockDataFromArgs(
   action: string,
   args: Record<string, unknown> | undefined,
   aiVar?: string,
+  ocrVar?: string,
 ): Record<string, unknown> {
   const selector = selectorFromArgs(args)
   const target = richTargetFromArgs(args)
@@ -1023,9 +1188,11 @@ function blockDataFromArgs(
           type: 'text-field',
           value: aiVar
             ? `{{${aiVar}}}`
-            : typeof args?.value === 'string'
-              ? args.value
-              : '',
+            : ocrVar
+              ? `{{${ocrVar}}}`
+              : typeof args?.value === 'string'
+                ? args.value
+                : '',
           clearValue: true,
         },
         target,
@@ -1036,7 +1203,13 @@ function blockDataFromArgs(
           selector,
           findBy: 'cssSelector',
           type: 'select',
-          value: typeof args?.value === 'string' ? args.value : '',
+          value: aiVar
+            ? `{{${aiVar}}}`
+            : ocrVar
+              ? `{{${ocrVar}}}`
+              : typeof args?.value === 'string'
+                ? args.value
+                : '',
         },
         target,
       )
@@ -1066,11 +1239,59 @@ function blockDataFromArgs(
       // Mapped to the `delay` block: replay the agent's pacing as a pause.
       // `time` is the catalog + edit-form key (what the executor reads).
       return { time: Number(args?.timeout ?? 5000) }
-    case 'run_javascript':
-      // The agent ran this code in the page's main world; javascript-code
-      // replays it through the same harness. Timeout mirrors the catalog
-      // default so the edit panel shows a real value.
-      return { code: typeof args?.code === 'string' ? args.code : '', timeout: 20000 }
+    case 'run_javascript': {
+      const code = typeof args?.code === 'string' ? args.code : ''
+      // Fill-shaped JS (one selector, one literal value write) becomes the
+      // forms operator: typing into fields is what the forms block is for, and
+      // a following OCR node can hand off {{lastOcrText}} exactly like a real
+      // fill. Anything ambiguous replays verbatim through the same harness the
+      // agent used. Timeout mirrors the catalog default so the edit panel
+      // shows a real value.
+      const fill = fillLikeJsFromCode(code)
+      if (fill) {
+        return {
+          selector: fill.selector,
+          findBy: 'cssSelector',
+          type: 'text-field',
+          value: ocrVar ? `{{${ocrVar}}}` : fill.value,
+          clearValue: true,
+        }
+      }
+      return { code, timeout: 20000 }
+    }
+    case 'recognize_image':
+      // Replays as a live OCR capture. An http(s) `image` argument is what the
+      // conversation actually READ from (usually the <img> src) — it replays
+      // through the variable source (the generator stores the URL in
+      // `lastOcrImage` first); fetching it fresh is more faithful than an
+      // element capture, which page CSP or late rendering can break. With
+      // only a selector the block re-captures that img element at run time;
+      // with neither it reads the visible page. The captcha preprocess
+      // (upscale + contrast) is tuned for SMALL images: an element/variable
+      // capture keeps it, a full-page shot skips it — binarizing a whole page
+      // washes the text out and the read comes back empty. A data-URL `image`
+      // arg is transient (its bytes exist only inside the conversation) and
+      // is intentionally not persisted into the workflow. The recognized
+      // string (type always string) lands in the block's output variable,
+      // default `lastOcrText`.
+      if (httpImageUrlArg(args)) {
+        return {
+          source: 'variable',
+          imageVariable: OCR_IMAGE_VARIABLE,
+          preprocess: true,
+          variableName: OCR_VARIABLE,
+        }
+      }
+      return withRichTarget(
+        {
+          source: selector ? 'element' : 'page',
+          selector,
+          findBy: 'cssSelector',
+          preprocess: Boolean(selector),
+          variableName: OCR_VARIABLE,
+        },
+        selector ? target : undefined,
+      )
     default:
       return {}
   }
@@ -1155,15 +1376,34 @@ function nodeDescription(step: HistoryStep, selector: string): string {
  *
  * Fill steps whose content the model composed get an `ai-agent` node that
  * regenerates the content at replay time (see {@link wantsAiPrefill}).
+ *
+ * Fill-shaped `run_javascript` snippets (one selector, one literal value
+ * write — see {@link fillLikeJsFromCode}) become `forms` nodes instead of
+ * javascript-code, so form filling always shows up as the form operator. A
+ * fill that immediately follows a recognition step references `{{lastOcrText}}`
+ * (see {@link OCR_VARIABLE}) and a text-extraction `screenshot` is replayed as
+ * an `ocr` node, so image recognition always shows up as the OCR operator.
  * Returns `null` when nothing could be mapped.
  */
 export function workflowFromHistory(entries: HistoryEntry[], name: string): Workflow | null {
   const steps: HistoryStep[] = []
   for (const entry of entries) {
-    if (!ACTION_TO_BLOCK[entry.action]) continue
+    // A `screenshot` whose prompt asks for text extraction (reading a captcha,
+    // image-embedded characters) replays as the `ocr` operator just like
+    // recognize_image; plain visual-inspection screenshots have no replayable
+    // block and are skipped. The selector arg name differs (`target` here).
+    let action = entry.action
+    let args: Record<string, unknown> | undefined = entry.args
+    if (action === 'screenshot') {
+      const prompt = typeof args?.prompt === 'string' ? args.prompt : ''
+      if (!looksTextExtractionPrompt(prompt)) continue
+      action = 'recognize_image'
+      args = { selector: typeof args?.target === 'string' ? args.target : '', prompt }
+    }
+    if (!ACTION_TO_BLOCK[action]) continue
     const step: HistoryStep = {
-      action: entry.action,
-      ...(entry.args && typeof entry.args === 'object' ? { args: entry.args } : {}),
+      action,
+      ...(args && typeof args === 'object' ? { args } : {}),
       ...(entry.host ? { host: entry.host } : {}),
       ...(entry.summary ? { summary: entry.summary } : {}),
     }
@@ -1187,58 +1427,137 @@ export function workflowFromHistory(entries: HistoryEntry[], name: string): Work
     data: { blockId: 'trigger', type: 'manual', description: '' },
   })
   let prevId: string = triggerId
+  let prevBlockId = 'trigger'
   let aiSeq = 0
+  let ocrExtractSeq = 0
+  /** Recognition step index → the ai-agent extraction variable added for it. */
+  const extractVarByRecognition = new Map<number, string>()
+  let y = 80
+
+  /**
+   * Appends a node and its incoming edge. Edges carry BLOCK-KEYED handles
+   * (`<blockId>-output-1` → `<blockId>-input-1`) — the same shape the
+   * recorder emits and the canvas renders, so generated connections draw
+   * instead of relying on React Flow's null-handle fallback.
+   */
+  const addNode = (blockId: string, data: Record<string, unknown>): string => {
+    const id = newId()
+    nodes.push({ id, label: blockId, position: { x: 160, y }, data: { blockId, ...data } })
+    edges.push({
+      id: newId(),
+      source: prevId,
+      target: id,
+      sourceHandle: `${prevBlockId}-output-1`,
+      targetHandle: `${blockId}-input-1`,
+    })
+    prevId = id
+    prevBlockId = blockId
+    return id
+  }
 
   steps.forEach((step, i) => {
-    const y = 80 + i * 140
-    const selector = selectorFromArgs(step.args)
+    y = 80 + i * 140
+    // A fill-shaped JS step carries its selector inside the code — once it
+    // becomes a forms node the card shows the selector, so the description
+    // logic must see it (nodeDescription keeps the summary only when there is
+    // no selector to show).
+    const selector = selectorFromArgs(step.args) || jsFillSelector(step)
     const description = nodeDescription(step, selector)
+
+    // OCR hand-off FIRST: a short-token fill shortly after a recognition step
+    // is a TRANSCRIPTION (the captcha code just read), not composed content —
+    // the AI-prefill path below must not claim it. The linked forms node reads
+    // the FRESH recognition output at replay — either `{{lastOcrText}}` or,
+    // when the recognition was a whole-page OCR, the extraction node's
+    // `{{ocrExtractN}}` (the raw dump must not reach the form). Long composed
+    // content keeps the AI-prefill path.
+    const recognizedAt = recognitionBefore(steps, i)
+    let ocrVar: string | undefined
+    if (recognizedAt >= 0 && isShortToken(literalFillValue(step) ?? '')) {
+      ocrVar = extractVarByRecognition.get(recognizedAt) ?? OCR_VARIABLE
+    }
 
     // AI prefill: an `ai-agent` node regenerates the content at replay time;
     // the following forms node references it through `{{variableName}}`.
     let aiVar: string | undefined
-    if (wantsAiPrefill(step)) {
+    if (!ocrVar && wantsAiPrefill(step)) {
       aiSeq += 1
       aiVar = `aiFill${aiSeq}`
       const rawValue = typeof step.args?.value === 'string' ? step.args.value : ''
       const reference =
         rawValue.length > AI_REFERENCE_CAP ? `${rawValue.slice(0, AI_REFERENCE_CAP)}…` : rawValue
-      const aiId = newId()
-      nodes.push({
-        id: aiId,
-        label: AI_BLOCK_ID,
-        position: { x: 160, y },
-        data: {
-          blockId: AI_BLOCK_ID,
-          description: `AI 生成表单内容: ${fieldLabel(step)}`,
-          prompt:
-            `为网页表单字段「${fieldLabel(step)}」生成要填写的内容。` +
-            '直接输出可填入输入框的纯文本，不要解释、不要引号。' +
-            `参考（对话中填写的同用途内容）：${reference}`,
-          findBy: 'cssSelector',
-          selector: '',
-          actOnPage: false,
-          useSnapshot: false,
-          maxToolRounds: 8,
-          variableName: aiVar,
-          // Kept so the save-card toggle can restore the literal value.
-          referenceValue: rawValue,
-        },
+      addNode(AI_BLOCK_ID, {
+        description: `AI 生成表单内容: ${fieldLabel(step)}`,
+        prompt:
+          `为网页表单字段「${fieldLabel(step)}」生成要填写的内容。` +
+          '直接输出可填入输入框的纯文本，不要解释、不要引号。' +
+          `参考（对话中填写的同用途内容）：${reference}`,
+        findBy: 'cssSelector',
+        selector: '',
+        actOnPage: false,
+        useSnapshot: false,
+        maxToolRounds: 8,
+        variableName: aiVar,
+        // Kept so the save-card toggle can restore the literal value.
+        referenceValue: rawValue,
       })
-      edges.push({ id: newId(), source: prevId, target: aiId })
-      prevId = aiId
     }
 
-    const blockId = ACTION_TO_BLOCK[step.action]!
-    const id = newId()
-    nodes.push({
-      id,
-      label: blockId,
-      position: { x: 160, y },
-      data: { blockId, description, ...blockDataFromArgs(step.action, step.args, aiVar) },
+    // A recognition that succeeded through an http(s) `image` argument (the
+    // model's preferred shape — the <img> src it already had) replays through
+    // the variable source: the URL is stored in a variable first, then the ocr
+    // node reads it. An element capture can be blocked by the page's CSP or
+    // run before a late-rendered captcha exists; fetching the URL is what
+    // actually succeeded in the conversation.
+    if (step.action === 'recognize_image') {
+      const imageUrl = httpImageUrlArg(step.args)
+      if (imageUrl) {
+        addNode('set-variable', {
+          description: '记录识别图片地址',
+          variableName: OCR_IMAGE_VARIABLE,
+          value: imageUrl,
+        })
+      }
+    }
+
+    const blockId = blockIdForStep(step.action, step.args)
+    addNode(blockId, {
+      description,
+      ...blockDataFromArgs(step.action, step.args, aiVar, ocrVar),
     })
-    edges.push({ id: newId(), source: prevId, target: id })
-    prevId = id
+
+    // A recognition with NEITHER an image nor a selector OCR'd the WHOLE
+    // visible page — in the conversation the model then picked the wanted
+    // value out of the noisy dump, and the replay needs the same brain: an
+    // ai-agent extraction node (after the ocr node it reads) turns
+    // `lastOcrText` (the full-page dump) into the answer the flow actually
+    // fills (see extractVarByRecognition).
+    if (step.action === 'recognize_image' && !httpImageUrlArg(step.args) && !selector) {
+      ocrExtractSeq += 1
+      const extractVar = `ocrExtract${ocrExtractSeq}`
+      const ask =
+        typeof step.args?.prompt === 'string' && step.args.prompt.trim()
+          ? step.args.prompt.trim()
+          : '提取关键信息'
+      addNode(AI_BLOCK_ID, {
+        description: '提取 OCR 中的关键信息',
+        // Not a save-card prefill row: the extraction is functionally
+        // required — without it the fill would receive the raw page dump.
+        purpose: 'ocr-extract',
+        prompt:
+          `${ask}\n\n` +
+          '以上是要求。下面是页面 OCR 识别出的全部文本（可能包含大量无关噪声），' +
+          '根据要求从文本中得出答案，只输出结果本身，不要解释、不要引号。\n\n' +
+          'OCR 文本：\n{{lastOcrText}}',
+        findBy: 'cssSelector',
+        selector: '',
+        actOnPage: false,
+        useSnapshot: false,
+        maxToolRounds: 8,
+        variableName: extractVar,
+      })
+      extractVarByRecognition.set(i, extractVar)
+    }
 
     // Pace the replay: always wait after navigation; after a click/keypress
     // only when the next step lands on a different host (a page change).
@@ -1250,15 +1569,7 @@ export function workflowFromHistory(entries: HistoryEntry[], name: string): Work
       !!next?.host &&
       step.host !== next.host
     if (navigated || hostChanged) {
-      const waitId = newId()
-      nodes.push({
-        id: waitId,
-        label: WAIT_BLOCK_ID,
-        position: { x: 160, y },
-        data: { blockId: WAIT_BLOCK_ID, description: '等待页面加载', timeout: 10000 },
-      })
-      edges.push({ id: newId(), source: prevId, target: waitId })
-      prevId = waitId
+      addNode(WAIT_BLOCK_ID, { description: '等待页面加载', timeout: 10000 })
     }
   })
 
@@ -1294,7 +1605,12 @@ export function aiPrefillSteps(workflow: Workflow): AiPrefillStep[] {
     const variableName = VAR_TOKEN.exec(String(node.data.value ?? ''))?.[1]
     if (!variableName) continue
     const aiNode = nodes.find(
-      (n) => n.data?.blockId === AI_BLOCK_ID && n.data?.variableName === variableName,
+      (n) =>
+        n.data?.blockId === AI_BLOCK_ID &&
+        n.data?.variableName === variableName &&
+        // An OCR-extraction agent is not a prefill choice — it is required
+        // for the flow to produce the right value at all.
+        n.data?.purpose !== 'ocr-extract',
     )
     if (!aiNode) continue
     steps.push({
@@ -1322,6 +1638,8 @@ export function applyAiPrefillOptions(
   const aiByVar = new Map<string, WorkflowNode>()
   for (const node of nodes) {
     if (node.data?.blockId !== AI_BLOCK_ID) continue
+    // OCR-extraction agents are not save-card controllable (see aiPrefillSteps).
+    if (node.data?.purpose === 'ocr-extract') continue
     const variableName = String(node.data.variableName ?? '')
     if (variableName) aiByVar.set(variableName, node)
   }
@@ -1341,6 +1659,8 @@ export function applyAiPrefillOptions(
   // Enable/disable each paired ai-agent node alongside its forms step.
   const finalNodes = nextNodes.map((node) => {
     if (node.data?.blockId !== AI_BLOCK_ID) return node
+    // OCR-extraction agents are not save-card controllable (see aiPrefillSteps).
+    if (node.data?.purpose === 'ocr-extract') return node
     const variableName = String(node.data.variableName ?? '')
     // Pair against the ORIGINAL nodes: the disable direction already replaced
     // the forms `{{var}}` value with the literal above, so the post-update list

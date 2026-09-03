@@ -1365,24 +1365,56 @@ export async function clipboardInsert(text: string): Promise<void> {
 interface OcrReply {
   ok: boolean
   text?: string
+  /** Tesseract confidence (0-100) for the returned text, when reported. */
+  confidence?: number
+  /** True when both segmentation passes normalized to the same reading. */
+  agreed?: boolean
+  /** Runner-up readings from the second segmentation pass, when they disagree. */
+  alternatives?: string[]
   error?: string
 }
 
 /**
  * Runs local OCR (Tesseract.js) on a data URL in the offscreen document.
- * Returns the recognized text, or `{ ok: false, error }` when the worker could
- * not load (e.g. the requested language data is not vendored). Recognizes
- * fully offline — no image model or network required.
+ * Returns the recognized text with its confidence and an agreement flag
+ * (plus alternative readings when the two segmentation passes disagree), or
+ * `{ ok: false, error }` when the worker could not load (e.g. the requested
+ * language data is not vendored). Recognizes fully offline — no image model
+ * or network required.
  */
 export async function ocrImage(
   dataUrl: string,
   lang = 'eng',
-): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; text: string; confidence: number; agreed: boolean; alternatives?: string[] }
+  | { ok: false; error: string }
+> {
   await ensureOffscreen()
   const reply = await chrome.runtime.sendMessage({ type: 'ocr-image', image: dataUrl, lang })
   const result = reply as OcrReply | undefined
   if (!result || !result.ok) {
     return { ok: false, error: result?.error ?? 'OCR failed' }
   }
-  return { ok: true, text: result.text ?? '' }
+  return {
+    ok: true,
+    text: result.text ?? '',
+    confidence: result.confidence ?? 0,
+    agreed: result.agreed ?? false,
+    ...(result.alternatives && result.alternatives.length > 0 ? { alternatives: result.alternatives } : {}),
+  }
+}
+
+/**
+ * Pre-loads the OCR worker (WASM compile + language model) in the offscreen
+ * document so the first real `ocrImage` call skips the multi-second cold start.
+ * Best effort: every failure is swallowed — warmup is purely an optimization
+ * and the first `ocrImage` call would initialize the worker anyway.
+ */
+export async function warmupOcr(lang = 'eng'): Promise<void> {
+  try {
+    await ensureOffscreen()
+    await chrome.runtime.sendMessage({ type: 'ocr-warm', lang })
+  } catch {
+    // Ignore: warmup must never break startup.
+  }
 }

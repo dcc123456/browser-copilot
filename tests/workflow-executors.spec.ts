@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { elementExists, execOnActiveTab } from '../src/background/driver'
+import { elementExists, execOnActiveTab, ocrImage } from '../src/background/driver'
 import {
   EXECUTORS,
+  cropRectFor,
   type WorkflowExecCtx,
 } from '../src/background/workflow-engine/executors'
 import type { OpResult } from '../src/lib/ops'
@@ -10,7 +11,9 @@ import type { OpResult } from '../src/lib/ops'
  * The driver module is imported for real except `execOnActiveTab`, which we
  * replace so executors never touch the real kernel. Every other driver export
  * (`newTab`, `switchTab`, `closeActiveTab`) keeps its own chrome-backed logic,
- * which is stubbed via the global `chrome` mock below.
+ * which is stubbed via the global `chrome` mock below. `ocrImage` (the local
+ * Tesseract OCR via the offscreen document) is stubbed too so OCR-block tests
+ * never need the offscreen runtime.
  */
 vi.mock('../src/background/driver', async (importActual) => {
   const actual = await importActual<typeof import('../src/background/driver')>()
@@ -20,6 +23,7 @@ vi.mock('../src/background/driver', async (importActual) => {
     // elementExists reads the page via driver-internal execOnActiveTab, which the
     // module mock above cannot intercept; stub it so branch executors are testable.
     elementExists: vi.fn(async () => 1),
+    ocrImage: vi.fn(async () => ({ ok: true, text: '', confidence: 0 })),
   }
 })
 
@@ -52,12 +56,19 @@ function makeChromeMock() {
   const goForward = vi.fn(async () => {})
   const captureVisibleTab = vi.fn(async () => 'data:image/png;base64,ZZZ')
   const executeScript = vi.fn(async (_details: { target: { tabId: number }; args?: unknown[] }) => [
-    { result: 'hello text' },
+    { result: 'hello text' as unknown },
   ])
   return {
     chrome: {
       tabs: { query, update, create, reload, remove, goBack, goForward, captureVisibleTab },
       scripting: { executeScript },
+      // getSettings() (used by the ai-prompt and ocr blocks) reads storage.
+      storage: {
+        local: {
+          get: async () => ({}),
+          set: async () => {},
+        },
+      },
     },
     refs: { query, update, create, reload, remove, goBack, goForward, captureVisibleTab, executeScript, tab },
   }
@@ -324,5 +335,199 @@ describe('workflow executors (automa-aligned browser actions)', () => {
     const [op] = driverMock.mock.calls[0]!
     expect(op.action).toBe('create_element')
     expect(op.value).toBe('<div>x</div>')
+  })
+})
+
+describe('workflow ocr block', () => {
+  let chromeRefs: ReturnType<typeof makeChromeMock>['refs']
+  let driverMock: ReturnType<typeof vi.fn>
+  let ocrMock: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    const mock = makeChromeMock()
+    chromeRefs = mock.refs
+    vi.stubGlobal('chrome', mock.chrome)
+    driverMock = vi.mocked(execOnActiveTab)
+    driverMock.mockReset()
+    driverMock.mockResolvedValue(opResult)
+    ocrMock = vi.mocked(ocrImage)
+    ocrMock.mockReset()
+    ocrMock.mockResolvedValue({ ok: true, text: '  AB12  ', confidence: 88.4 })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('page source captures the visible tab, stores the trimmed text, and reports confidence', async () => {
+    chromeRefs.captureVisibleTab.mockResolvedValue('data:image/png;base64,PAGE')
+    const { ctx, emit } = makeCtx()
+    await EXECUTORS['ocr']!({}, ctx)
+
+    expect(chromeRefs.captureVisibleTab).toHaveBeenCalledWith(1, { format: 'png' })
+    // preprocessImage is a no-op without OffscreenCanvas, so the captured
+    // data URL reaches the OCR call as-is.
+    expect(ocrMock).toHaveBeenCalledWith('data:image/png;base64,PAGE', 'eng')
+    expect(ctx.variables['lastOcrText']).toBe('AB12')
+    expect(emit).toHaveBeenCalledWith('result', expect.stringContaining('AB12'))
+    expect(emit).toHaveBeenCalledWith('result', expect.stringContaining('88'))
+  })
+
+  it('element source scrolls into view, then captures the selector in-page for OCR', async () => {
+    driverMock.mockResolvedValue({ ...opResult, data: 'data:image/png;base64,EL' })
+    const { ctx } = makeCtx()
+    await EXECUTORS['ocr']!({ source: 'element', selector: 'img.captcha' }, ctx)
+
+    // First op scrolls the element into view (shadow-piercing kernel target)…
+    const [scrollOp] = driverMock.mock.calls[0]!
+    expect(scrollOp.action).toBe('scroll')
+    expect(scrollOp.target).toEqual({
+      primary: { how: 'css', value: 'img.captcha' },
+      fallbacks: [],
+    })
+    // …then the capture op polls (`waitFor`) for late-rendered elements.
+    const [captureOp] = driverMock.mock.calls[1]!
+    expect(captureOp.action).toBe('capture')
+    expect(captureOp.value).toBe('img.captcha')
+    expect(captureOp.waitFor).toBe(2000)
+    expect(ocrMock).toHaveBeenCalledWith('data:image/png;base64,EL', 'eng')
+    expect(ctx.variables['lastOcrText']).toBe('AB12')
+  })
+
+  it('element source retries the capture and reports a precise error when the element never appears', async () => {
+    // The in-page SVG capture is blocked (e.g. page CSP forbidding data: images)
+    // AND the element is absent from the top document (iframe / late render).
+    // The block retries, then reports WHY instead of an opaque failure.
+    driverMock.mockResolvedValue({ ...opResult, ok: false, error: 'capture: SVG 加载失败' })
+    chromeRefs.executeScript.mockResolvedValue([{ result: null }])
+    const { ctx, emit } = makeCtx()
+    await EXECUTORS['ocr']!({ source: 'element', selector: 'img.captcha' }, ctx)
+
+    expect(ocrMock).not.toHaveBeenCalled()
+    // 3 attempts × (scroll + capture).
+    expect(driverMock.mock.calls).toHaveLength(6)
+    expect(emit).toHaveBeenCalledWith('error', expect.stringContaining('找不到元素'))
+    expect(emit).toHaveBeenCalledWith('error', expect.stringContaining('iframe'))
+  })
+
+  it('variable source reads an image data URL from the named variable', async () => {
+    const { ctx } = makeCtx()
+    ctx.variables['shot'] = 'data:image/png;base64,VAR'
+    await EXECUTORS['ocr']!({ source: 'variable', imageVariable: 'shot' }, ctx)
+
+    expect(chromeRefs.captureVisibleTab).not.toHaveBeenCalled()
+    expect(driverMock).not.toHaveBeenCalled()
+    expect(ocrMock).toHaveBeenCalledWith('data:image/png;base64,VAR', 'eng')
+  })
+
+  it('variable source wraps a bare base64 payload into a data URL for the canvas', async () => {
+    const { ctx } = makeCtx()
+    const b64 = 'A'.repeat(64)
+    ctx.variables['shot'] = b64
+    await EXECUTORS['ocr']!({ source: 'variable', imageVariable: 'shot' }, ctx)
+
+    expect(ocrMock).toHaveBeenCalledWith(`data:image/png;base64,${b64}`, 'eng')
+    expect(ctx.variables['lastOcrText']).toBe('AB12')
+  })
+
+  it('variable source fetches an http(s) image link and re-encodes it as a data URL', async () => {
+    const bytes = new TextEncoder().encode('fake-png-bytes')
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      headers: { get: () => 'image/png' },
+      arrayBuffer: async () => bytes.buffer,
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { ctx } = makeCtx()
+    ctx.variables['shot'] = 'https://example.com/captcha.png'
+    await EXECUTORS['ocr']!({ source: 'variable', imageVariable: 'shot' }, ctx)
+
+    expect(fetchMock).toHaveBeenCalledWith('https://example.com/captcha.png', expect.anything())
+    const [dataUrl] = ocrMock.mock.calls[0]!
+    expect(String(dataUrl)).toMatch(/^data:image\/png;base64,/)
+    expect(ctx.variables['lastOcrText']).toBe('AB12')
+  })
+
+  it('variable source errors on a value that is not an image reference', async () => {
+    const { ctx, emit } = makeCtx()
+    ctx.variables['shot'] = 'not-an-image-value'
+    await EXECUTORS['ocr']!({ source: 'variable', imageVariable: 'shot' }, ctx)
+
+    expect(ocrMock).not.toHaveBeenCalled()
+    expect(emit).toHaveBeenCalledWith('error', expect.stringContaining('base64'))
+  })
+
+  it('an explicit lang overrides the global setting', async () => {
+    chromeRefs.captureVisibleTab.mockResolvedValue('data:image/png;base64,PAGE')
+    const { ctx } = makeCtx()
+    await EXECUTORS['ocr']!({ lang: 'chi_sim+eng' }, ctx)
+    expect(ocrMock).toHaveBeenCalledWith(expect.any(String), 'chi_sim+eng')
+  })
+
+  it('the output variable name is editable and the value is always a string', async () => {
+    chromeRefs.captureVisibleTab.mockResolvedValue('data:image/png;base64,PAGE')
+    const { ctx } = makeCtx()
+    await EXECUTORS['ocr']!({ variableName: 'captcha' }, ctx)
+    expect(ctx.variables['captcha']).toBe('AB12')
+    // No fixed-output guarantee: the default name is only used when unset.
+    expect(ctx.variables['lastOcrText']).toBeUndefined()
+  })
+
+  it('an empty output variable name falls back to lastOcrText', async () => {
+    chromeRefs.captureVisibleTab.mockResolvedValue('data:image/png;base64,PAGE')
+    const { ctx } = makeCtx()
+    await EXECUTORS['ocr']!({ variableName: '' }, ctx)
+    expect(ctx.variables['lastOcrText']).toBe('AB12')
+  })
+
+  it('an empty read throws with diagnostics so the engine onError machinery (retry/fallback) applies', async () => {
+    ocrMock.mockResolvedValue({ ok: true, text: '   ', confidence: 0 })
+    const { ctx, emit } = makeCtx()
+    await expect(EXECUTORS['ocr']!({}, ctx)).rejects.toThrow('未识别到文字')
+    // The failure must not look like a success — but the input diagnostics
+    // (source, image size, preprocess) DO get logged to aid investigation.
+    expect(emit).not.toHaveBeenCalledWith('result', expect.anything())
+    expect(emit).toHaveBeenCalledWith('info', expect.stringContaining('[识别输入]'))
+  })
+
+  it('a failed OCR run surfaces the driver error as a block error', async () => {
+    ocrMock.mockResolvedValue({ ok: false, error: 'OCR failed' })
+    const { ctx, emit } = makeCtx()
+    await expect(EXECUTORS['ocr']!({}, ctx)).rejects.toThrow('OCR failed')
+    expect(emit).not.toHaveBeenCalledWith('result', expect.anything())
+  })
+
+  it('a missing element selector errors without calling OCR', async () => {
+    const { ctx, emit } = makeCtx()
+    await EXECUTORS['ocr']!({ source: 'element', selector: '' }, ctx)
+    expect(ocrMock).not.toHaveBeenCalled()
+    expect(emit).toHaveBeenCalledWith('error', expect.stringContaining('选择器'))
+  })
+})
+
+describe('ocr cropRectFor (visible-page crop math)', () => {
+  it('scales the CSS-pixel rect by devicePixelRatio', () => {
+    expect(cropRectFor({ x: 10, y: 20, w: 100, h: 40, dpr: 2 }, 1600, 900)).toEqual({
+      x: 20,
+      y: 40,
+      w: 200,
+      h: 80,
+    })
+  })
+
+  it('clamps the crop to the captured image bounds', () => {
+    // Element hangs off the right/bottom edge of the viewport image.
+    expect(cropRectFor({ x: 790, y: 440, w: 100, h: 100, dpr: 1 }, 800, 500)).toEqual({
+      x: 790,
+      y: 440,
+      w: 10,
+      h: 60,
+    })
+  })
+
+  it('returns null when the element lies entirely outside the viewport image', () => {
+    expect(cropRectFor({ x: 2000, y: 20, w: 100, h: 40, dpr: 1 }, 800, 500)).toBeNull()
+    expect(cropRectFor({ x: 10, y: 600, w: 100, h: 40, dpr: 1 }, 800, 500)).toBeNull()
   })
 })

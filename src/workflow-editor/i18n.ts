@@ -295,6 +295,15 @@ const BLOCK_FORM_STRINGS = {
     'Clear form value': '清空输入框',
     'Get form value': '获取表单值',
     'Form type': '表单类型',
+    Selected: '设为选中',
+    'The value': '按选项值',
+    'Position: First option': '位置：第一项',
+    'Position: Last option': '位置：最后一项',
+    'Position: Custom': '位置：自定义',
+    'Content to fill into the field. Supports variable references such as {{lastOcrText}} (the latest OCR result) or {{aiFill1}} (AI-generated content).':
+      '要填入输入框的内容。支持变量引用，如 {{lastOcrText}}（最近的 OCR 识别结果）或 {{aiFill1}}（AI 生成的内容）。',
+    'Option value to select. Supports variable references such as {{lastOcrText}}.':
+      '要选择的选项值。支持变量引用，如 {{lastOcrText}}。',
     'Input type': '输入类型',
     'Select an option by': '选择选项方式',
     'Option position': '选项位置',

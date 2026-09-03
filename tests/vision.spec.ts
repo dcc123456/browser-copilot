@@ -3,6 +3,7 @@ import {
   buildVisionRequestBody,
   defaultRecognitionPrompt,
   inspectImage,
+  preprocessImage,
   recognizeImage,
   resolveVisionTarget,
 } from '../src/lib/vision'
@@ -144,6 +145,13 @@ describe('recognizeImage', () => {
       recognizeImage(target, 'data:image/png;base64,abc', { signal: new AbortController().signal }),
     ).rejects.toThrow('aborted')
     vi.unstubAllGlobals()
+  })
+})
+
+describe('preprocessImage', () => {
+  it('returns the input unchanged when no OffscreenCanvas exists', async () => {
+    const dataUrl = 'data:image/png;base64,abc'
+    expect(await preprocessImage(dataUrl)).toBe(dataUrl)
   })
 })
 
