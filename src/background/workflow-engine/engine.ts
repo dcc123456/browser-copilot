@@ -11,6 +11,7 @@
 
 import type { Workflow, WorkflowEdge, WorkflowNode } from '../../lib/workflow/types'
 import { getWorkflow } from '../../lib/workflow/storage'
+import type { ScopeWindow } from '../automation-scope'
 import {
   EXECUTORS,
   type BlockExecutor,
@@ -26,6 +27,12 @@ export interface WorkflowRunOptions {
   variables?: Record<string, unknown>
   /** Shared abort signal; aborting requests a `'cancelled'` outcome. */
   signal?: AbortSignal
+  /**
+   * Panel-window scope threaded onto every block executor's ctx. Runs started
+   * from the side panel scope to the panel's window; unattended runs omit it
+   * for the legacy global resolution.
+   */
+  scope?: ScopeWindow
   /** Called for every status/result/error/info a block emits, plus engine errors. */
   onStep?(kind: EmitKind, nodeId: string, text: string): void
   /** Override / inject the block-executor map (falls back to {@link EXECUTORS}). */
@@ -218,6 +225,7 @@ function buildExecCtx(
   onStep: (kind: EmitKind, nodeId: string, text: string) => void,
   tabId: number | undefined,
   setTab: (id: number) => void,
+  scope: ScopeWindow | undefined,
 ): WorkflowExecCtx {
   return {
     variables,
@@ -227,6 +235,7 @@ function buildExecCtx(
     defaultNext,
     tabId,
     setTab,
+    ...(scope ? { scope } : {}),
     emit: (kind, text) => onStep(kind, currentId, text),
   }
 }
@@ -260,6 +269,7 @@ async function runCore(
     startAt,
     variables = {},
     signal,
+    scope,
     onStep,
     executors = EXECUTORS,
     parentWorkflowIds = new Set<string>(),
@@ -392,6 +402,7 @@ async function runCore(
       (id) => {
         targetTabId = id
       },
+      scope,
     )
     const policy = onErrorPolicy(params)
 
@@ -590,6 +601,7 @@ async function runCore(
     await runCore(child, {
       variables,
       signal: signalToUse,
+      scope,
       executors,
       parentWorkflowIds: childStack,
       loopElementCounter,

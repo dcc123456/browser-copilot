@@ -12,6 +12,7 @@
 import type { Workflow } from '../../lib/workflow/types'
 import { addStep, finishRun, recordSnapshot, startRun, type RunSource } from '../running-tasks'
 import { countElements, execJsOnActiveTab } from '../driver'
+import { normalScopeFromWindowId } from '../automation-scope'
 import { BLOCK_BY_ID } from '../../lib/workflow/blocks/palette'
 import { runWorkflow } from './engine'
 
@@ -31,6 +32,14 @@ export interface ExecuteWorkflowOptions {
   taskId?: string
   feishuChatId?: string
   variables?: Record<string, unknown>
+  /**
+   * Window id of the panel that launched this run. Validated once here and
+   * threaded to every block, so panel-started runs act ONLY inside that
+   * window; undefined (scheduler, Feishu, triggers) keeps the legacy global
+   * resolution. A non-normal window (standalone editor popup) also degrades
+   * to undefined inside {@link normalScopeFromWindowId}.
+   */
+  scopeWindowId?: number
   /** Node id to start execution from ("run workflow from here"); defaults to the trigger/first node. */
   startAt?: string
   /** Capture per-block variable snapshots for the logs viewer (debug mode). */
@@ -65,14 +74,19 @@ export async function executeWorkflow(
   const runId = run.runId
 
   try {
+    // Validate the panel scope once for the whole run; every block then reads
+    // the same ScopeWindow (no per-block window lookups).
+    const scope =
+      opts.scopeWindowId === undefined ? undefined : await normalScopeFromWindowId(opts.scopeWindowId)
     const result = await runWorkflow(workflow, {
       startAt: opts.startAt,
       variables: opts.variables,
       signal: run.controller.signal,
-      loopElementCounter: (selector, signal) => countElements(selector, signal),
+      ...(scope ? { scope } : {}),
+      loopElementCounter: (selector, signal) => countElements(selector, signal, scope),
       // JS conditions run in the page: the service worker CSP forbids eval.
       evaluateExpression: async (code, vars) => {
-        const result = await execJsOnActiveTab(`return (${code});`, { vars }, run.controller.signal)
+        const result = await execJsOnActiveTab(`return (${code});`, { vars }, run.controller.signal, undefined, scope)
         return result.ok ? result.data : undefined
       },
       onSnapshot: opts.debug

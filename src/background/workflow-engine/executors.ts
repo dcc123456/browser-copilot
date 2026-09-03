@@ -27,6 +27,7 @@ import {
 import { aiAgent } from './ai-agent-executor'
 import type { Op, ScrollSpec, Target, TargetSpec } from '../../lib/ops'
 import { activeTab } from '../page'
+import type { ScopeWindow } from '../automation-scope'
 import {
   clipboardGet,
   clipboardInsert,
@@ -81,6 +82,13 @@ export interface WorkflowExecCtx {
    * instead of the extension popup that launched the run.
    */
   tabId?: number
+  /**
+   * Panel-window scope for this run: every tab resolution, tab op and page
+   * action stays inside this window (undefined = legacy global resolution for
+   * unattended runs). Validated once by the run layer; the engine only
+   * threads it through.
+   */
+  scope?: ScopeWindow
   /** Pin the target tab (called by new-tab / link / switch-tab executors). */
   setTab?: (tabId: number) => void
   /**

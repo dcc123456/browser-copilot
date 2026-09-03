@@ -63,6 +63,27 @@ describe('workflow engine', () => {
     expect(result.completedNodeIds).toEqual(['a', 'b', 'c'])
   })
 
+  it('threads the panel-window scope onto every block ctx (and omits it when absent)', async () => {
+    const seen: (unknown)[] = []
+    const wf = makeWorkflow([node('a', 'step-a'), node('b', 'step-b')], [edge('a', 'b')])
+    const executors = {
+      'step-a': async (_data: Record<string, unknown>, ctx: { scope?: unknown }) => {
+        seen.push(ctx.scope)
+        return null
+      },
+      'step-b': async (_data: Record<string, unknown>, ctx: { scope?: unknown }) => {
+        seen.push(ctx.scope)
+        return null
+      },
+    }
+    await runWorkflow(wf, { executors, scope: { windowId: 7 } })
+    expect(seen).toEqual([{ windowId: 7 }, { windowId: 7 }])
+
+    seen.length = 0
+    await runWorkflow(wf, { executors })
+    expect(seen).toEqual([undefined, undefined])
+  })
+
   it('routes through a branch executor to the edge it returns', async () => {
     const order: string[] = []
     // picks outputs['true'] when flag is set, else outputs['false']
