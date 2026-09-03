@@ -7,10 +7,14 @@
  * the real adapter over stdio and asserts the wire format, so the root-cause
  * fix cannot silently regress.
  *
- * The outcome is deterministic: whether the spawned instance becomes the main
- * adapter (port 8765 free, plugin offline → static fallback) or falls into
- * proxy mode (port occupied), `tools/list` still returns the MCP-format static
- * tool list.
+ * Each test grabs a fresh ephemeral port and pins every spawned adapter to it
+ * (BROWSER_COPILOT_PORT), so the suite never collides with a real adapter the
+ * developer may be running locally on the default port 8765 — otherwise every
+ * WS connection here lands on the REAL server/extension (observed as a live
+ * navigation to www.baidu.com). The outcome is deterministic: whether the
+ * spawned instance becomes the main adapter (port free, plugin offline →
+ * static fallback) or falls into proxy mode (port occupied), `tools/list`
+ * still returns the MCP-format static tool list.
  *
  * The second test covers the other reported symptom — "plugin not connected"
  * when *calling* a tool. It assembles the full chain (main adapter + a fake
@@ -29,7 +33,29 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ADAPTER = path.join(ROOT, 'examples', 'local-agent', 'mcp-server.mjs')
-const PORT = 8765
+
+/**
+ * Grabs a fresh free loopback port from the OS. The suite spawns real adapter
+ * processes, so hardcoding 8765 collides with a real adapter the developer may
+ * be running locally — every WS connection would then land on the REAL
+ * server/extension instead of the spawned ones. An ephemeral port keeps the
+ * test hermetic.
+ */
+async function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer()
+    srv.once('error', reject)
+    srv.listen(0, '127.0.0.1', () => {
+      const address = srv.address() as net.AddressInfo
+      srv.close(() => resolve(address.port))
+    })
+  })
+}
+
+/** Spawned adapters must bind the test's ephemeral port, not the default 8765. */
+function adapterEnv(port: number): NodeJS.ProcessEnv {
+  return { ...process.env, BROWSER_COPILOT_PORT: String(port) }
+}
 
 interface Tool {
   name?: unknown
@@ -43,12 +69,12 @@ let proc: ChildProcessWithoutNullStreams | null = null
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
-/** Resolves once a TCP listener accepts connections on 127.0.0.1:PORT. */
-function waitForPort(timeoutMs = 5000): Promise<void> {
+/** Resolves once a TCP listener accepts connections on 127.0.0.1:port. */
+function waitForPort(port: number, timeoutMs = 5000): Promise<void> {
   return new Promise((resolve, reject) => {
     const deadline = Date.now() + timeoutMs
     const tryConnect = (): void => {
-      const sock = net.connect(PORT, '127.0.0.1')
+      const sock = net.connect(port, '127.0.0.1')
       sock.once('connect', () => {
         sock.destroy()
         resolve()
@@ -111,8 +137,10 @@ afterEach(() => {
 
 describe('mcp-server tools/list wire format', () => {
   it('returns every tool in MCP format with no OpenAI wrapper or schema refs', async () => {
+    const port = await freePort()
     proc = spawn(process.execPath, [ADAPTER], {
       cwd: ROOT,
+      env: adapterEnv(port),
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     proc.stderr.resume()
@@ -163,17 +191,19 @@ describe('mcp-server tools/list wire format', () => {
     'routes a proxy-mode tools/call to the plugin instead of rejecting as offline',
     { timeout: 25_000 },
     async () => {
-      // --- 1. main adapter: binds 127.0.0.1:8765 -------------------------------
+      const port = await freePort()
+      // --- 1. main adapter: binds the ephemeral port ---------------------------
       const main = spawn(process.execPath, [ADAPTER], {
         cwd: ROOT,
+        env: adapterEnv(port),
         stdio: ['pipe', 'pipe', 'pipe'],
       })
       main.stderr.resume()
       try {
-        await waitForPort()
+        await waitForPort(port)
 
         // --- 2. fake plugin: a WS client that answers the adapter's requests ----
-      const plugin = new WebSocket(`ws://127.0.0.1:${PORT}`)
+      const plugin = new WebSocket(`ws://127.0.0.1:${port}`)
       const pluginReady = new Promise<void>((resolve, reject) => {
         plugin.onopen = () => {
           // First message makes the main adapter register this socket as "plugin".
@@ -222,6 +252,7 @@ describe('mcp-server tools/list wire format', () => {
       // --- 3. proxy adapter: port occupied → EADDRINUSE → proxy mode ------------
       proc = spawn(process.execPath, [ADAPTER], {
         cwd: ROOT,
+        env: adapterEnv(port),
         stdio: ['pipe', 'pipe', 'pipe'],
       })
       proc.stderr.resume()
@@ -253,22 +284,24 @@ describe('mcp-server tools/list wire format', () => {
     'registers a plugin that pings WITHOUT an id, so tools/call executes instead of returning "插件未连接"',
     { timeout: 25_000 },
     async () => {
-      // --- 1. main adapter: binds 127.0.0.1:8765 -------------------------------
+      const port = await freePort()
+      // --- 1. main adapter: binds the ephemeral port ---------------------------
       const main = spawn(process.execPath, [ADAPTER], {
         cwd: ROOT,
+        env: adapterEnv(port),
         stdio: ['pipe', 'pipe', 'pipe'],
       })
       main.stderr.resume()
       proc = main // afterEach + finally both clean this up
       try {
-        await waitForPort()
+        await waitForPort(port)
 
         // --- 2. fake plugin: mirrors the REAL Browser Copilot plugin ------------
         // The real plugin sends `{ type: 'ping' }` on connect — no `id` field.
         // The adapter must still register this socket as "the plugin", otherwise
         // tools/list returns the static fallback and tools/call fails with
         // "Browser Copilot 插件未连接".
-        const plugin = new WebSocket(`ws://127.0.0.1:${PORT}`)
+        const plugin = new WebSocket(`ws://127.0.0.1:${port}`)
         const pluginReady = new Promise<void>((resolve, reject) => {
           plugin.onopen = () => {
             plugin.send(JSON.stringify({ type: 'ping' }))

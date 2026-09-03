@@ -63,7 +63,10 @@ import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 
 const HOST = '127.0.0.1';
-const PORT = 8765;
+// 端口可被环境变量覆盖（BROWSER_COPILOT_PORT）：供 mcp-tools-format.spec.ts 的
+// 集成测试使用——测试要在同一台机器上起多份 adapter 实例互相对接，用临时端口
+// 避免和用户本机正在运行的真实适配器（默认 8765）互相干扰。
+const PORT = Number(process.env.BROWSER_COPILOT_PORT) || 8765;
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const REQUEST_TIMEOUT_MS = 120_000; // 等待插件响应超时
 const MAX_FRAME_SIZE = 1 << 20; // 单帧最大 ~1MB
@@ -254,9 +257,13 @@ function sanitizeSchema(node) {
       : sanitizeSchema(node.items);
   }
   if (Array.isArray(node.required) && out.properties) {
-    out.required = node.required.filter((k) =>
+    // 过滤后为空（如 STATIC_TOOLS 里 required: t.required || [] 生成的 []）
+    // 时不输出该字段：required: [] 与省略语义相同，但测试契约要求 click 这类
+    // 无必填参数的工具在 wire format 上干脆没有 required 字段。
+    const required = node.required.filter((k) =>
       Object.prototype.hasOwnProperty.call(out.properties, k)
     );
+    if (required.length > 0) out.required = required;
   }
   if (typeof node.additionalProperties !== 'undefined') {
     out.additionalProperties = node.additionalProperties;
@@ -520,7 +527,7 @@ function proxyRequest(payload) {
     proxyConnect();
     const trySend = () => {
       if (!proxyWs || proxyWs.destroyed) {
-        resolve({ ok: false, error: '主适配器不可达：请确认端口 8765 有主适配器在监听' });
+        resolve({ ok: false, error: `主适配器不可达：请确认端口 ${PORT} 有主适配器在监听` });
         return;
       }
       const id = randomUUID();
@@ -549,7 +556,7 @@ function proxyRequest(payload) {
         trySend();
       } else if (waited >= 2000) {
         clearInterval(tick);
-        resolve({ ok: false, error: '主适配器不可达：请确认端口 8765 有主适配器在监听' });
+        resolve({ ok: false, error: `主适配器不可达：请确认端口 ${PORT} 有主适配器在监听` });
       }
     }, 200);
   });
