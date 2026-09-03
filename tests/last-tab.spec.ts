@@ -98,4 +98,24 @@ describe('last injectable tab tracker', () => {
   it('returns undefined when no injectable tab is remembered', async () => {
     expect(await mod.getLastInjectableTab()).toBeUndefined()
   })
+
+  it('onlyWindowId restricts candidates to that window', async () => {
+    const { listeners, store } = fake()
+    store.set(10, { id: 10, windowId: 1, url: 'https://older.test/' })
+    store.set(11, { id: 11, windowId: 1, url: 'https://newer.test/' })
+    store.set(20, { id: 20, windowId: 2, url: 'https://other-window.test/' })
+    listeners['onUpdated']!.forEach((fn) => fn(10, { status: 'complete' }, store.get(10)!))
+    await tick()
+    listeners['onUpdated']!.forEach((fn) => fn(11, { status: 'complete' }, store.get(11)!))
+    await tick()
+    listeners['onUpdated']!.forEach((fn) => fn(20, { status: 'complete' }, store.get(20)!))
+    await tick()
+
+    // Unscoped prefers the most recent across every window.
+    expect((await mod.getLastInjectableTab())?.id).toBe(20)
+    // Scoped to window 1: window 2's tab must never surface.
+    expect((await mod.getLastInjectableTab(undefined, 1))?.id).toBe(11)
+    expect((await mod.getLastInjectableTab(undefined, 2))?.id).toBe(20)
+    expect(await mod.getLastInjectableTab(undefined, 7)).toBeUndefined()
+  })
 })

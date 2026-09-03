@@ -81,18 +81,27 @@ export function initLastTabTracker(): void {
 
 /**
  * The most recently viewed injectable tab, preferring one in `preferWindowId`.
- * Validates the tab still exists and is still injectable (it may have closed or
- * navigated). Returns undefined when nothing usable is remembered.
+ * When `onlyWindowId` is given (panel-window scoped runs) candidates outside
+ * that window are dropped entirely — a scoped run must never surface a tab
+ * from another window. Validates the tab still exists and is still injectable
+ * (it may have closed or navigated). Returns undefined when nothing usable is
+ * remembered.
  */
-export async function getLastInjectableTab(preferWindowId?: number): Promise<chrome.tabs.Tab | undefined> {
-  const ordered =
+export async function getLastInjectableTab(
+  preferWindowId?: number,
+  onlyWindowId?: number,
+): Promise<chrome.tabs.Tab | undefined> {
+  let ordered =
     typeof preferWindowId === 'number'
       ? [...recent].sort((a, b) => {
           if (a.windowId === preferWindowId && b.windowId !== preferWindowId) return -1
           if (b.windowId === preferWindowId && a.windowId !== preferWindowId) return 1
           return b.updatedAt - a.updatedAt
         })
-      : recent
+      : [...recent]
+  if (typeof onlyWindowId === 'number') {
+    ordered = ordered.filter((t) => t.windowId === onlyWindowId)
+  }
 
   for (const candidate of ordered) {
     const tab = await chrome.tabs.get(candidate.tabId).catch(() => undefined)
