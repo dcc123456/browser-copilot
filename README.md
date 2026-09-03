@@ -218,6 +218,13 @@ that's unacceptable.
 
 ## Using it
 
+- **Window scope.** Everything the panel starts — reading and acting on pages,
+  opening/switching/closing tabs, workflows run from the panel — happens in the
+  **browser window the panel is attached to**. Open another window without the
+  panel and use it freely: it is never read, never acted on, and never triggers
+  "run when a matching page opens" workflows. Unattended runs (scheduled tasks,
+  Feishu commands) keep the previous global behaviour while no panel is open;
+  keyboard shortcuts and context-menu runs act in the window where you used them.
 - **Reading the page.** Either tick **Attach selection** to send highlighted
   text up front, or let the assistant read it itself (which asks for
   confirmation in semi-auto unless you attached). The grant is scoped to that
@@ -464,6 +471,10 @@ settings changes apply without a reload.
 
 - One active tab at a time; broad reads see the rendered DOM (iframes targeted
   per-action).
+- Panel-started actions are locked to the panel's window: if that window only
+  shows `chrome://` (or other non-automatable) pages, the assistant reports
+  "no actionable tab in the panel's window" instead of reaching into another
+  window.
 - Page text capped at ~12,000 characters; truncation is reported to the model.
 - Tool calls stop after the configured cap (20 by default).
 - Autonomous read/act requires a function-calling model.
