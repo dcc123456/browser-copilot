@@ -29,7 +29,7 @@ interface Browser {
   tabs: Map<number, FakeTab>
   windows: Map<number, FakeWindow>
   lastFocusedWindowId: number
-  calls: { update: unknown[]; create: unknown[]; remove: unknown[]; getAll: unknown[]; getLastFocused: number }
+  calls: { update: unknown[][]; create: unknown[]; remove: unknown[]; getAll: unknown[]; getLastFocused: number }
   listeners: Record<string, ((...args: unknown[]) => void)[]>
 }
 
