@@ -1,4 +1,5 @@
 allowBuilds:
   esbuild: true
-
-storeDir: d:/works/deep-seek-workspace/browser-copilot/.pnpm-store-local
+  # tesseract.js 的 postinstall 只是 opencollective 捐赠提示（`|| true` 兜底），
+  # 放行仅为消除 pnpm 11 的 ERR_PNPM_IGNORED_BUILDS；不放行也不影响功能。
+  tesseract.js: true
