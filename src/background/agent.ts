@@ -86,6 +86,7 @@ import { normalScopeFromWindowId, currentPanelScope, type ScopeWindow } from './
 import {
   drainConsoleEntries,
   ensureTabMonitor,
+  getConsoleEntries,
   getRecentRequests,
   waitForNetworkIdle,
 } from './cdp-monitor'
@@ -571,6 +572,25 @@ export const TOOLS: WireTool[] = [
       description:
         'List recent network requests of the active tab (URL, method, HTTP status, failures), captured passively since the monitor attached. Use after an action to diagnose failed, slow, or error-status requests. Read-only; requires approval.',
       parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_console_messages',
+      description:
+        'List recent browser console messages of the active tab (errors and warnings by default; pass level:"all" to also see log/info/debug). Only captures output emitted after the monitor attached, so run an action first when debugging. Read-only; no approval needed.',
+      parameters: {
+        type: 'object',
+        properties: {
+          level: {
+            type: 'string',
+            enum: ['errors', 'all'],
+            description:
+              "'errors' (default) returns error and warning entries; 'all' returns every captured entry including log/info/debug.",
+          },
+        },
+      },
     },
   },
   {
@@ -1245,6 +1265,8 @@ function describeAction(
       return 'Read the text of the current page'
     case 'snapshot_page':
       return 'Read the current page and list its buttons, links, and fields'
+    case 'list_console_messages':
+      return 'Read browser console messages'
     case 'click':
       return `Click ${targetLabel}`
     case 'fill':
@@ -1638,6 +1660,31 @@ export async function executeTool(
         requests,
         ...(requests.length === 0
           ? { note: 'No requests captured yet. Run an action first, then call again.' }
+          : {}),
+      })
+    }
+
+    case 'list_console_messages': {
+      throwIfAborted()
+      // Reads the passive CDP monitor's console buffer; attaching here
+      // (best-effort) makes the tool useful even when called before any
+      // action ran. Never requires approval: pure read of an in-memory buffer.
+      const tab = await resolveAutomationTab(undefined, ctx.scope)
+      if (!tab || typeof tab.id !== 'number') {
+        return JSON.stringify({ ok: false, error: '没有可读取的标签页。' })
+      }
+      await ensureTabMonitor(tab.id)
+      const level = args.level === 'all' ? 'all' : 'errors'
+      const messages = getConsoleEntries(tab.id, level)
+      return JSON.stringify({
+        ok: true,
+        messages,
+        count: messages.length,
+        ...(messages.length === 0
+          ? {
+              note:
+                'No console messages captured yet. The monitor only sees output emitted after it attached — run an action first, then call again.',
+            }
           : {}),
       })
     }
