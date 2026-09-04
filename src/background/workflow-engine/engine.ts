@@ -505,6 +505,9 @@ async function runCore(
    * body into a `'break'` signal when THIS loop owns it (no loopId = the
    * innermost loop; a loopId must match the loop node's values/data `loopId`
    * or the node id), rethrowing otherwise so an outer loop can claim it.
+   * `'ok'` = the body finished with the run still ok; `'failed'` = the run
+   * outcome flipped to failed/cancelled (the loop stops without following
+   * `endId`; the run result reports the outcome unchanged).
    */
   async function runLoopBody(
     loopNode: WorkflowNode,
@@ -619,7 +622,11 @@ async function runCore(
     return endId
   }
 
-  /** Executes a referenced workflow as a nested run, then follows the edge. */
+  /**
+   * Executes a referenced workflow as a nested run, then follows the edge.
+   * A loop-breakpoint thrown inside the child is contained by the child's own
+   * top-level catch — it can never break a loop in the parent.
+   */
   async function runSubWorkflow(
     execNode: WorkflowNode,
     params: Record<string, unknown>,

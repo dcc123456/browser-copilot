@@ -808,6 +808,81 @@ describe('workflow loops — loop-breakpoint', () => {
     expect(seen).toEqual(['a', 'after'])
   })
 
+  it('matches a data.loopId on the loop node when breaking outward', async () => {
+    const seen: string[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('outer', 'repeat-task', { count: 2, loopId: 'login' }),
+        node('inner', 'repeat-task', { count: 2 }),
+        node('a', 'a'),
+        node('bp', 'loop-breakpoint', { loopId: 'login' }),
+        node('b', 'b'),
+        node('after', 'after'),
+      ],
+      [
+        edge('t', 'outer'),
+        edge('outer', 'inner', 'repeat-task-output-1'),
+        edge('inner', 'a', 'repeat-task-output-1'),
+        edge('a', 'bp'),
+        edge('inner', 'b', 'repeat-task-output-2'),
+        edge('b', 'outer'),
+        edge('outer', 'after', 'repeat-task-output-2'),
+      ],
+    )
+    const result = await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        a: pushTo(seen, 'a'),
+        b: pushTo(seen, 'b'),
+        after: pushTo(seen, 'after'),
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual(['a', 'after'])
+  })
+
+  it('a loopId matching nothing unwinds benignly: the chain stops, run ends ok', async () => {
+    const seen: string[] = []
+    const steps: Array<{ kind: string; text: string }> = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('outer', 'repeat-task', { count: 2 }),
+        node('inner', 'repeat-task', { count: 2 }),
+        node('a', 'a'),
+        node('bp', 'loop-breakpoint', { loopId: 'nope' }),
+        node('b', 'b'),
+        node('after', 'after'),
+      ],
+      [
+        edge('t', 'outer'),
+        edge('outer', 'inner', 'repeat-task-output-1'),
+        edge('inner', 'a', 'repeat-task-output-1'),
+        edge('a', 'bp'),
+        edge('inner', 'b', 'repeat-task-output-2'),
+        edge('b', 'outer'),
+        edge('outer', 'after', 'repeat-task-output-2'),
+      ],
+    )
+    const result = await runWorkflow(wf, {
+      onStep: (kind, _id, text) => steps.push({ kind, text }),
+      executors: {
+        ...EXECUTORS,
+        a: pushTo(seen, 'a'),
+        b: pushTo(seen, 'b'),
+        after: pushTo(seen, 'after'),
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(result.error).toBeUndefined()
+    // The body ran once inside the first iteration; the unmatched sentinel
+    // then unwound past BOTH loops, so `b` (inner end) and `after` (outer
+    // end) never run — the chain stops where the breakpoint fired.
+    expect(seen).toEqual(['a'])
+    expect(steps.some((s) => s.kind === 'info' && s.text.includes('不在循环内'))).toBe(true)
+  })
+
   it('outside any loop it is benign: run ends ok with an info note', async () => {
     const seen: string[] = []
     const steps: Array<{ kind: string; text: string }> = []
