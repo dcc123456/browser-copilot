@@ -59,7 +59,7 @@ const KEY_CONVERSATIONS_META = 'conversations'
  * - v3: `imageModel` (optional vision config) added to settings; the
  *   built-in `skill-generator` skill is seeded on install/upgrade.
  */
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 
 export const DEFAULT_SETTINGS: Settings = {
   providers: [],
@@ -210,16 +210,27 @@ export async function ensureSchema(): Promise<void> {
 }
 
 /**
- * Inserts any built-in skill that does not already exist (matched by name), so
- * a fresh install or upgrade gets the bundled skills without ever overwriting a
- * skill the user has created or edited.
+ * Syncs the built-in skills into the store.
+ *
+ * A skill whose name does not exist yet is inserted, so a fresh install gets
+ * the bundled skills without ever overwriting a skill the user has created or
+ * edited. A stored copy that still carries a built-in's id AND its untouched
+ * `updatedAt: 0` marker is refreshed to the shipped version: that is how an
+ * improved built-in (e.g. a better skill-generator) reaches existing installs.
+ * The moment the user edits the skill, `updatedAt` becomes a real timestamp
+ * and the copy belongs to them — never rewritten again.
  */
 export async function seedBuiltInSkills(): Promise<void> {
   const skills = await listSkills()
-  const known = new Set(skills.map((skill) => skill.name.trim().toLowerCase()))
+  const byName = new Map(skills.map((skill) => [skill.name.trim().toLowerCase(), skill]))
   for (const builtin of BUILT_IN_SKILLS) {
-    if (!known.has(builtin.name.trim().toLowerCase())) {
+    const stored = byName.get(builtin.name.trim().toLowerCase())
+    if (!stored) {
       await saveSkill(builtin)
+      continue
+    }
+    if (stored.id === builtin.id && stored.updatedAt === 0) {
+      await saveSkill({ ...builtin })
     }
   }
 }

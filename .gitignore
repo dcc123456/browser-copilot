@@ -19,6 +19,9 @@ releases/
 # Test output
 coverage/
 
+# Local scratch: scripts & data produced during manual testing (never commit)
+tmp/
+
 # Logs
 *.log
 npm-debug.log*

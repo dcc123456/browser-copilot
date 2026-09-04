@@ -25,6 +25,12 @@ export interface WorkflowMetaPatch {
 }
 
 export interface WorkflowMetaLike {
+  /**
+   * Id of the workflow being edited, when the provider knows it. Block forms
+   * use it to exclude the current workflow from "pick another workflow"
+   * dropdowns (running a workflow inside itself is always a loop).
+   */
+  id?: string
   name: string
   description: string
   settings: { debugMode: boolean; saveLog: boolean; notification: boolean }

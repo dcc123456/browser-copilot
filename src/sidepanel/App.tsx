@@ -71,6 +71,21 @@ export default function App() {
     void syncToFiles().catch(() => {})
   }, [refreshSkills])
 
+  // Skills can change from outside this panel's commands — most visibly the
+  // agent's `create_skill` tool inside a chat turn. The worker broadcasts
+  // `skills.changed`, and without this listener a freshly created skill would
+  // only appear after the panel was closed and reopened: missing from the
+  // Skills tab, uneditable there, and absent from the composer's slash menu.
+  useEffect(() => {
+    const listener = (message: unknown): void => {
+      if ((message as { type?: string } | undefined)?.type === 'skills.changed') {
+        void refreshSkills()
+      }
+    }
+    chrome.runtime.onMessage.addListener(listener)
+    return () => chrome.runtime.onMessage.removeListener(listener)
+  }, [refreshSkills])
+
   const locale = effectiveLocale(
     (localeSetting ?? 'auto') as 'auto',
     navigator.language,

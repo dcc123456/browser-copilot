@@ -95,6 +95,28 @@ export const CUSTOM_BLOCKS: BlockCatalogEntry[] = [
     },
     cloud: false,
   },
+  {
+    id: 'set-variable',
+    name: 'Set variable',
+    description:
+      'Store a value into a workflow variable for later blocks to read (supports {{variables}}).',
+    icon: 'riBookmarkLine',
+    category: 'data',
+    component: 'Default',
+    editComponent: 'EditSetVariable',
+    inputs: 1,
+    outputs: 1,
+    allowedInputs: true,
+    maxConnection: 1,
+    refDataKeys: ['value'],
+    data: {
+      disableBlock: false,
+      description: '',
+      variableName: '',
+      value: '',
+    },
+    cloud: false,
+  },
 ]
 
 /** Ids of every local extension block. */

@@ -181,6 +181,50 @@ export interface Messages {
   workflowsImported: (params: { count: number }) => string
   /** Shown on a failed-run banner in the Workflows tab; the banner is clickable and jumps to the run's history entry. */
   workflowsRunFailedHint: string
+  /** Debug button on each workflow card: run once, then AI auto-repairs failures and re-runs. */
+  workflowsDebug: string
+  /** Debug button label while the AI debug loop is running for that workflow. */
+  workflowsDebugging: string
+  /** Banner when the debug run passed on the first attempt (no AI repair needed). */
+  workflowsDebugOkNoChanges: string
+  /** Banner when AI repairs made the workflow pass; {rounds} = applied fix rounds. */
+  workflowsDebugFixed: (params: { rounds: number }) => string
+  /** Banner when the AI debug loop ended without a passing run. */
+  workflowsDebugFailed: string
+  /** Debug report dialog title. */
+  workflowsDebugReportTitle: string
+  /** Debug report: per-round heading. */
+  workflowsDebugRound: (params: { n: number }) => string
+  /** Debug report: diagnosis label. */
+  workflowsDebugDiagnosis: string
+  /** Debug report: changes label. */
+  workflowsDebugChanges: string
+  /** Debug report: run outcome label. */
+  workflowsDebugOutcome: string
+  /** Debug report: strategy labels by repair kind. */
+  workflowsDebugStrategyRetry: string
+  workflowsDebugStrategyFix: string
+  workflowsDebugStrategyBranch: string
+  workflowsDebugStrategyAgent: string
+  workflowsDebugStrategyRemove: string
+  workflowsDebugStrategyUnfixable: string
+  /** Live AI debug log modal. */
+  workflowsDebugLogTitle: string
+  /** Badge while the debug session is still running. */
+  workflowsDebugLogLive: string
+  /** Badge once the debug session has settled. */
+  workflowsDebugLogDone: string
+  /** Empty state before the first debug step lands. */
+  workflowsDebugLogEmpty: string
+  workflowsDebugLogClose: string
+  /** Review chip on cards the AI debugger modified: hint with time + change count. */
+  workflowsDebugBackupHint: (params: { time: string; changes: number }) => string
+  workflowsDebugBackupKeep: string
+  workflowsDebugBackupRevert: string
+  /** Confirm dialog before reverting. */
+  workflowsDebugRevertConfirm: string
+  /** Banner after a successful revert. */
+  workflowsDebugReverted: string
   /** Activity board (History tab) collapse/expand toggle title. */
   tasksActivityCollapse: string
   tasksActivityExpand: string
@@ -249,6 +293,20 @@ export interface Messages {
   chatSaveWorkflowSaved: (params: { name: string }) => string
   /** Title of the AI-prefill checkbox list on the workflow save card. */
   chatSaveWorkflowAiTitle: string
+  /** In-progress line while the AI node review is running. */
+  chatWorkflowReviewing: string
+  /** Hint shown when the AI node review is unavailable (no provider / failure). */
+  chatWorkflowReviewUnavailable: string
+  /** One-line count of steps the AI judged garbage. */
+  chatWorkflowReviewDropped: (params: { count: number }) => string
+  /** One-line count when the AI found no garbage steps. */
+  chatWorkflowReviewAllKept: string
+  /** Title of the step checklist on the save card / review dialog. */
+  chatWorkflowStepsTitle: string
+  /** Title of the history-tab review dialog. */
+  workflowReviewDialogTitle: string
+  workflowReviewDialogConfirm: string
+  workflowReviewDialogCancel: string
 
   // Agent mode
   modeLabel: string
@@ -808,6 +866,33 @@ const en: Messages = {
   workflowsImportInvalid: 'Invalid workflow file(s): at least one export could not be read.',
   workflowsImported: ({ count }) => `Imported ${count} workflow(s).`,
   workflowsRunFailedHint: 'Run failed — click to view details in history',
+  workflowsDebug: 'Debug',
+  workflowsDebugging: 'Debugging…',
+  workflowsDebugOkNoChanges: 'Run succeeded — nothing to debug',
+  workflowsDebugFixed: ({ rounds }) => `AI debug succeeded after ${rounds} fix round(s)`,
+  workflowsDebugFailed: 'AI debug could not fix this workflow',
+  workflowsDebugReportTitle: 'AI debug report',
+  workflowsDebugRound: ({ n }) => `Round ${n}`,
+  workflowsDebugDiagnosis: 'Diagnosis',
+  workflowsDebugChanges: 'Changes',
+  workflowsDebugOutcome: 'Result',
+  workflowsDebugStrategyRetry: 'Add retry',
+  workflowsDebugStrategyFix: 'Fix parameters',
+  workflowsDebugStrategyBranch: 'Add conditional branch',
+  workflowsDebugStrategyAgent: 'Add AI agent step',
+  workflowsDebugStrategyRemove: 'Remove redundant steps',
+  workflowsDebugStrategyUnfixable: 'Not fixable automatically',
+  workflowsDebugLogTitle: 'AI debug log',
+  workflowsDebugLogLive: 'live',
+  workflowsDebugLogDone: 'finished',
+  workflowsDebugLogEmpty: 'Waiting for debug steps…',
+  workflowsDebugLogClose: 'Close',
+  workflowsDebugBackupHint: ({ time, changes }) =>
+    `AI modified this workflow at ${time} (${changes} change(s)) — keep or revert`,
+  workflowsDebugBackupKeep: 'Keep AI changes',
+  workflowsDebugBackupRevert: 'Revert',
+  workflowsDebugRevertConfirm: 'Revert this workflow to the version before AI debug?',
+  workflowsDebugReverted: 'Reverted to the pre-debug version',
   tasksActivityCollapse: 'Collapse activity',
   tasksActivityExpand: 'Expand activity',
 
@@ -862,6 +947,14 @@ const en: Messages = {
   chatSaveWorkflowSkip: 'Skip',
   chatSaveWorkflowSaved: ({ name }) => `Saved workflow: ${name}`,
   chatSaveWorkflowAiTitle: 'AI-generated content (checked = regenerate with AI at replay; unchecked = reuse the captured text)',
+  chatWorkflowReviewing: 'AI is reviewing which nodes are worth keeping…',
+  chatWorkflowReviewUnavailable: 'AI review unavailable — keeping all steps.',
+  chatWorkflowReviewDropped: ({ count }) => `AI dropped ${count} ineffective step${count > 1 ? 's' : ''} (unchecked); check to keep one.`,
+  chatWorkflowReviewAllKept: 'AI reviewed every step — none look ineffective.',
+  chatWorkflowStepsTitle: 'Steps (uncheck to remove from the workflow)',
+  workflowReviewDialogTitle: 'Review steps before saving',
+  workflowReviewDialogConfirm: 'Save workflow',
+  workflowReviewDialogCancel: 'Cancel',
 
   modeLabel: 'Mode',
   saveWorkflowLabel: 'Save workflow',
@@ -1411,6 +1504,33 @@ const zhCN: Messages = {
   workflowsImportInvalid: '无效的工作流文件：至少一个导出无法读取。',
   workflowsImported: ({ count }) => `已导入 ${count} 个工作流。`,
   workflowsRunFailedHint: '运行失败 — 点击查看历史详情',
+  workflowsDebug: '调试',
+  workflowsDebugging: '调试中…',
+  workflowsDebugOkNoChanges: '运行成功，无需调试',
+  workflowsDebugFixed: ({ rounds }) => `AI 调试成功：经 ${rounds} 轮修复后运行通过`,
+  workflowsDebugFailed: 'AI 调试未能修复该工作流',
+  workflowsDebugReportTitle: 'AI 调试报告',
+  workflowsDebugRound: ({ n }) => `第 ${n} 轮`,
+  workflowsDebugDiagnosis: '诊断',
+  workflowsDebugChanges: '变更内容',
+  workflowsDebugOutcome: '运行结果',
+  workflowsDebugStrategyRetry: '增加重试',
+  workflowsDebugStrategyFix: '修正参数',
+  workflowsDebugStrategyBranch: '增加条件分支',
+  workflowsDebugStrategyAgent: '增加 AI 智能节点',
+  workflowsDebugStrategyRemove: '删除冗余节点',
+  workflowsDebugStrategyUnfixable: '无法自动修复',
+  workflowsDebugLogTitle: 'AI 调试日志',
+  workflowsDebugLogLive: '进行中',
+  workflowsDebugLogDone: '已结束',
+  workflowsDebugLogEmpty: '等待调试步骤…',
+  workflowsDebugLogClose: '关闭',
+  workflowsDebugBackupHint: ({ time, changes }) =>
+    `AI 已修改此工作流（${time}，${changes} 处变更），可保留或回退`,
+  workflowsDebugBackupKeep: '保留 AI 修改',
+  workflowsDebugBackupRevert: '回退',
+  workflowsDebugRevertConfirm: '回退到 AI 调试前的版本？',
+  workflowsDebugReverted: '已回退到 AI 调试前的版本',
   tasksActivityCollapse: '收起动态',
   tasksActivityExpand: '展开动态',
 
@@ -1460,6 +1580,14 @@ const zhCN: Messages = {
   chatSaveWorkflowSkip: '跳过',
   chatSaveWorkflowSaved: ({ name }) => `已保存工作流：${name}`,
   chatSaveWorkflowAiTitle: 'AI 生成内容（勾选 = 回放时用 AI 重新生成；取消 = 沿用本次填写的文本）',
+  chatWorkflowReviewing: 'AI 正在审查哪些节点值得保留…',
+  chatWorkflowReviewUnavailable: 'AI 审查不可用，已保留全部步骤。',
+  chatWorkflowReviewDropped: ({ count }) => `AI 已剔除 ${count} 个无效步骤，取消勾选可保留。`,
+  chatWorkflowReviewAllKept: 'AI 已逐项审查：没有发现无效步骤。',
+  chatWorkflowStepsTitle: '步骤清单（取消勾选即从工作流中移除）',
+  workflowReviewDialogTitle: '保存前先审查步骤',
+  workflowReviewDialogConfirm: '保存工作流',
+  workflowReviewDialogCancel: '取消',
 
   modeLabel: '模式',
   saveWorkflowLabel: '保存工作流',

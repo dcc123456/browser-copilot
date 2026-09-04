@@ -67,6 +67,7 @@ export const BLOCK_NAMES_ZH: Record<string, string> = {
   'slice-variable': '变量切片',
   'regex-variable': '正则变量',
   'sort-data': '排序数据',
+  'set-variable': '设置变量',
   'data-mapping': '数据映射',
   'log-data': '日志数据',
   // Conditions / control flow

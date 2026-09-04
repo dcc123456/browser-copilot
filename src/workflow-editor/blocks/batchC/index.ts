@@ -29,6 +29,7 @@ import EditIncreaseVariable from './EditIncreaseVariable'
 import EditRegexVariable from './EditRegexVariable'
 import EditDataMapping from './EditDataMapping'
 import EditSortData from './EditSortData'
+import EditSetVariable from './EditSetVariable'
 
 export const BatchCForms: Record<string, ComponentType<EditFormProps>> = {
   // Control flow (conditions category)
@@ -48,4 +49,5 @@ export const BatchCForms: Record<string, ComponentType<EditFormProps>> = {
   EditRegexVariable,
   EditDataMapping,
   EditSortData,
+  EditSetVariable,
 }

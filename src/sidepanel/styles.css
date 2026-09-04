@@ -1778,6 +1778,55 @@ textarea:focus-visible {
   border-color: var(--accent);
 }
 
+/* AI auto-debug action: amber accent to read as "assisted" next to Run. */
+.task-action-debug {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+/* Thin scrollbar for the AI debug live-log modal body. */
+.debug-log-scroll {
+  scrollbar-width: thin;
+}
+
+.debug-log-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.debug-log-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+.debug-log-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* Keep / revert row shown on cards the AI debugger has modified. */
+.ai-debug-backup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px dashed var(--warn);
+  border-radius: 8px;
+  background: var(--warn-surface);
+  font-size: 11px;
+  color: var(--ink);
+}
+
+.ai-debug-backup span {
+  flex: 1;
+  min-width: 0;
+}
+
+.ai-debug-backup button {
+  flex: none;
+  padding: 3px 10px;
+  font-size: 11px;
+}
+
 .task-editor {
   display: flex;
   flex-direction: column;

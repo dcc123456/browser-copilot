@@ -473,7 +473,12 @@ const BLOCK_FORM_STRINGS = {
     'Remove script': '移除脚本',
     Close: '关闭',
     'Execute workflow': '执行工作流',
+    'Workflow to execute': '要执行的工作流',
     'Workflow to execute (workflow id)': '要执行的工作流（工作流 id）',
+    'Select a workflow…': '选择工作流…',
+    'Reload workflows': '刷新工作流列表',
+    'No saved workflows yet — create one in the Workflows tab first.':
+      '还没有已保存的工作流 — 请先在「工作流」页新建一个。',
     'Execute Id (optional)': '执行 ID（可选）',
     'Workflow (workflow id)': '工作流（工作流 id）',
     'Workflow IDs (comma separated)': '工作流 ID（逗号分隔）',

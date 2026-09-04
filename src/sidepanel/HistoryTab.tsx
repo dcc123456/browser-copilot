@@ -22,11 +22,19 @@ import { useCallback, useEffect, useState } from "react";
 import { sendCommand } from "../lib/messages";
 import { workflowFromHistory } from "../lib/storage";
 import { saveWorkflow } from "../lib/workflow/storage";
+import {
+  applyNodeKeepSelection,
+  reviewStepsOf,
+  type ReviewStep,
+  type WorkflowReview,
+} from "../lib/workflow/review-patch";
+import type { Workflow } from "../lib/workflow/types";
 import type { ConversationMeta, HistoryEntry } from "../lib/types";
 import type { TaskRunLog } from "../lib/scheduler-types";
 import { useT } from "./i18n";
 import { confirmDialog } from "../ui/confirm";
 import RunningBoard from "./RunningBoard";
+import { WorkflowReviewDialog } from "./WorkflowReviewList";
 
 type Section = "conversations" | "workflowRuns" | "taskRuns" | "operations";
 
@@ -714,6 +722,14 @@ function OperationsSection({ t, flash }: SectionProps) {
   // the stored ids are group keys (conversation ids / "task:…" / "feishu:…").
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  /** Open AI node-review dialog for a rebuilt workflow (null = closed). */
+  const [review, setReview] = useState<{
+    workflow: Workflow;
+    stepList: ReviewStep[];
+    reviewing: boolean;
+    review: WorkflowReview | null;
+    keep: Record<string, boolean> | null;
+  } | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -812,23 +828,68 @@ function OperationsSection({ t, flash }: SectionProps) {
     }
   }, [entries, t, flash, load]);
 
-  /** Rebuilds a linear workflow from a group's action steps (oldest first). */
+  /**
+   * Rebuilds a linear workflow from a group's action steps (oldest first) and
+   * opens the AI node-review dialog; the save happens only on confirm. A late
+   * review reply for a closed/superseded dialog is dropped by the workflow-id
+   * guard.
+   */
   const rebuild = useCallback(
     async (groupTitle: string, groupEntries: HistoryEntry[]): Promise<void> => {
+      const workflow = workflowFromHistory([...groupEntries].reverse(), `从历史: ${groupTitle}`);
+      if (!workflow) {
+        flash("error", t.dataHistoryToWorkflowEmpty);
+        return;
+      }
+      const stepList = reviewStepsOf(workflow);
+      setReview({
+        workflow,
+        stepList,
+        reviewing: stepList.length > 0,
+        review: null,
+        keep: null,
+      });
+      const applyVerdict = (verdict: WorkflowReview | null): void => {
+        setReview((prev) => {
+          if (!prev || prev.workflow.id !== workflow.id) return prev;
+          // Materialize the verdicts into the keep set so the checkboxes AND
+          // the saved result both reflect the AI judgment; unmentioned steps
+          // stay keep=true.
+          const keep: Record<string, boolean> = { ...prev.keep };
+          if (verdict) {
+            for (const item of verdict.steps) keep[item.id] = item.keep;
+          }
+          return { ...prev, reviewing: false, review: verdict, keep };
+        });
+      };
       try {
-        const workflow = workflowFromHistory([...groupEntries].reverse(), `从历史: ${groupTitle}`);
-        if (!workflow) {
-          flash("error", t.dataHistoryToWorkflowEmpty);
-          return;
-        }
-        await saveWorkflow(workflow);
-        flash("ok", t.dataHistoryToWorkflowDone);
-      } catch (error) {
-        flash("error", (error as Error).message);
+        const result = await sendCommand({ type: "workflows.review", workflow });
+        if (result.type === "workflows.review") applyVerdict(result.review);
+      } catch {
+        applyVerdict(null);
       }
     },
     [flash, t],
   );
+
+  /** Keep/drop one reviewed step (primary + its satellites) in the dialog. */
+  const toggleStepKeep = (stepId: string, kept: boolean): void => {
+    setReview((prev) => (prev ? { ...prev, keep: { ...prev.keep, [stepId]: kept } } : prev));
+  };
+
+  /** Applies the keep set and persists; unavailable review keeps everything. */
+  const confirmReview = useCallback(async (): Promise<void> => {
+    const current = review;
+    if (!current) return;
+    setReview(null);
+    try {
+      const workflow = applyNodeKeepSelection(current.workflow, current.keep ?? {});
+      await saveWorkflow(workflow);
+      flash("ok", t.dataHistoryToWorkflowDone);
+    } catch (error) {
+      flash("error", (error as Error).message);
+    }
+  }, [review, flash, t]);
 
   const toggleGroup = (key: string): void => {
     setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -976,6 +1037,19 @@ function OperationsSection({ t, flash }: SectionProps) {
           </div>
         );
       })}
+      {review && (
+        <WorkflowReviewDialog
+          keep={review.keep}
+          review={review.review}
+          reviewing={review.reviewing}
+          steps={review.stepList}
+          subtitle={review.workflow.name}
+          title={t.workflowReviewDialogTitle}
+          onCancel={() => setReview(null)}
+          onConfirm={() => void confirmReview()}
+          onToggle={toggleStepKeep}
+        />
+      )}
     </div>
   );
 }

@@ -30,6 +30,13 @@ import {
   workflowFromHistory,
   type AiPrefillStep,
 } from '../lib/storage'
+import {
+  applyNodeKeepSelection,
+  reviewStepsOf,
+  type ReviewStep,
+  type WorkflowReview,
+} from '../lib/workflow/review-patch'
+import { WorkflowReviewList } from './WorkflowReviewList'
 import type { Workflow } from '../lib/workflow/types'
 import type { AgentMode, ConversationMeta } from '../lib/types'
 import { confirmDialog } from '../ui/confirm'
@@ -726,6 +733,17 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     aiSelections: Record<string, boolean>
     workflow: Workflow
     steps: number
+    /**
+     * AI node review state. `reviewing` while the background verdict is in
+     * flight; `review: null` after it settled means unavailable — every step
+     * stays. `keep` (stepId → keep) is `null` until the review lands; the
+     * absent case keeps everything.
+     */
+    reviewing: boolean
+    review: WorkflowReview | null
+    keep: Record<string, boolean> | null
+    /** Reviewable steps of the base workflow, in chain order (stable). */
+    stepList: ReviewStep[]
   } | null>(null)
   /** Last reuseable-step count we already asked about per conversation. */
   const promptedRef = useRef<Record<string, number>>({})
@@ -737,6 +755,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
    * reusable workflow. Only actions that actually ran (approved + ok) in this
    * conversation count; if none map to a block we stay quiet. A per-conversation
    * counter means we only ask again once new steps have accumulated.
+   *
+   * The card opens immediately; the AI node review runs in the background and
+   * lands on the card when it arrives (a late reply after the card was closed
+   * or switched is dropped by the conversationId guard).
    */
   const maybePromptSaveWorkflow = useCallback(async (convId: string) => {
     let result: Awaited<ReturnType<typeof sendCommand>>
@@ -759,6 +781,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     if (steps === 0) return
     if ((promptedRef.current[convId] ?? 0) >= steps) return
     promptedRef.current[convId] = steps
+    const stepList = reviewStepsOf(workflow)
     setWorkflowPrompt({
       conversationId: convId,
       base: workflow,
@@ -766,7 +789,37 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       aiSteps,
       aiSelections,
       steps,
+      reviewing: stepList.length > 0,
+      review: null,
+      keep: null,
+      stepList,
     })
+    sendCommand({ type: 'workflows.review', workflow })
+      .then((review) => {
+        if (review.type !== 'workflows.review') return
+        setWorkflowPrompt((prev) => {
+          if (!prev || prev.conversationId !== convId) return prev
+          // Materialize the verdicts into the keep set so the checkboxes AND
+          // the preview both reflect the AI judgment; steps the model never
+          // mentioned stay keep=true.
+          const keep: Record<string, boolean> = { ...prev.keep }
+          if (review.review) {
+            for (const verdict of review.review.steps) keep[verdict.id] = verdict.keep
+          }
+          return {
+            ...prev,
+            reviewing: false,
+            review: review.review,
+            keep,
+            workflow: derivePreview(prev.base, keep, prev.aiSelections),
+          }
+        })
+      })
+      .catch(() => {
+        setWorkflowPrompt((prev) =>
+          prev && prev.conversationId === convId ? { ...prev, reviewing: false } : prev,
+        )
+      })
   }, [])
 
   const append = useCallback((entry: Omit<Entry, 'id'>) => {
@@ -1343,6 +1396,17 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   }
 
   /**
+   * Re-derives the preview workflow from the untouched base: first the AI
+   * node-review keep set (dropping whole steps), then the AI-prefill toggles.
+   * Layering both from the base keeps every toggle idempotent.
+   */
+  const derivePreview = (
+    base: Workflow,
+    keep: Record<string, boolean> | null,
+    aiSelections: Record<string, boolean>,
+  ): Workflow => applyAiPrefillOptions(applyNodeKeepSelection(base, keep ?? {}), aiSelections)
+
+  /**
    * Toggle one AI-prefill checkbox and rebuild the preview workflow from the
    * untouched base, so toggling is idempotent regardless of prior state.
    */
@@ -1353,8 +1417,17 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       return {
         ...prev,
         aiSelections,
-        workflow: applyAiPrefillOptions(prev.base, aiSelections),
+        workflow: derivePreview(prev.base, prev.keep, aiSelections),
       }
+    })
+  }
+
+  /** Keep/drop one reviewed step (primary + its satellites) on the card. */
+  const toggleStepKeep = (stepId: string, kept: boolean): void => {
+    setWorkflowPrompt((prev) => {
+      if (!prev) return prev
+      const keep = { ...prev.keep, [stepId]: kept }
+      return { ...prev, keep, workflow: derivePreview(prev.base, keep, prev.aiSelections) }
     })
   }
 
@@ -1635,23 +1708,40 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
 
         {workflowPrompt && (
           <div className="confirm-card" data-kind="workflow">
-            <strong>{t.chatSaveWorkflowPrompt({ steps: workflowPrompt.steps })}</strong>
+            <strong>
+              {t.chatSaveWorkflowPrompt({
+                steps: workflowPrompt.workflow.drawflow.nodes.length,
+              })}
+            </strong>
             <p className="hint" style={{ margin: '6px 0' }}>
               {workflowPrompt.workflow.name}
             </p>
-            {workflowPrompt.aiSteps.length > 0 && (
+            <WorkflowReviewList
+              keep={workflowPrompt.keep}
+              review={workflowPrompt.review}
+              reviewing={workflowPrompt.reviewing}
+              steps={workflowPrompt.stepList}
+              onToggle={toggleStepKeep}
+            />
+            {workflowPrompt.aiSteps.filter((step) =>
+              workflowPrompt.workflow.drawflow.nodes.some((node) => node.id === step.nodeId),
+            ).length > 0 && (
               <div className="ai-prefill-list" role="group" aria-label={t.chatSaveWorkflowAiTitle}>
                 <p className="hint">{t.chatSaveWorkflowAiTitle}</p>
-                {workflowPrompt.aiSteps.map((step) => (
-                  <label key={step.nodeId} className="ai-prefill-item">
-                    <input
-                      checked={workflowPrompt.aiSelections[step.nodeId] !== false}
-                      onChange={(event) => toggleAiPrefill(step.nodeId, event.target.checked)}
-                      type="checkbox"
-                    />
-                    <span>{step.label}</span>
-                  </label>
-                ))}
+                {workflowPrompt.aiSteps
+                  .filter((step) =>
+                    workflowPrompt.workflow.drawflow.nodes.some((node) => node.id === step.nodeId),
+                  )
+                  .map((step) => (
+                    <label key={step.nodeId} className="ai-prefill-item">
+                      <input
+                        checked={workflowPrompt.aiSelections[step.nodeId] !== false}
+                        onChange={(event) => toggleAiPrefill(step.nodeId, event.target.checked)}
+                        type="checkbox"
+                      />
+                      <span>{step.label}</span>
+                    </label>
+                  ))}
               </div>
             )}
             <div className="actions">

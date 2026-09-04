@@ -33,6 +33,7 @@ import {
   type WireToolCall,
 } from '../lib/llm'
 import type { AgentServerMessage, TurnTokenUsage } from '../lib/messages'
+import { notifySkillsChanged } from '../lib/messages'
 import { renderSkillCatalogue, renderSkillPrompt, validateSkill } from '../lib/skills'
 import {
   addHistory,
@@ -659,12 +660,12 @@ export const TOOLS: WireTool[] = [
           description: {
             type: 'string',
             description:
-              'One concise sentence saying what the skill does AND when to use it — the auto-match trigger. E.g. "Recognizes CAPTCHA codes on login pages. Use when the user needs to read a verification code image."',
+              'The auto-match trigger: one to two sentences saying BOTH what the skill does AND when to use it, with concrete triggers ("Use when …"). ALL when-to-use information goes here — the body is only loaded after this description matches, so "when to use" sections in the body are useless. E.g. "Fills the site\'s multi-page export form. Use when the user asks to export data from <site> or mentions the export form."',
           },
           instructions: {
             type: 'string',
             description:
-              "The skill body as Markdown: imperative steps in the user's language. This is the full instruction set applied when the skill runs.",
+              "The skill body as Markdown, written for an agent with no memory of this conversation: imperative steps in the user's language that reference the exact tools to call, plus failure handling. The model is already smart — include only non-obvious, project-specific knowledge (real steps, selectors, formats, edge cases), never general advice; prefer one worked example over explanation; keep under ~500 lines.",
           },
           autoMatch: {
             type: 'boolean',
@@ -2137,6 +2138,10 @@ export async function executeTool(
       }
 
       await saveSkill(base)
+      // The skill was created outside a panel command, so nothing else would
+      // refresh the panel's list — push the change so the new skill shows up
+      // in the Skills tab and the composer's slash menu right away.
+      notifySkillsChanged()
       return JSON.stringify({
         ok: true,
         skill: base.name,

@@ -19,13 +19,14 @@ import {
 import { toRestoreMessages } from './restore'
 import { retain, release } from './keepalive'
 import {
-  AGENT_PORT,
-  type AgentClientMessage,
-  type AgentServerMessage,
-  type Command,
-  type CommandResponse,
-  type CommandResult,
-} from '../lib/messages'
+    AGENT_PORT,
+    type AgentClientMessage,
+    type AgentServerMessage,
+    type Command,
+    type CommandResponse,
+    type CommandResult,
+    notifySkillsChanged,
+  } from '../lib/messages'
 import { isInjectablePage } from '../lib/pages'
 import {
   hasPanelWindows,
@@ -37,7 +38,7 @@ import {
   shouldTriggerVisitWeb,
   unregisterPort,
 } from './automation-scope'
-import { warmupOcr } from './driver'
+import { countElements, resolveAutomationTab, warmupOcr } from './driver'
 import { handlePickerMessage } from './picker-bridge'
 import {
   startRecording,
@@ -105,7 +106,19 @@ import {
   saveWorkflow,
   deleteWorkflow,
 } from '../lib/workflow/storage'
+import type { DebugStepLine } from '../lib/workflow/auto-debug-patch'
+import { describeNodeParams } from '../lib/workflow/auto-debug-patch'
+import {
+  clearDebugBackup,
+  listDebugBackups,
+  revertDebugBackup,
+  saveDebugBackup,
+} from '../lib/workflow/debug-backup'
 import { executeWorkflow } from './workflow-engine/run-workflow'
+import { debugWorkflow, debugRunLabel } from './workflow-engine/auto-debug'
+import { aiDecide } from './workflow-engine/auto-debug-ai'
+import { reviewWorkflow } from './workflow-engine/workflow-review'
+import { inspectPage } from './workflow-engine/page-inspect'
 import { initLastTabTracker } from './last-tab'
 import { rescheduleAll, scheduleTask, triggerNow, onAlarm } from './scheduler'
 import { FeishuBot, FEISHU_WATCHDOG_ALARM } from './feishu-bot'
@@ -123,7 +136,11 @@ import {
   setFinishedPersister,
   startRun,
   type FinishedTask,
+  type RunStepKind,
 } from './running-tasks'
+
+/** Whitelist used to narrow the engine's free-form step kinds for addStep. */
+const RUN_STEP_KINDS: readonly RunStepKind[] = ['tool', 'status', 'result', 'error', 'info']
 
 // Persist every finished run (with its steps) so the run log survives a worker
 // eviction/restart. finishRun calls this synchronously; recordFinishedRun is
@@ -553,11 +570,15 @@ async function handleCommand(command: Command, sender?: chrome.runtime.MessageSe
         throw new Error(`skill:${problems.map((problem) => problem.code).join(',')}`)
       }
       await saveSkill(normalized)
+      // Other panels (and the sending one, as a cheap idempotent refresh)
+      // re-read the list so a saved skill reaches the picker immediately.
+      notifySkillsChanged()
       return { type: 'skills.save', skill: normalized }
     }
 
     case 'skills.delete':
       await deleteSkill(command.id)
+      notifySkillsChanged()
       return { type: 'skills.delete' }
 
     case 'provider.save': {
@@ -780,6 +801,11 @@ async function handleCommand(command: Command, sender?: chrome.runtime.MessageSe
       await rescheduleAllWorkflowTriggers()
       return { type: 'workflows.delete' }
 
+    case 'workflows.review':
+      // Null (unavailable) is a valid outcome: the panel then keeps every
+      // step and shows the availability hint.
+      return { type: 'workflows.review', review: await reviewWorkflow(command.workflow) }
+
     case 'workflows.run': {
       const workflow = await getWorkflow(command.id)
       if (!workflow) throw new Error('Workflow not found.')
@@ -802,6 +828,131 @@ async function handleCommand(command: Command, sender?: chrome.runtime.MessageSe
         },
       }
     }
+
+    case 'workflows.debug': {
+      const workflow = await getWorkflow(command.id)
+      if (!workflow) throw new Error('Workflow not found.')
+      // Same panel-window scoping as a manual run: panel-started debugs act
+      // only inside that window; editor popups degrade to the global scope.
+      const scope =
+        scopeWindowId === undefined
+          ? undefined
+          : await normalScopeFromWindowId(scopeWindowId).catch(() => undefined)
+      // One tracked "debug session" run wraps the whole loop: the panel's live
+      // log modal polls the board for it, and it lands in History when done.
+      const session = startRun({
+        label: debugRunLabel(workflow.name),
+        source: 'manual',
+        workflowId: workflow.id,
+      })
+      let attemptNo = 0
+      // The debug loop spans several runs and model calls; hold the worker
+      // alive for the whole session (released in `finally`).
+      retain()
+      try {
+        const result = await debugWorkflow(workflow, {
+          run: async (wf) => {
+            attemptNo += 1
+            const attemptPrefix = `[尝试 ${attemptNo}] `
+            // Per-node param summaries so the session log shows WHICH node
+            // runs with WHAT configuration, not just block names.
+            const params = new Map<string, string>()
+            for (const node of wf.drawflow.nodes) {
+              const summary = describeNodeParams(node)
+              if (summary) params.set(node.id, summary)
+            }
+            const steps: DebugStepLine[] = []
+            const r = await executeWorkflow(wf, {
+              source: 'manual',
+              ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
+              onStep: (kind, nodeId, text) => {
+                steps.push({ kind, nodeId, text })
+                // Mirror every engine step into the debug session log with
+                // attempt context — the user follows along live.
+                const runKind: RunStepKind = (RUN_STEP_KINDS as readonly string[]).includes(kind)
+                  ? (kind as RunStepKind)
+                  : 'status'
+                if (kind === 'tool' && nodeId) {
+                  const summary = params.get(nodeId)
+                  addStep(
+                    session.runId,
+                    'tool',
+                    `${attemptPrefix}${text}${summary ? `（${summary}）` : ''}`,
+                    { nodeId },
+                  )
+                } else {
+                  addStep(session.runId, runKind, `${attemptPrefix}${text}`, ...(nodeId ? [{ nodeId }] : []))
+                }
+              },
+            })
+            return {
+              runId: r.runId,
+              outcome: r.outcome,
+              summary: r.summary,
+              error: r.error,
+              steps,
+            }
+          },
+          aiDecide: (ctx) => aiDecide(ctx),
+          save: async (wf) => {
+            await saveWorkflow(wf)
+            await rescheduleAllWorkflowTriggers()
+          },
+          ...(scope
+            ? {
+                probe: (selector: string) =>
+                  countElements(selector, new AbortController().signal, scope).catch(() => null),
+              }
+            : {}),
+          pageFacts: async () => {
+            const tab = await resolveAutomationTab(undefined, scope).catch(() => undefined)
+            if (!tab || (!tab.url && !tab.title)) return null
+            return {
+              ...(tab.url ? { url: tab.url } : {}),
+              ...(tab.title ? { title: tab.title } : {}),
+            }
+          },
+          inspectPage: (selector: string) => inspectPage(selector, scope),
+          onDebugStep: (kind, text) => addStep(session.runId, kind, text),
+        })
+        // The AI touched the graph: snapshot the PRE-debug workflow so the
+        // user can review and keep or revert (earliest snapshot wins).
+        if (result.workflowModified) {
+          await saveDebugBackup(
+            workflow,
+            result.summary,
+            result.rounds.flatMap((round) => round.changes),
+          ).catch(() => undefined)
+        }
+        finishRun(session.runId, {
+          outcome: result.cancelled ? 'cancelled' : result.ok ? 'ok' : 'failed',
+          summary: result.summary,
+          ...(result.error ? { error: result.error } : {}),
+        })
+        return { type: 'workflows.debug', result }
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error)
+        finishRun(session.runId, { outcome: 'failed', summary: text, error: text })
+        throw error
+      } finally {
+        release()
+      }
+    }
+
+    case 'workflows.debugBackups':
+      return { type: 'workflows.debugBackups', backups: await listDebugBackups() }
+
+    case 'workflows.debugRevert': {
+      const restored = await revertDebugBackup(command.id)
+      if (!restored) throw new Error('No AI debug backup for this workflow.')
+      await saveWorkflow(restored)
+      await rescheduleAllWorkflowTriggers()
+      return { type: 'workflows.debugRevert', workflow: restored }
+    }
+
+    case 'workflows.debugKeep':
+      await clearDebugBackup(command.id)
+      return { type: 'workflows.debugKeep' }
 
     case 'workflows.running': {
       const boards = runningBoardsView((command as { workflowId?: string }).workflowId)

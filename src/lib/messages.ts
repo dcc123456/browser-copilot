@@ -24,6 +24,9 @@ import type {
 import type { FeishuConfig, ScheduledTask, TaskRunLog } from './scheduler-types'
 import type { RunOutcomeKind, RunSource, RunStep } from '../background/running-tasks'
 import type { Workflow } from './workflow/types'
+import type { WorkflowDebugResult } from './workflow/auto-debug-patch'
+import type { WorkflowReview } from './workflow/review-patch'
+import type { DebugBackupInfo } from './workflow/debug-backup'
 import type { AttachmentDescriptor, AttachmentSummary } from './attachments'
 
 /** Aggregated token usage for one agent turn (summed across all tool rounds). */
@@ -123,11 +126,31 @@ export type Command =
   | { type: 'workflows.get'; id: string }
   | { type: 'workflows.save'; workflow: Workflow }
   | { type: 'workflows.delete'; id: string }
+  /**
+   * AI node review of a conversation-generated workflow (before save): the
+   * model judges which steps the replay genuinely needs. `review` is null
+   * when no provider is configured or the call failed — the panel then keeps
+   * every step and shows an availability hint.
+   */
+  | { type: 'workflows.review'; workflow: Workflow }
   | {
       type: 'workflows.run'
       id: string
       /** Run the graph starting at this node id ("run from here"). */ startAt?: string
     }
+  /**
+   * AI auto-debug: run the workflow, and when it fails let the model diagnose
+   * and repair operator nodes (retry policy / params / guards / AI steps /
+   * redundant-node removal), re-running to verify. See
+   * `background/workflow-engine/auto-debug`.
+   */
+  | { type: 'workflows.debug'; id: string }
+  /** Workflows with a pending AI-debug backup (review keep / revert chip). */
+  | { type: 'workflows.debugBackups' }
+  /** Restores the pre-AI-debug snapshot for this workflow. */
+  | { type: 'workflows.debugRevert'; id: string }
+  /** Keeps the AI changes and drops the stored snapshot. */
+  | { type: 'workflows.debugKeep'; id: string }
   | { type: 'workflows.running'; workflowId?: string }
 
   // --- Workflow recording (see background/record-controller.ts) ---
@@ -203,10 +226,15 @@ export type CommandResult =
   | { type: 'workflows.get'; workflow?: Workflow }
   | { type: 'workflows.save' }
   | { type: 'workflows.delete' }
+  | { type: 'workflows.review'; review: WorkflowReview | null }
   | {
       type: 'workflows.run'
       outcome: { ok: boolean; skipped: boolean; summary: string; error?: string; runId?: string }
     }
+  | { type: 'workflows.debug'; result: WorkflowDebugResult }
+  | { type: 'workflows.debugBackups'; backups: DebugBackupInfo[] }
+  | { type: 'workflows.debugRevert'; workflow: Workflow }
+  | { type: 'workflows.debugKeep' }
   | { type: 'workflows.running'; runs: RunningTaskView[]; finished: FinishedTaskView[] }
   | { type: 'record.start'; recording: boolean }
   | { type: 'record.stop'; workflowId?: string }
@@ -217,6 +245,28 @@ export type CommandResult =
 
 /** Envelope so a failed command never looks like a successful one. */
 export type CommandResponse = { ok: true; data: CommandResult } | { ok: false; error: string }
+
+/**
+ * One-way push messages the service worker broadcasts to every extension page.
+ *
+ * Skills can change from a context that is not a panel command — the agent's
+ * `create_skill` tool inside a chat turn — so the panel cannot rely on command
+ * replies to notice. Pages listen for `skills.changed` and re-read the list.
+ */
+export type WorkerBroadcast = { type: 'skills.changed' }
+
+/**
+ * Fire-and-forget broadcast that the skill store changed.
+ *
+ * Never throws: a page that is closed (or not yet listening) makes the runtime
+ * reject the send, and a failed notification is harmless — the list refreshes
+ * the next time the panel reopens anyway.
+ */
+export function notifySkillsChanged(): void {
+  void chrome.runtime
+    .sendMessage({ type: 'skills.changed' } satisfies WorkerBroadcast)
+    .catch(() => {})
+}
 
 /** Messages the side panel sends over the agent port. */
 export type AgentClientMessage =

@@ -230,9 +230,16 @@ export default function EditorApp() {
   const onConnect = useCallback((conn: Connection) => {
     if (!conn.source || !conn.target || conn.source === conn.target) return
     setEdges((eds) => {
-      if (eds.some((e) => e.target === conn.target && e.targetHandle === conn.targetHandle)) return eds
+      // An input handle holds a single connection (Automa). Re-drawing onto an
+      // occupied input REPLACES the old edge — silently dropping the new
+      // connection made occupied inputs (e.g. the generated set-variable → ocr
+      // link) impossible to rewire. Identical re-draws stay a no-op.
+      const sameTarget = (e: Edge) => e.target === conn.target && e.targetHandle === conn.targetHandle
+      if (eds.some((e) => sameTarget(e) && e.source === conn.source && e.sourceHandle === conn.sourceHandle)) {
+        return eds
+      }
       return [
-        ...eds,
+        ...eds.filter((e) => !sameTarget(e)),
         {
           id: newId(),
           source: conn.source,
@@ -549,7 +556,14 @@ export default function EditorApp() {
     editNode && editBlock ? (
       <div className="wf-edit-overlay">
         <WorkflowMetaProvider
-          meta={{ name: meta.name, description: meta.description, settings: meta.settings }}
+          meta={{
+            // The id lets block forms exclude this workflow from their
+            // "execute workflow" pickers (self-execution is a loop).
+            ...(workflowId ? { id: workflowId } : {}),
+            name: meta.name,
+            description: meta.description,
+            settings: meta.settings,
+          }}
           onMeta={(p) =>
             patchMeta({
               ...(p.name !== undefined ? { name: p.name } : {}),

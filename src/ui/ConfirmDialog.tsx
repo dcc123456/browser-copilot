@@ -134,7 +134,7 @@ export function useConfirm(): {
               {dialog.title}
             </h2>
             {dialog.message && (
-              <p className="m-0 mt-1.5 text-[12.5px] leading-relaxed text-muted break-words">
+              <p className="m-0 mt-1.5 whitespace-pre-line text-[12.5px] leading-relaxed text-muted break-words">
                 {dialog.message}
               </p>
             )}
