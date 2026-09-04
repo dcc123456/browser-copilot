@@ -25,11 +25,11 @@
 /** How long an untouched monitor stays attached before self-detaching. */
 const MONITOR_IDLE_MS = 60_000
 
-const MAX_CONSOLE_ENTRIES = 50
+const MAX_CONSOLE_ENTRIES = 200
 const MAX_REQUEST_ENTRIES = 50
 
 export interface ConsoleEntry {
-  level: 'error' | 'warning'
+  level: 'error' | 'warning' | 'log'
   text: string
   at: number
 }
@@ -144,21 +144,24 @@ if (typeof chrome !== 'undefined' && chrome.debugger?.onEvent) {
 
     if (method === 'Runtime.consoleAPICalled') {
       const type = String(p?.type ?? '')
-      if (type !== 'error' && type !== 'warning') return
+      // Control types without message text would render as empty entries.
+      if (type === 'clear' || type === 'profile' || type === 'profileEnd') return
+      const level: ConsoleEntry['level'] =
+        type === 'error' || type === 'assert' ? 'error' : type === 'warning' ? 'warning' : 'log'
       const args = Array.isArray(p?.args) ? (p!.args as { value?: unknown; description?: string }[]) : []
       const text = args
         .map((arg) => arg.description ?? (arg.value === undefined ? '' : String(arg.value)))
         .join(' ')
         .slice(0, 300)
-      push(monitor.console, MAX_CONSOLE_ENTRIES, { level: type, text, at: Date.now() })
+      push(monitor.console, MAX_CONSOLE_ENTRIES, { level, text, at: Date.now() })
       return
     }
     if (method === 'Log.entryAdded') {
       const entry = p?.entry as { level?: string; text?: string } | undefined
-      const level = entry?.level
-      if (level !== 'error' && level !== 'warning') return
+      const raw = entry?.level
+      if (!raw) return
       push(monitor.console, MAX_CONSOLE_ENTRIES, {
-        level,
+        level: raw === 'error' ? 'error' : raw === 'warning' ? 'warning' : 'log',
         text: String(entry?.text ?? '').slice(0, 300),
         at: Date.now(),
       })
@@ -266,4 +269,19 @@ export function getRecentRequests(tabId: number, cap = 30): RequestEntry[] {
   const monitor = monitors.get(tabId)
   if (!monitor) return []
   return monitor.requests.slice(-cap).map((r) => ({ ...r }))
+}
+
+/**
+ * Recent console entries for the tab (newest last). `level: 'errors'`
+ * (default) keeps only error/warning entries; 'all' returns everything
+ * captured, including plain log/info/debug output.
+ */
+export function getConsoleEntries(
+  tabId: number,
+  level: 'errors' | 'all' = 'errors',
+): ConsoleEntry[] {
+  const monitor = monitors.get(tabId)
+  if (!monitor) return []
+  const list = level === 'all' ? monitor.console : monitor.console.filter((e) => e.level !== 'log')
+  return list.map((e) => ({ ...e }))
 }
