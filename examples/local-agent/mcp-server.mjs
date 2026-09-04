@@ -335,6 +335,7 @@ const STATIC_TOOLS = [
   { name: 'run_plan', description: 'Execute an ordered sequence of already-decided steps in one round, stopping at the first failure.', properties: { steps: { type: 'array', items: { type: 'object', properties: { tool: { type: 'string' }, args: { type: 'object' }, optional: { type: 'boolean' } }, required: ['tool'] } } }, required: ['steps'] },
   { name: 'list_tabs', description: 'List the tabs open in the current window with index, title, and URL.', properties: {} },
   { name: 'list_network_requests', description: 'List recent network requests of the active tab (URL, method, status, failures).', properties: {} },
+  { name: 'list_console_messages', description: 'List recent console messages of the active tab (errors/warnings by default; pass level:"all" for every log).', properties: { level: { type: 'string' } } },
   { name: 'get_my_profile', description: "Get the user's saved personal profile(s) for filling forms.", properties: {} },
   { name: 'list_secrets', description: 'List saved credential bundles by label/URL with field names (not values).', properties: {} },
   { name: 'get_secret', description: "Fill a field using a saved credential bundle by id (value never shown).", properties: { id: { type: 'string' }, field: { type: 'string' }, ref: { type: 'string' }, target: { type: 'object' } }, required: ['id'] },
