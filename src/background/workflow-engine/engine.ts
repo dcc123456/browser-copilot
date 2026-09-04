@@ -373,9 +373,15 @@ async function runCore(
 
     // Loop and sub-workflow blocks are handled by the engine itself, not by an
     // executor in the registry, so sub-runs and loop bodies recurse here too.
+    // Body entry / after-loop exit resolve by handle semantics, not edge
+    // order: `loop` (output-1) starts the body, `end` (output-2) runs once
+    // after the loop finishes. A bare unlabeled edge still works as the body
+    // (legacy / programmatic graphs), but only when no end edge exists.
     if (LOOP_BLOCK_IDS.has(blockId)) {
       completedNodeIds.push(nodeId)
-      return runLoop(current, params, defaultNext)
+      const endId = outputs['end'] ?? outputs['output-2'] ?? null
+      const bodyStart = outputs['loop'] ?? outputs['output-1'] ?? (endId === null ? defaultNext : null)
+      return runLoop(current, params, bodyStart, endId)
     }
     if (blockId === 'execute-workflow') {
       completedNodeIds.push(nodeId)
@@ -502,6 +508,7 @@ async function runCore(
     loopNode: WorkflowNode,
     params: Record<string, unknown>,
     startId: string | null,
+    endId: string | null,
   ): Promise<string | null> {
     const label = blockIdOf(loopNode)
 
@@ -515,7 +522,7 @@ async function runCore(
         return null
       }
       emit('status', loopNode.id, `开始循环，共 ${items.length} 项`)
-      if (startId === null) return null
+      if (startId === null) return endId
       for (let i = 0; i < items.length; i++) {
         if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
         variables['loopIndex'] = i
@@ -523,25 +530,25 @@ async function runCore(
         await runSegment(startId, loopNode.id)
         if (outcome !== 'ok') return null
       }
-      return null
+      return endId
     }
 
     if (label === 'repeat-task') {
       const count = Math.max(0, Number(params['count'] ?? 1))
       emit('status', loopNode.id, `重复执行 ${count} 次`)
-      if (startId === null) return null
+      if (startId === null) return endId
       for (let i = 0; i < count; i++) {
         if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
         variables['loopIndex'] = i
         await runSegment(startId, loopNode.id)
         if (outcome !== 'ok') return null
       }
-      return null
+      return endId
     }
 
     if (label === 'while-loop') {
       const code = String(params['code'] ?? 'false')
-      if (startId === null) return null
+      if (startId === null) return endId
       let iterations = 0
       while (await evalCondition(code, variables, evaluateExpression)) {
         if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
@@ -556,7 +563,7 @@ async function runCore(
           return null
         }
       }
-      return null
+      return endId
     }
 
     // loop-elements
@@ -569,14 +576,14 @@ async function runCore(
       count = Math.max(0, Number(params['count'] ?? 0))
     }
     emit('status', loopNode.id, `遍历 ${count} 个元素`)
-    if (startId === null) return null
+    if (startId === null) return endId
     for (let i = 0; i < count; i++) {
       if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
       variables['loopIndex'] = i
       await runSegment(startId, loopNode.id)
       if (outcome !== 'ok') return null
     }
-    return null
+    return endId
   }
 
   /** Executes a referenced workflow as a nested run, then follows the edge. */

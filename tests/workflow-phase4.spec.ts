@@ -485,3 +485,115 @@ describe('workflow phase 4 — integration executors', () => {
     expect(emit).toHaveBeenCalledWith('error', 'AI 块: 未配置模型给 provider')
   })
 })
+
+describe('workflow loops — after-loop "end" branch', () => {
+  const CASES: Array<{ blockId: string; data: Record<string, unknown>; vars?: Record<string, unknown> }> = [
+    { blockId: 'loop-data', data: { data: '[1,2]' } },
+    { blockId: 'repeat-task', data: { count: 2 } },
+    { blockId: 'while-loop', data: { code: 'vars.n < 2' }, vars: { n: 0 } },
+    { blockId: 'loop-elements', data: { count: 2 } },
+  ]
+
+  it.each(CASES)('$blockId runs the end branch once after iterations finish', async ({ blockId, data, vars }) => {
+    const seen: string[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('loop', blockId, data),
+        node('body', 'body'),
+        node('after', 'after'),
+      ],
+      [
+        edge('t', 'loop'),
+        edge('loop', 'body', `${blockId}-output-1`),
+        edge('body', 'loop'),
+        edge('loop', 'after', `${blockId}-output-2`),
+      ],
+    )
+    const result = await runWorkflow(wf, {
+      variables: { ...(vars ?? {}) },
+      executors: {
+        ...EXECUTORS,
+        body: async (_d, ctx) => {
+          seen.push('body')
+          if (blockId === 'while-loop') {
+            ctx.variables['n'] = Number(ctx.variables['n'] ?? 0) + 1
+          }
+          return null
+        },
+        after: async () => {
+          seen.push('after')
+          return null
+        },
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual(['body', 'body', 'after'])
+  })
+
+  it('while-loop with an immediately-false condition goes straight to the end branch', async () => {
+    const seen: string[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('loop', 'while-loop', { code: 'false' }),
+        node('body', 'body'),
+        node('after', 'after'),
+      ],
+      [
+        edge('t', 'loop'),
+        edge('loop', 'body', 'while-loop-output-1'),
+        edge('body', 'loop'),
+        edge('loop', 'after', 'while-loop-output-2'),
+      ],
+    )
+    const result = await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        body: async () => {
+          seen.push('body')
+          return null
+        },
+        after: async () => {
+          seen.push('after')
+          return null
+        },
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual(['after'])
+  })
+
+  it('resolves body/end by handle semantics even when the end edge was connected first', async () => {
+    const seen: string[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('loop', 'repeat-task', { count: 2 }),
+        node('body', 'body'),
+        node('after', 'after'),
+      ],
+      [
+        edge('t', 'loop'),
+        edge('loop', 'after', 'repeat-task-output-2'),
+        edge('loop', 'body', 'repeat-task-output-1'),
+        edge('body', 'loop'),
+      ],
+    )
+    const result = await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        body: async () => {
+          seen.push('body')
+          return null
+        },
+        after: async () => {
+          seen.push('after')
+          return null
+        },
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual(['body', 'body', 'after'])
+  })
+})
