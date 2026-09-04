@@ -388,6 +388,8 @@ export interface Messages {
   toolListTabsWarn: string
   toolNetworkRequests: string
   toolNetworkRequestsWarn: string
+  toolConsoleLog: string
+  toolConsoleLogWarn: string
   toolClick: string
   toolClickWarn: string
   toolFill: string
@@ -1009,6 +1011,9 @@ const en: Messages = {
   toolNetworkRequests: 'Inspect recent network requests',
   toolNetworkRequestsWarn:
     'When off: the assistant cannot diagnose failed or slow requests after page actions.',
+  toolConsoleLog: 'Read browser console logs',
+  toolConsoleLogWarn:
+    'When off: the assistant cannot inspect console errors or logs when debugging page issues.',
   toolClick: 'Click elements',
   toolClickWarn: 'When off: the assistant cannot click buttons or links.',
   toolFill: 'Type into fields',
@@ -1594,6 +1599,8 @@ const zhCN: Messages = {
   toolListTabsWarn: '关闭后：助手无法查看或引用你打开的其他标签页。',
   toolNetworkRequests: '查看最近网络请求',
   toolNetworkRequestsWarn: '关闭后：助手无法在页面操作后诊断失败或缓慢的请求。',
+  toolConsoleLog: '查看控制台日志',
+  toolConsoleLogWarn: '关闭后：助手无法查看页面控制台的报错与日志，排查页面脚本问题会变难。',
   toolClick: '点击元素',
   toolClickWarn: '关闭后：助手无法点击按钮或链接。',
   toolFill: '在输入框中输入',
