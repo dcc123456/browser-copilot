@@ -55,6 +55,12 @@ export const TOOL_META: ToolMeta[] = [
     labelKey: 'toolNetworkRequests',
     warningKey: 'toolNetworkRequestsWarn',
   },
+  {
+    name: 'list_console_messages',
+    category: 'read',
+    labelKey: 'toolConsoleLog',
+    warningKey: 'toolConsoleLogWarn',
+  },
   { name: 'click', category: 'act', labelKey: 'toolClick', warningKey: 'toolClickWarn' },
   { name: 'fill', category: 'act', labelKey: 'toolFill', warningKey: 'toolFillWarn' },
   {
