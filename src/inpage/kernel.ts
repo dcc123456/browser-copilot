@@ -1207,6 +1207,19 @@ export function runOp(op: Op): OpResult {
         error: `capture: 未找到元素 "${selector || (op.target?.primary?.value ?? '')}"`,
       }
     }
+    // <img> elements resolve to their SOURCE resource instead of being
+    // rasterized through an SVG foreignObject: the SVG data-URL load is
+    // subject to the page's CSP (blocked on many sites) and always renders one
+    // resample blurrier than the original pixels — fatal for small captchas.
+    // Relative srcs resolve against the page location; the worker downloads
+    // the URL itself (with cookies, so session-bound captchas work).
+    if (host instanceof HTMLImageElement) {
+      const rawSrc = host.currentSrc || host.src
+      if (rawSrc && /^(https?:|data:image\/)/i.test(rawSrc)) {
+        const src = /^https?:/i.test(rawSrc) ? new URL(rawSrc, location.href).href : rawSrc
+        return { ...base(), ok: true, found: true, note: 'captured-img-src', data: src }
+      }
+    }
     try {
       const width = host.scrollWidth || host.offsetWidth || 1280
       const height = host.scrollHeight || host.offsetHeight || 800

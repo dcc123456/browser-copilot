@@ -107,20 +107,42 @@ async function runOcr(
   if (h <= 120 && w / h >= 2.5) {
     await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_LINE })
     try {
-      // Both segmentation modes always run (~20ms extra): their agreement
-      // signals a trustworthy read, and their disagreement feeds the
-      // candidate comparison instead of silently picking one.
-      const line = await worker.recognize(canvas)
-      const lineText = extractText(line)
-      const lineConf = line.data?.confidence ?? 0
-      await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK })
-      const block = await worker.recognize(canvas)
-      const blockText = extractText(block)
-      const blockConf = block.data?.confidence ?? 0
-      const picked = pickOcrCandidate([
-        { text: lineText, confidence: lineConf },
-        { text: blockText, confidence: blockConf },
-      ])
+      // Self-sufficiency: Tesseract needs ~30px glyphs. When callers skip
+      // preprocessing (workflow ocr blocks with preprocess=false, or a failed
+      // convenience step), a raw 50x20 captcha arrives and EVERY pass starves.
+      // Upscaling here (nearest-neighbour — no ringing on two-tone captcha
+      // pixels) restores the validated input size unconditionally.
+      let base = canvas
+      if (Math.max(w, h) < 120) base = upscaleNearest(canvas, Math.max(3, Math.round(120 / h)))
+      // Six candidates, one worker, strictly sequential (~60ms extra): three
+      // segmentation modes on the grayscale, plus three on a cleaned binary
+      // variant (see cleanBinaryCanvas) — plain SINGLE_LINE/RAW_LINE and a
+      // digits-only-whitelisted SINGLE_LINE. Thin-stroke captchas (e.g.
+      // jxt56's 50x20 digits) read badly or empty on the grayscale but recover
+      // fully on the cleaned binary; wide-spaced arithmetic captchas keep
+      // reading best on the plain grayscale. The whitelist pass is a safety
+      // net that cannot hurt: offline it matched the unwhitelisted read on
+      // every clean sample and forces digit output on marginal ones.
+      const readWith = async (target: HTMLCanvasElement, psm: PSM, whitelist?: string) => {
+        await worker.setParameters({
+          tessedit_pageseg_mode: psm,
+          tessedit_char_whitelist: whitelist ?? '',
+        })
+        const r = await worker.recognize(target)
+        return { text: extractText(r), confidence: r.data?.confidence ?? 0 }
+      }
+      const reads = [
+        await readWith(base, PSM.SINGLE_LINE),
+        await readWith(base, PSM.SINGLE_BLOCK),
+        await readWith(base, PSM.RAW_LINE),
+      ]
+      const clean = cleanBinaryCanvas(base)
+      if (clean) {
+        reads.push(await readWith(clean, PSM.SINGLE_LINE))
+        reads.push(await readWith(clean, PSM.SINGLE_LINE, '0123456789+-xX*/='))
+        reads.push(await readWith(clean, PSM.RAW_LINE))
+      }
+      const picked = pickOcrCandidate(reads)
       return {
         text: picked.text,
         confidence: picked.confidence,
@@ -128,7 +150,7 @@ async function runOcr(
         alternatives: picked.alternatives,
       }
     } finally {
-      await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO })
+      await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO, tessedit_char_whitelist: '' })
     }
   }
   const result = await worker.recognize(canvas)
@@ -158,6 +180,134 @@ function drawToCanvas(dataUrl: string): Promise<HTMLCanvasElement> {
     img.onerror = () => reject(new Error('图片无法解码，无法进行 OCR'))
     img.src = dataUrl
   })
+}
+
+/**
+ * Nearest-neighbour upscale for tiny captcha inputs. Deliberately NOT smooth:
+ * two-tone captcha pixels stay two-tone (no ringing halos), which is what the
+ * cleaned-binary pipeline and Tesseract's LSTM were validated against.
+ */
+function upscaleNearest(canvas: HTMLCanvasElement, factor: number): HTMLCanvasElement {
+  const out = document.createElement('canvas')
+  out.width = Math.min(2400, canvas.width * factor)
+  out.height = Math.min(2400, canvas.height * factor)
+  const ctx = out.getContext('2d')
+  if (!ctx) return canvas
+  ctx.imageSmoothingEnabled = false
+  ctx.drawImage(canvas, 0, 0, out.width, out.height)
+  return out
+}
+
+/**
+ * Builds a "cleaned binary" variant of a captcha-shaped image, tuned on live
+ * jxt56 samples (50x20 thin-stroke digits with scattered noise dots):
+ *
+ * 1. adaptive binarize — threshold halfway between the 2nd-percentile floor
+ *    and white;
+ * 2. drop connected components shorter than 30% of the image height — noise
+ *    dots are a few pixels tall, every glyph spans most of the height (a plain
+ *    area threshold fails: upscaled dots grow past it);
+ * 3. dilate 1px — reconnects the broken thin strokes;
+ * 4. clear a 2px margin — border remnants otherwise read as punctuation.
+ *
+ * Whole-line reads on this variant were the ONLY ones that recovered every
+ * jxt56 sample (the raw grayscale read ~40% empty); they run as ADDITIONAL
+ * candidates next to the ordinary grayscale passes, so other captcha styles
+ * (e.g. wide arithmetic codes) are never worse off — the structural scorer
+ * picks the cleanest read. Returns null when the canvas has no 2d context.
+ */
+function cleanBinaryCanvas(canvas: HTMLCanvasElement): HTMLCanvasElement | null {
+  const w = canvas.width
+  const h = canvas.height
+  const ctx = canvas.getContext('2d')
+  if (!ctx || w < 4 || h < 4) return null
+  let data: Uint8ClampedArray
+  try {
+    data = ctx.getImageData(0, 0, w, h).data
+  } catch {
+    return null
+  }
+  const gray = new Float32Array(w * h)
+  for (let i = 0; i < w * h; i++) {
+    gray[i] = 0.299 * data[i * 4]! + 0.587 * data[i * 4 + 1]! + 0.114 * data[i * 4 + 2]!
+  }
+  const sorted = Float32Array.from(gray).sort()
+  const k = Math.max(1, Math.floor((w * h) * 0.02))
+  const thr = Math.min(200, sorted[k]! + 0.55 * (255 - sorted[k]!))
+  const bin = new Uint8Array(w * h)
+  for (let i = 0; i < w * h; i++) bin[i] = gray[i]! < thr ? 1 : 0
+  const keep = new Uint8Array(w * h)
+  const label = new Int32Array(w * h)
+  const minCompHeight = Math.max(4, Math.round(h * 0.3))
+  const stack = new Int32Array(w * h)
+  let next = 1
+  for (let start = 0; start < w * h; start++) {
+    if (bin[start] !== 1 || label[start] !== 0) continue
+    let sp = 0
+    stack[sp++] = start
+    label[start] = next
+    const comp: number[] = []
+    let y0 = h
+    let y1 = 0
+    while (sp > 0) {
+      const p = stack[--sp]!
+      comp.push(p)
+      const py = (p / w) | 0
+      if (py < y0) y0 = py
+      if (py > y1) y1 = py
+      const px = p % w
+      for (const d of [-1, 1, -w, w]) {
+        const q = p + d
+        if (q < 0 || q >= w * h || bin[q] !== 1 || label[q] !== 0) continue
+        if (d === -1 && px === 0) continue
+        if (d === 1 && px === w - 1) continue
+        label[q] = next
+        stack[sp++] = q
+      }
+    }
+    if (y1 - y0 + 1 >= minCompHeight) for (const p of comp) keep[p] = 1
+    next++
+  }
+  const mask = new Uint8Array(w * h)
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let v = 0
+      for (let dy = -1; dy <= 1 && !v; dy++) {
+        const ny = y + dy
+        if (ny < 0 || ny >= h) continue
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx
+          if (nx < 0 || nx >= w) continue
+          if (keep[ny * w + nx]) {
+            v = 1
+            break
+          }
+        }
+      }
+      mask[y * w + x] = v
+    }
+  }
+  const M = 2
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (x < M || y < M || x >= w - M || y >= h - M) mask[y * w + x] = 0
+    }
+  }
+  const out = document.createElement('canvas')
+  out.width = w
+  out.height = h
+  const octx = out.getContext('2d')
+  if (!octx) return null
+  const img = octx.createImageData(w, h)
+  for (let i = 0; i < w * h; i++) {
+    const v = mask[i]! ? 0 : 255
+    img.data[i * 4] = v
+    img.data[i * 4 + 1] = v
+    img.data[i * 4 + 2] = v
+    img.data[i * 4 + 3] = 255
+  }
+  octx.putImageData(img, 0, 0)
+  return out
 }
 
 /**

@@ -416,8 +416,6 @@ export default function EditorApp() {
         toast.show(`${t('runFailed')}: ${msg}`, 'error')
       } finally {
         setRunning(false)
-        // Logs are viewed in a modal (Automa's log viewer), not the sidebar.
-        setLogsOpen(true)
       }
     },
     [workflowId, handleSave, toast, t],

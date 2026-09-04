@@ -55,6 +55,7 @@ import {
 } from '../lib/download-dir'
 import { inspectImage, preprocessImage, recognizeImage, resolveVisionTarget } from '../lib/vision'
 import { evaluateArithmetic } from '../lib/ocr-candidates'
+import { fetchImageAsDataUrl } from '../lib/fetch-image'
 import { isSamePage } from '../lib/pages'
 import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
 import {
@@ -1328,43 +1329,6 @@ async function resolveImageRef(ref: string): Promise<string | null> {
     }
   }
   return null
-}
-
-/**
- * Downloads an http(s) image and inlines it as a data URL, so both the local
- * OCR worker and the vision model receive self-contained bytes instead of a
- * URL they must each fetch themselves. The response must actually BE an image
- * (many sites serve JSON/API payloads at their captcha URLs — a fast, explicit
- * failure here beats slow cascading failures downstream). Cookies are sent:
- * captchas are commonly session-bound.
- */
-async function fetchImageAsDataUrl(
-  url: string,
-): Promise<{ ok: true; dataUrl: string } | { ok: false; error: string }> {
-  try {
-    const res = await fetch(url, { credentials: 'include' })
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status} while downloading ${url}` }
-    const type = (res.headers.get('content-type') ?? '').split(';')[0]!.trim()
-    if (!type.startsWith('image/')) {
-      return {
-        ok: false,
-        error:
-          `${url} did not return an image (Content-Type: ${type || 'unknown'}). ` +
-          'That URL likely serves an API/JSON response — capture the rendered element with a selector instead.',
-      }
-    }
-    const bytes = new Uint8Array(await res.arrayBuffer())
-    let binary = ''
-    for (let i = 0; i < bytes.length; i += 0x8000) {
-      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
-    }
-    return { ok: true, dataUrl: `data:${type};base64,${btoa(binary)}` }
-  } catch (error) {
-    return {
-      ok: false,
-      error: `Could not download ${url}: ${(error as Error)?.message ?? String(error)}`,
-    }
-  }
 }
 
 /**

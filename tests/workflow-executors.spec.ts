@@ -48,6 +48,9 @@ function makeChromeMock() {
     active: true,
   } as unknown as chrome.tabs.Tab
   const query = vi.fn(async () => [tab])
+  // resolveAutomationTab's cache branch probes the cached tab's existence
+  // through tabs.get on every element-capture fallback path.
+  const get = vi.fn(async () => tab)
   const update = vi.fn(async () => tab)
   const create = vi.fn(async () => tab)
   const reload = vi.fn(async () => {})
@@ -60,7 +63,7 @@ function makeChromeMock() {
   ])
   return {
     chrome: {
-      tabs: { query, update, create, reload, remove, goBack, goForward, captureVisibleTab },
+      tabs: { query, get, update, create, reload, remove, goBack, goForward, captureVisibleTab },
       scripting: { executeScript },
       // getSettings() (used by the ai-prompt and ocr blocks) reads storage.
       storage: {
@@ -70,7 +73,7 @@ function makeChromeMock() {
         },
       },
     },
-    refs: { query, update, create, reload, remove, goBack, goForward, captureVisibleTab, executeScript, tab },
+    refs: { query, get, update, create, reload, remove, goBack, goForward, captureVisibleTab, executeScript, tab },
   }
 }
 
@@ -407,8 +410,8 @@ describe('workflow ocr block', () => {
     expect(ocrMock).not.toHaveBeenCalled()
     // 3 attempts × (scroll + capture).
     expect(driverMock.mock.calls).toHaveLength(6)
-    expect(emit).toHaveBeenCalledWith('error', expect.stringContaining('找不到元素'))
-    expect(emit).toHaveBeenCalledWith('error', expect.stringContaining('iframe'))
+    expect(emit).toHaveBeenCalledWith('error', expect.stringContaining('所有框架中均找不到元素'))
+    expect(emit).toHaveBeenCalledWith('error', expect.stringContaining('选择器不匹配'))
   })
 
   it('variable source reads an image data URL from the named variable', async () => {

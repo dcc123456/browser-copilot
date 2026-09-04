@@ -68,9 +68,12 @@ function captureHint(raw: string): string {
  */
 export async function captureVisiblePage(
   scope?: ScopeWindow,
-  opts?: { format?: 'png' | 'jpeg'; quality?: number },
+  opts?: { format?: 'png' | 'jpeg'; quality?: number; tab?: chrome.tabs.Tab },
 ): Promise<CaptureResult> {
-  const tab = await activeTab(scope)
+  // An explicit tab (resolved by the caller through resolveAutomationTab) wins:
+  // the focused tab may be the workflow editor / popup itself, which must never
+  // be the capture subject.
+  const tab = opts?.tab ?? (await activeTab(scope))
   if (!tab || typeof tab.windowId !== 'number') {
     return {
       ok: false,
