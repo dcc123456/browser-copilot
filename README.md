@@ -327,6 +327,36 @@ runs for workflows and tasks alike — live progress, per-block logs, debug
 mode, and mid-run cancellation. The Workflows tab shows each workflow's
 last-run status, and a failed run deep-links straight to its log.
 
+**Failure retry.** Two levels:
+
+- **Single block.** Every block's *On error* settings can retry itself N times
+  with an interval, or route to its `fallback` handle. For one flaky click.
+- **A group of steps.** Put the group inside a **Repeat task** block and detect
+  the failure with an **Element exists** check — e.g. a login that re-enters
+  the captcha on failure, up to 5 attempts:
+
+  ```
+  Repeat task (5)
+   ├─ loop → click "refresh captcha" → OCR the captcha image (→ lastOcrText)
+   │          → fill the captcha input with {{lastOcrText}} → click "sign in"
+   │          → wait 2s → Element exists (error-message selector)
+   │                         ├─ exists (failed)  → wire back to the Repeat task
+   │                         │                     block = next retry
+   │                         └─ not exists (ok)  → Set variable loginOk=true
+   │                                              → Loop breakpoint
+   └─ end  → Conditions (loginOk exists?) ─ true  → logged-in steps…
+                                          └─ false → all 5 attempts failed
+  ```
+
+  The body is whatever hangs off the **loop** handle; wiring the last body
+  block back to the loop block ends an iteration. **Loop breakpoint** breaks
+  out early; execution resumes at the **end** handle — which also runs after
+  all iterations finish, so tell the two endings apart with a variable plus
+  **Conditions** (as above), e.g. notify or fail the run when login never
+  succeeded. (A hand-drawn cycle of blocks counted by **Increase variable**
+  and gated by **Conditions** also works, but the loop shape above is easier
+  to read and maintain.)
+
 **Portability.** Export a single workflow or all of them as JSON, and import
 JSON back — including files exported from Automa itself. Older
 Browser Copilot workflow formats migrate automatically on load.
