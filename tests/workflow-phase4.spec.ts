@@ -597,3 +597,234 @@ describe('workflow loops — after-loop "end" branch', () => {
     expect(seen).toEqual(['body', 'body', 'after'])
   })
 })
+
+describe('workflow loops — end branch edge cases', () => {
+  it('loop with an end edge but no body edge goes straight to the end branch', async () => {
+    const seen: string[] = []
+    const wf = makeWorkflow(
+      [node('t', 'manual'), node('loop', 'repeat-task', { count: 2 }), node('after', 'after')],
+      [edge('t', 'loop'), edge('loop', 'after', 'repeat-task-output-2')],
+    )
+    const result = await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        after: async () => {
+          seen.push('after')
+          return null
+        },
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual(['after'])
+  })
+
+  it('ignores an unlabeled edge as body when an end edge exists', async () => {
+    const seen: string[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('loop', 'repeat-task', { count: 2 }),
+        node('body', 'body'),
+        node('after', 'after'),
+      ],
+      [edge('t', 'loop'), edge('loop', 'body'), edge('loop', 'after', 'repeat-task-output-2')],
+    )
+    const result = await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        body: async () => {
+          seen.push('body')
+          return null
+        },
+        after: async () => {
+          seen.push('after')
+          return null
+        },
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual(['after'])
+  })
+
+  it('does not follow the end branch when an iteration fails the run', async () => {
+    const seen: string[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('loop', 'repeat-task', { count: 3 }),
+        node('body', 'body'),
+        node('after', 'after'),
+      ],
+      [
+        edge('t', 'loop'),
+        edge('loop', 'body', 'repeat-task-output-1'),
+        edge('body', 'loop'),
+        edge('loop', 'after', 'repeat-task-output-2'),
+      ],
+    )
+    const result = await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        body: async (_d, ctx) => {
+          seen.push('body')
+          if (seen.length > Number(ctx.variables['failAfter'] ?? 1)) throw new Error('boom')
+          return null
+        },
+        after: async () => {
+          seen.push('after')
+          return null
+        },
+      },
+    })
+    expect(result.outcome).toBe('failed')
+    expect(result.error).toContain('boom')
+    expect(seen).toEqual(['body', 'body'])
+  })
+})
+
+describe('workflow loops — loop-breakpoint', () => {
+  /** Single loop + body `a` → breakpoint → end branch `after`. */
+  const singleLoopGraph = (bpData: Record<string, unknown> = {}) =>
+    makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('loop', 'repeat-task', { count: 5 }),
+        node('a', 'a'),
+        node('bp', 'loop-breakpoint', bpData),
+        node('after', 'after'),
+      ],
+      [
+        edge('t', 'loop'),
+        edge('loop', 'a', 'repeat-task-output-1'),
+        edge('a', 'bp'),
+        edge('loop', 'after', 'repeat-task-output-2'),
+      ],
+    )
+
+  const pushTo = (seen: string[], label: string) => async () => {
+    seen.push(label)
+    return null
+  }
+
+  it('breaks the loop early and continues from the end branch', async () => {
+    const seen: string[] = []
+    const result = await runWorkflow(singleLoopGraph(), {
+      executors: {
+        ...EXECUTORS,
+        a: pushTo(seen, 'a'),
+        after: pushTo(seen, 'after'),
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual(['a', 'after'])
+  })
+
+  it('is not swallowed by its own onError retry policy', async () => {
+    const seen: string[] = []
+    const steps: string[] = []
+    const result = await runWorkflow(
+      singleLoopGraph({
+        onError: { enable: true, toDo: 'retry', retryTimes: 3, retryInterval: 0 },
+      }),
+      {
+        onStep: (_k, _id, text) => steps.push(text),
+        executors: {
+          ...EXECUTORS,
+          a: pushTo(seen, 'a'),
+          after: pushTo(seen, 'after'),
+        },
+      },
+    )
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual(['a', 'after'])
+    expect(steps.some((s) => s.includes('Retrying'))).toBe(false)
+  })
+
+  it('breaks only the innermost loop by default; the outer loop continues', async () => {
+    const seen: string[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('outer', 'repeat-task', { count: 2 }),
+        node('inner', 'repeat-task', { count: 2 }),
+        node('a', 'a'),
+        node('bp', 'loop-breakpoint'),
+        node('b', 'b'),
+        node('after', 'after'),
+      ],
+      [
+        edge('t', 'outer'),
+        edge('outer', 'inner', 'repeat-task-output-1'),
+        edge('inner', 'a', 'repeat-task-output-1'),
+        edge('a', 'bp'),
+        edge('inner', 'b', 'repeat-task-output-2'),
+        edge('b', 'outer'),
+        edge('outer', 'after', 'repeat-task-output-2'),
+      ],
+    )
+    const result = await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        a: pushTo(seen, 'a'),
+        b: pushTo(seen, 'b'),
+        after: pushTo(seen, 'after'),
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual(['a', 'b', 'a', 'b', 'after'])
+  })
+
+  it('breaks the outer loop when the breakpoint carries a matching loopId', async () => {
+    const seen: string[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('outer', 'repeat-task', { count: 2 }),
+        node('inner', 'repeat-task', { count: 2 }),
+        node('a', 'a'),
+        node('bp', 'loop-breakpoint', { loopId: 'outer' }),
+        node('b', 'b'),
+        node('after', 'after'),
+      ],
+      [
+        edge('t', 'outer'),
+        edge('outer', 'inner', 'repeat-task-output-1'),
+        edge('inner', 'a', 'repeat-task-output-1'),
+        edge('a', 'bp'),
+        edge('inner', 'b', 'repeat-task-output-2'),
+        edge('b', 'outer'),
+        edge('outer', 'after', 'repeat-task-output-2'),
+      ],
+    )
+    const result = await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        a: pushTo(seen, 'a'),
+        b: pushTo(seen, 'b'),
+        after: pushTo(seen, 'after'),
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual(['a', 'after'])
+  })
+
+  it('outside any loop it is benign: run ends ok with an info note', async () => {
+    const seen: string[] = []
+    const steps: Array<{ kind: string; text: string }> = []
+    const wf = makeWorkflow(
+      [node('t', 'manual'), node('bp', 'loop-breakpoint'), node('after', 'after')],
+      [edge('t', 'bp'), edge('bp', 'after')],
+    )
+    const result = await runWorkflow(wf, {
+      onStep: (kind, _id, text) => steps.push({ kind, text }),
+      executors: {
+        ...EXECUTORS,
+        after: pushTo(seen, 'after'),
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(result.error).toBeUndefined()
+    expect(seen).toEqual([])
+    expect(steps.some((s) => s.kind === 'info' && s.text.includes('不在循环内'))).toBe(true)
+  })
+})

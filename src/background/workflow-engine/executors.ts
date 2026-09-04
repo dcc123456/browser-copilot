@@ -18,6 +18,7 @@ import { streamCompletion, type WireMessage } from '../../lib/llm'
 import { getSettings } from '../../lib/storage'
 import { interpolate } from '../../lib/workflow/interpolate'
 import { preprocessImage } from '../../lib/vision'
+import { LoopBreakpointError } from './loop-breakpoint'
 import {
   askSaveViaSidePanel,
   getDownloadDir,
@@ -1825,6 +1826,20 @@ const hoverElement: BlockExecutor = async (data, ctx) =>
   runRaw(withWait({ action: 'hover', target: targetFrom(data) }, data), ctx)
 
 /**
+ * Automa `loop-breakpoint` block: unwinds out of the enclosing loop by
+ * throwing the sentinel the engine catches at the owning loop (which resumes
+ * from that loop's "end" branch). A non-empty `loopId` targets a specific
+ * outer loop; without one the innermost enclosing loop breaks. runNode
+ * rethrows the sentinel before any onError handling, so this block is never
+ * retried, fallback-routed or failed.
+ */
+const loopBreakpointExec: BlockExecutor = async (data) => {
+  const raw = data['loopId']
+  const loopId = typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : undefined
+  throw new LoopBreakpointError(loopId)
+}
+
+/**
  * Block-executor registry, keyed by block id. The engine resolves the block id
  * from `WorkflowNode.data.blockId` (falling back to the legacy `label` field)
  * and dispatches through this map.
@@ -1912,7 +1927,7 @@ export const EXECUTORS: Record<string, BlockExecutor> = {
   'element-scroll': elementScroll,
   'forms': formsBlock,
   'conditions': conditionsBlock,
-  'loop-breakpoint': noop,
+  'loop-breakpoint': loopBreakpointExec,
   // trigger
   'visit-web': noop,
   'schedule': noop,

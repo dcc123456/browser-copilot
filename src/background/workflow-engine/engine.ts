@@ -17,6 +17,7 @@ import {
   type BlockExecutor,
   type WorkflowExecCtx,
 } from './executors'
+import { LoopBreakpointError } from './loop-breakpoint'
 
 export type EmitKind = 'tool' | 'status' | 'result' | 'error' | 'info'
 
@@ -429,6 +430,9 @@ async function runCore(
       } catch (e) {
         lastError = e
         if (isAbort(e)) break
+        // A loop-breakpoint unwinds past per-block onError handling: the
+        // enclosing loop catches it, not the retry/fallback machinery.
+        if (e instanceof LoopBreakpointError) throw e
         if (attempt < maxAttempts - 1) {
           const waitMs = Math.max(0, Number(policy?.retryInterval ?? 1000))
           emit('info', nodeId, `Retrying (${attempt + 1}/${maxAttempts - 1}) after failure: ${message(e)}`)
@@ -497,6 +501,31 @@ async function runCore(
   }
 
   /**
+   * Runs one loop-body segment, translating a `LoopBreakpointError` from the
+   * body into a `'break'` signal when THIS loop owns it (no loopId = the
+   * innermost loop; a loopId must match the loop node's values/data `loopId`
+   * or the node id), rethrowing otherwise so an outer loop can claim it.
+   */
+  async function runLoopBody(
+    loopNode: WorkflowNode,
+    startId: string,
+  ): Promise<'ok' | 'break' | 'failed'> {
+    try {
+      await runSegment(startId, loopNode.id)
+    } catch (e) {
+      if (e instanceof LoopBreakpointError) {
+        const wanted = e.loopId ?? ''
+        const owners = [paramsOf(loopNode)['loopId'], loopNode.data?.['loopId'], loopNode.id].map(
+          (v) => (v === undefined || v === null ? '' : String(v)),
+        )
+        if (wanted === '' || owners.includes(wanted)) return 'break'
+      }
+      throw e
+    }
+    return outcome === 'ok' ? 'ok' : 'failed'
+  }
+
+  /**
    * Runs the body of a loop block once per iteration, dispatching on the loop
    * block's label:
    * - `loop-data`: once per parsed JSON array item (exposes loopIndex/loopItem)
@@ -527,8 +556,9 @@ async function runCore(
         if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
         variables['loopIndex'] = i
         variables['loopItem'] = items[i]
-        await runSegment(startId, loopNode.id)
-        if (outcome !== 'ok') return null
+        const seg = await runLoopBody(loopNode, startId)
+        if (seg === 'failed') return null
+        if (seg === 'break') return endId
       }
       return endId
     }
@@ -540,8 +570,9 @@ async function runCore(
       for (let i = 0; i < count; i++) {
         if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
         variables['loopIndex'] = i
-        await runSegment(startId, loopNode.id)
-        if (outcome !== 'ok') return null
+        const seg = await runLoopBody(loopNode, startId)
+        if (seg === 'failed') return null
+        if (seg === 'break') return endId
       }
       return endId
     }
@@ -553,8 +584,9 @@ async function runCore(
       while (await evalCondition(code, variables, evaluateExpression)) {
         if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
         variables['loopIndex'] = iterations
-        await runSegment(startId, loopNode.id)
-        if (outcome !== 'ok') return null
+        const seg = await runLoopBody(loopNode, startId)
+        if (seg === 'failed') return null
+        if (seg === 'break') return endId
         if (++iterations > MAX_WHILE_ITERATIONS) {
           const text = 'while-loop: 迭代超限，疑似死循环'
           emit('error', loopNode.id, text)
@@ -580,8 +612,9 @@ async function runCore(
     for (let i = 0; i < count; i++) {
       if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
       variables['loopIndex'] = i
-      await runSegment(startId, loopNode.id)
-      if (outcome !== 'ok') return null
+      const seg = await runLoopBody(loopNode, startId)
+      if (seg === 'failed') return null
+      if (seg === 'break') return endId
     }
     return endId
   }
@@ -625,15 +658,21 @@ async function runCore(
     if (!startId) startId = nodes[0]?.id
     if (startId) await runSegment(startId)
   } catch (e) {
-    // Top-of-loop abort check (or an unexpected engine error) surfaced here.
-    const text = message(e)
-    emit('error', currentNodeId, text)
-    if (isAbort(e)) {
-      outcome = 'cancelled'
-      summary = CANCELLED_SUMMARY
+    if (e instanceof LoopBreakpointError) {
+      // A loop-breakpoint fired outside any loop (or its loopId matched
+      // nothing): benign — stop the chain here and keep the run 'ok'.
+      emit('info', currentNodeId, 'loop-breakpoint: 不在循环内，已忽略')
     } else {
-      outcome = 'failed'
-      error = text
+      // Top-of-loop abort check (or an unexpected engine error) surfaced here.
+      const text = message(e)
+      emit('error', currentNodeId, text)
+      if (isAbort(e)) {
+        outcome = 'cancelled'
+        summary = CANCELLED_SUMMARY
+      } else {
+        outcome = 'failed'
+        error = text
+      }
     }
   }
 
