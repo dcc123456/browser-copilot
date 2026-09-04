@@ -122,8 +122,8 @@ OCR（写入 `lastOcrText`）、`element-exists`（exists/notExists 分支）、
 1. 四种循环块迭代耗尽后走 "end" 分支，且 "end" 目标节点**只执行一次**
    （回归：现状是 "end" 不执行，而 "end" 前挂的块会被误当成循环体尾每轮执行）。
 2. `while-loop` 条件首轮即为假（0 次迭代）→ 直接走 "end" 分支。
-3. `loop-breakpoint` 在体内 → 提前跳出，从 "end" 继续；
-   `completedNodeIds` 含断点节点，且后续迭代不再执行。
+3. `loop-breakpoint` 在体内 → 提前跳出，从 "end" 继续；断点节点以哨兵上抛、
+   不计入 `completedNodeIds`，后续迭代不再执行。
 4. 嵌套循环：内层断点只跳内层，外层继续；带匹配 `loopId` 的断点跳出外层。
 5. 断点在循环外 → 运行 `ok` 结束，info 日志出现"不在循环内"。
 6. 断点块配置 `onError.enable + retryTimes` → 不被重试、不判失败（哨兵优先于
