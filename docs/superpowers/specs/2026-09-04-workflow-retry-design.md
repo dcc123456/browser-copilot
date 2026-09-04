@@ -143,6 +143,17 @@ OCR（写入 `lastOcrText`）、`element-exists`（exists/notExists 分支）、
   修正，不是破坏；发布说明中提一句即可。
 - 循环体入口按句柄取值：只影响"先连 end 后连 loop"这种此前必然错误的图，
   修正方向与用户意图一致。
+- 无句柄裸边 + 已连 end 出口的图：裸边不再被当作循环体（有 end 出口时）。
+  存量已保存的工作流在加载时经 `migrate.ts` 归一化为标准句柄，不受影响；
+  仅未经过迁移的图会受影响（终审 F2）。
+- 旧版 `breakpoint` 块（migrate 将其映射为 `loop-breakpoint`）：以前是
+  noop，现在会真正跳出所在循环；不在循环内时就地收尾（运行仍为 ok，info
+  日志）。发布说明中提一句（终审 F3）。
+- 编辑器/引擎参数形状漂移（既有问题，本次只修 repeat-task）：编辑器
+  repeat-task 只能编辑 `repeatFor`，引擎已兼容读取 `count ?? repeatFor`；
+  while-loop 编辑器写 `conditions` 组、引擎读 `code` 表达式——编辑器搭建的
+  while-loop 条件恒为假（0 次迭代，现会走到 end 分支）。该漂移超出本特性
+  范围，未在本次修复（终审 F1）。
 
 ## 5. 交付物清单
 

@@ -340,8 +340,9 @@ async function runCore(
     for (const edge of outEdges) {
       const handle = edge.sourceHandle ?? 'next'
       outputs[handle] = edge.target
-      // Index by bare suffix: `${blockId}-output-1` -> `output-1`.
-      const m = /-(output-\d+|fallback)$/.exec(handle)
+      // Index by bare suffix: `${blockId}-output-1` -> `output-1`. `loop`/`end`
+      // cover handles migration normalized from imported bare semantic keys.
+      const m = /-(output-\d+|fallback|loop|end)$/.exec(handle)
       if (m) outputs[m[1]!] = edge.target
       // Index semantic keys for this block's branch handles.
       const pair = BRANCH_KEYS[blockIdOf(current)]
@@ -567,7 +568,9 @@ async function runCore(
     }
 
     if (label === 'repeat-task') {
-      const count = Math.max(0, Number(params['count'] ?? 1))
+      // `count` is the engine/chat shape; the editor catalog seeds and edits
+      // `repeatFor` (string) — accept both so editor-built loops repeat.
+      const count = Math.max(0, Number(params['count'] ?? params['repeatFor'] ?? 1))
       emit('status', loopNode.id, `重复执行 ${count} 次`)
       if (startId === null) return endId
       for (let i = 0; i < count; i++) {

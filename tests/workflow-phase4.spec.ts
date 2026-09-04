@@ -402,6 +402,50 @@ describe('workflow phase 4 — execute-workflow', () => {
     expect(vi.mocked(getWorkflow)).not.toHaveBeenCalled()
     expect(steps.some((s) => s.includes('自循环'))).toBe(true)
   })
+
+  it('contains a sub-workflow loop-breakpoint: it cannot break a parent loop', async () => {
+    // Child: a loop-breakpoint with no enclosing loop — contained by the
+    // child's own benign top-level handling, so the child run stays 'ok'.
+    const sub = makeWorkflow(
+      [node('s', 'manual'), node('bp', 'loop-breakpoint'), node('s-after', 's-after')],
+      [edge('s', 'bp'), edge('bp', 's-after')],
+    )
+    vi.mocked(getWorkflow).mockResolvedValue(sub)
+
+    const order: string[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('loop', 'repeat-task', { count: 2 }),
+        node('ex', 'execute-workflow', { workflowId: 'child-1' }),
+        node('after', 'after'),
+      ],
+      [
+        edge('t', 'loop'),
+        edge('loop', 'ex', 'repeat-task-output-1'),
+        edge('ex', 'loop'),
+        edge('loop', 'after', 'repeat-task-output-2'),
+      ],
+    )
+    const result = await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        's-after': async () => {
+          order.push('s-after')
+          return null
+        },
+        after: async () => {
+          order.push('after')
+          return null
+        },
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    // The child's breakpoint stopped only the child's chain (its own s-after
+    // never ran, across both parent iterations); the parent loop then ran to
+    // exhaustion and reached its own end branch exactly once.
+    expect(order).toEqual(['after'])
+  })
 })
 
 describe('workflow phase 4 — integration executors', () => {
@@ -679,6 +723,72 @@ describe('workflow loops — end branch edge cases', () => {
     expect(result.outcome).toBe('failed')
     expect(result.error).toContain('boom')
     expect(seen).toEqual(['body', 'body'])
+  })
+
+  it('reads the editor-shaped repeatFor when count is absent', async () => {
+    const seen: string[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('loop', 'repeat-task', { repeatFor: '2' }),
+        node('body', 'body'),
+        node('after', 'after'),
+      ],
+      [
+        edge('t', 'loop'),
+        edge('loop', 'body', 'repeat-task-output-1'),
+        edge('body', 'loop'),
+        edge('loop', 'after', 'repeat-task-output-2'),
+      ],
+    )
+    const result = await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        body: async () => {
+          seen.push('body')
+          return null
+        },
+        after: async () => {
+          seen.push('after')
+          return null
+        },
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual(['body', 'body', 'after'])
+  })
+
+  it('understands imported loop/end handle suffixes produced by migration', async () => {
+    const seen: string[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('loop', 'repeat-task', { count: 2 }),
+        node('body', 'body'),
+        node('after', 'after'),
+      ],
+      [
+        edge('t', 'loop'),
+        edge('loop', 'body', 'repeat-task-loop'),
+        edge('body', 'loop'),
+        edge('loop', 'after', 'repeat-task-end'),
+      ],
+    )
+    const result = await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        body: async () => {
+          seen.push('body')
+          return null
+        },
+        after: async () => {
+          seen.push('after')
+          return null
+        },
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual(['body', 'body', 'after'])
   })
 })
 
