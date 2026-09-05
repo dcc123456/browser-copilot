@@ -53,6 +53,23 @@ export interface Messages {
   tabHistory: string
   tabMore: string
 
+  // Panel minimize (floating page button)
+  panelMinimize: string
+
+  // Multi-window picker (unattended window policy = ask)
+  windowPickTitle: string
+  windowPickHint: string
+  windowPickBadgeThisPanel: string
+  windowPickBadgeMinimized: string
+
+  // Settings: unattended window policy
+  settingsWindowPolicyLabel: string
+  settingsWindowPolicyLatest: string
+  settingsWindowPolicyAsk: string
+  settingsWindowPolicyFixed: string
+  settingsWindowPolicyHelp: string
+  settingsWindowPolicyFixedWindow: string
+
   // History tab
   histConversations: string
   histTasks: string
@@ -307,6 +324,16 @@ export interface Messages {
   workflowReviewDialogTitle: string
   workflowReviewDialogConfirm: string
   workflowReviewDialogCancel: string
+  /** Retry button after a failed/unavailable review. */
+  workflowReviewDialogRetry: string
+  /** Collapsible live-log section header in the review dialog. */
+  workflowReviewLogTitle: string
+  workflowReviewLogCollapse: string
+  workflowReviewLogExpand: string
+  /** First review-log line: the step list was sent to the reviewer. */
+  workflowReviewLogStart: (params: { steps: number }) => string
+  /** Review-log line for a failed attempt (timeout / endpoint / parse). */
+  workflowReviewLogFailed: string
 
   // Agent mode
   modeLabel: string
@@ -737,6 +764,18 @@ const en: Messages = {
   tabSettings: 'Settings',
   tabHistory: 'History',
   tabMore: 'More',
+  panelMinimize: 'Minimize to a floating button',
+  windowPickTitle: 'Choose a window',
+  windowPickHint: 'A background task needs to know which browser window to run in.',
+  windowPickBadgeThisPanel: 'This panel',
+  windowPickBadgeMinimized: 'Minimized',
+  settingsWindowPolicyLabel: 'Unattended window',
+  settingsWindowPolicyLatest: 'Latest plugin window (auto)',
+  settingsWindowPolicyAsk: 'Ask me every time',
+  settingsWindowPolicyFixed: 'Always this window',
+  settingsWindowPolicyHelp:
+    'Which window agent-bridge / scheduled / Feishu tasks act in when several windows run the plugin. They can only ever act in windows with the plugin open (panel expanded or minimized); with the plugin closed everywhere they fall back to the legacy global behaviour.',
+  settingsWindowPolicyFixedWindow: 'Fixed window',
 
   // History tab
   histConversations: 'Conversations',
@@ -955,6 +994,12 @@ const en: Messages = {
   workflowReviewDialogTitle: 'Review steps before saving',
   workflowReviewDialogConfirm: 'Save workflow',
   workflowReviewDialogCancel: 'Cancel',
+  workflowReviewDialogRetry: 'Retry review',
+  workflowReviewLogTitle: 'Review log',
+  workflowReviewLogCollapse: 'Collapse',
+  workflowReviewLogExpand: 'Expand',
+  workflowReviewLogStart: ({ steps }) => `Sent ${steps} step${steps > 1 ? 's' : ''} to the AI reviewer…`,
+  workflowReviewLogFailed: 'Review failed — keeping every step. Click “Retry review” to try again.',
 
   modeLabel: 'Mode',
   saveWorkflowLabel: 'Save workflow',
@@ -1376,6 +1421,18 @@ const zhCN: Messages = {
   tabSettings: '设置',
   tabHistory: '历史',
   tabMore: '更多',
+  panelMinimize: '最小化为悬浮按钮',
+  windowPickTitle: '选择要操作的窗口',
+  windowPickHint: '一个后台任务需要确定在哪个浏览器窗口中执行。',
+  windowPickBadgeThisPanel: '本面板',
+  windowPickBadgeMinimized: '已最小化',
+  settingsWindowPolicyLabel: '无人值守目标窗口',
+  settingsWindowPolicyLatest: '最近使用的插件窗口（自动）',
+  settingsWindowPolicyAsk: '每次询问',
+  settingsWindowPolicyFixed: '固定窗口',
+  settingsWindowPolicyHelp:
+    '当多个窗口开着插件时，指定 agent 接入 / 定时任务 / 飞书任务在哪个窗口执行。它们只会在“插件开着”（面板展开或最小化）的窗口中操作；所有窗口都关闭插件时，回退到原有全局行为。',
+  settingsWindowPolicyFixedWindow: '固定窗口',
 
   // History tab
   histConversations: '对话记录',
@@ -1588,6 +1645,12 @@ const zhCN: Messages = {
   workflowReviewDialogTitle: '保存前先审查步骤',
   workflowReviewDialogConfirm: '保存工作流',
   workflowReviewDialogCancel: '取消',
+  workflowReviewDialogRetry: '重试审查',
+  workflowReviewLogTitle: '审查日志',
+  workflowReviewLogCollapse: '收起',
+  workflowReviewLogExpand: '展开',
+  workflowReviewLogStart: ({ steps }) => `已发送 ${steps} 个步骤给 AI 审查…`,
+  workflowReviewLogFailed: '审查失败，已保留全部步骤。可点击「重试审查」再试一次。',
 
   modeLabel: '模式',
   saveWorkflowLabel: '保存工作流',

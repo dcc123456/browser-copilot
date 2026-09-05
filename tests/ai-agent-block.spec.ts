@@ -213,6 +213,23 @@ describe('ai-agent executor', () => {
     expect(ctx.variables['lastAIAgent']).toBe('clicked')
   })
 
+  it('pins the nested unattended turn to the workflow window scope', async () => {
+    configuredSettings()
+    runUnattended.mockResolvedValue({ ok: true, answer: 'scoped' })
+    const { ctx } = makeCtx()
+    // The workflow is running scoped to window 7 (panel/editor host window).
+    ctx.scope = { windowId: 7 }
+
+    await EXECUTORS['ai-agent']!({ prompt: 'Do it', useSnapshot: false }, ctx)
+
+    expect(runUnattended).toHaveBeenCalledTimes(1)
+    const [, , , options] = runUnattended.mock.calls[0] as unknown as [
+      string, string, string, { scopeWindowId?: number },
+    ]
+    // Without this passthrough a second plugin window would capture the turn.
+    expect(options.scopeWindowId).toBe(7)
+  })
+
   it('surfaces agent failure as an error emit without throwing', async () => {
     configuredSettings()
     runUnattended.mockResolvedValue({ ok: false, answer: '', error: 'boom' })

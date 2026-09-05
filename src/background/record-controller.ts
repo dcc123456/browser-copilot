@@ -25,6 +25,12 @@ import { saveWorkflow, getWorkflow } from '../lib/workflow/storage'
 
 interface RecorderState {
   flows: RecordedFlow[]
+  /**
+   * Confined window, when the recorder was started scoped (the editor's host
+   * window). Undefined = global recording (legacy behaviour). Events from
+   * other windows are ignored while set.
+   */
+  windowId?: number
   /** URLs already turned into a navigation block (dedupe per frame). */
   seenNav: Set<string>
   /** Tab ids and their URL at the moment recording started (initial load). */
@@ -64,20 +70,25 @@ async function injectIntoTab(tabId: number, url?: string): Promise<void> {
   }
 }
 
-async function injectIntoAllTabs(): Promise<void> {
-  const tabs = await chrome.tabs.query({})
+async function injectIntoAllTabs(windowId?: number): Promise<void> {
+  const tabs = await chrome.tabs.query(windowId !== undefined ? { windowId } : {})
   await Promise.all(tabs.map((t) => (typeof t.id === 'number' ? injectIntoTab(t.id, t.url) : null)))
 }
 
-export async function startRecording(): Promise<void> {
+/**
+ * @param windowId confine recording to this window's tabs (the editor's host
+ *   window). Undefined keeps the legacy global recording.
+ */
+export async function startRecording(windowId?: number): Promise<void> {
   if (state) return
-  const tabs = await chrome.tabs.query({})
+  const tabs = await chrome.tabs.query(windowId !== undefined ? { windowId } : {})
   const initialTabs = new Map<number, string>()
   for (const tab of tabs) {
     if (typeof tab.id === 'number') initialTabs.set(tab.id, tab.url ?? '')
   }
   state = {
     flows: [],
+    ...(windowId !== undefined ? { windowId } : {}),
     seenNav: new Set(),
     initialTabs,
     newTabIds: new Set(),
@@ -86,11 +97,14 @@ export async function startRecording(): Promise<void> {
     lastSwitchIndex: null,
   }
   setBadge(true)
-  await injectIntoAllTabs()
+  await injectIntoAllTabs(windowId)
 }
 
 export async function stopRecording(): Promise<string | undefined> {
   if (!state) return undefined
+  // The recorder's own scope (set at start) decides which tabs to clean up —
+  // not the stop command's, so a scope change mid-recording cannot leak.
+  const scopedWindowId = state.windowId
   const flows = state.flows
   const wf = flowsToWorkflow(flows)
   await saveWorkflow(wf)
@@ -98,7 +112,7 @@ export async function stopRecording(): Promise<string | undefined> {
   state = null
   setBadge(false)
   // Stop the recorder in every tab.
-  const tabs = await chrome.tabs.query({})
+  const tabs = await chrome.tabs.query(scopedWindowId !== undefined ? { windowId: scopedWindowId } : {})
   await Promise.all(
     tabs.map((t) =>
       typeof t.id === 'number'
@@ -154,12 +168,21 @@ export function handleRecordEvent(message: unknown): boolean {
   return false
 }
 
+/**
+ * Whether an event originating in `windowId` belongs to the active recording.
+ * Unscoped recordings accept everything; scoped ones drop other windows.
+ */
+function scoped(windowId: number | undefined): boolean {
+  if (!state) return false
+  return state.windowId === undefined || state.windowId === windowId
+}
+
 /** Wire tab/navigation listeners. Call once at service-worker startup. */
 export function initRecordingLifecycle(): void {
   // A tab opened while recording injects the recorder; its navigation is
   // captured below as a `new-tab` block (it has an opener).
   chrome.tabs.onCreated.addListener((tab) => {
-    if (state && typeof tab.id === 'number') {
+    if (state && scoped(tab.windowId) && typeof tab.id === 'number') {
       // Remember tabs opened during recording so their navigation becomes a
       // `new-tab` block; a freshly opened tab is never an "initial" page.
       state.newTabIds.add(tab.id)
@@ -173,7 +196,9 @@ export function initRecordingLifecycle(): void {
   // tab happened to be active). Fired when the user picks another tab.
   chrome.tabs.onActivated.addListener(({ tabId }) => {
     if (!state) return
-    void chrome.tabs.get(tabId).then((tab) => injectIntoTab(tabId, tab.url))
+    void chrome.tabs.get(tabId).then((tab) => {
+      if (state && scoped(tab?.windowId)) injectIntoTab(tabId, tab?.url)
+    })
     if (!state) return
     // Ignore the activation caused by our own newly-opened navigation tab.
     if (Date.now() - state.lastNavAt < 1500) return
@@ -194,6 +219,7 @@ export function initRecordingLifecycle(): void {
   // a typed URL). We did NOT previously see the change from the page context.
   chrome.webNavigation.onCommitted.addListener((details) => {
     if (!state || details.frameId !== 0) return
+    if (!scoped((details as { windowId?: number }).windowId)) return
     if (!isInjectablePage(details.url)) return
     if (details.transitionType === 'reload') return
     const key = `${details.tabId}:${details.url}`
@@ -250,6 +276,7 @@ export function initRecordingLifecycle(): void {
   // page. `onHistoryStateUpdated` reports frame 0 for the top-frame change.
   chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
     if (!state || details.frameId !== 0) return
+    if (!scoped((details as { windowId?: number }).windowId)) return
     if (!isInjectablePage(details.url)) return
     // A same-tab link click already replayed via the `link` block; recording a
     // second navigation would duplicate it.

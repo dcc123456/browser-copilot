@@ -77,7 +77,7 @@ export default function EditExportData({ data, onChange }: EditFormProps) {
         <Expand title="Options" defaultOpen>
           <Checkbox checked={bool(data, 'addBOMHeader')} onChange={(v) => onChange({ addBOMHeader: v })} label="Add UTF-8 BOM" />
           <Field label="Delimiter">
-            <TextInput value={str(data, 'csvDelimiter') || ','} placeholder="," onChange={(v) => onChange({ csvDelimiter: v })} />
+            <TextInput value={str(data, 'csvDelimiter')} placeholder="," fallback="," onChange={(v) => onChange({ csvDelimiter: v })} />
           </Field>
         </Expand>
       )}

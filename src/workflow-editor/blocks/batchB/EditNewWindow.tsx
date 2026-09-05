@@ -10,7 +10,7 @@
  */
 
 import type { EditFormProps } from '../EditForms'
-import { Checkbox, Field, Select, TextArea, TextInput } from '../shared/Field'
+import { Checkbox, Field, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
 
 const WINDOW_TYPES = ['normal', 'popup', 'panel']
@@ -65,34 +65,18 @@ export default function EditNewWindow({ data, onChange }: EditFormProps) {
         <>
           <div style={{ display: 'flex', gap: 8 }}>
             <Field label="Top">
-              <TextInput
-                type="number"
-                value={num(data, 'top')}
-                onChange={(v) => onChange({ top: Number(v) || 0 })}
-              />
+              <NumberInput value={num(data, 'top')} fallback={0} onChange={(n) => onChange({ top: n })} />
             </Field>
             <Field label="Left">
-              <TextInput
-                type="number"
-                value={num(data, 'left')}
-                onChange={(v) => onChange({ left: Number(v) || 0 })}
-              />
+              <NumberInput value={num(data, 'left')} fallback={0} onChange={(n) => onChange({ left: n })} />
             </Field>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <Field label="Height">
-              <TextInput
-                type="number"
-                value={num(data, 'height')}
-                onChange={(v) => onChange({ height: Number(v) || 0 })}
-              />
+              <NumberInput value={num(data, 'height')} fallback={0} onChange={(n) => onChange({ height: n })} />
             </Field>
             <Field label="Width">
-              <TextInput
-                type="number"
-                value={num(data, 'width')}
-                onChange={(v) => onChange({ width: Number(v) || 0 })}
-              />
+              <NumberInput value={num(data, 'width')} fallback={0} onChange={(n) => onChange({ width: n })} />
             </Field>
           </div>
           <p className="wf-form-note">Note: use 0 to disable</p>

@@ -11,9 +11,16 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useEditorLocale } from '../../locale-context'
+import NumberInput from '../../../ui/NumberInput'
 
 /** Merge a partial patch into the block data (Automa's updateData). */
 export type Patch = (patch: Record<string, unknown>) => void
+
+/**
+ * Blur-validating number input (shared with the side panel). Re-exported here
+ * so block forms can import every field primitive from this one module.
+ */
+export { NumberInput }
 
 export function Field({
   label,
@@ -39,6 +46,7 @@ export function TextInput({
   placeholder,
   type = 'text',
   list,
+  fallback,
 }: {
   value: string | number
   onChange: (v: string) => void
@@ -46,6 +54,11 @@ export function TextInput({
   type?: string
   /** Id of a <datalist> for suggestions. */
   list?: string
+  /**
+   * Default written back on blur when the field was left empty (失焦校验).
+   * Never coerce on change: the field must stay clearable while typing.
+   */
+  fallback?: string
 }) {
   const { bt } = useEditorLocale()
   return (
@@ -55,6 +68,13 @@ export function TextInput({
       placeholder={placeholder ? bt(placeholder) : placeholder}
       list={list}
       onChange={(e) => onChange(e.target.value)}
+      onBlur={
+        fallback != null
+          ? () => {
+              if (String(value ?? '').trim() === '') onChange(fallback)
+            }
+          : undefined
+      }
     />
   )
 }
@@ -67,6 +87,7 @@ export function TextArea({
   rows = 2,
   mono,
   className,
+  fallback,
 }: {
   value: string
   onChange: (v: string) => void
@@ -74,6 +95,8 @@ export function TextArea({
   rows?: number
   mono?: boolean
   className?: string
+  /** Default written back on blur when the field was left empty (失焦校验). */
+  fallback?: string
 }) {
   const { bt } = useEditorLocale()
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -91,6 +114,13 @@ export function TextArea({
       placeholder={placeholder ? bt(placeholder) : placeholder}
       className={`${mono ? 'wf-mono' : ''} ${className ?? ''}`}
       onChange={(e) => onChange(e.target.value)}
+      onBlur={
+        fallback != null
+          ? () => {
+              if (String(value ?? '').trim() === '') onChange(fallback)
+            }
+          : undefined
+      }
     />
   )
 }

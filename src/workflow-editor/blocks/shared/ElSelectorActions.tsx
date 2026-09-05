@@ -11,6 +11,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { hostWindowId } from '../../host-window'
 import { toast } from '../../../ui/toast'
 import { useEditorLocale } from '../../locale-context'
 
@@ -133,11 +134,15 @@ export default function ElSelectorActions({
         }
       }, safetyMs)
       try {
+        // Picking targets the window that opened this editor (host-window);
+        // without it the worker falls back to the legacy global resolution.
+        const windowId = hostWindowId()
         const resp = (await chrome.runtime.sendMessage({
           type: mode === 'select' ? 'picker:start' : 'picker:verify',
           pickerId,
           findBy,
           multiple,
+          ...(windowId !== undefined ? { windowId } : {}),
           ...(mode === 'verify' ? { selector } : {}),
         })) as { ok?: boolean; error?: string } | undefined
         // No response (SW restarted) or an explicit failure: stop spinning.

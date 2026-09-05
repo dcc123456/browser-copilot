@@ -80,7 +80,7 @@ export default function EditExportData({ data, onChange }: EditFormProps) {
             label="Add UTF-8 BOM"
           />
           <Field label="Delimiter">
-            <TextInput value={str(data, 'csvDelimiter') || ','} placeholder="," onChange={(v) => onChange({ csvDelimiter: v })} />
+            <TextInput value={str(data, 'csvDelimiter')} placeholder="," fallback="," onChange={(v) => onChange({ csvDelimiter: v })} />
           </Field>
         </Expand>
       )}

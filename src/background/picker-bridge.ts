@@ -17,18 +17,26 @@
 import { startPicker } from '../inpage/element-picker'
 import { isInjectablePage } from '../lib/pages'
 import { resolveAutomationTab } from './driver'
+import { normalScopeFromWindowId, type ScopeWindow } from './automation-scope'
 
 export interface PickerStartMessage {
   type: 'picker:start'
   pickerId: string
   findBy?: 'cssSelector' | 'xpath'
   multiple?: boolean
+  /**
+   * Explicit target window (the editor's host window). When present, the
+   * picker resolves its tab INSIDE that window instead of the global chain.
+   */
+  windowId?: number
 }
 export interface PickerVerifyMessage {
   type: 'picker:verify'
   pickerId: string
   selector: string
   findBy?: 'cssSelector' | 'xpath'
+  /** See PickerStartMessage.windowId. */
+  windowId?: number
 }
 
 /** Discriminated result of attempting to handle a message. */
@@ -43,13 +51,19 @@ async function injectPicker(args: {
   findBy?: 'cssSelector' | 'xpath'
   selector?: string
   multiple?: boolean
+  windowId?: number
 }): Promise<{ ok: boolean; error?: string }> {
   // Resolve the tab the user is actually automating, not the focused window's
   // active tab. The picker is launched from the standalone editor — a
   // chrome-extension:// popup — where `{active:true,lastFocusedWindow:true}`
-  // returns the editor tab itself, which cannot be injected. resolveAutomationTab
-  // skips extension pages and, when needed, falls back to the last viewed page.
-  const tab = await resolveAutomationTab().catch(() => undefined)
+  // returns the editor tab itself, which cannot be injected. With the editor's
+  // host window the resolution stays INSIDE that window; otherwise
+  // resolveAutomationTab falls back to the legacy global chain.
+  const scope: ScopeWindow | undefined =
+    args.windowId === undefined
+      ? undefined
+      : await normalScopeFromWindowId(args.windowId).catch(() => undefined)
+  const tab = await resolveAutomationTab(undefined, scope).catch(() => undefined)
   if (!tab || typeof tab.id !== 'number' || !isInjectablePage(tab.url)) {
     return {
       ok: false,
@@ -107,6 +121,7 @@ export async function handlePickerMessage(
       mode: 'select',
       findBy: msg.findBy,
       multiple: msg.multiple,
+      windowId: msg.windowId,
     })
     return { handled: true, response }
   }
@@ -117,6 +132,7 @@ export async function handlePickerMessage(
       mode: 'verify',
       selector: msg.selector,
       findBy: msg.findBy ?? 'cssSelector',
+      windowId: msg.windowId,
     })
     return { handled: true, response }
   }

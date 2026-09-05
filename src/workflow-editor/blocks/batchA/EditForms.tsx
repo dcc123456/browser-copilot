@@ -15,7 +15,7 @@
  *
  * @module workflow-editor/blocks/batchA/EditForms
  */
-import { Checkbox, Field, Select, TextArea, TextInput } from '../shared/Field'
+import { Checkbox, Field, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
 import type { EditFormProps } from '../EditForms'
 import InteractionBase, { bool, str, num } from '../shared/InteractionBase'
 import { useEditorLocale } from '../../locale-context'
@@ -116,8 +116,9 @@ export default function EditForms({ data, onChange }: EditFormProps) {
                 <Field label="Option position">
                   <TextInput
                     type="number"
-                    value={str(data, 'optionPosition') || '1'}
+                    value={str(data, 'optionPosition')}
                     placeholder="0"
+                    fallback="1"
                     onChange={(v) => onChange({ optionPosition: v })}
                   />
                 </Field>
@@ -127,11 +128,11 @@ export default function EditForms({ data, onChange }: EditFormProps) {
 
           {type === 'text-field' && (
             <Field label="Typing delay (millisecond)(0 to disable)">
-              <TextInput
-                type="number"
+              <NumberInput
                 value={num(data, 'delay', 0)}
                 placeholder="Delay"
-                onChange={(v) => onChange({ delay: v })}
+                fallback={0}
+                onChange={(n) => onChange({ delay: n })}
               />
             </Field>
           )}

@@ -19,7 +19,7 @@
  */
 
 import { runAgentTurn } from './agent'
-import { currentPanelScope } from './automation-scope'
+import { resolveUnattendedScope } from './window-policy'
 import { getSettings } from '../lib/storage'
 import type { AgentMode } from '../lib/types'
 import { retain, release } from './keepalive'
@@ -36,6 +36,14 @@ export interface UnattendedResult {
 export interface UnattendedOptions {
   /** Abort signal used to cancel a running turn (from the board or Feishu). */
   signal?: AbortSignal
+  /**
+   * Pin the turn to this window instead of the default plugin-window
+   * resolution (`currentPluginScope`). Callers that already resolved a scope
+   * — the workflow AI-agent block running inside a scoped workflow — must
+   * pass it through, or a multi-plugin-window setup would resolve the nested
+   * turn to the wrong window.
+   */
+  scopeWindowId?: number
   /**
    * Per-run cap on model↔tool round trips. Scheduled tasks carry their own
    * budget (default 50) so they aren't bounded by the interactive setting.
@@ -66,10 +74,14 @@ export async function runUnattendedPrompt(
   retain()
   try {
     const settings = await getSettings()
-    // While ANY panel window is open, unattended runs stay inside it — the
-    // plugin window is the only monitored/controlled one. With no panel open
-    // (the common unattended case), the legacy global resolution applies.
-    const scope = await currentPanelScope()
+    // While the plugin runs anywhere (panel connected or minimized),
+    // unattended runs stay inside a plugin window — an explicit caller-supplied
+    // scope wins, otherwise the default plugin-window resolution applies. With
+    // the plugin closed everywhere, the legacy global resolution applies.
+    const scope =
+      options.scopeWindowId !== undefined
+        ? { windowId: options.scopeWindowId }
+        : await resolveUnattendedScope()
     const collected: string[] = []
     const chunks: string[] = []
     const history: { role: string; content: string }[] = [

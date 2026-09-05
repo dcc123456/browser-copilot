@@ -13,7 +13,7 @@
 import { useEffect } from 'react'
 import type { EditFormProps } from '../EditForms'
 import InteractionBase from '../shared/InteractionBase'
-import { Checkbox, Field, Select, TextInput } from '../shared/Field'
+import { Checkbox, Field, NumberInput, Select, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
 import { id } from './shared'
 
@@ -50,10 +50,10 @@ export default function EditLoopElements({ data, onChange }: EditFormProps) {
       }
     >
       <Field label="Max data to loop (0 to disable)" title="Max number of data to loop">
-        <TextInput
-          type="number"
+        <NumberInput
           value={typeof data.maxLoop === 'string' || typeof data.maxLoop === 'number' ? (data.maxLoop as string | number) : '0'}
-          onChange={(v) => onChange({ maxLoop: v })}
+          fallback={0}
+          onChange={(n) => onChange({ maxLoop: n })}
         />
       </Field>
       <Checkbox checked={bool(data, 'reverseLoop')} onChange={(v) => onChange({ reverseLoop: v })} label="Reverse loop order" />
@@ -76,11 +76,11 @@ export default function EditLoopElements({ data, onChange }: EditFormProps) {
 
         {(action === 'click-element' || action === 'scroll' || action === 'scroll-up') && (
           <Field label="Max seconds wait for more elements">
-            <TextInput
-              type="number"
+            <NumberInput
               value={num(data, 'actionElMaxWaitTime', 5)}
               placeholder="0"
-              onChange={(v) => onChange({ actionElMaxWaitTime: Number(v) || 0 })}
+              fallback={0}
+              onChange={(n) => onChange({ actionElMaxWaitTime: n })}
             />
           </Field>
         )}
@@ -95,11 +95,11 @@ export default function EditLoopElements({ data, onChange }: EditFormProps) {
 
         {action === 'click-link' && (
           <Field label="Max seconds wait for the page to load">
-            <TextInput
-              type="number"
+            <NumberInput
               value={num(data, 'actionPageMaxWaitTime', 10)}
               placeholder="0"
-              onChange={(v) => onChange({ actionPageMaxWaitTime: Number(v) || 0 })}
+              fallback={0}
+              onChange={(n) => onChange({ actionPageMaxWaitTime: n })}
             />
           </Field>
         )}

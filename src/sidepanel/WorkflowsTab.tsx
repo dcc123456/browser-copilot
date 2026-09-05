@@ -349,14 +349,29 @@ export default function WorkflowsTab() {
    * The workflow editor opens in a standalone popup window (no address bar /
    * browser chrome), matching Automa's separate editor window. A regular tab is
    * used as a fallback if popup creation is unavailable.
+   *
+   * The opener's window id is appended as `hostWindow=<id>`: the editor popup
+   * itself can never be a valid automation scope (it is a popup-type
+   * chrome-extension window), so it carries THIS panel's window and every
+   * run/record/pick it performs is pinned to that window.
    */
   const openEditor = (id?: string): void => {
-    const url = editorUrl(id)
-    void chrome.windows
-      ?.create?.({ url, type: 'popup', width: 1280, height: 860 })
-      ?.catch?.(() => chrome.tabs.create({ url }))
-    // Fallback for environments where `chrome.windows` is unavailable.
-    if (!chrome.windows?.create) void chrome.tabs.create({ url })
+    void (async () => {
+      const hostId = await chrome.windows
+        .getCurrent()
+        .then((win) => (typeof win?.id === 'number' ? win.id : undefined))
+        .catch(() => undefined)
+      const base = editorUrl(id)
+      const url =
+        hostId !== undefined
+          ? `${base}${base.includes('?') ? '&' : '?'}hostWindow=${hostId}`
+          : base
+      void chrome.windows
+        ?.create?.({ url, type: 'popup', width: 1280, height: 860 })
+        ?.catch?.(() => chrome.tabs.create({ url }))
+      // Fallback for environments where `chrome.windows` is unavailable.
+      if (!chrome.windows?.create) void chrome.tabs.create({ url })
+    })()
   }
 
   const [recording, setRecording] = useState(false)

@@ -162,6 +162,7 @@ describe('normalizeStoredSettings', () => {
         localAgentToken: '',
         localAgentUrl: 'ws://127.0.0.1:8765',
         localAgentActiveAgent: '',
+        unattendedWindowPolicy: 'latest',
         imageModel: { providerId: '', model: '' },
         ocrLanguage: 'eng',
       })
@@ -183,6 +184,7 @@ describe('normalizeStoredSettings', () => {
       localAgentToken: '',
       localAgentUrl: 'ws://127.0.0.1:8765',
       localAgentActiveAgent: '',
+      unattendedWindowPolicy: 'latest',
       imageModel: { providerId: '', model: '' },
       ocrLanguage: 'chi_sim+eng',
     }
@@ -217,6 +219,7 @@ describe('normalizeStoredSettings', () => {
       localAgentToken: '',
       localAgentUrl: 'ws://127.0.0.1:8765',
       localAgentActiveAgent: '',
+      unattendedWindowPolicy: 'latest',
       imageModel: { providerId: '', model: '' },
       ocrLanguage: 'eng',
     })

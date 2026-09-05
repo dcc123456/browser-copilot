@@ -86,12 +86,21 @@ if (typeof chrome !== 'undefined' && chrome.tabs?.onActivated) {
  * `unpin` runs or the TTL expires (so a forgotten pin cannot hijack the next
  * session). Sits between an explicit per-call preferredTabId (which still
  * wins) and the passive resolution cache.
+ *
+ * The pin records its tab's WINDOW. A window-scoped run (`scope`) only honors
+ * pins that live in ITS window — otherwise a pin from window A's session
+ * would hijack window B's scoped resolution for the TTL duration, a real
+ * cross-window leak. Unscoped (unattended) resolution honors any pin, as
+ * before.
  */
 const PIN_TTL_MS = 5 * 60_000
-let pinnedTab: { id: number; at: number } | undefined
+let pinnedTab: { id: number; windowId: number; at: number } | undefined
 
-function setPinnedTab(tabId: number | undefined): void {
-  pinnedTab = tabId === undefined ? undefined : { id: tabId, at: Date.now() }
+function setPinnedTab(tabId: number | undefined, windowId?: number): void {
+  pinnedTab =
+    tabId === undefined || typeof windowId !== 'number'
+      ? undefined
+      : { id: tabId, windowId, at: Date.now() }
   if (tabId !== undefined) {
     cachedAutomationTab = undefined // force a fresh resolution for the pin
   }
@@ -106,12 +115,17 @@ export async function resolveAutomationTab(
     if (pinned && isInjectablePage(pinned.url)) return pinned
   }
 
-  // A `pin_tab` pin wins over everything but an explicit per-call tab.
-  if (pinnedTab && Date.now() - pinnedTab.at < PIN_TTL_MS) {
-    const pinned = await chrome.tabs.get(pinnedTab.id).catch(() => undefined)
+  // A `pin_tab` pin wins over everything but an explicit per-call tab —
+  // but only within its own window for scoped runs.
+  const pinUsable =
+    pinnedTab !== undefined &&
+    Date.now() - pinnedTab.at < PIN_TTL_MS &&
+    (scope === undefined || pinnedTab.windowId === scope.windowId)
+  if (pinUsable) {
+    const pinned = await chrome.tabs.get(pinnedTab!.id).catch(() => undefined)
     if (pinned && isInjectablePage(pinned.url)) return pinned
     pinnedTab = undefined // pinned tab closed or became uninjectable
-  } else if (pinnedTab) {
+  } else if (pinnedTab && Date.now() - pinnedTab.at >= PIN_TTL_MS) {
     pinnedTab = undefined
   }
 
@@ -1114,7 +1128,7 @@ export async function pinActiveTab(tabId?: number, scope?: ScopeWindow): Promise
   if (!tab || typeof tab.id !== 'number' || !isInjectablePage(tab.url)) {
     throw new DriverError('pin_tab: 没有可钉住的 http(s) 标签页。')
   }
-  setPinnedTab(tab.id)
+  setPinnedTab(tab.id, tab.windowId)
   return toDriverTab(tab)
 }
 

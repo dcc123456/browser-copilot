@@ -137,6 +137,12 @@ export type Command =
       type: 'workflows.run'
       id: string
       /** Run the graph starting at this node id ("run from here"). */ startAt?: string
+      /**
+       * Explicit target window (the editor popup's host window). Validated and
+       * preferred over the sender-derived scope; the panel omits it and is
+       * scoped by its own window instead.
+       */
+      windowId?: number
     }
   /**
    * AI auto-debug: run the workflow, and when it fails let the model diagnose
@@ -144,7 +150,7 @@ export type Command =
    * redundant-node removal), re-running to verify. See
    * `background/workflow-engine/auto-debug`.
    */
-  | { type: 'workflows.debug'; id: string }
+  | { type: 'workflows.debug'; id: string; /** See workflows.run.windowId. */ windowId?: number }
   /** Workflows with a pending AI-debug backup (review keep / revert chip). */
   | { type: 'workflows.debugBackups' }
   /** Restores the pre-AI-debug snapshot for this workflow. */
@@ -154,16 +160,27 @@ export type Command =
   | { type: 'workflows.running'; workflowId?: string }
 
   // --- Workflow recording (see background/record-controller.ts) ---
-  /** Start recording: injects the recorder into all http tabs, sets the rec badge. */
-  | { type: 'record.start' }
+  /**
+   * Start recording: injects the recorder into all http tabs (of `windowId`
+   * when given — the editor's host window), sets the rec badge.
+   */
+  | { type: 'record.start'; windowId?: number }
   /** Stop recording and convert the captured blocks into a saved workflow. */
-  | { type: 'record.stop' }
+  | { type: 'record.stop'; windowId?: number }
   /** Whether a recording session is currently active. */
   | { type: 'record.status' }
 
   // --- Local agent bridge (see background/agent-client.ts) ---
   /** Current outbound WebSocket connection status to the local agent. */
   | { type: 'agent.status.get' }
+  /**
+   * Minimize this window's side panel into a floating page button. The
+   * sender panel reports its own window (a window-level UI resolves it via
+   * `chrome.windows.getCurrent()`); the worker validates it, marks the
+   * window minimized (unattended runs stay scoped to it) and broadcasts the
+   * floating button to its pages. The panel closes itself after the ack.
+   */
+  | { type: 'panel.minimize'; windowId: number }
 
 /** Replies, discriminated by the command that produced them. */
 export type CommandResult =
@@ -221,12 +238,20 @@ export type CommandResult =
   | { type: 'feishu.save' }
   | { type: 'feishu.test'; ok: boolean; message?: string }
 
+  // --- Panel minimize (floating page button) ---
+  | { type: 'panel.minimize' }
+
   // --- Workflows ---
   | { type: 'workflows.list'; workflows: Workflow[] }
   | { type: 'workflows.get'; workflow?: Workflow }
   | { type: 'workflows.save' }
   | { type: 'workflows.delete' }
-  | { type: 'workflows.review'; review: WorkflowReview | null }
+  | {
+      type: 'workflows.review'
+      review: WorkflowReview | null
+      /** Why the review is unavailable (timeout / endpoint / unusable reply). */
+      error?: string
+    }
   | {
       type: 'workflows.run'
       outcome: { ok: boolean; skipped: boolean; summary: string; error?: string; runId?: string }
@@ -358,6 +383,12 @@ export type AgentServerMessage =
   | { type: 'error'; message: string }
   | { type: 'pong' }
   /**
+   * One live review-log line, pushed over the agent port WHILE the workflow
+   * review streams (model picked, verdicts arriving, …). The reviewing panel
+   * subscribes via {@link onReviewLog} and renders the lines as they come.
+   */
+  | { type: 'workflows.reviewLog'; text: string }
+  /**
    * The stored transcript replayed after `resume`. `running` tells the panel
    * whether to show itself as busy because a turn continued without it.
    */
@@ -377,4 +408,83 @@ export async function sendCommand(command: Command): Promise<CommandResult> {
   if (!response) throw new Error('No response from the extension service worker.')
   if (!response.ok) throw new Error(response.error)
   return response.data
+}
+
+// --- Live review log fan-out (panel side) -------------------------------------
+
+/**
+ * Subscriber for live AI review-log lines pushed over the agent port.
+ * The port lives in the always-mounted chat component, so it forwards the
+ * lines here and any open review dialog (chat card OR history tab) picks
+ * them up through {@link onReviewLog}.
+ */
+type ReviewLogListener = (text: string) => void
+
+const reviewLogListeners = new Set<ReviewLogListener>()
+
+/** Forward one live review-log line to every subscribed dialog. */
+export function emitReviewLog(text: string): void {
+  for (const listener of reviewLogListeners) listener(text)
+}
+
+/** Subscribe to live review-log lines; returns an unsubscribe function. */
+export function onReviewLog(listener: ReviewLogListener): () => void {
+  reviewLogListeners.add(listener)
+  return () => {
+    reviewLogListeners.delete(listener)
+  }
+}
+
+// --- Floating button (minimized plugin) ---------------------------------------
+
+/**
+ * Messages from the floating-button content script to the service worker.
+ * Not part of {@link Command}: the sender is a content script, not the panel,
+ * and `floating.expand` must reach `sidePanel.open` inside the click gesture.
+ */
+export type FloatingButtonMessage =
+  | { type: 'floating.status' }
+  | { type: 'floating.expand' }
+
+/** Worker → floating-button content script control messages. */
+export type FloatingButtonControl =
+  | { type: 'floating.show' }
+  | { type: 'floating.hide' }
+
+/** Reply to `floating.status`. */
+export interface FloatingStatusResponse {
+  minimized: boolean
+}
+
+// --- Multi-window picker (unattended window policy = "ask") --------------------
+
+/** One selectable browser window in the multi-window picker. */
+export interface WindowChoice {
+  windowId: number
+  /** Title of the window's active tab. */
+  title: string
+  /** Host of the active tab's URL, when available. */
+  host?: string
+  /** The window currently hosts a connected side panel. */
+  isPanel: boolean
+  /** The window's plugin is minimized (floating page button). */
+  isMinimized: boolean
+}
+
+/**
+ * Worker → every connected panel: the user must pick which plugin window an
+ * unattended run (agent bridge / scheduled / Feishu) should act in. The first
+ * `window.pick.response` wins; the worker times out and falls back.
+ */
+export type WindowPickRequest = {
+  type: 'window.pick.request'
+  requestId: string
+  windows: WindowChoice[]
+}
+
+/** Panel → worker answer for a `window.pick.request`; `null` = cancelled. */
+export type WindowPickResponse = {
+  type: 'window.pick.response'
+  requestId: string
+  windowId: number | null
 }

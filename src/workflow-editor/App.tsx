@@ -28,7 +28,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
-import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
+import { BLOCK_BY_ID, CATALOG_BY_ID } from '../lib/workflow/blocks/palette'
 import { isCloudBlock } from '../lib/workflow/blocks/cloud-blocks'
 import type { BlockCatalogEntry } from '../lib/workflow/blocks/types'
 import type {
@@ -40,11 +40,13 @@ import type {
 } from '../lib/workflow/types'
 import { migrateWorkflow } from '../lib/workflow/migrate'
 import { sendCommand } from '../lib/messages'
+import { editorUrl, hostWindowId } from './host-window'
 import { getSettings } from '../lib/storage'
 import { newId } from '../lib/storage'
 
 import { nodeTypes, type BlockNodeData } from './flow/BlockNode'
 import { edgeTypes } from './flow/CustomEdge'
+import { applyConnection } from './flow/connections'
 import Sidebar, { loadWidth } from './sidebar/Sidebar'
 import BlockPalette from './sidebar/BlockPalette'
 import BlockEditForm from './sidebar/BlockEditForm'
@@ -72,7 +74,11 @@ type FlowNode = Node<BlockNodeData>
 
 function toFlowNode(n: WorkflowNode): FlowNode {
   const blockId = (n.data.blockId as string) ?? n.label
-  const block = BLOCK_BY_ID.get(blockId)
+  // Fall back to the FULL catalog (cloud blocks included): a miss here makes
+  // BlockNode render `null` (an invisible node with no handles, silently
+  // dropping its edges) and buildWorkflow then persists `blockId: "unknown"`,
+  // corrupting the workflow on the next save.
+  const block = BLOCK_BY_ID.get(blockId) ?? CATALOG_BY_ID.get(blockId)
   const { blockId: _, ...blockData } = n.data as Record<string, unknown>
   return {
     id: n.id,
@@ -228,28 +234,9 @@ export default function EditorApp() {
   }, [])
 
   const onConnect = useCallback((conn: Connection) => {
-    if (!conn.source || !conn.target || conn.source === conn.target) return
-    setEdges((eds) => {
-      // An input handle holds a single connection (Automa). Re-drawing onto an
-      // occupied input REPLACES the old edge — silently dropping the new
-      // connection made occupied inputs (e.g. the generated set-variable → ocr
-      // link) impossible to rewire. Identical re-draws stay a no-op.
-      const sameTarget = (e: Edge) => e.target === conn.target && e.targetHandle === conn.targetHandle
-      if (eds.some((e) => sameTarget(e) && e.source === conn.source && e.sourceHandle === conn.sourceHandle)) {
-        return eds
-      }
-      return [
-        ...eds.filter((e) => !sameTarget(e)),
-        {
-          id: newId(),
-          source: conn.source,
-          target: conn.target,
-          sourceHandle: conn.sourceHandle,
-          targetHandle: conn.targetHandle,
-          type: 'custom',
-        },
-      ]
-    })
+    // See flow/connections.ts: occupied inputs are replaced EXCEPT by fallback
+    // connections, which must coexist with the target's incoming edge.
+    setEdges((eds) => applyConnection(eds, conn))
   }, [])
 
   // Double-clicking a connection removes it (matches Automa's edge behaviour).
@@ -408,7 +395,14 @@ export default function EditorApp() {
       await handleSave()
       setRunning(true)
       try {
-        const r = await sendCommand({ type: 'workflows.run', id: workflowId, startAt: startNodeId })
+        // Run scoped to the window that opened this editor (see host-window).
+        const windowId = hostWindowId()
+        const r = await sendCommand({
+          type: 'workflows.run',
+          id: workflowId,
+          startAt: startNodeId,
+          ...(windowId !== undefined ? { windowId } : {}),
+        })
         if (r.type === 'workflows.run') {
           if (r.outcome.ok) toast.show(startNodeId ? t('runFromHereFinished') : t('runFinished'), 'ok')
           else {
@@ -449,16 +443,24 @@ export default function EditorApp() {
 
   const toggleRecording = useCallback(async () => {
     try {
+      // Recording is scoped to the window that opened this editor as well.
+      const windowId = hostWindowId()
+      const windowField = windowId !== undefined ? { windowId } : {}
       if (recording) {
-        const r = await sendCommand({ type: 'record.stop' })
+        const r = await sendCommand({ type: 'record.stop', ...windowField })
         setRecording(false)
         toast.show(t('recordingStopped'), 'ok')
         if (r.type === 'record.stop' && r.workflowId) {
-          window.location.search = `?edit=${encodeURIComponent(r.workflowId)}`
+          // editorUrl() re-appends hostWindow so the reopened editor stays
+          // bound to the same window after the reload.
+          window.location.search = editorUrl(
+            `?edit=${encodeURIComponent(r.workflowId)}`,
+            windowId,
+          )
           window.location.reload()
         }
       } else {
-        await sendCommand({ type: 'record.start' })
+        await sendCommand({ type: 'record.start', ...windowField })
         setRecording(true)
         toast.show(t('recordingStarted'), 'info')
       }

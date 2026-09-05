@@ -80,6 +80,23 @@ export default defineManifest({
       all_frames: true,
       run_at: 'document_idle',
     },
+    {
+      // Floating "restore" button for the minimized plugin. Renders nothing
+      // unless the service worker reports this window minimized (see
+      // src/inpage/floating-button.ts). Main frame only: one button per page.
+      matches: ['http://*/*', 'https://*/*'],
+      js: ['src/inpage/floating-button.ts'],
+      all_frames: false,
+      run_at: 'document_idle',
+    },
+  ],
+  // The floating button loads the extension icon inside web pages; without
+  // this declaration Chrome blocks the chrome-extension:// fetch.
+  web_accessible_resources: [
+    {
+      resources: ['icons/icon-48.png'],
+      matches: ['http://*/*', 'https://*/*'],
+    },
   ],
   action: {
     default_title: 'Open Browser Copilot',

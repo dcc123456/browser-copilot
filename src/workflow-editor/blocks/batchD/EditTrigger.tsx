@@ -25,7 +25,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { EditFormProps } from '../EditForms'
-import { Checkbox, Expand, Field, Select, TextArea, TextInput, type Patch } from '../shared/Field'
+import { Checkbox, Expand, Field, NumberInput, Select, TextArea, TextInput, type Patch } from '../shared/Field'
 import InteractionBase, { bool, num, str } from '../shared/InteractionBase'
 import Modal from '../../ui/Modal'
 import { useEditorLocale } from '../../locale-context'
@@ -66,11 +66,6 @@ function asStringList(value: unknown): string[] {
   return value.filter((v): v is string => typeof v === 'string')
 }
 
-function clamp(v: number, min: number, max: number): number {
-  if (Number.isNaN(v)) return min
-  return Math.min(max, Math.max(min, v))
-}
-
 export default function EditTrigger({ data, onChange }: EditFormProps) {
   const { bt } = useEditorLocale()
   const [paramsOpen, setParamsOpen] = useState(false)
@@ -107,17 +102,21 @@ export default function EditTrigger({ data, onChange }: EditFormProps) {
       {type === 'interval' && (
         <>
           <Field label="Interval (minutes)">
-            <TextInput
-              type="number"
+            <NumberInput
               value={num(data, 'interval', 60)}
-              onChange={(v) => onChange({ interval: clamp(Number(v), 1, 360) })}
+              min={1}
+              max={360}
+              fallback={60}
+              onChange={(n) => onChange({ interval: n })}
             />
           </Field>
           <Field label="Delay (minutes)">
-            <TextInput
-              type="number"
+            <NumberInput
               value={num(data, 'delay', 5)}
-              onChange={(v) => onChange({ delay: clamp(Number(v), 0, 20) })}
+              min={0}
+              max={20}
+              fallback={5}
+              onChange={(n) => onChange({ delay: n })}
             />
           </Field>
         </>
@@ -129,7 +128,7 @@ export default function EditTrigger({ data, onChange }: EditFormProps) {
             <TextInput type="date" value={str(data, 'date')} onChange={(v) => onChange({ date: v })} />
           </Field>
           <Field label="Time">
-            <TextInput type="time" value={str(data, 'time') || '00:00'} onChange={(v) => onChange({ time: v || '00:00' })} />
+            <TextInput type="time" value={str(data, 'time')} fallback="00:00" onChange={(v) => onChange({ time: v })} />
           </Field>
         </>
       )}
@@ -149,7 +148,7 @@ export default function EditTrigger({ data, onChange }: EditFormProps) {
             </div>
           </Field>
           <Field label="Time">
-            <TextInput type="time" value={str(data, 'time') || '00:00'} onChange={(v) => onChange({ time: v || '00:00' })} />
+            <TextInput type="time" value={str(data, 'time')} fallback="00:00" onChange={(v) => onChange({ time: v })} />
           </Field>
         </>
       )}

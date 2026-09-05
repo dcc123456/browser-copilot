@@ -14,7 +14,7 @@
  *
  * @module workflow-editor/blocks/batchA/EditElementExists
  */
-import { Checkbox, Field, TextInput } from '../shared/Field'
+import { Checkbox, Field, NumberInput } from '../shared/Field'
 import type { EditFormProps } from '../EditForms'
 import InteractionBase, { bool, num } from '../shared/InteractionBase'
 
@@ -22,18 +22,10 @@ export default function EditElementExists({ data, onChange }: EditFormProps) {
   return (
     <InteractionBase data={data} onChange={onChange} hideMarkEl>
       <Field label="Try for">
-        <TextInput
-          type="number"
-          value={num(data, 'tryCount', 1)}
-          onChange={(v) => onChange({ tryCount: Number(v) || 1 })}
-        />
+        <NumberInput value={num(data, 'tryCount', 1)} min={0} fallback={1} onChange={(n) => onChange({ tryCount: n })} />
       </Field>
       <Field label="Timeout (milliseconds)">
-        <TextInput
-          type="number"
-          value={num(data, 'timeout', 500)}
-          onChange={(v) => onChange({ timeout: Number(v) || 500 })}
-        />
+        <NumberInput value={num(data, 'timeout', 500)} min={0} fallback={500} onChange={(n) => onChange({ timeout: n })} />
       </Field>
       <Checkbox
         checked={bool(data, 'throwError')}

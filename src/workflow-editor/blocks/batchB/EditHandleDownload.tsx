@@ -12,7 +12,7 @@
 
 import type { EditFormProps } from '../EditForms'
 import SaveOutputs from './SaveOutputs'
-import { Checkbox, Field, Select, TextArea, TextInput } from '../shared/Field'
+import { Checkbox, Field, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
 
 const ON_CONFLICT = [
@@ -37,12 +37,7 @@ export default function EditHandleDownload({ data, onChange }: EditFormProps) {
       </Field>
 
       <Field label="Timeout (milliseconds)">
-        <TextInput
-          type="number"
-          value={num(data, 'timeout', 20000)}
-          placeholder="1000"
-          onChange={(v) => onChange({ timeout: Number(v) || 1000 })}
-        />
+        <NumberInput value={num(data, 'timeout', 20000)} placeholder="1000" min={0} fallback={20000} onChange={(n) => onChange({ timeout: n })} />
       </Field>
 
       <Field label="File download ID (optional)">

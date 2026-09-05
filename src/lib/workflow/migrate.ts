@@ -138,13 +138,25 @@ function normalizeHandle(
     if (kind === 'source' && (handle === 'true' || handle === 'false' || handle === 'loop' || handle === 'end')) {
       return `${blockId}-${handle}`
     }
+    // A bare "fallback" is the fallback SOURCE handle (the engine's output key);
+    // the editor renders it as `<blockId>-output-fallback`.
+    if (kind === 'source' && handle === 'fallback') return `${blockId}-output-fallback`
     return handle.startsWith('output') || handle.startsWith('input') ? `${blockId}-${handle}` : fallback
   }
-  // Extract the trailing "-output-N" / "-input-N" / "-fallback" suffix regardless
-  // of the (possibly node-id) prefix.
-  const match = /-(output-\d+|input-\d+|fallback|true|false|loop|end)$/.exec(handle)
-  const tail = match ? match[1] : (kind === 'source' ? 'output-1' : 'input-1')
-  return `${blockId}-${tail}`
+  // Extract the trailing handle suffix regardless of the (possibly node-id)
+  // prefix. `-output-fallback` must be matched before bare `-fallback`
+  // (leftmost alternative wins): the editor renders the fallback handle as
+  // `<blockId>-output-fallback`, and rewriting it to `<blockId>-fallback`
+  // detached every saved fallback edge on reopen (the line silently vanished).
+  const match = /-(output-fallback|input-fallback|output-\d+|input-\d+|fallback|true|false|loop|end)$/.exec(handle)
+  const raw = match ? match[1] : kind === 'source' ? 'output-1' : 'input-1'
+  // The fallback handle only exists as a SOURCE (`-output-fallback`). Bare
+  // `-fallback` tails come from older mangled saves — repair them so already
+  // stored workflows heal on the next load/save.
+  if (raw === 'fallback' || raw === 'output-fallback' || raw === 'input-fallback') {
+    return kind === 'source' ? `${blockId}-output-fallback` : fallback
+  }
+  return `${blockId}-${raw}`
 }
 
 export function migrateWorkflow(wf: Workflow): Workflow {

@@ -240,4 +240,32 @@ describe('driver panel-window scope', () => {
     const tab = await driver.resolveAutomationTab(undefined, { windowId: 9 })
     expect(tab?.id).toBe(2) // legacy: focused window 2
   })
+
+  it('a pin from another window never hijacks a scoped resolution', async () => {
+    // Window 2's session pins its own tab (pin_tab TTL 5 min).
+    const pinned = await driver.pinActiveTab(2)
+    expect(pinned.id).toBe(2)
+
+    // Window 1's scoped run must ignore the foreign pin and stay in-window.
+    const scoped = await driver.resolveAutomationTab(undefined, scope)
+    expect(scoped?.id).toBe(1)
+
+    // Unscoped resolution still honors the pin (legacy behaviour preserved).
+    const unscoped = await driver.resolveAutomationTab()
+    expect(unscoped?.id).toBe(2)
+
+    driver.unpinTab()
+    const afterUnpin = await driver.resolveAutomationTab()
+    expect(afterUnpin?.id).toBe(2) // focused window's active tab, not the pin
+  })
+
+  it('a pin inside the scoped window wins for that window', async () => {
+    // Window 1 pins its own remembered tab (explicit intent, same window).
+    await driver.pinActiveTab(1, scope)
+    // Even with the window's active tab gone chrome://, the pin holds.
+    browser().tabs.get(1)!.url = 'https://still-pin.example/'
+    const tab = await driver.resolveAutomationTab(undefined, scope)
+    expect(tab?.id).toBe(1)
+    driver.unpinTab()
+  })
 })

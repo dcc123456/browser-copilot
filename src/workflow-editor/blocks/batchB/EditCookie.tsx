@@ -55,7 +55,8 @@ export default function EditCookie({ data, onChange }: EditFormProps) {
             <TextArea
               mono
               rows={6}
-              value={str(data, 'jsonCode') || '{\n\n}'}
+              value={str(data, 'jsonCode')}
+              fallback={'{\n\n}'}
               onChange={(v) => onChange({ jsonCode: v })}
             />
           </Field>

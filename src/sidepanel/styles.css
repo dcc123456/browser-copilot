@@ -126,6 +126,25 @@ body {
   font-size: 0.8em;
 }
 
+/* Minimize (floating-button) control pinned at the right edge of the tab bar */
+.tab-minimize {
+  flex: none;
+  width: 30px;
+  padding: 8px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.tab-minimize:hover {
+  color: var(--text);
+}
+
+.tab-minimize svg {
+  display: block;
+}
+
 .tab-more-menu {
   position: absolute;
   top: 100%;
@@ -830,6 +849,19 @@ body {
   border-radius: 6px;
   overflow-x: auto;
   font-size: 11px;
+}
+
+/* AI node-review progress log inside the save review dialog. */
+.review-log {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: var(--sunken);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 88px;
+  overflow-y: auto;
 }
 
 /* AI-operator checklist on the save-as-workflow card. A grid keeps rows evenly

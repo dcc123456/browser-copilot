@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from 'react'
 import type { EditFormProps } from '../EditForms'
-import { Checkbox, Expand, Field, Select, TextArea, TextInput } from '../shared/Field'
+import { Checkbox, Expand, Field, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
 import { id } from './shared'
 
@@ -36,13 +36,13 @@ export default function EditLoopData({ data, onChange }: EditFormProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const setFromNumber = (v: string) => {
-    const from = Number(v)
+  // Cross-field clamp: from stays below to (and vice versa). NumberInput keeps
+  // the field clearable while typing and normalizes on blur.
+  const setFromNumber = (from: number) => {
     const to = num(data, 'toNumber', 10)
     patch({ fromNumber: from >= to ? to - 1 : from })
   }
-  const setToNumber = (v: string) => {
-    const to = Number(v)
+  const setToNumber = (to: number) => {
     const from = num(data, 'fromNumber', 1)
     patch({ toNumber: to <= from ? from + 1 : to })
   }
@@ -94,11 +94,7 @@ export default function EditLoopData({ data, onChange }: EditFormProps) {
           />
           {bool(data, 'waitForSelector') && (
             <Field label="Selector timeout (ms)">
-              <TextInput
-                type="number"
-                value={num(data, 'waitSelectorTimeout', 5000)}
-                onChange={(v) => patch({ waitSelectorTimeout: Number(v) || 5000 })}
-              />
+              <NumberInput value={num(data, 'waitSelectorTimeout', 5000)} min={0} fallback={5000} onChange={(n) => patch({ waitSelectorTimeout: n })} />
             </Field>
           )}
         </>
@@ -127,10 +123,10 @@ export default function EditLoopData({ data, onChange }: EditFormProps) {
       {loopThrough === 'numbers' && (
         <div style={{ display: 'flex', gap: 8 }}>
           <Field label="From number">
-            <TextInput type="number" value={num(data, 'fromNumber', 1)} onChange={setFromNumber} />
+            <NumberInput value={num(data, 'fromNumber', 1)} fallback={1} onChange={setFromNumber} />
           </Field>
           <Field label="To number">
-            <TextInput type="number" value={num(data, 'toNumber', 10)} onChange={setToNumber} />
+            <NumberInput value={num(data, 'toNumber', 10)} fallback={10} onChange={setToNumber} />
           </Field>
         </div>
       )}
@@ -138,19 +134,19 @@ export default function EditLoopData({ data, onChange }: EditFormProps) {
       {loopThrough !== 'numbers' && (
         <>
           <Field label="Max data to loop (0 to disable)" title="Max number of data to loop">
-            <TextInput
-              type="number"
+            <NumberInput
               value={typeof data.maxLoop === 'number' || typeof data.maxLoop === 'string' ? (data.maxLoop as string | number) : 0}
-              onChange={(v) => patch({ maxLoop: v })}
+              fallback={0}
+              onChange={(n) => patch({ maxLoop: n })}
             />
           </Field>
           {!resume && (
             <Field label="Start from index">
-              <TextInput
-                type="number"
+              <NumberInput
                 value={typeof data.startIndex === 'number' || typeof data.startIndex === 'string' ? (data.startIndex as string | number) : 0}
                 placeholder="0"
-                onChange={(v) => patch({ startIndex: v })}
+                fallback={0}
+                onChange={(n) => patch({ startIndex: n })}
               />
             </Field>
           )}

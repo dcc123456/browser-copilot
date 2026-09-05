@@ -6,7 +6,7 @@
  */
 
 import type { EditFormProps } from '../EditForms'
-import { Field, Select, TextInput, TextArea, Checkbox } from '../shared/Field'
+import { Field, NumberInput, Select, TextInput, TextArea, Checkbox } from '../shared/Field'
 import { str, bool, num } from '../shared/InteractionBase'
 
 const EVENTS = [
@@ -35,11 +35,7 @@ export default function EditBrowserEvent({ data, onChange }: EditFormProps) {
         <Select value={event} onChange={(v) => onChange({ eventName: v })} options={EVENTS} />
       </Field>
       <Field label="Timeout (ms)">
-        <TextInput
-          type="number"
-          value={num(data, 'timeout', 10000)}
-          onChange={(v) => onChange({ timeout: Number(v) || 10000 })}
-        />
+        <NumberInput value={num(data, 'timeout', 10000)} min={0} fallback={10000} onChange={(n) => onChange({ timeout: n })} />
       </Field>
       {event.startsWith('tab:') && (
         <Checkbox

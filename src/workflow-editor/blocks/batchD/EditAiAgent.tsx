@@ -15,7 +15,7 @@
  */
 
 import type { EditFormProps } from '../EditForms'
-import { Checkbox, Expand, Field, Select, TextArea, TextInput } from '../shared/Field'
+import { Checkbox, Expand, Field, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
 import ElSelectorActions from '../shared/ElSelectorActions'
 
@@ -93,16 +93,19 @@ export default function EditAiAgent({ data, onChange }: EditFormProps) {
 
       <Expand title="Advanced">
         <Field label="Max tool rounds">
-          <TextInput
-            type="number"
+          <NumberInput
             value={num(data, 'maxToolRounds', 20)}
-            onChange={(v) => onChange({ maxToolRounds: Math.min(50, Math.max(1, Number(v) || 20)) })}
+            min={1}
+            max={50}
+            fallback={20}
+            onChange={(n) => onChange({ maxToolRounds: n })}
           />
         </Field>
         <Field label="Output variable name">
           <TextInput
-            value={str(data, 'variableName') || 'lastAIAgent'}
+            value={str(data, 'variableName')}
             placeholder="lastAIAgent"
+            fallback="lastAIAgent"
             onChange={(v) => onChange({ variableName: v })}
           />
         </Field>

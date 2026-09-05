@@ -9,7 +9,7 @@
  */
 
 import type { EditFormProps } from '../EditForms'
-import { Checkbox, Field, Select, TextArea, TextInput } from '../shared/Field'
+import { Checkbox, Field, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
 
 const FIND_TYPES = [
@@ -89,11 +89,7 @@ export default function EditSwitchTab({ data, onChange }: EditFormProps) {
 
       {findTabBy === 'tab-index' && (
         <Field label="Index">
-          <TextInput
-            type="number"
-            value={num(data, 'tabIndex')}
-            onChange={(v) => onChange({ tabIndex: Number(v) || 0 })}
-          />
+          <NumberInput value={num(data, 'tabIndex')} fallback={0} onChange={(n) => onChange({ tabIndex: n })} />
         </Field>
       )}
 

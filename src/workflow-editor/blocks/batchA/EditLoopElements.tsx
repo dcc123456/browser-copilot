@@ -14,7 +14,7 @@
  * @module workflow-editor/blocks/batchA/EditLoopElements
  */
 import { useEffect } from 'react'
-import { Checkbox, Field, Select, TextInput } from '../shared/Field'
+import { Checkbox, Field, NumberInput, Select, TextInput } from '../shared/Field'
 import type { EditFormProps } from '../EditForms'
 import InteractionBase, { bool, num, str } from '../shared/InteractionBase'
 import ElSelectorActions from '../shared/ElSelectorActions'
@@ -47,14 +47,17 @@ export default function EditLoopElements({ data, onChange }: EditFormProps) {
           <TextInput
             value={str(data, 'loopId')}
             placeholder="Loop ID"
-            onChange={(v) => onChange({ loopId: v.replace(/\s/g, '') || nanoid(6) })}
+            // Stay clearable while typing; a fresh id is backfilled on blur.
+            onChange={(v) => onChange({ loopId: v.replace(/\s/g, '') })}
+            fallback={nanoid(6)}
           />
         </Field>
       }
     >
       <Field label="Max data to loop (0 to disable)" >
         <TextInput
-          value={str(data, 'maxLoop') || '0'}
+          value={str(data, 'maxLoop')}
+          fallback="0"
           onChange={(v) => onChange({ maxLoop: v })}
         />
       </Field>
@@ -92,11 +95,11 @@ export default function EditLoopElements({ data, onChange }: EditFormProps) {
 
         {['click-element', 'scroll', 'scroll-up'].includes(loadMoreAction) && (
           <Field label="Max seconds wait for more elements">
-            <TextInput
-              type="number"
+            <NumberInput
               value={num(data, 'actionElMaxWaitTime', 5)}
               placeholder="0"
-              onChange={(v) => onChange({ actionElMaxWaitTime: Number(v) || 0 })}
+              fallback={0}
+              onChange={(n) => onChange({ actionElMaxWaitTime: n })}
             />
           </Field>
         )}
@@ -111,11 +114,11 @@ export default function EditLoopElements({ data, onChange }: EditFormProps) {
 
         {loadMoreAction === 'click-link' && (
           <Field label="Max seconds wait for the page to load">
-            <TextInput
-              type="number"
+            <NumberInput
               value={num(data, 'actionPageMaxWaitTime', 10)}
               placeholder="0"
-              onChange={(v) => onChange({ actionPageMaxWaitTime: Number(v) || 0 })}
+              fallback={0}
+              onChange={(n) => onChange({ actionPageMaxWaitTime: n })}
             />
           </Field>
         )}

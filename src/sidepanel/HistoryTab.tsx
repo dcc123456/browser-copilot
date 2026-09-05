@@ -19,7 +19,7 @@
  * @module sidepanel/HistoryTab
  */
 import { useCallback, useEffect, useState } from "react";
-import { sendCommand } from "../lib/messages";
+import { onReviewLog, sendCommand } from "../lib/messages";
 import { workflowFromHistory } from "../lib/storage";
 import { saveWorkflow } from "../lib/workflow/storage";
 import {
@@ -728,8 +728,24 @@ function OperationsSection({ t, flash }: SectionProps) {
     stepList: ReviewStep[];
     reviewing: boolean;
     review: WorkflowReview | null;
+    /** Failure reason of the last review attempt (timeout / endpoint / parse). */
+    reviewError: string | null;
+    /** Ordered review progress lines shown in the dialog. */
+    reviewLog: string[];
+    /** Failure reason of the last save attempt; the dialog stays open for a retry. */
+    saveError: string | null;
     keep: Record<string, boolean> | null;
   } | null>(null);
+
+  // Live AI review log: the port (mounted in ChatTab) forwards pushed lines
+  // through the shared fan-out; render them in the open dialog as they come.
+  useEffect(() => {
+    return onReviewLog((text) => {
+      setReview((prev) =>
+        prev && prev.reviewing ? { ...prev, reviewLog: [...prev.reviewLog, text] } : prev,
+      );
+    });
+  }, []);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -830,26 +846,19 @@ function OperationsSection({ t, flash }: SectionProps) {
 
   /**
    * Rebuilds a linear workflow from a group's action steps (oldest first) and
-   * opens the AI node-review dialog; the save happens only on confirm. A late
-   * review reply for a closed/superseded dialog is dropped by the workflow-id
-   * guard.
+   * opens the AI node-review dialog; the save happens only on confirm. With
+   * nothing to review the workflow saves straight away instead of opening an
+   * empty dialog. A late review reply for a closed/superseded dialog is
+   * dropped by the workflow-id guard.
    */
-  const rebuild = useCallback(
-    async (groupTitle: string, groupEntries: HistoryEntry[]): Promise<void> => {
-      const workflow = workflowFromHistory([...groupEntries].reverse(), `从历史: ${groupTitle}`);
-      if (!workflow) {
-        flash("error", t.dataHistoryToWorkflowEmpty);
-        return;
-      }
-      const stepList = reviewStepsOf(workflow);
-      setReview({
-        workflow,
-        stepList,
-        reviewing: stepList.length > 0,
-        review: null,
-        keep: null,
-      });
-      const applyVerdict = (verdict: WorkflowReview | null): void => {
+  /**
+   * Fires the AI node review for the given workflow (used by the rebuild
+   * click AND the dialog's retry button; a failed attempt may be re-run).
+   * A late reply for a closed/superseded dialog is dropped by the id guard.
+   */
+  const runReview = useCallback(
+    (workflow: Workflow): void => {
+      const applyVerdict = (verdict: WorkflowReview | null, errorMessage?: string): void => {
         setReview((prev) => {
           if (!prev || prev.workflow.id !== workflow.id) return prev;
           // Materialize the verdicts into the keep set so the checkboxes AND
@@ -859,35 +868,104 @@ function OperationsSection({ t, flash }: SectionProps) {
           if (verdict) {
             for (const item of verdict.steps) keep[item.id] = item.keep;
           }
-          return { ...prev, reviewing: false, review: verdict, keep };
+          const dropped = verdict?.steps.filter((item) => !item.keep).length ?? 0;
+          const logLine = verdict
+            ? dropped > 0
+              ? t.chatWorkflowReviewDropped({ count: dropped })
+              : t.chatWorkflowReviewAllKept
+            : t.workflowReviewLogFailed;
+          return {
+            ...prev,
+            reviewing: false,
+            review: verdict,
+            reviewError: errorMessage ?? null,
+            reviewLog: [...prev.reviewLog, logLine],
+            keep,
+          };
         });
       };
-      try {
-        const result = await sendCommand({ type: "workflows.review", workflow });
-        if (result.type === "workflows.review") applyVerdict(result.review);
-      } catch {
-        applyVerdict(null);
-      }
+      setReview((prev) =>
+        prev && prev.workflow.id === workflow.id
+          ? {
+              ...prev,
+              reviewing: true,
+              reviewError: null,
+              reviewLog: [
+                ...prev.reviewLog,
+                t.workflowReviewLogStart({ steps: prev.stepList.length }),
+              ],
+            }
+          : prev,
+      );
+      void (async () => {
+        try {
+          const result = await sendCommand({ type: "workflows.review", workflow });
+          if (result.type === "workflows.review") applyVerdict(result.review, result.error);
+        } catch (error) {
+          applyVerdict(null, (error as Error).message);
+        }
+      })();
     },
-    [flash, t],
+    [t],
   );
+
+  const rebuild = useCallback(
+    async (groupTitle: string, groupEntries: HistoryEntry[]): Promise<void> => {
+      const workflow = workflowFromHistory([...groupEntries].reverse(), `从历史: ${groupTitle}`);
+      if (!workflow) {
+        flash("error", t.dataHistoryToWorkflowEmpty);
+        return;
+      }
+      const stepList = reviewStepsOf(workflow);
+      if (stepList.length === 0) {
+        try {
+          await saveWorkflow(workflow);
+          flash("ok", t.dataHistoryToWorkflowDone);
+        } catch (error) {
+          flash("error", (error as Error).message);
+        }
+        return;
+      }
+      setReview({
+        workflow,
+        stepList,
+        reviewing: false,
+        review: null,
+        reviewError: null,
+        reviewLog: [],
+        saveError: null,
+        keep: null,
+      });
+      runReview(workflow);
+    },
+    [flash, t, runReview],
+  );
+
+  /** Review dialog retry: re-runs a failed/unavailable review on the spot. */
+  const retryReview = useCallback((): void => {
+    if (!review || review.reviewing) return;
+    runReview(review.workflow);
+  }, [review, runReview]);
 
   /** Keep/drop one reviewed step (primary + its satellites) in the dialog. */
   const toggleStepKeep = (stepId: string, kept: boolean): void => {
     setReview((prev) => (prev ? { ...prev, keep: { ...prev.keep, [stepId]: kept } } : prev));
   };
 
-  /** Applies the keep set and persists; unavailable review keeps everything. */
+  /** Applies the keep set and persists; the dialog closes only on success. */
   const confirmReview = useCallback(async (): Promise<void> => {
     const current = review;
     if (!current) return;
-    setReview(null);
     try {
       const workflow = applyNodeKeepSelection(current.workflow, current.keep ?? {});
       await saveWorkflow(workflow);
+      setReview(null);
       flash("ok", t.dataHistoryToWorkflowDone);
     } catch (error) {
-      flash("error", (error as Error).message);
+      // The dialog stays open so the failure is visible and the save retryable.
+      const message = (error as Error).message;
+      setReview((prev) => (prev ? { ...prev, saveError: message } : prev));
+      flash("error", message);
     }
   }, [review, flash, t]);
 
@@ -1040,13 +1118,17 @@ function OperationsSection({ t, flash }: SectionProps) {
       {review && (
         <WorkflowReviewDialog
           keep={review.keep}
+          log={review.reviewLog}
           review={review.review}
           reviewing={review.reviewing}
+          saveError={review.saveError ?? undefined}
           steps={review.stepList}
           subtitle={review.workflow.name}
           title={t.workflowReviewDialogTitle}
+          unavailableReason={review.reviewError ?? undefined}
           onCancel={() => setReview(null)}
           onConfirm={() => void confirmReview()}
+          onRetry={retryReview}
           onToggle={toggleStepKeep}
         />
       )}

@@ -11,7 +11,7 @@
  */
 
 import { useState, type ReactNode } from 'react'
-import { Checkbox, Expand, Field, Select, TextArea, TextInput } from './Field'
+import { Checkbox, Expand, Field, NumberInput, Select, TextArea } from './Field'
 import ElSelectorActions from './ElSelectorActions'
 import type { Patch } from './Field'
 
@@ -172,10 +172,11 @@ export default function InteractionBase({
               />
               {bool(data, 'waitForSelector') && (
                 <Field label="Timeout (ms)">
-                  <TextInput
-                    type="number"
+                  <NumberInput
                     value={num(data, 'waitSelectorTimeout', 5000)}
-                    onChange={(v) => onChange({ waitSelectorTimeout: Number(v) || 5000 })}
+                    min={0}
+                    fallback={5000}
+                    onChange={(n) => onChange({ waitSelectorTimeout: n })}
                   />
                 </Field>
               )}

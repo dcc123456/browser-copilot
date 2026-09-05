@@ -25,19 +25,29 @@ import {
     type Command,
     type CommandResponse,
     type CommandResult,
+    type WindowPickRequest,
     notifySkillsChanged,
   } from '../lib/messages'
+import { handleWindowPickResponse, setWindowPickRequester } from './window-policy'
 import { isInjectablePage } from '../lib/pages'
 import {
-  hasPanelWindows,
+  hasPluginWindows,
   initScopeWindowCleanup,
-  isPanelWindow,
-  latestPanelWindowId,
+  isPluginWindow,
+  latestPluginWindowId,
   normalScopeFromWindowId,
   registerPanelWindow,
+  broadcastPanels,
   shouldTriggerVisitWeb,
   unregisterPort,
 } from './automation-scope'
+import {
+  expandWindow,
+  initPanelMinimize,
+  isMinimized,
+  minimizeWindow,
+  whenRestoreSettled,
+} from './panel-minimize'
 import { countElements, resolveAutomationTab, warmupOcr } from './driver'
 import { handlePickerMessage } from './picker-bridge'
 import {
@@ -220,11 +230,11 @@ chrome.runtime.onStartup.addListener(() => {
     console.error('[Browser Copilot] could not reschedule workflow triggers', error),
   )
   void feishuBot.reconcile()
-  // Run workflows whose trigger block is "on-startup". Scoped to the panel
-  // window when one is already connected (usually none is at browser start).
+  // Run workflows whose trigger block is "on-startup". Scoped to the plugin
+  // window when one exists (usually none is at browser start).
   void startupWorkflows()
     .then((wfs) => {
-      for (const wf of wfs) void runWorkflowKeepalive(wf.id, latestPanelWindowId())
+      for (const wf of wfs) void runWorkflowKeepalive(wf.id, latestPluginWindowId())
     })
     .catch((error: unknown) =>
       console.error('[Browser Copilot] on-startup workflows failed', error),
@@ -236,7 +246,7 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.runtime.onInstalled.addListener(() => {
   void startupWorkflows()
     .then((wfs) => {
-      for (const wf of wfs) void runWorkflowKeepalive(wf.id, latestPanelWindowId())
+      for (const wf of wfs) void runWorkflowKeepalive(wf.id, latestPluginWindowId())
     })
     .catch(() => {})
 })
@@ -352,10 +362,11 @@ if (chrome.contextMenus?.onClicked) {
 // ignore any scheme other than http(s), and fall back to substring matching if
 // the stored pattern is not a valid regular expression.
 //
-// Panel-window guard: once any side panel is connected, matching navigations
-// only fire in windows that host a panel — a window without the panel belongs
-// to the user, and an automation starting there would hijack it. With no panel
-// anywhere the guard is a no-op (global listening, the long-standing default).
+// Plugin-window guard: once the plugin runs anywhere (a connected side panel
+// OR a minimized one), matching navigations only fire in windows that run the
+// plugin — a window without the plugin belongs to the user, and an automation
+// starting there would hijack it. With the plugin closed everywhere the guard
+// is a no-op (global listening, the long-standing default).
 if (chrome.webNavigation?.onCommitted) {
   chrome.webNavigation.onCommitted.addListener((details) => {
     void (async () => {
@@ -365,7 +376,7 @@ if (chrome.webNavigation?.onCommitted) {
         // `windowId` is present at runtime but missing from this
         // @types/chrome version's WebNavigation callback details.
         const navWindowId = (details as { windowId?: number }).windowId
-        if (!shouldTriggerVisitWeb(hasPanelWindows(), isPanelWindow(navWindowId))) return
+        if (!shouldTriggerVisitWeb(hasPluginWindows(), isPluginWindow(navWindowId))) return
         const href = new URL(url).href
         const workflows = await listWorkflows()
         const wf = workflows.find((w) => {
@@ -376,9 +387,10 @@ if (chrome.webNavigation?.onCommitted) {
             return href.includes(w.trigger.urlPattern)
           }
         })
-        // Run scoped to the window the matching page opened in (a panel window
-        // by the guard above); undefined when no panel exists at all.
-        if (wf) await runWorkflowKeepalive(wf.id, isPanelWindow(navWindowId) ? navWindowId : undefined)
+        // Run scoped to the window the matching page opened in (a plugin
+        // window — connected or minimized — by the guard above); undefined
+        // when the plugin is closed everywhere.
+        if (wf) await runWorkflowKeepalive(wf.id, isPluginWindow(navWindowId) ? navWindowId : undefined)
       } catch (error) {
         console.error('[Browser Copilot] visit-web workflow failed', error)
       }
@@ -401,6 +413,8 @@ function recordStep(
 initLastTabTracker()
 // Drop closed windows from the panel registry so trigger guards stay honest.
 initScopeWindowCleanup()
+// Restore minimized-plugin marks (chrome.storage.session) after a worker restart.
+initPanelMinimize()
 void rescheduleAll().catch((error: unknown) =>
   console.error('[Browser Copilot] could not reschedule tasks', error),
 )
@@ -427,6 +441,12 @@ void chrome.sidePanel
   .catch(() => {})
 
 chrome.action.onClicked.addListener((tab) => {
+  // Opening the panel from the toolbar also retires the minimized state and
+  // the floating page button — the plugin is plainly expanded again.
+  if (typeof tab.windowId === 'number' && isMinimized(tab.windowId)) {
+    expandWindow(tab.windowId)
+    void broadcastFloating(tab.windowId, 'floating.hide')
+  }
   // Nothing may be awaited before `open()`; see the note above.
   const opened =
     tab.windowId !== undefined
@@ -442,6 +462,58 @@ chrome.action.onClicked.addListener((tab) => {
   })
 })
 
+/**
+ * Sends one floating-button control message to every (injectable) tab of a
+ * window. Tabs without the content script (chrome://, discarded, closed
+ * mid-race) reject the send — swallowed, they simply show nothing until their
+ * next load, where the script's own `floating.status` query decides.
+ */
+async function broadcastFloating(
+  windowId: number,
+  type: 'floating.show' | 'floating.hide',
+): Promise<void> {
+  const tabs = await chrome.tabs.query({ windowId }).catch(() => [])
+  await Promise.all(
+    tabs
+      .filter((tab) => typeof tab.id === 'number')
+      .map(async (tab) => {
+        const tabId = tab.id as number
+        try {
+          await chrome.tabs.sendMessage(tabId, { type })
+        } catch {
+          if (type !== 'floating.show') return
+          // No receiver: the tab was open before the extension (re)loaded, so
+          // the manifest-declared content script was never injected there and
+          // the broadcast silently no-ops — leaving the minimized plugin
+          // invisible on that page. Inject the script on demand: it queries
+          // `floating.status` on boot and mounts by itself. A rejection here
+          // (chrome:// pages, discarded tabs, no host access) just means the
+          // toolbar icon remains the expand fallback for that page.
+          try {
+            await chrome.scripting.executeScript({
+              target: { tabId },
+              files: [floatingButtonScriptFile()],
+            })
+          } catch {
+            /* page cannot host content scripts */
+          }
+        }
+      }),
+  )
+}
+
+/**
+ * The built (content-hashed) floating-button script file, resolved from the
+ * manifest's own declaration so no build-time path is duplicated here.
+ */
+function floatingButtonScriptFile(): string {
+  for (const entry of chrome.runtime.getManifest().content_scripts ?? []) {
+    const file = entry.js?.find((name) => name.includes('floating-button'))
+    if (file) return file
+  }
+  throw new Error('floating-button content script is not declared in the manifest')
+}
+
 // --- Message channel ---------------------------------------------------------
 //
 // Exactly ONE onMessage listener: special protocols (element picker, workflow
@@ -450,7 +522,63 @@ chrome.action.onClicked.addListener((tab) => {
 // message (e.g. picker:start) ALSO reached the command handler, which threw
 // "Unknown command" and raced the real response — the root cause of the picker
 // error and flaky run/record buttons.
+// Multi-window picker: relay a pick request to every connected panel
+// (extension pages) and let the first `window.pick.response` answer it.
+// window-policy owns the pending map and the 30s timeout; this is only the
+// chrome.runtime plumbing.
+setWindowPickRequester(async (request: WindowPickRequest) => {
+  try {
+    await chrome.runtime.sendMessage(request)
+  } catch {
+    // No panel was listening (e.g. the picker dialog is not mounted in any
+    // open panel) — the timeout fallback in window-policy answers null.
+  }
+})
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // 0. Floating-button protocol — MUST be handled before any await: the
+  // content-script click gesture only carries over to `sidePanel.open` when
+  // the listener calls it synchronously. The picker/shortcut checks below
+  // await first, which silently broke the reopen on some builds.
+  if (message?.type === 'floating.status') {
+    const windowId = sender?.tab?.windowId
+    // The query itself may have just woken the worker, and the session-state
+    // restore runs asynchronously — answering synchronously would report a
+    // stale `false` and the minimized plugin would show no button at all.
+    void whenRestoreSettled().then(() => {
+      try {
+        sendResponse({ minimized: isMinimized(windowId) })
+      } catch {
+        /* the asker navigated away before the answer */
+      }
+    })
+    return true
+  }
+  if (message?.type === 'floating.expand') {
+    const windowId = sender?.tab?.windowId
+    if (typeof windowId === 'number') {
+      // Open first, retire the minimized mark only once the panel is really
+      // open: a rejected open() (gesture race right after worker wake) then
+      // leaves the mark AND the button intact, so the next click can retry.
+      // No isMinimized guard here either — a stale button click is exactly
+      // the desync we want to self-heal.
+      const opened =
+        sender?.tab?.id !== undefined
+          ? chrome.sidePanel.open({ tabId: sender.tab.id })
+          : chrome.sidePanel.open({ windowId })
+      void opened
+        .then(() => {
+          expandWindow(windowId)
+          void broadcastFloating(windowId, 'floating.hide')
+        })
+        .catch((error: unknown) => {
+          console.error('[Browser Copilot] could not reopen the side panel from the floating button', error)
+        })
+    }
+    sendResponse({ ok: true })
+    return
+  }
+
   void (async () => {
     try {
       // 另存为 picker 请求由侧面板处理，这里直接放行。
@@ -471,6 +599,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       // 3. Keyboard-shortcut triggers from the injected tab listener.
       if (await handleShortcutPressed(message, sender)) {
+        sendResponse({ ok: true })
+        return
+      }
+
+      // 3.6 Multi-window picker answer from a panel.
+      if (message?.type === 'window.pick.response') {
+        const pick = message as { requestId: string; windowId: number | null }
+        handleWindowPickResponse(pick.requestId, pick.windowId)
         sendResponse({ ok: true })
         return
       }
@@ -543,7 +679,18 @@ async function handleCommand(command: Command, sender?: chrome.runtime.MessageSe
   // Window scope of the extension page that sent this command, if any.
   // Page reads and panel-run workflows act inside THAT window; commands from
   // non-extension senders or the editor popup resolve to undefined (global).
-  const scopeWindowId = await scopeOfSender(sender)
+  const senderScopeWindowId = await scopeOfSender(sender)
+  // An explicit command windowId — the editor popup's HOST window, appended
+  // when the panel opened it — wins over the sender-derived scope: the
+  // editor's own window is a popup (never a valid scope), so it carries the
+  // window that opened it. A stale id (host window closed) degrades to the
+  // sender scope, which for the editor means the legacy global chain.
+  const commandWindowId = (command as { windowId?: number }).windowId
+  const scopeWindowId =
+    commandWindowId !== undefined
+      ? ((await normalScopeFromWindowId(commandWindowId).catch(() => undefined))?.windowId ??
+        senderScopeWindowId)
+      : senderScopeWindowId
   switch (command.type) {
     case 'settings.get':
       return { type: 'settings', settings: await getSettings() }
@@ -557,6 +704,19 @@ async function handleCommand(command: Command, sender?: chrome.runtime.MessageSe
 
     case 'agent.status.get':
       return { type: 'agent.status', status: agentClient.getStatus() }
+
+    case 'panel.minimize': {
+      // The panel reports its own window (a window-level UI resolves it via
+      // chrome.windows.getCurrent()). Validated: only a real normal window can
+      // be minimized. The panel closes itself (window.close) after this ack.
+      const scope = await normalScopeFromWindowId(command.windowId)
+      if (!scope) throw new Error('panel.minimize: unknown or non-normal window.')
+      minimizeWindow(scope.windowId)
+      // Mark first, broadcast second: even if the panel fails to close, the
+      // minimized state (and its scope semantics) is already consistent.
+      void broadcastFloating(scope.windowId, 'floating.show')
+      return { type: 'panel.minimize' }
+    }
 
     case 'skills.list':
       return { type: 'skills.list', skills: await listSkills() }
@@ -801,10 +961,25 @@ async function handleCommand(command: Command, sender?: chrome.runtime.MessageSe
       await rescheduleAllWorkflowTriggers()
       return { type: 'workflows.delete' }
 
-    case 'workflows.review':
+    case 'workflows.review': {
       // Null (unavailable) is a valid outcome: the panel then keeps every
-      // step and shows the availability hint.
-      return { type: 'workflows.review', review: await reviewWorkflow(command.workflow) }
+      // step. A real failure (timeout / endpoint error / unusable reply)
+      // becomes `error` so the panel can show WHY instead of a bare hint.
+      try {
+        return {
+          type: 'workflows.review',
+          review: await reviewWorkflow(command.workflow, (text) =>
+            broadcastPanels({ type: 'workflows.reviewLog', text }),
+          ),
+        }
+      } catch (error) {
+        return {
+          type: 'workflows.review',
+          review: null,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      }
+    }
 
     case 'workflows.run': {
       const workflow = await getWorkflow(command.id)
@@ -960,9 +1135,13 @@ async function handleCommand(command: Command, sender?: chrome.runtime.MessageSe
     }
 
     case 'record.start':
-      await startRecording()
+      // Recording is confined to the command's window scope when present
+      // (the editor's host window); otherwise it stays global as before.
+      await startRecording(scopeWindowId)
       return { type: 'record.start', recording: true }
     case 'record.stop': {
+      // The recorder cleans up with the scope it STARTED with (state), so the
+      // stop command carries no window.
       const workflowId = await stopRecording()
       return { type: 'record.stop', workflowId }
     }
@@ -986,6 +1165,17 @@ async function handleCommand(command: Command, sender?: chrome.runtime.MessageSe
  * Durable data (the transcript) lives in session storage instead.
  */
 const activeTurns = new Set<string>()
+
+/**
+ * Live in-memory transcripts of currently running turns, keyed by
+ * conversation id (the same array object the turn mutates).
+ *
+ * The persisted transcript only updates when the turn finishes, so a panel
+ * that reconnects mid-turn must replay THIS instead of storage to show what
+ * the turn has produced so far. Disposable like `activeTurns`: worker
+ * eviction ends every turn, so an empty map is the correct state.
+ */
+const liveHistories = new Map<string, WireMessage[]>()
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== AGENT_PORT) return
@@ -1020,6 +1210,13 @@ chrome.runtime.onConnect.addListener((port) => {
       // turns; overrides any sender-derived guess.
       panelWindowId = message.windowId
       registerPanelWindow(message.windowId, port)
+      // A connected panel means the plugin is expanded in this window: retire
+      // a stale minimized mark (e.g. the user opened the panel from the
+      // toolbar) and clear the page's floating button.
+      if (isMinimized(message.windowId)) {
+        expandWindow(message.windowId)
+        void broadcastFloating(message.windowId, 'floating.hide')
+      }
       send({ type: 'pong' })
       return
     }
@@ -1043,10 +1240,14 @@ chrome.runtime.onConnect.addListener((port) => {
     if (message.type === 'resume') {
       const conversationId = message.conversationId
       void (async () => {
-        const [history, state] = await Promise.all([
+        const [persisted, state] = await Promise.all([
           loadConversation(conversationId),
           getTurnState(conversationId),
         ])
+        // While a turn is still running, prefer its live in-memory transcript:
+        // the persisted copy only updates when the turn finishes, so replaying
+        // storage would show a stale conversation without the in-flight work.
+        const history = liveHistories.get(conversationId) ?? persisted
         // Replay every visible turn: user text, assistant text (including the
         // empty-content tool-call turns, which carry no text), and tool chips.
         // This is the full conversation the user saw, not a redacted summary,
@@ -1119,6 +1320,10 @@ chrome.runtime.onConnect.addListener((port) => {
       try {
         sendWithTracking({ type: 'phase', phase: 'preparing' })
         history = await loadConversation(conversationId)
+        // Register the live transcript so a panel that reconnects mid-turn
+        // (minimize/expand, crash, worker recycle) resumes the CURRENT state,
+        // not the last persisted snapshot. Deregistered in `finally` below.
+        liveHistories.set(conversationId, history)
 
         // Scope the whole turn to the panel's own window, resolved once up
         // front: selection reading, /run workflows and every agent tool call
@@ -1279,6 +1484,15 @@ chrome.runtime.onConnect.addListener((port) => {
           ...(failure ? { error: failure } : {}),
         }).catch(() => {})
         activeTurns.delete(conversationId)
+        liveHistories.delete(conversationId)
+        // The turn's stream went to the port that existed when it started; a
+        // panel reopened mid-turn is watching a different (or no) port and
+        // would otherwise sit on a stale snapshot with a busy spinner forever.
+        // Broadcast the end so any panel showing this conversation re-pulls
+        // the final transcript (including the answer produced after reopen).
+        void chrome.runtime
+          .sendMessage({ type: 'conversation.ended', conversationId })
+          .catch(() => {})
         finishRun(trackedRun.runId, {
           outcome: turnController.signal.aborted
             ? 'cancelled'

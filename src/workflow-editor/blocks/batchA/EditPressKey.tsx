@@ -155,8 +155,9 @@ export default function EditPressKey({ data, onChange }: EditFormProps) {
       <Field label="Press time (milliseconds)">
         <TextInput
           type="number"
-          value={str(data, 'pressTime') || '0'}
+          value={str(data, 'pressTime')}
           placeholder="millisecond"
+          fallback="0"
           onChange={(v) => onChange({ pressTime: v })}
         />
       </Field>

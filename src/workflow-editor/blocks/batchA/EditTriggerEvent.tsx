@@ -14,7 +14,7 @@
  * @module workflow-editor/blocks/batchA/EditTriggerEvent
  */
 import { type ReactNode } from 'react'
-import { Checkbox, Expand, Field, Select, TextInput } from '../shared/Field'
+import { Checkbox, Expand, Field, NumberInput, Select, TextInput } from '../shared/Field'
 import type { EditFormProps } from '../EditForms'
 import InteractionBase, { str } from '../shared/InteractionBase'
 
@@ -158,11 +158,7 @@ function MouseEventParams({ params, update }: { params: Params; update: (p: Para
                   onChange={(v) => update({ [xKey]: Number(v) || v })}
                 />
               ) : (
-                <TextInput
-                  type="number"
-                  value={paramNum(params, xKey)}
-                  onChange={(v) => update({ [xKey]: Number(v) || 0 })}
-                />
+                <NumberInput value={paramNum(params, xKey)} onChange={(n) => update({ [xKey]: n })} />
               )}
             </Field>
             <Field label={yKey}>
@@ -172,11 +168,7 @@ function MouseEventParams({ params, update }: { params: Params; update: (p: Para
                   onChange={(v) => update({ [yKey]: Number(v) || v })}
                 />
               ) : (
-                <TextInput
-                  type="number"
-                  value={paramNum(params, yKey)}
-                  onChange={(v) => update({ [yKey]: Number(v) || 0 })}
-                />
+                <NumberInput value={paramNum(params, yKey)} onChange={(n) => update({ [yKey]: n })} />
               )}
             </Field>
           </div>
@@ -194,25 +186,13 @@ function WheelEventParams({ params, update }: { params: Params; update: (p: Para
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
       <Field label="deltaX">
-        <TextInput
-          type="number"
-          value={paramNum(params, 'deltaX')}
-          onChange={(v) => update({ deltaX: Number(v) || 0 })}
-        />
+        <NumberInput value={paramNum(params, 'deltaX')} onChange={(n) => update({ deltaX: n })} />
       </Field>
       <Field label="deltaY">
-        <TextInput
-          type="number"
-          value={paramNum(params, 'deltaY')}
-          onChange={(v) => update({ deltaY: Number(v) || 0 })}
-        />
+        <NumberInput value={paramNum(params, 'deltaY')} onChange={(n) => update({ deltaY: n })} />
       </Field>
       <Field label="deltaZ">
-        <TextInput
-          type="number"
-          value={paramNum(params, 'deltaZ')}
-          onChange={(v) => update({ deltaZ: Number(v) || 0 })}
-        />
+        <NumberInput value={paramNum(params, 'deltaZ')} onChange={(n) => update({ deltaZ: n })} />
       </Field>
     </div>
   )
@@ -263,11 +243,7 @@ function KeyboardEventParams({ params, update }: { params: Params; update: (p: P
           />
         </Field>
         <Field label="keyCode">
-          <TextInput
-            type="number"
-            value={paramNum(params, 'keyCode')}
-            onChange={(v) => update({ keyCode: Number(v) || 0 })}
-          />
+          <NumberInput value={paramNum(params, 'keyCode')} onChange={(n) => update({ keyCode: n })} />
         </Field>
       </div>
       <Checkbox

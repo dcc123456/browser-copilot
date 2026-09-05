@@ -11,7 +11,7 @@ import {
   validateProfile,
   type ProviderProfile,
 } from '../lib/providers'
-import type { AgentStatus, Settings } from '../lib/types'
+import type { AgentStatus, Settings, UnattendedWindowPolicy } from '../lib/types'
 import { TOOL_META } from '../lib/tool-catalog'
 import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
 import {
@@ -23,6 +23,7 @@ import {
   type StorageMode,
 } from '../lib/fs-store'
 import { clearDownloadDir, getDownloadDir, setDownloadDir } from '../lib/download-dir'
+import NumberInput from '../ui/NumberInput'
 import { useT } from './i18n'
 
 /** Editable form state; numbers stay strings so partial input is allowed. */
@@ -234,6 +235,32 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   const [imgModels, setImgModels] = useState<string[] | null>(null)
   const [imgBusy, setImgBusy] = useState<null | 'models' | 'save'>(null)
   const [imgBanner, setImgBanner] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
+
+  // --- Unattended window policy -----------------------------------------------
+  // Ordinary windows for the "fixed" selector; refreshed on mount (and cheap
+  // enough to re-fetch whenever the user switches policy to fixed).
+  const [normalWindows, setNormalWindows] = useState<{ windowId: number; title: string }[]>([])
+
+  const refreshNormalWindows = useCallback((): void => {
+    if (!chrome.windows?.getAll) return
+    void chrome.windows
+      .getAll({ windowTypes: ['normal'], populate: true })
+      .then((windows) =>
+        setNormalWindows(
+          windows
+            .filter((win) => typeof win.id === 'number')
+            .map((win) => {
+              const active = win.tabs?.find((tab) => tab.active) ?? win.tabs?.[0]
+              return { windowId: win.id as number, title: active?.title ?? `#${win.id}` }
+            }),
+        ),
+      )
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    refreshNormalWindows()
+  }, [refreshNormalWindows])
 
   // --- Storage location ------------------------------------------------------
   const [storageMode, setStorageMode] = useState<StorageMode>('browser')
@@ -957,6 +984,53 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         </div>
       </div>
 
+      {/* --- Unattended window policy --- */}
+      <div className="card">
+        <div className="card-title">{t.settingsWindowPolicyLabel}</div>
+        <p className="hint">{t.settingsWindowPolicyHelp}</p>
+
+        <div className="field">
+          <label htmlFor="unattended-policy">{t.settingsWindowPolicyLabel}</label>
+          <select
+            id="unattended-policy"
+            value={settings?.unattendedWindowPolicy ?? 'latest'}
+            onChange={(event) => {
+              const policy = event.target.value as UnattendedWindowPolicy
+              refreshNormalWindows()
+              void mutate({ type: 'settings.set', patch: { unattendedWindowPolicy: policy } })
+            }}
+          >
+            <option value="latest">{t.settingsWindowPolicyLatest}</option>
+            <option value="ask">{t.settingsWindowPolicyAsk}</option>
+            <option value="fixed">{t.settingsWindowPolicyFixed}</option>
+          </select>
+        </div>
+
+        {settings?.unattendedWindowPolicy === 'fixed' && (
+          <div className="field">
+            <label htmlFor="unattended-window">{t.settingsWindowPolicyFixedWindow}</label>
+            <select
+              id="unattended-window"
+              value={settings.unattendedWindowId ?? ''}
+              onChange={(event) => {
+                const raw = event.target.value
+                void mutate({
+                  type: 'settings.set',
+                  patch: { unattendedWindowId: raw === '' ? undefined : Number(raw) },
+                })
+              }}
+            >
+              <option value="">—</option>
+              {normalWindows.map((win) => (
+                <option key={win.windowId} value={win.windowId}>
+                  {win.title}（#{win.windowId}）
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+
       {/* --- Agent behaviour --- */}
       <div className="card">
         <div className="card-title">{t.settingsContextTitle}</div>
@@ -1100,18 +1174,13 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         <div className="card-title">{t.settingsMaxToolRounds}</div>
         <p className="hint">{t.settingsMaxToolRoundsHint}</p>
         <div className="field">
-          <input
-            inputMode="numeric"
+          <NumberInput
             max={100}
             min={1}
-            onChange={(event) => {
-              const value = Number(event.target.value)
-              if (!Number.isFinite(value)) return
-              const clamped = Math.min(100, Math.max(1, Math.round(value)))
-              void mutate({ type: 'settings.set', patch: { maxToolRounds: clamped } })
+            onChange={(value) => {
+              void mutate({ type: 'settings.set', patch: { maxToolRounds: value } })
             }}
             style={{ maxWidth: 96 }}
-            type="number"
             value={settings.maxToolRounds}
           />
         </div>

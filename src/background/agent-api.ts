@@ -41,7 +41,7 @@ import { newId } from '../lib/storage'
 import type { Settings } from '../lib/types'
 import { TOOLS, runToolStandalone } from './agent'
 import { runUnattendedPrompt } from './agent-unattended'
-import { currentPanelScope } from './automation-scope'
+import { resolveUnattendedScope } from './window-policy'
 import { execOnActiveTab, resolveAutomationTab } from './driver'
 import { ensureTabMonitor } from './cdp-monitor'
 
@@ -55,7 +55,7 @@ import { ensureTabMonitor } from './cdp-monitor'
  */
 async function warmupAutomation(): Promise<void> {
   try {
-    const scope = await currentPanelScope()
+    const scope = await resolveUnattendedScope()
     const tab = await resolveAutomationTab(undefined, scope)
     if (!tab || typeof tab.id !== 'number') return
     await ensureTabMonitor(tab.id)

@@ -66,6 +66,7 @@ import { getFeishuConfig, listTasks } from '../lib/task-store'
 import { listWorkflows } from '../lib/workflow/storage'
 import type { Workflow } from '../lib/workflow/types'
 import { triggerNow } from './scheduler'
+import { resolveUnattendedScope } from './window-policy'
 import { executeWorkflow } from './workflow-engine/run-workflow'
 import { runUnattendedPrompt } from './agent-unattended'
 import {
@@ -650,9 +651,14 @@ export class FeishuBot {
     const streamer = new StepStreamer(token, chatId)
     streamer.start()
     try {
+      // Unattended run: scoped to the plugin window (panel connected or
+      // minimized) while one exists, global when the plugin is closed
+      // everywhere — same policy as scheduled tasks.
+      const scope = await resolveUnattendedScope()
       const result = await executeWorkflow(wf, {
         source: 'feishu',
         feishuChatId: chatId,
+        ...(scope ? { scopeWindowId: scope.windowId } : {}),
         onStep: (_kind, nodeId, text) => {
           streamer.push(text)
           streamer.push('→ ' + nodeId)

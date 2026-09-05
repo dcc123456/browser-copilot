@@ -11,7 +11,7 @@
 
 import { useState } from 'react'
 import type { EditFormProps } from '../EditForms'
-import { Checkbox, Field, Select, TextArea, TextInput } from '../shared/Field'
+import { Checkbox, Field, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD']
@@ -87,11 +87,7 @@ export default function EditWebhook({ data, onChange }: EditFormProps) {
       </Field>
 
       <Field label="Timeout (ms) (0 to disable)">
-        <TextInput
-          type="number"
-          value={num(data, 'timeout', 10000)}
-          onChange={(v) => onChange({ timeout: Number(v) || 0 })}
-        />
+        <NumberInput value={num(data, 'timeout', 10000)} fallback={0} onChange={(n) => onChange({ timeout: n })} />
       </Field>
 
       <div className="wf-tabs">

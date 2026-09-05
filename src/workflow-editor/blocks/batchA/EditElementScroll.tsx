@@ -11,7 +11,7 @@
  *
  * @module workflow-editor/blocks/batchA/EditElementScroll
  */
-import { Checkbox, Field, TextInput } from '../shared/Field'
+import { Checkbox, Field, NumberInput } from '../shared/Field'
 import type { EditFormProps } from '../EditForms'
 import InteractionBase, { bool, num } from '../shared/InteractionBase'
 
@@ -23,18 +23,10 @@ export default function EditElementScroll({ data, onChange }: EditFormProps) {
       {!scrollIntoView && (
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
           <Field label="Scroll horizontal">
-            <TextInput
-              type="number"
-              value={num(data, 'scrollX', 0)}
-              onChange={(v) => onChange({ scrollX: Number(v) || 0 })}
-            />
+            <NumberInput value={num(data, 'scrollX', 0)} fallback={0} onChange={(n) => onChange({ scrollX: n })} />
           </Field>
           <Field label="Scroll vertical">
-            <TextInput
-              type="number"
-              value={num(data, 'scrollY', 0)}
-              onChange={(v) => onChange({ scrollY: Number(v) || 0 })}
-            />
+            <NumberInput value={num(data, 'scrollY', 0)} fallback={0} onChange={(n) => onChange({ scrollY: n })} />
           </Field>
         </div>
       )}

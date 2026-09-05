@@ -46,7 +46,8 @@ export default function EditSaveLocal({ data, onChange }: EditFormProps) {
 
       <Field label="Variable name (output path)">
         <TextInput
-          value={str(data, 'variableName') || 'lastSavedPath'}
+          value={str(data, 'variableName')}
+          fallback="lastSavedPath"
           onChange={(v) => onChange({ variableName: v })}
         />
       </Field>

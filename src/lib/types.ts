@@ -113,7 +113,22 @@ export interface Settings {
    * 其余连接会被拒绝，从而实现“在插件里选择使用哪个连接”。
    */
   localAgentActiveAgent: string
+  /**
+   * 无人值守运行（agent 接入 / 定时任务 / 飞书任务）在多个插件窗口同时
+   * 打开时如何选择目标窗口：
+   * - `'latest'`（默认）：自动选最近使用的插件窗口；
+   * - `'ask'`：在所有在线面板弹出窗口选择框（30 秒未选回退 latest）；
+   * - `'fixed'`：固定 {@link unattendedWindowId}（失效自动回退 latest）。
+   * 候选永远是“插件开着”（面板展开或最小化）的窗口；所有窗口都关闭插件时
+   * 回退到无作用域的全局解析。
+   */
+  unattendedWindowPolicy: UnattendedWindowPolicy
+  /** `unattendedWindowPolicy = 'fixed'` 时锁定的窗口 id；其余策略忽略。 */
+  unattendedWindowId?: number
 }
+
+/** 无人值守运行的窗口选择策略（见 {@link Settings.unattendedWindowPolicy}）。 */
+export type UnattendedWindowPolicy = 'latest' | 'ask' | 'fixed'
 
 /** 本地 Agent 接入默认连接地址。 */
 export const DEFAULT_LOCAL_AGENT_URL = 'ws://127.0.0.1:8765'

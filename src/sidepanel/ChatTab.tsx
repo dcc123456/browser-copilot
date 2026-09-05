@@ -20,6 +20,8 @@ import {
   type AgentClientMessage,
   type AgentServerMessage,
   type TurnTokenUsage,
+  emitReviewLog,
+  onReviewLog,
   sendCommand,
 } from '../lib/messages'
 import {
@@ -36,7 +38,7 @@ import {
   type ReviewStep,
   type WorkflowReview,
 } from '../lib/workflow/review-patch'
-import { WorkflowReviewList } from './WorkflowReviewList'
+import { WorkflowReviewDialog } from './WorkflowReviewList'
 import type { Workflow } from '../lib/workflow/types'
 import type { AgentMode, ConversationMeta } from '../lib/types'
 import { confirmDialog } from '../ui/confirm'
@@ -75,6 +77,20 @@ import { detectSkillCandidatesFromMarkdown, type DetectedSkill } from '../lib/sk
  */
 const STORED_CONV_KEY = 'browser-copilot:active-conversation'
 
+/**
+ * The "current conversation" pointer is PER WINDOW.
+ *
+ * `localStorage` is shared by every panel instance (one extension origin), so
+ * a single key made two windows' panels open onto the same thread — and the
+ * worker serializes turns within a conversation (`activeTurns`), so two
+ * windows could not work in parallel by default. Keying by windowId gives
+ * each window its own pointer; before the window id resolves (and in tests)
+ * the legacy global key applies.
+ */
+export function storedConvKey(windowId?: number): string {
+  return typeof windowId === 'number' ? `${STORED_CONV_KEY}:${windowId}` : STORED_CONV_KEY
+}
+
 /** Empty token tally, used when (re)starting a conversation's counters. */
 const ZERO_USAGE: TurnTokenUsage = {
   inputTokens: 0,
@@ -84,9 +100,9 @@ const ZERO_USAGE: TurnTokenUsage = {
   totalTokens: 0,
 }
 
-function loadStoredConversationId(): string {
+function loadStoredConversationId(windowId?: number): string {
   try {
-    return localStorage.getItem(STORED_CONV_KEY) || DEFAULT_CONVERSATION_ID
+    return localStorage.getItem(storedConvKey(windowId)) || DEFAULT_CONVERSATION_ID
   } catch {
     return DEFAULT_CONVERSATION_ID
   }
@@ -108,6 +124,42 @@ interface PendingConfirm {
   requestId: string
   name: string
   argsPreview: string
+}
+
+/**
+ * State of the "save this session as a workflow?" card plus its save-time AI
+ * node review. `reviewing` while the background verdict is in flight;
+ * `review: null` after it settled means unavailable — every step stays.
+ * `keep` (stepId → keep) is `null` until the review lands; the absent case
+ * keeps everything. `reviewOpen` is true only while the review dialog the
+ * "Save as workflow" click opened is showing. `reviewLog` accumulates the
+ * dialog's progress lines (sent → verdict / failure) across retries.
+ */
+interface WorkflowPromptState {
+  conversationId: string
+  /** Unmodified workflow the prompt was built from, for re-deriving on toggle. */
+  base: Workflow
+  /** Form fields the generator flagged as AI-composable, with their capture text. */
+  aiSteps: AiPrefillStep[]
+  /** Per-node checkbox state; absent = enabled (the default). */
+  aiSelections: Record<string, boolean>
+  workflow: Workflow
+  steps: number
+  reviewing: boolean
+  review: WorkflowReview | null
+  /** Failure reason of the last review attempt (timeout / endpoint / parse). */
+  reviewError: string | null
+  /** True while the save-time review dialog is open. */
+  reviewOpen: boolean
+  /** Ordered review progress lines shown in the dialog. */
+  reviewLog: string[]
+  /** True while the persist command is in flight (blocks double clicks). */
+  saving: boolean
+  /** Failure reason of the last save attempt; the dialog stays open for a retry. */
+  saveError: string | null
+  keep: Record<string, boolean> | null
+  /** Reviewable steps of the base workflow, in chain order (stable). */
+  stepList: ReviewStep[]
 }
 
 let counter = 0
@@ -550,6 +602,41 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const [busy, setBusy] = useState(false)
   const [confirms, setConfirms] = useState<PendingConfirm[]>([])
   const [conversationId, setConversationId] = useState<string>(() => loadStoredConversationId())
+  /**
+   * This panel's browser window, resolved once after mount. Gates the
+   * per-window "current conversation" pointer below (see storedConvKey).
+   */
+  const [panelWindowId, setPanelWindowId] = useState<number | undefined>(undefined)
+  /**
+   * Whether the per-window conversation pointer has been adopted.
+   *
+   * Mount-time `conversationId` comes from the legacy global key, which can
+   * be arbitrarily stale after the per-window split. Until the window id
+   * resolves and the pointer is adopted we must neither persist (writing the
+   * stale legacy id into the per-window key would clobber the conversation
+   * this window was last using) nor resume (it would briefly restore a
+   * foreign transcript and race the adoption switch).
+   */
+  const [conversationAdopted, setConversationAdopted] = useState(false)
+  const adoptedRef = useRef(false)
+  /** Bumped when adoption completes so the port effect re-runs and resumes. */
+  const [resumeTick, setResumeTick] = useState(0)
+  /** Latest conversationId for listeners outside the React render cycle. */
+  const conversationIdRef = useRef(conversationId)
+  useEffect(() => {
+    conversationIdRef.current = conversationId
+  }, [conversationId])
+  /**
+   * Adoption fallback for panels without a resolvable window id (or a failed
+   * `windows.getCurrent`): unblock resume/persistence on the legacy global
+   * pointer instead of waiting forever.
+   */
+  const adoptFallback = useCallback(() => {
+    if (adoptedRef.current) return
+    adoptedRef.current = true
+    setConversationAdopted(true)
+    setResumeTick((tick) => tick + 1)
+  }, [])
   const [conversations, setConversations] = useState<ConversationMeta[]>([])
   const [showHistory, setShowHistory] = useState(false)
   /** Conversation whose messages are being previewed in the history drawer. */
@@ -722,33 +809,27 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
    * "Save this session as a workflow?" call-to-action, shown right after a turn
    * that actually performed page operations in semi/full-auto. `conversationId`
    * guards against saving another conversation's flow by mistake.
+   *
+   * The AI node review does NOT run while the card is open — it starts only
+   * when the user clicks "Save as workflow", which opens the review dialog
+   * (`reviewOpen`). A failed attempt (`reviewError`) can be retried by
+   * clicking save again; a landed verdict is reused.
    */
-  const [workflowPrompt, setWorkflowPrompt] = useState<{
-    conversationId: string
-    /** Unmodified workflow the prompt was built from, for re-deriving on toggle. */
-    base: Workflow
-    /** Form fields the generator flagged as AI-composable, with their capture text. */
-    aiSteps: AiPrefillStep[]
-    /** Per-node checkbox state; absent = enabled (the default). */
-    aiSelections: Record<string, boolean>
-    workflow: Workflow
-    steps: number
-    /**
-     * AI node review state. `reviewing` while the background verdict is in
-     * flight; `review: null` after it settled means unavailable — every step
-     * stays. `keep` (stepId → keep) is `null` until the review lands; the
-     * absent case keeps everything.
-     */
-    reviewing: boolean
-    review: WorkflowReview | null
-    keep: Record<string, boolean> | null
-    /** Reviewable steps of the base workflow, in chain order (stable). */
-    stepList: ReviewStep[]
-  } | null>(null)
+  const [workflowPrompt, setWorkflowPrompt] = useState<WorkflowPromptState | null>(null)
   /** Last reuseable-step count we already asked about per conversation. */
   const promptedRef = useRef<Record<string, number>>({})
   const conversationsRef = useRef<ConversationMeta[]>(conversations)
   conversationsRef.current = conversations
+
+  // Live AI review log: the port forwards pushed lines via emitReviewLog;
+  // this subscription renders them in the open review dialog as they arrive.
+  useEffect(() => {
+    return onReviewLog((text) => {
+      setWorkflowPrompt((prev) =>
+        prev && prev.reviewOpen ? { ...prev, reviewLog: [...prev.reviewLog, text] } : prev,
+      )
+    })
+  }, [])
 
   /**
    * After a turn that performed page operations, offer to persist them as a
@@ -756,9 +837,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
    * conversation count; if none map to a block we stay quiet. A per-conversation
    * counter means we only ask again once new steps have accumulated.
    *
-   * The card opens immediately; the AI node review runs in the background and
-   * lands on the card when it arrives (a late reply after the card was closed
-   * or switched is dropped by the conversationId guard).
+   * The card opens WITHOUT the AI node review — that starts only when the user
+   * clicks "Save as workflow" (see {@link savePromptWorkflow}).
    */
   const maybePromptSaveWorkflow = useCallback(async (convId: string) => {
     let result: Awaited<ReturnType<typeof sendCommand>>
@@ -781,7 +861,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     if (steps === 0) return
     if ((promptedRef.current[convId] ?? 0) >= steps) return
     promptedRef.current[convId] = steps
-    const stepList = reviewStepsOf(workflow)
     setWorkflowPrompt({
       conversationId: convId,
       base: workflow,
@@ -789,37 +868,16 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       aiSteps,
       aiSelections,
       steps,
-      reviewing: stepList.length > 0,
+      reviewing: false,
       review: null,
+      reviewError: null,
+      reviewOpen: false,
+      reviewLog: [],
+      saving: false,
+      saveError: null,
       keep: null,
-      stepList,
+      stepList: reviewStepsOf(workflow),
     })
-    sendCommand({ type: 'workflows.review', workflow })
-      .then((review) => {
-        if (review.type !== 'workflows.review') return
-        setWorkflowPrompt((prev) => {
-          if (!prev || prev.conversationId !== convId) return prev
-          // Materialize the verdicts into the keep set so the checkboxes AND
-          // the preview both reflect the AI judgment; steps the model never
-          // mentioned stay keep=true.
-          const keep: Record<string, boolean> = { ...prev.keep }
-          if (review.review) {
-            for (const verdict of review.review.steps) keep[verdict.id] = verdict.keep
-          }
-          return {
-            ...prev,
-            reviewing: false,
-            review: review.review,
-            keep,
-            workflow: derivePreview(prev.base, keep, prev.aiSelections),
-          }
-        })
-      })
-      .catch(() => {
-        setWorkflowPrompt((prev) =>
-          prev && prev.conversationId === convId ? { ...prev, reviewing: false } : prev,
-        )
-      })
   }, [])
 
   const append = useCallback((entry: Omit<Entry, 'id'>) => {
@@ -885,13 +943,18 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       // worker restart re-registers too).
       void chrome.windows.getCurrent().then((win) => {
         if (typeof win.id === 'number') {
+          setPanelWindowId(win.id)
           try {
             port.postMessage({ type: 'panel.hello', windowId: win.id } satisfies AgentClientMessage)
           } catch {
             /* port closed between connect and hello — the next reconnect resends */
           }
+        } else {
+          // No usable window id: adopt immediately so the legacy global
+          // pointer keeps working and the resume below is not blocked.
+          adoptFallback()
         }
-      })
+      }, adoptFallback)
       port.onMessage.addListener((raw) => {
         const message = raw as AgentServerMessage
         switch (message.type) {
@@ -963,6 +1026,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             // transient phase line too, so they don't pile up.
             clearPhase()
             append({ role: 'status', text: message.text })
+            break
+          case 'workflows.reviewLog':
+            // Live AI review progress: forward into the shared fan-out so the
+            // open review dialog (here or in the history tab) renders it.
+            emitReviewLog(message.text)
             break
           case 'phase': {
             const labels: Record<typeof message.phase, string> = {
@@ -1055,13 +1123,18 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
 
       // Ask for the stored transcript. On a first open this is empty; after a
       // collapse it restores the conversation and any run still in progress.
-      try {
-        port.postMessage({
-          type: 'resume',
-          conversationId,
-        } satisfies AgentClientMessage)
-      } catch {
-        // The disconnect listener handles recovery.
+      // Skipped until this window's conversation pointer is adopted: before
+      // that the id is the possibly-stale legacy one, and resuming it would
+      // flash a foreign transcript and race the adoption switch.
+      if (adoptedRef.current) {
+        try {
+          port.postMessage({
+            type: 'resume',
+            conversationId,
+          } satisfies AgentClientMessage)
+        } catch {
+          // The disconnect listener handles recovery.
+        }
       }
     }
 
@@ -1083,8 +1156,42 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     clearPhase,
     conversationId,
     maybePromptSaveWorkflow,
+    resumeTick,
     showPhase,
   ])
+
+  // A turn that was still running when this panel (re)connected streams into
+  // the port it was born with — which is gone. It broadcasts
+  // `conversation.ended` when it finishes; re-pull the final transcript then,
+  // otherwise the panel would keep showing the mid-turn snapshot with a busy
+  // spinner until manual reload.
+  useEffect(() => {
+    // Guarded: some test stubs provide a partial `chrome.runtime` without
+    // `onMessage`; the broadcast is an optimization, not a hard dependency.
+    const onMessage = chrome.runtime?.onMessage
+    if (!onMessage) return
+    const listener: Parameters<typeof onMessage.addListener>[0] = (
+      raw,
+      _sender,
+      sendResponse,
+    ): void => {
+      const message = raw as { type?: string; conversationId?: string }
+      if (message?.type !== 'conversation.ended') return
+      if (message.conversationId === conversationIdRef.current) {
+        try {
+          portRef.current?.postMessage({
+            type: 'resume',
+            conversationId: conversationIdRef.current,
+          } satisfies AgentClientMessage)
+        } catch {
+          /* the reconnect loop resumes on its own */
+        }
+      }
+      sendResponse({ ok: true })
+    }
+    onMessage.addListener(listener)
+    return () => onMessage.removeListener(listener)
+  }, [])
 
   // Refresh the conversation list when it changes and on mount.
   const refreshConversations = useCallback(async () => {
@@ -1149,12 +1256,53 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   }, [refreshConversations, entries.length])
 
   useEffect(() => {
+    // Persist only the adopted pointer. Running this before adoption is the
+    // bug: the mount render still holds the stale legacy id, and writing it
+    // into the per-window key overwrote the conversation this window was
+    // actually using — so a reopened panel landed on the wrong thread.
+    if (!conversationAdopted) return
     try {
-      localStorage.setItem(STORED_CONV_KEY, conversationId)
+      localStorage.setItem(storedConvKey(panelWindowId), conversationId)
     } catch {
       /* ignore */
     }
-  }, [conversationId])
+  }, [conversationAdopted, conversationId, panelWindowId])
+
+  // Adopt this window's own conversation pointer once the window id resolves.
+  // First open after the split seeds the per-window key from the legacy global
+  // pointer (pre-split behaviour), then the two windows diverge freely. The
+  // port's resume effect fires on the resulting conversationId change and
+  // restores the right transcript.
+  useEffect(() => {
+    if (panelWindowId === undefined) return
+    const key = storedConvKey(panelWindowId)
+    let stored: string | null = null
+    try {
+      stored = localStorage.getItem(key)
+    } catch {
+      /* ignore */
+    }
+    if (stored === null) {
+      const legacy = loadStoredConversationId()
+      try {
+        localStorage.setItem(key, legacy)
+      } catch {
+        /* ignore */
+      }
+      setConversationId(legacy)
+    } else if (stored !== conversationId) {
+      setConversationId(stored)
+    }
+    // Unblock the port's transcript resume and per-window persistence even
+    // when the id did not change (stored === conversationId): the resume was
+    // skipped pre-adoption, so it must be requested now.
+    adoptedRef.current = true
+    setConversationAdopted(true)
+    setResumeTick((tick) => tick + 1)
+    // Owns the initial window-scoped selection; reruns on conversationId are
+    // no-ops (the pointer is already in sync).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelWindowId])
 
   const openConversation = (id: string): void => {
     if (busy) return
@@ -1374,21 +1522,128 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     setConfirms((prev) => prev.filter((item) => item.requestId !== requestId))
   }
 
-  const savePromptWorkflow = async (): Promise<void> => {
+  /**
+   * Fires the AI node review for the card's base workflow (once — an
+   * in-flight or landed verdict is reused). Used by BOTH the save click and
+   * the dialog's retry button: a failed attempt may be re-run arbitrarily.
+   */
+  const runSaveReview = (prompt: WorkflowPromptState): void => {
+    if (prompt.reviewing || prompt.review) return
+    setWorkflowPrompt((prev) =>
+      prev
+        ? {
+            ...prev,
+            reviewing: true,
+            reviewError: null,
+            reviewLog: [
+              ...prev.reviewLog,
+              tRef.current.workflowReviewLogStart({ steps: prev.stepList.length }),
+            ],
+          }
+        : prev,
+    )
+    sendCommand({ type: 'workflows.review', workflow: prompt.base })
+      .then((result) => {
+        if (result.type !== 'workflows.review') return
+        setWorkflowPrompt((prev) => {
+          if (!prev || prev.conversationId !== prompt.conversationId) return prev
+          // Materialize the verdicts into the keep set so the checkboxes AND
+          // the saved result both reflect the AI judgment; steps the model
+          // never mentioned stay keep=true.
+          const keep: Record<string, boolean> = { ...prev.keep }
+          if (result.review) {
+            for (const verdict of result.review.steps) keep[verdict.id] = verdict.keep
+          }
+          const dropped = result.review?.steps.filter((verdict) => !verdict.keep).length ?? 0
+          const logLine = result.review
+            ? dropped > 0
+              ? tRef.current.chatWorkflowReviewDropped({ count: dropped })
+              : tRef.current.chatWorkflowReviewAllKept
+            : tRef.current.workflowReviewLogFailed
+          return {
+            ...prev,
+            reviewing: false,
+            review: result.review,
+            reviewError: result.error ?? null,
+            reviewLog: [...prev.reviewLog, logLine],
+            keep,
+          }
+        })
+      })
+      .catch((error) => {
+        setWorkflowPrompt((prev) =>
+          prev && prev.conversationId === prompt.conversationId
+            ? {
+                ...prev,
+                reviewing: false,
+                reviewError: (error as Error).message,
+                reviewLog: [...prev.reviewLog, tRef.current.workflowReviewLogFailed],
+              }
+            : prev,
+        )
+      })
+  }
+
+  /**
+   * "保存为工作流" click. With nothing to review, saves straight away;
+   * otherwise OPENS the AI review dialog and runs the node review.
+   */
+  const savePromptWorkflow = (): void => {
     const prompt = workflowPrompt
-    if (!prompt) return
-    setWorkflowPrompt(null)
+    if (!prompt || prompt.saving) return
+    if (prompt.stepList.length === 0) {
+      void persistPromptWorkflow(prompt)
+      return
+    }
+    setWorkflowPrompt((prev) => (prev ? { ...prev, reviewOpen: true } : prev))
+    runSaveReview(prompt)
+  }
+
+  /** Review dialog retry: re-runs a failed/unavailable review on the spot. */
+  const retrySaveReview = (): void => {
+    const prompt = workflowPrompt
+    if (!prompt || prompt.saving || prompt.reviewing) return
+    runSaveReview(prompt)
+  }
+
+  /**
+   * Applies the keep selection + AI prefill toggles and persists the workflow.
+   * The card/dialog closes ONLY on success — a failed save keeps it open with
+   * the reason shown, so "nothing seemed to happen" can never hide a failure.
+   */
+  const persistPromptWorkflow = async (prompt: WorkflowPromptState): Promise<void> => {
+    setWorkflowPrompt((prev) =>
+      prev && prev.conversationId === prompt.conversationId ? { ...prev, saving: true } : prev,
+    )
     try {
-      await sendCommand({ type: 'workflows.save', workflow: prompt.workflow })
+      const workflow = derivePreview(prompt.base, prompt.keep, prompt.aiSelections)
+      await sendCommand({ type: 'workflows.save', workflow })
+      setWorkflowPrompt(null)
       append({
         role: 'status',
-        text: tRef.current.chatSaveWorkflowSaved({
-          name: prompt.workflow.name,
-        }),
+        text: tRef.current.chatSaveWorkflowSaved({ name: workflow.name }),
       })
     } catch (error) {
-      append({ role: 'error', text: (error as Error).message })
+      const message = (error as Error).message
+      setWorkflowPrompt((prev) =>
+        prev && prev.conversationId === prompt.conversationId
+          ? { ...prev, saving: false, saveError: message }
+          : prev,
+      )
+      append({ role: 'error', text: message })
     }
+  }
+
+  /** Review dialog confirm: save with the (possibly AI-adjusted) keep set. */
+  const confirmSaveReview = (): void => {
+    const prompt = workflowPrompt
+    if (!prompt) return
+    void persistPromptWorkflow(prompt)
+  }
+
+  /** Review dialog cancel: back to the card, the verdict stays cached. */
+  const cancelSaveReview = (): void => {
+    setWorkflowPrompt((prev) => (prev ? { ...prev, reviewOpen: false } : prev))
   }
 
   const dismissPromptWorkflow = (): void => {
@@ -1716,13 +1971,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             <p className="hint" style={{ margin: '6px 0' }}>
               {workflowPrompt.workflow.name}
             </p>
-            <WorkflowReviewList
-              keep={workflowPrompt.keep}
-              review={workflowPrompt.review}
-              reviewing={workflowPrompt.reviewing}
-              steps={workflowPrompt.stepList}
-              onToggle={toggleStepKeep}
-            />
+            {workflowPrompt.saveError && (
+              <p className="hint text-err" style={{ margin: '6px 0' }} role="alert">
+                {workflowPrompt.saveError}
+              </p>
+            )}
             {workflowPrompt.aiSteps.filter((step) =>
               workflowPrompt.workflow.drawflow.nodes.some((node) => node.id === step.nodeId),
             ).length > 0 && (
@@ -1745,14 +1998,37 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               </div>
             )}
             <div className="actions">
-              <button className="primary" onClick={() => void savePromptWorkflow()} type="button">
+              <button
+                className="primary"
+                disabled={workflowPrompt.saving}
+                onClick={savePromptWorkflow}
+                type="button"
+              >
                 {t.chatSaveWorkflowSave}
               </button>
-              <button onClick={dismissPromptWorkflow} type="button">
+              <button disabled={workflowPrompt.saving} onClick={dismissPromptWorkflow} type="button">
                 {t.chatSaveWorkflowSkip}
               </button>
             </div>
           </div>
+        )}
+
+        {workflowPrompt?.reviewOpen && (
+          <WorkflowReviewDialog
+            keep={workflowPrompt.keep}
+            log={workflowPrompt.reviewLog}
+            review={workflowPrompt.review}
+            reviewing={workflowPrompt.reviewing}
+            saveError={workflowPrompt.saveError ?? undefined}
+            steps={workflowPrompt.stepList}
+            subtitle={workflowPrompt.workflow.name}
+            title={t.workflowReviewDialogTitle}
+            unavailableReason={workflowPrompt.reviewError ?? undefined}
+            onCancel={cancelSaveReview}
+            onConfirm={confirmSaveReview}
+            onRetry={retrySaveReview}
+            onToggle={toggleStepKeep}
+          />
         )}
       </div>
 

@@ -16,7 +16,7 @@
  */
 
 import type { EditFormProps } from '../EditForms'
-import { Select, Switch, TextInput } from './Field'
+import { NumberInput, Select, Switch, TextInput } from './Field'
 import { bool, num, str } from './InteractionBase'
 import { useEditorLocale } from '../../locale-context'
 
@@ -96,10 +96,11 @@ export function OnErrorFields({ data, onChange }: EditFormProps) {
                 <span>{t('times')}</span>
                 <i className="ri-information-line" />
                 <div className="wf-inline-input">
-                  <TextInput
-                    type="number"
+                  <NumberInput
                     value={num(onError as unknown as Record<string, unknown>, 'retryTimes', 1)}
-                    onChange={(v) => setOnError({ retryTimes: Math.max(0, Number(v) || 0) })}
+                    min={0}
+                    fallback={1}
+                    onChange={(n) => setOnError({ retryTimes: n })}
                   />
                 </div>
               </div>
@@ -108,10 +109,11 @@ export function OnErrorFields({ data, onChange }: EditFormProps) {
                 <span>{t('interval')}</span>
                 <i className="ri-information-line" />
                 <div className="wf-inline-input">
-                  <TextInput
-                    type="number"
+                  <NumberInput
                     value={num(onError as unknown as Record<string, unknown>, 'retryInterval', 2)}
-                    onChange={(v) => setOnError({ retryInterval: Math.max(0, Number(v) || 0) })}
+                    min={0}
+                    fallback={2}
+                    onChange={(n) => setOnError({ retryInterval: n })}
                   />
                 </div>
                 <span className="wf-inline-unit">{t('seconds')}</span>

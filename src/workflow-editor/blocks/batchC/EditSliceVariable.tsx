@@ -8,7 +8,7 @@
  * @module workflow-editor/blocks/batchC/EditSliceVariable
  */
 
-import { Checkbox, Field, TextArea, TextInput } from '../shared/Field'
+import { Checkbox, Field, NumberInput, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
 import type { EditFormProps } from '../EditForms'
 
@@ -34,24 +34,14 @@ export default function EditSliceVariable({ data, onChange }: EditFormProps) {
       />
       {bool(data, 'startIdxEnabled') && (
         <Field label="Start index">
-          <TextInput
-            type="number"
-            value={num(data, 'startIndex', 0)}
-            placeholder="0"
-            onChange={(v) => onChange({ startIndex: Number(v) || 0 })}
-          />
+          <NumberInput value={num(data, 'startIndex', 0)} placeholder="0" fallback={0} onChange={(n) => onChange({ startIndex: n })} />
         </Field>
       )}
 
       <Checkbox checked={bool(data, 'endIdxEnabled')} onChange={(v) => onChange({ endIdxEnabled: v })} label="End index" />
       {bool(data, 'endIdxEnabled') && (
         <Field label="End index">
-          <TextInput
-            type="number"
-            value={num(data, 'endIndex', 0)}
-            placeholder="0"
-            onChange={(v) => onChange({ endIndex: Number(v) || 0 })}
-          />
+          <NumberInput value={num(data, 'endIndex', 0)} placeholder="0" fallback={0} onChange={(n) => onChange({ endIndex: n })} />
         </Field>
       )}
     </div>

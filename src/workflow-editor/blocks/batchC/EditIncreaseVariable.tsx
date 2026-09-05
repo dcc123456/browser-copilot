@@ -7,7 +7,7 @@
  * @module workflow-editor/blocks/batchC/EditIncreaseVariable
  */
 
-import { Field, TextArea, TextInput } from '../shared/Field'
+import { Field, NumberInput, TextArea, TextInput } from '../shared/Field'
 import { num, str } from '../shared/InteractionBase'
 import type { EditFormProps } from '../EditForms'
 
@@ -27,12 +27,7 @@ export default function EditIncreaseVariable({ data, onChange }: EditFormProps) 
       </Field>
 
       <Field label="Increase by">
-        <TextInput
-          type="number"
-          value={num(data, 'increaseBy', 1)}
-          placeholder="0"
-          onChange={(v) => onChange({ increaseBy: Number(v) || 0 })}
-        />
+        <NumberInput value={num(data, 'increaseBy', 1)} placeholder="0" fallback={1} onChange={(n) => onChange({ increaseBy: n })} />
       </Field>
     </div>
   )

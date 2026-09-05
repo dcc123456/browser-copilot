@@ -10,7 +10,7 @@
  */
 
 import type { EditFormProps } from '../EditForms'
-import { Checkbox, Field, TextArea, TextInput } from '../shared/Field'
+import { Checkbox, Field, NumberInput, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
 
 export default function EditWaitConnections({ data, onChange }: EditFormProps) {
@@ -27,12 +27,7 @@ export default function EditWaitConnections({ data, onChange }: EditFormProps) {
       </Field>
 
       <Field label="Timeout (milliseconds)">
-        <TextInput
-          type="number"
-          value={num(data, 'timeout', 10000)}
-          placeholder="10000"
-          onChange={(v) => onChange({ timeout: Number(v) || 0 })}
-        />
+        <NumberInput value={num(data, 'timeout', 10000)} placeholder="10000" min={0} fallback={10000} onChange={(n) => onChange({ timeout: n })} />
       </Field>
 
       <Checkbox

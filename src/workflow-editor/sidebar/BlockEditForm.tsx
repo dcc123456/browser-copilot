@@ -14,6 +14,7 @@
 import { isCloudBlock } from '../../lib/workflow/blocks/cloud-blocks'
 import { isCustomBlock } from '../../lib/workflow/blocks/custom'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
+import NumberInput from '../../ui/NumberInput'
 import { EditForms } from '../blocks/EditForms'
 import type { TranslateFn } from '../i18n'
 import { useEditorLocale } from '../locale-context'
@@ -58,11 +59,8 @@ function GenericForm({
               <label>
                 <code>{key}</code>
               </label>
-              <input
-                type="number"
-                value={value}
-                onChange={(e) => onChange({ [key]: Number(e.target.value) })}
-              />
+              {/* No known default here: clearing restores the previous number on blur. */}
+              <NumberInput value={value} onChange={(n) => onChange({ [key]: n })} />
             </div>
           )
         }

@@ -12,7 +12,7 @@
  */
 
 import { useState } from 'react'
-import { Checkbox, Field, IconButton, Select, TextArea, TextInput } from '../shared/Field'
+import { Checkbox, Field, IconButton, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
 import type { EditFormProps } from '../EditForms'
 import { arr, id } from './shared'
@@ -73,11 +73,7 @@ export default function EditJavascriptCode({ data, onChange }: EditFormProps) {
       {!everyNewTab && (
         <>
           <Field label="Timeout (milliseconds)" title="JavaScript code execution timeout">
-            <TextInput
-              type="number"
-              value={num(data, 'timeout', 20000)}
-              onChange={(v) => onChange({ timeout: Number(v) || 20000 })}
-            />
+            <NumberInput value={num(data, 'timeout', 20000)} min={0} fallback={20000} onChange={(n) => onChange({ timeout: n })} />
           </Field>
           {showContext && (
             <Field label="Execution context">

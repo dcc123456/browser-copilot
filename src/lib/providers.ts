@@ -16,7 +16,7 @@
 
 import { LOCALES, type LocaleSetting } from './i18n'
 import { normalizeLocalAgentUrl } from './types'
-import type { AgentMode } from './types'
+import type { AgentMode, UnattendedWindowPolicy } from './types'
 
 /** A configured endpoint the agent can talk to. */
 export interface ProviderProfile {
@@ -372,6 +372,8 @@ export function normalizeSettingsPayload(raw: unknown): {
   localAgentToken: string
   localAgentUrl: string
   localAgentActiveAgent: string
+  unattendedWindowPolicy: UnattendedWindowPolicy
+  unattendedWindowId?: number
   imageModel: { providerId: string; model: string }
   ocrLanguage: string
 } {
@@ -407,6 +409,12 @@ export function normalizeSettingsPayload(raw: unknown): {
   const localAgentUrl = normalizeLocalAgentUrl(value.localAgentUrl)
   const localAgentActiveAgent =
     typeof value.localAgentActiveAgent === 'string' ? value.localAgentActiveAgent : ''
+  const unattendedWindowPolicy =
+    value.unattendedWindowPolicy === 'ask' || value.unattendedWindowPolicy === 'fixed'
+      ? value.unattendedWindowPolicy
+      : 'latest'
+  const unattendedWindowId =
+    typeof value.unattendedWindowId === 'number' ? value.unattendedWindowId : undefined
   const rawImage = value.imageModel as { providerId?: unknown; model?: unknown }
   const imageModel = {
     providerId: typeof rawImage?.providerId === 'string' ? rawImage.providerId : '',
@@ -439,6 +447,8 @@ export function normalizeSettingsPayload(raw: unknown): {
     localAgentToken,
     localAgentUrl,
     localAgentActiveAgent,
+    unattendedWindowPolicy,
+    unattendedWindowId,
     imageModel,
     ocrLanguage,
   }

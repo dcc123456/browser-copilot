@@ -104,7 +104,7 @@ describe('automation scope', () => {
     })
   })
 
-  describe('latestPanelWindowId / currentPanelScope', () => {
+  describe('latestPanelWindowId / currentPluginScope', () => {
     it('is undefined with no connected panel', () => {
       expect(mod.latestPanelWindowId()).toBeUndefined()
     })
@@ -138,6 +138,34 @@ describe('automation scope', () => {
     it('restricts to panel windows once one exists', () => {
       expect(mod.shouldTriggerVisitWeb(true, true)).toBe(true)
       expect(mod.shouldTriggerVisitWeb(true, false)).toBe(false)
+    })
+  })
+
+  describe('plugin windows (connected panels ∪ minimized panels)', () => {
+    it('counts a minimized window as a plugin window', async () => {
+      const minimize: typeof import('../src/background/panel-minimize') = await import(
+        '../src/background/panel-minimize'
+      )
+      expect(mod.hasPluginWindows()).toBe(false)
+      expect(mod.isPluginWindow(1)).toBe(false)
+      expect(mod.latestPluginWindowId()).toBeUndefined()
+
+      minimize.minimizeWindow(1)
+      expect(mod.hasPluginWindows()).toBe(true)
+      expect(mod.isPluginWindow(1)).toBe(true)
+      expect(mod.isPluginWindow(2)).toBe(false)
+      expect(mod.latestPluginWindowId()).toBe(1)
+
+      // A connected panel outranks a minimized window…
+      const port = { name: 'x' } as unknown as chrome.runtime.Port
+      mod.registerPanelWindow(2, port)
+      expect(mod.latestPluginWindowId()).toBe(2)
+      // …and once the panel disconnects, the minimized window remains.
+      mod.unregisterPort(port)
+      expect(mod.latestPluginWindowId()).toBe(1)
+
+      minimize.expandWindow(1)
+      expect(mod.hasPluginWindows()).toBe(false)
     })
   })
 })

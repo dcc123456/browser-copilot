@@ -12,7 +12,7 @@
 
 import { useState } from 'react'
 import type { EditFormProps } from '../EditForms'
-import { Checkbox, Expand, Field, IconButton, TextArea, TextInput } from '../shared/Field'
+import { Checkbox, Expand, Field, IconButton, NumberInput, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
 import ConditionBuilder, { readGroups, type OrGroup } from './ConditionBuilder'
 import { id } from './shared'
@@ -111,18 +111,10 @@ export default function EditConditions({ data, onChange }: EditFormProps) {
         {bool(data, 'retryConditions') && (
           <>
             <Field label="Times">
-              <TextInput
-                type="number"
-                value={num(data, 'retryCount', 10)}
-                onChange={(v) => onChange({ retryCount: Number(v) || 10 })}
-              />
+              <NumberInput value={num(data, 'retryCount', 10)} min={0} fallback={10} onChange={(n) => onChange({ retryCount: n })} />
             </Field>
             <Field label="Timeout (ms)">
-              <TextInput
-                type="number"
-                value={num(data, 'retryTimeout', 1000)}
-                onChange={(v) => onChange({ retryTimeout: Number(v) || 1000 })}
-              />
+              <NumberInput value={num(data, 'retryTimeout', 1000)} min={0} fallback={1000} onChange={(n) => onChange({ retryTimeout: n })} />
             </Field>
           </>
         )}

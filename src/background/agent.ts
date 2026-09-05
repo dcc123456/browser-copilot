@@ -83,7 +83,8 @@ import {
   unpinTab,
   updateActiveTabUrl,
 } from './driver'
-import { normalScopeFromWindowId, currentPanelScope, type ScopeWindow } from './automation-scope'
+import { normalScopeFromWindowId, type ScopeWindow } from './automation-scope'
+import { resolveUnattendedScope } from './window-policy'
 import {
   drainConsoleEntries,
   ensureTabMonitor,
@@ -2791,7 +2792,7 @@ export async function runToolStandalone(
   // The bridge has no sender window of its own: while a panel window exists it
   // is the monitored/controlled one, so scope to it; with no panel open the
   // legacy global resolution applies.
-  const scope = await currentPanelScope()
+  const scope = await resolveUnattendedScope()
   const ctx: ToolContext = {
     conversationId: `external:${newId()}`,
     navigated: false,

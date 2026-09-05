@@ -11,11 +11,19 @@
  *
  * @module background/workflow-engine/auto-debug-ai
  */
-import { streamCompletion } from '../../lib/llm'
+import { streamCompletion, type StreamResult } from '../../lib/llm'
 import { getSettings } from '../../lib/storage'
 import type { DebugDecision, DebugFailureContext } from '../../lib/workflow/auto-debug-patch'
 import { NoProviderError } from '../../lib/workflow/auto-debug-patch'
 import type { WorkflowNode } from '../../lib/workflow/types'
+
+/**
+ * One-shot AI decision budget for a debug round: 5 minutes. Generous on
+ * purpose — a thinking model legitimately spends minutes on the failure
+ * context + guide — while a hung request still cannot stall the debug loop
+ * forever. The timeout surfaces as "AI 诊断超时（5 分钟）".
+ */
+const AI_DECIDE_TIMEOUT_MS = 5 * 60_000
 
 /** Cap per string value shipped to the model so one node can't blow context. */
 const VALUE_CAP = 200
@@ -238,21 +246,37 @@ export function parseDecision(text: string): DebugDecision {
  */
 export async function aiDecide(
   ctx: DebugFailureContext,
-  signal?: AbortSignal,
+  callerSignal?: AbortSignal,
 ): Promise<DebugDecision> {
   const settings = await getSettings()
   const provider = settings.providers.find((p) => p.id === settings.activeProviderId)
   if (!provider || !provider.apiKey.trim()) {
     throw new NoProviderError('未配置模型 provider / API Key，AI 调试不可用')
   }
-  const result = await streamCompletion({
-    apiKey: provider.apiKey,
-    baseUrl: provider.baseUrl,
-    model: provider.model,
-    messages: [{ role: 'user', content: buildDebugPrompt(ctx) }],
-    headers: provider.headers,
-    maxTokens: 1500,
-    ...(signal ? { signal } : {}),
-  })
+  // 5-minute budget; combined with the caller's cancellation signal when one
+  // is provided, so a cancelled debug run still aborts immediately.
+  const timeoutSignal = AbortSignal.timeout(AI_DECIDE_TIMEOUT_MS)
+  const signal = callerSignal ? AbortSignal.any([timeoutSignal, callerSignal]) : timeoutSignal
+  let result: StreamResult
+  try {
+    result = await streamCompletion({
+      apiKey: provider.apiKey,
+      baseUrl: provider.baseUrl,
+      model: provider.model,
+      messages: [{ role: 'user', content: buildDebugPrompt(ctx) }],
+      headers: provider.headers,
+      // No hard max_tokens cap (same reasoning as workflow-review): a thinking
+      // model spends the budget on reasoning before any content, truncating
+      // the decision JSON. The provider default applies; the 5-minute budget
+      // above bounds the wait.
+      signal,
+    })
+  } catch (error) {
+    const err = error as Error
+    if (err?.name === 'TimeoutError' || /timed?\s*out/i.test(err?.message ?? '')) {
+      throw new Error(`AI 诊断超时（${AI_DECIDE_TIMEOUT_MS / 60_000} 分钟）`)
+    }
+    throw error
+  }
   return parseDecision(result.content)
 }

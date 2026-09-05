@@ -215,6 +215,10 @@ export const aiAgent: BlockExecutor = async (data, ctx) => {
   const result = await runUnattendedPrompt(prompt, conversationId, mode, {
     signal: ctx.signal,
     maxToolRounds: rounds,
+    // Pin the nested turn to THIS workflow's window: without it the nested
+    // turn would re-resolve "the plugin window" and, with several plugin
+    // windows open, could act in the wrong one.
+    ...(ctx.scope ? { scopeWindowId: ctx.scope.windowId } : {}),
     onStep: (kind, text) => {
       if (kind === 'error') ctx.emit('error', text)
       else if (kind === 'result') ctx.emit('result', text)

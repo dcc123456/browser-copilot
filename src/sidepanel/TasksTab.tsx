@@ -19,6 +19,7 @@ import type { FeishuConfig, ScheduledTask } from '../lib/scheduler-types'
 import type { Workflow } from '../lib/workflow/types'
 import { useT } from './i18n'
 import { confirmDialog } from '../ui/confirm'
+import NumberInput from '../ui/NumberInput'
 
 /** Editable form state. */
 type Draft = ScheduledTask
@@ -587,17 +588,11 @@ function TaskEditor({
               </label>
             ) : (
               <label className="interval-input">
-                <input
+                <NumberInput
                   disabled={disabled}
                   min={1}
-                  onChange={(event) =>
-                    update('schedule', {
-                      kind: 'interval',
-                      minutes: Number(event.target.value) || 1,
-                    })
-                  }
-                  type="number"
                   value={sched.minutes}
+                  onChange={(n) => update('schedule', { kind: 'interval', minutes: n })}
                 />
                 <span>{t.taskMinutes}</span>
               </label>
@@ -615,18 +610,12 @@ function TaskEditor({
       <div className="option-row">
         <label className="option-field">
           <span>{t.taskMaxRounds}</span>
-          <input
+          <NumberInput
             disabled={disabled}
             max={500}
             min={1}
-            onChange={(event) =>
-              onChange({
-                ...draft,
-                maxToolRounds: Math.min(500, Math.max(1, Number(event.target.value) || 1)),
-              })
-            }
-            type="number"
             value={draft.maxToolRounds}
+            onChange={(n) => onChange({ ...draft, maxToolRounds: n })}
           />
         </label>
         <label className="inline-check">

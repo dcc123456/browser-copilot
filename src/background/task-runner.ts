@@ -24,6 +24,7 @@ import {
   recordTaskRun,
 } from '../lib/task-store'
 import { runUnattendedPrompt } from './agent-unattended'
+import { resolveUnattendedScope } from './window-policy'
 import { retain, release } from './keepalive'
 import { getWorkflow } from '../lib/workflow/storage'
 import { executeWorkflow } from './workflow-engine/run-workflow'
@@ -214,10 +215,15 @@ async function runWorkflowTask(task: ScheduledTask, tracked: RunningTask): Promi
     return { ok: false, skipped: false, summary: '', error: 'This task has no workflow.' }
   }
   addStep(tracked.runId, 'info', `Running workflow: ${workflow.name}`)
+  // A scheduled workflow run is unattended: while the plugin runs anywhere
+  // (panel connected or minimized) it acts inside that plugin window; with
+  // the plugin closed everywhere it falls back to the legacy global chain.
+  const scope = await resolveUnattendedScope()
   const outcome = await executeWorkflow(workflow, {
     source: 'schedule',
     taskId: task.id,
     feishuChatId: tracked.feishuChatId,
+    ...(scope ? { scopeWindowId: scope.windowId } : {}),
   })
   return {
     ok: outcome.outcome === 'ok',

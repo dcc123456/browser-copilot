@@ -11,6 +11,7 @@ import SettingsTab from './SettingsTab'
 import SkillsTab from './SkillsTab'
 import TasksTab from './TasksTab'
 import WorkflowsTab from './WorkflowsTab'
+import WindowPicker from './WindowPicker'
 import { ConfirmHost } from '../ui/confirm'
 
 type TabId = 'chat' | 'skills' | 'tasks' | 'workflows' | 'history' | 'data' | 'settings'
@@ -120,6 +121,27 @@ export default function App() {
     return () => window.removeEventListener('bc:open-conversation', handler)
   }, [])
 
+  /**
+   * Minimize: collapse this panel into a floating page button.
+   *
+   * The worker marks the window minimized FIRST (unattended runs stay scoped
+   * to it; the page shows the floating button), then this panel closes
+   * itself. MV3 has no `sidePanel.close()`; `window.close()` from inside the
+   * panel page is the supported way to dismiss it. If the close is ignored
+   * by some build, the panel simply stays open over an already-minimized
+   * window — harmless, the next manual close restores consistency.
+   */
+  const minimizePanel = useCallback(async (): Promise<void> => {
+    try {
+      const win = await chrome.windows.getCurrent()
+      if (typeof win?.id !== 'number') return
+      await sendCommand({ type: 'panel.minimize', windowId: win.id })
+      window.close()
+    } catch (error) {
+      console.error('[Browser Copilot] could not minimize the panel', error)
+    }
+  }, [])
+
   // Other tabs (e.g. the Workflows tab's failed-run banner) dispatch
   // `bc:open-history` to deep-link into the History tab. HistoryTab itself
   // listens for the detail payload (section + run id to expand); App only
@@ -204,6 +226,28 @@ export default function App() {
             </div>
           )}
         </div>
+        <button
+          className="tab tab-minimize"
+          title={i18n.t.panelMinimize}
+          aria-label={i18n.t.panelMinimize}
+          onClick={() => void minimizePanel()}
+          type="button"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            aria-hidden="true"
+          >
+            {/* window-minimize: a chevron pointing down into a tray */}
+            <polyline points="4 14 12 20 20 14" />
+            <line x1="4" y1="5" x2="20" y2="5" />
+          </svg>
+        </button>
       </nav>
       {/*
         Every tab stays mounted: the chat holds a live port and streaming
@@ -246,6 +290,8 @@ export default function App() {
       </div>
       {/* Shared custom confirm/alert dialog host (replaces window.confirm). */}
       <ConfirmHost />
+      {/* Multi-window picker for "ask" unattended runs (see background/window-policy). */}
+      <WindowPicker />
     </I18nProvider>
   )
 }

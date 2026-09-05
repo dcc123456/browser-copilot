@@ -20,7 +20,7 @@
 
 import { getWorkflow, listWorkflows } from '../lib/workflow/storage'
 import type { Workflow, WorkflowNode } from '../lib/workflow/types'
-import { latestPanelWindowId } from './automation-scope'
+import { latestPluginWindowId } from './automation-scope'
 import { coerceIntervalMinutes, nextRunAt } from '../lib/schedule'
 import type { Schedule } from '../lib/scheduler-types'
 
@@ -367,5 +367,5 @@ export async function handleWorkflowTriggerAlarm(alarmName: string): Promise<voi
     // One-shot `date` trigger (or a now-invalid trigger): fire once, then stop.
     await chrome.alarms.clear(alarmName)
   }
-  runWorkflowRef?.(workflowId, latestPanelWindowId())
+  runWorkflowRef?.(workflowId, latestPluginWindowId())
 }

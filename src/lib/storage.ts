@@ -77,6 +77,7 @@ export const DEFAULT_SETTINGS: Settings = {
   localAgentToken: '',
   localAgentUrl: DEFAULT_LOCAL_AGENT_URL,
   localAgentActiveAgent: '',
+  unattendedWindowPolicy: 'latest',
 }
 
 /**
@@ -173,6 +174,12 @@ export function normalizeStoredSettings(raw: unknown): Settings {
     localAgentUrl: normalizeLocalAgentUrl(value.localAgentUrl),
     localAgentActiveAgent:
       typeof value.localAgentActiveAgent === 'string' ? value.localAgentActiveAgent : '',
+    unattendedWindowPolicy:
+      value.unattendedWindowPolicy === 'ask' || value.unattendedWindowPolicy === 'fixed'
+        ? value.unattendedWindowPolicy
+        : 'latest',
+    unattendedWindowId:
+      typeof value.unattendedWindowId === 'number' ? value.unattendedWindowId : undefined,
   }
 }
 
