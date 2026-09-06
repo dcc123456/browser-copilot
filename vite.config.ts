@@ -13,16 +13,20 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), crx({ manifest })],
   build: {
     target: 'chrome116',
-    // Extension pages are loaded from disk; readable output helps debugging.
-    minify: false,
-    sourcemap: true,
+    // Minified, map-free output: the release zip ships straight from dist/, and
+    // unminified JS + sourcemaps tripled the download. Local debugging happens
+    // against `pnpm dev` or an unpacked dev build, not the published artefact.
+    minify: true,
+    sourcemap: false,
     rollupOptions: {
       // Extra extension page (the visual workflow editor) opened via
       // chrome.runtime.getURL('src/workflow-editor/index.html'). The side panel
       // is already wired through the manifest and handled by the crx plugin.
       input: {
-        'workflow-editor': fileURLToPath(new URL('src/workflow-editor/index.html', import.meta.url)),
-        'offscreen': fileURLToPath(new URL('src/offscreen/index.html', import.meta.url)),
+        'workflow-editor': fileURLToPath(
+          new URL('src/workflow-editor/index.html', import.meta.url),
+        ),
+        offscreen: fileURLToPath(new URL('src/offscreen/index.html', import.meta.url)),
       },
     },
   },

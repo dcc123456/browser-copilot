@@ -342,7 +342,7 @@ describe('run_javascript maps to the javascript-code block', () => {
     expect(actionData([entry('run_javascript', { code: 'return document.title' })])).toEqual([
       {
         blockId: 'javascript-code',
-        description: 'run_javascript',
+        description: 'document.title',
         code: 'return document.title',
         timeout: 20000,
       },
@@ -362,6 +362,56 @@ describe('run_javascript maps to the javascript-code block', () => {
       'new-tab',
       'wait-connections',
       'javascript-code',
+    ])
+  })
+})
+
+describe('javascript-code nodes title themselves from the code', () => {
+  it('a leading // comment describes the whole script', () => {
+    const code = "// 读取购物车总金额\nreturn document.querySelector('.total').textContent"
+    expect(actionData([entry('run_javascript', { code })])).toEqual([
+      {
+        blockId: 'javascript-code',
+        description: '读取购物车总金额',
+        code,
+        timeout: 20000,
+      },
+    ])
+  })
+
+  it('without a comment the first statement shows, return/await stripped', () => {
+    const data = actionData([
+      entry('run_javascript', { code: 'await fetch("/api/cart").then((r) => r.json())' }),
+    ])
+    expect(data[0]).toMatchObject({ description: 'fetch("/api/cart").then((r) => r.json())' })
+  })
+
+  it('a long line is clipped so the card stays one line', () => {
+    const code =
+      "return Array.from(document.querySelectorAll('.item')).map((el) => el.textContent.trim())"
+    const [node] = actionData([entry('run_javascript', { code })])
+    const title = String(node!.description)
+    expect(title.length).toBe(41)
+    expect(title.endsWith('…')).toBe(true)
+    expect(title.startsWith('Array.from(document.querySelectorAll(')).toBe(true)
+  })
+
+  it('brace-only opening lines do not become the title', () => {
+    const statement = 'document.body.setAttribute("data-ok", "1")'
+    const code = `{\n  ${statement}\n}`
+    expect(actionData([entry('run_javascript', { code })])[0]).toMatchObject({
+      description: `${statement.slice(0, 40)}…`,
+    })
+  })
+
+  it('code that yields nothing keeps the generic summary', () => {
+    expect(actionData([entry('run_javascript', { code: '' })])).toEqual([
+      {
+        blockId: 'javascript-code',
+        description: 'run_javascript',
+        code: '',
+        timeout: 20000,
+      },
     ])
   })
 })
@@ -402,6 +452,27 @@ describe('fill-shaped run_javascript becomes the forms operator', () => {
     })
   })
 
+  it('getElementsByName("[0]") maps to a [name] selector', () => {
+    const code =
+      "document.getElementsByName('email')[0].value = 'a@b.com';\n" +
+      "document.getElementsByName('email')[0].dispatchEvent(new Event('input', { bubbles: true }))"
+    expect(fillLikeJsFromCode(code)).toEqual({ selector: '[name="email"]', value: 'a@b.com' })
+  })
+
+  it('getElementsByClassName("[0]") maps to a .class selector', () => {
+    expect(
+      fillLikeJsFromCode("document.getElementsByClassName('qty')[0].value = '2'"),
+    ).toEqual({ selector: '.qty', value: '2' })
+  })
+
+  it('a defensive duplicate write of the same value still converts', () => {
+    const code =
+      "document.querySelector('#a').value = 'x';\n" +
+      "const s = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;\n" +
+      "s.call(document.querySelector('#a'), 'x')"
+    expect(fillLikeJsFromCode(code)).toEqual({ selector: '#a', value: 'x' })
+  })
+
   it('guards keep ambiguous snippets as javascript-code', () => {
     // a click makes it more than a fill
     expect(
@@ -417,11 +488,12 @@ describe('fill-shaped run_javascript becomes the forms operator', () => {
     expect(fillLikeJsFromCode("document.querySelector('#a').value = `${v}`")).toBeNull()
     // form.submit guard
     expect(fillLikeJsFromCode("document.querySelector('#f').submit()")).toBeNull()
-    // the workflow keeps the verbatim JS block for guarded snippets
+    // the workflow keeps the verbatim JS block for guarded snippets, titled
+    // from its first statement line (clipped to the card width)
     expect(actionData([entry('run_javascript', { code: twoFields })])).toEqual([
       {
         blockId: 'javascript-code',
-        description: 'run_javascript',
+        description: `${twoFields.slice(0, 40)}…`,
         code: twoFields,
         timeout: 20000,
       },

@@ -35,7 +35,11 @@ export default function EditNewWindow({ data, onChange }: EditFormProps) {
       </Field>
 
       <Field label="Type">
-        <Select value={str(data, 'type') || 'normal'} onChange={(v) => onChange({ type: v })} options={WINDOW_TYPES} />
+        <Select
+          value={str(data, 'type') || 'normal'}
+          onChange={(v) => onChange({ type: v })}
+          options={WINDOW_TYPES}
+        />
       </Field>
 
       <Field label="URL (optional)">
@@ -47,7 +51,11 @@ export default function EditNewWindow({ data, onChange }: EditFormProps) {
       </Field>
 
       <Field label="Window state">
-        <Select value={windowState} onChange={(v) => onChange({ windowState: v })} options={WINDOW_STATES} />
+        <Select
+          value={windowState}
+          onChange={(v) => onChange({ windowState: v })}
+          options={WINDOW_STATES}
+        />
       </Field>
 
       <Checkbox
@@ -56,7 +64,9 @@ export default function EditNewWindow({ data, onChange }: EditFormProps) {
         label={
           <span>
             Set as an incognito window{' '}
-            <span title="You must enable 'Allow in incognito' for this extension first">&#128712;</span>
+            <span title="You must enable 'Allow in incognito' for this extension first">
+              &#128712;
+            </span>
           </span>
         }
       />
@@ -65,18 +75,34 @@ export default function EditNewWindow({ data, onChange }: EditFormProps) {
         <>
           <div style={{ display: 'flex', gap: 8 }}>
             <Field label="Top">
-              <NumberInput value={num(data, 'top')} fallback={0} onChange={(n) => onChange({ top: n })} />
+              <NumberInput
+                value={num(data, 'top')}
+                fallback={0}
+                onChange={(n) => onChange({ top: n })}
+              />
             </Field>
             <Field label="Left">
-              <NumberInput value={num(data, 'left')} fallback={0} onChange={(n) => onChange({ left: n })} />
+              <NumberInput
+                value={num(data, 'left')}
+                fallback={0}
+                onChange={(n) => onChange({ left: n })}
+              />
             </Field>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <Field label="Height">
-              <NumberInput value={num(data, 'height')} fallback={0} onChange={(n) => onChange({ height: n })} />
+              <NumberInput
+                value={num(data, 'height')}
+                fallback={0}
+                onChange={(n) => onChange({ height: n })}
+              />
             </Field>
             <Field label="Width">
-              <NumberInput value={num(data, 'width')} fallback={0} onChange={(n) => onChange({ width: n })} />
+              <NumberInput
+                value={num(data, 'width')}
+                fallback={0}
+                onChange={(n) => onChange({ width: n })}
+              />
             </Field>
           </div>
           <p className="wf-form-note">Note: use 0 to disable</p>

@@ -25,7 +25,8 @@ const REGEX_FLAGS = [
 function readRegexExp(data: Record<string, unknown>): string[] {
   const raw = data.regexExp
   if (Array.isArray(raw)) return raw.filter((x): x is string => typeof x === 'string')
-  if (raw && typeof raw === 'object') return Object.values(raw).filter((x): x is string => typeof x === 'string')
+  if (raw && typeof raw === 'object')
+    return Object.values(raw).filter((x): x is string => typeof x === 'string')
   return []
 }
 

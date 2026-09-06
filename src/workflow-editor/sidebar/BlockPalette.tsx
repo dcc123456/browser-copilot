@@ -9,6 +9,7 @@
  * @module workflow-editor/sidebar/BlockPalette
  */
 
+import { Info, Minus, Pin, Plus } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { blocksByCategory, CATEGORY_META } from '../../lib/workflow/blocks/palette'
 import { BlockIcon } from '../../lib/workflow/blocks/icons'
@@ -54,7 +55,7 @@ function BlockCard({
           title="Docs"
           onClick={(e) => e.stopPropagation()}
         >
-          <i className="ri-information-line" />
+          <Info size={14} />
         </a>
         <span
           title={pinned ? 'Unpin block' : 'Pin block'}
@@ -63,7 +64,7 @@ function BlockCard({
             onTogglePin()
           }}
         >
-          <i className={pinned ? 'ri-pushpin-2-fill' : 'ri-pushpin-2-line'} />
+          <Pin size={14} fill={pinned ? 'currentColor' : 'none'} />
         </span>
       </div>
       {block.tag && <div className="wf-palette-tag">{block.tag}</div>}
@@ -96,8 +97,10 @@ function CategorySection({
           className="wf-palette-dot"
           style={{ ['--cat-dot' as string]: `var(--cat-${categoryId})` }}
         />
-        <span className="wf-palette-title">{categoryName(categoryId, meta?.name ?? categoryId)}</span>
-        <i className={open ? 'ri-subtract-line' : 'ri-add-line'} />
+        <span className="wf-palette-title">
+          {categoryName(categoryId, meta?.name ?? categoryId)}
+        </span>
+        {open ? <Minus size={14} /> : <Plus size={14} />}
       </button>
       {open && (
         <div className="wf-palette-grid">
@@ -127,9 +130,7 @@ export default function BlockPalette() {
     })
   }
 
-  const pinnedBlocks = groups
-    .flatMap((g) => g.blocks)
-    .filter((b) => pinned.includes(b.id))
+  const pinnedBlocks = groups.flatMap((g) => g.blocks).filter((b) => pinned.includes(b.id))
 
   return (
     <div className="wf-sidebar-scroll">

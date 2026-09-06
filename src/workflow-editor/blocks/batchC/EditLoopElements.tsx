@@ -51,17 +51,29 @@ export default function EditLoopElements({ data, onChange }: EditFormProps) {
     >
       <Field label="Max data to loop (0 to disable)" title="Max number of data to loop">
         <NumberInput
-          value={typeof data.maxLoop === 'string' || typeof data.maxLoop === 'number' ? (data.maxLoop as string | number) : '0'}
+          value={
+            typeof data.maxLoop === 'string' || typeof data.maxLoop === 'number'
+              ? (data.maxLoop as string | number)
+              : '0'
+          }
           fallback={0}
           onChange={(n) => onChange({ maxLoop: n })}
         />
       </Field>
-      <Checkbox checked={bool(data, 'reverseLoop')} onChange={(v) => onChange({ reverseLoop: v })} label="Reverse loop order" />
+      <Checkbox
+        checked={bool(data, 'reverseLoop')}
+        onChange={(v) => onChange({ reverseLoop: v })}
+        label="Reverse loop order"
+      />
 
       <div style={{ borderTop: '1px solid var(--bc-border, #ccc)', marginTop: 16, paddingTop: 16 }}>
         <p className="wf-form-note">Load more elements</p>
         <Field label="Action">
-          <Select value={action} onChange={(v) => onChange({ loadMoreAction: v })} options={ACTIONS} />
+          <Select
+            value={action}
+            onChange={(v) => onChange({ loadMoreAction: v })}
+            options={ACTIONS}
+          />
         </Field>
 
         {(action === 'click-element' || action === 'click-link') && (

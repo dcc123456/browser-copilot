@@ -35,7 +35,12 @@ export default function EditBrowserEvent({ data, onChange }: EditFormProps) {
         <Select value={event} onChange={(v) => onChange({ eventName: v })} options={EVENTS} />
       </Field>
       <Field label="Timeout (ms)">
-        <NumberInput value={num(data, 'timeout', 10000)} min={0} fallback={10000} onChange={(n) => onChange({ timeout: n })} />
+        <NumberInput
+          value={num(data, 'timeout', 10000)}
+          min={0}
+          fallback={10000}
+          onChange={(n) => onChange({ timeout: n })}
+        />
       </Field>
       {event.startsWith('tab:') && (
         <Checkbox

@@ -46,27 +46,47 @@ export default function EditExportData({ data, onChange }: EditFormProps) {
       </Field>
 
       <Field label="Data to export">
-        <Select value={dataToExport} onChange={(v) => onChange({ dataToExport: v })} options={DATA_TO_EXPORT} />
+        <Select
+          value={dataToExport}
+          onChange={(v) => onChange({ dataToExport: v })}
+          options={DATA_TO_EXPORT}
+        />
       </Field>
 
       {dataToExport === 'google-sheets' && (
         <Field label="Reference key" title="Reference key">
-          <TextInput value={str(data, 'refKey')} placeholder="Reference key" onChange={(v) => onChange({ refKey: v })} />
+          <TextInput
+            value={str(data, 'refKey')}
+            placeholder="Reference key"
+            onChange={(v) => onChange({ refKey: v })}
+          />
         </Field>
       )}
 
       {dataToExport === 'variable' && (
         <Field label="Variable name" title="Variable name">
-          <TextInput value={str(data, 'variableName')} placeholder="abc123" onChange={(v) => onChange({ variableName: v })} />
+          <TextInput
+            value={str(data, 'variableName')}
+            placeholder="abc123"
+            onChange={(v) => onChange({ variableName: v })}
+          />
         </Field>
       )}
 
       <Field label="File name">
-        <TextInput value={str(data, 'name')} placeholder="unnamed" onChange={(v) => onChange({ name: v })} />
+        <TextInput
+          value={str(data, 'name')}
+          placeholder="unnamed"
+          onChange={(v) => onChange({ name: v })}
+        />
       </Field>
 
       <Field label="On conflict">
-        <Select value={str(data, 'onConflict') || 'uniquify'} onChange={(v) => onChange({ onConflict: v })} options={ON_CONFLICT} />
+        <Select
+          value={str(data, 'onConflict') || 'uniquify'}
+          onChange={(v) => onChange({ onConflict: v })}
+          options={ON_CONFLICT}
+        />
       </Field>
 
       <Field label="Export as">
@@ -75,9 +95,18 @@ export default function EditExportData({ data, onChange }: EditFormProps) {
 
       {type === 'csv' && (
         <Expand title="Options" defaultOpen>
-          <Checkbox checked={bool(data, 'addBOMHeader')} onChange={(v) => onChange({ addBOMHeader: v })} label="Add UTF-8 BOM" />
+          <Checkbox
+            checked={bool(data, 'addBOMHeader')}
+            onChange={(v) => onChange({ addBOMHeader: v })}
+            label="Add UTF-8 BOM"
+          />
           <Field label="Delimiter">
-            <TextInput value={str(data, 'csvDelimiter')} placeholder="," fallback="," onChange={(v) => onChange({ csvDelimiter: v })} />
+            <TextInput
+              value={str(data, 'csvDelimiter')}
+              placeholder=","
+              fallback=","
+              onChange={(v) => onChange({ csvDelimiter: v })}
+            />
           </Field>
         </Expand>
       )}

@@ -11,13 +11,7 @@
 
 /** 块的七个分类。 */
 export type BlockCategory =
-  | 'interaction'
-  | 'browser'
-  | 'general'
-  | 'onlineServices'
-  | 'data'
-  | 'conditions'
-  | 'package'
+  'interaction' | 'browser' | 'general' | 'onlineServices' | 'data' | 'conditions' | 'package'
 
 /**
  * React 画布节点渲染键。此即节点渲染器分支所依据的标识，对应各渲染组件。
@@ -43,9 +37,9 @@ export interface BlockCatalogEntry {
   description: string
   /**
    * Icon spec:
-   * - RemixIcon name: `'riFlashlightLine'`
-   * - inline SVG path: `'path:M10 10...'`
-   * - remote image: `'https://...'`
+   * - lucide icon: `'lucide:Zap'` (see `blocks/icons.tsx`)
+   * - legacy, still rendered for saved data: RemixIcon name `'riFlashlightLine'`,
+   *   inline SVG path `'path:M10 10...'`, remote image `'https://...'`
    */
   icon: string
   category: BlockCategory

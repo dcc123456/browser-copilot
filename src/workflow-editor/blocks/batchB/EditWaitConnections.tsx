@@ -27,7 +27,13 @@ export default function EditWaitConnections({ data, onChange }: EditFormProps) {
       </Field>
 
       <Field label="Timeout (milliseconds)">
-        <NumberInput value={num(data, 'timeout', 10000)} placeholder="10000" min={0} fallback={10000} onChange={(n) => onChange({ timeout: n })} />
+        <NumberInput
+          value={num(data, 'timeout', 10000)}
+          placeholder="10000"
+          min={0}
+          fallback={10000}
+          onChange={(n) => onChange({ timeout: n })}
+        />
       </Field>
 
       <Checkbox

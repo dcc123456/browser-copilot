@@ -8,6 +8,7 @@
  * @module workflow-editor/blocks/batchB/EditSwitchTab
  */
 
+import { Info } from 'lucide-react'
 import type { EditFormProps } from '../EditForms'
 import { Checkbox, Field, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
@@ -35,7 +36,11 @@ export default function EditSwitchTab({ data, onChange }: EditFormProps) {
       </Field>
 
       <Field label="Find tab by">
-        <Select value={findTabBy} onChange={(v) => onChange({ findTabBy: v })} options={FIND_TYPES} />
+        <Select
+          value={findTabBy}
+          onChange={(v) => onChange({ findTabBy: v })}
+          options={FIND_TYPES}
+        />
       </Field>
 
       {(findTabBy === 'match-patterns' || findTabBy === 'tab-title') && (
@@ -51,7 +56,7 @@ export default function EditSwitchTab({ data, onChange }: EditFormProps) {
                   rel="noopener noreferrer"
                   style={{ display: 'inline-block' }}
                 >
-                  <i className="ri-information-line" />
+                  <Info size={14} />
                 </a>
               </label>
               <TextInput
@@ -89,7 +94,11 @@ export default function EditSwitchTab({ data, onChange }: EditFormProps) {
 
       {findTabBy === 'tab-index' && (
         <Field label="Index">
-          <NumberInput value={num(data, 'tabIndex')} fallback={0} onChange={(n) => onChange({ tabIndex: n })} />
+          <NumberInput
+            value={num(data, 'tabIndex')}
+            fallback={0}
+            onChange={(n) => onChange({ tabIndex: n })}
+          />
         </Field>
       )}
 

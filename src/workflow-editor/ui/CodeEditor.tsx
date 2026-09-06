@@ -13,7 +13,13 @@
 
 import { useEffect, useRef } from 'react'
 import { EditorState, type Extension } from '@codemirror/state'
-import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view'
+import {
+  EditorView,
+  keymap,
+  lineNumbers,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+} from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import {
   bracketMatching,
@@ -117,7 +123,15 @@ export default function CodeEditor({
         autocompletion(),
         ...(readOnly
           ? [EditorState.readOnly.of(true), EditorView.editable.of(false)]
-          : [keymap.of([...defaultKeymap, ...historyKeymap, ...foldKeymap, ...completionKeymap, indentWithTab])]),
+          : [
+              keymap.of([
+                ...defaultKeymap,
+                ...historyKeymap,
+                ...foldKeymap,
+                ...completionKeymap,
+                indentWithTab,
+              ]),
+            ]),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         highlightActiveLine(),
         langExt,
@@ -127,7 +141,9 @@ export default function CodeEditor({
         EditorState.tabSize.of(2),
         EditorView.theme({
           '&': { height: height ?? '100%', fontSize: '14px', borderRadius: '8px' },
-          '.cm-scroller': { fontFamily: "'Source Code Pro', ui-monospace, Menlo, Consolas, monospace" },
+          '.cm-scroller': {
+            fontFamily: "'Source Code Pro', ui-monospace, Menlo, Consolas, monospace",
+          },
           '.cm-content': { padding: '10px 0' },
         }),
       ],

@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Info, TriangleAlert } from 'lucide-react'
 
 export interface ConfirmOptions {
   /** Heading, e.g. "Delete conversation?". */
@@ -115,24 +116,10 @@ export function useConfirm(): {
               dialog.danger ? 'bg-err-surface text-err' : 'bg-accent-soft text-accent',
             ].join(' ')}
           >
-            {dialog.danger ? (
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
-                <line x1="12" y1="9" x2="12" y2="13" />
-                <line x1="12" y1="17" x2="12.01" y2="17" />
-              </svg>
-            ) : (
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="16" x2="12" y2="12" />
-                <line x1="12" y1="8" x2="12.01" y2="8" />
-              </svg>
-            )}
+            {dialog.danger ? <TriangleAlert size={17} /> : <Info size={17} />}
           </span>
           <div className="min-w-0 flex-1">
-            <h2 className="m-0 text-[14px] font-semibold leading-snug text-ink">
-              {dialog.title}
-            </h2>
+            <h2 className="m-0 text-[14px] font-semibold leading-snug text-ink">{dialog.title}</h2>
             {dialog.message && (
               <p className="m-0 mt-1.5 whitespace-pre-line text-[12.5px] leading-relaxed text-muted break-words">
                 {dialog.message}

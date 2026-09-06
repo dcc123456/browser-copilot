@@ -21,6 +21,7 @@
 import { runAgentTurn } from './agent'
 import { resolveUnattendedScope } from './window-policy'
 import { getSettings } from '../lib/storage'
+import { sanitizeModelAnswer } from '../lib/model-output'
 import type { AgentMode } from '../lib/types'
 import { retain, release } from './keepalive'
 
@@ -83,7 +84,16 @@ export async function runUnattendedPrompt(
         ? { windowId: options.scopeWindowId }
         : await resolveUnattendedScope()
     const collected: string[] = []
+    /** Every text delta of the turn (all rounds) — fallback + diagnostics. */
     const chunks: string[] = []
+    /**
+     * Text streamed since the last tool call. The agent loop streams
+     * narration ("let me check the page…") in the rounds BETWEEN tool calls;
+     * the reply is the text of the round that ends the turn (no tool call).
+     * Consumers store this answer into workflow variables — narration and
+     * reasoning junk in it would be filled into pages verbatim.
+     */
+    const finalChunks: string[] = []
     const history: { role: string; content: string }[] = [
       { role: 'user', content: prompt },
     ]
@@ -93,8 +103,14 @@ export async function runUnattendedPrompt(
       signal: options.signal,
       ...(scope ? { scopeWindowId: scope.windowId } : {}),
       send: (message) => {
-        if (message.type === 'delta') chunks.push(message.text)
+        if (message.type === 'delta') {
+          chunks.push(message.text)
+          finalChunks.push(message.text)
+        }
         if (message.type === 'tool.start') {
+          // A new tool round begins: everything streamed so far was
+          // inter-round narration, not the answer.
+          finalChunks.length = 0
           collected.push(`→ ${message.name}`)
           options.onStep?.('tool', `→ ${message.name}`)
         }
@@ -125,9 +141,25 @@ export async function runUnattendedPrompt(
       }),
     })
 
-    const answer = chunks.join('').trim()
+    // The final-round text wins; when the turn never produced one (round cap
+    // hit mid-run, tool-only rounds) fall back to the whole transcript so a
+    // usable answer is not lost.
+    const rawAnswer = (finalChunks.join('') || chunks.join('')).trim()
+    // Strip reasoning-model `<think>` blocks and a wrapping code fence: this
+    // string is stored into workflow variables / sent to chat verbatim.
+    const answer = sanitizeModelAnswer(rawAnswer)
     if (answer) return { ok: true, answer }
     const trace = collected.join('\n').trim()
+    if (rawAnswer) {
+      // The turn streamed text, but every byte was wrapper junk (a
+      // thinking-only reply, an empty fence). Report the reason instead of
+      // letting the junk flow into variables and chat replies.
+      return {
+        ok: false,
+        answer: trace || '(no answer)',
+        error: 'The model produced no usable answer content (reasoning-only or empty).',
+      }
+    }
     return {
       ok: false,
       answer: trace || '(no answer)',

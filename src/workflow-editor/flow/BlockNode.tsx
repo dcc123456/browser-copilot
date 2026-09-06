@@ -11,6 +11,17 @@
  * @module workflow-editor/flow/BlockNode
  */
 
+import {
+  Copy,
+  Info,
+  Pencil,
+  Play,
+  Settings,
+  ToggleLeft,
+  ToggleRight,
+  Trash2,
+  TriangleAlert,
+} from 'lucide-react'
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { BlockIcon } from '../../lib/workflow/blocks/icons'
@@ -49,7 +60,15 @@ export interface BlockNodeData extends Record<string, unknown> {
  * starts a canvas drag from a toolbar click, and every click stops propagation
  * so the node isn't selected/dragged as a side effect.
  */
-function NodeToolbar({ id, disabled, actions }: { id: string; disabled: boolean; actions?: BlockNodeActions }) {
+function NodeToolbar({
+  id,
+  disabled,
+  actions,
+}: {
+  id: string
+  disabled: boolean
+  actions?: BlockNodeActions
+}) {
   const { t } = useEditorLocale()
   if (!actions) return null
   const stop = (fn: (id: string) => void) => (e: React.MouseEvent) => {
@@ -60,33 +79,35 @@ function NodeToolbar({ id, disabled, actions }: { id: string; disabled: boolean;
   return (
     <div className="wf-node-toolbar nodrag" onPointerDown={(e) => e.stopPropagation()}>
       <button type="button" title={t('nodeDelete')} onClick={stop(actions.onDelete)}>
-        <i className="ri-delete-bin-7-line" />
+        <Trash2 size={14} />
       </button>
       <button type="button" title={t('nodeDuplicate')} onClick={stop(actions.onDuplicate)}>
-        <i className="ri-file-copy-line" />
+        <Copy size={14} />
       </button>
       <button type="button" title={t('nodeSettings')} onClick={stop(actions.onSettings)}>
-        <i className="ri-settings-3-line" />
+        <Settings size={14} />
       </button>
       <button
         type="button"
         title={disabled ? t('nodeEnable') : t('nodeDisable')}
         onClick={stop(actions.onToggleDisable)}
       >
-        <i className={disabled ? 'ri-toggle-line' : 'ri-toggle-fill'} />
+        {disabled ? <ToggleLeft size={14} /> : <ToggleRight size={14} />}
       </button>
       <button type="button" title={t('nodeRunFromHere')} onClick={stop(actions.onRunFromHere)}>
-        <i className="ri-play-line" />
+        <Play size={14} />
       </button>
       <button type="button" title={t('nodeEdit')} onClick={stop(actions.onEdit)}>
-        <i className="ri-pencil-line" />
+        <Pencil size={14} />
       </button>
     </div>
   )
 }
 
 /** Branch handle labels for multi-output blocks (English, matching Automa). */
-const BRANCH_HANDLES: Record<string, { idSuffix: string; label: string }[]> = {
+/** Blocks whose outputs are BRANCH handles (true/false, exists/not, loop/end):
+ *  exported so `healEdgeHandles` can validate stored edge handle ids. */
+export const BRANCH_HANDLES: Record<string, { idSuffix: string; label: string }[]> = {
   conditions: [
     { idSuffix: 'output-1', label: 'true' },
     { idSuffix: 'output-2', label: 'false' },
@@ -150,18 +171,25 @@ function BlockNodeComponent({ id, data, selected }: NodeProps) {
       {/* Hover action toolbar (Automa block-menu) */}
       <NodeToolbar id={id} disabled={disabled} actions={node.actions} />
       {block.inputs > 0 && (
-        <Handle id={`${block.id}-input-1`} type="target" position={Position.Left} className="wf-handle" />
+        <Handle
+          id={`${block.id}-input-1`}
+          type="target"
+          position={Position.Left}
+          className="wf-handle"
+        />
       )}
 
       <div className="wf-node-body">
         <span
           className={`wf-node-chip ${disabled ? 'wf-node-chip-disabled' : ''}`}
-          style={disabled ? undefined : { ['--cat-color' as string]: `var(--cat-${block.category})` }}
+          style={
+            disabled ? undefined : { ['--cat-color' as string]: `var(--cat-${block.category})` }
+          }
         >
           <BlockIcon icon={block.icon} size={16} />
         </span>
         <div className="wf-node-text">
-          {hasError && <i className="wf-node-alert ri-error-warning-line" />}
+          {hasError && <TriangleAlert size={13} className="wf-node-alert" />}
           <p className="wf-node-name">{node.label || displayName}</p>
           {summary && <p className="wf-node-desc">{summary}</p>}
           {bd.loopId ? (
@@ -174,13 +202,20 @@ function BlockNodeComponent({ id, data, selected }: NodeProps) {
 
       {hasFallback && (
         <div className="wf-node-fallback">
-          <i className="ri-information-line" />
+          <Info size={13} />
           <span>fallback</span>
         </div>
       )}
 
       {/* Single (default) source handle */}
-      {!branchHandles && <Handle id={`${block.id}-output-1`} type="source" position={Position.Right} className="wf-handle" />}
+      {!branchHandles && (
+        <Handle
+          id={`${block.id}-output-1`}
+          type="source"
+          position={Position.Right}
+          className="wf-handle"
+        />
+      )}
 
       {/* Branch source handles, spread vertically with labels */}
       {branchHandles?.map((h, i) => (
@@ -228,7 +263,7 @@ function NoteNodeComponent({ id, data }: NodeProps) {
               node.actions?.onDelete(id)
             }}
           >
-            <i className="ri-delete-bin-7-line" />
+            <Trash2 size={14} />
           </button>
           <button
             type="button"
@@ -238,13 +273,18 @@ function NoteNodeComponent({ id, data }: NodeProps) {
               node.actions?.onEdit(id)
             }}
           >
-            <i className="ri-pencil-line" />
+            <Pencil size={14} />
           </button>
         </div>
       )}
       <Handle type="target" position={Position.Left} className="wf-handle" style={{ opacity: 0 }} />
       <p>{text || 'Note'}</p>
-      <Handle type="source" position={Position.Right} className="wf-handle" style={{ opacity: 0 }} />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="wf-handle"
+        style={{ opacity: 0 }}
+      />
     </div>
   )
 }

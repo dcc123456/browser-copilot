@@ -291,6 +291,23 @@
   max-width: 150px;
   padding: 0 4px;
 }
+/* The name is a BUTTON (click opens the rename dialog): reset the button
+   chrome so it reads as the workflow title with a pencil affordance. */
+.wf-toolbar-name-btn {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 4px 6px;
+  transition: background 0.14s ease;
+}
+.wf-toolbar-name-btn:hover {
+  background: var(--we-bg-active);
+}
+.wf-name-pencil {
+  color: var(--we-text-dim);
+  flex-shrink: 0;
+}
 .wf-toolbar-name {
   font-weight: 600;
   font-size: 13px;
@@ -302,6 +319,14 @@
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
+  /* The debug/logs toggles must stay on ONE line each: never let the group
+     shrink or wrap its labels, even when the toolbar gets narrow. */
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+.wf-toolbar-tabs > * {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 @media (max-width: 760px) {
   .wf-toolbar-tabs {
@@ -1266,6 +1291,30 @@
   overflow: auto;
   flex: 1;
   min-height: 0;
+}
+
+/* ---- rename-workflow dialog ---- */
+.wf-rename-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border: 1px solid var(--we-border);
+  border-radius: 8px;
+  background: var(--we-bg-input);
+  color: var(--we-text);
+  font: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  outline: none;
+}
+.wf-rename-input:focus {
+  border-color: var(--we-accent);
+}
+.wf-rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
 }
 
 /* JS-code block helper reference */

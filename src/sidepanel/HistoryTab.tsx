@@ -18,41 +18,42 @@
  *
  * @module sidepanel/HistoryTab
  */
-import { useCallback, useEffect, useState } from "react";
-import { onReviewLog, sendCommand } from "../lib/messages";
-import { workflowFromHistory } from "../lib/storage";
-import { saveWorkflow } from "../lib/workflow/storage";
+import { useCallback, useEffect, useState } from 'react'
+import { Check, Workflow as WorkflowIcon, X } from 'lucide-react'
+import { onReviewLog, sendCommand } from '../lib/messages'
+import { workflowFromHistory } from '../lib/storage'
+import { saveWorkflow } from '../lib/workflow/storage'
 import {
   applyNodeKeepSelection,
   reviewStepsOf,
   type ReviewStep,
   type WorkflowReview,
-} from "../lib/workflow/review-patch";
-import type { Workflow } from "../lib/workflow/types";
-import type { ConversationMeta, HistoryEntry } from "../lib/types";
-import type { TaskRunLog } from "../lib/scheduler-types";
-import { useT } from "./i18n";
-import { confirmDialog } from "../ui/confirm";
-import RunningBoard from "./RunningBoard";
-import { WorkflowReviewDialog } from "./WorkflowReviewList";
+} from '../lib/workflow/review-patch'
+import type { Workflow } from '../lib/workflow/types'
+import type { ConversationMeta, HistoryEntry } from '../lib/types'
+import type { TaskRunLog } from '../lib/scheduler-types'
+import { useT } from './i18n'
+import { confirmDialog } from '../ui/confirm'
+import RunningBoard from './RunningBoard'
+import { WorkflowReviewDialog } from './WorkflowReviewList'
 
-type Section = "conversations" | "workflowRuns" | "taskRuns" | "operations";
+type Section = 'conversations' | 'workflowRuns' | 'taskRuns' | 'operations'
 
-type Banner = { kind: "ok" | "error"; text: string } | null;
+type Banner = { kind: 'ok' | 'error'; text: string } | null
 
 interface SectionProps {
-  t: ReturnType<typeof useT>;
-  flash: (kind: "ok" | "error", text: string) => void;
+  t: ReturnType<typeof useT>
+  flash: (kind: 'ok' | 'error', text: string) => void
 }
 
 /** Same-day → time only, otherwise date + time. */
 function formatWhen(ms: number): string {
-  const date = new Date(ms);
-  const now = new Date();
-  const sameDay = date.toDateString() === now.toDateString();
-  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  if (sameDay) return time;
-  return `${date.toLocaleDateString()} ${time}`;
+  const date = new Date(ms)
+  const now = new Date()
+  const sameDay = date.toDateString() === now.toDateString()
+  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  if (sameDay) return time
+  return `${date.toLocaleDateString()} ${time}`
 }
 
 /**
@@ -64,66 +65,66 @@ function formatWhen(ms: number): string {
  * listen for. App flips the active tab, ChatTab resumes the thread.
  */
 function continueConversation(id: string): void {
-  window.dispatchEvent(new CustomEvent("bc:open-conversation", { detail: { id } }));
+  window.dispatchEvent(new CustomEvent('bc:open-conversation', { detail: { id } }))
 }
 
 // --- Operations: grouping ---------------------------------------------------
 
 interface HistoryGroup {
-  key: string;
-  title: string;
-  entries: HistoryEntry[];
+  key: string
+  title: string
+  entries: HistoryEntry[]
 }
 
 /** Groups action-history entries by conversationId, newest-first. */
 function groupHistory(history: HistoryEntry[], conversations: ConversationMeta[]): HistoryGroup[] {
   const titleOf = (id: string): string => {
-    if (id.startsWith("task:")) return id.slice(5) || "Scheduled task";
-    if (id.startsWith("feishu:")) return "Feishu";
-    const meta = conversations.find((c) => c.id === id);
-    return meta?.title || id;
-  };
-  const order: string[] = [];
-  const map = new Map<string, HistoryEntry[]>();
+    if (id.startsWith('task:')) return id.slice(5) || 'Scheduled task'
+    if (id.startsWith('feishu:')) return 'Feishu'
+    const meta = conversations.find((c) => c.id === id)
+    return meta?.title || id
+  }
+  const order: string[] = []
+  const map = new Map<string, HistoryEntry[]>()
   for (const entry of history) {
-    const key = entry.conversationId || "unknown";
+    const key = entry.conversationId || 'unknown'
     if (!map.has(key)) {
-      map.set(key, []);
-      order.push(key);
+      map.set(key, [])
+      order.push(key)
     }
-    map.get(key)!.push(entry);
+    map.get(key)!.push(entry)
   }
   // history is already newest-first; groups follow their newest entry.
-  return order.map((key) => ({ key, title: titleOf(key), entries: map.get(key)! }));
+  return order.map((key) => ({ key, title: titleOf(key), entries: map.get(key)! }))
 }
 
 export default function HistoryTab() {
-  const t = useT();
-  const [section, setSection] = useState<Section>("conversations");
-  const [banner, setBanner] = useState<Banner>(null);
+  const t = useT()
+  const [section, setSection] = useState<Section>('conversations')
+  const [banner, setBanner] = useState<Banner>(null)
   // One shared load of the full run log, split by `source` in the two run
   // sections so the service worker is only queried once.
-  const [runs, setRuns] = useState<TaskRunLog[] | null>(null);
+  const [runs, setRuns] = useState<TaskRunLog[] | null>(null)
   // Deep-linked run (from another tab's failed-run banner): the matching run
   // card in the run sections auto-expands and briefly highlights itself.
-  const [focusRunId, setFocusRunId] = useState<string | null>(null);
+  const [focusRunId, setFocusRunId] = useState<string | null>(null)
 
-  const flash = useCallback((kind: "ok" | "error", text: string): void => {
-    setBanner({ kind, text });
-  }, []);
+  const flash = useCallback((kind: 'ok' | 'error', text: string): void => {
+    setBanner({ kind, text })
+  }, [])
 
   const reloadRuns = useCallback(async (): Promise<void> => {
     try {
-      const result = await sendCommand({ type: "tasks.runs" });
-      if (result.type === "tasks.runs") setRuns(result.runs);
+      const result = await sendCommand({ type: 'tasks.runs' })
+      if (result.type === 'tasks.runs') setRuns(result.runs)
     } catch (error) {
-      flash("error", (error as Error).message);
+      flash('error', (error as Error).message)
     }
-  }, [flash]);
+  }, [flash])
 
   useEffect(() => {
-    void reloadRuns();
-  }, [reloadRuns]);
+    void reloadRuns()
+  }, [reloadRuns])
 
   // Deep links from other tabs (Workflows tab failed-run banner) arrive as a
   // `bc:open-history` window event; App flips to this tab, and here we switch
@@ -131,20 +132,20 @@ export default function HistoryTab() {
   // expand + flash the failing run's detail.
   useEffect(() => {
     const handler = (event: Event): void => {
-      const detail = (event as CustomEvent<{ section?: Section; runId?: string }>).detail;
-      if (detail?.section) setSection(detail.section);
-      if (detail?.runId) setFocusRunId(detail.runId);
-    };
-    window.addEventListener("bc:open-history", handler);
-    return () => window.removeEventListener("bc:open-history", handler);
-  }, []);
+      const detail = (event as CustomEvent<{ section?: Section; runId?: string }>).detail
+      if (detail?.section) setSection(detail.section)
+      if (detail?.runId) setFocusRunId(detail.runId)
+    }
+    window.addEventListener('bc:open-history', handler)
+    return () => window.removeEventListener('bc:open-history', handler)
+  }, [])
 
   const sections: Array<{ id: Section; label: string }> = [
-    { id: "conversations", label: t.histConversations },
-    { id: "workflowRuns", label: t.histWorkflowRuns },
-    { id: "taskRuns", label: t.histTaskRuns },
-    { id: "operations", label: t.histOperations },
-  ];
+    { id: 'conversations', label: t.histConversations },
+    { id: 'workflowRuns', label: t.histWorkflowRuns },
+    { id: 'taskRuns', label: t.histTaskRuns },
+    { id: 'operations', label: t.histOperations },
+  ]
 
   return (
     <div className="pane history-tab">
@@ -172,42 +173,42 @@ export default function HistoryTab() {
         ))}
       </div>
 
-      {section === "conversations" && <ConversationsSection t={t} flash={flash} />}
-      {section === "workflowRuns" && (
+      {section === 'conversations' && <ConversationsSection t={t} flash={flash} />}
+      {section === 'workflowRuns' && (
         <RunsSection
           t={t}
           flash={flash}
           runs={runs}
           reload={reloadRuns}
-          filter={(run) => run.source === "manual" || run.source === "chat"}
+          filter={(run) => run.source === 'manual' || run.source === 'chat'}
           focusRunId={focusRunId}
           onFocused={() => setFocusRunId(null)}
         />
       )}
-      {section === "taskRuns" && (
+      {section === 'taskRuns' && (
         <RunsSection
           t={t}
           flash={flash}
           runs={runs}
           reload={reloadRuns}
-          filter={(run) => run.source === "schedule" || run.source === "feishu"}
+          filter={(run) => run.source === 'schedule' || run.source === 'feishu'}
           focusRunId={focusRunId}
           onFocused={() => setFocusRunId(null)}
         />
       )}
-      {section === "operations" && <OperationsSection t={t} flash={flash} />}
+      {section === 'operations' && <OperationsSection t={t} flash={flash} />}
     </div>
-  );
+  )
 }
 
 // --- Shared helpers ---------------------------------------------------------
 
 /** Toggle a string id in a Set, returning a new Set (immutable). */
 function toggleId(set: Set<string>, id: string): Set<string> {
-  const next = new Set(set);
-  if (next.has(id)) next.delete(id);
-  else next.add(id);
-  return next;
+  const next = new Set(set)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  return next
 }
 
 /** Select-all / deselect-all toggle based on current all-selected state. */
@@ -215,55 +216,55 @@ function selectAllToggle<T extends { id: string }>(
   items: T[] | null,
   selected: Set<string>,
 ): Set<string> {
-  const allSelected = items !== null && items.length > 0 && items.every((i) => selected.has(i.id));
-  if (allSelected) return new Set();
-  return new Set((items ?? []).map((i) => i.id));
+  const allSelected = items !== null && items.length > 0 && items.every((i) => selected.has(i.id))
+  if (allSelected) return new Set()
+  return new Set((items ?? []).map((i) => i.id))
 }
 
-type BadgeKind = "ok" | "err" | "cancel" | "skip";
+type BadgeKind = 'ok' | 'err' | 'cancel' | 'skip'
 
 function badgeKind(run: TaskRunLog): BadgeKind {
-  if (run.skipped) return "skip";
-  if (run.ok) return "ok";
-  return run.outcome === "cancelled" ? "cancel" : "err";
+  if (run.skipped) return 'skip'
+  if (run.ok) return 'ok'
+  return run.outcome === 'cancelled' ? 'cancel' : 'err'
 }
 
 function badgeLabel(t: ReturnType<typeof useT>, run: TaskRunLog): string {
-  if (run.skipped) return t.histOutcomeSkipped;
-  if (run.ok) return t.histOutcomeOk;
-  return run.outcome === "cancelled" ? t.histOutcomeCancelled : t.histOutcomeFailed;
+  if (run.skipped) return t.histOutcomeSkipped
+  if (run.ok) return t.histOutcomeOk
+  return run.outcome === 'cancelled' ? t.histOutcomeCancelled : t.histOutcomeFailed
 }
 
 /** Human-readable trigger source, reused from the Tasks tab vocabulary. */
-function sourceLabel(t: ReturnType<typeof useT>, source: TaskRunLog["source"] | undefined): string {
+function sourceLabel(t: ReturnType<typeof useT>, source: TaskRunLog['source'] | undefined): string {
   switch (source) {
-    case "chat":
-      return t.taskSourceChat;
-    case "schedule":
-      return t.taskSourceSchedule;
-    case "manual":
-      return t.taskSourceManual;
-    case "feishu":
-      return t.taskSourceFeishu;
+    case 'chat':
+      return t.taskSourceChat
+    case 'schedule':
+      return t.taskSourceSchedule
+    case 'manual':
+      return t.taskSourceManual
+    case 'feishu':
+      return t.taskSourceFeishu
     default:
-      return "";
+      return ''
   }
 }
 
 interface BatchBarProps {
-  count: number;
-  total: number;
-  onSelectAll: () => void;
-  onDelete: () => void;
-  t: ReturnType<typeof useT>;
+  count: number
+  total: number
+  onSelectAll: () => void
+  onDelete: () => void
+  t: ReturnType<typeof useT>
   /** Optional extra control on the right (e.g. "clear all" for operations). */
-  extra?: React.ReactNode;
+  extra?: React.ReactNode
 }
 
 /** Sticky batch-delete toolbar shared by every list section. */
 function BatchBar({ count, total, onSelectAll, onDelete, t, extra }: BatchBarProps) {
-  const allSelected = total > 0 && count === total;
-  const noneSelected = total === 0;
+  const allSelected = total > 0 && count === total
+  const noneSelected = total === 0
   return (
     <div className="card record-batchbar">
       <label className="record-batchbar-check">
@@ -272,7 +273,7 @@ function BatchBar({ count, total, onSelectAll, onDelete, t, extra }: BatchBarPro
           checked={allSelected}
           ref={(el) => {
             // Indeterminate when some, but not all, visible items are selected.
-            if (el) el.indeterminate = count > 0 && !allSelected;
+            if (el) el.indeterminate = count > 0 && !allSelected
           }}
           disabled={noneSelected}
           onChange={onSelectAll}
@@ -281,7 +282,7 @@ function BatchBar({ count, total, onSelectAll, onDelete, t, extra }: BatchBarPro
         <span>{t.histSelectAll}</span>
       </label>
       <div className="record-batchbar-count">
-        {count > 0 ? `${count} / ${total}` : total > 0 ? `共 ${total} 条` : ""}
+        {count > 0 ? `${count} / ${total}` : total > 0 ? `共 ${total} 条` : ''}
       </div>
       <div className="record-batchbar-actions">
         {extra}
@@ -290,92 +291,92 @@ function BatchBar({ count, total, onSelectAll, onDelete, t, extra }: BatchBarPro
         </button>
       </div>
     </div>
-  );
+  )
 }
 
 // --- Conversations ----------------------------------------------------------
 
 interface ConvState {
   /** True while the transcript is being fetched for the first time. */
-  loading: boolean;
+  loading: boolean
   /** Cached transcript; persists across collapse/re-expand. */
-  messages: { role: "user" | "assistant" | "tool"; text: string }[];
+  messages: { role: 'user' | 'assistant' | 'tool'; text: string }[]
   /** Whether the detail panel is currently visible. */
-  open: boolean;
+  open: boolean
 }
 
 function ConversationsSection({ t, flash }: SectionProps) {
-  const [items, setItems] = useState<ConversationMeta[] | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [items, setItems] = useState<ConversationMeta[] | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   // One entry per conversation the user has ever expanded. `messages` is
   // cached so collapse + re-open is instant and we never query the worker
   // twice for the same transcript.
-  const [state, setState] = useState<Record<string, ConvState>>({});
+  const [state, setState] = useState<Record<string, ConvState>>({})
 
   const load = useCallback(async (): Promise<void> => {
     try {
-      const result = await sendCommand({ type: "conversations.list" });
-      if (result.type === "conversations.list") setItems(result.conversations);
+      const result = await sendCommand({ type: 'conversations.list' })
+      if (result.type === 'conversations.list') setItems(result.conversations)
     } catch (error) {
-      flash("error", (error as Error).message);
+      flash('error', (error as Error).message)
     }
-  }, [flash]);
+  }, [flash])
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void load()
+  }, [load])
 
   const toggle = useCallback(
     async (id: string): Promise<void> => {
-      const current = state[id];
+      const current = state[id]
       if (current) {
         // Already loaded at least once — toggle open/closed, keep messages.
         setState((prev) => ({
           ...prev,
           [id]: { ...current, open: !current.open },
-        }));
-        return;
+        }))
+        return
       }
       // First expansion: mark loading + open, fetch once.
       setState((prev) => ({
         ...prev,
         [id]: { loading: true, messages: [], open: true },
-      }));
+      }))
       try {
-        const result = await sendCommand({ type: "conversations.get", id });
-        const messages = result.type === "conversations.get" ? result.messages : [];
+        const result = await sendCommand({ type: 'conversations.get', id })
+        const messages = result.type === 'conversations.get' ? result.messages : []
         setState((prev) => ({
           ...prev,
           [id]: { loading: false, messages, open: prev[id]?.open ?? true },
-        }));
+        }))
       } catch (error) {
-        flash("error", (error as Error).message);
-        setState((prev) => ({ ...prev, [id]: { loading: false, messages: [], open: false } }));
+        flash('error', (error as Error).message)
+        setState((prev) => ({ ...prev, [id]: { loading: false, messages: [], open: false } }))
       }
     },
     [state, flash],
-  );
+  )
 
   const removeOne = useCallback(
     async (id: string): Promise<void> => {
       try {
-        await sendCommand({ type: "conversations.delete", id });
+        await sendCommand({ type: 'conversations.delete', id })
         setSelected((prev) => {
-          if (!prev.has(id)) return prev;
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
-        await load();
+          if (!prev.has(id)) return prev
+          const next = new Set(prev)
+          next.delete(id)
+          return next
+        })
+        await load()
       } catch (error) {
-        flash("error", (error as Error).message);
+        flash('error', (error as Error).message)
       }
     },
     [flash, load],
-  );
+  )
 
   const removeSelected = useCallback(async (): Promise<void> => {
-    if (selected.size === 0) return;
+    if (selected.size === 0) return
     if (
       !(await confirmDialog({
         title: t.dialogDeleteTitle,
@@ -385,20 +386,20 @@ function ConversationsSection({ t, flash }: SectionProps) {
         danger: true,
       }))
     )
-      return;
-    const count = selected.size;
+      return
+    const count = selected.size
     try {
       for (const id of selected) {
-        await sendCommand({ type: "conversations.delete", id });
+        await sendCommand({ type: 'conversations.delete', id })
       }
-      setSelected(new Set());
-      await load();
-      flash("ok", `${count}`);
+      setSelected(new Set())
+      await load()
+      flash('ok', `${count}`)
     } catch (error) {
-      flash("error", (error as Error).message);
-      await load();
+      flash('error', (error as Error).message)
+      await load()
     }
-  }, [selected, t, flash, load]);
+  }, [selected, t, flash, load])
 
   return (
     <div className="record-section">
@@ -413,8 +414,8 @@ function ConversationsSection({ t, flash }: SectionProps) {
       )}
       {items !== null && items.length === 0 && <div className="empty">{t.histEmpty}</div>}
       {items?.map((conv) => {
-        const detail = state[conv.id];
-        const isOpen = detail?.open ?? false;
+        const detail = state[conv.id]
+        const isOpen = detail?.open ?? false
         return (
           <div className="record-card conv-record" key={conv.id}>
             <div
@@ -423,9 +424,9 @@ function ConversationsSection({ t, flash }: SectionProps) {
               role="button"
               tabIndex={0}
               onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  void toggle(conv.id);
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  void toggle(conv.id)
                 }
               }}
             >
@@ -437,7 +438,7 @@ function ConversationsSection({ t, flash }: SectionProps) {
                 onChange={() => setSelected((prev) => toggleId(prev, conv.id))}
                 aria-label={conv.title}
               />
-              <span className={`record-caret${isOpen ? " open" : ""}`} aria-hidden="true" />
+              <span className={`record-caret${isOpen ? ' open' : ''}`} aria-hidden="true" />
               <span className="record-title">{conv.title}</span>
               <span className="record-meta">
                 <span className="record-time">{formatWhen(conv.createdAt)}</span>
@@ -445,8 +446,8 @@ function ConversationsSection({ t, flash }: SectionProps) {
               <button
                 className="icon-btn danger record-delete"
                 onClick={(e) => {
-                  e.stopPropagation();
-                  void removeOne(conv.id);
+                  e.stopPropagation()
+                  void removeOne(conv.id)
                 }}
                 title={t.delete}
                 aria-label={t.delete}
@@ -473,8 +474,8 @@ function ConversationsSection({ t, flash }: SectionProps) {
                       <button
                         className="primary conv-continue"
                         onClick={(e) => {
-                          e.stopPropagation();
-                          continueConversation(conv.id);
+                          e.stopPropagation()
+                          continueConversation(conv.id)
                         }}
                         type="button"
                       >
@@ -486,89 +487,89 @@ function ConversationsSection({ t, flash }: SectionProps) {
               </div>
             )}
           </div>
-        );
+        )
       })}
     </div>
-  );
+  )
 }
 
 // --- Runs: shared by workflow-runs and task-runs sections -------------------
 
 interface RunsSectionProps extends SectionProps {
-  runs: TaskRunLog[] | null;
-  reload: () => Promise<void>;
-  filter: (run: TaskRunLog) => boolean;
+  runs: TaskRunLog[] | null
+  reload: () => Promise<void>
+  filter: (run: TaskRunLog) => boolean
   /** Run id deep-linked from another tab; its card auto-expands + highlights. */
-  focusRunId?: string | null;
+  focusRunId?: string | null
   /** Called once the deep-linked run was found in this section. */
-  onFocused?: () => void;
+  onFocused?: () => void
 }
 
 function RunsSection({ t, flash, runs, reload, filter, focusRunId, onFocused }: RunsSectionProps) {
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [open, setOpen] = useState<Record<string, boolean>>({})
   // Ids of deep-linked cards currently playing the highlight flash.
-  const [flashing, setFlashing] = useState<Set<string>>(new Set());
+  const [flashing, setFlashing] = useState<Set<string>>(new Set())
   const items = (runs ?? [])
     .filter(filter)
     .slice()
-    .sort((a, b) => (b.startedAt ?? b.at) - (a.startedAt ?? a.at));
+    .sort((a, b) => (b.startedAt ?? b.at) - (a.startedAt ?? a.at))
 
   // Expand + flash a run another tab deep-linked to (e.g. the Workflows tab's
   // failed-run banner). No-op when the id belongs to the other run section.
   useEffect(() => {
-    if (!focusRunId) return;
-    const match = items.find((run) => run.id === focusRunId);
-    if (!match) return;
-    setOpen((prev) => (prev[focusRunId] ? prev : { ...prev, [focusRunId]: true }));
+    if (!focusRunId) return
+    const match = items.find((run) => run.id === focusRunId)
+    if (!match) return
+    setOpen((prev) => (prev[focusRunId] ? prev : { ...prev, [focusRunId]: true }))
     setFlashing((prev) => {
-      const next = new Set(prev);
-      next.add(focusRunId);
-      return next;
-    });
-    onFocused?.();
+      const next = new Set(prev)
+      next.add(focusRunId)
+      return next
+    })
+    onFocused?.()
     const timer = setTimeout(() => {
       setFlashing((prev) => {
-        const next = new Set(prev);
-        next.delete(focusRunId);
-        return next;
-      });
-    }, 2600);
+        const next = new Set(prev)
+        next.delete(focusRunId)
+        return next
+      })
+    }, 2600)
     // Wait a tick for the card to render before scrolling it into view.
     const scrollTimer = setTimeout(() => {
       document
         .querySelector(`[data-run-id="${focusRunId}"]`)
-        ?.scrollIntoView({ block: "center", behavior: "smooth" });
-    }, 60);
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 60)
     return () => {
-      clearTimeout(timer);
-      clearTimeout(scrollTimer);
-    };
+      clearTimeout(timer)
+      clearTimeout(scrollTimer)
+    }
     // items identity changes on every reload; the effect should only refire for
     // a new deep link.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusRunId]);
+  }, [focusRunId])
 
   const removeOne = useCallback(
     async (id: string): Promise<void> => {
       try {
-        await sendCommand({ type: "tasks.runs.delete", id });
+        await sendCommand({ type: 'tasks.runs.delete', id })
         setSelected((prev) => {
-          if (!prev.has(id)) return prev;
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
-        await reload();
+          if (!prev.has(id)) return prev
+          const next = new Set(prev)
+          next.delete(id)
+          return next
+        })
+        await reload()
       } catch (error) {
-        flash("error", (error as Error).message);
+        flash('error', (error as Error).message)
       }
     },
     [flash, reload],
-  );
+  )
 
   const removeSelected = useCallback(async (): Promise<void> => {
-    if (selected.size === 0) return;
+    if (selected.size === 0) return
     if (
       !(await confirmDialog({
         title: t.dialogDeleteTitle,
@@ -578,23 +579,23 @@ function RunsSection({ t, flash, runs, reload, filter, focusRunId, onFocused }: 
         danger: true,
       }))
     )
-      return;
-    const count = selected.size;
+      return
+    const count = selected.size
     try {
       for (const id of selected) {
-        await sendCommand({ type: "tasks.runs.delete", id });
+        await sendCommand({ type: 'tasks.runs.delete', id })
       }
-      setSelected(new Set());
-      await reload();
-      flash("ok", `${count}`);
+      setSelected(new Set())
+      await reload()
+      flash('ok', `${count}`)
     } catch (error) {
-      flash("error", (error as Error).message);
-      await reload();
+      flash('error', (error as Error).message)
+      await reload()
     }
-  }, [selected, t, flash, reload]);
+  }, [selected, t, flash, reload])
 
   const clearAll = useCallback(async (): Promise<void> => {
-    if (items.length === 0) return;
+    if (items.length === 0) return
     if (
       !(await confirmDialog({
         title: t.dialogDeleteTitle,
@@ -604,15 +605,15 @@ function RunsSection({ t, flash, runs, reload, filter, focusRunId, onFocused }: 
         danger: true,
       }))
     )
-      return;
+      return
     try {
-      await sendCommand({ type: "tasks.runs.clear" });
-      setSelected(new Set());
-      await reload();
+      await sendCommand({ type: 'tasks.runs.clear' })
+      setSelected(new Set())
+      await reload()
     } catch (error) {
-      flash("error", (error as Error).message);
+      flash('error', (error as Error).message)
     }
-  }, [items.length, t, flash, reload]);
+  }, [items.length, t, flash, reload])
 
   return (
     <div className="record-section">
@@ -632,13 +633,13 @@ function RunsSection({ t, flash, runs, reload, filter, focusRunId, onFocused }: 
       )}
       {items.length === 0 && <div className="empty">{t.histEmptyRuns}</div>}
       {items.map((run) => {
-        const isOpen = open[run.id] ?? false;
-        const label = run.label || run.taskId || run.id;
-        const kind = badgeKind(run);
-        const src = sourceLabel(t, run.source);
+        const isOpen = open[run.id] ?? false
+        const label = run.label || run.taskId || run.id
+        const kind = badgeKind(run)
+        const src = sourceLabel(t, run.source)
         return (
           <div
-            className={`record-card run-record${flashing.has(run.id) ? " run-record-flash" : ""}`}
+            className={`record-card run-record${flashing.has(run.id) ? ' run-record-flash' : ''}`}
             key={run.id}
             data-run-id={run.id}
           >
@@ -648,9 +649,9 @@ function RunsSection({ t, flash, runs, reload, filter, focusRunId, onFocused }: 
               role="button"
               tabIndex={0}
               onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setOpen((prev) => ({ ...prev, [run.id]: !isOpen }));
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  setOpen((prev) => ({ ...prev, [run.id]: !isOpen }))
                 }
               }}
             >
@@ -662,7 +663,7 @@ function RunsSection({ t, flash, runs, reload, filter, focusRunId, onFocused }: 
                 onChange={() => setSelected((prev) => toggleId(prev, run.id))}
                 aria-label={label}
               />
-              <span className={`record-caret${isOpen ? " open" : ""}`} aria-hidden="true" />
+              <span className={`record-caret${isOpen ? ' open' : ''}`} aria-hidden="true" />
               <span className="record-title">{label}</span>
               <span className="record-meta">
                 {src && <span className="record-source">{src}</span>}
@@ -672,8 +673,8 @@ function RunsSection({ t, flash, runs, reload, filter, focusRunId, onFocused }: 
               <button
                 className="icon-btn danger record-delete"
                 onClick={(e) => {
-                  e.stopPropagation();
-                  void removeOne(run.id);
+                  e.stopPropagation()
+                  void removeOne(run.id)
                 }}
                 title={t.delete}
                 aria-label={t.delete}
@@ -707,35 +708,35 @@ function RunsSection({ t, flash, runs, reload, filter, focusRunId, onFocused }: 
               </div>
             )}
           </div>
-        );
+        )
       })}
     </div>
-  );
+  )
 }
 
 // --- Operations (action history) --------------------------------------------
 
 function OperationsSection({ t, flash }: SectionProps) {
-  const [entries, setEntries] = useState<HistoryEntry[] | null>(null);
-  const [conversations, setConversations] = useState<ConversationMeta[]>([]);
+  const [entries, setEntries] = useState<HistoryEntry[] | null>(null)
+  const [conversations, setConversations] = useState<ConversationMeta[]>([])
   // Selection is per CONVERSATION/group, never per individual operation row:
   // the stored ids are group keys (conversation ids / "task:…" / "feishu:…").
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   /** Open AI node-review dialog for a rebuilt workflow (null = closed). */
   const [review, setReview] = useState<{
-    workflow: Workflow;
-    stepList: ReviewStep[];
-    reviewing: boolean;
-    review: WorkflowReview | null;
+    workflow: Workflow
+    stepList: ReviewStep[]
+    reviewing: boolean
+    review: WorkflowReview | null
     /** Failure reason of the last review attempt (timeout / endpoint / parse). */
-    reviewError: string | null;
+    reviewError: string | null
     /** Ordered review progress lines shown in the dialog. */
-    reviewLog: string[];
+    reviewLog: string[]
     /** Failure reason of the last save attempt; the dialog stays open for a retry. */
-    saveError: string | null;
-    keep: Record<string, boolean> | null;
-  } | null>(null);
+    saveError: string | null
+    keep: Record<string, boolean> | null
+  } | null>(null)
 
   // Live AI review log: the port (mounted in ChatTab) forwards pushed lines
   // through the shared fan-out; render them in the open dialog as they come.
@@ -743,60 +744,57 @@ function OperationsSection({ t, flash }: SectionProps) {
     return onReviewLog((text) => {
       setReview((prev) =>
         prev && prev.reviewing ? { ...prev, reviewLog: [...prev.reviewLog, text] } : prev,
-      );
-    });
-  }, []);
+      )
+    })
+  }, [])
 
   const load = useCallback(async (): Promise<void> => {
     try {
       const [histResult, convResult] = await Promise.all([
-        sendCommand({ type: "history.list" }),
-        sendCommand({ type: "conversations.list" }),
-      ]);
-      if (histResult.type === "history.list") setEntries(histResult.entries);
-      if (convResult.type === "conversations.list") setConversations(convResult.conversations);
+        sendCommand({ type: 'history.list' }),
+        sendCommand({ type: 'conversations.list' }),
+      ])
+      if (histResult.type === 'history.list') setEntries(histResult.entries)
+      if (convResult.type === 'conversations.list') setConversations(convResult.conversations)
     } catch (error) {
-      flash("error", (error as Error).message);
+      flash('error', (error as Error).message)
     }
-  }, [flash]);
+  }, [flash])
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void load()
+  }, [load])
 
   const removeOne = useCallback(
     async (id: string): Promise<void> => {
       try {
-        await sendCommand({ type: "history.delete", id });
+        await sendCommand({ type: 'history.delete', id })
         setSelected((prev) => {
-          if (!prev.has(id)) return prev;
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
-        await load();
+          if (!prev.has(id)) return prev
+          const next = new Set(prev)
+          next.delete(id)
+          return next
+        })
+        await load()
       } catch (error) {
-        flash("error", (error as Error).message);
+        flash('error', (error as Error).message)
       }
     },
     [flash, load],
-  );
+  )
 
   // `selected` holds GROUP keys (conversations); deleting removes every action
   // record inside each selected group.
-  const groups = entries ? groupHistory(entries, conversations) : [];
+  const groups = entries ? groupHistory(entries, conversations) : []
   const entryCountOf = (groupKeys: Set<string>): number =>
-    groups.reduce(
-      (sum, g) => sum + (groupKeys.has(g.key) ? g.entries.length : 0),
-      0,
-    );
+    groups.reduce((sum, g) => sum + (groupKeys.has(g.key) ? g.entries.length : 0), 0)
 
   const removeSelected = useCallback(async (): Promise<void> => {
-    if (selected.size === 0) return;
-    const toDelete = (entries ?? []).filter((e) => selected.has(e.conversationId || "unknown"));
+    if (selected.size === 0) return
+    const toDelete = (entries ?? []).filter((e) => selected.has(e.conversationId || 'unknown'))
     if (toDelete.length === 0) {
-      setSelected(new Set());
-      return;
+      setSelected(new Set())
+      return
     }
     if (
       !(await confirmDialog({
@@ -807,23 +805,23 @@ function OperationsSection({ t, flash }: SectionProps) {
         danger: true,
       }))
     )
-      return;
+      return
     try {
       for (const entry of toDelete) {
-        await sendCommand({ type: "history.delete", id: entry.id });
+        await sendCommand({ type: 'history.delete', id: entry.id })
       }
-      setSelected(new Set());
-      await load();
-      flash("ok", `${toDelete.length}`);
+      setSelected(new Set())
+      await load()
+      flash('ok', `${toDelete.length}`)
     } catch (error) {
-      flash("error", (error as Error).message);
-      await load();
+      flash('error', (error as Error).message)
+      await load()
     }
-  }, [selected, entries, t, flash, load]);
+  }, [selected, entries, t, flash, load])
 
   const clearAll = useCallback(async (): Promise<void> => {
-    const total = entries?.length ?? 0;
-    if (total === 0) return;
+    const total = entries?.length ?? 0
+    if (total === 0) return
     if (
       !(await confirmDialog({
         title: t.dialogDeleteTitle,
@@ -833,16 +831,16 @@ function OperationsSection({ t, flash }: SectionProps) {
         danger: true,
       }))
     )
-      return;
+      return
     try {
-      await sendCommand({ type: "history.clear" });
-      setSelected(new Set());
-      await load();
-      flash("ok", `${total}`);
+      await sendCommand({ type: 'history.clear' })
+      setSelected(new Set())
+      await load()
+      flash('ok', `${total}`)
     } catch (error) {
-      flash("error", (error as Error).message);
+      flash('error', (error as Error).message)
     }
-  }, [entries, t, flash, load]);
+  }, [entries, t, flash, load])
 
   /**
    * Rebuilds a linear workflow from a group's action steps (oldest first) and
@@ -860,20 +858,20 @@ function OperationsSection({ t, flash }: SectionProps) {
     (workflow: Workflow): void => {
       const applyVerdict = (verdict: WorkflowReview | null, errorMessage?: string): void => {
         setReview((prev) => {
-          if (!prev || prev.workflow.id !== workflow.id) return prev;
+          if (!prev || prev.workflow.id !== workflow.id) return prev
           // Materialize the verdicts into the keep set so the checkboxes AND
           // the saved result both reflect the AI judgment; unmentioned steps
           // stay keep=true.
-          const keep: Record<string, boolean> = { ...prev.keep };
+          const keep: Record<string, boolean> = { ...prev.keep }
           if (verdict) {
-            for (const item of verdict.steps) keep[item.id] = item.keep;
+            for (const item of verdict.steps) keep[item.id] = item.keep
           }
-          const dropped = verdict?.steps.filter((item) => !item.keep).length ?? 0;
+          const dropped = verdict?.steps.filter((item) => !item.keep).length ?? 0
           const logLine = verdict
             ? dropped > 0
               ? t.chatWorkflowReviewDropped({ count: dropped })
               : t.chatWorkflowReviewAllKept
-            : t.workflowReviewLogFailed;
+            : t.workflowReviewLogFailed
           return {
             ...prev,
             reviewing: false,
@@ -881,9 +879,9 @@ function OperationsSection({ t, flash }: SectionProps) {
             reviewError: errorMessage ?? null,
             reviewLog: [...prev.reviewLog, logLine],
             keep,
-          };
-        });
-      };
+          }
+        })
+      }
       setReview((prev) =>
         prev && prev.workflow.id === workflow.id
           ? {
@@ -896,35 +894,35 @@ function OperationsSection({ t, flash }: SectionProps) {
               ],
             }
           : prev,
-      );
+      )
       void (async () => {
         try {
-          const result = await sendCommand({ type: "workflows.review", workflow });
-          if (result.type === "workflows.review") applyVerdict(result.review, result.error);
+          const result = await sendCommand({ type: 'workflows.review', workflow })
+          if (result.type === 'workflows.review') applyVerdict(result.review, result.error)
         } catch (error) {
-          applyVerdict(null, (error as Error).message);
+          applyVerdict(null, (error as Error).message)
         }
-      })();
+      })()
     },
     [t],
-  );
+  )
 
   const rebuild = useCallback(
     async (groupTitle: string, groupEntries: HistoryEntry[]): Promise<void> => {
-      const workflow = workflowFromHistory([...groupEntries].reverse(), `从历史: ${groupTitle}`);
+      const workflow = workflowFromHistory([...groupEntries].reverse(), `从历史: ${groupTitle}`)
       if (!workflow) {
-        flash("error", t.dataHistoryToWorkflowEmpty);
-        return;
+        flash('error', t.dataHistoryToWorkflowEmpty)
+        return
       }
-      const stepList = reviewStepsOf(workflow);
+      const stepList = reviewStepsOf(workflow)
       if (stepList.length === 0) {
         try {
-          await saveWorkflow(workflow);
-          flash("ok", t.dataHistoryToWorkflowDone);
+          await saveWorkflow(workflow)
+          flash('ok', t.dataHistoryToWorkflowDone)
         } catch (error) {
-          flash("error", (error as Error).message);
+          flash('error', (error as Error).message)
         }
-        return;
+        return
       }
       setReview({
         workflow,
@@ -935,47 +933,47 @@ function OperationsSection({ t, flash }: SectionProps) {
         reviewLog: [],
         saveError: null,
         keep: null,
-      });
-      runReview(workflow);
+      })
+      runReview(workflow)
     },
     [flash, t, runReview],
-  );
+  )
 
   /** Review dialog retry: re-runs a failed/unavailable review on the spot. */
   const retryReview = useCallback((): void => {
-    if (!review || review.reviewing) return;
-    runReview(review.workflow);
-  }, [review, runReview]);
+    if (!review || review.reviewing) return
+    runReview(review.workflow)
+  }, [review, runReview])
 
   /** Keep/drop one reviewed step (primary + its satellites) in the dialog. */
   const toggleStepKeep = (stepId: string, kept: boolean): void => {
-    setReview((prev) => (prev ? { ...prev, keep: { ...prev.keep, [stepId]: kept } } : prev));
-  };
+    setReview((prev) => (prev ? { ...prev, keep: { ...prev.keep, [stepId]: kept } } : prev))
+  }
 
   /** Applies the keep set and persists; the dialog closes only on success. */
   const confirmReview = useCallback(async (): Promise<void> => {
-    const current = review;
-    if (!current) return;
+    const current = review
+    if (!current) return
     try {
-      const workflow = applyNodeKeepSelection(current.workflow, current.keep ?? {});
-      await saveWorkflow(workflow);
-      setReview(null);
-      flash("ok", t.dataHistoryToWorkflowDone);
+      const workflow = applyNodeKeepSelection(current.workflow, current.keep ?? {})
+      await saveWorkflow(workflow)
+      setReview(null)
+      flash('ok', t.dataHistoryToWorkflowDone)
     } catch (error) {
       // The dialog stays open so the failure is visible and the save retryable.
-      const message = (error as Error).message;
-      setReview((prev) => (prev ? { ...prev, saveError: message } : prev));
-      flash("error", message);
+      const message = (error as Error).message
+      setReview((prev) => (prev ? { ...prev, saveError: message } : prev))
+      flash('error', message)
     }
-  }, [review, flash, t]);
+  }, [review, flash, t])
 
   const toggleGroup = (key: string): void => {
-    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
+    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
 
   const toggleGroupSelected = (key: string): void => {
-    setSelected((prev) => toggleId(prev, key));
-  };
+    setSelected((prev) => toggleId(prev, key))
+  }
 
   return (
     <div className="record-section">
@@ -985,9 +983,7 @@ function OperationsSection({ t, flash }: SectionProps) {
           total={entries.length}
           onSelectAll={() =>
             setSelected((prev) =>
-              prev.size === groups.length
-                ? new Set()
-                : new Set(groups.map((g) => g.key)),
+              prev.size === groups.length ? new Set() : new Set(groups.map((g) => g.key)),
             )
           }
           onDelete={() => void removeSelected()}
@@ -1001,10 +997,10 @@ function OperationsSection({ t, flash }: SectionProps) {
       )}
       {entries !== null && entries.length === 0 && <div className="empty">{t.histEmpty}</div>}
       {groups.map((group) => {
-        const okCount = group.entries.filter((e) => e.ok && e.approved).length;
-        const failCount = group.entries.filter((e) => !e.ok).length;
-        const isOpen = expanded[group.key] ?? false;
-        const groupChecked = selected.has(group.key);
+        const okCount = group.entries.filter((e) => e.ok && e.approved).length
+        const failCount = group.entries.filter((e) => !e.ok).length
+        const isOpen = expanded[group.key] ?? false
+        const groupChecked = selected.has(group.key)
         return (
           <div className="record-card history-group" key={group.key}>
             <div
@@ -1013,9 +1009,9 @@ function OperationsSection({ t, flash }: SectionProps) {
               role="button"
               tabIndex={0}
               onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  toggleGroup(group.key);
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  toggleGroup(group.key)
                 }
               }}
             >
@@ -1027,14 +1023,18 @@ function OperationsSection({ t, flash }: SectionProps) {
                 onChange={() => toggleGroupSelected(group.key)}
                 aria-label={group.title}
               />
-              <span className={`record-caret${isOpen ? " open" : ""}`} aria-hidden="true" />
+              <span className={`record-caret${isOpen ? ' open' : ''}`} aria-hidden="true" />
               <span className="record-title history-group-title">{group.title}</span>
               <span className="record-meta">
                 <span className="history-count">{group.entries.length}</span>
                 {failCount > 0 ? (
-                  <span className="history-stat history-stat-err">{failCount} ✕</span>
+                  <span className="history-stat history-stat-err">
+                    {failCount} <X size={11} strokeWidth={2.5} aria-hidden="true" />
+                  </span>
                 ) : (
-                  <span className="history-stat history-stat-ok">{okCount} ✓</span>
+                  <span className="history-stat history-stat-ok">
+                    {okCount} <Check size={11} strokeWidth={2.5} aria-hidden="true" />
+                  </span>
                 )}
               </span>
               <button
@@ -1042,35 +1042,19 @@ function OperationsSection({ t, flash }: SectionProps) {
                 title={t.dataHistoryToWorkflow}
                 aria-label={t.dataHistoryToWorkflow}
                 onClick={(e) => {
-                  e.stopPropagation();
-                  void rebuild(group.title, group.entries);
+                  e.stopPropagation()
+                  void rebuild(group.title, group.entries)
                 }}
                 type="button"
               >
-                <svg
-                  viewBox="0 0 24 24"
-                  width="15"
-                  height="15"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <rect x="3" y="3" width="7" height="7" rx="1.5" />
-                  <rect x="14" y="14" width="7" height="7" rx="1.5" />
-                  <rect x="14" y="3" width="7" height="7" rx="1.5" />
-                  <path d="M10 6.5h4" />
-                  <path d="M6.5 10v4a2 2 0 0 0 2 2h5.5" />
-                </svg>
+                <WorkflowIcon size={15} strokeWidth={1.8} aria-hidden="true" />
               </button>
             </div>
             {isOpen && (
               <ul className="history-steps">
                 {group.entries.map((entry) => (
                   <li
-                    className={`history-step history-step-${entry.ok ? "ok" : "err"}`}
+                    className={`history-step history-step-${entry.ok ? 'ok' : 'err'}`}
                     key={entry.id}
                   >
                     <div className="history-step-head">
@@ -1084,8 +1068,8 @@ function OperationsSection({ t, flash }: SectionProps) {
                       <button
                         className="icon-btn danger history-delete"
                         onClick={(e) => {
-                          e.stopPropagation();
-                          void removeOne(entry.id);
+                          e.stopPropagation()
+                          void removeOne(entry.id)
                         }}
                         title={t.delete}
                         aria-label={t.delete}
@@ -1113,7 +1097,7 @@ function OperationsSection({ t, flash }: SectionProps) {
               </ul>
             )}
           </div>
-        );
+        )
       })}
       {review && (
         <WorkflowReviewDialog
@@ -1133,5 +1117,5 @@ function OperationsSection({ t, flash }: SectionProps) {
         />
       )}
     </div>
-  );
+  )
 }

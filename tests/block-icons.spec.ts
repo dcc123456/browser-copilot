@@ -1,72 +1,67 @@
 /**
  * Block icon integrity.
  *
- * RemixIcon names are stored in Pascal form (`riFlashlightLine`) and converted
- * to webfont kebab classes at render time. The converter historically only
- * dashed camelCase boundaries, so names with a version/number suffix —
- * `riWindow2Line`, `riDeleteBin7Line`, `riRobot2Line`, … — produced a class
- * with no matching glyph and the node showed no icon. These tests pin the
- * conversion for the digit-suffixed / special-cased names, and assert that
- * every block the palette offers resolves to a supported icon spec whose
- * RemixIcon class actually exists in the bundled font.
+ * Block icons are lucide icons referenced by `lucide:<PascalName>` spec
+ * strings and resolved through a static map in `blocks/icons.tsx` — explicit
+ * imports, so the bundle only ships the glyphs the catalog uses. These tests
+ * pin three invariants:
+ *
+ *  1. every palette block's spec resolves to a lucide name (never the
+ *     fallback), and that name is a real lucide-react export — checked against
+ *     the installed package, so a renamed icon fails here instead of
+ *     rendering a blank or default glyph;
+ *  2. specs persisted by the pre-lucide versions still resolve: the RemixIcon
+ *     names in both Pascal (`riFlowChart`) and webfont-kebab form
+ *     (`ri-flow-chart`), plus `path:` and `http` specs;
+ *  3. truly unknown specs fall back to the default icon instead of throwing.
  */
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { remixClass } from '../src/lib/workflow/blocks/icons'
+import * as lucide from 'lucide-react'
+import { resolveIconName } from '../src/lib/workflow/blocks/icons'
 import { PALETTE_BLOCKS } from '../src/lib/workflow/blocks/palette'
 
-describe('remixClass name -> webfont class', () => {
-  it('dashes plain camelCase', () => {
-    expect(remixClass('riFlashlightLine')).toBe('ri-flashlight-line')
-    expect(remixClass('riIncreaseDecreaseLine')).toBe('ri-increase-decrease-line')
-  })
-
-  it('dashes before a version/number suffix (previously blank icons)', () => {
-    expect(remixClass('riWindow2Line')).toBe('ri-window-2-line')
-    expect(remixClass('riRepeat2Line')).toBe('ri-repeat-2-line')
-    expect(remixClass('riFocus3Line')).toBe('ri-focus-3-line')
-    expect(remixClass('riDatabase2Line')).toBe('ri-database-2-line')
-    expect(remixClass('riChat3Line')).toBe('ri-chat-3-line')
-    expect(remixClass('riDeleteBin7Line')).toBe('ri-delete-bin-7-line')
-    expect(remixClass('riNotification3Line')).toBe('ri-notification-3-line')
-    expect(remixClass('riSettings3Line')).toBe('ri-settings-3-line')
-    expect(remixClass('riRobot2Line')).toBe('ri-robot-2-line')
-  })
-
-  it('handles the non-obvious aliases', () => {
-    // Html5 keeps its digit attached; SS is two s-tokens; AB has no glyph.
-    expect(remixClass('riHtml5Line')).toBe('ri-html5-line')
-    expect(remixClass('riCodeSSlashLine')).toBe('ri-code-s-slash-line')
-    expect(remixClass('riAB')).toBe('ri-git-branch-line')
-  })
-})
-
 describe('palette block icons', () => {
-  // The webfont stylesheet ships the complete class list; read it so the test
-  // fails if a block's RemixIcon name no longer maps to a shipped glyph.
-  const css = readFileSync(resolve(__dirname, '../node_modules/remixicon/fonts/remixicon.css'), 'utf8')
-  const classExists = (cls: string): boolean => css.includes(`.${cls}:before`)
-
-  it('every palette block uses a supported icon spec with a real glyph', () => {
+  it('every palette block resolves to a real lucide-react export', () => {
     for (const block of PALETTE_BLOCKS) {
       const icon = block.icon
       expect(icon, `${block.id} has an icon`).toBeTruthy()
       if (icon.startsWith('path:') || icon.startsWith('http')) continue
-      const cls = remixClass(icon)
-      const leaf = cls.startsWith('ri-') ? cls.slice(3) : cls
-      const exists = classExists(cls) || classExists(`ri-${leaf}-line`) || classExists(`ri-${leaf}-fill`)
-      expect(exists, `${block.id} icon "${icon}" -> "${cls}" resolves in the RemixIcon font`).toBe(true)
+      const name = resolveIconName(icon)
+      expect(name, `${block.id} icon "${icon}" resolves (not the fallback)`).toBeTruthy()
+      expect(
+        (lucide as Record<string, unknown>)[name!],
+        `${block.id} icon "${icon}" -> "${name}" is exported by lucide-react`,
+      ).toBeTruthy()
     }
   })
 
-  it('the digit-suffixed operator blocks render non-blank glyphs', () => {
-    const byId = new Map(PALETTE_BLOCKS.map((b) => [b.id, b.icon]))
-    // new-window / repeat-task / javascript-code use the digit/SSlash remix names;
-    // cookie previously used an inline `path:` SVG, now a RemixIcon name too.
-    expect(classExists(remixClass(byId.get('new-window')!))).toBe(true)
-    expect(classExists(remixClass(byId.get('repeat-task')!))).toBe(true)
-    expect(classExists(remixClass(byId.get('javascript-code')!))).toBe(true)
-    expect(classExists(remixClass(byId.get('cookie')!))).toBe(true)
+  it('the distinct block glyphs stay distinct', () => {
+    const byId = new Map(PALETTE_BLOCKS.map((b) => [b.id, resolveIconName(b.icon)]))
+    // A few representative blocks that previously shared a family of glyphs.
+    expect(byId.get('new-tab')).toBe('Globe')
+    expect(byId.get('webhook')).toBe('Webhook')
+    expect(byId.get('take-screenshot')).toBe('Camera')
+    expect(byId.get('save-assets')).toBe('Image')
+    expect(byId.get('javascript-code')).toBe('CodeXml')
+    expect(byId.get('create-element')).toBe('SquarePlus')
+    expect(byId.get('blocks-group')).toBe('FolderArchive')
+  })
+})
+
+describe('legacy icon spec compatibility', () => {
+  it('maps pre-lucide RemixIcon names (Pascal and kebab form)', () => {
+    expect(resolveIconName('riFlowChart')).toBe('Workflow')
+    expect(resolveIconName('ri-flow-chart')).toBe('Workflow')
+    expect(resolveIconName('riFlashlightLine')).toBe('Zap')
+    expect(resolveIconName('ri-delete-bin-7-line')).toBe('Trash2')
+    expect(resolveIconName('riCodeSSlashLine')).toBe('CodeXml')
+    expect(resolveIconName('riAB')).toBe('GitBranch')
+  })
+
+  it('accepts bare lucide names and unknown specs fall back', () => {
+    expect(resolveIconName('lucide:Zap')).toBe('Zap')
+    expect(resolveIconName('Zap')).toBe('Zap')
+    expect(resolveIconName('lucide:NoSuchIcon')).toBeNull()
+    expect(resolveIconName('ri-entirely-made-up')).toBeNull()
   })
 })

@@ -9,6 +9,7 @@
  * @module workflow-editor/blocks/shared/Field
  */
 
+import { ChevronLeft, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useEditorLocale } from '../../locale-context'
 import NumberInput from '../../../ui/NumberInput'
@@ -193,7 +194,12 @@ export function Switch({
 }) {
   return (
     <label className="wf-field wf-field-check">
-      <input type="checkbox" className="wf-switch" checked={!!checked} onChange={(e) => onChange(e.target.checked)} />
+      <input
+        type="checkbox"
+        className="wf-switch"
+        checked={!!checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
       {label != null && (
         <span>
           <LocalizedLabel label={label} />
@@ -218,8 +224,8 @@ export function Expand({
   return (
     <div className="wf-expand">
       <button type="button" className="wf-expand-header" onClick={() => setOpen(!open)}>
-        <i
-          className="ri-arrow-left-s-line"
+        <ChevronLeft
+          size={14}
           style={{ transform: `rotate(${open ? 90 : -90}deg)`, transition: 'transform .2s' }}
         />
         <span>{typeof title === 'string' ? bt(title) : title}</span>
@@ -231,20 +237,26 @@ export function Expand({
 
 /** Small icon button used inside forms. */
 export function IconButton({
-  icon,
+  icon: Icon,
   title,
   disabled,
   onClick,
 }: {
-  icon: string
+  icon: LucideIcon
   title: string
   disabled?: boolean
   onClick?: () => void
 }) {
   const { bt } = useEditorLocale()
   return (
-    <button type="button" className="wf-icon-btn" title={bt(title)} disabled={disabled} onClick={onClick}>
-      <i className={icon} />
+    <button
+      type="button"
+      className="wf-icon-btn"
+      title={bt(title)}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      <Icon size={14} />
     </button>
   )
 }

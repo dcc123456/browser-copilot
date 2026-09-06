@@ -352,7 +352,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'fill',
       description:
-        'Type text into an input or textarea, replacing its value. Use for text/email/number/search/tel/url fields and contenteditable regions. For checkboxes use set_checkbox; for dropdowns use select_option.',
+        'Type text into an input or textarea, replacing its value. Use for text/email/number/search/tel/url fields and contenteditable regions. PREFER this tool for ALL text entry — it handles React-controlled inputs, contenteditable editors and shadow roots natively; only fall back to run_javascript when a fill attempt has already failed. For checkboxes use set_checkbox; for dropdowns use select_option.',
       parameters: {
         type: 'object',
         properties: {
@@ -544,7 +544,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'run_javascript',
       description:
-        'Run custom JavaScript in the active web page and return its result. Use for data extraction or page manipulation the other tools cannot do. The code runs as a function body in the page; use `return` to send a JSON-serializable value back. This changes the page and requires approval.',
+        'Run custom JavaScript in the active web page and return its result. Use for data extraction or page manipulation the other tools cannot do. Do NOT use this to type text into form fields — the fill tool handles plain inputs, React-controlled inputs, contenteditable editors and shadow roots natively, and workflows replay fill steps as form operators while script fills replay as opaque code. Fall back to a script only AFTER a fill attempt has already failed. The code runs as a function body in the page; use `return` to send a JSON-serializable value back. This changes the page and requires approval.',
       parameters: {
         type: 'object',
         properties: {
@@ -2426,12 +2426,6 @@ export async function runAgentTurn(
   const activeSkill = deps.skillId ? await getSkill(deps.skillId) : undefined
   const catalogue = activeSkill ? [] : skillList
   const disabled = new Set(toolConfig.disabledTools)
-  // 「保存工作流」模式：走逐条执行的老路径。run_plan 的内部步骤在
-  // executeTool 里跑、不经过 runOneToolCall 的审计,撤掉它保证每个动作
-  // 单独入历史,「从历史生成工作流」的算子节点才完整。
-  if ((await getSettings()).saveWorkflowFromChat === true) {
-    disabled.add('run_plan')
-  }
   const systemPrompt = buildSystemPrompt({
     activeSkill,
     catalogue,

@@ -48,10 +48,7 @@ export default function Sidebar({
   const onMouseMove = useCallback(
     (e: MouseEvent) => {
       const delta = e.clientX - startX.current
-      const next =
-        side === 'left'
-          ? startW.current + delta
-          : startW.current - delta
+      const next = side === 'left' ? startW.current + delta : startW.current - delta
       onWidthChange(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, next)))
     },
     [onWidthChange, side],

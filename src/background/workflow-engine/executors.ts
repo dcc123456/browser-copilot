@@ -17,6 +17,7 @@ import { isInjectablePage } from '../../lib/pages'
 import { streamCompletion, type WireMessage } from '../../lib/llm'
 import { getSettings } from '../../lib/storage'
 import { interpolate } from '../../lib/workflow/interpolate'
+import { sanitizeModelAnswer } from '../../lib/model-output'
 import { preprocessImage } from '../../lib/vision'
 import { LoopBreakpointError } from './loop-breakpoint'
 import {
@@ -1042,8 +1043,9 @@ const aiPrompt: BlockExecutor = async (data, ctx) => {
   const settings = await getSettings()
   const provider = settings.providers.find((p) => p.id === settings.activeProviderId)
   if (!provider || !provider.apiKey.trim()) {
-    ctx.emit('error', 'AI 块: 未配置模型给 provider')
-    return null
+    // Fail the block (engine onError: retry → fallback → stop) — never
+    // continue without a model, downstream would act on an empty variable.
+    throw new Error('AI 块: 未配置模型给 provider')
   }
   const messages: WireMessage[] = [{ role: 'user', content: prompt }]
   try {
@@ -1055,10 +1057,18 @@ const aiPrompt: BlockExecutor = async (data, ctx) => {
       headers: provider.headers,
       signal: ctx.signal,
     })
-    ctx.variables['lastAIResponse'] = result.content
-    ctx.emit('result', result.content)
+    // `lastAIResponse` is consumed verbatim by later steps (`{{lastAIResponse}}`
+    // fills, conditions, code): strip reasoning-model `<think>` blocks and a
+    // wrapping ``` fence so wrapper junk never reaches downstream variables.
+    const clean = sanitizeModelAnswer(result.content)
+    ctx.variables['lastAIResponse'] = clean
+    ctx.emit('result', clean)
   } catch (error) {
-    ctx.emit('error', message(error))
+    // No answer → FAIL the block (engine onError: retry → fallback → stop).
+    // The old emit-and-continue let downstream run on a stale/empty
+    // lastAIResponse, which read as "the workflow didn't wait for the AI".
+    ctx.variables['lastAIResponse'] = ''
+    throw new Error(`AI 块: ${message(error)}`)
   }
   return null
 }

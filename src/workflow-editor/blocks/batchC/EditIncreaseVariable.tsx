@@ -23,11 +23,20 @@ export default function EditIncreaseVariable({ data, onChange }: EditFormProps) 
       </Field>
 
       <Field label="Variable name" title="Variable name">
-        <TextInput value={str(data, 'variableName')} placeholder="abc123" onChange={(v) => onChange({ variableName: v })} />
+        <TextInput
+          value={str(data, 'variableName')}
+          placeholder="abc123"
+          onChange={(v) => onChange({ variableName: v })}
+        />
       </Field>
 
       <Field label="Increase by">
-        <NumberInput value={num(data, 'increaseBy', 1)} placeholder="0" fallback={1} onChange={(n) => onChange({ increaseBy: n })} />
+        <NumberInput
+          value={num(data, 'increaseBy', 1)}
+          placeholder="0"
+          fallback={1}
+          onChange={(n) => onChange({ increaseBy: n })}
+        />
       </Field>
     </div>
   )

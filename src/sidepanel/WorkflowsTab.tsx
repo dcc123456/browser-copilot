@@ -13,13 +13,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { sendCommand } from '../lib/messages'
 import type { TaskRunLog } from '../lib/scheduler-types'
 import type { Workflow, WorkflowTrigger } from '../lib/workflow/types'
-import type { DebugRound, DebugStrategy, WorkflowDebugResult } from '../lib/workflow/auto-debug-patch'
-import type { DebugBackupInfo } from '../lib/workflow/debug-backup'
+import type { WorkflowDebugResult } from '../lib/workflow/auto-debug-patch'
+import { debugRunLabel } from '../lib/workflow/ai-takeover'
+import type { PendingTakeoverInfo } from '../lib/workflow/takeover-pending'
 import type { RunStep } from '../background/running-tasks'
-import { debugRunLabel } from '../background/workflow-engine/auto-debug'
 import { newId } from '../lib/storage'
 import { useT } from './i18n'
-import { alertDialog, confirmDialog } from '../ui/confirm'
+import { confirmDialog } from '../ui/confirm'
 
 export default function WorkflowsTab() {
   const t = useT()
@@ -35,19 +35,19 @@ export default function WorkflowsTab() {
     runId?: string
   } | null>(null)
   const [busy, setBusy] = useState(false)
-  // Workflows with a pending AI-debug snapshot (keep / revert review chip).
-  const [backups, setBackups] = useState<DebugBackupInfo[]>([])
+  // Workflows with pending AI-takeover fixes (apply / discard chip).
+  const [pending, setPending] = useState<PendingTakeoverInfo[]>([])
 
   const load = useCallback(async () => {
     try {
-      const [workflowResult, runsResult, backupsResult] = await Promise.all([
+      const [workflowResult, runsResult, pendingResult] = await Promise.all([
         sendCommand({ type: 'workflows.list' }),
         sendCommand({ type: 'tasks.runs' }),
-        sendCommand({ type: 'workflows.debugBackups' }),
+        sendCommand({ type: 'workflows.takeoverPending' }),
       ])
       if (workflowResult.type === 'workflows.list') setWorkflows(workflowResult.workflows)
       if (runsResult.type === 'tasks.runs') setRuns(runsResult.runs)
-      if (backupsResult.type === 'workflows.debugBackups') setBackups(backupsResult.backups)
+      if (pendingResult.type === 'workflows.takeoverPending') setPending(pendingResult.items)
     } catch (error) {
       setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
     }
@@ -171,57 +171,21 @@ export default function WorkflowsTab() {
     return () => clearInterval(timer)
   }, [debuggingId, pollDebugRun])
 
-  const strategyLabel = (strategy: DebugStrategy): string => {
-    switch (strategy) {
-      case 'retry':
-        return t.workflowsDebugStrategyRetry
-      case 'repair-params':
-        return t.workflowsDebugStrategyFix
-      case 'insert-branch':
-        return t.workflowsDebugStrategyBranch
-      case 'insert-ai-agent':
-        return t.workflowsDebugStrategyAgent
-      case 'remove-redundant':
-        return t.workflowsDebugStrategyRemove
-      case 'unfixable':
-        return t.workflowsDebugStrategyUnfixable
-    }
-  }
-
-  const roundOutcomeLabel = (outcome: DebugRound['runOutcome']): string => {
-    switch (outcome) {
-      case 'ok':
-        return t.taskOutcomeOk
-      case 'cancelled':
-        return t.taskOutcomeCancelled
-      default:
-        return t.taskOutcomeFailed
-    }
-  }
-
-  /** Multi-line AI debug report shown after a debug session settles. */
-  const formatDebugReport = (r: WorkflowDebugResult): string => {
-    const lines: string[] = []
-    r.rounds.forEach((round, index) => {
-      lines.push(`${t.workflowsDebugRound({ n: index + 1 })} · ${strategyLabel(round.strategy)}`)
-      lines.push(`${t.workflowsDebugDiagnosis}: ${round.diagnosis || '—'}`)
-      if (round.changes.length > 0) {
-        lines.push(`${t.workflowsDebugChanges}:`)
-        for (const change of round.changes) lines.push(`· ${change}`)
-      }
-      lines.push(`${t.workflowsDebugOutcome}: ${roundOutcomeLabel(round.runOutcome)}`)
-      lines.push('')
-    })
-    if (r.error) lines.push(r.error)
-    return lines.join('\n').trim()
+  /**
+   * Multi-line list of the pending AI-takeover fixes, shown in the confirm
+   * dialog: one bullet per node with WHAT the AI changed.
+   */
+  const formatPendingFixes = (r: WorkflowDebugResult): string => {
+    return r.pendingChanges.map((fix) => `· ${fix.note}`).join('\n')
   }
 
   /**
-   * AI auto-debug: run once; on failure the model diagnoses and repairs the
-   * graph (retry policy / params / guards / AI steps / redundant-node removal)
-   * and the repaired workflow is saved and re-run, at most two fix rounds.
-   * Every attempt lands on the History activity board as its own tracked run,
-   * and the live log modal streams the AI's steps while it works.
+   * AI takeover debug (AI 调试): run the workflow once. When a node fails the
+   * AI takes over that node — it looks at the live page and completes the
+   * step's purpose — then the remaining nodes keep running (up to 3 takeover
+   * attempts per node). The workflow itself is only changed AFTER the user
+   * confirms the AI's proposed node fixes.
+   * The session streams into the live log modal as it works.
    */
   const debugNow = async (id: string, name: string): Promise<void> => {
     debuggingNameRef.current = name
@@ -235,13 +199,18 @@ export default function WorkflowsTab() {
       const result = await sendCommand({ type: 'workflows.debug', id })
       if (result.type === 'workflows.debug') {
         const r = result.result
-        const appliedRounds = r.rounds.filter((round) => round.strategy !== 'unfixable').length
-        if (r.ok && !r.workflowModified) {
+        const completedTakeovers = r.takeovers.filter((t) => t.completed).length
+        if (r.ok && completedTakeovers === 0) {
           setBanner({ kind: 'ok', text: r.summary || t.workflowsDebugOkNoChanges })
         } else if (r.ok) {
-          setBanner({ kind: 'ok', text: t.workflowsDebugFixed({ rounds: appliedRounds }) })
+          setBanner({
+            kind: 'ok',
+            text: t.workflowsDebugTakeoverDone({ count: completedTakeovers }),
+          })
+        } else if (r.cancelled) {
+          setBanner({ kind: 'error', text: t.taskOutcomeCancelled })
         } else {
-          // Failed debug banner keeps the deep-link into the last attempt's
+          // Failed debug banner keeps the deep-link into the session's
           // history entry (same pattern as a plain failed run).
           setBanner({
             kind: 'error',
@@ -249,14 +218,34 @@ export default function WorkflowsTab() {
             ...(r.lastRunId ? { runId: r.lastRunId } : {}),
           })
         }
-        // The live log modal already shows the whole session; only pop the
-        // structured report when the user has closed (or never opened) it.
-        if ((r.rounds.length > 0 || r.workflowModified) && !logOpenRef.current) {
-          void alertDialog({
-            title: t.workflowsDebugReportTitle,
-            message: formatDebugReport(r),
-            confirmText: t.dialogConfirm,
+        // The AI completed steps AND proposed node fixes: ask the user to
+        // apply them. Nothing was written to the workflow before this point.
+        if (r.pendingChanges.length > 0) {
+          const confirmed = await confirmDialog({
+            title: t.workflowsDebugTakeoverConfirmTitle,
+            message: `${t.workflowsDebugTakeoverConfirmMessage}\n\n${formatPendingFixes(r)}`,
+            confirmText: t.workflowsDebugTakeoverApply,
+            cancelText: t.workflowsDebugTakeoverDiscard,
           })
+          if (confirmed) {
+            try {
+              const applyResult = await sendCommand({ type: 'workflows.takeoverApply', id })
+              if (applyResult.type === 'workflows.takeoverApply') {
+                setBanner({
+                  kind: 'ok',
+                  text:
+                    applyResult.appliedCount > 0
+                      ? t.workflowsDebugTakeoverApplied
+                      : t.workflowsDebugTakeoverNothing,
+                })
+              }
+            } catch (error) {
+              setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+            }
+          } else {
+            await sendCommand({ type: 'workflows.takeoverDiscard', id }).catch(() => undefined)
+            setBanner({ kind: 'ok', text: t.workflowsDebugTakeoverDiscarded })
+          }
         }
       }
       await load()
@@ -271,13 +260,28 @@ export default function WorkflowsTab() {
   }
 
   /**
-   * Review chip actions: keep the AI changes (drop the snapshot) or revert
-   * the whole workflow to its pre-debug snapshot.
+   * Pending chip actions: apply the AI's proposed fixes to the workflow (the
+   * takeover session may have settled while the panel was closed) or discard
+   * them.
    */
-  const keepAiChanges = async (id: string): Promise<void> => {
+  const applyPendingFixes = async (id: string): Promise<void> => {
+    const info = pending.find((entry) => entry.workflowId === id)
+    const message = info
+      ? `${t.workflowsDebugTakeoverConfirmMessage}\n\n${info.fixes.map((fix) => `· ${fix.note}`).join('\n')}`
+      : t.workflowsDebugTakeoverConfirmMessage
+    const confirmed = await confirmDialog({
+      title: t.workflowsDebugTakeoverConfirmTitle,
+      message,
+      confirmText: t.workflowsDebugTakeoverApply,
+      cancelText: t.workflowsDebugTakeoverDiscard,
+    })
+    if (!confirmed) return
     setBusy(true)
     try {
-      await sendCommand({ type: 'workflows.debugKeep', id })
+      const result = await sendCommand({ type: 'workflows.takeoverApply', id })
+      if (result.type === 'workflows.takeoverApply') {
+        setBanner({ kind: 'ok', text: t.workflowsDebugTakeoverApplied })
+      }
       await load()
     } catch (error) {
       setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
@@ -286,18 +290,11 @@ export default function WorkflowsTab() {
     }
   }
 
-  const revertAiChanges = async (id: string): Promise<void> => {
-    const confirmed = await confirmDialog({
-      title: t.workflowsDebugBackupRevert,
-      message: t.workflowsDebugRevertConfirm,
-      confirmText: t.dialogConfirm,
-      cancelText: t.cancel,
-    })
-    if (!confirmed) return
+  const discardPendingFixes = async (id: string): Promise<void> => {
     setBusy(true)
     try {
-      await sendCommand({ type: 'workflows.debugRevert', id })
-      setBanner({ kind: 'ok', text: t.workflowsDebugReverted })
+      await sendCommand({ type: 'workflows.takeoverDiscard', id })
+      setBanner({ kind: 'ok', text: t.workflowsDebugTakeoverDiscarded })
       await load()
     } catch (error) {
       setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
@@ -636,26 +633,26 @@ export default function WorkflowsTab() {
                   </button>
                 </div>
                 {(() => {
-                  const backup = backups.find((b) => b.workflowId === wf.id)
-                  if (!backup) return null
+                  const pendingInfo = pending.find((entry) => entry.workflowId === wf.id)
+                  if (!pendingInfo) return null
                   return (
                     <div className="ai-debug-backup">
                       <span>
-                        {t.workflowsDebugBackupHint({
-                          time: new Date(backup.savedAt).toLocaleString(navigator.language),
-                          changes: backup.changes.length,
+                        {t.workflowsDebugTakeoverPendingHint({
+                          time: new Date(pendingInfo.createdAt).toLocaleString(navigator.language),
+                          changes: pendingInfo.fixes.length,
                         })}
                       </span>
-                      <button disabled={busy} onClick={() => void keepAiChanges(wf.id)} type="button">
-                        {t.workflowsDebugBackupKeep}
+                      <button disabled={busy} onClick={() => void applyPendingFixes(wf.id)} type="button">
+                        {t.workflowsDebugTakeoverApply}
                       </button>
                       <button
                         className="danger"
                         disabled={busy}
-                        onClick={() => void revertAiChanges(wf.id)}
+                        onClick={() => void discardPendingFixes(wf.id)}
                         type="button"
                       >
-                        {t.workflowsDebugBackupRevert}
+                        {t.workflowsDebugTakeoverDiscard}
                       </button>
                     </div>
                   )

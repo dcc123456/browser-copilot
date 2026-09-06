@@ -41,7 +41,11 @@ export default function EditLoopElements({ data, onChange }: EditFormProps) {
   }, [])
 
   return (
-    <InteractionBase data={data} onChange={onChange} hideMultiple hideMarkEl
+    <InteractionBase
+      data={data}
+      onChange={onChange}
+      hideMultiple
+      hideMarkEl
       header={
         <Field label="Loop ID">
           <TextInput
@@ -54,7 +58,7 @@ export default function EditLoopElements({ data, onChange }: EditFormProps) {
         </Field>
       }
     >
-      <Field label="Max data to loop (0 to disable)" >
+      <Field label="Max data to loop (0 to disable)">
         <TextInput
           value={str(data, 'maxLoop')}
           fallback="0"
@@ -67,7 +71,13 @@ export default function EditLoopElements({ data, onChange }: EditFormProps) {
         label="Reverse loop order"
       />
 
-      <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--bc-border, rgba(128,128,128,0.25))' }}>
+      <div
+        style={{
+          marginTop: 16,
+          paddingTop: 16,
+          borderTop: '1px solid var(--bc-border, rgba(128,128,128,0.25))',
+        }}
+      >
         <p style={{ fontSize: 13, opacity: 0.75, margin: '0 0 8px' }}>Load more elements</p>
         <Field label="Action">
           <Select

@@ -10,15 +10,10 @@
  * @module workflow-editor/sidebar/RunDetailModal
  */
 
+import { CircleCheck, CircleStop, CircleX, Download, LoaderCircle, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import Modal from '../ui/Modal'
-import {
-  TraceRow,
-  VariablesInspector,
-  buildTrace,
-  clock,
-  type RunView,
-} from './log-view'
+import { TraceRow, VariablesInspector, buildTrace, clock, type RunView } from './log-view'
 import type { TranslateFn } from '../i18n'
 
 export default function RunDetailModal({
@@ -81,29 +76,30 @@ export default function RunDetailModal({
 
   const title = (
     <span className="wf-run-detail-title">
-      {state === undefined && <i className="ri-loader-4-line wf-spin" />}
-      {state === 'ok' && <i className="ri-checkbox-circle-fill wf-ok" />}
-      {state === 'failed' && <i className="ri-close-circle-fill wf-err" />}
-      {state === 'cancelled' && <i className="ri-stop-circle-fill wf-warn" />}
+      {state === undefined && <LoaderCircle size={14} className="wf-spin" />}
+      {state === 'ok' && <CircleCheck size={14} className="wf-ok" />}
+      {state === 'failed' && <CircleX size={14} className="wf-err" />}
+      {state === 'cancelled' && <CircleStop size={14} className="wf-warn" />}
       <span>{run?.label || 'workflow'}</span>
     </span>
   )
 
   return (
-    <Modal open={!!run} onClose={onClose} icon="ri-list-check-2" title={title} size="lg">
+    <Modal open={!!run} onClose={onClose} icon="lucide:ListChecks" title={title} size="lg">
       {run && (
         <div className="wf-console">
           {/* Tool row: search + export (Automa LogsHistory header) */}
           <div className="wf-console-tools">
             <span className="wf-console-when">
-              {state === undefined ? t('running') : state} · {clock(run.finishedAt ?? run.startedAt)}
+              {state === undefined ? t('running') : state} ·{' '}
+              {clock(run.finishedAt ?? run.startedAt)}
             </span>
             <span className="wf-console-tools-spacer" />
             <button type="button" className="wf-console-export" onClick={exportLogs}>
-              <i className="ri-download-2-line" /> {t('exportLogs')}
+              <Download size={14} /> {t('exportLogs')}
             </button>
             <div className="wf-console-search">
-              <i className="ri-search-2-line" />
+              <Search size={14} />
               <input
                 value={query}
                 placeholder={t('search')}
@@ -118,7 +114,10 @@ export default function RunDetailModal({
             <div className="wf-console-body">
               {state === 'failed' && (errorEntry || run.error) && (
                 <div className="wf-console-banner">
-                  <p>{run.error?.split('\n')[0] || errorEntry?.lines.find((l) => l.kind === 'error')?.text}</p>
+                  <p>
+                    {run.error?.split('\n')[0] ||
+                      errorEntry?.lines.find((l) => l.kind === 'error')?.text}
+                  </p>
                   {errorEntry && (
                     <p className="wf-console-banner-block">
                       {t('onTheBlock').replace('{name}', errorEntry.label)}
@@ -126,7 +125,9 @@ export default function RunDetailModal({
                   )}
                 </div>
               )}
-              {state === 'cancelled' && <div className="wf-console-banner wf-console-banner-stop">Cancelled</div>}
+              {state === 'cancelled' && (
+                <div className="wf-console-banner wf-console-banner-stop">Cancelled</div>
+              )}
               {filtered.length === 0 && <p className="wf-console-empty">{t('logsEmpty')}</p>}
               <div className="wf-console-trace">
                 {filtered.map((e, i) => (

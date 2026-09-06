@@ -25,8 +25,8 @@ import type { FeishuConfig, ScheduledTask, TaskRunLog } from './scheduler-types'
 import type { RunOutcomeKind, RunSource, RunStep } from '../background/running-tasks'
 import type { Workflow } from './workflow/types'
 import type { WorkflowDebugResult } from './workflow/auto-debug-patch'
+import type { PendingTakeoverInfo } from './workflow/takeover-pending'
 import type { WorkflowReview } from './workflow/review-patch'
-import type { DebugBackupInfo } from './workflow/debug-backup'
 import type { AttachmentDescriptor, AttachmentSummary } from './attachments'
 
 /** Aggregated token usage for one agent turn (summed across all tool rounds). */
@@ -145,18 +145,20 @@ export type Command =
       windowId?: number
     }
   /**
-   * AI auto-debug: run the workflow, and when it fails let the model diagnose
-   * and repair operator nodes (retry policy / params / guards / AI steps /
-   * redundant-node removal), re-running to verify. See
-   * `background/workflow-engine/auto-debug`.
+   * AI takeover debug (AI 调试): run the workflow once; when a node fails, the
+   * AI takes over THAT node — it sees the live page and completes the step's
+   * purpose — then the remaining nodes keep running (retry up to 3 times).
+   * Proposed node fixes come back as pending changes; nothing is applied to
+   * the workflow until the user confirms. See
+   * `background/workflow-engine/ai-takeover`.
    */
   | { type: 'workflows.debug'; id: string; /** See workflows.run.windowId. */ windowId?: number }
-  /** Workflows with a pending AI-debug backup (review keep / revert chip). */
-  | { type: 'workflows.debugBackups' }
-  /** Restores the pre-AI-debug snapshot for this workflow. */
-  | { type: 'workflows.debugRevert'; id: string }
-  /** Keeps the AI changes and drops the stored snapshot. */
-  | { type: 'workflows.debugKeep'; id: string }
+  /** Workflows with pending AI-takeover fixes awaiting user confirmation. */
+  | { type: 'workflows.takeoverPending' }
+  /** Applies the pending AI-takeover fixes to this workflow (user confirmed). */
+  | { type: 'workflows.takeoverApply'; id: string }
+  /** Discards the pending AI-takeover fixes for this workflow. */
+  | { type: 'workflows.takeoverDiscard'; id: string }
   | { type: 'workflows.running'; workflowId?: string }
 
   // --- Workflow recording (see background/record-controller.ts) ---
@@ -257,9 +259,9 @@ export type CommandResult =
       outcome: { ok: boolean; skipped: boolean; summary: string; error?: string; runId?: string }
     }
   | { type: 'workflows.debug'; result: WorkflowDebugResult }
-  | { type: 'workflows.debugBackups'; backups: DebugBackupInfo[] }
-  | { type: 'workflows.debugRevert'; workflow: Workflow }
-  | { type: 'workflows.debugKeep' }
+  | { type: 'workflows.takeoverPending'; items: PendingTakeoverInfo[] }
+  | { type: 'workflows.takeoverApply'; workflow: Workflow; appliedCount: number }
+  | { type: 'workflows.takeoverDiscard' }
   | { type: 'workflows.running'; runs: RunningTaskView[]; finished: FinishedTaskView[] }
   | { type: 'record.start'; recording: boolean }
   | { type: 'record.stop'; workflowId?: string }

@@ -88,7 +88,9 @@ export default function InteractionBase({
   const locatorHint = selector ? '' : targetSummary(data)
   // Latest "verify selector" outcome, shown inline so the operator has feedback
   // even though ElSelectorActions has no toast host of its own in this popup.
-  const [verifyStatus, setVerifyStatus] = useState<{ text: string; kind: 'ok' | 'error' } | null>(null)
+  const [verifyStatus, setVerifyStatus] = useState<{ text: string; kind: 'ok' | 'error' } | null>(
+    null,
+  )
   const reportVerify = (text: string, kind: 'ok' | 'error'): void => setVerifyStatus({ text, kind })
 
   return (

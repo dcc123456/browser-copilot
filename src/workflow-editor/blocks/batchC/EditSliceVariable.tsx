@@ -24,7 +24,11 @@ export default function EditSliceVariable({ data, onChange }: EditFormProps) {
       </Field>
 
       <Field label="Variable name" title="Variable name">
-        <TextInput value={str(data, 'variableName')} placeholder="abc123" onChange={(v) => onChange({ variableName: v })} />
+        <TextInput
+          value={str(data, 'variableName')}
+          placeholder="abc123"
+          onChange={(v) => onChange({ variableName: v })}
+        />
       </Field>
 
       <Checkbox
@@ -34,14 +38,28 @@ export default function EditSliceVariable({ data, onChange }: EditFormProps) {
       />
       {bool(data, 'startIdxEnabled') && (
         <Field label="Start index">
-          <NumberInput value={num(data, 'startIndex', 0)} placeholder="0" fallback={0} onChange={(n) => onChange({ startIndex: n })} />
+          <NumberInput
+            value={num(data, 'startIndex', 0)}
+            placeholder="0"
+            fallback={0}
+            onChange={(n) => onChange({ startIndex: n })}
+          />
         </Field>
       )}
 
-      <Checkbox checked={bool(data, 'endIdxEnabled')} onChange={(v) => onChange({ endIdxEnabled: v })} label="End index" />
+      <Checkbox
+        checked={bool(data, 'endIdxEnabled')}
+        onChange={(v) => onChange({ endIdxEnabled: v })}
+        label="End index"
+      />
       {bool(data, 'endIdxEnabled') && (
         <Field label="End index">
-          <NumberInput value={num(data, 'endIndex', 0)} placeholder="0" fallback={0} onChange={(n) => onChange({ endIndex: n })} />
+          <NumberInput
+            value={num(data, 'endIndex', 0)}
+            placeholder="0"
+            fallback={0}
+            onChange={(n) => onChange({ endIndex: n })}
+          />
         </Field>
       )}
     </div>

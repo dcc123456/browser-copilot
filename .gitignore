@@ -18,6 +18,11 @@ releases/
 
 # Test output
 coverage/
+test-results/
+
+# Tool leftovers
+.coderabbit-cfg/
+.homedir/
 
 # Local scratch: scripts & data produced during manual testing (never commit)
 tmp/

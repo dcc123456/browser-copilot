@@ -23,10 +23,18 @@ export default function EditElementScroll({ data, onChange }: EditFormProps) {
       {!scrollIntoView && (
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
           <Field label="Scroll horizontal">
-            <NumberInput value={num(data, 'scrollX', 0)} fallback={0} onChange={(n) => onChange({ scrollX: n })} />
+            <NumberInput
+              value={num(data, 'scrollX', 0)}
+              fallback={0}
+              onChange={(n) => onChange({ scrollX: n })}
+            />
           </Field>
           <Field label="Scroll vertical">
-            <NumberInput value={num(data, 'scrollY', 0)} fallback={0} onChange={(n) => onChange({ scrollY: n })} />
+            <NumberInput
+              value={num(data, 'scrollY', 0)}
+              fallback={0}
+              onChange={(n) => onChange({ scrollY: n })}
+            />
           </Field>
         </div>
       )}
@@ -37,7 +45,11 @@ export default function EditElementScroll({ data, onChange }: EditFormProps) {
           onChange={(v) => onChange({ scrollIntoView: v })}
           label="Scroll into view"
         />
-        <Checkbox checked={bool(data, 'smooth')} onChange={(v) => onChange({ smooth: v })} label="Smooth scroll" />
+        <Checkbox
+          checked={bool(data, 'smooth')}
+          onChange={(v) => onChange({ smooth: v })}
+          label="Smooth scroll"
+        />
         {!scrollIntoView && (
           <>
             <Checkbox

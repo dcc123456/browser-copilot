@@ -34,8 +34,7 @@ export default function EditOcr({ data, onChange }: EditFormProps) {
   const [verifyStatus, setVerifyStatus] = useState<{ text: string; kind: 'ok' | 'error' } | null>(
     null,
   )
-  const reportVerify = (text: string, kind: 'ok' | 'error'): void =>
-    setVerifyStatus({ text, kind })
+  const reportVerify = (text: string, kind: 'ok' | 'error'): void => setVerifyStatus({ text, kind })
 
   return (
     <div className="wf-form">

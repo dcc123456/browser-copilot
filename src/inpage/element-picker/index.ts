@@ -5,8 +5,8 @@
  * background script (same pattern as inpage/kernel.ts). It must not import
  * anything at module level and must not close over outer variables. All
  * helpers live below in one function scope, styles are injected as a string
- * into a Shadow DOM, and icons are inline SVG (the RemixIcon webfont is not
- * present in the page).
+ * into a Shadow DOM, and icons are inline SVG strings carrying lucide's
+ * official path data (no React and no webfont exist in the page world).
  *
  * The picker highlights the element under the cursor, locks it on click, lets
  * the user switch CSS/XPath, toggle selector options, walk parent/child, and
@@ -79,12 +79,17 @@ export const startPicker: PickerStart = async (args) => {
 .pick-err { margin-top: 8px; font-size: 12px; color: #dc2626; }
 `
 
-  // --- inline SVG icons (RemixIcon glyphs; webfont unavailable in page world)
+  // --- inline SVG icons (lucide glyphs, stroke markup inlined as strings:
+  // the picker runs in the page world where the React component library and
+  // any webfont are unavailable, so the official lucide path data is embedded
+  // directly — same geometry the lucide-react components render).
+  const lucideSvg = (paths: string): string =>
+    `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`
   const ICON = {
-    close: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 10.587l4.95-4.95 1.414 1.414-4.95 4.95 4.95 4.95-1.414 1.414-4.95-4.95-4.95 4.95-1.414-1.414 4.95-4.95-4.95-4.95L7.05 5.637z"/></svg>',
-    up: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M13 7.828V20h-2V7.828l-5.364 5.364-1.414-1.414L12 4l7.778 7.778-1.414 1.414z"/></svg>',
-    down: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12 16-.343.343 5.657 5.657H22v-2h-3.657l-4.95-4.95-1.414 1.414 3.273 3.273L12 16zM2 6h4.686l4.95 4.95-1.414 1.414L6.657 8.657H2V6zm18 2.343L13.343 15 12 13.657l6.657-6.657H15V5h7v7h-2z"/></svg>',
-    check: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m10 15.172 7.071-7.071 1.414 1.414L10 18 5.515 13.515l1.414-1.414z"/></svg>',
+    close: lucideSvg('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>'),
+    up: lucideSvg('<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>'),
+    down: lucideSvg('<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>'),
+    check: lucideSvg('<path d="M20 6 9 17l-5-5"/>'),
   }
 
   // Idempotency guard (Automa's elementSelectorInstance): a previous picker
@@ -93,20 +98,53 @@ export const startPicker: PickerStart = async (args) => {
   document.getElementById('bc-element-picker')?.remove()
 
   // --- selector builder (mirrors build-selector.ts; inlined for injection) ---
-  interface Opts { idName: boolean; tagName: boolean; className: boolean; attr: boolean; attrNames: string[]; nthChild: boolean }
-  const opts: Opts = { idName: true, tagName: true, className: true, attr: false, attrNames: ['data-testid', 'data-test', 'name', 'type'], nthChild: false }
-  const esc = (v: string) => (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(v) : v.replace(/([^a-zA-Z0-9_-])/g, '\\$1'))
+  interface Opts {
+    idName: boolean
+    tagName: boolean
+    className: boolean
+    attr: boolean
+    attrNames: string[]
+    nthChild: boolean
+  }
+  const opts: Opts = {
+    idName: true,
+    tagName: true,
+    className: true,
+    attr: false,
+    attrNames: ['data-testid', 'data-test', 'name', 'type'],
+    nthChild: false,
+  }
+  const esc = (v: string) =>
+    typeof CSS !== 'undefined' && CSS.escape
+      ? CSS.escape(v)
+      : v.replace(/([^a-zA-Z0-9_-])/g, '\\$1')
   function part(el: Element): string {
     const tag = el.tagName.toLowerCase()
     if (opts.idName && el.id) return `#${esc(el.id)}`
     let q = ''
     if (opts.className && el.classList.length) {
-      q += Array.from(el.classList).filter((c) => c && !/^(css-|jsx-|sc-|ng-|ember)/.test(c) && !/^\d/.test(c)).slice(0, 2).map((c) => `.${esc(c)}`).join('')
+      q += Array.from(el.classList)
+        .filter((c) => c && !/^(css-|jsx-|sc-|ng-|ember)/.test(c) && !/^\d/.test(c))
+        .slice(0, 2)
+        .map((c) => `.${esc(c)}`)
+        .join('')
     }
-    if (opts.attr) for (const a of opts.attrNames) { const v = el.getAttribute(a); if (v) { q += `[${a}="${v.replace(/"/g, '\\"')}"]`; break } }
+    if (opts.attr)
+      for (const a of opts.attrNames) {
+        const v = el.getAttribute(a)
+        if (v) {
+          q += `[${a}="${v.replace(/"/g, '\\"')}"]`
+          break
+        }
+      }
     if (!q || opts.nthChild) {
       const parentEl = el.parentElement
-      if (parentEl) { const sib = Array.from(parentEl.children).filter((c) => (c as Element).tagName === el.tagName); if (sib.length > 1) q += `:nth-of-type(${sib.indexOf(el) + 1})` }
+      if (parentEl) {
+        const sib = Array.from(parentEl.children).filter(
+          (c) => (c as Element).tagName === el.tagName,
+        )
+        if (sib.length > 1) q += `:nth-of-type(${sib.indexOf(el) + 1})`
+      }
     }
     return (opts.tagName ? tag : '') + q
   }
@@ -115,7 +153,11 @@ export const startPicker: PickerStart = async (args) => {
   const matchesInRoots = (sel: string): Element[] => {
     const out: Element[] = []
     for (const root of openRoots()) {
-      try { root.querySelectorAll(sel).forEach((m) => out.push(m)) } catch { /* bad selector */ }
+      try {
+        root.querySelectorAll(sel).forEach((m) => out.push(m))
+      } catch {
+        /* bad selector */
+      }
     }
     return out
   }
@@ -129,8 +171,13 @@ export const startPicker: PickerStart = async (args) => {
       const cand = chain.slice().reverse().join(' > ')
       const ms = matchesInRoots(cand)
       if (ms.length === 1 && ms[0] === el) return cand
-      if (opts.idName && node.id) { const withId = `#${esc(node.id)} > ${chain.slice().reverse().join(' > ')}`; if (matchesInRoots(withId).length === 1) return withId }
-      chain.push(part(node)); node = node.parentElement; depth++
+      if (opts.idName && node.id) {
+        const withId = `#${esc(node.id)} > ${chain.slice().reverse().join(' > ')}`
+        if (matchesInRoots(withId).length === 1) return withId
+      }
+      chain.push(part(node))
+      node = node.parentElement
+      depth++
     }
     return chain.slice().reverse().join(' > ')
   }
@@ -141,10 +188,18 @@ export const startPicker: PickerStart = async (args) => {
     while (node && node.nodeType === 1) {
       const tag = node.tagName.toLowerCase()
       const pNode: Element | null = node.parentElement
-      if (!pNode) { segs.unshift(`/${tag}`); break }
-      const same = Array.from(pNode.children).filter((c) => (c as Element).tagName === node!.tagName)
+      if (!pNode) {
+        segs.unshift(`/${tag}`)
+        break
+      }
+      const same = Array.from(pNode.children).filter(
+        (c) => (c as Element).tagName === node!.tagName,
+      )
       segs.unshift(same.length === 1 ? `/${tag}` : `/${tag}[${same.indexOf(node) + 1}]`)
-      if (pNode.id) { segs.unshift(`//*[@id="${pNode.id}"]`); break }
+      if (pNode.id) {
+        segs.unshift(`//*[@id="${pNode.id}"]`)
+        break
+      }
       node = pNode
     }
     return segs.join('')
@@ -157,11 +212,18 @@ export const startPicker: PickerStart = async (args) => {
     const roots: ParentNode[] = [document]
     const visit = (root: ParentNode): void => {
       let list: NodeListOf<Element>
-      try { list = root.querySelectorAll('*') } catch { return }
+      try {
+        list = root.querySelectorAll('*')
+      } catch {
+        return
+      }
       list.forEach((el) => {
         if (el === host) return
         const sr = (el as HTMLElement).shadowRoot
-        if (sr && sr.nodeType === 11) { roots.push(sr); visit(sr) }
+        if (sr && sr.nodeType === 11) {
+          roots.push(sr)
+          visit(sr)
+        }
       })
     }
     visit(document)
@@ -179,7 +241,9 @@ export const startPicker: PickerStart = async (args) => {
           n += root.querySelectorAll(sel).length
         }
       }
-    } catch { return 0 }
+    } catch {
+      return 0
+    }
     return n
   }
 
@@ -283,7 +347,13 @@ export const startPicker: PickerStart = async (args) => {
   if (mode === 'verify' && initial) {
     const xp = findBy === 'xpath'
     const n = count(initial, xp)
-    void chrome.runtime.sendMessage({ type: 'picker:result', pickerId, selector: initial, count: n, verified: true })
+    void chrome.runtime.sendMessage({
+      type: 'picker:result',
+      pickerId,
+      selector: initial,
+      count: n,
+      verified: true,
+    })
     host.remove()
     return
   }
@@ -337,20 +407,47 @@ export const startPicker: PickerStart = async (args) => {
     if (locked && locked !== host && !host.contains(locked)) refresh()
   }
   const onKey = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') { cleanup(); void chrome.runtime.sendMessage({ type: 'picker:cancel', pickerId }) }
+    if (e.key === 'Escape') {
+      cleanup()
+      void chrome.runtime.sendMessage({ type: 'picker:cancel', pickerId })
+    }
   }
 
   card.addEventListener('click', (e) => {
     const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-act]')
     if (!btn) return
     const act = btn.dataset.act
-    if (act === 'cancel') { cleanup(); void chrome.runtime.sendMessage({ type: 'picker:cancel', pickerId }); return }
-    if (act === 'confirm' && curSelector) {
-      void chrome.runtime.sendMessage({ type: 'picker:result', pickerId, selector: curSelector, findBy: findBySel.value, multiple })
-      cleanup(); return
+    if (act === 'cancel') {
+      cleanup()
+      void chrome.runtime.sendMessage({ type: 'picker:cancel', pickerId })
+      return
     }
-    if (act === 'parent') { const el = target(); if (el?.parentElement) { locked = el.parentElement; refresh() } }
-    if (act === 'child') { const el = target(); const kid = el?.firstElementChild; if (kid) { locked = kid; refresh() } }
+    if (act === 'confirm' && curSelector) {
+      void chrome.runtime.sendMessage({
+        type: 'picker:result',
+        pickerId,
+        selector: curSelector,
+        findBy: findBySel.value,
+        multiple,
+      })
+      cleanup()
+      return
+    }
+    if (act === 'parent') {
+      const el = target()
+      if (el?.parentElement) {
+        locked = el.parentElement
+        refresh()
+      }
+    }
+    if (act === 'child') {
+      const el = target()
+      const kid = el?.firstElementChild
+      if (kid) {
+        locked = kid
+        refresh()
+      }
+    }
     if (act === 'verify') {
       const xp = findBySel.value === 'xpath'
       const n = count(curSelector, xp)
@@ -370,7 +467,9 @@ export const startPicker: PickerStart = async (args) => {
   })
 
   // make the card draggable
-  let dragDx = 0, dragDy = 0, dragging = false
+  let dragDx = 0,
+    dragDy = 0,
+    dragging = false
   const head = card.querySelector('.pick-card-head') as HTMLElement
   head.addEventListener('mousedown', (e) => {
     if ((e.target as HTMLElement).closest('button')) return
@@ -379,13 +478,23 @@ export const startPicker: PickerStart = async (args) => {
     dragDx = e.clientX - r.left
     dragDy = e.clientY - r.top
   })
-  window.addEventListener('mousemove', (e) => {
-    if (!dragging) return
-    card.style.left = `${e.clientX - dragDx}px`
-    card.style.top = `${e.clientY - dragDy}px`
-    card.style.bottom = 'auto'
-  }, true)
-  window.addEventListener('mouseup', () => { dragging = false }, true)
+  window.addEventListener(
+    'mousemove',
+    (e) => {
+      if (!dragging) return
+      card.style.left = `${e.clientX - dragDx}px`
+      card.style.top = `${e.clientY - dragDy}px`
+      card.style.bottom = 'auto'
+    },
+    true,
+  )
+  window.addEventListener(
+    'mouseup',
+    () => {
+      dragging = false
+    },
+    true,
+  )
 
   function cleanup() {
     document.removeEventListener('mousemove', onMove, true)

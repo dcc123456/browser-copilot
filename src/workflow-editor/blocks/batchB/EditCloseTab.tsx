@@ -7,6 +7,7 @@
  * @module workflow-editor/blocks/batchB/EditCloseTab
  */
 
+import { Info } from 'lucide-react'
 import type { EditFormProps } from '../EditForms'
 import { Checkbox, Field, Select, TextArea, TextInput } from '../shared/Field'
 import { bool, str } from '../shared/InteractionBase'
@@ -28,7 +29,11 @@ export default function EditCloseTab({ data, onChange }: EditFormProps) {
       </Field>
 
       <Field label="Close">
-        <Select value={closeType} onChange={(v) => onChange({ closeType: v })} options={CLOSE_TYPES} />
+        <Select
+          value={closeType}
+          onChange={(v) => onChange({ closeType: v })}
+          options={CLOSE_TYPES}
+        />
       </Field>
 
       {closeType === 'tab' ? (
@@ -49,7 +54,7 @@ export default function EditCloseTab({ data, onChange }: EditFormProps) {
                   rel="noopener noreferrer"
                   style={{ display: 'inline-block' }}
                 >
-                  <i className="ri-information-line" />
+                  <Info size={14} />
                 </a>
               </label>
               <TextInput

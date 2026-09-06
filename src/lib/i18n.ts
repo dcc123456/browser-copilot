@@ -198,33 +198,16 @@ export interface Messages {
   workflowsImported: (params: { count: number }) => string
   /** Shown on a failed-run banner in the Workflows tab; the banner is clickable and jumps to the run's history entry. */
   workflowsRunFailedHint: string
-  /** Debug button on each workflow card: run once, then AI auto-repairs failures and re-runs. */
+  /** Debug button on each workflow card: run once, then AI takes over failed nodes. */
   workflowsDebug: string
-  /** Debug button label while the AI debug loop is running for that workflow. */
+  /** Debug button label while the AI debug session is running for that workflow. */
   workflowsDebugging: string
-  /** Banner when the debug run passed on the first attempt (no AI repair needed). */
+  /** Banner when the debug run passed on the first attempt (no AI takeover needed). */
   workflowsDebugOkNoChanges: string
-  /** Banner when AI repairs made the workflow pass; {rounds} = applied fix rounds. */
-  workflowsDebugFixed: (params: { rounds: number }) => string
-  /** Banner when the AI debug loop ended without a passing run. */
+  /** Banner when the AI debug session ended without a passing run. */
   workflowsDebugFailed: string
-  /** Debug report dialog title. */
-  workflowsDebugReportTitle: string
-  /** Debug report: per-round heading. */
-  workflowsDebugRound: (params: { n: number }) => string
-  /** Debug report: diagnosis label. */
-  workflowsDebugDiagnosis: string
-  /** Debug report: changes label. */
-  workflowsDebugChanges: string
-  /** Debug report: run outcome label. */
-  workflowsDebugOutcome: string
-  /** Debug report: strategy labels by repair kind. */
-  workflowsDebugStrategyRetry: string
-  workflowsDebugStrategyFix: string
-  workflowsDebugStrategyBranch: string
-  workflowsDebugStrategyAgent: string
-  workflowsDebugStrategyRemove: string
-  workflowsDebugStrategyUnfixable: string
+  /** Banner when AI takeover completed {count} failed node(s) and the run passed. */
+  workflowsDebugTakeoverDone: (params: { count: number }) => string
   /** Live AI debug log modal. */
   workflowsDebugLogTitle: string
   /** Badge while the debug session is still running. */
@@ -234,14 +217,20 @@ export interface Messages {
   /** Empty state before the first debug step lands. */
   workflowsDebugLogEmpty: string
   workflowsDebugLogClose: string
-  /** Review chip on cards the AI debugger modified: hint with time + change count. */
-  workflowsDebugBackupHint: (params: { time: string; changes: number }) => string
-  workflowsDebugBackupKeep: string
-  workflowsDebugBackupRevert: string
-  /** Confirm dialog before reverting. */
-  workflowsDebugRevertConfirm: string
-  /** Banner after a successful revert. */
-  workflowsDebugReverted: string
+  /** Confirm dialog title before applying the AI's proposed node fixes. */
+  workflowsDebugTakeoverConfirmTitle: string
+  /** Confirm dialog body asking the user to apply the takeover's node fixes. */
+  workflowsDebugTakeoverConfirmMessage: string
+  workflowsDebugTakeoverApply: string
+  workflowsDebugTakeoverDiscard: string
+  /** Banner after the fixes were applied to the workflow. */
+  workflowsDebugTakeoverApplied: string
+  /** Banner when there was nothing applicable to apply. */
+  workflowsDebugTakeoverNothing: string
+  /** Banner after the fixes were discarded. */
+  workflowsDebugTakeoverDiscarded: string
+  /** Pending chip on cards with unanswered takeover fixes: hint with time + count. */
+  workflowsDebugTakeoverPendingHint: (params: { time: string; changes: number }) => string
   /** Activity board (History tab) collapse/expand toggle title. */
   tasksActivityCollapse: string
   tasksActivityExpand: string
@@ -337,8 +326,6 @@ export interface Messages {
 
   // Agent mode
   modeLabel: string
-  saveWorkflowLabel: string
-  saveWorkflowHint: string
   modeChat: string
   modeReadonly: string
   modeSemi: string
@@ -908,30 +895,24 @@ const en: Messages = {
   workflowsDebug: 'Debug',
   workflowsDebugging: 'Debugging…',
   workflowsDebugOkNoChanges: 'Run succeeded — nothing to debug',
-  workflowsDebugFixed: ({ rounds }) => `AI debug succeeded after ${rounds} fix round(s)`,
   workflowsDebugFailed: 'AI debug could not fix this workflow',
-  workflowsDebugReportTitle: 'AI debug report',
-  workflowsDebugRound: ({ n }) => `Round ${n}`,
-  workflowsDebugDiagnosis: 'Diagnosis',
-  workflowsDebugChanges: 'Changes',
-  workflowsDebugOutcome: 'Result',
-  workflowsDebugStrategyRetry: 'Add retry',
-  workflowsDebugStrategyFix: 'Fix parameters',
-  workflowsDebugStrategyBranch: 'Add conditional branch',
-  workflowsDebugStrategyAgent: 'Add AI agent step',
-  workflowsDebugStrategyRemove: 'Remove redundant steps',
-  workflowsDebugStrategyUnfixable: 'Not fixable automatically',
+  workflowsDebugTakeoverDone: ({ count }) =>
+    `Run succeeded — AI takeover completed ${count} failed node(s)`,
   workflowsDebugLogTitle: 'AI debug log',
   workflowsDebugLogLive: 'live',
   workflowsDebugLogDone: 'finished',
   workflowsDebugLogEmpty: 'Waiting for debug steps…',
   workflowsDebugLogClose: 'Close',
-  workflowsDebugBackupHint: ({ time, changes }) =>
-    `AI modified this workflow at ${time} (${changes} change(s)) — keep or revert`,
-  workflowsDebugBackupKeep: 'Keep AI changes',
-  workflowsDebugBackupRevert: 'Revert',
-  workflowsDebugRevertConfirm: 'Revert this workflow to the version before AI debug?',
-  workflowsDebugReverted: 'Reverted to the pre-debug version',
+  workflowsDebugTakeoverConfirmTitle: 'Apply AI takeover node fixes?',
+  workflowsDebugTakeoverConfirmMessage:
+    'The AI takeover completed the failed steps on the live page and proposes the following node fixes so future runs work WITHOUT the AI. Apply them to the workflow?',
+  workflowsDebugTakeoverApply: 'Apply fixes',
+  workflowsDebugTakeoverDiscard: 'Discard',
+  workflowsDebugTakeoverApplied: 'AI takeover fixes applied to the workflow',
+  workflowsDebugTakeoverNothing: 'No applicable AI takeover fixes',
+  workflowsDebugTakeoverDiscarded: 'AI takeover fixes discarded',
+  workflowsDebugTakeoverPendingHint: ({ time, changes }) =>
+    `AI takeover proposed ${changes} node fix(es) at ${time} — apply or discard`,
   tasksActivityCollapse: 'Collapse activity',
   tasksActivityExpand: 'Expand activity',
 
@@ -1002,9 +983,6 @@ const en: Messages = {
   workflowReviewLogFailed: 'Review failed — keeping every step. Click “Retry review” to try again.',
 
   modeLabel: 'Mode',
-  saveWorkflowLabel: 'Save workflow',
-  saveWorkflowHint:
-    'Execute step by step (slower) so every action is recorded and can be saved as a workflow.',
   modeChat: 'Chat',
   modeReadonly: 'Read only',
   modeSemi: 'Semi-auto',
@@ -1564,30 +1542,23 @@ const zhCN: Messages = {
   workflowsDebug: '调试',
   workflowsDebugging: '调试中…',
   workflowsDebugOkNoChanges: '运行成功，无需调试',
-  workflowsDebugFixed: ({ rounds }) => `AI 调试成功：经 ${rounds} 轮修复后运行通过`,
   workflowsDebugFailed: 'AI 调试未能修复该工作流',
-  workflowsDebugReportTitle: 'AI 调试报告',
-  workflowsDebugRound: ({ n }) => `第 ${n} 轮`,
-  workflowsDebugDiagnosis: '诊断',
-  workflowsDebugChanges: '变更内容',
-  workflowsDebugOutcome: '运行结果',
-  workflowsDebugStrategyRetry: '增加重试',
-  workflowsDebugStrategyFix: '修正参数',
-  workflowsDebugStrategyBranch: '增加条件分支',
-  workflowsDebugStrategyAgent: '增加 AI 智能节点',
-  workflowsDebugStrategyRemove: '删除冗余节点',
-  workflowsDebugStrategyUnfixable: '无法自动修复',
+  workflowsDebugTakeoverDone: ({ count }) => `运行成功：AI 接管完成了 ${count} 个失败节点`,
   workflowsDebugLogTitle: 'AI 调试日志',
   workflowsDebugLogLive: '进行中',
   workflowsDebugLogDone: '已结束',
   workflowsDebugLogEmpty: '等待调试步骤…',
   workflowsDebugLogClose: '关闭',
-  workflowsDebugBackupHint: ({ time, changes }) =>
-    `AI 已修改此工作流（${time}，${changes} 处变更），可保留或回退`,
-  workflowsDebugBackupKeep: '保留 AI 修改',
-  workflowsDebugBackupRevert: '回退',
-  workflowsDebugRevertConfirm: '回退到 AI 调试前的版本？',
-  workflowsDebugReverted: '已回退到 AI 调试前的版本',
+  workflowsDebugTakeoverConfirmTitle: '应用 AI 接管的节点修改？',
+  workflowsDebugTakeoverConfirmMessage:
+    'AI 接管已在页面上完成失败步骤，并为相关节点生成了修改建议（让以后运行无需 AI 也能通过）。是否将这些修改应用到工作流？',
+  workflowsDebugTakeoverApply: '应用修改',
+  workflowsDebugTakeoverDiscard: '放弃',
+  workflowsDebugTakeoverApplied: '已应用 AI 接管的节点修改',
+  workflowsDebugTakeoverNothing: '没有可应用的 AI 接管修改',
+  workflowsDebugTakeoverDiscarded: '已放弃 AI 接管的修改',
+  workflowsDebugTakeoverPendingHint: ({ time, changes }) =>
+    `AI 接管提出了 ${changes} 处节点修改（${time}），可应用或放弃`,
   tasksActivityCollapse: '收起动态',
   tasksActivityExpand: '展开动态',
 
@@ -1653,8 +1624,6 @@ const zhCN: Messages = {
   workflowReviewLogFailed: '审查失败，已保留全部步骤。可点击「重试审查」再试一次。',
 
   modeLabel: '模式',
-  saveWorkflowLabel: '保存工作流',
-  saveWorkflowHint: '逐条执行（较慢），每个动作都会记录，可完整保存为工作流。',
   modeChat: '聊天',
   modeReadonly: '只读',
   modeSemi: '半自动',

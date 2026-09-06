@@ -14,6 +14,7 @@
  * @module workflow-editor/blocks/batchD/ParameterFields
  */
 
+import { Plus, Trash2 } from 'lucide-react'
 import { Checkbox, Expand, Select, TextArea, TextInput } from '../shared/Field'
 import { useEditorLocale } from '../../locale-context'
 
@@ -135,7 +136,7 @@ export default function ParameterFields({
                     title={bt('Remove parameter')}
                     onClick={() => remove(index)}
                   >
-                    <i className="ri-delete-bin-7-line" />
+                    <Trash2 size={14} />
                   </button>
                 </div>
                 <Expand title="Options">
@@ -148,7 +149,9 @@ export default function ParameterFields({
                     {(param.type === 'string' || param.type === 'number') && (
                       <Checkbox
                         checked={param.data?.required === true}
-                        onChange={(v) => update(index, { data: { ...(param.data ?? {}), required: v } })}
+                        onChange={(v) =>
+                          update(index, { data: { ...(param.data ?? {}), required: v } })
+                        }
                         label="Parameter required"
                       />
                     )}
@@ -161,7 +164,7 @@ export default function ParameterFields({
       </div>
       <div className="wf-params-footer">
         <button type="button" className="wf-params-add" onClick={add}>
-          <i className="ri-add-line" />
+          <Plus size={14} />
           <span>{bt('Add parameter')}</span>
         </button>
         <span className="wf-params-footer-grow" />

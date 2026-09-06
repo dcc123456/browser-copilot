@@ -11,8 +11,17 @@
  * @module workflow-editor/blocks/batchC/EditJavascriptCode
  */
 
+import { Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
-import { Checkbox, Field, IconButton, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
+import {
+  Checkbox,
+  Field,
+  IconButton,
+  NumberInput,
+  Select,
+  TextArea,
+  TextInput,
+} from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
 import type { EditFormProps } from '../EditForms'
 import { arr, id } from './shared'
@@ -53,7 +62,8 @@ export default function EditJavascriptCode({ data, onChange }: EditFormProps) {
     next[index] = { ...current, ...patch }
     onChange({ preloadScripts: next })
   }
-  const addScript = () => onChange({ preloadScripts: [...scripts, { src: '', removeAfterExec: true, id: id(6) }] })
+  const addScript = () =>
+    onChange({ preloadScripts: [...scripts, { src: '', removeAfterExec: true, id: id(6) }] })
   const removeScript = (index: number) => {
     const next = scripts.slice()
     next.splice(index, 1)
@@ -73,7 +83,12 @@ export default function EditJavascriptCode({ data, onChange }: EditFormProps) {
       {!everyNewTab && (
         <>
           <Field label="Timeout (milliseconds)" title="JavaScript code execution timeout">
-            <NumberInput value={num(data, 'timeout', 20000)} min={0} fallback={20000} onChange={(n) => onChange({ timeout: n })} />
+            <NumberInput
+              value={num(data, 'timeout', 20000)}
+              min={0}
+              fallback={20000}
+              onChange={(n) => onChange({ timeout: n })}
+            />
           </Field>
           {showContext && (
             <Field label="Execution context">
@@ -100,13 +115,21 @@ export default function EditJavascriptCode({ data, onChange }: EditFormProps) {
           }}
           title={t('clickToEdit')}
         >
-          {code ? code : <span className="wf-code-preview-empty">console.log("Hello world!");</span>}
+          {code ? (
+            code
+          ) : (
+            <span className="wf-code-preview-empty">console.log("Hello world!");</span>
+          )}
         </pre>
       </Field>
 
       {context !== 'background' && (
         <>
-          <Checkbox checked={everyNewTab} onChange={(v) => onChange({ everyNewTab: v })} label="Execute in every new tab" />
+          <Checkbox
+            checked={everyNewTab}
+            onChange={(v) => onChange({ everyNewTab: v })}
+            label="Execute in every new tab"
+          />
           <Checkbox
             checked={bool(data, 'runBeforeLoad')}
             onChange={(v) => onChange({ runBeforeLoad: v })}
@@ -118,7 +141,7 @@ export default function EditJavascriptCode({ data, onChange }: EditFormProps) {
       <Modal
         open={codeOpen}
         onClose={() => setCodeOpen(false)}
-        icon="ri-code-s-slash-line"
+        icon="lucide:CodeXml"
         title={t('jsCode')}
         size="xl"
         actions={
@@ -143,12 +166,21 @@ export default function EditJavascriptCode({ data, onChange }: EditFormProps) {
         {tab === 'code' ? (
           <div className="wf-code-modal">
             <div className={`wf-code-host${wrap ? ' wf-code-wrap' : ''}`}>
-              <CodeEditor value={code} onChange={(v) => onChange({ code: v })} lang="javascript" height="100%" />
+              <CodeEditor
+                value={code}
+                onChange={(v) => onChange({ code: v })}
+                lang="javascript"
+                height="100%"
+              />
             </div>
             <div className="wf-code-helpers">
               <p className="wf-code-helpers-title">
                 <span>{t('availableFuncs')}</span>
-                <button type="button" className="wf-code-wrap-toggle" onClick={() => setWrap((w) => !w)}>
+                <button
+                  type="button"
+                  className="wf-code-wrap-toggle"
+                  onClick={() => setWrap((w) => !w)}
+                >
                   {t('wrapLine')}
                 </button>
               </p>
@@ -172,7 +204,11 @@ export default function EditJavascriptCode({ data, onChange }: EditFormProps) {
             {scripts.length === 0 && <p className="wf-form-note">{t('noPreload')}</p>}
             {scripts.map((script, index) => (
               <div key={index} className="wf-preload-row">
-                <IconButton icon="ri-delete-bin-line" title="Remove script" onClick={() => removeScript(index)} />
+                <IconButton
+                  icon={Trash2}
+                  title="Remove script"
+                  onClick={() => removeScript(index)}
+                />
                 <TextInput
                   value={script.src ?? ''}
                   placeholder="http://example.com/script.js"
@@ -186,7 +222,7 @@ export default function EditJavascriptCode({ data, onChange }: EditFormProps) {
               </div>
             ))}
             <button type="button" className="wf-btn-accent" onClick={addScript}>
-              <i className="ri-add-line" /> {bt('Add')}
+              <Plus size={14} /> {bt('Add')}
             </button>
           </div>
         )}

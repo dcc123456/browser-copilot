@@ -16,6 +16,7 @@
  *
  * @module workflow-editor/blocks/batchA/EditCreateElement
  */
+import { Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import { Checkbox, Field, IconButton, Select, TextArea, TextInput } from '../shared/Field'
 import type { EditFormProps } from '../EditForms'
@@ -81,7 +82,14 @@ export default function EditCreateElement({ data, onChange }: EditFormProps) {
       <button
         type="button"
         className="wf-btn-accent"
-        style={{ width: '100%', marginTop: 16, padding: '8px 12px', borderRadius: 8, border: 'none', cursor: 'pointer' }}
+        style={{
+          width: '100%',
+          marginTop: 16,
+          padding: '8px 12px',
+          borderRadius: 8,
+          border: 'none',
+          cursor: 'pointer',
+        }}
         onClick={() => setShowModal(true)}
       >
         Edit element
@@ -130,7 +138,7 @@ export default function EditCreateElement({ data, onChange }: EditFormProps) {
                   </button>
                 ))}
               </div>
-              <IconButton icon="ri-close-line" title="Close" onClick={() => setShowModal(false)} />
+              <IconButton icon={X} title="Close" onClick={() => setShowModal(false)} />
             </div>
 
             <div style={{ padding: '0 16px 16px', overflow: 'auto', flex: 1 }}>
@@ -157,19 +165,21 @@ export default function EditCreateElement({ data, onChange }: EditFormProps) {
                   <div style={{ margin: '8px 0' }}>
                     <span style={{ fontSize: 13, opacity: 0.75 }}>Available functions</span>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
-                      {['automaRefData(keyword, path?)', 'automaExecWorkflow(options)'].map((name) => (
-                        <code
-                          key={name}
-                          style={{
-                            background: 'var(--bc-box-transparent, rgba(128,128,128,0.12))',
-                            padding: '2px 6px',
-                            borderRadius: 6,
-                            fontSize: 12,
-                          }}
-                        >
-                          {name}
-                        </code>
-                      ))}
+                      {['automaRefData(keyword, path?)', 'automaExecWorkflow(options)'].map(
+                        (name) => (
+                          <code
+                            key={name}
+                            style={{
+                              background: 'var(--bc-box-transparent, rgba(128,128,128,0.12))',
+                              padding: '2px 6px',
+                              borderRadius: 6,
+                              fontSize: 12,
+                            }}
+                          >
+                            {name}
+                          </code>
+                        ),
+                      )}
                     </div>
                   </div>
                   <TextArea
@@ -185,7 +195,10 @@ export default function EditCreateElement({ data, onChange }: EditFormProps) {
                 <div>
                   <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
                     {preloadScripts.map((item, index) => (
-                      <li key={index} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <li
+                        key={index}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}
+                      >
                         <Select
                           value={item.type || 'script'}
                           onChange={(v) => updateScript(index, { type: v })}
@@ -203,7 +216,7 @@ export default function EditCreateElement({ data, onChange }: EditFormProps) {
                           />
                         </div>
                         <IconButton
-                          icon="ri-delete-bin-7-line"
+                          icon={Trash2}
                           title="Remove"
                           onClick={() => removeScript(index)}
                         />
@@ -213,7 +226,13 @@ export default function EditCreateElement({ data, onChange }: EditFormProps) {
                   <button
                     type="button"
                     className="wf-btn-accent"
-                    style={{ marginTop: 8, padding: '6px 12px', borderRadius: 8, border: 'none', cursor: 'pointer' }}
+                    style={{
+                      marginTop: 8,
+                      padding: '6px 12px',
+                      borderRadius: 8,
+                      border: 'none',
+                      cursor: 'pointer',
+                    }}
                     onClick={addScript}
                   >
                     Add script

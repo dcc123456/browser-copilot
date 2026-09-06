@@ -37,11 +37,21 @@ export default function EditHandleDownload({ data, onChange }: EditFormProps) {
       </Field>
 
       <Field label="Timeout (milliseconds)">
-        <NumberInput value={num(data, 'timeout', 20000)} placeholder="1000" min={0} fallback={20000} onChange={(n) => onChange({ timeout: n })} />
+        <NumberInput
+          value={num(data, 'timeout', 20000)}
+          placeholder="1000"
+          min={0}
+          fallback={20000}
+          onChange={(n) => onChange({ timeout: n })}
+        />
       </Field>
 
       <Field label="File download ID (optional)">
-        <TextInput value={downloadId} placeholder="0" onChange={(v) => onChange({ downloadId: v })} />
+        <TextInput
+          value={downloadId}
+          placeholder="0"
+          onChange={(v) => onChange({ downloadId: v })}
+        />
       </Field>
 
       {!hasDownloadId && (

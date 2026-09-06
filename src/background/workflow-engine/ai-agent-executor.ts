@@ -28,6 +28,7 @@
 
 import { getSettings } from '../../lib/storage'
 import { interpolate } from '../../lib/workflow/interpolate'
+import { sanitizeModelAnswer } from '../../lib/model-output'
 import type { AgentMode } from '../../lib/types'
 import { resolveAutomationTab } from '../driver'
 import { runUnattendedPrompt } from '../agent-unattended'
@@ -142,7 +143,13 @@ export function buildAgentPrompt(parts: {
   }
   lines.push('', 'Task / instruction from the workflow author:')
   lines.push(parts.userPrompt || '(no instruction provided)')
-  lines.push('', 'When done, reply with a concise text summary of the result (this is stored for later workflow steps).')
+  lines.push(
+    '',
+    'Output requirements for your FINAL reply (it is stored into a workflow variable and consumed verbatim by later steps — filled into form fields, compared, parsed):',
+    '- Reply with the final result only. Do NOT include your reasoning, planning, or <think> blocks — thinking content is junk to the workflow.',
+    '- Do NOT wrap the answer in markdown code fences unless the task explicitly asks for code.',
+    '- If the task asks for data (JSON, a number, a list), output exactly that data and nothing else.',
+  )
   return lines.join('\n')
 }
 
@@ -168,17 +175,21 @@ export const aiAgent: BlockExecutor = async (data, ctx) => {
   const variable = String(data['variableName'] ?? 'lastAIAgent') || 'lastAIAgent'
   const rounds = Math.min(50, Math.max(1, Number(data['maxToolRounds'] ?? 20) || 20))
 
-  /** Emit + bail, pre-setting the output variable to '' so a downstream forms
-   *  block's `{{variable}}` reference resolves empty (its guard then skips the
-   *  fill instead of typing a blank or a leftover `{{token}}` literal). */
-  const fail = (kind: 'error' | 'info', text: string): null => {
+  /**
+   * Config/runtime failures THROW, not emit-and-continue: the engine's
+   * per-block onError machinery then applies (retry → fallback edge → fail
+   * the run). The previous "emit + return null" kept the run flowing to
+   * downstream blocks while the AI had produced NO result — from the user's
+   * view the workflow "didn't wait for the AI". Downstream must never run on
+   * an empty output variable, so pre-set it to '' before bailing.
+   */
+  const fail = (text: string): never => {
     ctx.variables[variable] = ''
-    ctx.emit(kind, text)
-    return null
+    throw new Error(text)
   }
 
   if (!userPrompt.trim() && !selector) {
-    return fail('error', 'AI 智能体: 请填写提示词或选择目标元素')
+    fail('AI 智能体: 请填写提示词或选择目标元素')
   }
 
   // Fail fast with a clear message when no model is configured (mirrors the
@@ -186,7 +197,7 @@ export const aiAgent: BlockExecutor = async (data, ctx) => {
   const settings = await getSettings()
   const provider = settings.providers.find((p) => p.id === settings.activeProviderId)
   if (!provider || !provider.apiKey.trim()) {
-    return fail('error', 'AI 智能体: 未配置模型 provider / API Key')
+    fail('AI 智能体: 未配置模型 provider / API Key')
   }
 
   let elementText = ''
@@ -227,18 +238,30 @@ export const aiAgent: BlockExecutor = async (data, ctx) => {
   })
 
   if (result.cancelled) {
-    return fail('info', 'AI 智能体已取消')
+    // Deliberate cancellation: the run is aborting anyway; no error, no throw.
+    ctx.variables[variable] = ''
+    ctx.emit('info', 'AI 智能体已取消')
+    return null
   }
 
   if (!result.ok) {
-    // Emit but do not fail the whole run: other blocks continue on the default
-    // edge, matching the engine's per-block error convention.
-    return fail('error', `AI 智能体: ${result.error ?? '运行失败'}`)
+    // No answer → the block FAILS (see `fail` above): downstream blocks must
+    // not run on an empty result, and the engine's retry/fallback now applies.
+    fail(`AI 智能体: ${result.error ?? '运行失败'}`)
   }
 
-  const answer = result.answer ?? ''
+  // Defense in depth at the workflow boundary (the unattended runner already
+  // cleans): strip reasoning-model `<think>` blocks, a wrapping ``` fence, and
+  // trim, so the variable downstream blocks consume never carries wrapper junk.
+  const answer = sanitizeModelAnswer(result.answer ?? '')
+  if (!answer) {
+    // The turn "finished" but produced nothing usable (thinking-only reply,
+    // empty fence). FAIL like the no-answer path above — downstream must never
+    // run on an empty output variable, and onError (retry → fallback) applies.
+    fail('AI 智能体: 模型未输出有效内容（仅思考过程或空回复）')
+  }
   ctx.variables[variable] = answer
   ctx.variables['lastAIAgent'] = answer
-  ctx.emit('result', answer.slice(0, 200) || 'AI 智能体完成（无文本输出）')
+  ctx.emit('result', answer.slice(0, 200))
   return null
 }

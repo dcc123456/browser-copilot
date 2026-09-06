@@ -8,9 +8,8 @@
  * @module workflow-editor/toast
  */
 
+import { CircleCheck, Info, TriangleAlert } from 'lucide-react'
 import { useCallback, useRef, useState, type ReactElement } from 'react'
-
-
 
 interface ToastItem {
   id: number
@@ -18,7 +17,11 @@ interface ToastItem {
   kind: 'info' | 'ok' | 'error'
 }
 
-export function useToast(): { toasts: ToastItem[]; show: (text: string, kind?: ToastItem['kind']) => void; node: ReactElement } {
+export function useToast(): {
+  toasts: ToastItem[]
+  show: (text: string, kind?: ToastItem['kind']) => void
+  node: ReactElement
+} {
   const [toasts, setToasts] = useState<ToastItem[]>([])
   const idRef = useRef(0)
 
@@ -35,15 +38,13 @@ export function useToast(): { toasts: ToastItem[]; show: (text: string, kind?: T
     <div className="wf-toasts">
       {toasts.map((toast) => (
         <div key={toast.id} className={`wf-toast wf-toast-${toast.kind}`}>
-          <i
-            className={
-              toast.kind === 'error'
-                ? 'ri-error-warning-line'
-                : toast.kind === 'ok'
-                  ? 'ri-checkbox-circle-line'
-                  : 'ri-information-line'
-            }
-          />
+          {toast.kind === 'error' ? (
+            <TriangleAlert size={14} />
+          ) : toast.kind === 'ok' ? (
+            <CircleCheck size={14} />
+          ) : (
+            <Info size={14} />
+          )}
           <span>{toast.text}</span>
         </div>
       ))}

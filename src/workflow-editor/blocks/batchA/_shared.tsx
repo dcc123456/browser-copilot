@@ -25,7 +25,13 @@ export function nanoid(size = 6): string {
   return id
 }
 
-export function AssignVariableFields({ data, onChange }: { data: Record<string, unknown>; onChange: Patch }) {
+export function AssignVariableFields({
+  data,
+  onChange,
+}: {
+  data: Record<string, unknown>
+  onChange: Patch
+}) {
   const assignVariable = data.assignVariable === true
   return (
     <>
@@ -52,11 +58,21 @@ export function AssignVariableFields({ data, onChange }: { data: Record<string, 
  * dropdown from the current workflow's columns; here the column name is a
  * free-text input.
  */
-export function TableFields({ data, onChange }: { data: Record<string, unknown>; onChange: Patch }) {
+export function TableFields({
+  data,
+  onChange,
+}: {
+  data: Record<string, unknown>
+  onChange: Patch
+}) {
   const saveData = data.saveData === true
   return (
     <>
-      <Checkbox checked={saveData} onChange={(v) => onChange({ saveData: v })} label="Insert to table" />
+      <Checkbox
+        checked={saveData}
+        onChange={(v) => onChange({ saveData: v })}
+        label="Insert to table"
+      />
       {saveData && (
         <Field label="Select column">
           <TextInput
@@ -71,7 +87,13 @@ export function TableFields({ data, onChange }: { data: Record<string, unknown>;
 }
 
 /** "Add extra row" checkbox + value/column inputs (port of InsertWorkflowData's extraRow slot). */
-export function ExtraRowFields({ data, onChange }: { data: Record<string, unknown>; onChange: Patch }) {
+export function ExtraRowFields({
+  data,
+  onChange,
+}: {
+  data: Record<string, unknown>
+  onChange: Patch
+}) {
   const addExtraRow = data.addExtraRow === true
   return (
     <>
@@ -124,5 +146,3 @@ export function InsertDataFields({
     </>
   )
 }
-
-

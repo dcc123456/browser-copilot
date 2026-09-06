@@ -9,12 +9,7 @@
  */
 
 import { memo } from 'react'
-import {
-  BaseEdge,
-  getSmoothStepPath,
-  type EdgeProps,
-  type Edge,
-} from '@xyflow/react'
+import { BaseEdge, getSmoothStepPath, type EdgeProps, type Edge } from '@xyflow/react'
 
 export type CustomEdgeData = {
   highlighted?: boolean

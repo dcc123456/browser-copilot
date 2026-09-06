@@ -28,10 +28,10 @@ describe('block catalog', () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
-  it('icons use RemixIcon names, inline paths, or http URLs', () => {
+  it('icons use lucide names, inline paths, or http URLs', () => {
     for (const b of BLOCK_CATALOG) {
       const ok =
-        b.icon.startsWith('ri') || b.icon.startsWith('path:') || b.icon.startsWith('http')
+        b.icon.startsWith('lucide:') || b.icon.startsWith('path:') || b.icon.startsWith('http')
       expect(ok, `${b.id} icon "${b.icon}" is a supported form`).toBe(true)
     }
   })
@@ -48,10 +48,10 @@ describe('block catalog', () => {
   })
 
   it('the five cloud blocks are exactly google/ai/package', () => {
-    const cloud = BLOCK_CATALOG.filter((b) => b.cloud).map((b) => b.id).sort()
-    expect(cloud).toEqual(
-      [...CLOUD_BLOCK_IDS].sort(),
-    )
+    const cloud = BLOCK_CATALOG.filter((b) => b.cloud)
+      .map((b) => b.id)
+      .sort()
+    expect(cloud).toEqual([...CLOUD_BLOCK_IDS].sort())
   })
 
   it('local (palette) block count is at least 50', () => {

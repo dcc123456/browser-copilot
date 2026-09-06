@@ -15,6 +15,7 @@ import { countElements, execJsOnActiveTab } from '../driver'
 import { normalScopeFromWindowId } from '../automation-scope'
 import { BLOCK_BY_ID } from '../../lib/workflow/blocks/palette'
 import { runWorkflow } from './engine'
+import type { AiTakeoverHook } from './engine'
 
 /** Resolve a node id to a human-readable block label for run logs. */
 function nodeLabel(workflow: Workflow, nodeId: string): string {
@@ -44,6 +45,11 @@ export interface ExecuteWorkflowOptions {
   startAt?: string
   /** Capture per-block variable snapshots for the logs viewer (debug mode). */
   debug?: boolean
+  /**
+   * AI takeover hook (AI 调试): handed to the engine so a failed node is
+   * completed by the AI agent on the live page instead of failing the run.
+   */
+  aiTakeover?: AiTakeoverHook
   /** Optional caller-side sink for each engine step, fired alongside the run log. */
   onStep?: (kind: string, nodeId: string, text: string) => void
 }
@@ -83,6 +89,7 @@ export async function executeWorkflow(
       variables: opts.variables,
       signal: run.controller.signal,
       ...(scope ? { scope } : {}),
+      ...(opts.aiTakeover ? { aiTakeover: opts.aiTakeover } : {}),
       loopElementCounter: (selector, signal) => countElements(selector, signal, scope),
       // JS conditions run in the page: the service worker CSP forbids eval.
       evaluateExpression: async (code, vars) => {

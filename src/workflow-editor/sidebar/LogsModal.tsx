@@ -10,6 +10,7 @@
  * @module workflow-editor/sidebar/LogsModal
  */
 
+import { Bug, ChevronRight, CircleCheck, CircleStop, CircleX, LoaderCircle } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { sendCommand } from '../../lib/messages'
 import Modal from '../ui/Modal'
@@ -30,14 +31,14 @@ function blockCount(run: RunView): number {
 
 function RunRow({ run, onOpen }: { run: RunView; onOpen: (run: RunView) => void }) {
   const state = run.outcome
-  const icon =
+  const Icon =
     state === undefined
-      ? 'ri-loader-4-line wf-spin'
+      ? LoaderCircle
       : state === 'ok'
-        ? 'ri-checkbox-circle-fill'
+        ? CircleCheck
         : state === 'failed'
-          ? 'ri-close-circle-fill'
-          : 'ri-stop-circle-fill'
+          ? CircleX
+          : CircleStop
   const iconCls =
     state === undefined
       ? 'wf-run-running'
@@ -48,7 +49,10 @@ function RunRow({ run, onOpen }: { run: RunView; onOpen: (run: RunView) => void 
           : 'wf-warn'
   return (
     <button type="button" className="wf-run-row" onClick={() => onOpen(run)}>
-      <i className={`wf-run-icon ${icon} ${iconCls}`} />
+      <Icon
+        size={14}
+        className={`wf-run-icon ${iconCls}${state === undefined ? ' wf-spin' : ''}`}
+      />
       <span className="wf-run-name" title={run.label}>
         {run.label || 'workflow'}
       </span>
@@ -58,7 +62,7 @@ function RunRow({ run, onOpen }: { run: RunView; onOpen: (run: RunView) => void 
       <span className="wf-run-meta">{blockCount(run)} blocks</span>
       <span className="wf-run-meta">{runDuration(run) || '…'}</span>
       <span className="wf-run-meta">{clock(run.startedAt)}</span>
-      <i className="ri-chevron-right-line wf-run-chevron" />
+      <ChevronRight size={12} className="wf-run-chevron" />
     </button>
   )
 }
@@ -76,7 +80,10 @@ export default function LogsModal({
   debugMode: boolean
   t: TranslateFn
 }) {
-  const [boards, setBoards] = useState<{ runs: RunView[]; finished: RunView[] }>({ runs: [], finished: [] })
+  const [boards, setBoards] = useState<{ runs: RunView[]; finished: RunView[] }>({
+    runs: [],
+    finished: [],
+  })
   const [openRunId, setOpenRunId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -84,7 +91,10 @@ export default function LogsModal({
     let live = true
     const load = async () => {
       try {
-        const r = await sendCommand({ type: 'workflows.running', workflowId: workflowId ?? undefined })
+        const r = await sendCommand({
+          type: 'workflows.running',
+          workflowId: workflowId ?? undefined,
+        })
         if (live && r.type === 'workflows.running') {
           setBoards({ runs: r.runs as RunView[], finished: r.finished as RunView[] })
         }
@@ -103,20 +113,20 @@ export default function LogsModal({
   // Newest first: running on top, then finished (already newest-first).
   const all = useMemo(() => [...boards.runs, ...boards.finished], [boards])
   // Keep the open run's live data fresh by deriving it from the latest board.
-  const openRun = openRunId ? all.find((r) => r.runId === openRunId) ?? null : null
+  const openRun = openRunId ? (all.find((r) => r.runId === openRunId) ?? null) : null
 
   return (
     <>
       <Modal
         open={open}
         onClose={onClose}
-        icon="ri-terminal-box-line"
+        icon="lucide:SquareTerminal"
         title={t('logsTitle')}
         size="md"
         actions={
           debugMode ? (
             <span className="wf-logs-debug-badge">
-              <i className="ri-bug-line" /> Debug
+              <Bug size={14} /> Debug
             </span>
           ) : undefined
         }
@@ -128,18 +138,13 @@ export default function LogsModal({
           ))}
           {!debugMode && all.length > 0 && (
             <p className="wf-logs-debug-hint">
-              <i className="ri-bug-line" /> {t('debugHint')}
+              <Bug size={14} /> {t('debugHint')}
             </p>
           )}
         </div>
       </Modal>
 
-      <RunDetailModal
-        run={openRun}
-        debug={debugMode}
-        onClose={() => setOpenRunId(null)}
-        t={t}
-      />
+      <RunDetailModal run={openRun} debug={debugMode} onClose={() => setOpenRunId(null)} t={t} />
     </>
   )
 }

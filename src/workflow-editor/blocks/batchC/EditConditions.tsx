@@ -10,9 +10,18 @@
  * @module workflow-editor/blocks/batchC/EditConditions
  */
 
+import { Pencil, Plus, Trash2, Waypoints } from 'lucide-react'
 import { useState } from 'react'
 import type { EditFormProps } from '../EditForms'
-import { Checkbox, Expand, Field, IconButton, NumberInput, TextArea, TextInput } from '../shared/Field'
+import {
+  Checkbox,
+  Expand,
+  Field,
+  IconButton,
+  NumberInput,
+  TextArea,
+  TextInput,
+} from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
 import ConditionBuilder, { readGroups, type OrGroup } from './ConditionBuilder'
 import { id } from './shared'
@@ -74,8 +83,13 @@ export default function EditConditions({ data, onChange }: EditFormProps) {
       </Field>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0' }}>
-        <button type="button" className="wf-btn-accent" disabled={paths.length >= 20} onClick={addPath}>
-          <i className="ri-add-line" /> Add path
+        <button
+          type="button"
+          className="wf-btn-accent"
+          disabled={paths.length >= 20}
+          onClick={addPath}
+        >
+          <Plus size={14} /> Add path
         </button>
       </div>
 
@@ -86,17 +100,33 @@ export default function EditConditions({ data, onChange }: EditFormProps) {
       {paths.map((path, index) => (
         <div
           key={path.id}
-          style={{ border: '1px solid var(--bc-border, #ccc)', borderRadius: 8, padding: 8, marginBottom: 8 }}
+          style={{
+            border: '1px solid var(--bc-border, #ccc)',
+            borderRadius: 8,
+            padding: 8,
+            marginBottom: 8,
+          }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <i className="ri-guide-line" />
-            <TextInput value={path.name} placeholder={`Path ${index + 1}`} onChange={(v) => renamePath(index, v)} />
-            <IconButton icon="ri-pencil-line" title="Edit condition" onClick={() => setOpenPath(openPath === index ? null : index)} />
-            <IconButton icon="ri-delete-bin-line" title="Delete path" onClick={() => removePath(index)} />
+            <Waypoints size={14} />
+            <TextInput
+              value={path.name}
+              placeholder={`Path ${index + 1}`}
+              onChange={(v) => renamePath(index, v)}
+            />
+            <IconButton
+              icon={Pencil}
+              title="Edit condition"
+              onClick={() => setOpenPath(openPath === index ? null : index)}
+            />
+            <IconButton icon={Trash2} title="Delete path" onClick={() => removePath(index)} />
           </div>
           {openPath === index && (
             <div style={{ marginTop: 8 }}>
-              <ConditionBuilder value={readGroups(path.conditions)} onChange={(g) => setPathConditions(index, g)} />
+              <ConditionBuilder
+                value={readGroups(path.conditions)}
+                onChange={(g) => setPathConditions(index, g)}
+              />
             </div>
           )}
         </div>
@@ -111,10 +141,20 @@ export default function EditConditions({ data, onChange }: EditFormProps) {
         {bool(data, 'retryConditions') && (
           <>
             <Field label="Times">
-              <NumberInput value={num(data, 'retryCount', 10)} min={0} fallback={10} onChange={(n) => onChange({ retryCount: n })} />
+              <NumberInput
+                value={num(data, 'retryCount', 10)}
+                min={0}
+                fallback={10}
+                onChange={(n) => onChange({ retryCount: n })}
+              />
             </Field>
             <Field label="Timeout (ms)">
-              <NumberInput value={num(data, 'retryTimeout', 1000)} min={0} fallback={1000} onChange={(n) => onChange({ retryTimeout: n })} />
+              <NumberInput
+                value={num(data, 'retryTimeout', 1000)}
+                min={0}
+                fallback={1000}
+                onChange={(n) => onChange({ retryTimeout: n })}
+              />
             </Field>
           </>
         )}

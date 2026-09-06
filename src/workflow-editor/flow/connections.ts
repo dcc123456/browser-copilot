@@ -16,14 +16,53 @@
  * @module workflow-editor/flow/connections
  */
 
-import type { Connection, Edge } from '@xyflow/react'
+import type { Connection, Edge, Node } from '@xyflow/react'
 
 import { newId } from '../../lib/storage'
+import { BRANCH_HANDLES } from './BlockNode'
 
 const FALLBACK_SUFFIX = '-output-fallback'
 
 export function isFallbackHandle(handle: string | null | undefined): boolean {
   return typeof handle === 'string' && handle.endsWith(FALLBACK_SUFFIX)
+}
+
+type NodeHandleInfo = { blockId: string; sources: Set<string>; hasTarget: boolean }
+
+/**
+ * Re-anchor edges whose stored handle ids no longer resolve to a rendered
+ * `<Handle>`.
+ *
+ * React Flow silently DROPS an edge whose `sourceHandle`/`targetHandle` does
+ * not match a handle on its endpoint node: nodes stay visible, connections
+ * just vanish — no console error, no warning (the "连线看不见" bug after a
+ * handle-id convention drift or a save format predating branch handles). On
+ * load every edge with an unknown handle is re-anchored to its node's primary
+ * input/output handle; known ids (primary, branch, fallback) are kept as-is.
+ */
+export function healEdgeHandles(nodes: Node[], edges: Edge[]): Edge[] {
+  const known = new Map<string, NodeHandleInfo>()
+  for (const node of nodes) {
+    const block = node.data?.block as { id: string; inputs?: number } | undefined
+    if (!block) continue
+    const sources = new Set<string>([`${block.id}-output-1`, `${block.id}-output-fallback`])
+    for (const handle of BRANCH_HANDLES[block.id] ?? []) {
+      sources.add(`${block.id}-${handle.idSuffix}`)
+    }
+    known.set(node.id, { blockId: block.id, sources, hasTarget: (block.inputs ?? 1) > 0 })
+  }
+  return edges.map((edge) => {
+    const source = known.get(edge.source)
+    const target = known.get(edge.target)
+    if (!source || !target) return edge
+    const sourceHandle =
+      edge.sourceHandle && source.sources.has(edge.sourceHandle)
+        ? edge.sourceHandle
+        : `${source.blockId}-output-1`
+    const targetHandle = target.hasTarget ? `${target.blockId}-input-1` : edge.targetHandle
+    if (sourceHandle === edge.sourceHandle && targetHandle === edge.targetHandle) return edge
+    return { ...edge, sourceHandle, targetHandle }
+  })
 }
 
 function newEdge(conn: Connection): Edge {
@@ -62,6 +101,8 @@ export function applyConnection(eds: Edge[], conn: Connection): Edge[] {
   // fallback edges (they attach to the same handle visually but never occupy
   // it — the fallback line coexists with the node's regular incoming edge).
   const occupiesInput = (e: Edge): boolean =>
-    e.target === conn.target && e.targetHandle === conn.targetHandle && !isFallbackHandle(e.sourceHandle)
+    e.target === conn.target &&
+    e.targetHandle === conn.targetHandle &&
+    !isFallbackHandle(e.sourceHandle)
   return [...eds.filter((e) => !occupiesInput(e)), newEdge(conn)]
 }

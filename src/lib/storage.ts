@@ -69,7 +69,6 @@ export const DEFAULT_SETTINGS: Settings = {
   maxToolRounds: 20,
   disabledTools: [],
   systemPromptOverride: '',
-  saveWorkflowFromChat: false,
   downloadAutoSave: true,
   imageModel: { providerId: '', model: '' },
   ocrLanguage: 'eng',
@@ -161,8 +160,6 @@ export function normalizeStoredSettings(raw: unknown): Settings {
       ? value.disabledTools.filter((n): n is string => typeof n === 'string')
       : [],
     systemPromptOverride: typeof value.systemPromptOverride === 'string' ? value.systemPromptOverride : '',
-    saveWorkflowFromChat:
-      typeof value.saveWorkflowFromChat === 'boolean' ? value.saveWorkflowFromChat : false,
     downloadAutoSave:
       typeof value.downloadAutoSave === 'boolean' ? value.downloadAutoSave : true,
     imageModel,
@@ -1075,6 +1072,14 @@ export function fillLikeJsFromCode(code: string): { selector: string; value: str
     if (match[3] !== undefined) selectors.add(`#${match[4]}`)
     else selectors.add((match[2] ?? '').trim())
   }
+  // Indexed list accessors resolve to the FIRST matching element — same as
+  // querySelector. getElementsByName → [name="…"], getElementsByClassName →
+  // ".…". Requiring the `[0]` index keeps multi-element loops as JS.
+  const indexedRe =
+    /getElementsByName\s*\(\s*(['"])([^'"\n]+)\1\s*\)\s*\[0\]|getElementsByClassName\s*\(\s*(['"])([^'"\n]+)\3\s*\)\s*\[0\]/g
+  for (const match of code.matchAll(indexedRe)) {
+    selectors.add(match[0].startsWith('getElementsByName') ? `[name="${match[2]}"]` : `.${match[4]}`)
+  }
   if (selectors.size !== 1) return null
 
   // A value write must be present: a plain assignment or the React native
@@ -1094,8 +1099,12 @@ export function fillLikeJsFromCode(code: string): { selector: string; value: str
     const value = match[2] ?? match[4] ?? ''
     if (value && !value.includes('${')) values.push(value)
   }
-  if (values.length !== 1) return null
-  return { selector: [...selectors][0]!, value: values[0]! }
+  // One DISTINCT literal value — a defensive duplicate write of the same text
+  // is still a single fill and converts; genuinely different values (a
+  // clear-then-set of two fields, chained writes) stay JS.
+  const distinct = new Set(values)
+  if (distinct.size !== 1) return null
+  return { selector: [...selectors][0]!, value: [...distinct][0]! }
 }
 
 /** The literal a fill/select/JS-fill step would write (null when there is none). */
@@ -1137,6 +1146,40 @@ function jsFillSelector(step: HistoryStep): string {
   if (step.action !== 'run_javascript') return ''
   const code = typeof step.args?.code === 'string' ? step.args.code : ''
   return fillLikeJsFromCode(code)?.selector ?? ''
+}
+
+/**
+ * One-line canvas title: whitespace collapsed, long text cut so the node card
+ * keeps a single readable line.
+ */
+function titleClip(text: string, max = 40): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat
+}
+
+/**
+ * Meaningful canvas title for a generated javascript-code node. Every JS step
+ * shares the same history summary ("Run JavaScript in the page"), which says
+ * nothing at a glance — so the title is read from the code itself: a leading
+ * `//` comment (what the author said the script does) wins, otherwise the
+ * first meaningful statement line does. `return`/`await` prefixes carry no
+ * meaning on a card and are stripped.
+ */
+function jsNodeTitle(code: string): string {
+  const lines = code.split('\n').map((line) => line.trim())
+  let i = 0
+  while (i < lines.length && lines[i] === '') i += 1
+  const comments: string[] = []
+  while (i < lines.length && lines[i]!.startsWith('//')) {
+    comments.push(lines[i]!.replace(/^\/\/+\s*/, ''))
+    i += 1
+  }
+  const comment = comments.join(' ').trim()
+  if (comment) return titleClip(comment)
+  // Skip blanks and bare-brace noise so a wrapped block still yields a
+  // statement line rather than `{`.
+  while (i < lines.length && (lines[i] === '' || /^[{};,)]*$/.test(lines[i]!))) i += 1
+  return titleClip((lines[i] ?? '').replace(/^(?:return|await)\s+/, ''))
 }
 
 /**
@@ -1480,7 +1523,7 @@ export function workflowFromHistory(entries: HistoryEntry[], name: string): Work
     // logic must see it (nodeDescription keeps the summary only when there is
     // no selector to show).
     const selector = selectorFromArgs(step.args) || jsFillSelector(step)
-    const description = nodeDescription(step, selector)
+    let description = nodeDescription(step, selector)
 
     // OCR hand-off FIRST: a short-token fill shortly after a recognition step
     // is a TRANSCRIPTION (the captcha code just read), not composed content —
@@ -1539,6 +1582,13 @@ export function workflowFromHistory(entries: HistoryEntry[], name: string): Work
     }
 
     const blockId = blockIdForStep(step.action, step.args)
+    // A javascript-code node's card must say what THIS script does: every JS
+    // step shares one generic history summary, so the title is read from the
+    // code itself (leading comment, else first statement). Fill-shaped JS
+    // became a forms node above and keeps its selector card.
+    if (blockId === 'javascript-code') {
+      description = jsNodeTitle(String(step.args?.code ?? '')) || description
+    }
     addNode(blockId, {
       description,
       ...blockDataFromArgs(step.action, step.args, aiVar, ocrVar),

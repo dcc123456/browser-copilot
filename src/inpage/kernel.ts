@@ -885,6 +885,19 @@ export function runOp(op: Op): OpResult {
 
     try {
       focusElement(element)
+      // Already-correct content: skip the clear+retype entirely. Clearing a
+      // stateful editor that already holds the target text risks LOSING it
+      // (some editors drop simulated input after an internal-state clear),
+      // and an equal re-type is a no-op anyway — "已填写的内容" survives.
+      if (clear && value !== '' && stripWhitespace(readEditorText()) === stripWhitespace(value)) {
+        return {
+          ...base(),
+          ok: true,
+          found: true,
+          note: '编辑器内容已是目标文本，跳过填写（不清空已填写内容）',
+          data: { contenteditable: true, registered: true, cssPath: cssPathOf(element) },
+        }
+      }
       if (clear) {
         // 1) The editor's own keybinding path: ctrl/meta+A then Backspace
         //    operate on the internal selection (DraftJS and friends).
@@ -1520,6 +1533,18 @@ export function runOp(op: Op): OpResult {
           return withMeta(fail(`${describeElement(element)} is a ${type}; use set_checkbox.`))
         if (type === 'file')
           return withMeta(fail('File inputs cannot be filled by an extension.'))
+      }
+      // Content already equal to the target: do NOT clear-and-retype. The
+      // forms fill then never wipes content an earlier step (an AI agent, a
+      // previous fill, the page itself) already wrote correctly.
+      const current = String((element as HTMLInputElement).value ?? '')
+      if (op.clear !== false && value !== '' && current === value) {
+        return withMeta({
+          ...base(),
+          ok: true,
+          found: true,
+          note: '字段内容已是目标值，跳过填写（不清空已填写内容）',
+        })
       }
       const next =
         op.clear === false ? `${(element as HTMLInputElement).value ?? ''}${value}` : value

@@ -11,6 +11,7 @@
  * @module workflow-editor/sidebar/BlockEditForm
  */
 
+import { ArrowLeft, Cloud, Info } from 'lucide-react'
 import { isCloudBlock } from '../../lib/workflow/blocks/cloud-blocks'
 import { isCustomBlock } from '../../lib/workflow/blocks/custom'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
@@ -78,7 +79,11 @@ function GenericForm({
                 onChange={(e) => onChange({ [key]: e.target.value })}
               />
             ) : (
-              <input type="text" value={str} onChange={(e) => onChange({ [key]: e.target.value })} />
+              <input
+                type="text"
+                value={str}
+                onChange={(e) => onChange({ [key]: e.target.value })}
+              />
             )}
           </div>
         )
@@ -103,7 +108,7 @@ export default function BlockEditForm({
     <div className="wf-edit-block">
       <div className="wf-edit-header">
         <button type="button" onClick={onBack} title={t('back')} className="wf-icon-btn">
-          <i className="ri-arrow-left-line" />
+          <ArrowLeft size={14} />
         </button>
         <p className="wf-edit-title">{nodeName || blockName(block.id, block.name)}</p>
         <span className="wf-edit-spacer" />
@@ -115,14 +120,14 @@ export default function BlockEditForm({
             title="Docs"
             className="wf-icon-btn"
           >
-            <i className="ri-information-line" />
+            <Info size={14} />
           </a>
         )}
       </div>
 
       {cloud ? (
         <div className="wf-form wf-form-unsupported">
-          <i className="ri-cloud-line" />
+          <Cloud size={14} />
           <p>This block requires Automa's cloud service and is not supported.</p>
         </div>
       ) : block.disableEdit ? (

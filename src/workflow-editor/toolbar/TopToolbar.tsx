@@ -1,14 +1,30 @@
 /**
  * Floating top toolbar — compact Automa-style controls across the canvas top.
  *
- * Left group: palette toggle + an INLINE-EDITABLE workflow name (Automa lets you
- * rename the workflow from the editor top bar) + auto-layout. Center: a Logs
- * button that opens the run-logs/debug modal. Right: record / save / run.
+ * Left group: palette toggle (PanelLeft open/close icons matching the
+ * expand/collapse intent) + the workflow name (CLICK opens a rename dialog —
+ * no more inline keystroke renaming) + auto-layout. Center: debug mode + Logs
+ * toggles (nowrap so the labels never wrap). Right: record / save / run.
  *
  * @module workflow-editor/toolbar/TopToolbar
  */
 
+import {
+  Bug,
+  CircleDot,
+  CircleStop,
+  LoaderCircle,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Pencil,
+  Play,
+  Save,
+  SquareTerminal,
+  WandSparkles,
+} from 'lucide-react'
+import { useState } from 'react'
 import { BlockIcon } from '../../lib/workflow/blocks/icons'
+import Modal from '../ui/Modal'
 import type { TranslateFn } from '../i18n'
 
 export default function TopToolbar({
@@ -34,7 +50,6 @@ export default function TopToolbar({
   workflowIcon: string
   paletteOpen: boolean
   onTogglePalette: () => void
-  /** Rename the workflow (called on every keystroke of the inline name input). */
   onRename: (name: string) => void
   /** Debug mode: capture per-block variables for the logs viewer. */
   debugMode: boolean
@@ -51,26 +66,50 @@ export default function TopToolbar({
   onAutoLayout: () => void
   t: TranslateFn
 }) {
+  // Rename dialog state: the toolbar shows the name as a button; editing
+  // happens in the dialog so a stray click can no longer turn the name into
+  // an input mid-canvas-work.
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [nameDraft, setNameDraft] = useState(workflowName)
+
+  const confirmRename = (): void => {
+    const next = nameDraft.trim()
+    if (next && next !== workflowName) onRename(next)
+    setRenameOpen(false)
+  }
+
   return (
     <div className="wf-toolbar">
       <div className="wf-toolbar-group">
-        <button type="button" className="wf-icon-btn" title={t('addBlocks')} onClick={onTogglePalette}>
-          <i className={paletteOpen ? 'ri-function-line' : 'ri-add-line'} />
+        <button
+          type="button"
+          className="wf-icon-btn"
+          title={paletteOpen ? t('hidePalette') : t('addBlocks')}
+          onClick={onTogglePalette}
+        >
+          {paletteOpen ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
         </button>
-        <span className="wf-toolbar-mini" title={workflowName}>
-          <BlockIcon icon={workflowIcon || 'ri-flow-chart'} size={16} />
-          <input
-            className="wf-toolbar-name-input"
-            value={workflowName}
-            placeholder={t('untitled')}
-            onChange={(e) => onRename(e.target.value)}
-            onKeyDown={(e) => e.stopPropagation()}
-            aria-label={t('workflowName')}
-          />
+        <button
+          type="button"
+          className="wf-toolbar-mini wf-toolbar-name-btn"
+          title={t('renameWorkflow')}
+          onClick={() => {
+            setNameDraft(workflowName)
+            setRenameOpen(true)
+          }}
+        >
+          <BlockIcon icon={workflowIcon || 'lucide:Workflow'} size={16} />
+          <span className="wf-toolbar-name">{workflowName || t('untitled')}</span>
+          <Pencil size={11} className="wf-name-pencil" />
           {dirty && <span className="wf-dirty-dot" title={t('unsavedChanges')} />}
-        </span>
-        <button type="button" className="wf-icon-btn" title={t('autoLayout')} onClick={onAutoLayout}>
-          <i className="ri-magic-line" />
+        </button>
+        <button
+          type="button"
+          className="wf-icon-btn"
+          title={t('autoLayout')}
+          onClick={onAutoLayout}
+        >
+          <WandSparkles size={14} />
         </button>
       </div>
 
@@ -82,11 +121,11 @@ export default function TopToolbar({
           onClick={onToggleDebug}
           aria-pressed={debugMode}
         >
-          <i className="ri-bug-line" />
+          <Bug size={14} />
           <span>{t('debugMode')}</span>
         </button>
         <button type="button" className="wf-tab" onClick={onOpenLogs} title={t('logsTitle')}>
-          <i className="ri-terminal-box-line" />
+          <SquareTerminal size={14} />
           {t('logs')}
         </button>
       </div>
@@ -101,7 +140,7 @@ export default function TopToolbar({
           onClick={onToggleRecording}
           disabled={false}
         >
-          <i className={recording ? 'ri-stop-circle-line' : 'ri-record-circle-line'} />
+          {recording ? <CircleStop size={14} /> : <CircleDot size={14} />}
           {recording && <span className="wf-rec-label">REC</span>}
         </button>
         <button
@@ -111,7 +150,7 @@ export default function TopToolbar({
           onClick={onSave}
           disabled={saving}
         >
-          <i className="ri-save-line" />
+          <Save size={14} />
         </button>
         <button
           type="button"
@@ -120,9 +159,36 @@ export default function TopToolbar({
           onClick={onRun}
           disabled={running}
         >
-          <i className={running ? 'ri-loader-4-line wf-spin' : 'ri-play-line'} />
+          {running ? <LoaderCircle size={14} className="wf-spin" /> : <Play size={14} />}
         </button>
       </div>
+
+      <Modal
+        open={renameOpen}
+        onClose={() => setRenameOpen(false)}
+        title={t('renameWorkflow')}
+        size="sm"
+      >
+        <input
+          autoFocus
+          aria-label={t('workflowName')}
+          className="wf-rename-input"
+          value={nameDraft}
+          onChange={(e) => setNameDraft(e.target.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation()
+            if (e.key === 'Enter') confirmRename()
+          }}
+        />
+        <div className="wf-rename-actions">
+          <button type="button" className="wf-tab" onClick={() => setRenameOpen(false)}>
+            {t('cancel')}
+          </button>
+          <button type="button" className="wf-tab wf-tab-active" onClick={confirmRename}>
+            {t('save')}
+          </button>
+        </div>
+      </Modal>
     </div>
   )
 }

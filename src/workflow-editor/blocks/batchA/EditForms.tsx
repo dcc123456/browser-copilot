@@ -31,7 +31,8 @@ const FORM_TYPES = [
 /** What the "Value" box holds, per form type — multilingual via the block dictionary. */
 const VALUE_HINT_TEXT_FIELD =
   'Content to fill into the field. Supports variable references such as {{lastOcrText}} (the latest OCR result) or {{aiFill1}} (AI-generated content).'
-const VALUE_HINT_SELECT = 'Option value to select. Supports variable references such as {{lastOcrText}}.'
+const VALUE_HINT_SELECT =
+  'Option value to select. Supports variable references such as {{lastOcrText}}.'
 
 export default function EditForms({ data, onChange }: EditFormProps) {
   const { bt } = useEditorLocale()
@@ -43,7 +44,11 @@ export default function EditForms({ data, onChange }: EditFormProps) {
     <InteractionBase data={data} onChange={onChange}>
       <hr />
 
-      <Checkbox checked={getValue} onChange={(v) => onChange({ getValue: v })} label="Get form value" />
+      <Checkbox
+        checked={getValue}
+        onChange={(v) => onChange({ getValue: v })}
+        label="Get form value"
+      />
 
       {getValue ? (
         <AssignVariableFields data={data} onChange={onChange} />

@@ -11,6 +11,7 @@
 
 import type { Workflow, WorkflowEdge, WorkflowNode } from '../../lib/workflow/types'
 import { getWorkflow } from '../../lib/workflow/storage'
+import type { DebugStepLine } from '../../lib/workflow/auto-debug-patch'
 import type { ScopeWindow } from '../automation-scope'
 import {
   EXECUTORS,
@@ -20,6 +21,40 @@ import {
 import { LoopBreakpointError } from './loop-breakpoint'
 
 export type EmitKind = 'tool' | 'status' | 'result' | 'error' | 'info'
+
+/**
+ * Everything the AI takeover needs to complete ONE failed node's function.
+ * `variables` is the run's LIVE store: the hook may write the step's output
+ * into it (e.g. the node's `variableName`) so downstream references resolve.
+ */
+export interface AiTakeoverRequest {
+  workflow: Workflow
+  failingNodeId: string
+  failedBlockId: string
+  failedParams: Record<string, unknown>
+  failedError: string
+  /** Last node that completed BEFORE the failure (the takeover anchor). */
+  previousNodeId?: string
+  /** Engine step lines up to the failure (tail-capped), oldest first. */
+  steps: DebugStepLine[]
+  /** Live run variables (mutable — the takeover may write outputs). */
+  variables: Record<string, unknown>
+  signal: AbortSignal
+  scope?: ScopeWindow
+  tabId?: number
+}
+
+/** What the takeover reports back to the engine. */
+export interface AiTakeoverOutcome {
+  completed: boolean
+  /** One-line summary of what the AI did (Chinese). */
+  summary?: string
+  /** Why the step could not be completed (feeds the run's failure). */
+  reason?: string
+}
+
+/** Engine-side hook: run the AI takeover for one failed node. */
+export type AiTakeoverHook = (request: AiTakeoverRequest) => Promise<AiTakeoverOutcome | null>
 
 export interface WorkflowRunOptions {
   /** Node id to start from. Defaults to the first trigger or, failing that, the first node. */
@@ -64,6 +99,15 @@ export interface WorkflowRunOptions {
    * variables at that point.
    */
   onSnapshot?: (nodeId: string, label: string, variables: Record<string, unknown>) => void
+  /**
+   * AI takeover (AI 接管): when a block fails, the engine hands that ONE node
+   * to the injected hook before failing the run. The hook completes the node's
+   * function on the live page (seeing the page through the agent's tools); on
+   * success the engine continues with the node's downstream, on failure the
+   * run fails with the takeover's reason appended. Chrome-free: the real
+   * hook lives in `workflow-engine/ai-takeover`.
+   */
+  aiTakeover?: AiTakeoverHook
 }
 
 export interface WorkflowRunResult {
@@ -277,6 +321,7 @@ async function runCore(
     loopElementCounter,
     evaluateExpression,
     onSnapshot,
+    aiTakeover,
   } = options
 
   const nodes = workflow.drawflow.nodes
@@ -290,7 +335,13 @@ async function runCore(
     else outBySource.set(edge.source, [edge])
   }
 
-  const emit = (kind: EmitKind, nodeId: string, text: string) => onStep?.(kind, nodeId, text)
+  // Every engine line is recorded for the AI-takeover context (the takeover
+  // prompt shows the run tail starting at the previous node).
+  const stepLines: DebugStepLine[] = []
+  const emit = (kind: EmitKind, nodeId: string, text: string) => {
+    stepLines.push({ kind, ...(nodeId ? { nodeId } : {}), text })
+    onStep?.(kind, nodeId, text)
+  }
   const signalToUse = signal ?? new AbortController().signal
 
   const completedNodeIds: string[] = []
@@ -468,8 +519,48 @@ async function runCore(
         error = policy.errorMessage
         emit('error', nodeId, policy.errorMessage)
       }
+      // AI takeover (AI 接管): before the run fails, hand the failed node to
+      // the AI. It sees the page, completes THIS node's purpose; on success
+      // the run continues with the node's downstream as if nothing happened.
+      let takeoverReason: string | undefined
+      if (aiTakeover && !isAbort(e) && !signalToUse.aborted) {
+        const previousNodeId = completedNodeIds[completedNodeIds.length - 1]
+        emit('status', nodeId, '运行失败，AI 开始接管该节点…')
+        let outcome: AiTakeoverOutcome | null = null
+        try {
+          outcome = await aiTakeover({
+            workflow,
+            failingNodeId: nodeId,
+            failedBlockId: blockId,
+            failedParams: params,
+            failedError: text,
+            ...(previousNodeId ? { previousNodeId } : {}),
+            steps: stepLines.slice(-25),
+            variables,
+            signal: signalToUse,
+            ...(scope ? { scope } : {}),
+            ...(targetTabId !== undefined ? { tabId: targetTabId } : {}),
+          })
+        } catch (takeoverError) {
+          outcome = { completed: false, reason: message(takeoverError) }
+        }
+        if (outcome?.completed) {
+          completedNodeIds.push(nodeId)
+          emit('result', nodeId, outcome.summary ? `AI 接管完成该步骤：${outcome.summary}` : 'AI 接管完成该步骤')
+          if (onSnapshot) {
+            try {
+              onSnapshot(nodeId, blockId, JSON.parse(JSON.stringify(variables ?? {})))
+            } catch {
+              onSnapshot(nodeId, blockId, {})
+            }
+          }
+          return defaultNext
+        }
+        takeoverReason = outcome?.reason || 'AI 接管未完成该步骤'
+        emit('error', nodeId, `AI 接管失败：${takeoverReason}`)
+      }
       outcome = 'failed'
-      error = error || text
+      error = error || (takeoverReason ? `${text}（AI 接管未完成：${takeoverReason}）` : text)
       return null
     }
 

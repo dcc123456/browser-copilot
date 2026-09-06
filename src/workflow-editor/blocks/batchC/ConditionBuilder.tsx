@@ -21,6 +21,7 @@
  * @module workflow-editor/blocks/batchC/ConditionBuilder
  */
 
+import { Plus, Trash2 } from 'lucide-react'
 import { Field, IconButton, Select, TextArea, TextInput } from '../shared/Field'
 import { id } from './shared'
 
@@ -53,11 +54,41 @@ export const VALUE_TYPES: ValueTypeDef[] = [
     compareable: false,
     data: { code: '\nreturn true;', context: 'background' },
   },
-  { id: 'data#exists', category: 'value', name: 'Data exists', compareable: false, data: { dataPath: '' } },
-  { id: 'element#text', category: 'element', name: 'Element text', compareable: true, data: { selector: '' } },
-  { id: 'element#exists', category: 'element', name: 'Element exists', compareable: false, data: { selector: '' } },
-  { id: 'element#notExists', category: 'element', name: 'Element not exists', compareable: false, data: { selector: '' } },
-  { id: 'element#visible', category: 'element', name: 'Element visible', compareable: false, data: { selector: '' } },
+  {
+    id: 'data#exists',
+    category: 'value',
+    name: 'Data exists',
+    compareable: false,
+    data: { dataPath: '' },
+  },
+  {
+    id: 'element#text',
+    category: 'element',
+    name: 'Element text',
+    compareable: true,
+    data: { selector: '' },
+  },
+  {
+    id: 'element#exists',
+    category: 'element',
+    name: 'Element exists',
+    compareable: false,
+    data: { selector: '' },
+  },
+  {
+    id: 'element#notExists',
+    category: 'element',
+    name: 'Element not exists',
+    compareable: false,
+    data: { selector: '' },
+  },
+  {
+    id: 'element#visible',
+    category: 'element',
+    name: 'Element visible',
+    compareable: false,
+    data: { selector: '' },
+  },
   {
     id: 'element#visibleScreen',
     category: 'element',
@@ -188,7 +219,8 @@ function ValueItemEditor({
     if (!def) return
     onChange({ ...item, type: newType, data: { ...def.data } })
   }
-  const setData = (key: string, value: string) => onChange({ ...item, data: { ...item.data, [key]: value } })
+  const setData = (key: string, value: string) =>
+    onChange({ ...item, data: { ...item.data, [key]: value } })
 
   // "code" renders a mono textarea; every other data key a plain input.
   const dataKeys = Object.keys(item.data).filter((k) => k !== 'context')
@@ -239,7 +271,8 @@ function AndRow({
   onDelete: () => void
 }) {
   const first = row.items[0]
-  const firstValueDef = first && first.category === 'value' ? VALUE_TYPES.find((v) => v.id === first.type) : undefined
+  const firstValueDef =
+    first && first.category === 'value' ? VALUE_TYPES.find((v) => v.id === first.type) : undefined
   // A non-compareable left operand stands alone (Automa drops compare+right).
   const standalone = firstValueDef ? !firstValueDef.compareable : false
 
@@ -253,7 +286,8 @@ function AndRow({
     onItemsChange(items)
   }
 
-  const compareItem = row.items.find((i) => i.category === 'compare') as BuilderCompareItem | undefined
+  const compareItem = row.items.find((i) => i.category === 'compare') as
+    BuilderCompareItem | undefined
 
   const setCompareType = (newType: string) => {
     const def = COMPARE_TYPES.find((c) => c.id === newType)
@@ -271,20 +305,28 @@ function AndRow({
 
   return (
     <div className="wf-expand">
-      <div className="wf-field" style={{ border: '1px solid var(--bc-border, #ccc)', borderRadius: 8, padding: 8 }}>
+      <div
+        className="wf-field"
+        style={{ border: '1px solid var(--bc-border, #ccc)', borderRadius: 8, padding: 8 }}
+      >
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <IconButton icon="ri-delete-bin-line" title="Delete condition" onClick={onDelete} />
+          <IconButton icon={Trash2} title="Delete condition" onClick={onDelete} />
         </div>
         {leftValue && (
           <>
-            <ValueItemEditor item={leftValue} onChange={(n) => updateItem(row.items.indexOf(leftValue), n)} />
+            <ValueItemEditor
+              item={leftValue}
+              onChange={(n) => updateItem(row.items.indexOf(leftValue), n)}
+            />
             {!standalone && (
               <>
                 <Field label="Operator">
                   <Select
                     value={compareItem?.type ?? 'eq'}
                     onChange={setCompareType}
-                    options={COMPARE_GROUPS.flatMap((g) => g.items.map((c) => ({ value: c.id, label: c.name })))}
+                    options={COMPARE_GROUPS.flatMap((g) =>
+                      g.items.map((c) => ({ value: c.id, label: c.name })),
+                    )}
                   />
                 </Field>
                 {compareItem &&
@@ -355,7 +397,7 @@ export default function ConditionBuilder({
     <div className="wf-form">
       {groups.length === 0 && (
         <button type="button" className="wf-btn-accent" onClick={() => onChange([newOrGroup()])}>
-          <i className="ri-add-line" /> Add condition
+          <Plus size={14} /> Add condition
         </button>
       )}
 
@@ -391,7 +433,7 @@ export default function ConditionBuilder({
           ))}
           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
             <button type="button" className="wf-btn-accent" onClick={() => addAndRow(gIndex)}>
-              <i className="ri-add-line" /> AND
+              <Plus size={14} /> AND
             </button>
             {gIndex === groups.length - 1 && (
               <button
@@ -399,7 +441,7 @@ export default function ConditionBuilder({
                 className="wf-btn-accent"
                 onClick={() => onChange([...groups, newOrGroup()])}
               >
-                <i className="ri-add-line" /> OR
+                <Plus size={14} /> OR
               </button>
             )}
           </div>

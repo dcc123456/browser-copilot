@@ -23,7 +23,7 @@ export const CUSTOM_BLOCKS: BlockCatalogEntry[] = [
     name: 'AI agent',
     description:
       'Read a target element and hand it to an AI agent that can analyze the page and (optionally) act on it.',
-    icon: 'riRobot2Line',
+    icon: 'lucide:Bot',
     category: 'general',
     component: 'Default',
     editComponent: 'EditAiAgent',
@@ -60,7 +60,7 @@ export const CUSTOM_BLOCKS: BlockCatalogEntry[] = [
     name: 'OCR text recognition',
     description:
       'Run local OCR (Tesseract.js, offline) on an image variable, an img element on the page or the previous page snapshot; outputs the recognized string into the output variable (default lastOcrText).',
-    icon: 'riCharacterRecognitionLine',
+    icon: 'lucide:ScanText',
     category: 'browser',
     component: 'Default',
     editComponent: 'EditOcr',
@@ -100,7 +100,7 @@ export const CUSTOM_BLOCKS: BlockCatalogEntry[] = [
     name: 'Set variable',
     description:
       'Store a value into a workflow variable for later blocks to read (supports {{variables}}).',
-    icon: 'riBookmarkLine',
+    icon: 'lucide:Bookmark',
     category: 'data',
     component: 'Default',
     editComponent: 'EditSetVariable',

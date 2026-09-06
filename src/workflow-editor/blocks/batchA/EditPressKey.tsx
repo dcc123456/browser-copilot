@@ -15,6 +15,7 @@
  *
  * @module workflow-editor/blocks/batchA/EditPressKey
  */
+import { Focus, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Field, IconButton, Select, TextArea, TextInput } from '../shared/Field'
 import type { EditFormProps } from '../EditForms'
@@ -23,16 +24,110 @@ import ElSelectorActions from '../shared/ElSelectorActions'
 
 /** Keys suggested in the single-key autocomplete (EditPressKey `keysList`). */
 const KEYS_LIST = [
-  '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-  'ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown',
-  'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
-  'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
-  '*', '+', '-', '/', ';', '=', ',', '.', '`', '[', '\\', ']', "'", ')',
-  '!', '@', '#', '$', '%', '^', '&', '(',
-  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
-  'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
-  ':', '<', '_', '>', '?', '~', '{', '|', '}', '"',
-  'Enter', 'Control', 'Meta', 'Shift', 'Alt', 'Space',
+  '0',
+  '1',
+  '2',
+  '3',
+  '4',
+  '5',
+  '6',
+  '7',
+  '8',
+  '9',
+  'ArrowLeft',
+  'ArrowUp',
+  'ArrowRight',
+  'ArrowDown',
+  'a',
+  'b',
+  'c',
+  'd',
+  'e',
+  'f',
+  'g',
+  'h',
+  'i',
+  'j',
+  'k',
+  'l',
+  'm',
+  'n',
+  'o',
+  'p',
+  'q',
+  'r',
+  's',
+  't',
+  'u',
+  'v',
+  'w',
+  'x',
+  'y',
+  'z',
+  '*',
+  '+',
+  '-',
+  '/',
+  ';',
+  '=',
+  ',',
+  '.',
+  '`',
+  '[',
+  '\\',
+  ']',
+  "'",
+  ')',
+  '!',
+  '@',
+  '#',
+  '$',
+  '%',
+  '^',
+  '&',
+  '(',
+  'A',
+  'B',
+  'C',
+  'D',
+  'E',
+  'F',
+  'G',
+  'H',
+  'I',
+  'J',
+  'K',
+  'L',
+  'M',
+  'N',
+  'O',
+  'P',
+  'Q',
+  'R',
+  'S',
+  'T',
+  'U',
+  'V',
+  'W',
+  'X',
+  'Y',
+  'Z',
+  ':',
+  '<',
+  '_',
+  '>',
+  '?',
+  '~',
+  '{',
+  '|',
+  '}',
+  '"',
+  'Enter',
+  'Control',
+  'Meta',
+  'Shift',
+  'Alt',
+  'Space',
 ]
 
 const MODIFIER_KEYS = ['Control', 'Alt', 'Shift', 'Meta']
@@ -45,9 +140,14 @@ function toCamelCase(input: string, capitalize = false): string {
 }
 
 /** Port of Automa's recordPressedKey: turns a keydown event into a key combo. */
-function recordPressedKey(
-  event: { repeat: boolean; shiftKey: boolean; metaKey: boolean; altKey: boolean; ctrlKey: boolean; key: string },
-): string | null {
+function recordPressedKey(event: {
+  repeat: boolean
+  shiftKey: boolean
+  metaKey: boolean
+  altKey: boolean
+  ctrlKey: boolean
+  key: string
+}): string | null {
   if (event.repeat || MODIFIER_KEYS.includes(event.key)) return null
 
   let pressedKey: string =
@@ -102,7 +202,10 @@ export default function EditPressKey({ data, onChange }: EditFormProps) {
               placeholder="CSS Selector or XPath"
               onChange={(v) => onChange({ selector: v })}
             />
-            <ElSelectorActions selector={selector} onSelector={(sel) => onChange({ selector: sel })} />
+            <ElSelectorActions
+              selector={selector}
+              onSelector={(sel) => onChange({ selector: sel })}
+            />
           </div>
         </Field>
       }
@@ -136,7 +239,7 @@ export default function EditPressKey({ data, onChange }: EditFormProps) {
               </datalist>
             </div>
             <IconButton
-              icon={isRecording ? 'ri-close-line' : 'ri-focus-3-line'}
+              icon={isRecording ? X : Focus}
               title={isRecording ? 'Cancel' : 'Detect key'}
               onClick={() => setIsRecording((v) => !v)}
             />

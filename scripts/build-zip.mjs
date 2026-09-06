@@ -5,8 +5,8 @@
  * The zip has the built files at its root (manifest.json, icons/, assets/…),
  * not under a dist/ folder, because Chrome's "Load unpacked" and the resulting
  * release both expect manifest.json at the archive root. Source maps are
- * omitted to keep the download small; the minify setting is off, so the shipped
- * JS is still readable enough to debug against the published source.
+ * pruned here as a belt-and-braces measure; the build itself is already
+ * minified and map-free (see vite.config.ts) to keep the download small.
  *
  * No third-party archiver is required: this uses the system `zip` on macOS/Linux
  * and PowerShell's Compress-Archive on Windows. Run `pnpm build` first.

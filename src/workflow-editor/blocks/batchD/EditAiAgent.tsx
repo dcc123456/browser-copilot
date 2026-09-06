@@ -57,7 +57,9 @@ export default function EditAiAgent({ data, onChange }: EditFormProps) {
         <TextArea
           mono
           value={selector}
-          placeholder={findBy === 'xpath' ? '//div[@class="..."] (optional)' : '.css-selector (optional)'}
+          placeholder={
+            findBy === 'xpath' ? '//div[@class="..."] (optional)' : '.css-selector (optional)'
+          }
           onChange={(v) => onChange({ selector: v })}
         />
       </Field>
@@ -70,7 +72,9 @@ export default function EditAiAgent({ data, onChange }: EditFormProps) {
         <TextArea
           rows={5}
           value={str(data, 'prompt')}
-          placeholder={'e.g. Summarize the price in this element and fill the coupon code box.\nUse {{variableName}} to insert a workflow variable.'}
+          placeholder={
+            'e.g. Summarize the price in this element and fill the coupon code box.\nUse {{variableName}} to insert a workflow variable.'
+          }
           onChange={(v) => onChange({ prompt: v })}
         />
       </Field>

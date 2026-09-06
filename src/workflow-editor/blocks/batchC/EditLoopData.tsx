@@ -58,22 +58,38 @@ export default function EditLoopData({ data, onChange }: EditFormProps) {
       </Field>
 
       <Field label="Loop ID">
-        <TextInput value={str(data, 'loopId')} placeholder="Loop ID" onChange={(v) => patch({ loopId: v.replace(/\s/g, '') })} />
+        <TextInput
+          value={str(data, 'loopId')}
+          placeholder="Loop ID"
+          onChange={(v) => patch({ loopId: v.replace(/\s/g, '') })}
+        />
       </Field>
 
       <Field label="Loop through">
-        <Select value={loopThrough} onChange={(v) => patch({ loopThrough: v })} options={LOOP_TYPES} />
+        <Select
+          value={loopThrough}
+          onChange={(v) => patch({ loopThrough: v })}
+          options={LOOP_TYPES}
+        />
       </Field>
 
       {loopThrough === 'google-sheets' && (
         <Field label="Reference key">
-          <TextInput value={str(data, 'referenceKey')} placeholder="abc123" onChange={(v) => patch({ referenceKey: v })} />
+          <TextInput
+            value={str(data, 'referenceKey')}
+            placeholder="abc123"
+            onChange={(v) => patch({ referenceKey: v })}
+          />
         </Field>
       )}
 
       {loopThrough === 'variable' && (
         <Field label="Variable name">
-          <TextInput value={str(data, 'variableName')} placeholder="abc123" onChange={(v) => patch({ variableName: v })} />
+          <TextInput
+            value={str(data, 'variableName')}
+            placeholder="abc123"
+            onChange={(v) => patch({ variableName: v })}
+          />
         </Field>
       )}
 
@@ -94,7 +110,12 @@ export default function EditLoopData({ data, onChange }: EditFormProps) {
           />
           {bool(data, 'waitForSelector') && (
             <Field label="Selector timeout (ms)">
-              <NumberInput value={num(data, 'waitSelectorTimeout', 5000)} min={0} fallback={5000} onChange={(n) => patch({ waitSelectorTimeout: n })} />
+              <NumberInput
+                value={num(data, 'waitSelectorTimeout', 5000)}
+                min={0}
+                fallback={5000}
+                onChange={(n) => patch({ waitSelectorTimeout: n })}
+              />
             </Field>
           )}
         </>
@@ -102,10 +123,16 @@ export default function EditLoopData({ data, onChange }: EditFormProps) {
 
       {loopThrough === 'custom-data' && (
         <>
-          <button type="button" className="wf-btn-accent w-full" onClick={() => setShowData(!showData)}>
+          <button
+            type="button"
+            className="wf-btn-accent w-full"
+            onClick={() => setShowData(!showData)}
+          >
             {showData ? 'Close data' : 'Insert data'}
           </button>
-          <p className="wf-form-note">Max file/data size is 1MB. Import a JSON/CSV file or paste JSON below.</p>
+          <p className="wf-form-note">
+            Max file/data size is 1MB. Import a JSON/CSV file or paste JSON below.
+          </p>
           {showData && (
             <Field label="Custom data (JSON array)">
               <TextArea
@@ -135,7 +162,11 @@ export default function EditLoopData({ data, onChange }: EditFormProps) {
         <>
           <Field label="Max data to loop (0 to disable)" title="Max number of data to loop">
             <NumberInput
-              value={typeof data.maxLoop === 'number' || typeof data.maxLoop === 'string' ? (data.maxLoop as string | number) : 0}
+              value={
+                typeof data.maxLoop === 'number' || typeof data.maxLoop === 'string'
+                  ? (data.maxLoop as string | number)
+                  : 0
+              }
               fallback={0}
               onChange={(n) => patch({ maxLoop: n })}
             />
@@ -143,22 +174,34 @@ export default function EditLoopData({ data, onChange }: EditFormProps) {
           {!resume && (
             <Field label="Start from index">
               <NumberInput
-                value={typeof data.startIndex === 'number' || typeof data.startIndex === 'string' ? (data.startIndex as string | number) : 0}
+                value={
+                  typeof data.startIndex === 'number' || typeof data.startIndex === 'string'
+                    ? (data.startIndex as string | number)
+                    : 0
+                }
                 placeholder="0"
                 fallback={0}
                 onChange={(n) => patch({ startIndex: n })}
               />
             </Field>
           )}
-          <Checkbox checked={resume} onChange={(v) => patch({ resumeLastWorkflow: v })} label="Resume last workflow" />
-          <Checkbox checked={bool(data, 'reverseLoop')} onChange={(v) => patch({ reverseLoop: v })} label="Reverse loop order" />
+          <Checkbox
+            checked={resume}
+            onChange={(v) => patch({ resumeLastWorkflow: v })}
+            label="Resume last workflow"
+          />
+          <Checkbox
+            checked={bool(data, 'reverseLoop')}
+            onChange={(v) => patch({ reverseLoop: v })}
+            label="Reverse loop order"
+          />
         </>
       )}
 
       <Expand title="Notes">
         <p className="wf-form-note">
-          Google Sheets, file import (CSV/JSON), and the on-page element picker are not wired up in this build — use
-          the reference key / selector text fields directly.
+          Google Sheets, file import (CSV/JSON), and the on-page element picker are not wired up in
+          this build — use the reference key / selector text fields directly.
         </p>
       </Expand>
     </div>

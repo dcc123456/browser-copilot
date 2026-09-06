@@ -44,10 +44,18 @@ export default function EditCookie({ data, onChange }: EditFormProps) {
       </Field>
 
       {type === 'get' && (
-        <Checkbox checked={getAll} onChange={(v) => onChange({ getAll: v })} label="Get all cookies" />
+        <Checkbox
+          checked={getAll}
+          onChange={(v) => onChange({ getAll: v })}
+          label="Get all cookies"
+        />
       )}
 
-      <Checkbox checked={useJson} onChange={(v) => onChange({ useJson: v })} label="Use JSON format" />
+      <Checkbox
+        checked={useJson}
+        onChange={(v) => onChange({ useJson: v })}
+        label="Use JSON format"
+      />
 
       {useJson ? (
         <>
@@ -87,11 +95,19 @@ export default function EditCookie({ data, onChange }: EditFormProps) {
           </Field>
           {type === 'set' && (
             <Field label="Value (optional)">
-              <TextInput value={str(data, 'value')} placeholder="value" onChange={(v) => onChange({ value: v })} />
+              <TextInput
+                value={str(data, 'value')}
+                placeholder="value"
+                onChange={(v) => onChange({ value: v })}
+              />
             </Field>
           )}
           <Field label="Path (optional)">
-            <TextInput value={str(data, 'path')} placeholder="/" onChange={(v) => onChange({ path: v })} />
+            <TextInput
+              value={str(data, 'path')}
+              placeholder="/"
+              onChange={(v) => onChange({ path: v })}
+            />
           </Field>
           {isGetOrSet && (
             <Field label="Domain (optional)">
@@ -129,7 +145,11 @@ export default function EditCookie({ data, onChange }: EditFormProps) {
                   label="httpOnly"
                 />
               )}
-              <Checkbox checked={bool(data, 'secure')} onChange={(v) => onChange({ secure: v })} label="secure" />
+              <Checkbox
+                checked={bool(data, 'secure')}
+                onChange={(v) => onChange({ secure: v })}
+                label="secure"
+              />
             </div>
           )}
         </>

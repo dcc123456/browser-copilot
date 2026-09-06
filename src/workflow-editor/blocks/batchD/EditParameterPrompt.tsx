@@ -25,11 +25,18 @@ export default function EditParameterPrompt({ data, onChange }: EditFormProps) {
       </Field>
 
       <Field label="Timeout (millisecond) (0 to disable)">
-        <NumberInput value={num(data, 'timeout', 60000)} fallback={0} onChange={(n) => onChange({ timeout: n })} />
+        <NumberInput
+          value={num(data, 'timeout', 60000)}
+          fallback={0}
+          onChange={(n) => onChange({ timeout: n })}
+        />
       </Field>
 
       <Expand title="Insert parameters" defaultOpen>
-        <ParameterFields value={data.parameters} onChange={(parameters: WorkflowParameter[]) => onChange({ parameters })} />
+        <ParameterFields
+          value={data.parameters}
+          onChange={(parameters: WorkflowParameter[]) => onChange({ parameters })}
+        />
       </Expand>
     </div>
   )

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Minimize2 } from 'lucide-react'
 import { effectiveLocale, messagesFor, type Messages } from '../lib/i18n'
 import { sendCommand } from '../lib/messages'
 import { syncToFiles } from '../lib/fs-store'
@@ -87,10 +88,7 @@ export default function App() {
     return () => chrome.runtime.onMessage.removeListener(listener)
   }, [refreshSkills])
 
-  const locale = effectiveLocale(
-    (localeSetting ?? 'auto') as 'auto',
-    navigator.language,
-  )
+  const locale = effectiveLocale((localeSetting ?? 'auto') as 'auto', navigator.language)
   const i18n = useMemo(() => ({ locale, t: messagesFor(locale) }), [locale])
 
   // A deleted skill must not stay selected in Chat, or the turn would reference
@@ -233,20 +231,7 @@ export default function App() {
           onClick={() => void minimizePanel()}
           type="button"
         >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            aria-hidden="true"
-          >
-            {/* window-minimize: a chevron pointing down into a tray */}
-            <polyline points="4 14 12 20 20 14" />
-            <line x1="4" y1="5" x2="20" y2="5" />
-          </svg>
+          <Minimize2 size={14} aria-hidden="true" />
         </button>
       </nav>
       {/*
@@ -254,11 +239,7 @@ export default function App() {
         transcript that must survive the user editing a skill mid-answer.
       */}
       <div style={{ display: active === 'chat' ? 'contents' : 'none' }}>
-        <ChatTab
-          skills={skills}
-          activeSkillId={activeSkillId}
-          onSelectSkill={setActiveSkillId}
-        />
+        <ChatTab skills={skills} activeSkillId={activeSkillId} onSelectSkill={setActiveSkillId} />
       </div>
       <div style={{ display: active === 'skills' ? 'contents' : 'none' }}>
         <SkillsTab

@@ -1,7 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ReactFlowProvider } from '@xyflow/react'
-import 'remixicon/fonts/remixicon.css'
 import EditorApp from './App'
 import '../ui/design-system.css'
 import './styles.css'

@@ -23,9 +23,19 @@
  * @module workflow-editor/blocks/batchD/EditTrigger
  */
 
+import { CircleDot, Square, SquareTerminal } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { EditFormProps } from '../EditForms'
-import { Checkbox, Expand, Field, NumberInput, Select, TextArea, TextInput, type Patch } from '../shared/Field'
+import {
+  Checkbox,
+  Expand,
+  Field,
+  NumberInput,
+  Select,
+  TextArea,
+  TextInput,
+  type Patch,
+} from '../shared/Field'
 import InteractionBase, { bool, num, str } from '../shared/InteractionBase'
 import Modal from '../../ui/Modal'
 import { useEditorLocale } from '../../locale-context'
@@ -52,9 +62,21 @@ const TRIGGER_TYPES = [
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
-const CONTEXT_TYPES = ['audio', 'editable', 'image', 'link', 'page', 'password', 'selection', 'video']
+const CONTEXT_TYPES = [
+  'audio',
+  'editable',
+  'image',
+  'link',
+  'page',
+  'password',
+  'selection',
+  'video',
+]
 
-const OBSERVER_OPTIONS: { key: 'subtree' | 'childList' | 'attributes' | 'characterData'; label: string }[] = [
+const OBSERVER_OPTIONS: {
+  key: 'subtree' | 'childList' | 'attributes' | 'characterData'
+  label: string
+}[] = [
   { key: 'subtree', label: 'Include subtree' },
   { key: 'childList', label: 'Child list' },
   { key: 'attributes', label: 'Attributes' },
@@ -125,10 +147,19 @@ export default function EditTrigger({ data, onChange }: EditFormProps) {
       {type === 'date' && (
         <>
           <Field label="Date">
-            <TextInput type="date" value={str(data, 'date')} onChange={(v) => onChange({ date: v })} />
+            <TextInput
+              type="date"
+              value={str(data, 'date')}
+              onChange={(v) => onChange({ date: v })}
+            />
           </Field>
           <Field label="Time">
-            <TextInput type="time" value={str(data, 'time')} fallback="00:00" onChange={(v) => onChange({ time: v })} />
+            <TextInput
+              type="time"
+              value={str(data, 'time')}
+              fallback="00:00"
+              onChange={(v) => onChange({ time: v })}
+            />
           </Field>
         </>
       )}
@@ -148,7 +179,12 @@ export default function EditTrigger({ data, onChange }: EditFormProps) {
             </div>
           </Field>
           <Field label="Time">
-            <TextInput type="time" value={str(data, 'time')} fallback="00:00" onChange={(v) => onChange({ time: v })} />
+            <TextInput
+              type="time"
+              value={str(data, 'time')}
+              fallback="00:00"
+              onChange={(v) => onChange({ time: v })}
+            />
           </Field>
         </>
       )}
@@ -156,9 +192,17 @@ export default function EditTrigger({ data, onChange }: EditFormProps) {
       {type === 'visit-web' && (
         <>
           <Field label="URL or Regex">
-            <TextInput value={str(data, 'url')} placeholder="https://example.com/*" onChange={(v) => onChange({ url: v })} />
+            <TextInput
+              value={str(data, 'url')}
+              placeholder="https://example.com/*"
+              onChange={(v) => onChange({ url: v })}
+            />
           </Field>
-          <Checkbox checked={bool(data, 'isUrlRegex')} onChange={(v) => onChange({ isUrlRegex: v })} label="Use regex" />
+          <Checkbox
+            checked={bool(data, 'isUrlRegex')}
+            onChange={(v) => onChange({ isUrlRegex: v })}
+            label="Use regex"
+          />
         </>
       )}
 
@@ -190,17 +234,26 @@ export default function EditTrigger({ data, onChange }: EditFormProps) {
 
       {type === 'element-change' && <ElementChangeFields data={data} onChange={onChange} />}
 
-      {type === 'on-startup' && <p className="wf-hint">The workflow runs when the browser starts.</p>}
-      {type === 'manual' && <p className="wf-hint">The workflow runs only when started manually.</p>}
+      {type === 'on-startup' && (
+        <p className="wf-hint">The workflow runs when the browser starts.</p>
+      )}
+      {type === 'manual' && (
+        <p className="wf-hint">The workflow runs only when started manually.</p>
+      )}
 
       {/* Automa EditTrigger: a "Parameters" button opens the parameters modal
           (EditWorkflowParameters) instead of an inline fold-out. */}
       <button type="button" className="wf-params-btn" onClick={() => setParamsOpen(true)}>
-        <i className="ri-command-line" />
+        <SquareTerminal size={14} />
         <span>{bt('Parameters')}</span>
       </button>
 
-      <Modal open={paramsOpen} onClose={() => setParamsOpen(false)} title={bt('Parameters')} size="lg">
+      <Modal
+        open={paramsOpen}
+        onClose={() => setParamsOpen(false)}
+        title={bt('Parameters')}
+        size="lg"
+      >
         <ParameterFields
           value={data.parameters}
           onChange={(parameters: WorkflowParameter[]) => onChange({ parameters })}
@@ -253,7 +306,7 @@ function ShortcutFields({ data, onChange }: SubFormProps) {
             title={recording ? 'Stop recording' : 'Record shortcut'}
             onClick={() => setRecording((r) => !r)}
           >
-            <i className={recording ? 'ri-stop-line' : 'ri-record-circle-line'} />
+            {recording ? <Square size={14} /> : <CircleDot size={14} />}
           </button>
         </div>
       </Field>
@@ -291,7 +344,9 @@ function asObserveOptions(value: unknown): ObserveOptions {
     subtree: o.subtree === true,
     childList: o.childList !== false,
     attributes: o.attributes === true,
-    attributeFilter: Array.isArray(o.attributeFilter) ? o.attributeFilter.filter((x): x is string => typeof x === 'string') : [],
+    attributeFilter: Array.isArray(o.attributeFilter)
+      ? o.attributeFilter.filter((x): x is string => typeof x === 'string')
+      : [],
     characterData: o.characterData === true,
   }
 }
@@ -318,7 +373,8 @@ function ElementChangeFields({ data, onChange }: SubFormProps) {
     waitSelectorTimeout: 5000,
   }
   const patchShim = (patch: Record<string, unknown>) => {
-    if ('selector' in patch) onChange({ observeElement: { ...observe, selector: String(patch.selector ?? '') } })
+    if ('selector' in patch)
+      onChange({ observeElement: { ...observe, selector: String(patch.selector ?? '') } })
   }
 
   const patchTarget = (patch: Partial<ObserveOptions>) =>
@@ -326,20 +382,29 @@ function ElementChangeFields({ data, onChange }: SubFormProps) {
   const patchBase = (patch: Partial<ObserveOptions>) =>
     onChange({ observeElement: { ...observe, baseElOptions: { ...baseOptions, ...patch } } })
 
-  const renderOptions = (
-    options: ObserveOptions,
-    patch: (p: Partial<ObserveOptions>) => void,
-  ) => (
+  const renderOptions = (options: ObserveOptions, patch: (p: Partial<ObserveOptions>) => void) => (
     <div className="wf-observer-options">
       {OBSERVER_OPTIONS.map(({ key, label }) => (
-        <Checkbox key={key} checked={options[key]} onChange={(v) => patch({ [key]: v })} label={label} />
+        <Checkbox
+          key={key}
+          checked={options[key]}
+          onChange={(v) => patch({ [key]: v })}
+          label={label}
+        />
       ))}
       {options.attributes && (
         <Field label="Attribute filter">
           <TextInput
             value={options.attributeFilter.join(',')}
             placeholder="id,label,class"
-            onChange={(v) => patch({ attributeFilter: v.split(',').map((s) => s.trim()).filter(Boolean) })}
+            onChange={(v) =>
+              patch({
+                attributeFilter: v
+                  .split(',')
+                  .map((s) => s.trim())
+                  .filter(Boolean),
+              })
+            }
           />
           <span className="wf-hint">Use commas (,) to separate attribute names</span>
         </Field>
@@ -365,9 +430,7 @@ function ElementChangeFields({ data, onChange }: SubFormProps) {
         hideMultiple
         hideMarkEl
       >
-        <Expand title="Target element options">
-          {renderOptions(targetOptions, patchTarget)}
-        </Expand>
+        <Expand title="Target element options">{renderOptions(targetOptions, patchTarget)}</Expand>
       </InteractionBase>
 
       <Field label="Base element (optional)">
@@ -377,7 +440,9 @@ function ElementChangeFields({ data, onChange }: SubFormProps) {
           placeholder="CSS selector or XPath"
           onChange={(v) => onChange({ observeElement: { ...observe, baseSelector: v } })}
         />
-        <span className="wf-hint">Automa restarts observing the target element when this element changes.</span>
+        <span className="wf-hint">
+          Automa restarts observing the target element when this element changes.
+        </span>
       </Field>
       <Expand title="Base element options">{renderOptions(baseOptions, patchBase)}</Expand>
     </div>

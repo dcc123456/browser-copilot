@@ -366,7 +366,6 @@ export function normalizeSettingsPayload(raw: unknown): {
   maxToolRounds: number
   disabledTools: string[]
   systemPromptOverride: string
-  saveWorkflowFromChat: boolean
   downloadAutoSave: boolean
   localAgentEnabled: boolean
   localAgentToken: string
@@ -398,8 +397,6 @@ export function normalizeSettingsPayload(raw: unknown): {
     : []
   const systemPromptOverride =
     typeof value.systemPromptOverride === 'string' ? value.systemPromptOverride : ''
-  const saveWorkflowFromChat =
-    typeof value.saveWorkflowFromChat === 'boolean' ? value.saveWorkflowFromChat : false
   const downloadAutoSave =
     typeof value.downloadAutoSave === 'boolean' ? value.downloadAutoSave : true
   const localAgentEnabled =
@@ -441,7 +438,6 @@ export function normalizeSettingsPayload(raw: unknown): {
     maxToolRounds,
     disabledTools,
     systemPromptOverride,
-    saveWorkflowFromChat,
     downloadAutoSave,
     localAgentEnabled,
     localAgentToken,

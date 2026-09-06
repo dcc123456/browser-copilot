@@ -101,7 +101,7 @@ beforeEach(() => {
       case 'conversations.list':
         return { type: 'conversations.list', conversations: [] }
       case 'settings.get':
-        return { type: 'settings', settings: { mode: 'semi', saveWorkflowFromChat: false } }
+        return { type: 'settings', settings: { mode: 'semi' } }
       case 'workflows.review': {
         if (reviewBehavior === 'fail') throw new Error('AI review timed out after 60s.')
         const workflow = (command as { workflow: Workflow }).workflow

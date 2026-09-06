@@ -10,6 +10,7 @@
  * @module workflow-editor/ui/Modal
  */
 
+import { X } from 'lucide-react'
 import { useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { BlockIcon } from '../../lib/workflow/blocks/icons'
@@ -82,15 +83,23 @@ export default function Modal({
       >
         <div className="wf-modal-head">
           {icon && (
-            <span className="wf-modal-icon" style={accent ? { ['--cat-color' as string]: accent } : undefined}>
+            <span
+              className="wf-modal-icon"
+              style={accent ? { ['--cat-color' as string]: accent } : undefined}
+            >
               <BlockIcon icon={icon} size={16} />
             </span>
           )}
           <p className="wf-modal-title">{title}</p>
           <span className="wf-modal-head-actions">{actions}</span>
           {!hideClose && (
-            <button type="button" className="wf-icon-btn wf-modal-close" title="Close" onClick={onClose}>
-              <i className="ri-close-line" />
+            <button
+              type="button"
+              className="wf-icon-btn wf-modal-close"
+              title="Close"
+              onClick={onClose}
+            >
+              <X size={14} />
             </button>
           )}
         </div>

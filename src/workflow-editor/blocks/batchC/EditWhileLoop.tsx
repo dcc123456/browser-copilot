@@ -13,7 +13,11 @@ import { useState } from 'react'
 import type { EditFormProps } from '../EditForms'
 import { Field, TextArea } from '../shared/Field'
 import { str } from '../shared/InteractionBase'
-import ConditionBuilder, { defaultWhileConditions, readGroups, type OrGroup } from './ConditionBuilder'
+import ConditionBuilder, {
+  defaultWhileConditions,
+  readGroups,
+  type OrGroup,
+} from './ConditionBuilder'
 
 export default function EditWhileLoop({ data, onChange }: EditFormProps) {
   const [editing, setEditing] = useState(false)

@@ -13,6 +13,7 @@
  *
  * @module workflow-editor/blocks/batchA/EditTriggerEvent
  */
+import { Info } from 'lucide-react'
 import { type ReactNode } from 'react'
 import { Checkbox, Expand, Field, NumberInput, Select, TextInput } from '../shared/Field'
 import type { EditFormProps } from '../EditForms'
@@ -53,31 +54,55 @@ const MODIFIER_KEYS = ['altKey', 'ctrlKey', 'metaKey', 'shiftKey'] as const
 /** Single-character key -> { code, keyCode } for the keyboard-event auto-fill
  *  (TriggerEventKeyboard.findKeyDefintion; subset of USKeyboardLayout). */
 const KEY_DEFINITIONS: Record<string, { code: string; keyCode: number }> = {
-  '0': { code: 'Digit0', keyCode: 48 }, '1': { code: 'Digit1', keyCode: 49 },
-  '2': { code: 'Digit2', keyCode: 50 }, '3': { code: 'Digit3', keyCode: 51 },
-  '4': { code: 'Digit4', keyCode: 52 }, '5': { code: 'Digit5', keyCode: 53 },
-  '6': { code: 'Digit6', keyCode: 54 }, '7': { code: 'Digit7', keyCode: 55 },
-  '8': { code: 'Digit8', keyCode: 56 }, '9': { code: 'Digit9', keyCode: 57 },
+  '0': { code: 'Digit0', keyCode: 48 },
+  '1': { code: 'Digit1', keyCode: 49 },
+  '2': { code: 'Digit2', keyCode: 50 },
+  '3': { code: 'Digit3', keyCode: 51 },
+  '4': { code: 'Digit4', keyCode: 52 },
+  '5': { code: 'Digit5', keyCode: 53 },
+  '6': { code: 'Digit6', keyCode: 54 },
+  '7': { code: 'Digit7', keyCode: 55 },
+  '8': { code: 'Digit8', keyCode: 56 },
+  '9': { code: 'Digit9', keyCode: 57 },
   ' ': { code: 'Space', keyCode: 32 },
-  a: { code: 'KeyA', keyCode: 65 }, b: { code: 'KeyB', keyCode: 66 },
-  c: { code: 'KeyC', keyCode: 67 }, d: { code: 'KeyD', keyCode: 68 },
-  e: { code: 'KeyE', keyCode: 69 }, f: { code: 'KeyF', keyCode: 70 },
-  g: { code: 'KeyG', keyCode: 71 }, h: { code: 'KeyH', keyCode: 72 },
-  i: { code: 'KeyI', keyCode: 73 }, j: { code: 'KeyJ', keyCode: 74 },
-  k: { code: 'KeyK', keyCode: 75 }, l: { code: 'KeyL', keyCode: 76 },
-  m: { code: 'KeyM', keyCode: 77 }, n: { code: 'KeyN', keyCode: 78 },
-  o: { code: 'KeyO', keyCode: 79 }, p: { code: 'KeyP', keyCode: 80 },
-  q: { code: 'KeyQ', keyCode: 81 }, r: { code: 'KeyR', keyCode: 82 },
-  s: { code: 'KeyS', keyCode: 83 }, t: { code: 'KeyT', keyCode: 84 },
-  u: { code: 'KeyU', keyCode: 85 }, v: { code: 'KeyV', keyCode: 86 },
-  w: { code: 'KeyW', keyCode: 87 }, x: { code: 'KeyX', keyCode: 88 },
-  y: { code: 'KeyY', keyCode: 89 }, z: { code: 'KeyZ', keyCode: 90 },
-  '*': { code: 'NumpadMultiply', keyCode: 106 }, '+': { code: 'NumpadAdd', keyCode: 107 },
-  '-': { code: 'Minus', keyCode: 189 }, '/': { code: 'Slash', keyCode: 191 },
-  ';': { code: 'Semicolon', keyCode: 186 }, '=': { code: 'NumpadEqual', keyCode: 187 },
-  ',': { code: 'Comma', keyCode: 188 }, '.': { code: 'Period', keyCode: 190 },
-  '`': { code: 'Backquote', keyCode: 192 }, '[': { code: 'BracketLeft', keyCode: 219 },
-  '\\': { code: 'Backslash', keyCode: 220 }, ']': { code: 'BracketRight', keyCode: 221 },
+  a: { code: 'KeyA', keyCode: 65 },
+  b: { code: 'KeyB', keyCode: 66 },
+  c: { code: 'KeyC', keyCode: 67 },
+  d: { code: 'KeyD', keyCode: 68 },
+  e: { code: 'KeyE', keyCode: 69 },
+  f: { code: 'KeyF', keyCode: 70 },
+  g: { code: 'KeyG', keyCode: 71 },
+  h: { code: 'KeyH', keyCode: 72 },
+  i: { code: 'KeyI', keyCode: 73 },
+  j: { code: 'KeyJ', keyCode: 74 },
+  k: { code: 'KeyK', keyCode: 75 },
+  l: { code: 'KeyL', keyCode: 76 },
+  m: { code: 'KeyM', keyCode: 77 },
+  n: { code: 'KeyN', keyCode: 78 },
+  o: { code: 'KeyO', keyCode: 79 },
+  p: { code: 'KeyP', keyCode: 80 },
+  q: { code: 'KeyQ', keyCode: 81 },
+  r: { code: 'KeyR', keyCode: 82 },
+  s: { code: 'KeyS', keyCode: 83 },
+  t: { code: 'KeyT', keyCode: 84 },
+  u: { code: 'KeyU', keyCode: 85 },
+  v: { code: 'KeyV', keyCode: 86 },
+  w: { code: 'KeyW', keyCode: 87 },
+  x: { code: 'KeyX', keyCode: 88 },
+  y: { code: 'KeyY', keyCode: 89 },
+  z: { code: 'KeyZ', keyCode: 90 },
+  '*': { code: 'NumpadMultiply', keyCode: 106 },
+  '+': { code: 'NumpadAdd', keyCode: 107 },
+  '-': { code: 'Minus', keyCode: 189 },
+  '/': { code: 'Slash', keyCode: 191 },
+  ';': { code: 'Semicolon', keyCode: 186 },
+  '=': { code: 'NumpadEqual', keyCode: 187 },
+  ',': { code: 'Comma', keyCode: 188 },
+  '.': { code: 'Period', keyCode: 190 },
+  '`': { code: 'Backquote', keyCode: 192 },
+  '[': { code: 'BracketLeft', keyCode: 219 },
+  '\\': { code: 'Backslash', keyCode: 220 },
+  ']': { code: 'BracketRight', keyCode: 221 },
   "'": { code: 'Quote', keyCode: 222 },
 }
 
@@ -158,7 +183,10 @@ function MouseEventParams({ params, update }: { params: Params; update: (p: Para
                   onChange={(v) => update({ [xKey]: Number(v) || v })}
                 />
               ) : (
-                <NumberInput value={paramNum(params, xKey)} onChange={(n) => update({ [xKey]: n })} />
+                <NumberInput
+                  value={paramNum(params, xKey)}
+                  onChange={(n) => update({ [xKey]: n })}
+                />
               )}
             </Field>
             <Field label={yKey}>
@@ -168,7 +196,10 @@ function MouseEventParams({ params, update }: { params: Params; update: (p: Para
                   onChange={(v) => update({ [yKey]: Number(v) || v })}
                 />
               ) : (
-                <NumberInput value={paramNum(params, yKey)} onChange={(n) => update({ [yKey]: n })} />
+                <NumberInput
+                  value={paramNum(params, yKey)}
+                  onChange={(n) => update({ [yKey]: n })}
+                />
               )}
             </Field>
           </div>
@@ -243,7 +274,10 @@ function KeyboardEventParams({ params, update }: { params: Params; update: (p: P
           />
         </Field>
         <Field label="keyCode">
-          <NumberInput value={paramNum(params, 'keyCode')} onChange={(n) => update({ keyCode: n })} />
+          <NumberInput
+            value={paramNum(params, 'keyCode')}
+            onChange={(n) => update({ keyCode: n })}
+          />
         </Field>
       </div>
       <Checkbox
@@ -255,7 +289,11 @@ function KeyboardEventParams({ params, update }: { params: Params; update: (p: P
   )
 }
 
-function renderEventParams(eventType: string, params: Params, update: (p: Params) => void): ReactNode {
+function renderEventParams(
+  eventType: string,
+  params: Params,
+  update: (p: Params) => void,
+): ReactNode {
   switch (eventType) {
     case 'mouse-event':
       return <MouseEventParams params={params} update={update} />
@@ -328,7 +366,7 @@ export default function EditTriggerEvent({ data, onChange }: EditFormProps) {
                 title="Event reference (MDN)"
                 style={{ marginLeft: 'auto' }}
               >
-                <i className="ri-information-line" />
+                <Info size={14} />
               </a>
             )}
           </span>

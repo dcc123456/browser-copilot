@@ -18,10 +18,7 @@ export default function EditDelay({ data, onChange }: EditFormProps) {
   return (
     <div className="wf-form">
       <Field label="Delay time (millisecond)">
-        <TextInput
-          value={value}
-          onChange={(v) => onChange({ time: v })}
-        />
+        <TextInput value={value} onChange={(v) => onChange({ time: v })} />
       </Field>
     </div>
   )

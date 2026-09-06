@@ -27,7 +27,9 @@ const FLAGS = [
 
 export default function EditRegexVariable({ data, onChange }: EditFormProps) {
   const [showFlags, setShowFlags] = useState(false)
-  const flags = Array.isArray(data.flag) ? (data.flag as unknown[]).filter((f): f is string => typeof f === 'string') : []
+  const flags = Array.isArray(data.flag)
+    ? (data.flag as unknown[]).filter((f): f is string => typeof f === 'string')
+    : []
 
   const toggleFlag = (flag: string, include: boolean) => {
     const next = include ? [...flags, flag] : flags.filter((f) => f !== flag)
@@ -45,16 +47,28 @@ export default function EditRegexVariable({ data, onChange }: EditFormProps) {
       </Field>
 
       <Field label="Variable name" title="Variable name">
-        <TextInput value={str(data, 'variableName')} placeholder="abc123" onChange={(v) => onChange({ variableName: v })} />
+        <TextInput
+          value={str(data, 'variableName')}
+          placeholder="abc123"
+          onChange={(v) => onChange({ variableName: v })}
+        />
       </Field>
 
       <Field label="Method">
-        <Select value={str(data, 'method') || 'match'} onChange={(v) => onChange({ method: v })} options={METHODS} />
+        <Select
+          value={str(data, 'method') || 'match'}
+          onChange={(v) => onChange({ method: v })}
+          options={METHODS}
+        />
       </Field>
 
       {str(data, 'method') === 'replace' && (
         <Field label="Replace with">
-          <TextInput value={str(data, 'replaceVal')} placeholder="(empty)" onChange={(v) => onChange({ replaceVal: v })} />
+          <TextInput
+            value={str(data, 'replaceVal')}
+            placeholder="(empty)"
+            onChange={(v) => onChange({ replaceVal: v })}
+          />
         </Field>
       )}
 

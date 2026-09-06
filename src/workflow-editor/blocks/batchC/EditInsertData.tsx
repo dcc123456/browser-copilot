@@ -11,6 +11,7 @@
  * @module workflow-editor/blocks/batchC/EditInsertData
  */
 
+import { Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { Field, IconButton, Select, TextArea } from '../shared/Field'
 import { str } from '../shared/InteractionBase'
@@ -44,7 +45,19 @@ export default function EditInsertData({ data, onChange }: EditFormProps) {
 
   const commit = (next: InsertItem[]) => onChange({ dataList: next })
 
-  const addItem = () => commit([...list, { type: 'table', name: '', value: '', filePath: '', isFile: false, action: 'default', id: id(6) }])
+  const addItem = () =>
+    commit([
+      ...list,
+      {
+        type: 'table',
+        name: '',
+        value: '',
+        filePath: '',
+        isFile: false,
+        action: 'default',
+        id: id(6),
+      },
+    ])
   const removeItem = (index: number) => {
     const next = list.slice()
     next.splice(index, 1)
@@ -80,7 +93,12 @@ export default function EditInsertData({ data, onChange }: EditFormProps) {
           {list.map((item, index) => (
             <div
               key={index}
-              style={{ border: '1px solid var(--bc-border, #ccc)', borderRadius: 8, padding: 8, marginBottom: 10 }}
+              style={{
+                border: '1px solid var(--bc-border, #ccc)',
+                borderRadius: 8,
+                padding: 8,
+                marginBottom: 10,
+              }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{ flex: '0 0 130px' }}>
@@ -103,7 +121,7 @@ export default function EditInsertData({ data, onChange }: EditFormProps) {
                     />
                   </Field>
                 </div>
-                <IconButton icon="ri-delete-bin-line" title="Remove item" onClick={() => removeItem(index)} />
+                <IconButton icon={Trash2} title="Remove item" onClick={() => removeItem(index)} />
               </div>
               <Field label="Value">
                 <TextArea
@@ -116,9 +134,11 @@ export default function EditInsertData({ data, onChange }: EditFormProps) {
             </div>
           ))}
           <button type="button" className="wf-btn-accent" onClick={addItem}>
-            <i className="ri-add-line" /> Add
+            <Plus size={14} /> Add
           </button>
-          <p className="wf-form-note">File import (path / CSV / Excel / base64) is not supported in this build.</p>
+          <p className="wf-form-note">
+            File import (path / CSV / Excel / base64) is not supported in this build.
+          </p>
         </div>
       )}
     </div>

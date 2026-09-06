@@ -48,7 +48,7 @@ import {
   minimizeWindow,
   whenRestoreSettled,
 } from './panel-minimize'
-import { countElements, resolveAutomationTab, warmupOcr } from './driver'
+import { warmupOcr } from './driver'
 import { handlePickerMessage } from './picker-bridge'
 import {
   startRecording,
@@ -116,19 +116,18 @@ import {
   saveWorkflow,
   deleteWorkflow,
 } from '../lib/workflow/storage'
-import type { DebugStepLine } from '../lib/workflow/auto-debug-patch'
-import { describeNodeParams } from '../lib/workflow/auto-debug-patch'
+import { describeNodeParams, patchNodeParams } from '../lib/workflow/auto-debug-patch'
 import {
-  clearDebugBackup,
-  listDebugBackups,
-  revertDebugBackup,
-  saveDebugBackup,
-} from '../lib/workflow/debug-backup'
+  clearPendingTakeover,
+  getPendingTakeover,
+  listPendingTakeovers,
+  savePendingTakeover,
+} from '../lib/workflow/takeover-pending'
+import type { TakeoverReport } from '../lib/workflow/ai-takeover'
+import { debugRunLabel } from '../lib/workflow/ai-takeover'
 import { executeWorkflow } from './workflow-engine/run-workflow'
-import { debugWorkflow, debugRunLabel } from './workflow-engine/auto-debug'
-import { aiDecide } from './workflow-engine/auto-debug-ai'
+import { createAiTakeover } from './workflow-engine/ai-takeover'
 import { reviewWorkflow } from './workflow-engine/workflow-review'
-import { inspectPage } from './workflow-engine/page-inspect'
 import { initLastTabTracker } from './last-tab'
 import { rescheduleAll, scheduleTask, triggerNow, onAlarm } from './scheduler'
 import { FeishuBot, FEISHU_WATCHDOG_ALARM } from './feishu-bot'
@@ -1020,91 +1019,100 @@ async function handleCommand(command: Command, sender?: chrome.runtime.MessageSe
         source: 'manual',
         workflowId: workflow.id,
       })
-      let attemptNo = 0
-      // The debug loop spans several runs and model calls; hold the worker
-      // alive for the whole session (released in `finally`).
+      // The debug run spans the workflow plus possibly several agent takeovers;
+      // hold the worker alive for the whole session (released in `finally`).
       retain()
       try {
-        const result = await debugWorkflow(workflow, {
-          run: async (wf) => {
-            attemptNo += 1
-            const attemptPrefix = `[尝试 ${attemptNo}] `
-            // Per-node param summaries so the session log shows WHICH node
-            // runs with WHAT configuration, not just block names.
-            const params = new Map<string, string>()
-            for (const node of wf.drawflow.nodes) {
-              const summary = describeNodeParams(node)
-              if (summary) params.set(node.id, summary)
-            }
-            const steps: DebugStepLine[] = []
-            const r = await executeWorkflow(wf, {
-              source: 'manual',
-              ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
-              onStep: (kind, nodeId, text) => {
-                steps.push({ kind, nodeId, text })
-                // Mirror every engine step into the debug session log with
-                // attempt context — the user follows along live.
-                const runKind: RunStepKind = (RUN_STEP_KINDS as readonly string[]).includes(kind)
-                  ? (kind as RunStepKind)
-                  : 'status'
-                if (kind === 'tool' && nodeId) {
-                  const summary = params.get(nodeId)
-                  addStep(
-                    session.runId,
-                    'tool',
-                    `${attemptPrefix}${text}${summary ? `（${summary}）` : ''}`,
-                    { nodeId },
-                  )
-                } else {
-                  addStep(session.runId, runKind, `${attemptPrefix}${text}`, ...(nodeId ? [{ nodeId }] : []))
-                }
-              },
-            })
-            return {
-              runId: r.runId,
-              outcome: r.outcome,
-              summary: r.summary,
-              error: r.error,
-              steps,
-            }
+        // Takeover episodes reported as they settle; the completed ones with a
+        // params fix become PENDING changes for the user to confirm.
+        const reports: TakeoverReport[] = []
+        const takeover = createAiTakeover({
+          ...(scope ? { scope } : {}),
+          onEvent: (kind, text) => {
+            const runKind: RunStepKind = (RUN_STEP_KINDS as readonly string[]).includes(kind)
+              ? (kind as RunStepKind)
+              : 'status'
+            addStep(session.runId, runKind, text)
           },
-          aiDecide: (ctx) => aiDecide(ctx),
-          save: async (wf) => {
-            await saveWorkflow(wf)
-            await rescheduleAllWorkflowTriggers()
+          onTakeover: (report) => {
+            reports.push(report)
+            addStep(
+              session.runId,
+              report.completed ? 'result' : 'error',
+              report.completed
+                ? `AI 接管「${report.nodeLabel}」完成（${report.attempts} 次尝试）：${report.summary ?? ''}`
+                : `AI 接管「${report.nodeLabel}」失败：${report.error ?? ''}`,
+              { nodeId: report.nodeId, label: report.nodeLabel },
+            )
           },
-          ...(scope
-            ? {
-                probe: (selector: string) =>
-                  countElements(selector, new AbortController().signal, scope).catch(() => null),
-              }
-            : {}),
-          pageFacts: async () => {
-            const tab = await resolveAutomationTab(undefined, scope).catch(() => undefined)
-            if (!tab || (!tab.url && !tab.title)) return null
-            return {
-              ...(tab.url ? { url: tab.url } : {}),
-              ...(tab.title ? { title: tab.title } : {}),
-            }
-          },
-          inspectPage: (selector: string) => inspectPage(selector, scope),
-          onDebugStep: (kind, text) => addStep(session.runId, kind, text),
         })
-        // The AI touched the graph: snapshot the PRE-debug workflow so the
-        // user can review and keep or revert (earliest snapshot wins).
-        if (result.workflowModified) {
-          await saveDebugBackup(
-            workflow,
-            result.summary,
-            result.rounds.flatMap((round) => round.changes),
-          ).catch(() => undefined)
+        // Per-node param summaries so the session log shows WHICH node runs
+        // with WHAT configuration, not just block names.
+        const params = new Map<string, string>()
+        for (const node of workflow.drawflow.nodes) {
+          const summary = describeNodeParams(node)
+          if (summary) params.set(node.id, summary)
         }
-        finishRun(session.runId, {
-          outcome: result.cancelled ? 'cancelled' : result.ok ? 'ok' : 'failed',
-          summary: result.summary,
-          ...(result.error ? { error: result.error } : {}),
+        const r = await executeWorkflow(workflow, {
+          source: 'manual',
+          debug: workflow.settings?.debugMode === true,
+          aiTakeover: takeover,
+          ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
+          onStep: (kind, nodeId, text) => {
+            const runKind: RunStepKind = (RUN_STEP_KINDS as readonly string[]).includes(kind)
+              ? (kind as RunStepKind)
+              : 'status'
+            if (kind === 'tool' && nodeId) {
+              const summary = params.get(nodeId)
+              addStep(
+                session.runId,
+                'tool',
+                `${text}${summary ? `（${summary}）` : ''}`,
+                { nodeId },
+              )
+            } else {
+              addStep(session.runId, runKind, text, ...(nodeId ? [{ nodeId }] : []))
+            }
+          },
         })
-        return { type: 'workflows.debug', result }
+        const ok = r.outcome === 'ok'
+        const takeovers = reports
+        const fixes = reports.flatMap((report) => (report.completed && report.fix ? [report.fix] : []))
+        if (fixes.length > 0) {
+          // Pending, NOT applied: the user confirms on the panel (or later via
+          // the workflow card chip). Latest session replaces earlier ones.
+          await savePendingTakeover({
+            workflowId: workflow.id,
+            runId: r.runId,
+            fixes,
+            createdAt: Date.now(),
+          }).catch(() => undefined)
+        }
+        const takeoverSummary =
+          takeovers.length > 0
+            ? `AI 接管完成 ${takeovers.filter((t) => t.completed).length}/${takeovers.length} 个失败节点`
+            : ''
+        const summary = ok
+          ? r.summary || takeoverSummary || '运行成功'
+          : r.error ?? r.summary ?? '运行失败'
+        finishRun(session.runId, {
+          outcome: r.outcome,
+          summary,
+          ...(r.error ? { error: r.error } : {}),
+        })
+        return {
+          type: 'workflows.debug',
+          result: {
+            ok,
+            ...(r.outcome === 'cancelled' ? { cancelled: true } : {}),
+            attempts: 1,
+            summary,
+            ...(r.error ? { error: r.error } : {}),
+            lastRunId: r.runId,
+            takeovers,
+            pendingChanges: fixes,
+          },
+        }
       } catch (error) {
         const text = error instanceof Error ? error.message : String(error)
         finishRun(session.runId, { outcome: 'failed', summary: text, error: text })
@@ -1114,20 +1122,40 @@ async function handleCommand(command: Command, sender?: chrome.runtime.MessageSe
       }
     }
 
-    case 'workflows.debugBackups':
-      return { type: 'workflows.debugBackups', backups: await listDebugBackups() }
+    case 'workflows.takeoverPending':
+      return { type: 'workflows.takeoverPending', items: await listPendingTakeovers() }
 
-    case 'workflows.debugRevert': {
-      const restored = await revertDebugBackup(command.id)
-      if (!restored) throw new Error('No AI debug backup for this workflow.')
-      await saveWorkflow(restored)
+    case 'workflows.takeoverApply': {
+      // Applies the PENDING AI-takeover fixes to the workflow — only ever on
+      // the user's explicit confirmation from the panel.
+      const pending = await getPendingTakeover(command.id)
+      if (!pending || pending.fixes.length === 0) throw new Error('No pending AI takeover fixes for this workflow.')
+      const workflow = await getWorkflow(command.id)
+      if (!workflow) throw new Error('Workflow not found.')
+      let applied = workflow
+      const changes: string[] = []
+      for (const fix of pending.fixes) {
+        const result = patchNodeParams(applied, fix.nodeId, fix.paramsPatch)
+        if (result.changed) {
+          applied = result.workflow
+          changes.push(...result.changes)
+        }
+      }
+      if (!changes.length) {
+        await clearPendingTakeover(command.id)
+        return { type: 'workflows.takeoverApply', workflow, appliedCount: 0 }
+      }
+      applied.updatedAt = Date.now()
+      await saveWorkflow(applied)
       await rescheduleAllWorkflowTriggers()
-      return { type: 'workflows.debugRevert', workflow: restored }
+      await clearPendingTakeover(command.id)
+      return { type: 'workflows.takeoverApply', workflow: applied, appliedCount: changes.length }
     }
 
-    case 'workflows.debugKeep':
-      await clearDebugBackup(command.id)
-      return { type: 'workflows.debugKeep' }
+    case 'workflows.takeoverDiscard': {
+      await clearPendingTakeover(command.id)
+      return { type: 'workflows.takeoverDiscard' }
+    }
 
     case 'workflows.running': {
       const boards = runningBoardsView((command as { workflowId?: string }).workflowId)

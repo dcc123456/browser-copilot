@@ -9,13 +9,14 @@
  * model EXPLICITLY marks it (a missing `keep` is a keep), so a chatty or
  * broken model can never silently delete real steps.
  *
- * The call pattern mirrors `auto-debug-ai.ts`: prompt builder and parser are
+ * The call pattern mirrors `ai-takeover.ts`: prompt builder and parser are
  * exported pure (unit-testable); `reviewWorkflow` is the only side-effectful
  * entry.
  *
  * @module background/workflow-engine/workflow-review
  */
 import { streamCompletion } from '../../lib/llm'
+import { stripThinkBlocks } from '../../lib/model-output'
 import { getSettings } from '../../lib/storage'
 import { OPERATOR_GUIDE } from '../../lib/workflow/operator-guide'
 import {
@@ -107,16 +108,10 @@ export function buildReviewPrompt(workflow: Workflow): string {
 /**
  * Removes reasoning-model thinking blocks so the JSON search in
  * {@link parseReview} cannot latch onto a brace inside the model's chain of
- * thought. Handles both `<think>…</think>` pairs (repeated, case-insensitive)
- * and a lone closing tag — thinking cut off mid-stream by the timeout — which
- * drops everything before it.
+ * thought. Shared implementation lives in `lib/model-output` (also used by the
+ * workflow AI operators); re-exported here for the review unit tests.
  */
-export function stripThinkBlocks(text: string): string {
-  let out = text.replace(/<think>[\s\S]*?<\/think>/gi, '')
-  const lastClose = out.toLowerCase().lastIndexOf('</think>')
-  if (lastClose >= 0) out = out.slice(lastClose + '</think>'.length)
-  return out
-}
+export { stripThinkBlocks } from '../../lib/model-output'
 
 /**
  * Parses the model's reply. Any deviation (no JSON, wrong shapes, unknown

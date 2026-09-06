@@ -138,6 +138,22 @@ describe('buildAgentPrompt', () => {
     })
     expect(p).toContain('element not found')
   })
+
+  it('demands a clean machine-consumable final answer (no reasoning, no fences)', () => {
+    const p = buildAgentPrompt({
+      userPrompt: 'x',
+      selector: '',
+      elementText: '',
+      elementFound: false,
+      useSnapshot: false,
+      actOnPage: false,
+    })
+    // The answer is stored into a workflow variable verbatim: the prompt must
+    // tell the model to keep thinking content and fences out of it.
+    expect(p).toContain('<think>')
+    expect(p).toContain('code fences')
+    expect(p).toContain('Output requirements')
+  })
 })
 
 describe('ai-agent executor', () => {
@@ -146,20 +162,20 @@ describe('ai-agent executor', () => {
     delete (globalThis as { chrome?: unknown }).chrome
   })
 
-  it('emits an error and does not call the agent when no provider is configured', async () => {
+  it('fails the block (throws) and does not call the agent when no provider is configured', async () => {
     getSettingsMock.mockResolvedValue({ providers: [], activeProviderId: '' })
     const { ctx, emit } = makeCtx()
-    await EXECUTORS['ai-agent']!({ prompt: 'hi' }, ctx)
+    await expect(EXECUTORS['ai-agent']!({ prompt: 'hi' }, ctx)).rejects.toThrow(/provider/)
     expect(runUnattended).not.toHaveBeenCalled()
-    expect(emit).toHaveBeenCalledWith('error', expect.stringContaining('provider'))
+    expect(emit).not.toHaveBeenCalled()
   })
 
-  it('emits an error when both prompt and selector are empty', async () => {
+  it('fails the block (throws) when both prompt and selector are empty', async () => {
     configuredSettings()
     const { ctx, emit } = makeCtx()
-    await EXECUTORS['ai-agent']!({}, ctx)
+    await expect(EXECUTORS['ai-agent']!({}, ctx)).rejects.toThrow(/提示词/)
     expect(runUnattended).not.toHaveBeenCalled()
-    expect(emit).toHaveBeenCalledWith('error', expect.stringContaining('提示词'))
+    expect(emit).not.toHaveBeenCalled()
   })
 
   it('runs read-only by default and stores the answer in the output variable', async () => {
@@ -230,14 +246,37 @@ describe('ai-agent executor', () => {
     expect(options.scopeWindowId).toBe(7)
   })
 
-  it('surfaces agent failure as an error emit without throwing', async () => {
+  it('FAILS the block when the agent produced no result (downstream must not run on empty)', async () => {
     configuredSettings()
     runUnattended.mockResolvedValue({ ok: false, answer: '', error: 'boom' })
-    const { ctx, emit } = makeCtx()
-    await expect(EXECUTORS['ai-agent']!({ prompt: 'go' }, ctx)).resolves.toBeNull()
-    expect(emit).toHaveBeenCalledWith('error', expect.stringContaining('boom'))
-    // Failure pre-sets the variable to '' so downstream {{lastAIAgent}} references
-    // resolve to an empty value instead of raw unresolved tokens.
+    const { ctx } = makeCtx()
+    // Throwing engages the engine's per-block onError machinery (retry →
+    // fallback → stop) INSTEAD of silently continuing down the default edge —
+    // the "didn't wait for the AI" bug. The variable is pre-set to '' so a
+    // fallback-routed downstream {{lastAIAgent}} resolves empty, not stale.
+    await expect(EXECUTORS['ai-agent']!({ prompt: 'go' }, ctx)).rejects.toThrow(/boom/)
+    expect(ctx.variables['lastAIAgent']).toBe('')
+  })
+
+  it('strips thinking blocks and a wrapping fence from the stored answer', async () => {
+    configuredSettings()
+    runUnattended.mockResolvedValue({
+      ok: true,
+      answer: '<think>reasoning</think>\n```json\n{"a":1}\n```',
+    })
+    const { ctx } = makeCtx()
+    await EXECUTORS['ai-agent']!({ prompt: 'go', variableName: 'out' }, ctx)
+    // Downstream blocks (form fills, conditions) consume this variable
+    // verbatim — wrapper junk must never reach it.
+    expect(ctx.variables['out']).toBe('{"a":1}')
+    expect(ctx.variables['lastAIAgent']).toBe('{"a":1}')
+  })
+
+  it('FAILS the block when the reply is thinking-only junk (no usable content)', async () => {
+    configuredSettings()
+    runUnattended.mockResolvedValue({ ok: true, answer: '<think>only reasoning, no answer' })
+    const { ctx } = makeCtx()
+    await expect(EXECUTORS['ai-agent']!({ prompt: 'go' }, ctx)).rejects.toThrow(/有效内容/)
     expect(ctx.variables['lastAIAgent']).toBe('')
   })
 

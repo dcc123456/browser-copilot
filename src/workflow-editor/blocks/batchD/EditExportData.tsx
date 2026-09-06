@@ -40,12 +40,20 @@ export default function EditExportData({ data, onChange }: EditFormProps) {
 
       {dataToExport === 'variable' && (
         <Field label="Variable name">
-          <TextInput value={str(data, 'variableName')} placeholder="Variable name" onChange={(v) => onChange({ variableName: v })} />
+          <TextInput
+            value={str(data, 'variableName')}
+            placeholder="Variable name"
+            onChange={(v) => onChange({ variableName: v })}
+          />
         </Field>
       )}
 
       <Field label="File name">
-        <TextInput value={str(data, 'name')} placeholder="unnamed" onChange={(v) => onChange({ name: v })} />
+        <TextInput
+          value={str(data, 'name')}
+          placeholder="unnamed"
+          onChange={(v) => onChange({ name: v })}
+        />
       </Field>
 
       <Field label="On conflict">
@@ -80,7 +88,12 @@ export default function EditExportData({ data, onChange }: EditFormProps) {
             label="Add UTF-8 BOM"
           />
           <Field label="Delimiter">
-            <TextInput value={str(data, 'csvDelimiter')} placeholder="," fallback="," onChange={(v) => onChange({ csvDelimiter: v })} />
+            <TextInput
+              value={str(data, 'csvDelimiter')}
+              placeholder=","
+              fallback=","
+              onChange={(v) => onChange({ csvDelimiter: v })}
+            />
           </Field>
         </Expand>
       )}

@@ -12,6 +12,19 @@
  * @module workflow-editor/sidebar/log-view
  */
 
+import {
+  ArrowLeft,
+  Braces,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  CirclePlay,
+  Flag,
+  Info,
+  Square,
+  TriangleAlert,
+  type LucideIcon,
+} from 'lucide-react'
 import { useState } from 'react'
 import CodeEditor from '../ui/CodeEditor'
 
@@ -141,13 +154,13 @@ export function durationLabel(ms?: number): string {
   return `${(ms / 1000).toFixed(2)}s`
 }
 
-const TYPE_STYLE: Record<TraceEntry['type'], { icon: string; cls: string }> = {
-  tool: { icon: 'ri-play-circle-line', cls: 'wf-console-info' },
-  success: { icon: 'ri-check-line', cls: 'wf-console-success' },
-  error: { icon: 'ri-error-warning-fill', cls: 'wf-console-error' },
-  finish: { icon: 'ri-flag-line', cls: 'wf-console-finish' },
-  stop: { icon: 'ri-stop-line', cls: 'wf-console-stop' },
-  info: { icon: 'ri-information-line', cls: 'wf-console-info' },
+const TYPE_STYLE: Record<TraceEntry['type'], { Icon: LucideIcon; cls: string }> = {
+  tool: { Icon: CirclePlay, cls: 'wf-console-info' },
+  success: { Icon: Check, cls: 'wf-console-success' },
+  error: { Icon: TriangleAlert, cls: 'wf-console-error' },
+  finish: { Icon: Flag, cls: 'wf-console-finish' },
+  stop: { Icon: Square, cls: 'wf-console-stop' },
+  info: { Icon: Info, cls: 'wf-console-info' },
 }
 
 function preview(value: unknown): string {
@@ -162,16 +175,22 @@ function preview(value: unknown): string {
 }
 
 /** The variables-at-block viewer: GUI (name/value cards) + Raw JSON tabs. */
-export function VariablesInspector({ vars, onBack }: { vars: Record<string, unknown>; onBack: () => void }) {
+export function VariablesInspector({
+  vars,
+  onBack,
+}: {
+  vars: Record<string, unknown>
+  onBack: () => void
+}) {
   const [tab, setTab] = useState<'gui' | 'raw'>('gui')
   const entries = Object.entries(vars ?? {})
   return (
     <div className="wf-vars-inspector">
       <div className="wf-vars-head">
         <button type="button" className="wf-icon-btn" title="Back to log" onClick={onBack}>
-          <i className="ri-arrow-left-line" />
+          <ArrowLeft size={14} />
         </button>
-        <i className="ri-braces-line" />
+        <Braces size={14} />
         <span>Variables</span>
         <span className="wf-vars-spacer" />
         <div className="wf-modal-tabs">
@@ -236,9 +255,13 @@ export function TraceRow({
     >
       <span className="wf-console-time" title={when(entry.at)}>
         {clock(entry.at)}
-        {entry.durationMs ? <em className="wf-console-dur"> ({durationLabel(entry.durationMs)})</em> : ''}
+        {entry.durationMs ? (
+          <em className="wf-console-dur"> ({durationLabel(entry.durationMs)})</em>
+        ) : (
+          ''
+        )}
       </span>
-      <i className={`wf-console-icon ${style.icon} ${style.cls}`} />
+      <style.Icon size={13} className={`wf-console-icon ${style.cls}`} />
       <span className="wf-console-main">
         <span className="wf-console-name">{entry.label}</span>
         {entry.description && <span className="wf-console-desc">{entry.description}</span>}
@@ -258,15 +281,18 @@ export function TraceRow({
               }}
             >
               {l.text.split('\n')[0]}
-              {l.text.includes('\n') && (
-                <i className={`ri-arrow-${openError ? 'up' : 'down'}-s-line`} />
-              )}
+              {l.text.includes('\n') &&
+                (openError ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
             </button>
             {openError && <pre className="wf-console-errdetail">{l.text}</pre>}
           </span>
         ))}
       </span>
-      {hasVars && <i className="ri-braces-line wf-console-vars" title="Inspect variables" />}
+      {hasVars && (
+        <span title="Inspect variables" style={{ display: 'inline-flex' }}>
+          <Braces size={13} className="wf-console-vars" />
+        </span>
+      )}
     </div>
   )
 }

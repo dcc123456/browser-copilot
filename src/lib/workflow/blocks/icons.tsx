@@ -1,79 +1,267 @@
 /**
  * Block icon rendering.
  *
- * Automa renders block icons with v-remixicon: most are RemixIcon class names
- * (`riFlashlightLine`), a few are Material-Design icons registered as inline
- * SVG paths (the catalog generator already rewrites those to `path:<d>`), and
- * remote images use an `<img>`. This module provides the React equivalents so
- * the palette, nodes, and toolbars all render the exact same glyphs as Automa.
+ * Every block icon is a lucide icon, referenced from the catalog by a spec
+ * string of the form `lucide:<PascalName>` (e.g. `lucide:Zap`). The components
+ * are imported explicitly and resolved through a static map — not through a
+ * dynamic all-icons registry — so the bundle ships only the glyphs the catalog
+ * actually uses.
  *
- * The RemixIcon webfont is imported once here; Vite bundles the font files and
- * the `ri-<kebab>` classes resolve to them.
+ * Backward compatibility: workflows saved by older versions persist icon specs
+ * in three older formats, and all of them still render:
+ *  - `riXxx` / `ri-xxx` RemixIcon names from the previous webfont-based system
+ *    (e.g. a workflow meta icon of `ri-flow-chart`), mapped through
+ *    {@link LEGACY_RI_ALIASES};
+ *  - `path:<d>` inline SVG paths (Material Design aliases);
+ *  - remote `https://…` images.
  *
- * Note: content scripts (element picker / recorder) cannot rely on this font
- * being injected into the page — they use inline SVG strings instead.
+ * Content scripts (element picker / recorder) cannot use React components —
+ * they inline the same lucide geometry directly as SVG strings.
  *
  * @module lib/workflow/blocks/icons
  */
+import type { LucideIcon } from 'lucide-react'
+import {
+  AppWindow,
+  AppWindowMac,
+  ArrowLeftRight,
+  ArrowUpWideNarrow,
+  ArrowUpDown,
+  Bell,
+  Bot,
+  Brackets,
+  Camera,
+  Clipboard,
+  CircleX,
+  CodeXml,
+  Cookie,
+  Database,
+  Diff,
+  Download,
+  FileClock,
+  FileDown,
+  FilePen,
+  FileUp,
+  Focus,
+  FolderArchive,
+  GitBranch,
+  Globe,
+  HardDrive,
+  HardDriveUpload,
+  Hourglass,
+  Image,
+  Keyboard,
+  Lightbulb,
+  Link,
+  Link2,
+  ListChecks,
+  ListTree,
+  MessageSquare,
+  Mouse,
+  MousePointer2,
+  MousePointerClick,
+  Network,
+  Package,
+  RefreshCcw,
+  RefreshCw,
+  Repeat2,
+  RotateCcw,
+  Save,
+  ScanText,
+  Settings,
+  Bookmark,
+  ShieldCheck,
+  Slice,
+  Square,
+  SquareFunction,
+  SquarePlus,
+  SquareTerminal,
+  Table,
+  TextCursorInput,
+  Timer,
+  Trash2,
+  Type,
+  Undo2,
+  Redo2,
+  Webhook,
+  Workflow,
+  Zap,
+} from 'lucide-react'
+
+/** Fallback when a spec resolves to nothing (keeps nodes renderable). */
+const DEFAULT_ICON = Workflow
 
 /**
- * The RemixIcon webfont stylesheet is imported once by each app entry point
- * (workflow-editor/main.tsx, sidepanel/main.tsx) — not here, so node-environment
- * unit tests can import these components without pulling in font/CSS assets.
+ * Catalog lucide specs → components.
+ *
+ * Keys are the bare Pascal names used after the `lucide:` prefix.
  */
-
-/**
- * Pascal `riXxx` names whose straight kebab translation does NOT match the
- * RemixIcon webfont class, or which Automa points at a glyph this RemixIcon
- * version doesn't ship:
- *  - `riHtml5Line` has no dash before the digit (`ri-html5-line`);
- *  - `riCodeSSlashLine` is two `s` tokens (`ri-code-s-slash-line`);
- *  - `riAB` (the Conditions block) has no matching glyph in this font version,
- *    so it is pointed at a branch glyph that exists (`ri-git-branch-line`).
- */
-const REMIX_CLASS_ALIASES: Record<string, string> = {
-  riHtml5Line: 'ri-html5-line',
-  riCodeSSlashLine: 'ri-code-s-slash-line',
-  riAB: 'ri-git-branch-line',
+const LUCIDE_ICONS: Record<string, LucideIcon> = {
+  AppWindow,
+  AppWindowMac,
+  ArrowLeftRight,
+  ArrowUpWideNarrow,
+  ArrowUpDown,
+  Bell,
+  Bot,
+  Brackets,
+  Camera,
+  Clipboard,
+  CircleX,
+  CodeXml,
+  Cookie,
+  Database,
+  Diff,
+  Download,
+  FileClock,
+  FileDown,
+  FilePen,
+  FileUp,
+  Focus,
+  FolderArchive,
+  GitBranch,
+  Globe,
+  HardDrive,
+  HardDriveUpload,
+  Hourglass,
+  Image,
+  Keyboard,
+  Lightbulb,
+  Link,
+  Link2,
+  ListChecks,
+  ListTree,
+  MessageSquare,
+  Mouse,
+  MousePointer2,
+  MousePointerClick,
+  Network,
+  Package,
+  RefreshCcw,
+  RefreshCw,
+  Repeat2,
+  Redo2,
+  RotateCcw,
+  Save,
+  ScanText,
+  Bookmark,
+  Settings,
+  ShieldCheck,
+  Slice,
+  Square,
+  SquareFunction,
+  SquarePlus,
+  SquareTerminal,
+  Table,
+  TextCursorInput,
+  Timer,
+  Trash2,
+  Type,
+  Undo2,
+  Webhook,
+  Workflow,
+  Zap,
 }
 
 /**
- * Convert a Pascal RemixIcon name (`riFlashlightLine`) to its webfont class
- * (`ri-flashlight-line`). Beyond camelCase splitting, RemixIcon inserts a dash
- * between a word and a version/number suffix — `riWindow2Line` is
- * `ri-window-2-line`, `riDeleteBin7Line` is `ri-delete-bin-7-line` — which a
- * purely "dash before uppercase" rule misses, leaving those glyphs blank.
+ * RemixIcon names used by catalog versions before the lucide migration, in
+ * their Pascal form (`riFlashlightLine`). Workflows persisted by those
+ * versions — and workflow meta icons, whose default was `ri-flow-chart` —
+ * resolve through this table instead of a missing webfont.
  */
-export function remixClass(name: string): string {
-  const alias = REMIX_CLASS_ALIASES[name]
-  if (alias) return alias
-  const kebab = name
-    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
-    .replace(/([A-Za-z])([0-9]+)/g, '$1-$2')
-    .replace(/([0-9])([A-Za-z])/g, '$1-$2')
-    .toLowerCase()
-  // "ri-flashlight-line" — the leading "ri-" prefix comes from `ri` + `-F...`.
-  return kebab.startsWith('ri-') ? kebab : `ri-${kebab}`
+const LEGACY_RI_ALIASES: Record<string, string> = {
+  riFlashlightLine: 'Zap',
+  riFlowChart: 'Workflow',
+  riWindowLine: 'AppWindow',
+  riGlobalLine: 'Globe',
+  riArrowLeftRightLine: 'ArrowLeftRight',
+  riWindow2Line: 'AppWindowMac',
+  riShieldKeyholeLine: 'ShieldCheck',
+  riArrowGoBackLine: 'Undo2',
+  riArrowGoForwardLine: 'Redo2',
+  riCloseCircleLine: 'CircleX',
+  riImageLine: 'Image',
+  riLightbulbLine: 'Lightbulb',
+  riCursorLine: 'MousePointer2',
+  riTimerLine: 'Timer',
+  riParagraph: 'Type',
+  riDownloadLine: 'Download',
+  riMouseLine: 'Mouse',
+  riLink: 'Link',
+  riBracketsLine: 'Brackets',
+  riInputCursorMove: 'TextCursorInput',
+  riRepeat2Line: 'Repeat2',
+  riCodeSSlashLine: 'CodeXml',
+  riLightbulbFlashLine: 'MousePointerClick',
+  riTableLine: 'Table',
+  riDriveFill: 'HardDriveUpload',
+  riDriveLine: 'HardDrive',
+  riAB: 'GitBranch',
+  riFocus3Line: 'Focus',
+  riEarthLine: 'Webhook',
+  riRefreshFill: 'RefreshCw',
+  riRefreshLine: 'RefreshCcw',
+  riRestartLine: 'RotateCcw',
+  riStopLine: 'Square',
+  riFolderZipLine: 'FolderArchive',
+  riClipboardLine: 'Clipboard',
+  riDatabase2Line: 'Database',
+  riArrowUpDownLine: 'ArrowUpDown',
+  riFileUploadLine: 'FileUp',
+  riCursorFill: 'MousePointer2',
+  riKeyboardLine: 'Keyboard',
+  riChat3Line: 'MessageSquare',
+  riFileDownloadLine: 'FileDown',
+  riSaveLine: 'Save',
+  riDeleteBin7Line: 'Trash2',
+  riTimerFlashLine: 'Hourglass',
+  riNotification3Line: 'Bell',
+  riFileHistoryLine: 'FileClock',
+  riLinksLine: 'Link2',
+  riSliceLine: 'Slice',
+  riIncreaseDecreaseLine: 'Diff',
+  riFunctionLine: 'SquareFunction',
+  riMindMap: 'Network',
+  riSortAsc: 'ArrowUpWideNarrow',
+  riHtml5Line: 'SquarePlus',
+  riCookieLine: 'Cookie',
+  riFileEditLine: 'FilePen',
+  riSettings3Line: 'Settings',
+  riCommandLine: 'SquareTerminal',
+  riRobot2Line: 'Bot',
+  riCharacterRecognitionLine: 'ScanText',
+  riBookmarkLine: 'Bookmark',
 }
 
-export interface RemixIconProps {
-  /** RemixIcon name in Pascal form, e.g. `riFlashlightLine`. */
-  name: string
-  size?: number
-  className?: string
-  title?: string
+/**
+ * Kebab (`ri-flow-chart`) → Pascal (`riFlowChart`), so legacy specs written in
+ * webfont-class form hit the alias table too.
+ */
+function pascalRiName(name: string): string {
+  if (!name.includes('-')) return name
+  const [ri, ...rest] = name.split('-')
+  return ri + rest.map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join('')
 }
 
-/** Renders a RemixIcon glyph via the webfont class. */
-export function RemixIcon({ name, size = 20, className, title }: RemixIconProps) {
-  return (
-    <i
-      className={`${remixClass(name)} ${className ?? ''}`}
-      style={{ fontSize: size, lineHeight: 1, fontStyle: 'normal', display: 'inline-flex' }}
-      title={title}
-      aria-hidden={!title}
-    />
-  )
+/**
+ * Resolves any supported spec to the lucide icon name it renders, or `null`
+ * when the spec is unknown and {@link BlockIcon} would fall back to the
+ * default icon. Exported so tests can pin every catalog icon to a real glyph.
+ */
+export function resolveIconName(icon: string): string | null {
+  const bare = icon.startsWith('lucide:') ? icon.slice('lucide:'.length) : icon
+  if (LUCIDE_ICONS[bare]) return bare
+  if (bare.startsWith('ri')) {
+    const legacy = LEGACY_RI_ALIASES[bare] ?? LEGACY_RI_ALIASES[pascalRiName(bare)]
+    if (legacy && LUCIDE_ICONS[legacy]) return legacy
+  }
+  return null
+}
+
+/** Resolves any supported icon spec to a lucide component. */
+function resolveIcon(icon: string): LucideIcon {
+  const name = resolveIconName(icon)
+  return (name && LUCIDE_ICONS[name]) || DEFAULT_ICON
 }
 
 /** Inline SVG for the `path:<d>` icon spec (Material Design aliases). */
@@ -86,7 +274,10 @@ export function CustomPathIcon({ path, size = 20 }: { path: string; size?: numbe
 }
 
 export interface BlockIconProps {
-  /** Catalog icon spec: `riXxx` | `path:<d>` | `https://...`. */
+  /**
+   * Icon spec: `lucide:<PascalName>` (catalog default) or, for data saved by
+   * older versions, `riXxx`/`ri-xxx`, `path:<d>`, or an `https://…` image.
+   */
   icon: string
   size?: number
   className?: string
@@ -94,7 +285,7 @@ export interface BlockIconProps {
   invertInDark?: boolean
 }
 
-/** Renders a block icon regardless of which of the three icon forms it uses. */
+/** Renders a block icon regardless of which of the spec forms it uses. */
 export function BlockIcon({ icon, size = 20, className, invertInDark }: BlockIconProps) {
   if (icon.startsWith('http')) {
     return (
@@ -115,5 +306,10 @@ export function BlockIcon({ icon, size = 20, className, invertInDark }: BlockIco
       </span>
     )
   }
-  return <RemixIcon name={icon} size={size} className={className} />
+  const Icon = resolveIcon(icon)
+  return (
+    <span className={className} style={{ display: 'inline-flex' }}>
+      <Icon size={size} aria-hidden />
+    </span>
+  )
 }

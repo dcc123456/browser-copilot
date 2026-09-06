@@ -5,9 +5,12 @@
  * rather than committed as opaque binaries: the design stays reviewable as code,
  * and every size is regenerated consistently instead of being rescaled by hand.
  *
- * Design: a rounded square in the panel background colour, a page glyph with text
- * lines (what this assistant reads) and a small accent spark at the upper right
- * (the agent that reads it). Both read at 16px, which is the size that actually
+ * Design: lucide's `bot` icon (https://lucide.dev, ISC license) rasterized from
+ * its official 24x24 geometry — the same path data the `lucide-react`
+ * components render — drawn with lucide's stroke width and round caps onto a
+ * rounded square in the panel background colour. The eyes use the accent
+ * colour so the glyph carries the brand spark the previous hand-drawn page
+ * artwork had, and everything still reads at 16px, the size that actually
  * matters for a pinned toolbar button.
  *
  * Run with: node scripts/generate-icons.mjs
@@ -26,6 +29,27 @@ const FACE = [0xe6, 0xe8, 0xec]
 
 /** Sizes Chrome asks for across the toolbar, management page, and store. */
 const SIZES = [16, 32, 48, 128]
+
+// --- lucide `bot` geometry (24x24 viewBox, stroke-based, fill="none") --------
+// https://lucide.dev/icons/bot — rounded-rect body, two eye dots, an antenna
+// line, and a head circle. Reproduced exactly; do not hand-adjust coordinates.
+const BOT = {
+  /** <rect width="18" height="10" x="3" y="11" rx="2"/> */
+  body: { x: 3, y: 11, w: 18, h: 10, rx: 2 },
+  /** <circle cx="12" cy="5" r="2"/> — antenna tip */
+  antennaDot: { cx: 12, cy: 5, r: 2 },
+  /** <path d="M12 7v4"/> — antenna stem */
+  antennaStem: { x1: 12, y1: 7, x2: 12, y2: 11 },
+  /** <line x1="8" x2="8" y1="16" y2="16"/> + <line x1="16" .../> — eyes */
+  eyes: [
+    { x: 8, y: 16 },
+    { x: 16, y: 16 },
+  ],
+}
+
+/** Lucide's stroke spec: stroke-width 2 in the 24 viewBox, round caps/joins. */
+const VIEW = 24
+const STROKE = 2
 
 /** Straight-alpha pixel buffer helper. */
 function createCanvas(size) {
@@ -59,7 +83,7 @@ function setPixel(canvas, x, y, [r, g, b], alpha) {
  * Coverage of a pixel by a shape, sampled on a 4x4 grid.
  *
  * Supersampling rather than analytic coverage: at 16px the difference is
- * invisible, and this keeps each shape a simple inside/outside predicate.
+ * invisible, and this keeps each shape a simple distance predicate.
  */
 function coverage(x, y, inside) {
   const STEPS = 4
@@ -74,31 +98,12 @@ function coverage(x, y, inside) {
   return hits / (STEPS * STEPS)
 }
 
-/**
- * Fills a shape, optionally restricted to a mask.
- *
- * The mask is used to repaint the background *inside* a cleared gap, so the gap
- * shows the icon's own backdrop rather than a hole through to the toolbar.
- */
-function fill(canvas, colour, inside, mask) {
+/** Fills a shape. */
+function fill(canvas, colour, inside) {
   for (let y = 0; y < canvas.size; y += 1) {
     for (let x = 0; x < canvas.size; x += 1) {
-      const alpha = coverage(x, y, mask ? (px, py) => inside(px, py) && mask(px, py) : inside)
+      const alpha = coverage(x, y, inside)
       if (alpha > 0) setPixel(canvas, x, y, colour, alpha)
-    }
-  }
-}
-
-/** Resets pixels inside a shape to fully transparent, ignoring what was there. */
-function clear(canvas, inside) {
-  for (let y = 0; y < canvas.size; y += 1) {
-    for (let x = 0; x < canvas.size; x += 1) {
-      if (coverage(x, y, inside) < 0.5) continue
-      const index = (y * canvas.size + x) * 4
-      canvas.data[index] = 0
-      canvas.data[index + 1] = 0
-      canvas.data[index + 2] = 0
-      canvas.data[index + 3] = 0
     }
   }
 }
@@ -123,118 +128,93 @@ function roundedSquare(size) {
   }
 }
 
-/** Axis-aligned rectangle with rounded corners, used for the page glyph. */
-function roundedRect(left, top, right, bottom, radius) {
-  return (x, y) => {
-    if (x < left || x > right || y < top || y > bottom) return false
-    const cx = Math.min(Math.max(x, left + radius), right - radius)
-    const cy = Math.min(Math.max(y, top + radius), bottom - radius)
-    if (x >= left + radius && x <= right - radius) return true
-    if (y >= top + radius && y <= bottom - radius) return true
-    return (x - cx) ** 2 + (y - cy) ** 2 <= radius ** 2
-  }
+// --- lucide stroke rasterization ---------------------------------------------
+// Lucide icons are stroked paths, so each shape is drawn as a band around its
+// centerline: the set of points within STROKE/2 of the outline, with round
+// caps and joins exactly as the SVG renderer produces them.
+
+/** Signed distance to a rounded rectangle's boundary (negative inside). */
+function roundedRectSDF(px, py, rect) {
+  const halfW = rect.w / 2
+  const halfH = rect.h / 2
+  const cx = rect.x + halfW
+  const cy = rect.y + halfH
+  const qx = Math.abs(px - cx) - (halfW - rect.rx)
+  const qy = Math.abs(py - cy) - (halfH - rect.rx)
+  const ox = Math.max(qx, 0)
+  const oy = Math.max(qy, 0)
+  return Math.sqrt(ox * ox + oy * oy) + Math.min(Math.max(qx, qy), 0) - rect.rx
 }
 
-/** Thick line segment as a capsule, so text lines keep clean ends at small sizes. */
-function segment(x1, y1, x2, y2, halfWidth) {
+/** Distance from a point to a segment, with the point repeated for round caps. */
+function segmentDistance(px, py, x1, y1, x2, y2) {
   const dx = x2 - x1
   const dy = y2 - y1
   const lengthSquared = dx * dx + dy * dy
-  return (x, y) => {
-    if (lengthSquared === 0) return (x - x1) ** 2 + (y - y1) ** 2 <= halfWidth ** 2
-    let t = ((x - x1) * dx + (y - y1) * dy) / lengthSquared
-    t = Math.min(1, Math.max(0, t))
-    const px = x1 + t * dx
-    const py = y1 + t * dy
-    return (x - px) ** 2 + (y - py) ** 2 <= halfWidth ** 2
-  }
-}
-
-function disc(cx, cy, radius) {
-  return (x, y) => (x - cx) ** 2 + (y - cy) ** 2 <= radius ** 2
+  if (lengthSquared === 0) return Math.hypot(px - x1, py - y1)
+  let t = ((px - x1) * dx + (py - y1) * dy) / lengthSquared
+  t = Math.min(1, Math.max(0, t))
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy))
 }
 
 function drawIcon(size) {
   const canvas = createCanvas(size)
-  const s = (fraction) => fraction * size
+
+  // The 24x24 lucide viewBox is scaled into the canvas with a margin so the
+  // glyph clears the rounded-square border on every size.
+  const CONTENT = size <= 16 ? 0.82 : 0.78
+  const scale = (size * CONTENT) / VIEW
+  const offset = (size - VIEW * scale) / 2
+  const toCanvas = (v) => offset + v * scale
+  // Lucide's 2/24 stroke lands near one device pixel at 16px, where it breaks
+  // into dashes and the eye dots vanish entirely — the same failure mode the
+  // previous artwork special-cased. Clamp the stroke so the glyph stays whole;
+  // at every larger size this is a no-op.
+  const halfStroke = Math.max((STROKE * scale) / 2, size <= 16 ? 0.72 : 0.55)
 
   fill(canvas, BG, roundedSquare(size))
 
-  /**
-   * Small sizes get a deliberately different layout, not a scaled-down one.
-   *
-   * At 16px a proportionally-scaled page outline lands near one device pixel and
-   * breaks into dashes, and three proportional text lines merge into a grey
-   * block. So 16px draws a solid page with two thick lines instead of an outline
-   * with three thin ones. Verified by rendering each size, not assumed.
-   */
-  const tiny = size <= 16
-  const small = size <= 32
-
-  // Page glyph, nudged down-left to leave room for the spark.
-  const left = tiny ? s(0.16) : s(0.2)
-  const right = tiny ? s(0.66) : s(0.68)
-  const top = tiny ? s(0.28) : s(0.26)
-  const bottom = tiny ? s(0.86) : s(0.82)
-  const pageRadius = size * (tiny ? 0.06 : 0.07)
-
-  if (tiny) {
-    // Solid page: an outline this small cannot hold a visible border and an
-    // interior at the same time.
-    fill(canvas, FACE, roundedRect(left, top, right, bottom, pageRadius))
-    // Lines are punched out of the page in the background colour, which stays
-    // legible where a lighter-on-light stroke would not.
-    const lineWidth = Math.max(0.9, size * 0.055)
-    for (const fraction of [0.45, 0.65]) {
-      fill(
-        canvas,
-        BG,
-        segment(left + s(0.07), top + (bottom - top) * fraction, right - s(0.07), top + (bottom - top) * fraction, lineWidth),
-      )
-    }
-  } else {
-    // Outlined page: fill, then clear the interior and repaint the backdrop, so
-    // the border reads as a stroke rather than a filled block.
-    const stroke = Math.max(1.5, size * (small ? 0.075 : 0.055))
-    fill(canvas, FACE, roundedRect(left, top, right, bottom, pageRadius))
-    const inner = roundedRect(
-      left + stroke,
-      top + stroke,
-      right - stroke,
-      bottom - stroke,
-      Math.max(0, pageRadius - stroke * 0.5),
-    )
-    clear(canvas, inner)
-    fill(canvas, BG, roundedSquare(size), inner)
-
-    // Text lines. The last one is short, which is what makes the glyph read as
-    // prose rather than as a table.
-    const lineWidth = Math.max(1, size * (small ? 0.05 : 0.04))
-    const lineLeft = left + stroke + size * 0.06
-    const lineRight = right - stroke - size * 0.06
-    const rows = [0.32, 0.52, 0.72]
-    rows.forEach((fraction, index) => {
-      const y = top + (bottom - top) * fraction
-      const end = index === rows.length - 1 ? lineLeft + (lineRight - lineLeft) * 0.55 : lineRight
-      fill(canvas, FACE, segment(lineLeft, y, end, y, lineWidth))
-    })
+  const body = {
+    x: toCanvas(BOT.body.x),
+    y: toCanvas(BOT.body.y),
+    w: BOT.body.w * scale,
+    h: BOT.body.h * scale,
+    rx: BOT.body.rx * scale,
   }
 
-  // Accent spark: a diamond, which stays sharper than a star at small sizes.
-  const sparkX = tiny ? s(0.79) : s(0.79)
-  const sparkY = tiny ? s(0.21) : s(0.24)
-  const sparkR = tiny ? s(0.17) : s(0.16)
+  // Stroked body: points within halfStroke of the rounded-rect boundary.
+  fill(canvas, FACE, (px, py) => Math.abs(roundedRectSDF(px, py, body)) <= halfStroke)
 
-  // Punch a transparent gap so the spark never merges with the page glyph.
-  const gap = sparkR * (tiny ? 1.5 : 1.4)
-  clear(canvas, disc(sparkX, sparkY, gap))
-  fill(canvas, BG, roundedSquare(size), disc(sparkX, sparkY, gap))
-
-  fill(canvas, ACCENT, (x, y) => {
-    const dx = Math.abs(x - sparkX) / sparkR
-    const dy = Math.abs(y - sparkY) / sparkR
-    return dx + dy <= 1
+  // Antenna: stroked tip circle + stroked stem segment.
+  const tip = {
+    cx: toCanvas(BOT.antennaDot.cx),
+    cy: toCanvas(BOT.antennaDot.cy),
+    r: BOT.antennaDot.r * scale,
+  }
+  fill(
+    canvas,
+    FACE,
+    (px, py) => Math.abs(Math.hypot(px - tip.cx, py - tip.cy) - tip.r) <= halfStroke,
+  )
+  fill(canvas, FACE, (px, py) => {
+    const d = segmentDistance(
+      px,
+      py,
+      toCanvas(BOT.antennaStem.x1),
+      toCanvas(BOT.antennaStem.y1),
+      toCanvas(BOT.antennaStem.x2),
+      toCanvas(BOT.antennaStem.y2),
+    )
+    return d <= halfStroke
   })
+
+  // Eyes: zero-length lucide <line>s render as round-cap dots; accent coloured.
+  for (const eye of BOT.eyes) {
+    const ex = toCanvas(eye.x)
+    const ey = toCanvas(eye.y)
+    const eyeR = size <= 16 ? Math.max(halfStroke, 0.95) : halfStroke
+    fill(canvas, ACCENT, (px, py) => Math.hypot(px - ex, py - ey) <= eyeR)
+  }
 
   return canvas
 }

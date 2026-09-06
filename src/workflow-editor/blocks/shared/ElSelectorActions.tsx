@@ -10,6 +10,7 @@
  * @module workflow-editor/blocks/shared/ElSelectorActions
  */
 
+import { CheckCheck, Focus, LoaderCircle } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { hostWindowId } from '../../host-window'
 import { toast } from '../../../ui/toast'
@@ -167,7 +168,7 @@ export default function ElSelectorActions({
         disabled={busy !== null}
         onClick={() => void start('select')}
       >
-        <i className={busy === 'pick' ? 'ri-loader-4-line wf-spin' : 'ri-focus-3-line'} />
+        {busy === 'pick' ? <LoaderCircle size={14} className="wf-spin" /> : <Focus size={14} />}
       </button>
       <button
         type="button"
@@ -176,7 +177,11 @@ export default function ElSelectorActions({
         disabled={busy !== null || !selector}
         onClick={() => void start('verify')}
       >
-        <i className={busy === 'verify' ? 'ri-loader-4-line wf-spin' : 'ri-check-double-line'} />
+        {busy === 'verify' ? (
+          <LoaderCircle size={14} className="wf-spin" />
+        ) : (
+          <CheckCheck size={14} />
+        )}
       </button>
     </span>
   )

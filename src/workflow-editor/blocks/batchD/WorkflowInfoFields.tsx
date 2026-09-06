@@ -51,10 +51,15 @@ export function WorkflowMetaProvider({
   onMeta: (patch: WorkflowMetaPatch) => void
   children: ReactNode
 }) {
-  return <WorkflowMetaContext.Provider value={{ meta, onMeta }}>{children}</WorkflowMetaContext.Provider>
+  return (
+    <WorkflowMetaContext.Provider value={{ meta, onMeta }}>{children}</WorkflowMetaContext.Provider>
+  )
 }
 
-export function useWorkflowMeta(): { meta: WorkflowMetaLike; onMeta: (patch: WorkflowMetaPatch) => void } | null {
+export function useWorkflowMeta(): {
+  meta: WorkflowMetaLike
+  onMeta: (patch: WorkflowMetaPatch) => void
+} | null {
   return useContext(WorkflowMetaContext)
 }
 
@@ -68,7 +73,11 @@ export default function WorkflowInfoFields() {
   return (
     <div className="wf-workflow-info">
       <Field label="Workflow name">
-        <TextInput value={meta.name} placeholder="My workflow" onChange={(v) => onMeta({ name: v })} />
+        <TextInput
+          value={meta.name}
+          placeholder="My workflow"
+          onChange={(v) => onMeta({ name: v })}
+        />
       </Field>
       <Field label="Description">
         <TextArea

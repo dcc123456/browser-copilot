@@ -54,7 +54,11 @@ export default function EditWorkflowState({ data, onChange }: EditFormProps) {
 
       {type === 'stop-current' && (
         <>
-          <Checkbox checked={bool(data, 'throwError')} onChange={(v) => onChange({ throwError: v })} label="Throw error" />
+          <Checkbox
+            checked={bool(data, 'throwError')}
+            onChange={(v) => onChange({ throwError: v })}
+            label="Throw error"
+          />
           {bool(data, 'throwError') && (
             <Field label="Error message">
               <TextInput

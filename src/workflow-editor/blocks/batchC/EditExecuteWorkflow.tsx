@@ -25,6 +25,7 @@
  * @module workflow-editor/blocks/batchC/EditExecuteWorkflow
  */
 
+import { RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { sendCommand } from '../../../lib/messages'
 import type { Workflow } from '../../../lib/workflow/types'
@@ -79,20 +80,23 @@ export default function EditExecuteWorkflow({ data, onChange }: EditFormProps) {
           <Select
             value={workflowId}
             onChange={(v) => onChange({ workflowId: v })}
-            options={[
-              { value: '', label: workflowId ? '—' : 'Select a workflow…' },
-              ...options,
-            ]}
+            options={[{ value: '', label: workflowId ? '—' : 'Select a workflow…' }, ...options]}
           />
-          <IconButton icon="ri-refresh-line" title="Reload workflows" onClick={reload} />
+          <IconButton icon={RefreshCw} title="Reload workflows" onClick={reload} />
         </div>
       </Field>
       {loaded && workflows.length === 0 && (
-        <p className="wf-form-note">No saved workflows yet — create one in the Workflows tab first.</p>
+        <p className="wf-form-note">
+          No saved workflows yet — create one in the Workflows tab first.
+        </p>
       )}
 
       <Field label="Execute Id (optional)" title="Execute Id (optional)">
-        <TextInput value={str(data, 'executeId')} placeholder="abc123" onChange={(v) => onChange({ executeId: v })} />
+        <TextInput
+          value={str(data, 'executeId')}
+          placeholder="abc123"
+          onChange={(v) => onChange({ executeId: v })}
+        />
       </Field>
 
       <p className="wf-form-note" style={{ marginTop: 12 }}>
@@ -115,7 +119,11 @@ export default function EditExecuteWorkflow({ data, onChange }: EditFormProps) {
       </Field>
       <p className="wf-form-note">This will overwrite the global data of the selected workflow.</p>
 
-      <Checkbox checked={insertAllVars} onChange={(v) => onChange({ insertAllVars: v })} label="Use all current workflow variables" />
+      <Checkbox
+        checked={insertAllVars}
+        onChange={(v) => onChange({ insertAllVars: v })}
+        label="Use all current workflow variables"
+      />
 
       {!insertAllVars && (
         <>

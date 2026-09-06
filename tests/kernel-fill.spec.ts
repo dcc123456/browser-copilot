@@ -207,6 +207,37 @@ describe('kernel fill into stateful contenteditable editors', () => {
     expect(fake.state).toBe('')
   })
 
+  it('skips the clear+retype when the editor already holds the target text', async () => {
+    // The forms fill must NOT wipe content an earlier step already wrote
+    // correctly: equal content → no Backspace, no re-typing, content survives.
+    const fake = new FakeDraftEditor(editor)
+    fake.state = '目标文本'
+    fake['sync']()
+    const eventsBefore = fake.events.length
+    const result = (await runOp(fill('目标文本'))) as unknown as OpResult
+    expect(result.ok).toBe(true)
+    expect(result.note).toContain('跳过填写')
+    expect(fake.state).toBe('目标文本')
+    expect(fake.events.length).toBe(eventsBefore)
+  })
+
+  it('input fill skips the clear when the field already holds the target value', () => {
+    const input = dom.window.document.createElement('input')
+    input.id = 'email'
+    dom.window.document.body.appendChild(input)
+    input.value = 'a@b.com'
+
+    const result = runOp(fill('a@b.com', { id: 'email' })) as unknown as OpResult
+    expect(result.ok).toBe(true)
+    expect(result.note).toContain('跳过填写')
+    expect(input.value).toBe('a@b.com')
+
+    // Different content still replaces — normal fill semantics.
+    const replace = runOp(fill('new@b.com', { id: 'email' })) as unknown as OpResult
+    expect(replace.ok).toBe(true)
+    expect(input.value).toBe('new@b.com')
+  })
+
   it('press_key Enter carries keyCode/which 13 (DraftJS matches on e.which)', () => {
     const seen: EventRecord[] = []
     editor.addEventListener('keydown', (ev) => {

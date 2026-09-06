@@ -24,16 +24,32 @@ export default function EditNotification({ data, onChange }: EditFormProps) {
         />
       </Field>
       <Field label="Title">
-        <TextInput value={str(data, 'title')} placeholder="Hello world!" onChange={(v) => onChange({ title: v })} />
+        <TextInput
+          value={str(data, 'title')}
+          placeholder="Hello world!"
+          onChange={(v) => onChange({ title: v })}
+        />
       </Field>
       <Field label="Message">
-        <TextArea value={str(data, 'message')} placeholder="Notification message" onChange={(v) => onChange({ message: v })} />
+        <TextArea
+          value={str(data, 'message')}
+          placeholder="Notification message"
+          onChange={(v) => onChange({ message: v })}
+        />
       </Field>
       <Field label="Icon URL (optional)">
-        <TextInput value={str(data, 'iconUrl')} placeholder="https://example.com/icon.png" onChange={(v) => onChange({ iconUrl: v })} />
+        <TextInput
+          value={str(data, 'iconUrl')}
+          placeholder="https://example.com/icon.png"
+          onChange={(v) => onChange({ iconUrl: v })}
+        />
       </Field>
       <Field label="Image URL (optional)">
-        <TextInput value={str(data, 'imageUrl')} placeholder="https://example.com/image.png" onChange={(v) => onChange({ imageUrl: v })} />
+        <TextInput
+          value={str(data, 'imageUrl')}
+          placeholder="https://example.com/image.png"
+          onChange={(v) => onChange({ imageUrl: v })}
+        />
       </Field>
     </div>
   )

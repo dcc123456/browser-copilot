@@ -46,7 +46,7 @@ import { newId } from '../lib/storage'
 
 import { nodeTypes, type BlockNodeData } from './flow/BlockNode'
 import { edgeTypes } from './flow/CustomEdge'
-import { applyConnection } from './flow/connections'
+import { applyConnection, healEdgeHandles } from './flow/connections'
 import Sidebar, { loadWidth } from './sidebar/Sidebar'
 import BlockPalette from './sidebar/BlockPalette'
 import BlockEditForm from './sidebar/BlockEditForm'
@@ -59,7 +59,11 @@ import { useToast } from './toast'
 import { ToastHost } from '../ui/toast'
 import { ConfirmHost } from '../ui/confirm'
 import { makeTranslate, resolveEditorLocale } from './i18n'
-import { EditorLocaleContext, makeEditorLocale, type EditorLocale as EditorLocaleValue } from './locale-context'
+import {
+  EditorLocaleContext,
+  makeEditorLocale,
+  type EditorLocale as EditorLocaleValue,
+} from './locale-context'
 import { autoLayout } from './auto-layout'
 import './editor.css'
 
@@ -139,7 +143,7 @@ export default function EditorApp() {
   }>({
     name: 'New workflow',
     description: '',
-    icon: 'ri-flow-chart',
+    icon: 'lucide:Workflow',
     trigger: { type: 'manual', enabled: true },
     settings: DEFAULT_SETTINGS,
   })
@@ -174,16 +178,23 @@ export default function EditorApp() {
           trigger: wf.trigger ?? m.trigger,
           settings: wf.settings ?? m.settings,
         }))
-        setNodes(wf.drawflow.nodes.map(toFlowNode))
+        const flowNodes = wf.drawflow.nodes.map(toFlowNode)
+        setNodes(flowNodes)
+        // healEdgeHandles: React Flow silently DROPS edges whose stored
+        // source/target handle ids don't match a rendered Handle (nodes stay,
+        // connections vanish, no console error). Re-anchor stale ids on load.
         setEdges(
-          wf.drawflow.edges.map((e) => ({
-            id: e.id,
-            source: e.source,
-            target: e.target,
-            sourceHandle: e.sourceHandle,
-            targetHandle: e.targetHandle,
-            type: 'custom',
-          })),
+          healEdgeHandles(
+            flowNodes,
+            wf.drawflow.edges.map((e) => ({
+              id: e.id,
+              source: e.source,
+              target: e.target,
+              sourceHandle: e.sourceHandle,
+              targetHandle: e.targetHandle,
+              type: 'custom',
+            })),
+          ),
         )
         if (wf.drawflow.position && typeof wf.drawflow.zoom === 'number') {
           setTimeout(
@@ -335,7 +346,10 @@ export default function EditorApp() {
               ...n,
               data: {
                 ...n.data,
-                blockData: { ...n.data.blockData, disableBlock: n.data.blockData.disableBlock !== true },
+                blockData: {
+                  ...n.data.blockData,
+                  disableBlock: n.data.blockData.disableBlock !== true,
+                },
               },
             }
           : n,
@@ -404,7 +418,8 @@ export default function EditorApp() {
           ...(windowId !== undefined ? { windowId } : {}),
         })
         if (r.type === 'workflows.run') {
-          if (r.outcome.ok) toast.show(startNodeId ? t('runFromHereFinished') : t('runFinished'), 'ok')
+          if (r.outcome.ok)
+            toast.show(startNodeId ? t('runFromHereFinished') : t('runFinished'), 'ok')
           else {
             const msg = r.outcome.error ?? r.outcome.summary
             setError(msg)
@@ -453,10 +468,7 @@ export default function EditorApp() {
         if (r.type === 'record.stop' && r.workflowId) {
           // editorUrl() re-appends hostWindow so the reopened editor stays
           // bound to the same window after the reload.
-          window.location.search = editorUrl(
-            `?edit=${encodeURIComponent(r.workflowId)}`,
-            windowId,
-          )
+          window.location.search = editorUrl(`?edit=${encodeURIComponent(r.workflowId)}`, windowId)
           window.location.reload()
         }
       } else {
@@ -592,103 +604,120 @@ export default function EditorApp() {
 
   return (
     <EditorLocaleContext.Provider value={editorLocale}>
-    <div className="wf-editor">
-      <TopToolbar
-        workflowName={meta.name || t('untitled')}
-        workflowIcon={meta.icon}
-        paletteOpen={paletteOpen}
-        onTogglePalette={() => setPaletteOpen((o) => !o)}
-        onRename={(name) => setMeta((m) => ({ ...m, name }))}
-        debugMode={meta.settings.debugMode}
-        onToggleDebug={() =>
-          setMeta((m) => ({ ...m, settings: { ...m.settings, debugMode: !m.settings.debugMode } }))
-        }
-        dirty={dirty}
-        saving={saving}
-        running={running}
-        recording={recording}
-        onSave={() => void handleSave()}
-        onRun={() => void handleRun()}
-        onOpenLogs={() => setLogsOpen(true)}
-        onToggleRecording={() => void toggleRecording()}
-        onAutoLayout={handleAutoLayout}
-        t={t}
-      />
-
-      <div className="wf-canvas-wrap">
-      <ReactFlow
-        nodes={flowNodes}
-        edges={edgeWithHighlight}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        onEdgeDoubleClick={onEdgeDoubleClick}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        onDrop={onDrop}
-        onDragOver={(e) => {
-          e.preventDefault()
-          e.dataTransfer.dropEffect = 'copy'
-        }}
-        onNodeDoubleClick={(_e, node) => {
-          // Automa: double-click a block to edit it in the left panel. Note
-          // nodes have no catalog block, so they don't open the editor.
-          if ((node.data as BlockNodeData).block) openNodeEditor(node.id)
-        }}
-        fitView
-        deleteKeyCode={['Delete', 'Backspace']}
-        multiSelectionKeyCode="Control"
-        defaultEdgeOptions={{
-          type: 'custom',
-          markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color: 'var(--we-edge)' },
-        }}
-      >
-        <Background gap={16} color="var(--we-border)" />
-        <MiniMap
-          pannable
-          zoomable
-          className="wf-minimap"
-          nodeColor={(n) => {
-            const block = (n.data as BlockNodeData).block
-            return block ? `var(--cat-${block.category})` : 'var(--we-border)'
-          }}
-          maskColor="rgba(15,23,42,0.10)"
-          bgColor="var(--we-bg-soft)"
+      <div className="wf-editor">
+        <TopToolbar
+          workflowName={meta.name}
+          workflowIcon={meta.icon}
+          paletteOpen={paletteOpen}
+          onTogglePalette={() => setPaletteOpen((o) => !o)}
+          onRename={(name) => setMeta((m) => ({ ...m, name }))}
+          debugMode={meta.settings.debugMode}
+          onToggleDebug={() =>
+            setMeta((m) => ({
+              ...m,
+              settings: { ...m.settings, debugMode: !m.settings.debugMode },
+            }))
+          }
+          dirty={dirty}
+          saving={saving}
+          running={running}
+          recording={recording}
+          onSave={() => void handleSave()}
+          onRun={() => void handleRun()}
+          onOpenLogs={() => setLogsOpen(true)}
+          onToggleRecording={() => void toggleRecording()}
+          onAutoLayout={handleAutoLayout}
+          t={t}
         />
-        <CanvasControls nodes={nodes} t={t} />
-      </ReactFlow>
 
-      {/* Left: block palette; the edit form OVERLAYS it while editing
+        <div className="wf-canvas-wrap">
+          <ReactFlow
+            nodes={flowNodes}
+            edges={edgeWithHighlight}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onEdgeDoubleClick={onEdgeDoubleClick}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            onDrop={onDrop}
+            onDragOver={(e) => {
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'copy'
+            }}
+            onNodeDoubleClick={(_e, node) => {
+              // Automa: double-click a block to edit it in the left panel. Note
+              // nodes have no catalog block, so they don't open the editor.
+              if ((node.data as BlockNodeData).block) openNodeEditor(node.id)
+            }}
+            fitView
+            deleteKeyCode={['Delete', 'Backspace']}
+            multiSelectionKeyCode="Control"
+            defaultEdgeOptions={{
+              type: 'custom',
+              markerEnd: {
+                type: MarkerType.ArrowClosed,
+                width: 18,
+                height: 18,
+                color: 'var(--we-edge)',
+              },
+            }}
+          >
+            <Background gap={16} color="var(--we-border)" />
+            <MiniMap
+              pannable
+              zoomable
+              className="wf-minimap"
+              nodeColor={(n) => {
+                const block = (n.data as BlockNodeData).block
+                return block ? `var(--cat-${block.category})` : 'var(--we-border)'
+              }}
+              maskColor="rgba(15,23,42,0.10)"
+              bgColor="var(--we-bg-soft)"
+            />
+            <CanvasControls nodes={nodes} t={t} />
+          </ReactFlow>
+
+          {/* Left: block palette; the edit form OVERLAYS it while editing
           (Automa: double-click a node to edit, back arrow returns). */}
-      <Sidebar open={paletteOpen} width={paletteWidth} onWidthChange={setPaletteWidth} side="left">
-        <BlockPalette />
-        {editOverlay}
-      </Sidebar>
+          <Sidebar
+            open={paletteOpen}
+            width={paletteWidth}
+            onWidthChange={setPaletteWidth}
+            side="left"
+          >
+            <BlockPalette />
+            {editOverlay}
+          </Sidebar>
+        </div>
+
+        {error && (
+          <div className="wf-error-banner" onClick={() => setError(null)}>
+            {error}
+          </div>
+        )}
+        {toast.node}
+        <ToastHost />
+        <ConfirmHost />
+
+        {/* Block settings + on-error modal (gear button in node hover toolbar). */}
+        <BlockSettingsModal
+          open={settingsForId !== null && !!settingsBlock}
+          onClose={() => setSettingsForId(null)}
+          block={settingsBlock}
+          data={settingsNode?.data.blockData ?? {}}
+          onChange={(patch) => settingsForId && patchNode(settingsForId, patch)}
+        />
+
+        {/* Run-logs / debug viewer modal. */}
+        <LogsModal
+          open={logsOpen}
+          onClose={() => setLogsOpen(false)}
+          workflowId={workflowId}
+          debugMode={meta.settings.debugMode}
+          t={t}
+        />
       </div>
-
-      {error && <div className="wf-error-banner" onClick={() => setError(null)}>{error}</div>}
-      {toast.node}
-      <ToastHost />
-      <ConfirmHost />
-
-      {/* Block settings + on-error modal (gear button in node hover toolbar). */}
-      <BlockSettingsModal
-        open={settingsForId !== null && !!settingsBlock}
-        onClose={() => setSettingsForId(null)}
-        block={settingsBlock}
-        data={settingsNode?.data.blockData ?? {}}
-        onChange={(patch) => settingsForId && patchNode(settingsForId, patch)}
-      />
-
-      {/* Run-logs / debug viewer modal. */}
-      <LogsModal
-        open={logsOpen}
-        onClose={() => setLogsOpen(false)}
-        workflowId={workflowId}
-        debugMode={meta.settings.debugMode}
-        t={t}
-      />
-    </div>
     </EditorLocaleContext.Provider>
   )
 }

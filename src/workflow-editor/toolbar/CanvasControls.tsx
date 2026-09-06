@@ -8,6 +8,7 @@
  * @module workflow-editor/toolbar/CanvasControls
  */
 
+import { Maximize2, Minus, Plus, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useReactFlow, type Node } from '@xyflow/react'
 import type { TranslateFn } from '../i18n'
@@ -52,7 +53,7 @@ function SearchBlocks({ nodes, t }: { nodes: SearchTarget[]; t: TranslateFn }) {
         title={`${t('searchNodes')} (Ctrl+Shift+F)`}
         onClick={() => setActive(!active)}
       >
-        <i className="ri-search-2-line" />
+        <Search size={14} />
       </button>
       {active && (
         <div className="wf-search-pop">
@@ -84,15 +85,20 @@ function ZoomControls() {
   const { zoomIn, zoomOut, fitView } = useReactFlow()
   return (
     <div className="wf-zoom">
-      <button type="button" className="wf-icon-btn" title="Reset view" onClick={() => fitView({ duration: 200 })}>
-        <i className="ri-fullscreen-line" />
+      <button
+        type="button"
+        className="wf-icon-btn"
+        title="Reset view"
+        onClick={() => fitView({ duration: 200 })}
+      >
+        <Maximize2 size={14} />
       </button>
       <div className="wf-zoom-seg">
         <button type="button" className="wf-icon-btn" title="Zoom out" onClick={() => zoomOut()}>
-          <i className="ri-subtract-line" />
+          <Minus size={14} />
         </button>
         <button type="button" className="wf-icon-btn" title="Zoom in" onClick={() => zoomIn()}>
-          <i className="ri-add-line" />
+          <Plus size={14} />
         </button>
       </div>
     </div>

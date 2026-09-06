@@ -13,6 +13,7 @@
  *
  * @module workflow-editor/blocks/batchA/EditUploadFile
  */
+import { Trash2 } from 'lucide-react'
 import { Field, IconButton, TextInput } from '../shared/Field'
 import type { EditFormProps } from '../EditForms'
 import InteractionBase from '../shared/InteractionBase'
@@ -38,7 +39,7 @@ export default function EditUploadFile({ data, onChange }: EditFormProps) {
                 />
               </div>
               <IconButton
-                icon="ri-delete-bin-7-line"
+                icon={Trash2}
                 title="Remove file"
                 onClick={() => setPaths(filePaths.filter((_, i) => i !== index))}
               />
@@ -48,7 +49,13 @@ export default function EditUploadFile({ data, onChange }: EditFormProps) {
         <button
           type="button"
           className="wf-btn-accent"
-          style={{ alignSelf: 'flex-start', padding: '6px 12px', borderRadius: 8, border: 'none', cursor: 'pointer' }}
+          style={{
+            alignSelf: 'flex-start',
+            padding: '6px 12px',
+            borderRadius: 8,
+            border: 'none',
+            cursor: 'pointer',
+          }}
           onClick={() => setPaths([...filePaths, ''])}
         >
           Add file

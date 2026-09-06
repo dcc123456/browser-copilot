@@ -22,10 +22,20 @@ export default function EditElementExists({ data, onChange }: EditFormProps) {
   return (
     <InteractionBase data={data} onChange={onChange} hideMarkEl>
       <Field label="Try for">
-        <NumberInput value={num(data, 'tryCount', 1)} min={0} fallback={1} onChange={(n) => onChange({ tryCount: n })} />
+        <NumberInput
+          value={num(data, 'tryCount', 1)}
+          min={0}
+          fallback={1}
+          onChange={(n) => onChange({ tryCount: n })}
+        />
       </Field>
       <Field label="Timeout (milliseconds)">
-        <NumberInput value={num(data, 'timeout', 500)} min={0} fallback={500} onChange={(n) => onChange({ timeout: n })} />
+        <NumberInput
+          value={num(data, 'timeout', 500)}
+          min={0}
+          fallback={500}
+          onChange={(n) => onChange({ timeout: n })}
+        />
       </Field>
       <Checkbox
         checked={bool(data, 'throwError')}

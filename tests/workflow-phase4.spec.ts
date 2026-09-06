@@ -517,16 +517,19 @@ describe('workflow phase 4 — integration executors', () => {
     expect(emit).toHaveBeenCalledWith('result', 'hello ai')
   })
 
-  it('ai-prompt emits an error when no provider is configured', async () => {
+  it('ai-prompt fails the block (throws) when no provider is configured', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       providers: [],
       activeProviderId: '',
     } as unknown as Awaited<ReturnType<typeof getSettings>>)
 
     const { ctx, emit } = makeCtx()
-    await EXECUTORS['ai-prompt']!({ prompt: 'hi' }, ctx)
-
-    expect(emit).toHaveBeenCalledWith('error', 'AI 块: 未配置模型给 provider')
+    // Throwing (not emit-and-continue) keeps downstream blocks from running
+    // on an empty/stale lastAIResponse — the "didn't wait for the AI" bug.
+    await expect(EXECUTORS['ai-prompt']!({ prompt: 'hi' }, ctx)).rejects.toThrow(
+      'AI 块: 未配置模型给 provider',
+    )
+    expect(emit).not.toHaveBeenCalled()
   })
 })
 

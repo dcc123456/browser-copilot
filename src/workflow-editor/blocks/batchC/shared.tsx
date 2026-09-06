@@ -18,7 +18,9 @@ let counter = 0
 /** Small unique id (Automa used nanoid(4..10)). */
 export function id(size = 8): string {
   counter += 1
-  const rand = Math.random().toString(36).slice(2, 2 + size)
+  const rand = Math.random()
+    .toString(36)
+    .slice(2, 2 + size)
   return `${Date.now().toString(36).slice(-4)}${rand}${counter.toString(36)}`.slice(0, size + 4)
 }
 
@@ -58,7 +60,11 @@ export function SaveToTable({ data, onChange }: Pick<EditFormProps, 'data' | 'on
   const saveData = data.saveData === true
   return (
     <>
-      <Checkbox checked={saveData} onChange={(v) => onChange({ saveData: v })} label="Insert to table" />
+      <Checkbox
+        checked={saveData}
+        onChange={(v) => onChange({ saveData: v })}
+        label="Insert to table"
+      />
       {saveData && (
         <Field label="Select column">
           <TextInput

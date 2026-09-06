@@ -10,6 +10,7 @@
  * @module workflow-editor/blocks/batchC/EditDeleteData
  */
 
+import { Plus, Trash2 } from 'lucide-react'
 import { Field, IconButton, Select, TextArea, TextInput } from '../shared/Field'
 import { str } from '../shared/InteractionBase'
 import type { EditFormProps } from '../EditForms'
@@ -59,14 +60,20 @@ export default function EditDeleteData({ data, onChange }: EditFormProps) {
       {list.map((item, index) => (
         <div
           key={index}
-          style={{ borderBottom: '1px solid var(--bc-border, #ccc)', paddingBottom: 12, marginBottom: 12 }}
+          style={{
+            borderBottom: '1px solid var(--bc-border, #ccc)',
+            paddingBottom: 12,
+            marginBottom: 12,
+          }}
         >
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
             <div style={{ flex: 1 }}>
               <Field label="Data from">
                 <Select
                   value={item.type}
-                  onChange={(v) => patchItem(index, { type: v === 'variable' ? 'variable' : 'table' })}
+                  onChange={(v) =>
+                    patchItem(index, { type: v === 'variable' ? 'variable' : 'table' })
+                  }
                   options={[
                     { value: 'table', label: 'Table' },
                     { value: 'variable', label: 'Variable' },
@@ -74,7 +81,7 @@ export default function EditDeleteData({ data, onChange }: EditFormProps) {
                 />
               </Field>
             </div>
-            <IconButton icon="ri-delete-bin-line" title="Remove" onClick={() => removeItem(index)} />
+            <IconButton icon={Trash2} title="Remove" onClick={() => removeItem(index)} />
           </div>
 
           {item.type === 'variable' ? (
@@ -108,7 +115,7 @@ export default function EditDeleteData({ data, onChange }: EditFormProps) {
       ))}
 
       <button type="button" className="wf-btn-accent" onClick={addItem}>
-        <i className="ri-add-line" /> Add
+        <Plus size={14} /> Add
       </button>
     </div>
   )

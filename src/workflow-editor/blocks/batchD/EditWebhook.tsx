@@ -9,6 +9,7 @@
  * @module workflow-editor/blocks/batchD/EditWebhook
  */
 
+import { CircleX } from 'lucide-react'
 import { useState } from 'react'
 import type { EditFormProps } from '../EditForms'
 import { Checkbox, Field, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
@@ -26,7 +27,10 @@ function asHeaders(value: unknown): Header[] {
   if (!Array.isArray(value)) return []
   return value
     .filter((h): h is Record<string, unknown> => typeof h === 'object' && h !== null)
-    .map((h) => ({ name: typeof h.name === 'string' ? h.name : '', value: typeof h.value === 'string' ? h.value : '' }))
+    .map((h) => ({
+      name: typeof h.name === 'string' ? h.name : '',
+      value: typeof h.value === 'string' ? h.value : '',
+    }))
 }
 
 export default function EditWebhook({ data, onChange }: EditFormProps) {
@@ -87,7 +91,11 @@ export default function EditWebhook({ data, onChange }: EditFormProps) {
       </Field>
 
       <Field label="Timeout (ms) (0 to disable)">
-        <NumberInput value={num(data, 'timeout', 10000)} fallback={0} onChange={(n) => onChange({ timeout: n })} />
+        <NumberInput
+          value={num(data, 'timeout', 10000)}
+          fallback={0}
+          onChange={(n) => onChange({ timeout: n })}
+        />
       </Field>
 
       <div className="wf-tabs">
@@ -120,10 +128,23 @@ export default function EditWebhook({ data, onChange }: EditFormProps) {
         <div className="wf-headers">
           {headers.map((h, i) => (
             <div className="wf-header-row" key={i}>
-              <TextInput value={h.name} placeholder={`Header ${i + 1}`} onChange={(v) => updateHeader(i, { name: v })} />
-              <TextInput value={h.value} placeholder="Value" onChange={(v) => updateHeader(i, { value: v })} />
-              <button type="button" className="wf-icon-btn" title="Remove header" onClick={() => removeHeader(i)}>
-                <i className="ri-close-circle-line" />
+              <TextInput
+                value={h.name}
+                placeholder={`Header ${i + 1}`}
+                onChange={(v) => updateHeader(i, { name: v })}
+              />
+              <TextInput
+                value={h.value}
+                placeholder="Value"
+                onChange={(v) => updateHeader(i, { value: v })}
+              />
+              <button
+                type="button"
+                className="wf-icon-btn"
+                title="Remove header"
+                onClick={() => removeHeader(i)}
+              >
+                <CircleX size={14} />
               </button>
             </div>
           ))}
@@ -175,13 +196,25 @@ export default function EditWebhook({ data, onChange }: EditFormProps) {
           />
           {bool(data, 'assignVariable') && (
             <Field label="Variable name">
-              <TextInput value={str(data, 'variableName')} placeholder="Variable name" onChange={(v) => onChange({ variableName: v })} />
+              <TextInput
+                value={str(data, 'variableName')}
+                placeholder="Variable name"
+                onChange={(v) => onChange({ variableName: v })}
+              />
             </Field>
           )}
-          <Checkbox checked={bool(data, 'saveData')} onChange={(v) => onChange({ saveData: v })} label="Save response to a table" />
+          <Checkbox
+            checked={bool(data, 'saveData')}
+            onChange={(v) => onChange({ saveData: v })}
+            label="Save response to a table"
+          />
           {bool(data, 'saveData') && (
             <Field label="Column name">
-              <TextInput value={str(data, 'dataColumn')} placeholder="Column name" onChange={(v) => onChange({ dataColumn: v })} />
+              <TextInput
+                value={str(data, 'dataColumn')}
+                placeholder="Column name"
+                onChange={(v) => onChange({ dataColumn: v })}
+              />
             </Field>
           )}
         </div>

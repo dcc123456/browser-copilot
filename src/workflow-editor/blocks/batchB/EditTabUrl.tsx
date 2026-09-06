@@ -36,7 +36,14 @@ export default function EditTabUrl({ data, onChange }: EditFormProps) {
       </Field>
 
       {type === 'all' && (
-        <div style={{ border: '1px solid var(--bc-border)', borderRadius: 8, padding: 8, marginBottom: 12 }}>
+        <div
+          style={{
+            border: '1px solid var(--bc-border)',
+            borderRadius: 8,
+            padding: 8,
+            marginBottom: 12,
+          }}
+        >
           <p className="wf-form-note">Query</p>
           <Field label="Match Patterns (optional)">
             <TextInput

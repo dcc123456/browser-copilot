@@ -15,6 +15,7 @@
  * @module workflow-editor/blocks/shared/BlockSettingsFields
  */
 
+import { Info } from 'lucide-react'
 import type { EditFormProps } from '../EditForms'
 import { NumberInput, Select, Switch, TextInput } from './Field'
 import { bool, num, str } from './InteractionBase'
@@ -69,7 +70,7 @@ export function OnErrorFields({ data, onChange }: EditFormProps) {
     <div className="wf-onerror">
       {/* Automa's green info banner (bg-green-200 / dark:bg-green-300). */}
       <div className="wf-onerror-banner">
-        <i className="ri-information-line" />
+        <Info size={14} />
         <p>{t('theseErrorRules')}</p>
       </div>
 
@@ -94,7 +95,7 @@ export function OnErrorFields({ data, onChange }: EditFormProps) {
               {/* Automa: inline "Times ⓘ [input]" row. */}
               <div className="wf-inline-field" title="The number of times to retry the action">
                 <span>{t('times')}</span>
-                <i className="ri-information-line" />
+                <Info size={14} />
                 <div className="wf-inline-input">
                   <NumberInput
                     value={num(onError as unknown as Record<string, unknown>, 'retryTimes', 1)}
@@ -105,9 +106,12 @@ export function OnErrorFields({ data, onChange }: EditFormProps) {
                 </div>
               </div>
               {/* Automa: indented "Interval ⓘ [input] seconds" row. */}
-              <div className="wf-inline-field wf-inline-field-indent" title="Seconds to wait between each try">
+              <div
+                className="wf-inline-field wf-inline-field-indent"
+                title="Seconds to wait between each try"
+              >
                 <span>{t('interval')}</span>
-                <i className="ri-information-line" />
+                <Info size={14} />
                 <div className="wf-inline-input">
                   <NumberInput
                     value={num(onError as unknown as Record<string, unknown>, 'retryInterval', 2)}

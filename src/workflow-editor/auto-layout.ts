@@ -140,7 +140,7 @@ export function autoLayout(
     for (const l of order) {
       const arr = layers.get(l)!
       const keys = new Map(arr.map((id) => [id, bary(id, l, down)]))
-      arr.sort((a, b) => (keys.get(a)! - keys.get(b)!))
+      arr.sort((a, b) => keys.get(a)! - keys.get(b)!)
     }
   }
 
