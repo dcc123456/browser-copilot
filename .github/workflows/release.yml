@@ -67,6 +67,17 @@ jobs:
           echo "path=releases/browser-copilot-${version}-*.zip" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
+      # Curated release notes live in release-notes/<version>.md (committed per
+      # release). When a release has no file, a placeholder is written so the
+      # job still succeeds — GitHub then appends its auto-generated notes.
+      - name: Prepare release notes
+        run: |
+          version=$(node -p "require('./package.json').version")
+          mkdir -p release-notes
+          if [ ! -f "release-notes/${version}.md" ]; then
+            printf '_See the commit history for the full changelog._\n' > "release-notes/${version}.md"
+          fi
+
       - name: Upload build artifact
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
@@ -80,6 +91,7 @@ jobs:
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          body_path: release-notes/${{ steps.artifact.outputs.version }}.md
           generate_release_notes: true
           files: ${{ steps.artifact.outputs.path }}
           fail-on-unmatched-files: true

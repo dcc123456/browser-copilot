@@ -1,6 +1,9 @@
 import { defineManifest } from '@crxjs/vite-plugin'
 import type { ConfigEnv } from 'vite'
 
+/** Release version — single source for both variant manifests. */
+const VERSION = '0.6.0'
+
 /** Flat typing of the crxjs manifest parameter (some fields below are wider than the typed union allows). */
 type ManifestParam = Parameters<typeof defineManifest>[0]
 
@@ -48,10 +51,10 @@ export default defineManifest(((env: ConfigEnv) => {
   return {
   manifest_version: 3,
   name: 'Browser Copilot',
-  version: '0.5.7',
+  version: VERSION,
   // Marks the lite build in chrome://extensions (the numeric `version` stays
   // identical so both variants track the same release).
-  ...(ocr ? {} : { version_name: '0.5.7 (no OCR)' }),
+  ...(ocr ? {} : { version_name: `${VERSION} (no OCR)` }),
   description:
     'A side-panel assistant that can read and act on the page you are looking at. Works with any OpenAI-compatible model.',
   minimum_chrome_version: '116',
