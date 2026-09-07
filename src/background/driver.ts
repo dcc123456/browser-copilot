@@ -1341,12 +1341,14 @@ async function ensureOffscreen(): Promise<void> {
   }
   // A single offscreen document serves both jobs, so every reason the page
   // uses (or will use) must be declared up front. WORKERS covers the
-  // Tesseract.js worker that loads the WASM core for offline OCR.
+  // Tesseract.js worker that loads the WASM core for offline OCR — the no-ocr
+  // build strips that engine, so it declares only the clipboard reason.
   await chrome.offscreen.createDocument({
     url: 'src/offscreen/index.html',
-    reasons: ['CLIPBOARD', 'WORKERS'],
-    justification:
-      'read/write the system clipboard for the workflow clipboard block and run the local OCR (Tesseract.js) worker',
+    reasons: __OCR__ ? ['CLIPBOARD', 'WORKERS'] : ['CLIPBOARD'],
+    justification: __OCR__
+      ? 'read/write the system clipboard for the workflow clipboard block and run the local OCR (Tesseract.js) worker'
+      : 'read/write the system clipboard for the workflow clipboard block',
   })
   offscreenOpen = true
 }
@@ -1403,6 +1405,13 @@ export async function ocrImage(
   | { ok: true; text: string; confidence: number; agreed: boolean; alternatives?: string[] }
   | { ok: false; error: string }
 > {
+  // Compile-time guard (`__OCR__` in vite.config.ts): the no-ocr build never
+  // reaches the offscreen round-trip. Callers treat this like any other OCR
+  // failure — the agent tool falls back to the vision model, and the workflow
+  // `ocr` block is disabled in the editor anyway.
+  if (!__OCR__) {
+    return { ok: false, error: '本地 OCR 未包含在此构建中（no-ocr 精简版）' }
+  }
   await ensureOffscreen()
   const reply = await chrome.runtime.sendMessage({ type: 'ocr-image', image: dataUrl, lang })
   const result = reply as OcrReply | undefined
@@ -1425,6 +1434,8 @@ export async function ocrImage(
  * and the first `ocrImage` call would initialize the worker anyway.
  */
 export async function warmupOcr(lang = 'eng'): Promise<void> {
+  // No-ocr build: skip entirely — no offscreen document is created for OCR.
+  if (!__OCR__) return
   try {
     await ensureOffscreen()
     await chrome.runtime.sendMessage({ type: 'ocr-warm', lang })

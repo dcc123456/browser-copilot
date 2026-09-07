@@ -30,6 +30,7 @@ import {
 import '@xyflow/react/dist/style.css'
 
 import { BLOCK_BY_ID, CATALOG_BY_ID } from '../lib/workflow/blocks/palette'
+import { OCR_SUPPORTED } from '../lib/ocr-support'
 import { isCloudBlock } from '../lib/workflow/blocks/cloud-blocks'
 import type { BlockCatalogEntry } from '../lib/workflow/blocks/types'
 import type {
@@ -262,10 +263,16 @@ export default function EditorApp() {
       if (!blockId) return
       const block = BLOCK_BY_ID.get(blockId)
       if (!block || isCloudBlock(blockId)) return
+      // no-ocr build: OCR-only operators cannot be added (the palette card is
+      // already inert; this also rejects drags from other sources).
+      if (block.requiresOcr === true && !OCR_SUPPORTED) {
+        toast.show(t('ocrUnavailable'), 'error')
+        return
+      }
       const position = reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY })
       setNodes((nds) => [...nds, newFlowNode(block, position)])
     },
-    [reactFlow],
+    [reactFlow, toast, t],
   )
 
   // --- node hover-toolbar actions (Automa block-menu) ------------------------

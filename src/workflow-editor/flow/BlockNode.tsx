@@ -25,6 +25,7 @@ import {
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { BlockIcon } from '../../lib/workflow/blocks/icons'
+import { OCR_SUPPORTED } from '../../lib/ocr-support'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
 import { useEditorLocale } from '../locale-context'
 
@@ -136,7 +137,9 @@ function BlockNodeComponent({ id, data, selected }: NodeProps) {
   const block = node.block
   if (!block) return null
   const bd = node.blockData ?? {}
-  const disabled = bd.disableBlock === true
+  // Grayed out when the user disabled the block — or in the no-ocr build for
+  // OCR-only operators (requiresOcr; execution refuses with an explicit error).
+  const disabled = bd.disableBlock === true || (block.requiresOcr === true && !OCR_SUPPORTED)
   const onError = bd.onError as { enable?: boolean; toDo?: string } | undefined
   const hasFallback = onError?.enable === true && onError?.toDo === 'fallback'
   const displayName = blockName(block.id, block.name)

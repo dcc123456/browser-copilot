@@ -63,6 +63,12 @@ export interface BlockCatalogEntry {
   refDataKeys?: string[]
   /** Cloud-only block (Google/AI/package): hidden from the palette. */
   cloud?: boolean
+  /**
+   * Requires the local OCR engine (Tesseract.js). In the no-ocr release build
+   * (see vite.config.ts `__OCR__`) the palette card is disabled and canvas
+   * nodes render grayed out; execution is refused with an explicit error.
+   */
+  requiresOcr?: boolean
   /** Default node `data` (the runtime default contract defined by this catalog). */
   data: Record<string, unknown>
 }

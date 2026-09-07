@@ -12,11 +12,38 @@
  *
  * Both run in the same single offscreen document (Chrome allows only one).
  *
+ * The no-ocr release build (`--mode no-ocr`) strips the Tesseract.js import
+ * below; `ocr-image` / `ocr-warm` then answer with a clear "not included in
+ * this build" error instead (the full release keeps everything as described).
+ *
  * @module offscreen/index
  */
 
-import { createWorker, PSM, type Worker } from 'tesseract.js'
 import { pickOcrCandidate } from '../lib/ocr-candidates'
+
+/**
+ * Type-only handle to Tesseract.js — erased at build time, no runtime import.
+ * The real module is loaded lazily in {@link loadTesseract}; the `no-ocr`
+ * release build removes that guarded dynamic import entirely (see
+ * `__OCR__` in vite.config.ts), so the lite bundle never ships the engine.
+ */
+type TesseractModule = typeof import('tesseract.js')
+type TesseractWorker = import('tesseract.js').Worker
+/** Type-side of Tesseract's page-segmentation enum (the value is loaded lazily). */
+type PsmMode = import('tesseract.js').PSM
+
+let tesseract: TesseractModule | null = null
+
+async function loadTesseract(): Promise<TesseractModule> {
+  // The positive form matters: with `__OCR__` compiled to `false` this block
+  // (and the dynamic import inside) is dead-code-eliminated, and the lite
+  // build never pulls tesseract.js into a chunk.
+  if (__OCR__) {
+    tesseract ??= await import('tesseract.js')
+    return tesseract
+  }
+  throw new Error('本地 OCR 未包含在此构建中（no-ocr 精简版），请安装完整版（含 OCR）')
+}
 
 void chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || typeof message !== 'object') return undefined
@@ -67,9 +94,9 @@ const OCR_BASE = chrome.runtime.getURL('tesseract')
 
 // Tesseract's WASM core + worker load once per document; reusing the worker
 // across calls avoids re-compiling the WASM on every recognition.
-let ocrWorker: { lang: string; worker: Worker } | null = null
+let ocrWorker: { lang: string; worker: TesseractWorker } | null = null
 
-async function getOcrWorker(lang: string): Promise<Worker> {
+async function getOcrWorker(lang: string): Promise<TesseractWorker> {
   if (ocrWorker && ocrWorker.lang === lang) return ocrWorker.worker
   if (ocrWorker) {
     await ocrWorker.worker.terminate().catch(() => undefined)
@@ -78,6 +105,7 @@ async function getOcrWorker(lang: string): Promise<Worker> {
   // All assets are vendored under public/tesseract/ so OCR works fully offline.
   // workerBlobURL:false creates the worker directly from the extension URL
   // (keeps the CSP as `script-src 'self'` — no blob: worker needed).
+  const { createWorker } = await loadTesseract()
   const worker = await createWorker(lang, 1, {
     workerPath: `${OCR_BASE}/worker.min.js`,
     corePath: `${OCR_BASE}/tesseract-core.wasm.js`,
@@ -94,6 +122,7 @@ async function runOcr(
   lang: string,
 ): Promise<{ text: string; confidence: number; agreed: boolean; alternatives?: string[] }> {
   const worker = await getOcrWorker(lang)
+  const { PSM } = await loadTesseract()
   // The incoming image (a base64/data-URL payload) is painted onto a canvas
   // ONCE and Tesseract recognizes the canvas pixels directly — a single
   // decode, independent of Tesseract's own image-loading path.
@@ -123,7 +152,7 @@ async function runOcr(
       // reading best on the plain grayscale. The whitelist pass is a safety
       // net that cannot hurt: offline it matched the unwhitelisted read on
       // every clean sample and forces digit output on marginal ones.
-      const readWith = async (target: HTMLCanvasElement, psm: PSM, whitelist?: string) => {
+      const readWith = async (target: HTMLCanvasElement, psm: PsmMode, whitelist?: string) => {
         await worker.setParameters({
           tessedit_pageseg_mode: psm,
           tessedit_char_whitelist: whitelist ?? '',

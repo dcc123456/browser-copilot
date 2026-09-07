@@ -12,5 +12,5 @@
     */
     "types": ["chrome", "vite/client", "node"]
   },
-  "include": ["tests", "src/types/fs-access.d.ts"]
+  "include": ["tests", "src/types/*.d.ts"]
 }

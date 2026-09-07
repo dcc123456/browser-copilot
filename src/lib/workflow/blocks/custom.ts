@@ -69,6 +69,10 @@ export const CUSTOM_BLOCKS: BlockCatalogEntry[] = [
     allowedInputs: true,
     maxConnection: 1,
     refDataKeys: ['variableName', 'selector', 'lang', 'imageVariable'],
+    // Full build only: the no-ocr release strips Tesseract.js (see
+    // lib/ocr-support.ts), where this operator renders disabled and refuses
+    // to run.
+    requiresOcr: true,
     data: {
       disableBlock: false,
       description: '',

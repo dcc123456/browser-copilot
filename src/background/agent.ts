@@ -1457,10 +1457,11 @@ export async function executeTool(
       const settings = await getSettings()
       const provider = await getActiveProvider().catch(() => undefined)
       const target = resolveVisionTarget(settings.imageModel, settings.providers, provider)
-      // Local OCR (Tesseract.js) runs first: it is fully offline, free and,
-      // with the upscale+contrast preprocessing, accurate enough for clean
-      // text. The vision model is the fallback for the noisy/distorted images
-      // OCR comes up empty on.
+      // Local OCR (Tesseract.js) runs first in the full build: it is fully
+      // offline, free and, with the upscale+contrast preprocessing, accurate
+      // enough for clean text. The vision model is the fallback for the
+      // noisy/distorted images OCR comes up empty on — and the ONLY reader in
+      // the no-ocr build, which strips the local engine entirely.
       const lang = (settings.ocrLanguage || 'eng').trim() || 'eng'
 
       // An http(s) URL is downloaded here and inlined as a data URL: some
@@ -1480,13 +1481,55 @@ export async function executeTool(
       let best: { text: string; confidence: number; agreed: boolean; alternatives: string[]; attempt: number; rank: number } | null = null
       const readings: string[] = []
 
-      for (let attempt = 1; attempt <= (sourceUrl ? MAX_OCR_ATTEMPTS : 1); attempt++) {
-        attempts = attempt
+      if (__OCR__) {
+        for (let attempt = 1; attempt <= (sourceUrl ? MAX_OCR_ATTEMPTS : 1); attempt++) {
+          attempts = attempt
+          let imageData = dataUrl
+          if (sourceUrl) {
+            const downloaded = await fetchImageAsDataUrl(sourceUrl)
+            if (!downloaded.ok) {
+              if (best) break // keep the earlier good attempt
+              return JSON.stringify({
+                ok: false,
+                error: downloaded.error,
+                timing: { captureMs, preprocessMs, ocrMs, visionMs: 0, attempts, totalMs: Math.round(performance.now() - totalStart) },
+              })
+            }
+            imageData = downloaded.dataUrl
+          }
+          const tPre = performance.now()
+          processed = await preprocessImage(imageData)
+          preprocessMs += Math.round(performance.now() - tPre)
+          const tOcr = performance.now()
+          const ocr = await ocrImage(processed, lang)
+          ocrMs += Math.round(performance.now() - tOcr)
+          if (!ocr.ok) {
+            // An offscreen/worker failure will not improve by refetching — stop.
+            lastOcrError = ocr.error
+            break
+          }
+          if (ocr.text.trim()) {
+            const text = ocr.text.trim()
+            const confidence = Math.round(ocr.confidence)
+            const alternatives = (ocr.alternatives ?? []).filter((t) => t.trim() && t.trim() !== text)
+            readings.push(text)
+            const answerNow = evaluateArithmetic(text)
+            const rank = (answerNow !== null ? 2000 : 0) + (ocr.agreed ? 200 : 0) + confidence
+            if (!best || rank > best.rank) {
+              best = { text, confidence, agreed: ocr.agreed, alternatives, attempt, rank }
+            }
+            // Trustworthy when the two segmentation passes agree or confidence
+            // is high; otherwise refetch a fresh captcha and try again.
+            if (ocr.agreed || confidence >= 75) break
+          }
+        }
+      } else {
+        // No-ocr build: no local read exists — prepare the image once for the
+        // vision-model fallback below (same download/preprocess contract).
         let imageData = dataUrl
         if (sourceUrl) {
           const downloaded = await fetchImageAsDataUrl(sourceUrl)
           if (!downloaded.ok) {
-            if (best) break // keep the earlier good attempt
             return JSON.stringify({
               ok: false,
               error: downloaded.error,
@@ -1497,29 +1540,7 @@ export async function executeTool(
         }
         const tPre = performance.now()
         processed = await preprocessImage(imageData)
-        preprocessMs += Math.round(performance.now() - tPre)
-        const tOcr = performance.now()
-        const ocr = await ocrImage(processed, lang)
-        ocrMs += Math.round(performance.now() - tOcr)
-        if (!ocr.ok) {
-          // An offscreen/worker failure will not improve by refetching — stop.
-          lastOcrError = ocr.error
-          break
-        }
-        if (ocr.text.trim()) {
-          const text = ocr.text.trim()
-          const confidence = Math.round(ocr.confidence)
-          const alternatives = (ocr.alternatives ?? []).filter((t) => t.trim() && t.trim() !== text)
-          readings.push(text)
-          const answerNow = evaluateArithmetic(text)
-          const rank = (answerNow !== null ? 2000 : 0) + (ocr.agreed ? 200 : 0) + confidence
-          if (!best || rank > best.rank) {
-            best = { text, confidence, agreed: ocr.agreed, alternatives, attempt, rank }
-          }
-          // Trustworthy when the two segmentation passes agree or confidence
-          // is high; otherwise refetch a fresh captcha and try again.
-          if (ocr.agreed || confidence >= 75) break
-        }
+        preprocessMs = Math.round(performance.now() - tPre)
       }
 
       const timing = {
@@ -1608,7 +1629,9 @@ export async function executeTool(
       return JSON.stringify({
         ok: false,
         error:
-          'Local OCR could not read the image and no vision-capable image model is configured. ' +
+          (__OCR__
+            ? 'Local OCR could not read the image and no vision-capable image model is configured. '
+            : 'This build ships without local OCR (no-ocr variant) and no vision-capable image model is configured. ') +
           (lastOcrError ? `OCR error: ${lastOcrError}. ` : '') +
           'Open Settings → 图片识别模型 to set an image model (e.g. gpt-4o, qwen-vl, or glm-4v). ' +
           'The CAPTCHA usually regenerates on every request — refresh the page or click the captcha for ' +
@@ -2774,6 +2797,7 @@ async function runOneToolCall(
 export async function runToolStandalone(
   name: string,
   args: Record<string, unknown>,
+  scope?: ScopeWindow,
 ): Promise<unknown> {
   if (!TOOLS.some((tool) => tool.function.name === name)) {
     return { ok: false, error: `Unknown tool: ${name}` }
@@ -2783,15 +2807,17 @@ export async function runToolStandalone(
   if (disabled.has(name)) {
     return { ok: false, error: `The "${name}" tool is disabled in settings.` }
   }
-  // The bridge has no sender window of its own: while a panel window exists it
-  // is the monitored/controlled one, so scope to it; with no panel open the
-  // legacy global resolution applies.
-  const scope = await resolveUnattendedScope()
+  // The bridge has no sender window of its own: an explicitly passed scope
+  // (the pinned "current window", see resolveBridgeScope in window-policy)
+  // wins; otherwise while a panel window exists it is the monitored/controlled
+  // one, so scope to it; with no panel open the legacy global resolution
+  // applies.
+  const resolved = scope ?? (await resolveUnattendedScope())
   const ctx: ToolContext = {
     conversationId: `external:${newId()}`,
     navigated: false,
     disabled,
-    ...(scope ? { scope } : {}),
+    ...(resolved ? { scope: resolved } : {}),
   }
   const output = await executeTool(name, args, ctx)
   try {

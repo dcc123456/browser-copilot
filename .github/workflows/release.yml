@@ -58,11 +58,13 @@ jobs:
       - name: Build and package
         run: pnpm package
 
-      - name: Resolve artifact path
+      - name: Resolve artifact paths
         id: artifact
         run: |
           version=$(node -p "require('./package.json').version")
-          echo "path=releases/browser-copilot-${version}.zip" >> "$GITHUB_OUTPUT"
+          # Two release variants (see vite.config.ts / scripts/build-zip.mjs):
+          # -ocr (full, local OCR included) and -no-ocr (lite, smaller).
+          echo "path=releases/browser-copilot-${version}-*.zip" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Upload build artifact

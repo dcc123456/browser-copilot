@@ -62,8 +62,13 @@ MCP 发来的工具调用。
 **方式一：下载发行版（推荐）**
 
 1. 前往
-   [**Releases**](https://github.com/dcc123456/browser-copilot/releases) 页面，
-   下载最新版本里的 `browser-copilot-<版本>.zip`。
+   [**Releases**](https://github.com/dcc123456/browser-copilot/releases) 页面。
+   每个版本提供**两种变体**，按需选择：
+   - `browser-copilot-<版本>-ocr.zip` —— **完整版**，内置本地 OCR
+     （Tesseract.js）：工作流的 **OCR 识别**算子、离线验证码识别开箱即用。
+   - `browser-copilot-<版本>-no-ocr.zip` —— **精简版**（体积小约 35 MB：不含
+     Tesseract.js 引擎与语言模型）。其余功能完全一致；OCR 算子置灰不可用。
+     图片文字仍可通过视觉模型识别（设置 → 图片识别模型）。
 2. 解压到一个会**长期保留**的文件夹——扩展会从该文件夹加载，之后不要删除它。
 3. 打开 `chrome://extensions`。
 4. 打开右上角的**开发者模式**开关。
@@ -438,11 +443,14 @@ pnpm run dev         # 改动即重新构建
 pnpm run typecheck   # tsc --noEmit
 pnpm run test        # vitest
 pnpm run build       # 生产构建输出到 dist/
-pnpm run package     # 构建并生成 releases/browser-copilot-<版本>.zip
+pnpm run build:no-ocr  # 精简版构建（不含本地 OCR）输出到 dist-no-ocr/
+pnpm run package     # 构建两个变体 → releases/browser-copilot-<版本>-ocr.zip
+                     #                 + releases/browser-copilot-<版本>-no-ocr.zip
 ```
 
 把 `dist/` 作为已解压扩展加载，改动后在扩展卡片上点**重新加载**。用 npm 也可以。推送 tag 会
-运行 `.github/workflows/release.yml`，执行类型检查、测试、构建，并把可加载的 zip 挂到 Release。
+运行 `.github/workflows/release.yml`，执行类型检查、测试、构建，并把两个可加载的 zip
+（完整版 `-ocr` 与精简版 `-no-ocr`）挂到 Release。
 
 关键设计：Markdown 解析成类型化语法树（绝不生成 HTML，没有 `dangerouslySetInnerHTML`）；
 页内内核自包含并跨框架注入；选定存储文件夹后，持久化状态写入磁盘真实文件（以

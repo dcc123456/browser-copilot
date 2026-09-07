@@ -12,6 +12,7 @@
 import { Info, Minus, Pin, Plus } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { blocksByCategory, CATEGORY_META } from '../../lib/workflow/blocks/palette'
+import { OCR_SUPPORTED } from '../../lib/ocr-support'
 import { BlockIcon } from '../../lib/workflow/blocks/icons'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
 import { useEditorLocale } from '../locale-context'
@@ -35,14 +36,25 @@ function BlockCard({
   pinned: boolean
   onTogglePin: () => void
 }) {
-  const { blockName } = useEditorLocale()
+  const { t, blockName } = useEditorLocale()
+  // no-ocr build: OCR-only operators are shown grayed out and cannot be
+  // dragged onto the canvas (Tailwind utilities — see ui/design-system.css).
+  const ocrUnavailable = block.requiresOcr === true && !OCR_SUPPORTED
   return (
     <div
-      className="wf-palette-card"
-      draggable
-      title={block.description || blockName(block.id, block.name)}
+      className={`wf-palette-card ${
+        ocrUnavailable ? 'cursor-not-allowed opacity-50 grayscale select-none' : ''
+      }`}
+      draggable={!ocrUnavailable}
+      title={
+        ocrUnavailable ? t('ocrUnavailable') : block.description || blockName(block.id, block.name)
+      }
       style={{ ['--cat-color' as string]: `var(--cat-${block.category})` }}
       onDragStart={(e) => {
+        if (ocrUnavailable) {
+          e.preventDefault()
+          return
+        }
         e.dataTransfer.setData('application/workflow-block', block.id)
         e.dataTransfer.effectAllowed = 'copy'
       }}

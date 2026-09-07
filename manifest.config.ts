@@ -1,4 +1,5 @@
 import { defineManifest } from '@crxjs/vite-plugin'
+import type { ConfigEnv } from 'vite'
 
 /** Flat typing of the crxjs manifest parameter (some fields below are wider than the typed union allows). */
 type ManifestParam = Parameters<typeof defineManifest>[0]
@@ -34,10 +35,23 @@ type ManifestParam = Parameters<typeof defineManifest>[0]
  * path. Referencing `public/` here yields a manifest pointing at files that do
  * not exist at that location and Chrome silently falls back to the placeholder.
  */
-export default defineManifest({
+/**
+ * Release variants (see vite.config.ts): the default build ships local OCR
+ * (Tesseract.js), while `--mode no-ocr` produces the lite release:
+ * - CSP drops `'wasm-unsafe-eval'` — nothing compiles WebAssembly anymore.
+ * - `version_name` marks the variant so the two builds are distinguishable in
+ *   chrome://extensions.
+ * - The vendored public/tesseract/ assets are stripped by the build itself.
+ */
+export default defineManifest(((env: ConfigEnv) => {
+  const ocr = env.mode !== 'no-ocr'
+  return {
   manifest_version: 3,
   name: 'Browser Copilot',
   version: '0.5.7',
+  // Marks the lite build in chrome://extensions (the numeric `version` stays
+  // identical so both variants track the same release).
+  ...(ocr ? {} : { version_name: '0.5.7 (no OCR)' }),
   description:
     'A side-panel assistant that can read and act on the page you are looking at. Works with any OpenAI-compatible model.',
   minimum_chrome_version: '116',
@@ -55,8 +69,11 @@ export default defineManifest({
   // bundled WebAssembly core. `'wasm-unsafe-eval'` permits that while keeping
   // `script-src 'self'` — no JS eval. The vendored core is fetched from the
   // extension origin, and the worker is created directly from that URL (no blob).
+  // The no-ocr build has no wasm at all, so the grant is dropped entirely.
   content_security_policy: {
-    extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+    extension_pages: ocr
+      ? "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+      : "script-src 'self'; object-src 'self'",
   },
   icons: {
     16: 'icons/icon-16.png',
@@ -110,4 +127,5 @@ export default defineManifest({
   side_panel: {
     default_path: 'src/sidepanel/index.html',
   },
-} as unknown as ManifestParam)
+  }
+}) as unknown as ManifestParam)

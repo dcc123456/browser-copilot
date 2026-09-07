@@ -16,6 +16,7 @@
 import { isInjectablePage } from '../../lib/pages'
 import { streamCompletion, type WireMessage } from '../../lib/llm'
 import { getSettings } from '../../lib/storage'
+import { OCR_SUPPORTED } from '../../lib/ocr-support'
 import { interpolate } from '../../lib/workflow/interpolate'
 import { sanitizeModelAnswer } from '../../lib/model-output'
 import { preprocessImage } from '../../lib/vision'
@@ -517,6 +518,13 @@ async function imageDims(dataUrl: string): Promise<string> {
 
 const ocrBlock: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
+  // The no-ocr release strips the local OCR engine; the block is grayed out in
+  // the editor there. A saved/imported workflow can still reference it, so the
+  // executor answers with an explicit error instead of a confusing failure.
+  if (!OCR_SUPPORTED) {
+    ctx.emit('error', 'ocr: 当前为无 OCR 精简版构建，此算子不可用 — 请安装完整版（含 OCR）')
+    return null
+  }
   const source = String(data['source'] ?? (sel(data) ? 'element' : 'page'))
 
   let image = ''

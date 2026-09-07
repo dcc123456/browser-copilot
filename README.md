@@ -74,8 +74,15 @@ panels).
 **Option A — download a release (recommended):**
 
 1. Go to the
-   [**Releases**](https://github.com/dcc123456/browser-copilot/releases) page
-   and download `browser-copilot-<version>.zip` from the latest release.
+   [**Releases**](https://github.com/dcc123456/browser-copilot/releases) page.
+   Every release ships **two variants** — pick one:
+   - `browser-copilot-<version>-ocr.zip` — **full build** with local OCR
+     (Tesseract.js): the workflow **OCR text recognition** operator and offline
+     captcha reading work out of the box.
+   - `browser-copilot-<version>-no-ocr.zip` — **lite build** (~35 MB smaller:
+     no Tesseract.js engine or language models). Everything else is identical;
+     the OCR operator is grayed out and disabled. Image text can still be read
+     through a vision model (Settings → image recognition model).
 2. Unzip it into a folder you will keep — the extension loads from that folder,
    so don't delete it afterwards.
 3. Open `chrome://extensions`.
@@ -541,13 +548,15 @@ pnpm run dev         # rebuild on change
 pnpm run typecheck   # tsc --noEmit
 pnpm run test        # vitest
 pnpm run build       # production bundle into dist/
-pnpm run package     # build + releases/browser-copilot-<version>.zip
+pnpm run build:no-ocr  # lite bundle (no local OCR) into dist-no-ocr/
+pnpm run package     # build both variants → releases/browser-copilot-<version>-ocr.zip
+                     #                      + releases/browser-copilot-<version>-no-ocr.zip
 ```
 
 Load `dist/` unpacked, then press **Reload** on the extension card after changes.
 `npm` works as well as `pnpm`. Pushing a tag runs
 `.github/workflows/release.yml`, which typechecks, tests, builds, and attaches
-the loadable zip to the GitHub Release.
+both loadable zips (full `-ocr` and lite `-no-ocr`) to the GitHub Release.
 
 Key design notes: Markdown is parsed to a typed tree (never HTML, no
 `dangerouslySetInnerHTML`); the in-page kernel is self-contained and injected

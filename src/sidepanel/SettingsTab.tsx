@@ -23,6 +23,7 @@ import {
   type StorageMode,
 } from '../lib/fs-store'
 import { clearDownloadDir, getDownloadDir, setDownloadDir } from '../lib/download-dir'
+import { OCR_SUPPORTED } from '../lib/ocr-support'
 import NumberInput from '../ui/NumberInput'
 import { useT } from './i18n'
 
@@ -937,23 +938,25 @@ export default function SettingsTab({ onLocaleChange }: Props) {
           </select>
         </div>
 
-        <div className="field">
-          <label htmlFor="img-ocr-lang">{t.settingsOcrLanguage}</label>
-          <select
-            id="img-ocr-lang"
-            value={settings.ocrLanguage}
-            onChange={(event) => {
-              void mutate({ type: 'settings.set', patch: { ocrLanguage: event.target.value } })
-            }}
-          >
-            <option value="eng">English (eng)</option>
-            <option value="chi_sim">简体中文 (chi_sim)</option>
-            <option value="chi_sim+eng">中文 + English (chi_sim+eng)</option>
-          </select>
-          <p className="hint" style={{ marginBottom: 0 }}>
-            {t.settingsOcrLanguageIntro}
-          </p>
-        </div>
+        {OCR_SUPPORTED && (
+          <div className="field">
+            <label htmlFor="img-ocr-lang">{t.settingsOcrLanguage}</label>
+            <select
+              id="img-ocr-lang"
+              value={settings.ocrLanguage}
+              onChange={(event) => {
+                void mutate({ type: 'settings.set', patch: { ocrLanguage: event.target.value } })
+              }}
+            >
+              <option value="eng">English (eng)</option>
+              <option value="chi_sim">简体中文 (chi_sim)</option>
+              <option value="chi_sim+eng">中文 + English (chi_sim+eng)</option>
+            </select>
+            <p className="hint" style={{ marginBottom: 0 }}>
+              {t.settingsOcrLanguageIntro}
+            </p>
+          </div>
+        )}
 
         <div className="field">
           <label htmlFor="img-model">{t.settingsModel}</label>

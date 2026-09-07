@@ -8,7 +8,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "package": "vite build && node scripts/build-zip.mjs",
+    "build:no-ocr": "vite build --mode no-ocr",
+    "package": "vite build && node scripts/build-zip.mjs ocr && vite build --mode no-ocr && node scripts/build-zip.mjs no-ocr",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.tests.json",
     "test": "vitest run",
     "icons": "node scripts/generate-icons.mjs"

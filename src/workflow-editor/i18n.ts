@@ -23,6 +23,9 @@ export const EDITOR_STRINGS = {
     stopRecord: 'Stop recording',
     addBlocks: 'Add blocks',
     hidePalette: 'Hide blocks',
+    // no-ocr build: title/toast for the disabled local-OCR operator.
+    ocrUnavailable:
+      'Local OCR is not included in this build (no-OCR variant). Download the full (OCR) release to use it.',
     renameWorkflow: 'Rename workflow',
     cancel: 'Cancel',
     toggleSidebar: 'Toggle sidebar',
@@ -124,6 +127,8 @@ export const EDITOR_STRINGS = {
     stopRecord: '停止录制',
     addBlocks: '添加算子',
     hidePalette: '收起算子栏',
+    // no-ocr 精简版：置灰的本地 OCR 算子的提示。
+    ocrUnavailable: '本地 OCR 未包含在此构建中（无 OCR 精简版），请下载完整版（含 OCR）使用。',
     renameWorkflow: '重命名工作流',
     cancel: '取消',
     toggleSidebar: '切换侧边栏',
