@@ -233,6 +233,25 @@ const SPEC_SCHEMA = {
   additionalProperties: true,
 } as const
 
+/**
+ * On-demand tool groups, loaded conversation-wide by the `load_tools` tool.
+ * Group names appear in the load_tools schema and in system-prompt rule 14.
+ * Every tool NOT listed here (plus `load_tools` itself) is core and always
+ * advertised in non-chat modes.
+ */
+export const TOOL_GROUPS: Record<string, readonly string[]> = {
+  tabs: ['list_tabs', 'tab_new', 'tab_switch', 'tab_close', 'pin_tab', 'unpin_tab'],
+  data: ['save_local', 'get_my_profile', 'list_secrets', 'get_secret'],
+  skills: ['use_skill', 'create_skill'],
+  ops: ['list_network_requests', 'list_console_messages', 'list_scheduled_tasks'],
+}
+
+const TOOL_GROUP_BY_NAME = new Map(
+  Object.entries(TOOL_GROUPS).flatMap(([group, names]) =>
+    names.map((name) => [name, group] as const),
+  ),
+)
+
 export const TOOLS: WireTool[] = [
   {
     type: 'function',
@@ -708,9 +727,82 @@ export const TOOLS: WireTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'load_tools',
+      description:
+        'Load a group of tools that are hidden by default to keep requests small. Groups: "tabs" (list/open/switch/close/pin tabs), "data" (save files, saved profile, saved passwords), "skills" (use/create saved skills), "ops" (network requests, console messages, scheduled tasks). Call this before using any tool that is not advertised in the current request; loaded groups stay available for the rest of the conversation.',
+      parameters: {
+        type: 'object',
+        properties: {
+          groups: {
+            type: 'array',
+            items: { type: 'string', enum: Object.keys(TOOL_GROUPS) },
+            description: 'Tool groups to load.',
+          },
+        },
+        required: ['groups'],
+      },
+    },
+  },
 ]
 
 export type ConfirmFn = (name: string, argsPreview: string) => Promise<boolean>
+
+/**
+ * Conversation-scoped record of which on-demand tool groups the model has
+ * loaded via `load_tools`. In-memory only: losing it after a worker restart
+ * costs one extra load_tools round, never a wrong behaviour. LRU-capped so
+ * abandoned conversations cannot grow it without bound.
+ */
+const loadedToolGroupStore = new Map<string, Set<string>>()
+const LOADED_GROUP_STORE_CAP = 64
+
+function storeLoadedGroups(conversationId: string, groups: readonly string[]): Set<string> {
+  const existing = loadedToolGroupStore.get(conversationId) ?? new Set<string>()
+  for (const group of groups) {
+    if (TOOL_GROUPS[group]) existing.add(group)
+  }
+  // Re-insert so Map iteration order doubles as LRU order.
+  loadedToolGroupStore.delete(conversationId)
+  loadedToolGroupStore.set(conversationId, existing)
+  while (loadedToolGroupStore.size > LOADED_GROUP_STORE_CAP) {
+    const oldest = loadedToolGroupStore.keys().next().value
+    if (oldest === undefined) break
+    loadedToolGroupStore.delete(oldest)
+  }
+  return existing
+}
+
+export interface ToolAdvertiseOptions {
+  mode: AgentMode
+  disabled?: ReadonlySet<string>
+  /** On-demand groups already loaded for this conversation via `load_tools`. */
+  loadedGroups?: ReadonlySet<string>
+}
+
+/**
+ * The tool schemas advertised for one conversation round: the core set, the
+ * `load_tools` loader, and every tool of an already-loaded group — minus the
+ * user's disabled tools and, in read-only mode, every page-changing action.
+ * Chat mode advertises nothing at all.
+ */
+export function advertiseTools({
+  mode,
+  disabled = new Set<string>(),
+  loadedGroups = new Set<string>(),
+}: ToolAdvertiseOptions): WireTool[] {
+  if (mode === 'chat') return []
+  return TOOLS.filter((tool) => {
+    const name = tool.function.name
+    if (disabled.has(name)) return false
+    if (mode === 'readonly' && ACTION_TOOLS.has(name)) return false
+    const group = TOOL_GROUP_BY_NAME.get(name)
+    if (group && !loadedGroups.has(group)) return false
+    return true
+  })
+}
 
 export interface AgentDeps {
   send: (message: AgentServerMessage) => void
@@ -924,6 +1016,11 @@ async function recordAction(
 
 interface ToolContext {
   conversationId: string
+  /**
+   * On-demand tool groups loaded so far in this conversation (live view — the
+   * `load_tools` tool mutates it mid-turn). Undefined = none loaded.
+   */
+  loadedGroups?: ReadonlySet<string>
   /** Set when a click/action likely navigated, so the caller can re-snapshot. */
   navigated: boolean
   /** The most recently read URL; used to attach history hosts. */
@@ -2423,24 +2520,18 @@ export async function runAgentTurn(
   })
   const roundsCap = maxToolRounds || DEFAULT_MAX_TOOL_ROUNDS
 
-  // Filter the advertised tools:
+  // Filter the advertised tools per round (see advertiseTools): the core set
+  // plus any on-demand group the model has loaded so far this conversation.
   //  - chat mode sends no tools at all (pure conversation);
   //  - read-only mode hides every action that changes the page;
   //  - the user's disabled-tool list hides specific tools regardless of mode.
   // The execution switch below still rejects a tool that slips through, so a
-  // stale model call cannot run a disabled tool.
-  const tools =
-    initialMode === 'chat'
-      ? []
-      : TOOLS.filter((tool) => {
-          const name = tool.function.name
-          if (disabled.has(name)) return false
-          if (initialMode === 'readonly' && ACTION_TOOLS.has(name)) return false
-          return true
-        })
+  // stale model call cannot run a disabled or unadvertised tool.
+  const loadedGroups = storeLoadedGroups(deps.conversationId, [])
 
   const ctx: ToolContext = {
     conversationId: deps.conversationId,
+    loadedGroups,
     navigated: false,
     disabled,
     // Panel-scoped turns validate their window once here; a window that died
@@ -2483,6 +2574,10 @@ export async function runAgentTurn(
     }
 
     const messages: WireMessage[] = [{ role: 'system', content: systemPrompt }, ...history]
+
+    // Recomputed per round: a load_tools call in this turn must widen the
+    // advertised set from the very next request on.
+    const tools = advertiseTools({ mode: initialMode, disabled, loadedGroups: ctx.loadedGroups })
 
     // "Thinking" covers the request in flight until either text starts streaming
     // or a tool call is announced. The first text delta flips it to "Responding";
@@ -2627,6 +2722,53 @@ async function runOneToolCall(
     const message = `The "${name}" tool is disabled in settings.`
     pushResult(JSON.stringify({ error: message }))
     deps.send({ type: 'tool.result', name, summary: `Blocked (${name} disabled)` })
+    return
+  }
+
+  // The on-demand group loader: record the groups on this conversation so the
+  // next round advertises them. Pure bookkeeping — no approval, no page touch.
+  if (name === 'load_tools') {
+    const requested = Array.isArray(args.groups) ? args.groups.map(String) : []
+    const valid = requested.filter((group) => Boolean(TOOL_GROUPS[group]))
+    const invalid = requested.filter((group) => !TOOL_GROUPS[group])
+    if (valid.length === 0) {
+      pushResult(
+        JSON.stringify({
+          error: `No valid group requested. Valid groups: ${Object.keys(TOOL_GROUPS).join(', ')}.`,
+        }),
+      )
+      deps.send({ type: 'tool.result', name, summary: 'load_tools: no valid group' })
+      return
+    }
+    const fresh = valid.filter((group) => !ctx.loadedGroups?.has(group))
+    const loaded = storeLoadedGroups(ctx.conversationId, valid)
+    pushResult(
+      JSON.stringify({
+        loaded: fresh,
+        alreadyLoaded: valid.filter((group) => !fresh.includes(group)),
+        ...(invalid.length > 0 ? { unknownGroups: invalid } : {}),
+        toolsAdvertised: [...loaded].flatMap((group) => [...TOOL_GROUPS[group] ?? []]),
+      }),
+    )
+    deps.send({
+      type: 'tool.result',
+      name,
+      summary: fresh.length > 0 ? `Loaded tools: ${fresh.join(', ')}` : 'Tool groups already loaded',
+    })
+    return
+  }
+
+  // A tool hidden inside an unloaded group was never advertised, so a call to
+  // it is a hallucination — steer the model to the loader instead of silently
+  // executing, so the next round actually carries its schema.
+  const groupName = TOOL_GROUP_BY_NAME.get(name)
+  if (groupName && !ctx.loadedGroups?.has(groupName)) {
+    pushResult(
+      JSON.stringify({
+        error: `"${name}" is not loaded yet. Call load_tools with groups: ["${groupName}"] first, then retry.`,
+      }),
+    )
+    deps.send({ type: 'tool.result', name, summary: `Not loaded (${groupName} group)` })
     return
   }
 
@@ -2781,6 +2923,9 @@ export async function runToolStandalone(
   const resolved = scope ?? (await resolveUnattendedScope())
   const ctx: ToolContext = {
     conversationId: `external:${newId()}`,
+    // The bridge bypasses advertisement entirely, so treat every group as
+    // loaded: runOneToolCall's unloaded-group refusal must not block it.
+    loadedGroups: new Set(Object.keys(TOOL_GROUPS)),
     navigated: false,
     disabled,
     ...(resolved ? { scope: resolved } : {}),

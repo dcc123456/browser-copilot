@@ -122,6 +122,8 @@ export function renderSkillCatalogue(skills: readonly Skill[]): string {
     'How to use a skill:',
     '1. If one clearly matches what the user is asking, STOP and call the `use_skill`',
     '   tool with that skill\'s exact name BEFORE you write any answer.',
+    '   (The skills tools load on demand: if `use_skill` is not advertised, call',
+    '   `load_tools` with groups: ["skills"] first.)',
     '2. The tool returns the skill\'s full instructions; read them and follow them',
     '   exactly when producing your answer.',
     '3. If none clearly apply, just answer normally without mentioning this list.',

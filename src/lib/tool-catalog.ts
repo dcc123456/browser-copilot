@@ -160,6 +160,12 @@ export const TOOL_META: ToolMeta[] = [
     labelKey: 'toolListTasks',
     warningKey: 'toolListTasksWarn',
   },
+  {
+    name: 'load_tools',
+    category: 'read',
+    labelKey: 'toolLoadTools',
+    warningKey: 'toolLoadToolsWarn',
+  },
 ]
 
 export const TOOL_META_BY_NAME = new Map(TOOL_META.map((meta) => [meta.name, meta]))

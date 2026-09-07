@@ -518,6 +518,8 @@ export interface Messages {
   toolScreenshotWarn: string
   toolListTasks: string
   toolListTasksWarn: string
+  toolLoadTools: string
+  toolLoadToolsWarn: string
 
   // Settings · page access
   settingsPageAccess: string
@@ -1196,6 +1198,9 @@ const en: Messages = {
   toolListTasks: 'List scheduled tasks',
   toolListTasksWarn:
     'When off: the assistant cannot tell you which scheduled/recurring tasks are enabled.',
+  toolLoadTools: 'On-demand tool groups',
+  toolLoadToolsWarn:
+    'When off: the assistant cannot load hidden tool groups (tab management, saving files, saved profile/passwords, skills, network/console diagnostics), so those tasks will fail.',
 
   toolRecognizeImage: 'Recognize text in an image (CAPTCHA, etc.)',
   toolRecognizeImageWarn:
@@ -1820,6 +1825,9 @@ const zhCN: Messages = {
   toolSkillWarn: '关闭后：助手无法加载或应用已保存的技能。',
   toolListTasks: '列出定时任务',
   toolListTasksWarn: '关闭后：助手无法告诉你当前启用了哪些定时/周期任务。',
+  toolLoadTools: '按需加载工具组',
+  toolLoadToolsWarn:
+    '关闭后：助手无法按需加载隐藏的工具组（标签页管理、保存文件、已存资料/密码、技能、网络/控制台诊断），相关任务会失败。',
 
   toolRecognizeImage: '识别图片中的文字（验证码等）',
   toolRecognizeImageWarn: '关闭后：助手无法使用图片模型识别页面上的验证码或其他图片文字。',
