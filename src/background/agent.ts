@@ -167,15 +167,15 @@ export function buildSystemPrompt(options: {
   // action the gate will refuse.
   if (options.mode === 'readonly') {
     parts.push(
-      'OPERATING MODE: READ-ONLY. You may read the page and list tabs, but you MUST NOT click, type, scroll-to-act, navigate, switch tabs, fill forms, or use secrets. If the user asks you to do something, explain that read-only mode is on and tell them how to switch to Semi or Full auto in the panel.',
+      'OPERATING MODE: READ-ONLY. You may read pages and list tabs but MUST NOT click, type, navigate, switch tabs, fill forms, or use secrets — if asked, explain that read-only mode is on and how to switch to Semi or Full auto.',
     )
   } else if (options.mode === 'full') {
     parts.push(
-      'OPERATING MODE: FULL AUTO. The user has pre-approved actions, so do not ask them to confirm — just perform them, issuing multiple tool calls in one response whenever the next steps are unambiguous. Take a fresh snapshot after each navigation or important change. Still read errors back and stop if something looks dangerous.',
+      'OPERATING MODE: FULL AUTO. Actions are pre-approved — do not ask for confirmation; batch multiple tool calls per response and take a fresh snapshot after navigations. Read errors back and stop if something looks dangerous.',
     )
   } else {
     parts.push(
-      'OPERATING MODE: SEMI-AUTO (default). Every action that changes the page is shown to the user for one-shot approval before it runs. Be precise so the approval summary is clear.',
+      'OPERATING MODE: SEMI-AUTO (default). Every page-changing action is shown to the user for one-shot approval; be precise so the summary is clear.',
     )
   }
 
@@ -191,8 +191,7 @@ export function buildSystemPrompt(options: {
 
 const TARGET_SCHEMA = {
   type: 'object',
-  description:
-    'A durable element locator. Prefer passing `ref` — only pass a full target copied VERBATIM from a snapshot element\'s "target" field; do not assemble one yourself.',
+  description: 'Locator copied verbatim from a snapshot element. Prefer `ref`.',
   properties: {
     primary: { $ref: '#/$defs/spec' },
     fallbacks: { type: 'array', items: { $ref: '#/$defs/spec' } },
@@ -210,42 +209,25 @@ const TARGET_SCHEMA = {
  */
 const SCREENSHOT_ARG = {
   type: 'boolean',
-  description:
-    "Also attach a base64 screenshot of the page to the result's observation, for multimodal remote clients. Ignored by the side-panel agent (its transcript is text-only).",
+  description: 'Attach a base64 page screenshot to the result (remote multimodal clients only).',
 } as const
 
 /** Preferred element handle: a short ref from the latest snapshot/observation. */
 const REF_ARG = {
   type: 'string',
-  description:
-    'Element ref (e.g. "e12") from the latest snapshot_page or an action\'s observation. Preferred over passing a full target object.',
+  description: 'Element ref (e.g. "e12") from the latest snapshot/observation. Preferred over target.',
 } as const
 
 const SPEC_SCHEMA = {
   type: 'object',
   description:
-    'One locator strategy, copied verbatim from a snapshot element — never invented. ' +
-    '`testid`/`id`/`name`: the attribute value goes in `value`. ' +
-    '`role`: the ARIA role goes in `role` (e.g. "textbox") and the accessible name in `value` — a spec with only the role name in `value` is a common mistake. ' +
-    '`text`: the element\'s visible text in `value`. ' +
-    '`css`: a CSS selector in `value`.',
+    'One locator strategy copied verbatim from a snapshot element; a `role` spec needs the accessible name in `value`.',
   properties: {
-    how: {
-      type: 'string',
-      enum: ['testid', 'id', 'name', 'role', 'text', 'css'],
-      description: 'Locator strategy.',
-    },
-    value: {
-      type: 'string',
-      description:
-        'Attribute value / accessible name / visible text / CSS selector — see the strategy descriptions.',
-    },
-    role: {
-      type: 'string',
-      description: 'ARIA role for `role` specs (e.g. "textbox", "button"); omit otherwise.',
-    },
-    tag: { type: 'string', description: 'Optional tag-name narrowing.' },
-    nth: { type: 'number', description: 'Zero-based index among visible matches.' },
+    how: { type: 'string', enum: ['testid', 'id', 'name', 'role', 'text', 'css'] },
+    value: { type: 'string' },
+    role: { type: 'string' },
+    tag: { type: 'string' },
+    nth: { type: 'number' },
   },
   required: ['how', 'value'],
   additionalProperties: true,
@@ -257,7 +239,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'read_current_page',
       description:
-        'Read the title, URL, selection, and visible text of the active tab. Use for questions about page content when you do not need to act on elements. Requires approval.',
+        'Read the active tab: title, URL, selection, visible text. For content questions that need no element action. Requires approval.',
       parameters: {
         type: 'object',
         properties: { maxChars: { type: 'number' } },
@@ -269,7 +251,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'snapshot_page',
       description:
-        'Read the active page AND list its interactive elements (buttons, links, inputs) and forms, each with a ref and a durable target. Call this before clicking or filling. Requires approval.',
+        'Read the active page and list its interactive elements (buttons, links, inputs) with refs. Call before clicking/filling. Requires approval.',
       parameters: {
         type: 'object',
         properties: {
@@ -301,24 +283,21 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'recognize_image',
       description:
-        'Recognize the text/content of an image using an image model. The image can be supplied in two ways: pass an `image` value (a data URL or absolute http(s) URL) that is already available, OR pass a CSS selector to capture that page element; pass nothing to screenshot the visible page. Use when you need to read characters or text that live inside an image, most commonly a CAPTCHA code that you will then type into a field with fill. Check this conversation first: if the same unchanged image was already recognized earlier (or the user attached it and you can see it), reuse that result instead of calling this tool again — re-recognize only when the image changed (e.g. a refreshed CAPTCHA), the earlier call failed, or you cannot tell it is the same image. Requires approval.',
+        'Read TEXT inside an image (e.g. a CAPTCHA) with an image model. Pass `image` (data URL / http(s) URL), a CSS `selector`, or nothing for the visible page. Reuse an earlier result for the same unchanged image. Requires approval.',
       parameters: {
         type: 'object',
         properties: {
           image: {
             type: 'string',
-            description:
-              'The image itself, given as a data URL (data:image/…) or an absolute http(s) URL. The image is recognized as-is — it is attached to the recognition request, so nothing needs to be fetched. Prefer this when an <img> src or a data URL is already in hand.',
+            description: 'The image as a data URL or http(s) URL, attached as-is.',
           },
           selector: {
             type: 'string',
-            description:
-              'CSS selector of the <img> or element to capture from the active page. Prefer the img\'s own selector, e.g. "#captchaImg" or "img[src*=captcha]". Omit `image` to capture this region. If neither `image` nor `selector` is given, the visible page is used.',
+            description: 'CSS selector of the <img>/element to capture; omit `image` to use it.',
           },
           prompt: {
             type: 'string',
-            description:
-              'Optional custom instruction for what to extract. Defaults to transcribing all visible text/characters (good for CAPTCHA). E.g. "Read the 4-digit code in the top-left corner".',
+            description: 'Optional extraction instruction, e.g. "the 4-digit code top-left".',
           },
         },
       },
@@ -329,19 +308,17 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'screenshot',
       description:
-        "Take a screenshot of a page element (or the whole visible page) and send it to the image model so it can LOOK at it — inspect an element's current state, layout, colors, or verify what is actually rendered. Unlike snapshot_page (which returns the DOM text) this shows the visual rendering. To READ TEXT that lives inside an image (a CAPTCHA, a label, digits), call recognize_image instead — this tool is for visual inspection, not text extraction. Optionally pass a `target` CSS selector to capture just that element; pass nothing to capture the whole page. Requires approval.",
+        "Visually inspect an element or the page with an image model (layout, colors, rendered state). For text inside images use recognize_image. Pass `target` or nothing for the whole page. Requires approval.",
       parameters: {
         type: 'object',
         properties: {
           target: {
             type: 'string',
-            description:
-              'CSS selector of the element to screenshot, e.g. "#captchaImg" or "img[src*=captcha]". Omit to capture the whole visible page.',
+            description: 'CSS selector; omit for the whole page.',
           },
           prompt: {
             type: 'string',
-            description:
-              'Optional instruction for what the model should look for. Defaults to reading any visible text/CAPTCHA and describing the element. E.g. "Is the submit button disabled?" or "What is displayed in the top-right toast?".',
+            description: 'Optional instruction for what to look for.',
           },
         },
       },
@@ -352,7 +329,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'fill',
       description:
-        'Type text into an input or textarea, replacing its value. Use for text/email/number/search/tel/url fields and contenteditable regions. PREFER this tool for ALL text entry — it handles React-controlled inputs, contenteditable editors and shadow roots natively; only fall back to run_javascript when a fill attempt has already failed. For checkboxes use set_checkbox; for dropdowns use select_option.',
+        'Type text into an input/textarea/contenteditable. Preferred for ALL text entry (handles React inputs and shadow roots). Checkboxes: set_checkbox; dropdowns: select_option.',
       parameters: {
         type: 'object',
         properties: {
@@ -364,7 +341,7 @@ export const TOOLS: WireTool[] = [
           generated: {
             type: 'boolean',
             description:
-              'Set true when you composed the text yourself (a message, summary, or any content not dictated by the user or read verbatim from the page); false when the text is literal user-dictated data (an email address, URL, name, number).',
+              'True when you composed the text yourself; false for literal user data (email, URL, name, number).',
           },
           clear: {
             type: 'boolean',
@@ -437,7 +414,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'scroll',
       description:
-        'Scroll the page or an element. Use {mode:"by", y: 600} to read more of a long page, {mode:"bottom"} to reach the end, {mode:"top"} for the top, or pass a target with {mode:"into_view"} to reveal an element.',
+        'Scroll the page or an element: {mode:"by", y:600} to read on, "bottom"/"top" for the ends, {mode:"into_view"} with a ref/target to reveal an element.',
       parameters: {
         type: 'object',
         properties: {
@@ -469,8 +446,7 @@ export const TOOLS: WireTool[] = [
     type: 'function',
     function: {
       name: 'open_url',
-      description:
-        "Navigate the active tab to a URL. The active tab is the one in the panel's window (side-panel runs never touch other browser windows).",
+      description: 'Navigate the active tab to a URL.',
       parameters: {
         type: 'object',
         properties: {
@@ -485,8 +461,7 @@ export const TOOLS: WireTool[] = [
     type: 'function',
     function: {
       name: 'tab_new',
-      description:
-        "Open a new tab, optionally navigating to a URL, and switch to it. The tab is created in the panel's window; other browser windows are never touched.",
+      description: 'Open a new tab (optionally navigating) and switch to it.',
       parameters: {
         type: 'object',
         properties: { url: { type: 'string' } },
@@ -497,8 +472,7 @@ export const TOOLS: WireTool[] = [
     type: 'function',
     function: {
       name: 'tab_switch',
-      description:
-        'Switch to another tab in this window by its index (0-based, as returned by list_tabs). "This window" is the panel\'s window; tabs in other windows are out of scope.',
+      description: 'Switch to another tab in this window by index (0-based, from list_tabs).',
       parameters: {
         type: 'object',
         properties: { index: { type: 'number' } },
@@ -519,7 +493,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'pin_tab',
       description:
-        'Pin a tab so every subsequent action targets it, avoiding tab_switch round trips. Pass a tabId from list_tabs, or nothing to pin the tab that would be acted on anyway. The pin expires after 5 minutes.',
+        'Pin a tab (tabId from list_tabs, or omit for the current target) so subsequent actions skip tab_switch. Expires after 5 minutes.',
       parameters: {
         type: 'object',
         properties: {
@@ -544,14 +518,13 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'run_javascript',
       description:
-        'Run custom JavaScript in the active web page and return its result. Use for data extraction or page manipulation the other tools cannot do. Do NOT use this to type text into form fields — the fill tool handles plain inputs, React-controlled inputs, contenteditable editors and shadow roots natively, and workflows replay fill steps as form operators while script fills replay as opaque code. Fall back to a script only AFTER a fill attempt has already failed. The code runs as a function body in the page; use `return` to send a JSON-serializable value back. This changes the page and requires approval.',
+        'Run JavaScript in the active page as a function body; `return` a JSON-serializable value. For computation/DOM work no other tool covers. NEVER fill form fields with it (use fill/select_option/set_checkbox; controlled inputs discard JS-set values) — script only after fill failed. Requires approval.',
       parameters: {
         type: 'object',
         properties: {
           code: {
             type: 'string',
-            description:
-              'JavaScript statements to execute in the page. Use `return` to send a value back. Do NOT use this to fill form fields — use fill/select_option/set_checkbox; JS-assigned values are silently discarded by React/Vue controlled inputs.',
+            description: 'JavaScript statements; `return` a value. Do not fill fields with it.',
           },
         },
         required: ['code'],
@@ -572,7 +545,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'list_network_requests',
       description:
-        'List recent network requests of the active tab (URL, method, HTTP status, failures), captured passively since the monitor attached. Use after an action to diagnose failed, slow, or error-status requests. Read-only; requires approval.',
+        'List recent network requests of the active tab (URL, method, status, failures). Use to diagnose failed/slow requests after an action. Read-only; requires approval.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -581,15 +554,14 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'list_console_messages',
       description:
-        'List recent browser console messages of the active tab (errors and warnings by default; pass level:"all" to also see log/info/debug). Only captures output emitted after the monitor attached, so run an action first when debugging. Read-only; no approval needed.',
+        'List recent console messages of the active tab (errors+warnings by default; level:"all" for everything). Only captures output after the monitor attached. Read-only.',
       parameters: {
         type: 'object',
         properties: {
           level: {
             type: 'string',
             enum: ['errors', 'all'],
-            description:
-              "'errors' (default) returns error and warning entries; 'all' returns every captured entry including log/info/debug.",
+            description: "'errors' (default) = error+warning; 'all' = every captured entry.",
           },
         },
       },
@@ -600,7 +572,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'get_my_profile',
       description:
-        "Get the user's saved personal profile(s) (name, email, phone, address, company, etc.) for filling forms. Read-only and local; does not need approval. Returns labels and fields, not passwords.",
+        "Get saved personal profile fields (name, email, phone, address, ...) for form filling. Read-only; no approval. Never includes passwords.",
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -609,7 +581,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'list_secrets',
       description:
-        'List saved credential bundles by label and URL, with the names of their fields (e.g. username, password, cvv) — NOT the secret values. Use to find the right entry and field name before calling get_secret. Read-only.',
+        'List saved credential bundles (label, URL, field NAMES like username/password — never values). Use to find the id and field before get_secret. Read-only.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -618,12 +590,12 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'get_secret',
       description:
-        "Fill a field using a saved credential bundle identified by its id. Pass 'field' to choose which value (e.g. 'username' or 'password'); it defaults to 'password'. The user must approve; the value is filled directly and never shown to you.",
+        "Fill a field from a saved credential bundle by id (`field` defaults to 'password'). The value is filled directly, never shown to you. Requires approval.",
       parameters: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'The id from list_secrets.' },
-          field: { type: 'string', description: "Field name to fill (defaults to 'password')." },
+          id: { type: 'string', description: 'From list_secrets.' },
+          field: { type: 'string', description: "Field to fill (defaults to 'password')." },
           target: TARGET_SCHEMA,
           label: { type: 'string' },
         },
@@ -649,34 +621,32 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'create_skill',
       description:
-        'Create or update a saved skill, making it available in this project immediately (it is written to the skills store as a SKILL.md file). A skill is a reusable set of instructions the agent can auto-apply later. Use when the user asks to make, record, or remember a reusable procedure/skill, or when an active skill-authoring flow asks you to save the result. Requires approval.',
+        'Create or update a saved reusable skill (written to the skills store, available immediately). Use when the user asks to make/record a reusable procedure or an authoring flow asks to save. Requires approval.',
       parameters: {
         type: 'object',
         properties: {
           name: {
             type: 'string',
             description:
-              'Unique skill name (used to trigger it later). Keep it short, e.g. "captcha-helper".',
+              'Unique short name used to trigger it later, e.g. "captcha-helper".',
           },
           description: {
             type: 'string',
             description:
-              'The auto-match trigger: one to two sentences saying BOTH what the skill does AND when to use it, with concrete triggers ("Use when …"). ALL when-to-use information goes here — the body is only loaded after this description matches, so "when to use" sections in the body are useless. E.g. "Fills the site\'s multi-page export form. Use when the user asks to export data from <site> or mentions the export form."',
+              'Auto-match trigger: 1-2 sentences covering BOTH what it does and when to use it — the body loads only after this matches.',
           },
           instructions: {
             type: 'string',
             description:
-              "The skill body as Markdown, written for an agent with no memory of this conversation: imperative steps in the user's language that reference the exact tools to call, plus failure handling. The model is already smart — include only non-obvious, project-specific knowledge (real steps, selectors, formats, edge cases), never general advice; prefer one worked example over explanation; keep under ~500 lines.",
+              "Markdown body for an agent with no conversation memory: imperative tool-exact steps plus edge cases; one worked example over explanation.",
           },
           autoMatch: {
             type: 'boolean',
-            description:
-              'Allow the agent to auto-select this skill when it matches, without the user pinning it. Defaults to true.',
+            description: 'Auto-select when it matches, without pinning (default true).',
           },
           id: {
             type: 'string',
-            description:
-              'Optional existing skill id to update instead of create. You usually should not pass this; omit to create or update by name.',
+            description: 'Existing skill id to update; usually omit.',
           },
         },
         required: ['name', 'description', 'instructions'],
@@ -688,7 +658,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'list_scheduled_tasks',
       description:
-        'List the currently enabled scheduled tasks (their name, schedule, kind, prompt, and latest status). Use when the user asks what scheduled/recurring/automated tasks exist, what is running on a timer, or "what are my tasks". Read-only and local; does not need approval.',
+        'List enabled scheduled tasks (name, schedule, kind, prompt, latest status). Read-only.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -697,15 +667,14 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'save_local',
       description:
-        "Save a piece of text/content as a local file on the user's computer. Use this whenever the user asks to download, export, or save some content (a report, summary, transcript, table, or code) to a file. Do NOT build a Blob or <a download> script with run_javascript to download files — save_local uses the configured download folder or asks where to save. Requires approval.",
+        'Save text content as a local file (download folder / save dialog). Use for download/export/save requests; never script downloads with run_javascript. Requires approval.',
       parameters: {
         type: 'object',
         properties: {
-          content: { type: 'string', description: 'The full text to save into the file.' },
+          content: { type: 'string', description: 'The text to save.' },
           filename: {
             type: 'string',
-            description:
-              'Filename with extension, e.g. report.md. Optional; defaults to download.txt.',
+            description: 'Filename with extension; defaults to download.txt.',
           },
         },
         required: ['content'],
@@ -717,22 +686,19 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'run_plan',
       description:
-        'Execute a sequence of already-decided steps in ONE round, in order, stopping at the first failure. Use it when the next steps are unambiguous from the current snapshot (e.g. fill three fields, then click submit, then wait_for the confirmation element). Each step is { tool, args } using the other tool names; steps run exactly like individual tool calls, and an { optional: true } step that fails is skipped instead of stopping the plan. Do NOT use run_plan when a later step depends on what you would learn from an earlier one — do those one at a time. Requires approval.',
+        'Execute up to 16 already-decided steps ({tool, args, optional?}) in order in ONE round; stops at the first failure unless the step is optional. Only when the steps are unambiguous from the current snapshot — one-at-a-time when a later step depends on an earlier result. Requires approval.',
       parameters: {
         type: 'object',
         properties: {
           steps: {
             type: 'array',
-            description: 'Ordered steps to execute. At most 16.',
+            description: 'Ordered steps, at most 16.',
             items: {
               type: 'object',
               properties: {
                 tool: { type: 'string', description: 'A tool name other than run_plan.' },
                 args: { type: 'object', description: "That tool's arguments, same schema." },
-                optional: {
-                  type: 'boolean',
-                  description: 'Skip this step (continue the plan) if it fails. Default false.',
-                },
+                optional: { type: 'boolean', description: 'Skip on failure (default false).' },
               },
               required: ['tool'],
             },

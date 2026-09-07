@@ -6,7 +6,7 @@ import { TOOL_META, TOOL_META_BY_NAME } from '../src/lib/tool-catalog'
 describe('system prompt', () => {
   it('uses the full default operating rules when no override is given', () => {
     const prompt = buildSystemPrompt({ mode: 'semi' })
-    expect(prompt).toContain('Key rules you must follow')
+    expect(prompt).toContain('Never invent page content')
     expect(prompt).toContain('SEMI-AUTO')
     expect(prompt.startsWith(DEFAULT_SYSTEM_PROMPT)).toBe(true)
   })
@@ -15,21 +15,21 @@ describe('system prompt', () => {
     const custom = 'Be terse. Always answer in haiku.'
     const prompt = buildSystemPrompt({ mode: 'full', basePrompt: custom })
     expect(prompt).toContain(custom)
-    expect(prompt).not.toContain('Key rules you must follow')
+    expect(prompt).not.toContain('Never invent page content')
     // The mode is still advertised so the model knows it can act.
     expect(prompt).toContain('FULL AUTO')
   })
 
   it('treats a blank override as "use the default"', () => {
     const prompt = buildSystemPrompt({ mode: 'readonly', basePrompt: '   ' })
-    expect(prompt).toContain('Key rules you must follow')
+    expect(prompt).toContain('Never invent page content')
     expect(prompt).toContain('READ-ONLY')
   })
 
   it('chat mode uses a tiny identity prompt and ignores overrides/rules', () => {
     const custom = 'Be terse. Always answer in haiku.'
     const prompt = buildSystemPrompt({ mode: 'chat', basePrompt: custom })
-    expect(prompt).not.toContain('Key rules you must follow')
+    expect(prompt).not.toContain('Never invent page content')
     expect(prompt).not.toContain(custom)
     expect(prompt).not.toContain('SEMI-AUTO')
     expect(prompt.length).toBeLessThan(260)
