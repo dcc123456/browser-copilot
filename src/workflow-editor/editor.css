@@ -44,6 +44,17 @@
   display: none; /* custom zoom controls used instead */
 }
 
+/* Box-select: after the drag ends, xyflow swaps the drawn rect for a second
+   blue box — the bounding box of the SELECTED nodes — which (especially with
+   Partial mode grazing edge nodes) never matches the rect the user drew, so
+   it reads as a sizing bug. The per-node highlight (.wf-node-selected) is the
+   real selection feedback; this box stays in the DOM as the invisible drag
+   handle for moving the whole group across empty canvas, just without paint. */
+.react-flow__nodesselection-rect {
+  background: transparent;
+  border: none;
+}
+
 /* --- Nodes --------------------------------------------------------------- */
 .wf-node {
   position: relative;

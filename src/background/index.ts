@@ -43,9 +43,11 @@ import {
 } from './automation-scope'
 import {
   expandWindow,
+  getFloatingButtonPos,
   initPanelMinimize,
   isMinimized,
   minimizeWindow,
+  setFloatingButtonPos,
   whenRestoreSettled,
 } from './panel-minimize'
 import { warmupOcr } from './driver'
@@ -466,11 +468,15 @@ chrome.action.onClicked.addListener((tab) => {
  * window. Tabs without the content script (chrome://, discarded, closed
  * mid-race) reject the send — swallowed, they simply show nothing until their
  * next load, where the script's own `floating.status` query decides.
+ *
+ * `floating.show` carries the window's saved drag position (if the user moved
+ * the button before), so every page mounts the button where it was dropped.
  */
 async function broadcastFloating(
   windowId: number,
   type: 'floating.show' | 'floating.hide',
 ): Promise<void> {
+  const pos = type === 'floating.show' ? await getFloatingButtonPos(windowId) : undefined
   const tabs = await chrome.tabs.query({ windowId }).catch(() => [])
   await Promise.all(
     tabs
@@ -478,7 +484,7 @@ async function broadcastFloating(
       .map(async (tab) => {
         const tabId = tab.id as number
         try {
-          await chrome.tabs.sendMessage(tabId, { type })
+          await chrome.tabs.sendMessage(tabId, { type, ...(pos ? { pos } : {}) })
         } catch {
           if (type !== 'floating.show') return
           // No receiver: the tab was open before the extension (re)loaded, so
@@ -544,14 +550,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // The query itself may have just woken the worker, and the session-state
     // restore runs asynchronously — answering synchronously would report a
     // stale `false` and the minimized plugin would show no button at all.
-    void whenRestoreSettled().then(() => {
-      try {
-        sendResponse({ minimized: isMinimized(windowId) })
-      } catch {
-        /* the asker navigated away before the answer */
-      }
-    })
+    void whenRestoreSettled()
+      .then(async () => ({
+        minimized: isMinimized(windowId),
+        // The button's last dragged position, so a remount (new page,
+        // navigation) puts it back where the user dropped it.
+        ...(typeof windowId === 'number'
+          ? { pos: (await getFloatingButtonPos(windowId)) ?? undefined }
+          : {}),
+      }))
+      .then((response) => {
+        try {
+          sendResponse(response)
+        } catch {
+          /* the asker navigated away before the answer */
+        }
+      })
     return true
+  }
+  if (message?.type === 'floating.move') {
+    // The user dropped the dragged button. Persist per window so every page
+    // of this window remounts it there. Not gesture-sensitive — plain storage.
+    const windowId = sender?.tab?.windowId
+    const x = (message as { x?: unknown }).x
+    const y = (message as { y?: unknown }).y
+    if (typeof windowId === 'number' && typeof x === 'number' && typeof y === 'number') {
+      void setFloatingButtonPos(windowId, { x, y })
+        .then(() => sendResponse({ ok: true }))
+        .catch(() => sendResponse({ ok: false }))
+      return true
+    }
+    sendResponse({ ok: false })
+    return
   }
   if (message?.type === 'floating.expand') {
     const windowId = sender?.tab?.windowId

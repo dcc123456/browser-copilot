@@ -10,6 +10,7 @@
  * @module sidepanel/WorkflowsTab
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Circle, Download, Plus, Square, Trash2, Upload } from 'lucide-react'
 import { sendCommand } from '../lib/messages'
 import type { TaskRunLog } from '../lib/scheduler-types'
 import type { Workflow, WorkflowTrigger } from '../lib/workflow/types'
@@ -329,10 +330,70 @@ export default function WorkflowsTab() {
     setBusy(true)
     try {
       await sendCommand({ type: 'workflows.delete', id })
+      setSelectedIds((prev) => {
+        if (!prev.has(id)) return prev
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
       await load()
     } catch (error) {
       setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
     } finally {
+      setBusy(false)
+    }
+  }
+
+  // --- Batch delete -----------------------------------------------------------
+  // Checked workflow ids. The set may briefly hold ids that no longer exist
+  // (deleted elsewhere); every consumer intersects it with the live list, so
+  // stale ids never render or get re-deleted.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
+  const toggleSelected = (id: string): void => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const allSelected = workflows.length > 0 && workflows.every((wf) => selectedIds.has(wf.id))
+
+  const toggleSelectAll = (on: boolean): void => {
+    setSelectedIds(on ? new Set(workflows.map((wf) => wf.id)) : new Set())
+  }
+
+  /** Ids that are BOTH checked and still listed — the effective selection. */
+  const effectiveSelection = workflows.filter((wf) => selectedIds.has(wf.id)).map((wf) => wf.id)
+
+  const removeSelected = async (): Promise<void> => {
+    const ids = effectiveSelection
+    if (ids.length === 0) return
+    const ok = await confirmDialog({
+      title: t.dialogDeleteTitle,
+      message: t.workflowsBatchDeleteConfirm({ count: ids.length }),
+      confirmText: t.delete,
+      cancelText: t.cancel,
+      danger: true,
+    })
+    if (!ok) return
+    setBusy(true)
+    let deleted = 0
+    try {
+      // Sequential on purpose: each delete also reschedules triggers in the
+      // worker; a failed one aborts the loop and surfaces its error.
+      for (const id of ids) {
+        await sendCommand({ type: 'workflows.delete', id })
+        deleted += 1
+      }
+      setBanner({ kind: 'ok', text: t.workflowsBatchDeleteDone({ count: deleted }) })
+    } catch (error) {
+      setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setSelectedIds(new Set())
+      await load()
       setBusy(false)
     }
   }
@@ -507,8 +568,6 @@ export default function WorkflowsTab() {
 
   return (
     <div className="pane workflows-tab">
-      <h2>{t.tabWorkflows}</h2>
-
       {banner && (
         <div
           className={`banner banner-${banner.kind}${banner.runId ? ' banner-link' : ''}`}
@@ -526,17 +585,48 @@ export default function WorkflowsTab() {
         <h3>{t.tabWorkflows}</h3>
         <div className="section-actions">
           {workflows.length > 0 && (
-            <button className="section-action" disabled={busy} onClick={exportAll} type="button">
-              {t.workflowsExport}
+            <label className="wf-select-all" title={t.workflowsSelectAll}>
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={(event) => toggleSelectAll(event.target.checked)}
+              />
+              {t.workflowsSelectAll}
+            </label>
+          )}
+          {effectiveSelection.length > 0 && (
+            <button
+              className="section-action danger wf-icon-action"
+              disabled={busy}
+              onClick={() => void removeSelected()}
+              type="button"
+              title={t.workflowsBatchDelete}
+              aria-label={t.workflowsBatchDelete}
+            >
+              <Trash2 size={14} aria-hidden="true" />
+            </button>
+          )}
+          {workflows.length > 0 && (
+            <button
+              className="section-action wf-icon-action"
+              disabled={busy}
+              onClick={exportAll}
+              type="button"
+              title={t.workflowsExport}
+              aria-label={t.workflowsExport}
+            >
+              <Download size={14} aria-hidden="true" />
             </button>
           )}
           <button
-            className="section-action"
+            className="section-action wf-icon-action"
             disabled={busy}
             onClick={() => fileInputRef.current?.click()}
             type="button"
+            title={t.workflowsImport}
+            aria-label={t.workflowsImport}
           >
-            {t.workflowsImport}
+            <Upload size={14} aria-hidden="true" />
           </button>
           <input
             ref={fileInputRef}
@@ -547,21 +637,28 @@ export default function WorkflowsTab() {
             onChange={(event) => void importFiles(event.target.files)}
           />
           <button
-            className={`section-action${recording ? ' record-active' : ''}`}
+            className={`section-action wf-icon-action${recording ? ' record-active' : ''}`}
             disabled={busy}
             onClick={() => void toggleRecording()}
             type="button"
             title={recording ? '停止录制并生成工作流' : '录制页面操作'}
+            aria-label={recording ? '停止录制并生成工作流' : '录制页面操作'}
           >
-            {recording ? '■ 停止录制' : '● 录制'}
+            {recording ? (
+              <Square size={14} aria-hidden="true" />
+            ) : (
+              <Circle size={14} aria-hidden="true" />
+            )}
           </button>
           <button
-            className="primary section-action"
+            className="primary section-action wf-icon-action"
             disabled={busy}
             onClick={() => openEditor()}
             type="button"
+            title={t.workflowsNew}
+            aria-label={t.workflowsNew}
           >
-            + {t.workflowsNew}
+            <Plus size={14} aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -577,7 +674,19 @@ export default function WorkflowsTab() {
             return (
               <li className="task-item" key={wf.id}>
                 <div className="task-item-head">
-                  <strong className="task-item-name">{wf.name}</strong>
+                  {/* Checkbox + name in one LEFT group: .task-item-head is
+                      space-between, so a bare third child would push the name
+                      to the middle. The status chip stays on the right. */}
+                  <div className="task-item-lead">
+                    <label className="wf-item-check" title={t.workflowsSelectAll}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(wf.id)}
+                        onChange={() => toggleSelected(wf.id)}
+                      />
+                    </label>
+                    <strong className="task-item-name">{wf.name}</strong>
+                  </div>
                   <span className={`task-status task-status-${!last ? 'none' : last.skipped ? 'skipped' : last.ok ? 'ok' : 'failed'}`}>
                     {lastRunLabel(wf)}
                   </span>

@@ -171,6 +171,8 @@ export function normalizeStoredSettings(raw: unknown): Settings {
     localAgentUrl: normalizeLocalAgentUrl(value.localAgentUrl),
     localAgentActiveAgent:
       typeof value.localAgentActiveAgent === 'string' ? value.localAgentActiveAgent : '',
+    localAgentWindowId:
+      typeof value.localAgentWindowId === 'number' ? value.localAgentWindowId : undefined,
     unattendedWindowPolicy:
       value.unattendedWindowPolicy === 'ask' || value.unattendedWindowPolicy === 'fixed'
         ? value.unattendedWindowPolicy

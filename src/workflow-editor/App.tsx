@@ -17,6 +17,7 @@ import {
   Background,
   MiniMap,
   MarkerType,
+  SelectionMode,
   useReactFlow,
   applyNodeChanges,
   applyEdgeChanges,
@@ -112,7 +113,6 @@ export default function EditorApp() {
   const [workflowId, setWorkflowId] = useState<string | null>(null)
   const [nodes, setNodes] = useState<FlowNode[]>([])
   const [edges, setEdges] = useState<Edge[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
   /** Node id whose block-settings modal is open (gear button in hover toolbar). */
   const [settingsForId, setSettingsForId] = useState<string | null>(null)
   /** Whether the run-logs / debug viewer modal is open. */
@@ -228,16 +228,10 @@ export default function EditorApp() {
   }, [nodes, edges, meta])
 
   const onNodesChange = useCallback((changes: NodeChange<FlowNode>[]) => {
+    // Selection itself lives on the nodes (`n.selected`, see selectedIds) —
+    // box-select / Ctrl+click / delete-key remove changes all flow through
+    // applyNodeChanges.
     setNodes((nds) => applyNodeChanges<FlowNode>(changes, nds))
-    let next: string | null | undefined
-    for (const c of changes) {
-      if (c.type !== 'select') continue
-      if (c.selected) next = c.id
-      else if (next === undefined || next === c.id) next = null
-    }
-    if (next !== undefined) {
-      setSelectedId(next)
-    }
   }, [])
 
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
@@ -277,7 +271,6 @@ export default function EditorApp() {
   // --- node hover-toolbar actions (Automa block-menu) ------------------------
   // Edit opens the LEFT overlay over the palette (Automa's edit panel).
   const openNodeEditor = useCallback((id: string) => {
-    setSelectedId(id)
     setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === id })))
     setEditingId(id)
     setPaletteOpen(true)
@@ -287,7 +280,6 @@ export default function EditorApp() {
   // Select the node too (without forcing the sidebar open) so the modal edits
   // the live node data.
   const openNodeSettings = useCallback((id: string) => {
-    setSelectedId(id)
     setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === id })))
     setSettingsForId(id)
   }, [])
@@ -309,7 +301,6 @@ export default function EditorApp() {
       setNodes((nds) => nds.filter((n) => n.id !== id))
       // Remove edges that were attached to the deleted node.
       setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id))
-      setSelectedId((cur) => (cur === id ? null : cur))
       setEditingId((cur) => (cur === id ? null : cur))
       toast.show(t('nodeDeleted'), 'info')
     },
@@ -543,16 +534,25 @@ export default function EditorApp() {
   )
   const settingsBlock = settingsNode?.data.block ?? null
 
+  // Every currently selected node id (box-select / Ctrl+click / shift-range).
+  // Drives edge highlighting for the WHOLE selection — `selectedId` alone only
+  // ever tracks the last node picked.
+  const selectedIds = useMemo(
+    () => new Set(nodes.filter((n) => n.selected).map((n) => n.id)),
+    [nodes],
+  )
+
   const edgeWithHighlight = useMemo(
     () =>
       edges.map((e) => ({
         ...e,
         data: {
           ...(e.data as Record<string, unknown> | undefined),
-          highlighted: selectedId ? e.source === selectedId || e.target === selectedId : false,
+          highlighted:
+            selectedIds.size > 0 && (selectedIds.has(e.source) || selectedIds.has(e.target)),
         },
       })),
-    [edges, selectedId],
+    [edges, selectedIds],
   )
 
   // Edit overlay for the LEFT panel (Automa: the edit form replaces/overlays
@@ -594,7 +594,6 @@ export default function EditorApp() {
             t={t}
             onBack={() => {
               setEditingId(null)
-              setSelectedId(null)
               setNodes((nds) => nds.map((n) => ({ ...n, selected: false })))
             }}
           />
@@ -653,6 +652,15 @@ export default function EditorApp() {
             fitView
             deleteKeyCode={['Delete', 'Backspace']}
             multiSelectionKeyCode="Control"
+            // Rubber-band multi-select: LEFT-drag on empty canvas draws the
+            // selection box and every node the box touches (Partial) becomes
+            // selected; selected nodes then move/delete as a group (drag one
+            // selected node moves all; Delete/Backspace removes them together
+            // with their edges). Panning moves to the middle/right button or
+            // Space+drag; wheel zoom is unchanged.
+            selectionOnDrag
+            panOnDrag={[1, 2]}
+            selectionMode={SelectionMode.Partial}
             defaultEdgeOptions={{
               type: 'custom',
               markerEnd: {

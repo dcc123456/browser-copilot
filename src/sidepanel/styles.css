@@ -1593,6 +1593,73 @@ textarea:focus-visible {
   font-weight: 600;
 }
 
+/* --- Workflows tab toolbar: icon actions + batch selection ------------------ */
+
+/* Icon-only actions (export / import / record / new / batch delete): square
+   hit targets; the flex gap here is the spacing the buttons rely on. */
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.section-action.wf-icon-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+}
+
+/* "Select all" label next to the icon actions. */
+.wf-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.wf-select-all input,
+.wf-item-check input {
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Per-workflow checkbox leading the card row. */
+.wf-item-check {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  margin-right: 2px;
+  cursor: pointer;
+}
+
+/* Checkbox + title group on the LEFT of the card head; the status chip stays
+   pinned right by .task-item-head's space-between. Long names ellipsize
+   instead of pushing the chip away. */
+.task-item-lead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.task-item-lead .task-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .empty-state {
   text-align: center;
   padding: 18px 10px;

@@ -22,6 +22,11 @@
  * async orchestration so the policy truth table is unit-testable without
  * `chrome`.
  *
+ * The local-agent bridge has its own stricter resolution,
+ * {@link resolveBridgeScope}: it pins runs to the window the user selected
+ * the served agent in (`settings.localAgentWindowId`) before falling back to
+ * the policies here.
+ *
  * @module background/window-policy
  */
 
@@ -175,6 +180,32 @@ export async function resolveUnattendedScope(): Promise<ScopeWindow | undefined>
   if (typeof picked !== 'number') return currentPluginScope() // timeout / cancel
   const scope = await normalScopeFromWindowId(picked)
   return scope && isPluginWindow(scope.windowId) ? scope : currentPluginScope()
+}
+
+/**
+ * Window scope for the LOCAL-AGENT bridge specifically.
+ *
+ * When the user picks which connected agent the plugin serves (settings →
+ * local agent → "serve connection"), the panel also records ITS window id in
+ * `settings.localAgentWindowId`. From then on the chosen agent only ever acts
+ * in THAT window — tab resolution and every `chrome.debugger` attachment stay
+ * inside it, so the user's other windows are never touched (and never show
+ * Chrome's native "extension is debugging" infobar either).
+ *
+ * The pin is validated at use time: a closed window, a non-`normal` window or
+ * one that no longer hosts the plugin (panel closed AND not minimized) makes
+ * the pin stale — the bridge then falls back to the default unattended
+ * resolution (latest plugin window; global only when the plugin is closed
+ * everywhere, the documented legacy behaviour). A stale pin is left in place:
+ * it is harmless, and the next explicit selection overwrites it.
+ */
+export async function resolveBridgeScope(): Promise<ScopeWindow | undefined> {
+  const settings = await getSettings()
+  if (typeof settings.localAgentWindowId === 'number') {
+    const pinned = await normalScopeFromWindowId(settings.localAgentWindowId)
+    if (pinned && isPluginWindow(pinned.windowId)) return pinned
+  }
+  return resolveUnattendedScope()
 }
 
 /** Test helper: clears pending picks and the wired requester. */

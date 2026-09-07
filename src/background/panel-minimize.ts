@@ -104,6 +104,7 @@ export function initPanelMinimize(): void {
   if (chrome.windows?.onRemoved) {
     chrome.windows.onRemoved.addListener((closedWindowId) => {
       expandWindow(closedWindowId)
+      forgetFloatingButtonPos(closedWindowId)
     })
   }
 }
@@ -112,4 +113,62 @@ export function initPanelMinimize(): void {
 export function _resetMinimizeForTests(): void {
   minimizedWindows.clear()
   restoreSettled = Promise.resolve()
+}
+
+// --- Floating-button position (per window, user-dragged) ----------------------
+
+/**
+ * The minimized floating button is draggable; its dropped position is stored
+ * per WINDOW in LOCAL storage (not session): it is a user preference and
+ * should survive browser restarts, unlike the minimized marks above. Values
+ * are the button center in viewport percentages (0–100), so a position saved
+ * on one page lands sensibly on pages of a different size.
+ */
+const POS_KEY = 'floatingButtonPositions'
+
+export interface FloatingPos {
+  x: number
+  y: number
+}
+
+const clampPercent = (value: number): number => Math.min(100, Math.max(0, value))
+
+function readPosMap(): Promise<Record<string, FloatingPos>> {
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) return Promise.resolve({})
+  return chrome.storage.local
+    .get(POS_KEY)
+    .then((stored) => {
+      const map = stored?.[POS_KEY] as Record<string, FloatingPos> | undefined
+      return map && typeof map === 'object' ? map : {}
+    })
+    .catch(() => ({}))
+}
+
+/** The saved drag position for this window, when one exists. */
+export async function getFloatingButtonPos(windowId: number): Promise<FloatingPos | undefined> {
+  if (typeof windowId !== 'number') return undefined
+  const map = await readPosMap()
+  const pos = map[String(windowId)]
+  return pos && typeof pos.x === 'number' && typeof pos.y === 'number' ? pos : undefined
+}
+
+/** Persists a dropped position (values clamped to 0–100 on both axes). */
+export async function setFloatingButtonPos(windowId: number, pos: FloatingPos): Promise<void> {
+  if (typeof windowId !== 'number') return
+  if (typeof pos?.x !== 'number' || typeof pos?.y !== 'number') return
+  const map = await readPosMap()
+  map[String(windowId)] = { x: clampPercent(pos.x), y: clampPercent(pos.y) }
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) return
+  await chrome.storage.local.set({ [POS_KEY]: map }).catch(() => {})
+}
+
+/** Drops the saved position when the window closes (fire-and-forget). */
+function forgetFloatingButtonPos(windowId: number): void {
+  void (async () => {
+    const map = await readPosMap()
+    if (!(String(windowId) in map)) return
+    delete map[String(windowId)]
+    if (typeof chrome === 'undefined' || !chrome.storage?.local) return
+    await chrome.storage.local.set({ [POS_KEY]: map }).catch(() => {})
+  })()
 }

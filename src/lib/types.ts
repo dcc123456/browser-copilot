@@ -108,6 +108,14 @@ export interface Settings {
    */
   localAgentActiveAgent: string
   /**
+   * 本地 Agent 桥接锁定的“当前窗口”id。用户在某个窗口的面板里选择由哪个
+   * agent 控制时，随选择一并记录该窗口；此后桥接的 tool/prompt 运行只在
+   * 该窗口内的标签页上执行（含 CDP 附加），绝不触及其它窗口。窗口已关闭
+   * 或不再是插件窗口时，该记录失效并回退到默认解析
+   * （{@link unattendedWindowPolicy} 的 latest 行为）。未设置时同样回退。
+   */
+  localAgentWindowId?: number
+  /**
    * 无人值守运行（agent 接入 / 定时任务 / 飞书任务）在多个插件窗口同时
    * 打开时如何选择目标窗口：
    * - `'latest'`（默认）：自动选最近使用的插件窗口；

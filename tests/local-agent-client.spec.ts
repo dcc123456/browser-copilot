@@ -12,6 +12,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const { runToolStandalone } = vi.hoisted(() => ({ runToolStandalone: vi.fn() }))
 const { runUnattendedPrompt } = vi.hoisted(() => ({ runUnattendedPrompt: vi.fn() }))
 
+// The bridge's window scope (window-policy) and its page-touching helpers
+// (driver) are mocked so tests can assert the pinned window is threaded
+// through tool/prompt/warmup — and that warmup NEVER attaches the CDP
+// monitor (a `chrome.debugger` attach would surface Chrome's native
+// "extension is debugging this browser" infobar on every heartbeat).
+const { resolveBridgeScope } = vi.hoisted(() => ({ resolveBridgeScope: vi.fn() }))
+const { resolveAutomationTab, execOnActiveTab } = vi.hoisted(() => ({
+  resolveAutomationTab: vi.fn(),
+  execOnActiveTab: vi.fn(),
+}))
+const { ensureTabMonitor, isMonitorHolding } = vi.hoisted(() => ({
+  ensureTabMonitor: vi.fn(),
+  isMonitorHolding: vi.fn((): boolean => false),
+}))
+
+vi.mock('../src/background/window-policy', () => ({ resolveBridgeScope }))
+vi.mock('../src/background/driver', () => ({ resolveAutomationTab, execOnActiveTab }))
+vi.mock('../src/background/cdp-monitor', () => ({ ensureTabMonitor, isMonitorHolding }))
+
 vi.mock('../src/background/agent', () => ({
   TOOLS: [
     {
@@ -138,6 +157,10 @@ beforeEach(() => {
   // APIs; individual tests override these to exercise edge cases.
   vi.mocked(getSettings).mockResolvedValue(settings())
   vi.mocked(setSettings).mockResolvedValue(settings())
+  // Bridge scope: undefined = no pin and no plugin window = legacy global
+  // resolution; the pinning tests override this per case.
+  resolveBridgeScope.mockResolvedValue(undefined)
+  resolveAutomationTab.mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -227,7 +250,7 @@ describe('processAgentRequest · protocol & security gates', () => {
       { type: 'tool', tool: 'click', args: { selector: '#a' } },
       settings(),
     )
-    expect(runToolStandalone).toHaveBeenCalledWith('click', { selector: '#a' })
+    expect(runToolStandalone).toHaveBeenCalledWith('click', { selector: '#a' }, undefined)
     expect(result).toEqual({ ok: true, data: { ok: true, clicked: true } })
   })
 
@@ -263,6 +286,7 @@ describe('processAgentRequest · protocol & security gates', () => {
       'do the thing',
       expect.stringMatching(/^external:/),
       'full',
+      {},
     )
     expect(result.ok).toBe(true)
     if (result.ok) {
@@ -301,7 +325,7 @@ describe('processAgentRequest · protocol & security gates', () => {
       activeAgentIds,
     )
     expect(mine.ok).toBe(true)
-    expect(runToolStandalone).toHaveBeenCalledWith('click', {})
+    expect(runToolStandalone).toHaveBeenCalledWith('click', {}, undefined)
   })
 
   it('serves every connection when the pinned id is stale (no longer connected)', async () => {
@@ -316,7 +340,7 @@ describe('processAgentRequest · protocol & security gates', () => {
       ['agent-2'],
     )
     expect(result.ok).toBe(true)
-    expect(runToolStandalone).toHaveBeenCalledWith('click', {})
+    expect(runToolStandalone).toHaveBeenCalledWith('click', {}, undefined)
   })
 
   it('never refuses tools.list while a connection is pinned', async () => {
@@ -355,6 +379,44 @@ describe('processAgentRequest · protocol & security gates', () => {
       settings(),
     )
     expect(result.ok).toBe(true)
+  })
+})
+
+describe('processAgentRequest · window pin & warmup', () => {
+  it('threads the pinned window scope into tool and prompt runs', async () => {
+    resolveBridgeScope.mockResolvedValue({ windowId: 5 })
+    runToolStandalone.mockResolvedValueOnce({ ok: true, clicked: true })
+    runUnattendedPrompt.mockResolvedValueOnce({ ok: true, answer: 'done', cancelled: false })
+
+    await processAgentRequest({ type: 'tool', tool: 'click', args: {} }, settings())
+    expect(runToolStandalone).toHaveBeenLastCalledWith('click', {}, { windowId: 5 })
+
+    await processAgentRequest({ type: 'prompt', prompt: 'go' }, settings())
+    expect(runUnattendedPrompt).toHaveBeenLastCalledWith(
+      'go',
+      expect.stringMatching(/^external:/),
+      'full',
+      { scopeWindowId: 5 },
+    )
+  })
+
+  it('warmup (ping) never attaches the CDP monitor — idle heartbeats stay infobar-free', async () => {
+    // A resolvable tab means warmup reaches its deepest step; even then the
+    // monitor must not be attached (resolveBridgeScope already resolved above
+    // via the global default of undefined).
+    resolveAutomationTab.mockResolvedValue({ id: 11, url: 'https://x.example/' })
+    const result = await processAgentRequest({ type: 'ping' }, settings())
+    expect(result).toEqual({ ok: true, data: { pong: true } })
+    expect(resolveAutomationTab).toHaveBeenCalled()
+    expect(execOnActiveTab).toHaveBeenCalled()
+    expect(ensureTabMonitor).not.toHaveBeenCalled()
+  })
+
+  it('warmup on tools.list also stays CDP-free', async () => {
+    resolveAutomationTab.mockResolvedValue({ id: 12, url: 'https://y.example/' })
+    const result = await processAgentRequest({ type: 'tools.list' }, settings())
+    expect(result.ok).toBe(true)
+    expect(ensureTabMonitor).not.toHaveBeenCalled()
   })
 })
 
@@ -398,7 +460,7 @@ describe('agentClient · outbound WebSocket', () => {
     )
     await flush()
 
-    expect(runToolStandalone).toHaveBeenCalledWith('click', { selector: '#x' })
+    expect(runToolStandalone).toHaveBeenCalledWith('click', { selector: '#x' }, undefined)
     // sent[0] is the initial registration ping; replies follow it.
     expect(latestSocket().sent[0]).toBe(JSON.stringify({ type: 'ping' }))
     expect(latestSocket().sent[1]).toBe(JSON.stringify({ ok: true, data: { pong: true }, id: 1 }))

@@ -440,6 +440,16 @@ export function onReviewLog(listener: ReviewLogListener): () => void {
 // --- Floating button (minimized plugin) ---------------------------------------
 
 /**
+ * Saved position of the floating button, as the button CENTER in percent of
+ * the viewport (0–100 on both axes). Percentages survive navigation between
+ * pages of different sizes and window resizes far better than raw pixels.
+ */
+export interface FloatingButtonPos {
+  x: number
+  y: number
+}
+
+/**
  * Messages from the floating-button content script to the service worker.
  * Not part of {@link Command}: the sender is a content script, not the panel,
  * and `floating.expand` must reach `sidePanel.open` inside the click gesture.
@@ -447,15 +457,19 @@ export function onReviewLog(listener: ReviewLogListener): () => void {
 export type FloatingButtonMessage =
   | { type: 'floating.status' }
   | { type: 'floating.expand' }
+  /** The user dropped the button after dragging it; `x`/`y` are percentages. */
+  | { type: 'floating.move'; x: number; y: number }
 
 /** Worker → floating-button content script control messages. */
 export type FloatingButtonControl =
-  | { type: 'floating.show' }
+  | { type: 'floating.show'; pos?: FloatingButtonPos }
   | { type: 'floating.hide' }
 
 /** Reply to `floating.status`. */
 export interface FloatingStatusResponse {
   minimized: boolean
+  /** Last saved drag position for this window, when one exists. */
+  pos?: FloatingButtonPos
 }
 
 // --- Multi-window picker (unattended window policy = "ask") --------------------

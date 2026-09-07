@@ -178,3 +178,96 @@ describe('pick channel routing', () => {
     delete (globalThis as Partial<{ chrome: unknown }>).chrome
   })
 })
+
+describe('resolveBridgeScope (local-agent window pin)', () => {
+  let policy: typeof import('../src/background/window-policy')
+
+  /**
+   * Chrome stub: `settings` is the stored settings object, `windows` maps id →
+   * chrome window (or undefined for a closed id). Callers register plugin
+   * windows through automation-scope / panel-minimize, exactly like production.
+   */
+  function stubChrome(settings: Record<string, unknown>, windows: Record<number, unknown>): void {
+    ;(globalThis as unknown as { chrome: unknown }).chrome = {
+      storage: {
+        local: {
+          get: vi.fn(async (keys: unknown) => {
+            const list = Array.isArray(keys)
+              ? keys
+              : typeof keys === 'string'
+                ? [keys]
+                : Object.keys((keys ?? {}) as Record<string, unknown>)
+            const out: Record<string, unknown> = {}
+            for (const key of list) {
+              if (key === 'settings') out[key] = settings
+            }
+            return out
+          }),
+        },
+      },
+      windows: {
+        get: vi.fn(async (id: number) => windows[id]),
+      },
+    }
+  }
+
+  beforeEach(async () => {
+    vi.resetModules()
+    policy = await import('../src/background/window-policy')
+  })
+
+  afterEach(() => {
+    policy._resetWindowPolicyForTests()
+    delete (globalThis as Partial<{ chrome: unknown }>).chrome
+  })
+
+  it('pins the run to the window the served agent was selected in', async () => {
+    stubChrome({ localAgentWindowId: 7 }, { 7: { id: 7, type: 'normal' } })
+    const scope = await import('../src/background/automation-scope')
+    const port = { name: 'x' } as unknown as chrome.runtime.Port
+    scope.registerPanelWindow(7, port)
+
+    await expect(policy.resolveBridgeScope()).resolves.toEqual({ windowId: 7 })
+  })
+
+  it('accepts a pinned minimized (plugin) window too', async () => {
+    stubChrome({ localAgentWindowId: 2 }, { 2: { id: 2, type: 'normal' } })
+    const minimize = await import('../src/background/panel-minimize')
+    minimize.minimizeWindow(2)
+
+    await expect(policy.resolveBridgeScope()).resolves.toEqual({ windowId: 2 })
+  })
+
+  it('falls back to the latest plugin window when the pin is not a plugin window', async () => {
+    // Window 3 exists and is normal, but hosts no panel and is not minimized.
+    // Window 1 (the registered panel window) must also be a real normal window:
+    // the fallback validates it through chrome.windows.get.
+    stubChrome(
+      { localAgentWindowId: 3 },
+      { 1: { id: 1, type: 'normal' }, 3: { id: 3, type: 'normal' } },
+    )
+    const scope = await import('../src/background/automation-scope')
+    const port = { name: 'x' } as unknown as chrome.runtime.Port
+    scope.registerPanelWindow(1, port)
+
+    await expect(policy.resolveBridgeScope()).resolves.toEqual({ windowId: 1 })
+  })
+
+  it('falls back when the pinned window is gone', async () => {
+    stubChrome({ localAgentWindowId: 9 }, { 1: { id: 1, type: 'normal' } })
+    const scope = await import('../src/background/automation-scope')
+    const port = { name: 'x' } as unknown as chrome.runtime.Port
+    scope.registerPanelWindow(1, port)
+
+    await expect(policy.resolveBridgeScope()).resolves.toEqual({ windowId: 1 })
+  })
+
+  it('with no pin it behaves like the default unattended resolution', async () => {
+    stubChrome({}, { 1: { id: 1, type: 'normal' } })
+    const scope = await import('../src/background/automation-scope')
+    const port = { name: 'x' } as unknown as chrome.runtime.Port
+    scope.registerPanelWindow(1, port)
+
+    await expect(policy.resolveBridgeScope()).resolves.toEqual({ windowId: 1 })
+  })
+})

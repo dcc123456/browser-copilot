@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 
 function makeChrome() {
   const session = new Map<string, unknown>()
+  const local = new Map<string, unknown>()
   const windows = new Map<number, { id: number; type: string }>([
     [1, { id: 1, type: 'normal' }],
     [2, { id: 2, type: 'normal' }],
@@ -25,6 +26,12 @@ function makeChrome() {
           for (const [k, v] of Object.entries(items)) session.set(k, v)
         }),
       },
+      local: {
+        get: vi.fn(async (key: string) => ({ [key]: local.get(key) })),
+        set: vi.fn(async (items: Record<string, unknown>) => {
+          for (const [k, v] of Object.entries(items)) local.set(k, v)
+        }),
+      },
     },
     windows: {
       get: vi.fn(async (id: number) => {
@@ -35,7 +42,7 @@ function makeChrome() {
       onRemoved: { addListener: (fn: (id: number) => void) => removed.push(fn) },
     },
   }
-  return { session, windows, removed, chrome }
+  return { session, local, windows, removed, chrome }
 }
 
 function fake(): ReturnType<typeof makeChrome> {
@@ -161,5 +168,53 @@ describe('panel minimize state', () => {
     restored.initPanelMinimize()
     await restored.whenRestoreSettled()
     expect(restored.isMinimized(1)).toBe(true)
+  })
+})
+
+describe('floating-button position persistence', () => {
+  let mod: typeof import('../src/background/panel-minimize')
+
+  beforeEach(async () => {
+    vi.resetModules()
+    const fakeChrome = makeChrome()
+    ;(globalThis as unknown as { chrome: unknown }).chrome = fakeChrome.chrome
+    ;(globalThis as unknown as { __fake: unknown }).__fake = fakeChrome
+    mod = await import('../src/background/panel-minimize')
+  })
+
+  afterEach(() => {
+    delete (globalThis as Partial<{ chrome: unknown }>).chrome
+    delete (globalThis as Partial<{ __fake: unknown }>).__fake
+  })
+
+  it('stores and returns a dropped position per window', async () => {
+    await mod.setFloatingButtonPos(1, { x: 87.5, y: 12.25 })
+    await expect(mod.getFloatingButtonPos(1)).resolves.toEqual({ x: 87.5, y: 12.25 })
+    await expect(mod.getFloatingButtonPos(2)).resolves.toBeUndefined()
+  })
+
+  it('clamps dropped positions to 0–100 on both axes', async () => {
+    await mod.setFloatingButtonPos(1, { x: 150, y: -20 })
+    await expect(mod.getFloatingButtonPos(1)).resolves.toEqual({ x: 100, y: 0 })
+  })
+
+  it('rejects malformed positions without writing', async () => {
+    await mod.setFloatingButtonPos(1, { x: 'left' as unknown as number, y: 50 })
+    await expect(mod.getFloatingButtonPos(1)).resolves.toBeUndefined()
+    await expect(mod.getFloatingButtonPos(undefined as unknown as number)).resolves.toBeUndefined()
+  })
+
+  it('forgets the position when the window closes', async () => {
+    mod.initPanelMinimize()
+    await mod.setFloatingButtonPos(2, { x: 50, y: 50 })
+    await expect(mod.getFloatingButtonPos(2)).resolves.toEqual({ x: 50, y: 50 })
+
+    fake().removed.forEach((fn) => fn(2))
+    await vi.waitFor(async () => {
+      await expect(mod.getFloatingButtonPos(2)).resolves.toBeUndefined()
+    })
+    // Other windows keep theirs.
+    await mod.setFloatingButtonPos(1, { x: 30, y: 60 })
+    await expect(mod.getFloatingButtonPos(1)).resolves.toEqual({ x: 30, y: 60 })
   })
 })

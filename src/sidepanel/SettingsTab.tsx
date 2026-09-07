@@ -262,6 +262,20 @@ export default function SettingsTab({ onLocaleChange }: Props) {
     refreshNormalWindows()
   }, [refreshNormalWindows])
 
+  // This panel's own window id. Recorded alongside the "serve connection"
+  // selection: picking which agent controls ALSO pins the local-agent bridge
+  // to THIS window, so the chosen agent only ever acts here (see
+  // `localAgentWindowId` in Settings and resolveBridgeScope in window-policy).
+  const [myWindowId, setMyWindowId] = useState<number | undefined>(undefined)
+  useEffect(() => {
+    void chrome.windows
+      ?.getCurrent()
+      .then((win) => {
+        if (typeof win?.id === 'number') setMyWindowId(win.id)
+      })
+      .catch(() => undefined)
+  }, [])
+
   // --- Storage location ------------------------------------------------------
   const [storageMode, setStorageMode] = useState<StorageMode>('browser')
   const [storageDirName, setStorageDirName] = useState<string | null>(null)
@@ -1400,6 +1414,53 @@ export default function SettingsTab({ onLocaleChange }: Props) {
               </div>
             )}
 
+            {/* Which connected agent may control the browser. Surfaced ON the
+                card (not inside 配置接入) so a multi-agent setup can switch
+                control without expanding anything. Picking one also pins the
+                bridge to THIS window (`localAgentWindowId`): the chosen agent
+                then only ever acts in the window where the selection was made. */}
+            {(agentStatus?.agents ?? []).length > 1 && (
+              <div className="field">
+                <label htmlFor="agent-serve">{t.settingsLocalAgentActiveAgent}</label>
+                <select
+                  id="agent-serve"
+                  onChange={(event) =>
+                    void mutate({
+                      type: 'settings.set',
+                      patch: {
+                        localAgentActiveAgent: event.target.value,
+                        ...(myWindowId !== undefined ? { localAgentWindowId: myWindowId } : {}),
+                      },
+                    })
+                  }
+                  value={settings.localAgentActiveAgent}
+                >
+                  <option value="">{t.settingsLocalAgentActiveAgentAll}</option>
+                  {/* A previously selected connection may have dropped; keep it
+                      listed so the value never renders as a blank select. */}
+                  {settings.localAgentActiveAgent &&
+                    !(agentStatus?.agents ?? []).some(
+                      (agent) => agent.id === settings.localAgentActiveAgent,
+                    ) && (
+                      <option disabled value={settings.localAgentActiveAgent}>
+                        {settings.localAgentActiveAgent} · {t.settingsLocalAgentStatusDisconnected}
+                      </option>
+                    )}
+                  {(agentStatus?.agents ?? []).map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="hint" style={{ marginBottom: 0 }}>
+                  {t.settingsLocalAgentActiveAgentHint}
+                  {` ${t.settingsLocalAgentAgentsConnected({
+                    count: (agentStatus?.agents ?? []).length,
+                  })}`}
+                </p>
+              </div>
+            )}
+
             <details className="collapsible">
               <summary>
                 <span className="collapsible-title">{t.settingsLocalAgentConfigure}</span>
@@ -1438,44 +1499,6 @@ export default function SettingsTab({ onLocaleChange }: Props) {
                   />
                   <span>{t.settingsLocalAgentToken}</span>
                 </label>
-                {(agentStatus?.agents ?? []).length > 1 && (
-                  <div className="field">
-                    <label htmlFor="agent-serve">{t.settingsLocalAgentActiveAgent}</label>
-                    <select
-                      id="agent-serve"
-                      onChange={(event) =>
-                        void mutate({
-                          type: 'settings.set',
-                          patch: { localAgentActiveAgent: event.target.value },
-                        })
-                      }
-                      value={settings.localAgentActiveAgent}
-                    >
-                      <option value="">{t.settingsLocalAgentActiveAgentAll}</option>
-                      {/* A previously selected connection may have dropped; keep it
-                          listed so the value never renders as a blank select. */}
-                      {settings.localAgentActiveAgent &&
-                        !(agentStatus?.agents ?? []).some(
-                          (agent) => agent.id === settings.localAgentActiveAgent,
-                        ) && (
-                          <option disabled value={settings.localAgentActiveAgent}>
-                            {settings.localAgentActiveAgent} · {t.settingsLocalAgentStatusDisconnected}
-                          </option>
-                        )}
-                      {(agentStatus?.agents ?? []).map((agent) => (
-                        <option key={agent.id} value={agent.id}>
-                          {agent.name}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="hint" style={{ marginBottom: 0 }}>
-                      {t.settingsLocalAgentActiveAgentHint}
-                      {` ${t.settingsLocalAgentAgentsConnected({
-                        count: (agentStatus?.agents ?? []).length,
-                      })}`}
-                    </p>
-                  </div>
-                )}
                 <p className="hint error">{t.settingsLocalAgentWarning}</p>
               </div>
             </details>

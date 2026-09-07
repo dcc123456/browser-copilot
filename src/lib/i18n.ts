@@ -196,6 +196,14 @@ export interface Messages {
   workflowsImport: string
   workflowsImportInvalid: string
   workflowsImported: (params: { count: number }) => string
+  /** Select-all checkbox in the Workflows tab toolbar (batch management). */
+  workflowsSelectAll: string
+  /** Icon-only batch-delete button in the Workflows tab toolbar (needs a selection). */
+  workflowsBatchDelete: string
+  /** Confirm dialog body for deleting every checked workflow at once. */
+  workflowsBatchDeleteConfirm: (params: { count: number }) => string
+  /** Success banner after a batch delete. */
+  workflowsBatchDeleteDone: (params: { count: number }) => string
   /** Shown on a failed-run banner in the Workflows tab; the banner is clickable and jumps to the run's history entry. */
   workflowsRunFailedHint: string
   /** Debug button on each workflow card: run once, then AI takes over failed nodes. */
@@ -891,9 +899,14 @@ const en: Messages = {
   workflowsImport: 'Import',
   workflowsImportInvalid: 'Invalid workflow file(s): at least one export could not be read.',
   workflowsImported: ({ count }) => `Imported ${count} workflow(s).`,
+  workflowsSelectAll: 'Select all',
+  workflowsBatchDelete: 'Delete selected workflows',
+  workflowsBatchDeleteConfirm: ({ count }) =>
+    `Delete ${count} selected workflow(s)? This cannot be undone.`,
+  workflowsBatchDeleteDone: ({ count }) => `Deleted ${count} workflow(s).`,
   workflowsRunFailedHint: 'Run failed — click to view details in history',
-  workflowsDebug: 'Debug',
-  workflowsDebugging: 'Debugging…',
+  workflowsDebug: 'AI Debug',
+  workflowsDebugging: 'AI Debugging…',
   workflowsDebugOkNoChanges: 'Run succeeded — nothing to debug',
   workflowsDebugFailed: 'AI debug could not fix this workflow',
   workflowsDebugTakeoverDone: ({ count }) =>
@@ -1243,7 +1256,7 @@ const en: Messages = {
   settingsLocalAgentActiveAgent: 'Serve connection',
   settingsLocalAgentActiveAgentAll: 'All connections (default)',
   settingsLocalAgentActiveAgentHint:
-    'Only requests from the selected connection are executed; others are refused until you switch back to "all".',
+    'Only requests from the selected connection are executed (others are refused until you switch back to "all"), and the agent only acts in the window where you made this selection.',
   settingsLocalAgentAgentsConnected: ({ count }) =>
     `${count} connection${count === 1 ? '' : 's'} connected`,
   settingsLocalAgentMcpTitle: 'MCP config',
@@ -1538,9 +1551,13 @@ const zhCN: Messages = {
   workflowsImport: '导入',
   workflowsImportInvalid: '无效的工作流文件：至少一个导出无法读取。',
   workflowsImported: ({ count }) => `已导入 ${count} 个工作流。`,
+  workflowsSelectAll: '全选',
+  workflowsBatchDelete: '删除选中的工作流',
+  workflowsBatchDeleteConfirm: ({ count }) => `确定删除选中的 ${count} 个工作流？此操作不可恢复。`,
+  workflowsBatchDeleteDone: ({ count }) => `已删除 ${count} 个工作流。`,
   workflowsRunFailedHint: '运行失败 — 点击查看历史详情',
-  workflowsDebug: '调试',
-  workflowsDebugging: '调试中…',
+  workflowsDebug: 'AI 调试',
+  workflowsDebugging: 'AI 调试中…',
   workflowsDebugOkNoChanges: '运行成功，无需调试',
   workflowsDebugFailed: 'AI 调试未能修复该工作流',
   workflowsDebugTakeoverDone: ({ count }) => `运行成功：AI 接管完成了 ${count} 个失败节点`,
@@ -1861,7 +1878,7 @@ const zhCN: Messages = {
   settingsLocalAgentActiveAgent: '服务连接',
   settingsLocalAgentActiveAgentAll: '全部连接（默认）',
   settingsLocalAgentActiveAgentHint:
-    '只执行所选连接发来的请求，其余连接会被拒绝，直到切回“全部连接”。',
+    '只执行所选连接发来的请求（其余连接会被拒绝，直到切回“全部连接”），且该 agent 只能在你做出此选择时所在的窗口内操作页面。',
   settingsLocalAgentAgentsConnected: ({ count }) => `已接入 ${count} 个连接`,
   settingsLocalAgentMcpTitle: 'MCP 配置',
   settingsLocalAgentMcpHint: '添加一个 stdio MCP 服务，助手会自动拉起适配器并自动连上。',

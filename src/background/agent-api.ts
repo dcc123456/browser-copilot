@@ -41,24 +41,29 @@ import { newId } from '../lib/storage'
 import type { Settings } from '../lib/types'
 import { TOOLS, runToolStandalone } from './agent'
 import { runUnattendedPrompt } from './agent-unattended'
-import { resolveUnattendedScope } from './window-policy'
+import { resolveBridgeScope } from './window-policy'
 import { execOnActiveTab, resolveAutomationTab } from './driver'
-import { ensureTabMonitor } from './cdp-monitor'
 
 /**
  * Session warmup, run when a remote agent pings or lists tools: resolve the
- * automation tab (fills the resolution cache), attach the CDP monitor and
- * prime the resident kernel in the tab, so the FIRST real tool call doesn't
- * pay cold-start costs (tab search chain + kernel injection). Best-effort —
- * any failure just means the first call warms up instead. Scoped to the panel
- * window when one is open, matching {@link runToolStandalone}.
+ * automation tab (fills the resolution cache) and prime the resident kernel in
+ * the tab, so the FIRST real tool call doesn't pay cold-start costs (tab search
+ * chain + kernel injection). Best-effort — any failure just means the first
+ * call warms up instead. Scoped to the pinned/panel window via
+ * {@link resolveBridgeScope}.
+ *
+ * Deliberately does NOT attach the CDP monitor: warmup runs on every adapter
+ * heartbeat ping, and a `chrome.debugger` attachment makes Chrome pin its
+ * native "extension is debugging this browser" infobar onto the controlled
+ * window for the monitor's whole idle lifetime. The monitor still attaches on
+ * demand during real tool calls (action ops, console/network reads), so
+ * warmup only pays for the cheap parts.
  */
 async function warmupAutomation(): Promise<void> {
   try {
-    const scope = await resolveUnattendedScope()
+    const scope = await resolveBridgeScope()
     const tab = await resolveAutomationTab(undefined, scope)
     if (!tab || typeof tab.id !== 'number') return
-    await ensureTabMonitor(tab.id)
     await execOnActiveTab({ action: 'page_signature' }, undefined, undefined, scope).catch(() => {})
   } catch {
     /* best-effort */
@@ -177,7 +182,11 @@ export async function processAgentRequest(
           ? req.args
           : {}
       try {
-        const result = await runToolStandalone(req.tool, args)
+        // resolveBridgeScope pins the run to the window the user selected the
+        // served agent in; every tab resolution and debugger attachment below
+        // stays inside it (see window-policy.ts).
+        const scope = await resolveBridgeScope()
+        const result = await runToolStandalone(req.tool, args, scope)
         return { ok: true, data: result }
       } catch (error) {
         return {
@@ -193,8 +202,12 @@ export async function processAgentRequest(
       }
       // Full autonomy: the caller explicitly asked the agent to "go do this",
       // with no human to approve each step. History id is namespaced so these
-      // turns never collide with side-panel conversations.
-      const result = await runUnattendedPrompt(req.prompt, `external:${newId()}`, 'full')
+      // turns never collide with side-panel conversations. Same window pin as
+      // the single-tool path above.
+      const scope = await resolveBridgeScope()
+      const result = await runUnattendedPrompt(req.prompt, `external:${newId()}`, 'full', {
+        ...(scope ? { scopeWindowId: scope.windowId } : {}),
+      })
       if (result.cancelled) return { ok: false, error: 'Cancelled.' }
       if (!result.ok) return { ok: false, error: result.error ?? result.answer }
       return { ok: true, data: { answer: result.answer } }

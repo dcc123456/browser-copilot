@@ -22,8 +22,18 @@
  * @module background/cdp-monitor
  */
 
-/** How long an untouched monitor stays attached before self-detaching. */
-const MONITOR_IDLE_MS = 60_000
+/**
+ * How long an untouched monitor stays attached before self-detaching.
+ *
+ * While the monitor holds a `chrome.debugger` attachment, Chrome pins its
+ * native "extension is debugging this browser" infobar onto the controlled
+ * window. 20 s keeps that post-work linger short (the observation window
+ * after an action — console/network errors still get captured) without the
+ * strip hanging around for a full minute after the agent goes quiet. Idle
+ * connections no longer attach at all (warmup does not), so this only bounds
+ * the tail of real work.
+ */
+const MONITOR_IDLE_MS = 20_000
 
 const MAX_CONSOLE_ENTRIES = 200
 const MAX_REQUEST_ENTRIES = 50
