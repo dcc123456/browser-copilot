@@ -459,6 +459,14 @@ pnpm run package     # 构建两个变体 → releases/browser-copilot-<版本>-
 
 ---
 
+## 服务器运行器
+
+想把这个项目的工作流放到远程服务器上无人值守运行（HTTP API / cron 定时 / Webhook / 飞书触发，
+支持嵌套子工作流复制校验、持久化 profile、CDP 远端浏览器与 Docker 部署），见
+**[docs/server.md](./docs/server.md)**。扩展本身不受影响。
+
+---
+
 ## 常见问题
 
 | 现象 | 处理 |
