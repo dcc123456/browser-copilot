@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { Cron } from 'croner'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { coerceIntervalMinutes } from '../../src/lib/schedule'
-import { effectiveKind, enabled, parseTime, triggerNode } from '../src/scheduler'
+import { Scheduler, effectiveKind, enabled, parseTime, triggerNode } from '../src/scheduler'
+import { loadConfig } from '../src/config'
+import { WorkflowLibrary } from '../src/workflow-library'
+import type { RunService } from '../src/run-service'
 import type { Workflow } from '../../src/lib/workflow/types'
 
 function wf(trigger: Record<string, unknown>, top?: Record<string, unknown>): Workflow {
@@ -55,5 +61,62 @@ describe('scheduler trigger parsing', () => {
     expect(coerceIntervalMinutes(9999)).toBe(1440)
     expect(coerceIntervalMinutes(undefined)).toBe(60)
     expect(coerceIntervalMinutes('abc')).toBe(60)
+  })
+})
+
+describe('schedule overview', () => {
+  function triggerWf(id: string, triggerData: Record<string, unknown>, top?: Record<string, unknown>): Workflow {
+    return {
+      id,
+      name: `W-${id}`,
+      ...(top ? { trigger: top } : {}),
+      drawflow: {
+        nodes: [{ id: 't', label: 'trigger', position: { x: 0, y: 0 }, data: { blockId: 'trigger', ...triggerData } }],
+        edges: [],
+      },
+    } as unknown as Workflow
+  }
+
+  it('lists time-triggered workflows with armed state and next run; disabled stay listed', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bc-sched-'))
+    try {
+      const config = {
+        ...loadConfig(),
+        dataDir: dir,
+        workflowsFile: join(dir, 'wf.json'),
+        workflowsExtraDir: '',
+        token: '',
+      }
+      const library = new WorkflowLibrary(config.workflowsFile)
+      library.load()
+      library.importPayload([
+        triggerWf('on', { type: 'interval', interval: 30 }),
+        triggerWf('off', { type: 'interval', interval: 15 }, { type: 'interval', enabled: false }),
+        triggerWf('manual', {}),
+      ])
+
+      const runs = { start: () => 'r1' } as unknown as RunService
+      const scheduler = new Scheduler(config, library, runs)
+      scheduler.refresh()
+
+      const entries = scheduler.scheduleOverview()
+      expect(entries.map((entry) => entry.workflowId).sort()).toEqual(['off', 'on'])
+
+      const on = entries.find((entry) => entry.workflowId === 'on')!
+      expect(on.kind).toBe('interval')
+      expect(on.detail).toBe('每 30 分钟')
+      expect(on.enabled).toBe(true)
+      expect(on.armed).toBe(true)
+      expect(on.nextRunAt).toBeTruthy()
+
+      const off = entries.find((entry) => entry.workflowId === 'off')!
+      expect(off.enabled).toBe(false)
+      expect(off.armed).toBe(false)
+      expect(off.nextRunAt).toBeUndefined()
+
+      scheduler.stop()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

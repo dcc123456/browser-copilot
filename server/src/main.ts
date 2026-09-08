@@ -12,6 +12,7 @@ import { RunService } from './run-service'
 import { buildHttpApi } from './http-api'
 import { Scheduler } from './scheduler'
 import { startFeishuBot, type FeishuBot } from './feishu-bot'
+import { mountConsole } from './web-console'
 
 async function main(): Promise<void> {
   const config = loadConfig()
@@ -40,16 +41,32 @@ async function main(): Promise<void> {
   scheduler.refresh()
 
   let bot: FeishuBot | null = null
-  if (config.feishu.botEnabled) {
-    bot = startFeishuBot(config, library, runs)
+  // (Re)starts the Feishu long connection from the CURRENT config — called at
+  // boot and after every Web-console config change.
+  const ensureBot = (): void => {
+    bot?.stop()
+    bot = config.feishu.botEnabled ? startFeishuBot(config, library, runs) : null
   }
+  ensureBot()
 
   const app = buildHttpApi({
     config,
     library,
     runs,
     onLibraryChanged: () => scheduler.refresh(),
+    onConfigChanged: () => ensureBot(),
+    feishuConnected: () => bot?.connected() ?? false,
+    schedulesOverview: () => scheduler.scheduleOverview(),
   })
+
+  // Mount the built console SPA; without it, serve a build hint at `/`.
+  const consoleBuilt = await mountConsole(app)
+  console.log(
+    consoleBuilt
+      ? '[runner] Web 控制台已挂载: http://127.0.0.1:<port>/'
+      : '[runner] Web 控制台未构建（pnpm --dir server build 后重启生效）；API 正常',
+  )
+
   await app.listen({ port: config.port, host: '0.0.0.0' })
   console.log(`[runner] API 就绪: http://0.0.0.0:${config.port}（GET /healthz 探活）`)
 

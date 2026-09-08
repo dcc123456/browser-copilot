@@ -228,6 +228,8 @@ async function main(): Promise<void> {
   const runs = new RunService(config, pool, library)
   new Scheduler(config, library, runs) // armed but idle for the smoke
   const app = buildHttpApi({ config, library, runs, onLibraryChanged: () => {} })
+  const { mountConsole } = await import('../src/web-console')
+  await mountConsole(app)
   await app.listen({ port: config.port, host: '127.0.0.1' })
 
   const api = async (method: string, path: string, payload?: unknown) => {
@@ -238,6 +240,21 @@ async function main(): Promise<void> {
     const body = await res.json().catch(() => null)
     return { status: res.status, body }
   }
+
+  // 0. The Web console shell (built or the unbuilt-hint page) is served at /.
+  const consoleRes = await fetch(`http://127.0.0.1:${PORT}/`)
+  const consoleHtml = await consoleRes.text()
+  check(
+    'web console served at /',
+    consoleRes.status === 200 && consoleHtml.includes('<html') && (consoleHtml.includes('控制台') || consoleHtml.includes('尚未构建')),
+  )
+  const configRes = await api('GET', '/api/config')
+  check(
+    'config API masks secrets',
+    configRes.status === 200 && typeof (configRes.body as { config?: { token?: { set?: boolean } } })?.config?.token?.set === 'boolean',
+  )
+  const schedulesRes = await api('GET', '/api/schedules')
+  check('schedules overview reachable', schedulesRes.status === 200 && Array.isArray((schedulesRes.body as { schedules?: unknown[] })?.schedules))
 
   // 1. Reference pre-check on a workflow with a missing child.
   library.importPayload({ ...parentWorkflow, id: 'smoke-broken', drawflow: { ...parentWorkflow.drawflow, nodes: parentWorkflow.drawflow.nodes.map((n) => (n.id === 'sub' ? { ...n, data: { ...n.data, values: { workflowId: 'ghost-child' } } } : n)) } })

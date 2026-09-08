@@ -62,6 +62,22 @@ interface Armed {
   timer: ReturnType<typeof setTimeout>
   kind: 'interval' | 'once' | 'cron'
   cron?: Cron
+  /** Next fire time (epoch ms) for interval/once arms; cron computes on demand. */
+  nextAt?: number
+}
+
+/** One row of the console's schedule overview (armed OR merely configured). */
+export interface ScheduleEntry {
+  workflowId: string
+  name: string
+  kind: TriggerKind
+  /** Human-readable pattern: `每 30 分钟` / `周一,周三 09:30` / `2026-01-01 08:00` / cron text. */
+  detail: string
+  enabled: boolean
+  /** Whether a timer is actually armed right now. */
+  armed: boolean
+  /** Next fire time (ISO string), when computable. */
+  nextRunAt?: string
 }
 
 export class Scheduler {
@@ -122,10 +138,11 @@ export class Scheduler {
       this.fire(workflowId, 'cron')
       const armed = this.armed.get(workflowId)
       if (!armed) return
+      armed.nextAt = Date.now() + minutes * 60_000
       armed.timer = setTimeout(fire, minutes * 60_000)
     }
     const timer = setTimeout(fire, minutes * 60_000)
-    this.armed.set(workflowId, { timer, kind: 'interval' })
+    this.armed.set(workflowId, { timer, kind: 'interval', nextAt: Date.now() + minutes * 60_000 })
   }
 
   private armOnce(workflowId: string, delayMs: number): void {
@@ -133,7 +150,7 @@ export class Scheduler {
       this.armed.delete(workflowId)
       this.fire(workflowId, 'cron')
     }, delayMs)
-    this.armed.set(workflowId, { timer, kind: 'once' })
+    this.armed.set(workflowId, { timer, kind: 'once', nextAt: Date.now() + delayMs })
   }
 
   private armCron(workflowId: string, pattern: string): void {
@@ -153,6 +170,50 @@ export class Scheduler {
     } catch (error) {
       console.warn(`[scheduler] run start failed: ${(error as Error).message}`)
     }
+  }
+
+  /**
+   * The console's schedule table: every workflow with a non-manual trigger,
+   * joined with its armed state and next fire time. Disabled workflows stay
+   * listed (armed=false) so the console can offer the enable toggle.
+   */
+  scheduleOverview(): ScheduleEntry[] {
+    return this.library
+      .list()
+      .map((workflow): ScheduleEntry | undefined => {
+        const kind = effectiveKind(workflow)
+        if (kind === 'manual') return undefined
+        const data = triggerNode(workflow)?.data ?? {}
+        let detail = ''
+        if (kind === 'interval') detail = `每 ${coerceIntervalMinutes(data['interval'])} 分钟`
+        else if (kind === 'specific-day') {
+          const days = Array.isArray(data['days']) ? (data['days'] as unknown[]).map(Number) : []
+          const { hour, minute } = parseTime(data['time'])
+          const names = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+          detail = `${days.map((d) => names[d] ?? d).join('、') || '—'} ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+        } else if (kind === 'date') {
+          const { hour, minute } = parseTime(data['time'])
+          detail = `${String(data['date'] ?? '—')} ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+        } else {
+          detail = wfScheduleText(workflow) ?? '—'
+        }
+        const armed = this.armed.get(workflow.id)
+        const isOn = enabled(workflow)
+        const nextAt =
+          armed && isOn
+            ? (armed.cron?.nextRun()?.getTime() ?? armed.nextAt)
+            : undefined
+        return {
+          workflowId: workflow.id,
+          name: workflow.name,
+          kind,
+          detail,
+          enabled: isOn,
+          armed: Boolean(armed && isOn),
+          ...(nextAt && Number.isFinite(nextAt) ? { nextRunAt: new Date(nextAt).toISOString() } : {}),
+        } satisfies ScheduleEntry
+      })
+      .filter((entry): entry is ScheduleEntry => entry !== undefined)
   }
 
   stop(): void {

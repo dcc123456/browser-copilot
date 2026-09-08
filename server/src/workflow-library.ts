@@ -200,6 +200,21 @@ export class WorkflowLibrary {
   }
 
   /**
+   * Deletes one workflow. Primary-sourced entries are removed and the primary
+   * file is persisted; extra-dir entries are refused (the operator deletes the
+   * source file instead — the library cannot know which of several extra
+   * files owned it without reparsing all of them).
+   */
+  remove(id: string): { ok: true; id: string } | { ok: false; reason: 'not-found' | 'extra-source' } {
+    if (!this.byId.has(id)) return { ok: false, reason: 'not-found' }
+    if (this.sources.get(id) === 'extra') return { ok: false, reason: 'extra-source' }
+    this.byId.delete(id)
+    this.sources.delete(id)
+    this.persistPrimary()
+    return { ok: true, id }
+  }
+
+  /**
    * Imports an extension `workflows.json` payload (or bare list / single
    * object). Every record is validated; valid ones are merged into the
    * library and the primary file is rewritten. The response reports, per

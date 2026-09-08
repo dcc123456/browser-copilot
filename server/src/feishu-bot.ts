@@ -76,6 +76,11 @@ export class FeishuBot {
     this.socket = null
   }
 
+  /** Whether the long-connection socket is currently open. */
+  connected(): boolean {
+    return this.socket?.readyState === WebSocket.OPEN
+  }
+
   private async connect(): Promise<void> {
     if (this.stopped) return
     try {

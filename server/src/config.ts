@@ -183,6 +183,11 @@ export function loadConfig(): RunnerConfig {
   return config
 }
 
+/** The config file path exactly as {@link loadConfig} resolves it. */
+export function configFilePath(): string {
+  return process.env['BC_CONFIG'] ? resolve(process.env['BC_CONFIG']) : join(SERVER_ROOT, 'config.json')
+}
+
 /** The server root directory (used by modules that need sibling paths). */
 export function serverRoot(): string {
   return SERVER_ROOT
