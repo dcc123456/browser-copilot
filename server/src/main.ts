@@ -16,14 +16,10 @@ import { mountConsole } from './web-console'
 
 async function main(): Promise<void> {
   const config = loadConfig()
-  if (!config.token) {
-    console.warn('[runner] ⚠ BC_TOKEN 未设置：HTTP API 无鉴权，仅建议内网使用')
-  }
 
   const library = new WorkflowLibrary(config.workflowsFile, config.workflowsExtraDir)
   library.load()
   const workflows = library.list()
-  console.log(`[runner] 工作流库: ${workflows.length} 条（${config.workflowsFile}）`)
   const cycles = library.allCycles()
   if (cycles.length > 0) {
     console.warn(`[runner] ⚠ 检测到工作流循环引用（运行时会被引擎拦截）: ${cycles.map((c) => c.join('→')).join('; ')}`)
@@ -61,14 +57,30 @@ async function main(): Promise<void> {
 
   // Mount the built console SPA; without it, serve a build hint at `/`.
   const consoleBuilt = await mountConsole(app)
-  console.log(
-    consoleBuilt
-      ? '[runner] Web 控制台已挂载: http://127.0.0.1:<port>/'
-      : '[runner] Web 控制台未构建（pnpm --dir server build 后重启生效）；API 正常',
-  )
 
   await app.listen({ port: config.port, host: '0.0.0.0' })
+
+  // One startup summary, written once the port is actually bound. First-run
+  // gaps (no token / empty library) are surfaced as pointers INTO the console,
+  // since the whole setup can be completed there.
   console.log(`[runner] API 就绪: http://0.0.0.0:${config.port}（GET /healthz 探活）`)
+  if (consoleBuilt) {
+    console.log(`[runner] Web 控制台: http://127.0.0.1:${config.port}/`)
+  } else {
+    console.log(`[runner] Web 控制台未构建（pnpm --dir server build 后重启生效）；API 正常`)
+  }
+  if (!config.token) {
+    console.warn(
+      consoleBuilt
+        ? '[runner] ⚠ API Token 未设置：HTTP API 无鉴权（仅限内网）。打开控制台 → 设置 → 安全，填写 Token 保存即可'
+        : '[runner] ⚠ API Token 未设置：HTTP API 无鉴权（仅限内网）。设置 BC_TOKEN 环境变量或编辑 server/config.json 后重启',
+    )
+  }
+  if (workflows.length === 0) {
+    console.log('[runner] 工作流库为空：在控制台「工作流」页导入 workflows.json，或放入工作流文件后重启')
+  } else {
+    console.log(`[runner] 工作流库: ${workflows.length} 条`)
+  }
 
   const shutdown = async (): Promise<void> => {
     console.log('[runner] shutting down…')
