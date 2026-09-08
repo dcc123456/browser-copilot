@@ -1,5 +1,6 @@
 node_modules/
 dist/
+web/dist/
 config.json
 data/
 workflows.json

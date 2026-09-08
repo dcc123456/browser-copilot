@@ -16,6 +16,9 @@ COPY server/ server/
 COPY src/ src/
 COPY tests/ tests/
 
+# Build the Web console SPA (served by the runner from server/web/dist).
+RUN pnpm --filter browser-copilot-runner build
+
 ENV NODE_ENV=production \
     BC_DATA_DIR=/data \
     BC_WORKFLOWS_FILE=/data/workflows.json

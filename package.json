@@ -14,6 +14,8 @@
     "test": "vitest run",
     "server:start": "pnpm --filter browser-copilot-runner start",
     "server:dev": "pnpm --filter browser-copilot-runner dev",
+    "server:build": "pnpm --filter browser-copilot-runner build",
+    "server:web:dev": "pnpm --filter browser-copilot-runner web:dev",
     "server:typecheck": "pnpm --filter browser-copilot-runner typecheck",
     "server:test": "pnpm --filter browser-copilot-runner test",
     "server:smoke": "pnpm --filter browser-copilot-runner smoke",
