@@ -1,0 +1,41 @@
+# Browser Copilot runner — compose deployment.
+#
+#   docker compose up -d --build          # local-chromium mode (default)
+#   docker compose --profile cdp up -d    # CDP mode against a browserless sidecar
+#
+# Data (workflows.json / runs / artifacts / profiles) persists in ./data.
+services:
+  runner:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    ports:
+      - '8787:8787'
+    environment:
+      BC_TOKEN: ${BC_TOKEN:-}
+      BC_MAX_CONCURRENT: '2'
+      BC_RUN_TIMEOUT_MS: '600000'
+      # LLM (ai-agent / AI takeover blocks):
+      BC_LLM_BASE_URL: ${BC_LLM_BASE_URL:-}
+      BC_LLM_API_KEY: ${BC_LLM_API_KEY:-}
+      BC_LLM_MODEL: ${BC_LLM_MODEL:-}
+      # Feishu bot (optional):
+      BC_FEISHU_BOT_ENABLED: ${BC_FEISHU_BOT_ENABLED:-0}
+      BC_FEISHU_APP_ID: ${BC_FEISHU_APP_ID:-}
+      BC_FEISHU_APP_SECRET: ${BC_FEISHU_APP_SECRET:-}
+      BC_FEISHU_WEBHOOK_URL: ${BC_FEISHU_WEBHOOK_URL:-}
+      BC_FEISHU_WEBHOOK_SECRET: ${BC_FEISHU_WEBHOOK_SECRET:-}
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
+  # Optional: run the browser in a separate scalable container and point the
+  # runner at it with BC_BROWSER_MODE=cdp BC_CDP_ENDPOINT=ws://browser:3000.
+  browser:
+    image: ghcr.io/browserless/chromium:latest
+    profiles: ['cdp']
+    environment:
+      TOKEN: ${BROWSERLESS_TOKEN:-}
+    ports:
+      - '3000:3000'
+    restart: unless-stopped

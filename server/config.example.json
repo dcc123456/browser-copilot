@@ -1,0 +1,27 @@
+{
+  "port": 8787,
+  "token": "",
+  "dataDir": "data",
+  "workflowsFile": "workflows.json",
+  "workflowsExtraDir": "workflows.d",
+  "browser": {
+    "mode": "local",
+    "cdpEndpoint": "",
+    "headless": true,
+    "maxConcurrent": 2
+  },
+  "llm": {
+    "baseUrl": "https://api.deepseek.com/v1",
+    "apiKey": "",
+    "model": "deepseek-chat",
+    "headers": {}
+  },
+  "feishu": {
+    "botEnabled": false,
+    "appId": "",
+    "appSecret": "",
+    "webhookUrl": "",
+    "webhookSecret": ""
+  },
+  "runTimeoutMs": 600000
+}
