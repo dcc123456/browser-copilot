@@ -375,6 +375,8 @@ export function normalizeSettingsPayload(raw: unknown): {
   unattendedWindowId?: number
   imageModel: { providerId: string; model: string }
   ocrLanguage: string
+  takeoverModel: { providerId: string; model: string }
+  takeoverOnRun: boolean
 } {
   const value = (raw ?? {}) as Record<string, unknown>
   const providers = Array.isArray(value.providers)
@@ -417,6 +419,11 @@ export function normalizeSettingsPayload(raw: unknown): {
     providerId: typeof rawImage?.providerId === 'string' ? rawImage.providerId : '',
     model: typeof rawImage?.model === 'string' ? rawImage.model : '',
   }
+  const rawTakeover = value.takeoverModel as { providerId?: unknown; model?: unknown } | undefined
+  const takeoverModel = {
+    providerId: typeof rawTakeover?.providerId === 'string' ? rawTakeover.providerId : '',
+    model: typeof rawTakeover?.model === 'string' ? rawTakeover.model : '',
+  }
   const ocrLanguage = typeof value.ocrLanguage === 'string' ? value.ocrLanguage : 'eng'
   return {
     providers,
@@ -447,5 +454,7 @@ export function normalizeSettingsPayload(raw: unknown): {
     unattendedWindowId,
     imageModel,
     ocrLanguage,
+    takeoverModel,
+    takeoverOnRun: typeof value.takeoverOnRun === 'boolean' ? value.takeoverOnRun : false,
   }
 }

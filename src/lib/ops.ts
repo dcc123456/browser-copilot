@@ -53,6 +53,32 @@ export interface TargetSpec {
   closedShadow?: boolean
 }
 
+/**
+ * Renders a Target's most stable spec as a short CSS locator the model can
+ * copy into a block's `selector` param: `#id`, `[data-testid="…"]`,
+ * `[name="…"]`. Unstable specs (role/text/css path) render nothing — a guess
+ * is worse than no hint. Returns undefined for anything unusable or too long.
+ */
+export function locatorHintOf(target: unknown): string | undefined {
+  if (!target || typeof target !== 'object') return undefined
+  const primary = (target as { primary?: unknown }).primary
+  if (!primary || typeof primary !== 'object') return undefined
+  const spec = primary as { how?: unknown; value?: unknown }
+  if (typeof spec.how !== 'string' || typeof spec.value !== 'string') return undefined
+  const value = spec.value.trim()
+  if (!value || value.length > 60) return undefined
+  switch (spec.how) {
+    case 'id':
+      return `#${value}`
+    case 'testid':
+      return value.includes('=') ? `[${value}]` : `[data-testid="${value}"]`
+    case 'name':
+      return value.includes('=') ? `[${value}]` : `[name="${value}"]`
+    default:
+      return undefined
+  }
+}
+
 /** Every action the kernel understands. */
 export type ActionName =
   | 'click'

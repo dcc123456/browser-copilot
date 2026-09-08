@@ -26,6 +26,7 @@ import type { RunOutcomeKind, RunSource, RunStep } from '../background/running-t
 import type { Workflow } from './workflow/types'
 import type { WorkflowDebugResult } from './workflow/auto-debug-patch'
 import type { PendingTakeoverInfo } from './workflow/takeover-pending'
+import type { TakeoverStatsSummary } from './workflow/takeover-stats'
 import type { WorkflowReview } from './workflow/review-patch'
 import type { AttachmentDescriptor, AttachmentSummary } from './attachments'
 
@@ -155,6 +156,8 @@ export type Command =
   | { type: 'workflows.debug'; id: string; /** See workflows.run.windowId. */ windowId?: number }
   /** Workflows with pending AI-takeover fixes awaiting user confirmation. */
   | { type: 'workflows.takeoverPending' }
+  /** Aggregate AI-takeover success-rate stats (debug埋点). */
+  | { type: 'workflows.takeoverStats' }
   /** Applies the pending AI-takeover fixes to this workflow (user confirmed). */
   | { type: 'workflows.takeoverApply'; id: string }
   /** Discards the pending AI-takeover fixes for this workflow. */
@@ -260,6 +263,7 @@ export type CommandResult =
     }
   | { type: 'workflows.debug'; result: WorkflowDebugResult }
   | { type: 'workflows.takeoverPending'; items: PendingTakeoverInfo[] }
+  | { type: 'workflows.takeoverStats'; summary: TakeoverStatsSummary }
   | { type: 'workflows.takeoverApply'; workflow: Workflow; appliedCount: number }
   | { type: 'workflows.takeoverDiscard' }
   | { type: 'workflows.running'; runs: RunningTaskView[]; finished: FinishedTaskView[] }

@@ -37,10 +37,34 @@ export interface WorkflowDebugResult {
   error?: string
   /** Run id of the attempt, so the panel can deep-link into History. */
   lastRunId?: string
+  /**
+   * True when the FINAL workflow version completed a takeover-free run: the
+   * fixes (if any) were verified to work WITHOUT AI help. A session that only
+   * succeeded via AI reports verified=false with the fixes left pending.
+   */
+  verified?: boolean
+  /** How many apply-fix + verify rounds the session ran (1-based). */
+  rounds?: number
   /** Takeover episodes of the session, in the order they happened. */
   takeovers: TakeoverReport[]
   /** Node fixes awaiting user confirmation (persisted until applied/discarded). */
   pendingChanges: TakeoverFix[]
+  /**
+   * The replay+audit path's outcome: a WHOLE-GRAPH rewrite that passed the
+   * takeover-free verify run and waits for the user's confirmation
+   * (takeoverApply replaces the graph). Present only when `ok`.
+   */
+  rewrite?: { diagnosis: string; changes: string[] }
+  /** Per-node audit verdicts (shown in the panel even when the rewrite failed). */
+  audit?: { nodeId: string; nodeLabel: string; verdict: string; note: string }[]
+  /**
+   * Result of the goal-completion judge (目标达成判定): undefined when the
+   * judge was unavailable (no provider) and the no-error standard applied.
+   * A run WITHOUT errors but WITHOUT goal achievement is a failed debug.
+   */
+  goalAchieved?: boolean
+  /** The judge's one-line Chinese reasoning (basis of achievement / the gap). */
+  goalNote?: string
 }
 
 /** Raised by the AI layer when no model provider / API key is configured. */

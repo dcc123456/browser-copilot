@@ -135,6 +135,29 @@ describe('AI takeover pending fixes', () => {
     expect(await getPendingTakeover('wf-1')).toBeUndefined()
   })
 
+  it('stores a whole-graph rewrite even with no fixes, and surfaces it', async () => {
+    const rewriteWorkflow = makeWorkflow({ id: 'wf-1', name: 'rebuilt' })
+    await saveWorkflow(makeWorkflow({ id: 'wf-1' }))
+    await savePendingTakeover({
+      workflowId: 'wf-1',
+      runId: 'run-9',
+      fixes: [],
+      rewrite: { workflow: rewriteWorkflow, changes: ['换按钮', '加等待'], diagnosis: '选择器过期' },
+      createdAt: 7,
+    })
+    const pending = await getPendingTakeover('wf-1')
+    expect(pending?.rewrite?.workflow.name).toBe('rebuilt')
+    expect(pending?.rewrite?.changes).toEqual(['换按钮', '加等待'])
+    const infos = await listPendingTakeovers()
+    expect(infos[0]?.rewrite).toMatchObject({ diagnosis: '选择器过期' })
+    expect(infos[0]?.fixes).toHaveLength(0)
+    // A rewrite with a garbage payload degrades to "no pending".
+    mocks.store.set('aiTakeoverPending', {
+      'wf-1': { workflowId: 'wf-1', fixes: [], rewrite: { workflow: 'nope' }, createdAt: 1 },
+    })
+    expect(await getPendingTakeover('wf-1')).toBeUndefined()
+  })
+
   it('is tolerant of corrupted stored payloads', async () => {
     mocks.store.set('aiTakeoverPending', { 'wf-1': { workflowId: 'wf-1', fixes: [{ bad: true }] } })
     expect(await getPendingTakeover('wf-1')).toBeUndefined()

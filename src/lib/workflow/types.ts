@@ -108,6 +108,13 @@ export interface Workflow {
   id: string
   name: string
   description?: string
+  /**
+   * 目标与执行步骤说明（生成时写下的"这个工作流做什么、按什么顺序做"）。
+   * AI 调试的复演/审计用它理解每一步的意图——没有它，调试智能体只能从
+   * 参数里猜。由对话生成路径自动写入；编辑器可留空（调试时回退到节点
+   * description 拼装）。
+   */
+  plan?: string
   /** Owning folder id, when workflows are grouped. */
   folderId?: string
   createdAt: number

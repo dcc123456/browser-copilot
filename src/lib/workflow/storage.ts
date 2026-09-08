@@ -104,6 +104,7 @@ export function asWorkflow(value: unknown): Workflow | null {
     id: v.id,
     name: v.name || 'Workflow',
     ...(typeof v.description === 'string' ? { description: v.description } : {}),
+    ...(typeof v.plan === 'string' ? { plan: v.plan } : {}),
     ...(typeof v.folderId === 'string' ? { folderId: v.folderId } : {}),
     createdAt: typeof v.createdAt === 'number' ? v.createdAt : Date.now(),
     updatedAt: typeof v.updatedAt === 'number' ? v.updatedAt : Date.now(),

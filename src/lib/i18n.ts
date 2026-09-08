@@ -212,6 +212,28 @@ export interface Messages {
   workflowsDebugging: string
   /** Banner when the debug run passed on the first attempt (no AI takeover needed). */
   workflowsDebugOkNoChanges: string
+  /** Banner when the fixed workflow passed a takeover-free verify run. */
+  workflowsDebugVerified: (params: { count: number }) => string
+  /** Banner when the audit rebuilt the whole graph and the rebuild verified. */
+  workflowsDebugRewriteVerified: (params: { count: number }) => string
+  /** Confirm dialog before replacing the workflow with the AI-rebuilt graph. */
+  workflowsDebugRewriteConfirmTitle: string
+  workflowsDebugRewriteConfirmMessage: (params: { diagnosis: string }) => string
+  workflowsDebugRewriteApply: string
+  /** Banner after the rebuilt workflow was applied. */
+  workflowsDebugRewriteApplied: string
+  /** Banner when the run passed via AI but the fixes did NOT verify. */
+  workflowsDebugNotVerified: string
+  /** Lifetime takeover success-rate line in the debug modal footer. */
+  workflowsDebugStats: (params: { rate: number; total: number }) => string
+  /** Classified takeover failure reasons (stats line). */
+  workflowsDebugReasonAuth: string
+  workflowsDebugReasonCaptcha: string
+  workflowsDebugReasonNotfound: string
+  workflowsDebugReasonTimeout: string
+  workflowsDebugReasonNetwork: string
+  workflowsDebugReasonOther: string
+  workflowsDebugReasonUnclassified: string
   /** Banner when the AI debug session ended without a passing run. */
   workflowsDebugFailed: string
   /** Banner when AI takeover completed {count} failed node(s) and the run passed. */
@@ -407,6 +429,14 @@ export interface Messages {
   settingsEndpointPresets: string
   settingsBaseUrlHint: string
   settingsImageModel: string
+  /** AI-takeover debug model card. */
+  settingsTakeoverModel: string
+  settingsTakeoverModelIntro: string
+  settingsTakeoverOnRun: string
+  settingsTakeoverOnRunIntro: string
+  settingsTakeoverModelProvider: string
+  settingsTakeoverModelSelectHint: string
+  settingsTakeoverModelSaved: string
   settingsImageModelIntro: string
   settingsImageModelProvider: string
   settingsImageModelAuto: string
@@ -910,6 +940,24 @@ const en: Messages = {
   workflowsDebug: 'AI Debug',
   workflowsDebugging: 'AI Debugging…',
   workflowsDebugOkNoChanges: 'Run succeeded — nothing to debug',
+  workflowsDebugRewriteVerified: ({ count }) =>
+    `AI rebuilt the workflow and the new version verified (${count} change(s) awaiting confirmation)`,
+  workflowsDebugRewriteConfirmTitle: 'Apply the AI-rebuilt workflow?',
+  workflowsDebugRewriteConfirmMessage: ({ diagnosis }) =>
+    `AI replayed the task like a chat run, audited the graph (wrong / missing / redundant / fallback nodes) and produced a corrected version that ran clean on its own. Applying REPLACES the current graph. Diagnosis: ${diagnosis}`,
+  workflowsDebugRewriteApply: 'Apply rebuilt workflow',
+  workflowsDebugRewriteApplied: 'The AI-rebuilt workflow has been applied',
+  workflowsDebugVerified: ({ count }) =>
+    `Verified: the fixed workflow ran clean without AI (${count} fix(es) awaiting confirmation)`,
+  workflowsDebugNotVerified: 'Run succeeded via AI, but the fixes did NOT pass verification — review them carefully',
+  workflowsDebugStats: ({ rate, total }) => `Takeover success rate: ${rate}% of ${total}`,
+  workflowsDebugReasonAuth: 'login wall',
+  workflowsDebugReasonCaptcha: 'captcha',
+  workflowsDebugReasonNotfound: 'element not found',
+  workflowsDebugReasonTimeout: 'timeout',
+  workflowsDebugReasonNetwork: 'network',
+  workflowsDebugReasonOther: 'other',
+  workflowsDebugReasonUnclassified: 'unclassified',
   workflowsDebugFailed: 'AI debug could not fix this workflow',
   workflowsDebugTakeoverDone: ({ count }) =>
     `Run succeeded — AI takeover completed ${count} failed node(s)`,
@@ -1078,6 +1126,16 @@ const en: Messages = {
   settingsImageModelProviderMissing:
     'The selected provider is no longer in the list. Pick another provider or “Auto”.',
   settingsImageModelSaved: 'Image recognition model saved.',
+  settingsTakeoverModel: 'AI-takeover model (AI 调试)',
+  settingsTakeoverModelIntro:
+    'Dedicated model for AI debug takeovers — the agent that completes failed workflow steps on the live page. This is a hard multi-round task, so a stronger model here raises the debug success rate. Leave on Auto to use the active chat model.',
+  settingsTakeoverOnRun: 'Also allow AI takeover when a plain run fails (uses model calls)',
+  settingsTakeoverOnRunIntro:
+    'Off by default: plain runs fail fast. When on, a failed node gets one AI takeover episode and any proposed fix lands as pending for your confirmation.',
+  settingsTakeoverModelProvider: 'Provider',
+  settingsTakeoverModelSelectHint:
+    'Pick a model from the dropdown, or keep the provider default. Fetch the list first if it is empty.',
+  settingsTakeoverModelSaved: 'AI-takeover model saved.',
   settingsOcrLanguage: 'Local OCR language',
   settingsOcrLanguageIntro:
     'Languages Tesseract.js tries when reading text offline. This runs first, before the image model; if it returns nothing, the image model below is used.',
@@ -1257,7 +1315,7 @@ const en: Messages = {
   settingsLocalAgentStatusDisconnected: 'Not connected',
   settingsLocalAgentStatusError: ({ error }) => `Error: ${error}`,
   settingsLocalAgentErrorRefused:
-    'Adapter not running: start Claude Code / Codex / Trae and it reconnects automatically.',
+    'Adapter not running: the MCP adapter lives only while your coding-agent session runs. The plugin reconnects automatically (within ~30 s); run `node mcp-server.mjs --standalone` to keep it connected all the time.',
   settingsLocalAgentActiveAgent: 'Serve connection',
   settingsLocalAgentActiveAgentAll: 'All connections (default)',
   settingsLocalAgentActiveAgentHint:
@@ -1266,7 +1324,7 @@ const en: Messages = {
     `${count} connection${count === 1 ? '' : 's'} connected`,
   settingsLocalAgentMcpTitle: 'MCP config',
   settingsLocalAgentMcpHint:
-    'Add ONE stdio MCP server; it auto-spawns the adapter and the plugin connects automatically.',
+    'Add ONE stdio MCP server; it auto-spawns the adapter and the plugin connects automatically. The adapter only lives while the agent session runs — use `node mcp-server.mjs --standalone` for an always-on connection.',
   settingsLocalAgentMcpTabClaude: 'Claude Code',
   settingsLocalAgentMcpTabCodex: 'Codex',
   settingsLocalAgentMcpTabTrae: 'Trae',
@@ -1564,6 +1622,24 @@ const zhCN: Messages = {
   workflowsDebug: 'AI 调试',
   workflowsDebugging: 'AI 调试中…',
   workflowsDebugOkNoChanges: '运行成功，无需调试',
+  workflowsDebugRewriteVerified: ({ count }) =>
+    `AI 已重建工作流并通过验证（${count} 项变更待确认）`,
+  workflowsDebugRewriteConfirmTitle: '应用 AI 重建的工作流？',
+  workflowsDebugRewriteConfirmMessage: ({ diagnosis }) =>
+    `AI 已像聊天一样复演了整个任务，并审计了工作流图（哪些节点不对/缺失/多余/需兜底），生成了可独立运行的新版本。应用后将替换当前流程图。诊断：${diagnosis}`,
+  workflowsDebugRewriteApply: '应用重建的工作流',
+  workflowsDebugRewriteApplied: '已应用 AI 重建的工作流',
+  workflowsDebugVerified: ({ count }) =>
+    `已验证：修复后的流程无需 AI 也能跑通（${count} 处修改待确认）`,
+  workflowsDebugNotVerified: '本次运行靠 AI 救回，但修复未通过验证——请仔细确认后再应用',
+  workflowsDebugStats: ({ rate, total }) => `接管成功率：${total} 次中 ${rate}%`,
+  workflowsDebugReasonAuth: '需要登录',
+  workflowsDebugReasonCaptcha: '验证码',
+  workflowsDebugReasonNotfound: '元素未找到',
+  workflowsDebugReasonTimeout: '超时',
+  workflowsDebugReasonNetwork: '网络',
+  workflowsDebugReasonOther: '其他',
+  workflowsDebugReasonUnclassified: '未分类',
   workflowsDebugFailed: 'AI 调试未能修复该工作流',
   workflowsDebugTakeoverDone: ({ count }) => `运行成功：AI 接管完成了 ${count} 个失败节点`,
   workflowsDebugLogTitle: 'AI 调试日志',
@@ -1720,6 +1796,16 @@ const zhCN: Messages = {
     '请先选择提供商——将复用其已保存的接口地址和 API 密钥，无需重新填写。',
   settingsImageModelProviderMissing: '所选提供商已不在列表中，请重新选择或使用“自动”。',
   settingsImageModelSaved: '图片识别模型已保存。',
+  settingsTakeoverModel: 'AI 接管模型（AI 调试）',
+  settingsTakeoverModelIntro:
+    '为 AI 调试接管单独指定模型——负责在页面上完成失败步骤的智能体是“看页面 + 多轮工具调用”的硬任务，用更强的模型能显著提升调试成功率。留空（自动）则使用当前会话模型。',
+  settingsTakeoverOnRun: '普通运行失败时也允许 AI 接管（会消耗模型调用）',
+  settingsTakeoverOnRunIntro:
+    '默认关闭：普通运行失败即失败。开启后失败节点会获得一次 AI 接管机会，产生的修改建议进入待确认列表。',
+  settingsTakeoverModelProvider: '模型服务',
+  settingsTakeoverModelSelectHint:
+    '从下拉中选择模型，或保持服务默认。列表为空时请先获取模型列表。',
+  settingsTakeoverModelSaved: 'AI 接管模型已保存。',
   settingsOcrLanguage: '本地 OCR 语言',
   settingsOcrLanguageIntro:
     'Tesseract.js 离线识别图片文字时的语言。会先于图像模型执行；若 OCR 无结果，再回退到下方配置的图像模型。',
@@ -1882,14 +1968,15 @@ const zhCN: Messages = {
   settingsLocalAgentStatusDisconnected: '未连接',
   settingsLocalAgentStatusError: ({ error }) => `错误：${error}`,
   settingsLocalAgentErrorRefused:
-    '本地适配器未运行：启动 Claude Code / Codex / Trae 后会自动重连。',
+    '本地适配器未运行：适配器只在编码 Agent 会话期间存活，会话结束即退出（插件因此显示“未连接”）。适配器启动后约 30 秒内会自动重连；想让插件保持常连，可单独运行 node mcp-server.mjs --standalone。',
   settingsLocalAgentActiveAgent: '服务连接',
   settingsLocalAgentActiveAgentAll: '全部连接（默认）',
   settingsLocalAgentActiveAgentHint:
     '只执行所选连接发来的请求（其余连接会被拒绝，直到切回“全部连接”），且该 agent 只能在你做出此选择时所在的窗口内操作页面。',
   settingsLocalAgentAgentsConnected: ({ count }) => `已接入 ${count} 个连接`,
   settingsLocalAgentMcpTitle: 'MCP 配置',
-  settingsLocalAgentMcpHint: '添加一个 stdio MCP 服务，助手会自动拉起适配器并自动连上。',
+  settingsLocalAgentMcpHint:
+    '添加一个 stdio MCP 服务，助手会自动拉起适配器并自动连上。注意：适配器只在编码 Agent 会话期间存活；想让插件保持常连，可单独运行 node mcp-server.mjs --standalone。',
   settingsLocalAgentMcpTabClaude: 'Claude Code',
   settingsLocalAgentMcpTabCodex: 'Codex',
   settingsLocalAgentMcpTabTrae: 'Trae',

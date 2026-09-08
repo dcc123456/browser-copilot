@@ -59,6 +59,10 @@ export interface ExecuteWorkflowResult {
   outcome: 'ok' | 'cancelled' | 'failed'
   summary?: string
   error?: string
+  /** Final variable store (goal-check evidence for the debug session). */
+  variables?: Record<string, unknown>
+  /** Run step tail (goal-check evidence for the debug session). */
+  steps?: { kind: string; nodeId?: string; text: string }[]
 }
 
 /**
@@ -120,7 +124,14 @@ export async function executeWorkflow(
     // so legacy failures still show something in the history error block.
     const error = outcome === 'failed' ? (result.error ?? summary) : undefined
     finishRun(runId, { outcome, summary, error })
-    return { runId, outcome, summary, error }
+    return {
+      runId,
+      outcome,
+      summary,
+      error,
+      ...(result.variables ? { variables: result.variables } : {}),
+      ...(result.steps ? { steps: result.steps } : {}),
+    }
   } catch (e) {
     // A cancellation or engine error that leaked out of runWorkflow.
     const aborted = run.controller.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')

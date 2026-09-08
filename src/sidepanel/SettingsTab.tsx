@@ -236,6 +236,17 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   const [imgModels, setImgModels] = useState<string[] | null>(null)
   const [imgBusy, setImgBusy] = useState<null | 'models' | 'save'>(null)
   const [imgBanner, setImgBanner] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
+  // AI-takeover debug model (see the takeover card below): same save-then-sync
+  // pattern as the image model — nothing persists until 保存 is clicked.
+  const [takeoverDraft, setTakeoverDraft] = useState<{ providerId: string; model: string }>({
+    providerId: '',
+    model: '',
+  })
+  const [takeoverModels, setTakeoverModels] = useState<string[] | null>(null)
+  const [takeoverBusy, setTakeoverBusy] = useState<null | 'models' | 'save'>(null)
+  const [takeoverBanner, setTakeoverBanner] = useState<{ kind: 'ok' | 'error'; text: string } | null>(
+    null,
+  )
 
   // --- Unattended window policy -----------------------------------------------
   // Ordinary windows for the "fixed" selector; refreshed on mount (and cheap
@@ -463,6 +474,11 @@ export default function SettingsTab({ onLocaleChange }: Props) {
       if (prev.providerId === stored.providerId && prev.model === stored.model) return prev
       return { providerId: stored.providerId, model: stored.model }
     })
+    setTakeoverDraft((prev) => {
+      const stored = normalized.takeoverModel
+      if (prev.providerId === stored.providerId && prev.model === stored.model) return prev
+      return { providerId: stored.providerId, model: stored.model }
+    })
   }
 
   const saveDraft = async (): Promise<void> => {
@@ -580,6 +596,63 @@ export default function SettingsTab({ onLocaleChange }: Props) {
       setImgBanner({ kind: 'ok', text: t.settingsImageModelSaved })
     } finally {
       setImgBusy(null)
+    }
+  }
+
+  // --- AI-takeover debug model (mirrors the image-model flow) ----------------
+  const fetchTakeoverModels = async (): Promise<void> => {
+    const providers = settings?.providers ?? []
+    setTakeoverBanner(null)
+    // Resolve the provider being edited from the saved list (credentials live
+    // there, so we never add an API-key field to this card).
+    const target = providers.find((p) => p.id === takeoverDraft.providerId)
+    if (!target || !target.baseUrl || !target.apiKey) {
+      setTakeoverBanner({
+        kind: 'error',
+        text: settings ? t.settingsImageModelFetchNoProvider : t.loading,
+      })
+      return
+    }
+    setTakeoverBusy('models')
+    try {
+      const result = await sendCommand({ type: 'provider.models', profile: target })
+      if (result.type === 'provider.models') {
+        setTakeoverModels(result.models)
+        if (result.models.length === 0) {
+          setTakeoverBanner({ kind: 'error', text: t.settingsModelsEmpty })
+        }
+      }
+    } catch (error) {
+      setTakeoverBanner({
+        kind: 'error',
+        text: t.settingsModelsFailed({ message: (error as Error).message }),
+      })
+    } finally {
+      setTakeoverBusy(null)
+    }
+  }
+
+  const saveTakeoverModel = async (): Promise<void> => {
+    if (!settings) return
+    setTakeoverBanner(null)
+    if (takeoverDraft.providerId && !settings.providers.some((p) => p.id === takeoverDraft.providerId)) {
+      setTakeoverBanner({
+        kind: 'error',
+        text: t.settingsImageModelProviderMissing,
+      })
+      return
+    }
+    const model = takeoverDraft.model.trim()
+    setTakeoverBusy('save')
+    try {
+      await mutate({
+        type: 'settings.set',
+        patch: { takeoverModel: { providerId: takeoverDraft.providerId, model } },
+      })
+      setTakeoverModels(null)
+      setTakeoverBanner({ kind: 'ok', text: t.settingsTakeoverModelSaved })
+    } finally {
+      setTakeoverBusy(null)
     }
   }
 
@@ -997,6 +1070,95 @@ export default function SettingsTab({ onLocaleChange }: Props) {
             type="button"
           >
             {imgBusy === 'models' ? t.settingsFetchingModels : t.settingsFetchModels}
+          </button>
+        </div>
+      </div>
+
+      {/* --- AI-takeover debug model --- */}
+      <div className="card">
+        <div className="card-title">{t.settingsTakeoverModel}</div>
+        <p className="hint">{t.settingsTakeoverModelIntro}</p>
+
+        {takeoverBanner && (
+          <p className={takeoverBanner.kind === 'ok' ? 'hint ok' : 'hint error'}>
+            {takeoverBanner.text}
+          </p>
+        )}
+
+        <label className="checkbox">
+          <input
+            checked={settings.takeoverOnRun}
+            onChange={(event) =>
+              void mutate({
+                type: 'settings.set',
+                patch: { takeoverOnRun: event.target.checked },
+              })
+            }
+            type="checkbox"
+          />
+          {t.settingsTakeoverOnRun}
+        </label>
+        <p className="hint">{t.settingsTakeoverOnRunIntro}</p>
+
+        <div className="field">
+          <label htmlFor="takeover-provider">{t.settingsTakeoverModelProvider}</label>
+          <select
+            id="takeover-provider"
+            onChange={(event) => {
+              setTakeoverDraft({ ...takeoverDraft, providerId: event.target.value })
+              setTakeoverModels(null)
+            }}
+            value={takeoverDraft.providerId}
+          >
+            <option value="">{t.settingsImageModelAuto}</option>
+            {settings.providers.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.label}
+                {profile.model ? ` · ${profile.model}` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="field">
+          <label htmlFor="takeover-model">{t.settingsModel}</label>
+          <select
+            id="takeover-model"
+            onChange={(event) => setTakeoverDraft({ ...takeoverDraft, model: event.target.value })}
+            value={takeoverDraft.model}
+          >
+            <option value="">{t.settingsProviderDefault}</option>
+            {takeoverDraft.model && !(takeoverModels ?? []).includes(takeoverDraft.model) && (
+              <option value={takeoverDraft.model}>{takeoverDraft.model}</option>
+            )}
+            {(takeoverModels ?? []).map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+          <p className="hint" style={{ marginBottom: 0 }}>
+            {takeoverModels
+              ? t.settingsModelsAvailable({ count: takeoverModels.length })
+              : t.settingsTakeoverModelSelectHint}
+          </p>
+        </div>
+
+        <div className="actions">
+          <button
+            className="primary"
+            disabled={takeoverBusy === 'save'}
+            onClick={() => void saveTakeoverModel()}
+            type="button"
+          >
+            {takeoverBusy === 'save' ? t.settingsSaving : t.save}
+          </button>
+          <button
+            disabled={takeoverBusy === 'models' || !takeoverDraft.providerId}
+            onClick={() => void fetchTakeoverModels()}
+            type="button"
+          >
+            {takeoverBusy === 'models' ? t.settingsFetchingModels : t.settingsFetchModels}
           </button>
         </div>
       </div>

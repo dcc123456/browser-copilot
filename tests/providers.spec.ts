@@ -164,6 +164,8 @@ describe('normalizeStoredSettings', () => {
         unattendedWindowPolicy: 'latest',
         imageModel: { providerId: '', model: '' },
         ocrLanguage: 'eng',
+        takeoverModel: { providerId: '', model: '' },
+        takeoverOnRun: false,
       })
     }
   })
@@ -185,6 +187,8 @@ describe('normalizeStoredSettings', () => {
       unattendedWindowPolicy: 'latest',
       imageModel: { providerId: '', model: '' },
       ocrLanguage: 'chi_sim+eng',
+      takeoverModel: { providerId: '', model: '' },
+      takeoverOnRun: false,
     }
     expect(normalizeStoredSettings(settings)).toEqual(settings)
   })
@@ -219,6 +223,8 @@ describe('normalizeStoredSettings', () => {
       unattendedWindowPolicy: 'latest',
       imageModel: { providerId: '', model: '' },
       ocrLanguage: 'eng',
+      takeoverModel: { providerId: '', model: '' },
+      takeoverOnRun: false,
     })
   })
 

@@ -23,6 +23,17 @@ export const OPERATOR_GUIDE = `# 工作流算子指南（Browser Copilot）
 参数里引用变量用 \`{{变量名}}\`；元素定位用扁平字段 \`selector\` + \`findBy: 'cssSelector'\`。
 每个节点的 data.description 写一句中文，说明这一步做什么（显示在画布卡片上）。
 
+## 可靠性要求（生成时就要做到，重放才稳）
+
+- 元素定位优先用稳定选择器：#id、[data-testid="…"]、[name="…"]；避免脆弱的
+  结构性 nth-child 长链与自动生成的 class。
+- 导航后（new-tab、导致跳转的 event-click/press-key）出现的交互节点，写上
+  waitForSelector:true（默认轮询 5 秒；慢页面再加 waitSelectorTimeout），
+  等元素真正出现再操作——比固定延时更稳。
+- 选择器拿不准时，把整条业务动作拆细，每步都用最能代表意图的定位方式。
+- 可有可无的步骤用 element-exists 分支跳过；写 always-fail 的节点靠 AI 调试兜底
+  是下策。
+
 ## 对话动作 → 算子映射（从会话生成工作流时的固定映射）
 
 | 对话动作 | 算子 blockId | 关键参数 |

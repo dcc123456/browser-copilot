@@ -127,6 +127,17 @@ export interface Settings {
   unattendedWindowPolicy: UnattendedWindowPolicy
   /** `unattendedWindowPolicy = 'fixed'` 时锁定的窗口 id；其余策略忽略。 */
   unattendedWindowId?: number
+  /**
+   * AI 调试接管（失败节点交给 AI 代理完成）专用的模型配置。
+   * 接管是“看页面 + 多轮工具调用”的硬任务，可以单独指定更强的模型而不影响
+   * 日常聊天成本。providerId/model 任一为空时回退到当前激活的会话模型。
+   */
+  takeoverModel: VisionConfig
+  /**
+   * 普通运行（面板“运行”按钮）失败时也允许 AI 接管。消耗模型调用，
+   * 默认关闭；调试（workflows.debug）始终启用接管，与此开关无关。
+   */
+  takeoverOnRun: boolean
 }
 
 /** 无人值守运行的窗口选择策略（见 {@link Settings.unattendedWindowPolicy}）。 */

@@ -77,6 +77,8 @@ export const DEFAULT_SETTINGS: Settings = {
   localAgentUrl: DEFAULT_LOCAL_AGENT_URL,
   localAgentActiveAgent: '',
   unattendedWindowPolicy: 'latest',
+  takeoverModel: { providerId: '', model: '' },
+  takeoverOnRun: false,
 }
 
 /**
@@ -145,6 +147,15 @@ export function normalizeStoredSettings(raw: unknown): Settings {
         }
       : { ...DEFAULT_SETTINGS.imageModel }
 
+  const rawTakeover = value.takeoverModel
+  const takeoverModel =
+    rawTakeover && typeof rawTakeover === 'object'
+      ? {
+          providerId: typeof rawTakeover.providerId === 'string' ? rawTakeover.providerId : '',
+          model: typeof rawTakeover.model === 'string' ? rawTakeover.model : '',
+        }
+      : { ...DEFAULT_SETTINGS.takeoverModel }
+
   return {
     providers,
     activeProviderId: active,
@@ -179,6 +190,8 @@ export function normalizeStoredSettings(raw: unknown): Settings {
         : 'latest',
     unattendedWindowId:
       typeof value.unattendedWindowId === 'number' ? value.unattendedWindowId : undefined,
+    takeoverModel,
+    takeoverOnRun: typeof value.takeoverOnRun === 'boolean' ? value.takeoverOnRun : false,
   }
 }
 
@@ -1643,9 +1656,28 @@ export function workflowFromHistory(entries: HistoryEntry[], name: string): Work
     }
   })
 
+  // 目标与执行步骤说明：AI 调试的复演/审计靠它理解每步意图（见
+  // `Workflow.plan`）。目标取会话标题，步骤取各节点的 description——
+  // 正是用户在对话里看到的那份"做了什么"。
+  const plan =
+    `目标：${name.trim() || '（未命名任务）'}\n` +
+    '执行步骤：\n' +
+    nodes
+      .filter((node) => node.data['blockId'] !== 'trigger')
+      .map((node, index) => {
+        const desc =
+          typeof node.data['description'] === 'string' && node.data['description']
+            ? node.data['description']
+            : String(node.data['blockId'] ?? node.label)
+        return `${index + 1}. ${desc}`
+      })
+      .join('\n')
+
   return {
     id: newId(),
     name: name.trim() || 'From history',
+    description: name.trim() || undefined,
+    plan,
     createdAt: Date.now(),
     updatedAt: Date.now(),
     drawflow: { nodes, edges, position: { x: 0, y: 0 }, zoom: 1 },

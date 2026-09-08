@@ -17,8 +17,16 @@
 import { fileStorageArea } from '../fs-store'
 import { listWorkflows } from './storage'
 import type { TakeoverFix } from './ai-takeover'
+import type { Workflow } from './types'
 
 const KEY_PENDING = 'aiTakeoverPending'
+
+/** A whole-graph rewrite awaiting confirmation (the audit path's product). */
+export interface PendingRewrite {
+  workflow: Workflow
+  changes: string[]
+  diagnosis: string
+}
 
 /** A stored set of pending takeover fixes for one workflow. */
 export interface PendingTakeoverRecord {
@@ -26,6 +34,12 @@ export interface PendingTakeoverRecord {
   /** Run id of the debug session that produced the fixes. */
   runId?: string
   fixes: TakeoverFix[]
+  /**
+   * Whole-workflow rewrite from the debug audit (复演+图审计). When present
+   * the apply action replaces the workflow's GRAPH instead of patching
+   * individual params. `fixes` may then be empty.
+   */
+  rewrite?: PendingRewrite
   createdAt: number
 }
 
@@ -35,6 +49,7 @@ export interface PendingTakeoverInfo {
   name: string
   createdAt: number
   fixes: TakeoverFix[]
+  rewrite?: { changes: string[]; diagnosis: string }
 }
 
 /** Structural guard so corrupted/foreign payloads degrade to "no pending". */
@@ -51,6 +66,20 @@ function isFix(value: unknown): value is TakeoverFix {
   )
 }
 
+/** Loose shape check for a stored rewrite payload. */
+function isRewrite(value: unknown): value is PendingRewrite {
+  if (!value || typeof value !== 'object') return false
+  const rewrite = value as Partial<PendingRewrite>
+  return (
+    !!rewrite.workflow &&
+    typeof rewrite.workflow === 'object' &&
+    !!rewrite.workflow.drawflow &&
+    Array.isArray(rewrite.workflow.drawflow.nodes) &&
+    Array.isArray(rewrite.changes) &&
+    typeof rewrite.diagnosis === 'string'
+  )
+}
+
 function isRecord(value: unknown): value is PendingTakeoverRecord {
   if (!value || typeof value !== 'object') return false
   const record = value as Partial<PendingTakeoverRecord>
@@ -58,7 +87,8 @@ function isRecord(value: unknown): value is PendingTakeoverRecord {
     typeof record.workflowId === 'string' &&
     typeof record.createdAt === 'number' &&
     Array.isArray(record.fixes) &&
-    record.fixes.every(isFix)
+    record.fixes.every(isFix) &&
+    (record.rewrite === undefined || isRewrite(record.rewrite))
   )
 }
 
@@ -90,7 +120,7 @@ export async function savePendingTakeover(record: PendingTakeoverRecord): Promis
   for (const [id, existing] of Object.entries(all)) {
     if (liveIds.has(id)) next[id] = existing
   }
-  if (liveIds.has(record.workflowId) && record.fixes.length > 0) {
+  if (liveIds.has(record.workflowId) && (record.fixes.length > 0 || record.rewrite)) {
     next[record.workflowId] = {
       ...record,
       fixes: record.fixes.slice(0, 20),
@@ -115,6 +145,9 @@ export async function listPendingTakeovers(): Promise<PendingTakeoverInfo[]> {
       name: nameById.get(workflowId) ?? record.workflowId,
       createdAt: record.createdAt,
       fixes: record.fixes,
+      ...(record.rewrite
+        ? { rewrite: { changes: record.rewrite.changes, diagnosis: record.rewrite.diagnosis } }
+        : {}),
     }))
     .sort((a, b) => b.createdAt - a.createdAt)
 }

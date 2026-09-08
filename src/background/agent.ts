@@ -64,6 +64,7 @@ import {
   findField,
   type AgentMode,
   type PasswordEntry,
+  type ProviderProfile,
   type Skill,
   type UserProfile,
 } from '../lib/types'
@@ -825,6 +826,12 @@ export interface AgentDeps {
    * Read at turn start so a settings change applies to the next request.
    */
   getMaxToolRounds: () => Promise<number>
+  /**
+   * Overrides the provider/model for this turn (e.g. the AI-takeover runner
+   * pointing at `settings.takeoverModel`). Returns undefined (or is omitted)
+   * to fall back to the active chat provider.
+   */
+  getProvider?: () => Promise<ProviderProfile | undefined>
   /**
    * Returns the names of tools the user has disabled and their custom base
    * system prompt (empty string = use the default). Read at turn start so
@@ -2504,13 +2511,14 @@ export async function runAgentTurn(
   // These reads are independent and all hit local storage / the settings cache,
   // but running them in parallel shaves the serial round trips off the
   // time-to-first-token — most noticeable for short chat-mode turns.
-  const [provider, skillList, initialMode, toolConfig, maxToolRounds] = await Promise.all([
-    getActiveProvider(),
+  const [preferredProvider, skillList, initialMode, toolConfig, maxToolRounds] = await Promise.all([
+    deps.getProvider ? deps.getProvider().catch(() => undefined) : Promise.resolve(undefined),
     listSkills(),
     deps.getMode(),
     deps.getToolConfig(),
     deps.getMaxToolRounds(),
   ])
+  const provider = preferredProvider ?? (await getActiveProvider())
   const activeSkill = deps.skillId ? await getSkill(deps.skillId) : undefined
   const catalogue = activeSkill ? [] : skillList
   const disabled = new Set(toolConfig.disabledTools)

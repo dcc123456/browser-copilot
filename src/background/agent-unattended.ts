@@ -22,7 +22,7 @@ import { runAgentTurn } from './agent'
 import { resolveUnattendedScope } from './window-policy'
 import { getSettings } from '../lib/storage'
 import { sanitizeModelAnswer } from '../lib/model-output'
-import type { AgentMode } from '../lib/types'
+import type { AgentMode, ProviderProfile } from '../lib/types'
 import { retain, release } from './keepalive'
 
 export interface UnattendedResult {
@@ -57,6 +57,11 @@ export interface UnattendedOptions {
    * the running-tasks registry records them for the board.
    */
   onStep?: (kind: 'tool' | 'status' | 'result' | 'error' | 'info', text: string) => void
+  /**
+   * Overrides the provider/model for this turn (e.g. the AI-takeover runner
+   * pointing at `settings.takeoverModel`). Undefined = the active chat model.
+   */
+  provider?: ProviderProfile
 }
 
 /**
@@ -135,6 +140,7 @@ export async function runUnattendedPrompt(
       confirm: async () => (modeOverride === 'full' ? true : false),
       getMode: async () => modeOverride ?? settings.mode,
       getMaxToolRounds: async () => options.maxToolRounds ?? settings.maxToolRounds,
+      ...(options.provider ? { getProvider: async () => options.provider } : {}),
       getToolConfig: async () => ({
         disabledTools: settings.disabledTools ?? [],
         basePrompt: settings.systemPromptOverride ?? '',
