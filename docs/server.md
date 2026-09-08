@@ -196,6 +196,126 @@ curl -X POST "http://127.0.0.1:8787/api/hooks/parent-1?token=$BC_TOKEN" \
 | `BC_LLM_BASE_URL/_API_KEY/_MODEL` | — | ai-agent / AI 接管用的 OpenAI 兼容模型 |
 | `BC_FEISHU_*` | — | 见 §5.4 |
 
+### 6.1 敏感配置放哪、怎么配（LLM Key / 飞书 Secret 示例）
+
+敏感值有**三个配置渠道**，选一个即可；同一台机器上环境变量优先级最高（会覆盖 config.json）。
+无论哪个渠道，这些文件都**不会进 git**（根 `.gitignore` 已忽略 `.env`，`server/.gitignore` 已忽略 `config.json`）——但仍要养成习惯：密钥只出现在服务器本机。
+
+#### 渠道 1：环境变量（推荐，任何部署方式都适用）
+
+**Linux / macOS（bash，临时，当前终端有效）：**
+
+```bash
+export BC_LLM_BASE_URL="https://api.deepseek.com/v1"
+export BC_LLM_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"        # DeepSeek/OpenAI 兼容 Key
+export BC_LLM_MODEL="deepseek-chat"
+export BC_FEISHU_BOT_ENABLED=1
+export BC_FEISHU_APP_ID="cli_a1b2c3d4e5f6g7h8"             # 飞书自建应用 App ID
+export BC_FEISHU_APP_SECRET="xxxxxxxxxxxxxxxxxxxxxxxx"     # 飞书自建应用 App Secret
+pnpm --dir server start
+```
+
+**Windows（PowerShell）：**
+
+```powershell
+$env:BC_LLM_API_KEY     = "sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+$env:BC_FEISHU_APP_ID   = "cli_a1b2c3d4e5f6g7h8"
+$env:BC_FEISHU_APP_SECRET = "xxxxxxxxxxxxxxxxxxxxxxxx"
+pnpm --dir server start
+```
+
+**systemd 常驻（密钥落在独立文件，`EnvironmentFile` 格式：`KEY=VALUE`，不要加 `export`）：**
+
+```bash
+# 1) 建密钥文件（root 可读，其他用户不可）
+sudo install -m 600 /dev/null /etc/browser-copilot/runner.env
+sudo tee /etc/browser-copilot/runner.env > /dev/null <<'EOF'
+BC_TOKEN=换成一段随机长字符串
+BC_LLM_BASE_URL=https://api.deepseek.com/v1
+BC_LLM_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxx
+BC_LLM_MODEL=deepseek-chat
+BC_FEISHU_BOT_ENABLED=1
+BC_FEISHU_APP_ID=cli_a1b2c3d4e5f6g7h8
+BC_FEISHU_APP_SECRET=xxxxxxxxxxxxxxxxxxxxxxxx
+EOF
+
+# 2) service 里引用它
+#    /etc/systemd/system/bc-runner.service 的 [Service] 段加一行：
+#    EnvironmentFile=/etc/browser-copilot/runner.env
+sudo systemctl daemon-reload && sudo systemctl restart bc-runner
+```
+
+#### 渠道 2：`server/config.json`（单机直跑最省事，文件不入库）
+
+```bash
+cd browser-copilot
+cp server/config.example.json server/config.json   # 模板复制一份
+chmod 600 server/config.json                       # 收紧权限（Linux）
+```
+
+然后编辑 `server/config.json`，把密钥填进对应字段（和上表的环境变量一一对应）：
+
+```json
+{
+  "token": "换一段随机长字符串",
+  "llm": {
+    "baseUrl": "https://api.deepseek.com/v1",
+    "apiKey": "sk-xxxxxxxxxxxxxxxxxxxxxxxx",
+    "model": "deepseek-chat"
+  },
+  "feishu": {
+    "botEnabled": true,
+    "appId": "cli_a1b2c3d4e5f6g7h8",
+    "appSecret": "xxxxxxxxxxxxxxxxxxxxxxxx"
+  }
+}
+```
+
+保存后启动 `pnpm --dir server start` 即生效。注意：**这个文件在 `server/.gitignore` 里，永远不会被 `git add`，但如果你手工打包/复制整个目录到别处，要记得它带着密钥。**
+
+#### 渠道 3：Docker Compose 的 `.env`（容器部署推荐）
+
+`docker-compose.yml` 里的 `${BC_TOKEN:-}` 占位符会自动读取**与 compose 文件同目录**的 `.env` 文件：
+
+```bash
+cd browser-copilot
+cat > .env <<'EOF'
+BC_TOKEN=换一段随机长字符串
+BC_LLM_BASE_URL=https://api.deepseek.com/v1
+BC_LLM_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxx
+BC_LLM_MODEL=deepseek-chat
+BC_FEISHU_BOT_ENABLED=0
+BC_FEISHU_APP_ID=
+BC_FEISHU_APP_SECRET=
+EOF
+chmod 600 .env
+docker compose up -d        # 密钥只进入容器内存，不进镜像、不进 git
+```
+
+根 `.gitignore` 已包含 `.env`（含 `.env.*`），不会误提交。用 `docker compose config` 可以核对最终注入容器的值。
+
+#### 验证密钥已生效（30 秒 demo）
+
+**LLM**：起服务后内联提交一个只有 `ai-prompt` 的最小工作流，看回复：
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/api/runs \
+  -H "Authorization: Bearer $BC_TOKEN" -H "Content-Type: application/json" \
+  -d '{"workflow":{"id":"llm-check","name":"LLM连通性检查","drawflow":{"nodes":[{"id":"t","label":"trigger","position":{"x":0,"y":0},"data":{"blockId":"trigger"}},{"id":"p","label":"ai-prompt","position":{"x":1,"y":0},"data":{"blockId":"ai-prompt","prompt":"只回复两个字：OK"}}],"edges":[{"id":"e","source":"t","target":"p"}]}}}'
+# → {"runId":"…"}；轮询 GET /api/runs/<runId>，steps 里 ai-prompt 的 result 出现 "OK" 即配置生效
+```
+
+若报 `AI 块: 服务端未配置模型…` 说明三个 `BC_LLM_*` 变量没有读到（查启动终端 / `docker compose config`）。
+
+**飞书**：配置了 `BC_FEISHU_APP_ID/APP_SECRET` 且 `BC_FEISHU_BOT_ENABLED=1` 时，服务启动日志出现
+`[feishu] long connection established`；在飞书里私聊你的应用机器人发送 `/help`，收到命令列表即通了。
+（注意：App Secret 属于自建应用凭证，在飞书开放平台「凭证与基础信息」页获取；应用需开启长连接模式并订阅 `im.message.receive_v1`。`BC_FEISHU_WEBHOOK_URL/SECRET` 是群自定义机器人的推送通道，当前为预留项，命令机器人只依赖 APP_ID/APP_SECRET。）
+
+#### 密钥轮换与泄露处理
+
+- 换 Key：改环境变量/文件 → 重启进程（容器则 `docker compose up -d` 重建），无需动仓库。
+- 一旦怀疑泄露：先在服务商后台吊销（DeepSeek 控制台 / 飞书开放平台重置 App Secret），再换新值重启；已提交进 git 历史的密钥视为已泄露，必须吊销而不是删除提交。
+
 ## 7. 块支持矩阵（相对扩展）
 
 - **完全支持**：click/fill/scroll/hover/按键/勾选、open-url/new-tab/switch-tab/close-tab/reload、get-text/get-form/set-radio/attribute-value/tab-url、set/get-variable、insert/export-data、slice/regex/increase/delete/sort/data-mapping、log-data、condition/conditions/delay、loop-data/repeat-task/while-loop/loop-elements（引擎循环）、**execute-workflow（嵌套）**、cookie、clipboard、element-exists、link、create-element、upload-file、handle-dialog、wait-connections、trigger-event、webhook、javascript-code（页面优先、本地兜底）、handle-download、save-local、forms、event-click/hover-element/element-scroll、loop-breakpoint、workflow-state、parameter-prompt（从运行变量读取）。
@@ -219,7 +339,7 @@ data/
 1. **必设 `BC_TOKEN`**；没有 Token 时 API 完全开放，只适合 `127.0.0.1` 调试。
 2. 对公网暴露时前置反向代理 + HTTPS，或用 SSH 隧道 / WireGuard 内网访问。
 3. 工作流能驱动真实浏览器出网——只导入可信来源的 workflows.json。
-4. LLM Key、飞书 Secret 用环境变量注入，不要写进仓库。
+4. LLM Key、飞书 Secret 用环境变量注入，不要写进仓库——三个渠道的具体配法与验证 demo 见 §6.1。
 5. `BC_MAX_CONCURRENT` 控制资源占用；CDP/browserless 端口不要裸暴露公网。
 
 ## 10. 故障排查
