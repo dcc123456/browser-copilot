@@ -67,6 +67,7 @@ import {
   type Skill,
   type UserProfile,
 } from '../lib/types'
+import { locatorHintOf } from '../lib/ops'
 import type { Op, OpResult, Target } from '../lib/ops'
 import {
   DriverError,
@@ -895,25 +896,26 @@ function summarizeSnapshot(snapshot: {
   elementsTruncated: boolean
 }): unknown {
   const ELEMENT_LIMIT = 80
-  const elements = snapshot.elements.slice(0, ELEMENT_LIMIT).map((el) => ({
-    ref: el.ref,
-    role: el.role,
-    name: el.name,
-    tag: el.tag,
-    ...(el.type ? { type: el.type } : {}),
-    ...(el.value !== undefined ? { value: el.value } : {}),
-    ...(el.placeholder ? { placeholder: el.placeholder } : {}),
-    ...(el.disabled ? { disabled: true } : {}),
-    ...(el.checked !== undefined ? { checked: el.checked } : {}),
-    ...(el.required ? { required: true } : {}),
-    inViewport: el.inViewport,
-    // NOTE: the element's durable `target` is deliberately NOT emitted — it
-    // was the single largest token sink in every snapshot. The agent holds the
-    // ref→target mapping in ToolContext.snapshotTargets; the model acts with
-    // the short `ref` (devtools-mcp's uid pattern) and the full target —
-    // including the closed-shadow marker that routes clicks through CDP —
-    // never leaves the extension.
-  }))
+  const elements = snapshot.elements.slice(0, ELEMENT_LIMIT).map((el) => {
+    // Compact locator hint (#id / [data-testid] / [name]): the ONLY stable
+    // handle the model can copy into a block's `selector` param when it
+    // proposes a fix. Few tokens, only for genuinely stable specs.
+    const loc = locatorHintOf(el.target)
+    return {
+      ref: el.ref,
+      role: el.role,
+      name: el.name,
+      tag: el.tag,
+      ...(el.type ? { type: el.type } : {}),
+      ...(el.value !== undefined ? { value: el.value } : {}),
+      ...(el.placeholder ? { placeholder: el.placeholder } : {}),
+      ...(el.disabled ? { disabled: true } : {}),
+      ...(el.checked !== undefined ? { checked: el.checked } : {}),
+      ...(el.required ? { required: true } : {}),
+      inViewport: el.inViewport,
+      ...(loc ? { loc } : {}),
+    }
+  })
   // Keep the text but cap it hard: a snapshot is re-sent on every later round
   // and the model's locators come from the elements, not the prose.
   const text =
@@ -2759,16 +2761,23 @@ async function runOneToolCall(
   }
 
   // A tool hidden inside an unloaded group was never advertised, so a call to
-  // it is a hallucination — steer the model to the loader instead of silently
-  // executing, so the next round actually carries its schema.
+  // it is a hallucination — but a deliberate one: the model clearly needs it.
+  // Auto-load the group right away (equivalent to the model calling
+  // load_tools first) and instruct an immediate retry. Refusing with merely a
+  // hint made weaker models give up and claim "tool limitations" to the user.
   const groupName = TOOL_GROUP_BY_NAME.get(name)
   if (groupName && !ctx.loadedGroups?.has(groupName)) {
+    storeLoadedGroups(ctx.conversationId, [groupName])
     pushResult(
       JSON.stringify({
-        error: `"${name}" is not loaded yet. Call load_tools with groups: ["${groupName}"] first, then retry.`,
+        error: `"${name}" was not loaded: its "${groupName}" tool group has been auto-loaded now and will be advertised on the next request. Call "${name}" again immediately — do not tell the user you lack tools.`,
       }),
     )
-    deps.send({ type: 'tool.result', name, summary: `Not loaded (${groupName} group)` })
+    deps.send({
+      type: 'tool.result',
+      name,
+      summary: `Auto-loaded ${groupName} group — retry ${name}`,
+    })
     return
   }
 

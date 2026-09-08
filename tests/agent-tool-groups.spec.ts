@@ -125,7 +125,7 @@ describe('load_tools round trip', () => {
     expect(advertisedNames(1)).toContain('tab_new')
   })
 
-  it('refuses an unloaded group tool with a load hint instead of executing', async () => {
+  it('auto-loads the group on a direct call and tells the model to retry', async () => {
     streamMock
       .mockResolvedValueOnce({
         content: '',
@@ -139,8 +139,11 @@ describe('load_tools round trip', () => {
     await runAgentTurn(history as never, deps() as never)
 
     const result = toolResult(history, 'save_local')
-    expect(result.error).toContain('load_tools')
-    expect(result.error).toContain('"data"')
+    expect(result.error).toContain('auto-loaded')
+    expect(result.error).toContain('data')
+    expect(result.error).toContain('again')
+    // The next round must carry the freshly loaded group's schemas.
+    expect(advertisedNames(1)).toContain('save_local')
   })
 
   it('reports unknown group names and keeps the conversation scoped', async () => {
