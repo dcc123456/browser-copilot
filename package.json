@@ -12,6 +12,11 @@
     "package": "vite build && node scripts/build-zip.mjs ocr && vite build --mode no-ocr && node scripts/build-zip.mjs no-ocr",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.tests.json",
     "test": "vitest run",
+    "server:start": "pnpm --filter browser-copilot-runner start",
+    "server:dev": "pnpm --filter browser-copilot-runner dev",
+    "server:typecheck": "pnpm --filter browser-copilot-runner typecheck",
+    "server:test": "pnpm --filter browser-copilot-runner test",
+    "server:smoke": "pnpm --filter browser-copilot-runner smoke",
     "icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {

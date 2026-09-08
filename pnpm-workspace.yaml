@@ -1,3 +1,6 @@
+packages:
+  - server
+
 allowBuilds:
   esbuild: true
   # tesseract.js 的 postinstall 只是 opencollective 捐赠提示（`|| true` 兜底），
