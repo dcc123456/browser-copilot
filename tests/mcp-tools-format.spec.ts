@@ -377,4 +377,36 @@ describe('mcp-server tools/list wire format', () => {
       }
     },
   )
+
+  it(
+    'keeps the WS server alive after stdin closes in --standalone mode',
+    { timeout: 20_000 },
+    async () => {
+      const port = await freePort()
+      proc = spawn(process.execPath, [ADAPTER, '--standalone'], {
+        cwd: ROOT,
+        env: adapterEnv(port),
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+      proc.stderr.resume()
+
+      await waitForPort(port)
+      await rpc(proc, 400, 'initialize', {})
+      const list = (await rpc(proc, 401, 'tools/list', {})) as {
+        result?: { tools?: Tool[] }
+      }
+      expect(list.result?.tools?.length).toBeGreaterThanOrEqual(23)
+
+      // Simulate the coding-agent session ending: the MCP client closes stdin.
+      // Default mode exits here — the WS server (and the plugin's connection)
+      // dies with it, which is the classic "plugin shows 未连接" root cause.
+      // Standalone mode must keep the process AND the port alive.
+      proc.stdin.end()
+      await sleep(1500)
+      expect(proc.exitCode).toBeNull() // process still running
+      expect(proc.killed).toBe(false)
+      await waitForPort(port) // WS server still accepting the plugin
+      // afterEach kills the process.
+    },
+  )
 })

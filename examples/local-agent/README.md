@@ -26,6 +26,21 @@
 
 > 无需手动启动本适配器进程，也无需 npm install / Python。
 
+## 可选：standalone 常驻模式（让插件保持“已连接”）
+
+默认模式下，适配器进程由编码 Agent 会话拉起、**随会话结束而退出**，`8765` 端口随之下线——此时插件设置里会显示“**未连接**”，Agent 调用工具也会得到“插件未连接”。这是最常见的一类“连不上”，并非故障。
+
+如果希望插件**随时保持连接**（插件状态常驻“已连接”，任何编码 Agent 会话即开即用），在一个独立终端运行：
+
+```bash
+node examples/local-agent/mcp-server.mjs --standalone
+# 或用环境变量：BROWSER_COPILOT_STANDALONE=1 node mcp-server.mjs
+```
+
+- standalone 模式忽略 stdin 关闭：编码 Agent 退出、终端会话挂起都不会杀死 WS 服务端（`Ctrl+C` 手动停止）。
+- 常驻主适配器占用 `8765` 后，之后编码 Agent 再拉起的 `mcp-server.mjs` 实例会**自动切换到代理模式**，把 MCP 请求转发给常驻主适配器执行——各 Agent 的 MCP 配置无需任何改动。
+- 插件侧断线后会以退避重试自动重连（上限约 30 秒），所以适配器一上线，插件最多约半分钟就会恢复“已连接”。
+
 ## 各编码 Agent 的 MCP 配置
 
 ### Claude Code
@@ -87,6 +102,6 @@ MCP 侧的映射：Agent 的 `tools/list` → WS `tools.list`；Agent 的 `tools
 ## 注意事项
 
 - **无需 Python**：本方案只用 Node.js 内置模块（`node:http` / `node:crypto` / `node:readline` / `node:process`），零外部依赖。
-- **无需常驻服务**：适配器由编码 Agent 通过 stdio 自动拉起、随 Agent 退出而结束；插件侧会自动带退避重试，直到连上适配器。两个进程相互独立，谁先启动都行。
+- **适配器生命周期**：默认由编码 Agent 通过 stdio 自动拉起、随 Agent 退出而结束；插件侧会自动带退避重试，直到连上适配器。两个进程相互独立，谁先启动都行。想让插件保持常连请用 [standalone 模式](#可选standalone-常驻模式让插件保持已连接)。
 - **仅回环，安全**：适配器只绑定 `127.0.0.1:8765`，外部网络无法访问；配合可选共享 token，进一步防止本机其它进程随意驱动浏览器。
 - 端口 `8765` 被占用时，先停止旧的适配器进程再重试。

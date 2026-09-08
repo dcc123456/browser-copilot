@@ -47,6 +47,9 @@
  * --------
  *   node mcp-server.mjs                    # 直接运行
  *   node mcp-server.mjs --token <value>    # 附加共享 token（或用环境变量 BROWSER_COPILOT_TOKEN）
+ *   node mcp-server.mjs --standalone       # 常驻模式：stdin 关闭（编码 Agent 退出）后不退出，
+ *                                          # 继续持有 8765 让插件保持连接；Ctrl+C 手动停止。
+ *                                          # （也可用环境变量 BROWSER_COPILOT_STANDALONE=1）
  * 然后在你的编码 Agent 中添加一条 stdio MCP 配置指向本文件（见同目录 README.md）。
  * 注意：stdout 只输出 JSON-RPC 响应，所有日志一律写入 stderr。
  *
@@ -82,6 +85,18 @@ function readToken(argv) {
   return process.env.BROWSER_COPILOT_TOKEN || null;
 }
 const TOKEN = readToken(process.argv.slice(2));
+
+/**
+ * 常驻模式：`--standalone` 参数或 BROWSER_COPILOT_STANDALONE=1。默认（MCP stdio
+ * 模式）下 stdin 关闭 = 编码 Agent 会话结束，进程随之退出、8765 一并下线——这
+ * 正是“插件一直显示未连接”的常见根因：适配器的生命周期被编码 Agent 会话绑死。
+ * standalone 模式忽略 stdin 关闭，把 WS 服务端独立挂住，插件就能 7x24 保持连接；
+ * 之后任何编码 Agent 再拉起的 mcp-server.mjs 实例都会因端口占用自动切到代理模式，
+ * 转发请求到这个常驻主适配器（见 EADDRINUSE 分支）。
+ */
+const STANDALONE =
+  process.argv.slice(2).includes('--standalone') ||
+  /^(1|true|yes)$/i.test(process.env.BROWSER_COPILOT_STANDALONE || '');
 
 // ---------------------------------------------------------------------------
 // 本适配器实例的 Agent 身份：每个编码 Agent 会话会拉起一个独立的适配器进程，
@@ -759,7 +774,10 @@ function jsonRpcError(id, code, message) {
 
 /** 未连接插件时的统一错误文案（中英对照，帮助排障）。 */
 const PLUGIN_OFFLINE_MSG =
-  'Browser Copilot 插件未连接：请先在插件设置里启用“本地 Agent 接入”，并保持浏览器运行。';
+  'Browser Copilot 插件未连接。常见原因：① 插件设置里未启用“本地 Agent 接入”；' +
+  '② 本适配器进程未运行（它由编码 Agent 会话拉起，会话结束即退出，插件会显示“未连接”）。' +
+  '适配器启动后插件会在约 30 秒内自动重连；如需插件保持常连，可单独运行' +
+  ' `node mcp-server.mjs --standalone`（见 README）。';
 
 async function handleMCPRequest(req) {
   const { id, method, params } = req;
@@ -838,6 +856,12 @@ rl.on('line', async (line) => {
 });
 
 rl.on('close', () => {
+  if (STANDALONE) {
+    // 常驻模式：编码 Agent 会话结束（stdin 关闭）不代表用户想停掉适配器。
+    // 保持 WS 服务端运行，插件保持连接；手动 Ctrl+C（SIGINT）才退出。
+    log('stdin 已关闭：standalone 常驻模式，继续运行（Ctrl+C 停止）');
+    return;
+  }
   log('stdin 已关闭（编码 Agent 退出），进程退出');
   process.exit(0);
 });
@@ -848,7 +872,11 @@ rl.on('close', () => {
 server.listen(PORT, HOST, () => {
   ownServer = true; // 本进程成功占用了 8765 端口，成为主适配器
   log(`WebSocket 服务已启动：ws://${HOST}:${PORT}（仅回环）`);
-  log('MCP stdio 服务已就绪：等待编码 Agent 通过 stdio 调用');
+  log(
+    STANDALONE
+      ? 'standalone 常驻模式：编码 Agent 会话结束后继续运行，插件可保持常连'
+      : 'MCP stdio 服务已就绪：等待编码 Agent 通过 stdio 调用',
+  );
   log(
     TOKEN
       ? `已启用共享 token（BROWSER_COPILOT_TOKEN，${TOKEN.length} 字符）`

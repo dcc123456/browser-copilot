@@ -134,6 +134,8 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     downloadAutoSave: true,
     imageModel: { providerId: '', model: '' },
     ocrLanguage: 'eng',
+    takeoverModel: { providerId: '', model: '' },
+    takeoverOnRun: false,
     localAgentEnabled: true,
     localAgentToken: '',
     localAgentUrl: 'ws://127.0.0.1:8765',
