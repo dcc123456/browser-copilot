@@ -13,10 +13,9 @@ import type { Workflow, WorkflowEdge, WorkflowNode } from '../../lib/workflow/ty
 import { getWorkflow } from '../../lib/workflow/storage'
 import type { DebugStepLine } from '../../lib/workflow/auto-debug-patch'
 import type { ScopeWindow } from '../automation-scope'
-import {
-  EXECUTORS,
-  type BlockExecutor,
-  type WorkflowExecCtx,
+import type {
+  BlockExecutor,
+  WorkflowExecCtx,
 } from './executors'
 import { LoopBreakpointError } from './loop-breakpoint'
 
@@ -51,6 +50,8 @@ export interface AiTakeoverOutcome {
   summary?: string
   /** Why the step could not be completed (feeds the run's failure). */
   reason?: string
+  /** Classified failure reason (auth/captcha ⇒ already fast-failed upstream). */
+  reasonKind?: import('../../lib/workflow/ai-takeover').TakeoverReasonKind
 }
 
 /** Engine-side hook: run the AI takeover for one failed node. */
@@ -71,8 +72,18 @@ export interface WorkflowRunOptions {
   scope?: ScopeWindow
   /** Called for every status/result/error/info a block emits, plus engine errors. */
   onStep?(kind: EmitKind, nodeId: string, text: string): void
-  /** Override / inject the block-executor map (falls back to {@link EXECUTORS}). */
+  /** Override / inject the block-executor map. When omitted, the browser
+   * executors are lazy-loaded (they pull the chrome-coupled driver chain);
+   * Node-based runners such as the server runner always pass their own map,
+   * so that chain is never loaded there. */
   executors?: Partial<Record<string, BlockExecutor>>
+  /**
+   * Resolves a sub-workflow id for `execute-workflow` blocks. Defaults to the
+   * chrome-backed `storage.getWorkflow`; Node-based runners (the server
+   * runner) inject a file-backed resolver so the pure engine stays
+   * chrome-free.
+   */
+  resolveWorkflow?: (id: string) => Promise<Workflow | null>
   /**
    * Workflow ids already on the `execute-workflow` call stack, used to guard
    * against a→a self-loops. Filled in by recursive `runCore` calls.
@@ -116,6 +127,14 @@ export interface WorkflowRunResult {
   summary?: string
   /** Full failure detail when outcome is 'failed'; may be multi-line. */
   error?: string
+  /**
+   * The run's final variable store (the same object the blocks mutated).
+   * Evidence for the debug session's goal-completion check — "no error" does
+   * not mean "goal achieved", and what the nodes PRODUCED is the proof.
+   */
+  variables?: Record<string, unknown>
+  /** Tail of the run's step lines (oldest last), for the same evidence. */
+  steps?: DebugStepLine[]
 }
 
 /** Guards against infinite/long loops in mis-wired graphs. */
@@ -316,13 +335,21 @@ async function runCore(
     signal,
     scope,
     onStep,
-    executors = EXECUTORS,
+    executors,
+    resolveWorkflow,
     parentWorkflowIds = new Set<string>(),
     loopElementCounter,
     evaluateExpression,
     onSnapshot,
     aiTakeover,
   } = options
+
+  // The browser executors pull the chrome-coupled driver chain; resolve them
+  // lazily so Node-based runners that always pass their own `executors` map
+  // never load that chain (and never pay the import cost). `??` short-circuits:
+  // the dynamic import only evaluates when the caller supplied no map.
+  const executorsMap: Partial<Record<string, BlockExecutor>> =
+    executors ?? (await import('./executors')).EXECUTORS
 
   const nodes = workflow.drawflow.nodes
   const edges = workflow.drawflow.edges
@@ -441,7 +468,7 @@ async function runCore(
       return runSubWorkflow(current, params, defaultNext)
     }
 
-    const executor = executors[blockId]
+    const executor = executorsMap[blockId]
     if (!executor) {
       const text = `没有找到块执行器: ${blockId}`
       emit('error', nodeId, text)
@@ -731,7 +758,9 @@ async function runCore(
       emit('error', execNode.id, `execute-workflow: 检测到工作流自循环 ${childId}`)
       return defaultNext
     }
-    const child = await getWorkflow(childId)
+    const child = resolveWorkflow
+      ? await resolveWorkflow(childId)
+      : await getWorkflow(childId)
     if (!child) {
       emit('error', execNode.id, `execute-workflow: 未找到工作流 ${childId}`)
       return defaultNext
@@ -743,7 +772,8 @@ async function runCore(
       variables,
       signal: signalToUse,
       scope,
-      executors,
+      executors: executorsMap,
+      ...(resolveWorkflow ? { resolveWorkflow } : {}),
       parentWorkflowIds: childStack,
       loopElementCounter,
       evaluateExpression,
@@ -777,5 +807,12 @@ async function runCore(
     }
   }
 
-  return { outcome, completedNodeIds, summary, ...(error ? { error } : {}) }
+  return {
+    outcome,
+    completedNodeIds,
+    summary,
+    ...(error ? { error } : {}),
+    variables,
+    steps: stepLines.slice(-40),
+  }
 }
