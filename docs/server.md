@@ -31,7 +31,7 @@ git clone <repo> && cd browser-copilot
 pnpm install                       # workspace 会一并装好 server/
 npx playwright install chromium    # 下载浏览器（首次）
 
-# 最小配置（也可用 server/config.json，见 §6）
+# 最小配置（也可用 server/config.json，见 §7）
 export BC_TOKEN="换成随机长字符串"          # API 鉴权，务必设置
 export BC_LLM_BASE_URL="https://api.deepseek.com/v1"   # 仅 ai-agent / AI 接管需要
 export BC_LLM_API_KEY="sk-..."
@@ -39,6 +39,7 @@ export BC_LLM_MODEL="deepseek-chat"
 
 pnpm --dir server start            # 等价 tsx server/src/main.ts
 # 默认端口 8787，日志见 data/runs/<runId>.jsonl
+# 执行过 pnpm --dir server build 后，打开 http://127.0.0.1:8787/ 即是 Web 控制台（§6）
 ```
 
 用 systemd 常驻（Linux）：
@@ -177,7 +178,40 @@ curl -X POST "http://127.0.0.1:8787/api/hooks/parent-1?token=$BC_TOKEN" \
 - **命令机器人**（长连接，无需公网回调）：`BC_FEISHU_BOT_ENABLED=1` + `BC_FEISHU_APP_ID/APP_SECRET`（应用需开启长连接模式、订阅 `im.message.receive_v1` 并发布版本）。私聊机器人发 `/workflow <名称或id>` 运行并回报结果；`/runs` 看最近运行；`/help` 帮助。
 - **结果推送**（群自定义机器人）：`BC_FEISHU_WEBHOOK_URL/WEBHOOK_SECRET` 预留推送通道。
 
-## 6. 配置参考
+## 6. Web 控制台
+
+运行器自带一个自托管管理页面：构建一次后由 runner 进程直接托管（`server/web/dist`），不需要额外的静态服务。
+
+```bash
+pnpm install
+pnpm --dir server build     # 构建 Web 控制台（Docker 镜像内自动完成）
+pnpm --dir server start
+# 浏览器打开 http://127.0.0.1:8787/
+```
+
+**登录**：输入 API Token（即 `BC_TOKEN`），保存在浏览器 localStorage 中；服务器未设置 Token 时可直接进入，页面会提示尽快设置。Token 错误或被轮换后，下一次请求 401 会自动回到登录页。
+
+### 6.1 功能一览
+
+| 页面 | 能做什么 |
+| --- | --- |
+| 仪表盘 | 工作流数/定时任务/浏览器模式/飞书连接状态卡片、最近 5 次运行、快速运行下拉 |
+| 工作流 | 列表（触发方式徽标）、导入 JSON（逐条报告缺失子流程与校验警告）、在线编辑（CodeMirror JSON 编辑器 + 校验/格式化）、新建、运行（可注入变量 JSON）、定时设置、引用与循环检查、下载、删除 |
+| 定时任务 | 全部时间触发总览：规则明细、下次运行时间、启用/停用开关（停用的工作流也列出） |
+| 运行记录 | 4 秒自动刷新、按名称/runId 过滤、逐步日志时间线、summary/error、取消运行中的任务 |
+| 设置 | 大模型（Base URL/Key/模型 + 一键测试连接）、飞书机器人（AppId/Secret/Webhook + 测试推送与长连接状态）、安全（更换 BC_TOKEN）、浏览器（模式/CDP/无头/并发/超时） |
+
+### 6.2 配置生效语义（PUT /api/config）
+
+- **立即热生效**：LLM 三项（下一次运行即用新模型）、飞书配置（保存后自动重启长连接机器人）、`runTimeoutMs`、并发数、`BC_TOKEN`（保存后旧 Token 立即失效，控制台自动换用新 Token）。
+- **需重启进程**：端口、浏览器模式（local/cdp）、CDP endpoint、无头开关——保存成功后页面会标出。
+- **环境变量遮蔽**：被 `BC_*` 环境变量覆盖的字段，页面会显示"被环境变量 XX 覆盖，修改配置文件不会生效"（见 §7.1）。
+
+### 6.3 与命令行的关系
+
+控制台只是 CLI 的图形化补充，不做任何取代：每一项功能都有等价 curl（§5.1、§7），`config.json` 手工编辑、`BC_*` 环境变量、`workflows.d` 目录等工作方式完全不变。安全模型也与 API 一致：控制台页面本身免鉴权加载（只是个登录壳，不含数据），所有数据都走受 Bearer 保护的 `/api/*`；公网部署请按 §10 前置反向代理 + HTTPS。
+
+## 7. 配置参考
 
 优先级：`BC_*` 环境变量 > `server/config.json`（`BC_CONFIG` 可指向别处）> 内置默认。模板见 `server/config.example.json`。
 
@@ -196,7 +230,7 @@ curl -X POST "http://127.0.0.1:8787/api/hooks/parent-1?token=$BC_TOKEN" \
 | `BC_LLM_BASE_URL/_API_KEY/_MODEL` | — | ai-agent / AI 接管用的 OpenAI 兼容模型 |
 | `BC_FEISHU_*` | — | 见 §5.4 |
 
-### 6.1 敏感配置放哪、怎么配（LLM Key / 飞书 Secret 示例）
+### 7.1 敏感配置放哪、怎么配（LLM Key / 飞书 Secret 示例）
 
 敏感值有**三个配置渠道**，选一个即可；同一台机器上环境变量优先级最高（会覆盖 config.json）。
 无论哪个渠道，这些文件都**不会进 git**（根 `.gitignore` 已忽略 `.env`，`server/.gitignore` 已忽略 `config.json`）——但仍要养成习惯：密钥只出现在服务器本机。
@@ -316,7 +350,7 @@ curl -s -X POST http://127.0.0.1:8787/api/runs \
 - 换 Key：改环境变量/文件 → 重启进程（容器则 `docker compose up -d` 重建），无需动仓库。
 - 一旦怀疑泄露：先在服务商后台吊销（DeepSeek 控制台 / 飞书开放平台重置 App Secret），再换新值重启；已提交进 git 历史的密钥视为已泄露，必须吊销而不是删除提交。
 
-## 7. 块支持矩阵（相对扩展）
+## 8. 块支持矩阵（相对扩展）
 
 - **完全支持**：click/fill/scroll/hover/按键/勾选、open-url/new-tab/switch-tab/close-tab/reload、get-text/get-form/set-radio/attribute-value/tab-url、set/get-variable、insert/export-data、slice/regex/increase/delete/sort/data-mapping、log-data、condition/conditions/delay、loop-data/repeat-task/while-loop/loop-elements（引擎循环）、**execute-workflow（嵌套）**、cookie、clipboard、element-exists、link、create-element、upload-file、handle-dialog、wait-connections、trigger-event、webhook、javascript-code（页面优先、本地兜底）、handle-download、save-local、forms、event-click/hover-element/element-scroll、loop-breakpoint、workflow-state、parameter-prompt（从运行变量读取）。
 - **服务端降级**（记录日志后继续）：notification（→日志）、proxy/save-assets/switch-to/browser-event（占位说明）、parameter-prompt（无人值守无弹窗）。
@@ -324,7 +358,7 @@ curl -s -X POST http://127.0.0.1:8787/api/runs \
 - **OCR**：`ocr` 走 tesseract.js（Node 原生可用）。
 - **不支持**：google-sheets / google-drive（需 Google OAuth 云服务，报错终止）。
 
-## 8. 数据与可观测性
+## 9. 数据与可观测性
 
 ```
 data/
@@ -334,15 +368,15 @@ data/
 └── artifacts/<runId>/      # export-data 导出、截图、下载文件、AI 截图
 ```
 
-## 9. 安全清单
+## 10. 安全清单
 
 1. **必设 `BC_TOKEN`**；没有 Token 时 API 完全开放，只适合 `127.0.0.1` 调试。
 2. 对公网暴露时前置反向代理 + HTTPS，或用 SSH 隧道 / WireGuard 内网访问。
 3. 工作流能驱动真实浏览器出网——只导入可信来源的 workflows.json。
-4. LLM Key、飞书 Secret 用环境变量注入，不要写进仓库——三个渠道的具体配法与验证 demo 见 §6.1。
+4. LLM Key、飞书 Secret 用环境变量注入，不要写进仓库——三个渠道的具体配法与验证 demo 见 §7.1。
 5. `BC_MAX_CONCURRENT` 控制资源占用；CDP/browserless 端口不要裸暴露公网。
 
-## 10. 故障排查
+## 11. 故障排查
 
 | 现象 | 处理 |
 | --- | --- |
@@ -353,8 +387,11 @@ data/
 | 飞书 404 / 收不到消息 | 应用未开“长连接模式”或未订阅 `im.message.receive_v1` / 版本未发布 |
 | 定时没触发 | `GET /api/workflows` 看 trigger；`trigger.enabled=false` 不布防；cron 需 5 段式 |
 | Windows 有头调试 | `BC_BROWSER_HEADLESS=0`，且以桌面会话运行（不要在服务会话里有头） |
+| 控制台显示“尚未构建”或 `GET /` 404 | 先执行 `pnpm --dir server build` 再重启进程（Docker 镜像已内置） |
+| 控制台登录后一直 401 | Token 不对或被轮换：清除浏览器 localStorage 中的 `bc-runner-token` 后重新输入 |
+| 页面改了配置但“不生效” | 该字段被 `BC_*` 环境变量覆盖（页面有标注），去掉环境变量或改环境变量本身 |
 
-## 11. 本地验证
+## 12. 本地验证
 
 ```bash
 pnpm --dir server typecheck   # 类型检查

@@ -465,6 +465,10 @@ pnpm run package     # 构建两个变体 → releases/browser-copilot-<版本>-
 支持嵌套子工作流复制校验、持久化 profile、CDP 远端浏览器与 Docker 部署），见
 **[docs/server.md](./docs/server.md)**。扩展本身不受影响。
 
+执行 `pnpm --dir server build` 后，runner 会在 `http://<服务器>:8787/` 直接托管一个
+**Web 控制台**：配置大模型 / 飞书 / Token / 浏览器参数，导入与在线编辑工作流 JSON，
+管理定时任务，运行工作流并查看逐步日志——日常运维不再需要敲命令行（CLI 用法全部保留）。
+
 ---
 
 ## 常见问题
