@@ -20,7 +20,7 @@ import { useEffect, useState } from 'react'
 import { Field, IconButton, Select, TextArea, TextInput } from '../shared/Field'
 import type { EditFormProps } from '../EditForms'
 import InteractionBase, { str } from '../shared/InteractionBase'
-import ElSelectorActions from '../shared/ElSelectorActions'
+import SelectorField from '../shared/SelectorField'
 
 /** Keys suggested in the single-key autocomplete (EditPressKey `keysList`). */
 const KEYS_LIST = [
@@ -195,19 +195,13 @@ export default function EditPressKey({ data, onChange }: EditFormProps) {
       onChange={onChange}
       hideSelector
       header={
-        <Field label="Target element (Optional)">
-          <div className="wf-selector-row">
-            <TextInput
-              value={selector}
-              placeholder="CSS Selector or XPath"
-              onChange={(v) => onChange({ selector: v })}
-            />
-            <ElSelectorActions
-              selector={selector}
-              onSelector={(sel) => onChange({ selector: sel })}
-            />
-          </div>
-        </Field>
+        <SelectorField
+          label="Target element (Optional)"
+          inputVariant="input"
+          placeholder="CSS Selector or XPath"
+          selector={selector}
+          onSelector={(sel) => onChange({ selector: sel })}
+        />
       }
     >
       <Field label="Action">

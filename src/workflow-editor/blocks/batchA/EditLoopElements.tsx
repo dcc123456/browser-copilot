@@ -17,7 +17,7 @@ import { useEffect } from 'react'
 import { Checkbox, Field, NumberInput, Select, TextInput } from '../shared/Field'
 import type { EditFormProps } from '../EditForms'
 import InteractionBase, { bool, num, str } from '../shared/InteractionBase'
-import ElSelectorActions from '../shared/ElSelectorActions'
+import SelectorField from '../shared/SelectorField'
 import { nanoid } from './_shared'
 
 const LOAD_MORE_ACTIONS = [
@@ -88,19 +88,13 @@ export default function EditLoopElements({ data, onChange }: EditFormProps) {
         </Field>
 
         {(loadMoreAction === 'click-element' || loadMoreAction === 'click-link') && (
-          <Field label="Element selector">
-            <div className="wf-selector-row">
-              <TextInput
-                value={actionElSelector}
-                placeholder="CSS Selector or XPath"
-                onChange={(v) => onChange({ actionElSelector: v })}
-              />
-              <ElSelectorActions
-                selector={actionElSelector}
-                onSelector={(sel) => onChange({ actionElSelector: sel })}
-              />
-            </div>
-          </Field>
+          <SelectorField
+            label="Element selector"
+            inputVariant="input"
+            placeholder="CSS Selector or XPath"
+            selector={actionElSelector}
+            onSelector={(sel) => onChange({ actionElSelector: sel })}
+          />
         )}
 
         {['click-element', 'scroll', 'scroll-up'].includes(loadMoreAction) && (

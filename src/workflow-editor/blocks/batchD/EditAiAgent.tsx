@@ -15,9 +15,9 @@
  */
 
 import type { EditFormProps } from '../EditForms'
-import { Checkbox, Expand, Field, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
+import { Checkbox, Expand, Field, NumberInput, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
-import ElSelectorActions from '../shared/ElSelectorActions'
+import SelectorField from '../shared/SelectorField'
 
 export default function EditAiAgent({ data, onChange }: EditFormProps) {
   const findBy = str(data, 'findBy') || 'cssSelector'
@@ -34,35 +34,14 @@ export default function EditAiAgent({ data, onChange }: EditFormProps) {
         />
       </Field>
 
-      <Field label="Target element (optional)">
-        <div className="wf-selector-row">
-          <div className="wf-selector-findby">
-            <Select
-              value={findBy}
-              onChange={(v) => onChange({ findBy: v })}
-              options={[
-                { value: 'cssSelector', label: 'CSS selector' },
-                { value: 'xpath', label: 'XPath' },
-              ]}
-            />
-          </div>
-          <ElSelectorActions
-            selector={selector}
-            findBy={findBy === 'xpath' ? 'xpath' : 'cssSelector'}
-            onSelector={(sel) => onChange({ selector: sel })}
-          />
-        </div>
-      </Field>
-      <Field label="Selector" title="Leave empty to let the agent read the whole page itself.">
-        <TextArea
-          mono
-          value={selector}
-          placeholder={
-            findBy === 'xpath' ? '//div[@class="..."] (optional)' : '.css-selector (optional)'
-          }
-          onChange={(v) => onChange({ selector: v })}
-        />
-      </Field>
+      <SelectorField
+        label="Target element (optional)"
+        data={data}
+        selector={selector}
+        onSelector={(sel) => onChange({ selector: sel })}
+        findBy={findBy}
+        onFindBy={(v) => onChange({ findBy: v })}
+      />
       <p className="wf-form-note">
         The matched element's text is read at runtime and given to the agent. Leave it empty and the
         agent reads the page itself via its tools.

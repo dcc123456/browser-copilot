@@ -12,6 +12,7 @@
 
 import type { ReactNode } from 'react'
 import type { EditFormProps } from '../EditForms'
+import OutputVariableFields from '../shared/OutputVariableFields'
 import { Checkbox, Field, TextInput } from '../shared/Field'
 
 let counter = 0
@@ -30,29 +31,11 @@ export function arr<T = Record<string, unknown>>(value: unknown): T[] {
 }
 
 /**
- * "Assign to variable" output row (Automa's InsertWorkflowData `variables`
- * slot). Renders the checkbox and, when enabled, the variable name input.
+ * "Assign to a variable" output row (Automa's InsertWorkflowData `variables`
+ * slot) — shared OutputVariableFields with batchC's original label strings.
  */
-export function AssignVariable({ data, onChange }: Pick<EditFormProps, 'data' | 'onChange'>) {
-  const assignVariable = data.assignVariable === true
-  return (
-    <>
-      <Checkbox
-        checked={assignVariable}
-        onChange={(v) => onChange({ assignVariable: v })}
-        label="Assign to a variable"
-      />
-      {assignVariable && (
-        <Field label="Variable name">
-          <TextInput
-            value={typeof data.variableName === 'string' ? data.variableName : ''}
-            placeholder="abc123"
-            onChange={(v) => onChange({ variableName: v })}
-          />
-        </Field>
-      )}
-    </>
-  )
+export function AssignVariable(props: Pick<EditFormProps, 'data' | 'onChange'>) {
+  return <OutputVariableFields {...props} checkboxLabel="Assign to a variable" placeholder="abc123" />
 }
 
 /** "Insert to table" dataColumn row kept simple (no live column list yet). */

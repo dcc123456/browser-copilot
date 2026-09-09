@@ -59,7 +59,7 @@ export const CUSTOM_BLOCKS: BlockCatalogEntry[] = [
     id: 'ocr',
     name: 'OCR text recognition',
     description:
-      'Run local OCR (Tesseract.js, offline) on an image variable, an img element on the page or the previous page snapshot; outputs the recognized string into the output variable (default lastOcrText).',
+      'Run local OCR (Tesseract.js, offline) on an image variable, an element on the page (img / canvas / text-less container) or the previous page snapshot; outputs the recognized string into the output variable (default lastOcrText).',
     icon: 'lucide:ScanText',
     category: 'browser',
     component: 'Default',

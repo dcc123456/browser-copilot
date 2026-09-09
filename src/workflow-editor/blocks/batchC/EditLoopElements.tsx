@@ -4,8 +4,8 @@
  * Reuses the interaction skeleton (description + find-by + selector +
  * selector options; multiple/mark-el hidden) and adds the loop id, max-loop,
  * reverse toggle, and the "load more elements" section (click an element,
- * click a link / paginate, or scroll to load more). The on-page element
- * picker for the action selector is out of scope — a plain selector field.
+ * click a link / paginate, or scroll to load more) with the shared
+ * SelectorField (pick/verify) for the action selector.
  *
  * @module workflow-editor/blocks/batchC/EditLoopElements
  */
@@ -15,6 +15,7 @@ import type { EditFormProps } from '../EditForms'
 import InteractionBase from '../shared/InteractionBase'
 import { Checkbox, Field, NumberInput, Select, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
+import SelectorField from '../shared/SelectorField'
 import { id } from './shared'
 
 const ACTIONS = [
@@ -77,13 +78,13 @@ export default function EditLoopElements({ data, onChange }: EditFormProps) {
         </Field>
 
         {(action === 'click-element' || action === 'click-link') && (
-          <Field label="Element selector">
-            <TextInput
-              value={str(data, 'actionElSelector')}
-              placeholder="CSS Selector or XPath"
-              onChange={(v) => onChange({ actionElSelector: v })}
-            />
-          </Field>
+          <SelectorField
+            label="Element selector"
+            inputVariant="input"
+            placeholder="CSS Selector or XPath"
+            selector={str(data, 'actionElSelector')}
+            onSelector={(v) => onChange({ actionElSelector: v })}
+          />
         )}
 
         {(action === 'click-element' || action === 'scroll' || action === 'scroll-up') && (

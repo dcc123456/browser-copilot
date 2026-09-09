@@ -2,39 +2,29 @@
  * EditOcr — edit form for the local `ocr` block (Browser Copilot extension).
  *
  * Input — one of three sources: an img-typed variable holding an image data
- * URL / bare base64 payload / http(s) link, an img element selected on the
- * page (CSS selector with the shared pick-from-page + verify actions, like
- * the click blocks), or the previous page snapshot (the visible page the run
- * is driving). Output — the recognized string (type always string), stored
+ * URL / bare base64 payload / http(s) link, an element on the page (img /
+ * canvas / a text-less container — shared pick-from-page + verify actions,
+ * like the click blocks), or the previous page snapshot (the visible page the
+ * run is driving). Output — the recognized string (type always string), stored
  * in the editable `variableName` variable (default `lastOcrText`).
  *
  * @module workflow-editor/blocks/batchB/EditOcr
  */
 
-import { useState } from 'react'
 import type { EditFormProps } from '../EditForms'
-import ElSelectorActions from '../shared/ElSelectorActions'
-import { bool, str, targetSummary } from '../shared/InteractionBase'
+import { bool, str } from '../shared/InteractionBase'
+import SelectorField from '../shared/SelectorField'
 import { Checkbox, Field, Select, TextArea, TextInput } from '../shared/Field'
 
 const SOURCES = [
   { value: 'variable', label: 'An image variable (img)' },
-  { value: 'element', label: 'An img element on the page' },
+  { value: 'element', label: 'An element on the page (img / canvas)' },
   { value: 'page', label: 'The previous page snapshot' },
 ]
 
 export default function EditOcr({ data, onChange }: EditFormProps) {
   const source = str(data, 'source') || 'page'
   const selector = str(data, 'selector')
-  // A generated node may carry the conversation's locator instead of a CSS
-  // selector — show it read-only so the edit panel is not blank.
-  const locatorHint = selector ? '' : targetSummary(data)
-  // Latest "verify selector" outcome, shown inline (ElSelectorActions has no
-  // toast host of its own in this popup).
-  const [verifyStatus, setVerifyStatus] = useState<{ text: string; kind: 'ok' | 'error' } | null>(
-    null,
-  )
-  const reportVerify = (text: string, kind: 'ok' | 'error'): void => setVerifyStatus({ text, kind })
 
   return (
     <div className="wf-form">
@@ -61,37 +51,13 @@ export default function EditOcr({ data, onChange }: EditFormProps) {
       )}
 
       {source === 'element' && (
-        <>
-          {/* Pick/verify actions on one row, like the interaction blocks. The
-              capture path is CSS-only, so there is no find-by dropdown. */}
-          <div className="wf-selector-row">
-            <div className="wf-selector-findby">
-              <span style={{ fontSize: 12, opacity: 0.75 }}>CSS Selector</span>
-            </div>
-            <ElSelectorActions
-              selector={selector}
-              findBy="cssSelector"
-              onSelector={(sel) => onChange({ selector: sel })}
-              onMessage={reportVerify}
-            />
-          </div>
-          {verifyStatus && (
-            <p className={`wf-form-note wf-verify-${verifyStatus.kind}`}>{verifyStatus.text}</p>
-          )}
-          {locatorHint && <p className="wf-form-note">{locatorHint}</p>}
-          <Field label="CSS Selector">
-            <TextArea
-              mono
-              value={selector}
-              placeholder={
-                locatorHint
-                  ? 'Leave empty to use the conversation locator above; type a CSS selector to override'
-                  : 'img.captcha'
-              }
-              onChange={(v) => onChange({ selector: v })}
-            />
-          </Field>
-        </>
+        // The capture path is CSS-only, so there is no find-by dropdown.
+        <SelectorField
+          data={data}
+          selector={selector}
+          onSelector={(sel) => onChange({ selector: sel })}
+          placeholder="img.captcha"
+        />
       )}
 
       <Field label="Language (empty = global setting)">

@@ -13,7 +13,7 @@
  *   keyboard-shortcut  — shortcut (+ active-in-input)
  *   context-menu       — menu name + context types
  *   on-startup         — no options
- *   element-change     — observe a target element (InteractionBase selector +
+ *   element-change     — observe a target element (SelectorField pick/verify +
  *                        MutationObserver options) and an optional base element
  *
  * Automa's newer build wraps these in a multi-trigger modal, but the flat
@@ -24,7 +24,7 @@
  */
 
 import { CircleDot, Square, SquareTerminal } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { EditFormProps } from '../EditForms'
 import {
   Checkbox,
@@ -36,7 +36,8 @@ import {
   TextInput,
   type Patch,
 } from '../shared/Field'
-import InteractionBase, { bool, num, str } from '../shared/InteractionBase'
+import { bool, num, str } from '../shared/InteractionBase'
+import SelectorField from '../shared/SelectorField'
 import Modal from '../../ui/Modal'
 import { useEditorLocale } from '../../locale-context'
 import ParameterFields, { type WorkflowParameter } from './ParameterFields'
@@ -362,21 +363,6 @@ function ElementChangeFields({ data, onChange }: SubFormProps) {
   const baseSelector = str(observe, 'baseSelector')
   const matchPattern = str(observe, 'matchPattern')
 
-  // InteractionBase drives selector pick/verify on a shimmed record.
-  const shim = useRef<Record<string, unknown>>({})
-  shim.current = {
-    selector: str(observe, 'selector'),
-    findBy: 'cssSelector',
-    multiple: true, // hide the "multiple elements" checkbox (irrelevant here)
-    markEl: false,
-    waitForSelector: false,
-    waitSelectorTimeout: 5000,
-  }
-  const patchShim = (patch: Record<string, unknown>) => {
-    if ('selector' in patch)
-      onChange({ observeElement: { ...observe, selector: String(patch.selector ?? '') } })
-  }
-
   const patchTarget = (patch: Partial<ObserveOptions>) =>
     onChange({ observeElement: { ...observe, targetOptions: { ...targetOptions, ...patch } } })
   const patchBase = (patch: Partial<ObserveOptions>) =>
@@ -422,16 +408,13 @@ function ElementChangeFields({ data, onChange }: SubFormProps) {
         />
       </Field>
 
-      {/* Target element selector with pick/verify (InteractionBase). */}
-      <InteractionBase
-        data={shim.current}
-        onChange={patchShim}
-        hideDescription
-        hideMultiple
-        hideMarkEl
-      >
-        <Expand title="Target element options">{renderOptions(targetOptions, patchTarget)}</Expand>
-      </InteractionBase>
+      {/* Target element selector with pick/verify (shared SelectorField — the
+          record is nested under observeElement, so value-driven props). */}
+      <SelectorField
+        selector={str(observe, 'selector')}
+        onSelector={(v) => onChange({ observeElement: { ...observe, selector: v } })}
+      />
+      <Expand title="Target element options">{renderOptions(targetOptions, patchTarget)}</Expand>
 
       <Field label="Base element (optional)">
         <TextArea

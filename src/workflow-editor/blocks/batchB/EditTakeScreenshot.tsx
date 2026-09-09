@@ -13,6 +13,7 @@ import type { EditFormProps } from '../EditForms'
 import SaveOutputs from './SaveOutputs'
 import { Checkbox, Field, Select, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
+import SelectorField from '../shared/SelectorField'
 
 const TYPES = [
   { value: 'page', label: 'A page' },
@@ -47,13 +48,13 @@ export default function EditTakeScreenshot({ data, onChange }: EditFormProps) {
       </Field>
 
       {type === 'element' && (
-        <Field label="CSS Selector">
-          <TextInput
-            value={str(data, 'selector')}
-            placeholder=".element"
-            onChange={(v) => onChange({ selector: v })}
-          />
-        </Field>
+        <SelectorField
+          label="CSS Selector"
+          inputVariant="input"
+          placeholder=".element"
+          selector={str(data, 'selector')}
+          onSelector={(sel) => onChange({ selector: sel })}
+        />
       )}
 
       {ext === 'jpeg' && (

@@ -12,6 +12,8 @@
  *
  * @module workflow-editor/blocks/batchA/_shared
  */
+import type { EditFormProps } from '../EditForms'
+import OutputVariableFields from '../shared/OutputVariableFields'
 import { Checkbox, Field, TextInput } from '../shared/Field'
 import type { Patch } from '../shared/Field'
 
@@ -25,32 +27,9 @@ export function nanoid(size = 6): string {
   return id
 }
 
-export function AssignVariableFields({
-  data,
-  onChange,
-}: {
-  data: Record<string, unknown>
-  onChange: Patch
-}) {
-  const assignVariable = data.assignVariable === true
-  return (
-    <>
-      <Checkbox
-        checked={assignVariable}
-        onChange={(v) => onChange({ assignVariable: v })}
-        label="Assign to variable"
-      />
-      {assignVariable && (
-        <Field label="Variable name">
-          <TextInput
-            value={typeof data.variableName === 'string' ? data.variableName : ''}
-            placeholder="Variable name"
-            onChange={(v) => onChange({ variableName: v })}
-          />
-        </Field>
-      )}
-    </>
-  )
+/** "Assign to variable" strip — shared OutputVariableFields (batchA label). */
+export function AssignVariableFields(props: Pick<EditFormProps, 'data' | 'onChange'>) {
+  return <OutputVariableFields {...props} />
 }
 
 /**

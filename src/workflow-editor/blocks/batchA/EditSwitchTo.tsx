@@ -13,14 +13,13 @@
  *
  * @module workflow-editor/blocks/batchA/EditSwitchTo
  */
-import { Field, Select, TextArea, TextInput } from '../shared/Field'
+import { Field, Select, TextArea } from '../shared/Field'
 import type { EditFormProps } from '../EditForms'
 import { str } from '../shared/InteractionBase'
-import ElSelectorActions from '../shared/ElSelectorActions'
+import SelectorField from '../shared/SelectorField'
 
 export default function EditSwitchTo({ data, onChange }: EditFormProps) {
   const windowType = str(data, 'windowType') || 'main-window'
-  const selector = str(data, 'selector')
 
   return (
     <div className="wf-form">
@@ -44,22 +43,13 @@ export default function EditSwitchTo({ data, onChange }: EditFormProps) {
       </Field>
 
       {windowType === 'iframe' && (
-        <Field label="Element selector">
-          <div className="wf-selector-row">
-            <div style={{ flex: 1 }}>
-              <TextInput
-                value={selector}
-                placeholder="CSS Selector or XPath"
-                onChange={(v) => onChange({ selector: v })}
-              />
-            </div>
-            <ElSelectorActions
-              selector={selector}
-              findBy={str(data, 'findBy') === 'xpath' ? 'xpath' : 'cssSelector'}
-              onSelector={(sel) => onChange({ selector: sel })}
-            />
-          </div>
-        </Field>
+        <SelectorField
+          label="Element selector"
+          inputVariant="input"
+          placeholder="CSS Selector or XPath"
+          selector={str(data, 'selector')}
+          onSelector={(sel) => onChange({ selector: sel })}
+        />
       )}
     </div>
   )

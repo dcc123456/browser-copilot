@@ -10,9 +10,9 @@
  * @module workflow-editor/blocks/shared/InteractionBase
  */
 
-import { useState, type ReactNode } from 'react'
-import { Checkbox, Expand, Field, NumberInput, Select, TextArea } from './Field'
-import ElSelectorActions from './ElSelectorActions'
+import type { ReactNode } from 'react'
+import { Checkbox, Expand, Field, NumberInput, TextArea } from './Field'
+import SelectorField from './SelectorField'
 import type { Patch } from './Field'
 
 export interface InteractionBaseProps {
@@ -83,15 +83,6 @@ export default function InteractionBase({
 }: InteractionBaseProps) {
   const findBy = str(data, 'findBy') || 'cssSelector'
   const selector = str(data, 'selector')
-  // A generated node may carry the conversation's locator instead of a CSS
-  // selector — show it read-only so the edit panel is not blank.
-  const locatorHint = selector ? '' : targetSummary(data)
-  // Latest "verify selector" outcome, shown inline so the operator has feedback
-  // even though ElSelectorActions has no toast host of its own in this popup.
-  const [verifyStatus, setVerifyStatus] = useState<{ text: string; kind: 'ok' | 'error' } | null>(
-    null,
-  )
-  const reportVerify = (text: string, kind: 'ok' | 'error'): void => setVerifyStatus({ text, kind })
 
   return (
     <div className="wf-form">
@@ -109,44 +100,14 @@ export default function InteractionBase({
 
       {!hideSelector && (
         <>
-          {/* Automa: find-by select (flex-1) + pick/verify buttons on ONE row. */}
-          <div className="wf-selector-row">
-            <div className="wf-selector-findby">
-              <Select
-                value={findBy}
-                onChange={(v) => onChange({ findBy: v })}
-                options={[
-                  { value: 'cssSelector', label: 'CSS selector' },
-                  { value: 'xpath', label: 'XPath' },
-                ]}
-              />
-            </div>
-            <ElSelectorActions
-              selector={selector}
-              findBy={findBy === 'xpath' ? 'xpath' : 'cssSelector'}
-              multiple={bool(data, 'multiple')}
-              onSelector={(sel) => onChange({ selector: sel })}
-              onMessage={reportVerify}
-            />
-          </div>
-          {verifyStatus && (
-            <p className={`wf-form-note wf-verify-${verifyStatus.kind}`}>{verifyStatus.text}</p>
-          )}
-          {locatorHint && <p className="wf-form-note">{locatorHint}</p>}
-          <Field>
-            <TextArea
-              mono
-              value={selector}
-              placeholder={
-                locatorHint
-                  ? 'Leave empty to use the conversation locator above; type a CSS selector to override'
-                  : findBy === 'xpath'
-                    ? '//div[@class="..."]'
-                    : '.css-selector'
-              }
-              onChange={(v) => onChange({ selector: v })}
-            />
-          </Field>
+          <SelectorField
+            data={data}
+            selector={selector}
+            onSelector={(sel) => onChange({ selector: sel })}
+            findBy={findBy}
+            onFindBy={(v) => onChange({ findBy: v })}
+            multiple={bool(data, 'multiple')}
+          />
 
           <Expand title="Selector options">
             <div className="wf-selector-options">

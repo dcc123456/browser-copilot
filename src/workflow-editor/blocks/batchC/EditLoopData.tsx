@@ -3,8 +3,8 @@
  *
  * Iterates over a table (data columns), a number range, a Google Sheet ref,
  * a variable, custom JSON data, or page elements. File import / CSV parsing
- * (Papa) and the element picker are out of scope; custom data is edited as a
- * mono JSON textarea and elements use a plain selector input.
+ * (Papa) are out of scope; custom data is edited as a mono JSON textarea and
+ * elements use the shared SelectorField (pick/verify on page).
  *
  * @module workflow-editor/blocks/batchC/EditLoopData
  */
@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react'
 import type { EditFormProps } from '../EditForms'
 import { Checkbox, Expand, Field, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
+import SelectorField from '../shared/SelectorField'
 import { id } from './shared'
 
 const LOOP_TYPES = [
@@ -95,14 +96,11 @@ export default function EditLoopData({ data, onChange }: EditFormProps) {
 
       {loopThrough === 'elements' && (
         <>
-          <Field label="Element selector">
-            <TextArea
-              mono
-              value={str(data, 'elementSelector')}
-              placeholder="CSS Selector or XPath"
-              onChange={(v) => patch({ elementSelector: v })}
-            />
-          </Field>
+          <SelectorField
+            label="Element selector"
+            selector={str(data, 'elementSelector')}
+            onSelector={(v) => patch({ elementSelector: v })}
+          />
           <Checkbox
             checked={bool(data, 'waitForSelector')}
             onChange={(v) => patch({ waitForSelector: v })}
