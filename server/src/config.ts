@@ -110,7 +110,8 @@ function str(value: unknown): string | undefined {
 /** Applies the `BC_*` environment overrides onto the config. */
 function applyEnv(config: Mutable<RunnerConfig>): void {
   const env = process.env
-  const port = Number(env['BC_PORT'])
+  // PocketBay and most PaaS hosts inject `PORT`; `BC_PORT` stays the override.
+  const port = Number(env['BC_PORT'] ?? env['PORT'])
   if (Number.isFinite(port) && port > 0) config.port = Math.floor(port)
   const token = str(env['BC_TOKEN'])
   if (token !== undefined) config.token = token
