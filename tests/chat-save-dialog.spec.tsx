@@ -1,16 +1,18 @@
 // @vitest-environment jsdom
 /**
- * Component test for the ChatTab save-as-workflow dialog ("保存为工作流" →
- * AI node review → save), driving the REAL ChatTab component with a mocked
- * command channel. Pins the interaction contract:
+ * Component test for the ChatTab save-as-workflow flow ("保存为工作流"),
+ * driving the REAL ChatTab component with a mocked command channel. Pins the
+ * zero-token interaction contract:
  *
- * 1. clicking "Save as workflow" opens the review dialog and the review
- *    starts immediately, with the progress log's first line visible;
- * 2. the dialog has NO confirm button while the review is in flight;
- * 3. once the verdict lands, the confirm button appears and clicking it
- *    issues exactly one `workflows.save` carrying the AI-pruned workflow;
- * 4. a failed review still ends with a confirm button (keep everything);
- * 5. cancel closes the dialog and keeps the card.
+ * 1. clicking "Save as workflow" on the card saves DIRECTLY — exactly one
+ *    `workflows.save` and ZERO `workflows.review` commands (no model tokens);
+ * 2. the AI node review is opt-in via "AI refine…": it opens the review
+ *    dialog, starts immediately, shows no confirm while in flight, and the
+ *    landed verdict prunes the saved workflow;
+ * 3. a failed review still ends with a confirm button (keep everything);
+ * 4. cancel closes the dialog and keeps the card;
+ * 5. the toolbar switch gates the whole flow: off → no card, no history query,
+ *    and flipping it persists `chatWorkflowPromptEnabled` into settings.
  */
 import { beforeAll, afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 
@@ -72,6 +74,8 @@ let reviewBehavior: 'ok' | 'fail' = 'ok'
 let holdReview = false
 let releaseReview: (() => void) | null = null
 const saveCommands: Extract<Command, { type: 'workflows.save' }>[] = []
+/** Settings payload served by the `settings.get` mock; tests may override. */
+let settingsPayload: Record<string, unknown> = { mode: 'semi' }
 
 const portMessageListeners: ((message: unknown) => void)[] = []
 const fakePort = {
@@ -92,6 +96,7 @@ beforeEach(() => {
   holdReview = false
   releaseReview = null
   saveCommands.length = 0
+  settingsPayload = { mode: 'semi' }
   portMessageListeners.length = 0
   mocks.sendCommand.mockReset()
   mocks.sendCommand.mockImplementation(async (command: Command) => {
@@ -101,7 +106,10 @@ beforeEach(() => {
       case 'conversations.list':
         return { type: 'conversations.list', conversations: [] }
       case 'settings.get':
-        return { type: 'settings', settings: { mode: 'semi' } }
+        return { type: 'settings', settings: settingsPayload }
+      case 'settings.set':
+        settingsPayload = { ...settingsPayload, ...command.patch }
+        return { type: 'settings', settings: settingsPayload }
       case 'workflows.review': {
         if (reviewBehavior === 'fail') throw new Error('AI review timed out after 60s.')
         const workflow = (command as { workflow: Workflow }).workflow
@@ -148,7 +156,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('chat save-as-workflow review dialog', () => {
+describe('chat save-as-workflow flow', () => {
   const flush = async (): Promise<void> => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
@@ -196,7 +204,33 @@ describe('chat save-as-workflow review dialog', () => {
     await flush()
   }
 
-  it('reviews immediately on open, gates the save button on the verdict, then saves', async () => {
+  const reviewCommandCount = (): number =>
+    mocks.sendCommand.mock.calls.filter(
+      ([command]) => (command as Command).type === 'workflows.review',
+    ).length
+
+  it('saves directly from the card with ZERO review calls (no model tokens)', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await openCard(container, root)
+
+      // Click "Save as workflow": the save goes out at once.
+      await clickButton(container, 'Save as workflow')
+      expect(saveCommands).toHaveLength(1)
+      expect(reviewCommandCount()).toBe(0)
+      // The card closed and a status line confirmed the save.
+      expect(container.textContent).toContain('Saved workflow:')
+    } finally {
+      await act(async () => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+
+  it('runs the opt-in AI review from "AI refine…" and saves the pruned workflow', async () => {
     const container = document.createElement('div')
     document.body.appendChild(container)
     const root = createRoot(container)
@@ -204,17 +238,14 @@ describe('chat save-as-workflow review dialog', () => {
       holdReview = true
       await openCard(container, root)
 
-      // Click "Save as workflow": the review dialog opens and the review STARTS.
-      await clickButton(container, 'Save as workflow')
+      // "AI refine…" opens the review dialog and the review STARTS at once.
+      await clickButton(container, 'AI refine…')
       expect(container.textContent).toContain('Sent 2 steps to the AI reviewer…')
       expect(container.textContent).toContain('AI is reviewing which nodes are worth keeping…')
       // No confirm button while the review is in flight.
       expect(buttonTexts(container)).not.toContain('Save workflow')
       // Exactly one review command, for the base workflow.
-      const reviewCommands = mocks.sendCommand.mock.calls.filter(
-        ([command]) => (command as Command).type === 'workflows.review',
-      )
-      expect(reviewCommands).toHaveLength(1)
+      expect(reviewCommandCount()).toBe(1)
 
       // The verdict lands: the save button appears; clicking saves once.
       await act(async () => {
@@ -245,7 +276,7 @@ describe('chat save-as-workflow review dialog', () => {
     const root = createRoot(container)
     try {
       await openCard(container, root)
-      await clickButton(container, 'Save as workflow')
+      await clickButton(container, 'AI refine…')
       await flush()
       expect(container.textContent).toContain('Review failed')
       // A settled (failed) review still ends with a confirm button.
@@ -262,13 +293,13 @@ describe('chat save-as-workflow review dialog', () => {
     }
   })
 
-  it('cancel closes the dialog and keeps the save card', async () => {
+  it('cancel closes the review dialog and keeps the save card', async () => {
     const container = document.createElement('div')
     document.body.appendChild(container)
     const root = createRoot(container)
     try {
       await openCard(container, root)
-      await clickButton(container, 'Save as workflow')
+      await clickButton(container, 'AI refine…')
       expect(container.textContent).toContain('Review steps before saving')
       await clickButton(container, 'Cancel')
       expect(container.textContent).not.toContain('Review steps before saving')
@@ -305,7 +336,7 @@ describe('chat save-as-workflow review dialog', () => {
       // Hold the review so the dialog stays in-flight while lines are pushed.
       holdReview = true
       await openCard(container, root)
-      await clickButton(container, 'Save as workflow')
+      await clickButton(container, 'AI refine…')
       // The collapsible log section is visible with the local start line.
       expect(container.textContent).toContain('Review log')
       expect(container.textContent).toContain('Sent 2 steps to the AI reviewer…')
@@ -349,7 +380,7 @@ describe('chat save-as-workflow review dialog', () => {
       // First attempt fails (e.g. the MV3 mid-stream abort the user reported).
       reviewBehavior = 'fail'
       await openCard(container, root)
-      await clickButton(container, 'Save as workflow')
+      await clickButton(container, 'AI refine…')
       await flush()
       expect(container.textContent).toContain('Retry review')
 
@@ -363,10 +394,7 @@ describe('chat save-as-workflow review dialog', () => {
       expect(container.textContent).toContain('AI is reviewing which nodes are worth keeping…')
       expect(buttonTexts(container)).not.toContain('Save workflow')
       // Two review commands now, and a second "sent" log line.
-      const reviewCommands = mocks.sendCommand.mock.calls.filter(
-        ([command]) => (command as Command).type === 'workflows.review',
-      )
-      expect(reviewCommands).toHaveLength(2)
+      expect(reviewCommandCount()).toBe(2)
       expect(container.textContent.match(/Sent 2 steps to the AI reviewer…/g)).toHaveLength(2)
 
       // The retried verdict lands and saves with its keep set.
@@ -378,6 +406,95 @@ describe('chat save-as-workflow review dialog', () => {
       await clickButton(container, 'Save workflow')
       expect(saveCommands).toHaveLength(1)
       expect(saveCommands[0]!.workflow.drawflow.nodes).toHaveLength(3)
+    } finally {
+      await act(async () => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+
+  it('shows no card and sends no history query when the toolbar switch is off', async () => {
+    settingsPayload = { mode: 'semi', chatWorkflowPromptEnabled: false }
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          createElement(ChatTab, { skills: [], activeSkillId: null, onSelectSkill: () => {} }),
+        )
+      })
+      await flush()
+      await act(async () => {
+        for (const listener of portMessageListeners) listener({ type: 'done' })
+      })
+      await flush()
+      expect(container.textContent).not.toContain('Save as workflow')
+      // Gated BEFORE any work: not even the history lookup happens.
+      const historyCalls = mocks.sendCommand.mock.calls.filter(
+        ([command]) => (command as Command).type === 'history.list',
+      )
+      expect(historyCalls).toHaveLength(0)
+    } finally {
+      await act(async () => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+
+  it('persists the toolbar switch and stops offering after it is turned off', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          createElement(ChatTab, { skills: [], activeSkillId: null, onSelectSkill: () => {} }),
+        )
+      })
+      await flush()
+
+      // The toolbar toggle is an icon button; it defaults to pressed
+      // (historical behavior) and explains itself on hover via `title`.
+      const toggle = [...container.querySelectorAll('button')].find(
+        (candidate) => candidate.getAttribute('aria-label') === 'Offer to save workflow',
+      )
+      expect(toggle).toBeDefined()
+      expect(toggle!.getAttribute('aria-pressed')).toBe('true')
+      expect(toggle!.getAttribute('title')).toContain('workflow')
+
+      // All three toolbar controls are icon-only buttons that render their
+      // lucide icon as an inline <svg>; if an icon import is ever dropped the
+      // button still exists but paints nothing, so pin the svg presence.
+      for (const label of ['Attach selection', 'Offer to save workflow', 'History']) {
+        const button = [...container.querySelectorAll('button')].find(
+          (candidate) => candidate.getAttribute('aria-label') === label,
+        )
+        expect(button, label).toBeDefined()
+        expect(button!.querySelector('svg'), label).not.toBeNull()
+      }
+
+      // Clicking it off persists the setting and dismisses any open card.
+      await act(async () => {
+        toggle!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
+      await flush()
+      expect(toggle!.getAttribute('aria-pressed')).toBe('false')
+      expect(settingsPayload.chatWorkflowPromptEnabled).toBe(false)
+
+      // A subsequent turn end stays quiet: no card, no history query.
+      await act(async () => {
+        for (const listener of portMessageListeners) listener({ type: 'done' })
+      })
+      await flush()
+      expect(container.textContent).not.toContain('Save as workflow')
+      expect(
+        mocks.sendCommand.mock.calls.filter(
+          ([command]) => (command as Command).type === 'history.list',
+        ),
+      ).toHaveLength(0)
     } finally {
       await act(async () => {
         root.unmount()

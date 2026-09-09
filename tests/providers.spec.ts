@@ -166,6 +166,7 @@ describe('normalizeStoredSettings', () => {
         ocrLanguage: 'eng',
         takeoverModel: { providerId: '', model: '' },
         takeoverOnRun: false,
+        chatWorkflowPromptEnabled: true,
       })
     }
   })
@@ -189,6 +190,7 @@ describe('normalizeStoredSettings', () => {
       ocrLanguage: 'chi_sim+eng',
       takeoverModel: { providerId: '', model: '' },
       takeoverOnRun: false,
+      chatWorkflowPromptEnabled: false,
     }
     expect(normalizeStoredSettings(settings)).toEqual(settings)
   })
@@ -225,6 +227,7 @@ describe('normalizeStoredSettings', () => {
       ocrLanguage: 'eng',
       takeoverModel: { providerId: '', model: '' },
       takeoverOnRun: false,
+      chatWorkflowPromptEnabled: true,
     })
   })
 
@@ -351,6 +354,20 @@ describe('normalizeSettingsPayload · cross-version safety', () => {
     )
     for (const bad of [7, {}, null, undefined]) {
       expect(normalizeSettingsPayload({ localAgentActiveAgent: bad }).localAgentActiveAgent).toBe('')
+    }
+  })
+
+  // The chat's end-of-turn save prompt must survive a version skew: a worker
+  // that does not know the field yet still yields the historical default ON.
+  it('defaults and preserves chatWorkflowPromptEnabled', () => {
+    expect(normalizeSettingsPayload({}).chatWorkflowPromptEnabled).toBe(true)
+    expect(normalizeSettingsPayload({ chatWorkflowPromptEnabled: false }).chatWorkflowPromptEnabled).toBe(
+      false,
+    )
+    for (const bad of ['yes', 1, {}, null, undefined]) {
+      expect(normalizeSettingsPayload({ chatWorkflowPromptEnabled: bad }).chatWorkflowPromptEnabled).toBe(
+        true,
+      )
     }
   })
 })

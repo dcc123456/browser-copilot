@@ -39,6 +39,7 @@ import {
   type WorkflowReview,
 } from '../lib/workflow/review-patch'
 import { WorkflowReviewDialog } from './WorkflowReviewList'
+import SkillEditDialog from './SkillEditDialog'
 import type { Workflow } from '../lib/workflow/types'
 import type { AgentMode, ConversationMeta } from '../lib/types'
 import { confirmDialog } from '../ui/confirm'
@@ -63,7 +64,18 @@ import {
 import { useT } from './i18n'
 import Markdown from './Markdown'
 import { downloadAnswer, hasTables, type AnswerFormat } from '../lib/export-answer'
-import { Check, Copy, Download, Gauge, History, Info, Paperclip } from 'lucide-react'
+import {
+  Check,
+  Copy,
+  Download,
+  Gauge,
+  Highlighter,
+  History,
+  Info,
+  Paperclip,
+  // `Workflow` the icon is aliased: the file's `Workflow` type (lib/workflow) wins.
+  Workflow as WorkflowIcon,
+} from 'lucide-react'
 import { normalizeSkill } from '../lib/skills'
 import { detectSkillCandidatesFromMarkdown, type DetectedSkill } from '../lib/skill-detect'
 
@@ -190,6 +202,61 @@ function MessageAttachments({ attachments }: { attachments?: AttachmentSummary[]
 }
 
 /**
+ * Icon-only toolbar button used by the chat toolbar, where three text labels
+ * would not fit. The explanation lives in the hover tooltip (`title`) instead
+ * of a visible label; toggles additionally show their ON state as an accent
+ * tint (`aria-pressed`) so the icon alone still reads unambiguously.
+ *
+ * `!` modifiers are REQUIRED on the colour/border/padding utilities here:
+ * sidepanel/styles.css styles bare `button` elements with UNLAYERED rules
+ * (`button { … }`, `button:hover:not(:disabled) { … }`), and unlayered CSS
+ * always beats Tailwind's `@layer utilities` declarations in the cascade —
+ * without `!` the active/inactive tints are silently overridden and the
+ * toggles never show their selected state.
+ *
+ * `inline-flex`, NOT `flex`: Chrome shrinks the inline <svg> child of a
+ * flex-display <button> to zero width (the icon then paints nothing — see the
+ * `.msg-action svg` note in styles.css). Every icon button in this panel uses
+ * inline-flex for exactly that reason.
+ *
+ * For plain actions (no `active`) the attribute is omitted, keeping the
+ * semantics of a normal button.
+ */
+function ToolbarIconButton({
+  icon,
+  label,
+  hint,
+  active,
+  onClick,
+}: {
+  icon: React.ReactNode
+  label: string
+  /** Hover explanation; defaults to the label. */
+  hint?: string
+  /** Toggle state; omit for plain (non-toggle) action buttons. */
+  active?: boolean
+  onClick: () => void
+}): React.ReactElement {
+  return (
+    <button
+      aria-label={label}
+      aria-pressed={active}
+      className={[
+        'inline-flex h-7 w-7 flex-none cursor-pointer items-center justify-center rounded-lg border p-0! transition-colors duration-150',
+        active
+          ? 'border-accent! bg-accent-soft! text-accent!'
+          : 'border-transparent! bg-transparent! text-muted! hover:border-border! hover:bg-hover! hover:text-ink!',
+      ].join(' ')}
+      onClick={onClick}
+      title={hint ?? label}
+      type="button"
+    >
+      {icon}
+    </button>
+  )
+}
+
+/**
  * Copy / download actions rendered on user and assistant bubbles.
  *
  * Copying writes the raw `entry.text` (plain text for the user's own words,
@@ -199,8 +266,7 @@ function MessageAttachments({ attachments }: { attachments?: AttachmentSummary[]
  *
  * The buttons sit in the top-right corner and only show on hover / keyboard
  * focus, so they never block the transcript on a touch-less desktop.
- */
-function MsgActions({
+ */function MsgActions({
   entry,
   title,
   t,
@@ -341,29 +407,11 @@ function MsgActions({
   )
 }
 
-/** Editable fields of a generated-skill card; kept separate from `Skill` so the
- * form may hold an invalid (or empty) draft while the user is still typing. */
-interface SkillForm {
-  name: string
-  description: string
-  instructions: string
-  autoMatch: boolean
-}
-
-function toSkillForm(skill: Skill): SkillForm {
-  return {
-    name: skill.name,
-    description: skill.description,
-    instructions: skill.instructions,
-    autoMatch: skill.autoMatch,
-  }
-}
-
 /**
  * Renders the generated-skill cards found in an assistant reply (see
  * `msg-actions` UI, below). Each assistant message is scanned once and every
  * recognised skill block becomes a card where the user can save it straight
- * into the project's skill store, open an inline editor to tweak it first, or
+ * into the project's skill store, open the edit dialog to tweak it first, or
  * dismiss it.
  */
 function GeneratedSkillCards({
@@ -402,8 +450,9 @@ function GeneratedSkillCard({
   t: ReturnType<typeof useT>
 }) {
   const [dismissed, setDismissed] = useState(false)
+  // True while the edit DIALOG is open; the dialog owns the field state, so
+  // this component only tracks the saving/error outcome of the last save.
   const [editing, setEditing] = useState(false)
-  const [form, setForm] = useState<SkillForm>(() => toSkillForm(detected.draft))
   const [errorText, setErrorText] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -462,100 +511,58 @@ function GeneratedSkillCard({
       detected.draft.autoMatch,
     )
 
-  const saveEdited = (): void =>
-    void persist(form.name, form.description, form.instructions, form.autoMatch)
-
-  const startEditing = (): void => {
-    setForm(toSkillForm(detected.draft))
-    setEditing(true)
-    setErrorText(null)
-  }
-
   return (
     <div className="card generated-skill-card">
-      {editing ? (
-        <>
-          <div className="card-title">{t.skillSaveEdit}</div>
-          <label className="field">
-            <span>{t.skillName}</span>
-            <input
-              maxLength={60}
-              onChange={(event) => setForm({ ...form, name: event.target.value })}
-              value={form.name}
-            />
-          </label>
-          <label className="field">
-            <span>{t.skillDescription}</span>
-            <input
-              maxLength={300}
-              onChange={(event) => setForm({ ...form, description: event.target.value })}
-              value={form.description}
-            />
-          </label>
-          <label className="field">
-            <span>{t.skillInstructions}</span>
-            <textarea
-              maxLength={8000}
-              onChange={(event) => setForm({ ...form, instructions: event.target.value })}
-              rows={6}
-              value={form.instructions}
-            />
-          </label>
-          <label className="checkbox">
-            <input
-              checked={form.autoMatch}
-              onChange={(event) => setForm({ ...form, autoMatch: event.target.checked })}
-              type="checkbox"
-            />
-            <span>{t.skillAutoMatch}</span>
-          </label>
-          {errorText && (
-            <div className="banner" data-kind="error">
-              {errorText}
-            </div>
-          )}
-          <div className="actions">
-            <button className="primary" disabled={saving} onClick={saveEdited} type="button">
-              {t.save}
-            </button>
-            <button
-              disabled={saving}
-              onClick={() => {
-                setEditing(false)
-                setErrorText(null)
-              }}
-              type="button"
-            >
-              {t.cancel}
-            </button>
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="card-title">{t.skillGeneratedPreview}</div>
-          <div className="generated-skill-name">{detected.draft.name}</div>
-          {detected.draft.description && <p className="hint">{detected.draft.description}</p>}
-          <details className="generated-skill-instructions">
-            <summary>{t.skillInstructions}</summary>
-            <pre>{detected.draft.instructions}</pre>
-          </details>
-          {errorText && (
-            <div className="banner" data-kind="error">
-              {errorText}
-            </div>
-          )}
-          <div className="actions">
-            <button className="primary" disabled={saving} onClick={saveAsIs} type="button">
-              {t.skillSave}
-            </button>
-            <button disabled={saving} onClick={startEditing} type="button">
-              {t.skillSaveEdit}
-            </button>
-            <button disabled={saving} onClick={() => setDismissed(true)} type="button">
-              {t.skillDiscard}
-            </button>
-          </div>
-        </>
+      <div className="card-title">{t.skillGeneratedPreview}</div>
+      <div className="generated-skill-name">{detected.draft.name}</div>
+      {detected.draft.description && <p className="hint">{detected.draft.description}</p>}
+      <details className="generated-skill-instructions">
+        <summary>{t.skillInstructions}</summary>
+        <pre>{detected.draft.instructions}</pre>
+      </details>
+      {errorText && (
+        <div className="banner" data-kind="error">
+          {errorText}
+        </div>
+      )}
+      <div className="actions">
+        <button className="primary" disabled={saving} onClick={saveAsIs} type="button">
+          {t.skillSave}
+        </button>
+        <button
+          disabled={saving}
+          onClick={() => {
+            setErrorText(null)
+            setEditing(true)
+          }}
+          type="button"
+        >
+          {t.skillSaveEdit}
+        </button>
+        <button disabled={saving} onClick={() => setDismissed(true)} type="button">
+          {t.skillDiscard}
+        </button>
+      </div>
+
+      {editing && (
+        <SkillEditDialog
+          error={errorText}
+          initial={{
+            name: detected.draft.name,
+            description: detected.draft.description,
+            instructions: detected.draft.instructions,
+            autoMatch: detected.draft.autoMatch,
+          }}
+          saving={saving}
+          title={t.skillSaveEdit}
+          onCancel={() => {
+            setEditing(false)
+            setErrorText(null)
+          }}
+          onSave={(values) => {
+            void persist(values.name, values.description, values.instructions, values.autoMatch)
+          }}
+        />
       )}
     </div>
   )
@@ -651,6 +658,14 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   } | null>(null)
   const [mode, setMode] = useState<AgentMode>('semi')
   const [modeInfoOpen, setModeInfoOpen] = useState(false)
+  /**
+   * "Offer to save workflow" switch (the chat-toolbar checkbox). When off, the
+   * end-of-turn prompt never appears and the panel skips the history lookup
+   * entirely. Persisted in settings; defaults to on (the historical behavior).
+   */
+  const [workflowPromptEnabled, setWorkflowPromptEnabled] = useState(true)
+  const workflowPromptEnabledRef = useRef(true)
+  workflowPromptEnabledRef.current = workflowPromptEnabled
   /** Summed usage across turns in this conversation. */
   const [sessionUsage, setSessionUsage] = useState<TurnTokenUsage>(() => ({
     ...ZERO_USAGE,
@@ -832,10 +847,15 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
    * conversation count; if none map to a block we stay quiet. A per-conversation
    * counter means we only ask again once new steps have accumulated.
    *
+   * Gated by the toolbar's "offer to save workflow" switch: when it is off this
+   * returns before ANY work — no history query, no card, nothing at turn end.
+   *
    * The card opens WITHOUT the AI node review — that starts only when the user
-   * clicks "Save as workflow" (see {@link savePromptWorkflow}).
+   * explicitly clicks "AI refine" (see {@link runSaveReview}); the primary
+   * save button persists directly and costs zero model tokens.
    */
   const maybePromptSaveWorkflow = useCallback(async (convId: string) => {
+    if (!workflowPromptEnabledRef.current) return
     let result: Awaited<ReturnType<typeof sendCommand>>
     try {
       result = await sendCommand({ type: 'history.list' })
@@ -1198,18 +1218,21 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     }
   }, [])
 
-  // Load the autonomy mode once on mount. It is sent with each chat message
-  // indirectly via the worker reading settings, so the switch below only has
-  // to persist it before the next send.
+  // Load local settings once on mount: the autonomy mode rides along with each
+  // chat message (the worker reads settings itself), and the workflow-prompt
+  // switch gates the end-of-turn save card here in the panel.
   useEffect(() => {
     void (async () => {
       try {
         const result = await sendCommand({ type: 'settings.get' })
         if (result.type === 'settings') {
           setMode(result.settings.mode)
+          // `!== false` keeps a version-skewed worker (field missing) on the
+          // historical default: the prompt stays on until explicitly disabled.
+          setWorkflowPromptEnabled(result.settings.chatWorkflowPromptEnabled !== false)
         }
       } catch {
-        /* keep default */
+        /* keep defaults */
       }
     })()
   }, [])
@@ -1569,12 +1592,24 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   }
 
   /**
-   * "保存为工作流" click. With nothing to review, saves straight away;
-   * otherwise OPENS the AI review dialog and runs the node review.
+   * Primary "保存为工作流" click: persists DIRECTLY with the captured steps —
+   * no model call, zero tokens. The AI node review is opt-in via the separate
+   * "AI refine" button, so the default path never spends tokens.
    */
-  const savePromptWorkflow = (): void => {
+  const savePromptWorkflowDirect = (): void => {
     const prompt = workflowPrompt
     if (!prompt || prompt.saving) return
+    void persistPromptWorkflow(prompt)
+  }
+
+  /**
+   * "AI refine" click: opens the AI review dialog and runs the node review
+   * (one model call, only when the user asks for it). With nothing to review
+   * it saves straight away instead — a review of zero steps is pointless.
+   */
+  const refinePromptWorkflow = (): void => {
+    const prompt = workflowPrompt
+    if (!prompt || prompt.saving || prompt.reviewing) return
     if (prompt.stepList.length === 0) {
       void persistPromptWorkflow(prompt)
       return
@@ -1632,6 +1667,21 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
 
   const dismissPromptWorkflow = (): void => {
     setWorkflowPrompt(null)
+  }
+
+  /**
+   * Toolbar switch: flips the end-of-turn save prompt and persists it. Turning
+   * it off also dismisses a card that is already showing — the user asked for
+   * quiet, so a stale offer should not linger.
+   */
+  const changeWorkflowPromptEnabled = async (enabled: boolean): Promise<void> => {
+    setWorkflowPromptEnabled(enabled)
+    if (!enabled) setWorkflowPrompt(null)
+    try {
+      await sendCommand({ type: 'settings.set', patch: { chatWorkflowPromptEnabled: enabled } })
+    } catch {
+      /* non-fatal: the switch stays flipped for this panel session */
+    }
   }
 
   /**
@@ -1850,27 +1900,34 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       )}
 
       <div className="chat-toolbar">
-        <label className="inline-check" title={t.chatAttachSelection}>
-          <input
-            checked={includeSelection}
-            onChange={(event) => setIncludeSelection(event.target.checked)}
-            type="checkbox"
+        {/*
+          Icon-only toggles: three text labels squeezed the toolbar, so the
+          explanations moved into the hover tooltips. The workflow toggle shows
+          its ON state via the accent tint; hover any icon for the description.
+        */}
+        <div className="flex items-center gap-1">
+          <ToolbarIconButton
+            active={includeSelection}
+            icon={<Highlighter size={15} className="shrink-0" aria-hidden="true" />}
+            label={t.chatAttachSelection}
+            onClick={() => setIncludeSelection((current) => !current)}
           />
-          {t.chatAttachSelection}
-        </label>
-        <button
-          aria-label={t.convHistory}
-          className="icon-btn"
+          <ToolbarIconButton
+            active={workflowPromptEnabled}
+            hint={t.chatWorkflowPromptToggleHint}
+            icon={<WorkflowIcon size={15} className="shrink-0" aria-hidden="true" />}
+            label={t.chatWorkflowPromptToggle}
+            onClick={() => void changeWorkflowPromptEnabled(!workflowPromptEnabled)}
+          />
+        </div>
+        <ToolbarIconButton
+          icon={<History size={16} className="shrink-0" aria-hidden="true" />}
+          label={t.convHistory}
           onClick={() => {
             void refreshConversations()
             setShowHistory(true)
           }}
-          title={t.convHistory}
-          type="button"
-        >
-          <History size={16} aria-hidden="true" />
-          <span className="icon-btn-label">{t.convHistory}</span>
-        </button>
+        />
       </div>
 
       <div className="pane chat-log" ref={logRef}>
@@ -1982,11 +2039,21 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               <button
                 className="primary"
                 disabled={workflowPrompt.saving}
-                onClick={savePromptWorkflow}
+                onClick={savePromptWorkflowDirect}
                 type="button"
               >
                 {t.chatSaveWorkflowSave}
               </button>
+              {workflowPrompt.stepList.length > 0 && (
+                <button
+                  disabled={workflowPrompt.saving || workflowPrompt.reviewing}
+                  onClick={refinePromptWorkflow}
+                  title={t.chatWorkflowReviewing}
+                  type="button"
+                >
+                  {t.chatSaveWorkflowAiReview}
+                </button>
+              )}
               <button
                 disabled={workflowPrompt.saving}
                 onClick={dismissPromptWorkflow}

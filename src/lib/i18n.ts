@@ -329,6 +329,12 @@ export interface Messages {
   chatSaveWorkflowSaved: (params: { name: string }) => string
   /** Title of the AI-prefill checkbox list on the workflow save card. */
   chatSaveWorkflowAiTitle: string
+  /** Toolbar switch controlling whether the end-of-turn save card appears. */
+  chatWorkflowPromptToggle: string
+  /** Tooltip for the toolbar switch. */
+  chatWorkflowPromptToggleHint: string
+  /** Optional button on the save card that runs the (token-costly) AI review. */
+  chatSaveWorkflowAiReview: string
   /** In-progress line while the AI node review is running. */
   chatWorkflowReviewing: string
   /** Hint shown when the AI node review is unavailable (no provider / failure). */
@@ -1034,6 +1040,9 @@ const en: Messages = {
   chatSaveWorkflowSkip: 'Skip',
   chatSaveWorkflowSaved: ({ name }) => `Saved workflow: ${name}`,
   chatSaveWorkflowAiTitle: 'AI-generated content (checked = regenerate with AI at replay; unchecked = reuse the captured text)',
+  chatWorkflowPromptToggle: 'Offer to save workflow',
+  chatWorkflowPromptToggleHint: 'When on, the panel offers to save this session as a workflow after each turn ends.',
+  chatSaveWorkflowAiReview: 'AI refine…',
   chatWorkflowReviewing: 'AI is reviewing which nodes are worth keeping…',
   chatWorkflowReviewUnavailable: 'AI review unavailable — keeping all steps.',
   chatWorkflowReviewDropped: ({ count }) => `AI dropped ${count} ineffective step${count > 1 ? 's' : ''} (unchecked); check to keep one.`,
@@ -1712,6 +1721,9 @@ const zhCN: Messages = {
   chatSaveWorkflowSkip: '跳过',
   chatSaveWorkflowSaved: ({ name }) => `已保存工作流：${name}`,
   chatSaveWorkflowAiTitle: 'AI 生成内容（勾选 = 回放时用 AI 重新生成；取消 = 沿用本次填写的文本）',
+  chatWorkflowPromptToggle: '对话结束提示保存工作流',
+  chatWorkflowPromptToggleHint: '开启后，每轮对话结束会询问是否把本次操作保存为工作流。',
+  chatSaveWorkflowAiReview: 'AI 提炼…',
   chatWorkflowReviewing: 'AI 正在审查哪些节点值得保留…',
   chatWorkflowReviewUnavailable: 'AI 审查不可用，已保留全部步骤。',
   chatWorkflowReviewDropped: ({ count }) => `AI 已剔除 ${count} 个无效步骤，取消勾选可保留。`,

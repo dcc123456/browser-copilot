@@ -134,6 +134,11 @@ export interface Settings {
    */
   takeoverModel: VisionConfig
   /**
+   * 对话结束后是否提示“保存为工作流”。开启时回合结束展示保存卡片；
+   * 关闭时回合结束不做任何处理（不发 history 查询、不出卡片）。默认开启。
+   */
+  chatWorkflowPromptEnabled: boolean
+  /**
    * 普通运行（面板“运行”按钮）失败时也允许 AI 接管。消耗模型调用，
    * 默认关闭；调试（workflows.debug）始终启用接管，与此开关无关。
    */

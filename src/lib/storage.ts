@@ -79,6 +79,7 @@ export const DEFAULT_SETTINGS: Settings = {
   unattendedWindowPolicy: 'latest',
   takeoverModel: { providerId: '', model: '' },
   takeoverOnRun: false,
+  chatWorkflowPromptEnabled: true,
 }
 
 /**
@@ -192,6 +193,10 @@ export function normalizeStoredSettings(raw: unknown): Settings {
       typeof value.unattendedWindowId === 'number' ? value.unattendedWindowId : undefined,
     takeoverModel,
     takeoverOnRun: typeof value.takeoverOnRun === 'boolean' ? value.takeoverOnRun : false,
+    chatWorkflowPromptEnabled:
+      typeof value.chatWorkflowPromptEnabled === 'boolean'
+        ? value.chatWorkflowPromptEnabled
+        : DEFAULT_SETTINGS.chatWorkflowPromptEnabled,
   }
 }
 
