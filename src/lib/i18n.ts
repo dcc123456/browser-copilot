@@ -429,6 +429,10 @@ export interface Messages {
   settingsEndpointPresets: string
   settingsBaseUrlHint: string
   settingsImageModel: string
+  /** Button on a status card that opens its editing dialog. */
+  settingsModify: string
+  /** Status-card line showing the configured model selection. */
+  settingsImageModelCurrentValue: (params: { value: string }) => string
   /** AI-takeover debug model card. */
   settingsTakeoverModel: string
   settingsTakeoverModelIntro: string
@@ -1117,6 +1121,8 @@ const en: Messages = {
   settingsBaseUrlHint:
     'Everything up to but not including /chat/completions. A pasted full URL is trimmed automatically.',
   settingsImageModel: 'Image recognition model',
+  settingsModify: 'Edit…',
+  settingsImageModelCurrentValue: ({ value }) => `Current: ${value}`,
   settingsImageModelIntro:
     'Select any already-configured provider to reuse its base URL and API key for the recognize_image tool (CAPTCHA, image text). Re-enter a model only if that provider’s default is not vision-capable.',
   settingsImageModelProvider: 'Provider',
@@ -1788,6 +1794,8 @@ const zhCN: Messages = {
   settingsEndpointPresets: '预设端点',
   settingsBaseUrlHint: '填到 /chat/completions 之前的部分即可。粘贴完整地址会自动裁剪。',
   settingsImageModel: '图片识别模型',
+  settingsModify: '修改…',
+  settingsImageModelCurrentValue: ({ value }) => `当前：${value}`,
   settingsImageModelIntro:
     '从已添加的提供商中选择即可复用其接口地址和 API 密钥，用于 recognize_image 工具（验证码、图片文字）。仅当该提供商默认模型不支持视觉时才需要手动填模型名。',
   settingsImageModelProvider: '模型提供商',

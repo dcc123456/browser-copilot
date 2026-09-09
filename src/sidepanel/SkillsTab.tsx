@@ -17,6 +17,7 @@ import {
 } from '../lib/skills-import'
 import { downloadBlob } from '../lib/export-answer'
 import { useT } from './i18n'
+import SkillEditDialog, { type SkillFormValues } from './SkillEditDialog'
 
 interface Props {
   skills: Skill[]
@@ -63,7 +64,12 @@ function emptyDraft(): Draft {
 
 export default function SkillsTab({ skills, activeSkillId, onChanged, onUseInChat }: Props) {
   const t = useT()
+  // Non-null while the create/edit DIALOG is open; the dialog owns the fields,
+  // this only carries identity (id/createdAt) and the open/closed switch.
   const [draft, setDraft] = useState<Draft | null>(null)
+  /** Failure of the last save attempt, rendered inside the dialog. */
+  const [draftError, setDraftError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
   const [banner, setBanner] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
   const [importing, setImporting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -115,17 +121,19 @@ export default function SkillsTab({ skills, activeSkillId, onChanged, onUseInCha
       .join(' ')
   }
 
-  const save = async (): Promise<void> => {
+  const save = async (values: SkillFormValues): Promise<void> => {
     if (!draft) return
     const skill: Skill = {
       id: draft.id,
-      name: draft.name,
-      description: draft.description,
-      instructions: draft.instructions,
-      autoMatch: draft.autoMatch,
+      name: values.name,
+      description: values.description,
+      instructions: values.instructions,
+      autoMatch: values.autoMatch,
       createdAt: draft.createdAt,
       updatedAt: Date.now(),
     }
+    setSaving(true)
+    setDraftError(null)
     try {
       const result = await sendCommand({ type: 'skills.save', skill })
       const saved = result.type === 'skills.save' ? result.skill : skill
@@ -133,7 +141,10 @@ export default function SkillsTab({ skills, activeSkillId, onChanged, onUseInCha
       setDraft(null)
       onChanged()
     } catch (error) {
-      setBanner({ kind: 'error', text: describeError(error as Error) })
+      // Rendered INSIDE the dialog so the failure is visible next to the form.
+      setDraftError(describeError(error as Error))
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -141,7 +152,10 @@ export default function SkillsTab({ skills, activeSkillId, onChanged, onUseInCha
     try {
       await sendCommand({ type: 'skills.delete', id: skill.id })
       setBanner({ kind: 'ok', text: t.skillsDeleted({ name: skill.name }) })
-      if (draft?.id === skill.id) setDraft(null)
+      if (draft?.id === skill.id) {
+        setDraft(null)
+        setDraftError(null)
+      }
       onChanged()
     } catch (error) {
       setBanner({ kind: 'error', text: (error as Error).message })
@@ -223,100 +237,69 @@ export default function SkillsTab({ skills, activeSkillId, onChanged, onUseInCha
       <div className="card">
         <div className="card-title">{t.skillsTitle}</div>
         <p className="hint">{t.skillsIntro}</p>
-        {!draft && (
-          <div className="actions">
-            <button className="primary" onClick={() => setDraft(emptyDraft())} type="button">
-              {t.skillsAdd}
-            </button>
-            <button
-              className="skills-import-btn"
-              disabled={importing}
-              onClick={() => fileInputRef.current?.click()}
-              title={t.skillsImportHint}
-              type="button"
-            >
-              {t.skillsImport}
-            </button>
-            <button
-              className="skills-export-btn"
-              disabled={skills.length === 0}
-              onClick={exportAll}
-              type="button"
-            >
-              {t.skillsExportAll}
-            </button>
-            <input
-              accept=".json,.yaml,.yml,.md,.markdown"
-              multiple
-              onChange={(event) => {
-                void importFromFiles(event.target.files)
-                event.target.value = ''
-              }}
-              ref={fileInputRef}
-              style={{ display: 'none' }}
-              type="file"
-            />
-          </div>
-        )}
+        <div className="actions">
+          <button
+            className="primary"
+            onClick={() => {
+              setDraftError(null)
+              setDraft(emptyDraft())
+            }}
+            type="button"
+          >
+            {t.skillsAdd}
+          </button>
+          <button
+            className="skills-import-btn"
+            disabled={importing}
+            onClick={() => fileInputRef.current?.click()}
+            title={t.skillsImportHint}
+            type="button"
+          >
+            {t.skillsImport}
+          </button>
+          <button
+            className="skills-export-btn"
+            disabled={skills.length === 0}
+            onClick={exportAll}
+            type="button"
+          >
+            {t.skillsExportAll}
+          </button>
+          <input
+            accept=".json,.yaml,.yml,.md,.markdown"
+            multiple
+            onChange={(event) => {
+              void importFromFiles(event.target.files)
+              event.target.value = ''
+            }}
+            ref={fileInputRef}
+            style={{ display: 'none' }}
+            type="file"
+          />
+        </div>
       </div>
 
+      {/* Create/edit happens in a dialog, never inline on the page. */}
       {draft && (
-        <div className="card">
-          <div className="card-title">{draft.name.trim() || t.skillsAdd}</div>
-
-          <label className="field">
-            <span>{t.skillsName}</span>
-            <input
-              maxLength={60}
-              onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-              placeholder={t.skillsNamePlaceholder}
-              value={draft.name}
-            />
-          </label>
-
-          <label className="field">
-            <span>{t.skillsDescription}</span>
-            <input
-              maxLength={300}
-              onChange={(event) => setDraft({ ...draft, description: event.target.value })}
-              value={draft.description}
-            />
-          </label>
-          <p className="hint">{t.skillsDescriptionHint}</p>
-
-          <label className="field">
-            <span>{t.skillsInstructions}</span>
-            <textarea
-              maxLength={8000}
-              onChange={(event) => setDraft({ ...draft, instructions: event.target.value })}
-              rows={10}
-              value={draft.instructions}
-            />
-          </label>
-          <p className="hint">{t.skillsInstructionsHint}</p>
-
-          <label className="checkbox">
-            <input
-              checked={draft.autoMatch}
-              onChange={(event) => setDraft({ ...draft, autoMatch: event.target.checked })}
-              type="checkbox"
-            />
-            <span>{t.skillsAutoMatch}</span>
-          </label>
-          <p className="hint">{t.skillsAutoMatchHint}</p>
-
-          <div className="actions">
-            <button className="primary" onClick={() => void save()} type="button">
-              {t.save}
-            </button>
-            <button onClick={() => setDraft(null)} type="button">
-              {t.cancel}
-            </button>
-          </div>
-        </div>
+        <SkillEditDialog
+          error={draftError}
+          initial={{
+            name: draft.name,
+            description: draft.description,
+            instructions: draft.instructions,
+            autoMatch: draft.autoMatch,
+          }}
+          saving={saving}
+          title={draft.name.trim() || t.skillsAdd}
+          onCancel={() => {
+            setDraft(null)
+            setDraftError(null)
+          }}
+          onSave={(values) => void save(values)}
+        />
       )}
 
-      {skills.length === 0 && !draft && <div className="empty">{t.skillsEmpty}</div>}
+      {skills.length === 0 && <div className="empty">{t.skillsEmpty}</div>}
 
       {skills.map((skill) => (
         <div className="card" key={skill.id}>

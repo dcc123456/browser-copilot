@@ -25,6 +25,10 @@ import {
 import { clearDownloadDir, getDownloadDir, setDownloadDir } from '../lib/download-dir'
 import { OCR_SUPPORTED } from '../lib/ocr-support'
 import NumberInput from '../ui/NumberInput'
+import FormDialog, {
+  FormDialogCancelButton,
+  FormDialogPrimaryButton,
+} from '../ui/FormDialog'
 import { useT } from './i18n'
 
 /** Editable form state; numbers stay strings so partial input is allowed. */
@@ -247,6 +251,20 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   const [takeoverBanner, setTakeoverBanner] = useState<{ kind: 'ok' | 'error'; text: string } | null>(
     null,
   )
+  /**
+   * Which editing dialog is open. Every edit surface (provider form, image
+   * model, takeover model, local-agent connection) opens as a dialog; the
+   * page itself only shows status cards with an "Edit…" entry button.
+   */
+  const [openDialog, setOpenDialog] = useState<null | 'provider' | 'image' | 'takeover' | 'agent'>(
+    null,
+  )
+  /** Outcome line of the last provider-dialog action (test ok / save error). */
+  const [providerNotice, setProviderNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(
+    null,
+  )
+  /** Failure of the last local-agent connection save, rendered inside its dialog. */
+  const [agentNotice, setAgentNotice] = useState<string | null>(null)
 
   // --- Unattended window policy -----------------------------------------------
   // Ordinary windows for the "fixed" selector; refreshed on mount (and cheap
@@ -457,6 +475,8 @@ export default function SettingsTab({ onLocaleChange }: Props) {
     setDraft(toDraft(profileFromPreset(preset, newLocalId())))
     setModels(null)
     setShowAdvanced(false)
+    setProviderNotice(null)
+    setOpenDialog('provider')
   }
 
   const applySettings = (next: Settings): void => {
@@ -483,6 +503,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
 
   const saveDraft = async (): Promise<void> => {
     if (!draft) return
+    setProviderNotice(null)
     try {
       const profile = fromDraft(draft, t)
       const problems = validateProfile(profile)
@@ -492,24 +513,27 @@ export default function SettingsTab({ onLocaleChange }: Props) {
       if (result.type === 'settings') applySettings(result.settings)
       setDraft(null)
       setModels(null)
+      setOpenDialog(null)
       setBanner({ kind: 'ok', text: t.settingsSaved({ name: profile.label }) })
     } catch (error) {
-      setBanner({ kind: 'error', text: (error as Error).message })
+      // Rendered INSIDE the dialog: the failure must sit next to the form it
+      // belongs to, not vanish behind the overlay.
+      setProviderNotice({ kind: 'error', text: (error as Error).message })
     }
   }
 
   const runTest = async (): Promise<void> => {
     if (!draft) return
     setPending('test')
-    setBanner(null)
+    setProviderNotice(null)
     try {
       const profile = fromDraft(draft, t)
       const problems = validateProfile(profile)
       if (problems.length > 0) throw new Error(problems.map((p) => p.message).join(' '))
       await sendCommand({ type: 'provider.test', profile })
-      setBanner({ kind: 'ok', text: t.settingsTestOk({ name: profile.label }) })
+      setProviderNotice({ kind: 'ok', text: t.settingsTestOk({ name: profile.label }) })
     } catch (error) {
-      setBanner({ kind: 'error', text: (error as Error).message })
+      setProviderNotice({ kind: 'error', text: (error as Error).message })
     } finally {
       setPending(null)
     }
@@ -518,23 +542,31 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   const fetchModels = async (): Promise<void> => {
     if (!draft) return
     setPending('models')
-    setBanner(null)
+    setProviderNotice(null)
     try {
       const result = await sendCommand({ type: 'provider.models', profile: fromDraft(draft, t) })
       if (result.type === 'provider.models') {
         setModels(result.models)
         if (result.models.length === 0) {
-          setBanner({ kind: 'error', text: t.settingsModelsEmpty })
+          setProviderNotice({ kind: 'error', text: t.settingsModelsEmpty })
         }
       }
     } catch (error) {
-      setBanner({
+      setProviderNotice({
         kind: 'error',
         text: t.settingsModelsFailed({ message: (error as Error).message }),
       })
     } finally {
       setPending(null)
     }
+  }
+
+  /** Closes the provider dialog, dropping any in-progress edits. */
+  const closeProviderDialog = (): void => {
+    setDraft(null)
+    setModels(null)
+    setProviderNotice(null)
+    setOpenDialog(null)
   }
 
   // --- Image-recognition model -----------------------------------------------
@@ -593,10 +625,18 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         patch: { imageModel: { providerId: imgDraft.providerId, model } },
       })
       setImgModels(null)
-      setImgBanner({ kind: 'ok', text: t.settingsImageModelSaved })
+      // Close on success: the status card now reflects the saved selection.
+      setOpenDialog(null)
     } finally {
       setImgBusy(null)
     }
+  }
+
+  /** Closes the image-model dialog, dropping any uncommitted selection. */
+  const closeImageDialog = (): void => {
+    setImgBanner(null)
+    setImgModels(null)
+    setOpenDialog(null)
   }
 
   // --- AI-takeover debug model (mirrors the image-model flow) ----------------
@@ -650,9 +690,40 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         patch: { takeoverModel: { providerId: takeoverDraft.providerId, model } },
       })
       setTakeoverModels(null)
-      setTakeoverBanner({ kind: 'ok', text: t.settingsTakeoverModelSaved })
+      // Close on success: the status card now reflects the saved selection.
+      setOpenDialog(null)
     } finally {
       setTakeoverBusy(null)
+    }
+  }
+
+  /** Closes the takeover-model dialog, dropping any uncommitted selection. */
+  const closeTakeoverDialog = (): void => {
+    setTakeoverBanner(null)
+    setTakeoverModels(null)
+    setOpenDialog(null)
+  }
+
+  /**
+   * Commits the local-agent connection fields from the dialog. Unlike the old
+   * onBlur auto-commit, both fields go out in ONE explicit save so "what did
+   * the dialog change?" has a single answer, and a failure is reported inside
+   * the dialog instead of behind it.
+   */
+  const saveAgentConnection = async (): Promise<void> => {
+    setAgentNotice(null)
+    try {
+      const result = await sendCommand({
+        type: 'settings.set',
+        patch: {
+          localAgentUrl: agentUrlDraft.trim() || t.settingsLocalAgentUrlPlaceholder,
+          localAgentToken: agentTokenDraft.trim(),
+        },
+      })
+      if (result.type === 'settings') applySettings(result.settings)
+      setOpenDialog(null)
+    } catch (error) {
+      setAgentNotice((error as Error).message)
     }
   }
 
@@ -713,113 +784,149 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         </div>
       )}
 
-      {/* --- Providers --- */}
-      {!draft && (
-        <div className="card">
-          <div className="card-head">
-            <span className="card-title">{t.settingsProviders}</span>
-          </div>
-          <p className="hint">{t.settingsProvidersIntro}</p>
+      {/* --- Providers: status cards only; editing opens the dialog below --- */}
+      <div className="card">
+        <div className="card-head">
+          <span className="card-title">{t.settingsProviders}</span>
+        </div>
+        <p className="hint">{t.settingsProvidersIntro}</p>
 
-          {settings.providers.length === 0 && (
-            <div className="empty">{t.settingsNoProvider}</div>
-          )}
+        {settings.providers.length === 0 && (
+          <div className="empty">{t.settingsNoProvider}</div>
+        )}
 
-          {settings.providers.map((profile) => {
-            const isActive = profile.id === settings.activeProviderId
-            return (
-              <div className="card provider-card" key={profile.id} style={{ marginBottom: 8 }}>
-                <div className="card-head">
-                  <span className="card-title">{profile.label}</span>
-                  {isActive ? (
-                    <span className="status-ok">{t.settingsActive}</span>
-                  ) : (
-                    <button
-                      onClick={() => void mutate({ type: 'provider.activate', id: profile.id })}
-                      type="button"
-                    >
-                      {t.settingsUseThis}
-                    </button>
-                  )}
-                </div>
-                <div className="provider-meta">
-                  <div className="meta">
-                    <span className="meta-label">{t.settingsModel}</span>
-                    <span>{profile.model}</span>
-                  </div>
-                  <div className="meta">
-                    <span className="meta-label">{t.settingsBaseUrl}</span>
-                    <span>{profile.baseUrl}</span>
-                  </div>
-                  <div className="meta">
-                    <span className="meta-label">{t.settingsApiKey}</span>
-                    <span>
-                      {profile.apiKey ? (
-                        <span className="status-ok">{t.settingsKeyConfigured}</span>
-                      ) : (
-                        t.settingsNoKey
-                      )}
-                    </span>
-                  </div>
-                </div>
-                <div className="actions">
+        {settings.providers.map((profile) => {
+          const isActive = profile.id === settings.activeProviderId
+          return (
+            <div className="card provider-card" key={profile.id} style={{ marginBottom: 8 }}>
+              <div className="card-head">
+                <span className="card-title">{profile.label}</span>
+                {isActive ? (
+                  <span className="status-ok">{t.settingsActive}</span>
+                ) : (
                   <button
-                    onClick={() => {
-                      setDraft(toDraft(profile))
-                      setModels(null)
-                      setShowAdvanced(
-                        profile.temperature !== undefined ||
-                          profile.maxTokens !== undefined ||
-                          !!profile.headers,
-                      )
-                    }}
+                    onClick={() => void mutate({ type: 'provider.activate', id: profile.id })}
                     type="button"
                   >
-                    {t.edit}
+                    {t.settingsUseThis}
                   </button>
-                  <button
-                    className="danger"
-                    onClick={() => void mutate({ type: 'provider.delete', id: profile.id })}
-                    type="button"
-                  >
-                    {t.delete}
-                  </button>
+                )}
+              </div>
+              <div className="provider-meta">
+                <div className="meta">
+                  <span className="meta-label">{t.settingsModel}</span>
+                  <span>{profile.model}</span>
+                </div>
+                <div className="meta">
+                  <span className="meta-label">{t.settingsBaseUrl}</span>
+                  <span>{profile.baseUrl}</span>
+                </div>
+                <div className="meta">
+                  <span className="meta-label">{t.settingsApiKey}</span>
+                  <span>
+                    {profile.apiKey ? (
+                      <span className="status-ok">{t.settingsKeyConfigured}</span>
+                    ) : (
+                      t.settingsNoKey
+                    )}
+                  </span>
                 </div>
               </div>
-            )
-          })}
+              <div className="actions">
+                <button
+                  onClick={() => {
+                    setDraft(toDraft(profile))
+                    setModels(null)
+                    setShowAdvanced(
+                      profile.temperature !== undefined ||
+                        profile.maxTokens !== undefined ||
+                        !!profile.headers,
+                    )
+                    setProviderNotice(null)
+                    setOpenDialog('provider')
+                  }}
+                  type="button"
+                >
+                  {t.edit}
+                </button>
+                <button
+                  className="danger"
+                  onClick={() => void mutate({ type: 'provider.delete', id: profile.id })}
+                  type="button"
+                >
+                  {t.delete}
+                </button>
+              </div>
+            </div>
+          )
+        })}
 
-          <div className="field" style={{ marginTop: 10 }}>
-            <label htmlFor="add-preset">{t.settingsAddProvider}</label>
-            <select
-              defaultValue=""
-              id="add-preset"
-              onChange={(event) => {
-                if (event.target.value) startNew(event.target.value)
-                event.target.value = ''
-              }}
-            >
-              <option disabled value="">
-                {t.settingsChoosePreset}
+        <div className="field" style={{ marginTop: 10 }}>
+          <label htmlFor="add-preset">{t.settingsAddProvider}</label>
+          <select
+            defaultValue=""
+            id="add-preset"
+            onChange={(event) => {
+              if (event.target.value) startNew(event.target.value)
+              event.target.value = ''
+            }}
+          >
+            <option disabled value="">
+              {t.settingsChoosePreset}
+            </option>
+            {PROVIDER_PRESETS.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
               </option>
-              {PROVIDER_PRESETS.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
+            ))}
+          </select>
         </div>
-      )}
+      </div>
 
-      {/* --- Provider editor --- */}
-      {draft && (
-        <div className="card">
-          <div className="card-title">
-            {settings.providers.some((profile) => profile.id === draft.id)
+      {/* --- Provider editor dialog --- */}
+      {draft && openDialog === 'provider' && (
+        <FormDialog
+          footer={
+            <>
+              <FormDialogCancelButton label={t.cancel} onClick={closeProviderDialog} />
+              <FormDialogPrimaryButton
+                disabled={pending !== null}
+                label={pending === 'test' ? t.settingsTesting : t.settingsTest}
+                onClick={() => void runTest()}
+              />
+              <FormDialogPrimaryButton
+                disabled={pending !== null}
+                label={pending === 'models' ? t.settingsFetchingModels : t.settingsFetchModels}
+                onClick={() => void fetchModels()}
+              />
+              <FormDialogPrimaryButton
+                disabled={pending !== null}
+                label={t.save}
+                onClick={() => void saveDraft()}
+              />
+            </>
+          }
+          onClose={closeProviderDialog}
+          title={
+            settings.providers.some((profile) => profile.id === draft.id)
               ? t.settingsEditProvider
-              : t.settingsNewProvider}
-          </div>
+              : t.settingsNewProvider
+          }
+          width="lg"
+        >
+          {providerNotice && (
+            <div
+              className={[
+                'mb-3 rounded-lg px-3 py-2 text-[12.5px] leading-relaxed break-words',
+                providerNotice.kind === 'ok'
+                  ? 'border border-border bg-panel-2 text-muted'
+                  : 'border border-err bg-err-surface text-err',
+              ].join(' ')}
+              role={providerNotice.kind === 'error' ? 'alert' : 'status'}
+            >
+              {providerNotice.text}
+            </div>
+          )}
 
           {preset?.hint && <p className="hint">{preset.hint}</p>}
 
@@ -955,61 +1062,26 @@ export default function SettingsTab({ onLocaleChange }: Props) {
             </div>
           )}
 
-          <div className="actions">
-            <button className="primary" onClick={() => void saveDraft()} type="button">
-              {t.save}
-            </button>
-            <button disabled={pending !== null} onClick={() => void runTest()} type="button">
-              {pending === 'test' ? t.settingsTesting : t.settingsTest}
-            </button>
-            <button disabled={pending !== null} onClick={() => void fetchModels()} type="button">
-              {pending === 'models' ? t.settingsFetchingModels : t.settingsFetchModels}
-            </button>
-            <button
-              onClick={() => {
-                setDraft(null)
-                setModels(null)
-              }}
-              type="button"
-            >
-              {t.cancel}
-            </button>
-          </div>
-
           <p className="hint" style={{ marginTop: 10, marginBottom: 0 }}>
             {t.settingsKeyStorageNote}
           </p>
-        </div>
+        </FormDialog>
       )}
 
-      {/* --- Image recognition model --- */}
+      {/* --- Image recognition model: status card + edit dialog --- */}
       <div className="card">
         <div className="card-title">{t.settingsImageModel}</div>
         <p className="hint">{t.settingsImageModelIntro}</p>
 
-        {imgBanner && (
-          <p className={imgBanner.kind === 'ok' ? 'hint ok' : 'hint error'}>{imgBanner.text}</p>
-        )}
-
-        <div className="field">
-          <label htmlFor="img-provider">{t.settingsImageModelProvider}</label>
-          <select
-            id="img-provider"
-            onChange={(event) => {
-              setImgDraft({ ...imgDraft, providerId: event.target.value })
-              setImgModels(null)
-            }}
-            value={imgDraft.providerId}
-          >
-            <option value="">{t.settingsImageModelAuto}</option>
-            {settings.providers.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {profile.label}
-                {profile.model ? ` · ${profile.model}` : ''}
-              </option>
-            ))}
-          </select>
-        </div>
+        <p className="hint">
+          {t.settingsImageModelCurrentValue({
+            value: (() => {
+              const target = settings.providers.find((p) => p.id === imgDraft.providerId)
+              if (!target) return t.settingsImageModelAuto
+              return imgDraft.model ? `${target.label} · ${imgDraft.model}` : target.label
+            })(),
+          })}
+        </p>
 
         {OCR_SUPPORTED && (
           <div className="field">
@@ -1031,59 +1103,107 @@ export default function SettingsTab({ onLocaleChange }: Props) {
           </div>
         )}
 
-        <div className="field">
-          <label htmlFor="img-model">{t.settingsModel}</label>
-          <select
-            id="img-model"
-            onChange={(event) => setImgDraft({ ...imgDraft, model: event.target.value })}
-            value={imgDraft.model}
-          >
-            <option value="">{t.settingsProviderDefault}</option>
-            {imgDraft.model && !(imgModels ?? []).includes(imgDraft.model) && (
-              <option value={imgDraft.model}>{imgDraft.model}</option>
-            )}
-            {(imgModels ?? []).map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-          <p className="hint" style={{ marginBottom: 0 }}>
-            {imgModels
-              ? t.settingsModelsAvailable({ count: imgModels.length })
-              : t.settingsImageModelSelectHint}
-          </p>
-        </div>
-
         <div className="actions">
-          <button
-            className="primary"
-            disabled={imgBusy === 'save'}
-            onClick={() => void saveImageModel()}
-            type="button"
-          >
-            {imgBusy === 'save' ? t.settingsSaving : t.save}
-          </button>
-          <button
-            disabled={imgBusy === 'models' || !imgDraft.providerId}
-            onClick={() => void fetchImageModels()}
-            type="button"
-          >
-            {imgBusy === 'models' ? t.settingsFetchingModels : t.settingsFetchModels}
+          <button onClick={() => setOpenDialog('image')} type="button">
+            {t.settingsModify}
           </button>
         </div>
       </div>
 
-      {/* --- AI-takeover debug model --- */}
+      {openDialog === 'image' && (
+        <FormDialog
+          footer={
+            <>
+              <FormDialogCancelButton label={t.cancel} onClick={closeImageDialog} />
+              <FormDialogPrimaryButton
+                disabled={imgBusy === 'save'}
+                label={imgBusy === 'save' ? t.settingsSaving : t.save}
+                onClick={() => void saveImageModel()}
+              />
+            </>
+          }
+          onClose={closeImageDialog}
+          title={t.settingsImageModel}
+        >
+          {imgBanner && (
+            <div
+              className="mb-3 rounded-lg border border-err bg-err-surface px-3 py-2 text-[12.5px] leading-relaxed break-words text-err"
+              role="alert"
+            >
+              {imgBanner.text}
+            </div>
+          )}
+
+          <div className="field">
+            <label htmlFor="img-provider">{t.settingsImageModelProvider}</label>
+            <select
+              id="img-provider"
+              onChange={(event) => {
+                setImgDraft({ ...imgDraft, providerId: event.target.value })
+                setImgModels(null)
+              }}
+              value={imgDraft.providerId}
+            >
+              <option value="">{t.settingsImageModelAuto}</option>
+              {settings.providers.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.label}
+                  {profile.model ? ` · ${profile.model}` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="field">
+            <label htmlFor="img-model">{t.settingsModel}</label>
+            <select
+              id="img-model"
+              onChange={(event) => setImgDraft({ ...imgDraft, model: event.target.value })}
+              value={imgDraft.model}
+            >
+              <option value="">{t.settingsProviderDefault}</option>
+              {imgDraft.model && !(imgModels ?? []).includes(imgDraft.model) && (
+                <option value={imgDraft.model}>{imgDraft.model}</option>
+              )}
+              {(imgModels ?? []).map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <p className="hint" style={{ marginBottom: 0 }}>
+              {imgModels
+                ? t.settingsModelsAvailable({ count: imgModels.length })
+                : t.settingsImageModelSelectHint}
+            </p>
+          </div>
+
+          <div className="actions" style={{ marginTop: 8 }}>
+            <button
+              disabled={imgBusy === 'models' || !imgDraft.providerId}
+              onClick={() => void fetchImageModels()}
+              type="button"
+            >
+              {imgBusy === 'models' ? t.settingsFetchingModels : t.settingsFetchModels}
+            </button>
+          </div>
+        </FormDialog>
+      )}
+
+      {/* --- AI-takeover debug model: status card + edit dialog --- */}
       <div className="card">
         <div className="card-title">{t.settingsTakeoverModel}</div>
         <p className="hint">{t.settingsTakeoverModelIntro}</p>
 
-        {takeoverBanner && (
-          <p className={takeoverBanner.kind === 'ok' ? 'hint ok' : 'hint error'}>
-            {takeoverBanner.text}
-          </p>
-        )}
+        <p className="hint">
+          {t.settingsImageModelCurrentValue({
+            value: (() => {
+              const target = settings.providers.find((p) => p.id === takeoverDraft.providerId)
+              if (!target) return t.settingsImageModelAuto
+              return takeoverDraft.model ? `${target.label} · ${takeoverDraft.model}` : target.label
+            })(),
+          })}
+        </p>
 
         <label className="checkbox">
           <input
@@ -1100,68 +1220,92 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         </label>
         <p className="hint">{t.settingsTakeoverOnRunIntro}</p>
 
-        <div className="field">
-          <label htmlFor="takeover-provider">{t.settingsTakeoverModelProvider}</label>
-          <select
-            id="takeover-provider"
-            onChange={(event) => {
-              setTakeoverDraft({ ...takeoverDraft, providerId: event.target.value })
-              setTakeoverModels(null)
-            }}
-            value={takeoverDraft.providerId}
-          >
-            <option value="">{t.settingsImageModelAuto}</option>
-            {settings.providers.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {profile.label}
-                {profile.model ? ` · ${profile.model}` : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="field">
-          <label htmlFor="takeover-model">{t.settingsModel}</label>
-          <select
-            id="takeover-model"
-            onChange={(event) => setTakeoverDraft({ ...takeoverDraft, model: event.target.value })}
-            value={takeoverDraft.model}
-          >
-            <option value="">{t.settingsProviderDefault}</option>
-            {takeoverDraft.model && !(takeoverModels ?? []).includes(takeoverDraft.model) && (
-              <option value={takeoverDraft.model}>{takeoverDraft.model}</option>
-            )}
-            {(takeoverModels ?? []).map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-          <p className="hint" style={{ marginBottom: 0 }}>
-            {takeoverModels
-              ? t.settingsModelsAvailable({ count: takeoverModels.length })
-              : t.settingsTakeoverModelSelectHint}
-          </p>
-        </div>
-
         <div className="actions">
-          <button
-            className="primary"
-            disabled={takeoverBusy === 'save'}
-            onClick={() => void saveTakeoverModel()}
-            type="button"
-          >
-            {takeoverBusy === 'save' ? t.settingsSaving : t.save}
-          </button>
-          <button
-            disabled={takeoverBusy === 'models' || !takeoverDraft.providerId}
-            onClick={() => void fetchTakeoverModels()}
-            type="button"
-          >
-            {takeoverBusy === 'models' ? t.settingsFetchingModels : t.settingsFetchModels}
+          <button onClick={() => setOpenDialog('takeover')} type="button">
+            {t.settingsModify}
           </button>
         </div>
       </div>
+
+      {openDialog === 'takeover' && (
+        <FormDialog
+          footer={
+            <>
+              <FormDialogCancelButton label={t.cancel} onClick={closeTakeoverDialog} />
+              <FormDialogPrimaryButton
+                disabled={takeoverBusy === 'save'}
+                label={takeoverBusy === 'save' ? t.settingsSaving : t.save}
+                onClick={() => void saveTakeoverModel()}
+              />
+            </>
+          }
+          onClose={closeTakeoverDialog}
+          title={t.settingsTakeoverModel}
+        >
+          {takeoverBanner && (
+            <div
+              className="mb-3 rounded-lg border border-err bg-err-surface px-3 py-2 text-[12.5px] leading-relaxed break-words text-err"
+              role="alert"
+            >
+              {takeoverBanner.text}
+            </div>
+          )}
+
+          <div className="field">
+            <label htmlFor="takeover-provider">{t.settingsTakeoverModelProvider}</label>
+            <select
+              id="takeover-provider"
+              onChange={(event) => {
+                setTakeoverDraft({ ...takeoverDraft, providerId: event.target.value })
+                setTakeoverModels(null)
+              }}
+              value={takeoverDraft.providerId}
+            >
+              <option value="">{t.settingsImageModelAuto}</option>
+              {settings.providers.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.label}
+                  {profile.model ? ` · ${profile.model}` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="field">
+            <label htmlFor="takeover-model">{t.settingsModel}</label>
+            <select
+              id="takeover-model"
+              onChange={(event) => setTakeoverDraft({ ...takeoverDraft, model: event.target.value })}
+              value={takeoverDraft.model}
+            >
+              <option value="">{t.settingsProviderDefault}</option>
+              {takeoverDraft.model && !(takeoverModels ?? []).includes(takeoverDraft.model) && (
+                <option value={takeoverDraft.model}>{takeoverDraft.model}</option>
+              )}
+              {(takeoverModels ?? []).map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <p className="hint" style={{ marginBottom: 0 }}>
+              {takeoverModels
+                ? t.settingsModelsAvailable({ count: takeoverModels.length })
+                : t.settingsTakeoverModelSelectHint}
+            </p>
+          </div>
+
+          <div className="actions" style={{ marginTop: 8 }}>
+            <button
+              disabled={takeoverBusy === 'models' || !takeoverDraft.providerId}
+              onClick={() => void fetchTakeoverModels()}
+              type="button"
+            >
+              {takeoverBusy === 'models' ? t.settingsFetchingModels : t.settingsFetchModels}
+            </button>
+          </div>
+        </FormDialog>
+      )}
 
       {/* --- Unattended window policy --- */}
       <div className="card">
@@ -1626,118 +1770,145 @@ export default function SettingsTab({ onLocaleChange }: Props) {
               </div>
             )}
 
-            <details className="collapsible">
-              <summary>
-                <span className="collapsible-title">{t.settingsLocalAgentConfigure}</span>
-              </summary>
-              <div style={{ padding: '0 12px 12px' }}>
-                <label className="field">
-                  <input
-                    onChange={(event) => setAgentUrlDraft(event.target.value)}
-                    onBlur={() =>
-                      void mutate({
-                        type: 'settings.set',
-                        patch: {
-                          localAgentUrl:
-                            agentUrlDraft.trim() || t.settingsLocalAgentUrlPlaceholder,
-                        },
-                      })
-                    }
-                    placeholder={t.settingsLocalAgentUrlPlaceholder}
-                    type="text"
-                    value={agentUrlDraft}
-                  />
-                  <span>{t.settingsLocalAgentUrl}</span>
-                </label>
-                <label className="field">
-                  <input
-                    onChange={(event) => setAgentTokenDraft(event.target.value)}
-                    onBlur={() =>
-                      void mutate({
-                        type: 'settings.set',
-                        patch: { localAgentToken: agentTokenDraft.trim() },
-                      })
-                    }
-                    placeholder={t.settingsLocalAgentTokenPlaceholder}
-                    type="text"
-                    value={agentTokenDraft}
-                  />
-                  <span>{t.settingsLocalAgentToken}</span>
-                </label>
-                <p className="hint error">{t.settingsLocalAgentWarning}</p>
-              </div>
-            </details>
-          </>
-        )}
-
-        <p className="hint" style={{ marginTop: 12, marginBottom: 4 }}>
-          {t.settingsLocalAgentMcpTitle}
-        </p>
-        <p className="hint">{t.settingsLocalAgentMcpHint}</p>
-        <div role="tablist" style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
-          {(
-            [
-              ['claude', t.settingsLocalAgentMcpTabClaude],
-              ['codex', t.settingsLocalAgentMcpTabCodex],
-              ['trae', t.settingsLocalAgentMcpTabTrae],
-            ] as const
-          ).map(([key, label]) => {
-            const active = mcpTab === key
-            return (
+            {/* Connection editing moved into the dialog (button below); this
+                card stays a status surface: enable switch, live state, and —
+                for a multi-agent setup — which connection to serve. */}
+            <div className="actions">
               <button
-                aria-selected={active}
-                key={key}
-                onClick={() => setMcpTab(key)}
-                role="tab"
-                style={{
-                  flex: 1,
-                  padding: '4px 8px',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  borderRadius: 6,
-                  border: '1px solid var(--border)',
-                  background: active ? 'var(--accent)' : 'var(--panel-2)',
-                  color: active ? 'var(--on-accent)' : 'var(--muted)',
-                  cursor: 'pointer',
+                onClick={() => {
+                  setAgentNotice(null)
+                  setOpenDialog('agent')
                 }}
                 type="button"
               >
-                {label}
+                {t.settingsLocalAgentConfigure}
               </button>
-            )
-          })}
-        </div>
-        {mcpTab === 'claude' && (
-          <McpSnippet
-            copied={copiedKey === 'claude'}
-            copyLabel={t.settingsLocalAgentCopy}
-            copiedLabel={t.settingsLocalAgentCopied}
-            onCopy={() => copySnippet('claude', MCP_SNIPPET_CLAUDE.text)}
-            text={MCP_SNIPPET_CLAUDE.text}
-          />
+            </div>
+          </>
         )}
-        {mcpTab === 'codex' && (
-          <McpSnippet
-            copied={copiedKey === 'codex'}
-            copyLabel={t.settingsLocalAgentCopy}
-            copiedLabel={t.settingsLocalAgentCopied}
-            onCopy={() => copySnippet('codex', MCP_SNIPPET_CODEX.text)}
-            text={MCP_SNIPPET_CODEX.text}
-          />
-        )}
-        {mcpTab === 'trae' && (
-          <McpSnippet
-            copied={copiedKey === 'trae'}
-            copyLabel={t.settingsLocalAgentCopy}
-            copiedLabel={t.settingsLocalAgentCopied}
-            onCopy={() => copySnippet('trae', MCP_SNIPPET_TRAE.text)}
-            text={MCP_SNIPPET_TRAE.text}
-          />
-        )}
-        <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>
-          {t.settingsLocalAgentMcpPlaceholderHint}
-        </p>
       </div>
+
+      {openDialog === 'agent' && (
+        <FormDialog
+          footer={
+            <>
+              <FormDialogCancelButton
+                label={t.cancel}
+                onClick={() => {
+                  setAgentNotice(null)
+                  setOpenDialog(null)
+                }}
+              />
+              <FormDialogPrimaryButton
+                label={t.save}
+                onClick={() => void saveAgentConnection()}
+              />
+            </>
+          }
+          onClose={() => {
+            setAgentNotice(null)
+            setOpenDialog(null)
+          }}
+          title={t.settingsLocalAgentConfigure}
+        >
+          {agentNotice && (
+            <div
+              className="mb-3 rounded-lg border border-err bg-err-surface px-3 py-2 text-[12.5px] leading-relaxed break-words text-err"
+              role="alert"
+            >
+              {agentNotice}
+            </div>
+          )}
+
+          <label className="field">
+            <input
+              onChange={(event) => setAgentUrlDraft(event.target.value)}
+              placeholder={t.settingsLocalAgentUrlPlaceholder}
+              type="text"
+              value={agentUrlDraft}
+            />
+            <span>{t.settingsLocalAgentUrl}</span>
+          </label>
+          <label className="field">
+            <input
+              onChange={(event) => setAgentTokenDraft(event.target.value)}
+              placeholder={t.settingsLocalAgentTokenPlaceholder}
+              type="text"
+              value={agentTokenDraft}
+            />
+            <span>{t.settingsLocalAgentToken}</span>
+          </label>
+          <p className="hint error">{t.settingsLocalAgentWarning}</p>
+
+          <p className="hint" style={{ marginTop: 12, marginBottom: 4 }}>
+            {t.settingsLocalAgentMcpTitle}
+          </p>
+          <p className="hint">{t.settingsLocalAgentMcpHint}</p>
+          <div role="tablist" style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+            {(
+              [
+                ['claude', t.settingsLocalAgentMcpTabClaude],
+                ['codex', t.settingsLocalAgentMcpTabCodex],
+                ['trae', t.settingsLocalAgentMcpTabTrae],
+              ] as const
+            ).map(([key, label]) => {
+              const active = mcpTab === key
+              return (
+                <button
+                  aria-selected={active}
+                  key={key}
+                  onClick={() => setMcpTab(key)}
+                  role="tab"
+                  style={{
+                    flex: 1,
+                    padding: '4px 8px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    borderRadius: 6,
+                    border: '1px solid var(--border)',
+                    background: active ? 'var(--accent)' : 'var(--panel-2)',
+                    color: active ? 'var(--on-accent)' : 'var(--muted)',
+                    cursor: 'pointer',
+                  }}
+                  type="button"
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+          {mcpTab === 'claude' && (
+            <McpSnippet
+              copied={copiedKey === 'claude'}
+              copyLabel={t.settingsLocalAgentCopy}
+              copiedLabel={t.settingsLocalAgentCopied}
+              onCopy={() => copySnippet('claude', MCP_SNIPPET_CLAUDE.text)}
+              text={MCP_SNIPPET_CLAUDE.text}
+            />
+          )}
+          {mcpTab === 'codex' && (
+            <McpSnippet
+              copied={copiedKey === 'codex'}
+              copyLabel={t.settingsLocalAgentCopy}
+              copiedLabel={t.settingsLocalAgentCopied}
+              onCopy={() => copySnippet('codex', MCP_SNIPPET_CODEX.text)}
+              text={MCP_SNIPPET_CODEX.text}
+            />
+          )}
+          {mcpTab === 'trae' && (
+            <McpSnippet
+              copied={copiedKey === 'trae'}
+              copyLabel={t.settingsLocalAgentCopy}
+              copiedLabel={t.settingsLocalAgentCopied}
+              onCopy={() => copySnippet('trae', MCP_SNIPPET_TRAE.text)}
+              text={MCP_SNIPPET_TRAE.text}
+            />
+          )}
+          <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>
+            {t.settingsLocalAgentMcpPlaceholderHint}
+          </p>
+        </FormDialog>
+      )}
     </div>
   )
 }
