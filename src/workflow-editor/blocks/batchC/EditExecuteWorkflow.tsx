@@ -29,12 +29,14 @@ import { RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { sendCommand } from '../../../lib/messages'
 import type { Workflow } from '../../../lib/workflow/types'
+import { useEditorLocale } from '../../locale-context'
 import { useWorkflowMeta } from '../batchD/WorkflowInfoFields'
 import { Checkbox, Field, IconButton, Select, TextArea, TextInput } from '../shared/Field'
 import { bool, str } from '../shared/InteractionBase'
 import type { EditFormProps } from '../EditForms'
 
 export default function EditExecuteWorkflow({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
   const insertAllVars = bool(data, 'insertAllVars')
   const selfId = useWorkflowMeta()?.meta.id ?? null
 
@@ -87,7 +89,7 @@ export default function EditExecuteWorkflow({ data, onChange }: EditFormProps) {
       </Field>
       {loaded && workflows.length === 0 && (
         <p className="wf-form-note">
-          No saved workflows yet — create one in the Workflows tab first.
+          {bt('No saved workflows yet — create one in the Workflows tab first.')}
         </p>
       )}
 
@@ -100,7 +102,7 @@ export default function EditExecuteWorkflow({ data, onChange }: EditFormProps) {
       </Field>
 
       <p className="wf-form-note" style={{ marginTop: 12 }}>
-        Global data
+        {bt('Global data')}
       </p>
       <Checkbox
         checked={bool(data, 'insertAllGlobalData')}
@@ -117,7 +119,7 @@ export default function EditExecuteWorkflow({ data, onChange }: EditFormProps) {
           onChange={(v) => onChange({ globalData: v })}
         />
       </Field>
-      <p className="wf-form-note">This will overwrite the global data of the selected workflow.</p>
+      <p className="wf-form-note">{bt('This will overwrite the global data of the selected workflow.')}</p>
 
       <Checkbox
         checked={insertAllVars}
@@ -134,7 +136,7 @@ export default function EditExecuteWorkflow({ data, onChange }: EditFormProps) {
               onChange={(v) => onChange({ insertVars: v })}
             />
           </Field>
-          <p className="wf-form-note">Use commas to separate the variable names.</p>
+          <p className="wf-form-note">{bt('Use commas to separate the variable names.')}</p>
         </>
       )}
     </div>

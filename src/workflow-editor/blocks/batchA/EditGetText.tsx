@@ -12,6 +12,7 @@
  */
 import { useState } from 'react'
 import { Checkbox, Field, TextInput } from '../shared/Field'
+import { useEditorLocale } from '../../locale-context'
 import type { EditFormProps } from '../EditForms'
 import InteractionBase, { bool, str } from '../shared/InteractionBase'
 import { InsertDataFields } from './_shared'
@@ -31,6 +32,7 @@ function readRegexExp(data: Record<string, unknown>): string[] {
 }
 
 export default function EditGetText({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
   const [showFlags, setShowFlags] = useState(false)
   const regexExp = readRegexExp(data)
 
@@ -56,7 +58,7 @@ export default function EditGetText({ data, onChange }: EditFormProps) {
             className="wf-icon-btn"
             style={{ whiteSpace: 'nowrap' }}
             onClick={() => setShowFlags((s) => !s)}
-            title="Expression flags"
+            title={bt('Expression flags')}
           >
             /{regexExp.join('') || 'flags'}
           </button>
@@ -64,7 +66,9 @@ export default function EditGetText({ data, onChange }: EditFormProps) {
       </Field>
       {showFlags && (
         <div style={{ marginBottom: 8 }}>
-          <p style={{ margin: '4px 0', fontSize: 12, opacity: 0.75 }}>Expression flags</p>
+          <p style={{ margin: '4px 0', fontSize: 12, opacity: 0.75 }}>
+            {bt('Expression flags')}
+          </p>
           {REGEX_FLAGS.map((item) => (
             <Checkbox
               key={item.id}

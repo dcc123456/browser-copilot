@@ -36,10 +36,13 @@ function GenericForm({
   data: Record<string, unknown>
   onChange: (patch: Record<string, unknown>) => void
 }) {
+  const { bt } = useEditorLocale()
   const keys = Object.keys(data).filter((k) => k !== 'disableBlock')
   return (
     <div className="wf-form">
-      <p className="wf-form-note">Dedicated form coming in a later phase — generic editor:</p>
+      <p className="wf-form-note">
+        {bt('Dedicated form coming in a later phase — generic editor:')}
+      </p>
       {keys.map((key) => {
         const value = data[key]
         if (typeof value === 'boolean') {
@@ -100,7 +103,7 @@ export default function BlockEditForm({
   onBack,
   t,
 }: BlockEditFormProps) {
-  const { blockName } = useEditorLocale()
+  const { blockName, bt } = useEditorLocale()
   const EditComponent = block.editComponent ? EditForms[block.editComponent] : undefined
   const cloud = isCloudBlock(block.id)
 
@@ -117,7 +120,7 @@ export default function BlockEditForm({
             href={`https://docs.extension.automa.site/blocks/${block.id}.html`}
             target="_blank"
             rel="noreferrer"
-            title="Docs"
+            title={bt('Docs')}
             className="wf-icon-btn"
           >
             <Info size={14} />
@@ -128,10 +131,10 @@ export default function BlockEditForm({
       {cloud ? (
         <div className="wf-form wf-form-unsupported">
           <Cloud size={14} />
-          <p>This block requires Automa's cloud service and is not supported.</p>
+          <p>{bt("This block requires Automa's cloud service and is not supported.")}</p>
         </div>
       ) : block.disableEdit ? (
-        <p className="wf-form-note">This block has no editable settings.</p>
+        <p className="wf-form-note">{bt('This block has no editable settings.')}</p>
       ) : EditComponent ? (
         <EditComponent data={data} onChange={onChange} blockId={block.id} />
       ) : (

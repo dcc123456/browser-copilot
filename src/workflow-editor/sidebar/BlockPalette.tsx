@@ -36,7 +36,7 @@ function BlockCard({
   pinned: boolean
   onTogglePin: () => void
 }) {
-  const { t, blockName } = useEditorLocale()
+  const { t, bt, blockName, blockDesc: btDesc } = useEditorLocale()
   // no-ocr build: OCR-only operators are shown grayed out and cannot be
   // dragged onto the canvas (Tailwind utilities — see ui/design-system.css).
   const ocrUnavailable = block.requiresOcr === true && !OCR_SUPPORTED
@@ -47,7 +47,9 @@ function BlockCard({
       }`}
       draggable={!ocrUnavailable}
       title={
-        ocrUnavailable ? t('ocrUnavailable') : block.description || blockName(block.id, block.name)
+        ocrUnavailable
+          ? t('ocrUnavailable')
+          : btDesc(block.id, block.description) || blockName(block.id, block.name)
       }
       style={{ ['--cat-color' as string]: `var(--cat-${block.category})` }}
       onDragStart={(e) => {
@@ -64,13 +66,13 @@ function BlockCard({
           href={`https://docs.extension.automa.site/blocks/${block.id}.html`}
           target="_blank"
           rel="noreferrer"
-          title="Docs"
+          title={bt('Docs')}
           onClick={(e) => e.stopPropagation()}
         >
           <Info size={14} />
         </a>
         <span
-          title={pinned ? 'Unpin block' : 'Pin block'}
+          title={pinned ? bt('Unpin block') : bt('Pin block')}
           onClick={(e) => {
             e.stopPropagation()
             onTogglePin()

@@ -9,6 +9,7 @@
  */
 
 import type { EditFormProps } from '../EditForms'
+import { useEditorLocale } from '../../locale-context'
 import SaveOutputs from './SaveOutputs'
 import { Field, Select, TextArea, TextInput } from '../shared/Field'
 import { str } from '../shared/InteractionBase'
@@ -19,6 +20,7 @@ const TYPES = [
 ]
 
 export default function EditTabUrl({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
   const type = str(data, 'type') || 'active-tab'
 
   return (
@@ -44,7 +46,7 @@ export default function EditTabUrl({ data, onChange }: EditFormProps) {
             marginBottom: 12,
           }}
         >
-          <p className="wf-form-note">Query</p>
+          <p className="wf-form-note">{bt('Query')}</p>
           <Field label="Match Patterns (optional)">
             <TextInput
               value={str(data, 'qMatchPatterns')}

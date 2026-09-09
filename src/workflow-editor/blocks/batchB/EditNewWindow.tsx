@@ -10,6 +10,7 @@
  */
 
 import type { EditFormProps } from '../EditForms'
+import { useEditorLocale } from '../../locale-context'
 import { Checkbox, Field, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
 
@@ -22,6 +23,7 @@ const WINDOW_STATES = [
 ]
 
 export default function EditNewWindow({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
   const windowState = str(data, 'windowState') || 'normal'
 
   return (
@@ -63,8 +65,8 @@ export default function EditNewWindow({ data, onChange }: EditFormProps) {
         onChange={(v) => onChange({ incognito: v })}
         label={
           <span>
-            Set as an incognito window{' '}
-            <span title="You must enable 'Allow in incognito' for this extension first">
+            {bt('Set as an incognito window')}{' '}
+            <span title={bt("You must enable 'Allow in incognito' for this extension first")}>
               &#128712;
             </span>
           </span>
@@ -105,7 +107,7 @@ export default function EditNewWindow({ data, onChange }: EditFormProps) {
               />
             </Field>
           </div>
-          <p className="wf-form-note">Note: use 0 to disable</p>
+          <p className="wf-form-note">{bt('Note: use 0 to disable')}</p>
         </>
       )}
     </div>

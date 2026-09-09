@@ -10,18 +10,21 @@
  */
 
 import type { EditFormProps } from '../EditForms'
+import { useEditorLocale } from '../../locale-context'
 import { Checkbox, Field, TextArea, TextInput } from '../shared/Field'
 import { bool, str } from '../shared/InteractionBase'
 
 export default function EditProxy({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
   const port = data.port
   const portValue = typeof port === 'string' || typeof port === 'number' ? port : 443
 
   return (
     <div className="wf-form">
       <p className="wf-form-note">
-        Proxy is not supported in Manifest V3 (the chrome.proxy API is unavailable); this block is a
-        placeholder and its settings have no effect.
+        {bt(
+          'Proxy is not supported in Manifest V3 (the chrome.proxy API is unavailable); this block is a placeholder and its settings have no effect.',
+        )}
       </p>
 
       <Field label="Description">
@@ -51,7 +54,7 @@ export default function EditProxy({ data, onChange }: EditFormProps) {
           onChange={(v) => onChange({ bypassList: v })}
         />
       </Field>
-      <p className="wf-form-note">Use commas (,) to separate URL</p>
+      <p className="wf-form-note">{bt('Use commas (,) to separate URL')}</p>
 
       <Checkbox
         checked={bool(data, 'clearProxy')}

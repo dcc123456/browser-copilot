@@ -15,6 +15,7 @@ import { Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { Field, IconButton, Select, TextArea } from '../shared/Field'
 import { str } from '../shared/InteractionBase'
+import { useEditorLocale } from '../../locale-context'
 import type { EditFormProps } from '../EditForms'
 import { arr, id } from './shared'
 
@@ -40,6 +41,7 @@ function readList(raw: unknown): InsertItem[] {
 }
 
 export default function EditInsertData({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
   const [open, setOpen] = useState(false)
   const list = readList(data.dataList)
 
@@ -134,10 +136,10 @@ export default function EditInsertData({ data, onChange }: EditFormProps) {
             </div>
           ))}
           <button type="button" className="wf-btn-accent" onClick={addItem}>
-            <Plus size={14} /> Add
+            <Plus size={14} /> {bt('Add')}
           </button>
           <p className="wf-form-note">
-            File import (path / CSV / Excel / base64) is not supported in this build.
+            {bt('File import (path / CSV / Excel / base64) is not supported in this build.')}
           </p>
         </div>
       )}

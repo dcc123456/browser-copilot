@@ -132,7 +132,7 @@ export const BRANCH_HANDLES: Record<string, { idSuffix: string; label: string }[
 }
 
 function BlockNodeComponent({ id, data, selected }: NodeProps) {
-  const { blockName } = useEditorLocale()
+  const { blockName, bt } = useEditorLocale()
   const node = data as unknown as BlockNodeData
   const block = node.block
   if (!block) return null
@@ -196,7 +196,7 @@ function BlockNodeComponent({ id, data, selected }: NodeProps) {
           <p className="wf-node-name">{node.label || displayName}</p>
           {summary && <p className="wf-node-desc">{summary}</p>}
           {bd.loopId ? (
-            <span className="wf-node-loopid" title="Loop id (click to copy)">
+            <span className="wf-node-loopid" title={bt('Loop id (click to copy)')}>
               {String(bd.loopId)}
             </span>
           ) : null}

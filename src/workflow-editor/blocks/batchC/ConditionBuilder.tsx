@@ -23,6 +23,7 @@
 
 import { Plus, Trash2 } from 'lucide-react'
 import { Field, IconButton, Select, TextArea, TextInput } from '../shared/Field'
+import { useEditorLocale } from '../../locale-context'
 import { id } from './shared'
 
 // ---------------------------------------------------------------------------
@@ -212,6 +213,7 @@ function ValueItemEditor({
   item: BuilderValueItem
   onChange: (next: BuilderValueItem) => void
 }) {
+  const { bt } = useEditorLocale()
   const valueDef = VALUE_TYPES.find((v) => v.id === item.type)
 
   const setType = (newType: string) => {
@@ -251,7 +253,7 @@ function ValueItemEditor({
         ))
       )}
       {valueDef && !valueDef.compareable && (
-        <p className="wf-form-note">Standalone condition — no comparison needed.</p>
+        <p className="wf-form-note">{bt('Standalone condition — no comparison needed.')}</p>
       )}
     </div>
   )
@@ -358,6 +360,7 @@ export default function ConditionBuilder({
   onChange: (next: OrGroup[]) => void
 }) {
   const groups = value.length > 0 ? value : []
+  const { bt } = useEditorLocale()
 
   const patchGroup = (groupIndex: number, next: OrGroup) => {
     const nextGroups = groups.slice()
@@ -397,7 +400,7 @@ export default function ConditionBuilder({
     <div className="wf-form">
       {groups.length === 0 && (
         <button type="button" className="wf-btn-accent" onClick={() => onChange([newOrGroup()])}>
-          <Plus size={14} /> Add condition
+          <Plus size={14} /> {bt('Add condition')}
         </button>
       )}
 
@@ -419,7 +422,7 @@ export default function ConditionBuilder({
               >
                 AND
               </span>
-              all rows below must match
+              {bt('all rows below must match')}
             </p>
           )}
           {group.conditions.map((row, rIndex) => (

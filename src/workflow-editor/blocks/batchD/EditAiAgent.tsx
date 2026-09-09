@@ -15,11 +15,13 @@
  */
 
 import type { EditFormProps } from '../EditForms'
+import { useEditorLocale } from '../../locale-context'
 import { Checkbox, Expand, Field, NumberInput, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
 import SelectorField from '../shared/SelectorField'
 
 export default function EditAiAgent({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
   const findBy = str(data, 'findBy') || 'cssSelector'
   const selector = str(data, 'selector')
   const actOnPage = bool(data, 'actOnPage')
@@ -43,8 +45,9 @@ export default function EditAiAgent({ data, onChange }: EditFormProps) {
         onFindBy={(v) => onChange({ findBy: v })}
       />
       <p className="wf-form-note">
-        The matched element's text is read at runtime and given to the agent. Leave it empty and the
-        agent reads the page itself via its tools.
+        {bt(
+          "The matched element's text is read at runtime and given to the agent. Leave it empty and the agent reads the page itself via its tools.",
+        )}
       </p>
 
       <Field label="Prompt *">
@@ -61,17 +64,19 @@ export default function EditAiAgent({ data, onChange }: EditFormProps) {
       <Checkbox
         checked={actOnPage}
         onChange={(v) => onChange({ actOnPage: v })}
-        label={
-          <>
-            Allow the agent to <strong>act on the page</strong> (click, fill, navigate)
-          </>
-        }
-        title="Off: the agent only reads and analyzes (read-only). On: it performs actions autonomously without per-step confirmation."
+        label={bt('Allow the agent to act on the page (click, fill, navigate)')}
+        title={bt(
+          'Off: the agent only reads and analyzes (read-only). On: it performs actions autonomously without per-step confirmation.',
+        )}
       />
       <p className="wf-form-note">
         {actOnPage
-          ? 'Full auto: the agent may click, type, and navigate to finish the task. Every action is written to the run log.'
-          : 'Read-only: the agent can read/snapshot the page and answer, but cannot click, type, or navigate.'}
+          ? bt(
+              'Full auto: the agent may click, type, and navigate to finish the task. Every action is written to the run log.',
+            )
+          : bt(
+              'Read-only: the agent can read/snapshot the page and answer, but cannot click, type, or navigate.',
+            )}
       </p>
 
       <Expand title="Advanced">

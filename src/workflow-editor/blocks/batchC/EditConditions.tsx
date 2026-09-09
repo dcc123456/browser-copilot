@@ -13,6 +13,7 @@
 import { Pencil, Plus, Trash2, Waypoints } from 'lucide-react'
 import { useState } from 'react'
 import type { EditFormProps } from '../EditForms'
+import { useEditorLocale } from '../../locale-context'
 import {
   Checkbox,
   Expand,
@@ -44,6 +45,7 @@ function readPaths(raw: unknown): ConditionPath[] {
 }
 
 export default function EditConditions({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
   const paths = readPaths(data.conditions)
   const [openPath, setOpenPath] = useState<number | null>(paths.length === 1 ? 0 : null)
 
@@ -89,12 +91,14 @@ export default function EditConditions({ data, onChange }: EditFormProps) {
           disabled={paths.length >= 20}
           onClick={addPath}
         >
-          <Plus size={14} /> Add path
+          <Plus size={14} /> {bt('Add path')}
         </button>
       </div>
 
       {paths.length === 0 && (
-        <p className="wf-form-note">No condition paths yet — add one to create an output branch.</p>
+        <p className="wf-form-note">
+          {bt('No condition paths yet — add one to create an output branch.')}
+        </p>
       )}
 
       {paths.map((path, index) => (

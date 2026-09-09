@@ -14,6 +14,7 @@ import { X } from 'lucide-react'
 import { useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { BlockIcon } from '../../lib/workflow/blocks/icons'
+import { useEditorLocale } from '../locale-context'
 
 export interface ModalProps {
   open: boolean
@@ -50,6 +51,7 @@ export default function Modal({
   hideClose,
   children,
 }: ModalProps) {
+  const { bt } = useEditorLocale()
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -96,7 +98,7 @@ export default function Modal({
             <button
               type="button"
               className="wf-icon-btn wf-modal-close"
-              title="Close"
+              title={bt('Close')}
               onClick={onClose}
             >
               <X size={14} />

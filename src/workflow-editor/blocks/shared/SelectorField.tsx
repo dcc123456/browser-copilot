@@ -66,7 +66,7 @@ export default function SelectorField({
   const effectivePlaceholder =
     placeholder ??
     (locatorHint
-      ? 'Leave empty to use the conversation locator above; type a CSS selector to override'
+      ? bt('Leave empty to use the conversation locator above; type a CSS selector to override')
       : findBy === 'xpath'
         ? '//div[@class="..."]'
         : '.css-selector')

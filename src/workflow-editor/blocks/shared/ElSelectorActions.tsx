@@ -101,14 +101,14 @@ export default function ElSelectorActions({
         onSelector(msg.selector)
       } else if (pending.mode === 'verify') {
         const n = msg.count ?? 0
-        if (n > 0) onMessage?.(`Verified: ${n} element(s) match`, 'ok')
+        if (n > 0) onMessage?.(bt('Verified: {count} element(s) match').replace('{count}', String(n)), 'ok')
         else {
-          onMessage?.('Element not found', 'error')
-          toast('Element not found', 'error')
+          onMessage?.(bt('Element not found'), 'error')
+          toast(bt('Element not found'), 'error')
         }
       }
     },
-    [clearBusy, onMessage, onSelector],
+    [clearBusy, onMessage, onSelector, bt],
   )
 
   useEffect(() => {
@@ -131,7 +131,7 @@ export default function ElSelectorActions({
       safetyTimer.current = setTimeout(() => {
         if (pendingPicker.current?.id === pickerId) {
           clearBusy()
-          toast('The element picker did not respond.', 'error')
+          toast(bt('The element picker did not respond.'), 'error')
         }
       }, safetyMs)
       try {
@@ -149,14 +149,14 @@ export default function ElSelectorActions({
         // No response (SW restarted) or an explicit failure: stop spinning.
         if (!resp || resp.ok === false) {
           clearBusy()
-          toast(resp?.error ?? 'Could not start the element picker.', 'error')
+          toast(resp?.error ?? bt('Could not start the element picker.'), 'error')
         }
       } catch (error) {
         clearBusy()
         toast(error instanceof Error ? error.message : String(error), 'error')
       }
     },
-    [findBy, multiple, selector, clearBusy],
+    [findBy, multiple, selector, clearBusy, bt],
   )
 
   return (

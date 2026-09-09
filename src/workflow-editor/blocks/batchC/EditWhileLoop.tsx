@@ -11,6 +11,7 @@
 
 import { useState } from 'react'
 import type { EditFormProps } from '../EditForms'
+import { useEditorLocale } from '../../locale-context'
 import { Field, TextArea } from '../shared/Field'
 import { str } from '../shared/InteractionBase'
 import ConditionBuilder, {
@@ -20,6 +21,7 @@ import ConditionBuilder, {
 } from './ConditionBuilder'
 
 export default function EditWhileLoop({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
   const [editing, setEditing] = useState(false)
 
   // Catalog default is `null`; initialize with Automa's default tree.
@@ -49,7 +51,7 @@ export default function EditWhileLoop({ data, onChange }: EditFormProps) {
       )}
 
       <p className="wf-form-note" style={{ marginTop: 8 }}>
-        Blocks connected to the fallback handle run when the condition is false.
+        {bt('Blocks connected to the fallback handle run when the condition is false.')}
       </p>
     </div>
   )

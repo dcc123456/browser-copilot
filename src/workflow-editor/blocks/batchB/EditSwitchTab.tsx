@@ -10,6 +10,7 @@
 
 import { Info } from 'lucide-react'
 import type { EditFormProps } from '../EditForms'
+import { useEditorLocale } from '../../locale-context'
 import { Checkbox, Field, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
 
@@ -22,6 +23,7 @@ const FIND_TYPES = [
 ]
 
 export default function EditSwitchTab({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
   const findTabBy = str(data, 'findTabBy') || 'match-patterns'
   const createIfNoMatch = bool(data, 'createIfNoMatch')
 
@@ -48,9 +50,9 @@ export default function EditSwitchTab({ data, onChange }: EditFormProps) {
           {findTabBy === 'match-patterns' && (
             <div className="wf-field">
               <label>
-                Match Patterns{' '}
+                {bt('Match Patterns')}{' '}
                 <a
-                  title="Examples"
+                  title={bt('Examples')}
                   href="https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns#examples"
                   target="_blank"
                   rel="noopener noreferrer"

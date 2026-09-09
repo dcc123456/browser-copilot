@@ -17,6 +17,7 @@ import { Info } from 'lucide-react'
 import { type ReactNode } from 'react'
 import { Checkbox, Expand, Field, NumberInput, Select, TextInput } from '../shared/Field'
 import type { EditFormProps } from '../EditForms'
+import { useEditorLocale } from '../../locale-context'
 import InteractionBase, { str } from '../shared/InteractionBase'
 
 interface EventDef {
@@ -318,6 +319,7 @@ function toCamelCase(input: string): string {
 }
 
 export default function EditTriggerEvent({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
   const eventName = str(data, 'eventName')
   const eventType = str(data, 'eventType')
   const params = getParams(data)
@@ -353,17 +355,17 @@ export default function EditTriggerEvent({ data, onChange }: EditFormProps) {
         </Field>
       </div>
 
-      <Expand
+        <Expand
         title={
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, width: '100%' }}>
-            <span>Options</span>
+            <span>{bt('Options')}</span>
             {eventName && (
               <a
                 href={detailsUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={(e) => e.stopPropagation()}
-                title="Event reference (MDN)"
+                title={bt('Event reference (MDN)')}
                 style={{ marginLeft: 'auto' }}
               >
                 <Info size={14} />

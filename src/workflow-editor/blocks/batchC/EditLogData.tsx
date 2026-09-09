@@ -10,12 +10,14 @@
  * @module workflow-editor/blocks/batchC/EditLogData
  */
 
+import { useEditorLocale } from '../../locale-context'
 import { Field, TextArea, TextInput } from '../shared/Field'
 import { str } from '../shared/InteractionBase'
 import type { EditFormProps } from '../EditForms'
 import { AssignVariable } from './shared'
 
 export default function EditLogData({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
   return (
     <div className="wf-form">
       <Field label="Description">
@@ -38,7 +40,7 @@ export default function EditLogData({ data, onChange }: EditFormProps) {
       {str(data, 'workflowId') && (
         <>
           <p className="wf-form-note" style={{ marginTop: 12 }}>
-            Log data
+            {bt('Log data')}
           </p>
           <AssignVariable data={data} onChange={onChange} />
           <Field label="Insert to table (column name)">

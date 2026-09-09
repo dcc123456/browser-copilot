@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from 'react'
 import type { EditFormProps } from '../EditForms'
+import { useEditorLocale } from '../../locale-context'
 import { Checkbox, Expand, Field, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
 import SelectorField from '../shared/SelectorField'
@@ -26,6 +27,7 @@ const LOOP_TYPES = [
 ]
 
 export default function EditLoopData({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
   const [showData, setShowData] = useState(false)
   const loopThrough = str(data, 'loopThrough') || 'data-columns'
   const resume = bool(data, 'resumeLastWorkflow')
@@ -126,10 +128,10 @@ export default function EditLoopData({ data, onChange }: EditFormProps) {
             className="wf-btn-accent w-full"
             onClick={() => setShowData(!showData)}
           >
-            {showData ? 'Close data' : 'Insert data'}
+            {showData ? bt('Close data') : bt('Insert data')}
           </button>
           <p className="wf-form-note">
-            Max file/data size is 1MB. Import a JSON/CSV file or paste JSON below.
+            {bt('Max file/data size is 1MB. Import a JSON/CSV file or paste JSON below.')}
           </p>
           {showData && (
             <Field label="Custom data (JSON array)">
@@ -198,8 +200,9 @@ export default function EditLoopData({ data, onChange }: EditFormProps) {
 
       <Expand title="Notes">
         <p className="wf-form-note">
-          Google Sheets, file import (CSV/JSON), and the on-page element picker are not wired up in
-          this build — use the reference key / selector text fields directly.
+          {bt(
+            'Google Sheets, file import (CSV/JSON), and the on-page element picker are not wired up in this build — use the reference key / selector text fields directly.',
+          )}
         </p>
       </Expand>
     </div>

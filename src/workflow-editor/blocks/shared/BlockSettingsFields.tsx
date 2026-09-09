@@ -61,7 +61,7 @@ export function GeneralFields({ data, onChange }: EditFormProps) {
 
 /** On-error tab (Automa BlockSettingOnError). */
 export function OnErrorFields({ data, onChange }: EditFormProps) {
-  const { t } = useEditorLocale()
+  const { t, bt } = useEditorLocale()
   const onError = onErrorOf(data)
   const setOnError = (patch: Partial<OnError>) => onChange({ onError: { ...onError, ...patch } })
   const toDo = str(onError as unknown as Record<string, unknown>, 'toDo') || 'error'
@@ -93,7 +93,7 @@ export function OnErrorFields({ data, onChange }: EditFormProps) {
           {onError.retry && (
             <div className="wf-onerror-retry">
               {/* Automa: inline "Times ⓘ [input]" row. */}
-              <div className="wf-inline-field" title="The number of times to retry the action">
+              <div className="wf-inline-field" title={bt('The number of times to retry the action')}>
                 <span>{t('times')}</span>
                 <Info size={14} />
                 <div className="wf-inline-input">
@@ -108,7 +108,7 @@ export function OnErrorFields({ data, onChange }: EditFormProps) {
               {/* Automa: indented "Interval ⓘ [input] seconds" row. */}
               <div
                 className="wf-inline-field wf-inline-field-indent"
-                title="Seconds to wait between each try"
+                title={bt('Seconds to wait between each try')}
               >
                 <span>{t('interval')}</span>
                 <Info size={14} />

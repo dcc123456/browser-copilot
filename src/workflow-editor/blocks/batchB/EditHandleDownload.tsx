@@ -11,6 +11,7 @@
  */
 
 import type { EditFormProps } from '../EditForms'
+import { useEditorLocale } from '../../locale-context'
 import SaveOutputs from './SaveOutputs'
 import { Checkbox, Field, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
@@ -22,6 +23,7 @@ const ON_CONFLICT = [
 ]
 
 export default function EditHandleDownload({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
   const downloadId = str(data, 'downloadId')
   const waitForDownload = bool(data, 'waitForDownload')
   const hasDownloadId = downloadId.trim().length > 0
@@ -81,7 +83,7 @@ export default function EditHandleDownload({ data, onChange }: EditFormProps) {
 
       {waitForDownload && (
         <>
-          <p className="wf-form-note">File path</p>
+          <p className="wf-form-note">{bt('File path')}</p>
           <SaveOutputs data={data} onChange={onChange} />
         </>
       )}

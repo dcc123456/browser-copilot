@@ -12,6 +12,7 @@
 
 import { useEffect } from 'react'
 import type { EditFormProps } from '../EditForms'
+import { useEditorLocale } from '../../locale-context'
 import InteractionBase from '../shared/InteractionBase'
 import { Checkbox, Field, NumberInput, Select, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
@@ -27,6 +28,7 @@ const ACTIONS = [
 ]
 
 export default function EditLoopElements({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
   useEffect(() => {
     if (!str(data, 'loopId')) onChange({ loopId: id(6) })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -68,7 +70,7 @@ export default function EditLoopElements({ data, onChange }: EditFormProps) {
       />
 
       <div style={{ borderTop: '1px solid var(--bc-border, #ccc)', marginTop: 16, paddingTop: 16 }}>
-        <p className="wf-form-note">Load more elements</p>
+        <p className="wf-form-note">{bt('Load more elements')}</p>
         <Field label="Action">
           <Select
             value={action}

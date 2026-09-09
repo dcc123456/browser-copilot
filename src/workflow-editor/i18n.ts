@@ -231,8 +231,12 @@ export type TranslateFn = (key: EditorStringKey) => string
  * Keys are the English source strings (the fallback), values are the Chinese
  * rendering. Shared form controls (`Field`, `Checkbox`, `Select`, `Expand`,
  * placeholders) pass their English text through `bt()` so forms translate with
- * no per-form changes; a string missing here is shown verbatim, so coverage can
- * be extended incrementally without breaking anything.
+ * no per-form changes; a string missing here is shown verbatim. The dictionary
+ * is expected to cover every operator-node string (labels, option lists,
+ * notes, tooltips); only syntax examples ('.css-selector', 'abc123',
+ * 'variables@variableName') and format names (PNG/JPEG/JSON/CSS/XPath) are
+ * intentionally left untranslated. Block catalog DESCRIPTIONS live in
+ * block-i18n.ts (`BLOCK_DESCRIPTIONS_ZH`), not here.
  */
 const BLOCK_FORM_STRINGS = {
   en: {} as Record<string, string>,
@@ -550,10 +554,256 @@ const BLOCK_FORM_STRINGS = {
     'This block has no editable settings.': '此算子没有可编辑的设置。',
     'Runs in the active page as a function body. Use return to send a value back (stored in lastResult); vars and refData are available as parameters.':
       '在当前页面的函数体内执行。用 return 返回值（存入 lastResult）；vars、refData 作为参数可用。',
+    // — screenshot / ocr —
+    'A page': '页面（可见区域）',
+    'A full page': '整页',
+    'An element': '元素',
+    'Input image': '输入图片',
+    'An image variable (img)': '图片变量（img）',
+    'An element on the page (img / canvas)': '页面元素（img / canvas）',
+    'The previous page snapshot': '上一次页面快照',
+    'Image variable (data URL / base64 / link)': '图片变量（data URL / base64 / 链接）',
+    'Language (empty = global setting)': 'OCR 语言（留空 = 使用全局设置）',
+    'Enhance image before OCR (upscale + contrast)': '识别前预处理图片（放大 + 增强对比度）',
+    'Output variable (type: string)': '输出变量（字符串类型）',
+    Query: '查询参数',
+    // — browser / tabs —
+    'Main window': '主窗口',
+    Iframe: 'Iframe 框架',
+    'All tabs': '所有标签页',
+    'Next tab': '下一个标签页',
+    'Previous tab': '上一个标签页',
+    'Tab index': '标签页序号',
+    'Match patterns': '匹配模式',
+    Normal: '常规',
+    Minimized: '最小化',
+    Maximized: '最大化',
+    Fullscreen: '全屏',
+    'Note: use 0 to disable': '注意：填 0 表示禁用',
+    'Use the previously opened new tab instead of creating a new one':
+      '复用先前打开的新标签页，而不是新建',
+    "You must enable 'Allow in incognito' for this extension first":
+      '必须先在扩展设置中允许「在无痕模式下启用」',
+    Examples: '示例',
+    'Set as an incognito window': '设为无痕窗口',
+    'Media element (image, audio, or video)': '媒体元素（图片 / 音频 / 视频）',
+    // — interaction extras —
+    'Press a key': '按单个键',
+    'Press multiple keys': '按多个键',
+    'Get attribute value': '获取属性值',
+    'Set attribute value': '设置属性值',
+    'Text field': '文本框',
+    Select: '下拉选择',
+    Checkbox: '复选框',
+    Radio: '单选框',
+    // — create element —
+    'As first child': '作为第一个子元素',
+    'As last child': '作为最后一个子元素',
+    'As previous sibling': '作为前一个兄弟元素',
+    'As next sibling': '作为后一个兄弟元素',
+    'Replace target element': '替换目标元素',
+    Style: '样式',
+    Script: '脚本',
+    // — loops —
+    None: '无',
+    'Click an element': '点击元素',
+    'Click a link': '点击链接',
+    'Scroll down': '向下滚动',
+    'Scroll up': '向上滚动',
+    'Scroll to top': '滚动到顶部',
+    'Scroll to bottom': '滚动到底部',
+    'Load more elements': '加载更多元素',
+    Table: '数据表',
+    Numbers: '数字序列',
+    'Google Sheets': 'Google 表格',
+    'Custom data': '自定义数据',
+    Elements: '页面元素',
+    'Max file/data size is 1MB. Import a JSON/CSV file or paste JSON below.':
+      '文件/数据上限 1MB。可导入 JSON/CSV 文件，或在下方粘贴 JSON。',
+    'Close data': '收起数据',
+    'Insert data': '插入数据',
+    Notes: '备注',
+    'Google Sheets, file import (CSV/JSON), and the on-page element picker are not wired up in this build — use the reference key / selector text fields directly.':
+      '此版本尚未接入 Google 表格、文件导入（CSV/JSON）与页面元素拾取 — 请直接填写引用键 / 选择器。',
+    // — data mapping / export / sort / insert —
+    Source: '源',
+    Destination: '目标',
+    'Add source': '添加源',
+    'Add destination': '添加目标',
+    'Remove source': '删除源',
+    'Remove destination': '删除目标',
+    'Remove item': '删除条目',
+    'Remove property': '删除属性',
+    'Remove file': '删除文件',
+    Uniquify: '重名自动重命名',
+    Overwrite: '覆盖',
+    Prompt: '每次询问',
+    'Plain text': '纯文本',
+    Ascending: '升序',
+    Descending: '降序',
+    'Sort direction': '排序方向',
+    'Match value': '匹配值',
+    'Replace value': '替换值',
+    'File import (path / CSV / Excel / base64) is not supported in this build.':
+      '此版本暂不支持文件导入（路径 / CSV / Excel / base64）。',
+    // — browser events —
+    'Tab: page loaded': '标签页：页面加载完成',
+    'Tab: closed': '标签页：已关闭',
+    'Tab: updated': '标签页：已更新',
+    'Tab: activated': '标签页：已激活',
+    'Network: request': '网络：发起请求',
+    'Network: request completed': '网络：请求完成',
+    'Network: request error': '网络：请求出错',
+    'Download: created': '下载：已创建',
+    // — clipboard / cookie / download —
+    'Get clipboard data': '读取剪贴板',
+    'Insert text to clipboard': '写入剪贴板文本',
+    'Get cookies': '获取 Cookie',
+    'Set cookie': '设置 Cookie',
+    'Remove cookies': '删除 Cookie',
+    'File path': '文件路径',
+    // — execute workflow / log data —
+    'Global data': '全局数据',
+    'This will overwrite the global data of the selected workflow.':
+      '这会覆盖所选工作流的全局数据。',
+    'Use commas to separate the variable names.': '多个变量名用英文逗号分隔。',
+    'Log data': '记录数据',
+    'Select workflow — paste the workflow id': '选择工作流 — 或直接粘贴工作流 id',
+    // — while loop / conditions —
+    'Blocks connected to the fallback handle run when the condition is false.':
+      '条件不满足时，连接到 fallback 出口的算子会被执行。',
+    'No condition paths yet — add one to create an output branch.':
+      '还没有条件分支 — 添加一条以创建输出分支。',
+    'Standalone condition — no comparison needed.': '独立条件 — 无需比较。',
+    'Add condition': '添加条件',
+    'Add path': '添加分支',
+    'all rows below must match': '以下所有行都必须满足',
+    'Edit condition': '编辑条件',
+    'Delete condition': '删除条件',
+    'Delete path': '删除分支',
+    'Data exists': '数据存在',
+    'Element text': '元素文本',
+    'Element not exists': '元素不存在',
+    'Element visible': '元素可见',
+    'Element visible in screen': '元素在可视区内',
+    'Element hidden in screen': '元素在可视区外',
+    'Element attribute value': '元素属性值',
+    Code: '代码',
+    Equals: '等于',
+    'Equals (case insensitive)': '等于（忽略大小写）',
+    'Not equals': '不等于',
+    'Greater than': '大于',
+    'Greater than or equal': '大于等于',
+    'Less than': '小于',
+    'Less than or equal': '小于等于',
+    Contains: '包含',
+    'Contains (case insensitive)': '包含（忽略大小写）',
+    'Not contains': '不包含',
+    'Not contains (case insensitive)': '不包含（忽略大小写）',
+    'Starts with': '以…开头',
+    'Ends with': '以…结尾',
+    'Match with RegEx': '正则匹配',
+    'Is truthy': '为真值',
+    'Is falsy': '为假值',
+    Basic: '基础',
+    Number: '数字',
+    Boolean: '布尔',
+    Element: '元素',
+    // — trigger —
+    Manually: '手动',
+    Interval: '定时',
+    'On a specific date': '指定日期',
+    'On a specific day': '每周的某几天',
+    'When visiting a website': '访问网页时',
+    'Keyboard shortcut': '键盘快捷键',
+    'Context menu': '右键菜单',
+    'On browser startup': '浏览器启动时',
+    'On element change': '元素变化时',
+    'Interval (minutes)': '间隔（分钟）',
+    Sunday: '周日',
+    Monday: '周一',
+    Tuesday: '周二',
+    Wednesday: '周三',
+    Thursday: '周四',
+    Friday: '周五',
+    Saturday: '周六',
+    'The workflow runs when the browser starts.': '浏览器启动时运行该工作流。',
+    'The workflow runs only when started manually.': '仅手动启动时运行该工作流。',
+    "Note: keyboard shortcut only works when you're on a webpage.":
+      '注意：键盘快捷键仅在网页上生效。',
+    'Use commas (,) to separate attribute names': '多个属性名用英文逗号分隔',
+    'Automa restarts observing the target element when this element changes.':
+      '该元素变化时，会重新开始观察目标元素。',
+    'Record a shortcut': '录制快捷键',
+    'Stop recording': '停止录制',
+    'Record shortcut': '录制快捷键',
+    'Include subtree': '包含子树',
+    'Child list': '子节点变动',
+    Attributes: '属性变动',
+    'Character data': '文本变动',
+    'Target element options': '目标元素选项',
+    'Base element options': '基准元素选项',
+    'Expression flags': '表达式旗标（flags）',
+    'Event reference (MDN)': '事件参考文档（MDN）',
+    'Left click': '左键',
+    'Middle click': '中键',
+    // — proxy / navigation placeholders —
+    'Proxy is not supported in Manifest V3 (the chrome.proxy API is unavailable); this block is a placeholder and its settings have no effect.':
+      'Manifest V3 不支持代理（chrome.proxy API 不可用）；此算子仅为占位，设置不会生效。',
+    'Use commas (,) to separate URL': '多个地址用英文逗号分隔',
+    'This block reloads the active tab.': '此算子会刷新当前标签页。',
+    'This block navigates browser history (go back one page).':
+      '此算子会在浏览器历史中后退一页。',
+    'This block navigates browser history (go forward one page).':
+      '此算子会在浏览器历史中前进一页。',
+    'No settings for this block.': '此算子没有可配置项。',
+    // — AI agent —
+    "The matched element's text is read at runtime and given to the agent. Leave it empty and the agent reads the page itself via its tools.":
+      '运行时读取匹配元素的文本交给智能体；留空则由智能体自行用工具读取页面。',
+    'Full auto: the agent may click, type, and navigate to finish the task. Every action is written to the run log.':
+      '全自动：智能体可点击、输入、导航以完成任务；每一步都会写入运行日志。',
+    'Read-only: the agent can read/snapshot the page and answer, but cannot click, type, or navigate.':
+      '只读：智能体可读取/快照页面并回答，但不能点击、输入或导航。',
+    'Allow the agent to act on the page (click, fill, navigate)':
+      '允许智能体操作页面（点击、填写、导航）',
+    'Off: the agent only reads and analyzes (read-only). On: it performs actions autonomously without per-step confirmation.':
+      '关：智能体只读取和分析（只读模式）。开：智能体自主执行操作，无需逐步确认。',
+    'Lets the agent list buttons/links/fields so it can locate elements itself.':
+      '让智能体先列出按钮/链接/输入框，以便自主定位元素。',
+    'Leave empty to use the conversation locator above; type a CSS selector to override':
+      '留空使用上方的对话定位器；输入 CSS 选择器可覆盖',
+    // — element picker / editor chrome —
+    'Verified: {count} element(s) match': '校验通过：匹配到 {count} 个元素',
+    'Element not found': '未找到元素',
+    'The element picker did not respond.': '元素拾取器没有响应。',
+    'Could not start the element picker.': '无法启动元素拾取器。',
+    'Pin block': '固定算子',
+    'Unpin block': '取消固定',
+    Docs: '文档',
+    'Loop id (click to copy)': '循环 ID（点击复制）',
+    'Reset view': '重置视图',
+    'Zoom in': '放大',
+    'Zoom out': '缩小',
+    'Back to log': '返回日志',
+    'Inspect variables': '查看变量',
+    Variables: '变量',
+    // — block settings extras —
+    'The number of times to retry the action': '操作重试次数',
+    'Seconds to wait between each try': '每次重试的间隔（秒）',
+    'JavaScript code execution timeout': 'JavaScript 代码执行超时',
+    'Supports {{variables}}': '支持 {{variables}} 变量',
+    "Execute shortcut even when you're in an input element": '即使在输入框内也执行快捷键',
+    // — parameters —
+    'Input (string)': '输入（字符串）',
+    'Input (number)': '输入（数字）',
+    'Input (JSON)': '输入（JSON）',
   } satisfies Record<string, string>,
 } as const
 
 export type BlockFormLocale = keyof typeof BLOCK_FORM_STRINGS
+
+/** The zh block-form dictionary (English source → zh), exposed for tests. */
+export const BLOCK_FORM_STRINGS_ZH = BLOCK_FORM_STRINGS.zh as Record<string, string>
 
 /**
  * Build the block-form translator (`bt`). Returns the Chinese rendering for an
@@ -561,7 +811,7 @@ export type BlockFormLocale = keyof typeof BLOCK_FORM_STRINGS
  * returns the source text unchanged.
  */
 export function makeBlockTranslate(locale: 'en' | 'zh'): (english: string) => string {
-  const dict = BLOCK_FORM_STRINGS.zh as Record<string, string>
+  const dict = BLOCK_FORM_STRINGS_ZH
   return (english: string) => {
     if (locale !== 'zh' || !english) return english
     return dict[english] ?? english

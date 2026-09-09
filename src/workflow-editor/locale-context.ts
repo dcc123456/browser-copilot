@@ -8,7 +8,7 @@
 
 import { createContext, useContext } from 'react'
 import { makeBlockTranslate, type TranslateFn } from './i18n'
-import { blockDisplayName, categoryDisplayName } from './block-i18n'
+import { blockDescription, blockDisplayName, categoryDisplayName } from './block-i18n'
 
 export interface EditorLocale {
   /** 'en' or 'zh'. */
@@ -24,6 +24,8 @@ export interface EditorLocale {
   blockName: (blockId: string | undefined, englishName: string) => string
   /** Localized palette category name (falls back to English). */
   categoryName: (categoryId: string | undefined, englishName: string) => string
+  /** Localized block catalog description (falls back to English). */
+  blockDesc: (blockId: string | undefined, englishDescription: string) => string
 }
 
 const EN: EditorLocale = {
@@ -32,6 +34,7 @@ const EN: EditorLocale = {
   bt: (english) => english,
   blockName: (_id, english) => english,
   categoryName: (_id, english) => english,
+  blockDesc: (_id, english) => english,
 }
 
 export const EditorLocaleContext = createContext<EditorLocale>(EN)
@@ -49,5 +52,6 @@ export function makeEditorLocale(locale: 'en' | 'zh', t: TranslateFn): EditorLoc
     bt,
     blockName: (id, english) => blockDisplayName(id, english, locale),
     categoryName: (id, english) => categoryDisplayName(id, english, locale),
+    blockDesc: (id, english) => blockDescription(id, english, locale),
   }
 }

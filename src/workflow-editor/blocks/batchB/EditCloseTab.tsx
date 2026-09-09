@@ -9,12 +9,14 @@
 
 import { Info } from 'lucide-react'
 import type { EditFormProps } from '../EditForms'
+import { useEditorLocale } from '../../locale-context'
 import { Checkbox, Field, Select, TextArea, TextInput } from '../shared/Field'
 import { bool, str } from '../shared/InteractionBase'
 
 const CLOSE_TYPES = ['tab', 'window']
 
 export default function EditCloseTab({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
   const closeType = str(data, 'closeType') || 'tab'
   const activeTab = bool(data, 'activeTab')
 
@@ -46,9 +48,9 @@ export default function EditCloseTab({ data, onChange }: EditFormProps) {
           {!activeTab && (
             <div className="wf-field">
               <label>
-                Match Patterns{' '}
+                {bt('Match Patterns')}{' '}
                 <a
-                  title="Examples"
+                  title={bt('Examples')}
                   href="https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns#examples"
                   target="_blank"
                   rel="noopener noreferrer"

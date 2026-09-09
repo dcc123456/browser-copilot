@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import CodeEditor from '../ui/CodeEditor'
+import { useEditorLocale } from '../locale-context'
 
 export type StepKind = 'tool' | 'status' | 'result' | 'error' | 'info'
 
@@ -182,16 +183,17 @@ export function VariablesInspector({
   vars: Record<string, unknown>
   onBack: () => void
 }) {
+  const { bt } = useEditorLocale()
   const [tab, setTab] = useState<'gui' | 'raw'>('gui')
   const entries = Object.entries(vars ?? {})
   return (
     <div className="wf-vars-inspector">
       <div className="wf-vars-head">
-        <button type="button" className="wf-icon-btn" title="Back to log" onClick={onBack}>
+        <button type="button" className="wf-icon-btn" title={bt('Back to log')} onClick={onBack}>
           <ArrowLeft size={14} />
         </button>
         <Braces size={14} />
-        <span>Variables</span>
+        <span>{bt('Variables')}</span>
         <span className="wf-vars-spacer" />
         <div className="wf-modal-tabs">
           <button
@@ -241,6 +243,7 @@ export function TraceRow({
   onInspect: (vars: Record<string, unknown>) => void
 }) {
   const style = TYPE_STYLE[entry.type]
+  const { bt } = useEditorLocale()
   const hasVars = debug && entry.vars && Object.keys(entry.vars).length > 0
   const errorLines = entry.lines.filter((l) => l.kind === 'error')
   const otherLines = entry.lines.filter((l) => l.kind !== 'error')
@@ -289,7 +292,7 @@ export function TraceRow({
         ))}
       </span>
       {hasVars && (
-        <span title="Inspect variables" style={{ display: 'inline-flex' }}>
+        <span title={bt('Inspect variables')} style={{ display: 'inline-flex' }}>
           <Braces size={13} className="wf-console-vars" />
         </span>
       )}

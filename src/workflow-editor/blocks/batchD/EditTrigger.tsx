@@ -236,10 +236,10 @@ export default function EditTrigger({ data, onChange }: EditFormProps) {
       {type === 'element-change' && <ElementChangeFields data={data} onChange={onChange} />}
 
       {type === 'on-startup' && (
-        <p className="wf-hint">The workflow runs when the browser starts.</p>
+        <p className="wf-hint">{bt('The workflow runs when the browser starts.')}</p>
       )}
       {type === 'manual' && (
-        <p className="wf-hint">The workflow runs only when started manually.</p>
+        <p className="wf-hint">{bt('The workflow runs only when started manually.')}</p>
       )}
 
       {/* Automa EditTrigger: a "Parameters" button opens the parameters modal
@@ -268,6 +268,7 @@ export default function EditTrigger({ data, onChange }: EditFormProps) {
 
 /** Record-a-keyboard-shortcut field (ports TriggerKeyboardShortcut). */
 function ShortcutFields({ data, onChange }: SubFormProps) {
+  const { bt } = useEditorLocale()
   const [recording, setRecording] = useState(false)
   const shortcut = str(data, 'shortcut')
 
@@ -300,11 +301,11 @@ function ShortcutFields({ data, onChange }: SubFormProps) {
     <>
       <Field label="Shortcut">
         <div className="wf-selector-row">
-          <input value={shortcut} readOnly placeholder="Record a shortcut" />
+          <input value={shortcut} readOnly placeholder={bt('Record a shortcut')} />
           <button
             type="button"
             className="wf-icon-btn"
-            title={recording ? 'Stop recording' : 'Record shortcut'}
+            title={recording ? bt('Stop recording') : bt('Record shortcut')}
             onClick={() => setRecording((r) => !r)}
           >
             {recording ? <Square size={14} /> : <CircleDot size={14} />}
@@ -317,7 +318,9 @@ function ShortcutFields({ data, onChange }: SubFormProps) {
         label="Active while in input"
         title="Execute shortcut even when you're in an input element"
       />
-      <p className="wf-hint">Note: keyboard shortcut only works when you're on a webpage.</p>
+      <p className="wf-hint">
+        {bt("Note: keyboard shortcut only works when you're on a webpage.")}
+      </p>
     </>
   )
 }
@@ -354,6 +357,7 @@ function asObserveOptions(value: unknown): ObserveOptions {
 
 /** Element-change trigger — observe a target element (ports TriggerElementChange). */
 function ElementChangeFields({ data, onChange }: SubFormProps) {
+  const { bt } = useEditorLocale()
   const observe =
     typeof data.observeElement === 'object' && data.observeElement !== null
       ? (data.observeElement as Record<string, unknown>)
@@ -392,7 +396,7 @@ function ElementChangeFields({ data, onChange }: SubFormProps) {
               })
             }
           />
-          <span className="wf-hint">Use commas (,) to separate attribute names</span>
+          <span className="wf-hint">{bt('Use commas (,) to separate attribute names')}</span>
         </Field>
       )}
     </div>
@@ -424,7 +428,7 @@ function ElementChangeFields({ data, onChange }: SubFormProps) {
           onChange={(v) => onChange({ observeElement: { ...observe, baseSelector: v } })}
         />
         <span className="wf-hint">
-          Automa restarts observing the target element when this element changes.
+          {bt('Automa restarts observing the target element when this element changes.')}
         </span>
       </Field>
       <Expand title="Base element options">{renderOptions(baseOptions, patchBase)}</Expand>

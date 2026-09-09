@@ -4,7 +4,11 @@ import {
   makeBlockTranslate,
   resolveEditorLocale,
   EDITOR_STRINGS,
+  BLOCK_FORM_STRINGS_ZH,
 } from '../src/workflow-editor/i18n'
+import { BLOCK_DESCRIPTIONS_ZH } from '../src/workflow-editor/block-i18n'
+import { BLOCK_CATALOG } from '../src/lib/workflow/blocks/catalog'
+import { CUSTOM_BLOCKS } from '../src/lib/workflow/blocks/custom'
 
 describe('editor i18n', () => {
   it('resolves stored locale to editor locale', () => {
@@ -52,5 +56,23 @@ describe('block-form translator (bt)', () => {
     expect(btEn('Description')).toBe('Description')
     // Unknown key falls back verbatim so nothing renders blank.
     expect(btZh('Some brand new label')).toBe('Some brand new label')
+  })
+
+  it('zh form dictionary has no empty translations', () => {
+    for (const [key, value] of Object.entries(BLOCK_FORM_STRINGS_ZH)) {
+      expect(value.trim().length, `empty zh translation for "${key}"`).toBeGreaterThan(0)
+    }
+  })
+
+  it('describes every palette block in zh', () => {
+    const all = [...BLOCK_CATALOG, ...CUSTOM_BLOCKS]
+    const missing = all
+      .filter((b) => !(b.id in BLOCK_DESCRIPTIONS_ZH))
+      .map((b) => `${b.id} (${b.name})`)
+    expect(missing, `missing zh descriptions: ${missing.join(', ')}`).toEqual([])
+    // And no description entry dangles without a block.
+    const ids = new Set(all.map((b) => b.id))
+    const dangling = Object.keys(BLOCK_DESCRIPTIONS_ZH).filter((id) => !ids.has(id))
+    expect(dangling, `zh descriptions without a block: ${dangling.join(', ')}`).toEqual([])
   })
 })
