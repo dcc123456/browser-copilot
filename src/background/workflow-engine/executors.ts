@@ -32,7 +32,7 @@ import { aiAgent } from './ai-agent-executor'
 import type { Op, ScrollSpec, Target, TargetSpec } from '../../lib/ops'
 import { activeTab } from '../page'
 import { captureVisiblePage } from '../capture'
-import { captureElementRobust } from '../element-capture'
+import { captureElementRobust, imageHasInk } from '../element-capture'
 import type { ScopeWindow } from '../automation-scope'
 import {
   clipboardGet,
@@ -516,6 +516,40 @@ async function imageDims(dataUrl: string): Promise<string> {
   }
 }
 
+/**
+ * Builds the error line for an empty OCR read. Pure so both wordings are unit
+ * testable. `hasInk === false` (the capture is a near-uniform box — a canvas
+ * captcha or wrapped `<img>` whose pixels never entered the serialization)
+ * gets a targeted hint; everything else keeps the generic cause checklist.
+ * `null` hasInk (runtime could not decode) also takes the generic path.
+ */
+export function describeEmptyOcrRead(args: {
+  lang: string
+  inputDesc: string
+  imageChars: number
+  inputDims: string
+  preprocessUsed: boolean
+  preprocessedChars?: number
+  confidence: number
+  hasInk: boolean | null
+}): string {
+  const head =
+    `ocr: 未识别到文字 (${args.lang}) — ${args.inputDesc}, 图像 ${args.imageChars} 字符` +
+    `${args.inputDims ? ` ${args.inputDims}` : ''}` +
+    `${args.preprocessUsed ? `, 预处理后 ${args.preprocessedChars ?? ''} 字符` : ''}` +
+    `, 置信度 ${Math.round(args.confidence)}`
+  if (args.hasInk === false) {
+    return (
+      head +
+      '。截图内容近乎纯色（未包含验证码字形）— canvas 绘制或包着 <img> 的容器不会进入序列化截图，已自动回退像素级截图仍为空；建议把选择器直接指向 <img> 或 <canvas> 元素，或改用「图片变量」输入源'
+    )
+  }
+  return (
+    head +
+    '。常见原因: 截图区域空白或图片未加载; 预处理把文字洗白（编辑此算子, 关闭"识别前预处理"重试）; 语言不匹配（检查设置里的本地 OCR 语言）'
+  )
+}
+
 const ocrBlock: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   // The no-ocr release strips the local OCR engine; the block is grayed out in
@@ -605,14 +639,21 @@ const ocrBlock: BlockExecutor = async (data, ctx) => {
   const ocr = await ocrImage(processed, lang)
   if (!ocr.ok || !ocr.text.trim()) {
     if (!ocr.ok) throw new Error(`ocr: ${ocr.error}`)
-    // Empty read: carry everything needed to tell a blank capture from a
-    // washed-out preprocess from a language mismatch.
+    // Empty read: tell a blank capture (a serialization that lost its content)
+    // from a washed-out preprocess from a language mismatch.
     throw new Error(
-      `ocr: 未识别到文字 (${lang}) — ${inputDesc}, 图像 ${imageChars} 字符` +
-        `${inputDims ? ` ${inputDims}` : ''}` +
-        `${preprocessUsed ? `, 预处理后 ${processed.length} 字符` : ''}` +
-        `, 置信度 ${Math.round(ocr.confidence)}` +
-        '。常见原因: 截图区域空白或图片未加载; 预处理把文字洗白（编辑此算子, 关闭"识别前预处理"重试）; 语言不匹配（检查设置里的本地 OCR 语言）',
+      describeEmptyOcrRead({
+        lang,
+        inputDesc,
+        imageChars,
+        inputDims,
+        preprocessUsed,
+        preprocessedChars: processed.length,
+        confidence: ocr.confidence,
+        // Probe the ORIGINAL capture — preprocessing shifts pixels, and the
+        // question is whether the capture itself ever contained glyphs.
+        hasInk: await imageHasInk(image),
+      }),
     )
   }
   const text = ocr.text.trim()

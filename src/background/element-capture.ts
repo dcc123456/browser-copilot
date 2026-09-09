@@ -23,6 +23,7 @@
 import { execOnActiveTab, resolveAutomationTab } from './driver'
 import { captureVisiblePage } from './capture'
 import { fetchImageAsDataUrl } from '../lib/fetch-image'
+import { interiorIsUniform } from '../lib/image-preprocess'
 import type { ScopeWindow } from './automation-scope'
 import type { Target } from '../lib/ops'
 
@@ -257,6 +258,35 @@ export type ElementCaptureResult =
   | { ok: false; error: string }
 
 /**
+ * Ink probe for captured element images: decodes the data URL via
+ * OffscreenCanvas and reports whether it carries glyph-like content. `false`
+ * means the capture is a near-uniform box — a serialization that lost its
+ * content (a canvas-drawn captcha, a wrapped `<img>`) — and the caller should
+ * fall back to the visible-page crop. `null` when the runtime cannot decode
+ * (check skipped: treat as content, never reject).
+ */
+export async function imageHasInk(dataUrl: string): Promise<boolean | null> {
+  if (typeof OffscreenCanvas === 'undefined' || typeof createImageBitmap === 'undefined') return null
+  try {
+    const res = await fetch(dataUrl)
+    const bitmap = await createImageBitmap(await res.blob())
+    try {
+      if (bitmap.width < 8 || bitmap.height < 8) return true
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height)
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })
+      if (!ctx) return null
+      ctx.drawImage(bitmap, 0, 0)
+      const { data } = ctx.getImageData(0, 0, bitmap.width, bitmap.height)
+      return !interiorIsUniform(data, bitmap.width, bitmap.height)
+    } finally {
+      bitmap.close()
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
  * Captures an element's rendering as a PNG data URL — see the module doc for
  * the strategy chain. Errors are final and self-contained (no tool prefix);
  * callers add their own context (`ocr: …` / `Could not capture …`).
@@ -295,13 +325,28 @@ export async function captureElementRobust(
         // The in-page op returns an http(s) src for <img> targets (rasterizing
         // them through SVG would be CSP-blocked and blurrier). Download the
         // ORIGINAL pixels here — with cookies, so session-bound captchas work.
-        // A failed download falls through to the raster fallback attempts.
+        // A failed download — or a download whose pixels carry no ink (an
+        // error page / blank placeholder) — falls through to the raster
+        // fallback attempts.
         if (/^https?:\/\//i.test(result.data)) {
           const downloaded = await fetchImageAsDataUrl(result.data)
-          if (downloaded.ok) return { ok: true, dataUrl: downloaded.dataUrl }
-          lastError = downloaded.error
+          if (downloaded.ok && (await imageHasInk(downloaded.dataUrl)) !== false) {
+            return { ok: true, dataUrl: downloaded.dataUrl }
+          }
+          lastError = downloaded.ok
+            ? `元素 ${selector} 的图片下载成功但内容为纯色（未包含字形），改用整页截图裁剪`
+            : downloaded.error
         } else {
-          return { ok: true, dataUrl: result.data }
+          // Serialization blank-guard: an SVG foreignObject raster of a
+          // canvas-drawn captcha (or a box wrapping an <img>) is a
+          // valid-looking PNG with NO glyphs — a near-uniform interior. Reject
+          // it here and let the visible-page crop below capture the REAL
+          // rendered pixels instead.
+          if ((await imageHasInk(result.data)) !== false) {
+            return { ok: true, dataUrl: result.data }
+          }
+          lastError =
+            `元素 ${selector} 序列化截图内容为纯色（canvas 绘制或包裹的 <img> 不进入序列化），改用整页截图裁剪`
         }
       }
       if (result.error) lastError = result.error

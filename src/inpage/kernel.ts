@@ -1186,6 +1186,11 @@ export function runOp(op: Op): OpResult {
    * and reading `toDataURL`. Returns `null` when the target is missing or the
    * canvas is tainted (e.g. cross-origin images without CORS).
    *
+   * Media content bypasses the serialization entirely: an `<img>` resolves to
+   * its source URL, a `<canvas>` (its own bitmap is not part of the DOM
+   * serialization) and text-less containers wrapping one resolve to real
+   * pixels — see the media branch below.
+   *
    * Element lookup prefers `op.target` (the kernel resolver — pierces open
    * shadow roots, honors fallback specs) and falls back to the raw
    * `op.value` CSS selector. When the element is missing, `op.waitFor` polls
@@ -1231,6 +1236,124 @@ export function runOp(op: Op): OpResult {
       if (rawSrc && /^(https?:|data:image\/)/i.test(rawSrc)) {
         const src = /^https?:/i.test(rawSrc) ? new URL(rawSrc, location.href).href : rawSrc
         return { ...base(), ok: true, found: true, note: 'captured-img-src', data: src }
+      }
+    }
+
+    /**
+     * Classifies one element as directly capturable media, or null. Only
+     * VISIBLE media qualifies (zero-size rects are hidden); an img needs an
+     * http(s) / data / blob src — the only kinds that carry real pixels.
+     */
+    function classifyMedia(
+      el: Element,
+    ): { kind: 'canvas' | 'url' | 'blob'; area: number; el: Element; value: string } | null {
+      const rect = el.getBoundingClientRect()
+      if (rect.width < 2 || rect.height < 2) return null
+      const area = rect.width * rect.height
+      if (el instanceof HTMLCanvasElement) return { kind: 'canvas', area, el, value: '' }
+      // currentSrc is the RESOLVED url in real browsers; the raw attribute may
+      // still be relative (and is all jsdom/test environments expose).
+      let raw = (el as HTMLImageElement).currentSrc || el.getAttribute('src') || ''
+      if (raw && !/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+        try {
+          raw = new URL(raw, location.href).href
+        } catch {
+          /* keep raw */
+        }
+      }
+      if (/^https?:/i.test(raw)) {
+        return { kind: 'url', area, el, value: raw }
+      }
+      if (/^data:image\//i.test(raw)) return { kind: 'url', area, el, value: raw }
+      if (/^blob:/i.test(raw)) return { kind: 'blob', area, el, value: raw }
+      return null
+    }
+
+    /**
+     * Finds the real-pixel media source to capture: the largest visible
+     * <canvas>, else the largest <img> with a capturable src — checking `root`
+     * itself first, then its subtree INCLUDING open shadow roots. Recursive
+     * threading of the running best avoids cross-closure mutable state.
+     */
+    function findMediaSource(
+      root: Element,
+    ):
+      | { kind: 'canvas'; el: HTMLCanvasElement }
+      | { kind: 'url' | 'blob'; value: string }
+      | null {
+      type MediaCandidate = { kind: 'canvas' | 'url' | 'blob'; area: number; el: Element; value: string }
+      // Canvas wins ties: its bitmap NEVER survives serialization, while a
+      // data:-src img at least might.
+      const betterOf = (a: MediaCandidate, b: MediaCandidate): MediaCandidate =>
+        a.area > b.area || (a.area === b.area && a.kind === 'canvas' && b.kind !== 'canvas') ? a : b
+      const visit = (scope: ParentNode, current: MediaCandidate | null): MediaCandidate | null => {
+        let best = current
+        let media: Element[]
+        try {
+          media = Array.from(scope.querySelectorAll('canvas, img'))
+        } catch {
+          media = []
+        }
+        for (const el of media) {
+          const found = classifyMedia(el)
+          if (!found) continue
+          best = best ? betterOf(best, found) : found
+        }
+        let all: Element[]
+        try {
+          all = Array.from(scope.querySelectorAll('*'))
+        } catch {
+          all = []
+        }
+        for (const el of all) {
+          const shadow = (el as HTMLElement).shadowRoot
+          if (shadow && shadow.nodeType === 11) best = visit(shadow, best)
+        }
+        return best
+      }
+      const best = visit(root, classifyMedia(root))
+      if (!best) return null
+      if (best.kind === 'canvas') return { kind: 'canvas', el: best.el as HTMLCanvasElement }
+      return { kind: best.kind as 'url' | 'blob', value: best.value }
+    }
+
+    // Containers wrapping media would serialize to a blank or background-only
+    // image: a <canvas>'s bitmap is NOT part of the DOM serialization, and an
+    // SVG loaded as an image executes no scripts and loads no external
+    // resources. Canvas-drawn captchas (and boxes wrapping one) therefore came
+    // back as valid-looking PNGs with NO glyphs. Capture the real pixels
+    // instead — but only when the element carries no text of its own, so
+    // containers with actual content keep the full-subtree SVG path.
+    if (!collapse(visibleText(host))) {
+      const media = findMediaSource(host)
+      if (media && media.kind === 'canvas') {
+        try {
+          const url = media.el.toDataURL('image/png')
+          if (url && url.startsWith('data:image/')) {
+            return { ...base(), ok: true, found: true, note: 'captured-canvas', data: url }
+          }
+        } catch {
+          /* tainted canvas (cross-origin pixels) — fall through to the SVG path */
+        }
+      } else if (media && media.kind === 'url') {
+        return { ...base(), ok: true, found: true, note: 'captured-img-src', data: media.value }
+      } else if (media && media.kind === 'blob') {
+        // The page can read its own blob: URLs (the worker cannot); inline the
+        // pixels here so the worker receives a self-contained data URL.
+        try {
+          const blob = await fetch(media.value).then((r) => r.blob())
+          const url = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '')
+            reader.onerror = () => reject(reader.error)
+            reader.readAsDataURL(blob)
+          })
+          if (url.startsWith('data:image/')) {
+            return { ...base(), ok: true, found: true, note: 'captured-img-src', data: url }
+          }
+        } catch {
+          /* unreadable blob — fall through to the SVG path */
+        }
       }
     }
     try {

@@ -3,6 +3,7 @@ import { elementExists, execOnActiveTab, ocrImage } from '../src/background/driv
 import {
   EXECUTORS,
   cropRectFor,
+  describeEmptyOcrRead,
   type WorkflowExecCtx,
 } from '../src/background/workflow-engine/executors'
 import type { OpResult } from '../src/lib/ops'
@@ -532,5 +533,44 @@ describe('ocr cropRectFor (visible-page crop math)', () => {
   it('returns null when the element lies entirely outside the viewport image', () => {
     expect(cropRectFor({ x: 2000, y: 20, w: 100, h: 40, dpr: 1 }, 800, 500)).toBeNull()
     expect(cropRectFor({ x: 10, y: 600, w: 100, h: 40, dpr: 1 }, 800, 500)).toBeNull()
+  })
+})
+
+describe('describeEmptyOcrRead (empty-read diagnostics)', () => {
+  const base = {
+    lang: 'eng',
+    inputDesc: '元素 #checkin-captcha-box',
+    imageChars: 7114,
+    inputDims: '158×67',
+    preprocessUsed: false,
+    confidence: 0,
+  } as const
+
+  it('keeps the generic cause checklist when the ink probe is inconclusive', () => {
+    const message = describeEmptyOcrRead({ ...base, hasInk: null })
+    expect(message).toContain('未识别到文字 (eng)')
+    expect(message).toContain('元素 #checkin-captcha-box')
+    expect(message).toContain('158×67')
+    expect(message).toContain('常见原因')
+  })
+
+  it('targets the blank-serialization cause when the capture carries no ink', () => {
+    const message = describeEmptyOcrRead({ ...base, hasInk: false })
+    expect(message).toContain('截图内容近乎纯色')
+    expect(message).toContain('<img> 或 <canvas>')
+    expect(message).not.toContain('常见原因')
+  })
+
+  it('keeps the generic checklist when the capture HAS ink (read failed for other reasons)', () => {
+    const message = describeEmptyOcrRead({ ...base, hasInk: true })
+    expect(message).toContain('常见原因')
+    expect(message).not.toContain('近乎纯色')
+  })
+
+  it('reports the post-preprocess size only when preprocessing ran', () => {
+    const used = describeEmptyOcrRead({ ...base, hasInk: true, preprocessUsed: true, preprocessedChars: 64000 })
+    expect(used).toContain('预处理后 64000 字符')
+    const unused = describeEmptyOcrRead({ ...base, hasInk: true })
+    expect(unused).not.toContain('预处理后')
   })
 })

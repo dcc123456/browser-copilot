@@ -129,11 +129,15 @@ async function runOcr(
   const canvas = await drawToCanvas(image)
   const w = canvas.width
   const h = canvas.height
-  // Small, wide captures are single-line text (captchas). Tesseract's auto
-  // page segmentation tends to drop the leading glyph there; single-line mode
-  // reads them consistently better (verified against live captchas: never
-  // worse, and it recovers operands the auto mode loses entirely).
-  if (h <= 120 && w / h >= 2.5) {
+  // Line-shaped captures are single-line text (captchas, headers). Tesseract's
+  // auto page segmentation tends to drop the leading glyph there; single-line
+  // mode reads them consistently better (verified against live captchas: never
+  // worse, and it recovers operands the auto mode loses entirely). The gate
+  // covers PRE-PROCESSED inputs too: the 3x captcha upscale turns a raw
+  // 158x67 box into 474x201 (still one line of glyphs), so the height cap
+  // must span it — full pages (≈1.8:1) and tall multi-line elements stay on
+  // the plain auto path below.
+  if (h <= 320 && w / h >= 2) {
     await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_LINE })
     try {
       // Self-sufficiency: Tesseract needs ~30px glyphs. When callers skip

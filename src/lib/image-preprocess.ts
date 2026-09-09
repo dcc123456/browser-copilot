@@ -197,3 +197,52 @@ export function enhancePixels(
     }
   }
 }
+
+/** Knobs for {@link interiorIsUniform}. */
+export interface UniformityOptions {
+  /**
+   * Interior luminance spread below this counts as flat. Default 10 — any
+   * glyph/ink content on a background spans far more.
+   */
+  tolerance?: number
+}
+
+/**
+ * True when everything except a 2px frame is (near) one flat color or
+ * (near) fully transparent. Detects a serialization that lost its content:
+ * a canvas-drawn captcha or a wrapped `<img>` serializes to a background-only
+ * box, while a capture carrying real ink always spans a wide luminance range.
+ * Conservative at the edges — images too small to strip a border from are
+ * reported as NOT uniform (assume content; the caller keeps them).
+ */
+export function interiorIsUniform(
+  px: Uint8ClampedArray,
+  width: number,
+  height: number,
+  opts: UniformityOptions = {},
+): boolean {
+  const tolerance = Math.max(0, opts.tolerance ?? 10)
+  if (width < 8 || height < 8) return false
+  const border = 2
+  let min = 255
+  let max = 0
+  let transparent = 0
+  let total = 0
+  for (let y = border; y < height - border; y++) {
+    for (let x = border; x < width - border; x++) {
+      const i = (y * width + x) * 4
+      total += 1
+      if (px[i + 3]! < 32) {
+        transparent += 1
+        continue
+      }
+      const l = Math.round(0.299 * px[i]! + 0.587 * px[i + 1]! + 0.114 * px[i + 2]!)
+      if (l < min) min = l
+      if (l > max) max = l
+    }
+  }
+  if (total === 0) return true
+  // A near-fully-transparent interior carries no ink either.
+  if (transparent / total > 0.98) return true
+  return max - min <= tolerance
+}
