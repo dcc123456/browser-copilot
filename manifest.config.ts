@@ -2,7 +2,7 @@ import { defineManifest } from '@crxjs/vite-plugin'
 import type { ConfigEnv } from 'vite'
 
 /** Release version — single source for both variant manifests. */
-const VERSION = '0.6.0'
+const VERSION = '0.6.1'
 
 /** Flat typing of the crxjs manifest parameter (some fields below are wider than the typed union allows). */
 type ManifestParam = Parameters<typeof defineManifest>[0]
