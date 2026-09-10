@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 
-const ADAPTER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../examples/local-agent/mcp-server.mjs');
+const ADAPTER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../public/mcp-server.mjs');
 const SMOKE = process.argv.includes('--smoke');
 const child = spawn(process.execPath, [ADAPTER], { env: { ...process.env, BROWSER_COPILOT_TOKEN: '' }, stdio: ['pipe', 'pipe', 'pipe'] });
 child.stderr.on('data', d => process.stderr.write('[adapter] ' + d));

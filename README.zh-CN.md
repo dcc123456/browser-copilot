@@ -347,37 +347,38 @@ Browser Copilot 能以两种相互独立的方式接入[飞书](https://www.feis
 Claude Code / Codex / Trae   （MCP 客户端）
      │  stdio · JSON-RPC 2.0 —— 适配器由 agent 自动拉起
      ▼
-examples/local-agent/mcp-server.mjs   （零依赖 Node 适配器）
+mcp-server.mjs   （零依赖 Node 适配器，随插件内置、设置卡片一键导出）
      │  WebSocket · ws://127.0.0.1:8765   （仅回环）
      ▼
 Browser Copilot 插件   （在你的 Chrome 中实际执行每个调用）
 ```
 
-**环境要求**：Node.js ≥ 18，且 Chrome 已加载本插件。适配器只是仓库里的一个零依赖文件
-`examples/local-agent/mcp-server.mjs`——如果你是用发行版 zip 安装的插件，单独下载这一个
-文件即可，它不必放在插件目录里。
+**环境要求**：Node.js ≥ 18，且 Chrome 已加载本插件。适配器是一个零依赖文件
+`mcp-server.mjs`，**已内置在安装包中**——无需克隆源码或单独下载：在设置卡片上点一次
+「导出适配器」，它会保存到下载目录的 `browser-copilot/` 下，配置片段也会自动填入该
+绝对路径。从源码构建的用户也可以直接使用仓库里的 `public/mcp-server.mjs`（构建后位于
+插件根目录），文件不必放在插件目录里。
 
 **手动配置，三步**：
 
 1. 插件侧边栏 → **设置 → 本地 Agent 接入** → 打开开关。适配器地址保持
    `ws://127.0.0.1:8765`，可设置一个共享令牌；链路打通后卡片会显示**已连接**。
-2. 注册一条名为 `browser-copilot` 的 stdio MCP 服务，命令为 `node`、参数指向
-   `mcp-server.mjs`——设置卡片上就有 Claude Code / Codex / Trae 的现成片段可复制。
+2. 在同一卡片点「**导出适配器**」，然后复制 Claude Code / Codex / Trae 的现成片段
+   ——片段里的绝对路径已自动填好（插件升级后重新导出一次即可）。
 3. 启动（或重启）你的 agent——它通过 stdio 自动拉起适配器，插件自动连上。无需常驻
    进程、无需 `npm install`、无需 Python。
 
 > 🤖 **让 AI 替你接线。** 复制下面这段提示词，整段发给你的编码 agent（Claude Code /
-> Codex / Trae 均可），AI 会自己去找到并读取安装指引，然后完成全部接入——你不需要手动
-> 打开任何文件：
+> Codex / Trae 均可），AI 会引导你导出适配器并完成全部接入：
 >
 > ```text
-> 请帮我完成 Browser Copilot 插件的 MCP 接入。完整安装指引在本机 Browser Copilot
-> 仓库/插件目录下的 examples/local-agent/MCP-SETUP-PROMPT.md 文件里：先找到该目录、
-> 读取该文件，然后严格按其中的提示词执行——检查环境、向我询问适配器路径与可选共享
-> 令牌、为你的客户端写入 MCP 配置、引导我在浏览器里开启接入，最后用一次真实调用验证
-> 整条链路并汇报结果。找不到该文件时，先问我 Browser Copilot 目录在哪里，或从
-> https://github.com/dcc123456/browser-copilot/blob/main/examples/local-agent/MCP-SETUP-PROMPT.md
-> 获取，不要臆测路径。
+> 请帮我完成 Browser Copilot 插件的 MCP 接入。先在插件侧边栏「设置 → 本地 Agent 接入」
+> 里打开开关，并点「导出适配器」把 mcp-server.mjs 保存到下载目录（browser-copilot/）；
+> 检查 Node.js 环境、向我询问可选共享令牌、用导出文件的绝对路径为你的客户端写入 MCP
+> 配置（卡片上有 Claude Code/Codex/Trae 现成片段可复制），最后用一次真实调用验证整条
+> 链路并汇报结果。完整安装指引在源码仓库的 examples/local-agent/MCP-SETUP-PROMPT.md
+> （https://github.com/dcc123456/browser-copilot/blob/main/examples/local-agent/MCP-SETUP-PROMPT.md），
+> 找不到时不要臆测路径。
 > ```
 >
 > 想先看看 AI 会读到什么？提示词全文在

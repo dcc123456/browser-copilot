@@ -39,9 +39,16 @@ export default function FormDialog({
   width = 'md',
 }: FormDialogProps): React.ReactElement {
   const panelRef = useRef<HTMLDivElement | null>(null)
+  // Always call the latest `onClose` without re-subscribing the listener: the
+  // dialog's open/close lifecycle is mount/unmount (callers render it
+  // conditionally), so the effects below must run exactly once per mount.
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
 
-  // Focus the first focusable control so keyboard users land inside the form,
-  // and close on Escape — both scoped to the open dialog.
+  // Focus the first focusable control ONCE when the dialog opens, and close on
+  // Escape. Depending on `onClose` here would re-run the focus steal on every
+  // parent re-render that passes a fresh closure (e.g. the settings panel's
+  // 2-second agent-status poll), making later inputs impossible to type in.
   useEffect(() => {
     const focusable = panelRef.current?.querySelector<HTMLElement>(
       'input, select, textarea, button',
@@ -51,7 +58,7 @@ export default function FormDialog({
       if (event.key === 'Escape') {
         event.preventDefault()
         event.stopPropagation()
-        onClose()
+        onCloseRef.current()
       }
     }
     document.addEventListener('keydown', onKey)
@@ -59,7 +66,7 @@ export default function FormDialog({
       window.clearTimeout(timer)
       document.removeEventListener('keydown', onKey)
     }
-  }, [onClose])
+  }, [])
 
   return (
     <div

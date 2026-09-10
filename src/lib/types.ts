@@ -108,6 +108,12 @@ export interface Settings {
    */
   localAgentActiveAgent: string
   /**
+   * 用户从设置卡片导出的适配器脚本（mcp-server.mjs）绝对路径，用于自动回填
+   * MCP 配置片段。空串表示尚未导出（片段保留占位符）。该路径指向下载目录等
+   * 稳定位置，不随插件升级变化；升级插件后重新导出一次即可。
+   */
+  localAgentAdapterPath: string
+  /**
    * 本地 Agent 桥接锁定的“当前窗口”id。用户在某个窗口的面板里选择由哪个
    * agent 控制时，随选择一并记录该窗口；此后桥接的 tool/prompt 运行只在
    * 该窗口内的标签页上执行（含 CDP 附加），绝不触及其它窗口。窗口已关闭

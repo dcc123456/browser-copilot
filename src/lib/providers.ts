@@ -371,6 +371,7 @@ export function normalizeSettingsPayload(raw: unknown): {
   localAgentToken: string
   localAgentUrl: string
   localAgentActiveAgent: string
+  localAgentAdapterPath: string
   unattendedWindowPolicy: UnattendedWindowPolicy
   unattendedWindowId?: number
   imageModel: { providerId: string; model: string }
@@ -409,6 +410,8 @@ export function normalizeSettingsPayload(raw: unknown): {
   const localAgentUrl = normalizeLocalAgentUrl(value.localAgentUrl)
   const localAgentActiveAgent =
     typeof value.localAgentActiveAgent === 'string' ? value.localAgentActiveAgent : ''
+  const localAgentAdapterPath =
+    typeof value.localAgentAdapterPath === 'string' ? value.localAgentAdapterPath : ''
   const unattendedWindowPolicy =
     value.unattendedWindowPolicy === 'ask' || value.unattendedWindowPolicy === 'fixed'
       ? value.unattendedWindowPolicy
@@ -451,6 +454,7 @@ export function normalizeSettingsPayload(raw: unknown): {
     localAgentToken,
     localAgentUrl,
     localAgentActiveAgent,
+    localAgentAdapterPath,
     unattendedWindowPolicy,
     unattendedWindowId,
     imageModel,

@@ -624,8 +624,18 @@ export interface Messages {
   settingsLocalAgentMcpTabClaude: string
   settingsLocalAgentMcpTabCodex: string
   settingsLocalAgentMcpTabTrae: string
-  /** Hint that `__插件目录__` must be replaced with the absolute extension path. */
+  /** One-click export of the bundled mcp-server.mjs adapter (release-zip users need no source). */
+  settingsLocalAgentExportTitle: string
+  settingsLocalAgentExportIntro: string
+  settingsLocalAgentExport: string
+  settingsLocalAgentReexport: string
+  settingsLocalAgentExporting: string
+  settingsLocalAgentExportedTo: (params: { path: string }) => string
+  settingsLocalAgentExportFailed: string
+  /** Hint shown before export: use the button, or replace the placeholder manually. */
   settingsLocalAgentMcpPlaceholderHint: string
+  /** Hint shown after export: the snippets carry the real exported path. */
+  settingsLocalAgentMcpExportedHint: string
   settingsLocalAgentCopy: string
   settingsLocalAgentCopied: string
   settingsLocalAgentWarning: string
@@ -1343,8 +1353,18 @@ const en: Messages = {
   settingsLocalAgentMcpTabClaude: 'Claude Code',
   settingsLocalAgentMcpTabCodex: 'Codex',
   settingsLocalAgentMcpTabTrae: 'Trae',
+  settingsLocalAgentExportTitle: 'Adapter script (mcp-server.mjs)',
+  settingsLocalAgentExportIntro:
+    'On a release package? Export the adapter once — no source download needed — and the snippets below are filled with its real path automatically.',
+  settingsLocalAgentExport: 'Export adapter',
+  settingsLocalAgentReexport: 'Re-export',
+  settingsLocalAgentExporting: 'Exporting…',
+  settingsLocalAgentExportedTo: ({ path }) => `Exported to: ${path}`,
+  settingsLocalAgentExportFailed: 'Could not export the adapter:',
   settingsLocalAgentMcpPlaceholderHint:
-    'Replace __插件目录__ with the absolute path of this extension.',
+    'Export the adapter with the button above to auto-fill the path, or replace __插件目录__ with its absolute path yourself.',
+  settingsLocalAgentMcpExportedHint:
+    'The snippets point at the exported adapter. Re-export it once after upgrading the plugin to keep them in sync.',
   settingsLocalAgentCopy: 'Copy',
   settingsLocalAgentCopied: 'Copied ✓',
   settingsLocalAgentWarning:
@@ -2000,7 +2020,18 @@ const zhCN: Messages = {
   settingsLocalAgentMcpTabClaude: 'Claude Code',
   settingsLocalAgentMcpTabCodex: 'Codex',
   settingsLocalAgentMcpTabTrae: 'Trae',
-  settingsLocalAgentMcpPlaceholderHint: '将 __插件目录__ 替换为插件的绝对路径。',
+  settingsLocalAgentExportTitle: '适配器脚本（mcp-server.mjs）',
+  settingsLocalAgentExportIntro:
+    '使用安装包？点一次「导出适配器」即可，无需下载源码；下方配置会自动填入它的真实绝对路径。',
+  settingsLocalAgentExport: '导出适配器',
+  settingsLocalAgentReexport: '重新导出',
+  settingsLocalAgentExporting: '导出中…',
+  settingsLocalAgentExportedTo: ({ path }) => `已导出到：${path}`,
+  settingsLocalAgentExportFailed: '导出适配器失败：',
+  settingsLocalAgentMcpPlaceholderHint:
+    '请先点上方「导出适配器」自动填入路径；也可手动把 __插件目录__ 替换为适配器的绝对路径。',
+  settingsLocalAgentMcpExportedHint:
+    '配置片段已指向导出的适配器；插件升级后请重新导出一次以保持同步。',
   settingsLocalAgentCopy: '复制',
   settingsLocalAgentCopied: '已复制 ✓',
   settingsLocalAgentWarning: '开启后本机任意页面都能驱动浏览器，请仅在本地 agent 运行时开启。',

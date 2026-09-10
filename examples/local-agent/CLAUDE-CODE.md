@@ -55,7 +55,7 @@ Claude Code 的 MCP 配置统一记录在 **`claude.json`**：用户级为 `~/.c
   "mcpServers": {
     "browser-copilot": {
       "command": "node",
-      "args": ["<绝对路径>/examples/local-agent/mcp-server.mjs"],
+      "args": ["<mcp-server.mjs 的绝对路径>"],
       "env": {
         "BROWSER_COPILOT_TOKEN": "my-browser-token"
       }
@@ -64,10 +64,12 @@ Claude Code 的 MCP 配置统一记录在 **`claude.json`**：用户级为 `~/.c
 }
 ```
 
-把 `<绝对路径>` 替换为插件目录下 `examples/local-agent/mcp-server.mjs` 的完整路径，例如：
+把 `args` 替换为 `mcp-server.mjs` 的完整绝对路径。获取方式：
 
-- macOS/Linux：`"/Users/you/projects/browser-copilot/examples/local-agent/mcp-server.mjs"`
-- Windows：`"D:\\works\\browser-copilot\\examples\\local-agent\\mcp-server.mjs"`
+- **发行版安装包用户（推荐）**：在插件「本地 Agent 接入」卡片点「导出适配器」，文件保存到下载目录的 `browser-copilot/` 下，卡片上的片段已自动填好该绝对路径，直接复制即可。
+- 源码用户直接使用仓库里的 `public/mcp-server.mjs`，例如：
+  - macOS/Linux：`"/Users/you/projects/browser-copilot/public/mcp-server.mjs"`
+  - Windows：`"D:\\works\\browser-copilot\\public\\mcp-server.mjs"`
 
 > 若你在插件设置里**没有**配置令牌，就把 `env` 里的 `BROWSER_COPILOT_TOKEN` 留空字符串 `""`；配置了令牌则必须与插件设置中的值**完全一致**。
 
@@ -75,7 +77,7 @@ Claude Code 的 MCP 配置统一记录在 **`claude.json`**：用户级为 `~/.c
 
 ```bash
 claude mcp add --transport stdio browser-copilot \
-  -- node "<绝对路径>/examples/local-agent/mcp-server.mjs"
+  -- node "<mcp-server.mjs 的绝对路径>"
 ```
 
 ### 3.3 启动 Claude Code

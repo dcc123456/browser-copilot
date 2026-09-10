@@ -31,8 +31,8 @@ browser-copilot 浏览器工具：打开网址、读取页面、点击、填表�
 JavaScript、识别图片/验证码文字、保存本地文件等。接入完成后，你就可以一边写代码、
 一边亲自操作我本机的 Chrome 浏览器来验证效果。
 
-整个过程只需要 Node.js 和已安装的插件：适配器脚本（examples/local-agent/mcp-server.mjs，
-零依赖 Node 脚本）会在你启动时被自动拉起，随会话退出而结束，无需常驻服务。
+整个过程只需要 Node.js 和已安装的插件：适配器脚本（mcp-server.mjs，零依赖 Node
+脚本，已随插件安装包内置）会在你启动时被自动拉起，随会话退出而结束，无需常驻服务。
 
 请严格按下面的步骤执行，每步都告诉我结果；凡需要我在浏览器里手动操作的步骤，先把步骤
 展示给我并等我确认，不要臆测我已完成。
@@ -46,9 +46,13 @@ JavaScript、识别图片/验证码文字、保存本地文件等。接入完成
    - Trae：在 MCP 设置面板手动添加 stdio MCP 服务（把参数准备好交给我填）；
    - 其他或不确定：按「stdio MCP 服务器：command=node，args=[适配器绝对路径]」给我
      通用指引。
-3. 询问我 Browser Copilot 仓库/插件目录的绝对路径（其下应有
-   examples/local-agent/mcp-server.mjs）；如果我本会话已提供过就直接使用，不确定就
-   停下来问，不要乱猜路径。确认该文件存在，否则停止并报告。
+3. 取得适配器 mcp-server.mjs 的绝对路径，按以下优先级，不要乱猜路径：
+   a. 首选（发行版安装包用户）：让我打开插件侧边栏 → 设置 →「本地 Agent 接入」→
+      「配置接入」，点「导出适配器」。文件会保存到下载目录的 browser-copilot/ 下，
+      卡片上的配置片段也会自动填入绝对路径——让我把该路径（或整段片段）发给你；
+   b. 源码用户：使用仓库里的 public/mcp-server.mjs；解压加载构建产物的用户，使用
+      扩展目录根部的 mcp-server.mjs。
+   如果我本会话已提供过路径就直接使用；确认该文件存在，否则停止并报告。
 
 ## 第 1 步：确定共享令牌（可选，但建议设置）
 1. 问我是否设置共享令牌（用于防止本机其他进程随意驱动浏览器）。
@@ -126,8 +130,9 @@ and save local files. Once connected, you can write code and verify the result
 yourself in my Chrome.
 
 Only Node.js and the installed extension are needed: the adapter script
-(examples/local-agent/mcp-server.mjs, a zero-dependency Node script) is spawned
-automatically when you start and exits with your session — no daemon required.
+(mcp-server.mjs, a zero-dependency Node script bundled inside the extension
+package) is spawned automatically when you start and exits with your session —
+no daemon required.
 
 Follow the steps strictly and report each result. Any step I must do in the
 browser: show me the steps and wait for my confirmation; never assume I already
@@ -146,10 +151,19 @@ did them.
      values to paste);
    - Anything else / unsure: give generic stdio MCP guidance
      (command=node, args=[absolute adapter path]).
-3. Ask me for the absolute path of the Browser Copilot repo/plugin folder (it
-   must contain examples/local-agent/mcp-server.mjs); reuse it if I already
-   gave it this session; if unsure, stop and ask — never guess the path.
-   Verify the file exists, otherwise stop and report.
+3. Obtain the absolute path of mcp-server.mjs, in this priority order, and
+   never guess the path:
+   a. Preferred (release-package users): ask me to open the extension side
+      panel -> Settings -> "Local agent access" -> "Configure", and click
+      "Export adapter". The file is saved under browser-copilot/ in my
+      Downloads folder, and the config snippet on that card is auto-filled
+      with its absolute path — ask me to send you that path (or the whole
+      snippet);
+   b. Source users: use public/mcp-server.mjs in the repository; users who
+      load the built unpacked extension use mcp-server.mjs at the extension
+      folder root.
+   Reuse the path if I already gave it this session. Verify the file exists,
+   otherwise stop and report.
 
 ## Step 1 — shared token (optional but recommended)
 1. Ask whether to set a shared token (it stops other local processes from

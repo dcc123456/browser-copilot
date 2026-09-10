@@ -2,6 +2,8 @@
 
 `mcp-server.mjs` 是一个**零依赖**的 Node.js 本地适配器：它一边作为 MCP stdio 服务端被编码 Agent（Claude Code / Trae / Codex）自动拉起，另一边作为 WebSocket 服务端（仅回环 `ws://127.0.0.1:8765`）接收 Browser Copilot 插件的主动连接。插件是 MV3 Chrome 扩展，无法监听 TCP 端口，所以它作为 WebSocket 客户端“向外拨号”连到本适配器；编码 Agent 的每一次浏览器工具调用（MCP 工具）都由适配器通过这条 WebSocket 连接转发给插件执行，结果再原路返回。
 
+> 📦 **使用安装包（release zip），没有源码？** 无需克隆仓库：打开插件设置 →「本地 Agent 接入」卡片，点击**导出适配器**，适配器会保存到系统下载目录的 `browser-copilot/mcp-server.mjs`，各 Agent 配置片段中的绝对路径也会自动回填。下文中的 `public/mcp-server.mjs` 路径仅适用于源码用户，安装包用户请统一替换为导出文件的绝对路径。
+
 ```
 ┌────────────────────┐  stdio (JSON-RPC 2.0)  ┌───────────────────────┐  WS JSON  ┌───────────────────────────┐
 │   编码 Agent        │ ──── 工具调用 ───────▶ │  本地适配器             │ ────────▶ │   Browser Copilot 插件     │
@@ -33,7 +35,10 @@
 如果希望插件**随时保持连接**（插件状态常驻“已连接”，任何编码 Agent 会话即开即用），在一个独立终端运行：
 
 ```bash
-node examples/local-agent/mcp-server.mjs --standalone
+# 源码用户：
+node public/mcp-server.mjs --standalone
+# 安装包用户：把路径换成设置卡片导出的文件，例如
+# node "$HOME/Downloads/browser-copilot/mcp-server.mjs" --standalone
 # 或用环境变量：BROWSER_COPILOT_STANDALONE=1 node mcp-server.mjs
 ```
 
@@ -82,7 +87,7 @@ args = ["<绝对路径>/mcp-server.mjs"]
 打开 **MCP 设置面板 → 添加 stdio MCP server**：
 
 - command：`node`
-- args：指向 `mcp-server.mjs` 的绝对路径（例如 `["d:\\works\\...\\examples\\local-agent\\mcp-server.mjs"]`）
+- args：指向 `mcp-server.mjs` 的绝对路径（源码用户例如 `["d:\\works\\...\\browser-copilot\\public\\mcp-server.mjs"]`；安装包用户用设置卡片导出的路径，例如 `["C:\\Users\\you\\Downloads\\browser-copilot\\mcp-server.mjs"]`）
 - （可选）环境变量：`BROWSER_COPILOT_TOKEN=your-token`
 
 ## WS JSON 协议（对称 JSON 文本帧）

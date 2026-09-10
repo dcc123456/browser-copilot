@@ -431,45 +431,48 @@ recognize CAPTCHA text, and save files — in your real Chrome — which turns
 Claude Code / Codex / Trae   (MCP client)
      │  stdio · JSON-RPC 2.0 — the agent spawns the adapter itself
      ▼
-examples/local-agent/mcp-server.mjs   (zero-dependency Node adapter)
+mcp-server.mjs   (zero-dependency Node adapter, bundled in the package, one-click export)
      │  WebSocket · ws://127.0.0.1:8765   (loopback only)
      ▼
 Browser Copilot extension   (executes every call in your Chrome)
 ```
 
 **Requirements.** Node.js ≥ 18 and the extension loaded in Chrome. The adapter
-is one dependency-free file, `examples/local-agent/mcp-server.mjs`, from this
-repository — if you installed from a release zip, download just that one file;
-it does not need to sit inside the extension folder.
+is one dependency-free file, `mcp-server.mjs`, **bundled inside the extension
+package** — no source checkout or separate download needed: click
+**Export adapter** once on the settings card and it is saved to
+`browser-copilot/` under your Downloads folder, with the snippets below
+auto-filled with that absolute path. Source builds can also use
+`public/mcp-server.mjs` from the repository directly (it lands at the extension
+root after build); the file does not need to sit inside the extension folder.
 
 **Manual setup, three steps:**
 
 1. Extension panel → **Settings → Local agent access** → turn the switch on.
    Keep the adapter address `ws://127.0.0.1:8765` and optionally set a shared
    token; the card shows **Connected** once the link is up.
-2. Register one stdio MCP server named `browser-copilot` that runs Node with
-   `mcp-server.mjs` — copy-ready snippets for Claude Code, Codex, and Trae are
-   right on that settings card.
+2. On the same card, click **Export adapter**, then copy the ready-made
+   Claude Code / Codex / Trae snippet — its absolute path is filled in
+   automatically (re-export once after upgrading the extension).
 3. Start (or restart) your agent — it spawns the adapter over stdio and the
    extension dials in automatically. No daemon, no `npm install`, no Python.
 
 > 🤖 **Let the AI wire it up.** Copy the prompt below and paste it to your
-> coding agent (Claude Code / Codex / Trae all work) — the agent fetches the
-> setup instructions itself and completes the whole integration; you never
-> need to open a single file:
+> coding agent (Claude Code / Codex / Trae all work) — it guides you through
+> the export and completes the whole integration:
 >
 > ```text
 > Please set up MCP access to the Browser Copilot Chrome extension for me.
-> The full install guide lives in examples/local-agent/MCP-SETUP-PROMPT.md
-> inside the Browser Copilot repository/plugin folder on this machine. Find
-> that folder, read that file, then follow its setup instructions exactly:
-> check the environment, ask me for the adapter path and an optional shared
-> token, write the MCP config for your own client, walk me through the
-> browser switch, and verify the whole chain with a live call before
-> reporting back. If you cannot find the file, ask me where the Browser
-> Copilot folder is (or fetch it from
-> https://github.com/dcc123456/browser-copilot/blob/main/examples/local-agent/MCP-SETUP-PROMPT.md)
-> instead of guessing paths.
+> First turn on "Local agent access" in the extension panel under Settings,
+> and click "Export adapter" to save mcp-server.mjs to the browser-copilot/
+> folder under Downloads. Check the Node.js environment, ask me for an
+> optional shared token, write the MCP config for your client using the
+> ABSOLUTE path of the exported file (copy-ready Claude Code/Codex/Trae
+> snippets are on that settings card), and verify the whole chain with a
+> live call before reporting back. The full guide lives in
+> examples/local-agent/MCP-SETUP-PROMPT.md in the source repository
+> (https://github.com/dcc123456/browser-copilot/blob/main/examples/local-agent/MCP-SETUP-PROMPT.md);
+> do not guess paths.
 > ```
 >
 > Curious what the AI will read? The full instructions are in

@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const ADAPTER = path.join(ROOT, 'examples', 'local-agent', 'mcp-server.mjs')
+const ADAPTER = path.join(ROOT, 'public', 'mcp-server.mjs')
 
 /**
  * Grabs a fresh free loopback port from the OS. The suite spawns real adapter

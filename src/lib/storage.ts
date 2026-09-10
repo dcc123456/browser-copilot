@@ -76,6 +76,7 @@ export const DEFAULT_SETTINGS: Settings = {
   localAgentToken: '',
   localAgentUrl: DEFAULT_LOCAL_AGENT_URL,
   localAgentActiveAgent: '',
+  localAgentAdapterPath: '',
   unattendedWindowPolicy: 'latest',
   takeoverModel: { providerId: '', model: '' },
   takeoverOnRun: false,
@@ -183,6 +184,8 @@ export function normalizeStoredSettings(raw: unknown): Settings {
     localAgentUrl: normalizeLocalAgentUrl(value.localAgentUrl),
     localAgentActiveAgent:
       typeof value.localAgentActiveAgent === 'string' ? value.localAgentActiveAgent : '',
+    localAgentAdapterPath:
+      typeof value.localAgentAdapterPath === 'string' ? value.localAgentAdapterPath : '',
     localAgentWindowId:
       typeof value.localAgentWindowId === 'number' ? value.localAgentWindowId : undefined,
     unattendedWindowPolicy:

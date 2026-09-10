@@ -23,6 +23,11 @@ import {
   type StorageMode,
 } from '../lib/fs-store'
 import { clearDownloadDir, getDownloadDir, setDownloadDir } from '../lib/download-dir'
+import {
+  ADAPTER_ASSET_PATH,
+  ADAPTER_EXPORT_FILENAME,
+  buildMcpSnippet,
+} from '../lib/mcp-adapter'
 import { OCR_SUPPORTED } from '../lib/ocr-support'
 import NumberInput from '../ui/NumberInput'
 import FormDialog, {
@@ -116,39 +121,32 @@ function normalizeSettings(raw: Settings | undefined): Settings {
 }
 
 /**
- * Copyable stdio MCP config snippets for the local-agent card. The adapter path
- * is a placeholder (`__插件目录__`) because the panel cannot know the extension's
- * on-disk location; the user replaces it with their own install path.
- *
- * The Claude snippet is written into `claude.json` by `claude mcp add`, so it
- * is shown as a readable multi-line JSON block (matching what the command
- * produces) rather than a flattened one-liner.
+ * Polls the downloads API until one download reaches a terminal state. Only
+ * `DownloadItem.filename` carries the ABSOLUTE on-disk path, which is what the
+ * MCP snippets substitute in. Module-level/chrome-global is fine: this only
+ * runs from the export button click in the extension page.
  */
-const MCP_SNIPPET_CLAUDE = {
-  text:
-    '{\n' +
-    '  "mcpServers": {\n' +
-    '    "browser-copilot": {\n' +
-    '      "command": "node",\n' +
-    '      "args": ["__插件目录__/examples/local-agent/mcp-server.mjs"],\n' +
-    '      "env": { "BROWSER_COPILOT_TOKEN": "" }\n' +
-    '    }\n' +
-    '  }\n' +
-    '}',
-}
-
-const MCP_SNIPPET_CODEX = {
-  text:
-    '[mcp_servers.browser-copilot]\n' +
-    'command = "node"\n' +
-    'args = ["__插件目录__/examples/local-agent/mcp-server.mjs"]',
-}
-
-const MCP_SNIPPET_TRAE = {
-  text:
-    'MCP 设置面板 → 添加 stdio MCP 服务：\n' +
-    '  command: node\n' +
-    '  args: ["__插件目录__/examples/local-agent/mcp-server.mjs"]',
+function waitForDownloadItem(downloadId: number, timeoutMs = 30_000): Promise<chrome.downloads.DownloadItem> {
+  return new Promise((resolve, reject) => {
+    const started = Date.now()
+    const timer = window.setInterval(() => {
+      void chrome.downloads
+        .search({ id: downloadId })
+        .then((items) => {
+          const item = items[0]
+          if (item && (item.state === 'complete' || item.state === 'interrupted')) {
+            window.clearInterval(timer)
+            resolve(item)
+          } else if (Date.now() - started > timeoutMs) {
+            window.clearInterval(timer)
+            reject(new Error('download timeout'))
+          }
+        })
+        .catch(() => {
+          /* transient search error: keep polling until the timeout */
+        })
+    }, 400)
+  })
 }
 
 interface McpSnippetProps {
@@ -229,6 +227,9 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   const [copiedKey, setCopiedKey] = useState<null | 'claude' | 'codex' | 'trae'>(null)
   // Which MCP snippet tab is active (Claude Code by default).
   const [mcpTab, setMcpTab] = useState<'claude' | 'codex' | 'trae'>('claude')
+  // One-click adapter export (bundled mcp-server.mjs → Downloads/browser-copilot/).
+  const [adapterExporting, setAdapterExporting] = useState(false)
+  const [adapterExportError, setAdapterExportError] = useState<string | null>(null)
   const copyTimerRef = useRef<number | null>(null)
   // Local draft for the image-recognition model selection. Kept separate from
   // settings so nothing is persisted until the user clicks 保存; the model list
@@ -467,6 +468,52 @@ export default function SettingsTab({ onLocaleChange }: Props) {
       setCopiedKey(null)
       copyTimerRef.current = null
     }, 1500)
+  }
+
+  /**
+   * Exports the bundled adapter (public/mcp-server.mjs → extension root at
+   * build time) into the browser download folder via a Blob download, then
+   * persists the returned absolute path so the MCP snippets can be auto-filled.
+   * Blob (instead of downloading the chrome-extension:// URL directly) avoids
+   * any dependency on web_accessible_resources. Release-zip users never touch
+   * the source repository.
+   */
+  const exportAdapter = async (): Promise<void> => {
+    if (adapterExporting) return
+    setAdapterExportError(null)
+    setAdapterExporting(true)
+    let objectUrl: string | null = null
+    try {
+      if (typeof chrome?.runtime?.getURL !== 'function' || !chrome.downloads?.download) {
+        throw new Error(t.settingsLocalAgentExportFailed + ' downloads API unavailable')
+      }
+      const response = await fetch(chrome.runtime.getURL(ADAPTER_ASSET_PATH))
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const text = await response.text()
+      objectUrl = URL.createObjectURL(new Blob([text], { type: 'text/javascript' }))
+      const downloadId = await chrome.downloads.download({
+        url: objectUrl,
+        filename: ADAPTER_EXPORT_FILENAME,
+        conflictAction: 'uniquify',
+        saveAs: false,
+      })
+      const item = await waitForDownloadItem(downloadId)
+      if (item.state === 'interrupted' || !item.filename) {
+        throw new Error(item.error ?? 'interrupted')
+      }
+      const result = await sendCommand({
+        type: 'settings.set',
+        patch: { localAgentAdapterPath: item.filename },
+      })
+      if (result.type === 'settings') applySettings(result.settings)
+    } catch (error) {
+      setAdapterExportError(
+        `${t.settingsLocalAgentExportFailed} ${error instanceof Error ? error.message : String(error)}`,
+      )
+    } finally {
+      setAdapterExporting(false)
+      if (objectUrl !== null) URL.revokeObjectURL(objectUrl)
+    }
   }
 
   const startNew = (presetId: string): void => {
@@ -772,9 +819,24 @@ export default function SettingsTab({ onLocaleChange }: Props) {
 
   if (!settings) return <div className="pane empty">{t.loading}</div>
 
+  // Absolute path of an exported adapter; undefined until export so snippets
+  // keep their placeholder.
+  const adapterPath = settings.localAgentAdapterPath.trim() || undefined
+  const snippetClaude = buildMcpSnippet('claude', adapterPath)
+  const snippetCodex = buildMcpSnippet('codex', adapterPath)
+  const snippetTrae = buildMcpSnippet('trae', adapterPath)
+
   const preset = draft ? findPreset(draft.presetId) : undefined
   const localEndpoint = draft ? isLocalEndpoint(draft.baseUrl) : false
   const presetEndpoints = preset?.endpoints ?? []
+  // The endpoint picker is controlled and reflects whichever preset endpoint
+  // the current base URL matches. A hand-edited URL matches none → the
+  // placeholder is shown. The old action-menu pattern reset the picker to the
+  // placeholder immediately after choosing, which looked like the selection
+  // never took effect.
+  const selectedEndpoint = presetEndpoints.find(
+    (option) => option.baseUrl === draft?.baseUrl,
+  )
 
   return (
     <div className="pane">
@@ -919,7 +981,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
               className={[
                 'mb-3 rounded-lg px-3 py-2 text-[12.5px] leading-relaxed break-words',
                 providerNotice.kind === 'ok'
-                  ? 'border border-border bg-panel-2 text-muted'
+                  ? 'border border-ok/30 bg-ok-surface text-ok'
                   : 'border border-err bg-err-surface text-err',
               ].join(' ')}
               role={providerNotice.kind === 'error' ? 'alert' : 'status'}
@@ -958,15 +1020,14 @@ export default function SettingsTab({ onLocaleChange }: Props) {
             <div className="field">
               <label htmlFor="p-endpoint">{t.settingsEndpointPresets}</label>
               <select
-                defaultValue=""
                 id="p-endpoint"
                 onChange={(event) => {
                   const endpoint = presetEndpoints.find(
                     (option) => option.id === event.target.value,
                   )
                   if (endpoint) setDraft({ ...draft, baseUrl: endpoint.baseUrl })
-                  event.target.value = ''
                 }}
+                value={selectedEndpoint?.id ?? ''}
               >
                 <option disabled value="">
                   {t.settingsChooseEndpoint}
@@ -1796,6 +1857,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
                 label={t.cancel}
                 onClick={() => {
                   setAgentNotice(null)
+                  setAdapterExportError(null)
                   setOpenDialog(null)
                 }}
               />
@@ -1807,6 +1869,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
           }
           onClose={() => {
             setAgentNotice(null)
+            setAdapterExportError(null)
             setOpenDialog(null)
           }}
           title={t.settingsLocalAgentConfigure}
@@ -1839,6 +1902,41 @@ export default function SettingsTab({ onLocaleChange }: Props) {
             <span>{t.settingsLocalAgentToken}</span>
           </label>
           <p className="hint error">{t.settingsLocalAgentWarning}</p>
+
+          <div className="mt-3 rounded-lg border border-border bg-panel-2 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[12.5px] font-medium text-ink">
+                  {t.settingsLocalAgentExportTitle}
+                </div>
+                <div
+                  className="mt-1 truncate text-[11px] leading-relaxed text-muted"
+                  title={adapterPath ?? undefined}
+                >
+                  {adapterPath
+                    ? t.settingsLocalAgentExportedTo({ path: adapterPath })
+                    : t.settingsLocalAgentExportIntro}
+                </div>
+              </div>
+              <button
+                className="shrink-0 rounded-md border border-accent bg-accent-soft px-2.5 py-1 text-[12px] font-medium text-accent transition-colors hover:bg-accent hover:text-on-accent disabled:cursor-default disabled:opacity-60"
+                disabled={adapterExporting}
+                onClick={() => void exportAdapter()}
+                type="button"
+              >
+                {adapterExporting
+                  ? t.settingsLocalAgentExporting
+                  : adapterPath
+                    ? t.settingsLocalAgentReexport
+                    : t.settingsLocalAgentExport}
+              </button>
+            </div>
+            {adapterExportError && (
+              <p className="mb-0 mt-2 break-words text-[11px] leading-relaxed text-err">
+                {adapterExportError}
+              </p>
+            )}
+          </div>
 
           <p className="hint" style={{ marginTop: 12, marginBottom: 4 }}>
             {t.settingsLocalAgentMcpTitle}
@@ -1882,8 +1980,8 @@ export default function SettingsTab({ onLocaleChange }: Props) {
               copied={copiedKey === 'claude'}
               copyLabel={t.settingsLocalAgentCopy}
               copiedLabel={t.settingsLocalAgentCopied}
-              onCopy={() => copySnippet('claude', MCP_SNIPPET_CLAUDE.text)}
-              text={MCP_SNIPPET_CLAUDE.text}
+              onCopy={() => copySnippet('claude', snippetClaude)}
+              text={snippetClaude}
             />
           )}
           {mcpTab === 'codex' && (
@@ -1891,8 +1989,8 @@ export default function SettingsTab({ onLocaleChange }: Props) {
               copied={copiedKey === 'codex'}
               copyLabel={t.settingsLocalAgentCopy}
               copiedLabel={t.settingsLocalAgentCopied}
-              onCopy={() => copySnippet('codex', MCP_SNIPPET_CODEX.text)}
-              text={MCP_SNIPPET_CODEX.text}
+              onCopy={() => copySnippet('codex', snippetCodex)}
+              text={snippetCodex}
             />
           )}
           {mcpTab === 'trae' && (
@@ -1900,12 +1998,14 @@ export default function SettingsTab({ onLocaleChange }: Props) {
               copied={copiedKey === 'trae'}
               copyLabel={t.settingsLocalAgentCopy}
               copiedLabel={t.settingsLocalAgentCopied}
-              onCopy={() => copySnippet('trae', MCP_SNIPPET_TRAE.text)}
-              text={MCP_SNIPPET_TRAE.text}
+              onCopy={() => copySnippet('trae', snippetTrae)}
+              text={snippetTrae}
             />
           )}
           <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>
-            {t.settingsLocalAgentMcpPlaceholderHint}
+            {adapterPath
+              ? t.settingsLocalAgentMcpExportedHint
+              : t.settingsLocalAgentMcpPlaceholderHint}
           </p>
         </FormDialog>
       )}
