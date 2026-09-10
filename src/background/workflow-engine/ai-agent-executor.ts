@@ -37,41 +37,52 @@ import type { BlockExecutor, WorkflowExecCtx } from './executors'
 /** Cap the element text shipped to the model so one node can't blow context. */
 const ELEMENT_TEXT_CAP = 4000
 
+/** Result of reading a targeted element from the page. */
+interface ElementReadResult {
+  /** Whether the element exists in the DOM. */
+  exists: boolean
+  /** The trimmed text content (empty when the element has no text or is visual-only). */
+  text: string
+}
+
 /**
- * Top-level injected function (no closure): return the trimmed text of the
- * first element matching a CSS selector, or '' when nothing matches / the
- * selector is invalid.
+ * Top-level injected function (no closure): read the first element matching a
+ * CSS selector. Returns whether the element exists AND its text content.
+ * Visual-only elements (images, canvas) return exists=true but text=''.
  */
-function readElementTextInPage(selector: string): string {
+function readElementTextInPage(selector: string): ElementReadResult {
   try {
     const el = document.querySelector(selector)
-    return el ? (el.textContent ?? '').replace(/\s+/g, ' ').trim() : ''
+    if (!el) return { exists: false, text: '' }
+    const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim()
+    return { exists: true, text }
   } catch {
-    return ''
+    return { exists: false, text: '' }
   }
 }
 
 /**
  * Read the configured element's text from the page the run is driving.
- * Prefers the run-pinned tab (`ctx.tabId`), then the active tab. Returns ''
- * quietly when there is no injectable tab or the selector matches nothing;
- * XPath selectors are resolved in-page.
+ * Prefers the run-pinned tab (`ctx.tabId`), then the active tab. Returns
+ * `{ exists, text }` where `exists` indicates whether the element is in the
+ * DOM and `text` is its text content (empty for visual-only elements like
+ * images/canvas). XPath selectors are resolved in-page.
  */
 async function readElementText(
   selector: string,
   findBy: string,
   ctx: WorkflowExecCtx,
-): Promise<string> {
+): Promise<ElementReadResult> {
   // Resolve the page the run is driving: the run-pinned tab first, otherwise
   // the normal automation-tab resolution (which, when launched from the editor
   // popup, falls back to the last viewed http(s) tab rather than the extension
   // page).
   const tab = await resolveAutomationTab(ctx.tabId, ctx.scope).catch(() => undefined)
   const tabId = typeof tab?.id === 'number' ? tab.id : undefined
-  if (typeof tabId !== 'number') return ''
+  if (typeof tabId !== 'number') return { exists: false, text: '' }
 
   if (findBy === 'xpath') {
-    const func = (xpath: string): string => {
+    const func = (xpath: string): ElementReadResult => {
       try {
         const result = document.evaluate(
           xpath,
@@ -81,13 +92,14 @@ async function readElementText(
           null,
         )
         const node = result.singleNodeValue
+        if (!node) return { exists: false, text: '' }
         const text =
-          node && (node as Element).textContent !== undefined
+          (node as Element).textContent !== undefined
             ? (node as Element).textContent ?? ''
             : node?.nodeValue ?? ''
-        return text.replace(/\s+/g, ' ').trim()
+        return { exists: true, text: text.replace(/\s+/g, ' ').trim() }
       } catch {
-        return ''
+        return { exists: false, text: '' }
       }
     }
     try {
@@ -96,9 +108,13 @@ async function readElementText(
         func,
         args: [selector],
       })
-      return String((injection?.result as string | undefined) ?? '').slice(0, ELEMENT_TEXT_CAP)
+      const result = (injection?.result as ElementReadResult | undefined) ?? {
+        exists: false,
+        text: '',
+      }
+      return { exists: result.exists, text: result.text.slice(0, ELEMENT_TEXT_CAP) }
     } catch {
-      return ''
+      return { exists: false, text: '' }
     }
   }
 
@@ -108,9 +124,13 @@ async function readElementText(
       func: readElementTextInPage,
       args: [selector],
     })
-    return String((injection?.result as string | undefined) ?? '').slice(0, ELEMENT_TEXT_CAP)
+    const result = (injection?.result as ElementReadResult | undefined) ?? {
+      exists: false,
+      text: '',
+    }
+    return { exists: result.exists, text: result.text.slice(0, ELEMENT_TEXT_CAP) }
   } catch {
-    return ''
+    return { exists: false, text: '' }
   }
 }
 
@@ -138,7 +158,15 @@ export function buildAgentPrompt(parts: {
   if (parts.selector) {
     lines.push('', `The workflow is targeting this element (selector: ${parts.selector}):`)
     lines.push('"""')
-    lines.push(parts.elementFound ? parts.elementText || '(element has no text)' : '(element not found)')
+    if (!parts.elementFound) {
+      lines.push('(element not found — selector did not match anything on the page)')
+    } else if (!parts.elementText) {
+      lines.push(
+        '(element EXISTS but has NO text content — it is likely a visual element like an image, canvas, or captcha. Use snapshot_page to see it visually.)',
+      )
+    } else {
+      lines.push(parts.elementText)
+    }
     lines.push('"""')
   }
   lines.push('', 'Task / instruction from the workflow author:')
@@ -204,9 +232,15 @@ export const aiAgent: BlockExecutor = async (data, ctx) => {
   let elementFound = false
   if (selector) {
     ctx.emit('status', `读取目标元素: ${selector}`)
-    elementText = await readElementText(selector, findBy, ctx)
-    elementFound = elementText.length > 0
-    if (!elementFound) ctx.emit('info', 'AI 智能体: 未读取到元素文本（选择器无匹配或页面不可注入）')
+    const elementResult = await readElementText(selector, findBy, ctx)
+    elementFound = elementResult.exists
+    elementText = elementResult.text
+    if (!elementFound) {
+      ctx.emit('info', 'AI 智能体: 未找到目标元素（选择器无匹配或页面不可注入）')
+    } else if (!elementText) {
+      // Element exists but has no text (e.g., image, canvas, visual-only captcha)
+      ctx.emit('info', 'AI 智能体: 元素已找到但无文本内容（图片/画布等视觉元素），将使用截图分析')
+    }
   }
 
   const prompt = buildAgentPrompt({

@@ -54,6 +54,15 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       target: 'chrome116',
+      // The service worker has no DOM. The engine loads its executors via a
+      // run-time dynamic import (Node runners must not pull the chrome-coupled
+      // driver chain), and Vite's default modulePreload machinery wraps that
+      // import in __vitePreload() — whose helper calls document.getElementsByTagName
+      // / createElement("link") when the chunk has deps. In the worker that
+      // throws `ReferenceError: document is not defined` the moment the first
+      // workflow runs. Extension pages are local, so preload hints buy nothing:
+      // disable the machinery entirely ({polyfill:false} would keep the wrapper).
+      modulePreload: false,
       // Each variant builds into its own directory so build-zip.mjs can zip
       // them independently (see the `package` script).
       outDir,

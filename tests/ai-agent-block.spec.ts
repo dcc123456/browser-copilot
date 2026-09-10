@@ -188,7 +188,8 @@ describe('ai-agent executor', () => {
         query: vi.fn(async () => [tab]),
       },
       scripting: {
-        executeScript: vi.fn(async () => [{ result: 'ELEMENT TEXT' }]),
+        // The element reader now returns { exists, text } instead of a plain string
+        executeScript: vi.fn(async () => [{ result: { exists: true, text: 'ELEMENT TEXT' } }]),
       },
     })
     ctx.variables['name'] = 'Bob'

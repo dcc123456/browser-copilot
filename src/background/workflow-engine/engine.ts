@@ -17,6 +17,7 @@ import type {
   BlockExecutor,
   WorkflowExecCtx,
 } from './executors'
+import { EXECUTORS } from './executors'
 import { LoopBreakpointError } from './loop-breakpoint'
 
 export type EmitKind = 'tool' | 'status' | 'result' | 'error' | 'info'
@@ -344,12 +345,13 @@ async function runCore(
     aiTakeover,
   } = options
 
-  // The browser executors pull the chrome-coupled driver chain; resolve them
-  // lazily so Node-based runners that always pass their own `executors` map
-  // never load that chain (and never pay the import cost). `??` short-circuits:
-  // the dynamic import only evaluates when the caller supplied no map.
+  // The browser executors are statically imported above. Node-based runners
+  // (server runner) always pass their own `executors` map, so the browser
+  // chain is never invoked there — only the default browser build uses it.
+  // NOTE: dynamic `import()` is disallowed in ServiceWorkerGlobalScope per
+  // the HTML spec, so we must use a static import instead.
   const executorsMap: Partial<Record<string, BlockExecutor>> =
-    executors ?? (await import('./executors')).EXECUTORS
+    executors ?? EXECUTORS
 
   const nodes = workflow.drawflow.nodes
   const edges = workflow.drawflow.edges

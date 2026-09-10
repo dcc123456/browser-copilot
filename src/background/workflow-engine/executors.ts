@@ -1082,8 +1082,44 @@ async function evalLocalWorkflowJs(
     ])
     return { ok: true, result: nextCalled ? nextData : awaited, variables: working }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    return { ok: false, error: clarifyWorkerJsError(error) }
   }
+}
+
+/**
+ * Browser-only globals whose presence distinguishes "this code needs a page" from
+ * a plain typo. If the local (worker / Node) fallback meets a ReferenceError on
+ * one of these, the page bridge failed to run first and the code cannot work here.
+ */
+const BROWSER_ONLY_GLOBALS = new Set([
+  'document',
+  'window',
+  'location',
+  'navigator',
+  'screen',
+  'history',
+  'localStorage',
+  'sessionStorage',
+  'alert',
+  'confirm',
+  'prompt',
+  'getSelection',
+  'Element',
+  'HTMLElement',
+  'HTMLInputElement',
+  'Node',
+  'Document',
+])
+
+/** Turns a bare `xxx is not defined` into an actionable hint about the page bridge. */
+function clarifyWorkerJsError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error)
+  const m = /^(?:ReferenceError:\s*)?([A-Za-z_$][\w$]*)\s+is not defined/.exec(raw)
+  const name = m?.[1]
+  if (name && BROWSER_ONLY_GLOBALS.has(name)) {
+    return `${raw}。这段代码引用了只在网页中存在的全局「${name}」，无法在后台线程运行；当前未能注入页面（未找到可操作的 http(s) 页面，或页面禁止脚本注入），因此回退到本地求值失败。请先在普通 http(s) 网页上运行，或把该步骤改成浏览器操作块。`
+  }
+  return raw
 }
 
 const aiPrompt: BlockExecutor = async (data, ctx) => {
