@@ -74,7 +74,26 @@ export interface WorkflowEdge {
 
 /** How a workflow gets launched. */
 export interface WorkflowTrigger {
-  type: 'manual' | 'scheduled' | 'github' | 'feishu' | 'context-menu' | 'visit-web'
+  /**
+   * Launch type. The editor's trigger block (the Automa-style source of
+   * truth inside the graph) emits the `interval` / `date` / `specific-day` /
+   * `on-startup` / `keyboard-shortcut` / `element-change` kinds; `scheduled`,
+   * `github` and `feishu` come from other creation paths. The top-level field
+   * is a denormalized mirror of the trigger block (see `triggerFromNodes`).
+   */
+  type:
+    | 'manual'
+    | 'scheduled'
+    | 'interval'
+    | 'date'
+    | 'specific-day'
+    | 'on-startup'
+    | 'keyboard-shortcut'
+    | 'context-menu'
+    | 'visit-web'
+    | 'element-change'
+    | 'github'
+    | 'feishu'
   /** Cron-ish or interval text for scheduled triggers. */
   schedule?: string
   enabled?: boolean

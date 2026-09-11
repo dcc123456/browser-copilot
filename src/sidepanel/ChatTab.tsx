@@ -559,10 +559,10 @@ function ToolbarIconButton({
 }) {
   if (entry.role !== 'user' && entry.role !== 'assistant') return null
   const isAssistant = entry.role === 'assistant'
-  // While a turn is still answering, intermediate replies (everything except
-  // the newest assistant message) show no actions at all — their content is
-  // still evolving context, not a finished answer worth copying or exporting.
-  if (busy && isAssistant && !isLastAssistant) return null
+  // While a turn is still streaming, NO assistant bubble (the live one
+  // included) shows actions — the answer is still evolving, not a finished
+  // text worth copying or exporting. Buttons appear once the chat completes.
+  if (busy && isAssistant) return null
   // Only the last assistant reply gets any buttons at all (copy + download +
   // token); earlier assistant messages show none so the transcript stays calm.
   if (isAssistant && !isLastAssistant) return null

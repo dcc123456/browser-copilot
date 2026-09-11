@@ -40,7 +40,7 @@ import type {
   WorkflowTrigger,
   WorkflowSettings,
 } from '../lib/workflow/types'
-import { migrateWorkflow } from '../lib/workflow/migrate'
+import { migrateWorkflow, triggerFromNodes } from '../lib/workflow/migrate'
 import { sendCommand } from '../lib/messages'
 import { editorUrl, hostWindowId } from './host-window'
 import { getSettings } from '../lib/storage'
@@ -378,7 +378,10 @@ export default function EditorApp() {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       drawflow: { nodes: wfNodes, edges: wfEdges, position: { x, y }, zoom },
-      trigger: meta.trigger,
+      // The trigger block is the source of truth edited on the canvas;
+      // denormalize it into the top-level field so the workflows list chip
+      // and background listeners see the current launch type right on save.
+      trigger: triggerFromNodes(wfNodes) ?? meta.trigger,
       settings: meta.settings,
     }
   }, [workflowId, nodes, edges, meta, reactFlow, t])

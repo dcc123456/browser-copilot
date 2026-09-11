@@ -23,7 +23,7 @@
 import { BLOCK_CATALOG } from './blocks/catalog'
 import { CUSTOM_BLOCKS } from './blocks/custom'
 import { CATALOG_BY_ID } from './blocks/palette'
-import type { Workflow, WorkflowEdge, WorkflowNode } from './types'
+import type { Workflow, WorkflowEdge, WorkflowNode, WorkflowTrigger } from './types'
 
 /**
  * Runtime interoperability alias map: legacy Browser Copilot block ids (the MVP
@@ -192,6 +192,51 @@ export function migrateWorkflow(wf: Workflow): Workflow {
 
   if (!changed) return wf
   return { ...wf, drawflow: { ...wf.drawflow, nodes, edges } }
+}
+
+/** Trigger kinds the editor's trigger block can emit. */
+const TRIGGER_NODE_KINDS: ReadonlySet<string> = new Set([
+  'manual',
+  'interval',
+  'date',
+  'specific-day',
+  'visit-web',
+  'keyboard-shortcut',
+  'context-menu',
+  'on-startup',
+  'element-change',
+])
+
+/**
+ * Denormalize the trigger block into the workflow's top-level `trigger`
+ * field. The graph's trigger node is the Automa-style source of truth (edited
+ * in `EditTrigger`), while listeners (`background/index.ts`) and the
+ * workflows list chip read the top-level field — saving without syncing them
+ * leaves the chip and context-menu/visit-web registration stale.
+ *
+ * Returns `undefined` when the graph has no trigger node (callers then keep
+ * the workflow's previous top-level trigger). Unknown `data.type` values fall
+ * back to `'manual'`.
+ */
+export function triggerFromNodes(nodes: WorkflowNode[]): WorkflowTrigger | undefined {
+  const node = nodes.find(
+    (n) => (n.data?.['blockId'] as string) === 'trigger' || n.label === 'trigger',
+  )
+  if (!node) return undefined
+  const rawType = node.data?.['type']
+  const type = TRIGGER_NODE_KINDS.has(rawType as string)
+    ? (rawType as WorkflowTrigger['type'])
+    : 'manual'
+  const trigger: WorkflowTrigger = { type, enabled: true }
+  const url = node.data?.['url']
+  if (type === 'visit-web' && typeof url === 'string' && url) {
+    trigger.urlPattern = url
+  }
+  const contextMenuName = node.data?.['contextMenuName']
+  if (type === 'context-menu' && typeof contextMenuName === 'string' && contextMenuName) {
+    trigger.menuItemId = contextMenuName
+  }
+  return trigger
 }
 
 /**

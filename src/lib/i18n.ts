@@ -188,6 +188,12 @@ export interface Messages {
   workflowsTriggerVisitWeb: string
   workflowsTriggerGithub: string
   workflowsTriggerFeishu: string
+  workflowsTriggerInterval: string
+  workflowsTriggerDate: string
+  workflowsTriggerSpecificDay: string
+  workflowsTriggerStartup: string
+  workflowsTriggerShortcut: string
+  workflowsTriggerElementChange: string
   workflowsTriggerNone: string
   workflowsLastRun: string
   workflowsRunHistory: string
@@ -947,6 +953,12 @@ const en: Messages = {
   workflowsTriggerVisitWeb: 'Visit web',
   workflowsTriggerGithub: 'GitHub',
   workflowsTriggerFeishu: 'Feishu',
+  workflowsTriggerInterval: 'Interval',
+  workflowsTriggerDate: 'On specific date',
+  workflowsTriggerSpecificDay: 'Weekly',
+  workflowsTriggerStartup: 'On startup',
+  workflowsTriggerShortcut: 'Keyboard shortcut',
+  workflowsTriggerElementChange: 'Element change',
   workflowsTriggerNone: 'No trigger',
   workflowsLastRun: 'Last run',
   workflowsRunHistory: 'Run history',
@@ -1647,6 +1659,12 @@ const zhCN: Messages = {
   workflowsTriggerVisitWeb: '访问网页',
   workflowsTriggerGithub: 'GitHub',
   workflowsTriggerFeishu: '飞书',
+  workflowsTriggerInterval: '定时间隔',
+  workflowsTriggerDate: '指定日期',
+  workflowsTriggerSpecificDay: '每周定时',
+  workflowsTriggerStartup: '浏览器启动',
+  workflowsTriggerShortcut: '快捷键',
+  workflowsTriggerElementChange: '元素变化',
   workflowsTriggerNone: '无触发器',
   workflowsLastRun: '上次运行',
   workflowsRunHistory: '运行历史',

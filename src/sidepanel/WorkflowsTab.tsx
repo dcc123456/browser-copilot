@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Circle, Download, Plus, Square, Trash2, Upload } from 'lucide-react'
 import { sendCommand } from '../lib/messages'
 import type { TaskRunLog } from '../lib/scheduler-types'
-import type { Workflow, WorkflowTrigger } from '../lib/workflow/types'
+import type { Workflow } from '../lib/workflow/types'
 import type { WorkflowDebugResult } from '../lib/workflow/auto-debug-patch'
 import { debugRunLabel } from '../lib/workflow/ai-takeover'
 import type { TakeoverReasonKind } from '../lib/workflow/ai-takeover'
@@ -48,6 +48,132 @@ function reasonLabelOf(
     default:
       return t.workflowsDebugReasonUnclassified
   }
+}
+
+/**
+ * Effective launch type for the list chip: the trigger BLOCK inside the graph
+ * is the source of truth edited in the visual editor; the top-level
+ * `wf.trigger` is a denormalized mirror (older records may only have that).
+ * Mirrors background `effectiveTriggerKind` without importing worker modules.
+ */
+function effectiveTriggerType(wf: Workflow): string {
+  const node = wf.drawflow.nodes.find(
+    (n) => (n.data?.['blockId'] as string) === 'trigger' || n.label === 'trigger',
+  )
+  const fromBlock = node?.data?.['type']
+  return (typeof fromBlock === 'string' && fromBlock) || wf.trigger?.type || 'manual'
+}
+
+/**
+ * The primary "new" action with its sibling Import entry folded into a hover
+ * bubble. Hover/focus opens it for mouse/keyboard users; tapping the button
+ * toggles it so touch screens can reach both entries. The transparent padding
+ * bridge between button and card keeps the pointer inside the wrapper while
+ * moving down, so the bubble never closes mid-way.
+ *
+ * `!` utilities are REQUIRED on the menu items: sidepanel/styles.css styles
+ * bare `button` elements with UNLAYERED rules that beat Tailwind's layered
+ * utilities in the cascade (same note as ChatTab's ToolbarIconButton).
+ */
+function NewWorkflowMenu({
+  disabled,
+  t,
+  onNew,
+  onImport,
+}: {
+  disabled: boolean
+  t: ReturnType<typeof useT>
+  onNew: () => void
+  onImport: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  // Close on outside pointer-down / Escape (deferred listeners, same trick as
+  // the chat download menu, so the opening click doesn't immediately close).
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (event: MouseEvent): void => {
+      if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    const id = window.setTimeout(() => {
+      document.addEventListener('mousedown', onPointerDown)
+      document.addEventListener('keydown', onKey)
+    }, 0)
+    return () => {
+      window.clearTimeout(id)
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const itemClass =
+    'flex w-full cursor-pointer items-center gap-2 rounded-md! border-0! bg-transparent! px-2.5! py-1.5! ' +
+    'text-left text-[12.5px] text-ink! hover:bg-hover!'
+
+  return (
+    <div
+      ref={wrapRef}
+      className="relative flex"
+      onBlur={(event) => {
+        if (!wrapRef.current?.contains(event.relatedTarget as Node | null)) setOpen(false)
+      }}
+      onFocus={() => setOpen(true)}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={t.workflowsNew}
+        className="primary section-action wf-icon-action"
+        disabled={disabled}
+        onClick={() => setOpen((value) => !value)}
+        title={t.workflowsNew}
+        type="button"
+      >
+        <Plus size={14} aria-hidden="true" />
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 top-full z-50 min-w-[128px] pt-1.5"
+          role="menu"
+        >
+          <div className="flex flex-col rounded-lg border border-border bg-panel p-1 shadow-[var(--bc-shadow)]">
+            <button
+              className={itemClass}
+              onClick={() => {
+                setOpen(false)
+                onNew()
+              }}
+              role="menuitem"
+              type="button"
+            >
+              <Plus size={13} className="shrink-0 text-muted" aria-hidden="true" />
+              {t.workflowsNew}
+            </button>
+            <button
+              className={itemClass}
+              onClick={() => {
+                setOpen(false)
+                onImport()
+              }}
+              role="menuitem"
+              type="button"
+            >
+              <Upload size={13} className="shrink-0 text-muted" aria-hidden="true" />
+              {t.workflowsImport}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function WorkflowsTab() {
@@ -613,12 +739,24 @@ export default function WorkflowsTab() {
     await load()
   }
 
-  const triggerLabel = (triggerType: WorkflowTrigger['type'] | undefined): string => {
+  const triggerLabel = (triggerType: string | undefined): string => {
     switch (triggerType) {
       case 'manual':
         return t.workflowsTriggerManual
       case 'scheduled':
         return t.workflowsTriggerScheduled
+      case 'interval':
+        return t.workflowsTriggerInterval
+      case 'date':
+        return t.workflowsTriggerDate
+      case 'specific-day':
+        return t.workflowsTriggerSpecificDay
+      case 'on-startup':
+        return t.workflowsTriggerStartup
+      case 'keyboard-shortcut':
+        return t.workflowsTriggerShortcut
+      case 'element-change':
+        return t.workflowsTriggerElementChange
       case 'context-menu':
         return t.workflowsTriggerContextMenu
       case 'visit-web':
@@ -704,23 +842,19 @@ export default function WorkflowsTab() {
               <Download size={14} aria-hidden="true" />
             </button>
           )}
-          <button
-            className="section-action wf-icon-action"
-            disabled={busy}
-            onClick={() => fileInputRef.current?.click()}
-            type="button"
-            title={t.workflowsImport}
-            aria-label={t.workflowsImport}
-          >
-            <Upload size={14} aria-hidden="true" />
-          </button>
           <input
             ref={fileInputRef}
             type="file"
             accept=".json,application/json"
             multiple
             style={{ display: 'none' }}
-            onChange={(event) => void importFiles(event.target.files)}
+            onChange={(event) => {
+              // Reset after import so selecting the same file again still
+              // fires onChange (e.g. re-import after fixing the JSON).
+              void importFiles(event.target.files).finally(() => {
+                event.target.value = ''
+              })
+            }}
           />
           <button
             className={`section-action wf-icon-action${recording ? ' record-active' : ''}`}
@@ -736,16 +870,12 @@ export default function WorkflowsTab() {
               <Circle size={14} aria-hidden="true" />
             )}
           </button>
-          <button
-            className="primary section-action wf-icon-action"
+          <NewWorkflowMenu
             disabled={busy}
-            onClick={() => openEditor()}
-            type="button"
-            title={t.workflowsNew}
-            aria-label={t.workflowsNew}
-          >
-            <Plus size={14} aria-hidden="true" />
-          </button>
+            onImport={() => fileInputRef.current?.click()}
+            onNew={() => openEditor()}
+            t={t}
+          />
         </div>
       </div>
 
@@ -778,7 +908,7 @@ export default function WorkflowsTab() {
                   </span>
                 </div>
                 <div className="task-meta">
-                  <span className="task-chip">{triggerLabel(wf.trigger?.type)}</span>
+                  <span className="task-chip">{triggerLabel(effectiveTriggerType(wf))}</span>
                   {wf.description && <span className="task-lastrun">{wf.description}</span>}
                 </div>
                 {last && (
