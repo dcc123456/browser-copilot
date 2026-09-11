@@ -16,7 +16,7 @@ import {
   sanitizeAttachments,
   toAttachmentSummaries,
 } from '../lib/attachments'
-import { toRestoreMessages } from './restore'
+import { getUserDisplayText, toRestoreMessages } from './restore'
 import { retain, release } from './keepalive'
 import {
     AGENT_PORT,
@@ -920,7 +920,9 @@ async function handleCommand(command: Command, sender?: chrome.runtime.MessageSe
         )
         .map((entry) => ({
           role: entry.role,
-          text: entry.content,
+          // Hide model-only envelopes (skill directive, selection block);
+          // falls back to legacy unwrapping for older transcripts.
+          text: entry.role === 'user' ? getUserDisplayText(entry) : entry.content,
           ...(entry.role === 'user' && entry.attachments?.length
             ? { attachments: toAttachmentSummaries(entry.attachments) }
             : {}),
@@ -1648,6 +1650,10 @@ chrome.runtime.onConnect.addListener((port) => {
         history.push({
           role: 'user',
           content: text,
+          // Keep the raw panel text for replay/UI: `text` may carry the
+          // skill directive and the page-selection envelope, which are
+          // model-facing only and must not be rendered as the user's message.
+          displayContent: message.text,
           ...(sanitized.kept.length ? { attachments: sanitized.kept } : {}),
         })
         // Persist metadata so the conversation appears in the history list;

@@ -310,6 +310,10 @@ export interface Messages {
   phaseSending: string
   phaseThinking: string
   phaseResponding: string
+  /** Header of the collapsible model-reasoning (`<think>`) block. */
+  chatThinking: string
+  /** Inline label while a tool call in an assistant turn is still running. */
+  chatToolRunning: string
   chatApprove: string
   chatDecline: string
   chatConfirmTitle: (params: { name: string }) => string
@@ -1034,6 +1038,8 @@ const en: Messages = {
   phaseSending: 'Sending to the model…',
   phaseThinking: 'Thinking…',
   phaseResponding: 'Responding…',
+  chatThinking: 'Thinking',
+  chatToolRunning: 'running…',
   chatApprove: 'Approve',
   chatDecline: 'Decline',
   chatConfirmTitle: ({ name }) => `Allow ${name}?`,
@@ -1727,6 +1733,8 @@ const zhCN: Messages = {
   phaseSending: '正在发送给模型…',
   phaseThinking: '模型思考中…',
   phaseResponding: '正在回复…',
+  chatThinking: '思考过程',
+  chatToolRunning: '执行中…',
   chatApprove: '允许',
   chatDecline: '拒绝',
   chatConfirmTitle: ({ name }) => `是否允许执行 ${name}？`,

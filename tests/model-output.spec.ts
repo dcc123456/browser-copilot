@@ -7,7 +7,12 @@
  *   - sanitizeModelAnswer: the one-pass combination (idempotent).
  */
 import { describe, expect, it } from 'vitest'
-import { sanitizeModelAnswer, stripThinkBlocks, unwrapFencedAnswer } from '../src/lib/model-output'
+import {
+  sanitizeModelAnswer,
+  splitThinkSegments,
+  stripThinkBlocks,
+  unwrapFencedAnswer,
+} from '../src/lib/model-output'
 
 describe('stripThinkBlocks', () => {
   it('removes paired think blocks and keeps the answer', () => {
@@ -39,6 +44,83 @@ describe('stripThinkBlocks', () => {
   it('leaves plain text untouched', () => {
     expect(stripThinkBlocks('{"summary":"s"}')).toBe('{"summary":"s"}')
     expect(stripThinkBlocks('')).toBe('')
+  })
+})
+
+describe('splitThinkSegments', () => {
+  it('returns one answer segment for plain text', () => {
+    expect(splitThinkSegments('just an answer')).toEqual([
+      { kind: 'answer', text: 'just an answer', closed: true },
+    ])
+    expect(splitThinkSegments('')).toEqual([])
+  })
+
+  it('splits a completed think block from the answer in order', () => {
+    expect(splitThinkSegments('<think>reasoning</think>the answer')).toEqual([
+      { kind: 'think', text: 'reasoning', closed: true },
+      { kind: 'answer', text: 'the answer', closed: true },
+    ])
+  })
+
+  it('keeps text before and after a think block as separate answer runs', () => {
+    expect(splitThinkSegments('a<think>hmm</think>b')).toEqual([
+      { kind: 'answer', text: 'a', closed: true },
+      { kind: 'think', text: 'hmm', closed: true },
+      { kind: 'answer', text: 'b', closed: true },
+    ])
+  })
+
+  it('marks an unterminated think block as streaming (closed=false)', () => {
+    expect(splitThinkSegments('<think>still reasoning')).toEqual([
+      { kind: 'think', text: 'still reasoning', closed: false },
+    ])
+    expect(splitThinkSegments('answer first <think>now thinking')).toEqual([
+      { kind: 'answer', text: 'answer first ', closed: true },
+      { kind: 'think', text: 'now thinking', closed: false },
+    ])
+  })
+
+  it('holds back a tag cut in half at the end of a streamed answer', () => {
+    expect(splitThinkSegments('answer <thi')).toEqual([
+      { kind: 'answer', text: 'answer ', closed: true },
+    ])
+    expect(splitThinkSegments('<think>x</think>answer</thin')).toEqual([
+      { kind: 'think', text: 'x', closed: true },
+      { kind: 'answer', text: 'answer', closed: true },
+    ])
+  })
+
+  it('keeps stray tag-shaped text inside a think block verbatim', () => {
+    expect(splitThinkSegments('<think>a < b and </b></think>done')).toEqual([
+      { kind: 'think', text: 'a < b and </b>', closed: true },
+      { kind: 'answer', text: 'done', closed: true },
+    ])
+  })
+
+  it('classifies text before a lone closing tag as reasoning', () => {
+    expect(splitThinkSegments('reasoning without open</think>answer')).toEqual([
+      { kind: 'think', text: 'reasoning without open', closed: true },
+      { kind: 'answer', text: 'answer', closed: true },
+    ])
+  })
+
+  it('handles repeated blocks, variants and casing', () => {
+    expect(splitThinkSegments('<THINK>x</THINK>ok<think>y</think>z')).toEqual([
+      { kind: 'think', text: 'x', closed: true },
+      { kind: 'answer', text: 'ok', closed: true },
+      { kind: 'think', text: 'y', closed: true },
+      { kind: 'answer', text: 'z', closed: true },
+    ])
+    expect(splitThinkSegments('<reasoning>r</reasoning>a')).toEqual([
+      { kind: 'think', text: 'r', closed: true },
+      { kind: 'answer', text: 'a', closed: true },
+    ])
+  })
+
+  it('does not hold back an unrelated tag-like tail', () => {
+    expect(splitThinkSegments('see <table> below')).toEqual([
+      { kind: 'answer', text: 'see <table> below', closed: true },
+    ])
   })
 })
 

@@ -56,6 +56,14 @@ export type WireMessage =
        * multimodal content parts when the request is built.
        */
       attachments?: AttachmentDescriptor[]
+      /**
+       * What the UI should show as this turn's user text — the raw message the
+       * user actually sent. `content` may carry model-only envelopes (the
+       * active-skill directive, a captured page selection) that must never be
+       * rendered back as if the user had typed them. Display-only: stripped by
+       * {@link toApiMessages} so providers never receive it.
+       */
+      displayContent?: string
     }
   | {
       role: 'assistant'
@@ -74,13 +82,15 @@ export type WireMessage =
  * User turns with attachments become multimodal content parts: the typed text
  * first (when non-empty), then each image as an `image_url` data URL and each
  * text file inlined as a labelled fenced block. Everything else passes through
- * unchanged, and the extension-internal `attachments` field is stripped so
- * providers never see a field they did not ask for.
+ * unchanged. Extension-internal fields (`attachments`, `displayContent`) are
+ * always stripped so providers never see fields they did not ask for.
  */
 export function toApiMessages(messages: readonly WireMessage[]): unknown[] {
   return messages.map((message) => {
-    if (message.role !== 'user' || !message.attachments || message.attachments.length === 0) {
-      return message
+    if (message.role !== 'user') return message
+    if (!message.attachments || message.attachments.length === 0) {
+      // Rebuild the plain pair: displayContent must never reach the provider.
+      return { role: 'user', content: message.content }
     }
     const parts: UserContentPart[] = []
     if (message.content.trim().length > 0) {

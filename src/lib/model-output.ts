@@ -19,11 +19,126 @@
  */
 
 /** Tag names models actually use for visible chain-of-thought. */
-const THINK_TAG_SOURCE = '(?:think|thinking|thought|reasoning)'
+const THINK_TAG_NAMES = ['think', 'thinking', 'thought', 'reasoning'] as const
+
+const THINK_TAG_SOURCE = `(?:${THINK_TAG_NAMES.join('|')})`
 
 const THINK_PAIR = new RegExp(`<${THINK_TAG_SOURCE}>[\\s\\S]*?</${THINK_TAG_SOURCE}>`, 'gi')
 const THINK_CLOSE = new RegExp(`</${THINK_TAG_SOURCE}>`, 'gi')
 const THINK_OPEN = new RegExp(`<${THINK_TAG_SOURCE}>`, 'i')
+
+/**
+ * Opening OR closing think tag, tolerating stray attributes
+ * (`<thinking class="…">`). Capture 1 is `/` for a closing tag, capture 2 the
+ * tag name.
+ */
+const THINK_TAG_ANY = new RegExp(
+  `<(/?)(${THINK_TAG_NAMES.join('|')})(?:\\s[^>]*)?>`,
+  'gi',
+)
+
+/**
+ * A tag-shaped tail a token cut can leave dangling at the end of a stream
+ * (`<`, `</t`, `<thinkin`). Matched only to decide whether to hold the
+ * fragment back; {@link isThinkTagPrefix} confirms it could become a think tag.
+ */
+const PARTIAL_TAG_TAIL = /<\/?[a-zA-Z]{0,10}$/
+
+/** One visible segment of a model reply: the model's reasoning vs its answer. */
+export interface ThinkSegment {
+  kind: 'think' | 'answer'
+  text: string
+  /**
+   * Whether the reasoning block is complete. False while the closing tag has
+   * not arrived yet (stream still inside the thought).
+   */
+  closed: boolean
+}
+
+/** True when `fragment` is a cut-off prefix of an opening/closing think tag. */
+function isThinkTagPrefix(fragment: string): boolean {
+  const lower = fragment.toLowerCase()
+  if (lower === '<' || lower === '</') return true
+  const body = lower.startsWith('</') ? lower.slice(2) : lower.slice(1)
+  return THINK_TAG_NAMES.some((name) => name.startsWith(body))
+}
+
+/**
+ * Splits a model reply into reasoning (`think`) and `answer` segments,
+ * preserving their original order. Streaming-safe:
+ *
+ *   - an unterminated `<think>` yields one trailing `think` segment with
+ *     `closed: false`;
+ *   - a tag cut in half by a token boundary (`<thi`, `</thinkin`) is held
+ *     back while OUTSIDE a thought, so the raw fragment never flashes inside
+ *     the answer;
+ *   - a lone closing tag (the opening half was streamed earlier) classifies
+ *     the text before it as reasoning;
+ *   - repeated blocks, tag-name variants and casing are all handled.
+ *
+ * Display-oriented: unlike {@link stripThinkBlocks} it keeps the reasoning so
+ * the UI can render it in its own collapsible block.
+ */
+export function splitThinkSegments(input: string): ThinkSegment[] {
+  const segments: ThinkSegment[] = []
+
+  const push = (kind: ThinkSegment['kind'], part: string, closed = true): void => {
+    if (!part) return
+    const last = segments[segments.length - 1]
+    if (last && last.kind === kind) {
+      last.text += part
+      if (kind === 'think' && !closed) last.closed = false
+    } else {
+      segments.push({ kind, text: part, closed: kind === 'answer' ? true : closed })
+    }
+  }
+
+  THINK_TAG_ANY.lastIndex = 0
+  let inThink = false
+  let cursor = 0
+  let match: RegExpExecArray | null
+  while ((match = THINK_TAG_ANY.exec(input)) !== null) {
+    const between = input.slice(cursor, match.index)
+    const isClose = match[1] === '/'
+    if (inThink) {
+      if (isClose) {
+        push('think', between, true)
+        inThink = false
+      } else {
+        // A stray open tag inside reasoning: treat tag + text as thought text.
+        push('think', between + match[0], false)
+      }
+    } else if (isClose) {
+      // Lone closing tag — the opening tag was streamed/cut earlier.
+      push('think', between, true)
+    } else {
+      push('answer', between)
+      inThink = true
+    }
+    cursor = match.index + match[0].length
+  }
+
+  const tail = input.slice(cursor)
+  if (inThink) {
+    push('think', tail, false)
+    return segments
+  }
+
+  push('answer', tail)
+
+  // Hold back a half-typed tag at the very end so it does not leak into the
+  // answer until the next chunk reveals whether it really is a think tag.
+  const last = segments[segments.length - 1]
+  if (last && last.kind === 'answer') {
+    const dangling = PARTIAL_TAG_TAIL.exec(last.text)
+    if (dangling && isThinkTagPrefix(dangling[0])) {
+      last.text = last.text.slice(0, dangling.index)
+      if (last.text.length === 0) segments.pop()
+    }
+  }
+
+  return segments
+}
 
 /**
  * A reply that is exactly one markdown code fence (optionally language-tagged,

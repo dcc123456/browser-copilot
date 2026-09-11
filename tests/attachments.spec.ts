@@ -13,7 +13,9 @@ import {
   validateAttachmentMeta,
 } from '../src/lib/attachments'
 import { toApiMessages, type WireMessage } from '../src/lib/llm'
-import { toRestoreMessages } from '../src/background/restore'
+import { getUserDisplayText, toRestoreMessages } from '../src/background/restore'
+import { wrapSkillDirective } from '../src/lib/skills'
+import type { Skill } from '../src/lib/types'
 
 function imageAttachment(): Extract<WireMessage, { role: 'user' }> {
   return {
@@ -24,7 +26,7 @@ function imageAttachment(): Extract<WireMessage, { role: 'user' }> {
 }
 
 describe('toApiMessages', () => {
-  it('passes messages without attachments through by reference', () => {
+  it('keeps non-user messages by reference and rebuilds plain user turns', () => {
     const messages: WireMessage[] = [
       { role: 'system', content: 'sys' },
       { role: 'user', content: 'hello' },
@@ -33,15 +35,61 @@ describe('toApiMessages', () => {
     ]
     const out = toApiMessages(messages)
     expect(out).toEqual(messages)
+    // System / assistant / tool pass through untouched; user turns are rebuilt
+    // as a bare role/content pair so extension-only fields cannot leak.
     expect(out[0]).toBe(messages[0])
-    expect(out[1]).toBe(messages[1])
+    expect(out[1]).not.toBe(messages[1])
+    expect(out[1]).toEqual({ role: 'user', content: 'hello' })
+    expect(out[2]).toBe(messages[2])
+    expect(out[3]).toBe(messages[3])
     expect(JSON.stringify(out)).not.toContain('attachments')
+    expect(JSON.stringify(out)).not.toContain('displayContent')
+  })
+
+  it('strips displayContent from plain user turns', () => {
+    const messages: WireMessage[] = [
+      // Model-facing content carries the skill/selection envelopes; the raw
+      // user text is display-only and must never reach the provider.
+      { role: 'user', content: '[internal directive]\n\nmodel sees this', displayContent: 'translate it' },
+    ]
+    const out = toApiMessages(messages)
+    expect(out[0]).toEqual({ role: 'user', content: '[internal directive]\n\nmodel sees this' })
+    expect(JSON.stringify(out)).not.toContain('translate it')
+    expect(JSON.stringify(out)).not.toContain('displayContent')
+  })
+
+  it('strips displayContent when folding attachments into content parts', () => {
+    const out = toApiMessages([
+      {
+        role: 'user',
+        content: 'What is in picture?',
+        displayContent: '看看这张图',
+        attachments: [
+          {
+            id: 'a1',
+            name: 'pic.png',
+            mimeType: 'image/png',
+            size: 4,
+            dataUrl: 'data:image/png;base64,AAAA',
+          },
+        ],
+      },
+    ])
+    expect(out[0]).toEqual({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'What is in picture?' },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } },
+      ],
+    })
+    expect(JSON.stringify(out)).not.toContain('看看这张图')
   })
 
   it('treats an empty attachments array as no attachments', () => {
     const user: WireMessage = { role: 'user', content: 'plain', attachments: [] }
     const out = toApiMessages([user])
-    expect(out[0]).toBe(user)
+    expect(out[0]).toEqual({ role: 'user', content: 'plain' })
+    expect(out[0]).not.toBe(user)
   })
 
   it('builds text + image_url parts for an image attachment', () => {
@@ -351,6 +399,113 @@ describe('toRestoreMessages', () => {
   it('handles a non-string assistant content defensively', () => {
     const history: WireMessage[] = [{ role: 'assistant', content: null }]
     expect(toRestoreMessages(history)).toEqual([{ role: 'assistant', text: '' }])
+  })
+
+  it('renders displayContent instead of the model-facing wrapped content', () => {
+    const skill: Skill = {
+      id: 's1',
+      name: 'trans',
+      description: 'translate',
+      instructions: 'Translate the input.',
+      autoMatch: false,
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const selectionEnvelope =
+      'Content selected on the page I am viewing:\n' +
+      'Title: PR · ragflow\nURL: https://example.com/pr\n' +
+      'Selection:\nFixes an infinite update loop.\n\n' +
+      'My question: 请用"trans"技能处理我在页面上选中的内容。'
+    const history: WireMessage[] = [
+      {
+        role: 'user',
+        content: wrapSkillDirective(skill, selectionEnvelope),
+        displayContent: '请用"trans"技能处理我在页面上选中的内容。',
+      },
+      { role: 'assistant', content: '译文如下…' },
+    ]
+    const out = toRestoreMessages(history)
+    expect(out[0]!.text).toBe('请用"trans"技能处理我在页面上选中的内容。')
+    expect(out[0]!.text).not.toContain('ACTIVE')
+    expect(out[0]!.text).not.toContain('Content selected on the page')
+  })
+
+  it('keeps an empty displayContent for attachment-only turns', () => {
+    const history: WireMessage[] = [
+      {
+        role: 'user',
+        content: '',
+        displayContent: '',
+        attachments: [
+          { id: 'a1', name: 'n.txt', mimeType: 'text/plain', size: 3, content: 'abc' },
+        ],
+      },
+    ]
+    const out = toRestoreMessages(history)
+    expect(out[0]!.text).toBe('')
+    expect(out[0]!.attachments).toHaveLength(1)
+  })
+})
+
+describe('getUserDisplayText legacy unwrapping', () => {
+  const skill: Skill = {
+    id: 's1',
+    name: 'trans',
+    description: 'translate',
+    instructions: 'Translate the input.',
+    autoMatch: false,
+    createdAt: 1,
+    updatedAt: 1,
+  }
+  const selectionEnvelope = (question: string): string =>
+    'Content selected on the page I am viewing:\n' +
+    'Title: PR · ragflow\nURL: https://example.com/pr\n' +
+    'Selection:\nSummary of the selected text.\n\n' +
+    `My question: ${question}`
+
+  it('leaves plain user content untouched', () => {
+    expect(getUserDisplayText({ content: 'just a question' })).toBe('just a question')
+  })
+
+  it('prefers displayContent without parsing the wrapped content', () => {
+    expect(
+      getUserDisplayText({
+        content: wrapSkillDirective(skill, selectionEnvelope('原文')),
+        displayContent: '帮我翻译',
+      }),
+    ).toBe('帮我翻译')
+  })
+
+  it('strips a legacy skill directive for old transcripts', () => {
+    expect(
+      getUserDisplayText({ content: wrapSkillDirective(skill, 'Translate this paragraph.') }),
+    ).toBe('Translate this paragraph.')
+  })
+
+  it('recovers the question from a legacy page-selection envelope', () => {
+    const question = '总结一下选中的内容'
+    expect(getUserDisplayText({ content: selectionEnvelope(question) })).toBe(question)
+  })
+
+  it('unwraps a legacy skill directive AND selection envelope together', () => {
+    const question = '请处理选中的文本'
+    expect(
+      getUserDisplayText({
+        content: wrapSkillDirective(skill, selectionEnvelope(question)),
+      }),
+    ).toBe(question)
+  })
+
+  it('uses the final question marker when the selection quotes it', () => {
+    const quoted = 'Selection:\nMy question: not the real one\n\nMy question: real question'
+    const content =
+      'Content selected on the page I am viewing:\nTitle: t\nURL: u\n' + quoted
+    expect(getUserDisplayText({ content })).toBe('real question')
+  })
+
+  it('does not mistake ordinary text for an envelope', () => {
+    const content = 'Content selected on the page I am viewing: is a phrase I typed'
+    expect(getUserDisplayText({ content })).toBe(content)
   })
 })
 

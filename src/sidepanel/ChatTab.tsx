@@ -14,7 +14,7 @@
  *    worker's session storage keyed by `conversationId`, so the conversation
  *    continues instead of silently restarting.
  */
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AGENT_PORT,
   type AgentClientMessage,
@@ -65,19 +65,24 @@ import { useT } from './i18n'
 import Markdown from './Markdown'
 import { downloadAnswer, hasTables, type AnswerFormat } from '../lib/export-answer'
 import {
+  Brain,
   Check,
+  ChevronRight,
   Copy,
   Download,
   Gauge,
   Highlighter,
   History,
   Info,
+  Loader2,
   Paperclip,
   // `Workflow` the icon is aliased: the file's `Workflow` type (lib/workflow) wins.
   Workflow as WorkflowIcon,
+  Wrench,
 } from 'lucide-react'
 import { normalizeSkill } from '../lib/skills'
 import { detectSkillCandidatesFromMarkdown, type DetectedSkill } from '../lib/skill-detect'
+import { splitThinkSegments, stripThinkBlocks } from '../lib/model-output'
 
 /**
  * Fixed default conversation id; other conversations are generated ids.
@@ -129,6 +134,71 @@ interface Entry {
   attachments?: AttachmentSummary[]
   /** Token usage of the completed turn this assistant reply belongs to (hover). */
   usage?: TurnTokenUsage
+  /** Tool name for `tool` entries (the chip text stays as a fallback). */
+  toolName?: string
+  /**
+   * Tool result summary for `tool` entries. Absent while the call is still
+   * running; restored transcripts always carry it.
+   */
+  toolSummary?: string
+}
+
+/**
+ * Render items: consecutive assistant/tool entries belong to ONE agent turn
+ * and are painted as a single bubble, even when tool calls split the model's
+ * answer into several streamed text segments. Everything else (user, status,
+ * error) renders standalone and breaks the group.
+ */
+type RenderItem =
+  | { kind: 'single'; entry: Entry }
+  | { kind: 'turn'; entries: Entry[] }
+
+/**
+ * Groups the flat transcript into standalone entries and agent turns
+ * (assistant text + the tool calls interleaved between text segments).
+ */
+export function groupEntries(entries: readonly Entry[]): RenderItem[] {
+  const items: RenderItem[] = []
+  let run: Entry[] | null = null
+  for (const entry of entries) {
+    if (entry.role === 'assistant' || entry.role === 'tool') {
+      if (!run) {
+        run = []
+        items.push({ kind: 'turn', entries: run })
+      }
+      run.push(entry)
+    } else {
+      run = null
+      items.push({ kind: 'single', entry })
+    }
+  }
+  return items
+}
+
+/**
+ * Recovers the structured tool name/summary from a restored transcript line
+ * (`← name: summary`, produced by `background/restore.ts`). Live turns carry
+ * the fields directly.
+ */
+function parseRestoredTool(text: string): { name: string; summary: string } {
+  const trimmed = text.trim()
+  const match = /^←\s*([^:]+?):\s*([\s\S]*)$/.exec(trimmed)
+  // Always report a summary (even if just the raw line): a replayed entry is
+  // a completed call and must never render as a still-running spinner.
+  if (!match) return { name: 'tool', summary: trimmed.replace(/^←\s*/, '') }
+  return { name: match[1]!.trim(), summary: match[2]! }
+}
+
+/**
+ * The copyable/exportable answer of one agent turn: every assistant segment
+ * with reasoning blocks removed, joined across tool rounds.
+ */
+function turnAnswerText(entries: readonly Entry[]): string {
+  return entries
+    .filter((entry): entry is Entry & { role: 'assistant' } => entry.role === 'assistant')
+    .map((entry) => stripThinkBlocks(entry.text).trim())
+    .filter(Boolean)
+    .join('\n\n')
 }
 
 /** A tool call awaiting the user's decision. */
@@ -197,6 +267,214 @@ function MessageAttachments({ attachments }: { attachments?: AttachmentSummary[]
           </span>
         ),
       )}
+    </div>
+  )
+}
+
+/** Localized-text bundle type, reused by the small render components below. */
+type ChatT = ReturnType<typeof useT>
+
+/**
+ * One reasoning block (`<think>…</think>`) rendered apart from the answer:
+ * a collapsible, muted panel instead of literal tags mixed into the reply.
+ *
+ * Pinned open while the turn is streaming so the model's progress stays
+ * visible; auto-collapses when the turn completes, after which the user can
+ * freely toggle it.
+ */
+function ThinkBlock({
+  text,
+  closed,
+  live,
+}: {
+  text: string
+  /** False while the closing tag (and the rest of the thought) is pending. */
+  closed: boolean
+  /** True for the turn currently streaming. */
+  live: boolean
+}) {
+  const t = useT()
+  // A thought whose closing tag has not arrived is still streaming: default
+  // open even when the panel did not track the turn as busy (e.g. a run it
+  // reattached to mid-flight).
+  const [open, setOpen] = useState(live || !closed)
+  useEffect(() => {
+    // A completed turn collapses its finished reasoning blocks.
+    if (!live && closed) setOpen(false)
+  }, [live, closed])
+  const expanded = live || open || !closed
+
+  return (
+    <details
+      className="rounded-lg border border-border bg-sunken px-2.5 py-1.5"
+      data-kind="think"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      open={expanded}
+    >
+      <summary className="flex cursor-pointer list-none select-none items-center gap-1.5 text-muted [&::-webkit-details-marker]:hidden">
+        <Brain aria-hidden="true" className="h-3.5 w-3.5 shrink-0" size={14} />
+        <span className="text-xs font-medium">{t.chatThinking}</span>
+        {!closed && <Loader2 aria-hidden="true" className="h-3 w-3 shrink-0 animate-spin" />}
+        <ChevronRight
+          aria-hidden="true"
+          className={`ml-auto h-3 w-3 shrink-0 transition-transform duration-150 ${
+            expanded ? 'rotate-90' : ''
+          }`}
+          size={12}
+        />
+      </summary>
+      <div className="mt-1.5 whitespace-pre-wrap [overflow-wrap:anywhere] text-xs leading-relaxed text-muted">
+        {text}
+      </div>
+    </details>
+  )
+}
+
+/**
+ * One assistant text segment. Splits reasoning blocks out of the raw model
+ * text and renders them in stream order, each as its own {@link ThinkBlock},
+ * with only the actual answer going through Markdown.
+ */
+function AssistantContent({ text, live }: { text: string; live: boolean }) {
+  const segments = splitThinkSegments(text)
+  if (segments.length === 0) return null
+  return (
+    <div className="flex flex-col gap-2">
+      {segments.map((segment, index) => {
+        if (segment.kind === 'think') {
+          return (
+            <ThinkBlock
+              closed={segment.closed}
+              key={`think-${index}`}
+              live={live}
+              text={segment.text}
+            />
+          )
+        }
+        // Whitespace-only answer runs (e.g. the newline after a think tag)
+        // would render as an empty paragraph with extra margins.
+        if (!segment.text.trim()) return null
+        return <Markdown key={`answer-${index}`} text={segment.text} />
+      })}
+    </div>
+  )
+}
+
+/**
+ * One tool call embedded inside an agent turn: a compact card instead of a
+ * loose chip floating between reply bubbles. Shows a spinner until the result
+ * summary arrives; the completed card expands to reveal the full summary.
+ */
+function ToolCallCard({ entry, t }: { entry: Entry; t: ChatT }) {
+  const name = entry.toolName ?? 'tool'
+  const summary = entry.toolSummary
+  const running = summary === undefined
+  const baseClass = 'rounded-lg border border-border bg-sunken px-2.5 py-1.5'
+
+  const icon = running ? (
+    <Loader2 aria-hidden="true" className="h-3 w-3 shrink-0 animate-spin text-accent" />
+  ) : (
+    <Wrench aria-hidden="true" className="h-3 w-3 shrink-0 text-muted" />
+  )
+
+  const inner = (
+    <div className="flex min-w-0 flex-1 items-center gap-1.5">
+      {icon}
+      <span className="shrink-0 font-mono text-xs text-ink">{name}</span>
+      {running ? (
+        <span className="text-xs text-muted">{t.chatToolRunning}</span>
+      ) : (
+        summary && <span className="min-w-0 truncate text-xs text-muted">· {summary}</span>
+      )}
+    </div>
+  )
+
+  if (running || !summary?.trim()) {
+    return (
+      <div className={`${baseClass} flex items-center`} data-kind="tool" data-state="running">
+        {inner}
+      </div>
+    )
+  }
+
+  return (
+    <details
+      className={`${baseClass} group/tool`}
+      data-kind="tool"
+      data-state="done"
+    >
+      <summary
+        className="flex cursor-pointer list-none items-center [&::-webkit-details-marker]:hidden"
+        title={summary}
+      >
+        {inner}
+        <ChevronRight
+          aria-hidden="true"
+          className="ml-1 h-3 w-3 shrink-0 text-muted transition-transform duration-150 group-open/tool:rotate-90"
+          size={12}
+        />
+      </summary>
+      <div className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[11px] leading-relaxed text-muted">
+        {summary}
+      </div>
+    </details>
+  )
+}
+
+/**
+ * One complete agent turn painted as a SINGLE bubble: all assistant text
+ * segments and the tool calls interleaved between them share one container,
+ * so a turn whose answer brackets tool calls no longer splits into several
+ * disconnected bubbles.
+ */
+function AssistantTurn({
+  entries,
+  live,
+  isLast,
+  busy,
+  t,
+  title,
+  onSkillSaved,
+}: {
+  entries: Entry[]
+  live: boolean
+  isLast: boolean
+  busy: boolean
+  t: ChatT
+  title: string
+  onSkillSaved: (statusText: string) => void
+}) {
+  const answer = turnAnswerText(entries)
+  const usage = [...entries].reverse().find(
+    (entry) => entry.role === 'assistant' && entry.usage,
+  )?.usage
+  const actionsEntry: Entry = {
+    id: `turn-actions-${entries[0]!.id}`,
+    role: 'assistant',
+    text: answer,
+    ...(usage ? { usage } : {}),
+  }
+
+  return (
+    <div
+      className="flex flex-col gap-2.5 rounded-xl border border-border bg-panel-2 px-3 py-2.5"
+      data-role="assistant-turn"
+    >
+      {entries.map((entry) =>
+        entry.role === 'tool' ? (
+          <ToolCallCard entry={entry} key={entry.id} t={t} />
+        ) : (
+          <AssistantContent key={entry.id} live={live} text={entry.text} />
+        ),
+      )}
+      <GeneratedSkillCards assistantText={answer} onSaved={onSkillSaved} t={t} />
+      <MsgActions
+        busy={busy}
+        entry={actionsEntry}
+        isLastAssistant={isLast}
+        t={t}
+        title={title}
+      />
     </div>
   )
 }
@@ -983,10 +1261,16 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             // crash the whole panel.
             const restored = (message.messages ?? []).map((entry) => {
               if (entry.role === 'tool') {
+                // Replay lines are preformatted `← name: summary`; recover the
+                // structured fields so historical turns render the same card
+                // UI as live tool calls.
+                const { name, summary } = parseRestoredTool(entry.text)
                 return {
                   id: nextId(),
                   role: 'tool' as const,
                   text: entry.text,
+                  toolName: name,
+                  toolSummary: summary,
                 }
               }
               return {
@@ -1025,12 +1309,35 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
           case 'tool.start':
             clearPhase()
             streamingRef.current = null
-            append({ role: 'tool', text: `→ ${message.name}` })
+            append({ role: 'tool', text: '', toolName: message.name })
             break
           case 'tool.result':
-            append({
-              role: 'tool',
-              text: `← ${message.name}: ${message.summary}`,
+            setEntries((prev) => {
+              // Attach to the first still-running call of this tool: the
+              // calls of one round execute and report in order (FIFO). A
+              // result without a live start (reconnected mid-turn) appends
+              // its own completed card instead.
+              const pending = prev.findIndex(
+                (entry) =>
+                  entry.role === 'tool' &&
+                  entry.toolName === message.name &&
+                  entry.toolSummary === undefined,
+              )
+              if (pending === -1) {
+                return [
+                  ...prev,
+                  {
+                    id: nextId(),
+                    role: 'tool' as const,
+                    text: '',
+                    toolName: message.name,
+                    toolSummary: message.summary,
+                  },
+                ]
+              }
+              return prev.map((entry, index) =>
+                index === pending ? { ...entry, toolSummary: message.summary } : entry,
+              )
             })
             break
           case 'confirm.request':
@@ -1935,45 +2242,45 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
           <div className="empty">{t.chatEmpty}</div>
         )}
 
-        {entries.map((entry) => {
-          if (entry.role === 'tool') {
+        {groupEntries(entries).map((item) => {
+          if (item.kind === 'single') {
+            const entry = item.entry
             return (
-              <div key={entry.id}>
-                <span className="tool-chip">{entry.text}</span>
+              <div className="msg" data-role={entry.role} key={entry.id}>
+                {/*
+                  User text is shown exactly as typed; status and error lines
+                  are plain text generated by this extension. Only assistant
+                  replies are parsed as Markdown, and those render as turns
+                  below.
+                */}
+                {entry.text}
+                <MessageAttachments attachments={entry.attachments} />
+                <MsgActions
+                  busy={busy}
+                  entry={entry}
+                  isLastAssistant={false}
+                  t={t}
+                  title={convTitle}
+                />
               </div>
             )
           }
-          // A keyed fragment keeps `.msg` a direct flex child of `.chat-log`
-          // (so its align-self keeps working) while letting the generated-skill
-          // cards drop in as their own flex items right below the reply.
+          // Consecutive assistant/tool entries are one agent turn: the model
+          // often thinks, answers, calls a tool, then continues — keeping
+          // those segments in one bubble prevents the reply from visually
+          // breaking into disconnected blocks.
+          const containsLastAssistant = item.entries.some((entry) => entry.id === lastAssistantId)
           return (
-            <Fragment key={entry.id}>
-              <div className="msg" data-role={entry.role}>
-                {/*
-                  Only assistant replies are parsed as Markdown. What the user typed
-                  is shown exactly as typed: reformatting their own words would be
-                  surprising, and asking about `**` or a code fence must not make
-                  the question itself change shape. Status and error lines are
-                  plain text generated by this extension.
-                */}
-                {entry.role === 'assistant' ? <Markdown text={entry.text} /> : entry.text}
-                <MessageAttachments attachments={entry.attachments} />
-                <MsgActions
-                  entry={entry}
-                  t={t}
-                  title={convTitle}
-                  isLastAssistant={entry.id === lastAssistantId}
-                  busy={busy}
-                />
-              </div>
-              {entry.role === 'assistant' && (
-                <GeneratedSkillCards
-                  assistantText={entry.text}
-                  onSaved={(text) => append({ role: 'status', text })}
-                  t={t}
-                />
-              )}
-            </Fragment>
+            <AssistantTurn
+              busy={busy}
+              entries={item.entries}
+              isLast={containsLastAssistant}
+              key={item.entries[0]!.id}
+              live={busy && containsLastAssistant}
+              onSkillSaved={(text) => append({ role: 'status', text })}
+              t={t}
+              title={convTitle}
+            />
           )
         })}
 
