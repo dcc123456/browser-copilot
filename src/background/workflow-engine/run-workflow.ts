@@ -10,11 +10,12 @@
  */
 
 import type { Workflow } from '../../lib/workflow/types'
-import { recordCheckpoint } from '../../lib/workflow/checkpoints'
+import { recordCheckpoint, resumePointOf } from '../../lib/workflow/checkpoints'
 import {
   createChromeCheckpointStore,
   indexPersistedRun,
   prunePersistedCheckpoints,
+  readPersistedCheckpoints,
 } from '../checkpoint-store'
 import { addStep, finishRun, recordSnapshot, startRun, type RunSource } from '../running-tasks'
 import { countElements, execJsOnActiveTab } from '../driver'
@@ -86,6 +87,16 @@ export interface ExecuteWorkflowOptions {
    * checkpoint, takeover stat and run row of one session can be joined.
    */
   sessionId?: string
+  /**
+   * M4: resume a previous run instead of starting from the trigger. The run's
+   * checkpoints decide where: execution starts at the node AFTER the last step
+   * that settled cleanly, with that step's variables.
+   *
+   * This is the fix for non-idempotent flows — re-driving a login that already
+   * happened can only fail, so a retry must skip what already landed.
+   * Unresumable (no checkpoints, node gone) falls back to a normal start.
+   */
+  resumeFrom?: string
 }
 
 export interface ExecuteWorkflowResult {
@@ -97,6 +108,11 @@ export interface ExecuteWorkflowResult {
   variables?: Record<string, unknown>
   /** Run step tail (goal-check evidence for the debug session). */
   steps?: { kind: string; nodeId?: string; text: string }[]
+  /**
+   * M4: the step index this run resumed FROM, when `resumeFrom` pointed at a
+   * resumable run. Absent for a normal (or a non-resumable) start.
+   */
+  resumedFrom?: number
 }
 
 /**
@@ -121,6 +137,8 @@ export async function executeWorkflow(
   // retire the oldest runs once enough of them have accumulated.
   const wantCheckpoints = opts.checkpoints !== false
   if (wantCheckpoints) void indexPersistedRun(runId)
+  // Hoisted: the catch path below reports it too (see `resumedFrom`).
+  let resumedFrom: number | undefined
 
   try {
     // Validate the panel scope once for the whole run; every block then reads
@@ -138,9 +156,32 @@ export async function executeWorkflow(
       workflow,
       workflow.settings?.defaultWaitMs ?? DEFAULT_WAIT_MS,
     )
+    // M4 resume: continue a previous run after its last clean step instead of
+    // re-driving the whole graph. A login workflow re-run from its trigger hits
+    // a login form that no longer exists; resuming skips what already landed.
+    let startAt = opts.startAt
+    let variables = opts.variables
+    if (opts.resumeFrom) {
+      const inMemory = checkpointStore.load(opts.resumeFrom)
+      const checkpoints =
+        inMemory.length > 0 ? inMemory : await readPersistedCheckpoints(opts.resumeFrom)
+      const point = resumePointOf(effective, checkpoints)
+      if (point) {
+        startAt = point.nodeId
+        variables = { ...(opts.variables ?? {}), ...point.variables }
+        resumedFrom = point.fromStepIndex
+        addStep(
+          runId,
+          'status',
+          `从第 ${point.fromStepIndex + 1} 步之后恢复运行（已跳过的步骤不再重复执行）`,
+        )
+      } else {
+        addStep(runId, 'status', '没有可恢复的检查点，本次从头运行')
+      }
+    }
     const result = await runWorkflow(effective, {
-      startAt: opts.startAt,
-      variables: opts.variables,
+      startAt,
+      variables,
       signal: run.controller.signal,
       ...(scope ? { scope } : {}),
       ...(opts.aiTakeover ? { aiTakeover: opts.aiTakeover } : {}),
@@ -209,6 +250,7 @@ export async function executeWorkflow(
       error,
       ...(result.variables ? { variables: result.variables } : {}),
       ...(result.steps ? { steps: result.steps } : {}),
+      ...(resumedFrom !== undefined ? { resumedFrom } : {}),
     }
   } catch (e) {
     // A cancellation or engine error that leaked out of runWorkflow.
@@ -216,11 +258,21 @@ export async function executeWorkflow(
       run.controller.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')
     if (aborted) {
       finishRun(runId, { outcome: 'cancelled' })
-      return { runId, outcome: 'cancelled' }
+      return {
+        runId,
+        outcome: 'cancelled',
+        ...(resumedFrom !== undefined ? { resumedFrom } : {}),
+      }
     }
     const text = e instanceof Error ? e.message : String(e)
     finishRun(runId, { outcome: 'failed', summary: text.split('\n')[0], error: text })
     if (wantCheckpoints) void prunePersistedCheckpoints()
-    return { runId, outcome: 'failed', summary: text.split('\n')[0], error: text }
+    return {
+      runId,
+      outcome: 'failed',
+      summary: text.split('\n')[0],
+      error: text,
+      ...(resumedFrom !== undefined ? { resumedFrom } : {}),
+    }
   }
 }

@@ -164,6 +164,20 @@ export type Command =
   | { type: 'workflows.takeoverApply'; id: string; verify?: boolean }
   /** Discards the pending AI-takeover fixes for this workflow. */
   | { type: 'workflows.takeoverDiscard'; id: string }
+  /**
+   * Re-runs a workflow from its last clean checkpoint instead of its trigger
+   * (M4 resume). `runId` identifies the earlier run whose checkpoints decide
+   * where to pick up — for a non-idempotent flow (login / submit) re-driving
+   * the finished prefix can only fail.
+   */
+  | {
+      type: 'workflows.resume'
+      id: string
+      /** The earlier run to resume from. */
+      runId: string
+      /** See workflows.run.windowId. */
+      windowId?: number
+    }
   | { type: 'workflows.running'; workflowId?: string }
 
   // --- Workflow recording (see background/record-controller.ts) ---
@@ -267,6 +281,17 @@ export type CommandResult =
   | { type: 'workflows.takeoverPending'; items: PendingTakeoverInfo[] }
   | { type: 'workflows.takeoverStats'; summary: TakeoverStatsSummary }
   | { type: 'workflows.debugStats'; summary: DebugSessionStatsSummary }
+  | {
+      type: 'workflows.resume'
+      outcome: {
+        ok: boolean
+        summary: string
+        error?: string
+        runId?: string
+        /** Step index the run resumed from; absent when it started fresh. */
+        resumedFrom?: number
+      }
+    }
   | {
       type: 'workflows.takeoverApply'
       workflow: Workflow

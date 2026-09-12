@@ -1141,6 +1141,31 @@ async function handleCommand(
       }
     }
 
+    case 'workflows.resume': {
+      // M4 resume: re-run a workflow from its last clean checkpoint instead of
+      // its trigger. For a non-idempotent flow (login / submit / send) the
+      // finished prefix cannot be re-driven — the login form is gone — so the
+      // retry must skip it. Unresumable runs simply start from the beginning.
+      const workflow = await getWorkflow(command.id)
+      if (!workflow) throw new Error('Workflow not found.')
+      const r = await executeWorkflow(workflow, {
+        source: 'manual',
+        resumeFrom: command.runId,
+        debug: workflow.settings?.debugMode === true,
+        ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
+      })
+      return {
+        type: 'workflows.resume',
+        outcome: {
+          ok: r.outcome === 'ok',
+          summary: r.summary ?? '',
+          ...(r.outcome === 'failed' ? { error: r.error ?? r.summary } : {}),
+          runId: r.runId,
+          ...(r.resumedFrom !== undefined ? { resumedFrom: r.resumedFrom } : {}),
+        },
+      }
+    }
+
     case 'workflows.debug': {
       const workflow = await getWorkflow(command.id)
       if (!workflow) throw new Error('Workflow not found.')

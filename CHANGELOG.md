@@ -41,6 +41,13 @@ All notable changes to this project are documented here. The format is based on
 - **Session correlation (M4)**: one `sessionId` is stamped onto every run a
   debug session spawns (takeover pass, fix-verify, rewrite-verify) and onto its
   pending-fix records, so runs, checkpoints and takeover stats can be joined.
+- **Resume from checkpoint (M4)**: `resumePointOf` derives where an interrupted
+  run picks up — the node after the last step that settled cleanly, carrying
+  that step's variables. `executeWorkflow({ resumeFrom: runId })` and the new
+  `workflows.resume` command use it, reading the in-memory store first and
+  falling back to the persisted copy so a restart does not lose the point.
+  This is the recovery path for non-idempotent flows: re-driving a login that
+  already happened can only fail, so the retry skips what already landed.
 - **Configurable budgets**: `BC_TAKEOVER_MAX_ATTEMPTS`,
   `BC_TAKEOVER_TOOL_ROUNDS`, `BC_TAKEOVER_AUTORUN_BUDGET`.
 

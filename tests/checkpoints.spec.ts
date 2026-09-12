@@ -5,8 +5,10 @@ import {
   recordCheckpoint,
   rollbackToLastValid,
   restoreVariables,
+  resumePointOf,
   type RunCheckpoint,
 } from '../src/lib/workflow/checkpoints'
+import type { Workflow } from '../src/lib/workflow/types'
 import {
   createMemoryFailureStore,
   rememberFailure,
@@ -97,5 +99,97 @@ describe('failure memory (M4)', () => {
     expect(hint).toContain('失败记忆')
     expect(hint).toContain('选择器过期')
     expect(hint).toContain('改用稳定选择器')
+  })
+})
+
+/**
+ * The resume point is what makes a NON-IDEMPOTENT flow recoverable: a login
+ * workflow re-run from its trigger hits a form that no longer exists, so a
+ * retry has to skip the steps that already landed.
+ */
+describe('resumePointOf (M4)', () => {
+  const workflow = (nodeIds: string[]): Workflow => ({
+    id: 'wf',
+    name: 'wf',
+    createdAt: 0,
+    updatedAt: 0,
+    drawflow: {
+      nodes: nodeIds.map((id) => ({
+        id,
+        label: id,
+        position: { x: 0, y: 0 },
+        data: {},
+      })),
+      edges: nodeIds.slice(0, -1).map((source, i) => ({
+        id: `e${i}`,
+        source,
+        target: nodeIds[i + 1]!,
+      })),
+    },
+    settings: { saveLog: false, debugMode: false, notification: false, reuseLastState: false },
+  })
+
+  const at = (stepIndex: number, nodeId: string, status: RunCheckpoint['status'] = 'ok') => ({
+    ...cp('r1', stepIndex, status),
+    nodeId,
+  })
+
+  it('resumes at the node AFTER the last clean step, carrying its variables', () => {
+    // trigger → login → dashboard: login succeeded, dashboard never ran.
+    const wf = workflow(['trigger', 'login', 'dashboard'])
+    const point = resumePointOf(wf, [
+      at(0, 'trigger'),
+      at(1, 'login', 'ok'),
+      at(2, 'dashboard', 'failed'),
+    ])
+    // Not the trigger — the login must NOT be re-driven.
+    expect(point?.nodeId).toBe('dashboard')
+    expect(point?.variables).toEqual({ step: 1 })
+    expect(point?.fromStepIndex).toBe(1)
+  })
+
+  it('ignores a failed tail: resumes at the first step that did NOT settle', () => {
+    // b and c both failed, so they prove nothing — the resume point is the
+    // node after the last CLEAN step (a), i.e. b gets re-driven.
+    const wf = workflow(['a', 'b', 'c'])
+    const point = resumePointOf(wf, [at(0, 'a'), at(1, 'b', 'failed'), at(2, 'c', 'failed')])
+    expect(point?.nodeId).toBe('b')
+    expect(point?.fromStepIndex).toBe(0)
+  })
+
+  it('has no resume point without any clean step', () => {
+    const wf = workflow(['a', 'b'])
+    expect(resumePointOf(wf, [at(0, 'a', 'failed')])).toBeUndefined()
+    expect(resumePointOf(wf, [])).toBeUndefined()
+  })
+
+  it('has no resume point when the last clean step is the final node', () => {
+    // The run had effectively finished — nothing left to resume.
+    const wf = workflow(['a', 'b'])
+    expect(resumePointOf(wf, [at(0, 'a'), at(1, 'b')])).toBeUndefined()
+  })
+
+  it('has no resume point when the checkpointed node is gone from the graph', () => {
+    const wf = workflow(['a', 'b'])
+    expect(resumePointOf(wf, [at(0, 'deleted-node')])).toBeUndefined()
+  })
+
+  it('prefers the default edge over a branch handle', () => {
+    const wf: Workflow = {
+      ...workflow(['a', 'b', 'fallback']),
+      drawflow: {
+        nodes: ['a', 'b', 'fallback'].map((id) => ({
+          id,
+          label: id,
+          position: { x: 0, y: 0 },
+          data: {},
+        })),
+        edges: [
+          { id: 'e1', source: 'a', target: 'fallback', sourceHandle: 'fallback' },
+          { id: 'e2', source: 'a', target: 'b' },
+        ],
+      },
+    }
+    expect(resumePointOf(wf, [at(0, 'a')])?.nodeId).toBe('b')
   })
 })

@@ -14,6 +14,7 @@
  *
  * @module lib/workflow/checkpoints
  */
+import type { Workflow } from './types'
 
 /** Lifecycle status of one checkpoint. */
 export type CheckpointStatus = 'running' | 'ok' | 'failed' | 'cancelled'
@@ -102,4 +103,53 @@ export function rollbackToLastValid(
 /** Restores the run's variables from a checkpoint (empty object when none). */
 export function restoreVariables(cp: RunCheckpoint | undefined): Record<string, unknown> {
   return cp ? { ...cp.variables } : {}
+}
+
+/** Where a crashed or interrupted run can pick up again. */
+export interface ResumePoint {
+  /** The node to START FROM (the one after the last clean step). */
+  nodeId: string
+  /** Variables as they were at the last clean step. */
+  variables: Record<string, unknown>
+  /** The checkpoint the point was derived from (logging / display). */
+  fromStepIndex: number
+}
+
+/**
+ * Derives where a run can resume: the node AFTER the last step that settled
+ * cleanly, carrying that step's variables.
+ *
+ * This is what makes a NON-IDEMPOTENT flow recoverable. Re-running a login
+ * workflow from its trigger re-drives the login — but the user is already
+ * logged in, so the form is gone and the retry can only fail. Resuming from
+ * the last clean step skips the part that already happened.
+ *
+ * Returns undefined when there is nothing to resume: no clean step, a node
+ * that no longer exists in the graph, or a clean step with no downstream
+ * (the run had effectively finished).
+ *
+ * Pure: no chrome, no fs, no engine.
+ */
+export function resumePointOf(
+  workflow: Workflow,
+  checkpoints: RunCheckpoint[],
+): ResumePoint | undefined {
+  // Newest clean step wins — the furthest point the run provably reached.
+  for (let i = checkpoints.length - 1; i >= 0; i -= 1) {
+    const cp = checkpoints[i]!
+    if (cp.status !== 'ok' || !cp.nodeId) continue
+    const node = workflow.drawflow.nodes.find((n) => n.id === cp.nodeId)
+    if (!node) continue
+    const out = workflow.drawflow.edges.filter((edge) => edge.source === node.id)
+    if (out.length === 0) return undefined
+    // Mirror the engine's default routing: the plain/default edge, not a
+    // branch handle (fallback / condition outputs).
+    const next = out.find((edge) => !edge.sourceHandle || edge.sourceHandle === 'next') ?? out[0]!
+    return {
+      nodeId: next.target,
+      variables: restoreVariables(cp),
+      fromStepIndex: cp.stepIndex,
+    }
+  }
+  return undefined
 }
