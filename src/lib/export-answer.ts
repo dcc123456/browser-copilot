@@ -155,9 +155,7 @@ function csvEscape(value: string): string {
 
 function renderTable(table: TableBlock): string {
   const rows: Inline[][][] = [table.head, ...table.rows]
-  return rows
-    .map((row) => row.map((cell) => csvEscape(inlineToText(cell))).join(','))
-    .join('\n')
+  return rows.map((row) => row.map((cell) => csvEscape(inlineToText(cell))).join(',')).join('\n')
 }
 
 /** Extracts every table block and emits an RFC-4180 CSV payload. */
@@ -175,7 +173,10 @@ export function toPlainText(mdText: string): string {
   if (!mdText) return ''
   const blocks = parseMarkdown(mdText)
   const rendered = blocksToText(blocks)
-  const collapsed = rendered.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+  const collapsed = rendered
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
   return `${collapsed}\n`
 }
 
@@ -223,9 +224,7 @@ function inlineToHtml(nodes: Inline[]): string {
 function listItemsToHtml(items: ListItem[], ordered: boolean, start: number): string {
   const tag = ordered ? 'ol' : 'ul'
   const startAttr = ordered && start !== 1 ? ` start="${start}"` : ''
-  const inner = items
-    .map((item) => `<li>${blocksToHtml(item.blocks)}</li>`)
-    .join('')
+  const inner = items.map((item) => `<li>${blocksToHtml(item.blocks)}</li>`).join('')
   return `<${tag}${startAttr}>${inner}</${tag}>`
 }
 
@@ -254,12 +253,20 @@ function blocksToHtml(blocks: Block[]): string {
           return '<hr />'
         case 'table': {
           const thead = `<thead><tr>${block.head
-            .map((cell, idx) => `<th${alignAttr(block.align[idx] ?? null)}>${inlineToHtml(cell)}</th>`)
+            .map(
+              (cell, idx) => `<th${alignAttr(block.align[idx] ?? null)}>${inlineToHtml(cell)}</th>`,
+            )
             .join('')}</tr></thead>`
           const tbody = `<tbody>${block.rows
-            .map((row) => `<tr>${row
-              .map((cell, idx) => `<td${alignAttr(block.align[idx] ?? null)}>${inlineToHtml(cell)}</td>`)
-              .join('')}</tr>`)
+            .map(
+              (row) =>
+                `<tr>${row
+                  .map(
+                    (cell, idx) =>
+                      `<td${alignAttr(block.align[idx] ?? null)}>${inlineToHtml(cell)}</td>`,
+                  )
+                  .join('')}</tr>`,
+            )
             .join('')}</tbody>`
           return `<table>${thead}${tbody}</table>`
         }

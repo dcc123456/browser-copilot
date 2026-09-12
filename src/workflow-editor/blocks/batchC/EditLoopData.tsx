@@ -36,7 +36,6 @@ export default function EditLoopData({ data, onChange }: EditFormProps) {
   // Automa seeds a short nanoid loop id on mount.
   useEffect(() => {
     if (!str(data, 'loopId')) onChange({ loopId: id(6) })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Cross-field clamp: from stays below to (and vice versa). NumberInput keeps

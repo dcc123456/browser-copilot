@@ -37,7 +37,6 @@ export default function EditLoopElements({ data, onChange }: EditFormProps) {
     if (!str(data, 'loopId')) {
       onChange({ loopId: nanoid(6) })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (

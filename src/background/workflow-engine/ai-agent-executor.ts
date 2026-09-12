@@ -95,8 +95,8 @@ async function readElementText(
         if (!node) return { exists: false, text: '' }
         const text =
           (node as Element).textContent !== undefined
-            ? (node as Element).textContent ?? ''
-            : node?.nodeValue ?? ''
+            ? ((node as Element).textContent ?? '')
+            : (node?.nodeValue ?? '')
         return { exists: true, text: text.replace(/\s+/g, ' ').trim() }
       } catch {
         return { exists: false, text: '' }

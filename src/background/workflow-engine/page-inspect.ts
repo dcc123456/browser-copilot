@@ -104,7 +104,13 @@ function inspectPageInPage(selector: string): PageInspection {
   /** Resolves an XPath expression to its first node (when the selector is one). */
   function xpathFirst(expression: string): Element | null {
     try {
-      const result = document.evaluate(expression, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null)
+      const result = document.evaluate(
+        expression,
+        document,
+        null,
+        XPathResult.FIRST_ORDERED_NODE_TYPE,
+        null,
+      )
       return (result.singleNodeValue as Element | null) ?? null
     } catch {
       return null
@@ -115,7 +121,12 @@ function inspectPageInPage(selector: string): PageInspection {
   let target: PageInspection['target']
   if (isXpath) {
     const el = xpathFirst(selector)
-    target = { selectorUsed: selector, found: !!el, matches: el ? 1 : 0, ...(el ? { info: infoOf(el) } : {}) }
+    target = {
+      selectorUsed: selector,
+      found: !!el,
+      matches: el ? 1 : 0,
+      ...(el ? { info: infoOf(el) } : {}),
+    }
   } else {
     let matched: Element[] = []
     try {

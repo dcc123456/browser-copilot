@@ -14,12 +14,7 @@
 import { newId } from '../storage'
 import { fileStorageArea } from '../fs-store'
 import { migrateWorkflow } from './migrate'
-import type {
-  Workflow,
-  WorkflowEdge,
-  WorkflowNode,
-  WorkflowSettings,
-} from './types'
+import type { Workflow, WorkflowEdge, WorkflowNode, WorkflowSettings } from './types'
 
 const KEY_WORKFLOWS = 'workflows'
 
@@ -82,10 +77,10 @@ export function asWorkflow(value: unknown): Workflow | null {
   const rawPosition = rawDrawflow.position
   const position =
     rawPosition && typeof rawPosition === 'object'
-      ? ((rawPosition as { x?: unknown; y?: unknown }).x === 'number' ||
-          (rawPosition as { x?: unknown; y?: unknown }).y === 'number'
-          ? (rawPosition as unknown as { x: number; y: number })
-          : undefined)
+      ? (rawPosition as { x?: unknown; y?: unknown }).x === 'number' ||
+        (rawPosition as { x?: unknown; y?: unknown }).y === 'number'
+        ? (rawPosition as unknown as { x: number; y: number })
+        : undefined
       : undefined
 
   const rawSettings = (v.settings ?? {}) as Partial<WorkflowSettings>

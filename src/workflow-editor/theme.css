@@ -10,9 +10,9 @@
 
 :root {
   /* surfaces */
-  --we-bg: var(--bc-panel);             /* app chrome: topbar, sidebars       */
-  --we-bg-soft: var(--bc-sunken);       /* React Flow canvas (recessed)        */
-  --we-bg-input: var(--bc-panel-2);     /* inputs, palette cards               */
+  --we-bg: var(--bc-panel); /* app chrome: topbar, sidebars       */
+  --we-bg-soft: var(--bc-sunken); /* React Flow canvas (recessed)        */
+  --we-bg-input: var(--bc-panel-2); /* inputs, palette cards               */
   --we-bg-hover: var(--bc-accent-soft);
   --we-bg-active: color-mix(in srgb, var(--bc-accent) 24%, transparent);
   --we-border: var(--bc-border);

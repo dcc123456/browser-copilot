@@ -13,10 +13,7 @@ import type { Workflow, WorkflowEdge, WorkflowNode } from '../../lib/workflow/ty
 import { getWorkflow } from '../../lib/workflow/storage'
 import type { DebugStepLine } from '../../lib/workflow/auto-debug-patch'
 import type { ScopeWindow } from '../automation-scope'
-import type {
-  BlockExecutor,
-  WorkflowExecCtx,
-} from './executors'
+import type { BlockExecutor, WorkflowExecCtx } from './executors'
 import { EXECUTORS } from './executors'
 import { LoopBreakpointError } from './loop-breakpoint'
 
@@ -111,6 +108,20 @@ export interface WorkflowRunOptions {
    * variables at that point.
    */
   onSnapshot?: (nodeId: string, label: string, variables: Record<string, unknown>) => void
+  /**
+   * M4 checkpoints: called after EVERY node settles — success, failure or
+   * cancellation — so a durable backend can persist a resume point per step.
+   *
+   * The engine stays chrome- and fs-free: it only reports the step; the
+   * integration layer (`run-workflow.ts`, the server runner) supplies the run
+   * id and writes to its own store. Omitted ⇒ no checkpoints (default).
+   */
+  onCheckpoint?: (entry: {
+    stepIndex: number
+    nodeId: string
+    status: 'ok' | 'failed' | 'cancelled'
+    variables: Record<string, unknown>
+  }) => void
   /**
    * AI takeover (AI 接管): when a block fails, the engine hands that ONE node
    * to the injected hook before failing the run. The hook completes the node's
@@ -268,11 +279,9 @@ async function evalCondition(
 }
 
 function isAbort(error: unknown): boolean {
-  return (
-    error instanceof DOMException
-      ? error.name === 'AbortError'
-      : (error as { name?: string }).name === 'AbortError'
-  )
+  return error instanceof DOMException
+    ? error.name === 'AbortError'
+    : (error as { name?: string }).name === 'AbortError'
 }
 
 /**
@@ -342,6 +351,7 @@ async function runCore(
     loopElementCounter,
     evaluateExpression,
     onSnapshot,
+    onCheckpoint,
     aiTakeover,
   } = options
 
@@ -350,8 +360,7 @@ async function runCore(
   // chain is never invoked there — only the default browser build uses it.
   // NOTE: dynamic `import()` is disallowed in ServiceWorkerGlobalScope per
   // the HTML spec, so we must use a static import instead.
-  const executorsMap: Partial<Record<string, BlockExecutor>> =
-    executors ?? EXECUTORS
+  const executorsMap: Partial<Record<string, BlockExecutor>> = executors ?? EXECUTORS
 
   const nodes = workflow.drawflow.nodes
   const edges = workflow.drawflow.edges
@@ -383,6 +392,38 @@ async function runCore(
   // navigation blocks pin it so steps follow the opened/navigated page rather
   // than the extension popup that launched the run.
   let targetTabId: number | undefined
+
+  /**
+   * M4 checkpoints: 0-based index of the step being recorded, incremented for
+   * every node that SETTLES (ok / failed / cancelled) so a durable backend can
+   * rebuild the run's progress in order.
+   */
+  let checkpointStep = 0
+
+  /**
+   * Reports one settled node to the checkpoint sink (no-op when unwired). The
+   * variables are structurally cloned: a snapshot must be serializable, and it
+   * must not alias the live store the next block is about to mutate.
+   */
+  const emitCheckpoint = (nodeId: string, status: 'ok' | 'failed' | 'cancelled'): void => {
+    if (!onCheckpoint) return
+    let snapshot: Record<string, unknown> = {}
+    try {
+      snapshot = JSON.parse(JSON.stringify(variables ?? {})) as Record<string, unknown>
+    } catch {
+      snapshot = {}
+    }
+    onCheckpoint({ stepIndex: checkpointStep++, nodeId, status, variables: snapshot })
+  }
+
+  /** Overwrites `target` in place with `from` (keeps the object identity). */
+  const restoreVariables = (
+    target: Record<string, unknown>,
+    from: Record<string, unknown>,
+  ): void => {
+    for (const key of Object.keys(target)) delete target[key]
+    Object.assign(target, from)
+  }
 
   /** Run exactly one node; returns the next node id or `null` to finish. */
   async function runNode(nodeId: string): Promise<string | null> {
@@ -462,7 +503,8 @@ async function runCore(
     if (LOOP_BLOCK_IDS.has(blockId)) {
       completedNodeIds.push(nodeId)
       const endId = outputs['end'] ?? outputs['output-2'] ?? null
-      const bodyStart = outputs['loop'] ?? outputs['output-1'] ?? (endId === null ? defaultNext : null)
+      const bodyStart =
+        outputs['loop'] ?? outputs['output-1'] ?? (endId === null ? defaultNext : null)
       return runLoop(current, params, bodyStart, endId)
     }
     if (blockId === 'execute-workflow') {
@@ -497,14 +539,30 @@ async function runCore(
     // Execute with Automa's onError semantics: retry up to retryTimes (with
     // retryInterval between attempts), then either route to the fallback handle
     // or fail.
-    const maxAttempts = policy?.enable && policy.toDo === 'retry'
-      ? 1 + Math.max(0, Number(policy.retryTimes ?? 0))
-      : 1
+    const maxAttempts =
+      policy?.enable && policy.toDo === 'retry'
+        ? 1 + Math.max(0, Number(policy.retryTimes ?? 0))
+        : 1
     let resolver: string | null | undefined
     let lastError: unknown
     let succeeded = false
+    // M4: a retry must NOT inherit the half-written state of the failed
+    // attempt (a form already partially filled, a counter already bumped, a
+    // variable overwritten with a truncated value). Restoring the pre-node
+    // snapshot before attempt 2+ makes per-node retries IDEMPOTENT — without
+    // it, a re-run of a non-idempotent block (submit / send / login) starts
+    // from a state that is neither the original nor a clean one.
+    let beforeNode: Record<string, unknown> | undefined
+    if (maxAttempts > 1) {
+      try {
+        beforeNode = JSON.parse(JSON.stringify(variables ?? {})) as Record<string, unknown>
+      } catch {
+        beforeNode = undefined
+      }
+    }
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
+        if (attempt > 0 && beforeNode) restoreVariables(variables, beforeNode)
         resolver = await executor(params, ctx)
         succeeded = true
         break
@@ -516,7 +574,11 @@ async function runCore(
         if (e instanceof LoopBreakpointError) throw e
         if (attempt < maxAttempts - 1) {
           const waitMs = Math.max(0, Number(policy?.retryInterval ?? 1000))
-          emit('info', nodeId, `Retrying (${attempt + 1}/${maxAttempts - 1}) after failure: ${message(e)}`)
+          emit(
+            'info',
+            nodeId,
+            `Retrying (${attempt + 1}/${maxAttempts - 1}) after failure: ${message(e)}`,
+          )
           await sleep(waitMs)
         }
       }
@@ -529,6 +591,7 @@ async function runCore(
       if (isAbort(e)) {
         outcome = 'cancelled'
         summary = CANCELLED_SUMMARY
+        emitCheckpoint(nodeId, 'cancelled')
         return null
       }
       // Automa toDo='continue': swallow the error and keep flowing down the
@@ -575,7 +638,11 @@ async function runCore(
         }
         if (outcome?.completed) {
           completedNodeIds.push(nodeId)
-          emit('result', nodeId, outcome.summary ? `AI 接管完成该步骤：${outcome.summary}` : 'AI 接管完成该步骤')
+          emit(
+            'result',
+            nodeId,
+            outcome.summary ? `AI 接管完成该步骤：${outcome.summary}` : 'AI 接管完成该步骤',
+          )
           if (onSnapshot) {
             try {
               onSnapshot(nodeId, blockId, JSON.parse(JSON.stringify(variables ?? {})))
@@ -590,6 +657,7 @@ async function runCore(
       }
       outcome = 'failed'
       error = error || (takeoverReason ? `${text}（AI 接管未完成：${takeoverReason}）` : text)
+      emitCheckpoint(nodeId, 'failed')
       return null
     }
 
@@ -603,6 +671,7 @@ async function runCore(
         onSnapshot(nodeId, blockId, {})
       }
     }
+    emitCheckpoint(nodeId, 'ok')
     return nextResult
   }
 
@@ -760,9 +829,7 @@ async function runCore(
       emit('error', execNode.id, `execute-workflow: 检测到工作流自循环 ${childId}`)
       return defaultNext
     }
-    const child = resolveWorkflow
-      ? await resolveWorkflow(childId)
-      : await getWorkflow(childId)
+    const child = resolveWorkflow ? await resolveWorkflow(childId) : await getWorkflow(childId)
     if (!child) {
       emit('error', execNode.id, `execute-workflow: 未找到工作流 ${childId}`)
       return defaultNext
@@ -780,6 +847,9 @@ async function runCore(
       loopElementCounter,
       evaluateExpression,
       onSnapshot,
+      // A child run shares the parent's checkpoint sink: it is the same
+      // logical run, and the parent's integration layer owns the run id.
+      onCheckpoint,
       onStep: onStep ? (kind, nodeId, text) => onStep(kind, nodeId, `[子] ${text}`) : undefined,
     })
     return defaultNext

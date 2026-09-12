@@ -143,8 +143,7 @@ export async function sendWebhookText(
   const code = (parsed as { code?: number } | null)?.code
   if (!response.ok || code !== 0) {
     const msg =
-      (parsed as { msg?: string } | null)?.msg ??
-      `Feishu returned HTTP ${response.status}`
+      (parsed as { msg?: string } | null)?.msg ?? `Feishu returned HTTP ${response.status}`
     throw new FeishuError(msg, code ?? response.status)
   }
   return { ok: true, status: response.status, body: parsed }
@@ -209,21 +208,27 @@ export async function sendImText(
   text: string,
   fetchImpl: typeof fetch = httpFetch,
 ): Promise<void> {
-  const response = await fetchImpl('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id', {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${token}`,
-      'content-type': 'application/json',
+  const response = await fetchImpl(
+    'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id',
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        receive_id: chatId,
+        msg_type: 'text',
+        content: JSON.stringify({ text }),
+      }),
     },
-    body: JSON.stringify({
-      receive_id: chatId,
-      msg_type: 'text',
-      content: JSON.stringify({ text }),
-    }),
-  })
+  )
   const data = await readJson<{ code?: number; msg?: string }>(response, 'Feishu send')
   if (data.code !== 0) {
-    throw new FeishuError(data.msg ?? `Feishu send failed (HTTP ${response.status})`, data.code ?? response.status)
+    throw new FeishuError(
+      data.msg ?? `Feishu send failed (HTTP ${response.status})`,
+      data.code ?? response.status,
+    )
   }
 }
 
@@ -270,4 +275,3 @@ export async function getWsEndpoint(
   const json = await readJson<unknown>(response, 'Feishu GetWsEndpoint')
   return parseEndpointResponse(json)
 }
-

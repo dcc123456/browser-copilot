@@ -23,6 +23,86 @@ import type { ProviderProfile, Settings } from '../types'
 export const TAKEOVER_MAX_ATTEMPTS = 3
 
 /**
+ * Per-attempt ceiling on model↔tool round trips inside one takeover (the agent
+ * "sees the page, calls tools" loop). 40 gives a long multi-step step room to
+ * find the real target without spinning forever.
+ */
+export const TAKEOVER_TOOL_ROUNDS = 40
+
+/** Reads a positive integer env override, clamped to a sane range. */
+function readNumEnv(name: string, fallback: number, hardCap = 100): number {
+  if (typeof process !== 'undefined' && process.env) {
+    const raw = process.env[name]
+    if (raw != null && raw !== '') {
+      const n = Number(raw)
+      if (Number.isFinite(n) && n > 0 && n <= hardCap) return Math.trunc(n)
+    }
+  }
+  return fallback
+}
+
+/**
+ * Overridable takeover attempt cap (env `BC_TAKEOVER_MAX_ATTEMPTS`). The
+ * extension keeps the constant default; the server reads the env so an operator
+ * can tune cost per deployment without a rebuild.
+ */
+export function takeoverMaxAttempts(): number {
+  return readNumEnv('BC_TAKEOVER_MAX_ATTEMPTS', TAKEOVER_MAX_ATTEMPTS)
+}
+
+/** Overridable per-attempt tool-round ceiling (env `BC_TAKEOVER_TOOL_ROUNDS`). */
+export function takeoverToolRounds(): number {
+  return readNumEnv('BC_TAKEOVER_TOOL_ROUNDS', TAKEOVER_TOOL_ROUNDS)
+}
+
+/**
+ * Cost ceiling on takeover attempts for an AUTOMATIC run (`takeoverOnRun`).
+ * Unlike a manual debug session, an unattended run must not loop 3×40 — it
+ * gets a single takeover episode, and the fix (if any) lands as pending for
+ * the user to confirm. Overridable via `BC_TAKEOVER_AUTORUN_BUDGET` (min 1).
+ */
+export function takeoverAutoRunBudget(): number {
+  const raw =
+    typeof process !== 'undefined' && process.env
+      ? process.env.BC_TAKEOVER_AUTORUN_BUDGET
+      : undefined
+  if (raw != null && raw !== '') {
+    const n = Number(raw)
+    if (Number.isFinite(n)) return Math.min(100, Math.max(1, Math.trunc(n)))
+  }
+  return 1
+}
+
+/**
+ * A cheap, stable signature of one failure: the failing node id plus a
+ * normalized (lowercased, whitespace-collapsed) slice of the error. Used to
+ * detect that retrying the SAME failure is hopeless (fast-fail breadth).
+ */
+export function failureSignature(nodeId: string, error: string): string {
+  const norm = error.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 160)
+  return `${nodeId}::${norm}`
+}
+
+/**
+ * Fast-fail breadth: beyond the explicit `HOPELESS_REASON_KINDS` (which stop on
+ * the FIRST attempt), give up early when the SAME node fails with the SAME
+ * signature THREE times in a row. Re-walking an identical dead end burns model
+ * calls for nothing — stop and report the reason instead.
+ *
+ * @param signatures ordered failure signatures (oldest first)
+ */
+export function isRepeatedHopelessFailure(signatures: string[]): boolean {
+  if (signatures.length < 3) return false
+  const last = signatures[signatures.length - 1]
+  let streak = 0
+  for (let i = signatures.length - 1; i >= 0; i--) {
+    if (signatures[i] === last) streak++
+    else break
+  }
+  return streak >= 3
+}
+
+/**
  * Why a takeover could not complete the step. `auth` / `captcha` are
  * UNRECOVERABLE — retrying burns model calls for nothing, so the runtime
  * stops after the first attempt when the agent reports one of them.
@@ -32,7 +112,14 @@ export type TakeoverReasonKind = 'auth' | 'captcha' | 'notfound' | 'timeout' | '
 /** Reason kinds that can never succeed by retrying. */
 export const HOPELESS_REASON_KINDS: readonly TakeoverReasonKind[] = ['auth', 'captcha']
 
-const REASON_KINDS: readonly string[] = ['auth', 'captcha', 'notfound', 'timeout', 'network', 'other']
+const REASON_KINDS: readonly string[] = [
+  'auth',
+  'captcha',
+  'notfound',
+  'timeout',
+  'network',
+  'other',
+]
 
 /** Narrow a free-form reason to the whitelist (undefined when not one of them). */
 export function asReasonKind(value: unknown): TakeoverReasonKind | undefined {
@@ -50,11 +137,41 @@ export function asReasonKind(value: unknown): TakeoverReasonKind | undefined {
 export function classifyReason(text: string): TakeoverReasonKind | undefined {
   const t = text.toLowerCase()
   if (/(验证码|captcha|recaptcha|human verification)/.test(t)) return 'captcha'
-  if (/(需要登录|请先登录|请登录|未登录|登录页|sign in|log in|login required|not logged in|unauthorized|401|403)/.test(t)) return 'auth'
+  if (
+    /(需要登录|请先登录|请登录|未登录|登录页|sign in|log in|login required|not logged in|unauthorized|401|403)/.test(
+      t,
+    )
+  )
+    return 'auth'
   if (/(超时|timeout|timed out)/.test(t)) return 'timeout'
   if (/(网络|断网|network|net::err|failed to fetch)/.test(t)) return 'network'
   if (/(未找到|没有找到|不存在|not found|no element|no matching)/.test(t)) return 'notfound'
   return undefined
+}
+
+/** A concrete next-step hint per failure reason (shown to the user post-verify). */
+const SUGGESTED_ACTION: Record<TakeoverReasonKind, string> = {
+  auth: '请先登录目标站点再重新调试，登录态可能已过期。',
+  captcha: '出现验证码/人机校验，无法自动通过；请手动处理后重新运行。',
+  notfound: '页面上找不到目标元素，请检查选择器或页面结构是否变化。',
+  timeout: '页面响应超时，可增大等待时间（waitForSelector）或检查网络。',
+  network: '网络连接异常，请检查网络后重试。',
+  other: '请查看错误详情，必要时手动调整对应节点参数。',
+}
+
+/**
+ * Turns a free-form verify failure into a structured result the panel and
+ * closed loop can act on: a classified `failureReason` plus a `suggestedAction`
+ * next step (M2-14). Returns an empty object when nothing classifiable.
+ */
+export function validationFailure(error?: string): {
+  failureReason?: TakeoverReasonKind
+  suggestedAction?: string
+} {
+  if (!error) return {}
+  const kind = classifyReason(error)
+  if (!kind) return {}
+  return { failureReason: kind, suggestedAction: SUGGESTED_ACTION[kind] }
 }
 
 /**
@@ -89,6 +206,8 @@ export interface TakeoverReport {
   error?: string
   /** Classified failure reason (drives fast-fail and the stats view). */
   reasonKind?: TakeoverReasonKind
+  /** Wall-clock ms the episode took (all attempts included). */
+  durationMs?: number
   /** Proposed node fix awaiting user confirmation (never auto-applied). */
   fix?: TakeoverFix
 }
@@ -140,6 +259,11 @@ export interface TakeoverPromptParts {
   outputVariable?: string
   /** Compact tool trace of the previous attempt (tool/result/error lines). */
   lastAttemptTrace?: string[]
+  /**
+   * One-line outcome of EVERY earlier attempt, oldest first. Fed forward so a
+   * fresh conversation does not re-walk dead ends it cannot otherwise remember.
+   */
+  previousAttemptNotes?: string[]
   failing: {
     blockId: string
     blockName?: string
@@ -152,6 +276,19 @@ export interface TakeoverPromptParts {
   maxAttempts: number
   /** What went wrong in the previous attempt (fed back on retries). */
   lastAttemptNote?: string
+  /**
+   * Compact DOM/ARIA summary of the LIVE page (visible headings, key
+   * interactive elements, form fields) computed by the runtime. Lets the model
+   * ground its reasoning in current page state without a full snapshot,
+   * improving fix quality on pages that change between snapshots.
+   */
+  pageSummary?: string
+  /**
+   * Structured memory of EARLIER failures of this same node (root cause /
+   * suggested action / confidence), rendered by `buildFailureMemoryHint`.
+   * Primes attempt 2+ so it does not re-walk a proven dead end (M4 item 22).
+   */
+  failureMemory?: string
 }
 
 /** Cap per param value shipped to the model so one node can't blow context. */
@@ -172,7 +309,7 @@ export function buildTakeoverPrompt(parts: TakeoverPromptParts): string {
   const lines: string[] = []
   lines.push(
     'You are the AI takeover step inside a browser-automation Chrome extension.',
-    'A workflow run FAILED at one step. You take over EXACTLY that step: look at the live page, complete the step\'s purpose like a human operator would, then hand control back — the workflow continues automatically with the following steps.',
+    "A workflow run FAILED at one step. You take over EXACTLY that step: look at the live page, complete the step's purpose like a human operator would, then hand control back — the workflow continues automatically with the following steps.",
     '',
     '## Workflow intent',
     `Name: ${parts.workflowName || '(unnamed)'}`,
@@ -197,13 +334,29 @@ export function buildTakeoverPrompt(parts: TakeoverPromptParts): string {
     lines.push(
       '',
       '## Current variable values (produced by the upstream nodes)',
-      ...Object.entries(parts.variables).map(([key, value]) => `- ${key} = ${truncateStrings(value)}`),
+      ...Object.entries(parts.variables).map(
+        ([key, value]) => `- ${key} = ${truncateStrings(value)}`,
+      ),
       'A wrong/empty value here points at the node that PRODUCED it — that node is the one to fix.',
     )
   }
   if (parts.steps.length > 0) {
     lines.push('', '## Recent run steps (oldest first)')
     for (const step of parts.steps) lines.push(`- [${step.kind}] ${step.text}`)
+  }
+  if (parts.pageSummary) {
+    lines.push(
+      '',
+      '## Current page DOM/ARIA summary (live visible state — trust THIS over stale recorded selectors)',
+      parts.pageSummary,
+    )
+  }
+  if (parts.failureMemory) {
+    lines.push(
+      '',
+      '## Failure memory (this node failed before — do NOT repeat what already proved useless)',
+      parts.failureMemory,
+    )
   }
   if (parts.upcomingNodeLines && parts.upcomingNodeLines.length > 0) {
     lines.push(
@@ -243,10 +396,17 @@ export function buildTakeoverPrompt(parts: TakeoverPromptParts): string {
     '1. FIRST call snapshot_page to see the current page (structure + interactive elements with refs). The recorded selector is often stale — trust what the page shows NOW. On long pages raise `maxElements` (e.g. 200) and scroll if the target is below the fold.',
     '2. Locate the real target for this step\'s purpose among the snapshot elements. Elements may carry a `loc` hint — a stable CSS locator (#id, [data-testid="…"], [name="…"]) you can reuse.',
     '3. If the target is NOT in the snapshot (overlay, canvas, odd markup): scroll into view, take a `screenshot` (visual) or `read_current_page` (text) to find it; use `recognize_image` for text inside images.',
-    '4. Complete the step with the page tools (click / fill / press key / navigate / read). Do ONLY this step\'s work — no extra exploring, no doing later steps.',
+    "4. Complete the step with the page tools (click / fill / press key / navigate / read). Do ONLY this step's work — no extra exploring, no doing later steps.",
     '5. Verify your action took effect (a fresh snapshot / element check) before finishing.',
     '6. If the step should PRODUCE a value (element text, HTTP response body, OCR result…), put that value in "output" — it is stored into the step\'s output variable.',
   )
+  if (parts.previousAttemptNotes && parts.previousAttemptNotes.length > 1) {
+    lines.push(
+      '',
+      '## Outcome of your EARLIER attempts (oldest first — do NOT repeat these dead ends)',
+      ...parts.previousAttemptNotes.map((note, index) => `- attempt ${index + 1}: ${note}`),
+    )
+  }
   if (parts.lastAttemptNote) {
     lines.push(
       '',
@@ -258,7 +418,7 @@ export function buildTakeoverPrompt(parts: TakeoverPromptParts): string {
   if (parts.lastAttemptTrace && parts.lastAttemptTrace.length > 0) {
     lines.push(
       '',
-      "## What your PREVIOUS attempt actually did (tool trace, oldest first — you have NO other memory of it)",
+      '## What your PREVIOUS attempt actually did (tool trace, oldest first — you have NO other memory of it)',
       ...parts.lastAttemptTrace.map((line) => `- ${line}`),
       'Do NOT blindly repeat these calls: any action listed here already ran. If it failed, change the approach — different element/ref, scroll first, fill instead of click, re-snapshot, or a different page area.',
     )
@@ -270,13 +430,36 @@ export function buildTakeoverPrompt(parts: TakeoverPromptParts): string {
     '{"completed":true,"summary":"一句话中文总结你做了什么","output":"该步骤应产出的值（没有则省略）","fix":{"nodeId":"<要修的节点id，省略=失败节点>","paramsPatch":{"selector":"你实际使用的正确选择器或修正后的参数"}},"reasonKind":"notfound"}',
     '- completed=false when you could not finish the step; explain why in summary and set reasonKind to one of: auth | captcha | notfound | timeout | network | other.',
     '- fix.paramsPatch: corrected params so FUTURE runs work WITHOUT AI takeover. Only when confident:',
-    '  · stale selector → the stable locator you actually saw (the element\'s `loc` hint, #id, [data-testid=…]);',
+    "  · stale selector → the stable locator you actually saw (the element's `loc` hint, #id, [data-testid=…]);",
     '  · page loads slowly → {"waitForSelector":true,"waitSelectorTimeout":5000} (or higher), optionally alongside the corrected selector;',
     '  · omit entirely when unsure.',
     "- fix.nodeId: WHERE the fix belongs. The node that threw is NOT always the culprit — when the real cause is an upstream node producing a wrong value (bad read, wrong element, mangled variable), set fix.nodeId to THAT upstream node's id (see the Upstream chain section). Omit to target the failed node itself.",
     `- You have ${parts.maxAttempts} attempts in total; this is attempt ${parts.attempt}.`,
   )
   return lines.join('\n')
+}
+
+/**
+ * Phrases that mean the agent did NOT finish. A mangled reply that also denies
+ * completion must NEVER be rescued into a success — that would count a failure
+ * as a win and poison the success-rate metric.
+ */
+const DENIES_COMPLETION =
+  /"completed"\s*:\s*false|未完成|未能完成|无法完成|任务失败|执行失败|操作失败|not completed|could not complete|unable to complete|failed to complete/i
+
+/**
+ * The model's one-line summary: the first non-JSON prose line. Lines that look
+ * like JSON scaffolding (`{`, `}`, `"`) are skipped, so a rescue never adopts a
+ * fragment of the broken verdict object as its summary.
+ */
+function firstProseLine(text: string): string | undefined {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .find(
+      (line) =>
+        line.length > 0 && !line.startsWith('{') && !line.startsWith('}') && !line.startsWith('"'),
+    )
 }
 
 /**
@@ -288,6 +471,9 @@ export function buildTakeoverPrompt(parts: TakeoverPromptParts): string {
  * Recovery heuristic: when no JSON object parses at all but the reply plainly
  * claims `"completed": true`, the work IS accepted — models that finished the
  * step but mangled the verdict line must not burn another attempt redoing it.
+ * The rescue is deliberately narrow: it is refused when the reply also denies
+ * completion (`"completed": false`, 未完成/失败/…) or has no usable prose
+ * summary, so a mangled FAILURE can never be counted as a success.
  */
 export function parseTakeoverVerdict(text: string): TakeoverVerdict {
   const candidates: string[] = []
@@ -318,25 +504,24 @@ export function parseTakeoverVerdict(text: string): TakeoverVerdict {
           typeof parsed['summary'] === 'string' && parsed['summary'].trim()
             ? parsed['summary'].trim()
             : text.slice(0, 200).trim() || '（AI 未给出总结）',
-        ...(typeof parsed['output'] === 'string' && parsed['output'] ? { output: parsed['output'] } : {}),
+        ...(typeof parsed['output'] === 'string' && parsed['output']
+          ? { output: parsed['output'] }
+          : {}),
         ...(patch && Object.keys(patch).length > 0 ? { paramsPatch: patch } : {}),
         ...(typeof fixRecord?.['nodeId'] === 'string' && fixRecord['nodeId'].trim()
           ? { fixNodeId: fixRecord['nodeId'].trim() }
           : {}),
-        ...(asReasonKind(parsed['reasonKind']) ? { reasonKind: asReasonKind(parsed['reasonKind']) } : {}),
+        ...(asReasonKind(parsed['reasonKind'])
+          ? { reasonKind: asReasonKind(parsed['reasonKind']) }
+          : {}),
       }
     } catch {
       /* try the next candidate */
     }
   }
-  if (/"completed"\s*:\s*true/i.test(text)) {
-    const summary =
-      text
-        .split('\n')
-        .map((line) => line.trim())
-        .find((line) => line.length > 0 && !line.startsWith('{') && !line.startsWith('}')) ??
-      text.slice(0, 200).trim()
-    return { completed: true, summary: summary.slice(0, 200) || '（AI 未给出总结）' }
+  if (/"completed"\s*:\s*true/i.test(text) && !DENIES_COMPLETION.test(text)) {
+    const summary = firstProseLine(text)
+    if (summary) return { completed: true, summary: summary.slice(0, 200) }
   }
   return {
     completed: false,
@@ -345,9 +530,19 @@ export function parseTakeoverVerdict(text: string): TakeoverVerdict {
 }
 
 /**
+ * Default sampling temperature for takeover/agentic runs. A multi-step
+ * "see the page + call tools" task is deterministic work: a vendor default of
+ * 1.0 makes step-to-step behaviour drift, while a low value markedly improves
+ * the odds of finishing a long chain. An explicit per-provider `temperature`
+ * always wins.
+ */
+export const TAKEOVER_TEMPERATURE = 0.2
+
+/**
  * Resolves the provider/model the takeover agent should use: the dedicated
  * `settings.takeoverModel` when configured (provider and/or a model override
- * on the active profile), otherwise the active chat provider.
+ * on the active profile), otherwise the active chat provider. When the resolved
+ * profile has no explicit temperature, a low deterministic default is applied.
  */
 export function takeoverProviderOf(settings: Settings): ProviderProfile | undefined {
   const active =
@@ -355,13 +550,22 @@ export function takeoverProviderOf(settings: Settings): ProviderProfile | undefi
     settings.providers[0]
   if (!active) return undefined
   const override = settings.takeoverModel
-  if (!override || (!override.providerId && !override.model)) return active
+  if (!override || (!override.providerId && !override.model)) return withLowTemperature(active)
   const base =
     override.providerId !== ''
       ? settings.providers.find((profile) => profile.id === override.providerId)
       : active
-  if (!base) return active
-  return override.model && override.model !== base.model ? { ...base, model: override.model } : base
+  if (!base) return withLowTemperature(active)
+  return withLowTemperature(
+    override.model && override.model !== base.model ? { ...base, model: override.model } : base,
+  )
+}
+
+/** Applies {@link TAKEOVER_TEMPERATURE} unless the profile already sets one. */
+function withLowTemperature(profile: ProviderProfile): ProviderProfile {
+  return typeof profile.temperature === 'number'
+    ? profile
+    : { ...profile, temperature: TAKEOVER_TEMPERATURE }
 }
 
 /**

@@ -265,7 +265,7 @@ function cleanBinaryCanvas(canvas: HTMLCanvasElement): HTMLCanvasElement | null 
     gray[i] = 0.299 * data[i * 4]! + 0.587 * data[i * 4 + 1]! + 0.114 * data[i * 4 + 2]!
   }
   const sorted = Float32Array.from(gray).sort()
-  const k = Math.max(1, Math.floor((w * h) * 0.02))
+  const k = Math.max(1, Math.floor(w * h * 0.02))
   const thr = Math.min(200, sorted[k]! + 0.55 * (255 - sorted[k]!))
   const bin = new Uint8Array(w * h)
   for (let i = 0; i < w * h; i++) bin[i] = gray[i]! < thr ? 1 : 0
@@ -350,8 +350,5 @@ function cleanBinaryCanvas(canvas: HTMLCanvasElement): HTMLCanvasElement | null 
  */
 function extractText(result: { data?: { text?: string } }): string {
   const text = result?.data?.text ?? ''
-  return text
-    .replace(/[—–―]/g, '-')
-    .replace(/\s+/g, ' ')
-    .trim()
+  return text.replace(/[—–―]/g, '-').replace(/\s+/g, ' ').trim()
 }

@@ -32,10 +32,7 @@ const THINK_OPEN = new RegExp(`<${THINK_TAG_SOURCE}>`, 'i')
  * (`<thinking class="…">`). Capture 1 is `/` for a closing tag, capture 2 the
  * tag name.
  */
-const THINK_TAG_ANY = new RegExp(
-  `<(/?)(${THINK_TAG_NAMES.join('|')})(?:\\s[^>]*)?>`,
-  'gi',
-)
+const THINK_TAG_ANY = new RegExp(`<(/?)(${THINK_TAG_NAMES.join('|')})(?:\\s[^>]*)?>`, 'gi')
 
 /**
  * A tag-shaped tail a token cut can leave dangling at the end of a stream

@@ -87,7 +87,7 @@ const SAFE_SCHEME = /^(?:https?:|mailto:|tel:)/i
 export function safeHref(raw: string): string | null {
   const url = raw.trim()
   if (url === '') return null
-  // eslint-disable-next-line no-control-regex
+
   if (/[\u0000-\u001f\u007f]/.test(url)) return null
   if (!SAFE_SCHEME.test(url)) return null
   return url
@@ -242,29 +242,26 @@ export function parseInline(text: string): Inline[] {
     }
 
     // --- Strikethrough, strong, emphasis ---
-    const delimiter =
-      text.startsWith('~~', index)
-        ? '~~'
-        : text.startsWith('**', index)
-          ? '**'
-          : text.startsWith('__', index)
-            ? '__'
-            : char === '*' || char === '_'
-              ? char
-              : null
+    const delimiter = text.startsWith('~~', index)
+      ? '~~'
+      : text.startsWith('**', index)
+        ? '**'
+        : text.startsWith('__', index)
+          ? '__'
+          : char === '*' || char === '_'
+            ? char
+            : null
 
     if (delimiter) {
       const intraWord =
-        (delimiter === '_' || delimiter === '__') &&
-        isIntraWord(text, index, delimiter.length)
+        (delimiter === '_' || delimiter === '__') && isIntraWord(text, index, delimiter.length)
       if (!intraWord) {
         const closer = findCloser(text, index + delimiter.length, delimiter)
         // Reject an empty span so `**` alone stays literal.
         if (closer > index + delimiter.length) {
           const inner = text.slice(index + delimiter.length, closer)
           const children = parseInline(inner)
-          const kind =
-            delimiter === '~~' ? 'strike' : delimiter.length === 2 ? 'strong' : 'em'
+          const kind = delimiter === '~~' ? 'strike' : delimiter.length === 2 ? 'strong' : 'em'
           nodes.push({ kind, children } as Inline)
           index = closer + delimiter.length
           continue
@@ -345,7 +342,10 @@ function parseLink(text: string, start: number): { nodes: Inline[]; next: number
   const children = parseInline(label)
 
   if (!href) {
-    return { nodes: children.length > 0 ? children : [{ kind: 'text', value: label }], next: targetEnd + 1 }
+    return {
+      nodes: children.length > 0 ? children : [{ kind: 'text', value: label }],
+      next: targetEnd + 1,
+    }
   }
   return { nodes: [{ kind: 'link', href, children }], next: targetEnd + 1 }
 }
@@ -478,7 +478,9 @@ function parseBlocks(lines: string[]): Block[] {
         const current = lines[i]
         if (current === undefined) break
         // A closing fence is the same character, at least as long, nothing else.
-        const closer = new RegExp(`^\\s{0,3}${marker[0] === '`' ? '`' : '~'}{${marker.length},}\\s*$`)
+        const closer = new RegExp(
+          `^\\s{0,3}${marker[0] === '`' ? '`' : '~'}{${marker.length},}\\s*$`,
+        )
         if (closer.test(current)) {
           closed = true
           i += 1
@@ -589,11 +591,7 @@ function parseBlocks(lines: string[]): Block[] {
 }
 
 /** Collects consecutive items at one indent into a list block. */
-function parseList(
-  lines: string[],
-  start: number,
-  first: Marker,
-): { block: Block; next: number } {
+function parseList(lines: string[], start: number, first: Marker): { block: Block; next: number } {
   const items: ListItem[] = []
   let i = start
 

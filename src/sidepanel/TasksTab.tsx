@@ -224,85 +224,85 @@ export default function TasksTab() {
           {tasks.map((task) => {
             const manual = isManualSchedule(task.schedule)
             return (
-            <li
-              className={`task-item${justSavedId === task.id ? ' task-item-saved' : ''}${
-                !task.enabled && !manual ? ' task-item-disabled' : ''
-              }`}
-              key={task.id}
-            >
-              <div className="task-item-head">
-                {manual ? (
-                  // A manual task has no schedule to enable/disable; show its
-                  // name plainly instead of an enable checkbox.
-                  <strong className="task-item-name">{task.name}</strong>
-                ) : (
-                  <label className="inline-check">
-                    <input
-                      checked={task.enabled}
-                      disabled={busy || draft?.id === task.id}
-                      onChange={(event) =>
-                        void persistTask({ ...task, enabled: event.target.checked })
-                      }
-                      type="checkbox"
-                    />
+              <li
+                className={`task-item${justSavedId === task.id ? ' task-item-saved' : ''}${
+                  !task.enabled && !manual ? ' task-item-disabled' : ''
+                }`}
+                key={task.id}
+              >
+                <div className="task-item-head">
+                  {manual ? (
+                    // A manual task has no schedule to enable/disable; show its
+                    // name plainly instead of an enable checkbox.
                     <strong className="task-item-name">{task.name}</strong>
-                  </label>
-                )}
-                <span className={`task-status task-status-${task.lastStatus ?? 'none'}`}>
-                  {task.lastStatus === 'ok'
-                    ? t.taskStatusOk
-                    : task.lastStatus === 'failed'
-                      ? t.taskStatusFailed
-                      : task.lastStatus === 'skipped'
-                        ? t.taskStatusSkipped
-                        : ''}
-                </span>
-              </div>
-              <div className="task-meta">
-                <span className={`task-chip${manual ? ' task-chip-manual' : ''}`}>
-                  {describeSchedule(task.schedule, zh ? 'zh' : 'en')}
-                </span>
-                <span className="task-chip">
-                  {task.kind === 'github-review-requests'
-                    ? t.taskKindGithub
-                    : task.kind === 'workflow'
-                      ? t.taskKindWorkflow
-                      : t.taskKindPrompt}
-                </span>
-                {task.notifyFeishu && <span className="task-chip task-chip-feishu">Feishu</span>}
-              </div>
-              {task.lastRunAt && (
-                <div className="task-lastrun">
-                  {t.taskLastRun}: {new Date(task.lastRunAt).toLocaleString(locale)}
-                  {task.lastSummary ? ` — ${task.lastSummary.split('\n')[0]}` : ''}
+                  ) : (
+                    <label className="inline-check">
+                      <input
+                        checked={task.enabled}
+                        disabled={busy || draft?.id === task.id}
+                        onChange={(event) =>
+                          void persistTask({ ...task, enabled: event.target.checked })
+                        }
+                        type="checkbox"
+                      />
+                      <strong className="task-item-name">{task.name}</strong>
+                    </label>
+                  )}
+                  <span className={`task-status task-status-${task.lastStatus ?? 'none'}`}>
+                    {task.lastStatus === 'ok'
+                      ? t.taskStatusOk
+                      : task.lastStatus === 'failed'
+                        ? t.taskStatusFailed
+                        : task.lastStatus === 'skipped'
+                          ? t.taskStatusSkipped
+                          : ''}
+                  </span>
                 </div>
-              )}
-              <div className="actions task-actions">
-                <button
-                  className="task-action-run"
-                  disabled={busy || !!draft}
-                  onClick={() => void runNow(task.id)}
-                  type="button"
-                >
-                  {t.taskRunNow}
-                </button>
-                <button
-                  disabled={busy || !!draft}
-                  onClick={() => setDraft({ ...task })}
-                  type="button"
-                >
-                  {t.edit}
-                </button>
-                <button
-                  className="danger"
-                  disabled={busy || !!draft}
-                  onClick={() => void removeTask(task.id)}
-                  type="button"
-                >
-                  {t.delete}
-                </button>
-              </div>
-            </li>
+                <div className="task-meta">
+                  <span className={`task-chip${manual ? ' task-chip-manual' : ''}`}>
+                    {describeSchedule(task.schedule, zh ? 'zh' : 'en')}
+                  </span>
+                  <span className="task-chip">
+                    {task.kind === 'github-review-requests'
+                      ? t.taskKindGithub
+                      : task.kind === 'workflow'
+                        ? t.taskKindWorkflow
+                        : t.taskKindPrompt}
+                  </span>
+                  {task.notifyFeishu && <span className="task-chip task-chip-feishu">Feishu</span>}
+                </div>
+                {task.lastRunAt && (
+                  <div className="task-lastrun">
+                    {t.taskLastRun}: {new Date(task.lastRunAt).toLocaleString(locale)}
+                    {task.lastSummary ? ` — ${task.lastSummary.split('\n')[0]}` : ''}
+                  </div>
+                )}
+                <div className="actions task-actions">
+                  <button
+                    className="task-action-run"
+                    disabled={busy || !!draft}
+                    onClick={() => void runNow(task.id)}
+                    type="button"
+                  >
+                    {t.taskRunNow}
+                  </button>
+                  <button
+                    disabled={busy || !!draft}
+                    onClick={() => setDraft({ ...task })}
+                    type="button"
+                  >
+                    {t.edit}
+                  </button>
+                  <button
+                    className="danger"
+                    disabled={busy || !!draft}
+                    onClick={() => void removeTask(task.id)}
+                    type="button"
+                  >
+                    {t.delete}
+                  </button>
+                </div>
+              </li>
             )
           })}
         </ul>
@@ -376,9 +376,19 @@ function TaskEditor({
     draft.schedule.kind === 'none'
       ? ({ kind: 'none' } as const)
       : draft.schedule.kind === 'daily'
-        ? { kind: 'weekly' as const, days: ALL_DAYS, hour: draft.schedule.hour, minute: draft.schedule.minute }
+        ? {
+            kind: 'weekly' as const,
+            days: ALL_DAYS,
+            hour: draft.schedule.hour,
+            minute: draft.schedule.minute,
+          }
         : draft.schedule.kind === 'weekdays'
-          ? { kind: 'weekly' as const, days: WEEKDAYS, hour: draft.schedule.hour, minute: draft.schedule.minute }
+          ? {
+              kind: 'weekly' as const,
+              days: WEEKDAYS,
+              hour: draft.schedule.hour,
+              minute: draft.schedule.minute,
+            }
           : draft.schedule
 
   const isTimeBased = sched.kind === 'weekly'
@@ -393,7 +403,10 @@ function TaskEditor({
   const onTimeChange = (value: string): void => {
     const match = /^(\d{1,2}):(\d{2})$/.exec(value)
     if (!match) return
-    setTime(Math.min(23, Math.max(0, Number(match[1]))), Math.min(59, Math.max(0, Number(match[2]))))
+    setTime(
+      Math.min(23, Math.max(0, Number(match[1]))),
+      Math.min(59, Math.max(0, Number(match[2]))),
+    )
   }
 
   const setDays = (days: number[]): void => {
@@ -409,9 +422,7 @@ function TaskEditor({
     setDays(has ? sched.days.filter((d) => d !== day) : [...sched.days, day])
   }
 
-  const canSave =
-    draft.name.trim().length > 0 &&
-    (draft.kind !== 'workflow' || !!draft.workflowId)
+  const canSave = draft.name.trim().length > 0 && (draft.kind !== 'workflow' || !!draft.workflowId)
 
   return (
     <div className="card task-editor">
@@ -433,10 +444,7 @@ function TaskEditor({
               { kind: 'workflow', label: t.taskKindWorkflow },
             ] as const
           ).map((opt) => (
-            <label
-              className={`seg-btn${kind === opt.kind ? ' seg-btn-on' : ''}`}
-              key={opt.kind}
-            >
+            <label className={`seg-btn${kind === opt.kind ? ' seg-btn-on' : ''}`} key={opt.kind}>
               <input
                 checked={kind === opt.kind}
                 disabled={disabled}
@@ -550,25 +558,13 @@ function TaskEditor({
               })}
             </div>
             <div className="day-quick">
-              <button
-                disabled={disabled}
-                onClick={() => setDays(WEEKDAYS)}
-                type="button"
-              >
+              <button disabled={disabled} onClick={() => setDays(WEEKDAYS)} type="button">
                 {t.taskDaysWeekdays}
               </button>
-              <button
-                disabled={disabled}
-                onClick={() => setDays(WEEKEND)}
-                type="button"
-              >
+              <button disabled={disabled} onClick={() => setDays(WEEKEND)} type="button">
                 {t.taskDaysWeekend}
               </button>
-              <button
-                disabled={disabled}
-                onClick={() => setDays(ALL_DAYS)}
-                type="button"
-              >
+              <button disabled={disabled} onClick={() => setDays(ALL_DAYS)} type="button">
                 {t.taskDaysAll}
               </button>
             </div>
@@ -640,7 +636,12 @@ function TaskEditor({
       <p className="hint option-hint">{t.taskMaxRoundsHint}</p>
 
       <div className="actions">
-        <button className="primary" disabled={disabled || !canSave} onClick={() => onSave(draft)} type="button">
+        <button
+          className="primary"
+          disabled={disabled || !canSave}
+          onClick={() => onSave(draft)}
+          type="button"
+        >
           {t.taskSave}
         </button>
         <button disabled={disabled} onClick={onCancel} type="button">
@@ -667,8 +668,7 @@ function FeishuSection({
   onTest: () => void
 }) {
   const t = useT()
-  const dirty =
-    config.webhookUrl || config.appId || config.appSecret || config.webhookSecret
+  const dirty = config.webhookUrl || config.appId || config.appSecret || config.webhookSecret
   return (
     <div className="card">
       <h3>{t.tasksFeishuTitle}</h3>

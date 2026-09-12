@@ -70,8 +70,7 @@ export function planTextOf(workflow: Workflow): string {
   if (typeof workflow.plan === 'string' && workflow.plan.trim()) return workflow.plan.trim()
   const steps = workflow.drawflow.nodes
     .map((node) => ({
-      blockId:
-        typeof node.data['blockId'] === 'string' ? node.data['blockId'] : node.label,
+      blockId: typeof node.data['blockId'] === 'string' ? node.data['blockId'] : node.label,
       description:
         typeof node.data['description'] === 'string' && node.data['description']
           ? node.data['description']
@@ -89,8 +88,7 @@ function nodeLines(workflow: Workflow): string[] {
     const raw = node.data['blockId']
     const blockId = typeof raw === 'string' ? raw : node.label
     const name = BLOCK_BY_ID.get(blockId)?.name ?? blockId
-    const description =
-      typeof node.data['description'] === 'string' ? node.data['description'] : ''
+    const description = typeof node.data['description'] === 'string' ? node.data['description'] : ''
     const params = { ...node.data } as Record<string, unknown>
     delete params['description']
     delete params['blockId']
@@ -117,9 +115,15 @@ export function buildReplayPrompt(workflow: Workflow): string {
     '',
     '## How to work',
     '1. snapshot_page FIRST, then do every step for real with the page tools (navigate, click, fill, press key…). No dry runs, no "I would click" — actually do it.',
-    '2. Follow the brief\'s steps in order when they work. Where a step does not work as written (stale selector, missing element, wrong order), still achieve that step\'s PURPOSE your own way and remember the difference.',
+    "2. Follow the brief's steps in order when they work. Where a step does not work as written (stale selector, missing element, wrong order), still achieve that step's PURPOSE your own way and remember the difference.",
     '3. Do not stop at the first obstacle; adapt like you would in a normal chat run. Skip a step only when the page genuinely has no such target.',
     '4. Finish the WHOLE task before answering.',
+    '',
+    '## Already-done check (NON-IDEMPOTENT tasks — read before you retry anything)',
+    '- Login / submit-order / send-message / register / pay tasks can only happen ONCE. If the page shows the goal ALREADY HOLDS — you are logged in (dashboard, avatar, user menu, logout button, welcome text), or the order/message is already in the list — then the task is ALREADY DONE: report completed=true and say so plainly.',
+    '- Do NOT log out and redo it, and do NOT keep hunting for the login form: it is gone precisely because the login already succeeded. Hammering a form that no longer exists is the one failure mode that turns a success into an endless retry loop.',
+    '- Only redo a step when the end state genuinely does NOT hold (still sitting on the login page, the form is still empty, the order is not in the list).',
+    '- Never reload or navigate away just to get back to a starting page — that destroys the state we are diagnosing.',
     '',
     '## Response format (MANDATORY)',
     'End your reply with ONE line of JSON — no markdown fence, no commentary after it:',
@@ -148,14 +152,14 @@ export function buildAuditPrompt(
   const lines: string[] = []
   lines.push(
     'You are the workflow repair expert inside a browser-automation Chrome extension.',
-    'A workflow\'s replay failed; an agent then re-did the task on the live page successfully (or nearly).',
+    "A workflow's replay failed; an agent then re-did the task on the live page successfully (or nearly).",
     'Audit the workflow graph against what ACTUALLY worked and produce a corrected version.',
     '',
     '## Domain knowledge (operator guide)',
-    '节点形如 { id, label: \'<算子id>\', position: {x,y}, data: { blockId: \'<算子id>\', ...参数 } }；',
+    "节点形如 { id, label: '<算子id>', position: {x,y}, data: { blockId: '<算子id>', ...参数 } }；",
     "连边形如 { id, source, target, sourceHandle: '<来源算子id>-output-1', targetHandle: '<目标算子id>-input-1' }。",
-    '参数里引用变量用 {{变量名}}；元素定位用 selector + findBy: \'cssSelector\'。每个节点 data.description 写一句中文。',
-    '首节点必须是 trigger（data.type:\'manual\'）。可选步骤用 element-exists 分支或 onError 跳过，不要让它们中断流程。',
+    "参数里引用变量用 {{变量名}}；元素定位用 selector + findBy: 'cssSelector'。每个节点 data.description 写一句中文。",
+    "首节点必须是 trigger（data.type:'manual'）。可选步骤用 element-exists 分支或 onError 跳过，不要让它们中断流程。",
     '',
     '## Workflow goal + steps',
     planTextOf(workflow),
@@ -180,7 +184,7 @@ export function buildAuditPrompt(
     '   - missing：目标需要但图里缺的步骤（changes 里说明应加什么）；redundant：多余/死步骤，应删；fallback：可有可无，必须配置 onError 跳过才不炸。',
     '   note：中文一句，说明依据（复演里它是怎么做的）。',
     '3. workflow：给出修正后的完整图（nodes + edges，结构严格遵守上面的规则）。能给出就一定给——这是最终产物；确实给不出时才省略。',
-    '   保留正确的节点原样（id 不变）；修正 wrong 的参数；删掉 redundant；补上 missing 的节点；给 fallback 节点加 onError: { enable: true, toDo: \'continue\' }。',
+    "   保留正确的节点原样（id 不变）；修正 wrong 的参数；删掉 redundant；补上 missing 的节点；给 fallback 节点加 onError: { enable: true, toDo: 'continue' }。",
     '4. changes：中文列表，逐条写你改了什么（用于向用户展示，如「修正节点3选择器 → button.submit」「新增：提交后等待加载」）。',
     '',
     '## Response format',
@@ -261,10 +265,7 @@ export function parseWorkflowAudit(text: string): WorkflowAudit | null {
         nodeId: id,
         nodeLabel: typeof entry['label'] === 'string' ? entry['label'] : id,
         verdict: verdict as NodeVerdict,
-        note:
-          typeof entry['note'] === 'string' && entry['note'].trim()
-            ? entry['note'].trim()
-            : '',
+        note: typeof entry['note'] === 'string' && entry['note'].trim() ? entry['note'].trim() : '',
       })
     }
   }
@@ -319,6 +320,22 @@ export interface GoalEvidence {
 export interface GoalVerdict {
   achieved: boolean
   reason: string
+  /**
+   * The goal's END STATE already holds, independent of this run — typically a
+   * NON-IDEMPOTENT flow re-run after it already succeeded (a login flow that is
+   * already logged in, an order already submitted). The preconditions are gone,
+   * so the run can only fail; retrying can never re-demonstrate the goal.
+   */
+  alreadySatisfied?: boolean
+}
+
+/** Extra framing for {@link buildGoalCheckPrompt}. */
+export interface GoalCheckOptions {
+  /**
+   * The run being judged ENDED WITH AN ERROR (it is not a clean run). Changes
+   * the framing: the failure may simply mean the goal is already satisfied.
+   */
+  runFailed?: boolean
 }
 
 /**
@@ -327,11 +344,17 @@ export interface GoalVerdict {
  * The distinction matters: a workflow can run clean end-to-end and still read
  * the wrong element, fill the wrong box or submit into the void.
  */
-export function buildGoalCheckPrompt(workflow: Workflow, evidence: GoalEvidence): string {
+export function buildGoalCheckPrompt(
+  workflow: Workflow,
+  evidence: GoalEvidence,
+  opts: GoalCheckOptions = {},
+): string {
   const lines: string[] = []
   lines.push(
     'You are the goal judge for a browser-automation workflow.',
-    'A workflow just finished WITHOUT any node error. "No error" is NOT success — decide whether the run actually COMPLETED THE GOAL.',
+    opts.runFailed
+      ? 'This run ENDED WITH AN ERROR. Decide whether that error is a real breakage — or simply the goal being ALREADY SATISFIED (see the terminal-state rule below).'
+      : 'A workflow just finished WITHOUT any node error. "No error" is NOT success — decide whether the run actually COMPLETED THE GOAL.',
     '',
     '## Goal + execution steps (the contract this run must fulfill)',
     planTextOf(workflow),
@@ -356,9 +379,18 @@ export function buildGoalCheckPrompt(workflow: Workflow, evidence: GoalEvidence)
     '- Missing steps the plan requires (a step never ran, a submission never happened) mean NOT achieved, even when every executed step succeeded.',
     '- Judge leniently about cosmetic differences (page layout, exact text wording) and strictly about the substance (right target, real value, action actually happened).',
     '',
+    '## Terminal-state rule (non-idempotent flows)',
+    '- Some goals are NON-IDEMPOTENT: once they land they cannot be repeated — "log in" (you are already logged in, so the login page/username field no longer exists), "submit the order" (the order already exists), "send the message", "register the account", "pay".',
+    '- For those goals, the END STATE holding IS success — even when the run that produced it errored, and even when the steps look nothing like the plan. If the page/evidence shows the goal is ALREADY DONE, answer achieved=true and alreadySatisfied=true.',
+    '- Evidence that a login goal is already satisfied: the page is the post-login destination (dashboard/account/home with the user menu, avatar, logout button, welcome text), or the browser is authenticated, or a "you are already logged in" style redirect happened.',
+    '- Evidence it is NOT satisfied: still sitting on the login/register form, or an error that is genuinely unrelated (wrong credentials rejected, captcha unsolved, network outage, a required element missing on an unrelated page).',
+    '- Set alreadySatisfied=false (or omit it) whenever the failure is a real breakage that a retry could plausibly fix.',
+    '',
     '## Response format',
     'Respond with ONLY a JSON object — no markdown fence, no commentary:',
-    '{"achieved":true,"reason":"中文一句话：目标达成的依据（或未达成的缺口）"}',
+    '{"achieved":true,"alreadySatisfied":false,"reason":"中文一句话：目标达成的依据（或未达成的缺口）"}',
+    '- achieved: did the goal END STATE hold at the end of this run?',
+    '- alreadySatisfied: true ONLY when the end state already held before/independent of this run and CANNOT be re-demonstrated by retrying (non-idempotent goal landed earlier).',
   )
   return lines.join('\n')
 }
@@ -372,16 +404,19 @@ export function parseGoalVerdict(text: string): GoalVerdict | null {
   try {
     const parsed = JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>
     const reason =
-      typeof parsed['reason'] === 'string' && parsed['reason'].trim()
-        ? parsed['reason'].trim()
-        : ''
-    return { achieved: parsed['achieved'] === true, reason }
+      typeof parsed['reason'] === 'string' && parsed['reason'].trim() ? parsed['reason'].trim() : ''
+    // Only meaningful when achieved: an unachieved goal can never be
+    // "already satisfied".
+    const alreadySatisfied = parsed['achieved'] === true && parsed['alreadySatisfied'] === true
+    return alreadySatisfied
+      ? { achieved: true, reason, alreadySatisfied: true }
+      : { achieved: parsed['achieved'] === true, reason }
   } catch {
     return null
   }
 }
 
-/** Validates the model's graph and builds the rewritten workflow. Pure. */export function buildRewrittenWorkflow(
+/** Validates the model's graph and builds the rewritten workflow. Pure. */ export function buildRewrittenWorkflow(
   original: Workflow,
   graph: { nodes: unknown[]; edges: unknown[] },
 ): Workflow | null {
@@ -400,7 +435,8 @@ export function parseGoalVerdict(text: string): GoalVerdict | null {
     const rawBlockId = typeof data['blockId'] === 'string' ? data['blockId'] : entry['label']
     const blockId = typeof rawBlockId === 'string' ? rawBlockId : ''
     if (!blockId || !BLOCK_BY_ID.has(blockId)) return null
-    const originalId = typeof entry['id'] === 'string' && entry['id'] ? entry['id'] : `n${nodes.length + 1}`
+    const originalId =
+      typeof entry['id'] === 'string' && entry['id'] ? entry['id'] : `n${nodes.length + 1}`
     if (idOf.has(originalId)) return null
     const id = originalId
     idOf.set(originalId, id)

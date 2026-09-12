@@ -49,86 +49,106 @@ type ManifestParam = Parameters<typeof defineManifest>[0]
 export default defineManifest(((env: ConfigEnv) => {
   const ocr = env.mode !== 'no-ocr'
   return {
-  manifest_version: 3,
-  name: 'Browser Copilot',
-  version: VERSION,
-  // Marks the lite build in chrome://extensions (the numeric `version` stays
-  // identical so both variants track the same release).
-  ...(ocr ? {} : { version_name: `${VERSION} (no OCR)` }),
-  description:
-    'A side-panel assistant that can read and act on the page you are looking at. Works with any OpenAI-compatible model.',
-  minimum_chrome_version: '116',
-  permissions: ['storage', 'tabs', 'scripting', 'sidePanel', 'alarms', 'offscreen', 'contextMenus', 'webNavigation', 'cookies', 'downloads', 'clipboardRead', 'debugger'],
-  // '<all_urls>' is load-bearing for screenshots: chrome.tabs.captureVisibleTab
-  // hard-requires it (or activeTab) and rejects equivalent-looking specific
-  // patterns — 'http://*/*' + 'https://*/*' alone fail with "Either the
-  // '<all_urls>' or 'activeTab' permission is required." activeTab cannot
-  // replace it here: its grant is user-gesture-bound and revoked on
-  // navigation, while the agent screenshots pages it has just driven to.
-  // The http/https/ws patterns are kept below only for readability;
-  // '<all_urls>' already covers them.
-  host_permissions: ['<all_urls>', 'http://*/*', 'https://*/*', 'ws://localhost/*', 'ws://127.0.0.1/*', 'ws://[::1]/*'],
-  // Local OCR (Tesseract.js in the offscreen document) needs to compile the
-  // bundled WebAssembly core. `'wasm-unsafe-eval'` permits that while keeping
-  // `script-src 'self'` — no JS eval. The vendored core is fetched from the
-  // extension origin, and the worker is created directly from that URL (no blob).
-  // The no-ocr build has no wasm at all, so the grant is dropped entirely.
-  content_security_policy: {
-    extension_pages: ocr
-      ? "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
-      : "script-src 'self'; object-src 'self'",
-  },
-  icons: {
-    16: 'icons/icon-16.png',
-    32: 'icons/icon-32.png',
-    48: 'icons/icon-48.png',
-    128: 'icons/icon-128.png',
-  },
-  background: {
-    service_worker: 'src/background/index.ts',
-    type: 'module',
-  },
-  // The in-page kernel host (see src/inpage/content-kernel.ts). Previously the
-  // driver re-serialized the whole kernel into every op; now this script parks
-  // it on each frame at document_idle and ops ship only their arguments. It
-  // stays passive until the user triggers an action, so the privacy posture of
-  // the on-demand injection it replaces is unchanged.
-  content_scripts: [
-    {
-      matches: ['http://*/*', 'https://*/*'],
-      js: ['src/inpage/content-kernel.ts'],
-      all_frames: true,
-      run_at: 'document_idle',
+    manifest_version: 3,
+    name: 'Browser Copilot',
+    version: VERSION,
+    // Marks the lite build in chrome://extensions (the numeric `version` stays
+    // identical so both variants track the same release).
+    ...(ocr ? {} : { version_name: `${VERSION} (no OCR)` }),
+    description:
+      'A side-panel assistant that can read and act on the page you are looking at. Works with any OpenAI-compatible model.',
+    minimum_chrome_version: '116',
+    permissions: [
+      'storage',
+      'tabs',
+      'scripting',
+      'sidePanel',
+      'alarms',
+      'offscreen',
+      'contextMenus',
+      'webNavigation',
+      'cookies',
+      'downloads',
+      'clipboardRead',
+      'debugger',
+    ],
+    // '<all_urls>' is load-bearing for screenshots: chrome.tabs.captureVisibleTab
+    // hard-requires it (or activeTab) and rejects equivalent-looking specific
+    // patterns — 'http://*/*' + 'https://*/*' alone fail with "Either the
+    // '<all_urls>' or 'activeTab' permission is required." activeTab cannot
+    // replace it here: its grant is user-gesture-bound and revoked on
+    // navigation, while the agent screenshots pages it has just driven to.
+    // The http/https/ws patterns are kept below only for readability;
+    // '<all_urls>' already covers them.
+    host_permissions: [
+      '<all_urls>',
+      'http://*/*',
+      'https://*/*',
+      'ws://localhost/*',
+      'ws://127.0.0.1/*',
+      'ws://[::1]/*',
+    ],
+    // Local OCR (Tesseract.js in the offscreen document) needs to compile the
+    // bundled WebAssembly core. `'wasm-unsafe-eval'` permits that while keeping
+    // `script-src 'self'` — no JS eval. The vendored core is fetched from the
+    // extension origin, and the worker is created directly from that URL (no blob).
+    // The no-ocr build has no wasm at all, so the grant is dropped entirely.
+    content_security_policy: {
+      extension_pages: ocr
+        ? "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+        : "script-src 'self'; object-src 'self'",
     },
-    {
-      // Floating "restore" button for the minimized plugin. Renders nothing
-      // unless the service worker reports this window minimized (see
-      // src/inpage/floating-button.ts). Main frame only: one button per page.
-      matches: ['http://*/*', 'https://*/*'],
-      js: ['src/inpage/floating-button.ts'],
-      all_frames: false,
-      run_at: 'document_idle',
-    },
-  ],
-  // The floating button loads the extension icon inside web pages; without
-  // this declaration Chrome blocks the chrome-extension:// fetch.
-  web_accessible_resources: [
-    {
-      resources: ['icons/icon-48.png'],
-      matches: ['http://*/*', 'https://*/*'],
-    },
-  ],
-  action: {
-    default_title: 'Open Browser Copilot',
-    default_icon: {
+    icons: {
       16: 'icons/icon-16.png',
       32: 'icons/icon-32.png',
       48: 'icons/icon-48.png',
       128: 'icons/icon-128.png',
     },
-  },
-  side_panel: {
-    default_path: 'src/sidepanel/index.html',
-  },
+    background: {
+      service_worker: 'src/background/index.ts',
+      type: 'module',
+    },
+    // The in-page kernel host (see src/inpage/content-kernel.ts). Previously the
+    // driver re-serialized the whole kernel into every op; now this script parks
+    // it on each frame at document_idle and ops ship only their arguments. It
+    // stays passive until the user triggers an action, so the privacy posture of
+    // the on-demand injection it replaces is unchanged.
+    content_scripts: [
+      {
+        matches: ['http://*/*', 'https://*/*'],
+        js: ['src/inpage/content-kernel.ts'],
+        all_frames: true,
+        run_at: 'document_idle',
+      },
+      {
+        // Floating "restore" button for the minimized plugin. Renders nothing
+        // unless the service worker reports this window minimized (see
+        // src/inpage/floating-button.ts). Main frame only: one button per page.
+        matches: ['http://*/*', 'https://*/*'],
+        js: ['src/inpage/floating-button.ts'],
+        all_frames: false,
+        run_at: 'document_idle',
+      },
+    ],
+    // The floating button loads the extension icon inside web pages; without
+    // this declaration Chrome blocks the chrome-extension:// fetch.
+    web_accessible_resources: [
+      {
+        resources: ['icons/icon-48.png'],
+        matches: ['http://*/*', 'https://*/*'],
+      },
+    ],
+    action: {
+      default_title: 'Open Browser Copilot',
+      default_icon: {
+        16: 'icons/icon-16.png',
+        32: 'icons/icon-32.png',
+        48: 'icons/icon-48.png',
+        128: 'icons/icon-128.png',
+      },
+    },
+    side_panel: {
+      default_path: 'src/sidepanel/index.html',
+    },
   }
 }) as unknown as ManifestParam)

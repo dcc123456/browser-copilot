@@ -41,8 +41,7 @@ export interface PickerVerifyMessage {
 
 /** Discriminated result of attempting to handle a message. */
 export type PickerHandleResult =
-  | { handled: false }
-  | { handled: true; response: { ok: boolean; error?: string } }
+  { handled: false } | { handled: true; response: { ok: boolean; error?: string } }
 
 /** Inject the picker into the active http(s) tab. */
 async function injectPicker(args: {
@@ -107,13 +106,9 @@ async function injectPicker(args: {
  * Handle a runtime message for the picker protocol. Returns a discriminated
  * result so the single background listener can route exactly one response.
  */
-export async function handlePickerMessage(
-  message: unknown,
-): Promise<PickerHandleResult> {
+export async function handlePickerMessage(message: unknown): Promise<PickerHandleResult> {
   const msg = message as
-    | PickerStartMessage
-    | PickerVerifyMessage
-    | { type: 'picker:result' | 'picker:cancel' }
+    PickerStartMessage | PickerVerifyMessage | { type: 'picker:result' | 'picker:cancel' }
 
   if (msg.type === 'picker:start') {
     const response = await injectPicker({

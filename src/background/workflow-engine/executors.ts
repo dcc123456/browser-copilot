@@ -292,7 +292,10 @@ const scroll: BlockExecutor = async (data, ctx) => {
     const steps = Math.max(1, Math.ceil(Math.max(Math.abs(x), Math.abs(y)) / step))
     for (let i = 0; i < steps; i += 1) {
       assertActive(ctx)
-      const safe = { ...op, scroll: { mode: 'by' as const, x: x / steps, y: y / steps, smooth: true } }
+      const safe = {
+        ...op,
+        scroll: { mode: 'by' as const, x: x / steps, y: y / steps, smooth: true },
+      }
       try {
         await execOnActiveTab(safe, ctx.signal, ctx.tabId, ctx.scope)
       } catch (error) {
@@ -574,7 +577,10 @@ const ocrBlock: BlockExecutor = async (data, ctx) => {
     // http(s) links are fetched and re-encoded first (转成图片后识别).
     const normalized = await imageInputToDataUrl(value, ctx.signal)
     if (!normalized) {
-      ctx.emit('error', `ocr: 变量 ${name} 不是可识别的图片（支持 base64、data URL 或 http(s) 图片链接）`)
+      ctx.emit(
+        'error',
+        `ocr: 变量 ${name} 不是可识别的图片（支持 base64、data URL 或 http(s) 图片链接）`,
+      )
       return null
     }
     image = normalized
@@ -823,7 +829,11 @@ const exportData: BlockExecutor = async (data, ctx) => {
 const condition: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const code = String(data['code'] ?? 'true')
-  const evaluated = await evalInPage(`return (${code})`, { vars: ctx.variables, refData: ctx.refData }, ctx)
+  const evaluated = await evalInPage(
+    `return (${code})`,
+    { vars: ctx.variables, refData: ctx.refData },
+    ctx,
+  )
   const ok = evaluated.ok ? Boolean(evaluated.value) : false
   return ok
     ? (ctx.outputs?.['true'] ?? ctx.defaultNext ?? null)
@@ -859,7 +869,8 @@ const webhook: BlockExecutor = async (data, ctx) => {
   if (headersRaw.trim()) {
     try {
       const parsed = JSON.parse(headersRaw)
-      if (parsed && typeof parsed === 'object') headers = { ...headers, ...parsed } as Record<string, string>
+      if (parsed && typeof parsed === 'object')
+        headers = { ...headers, ...parsed } as Record<string, string>
     } catch {
       ctx.emit('error', 'webhook: headers 不是合法 JSON，使用默认头')
     }
@@ -947,7 +958,14 @@ const javascriptCode: BlockExecutor = async (data, ctx) => {
   if (hasPageBridge) {
     triedPage = true
     try {
-      run = await execWorkflowJsOnActiveTab(code, ctx.variables, timeout, ctx.signal, ctx.tabId, ctx.scope)
+      run = await execWorkflowJsOnActiveTab(
+        code,
+        ctx.variables,
+        timeout,
+        ctx.signal,
+        ctx.tabId,
+        ctx.scope,
+      )
     } catch {
       run = null
     }
@@ -992,7 +1010,10 @@ const javascriptCode: BlockExecutor = async (data, ctx) => {
   for (const [k, v] of Object.entries(local.variables ?? {})) ctx.variables[k] = v
   ctx.variables['lastResult'] = local.result
   if (local.result !== undefined) {
-    ctx.emit('result', typeof local.result === 'string' ? local.result : safeStringify(local.result))
+    ctx.emit(
+      'result',
+      typeof local.result === 'string' ? local.result : safeStringify(local.result),
+    )
   }
   return null
 }
@@ -1016,7 +1037,9 @@ async function evalLocalWorkflowJs(
   code: string,
   variables: Record<string, unknown>,
   timeout: number,
-): Promise<{ ok: true; result?: unknown; variables?: Record<string, unknown> } | { ok: false; error: string }> {
+): Promise<
+  { ok: true; result?: unknown; variables?: Record<string, unknown> } | { ok: false; error: string }
+> {
   try {
     const working = { ...variables }
     let nextData: unknown
@@ -1052,7 +1075,6 @@ async function evalLocalWorkflowJs(
       },
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
     const fn = new Function(
       'automaNextBlock',
       'automaSetVariable',
@@ -1069,15 +1091,20 @@ async function evalLocalWorkflowJs(
     ) => unknown
 
     const awaited = await Promise.race([
-      Promise.resolve(fn(
-        helpers.automaNextBlock,
-        helpers.automaSetVariable,
-        helpers.automaRefData,
-        helpers.automaResetTimeout,
-        working,
-      )),
+      Promise.resolve(
+        fn(
+          helpers.automaNextBlock,
+          helpers.automaSetVariable,
+          helpers.automaRefData,
+          helpers.automaResetTimeout,
+          working,
+        ),
+      ),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`JavaScript 代码超时（${timeout}ms）`)), Math.max(0, timeout) || 20000),
+        setTimeout(
+          () => reject(new Error(`JavaScript 代码超时（${timeout}ms）`)),
+          Math.max(0, timeout) || 20000,
+        ),
       ),
     ])
     return { ok: true, result: nextCalled ? nextData : awaited, variables: working }
@@ -1254,7 +1281,12 @@ const linkBlock: BlockExecutor = async (data, ctx) => {
       }
       ctx.emit('result', `已在新标签页打开 ${href}`)
     } else {
-      await execOnActiveTab(withWait({ action: 'click', target: cssTarget(selector) }, data), ctx.signal, ctx.tabId, ctx.scope)
+      await execOnActiveTab(
+        withWait({ action: 'click', target: cssTarget(selector) }, data),
+        ctx.signal,
+        ctx.tabId,
+        ctx.scope,
+      )
       if (waitLoaded) {
         const tab = await activeTab(ctx.scope).catch(() => null)
         if (tab && typeof tab.id === 'number') await waitForTabLoaded(tab.id, ctx.signal)
@@ -1277,7 +1309,8 @@ const attributeValueExec: BlockExecutor = async (data, ctx) => {
     target: targetFrom(data),
     attribute,
   }
-  if (op === 'set') opData.value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
+  if (op === 'set')
+    opData.value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
   try {
     const result = await execOnActiveTab(opData, ctx.signal, ctx.tabId, ctx.scope)
     if (op === 'get') {
@@ -1318,9 +1351,8 @@ const tabUrlExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const variable = String(data['variableName'] ?? 'lastTabUrl')
   try {
-    const current = data['scope'] === 'all'
-      ? await listAllTabUrls(ctx.scope)
-      : await getActiveTabInfo(ctx.scope)
+    const current =
+      data['scope'] === 'all' ? await listAllTabUrls(ctx.scope) : await getActiveTabInfo(ctx.scope)
     ctx.variables[variable] = current
     ctx.emit('result', Array.isArray(current) ? `共 ${current.length} 个标签页` : current.url)
   } catch (error) {
@@ -1388,7 +1420,7 @@ const increaseVariable: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const name = String(data['variableName'] ?? '')
   const step = Number(interpolate(String(data['value'] ?? '1'), ctx.variables, ctx.refData))
-  const current = Number(ctx.variables[name] ?? data['incType'] === 'multiply' ? 1 : 0)
+  const current = Number((ctx.variables[name] ?? data['incType'] === 'multiply') ? 1 : 0)
   const next = data['incType'] === 'multiply' ? current * step : current + step
   ctx.variables[name] = Number.isNaN(next) ? 0 : next
   ctx.emit('result', `${name} = ${next}`)
@@ -1470,7 +1502,9 @@ const sortDataExec: BlockExecutor = async (data, ctx) => {
 
 const dataMapping: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const rows = tableOf(ctx).filter((row): row is Record<string, unknown> => !!row && typeof row === 'object')
+  const rows = tableOf(ctx).filter(
+    (row): row is Record<string, unknown> => !!row && typeof row === 'object',
+  )
   const expression = String(data['mapping'] ?? 'item')
   // Map every row in ONE page injection (rather than one eval per row). The
   // expression is evaluated with `item`, `index`, and `vars` in scope.
@@ -1537,7 +1571,10 @@ const triggerEventExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const event = String(data['event'] ?? '')
   const detail = interpolate(String(data['detail'] ?? 'null'), ctx.variables, ctx.refData)
-  return runRaw({ action: 'trigger_event', target: targetFrom(data), attribute: event, value: detail }, ctx)
+  return runRaw(
+    { action: 'trigger_event', target: targetFrom(data), attribute: event, value: detail },
+    ctx,
+  )
 }
 
 const browserEvent: BlockExecutor = async (_data, ctx) => {
@@ -1552,10 +1589,10 @@ const handleDownload: BlockExecutor = async (data, ctx) => {
   const variable = String(data['variableName'] ?? 'lastDownload')
   try {
     const items = await chrome.downloads.search({})
-    const match = filename
-      ? items.find((item) => item.filename.includes(filename))
-      : items[0]
-    ctx.variables[variable] = match ? { id: match.id, filename: match.filename, url: match.url } : null
+    const match = filename ? items.find((item) => item.filename.includes(filename)) : items[0]
+    ctx.variables[variable] = match
+      ? { id: match.id, filename: match.filename, url: match.url }
+      : null
     ctx.emit('result', match ? `最近下载: ${match.filename}` : '未找到匹配下载')
   } catch (error) {
     ctx.emit('error', message(error))
@@ -1576,7 +1613,8 @@ const saveLocal: BlockExecutor = async (data, ctx) => {
   // 因非法文件名静默失败）。
   const filename = interpolate(String(data['filename'] || 'file.txt'), ctx.variables, ctx.refData)
   const rawSaveMode = String(data['saveMode'] ?? 'auto')
-  const saveMode: SaveMode = rawSaveMode === 'manual' ? 'manual' : rawSaveMode === 'force' ? 'force' : 'auto'
+  const saveMode: SaveMode =
+    rawSaveMode === 'manual' ? 'manual' : rawSaveMode === 'force' ? 'force' : 'auto'
   const variable = String(data['variableName'] ?? 'lastSavedPath')
 
   const settings = await getSettings()
@@ -1821,17 +1859,29 @@ const elementScroll: BlockExecutor = async (data, ctx) => {
   }
   if (selector) {
     if (data['scrollIntoView']) {
-      return runRaw(withWait({ action: 'scroll', target: targetFrom(data), scroll: { mode: 'into_view' } }, data), ctx)
+      return runRaw(
+        withWait(
+          { action: 'scroll', target: targetFrom(data), scroll: { mode: 'into_view' } },
+          data,
+        ),
+        ctx,
+      )
     }
     return runRaw(
-      withWait({ action: 'scroll', target: targetFrom(data), scroll: { mode: 'by', x, y, smooth } }, data),
+      withWait(
+        { action: 'scroll', target: targetFrom(data), scroll: { mode: 'by', x, y, smooth } },
+        data,
+      ),
       ctx,
     )
   }
   // No CSS selector: a conversation-generated node may still carry the rich
   // locator — scrollIntoView applies to that element.
   if (data['scrollIntoView'] && richTargetOf(data)) {
-    return runRaw(withWait({ action: 'scroll', target: targetFrom(data), scroll: { mode: 'into_view' } }, data), ctx)
+    return runRaw(
+      withWait({ action: 'scroll', target: targetFrom(data), scroll: { mode: 'into_view' } }, data),
+      ctx,
+    )
   }
   return runRaw({ action: 'scroll', scroll: { mode: 'by', x, y, smooth } }, ctx)
 }
@@ -1909,7 +1959,8 @@ function evalConditionRow(row: ConditionRow, vars: Record<string, unknown>): boo
     case 'eq':
     default:
       // Equality with type coercion for numbers, else string compare.
-      if (typeof left === 'number' || typeof right === 'number') return Number(left) === Number(right)
+      if (typeof left === 'number' || typeof right === 'number')
+        return Number(left) === Number(right)
       return String(left ?? '') === String(right ?? '')
   }
 }
@@ -1941,16 +1992,16 @@ const loopBreakpointExec: BlockExecutor = async (data) => {
  */
 export const EXECUTORS: Record<string, BlockExecutor> = {
   // browser
-  'click': click,
-  'fill': fill,
+  click: click,
+  fill: fill,
   'select-option': selectOption,
-  'scroll': scroll,
+  scroll: scroll,
   'press-key': pressKey,
   'wait-for': waitFor,
   'take-screenshot': takeScreenshot,
   'get-text': getText,
-  'ocr': ocrBlock,
-  'hover': hover,
+  ocr: ocrBlock,
+  hover: hover,
   'set-checkbox': setCheckbox,
   'get-form': getForm,
   'set-radio': selectRadio,
@@ -1974,18 +2025,18 @@ export const EXECUTORS: Record<string, BlockExecutor> = {
   'log-data': logData,
   'workflow-state': workflowState,
   // control-flow
-  'condition': condition,
+  condition: condition,
   'loop-data': placeholder('loop-data'),
   'repeat-task': placeholder('repeat-task'),
   'while-loop': placeholder('while-loop'),
   'loop-elements': placeholder('loop-elements'),
-  'delay': delay,
-  'breakpoint': breakpoint,
+  delay: delay,
+  breakpoint: breakpoint,
   // browser actions (phase 2)
-  'cookie': cookieBlock,
-  'clipboard': clipboardBlock,
+  cookie: cookieBlock,
+  clipboard: clipboardBlock,
   'element-exists': elementExistsExec,
-  'link': linkBlock,
+  link: linkBlock,
   'attribute-value': attributeValueExec,
   'go-back': goBackExec,
   'forward-page': forwardPage,
@@ -1996,8 +2047,8 @@ export const EXECUTORS: Record<string, BlockExecutor> = {
   'upload-file': uploadFileExec,
   'handle-dialog': handleDialogExec,
   // integration
-  'webhook': webhook,
-  'notification': notification,
+  webhook: webhook,
+  notification: notification,
   'javascript-code': javascriptCode,
   'ai-prompt': aiPrompt,
   'ai-agent': aiAgent,
@@ -2009,28 +2060,28 @@ export const EXECUTORS: Record<string, BlockExecutor> = {
   'handle-download': handleDownload,
   'save-local': saveLocal,
   'save-assets': saveAssetsExec,
-  'proxy': proxyExec,
+  proxy: proxyExec,
   'google-sheets': googleSheets,
   'google-drive': googleDrive,
   'wait-connections': waitConnections,
-  'note': note,
+  note: note,
   'blocks-group': blocksGroup,
   // Automa-catalog ids produced by the editor / recorder.
-  'trigger': noop,
+  trigger: noop,
   'event-click': eventClick,
   'hover-element': hoverElement,
   'element-scroll': elementScroll,
-  'forms': formsBlock,
-  'conditions': conditionsBlock,
+  forms: formsBlock,
+  conditions: conditionsBlock,
   'loop-breakpoint': loopBreakpointExec,
   // trigger
   'visit-web': noop,
-  'schedule': noop,
-  'manual': noop,
+  schedule: noop,
+  manual: noop,
   'context-menu': noop,
   'on-startup': noop,
   'keyboard-shortcut': noop,
-  'date': noop,
+  date: noop,
   'specific-day': noop,
   'element-change': noop,
 }

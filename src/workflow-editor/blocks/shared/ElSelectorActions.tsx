@@ -101,7 +101,8 @@ export default function ElSelectorActions({
         onSelector(msg.selector)
       } else if (pending.mode === 'verify') {
         const n = msg.count ?? 0
-        if (n > 0) onMessage?.(bt('Verified: {count} element(s) match').replace('{count}', String(n)), 'ok')
+        if (n > 0)
+          onMessage?.(bt('Verified: {count} element(s) match').replace('{count}', String(n)), 'ok')
         else {
           onMessage?.(bt('Element not found'), 'error')
           toast(bt('Element not found'), 'error')

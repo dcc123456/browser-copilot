@@ -196,14 +196,8 @@ function mount(pos?: ButtonPos): void {
       dragged = true
       button.classList.add('dragging')
     }
-    const maxLeft = Math.max(
-      VIEWPORT_MARGIN,
-      window.innerWidth - BUTTON_SIZE - VIEWPORT_MARGIN,
-    )
-    const maxTop = Math.max(
-      VIEWPORT_MARGIN,
-      window.innerHeight - BUTTON_SIZE - VIEWPORT_MARGIN,
-    )
+    const maxLeft = Math.max(VIEWPORT_MARGIN, window.innerWidth - BUTTON_SIZE - VIEWPORT_MARGIN)
+    const maxTop = Math.max(VIEWPORT_MARGIN, window.innerHeight - BUTTON_SIZE - VIEWPORT_MARGIN)
     const left = clamp(dragOrigin.left + dx, VIEWPORT_MARGIN, maxLeft)
     const top = clamp(dragOrigin.top + dy, VIEWPORT_MARGIN, maxTop)
     currentPos = leftTopToPos(left, top)

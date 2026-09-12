@@ -218,7 +218,10 @@ export function WorkflowReviewDialog({
             {logOpen && (
               <div className="review-log" ref={logRef} role="log">
                 {log.map((line, index) => (
-                  <p className="m-0 text-[11.5px] leading-relaxed break-words text-muted" key={index}>
+                  <p
+                    className="m-0 text-[11.5px] leading-relaxed break-words text-muted"
+                    key={index}
+                  >
                     {line}
                   </p>
                 ))}

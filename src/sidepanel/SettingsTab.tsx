@@ -23,17 +23,10 @@ import {
   type StorageMode,
 } from '../lib/fs-store'
 import { clearDownloadDir, getDownloadDir, setDownloadDir } from '../lib/download-dir'
-import {
-  ADAPTER_ASSET_PATH,
-  ADAPTER_EXPORT_FILENAME,
-  buildMcpSnippet,
-} from '../lib/mcp-adapter'
+import { ADAPTER_ASSET_PATH, ADAPTER_EXPORT_FILENAME, buildMcpSnippet } from '../lib/mcp-adapter'
 import { OCR_SUPPORTED } from '../lib/ocr-support'
 import NumberInput from '../ui/NumberInput'
-import FormDialog, {
-  FormDialogCancelButton,
-  FormDialogPrimaryButton,
-} from '../ui/FormDialog'
+import FormDialog, { FormDialogCancelButton, FormDialogPrimaryButton } from '../ui/FormDialog'
 import { useT } from './i18n'
 
 /** Editable form state; numbers stay strings so partial input is allowed. */
@@ -97,10 +90,7 @@ function fromDraft(draft: Draft, t: Messages): ProviderProfile {
       throw new Error(t.errorHeadersObject)
     }
     profile.headers = Object.fromEntries(
-      Object.entries(parsed as Record<string, unknown>).map(([key, value]) => [
-        key,
-        String(value),
-      ]),
+      Object.entries(parsed as Record<string, unknown>).map(([key, value]) => [key, String(value)]),
     )
   }
   return profile
@@ -126,7 +116,10 @@ function normalizeSettings(raw: Settings | undefined): Settings {
  * MCP snippets substitute in. Module-level/chrome-global is fine: this only
  * runs from the export button click in the extension page.
  */
-function waitForDownloadItem(downloadId: number, timeoutMs = 30_000): Promise<chrome.downloads.DownloadItem> {
+function waitForDownloadItem(
+  downloadId: number,
+  timeoutMs = 30_000,
+): Promise<chrome.downloads.DownloadItem> {
   return new Promise((resolve, reject) => {
     const started = Date.now()
     const timer = window.setInterval(() => {
@@ -249,9 +242,10 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   })
   const [takeoverModels, setTakeoverModels] = useState<string[] | null>(null)
   const [takeoverBusy, setTakeoverBusy] = useState<null | 'models' | 'save'>(null)
-  const [takeoverBanner, setTakeoverBanner] = useState<{ kind: 'ok' | 'error'; text: string } | null>(
-    null,
-  )
+  const [takeoverBanner, setTakeoverBanner] = useState<{
+    kind: 'ok' | 'error'
+    text: string
+  } | null>(null)
   /**
    * Which editing dialog is open. Every edit surface (provider form, image
    * model, takeover model, local-agent connection) opens as a dialog; the
@@ -261,9 +255,10 @@ export default function SettingsTab({ onLocaleChange }: Props) {
     null,
   )
   /** Outcome line of the last provider-dialog action (test ok / save error). */
-  const [providerNotice, setProviderNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(
-    null,
-  )
+  const [providerNotice, setProviderNotice] = useState<{
+    kind: 'ok' | 'error'
+    text: string
+  } | null>(null)
   /** Failure of the last local-agent connection save, rendered inside its dialog. */
   const [agentNotice, setAgentNotice] = useState<string | null>(null)
 
@@ -415,9 +410,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   // clobbering text the user is actively typing.
   useEffect(() => {
     if (!settings) return
-    setPromptDraft((current) =>
-      current === null ? settings.systemPromptOverride : current,
-    )
+    setPromptDraft((current) => (current === null ? settings.systemPromptOverride : current))
   }, [settings])
 
   const load = useCallback(async () => {
@@ -617,8 +610,10 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   }
 
   // --- Image-recognition model -----------------------------------------------
-  const imgProvider = (providerId: string, fallback: Settings['providers'] = settings?.providers ?? []): ProviderProfile | undefined =>
-    fallback.find((p) => p.id === providerId)
+  const imgProvider = (
+    providerId: string,
+    fallback: Settings['providers'] = settings?.providers ?? [],
+  ): ProviderProfile | undefined => fallback.find((p) => p.id === providerId)
 
   const fetchImageModels = async (): Promise<void> => {
     const providers = settings?.providers ?? []
@@ -722,7 +717,10 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   const saveTakeoverModel = async (): Promise<void> => {
     if (!settings) return
     setTakeoverBanner(null)
-    if (takeoverDraft.providerId && !settings.providers.some((p) => p.id === takeoverDraft.providerId)) {
+    if (
+      takeoverDraft.providerId &&
+      !settings.providers.some((p) => p.id === takeoverDraft.providerId)
+    ) {
       setTakeoverBanner({
         kind: 'error',
         text: t.settingsImageModelProviderMissing,
@@ -805,12 +803,9 @@ export default function SettingsTab({ onLocaleChange }: Props) {
     }
   }
 
-  const savePrompt = useCallback(
-    (value: string) => {
-      void mutate({ type: 'settings.set', patch: { systemPromptOverride: value } })
-    },
-    [],
-  )
+  const savePrompt = useCallback((value: string) => {
+    void mutate({ type: 'settings.set', patch: { systemPromptOverride: value } })
+  }, [])
 
   const resetPrompt = useCallback(() => {
     setPromptDraft('')
@@ -834,9 +829,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   // placeholder is shown. The old action-menu pattern reset the picker to the
   // placeholder immediately after choosing, which looked like the selection
   // never took effect.
-  const selectedEndpoint = presetEndpoints.find(
-    (option) => option.baseUrl === draft?.baseUrl,
-  )
+  const selectedEndpoint = presetEndpoints.find((option) => option.baseUrl === draft?.baseUrl)
 
   return (
     <div className="pane">
@@ -853,9 +846,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         </div>
         <p className="hint">{t.settingsProvidersIntro}</p>
 
-        {settings.providers.length === 0 && (
-          <div className="empty">{t.settingsNoProvider}</div>
-        )}
+        {settings.providers.length === 0 && <div className="empty">{t.settingsNoProvider}</div>}
 
         {settings.providers.map((profile) => {
           const isActive = profile.id === settings.activeProviderId
@@ -1336,7 +1327,9 @@ export default function SettingsTab({ onLocaleChange }: Props) {
             <label htmlFor="takeover-model">{t.settingsModel}</label>
             <select
               id="takeover-model"
-              onChange={(event) => setTakeoverDraft({ ...takeoverDraft, model: event.target.value })}
+              onChange={(event) =>
+                setTakeoverDraft({ ...takeoverDraft, model: event.target.value })
+              }
               value={takeoverDraft.model}
             >
               <option value="">{t.settingsProviderDefault}</option>
@@ -1444,9 +1437,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
             <div className="context-prompt-head">
               <button
                 className="link-btn"
-                disabled={
-                  promptDraft === null || promptDraft === settings.systemPromptOverride
-                }
+                disabled={promptDraft === null || promptDraft === settings.systemPromptOverride}
                 onClick={() => {
                   if (promptDraft !== null) savePrompt(promptDraft)
                 }}
@@ -1624,34 +1615,18 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         <div className="actions">
           {storageDirName ? (
             <>
-              <button
-                disabled={storageBusy}
-                onClick={() => void reconnectFolder()}
-                type="button"
-              >
+              <button disabled={storageBusy} onClick={() => void reconnectFolder()} type="button">
                 {t.settingsReconnectFolder}
               </button>
-              <button
-                disabled={storageBusy}
-                onClick={() => void chooseFolder()}
-                type="button"
-              >
+              <button disabled={storageBusy} onClick={() => void chooseFolder()} type="button">
                 {t.settingsChangeFolder}
               </button>
-              <button
-                disabled={storageBusy}
-                onClick={() => void removeFolder()}
-                type="button"
-              >
+              <button disabled={storageBusy} onClick={() => void removeFolder()} type="button">
                 {t.settingsUseBrowserStorage}
               </button>
             </>
           ) : (
-            <button
-              disabled={storageBusy}
-              onClick={() => void chooseFolder()}
-              type="button"
-            >
+            <button disabled={storageBusy} onClick={() => void chooseFolder()} type="button">
               {t.settingsChooseFolder}
             </button>
           )}
@@ -1691,11 +1666,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
               </button>
             </>
           ) : (
-            <button
-              disabled={downloadBusy}
-              onClick={() => void chooseDownloadDir()}
-              type="button"
-            >
+            <button disabled={downloadBusy} onClick={() => void chooseDownloadDir()} type="button">
               {t.settingsChooseFolder}
             </button>
           )}
@@ -1861,10 +1832,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
                   setOpenDialog(null)
                 }}
               />
-              <FormDialogPrimaryButton
-                label={t.save}
-                onClick={() => void saveAgentConnection()}
-              />
+              <FormDialogPrimaryButton label={t.save} onClick={() => void saveAgentConnection()} />
             </>
           }
           onClose={() => {

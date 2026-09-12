@@ -48,7 +48,10 @@ export function normalizeSchedule(raw: unknown): Schedule {
     return { kind: 'none' }
   }
   if (value.kind === 'interval') {
-    return { kind: 'interval', minutes: coerceIntervalMinutes((value as { minutes?: unknown }).minutes) }
+    return {
+      kind: 'interval',
+      minutes: coerceIntervalMinutes((value as { minutes?: unknown }).minutes),
+    }
   }
   if (value.kind === 'weekdays') {
     const h = (value as { hour?: unknown }).hour
@@ -62,9 +65,7 @@ export function normalizeSchedule(raw: unknown): Schedule {
     const days = Array.isArray(rawDays)
       ? Array.from(
           new Set(
-            rawDays
-              .map((d) => Number(d))
-              .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6),
+            rawDays.map((d) => Number(d)).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6),
           ),
         ).sort((a, b) => a - b)
       : []

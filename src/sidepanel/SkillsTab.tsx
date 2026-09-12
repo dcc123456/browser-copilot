@@ -202,7 +202,10 @@ export default function SkillsTab({ skills, activeSkillId, onChanged, onUseInCha
         setBanner({ kind: 'ok', text: t.skillsImportResultOk({ count: persisted }) })
       } else {
         const summary = t.skillsImportResultFail({ ok: persisted, failed })
-        setBanner({ kind: 'error', text: detail.length ? `${summary} ${detail.join(' ')}` : summary })
+        setBanner({
+          kind: 'error',
+          text: detail.length ? `${summary} ${detail.join(' ')}` : summary,
+        })
       }
       if (persisted > 0) onChanged()
     } catch (error) {
@@ -224,10 +227,14 @@ export default function SkillsTab({ skills, activeSkillId, onChanged, onUseInCha
   }
 
   return (
-    <div className="pane" onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
-      event.preventDefault()
-      void importFromFiles(event.dataTransfer?.files ?? null)
-    }}>
+    <div
+      className="pane"
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={(event) => {
+        event.preventDefault()
+        void importFromFiles(event.dataTransfer?.files ?? null)
+      }}
+    >
       {banner && (
         <div className="banner" data-kind={banner.kind}>
           {banner.text}

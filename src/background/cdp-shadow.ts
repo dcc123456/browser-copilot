@@ -65,9 +65,7 @@ export interface ShadowCandidate {
   node: CdpNode
 }
 
-const INTERACTIVE_TAGS = new Set([
-  'a', 'button', 'input', 'select', 'textarea', 'summary',
-])
+const INTERACTIVE_TAGS = new Set(['a', 'button', 'input', 'select', 'textarea', 'summary'])
 
 function attrMap(node: CdpNode): Record<string, string> {
   const out: Record<string, string> = {}
@@ -149,9 +147,7 @@ export function buildShadowCandidates(root: CdpNode): ShadowCandidate[] {
           tag,
           role,
           name: accessibleName(node, tag, attrs),
-          disabled:
-            attrs.disabled !== undefined ||
-            attrs['aria-disabled'] === 'true',
+          disabled: attrs.disabled !== undefined || attrs['aria-disabled'] === 'true',
           hostTags: hostTags.slice(),
           depth: out.length,
           text: nodeText(node),
@@ -178,11 +174,7 @@ export function buildShadowCandidates(root: CdpNode): ShadowCandidate[] {
 }
 
 /** Best-effort accessible name for a CDP node (aria-label / title / value / text). */
-function accessibleName(
-  node: CdpNode,
-  tag: string,
-  attrs: Record<string, string>,
-): string {
+function accessibleName(node: CdpNode, tag: string, attrs: Record<string, string>): string {
   const aria = collapse(attrs['aria-label'] ?? '')
   if (aria) return aria
   const title = collapse(attrs.title ?? '')
@@ -239,11 +231,7 @@ export function matchCandidates(
     if (typeof spec.nth === 'number' && typeof matches[spec.nth] !== 'undefined') {
       return matches[spec.nth] ?? null
     }
-    return (
-      matches.find((c) => !c.disabled) ??
-      matches[0] ??
-      null
-    )
+    return matches.find((c) => !c.disabled) ?? matches[0] ?? null
   }
   return null
 }
@@ -255,9 +243,7 @@ export function findCandidatesByName(
 ): ShadowCandidate[] {
   const wanted = name.trim()
   if (!wanted) return []
-  return candidates.filter(
-    (c) => c.name === wanted || c.text === wanted || c.name.includes(wanted),
-  )
+  return candidates.filter((c) => c.name === wanted || c.text === wanted || c.name.includes(wanted))
 }
 
 // --- Live CDP operations -----------------------------------------------------
@@ -310,10 +296,7 @@ export function boxCenter(
 }
 
 /** Convert a shadow candidate into a snapshot element entry. */
-export function candidateToSnapshot(
-  c: ShadowCandidate,
-  ref: string,
-): SnapshotElement {
+export function candidateToSnapshot(c: ShadowCandidate, ref: string): SnapshotElement {
   const primary: TargetSpec = {
     how: 'cdp-shadow',
     value: c.name || c.tag,

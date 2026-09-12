@@ -31,7 +31,6 @@ export default function EditLoopElements({ data, onChange }: EditFormProps) {
   const { bt } = useEditorLocale()
   useEffect(() => {
     if (!str(data, 'loopId')) onChange({ loopId: id(6) })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const action = str(data, 'loadMoreAction') || 'none'

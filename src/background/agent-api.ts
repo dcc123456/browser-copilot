@@ -99,9 +99,7 @@ export type ExternalAgentRequest =
     }
 
 /** Replies the plugin returns to the local adapter. */
-export type ExternalAgentResponse =
-  | { ok: true; data?: unknown }
-  | { ok: false; error: string }
+export type ExternalAgentResponse = { ok: true; data?: unknown } | { ok: false; error: string }
 
 /**
  * Processes one request from the local adapter. Synchronous validation first,
@@ -178,9 +176,7 @@ export async function processAgentRequest(
         return { ok: false, error: 'A tool name is required.' }
       }
       const args =
-        req.args && typeof req.args === 'object' && !Array.isArray(req.args)
-          ? req.args
-          : {}
+        req.args && typeof req.args === 'object' && !Array.isArray(req.args) ? req.args : {}
       try {
         // resolveBridgeScope pins the run to the window the user selected the
         // served agent in; every tab resolution and debugger attachment below

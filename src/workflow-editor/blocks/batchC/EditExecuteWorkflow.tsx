@@ -119,7 +119,9 @@ export default function EditExecuteWorkflow({ data, onChange }: EditFormProps) {
           onChange={(v) => onChange({ globalData: v })}
         />
       </Field>
-      <p className="wf-form-note">{bt('This will overwrite the global data of the selected workflow.')}</p>
+      <p className="wf-form-note">
+        {bt('This will overwrite the global data of the selected workflow.')}
+      </p>
 
       <Checkbox
         checked={insertAllVars}

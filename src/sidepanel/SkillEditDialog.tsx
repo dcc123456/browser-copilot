@@ -13,10 +13,7 @@
  * @module sidepanel/SkillEditDialog
  */
 import { useState } from 'react'
-import FormDialog, {
-  FormDialogCancelButton,
-  FormDialogPrimaryButton,
-} from '../ui/FormDialog'
+import FormDialog, { FormDialogCancelButton, FormDialogPrimaryButton } from '../ui/FormDialog'
 import { useT } from './i18n'
 
 /** Editable skill fields, shared shape for both call sites. */
@@ -67,7 +64,10 @@ export default function SkillEditDialog({
       title={title}
     >
       {error && (
-        <div className="mb-3 rounded-lg border border-err bg-err-surface px-3 py-2 text-[12.5px] leading-relaxed break-words text-err" role="alert">
+        <div
+          className="mb-3 rounded-lg border border-err bg-err-surface px-3 py-2 text-[12.5px] leading-relaxed break-words text-err"
+          role="alert"
+        >
           {error}
         </div>
       )}

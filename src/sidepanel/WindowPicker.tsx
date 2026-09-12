@@ -38,7 +38,11 @@ export default function WindowPicker(): React.ReactElement | null {
   }, [])
 
   useEffect(() => {
-    const listener = (message: unknown, _sender: unknown, sendResponse: (v: unknown) => void): void => {
+    const listener = (
+      message: unknown,
+      _sender: unknown,
+      sendResponse: (v: unknown) => void,
+    ): void => {
       if ((message as { type?: string } | undefined)?.type !== 'window.pick.request') return
       const request = message as { requestId: string; windows: WindowChoice[] }
       setPick({ requestId: request.requestId, windows: request.windows ?? [] })
@@ -78,13 +82,15 @@ export default function WindowPicker(): React.ReactElement | null {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
     // answer closes over the current pick; rebind per pick.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pick])
 
   if (!pick) return null
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-start justify-center p-4 pt-[9vh]" role="presentation">
+    <div
+      className="fixed inset-0 z-[1000] flex items-start justify-center p-4 pt-[9vh]"
+      role="presentation"
+    >
       <div
         className="absolute inset-0 bg-slate-950/55 backdrop-blur-[2px] animate-[dialog-fade_140ms_ease-out]"
         onClick={() => answer(null)}

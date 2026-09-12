@@ -47,7 +47,11 @@ function asTask(value: unknown): ScheduledTask | null {
   const v = value as Partial<ScheduledTask>
   if (typeof v.id !== 'string' || typeof v.name !== 'string') return null
   const kind: TaskKind =
-    v.kind === 'workflow' ? 'workflow' : v.kind === 'github-review-requests' || v.kind === 'agent-prompt' ? v.kind : 'agent-prompt'
+    v.kind === 'workflow'
+      ? 'workflow'
+      : v.kind === 'github-review-requests' || v.kind === 'agent-prompt'
+        ? v.kind
+        : 'agent-prompt'
   return {
     id: v.id,
     name: v.name || 'Task',
@@ -145,13 +149,19 @@ function asRun(value: unknown): TaskRunLog | null {
     id: v.id as string,
     ...(typeof v.taskId === 'string' ? { taskId: v.taskId } : {}),
     ...(typeof v.label === 'string' ? { label: v.label } : {}),
-    ...(v.source === 'chat' || v.source === 'schedule' || v.source === 'feishu' || v.source === 'manual'
+    ...(v.source === 'chat' ||
+    v.source === 'schedule' ||
+    v.source === 'feishu' ||
+    v.source === 'manual'
       ? { source: v.source }
       : {}),
     trigger: v.trigger === 'feishu' || v.trigger === 'manual' ? v.trigger : 'schedule',
     ...(typeof v.startedAt === 'number' ? { startedAt: v.startedAt } : {}),
     ...(typeof v.finishedAt === 'number' ? { finishedAt: v.finishedAt } : {}),
-    ...(v.outcome === 'ok' || v.outcome === 'failed' || v.outcome === 'cancelled' || v.outcome === 'skipped'
+    ...(v.outcome === 'ok' ||
+    v.outcome === 'failed' ||
+    v.outcome === 'cancelled' ||
+    v.outcome === 'skipped'
       ? { outcome: v.outcome }
       : {}),
     at: typeof v.at === 'number' ? v.at : Date.now(),
@@ -188,14 +198,16 @@ export async function listRuns(taskId?: string): Promise<TaskRunLog[]> {
   const stored = await area.get(KEY_RUNS)
   const list = stored[KEY_RUNS]
   if (!Array.isArray(list)) return []
-  return list
-    .map(asRun)
-    .filter((run): run is TaskRunLog => run !== null)
-    // Chat turns are conversation turns, not task runs — keep them out of the
-    // task run history (and out of the board hydrated from it).
-    .filter((run) => run.source !== 'chat')
-    .filter((run) => (taskId ? run.taskId === taskId : true))
-    .sort((a, b) => b.at - a.at)
+  return (
+    list
+      .map(asRun)
+      .filter((run): run is TaskRunLog => run !== null)
+      // Chat turns are conversation turns, not task runs — keep them out of the
+      // task run history (and out of the board hydrated from it).
+      .filter((run) => run.source !== 'chat')
+      .filter((run) => (taskId ? run.taskId === taskId : true))
+      .sort((a, b) => b.at - a.at)
+  )
 }
 
 export async function addRun(run: Omit<TaskRunLog, 'id' | 'at'>): Promise<TaskRunLog> {

@@ -23,11 +23,7 @@ import type { Op, OpResult, PageSnapshot, SnapshotElement, Target } from '../lib
 import { runOp, runExecJs, runWorkflowJs } from '../inpage/kernel'
 import { activeTab } from './page'
 import { getLastInjectableTab } from './last-tab'
-import {
-  clickClosedShadow,
-  snapshotClosedShadow,
-  type CdpSession,
-} from './cdp-shadow'
+import { clickClosedShadow, snapshotClosedShadow, type CdpSession } from './cdp-shadow'
 import { fillViaCdp } from './cdp-typing'
 
 /**
@@ -170,7 +166,9 @@ export async function resolveAutomationTab(
  * focused *normal* browser window that is on an ordinary http(s) page. When
  * the focused window already shows an injectable page it is used directly.
  */
-async function resolveAutomationTabUncached(scope?: ScopeWindow): Promise<chrome.tabs.Tab | undefined> {
+async function resolveAutomationTabUncached(
+  scope?: ScopeWindow,
+): Promise<chrome.tabs.Tab | undefined> {
   if (scope) {
     const win = await chrome.windows.get(scope.windowId).catch(() => undefined)
     if (win) {
@@ -210,7 +208,9 @@ async function resolveAutomationTabUncached(scope?: ScopeWindow): Promise<chrome
   // Fallback: search normal windows (most recently focused first) for their
   // active http(s) tab.
   const windows = await chrome.windows.getAll({ windowTypes: ['normal'] }).catch(() => [])
-  const sorted = (windows as chrome.windows.Window[]).slice().sort((a, b) => (b.id ?? 0) - (a.id ?? 0))
+  const sorted = (windows as chrome.windows.Window[])
+    .slice()
+    .sort((a, b) => (b.id ?? 0) - (a.id ?? 0))
   for (const win of sorted) {
     if (typeof win.id !== 'number') continue
     const tabs = await chrome.tabs.query({ windowId: win.id, active: true }).catch(() => [])
@@ -325,7 +325,10 @@ async function waitForActionable(
       () => undefined,
     )
     const data = result?.data as
-      | { state?: 'ready' | 'blocked' | 'missing'; rect?: { x: number; y: number; w: number; h: number } }
+      | {
+          state?: 'ready' | 'blocked' | 'missing'
+          rect?: { x: number; y: number; w: number; h: number }
+        }
       | undefined
     // Probe unsupported (old resident kernel) or the frame unscriptable —
     // the real op will report whatever is actually wrong.
@@ -518,7 +521,9 @@ export async function execOnActiveTab(
     if (value && typeof value === 'object') results.push(value)
   }
   if (results.length === 0) {
-    throw new DriverError('No frame in this tab could be scripted. The page may have just navigated.')
+    throw new DriverError(
+      'No frame in this tab could be scripted. The page may have just navigated.',
+    )
   }
 
   const rank = (result: OpResult): number =>
@@ -597,11 +602,7 @@ async function readClosedShadowElements(tabId: number): Promise<SnapshotElement[
 }
 
 /** Run a click/hover on a closed-shadow element via CDP trusted input. */
-async function runClosedShadowAction(
-  tabId: number,
-  frameUrl: string,
-  op: Op,
-): Promise<OpResult> {
+async function runClosedShadowAction(tabId: number, frameUrl: string, op: Op): Promise<OpResult> {
   const base: OpResult = { ok: false, found: true, frameUrl, isTopFrame: true }
   if (!chrome.debugger) {
     return {
@@ -612,7 +613,7 @@ async function runClosedShadowAction(
     }
   }
   try {
-    const kind = op.action === 'hover' ? 'hover' as const : 'click' as const
+    const kind = op.action === 'hover' ? ('hover' as const) : ('click' as const)
     const out = await withCdpSession(tabId, (session) =>
       clickClosedShadow(session, op.target as Target, kind),
     )
@@ -661,8 +662,7 @@ function explainJsError(message: string): string {
  */
 function readEditableFallback(result: OpResult): { cssPath: string } | null {
   const data = result.data as
-    | { contenteditable?: unknown; registered?: unknown; cssPath?: unknown }
-    | undefined
+    { contenteditable?: unknown; registered?: unknown; cssPath?: unknown } | undefined
   if (!data || typeof data !== 'object') return null
   if (data.contenteditable !== true || data.registered !== false) return null
   if (typeof data.cssPath !== 'string' || data.cssPath.length === 0) return null
@@ -718,10 +718,7 @@ function scheduleCdpDetach(tabId: number): void {
   )
 }
 
-function withCdpSession<T>(
-  tabId: number,
-  fn: (session: CdpSession) => Promise<T>,
-): Promise<T> {
+function withCdpSession<T>(tabId: number, fn: (session: CdpSession) => Promise<T>): Promise<T> {
   const run = async (): Promise<T> => {
     const target = { tabId }
     try {
@@ -840,9 +837,7 @@ async function runJsInMainWorld(
       signal,
     )
     const value = injections?.[0]?.result as
-      | { ok: true; data?: unknown }
-      | { ok: false; error?: string }
-      | undefined
+      { ok: true; data?: unknown } | { ok: false; error?: string } | undefined
     if (!value) {
       return { ...base, error: 'JS 未返回结果（页面可能刚跳转）。' }
     }
@@ -888,11 +883,15 @@ async function runExecJsViaCdp(
 ): Promise<{ ok: true; data?: unknown } | null> {
   if (!chrome?.debugger) return null
   try {
-    const result = (await callHarnessViaCdp(tabId, runExecJs as unknown as (...a: unknown[]) => unknown, {
-      code: String(op.value ?? ''),
-      argNames: Array.isArray(op.jsArgNames) ? op.jsArgNames : undefined,
-      args: op.jsArgs ?? {},
-    })) as { ok: true; data?: unknown } | { ok: false; error?: string } | undefined
+    const result = (await callHarnessViaCdp(
+      tabId,
+      runExecJs as unknown as (...a: unknown[]) => unknown,
+      {
+        code: String(op.value ?? ''),
+        argNames: Array.isArray(op.jsArgNames) ? op.jsArgNames : undefined,
+        args: op.jsArgs ?? {},
+      },
+    )) as { ok: true; data?: unknown } | { ok: false; error?: string } | undefined
     if (result && result.ok) return { ok: true, data: result.data }
     return null
   } catch {
@@ -929,7 +928,12 @@ async function runWorkflowJsInMainWorld(
       signal,
     )
     const value = injections?.[0]?.result as
-      | { ok: true; data?: unknown; variables?: Record<string, unknown>; logs?: { level: string; message: string }[] }
+      | {
+          ok: true
+          data?: unknown
+          variables?: Record<string, unknown>
+          logs?: { level: string; message: string }[]
+        }
       | { ok: false; error?: string; logs?: { level: string; message: string }[] }
       | undefined
     if (!value) return { ...base, error: 'JS 未返回结果（页面可能刚跳转）。' }
@@ -947,7 +951,11 @@ async function runWorkflowJsInMainWorld(
       const cdp = await runWorkflowJsViaCdp(tab.id, op)
       if (cdp) return { ...base, ok: true, data: cdp }
     }
-    return { ...base, error: explainJsError(value.error ?? 'JavaScript execution failed'), data: { logs: value.logs ?? [] } }
+    return {
+      ...base,
+      error: explainJsError(value.error ?? 'JavaScript execution failed'),
+      data: { logs: value.logs ?? [] },
+    }
   } catch (error) {
     if ((error as Error)?.name === 'AbortError') throw error
     const message = error instanceof Error ? error.message : String(error)
@@ -963,7 +971,11 @@ async function runWorkflowJsInMainWorld(
 async function runWorkflowJsViaCdp(
   tabId: number,
   op: Op,
-): Promise<{ result?: unknown; variables?: Record<string, unknown>; logs: { level: string; message: string }[] } | null> {
+): Promise<{
+  result?: unknown
+  variables?: Record<string, unknown>
+  logs: { level: string; message: string }[]
+} | null> {
   if (!chrome?.debugger) return null
   try {
     const value = (await callHarnessViaCdp(
@@ -975,7 +987,12 @@ async function runWorkflowJsViaCdp(
         timeout: Number(op.jsArgs?.['timeout'] ?? 20000),
       },
     )) as
-      | { ok: true; data?: unknown; variables?: Record<string, unknown>; logs?: { level: string; message: string }[] }
+      | {
+          ok: true
+          data?: unknown
+          variables?: Record<string, unknown>
+          logs?: { level: string; message: string }[]
+        }
       | { ok: false }
       | undefined
     if (value && value.ok) {
@@ -993,7 +1010,12 @@ export async function snapshotActiveTab(
   maxElements = 120,
   scope?: ScopeWindow,
 ): Promise<PageSnapshot> {
-  const result = await execOnActiveTab({ action: 'snapshot', maxChars, maxElements }, undefined, undefined, scope)
+  const result = await execOnActiveTab(
+    { action: 'snapshot', maxChars, maxElements },
+    undefined,
+    undefined,
+    scope,
+  )
   if (!result.page) throw new DriverError(result.error ?? 'The page could not be read.')
   return result.page
 }
@@ -1082,7 +1104,9 @@ function toDriverTab(tab: chrome.tabs.Tab): DriverTab {
 export async function listTabs(scope?: ScopeWindow): Promise<DriverTab[]> {
   // Scoped runs list only the panel window's tabs; unscoped keeps the legacy
   // "current window" (= last focused, in the service worker) behaviour.
-  const tabs = await chrome.tabs.query(scope ? { windowId: scope.windowId } : { currentWindow: true })
+  const tabs = await chrome.tabs.query(
+    scope ? { windowId: scope.windowId } : { currentWindow: true },
+  )
   return tabs
     .filter((tab) => typeof tab.id === 'number')
     .map(toDriverTab)
@@ -1167,8 +1191,12 @@ export async function getActiveTabInfo(scope?: ScopeWindow): Promise<DriverTabIn
   return toDriverTab(tab)
 }
 
-export async function listAllTabUrls(scope?: ScopeWindow): Promise<{ id: number; url: string; title: string }[]> {
-  const tabs = await chrome.tabs.query(scope ? { windowId: scope.windowId } : { currentWindow: true })
+export async function listAllTabUrls(
+  scope?: ScopeWindow,
+): Promise<{ id: number; url: string; title: string }[]> {
+  const tabs = await chrome.tabs.query(
+    scope ? { windowId: scope.windowId } : { currentWindow: true },
+  )
   return tabs
     .filter((tab) => typeof tab.id === 'number')
     .map((tab) => ({ id: tab.id as number, url: tab.url ?? '', title: tab.title ?? '' }))
@@ -1187,9 +1215,7 @@ export async function updateActiveTabUrl(url: string, scope?: ScopeWindow): Prom
     await chrome.tabs.update({ url })
     return
   }
-  const [tab] = await chrome.tabs
-    .query({ active: true, windowId: scope.windowId })
-    .catch(() => [])
+  const [tab] = await chrome.tabs.query({ active: true, windowId: scope.windowId }).catch(() => [])
   if (!tab || typeof tab.id !== 'number') {
     throw new DriverError('插件窗口内没有可导航的标签页。')
   }
@@ -1206,7 +1232,12 @@ export async function elementExists(
   signal?: AbortSignal,
   scope?: ScopeWindow,
 ): Promise<number> {
-  const result = await execOnActiveTab({ action: 'element_exists', value: selector }, signal, undefined, scope)
+  const result = await execOnActiveTab(
+    { action: 'element_exists', value: selector },
+    signal,
+    undefined,
+    scope,
+  )
   return typeof result.data === 'number' ? result.data : result.found ? 1 : 0
 }
 
@@ -1216,7 +1247,12 @@ export async function countElements(
   signal?: AbortSignal,
   scope?: ScopeWindow,
 ): Promise<number> {
-  const result = await execOnActiveTab({ action: 'count_elements', value: selector }, signal, undefined, scope)
+  const result = await execOnActiveTab(
+    { action: 'count_elements', value: selector },
+    signal,
+    undefined,
+    scope,
+  )
   return typeof result.data === 'number' ? result.data : 0
 }
 
@@ -1276,7 +1312,10 @@ export async function execWorkflowJsOnActiveTab(
   signal?: AbortSignal,
   preferredTabId?: number,
   scope?: ScopeWindow,
-): Promise<{ ok: true; data: WorkflowJsResult; logs: { level: string; message: string }[] } | { ok: false; error: string; logs: { level: string; message: string }[] }> {
+): Promise<
+  | { ok: true; data: WorkflowJsResult; logs: { level: string; message: string }[] }
+  | { ok: false; error: string; logs: { level: string; message: string }[] }
+> {
   const result = await execOnActiveTab(
     {
       action: 'exec_workflow_js',
@@ -1293,7 +1332,11 @@ export async function execWorkflowJsOnActiveTab(
       : []
   if (result.ok) {
     const payload = result.data as Partial<WorkflowJsResult>
-    return { ok: true, data: { result: payload.result, variables: payload.variables, logs: captured }, logs: captured }
+    return {
+      ok: true,
+      data: { result: payload.result, variables: payload.variables, logs: captured },
+      logs: captured,
+    }
   }
   return { ok: false, error: result.error ?? 'JavaScript execution failed', logs: captured }
 }
@@ -1359,7 +1402,9 @@ interface ClipReply {
   error?: string
 }
 
-async function clipboardCall(message: { type: 'clip-get' } | { type: 'clip-set'; text: string }): Promise<string> {
+async function clipboardCall(
+  message: { type: 'clip-get' } | { type: 'clip-set'; text: string },
+): Promise<string> {
   await ensureOffscreen()
   const reply = await chrome.runtime.sendMessage(message)
   const result = reply as ClipReply | undefined
@@ -1423,7 +1468,9 @@ export async function ocrImage(
     text: result.text ?? '',
     confidence: result.confidence ?? 0,
     agreed: result.agreed ?? false,
-    ...(result.alternatives && result.alternatives.length > 0 ? { alternatives: result.alternatives } : {}),
+    ...(result.alternatives && result.alternatives.length > 0
+      ? { alternatives: result.alternatives }
+      : {}),
   }
 }
 

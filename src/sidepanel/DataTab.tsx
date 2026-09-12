@@ -56,7 +56,6 @@ function serializeCustom(custom: Record<string, string>): string {
     .join('\n')
 }
 
-
 export default function DataTab() {
   const t = useT()
   const [section, setSection] = useState<Section>('profiles')
@@ -332,7 +331,9 @@ function ProfilesSection({
         </div>
       )}
 
-      {profiles && profiles.length === 0 && !draft && <div className="empty">{t.dataProfilesEmpty}</div>}
+      {profiles && profiles.length === 0 && !draft && (
+        <div className="empty">{t.dataProfilesEmpty}</div>
+      )}
       {profiles?.map((profile) => (
         <div className="card" key={profile.id}>
           <div className="card-title">{profile.label}</div>
@@ -384,7 +385,10 @@ function PasswordsSection({
   onSave,
   onCancel,
 }: PasswordsProps) {
-  const updateField = (index: number, patch: Partial<{ key: string; value: string; secret: boolean }>): void => {
+  const updateField = (
+    index: number,
+    patch: Partial<{ key: string; value: string; secret: boolean }>,
+  ): void => {
     if (!draft) return
     const fields = draft.fields.map((f, i) => (i === index ? { ...f, ...patch } : f))
     onDraftChange({ ...draft, fields })
@@ -532,4 +536,3 @@ function PasswordsSection({
     </>
   )
 }
-

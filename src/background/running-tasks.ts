@@ -57,6 +57,12 @@ export interface RunningTask {
   source: RunSource
   /** Feishu chat id to stream steps to, when source is 'feishu'. */
   feishuChatId?: string
+  /**
+   * M4: the AI-debug session this run belongs to. Every run a debug session
+   * spawns (takeover pass, fix-verify, rewrite-verify) carries the same id, so
+   * the session's runs, checkpoints and takeover stats can be joined.
+   */
+  sessionId?: string
   startedAt: number
   steps: RunStep[]
   /**
@@ -79,6 +85,8 @@ export interface FinishedTask {
   workflowId?: string
   label: string
   source: RunSource
+  /** M4: the AI-debug session this run belongs to (see RunningTask.sessionId). */
+  sessionId?: string
   startedAt: number
   finishedAt: number
   outcome: RunOutcomeKind
@@ -128,6 +136,8 @@ export interface StartRunOptions {
   taskId?: string
   workflowId?: string
   feishuChatId?: string
+  /** M4: the AI-debug session this run belongs to. */
+  sessionId?: string
   controller?: AbortController
   onCancel?: () => void
 }
@@ -146,6 +156,7 @@ export function startRun(options: StartRunOptions): RunningTask {
     label: options.label,
     source: options.source,
     feishuChatId: options.feishuChatId,
+    sessionId: options.sessionId,
     startedAt: Date.now(),
     steps: [],
     controller,
@@ -164,7 +175,14 @@ export function addStep(
 ): void {
   const task = runs.get(runId)
   if (!task) return
-  task.steps.push({ at: Date.now(), kind, text, ...(extra?.nodeId ? { nodeId: extra.nodeId } : {}), ...(extra?.label ? { label: extra.label } : {}), ...(extra?.vars ? { vars: extra.vars } : {}) })
+  task.steps.push({
+    at: Date.now(),
+    kind,
+    text,
+    ...(extra?.nodeId ? { nodeId: extra.nodeId } : {}),
+    ...(extra?.label ? { label: extra.label } : {}),
+    ...(extra?.vars ? { vars: extra.vars } : {}),
+  })
 }
 
 /**
@@ -224,6 +242,7 @@ export function finishRun(runId: string, options?: FinishOptions): void {
     workflowId: task.workflowId,
     label: task.label,
     source: task.source,
+    sessionId: task.sessionId,
     startedAt: task.startedAt,
     finishedAt: Date.now(),
     outcome: options?.outcome ?? (task.controller.signal.aborted ? 'cancelled' : 'ok'),

@@ -82,15 +82,12 @@ const TEXT_EXTENSIONS: ReadonlySet<string> = new Set([
 ])
 
 /** Value for `<input type="file" accept>` covering everything we allow. */
-export const FILE_INPUT_ACCEPT = [...IMAGE_MIME_TYPES].join(',') + ',' + [...TEXT_EXTENSIONS].join(',')
+export const FILE_INPUT_ACCEPT =
+  [...IMAGE_MIME_TYPES].join(',') + ',' + [...TEXT_EXTENSIONS].join(',')
 
 /** Why a file was rejected. */
 export type AttachmentErrorCode =
-  | 'too-many'
-  | 'unsupported'
-  | 'too-large-image'
-  | 'too-large-text'
-  | 'total-too-large'
+  'too-many' | 'unsupported' | 'too-large-image' | 'too-large-text' | 'total-too-large'
 
 function extensionOf(name: string): string {
   const dot = name.lastIndexOf('.')
@@ -98,7 +95,11 @@ function extensionOf(name: string): string {
 }
 
 function isTextLike(name: string, mimeType: string): boolean {
-  return mimeType.startsWith('text/') || mimeType === 'application/json' || TEXT_EXTENSIONS.has(extensionOf(name))
+  return (
+    mimeType.startsWith('text/') ||
+    mimeType === 'application/json' ||
+    TEXT_EXTENSIONS.has(extensionOf(name))
+  )
 }
 
 /** True when the descriptor carries an image (and can be shown as a thumbnail). */
@@ -221,7 +222,9 @@ export async function fileToDraft(file: File): Promise<AttachmentDescriptor> {
 }
 
 /** Strips text content from descriptors, for replay over the agent port. */
-export function toAttachmentSummaries(attachments: readonly AttachmentDescriptor[]): AttachmentSummary[] {
+export function toAttachmentSummaries(
+  attachments: readonly AttachmentDescriptor[],
+): AttachmentSummary[] {
   return attachments.map(({ id, name, mimeType, size, dataUrl }) => ({
     id,
     name,
@@ -235,13 +238,17 @@ function asDescriptor(value: unknown): AttachmentDescriptor | null {
   if (!value || typeof value !== 'object') return null
   const candidate = value as Partial<AttachmentDescriptor>
   if (typeof candidate.name !== 'string' || candidate.name.length === 0) return null
-  if (typeof candidate.size !== 'number' || !Number.isFinite(candidate.size) || candidate.size < 0) return null
+  if (typeof candidate.size !== 'number' || !Number.isFinite(candidate.size) || candidate.size < 0)
+    return null
   if (typeof candidate.dataUrl !== 'string' && typeof candidate.content !== 'string') return null
   if (typeof candidate.dataUrl === 'string' && !candidate.dataUrl.startsWith('data:')) return null
   return {
     id: typeof candidate.id === 'string' && candidate.id ? candidate.id : nextAttachmentId(),
     name: candidate.name,
-    mimeType: typeof candidate.mimeType === 'string' && candidate.mimeType ? candidate.mimeType : 'application/octet-stream',
+    mimeType:
+      typeof candidate.mimeType === 'string' && candidate.mimeType
+        ? candidate.mimeType
+        : 'application/octet-stream',
     size: candidate.size,
     ...(typeof candidate.dataUrl === 'string' ? { dataUrl: candidate.dataUrl } : {}),
     ...(typeof candidate.content === 'string' ? { content: candidate.content } : {}),
@@ -255,9 +262,10 @@ function asDescriptor(value: unknown): AttachmentDescriptor | null {
  * Malformed or over-limit entries are dropped rather than failing the whole
  * turn; the caller reports each rejection as a status line.
  */
-export function sanitizeAttachments(
-  input: readonly unknown[] | undefined,
-): { kept: AttachmentDescriptor[]; rejected: { name: string; code: AttachmentErrorCode }[] } {
+export function sanitizeAttachments(input: readonly unknown[] | undefined): {
+  kept: AttachmentDescriptor[]
+  rejected: { name: string; code: AttachmentErrorCode }[]
+} {
   const kept: AttachmentDescriptor[] = []
   const rejected: { name: string; code: AttachmentErrorCode }[] = []
   for (const value of input ?? []) {
@@ -265,7 +273,9 @@ export function sanitizeAttachments(
     if (!descriptor) {
       // Keep whatever name we can salvage so the status line is actionable.
       const attempted =
-        typeof value === 'object' && value !== null && typeof (value as { name?: unknown }).name === 'string'
+        typeof value === 'object' &&
+        value !== null &&
+        typeof (value as { name?: unknown }).name === 'string'
           ? ((value as { name: string }).name as string)
           : '(unknown file)'
       rejected.push({ name: attempted || '(unknown file)', code: 'unsupported' })

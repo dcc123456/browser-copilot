@@ -41,14 +41,7 @@ import type { Skill } from './types'
 // --- Alias table -----------------------------------------------------------
 
 const NAME_ALIASES = ['name', 'title', 'skillName', 'skill_name'] as const
-const DESC_ALIASES = [
-  'description',
-  'desc',
-  'summary',
-  'about',
-  'subtitle',
-  'tagline',
-] as const
+const DESC_ALIASES = ['description', 'desc', 'summary', 'about', 'subtitle', 'tagline'] as const
 const INSTR_ALIASES = [
   'instructions',
   'instruction',
@@ -148,11 +141,7 @@ export function mapAliasedToSkill(raw: unknown): Skill | null {
   const instructions = pickString(obj, INSTR_ALIASES)
   // At minimum one of the three semantic fields needs to actually be present;
   // otherwise we can't tell this apart from an arbitrary object.
-  if (
-    name.length === 0 &&
-    description.length === 0 &&
-    instructions.length === 0
-  ) {
+  if (name.length === 0 && description.length === 0 && instructions.length === 0) {
     return null
   }
   const createdAt = coerceNumber((obj as { createdAt?: unknown }).createdAt) ?? Date.now()
@@ -286,16 +275,23 @@ function parseYamlDoc(doc: string): YamlDoc | null {
     let i = startIndex
     while (i < lines.length) {
       const line = lines[i]!
-      if (line.length === 0) { i += 1; continue }
+      if (line.length === 0) {
+        i += 1
+        continue
+      }
       if (!line.startsWith(' '.repeat(indent))) break
       const item = readKeyValue(i, indent)
       if (!item) break
       const { key, value, next } = item
-      obj[key] = typeof value === 'string'
-        ? value
-        : value.chomp === 'literal'
-          ? value.body
-          : value.body.split(/\n{2,}/).map((p) => p.split('\n').join(' ')).join('\n\n')
+      obj[key] =
+        typeof value === 'string'
+          ? value
+          : value.chomp === 'literal'
+            ? value.body
+            : value.body
+                .split(/\n{2,}/)
+                .map((p) => p.split('\n').join(' '))
+                .join('\n\n')
       i = next
     }
     return { obj, next: i }
@@ -306,7 +302,10 @@ function parseYamlDoc(doc: string): YamlDoc | null {
     let i = 0
     while (i < lines.length) {
       const line = lines[i]!
-      if (line.length === 0) { i += 1; continue }
+      if (line.length === 0) {
+        i += 1
+        continue
+      }
       if (!line.startsWith('- ') && !line.startsWith('-\t')) {
         // A line that isn't a list item but might be a continuation key:
         // treat next object attributes as appended to previous item if the
@@ -370,9 +369,11 @@ export function parseYamlSkillsText(text: string): { ok: boolean; raws: unknown[
  * via `mapAliasedToSkill`. If the frontmatter carries no explicit instruction
  * field, the Markdown body below the delimiter is used as the instructions.
  */
-export function parseMarkdownSkillsFileText(
-  text: string,
-): { ok: boolean; raws: unknown[]; from: 'md' } {
+export function parseMarkdownSkillsFileText(text: string): {
+  ok: boolean
+  raws: unknown[]
+  from: 'md'
+} {
   const cleaned = text.replace(/^\uFEFF?/, '')
   const m = /^(?:---|\.\.\.)\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)\r?\n?/.exec(cleaned)
   if (!m) {
@@ -399,7 +400,10 @@ export function parseMarkdownSkillsFileText(
  * (fallback) content sniffing. Returns empty + ok=false when the file cannot
  * be read.
  */
-export function parseSkillsFileText(filename: string, text: string): { ok: boolean; raws: unknown[]; from: 'json' | 'yaml' | 'md' | 'unknown' } {
+export function parseSkillsFileText(
+  filename: string,
+  text: string,
+): { ok: boolean; raws: unknown[]; from: 'json' | 'yaml' | 'md' | 'unknown' } {
   const lower = filename.toLowerCase()
   const sniffFirst = (text: string): 'json' | 'yaml' | 'unknown' => {
     const trimmed = text.replace(/^\s*/, '')
@@ -443,14 +447,24 @@ export function parseSkillsFileText(filename: string, text: string): { ok: boole
  */
 export async function parseSkillsFiles(
   files: File | File[] | FileList | null,
-): Promise<{ file: File; ok: boolean; raws: unknown[]; from: 'json' | 'yaml' | 'md' | 'unknown' }[]> {
+): Promise<
+  { file: File; ok: boolean; raws: unknown[]; from: 'json' | 'yaml' | 'md' | 'unknown' }[]
+> {
   if (!files) return []
-  const list = 'length' in (files as FileList | File[]) ? Array.from(files as FileList | File[]) : [files as File]
+  const list =
+    'length' in (files as FileList | File[])
+      ? Array.from(files as FileList | File[])
+      : [files as File]
   if (list.length === 0) return []
   return Promise.all(
     list.map(
       (file) =>
-        new Promise<{ file: File; ok: boolean; raws: unknown[]; from: 'json' | 'yaml' | 'md' | 'unknown' }>((resolve) => {
+        new Promise<{
+          file: File
+          ok: boolean
+          raws: unknown[]
+          from: 'json' | 'yaml' | 'md' | 'unknown'
+        }>((resolve) => {
           const reader = new FileReader()
           reader.onerror = () => resolve({ file, ok: false, raws: [], from: 'unknown' })
           reader.onload = () => {

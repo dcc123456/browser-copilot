@@ -88,8 +88,7 @@ export async function readActivePage(
     args: [STRIP_SELECTOR],
   })
   const value = injection?.result as
-    | { url: string; title: string; selection: string; raw: string }
-    | undefined
+    { url: string; title: string; selection: string; raw: string } | undefined
   if (!value) throw new Error('Could not read the page contents.')
 
   const { text, truncated } = truncate(collapseWhitespace(value.raw), maxChars)
@@ -131,9 +130,7 @@ export async function readActiveSelection(scope?: ScopeWindow): Promise<PageCont
       selection: window.getSelection()?.toString() ?? '',
     }),
   })
-  const value = injection?.result as
-    | { url: string; title: string; selection: string }
-    | undefined
+  const value = injection?.result as { url: string; title: string; selection: string } | undefined
   if (!value) throw new Error('Could not read the selection.')
 
   return {

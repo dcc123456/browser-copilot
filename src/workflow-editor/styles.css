@@ -90,9 +90,22 @@ body {
 }
 
 /* Syntax tokens — muted editor colors that hold contrast in both themes. */
-.tok-keyword { color: #c479e8; }
-.tok-string  { color: #8fd679; }
-.tok-number  { color: #e0a06a; }
-.tok-comment { color: var(--bc-faint); font-style: italic; }
-.tok-name    { color: #79b8ff; }
-.tok-token   { color: #e5c07b; }
+.tok-keyword {
+  color: #c479e8;
+}
+.tok-string {
+  color: #8fd679;
+}
+.tok-number {
+  color: #e0a06a;
+}
+.tok-comment {
+  color: var(--bc-faint);
+  font-style: italic;
+}
+.tok-name {
+  color: #79b8ff;
+}
+.tok-token {
+  color: #e5c07b;
+}

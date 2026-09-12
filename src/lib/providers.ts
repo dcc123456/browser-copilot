@@ -84,7 +84,11 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     hint: 'Use an Ark API key. For "model", use a model ID such as doubao-seed-code, or your dedicated endpoint ID (ep-…). A coding-plan subscription is billed against the model it covers.',
     docsUrl: 'https://console.volcengine.com/ark',
     endpoints: [
-      { id: 'ark-standard', title: 'Standard', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3' },
+      {
+        id: 'ark-standard',
+        title: 'Standard',
+        baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+      },
       {
         id: 'ark-coding-plan',
         title: 'Coding Plan (OpenAI)',
@@ -384,7 +388,9 @@ export function normalizeSettingsPayload(raw: unknown): {
   const providers = Array.isArray(value.providers)
     ? (value.providers as unknown[]).filter(
         (profile): profile is ProviderProfile =>
-          !!profile && typeof profile === 'object' && typeof (profile as ProviderProfile).id === 'string',
+          !!profile &&
+          typeof profile === 'object' &&
+          typeof (profile as ProviderProfile).id === 'string',
       )
     : []
   const activeRaw = value.activeProviderId
@@ -405,8 +411,7 @@ export function normalizeSettingsPayload(raw: unknown): {
     typeof value.downloadAutoSave === 'boolean' ? value.downloadAutoSave : true
   const localAgentEnabled =
     typeof value.localAgentEnabled === 'boolean' ? value.localAgentEnabled : false
-  const localAgentToken =
-    typeof value.localAgentToken === 'string' ? value.localAgentToken : ''
+  const localAgentToken = typeof value.localAgentToken === 'string' ? value.localAgentToken : ''
   const localAgentUrl = normalizeLocalAgentUrl(value.localAgentUrl)
   const localAgentActiveAgent =
     typeof value.localAgentActiveAgent === 'string' ? value.localAgentActiveAgent : ''

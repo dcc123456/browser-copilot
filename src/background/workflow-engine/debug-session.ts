@@ -20,6 +20,7 @@
  *
  * @module background/workflow-engine/debug-session
  */
+import { failureSignature, validationFailure } from '../../lib/workflow/ai-takeover'
 import type { TakeoverFix, TakeoverReport } from '../../lib/workflow/ai-takeover'
 import type { GoalVerdict, NodeAudit } from '../../lib/workflow/debug-rewrite'
 import { patchNodeParams, type WorkflowDebugResult } from '../../lib/workflow/auto-debug-patch'
@@ -28,6 +29,19 @@ import type { AiTakeoverHook } from './engine'
 
 /** Default number of run→fix→verify rounds per session. */
 export const DEFAULT_MAX_ROUNDS = 2
+
+/**
+ * How many times the SAME failure signature may recur inside one session
+ * before the loop refuses to walk into it again.
+ *
+ * This is the anti-"infinite retry" breaker for NON-IDEMPOTENT workflows
+ * (login / submit / send / register): once the side effect has landed, the
+ * preconditions are gone forever, so every further round fails with the same
+ * "element not found" — retrying is not just useless, it is *wrong*, because
+ * it will never reach the page the workflow was written for. Stop and report
+ * instead of burning rounds (and model calls) on an identical dead end.
+ */
+export const REPEAT_FAILURE_LIMIT = 2
 
 /**
  * Interaction blocks whose executors honor `waitForSelector` polling
@@ -52,11 +66,24 @@ export const WAIT_BLOCKS: readonly string[] = [
 export const DEBUG_WAIT_MS = 4000
 
 /**
- * A debug-run copy of the workflow with element waits force-enabled on
- * interaction blocks. Pure: the input is never mutated. Blocks that already
- * set `waitForSelector` keep the user's own timeout.
+ * Default poll window (ms) forced onto interaction blocks in NORMAL runs
+ * (manual / scheduled / chat / Feishu / server). Deliberately shorter than the
+ * debug window: it must not noticeably slow the happy path. A workflow can opt
+ * out with `settings.defaultWaitMs = 0`, or pick its own value.
  */
-export function withWaitFor(workflow: Workflow, ms = DEBUG_WAIT_MS): Workflow {
+export const DEFAULT_WAIT_MS = 2000
+
+/**
+ * A copy of the workflow with element waits force-enabled on interaction
+ * blocks. Pure: the input is never mutated. Blocks that already set
+ * `waitForSelector` keep the user's own timeout. `ms <= 0` disables the
+ * rewrite entirely (returns the input unchanged).
+ *
+ * The single cheapest success-rate lever: a "not found" caused by a slow render
+ * never reaches the AI takeover at all.
+ */
+export function applyDefaultWaits(workflow: Workflow, ms: number): Workflow {
+  if (!(ms > 0)) return workflow
   const clone = structuredClone(workflow)
   for (const node of clone.drawflow.nodes) {
     const raw = node.data?.['blockId']
@@ -68,6 +95,13 @@ export function withWaitFor(workflow: Workflow, ms = DEBUG_WAIT_MS): Workflow {
     if (!(typeof existing === 'number' && existing > 0)) node.data['waitSelectorTimeout'] = ms
   }
   return clone
+}
+
+/**
+ * Debug-run alias of {@link applyDefaultWaits} with the longer debug window.
+ */
+export function withWaitFor(workflow: Workflow, ms = DEBUG_WAIT_MS): Workflow {
+  return applyDefaultWaits(workflow, ms)
 }
 
 /**
@@ -122,7 +156,10 @@ export interface AuditOutcome {
 
 export interface DebugSessionDeps {
   /** Runs one workflow pass (executeWorkflow). */
-  run: (workflow: Workflow, opts: { aiTakeover?: AiTakeoverHook | null }) => Promise<DebugRunResult>
+  run: (
+    workflow: Workflow,
+    opts: { aiTakeover?: AiTakeoverHook | null; sessionId?: string },
+  ) => Promise<DebugRunResult>
   /** Builds a fresh takeover hook for one run. */
   createTakeover: (opts: {
     onEvent: (kind: 'tool' | 'status' | 'result' | 'error' | 'info', text: string) => void
@@ -135,7 +172,10 @@ export interface DebugSessionDeps {
    * goal on the live page exactly like the first chat run. Undefined skips
    * the phase (plain failure).
    */
-  replay?: (workflow: Workflow, onStep: (kind: 'tool' | 'status' | 'result' | 'error', text: string) => void) => Promise<ReplayResult>
+  replay?: (
+    workflow: Workflow,
+    onStep: (kind: 'tool' | 'status' | 'result' | 'error', text: string) => void,
+  ) => Promise<ReplayResult>
   /**
    * Phase 3: audits the graph against the replay and (when the model's
    * corrected graph validates) returns the rewritten workflow. Receives the
@@ -147,16 +187,41 @@ export interface DebugSessionDeps {
     failure: { error?: string; takeoverNote?: string },
   ) => Promise<AuditOutcome | null>
   /** Persists a verified WHOLE-GRAPH rewrite (takeover-pending.rewrite). */
-  saveRewrite?: (workflowId: string, runId: string, rewrite: { workflow: Workflow; changes: string[]; diagnosis: string }) => Promise<void>
+  saveRewrite?: (
+    workflowId: string,
+    runId: string,
+    rewrite: { workflow: Workflow; changes: string[]; diagnosis: string },
+  ) => Promise<void>
   /**
    * Goal-completion judge: "no error" is NOT success — decide whether a
    * finished run actually achieved the workflow's goal. Returns null when
    * unavailable (no provider) and the session falls back to the no-error
    * standard. Called on EVERY ok run outcome (first pass, verify, rewrite).
    */
-  goalCheck?: (workflow: Workflow, evidence: { runId: string; summary?: string; steps: { kind: string; text: string }[]; variables: Record<string, unknown> }) => Promise<GoalVerdict | null>
+  goalCheck?: (
+    workflow: Workflow,
+    evidence: {
+      runId: string
+      summary?: string
+      steps: { kind: string; text: string }[]
+      variables: Record<string, unknown>
+      /**
+       * The run being judged ENDED IN FAILURE. The judge must then also
+       * consider the terminal-state case: a NON-IDEMPOTENT goal (login,
+       * submit, send) may already hold, so the "failure" is just the missing
+       * precondition — retrying can never re-demonstrate it.
+       */
+      runFailed?: boolean
+    },
+  ) => Promise<GoalVerdict | null>
   /** Live session log sink (the panel's debug modal). */
   onDebugStep?: (kind: 'info' | 'status' | 'error' | 'result', text: string) => void
+  /**
+   * M4: the debug session's id, stamped onto EVERY run this session spawns
+   * (takeover pass, fix-verify, rewrite-verify) so the session's runs,
+   * checkpoints and takeover stats can be joined after the fact.
+   */
+  sessionId?: string
   /** Run→fix→verify rounds; the first takeover run counts as round 1. */
   maxRounds?: number
 }
@@ -180,26 +245,73 @@ export async function runDebugSession(
   const takeovers: TakeoverReport[] = []
   let attempts = 0
   let lastRunId: string | undefined
+  /** The most recent run result — the evidence for the terminal-state check. */
+  let lastRun: DebugRunResult | undefined
   let lastError: string | undefined
   let roundsSeen = 0
+  /**
+   * Failure signatures seen this session (ordered, oldest first) — the
+   * anti-infinite-retry breaker. A non-idempotent workflow that already landed
+   * fails identically on every round, so seeing the same signature again is a
+   * signal to STOP (see {@link REPEAT_FAILURE_LIMIT}).
+   */
+  const seenSignatures: string[] = []
+
+  /**
+   * Records a failure signature; returns true when the SAME failure has now
+   * recurred enough times that walking into it again is pointless.
+   */
+  const isRepeatedDeadEnd = (error: string | undefined): boolean => {
+    if (!error) return false
+    const signature = failureSignature('session', error)
+    seenSignatures.push(signature)
+    return seenSignatures.filter((s) => s === signature).length > REPEAT_FAILURE_LIMIT
+  }
 
   /** Plain-failure result (no escalation available / escalation failed). */
   const failedResult = (
     summary: string,
     extra: Partial<WorkflowDebugResult> = {},
-  ): WorkflowDebugResult => ({
-    ok: false,
-    // The final workflow version never passed a takeover-free run here.
-    verified: false,
-    attempts,
-    summary,
-    ...(lastError ? { error: lastError } : {}),
-    ...(lastRunId ? { lastRunId } : {}),
-    rounds: Math.max(roundsSeen, 1),
-    takeovers,
-    pendingChanges: [],
-    ...extra,
-  })
+  ): WorkflowDebugResult => {
+    // Derive a structured failure reason + next-step hint from the error that
+    // actually drives the result (explicit extra.error wins over lastError).
+    const drivingError = (extra as { error?: string }).error ?? lastError
+    const structured = validationFailure(drivingError)
+    return {
+      ok: false,
+      // The final workflow version never passed a takeover-free run here.
+      verified: false,
+      attempts,
+      summary,
+      ...(lastError ? { error: lastError } : {}),
+      ...(lastRunId ? { lastRunId } : {}),
+      rounds: Math.max(roundsSeen, 1),
+      takeovers,
+      pendingChanges: [],
+      ...structured,
+      ...extra,
+    }
+  }
+
+  /**
+   * Stops the session when the SAME failure keeps coming back. Retrying a
+   * non-idempotent workflow that already fired is not merely useless — it can
+   * never return to the starting page, so each round is guaranteed to fail
+   * again. Tell the user to reset the state instead of looping.
+   */
+  const stopOnRepeatedDeadEnd = (error: string | undefined): WorkflowDebugResult => {
+    const detail = error ?? '(无详情)'
+    log(
+      'error',
+      `同一错误已连续出现超过 ${REPEAT_FAILURE_LIMIT} 次：${detail} —— 继续重试不会有新结果，停止调试`,
+    )
+    return failedResult(
+      `重复失败：${detail}。连续多次卡在同一个错误，继续重试不会回到初始状态（若是登录/提交类流程，请先手动复位到未登录/未提交状态再调试）`,
+      {
+        error: detail,
+      },
+    )
+  }
 
   /**
    * Phase 2+3 (复演 + 图审计): the node-level path failed, so a full agent
@@ -208,9 +320,16 @@ export async function runDebugSession(
    * graph validates — the rewrite is VERIFY-RUN (no takeover) before it is
    * offered to the user. Nothing is saved when the verify run fails.
    */
-  const escalateToReplay = async (failure: {
-    error?: string
-  }): Promise<WorkflowDebugResult> => {
+  const escalateToReplay = async (failure: { error?: string }): Promise<WorkflowDebugResult> => {
+    // TERMINAL-STATE ESCAPE HATCH (非幂等目标).
+    // Before spending a full replay, ask whether the goal ALREADY holds. A
+    // login workflow that already logged in cannot be replayed — the login page
+    // is gone — so replaying only walks into the same dead end forever. This is
+    // the single guard against "already succeeded but keeps retrying".
+    if (lastRun && lastRun.outcome !== 'ok') {
+      const satisfied = await judgeAlreadySatisfied(lastRun)
+      if (satisfied) return alreadySatisfiedResult(satisfied)
+    }
     if (!deps.replay || !deps.audit) {
       return failedResult(lastError ?? failure.error ?? 'AI 调试未能修复该工作流')
     }
@@ -225,7 +344,9 @@ export async function runDebugSession(
     let replay: ReplayResult
     try {
       replay = await deps.replay(current, (kind, text) => {
-        trace.push(`${kind === 'tool' ? '→' : kind === 'result' ? '←' : kind === 'error' ? '!' : '·'} ${text}`)
+        trace.push(
+          `${kind === 'tool' ? '→' : kind === 'result' ? '←' : kind === 'error' ? '!' : '·'} ${text}`,
+        )
         if (trace.length > 80) trace.splice(0, trace.length - 80)
         log(kind === 'tool' ? 'status' : kind, `🔁 ${text}`)
       })
@@ -251,7 +372,10 @@ export async function runDebugSession(
     }
     log('result', `诊断：${outcome.diagnosis}`)
     for (const node of outcome.nodes) {
-      log('info', `节点审计「${node.nodeLabel}」：${node.verdict}${node.note ? ` — ${node.note}` : ''}`)
+      log(
+        'info',
+        `节点审计「${node.nodeLabel}」：${node.verdict}${node.note ? ` — ${node.note}` : ''}`,
+      )
     }
     if (!outcome.rewritten) {
       log('error', 'AI 未能给出可用的修正版工作流（图校验未通过），本次调试不保存任何修改')
@@ -263,7 +387,10 @@ export async function runDebugSession(
     log('status', '验证 AI 生成的新工作流（无 AI 接管，独立运行）…')
     let v: DebugRunResult
     try {
-      v = await deps.run(outcome.rewritten, { aiTakeover: null })
+      v = await deps.run(outcome.rewritten, {
+        ...(deps.sessionId ? { sessionId: deps.sessionId } : {}),
+        aiTakeover: null,
+      })
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error)
       log('error', `新工作流验证运行异常：${text}`)
@@ -274,6 +401,7 @@ export async function runDebugSession(
     }
     attempts += 1
     lastRunId = v.runId
+    lastRun = v
     if (v.outcome === 'cancelled') {
       log('info', '新工作流验证运行已取消')
       return {
@@ -290,7 +418,14 @@ export async function runDebugSession(
     }
     if (v.outcome !== 'ok') {
       lastError = v.error ?? v.summary
-      log('error', `新工作流验证仍失败：${lastError ?? '(无详情)'}——不保存修改，请参考节点审计自行调整`)
+      log(
+        'error',
+        `新工作流验证仍失败：${lastError ?? '(无详情)'}——不保存修改，请参考节点审计自行调整`,
+      )
+      // The rebuild failed — but for a non-idempotent goal that may simply mean
+      // it was already done. Ask before declaring defeat.
+      const satisfied = await judgeAlreadySatisfied(v)
+      if (satisfied) return alreadySatisfiedResult(satisfied)
       return failedResult(outcome.diagnosis, {
         audit: outcome.nodes,
       })
@@ -316,7 +451,10 @@ export async function runDebugSession(
         diagnosis: outcome.diagnosis,
       })
       .catch(() => undefined)
-    log('result', `新工作流验证通过${goal ? `，目标已达成（${goal.reason}）` : ''}（${outcome.changes.length} 项变更待确认）`)
+    log(
+      'result',
+      `新工作流验证通过${goal ? `，目标已达成（${goal.reason}）` : ''}（${outcome.changes.length} 项变更待确认）`,
+    )
     return {
       ok: true,
       attempts,
@@ -345,19 +483,61 @@ export async function runDebugSession(
         summary: r.summary,
         steps: r.steps ?? [],
         variables: r.variables ?? {},
+        runFailed: r.outcome !== 'ok',
       })
     } catch {
       return null
     }
   }
 
+  /**
+   * TERMINAL-STATE ESCAPE HATCH (非幂等目标的"已达成"判定).
+   *
+   * A failed run is not automatically a broken workflow. For non-idempotent
+   * goals (log in / submit / send / register / pay) the goal may ALREADY hold —
+   * the login landed on an earlier round, so the username field is gone and the
+   * re-run can only fail. Ask the goal judge whether the END STATE holds; when
+   * it does, the session is over and successful. Returns null when the judge is
+   * unavailable or says the goal does not hold.
+   */
+  const judgeAlreadySatisfied = async (r: DebugRunResult): Promise<GoalVerdict | null> => {
+    const verdict = await judgeGoal(r)
+    if (verdict && verdict.achieved && verdict.alreadySatisfied) return verdict
+    return null
+  }
+
+  /** Success result for a goal that already holds (non-idempotent flow). */
+  const alreadySatisfiedResult = (verdict: GoalVerdict): WorkflowDebugResult => {
+    log(
+      'result',
+      `目标已达成（终态已满足，无需再跑）：${verdict.reason} —— 非幂等流程（登录/提交/发送类）已经生效，重试不会回到初始页面，本次调试到此结束`,
+    )
+    return {
+      ok: true,
+      attempts,
+      summary: verdict.reason || '目标终态已满足（非幂等流程已生效）',
+      ...(lastRunId ? { lastRunId } : {}),
+      verified: true,
+      rounds: Math.max(roundsSeen, 1),
+      takeovers,
+      pendingChanges: [],
+      goalAchieved: true,
+      goalNote: verdict.reason,
+      alreadySatisfied: true,
+    }
+  }
+
   for (let round = 1; round <= maxRounds; round++) {
     roundsSeen = round
-    log('status', `开始第 ${round}/${maxRounds} 轮调试运行${round > 1 ? '（已应用上一轮修复）' : '（交互节点自动等待 4 秒）'}…`)
+    log(
+      'status',
+      `开始第 ${round}/${maxRounds} 轮调试运行${round > 1 ? '（已应用上一轮修复）' : '（交互节点自动等待 4 秒）'}…`,
+    )
     const reports: TakeoverReport[] = []
     let r: DebugRunResult
     try {
       r = await deps.run(current, {
+        ...(deps.sessionId ? { sessionId: deps.sessionId } : {}),
         aiTakeover: deps.createTakeover({
           onEvent: (kind, text) => log(kind === 'tool' ? 'status' : kind, text),
           onTakeover: (report) => {
@@ -389,6 +569,7 @@ export async function runDebugSession(
     }
     attempts += 1
     lastRunId = r.runId
+    lastRun = r
     lastError = r.error
 
     if (r.outcome === 'cancelled') {
@@ -415,7 +596,10 @@ export async function runDebugSession(
         log('error', `运行无报错，但目标未达成：${goal.reason} —— 转入复演+图审计修复`)
         return escalateToReplay({ error: `目标未达成：${goal.reason}` })
       }
-      log('result', `调试通过：${goal ? `目标已达成（${goal.reason}）` : r.summary || '运行成功（无需修复）'}`)
+      log(
+        'result',
+        `调试通过：${goal ? `目标已达成（${goal.reason}）` : r.summary || '运行成功（无需修复）'}`,
+      )
       return {
         ok: true,
         attempts,
@@ -431,6 +615,14 @@ export async function runDebugSession(
 
     if (fixes.length === 0) {
       log('error', `运行失败且没有可用的修复建议：${r.error ?? r.summary ?? '(无详情)'}`)
+      // A failed run is NOT proof of a broken workflow: for a non-idempotent
+      // goal (login / submit / send) the run may be failing precisely because
+      // the goal ALREADY holds and its preconditions are gone. Check first.
+      const satisfied = await judgeAlreadySatisfied(r)
+      if (satisfied) return alreadySatisfiedResult(satisfied)
+      if (isRepeatedDeadEnd(r.error ?? r.summary)) {
+        return stopOnRepeatedDeadEnd(r.error ?? r.summary)
+      }
       // Nothing to patch — escalate straight to replay + graph audit.
       return escalateToReplay({ error: r.error ?? r.summary })
     }
@@ -457,20 +649,24 @@ export async function runDebugSession(
     log('status', '验证运行（关闭 AI 接管，验证修复后流程可独立跑通）…')
     let v: DebugRunResult
     try {
-      v = await deps.run(patched.workflow, { aiTakeover: null })
+      v = await deps.run(patched.workflow, {
+        ...(deps.sessionId ? { sessionId: deps.sessionId } : {}),
+        aiTakeover: null,
+      })
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error)
       log('error', `验证运行异常：${text}`)
       return {
         ok: r.outcome === 'ok',
         attempts,
-        summary: r.outcome === 'ok' ? (r.summary || '运行成功') : (r.error ?? '运行失败'),
+        summary: r.outcome === 'ok' ? r.summary || '运行成功' : (r.error ?? '运行失败'),
         ...(r.error ? { error: r.error } : {}),
         ...(lastRunId ? { lastRunId } : {}),
         verified: false,
         rounds: round,
         takeovers,
         pendingChanges: [],
+        ...validationFailure(r.error ?? r.summary),
       }
     }
     attempts += 1
@@ -526,6 +722,15 @@ export async function runDebugSession(
 
     lastError = v.error ?? v.summary
     log('error', `验证运行仍失败：${lastError ?? '(无详情)'}`)
+    // THE infinite-retry guard for non-idempotent flows. A login workflow that
+    // already logged in CANNOT re-demonstrate the login: the next round lands
+    // on the dashboard, the username field is gone, and every round fails the
+    // same way. Check the terminal state before burning another round.
+    const satisfied = await judgeAlreadySatisfied(v)
+    if (satisfied) return alreadySatisfiedResult(satisfied)
+    if (isRepeatedDeadEnd(lastError)) {
+      return stopOnRepeatedDeadEnd(lastError)
+    }
     if (round < maxRounds) {
       // Next round's takeover sees the patched graph + the verify failure.
       current = patched.workflow

@@ -58,8 +58,7 @@ export default function SelectorField({
   const [verifyStatus, setVerifyStatus] = useState<{ text: string; kind: 'ok' | 'error' } | null>(
     null,
   )
-  const reportVerify = (text: string, kind: 'ok' | 'error'): void =>
-    setVerifyStatus({ text, kind })
+  const reportVerify = (text: string, kind: 'ok' | 'error'): void => setVerifyStatus({ text, kind })
   // A generated node may carry the conversation's locator instead of a CSS
   // selector — show it read-only so the edit panel is not blank.
   const locatorHint = data && showLocatorHint && !selector ? targetSummary(data) : ''

@@ -186,7 +186,6 @@ export default function EditPressKey({ data, onChange }: EditFormProps) {
       window.removeEventListener('keyup', onKeyup)
     }
     // onChange is stable enough; the listeners are (re)bound per recording state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRecording])
 
   return (

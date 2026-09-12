@@ -49,7 +49,13 @@
  * @module background/feishu-bot
  */
 
-import { getWsEndpoint, FeishuError, TenantTokenProvider, sendImText, httpFetch } from '../lib/feishu'
+import {
+  getWsEndpoint,
+  FeishuError,
+  TenantTokenProvider,
+  sendImText,
+  httpFetch,
+} from '../lib/feishu'
 import {
   decodeFrame,
   encodeAck,
@@ -69,14 +75,7 @@ import { triggerNow } from './scheduler'
 import { resolveUnattendedScope } from './window-policy'
 import { executeWorkflow } from './workflow-engine/run-workflow'
 import { runUnattendedPrompt } from './agent-unattended'
-import {
-  addStep,
-  finishRun,
-  listRunning,
-  setOnCancel,
-  startRun,
-} from './running-tasks'
-
+import { addStep, finishRun, listRunning, setOnCancel, startRun } from './running-tasks'
 
 /** Alarm name the watchdog uses; also exported for clearing on stop. */
 export const FEISHU_WATCHDOG_ALARM = 'feishu-bot-watchdog'
@@ -97,14 +96,14 @@ export const COMMAND_PATTERNS = [
 ]
 
 /** Slash-style command that runs a named workflow by id or name. */
-export const WORKFLOW_COMMAND = /^\s*(?:\/run\s+workflow|\/workflow|运行工作流|执行工作流)[：: ]?\s*(.+)$/i
+export const WORKFLOW_COMMAND =
+  /^\s*(?:\/run\s+workflow|\/workflow|运行工作流|执行工作流)[：: ]?\s*(.+)$/i
 
 /** True when an inbound message text should trigger a task run. Exported for tests. */
 export function isCommand(text: string): boolean {
   return COMMAND_PATTERNS.some((pattern) => pattern.test(text))
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyHandler = (ev: any) => void
 
 interface SocketLike {
@@ -172,8 +171,7 @@ export class FeishuBot {
    */
   async reconcile(): Promise<void> {
     const config = await getFeishuConfig()
-    const wanted =
-      config.botEnabled && config.appId.length > 0 && config.appSecret.length > 0
+    const wanted = config.botEnabled && config.appId.length > 0 && config.appSecret.length > 0
 
     if (!wanted) {
       this.stop()
@@ -343,7 +341,6 @@ export class FeishuBot {
       payload: inbound.payload,
     })
   }
-
 
   private send(bytes: Uint8Array): void {
     if (this.socket && this.connected) {
@@ -643,11 +640,7 @@ export class FeishuBot {
    * executed inline here — `executeWorkflow` registers its own run on the board
    * and we stream its engine steps to the chat before replying with the outcome.
    */
-  private async runWorkflowAndReport(
-    token: string,
-    chatId: string,
-    wf: Workflow,
-  ): Promise<void> {
+  private async runWorkflowAndReport(token: string, chatId: string, wf: Workflow): Promise<void> {
     const streamer = new StepStreamer(token, chatId)
     streamer.start()
     try {
@@ -710,7 +703,8 @@ async function safeReply(token: string, chatId: string, text: string): Promise<v
   try {
     await sendImText(token, chatId, text)
   } catch (error) {
-    if (error instanceof FeishuError) console.warn('[Browser Copilot] feishu reply failed', error.code)
+    if (error instanceof FeishuError)
+      console.warn('[Browser Copilot] feishu reply failed', error.code)
   }
 }
 

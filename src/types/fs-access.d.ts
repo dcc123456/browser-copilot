@@ -12,25 +12,15 @@ declare global {
   }
 
   interface FileSystemHandle {
-    queryPermission(
-      descriptor?: FileSystemHandlePermissionDescriptor,
-    ): Promise<PermissionState>
-    requestPermission(
-      descriptor?: FileSystemHandlePermissionDescriptor,
-    ): Promise<PermissionState>
+    queryPermission(descriptor?: FileSystemHandlePermissionDescriptor): Promise<PermissionState>
+    requestPermission(descriptor?: FileSystemHandlePermissionDescriptor): Promise<PermissionState>
   }
 
   interface DirectoryPickerOptions {
     id?: string
     mode?: 'read' | 'readwrite'
     startIn?:
-      | 'desktop'
-      | 'documents'
-      | 'downloads'
-      | 'music'
-      | 'pictures'
-      | 'videos'
-      | FileSystemHandle
+      'desktop' | 'documents' | 'downloads' | 'music' | 'pictures' | 'videos' | FileSystemHandle
     types?: Array<{ description?: string; accept: Record<string, string[]> }>
     excludeAcceptAllOption?: boolean
   }
@@ -45,13 +35,7 @@ declare global {
     id?: string
     suggestedName?: string
     startIn?:
-      | 'desktop'
-      | 'documents'
-      | 'downloads'
-      | 'music'
-      | 'pictures'
-      | 'videos'
-      | FileSystemHandle
+      'desktop' | 'documents' | 'downloads' | 'music' | 'pictures' | 'videos' | FileSystemHandle
     types?: Array<{ description?: string; accept: Record<string, string[]> }>
     excludeAcceptAllOption?: boolean
   }

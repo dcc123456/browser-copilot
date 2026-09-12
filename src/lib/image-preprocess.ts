@@ -48,7 +48,11 @@ export interface EnhanceOptions {
  * The result is never below 1 and keeps the upscaled largest side within
  * `maxUpscaledSide`.
  */
-export function computeUpscaleFactor(width: number, height: number, opts: UpscaleOptions = {}): number {
+export function computeUpscaleFactor(
+  width: number,
+  height: number,
+  opts: UpscaleOptions = {},
+): number {
   const upscaleBelowSide = opts.upscaleBelowSide ?? 800
   const factor = opts.upscaleFactor ?? 3
   const maxUpscaledSide = opts.maxUpscaledSide ?? 2400
@@ -183,7 +187,12 @@ export function enhancePixels(
     }
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        if (x < borderDepth || x >= width - borderDepth || y < borderDepth || y >= height - borderDepth) {
+        if (
+          x < borderDepth ||
+          x >= width - borderDepth ||
+          y < borderDepth ||
+          y >= height - borderDepth
+        ) {
           sample(x, y)
         }
       }

@@ -209,7 +209,7 @@ export function decodeFrame(bytes: Uint8Array): Frame | null {
         case 5: {
           // nested Header message
           const lenR = decodeVarint(bytes, pos)
-          const end = pos = lenR.next + Number(lenR.value)
+          const end = (pos = lenR.next + Number(lenR.value))
           let key = ''
           let value = ''
           let hp = lenR.next
@@ -279,7 +279,10 @@ export function decodeFrame(bytes: Uint8Array): Frame | null {
   return frame
 }
 
-function decodeLengthPrefixed(bytes: Uint8Array, pos: number): { text: string; bytes: Uint8Array; next: number } {
+function decodeLengthPrefixed(
+  bytes: Uint8Array,
+  pos: number,
+): { text: string; bytes: Uint8Array; next: number } {
   const lenR = decodeVarint(bytes, pos)
   const start = lenR.next
   const end = start + Number(lenR.value)

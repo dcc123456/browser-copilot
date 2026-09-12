@@ -253,9 +253,7 @@ export interface ElementCaptureOptions {
   preferredTabId?: number
 }
 
-export type ElementCaptureResult =
-  | { ok: true; dataUrl: string }
-  | { ok: false; error: string }
+export type ElementCaptureResult = { ok: true; dataUrl: string } | { ok: false; error: string }
 
 /**
  * Ink probe for captured element images: decodes the data URL via
@@ -266,7 +264,8 @@ export type ElementCaptureResult =
  * (check skipped: treat as content, never reject).
  */
 export async function imageHasInk(dataUrl: string): Promise<boolean | null> {
-  if (typeof OffscreenCanvas === 'undefined' || typeof createImageBitmap === 'undefined') return null
+  if (typeof OffscreenCanvas === 'undefined' || typeof createImageBitmap === 'undefined')
+    return null
   try {
     const res = await fetch(dataUrl)
     const bitmap = await createImageBitmap(await res.blob())
@@ -345,8 +344,7 @@ export async function captureElementRobust(
           if ((await imageHasInk(result.data)) !== false) {
             return { ok: true, dataUrl: result.data }
           }
-          lastError =
-            `元素 ${selector} 序列化截图内容为纯色（canvas 绘制或包裹的 <img> 不进入序列化），改用整页截图裁剪`
+          lastError = `元素 ${selector} 序列化截图内容为纯色（canvas 绘制或包裹的 <img> 不进入序列化），改用整页截图裁剪`
         }
       }
       if (result.error) lastError = result.error
@@ -370,12 +368,13 @@ export async function captureElementRobust(
     const tab = await resolveAutomationTab(preferredTabId, scope)
     lastTabUrl = tab?.url
     if (!tab || typeof tab.id !== 'number') {
-      return { ok: false, error: `无法截取元素 ${selector} — 没有可操作的网页标签页（请先在普通 http(s) 页面上运行）` }
+      return {
+        ok: false,
+        error: `无法截取元素 ${selector} — 没有可操作的网页标签页（请先在普通 http(s) 页面上运行）`,
+      }
     }
 
-    let rect:
-      | { x: number; y: number; w: number; h: number; dpr: number }
-      | null = null
+    let rect: { x: number; y: number; w: number; h: number; dpr: number } | null = null
     let sawEmpty = false
     let probeError: string | undefined
     const probedFrameHrefs: string[] = []

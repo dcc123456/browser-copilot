@@ -15,7 +15,9 @@ export default function EditGoBack(_props: EditFormProps) {
   const { bt } = useEditorLocale()
   return (
     <div className="wf-form">
-      <p className="wf-form-note">{bt('This block navigates browser history (go back one page).')}</p>
+      <p className="wf-form-note">
+        {bt('This block navigates browser history (go back one page).')}
+      </p>
       <p className="wf-form-note">{bt('No settings for this block.')}</p>
     </div>
   )

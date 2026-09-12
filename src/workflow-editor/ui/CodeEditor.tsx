@@ -155,7 +155,6 @@ export default function CodeEditor({
       viewRef.current = null
     }
     // Editor is created once; external value changes are synced below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lang, readOnly])
 
   // Sync external value (e.g. modal open) into the doc without resetting caret

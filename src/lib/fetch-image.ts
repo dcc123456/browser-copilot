@@ -75,7 +75,10 @@ export function fetchImageAsDataUrl(
       }
       return { ok: true, dataUrl: `data:${mime};base64,${btoa(binary)}` }
     } catch (error) {
-      return { ok: false, error: `Could not download ${url}: ${(error as Error)?.message ?? String(error)}` }
+      return {
+        ok: false,
+        error: `Could not download ${url}: ${(error as Error)?.message ?? String(error)}`,
+      }
     }
   })()
 }

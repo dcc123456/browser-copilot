@@ -113,30 +113,36 @@ export default function RunningBoard({ onSettled, busy }: RunningBoardProps): Re
     return () => clearInterval(timer)
   }, [refresh])
 
-  const cancelRunning = useCallback(async (runId: string): Promise<void> => {
-    setCancellingIds((prev) => {
-      const next = new Set(prev)
-      next.add(runId)
-      return next
-    })
-    setLocalBusy(true)
-    try {
-      await sendCommand({ type: 'tasks.cancel', runId })
-      await refresh()
-    } finally {
-      setLocalBusy(false)
-    }
-  }, [refresh])
+  const cancelRunning = useCallback(
+    async (runId: string): Promise<void> => {
+      setCancellingIds((prev) => {
+        const next = new Set(prev)
+        next.add(runId)
+        return next
+      })
+      setLocalBusy(true)
+      try {
+        await sendCommand({ type: 'tasks.cancel', runId })
+        await refresh()
+      } finally {
+        setLocalBusy(false)
+      }
+    },
+    [refresh],
+  )
 
-  const deleteFinished = useCallback(async (runId: string): Promise<void> => {
-    setLocalBusy(true)
-    try {
-      await sendCommand({ type: 'tasks.finished.delete', runId })
-      await refresh()
-    } finally {
-      setLocalBusy(false)
-    }
-  }, [refresh])
+  const deleteFinished = useCallback(
+    async (runId: string): Promise<void> => {
+      setLocalBusy(true)
+      try {
+        await sendCommand({ type: 'tasks.finished.delete', runId })
+        await refresh()
+      } finally {
+        setLocalBusy(false)
+      }
+    },
+    [refresh],
+  )
 
   const clearFinished = useCallback(async (): Promise<void> => {
     const ok = await confirmDialog({
@@ -234,7 +240,8 @@ export default function RunningBoard({ onSettled, busy }: RunningBoardProps): Re
                     <div className="running-meta">
                       <span className="run-tag">{sourceLabel(run.source)}</span>
                       <span>
-                        {t.taskStartedAt}: {new Date(run.startedAt).toLocaleTimeString(navigator.language)}
+                        {t.taskStartedAt}:{' '}
+                        {new Date(run.startedAt).toLocaleTimeString(navigator.language)}
                       </span>
                     </div>
                     {run.steps.length > 0 && (

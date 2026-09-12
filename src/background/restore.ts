@@ -89,10 +89,7 @@ export function toRestoreMessages(history: readonly WireMessage[]): RestoreMessa
     }
   }
   return history
-    .filter(
-      (entry) =>
-        entry.role === 'user' || entry.role === 'assistant' || entry.role === 'tool',
-    )
+    .filter((entry) => entry.role === 'user' || entry.role === 'assistant' || entry.role === 'tool')
     .map((entry) => {
       if (entry.role === 'tool') {
         const name = toolNames.get(entry.tool_call_id) ?? 'tool'

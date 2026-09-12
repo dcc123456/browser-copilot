@@ -37,7 +37,9 @@ export const startRecorder: RecorderStart = (args) => {
 
   // --- selector builder (inlined; mirrors build-selector.ts) ----------------
   const esc = (v: string) =>
-    typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(v) : v.replace(/([^a-zA-Z0-9_-])/g, '\\$1')
+    typeof CSS !== 'undefined' && CSS.escape
+      ? CSS.escape(v)
+      : v.replace(/([^a-zA-Z0-9_-])/g, '\\$1')
   function partOf(el: Element): string {
     const tag = el.tagName.toLowerCase()
     if (el.id) return `#${esc(el.id)}`
@@ -66,7 +68,10 @@ export const startRecorder: RecorderStart = (args) => {
         const h = list[i] as Element
         if (h.id === 'bc-element-picker' || h.id === 'bc-recorder-bar') continue
         const sr = (h as HTMLElement).shadowRoot
-        if (sr && sr.nodeType === 11) { roots.push(sr); visit(sr) }
+        if (sr && sr.nodeType === 11) {
+          roots.push(sr)
+          visit(sr)
+        }
       }
     }
     visit(document)
@@ -128,7 +133,10 @@ export const startRecorder: RecorderStart = (args) => {
   // (debounced). Relying on `change` alone misses fields the user submits via
   // Enter / button without blurring (the context is torn down before change
   // fires), so we record on input, on Enter and on change, deduping per field.
-  const TEXT_PENDING = new Map<Element, { selector: string; name: string; timer: ReturnType<typeof setTimeout> | null }>()
+  const TEXT_PENDING = new Map<
+    Element,
+    { selector: string; name: string; timer: ReturnType<typeof setTimeout> | null }
+  >()
 
   /**
    * The last text-field value recorded PER FIELD, keyed by element. One physical
@@ -216,7 +224,11 @@ export const startRecorder: RecorderStart = (args) => {
     // Either flush the pending value or, if nothing was debounced, still emit
     // the blur value — sendFormsText de-dupes against the last recorded value,
     // so this never duplicates the block a debounced/Enter path already sent.
-    sendFormsText(el, pending?.selector ?? (el as HTMLElement).dataset.__bcSel ?? selectorFor(el), pending?.name ?? textFieldName(el))
+    sendFormsText(
+      el,
+      pending?.selector ?? (el as HTMLElement).dataset.__bcSel ?? selectorFor(el),
+      pending?.name ?? textFieldName(el),
+    )
   }
   function onInputField(e: Event) {
     const el = eventTarget(e)
@@ -304,8 +316,20 @@ export const startRecorder: RecorderStart = (args) => {
   // Special keys are recorded as press-key; printable characters within inputs
   // are captured via the forms block above.
   const SPECIAL_KEYS = new Set([
-    'Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'ArrowUp', 'ArrowDown',
-    'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', ' ',
+    'Enter',
+    'Tab',
+    'Escape',
+    'Backspace',
+    'Delete',
+    'ArrowUp',
+    'ArrowDown',
+    'ArrowLeft',
+    'ArrowRight',
+    'Home',
+    'End',
+    'PageUp',
+    'PageDown',
+    ' ',
   ])
   function onKeydown(e: KeyboardEvent) {
     const el = eventTarget(e)
@@ -324,15 +348,35 @@ export const startRecorder: RecorderStart = (args) => {
     // record plain special keys when NOT typing in a field (those are part of
     // text entry, captured as forms).
     if (typing && !e.ctrlKey && !e.metaKey && !e.altKey && !SPECIAL_KEYS.has(e.key)) return
-    if (typing && !e.ctrlKey && !e.metaKey && !e.altKey && e.key !== 'Enter' && e.key !== 'Tab' && e.key !== 'Escape') return
+    if (
+      typing &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      e.key !== 'Enter' &&
+      e.key !== 'Tab' &&
+      e.key !== 'Escape'
+    )
+      return
     const key = e.key === ' ' ? 'Space' : e.key
     send({
       blockId: 'press-key',
       key,
-      modifiers: [e.ctrlKey && 'Ctrl', e.metaKey && 'Meta', e.altKey && 'Alt', e.shiftKey && 'Shift']
+      modifiers: [
+        e.ctrlKey && 'Ctrl',
+        e.metaKey && 'Meta',
+        e.altKey && 'Alt',
+        e.shiftKey && 'Shift',
+      ]
         .filter(Boolean)
         .join('+'),
-      description: [e.ctrlKey && 'Ctrl', e.metaKey && 'Meta', e.altKey && 'Alt', e.shiftKey && 'Shift', key]
+      description: [
+        e.ctrlKey && 'Ctrl',
+        e.metaKey && 'Meta',
+        e.altKey && 'Alt',
+        e.shiftKey && 'Shift',
+        key,
+      ]
         .filter(Boolean)
         .join('+'),
     })

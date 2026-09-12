@@ -53,7 +53,6 @@
   }
 }
 
-
 * {
   box-sizing: border-box;
 }
@@ -62,7 +61,12 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font:
+    13px/1.5 ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
 }
 
 #root {
@@ -96,7 +100,9 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
 }
 
 .tab:hover {
@@ -975,7 +981,10 @@ button {
   color: var(--text);
   cursor: pointer;
   font: inherit;
-  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 button:hover:not(:disabled) {
@@ -1034,7 +1043,9 @@ textarea {
   background: var(--sunken);
   color: var(--text);
   font: inherit;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 input:focus-visible,
@@ -1327,7 +1338,9 @@ textarea:focus-visible {
   gap: 8px;
   cursor: pointer;
   border: 1px solid transparent;
-  transition: border-color 120ms ease, filter 120ms ease;
+  transition:
+    border-color 120ms ease,
+    filter 120ms ease;
 }
 
 .banner-link[data-kind='error'] {
@@ -1955,7 +1968,9 @@ textarea:focus-visible {
   color: var(--muted);
   cursor: pointer;
   text-align: center;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
 }
 
 .seg-btn input {
@@ -2003,7 +2018,10 @@ textarea:focus-visible {
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
 }
 
 .day-chip:hover {
@@ -2339,9 +2357,18 @@ textarea:focus-visible {
 }
 
 @keyframes running-pulse {
-  0% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.4; transform: scale(0.8); }
-  100% { opacity: 1; transform: scale(1); }
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.8);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .running-list {
@@ -2794,7 +2821,9 @@ textarea:focus-visible {
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
-  transition: border-color 120ms ease, background 120ms ease;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
 }
 
 .record-card:hover {
@@ -2931,7 +2960,10 @@ textarea:focus-visible {
   flex: none;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+  transition:
+    opacity 120ms ease,
+    background 120ms ease,
+    color 120ms ease;
 }
 
 .record-head:hover .icon-btn,
@@ -3401,4 +3433,3 @@ textarea:focus-visible {
 .msg-attachments .attach-chip {
   max-width: 220px;
 }
-

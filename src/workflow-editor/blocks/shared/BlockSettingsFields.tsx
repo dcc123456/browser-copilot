@@ -93,7 +93,10 @@ export function OnErrorFields({ data, onChange }: EditFormProps) {
           {onError.retry && (
             <div className="wf-onerror-retry">
               {/* Automa: inline "Times ⓘ [input]" row. */}
-              <div className="wf-inline-field" title={bt('The number of times to retry the action')}>
+              <div
+                className="wf-inline-field"
+                title={bt('The number of times to retry the action')}
+              >
                 <span>{t('times')}</span>
                 <Info size={14} />
                 <div className="wf-inline-input">

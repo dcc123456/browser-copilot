@@ -56,16 +56,8 @@ export function buildMcpSnippet(client: McpClient, adapterPath?: string): string
         '}'
       )
     case 'codex':
-      return (
-        '[mcp_servers.browser-copilot]\n' +
-        'command = "node"\n' +
-        `args = [${arg}]`
-      )
+      return '[mcp_servers.browser-copilot]\n' + 'command = "node"\n' + `args = [${arg}]`
     case 'trae':
-      return (
-        'MCP 设置面板 → 添加 stdio MCP 服务：\n' +
-        '  command: node\n' +
-        `  args: [${arg}]`
-      )
+      return 'MCP 设置面板 → 添加 stdio MCP 服务：\n' + '  command: node\n' + `  args: [${arg}]`
   }
 }

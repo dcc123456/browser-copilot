@@ -41,6 +41,12 @@ export interface PendingTakeoverRecord {
    */
   rewrite?: PendingRewrite
   createdAt: number
+  /**
+   * M4: the AI-debug session that produced these fixes. Every record of one
+   * session (runs, checkpoints, takeover stats, pending fixes) can then be
+   * joined to answer "what exactly did this debug session do?".
+   */
+  sessionId?: string
 }
 
 /** Panel-facing pending info (joins the workflow name for display). */
@@ -130,7 +136,9 @@ export async function savePendingTakeover(record: PendingTakeoverRecord): Promis
 }
 
 /** Returns the pending fixes for a workflow, or undefined. */
-export async function getPendingTakeover(workflowId: string): Promise<PendingTakeoverRecord | undefined> {
+export async function getPendingTakeover(
+  workflowId: string,
+): Promise<PendingTakeoverRecord | undefined> {
   return (await loadAll())[workflowId]
 }
 

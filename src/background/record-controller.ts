@@ -112,7 +112,9 @@ export async function stopRecording(): Promise<string | undefined> {
   state = null
   setBadge(false)
   // Stop the recorder in every tab.
-  const tabs = await chrome.tabs.query(scopedWindowId !== undefined ? { windowId: scopedWindowId } : {})
+  const tabs = await chrome.tabs.query(
+    scopedWindowId !== undefined ? { windowId: scopedWindowId } : {},
+  )
   await Promise.all(
     tabs.map((t) =>
       typeof t.id === 'number'

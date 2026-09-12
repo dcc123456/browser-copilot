@@ -41,8 +41,7 @@ export interface WireToolCall {
  * {@link toApiMessages}; never stored in the transcript itself.
  */
 export type UserContentPart =
-  | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string } }
+  { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }
 
 export type WireMessage =
   | { role: 'system'; content: string }
@@ -226,10 +225,7 @@ export class SseAccumulator {
       return typeof v === 'number' && Number.isFinite(v) ? v : undefined
     }
     const inputTokens =
-      num('prompt_tokens') ??
-      num('input_tokens') ??
-      num('inputTokens') ??
-      num('promptTokens')
+      num('prompt_tokens') ?? num('input_tokens') ?? num('inputTokens') ?? num('promptTokens')
     const outputTokens =
       num('completion_tokens') ??
       num('output_tokens') ??
@@ -240,22 +236,19 @@ export class SseAccumulator {
     // cache_read_input_tokens (Anthropic-style gateways).
     const details = u.prompt_tokens_details as Record<string, unknown> | undefined
     const cachedInputTokens =
-      (details && typeof details.cached_tokens === 'number'
-        ? details.cached_tokens
-        : undefined) ??
+      (details && typeof details.cached_tokens === 'number' ? details.cached_tokens : undefined) ??
       num('cached_tokens') ??
       num('cachedTokens') ??
       num('cache_read_input_tokens') ??
       num('cacheReadInputTokens')
     const reasoningTokens =
-      (details &&
-      typeof details.reasoning_tokens === 'number'
+      (details && typeof details.reasoning_tokens === 'number'
         ? details.reasoning_tokens
-        : undefined) ?? num('reasoning_tokens') ?? num('reasoningTokens')
+        : undefined) ??
+      num('reasoning_tokens') ??
+      num('reasoningTokens')
     const totalTokens =
-      num('total_tokens') ??
-      num('totalTokens') ??
-      ((inputTokens ?? 0) + (outputTokens ?? 0))
+      num('total_tokens') ?? num('totalTokens') ?? (inputTokens ?? 0) + (outputTokens ?? 0)
     return {
       inputTokens: inputTokens ?? 0,
       outputTokens: outputTokens ?? 0,
@@ -296,8 +289,7 @@ export class SseAccumulator {
     }
 
     const choice = (parsed as { choices?: unknown[] }).choices?.[0] as
-      | { delta?: Record<string, unknown>; finish_reason?: string | null }
-      | undefined
+      { delta?: Record<string, unknown>; finish_reason?: string | null } | undefined
     if (!choice) return // usage-only trailing chunk
 
     if (typeof choice.finish_reason === 'string') this.finishReason = choice.finish_reason
@@ -319,8 +311,7 @@ export class SseAccumulator {
         function?: { name?: string; arguments?: string }
       }
       const index = typeof fragment.index === 'number' ? fragment.index : 0
-      const existing =
-        this.toolCalls.get(index) ?? { index, id: '', name: '', arguments: '' }
+      const existing = this.toolCalls.get(index) ?? { index, id: '', name: '', arguments: '' }
       if (fragment.id) existing.id = fragment.id
       if (fragment.function?.name) existing.name = fragment.function.name
       if (typeof fragment.function?.arguments === 'string') {
@@ -350,8 +341,71 @@ export interface StreamRequest {
   providerLabel?: string
 }
 
-/** Raised with a human-readable message for any non-2xx or transport failure. */
-export class LlmError extends Error {}
+/**
+ * HTTP statuses worth retrying: request timeout, rate limit, and 5xx. A retry
+ * can only help for these — 4xx client errors (bad key, bad model) are
+ * permanent, so retrying them would just burn quota.
+ */
+const RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504])
+
+/** Max attempts (1 initial + 2 retries) for a transient failure. */
+export const LLM_MAX_ATTEMPTS = 3
+
+/** Base backoff before the first retry; doubles per attempt (with jitter). */
+const RETRY_BASE_MS = 500
+
+/** Upper bound on a single backoff wait. */
+const RETRY_MAX_MS = 8000
+
+/**
+ * Raised with a human-readable message for any non-2xx or transport failure.
+ *
+ * `transient` marks a failure a retry may resolve (429 / 5xx / network);
+ * `status` carries the HTTP status when the failure came from a response.
+ * {@link streamCompletion} already retries transient failures internally, so
+ * callers only see a transient error after the attempts are exhausted.
+ */
+export class LlmError extends Error {
+  readonly status?: number
+  readonly transient: boolean
+  constructor(message: string, options: { status?: number; transient?: boolean } = {}) {
+    super(message)
+    this.name = 'LlmError'
+    this.status = options.status
+    this.transient =
+      options.transient ?? (options.status !== undefined && RETRYABLE_STATUS.has(options.status))
+  }
+}
+
+/** True when retrying the failed request may succeed (429 / 5xx / network). */
+export function isTransientLlmError(error: unknown): boolean {
+  return error instanceof LlmError && error.transient
+}
+
+/** Exponential backoff with full jitter, capped at {@link RETRY_MAX_MS}. */
+function retryBackoffMs(attempt: number): number {
+  const base = RETRY_BASE_MS * 2 ** (attempt - 1)
+  return Math.min(base + Math.random() * RETRY_BASE_MS, RETRY_MAX_MS)
+}
+
+/** Sleeps, rejecting with an AbortError when the signal fires mid-wait. */
+function sleepWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'))
+      return
+    }
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
 
 /** Builds the request headers, letting profile headers override nothing critical. */
 function buildHeaders(request: {
@@ -408,24 +462,53 @@ export async function streamCompletion(
       signal: request.signal,
     })
 
-  let response: Response
-  try {
-    response = await doFetch(body)
-    // A strict gateway may reject the unknown `stream_options` param outright;
-    // retry once without it — losing usage stats beats losing the reply.
-    if (!response.ok && response.status === 400) {
-      const { stream_options: _dropped, ...withoutUsage } = body
-      response = await doFetch(withoutUsage)
+  /**
+   * Fetches the completion, retrying TRANSIENT failures (429 / 5xx / network)
+   * with exponential backoff + jitter, up to {@link LLM_MAX_ATTEMPTS}.
+   *
+   * Retries happen only BEFORE the response body is consumed, so a partially
+   * read stream is never replayed (that would duplicate a completion). The
+   * 400-without-`stream_options` fallback is a format negotiation, not a
+   * transient retry, so it does not consume an attempt.
+   */
+  const attemptFetch = async (): Promise<Response> => {
+    let lastError: LlmError | undefined
+    for (let attempt = 1; attempt <= LLM_MAX_ATTEMPTS; attempt++) {
+      if (request.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+      try {
+        let response = await doFetch(body)
+        // A strict gateway may reject the unknown `stream_options` param
+        // outright; retry once without it — losing usage stats beats losing
+        // the reply.
+        if (!response.ok && response.status === 400) {
+          const { stream_options: _dropped, ...withoutUsage } = body
+          response = await doFetch(withoutUsage)
+        }
+        if (response.ok) return response
+        throw new LlmError(await describeHttpFailure(response, who), {
+          status: response.status,
+          transient: RETRYABLE_STATUS.has(response.status),
+        })
+      } catch (error) {
+        // Cancellation is never retried — callers distinguish it by name.
+        if ((error as Error)?.name === 'AbortError') throw error
+        const failure =
+          error instanceof LlmError
+            ? error
+            : new LlmError(
+                `Cannot reach ${url}: ${describeError(error)}. Check the base URL, your network, and whether the endpoint allows browser-extension requests.`,
+                { transient: true },
+              )
+        // Permanent failure, or attempts exhausted: surface it.
+        if (!failure.transient || attempt === LLM_MAX_ATTEMPTS) throw failure
+        lastError = failure
+      }
+      await sleepWithSignal(retryBackoffMs(attempt), request.signal)
     }
-  } catch (error) {
-    // Rethrow cancellation untouched so callers can distinguish it from failure.
-    if ((error as Error)?.name === 'AbortError') throw error
-    throw new LlmError(
-      `Cannot reach ${url}: ${describeError(error)}. Check the base URL, your network, and whether the endpoint allows browser-extension requests.`,
-    )
+    throw lastError ?? new LlmError(`${who} request failed.`)
   }
 
-  if (!response.ok) throw new LlmError(await describeHttpFailure(response, who))
+  const response = await attemptFetch()
   if (!response.body) throw new LlmError(`${who} returned an empty response body.`)
 
   const accumulator = new SseAccumulator(handlers)
@@ -533,8 +616,7 @@ async function describeHttpFailure(response: Response, who: string): Promise<str
         error?: { message?: string } | string
         message?: string
       }
-      const fromError =
-        typeof parsed.error === 'string' ? parsed.error : parsed.error?.message
+      const fromError = typeof parsed.error === 'string' ? parsed.error : parsed.error?.message
       detail = fromError ?? parsed.message ?? text.slice(0, 300)
     } catch {
       detail = text.slice(0, 300)

@@ -74,7 +74,8 @@ const GITHUB_HOST = 'github.com'
  */
 export function parseReviewFeed(
   xml: string,
-  parse: (source: string) => Document = (source) => new DOMParser().parseFromString(source, 'application/xml'),
+  parse: (source: string) => Document = (source) =>
+    new DOMParser().parseFromString(source, 'application/xml'),
 ): ReviewRequests | null {
   if (!xml || xml.length === 0) return null
   // A login redirect never contains an Atom <feed> root; be explicit so the
@@ -100,8 +101,8 @@ export function parseReviewFeed(
       title: get('title'),
       url: href,
       repo,
-      author: entry.getElementsByTagName('author')[0]?.getElementsByTagName('name')[0]
-        ?.textContent ?? '',
+      author:
+        entry.getElementsByTagName('author')[0]?.getElementsByTagName('name')[0]?.textContent ?? '',
       updatedAt: get('updated'),
     })
   }
@@ -172,9 +173,7 @@ export async function fetchReviewRequests(signal?: AbortSignal): Promise<ReviewR
       },
     })
 
-    const value = injections[0]?.result as
-      | { url: string; text: string; html: string }
-      | undefined
+    const value = injections[0]?.result as { url: string; text: string; html: string } | undefined
     if (!value) throw new Error('Could not read the GitHub tab.')
 
     // If we landed anywhere other than the feed (a redirect to login, an SSO
@@ -229,10 +228,7 @@ function waitForTabReady(tabId: number, timeoutMs = 8000, signal?: AbortSignal):
       chrome.tabs.onUpdated.removeListener(listener)
       reject(new DOMException('Aborted', 'AbortError'))
     }
-    const listener = (
-      updatedId: number,
-      info: chrome.tabs.TabChangeInfo,
-    ): void => {
+    const listener = (updatedId: number, info: chrome.tabs.TabChangeInfo): void => {
       if (updatedId === tabId && info.status === 'complete') finish()
     }
     chrome.tabs.onUpdated.addListener(listener)
@@ -246,7 +242,10 @@ function waitForTabReady(tabId: number, timeoutMs = 8000, signal?: AbortSignal):
  *
  * Pure so it can be tested without Chrome.
  */
-export function formatReviewSummary(result: ReviewRequests, locale: string = 'en'): {
+export function formatReviewSummary(
+  result: ReviewRequests,
+  locale: string = 'en',
+): {
   headline: string
   body: string
 } {
@@ -269,9 +268,7 @@ export function formatReviewSummary(result: ReviewRequests, locale: string = 'en
   })
   if (result.items.length > 15) {
     lines.push(
-      zh
-        ? `…以及另外 ${result.items.length - 15} 个`
-        : `…and ${result.items.length - 15} more`,
+      zh ? `…以及另外 ${result.items.length - 15} 个` : `…and ${result.items.length - 15} more`,
     )
   }
   lines.push(FEED_URL)

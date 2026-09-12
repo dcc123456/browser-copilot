@@ -232,6 +232,7 @@ export interface Messages {
   workflowsDebugNotVerified: string
   /** Lifetime takeover success-rate line in the debug modal footer. */
   workflowsDebugStats: (params: { rate: number; total: number }) => string
+  workflowsDebugSessionStats: (params: { rate: number; total: number; p50: number }) => string
   /** Classified takeover failure reasons (stats line). */
   workflowsDebugReasonAuth: string
   workflowsDebugReasonCaptcha: string
@@ -876,7 +877,8 @@ const en: Messages = {
   taskSchedWeekly: 'On weekdays',
   taskSchedInterval: 'Every',
   taskSchedManual: 'Manual',
-  taskManualHint: 'No automatic schedule — run it yourself with "Run now" or trigger it from Feishu.',
+  taskManualHint:
+    'No automatic schedule — run it yourself with "Run now" or trigger it from Feishu.',
   taskManualChip: 'Manual',
   taskEvery: 'every',
   taskMinutes: 'minutes',
@@ -985,8 +987,11 @@ const en: Messages = {
   workflowsDebugRewriteApplied: 'The AI-rebuilt workflow has been applied',
   workflowsDebugVerified: ({ count }) =>
     `Verified: the fixed workflow ran clean without AI (${count} fix(es) awaiting confirmation)`,
-  workflowsDebugNotVerified: 'Run succeeded via AI, but the fixes did NOT pass verification — review them carefully',
+  workflowsDebugNotVerified:
+    'Run succeeded via AI, but the fixes did NOT pass verification — review them carefully',
   workflowsDebugStats: ({ rate, total }) => `Takeover success rate: ${rate}% of ${total}`,
+  workflowsDebugSessionStats: ({ rate, total, p50 }) =>
+    `Verified runs (no AI needed): ${rate}% of ${total} sessions · median ${p50}ms`,
   workflowsDebugReasonAuth: 'login wall',
   workflowsDebugReasonCaptcha: 'captcha',
   workflowsDebugReasonNotfound: 'element not found',
@@ -1035,8 +1040,7 @@ const en: Messages = {
   chatAttachSelection: 'Attach selection',
   chatAttach: 'Attach files',
   chatAttachmentRemove: 'Remove attachment',
-  chatAttachmentTooLarge: ({ name }) =>
-    `${name} is too large (images ≤ 4 MB, text files ≤ 200 KB)`,
+  chatAttachmentTooLarge: ({ name }) => `${name} is too large (images ≤ 4 MB, text files ≤ 200 KB)`,
   chatAttachmentUnsupported: ({ name }) => `${name} is not a supported file type`,
   chatAttachmentTooMany: 'Too many attachments (max 4 per message)',
   chatAttachmentTotalTooLarge: 'Attachments exceed the total size limit (8 MB)',
@@ -1059,21 +1063,23 @@ const en: Messages = {
   chatSkillGo: ({ name }) => `Apply the "${name}" skill now.`,
   chatSkillGoSelection: ({ name }) =>
     `Apply the "${name}" skill to the text I selected on the page.`,
-  chatPlaceholderWithSkills:
-    'Message… (Enter to send, Shift+Enter for a new line, / for skills)',
+  chatPlaceholderWithSkills: 'Message… (Enter to send, Shift+Enter for a new line, / for skills)',
   chatSlashNoMatch: 'No matching skill',
   chatSaveWorkflowPrompt: ({ steps }) =>
     `This session performed ${steps} step${steps > 1 ? 's' : ''} that can be reused. Save them as a workflow?`,
   chatSaveWorkflowSave: 'Save as workflow',
   chatSaveWorkflowSkip: 'Skip',
   chatSaveWorkflowSaved: ({ name }) => `Saved workflow: ${name}`,
-  chatSaveWorkflowAiTitle: 'AI-generated content (checked = regenerate with AI at replay; unchecked = reuse the captured text)',
+  chatSaveWorkflowAiTitle:
+    'AI-generated content (checked = regenerate with AI at replay; unchecked = reuse the captured text)',
   chatWorkflowPromptToggle: 'Offer to save workflow',
-  chatWorkflowPromptToggleHint: 'When on, the panel offers to save this session as a workflow after each turn ends.',
+  chatWorkflowPromptToggleHint:
+    'When on, the panel offers to save this session as a workflow after each turn ends.',
   chatSaveWorkflowAiReview: 'AI refine…',
   chatWorkflowReviewing: 'AI is reviewing which nodes are worth keeping…',
   chatWorkflowReviewUnavailable: 'AI review unavailable — keeping all steps.',
-  chatWorkflowReviewDropped: ({ count }) => `AI dropped ${count} ineffective step${count > 1 ? 's' : ''} (unchecked); check to keep one.`,
+  chatWorkflowReviewDropped: ({ count }) =>
+    `AI dropped ${count} ineffective step${count > 1 ? 's' : ''} (unchecked); check to keep one.`,
   chatWorkflowReviewAllKept: 'AI reviewed every step — none look ineffective.',
   chatWorkflowStepsTitle: 'Steps (uncheck to remove from the workflow)',
   workflowReviewDialogTitle: 'Review steps before saving',
@@ -1083,7 +1089,8 @@ const en: Messages = {
   workflowReviewLogTitle: 'Review log',
   workflowReviewLogCollapse: 'Collapse',
   workflowReviewLogExpand: 'Expand',
-  workflowReviewLogStart: ({ steps }) => `Sent ${steps} step${steps > 1 ? 's' : ''} to the AI reviewer…`,
+  workflowReviewLogStart: ({ steps }) =>
+    `Sent ${steps} step${steps > 1 ? 's' : ''} to the AI reviewer…`,
   workflowReviewLogFailed: 'Review failed — keeping every step. Click “Retry review” to try again.',
 
   modeLabel: 'Mode',
@@ -1091,7 +1098,8 @@ const en: Messages = {
   modeReadonly: 'Read only',
   modeSemi: 'Semi-auto',
   modeFull: 'Full auto',
-  modeChatHint: 'Plain conversation. No operating rules or tools are sent, so it cannot read or act on the page, and uses the fewest tokens.',
+  modeChatHint:
+    'Plain conversation. No operating rules or tools are sent, so it cannot read or act on the page, and uses the fewest tokens.',
   modeReadonlyHint: 'Can read pages and answer, but cannot click, type, or navigate.',
   modeSemiHint: 'Each action is shown to you for approval before it runs.',
   modeFullHint: 'The agent acts without asking each time. Watch the log.',
@@ -1186,7 +1194,8 @@ const en: Messages = {
   settingsApiKey: 'API key',
   settingsShowKey: 'Show key',
   settingsModel: 'Model',
-  settingsModelsAvailable: ({ count }) => `${count} model(s) available — pick one from the dropdown.`,
+  settingsModelsAvailable: ({ count }) =>
+    `${count} model(s) available — pick one from the dropdown.`,
   settingsImageModelSelectHint:
     'Pick a model from the dropdown, or keep the provider default. Fetch the list first if it is empty.',
   settingsShowAdvanced: 'Show advanced',
@@ -1422,7 +1431,7 @@ const en: Messages = {
   dataPasswordValue: 'Password',
   dataPasswordNotes: 'Notes (optional)',
   dataPasswordStorageNote:
-    'Credentials are stored in this extension\'s local storage on this machine (never synced). Anyone with access to your browser profile can read them — do not save high-value passwords on a shared device.',
+    "Credentials are stored in this extension's local storage on this machine (never synced). Anyone with access to your browser profile can read them — do not save high-value passwords on a shared device.",
   dataSecrets: 'Secrets & fields',
   dataSecretsIntro:
     'Store any key/value credentials the agent can fill into forms (username, password, CVV, security answers, etc.). Add as many fields as a site needs.',
@@ -1461,8 +1470,7 @@ const en: Messages = {
   convPreview: 'Preview',
   convUpdated: 'Updated',
 
-  confirmActionHint:
-    'The assistant wants to perform the action below. Approve to let it run once.',
+  confirmActionHint: 'The assistant wants to perform the action below. Approve to let it run once.',
 
   errorPanelCrashed: 'The panel hit an unexpected error and stopped rendering.',
   errorWhatHappened: 'What happened',
@@ -1563,8 +1571,7 @@ const zhCN: Messages = {
   histNoSteps: '暂无步骤记录',
 
   tasksTitle: '运行任务',
-  tasksSubtitle:
-    '按计划运行任务，并可通过飞书通知结果。定时任务仅在浏览器打开时触发。',
+  tasksSubtitle: '按计划运行任务，并可通过飞书通知结果。定时任务仅在浏览器打开时触发。',
   taskNew: '新建任务',
   taskName: '名称',
   taskKind: '做什么',
@@ -1587,8 +1594,7 @@ const zhCN: Messages = {
   taskEvery: '每隔',
   taskMinutes: '分钟',
   taskMaxRounds: '最大调用轮数',
-  taskMaxRoundsHint:
-    '该任务无人值守时最多进行多少轮"模型↔工具"往返。独立于全局设置，默认 50。',
+  taskMaxRoundsHint: '该任务无人值守时最多进行多少轮"模型↔工具"往返。独立于全局设置，默认 50。',
   taskDaysAll: '每天',
   taskDaysWeekdays: '工作日',
   taskDaysWeekend: '周末',
@@ -1692,6 +1698,8 @@ const zhCN: Messages = {
     `已验证：修复后的流程无需 AI 也能跑通（${count} 处修改待确认）`,
   workflowsDebugNotVerified: '本次运行靠 AI 救回，但修复未通过验证——请仔细确认后再应用',
   workflowsDebugStats: ({ rate, total }) => `接管成功率：${total} 次中 ${rate}%`,
+  workflowsDebugSessionStats: ({ rate, total, p50 }) =>
+    `修复后无需 AI 即可跑通：${total} 次会话中 ${rate}% · 中位耗时 ${p50}ms`,
   workflowsDebugReasonAuth: '需要登录',
   workflowsDebugReasonCaptcha: '验证码',
   workflowsDebugReasonNotfound: '元素未找到',
@@ -1869,8 +1877,7 @@ const zhCN: Messages = {
   settingsTakeoverOnRunIntro:
     '默认关闭：普通运行失败即失败。开启后失败节点会获得一次 AI 接管机会，产生的修改建议进入待确认列表。',
   settingsTakeoverModelProvider: '模型服务',
-  settingsTakeoverModelSelectHint:
-    '从下拉中选择模型，或保持服务默认。列表为空时请先获取模型列表。',
+  settingsTakeoverModelSelectHint: '从下拉中选择模型，或保持服务默认。列表为空时请先获取模型列表。',
   settingsTakeoverModelSaved: 'AI 接管模型已保存。',
   settingsOcrLanguage: '本地 OCR 语言',
   settingsOcrLanguageIntro:
@@ -1880,7 +1887,8 @@ const zhCN: Messages = {
   settingsShowKey: '显示密钥',
   settingsModel: '模型',
   settingsModelsAvailable: ({ count }) => `共 ${count} 个可用模型，请从下拉列表中选择。`,
-  settingsImageModelSelectHint: '从下拉列表中选择模型；若列表为空请先点击“获取模型列表”。留空使用该 provider 的默认模型。',
+  settingsImageModelSelectHint:
+    '从下拉列表中选择模型；若列表为空请先点击“获取模型列表”。留空使用该 provider 的默认模型。',
   settingsShowAdvanced: '显示高级选项',
   settingsHideAdvanced: '收起高级选项',
   settingsTemperature: '温度',
@@ -2184,7 +2192,8 @@ const zhCN: Messages = {
   skillsImportHint: '可将 .json / .yaml / .md 技能文件拖到此处，或点击“导入”。',
   skillsImportFile: '选择文件',
   skillsImportResultOk: ({ count }) => `已成功导入 ${count} 个技能。`,
-  skillsImportResultFail: ({ ok, failed }) => `导入完成：成功 ${ok} 个，失败 ${failed} 个，详情见上方提示。`,
+  skillsImportResultFail: ({ ok, failed }) =>
+    `导入完成：成功 ${ok} 个，失败 ${failed} 个，详情见上方提示。`,
   skillsExportAll: '全部导出',
   skillsImportNameTaken: ({ name }) => `已跳过 “${name}”：同名技能已存在。`,
 }

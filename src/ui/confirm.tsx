@@ -61,7 +61,6 @@ export function ConfirmHost(): React.ReactElement | null {
         setPending(null)
       })
       .catch(() => setPending(null))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending])
 
   return api.node

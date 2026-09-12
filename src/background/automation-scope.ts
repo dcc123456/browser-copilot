@@ -40,9 +40,7 @@ export interface ScopeWindow {
  * DevTools, closed window, missing `chrome`) yields `undefined`, meaning
  * "no scope" — callers keep their legacy global behaviour.
  */
-export async function normalScopeFromWindowId(
-  windowId?: number,
-): Promise<ScopeWindow | undefined> {
+export async function normalScopeFromWindowId(windowId?: number): Promise<ScopeWindow | undefined> {
   if (typeof windowId !== 'number') return undefined
   if (typeof chrome === 'undefined' || !chrome.windows?.get) return undefined
   try {
@@ -185,7 +183,13 @@ export async function listNormalWindows(): Promise<
   const windows = await chrome.windows
     .getAll({ windowTypes: ['normal'], populate: true })
     .catch(() => [])
-  const out: { windowId: number; title: string; host?: string; isPanel: boolean; isMinimized: boolean }[] = []
+  const out: {
+    windowId: number
+    title: string
+    host?: string
+    isPanel: boolean
+    isMinimized: boolean
+  }[] = []
   for (const win of windows as chrome.windows.Window[]) {
     if (typeof win.id !== 'number') continue
     const active = win.tabs?.find((tab) => tab.active) ?? win.tabs?.[0]

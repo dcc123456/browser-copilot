@@ -10,12 +10,35 @@
  */
 
 import type { Workflow } from '../../lib/workflow/types'
+import { recordCheckpoint } from '../../lib/workflow/checkpoints'
+import {
+  createChromeCheckpointStore,
+  indexPersistedRun,
+  prunePersistedCheckpoints,
+} from '../checkpoint-store'
 import { addStep, finishRun, recordSnapshot, startRun, type RunSource } from '../running-tasks'
 import { countElements, execJsOnActiveTab } from '../driver'
 import { normalScopeFromWindowId } from '../automation-scope'
 import { BLOCK_BY_ID } from '../../lib/workflow/blocks/palette'
 import { runWorkflow } from './engine'
 import type { AiTakeoverHook } from './engine'
+import { DEFAULT_WAIT_MS, applyDefaultWaits } from './debug-session'
+
+/**
+ * One store for the whole background script: checkpoints are per-run, and the
+ * in-memory half is what the rollback path reads synchronously.
+ */
+let checkpointStore = createChromeCheckpointStore()
+
+/** Exposed for tests and for the debug session's rollback path. */
+export function getCheckpointStore(): ReturnType<typeof createChromeCheckpointStore> {
+  return checkpointStore
+}
+
+/** Replaces the store (tests inject an isolated one). */
+export function setCheckpointStore(next: ReturnType<typeof createChromeCheckpointStore>): void {
+  checkpointStore = next
+}
 
 /** Resolve a node id to a human-readable block label for run logs. */
 function nodeLabel(workflow: Workflow, nodeId: string): string {
@@ -52,6 +75,17 @@ export interface ExecuteWorkflowOptions {
   aiTakeover?: AiTakeoverHook
   /** Optional caller-side sink for each engine step, fired alongside the run log. */
   onStep?: (kind: string, nodeId: string, text: string) => void
+  /**
+   * M4: persist a per-step checkpoint (`checkpoints/<runId>.json`) so a run can
+   * be resumed — or rolled back to its last known-good step — after a crash or
+   * a service-worker restart. Default true; pass false for cheap throwaway runs.
+   */
+  checkpoints?: boolean
+  /**
+   * M4: correlates this run with the debug session that spawned it, so every
+   * checkpoint, takeover stat and run row of one session can be joined.
+   */
+  sessionId?: string
 }
 
 export interface ExecuteWorkflowResult {
@@ -80,15 +114,31 @@ export async function executeWorkflow(
     taskId: opts.taskId,
     workflowId: workflow.id,
     feishuChatId: opts.feishuChatId,
+    ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
   })
   const runId = run.runId
+  // M4: register the run in the persisted-checkpoint index so the pruner can
+  // retire the oldest runs once enough of them have accumulated.
+  const wantCheckpoints = opts.checkpoints !== false
+  if (wantCheckpoints) void indexPersistedRun(runId)
 
   try {
     // Validate the panel scope once for the whole run; every block then reads
     // the same ScopeWindow (no per-block window lookups).
     const scope =
-      opts.scopeWindowId === undefined ? undefined : await normalScopeFromWindowId(opts.scopeWindowId)
-    const result = await runWorkflow(workflow, {
+      opts.scopeWindowId === undefined
+        ? undefined
+        : await normalScopeFromWindowId(opts.scopeWindowId)
+    // Force-enable a short element wait on interaction blocks for EVERY run —
+    // the cheapest fix for "element not found" caused by a slow render, which
+    // otherwise costs a whole AI takeover. A workflow opts out with
+    // `settings.defaultWaitMs = 0`; a block that already set its own wait keeps
+    // it (applyDefaultWaits never overrides a user value).
+    const effective = applyDefaultWaits(
+      workflow,
+      workflow.settings?.defaultWaitMs ?? DEFAULT_WAIT_MS,
+    )
+    const result = await runWorkflow(effective, {
       startAt: opts.startAt,
       variables: opts.variables,
       signal: run.controller.signal,
@@ -97,7 +147,13 @@ export async function executeWorkflow(
       loopElementCounter: (selector, signal) => countElements(selector, signal, scope),
       // JS conditions run in the page: the service worker CSP forbids eval.
       evaluateExpression: async (code, vars) => {
-        const result = await execJsOnActiveTab(`return (${code});`, { vars }, run.controller.signal, undefined, scope)
+        const result = await execJsOnActiveTab(
+          `return (${code});`,
+          { vars },
+          run.controller.signal,
+          undefined,
+          scope,
+        )
         return result.ok ? result.data : undefined
       },
       onSnapshot: opts.debug
@@ -105,10 +161,29 @@ export async function executeWorkflow(
             recordSnapshot(runId, nodeId, nodeLabel(workflow, nodeId), variables)
           }
         : undefined,
+      // M4 checkpoints: one entry per settled node, persisted to
+      // `checkpoints/<runId>.json`. The engine only reports the step; the run
+      // id and the durable write live here so the engine stays chrome-free.
+      onCheckpoint: wantCheckpoints
+        ? ({ stepIndex, nodeId, status, variables }) => {
+            recordCheckpoint(checkpointStore, {
+              runId,
+              workflowId: workflow.id,
+              stepIndex,
+              nodeId,
+              status,
+              variables,
+              at: Date.now(),
+            })
+          }
+        : undefined,
       onStep: (kind, nodeId, text) => {
         if (kind === 'tool') {
           // Per-block header: resolved block name, not the raw node id.
-          addStep(runId, 'tool', nodeLabel(workflow, nodeId), { nodeId, label: nodeLabel(workflow, nodeId) })
+          addStep(runId, 'tool', nodeLabel(workflow, nodeId), {
+            nodeId,
+            label: nodeLabel(workflow, nodeId),
+          })
         } else {
           addStep(runId, kind, text, { nodeId, label: nodeLabel(workflow, nodeId) })
         }
@@ -124,6 +199,9 @@ export async function executeWorkflow(
     // so legacy failures still show something in the history error block.
     const error = outcome === 'failed' ? (result.error ?? summary) : undefined
     finishRun(runId, { outcome, summary, error })
+    // Retire the oldest runs' checkpoints so repeated debugging cannot fill
+    // the data directory. Fire-and-forget: pruning must never hold the run.
+    if (wantCheckpoints) void prunePersistedCheckpoints()
     return {
       runId,
       outcome,
@@ -134,13 +212,15 @@ export async function executeWorkflow(
     }
   } catch (e) {
     // A cancellation or engine error that leaked out of runWorkflow.
-    const aborted = run.controller.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')
+    const aborted =
+      run.controller.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')
     if (aborted) {
       finishRun(runId, { outcome: 'cancelled' })
       return { runId, outcome: 'cancelled' }
     }
     const text = e instanceof Error ? e.message : String(e)
     finishRun(runId, { outcome: 'failed', summary: text.split('\n')[0], error: text })
+    if (wantCheckpoints) void prunePersistedCheckpoints()
     return { runId, outcome: 'failed', summary: text.split('\n')[0], error: text }
   }
 }

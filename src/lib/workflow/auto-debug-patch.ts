@@ -41,6 +41,10 @@ export interface WorkflowDebugResult {
    * True when the FINAL workflow version completed a takeover-free run: the
    * fixes (if any) were verified to work WITHOUT AI help. A session that only
    * succeeded via AI reports verified=false with the fixes left pending.
+   *
+   * Exception: a non-idempotent goal that ALREADY holds ({@link alreadySatisfied})
+   * also reports verified=true — there is nothing left to verify, because the
+   * run cannot be repeated (there is no login page once you are logged in).
    */
   verified?: boolean
   /** How many apply-fix + verify rounds the session ran (1-based). */
@@ -65,6 +69,22 @@ export interface WorkflowDebugResult {
   goalAchieved?: boolean
   /** The judge's one-line Chinese reasoning (basis of achievement / the gap). */
   goalNote?: string
+  /**
+   * True when the goal's END STATE already held, independent of the last run —
+   * a NON-IDEMPOTENT flow (login / submit / send / register / pay) that had
+   * already taken effect. The run may have failed (its preconditions are gone
+   * forever: there is no login page once you are logged in), but retrying can
+   * never re-demonstrate the goal, so the session stops and reports success.
+   */
+  alreadySatisfied?: boolean
+  /**
+   * Structured failure reason of the (failed) takeover-free verify run (M2-14):
+   * a classified kind, absent on success. Lets the panel and closed loop show a
+   * concrete next step instead of a raw error dump.
+   */
+  failureReason?: import('./ai-takeover').TakeoverReasonKind
+  /** Concrete next-step hint matching {@link failureReason}. */
+  suggestedAction?: string
 }
 
 /** Raised by the AI layer when no model provider / API key is configured. */
@@ -80,7 +100,7 @@ function describeNode(node: WorkflowNode): string {
 
 /** Truncates a value for inline change notes. */
 function preview(value: unknown): string {
-  const text = typeof value === 'string' ? value : JSON.stringify(value) ?? ''
+  const text = typeof value === 'string' ? value : (JSON.stringify(value) ?? '')
   return text.length > 60 ? `${text.slice(0, 60)}…` : text
 }
 
@@ -138,12 +158,16 @@ export function describeNodeParams(node: WorkflowNode): string {
       const policy = value as Record<string, unknown>
       if (policy['retry'] === true) {
         const interval = policy['retryInterval']
-        parts.push(`onError=重试×${String(policy['retryTimes'] ?? '?')}${interval ? `/${String(interval)}s` : ''}`)
+        parts.push(
+          `onError=重试×${String(policy['retryTimes'] ?? '?')}${interval ? `/${String(interval)}s` : ''}`,
+        )
       }
       continue
     }
-    const text = typeof value === 'string' ? value : JSON.stringify(value) ?? ''
-    parts.push(`${key}=${text.length > PARAM_VALUE_CAP ? `${text.slice(0, PARAM_VALUE_CAP)}…` : text}`)
+    const text = typeof value === 'string' ? value : (JSON.stringify(value) ?? '')
+    parts.push(
+      `${key}=${text.length > PARAM_VALUE_CAP ? `${text.slice(0, PARAM_VALUE_CAP)}…` : text}`,
+    )
   }
   return parts.join(', ')
 }

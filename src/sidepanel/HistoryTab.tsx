@@ -547,7 +547,6 @@ function RunsSection({ t, flash, runs, reload, filter, focusRunId, onFocused }: 
     }
     // items identity changes on every reload; the effect should only refire for
     // a new deep link.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRunId])
 
   const removeOne = useCallback(

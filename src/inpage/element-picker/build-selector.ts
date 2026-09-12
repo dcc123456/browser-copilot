@@ -73,9 +73,7 @@ function elementPart(el: Element, opts: SelectorOptions): string {
   if (!qualifiers || opts.nthChild) {
     const parent = el.parentElement
     if (parent) {
-      const sameTag = Array.from(parent.children).filter(
-        (c) => c.tagName === el.tagName,
-      )
+      const sameTag = Array.from(parent.children).filter((c) => c.tagName === el.tagName)
       if (sameTag.length > 1) {
         const idx = sameTag.indexOf(el) + 1
         qualifiers += `:nth-of-type(${idx})`
@@ -106,28 +104,19 @@ export function buildSelector(
   let node: Element | null = el.parentElement
   let depth = 0
   while (node && depth < 6) {
-    const candidate = chain
-      .slice()
-      .reverse()
-      .join(' > ')
+    const candidate = chain.slice().reverse().join(' > ')
     const matches = root.querySelectorAll(candidate)
     if (matches.length === 1 && matches[0] === el) return candidate
     // Id ancestors short-circuit the walk.
     if (opts.idName && node.id) {
-      const withId = `#${cssEscape(node.id)} > ${chain
-        .slice()
-        .reverse()
-        .join(' > ')}`
+      const withId = `#${cssEscape(node.id)} > ${chain.slice().reverse().join(' > ')}`
       if (root.querySelectorAll(withId).length === 1) return withId
     }
     chain.push(elementPart(node, opts))
     node = node.parentElement
     depth++
   }
-  return chain
-    .slice()
-    .reverse()
-    .join(' > ')
+  return chain.slice().reverse().join(' > ')
 }
 
 /** Build an XPath for the element. */
@@ -168,9 +157,7 @@ export function buildXPath(el: Element): string {
  *  Document constructor differs from the page's global still resolve. */
 function docOf(root: Document | Element): Document {
   const isDoc = (root as Node).nodeType === 9
-  const owner = isDoc
-    ? (root as Document)
-    : (root as Element).ownerDocument ?? null
+  const owner = isDoc ? (root as Document) : ((root as Element).ownerDocument ?? null)
   return owner ?? (typeof document !== 'undefined' ? document : (root as Document))
 }
 
@@ -191,13 +178,7 @@ export function countMatches(
   try {
     if (mode === 'xpath') {
       const doc = docOf(root)
-      const result = doc.evaluate(
-        selector,
-        root,
-        null,
-        xpathSnapshotType(doc),
-        null,
-      )
+      const result = doc.evaluate(selector, root, null, xpathSnapshotType(doc), null)
       return result.snapshotLength
     }
     return root.querySelectorAll(selector).length
@@ -216,13 +197,7 @@ export function queryMatches(
   try {
     if (mode === 'xpath') {
       const doc = docOf(root)
-      const result = doc.evaluate(
-        selector,
-        root,
-        null,
-        xpathSnapshotType(doc),
-        null,
-      )
+      const result = doc.evaluate(selector, root, null, xpathSnapshotType(doc), null)
       const out: Element[] = []
       for (let i = 0; i < result.snapshotLength; i++) {
         const n = result.snapshotItem(i)

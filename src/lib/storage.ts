@@ -163,24 +163,22 @@ export function normalizeStoredSettings(raw: unknown): Settings {
     activeProviderId: active,
     locale: coerceLocale(value.locale),
     mode:
-      value.mode === 'chat' ||
-      value.mode === 'readonly' ||
-      value.mode === 'full'
+      value.mode === 'chat' || value.mode === 'readonly' || value.mode === 'full'
         ? value.mode
         : 'semi',
     maxToolRounds: coerceMaxToolRounds(value.maxToolRounds),
     disabledTools: Array.isArray(value.disabledTools)
       ? value.disabledTools.filter((n): n is string => typeof n === 'string')
       : [],
-    systemPromptOverride: typeof value.systemPromptOverride === 'string' ? value.systemPromptOverride : '',
-    downloadAutoSave:
-      typeof value.downloadAutoSave === 'boolean' ? value.downloadAutoSave : true,
+    systemPromptOverride:
+      typeof value.systemPromptOverride === 'string' ? value.systemPromptOverride : '',
+    downloadAutoSave: typeof value.downloadAutoSave === 'boolean' ? value.downloadAutoSave : true,
     imageModel,
-    ocrLanguage: typeof value.ocrLanguage === 'string' ? value.ocrLanguage : DEFAULT_SETTINGS.ocrLanguage,
+    ocrLanguage:
+      typeof value.ocrLanguage === 'string' ? value.ocrLanguage : DEFAULT_SETTINGS.ocrLanguage,
     localAgentEnabled:
       typeof value.localAgentEnabled === 'boolean' ? value.localAgentEnabled : false,
-    localAgentToken:
-      typeof value.localAgentToken === 'string' ? value.localAgentToken : '',
+    localAgentToken: typeof value.localAgentToken === 'string' ? value.localAgentToken : '',
     localAgentUrl: normalizeLocalAgentUrl(value.localAgentUrl),
     localAgentActiveAgent:
       typeof value.localAgentActiveAgent === 'string' ? value.localAgentActiveAgent : '',
@@ -569,10 +567,7 @@ export async function touchConversation(
     if (firstUserText && (!existing.preview || existing.preview.trim().length === 0)) {
       existing.preview = firstUserText.slice(0, 120)
     }
-    if (
-      firstUserText &&
-      (!existing.title || existing.title === DEFAULT_CONVERSATION_TITLE)
-    ) {
+    if (firstUserText && (!existing.title || existing.title === DEFAULT_CONVERSATION_TITLE)) {
       existing.title = firstUserText.trim().slice(0, 60) || DEFAULT_CONVERSATION_TITLE
     }
     await area.set({ [KEY_CONVERSATIONS_META]: list })
@@ -581,7 +576,7 @@ export async function touchConversation(
   const trimmed = firstUserText?.trim() ?? ''
   const created: ConversationMeta = {
     id: conversationId,
-    title: (trimmed.slice(0, 60) || DEFAULT_CONVERSATION_TITLE),
+    title: trimmed.slice(0, 60) || DEFAULT_CONVERSATION_TITLE,
     createdAt: now,
     updatedAt: now,
     preview: trimmed.slice(0, 120) || undefined,
@@ -591,10 +586,7 @@ export async function touchConversation(
   return created
 }
 
-export async function renameConversation(
-  conversationId: string,
-  title: string,
-): Promise<void> {
+export async function renameConversation(conversationId: string, title: string): Promise<void> {
   const list = await listConversations()
   const meta = list.find((entry) => entry.id === conversationId)
   if (meta) {
@@ -702,7 +694,11 @@ function asPassword(value: unknown): PasswordEntry | null {
   const fields: SecretField[] = hasFields
     ? entry.fields
         .filter((f) => f && typeof f.key === 'string')
-        .map((f) => ({ key: f.key, value: String(f.value ?? ''), ...(f.secret ? { secret: true } : {}) }))
+        .map((f) => ({
+          key: f.key,
+          value: String(f.value ?? ''),
+          ...(f.secret ? { secret: true } : {}),
+        }))
     : hasLegacy
       ? [
           ...(entry.username ? [{ key: 'username', value: String(entry.username) }] : []),
@@ -975,7 +971,9 @@ function sameStep(
       return String(a.args?.key ?? '') === String(b.args?.key ?? '')
     case 'click':
     case 'hover':
-      return selectorFromArgs(a.args) !== '' && selectorFromArgs(a.args) === selectorFromArgs(b.args)
+      return (
+        selectorFromArgs(a.args) !== '' && selectorFromArgs(a.args) === selectorFromArgs(b.args)
+      )
     case 'fill':
     case 'select_option':
       return (
@@ -984,8 +982,7 @@ function sameStep(
       )
     case 'set_checkbox':
       return (
-        selectorFromArgs(a.args) === selectorFromArgs(b.args) &&
-        a.args?.value === b.args?.value
+        selectorFromArgs(a.args) === selectorFromArgs(b.args) && a.args?.value === b.args?.value
       )
     case 'scroll':
       return (
@@ -1042,10 +1039,7 @@ function richTargetFromArgs(args: Record<string, unknown> | undefined): unknown 
 }
 
 /** Attach the rich locator to flat block data when present. */
-function withRichTarget(
-  data: Record<string, unknown>,
-  target: unknown,
-): Record<string, unknown> {
+function withRichTarget(data: Record<string, unknown>, target: unknown): Record<string, unknown> {
   return target ? { ...data, target } : data
 }
 
@@ -1101,7 +1095,9 @@ export function fillLikeJsFromCode(code: string): { selector: string; value: str
   const indexedRe =
     /getElementsByName\s*\(\s*(['"])([^'"\n]+)\1\s*\)\s*\[0\]|getElementsByClassName\s*\(\s*(['"])([^'"\n]+)\3\s*\)\s*\[0\]/g
   for (const match of code.matchAll(indexedRe)) {
-    selectors.add(match[0].startsWith('getElementsByName') ? `[name="${match[2]}"]` : `.${match[4]}`)
+    selectors.add(
+      match[0].startsWith('getElementsByName') ? `[name="${match[2]}"]` : `.${match[4]}`,
+    )
   }
   if (selectors.size !== 1) return null
 
@@ -1109,8 +1105,7 @@ export function fillLikeJsFromCode(code: string): { selector: string; value: str
   // setter descriptor (`…getOwnPropertyDescriptor(HTMLInputElement.prototype,
   // 'value').set` + `setter.call(el, 'x')`).
   const writesValue =
-    /\.\s*value\s*=/.test(code) ||
-    /getOwnPropertyDescriptor\s*\([^)]*['"]value['"]\s*\)/.test(code)
+    /\.\s*value\s*=/.test(code) || /getOwnPropertyDescriptor\s*\([^)]*['"]value['"]\s*\)/.test(code)
   if (!writesValue) return null
 
   // Exactly one literal value. Template-literal `${…}` interpolations and

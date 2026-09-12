@@ -752,8 +752,7 @@ const BLOCK_FORM_STRINGS = {
       'Manifest V3 不支持代理（chrome.proxy API 不可用）；此算子仅为占位，设置不会生效。',
     'Use commas (,) to separate URL': '多个地址用英文逗号分隔',
     'This block reloads the active tab.': '此算子会刷新当前标签页。',
-    'This block navigates browser history (go back one page).':
-      '此算子会在浏览器历史中后退一页。',
+    'This block navigates browser history (go back one page).': '此算子会在浏览器历史中后退一页。',
     'This block navigates browser history (go forward one page).':
       '此算子会在浏览器历史中前进一页。',
     'No settings for this block.': '此算子没有可配置项。',

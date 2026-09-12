@@ -100,10 +100,7 @@ export function filterSkills(skills: readonly Skill[], term: string): Skill[] {
  * would send it to the model as if the user had typed it. The selected skill is
  * shown as a chip instead.
  */
-export function applySlashPick(
-  text: string,
-  query: SlashQuery,
-): { text: string; caret: number } {
+export function applySlashPick(text: string, query: SlashQuery): { text: string; caret: number } {
   const before = text.slice(0, query.start)
   const after = text.slice(query.end)
   // Collapse the space the command leaves behind, so removing a mid-sentence

@@ -96,10 +96,20 @@ function ZoomControls() {
         <Maximize2 size={14} />
       </button>
       <div className="wf-zoom-seg">
-        <button type="button" className="wf-icon-btn" title={bt('Zoom out')} onClick={() => zoomOut()}>
+        <button
+          type="button"
+          className="wf-icon-btn"
+          title={bt('Zoom out')}
+          onClick={() => zoomOut()}
+        >
           <Minus size={14} />
         </button>
-        <button type="button" className="wf-icon-btn" title={bt('Zoom in')} onClick={() => zoomIn()}>
+        <button
+          type="button"
+          className="wf-icon-btn"
+          title={bt('Zoom in')}
+          onClick={() => zoomIn()}
+        >
           <Plus size={14} />
         </button>
       </div>

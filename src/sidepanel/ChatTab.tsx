@@ -149,9 +149,7 @@ interface Entry {
  * answer into several streamed text segments. Everything else (user, status,
  * error) renders standalone and breaks the group.
  */
-type RenderItem =
-  | { kind: 'single'; entry: Entry }
-  | { kind: 'turn'; entries: Entry[] }
+type RenderItem = { kind: 'single'; entry: Entry } | { kind: 'turn'; entries: Entry[] }
 
 /**
  * Groups the flat transcript into standalone entries and agent turns
@@ -398,11 +396,7 @@ function ToolCallCard({ entry, t }: { entry: Entry; t: ChatT }) {
   }
 
   return (
-    <details
-      className={`${baseClass} group/tool`}
-      data-kind="tool"
-      data-state="done"
-    >
+    <details className={`${baseClass} group/tool`} data-kind="tool" data-state="done">
       <summary
         className="flex cursor-pointer list-none items-center [&::-webkit-details-marker]:hidden"
         title={summary}
@@ -445,9 +439,9 @@ function AssistantTurn({
   onSkillSaved: (statusText: string) => void
 }) {
   const answer = turnAnswerText(entries)
-  const usage = [...entries].reverse().find(
-    (entry) => entry.role === 'assistant' && entry.usage,
-  )?.usage
+  const usage = [...entries]
+    .reverse()
+    .find((entry) => entry.role === 'assistant' && entry.usage)?.usage
   const actionsEntry: Entry = {
     id: `turn-actions-${entries[0]!.id}`,
     role: 'assistant',
@@ -468,13 +462,7 @@ function AssistantTurn({
         ),
       )}
       <GeneratedSkillCards assistantText={answer} onSaved={onSkillSaved} t={t} />
-      <MsgActions
-        busy={busy}
-        entry={actionsEntry}
-        isLastAssistant={isLast}
-        t={t}
-        title={title}
-      />
+      <MsgActions busy={busy} entry={actionsEntry} isLastAssistant={isLast} t={t} title={title} />
     </div>
   )
 }
@@ -544,7 +532,7 @@ function ToolbarIconButton({
  *
  * The buttons sit in the top-right corner and only show on hover / keyboard
  * focus, so they never block the transcript on a touch-less desktop.
- */function MsgActions({
+ */ function MsgActions({
   entry,
   title,
   t,
@@ -1615,7 +1603,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     setResumeTick((tick) => tick + 1)
     // Owns the initial window-scoped selection; reruns on conversationId are
     // no-ops (the pointer is already in sync).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panelWindowId])
 
   const openConversation = (id: string): void => {
@@ -1645,7 +1632,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     // openConversation references `busy` and several setters; re-binding on
     // every render is cheap and ensures we never hold a stale closure over
     // `busy`.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   })
 
   const startNewConversation = (): void => {

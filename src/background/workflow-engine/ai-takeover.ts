@@ -20,7 +20,10 @@ import { getSettings } from '../../lib/storage'
 import { interpolate } from '../../lib/workflow/interpolate'
 import {
   HOPELESS_REASON_KINDS,
-  TAKEOVER_MAX_ATTEMPTS,
+  failureSignature,
+  isRepeatedHopelessFailure,
+  takeoverMaxAttempts,
+  takeoverToolRounds,
   buildTakeoverPrompt,
   classifyReason,
   parseTakeoverVerdict,
@@ -29,15 +32,19 @@ import {
   type TakeoverReasonKind,
   type TakeoverReport,
 } from '../../lib/workflow/ai-takeover'
+import { detectPreflightHints, observerPreflightEnabled } from '../../lib/workflow/observer'
+import {
+  buildFailureMemoryHint,
+  createMemoryFailureStore,
+  rememberFailure,
+  type FailureMemoryStore,
+} from '../../lib/workflow/failure-memory'
 import { BLOCK_BY_ID } from '../../lib/workflow/blocks/palette'
 import type { WorkflowNode } from '../../lib/workflow/types'
 import type { ProviderProfile } from '../../lib/types'
 import type { ScopeWindow } from '../automation-scope'
 import { runUnattendedPrompt, type UnattendedResult } from '../agent-unattended'
 import type { AiTakeoverHook, AiTakeoverRequest } from './engine'
-
-/** Cap per takeover attempt on model↔tool round trips. */
-const TAKEOVER_TOOL_ROUNDS = 25
 
 /** Default pause between takeover attempts (let page state settle). */
 const ATTEMPT_DELAY_MS = 1500
@@ -59,10 +66,24 @@ export interface AiTakeoverDeps {
   pinTab?: (tabId: number) => Promise<void>
   /** Pause between failed attempts; tests pass 0. */
   attemptDelayMs?: number
+  /**
+   * GLOBAL retry budget for the whole session (M2-12): the maximum number of
+   * takeover attempts across EVERY episode this hook serves. When exhausted
+   * the next episode fast-fails instead of spending more model calls. Undefined
+   * = no cap. The debug session derives it from the attempt/round budgets.
+   */
+  takeoverBudget?: number
   /** Live progress sink (the debug session log): agent tool steps etc. */
   onEvent?: (kind: 'tool' | 'status' | 'result' | 'error' | 'info', text: string) => void
   /** Called once per takeover episode, when it settles (completed or not). */
   onTakeover?: (report: TakeoverReport) => void
+  /**
+   * Failure memory shared across the attempts of this hook (M4 item 22):
+   * structured prior failures of the same node, rendered into the retry prompt
+   * so attempt 2 starts where attempt 1 gave up. Defaults to an in-memory
+   * store scoped to this hook (= one debug session).
+   */
+  failureMemory?: FailureMemoryStore
   /** Injectable agent turn runner (tests stub this). */
   runPrompt?: typeof runUnattendedPrompt
 }
@@ -104,7 +125,7 @@ function interpolateParams(
 
 /** Truncates a value for fix notes. */
 function preview(value: unknown): string {
-  const text = typeof value === 'string' ? value : JSON.stringify(value) ?? ''
+  const text = typeof value === 'string' ? value : (JSON.stringify(value) ?? '')
   return text.length > 60 ? `${text.slice(0, 60)}…` : text
 }
 
@@ -116,10 +137,19 @@ function preview(value: unknown): string {
 export function createAiTakeover(deps: AiTakeoverDeps = {}): AiTakeoverHook {
   const runPrompt = deps.runPrompt ?? runUnattendedPrompt
   const attemptDelayMs = deps.attemptDelayMs ?? ATTEMPT_DELAY_MS
-  return async (request: AiTakeoverRequest): Promise<{ completed: boolean; summary?: string; reasonKind?: TakeoverReasonKind }> => {
+  // Failure memory for this hook (M4 item 22): structured prior failures of
+  // the same node, rendered into every retry so attempt 2 starts where
+  // attempt 1 gave up instead of re-walking the same dead end.
+  const failureStore = deps.failureMemory ?? createMemoryFailureStore()
+  return async (
+    request: AiTakeoverRequest,
+  ): Promise<{ completed: boolean; summary?: string; reasonKind?: TakeoverReasonKind }> => {
     const failingNode = request.workflow.drawflow.nodes.find((n) => n.id === request.failingNodeId)
     const info = nodeInfoOf(failingNode)
     const nodeLabel = info?.nodeLabel ?? request.failingNodeId
+    const startedAt = Date.now()
+    // Cumulative attempt counter for the whole session (M2-12 global budget).
+    let usedAttempts = 0
 
     const fail = async (
       reason: string,
@@ -132,6 +162,7 @@ export function createAiTakeover(deps: AiTakeoverDeps = {}): AiTakeoverHook {
         completed: false,
         attempts,
         error: reason,
+        durationMs: Date.now() - startedAt,
         ...(reasonKind ? { reasonKind } : {}),
       })
       return { completed: false, reason, ...(reasonKind ? { reasonKind } : {}) }
@@ -139,9 +170,24 @@ export function createAiTakeover(deps: AiTakeoverDeps = {}): AiTakeoverHook {
 
     // Fail fast with a clear message when no model is configured.
     const settings = await getSettings()
-    const provider = deps.provider ?? settings.providers.find((p) => p.id === settings.activeProviderId)
+    const provider =
+      deps.provider ?? settings.providers.find((p) => p.id === settings.activeProviderId)
     if (!provider || !provider.apiKey.trim()) {
       return fail('未配置模型 provider / API Key，AI 接管不可用', 0)
+    }
+
+    // M3-17: optional read-only Observer preflight. When enabled, inspect the
+    // failing context and skip the (expensive) agent run on a captcha/login
+    // wall, or surface a popup hint. Default OFF (BC_OBSERVER_PREFLIGHT).
+    if (observerPreflightEnabled()) {
+      const hints = detectPreflightHints({ error: request.failedError })
+      if (hints.hopeless && hints.kind) {
+        deps.onEvent?.('error', `AI 接管预检终止：${hints.message}`)
+        return fail(hints.message, 0, hints.kind)
+      }
+      if (hints.kind || hints.message !== '预检未发现明显阻断（验证码/登录墙/弹窗）') {
+        deps.onEvent?.('info', `AI 接管预检：${hints.message}`)
+      }
     }
 
     // Bring the run's own tab to the foreground: the takeover tools resolve
@@ -155,9 +201,8 @@ export function createAiTakeover(deps: AiTakeoverDeps = {}): AiTakeoverHook {
     // the engine emits them with empty text), the last completed nodes as the
     // anchor, the downstream nodes as do-NOT-do boundaries, and the failing
     // node with REAL param values.
-    const labelOf = (nodeId: string): string => nodeInfoOf(
-      request.workflow.drawflow.nodes.find((n) => n.id === nodeId),
-    )?.nodeLabel ?? nodeId
+    const labelOf = (nodeId: string): string =>
+      nodeInfoOf(request.workflow.drawflow.nodes.find((n) => n.id === nodeId))?.nodeLabel ?? nodeId
     const promptSteps = request.steps
       .filter((step) => step.text.trim().length > 0 || step.kind === 'tool')
       .slice(-20)
@@ -168,13 +213,17 @@ export function createAiTakeover(deps: AiTakeoverDeps = {}): AiTakeoverHook {
             ? step.text
             : `${labelOf(step.nodeId ?? '')}${step.nodeId === request.failingNodeId ? ' ✗ 该步骤失败' : ''}`,
       }))
-    const previousNode = request.workflow.drawflow.nodes.find((n) => n.id === request.previousNodeId)
+    const previousNode = request.workflow.drawflow.nodes.find(
+      (n) => n.id === request.previousNodeId,
+    )
     const previousInfo = nodeInfoOf(previousNode)
     const previousNodeLine = previousInfo ? `← ${previousInfo.nodeLabel}` : undefined
     // Older anchors: the per-block markers of the last nodes before the
     // immediate predecessor (the agent orients better with a short trail).
     const anchorNodeIds = request.steps
-      .filter((step) => step.kind === 'tool' && step.nodeId && step.nodeId !== request.failingNodeId)
+      .filter(
+        (step) => step.kind === 'tool' && step.nodeId && step.nodeId !== request.failingNodeId,
+      )
       .map((step) => step.nodeId!)
     const earlierNodeIds = [...new Set(anchorNodeIds)].slice(-3, -1)
     const earlierNodeLines = earlierNodeIds.map((id) => `← ${labelOf(id)}`)
@@ -212,7 +261,7 @@ export function createAiTakeover(deps: AiTakeoverDeps = {}): AiTakeoverHook {
     // Variable snapshot: wrong values here fingerprint the upstream culprit.
     const variableSnapshot: Record<string, unknown> = {}
     for (const [key, value] of Object.entries(request.variables).slice(0, 20)) {
-      const text = typeof value === 'string' ? value : JSON.stringify(value) ?? String(value)
+      const text = typeof value === 'string' ? value : (JSON.stringify(value) ?? String(value))
       variableSnapshot[key] = text.length > 160 ? `${text.slice(0, 160)}…` : value
     }
     // When the failed step declares an output variable, the agent MUST fill it.
@@ -222,12 +271,32 @@ export function createAiTakeover(deps: AiTakeoverDeps = {}): AiTakeoverHook {
     let lastAttemptTrace: string[] | undefined
     let lastReasonKind: TakeoverReasonKind | undefined
     let lastAnswer = ''
-    for (let attempt = 1; attempt <= TAKEOVER_MAX_ATTEMPTS; attempt++) {
+    // One line per failed attempt, fed forward to later attempts (each attempt
+    // is a fresh conversation, so this is its only memory of earlier dead ends).
+    const attemptNotes: string[] = []
+    const signatures: string[] = []
+    const MAX_ATTEMPTS = takeoverMaxAttempts()
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       // Let the page settle between attempts (transient states, animations).
       if (attempt > 1 && attemptDelayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, attemptDelayMs))
       }
-      deps.onEvent?.('status', `AI 接管「${nodeLabel}」：第 ${attempt}/${TAKEOVER_MAX_ATTEMPTS} 次尝试（先看页面，再完成该步骤）`)
+      // Global session retry budget (M2-12 + escape hatch): once the whole
+      // session has spent its attempts, stop rather than burning more calls.
+      usedAttempts += 1
+      if (deps.takeoverBudget != null && usedAttempts > deps.takeoverBudget) {
+        deps.onEvent?.('error', `AI 接管终止：会话重试预算（${deps.takeoverBudget} 次）已耗尽`)
+        return fail('AI 接管会话重试预算已耗尽', usedAttempts - 1, lastReasonKind)
+      }
+      deps.onEvent?.(
+        'status',
+        `AI 接管「${nodeLabel}」：第 ${attempt}/${MAX_ATTEMPTS} 次尝试（先看页面，再完成该步骤）`,
+      )
+      // Attempt 2+ is primed with structured memory of THIS node's earlier
+      // failures (M4 item 22). Undefined on the first attempt — no change.
+      const failureHint = buildFailureMemoryHint(
+        failureStore.query({ nodeId: request.failingNodeId }),
+      )
       const prompt = buildTakeoverPrompt({
         workflowName: request.workflow.name,
         workflowDescription: request.workflow.description,
@@ -247,9 +316,11 @@ export function createAiTakeover(deps: AiTakeoverDeps = {}): AiTakeoverHook {
         },
         error: request.failedError,
         attempt,
-        maxAttempts: TAKEOVER_MAX_ATTEMPTS,
+        maxAttempts: MAX_ATTEMPTS,
         ...(lastAttemptNote ? { lastAttemptNote } : {}),
         ...(lastAttemptTrace && lastAttemptTrace.length > 0 ? { lastAttemptTrace } : {}),
+        ...(attemptNotes.length > 0 ? { previousAttemptNotes: attemptNotes } : {}),
+        ...(failureHint ? { failureMemory: failureHint } : {}),
       })
       // Compact tool trace of THIS attempt — fed to the next attempt so it
       // never blindly repeats actions that already ran (fresh conversation
@@ -257,27 +328,40 @@ export function createAiTakeover(deps: AiTakeoverDeps = {}): AiTakeoverHook {
       const trace: string[] = []
       let result: UnattendedResult
       try {
-        result = await runPrompt(prompt, `workflow-takeover:${request.workflow.id}:${request.failingNodeId}:${attempt}`, 'full', {
-          signal: request.signal,
-          maxToolRounds: TAKEOVER_TOOL_ROUNDS,
-          ...(request.scope?.windowId !== undefined
-            ? { scopeWindowId: request.scope.windowId }
-            : deps.scope?.windowId !== undefined
-              ? { scopeWindowId: deps.scope.windowId }
-              : {}),
-          onStep: (kind, text) => {
-            if (kind === 'tool' || kind === 'result' || kind === 'error') {
-              trace.push(`${kind === 'tool' ? '→' : kind === 'result' ? '←' : '!'} ${text}`)
-              if (trace.length > 14) trace.splice(0, trace.length - 14)
-            }
-            deps.onEvent?.(kind, `🤖 ${text}`)
+        result = await runPrompt(
+          prompt,
+          `workflow-takeover:${request.workflow.id}:${request.failingNodeId}:${attempt}`,
+          'full',
+          {
+            signal: request.signal,
+            maxToolRounds: takeoverToolRounds(),
+            ...(request.scope?.windowId !== undefined
+              ? { scopeWindowId: request.scope.windowId }
+              : deps.scope?.windowId !== undefined
+                ? { scopeWindowId: deps.scope.windowId }
+                : {}),
+            onStep: (kind, text) => {
+              if (kind === 'tool' || kind === 'result' || kind === 'error') {
+                trace.push(`${kind === 'tool' ? '→' : kind === 'result' ? '←' : '!'} ${text}`)
+                if (trace.length > 40) trace.splice(0, trace.length - 40)
+              }
+              deps.onEvent?.(kind, `🤖 ${text}`)
+            },
+            ...(deps.provider ? { provider: deps.provider } : {}),
           },
-          ...(deps.provider ? { provider: deps.provider } : {}),
-        })
+        )
       } catch (error) {
         lastAttemptNote = error instanceof Error ? error.message : String(error)
         lastAttemptTrace = [...trace]
         lastReasonKind ??= classifyReason(lastAttemptNote)
+        attemptNotes.push(lastAttemptNote)
+        // M4 item 22: remember transport/agent errors too (same dead end).
+        rememberFailure(failureStore, {
+          workflowId: request.workflow.id,
+          nodeId: request.failingNodeId,
+          error: lastAttemptNote,
+          ...(lastReasonKind ? { errorType: lastReasonKind } : {}),
+        })
         deps.onEvent?.('error', `AI 接管第 ${attempt} 次尝试出错：${lastAttemptNote}`)
         continue
       }
@@ -296,16 +380,14 @@ export function createAiTakeover(deps: AiTakeoverDeps = {}): AiTakeoverHook {
           // node (bad value produced earlier). Only accept an id that really
           // exists in the graph — anything else falls back to the failed node.
           const fixNodeId =
-            verdict.fixNodeId && verdict.fixNodeId !== request.failingNodeId &&
+            verdict.fixNodeId &&
+            verdict.fixNodeId !== request.failingNodeId &&
             request.workflow.drawflow.nodes.some((n) => n.id === verdict.fixNodeId)
               ? verdict.fixNodeId
               : request.failingNodeId
           const fixLabel = fixNodeId === request.failingNodeId ? nodeLabel : labelOf(fixNodeId)
           if (fixNodeId !== request.failingNodeId) {
-            deps.onEvent?.(
-              'info',
-              `根因定位：失败源头在上游节点「${fixLabel}」，修复将指向它`,
-            )
+            deps.onEvent?.('info', `根因定位：失败源头在上游节点「${fixLabel}」，修复将指向它`)
           }
           const keys = Object.keys(verdict.paramsPatch)
           fix = {
@@ -313,7 +395,10 @@ export function createAiTakeover(deps: AiTakeoverDeps = {}): AiTakeoverHook {
             nodeLabel: fixLabel,
             paramsPatch: verdict.paramsPatch,
             note: `AI 建议修正「${fixLabel}」参数${fixNodeId !== request.failingNodeId ? '（根因在失败节点的上游）' : ''}：${keys
-              .map((key) => `${key}: ${preview(request.workflow.drawflow.nodes.find((n) => n.id === fixNodeId)?.data?.[key])} → ${preview(verdict.paramsPatch?.[key])}`)
+              .map(
+                (key) =>
+                  `${key}: ${preview(request.workflow.drawflow.nodes.find((n) => n.id === fixNodeId)?.data?.[key])} → ${preview(verdict.paramsPatch?.[key])}`,
+              )
               .join('；')}`,
           }
         }
@@ -324,6 +409,7 @@ export function createAiTakeover(deps: AiTakeoverDeps = {}): AiTakeoverHook {
           completed: true,
           attempts: attempt,
           summary: verdict.summary,
+          durationMs: Date.now() - startedAt,
           ...(fix ? { fix } : {}),
         })
         return { completed: true, summary: verdict.summary }
@@ -331,7 +417,27 @@ export function createAiTakeover(deps: AiTakeoverDeps = {}): AiTakeoverHook {
       lastAttemptNote = verdict.summary || result.error || lastAnswer.slice(0, 200) || '（无说明）'
       lastAttemptTrace = [...trace]
       lastReasonKind = verdict.reasonKind ?? classifyReason(`${verdict.summary} ${lastAnswer}`)
+      attemptNotes.push(lastAttemptNote)
+      // M4 item 22: remember this failure so the NEXT attempt is primed with
+      // its root cause instead of rediscovering it.
+      rememberFailure(failureStore, {
+        workflowId: request.workflow.id,
+        nodeId: request.failingNodeId,
+        error: lastAttemptNote ?? '（无说明）',
+        ...(lastReasonKind ? { errorType: lastReasonKind } : {}),
+        ...(verdict.summary ? { rootCause: verdict.summary } : {}),
+      })
       deps.onEvent?.('info', `AI 接管第 ${attempt} 次尝试未完成：${lastAttemptNote}`)
+      // Same failure repeating three times in a row is hopeless regardless of
+      // reason kind — stop early instead of burning the remaining attempts.
+      signatures.push(failureSignature(request.failingNodeId, lastAttemptNote))
+      if (isRepeatedHopelessFailure(signatures)) {
+        deps.onEvent?.(
+          'error',
+          `AI 接管终止：相同失败已连续 3 次，重试无意义（${lastReasonKind ?? 'repeat'}）`,
+        )
+        return fail(lastAttemptNote, attempt, lastReasonKind)
+      }
       // Hopeless reasons (login wall, captcha) can NEVER succeed by retrying —
       // burning the remaining attempts would only waste model calls.
       if (lastReasonKind && (HOPELESS_REASON_KINDS as readonly string[]).includes(lastReasonKind)) {
@@ -339,6 +445,6 @@ export function createAiTakeover(deps: AiTakeoverDeps = {}): AiTakeoverHook {
         return fail(lastAttemptNote, attempt, lastReasonKind)
       }
     }
-    return fail(lastAttemptNote || 'AI 接管尝试均未完成该步骤', TAKEOVER_MAX_ATTEMPTS, lastReasonKind)
+    return fail(lastAttemptNote || 'AI 接管尝试均未完成该步骤', MAX_ATTEMPTS, lastReasonKind)
   }
 }

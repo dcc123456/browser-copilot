@@ -26,7 +26,7 @@ import type { RunOutcomeKind, RunSource, RunStep } from '../background/running-t
 import type { Workflow } from './workflow/types'
 import type { WorkflowDebugResult } from './workflow/auto-debug-patch'
 import type { PendingTakeoverInfo } from './workflow/takeover-pending'
-import type { TakeoverStatsSummary } from './workflow/takeover-stats'
+import type { DebugSessionStatsSummary, TakeoverStatsSummary } from './workflow/takeover-stats'
 import type { WorkflowReview } from './workflow/review-patch'
 import type { AttachmentDescriptor, AttachmentSummary } from './attachments'
 
@@ -158,8 +158,10 @@ export type Command =
   | { type: 'workflows.takeoverPending' }
   /** Aggregate AI-takeover success-rate stats (debug埋点). */
   | { type: 'workflows.takeoverStats' }
+  /** Aggregate debug-SESSION stats: verified success rate + phase timing. */
+  | { type: 'workflows.debugStats' }
   /** Applies the pending AI-takeover fixes to this workflow (user confirmed). */
-  | { type: 'workflows.takeoverApply'; id: string }
+  | { type: 'workflows.takeoverApply'; id: string; verify?: boolean }
   /** Discards the pending AI-takeover fixes for this workflow. */
   | { type: 'workflows.takeoverDiscard'; id: string }
   | { type: 'workflows.running'; workflowId?: string }
@@ -264,7 +266,16 @@ export type CommandResult =
   | { type: 'workflows.debug'; result: WorkflowDebugResult }
   | { type: 'workflows.takeoverPending'; items: PendingTakeoverInfo[] }
   | { type: 'workflows.takeoverStats'; summary: TakeoverStatsSummary }
-  | { type: 'workflows.takeoverApply'; workflow: Workflow; appliedCount: number }
+  | { type: 'workflows.debugStats'; summary: DebugSessionStatsSummary }
+  | {
+      type: 'workflows.takeoverApply'
+      workflow: Workflow
+      appliedCount: number
+      /** Set when the apply requested a takeover-free verification re-run. */
+      verified?: boolean
+      /** Run summary from the verification re-run (first error when it failed). */
+      verifySummary?: string
+    }
   | { type: 'workflows.takeoverDiscard' }
   | { type: 'workflows.running'; runs: RunningTaskView[]; finished: FinishedTaskView[] }
   | { type: 'record.start'; recording: boolean }
@@ -466,8 +477,7 @@ export type FloatingButtonMessage =
 
 /** Worker → floating-button content script control messages. */
 export type FloatingButtonControl =
-  | { type: 'floating.show'; pos?: FloatingButtonPos }
-  | { type: 'floating.hide' }
+  { type: 'floating.show'; pos?: FloatingButtonPos } | { type: 'floating.hide' }
 
 /** Reply to `floating.status`. */
 export interface FloatingStatusResponse {

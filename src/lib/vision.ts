@@ -47,8 +47,7 @@ export function resolveVisionTarget(
   providers: readonly ProviderProfile[],
   activeProvider: ProviderProfile | undefined,
 ): ResolvedVisionTarget | null {
-  const picked =
-    imageModel.providerId && providers.find((p) => p.id === imageModel.providerId)
+  const picked = imageModel.providerId && providers.find((p) => p.id === imageModel.providerId)
   if (picked && picked.baseUrl && picked.apiKey) {
     return {
       baseUrl: normalizeBaseUrl(picked.baseUrl),
@@ -72,7 +71,11 @@ export function resolveVisionTarget(
  * Builds the request body for one recognition call. Pure so tests can assert the
  * exact payload (multimodal image part, no tooling, single completion).
  */
-export function buildVisionRequestBody(target: ResolvedVisionTarget, dataUrl: string, prompt: string): Record<string, unknown> {
+export function buildVisionRequestBody(
+  target: ResolvedVisionTarget,
+  dataUrl: string,
+  prompt: string,
+): Record<string, unknown> {
   return {
     model: target.model,
     stream: false,
@@ -104,7 +107,9 @@ function describeFailure(body: string, status: number): string {
       message?: string
     }
     detail =
-      typeof parsed.error === 'string' ? parsed.error : (parsed.error?.message ?? parsed.message ?? '')
+      typeof parsed.error === 'string'
+        ? parsed.error
+        : (parsed.error?.message ?? parsed.message ?? '')
   } catch {
     detail = body.slice(0, 200)
   }
@@ -149,7 +154,13 @@ async function callVisionModel(
     else signal.addEventListener('abort', onOuterAbort, { once: true })
   }
   const timer = setTimeout(
-    () => controller.abort(new DOMException(`Vision request timed out after ${VISION_TIMEOUT_MS / 1000}s`, 'TimeoutError')),
+    () =>
+      controller.abort(
+        new DOMException(
+          `Vision request timed out after ${VISION_TIMEOUT_MS / 1000}s`,
+          'TimeoutError',
+        ),
+      ),
     VISION_TIMEOUT_MS,
   )
   let response: Response
@@ -173,7 +184,10 @@ async function callVisionModel(
           'Check the model endpoint/base URL, or switch to a faster provider in Settings → 图片识别模型.',
       }
     }
-    return { ok: false, error: `Cannot reach ${url}: ${(error as Error)?.message ?? String(error)}` }
+    return {
+      ok: false,
+      error: `Cannot reach ${url}: ${(error as Error)?.message ?? String(error)}`,
+    }
   } finally {
     clearTimeout(timer)
     signal?.removeEventListener('abort', onOuterAbort)
@@ -188,7 +202,8 @@ async function callVisionModel(
   } catch {
     return { ok: false, error: 'The image model returned an unreadable response.' }
   }
-  const content = (payload as { choices?: { message?: { content?: unknown } }[] })?.choices?.[0]?.message?.content
+  const content = (payload as { choices?: { message?: { content?: unknown } }[] })?.choices?.[0]
+    ?.message?.content
   if (typeof content === 'string' && content.trim().length > 0) {
     return { ok: true, text: content.trim() }
   }

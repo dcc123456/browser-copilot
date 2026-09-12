@@ -17,7 +17,7 @@ import type { Workflow } from '../lib/workflow/types'
 import type { WorkflowDebugResult } from '../lib/workflow/auto-debug-patch'
 import { debugRunLabel } from '../lib/workflow/ai-takeover'
 import type { TakeoverReasonKind } from '../lib/workflow/ai-takeover'
-import type { TakeoverStatsSummary } from '../lib/workflow/takeover-stats'
+import type { DebugSessionStatsSummary, TakeoverStatsSummary } from '../lib/workflow/takeover-stats'
 import type { PendingTakeoverInfo } from '../lib/workflow/takeover-pending'
 import type { RunStep } from '../background/running-tasks'
 import { newId } from '../lib/storage'
@@ -140,10 +140,7 @@ function NewWorkflowMenu({
         <Plus size={14} aria-hidden="true" />
       </button>
       {open && (
-        <div
-          className="absolute right-0 top-full z-50 min-w-[128px] pt-1.5"
-          role="menu"
-        >
+        <div className="absolute right-0 top-full z-50 min-w-[128px] pt-1.5" role="menu">
           <div className="flex flex-col rounded-lg border border-border bg-panel p-1 shadow-[var(--bc-shadow)]">
             <button
               className={itemClass}
@@ -280,6 +277,9 @@ export default function WorkflowsTab() {
   // Lifetime takeover stats (fetched once per settled debug session) for the
   // success-rate line at the bottom of the debug log modal.
   const [takeoverStats, setTakeoverStats] = useState<TakeoverStatsSummary | null>(null)
+  // Lifetime debug-SESSION stats: the strict "verified (no AI needed)" rate and
+  // phase timing, shown next to the takeover rate.
+  const [debugStats, setDebugStats] = useState<DebugSessionStatsSummary | null>(null)
   const debuggingNameRef = useRef('')
   const debugStartedAtRef = useRef(0)
   const logOpenRef = useRef(false)
@@ -410,7 +410,10 @@ export default function WorkflowsTab() {
                 })
               }
             } catch (error) {
-              setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+              setBanner({
+                kind: 'error',
+                text: error instanceof Error ? error.message : String(error),
+              })
             }
           } else {
             await sendCommand({ type: 'workflows.takeoverDiscard', id }).catch(() => undefined)
@@ -438,7 +441,10 @@ export default function WorkflowsTab() {
                 })
               }
             } catch (error) {
-              setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+              setBanner({
+                kind: 'error',
+                text: error instanceof Error ? error.message : String(error),
+              })
             }
           } else {
             await sendCommand({ type: 'workflows.takeoverDiscard', id }).catch(() => undefined)
@@ -452,10 +458,16 @@ export default function WorkflowsTab() {
     } finally {
       // One last poll so a still-open modal shows the session's final steps.
       await pollDebugRun()
-      // Refresh the lifetime takeover stats for the modal's success-rate line.
+      // Refresh the lifetime takeover + session stats for the modal's lines.
       try {
         const stats = await sendCommand({ type: 'workflows.takeoverStats' })
         if (stats.type === 'workflows.takeoverStats') setTakeoverStats(stats.summary)
+      } catch {
+        /* stats line is best-effort */
+      }
+      try {
+        const stats = await sendCommand({ type: 'workflows.debugStats' })
+        if (stats.type === 'workflows.debugStats') setDebugStats(stats.summary)
       } catch {
         /* stats line is best-effort */
       }
@@ -524,7 +536,9 @@ export default function WorkflowsTab() {
   const onBannerClick = (): void => {
     if (banner?.runId) {
       window.dispatchEvent(
-        new CustomEvent('bc:open-history', { detail: { section: 'workflowRuns', runId: banner.runId } }),
+        new CustomEvent('bc:open-history', {
+          detail: { section: 'workflowRuns', runId: banner.runId },
+        }),
       )
     }
     setBanner(null)
@@ -633,9 +647,7 @@ export default function WorkflowsTab() {
         .catch(() => undefined)
       const base = editorUrl(id)
       const url =
-        hostId !== undefined
-          ? `${base}${base.includes('?') ? '&' : '?'}hostWindow=${hostId}`
-          : base
+        hostId !== undefined ? `${base}${base.includes('?') ? '&' : '?'}hostWindow=${hostId}` : base
       void chrome.windows
         ?.create?.({ url, type: 'popup', width: 1280, height: 860 })
         ?.catch?.(() => chrome.tabs.create({ url }))
@@ -651,7 +663,8 @@ export default function WorkflowsTab() {
       const result = await sendCommand({ type: 'record.status' })
       if (result.type === 'record.status') setRecording(result.recording)
     } catch {
-      /* recorder not available until background controller lands */ }
+      /* recorder not available until background controller lands */
+    }
   }, [])
 
   useEffect(() => {
@@ -801,7 +814,11 @@ export default function WorkflowsTab() {
           title={banner.runId ? t.workflowsRunFailedHint : undefined}
         >
           <span className="banner-text">{banner.text}</span>
-          {banner.runId && <span className="banner-chevron" aria-hidden="true">›</span>}
+          {banner.runId && (
+            <span className="banner-chevron" aria-hidden="true">
+              ›
+            </span>
+          )}
         </div>
       )}
 
@@ -903,7 +920,9 @@ export default function WorkflowsTab() {
                     </label>
                     <strong className="task-item-name">{wf.name}</strong>
                   </div>
-                  <span className={`task-status task-status-${!last ? 'none' : last.skipped ? 'skipped' : last.ok ? 'ok' : 'failed'}`}>
+                  <span
+                    className={`task-status task-status-${!last ? 'none' : last.skipped ? 'skipped' : last.ok ? 'ok' : 'failed'}`}
+                  >
                     {lastRunLabel(wf)}
                   </span>
                 </div>
@@ -968,7 +987,11 @@ export default function WorkflowsTab() {
                           changes: pendingInfo.fixes.length,
                         })}
                       </span>
-                      <button disabled={busy} onClick={() => void applyPendingFixes(wf.id)} type="button">
+                      <button
+                        disabled={busy}
+                        onClick={() => void applyPendingFixes(wf.id)}
+                        type="button"
+                      >
                         {t.workflowsDebugTakeoverApply}
                       </button>
                       <button
@@ -1047,17 +1070,33 @@ export default function WorkflowsTab() {
               ))}
             </div>
             {debugSettled && takeoverStats && (
-              <p className="mb-0 mt-3 flex-none text-[11.5px] leading-relaxed text-muted">
-                {t.workflowsDebugStats({
-                  rate: Math.round(takeoverStats.successRate * 100),
-                  total: takeoverStats.total,
-                })}
-                {takeoverStats.byReason.length > 0 &&
-                  ` · ${takeoverStats.byReason
-                    .slice(0, 2)
-                    .map((entry) => `${reasonLabelOf(entry.reason, t)} ×${entry.count}`)
-                    .join(' · ')}`}
-              </p>
+              <div className="mb-0 mt-3 flex-none space-y-0.5">
+                <p className="m-0 text-[11.5px] leading-relaxed text-muted">
+                  {t.workflowsDebugStats({
+                    rate: Math.round(takeoverStats.successRate * 100),
+                    total: takeoverStats.total,
+                  })}
+                  {takeoverStats.byReason.length > 0 &&
+                    ` · ${takeoverStats.byReason
+                      .slice(0, 2)
+                      .map((entry) => `${reasonLabelOf(entry.reason, t)} ×${entry.count}`)
+                      .join(' · ')}`}
+                </p>
+                {debugStats && debugStats.total > 0 && (
+                  <p className="m-0 text-[11.5px] leading-relaxed text-muted">
+                    {t.workflowsDebugSessionStats({
+                      rate: Math.round(debugStats.successRate * 100),
+                      total: debugStats.total,
+                      p50: debugStats.p50DurationMs,
+                    })}
+                    {debugStats.byPhase.length > 0 &&
+                      ` · ${debugStats.byPhase
+                        .slice(0, 2)
+                        .map((entry) => `${entry.phase} ×${entry.count}`)
+                        .join(' · ')}`}
+                  </p>
+                )}
+              </div>
             )}
             <div className="mt-4 flex flex-none justify-end">
               <button

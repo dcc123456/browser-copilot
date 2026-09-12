@@ -12,12 +12,7 @@
 
 /** The broad category a block belongs to, used for palette grouping. */
 export type BlockCategory =
-  | 'browser'
-  | 'navigation'
-  | 'data'
-  | 'control-flow'
-  | 'integration'
-  | 'trigger'
+  'browser' | 'navigation' | 'data' | 'control-flow' | 'integration' | 'trigger'
 
 /** A connection point on a block, for wiring nodes together in the editor. */
 export interface HandleDefinition {
@@ -120,6 +115,12 @@ export interface WorkflowSettings {
   reuseLastState: boolean
   /** Target column name for table-backed workflows. */
   defaultColumnName?: string
+  /**
+   * Element-wait window (ms) force-enabled on interaction blocks for EVERY run
+   * (not just debug). Defaults to {@link DEFAULT_WAIT_MS} (2000) when unset;
+   * set 0 to disable the rewrite for this workflow.
+   */
+  defaultWaitMs?: number
 }
 
 /** A persisted workflow. */

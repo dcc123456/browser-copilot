@@ -32,7 +32,8 @@ const FULL_EXPRESSION = /^\d+(?:\.\d+)?\s*(?:[+\-xX*×÷/])\s*\d+(?:\.\d+)?\s*=?
 /** An expression buried in noise, e.g. "8 -=2 =" or "Zl x 7 =". */
 const PARTIAL_EXPRESSION = /\d+(?:\.\d+)?\s*(?:[+\-xX*×÷/])\s*\d+(?:\.\d+)?/
 /** Whitespace/dash variants that should not count as a disagreement. */
-const normalizeForCompare = (t: string): string => t.replace(/[—–―]/g, '-').replace(/\s+/g, ' ').trim()
+const normalizeForCompare = (t: string): string =>
+  t.replace(/[—–―]/g, '-').replace(/\s+/g, ' ').trim()
 
 /**
  * Plausibility score for one reading. Higher wins. Structure dominates the
@@ -62,10 +63,14 @@ export function pickOcrCandidate(candidates: OcrCandidate[]): PickedOcrCandidate
   const usable = candidates.filter((c) => normalizeForCompare(c.text).length > 0)
   if (usable.length === 0) return { text: '', confidence: 0, agreed: false, alternatives: [] }
   const first = usable[0]!
-  if (usable.length === 1) return { text: first.text, confidence: first.confidence, agreed: false, alternatives: [] }
+  if (usable.length === 1)
+    return { text: first.text, confidence: first.confidence, agreed: false, alternatives: [] }
 
-  const allAgree = usable.every((c) => normalizeForCompare(c.text) === normalizeForCompare(first.text))
-  if (allAgree) return { text: first.text, confidence: first.confidence, agreed: true, alternatives: [] }
+  const allAgree = usable.every(
+    (c) => normalizeForCompare(c.text) === normalizeForCompare(first.text),
+  )
+  if (allAgree)
+    return { text: first.text, confidence: first.confidence, agreed: true, alternatives: [] }
 
   const ranked = [...usable].sort(
     (a, b) => scoreOcrCandidate(b.text, b.confidence) - scoreOcrCandidate(a.text, a.confidence),
@@ -74,7 +79,10 @@ export function pickOcrCandidate(candidates: OcrCandidate[]): PickedOcrCandidate
     text: ranked[0]!.text,
     confidence: ranked[0]!.confidence,
     agreed: false,
-    alternatives: ranked.slice(1).map((c) => c.text).slice(0, 2),
+    alternatives: ranked
+      .slice(1)
+      .map((c) => c.text)
+      .slice(0, 2),
   }
 }
 
@@ -94,11 +102,24 @@ export function evaluateArithmetic(text: string): number | null {
   // `number | null`: division by zero yields null, handled below.
   let value: number | null
   switch (op) {
-    case '+': value = a + b; break
-    case '-': value = a - b; break
-    case 'x': case 'X': case '*': case '×': value = a * b; break
-    case '÷': case '/': value = b === 0 ? null : a / b; break
-    default: return null
+    case '+':
+      value = a + b
+      break
+    case '-':
+      value = a - b
+      break
+    case 'x':
+    case 'X':
+    case '*':
+    case '×':
+      value = a * b
+      break
+    case '÷':
+    case '/':
+      value = b === 0 ? null : a / b
+      break
+    default:
+      return null
   }
   if (value === null) return null
   return Math.round(value * 1000) / 1000

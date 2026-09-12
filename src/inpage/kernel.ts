@@ -384,8 +384,7 @@ export function runOp(op: Op): OpResult {
     const out: Element[] = []
     for (const root of roots) {
       try {
-        const doc =
-          root.nodeType === 9 ? (root as Document) : (root as ShadowRoot).ownerDocument
+        const doc = root.nodeType === 9 ? (root as Document) : (root as ShadowRoot).ownerDocument
         if (!doc) continue
         const result = doc.evaluate(xpath, root, null, 7, null)
         for (let i = 0; i < result.snapshotLength; i += 1) {
@@ -646,9 +645,7 @@ export function runOp(op: Op): OpResult {
     }
     try {
       if (typeof PointerEvent === 'function' && type.startsWith('pointer')) {
-        element.dispatchEvent(
-          new PointerEvent(type, { ...init, pointerId: 1, isPrimary: true }),
-        )
+        element.dispatchEvent(new PointerEvent(type, { ...init, pointerId: 1, isPrimary: true }))
         return
       }
       element.dispatchEvent(new MouseEvent(type, init))
@@ -782,9 +779,11 @@ export function runOp(op: Op): OpResult {
     const init = { data, bubbles: true, cancelable: true }
     if (type === 'textInput') {
       try {
-        const Ctor = (window as unknown as {
-          TextEvent?: new (t: string, i: typeof init) => Event
-        }).TextEvent
+        const Ctor = (
+          window as unknown as {
+            TextEvent?: new (t: string, i: typeof init) => Event
+          }
+        ).TextEvent
         if (typeof Ctor === 'function') return new Ctor(type, init)
       } catch {
         /* fall through */
@@ -1016,9 +1015,10 @@ export function runOp(op: Op): OpResult {
     const elementRoot = element.getRootNode ? element.getRootNode() : element.ownerDocument
     if (elementRoot && (elementRoot as ShadowRoot).nodeType === 11) {
       try {
-        const path = typeof document.elementsFromPoint === 'function'
-          ? document.elementsFromPoint(x, y)
-          : [top]
+        const path =
+          typeof document.elementsFromPoint === 'function'
+            ? document.elementsFromPoint(x, y)
+            : [top]
         for (let i = 0; i < path.length; i += 1) {
           if (path[i] === element) return null
         }
@@ -1119,7 +1119,10 @@ export function runOp(op: Op): OpResult {
         let within = false
         while (hostNode && (hostNode as ShadowRoot).nodeType === 11) {
           const h: Element | null = (hostNode as ShadowRoot).host
-          if (h && form.contains(h)) { within = true; break }
+          if (h && form.contains(h)) {
+            within = true
+            break
+          }
           hostNode = h ? (h.getRootNode ? h.getRootNode() : h.ownerDocument) : null
         }
         if (within) controls.push(ctrl)
@@ -1277,11 +1280,13 @@ export function runOp(op: Op): OpResult {
      */
     function findMediaSource(
       root: Element,
-    ):
-      | { kind: 'canvas'; el: HTMLCanvasElement }
-      | { kind: 'url' | 'blob'; value: string }
-      | null {
-      type MediaCandidate = { kind: 'canvas' | 'url' | 'blob'; area: number; el: Element; value: string }
+    ): { kind: 'canvas'; el: HTMLCanvasElement } | { kind: 'url' | 'blob'; value: string } | null {
+      type MediaCandidate = {
+        kind: 'canvas' | 'url' | 'blob'
+        area: number
+        el: Element
+        value: string
+      }
       // Canvas wins ties: its bitmap NEVER survives serialization, while a
       // data:-src img at least might.
       const betterOf = (a: MediaCandidate, b: MediaCandidate): MediaCandidate =>
@@ -1377,7 +1382,13 @@ export function runOp(op: Op): OpResult {
       context.fillStyle = '#ffffff'
       context.fillRect(0, 0, width, height)
       context.drawImage(decoded, 0, 0, width, height)
-      return { ...base(), ok: true, found: true, note: 'captured', data: canvas.toDataURL('image/png') }
+      return {
+        ...base(),
+        ok: true,
+        found: true,
+        note: 'captured',
+        data: canvas.toDataURL('image/png'),
+      }
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error)
       return { ...base(), ok: false, found: true, error: `capture: ${text}` }
@@ -1433,12 +1444,18 @@ export function runOp(op: Op): OpResult {
 
     if (op.action === 'scroll' && !op.target) {
       const spec = op.scroll ?? { mode: 'by' as const, y: 600 }
-      const behavior: ScrollBehavior = spec.mode === 'incremental' || 'smooth' in spec && spec.smooth ? 'smooth' : 'auto'
+      const behavior: ScrollBehavior =
+        spec.mode === 'incremental' || ('smooth' in spec && spec.smooth) ? 'smooth' : 'auto'
       try {
         if (spec.mode === 'top') window.scrollTo({ top: 0, left: 0, behavior })
         else if (spec.mode === 'bottom')
           window.scrollTo({ top: document.documentElement.scrollHeight ?? 0, left: 0, behavior })
-        else window.scrollBy({ top: 'y' in spec ? (spec.y ?? 0) : 0, left: 'x' in spec ? (spec.x ?? 0) : 0, behavior })
+        else
+          window.scrollBy({
+            top: 'y' in spec ? (spec.y ?? 0) : 0,
+            left: 'x' in spec ? (spec.x ?? 0) : 0,
+            behavior,
+          })
       } catch {
         /* no scrolling */
       }
@@ -1578,7 +1595,12 @@ export function runOp(op: Op): OpResult {
 
     if (op.action === 'scroll') {
       const spec = op.scroll ?? { mode: 'into_view' as const }
-      const behavior: ScrollBehavior = spec.mode === 'into_view' ? 'auto' : spec.mode === 'incremental' || 'smooth' in spec && spec.smooth ? 'smooth' : 'auto'
+      const behavior: ScrollBehavior =
+        spec.mode === 'into_view'
+          ? 'auto'
+          : spec.mode === 'incremental' || ('smooth' in spec && spec.smooth)
+            ? 'smooth'
+            : 'auto'
       try {
         if (spec.mode === 'into_view') scrollIntoView(element)
         else if (spec.mode === 'by' || spec.mode === 'incremental') {
@@ -1608,8 +1630,7 @@ export function runOp(op: Op): OpResult {
     }
 
     if (op.action === 'click') {
-      if (isDisabled(element))
-        return withMeta(fail(`${describeElement(element)} is disabled.`))
+      if (isDisabled(element)) return withMeta(fail(`${describeElement(element)} is disabled.`))
       const blocker = occludedBy(element)
       if (blocker)
         return withMeta(
@@ -1628,19 +1649,16 @@ export function runOp(op: Op): OpResult {
     }
 
     if (op.action === 'fill') {
-      if (isDisabled(element))
-        return withMeta(fail(`${describeElement(element)} is disabled.`))
+      if (isDisabled(element)) return withMeta(fail(`${describeElement(element)} is disabled.`))
       const value = op.value === undefined || op.value === null ? '' : String(op.value)
       const editable = element.getAttribute('contenteditable')
       focusElement(element)
       if (editable === '' || editable === 'true') {
         // Stateful rich editors (DraftJS etc.) must be typed through, not
         // written into: see typeIntoEditable. Async; executeScript awaits it.
-        return typeIntoEditable(
-          element as HTMLElement,
-          value,
-          op.clear !== false,
-        ).then(withMeta) as unknown as OpResult
+        return typeIntoEditable(element as HTMLElement, value, op.clear !== false).then(
+          withMeta,
+        ) as unknown as OpResult
       }
       const isField =
         element instanceof HTMLInputElement ||
@@ -1654,8 +1672,7 @@ export function runOp(op: Op): OpResult {
         const type = (element.type || 'text').toLowerCase()
         if (type === 'checkbox' || type === 'radio')
           return withMeta(fail(`${describeElement(element)} is a ${type}; use set_checkbox.`))
-        if (type === 'file')
-          return withMeta(fail('File inputs cannot be filled by an extension.'))
+        if (type === 'file') return withMeta(fail('File inputs cannot be filled by an extension.'))
       }
       // Content already equal to the target: do NOT clear-and-retype. The
       // forms fill then never wipes content an earlier step (an AI agent, a
@@ -1687,8 +1704,7 @@ export function runOp(op: Op): OpResult {
         if (!option) continue
         const label = collapse(option.textContent ?? '')
         available.push(label || option.value)
-        if (wanted.indexOf(option.value) !== -1 || wanted.indexOf(label) !== -1)
-          chosen.push(option)
+        if (wanted.indexOf(option.value) !== -1 || wanted.indexOf(label) !== -1) chosen.push(option)
       }
       if (chosen.length === 0)
         return withMeta(
@@ -1746,7 +1762,8 @@ export function runOp(op: Op): OpResult {
     if (op.action === 'click_link') {
       const href = (element as HTMLAnchorElement).href
       const tag = element.tagName.toLowerCase()
-      if (tag !== 'a' || !href) return withMeta(fail(`${describeElement(element)} is not a clickable link.`))
+      if (tag !== 'a' || !href)
+        return withMeta(fail(`${describeElement(element)} is not a clickable link.`))
       const target = (element as HTMLAnchorElement).target
       return withMeta({
         ...base(),
@@ -1868,7 +1885,6 @@ export function runExecJs(input: {
     let result: unknown
     if (!looksLikeStatements) {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
         const expr = new Function(...argNames, `"use strict"; return (${code});`)
         result = expr(...argValues)
       } catch {
@@ -1876,7 +1892,6 @@ export function runExecJs(input: {
       }
     }
     if (result === undefined && (looksLikeStatements || code.trim() !== '')) {
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
       const body = new Function(...argNames, `"use strict";\n${code}`)
       result = body(...argValues)
     }
@@ -1906,12 +1921,15 @@ export function runWorkflowJs(input: {
   code: string
   variables?: Record<string, unknown>
   timeout?: number
-}): Promise<{
-  ok: true
-  data?: unknown
-  variables?: Record<string, unknown>
-  logs: { level: string; message: string }[]
-} | { ok: false; error: string; logs: { level: string; message: string }[] }> {
+}): Promise<
+  | {
+      ok: true
+      data?: unknown
+      variables?: Record<string, unknown>
+      logs: { level: string; message: string }[]
+    }
+  | { ok: false; error: string; logs: { level: string; message: string }[] }
+> {
   return new Promise((resolvePromise) => {
     const logs: { level: string; message: string }[] = []
     let settled = false
@@ -1942,7 +1960,11 @@ export function runWorkflowJs(input: {
       return String(value)
     }
 
-    const finish = (payload: { ok: true; data?: unknown; variables?: Record<string, unknown> } | { ok: false; error: string }) => {
+    const finish = (
+      payload:
+        | { ok: true; data?: unknown; variables?: Record<string, unknown> }
+        | { ok: false; error: string },
+    ) => {
       if (settled) return
       settled = true
       if (timer) clearTimeout(timer)
@@ -1951,7 +1973,9 @@ export function runWorkflowJs(input: {
           resolvePromise({
             ok: true,
             data: cloneable(payload.data),
-            variables: payload.variables ? (cloneable(payload.variables) as Record<string, unknown>) : undefined,
+            variables: payload.variables
+              ? (cloneable(payload.variables) as Record<string, unknown>)
+              : undefined,
             logs,
           })
         } else {
@@ -2054,7 +2078,6 @@ export function runWorkflowJs(input: {
 
       armTimeout()
 
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
       const fn = new Function(
         'automaNextBlock',
         'automaSetVariable',
@@ -2109,4 +2132,3 @@ export function runWorkflowJs(input: {
     }
   })
 }
-

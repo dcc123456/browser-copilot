@@ -11,18 +11,10 @@
  */
 
 import { effectiveLocale } from '../lib/i18n'
-import {
-  NotLoggedIn,
-  fetchReviewRequests,
-  formatReviewSummary,
-} from '../lib/github'
+import { NotLoggedIn, fetchReviewRequests, formatReviewSummary } from '../lib/github'
 import { sendWebhookText } from '../lib/feishu'
 import type { ScheduledTask } from '../lib/scheduler-types'
-import {
-  addRun,
-  getFeishuConfig,
-  recordTaskRun,
-} from '../lib/task-store'
+import { addRun, getFeishuConfig, recordTaskRun } from '../lib/task-store'
 import { runUnattendedPrompt } from './agent-unattended'
 import { resolveUnattendedScope } from './window-policy'
 import { retain, release } from './keepalive'
@@ -126,7 +118,13 @@ async function executeTask(
   lang: string,
   tracked: RunningTask,
 ): Promise<RunOutcome> {
-  addStep(tracked.runId, 'info', task.kind === 'github-review-requests' ? 'Fetching GitHub review requests…' : 'Starting agent task…')
+  addStep(
+    tracked.runId,
+    'info',
+    task.kind === 'github-review-requests'
+      ? 'Fetching GitHub review requests…'
+      : 'Starting agent task…',
+  )
   switch (task.kind) {
     case 'github-review-requests':
       return runReviewRequests(lang, tracked)
@@ -162,10 +160,9 @@ async function runReviewRequests(lang: string, tracked: RunningTask): Promise<Ru
       // The user asked for this exact behaviour: if the session is gone, skip
       // rather than fail with a stack trace. It still records and notifies so the
       // missing report is not invisible.
-      const summary =
-        lang.toLowerCase().startsWith('zh')
-          ? '⏸ 未登录 GitHub，本次定时任务已跳过。请打开 github.com 重新登录。'
-          : '⏸ Not logged in to GitHub; this run was skipped. Sign in at github.com.'
+      const summary = lang.toLowerCase().startsWith('zh')
+        ? '⏸ 未登录 GitHub，本次定时任务已跳过。请打开 github.com 重新登录。'
+        : '⏸ Not logged in to GitHub; this run was skipped. Sign in at github.com.'
       addStep(tracked.runId, 'status', summary)
       return { ok: false, skipped: true, summary, error: error.message }
     }
@@ -184,7 +181,11 @@ async function runReviewRequests(lang: string, tracked: RunningTask): Promise<Ru
  * carries its own tool-round budget (default 50) so long unattended workflows
  * aren't bounded by the interactive setting.
  */
-async function runAgentPrompt(task: ScheduledTask, _lang: string, tracked: RunningTask): Promise<RunOutcome> {
+async function runAgentPrompt(
+  task: ScheduledTask,
+  _lang: string,
+  tracked: RunningTask,
+): Promise<RunOutcome> {
   const prompt = task.prompt?.trim()
   if (!prompt) {
     return { ok: false, skipped: false, summary: '', error: 'This task has no prompt.' }
@@ -229,20 +230,25 @@ async function runWorkflowTask(task: ScheduledTask, tracked: RunningTask): Promi
     ok: outcome.outcome === 'ok',
     skipped: false,
     summary: outcome.summary ?? '',
-    error:
-      outcome.outcome === 'failed'
-        ? (outcome.error ?? outcome.summary)
-        : undefined,
+    error: outcome.outcome === 'failed' ? (outcome.error ?? outcome.summary) : undefined,
     cancelled: outcome.outcome === 'cancelled',
   }
 }
 
-async function notifyOutcome(task: ScheduledTask, outcome: RunOutcome, lang: string): Promise<void> {
+async function notifyOutcome(
+  task: ScheduledTask,
+  outcome: RunOutcome,
+  lang: string,
+): Promise<void> {
   const config = await getFeishuConfig()
   if (!config.webhookUrl) return
-  const title = lang.toLowerCase().startsWith('zh') ? `🤖 任务：${task.name}` : `🤖 Task: ${task.name}`
+  const title = lang.toLowerCase().startsWith('zh')
+    ? `🤖 任务：${task.name}`
+    : `🤖 Task: ${task.name}`
   const text = `${title}\n${outcome.summary}${
-    outcome.error && !outcome.summary.toLowerCase().includes('sign in') && !outcome.summary.includes('登录')
+    outcome.error &&
+    !outcome.summary.toLowerCase().includes('sign in') &&
+    !outcome.summary.includes('登录')
       ? `\n\n${outcome.error}`
       : ''
   }`

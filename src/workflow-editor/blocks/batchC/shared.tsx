@@ -35,7 +35,9 @@ export function arr<T = Record<string, unknown>>(value: unknown): T[] {
  * slot) — shared OutputVariableFields with batchC's original label strings.
  */
 export function AssignVariable(props: Pick<EditFormProps, 'data' | 'onChange'>) {
-  return <OutputVariableFields {...props} checkboxLabel="Assign to a variable" placeholder="abc123" />
+  return (
+    <OutputVariableFields {...props} checkboxLabel="Assign to a variable" placeholder="abc123" />
+  )
 }
 
 /** "Insert to table" dataColumn row kept simple (no live column list yet). */

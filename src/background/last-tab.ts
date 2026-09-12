@@ -38,7 +38,12 @@ function remember(tab: { id?: number; windowId?: number; url?: string }): void {
   const url = tab.url
   if (!isInjectablePage(url)) return
   recent = recent.filter((t) => t.tabId !== tab.id)
-  recent.unshift({ tabId: tab.id, windowId: tab.windowId, url: url as string, updatedAt: Date.now() })
+  recent.unshift({
+    tabId: tab.id,
+    windowId: tab.windowId,
+    url: url as string,
+    updatedAt: Date.now(),
+  })
   if (recent.length > MAX_TRACKED) recent = recent.slice(0, MAX_TRACKED)
 }
 

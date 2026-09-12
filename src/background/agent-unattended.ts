@@ -99,9 +99,7 @@ export async function runUnattendedPrompt(
      * reasoning junk in it would be filled into pages verbatim.
      */
     const finalChunks: string[] = []
-    const history: { role: string; content: string }[] = [
-      { role: 'user', content: prompt },
-    ]
+    const history: { role: string; content: string }[] = [{ role: 'user', content: prompt }]
 
     await runAgentTurn(history as never, {
       conversationId,
@@ -173,10 +171,7 @@ export async function runUnattendedPrompt(
     }
   } catch (error) {
     // An AbortError is a deliberate cancellation, not a failure to report loudly.
-    if (
-      options.signal?.aborted ||
-      (error instanceof Error && error.name === 'AbortError')
-    ) {
+    if (options.signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
       return { ok: false, answer: '', cancelled: true, error: 'Cancelled' }
     }
     return {

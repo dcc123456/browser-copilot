@@ -133,22 +133,34 @@ function normalizeHandle(
   const fallback = `${blockId}-${kind === 'source' ? 'output-1' : 'input-1'}`
   if (!handle) return fallback
   // Bare suffix (from external imports): "output-1", "true", "input-1", ...
-  if (!handle.includes('-output-') && !handle.includes('-input-') && !handle.includes('-fallback')) {
+  if (
+    !handle.includes('-output-') &&
+    !handle.includes('-input-') &&
+    !handle.includes('-fallback')
+  ) {
     // Branch/condition handles may be a bare semantic key ("true"/"false").
-    if (kind === 'source' && (handle === 'true' || handle === 'false' || handle === 'loop' || handle === 'end')) {
+    if (
+      kind === 'source' &&
+      (handle === 'true' || handle === 'false' || handle === 'loop' || handle === 'end')
+    ) {
       return `${blockId}-${handle}`
     }
     // A bare "fallback" is the fallback SOURCE handle (the engine's output key);
     // the editor renders it as `<blockId>-output-fallback`.
     if (kind === 'source' && handle === 'fallback') return `${blockId}-output-fallback`
-    return handle.startsWith('output') || handle.startsWith('input') ? `${blockId}-${handle}` : fallback
+    return handle.startsWith('output') || handle.startsWith('input')
+      ? `${blockId}-${handle}`
+      : fallback
   }
   // Extract the trailing handle suffix regardless of the (possibly node-id)
   // prefix. `-output-fallback` must be matched before bare `-fallback`
   // (leftmost alternative wins): the editor renders the fallback handle as
   // `<blockId>-output-fallback`, and rewriting it to `<blockId>-fallback`
   // detached every saved fallback edge on reopen (the line silently vanished).
-  const match = /-(output-fallback|input-fallback|output-\d+|input-\d+|fallback|true|false|loop|end)$/.exec(handle)
+  const match =
+    /-(output-fallback|input-fallback|output-\d+|input-\d+|fallback|true|false|loop|end)$/.exec(
+      handle,
+    )
   const raw = match ? match[1] : kind === 'source' ? 'output-1' : 'input-1'
   // The fallback handle only exists as a SOURCE (`-output-fallback`). Bare
   // `-fallback` tails come from older mangled saves — repair them so already
@@ -176,7 +188,7 @@ export function migrateWorkflow(wf: Workflow): Workflow {
     const label =
       typeof data.description === 'string' && data.description
         ? data.description
-        : CATALOG_BY_ID.get(blockId)?.name ?? blockId
+        : (CATALOG_BY_ID.get(blockId)?.name ?? blockId)
     return { ...node, label, data: { ...data, blockId } }
   })
 
@@ -184,8 +196,12 @@ export function migrateWorkflow(wf: Workflow): Workflow {
   const edges: WorkflowEdge[] = (wf.drawflow.edges ?? []).map((edge) => {
     const sourceBlock = nodeBlockById.get(edge.source)
     const targetBlock = nodeBlockById.get(edge.target)
-    const sourceHandle = sourceBlock ? normalizeHandle(edge.sourceHandle, sourceBlock, 'source') : edge.sourceHandle
-    const targetHandle = targetBlock ? normalizeHandle(edge.targetHandle, targetBlock, 'target') : edge.targetHandle
+    const sourceHandle = sourceBlock
+      ? normalizeHandle(edge.sourceHandle, sourceBlock, 'source')
+      : edge.sourceHandle
+    const targetHandle = targetBlock
+      ? normalizeHandle(edge.targetHandle, targetBlock, 'target')
+      : edge.targetHandle
     if (sourceHandle !== edge.sourceHandle || targetHandle !== edge.targetHandle) changed = true
     return { ...edge, sourceHandle, targetHandle }
   })

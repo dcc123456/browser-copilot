@@ -38,6 +38,13 @@ export const DATA_DIR = 'browser-copilot'
 /** The keyspace prefix for a conversation transcript (see `lib/storage.ts`). */
 const CONVERSATION_PREFIX = 'conv:'
 
+/**
+ * The keyspace prefix for a run's step checkpoints (M4). Persisted as
+ * `checkpoints/<runId>.json` — the same convention the server runner uses — so
+ * a run's resume points are readable with a plain file browser.
+ */
+export const CHECKPOINT_PREFIX = 'cp:'
+
 const IDB_DB = 'browser-copilot-fs'
 const IDB_STORE = 'directory'
 const IDB_KEY = 'root'
@@ -67,13 +74,17 @@ function sanitizeFileSegment(segment: string): string {
 /**
  * Maps a logical storage key to the file path segments under the data folder.
  *
- * `conv:<id>` transcripts go to `conversations/<id>.json` so a long chat does
- * not sit in the root next to settings; every other key becomes `<key>.json`.
+ * `conv:<id>` transcripts go to `conversations/<id>.json` and `cp:<runId>`
+ * run checkpoints go to `checkpoints/<runId>.json` so neither sits in the root
+ * next to settings; every other key becomes `<key>.json`.
  * Exported for direct testing.
  */
 export function keyToPath(key: string): string[] {
   if (key.startsWith(CONVERSATION_PREFIX)) {
     return ['conversations', `${sanitizeFileSegment(key.slice(CONVERSATION_PREFIX.length))}.json`]
+  }
+  if (key.startsWith(CHECKPOINT_PREFIX)) {
+    return ['checkpoints', `${sanitizeFileSegment(key.slice(CHECKPOINT_PREFIX.length))}.json`]
   }
   return [`${sanitizeFileSegment(key)}.json`]
 }

@@ -48,9 +48,7 @@ export const PICK_TIMEOUT_MS = 30_000
 
 /** Outcome of the pure policy decision. `none` = no plugin window anywhere. */
 export type UnresolvedScope =
-  | { kind: 'scope'; windowId: number }
-  | { kind: 'ask' }
-  | { kind: 'none' }
+  { kind: 'scope'; windowId: number } | { kind: 'ask' } | { kind: 'none' }
 
 /**
  * Decide the target window for an unattended run. `windows` are the ordinary
@@ -70,8 +68,7 @@ export function resolveUnattendedWindow(
 
   // The latest plugin window, defensive against a stale latestWindowId.
   const latestId =
-    typeof latestWindowId === 'number' &&
-    pluginWindows.some((w) => w.windowId === latestWindowId)
+    typeof latestWindowId === 'number' && pluginWindows.some((w) => w.windowId === latestWindowId)
       ? latestWindowId
       : pluginWindows[pluginWindows.length - 1]!.windowId
 

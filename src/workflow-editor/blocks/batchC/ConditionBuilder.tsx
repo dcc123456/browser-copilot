@@ -379,7 +379,7 @@ export default function ConditionBuilder({
     if (!group) return
     const conditions = group.conditions.slice()
     conditions.splice(rowIndex, 1)
-    let nextGroups = groups.slice()
+    const nextGroups = groups.slice()
     if (conditions.length === 0) {
       nextGroups.splice(groupIndex, 1) // remove empty OR group entirely
     } else {

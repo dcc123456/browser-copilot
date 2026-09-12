@@ -355,7 +355,7 @@ export default function EditTriggerEvent({ data, onChange }: EditFormProps) {
         </Field>
       </div>
 
-        <Expand
+      <Expand
         title={
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, width: '100%' }}>
             <span>{bt('Options')}</span>

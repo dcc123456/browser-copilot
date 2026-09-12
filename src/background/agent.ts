@@ -59,6 +59,7 @@ import { evaluateArithmetic } from '../lib/ocr-candidates'
 import { fetchImageAsDataUrl } from '../lib/fetch-image'
 import { isSamePage } from '../lib/pages'
 import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
+import { buildToolErrorContext, recentFailedAttempts } from '../lib/tool-error'
 import {
   entryFields,
   findField,
@@ -92,6 +93,7 @@ import {
   ensureTabMonitor,
   getConsoleEntries,
   getRecentRequests,
+  summarizePerfNetwork,
   waitForNetworkIdle,
 } from './cdp-monitor'
 import { activeTab, readActivePage } from './page'
@@ -217,7 +219,8 @@ const SCREENSHOT_ARG = {
 /** Preferred element handle: a short ref from the latest snapshot/observation. */
 const REF_ARG = {
   type: 'string',
-  description: 'Element ref (e.g. "e12") from the latest snapshot/observation. Preferred over target.',
+  description:
+    'Element ref (e.g. "e12") from the latest snapshot/observation. Preferred over target.',
 } as const
 
 const SPEC_SCHEMA = {
@@ -329,7 +332,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'screenshot',
       description:
-        "Visually inspect an element or the page with an image model (layout, colors, rendered state). For text inside images use recognize_image. Pass `target` or nothing for the whole page. Requires approval.",
+        'Visually inspect an element or the page with an image model (layout, colors, rendered state). For text inside images use recognize_image. Pass `target` or nothing for the whole page. Requires approval.',
       parameters: {
         type: 'object',
         properties: {
@@ -593,7 +596,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'get_my_profile',
       description:
-        "Get saved personal profile fields (name, email, phone, address, ...) for form filling. Read-only; no approval. Never includes passwords.",
+        'Get saved personal profile fields (name, email, phone, address, ...) for form filling. Read-only; no approval. Never includes passwords.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -648,8 +651,7 @@ export const TOOLS: WireTool[] = [
         properties: {
           name: {
             type: 'string',
-            description:
-              'Unique short name used to trigger it later, e.g. "captcha-helper".',
+            description: 'Unique short name used to trigger it later, e.g. "captcha-helper".',
           },
           description: {
             type: 'string',
@@ -659,7 +661,7 @@ export const TOOLS: WireTool[] = [
           instructions: {
             type: 'string',
             description:
-              "Markdown body for an agent with no conversation memory: imperative tool-exact steps plus edge cases; one worked example over explanation.",
+              'Markdown body for an agent with no conversation memory: imperative tool-exact steps plus edge cases; one worked example over explanation.',
           },
           autoMatch: {
             type: 'boolean',
@@ -876,34 +878,51 @@ function hostOf(url: string | undefined): string | undefined {
   }
 }
 
+/**
+ * Default element budget for a snapshot sent to the model. Kept lean because a
+ * snapshot is re-sent on every later round.
+ */
+const SNAPSHOT_ELEMENT_LIMIT = 80
+
+/**
+ * Hard ceiling on elements returned even when the caller asks for more. A
+ * takeover agent may raise `maxElements` (long pages, target below the fold);
+ * without this the old 80-element cap silently discarded the extra elements
+ * the agent explicitly requested.
+ */
+const SNAPSHOT_ELEMENT_HARD_CAP = 250
+
 /** Redacts a snapshot to a model-friendly size: targets + labels, no giant text. */
-function summarizeSnapshot(snapshot: {
-  url: string
-  title: string
-  elements: Array<{
-    ref: string
-    role: string
-    name: string
-    tag: string
-    type?: string
-    value?: string
-    placeholder?: string
-    disabled?: boolean
-    checked?: boolean
-    required?: boolean
-    inViewport: boolean
-    target?: unknown
-  }>
-  forms: unknown
-  scrollY: number
-  scrollHeight: number
-  viewportHeight: number
-  text: string
-  truncated: boolean
-  elementsTruncated: boolean
-}): unknown {
-  const ELEMENT_LIMIT = 80
-  const elements = snapshot.elements.slice(0, ELEMENT_LIMIT).map((el) => {
+function summarizeSnapshot(
+  snapshot: {
+    url: string
+    title: string
+    elements: Array<{
+      ref: string
+      role: string
+      name: string
+      tag: string
+      type?: string
+      value?: string
+      placeholder?: string
+      disabled?: boolean
+      checked?: boolean
+      required?: boolean
+      inViewport: boolean
+      target?: unknown
+    }>
+    forms: unknown
+    scrollY: number
+    scrollHeight: number
+    viewportHeight: number
+    text: string
+    truncated: boolean
+    elementsTruncated: boolean
+  },
+  elementLimit = SNAPSHOT_ELEMENT_LIMIT,
+): unknown {
+  const limit = Math.max(1, Math.min(SNAPSHOT_ELEMENT_HARD_CAP, Math.floor(elementLimit) || 1))
+  const elements = snapshot.elements.slice(0, limit).map((el) => {
     // Compact locator hint (#id / [data-testid] / [name]): the ONLY stable
     // handle the model can copy into a block's `selector` param when it
     // proposes a fix. Few tokens, only for genuinely stable specs.
@@ -932,7 +951,7 @@ function summarizeSnapshot(snapshot: {
     title: snapshot.title,
     text,
     truncated: snapshot.truncated,
-    elementsTruncated: snapshot.elementsTruncated || snapshot.elements.length > ELEMENT_LIMIT,
+    elementsTruncated: snapshot.elementsTruncated || snapshot.elements.length > limit,
     elements,
     forms: snapshot.forms,
     scroll: {
@@ -973,8 +992,11 @@ function compactPageRead(page: {
   }
 }
 
-function compactSnapshot(snapshot: Parameters<typeof summarizeSnapshot>[0]): unknown {
-  const summarized = summarizeSnapshot(snapshot) as {
+function compactSnapshot(
+  snapshot: Parameters<typeof summarizeSnapshot>[0],
+  elementLimit = SNAPSHOT_ELEMENT_LIMIT,
+): unknown {
+  const summarized = summarizeSnapshot(snapshot, elementLimit) as {
     url: string
     title: string
     text: string
@@ -1065,8 +1087,11 @@ function resolveTargetFrom(
   if (ref) {
     const hit = ctx.snapshotTargets?.get(ref)
     if (!hit) {
+      const reason = ctx.navigated
+        ? 'The page navigated since your last snapshot, so every old ref is stale.'
+        : "Refs come from the latest snapshot_page or an action's observation."
       return {
-        error: `Unknown ref "${ref}". Refs come from the latest snapshot_page or an action's observation — take a fresh snapshot if the page has changed.`,
+        error: `Unknown ref "${ref}". ${reason} Take a fresh snapshot (snapshot_page) and use the new refs — never reuse an old ref.`,
       }
     }
     return { target: hit.target }
@@ -1505,11 +1530,19 @@ export async function executeTool(
       // A page whose text is genuinely needed can ask for more via maxChars,
       // or use read_current_page.
       const maxChars = typeof args.maxChars === 'number' ? args.maxChars : 3000
-      const maxElements = typeof args.maxElements === 'number' ? args.maxElements : 120
+      const requestedElements = typeof args.maxElements === 'number' ? args.maxElements : 120
+      // Clamp before the in-page call: a wild request must not make the kernel
+      // build a huge element list.
+      const maxElements = Math.max(
+        1,
+        Math.min(SNAPSHOT_ELEMENT_HARD_CAP, Math.floor(requestedElements) || 120),
+      )
       const snapshot = await snapshotActiveTab(maxChars, maxElements, ctx.scope)
       ctx.lastUrl = snapshot.url
       rememberSnapshotTargets(ctx, snapshot)
-      return JSON.stringify(compactSnapshot(snapshot))
+      // Honor the requested element budget (up to the hard cap) instead of the
+      // old fixed 80, so a takeover agent asking for 200 actually receives 200.
+      return JSON.stringify(compactSnapshot(snapshot, maxElements))
     }
 
     case 'recognize_image': {
@@ -1550,7 +1583,14 @@ export async function executeTool(
       let ocrMs = 0
       let attempts = 0
       let lastOcrError: string | undefined
-      let best: { text: string; confidence: number; agreed: boolean; alternatives: string[]; attempt: number; rank: number } | null = null
+      let best: {
+        text: string
+        confidence: number
+        agreed: boolean
+        alternatives: string[]
+        attempt: number
+        rank: number
+      } | null = null
       const readings: string[] = []
 
       if (__OCR__) {
@@ -1564,7 +1604,14 @@ export async function executeTool(
               return JSON.stringify({
                 ok: false,
                 error: downloaded.error,
-                timing: { captureMs, preprocessMs, ocrMs, visionMs: 0, attempts, totalMs: Math.round(performance.now() - totalStart) },
+                timing: {
+                  captureMs,
+                  preprocessMs,
+                  ocrMs,
+                  visionMs: 0,
+                  attempts,
+                  totalMs: Math.round(performance.now() - totalStart),
+                },
               })
             }
             imageData = downloaded.dataUrl
@@ -1583,7 +1630,9 @@ export async function executeTool(
           if (ocr.text.trim()) {
             const text = ocr.text.trim()
             const confidence = Math.round(ocr.confidence)
-            const alternatives = (ocr.alternatives ?? []).filter((t) => t.trim() && t.trim() !== text)
+            const alternatives = (ocr.alternatives ?? []).filter(
+              (t) => t.trim() && t.trim() !== text,
+            )
             readings.push(text)
             const answerNow = evaluateArithmetic(text)
             const rank = (answerNow !== null ? 2000 : 0) + (ocr.agreed ? 200 : 0) + confidence
@@ -1605,7 +1654,14 @@ export async function executeTool(
             return JSON.stringify({
               ok: false,
               error: downloaded.error,
-              timing: { captureMs, preprocessMs, ocrMs, visionMs: 0, attempts, totalMs: Math.round(performance.now() - totalStart) },
+              timing: {
+                captureMs,
+                preprocessMs,
+                ocrMs,
+                visionMs: 0,
+                attempts,
+                totalMs: Math.round(performance.now() - totalStart),
+              },
             })
           }
           imageData = downloaded.dataUrl
@@ -1640,9 +1696,13 @@ export async function executeTool(
           )
         }
         if (readings.length > 1) {
-          parts.push(`All readings: ${readings.join(' | ')} — compare and fill the most plausible one.`)
+          parts.push(
+            `All readings: ${readings.join(' | ')} — compare and fill the most plausible one.`,
+          )
         }
-        parts.push(`Local OCR (Tesseract.js · ${lang}) read ${text.length} chars; use this text to fill the CAPTCHA field.`)
+        parts.push(
+          `Local OCR (Tesseract.js · ${lang}) read ${text.length} chars; use this text to fill the CAPTCHA field.`,
+        )
         if (answer !== undefined) {
           parts.push(`The expression evaluates to ${answer} — fill that value.`)
         }
@@ -1752,9 +1812,13 @@ export async function executeTool(
       }
       await ensureTabMonitor(tab.id)
       const requests = getRecentRequests(tab.id)
+      // M2-16: one-line semantic summary so the model sees page health
+      // without parsing the raw request buffer.
+      const summary = summarizePerfNetwork([], requests).text
       return JSON.stringify({
         ok: true,
         requests,
+        summary,
         ...(requests.length === 0
           ? { note: 'No requests captured yet. Run an action first, then call again.' }
           : {}),
@@ -1773,14 +1837,17 @@ export async function executeTool(
       await ensureTabMonitor(tab.id)
       const level = args.level === 'all' ? 'all' : 'errors'
       const messages = getConsoleEntries(tab.id, level)
+      // M2-16: one-line semantic summary so the model sees page health
+      // without parsing the raw console buffer.
+      const summary = summarizePerfNetwork(messages, []).text
       return JSON.stringify({
         ok: true,
         messages,
         count: messages.length,
+        summary,
         ...(messages.length === 0
           ? {
-              note:
-                'No console messages captured yet. The monitor only sees output emitted after it attached — run an action first, then call again.',
+              note: 'No console messages captured yet. The monitor only sees output emitted after it attached — run an action first, then call again.',
             }
           : {}),
       })
@@ -2363,7 +2430,15 @@ async function captureObservation(
   ctx: ToolContext,
   withScreenshot: boolean,
   signal?: AbortSignal,
-): Promise<{ snapshot: unknown; screenshot?: string; consoleErrors?: string[] } | undefined> {
+): Promise<
+  | {
+      snapshot: unknown
+      screenshot?: string
+      consoleErrors?: string[]
+      perfNetworkSummary?: string
+    }
+  | undefined
+> {
   try {
     // Let the action's async page updates (fetch → render) land first, or the
     // observation shows the pre-action page.
@@ -2371,7 +2446,12 @@ async function captureObservation(
     const snapshot = await snapshotActiveTab(1500, 40, ctx.scope)
     // The observation's refs become the model's next action handles.
     rememberSnapshotTargets(ctx, snapshot)
-    const observed: { snapshot: unknown; screenshot?: string; consoleErrors?: string[] } = {
+    const observed: {
+      snapshot: unknown
+      screenshot?: string
+      consoleErrors?: string[]
+      perfNetworkSummary?: string
+    } = {
       snapshot: summarizeSnapshot(snapshot),
     }
     // Fresh console errors since the previous observation — the single most
@@ -2383,6 +2463,11 @@ async function captureObservation(
       if (errors.length > 0) {
         observed.consoleErrors = errors.map((entry) => `[${entry.level}] ${entry.text}`)
       }
+      // M2-16: combine the fresh console errors with recent network failures
+      // into one semantic "page health" line, fed back with the observation so
+      // the loop can reason about perf/network health without the raw buffers.
+      const recent = getRecentRequests(tabId)
+      observed.perfNetworkSummary = summarizePerfNetwork(errors, recent).text
     }
     if (withScreenshot) {
       if (signal?.aborted) return observed
@@ -2691,6 +2776,55 @@ export function needsConfirmation(
   return !isSamePage(grantedPageUrl, currentTabUrl)
 }
 
+/**
+ * Attaches structured recovery context to a failed tool result: the failure
+ * class, concrete recovery steps, the recent failed attempts at the SAME tool,
+ * and the current page URL. A bare error string makes a model guess — and often
+ * repeat the same call; this is what shortens the retry loop.
+ */
+function enrichToolError(
+  base: Record<string, unknown>,
+  history: readonly { role: string; name?: string; content?: unknown }[],
+  name: string,
+  lastUrl: string | undefined,
+): string {
+  const message = typeof base['error'] === 'string' ? base['error'] : 'Tool failed'
+  const structured = buildToolErrorContext(message)
+  const priorAttempts = recentFailedAttempts(history, name)
+  return JSON.stringify({
+    ...base,
+    errorType: structured.errorType,
+    suggestedRecovery: structured.suggestedRecovery,
+    ...(priorAttempts.length > 0 ? { previousAttempts: priorAttempts } : {}),
+    pageStateSummary: { url: lastUrl ?? '' },
+  })
+}
+
+/**
+ * Tools may REPORT failure (`{ok:false,error}`) instead of throwing. Enrich
+ * those results the same way; a success (or already-structured error) passes
+ * through untouched.
+ */
+function enrichToolOutputError(
+  output: string,
+  history: readonly { role: string; name?: string; content?: unknown }[],
+  name: string,
+  lastUrl: string | undefined,
+): string {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(output)
+  } catch {
+    return output
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return output
+  const record = parsed as Record<string, unknown>
+  if (record['errorType'] !== undefined) return output
+  const failed = record['ok'] === false || typeof record['error'] === 'string'
+  if (!failed) return output
+  return enrichToolError(record, history, name, lastUrl)
+}
+
 async function runOneToolCall(
   call: WireToolCall,
   history: WireMessage[],
@@ -2757,13 +2891,14 @@ async function runOneToolCall(
         loaded: fresh,
         alreadyLoaded: valid.filter((group) => !fresh.includes(group)),
         ...(invalid.length > 0 ? { unknownGroups: invalid } : {}),
-        toolsAdvertised: [...loaded].flatMap((group) => [...TOOL_GROUPS[group] ?? []]),
+        toolsAdvertised: [...loaded].flatMap((group) => [...(TOOL_GROUPS[group] ?? [])]),
       }),
     )
     deps.send({
       type: 'tool.result',
       name,
-      summary: fresh.length > 0 ? `Loaded tools: ${fresh.join(', ')}` : 'Tool groups already loaded',
+      summary:
+        fresh.length > 0 ? `Loaded tools: ${fresh.join(', ')}` : 'Tool groups already loaded',
     })
     return
   }
@@ -2864,7 +2999,7 @@ async function runOneToolCall(
 
   try {
     const output = await executeTool(name, args, ctx, deps.signal)
-    pushResult(output)
+    pushResult(enrichToolOutputError(output, history, name, ctx.lastUrl))
     const summary = shortSummary(name, output)
     deps.send({ type: 'tool.result', name, summary })
     let ok = true
@@ -2894,7 +3029,7 @@ async function runOneToolCall(
         : error instanceof Error
           ? error.message
           : String(error)
-    pushResult(JSON.stringify({ error: message }))
+    pushResult(enrichToolError({ error: message }, history, name, ctx.lastUrl))
     deps.send({ type: 'tool.result', name, summary: `Failed: ${message}` })
     await recordAction(
       deps.conversationId,

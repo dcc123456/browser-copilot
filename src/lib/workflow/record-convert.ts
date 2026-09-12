@@ -37,10 +37,7 @@ const Y_START = 180
  * (Automa begins records with the trigger block); subsequent nodes are laid
  * out left to right on a single row.
  */
-export function flowsToWorkflow(
-  flows: RecordedFlow[],
-  opts: { name?: string } = {},
-): Workflow {
+export function flowsToWorkflow(flows: RecordedFlow[], opts: { name?: string } = {}): Workflow {
   const nodes: WorkflowNode[] = []
   const edges: WorkflowEdge[] = []
 

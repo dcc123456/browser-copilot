@@ -66,9 +66,7 @@ export default function EditGetText({ data, onChange }: EditFormProps) {
       </Field>
       {showFlags && (
         <div style={{ marginBottom: 8 }}>
-          <p style={{ margin: '4px 0', fontSize: 12, opacity: 0.75 }}>
-            {bt('Expression flags')}
-          </p>
+          <p style={{ margin: '4px 0', fontSize: 12, opacity: 0.75 }}>{bt('Expression flags')}</p>
           {REGEX_FLAGS.map((item) => (
             <Checkbox
               key={item.id}

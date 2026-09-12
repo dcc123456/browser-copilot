@@ -158,7 +158,8 @@ async function handleMessage(ws: WebSocket, event: MessageEvent): Promise<void> 
     await applyAgentList(request.agents)
     return
   }
-  const id = typeof request.id === 'number' || typeof request.id === 'string' ? request.id : undefined
+  const id =
+    typeof request.id === 'number' || typeof request.id === 'string' ? request.id : undefined
 
   let response: ExternalAgentResponse
   try {

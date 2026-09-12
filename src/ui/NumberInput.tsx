@@ -66,8 +66,7 @@ export default function NumberInput({
 
   const numeric = typeof value === 'number' ? value : Number(value)
   const committed = Number.isFinite(numeric) ? numeric : Number.NaN
-  const display =
-    draft ?? (Number.isFinite(committed) ? String(committed) : String(value ?? ''))
+  const display = draft ?? (Number.isFinite(committed) ? String(committed) : String(value ?? ''))
 
   /** Write back only when the normalized value differs from the committed one. */
   const commit = (n: number) => {

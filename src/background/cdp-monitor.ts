@@ -95,7 +95,11 @@ function push<T>(list: T[], cap: number, entry: T): void {
   if (list.length > cap) list.splice(0, list.length - cap)
 }
 
-async function send(tabId: number, method: string, params?: Record<string, unknown>): Promise<void> {
+async function send(
+  tabId: number,
+  method: string,
+  params?: Record<string, unknown>,
+): Promise<void> {
   await chrome.debugger.sendCommand({ tabId }, method, params)
 }
 
@@ -158,7 +162,9 @@ if (typeof chrome !== 'undefined' && chrome.debugger?.onEvent) {
       if (type === 'clear' || type === 'profile' || type === 'profileEnd') return
       const level: ConsoleEntry['level'] =
         type === 'error' || type === 'assert' ? 'error' : type === 'warning' ? 'warning' : 'log'
-      const args = Array.isArray(p?.args) ? (p!.args as { value?: unknown; description?: string }[]) : []
+      const args = Array.isArray(p?.args)
+        ? (p!.args as { value?: unknown; description?: string }[])
+        : []
       const text = args
         .map((arg) => arg.description ?? (arg.value === undefined ? '' : String(arg.value)))
         .join(' ')
@@ -178,8 +184,12 @@ if (typeof chrome !== 'undefined' && chrome.debugger?.onEvent) {
       return
     }
     if (method === 'Runtime.exceptionThrown') {
-      const details = p?.exceptionDetails as { exception?: { description?: string }; text?: string } | undefined
-      const text = (details?.exception?.description ?? details?.text ?? 'Uncaught exception').slice(0, 300)
+      const details = p?.exceptionDetails as
+        { exception?: { description?: string }; text?: string } | undefined
+      const text = (details?.exception?.description ?? details?.text ?? 'Uncaught exception').slice(
+        0,
+        300,
+      )
       push(monitor.console, MAX_CONSOLE_ENTRIES, { level: 'error', text, at: Date.now() })
       return
     }
@@ -286,6 +296,59 @@ export function getRecentRequests(tabId: number, cap = 30): RequestEntry[] {
  * (default) keeps only error/warning entries; 'all' returns everything
  * captured, including plain log/info/debug output.
  */
+/**
+ * Compressed, human-readable health signal for a page derived from its
+ * captured console + network activity (M2-16 / proposal 6). The raw buffers
+ * (`getConsoleEntries` / `getRecentRequests`) can be hundreds of lines; this
+ * reduces them to one "is the page healthy?" line the agent loop can reason
+ * about without burning tokens on the full dump.
+ */
+export interface PerfNetworkSummary {
+  consoleErrors: number
+  consoleWarnings: number
+  networkFailures: number
+  /** HTTP responses with status >= 400 that still completed (network ok). */
+  httpErrors: number
+  /** The single-line semantic summary, always set (incl. the healthy case). */
+  text: string
+}
+
+/** Build the semantic perf/network summary from captured buffers. Pure. */
+export function summarizePerfNetwork(
+  consoleEntries: ConsoleEntry[],
+  requests: RequestEntry[],
+): PerfNetworkSummary {
+  const errors = consoleEntries.filter((e) => e.level === 'error')
+  const warnings = consoleEntries.filter((e) => e.level === 'warning')
+  const failed = requests.filter((r) => r.failed)
+  const httpErr = requests.filter(
+    (r) => typeof r.status === 'number' && r.status >= 400 && !r.failed,
+  )
+  const parts: string[] = []
+  if (errors.length) parts.push(`${errors.length} 个控制台错误`)
+  if (warnings.length) parts.push(`${warnings.length} 个控制台警告`)
+  if (failed.length) parts.push(`${failed.length} 个网络请求失败`)
+  if (httpErr.length) {
+    const byStatus = new Map<number, number>()
+    for (const r of httpErr) byStatus.set(r.status!, (byStatus.get(r.status!) ?? 0) + 1)
+    const detail = [...byStatus.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([s, c]) => `${s}×${c}`)
+      .join('、')
+    parts.push(`${httpErr.length} 个 HTTP 错误(${detail})`)
+  }
+  const text = parts.length
+    ? `页面信号：${parts.join('，')}。`
+    : '页面信号：控制台与网络均正常（无错误/失败）。'
+  return {
+    consoleErrors: errors.length,
+    consoleWarnings: warnings.length,
+    networkFailures: failed.length,
+    httpErrors: httpErr.length,
+    text,
+  }
+}
+
 export function getConsoleEntries(
   tabId: number,
   level: 'errors' | 'all' = 'errors',

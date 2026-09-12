@@ -88,10 +88,21 @@ export async function shortcutWorkflows(): Promise<{ wf: Workflow; shortcut: str
  * Normalize a chord like "Ctrl+Shift+E" to comparable lower-case tokens, used
  * to match a keyboard event from a page tab.
  */
-export function normalizeShortcut(chord: string): { key: string; ctrl: boolean; shift: boolean; alt: boolean; meta: boolean } {
-  const parts = chord.toLowerCase().split('+').map((s) => s.trim())
+export function normalizeShortcut(chord: string): {
+  key: string
+  ctrl: boolean
+  shift: boolean
+  alt: boolean
+  meta: boolean
+} {
+  const parts = chord
+    .toLowerCase()
+    .split('+')
+    .map((s) => s.trim())
   const has = (name: string) => parts.includes(name)
-  const key = parts.filter((p) => !['ctrl', 'control', 'shift', 'alt', 'meta', 'cmd', 'command'].includes(p)).join('+')
+  const key = parts
+    .filter((p) => !['ctrl', 'control', 'shift', 'alt', 'meta', 'cmd', 'command'].includes(p))
+    .join('+')
   return {
     key,
     ctrl: has('ctrl') || has('control'),
@@ -111,12 +122,22 @@ export function shortcutListenerInPage(chords: string[]): void {
   if (w.__bcShortcut) w.__bcShortcut.stop()
   const normalized = chords.map((c) => normalizeShortcutString(c))
   function normalizeShortcutString(chord: string) {
-    const parts = chord.toLowerCase().split('+').map((s) => s.trim())
+    const parts = chord
+      .toLowerCase()
+      .split('+')
+      .map((s) => s.trim())
     const has = (n: string) => parts.includes(n)
     const key = parts
       .filter((p) => !['ctrl', 'control', 'shift', 'alt', 'meta', 'cmd', 'command'].includes(p))
       .join('+')
-    return { chord, key, ctrl: has('ctrl') || has('control'), shift: has('shift'), alt: has('alt'), meta: has('meta') || has('cmd') || has('command') }
+    return {
+      chord,
+      key,
+      ctrl: has('ctrl') || has('control'),
+      shift: has('shift'),
+      alt: has('alt'),
+      meta: has('meta') || has('cmd') || has('command'),
+    }
   }
   function onKey(e: KeyboardEvent) {
     const pressed = {
@@ -282,7 +303,10 @@ export function workflowAutoTrigger(
   const data = triggerNodeData(wf)
   const type = data?.['type']
   if (type === 'interval') {
-    return { kind: 'schedule', schedule: { kind: 'interval', minutes: coerceIntervalMinutes(data?.['interval']) } }
+    return {
+      kind: 'schedule',
+      schedule: { kind: 'interval', minutes: coerceIntervalMinutes(data?.['interval']) },
+    }
   }
   if (type === 'specific-day') {
     const rawDays = Array.isArray(data?.['days']) ? (data?.['days'] as unknown[]) : []
@@ -297,7 +321,9 @@ export function workflowAutoTrigger(
     const dateStr = typeof data?.['date'] === 'string' ? (data?.['date'] as string) : ''
     if (!dateStr) return null
     const { hour, minute } = parseTime(data?.['time'])
-    const epoch = new Date(`${dateStr}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`).getTime()
+    const epoch = new Date(
+      `${dateStr}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`,
+    ).getTime()
     if (!Number.isFinite(epoch)) return null
     return { kind: 'once', epoch }
   }

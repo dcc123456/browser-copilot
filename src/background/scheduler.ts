@@ -84,9 +84,7 @@ export async function rescheduleAll(): Promise<void> {
   // plain-task and workflow prefixes.
   const existing = await chrome.alarms.getAll()
   const tasks = await listTasks()
-  const known = new Set(
-    tasks.filter((task) => task.enabled).map((task) => alarmNameFor(task)),
-  )
+  const known = new Set(tasks.filter((task) => task.enabled).map((task) => alarmNameFor(task)))
 
   for (const alarm of existing) {
     const isOurs =
