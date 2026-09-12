@@ -106,12 +106,10 @@ describe('chat-generated workflows expose editable form data', () => {
   const blockDataList = (entries: Parameters<typeof workflowFromHistory>[0]) => {
     const wf = workflowFromHistory(entries, 'wf')
     expect(wf).not.toBeNull()
-    return migrateWorkflow(wf!).drawflow.nodes.map(
-      (n) => {
-        const { blockId, ...blockData } = n.data as Record<string, unknown>
-        return { blockId: String(blockId), blockData }
-      },
-    )
+    return migrateWorkflow(wf!).drawflow.nodes.map((n) => {
+      const { blockId, ...blockData } = n.data as Record<string, unknown>
+      return { blockId: String(blockId), blockData }
+    })
   }
 
   it('carries stored values into the flat form fields (not catalog defaults)', () => {
@@ -173,7 +171,14 @@ describe('chat-generated workflows expose editable form data', () => {
         nodes: wf!.drawflow.nodes.map((n, i) =>
           i === 0
             ? n
-            : { ...n, data: { blockId: 'new-tab', values: { url: 'https://a.com' }, url: 'https://flat.com' } },
+            : {
+                ...n,
+                data: {
+                  blockId: 'new-tab',
+                  values: { url: 'https://a.com' },
+                  url: 'https://flat.com',
+                },
+              },
         ),
       },
     }

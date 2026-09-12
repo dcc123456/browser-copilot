@@ -14,9 +14,14 @@ function rgba(pixels: [number, number, number, number?][]): Uint8ClampedArray {
 }
 
 /** A solid-color RGBA buffer (the serialized-blank-capture shape). */
-function solid(width: number, height: number, v: [number, number, number, number?] = [255, 255, 255]): Uint8ClampedArray {
-  return rgba(Array.from({ length: width * height }, () => v) as [number, number, number, number?][])
-
+function solid(
+  width: number,
+  height: number,
+  v: [number, number, number, number?] = [255, 255, 255],
+): Uint8ClampedArray {
+  return rgba(
+    Array.from({ length: width * height }, () => v) as [number, number, number, number?][],
+  )
 }
 
 /** Dark "glyph" pixels scattered over a light background (real ink shape). */

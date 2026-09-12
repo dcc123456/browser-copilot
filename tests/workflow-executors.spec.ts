@@ -74,7 +74,19 @@ function makeChromeMock() {
         },
       },
     },
-    refs: { query, get, update, create, reload, remove, goBack, goForward, captureVisibleTab, executeScript, tab },
+    refs: {
+      query,
+      get,
+      update,
+      create,
+      reload,
+      remove,
+      goBack,
+      goForward,
+      captureVisibleTab,
+      executeScript,
+      tab,
+    },
   }
 }
 
@@ -568,7 +580,12 @@ describe('describeEmptyOcrRead (empty-read diagnostics)', () => {
   })
 
   it('reports the post-preprocess size only when preprocessing ran', () => {
-    const used = describeEmptyOcrRead({ ...base, hasInk: true, preprocessUsed: true, preprocessedChars: 64000 })
+    const used = describeEmptyOcrRead({
+      ...base,
+      hasInk: true,
+      preprocessUsed: true,
+      preprocessedChars: 64000,
+    })
     expect(used).toContain('预处理后 64000 字符')
     const unused = describeEmptyOcrRead({ ...base, hasInk: true })
     expect(unused).not.toContain('预处理后')

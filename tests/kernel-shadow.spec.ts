@@ -85,7 +85,9 @@ describe('kernel open shadow DOM', () => {
     let clicked = 0
     const host = dom.window.document.getElementById('publish-host') as HTMLElement
     const shadowBtn = host.shadowRoot!.querySelector('button.bg-red') as HTMLElement
-    shadowBtn.addEventListener('click', () => { clicked += 1 })
+    shadowBtn.addEventListener('click', () => {
+      clicked += 1
+    })
 
     const clickResult = runOp({ action: 'click', target: publish!.target } as Op)
     expect(clickResult.ok).toBe(true)
@@ -102,7 +104,13 @@ describe('kernel open shadow DOM', () => {
 
   it('treats a cdp-shadow (closed) spec as unresolvable in-page', () => {
     const target: Target = {
-      primary: { how: 'cdp-shadow', value: '发布', role: 'button', tag: 'button', closedShadow: true },
+      primary: {
+        how: 'cdp-shadow',
+        value: '发布',
+        role: 'button',
+        tag: 'button',
+        closedShadow: true,
+      },
       fallbacks: [],
     }
     const result = runOp({ action: 'click', target } as Op)

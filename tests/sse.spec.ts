@@ -93,12 +93,17 @@ describe('SseAccumulator · tool calls', () => {
       }),
     )
     accumulator.push(
-      frame({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"max' } }] } }] }),
+      frame({
+        choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"max' } }] } }],
+      }),
     )
     accumulator.push(
       frame({
         choices: [
-          { delta: { tool_calls: [{ index: 0, function: { arguments: 'Chars":50}' } }] }, finish_reason: 'tool_calls' },
+          {
+            delta: { tool_calls: [{ index: 0, function: { arguments: 'Chars":50}' } }] },
+            finish_reason: 'tool_calls',
+          },
         ],
       }),
     )
@@ -139,7 +144,11 @@ describe('SseAccumulator · tool calls', () => {
   it('defaults a missing index to 0 rather than dropping the call', () => {
     const accumulator = new SseAccumulator()
     accumulator.push(
-      frame({ choices: [{ delta: { tool_calls: [{ id: 'x', function: { name: 'only', arguments: '{}' } }] } }] }),
+      frame({
+        choices: [
+          { delta: { tool_calls: [{ id: 'x', function: { name: 'only', arguments: '{}' } }] } },
+        ],
+      }),
     )
     expect(accumulator.finish().toolCalls).toHaveLength(1)
   })

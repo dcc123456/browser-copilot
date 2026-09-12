@@ -209,7 +209,10 @@ describe('processAgentRequest · protocol & security gates', () => {
     result.ok ? '' : (result.error ?? '')
 
   it('refuses requests while the bridge is disabled', async () => {
-    const result = await processAgentRequest({ type: 'ping' }, settings({ localAgentEnabled: false }))
+    const result = await processAgentRequest(
+      { type: 'ping' },
+      settings({ localAgentEnabled: false }),
+    )
     expect(result.ok).toBe(false)
     expect(errorOf(result)).toMatch(/disabled/i)
   })
@@ -222,7 +225,10 @@ describe('processAgentRequest · protocol & security gates', () => {
 
   it('requires a matching token when one is configured', async () => {
     const s = settings({ localAgentToken: 'secret' })
-    expect(await processAgentRequest({ type: 'ping' }, s)).toEqual({ ok: false, error: 'Invalid token.' })
+    expect(await processAgentRequest({ type: 'ping' }, s)).toEqual({
+      ok: false,
+      error: 'Invalid token.',
+    })
     expect(await processAgentRequest({ type: 'ping', token: 'wrong' }, s)).toEqual({
       ok: false,
       error: 'Invalid token.',
@@ -259,7 +265,10 @@ describe('processAgentRequest · protocol & security gates', () => {
   })
 
   it('surfaces a tool rejection (e.g. disabled in settings)', async () => {
-    runToolStandalone.mockResolvedValueOnce({ ok: false, error: 'The "click" tool is disabled in settings.' })
+    runToolStandalone.mockResolvedValueOnce({
+      ok: false,
+      error: 'The "click" tool is disabled in settings.',
+    })
     const result = await processAgentRequest({ type: 'tool', tool: 'click', args: {} }, settings())
     // The processor passes the tool's own result through as `data`, so the
     // rejection is visible there rather than as a transport-level error.
@@ -318,7 +327,11 @@ describe('processAgentRequest · protocol & security gates', () => {
     )
     expect(other.ok).toBe(false)
     expect(errorOf(other)).toMatch(/selected connection/i)
-    const unknown = await processAgentRequest({ type: 'tool', tool: 'click', args: {} }, s, activeAgentIds)
+    const unknown = await processAgentRequest(
+      { type: 'tool', tool: 'click', args: {} },
+      s,
+      activeAgentIds,
+    )
     expect(unknown.ok).toBe(false)
     expect(runToolStandalone).not.toHaveBeenCalled()
 
@@ -350,7 +363,9 @@ describe('processAgentRequest · protocol & security gates', () => {
   it('never refuses tools.list while a connection is pinned', async () => {
     const s = settings({ localAgentActiveAgent: 'agent-1' })
     // Pinned id is live in `activeAgentIds`, but tools.list is never filtered.
-    const tools = await processAgentRequest({ type: 'tools.list', agentId: 'agent-2' }, s, ['agent-1'])
+    const tools = await processAgentRequest({ type: 'tools.list', agentId: 'agent-2' }, s, [
+      'agent-1',
+    ])
     expect(tools.ok).toBe(true)
     if (tools.ok) {
       expect((tools.data as { tools: unknown[] }).tools).toHaveLength(1)
@@ -359,7 +374,9 @@ describe('processAgentRequest · protocol & security gates', () => {
 
   it('refuses an agentId-less tool request with a readable error when the pin is live', async () => {
     const s = settings({ localAgentActiveAgent: 'agent-1' })
-    const result = await processAgentRequest({ type: 'tool', tool: 'click', args: {} }, s, ['agent-1'])
+    const result = await processAgentRequest({ type: 'tool', tool: 'click', args: {} }, s, [
+      'agent-1',
+    ])
     expect(result.ok).toBe(false)
     const error = errorOf(result)
     expect(error).toMatch(/selected connection/i)

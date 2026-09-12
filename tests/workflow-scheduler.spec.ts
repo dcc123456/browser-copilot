@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ScheduledTask } from '../src/lib/scheduler-types'
-import {
-  rescheduleAll,
-  scheduleTask,
-  taskIdFromAlarmName,
-} from '../src/background/scheduler'
+import { rescheduleAll, scheduleTask, taskIdFromAlarmName } from '../src/background/scheduler'
 
 /**
  * Shared mutable task store, seeded via `setTasks`. Exposed through
@@ -15,7 +11,6 @@ import {
 const store = vi.hoisted(() => {
   const tasks: unknown[] = []
   return {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tasks: tasks as any[],
     setTasks: (next: unknown[]) => {
       tasks.splice(0, tasks.length, ...next)

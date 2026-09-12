@@ -24,20 +24,35 @@ const executors: Record<string, BlockExecutor> = {
   'set-variable': setVariable,
 }
 
-function linearWorkflow(id: string, name: string, blocks: { id: string; blockId: string; data?: Record<string, unknown> }[]): Workflow {
+function linearWorkflow(
+  id: string,
+  name: string,
+  blocks: { id: string; blockId: string; data?: Record<string, unknown> }[],
+): Workflow {
   const nodes = [
     { id: 't1', label: 'trigger', position: { x: 0, y: 0 }, data: { blockId: 'trigger' } },
-    ...blocks.map((b) => ({ id: b.id, label: b.blockId, position: { x: 100, y: 100 }, data: { blockId: b.blockId, ...b.data } })),
+    ...blocks.map((b) => ({
+      id: b.id,
+      label: b.blockId,
+      position: { x: 100, y: 100 },
+      data: { blockId: b.blockId, ...b.data },
+    })),
   ]
   const chain = ['t1', ...blocks.map((b) => b.id)]
-  const edges = chain.slice(0, -1).map((source, i) => ({ id: `e-${i}`, source, target: chain[i + 1]! }))
+  const edges = chain
+    .slice(0, -1)
+    .map((source, i) => ({ id: `e-${i}`, source, target: chain[i + 1]! }))
   return { id, name, drawflow: { nodes, edges } } as unknown as Workflow
 }
 
 describe('engine resolveWorkflow injection', () => {
   it('runs a referenced child through the injected resolver and shares variables', async () => {
     const child = linearWorkflow('child-1', '子流程', [
-      { id: 's1', blockId: 'set-variable', data: { variableName: 'fromChild', value: 'child-value' } },
+      {
+        id: 's1',
+        blockId: 'set-variable',
+        data: { variableName: 'fromChild', value: 'child-value' },
+      },
     ])
     const parent = linearWorkflow('parent-1', '父流程', [
       {
@@ -45,7 +60,11 @@ describe('engine resolveWorkflow injection', () => {
         blockId: 'execute-workflow',
         data: { values: { workflowId: 'child-1' } },
       },
-      { id: 'p1', blockId: 'set-variable', data: { variableName: 'afterSub', value: '{{fromChild}}!' } },
+      {
+        id: 'p1',
+        blockId: 'set-variable',
+        data: { variableName: 'afterSub', value: '{{fromChild}}!' },
+      },
     ])
 
     const result = await runWorkflow(parent, {

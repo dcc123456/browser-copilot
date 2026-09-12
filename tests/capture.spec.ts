@@ -29,13 +29,10 @@ function makeChromeMock(overrides?: {
   const captureVisibleTab = vi.fn(async () => 'data:image/png;base64,SHOT')
   const windowsGet = vi.fn(async () => ({ id: 3, state: overrides?.windowState ?? 'normal' }))
   const windowsUpdate = vi.fn(async () => ({ id: 3 }))
-  vi.stubGlobal(
-    'chrome',
-    {
-      tabs: { query, captureVisibleTab },
-      windows: { get: windowsGet, update: windowsUpdate },
-    } as unknown as typeof chrome,
-  )
+  vi.stubGlobal('chrome', {
+    tabs: { query, captureVisibleTab },
+    windows: { get: windowsGet, update: windowsUpdate },
+  } as unknown as typeof chrome)
   return { captureVisibleTab, windowsGet, windowsUpdate, query }
 }
 

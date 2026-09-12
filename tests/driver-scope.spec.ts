@@ -29,7 +29,13 @@ interface Browser {
   tabs: Map<number, FakeTab>
   windows: Map<number, FakeWindow>
   lastFocusedWindowId: number
-  calls: { update: unknown[][]; create: unknown[]; remove: unknown[]; getAll: unknown[]; getLastFocused: number }
+  calls: {
+    update: unknown[][]
+    create: unknown[]
+    remove: unknown[]
+    getAll: unknown[]
+    getLastFocused: number
+  }
   listeners: Record<string, ((...args: unknown[]) => void)[]>
 }
 
@@ -51,7 +57,13 @@ function makeBrowser(opts: {
     },
   })
   const toTab = (t: FakeTab): chrome.tabs.Tab =>
-    ({ id: t.id, windowId: t.windowId, url: t.url, title: t.title ?? '', active: t.active === true }) as chrome.tabs.Tab
+    ({
+      id: t.id,
+      windowId: t.windowId,
+      url: t.url,
+      title: t.title ?? '',
+      active: t.active === true,
+    }) as chrome.tabs.Tab
 
   ;(globalThis as unknown as { chrome: unknown }).chrome = {
     tabs: {
@@ -65,28 +77,34 @@ function makeBrowser(opts: {
       }),
       query: vi.fn(async (q: Record<string, unknown>) => {
         let list = [...b.tabs.values()]
-        if (typeof q['windowId'] === 'number') list = list.filter((t) => t.windowId === q['windowId'])
+        if (typeof q['windowId'] === 'number')
+          list = list.filter((t) => t.windowId === q['windowId'])
         if (q['active'] === true) list = list.filter((t) => t.active === true)
         if (q['lastFocusedWindow'] === true || q['currentWindow'] === true) {
           list = list.filter((t) => t.windowId === b.lastFocusedWindowId)
         }
         return list.map(toTab)
       }),
-      update: vi.fn(async (idOrProps: number | Record<string, unknown>, props?: Record<string, unknown>) => {
-        b.calls.update.push([idOrProps, props])
-        if (typeof idOrProps === 'number') {
-          const t = b.tabs.get(idOrProps)
-          if (t && props) Object.assign(t, props)
-          return t ? toTab(t) : undefined
-        }
-        return undefined
-      }),
+      update: vi.fn(
+        async (idOrProps: number | Record<string, unknown>, props?: Record<string, unknown>) => {
+          b.calls.update.push([idOrProps, props])
+          if (typeof idOrProps === 'number') {
+            const t = b.tabs.get(idOrProps)
+            if (t && props) Object.assign(t, props)
+            return t ? toTab(t) : undefined
+          }
+          return undefined
+        },
+      ),
       create: vi.fn(async (props: Record<string, unknown>) => {
         b.calls.create.push(props)
         const id = nextTabId++
         const tab: FakeTab = {
           id,
-          windowId: typeof props['windowId'] === 'number' ? (props['windowId'] as number) : b.lastFocusedWindowId,
+          windowId:
+            typeof props['windowId'] === 'number'
+              ? (props['windowId'] as number)
+              : b.lastFocusedWindowId,
           url: typeof props['url'] === 'string' ? (props['url'] as string) : 'chrome://newtab/',
           active: true,
         }
@@ -111,8 +129,8 @@ function makeBrowser(opts: {
         const w = b.windows.get(b.lastFocusedWindowId)
         return w ? { id: w.id, type: w.type } : ({} as chrome.windows.Window)
       }),
-      getAll: vi.fn(async (_opts?: unknown) => {
-        b.calls.getAll.push(arguments)
+      getAll: vi.fn(async (opts?: unknown) => {
+        b.calls.getAll.push(opts)
         return [...b.windows.values()] as chrome.windows.Window[]
       }),
       onFocusChanged: on('onFocusChanged'),

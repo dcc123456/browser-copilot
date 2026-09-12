@@ -81,7 +81,9 @@ describe('nextRunAt · weekly', () => {
   it('rolls to the following week when all selected days passed', () => {
     // Fri 2024-01-05 18:00; selected Mon at 09:00 -> Mon Jan 8.
     const fri = new Date(2024, 0, 5, 18, 0).getTime()
-    const next = new Date(nextRunAt({ kind: 'weekly', days: [1], hour: 9, minute: 0 }, fri) as number)
+    const next = new Date(
+      nextRunAt({ kind: 'weekly', days: [1], hour: 9, minute: 0 }, fri) as number,
+    )
     expect(next.getDay()).toBe(1)
     expect(next.getDate()).toBe(8)
   })
@@ -89,7 +91,9 @@ describe('nextRunAt · weekly', () => {
   it('can select Sunday', () => {
     // Sat 2024-01-06 10:00; selected Sunday at 09:00 -> Sun Jan 7.
     const sat = new Date(2024, 0, 6, 10, 0).getTime()
-    const next = new Date(nextRunAt({ kind: 'weekly', days: [0], hour: 9, minute: 0 }, sat) as number)
+    const next = new Date(
+      nextRunAt({ kind: 'weekly', days: [0], hour: 9, minute: 0 }, sat) as number,
+    )
     expect(next.getDay()).toBe(0)
     expect(next.getDate()).toBe(7)
   })
@@ -167,8 +171,8 @@ describe('describeSchedule', () => {
   it('lists selected weekly days in Monday-first order', () => {
     const desc = describeSchedule({ kind: 'weekly', days: [0, 3, 5], hour: 9, minute: 0 }, 'en')
     expect(desc).toBe('Wed, Fri, Sun 09:00')
-    expect(
-      describeSchedule({ kind: 'weekly', days: [1, 3, 5], hour: 9, minute: 0 }, 'zh-CN'),
-    ).toBe('每周一、周三、周五 09:00')
+    expect(describeSchedule({ kind: 'weekly', days: [1, 3, 5], hour: 9, minute: 0 }, 'zh-CN')).toBe(
+      '每周一、周三、周五 09:00',
+    )
   })
 })

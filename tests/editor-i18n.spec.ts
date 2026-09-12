@@ -25,7 +25,10 @@ describe('editor i18n', () => {
   it('every key exists in both locales', () => {
     const enKeys = Object.keys(EDITOR_STRINGS.en)
     for (const key of enKeys) {
-      expect(EDITOR_STRINGS.zh[key as keyof typeof EDITOR_STRINGS.zh], `zh missing ${key}`).toBeDefined()
+      expect(
+        EDITOR_STRINGS.zh[key as keyof typeof EDITOR_STRINGS.zh],
+        `zh missing ${key}`,
+      ).toBeDefined()
     }
     expect(enKeys.length).toBe(Object.keys(EDITOR_STRINGS.zh).length)
   })

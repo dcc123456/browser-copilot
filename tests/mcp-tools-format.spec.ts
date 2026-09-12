@@ -173,14 +173,10 @@ describe('mcp-server tools/list wire format', () => {
       properties?: Record<string, { type?: string }>
       required?: string[]
     }
-    expect(clickSchema.properties?.target).toEqual(
-      expect.objectContaining({ type: 'object' }),
-    )
+    expect(clickSchema.properties?.target).toEqual(expect.objectContaining({ type: 'object' }))
     // ref is now the preferred element handle; target stays optional for
     // verbatim compatibility, so click has no required element parameter.
-    expect(clickSchema.properties?.ref).toEqual(
-      expect.objectContaining({ type: 'string' }),
-    )
+    expect(clickSchema.properties?.ref).toEqual(expect.objectContaining({ type: 'string' }))
     expect(clickSchema.required).toBeUndefined()
     const fill = tools!.find((t) => t.name === 'fill')
     const fillSchema = fill!.inputSchema as { required?: string[] }
@@ -203,81 +199,85 @@ describe('mcp-server tools/list wire format', () => {
         await waitForPort(port)
 
         // --- 2. fake plugin: a WS client that answers the adapter's requests ----
-      const plugin = new WebSocket(`ws://127.0.0.1:${port}`)
-      const pluginReady = new Promise<void>((resolve, reject) => {
-        plugin.onopen = () => {
-          // First message makes the main adapter register this socket as "plugin".
-          plugin.send(JSON.stringify({ id: 'hb-1', type: 'ping' }))
-          resolve()
-        }
-        plugin.onerror = () => reject(new Error('fake plugin WS connection failed'))
-      })
-      plugin.onmessage = (event) => {
-        let msg: { id?: unknown; type?: unknown; tool?: unknown }
-        try {
-          msg = JSON.parse(String(event.data))
-        } catch {
-          return
-        }
-        if (msg && typeof msg.id === 'string' && typeof msg.type === 'string') {
-          if (msg.type === 'tool') {
-            plugin.send(
-              JSON.stringify({ id: msg.id, ok: true, data: { ok: true, result: `PLUGIN-EXEC:${msg.tool}` } }),
-            )
-          } else if (msg.type === 'tools.list') {
-            plugin.send(
-              JSON.stringify({
-                id: msg.id,
-                ok: true,
-                data: {
-                  tools: [
-                    {
-                      name: 'open_url',
-                      description: 'navigate',
-                      inputSchema: {
-                        type: 'object',
-                        properties: { url: { type: 'string' } },
-                        required: ['url'],
+        const plugin = new WebSocket(`ws://127.0.0.1:${port}`)
+        const pluginReady = new Promise<void>((resolve, reject) => {
+          plugin.onopen = () => {
+            // First message makes the main adapter register this socket as "plugin".
+            plugin.send(JSON.stringify({ id: 'hb-1', type: 'ping' }))
+            resolve()
+          }
+          plugin.onerror = () => reject(new Error('fake plugin WS connection failed'))
+        })
+        plugin.onmessage = (event) => {
+          let msg: { id?: unknown; type?: unknown; tool?: unknown }
+          try {
+            msg = JSON.parse(String(event.data))
+          } catch {
+            return
+          }
+          if (msg && typeof msg.id === 'string' && typeof msg.type === 'string') {
+            if (msg.type === 'tool') {
+              plugin.send(
+                JSON.stringify({
+                  id: msg.id,
+                  ok: true,
+                  data: { ok: true, result: `PLUGIN-EXEC:${msg.tool}` },
+                }),
+              )
+            } else if (msg.type === 'tools.list') {
+              plugin.send(
+                JSON.stringify({
+                  id: msg.id,
+                  ok: true,
+                  data: {
+                    tools: [
+                      {
+                        name: 'open_url',
+                        description: 'navigate',
+                        inputSchema: {
+                          type: 'object',
+                          properties: { url: { type: 'string' } },
+                          required: ['url'],
+                        },
                       },
-                    },
-                  ],
-                },
-              }),
-            )
+                    ],
+                  },
+                }),
+              )
+            }
           }
         }
+        await pluginReady
+
+        // --- 3. proxy adapter: port occupied → EADDRINUSE → proxy mode ------------
+        proc = spawn(process.execPath, [ADAPTER], {
+          cwd: ROOT,
+          env: adapterEnv(port),
+          stdio: ['pipe', 'pipe', 'pipe'],
+        })
+        proc.stderr.resume()
+        await sleep(2000) // let the proxy WS handshake settle
+
+        await rpc(proc, 100, 'initialize', {})
+        const call = (await rpc(proc, 101, 'tools/call', {
+          name: 'open_url',
+          arguments: { url: 'https://www.baidu.com' },
+        })) as { result?: { content?: { text?: string }[]; isError?: boolean } }
+
+        // The proxy must have forwarded to the main adapter → fake plugin, so the
+        // plugin's canned marker is echoed back — NOT the offline rejection.
+        expect(call.result?.isError).toBe(false)
+        const text = call.result?.content?.[0]?.text ?? ''
+        expect(text).toContain('PLUGIN-EXEC:open_url')
+        expect(text).not.toContain('插件未连接')
+
+        plugin.close()
+      } finally {
+        proc?.kill()
+        proc = null
+        main.kill()
       }
-      await pluginReady
-
-      // --- 3. proxy adapter: port occupied → EADDRINUSE → proxy mode ------------
-      proc = spawn(process.execPath, [ADAPTER], {
-        cwd: ROOT,
-        env: adapterEnv(port),
-        stdio: ['pipe', 'pipe', 'pipe'],
-      })
-      proc.stderr.resume()
-      await sleep(2000) // let the proxy WS handshake settle
-
-      await rpc(proc, 100, 'initialize', {})
-      const call = (await rpc(proc, 101, 'tools/call', {
-        name: 'open_url',
-        arguments: { url: 'https://www.baidu.com' },
-      })) as { result?: { content?: { text?: string }[]; isError?: boolean } }
-
-      // The proxy must have forwarded to the main adapter → fake plugin, so the
-      // plugin's canned marker is echoed back — NOT the offline rejection.
-      expect(call.result?.isError).toBe(false)
-      const text = call.result?.content?.[0]?.text ?? ''
-      expect(text).toContain('PLUGIN-EXEC:open_url')
-      expect(text).not.toContain('插件未连接')
-
-      plugin.close()
-    } finally {
-      proc?.kill()
-      proc = null
-      main.kill()
-    }
-  },
+    },
   )
 
   it(

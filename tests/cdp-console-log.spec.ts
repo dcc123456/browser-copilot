@@ -95,7 +95,9 @@ describe('console capture levels', () => {
   it('captures Log.entryAdded at every level', async () => {
     const { mod, listeners } = await loadFreshModule()
     await mod.ensureTabMonitor(2)
-    emit(listeners, 2, 'Log.entryAdded', { entry: { level: 'error', text: 'net::ERR_ABORTED 404' } })
+    emit(listeners, 2, 'Log.entryAdded', {
+      entry: { level: 'error', text: 'net::ERR_ABORTED 404' },
+    })
     emit(listeners, 2, 'Log.entryAdded', { entry: { level: 'warning', text: 'deprecated API' } })
     emit(listeners, 2, 'Log.entryAdded', { entry: { level: 'info', text: 'loaded' } })
     const all = mod.getConsoleEntries(2, 'all')
@@ -112,9 +114,7 @@ describe('console capture levels', () => {
     emit(listeners, 3, 'Runtime.exceptionThrown', {
       exceptionDetails: { exception: { description: 'TypeError: x is not a function' } },
     })
-    expect(mod.getConsoleEntries(3).map((e) => e.text)).toEqual([
-      'TypeError: x is not a function',
-    ])
+    expect(mod.getConsoleEntries(3).map((e) => e.text)).toEqual(['TypeError: x is not a function'])
   })
 })
 

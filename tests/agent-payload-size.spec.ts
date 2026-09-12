@@ -19,7 +19,7 @@ describe('first-turn agent payload size (full auto)', () => {
   it('stays under the advertised-payload budget', () => {
     const system = buildSystemPrompt({ mode: 'full' })
     const tools = JSON.stringify(advertiseTools({ mode: 'full' }))
-    // eslint-disable-next-line no-console
+
     console.log(
       `[payload-size] advertised: system=${system.length} tools=${tools.length} ` +
         `total=${system.length + tools.length} chars (~${Math.round((system.length + tools.length) / 3.3)} tokens @ ~3.3 chars/token)`,
@@ -29,7 +29,7 @@ describe('first-turn agent payload size (full auto)', () => {
 
   it('keeps the full tool catalog bounded', () => {
     const catalog = JSON.stringify(TOOLS).length
-    // eslint-disable-next-line no-console
+
     console.log(`[payload-size] full catalog (all groups): ${catalog} chars`)
     expect(catalog).toBeLessThanOrEqual(MAX_CATALOG_CHARS)
   })

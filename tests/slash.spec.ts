@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  applySlashPick,
-  filterSkills,
-  findSlashQuery,
-  moveSelection,
-} from '../src/lib/slash'
+import { applySlashPick, filterSkills, findSlashQuery, moveSelection } from '../src/lib/slash'
 import type { Skill } from '../src/lib/types'
 
 function skill(name: string, description = '', id = name.toLowerCase()): Skill {

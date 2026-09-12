@@ -9,7 +9,7 @@
  * The agent turn runner and settings are mocked so nothing touches the
  * network or chrome.
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 
 const runUnattended = vi.fn()
 vi.mock('../src/background/agent-unattended', () => ({
@@ -30,9 +30,14 @@ import {
   asReasonKind,
   buildTakeoverPrompt,
   classifyReason,
+  failureSignature,
+  isRepeatedHopelessFailure,
   outputVariableKeyOf,
   parseTakeoverVerdict,
+  takeoverMaxAttempts,
   takeoverProviderOf,
+  takeoverToolRounds,
+  validationFailure,
 } from '../src/lib/workflow/ai-takeover'
 import type { Workflow, WorkflowEdge, WorkflowNode } from '../src/lib/workflow/types'
 
@@ -198,24 +203,52 @@ describe('parseTakeoverVerdict', () => {
     expect(parseTakeoverVerdict('对不起，我做不到').completed).toBe(false)
     expect(parseTakeoverVerdict('').completed).toBe(false)
     expect(parseTakeoverVerdict('{"completed":"yes"}').completed).toBe(false)
-    expect(parseTakeoverVerdict('{"completed":true,"fix":{"paramsPatch":"nope"}}').paramsPatch).toBeUndefined()
-    expect(parseTakeoverVerdict('{"completed":true,"fix":{"paramsPatch":{}}}').paramsPatch).toBeUndefined()
+    expect(
+      parseTakeoverVerdict('{"completed":true,"fix":{"paramsPatch":"nope"}}').paramsPatch,
+    ).toBeUndefined()
+    expect(
+      parseTakeoverVerdict('{"completed":true,"fix":{"paramsPatch":{}}}').paramsPatch,
+    ).toBeUndefined()
   })
 
   it('rescues a finished step whose verdict JSON is mangled', () => {
     // No parseable JSON object, but the reply plainly claims success.
-    const verdict = parseTakeoverVerdict('步骤已完成。我点击了提交按钮，"completed": true，页面跳转成功。')
+    const verdict = parseTakeoverVerdict(
+      '步骤已完成。我点击了提交按钮，"completed": true，页面跳转成功。',
+    )
     expect(verdict.completed).toBe(true)
     expect(verdict.summary).toContain('步骤已完成')
     // A completed:false claim inside a malformed object must NOT be rescued.
     expect(parseTakeoverVerdict('{"completed":false,"summary":"没做成').completed).toBe(false)
   })
 
+  it('refuses to rescue a mangled reply that also denies completion', () => {
+    // Mangled verdict (unparseable) plus a denial → must NOT become a success.
+    expect(parseTakeoverVerdict('这一步未完成。{"completed": true').completed).toBe(false)
+    expect(parseTakeoverVerdict('操作失败，"completed": true').completed).toBe(false)
+    // A well-formed object is still trusted (last verdict wins), even when the
+    // prose around it mentions a failure.
+    expect(parseTakeoverVerdict('先说失败。{"completed": true, "summary": "完成"}').completed).toBe(
+      true,
+    )
+  })
+
+  it('refuses to rescue when there is no usable prose summary', () => {
+    // A bare verdict fragment with no prose must not be adopted as a success.
+    expect(parseTakeoverVerdict('"completed": true').completed).toBe(false)
+  })
+
   it('surfaces a whitelist reasonKind from the verdict JSON', () => {
-    expect(parseTakeoverVerdict('{"completed":false,"summary":"要登录","reasonKind":"auth"}').reasonKind).toBe('auth')
-    expect(parseTakeoverVerdict('{"completed":false,"reasonKind":"captcha"}').reasonKind).toBe('captcha')
+    expect(
+      parseTakeoverVerdict('{"completed":false,"summary":"要登录","reasonKind":"auth"}').reasonKind,
+    ).toBe('auth')
+    expect(parseTakeoverVerdict('{"completed":false,"reasonKind":"captcha"}').reasonKind).toBe(
+      'captcha',
+    )
     // Unknown values are dropped, not passed through.
-    expect(parseTakeoverVerdict('{"completed":false,"reasonKind":"sudo rm -rf"}').reasonKind).toBeUndefined()
+    expect(
+      parseTakeoverVerdict('{"completed":false,"reasonKind":"sudo rm -rf"}').reasonKind,
+    ).toBeUndefined()
   })
 })
 
@@ -315,7 +348,11 @@ describe('createAiTakeover', () => {
 
   const request = (overrides: Partial<AiTakeoverRequest> = {}): AiTakeoverRequest => ({
     workflow: makeWorkflow(
-      [node('a', 'trigger'), node('b', 'event-click', { selector: '.stale', variableName: 'out' }), node('c', 'delay')],
+      [
+        node('a', 'trigger'),
+        node('b', 'event-click', { selector: '.stale', variableName: 'out' }),
+        node('c', 'delay'),
+      ],
       [edge('a', 'b'), edge('b', 'c')],
     ),
     failingNodeId: 'b',
@@ -334,13 +371,18 @@ describe('createAiTakeover', () => {
       .mockResolvedValueOnce({ ok: true, answer: '{"completed":false,"summary":"页面还没加载"}' })
       .mockResolvedValueOnce({
         ok: true,
-        answer: '{"completed":true,"summary":"点击了新的提交按钮","output":"done","fix":{"paramsPatch":{"selector":".fresh"}}}',
+        answer:
+          '{"completed":true,"summary":"点击了新的提交按钮","output":"done","fix":{"paramsPatch":{"selector":".fresh"}}}',
       })
     const onTakeover = vi.fn()
     const events: string[] = []
     const variables: Record<string, unknown> = {}
     const workflow = request({ variables }).workflow
-    const hook = createAiTakeover({ onTakeover, onEvent: (_k, text) => events.push(text), attemptDelayMs: 0 })
+    const hook = createAiTakeover({
+      onTakeover,
+      onEvent: (_k, text) => events.push(text),
+      attemptDelayMs: 0,
+    })
     const outcome = await hook(request({ workflow, variables }))
     expect(outcome).toMatchObject({ completed: true, summary: '点击了新的提交按钮' })
     // Two attempts (first failed, second succeeded) with feedback on the retry.
@@ -352,7 +394,11 @@ describe('createAiTakeover', () => {
     expect(variables['out']).toBe('done')
     // Fix reported for user confirmation — and NOT applied to the graph.
     expect(onTakeover).toHaveBeenCalledTimes(1)
-    const report = onTakeover.mock.calls[0]?.[0] as { completed: boolean; attempts: number; fix?: { paramsPatch: Record<string, unknown> } }
+    const report = onTakeover.mock.calls[0]?.[0] as {
+      completed: boolean
+      attempts: number
+      fix?: { paramsPatch: Record<string, unknown> }
+    }
     expect(report.completed).toBe(true)
     expect(report.attempts).toBe(2)
     expect(report.fix?.paramsPatch).toEqual({ selector: '.fresh' })
@@ -362,7 +408,10 @@ describe('createAiTakeover', () => {
 
   it('gives up after 3 failed attempts with the last reason', async () => {
     // '按钮被遮挡' classifies as "other" — retryable, so all 3 attempts run.
-    runUnattended.mockResolvedValue({ ok: true, answer: '{"completed":false,"summary":"按钮被遮挡"}' })
+    runUnattended.mockResolvedValue({
+      ok: true,
+      answer: '{"completed":false,"summary":"按钮被遮挡"}',
+    })
     const onTakeover = vi.fn()
     const hook = createAiTakeover({ onTakeover, attemptDelayMs: 0 })
     const outcome = await hook(request())
@@ -371,11 +420,16 @@ describe('createAiTakeover', () => {
     expect(outcome?.reason).toContain('按钮被遮挡')
     // "other" is retryable, so the kind stays unclassified (undefined).
     expect(outcome?.reasonKind).toBeUndefined()
-    expect(onTakeover).toHaveBeenCalledWith(expect.objectContaining({ completed: false, attempts: 3 }))
+    expect(onTakeover).toHaveBeenCalledWith(
+      expect.objectContaining({ completed: false, attempts: 3 }),
+    )
   })
 
   it('fast-fails hopeless reasons (captcha) on the FIRST attempt', async () => {
-    runUnattended.mockResolvedValue({ ok: true, answer: '{"completed":false,"summary":"需要输入验证码"}' })
+    runUnattended.mockResolvedValue({
+      ok: true,
+      answer: '{"completed":false,"summary":"需要输入验证码"}',
+    })
     const onTakeover = vi.fn()
     const hook = createAiTakeover({ onTakeover, attemptDelayMs: 0 })
     const outcome = await hook(request())
@@ -409,12 +463,19 @@ describe('createAiTakeover', () => {
   it('feeds the previous attempt tool trace into the next attempt prompt', async () => {
     // Attempt 1 streams a tool action + result, then fails to complete.
     runUnattended
-      .mockImplementationOnce(async (_prompt: string, _id: string, _mode: string, options: { onStep?: (kind: string, text: string) => void }) => {
-        options.onStep?.('tool', '→ click')
-        options.onStep?.('result', '← clicked nothing')
-        options.onStep?.('status', 'thinking…')
-        return { ok: true, answer: '{"completed":false,"summary":"按钮被遮挡"}' }
-      })
+      .mockImplementationOnce(
+        async (
+          _prompt: string,
+          _id: string,
+          _mode: string,
+          options: { onStep?: (kind: string, text: string) => void },
+        ) => {
+          options.onStep?.('tool', '→ click')
+          options.onStep?.('result', '← clicked nothing')
+          options.onStep?.('status', 'thinking…')
+          return { ok: true, answer: '{"completed":false,"summary":"按钮被遮挡"}' }
+        },
+      )
       .mockResolvedValueOnce({
         ok: true,
         answer: '{"completed":true,"summary":"换了个按钮点到了"}',
@@ -443,7 +504,15 @@ describe('createAiTakeover', () => {
       ],
       [edge('a', 'b'), edge('b', 'c')],
     )
-    await hook(request({ workflow, steps: [{ kind: 'tool', nodeId: 'a', text: '' }, { kind: 'error', nodeId: 'b', text: '元素未找到: .stale' }] }))
+    await hook(
+      request({
+        workflow,
+        steps: [
+          { kind: 'tool', nodeId: 'a', text: '' },
+          { kind: 'error', nodeId: 'b', text: '元素未找到: .stale' },
+        ],
+      }),
+    )
     const prompt = runUnattended.mock.calls[0]?.[0] as string
     // failedParams declare variableName 'out' — the prompt must demand output.
     expect(prompt).toContain('{{out}}')
@@ -464,7 +533,11 @@ describe('createAiTakeover', () => {
     const hook = createAiTakeover({})
     const workflow = makeWorkflow(
       [
-        node('a', 'get-text', { selector: '.title', variableName: 'title', description: '读取标题' }),
+        node('a', 'get-text', {
+          selector: '.title',
+          variableName: 'title',
+          description: '读取标题',
+        }),
         node('b', 'event-click', { selector: '.stale' }),
       ],
       [edge('a', 'b')],
@@ -472,7 +545,10 @@ describe('createAiTakeover', () => {
     await hook(
       request({
         workflow,
-        steps: [{ kind: 'tool', nodeId: 'a', text: '' }, { kind: 'error', nodeId: 'b', text: '元素未找到: .stale' }],
+        steps: [
+          { kind: 'tool', nodeId: 'a', text: '' },
+          { kind: 'error', nodeId: 'b', text: '元素未找到: .stale' },
+        ],
         variables: { title: '【促销】空气炸锅' },
       }),
     )
@@ -498,7 +574,11 @@ describe('createAiTakeover', () => {
     const hook = createAiTakeover({ onTakeover })
     const workflow = makeWorkflow(
       [
-        node('a', 'get-text', { selector: '.wrong', variableName: 'title', description: '读取标题' }),
+        node('a', 'get-text', {
+          selector: '.wrong',
+          variableName: 'title',
+          description: '读取标题',
+        }),
         node('b', 'forms', { selector: '.box' }),
       ],
       [edge('a', 'b')],
@@ -511,10 +591,15 @@ describe('createAiTakeover', () => {
         failedParams: { selector: '.box' },
         failedError: '值不对',
         previousNodeId: 'a',
-        steps: [{ kind: 'tool', nodeId: 'a', text: '' }, { kind: 'error', nodeId: 'b', text: '值不对' }],
+        steps: [
+          { kind: 'tool', nodeId: 'a', text: '' },
+          { kind: 'error', nodeId: 'b', text: '值不对' },
+        ],
       }),
     )
-    const report = onTakeover.mock.calls[0]?.[0] as { fix?: { nodeId: string; nodeLabel: string; note: string } }
+    const report = onTakeover.mock.calls[0]?.[0] as {
+      fix?: { nodeId: string; nodeLabel: string; note: string }
+    }
     // The fix targets the UPSTREAM node, not the node that threw.
     expect(report.fix?.nodeId).toBe('a')
     expect(report.fix?.nodeLabel).toContain('读取标题')
@@ -545,7 +630,9 @@ describe('createAiTakeover', () => {
     expect(runUnattended).not.toHaveBeenCalled()
     expect(outcome?.completed).toBe(false)
     expect(outcome?.reason).toContain('未配置模型')
-    expect(onTakeover).toHaveBeenCalledWith(expect.objectContaining({ completed: false, attempts: 0 }))
+    expect(onTakeover).toHaveBeenCalledWith(
+      expect.objectContaining({ completed: false, attempts: 0 }),
+    )
   })
 
   it('stops immediately when the run is cancelled', async () => {
@@ -642,7 +729,9 @@ describe('engine AI takeover', () => {
     expect(req.failedBlockId).toBe('boom-block')
     expect(req.failedError).toBe('元素未找到: .stale')
     expect(req.previousNodeId).toBe('a')
-    expect(req.steps.some((step) => step.kind === 'error' && step.text.includes('元素未找到'))).toBe(true)
+    expect(
+      req.steps.some((step) => step.kind === 'error' && step.text.includes('元素未找到')),
+    ).toBe(true)
     expect(req.workflow.id).toBe('wf')
   })
 
@@ -721,5 +810,88 @@ describe('engine AI takeover', () => {
     expect(takeoverCalls).toBe(0)
     expect(order).toEqual(['a', 'b!', 'd'])
     expect(result.outcome).toBe('ok')
+  })
+})
+
+describe('takeover failure-signature fast-fail breadth (M2-11)', () => {
+  it('failureSignature normalizes node + error into a stable key', () => {
+    const a = failureSignature('click', '  Timeout   waiting for selector  #x')
+    const b = failureSignature('click', 'timeout waiting for selector #x')
+    expect(a).toBe(b)
+    expect(a).toMatch(/^click::/)
+  })
+
+  it('needs three identical signatures in a row to declare hopeless', () => {
+    expect(isRepeatedHopelessFailure(['n::x'])).toBe(false)
+    expect(isRepeatedHopelessFailure(['n::x', 'n::y'])).toBe(false)
+    expect(isRepeatedHopelessFailure(['n::x', 'n::x', 'n::x'])).toBe(true)
+  })
+
+  it('a different signature resets the streak', () => {
+    expect(isRepeatedHopelessFailure(['n::x', 'n::x', 'n::y', 'n::x'])).toBe(false)
+    expect(isRepeatedHopelessFailure(['n::x', 'n::x', 'n::y', 'n::x', 'n::x', 'n::x'])).toBe(true)
+  })
+})
+
+describe('configurable takeover budgets (M3-18)', () => {
+  const saved = { ...process.env }
+  afterEach(() => {
+    process.env = { ...saved }
+  })
+  it('honors BC_TAKEOVER_MAX_ATTEMPTS', () => {
+    process.env.BC_TAKEOVER_MAX_ATTEMPTS = '5'
+    expect(takeoverMaxAttempts()).toBe(5)
+  })
+  it('falls back to the default for non-positive / non-numeric values', () => {
+    process.env.BC_TAKEOVER_MAX_ATTEMPTS = '0'
+    expect(takeoverMaxAttempts()).toBe(TAKEOVER_MAX_ATTEMPTS)
+    process.env.BC_TAKEOVER_MAX_ATTEMPTS = 'abc'
+    expect(takeoverMaxAttempts()).toBe(TAKEOVER_MAX_ATTEMPTS)
+  })
+  it('honors BC_TAKEOVER_TOOL_ROUNDS', () => {
+    process.env.BC_TAKEOVER_TOOL_ROUNDS = '12'
+    expect(takeoverToolRounds()).toBe(12)
+  })
+})
+
+describe('takeover prompt page-summary (M2-15)', () => {
+  it('renders the DOM/ARIA summary when provided', () => {
+    const prompt = buildTakeoverPrompt({
+      steps: [],
+      failing: { blockId: 'click', params: {} },
+      error: 'boom',
+      attempt: 1,
+      maxAttempts: 3,
+      pageSummary: '标题: 登录; 按钮: [提交]; 输入框: [用户名]',
+    })
+    expect(prompt).toContain('Current page DOM/ARIA summary')
+    expect(prompt).toContain('标题: 登录')
+  })
+  it('omits the summary section when not provided', () => {
+    const prompt = buildTakeoverPrompt({
+      steps: [],
+      failing: { blockId: 'click', params: {} },
+      error: 'boom',
+      attempt: 1,
+      maxAttempts: 3,
+    })
+    expect(prompt).not.toContain('Current page DOM/ARIA summary')
+  })
+})
+
+describe('structured validation failure (M2-14)', () => {
+  it('classifies an auth wall into failureReason + suggestedAction', () => {
+    const r = validationFailure('请先登录后再操作 (401)')
+    expect(r.failureReason).toBe('auth')
+    expect(r.suggestedAction).toContain('登录')
+  })
+  it('classifies a missing-element error as notfound', () => {
+    const r = validationFailure('未找到元素 selector=#x')
+    expect(r.failureReason).toBe('notfound')
+    expect(r.suggestedAction).toContain('选择器')
+  })
+  it('returns nothing when the error is unclassifiable', () => {
+    expect(validationFailure()).toEqual({})
+    expect(validationFailure('something weird happened')).toEqual({})
   })
 })

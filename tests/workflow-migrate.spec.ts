@@ -162,7 +162,7 @@ describe('legacy id mapping completeness', () => {
   it('every mapped target exists in the Automa catalog', () => {
     const targets = new Set(Object.values(LEGACY_ID_TO_AUTOMA))
     // import lazily to keep the test's intent explicit
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+
     for (const target of targets) {
       // catalog lookup through migrateNodeData should not throw and should keep id
       expect(migrateNodeData(target, {}).blockId).toBe(target)

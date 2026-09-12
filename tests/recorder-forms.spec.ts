@@ -47,19 +47,43 @@ describe('recorder forms blocks', () => {
     const flows: RecordedFlow[] = [
       {
         id: 'f1',
-        data: { blockId: 'forms', selector: 'input[name=q]', findBy: 'cssSelector', type: 'text-field', value: 'abc' },
+        data: {
+          blockId: 'forms',
+          selector: 'input[name=q]',
+          findBy: 'cssSelector',
+          type: 'text-field',
+          value: 'abc',
+        },
       },
       {
         id: 'f2',
-        data: { blockId: 'forms', selector: 'input[name=q]', findBy: 'cssSelector', type: 'text-field', value: 'abc' },
+        data: {
+          blockId: 'forms',
+          selector: 'input[name=q]',
+          findBy: 'cssSelector',
+          type: 'text-field',
+          value: 'abc',
+        },
       },
       {
         id: 'f3',
-        data: { blockId: 'forms', selector: 'input[name=q]', findBy: 'cssSelector', type: 'text-field', value: 'abc' },
+        data: {
+          blockId: 'forms',
+          selector: 'input[name=q]',
+          findBy: 'cssSelector',
+          type: 'text-field',
+          value: 'abc',
+        },
       },
       {
         id: 'f4',
-        data: { blockId: 'forms', selector: 'input[name=other]', findBy: 'cssSelector', type: 'text-field', value: 'xyz' },
+        data: {
+          blockId: 'forms',
+          selector: 'input[name=other]',
+          findBy: 'cssSelector',
+          type: 'text-field',
+          value: 'xyz',
+        },
       },
     ]
     const wf = flowsToWorkflow(flows)

@@ -1,13 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { FeishuBot } from '../src/background/feishu-bot'
-import {
-  decodeFrame,
-  encodeFrame,
-  header,
-  METHOD,
-  CTRL,
-  DATA,
-} from '../src/lib/feishu-proto'
+import { decodeFrame, encodeFrame, header, METHOD, CTRL, DATA } from '../src/lib/feishu-proto'
 
 /** Builds a server→client data event frame carrying a Feishu event callback. */
 function eventFrame(seqId: bigint, eventJson: string, service = 33554678): Uint8Array {
@@ -140,7 +133,12 @@ const ENDPOINT_JSON = {
   code: 0,
   data: {
     URL: 'wss://msg-frontier.feishu.cn/ws/v2?service_id=33554678&device_id=dev123&access_key=k&ticket=t',
-    ClientConfig: { PingInterval: 90, ReconnectCount: -1, ReconnectInterval: 90, ReconnectNonce: 25 },
+    ClientConfig: {
+      PingInterval: 90,
+      ReconnectCount: -1,
+      ReconnectInterval: 90,
+      ReconnectNonce: 25,
+    },
   },
 }
 const TOKEN_JSON = { code: 0, tenant_access_token: 't-ten', expire: 7200 }
@@ -163,13 +161,15 @@ describe('FeishuBot connection state machine', () => {
       alarms: alarms.api,
     }
     const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
-      if (typeof url === 'string' && url.includes('/tenant_access_token')) return fakeResponse(TOKEN_JSON)
+      if (typeof url === 'string' && url.includes('/tenant_access_token'))
+        return fakeResponse(TOKEN_JSON)
       if (typeof url === 'string' && url.includes('/callback/ws/endpoint')) {
         // The discovery request must authenticate with AppID/AppSecret in the
         // body (NOT a bearer token) and hit the path without /open-apis.
         return fakeResponse(ENDPOINT_JSON)
       }
-      if (typeof url === 'string' && url.includes('/im/v1/messages')) return fakeResponse({ code: 0 })
+      if (typeof url === 'string' && url.includes('/im/v1/messages'))
+        return fakeResponse({ code: 0 })
       return new Response('{}', { status: 200 })
     })
     const bot = new FeishuBot(fetchMock as unknown as typeof fetch, FakeSocket as never)
@@ -182,7 +182,9 @@ describe('FeishuBot connection state machine', () => {
     await vi.runAllTimersAsync()
     expect(FakeSocket.last).toBeTruthy()
     // Endpoint call goes to /callback/ws/endpoint (no /open-apis).
-    const [, init] = fetchMock.mock.calls.find(([u]) => String(u).includes('/callback/ws/endpoint'))!
+    const [, init] = fetchMock.mock.calls.find(([u]) =>
+      String(u).includes('/callback/ws/endpoint'),
+    )!
     expect(init!.headers).not.toHaveProperty('authorization')
     const body = JSON.parse(init!.body as string) as { AppID: string; AppSecret: string }
     expect(body.AppID).toBe('cli_test')
@@ -262,7 +264,11 @@ describe('FeishuBot connection state machine', () => {
     }
     const store = await import('../src/lib/task-store')
     vi.mocked(store.getFeishuConfig).mockResolvedValueOnce({
-      webhookUrl: '', webhookSecret: '', appId: '', appSecret: '', botEnabled: false,
+      webhookUrl: '',
+      webhookSecret: '',
+      appId: '',
+      appSecret: '',
+      botEnabled: false,
     })
     const bot = new FeishuBot(
       vi.fn(async () => new Response('{}')) as unknown as typeof fetch,

@@ -46,14 +46,18 @@ describe('needsConfirmation · waiver after an attach', () => {
   it('waives it despite fragment and trailing-slash differences', () => {
     // Chrome's tab URL and the page's own location.href routinely differ here.
     expect(needsConfirmation('read_current_page', PAGE, `${PAGE}#section`)).toBe(false)
-    expect(needsConfirmation('read_current_page', 'https://example.com/', 'https://example.com')).toBe(
-      false,
-    )
+    expect(
+      needsConfirmation('read_current_page', 'https://example.com/', 'https://example.com'),
+    ).toBe(false)
   })
 
   it('waives it when an SPA rewrote the query string', () => {
     expect(
-      needsConfirmation('read_current_page', 'https://example.com/app?tab=1', 'https://example.com/app?tab=9'),
+      needsConfirmation(
+        'read_current_page',
+        'https://example.com/app?tab=1',
+        'https://example.com/app?tab=9',
+      ),
     ).toBe(false)
   })
 })

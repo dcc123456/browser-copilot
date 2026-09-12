@@ -58,11 +58,18 @@ describe('resolveVisionTarget', () => {
 
   it('falls back to the active provider when providerId is empty', () => {
     const result = resolveVisionTarget({ providerId: '', model: '' }, [arkProfile], chatProfile)
-    expect(result).toMatchObject({ baseUrl: 'https://chat.example.com/v1', source: 'activeProvider' })
+    expect(result).toMatchObject({
+      baseUrl: 'https://chat.example.com/v1',
+      source: 'activeProvider',
+    })
   })
 
   it('falls back to the active provider when the selected id is unknown', () => {
-    const result = resolveVisionTarget({ providerId: 'ghost', model: '' }, [arkProfile], chatProfile)
+    const result = resolveVisionTarget(
+      { providerId: 'ghost', model: '' },
+      [arkProfile],
+      chatProfile,
+    )
     expect(result).toMatchObject({ source: 'activeProvider' })
   })
 
@@ -178,9 +185,9 @@ describe('inspectImage', () => {
     const body = JSON.parse(init.body) as {
       messages: { role: string; content: { type: string; text: string }[] }[]
     }
-    expect(
-      body.messages[0]!.content.find((c) => c.type === 'text')?.text,
-    ).toContain('What does the toast say?')
+    expect(body.messages[0]!.content.find((c) => c.type === 'text')?.text).toContain(
+      'What does the toast say?',
+    )
     vi.unstubAllGlobals()
   })
 

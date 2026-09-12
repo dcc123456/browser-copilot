@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { blockDisplayName, categoryDisplayName, BLOCK_NAMES_ZH } from '../src/workflow-editor/block-i18n'
+import {
+  blockDisplayName,
+  categoryDisplayName,
+  BLOCK_NAMES_ZH,
+} from '../src/workflow-editor/block-i18n'
 import { BLOCK_BY_ID } from '../src/lib/workflow/blocks/palette'
 
 describe('block display-name localization', () => {

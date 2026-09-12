@@ -12,12 +12,16 @@ function stubFetch(response: {
   vi.stubGlobal(
     'fetch',
     vi.fn(async () =>
-      Response ? new Response(new Uint8Array(response.body ?? []), { headers: { 'content-type': response.contentType ?? '' } }) : {
-        ok: response.ok ?? true,
-        status: response.status ?? 200,
-        headers: { get: () => response.contentType ?? null },
-        arrayBuffer: async () => (response.body ?? new Uint8Array()).buffer,
-      },
+      Response
+        ? new Response(new Uint8Array(response.body ?? []), {
+            headers: { 'content-type': response.contentType ?? '' },
+          })
+        : {
+            ok: response.ok ?? true,
+            status: response.status ?? 200,
+            headers: { get: () => response.contentType ?? null },
+            arrayBuffer: async () => (response.body ?? new Uint8Array()).buffer,
+          },
     ),
   )
 }
@@ -44,7 +48,10 @@ describe('fetchImageAsDataUrl', () => {
   })
 
   it('rejects non-image payloads (JSON error responses)', async () => {
-    stubFetch({ contentType: 'application/json', body: new Uint8Array([0x7b, 0x22, 0x63, 0x22, 0x3a, 0x31, 0x7d]) })
+    stubFetch({
+      contentType: 'application/json',
+      body: new Uint8Array([0x7b, 0x22, 0x63, 0x22, 0x3a, 0x31, 0x7d]),
+    })
     const result = await fetchImageAsDataUrl('https://example.test/Api/broken')
     expect(result.ok).toBe(false)
   })

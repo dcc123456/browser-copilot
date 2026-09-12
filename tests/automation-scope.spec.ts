@@ -143,9 +143,8 @@ describe('automation scope', () => {
 
   describe('plugin windows (connected panels ∪ minimized panels)', () => {
     it('counts a minimized window as a plugin window', async () => {
-      const minimize: typeof import('../src/background/panel-minimize') = await import(
-        '../src/background/panel-minimize'
-      )
+      const minimize: typeof import('../src/background/panel-minimize') =
+        await import('../src/background/panel-minimize')
       expect(mod.hasPluginWindows()).toBe(false)
       expect(mod.isPluginWindow(1)).toBe(false)
       expect(mod.latestPluginWindowId()).toBeUndefined()

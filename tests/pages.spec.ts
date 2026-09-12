@@ -46,7 +46,12 @@ describe('isInjectablePage', () => {
   })
 
   it('rejects non-http schemes outright', () => {
-    for (const url of ['ftp://example.com', 'data:text/html,hi', 'javascript:void(0)', 'mailto:a@b.c']) {
+    for (const url of [
+      'ftp://example.com',
+      'data:text/html,hi',
+      'javascript:void(0)',
+      'mailto:a@b.c',
+    ]) {
       expect(isInjectablePage(url), url).toBe(false)
     }
   })

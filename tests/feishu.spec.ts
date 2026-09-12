@@ -9,17 +9,13 @@ import {
 
 describe('isWebhookUrl', () => {
   it('accepts a valid Feishu hook URL', () => {
-    expect(
-      isWebhookUrl('https://open.feishu.cn/open-apis/bot/v2/hook/abc-123'),
-    ).toBe(true)
+    expect(isWebhookUrl('https://open.feishu.cn/open-apis/bot/v2/hook/abc-123')).toBe(true)
   })
 
   it('rejects non-feishu hosts and non-hook paths', () => {
     expect(isWebhookUrl('https://example.com/hook/x')).toBe(false)
     expect(isWebhookUrl('not a url')).toBe(false)
-    expect(isWebhookUrl('https://open.feishu.cn/open-apis/im/v1/messages')).toBe(
-      false,
-    )
+    expect(isWebhookUrl('https://open.feishu.cn/open-apis/im/v1/messages')).toBe(false)
   })
 })
 
@@ -50,16 +46,13 @@ describe('sendWebhookText', () => {
   })
 
   it('sends msg_type=text and unwraps code 0', async () => {
-    const fetchMock = vi.fn<typeof fetch>(async () =>
-      new Response(JSON.stringify({ code: 0, msg: 'success' }), { status: 200 }),
+    const fetchMock = vi.fn<typeof fetch>(
+      async () => new Response(JSON.stringify({ code: 0, msg: 'success' }), { status: 200 }),
     )
     // Bind the global fetch for the module under test.
     vi.stubGlobal('fetch', fetchMock)
     try {
-      await sendWebhookText(
-        'https://open.feishu.cn/open-apis/bot/v2/hook/x',
-        'hello',
-      )
+      await sendWebhookText('https://open.feishu.cn/open-apis/bot/v2/hook/x', 'hello')
     } finally {
       vi.unstubAllGlobals()
     }
@@ -88,10 +81,9 @@ describe('sendWebhookText', () => {
 describe('TenantTokenProvider', () => {
   it('fetches and caches a token until near expiry', async () => {
     let calls = 0
-    const fetchMock = vi.fn(async () =>
-      new Response(
-        JSON.stringify({ code: 0, tenant_access_token: 't-1', expire: 7200 }),
-      ),
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ code: 0, tenant_access_token: 't-1', expire: 7200 })),
     )
     const provider = new TenantTokenProvider('id', 'secret', fetchMock as unknown as typeof fetch)
     expect(await provider.get()).toBe('t-1')
@@ -101,18 +93,17 @@ describe('TenantTokenProvider', () => {
   })
 
   it('throws on a non-zero code', async () => {
-    const fetchMock = vi.fn(async () =>
-      new Response(JSON.stringify({ code: 10003, msg: 'invalid secret' })),
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ code: 10003, msg: 'invalid secret' })),
     )
     const provider = new TenantTokenProvider('id', 'bad', fetchMock as unknown as typeof fetch)
     await expect(provider.get()).rejects.toBeInstanceOf(FeishuError)
   })
 
   it('re-fetches after invalidate', async () => {
-    const fetchMock = vi.fn(async () =>
-      new Response(
-        JSON.stringify({ code: 0, tenant_access_token: 't-x', expire: 7200 }),
-      ),
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ code: 0, tenant_access_token: 't-x', expire: 7200 })),
     )
     const provider = new TenantTokenProvider('id', 's', fetchMock as unknown as typeof fetch)
     await provider.get()

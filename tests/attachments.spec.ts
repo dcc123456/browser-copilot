@@ -50,7 +50,11 @@ describe('toApiMessages', () => {
     const messages: WireMessage[] = [
       // Model-facing content carries the skill/selection envelopes; the raw
       // user text is display-only and must never reach the provider.
-      { role: 'user', content: '[internal directive]\n\nmodel sees this', displayContent: 'translate it' },
+      {
+        role: 'user',
+        content: '[internal directive]\n\nmodel sees this',
+        displayContent: 'translate it',
+      },
     ]
     const out = toApiMessages(messages)
     expect(out[0]).toEqual({ role: 'user', content: '[internal directive]\n\nmodel sees this' })
@@ -195,10 +199,7 @@ describe('validateAttachmentMeta', () => {
 
   it('rejects unsupported types', () => {
     expect(
-      validateAttachmentMeta(
-        { name: 'x.exe', mimeType: 'application/octet-stream', size: 10 },
-        [],
-      ),
+      validateAttachmentMeta({ name: 'x.exe', mimeType: 'application/octet-stream', size: 10 }, []),
     ).toBe('unsupported')
   })
 
@@ -218,20 +219,25 @@ describe('validateAttachmentMeta', () => {
   })
 
   it('rejects when the combined size would exceed the total cap', () => {
-    const fourMb = { id: 'h', name: 'h.png', mimeType: 'image/png', size: MAX_IMAGE_BYTES, dataUrl: 'data:image/png;base64,A' }
+    const fourMb = {
+      id: 'h',
+      name: 'h.png',
+      mimeType: 'image/png',
+      size: MAX_IMAGE_BYTES,
+      dataUrl: 'data:image/png;base64,A',
+    }
     // Each image is within its own cap, but the message total crosses 8MB.
     expect(
-      validateAttachmentMeta(
-        { name: 'p2.png', mimeType: 'image/png', size: 1024 },
-        [fourMb, { ...fourMb, id: 'h2' }],
-      ),
+      validateAttachmentMeta({ name: 'p2.png', mimeType: 'image/png', size: 1024 }, [
+        fourMb,
+        { ...fourMb, id: 'h2' },
+      ]),
     ).toBe('total-too-large')
     // Exactly at the total cap is still acceptable.
     expect(
-      validateAttachmentMeta(
-        { name: 'p2.png', mimeType: 'image/png', size: MAX_IMAGE_BYTES },
-        [fourMb],
-      ),
+      validateAttachmentMeta({ name: 'p2.png', mimeType: 'image/png', size: MAX_IMAGE_BYTES }, [
+        fourMb,
+      ]),
     ).toBeNull()
   })
 })
@@ -348,7 +354,13 @@ describe('toRestoreMessages', () => {
         role: 'user',
         content: 'look at this',
         attachments: [
-          { id: 'a1', name: 'pic.png', mimeType: 'image/png', size: 5, dataUrl: 'data:image/png;base64,A' },
+          {
+            id: 'a1',
+            name: 'pic.png',
+            mimeType: 'image/png',
+            size: 5,
+            dataUrl: 'data:image/png;base64,A',
+          },
           { id: 'a2', name: 'n.txt', mimeType: 'text/plain', size: 11, content: 'plain text' },
         ],
       },
@@ -436,9 +448,7 @@ describe('toRestoreMessages', () => {
         role: 'user',
         content: '',
         displayContent: '',
-        attachments: [
-          { id: 'a1', name: 'n.txt', mimeType: 'text/plain', size: 3, content: 'abc' },
-        ],
+        attachments: [{ id: 'a1', name: 'n.txt', mimeType: 'text/plain', size: 3, content: 'abc' }],
       },
     ]
     const out = toRestoreMessages(history)
@@ -498,8 +508,7 @@ describe('getUserDisplayText legacy unwrapping', () => {
 
   it('uses the final question marker when the selection quotes it', () => {
     const quoted = 'Selection:\nMy question: not the real one\n\nMy question: real question'
-    const content =
-      'Content selected on the page I am viewing:\nTitle: t\nURL: u\n' + quoted
+    const content = 'Content selected on the page I am viewing:\nTitle: t\nURL: u\n' + quoted
     expect(getUserDisplayText({ content })).toBe('real question')
   })
 
@@ -523,7 +532,13 @@ describe('descriptor shape guards', () => {
     // a user turn with attachments must typecheck and round-trip untouched.
     const turn = imageAttachment()
     turn.attachments = [
-      { id: 'x', name: 'x.png', mimeType: 'image/png', size: 1, dataUrl: 'data:image/png;base64,x' },
+      {
+        id: 'x',
+        name: 'x.png',
+        mimeType: 'image/png',
+        size: 1,
+        dataUrl: 'data:image/png;base64,x',
+      },
     ]
     expect(toApiMessages([turn])[0]).toEqual({
       role: 'user',

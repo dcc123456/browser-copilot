@@ -99,7 +99,13 @@ describe('buildShadowCandidates', () => {
 
 describe('matchCandidates', () => {
   const target: Target = {
-    primary: { how: 'cdp-shadow', value: '发布', role: 'button', tag: 'button', closedShadow: true },
+    primary: {
+      how: 'cdp-shadow',
+      value: '发布',
+      role: 'button',
+      tag: 'button',
+      closedShadow: true,
+    },
     fallbacks: [],
     label: '发布',
   }

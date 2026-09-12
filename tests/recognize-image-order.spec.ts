@@ -141,7 +141,13 @@ describe('recognize_image path ordering', () => {
         model: string
       }
 
-      expect(parsed).toMatchObject({ ok: true, text: '7 x 1 =', attempts: 2, agreed: true, model: 'tesseract(ocr)' })
+      expect(parsed).toMatchObject({
+        ok: true,
+        text: '7 x 1 =',
+        attempts: 2,
+        agreed: true,
+        model: 'tesseract(ocr)',
+      })
       expect(mocks.ocrImage).toHaveBeenCalledTimes(2)
       expect(fetchMock).toHaveBeenCalledTimes(2)
     } finally {

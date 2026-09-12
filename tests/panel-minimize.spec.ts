@@ -117,9 +117,8 @@ describe('panel minimize state', () => {
 
     // Simulate a fresh worker: reset modules, keep the session store.
     vi.resetModules()
-    const restored: typeof import('../src/background/panel-minimize') = await import(
-      '../src/background/panel-minimize'
-    )
+    const restored: typeof import('../src/background/panel-minimize') =
+      await import('../src/background/panel-minimize')
     expect(restored.isMinimized(1)).toBe(false) // not yet loaded
     restored.initPanelMinimize()
     await vi.waitFor(() => {
@@ -135,9 +134,8 @@ describe('panel minimize state', () => {
     fake().windows.delete(1) // window closed off-stage
 
     vi.resetModules()
-    const restored: typeof import('../src/background/panel-minimize') = await import(
-      '../src/background/panel-minimize'
-    )
+    const restored: typeof import('../src/background/panel-minimize') =
+      await import('../src/background/panel-minimize')
     restored.initPanelMinimize()
     await vi.waitFor(() => {
       expect(restored.isMinimized(1)).toBe(false)
@@ -161,9 +159,8 @@ describe('panel minimize state', () => {
     // Fresh worker: the status answer must observe the restored mark, not
     // the pre-restore empty map.
     vi.resetModules()
-    const restored: typeof import('../src/background/panel-minimize') = await import(
-      '../src/background/panel-minimize'
-    )
+    const restored: typeof import('../src/background/panel-minimize') =
+      await import('../src/background/panel-minimize')
     expect(restored.isMinimized(1)).toBe(false)
     restored.initPanelMinimize()
     await restored.whenRestoreSettled()

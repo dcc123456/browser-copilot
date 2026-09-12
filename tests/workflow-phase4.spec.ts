@@ -1,9 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runWorkflow } from '../src/background/workflow-engine/engine'
-import {
-  EXECUTORS,
-  type WorkflowExecCtx,
-} from '../src/background/workflow-engine/executors'
+import { EXECUTORS, type WorkflowExecCtx } from '../src/background/workflow-engine/executors'
 import { streamCompletion } from '../src/lib/llm'
 import { getSettings } from '../src/lib/storage'
 import { getWorkflow } from '../src/lib/workflow/storage'
@@ -41,18 +38,16 @@ vi.mock('../src/background/driver', async (importActual) => {
   const actual = await importActual<typeof import('../src/background/driver')>()
   return {
     ...actual,
-    execJsOnActiveTab: vi.fn(
-      async (code: string, args: Record<string, unknown> = {}) => {
-        const names = Object.keys(args)
-        // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
-        const fn = new Function(...names, `"use strict";\n${code}`)
-        try {
-          return { ok: true as const, data: fn(...names.map((n) => args[n])) }
-        } catch (error) {
-          return { ok: false as const, error: error instanceof Error ? error.message : String(error) }
-        }
-      },
-    ),
+    execJsOnActiveTab: vi.fn(async (code: string, args: Record<string, unknown> = {}) => {
+      const names = Object.keys(args)
+
+      const fn = new Function(...names, `"use strict";\n${code}`)
+      try {
+        return { ok: true as const, data: fn(...names.map((n) => args[n])) }
+      } catch (error) {
+        return { ok: false as const, error: error instanceof Error ? error.message : String(error) }
+      }
+    }),
   }
 })
 
@@ -153,7 +148,11 @@ describe('workflow phase 4 — data & control-flow blocks via runWorkflow', () =
   it('javascript-code stores its return value in lastResult', async () => {
     let captured: unknown = null
     const wf = makeWorkflow(
-      [node('t', 'manual'), node('js', 'javascript-code', { code: 'return 42' }), node('p', 'probe')],
+      [
+        node('t', 'manual'),
+        node('js', 'javascript-code', { code: 'return 42' }),
+        node('p', 'probe'),
+      ],
       [edge('t', 'js'), edge('js', 'p')],
     )
     const result = await runWorkflow(wf, {
@@ -188,7 +187,12 @@ describe('workflow phase 4 — data & control-flow blocks via runWorkflow', () =
   it('condition routes to the true edge when the expression is truthy', async () => {
     const calls: string[] = []
     const wf = makeWorkflow(
-      [node('t', 'manual'), node('c', 'condition', { code: '1+1===2' }), node('b', 'b'), node('n', 'n')],
+      [
+        node('t', 'manual'),
+        node('c', 'condition', { code: '1+1===2' }),
+        node('b', 'b'),
+        node('n', 'n'),
+      ],
       [edge('t', 'c'), edge('c', 'b', 'true'), edge('c', 'n', 'false')],
     )
     await runWorkflow(wf, {
@@ -210,7 +214,12 @@ describe('workflow phase 4 — data & control-flow blocks via runWorkflow', () =
   it('condition routes to the false edge when the expression is falsy', async () => {
     const calls: string[] = []
     const wf = makeWorkflow(
-      [node('t', 'manual'), node('c', 'condition', { code: '1===2' }), node('b', 'b'), node('n', 'n')],
+      [
+        node('t', 'manual'),
+        node('c', 'condition', { code: '1===2' }),
+        node('b', 'b'),
+        node('n', 'n'),
+      ],
       [edge('t', 'c'), edge('c', 'b', 'true'), edge('c', 'n', 'false')],
     )
     await runWorkflow(wf, {
@@ -499,7 +508,14 @@ describe('workflow phase 4 — integration executors', () => {
   it('ai-prompt calls the configured provider and stores lastAIResponse', async () => {
     vi.mocked(getSettings).mockResolvedValue({
       providers: [
-        { id: 'p1', label: 'p1', presetId: 'custom', baseUrl: 'https://x', apiKey: 'key', model: 'm' },
+        {
+          id: 'p1',
+          label: 'p1',
+          presetId: 'custom',
+          baseUrl: 'https://x',
+          apiKey: 'key',
+          model: 'm',
+        },
       ],
       activeProviderId: 'p1',
     } as unknown as Awaited<ReturnType<typeof getSettings>>)
@@ -534,49 +550,56 @@ describe('workflow phase 4 — integration executors', () => {
 })
 
 describe('workflow loops — after-loop "end" branch', () => {
-  const CASES: Array<{ blockId: string; data: Record<string, unknown>; vars?: Record<string, unknown> }> = [
+  const CASES: Array<{
+    blockId: string
+    data: Record<string, unknown>
+    vars?: Record<string, unknown>
+  }> = [
     { blockId: 'loop-data', data: { data: '[1,2]' } },
     { blockId: 'repeat-task', data: { count: 2 } },
     { blockId: 'while-loop', data: { code: 'vars.n < 2' }, vars: { n: 0 } },
     { blockId: 'loop-elements', data: { count: 2 } },
   ]
 
-  it.each(CASES)('$blockId runs the end branch once after iterations finish', async ({ blockId, data, vars }) => {
-    const seen: string[] = []
-    const wf = makeWorkflow(
-      [
-        node('t', 'manual'),
-        node('loop', blockId, data),
-        node('body', 'body'),
-        node('after', 'after'),
-      ],
-      [
-        edge('t', 'loop'),
-        edge('loop', 'body', `${blockId}-output-1`),
-        edge('body', 'loop'),
-        edge('loop', 'after', `${blockId}-output-2`),
-      ],
-    )
-    const result = await runWorkflow(wf, {
-      variables: { ...(vars ?? {}) },
-      executors: {
-        ...EXECUTORS,
-        body: async (_d, ctx) => {
-          seen.push('body')
-          if (blockId === 'while-loop') {
-            ctx.variables['n'] = Number(ctx.variables['n'] ?? 0) + 1
-          }
-          return null
+  it.each(CASES)(
+    '$blockId runs the end branch once after iterations finish',
+    async ({ blockId, data, vars }) => {
+      const seen: string[] = []
+      const wf = makeWorkflow(
+        [
+          node('t', 'manual'),
+          node('loop', blockId, data),
+          node('body', 'body'),
+          node('after', 'after'),
+        ],
+        [
+          edge('t', 'loop'),
+          edge('loop', 'body', `${blockId}-output-1`),
+          edge('body', 'loop'),
+          edge('loop', 'after', `${blockId}-output-2`),
+        ],
+      )
+      const result = await runWorkflow(wf, {
+        variables: { ...(vars ?? {}) },
+        executors: {
+          ...EXECUTORS,
+          body: async (_d, ctx) => {
+            seen.push('body')
+            if (blockId === 'while-loop') {
+              ctx.variables['n'] = Number(ctx.variables['n'] ?? 0) + 1
+            }
+            return null
+          },
+          after: async () => {
+            seen.push('after')
+            return null
+          },
         },
-        after: async () => {
-          seen.push('after')
-          return null
-        },
-      },
-    })
-    expect(result.outcome).toBe('ok')
-    expect(seen).toEqual(['body', 'body', 'after'])
-  })
+      })
+      expect(result.outcome).toBe('ok')
+      expect(seen).toEqual(['body', 'body', 'after'])
+    },
+  )
 
   it('while-loop with an immediately-false condition goes straight to the end branch', async () => {
     const seen: string[] = []

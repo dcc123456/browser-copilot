@@ -88,6 +88,15 @@ export default defineConfig(({ mode }) => {
       // .tsx too: component render tests use react-dom/server, which needs no DOM
       // environment, so they belong in this same suite.
       include: ['tests/**/*.spec.ts', 'tests/**/*.spec.tsx'],
+      coverage: {
+        provider: 'v8',
+        reporter: ['text', 'lcov'],
+        // Measure the engine + shared lib, not the bundled UI shells.
+        include: ['src/lib/**', 'src/background/**'],
+        // Starting baseline (see docs/ai-debug-success-rate-v3.md §6); tighten
+        // as the suite grows. Only enforced when run with --coverage.
+        thresholds: { lines: 60, functions: 60 },
+      },
     },
   }
 })

@@ -32,7 +32,9 @@ interface HostProps {
 }
 
 /** Mount NumberInput under a stateful parent that records onChange calls. */
-const renderInput = (opts: HostProps): { input: HTMLInputElement; onChange: ReturnType<typeof vi.fn> } => {
+const renderInput = (
+  opts: HostProps,
+): { input: HTMLInputElement; onChange: ReturnType<typeof vi.fn> } => {
   const onChange = vi.fn()
   const Host = (): ReturnType<typeof NumberInput> => {
     const [value, setValue] = useState<number | string>(opts.initial)
@@ -56,10 +58,7 @@ const renderInput = (opts: HostProps): { input: HTMLInputElement; onChange: Retu
 /** Simulate user typing: set the value through the native setter so React's
  *  change tracker picks it up, then dispatch a bubbling input event. */
 const type = (input: HTMLInputElement, text: string) => {
-  const setter = Object.getOwnPropertyDescriptor(
-    HTMLInputElement.prototype,
-    'value',
-  )!.set!
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
   act(() => {
     setter.call(input, text)
     input.dispatchEvent(new Event('input', { bubbles: true }))

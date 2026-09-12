@@ -121,7 +121,9 @@ describe('kernel capture: media elements resolve to real pixels', () => {
     const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4])
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => ({ blob: async () => new dom.window.Blob([bytes], { type: 'image/png' }) })),
+      vi.fn(async () => ({
+        blob: async () => new dom.window.Blob([bytes], { type: 'image/png' }),
+      })),
     )
     vi.stubGlobal('FileReader', dom.window.FileReader)
     const result = await runOp({ action: 'capture', value: '#box' } as Op)

@@ -117,7 +117,12 @@ describe('parseEndpointResponse', () => {
       code: 0,
       data: {
         URL: url,
-        ClientConfig: { PingInterval: 90, ReconnectCount: -1, ReconnectInterval: 90, ReconnectNonce: 25 },
+        ClientConfig: {
+          PingInterval: 90,
+          ReconnectCount: -1,
+          ReconnectInterval: 90,
+          ReconnectNonce: 25,
+        },
       },
     })
     expect(result.url).toBe(url)
@@ -169,14 +174,13 @@ describe('parseEvent', () => {
   })
 
   it('ignores non-message events', () => {
-    expect(
-      parseEvent(JSON.stringify({ header: { event_type: 'other' }, event: {} })),
-    ).toBeNull()
+    expect(parseEvent(JSON.stringify({ header: { event_type: 'other' }, event: {} }))).toBeNull()
   })
 
   it('ignores non-text messages', () => {
     const event = textEvent('x')
-    ;(event as { event: { message: { message_type: string } } }).event.message.message_type = 'image'
+    ;(event as { event: { message: { message_type: string } } }).event.message.message_type =
+      'image'
     expect(parseEvent(JSON.stringify(event))).toBeNull()
   })
 

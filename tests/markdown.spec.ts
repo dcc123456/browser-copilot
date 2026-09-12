@@ -341,10 +341,7 @@ describe('parseMarkdown · blocks', () => {
       'paragraph',
       'heading',
     ])
-    expect(parseMarkdown('text\n- item').map((b: Block) => b.kind)).toEqual([
-      'paragraph',
-      'list',
-    ])
+    expect(parseMarkdown('text\n- item').map((b: Block) => b.kind)).toEqual(['paragraph', 'list'])
     expect(parseMarkdown('text\n```\ncode\n```').map((b: Block) => b.kind)).toEqual([
       'paragraph',
       'code',

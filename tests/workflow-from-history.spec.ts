@@ -47,7 +47,9 @@ const actionData = (entries: HistoryEntry[], name = 'wf') =>
 
 describe('selectorFromArgs target synthesis', () => {
   it("how:'css' keeps the trimmed selector", () => {
-    expect(actionData([entry('click', { target: { primary: { how: 'css', value: ' .btn ' } } })])).toEqual([
+    expect(
+      actionData([entry('click', { target: { primary: { how: 'css', value: ' .btn ' } } })]),
+    ).toEqual([
       {
         blockId: 'event-click',
         description: '',
@@ -59,7 +61,9 @@ describe('selectorFromArgs target synthesis', () => {
   })
 
   it("how:'id' yields a #id selector", () => {
-    expect(actionData([entry('click', { target: { primary: { how: 'id', value: 'submit' } } })])).toEqual([
+    expect(
+      actionData([entry('click', { target: { primary: { how: 'id', value: 'submit' } } })]),
+    ).toEqual([
       {
         blockId: 'event-click',
         description: '',
@@ -71,7 +75,9 @@ describe('selectorFromArgs target synthesis', () => {
   })
 
   it("how:'name' yields a [name=...] selector", () => {
-    expect(actionData([entry('click', { target: { primary: { how: 'name', value: 'q' } } })])).toEqual([
+    expect(
+      actionData([entry('click', { target: { primary: { how: 'name', value: 'q' } } })]),
+    ).toEqual([
       {
         blockId: 'event-click',
         description: '',
@@ -83,7 +89,9 @@ describe('selectorFromArgs target synthesis', () => {
   })
 
   it("how:'testid' yields a [data-testid=...] selector", () => {
-    expect(actionData([entry('click', { target: { primary: { how: 'testid', value: 'x' } } })])).toEqual([
+    expect(
+      actionData([entry('click', { target: { primary: { how: 'testid', value: 'x' } } })]),
+    ).toEqual([
       {
         blockId: 'event-click',
         description: '',
@@ -217,7 +225,11 @@ describe('page-load wait insertion', () => {
       ],
       'wf',
     )
-    expect(wf!.drawflow.nodes.map((n) => n.data.blockId)).toEqual(['trigger', 'event-click', 'event-click'])
+    expect(wf!.drawflow.nodes.map((n) => n.data.blockId)).toEqual([
+      'trigger',
+      'event-click',
+      'event-click',
+    ])
   })
 })
 
@@ -285,10 +297,7 @@ describe('duplicate collapsing', () => {
 
   it('keeps two open_url calls when the URLs differ (each with its own wait)', () => {
     const wf = workflowFromHistory(
-      [
-        entry('open_url', { url: 'https://a.com' }),
-        entry('open_url', { url: 'https://b.com' }),
-      ],
+      [entry('open_url', { url: 'https://a.com' }), entry('open_url', { url: 'https://b.com' })],
       'wf',
     )
     // trigger + 2 × (new-tab + wait)
@@ -308,9 +317,7 @@ describe('duplicate collapsing', () => {
       'wf',
     )
     expect(
-      wf!.drawflow.nodes
-        .filter((n) => n.data.blockId !== 'trigger')
-        .map((n) => n.data.selector),
+      wf!.drawflow.nodes.filter((n) => n.data.blockId !== 'trigger').map((n) => n.data.selector),
     ).toEqual(['.a', '.b'])
   })
 
@@ -460,9 +467,10 @@ describe('fill-shaped run_javascript becomes the forms operator', () => {
   })
 
   it('getElementsByClassName("[0]") maps to a .class selector', () => {
-    expect(
-      fillLikeJsFromCode("document.getElementsByClassName('qty')[0].value = '2'"),
-    ).toEqual({ selector: '.qty', value: '2' })
+    expect(fillLikeJsFromCode("document.getElementsByClassName('qty')[0].value = '2'")).toEqual({
+      selector: '.qty',
+      value: '2',
+    })
   })
 
   it('a defensive duplicate write of the same value still converts', () => {
@@ -659,7 +667,10 @@ describe('text-extraction screenshots replay as the ocr operator', () => {
     const wf = workflowFromHistory(
       [
         entry('open_url', { url: 'https://e.com' }),
-        entry('screenshot', { target: '#captchaImg', prompt: 'Read the captcha code in the image' }),
+        entry('screenshot', {
+          target: '#captchaImg',
+          prompt: 'Read the captcha code in the image',
+        }),
       ],
       'wf',
     )

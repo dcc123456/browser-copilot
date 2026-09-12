@@ -40,15 +40,17 @@ describe('resolveUnattendedWindow (pure policy)', () => {
 
   it('latest picks the most recently used plugin window', () => {
     const windows = [win(1, { isMinimized: true }), win(2, { isPanel: true })]
-    expect(
-      policy.resolveUnattendedWindow('latest', windows, 2),
-    ).toEqual({ kind: 'scope', windowId: 2 })
+    expect(policy.resolveUnattendedWindow('latest', windows, 2)).toEqual({
+      kind: 'scope',
+      windowId: 2,
+    })
 
     // With no connected panel, the latest minimized window wins.
     const minimizedOnly = [win(1, { isMinimized: true }), win(2, { isMinimized: true })]
-    expect(
-      policy.resolveUnattendedWindow('latest', minimizedOnly, undefined),
-    ).toEqual({ kind: 'scope', windowId: 2 })
+    expect(policy.resolveUnattendedWindow('latest', minimizedOnly, undefined)).toEqual({
+      kind: 'scope',
+      windowId: 2,
+    })
   })
 
   it('latest survives a stale latestWindowId', () => {

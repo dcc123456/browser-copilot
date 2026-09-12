@@ -78,7 +78,9 @@ describe('ai-agent block catalog wiring', () => {
   })
 
   it('does not collide with any Automa catalog id', () => {
-    const automaIds = new Set(PALETTE_BLOCKS.filter((b) => !CUSTOM_BLOCK_IDS.has(b.id)).map((b) => b.id))
+    const automaIds = new Set(
+      PALETTE_BLOCKS.filter((b) => !CUSTOM_BLOCK_IDS.has(b.id)).map((b) => b.id),
+    )
     for (const custom of CUSTOM_BLOCKS) expect(automaIds.has(custom.id)).toBe(false)
   })
 
@@ -201,7 +203,10 @@ describe('ai-agent executor', () => {
 
     expect(runUnattended).toHaveBeenCalledTimes(1)
     const [prompt, conversationId, mode, options] = runUnattended.mock.calls[0] as [
-      string, string, string, { maxToolRounds: number },
+      string,
+      string,
+      string,
+      { maxToolRounds: number },
     ]
     expect(mode).toBe('readonly')
     expect(conversationId).toContain('workflow-ai-agent')
@@ -224,7 +229,12 @@ describe('ai-agent executor', () => {
       ctx,
     )
 
-    const [, , mode, options] = runUnattended.mock.calls[0] as [string, string, string, { maxToolRounds: number }]
+    const [, , mode, options] = runUnattended.mock.calls[0] as [
+      string,
+      string,
+      string,
+      { maxToolRounds: number },
+    ]
     expect(mode).toBe('full')
     expect(options.maxToolRounds).toBe(8)
     expect(ctx.variables['lastAIAgent']).toBe('clicked')
@@ -241,7 +251,10 @@ describe('ai-agent executor', () => {
 
     expect(runUnattended).toHaveBeenCalledTimes(1)
     const [, , , options] = runUnattended.mock.calls[0] as unknown as [
-      string, string, string, { scopeWindowId?: number },
+      string,
+      string,
+      string,
+      { scopeWindowId?: number },
     ]
     // Without this passthrough a second plugin window would capture the turn.
     expect(options.scopeWindowId).toBe(7)

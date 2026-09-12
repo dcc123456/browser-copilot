@@ -52,7 +52,11 @@ describe('patchNodeParams', () => {
       [node('a', 'trigger'), node('b', 'event-click', { disableBlock: false })],
       [edge('a', 'b')],
     )
-    const applied = patchNodeParams(wf, 'b', { blockId: 'ai-agent', disableBlock: true, selector: 'x' })
+    const applied = patchNodeParams(wf, 'b', {
+      blockId: 'ai-agent',
+      disableBlock: true,
+      selector: 'x',
+    })
     expect(applied.changed).toBe(true)
     const data = applied.workflow.drawflow.nodes[1]!.data
     expect(data['blockId']).toBe('event-click')

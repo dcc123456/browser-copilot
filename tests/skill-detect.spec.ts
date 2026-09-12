@@ -3,7 +3,8 @@ import { detectSkillCandidatesFromMarkdown } from '../src/lib/skill-detect'
 
 describe('detectSkillCandidatesFromMarkdown', () => {
   it('detects a JSON skill inside a ```json fence', () => {
-    const md = 'Here is one:\n```json\n{"name":"JSON Skill","description":"desc","instructions":"do x"}\n```\n'
+    const md =
+      'Here is one:\n```json\n{"name":"JSON Skill","description":"desc","instructions":"do x"}\n```\n'
     const found = detectSkillCandidatesFromMarkdown(md)
     expect(found).toHaveLength(1)
     expect(found[0]!.draft.name).toBe('JSON Skill')
@@ -48,14 +49,16 @@ describe('detectSkillCandidatesFromMarkdown', () => {
   })
 
   it('deduplicates when the same block would match twice', () => {
-    const md = '```json\n{"name":"X","instructions":"i"}\n```\n```json\n{"name":"X","instructions":"i"}\n```'
+    const md =
+      '```json\n{"name":"X","instructions":"i"}\n```\n```json\n{"name":"X","instructions":"i"}\n```'
     // Two fences carrying the *identical* skill body yield a single candidate,
     // so the user does not get duplicate save-cards for one reply.
     expect(detectSkillCandidatesFromMarkdown(md).length).toBe(1)
   })
 
   it('detects multiple distinct skills from separate fences', () => {
-    const md = '```json\n{"name":"A","instructions":"1"}\n```\n```json\n{"name":"B","instructions":"2"}\n```'
+    const md =
+      '```json\n{"name":"A","instructions":"1"}\n```\n```json\n{"name":"B","instructions":"2"}\n```'
     const found = detectSkillCandidatesFromMarkdown(md)
     expect(found.map((f) => f.draft.name).sort()).toEqual(['A', 'B'])
   })

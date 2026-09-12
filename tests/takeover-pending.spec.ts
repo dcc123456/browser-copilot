@@ -100,7 +100,11 @@ describe('AI takeover pending fixes', () => {
   it('a newer session replaces earlier unanswered fixes', async () => {
     await saveWorkflow(makeWorkflow({ id: 'wf-1' }))
     await savePendingTakeover({ workflowId: 'wf-1', fixes: [fix('b', '.old')], createdAt: 1 })
-    await savePendingTakeover({ workflowId: 'wf-1', fixes: [fix('b', '.new'), fix('c', '.x')], createdAt: 2 })
+    await savePendingTakeover({
+      workflowId: 'wf-1',
+      fixes: [fix('b', '.new'), fix('c', '.x')],
+      createdAt: 2,
+    })
     const pending = await getPendingTakeover('wf-1')
     expect(pending?.fixes).toHaveLength(2)
     expect(pending?.fixes[0]?.paramsPatch).toEqual({ selector: '.new' })
@@ -142,7 +146,11 @@ describe('AI takeover pending fixes', () => {
       workflowId: 'wf-1',
       runId: 'run-9',
       fixes: [],
-      rewrite: { workflow: rewriteWorkflow, changes: ['换按钮', '加等待'], diagnosis: '选择器过期' },
+      rewrite: {
+        workflow: rewriteWorkflow,
+        changes: ['换按钮', '加等待'],
+        diagnosis: '选择器过期',
+      },
       createdAt: 7,
     })
     const pending = await getPendingTakeover('wf-1')

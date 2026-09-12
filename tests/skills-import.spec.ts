@@ -159,9 +159,7 @@ describe('importSkillsBatch', () => {
     expect(saved[0]!.name).toBe('New Skill')
     expect(problems).toHaveLength(2)
     expect(problems[0]!.problems).toEqual([{ field: 'name', code: 'nameTaken' }])
-    expect(problems[1]!.problems).toEqual([
-      { field: 'instructions', code: 'instructionsRequired' },
-    ])
+    expect(problems[1]!.problems).toEqual([{ field: 'instructions', code: 'instructionsRequired' }])
   })
 
   it('treats unmappable entries as parseFailed', () => {
@@ -186,7 +184,10 @@ describe('export + import round-trip', () => {
   it('exported json re-imports to equivalent normalized skills', () => {
     const originals = [
       s('中文 名称'),
-      { ...s('Long'), instructions: 'multi\nline\nwith **markdown** and 中文\n\nand code\n```\nx\n```' },
+      {
+        ...s('Long'),
+        instructions: 'multi\nline\nwith **markdown** and 中文\n\nand code\n```\nx\n```',
+      },
     ]
     const json = exportSkillsJson(originals)
     const { ok, raws } = parseJsonSkillsText(json)

@@ -14,7 +14,7 @@ import {
 } from '../src/inpage/element-picker/build-selector'
 
 let doc: Document
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 let win: any
 
 beforeEach(() => {
@@ -107,7 +107,8 @@ describe('buildXPath', () => {
       xp,
       doc,
       null,
-      (win as unknown as { XPathResult: typeof XPathResult }).XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+      (win as unknown as { XPathResult: typeof XPathResult }).XPathResult
+        .ORDERED_NODE_SNAPSHOT_TYPE,
       null,
     )
     expect(result.snapshotLength).toBe(1)

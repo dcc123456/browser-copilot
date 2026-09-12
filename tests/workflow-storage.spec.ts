@@ -126,9 +126,7 @@ describe('workflow storage', () => {
   })
 
   it('duplicates a workflow under a new id with the given name', async () => {
-    await saveWorkflow(
-      makeWorkflow({ id: 'a', name: 'Original', table: 'tbl-1' }),
-    )
+    await saveWorkflow(makeWorkflow({ id: 'a', name: 'Original', table: 'tbl-1' }))
 
     const copy = await duplicateWorkflow('a', 'Renamed copy')
 

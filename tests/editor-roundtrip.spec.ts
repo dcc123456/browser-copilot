@@ -18,7 +18,14 @@ import type { Workflow, WorkflowEdge, WorkflowNode } from '../src/lib/workflow/t
  *   branch blocks) and the fallback source `<blockId>-output-fallback`.
  */
 function renderableHandles(blockId: string): { source: string[]; target: string[] } {
-  const branch2 = ['conditions', 'element-exists', 'loop-data', 'loop-elements', 'while-loop', 'repeat-task']
+  const branch2 = [
+    'conditions',
+    'element-exists',
+    'loop-data',
+    'loop-elements',
+    'while-loop',
+    'repeat-task',
+  ]
   const source = [`${blockId}-output-1`]
   if (branch2.includes(blockId)) source.push(`${blockId}-output-2`)
   // The fallback handle renders when the block's onError settings enable it.
@@ -38,25 +45,70 @@ function wf(nodes: WorkflowNode[], edges: WorkflowEdge[]): Workflow {
 }
 
 const BASE_NODES: WorkflowNode[] = [
-  { id: 'n1', label: 'Trigger', position: { x: 0, y: 0 }, data: { blockId: 'trigger', type: 'manual' } },
+  {
+    id: 'n1',
+    label: 'Trigger',
+    position: { x: 0, y: 0 },
+    data: { blockId: 'trigger', type: 'manual' },
+  },
   {
     id: 'n2',
     label: 'Click',
     position: { x: 1, y: 0 },
-    data: { blockId: 'event-click', selector: 'a.buy', findBy: 'cssSelector', description: '', onError: { enable: true, toDo: 'fallback' } },
+    data: {
+      blockId: 'event-click',
+      selector: 'a.buy',
+      findBy: 'cssSelector',
+      description: '',
+      onError: { enable: true, toDo: 'fallback' },
+    },
   },
-  { id: 'n3', label: 'Forms', position: { x: 2, y: 0 }, data: { blockId: 'forms', selector: '#name', description: '' } },
-  { id: 'n4', label: 'OCR', position: { x: 3, y: 0 }, data: { blockId: 'ocr', description: '', onError: { enable: true, toDo: 'fallback' } } },
+  {
+    id: 'n3',
+    label: 'Forms',
+    position: { x: 2, y: 0 },
+    data: { blockId: 'forms', selector: '#name', description: '' },
+  },
+  {
+    id: 'n4',
+    label: 'OCR',
+    position: { x: 3, y: 0 },
+    data: { blockId: 'ocr', description: '', onError: { enable: true, toDo: 'fallback' } },
+  },
 ]
 
 const BASE_EDGES: WorkflowEdge[] = [
-  { id: 'e1', source: 'n1', target: 'n2', sourceHandle: 'trigger-output-1', targetHandle: 'event-click-input-1' },
-  { id: 'e2', source: 'n2', target: 'n3', sourceHandle: 'event-click-output-1', targetHandle: 'forms-input-1' },
-  { id: 'e3', source: 'n3', target: 'n4', sourceHandle: 'forms-output-1', targetHandle: 'ocr-input-1' },
+  {
+    id: 'e1',
+    source: 'n1',
+    target: 'n2',
+    sourceHandle: 'trigger-output-1',
+    targetHandle: 'event-click-input-1',
+  },
+  {
+    id: 'e2',
+    source: 'n2',
+    target: 'n3',
+    sourceHandle: 'event-click-output-1',
+    targetHandle: 'forms-input-1',
+  },
+  {
+    id: 'e3',
+    source: 'n3',
+    target: 'n4',
+    sourceHandle: 'forms-output-1',
+    targetHandle: 'ocr-input-1',
+  },
   // The fallback connection: drawn from ocr's fallback handle back to the
   // earlier event-click block — "fall back to any previous node". (The
   // trigger has no input handle, so it is not a drop target.)
-  { id: 'e4', source: 'n4', target: 'n2', sourceHandle: 'ocr-output-fallback', targetHandle: 'event-click-input-1' },
+  {
+    id: 'e4',
+    source: 'n4',
+    target: 'n2',
+    sourceHandle: 'ocr-output-fallback',
+    targetHandle: 'event-click-input-1',
+  },
 ]
 
 function saveThenReopen(wf0: Workflow): Workflow {
@@ -71,7 +123,9 @@ describe('editor save → reopen round trip', () => {
     const reopened = saveThenReopen(wf(BASE_NODES, BASE_EDGES))
     for (const node of reopened.drawflow.nodes) {
       const blockId = node.data.blockId as string
-      expect(BLOCK_BY_ID.has(blockId), `node ${node.id}: block "${blockId}" must resolve`).toBe(true)
+      expect(BLOCK_BY_ID.has(blockId), `node ${node.id}: block "${blockId}" must resolve`).toBe(
+        true,
+      )
     }
   })
 
@@ -99,7 +153,13 @@ describe('editor save → reopen round trip', () => {
     // next load must repair it against the rendered handle id.
     const mangled = wf(BASE_NODES, [
       ...BASE_EDGES.filter((e) => e.id !== 'e4'),
-      { id: 'e4', source: 'n4', target: 'n2', sourceHandle: 'ocr-fallback', targetHandle: 'event-click-input-1' },
+      {
+        id: 'e4',
+        source: 'n4',
+        target: 'n2',
+        sourceHandle: 'ocr-fallback',
+        targetHandle: 'event-click-input-1',
+      },
     ])
     const reopened = saveThenReopen(mangled)
     const fb = reopened.drawflow.edges.find((e) => e.id === 'e4')!

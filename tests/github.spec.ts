@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  NotLoggedIn,
-  formatReviewSummary,
-  parseReviewFeed,
-} from '../src/lib/github'
+import { NotLoggedIn, formatReviewSummary, parseReviewFeed } from '../src/lib/github'
 
 /**
  * Minimal DOMParser stand-in for Node.
@@ -125,8 +121,10 @@ describe('parseReviewFeed', () => {
   })
 
   it('flags incompleteness at the 30-entry cap', () => {
-    const entries = Array.from({ length: 31 }, (_, i) =>
-      `<entry><title>PR ${i}</title><link href="https://github.com/o/r/pull/${i}"/></entry>`,
+    const entries = Array.from(
+      { length: 31 },
+      (_, i) =>
+        `<entry><title>PR ${i}</title><link href="https://github.com/o/r/pull/${i}"/></entry>`,
     ).join('')
     const feed = `<feed>${entries}</feed>`
     const result = parseReviewFeed(feed, parseXml)

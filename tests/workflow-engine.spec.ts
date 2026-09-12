@@ -64,7 +64,7 @@ describe('workflow engine', () => {
   })
 
   it('threads the panel-window scope onto every block ctx (and omits it when absent)', async () => {
-    const seen: (unknown)[] = []
+    const seen: unknown[] = []
     const wf = makeWorkflow([node('a', 'step-a'), node('b', 'step-b')], [edge('a', 'b')])
     const executors = {
       'step-a': async (_data: Record<string, unknown>, ctx: { scope?: unknown }) => {
@@ -165,7 +165,10 @@ describe('workflow engine', () => {
           id: 'open',
           label: 'open-url',
           position: { x: 0, y: 0 },
-          data: { blockId: 'open-url', values: { url: 'https://github.com/pulls/review-requested' } },
+          data: {
+            blockId: 'open-url',
+            values: { url: 'https://github.com/pulls/review-requested' },
+          },
         },
       ],
       [edge('trigger', 'open')],
@@ -186,7 +189,10 @@ describe('workflow engine', () => {
 
   it('guards against dead loops once MAX_STEPS is exceeded', async () => {
     const order: string[] = []
-    const wf = makeWorkflow([node('a', 'walk'), node('b', 'walk')], [edge('a', 'b'), edge('b', 'a')])
+    const wf = makeWorkflow(
+      [node('a', 'walk'), node('b', 'walk')],
+      [edge('a', 'b'), edge('b', 'a')],
+    )
     const steps: string[] = []
     const result = await runWorkflow(wf, {
       onStep: (_k, _id, text) => steps.push(text),

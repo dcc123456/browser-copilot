@@ -26,9 +26,7 @@ function profile(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
 describe('normalizeBaseUrl', () => {
   it('trims trailing slashes', () => {
     expect(normalizeBaseUrl('https://api.deepseek.com/v1/')).toBe('https://api.deepseek.com/v1')
-    expect(normalizeBaseUrl('  https://api.deepseek.com/v1  ')).toBe(
-      'https://api.deepseek.com/v1',
-    )
+    expect(normalizeBaseUrl('  https://api.deepseek.com/v1  ')).toBe('https://api.deepseek.com/v1')
   })
 
   it('strips a pasted /chat/completions suffix', () => {
@@ -107,9 +105,7 @@ describe('validateProfile', () => {
   })
 
   it('reports each missing field', () => {
-    const problems = validateProfile(
-      profile({ label: '', baseUrl: '', apiKey: '', model: '' }),
-    )
+    const problems = validateProfile(profile({ label: '', baseUrl: '', apiKey: '', model: '' }))
     expect(problems.map((problem) => problem.field).sort()).toEqual([
       'apiKey',
       'baseUrl',
@@ -285,9 +281,10 @@ describe('normalizeStoredSettings', () => {
         .localAgentActiveAgent,
     ).toBe('agent-abc')
     for (const bad of [undefined, null, 42, {}, ['x']]) {
-      expect(normalizeStoredSettings({ providers: [], localAgentActiveAgent: bad }).localAgentActiveAgent).toBe(
-        '',
-      )
+      expect(
+        normalizeStoredSettings({ providers: [], localAgentActiveAgent: bad })
+          .localAgentActiveAgent,
+      ).toBe('')
     }
   })
 })
@@ -328,9 +325,7 @@ describe('normalizeSettingsPayload · cross-version safety', () => {
 
   it('defaults ocrLanguage to eng and passes a custom value through', () => {
     expect(normalizeSettingsPayload({}).ocrLanguage).toBe('eng')
-    expect(
-      normalizeSettingsPayload({ ocrLanguage: 'chi_sim+eng' }).ocrLanguage,
-    ).toBe('chi_sim+eng')
+    expect(normalizeSettingsPayload({ ocrLanguage: 'chi_sim+eng' }).ocrLanguage).toBe('chi_sim+eng')
     expect(normalizeSettingsPayload({ ocrLanguage: 42 }).ocrLanguage).toBe('eng')
   })
 
@@ -352,11 +347,13 @@ describe('normalizeSettingsPayload · cross-version safety', () => {
 
   it('defaults and preserves the localAgentActiveAgent field', () => {
     expect(normalizeSettingsPayload({}).localAgentActiveAgent).toBe('')
-    expect(normalizeSettingsPayload({ localAgentActiveAgent: 'agent-x' }).localAgentActiveAgent).toBe(
-      'agent-x',
-    )
+    expect(
+      normalizeSettingsPayload({ localAgentActiveAgent: 'agent-x' }).localAgentActiveAgent,
+    ).toBe('agent-x')
     for (const bad of [7, {}, null, undefined]) {
-      expect(normalizeSettingsPayload({ localAgentActiveAgent: bad }).localAgentActiveAgent).toBe('')
+      expect(normalizeSettingsPayload({ localAgentActiveAgent: bad }).localAgentActiveAgent).toBe(
+        '',
+      )
     }
   })
 
@@ -364,13 +361,13 @@ describe('normalizeSettingsPayload · cross-version safety', () => {
   // that does not know the field yet still yields the historical default ON.
   it('defaults and preserves chatWorkflowPromptEnabled', () => {
     expect(normalizeSettingsPayload({}).chatWorkflowPromptEnabled).toBe(true)
-    expect(normalizeSettingsPayload({ chatWorkflowPromptEnabled: false }).chatWorkflowPromptEnabled).toBe(
-      false,
-    )
+    expect(
+      normalizeSettingsPayload({ chatWorkflowPromptEnabled: false }).chatWorkflowPromptEnabled,
+    ).toBe(false)
     for (const bad of ['yes', 1, {}, null, undefined]) {
-      expect(normalizeSettingsPayload({ chatWorkflowPromptEnabled: bad }).chatWorkflowPromptEnabled).toBe(
-        true,
-      )
+      expect(
+        normalizeSettingsPayload({ chatWorkflowPromptEnabled: bad }).chatWorkflowPromptEnabled,
+      ).toBe(true)
     }
   })
 })

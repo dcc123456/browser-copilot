@@ -3,7 +3,11 @@
  * normalizeShortcut parses chords for the injected keyboard listener.
  */
 import { describe, it, expect } from 'vitest'
-import { effectiveTriggerKind, normalizeShortcut, triggerEnabled } from '../src/background/workflow-triggers'
+import {
+  effectiveTriggerKind,
+  normalizeShortcut,
+  triggerEnabled,
+} from '../src/background/workflow-triggers'
 import type { Workflow } from '../src/lib/workflow/types'
 
 function wf(nodeType?: string, opts?: { top?: Workflow['trigger']; disabled?: boolean }): Workflow {
@@ -16,7 +20,14 @@ function wf(nodeType?: string, opts?: { top?: Workflow['trigger']; disabled?: bo
     trigger: opts?.top,
     drawflow: {
       nodes: nodeType
-        ? [{ id: 'trig', label: 'trigger', position: { x: 0, y: 0 }, data: { blockId: 'trigger', type: nodeType } }]
+        ? [
+            {
+              id: 'trig',
+              label: 'trigger',
+              position: { x: 0, y: 0 },
+              data: { blockId: 'trigger', type: nodeType },
+            },
+          ]
         : [],
       edges: [],
     },
@@ -46,7 +57,9 @@ describe('triggerEnabled', () => {
     expect(triggerEnabled(wf('on-startup'))).toBe(true)
   })
   it('is disabled when top-level trigger.enabled is false', () => {
-    expect(triggerEnabled(wf('on-startup', { top: { type: 'scheduled', enabled: false } }))).toBe(false)
+    expect(triggerEnabled(wf('on-startup', { top: { type: 'scheduled', enabled: false } }))).toBe(
+      false,
+    )
   })
 })
 

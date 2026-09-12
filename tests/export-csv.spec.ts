@@ -3,23 +3,14 @@ import { buildAnswerFilename, hasTables, toCsv } from '../src/lib/export-answer'
 
 describe('toCsv', () => {
   it('renders a simple table to header + data rows', () => {
-    const md = [
-      '| Name | Age |',
-      '| --- | --- |',
-      '| Alice | 30 |',
-      '| Bob | 25 |',
-    ].join('\n')
+    const md = ['| Name | Age |', '| --- | --- |', '| Alice | 30 |', '| Bob | 25 |'].join('\n')
     expect(toCsv(md)).toBe('Name,Age\nAlice,30\nBob,25')
   })
 
   it('escapes cells containing a comma, a double-quote, or a newline', () => {
     // Commas and quotes flow straight through from the Markdown cells; the
     // RFC-4180 wrapper quotes them and doubles internal double-quotes.
-    const md = [
-      '| A | B |',
-      '| --- | --- |',
-      '| "quoted" | a, b |',
-    ].join('\n')
+    const md = ['| A | B |', '| --- | --- |', '| "quoted" | a, b |'].join('\n')
     expect(toCsv(md)).toBe('A,B\n"""quoted""","a, b"')
     // The newline branch shares this same quote-wrapping code path ("if the
     // value contains ", , or \n, wrap and double quotes"). A raw newline in a

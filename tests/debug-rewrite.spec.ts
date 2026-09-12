@@ -73,7 +73,11 @@ describe('buildReplayPrompt / buildAuditPrompt', () => {
     ])
     const prompt = buildAuditPrompt(
       wf,
-      { completed: true, summary: '实际点了新按钮', trace: Array.from({ length: 90 }, (_, i) => `→ t${i}`) },
+      {
+        completed: true,
+        summary: '实际点了新按钮',
+        trace: Array.from({ length: 90 }, (_, i) => `→ t${i}`),
+      },
       { error: '元素未找到: .stale', takeoverNote: '完成 0/1 个失败节点' },
     )
     expect(prompt).toContain('id=b')
@@ -162,7 +166,10 @@ describe('buildRewrittenWorkflow', () => {
     expect(edge2?.sourceHandle).toBe('event-click-output-1')
     expect(edge2?.targetHandle).toBe('delay-input-1')
     // Nodes without a position get a stacked one.
-    expect(rewritten?.drawflow.nodes.find((n) => n.id === 'c')?.position).toEqual({ x: 160, y: 280 })
+    expect(rewritten?.drawflow.nodes.find((n) => n.id === 'c')?.position).toEqual({
+      x: 160,
+      y: 280,
+    })
     // The input workflow is untouched.
     expect(original.drawflow.nodes).toHaveLength(2)
   })
@@ -174,7 +181,10 @@ describe('buildRewrittenWorkflow', () => {
     }
     expect(buildRewrittenWorkflow(original, noTrigger)).toBeNull()
     const unknownBlock = {
-      nodes: [graph.nodes[0], { id: 'x', label: 'nuclear-launch', data: { blockId: 'nuclear-launch' } }],
+      nodes: [
+        graph.nodes[0],
+        { id: 'x', label: 'nuclear-launch', data: { blockId: 'nuclear-launch' } },
+      ],
       edges: [{ source: 'a', target: 'x' }],
     }
     expect(buildRewrittenWorkflow(original, unknownBlock)).toBeNull()
@@ -196,9 +206,15 @@ describe('buildRewrittenWorkflow', () => {
 
 describe('goal-completion check (目标达成判定)', () => {
   it('the prompt shows the goal, the run evidence and the judge rules', () => {
-    const wf = makeWorkflow([node('a', 'trigger'), node('b', 'event-click', { selector: '.x' })], '目标：搜索下单\n执行步骤：\n1. 搜索')
+    const wf = makeWorkflow(
+      [node('a', 'trigger'), node('b', 'event-click', { selector: '.x' })],
+      '目标：搜索下单\n执行步骤：\n1. 搜索',
+    )
     const prompt = buildGoalCheckPrompt(wf, {
-      steps: [{ kind: 'tool', text: 'event-click（.x）' }, { kind: 'result', text: '完成' }],
+      steps: [
+        { kind: 'tool', text: 'event-click（.x）' },
+        { kind: 'result', text: '完成' },
+      ],
       variables: { price: '¥9.9' },
       summary: '运行成功',
     })
@@ -214,11 +230,56 @@ describe('goal-completion check (目标达成判定)', () => {
       achieved: true,
       reason: '商品页已打开',
     })
-    expect(parseGoalVerdict('前言\n```json\n{"achieved":false,"reason":"价格变量为空"}\n```')).toEqual({
+    expect(
+      parseGoalVerdict('前言\n```json\n{"achieved":false,"reason":"价格变量为空"}\n```'),
+    ).toEqual({
       achieved: false,
       reason: '价格变量为空',
     })
     expect(parseGoalVerdict('no json here')).toBeNull()
     expect(parseGoalVerdict('{"achieved":"yes"}')).toEqual({ achieved: false, reason: '' })
+  })
+
+  it('a FAILED run is judged with the terminal-state framing', () => {
+    const wf = makeWorkflow([node('a', 'trigger')], '目标：登录账号')
+    const prompt = buildGoalCheckPrompt(
+      wf,
+      { steps: [{ kind: 'error', text: '元素未找到：#username' }], variables: {} },
+      { runFailed: true },
+    )
+    // A failed run must be tested for "already satisfied", not just breakage.
+    expect(prompt).toContain('ENDED WITH AN ERROR')
+    expect(prompt).toContain('NON-IDEMPOTENT')
+    expect(prompt).toContain('alreadySatisfied')
+    // Clean runs keep their original framing.
+    expect(buildGoalCheckPrompt(wf, { steps: [], variables: {} })).toContain(
+      'finished WITHOUT any node error',
+    )
+  })
+
+  it('alreadySatisfied is only honoured when the goal is achieved', () => {
+    expect(parseGoalVerdict('{"achieved":true,"alreadySatisfied":true,"reason":"已登录"}')).toEqual(
+      {
+        achieved: true,
+        alreadySatisfied: true,
+        reason: '已登录',
+      },
+    )
+    // An unachieved goal can never be "already satisfied".
+    expect(
+      parseGoalVerdict('{"achieved":false,"alreadySatisfied":true,"reason":"还在登录页"}'),
+    ).toEqual({ achieved: false, reason: '还在登录页' })
+    // Default: a plain achieved verdict is not flagged as a terminal state.
+    expect(parseGoalVerdict('{"achieved":true,"reason":"商品页已打开"}')).toEqual({
+      achieved: true,
+      reason: '商品页已打开',
+    })
+  })
+
+  it('the replay prompt tells the agent to stop when the goal already holds', () => {
+    const wf = makeWorkflow([node('a', 'trigger')], '目标：登录账号')
+    const prompt = buildReplayPrompt(wf)
+    expect(prompt).toContain('ALREADY DONE')
+    expect(prompt).toContain('NON-IDEMPOTENT')
   })
 })

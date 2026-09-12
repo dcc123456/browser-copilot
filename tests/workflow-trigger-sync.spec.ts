@@ -84,9 +84,10 @@ describe('triggerFromNodes', () => {
   })
 
   it('does not leak visit-web fields onto other trigger kinds', () => {
-    expect(
-      triggerFromNodes([triggerNode({ type: 'manual', url: 'https://x.com/*' })]),
-    ).toEqual({ type: 'manual', enabled: true })
+    expect(triggerFromNodes([triggerNode({ type: 'manual', url: 'https://x.com/*' })])).toEqual({
+      type: 'manual',
+      enabled: true,
+    })
   })
 
   it('finds legacy trigger nodes by label when blockId is missing', () => {
