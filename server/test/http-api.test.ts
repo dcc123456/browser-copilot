@@ -74,7 +74,10 @@ describe('http api', () => {
     library.importPayload(makeWorkflow('parent', '父', ['child', 'ghost']))
     const res = await app.inject({ method: 'GET', url: '/api/workflows/parent/references' })
     const body = res.json()
-    expect(body.references.map((r: { childId: string }) => r.childId).sort()).toEqual(['child', 'ghost'])
+    expect(body.references.map((r: { childId: string }) => r.childId).sort()).toEqual([
+      'child',
+      'ghost',
+    ])
     expect(body.missing.sort()).toEqual(['child', 'ghost'])
   })
 
@@ -131,7 +134,7 @@ describe('http api', () => {
     expect(library.get('w9')?.name).toBe('重命名')
   })
 
-  it('requires a bearer token when configured (webhook ?token= also works)', async () => {
+  it('requires a bearer token when configured (query-string tokens are rejected)', async () => {
     const config = {
       ...loadConfig(),
       dataDir: dir,
@@ -153,8 +156,10 @@ describe('http api', () => {
     })
     expect(header.statusCode).toBe(200)
 
+    // A token in the query string must never authenticate: URLs leak into
+    // access logs, browser history and Referer headers.
     const query = await secured.inject({ method: 'GET', url: '/api/workflows?token=sekret' })
-    expect(query.statusCode).toBe(200)
+    expect(query.statusCode).toBe(401)
 
     // /healthz stays open even with a token configured.
     const health = await secured.inject({ method: 'GET', url: '/healthz' })
@@ -163,7 +168,12 @@ describe('http api', () => {
   })
 
   it('serves non-API paths (console shell) without auth even when a token is set', async () => {
-    const config = { ...loadConfig(), dataDir: dir, workflowsFile: join(dir, 'workflows.json'), token: 'sekret' }
+    const config = {
+      ...loadConfig(),
+      dataDir: dir,
+      workflowsFile: join(dir, 'workflows.json'),
+      token: 'sekret',
+    }
     const lib2 = new WorkflowLibrary(config.workflowsFile)
     lib2.load()
     const runs2 = new RunService(config, new BrowserPool(config), lib2)
@@ -210,7 +220,12 @@ describe('http api', () => {
   })
 
   it('masks secrets in GET /api/config', async () => {
-    const config = { ...loadConfig(), dataDir: dir, workflowsFile: join(dir, 'wf.json'), token: 'super-secret-token' }
+    const config = {
+      ...loadConfig(),
+      dataDir: dir,
+      workflowsFile: join(dir, 'wf.json'),
+      token: 'super-secret-token',
+    }
     const lib2 = new WorkflowLibrary(config.workflowsFile)
     lib2.load()
     const runs2 = new RunService(config, new BrowserPool(config), lib2)
@@ -236,11 +251,21 @@ describe('http api', () => {
     const prevConfig = process.env['BC_CONFIG']
     process.env['BC_CONFIG'] = configFile
     try {
-      const config = { ...loadConfig(), dataDir: dir, workflowsFile: join(dir, 'wf.json'), token: 'old-token' }
+      const config = {
+        ...loadConfig(),
+        dataDir: dir,
+        workflowsFile: join(dir, 'wf.json'),
+        token: 'old-token',
+      }
       const lib2 = new WorkflowLibrary(config.workflowsFile)
       lib2.load()
       const runs2 = new RunService(config, new BrowserPool(config), lib2)
-      const secured = buildHttpApi({ config, library: lib2, runs: runs2, onLibraryChanged: () => {} })
+      const secured = buildHttpApi({
+        config,
+        library: lib2,
+        runs: runs2,
+        onLibraryChanged: () => {},
+      })
 
       const put = await secured.inject({
         method: 'PUT',
@@ -248,7 +273,11 @@ describe('http api', () => {
         headers: { authorization: 'Bearer old-token' },
         payload: {
           token: 'new-token',
-          llm: { baseUrl: 'https://api.test/v1', apiKey: 'sk-abc12345678901234', model: 'test-model' },
+          llm: {
+            baseUrl: 'https://api.test/v1',
+            apiKey: 'sk-abc12345678901234',
+            model: 'test-model',
+          },
           browser: { maxConcurrent: 3 },
         },
       })
@@ -269,7 +298,9 @@ describe('http api', () => {
       expect(newAuth.statusCode).toBe(200)
 
       // The patch landed in the config file (env-free machine).
-      const file = JSON.parse(await import('node:fs').then((fs) => fs.readFileSync(configFile, 'utf8')))
+      const file = JSON.parse(
+        await import('node:fs').then((fs) => fs.readFileSync(configFile, 'utf8')),
+      )
       expect(file['token']).toBe('new-token')
       expect(file['llm']['model']).toBe('test-model')
       expect(file['browser']['maxConcurrent']).toBe(3)
@@ -281,7 +312,11 @@ describe('http api', () => {
   })
 
   it('rejects a cdp switch without an endpoint (400)', async () => {
-    const res = await app.inject({ method: 'PUT', url: '/api/config', payload: { browser: { mode: 'cdp' } } })
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/config',
+      payload: { browser: { mode: 'cdp' } },
+    })
     expect(res.statusCode).toBe(400)
   })
 
@@ -318,7 +353,11 @@ describe('http api', () => {
     })
     const res = await app2.inject({ method: 'GET', url: '/api/schedules' })
     expect(res.statusCode).toBe(200)
-    expect(res.json().schedules[0]).toMatchObject({ workflowId: 's1', kind: 'interval', armed: true })
+    expect(res.json().schedules[0]).toMatchObject({
+      workflowId: 's1',
+      kind: 'interval',
+      armed: true,
+    })
     await app2.close()
   })
 })

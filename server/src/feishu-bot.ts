@@ -17,11 +17,7 @@
  */
 
 import WebSocket from 'ws'
-import {
-  TenantTokenProvider,
-  getWsEndpoint,
-  sendImText,
-} from '../../src/lib/feishu'
+import { TenantTokenProvider, getWsEndpoint, sendImText } from '../../src/lib/feishu'
 import {
   CTRL,
   DATA,
@@ -32,13 +28,13 @@ import {
   encodePing,
   header,
   parseEvent,
-  type Frame,
   type InboundMessage,
 } from '../../src/lib/feishu-proto'
 import type { RunnerConfig } from './config'
 import type { RunService } from './run-service'
 import type { WorkflowLibrary } from './workflow-library'
 import type { Workflow } from '../../src/lib/workflow/types'
+import { logger } from './observability'
 
 /** How long a run may take before the bot stops waiting for its result. */
 const RESULT_WAIT_MS = 10 * 60_000
@@ -92,14 +88,14 @@ export class FeishuBot {
 
       socket.on('open', () => {
         this.reconnectDelayMs = 2_000
-        console.log('[feishu] long connection established')
+        logger.info('[feishu] long connection established')
         this.startPing(endpoint.pingIntervalSeconds)
       })
       socket.on('message', (data: WebSocket.RawData) => {
         try {
           this.onMessage(data)
         } catch (error) {
-          console.warn('[feishu] frame handling failed:', (error as Error).message)
+          logger.warn(`[feishu] frame handling failed: ${(error as Error).message}`)
         }
       })
       socket.on('error', () => {
@@ -109,12 +105,14 @@ export class FeishuBot {
         this.stopPing()
         this.socket = null
         if (!this.stopped) {
-          console.log(`[feishu] socket closed (${code}${reason ? ` ${reason}` : ''}); reconnecting in ${this.reconnectDelayMs}ms`)
+          logger.info(
+            `[feishu] socket closed (${code}${reason ? ` ${reason}` : ''}); reconnecting in ${this.reconnectDelayMs}ms`,
+          )
           this.scheduleReconnect()
         }
       })
     } catch (error) {
-      console.warn(`[feishu] connect failed: ${(error as Error).message}`)
+      logger.warn(`[feishu] connect failed: ${(error as Error).message}`)
       this.scheduleReconnect()
     }
   }
@@ -177,7 +175,7 @@ export class FeishuBot {
       try {
         this.socket.send(bytes)
       } catch (error) {
-        console.warn('[feishu] send failed:', (error as Error).message)
+        logger.warn(`[feishu] send failed: ${(error as Error).message}`)
         this.socket.close()
       }
     }
@@ -209,7 +207,10 @@ export class FeishuBot {
         const lines = this.runs
           .list()
           .slice(0, 5)
-          .map((run) => `${emoji(run.status)} ${run.label} · ${run.status}${run.error ? ` · ${run.error.slice(0, 80)}` : ''}`)
+          .map(
+            (run) =>
+              `${emoji(run.status)} ${run.label} · ${run.status}${run.error ? ` · ${run.error.slice(0, 80)}` : ''}`,
+          )
         await this.reply(message.chatId, lines.length > 0 ? lines.join('\n') : '还没有运行记录')
         return
       }
@@ -223,7 +224,7 @@ export class FeishuBot {
         ].join('\n'),
       )
     } catch (error) {
-      console.warn('[feishu] command failed:', (error as Error).message)
+      logger.warn(`[feishu] command failed: ${(error as Error).message}`)
       await this.reply(message.chatId, `执行出错: ${(error as Error).message}`).catch(() => {})
     }
   }
@@ -245,7 +246,10 @@ export class FeishuBot {
 
     // Missing children fail at the API layer; the bot surfaces the copy hint.
     const runId = this.runs.start({ workflow, workflowId: workflow.id, source: 'feishu' })
-    await this.reply(message.chatId, `▶️ 已开始运行「${workflow.name}」（run ${runId}），完成后回报结果…`)
+    await this.reply(
+      message.chatId,
+      `▶️ 已开始运行「${workflow.name}」（run ${runId}），完成后回报结果…`,
+    )
 
     const finished = await new Promise<boolean>((resolve) => {
       const deadline = Date.now() + RESULT_WAIT_MS
@@ -265,7 +269,10 @@ export class FeishuBot {
 
     const run = this.runs.get(runId)
     if (!finished || !run) {
-      await this.reply(message.chatId, `⏳ 工作流「${workflow.name}」仍在运行（run ${runId}），可用 /runs 查看状态。`)
+      await this.reply(
+        message.chatId,
+        `⏳ 工作流「${workflow.name}」仍在运行（run ${runId}），可用 /runs 查看状态。`,
+      )
       return
     }
     const tail = run.steps
@@ -304,7 +311,7 @@ export class FeishuBot {
       const token = await this.token.get()
       await sendImText(token, chatId, text)
     } catch (error) {
-      console.warn('[feishu] reply failed:', (error as Error).message)
+      logger.warn(`[feishu] reply failed: ${(error as Error).message}`)
       throw error
     }
   }
@@ -325,9 +332,13 @@ function toBytes(data: WebSocket.RawData): Uint8Array | null {
 }
 
 /** Starts the bot when configured; returns a stop function. */
-export function startFeishuBot(config: RunnerConfig, library: WorkflowLibrary, runs: RunService): FeishuBot {
+export function startFeishuBot(
+  config: RunnerConfig,
+  library: WorkflowLibrary,
+  runs: RunService,
+): FeishuBot {
   if (!config.feishu.appId || !config.feishu.appSecret) {
-    console.warn('[feishu] botEnabled but appId/appSecret missing; bot not started')
+    logger.warn('[feishu] botEnabled but appId/appSecret missing; bot not started')
     return new FeishuBot(config, library, runs) // inert (start() never called)
   }
   const bot = new FeishuBot(config, library, runs)

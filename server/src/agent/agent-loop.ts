@@ -51,7 +51,9 @@ export function buildBlockPrompt(parts: {
   if (parts.selector) {
     lines.push('', `The workflow is targeting this element (selector: ${parts.selector}):`)
     lines.push('"""')
-    lines.push(parts.elementFound ? parts.elementText || '(element has no text)' : '(element not found)')
+    lines.push(
+      parts.elementFound ? parts.elementText || '(element has no text)' : '(element not found)',
+    )
     lines.push('"""')
   }
   lines.push('', 'Task / instruction from the workflow author:')

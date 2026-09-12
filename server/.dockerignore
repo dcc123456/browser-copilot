@@ -1,0 +1,16 @@
+# Defensive: the canonical image is built from the REPO ROOT (see ../Dockerfile),
+# which needs the workspace manifests. This file keeps a stray
+# `docker build .` inside server/ from shipping local state.
+node_modules
+dist
+web/dist
+coverage
+config.json
+.env
+.env.*
+*.log
+*.zip
+*.pem
+*.key
+Dockerfile
+.dockerignore

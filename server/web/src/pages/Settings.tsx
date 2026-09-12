@@ -22,7 +22,11 @@ const ENV_OF: Record<string, string> = {
 
 function EnvWarn({ field, overrides }: { field: string; overrides: string[] }) {
   if (!overrides.includes(field)) return null
-  return <span className="mt-1 block text-xs text-warn">被环境变量 {ENV_OF[field]} 覆盖，修改配置文件不会生效</span>
+  return (
+    <span className="mt-1 block text-xs text-warn">
+      被环境变量 {ENV_OF[field]} 覆盖，修改配置文件不会生效
+    </span>
+  )
 }
 
 type SaveState = { tone: 'ok' | 'err'; text: string } | null
@@ -102,9 +106,12 @@ export function SettingsPage({ onTokenChanged }: { onTokenChanged: () => void })
   const testLlm = async (): Promise<void> => {
     setLlmTest(null)
     try {
-      const result = await api.post<{ ok: boolean; latencyMs?: number; sample?: string; error?: string }>(
-        '/api/config/test-llm',
-      )
+      const result = await api.post<{
+        ok: boolean
+        latencyMs?: number
+        sample?: string
+        error?: string
+      }>('/api/config/test-llm')
       setLlmTest(
         result.ok
           ? { tone: 'ok', text: `连通正常（${result.latencyMs}ms）：${result.sample ?? ''}` }
@@ -123,7 +130,10 @@ export function SettingsPage({ onTokenChanged }: { onTokenChanged: () => void })
       )
       setFeishuTest(
         result.ok
-          ? { tone: 'ok', text: result.via === 'webhook' ? 'Webhook 推送成功' : (result.hint ?? '长连接在线') }
+          ? {
+              tone: 'ok',
+              text: result.via === 'webhook' ? 'Webhook 推送成功' : (result.hint ?? '长连接在线'),
+            }
           : { tone: 'err', text: result.hint ?? result.error ?? '测试失败' },
       )
     } catch (cause) {
@@ -142,11 +152,24 @@ export function SettingsPage({ onTokenChanged }: { onTokenChanged: () => void })
 
       <Card title="大模型（ai-agent / AI 接管）">
         <div className="grid gap-3 md:grid-cols-2">
-          <Field label="Base URL（OpenAI 兼容）" hint={<EnvWarn field="llm.baseUrl" overrides={overrides} />}>
-            <input className={inputClass} value={llmBaseUrl} onChange={(event) => setLlmBaseUrl(event.target.value)} placeholder="https://api.deepseek.com/v1" />
+          <Field
+            label="Base URL（OpenAI 兼容）"
+            hint={<EnvWarn field="llm.baseUrl" overrides={overrides} />}
+          >
+            <input
+              className={inputClass}
+              value={llmBaseUrl}
+              onChange={(event) => setLlmBaseUrl(event.target.value)}
+              placeholder="https://api.deepseek.com/v1"
+            />
           </Field>
           <Field label="模型名" hint={<EnvWarn field="llm.model" overrides={overrides} />}>
-            <input className={inputClass} value={llmModel} onChange={(event) => setLlmModel(event.target.value)} placeholder="deepseek-chat" />
+            <input
+              className={inputClass}
+              value={llmModel}
+              onChange={(event) => setLlmModel(event.target.value)}
+              placeholder="deepseek-chat"
+            />
           </Field>
           <Field label="API Key" hint={<EnvWarn field="llm.apiKey" overrides={overrides} />}>
             <input
@@ -158,15 +181,29 @@ export function SettingsPage({ onTokenChanged }: { onTokenChanged: () => void })
             />
           </Field>
         </div>
-        {llmSave && <div className="mt-3"><Notice tone={llmSave.tone}>{llmSave.text}</Notice></div>}
-        {llmTest && <div className="mt-2"><Notice tone={llmTest.tone}>{llmTest.text}</Notice></div>}
+        {llmSave && (
+          <div className="mt-3">
+            <Notice tone={llmSave.tone}>{llmSave.text}</Notice>
+          </div>
+        )}
+        {llmTest && (
+          <div className="mt-2">
+            <Notice tone={llmTest.tone}>{llmTest.text}</Notice>
+          </div>
+        )}
         <div className="mt-3 flex justify-end gap-2">
           <Btn onClick={() => void testLlm()}>测试连接</Btn>
           <Btn
             tone="primary"
             onClick={() =>
               void save(
-                { llm: { baseUrl: llmBaseUrl, model: llmModel, ...(llmApiKey ? { apiKey: llmApiKey } : {}) } },
+                {
+                  llm: {
+                    baseUrl: llmBaseUrl,
+                    model: llmModel,
+                    ...(llmApiKey ? { apiKey: llmApiKey } : {}),
+                  },
+                },
                 setLlmSave,
                 () => setLlmApiKey(''),
               )
@@ -181,7 +218,9 @@ export function SettingsPage({ onTokenChanged }: { onTokenChanged: () => void })
         title="飞书机器人"
         actions={
           config.feishu.botEnabled ? (
-            <Badge tone={feishuConnected ? 'ok' : 'warn'}>{feishuConnected ? '● 长连接在线' : '● 未连接'}</Badge>
+            <Badge tone={feishuConnected ? 'ok' : 'warn'}>
+              {feishuConnected ? '● 长连接在线' : '● 未连接'}
+            </Badge>
           ) : (
             <Badge>未启用</Badge>
           )
@@ -189,13 +228,25 @@ export function SettingsPage({ onTokenChanged }: { onTokenChanged: () => void })
       >
         <div className="grid gap-3 md:grid-cols-2">
           <label className="flex items-center gap-2 text-sm md:col-span-2">
-            <input type="checkbox" checked={feishuBotEnabled} onChange={(event) => setFeishuBotEnabled(event.target.checked)} />
+            <input
+              type="checkbox"
+              checked={feishuBotEnabled}
+              onChange={(event) => setFeishuBotEnabled(event.target.checked)}
+            />
             启用飞书长连接机器人（私聊 /workflow 运行、/runs 查看）
           </label>
           <Field label="App ID" hint={<EnvWarn field="feishu.appId" overrides={overrides} />}>
-            <input className={inputClass} value={feishuAppId} onChange={(event) => setFeishuAppId(event.target.value)} placeholder="cli_xxx" />
+            <input
+              className={inputClass}
+              value={feishuAppId}
+              onChange={(event) => setFeishuAppId(event.target.value)}
+              placeholder="cli_xxx"
+            />
           </Field>
-          <Field label="App Secret" hint={<EnvWarn field="feishu.appSecret" overrides={overrides} />}>
+          <Field
+            label="App Secret"
+            hint={<EnvWarn field="feishu.appSecret" overrides={overrides} />}
+          >
             <input
               className={inputClass}
               type="password"
@@ -204,10 +255,21 @@ export function SettingsPage({ onTokenChanged }: { onTokenChanged: () => void })
               placeholder={secretPlaceholder(config.feishu.appSecret)}
             />
           </Field>
-          <Field label="群 Webhook（可选推送通道）" hint={<EnvWarn field="feishu.webhookUrl" overrides={overrides} />}>
-            <input className={inputClass} value={feishuWebhookUrl} onChange={(event) => setFeishuWebhookUrl(event.target.value)} placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…" />
+          <Field
+            label="群 Webhook（可选推送通道）"
+            hint={<EnvWarn field="feishu.webhookUrl" overrides={overrides} />}
+          >
+            <input
+              className={inputClass}
+              value={feishuWebhookUrl}
+              onChange={(event) => setFeishuWebhookUrl(event.target.value)}
+              placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…"
+            />
           </Field>
-          <Field label="Webhook 签名密钥（可选）" hint={<EnvWarn field="feishu.webhookSecret" overrides={overrides} />}>
+          <Field
+            label="Webhook 签名密钥（可选）"
+            hint={<EnvWarn field="feishu.webhookSecret" overrides={overrides} />}
+          >
             <input
               className={inputClass}
               type="password"
@@ -217,8 +279,16 @@ export function SettingsPage({ onTokenChanged }: { onTokenChanged: () => void })
             />
           </Field>
         </div>
-        {feishuSave && <div className="mt-3"><Notice tone={feishuSave.tone}>{feishuSave.text}</Notice></div>}
-        {feishuTest && <div className="mt-2"><Notice tone={feishuTest.tone}>{feishuTest.text}</Notice></div>}
+        {feishuSave && (
+          <div className="mt-3">
+            <Notice tone={feishuSave.tone}>{feishuSave.text}</Notice>
+          </div>
+        )}
+        {feishuTest && (
+          <div className="mt-2">
+            <Notice tone={feishuTest.tone}>{feishuTest.text}</Notice>
+          </div>
+        )}
         <div className="mt-3 flex justify-end gap-2">
           <Btn onClick={() => void testFeishu()}>测试</Btn>
           <Btn
@@ -250,7 +320,12 @@ export function SettingsPage({ onTokenChanged }: { onTokenChanged: () => void })
       <Card title="安全（API Token）">
         <div className="space-y-3">
           <p className="text-xs text-muted">
-            当前状态：{config.token.set ? <Badge tone="ok">已设置（{config.token.masked}）</Badge> : <Badge tone="warn">未设置（API 无鉴权）</Badge>}
+            当前状态：
+            {config.token.set ? (
+              <Badge tone="ok">已设置（{config.token.masked}）</Badge>
+            ) : (
+              <Badge tone="warn">未设置（API 无鉴权）</Badge>
+            )}
           </p>
           <Field label="新的 BC_TOKEN" hint={<EnvWarn field="token" overrides={overrides} />}>
             <input
@@ -285,15 +360,36 @@ export function SettingsPage({ onTokenChanged }: { onTokenChanged: () => void })
       <Card title="浏览器与运行">
         <div className="grid gap-3 md:grid-cols-2">
           <Field label="浏览器模式" hint={<EnvWarn field="browser.mode" overrides={overrides} />}>
-            <select className={inputClass} value={browserMode} onChange={(event) => setBrowserMode(event.target.value as 'local' | 'cdp')}>
+            <select
+              className={inputClass}
+              value={browserMode}
+              onChange={(event) => setBrowserMode(event.target.value as 'local' | 'cdp')}
+            >
               <option value="local">本地 Chromium</option>
               <option value="cdp">CDP 远端</option>
             </select>
           </Field>
-          <Field label="CDP Endpoint" hint={browserMode === 'cdp' ? <EnvWarn field="browser.cdpEndpoint" overrides={overrides} /> : 'cdp 模式必填，如 ws://127.0.0.1:9222'}>
-            <input className={`${inputClass} font-mono`} value={cdpEndpoint} onChange={(event) => setCdpEndpoint(event.target.value)} placeholder="ws://127.0.0.1:9222" />
+          <Field
+            label="CDP Endpoint"
+            hint={
+              browserMode === 'cdp' ? (
+                <EnvWarn field="browser.cdpEndpoint" overrides={overrides} />
+              ) : (
+                'cdp 模式必填，如 ws://127.0.0.1:9222'
+              )
+            }
+          >
+            <input
+              className={`${inputClass} font-mono`}
+              value={cdpEndpoint}
+              onChange={(event) => setCdpEndpoint(event.target.value)}
+              placeholder="ws://127.0.0.1:9222"
+            />
           </Field>
-          <Field label="并发运行数（热生效）" hint={<EnvWarn field="browser.maxConcurrent" overrides={overrides} />}>
+          <Field
+            label="并发运行数（热生效）"
+            hint={<EnvWarn field="browser.maxConcurrent" overrides={overrides} />}
+          >
             <input
               className={inputClass}
               type="number"
@@ -303,7 +399,10 @@ export function SettingsPage({ onTokenChanged }: { onTokenChanged: () => void })
               onChange={(event) => setMaxConcurrent(Number(event.target.value))}
             />
           </Field>
-          <Field label="单次运行超时 ms（热生效）" hint={<EnvWarn field="runTimeoutMs" overrides={overrides} />}>
+          <Field
+            label="单次运行超时 ms（热生效）"
+            hint={<EnvWarn field="runTimeoutMs" overrides={overrides} />}
+          >
             <input
               className={inputClass}
               type="number"
@@ -314,11 +413,19 @@ export function SettingsPage({ onTokenChanged }: { onTokenChanged: () => void })
             />
           </Field>
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={headless} onChange={(event) => setHeadless(event.target.checked)} />
+            <input
+              type="checkbox"
+              checked={headless}
+              onChange={(event) => setHeadless(event.target.checked)}
+            />
             无头模式
           </label>
         </div>
-        {browserSave && <div className="mt-3"><Notice tone={browserSave.tone}>{browserSave.text}</Notice></div>}
+        {browserSave && (
+          <div className="mt-3">
+            <Notice tone={browserSave.tone}>{browserSave.text}</Notice>
+          </div>
+        )}
         <p className="mt-2 text-xs text-faint">
           端口（当前 {config.port}）与浏览器模式/无头/CDP 需重启进程生效；并发数与超时立即生效。
         </p>

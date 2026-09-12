@@ -20,13 +20,9 @@
 
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import {
-  chromium,
-  type Browser,
-  type BrowserContext,
-  type BrowserContextOptions,
-} from 'playwright'
+import { chromium, type Browser, type BrowserContext, type BrowserContextOptions } from 'playwright'
 import type { RunnerConfig } from './config'
+import { logger } from './observability'
 
 /**
  * Proxy settings for a run context. Structurally identical to Playwright's
@@ -107,7 +103,7 @@ export class BrowserPool {
     if (profile && this.config.browser.mode === 'cdp') {
       // Persistent profiles need a local profile directory — over CDP the
       // browser (and its profiles) belong to the remote host.
-      console.warn(
+      logger.warn(
         `[runner] profile "${profile}" requested in cdp mode; persistent profiles are local-mode only, using a fresh context.`,
       )
     } else if (profile) {

@@ -22,7 +22,12 @@
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { runWorkflow } from '../../src/background/workflow-engine/engine'
+import {
+  DEFAULT_WAIT_MS,
+  applyDefaultWaits,
+} from '../../src/background/workflow-engine/debug-session'
 import type { Workflow } from '../../src/lib/workflow/types'
+import { recordCheckpoint } from '../../src/lib/workflow/checkpoints'
 import { newId } from '../../src/lib/storage'
 import type { RunnerConfig } from './config'
 import { BrowserPool, type ProxySettings } from './browser-pool'
@@ -30,6 +35,12 @@ import { RunDriver } from './driver'
 import { createExecutors, type ExecutorDeps } from './executors'
 import { createServerTakeoverHook } from './agent/takeover'
 import { referencesOfWorkflow, type WorkflowLibrary } from './workflow-library'
+import {
+  createFileCheckpointStore,
+  pruneCheckpointDir,
+  type CheckpointStore,
+} from './checkpoint-store'
+import { logger, reportError } from './observability'
 
 export type RunSource = 'api' | 'cron' | 'webhook' | 'feishu'
 export type RunStatus = 'queued' | 'running' | 'ok' | 'failed' | 'cancelled'
@@ -65,6 +76,9 @@ export interface StartRunOptions {
 
 const STEPS_MEMORY_CAP = 500
 
+/** M4: how many settled runs between two checkpoint-directory prunes. */
+const PRUNE_EVERY_RUNS = 25
+
 export class RunService {
   private runs = new Map<string, RunRecord>()
   private controllers = new Map<string, AbortController>()
@@ -73,6 +87,23 @@ export class RunService {
   private waiters: (() => void)[] = []
   private activeCount = 0
   private finishListeners = new Set<(run: RunRecord) => void>()
+  /**
+   * M4: per-step checkpoint store, shared by every run of this service. The
+   * in-memory half backs synchronous rollback; the durable half is
+   * `<dataDir>/checkpoints/checkpoint-<runId>.json`.
+   *
+   * Lazy: it needs `config.dataDir`, which only exists once the constructor's
+   * parameter properties are assigned.
+   */
+  private checkpointStore: CheckpointStore | undefined
+  private get checkpoints(): CheckpointStore {
+    if (!this.checkpointStore) {
+      this.checkpointStore = createFileCheckpointStore(join(this.config.dataDir, 'checkpoints'))
+    }
+    return this.checkpointStore
+  }
+  /** How many runs have settled since the last checkpoint prune. */
+  private runsSincePrune = 0
 
   /** Subscribes to run settlement (used by the Feishu bot to report results). */
   onFinished(listener: (run: RunRecord) => void): () => void {
@@ -193,7 +224,11 @@ export class RunService {
     const artifactsDir = join(this.config.dataDir, 'artifacts', runId)
     try {
       mkdirSync(artifactsDir, { recursive: true })
-      this.appendStep(runId, { at: Date.now(), kind: 'info', text: `开始运行: ${opts.workflow.name}` })
+      this.appendStep(runId, {
+        at: Date.now(),
+        kind: 'info',
+        text: `开始运行: ${opts.workflow.name}`,
+      })
 
       const session = await this.pool.acquire({
         ...(opts.profile ? { profile: opts.profile } : {}),
@@ -207,7 +242,9 @@ export class RunService {
               apiKey: this.config.llm.apiKey,
               baseUrl: this.config.llm.baseUrl,
               model: this.config.llm.model,
-              ...(Object.keys(this.config.llm.headers).length > 0 ? { headers: this.config.llm.headers } : {}),
+              ...(Object.keys(this.config.llm.headers).length > 0
+                ? { headers: this.config.llm.headers }
+                : {}),
             }
           : null
 
@@ -219,9 +256,29 @@ export class RunService {
         provider,
       }
 
-      const result = await runWorkflow(opts.workflow, {
+      // Force-enable a short element wait on interaction blocks (same policy as
+      // the extension): slow renders must not fail a run. Opt out per workflow
+      // with `settings.defaultWaitMs = 0`.
+      const effective = applyDefaultWaits(
+        opts.workflow,
+        opts.workflow.settings?.defaultWaitMs ?? DEFAULT_WAIT_MS,
+      )
+      const result = await runWorkflow(effective, {
         variables: { ...(opts.variables ?? {}) },
         signal,
+        // M4: one checkpoint per settled node, written to
+        // `<dataDir>/checkpoints/checkpoint-<runId>.json`.
+        onCheckpoint: ({ stepIndex, nodeId, status, variables }) => {
+          recordCheckpoint(this.checkpoints, {
+            runId,
+            workflowId: opts.workflow.id,
+            stepIndex,
+            nodeId,
+            status,
+            variables,
+            at: Date.now(),
+          })
+        },
         executors: createExecutors(deps),
         resolveWorkflow: this.library.resolveWorkflow,
         loopElementCounter: (selector) => driver.countElements(selector),
@@ -247,11 +304,13 @@ export class RunService {
         },
       })
 
-      record.status = result.outcome === 'ok' ? 'ok' : result.outcome === 'cancelled' ? 'cancelled' : 'failed'
+      record.status =
+        result.outcome === 'ok' ? 'ok' : result.outcome === 'cancelled' ? 'cancelled' : 'failed'
       if (result.summary) record.summary = result.summary
       if (result.error) record.error = result.error
     } catch (error) {
-      const aborted = signal.aborted || (error instanceof DOMException && error.name === 'AbortError')
+      const aborted =
+        signal.aborted || (error instanceof DOMException && error.name === 'AbortError')
       if (aborted) {
         record.status = 'cancelled'
         record.error = signal.aborted ? '运行超时或被取消' : undefined
@@ -272,6 +331,7 @@ export class RunService {
       })
       this.persistFinal(record)
       this.controllers.delete(runId)
+      this.pruneCheckpointsEventually()
       for (const listener of [...this.finishListeners]) {
         try {
           listener(record)
@@ -280,6 +340,21 @@ export class RunService {
         }
       }
     }
+  }
+
+  /**
+   * M4: retires the oldest checkpoint files every {@link PRUNE_EVERY_RUNS}
+   * settled runs — pruning on every run would stat the directory constantly
+   * for no benefit. Failures are reported, never thrown.
+   */
+  private pruneCheckpointsEventually(): void {
+    this.runsSincePrune += 1
+    if (this.runsSincePrune < PRUNE_EVERY_RUNS) return
+    this.runsSincePrune = 0
+    const dir = join(this.config.dataDir, 'checkpoints')
+    void pruneCheckpointDir(dir).catch((error) => {
+      reportError(error, { where: 'pruneCheckpointDir', dir })
+    })
   }
 
   /** Appends a step to the in-memory record (capped) and the JSONL file. */
@@ -296,7 +371,7 @@ export class RunService {
       mkdirSync(dir, { recursive: true })
       appendFileSync(join(dir, `${runId}.jsonl`), `${JSON.stringify(step)}\n`, 'utf8')
     } catch (error) {
-      console.warn(`[runner] step log write failed: ${(error as Error).message}`)
+      logger.warn(`[runner] step log write failed: ${(error as Error).message}`)
     }
   }
 
@@ -308,7 +383,7 @@ export class RunService {
       const { steps: _steps, ...rest } = record
       writeFileSync(join(dir, `${record.id}.final.json`), JSON.stringify(rest, null, 2), 'utf8')
     } catch (error) {
-      console.warn(`[runner] final record write failed: ${(error as Error).message}`)
+      logger.warn(`[runner] final record write failed: ${(error as Error).message}`)
     }
   }
 }

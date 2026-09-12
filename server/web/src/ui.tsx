@@ -31,9 +31,17 @@ const BADGE_TONES = {
   warn: 'bg-warn-surface text-warn border-transparent',
 } as const
 
-export function Badge({ tone = 'muted', children }: { tone?: keyof typeof BADGE_TONES; children: ReactNode }) {
+export function Badge({
+  tone = 'muted',
+  children,
+}: {
+  tone?: keyof typeof BADGE_TONES
+  children: ReactNode
+}) {
   return (
-    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs ${BADGE_TONES[tone]}`}>
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs ${BADGE_TONES[tone]}`}
+    >
       {children}
     </span>
   )
@@ -95,14 +103,21 @@ export function Modal({
   children: ReactNode
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+    >
       <div
         className={`flex max-h-[88vh] w-full flex-col overflow-hidden rounded-lg border border-border bg-panel shadow-xl ${wide ? 'max-w-3xl' : 'max-w-lg'}`}
         onClick={(event) => event.stopPropagation()}
       >
         <header className="flex items-center justify-between border-b border-border px-4 py-3">
           <h3 className="text-sm font-semibold text-ink">{title}</h3>
-          <button type="button" className="cursor-pointer rounded px-2 text-muted hover:text-ink" onClick={onClose}>
+          <button
+            type="button"
+            className="cursor-pointer rounded px-2 text-muted hover:text-ink"
+            onClick={onClose}
+          >
             ✕
           </button>
         </header>
@@ -112,8 +127,18 @@ export function Modal({
   )
 }
 
-export function Notice({ tone = 'err', children }: { tone?: 'err' | 'ok' | 'warn'; children: ReactNode }) {
-  const tones = { err: 'bg-err-surface text-err', ok: 'bg-ok-surface text-ok', warn: 'bg-warn-surface text-warn' }
+export function Notice({
+  tone = 'err',
+  children,
+}: {
+  tone?: 'err' | 'ok' | 'warn'
+  children: ReactNode
+}) {
+  const tones = {
+    err: 'bg-err-surface text-err',
+    ok: 'bg-ok-surface text-ok',
+    warn: 'bg-warn-surface text-warn',
+  }
   return <div className={`rounded-md px-3 py-2 text-xs break-all ${tones[tone]}`}>{children}</div>
 }
 

@@ -14,7 +14,13 @@
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { WireTool } from '../../../src/lib/llm'
-import { locatorHintOf, type Op, type PageSnapshot, type Target, type TargetSpec } from '../../../src/lib/ops'
+import {
+  locatorHintOf,
+  type Op,
+  type PageSnapshot,
+  type Target,
+  type TargetSpec,
+} from '../../../src/lib/ops'
 import type { RunDriver } from '../driver'
 
 export type AgentToolMode = 'readonly' | 'full'
@@ -46,7 +52,9 @@ function renderSnapshot(page: PageSnapshot): string {
   lines.push('Page text (capped):')
   lines.push(page.text || '(empty)')
   lines.push('')
-  lines.push(`Interactive elements (${page.elements.length}${page.elementsTruncated ? '+, truncated' : ''}):`)
+  lines.push(
+    `Interactive elements (${page.elements.length}${page.elementsTruncated ? '+, truncated' : ''}):`,
+  )
   for (const element of page.elements) {
     const hint = locatorHintOf(element.target)
     lines.push(
@@ -62,7 +70,10 @@ function renderSnapshot(page: PageSnapshot): string {
     for (const form of page.forms) {
       lines.push(
         `form "${form.name}": ${form.fields
-          .map((field) => `${field.ref} ${field.label} (${field.tag}${field.type ? `/${field.type}` : ''})`)
+          .map(
+            (field) =>
+              `${field.ref} ${field.label} (${field.tag}${field.type ? `/${field.type}` : ''})`,
+          )
           .join('; ')}`,
       )
     }
@@ -165,7 +176,9 @@ export function buildAgentTools(
           target: targetFromToolArgs(args),
           waitFor: typeof args['timeoutMs'] === 'number' ? args['timeoutMs'] : 10_000,
         })
-        return result.ok && result.found ? 'Element appeared.' : `Error: ${result.error ?? 'not found'}`
+        return result.ok && result.found
+          ? 'Element appeared.'
+          : `Error: ${result.error ?? 'not found'}`
       },
     },
     {
@@ -233,14 +246,18 @@ export function buildAgentTools(
         description: 'Press a keyboard key on the focused element, e.g. "Enter", "Tab", "Escape".',
         parameters: { type: 'object', properties: { key: { type: 'string' } }, required: ['key'] },
         async execute(args) {
-          const result = await driver.execOp({ action: 'press_key', value: String(args['key'] ?? '') })
+          const result = await driver.execOp({
+            action: 'press_key',
+            value: String(args['key'] ?? ''),
+          })
           if (result.ok === false) return `Error: ${result.error ?? 'press failed'}`
           return 'Key pressed.'
         },
       },
       {
         name: 'navigate',
-        description: 'Navigate to a URL in a new page of the run session and wait for load (best-effort).',
+        description:
+          'Navigate to a URL in a new page of the run session and wait for load (best-effort).',
         parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] },
         async execute(args) {
           const url = String(args['url'] ?? '')

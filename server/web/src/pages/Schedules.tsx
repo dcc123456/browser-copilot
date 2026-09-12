@@ -85,13 +85,20 @@ export function SchedulesPage({ go }: { go: (page: 'workflows') => void }) {
                     <Badge tone="accent">{KIND_LABEL[entry.kind]}</Badge>
                   </td>
                   <td className="py-2 pr-3 font-mono text-xs">{entry.detail}</td>
-                  <td className="py-2 pr-3 text-xs">{entry.nextRunAt ? formatTime(new Date(entry.nextRunAt).getTime()) : '—'}</td>
+                  <td className="py-2 pr-3 text-xs">
+                    {entry.nextRunAt ? formatTime(new Date(entry.nextRunAt).getTime()) : '—'}
+                  </td>
                   <td className="py-2 pr-3">
-                    <Badge tone={entry.armed ? 'ok' : 'warn'}>{entry.armed ? '运行中' : entry.enabled ? '待生效' : '已停用'}</Badge>
+                    <Badge tone={entry.armed ? 'ok' : 'warn'}>
+                      {entry.armed ? '运行中' : entry.enabled ? '待生效' : '已停用'}
+                    </Badge>
                   </td>
                   <td className="py-2">
                     <div className="flex gap-1.5">
-                      <Btn disabled={busyId === entry.workflowId} onClick={() => void toggle(entry)}>
+                      <Btn
+                        disabled={busyId === entry.workflowId}
+                        onClick={() => void toggle(entry)}
+                      >
                         {entry.enabled ? '停用' : '启用'}
                       </Btn>
                       <Btn onClick={() => go('workflows')}>去工作流 →</Btn>

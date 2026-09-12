@@ -94,7 +94,10 @@ describe('WorkflowLibrary', () => {
 
   it('computes transitive missing sets', () => {
     const library = newLibrary()
-    library.importPayload([makeWorkflow('mid', 'Mid', ['ghost']), makeWorkflow('root', 'Root', ['mid'])])
+    library.importPayload([
+      makeWorkflow('mid', 'Mid', ['ghost']),
+      makeWorkflow('root', 'Root', ['mid']),
+    ])
     expect(library.missingFor('root')).toEqual(['ghost'])
     expect(library.missingFor('mid')).toEqual(['ghost'])
   })

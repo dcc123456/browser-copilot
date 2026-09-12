@@ -22,6 +22,7 @@ import type { Workflow, WorkflowNode } from '../../src/lib/workflow/types'
 import type { RunnerConfig } from './config'
 import type { RunService } from './run-service'
 import type { WorkflowLibrary } from './workflow-library'
+import { logger } from './observability'
 
 type TriggerKind = 'manual' | 'interval' | 'specific-day' | 'date' | 'scheduled'
 
@@ -106,7 +107,11 @@ export class Scheduler {
           this.armInterval(workflow.id, minutes)
         } else if (kind === 'specific-day') {
           const rawDays = Array.isArray(data['days']) ? (data['days'] as unknown[]) : []
-          const days = [...new Set(rawDays.map((d) => Number(d)).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))]
+          const days = [
+            ...new Set(
+              rawDays.map((d) => Number(d)).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6),
+            ),
+          ]
           if (days.length === 0) continue
           const { hour, minute } = parseTime(data['time'])
           // Cron dow: 0=Sunday…6=Saturday — matches Date.getDay().
@@ -116,7 +121,9 @@ export class Scheduler {
           const dateStr = typeof data['date'] === 'string' ? data['date'] : ''
           if (!dateStr) continue
           const { hour, minute } = parseTime(data['time'])
-          const epoch = new Date(`${dateStr}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`).getTime()
+          const epoch = new Date(
+            `${dateStr}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`,
+          ).getTime()
           if (!Number.isFinite(epoch) || epoch <= Date.now()) continue
           this.armOnce(workflow.id, epoch - Date.now())
         } else if (kind === 'scheduled') {
@@ -125,11 +132,13 @@ export class Scheduler {
           this.armCron(workflow.id, pattern)
         }
       } catch (error) {
-        console.warn(`[scheduler] workflow ${workflow.id} (${workflow.name}) trigger failed to arm: ${(error as Error).message}`)
+        logger.warn(
+          `[scheduler] workflow ${workflow.id} (${workflow.name}) trigger failed to arm: ${(error as Error).message}`,
+        )
       }
     }
     if (this.armed.size > 0) {
-      console.log(`[scheduler] ${this.armed.size} workflow trigger(s) armed`)
+      logger.info(`[scheduler] ${this.armed.size} workflow trigger(s) armed`)
     }
   }
 
@@ -154,9 +163,13 @@ export class Scheduler {
   }
 
   private armCron(workflowId: string, pattern: string): void {
-    const cron = new Cron(pattern, { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }, () => {
-      this.fire(workflowId, 'cron')
-    })
+    const cron = new Cron(
+      pattern,
+      { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+      () => {
+        this.fire(workflowId, 'cron')
+      },
+    )
     const timer = setTimeout(() => {}, 0) // placeholder handle (cron manages itself)
     this.armed.set(workflowId, { timer, kind: 'cron', cron })
   }
@@ -164,11 +177,11 @@ export class Scheduler {
   private fire(workflowId: string, source: 'cron'): void {
     const workflow = this.library.get(workflowId)
     if (!workflow) return
-    console.log(`[scheduler] firing workflow ${workflow.name} (${workflowId})`)
+    logger.info(`[scheduler] firing workflow ${workflow.name} (${workflowId})`)
     try {
       this.runs.start({ workflow, workflowId, source })
     } catch (error) {
-      console.warn(`[scheduler] run start failed: ${(error as Error).message}`)
+      logger.warn(`[scheduler] run start failed: ${(error as Error).message}`)
     }
   }
 
@@ -200,9 +213,7 @@ export class Scheduler {
         const armed = this.armed.get(workflow.id)
         const isOn = enabled(workflow)
         const nextAt =
-          armed && isOn
-            ? (armed.cron?.nextRun()?.getTime() ?? armed.nextAt)
-            : undefined
+          armed && isOn ? (armed.cron?.nextRun()?.getTime() ?? armed.nextAt) : undefined
         return {
           workflowId: workflow.id,
           name: workflow.name,
@@ -210,7 +221,9 @@ export class Scheduler {
           detail,
           enabled: isOn,
           armed: Boolean(armed && isOn),
-          ...(nextAt && Number.isFinite(nextAt) ? { nextRunAt: new Date(nextAt).toISOString() } : {}),
+          ...(nextAt && Number.isFinite(nextAt)
+            ? { nextRunAt: new Date(nextAt).toISOString() }
+            : {}),
         } satisfies ScheduleEntry
       })
       .filter((entry): entry is ScheduleEntry => entry !== undefined)

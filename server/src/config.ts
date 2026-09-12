@@ -174,7 +174,8 @@ export function loadConfig(): RunnerConfig {
   // Relative paths resolve against the server root so the process CWD is
   // irrelevant (Docker, systemd and terminals disagree about CWD).
   if (!isAbsolute(config.dataDir)) config.dataDir = join(SERVER_ROOT, config.dataDir)
-  if (!isAbsolute(config.workflowsFile)) config.workflowsFile = join(SERVER_ROOT, config.workflowsFile)
+  if (!isAbsolute(config.workflowsFile))
+    config.workflowsFile = join(SERVER_ROOT, config.workflowsFile)
   if (config.workflowsExtraDir && !isAbsolute(config.workflowsExtraDir))
     config.workflowsExtraDir = join(SERVER_ROOT, config.workflowsExtraDir)
 
@@ -186,7 +187,9 @@ export function loadConfig(): RunnerConfig {
 
 /** The config file path exactly as {@link loadConfig} resolves it. */
 export function configFilePath(): string {
-  return process.env['BC_CONFIG'] ? resolve(process.env['BC_CONFIG']) : join(SERVER_ROOT, 'config.json')
+  return process.env['BC_CONFIG']
+    ? resolve(process.env['BC_CONFIG'])
+    : join(SERVER_ROOT, 'config.json')
 }
 
 /** The server root directory (used by modules that need sibling paths). */

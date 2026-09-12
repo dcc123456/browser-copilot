@@ -31,6 +31,7 @@ import type { BrowserContext, Download, Frame, Page } from 'playwright'
 import { runExecJs, runOp, runWorkflowJs } from '../../src/inpage/kernel'
 import type { Op, OpResult } from '../../src/lib/ops'
 import type { RunSession } from './browser-pool'
+import { logger } from './observability'
 
 export class DriverError extends Error {}
 
@@ -111,7 +112,7 @@ export class RunDriver {
       this.downloads.push({ filename, path, url: download.url() })
     } catch (error) {
       this.downloads.push({ filename, path: null, url: download.url() })
-      console.warn(`[runner] download save failed: ${(error as Error).message}`)
+      logger.warn(`[runner] download save failed: ${(error as Error).message}`)
     }
   }
 
@@ -198,7 +199,9 @@ export class RunDriver {
   }
 
   async reloadTab(): Promise<void> {
-    await this.pageOf().reload({ timeout: 30_000 }).catch(() => {})
+    await this.pageOf()
+      .reload({ timeout: 30_000 })
+      .catch(() => {})
   }
 
   async goBack(): Promise<void> {
@@ -264,7 +267,14 @@ export class RunDriver {
           data: { result: payload.data, variables: payload.variables, logs },
         }
       }
-      return { ok: false, found: true, frameUrl, isTopFrame: true, error: payload.error, data: { logs } }
+      return {
+        ok: false,
+        found: true,
+        frameUrl,
+        isTopFrame: true,
+        error: payload.error,
+        data: { logs },
+      }
     }
 
     // Element ops: run in every frame, rank like the extension.
@@ -297,7 +307,9 @@ export class RunDriver {
           note: 'The page navigated during this step.',
         }
       }
-      throw new DriverError('No frame in this page could be scripted. The page may have just navigated.')
+      throw new DriverError(
+        'No frame in this page could be scripted. The page may have just navigated.',
+      )
     }
 
     const rank = (result: OpResult): number =>
@@ -326,7 +338,9 @@ export class RunDriver {
       { action: 'exec_js', value: prepared, jsArgs: args, jsArgNames: Object.keys(args) },
       tabId,
     )
-    return result.ok ? { ok: true, data: result.data } : { ok: false, error: result.error ?? 'JavaScript execution failed' }
+    return result.ok
+      ? { ok: true, data: result.data }
+      : { ok: false, error: result.error ?? 'JavaScript execution failed' }
   }
 
   /** The workflow "JavaScript code" harness result. */
@@ -336,7 +350,14 @@ export class RunDriver {
     timeout: number,
     tabId?: number,
   ): Promise<
-    | { ok: true; data: { result: unknown; variables?: Record<string, unknown>; logs: { level: string; message: string }[] } }
+    | {
+        ok: true
+        data: {
+          result: unknown
+          variables?: Record<string, unknown>
+          logs: { level: string; message: string }[]
+        }
+      }
     | { ok: false; error: string; logs: { level: string; message: string }[] }
   > {
     const result = await this.execOp(
@@ -352,7 +373,10 @@ export class RunDriver {
         : []
     if (result.ok) {
       const payload = result.data as { result?: unknown; variables?: Record<string, unknown> }
-      return { ok: true, data: { result: payload.result, variables: payload.variables, logs: captured } }
+      return {
+        ok: true,
+        data: { result: payload.result, variables: payload.variables, logs: captured },
+      }
     }
     return { ok: false, error: result.error ?? 'JavaScript execution failed', logs: captured }
   }
@@ -404,7 +428,9 @@ export class RunDriver {
     await this.pageOf().evaluate((value) => navigator.clipboard.writeText(value), text)
   }
 
-  async cookieGetAll(url?: string): Promise<{ name: string; value: string; domain: string; path: string }[]> {
+  async cookieGetAll(
+    url?: string,
+  ): Promise<{ name: string; value: string; domain: string; path: string }[]> {
     return this.session.context.cookies(url || undefined)
   }
 
@@ -415,7 +441,12 @@ export class RunDriver {
     return cookies.find((cookie) => cookie.name === name)?.value ?? null
   }
 
-  async cookieSet(name: string, value: string, url: string, expirationDate?: number): Promise<void> {
+  async cookieSet(
+    name: string,
+    value: string,
+    url: string,
+    expirationDate?: number,
+  ): Promise<void> {
     await this.session.context.addCookies([
       {
         name,
@@ -450,14 +481,24 @@ export class RunDriver {
       !filename || entry.filename.includes(filename) || entry.url.includes(filename)
     const found = [...this.downloads].reverse().find(matches)
     if (found) {
-      return { id: found.path ?? found.filename, filename: found.filename, path: found.path, url: found.url }
+      return {
+        id: found.path ?? found.filename,
+        filename: found.filename,
+        path: found.path,
+        url: found.url,
+      }
     }
     const deadline = Date.now() + Math.max(0, timeoutMs)
     while (Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 250))
       const fresh = [...this.downloads].reverse().find(matches)
       if (fresh) {
-        return { id: fresh.path ?? fresh.filename, filename: fresh.filename, path: fresh.path, url: fresh.url }
+        return {
+          id: fresh.path ?? fresh.filename,
+          filename: fresh.filename,
+          path: fresh.path,
+          url: fresh.url,
+        }
       }
     }
     return null

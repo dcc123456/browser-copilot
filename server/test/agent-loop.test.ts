@@ -11,7 +11,11 @@ import { runAgentLoop, runAgentTurnForBlock, buildBlockPrompt } from '../src/age
 import type { WireToolCall } from '../../src/lib/llm'
 
 function toolCall(name: string, args: Record<string, unknown> = {}): WireToolCall {
-  return { id: `call-${Math.random().toString(36).slice(2, 8)}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }
+  return {
+    id: `call-${Math.random().toString(36).slice(2, 8)}`,
+    type: 'function',
+    function: { name, arguments: JSON.stringify(args) },
+  }
 }
 
 /** A driver stub whose execOp serves snapshots; execJs evaluates real JS. */
@@ -22,7 +26,13 @@ function makeDriver(): RunDriver {
       return {
         ...OP_BASE,
         ok: true,
-        page: { url: 'https://example.com/list', title: 'List', text: 'hello page', elements: [], forms: [] },
+        page: {
+          url: 'https://example.com/list',
+          title: 'List',
+          text: 'hello page',
+          elements: [],
+          forms: [],
+        },
       } as unknown as OpResult
     },
     async execJs(code: string, args: Record<string, unknown> = {}): Promise<OpResult> {
@@ -31,7 +41,11 @@ function makeDriver(): RunDriver {
         const fn = new Function(...keys, `"use strict";\n${code}`)
         return { ...OP_BASE, ok: true, data: fn(...keys.map((k) => args[k])) }
       } catch (error) {
-        return { ...OP_BASE, ok: false, error: error instanceof Error ? error.message : String(error) }
+        return {
+          ...OP_BASE,
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        }
       }
     },
     async execWorkflowJs(): Promise<never> {
@@ -81,8 +95,13 @@ describe('runAgentLoop', () => {
     expect(result.ok).toBe(true)
     expect(result.answer).toBe('最终答案') // <think> stripped
     // A tool round happened and its output was appended as a tool message.
-    const secondCallMessages = streamCompletion.mock.calls[1]?.[0].messages as { role: string; name?: string }[]
-    expect(secondCallMessages.some((m) => m.role === 'tool' && m.name === 'snapshot_page')).toBe(true)
+    const secondCallMessages = streamCompletion.mock.calls[1]?.[0].messages as {
+      role: string
+      name?: string
+    }[]
+    expect(secondCallMessages.some((m) => m.role === 'tool' && m.name === 'snapshot_page')).toBe(
+      true,
+    )
     expect(steps.some((s) => s.startsWith('tool:snapshot_page'))).toBe(true)
   })
 
@@ -110,7 +129,12 @@ describe('runAgentLoop', () => {
 
   it('errors after exhausting the tool-round budget', async () => {
     streamCompletion.mockImplementation(() =>
-      Promise.resolve({ content: '', toolCalls: [toolCall('snapshot_page')], finishReason: 'tool_calls', usage: null }),
+      Promise.resolve({
+        content: '',
+        toolCalls: [toolCall('snapshot_page')],
+        finishReason: 'tool_calls',
+        usage: null,
+      }),
     )
     const result = await runAgentLoop({
       provider,
@@ -142,7 +166,12 @@ describe('runAgentTurnForBlock', () => {
 
   it('writes the sanitized answer into the configured variable', async () => {
     streamCompletion.mockImplementation(() =>
-      Promise.resolve({ content: '页面标题是 List', toolCalls: [], finishReason: 'stop', usage: null }),
+      Promise.resolve({
+        content: '页面标题是 List',
+        toolCalls: [],
+        finishReason: 'stop',
+        usage: null,
+      }),
     )
     const ctx = makeCtx()
     const deps = {
@@ -152,7 +181,11 @@ describe('runAgentTurnForBlock', () => {
       signal: ctx.signal,
       provider,
     }
-    await runAgentTurnForBlock({ prompt: '标题是什么', variableName: 'out', useSnapshot: false }, ctx as never, deps as never)
+    await runAgentTurnForBlock(
+      { prompt: '标题是什么', variableName: 'out', useSnapshot: false },
+      ctx as never,
+      deps as never,
+    )
     expect(ctx.variables['out']).toBe('页面标题是 List')
     expect(ctx.variables['lastAIAgent']).toBe('页面标题是 List')
   })

@@ -56,7 +56,9 @@ function richTargetOf(data: Record<string, unknown>): Target | undefined {
   return {
     primary,
     fallbacks: Array.isArray(target.fallbacks) ? (target.fallbacks as TargetSpec[]) : [],
-    ...(typeof target.frameHint === 'string' && target.frameHint ? { frameHint: target.frameHint } : {}),
+    ...(typeof target.frameHint === 'string' && target.frameHint
+      ? { frameHint: target.frameHint }
+      : {}),
     ...(typeof target.label === 'string' && target.label ? { label: target.label } : {}),
   }
 }
@@ -139,7 +141,12 @@ export interface ExecutorDeps {
   artifactsDir: string
   signal: AbortSignal
   /** Resolved LLM provider (config.llm); null when not configured. */
-  provider: { apiKey: string; baseUrl: string; model: string; headers?: Record<string, string> } | null
+  provider: {
+    apiKey: string
+    baseUrl: string
+    model: string
+    headers?: Record<string, string>
+  } | null
 }
 
 // --- Local (off-page) workflow JS fallback (ported verbatim) --------------------
@@ -148,7 +155,9 @@ async function evalLocalWorkflowJs(
   code: string,
   variables: Record<string, unknown>,
   timeout: number,
-): Promise<{ ok: true; result?: unknown; variables?: Record<string, unknown> } | { ok: false; error: string }> {
+): Promise<
+  { ok: true; result?: unknown; variables?: Record<string, unknown> } | { ok: false; error: string }
+> {
   try {
     const working = { ...variables }
     let nextData: unknown
@@ -198,15 +207,20 @@ async function evalLocalWorkflowJs(
       v: Record<string, unknown>,
     ) => unknown
     const awaited = await Promise.race([
-      Promise.resolve(fn(
-        helpers.automaNextBlock,
-        helpers.automaSetVariable,
-        helpers.automaRefData,
-        helpers.automaResetTimeout,
-        working,
-      )),
+      Promise.resolve(
+        fn(
+          helpers.automaNextBlock,
+          helpers.automaSetVariable,
+          helpers.automaRefData,
+          helpers.automaResetTimeout,
+          working,
+        ),
+      ),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`JavaScript 代码超时（${timeout}ms）`)), Math.max(0, timeout) || 20000),
+        setTimeout(
+          () => reject(new Error(`JavaScript 代码超时（${timeout}ms）`)),
+          Math.max(0, timeout) || 20000,
+        ),
       ),
     ])
     return { ok: true, result: nextCalled ? nextData : awaited, variables: working }
@@ -288,7 +302,8 @@ function evalConditionRow(row: ConditionRow, vars: Record<string, unknown>): boo
     case 'eql':
     case 'eq':
     default:
-      if (typeof left === 'number' || typeof right === 'number') return Number(left) === Number(right)
+      if (typeof left === 'number' || typeof right === 'number')
+        return Number(left) === Number(right)
       return String(left ?? '') === String(right ?? '')
   }
 }
@@ -356,7 +371,9 @@ function dataUrlToFilePayload(
   const isBase64 = !!match[2]
   const body = match[3] ?? ''
   try {
-    const buffer = isBase64 ? Buffer.from(body, 'base64') : Buffer.from(decodeURIComponent(body), 'utf8')
+    const buffer = isBase64
+      ? Buffer.from(body, 'base64')
+      : Buffer.from(decodeURIComponent(body), 'utf8')
     return { name: 'upload', mimeType, buffer }
   } catch {
     return null
@@ -442,7 +459,10 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
       const steps = Math.max(1, Math.ceil(Math.max(Math.abs(x), Math.abs(y)) / step))
       for (let i = 0; i < steps; i += 1) {
         assertActive(ctx)
-        const safe = { ...op, scroll: { mode: 'by' as const, x: x / steps, y: y / steps, smooth: true } }
+        const safe = {
+          ...op,
+          scroll: { mode: 'by' as const, x: x / steps, y: y / steps, smooth: true },
+        }
         try {
           await driver.execOp(safe, ctx.tabId)
         } catch (error) {
@@ -531,7 +551,10 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
       }
       const normalized = await imageInputToDataUrl(value, ctx.signal)
       if (!normalized) {
-        ctx.emit('error', `ocr: 变量 ${name} 不是可识别的图片（支持 base64、data URL 或 http(s) 图片链接）`)
+        ctx.emit(
+          'error',
+          `ocr: 变量 ${name} 不是可识别的图片（支持 base64、data URL 或 http(s) 图片链接）`,
+        )
         return null
       }
       image = normalized
@@ -706,7 +729,11 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     // Server convenience on top of the extension contract: the export also
     // lands in the run's artifacts directory, so the file is retrievable.
     if (text) {
-      const path = writeArtifact(artifactsDir, `export-${Date.now()}.${format === 'json' ? 'json' : 'csv'}`, text)
+      const path = writeArtifact(
+        artifactsDir,
+        `export-${Date.now()}.${format === 'json' ? 'json' : 'csv'}`,
+        text,
+      )
       ctx.emit('info', `已写出文件: ${path}`)
     }
     ctx.emit('result', text.slice(0, 80))
@@ -716,7 +743,11 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
   const condition: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const code = String(data['code'] ?? 'true')
-    const evaluated = await evalInPage(`return (${code})`, { vars: ctx.variables, refData: ctx.refData }, ctx)
+    const evaluated = await evalInPage(
+      `return (${code})`,
+      { vars: ctx.variables, refData: ctx.refData },
+      ctx,
+    )
     const ok = evaluated.ok ? Boolean(evaluated.value) : false
     return ok
       ? (ctx.outputs?.['true'] ?? ctx.defaultNext ?? null)
@@ -750,7 +781,8 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     if (headersRaw.trim()) {
       try {
         const parsed = JSON.parse(headersRaw)
-        if (parsed && typeof parsed === 'object') headers = { ...headers, ...parsed } as Record<string, string>
+        if (parsed && typeof parsed === 'object')
+          headers = { ...headers, ...parsed } as Record<string, string>
       } catch {
         ctx.emit('error', 'webhook: headers 不是合法 JSON，使用默认头')
       }
@@ -774,7 +806,12 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
       ctx.signal.addEventListener('abort', onAbort, { once: true })
       const timer = timeout > 0 ? setTimeout(() => controller.abort(), timeout) : undefined
       try {
-        const response = await fetch(url, { method, headers, body: bodyText, signal: controller.signal })
+        const response = await fetch(url, {
+          method,
+          headers,
+          body: bodyText,
+          signal: controller.signal,
+        })
         const responseText = await response.text()
         const record = {
           status: response.status,
@@ -853,7 +890,10 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     for (const [k, v] of Object.entries(local.variables ?? {})) ctx.variables[k] = v
     ctx.variables['lastResult'] = local.result
     if (local.result !== undefined) {
-      ctx.emit('result', typeof local.result === 'string' ? local.result : safeStringify(local.result))
+      ctx.emit(
+        'result',
+        typeof local.result === 'string' ? local.result : safeStringify(local.result),
+      )
     }
     return null
   }
@@ -958,7 +998,10 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     const selector = sel(data)
     const newTab = (data['newTab'] as boolean | undefined) ?? true
     try {
-      const result = await driver.execOp({ action: 'click_link', target: cssTarget(selector) }, ctx.tabId)
+      const result = await driver.execOp(
+        { action: 'click_link', target: cssTarget(selector) },
+        ctx.tabId,
+      )
       const info = result.data as { href?: string; target?: string } | undefined
       const href = info?.href ?? result.note ?? ''
       const waitLoaded = data['waitTabLoaded'] !== false
@@ -990,7 +1033,8 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
       target: targetFrom(data),
       attribute,
     }
-    if (op === 'set') opData.value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
+    if (op === 'set')
+      opData.value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
     try {
       const result = await driver.execOp(opData, ctx.tabId)
       if (op === 'get') {
@@ -1035,9 +1079,13 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
       const current =
         data['scope'] === 'all'
           ? tabs
-          : (tabs.find((tab) => tab.id === (ctx.tabId ?? driver.activeTabId())) ?? tabs[tabs.length - 1])
+          : (tabs.find((tab) => tab.id === (ctx.tabId ?? driver.activeTabId())) ??
+            tabs[tabs.length - 1])
       ctx.variables[variable] = current
-      ctx.emit('result', Array.isArray(current) ? `共 ${current.length} 个标签页` : (current?.url ?? ''))
+      ctx.emit(
+        'result',
+        Array.isArray(current) ? `共 ${current.length} 个标签页` : (current?.url ?? ''),
+      )
     } catch (error) {
       ctx.emit('error', message(error))
     }
@@ -1060,7 +1108,9 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
   const newWindowExec: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     // Headless "windows" are pages; a new window is a new page in the session.
-    const url = data['url'] ? interpolate(String(data['url']), ctx.variables, ctx.refData) : undefined
+    const url = data['url']
+      ? interpolate(String(data['url']), ctx.variables, ctx.refData)
+      : undefined
     try {
       const tab = await driver.newTab(url)
       ctx.setTab?.(tab.id)
@@ -1194,7 +1244,9 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
 
   const dataMapping: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    const rows = tableOf(ctx).filter((row): row is Record<string, unknown> => !!row && typeof row === 'object')
+    const rows = tableOf(ctx).filter(
+      (row): row is Record<string, unknown> => !!row && typeof row === 'object',
+    )
     const expression = String(data['mapping'] ?? 'item')
     const wrapped = `return rows.map((item, index) => (${expression}));`
     const evaluated = await evalInPage(wrapped, { rows, vars: ctx.variables }, ctx)
@@ -1254,7 +1306,10 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     assertActive(ctx)
     const event = String(data['event'] ?? '')
     const detail = interpolate(String(data['detail'] ?? 'null'), ctx.variables, ctx.refData)
-    return runRaw({ action: 'trigger_event', target: targetFrom(data), attribute: event, value: detail }, ctx)
+    return runRaw(
+      { action: 'trigger_event', target: targetFrom(data), attribute: event, value: detail },
+      ctx,
+    )
   }
 
   const browserEvent: BlockExecutor = async (_data, ctx) => {
@@ -1269,8 +1324,15 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     const variable = String(data['variableName'] ?? 'lastDownload')
     try {
       const match = await driver.waitForDownload(filename || undefined, 30_000)
-      ctx.variables[variable] = match ? { filename: match.filename, path: match.path, url: match.url } : null
-      ctx.emit('result', match ? `最近下载: ${match.filename}${match.path ? ` → ${match.path}` : ''}` : '未找到匹配下载')
+      ctx.variables[variable] = match
+        ? { filename: match.filename, path: match.path, url: match.url }
+        : null
+      ctx.emit(
+        'result',
+        match
+          ? `最近下载: ${match.filename}${match.path ? ` → ${match.path}` : ''}`
+          : '未找到匹配下载',
+      )
     } catch (error) {
       if ((error as Error)?.name === 'AbortError') throw error
       ctx.emit('error', message(error))
@@ -1305,10 +1367,12 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     return null
   }
 
-  const unsupportedCloud = (blockId: string): BlockExecutor => async (_data, ctx) => {
-    ctx.emit('error', `Block "${blockId}" requires Automa's cloud service and is not supported.`)
-    return null
-  }
+  const unsupportedCloud =
+    (blockId: string): BlockExecutor =>
+    async (_data, ctx) => {
+      ctx.emit('error', `Block "${blockId}" requires Automa's cloud service and is not supported.`)
+      return null
+    }
 
   const waitConnections: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
@@ -1397,12 +1461,18 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
       ctx.emit('error', '表单值引用的变量/AI 结果为空，已跳过本次填写')
       return null
     }
-    ctx.emit('info', `[表单输入] ${describeBlockTarget(data)} ← ${logPreview(filled, 120) || '(空)'}`)
+    ctx.emit(
+      'info',
+      `[表单输入] ${describeBlockTarget(data)} ← ${logPreview(filled, 120) || '(空)'}`,
+    )
     if (type === 'select') {
       return runRaw(withWait({ action: 'select_option', target, value: filled }, data), ctx)
     }
     return runRaw(
-      withWait({ action: 'fill', target, value: filled, clear: data['clearValue'] !== false }, data),
+      withWait(
+        { action: 'fill', target, value: filled, clear: data['clearValue'] !== false },
+        data,
+      ),
       ctx,
     )
   }
@@ -1418,15 +1488,30 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     }
     if (selector) {
       if (data['scrollIntoView']) {
-        return runRaw(withWait({ action: 'scroll', target: targetFrom(data), scroll: { mode: 'into_view' } }, data), ctx)
+        return runRaw(
+          withWait(
+            { action: 'scroll', target: targetFrom(data), scroll: { mode: 'into_view' } },
+            data,
+          ),
+          ctx,
+        )
       }
       return runRaw(
-        withWait({ action: 'scroll', target: targetFrom(data), scroll: { mode: 'by', x, y, smooth } }, data),
+        withWait(
+          { action: 'scroll', target: targetFrom(data), scroll: { mode: 'by', x, y, smooth } },
+          data,
+        ),
         ctx,
       )
     }
     if (data['scrollIntoView'] && richTargetOf(data)) {
-      return runRaw(withWait({ action: 'scroll', target: targetFrom(data), scroll: { mode: 'into_view' } }, data), ctx)
+      return runRaw(
+        withWait(
+          { action: 'scroll', target: targetFrom(data), scroll: { mode: 'into_view' } },
+          data,
+        ),
+        ctx,
+      )
     }
     return runRaw({ action: 'scroll', scroll: { mode: 'by', x, y, smooth } }, ctx)
   }
@@ -1436,7 +1521,11 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     const code = data['code'] as string | undefined
     let matched = false
     if (code) {
-      const evaluated = await evalInPage(`return (${code})`, { vars: ctx.variables, refData: ctx.refData }, ctx)
+      const evaluated = await evalInPage(
+        `return (${code})`,
+        { vars: ctx.variables, refData: ctx.refData },
+        ctx,
+      )
       matched = evaluated.ok ? Boolean(evaluated.value) : false
     } else {
       const groups = (data['conditions'] as { conditions?: ConditionRow[] }[] | undefined) ?? []
@@ -1469,16 +1558,16 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
 
   return {
     // browser
-    'click': click,
-    'fill': fill,
+    click: click,
+    fill: fill,
     'select-option': selectOption,
-    'scroll': scroll,
+    scroll: scroll,
     'press-key': pressKey,
     'wait-for': waitFor,
     'take-screenshot': takeScreenshot,
     'get-text': getText,
-    'ocr': ocrBlock,
-    'hover': hover,
+    ocr: ocrBlock,
+    hover: hover,
     'set-checkbox': setCheckbox,
     'get-form': getForm,
     'set-radio': selectRadio,
@@ -1502,18 +1591,18 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     'log-data': logData,
     'workflow-state': workflowState,
     // control-flow
-    'condition': condition,
+    condition: condition,
     'loop-data': placeholder('loop-data'),
     'repeat-task': placeholder('repeat-task'),
     'while-loop': placeholder('while-loop'),
     'loop-elements': placeholder('loop-elements'),
-    'delay': delay,
-    'breakpoint': breakpoint,
+    delay: delay,
+    breakpoint: breakpoint,
     // browser actions
-    'cookie': cookieBlock,
-    'clipboard': clipboardBlock,
+    cookie: cookieBlock,
+    clipboard: clipboardBlock,
     'element-exists': elementExistsExec,
-    'link': linkBlock,
+    link: linkBlock,
     'attribute-value': attributeValueExec,
     'go-back': goBackExec,
     'forward-page': forwardPage,
@@ -1524,8 +1613,8 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     'upload-file': uploadFileExec,
     'handle-dialog': handleDialogExec,
     // integration
-    'webhook': webhook,
-    'notification': notification,
+    webhook: webhook,
+    notification: notification,
     'javascript-code': javascriptCode,
     'ai-prompt': aiPrompt,
     'ai-agent': aiAgentExecutor,
@@ -1537,28 +1626,28 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     'handle-download': handleDownload,
     'save-local': saveLocal,
     'save-assets': saveAssetsExec,
-    'proxy': proxyExec,
+    proxy: proxyExec,
     'google-sheets': unsupportedCloud('google-sheets'),
     'google-drive': unsupportedCloud('google-drive'),
     'wait-connections': waitConnections,
-    'note': note,
+    note: note,
     'blocks-group': blocksGroup,
     // Automa-catalog ids produced by the editor / recorder.
-    'trigger': noop,
+    trigger: noop,
     'event-click': eventClick,
     'hover-element': hoverElement,
     'element-scroll': elementScroll,
-    'forms': formsBlock,
-    'conditions': conditionsBlock,
+    forms: formsBlock,
+    conditions: conditionsBlock,
     'loop-breakpoint': loopBreakpointExec,
     // trigger
     'visit-web': noop,
-    'schedule': noop,
-    'manual': noop,
+    schedule: noop,
+    manual: noop,
     'context-menu': noop,
     'on-startup': noop,
     'keyboard-shortcut': noop,
-    'date': noop,
+    date: noop,
     'specific-day': noop,
     'element-change': noop,
   }

@@ -47,7 +47,9 @@ function LoginScreen({ onSuccess }: { onSuccess: () => void }) {
         }}
       >
         <h1 className="mb-1 text-lg font-semibold text-ink">Browser Copilot Runner</h1>
-        <p className="mb-5 text-xs text-muted">输入 API Token（BC_TOKEN）进入控制台；服务器未启用鉴权时可直接进入。</p>
+        <p className="mb-5 text-xs text-muted">
+          输入 API Token（BC_TOKEN）进入控制台；服务器未启用鉴权时可直接进入。
+        </p>
         <Field label="API Token">
           <input
             className={inputClass}
@@ -90,7 +92,11 @@ export function App() {
   }, [probe])
 
   if (authed === null) {
-    return <div className="flex min-h-screen items-center justify-center bg-bg text-sm text-muted">连接中…</div>
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-bg text-sm text-muted">
+        连接中…
+      </div>
+    )
   }
   if (!authed) return <LoginScreen onSuccess={() => void probe()} />
 
@@ -108,7 +114,9 @@ export function App() {
               type="button"
               onClick={() => setPage(item.key)}
               className={`mb-0.5 flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
-                page === item.key ? 'bg-accent-soft text-accent' : 'text-muted hover:bg-hover hover:text-ink'
+                page === item.key
+                  ? 'bg-accent-soft text-accent'
+                  : 'text-muted hover:bg-hover hover:text-ink'
               }`}
             >
               <span className="w-4 text-center">{item.icon}</span>
@@ -117,7 +125,13 @@ export function App() {
           ))}
         </nav>
         <div className="border-t border-border p-3">
-          <Btn className="w-full justify-center" onClick={() => { setToken(''); setAuthed(false) }}>
+          <Btn
+            className="w-full justify-center"
+            onClick={() => {
+              setToken('')
+              setAuthed(false)
+            }}
+          >
             退出登录
           </Btn>
         </div>

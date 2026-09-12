@@ -15,11 +15,15 @@ function makeDriverStub(): RunDriver {
     async execJs(code: string, args: Record<string, unknown> = {}): Promise<OpResult> {
       try {
         const keys = Object.keys(args)
-        // eslint-disable-next-line no-new-func
+
         const fn = new Function(...keys, `"use strict";\n${code}`)
         return { ...OP_BASE, ok: true, data: fn(...keys.map((k) => args[k])) }
       } catch (error) {
-        return { ...OP_BASE, ok: false, error: error instanceof Error ? error.message : String(error) }
+        return {
+          ...OP_BASE,
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        }
       }
     },
     async execWorkflowJs(): Promise<never> {
@@ -144,7 +148,10 @@ describe('server executors', () => {
     expect(ctx.variables['n']).toBe(5)
     // The multiply mode starts from 1 when the variable is absent.
     const ctx2 = makeCtx({})
-    await registry['increase-variable']!({ variableName: 'm', value: '3', incType: 'multiply' }, ctx2)
+    await registry['increase-variable']!(
+      { variableName: 'm', value: '3', incType: 'multiply' },
+      ctx2,
+    )
     expect(ctx2.variables['m']).toBe(3)
   })
 
@@ -160,8 +167,8 @@ describe('server executors', () => {
 
   it('loop-breakpoint throws the LoopBreakpointError the engine catches', async () => {
     const registry = createExecutors(makeDeps(makeDriverStub()))
-    await expect(
-      registry['loop-breakpoint']!({ loopId: 'l1' }, makeCtx()),
-    ).rejects.toMatchObject({ name: 'LoopBreakpointError' })
+    await expect(registry['loop-breakpoint']!({ loopId: 'l1' }, makeCtx())).rejects.toMatchObject({
+      name: 'LoopBreakpointError',
+    })
   })
 })

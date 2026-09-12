@@ -127,9 +127,13 @@ export function RunsPage() {
                       <span className="font-medium">{run.label}</span>
                       <span className="block font-mono text-xs text-faint">{run.id}</span>
                     </td>
-                    <td className="py-2 pr-3 text-xs text-faint">{SOURCE_TEXT[run.source] ?? run.source}</td>
+                    <td className="py-2 pr-3 text-xs text-faint">
+                      {SOURCE_TEXT[run.source] ?? run.source}
+                    </td>
                     <td className="py-2 pr-3 text-xs text-faint">{formatTime(run.startedAt)}</td>
-                    <td className="py-2 pr-3 text-xs text-faint">{formatDuration(run.startedAt, run.finishedAt)}</td>
+                    <td className="py-2 pr-3 text-xs text-faint">
+                      {formatDuration(run.startedAt, run.finishedAt)}
+                    </td>
                     <td className="py-2">
                       {(run.status === 'queued' || run.status === 'running') && (
                         <Btn
@@ -156,10 +160,12 @@ export function RunsPage() {
           ) : (
             <div className="space-y-3">
               <div className="text-xs text-muted">
-                <p>runId: <span className="font-mono">{detail.id}</span></p>
                 <p>
-                  状态 <Badge tone={STATUS_TONE[detail.status]}>{STATUS_TEXT[detail.status]}</Badge> · 耗时{' '}
-                  {formatDuration(detail.startedAt, detail.finishedAt)}
+                  runId: <span className="font-mono">{detail.id}</span>
+                </p>
+                <p>
+                  状态 <Badge tone={STATUS_TONE[detail.status]}>{STATUS_TEXT[detail.status]}</Badge>{' '}
+                  · 耗时 {formatDuration(detail.startedAt, detail.finishedAt)}
                 </p>
                 {detail.summary && <p className="mt-1 text-ink">摘要：{detail.summary}</p>}
                 {detail.error && <p className="mt-1 text-err break-all">错误：{detail.error}</p>}
@@ -173,7 +179,9 @@ export function RunsPage() {
                       <span className="mr-1 font-mono text-faint">
                         {new Date(step.at).toLocaleTimeString('zh-CN', { hour12: false })}
                       </span>
-                      <span className={`${STEP_COLOR[step.kind] ?? 'text-muted'} break-all`}>{step.text}</span>
+                      <span className={`${STEP_COLOR[step.kind] ?? 'text-muted'} break-all`}>
+                        {step.text}
+                      </span>
                     </p>
                   ))
                 )}

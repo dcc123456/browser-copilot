@@ -13,9 +13,26 @@
  * @module server/config-store
  */
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { configFilePath } from './config'
+
+/**
+ * Owner-only permissions for `config.json`. The file may hold the API token,
+ * LLM keys and the Feishu app secret, so it must never be group/world
+ * readable. `chmodSync` is best-effort: on Windows and some mounted volumes it
+ * is a no-op or throws, and failing to tighten permissions must not lose the
+ * operator's config write.
+ */
+const CONFIG_FILE_MODE = 0o600
+
+function tightenPermissions(path: string): void {
+  try {
+    chmodSync(path, CONFIG_FILE_MODE)
+  } catch {
+    // Best-effort only (Windows / exotic filesystems).
+  }
+}
 
 /** The fields the Web console may persist to `config.json`. */
 export interface ConfigPatch {
@@ -43,10 +60,16 @@ export interface ConfigPatch {
 }
 
 /** Fields whose effective value changes only after a process restart. */
-export const RESTART_REQUIRED_FIELDS = ['port', 'browser.mode', 'browser.cdpEndpoint', 'browser.headless']
+export const RESTART_REQUIRED_FIELDS = [
+  'port',
+  'browser.mode',
+  'browser.cdpEndpoint',
+  'browser.headless',
+]
 
 const str = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined)
-const bool = (value: unknown): boolean | undefined => (typeof value === 'boolean' ? value : undefined)
+const bool = (value: unknown): boolean | undefined =>
+  typeof value === 'boolean' ? value : undefined
 
 function int(value: unknown, min: number, max: number): number | undefined {
   const n = typeof value === 'number' ? value : Number(value)
@@ -145,16 +168,21 @@ export function writeConfigPatch(patch: unknown): number {
   })) {
     if (!entry) continue
     const current = file[section]
-    const base = current && typeof current === 'object' && !Array.isArray(current)
-      ? (current as Record<string, unknown>)
-      : {}
+    const base =
+      current && typeof current === 'object' && !Array.isArray(current)
+        ? (current as Record<string, unknown>)
+        : {}
     file[section] = { ...base, ...entry }
   }
 
   const path = configFilePath()
   mkdirSync(dirname(path), { recursive: true })
+  // If a previous version created the file with looser permissions, fix it in
+  // place before replacing it — rename would otherwise inherit the tmp mode.
+  if (existsSync(path)) tightenPermissions(path)
   const tmp = `${path}.tmp`
-  writeFileSync(tmp, JSON.stringify(file, null, 2), 'utf8')
+  writeFileSync(tmp, JSON.stringify(file, null, 2), { encoding: 'utf8', mode: CONFIG_FILE_MODE })
+  tightenPermissions(tmp)
   renameSync(tmp, path)
   return 1
 }

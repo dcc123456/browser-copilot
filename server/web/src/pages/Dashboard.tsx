@@ -90,9 +90,13 @@ export function DashboardPage({ go }: { go: (page: 'runs') => void }) {
         <Card>
           <p className="text-xs text-muted">浏览器</p>
           <p className="mt-1 text-sm font-medium">
-            {config ? `${config.config.browser.mode === 'cdp' ? 'CDP 远端' : '本地 Chromium'}${config.config.browser.headless ? ' · 无头' : ''}` : '—'}
+            {config
+              ? `${config.config.browser.mode === 'cdp' ? 'CDP 远端' : '本地 Chromium'}${config.config.browser.headless ? ' · 无头' : ''}`
+              : '—'}
           </p>
-          <p className="text-xs text-faint">并发上限 {config?.config.browser.maxConcurrent ?? '—'}</p>
+          <p className="text-xs text-faint">
+            并发上限 {config?.config.browser.maxConcurrent ?? '—'}
+          </p>
         </Card>
         <Card>
           <p className="text-xs text-muted">飞书机器人</p>
@@ -105,14 +109,20 @@ export function DashboardPage({ go }: { go: (page: 'runs') => void }) {
               <span className="text-faint">未启用</span>
             )}
           </p>
-          <p className="text-xs text-faint">Token {config?.config.token.set ? '已设置' : '未设置'}</p>
+          <p className="text-xs text-faint">
+            Token {config?.config.token.set ? '已设置' : '未设置'}
+          </p>
         </Card>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card title="快速运行">
           <div className="flex gap-2">
-            <select className="flex-1 rounded-md border border-border bg-sunken px-2 py-1.5 text-sm" value={selected} onChange={(event) => setSelected(event.target.value)}>
+            <select
+              className="flex-1 rounded-md border border-border bg-sunken px-2 py-1.5 text-sm"
+              value={selected}
+              onChange={(event) => setSelected(event.target.value)}
+            >
               <option value="">选择要运行的工作流…</option>
               {workflows.map((workflow) => (
                 <option key={workflow.id} value={workflow.id}>
@@ -127,12 +137,7 @@ export function DashboardPage({ go }: { go: (page: 'runs') => void }) {
           {runNotice && <p className="mt-2 text-xs text-muted">{runNotice}</p>}
         </Card>
 
-        <Card
-          title="最近运行"
-          actions={
-            <Btn onClick={() => go('runs')}>全部记录 →</Btn>
-          }
-        >
+        <Card title="最近运行" actions={<Btn onClick={() => go('runs')}>全部记录 →</Btn>}>
           {runs.length === 0 ? (
             <Empty>还没有运行记录</Empty>
           ) : (

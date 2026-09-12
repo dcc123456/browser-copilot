@@ -114,7 +114,12 @@ const parentWorkflow = {
         id: 'fill-email',
         label: 'forms',
         position: { x: 3, y: 0 },
-        data: { blockId: 'forms', type: 'text-field', selector: '#email', value: 'smoke@test.local' },
+        data: {
+          blockId: 'forms',
+          type: 'text-field',
+          selector: '#email',
+          value: 'smoke@test.local',
+        },
       },
       {
         id: 'get-text',
@@ -126,7 +131,10 @@ const parentWorkflow = {
         id: 'cond',
         label: 'conditions',
         position: { x: 5, y: 0 },
-        data: { blockId: 'conditions', conditions: [{ conditions: [{ name: 'lastText', compare: 'cnt', value: 'Smoke' }] }] },
+        data: {
+          blockId: 'conditions',
+          conditions: [{ conditions: [{ name: 'lastText', compare: 'cnt', value: 'Smoke' }] }],
+        },
       },
       {
         id: 'loop',
@@ -222,7 +230,10 @@ async function main(): Promise<void> {
   const library = new WorkflowLibrary(config.workflowsFile)
   library.load()
   const importResult = library.importPayload([childWorkflow, parentWorkflow])
-  check('import parent+child', importResult.imported === 2 && importResult.entries.every((e) => e.missing.length === 0))
+  check(
+    'import parent+child',
+    importResult.imported === 2 && importResult.entries.every((e) => e.missing.length === 0),
+  )
 
   const pool = new BrowserPool(config)
   const runs = new RunService(config, pool, library)
@@ -235,7 +246,9 @@ async function main(): Promise<void> {
   const api = async (method: string, path: string, payload?: unknown) => {
     const res = await fetch(`http://127.0.0.1:${PORT}${path}`, {
       method,
-      ...(payload ? { body: JSON.stringify(payload), headers: { 'content-type': 'application/json' } } : {}),
+      ...(payload
+        ? { body: JSON.stringify(payload), headers: { 'content-type': 'application/json' } }
+        : {}),
     })
     const body = await res.json().catch(() => null)
     return { status: res.status, body }
@@ -246,27 +259,52 @@ async function main(): Promise<void> {
   const consoleHtml = await consoleRes.text()
   check(
     'web console served at /',
-    consoleRes.status === 200 && consoleHtml.includes('<html') && (consoleHtml.includes('控制台') || consoleHtml.includes('尚未构建')),
+    consoleRes.status === 200 &&
+      consoleHtml.includes('<html') &&
+      (consoleHtml.includes('控制台') || consoleHtml.includes('尚未构建')),
   )
   const configRes = await api('GET', '/api/config')
   check(
     'config API masks secrets',
-    configRes.status === 200 && typeof (configRes.body as { config?: { token?: { set?: boolean } } })?.config?.token?.set === 'boolean',
+    configRes.status === 200 &&
+      typeof (configRes.body as { config?: { token?: { set?: boolean } } })?.config?.token?.set ===
+        'boolean',
   )
   const schedulesRes = await api('GET', '/api/schedules')
-  check('schedules overview reachable', schedulesRes.status === 200 && Array.isArray((schedulesRes.body as { schedules?: unknown[] })?.schedules))
+  check(
+    'schedules overview reachable',
+    schedulesRes.status === 200 &&
+      Array.isArray((schedulesRes.body as { schedules?: unknown[] })?.schedules),
+  )
 
   // 1. Reference pre-check on a workflow with a missing child.
-  library.importPayload({ ...parentWorkflow, id: 'smoke-broken', drawflow: { ...parentWorkflow.drawflow, nodes: parentWorkflow.drawflow.nodes.map((n) => (n.id === 'sub' ? { ...n, data: { ...n.data, values: { workflowId: 'ghost-child' } } } : n)) } })
+  library.importPayload({
+    ...parentWorkflow,
+    id: 'smoke-broken',
+    drawflow: {
+      ...parentWorkflow.drawflow,
+      nodes: parentWorkflow.drawflow.nodes.map((n) =>
+        n.id === 'sub' ? { ...n, data: { ...n.data, values: { workflowId: 'ghost-child' } } } : n,
+      ),
+    },
+  })
   const broken = await api('POST', '/api/runs', { workflowId: 'smoke-broken' })
   check('missing child rejected (422)', broken.status === 422 && Array.isArray(broken.body.missing))
 
   // 2. Run the full parent workflow.
-  const started = await api('POST', '/api/runs', { workflowId: 'smoke-parent', variables: { smoke: true } })
+  const started = await api('POST', '/api/runs', {
+    workflowId: 'smoke-parent',
+    variables: { smoke: true },
+  })
   check('run accepted (202)', started.status === 202)
   const runId = started.body.runId as string
 
-  let record: { status: string; error?: string; summary?: string; steps: { kind: string; text: string }[] } | null = null
+  let record: {
+    status: string
+    error?: string
+    summary?: string
+    steps: { kind: string; text: string }[]
+  } | null = null
   for (let i = 0; i < 120; i++) {
     await new Promise((r) => setTimeout(r, 1000))
     record = (await api('GET', `/api/runs/${runId}`)).body
@@ -276,14 +314,25 @@ async function main(): Promise<void> {
   if (record) {
     check('webhook callback received', callbackBodies.length === 1)
     const callback = callbackBodies[0] as { pageTitle?: string; lastItem?: string } | undefined
-    check('callback carries interpolated variables', callback?.pageTitle === 'Smoke 表单页' && callback?.lastItem === '樱桃', JSON.stringify(callback))
-    check('child workflow ran (finalFlag=yes)', JSON.stringify(record.steps).includes('finalFlag') || record.summary !== undefined)
+    check(
+      'callback carries interpolated variables',
+      callback?.pageTitle === 'Smoke 表单页' && callback?.lastItem === '樱桃',
+      JSON.stringify(callback),
+    )
+    check(
+      'child workflow ran (finalFlag=yes)',
+      JSON.stringify(record.steps).includes('finalFlag') || record.summary !== undefined,
+    )
   }
 
   // 3. Artifacts written by export-data (file name carries a timestamp).
   const artifactDir = join(DATA_DIR, 'artifacts', runId)
   const artifacts = existsSync(artifactDir) ? readdirSync(artifactDir) : []
-  check('export-data artifact exists', artifacts.some((f) => f.startsWith('export-') && f.endsWith('.json')), artifacts.join(','))
+  check(
+    'export-data artifact exists',
+    artifacts.some((f) => f.startsWith('export-') && f.endsWith('.json')),
+    artifacts.join(','),
+  )
 
   // 4. Screenshot + run-log files exist.
   const logFile = join(DATA_DIR, 'runs', `${runId}.jsonl`)

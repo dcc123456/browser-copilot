@@ -21,7 +21,14 @@
  * @module server/workflow-library
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join } from 'node:path'
 import { asWorkflow } from '../../src/lib/workflow/storage'
 import { migrateWorkflow } from '../../src/lib/workflow/migrate'
@@ -112,7 +119,9 @@ function extractWorkflowList(payload: unknown): unknown[] {
     // A single workflow object carries id+name at the top level.
     if (typeof (payload as Record<string, unknown>)['id'] === 'string') return [payload]
   }
-  throw new Error('Unrecognized payload: expected a workflow array, {workflows:[…]} or a single workflow object')
+  throw new Error(
+    'Unrecognized payload: expected a workflow array, {workflows:[…]} or a single workflow object',
+  )
 }
 
 export class WorkflowLibrary {
@@ -190,9 +199,7 @@ export class WorkflowLibrary {
     // extension exactly; extra-dir files stay separate on disk. Entries that
     // came from the extra dir are NOT written into the primary file, so a
     // round-trip through upsert keeps file provenance stable.
-    const list = [...this.byId.values()].filter(
-      (wf) => this.sources.get(wf.id) === 'primary',
-    )
+    const list = [...this.byId.values()].filter((wf) => this.sources.get(wf.id) === 'primary')
     mkdirSync(dirname(this.primaryFile), { recursive: true })
     const tmp = `${this.primaryFile}.tmp`
     writeFileSync(tmp, JSON.stringify(list, null, 2), 'utf8')
@@ -205,7 +212,9 @@ export class WorkflowLibrary {
    * source file instead — the library cannot know which of several extra
    * files owned it without reparsing all of them).
    */
-  remove(id: string): { ok: true; id: string } | { ok: false; reason: 'not-found' | 'extra-source' } {
+  remove(
+    id: string,
+  ): { ok: true; id: string } | { ok: false; reason: 'not-found' | 'extra-source' } {
     if (!this.byId.has(id)) return { ok: false, reason: 'not-found' }
     if (this.sources.get(id) === 'extra') return { ok: false, reason: 'extra-source' }
     this.byId.delete(id)

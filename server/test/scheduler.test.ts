@@ -21,11 +21,15 @@ function wf(trigger: Record<string, unknown>, top?: Record<string, unknown>): Wo
 
 describe('scheduler trigger parsing', () => {
   it('prefers the trigger-node data.type over top-level trigger', () => {
-    expect(effectiveKind(wf({ blockId: 'trigger', type: 'interval' }, { type: 'scheduled' }))).toBe('interval')
+    expect(effectiveKind(wf({ blockId: 'trigger', type: 'interval' }, { type: 'scheduled' }))).toBe(
+      'interval',
+    )
   })
 
   it('falls back to top-level scheduled type (cron text)', () => {
-    expect(effectiveKind(wf({ blockId: 'trigger' }, { type: 'scheduled', schedule: '0 9 * * 1-5' }))).toBe('scheduled')
+    expect(
+      effectiveKind(wf({ blockId: 'trigger' }, { type: 'scheduled', schedule: '0 9 * * 1-5' })),
+    ).toBe('scheduled')
     expect(effectiveKind(wf({ blockId: 'trigger' }))).toBe('manual')
   })
 
@@ -65,13 +69,24 @@ describe('scheduler trigger parsing', () => {
 })
 
 describe('schedule overview', () => {
-  function triggerWf(id: string, triggerData: Record<string, unknown>, top?: Record<string, unknown>): Workflow {
+  function triggerWf(
+    id: string,
+    triggerData: Record<string, unknown>,
+    top?: Record<string, unknown>,
+  ): Workflow {
     return {
       id,
       name: `W-${id}`,
       ...(top ? { trigger: top } : {}),
       drawflow: {
-        nodes: [{ id: 't', label: 'trigger', position: { x: 0, y: 0 }, data: { blockId: 'trigger', ...triggerData } }],
+        nodes: [
+          {
+            id: 't',
+            label: 'trigger',
+            position: { x: 0, y: 0 },
+            data: { blockId: 'trigger', ...triggerData },
+          },
+        ],
         edges: [],
       },
     } as unknown as Workflow
