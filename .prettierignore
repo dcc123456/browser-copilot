@@ -1,7 +1,17 @@
-dist/
-node_modules/
-coverage/
+# Generated / vendored — never format.
+node_modules
+dist
+server/dist
+server/web/dist
+coverage
+releases
+preview
+public
+*.zip
+*.png
+*.ico
+*.woff
+*.woff2
+*.ttf
 pnpm-lock.yaml
-*.min.*
-public/icons/
-icon-design/
+package-lock.json

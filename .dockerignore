@@ -1,0 +1,28 @@
+# The runner image is built from the repo root (the Dockerfile copies the
+# workspace manifests and server/), so this file governs that context.
+node_modules
+**/node_modules
+dist
+dist-no-ocr
+server/dist
+server/web/dist
+coverage
+releases
+preview
+public/tesseract
+.git
+.github
+.vscode
+*.zip
+*.log
+*.md
+*.png
+*.ico
+# Never bake secrets or local state into an image.
+config.json
+.env
+.env.*
+*.pem
+*.key
+Dockerfile
+.dockerignore

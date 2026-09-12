@@ -44,3 +44,7 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Agent working directory (session memory, scratch state) — per-developer,
+# never part of the repository.
+.workbuddy-ai/

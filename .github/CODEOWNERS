@@ -1,0 +1,16 @@
+# Default owners for everything in this repository.
+* @dcc123456
+
+# The AI-debug / takeover pipeline is the sensitive part of the engine:
+# changes here move the measured success rate, so they need a closer review.
+/src/lib/workflow/ai-takeover.ts @dcc123456
+/src/lib/workflow/observer.ts @dcc123456
+/src/lib/workflow/checkpoints.ts @dcc123456
+/src/lib/workflow/failure-memory.ts @dcc123456
+/src/background/workflow-engine/ @dcc123456
+/tests/bench/ @dcc123456
+
+# Runner security surface (auth, rate limiting, config writes).
+/server/src/http-api.ts @dcc123456
+/server/src/config-store.ts @dcc123456
+/server/src/main.ts @dcc123456
