@@ -16,13 +16,13 @@
 
 ## 文件结构
 
-| 操作 | 文件 | 职责 |
-| --- | --- | --- |
-| 新建 | `src/background/workflow-engine/loop-breakpoint.ts` | `LoopBreakpointError` 哨兵类（引擎与执行器共用，避免循环依赖） |
-| 修改 | `src/background/workflow-engine/engine.ts` | 循环块出口解析（body/end 按句柄语义）、`runLoop` 收尾走 end、断点捕获（`runLoopBody`）、顶层 benign 兜底、runNode 放行哨兵 |
-| 修改 | `src/background/workflow-engine/executors.ts` | `'loop-breakpoint'` 从 `noop` 换成抛哨兵的真执行器 |
-| 修改 | `tests/workflow-phase4.spec.ts` | 新增两个 describe：end 分支（参数化 4 种循环块 + 0 次迭代 + 连线顺序回归）、loop-breakpoint（5 个用例） |
-| 修改 | `README.md` / `README.zh-CN.md` | Workflows 章节新增"失败重试"小节（单块重试 vs 整组重试 + 登录示例图） |
+| 操作 | 文件                                                | 职责                                                                                                                       |
+| ---- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| 新建 | `src/background/workflow-engine/loop-breakpoint.ts` | `LoopBreakpointError` 哨兵类（引擎与执行器共用，避免循环依赖）                                                             |
+| 修改 | `src/background/workflow-engine/engine.ts`          | 循环块出口解析（body/end 按句柄语义）、`runLoop` 收尾走 end、断点捕获（`runLoopBody`）、顶层 benign 兜底、runNode 放行哨兵 |
+| 修改 | `src/background/workflow-engine/executors.ts`       | `'loop-breakpoint'` 从 `noop` 换成抛哨兵的真执行器                                                                         |
+| 修改 | `tests/workflow-phase4.spec.ts`                     | 新增两个 describe：end 分支（参数化 4 种循环块 + 0 次迭代 + 连线顺序回归）、loop-breakpoint（5 个用例）                    |
+| 修改 | `README.md` / `README.zh-CN.md`                     | Workflows 章节新增"失败重试"小节（单块重试 vs 整组重试 + 登录示例图）                                                      |
 
 不改动：编辑器（`BlockNode.tsx` 已渲染 loop/end 双出口；`loop-breakpoint` 目录项 `disableEdit: true` 无表单）、其余全部执行器。
 
@@ -31,6 +31,7 @@
 ### Task 1: 循环块迭代结束后走 "end" 分支
 
 **Files:**
+
 - Modify: `src/background/workflow-engine/engine.ts:374-379`（runNode 循环块分发）、`engine.ts:501-580`（runLoop 四个分支）
 - Test: `tests/workflow-phase4.spec.ts`（文件末尾追加 describe）
 
@@ -40,49 +41,56 @@
 
 ```ts
 describe('workflow loops — after-loop "end" branch', () => {
-  const CASES: Array<{ blockId: string; data: Record<string, unknown>; vars?: Record<string, unknown> }> = [
+  const CASES: Array<{
+    blockId: string
+    data: Record<string, unknown>
+    vars?: Record<string, unknown>
+  }> = [
     { blockId: 'loop-data', data: { data: '[1,2]' } },
     { blockId: 'repeat-task', data: { count: 2 } },
     { blockId: 'while-loop', data: { code: 'vars.n < 2' }, vars: { n: 0 } },
     { blockId: 'loop-elements', data: { count: 2 } },
   ]
 
-  it.each(CASES)('$blockId runs the end branch once after iterations finish', async ({ blockId, data, vars }) => {
-    const seen: string[] = []
-    const wf = makeWorkflow(
-      [
-        node('t', 'manual'),
-        node('loop', blockId, data),
-        node('body', 'body'),
-        node('after', 'after'),
-      ],
-      [
-        edge('t', 'loop'),
-        edge('loop', 'body', `${blockId}-output-1`),
-        edge('body', 'loop'),
-        edge('loop', 'after', `${blockId}-output-2`),
-      ],
-    )
-    const result = await runWorkflow(wf, {
-      variables: { ...(vars ?? {}) },
-      executors: {
-        ...EXECUTORS,
-        body: async (_d, ctx) => {
-          seen.push('body')
-          if (blockId === 'while-loop') {
-            ctx.variables['n'] = Number(ctx.variables['n'] ?? 0) + 1
-          }
-          return null
+  it.each(CASES)(
+    '$blockId runs the end branch once after iterations finish',
+    async ({ blockId, data, vars }) => {
+      const seen: string[] = []
+      const wf = makeWorkflow(
+        [
+          node('t', 'manual'),
+          node('loop', blockId, data),
+          node('body', 'body'),
+          node('after', 'after'),
+        ],
+        [
+          edge('t', 'loop'),
+          edge('loop', 'body', `${blockId}-output-1`),
+          edge('body', 'loop'),
+          edge('loop', 'after', `${blockId}-output-2`),
+        ],
+      )
+      const result = await runWorkflow(wf, {
+        variables: { ...(vars ?? {}) },
+        executors: {
+          ...EXECUTORS,
+          body: async (_d, ctx) => {
+            seen.push('body')
+            if (blockId === 'while-loop') {
+              ctx.variables['n'] = Number(ctx.variables['n'] ?? 0) + 1
+            }
+            return null
+          },
+          after: async () => {
+            seen.push('after')
+            return null
+          },
         },
-        after: async () => {
-          seen.push('after')
-          return null
-        },
-      },
-    })
-    expect(result.outcome).toBe('ok')
-    expect(seen).toEqual(['body', 'body', 'after'])
-  })
+      })
+      expect(result.outcome).toBe('ok')
+      expect(seen).toEqual(['body', 'body', 'after'])
+    },
+  )
 
   it('while-loop with an immediately-false condition goes straight to the end branch', async () => {
     const seen: string[] = []
@@ -167,29 +175,29 @@ pnpm exec vitest run tests/workflow-phase4.spec.ts
 3a. `engine.ts:374-379`，把循环块分发：
 
 ```ts
-    // Loop and sub-workflow blocks are handled by the engine itself, not by an
-    // executor in the registry, so sub-runs and loop bodies recurse here too.
-    if (LOOP_BLOCK_IDS.has(blockId)) {
-      completedNodeIds.push(nodeId)
-      return runLoop(current, params, defaultNext)
-    }
+// Loop and sub-workflow blocks are handled by the engine itself, not by an
+// executor in the registry, so sub-runs and loop bodies recurse here too.
+if (LOOP_BLOCK_IDS.has(blockId)) {
+  completedNodeIds.push(nodeId)
+  return runLoop(current, params, defaultNext)
+}
 ```
 
 替换为：
 
 ```ts
-    // Loop and sub-workflow blocks are handled by the engine itself, not by an
-    // executor in the registry, so sub-runs and loop bodies recurse here too.
-    // Body entry / after-loop exit resolve by handle semantics, not edge
-    // order: `loop` (output-1) starts the body, `end` (output-2) runs once
-    // after the loop finishes. A bare unlabeled edge still works as the body
-    // (legacy / programmatic graphs), but only when no end edge exists.
-    if (LOOP_BLOCK_IDS.has(blockId)) {
-      completedNodeIds.push(nodeId)
-      const endId = outputs['end'] ?? outputs['output-2'] ?? null
-      const bodyStart = outputs['loop'] ?? outputs['output-1'] ?? (endId === null ? defaultNext : null)
-      return runLoop(current, params, bodyStart, endId)
-    }
+// Loop and sub-workflow blocks are handled by the engine itself, not by an
+// executor in the registry, so sub-runs and loop bodies recurse here too.
+// Body entry / after-loop exit resolve by handle semantics, not edge
+// order: `loop` (output-1) starts the body, `end` (output-2) runs once
+// after the loop finishes. A bare unlabeled edge still works as the body
+// (legacy / programmatic graphs), but only when no end edge exists.
+if (LOOP_BLOCK_IDS.has(blockId)) {
+  completedNodeIds.push(nodeId)
+  const endId = outputs['end'] ?? outputs['output-2'] ?? null
+  const bodyStart = outputs['loop'] ?? outputs['output-1'] ?? (endId === null ? defaultNext : null)
+  return runLoop(current, params, bodyStart, endId)
+}
 ```
 
 3b. `engine.ts:501-506`，`runLoop` 签名加 `endId` 参数：
@@ -242,6 +250,7 @@ git commit -m "feat(workflow): 循环块迭代结束后继续执行 end 分支"
 ### Task 2: 实现 loop-breakpoint（提前跳出循环）
 
 **Files:**
+
 - Create: `src/background/workflow-engine/loop-breakpoint.ts`
 - Modify: `src/background/workflow-engine/executors.ts:1821` 附近（新执行器）、`executors.ts:1915`（注册表）
 - Modify: `src/background/workflow-engine/engine.ts`（runNode catch 放行、`runLoopBody` 助手、四个分支调用点、顶层 catch）
@@ -517,45 +526,45 @@ import { LoopBreakpointError } from './loop-breakpoint'
 4c. `runSegment` 函数（`engine.ts:482-491`）之后新增助手：
 
 ```ts
-  /**
-   * Runs one loop-body segment, translating a `LoopBreakpointError` from the
-   * body into a `'break'` signal when THIS loop owns it (no loopId = the
-   * innermost loop; a loopId must match the loop node's values/data `loopId`
-   * or the node id), rethrowing otherwise so an outer loop can claim it.
-   */
-  async function runLoopBody(
-    loopNode: WorkflowNode,
-    startId: string,
-  ): Promise<'ok' | 'break' | 'failed'> {
-    try {
-      await runSegment(startId, loopNode.id)
-    } catch (e) {
-      if (e instanceof LoopBreakpointError) {
-        const wanted = e.loopId ?? ''
-        const owners = [paramsOf(loopNode)['loopId'], loopNode.data?.['loopId'], loopNode.id].map(
-          (v) => (v === undefined || v === null ? '' : String(v)),
-        )
-        if (wanted === '' || owners.includes(wanted)) return 'break'
-      }
-      throw e
+/**
+ * Runs one loop-body segment, translating a `LoopBreakpointError` from the
+ * body into a `'break'` signal when THIS loop owns it (no loopId = the
+ * innermost loop; a loopId must match the loop node's values/data `loopId`
+ * or the node id), rethrowing otherwise so an outer loop can claim it.
+ */
+async function runLoopBody(
+  loopNode: WorkflowNode,
+  startId: string,
+): Promise<'ok' | 'break' | 'failed'> {
+  try {
+    await runSegment(startId, loopNode.id)
+  } catch (e) {
+    if (e instanceof LoopBreakpointError) {
+      const wanted = e.loopId ?? ''
+      const owners = [paramsOf(loopNode)['loopId'], loopNode.data?.['loopId'], loopNode.id].map(
+        (v) => (v === undefined || v === null ? '' : String(v)),
+      )
+      if (wanted === '' || owners.includes(wanted)) return 'break'
     }
-    return outcome === 'ok' ? 'ok' : 'failed'
+    throw e
   }
+  return outcome === 'ok' ? 'ok' : 'failed'
+}
 ```
 
 4d. 四个循环分支的循环体调用点，把
 
 ```ts
-        await runSegment(startId, loopNode.id)
-        if (outcome !== 'ok') return null
+await runSegment(startId, loopNode.id)
+if (outcome !== 'ok') return null
 ```
 
 逐处替换为：
 
 ```ts
-        const seg = await runLoopBody(loopNode, startId)
-        if (seg === 'failed') return null
-        if (seg === 'break') return endId
+const seg = await runLoopBody(loopNode, startId)
+if (seg === 'failed') return null
+if (seg === 'break') return endId
 ```
 
 （`loop-data`、`repeat-task`、`while-loop`、`loop-elements` 各一处；`while-loop` 分支中该替换在 `if (++iterations > MAX_WHILE_ITERATIONS)` 之前，超限判断保持不变。）
@@ -620,6 +629,7 @@ git commit -m "feat(workflow): 实现 loop-breakpoint 提前跳出循环"
 ### Task 3: README 文档（失败重试小节）
 
 **Files:**
+
 - Modify: `README.md:329`（**Watching runs.** 段落之后、**Portability.** 之前插入）
 - Modify: `README.zh-CN.md:263`（**查看运行。** 段落之后、**导入导出。** 之前插入）
 
@@ -630,33 +640,34 @@ git commit -m "feat(workflow): 实现 loop-breakpoint 提前跳出循环"
 ```markdown
 **Failure retry.** Two levels:
 
-- **Single block.** Every block's *On error* settings can retry itself N times
+- **Single block.** Every block's _On error_ settings can retry itself N times
   with an interval, or route to its `fallback` handle. For one flaky click.
 - **A group of steps.** Put the group inside a **Repeat task** block and detect
   the failure with an **Element exists** check — e.g. a login that re-enters
   the captcha on failure, up to 5 attempts:
+```
 
-  ```
-  Repeat task (5)
-   ├─ loop → click "refresh captcha" → OCR the captcha image (→ lastOcrText)
-   │          → fill the captcha input with {{lastOcrText}} → click "sign in"
-   │          → wait 2s → Element exists (error-message selector)
-   │                         ├─ exists (failed)  → wire back to the Repeat task
-   │                         │                     block = next retry
-   │                         └─ not exists (ok)  → Set variable loginOk=true
-   │                                              → Loop breakpoint
-   └─ end  → Conditions (loginOk exists?) ─ true  → logged-in steps…
-                                          └─ false → all 5 attempts failed
-  ```
+Repeat task (5)
+├─ loop → click "refresh captcha" → OCR the captcha image (→ lastOcrText)
+│ → fill the captcha input with {{lastOcrText}} → click "sign in"
+│ → wait 2s → Element exists (error-message selector)
+│ ├─ exists (failed) → wire back to the Repeat task
+│ │ block = next retry
+│ └─ not exists (ok) → Set variable loginOk=true
+│ → Loop breakpoint
+└─ end → Conditions (loginOk exists?) ─ true → logged-in steps…
+└─ false → all 5 attempts failed
 
-  The body is whatever hangs off the **loop** handle; wiring the last body
-  block back to the loop block ends an iteration. **Loop breakpoint** breaks
-  out early; execution resumes at the **end** handle — which also runs after
-  all iterations finish, so tell the two endings apart with a variable plus
-  **Conditions** (as above), e.g. notify or fail the run when login never
-  succeeded. (A hand-drawn cycle of blocks counted by **Increase variable**
-  and gated by **Conditions** also works, but the loop shape above is easier
-  to read and maintain.)
+```
+
+The body is whatever hangs off the **loop** handle; wiring the last body
+block back to the loop block ends an iteration. **Loop breakpoint** breaks
+out early; execution resumes at the **end** handle — which also runs after
+all iterations finish, so tell the two endings apart with a variable plus
+**Conditions** (as above), e.g. notify or fail the run when login never
+succeeded. (A hand-drawn cycle of blocks counted by **Increase variable**
+and gated by **Conditions** also works, but the loop shape above is easier
+to read and maintain.)
 ```
 
 - [ ] **Step 2: README.zh-CN.md 插入小节**
@@ -670,24 +681,25 @@ git commit -m "feat(workflow): 实现 loop-breakpoint 提前跳出循环"
   `fallback` 分支。适合偶尔失灵的一次点击。
 - **一组步骤。** 把整组步骤放进**重复执行**块里，用**元素存在**判断是否失败
   ——比如登录时验证码输错就刷新重来、最多尝试 5 次：
+```
 
-  ```
-  重复执行 (5)
-   ├─ loop → 点「刷新验证码」→ OCR 识别验证码图片（→ lastOcrText）
-   │          → 验证码输入框填 {{lastOcrText}} → 点「登录」→ 等待 2 秒
-   │          → 元素存在（错误提示选择器）
-   │                         ├─ 存在（失败）  → 连回「重复执行」块 = 下一次重试
-   │                         └─ 不存在（成功）→ 设置变量 loginOk=true
-   │                                            → 循环断点
-   └─ end  → 条件（loginOk 是否存在）─ 成立 → 登录后的后续步骤…
-                                     └ 不成立 → 5 次均失败的处理
-  ```
+重复执行 (5)
+├─ loop → 点「刷新验证码」→ OCR 识别验证码图片（→ lastOcrText）
+│ → 验证码输入框填 {{lastOcrText}} → 点「登录」→ 等待 2 秒
+│ → 元素存在（错误提示选择器）
+│ ├─ 存在（失败） → 连回「重复执行」块 = 下一次重试
+│ └─ 不存在（成功）→ 设置变量 loginOk=true
+│ → 循环断点
+└─ end → 条件（loginOk 是否存在）─ 成立 → 登录后的后续步骤…
+└ 不成立 → 5 次均失败的处理
 
-  循环体是挂在 **loop** 出口上的那串块；把体内最后一个块连回循环块即结束一次
-  迭代。**循环断点**用于提前跳出；执行会从循环块的 **end** 出口继续——该出口
-  在循环自然跑完后同样会走到，所以用变量 + **条件**块区分两种结局（如上），
-  例如始终登录失败时发通知或让运行判失败。（替代做法：手工把块连成环、用
-  「增加变量」+「条件」做重试计数——也能跑，但没有上面的循环结构清晰。）
+```
+
+循环体是挂在 **loop** 出口上的那串块；把体内最后一个块连回循环块即结束一次
+迭代。**循环断点**用于提前跳出；执行会从循环块的 **end** 出口继续——该出口
+在循环自然跑完后同样会走到，所以用变量 + **条件**块区分两种结局（如上），
+例如始终登录失败时发通知或让运行判失败。（替代做法：手工把块连成环、用
+「增加变量」+「条件」做重试计数——也能跑，但没有上面的循环结构清晰。）
 ```
 
 - [ ] **Step 3: 提交**

@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Your AI assistant that actually *uses* the web for you. Open the side panel,
+Your AI assistant that actually _uses_ the web for you. Open the side panel,
 ask in plain language, and Browser Copilot reads the page you're on and takes
 action — clicking buttons, filling forms, scrolling, switching tabs, walking
 through a whole checkout or setup flow — while you watch or stay hands-off.
@@ -167,7 +167,7 @@ Best when a task lives on one page and mixes reading with acting:
 - **Review a PR or explain code/docs**; select the hunk first for a precise
   target instead of the whole page.
 - **Summarize** long articles, docs, release notes, threads.
-- **Analyze a page's data** — but note the model reasons over *text*, it does
+- **Analyze a page's data** — but note the model reasons over _text_, it does
   not compute; treat numbers over long tables as hypotheses to verify.
 - **Apply a repeatable standard** (review rubric, style guide, checklist) via a
   [skill](#skills).
@@ -184,12 +184,12 @@ Chrome is open).
 The dropdown applies to the **next action**, even mid-reply, so you can switch
 while a task runs.
 
-| Mode | Behavior | Best for |
-| --- | --- | --- |
-| 💬 **Chat** | Pure conversation. No page-reading or action tools are sent to the model, so it cannot touch the page and uses the fewest tokens. You can still attach a text selection. | Brainstorming, writing, Q&A, translation — anything where you don't want it acting on the page. |
-| 🔒 **Read-only** | Reads only; no click, type, navigation, or fill. | Review, summary, translation — zero side effects. |
-| 🛡 **Semi-auto** (default) | Every page-changing action is shown for approval first. | Everyday use; stay in control of each click. |
-| ⚡ **Full auto** | Actions run without confirmation. | Repetitive, trusted flows. |
+| Mode                      | Behavior                                                                                                                                                                 | Best for                                                                                        |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| 💬 **Chat**               | Pure conversation. No page-reading or action tools are sent to the model, so it cannot touch the page and uses the fewest tokens. You can still attach a text selection. | Brainstorming, writing, Q&A, translation — anything where you don't want it acting on the page. |
+| 🔒 **Read-only**          | Reads only; no click, type, navigation, or fill.                                                                                                                         | Review, summary, translation — zero side effects.                                               |
+| 🛡 **Semi-auto** (default) | Every page-changing action is shown for approval first.                                                                                                                  | Everyday use; stay in control of each click.                                                    |
+| ⚡ **Full auto**          | Actions run without confirmation.                                                                                                                                        | Repetitive, trusted flows.                                                                      |
 
 In semi-auto the confirmation card names the exact button/field/URL. In full
 auto every action is still logged on the **Data** tab for audit.
@@ -202,17 +202,17 @@ Any endpoint speaking the OpenAI chat-completions protocol
 (`POST {baseUrl}/chat/completions`, `Bearer` auth, SSE streaming). A provider is
 configuration, not a code path — unlisted endpoints work too.
 
-| Preset | Base URL | Example model |
-| --- | --- | --- |
-| DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat`, `deepseek-reasoner` |
-| 火山方舟 Ark | `https://ark.cn-beijing.volces.com/api/v3` | `doubao-seed-code`, or `ep-…` |
-| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
-| OpenRouter | `https://openrouter.ai/api/v1` | `deepseek/deepseek-chat` |
-| Moonshot / Kimi | `https://api.moonshot.cn/v1` | `kimi-k2-0905-preview` |
-| 阿里云百炼 DashScope | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` |
-| 硅基流动 SiliconFlow | `https://api.siliconflow.cn/v1` | `deepseek-ai/DeepSeek-V3` |
-| Ollama (local) | `http://localhost:11434/v1` | `qwen3:8b` |
-| LM Studio (local) | `http://localhost:1234/v1` | `local-model` |
+| Preset               | Base URL                                            | Example model                        |
+| -------------------- | --------------------------------------------------- | ------------------------------------ |
+| DeepSeek             | `https://api.deepseek.com/v1`                       | `deepseek-chat`, `deepseek-reasoner` |
+| 火山方舟 Ark         | `https://ark.cn-beijing.volces.com/api/v3`          | `doubao-seed-code`, or `ep-…`        |
+| OpenAI               | `https://api.openai.com/v1`                         | `gpt-4o-mini`                        |
+| OpenRouter           | `https://openrouter.ai/api/v1`                      | `deepseek/deepseek-chat`             |
+| Moonshot / Kimi      | `https://api.moonshot.cn/v1`                        | `kimi-k2-0905-preview`               |
+| 阿里云百炼 DashScope | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus`                          |
+| 硅基流动 SiliconFlow | `https://api.siliconflow.cn/v1`                     | `deepseek-ai/DeepSeek-V3`            |
+| Ollama (local)       | `http://localhost:11434/v1`                         | `qwen3:8b`                           |
+| LM Studio (local)    | `http://localhost:1234/v1`                          | `local-model`                        |
 
 **Choosing one:** function calling is required for autonomous read/act. Use a
 cheap fast model (`deepseek-chat`, `gpt-4o-mini`, `qwen-plus`) for daily work, a
@@ -264,7 +264,7 @@ that's unacceptable.
 A skill is a saved instruction pack: the stable part of a prompt. Create one
 under **Skills → New skill** with a name, a one-line description of when it
 applies, and its instructions. Then either type **`/`** in the composer and pick
-it, or leave *Let the agent apply this automatically* on so it is used when your
+it, or leave _Let the agent apply this automatically_ on so it is used when your
 message matches the description.
 
 Once a skill is selected, it is forced onto that turn — the full instructions are
@@ -304,14 +304,14 @@ click/hover/scroll, form fill, get text, element exists, loops over data or
 elements, while/repeat, condition branches, variables and `{{token}}`
 interpolation, JavaScript code, cookies, webhook, clipboard, screenshot,
 download handling, new/switch/reload/close tab, delay, and more. (Five Automa
-*cloud* blocks — Google Sheets/Drive, block packages, cloud AI workflows — are
+_cloud_ blocks — Google Sheets/Drive, block packages, cloud AI workflows — are
 listed for compatibility but not executable.) Every block has a dedicated edit
 form, can be disabled individually, and can carry its own error handling: retry
 or fall back to another branch on failure.
 
 **Precision targeting.** A built-in element picker generates a CSS or XPath
 selector for any target — hover to highlight, click to lock, walk up or down
-the DOM, switch between CSS and XPath. Targets inside *closed* shadow DOM are
+the DOM, switch between CSS and XPath. Targets inside _closed_ shadow DOM are
 reached by clicking through the Chrome DevTools Protocol. One click
 auto-lays-out the graph; `Ctrl+S` saves, `Ctrl+Enter` runs from the editor.
 
@@ -336,7 +336,7 @@ last-run status, and a failed run deep-links straight to its log.
 
 **Failure retry.** Two levels:
 
-- **Single block.** Every block's *On error* settings can retry itself N times
+- **Single block.** Every block's _On error_ settings can retry itself N times
   with an interval, or route to its `fallback` handle. For one flaky click.
 - **A group of steps.** Put the group inside a **Repeat task** block and detect
   the failure with an **Element exists** check — e.g. a login that re-enters
@@ -514,21 +514,21 @@ fall back to the mirror automatically. Switch back to browser storage any time
 from the same settings card; existing data migrates to the folder the first
 time you pick it.
 
-| Permission | Purpose |
-| --- | --- |
-| `storage` | Settings, providers, skills, conversations, workflows, profile, credentials. |
-| `tabs` | Identify the active tab and open/switch/close tabs when asked (and for workflow tab blocks). |
-| `scripting` | Inject the page kernel, workflow recorder, element picker, and shortcut listener to read or act on a tab. |
-| `sidePanel` | Show the panel. |
-| `alarms` | Wake the worker to run scheduled tasks and workflows and keep the Feishu bot connection alive. |
-| `offscreen` | Run a hidden document so the workflow clipboard block can read/write the system clipboard. |
-| `contextMenus` | Add the right-click item that launches workflows with a context-menu trigger. |
-| `webNavigation` | Detect page navigations for visit-web workflow triggers and for recording. |
-| `cookies` | The workflow Cookie block reads/sets/removes cookies. |
-| `downloads` | The workflow download-handling block observes and manages downloads. |
-| `clipboardRead` | Read the system clipboard for the workflow clipboard block. |
-| `debugger` | Click elements inside closed shadow DOM via the Chrome DevTools Protocol. |
-| `http(s)` host access | Interact with pages and call your model endpoint (and Feishu, if enabled). |
+| Permission            | Purpose                                                                                                   |
+| --------------------- | --------------------------------------------------------------------------------------------------------- |
+| `storage`             | Settings, providers, skills, conversations, workflows, profile, credentials.                              |
+| `tabs`                | Identify the active tab and open/switch/close tabs when asked (and for workflow tab blocks).              |
+| `scripting`           | Inject the page kernel, workflow recorder, element picker, and shortcut listener to read or act on a tab. |
+| `sidePanel`           | Show the panel.                                                                                           |
+| `alarms`              | Wake the worker to run scheduled tasks and workflows and keep the Feishu bot connection alive.            |
+| `offscreen`           | Run a hidden document so the workflow clipboard block can read/write the system clipboard.                |
+| `contextMenus`        | Add the right-click item that launches workflows with a context-menu trigger.                             |
+| `webNavigation`       | Detect page navigations for visit-web workflow triggers and for recording.                                |
+| `cookies`             | The workflow Cookie block reads/sets/removes cookies.                                                     |
+| `downloads`           | The workflow download-handling block observes and manages downloads.                                      |
+| `clipboardRead`       | Read the system clipboard for the workflow clipboard block.                                               |
+| `debugger`            | Click elements inside closed shadow DOM via the Chrome DevTools Protocol.                                 |
+| `http(s)` host access | Interact with pages and call your model endpoint (and Feishu, if enabled).                                |
 
 There is no always-on content script — nothing is injected into a page until a
 turn, a scheduled task, or a workflow needs it. While you record a workflow,
@@ -572,17 +572,17 @@ settings changes apply without a reload.
 
 ## Troubleshooting
 
-| Symptom | Fix |
-| --- | --- |
-| "No model provider configured" | Settings → Add a provider. |
-| 401 / 403 | Wrong/expired key, or key/vendor mismatch. |
-| 404 when sending | Base URL missing its version segment, or unknown model; press **Test connection**. |
-| "Cannot read this page" | `chrome://`, `file://`, Web Store, or extension page — not injectable. |
-| Action still asks in full auto | Reload the extension; confirm the dropdown shows ⚡ Full auto. |
-| "Stopped after N tool rounds" | Step cap reached; send "continue" or raise it in Settings. |
-| Chats but never reads/acts | Model lacks function calling; attach the page or switch model. |
-| Page text empty/partial | Content is in an iframe, lazy-loaded, or behind "Load more"; select the relevant section. |
-| Nothing happens on toolbar click | Reload the extension; the worker may have failed to start. |
+| Symptom                          | Fix                                                                                       |
+| -------------------------------- | ----------------------------------------------------------------------------------------- |
+| "No model provider configured"   | Settings → Add a provider.                                                                |
+| 401 / 403                        | Wrong/expired key, or key/vendor mismatch.                                                |
+| 404 when sending                 | Base URL missing its version segment, or unknown model; press **Test connection**.        |
+| "Cannot read this page"          | `chrome://`, `file://`, Web Store, or extension page — not injectable.                    |
+| Action still asks in full auto   | Reload the extension; confirm the dropdown shows ⚡ Full auto.                            |
+| "Stopped after N tool rounds"    | Step cap reached; send "continue" or raise it in Settings.                                |
+| Chats but never reads/acts       | Model lacks function calling; attach the page or switch model.                            |
+| Page text empty/partial          | Content is in an iframe, lazy-loaded, or behind "Load more"; select the relevant section. |
+| Nothing happens on toolbar click | Reload the extension; the worker may have failed to start.                                |
 
 ---
 

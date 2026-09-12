@@ -17,6 +17,7 @@
 ### Task 1: 监控器抓取全部级别 + `getConsoleEntries`（TDD）
 
 **Files:**
+
 - Create: `tests/cdp-console-log.spec.ts`
 - Modify: `src/background/cdp-monitor.ts`
 
@@ -124,7 +125,9 @@ describe('console capture levels', () => {
   it('captures Log.entryAdded at every level', async () => {
     const { mod, listeners } = await loadFreshModule()
     await mod.ensureTabMonitor(2)
-    emit(listeners, 2, 'Log.entryAdded', { entry: { level: 'error', text: 'net::ERR_ABORTED 404' } })
+    emit(listeners, 2, 'Log.entryAdded', {
+      entry: { level: 'error', text: 'net::ERR_ABORTED 404' },
+    })
     emit(listeners, 2, 'Log.entryAdded', { entry: { level: 'warning', text: 'deprecated API' } })
     emit(listeners, 2, 'Log.entryAdded', { entry: { level: 'info', text: 'loaded' } })
     const all = mod.getConsoleEntries(2, 'all')
@@ -141,9 +144,7 @@ describe('console capture levels', () => {
     emit(listeners, 3, 'Runtime.exceptionThrown', {
       exceptionDetails: { exception: { description: 'TypeError: x is not a function' } },
     })
-    expect(mod.getConsoleEntries(3).map((e) => e.text)).toEqual([
-      'TypeError: x is not a function',
-    ])
+    expect(mod.getConsoleEntries(3).map((e) => e.text)).toEqual(['TypeError: x is not a function'])
   })
 })
 
@@ -234,31 +235,33 @@ export interface ConsoleEntry {
 (c) 事件路由中两个分支改为全级别捕获（`chrome.debugger.onEvent.addListener` 内，原 145-166 行）。注意 `Runtime.consoleAPICalled` 分支跳过 `clear/profile/profileEnd` 三种控制类型——它们没有可读文本，会渲染成空条目；其余非 error/assert/warning 一律记 log：
 
 ```ts
-    if (method === 'Runtime.consoleAPICalled') {
-      const type = String(p?.type ?? '')
-      // Control types without message text would render as empty entries.
-      if (type === 'clear' || type === 'profile' || type === 'profileEnd') return
-      const level: ConsoleEntry['level'] =
-        type === 'error' || type === 'assert' ? 'error' : type === 'warning' ? 'warning' : 'log'
-      const args = Array.isArray(p?.args) ? (p!.args as { value?: unknown; description?: string }[]) : []
-      const text = args
-        .map((arg) => arg.description ?? (arg.value === undefined ? '' : String(arg.value)))
-        .join(' ')
-        .slice(0, 300)
-      push(monitor.console, MAX_CONSOLE_ENTRIES, { level, text, at: Date.now() })
-      return
-    }
-    if (method === 'Log.entryAdded') {
-      const entry = p?.entry as { level?: string; text?: string } | undefined
-      const raw = entry?.level
-      if (!raw) return
-      push(monitor.console, MAX_CONSOLE_ENTRIES, {
-        level: raw === 'error' ? 'error' : raw === 'warning' ? 'warning' : 'log',
-        text: String(entry?.text ?? '').slice(0, 300),
-        at: Date.now(),
-      })
-      return
-    }
+if (method === 'Runtime.consoleAPICalled') {
+  const type = String(p?.type ?? '')
+  // Control types without message text would render as empty entries.
+  if (type === 'clear' || type === 'profile' || type === 'profileEnd') return
+  const level: ConsoleEntry['level'] =
+    type === 'error' || type === 'assert' ? 'error' : type === 'warning' ? 'warning' : 'log'
+  const args = Array.isArray(p?.args)
+    ? (p!.args as { value?: unknown; description?: string }[])
+    : []
+  const text = args
+    .map((arg) => arg.description ?? (arg.value === undefined ? '' : String(arg.value)))
+    .join(' ')
+    .slice(0, 300)
+  push(monitor.console, MAX_CONSOLE_ENTRIES, { level, text, at: Date.now() })
+  return
+}
+if (method === 'Log.entryAdded') {
+  const entry = p?.entry as { level?: string; text?: string } | undefined
+  const raw = entry?.level
+  if (!raw) return
+  push(monitor.console, MAX_CONSOLE_ENTRIES, {
+    level: raw === 'error' ? 'error' : raw === 'warning' ? 'warning' : 'log',
+    text: String(entry?.text ?? '').slice(0, 300),
+    at: Date.now(),
+  })
+  return
+}
 ```
 
 `Runtime.exceptionThrown` 分支（原 167-172 行）不动。
@@ -301,6 +304,7 @@ git commit -m "feat(monitor): 被动捕获全部 console 级别并导出 getCons
 ### Task 2: i18n 双语词条
 
 **Files:**
+
 - Modify: `src/lib/i18n.ts`（三处：`Messages` 接口 ~390 行、en 字典 ~1011 行、zh-CN 字典 ~1596 行）
 
 **背景知识：** `Messages` 是全部文案键的 TS 接口（en 是键的来源），下方有两个字典对象 `en` 与 `zh-CN`。`tests/i18n.spec.ts` 运行时比对双语言键集合一致性并检查无空文案。文案风格沿用现有约定：en 警告用 "When off: ..." 前缀，zh 用 "关闭后：..."。
@@ -308,8 +312,8 @@ git commit -m "feat(monitor): 被动捕获全部 console 级别并导出 getCons
 - [ ] **Step 1: `Messages` 接口加键**（紧跟 `toolNetworkRequestsWarn: string` 之后，第 390 行后插入）
 
 ```ts
-  toolConsoleLog: string
-  toolConsoleLogWarn: string
+toolConsoleLog: string
+toolConsoleLogWarn: string
 ```
 
 - [ ] **Step 2: en 字典加词条**（紧跟 `toolNetworkRequestsWarn` 的 en 值之后，第 1011 行后插入）
@@ -344,6 +348,7 @@ git commit -m "feat(i18n): 控制台日志工具的双语词条 toolConsoleLog"
 ### Task 3: 工具目录元数据
 
 **Files:**
+
 - Modify: `src/lib/tool-catalog.ts`（`TOOL_META` 数组，第 53-57 行 `list_network_requests` 条目之后）
 
 **背景知识：** 设置页（`SettingsTab.tsx`）直接遍历 `TOOL_META` 渲染工具开关列表，无需改动 UI 组件。`tests/tool-config.spec.ts` 校验 `TOOL_META` 覆盖 agent 声明的每个工具、无重复、label/warning 键非空。
@@ -376,6 +381,7 @@ git commit -m "feat(catalog): 注册 list_console_messages 工具元数据"
 ### Task 4: agent 工具 schema + dispatch + 审计描述
 
 **Files:**
+
 - Modify: `src/background/agent.ts`（四处：import 块 ~86-91 行、`TOOLS` 数组 ~575 行后、`describeAction` ~1247 行后、dispatch switch ~1643 行后）
 
 **背景知识：** `TOOLS` 是发给模型 OpenAI 风格的工具 schema 数组；dispatch 是 `executeToolCall` 的 switch（`args: Record<string, unknown>`，返回 JSON 字符串）。审批集合 `ACTION_TOOLS`/`READ_TOOLS` **都不加**本工具——`needsConfirmation` 对两者之外的名称恒为 false，即任何模式不弹审批、只读模式可用。`describeAction` 在执行审计路径（recordAction）被调用，现有 `default: return name` 兜底，加 case 仅为历史记录可读性。
@@ -469,6 +475,7 @@ git commit -m "feat(agent): 新增 list_console_messages 只读控制台日志�
 ### Task 5: MCP 兜底清单同步
 
 **Files:**
+
 - Modify: `examples/local-agent/mcp-server.mjs`（`STATIC_TOOLS` 数组，第 337 行 `list_network_requests` 条目之后）
 
 **背景知识：** 该文件是本地 MCP 适配器（stdio），插件离线时 `tools/list` 回落到 `STATIC_TOOLS` 静态清单；插件在线时工具列表由扩展实时上报（自动含新工具）。`tests/mcp-tools-format.spec.ts` 只断言 `tools.length >= 23`，加条目安全。

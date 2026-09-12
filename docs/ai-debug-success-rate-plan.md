@@ -56,31 +56,34 @@
 
 ## 2. 失败模式分类（按代码推断，建议先用 §4.4 的埋点验证占比）
 
-| 类别 | 典型表现 | 当前代码事实 |
-|---|---|---|
-| A. 时序类 | 慢页面/懒加载导致"元素未找到" | 交互块的轮询等待**默认关闭**：只有块参数 `waitForSelector === true` 才启用（`withWait`，`src/background/workflow-engine/executors.ts:1641`），录制/生成的块大多没开 |
-| B. 定位类 | 选择器过期、元素在 iframe/Shadow DOM/长列表尾部 | 快照元素上限 120（kernel）/80（summarize），目标可能不在快照里 |
-| C. 环境类 | 登录墙、验证码、反爬、404 | 无快速失败路径：不可恢复错误照样烧满 3 次尝试 |
-| D. 语义类 | AI 理解错步骤目的、做错/做多了 | 已有下游边界声明缓解；模型能力是天花板 |
-| E. 配置类 | 未配模型、多窗口 snapshot 到错窗口 | 无模型已有快速失败；scope 错误无专门检测 |
-| F. 闭环缺失 | 调试成功但下次普通运行还失败 | 修复只 pending，确认后无验证重跑；且**只有调试运行**有接管（手动/定时/Feishu 触发都没有，`aiTakeover` 仅在 `workflows.debug` 传入） |
+| 类别        | 典型表现                                        | 当前代码事实                                                                                                                                                        |
+| ----------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A. 时序类   | 慢页面/懒加载导致"元素未找到"                   | 交互块的轮询等待**默认关闭**：只有块参数 `waitForSelector === true` 才启用（`withWait`，`src/background/workflow-engine/executors.ts:1641`），录制/生成的块大多没开 |
+| B. 定位类   | 选择器过期、元素在 iframe/Shadow DOM/长列表尾部 | 快照元素上限 120（kernel）/80（summarize），目标可能不在快照里                                                                                                      |
+| C. 环境类   | 登录墙、验证码、反爬、404                       | 无快速失败路径：不可恢复错误照样烧满 3 次尝试                                                                                                                       |
+| D. 语义类   | AI 理解错步骤目的、做错/做多了                  | 已有下游边界声明缓解；模型能力是天花板                                                                                                                              |
+| E. 配置类   | 未配模型、多窗口 snapshot 到错窗口              | 无模型已有快速失败；scope 错误无专门检测                                                                                                                            |
+| F. 闭环缺失 | 调试成功但下次普通运行还失败                    | 修复只 pending，确认后无验证重跑；且**只有调试运行**有接管（手动/定时/Feishu 触发都没有，`aiTakeover` 仅在 `workflows.debug` 传入）                                 |
 
 ## 3. 方案目录（按"确定性加固 → 接管更强 → 修复闭环 → 度量"分组）
 
 ### G1 不花模型钱的确定性加固（优先做，收益/成本比最高）
 
 **P0-1 调试运行自动启用元素等待**
+
 - 做法：debug 会话启动时对工作流做一次浅拷贝，把所有交互块（click/forms/press-key/hover）临时打上 `waitForSelector: true`（3~5s，可配），不改原工作流。
 - 改动点：`src/background/index.ts` debug case + `withWait` 逻辑；约 30 行。
 - 原理：A 类失败根本不该由 AI 接管处理——等待 3 秒就能解决的"失败"浪费 3 次代理对话。
 - 预期：直接消灭时序类失败的大部分；接管次数显著下降。
 
 **P0-2 失败预分类 + 快速失败（省时间也省成功率虚耗）**
+
 - 做法：接管 verdict 增加可选字段 `reasonKind: 'auth' | 'captcha' | 'notfound' | 'timeout' | 'network' | 'other'`；runtime 遇到 `auth`/`captcha` 立即终止重试（这类重试不可能成功），并给出明确的中文结论（"该页面需要登录，请先登录后重试"）。
 - 改动点：`src/lib/workflow/ai-takeover.ts`（schema + prompt 一行）+ `ai-takeover.ts` runtime（break 条件）。
 - 预期：C 类失败从"3 次尝试 × 25 轮工具"降到 1 次；同时把失败原因说清楚，用户知道该干什么。
 
 **P0-3 scope 自检**
+
 - 做法：接管开始前校验 `request.scope`/tabId 与引擎运行的 `targetTabId` 一致（engine 已传 `tabId`，`AiTakeoverRequest` 已有该字段但 runtime 未使用）；不一致时把接管代理钉到运行所在的 tab 而不是默认窗口解析。
 - 改动点：`src/background/workflow-engine/ai-takeover.ts`（把 `request.tabId` 传给 `runUnattendedPrompt` 的 scope 解析或工具上下文）。
 - 预期：消灭"多窗口用户 snapshot 到错误页面"这一整类静默失败。
@@ -88,22 +91,27 @@
 ### G2 接管本身更强（模型层）
 
 **P1-4 接管专用模型**
+
 - 做法：settings 增加 `takeoverModel: { providerId, model }`（完全仿照现有 `imageModel` 的 v3 迁移模式，`src/lib/storage.ts:137`），Settings UI 加一行；接管 runner 用它解析 provider。
 - 理由：接管是"看页面 + 多轮工具调用"的硬任务，用户可给调试配更强模型而不影响日常聊天成本。
 - 改动点：storage 迁移 + Settings UI + `createAiTakeover` 的 provider 解析；未配置时回落当前模型。
 
 **P1-5 尝试间冷却与强制重观察**
+
 - 做法：失败的尝试之间加 1.5s 延迟（页面状态稳定）；prompt 已要求重新 snapshot——runtime 在第 2、3 次尝试的 prompt 开头追加一行"先重新 snapshot_page 再行动，页面可能已变化"。
 
 **P2-6 快照覆盖增强（仅在接管场景）**
+
 - 做法：接管代理首次 snapshot 后若判断"目标不在列表"（prompt 引导），先 `scroll` 到底再 snapshot 一次对比；或 snapshot 工具在 takeover 上下文里提高 `maxElements`（120 → 200，token 成本换覆盖率）。默认不改全局行为。
 
 **P1-7 失败原因分类引导（配合 P0-2）**
+
 - 做法：prompt「How to work」前置一步："先判断失败类型：元素不存在？页面没加载完？需要登录？验证码？——分类决定策略（等待重试 / 找新元素 / 直接放弃并报告）"，避免对登录墙瞎点 25 轮。
 
 ### G3 修复闭环（治"调试成功、下次还坏"）
 
 **P0-8 调试会话内自动应用修复 + 验证重跑（本方案核心结构改动）**
+
 - 现状缺口：fix 只是 pending，用户确认后没有验证；且"调试"只验证了"AI 能救"，没验证"修完以后不需要 AI 也能跑"。
 - 做法：`workflows.debug` 改成会话循环（最多 2 轮，可配）：
   1. run（带接管）→ 收集 reports + fixes；
@@ -114,12 +122,14 @@
 - 预期：这是"成功率"用户体感的最大杠杆——用户要的是**以后能跑通**，不是这次被 AI 救活。
 
 **P1-9 修复类型扩展**
+
 - 做法：verdict 的 `fix` 除了 `paramsPatch`，允许 `enableWait: true`（给该块加 waitForSelector）与 `onError` 策略建议（retry×N）——这两类是 AI 修不好但确定有效的"非定位修复"。
 - 改动点：`TakeoverFix` 类型 + 确认 UI 文案 + `applyTakeoverFixes` 的应用逻辑。
 
 ### G4 度量（没有数据就无法继续优化）
 
 **P1-10 接管结果埋点**
+
 - 做法：每次接管 episode 追加一条本地记录（workflowId、nodeId、blockId、attempt、completed、reasonKind、耗时），按 workflow 聚合，History/调试报告显示"近 10 次接管成功 7 次，失败原因：登录墙 ×2、定位 ×1"。
 - 改动点：`TakeoverReport` 已有全部字段，只需持久化 + 一个聚合查询 + 一小块 UI。
 - 价值：验证本方案各项的真实收益，找出剩余失败的 top 原因。
@@ -127,19 +137,21 @@
 ### G5 环境与覆盖面
 
 **P2-11 普通运行可选接管**
+
 - 做法：设置开关"运行失败时尝试 AI 接管（消耗模型调用）"，默认关；开启后手动运行/定时任务也传入 takeover hook（`src/background/workflow-engine/run-workflow.ts` 已支持透传）。
 - 注意成本：定时任务无人值守时失败重试要克制（建议只允许 1 次接管）。
 
 **P2-12 编辑器内"易失败块"提示**
+
 - 做法：workflow-review 已有算子指南（`src/lib/workflow/operator-guide.ts`）；在生成的块缺 `waitForSelector`/缺 `description` 时提示补齐，从源头减少失败。
 
 ## 4. 推荐实施顺序
 
-| 阶段 | 内容 | 理由 |
-|---|---|---|
+| 阶段                       | 内容                                                                  | 理由                                                            |
+| -------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------- |
 | **P0（先做，1~2 天量级）** | G1-1 自动等待、G1-2 快速失败、G1-3 scope 自检、G3-8 自动应用+验证重跑 | 前三个是零模型成本的确定性修复；G3-8 直接改变"成功率"的用户体感 |
-| **P1（其次）** | G2-4 专用模型、G2-7 分类引导、G2-5 冷却、G3-9 修复类型、G4-10 埋点 | 模型层增强 + 建立数据回路 |
-| **P2（视数据决定）** | G2-6 快照增强、G5-11 普通运行接管、G5-12 编辑器提示 | 等 P1 埋点说明剩余瓶颈再投入 |
+| **P1（其次）**             | G2-4 专用模型、G2-7 分类引导、G2-5 冷却、G3-9 修复类型、G4-10 埋点    | 模型层增强 + 建立数据回路                                       |
+| **P2（视数据决定）**       | G2-6 快照增强、G5-11 普通运行接管、G5-12 编辑器提示                   | 等 P1 埋点说明剩余瓶颈再投入                                    |
 
 ## 5. 明确不建议做的
 
@@ -156,19 +168,19 @@
 
 ## 7. 实施记录（全部落地）
 
-| 项 | 落点 |
-|---|---|
-| G1-1 自动等待 | `debug-session.ts` `withWaitFor()`：调试运行对交互块强制 `waitForSelector:true`（4s），不改原工作流 |
-| G1-2 快速失败 | `ai-takeover.ts`（lib）`reasonKind` 白名单 + `classifyReason` 关键词兜底；runtime 遇 `auth`/`captcha` 第 1 次尝试后立即终止 |
-| G1-3 scope/tab | runtime `pinTab` 依赖：接管开始前把运行 tab 置前台 + 窗口聚焦（`index.ts` 实现） |
-| G2-4 专用模型 | `settings.takeoverModel`（Settings 卡片，imageModel 同款交互）+ `takeoverProviderOf()` 解析；`agent.ts` `getProvider` 依赖逐层穿透 |
-| G2-5 冷却 | 尝试间隔默认 1.5s（`attemptDelayMs` 可注入，测试传 0） |
-| G2-6 快照提示 | prompt 要求长页面传 `maxElements: 200` + `loc` 提示复用 |
-| G2-7 分类引导 | prompt "先分类再动手"：登录墙/验证码立即放弃；修复建议可含 `waitForSelector/waitSelectorTimeout` |
+| 项                 | 落点                                                                                                                                                               |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| G1-1 自动等待      | `debug-session.ts` `withWaitFor()`：调试运行对交互块强制 `waitForSelector:true`（4s），不改原工作流                                                                |
+| G1-2 快速失败      | `ai-takeover.ts`（lib）`reasonKind` 白名单 + `classifyReason` 关键词兜底；runtime 遇 `auth`/`captcha` 第 1 次尝试后立即终止                                        |
+| G1-3 scope/tab     | runtime `pinTab` 依赖：接管开始前把运行 tab 置前台 + 窗口聚焦（`index.ts` 实现）                                                                                   |
+| G2-4 专用模型      | `settings.takeoverModel`（Settings 卡片，imageModel 同款交互）+ `takeoverProviderOf()` 解析；`agent.ts` `getProvider` 依赖逐层穿透                                 |
+| G2-5 冷却          | 尝试间隔默认 1.5s（`attemptDelayMs` 可注入，测试传 0）                                                                                                             |
+| G2-6 快照提示      | prompt 要求长页面传 `maxElements: 200` + `loc` 提示复用                                                                                                            |
+| G2-7 分类引导      | prompt "先分类再动手"：登录墙/验证码立即放弃；修复建议可含 `waitForSelector/waitSelectorTimeout`                                                                   |
 | G3-8 自动应用+验证 | `debug-session.ts` `runDebugSession()`：运行→收集修复→应用到内存副本→**无接管验证运行**→通过才算 `verified` 并存待确认修复；最多 2 轮；面板横幅显示"已验证/未验证" |
-| G3-9 修复类型 | prompt 修复指引覆盖等待参数；`patchNodeParams` 保护 blockId/disableBlock 不变 |
-| G4-10 埋点 | `takeover-stats.ts`（本地 200 条/30 天）+ `workflows.takeoverStats` 命令 + 调试弹窗成功率/失败原因行 |
-| G5-11 普通运行接管 | `settings.takeoverOnRun`（默认关）开启后手动运行失败节点获得一次接管 |
-| G5-12 编辑器提示 | `operator-guide.ts` 增加"可靠性要求"：稳定选择器、导航后交互块写 waitForSelector、element-exists 分支 |
+| G3-9 修复类型      | prompt 修复指引覆盖等待参数；`patchNodeParams` 保护 blockId/disableBlock 不变                                                                                      |
+| G4-10 埋点         | `takeover-stats.ts`（本地 200 条/30 天）+ `workflows.takeoverStats` 命令 + 调试弹窗成功率/失败原因行                                                               |
+| G5-11 普通运行接管 | `settings.takeoverOnRun`（默认关）开启后手动运行失败节点获得一次接管                                                                                               |
+| G5-12 编辑器提示   | `operator-guide.ts` 增加"可靠性要求"：稳定选择器、导航后交互块写 waitForSelector、element-exists 分支                                                              |
 
 测试：`tests/debug-session.spec.ts`（会话循环全流程）、`tests/takeover-stats.spec.ts`、`tests/ai-takeover.spec.ts` 扩展（快速失败/分类/专用模型/tab 钉定/verdict reasonKind）。`pnpm typecheck`、`pnpm test`（1098 通过）、`pnpm build` 全绿。

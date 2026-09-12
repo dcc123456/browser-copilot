@@ -10,11 +10,11 @@
 
 ## 1. 三种部署方案
 
-| 方案 | 适用场景 | 说明 |
-| --- | --- | --- |
-| **A. 直接跑（推荐起步）** | 有台 Linux/Windows 服务器，想最快用起来 | 仓库克隆 → `pnpm install` → `pnpm --dir server start`，见 §2 |
-| **B. Docker 单容器** | 干净的环境、容器化交付 | 容器自带 Chromium，数据挂 `/data` 卷，见 §3 |
-| **C. Docker + browserless（CDP）** | 想把浏览器独立扩缩、或复用已有 browserless | `BC_BROWSER_MODE=cdp` 连 `ws://browser:3000`，见 §3 |
+| 方案                               | 适用场景                                   | 说明                                                         |
+| ---------------------------------- | ------------------------------------------ | ------------------------------------------------------------ |
+| **A. 直接跑（推荐起步）**          | 有台 Linux/Windows 服务器，想最快用起来    | 仓库克隆 → `pnpm install` → `pnpm --dir server start`，见 §2 |
+| **B. Docker 单容器**               | 干净的环境、容器化交付                     | 容器自带 Chromium，数据挂 `/data` 卷，见 §3                  |
+| **C. Docker + browserless（CDP）** | 想把浏览器独立扩缩、或复用已有 browserless | `BC_BROWSER_MODE=cdp` 连 `ws://browser:3000`，见 §3          |
 
 浏览器会话支持三种形态（`BC_*` / config.json 配置）：
 
@@ -92,10 +92,18 @@ curl -X POST http://127.0.0.1:8787/api/workflows/import \
 
 ```json
 {
-  "imported": 2, "skipped": 0,
+  "imported": 2,
+  "skipped": 0,
   "entries": [
     { "index": 0, "id": "child-1", "name": "子流程", "ok": true, "warnings": [], "missing": [] },
-    { "index": 1, "id": "parent-1", "name": "父流程", "ok": true, "warnings": [], "missing": ["ghost-id"] }
+    {
+      "index": 1,
+      "id": "parent-1",
+      "name": "父流程",
+      "ok": true,
+      "warnings": [],
+      "missing": ["ghost-id"]
+    }
   ]
 }
 ```
@@ -111,11 +119,11 @@ curl -X POST http://127.0.0.1:8787/api/workflows/import \
 
 缺失检查的三道防线：
 
-| 层 | 入口 | 行为 |
-| --- | --- | --- |
-| 导入时 | `POST /api/workflows/import` | 每条返回 `missing: [子流程id…]`（整个批次收完后计算） |
+| 层     | 入口                                | 行为                                                                                              |
+| ------ | ----------------------------------- | ------------------------------------------------------------------------------------------------- |
+| 导入时 | `POST /api/workflows/import`        | 每条返回 `missing: [子流程id…]`（整个批次收完后计算）                                             |
 | 查询时 | `GET /api/workflows/:id/references` | 返回完整引用树：`references`（引用了谁）、`missing`（缺谁，**传递闭包**）、`cycles`（循环引用链） |
-| 启动前 | `POST /api/runs` | 预检失败 → **422**，`missing` 列出要补拷的子流程 id |
+| 启动前 | `POST /api/runs`                    | 预检失败 → **422**，`missing` 列出要补拷的子流程 id                                               |
 
 ```bash
 # 看一个流程完整依赖了谁、缺谁
@@ -193,13 +201,13 @@ pnpm --dir server start
 
 ### 6.1 功能一览
 
-| 页面 | 能做什么 |
-| --- | --- |
-| 仪表盘 | 工作流数/定时任务/浏览器模式/飞书连接状态卡片、最近 5 次运行、快速运行下拉 |
-| 工作流 | 列表（触发方式徽标）、导入 JSON（逐条报告缺失子流程与校验警告）、在线编辑（CodeMirror JSON 编辑器 + 校验/格式化）、新建、运行（可注入变量 JSON）、定时设置、引用与循环检查、下载、删除 |
-| 定时任务 | 全部时间触发总览：规则明细、下次运行时间、启用/停用开关（停用的工作流也列出） |
-| 运行记录 | 4 秒自动刷新、按名称/runId 过滤、逐步日志时间线、summary/error、取消运行中的任务 |
-| 设置 | 大模型（Base URL/Key/模型 + 一键测试连接）、飞书机器人（AppId/Secret/Webhook + 测试推送与长连接状态）、安全（更换 BC_TOKEN）、浏览器（模式/CDP/无头/并发/超时） |
+| 页面     | 能做什么                                                                                                                                                                               |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 仪表盘   | 工作流数/定时任务/浏览器模式/飞书连接状态卡片、最近 5 次运行、快速运行下拉                                                                                                             |
+| 工作流   | 列表（触发方式徽标）、导入 JSON（逐条报告缺失子流程与校验警告）、在线编辑（CodeMirror JSON 编辑器 + 校验/格式化）、新建、运行（可注入变量 JSON）、定时设置、引用与循环检查、下载、删除 |
+| 定时任务 | 全部时间触发总览：规则明细、下次运行时间、启用/停用开关（停用的工作流也列出）                                                                                                          |
+| 运行记录 | 4 秒自动刷新、按名称/runId 过滤、逐步日志时间线、summary/error、取消运行中的任务                                                                                                       |
+| 设置     | 大模型（Base URL/Key/模型 + 一键测试连接）、飞书机器人（AppId/Secret/Webhook + 测试推送与长连接状态）、安全（更换 BC_TOKEN）、浏览器（模式/CDP/无头/并发/超时）                        |
 
 ### 6.2 配置生效语义（PUT /api/config）
 
@@ -215,20 +223,20 @@ pnpm --dir server start
 
 优先级：`BC_*` 环境变量 > `server/config.json`（`BC_CONFIG` 可指向别处）> 内置默认。模板见 `server/config.example.json`。
 
-| 环境变量 | 默认 | 说明 |
-| --- | --- | --- |
-| `BC_PORT` | 8787 | HTTP 端口 |
-| `BC_TOKEN` | （空=无鉴权） | Bearer Token；**生产必设**，空时启动会警告 |
-| `BC_DATA_DIR` | server/data | 运行日志/产物/ profile 根目录 |
-| `BC_WORKFLOWS_FILE` | server/workflows.json | 工作流库文件（扩展同格式） |
-| `BC_WORKFLOWS_EXTRA_DIR` | server/workflows.d | 额外合并的 `*.json` 工作流目录（可空） |
-| `BC_BROWSER_MODE` | local | `local` 本地 Chromium / `cdp` 远端 CDP |
-| `BC_CDP_ENDPOINT` | — | CDP 模式必填，如 `ws://127.0.0.1:9222` |
-| `BC_BROWSER_HEADLESS` | 1 | 有头调试设 0（桌面环境） |
-| `BC_MAX_CONCURRENT` | 2 | 同时运行的 workflow 数 |
-| `BC_RUN_TIMEOUT_MS` | 600000 | 单次运行硬超时 |
-| `BC_LLM_BASE_URL/_API_KEY/_MODEL` | — | ai-agent / AI 接管用的 OpenAI 兼容模型 |
-| `BC_FEISHU_*` | — | 见 §5.4 |
+| 环境变量                          | 默认                  | 说明                                       |
+| --------------------------------- | --------------------- | ------------------------------------------ |
+| `BC_PORT`                         | 8787                  | HTTP 端口                                  |
+| `BC_TOKEN`                        | （空=无鉴权）         | Bearer Token；**生产必设**，空时启动会警告 |
+| `BC_DATA_DIR`                     | server/data           | 运行日志/产物/ profile 根目录              |
+| `BC_WORKFLOWS_FILE`               | server/workflows.json | 工作流库文件（扩展同格式）                 |
+| `BC_WORKFLOWS_EXTRA_DIR`          | server/workflows.d    | 额外合并的 `*.json` 工作流目录（可空）     |
+| `BC_BROWSER_MODE`                 | local                 | `local` 本地 Chromium / `cdp` 远端 CDP     |
+| `BC_CDP_ENDPOINT`                 | —                     | CDP 模式必填，如 `ws://127.0.0.1:9222`     |
+| `BC_BROWSER_HEADLESS`             | 1                     | 有头调试设 0（桌面环境）                   |
+| `BC_MAX_CONCURRENT`               | 2                     | 同时运行的 workflow 数                     |
+| `BC_RUN_TIMEOUT_MS`               | 600000                | 单次运行硬超时                             |
+| `BC_LLM_BASE_URL/_API_KEY/_MODEL` | —                     | ai-agent / AI 接管用的 OpenAI 兼容模型     |
+| `BC_FEISHU_*`                     | —                     | 见 §5.4                                    |
 
 ### 7.1 敏感配置放哪、怎么配（LLM Key / 飞书 Secret 示例）
 
@@ -378,18 +386,18 @@ data/
 
 ## 11. 故障排查
 
-| 现象 | 处理 |
-| --- | --- |
-| `422 missing: [...]` | 把列出的子工作流一并复制进来（§4.2），导入后再跑 |
-| 运行一直 `queued` | 并发被占满（`/api/runs` 看在跑的），或浏览器启动失败看 stderr |
-| `cdp` 启动报 endpoint 错误 | `BC_BROWSER_MODE=cdp` 必须同时给 `BC_CDP_ENDPOINT` |
-| AI 块报“未配置模型” | 设置 `BC_LLM_BASE_URL/_API_KEY/_MODEL` |
-| 飞书 404 / 收不到消息 | 应用未开“长连接模式”或未订阅 `im.message.receive_v1` / 版本未发布 |
-| 定时没触发 | `GET /api/workflows` 看 trigger；`trigger.enabled=false` 不布防；cron 需 5 段式 |
-| Windows 有头调试 | `BC_BROWSER_HEADLESS=0`，且以桌面会话运行（不要在服务会话里有头） |
-| 控制台显示“尚未构建”或 `GET /` 404 | 先执行 `pnpm --dir server build` 再重启进程（Docker 镜像已内置） |
-| 控制台登录后一直 401 | Token 不对或被轮换：清除浏览器 localStorage 中的 `bc-runner-token` 后重新输入 |
-| 页面改了配置但“不生效” | 该字段被 `BC_*` 环境变量覆盖（页面有标注），去掉环境变量或改环境变量本身 |
+| 现象                               | 处理                                                                            |
+| ---------------------------------- | ------------------------------------------------------------------------------- |
+| `422 missing: [...]`               | 把列出的子工作流一并复制进来（§4.2），导入后再跑                                |
+| 运行一直 `queued`                  | 并发被占满（`/api/runs` 看在跑的），或浏览器启动失败看 stderr                   |
+| `cdp` 启动报 endpoint 错误         | `BC_BROWSER_MODE=cdp` 必须同时给 `BC_CDP_ENDPOINT`                              |
+| AI 块报“未配置模型”                | 设置 `BC_LLM_BASE_URL/_API_KEY/_MODEL`                                          |
+| 飞书 404 / 收不到消息              | 应用未开“长连接模式”或未订阅 `im.message.receive_v1` / 版本未发布               |
+| 定时没触发                         | `GET /api/workflows` 看 trigger；`trigger.enabled=false` 不布防；cron 需 5 段式 |
+| Windows 有头调试                   | `BC_BROWSER_HEADLESS=0`，且以桌面会话运行（不要在服务会话里有头）               |
+| 控制台显示“尚未构建”或 `GET /` 404 | 先执行 `pnpm --dir server build` 再重启进程（Docker 镜像已内置）                |
+| 控制台登录后一直 401               | Token 不对或被轮换：清除浏览器 localStorage 中的 `bc-runner-token` 后重新输入   |
+| 页面改了配置但“不生效”             | 该字段被 `BC_*` 环境变量覆盖（页面有标注），去掉环境变量或改环境变量本身        |
 
 ## 12. 本地验证
 

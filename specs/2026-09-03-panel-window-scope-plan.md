@@ -15,6 +15,7 @@
 ### Task 1: `automation-scope` 模块（TDD）
 
 **Files:**
+
 - Create: `src/background/automation-scope.ts`
 - Test: `tests/automation-scope.spec.ts`
 
@@ -22,14 +23,18 @@
 
 ```ts
 // 核心断言示例（完整文件按 tests/last-tab.spec.ts 的 makeChrome 风格写）
-expect(await mod.normalScopeFromWindowId(1)).toEqual({ windowId: 1 })        // type:'normal'
-expect(await mod.normalScopeFromWindowId(2)).toBeUndefined()                 // type:'popup'
-expect(await mod.normalScopeFromWindowId(99)).toBeUndefined()                // 不存在
+expect(await mod.normalScopeFromWindowId(1)).toEqual({ windowId: 1 }) // type:'normal'
+expect(await mod.normalScopeFromWindowId(2)).toBeUndefined() // type:'popup'
+expect(await mod.normalScopeFromWindowId(99)).toBeUndefined() // 不存在
 expect(await mod.normalScopeFromWindowId(undefined)).toBeUndefined()
-mod.registerPanelWindow(1, portA); mod.registerPanelWindow(1, portB)
-expect(mod.hasPanelWindows()).toBe(true); expect(mod.isPanelWindow(1)).toBe(true)
-mod.unregisterPort(portA); expect(mod.isPanelWindow(1)).toBe(true)           // B 还在
-mod.unregisterPort(portB); expect(mod.hasPanelWindows()).toBe(false)
+mod.registerPanelWindow(1, portA)
+mod.registerPanelWindow(1, portB)
+expect(mod.hasPanelWindows()).toBe(true)
+expect(mod.isPanelWindow(1)).toBe(true)
+mod.unregisterPort(portA)
+expect(mod.isPanelWindow(1)).toBe(true) // B 还在
+mod.unregisterPort(portB)
+expect(mod.hasPanelWindows()).toBe(false)
 expect(mod.shouldTriggerVisitWeb(true, true)).toBe(true)
 expect(mod.shouldTriggerVisitWeb(true, false)).toBe(false)
 expect(mod.shouldTriggerVisitWeb(false, false)).toBe(true)
@@ -126,6 +131,7 @@ export function shouldTriggerVisitWeb(hasPanels: boolean, isPanel: boolean): boo
 ### Task 2: `last-tab.ts` 支持窗口过滤
 
 **Files:**
+
 - Modify: `src/background/last-tab.ts`（`getLastInjectableTab(preferWindowId?, onlyWindowId?)`：`onlyWindowId` 存在时先 `filter((t) => t.windowId === onlyWindowId)` 再按 `updatedAt` 排序返回）
 - Test: 追加到 `tests/last-tab.spec.ts`（窗口 A 记忆 2 个、窗口 B 记忆 1 个 → `getLastInjectableTab(undefined, A)` 只返回 A 的最新；A 无记忆 → undefined）
 
@@ -134,6 +140,7 @@ export function shouldTriggerVisitWeb(hasPanels: boolean, isPanel: boolean): boo
 ### Task 3: `page.ts` 作用域
 
 **Files:**
+
 - Modify: `src/background/page.ts`
 
 ```ts
@@ -158,6 +165,7 @@ export async function activeTab(scope?: ScopeWindow): Promise<chrome.tabs.Tab | 
 ### Task 4: `driver.ts` 作用域贯穿
 
 **Files:**
+
 - Modify: `src/background/driver.ts`
 - Test: `tests/driver-scope.spec.ts`（新建，chrome stub 风格同 last-tab.spec，需含 `windows.get/getAll`、`tabs.query/get/update/create/remove` 与事件注册表）
 
@@ -188,7 +196,9 @@ async function resolveAutomationTabUncached(scope?: ScopeWindow) {
         .query({ active: true, windowId: scope.windowId })
         .catch(() => [])
       if (active && isInjectablePage(active.url)) return active
-      const remembered = await getLastInjectableTab(undefined, scope.windowId).catch(() => undefined)
+      const remembered = await getLastInjectableTab(undefined, scope.windowId).catch(
+        () => undefined,
+      )
       if (remembered) return remembered
       // 窗口在、但没有可注入页面：绝不跨窗口回退。
       return undefined
@@ -242,6 +252,7 @@ export async function updateActiveTabUrl(url: string, scope?: ScopeWindow): Prom
 ### Task 5: `agent.ts` 贯穿
 
 **Files:**
+
 - Modify: `src/background/agent.ts`
 
 - `AgentDeps` + `scopeWindowId?: number`；`ToolContext` + `scope?: ScopeWindow`。
@@ -267,6 +278,7 @@ export async function updateActiveTabUrl(url: string, scope?: ScopeWindow): Prom
 ### Task 6: workflow 引擎与 run 层
 
 **Files:**
+
 - Modify: `src/background/workflow-engine/engine.ts`、`src/background/workflow-engine/run-workflow.ts`
 - Test: `tests/workflow-engine.spec.ts` 追加（stub executor 断言 `ctx.scope` 到达执行器；`execute-workflow` 子流程继承 scope）
 
@@ -278,16 +290,19 @@ export async function updateActiveTabUrl(url: string, scope?: ScopeWindow): Prom
 ### Task 7: workflow 执行器贯穿
 
 **Files:**
+
 - Modify: `src/background/workflow-engine/executors.ts`、`src/background/workflow-engine/ai-agent-executor.ts`
 
 逐处把 `ctx.scope` 追加为尾参（`grep -n "execOnActiveTab\|activeTab(\|driverNewTab\|driverSwitchTab\|closeActiveTab\|goBack(\|goForward(\|listAllTabUrls\|getActiveTabInfo\|elementExists(\|countElements(\|resolveAutomationTab\|execJsOnActiveTab\|execWorkflowJsOnActiveTab" executors.ts` 全覆盖）：
 `runRaw`、滚动平滑、`waitFor`、`takeScreenshot`（两分支）、`getText`、`openUrl`、`newTabExec`、`switchTabExec`、`closeTabExec`、`reloadTabExec`、`elementExistsExec`、`linkBlock`（3 处）、`attributeValueExec`、`goBackExec`/`forwardPage`、`tabUrlExec`/`activeTabExec`、`uploadFileExec`、`waitConnections`、`getForm`、JS 块（199）；`ai-agent-executor.ts:68` → `resolveAutomationTab(ctx.tabId, ctx.scope)`。
+
 - [ ] `pnpm vitest run tests/workflow-executors.spec.ts tests/automa-executors.spec.ts tests/ai-agent-block.spec.ts tests/workflow-engine.spec.ts` 回归
 - [ ] Commit `feat(scope): workflow 块执行器按面板窗口执行`
 
 ### Task 8: 背景入口接线
 
 **Files:**
+
 - Modify: `src/background/index.ts`、`src/background/workflow-triggers.ts`
 
 1. index.ts 模块加载处 `initScopeWindowCleanup()`。
@@ -295,12 +310,14 @@ export async function updateActiveTabUrl(url: string, scope?: ScopeWindow): Prom
 3. `onMessage` listener：`_sender` → `sender`；`page.read`/`page.check` 用 `normalScopeFromWindowId(sender.tab?.windowId)`；`workflows.run` 传 `scopeWindowId: sender.tab?.windowId`。
 4. `runWorkflowKeepalive(workflowId, scopeWindowId?)`；visit-web 监听器头部加 `if (!shouldTriggerVisitWeb(hasPanelWindows(), isPanelWindow(details.windowId))) return`，触发时 `runWorkflowKeepalive(wf.id, details.windowId)`；右键菜单 `runWorkflowKeepalive(wf.id, info.tab?.windowId)`；`setWorkflowRunner((workflowId, scopeWindowId) => …)`。
 5. workflow-triggers.ts：`setWorkflowRunner(fn: (workflowId: string, scopeWindowId?: number) => void)`；`handleShortcutPressed(message, sender?)` → `runWorkflowRef?.(match.wf.id, sender?.tab?.windowId)`；**alarm 路径（342/357）保持不传 scope（无人值守）**。
+
 - [ ] `pnpm run typecheck` 通过；`pnpm vitest run tests/workflow-triggers.spec.ts` 回归
 - [ ] Commit `feat(scope): 背景接线——端口登记、visit-web 守卫与手势窗口`
 
 ### Task 9: 文档与全量验证
 
 **Files:**
+
 - Modify: `README.md`、`README.zh-CN.md`（「使用说明」加"窗口作用域"条目；「已知限制」同步）；spec 文档偏差备注回填
 - [ ] `pnpm run typecheck && pnpm run test && pnpm run build` 全部通过
 - [ ] Commit `docs: 窗口作用域使用说明`

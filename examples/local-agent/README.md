@@ -94,13 +94,13 @@ args = ["<绝对路径>/mcp-server.mjs"]
 
 任意一侧都可发送请求 `{ id, type, ... }`，另一侧必须回 `{ id, ok: true, data }` 或 `{ id, ok: false, error }`。配置了共享 token 时，每个请求额外带 `token: "<token>"`。
 
-| 方向 | 请求 | 响应 |
-| --- | --- | --- |
-| 适配器 → 插件 | `{ "id": "<uuid>", "type": "ping" }` | `{ "id": "<uuid>", "ok": true, "data": { "pong": true } }` |
-| 适配器 → 插件 | `{ "id": "<uuid>", "type": "tools.list" }` | `{ "id": "<uuid>", "ok": true, "data": { "tools": [ { "name": "...", "description": "...", "inputSchema": { ... } } ] } }` |
-| 适配器 → 插件 | `{ "id": "<uuid>", "type": "tool", "tool": "<名称>", "args": { ... } }`（args 可选） | `{ "id": "<uuid>", "ok": true, "data": <任意结果> }` 或 `{ "id": "<uuid>", "ok": false, "error": "<错误信息>" }` |
-| 适配器 → 插件 | `{ "id": "<uuid>", "type": "prompt", "prompt": "<自然语言指令>" }` | 同上 |
-| 插件 → 适配器 | `{ "id": "hb-<n>", "type": "ping" }`（心跳） | `{ "id": "hb-<n>", "ok": true, "data": { "pong": true } }` |
+| 方向          | 请求                                                                                 | 响应                                                                                                                       |
+| ------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| 适配器 → 插件 | `{ "id": "<uuid>", "type": "ping" }`                                                 | `{ "id": "<uuid>", "ok": true, "data": { "pong": true } }`                                                                 |
+| 适配器 → 插件 | `{ "id": "<uuid>", "type": "tools.list" }`                                           | `{ "id": "<uuid>", "ok": true, "data": { "tools": [ { "name": "...", "description": "...", "inputSchema": { ... } } ] } }` |
+| 适配器 → 插件 | `{ "id": "<uuid>", "type": "tool", "tool": "<名称>", "args": { ... } }`（args 可选） | `{ "id": "<uuid>", "ok": true, "data": <任意结果> }` 或 `{ "id": "<uuid>", "ok": false, "error": "<错误信息>" }`           |
+| 适配器 → 插件 | `{ "id": "<uuid>", "type": "prompt", "prompt": "<自然语言指令>" }`                   | 同上                                                                                                                       |
+| 插件 → 适配器 | `{ "id": "hb-<n>", "type": "ping" }`（心跳）                                         | `{ "id": "hb-<n>", "ok": true, "data": { "pong": true } }`                                                                 |
 
 MCP 侧的映射：Agent 的 `tools/list` → WS `tools.list`；Agent 的 `tools/call`（工具名 `name`、参数 `arguments`）→ WS `tool`（`tool` + `args`）。
 

@@ -54,7 +54,9 @@ MV3 service worker 没有异步上下文传播（无 `AsyncLocalStorage`），�
 type ScopeWindow = { windowId: number }
 
 /** 校验窗口存在且 type === 'normal'；否则返回 undefined（降级为无作用域）。 */
-async function normalScopeFromWindowId(windowId?: number | undefined): Promise<ScopeWindow | undefined>
+async function normalScopeFromWindowId(
+  windowId?: number | undefined,
+): Promise<ScopeWindow | undefined>
 
 /** 面板窗口登记（供 visit-web 触发器守卫判断"是否存在面板窗口"）。 */
 function registerPanelWindow(windowId: number, port: chrome.runtime.Port): void
@@ -100,7 +102,7 @@ function isPanelWindow(windowId: number | undefined): boolean
   3. last-tab 记忆中本窗口的最近可注入标签（给 `getLastInjectableTab` 增加第二个可选参数
      `onlyWindowId?: number`，只保留该窗口的候选，优先级仍按 `updatedAt`）；
   4. 仍无 → 返回 undefined（调用方报"没有可操作的标签页"类错误）。
-  **绝不跨窗口回退。** 无 scope 时保持现有完整回退链。
+     **绝不跨窗口回退。** 无 scope 时保持现有完整回退链。
 - `execOnActiveTab` / `execJsOnActiveTab` / `snapshotPage` / `settleAfterNavigation` /
   `goBack` / `goForward` / `closeActiveTab` / `listAllTabUrls`：透传 scope。
   `settleAfterNavigation` 内部用 `activeTab()` 定位等待的标签，必须跟着 scoped。
@@ -163,13 +165,13 @@ function isPanelWindow(windowId: number | undefined): boolean
 
 ## 7. 错误处理
 
-| 场景 | 行为 |
-| --- | --- |
-| 面板窗口被中途关闭 | scoped 查询为空 → driver/page 回退全局链路；chrome 调用抛错则照常上报。面板已随窗口关闭，回合结果仍持久化（现有 finally 逻辑）。 |
-| 插件窗口内无可注入页面（全是 chrome:// 等） | `resolveAutomationTab` 返回 undefined，报"插件窗口内没有可操作的网页标签页"；模型可转述；**绝不**跳到其他窗口操作。 |
-| worker 回收后面板登记丢失 | 触发器短暂回到全局监听；面板重连后恢复。注释写明接受的降级。 |
-| 编辑器弹窗运行工作流 / 元素拾取 | `normalScopeFromWindowId` 对 popup 窗口返回 undefined → 现有全局链路，行为不变。 |
-| `tab_new`/`open_url` 目标窗口恰好刚被关闭 | chrome 调用抛错，错误信息上报给模型/面板。 |
+| 场景                                        | 行为                                                                                                                             |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| 面板窗口被中途关闭                          | scoped 查询为空 → driver/page 回退全局链路；chrome 调用抛错则照常上报。面板已随窗口关闭，回合结果仍持久化（现有 finally 逻辑）。 |
+| 插件窗口内无可注入页面（全是 chrome:// 等） | `resolveAutomationTab` 返回 undefined，报"插件窗口内没有可操作的网页标签页"；模型可转述；**绝不**跳到其他窗口操作。              |
+| worker 回收后面板登记丢失                   | 触发器短暂回到全局监听；面板重连后恢复。注释写明接受的降级。                                                                     |
+| 编辑器弹窗运行工作流 / 元素拾取             | `normalScopeFromWindowId` 对 popup 窗口返回 undefined → 现有全局链路，行为不变。                                                 |
+| `tab_new`/`open_url` 目标窗口恰好刚被关闭   | chrome 调用抛错，错误信息上报给模型/面板。                                                                                       |
 
 ## 8. 测试
 

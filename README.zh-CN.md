@@ -32,6 +32,7 @@
 MCP 发来的工具调用。
 
 ---
+
 <video src="https://github.com/user-attachments/assets/17a30b54-608c-43a9-a5ee-770c1d809350" controls="controls" width="100%"></video>
 
 ## 目录
@@ -150,12 +151,12 @@ pnpm run build
 
 下拉框的选择作用于**下一个动作**，即使回答正在进行中也能立即切换。
 
-| 模式 | 行为 | 适用场景 |
-| --- | --- | --- |
-| 💬 **聊天** | 纯对话。不向模型发送读页面或操作工具，因此不会碰页面，token 消耗最低。仍可附带选中的文字。 | 头脑风暴、写作、问答、翻译——不希望它操作页面时。 |
-| 🔒 **只读** | 只能读取，不点击/输入/跳转/填写。 | 评审、总结、翻译——零副作用。 |
-| 🛡 **半自动**（默认） | 每个改变页面的动作都先给你确认。 | 日常使用；每一步都可控。 |
-| ⚡ **全自动** | 动作不再确认直接执行。 | 你信任的、重复性流程。 |
+| 模式                 | 行为                                                                                       | 适用场景                                         |
+| -------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| 💬 **聊天**          | 纯对话。不向模型发送读页面或操作工具，因此不会碰页面，token 消耗最低。仍可附带选中的文字。 | 头脑风暴、写作、问答、翻译——不希望它操作页面时。 |
+| 🔒 **只读**          | 只能读取，不点击/输入/跳转/填写。                                                          | 评审、总结、翻译——零副作用。                     |
+| 🛡 **半自动**（默认） | 每个改变页面的动作都先给你确认。                                                           | 日常使用；每一步都可控。                         |
+| ⚡ **全自动**        | 动作不再确认直接执行。                                                                     | 你信任的、重复性流程。                           |
 
 半自动下确认卡片会准确显示要点哪个按钮、填哪个字段、打开哪个 URL。全自动下每个动作仍记录在
 **数据**标签的操作历史里，事后可审计。
@@ -168,17 +169,17 @@ pnpm run build
 （`POST {baseUrl}/chat/completions`、`Bearer` 认证、SSE 流式返回）。provider 只是配置，
 不是代码分支，没列出的端点同样能用。
 
-| 预设 | 接口地址 | 模型示例 |
-| --- | --- | --- |
-| DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat`、`deepseek-reasoner` |
-| 火山方舟 Ark | `https://ark.cn-beijing.volces.com/api/v3` | `doubao-seed-code`，或 `ep-…` |
-| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
-| OpenRouter | `https://openrouter.ai/api/v1` | `deepseek/deepseek-chat` |
-| Moonshot / Kimi | `https://api.moonshot.cn/v1` | `kimi-k2-0905-preview` |
-| 阿里云百炼 DashScope | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` |
-| 硅基流动 SiliconFlow | `https://api.siliconflow.cn/v1` | `deepseek-ai/DeepSeek-V3` |
-| Ollama（本地） | `http://localhost:11434/v1` | `qwen3:8b` |
-| LM Studio（本地） | `http://localhost:1234/v1` | `local-model` |
+| 预设                 | 接口地址                                            | 模型示例                             |
+| -------------------- | --------------------------------------------------- | ------------------------------------ |
+| DeepSeek             | `https://api.deepseek.com/v1`                       | `deepseek-chat`、`deepseek-reasoner` |
+| 火山方舟 Ark         | `https://ark.cn-beijing.volces.com/api/v3`          | `doubao-seed-code`，或 `ep-…`        |
+| OpenAI               | `https://api.openai.com/v1`                         | `gpt-4o-mini`                        |
+| OpenRouter           | `https://openrouter.ai/api/v1`                      | `deepseek/deepseek-chat`             |
+| Moonshot / Kimi      | `https://api.moonshot.cn/v1`                        | `kimi-k2-0905-preview`               |
+| 阿里云百炼 DashScope | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus`                          |
+| 硅基流动 SiliconFlow | `https://api.siliconflow.cn/v1`                     | `deepseek-ai/DeepSeek-V3`            |
+| Ollama（本地）       | `http://localhost:11434/v1`                         | `qwen3:8b`                           |
+| LM Studio（本地）    | `http://localhost:1234/v1`                          | `local-model`                        |
 
 **怎么选**：要让它自主读页面/动手，必须选支持工具调用的模型。日常用便宜快的
 （`deepseek-chat`、`gpt-4o-mini`、`qwen-plus`），难任务用推理模型，敏感内容用本地模型。
@@ -411,21 +412,21 @@ Browser Copilot 插件   （在你的 Chrome 中实际执行每个调用）
 `chrome.storage.local` 降级为只读镜像缓存：磁盘不可用或文件损坏时自动回退读取，写入失败也
 不会丢数据。随时可以在同一设置卡片切回浏览器存储；第一次选择文件夹时会把已有数据迁移过去。
 
-| 权限 | 用途 |
-| --- | --- |
-| `storage` | 保存设置、模型服务、技能、对话、工作流、资料和凭据。 |
-| `tabs` | 识别当前标签页，并在你要求时打开/切换/关闭标签（工作流的标签块也需要）。 |
-| `scripting` | 注入页面内核、工作流录制器、元素选择器和快捷键监听，以读取或操作标签页。 |
-| `sidePanel` | 显示侧边栏。 |
-| `alarms` | 唤醒 worker 运行定时任务和工作流，并在开启飞书时为飞书连接保活。 |
-| `offscreen` | 运行隐藏文档，让工作流的剪贴板块读写系统剪贴板。 |
-| `contextMenus` | 添加右键菜单项，启动配置了右键菜单触发器的工作流。 |
-| `webNavigation` | 侦测页面跳转，用于 visit-web 工作流触发器和录制。 |
-| `cookies` | 工作流的 Cookie 块读取/设置/删除 Cookie。 |
-| `downloads` | 工作流的下载处理块观察和管理下载。 |
-| `clipboardRead` | 读取系统剪贴板，供工作流的剪贴板块使用。 |
-| `debugger` | 通过 Chrome DevTools Protocol 点击闭合 shadow DOM 内的元素。 |
-| `http(s)` 主机权限 | 与页面交互、请求你配置的模型端点，以及开启时请求飞书。 |
+| 权限               | 用途                                                                     |
+| ------------------ | ------------------------------------------------------------------------ |
+| `storage`          | 保存设置、模型服务、技能、对话、工作流、资料和凭据。                     |
+| `tabs`             | 识别当前标签页，并在你要求时打开/切换/关闭标签（工作流的标签块也需要）。 |
+| `scripting`        | 注入页面内核、工作流录制器、元素选择器和快捷键监听，以读取或操作标签页。 |
+| `sidePanel`        | 显示侧边栏。                                                             |
+| `alarms`           | 唤醒 worker 运行定时任务和工作流，并在开启飞书时为飞书连接保活。         |
+| `offscreen`        | 运行隐藏文档，让工作流的剪贴板块读写系统剪贴板。                         |
+| `contextMenus`     | 添加右键菜单项，启动配置了右键菜单触发器的工作流。                       |
+| `webNavigation`    | 侦测页面跳转，用于 visit-web 工作流触发器和录制。                        |
+| `cookies`          | 工作流的 Cookie 块读取/设置/删除 Cookie。                                |
+| `downloads`        | 工作流的下载处理块观察和管理下载。                                       |
+| `clipboardRead`    | 读取系统剪贴板，供工作流的剪贴板块使用。                                 |
+| `debugger`         | 通过 Chrome DevTools Protocol 点击闭合 shadow DOM 内的元素。             |
+| `http(s)` 主机权限 | 与页面交互、请求你配置的模型端点，以及开启时请求飞书。                   |
 
 没有常驻 content script——在某轮回答、某个定时任务或某个工作流需要之前，不会向任何页面注入
 内容。录制工作流、使用元素选择器或启用键盘快捷键触发器期间，会向打开的标签页注入一个只为
@@ -474,17 +475,17 @@ pnpm run package     # 构建两个变体 → releases/browser-copilot-<版本>-
 
 ## 常见问题
 
-| 现象 | 处理 |
-| --- | --- |
-| 提示未配置模型服务 | 设置 → 添加模型服务。 |
-| 401 / 403 | 密钥错误/过期，或密钥与厂商不匹配。 |
-| 发送时 404 | 接口地址少了版本段，或模型名不存在；点**测试连接**定位。 |
-| 提示无法读取此页面 | `chrome://`、`file://`、应用商店或其他扩展页面，无法注入。 |
-| 全自动下仍弹确认 | 重新加载扩展，再确认下拉框显示 ⚡ 全自动。 |
-| 提示 "Stopped after N tool rounds" | 达到步数上限，发"继续"或在设置里调高。 |
-| 能聊天但从不读页面或动手 | 模型不支持工具调用；手动附带页面或换模型。 |
-| 页面文字为空或不全 | 内容在 iframe、懒加载，或在"加载更多"后；先选中关键部分。 |
-| 点工具栏图标没反应 | 重新加载扩展，可能是 worker 启动失败。 |
+| 现象                               | 处理                                                       |
+| ---------------------------------- | ---------------------------------------------------------- |
+| 提示未配置模型服务                 | 设置 → 添加模型服务。                                      |
+| 401 / 403                          | 密钥错误/过期，或密钥与厂商不匹配。                        |
+| 发送时 404                         | 接口地址少了版本段，或模型名不存在；点**测试连接**定位。   |
+| 提示无法读取此页面                 | `chrome://`、`file://`、应用商店或其他扩展页面，无法注入。 |
+| 全自动下仍弹确认                   | 重新加载扩展，再确认下拉框显示 ⚡ 全自动。                 |
+| 提示 "Stopped after N tool rounds" | 达到步数上限，发"继续"或在设置里调高。                     |
+| 能聊天但从不读页面或动手           | 模型不支持工具调用；手动附带页面或换模型。                 |
+| 页面文字为空或不全                 | 内容在 iframe、懒加载，或在"加载更多"后；先选中关键部分。  |
+| 点工具栏图标没反应                 | 重新加载扩展，可能是 worker 启动失败。                     |
 
 ---
 

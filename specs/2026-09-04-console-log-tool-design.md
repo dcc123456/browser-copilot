@@ -95,14 +95,14 @@ browser-copilot 的智能体（`src/background/agent.ts`）可以读写页面、
 
 ### 2.5 错误处理与边界
 
-| 场景 | 行为 |
-| --- | --- |
-| 无可读标签页 | `{ ok: false, error: '没有可读取的标签页。' }` |
+| 场景                                              | 行为                                                           |
+| ------------------------------------------------- | -------------------------------------------------------------- |
+| 无可读标签页                                      | `{ ok: false, error: '没有可读取的标签页。' }`                 |
 | debugger 不可用（chrome:// 页、用户拒绝 infobar） | `ensureTabMonitor` 静默失败，返回缓冲现状或空 note；不阻断工具 |
-| 监控器附加前的日志 | 无法回补（CDP 固有限制）；工具描述与空结果 note 明示 |
-| 缓冲超 200 条 | 丢弃最旧（现有 ring-buffer 行为） |
-| 文本超长 | 截断 300 字符（现有行为） |
-| 内存 | 仅 service-worker 内存缓冲，不落盘 |
+| 监控器附加前的日志                                | 无法回补（CDP 固有限制）；工具描述与空结果 note 明示           |
+| 缓冲超 200 条                                     | 丢弃最旧（现有 ring-buffer 行为）                              |
+| 文本超长                                          | 截断 300 字符（现有行为）                                      |
+| 内存                                              | 仅 service-worker 内存缓冲，不落盘                             |
 
 ### 2.6 测试
 
@@ -119,13 +119,13 @@ browser-copilot 的智能体（`src/background/agent.ts`）可以读写页面、
 
 ## 影响面
 
-| 文件 | 改动 |
-| --- | --- |
-| `src/background/cdp-monitor.ts` | 级别扩展、容量 200、`getConsoleEntries` |
-| `src/background/agent.ts` | 工具 schema + dispatch；不进审批集合 |
-| `src/lib/tool-catalog.ts` | `TOOL_META` 一条 |
-| `src/lib/i18n.ts` | `Messages` 类型 + en/zh 各两条 |
-| `examples/local-agent/mcp-server.mjs` | `STATIC_TOOLS` 一条 |
-| `tests/cdp-console-log.spec.ts` | 新增 |
+| 文件                                  | 改动                                    |
+| ------------------------------------- | --------------------------------------- |
+| `src/background/cdp-monitor.ts`       | 级别扩展、容量 200、`getConsoleEntries` |
+| `src/background/agent.ts`             | 工具 schema + dispatch；不进审批集合    |
+| `src/lib/tool-catalog.ts`             | `TOOL_META` 一条                        |
+| `src/lib/i18n.ts`                     | `Messages` 类型 + en/zh 各两条          |
+| `examples/local-agent/mcp-server.mjs` | `STATIC_TOOLS` 一条                     |
+| `tests/cdp-console-log.spec.ts`       | 新增                                    |
 
 不改 `manifest.config.ts`（`debugger` 权限已存在）、不改设置页组件。
