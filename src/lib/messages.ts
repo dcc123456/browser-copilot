@@ -178,6 +178,11 @@ export type Command =
       /** See workflows.run.windowId. */
       windowId?: number
     }
+  /**
+   * Whether a workflow has a resumable point (M4): the panel only offers the
+   * Resume action when the last run left a clean step to continue from.
+   */
+  | { type: 'workflows.resumePoint'; id: string }
   | { type: 'workflows.running'; workflowId?: string }
 
   // --- Workflow recording (see background/record-controller.ts) ---
@@ -291,6 +296,14 @@ export type CommandResult =
         /** Step index the run resumed from; absent when it started fresh. */
         resumedFrom?: number
       }
+    }
+  | {
+      type: 'workflows.resumePoint'
+      resumable: boolean
+      /** The run whose checkpoints hold the point. */
+      runId?: string
+      /** 0-based step the run would resume from. */
+      fromStepIndex?: number
     }
   | {
       type: 'workflows.takeoverApply'

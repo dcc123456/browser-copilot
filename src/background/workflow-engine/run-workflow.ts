@@ -41,6 +41,18 @@ export function setCheckpointStore(next: ReturnType<typeof createChromeCheckpoin
   checkpointStore = next
 }
 
+/**
+ * Newest run id per workflow — how the panel finds the run to resume from
+ * without having to scan every checkpoint. Bounded to the runs of this worker
+ * session; a restart simply leaves nothing resumable until the next run.
+ */
+const lastRunByWorkflow = new Map<string, string>()
+
+/** The most recent run id of `workflowId`, when this session saw one. */
+export function lastRunIdOf(workflowId: string): string | undefined {
+  return lastRunByWorkflow.get(workflowId)
+}
+
 /** Resolve a node id to a human-readable block label for run logs. */
 function nodeLabel(workflow: Workflow, nodeId: string): string {
   const node = workflow.drawflow.nodes.find((n) => n.id === nodeId)
@@ -133,6 +145,7 @@ export async function executeWorkflow(
     ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
   })
   const runId = run.runId
+  lastRunByWorkflow.set(workflow.id, runId)
   // M4: register the run in the persisted-checkpoint index so the pruner can
   // retire the oldest runs once enough of them have accumulated.
   const wantCheckpoints = opts.checkpoints !== false

@@ -212,6 +212,18 @@ export interface Messages {
   workflowsBatchDeleteDone: (params: { count: number }) => string
   /** Shown on a failed-run banner in the Workflows tab; the banner is clickable and jumps to the run's history entry. */
   workflowsRunFailedHint: string
+  /**
+   * M4: "Resume" button on a workflow card — re-runs the workflow from the
+   * step after its last clean checkpoint instead of its trigger, so a login or
+   * a submit that already happened is not repeated.
+   */
+  workflowsResume: string
+  /** Tooltip explaining what resume skips. */
+  workflowsResumeTitle: string
+  /** Banner when a resume request had no resumable point and started fresh. */
+  workflowsResumeNone: string
+  /** Banner after a resumed run finished; `{ step }` is the 1-based step it resumed after. */
+  workflowsResumedOk: (params: { step: number }) => string
   /** Debug button on each workflow card: run once, then AI takes over failed nodes. */
   workflowsDebug: string
   /** Debug button label while the AI debug session is running for that workflow. */
@@ -975,6 +987,12 @@ const en: Messages = {
     `Delete ${count} selected workflow(s)? This cannot be undone.`,
   workflowsBatchDeleteDone: ({ count }) => `Deleted ${count} workflow(s).`,
   workflowsRunFailedHint: 'Run failed — click to view details in history',
+  /** M4: re-run a workflow from its last clean checkpoint instead of its trigger. */
+  workflowsResume: 'Resume',
+  workflowsResumeTitle:
+    'Re-run from the step after the last one that completed — the finished steps are skipped, so a login or submit that already happened is not repeated.',
+  workflowsResumeNone: 'Nothing to resume — this workflow will start from the beginning',
+  workflowsResumedOk: ({ step }) => `Resumed after step ${step} and finished the run`,
   workflowsDebug: 'AI Debug',
   workflowsDebugging: 'AI Debugging…',
   workflowsDebugOkNoChanges: 'Run succeeded — nothing to debug',
@@ -1684,6 +1702,12 @@ const zhCN: Messages = {
   workflowsBatchDeleteConfirm: ({ count }) => `确定删除选中的 ${count} 个工作流？此操作不可恢复。`,
   workflowsBatchDeleteDone: ({ count }) => `已删除 ${count} 个工作流。`,
   workflowsRunFailedHint: '运行失败 — 点击查看历史详情',
+  // M4：从最后一个干净完成的步骤之后重跑，跳过已完成的步骤（登录/提交不会重复执行）。
+  workflowsResume: '继续运行',
+  workflowsResumeTitle:
+    '从最后一个已完成的步骤之后继续——已完成的步骤会被跳过，因此已经执行过的登录或提交不会重复。',
+  workflowsResumeNone: '没有可恢复的进度，本次将从头开始运行',
+  workflowsResumedOk: ({ step }) => `已从第 ${step} 步之后继续并跑完剩余流程`,
   workflowsDebug: 'AI 调试',
   workflowsDebugging: 'AI 调试中…',
   workflowsDebugOkNoChanges: '运行成功，无需调试',

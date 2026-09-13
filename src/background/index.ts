@@ -128,7 +128,13 @@ import {
   takeoverProviderOf,
   type TakeoverReasonKind,
 } from '../lib/workflow/ai-takeover'
-import { executeWorkflow } from './workflow-engine/run-workflow'
+import {
+  executeWorkflow,
+  getCheckpointStore,
+  lastRunIdOf,
+} from './workflow-engine/run-workflow'
+import { readPersistedCheckpoints } from './checkpoint-store'
+import { resumePointOf } from '../lib/workflow/checkpoints'
 import { createAiTakeover } from './workflow-engine/ai-takeover'
 import { runDebugSession, DEFAULT_MAX_ROUNDS } from './workflow-engine/debug-session'
 import { runUnattendedPrompt } from './agent-unattended'
@@ -1138,6 +1144,27 @@ async function handleCommand(
           error: r.outcome === 'failed' ? r.summary : undefined,
           runId: r.runId,
         },
+      }
+    }
+
+    case 'workflows.resumePoint': {
+      // M4: does this workflow have a clean step to continue from? The panel
+      // uses it to decide whether to offer the Resume action at all — resuming
+      // a workflow that never ran (or that finished) would be meaningless.
+      const workflow = await getWorkflow(command.id)
+      if (!workflow) return { type: 'workflows.resumePoint', resumable: false }
+      const runId = lastRunIdOf(command.id)
+      if (!runId) return { type: 'workflows.resumePoint', resumable: false }
+      const inMemory = getCheckpointStore().load(runId)
+      const checkpoints =
+        inMemory.length > 0 ? inMemory : await readPersistedCheckpoints(runId).catch(() => [])
+      const point = resumePointOf(workflow, checkpoints)
+      if (!point) return { type: 'workflows.resumePoint', resumable: false }
+      return {
+        type: 'workflows.resumePoint',
+        resumable: true,
+        runId,
+        fromStepIndex: point.fromStepIndex,
       }
     }
 
