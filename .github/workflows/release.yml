@@ -82,7 +82,7 @@ jobs:
 
       - name: Upload build artifact
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: browser-copilot-${{ steps.artifact.outputs.version }}
           path: ${{ steps.artifact.outputs.path }}
