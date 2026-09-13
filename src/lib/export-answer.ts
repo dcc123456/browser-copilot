@@ -360,20 +360,46 @@ ${body}
  * callers in tests don't need to stub it out.
  */
 export function downloadBlob(content: string, mime: string, filename: string): void {
-  if (typeof document === 'undefined' || typeof URL === 'undefined') return
+  const chromeDownloads =
+    typeof chrome !== 'undefined' ? chrome.downloads?.download : undefined
+  const hasChrome = typeof chromeDownloads === 'function'
+  // Bail only when there is no way to drive a download at all. Previously this
+  // returned early whenever `document` was missing, which also skipped the
+  // extension downloads API — so an extension context without a DOM (e.g. a
+  // background page) could never download, and the side panel fell back to the
+  // anchor trick below, which silently no-ops when the blob URL is revoked too
+  // early. Prefer the downloads API; it is reliable from the side panel.
+  if (!hasChrome && (typeof document === 'undefined' || typeof URL === 'undefined')) {
+    return
+  }
   try {
-    const blob = new Blob([content], { type: mime })
-    const url = URL.createObjectURL(blob)
+    if (hasChrome) {
+      const url = URL.createObjectURL(new Blob([content], { type: mime }))
+      // Revoke only after the download has been accepted: Chrome has copied the
+      // blob by then. A too-early revoke (the old setTimeout(0)) can abort the
+      // transfer and look like a no-op click.
+      void chromeDownloads!({
+        url,
+        filename,
+        conflictAction: 'uniquify',
+        saveAs: false,
+      })
+        .then(() => setTimeout(() => URL.revokeObjectURL(url), 1000))
+        .catch(() => URL.revokeObjectURL(url))
+      return
+    }
+    // Non-extension fallback (web preview / tests): plain anchor download.
+    const url = URL.createObjectURL(new Blob([content], { type: mime }))
     const a = document.createElement('a')
     a.href = url
     a.download = filename
     document.body.appendChild(a)
     a.click()
     // Clean up: allow the browser to finalise the download before revoking.
-    window.setTimeout(() => {
+    setTimeout(() => {
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
-    }, 0)
+    }, 1000)
   } catch {
     /* ignore — user can still manually copy from the UI */
   }
