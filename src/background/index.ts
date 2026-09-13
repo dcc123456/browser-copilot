@@ -198,6 +198,8 @@ setFinishedPersister((run: FinishedTask) => {
   void recordFinishedRun({
     runId: run.runId,
     taskId: run.taskId,
+    // Persisted so the run stays attributable after a rename (see TaskRunLog).
+    workflowId: run.workflowId,
     label: run.label,
     source: run.source,
     startedAt: run.startedAt,
@@ -222,6 +224,7 @@ void listRuns()
         .map((r) => ({
           runId: r.id,
           ...(r.taskId ? { taskId: r.taskId } : {}),
+          ...(r.workflowId ? { workflowId: r.workflowId } : {}),
           label: r.label ?? r.summary?.slice(0, 40) ?? '',
           source:
             r.source ??

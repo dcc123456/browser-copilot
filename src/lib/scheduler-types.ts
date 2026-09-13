@@ -96,6 +96,15 @@ export interface TaskRunLog {
   taskId?: string
   /** Display label: task name, or a short label for an ad-hoc run. */
   label?: string
+  /**
+   * Saved workflow this run executed, when it was a workflow run.
+   *
+   * This is the durable link from a run back to its workflow. `label` cannot
+   * serve that purpose: it is the workflow's user-editable name, so a rename
+   * orphans the run and two workflows may share a name outright. Records
+   * persisted before this field existed carry only the label.
+   */
+  workflowId?: string
   /** Where the run was triggered from. */
   source?: 'chat' | 'schedule' | 'feishu' | 'manual'
   /**

@@ -148,6 +148,7 @@ function asRun(value: unknown): TaskRunLog | null {
   return {
     id: v.id as string,
     ...(typeof v.taskId === 'string' ? { taskId: v.taskId } : {}),
+    ...(typeof v.workflowId === 'string' ? { workflowId: v.workflowId } : {}),
     ...(typeof v.label === 'string' ? { label: v.label } : {}),
     ...(v.source === 'chat' ||
     v.source === 'schedule' ||
@@ -219,16 +220,18 @@ export async function addRun(run: Omit<TaskRunLog, 'id' | 'at'>): Promise<TaskRu
 }
 
 /**
- * Persists a fully-finished run (label, source, outcome, steps) into the run
- * log. This is the single persistence path invoked from running-tasks when a
- * run settles, so every entry point — chat turns, scheduled/Feishu/manual task
- * runs, and ad-hoc Feishu instructions — survives a service-worker restart.
- * The `trigger` field is derived from `source` for back-compat with older UI/
- * storage versions.
+ * Persists a fully-finished run (label, source, outcome, steps, and the
+ * workflow it executed) into the run log. This is the single persistence path
+ * invoked from running-tasks when a run settles, so every entry point — chat
+ * turns, scheduled/Feishu/manual task runs, and ad-hoc Feishu instructions —
+ * survives a service-worker restart. The `trigger` field is derived from
+ * `source` for back-compat with older UI/storage versions.
  */
 export interface FinishedRunInput {
   runId: string
   taskId?: string
+  /** Saved workflow this run executed, when it was a workflow run. */
+  workflowId?: string
   label?: string
   source: 'chat' | 'schedule' | 'feishu' | 'manual'
   startedAt?: number
@@ -249,6 +252,7 @@ export async function recordFinishedRun(input: FinishedRunInput): Promise<TaskRu
   const entry: TaskRunLog = {
     id: input.runId,
     ...(input.taskId ? { taskId: input.taskId } : {}),
+    ...(input.workflowId ? { workflowId: input.workflowId } : {}),
     ...(input.label ? { label: input.label } : {}),
     source: input.source,
     trigger,

@@ -54,9 +54,21 @@ function workflow(id: string, name: string): Workflow {
   }
 }
 
-/** A persisted run. `label` is the only link back to its workflow. */
-function run(label: string, ok: boolean, at: number): TaskRunLog {
-  return { id: `run-${at}`, label, trigger: 'manual', at, ok, skipped: false, summary: '' }
+/**
+ * A persisted run. `workflowId` is the durable link to its workflow; `label` is
+ * the user-editable name and only a fallback for records that predate the id.
+ */
+function run(label: string, ok: boolean, at: number, workflowId?: string): TaskRunLog {
+  return {
+    id: `run-${at}`,
+    ...(workflowId ? { workflowId } : {}),
+    label,
+    trigger: 'manual',
+    at,
+    ok,
+    skipped: false,
+    summary: '',
+  }
 }
 
 let workflows: Workflow[] = []
@@ -281,6 +293,69 @@ describe('workflow card Resume action (M4)', () => {
       await flush()
     }
     expect(probes()).toHaveLength(1)
+
+    await act(async () => root.unmount())
+  })
+
+  it('attributes a run by workflow id, so a rename does not orphan it', async () => {
+    // The workflow was renamed AFTER the run, so the run still carries the old
+    // label. Only the id can tie the two together.
+    workflows = [workflow('wf-a', 'Checkout flow')]
+    runs = [run('Login flow', false, 200, 'wf-a')]
+    resumePointFor = () => ({
+      type: 'workflows.resumePoint',
+      resumable: true,
+      runId: 'run-200',
+      fromStepIndex: 1,
+    })
+
+    const { container, root } = await render()
+
+    expect(probes().map((command) => command.id)).toEqual(['wf-a'])
+    expect(buttonByText(container, RESUME)).toBeDefined()
+
+    await act(async () => root.unmount())
+  })
+
+  it("does not let a same-named workflow claim another one's run", async () => {
+    // Two workflows share a name; only wf-a has a failed run. Matching on the
+    // label would hand wf-b the run — and a Resume button — as well.
+    workflows = [workflow('wf-a', 'Sync'), workflow('wf-b', 'Sync')]
+    runs = [run('Sync', false, 200, 'wf-a')]
+    resumePointFor = () => ({
+      type: 'workflows.resumePoint',
+      resumable: true,
+      runId: 'run-200',
+      fromStepIndex: 1,
+    })
+
+    const { container, root } = await render()
+
+    expect(probes().map((command) => command.id)).toEqual(['wf-a'])
+    const cards = [...container.querySelectorAll('.task-item')] as HTMLElement[]
+    expect(cards).toHaveLength(2)
+    expect(buttonByText(cards[0]!, RESUME)).toBeDefined()
+    expect(buttonByText(cards[1]!, RESUME)).toBeUndefined()
+
+    await act(async () => root.unmount())
+  })
+
+  it('still matches a legacy run that carries only its label', async () => {
+    // Records persisted before the id existed must keep working, otherwise
+    // upgrading would silently hide Resume for every pre-existing run.
+    workflows = [workflow('wf-a', 'Login flow')]
+    runs = [run('Login flow', false, 200)]
+    resumePointFor = () => ({
+      type: 'workflows.resumePoint',
+      resumable: true,
+      runId: 'run-200',
+      fromStepIndex: 1,
+    })
+
+    const { container, root } = await render()
+
+    expect(probes().map((command) => command.id)).toEqual(['wf-a'])
+    expect(buttonByText(container, RESUME)).toBeDefined()
 
     await act(async () => root.unmount())
   })

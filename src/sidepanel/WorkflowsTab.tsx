@@ -65,15 +65,19 @@ function effectiveTriggerType(wf: Workflow): string {
 }
 
 /**
- * Most recent persisted run for a workflow, or null when it never ran. Runs are
- * matched by label because that is what the run log carries; the same rule
- * drives the status chip and the resume probe, so both agree on which run is
- * "the last one".
+ * Most recent persisted run for a workflow, or null when it never ran.
+ *
+ * A run is attributed by `workflowId` whenever it has one. The label is only a
+ * fallback for records persisted before the id was stored: it is the workflow's
+ * user-editable name, so matching on it breaks after a rename and can pick the
+ * wrong workflow outright when two share a name. The status chip and the resume
+ * probe both go through here, so they always agree on which run is "the last".
  */
 function lastRunOf(runs: TaskRunLog[], wf: Workflow): TaskRunLog | null {
   let best: TaskRunLog | null = null
   for (const run of runs) {
-    if (run.label !== wf.name) continue
+    const matches = run.workflowId ? run.workflowId === wf.id : run.label === wf.name
+    if (!matches) continue
     const at = run.finishedAt ?? run.at
     const bestAt = best ? (best.finishedAt ?? best.at) : -1
     if (at > bestAt) best = run
