@@ -133,6 +133,50 @@ export async function clearPersistedCheckpoints(
 }
 
 /**
+ * Async: the run ids registered in the persisted index, OLDEST FIRST (the
+ * order `indexPersistedRun` appended them in). An absent or malformed index
+ * reads as empty rather than throwing — callers treat it as "nothing known".
+ */
+export async function readPersistedRunIds(
+  area: StorageArea = fileStorageArea(),
+): Promise<string[]> {
+  try {
+    // chrome.storage.local has no prefix scan, but the index is a single key
+    // holding the run ids, and the file area is a superset: both are read
+    // through the same `get(keys)` API.
+    const stored = await area.get(CHECKPOINT_PREFIX)
+    const value = stored[CHECKPOINT_PREFIX]
+    return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
+      ? (value as string[])
+      : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Async: the newest retained run that belongs to `workflowId`.
+ *
+ * The in-memory run map in `run-workflow` only covers the CURRENT worker
+ * session, and an MV3 worker is evicted shortly after a run settles — so by the
+ * time the user looks at the panel, the run that needs resuming is usually only
+ * reachable through the persisted index. Runs are indexed oldest-first, so the
+ * scan goes backwards and stops at the first run that carries the workflow id.
+ */
+export async function findNewestPersistedRunId(
+  workflowId: string,
+  area: StorageArea = fileStorageArea(),
+): Promise<string | undefined> {
+  const runIds = await readPersistedRunIds(area)
+  for (let i = runIds.length - 1; i >= 0; i -= 1) {
+    const runId = runIds[i]!
+    const checkpoints = await readPersistedCheckpoints(runId, area)
+    if (checkpoints.some((cp) => cp.workflowId === workflowId)) return runId
+  }
+  return undefined
+}
+
+/**
  * Async: keeps only the newest `keep` runs' checkpoints on disk, so repeated
  * debugging does not fill the data directory. Call it at the end of a run.
  */
@@ -142,15 +186,7 @@ export async function prunePersistedCheckpoints(
 ): Promise<number> {
   let removed = 0
   try {
-    // chrome.storage.local has no prefix scan, but the file area is a
-    // superset: both are read through the same `get(keys)` API, and the caller
-    // supplies the known run ids. Unknown ids are simply left alone.
-    const stored = await area.get(CHECKPOINT_PREFIX)
-    const value = stored[CHECKPOINT_PREFIX]
-    const runIds: string[] =
-      Array.isArray(value) && value.every((entry) => typeof entry === 'string')
-        ? (value as string[])
-        : []
+    const runIds = await readPersistedRunIds(area)
     if (runIds.length <= keep) return 0
     const stale = runIds.slice(0, Math.max(0, runIds.length - keep))
     for (const runId of stale) {
@@ -170,12 +206,7 @@ export async function indexPersistedRun(
   area: StorageArea = fileStorageArea(),
 ): Promise<void> {
   try {
-    const stored = await area.get(CHECKPOINT_PREFIX)
-    const value = stored[CHECKPOINT_PREFIX]
-    const runIds: string[] =
-      Array.isArray(value) && value.every((entry) => typeof entry === 'string')
-        ? (value as string[])
-        : []
+    const runIds = await readPersistedRunIds(area)
     if (runIds.includes(runId)) return
     runIds.push(runId)
     await area.set({ [CHECKPOINT_PREFIX]: runIds })

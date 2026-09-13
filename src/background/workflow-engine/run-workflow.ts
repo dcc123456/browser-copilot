@@ -13,6 +13,7 @@ import type { Workflow } from '../../lib/workflow/types'
 import { recordCheckpoint, resumePointOf } from '../../lib/workflow/checkpoints'
 import {
   createChromeCheckpointStore,
+  findNewestPersistedRunId,
   indexPersistedRun,
   prunePersistedCheckpoints,
   readPersistedCheckpoints,
@@ -43,14 +44,28 @@ export function setCheckpointStore(next: ReturnType<typeof createChromeCheckpoin
 
 /**
  * Newest run id per workflow — how the panel finds the run to resume from
- * without having to scan every checkpoint. Bounded to the runs of this worker
- * session; a restart simply leaves nothing resumable until the next run.
+ * without having to scan every checkpoint. Populated as runs start, and back-
+ * filled from the persisted index by {@link findRunIdFor}.
  */
 const lastRunByWorkflow = new Map<string, string>()
 
-/** The most recent run id of `workflowId`, when this session saw one. */
-export function lastRunIdOf(workflowId: string): string | undefined {
-  return lastRunByWorkflow.get(workflowId)
+/**
+ * The most recent run id of `workflowId`, consulting the persisted index when
+ * this worker session has not seen a run of it.
+ *
+ * The session map alone is not enough for the panel: an MV3 worker is evicted
+ * once a run settles, so the user's "Resume" click usually lands in a fresh
+ * worker that remembers nothing. The persisted copy of the checkpoints is the
+ * only durable link from a workflow to its last run, and reading it is what
+ * makes the resume point survive a restart. The hit is cached so a poll from
+ * the panel does not re-scan storage every time.
+ */
+export async function findRunIdFor(workflowId: string): Promise<string | undefined> {
+  const known = lastRunByWorkflow.get(workflowId)
+  if (known) return known
+  const persisted = await findNewestPersistedRunId(workflowId)
+  if (persisted) lastRunByWorkflow.set(workflowId, persisted)
+  return persisted
 }
 
 /** Resolve a node id to a human-readable block label for run logs. */

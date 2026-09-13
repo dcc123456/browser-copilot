@@ -128,11 +128,7 @@ import {
   takeoverProviderOf,
   type TakeoverReasonKind,
 } from '../lib/workflow/ai-takeover'
-import {
-  executeWorkflow,
-  getCheckpointStore,
-  lastRunIdOf,
-} from './workflow-engine/run-workflow'
+import { executeWorkflow, findRunIdFor, getCheckpointStore } from './workflow-engine/run-workflow'
 import { readPersistedCheckpoints } from './checkpoint-store'
 import { resumePointOf } from '../lib/workflow/checkpoints'
 import { createAiTakeover } from './workflow-engine/ai-takeover'
@@ -1153,7 +1149,10 @@ async function handleCommand(
       // a workflow that never ran (or that finished) would be meaningless.
       const workflow = await getWorkflow(command.id)
       if (!workflow) return { type: 'workflows.resumePoint', resumable: false }
-      const runId = lastRunIdOf(command.id)
+      // The last run is usually NOT in this session's memory: an MV3 worker is
+      // evicted once a run settles, and the panel asks later. The persisted
+      // index is what carries the run id across that gap.
+      const runId = await findRunIdFor(command.id)
       if (!runId) return { type: 'workflows.resumePoint', resumable: false }
       const inMemory = getCheckpointStore().load(runId)
       const checkpoints =

@@ -3,7 +3,9 @@
  * (`background/checkpoint-store`):
  *  - the synchronous in-memory half (what the rollback path reads);
  *  - the fire-and-forget durable half, written through an injected area;
- *  - read-back after a restart, and pruning of the oldest runs.
+ *  - read-back after a restart, and pruning of the oldest runs;
+ *  - finding a workflow's newest persisted run — the only route back to a
+ *    resumable run once the worker has been evicted and lost its in-memory map.
  *
  * The real area (`fileStorageArea()`) is never touched: a fake is injected, so
  * these tests run in plain Node with no chrome and no filesystem.
@@ -14,9 +16,11 @@ import {
   checkpointKey,
   clearPersistedCheckpoints,
   createChromeCheckpointStore,
+  findNewestPersistedRunId,
   indexPersistedRun,
   prunePersistedCheckpoints,
   readPersistedCheckpoints,
+  readPersistedRunIds,
 } from '../src/background/checkpoint-store'
 import { CHECKPOINT_PREFIX } from '../src/lib/fs-store'
 import type { StorageArea } from '../src/lib/fs-store'
@@ -157,5 +161,60 @@ describe('durable checkpoint persistence', () => {
     await indexPersistedRun('r1', area)
     await indexPersistedRun('r1', area)
     expect(area.data.get(CHECKPOINT_PREFIX)).toEqual(['r1'])
+  })
+})
+
+/**
+ * The resume point of a workflow is found through the run that owns its
+ * checkpoints. After a service-worker eviction the in-memory run map is empty,
+ * so this index scan is the ONLY way back to a resumable run.
+ */
+describe('findNewestPersistedRunId', () => {
+  /** A checkpoint that belongs to a workflow (what the index scan matches on). */
+  const wfCp = (runId: string, workflowId: string): RunCheckpoint => ({
+    ...cp(runId, 0, 'ok'),
+    workflowId,
+  })
+
+  /** Indexes a run and gives it one workflow-tagged checkpoint. */
+  const seed = async (area: StorageArea, runId: string, workflowId?: string): Promise<void> => {
+    await indexPersistedRun(runId, area)
+    await area.set({
+      [checkpointKey(runId)]: [workflowId ? wfCp(runId, workflowId) : cp(runId, 0, 'ok')],
+    })
+  }
+
+  it('returns the newest indexed run of that workflow', async () => {
+    const area = fakeArea()
+    await seed(area, 'r1', 'wf-a')
+    await seed(area, 'r2', 'wf-b')
+    await seed(area, 'r3', 'wf-a')
+    await seed(area, 'r4', 'wf-b')
+    expect(await findNewestPersistedRunId('wf-a', area)).toBe('r3')
+    expect(await findNewestPersistedRunId('wf-b', area)).toBe('r4')
+  })
+
+  it('ignores runs of other workflows and runs with no workflow id', async () => {
+    const area = fakeArea()
+    await seed(area, 'r1')
+    await seed(area, 'r2', 'wf-b')
+    expect(await findNewestPersistedRunId('wf-a', area)).toBeUndefined()
+  })
+
+  it('reads an absent or malformed index as "nothing known"', async () => {
+    const area = fakeArea()
+    expect(await readPersistedRunIds(area)).toEqual([])
+    expect(await findNewestPersistedRunId('wf-a', area)).toBeUndefined()
+
+    await area.set({ [CHECKPOINT_PREFIX]: 'not-a-list' })
+    expect(await readPersistedRunIds(area)).toEqual([])
+    expect(await findNewestPersistedRunId('wf-a', area)).toBeUndefined()
+  })
+
+  it('tolerates an indexed run whose checkpoints are gone', async () => {
+    const area = fakeArea()
+    // Indexed but pruned/never written: no throw, no match.
+    await indexPersistedRun('r1', area)
+    expect(await findNewestPersistedRunId('wf-a', area)).toBeUndefined()
   })
 })
