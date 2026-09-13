@@ -48,6 +48,13 @@ All notable changes to this project are documented here. The format is based on
   falling back to the persisted copy so a restart does not lose the point.
   This is the recovery path for non-idempotent flows: re-driving a login that
   already happened can only fail, so the retry skips what already landed.
+- **Resume reaches the panel (M4)**: a workflow whose last run failed now shows a
+  **Resume** action next to Run. The panel asks the new `workflows.resumePoint`
+  command whether a clean checkpoint exists and only offers the action when it
+  does, so it can never advertise a resume that would silently re-run
+  everything. The run behind the point is resolved through the persisted index
+  when the worker session no longer remembers it — an MV3 worker is evicted once
+  a run settles, which is exactly when the user goes looking for Resume.
 - **Configurable budgets**: `BC_TAKEOVER_MAX_ATTEMPTS`,
   `BC_TAKEOVER_TOOL_ROUNDS`, `BC_TAKEOVER_AUTORUN_BUDGET`.
 

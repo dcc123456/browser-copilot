@@ -65,6 +65,23 @@ function effectiveTriggerType(wf: Workflow): string {
 }
 
 /**
+ * Most recent persisted run for a workflow, or null when it never ran. Runs are
+ * matched by label because that is what the run log carries; the same rule
+ * drives the status chip and the resume probe, so both agree on which run is
+ * "the last one".
+ */
+function lastRunOf(runs: TaskRunLog[], wf: Workflow): TaskRunLog | null {
+  let best: TaskRunLog | null = null
+  for (const run of runs) {
+    if (run.label !== wf.name) continue
+    const at = run.finishedAt ?? run.at
+    const bestAt = best ? (best.finishedAt ?? best.at) : -1
+    if (at > bestAt) best = run
+  }
+  return best
+}
+
+/**
  * The primary "new" action with its sibling Import entry folded into a hover
  * bubble. Hover/focus opens it for mouse/keyboard users; tapping the button
  * toggles it so touch screens can reach both entries. The transparent padding
@@ -189,6 +206,60 @@ export default function WorkflowsTab() {
   const [busy, setBusy] = useState(false)
   // Workflows with pending AI-takeover fixes (apply / discard chip).
   const [pending, setPending] = useState<PendingTakeoverInfo[]>([])
+  // M4 resume: workflow id -> the run whose checkpoints a resume would pick up
+  // from. Only the worker can read checkpoints, so the panel asks and then
+  // offers the Resume action just for the workflows that answered yes.
+  const [resumePoints, setResumePoints] = useState<Record<string, string>>({})
+  /** Set of (workflow, last-run) pairs the current `resumePoints` belongs to. */
+  const probeSignatureRef = useRef('')
+
+  /**
+   * Asks the worker which workflows can be resumed, and drops the rest.
+   *
+   * Only a run that did NOT settle cleanly can have something to continue from:
+   * a workflow that never ran has no checkpoints, and a run that finished
+   * cleanly has nothing after its last step. That keeps the probe to the few
+   * cards a failed run left behind, and the signature guard means the tab's 5s
+   * refresh does not turn into a storage read per workflow.
+   */
+  const probeResumePoints = useCallback(
+    async (list: Workflow[], runLog: TaskRunLog[]): Promise<void> => {
+      const candidates = list
+        .map((wf) => ({ wf, last: lastRunOf(runLog, wf) }))
+        .filter(
+          (entry): entry is { wf: Workflow; last: TaskRunLog } => !!entry.last && !entry.last.ok,
+        )
+      const signature = candidates
+        .map(({ wf, last }) => `${wf.id}:${last.finishedAt ?? last.at}`)
+        .join('|')
+      if (signature === probeSignatureRef.current) return
+      probeSignatureRef.current = signature
+      if (candidates.length === 0) {
+        setResumePoints({})
+        return
+      }
+      const probed = await Promise.all(
+        candidates.map(async ({ wf }): Promise<[string, string] | null> => {
+          try {
+            const result = await sendCommand({ type: 'workflows.resumePoint', id: wf.id })
+            if (result.type !== 'workflows.resumePoint' || !result.resumable || !result.runId) {
+              return null
+            }
+            return [wf.id, result.runId]
+          } catch {
+            // A transient failure must not hide a real resume point for good:
+            // clear the signature so the next refresh asks again.
+            probeSignatureRef.current = ''
+            return null
+          }
+        }),
+      )
+      const next: Record<string, string> = {}
+      for (const entry of probed) if (entry) next[entry[0]] = entry[1]
+      setResumePoints(next)
+    },
+    [],
+  )
 
   const load = useCallback(async () => {
     try {
@@ -200,10 +271,13 @@ export default function WorkflowsTab() {
       if (workflowResult.type === 'workflows.list') setWorkflows(workflowResult.workflows)
       if (runsResult.type === 'tasks.runs') setRuns(runsResult.runs)
       if (pendingResult.type === 'workflows.takeoverPending') setPending(pendingResult.items)
+      if (workflowResult.type === 'workflows.list' && runsResult.type === 'tasks.runs') {
+        await probeResumePoints(workflowResult.workflows, runsResult.runs)
+      }
     } catch (error) {
       setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
     }
-  }, [])
+  }, [probeResumePoints])
 
   useEffect(() => {
     void load()
@@ -256,6 +330,46 @@ export default function WorkflowsTab() {
             text: `${result.outcome.summary || result.outcome.error || t.taskStatusFailed} · ${t.workflowsRunFailedHint}`,
             runId: result.outcome.runId,
           })
+        }
+      }
+      await load()
+    } catch (error) {
+      setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /**
+   * M4 resume: continue the last run from its last clean checkpoint instead of
+   * re-driving the graph from its trigger. This is the recovery path for a
+   * non-idempotent flow — re-running a login whose form is already gone can
+   * only fail — so the steps that already landed are skipped.
+   */
+  const resumeNow = async (id: string): Promise<void> => {
+    const runId = resumePoints[id]
+    if (!runId) {
+      setBanner({ kind: 'error', text: t.workflowsResumeNone })
+      return
+    }
+    setBusy(true)
+    try {
+      const result = await sendCommand({ type: 'workflows.resume', id, runId })
+      if (result.type === 'workflows.resume') {
+        const outcome = result.outcome
+        if (!outcome.ok) {
+          setBanner({
+            kind: 'error',
+            text: `${outcome.summary || outcome.error || t.taskStatusFailed} · ${t.workflowsRunFailedHint}`,
+            runId: outcome.runId,
+          })
+        } else if (outcome.resumedFrom !== undefined) {
+          setBanner({ kind: 'ok', text: t.workflowsResumedOk({ step: outcome.resumedFrom + 1 }) })
+        } else {
+          // The point disappeared between the probe and the click (the run was
+          // pruned, or the graph changed): the worker started from the top, and
+          // saying so is more honest than reporting a plain success.
+          setBanner({ kind: 'ok', text: t.workflowsResumeNone })
         }
       }
       await load()
@@ -785,15 +899,8 @@ export default function WorkflowsTab() {
 
   /** Most recent persisted run for a workflow, or null when it never ran. */
   const lastRunFor = (wf: Workflow): { time: number; ok: boolean; skipped: boolean } | null => {
-    let best: TaskRunLog | null = null
-    for (const run of runs) {
-      if (run.label !== wf.name) continue
-      const at = run.finishedAt ?? run.at
-      const bestAt = best ? (best.finishedAt ?? best.at) : -1
-      if (at > bestAt) best = run
-    }
-    if (!best) return null
-    return { time: best.finishedAt ?? best.at, ok: best.ok, skipped: best.skipped }
+    const best = lastRunOf(runs, wf)
+    return best ? { time: best.finishedAt ?? best.at, ok: best.ok, skipped: best.skipped } : null
   }
 
   const lastRunLabel = (wf: Workflow): string => {
@@ -944,6 +1051,22 @@ export default function WorkflowsTab() {
                   >
                     {t.workflowsRunNow}
                   </button>
+                  {/* Only offered when the last run left a clean step to pick
+                      up from — a Resume that silently re-runs everything would
+                      be worse than no button at all. The `!` is required: the
+                      unlayered `button` rules in sidepanel/styles.css beat
+                      Tailwind's layered utilities (same note as NewWorkflowMenu). */}
+                  {resumePoints[wf.id] && (
+                    <button
+                      className="text-ok! border-ok!"
+                      disabled={busy}
+                      onClick={() => void resumeNow(wf.id)}
+                      title={t.workflowsResumeTitle}
+                      type="button"
+                    >
+                      {t.workflowsResume}
+                    </button>
+                  )}
                   <button
                     className="task-action-debug"
                     disabled={busy && debuggingId !== wf.id}
