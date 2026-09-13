@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.6.2] - 2026-09-13
+
 ### Added — AI debugging reliability
 
 - **Offline success-rate benchmark** (`tests/bench/`, `pnpm bench:debug`):
@@ -106,6 +110,15 @@ All notable changes to this project are documented here. The format is based on
 - Server takeover can apply the agent's `paramsPatch` to an in-memory copy and
   write an audit artifact when `BC_TAKEOVER_APPLY_PATCH=1` (default off).
 
+### Added — Side panel
+
+- **Thinking and tool calls separated in the transcript**: model reasoning
+  (`think` blocks) renders in its own collapsed style and tool calls no longer
+  appear in the middle of an assistant reply, so one turn no longer reads as
+  split paragraphs. Model-only envelopes (active-skill directive, page-selection
+  block) are hidden from the user's own bubble through a `displayContent` field
+  that is stripped before provider requests.
+
 ### Fixed
 
 - Interaction blocks now wait on **every** run (not only debug first rounds).
@@ -113,5 +126,20 @@ All notable changes to this project are documented here. The format is based on
   after a stream body has been consumed.
 - Snapshot element cap respects the requested `maxElements` (ceiling 250).
 - Verdict parsing no longer treats a truncated payload as success.
+- **Conversation answer download**: `downloadBlob` relied on an
+  `<a download>.click()` plus revoking the blob URL at `setTimeout(0)`, which
+  races the browser's async download start and silently drops the file from the
+  side panel ("clicking download does nothing"). It now routes through
+  `chrome.downloads.download` and revokes the URL only once the transfer is
+  accepted, keeping the anchor path as a non-extension fallback.
+- **Workflow trigger edits now stick**: the trigger block is denormalized into
+  the workflow's top-level `trigger` on editor save (`triggerFromNodes`), so the
+  list chip and background listeners reflect the edited launch type. The list
+  chip reads the effective trigger kind and six more trigger labels
+  (interval / date / weekly / startup / shortcut / element-change) are localized.
+  Workflow Import moved into a hover/focus bubble attached to the **New** button.
+- Copy/download actions on assistant bubbles stay hidden while a chat answer is
+  still streaming and appear only after the turn completes.
 
-[Unreleased]: https://github.com/dcc123456/browser-copilot/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/dcc123456/browser-copilot/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/dcc123456/browser-copilot/compare/v0.6.1...v0.6.2
