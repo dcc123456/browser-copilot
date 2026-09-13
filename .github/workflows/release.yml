@@ -91,7 +91,7 @@ jobs:
       - name: Create release from tag
         id: release
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           body_path: release-notes/${{ steps.artifact.outputs.version }}.md
           generate_release_notes: true
@@ -100,7 +100,7 @@ jobs:
 
       - name: Attach to existing release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ${{ steps.artifact.outputs.path }}
           fail-on-unmatched-files: true
