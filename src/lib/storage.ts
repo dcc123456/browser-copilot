@@ -1176,14 +1176,18 @@ function titleClip(text: string, max = 40): string {
 }
 
 /**
- * Meaningful canvas title for a generated javascript-code node. Every JS step
- * shares the same history summary ("Run JavaScript in the page"), which says
- * nothing at a glance — so the title is read from the code itself: a leading
- * `//` comment (what the author said the script does) wins, otherwise the
- * first meaningful statement line does. `return`/`await` prefixes carry no
- * meaning on a card and are stripped.
+ * Comments that carry no information about what a script DOES — a bare step
+ * marker or a TODO. They are ignored so the plain-language description below
+ * gets a chance instead of a meaningless card title.
  */
-function jsNodeTitle(code: string): string {
+const GENERIC_JS_COMMENT_RE = /^(?:step\s*\d+|\d+[.)]?|todo|fixme|note)$/i
+
+/**
+ * The leading `//` comment block of a snippet — what the author said the script
+ * does — collapsed to one line. Empty when there is no leading comment, or when
+ * it is a bare step marker that says nothing about the script's behaviour.
+ */
+function jsScriptComment(code: string): string {
   const lines = code.split('\n').map((line) => line.trim())
   let i = 0
   while (i < lines.length && lines[i] === '') i += 1
@@ -1193,11 +1197,167 @@ function jsNodeTitle(code: string): string {
     i += 1
   }
   const comment = comments.join(' ').trim()
-  if (comment) return titleClip(comment)
-  // Skip blanks and bare-brace noise so a wrapped block still yields a
-  // statement line rather than `{`.
+  if (comment.length < 4 || GENERIC_JS_COMMENT_RE.test(comment)) return ''
+  return titleClip(comment)
+}
+
+/**
+ * Fallback canvas title: the first meaningful statement line, with the
+ * meaningless `return`/`await` prefixes and bare-brace noise skipped.
+ */
+function jsFirstStatement(code: string): string {
+  const lines = code.split('\n').map((line) => line.trim())
+  let i = 0
+  while (i < lines.length && lines[i] === '') i += 1
+  while (i < lines.length && lines[i]!.startsWith('//')) i += 1
   while (i < lines.length && (lines[i] === '' || /^[{};,)]*$/.test(lines[i]!))) i += 1
   return titleClip((lines[i] ?? '').replace(/^(?:return|await)\s+/, ''))
+}
+
+/** Every selector a snippet's lookup calls target, as short hints (`#id`, `.cls`). */
+function jsSelectorHints(code: string): string[] {
+  const hints: string[] = []
+  const add = (hint: string): void => {
+    const clipped = titleClip(hint, 24)
+    if (clipped && !hints.includes(clipped)) hints.push(clipped)
+  }
+  for (const match of code.matchAll(/getElementById\s*\(\s*(['"])([^'"\n]+)\1/g)) {
+    if (match[2]) add(`#${match[2].trim()}`)
+  }
+  for (const match of code.matchAll(/querySelector(?:All)?\s*\(\s*(['"])([^'"\n]+)\1/g)) {
+    if (match[2]) add(match[2].trim())
+  }
+  return hints
+}
+
+/** The literal a `.value = '…'` / native-setter write stores ('' when none). */
+function jsWrittenLiteral(code: string): string {
+  const direct = /\.\s*value\s*=\s*(['"`])([^'"`\\]*)\1/.exec(code)
+  if (direct?.[2]) return direct[2]
+  // React's native-setter pattern: `setter.call(<el>, 'value')`. The element
+  // expression may itself contain parentheses, so the gap is matched loosely.
+  const setter = /\.call\s*\([^;]{0,160}?,\s*(['"`])([^'"`\\]*)\1/.exec(code)
+  return setter?.[2] ?? ''
+}
+
+/** Appends the targeted selector to a phrase, when the snippet names exactly one. */
+function jsWithSelector(base: string, code: string): string {
+  const hints = jsSelectorHints(code)
+  return hints.length === 1 ? `${base}（${hints[0]}）` : base
+}
+
+/**
+ * Plain-language phrase for a form-field write. Only the statements that
+ * actually write a value are considered: a click elsewhere in the snippet must
+ * not turn a single fill into a "batch", and a genuine multi-field write is
+ * summarised as one rather than naming just the first field.
+ */
+function jsFillPhrase(code: string): string {
+  const writers = code
+    .split(/[;\n]/)
+    .filter((part) => /\.\s*value\s*=/.test(part) || /\.call\s*\(/.test(part))
+  const scope = writers.length > 0 ? writers.join(';') : code
+  const hints = jsSelectorHints(scope)
+  if (hints.length > 1) return '批量填写多个输入框'
+  const literal = jsWrittenLiteral(scope)
+  const base = literal ? `把「${titleClip(literal, 24)}」填进输入框` : '填写输入框内容'
+  return hints.length === 1 ? `${base}（${hints[0]}）` : base
+}
+
+/** One recognized side effect of a recorded snippet. */
+interface JsEffectRule {
+  re: RegExp
+  /** Plain-language phrase; receives the code for selector/value details. */
+  phrase: (code: string) => string
+}
+
+/** How many recognized effects are spelled out before the text is clipped. */
+const JS_EFFECT_LIMIT = 3
+
+/**
+ * Side effects a recorded snippet can have, in plain Chinese. Deliberately
+ * pattern-based rather than a parser: this must stay synchronous, dependency
+ * free and cheap enough to run while generating a workflow, and an
+ * unrecognized snippet simply falls through to the raw-code title.
+ */
+const JS_EFFECT_RULES: JsEffectRule[] = [
+  { re: /\.submit\s*\(/, phrase: () => '提交表单' },
+  { re: /\.click\s*\(/, phrase: (code) => jsWithSelector('点击页面元素', code) },
+  {
+    re: /\.dispatchEvent\s*\(|new\s+(?:Mouse|Keyboard|Pointer|Input|Focus|Event)\b/,
+    phrase: () => '模拟用户操作（触发页面事件）',
+  },
+  {
+    re: /\.value\s*=|\.call\s*\([^;]{0,160}?,\s*['"`]/,
+    phrase: (code) => jsFillPhrase(code),
+  },
+  {
+    re: /getOwnPropertyDescriptor\s*\([^)]*['"]value['"]|_valueTracker|__react/i,
+    phrase: () => '兼容 React 受控组件',
+  },
+  { re: /\.checked\s*=/, phrase: () => '勾选或取消勾选复选框' },
+  { re: /\.focus\s*\(/, phrase: () => '聚焦输入框' },
+  { re: /\.select\s*\(/, phrase: () => '选中文本或下拉项' },
+  {
+    re: /scrollIntoView\s*\(|\.scrollTo\s*\(|\.scrollTop\s*=|window\.scrollTo\s*\(/,
+    phrase: () => '滚动页面',
+  },
+  { re: /localStorage\s*\./, phrase: () => '读写浏览器本地存储' },
+  { re: /sessionStorage\s*\./, phrase: () => '读写会话存储' },
+  { re: /document\.cookie\s*=/, phrase: () => '写入 Cookie' },
+  {
+    re: /location\s*\.\s*(?:href\s*=|assign\s*\(|replace\s*\()|window\.location\s*=/,
+    phrase: () => '跳转到指定网址',
+  },
+  { re: /location\.reload\s*\(/, phrase: () => '刷新页面' },
+  { re: /history\s*\.\s*(?:back|forward|go)\s*\(/, phrase: () => '浏览器前进或后退' },
+  { re: /window\.open\s*\(/, phrase: () => '打开新标签页' },
+  { re: /\bfetch\s*\(|XMLHttpRequest|\baxios\s*\./, phrase: () => '请求后端接口' },
+  {
+    re: /createElement|appendChild|insertAdjacentHTML|\.innerHTML\s*=/,
+    phrase: () => '在页面上插入或改写元素',
+  },
+  { re: /(?<!classList)\.remove\s*\(|\.removeChild\s*\(/, phrase: () => '删除页面元素' },
+  {
+    re: /setAttribute\s*\(|\.classList\s*\.|\.style\s*\.[A-Za-z]+\s*=/,
+    phrase: () => '修改元素属性或样式',
+  },
+  { re: /setTimeout\s*\(|setInterval\s*\(/, phrase: () => '延时或定时执行' },
+  { re: /querySelectorAll\s*\(/, phrase: () => '批量查找页面元素' },
+  {
+    re: /\.(?:innerText|textContent|getAttribute|dataset)\b(?!\s*=)/,
+    phrase: () => '读取页面上的文字或属性',
+  },
+  { re: /JSON\s*\.\s*(?:parse|stringify)/, phrase: () => '处理 JSON 数据' },
+  { re: /\balert\s*\(|\bconfirm\s*\(|\bprompt\s*\(/, phrase: () => '弹出提示框' },
+  { re: /MutationObserver|addEventListener\s*\(/, phrase: () => '监听页面变化或事件' },
+  { re: /requestAnimationFrame\s*\(/, phrase: () => '等待页面渲染' },
+  { re: /navigator\.clipboard|execCommand\s*\(\s*['"]copy/, phrase: () => '操作剪贴板' },
+  { re: /\.play\s*\(|\.pause\s*\(/, phrase: () => '控制媒体播放' },
+]
+
+/**
+ * Plain-language description of what a recorded JavaScript snippet does.
+ *
+ * A generated `javascript-code` node used to be titled with its own first
+ * statement (`document.querySelector('#sign').click()`), which tells a
+ * non-programmer nothing about whether the node is worth keeping. This reads
+ * the snippet's side effects — click, fill, navigate, storage write, network
+ * call, … — and phrases them in plain Chinese for the node card and the run
+ * log. Returns '' when nothing recognizable is found, so the caller can fall
+ * back to the raw-code title.
+ */
+export function describeJsScript(code: string): string {
+  const trimmed = code.trim()
+  if (!trimmed) return ''
+  const phrases: string[] = []
+  for (const rule of JS_EFFECT_RULES) {
+    if (phrases.length >= JS_EFFECT_LIMIT) break
+    if (!rule.re.test(trimmed)) continue
+    const phrase = rule.phrase(trimmed)
+    if (phrase && !phrases.includes(phrase)) phrases.push(phrase)
+  }
+  return phrases.length > 0 ? titleClip(phrases.join('，'), 60) : ''
 }
 
 /**
@@ -1600,12 +1760,16 @@ export function workflowFromHistory(entries: HistoryEntry[], name: string): Work
     }
 
     const blockId = blockIdForStep(step.action, step.args)
-    // A javascript-code node's card must say what THIS script does: every JS
-    // step shares one generic history summary, so the title is read from the
-    // code itself (leading comment, else first statement). Fill-shaped JS
-    // became a forms node above and keeps its selector card.
+    // A javascript-code node's card must say what THIS script does, in plain
+    // language: every JS step shares one generic history summary, and the user
+    // reviewing the generated workflow decides from that description whether
+    // the node is worth keeping. The author's own comment wins, then the
+    // behaviour read out of the code, and the raw first statement is the last
+    // resort.
     if (blockId === 'javascript-code') {
-      description = jsNodeTitle(String(step.args?.code ?? '')) || description
+      const code = String(step.args?.code ?? '')
+      description =
+        jsScriptComment(code) || describeJsScript(code) || jsFirstStatement(code) || description
     }
     addNode(blockId, {
       description,

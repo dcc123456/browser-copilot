@@ -386,28 +386,27 @@ describe('javascript-code nodes title themselves from the code', () => {
     ])
   })
 
-  it('without a comment the first statement shows, return/await stripped', () => {
+  it('recognizable code is titled by what it does, in plain language', () => {
     const data = actionData([
       entry('run_javascript', { code: 'await fetch("/api/cart").then((r) => r.json())' }),
     ])
-    expect(data[0]).toMatchObject({ description: 'fetch("/api/cart").then((r) => r.json())' })
+    expect(data[0]).toMatchObject({ description: '请求后端接口' })
   })
 
-  it('a long line is clipped so the card stays one line', () => {
-    const code =
-      "return Array.from(document.querySelectorAll('.item')).map((el) => el.textContent.trim())"
+  it('a snippet with no recognizable effect falls back to its first statement', () => {
+    const code = 'const summary = items.reduce((acc, cur) => acc + cur.amount, 0) + fallbackValue'
     const [node] = actionData([entry('run_javascript', { code })])
     const title = String(node!.description)
     expect(title.length).toBe(41)
     expect(title.endsWith('…')).toBe(true)
-    expect(title.startsWith('Array.from(document.querySelectorAll(')).toBe(true)
+    expect(title.startsWith('const summary = items.reduce(')).toBe(true)
   })
 
   it('brace-only opening lines do not become the title', () => {
-    const statement = 'document.body.setAttribute("data-ok", "1")'
+    const statement = 'const total = computeTotal(items)'
     const code = `{\n  ${statement}\n}`
     expect(actionData([entry('run_javascript', { code })])[0]).toMatchObject({
-      description: `${statement.slice(0, 40)}…`,
+      description: statement,
     })
   })
 
@@ -496,12 +495,12 @@ describe('fill-shaped run_javascript becomes the forms operator', () => {
     expect(fillLikeJsFromCode("document.querySelector('#a').value = `${v}`")).toBeNull()
     // form.submit guard
     expect(fillLikeJsFromCode("document.querySelector('#f').submit()")).toBeNull()
-    // the workflow keeps the verbatim JS block for guarded snippets, titled
-    // from its first statement line (clipped to the card width)
+    // the workflow keeps the verbatim JS block for guarded snippets; the card
+    // summarises the multi-field write in plain language instead of showing code
     expect(actionData([entry('run_javascript', { code: twoFields })])).toEqual([
       {
         blockId: 'javascript-code',
-        description: `${twoFields.slice(0, 40)}…`,
+        description: '批量填写多个输入框',
         code: twoFields,
         timeout: 20000,
       },
