@@ -42,6 +42,33 @@ const area = fileStorageArea()
 /** Hard cap so a daily task running for years cannot grow storage unbounded. */
 export const MAX_RUN_LOGS = 100
 
+/**
+ * Serializes read-modify-write cycles per storage key.
+ *
+ * Every mutation below reads the whole array under its key, edits it and writes
+ * it back. Two runs settling at the same moment therefore raced: both read the
+ * same base list and the later write silently dropped the other's entry, so a
+ * finished run could disappear from the log entirely. Storage offers no
+ * compare-and-swap, so the mutations are queued behind one another per key
+ * instead. (Reproduced with a latency-simulating storage double: two concurrent
+ * `recordFinishedRun` calls left only one of the two records.)
+ */
+const writeQueues = new Map<string, Promise<unknown>>()
+
+function withKeyLock<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const tail = writeQueues.get(key) ?? Promise.resolve()
+  const next = tail.then(run, run)
+  // Swallow the settled result so one failed mutation cannot strand the queue.
+  writeQueues.set(
+    key,
+    next.then(
+      () => undefined,
+      () => undefined,
+    ),
+  )
+  return next
+}
+
 function asTask(value: unknown): ScheduledTask | null {
   if (!value || typeof value !== 'object') return null
   const v = value as Partial<ScheduledTask>
@@ -89,12 +116,14 @@ export async function getTask(id: string): Promise<ScheduledTask | undefined> {
 }
 
 export async function saveTask(task: ScheduledTask): Promise<void> {
-  const list = await listTasks()
-  const index = list.findIndex((existing) => existing.id === task.id)
-  const normalized: ScheduledTask = { ...task, updatedAt: Date.now() }
-  if (index >= 0) list[index] = normalized
-  else list.push(normalized)
-  await area.set({ [KEY_TASKS]: list })
+  await withKeyLock(KEY_TASKS, async () => {
+    const list = await listTasks()
+    const index = list.findIndex((existing) => existing.id === task.id)
+    const normalized: ScheduledTask = { ...task, updatedAt: Date.now() }
+    if (index >= 0) list[index] = normalized
+    else list.push(normalized)
+    await area.set({ [KEY_TASKS]: list })
+  })
 }
 
 export function createDraft(partial?: Partial<ScheduledTask>): ScheduledTask {
@@ -117,9 +146,11 @@ export function createDraft(partial?: Partial<ScheduledTask>): ScheduledTask {
 }
 
 export async function deleteTask(id: string): Promise<void> {
-  const list = await listTasks()
-  await area.set({
-    [KEY_TASKS]: list.filter((task) => task.id !== id),
+  await withKeyLock(KEY_TASKS, async () => {
+    const list = await listTasks()
+    await area.set({
+      [KEY_TASKS]: list.filter((task) => task.id !== id),
+    })
   })
 }
 
@@ -128,15 +159,17 @@ export async function recordTaskRun(
   id: string,
   result: Pick<ScheduledTask, 'lastStatus' | 'lastSummary' | 'lastError'>,
 ): Promise<void> {
-  const list = await listTasks()
-  const task = list.find((entry) => entry.id === id)
-  if (!task) return
-  task.lastRunAt = Date.now()
-  task.lastStatus = result.lastStatus
-  task.lastSummary = result.lastSummary
-  task.lastError = result.lastError
-  task.updatedAt = Date.now()
-  await area.set({ [KEY_TASKS]: list })
+  await withKeyLock(KEY_TASKS, async () => {
+    const list = await listTasks()
+    const task = list.find((entry) => entry.id === id)
+    if (!task) return
+    task.lastRunAt = Date.now()
+    task.lastStatus = result.lastStatus
+    task.lastSummary = result.lastSummary
+    task.lastError = result.lastError
+    task.updatedAt = Date.now()
+    await area.set({ [KEY_TASKS]: list })
+  })
 }
 
 // --- Run logs ----------------------------------------------------------------
@@ -212,11 +245,13 @@ export async function listRuns(taskId?: string): Promise<TaskRunLog[]> {
 }
 
 export async function addRun(run: Omit<TaskRunLog, 'id' | 'at'>): Promise<TaskRunLog> {
-  const list = await listRuns()
-  const entry: TaskRunLog = { ...run, id: newId(), at: Date.now() }
-  list.unshift(entry)
-  await area.set({ [KEY_RUNS]: list.slice(0, MAX_RUN_LOGS) })
-  return entry
+  return withKeyLock(KEY_RUNS, async () => {
+    const list = await listRuns()
+    const entry: TaskRunLog = { ...run, id: newId(), at: Date.now() }
+    list.unshift(entry)
+    await area.set({ [KEY_RUNS]: list.slice(0, MAX_RUN_LOGS) })
+    return entry
+  })
 }
 
 /**
@@ -246,47 +281,53 @@ export async function recordFinishedRun(input: FinishedRunInput): Promise<TaskRu
   // Chat turns are conversation history, not task runs. Never persist them into
   // the task run log, so it stays a clean record of scheduled/Feishu/manual runs.
   if (input.source === 'chat') return null
-  const list = await listRuns()
-  const trigger: TaskRunLog['trigger'] =
-    input.source === 'feishu' ? 'feishu' : input.source === 'manual' ? 'manual' : 'schedule'
-  const entry: TaskRunLog = {
-    id: input.runId,
-    ...(input.taskId ? { taskId: input.taskId } : {}),
-    ...(input.workflowId ? { workflowId: input.workflowId } : {}),
-    ...(input.label ? { label: input.label } : {}),
-    source: input.source,
-    trigger,
-    ...(input.startedAt ? { startedAt: input.startedAt } : {}),
-    finishedAt: input.finishedAt ?? Date.now(),
-    outcome: input.outcome,
-    at: input.finishedAt ?? Date.now(),
-    ok: input.outcome === 'ok',
-    skipped: input.outcome === 'skipped',
-    summary: input.summary ?? '',
-    ...(input.error ? { error: input.error } : {}),
-    ...(input.steps && input.steps.length > 0 ? { steps: input.steps } : {}),
-  }
-  // If a placeholder/earlier record with the same id exists, replace it.
-  const existing = list.findIndex((r) => r.id === input.runId)
-  if (existing !== -1) list[existing] = entry
-  else list.unshift(entry)
-  await area.set({ [KEY_RUNS]: list.slice(0, MAX_RUN_LOGS) })
-  return entry
+  return withKeyLock(KEY_RUNS, async () => {
+    const list = await listRuns()
+    const trigger: TaskRunLog['trigger'] =
+      input.source === 'feishu' ? 'feishu' : input.source === 'manual' ? 'manual' : 'schedule'
+    const entry: TaskRunLog = {
+      id: input.runId,
+      ...(input.taskId ? { taskId: input.taskId } : {}),
+      ...(input.workflowId ? { workflowId: input.workflowId } : {}),
+      ...(input.label ? { label: input.label } : {}),
+      source: input.source,
+      trigger,
+      ...(input.startedAt ? { startedAt: input.startedAt } : {}),
+      finishedAt: input.finishedAt ?? Date.now(),
+      outcome: input.outcome,
+      at: input.finishedAt ?? Date.now(),
+      ok: input.outcome === 'ok',
+      skipped: input.outcome === 'skipped',
+      summary: input.summary ?? '',
+      ...(input.error ? { error: input.error } : {}),
+      ...(input.steps && input.steps.length > 0 ? { steps: input.steps } : {}),
+    }
+    // If a placeholder/earlier record with the same id exists, replace it.
+    const existing = list.findIndex((r) => r.id === input.runId)
+    if (existing !== -1) list[existing] = entry
+    else list.unshift(entry)
+    await area.set({ [KEY_RUNS]: list.slice(0, MAX_RUN_LOGS) })
+    return entry
+  })
 }
 
 export async function clearRuns(taskId?: string): Promise<void> {
-  if (!taskId) {
-    await area.set({ [KEY_RUNS]: [] })
-    return
-  }
-  const list = await listRuns()
-  await area.set({ [KEY_RUNS]: list.filter((run) => run.taskId !== taskId) })
+  await withKeyLock(KEY_RUNS, async () => {
+    if (!taskId) {
+      await area.set({ [KEY_RUNS]: [] })
+      return
+    }
+    const list = await listRuns()
+    await area.set({ [KEY_RUNS]: list.filter((run) => run.taskId !== taskId) })
+  })
 }
 
 /** Deletes a single run-log entry by its id. */
 export async function deleteRun(id: string): Promise<void> {
-  const list = await listRuns()
-  await area.set({ [KEY_RUNS]: list.filter((run) => run.id !== id) })
+  await withKeyLock(KEY_RUNS, async () => {
+    const list = await listRuns()
+    await area.set({ [KEY_RUNS]: list.filter((run) => run.id !== id) })
+  })
 }
 
 // --- Feishu config -----------------------------------------------------------

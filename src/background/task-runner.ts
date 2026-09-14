@@ -113,18 +113,28 @@ export async function runTask(
   return outcome
 }
 
+/**
+ * Opening run-log line for a task. Each kind gets its own wording: a workflow
+ * task that announced "Starting agent task…" read as if the agent were about to
+ * act, which made the missing workflow steps look like a broken run.
+ */
+function taskStartLine(task: ScheduledTask): string {
+  switch (task.kind) {
+    case 'github-review-requests':
+      return 'Fetching GitHub review requests…'
+    case 'workflow':
+      return 'Starting workflow task…'
+    default:
+      return 'Starting agent task…'
+  }
+}
+
 async function executeTask(
   task: ScheduledTask,
   lang: string,
   tracked: RunningTask,
 ): Promise<RunOutcome> {
-  addStep(
-    tracked.runId,
-    'info',
-    task.kind === 'github-review-requests'
-      ? 'Fetching GitHub review requests…'
-      : 'Starting agent task…',
-  )
+  addStep(tracked.runId, 'info', taskStartLine(task))
   switch (task.kind) {
     case 'github-review-requests':
       return runReviewRequests(lang, tracked)
@@ -207,8 +217,8 @@ async function runAgentPrompt(
 
 /**
  * Runs a scheduled workflow-kind task through the workflow engine. The engine
- * already maps its steps onto the tracked run (see `executeWorkflow`), so this
- * only needs to look the stored workflow up and translate the settling outcome.
+ * records its steps on the run this task already opened (`reuseRun`), so the
+ * task's run log shows the whole workflow — one entry, not two.
  */
 async function runWorkflowTask(task: ScheduledTask, tracked: RunningTask): Promise<RunOutcome> {
   const workflow = task.workflowId ? await getWorkflow(task.workflowId) : undefined
@@ -221,9 +231,13 @@ async function runWorkflowTask(task: ScheduledTask, tracked: RunningTask): Promi
   // the plugin closed everywhere it falls back to the legacy global chain.
   const scope = await resolveUnattendedScope()
   const outcome = await executeWorkflow(workflow, {
-    source: 'schedule',
+    // The real trigger, not a hardcoded 'schedule': a manual "Run now" (or a
+    // Feishu command) on a workflow task must be labelled — and filed in the
+    // run history — for what it actually was.
+    source: tracked.source === 'chat' ? 'schedule' : tracked.source,
     taskId: task.id,
     feishuChatId: tracked.feishuChatId,
+    reuseRun: tracked,
     ...(scope ? { scopeWindowId: scope.windowId } : {}),
   })
   return {

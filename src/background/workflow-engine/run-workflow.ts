@@ -18,7 +18,15 @@ import {
   prunePersistedCheckpoints,
   readPersistedCheckpoints,
 } from '../checkpoint-store'
-import { addStep, finishRun, recordSnapshot, startRun, type RunSource } from '../running-tasks'
+import {
+  addStep,
+  finishRun,
+  recordSnapshot,
+  setRunWorkflow,
+  startRun,
+  type RunSource,
+  type RunningTask,
+} from '../running-tasks'
 import { countElements, execJsOnActiveTab } from '../driver'
 import { normalScopeFromWindowId } from '../automation-scope'
 import { BLOCK_BY_ID } from '../../lib/workflow/blocks/palette'
@@ -104,6 +112,7 @@ export interface ExecuteWorkflowOptions {
   /** Optional caller-side sink for each engine step, fired alongside the run log. */
   onStep?: (kind: string, nodeId: string, text: string) => void
   /**
+  /**
    * M4: persist a per-step checkpoint (`checkpoints/<runId>.json`) so a run can
    * be resumed — or rolled back to its last known-good step — after a crash or
    * a service-worker restart. Default true; pass false for cheap throwaway runs.
@@ -124,6 +133,21 @@ export interface ExecuteWorkflowOptions {
    * Unresumable (no checkpoints, node gone) falls back to a normal start.
    */
   resumeFrom?: string
+  /**
+   * Reuse a run the caller already started instead of opening a second one.
+   *
+   * The scheduled-task runner already tracks the task as a run; without this,
+   * every workflow-kind task produced TWO run records — the task wrapper
+   * (carrying only its two "starting" lines) and this engine's own run (carrying
+   * the real steps). The two were persisted back-to-back, so the read-modify-
+   * write on the shared run log could drop one of them and the surviving card
+   * could be the empty wrapper — a task that looks like it never ran.
+   *
+   * With a reused run the engine records its steps onto that run and the caller
+   * keeps ownership of finishing it; the run's `workflowId` is back-filled so
+   * the editor's run logs still find it.
+   */
+  reuseRun?: RunningTask
 }
 
 export interface ExecuteWorkflowResult {
@@ -146,21 +170,31 @@ export interface ExecuteWorkflowResult {
  * Run `workflow` as a tracked task, mapping engine steps onto the run's log.
  * A thrown engine error (e.g. a cancellation escaping the engine) is treated as
  * a `'cancelled'` abort so the board never shows a crashed run as `'ok'`.
+ *
+ * When `opts.reuseRun` is given the caller's run is used as-is: the engine's
+ * steps land on it and this function does NOT finish it (the caller does), so
+ * a scheduled workflow task is ONE run-log entry rather than two.
  */
 export async function executeWorkflow(
   workflow: Workflow,
   opts: ExecuteWorkflowOptions,
 ): Promise<ExecuteWorkflowResult> {
-  const run = startRun({
-    label: workflow.name,
-    source: opts.source,
-    taskId: opts.taskId,
-    workflowId: workflow.id,
-    feishuChatId: opts.feishuChatId,
-    ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
-  })
+  const ownsRun = opts.reuseRun === undefined
+  const run =
+    opts.reuseRun ??
+    startRun({
+      label: workflow.name,
+      source: opts.source,
+      taskId: opts.taskId,
+      workflowId: workflow.id,
+      feishuChatId: opts.feishuChatId,
+      ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+    })
   const runId = run.runId
   lastRunByWorkflow.set(workflow.id, runId)
+  // The reused run was opened by the task runner, which knows the task but not
+  // the workflow: back-fill the id so the editor's run logs still match it.
+  if (!ownsRun) setRunWorkflow(runId, workflow.id)
   // M4: register the run in the persisted-checkpoint index so the pruner can
   // retire the oldest runs once enough of them have accumulated.
   const wantCheckpoints = opts.checkpoints !== false
@@ -267,7 +301,9 @@ export async function executeWorkflow(
     // For a failed run, prefer the dedicated error field; fall back to summary
     // so legacy failures still show something in the history error block.
     const error = outcome === 'failed' ? (result.error ?? summary) : undefined
-    finishRun(runId, { outcome, summary, error })
+    // A reused run is the caller's to finish — it may still add lines (e.g. a
+    // notification step) after the engine settles.
+    if (ownsRun) finishRun(runId, { outcome, summary, error })
     // Retire the oldest runs' checkpoints so repeated debugging cannot fill
     // the data directory. Fire-and-forget: pruning must never hold the run.
     if (wantCheckpoints) void prunePersistedCheckpoints()
@@ -285,7 +321,7 @@ export async function executeWorkflow(
     const aborted =
       run.controller.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')
     if (aborted) {
-      finishRun(runId, { outcome: 'cancelled' })
+      if (ownsRun) finishRun(runId, { outcome: 'cancelled' })
       return {
         runId,
         outcome: 'cancelled',
@@ -293,7 +329,7 @@ export async function executeWorkflow(
       }
     }
     const text = e instanceof Error ? e.message : String(e)
-    finishRun(runId, { outcome: 'failed', summary: text.split('\n')[0], error: text })
+    if (ownsRun) finishRun(runId, { outcome: 'failed', summary: text.split('\n')[0], error: text })
     if (wantCheckpoints) void prunePersistedCheckpoints()
     return {
       runId,

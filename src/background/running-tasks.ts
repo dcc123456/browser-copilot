@@ -211,6 +211,19 @@ export function recordSnapshot(
 }
 
 /**
+ * Attaches (or replaces) the saved-workflow id on a run started without one.
+ *
+ * A scheduled workflow task opens its run in `task-runner` (which knows the
+ * task, not the workflow) and then hands that run to `executeWorkflow`; the
+ * engine back-fills the workflow id here so the editor's run logs — filtered by
+ * workflow id — still list the run.
+ */
+export function setRunWorkflow(runId: string, workflowId: string): void {
+  const task = runs.get(runId)
+  if (task) task.workflowId = workflowId
+}
+
+/**
  * Attaches (or replaces) the cancellation callback for a run. The Feishu bot
  * uses this to post a "terminated" notice when a task started from chat is
  * stopped from the board — task-runner creates the run without knowing how to
