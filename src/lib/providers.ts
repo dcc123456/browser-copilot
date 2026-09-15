@@ -15,6 +15,7 @@
  */
 
 import { LOCALES, type LocaleSetting } from './i18n'
+import { normalizeLocalAgentBindings } from './storage'
 import { normalizeLocalAgentUrl } from './types'
 import type { AgentMode, UnattendedWindowPolicy } from './types'
 
@@ -376,6 +377,8 @@ export function normalizeSettingsPayload(raw: unknown): {
   localAgentUrl: string
   localAgentActiveAgent: string
   localAgentAdapterPath: string
+  localAgentWindowId?: number
+  localAgentBindings: Record<string, number>
   unattendedWindowPolicy: UnattendedWindowPolicy
   unattendedWindowId?: number
   imageModel: { providerId: string; model: string }
@@ -417,6 +420,9 @@ export function normalizeSettingsPayload(raw: unknown): {
     typeof value.localAgentActiveAgent === 'string' ? value.localAgentActiveAgent : ''
   const localAgentAdapterPath =
     typeof value.localAgentAdapterPath === 'string' ? value.localAgentAdapterPath : ''
+  const localAgentWindowId =
+    typeof value.localAgentWindowId === 'number' ? value.localAgentWindowId : undefined
+  const localAgentBindings = normalizeLocalAgentBindings(value.localAgentBindings)
   const unattendedWindowPolicy =
     value.unattendedWindowPolicy === 'ask' || value.unattendedWindowPolicy === 'fixed'
       ? value.unattendedWindowPolicy
@@ -460,6 +466,8 @@ export function normalizeSettingsPayload(raw: unknown): {
     localAgentUrl,
     localAgentActiveAgent,
     localAgentAdapterPath,
+    localAgentWindowId,
+    localAgentBindings,
     unattendedWindowPolicy,
     unattendedWindowId,
     imageModel,

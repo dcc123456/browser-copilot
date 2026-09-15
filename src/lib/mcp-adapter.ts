@@ -50,7 +50,10 @@ export function buildMcpSnippet(client: McpClient, adapterPath?: string): string
         '    "browser-copilot": {\n' +
         '      "command": "node",\n' +
         `      "args": [${arg}],\n` +
-        '      "env": { "BROWSER_COPILOT_TOKEN": "" }\n' +
+        // BROWSER_COPILOT_AGENT_NAME: set a unique name when several agents in
+        // the same project folder drive different browser windows; an empty
+        // value falls back to the auto-generated "launcher@folder" name.
+        '      "env": { "BROWSER_COPILOT_TOKEN": "", "BROWSER_COPILOT_AGENT_NAME": "" }\n' +
         '    }\n' +
         '  }\n' +
         '}'
@@ -58,6 +61,12 @@ export function buildMcpSnippet(client: McpClient, adapterPath?: string): string
     case 'codex':
       return '[mcp_servers.browser-copilot]\n' + 'command = "node"\n' + `args = [${arg}]`
     case 'trae':
-      return 'MCP 设置面板 → 添加 stdio MCP 服务：\n' + '  command: node\n' + `  args: [${arg}]`
+      return (
+        'MCP 设置面板 → 添加 stdio MCP 服务：\n' +
+        '  command: node\n' +
+        `  args: [${arg}]\n` +
+        '  # 可选环境变量：BROWSER_COPILOT_TOKEN（共享 token）、\n' +
+        '  # BROWSER_COPILOT_AGENT_NAME（同项目多会话时给每个连接唯一名称）'
+      )
   }
 }

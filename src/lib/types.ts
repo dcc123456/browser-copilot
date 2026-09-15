@@ -164,6 +164,9 @@ export interface Settings {
    * 当前选中服务的 Agent 连接 id；`''` 表示服务所有连接（默认）。
    * 多个 agent 同时接入时，插件只执行被选中连接发来的 tool/prompt 请求，
    * 其余连接会被拒绝，从而实现“在插件里选择使用哪个连接”。
+   *
+   * @deprecated 被 {@link localAgentBindings} 的 N:N 窗口分配取代；首次收到
+   * `agents.update` 时由后台迁移成一条 name→window 绑定后清空。
    */
   localAgentActiveAgent: string
   /**
@@ -178,8 +181,23 @@ export interface Settings {
    * 该窗口内的标签页上执行（含 CDP 附加），绝不触及其它窗口。窗口已关闭
    * 或不再是插件窗口时，该记录失效并回退到默认解析
    * （{@link unattendedWindowPolicy} 的 latest 行为）。未设置时同样回退。
+   *
+   * @deprecated 与 {@link localAgentActiveAgent} 成对的旧版全局单选数据，
+   * 已被 {@link localAgentBindings} 取代，迁移完成后清空。
    */
   localAgentWindowId?: number
+  /**
+   * 本地 Agent 连接 → 浏览器窗口的 N:N 分配表，键为连接名（agentName：
+   * `launcher@项目名` 或环境变量 `BROWSER_COPILOT_AGENT_NAME`，跨适配器/
+   * worker 重启稳定；进程级随机 agentId 只存活于单次会话，不能持久化），
+   * 值为该连接被允许操作的浏览器窗口 id。多个连接可分配到同一窗口；一个
+   * 连接同一时刻只归属一个窗口。
+   *
+   * 一旦该表非空，没有任何有效分配的连接发来的 tool/prompt 请求会被拒绝
+   * （引导用户在目标窗口的面板里完成分配）；表为空时保持开箱即用行为。
+   * 窗口已关闭或不再承载插件时，该条分配视为失效并回退到默认窗口解析。
+   */
+  localAgentBindings?: Record<string, number>
   /**
    * 无人值守运行（agent 接入 / 定时任务 / 飞书任务）在多个插件窗口同时
    * 打开时如何选择目标窗口：

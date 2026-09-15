@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { sendCommand } from '../lib/messages'
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
+import { sendCommand, type WindowChoice } from '../lib/messages'
 import { LOCALE_LABELS, LOCALES, type LocaleSetting, type Messages } from '../lib/i18n'
 import {
   PROVIDER_PRESETS,
@@ -111,6 +111,133 @@ function normalizeSettings(raw: Settings | undefined): Settings {
 }
 
 /**
+ * Per-connection → window assignment surface, rendered independently in EVERY
+ * window's panel. Bindings live in global settings, so all panels show the
+ * same rows; an assignment made here is applied atomically by the worker
+ * (`agent.bindings.set`) and fanned out to other panels via storage change
+ * events.
+ */
+function AgentBindingsCard(props: {
+  t: Messages
+  agents: Array<{ id: string; name: string }>
+  windows: WindowChoice[]
+  bindings: Record<string, number>
+  myWindowId: number | undefined
+  onAssign: (agentId: string | undefined, agentName: string, windowId: number | null) => void
+}): ReactElement {
+  const { t, agents, windows, bindings, myWindowId, onAssign } = props
+  // Only windows currently hosting the plugin can be assigned.
+  const pluginWindows = windows.filter((window) => window.isPanel || window.isMinimized)
+
+  // How many live connections share each name (duplicate names share one
+  // binding and need a unique BROWSER_COPILOT_AGENT_NAME to be told apart).
+  const nameCounts = new Map<string, number>()
+  for (const agent of agents) {
+    nameCounts.set(agent.name, (nameCounts.get(agent.name) ?? 0) + 1)
+  }
+
+  // Bindings whose connection is no longer connected — orphaned by an agent
+  // restart under a different name; surfaced for one-click cleanup.
+  const staleNames = Object.keys(bindings).filter(
+    (name) => !agents.some((agent) => agent.name === name),
+  )
+
+  const windowLabel = (window: WindowChoice): string => {
+    const title = window.title.trim()
+    const here = window.windowId === myWindowId ? `（${t.settingsLocalAgentBindingThisWindow}）` : ''
+    return `${title || `#${window.windowId}`} · #${window.windowId}${here}`
+  }
+
+  return (
+    <div className="mt-2 space-y-2 rounded-lg border border-border bg-panel-2 p-3">
+      <div className="text-[12.5px] font-medium text-ink">
+        {t.settingsLocalAgentBindingsTitle}
+      </div>
+      <p className="m-0 text-[11.5px] leading-relaxed text-muted">
+        {t.settingsLocalAgentBindingsHint}
+      </p>
+
+      {agents.map((agent) => {
+        const bound = bindings[agent.name]
+        const closed =
+          typeof bound === 'number' &&
+          !pluginWindows.some((window) => window.windowId === bound)
+        return (
+          <div key={agent.id} className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <span className="truncate text-[12.5px] text-ink" title={agent.id}>
+                  {agent.name}
+                </span>
+                {bound === myWindowId && (
+                  <span className="shrink-0 text-[11px] text-accent">
+                    （{t.settingsLocalAgentBindingThisWindow}）
+                  </span>
+                )}
+              </div>
+              {(nameCounts.get(agent.name) ?? 0) > 1 && (
+                <div className="mt-0.5 text-[11px] leading-snug text-err">
+                  {t.settingsLocalAgentBindingDuplicate}
+                </div>
+              )}
+            </div>
+            <select
+              className="h-7 max-w-[52%] shrink-0 rounded-md border border-border bg-panel px-2 text-[12px] text-ink"
+              value={typeof bound === 'number' ? String(bound) : ''}
+              onChange={(event) =>
+                onAssign(
+                  agent.id,
+                  agent.name,
+                  event.target.value === '' ? null : Number(event.target.value),
+                )
+              }
+            >
+              <option value="">{t.settingsLocalAgentBindingUnassigned}</option>
+              {closed && (
+                <option disabled value={String(bound)}>
+                  {t.settingsLocalAgentBindingClosed({ id: bound as number })}
+                </option>
+              )}
+              {pluginWindows.map((window) => (
+                <option key={window.windowId} value={window.windowId}>
+                  {windowLabel(window)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )
+      })}
+
+      {staleNames.length > 0 && (
+        <div className="space-y-1 border-t border-border pt-2">
+          <div className="text-[11.5px] text-muted">
+            {t.settingsLocalAgentBindingStale}
+          </div>
+          {staleNames.map((name) => (
+            <div key={name} className="flex items-center gap-2">
+              <span className="min-w-0 flex-1 truncate text-[12px] text-muted" title={name}>
+                {name} · #{bindings[name]}
+              </span>
+              <button
+                type="button"
+                className="shrink-0 rounded-md border border-border px-2 py-0.5 text-[11.5px] text-muted hover:text-err"
+                onClick={() => onAssign(undefined, name, null)}
+              >
+                {t.settingsLocalAgentBindingRemove}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="m-0 text-[11px] text-muted">
+        {t.settingsLocalAgentAgentsConnected({ count: agents.length })}
+      </p>
+    </div>
+  )
+}
+
+/**
  * Polls the downloads API until one download reaches a terminal state. Only
  * `DownloadItem.filename` carries the ABSOLUTE on-disk path, which is what the
  * MCP snippets substitute in. Module-level/chrome-global is fine: this only
@@ -216,6 +343,9 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   const [agentTokenDraft, setAgentTokenDraft] = useState('')
   // Live connection status of the local-agent WebSocket, refreshed by polling.
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null)
+  // Normal windows with plugin state, backing the per-connection assignment
+  // selectors; polled alongside the connection status below.
+  const [pluginWindows, setPluginWindows] = useState<WindowChoice[]>([])
   // Which MCP snippet's copy button currently shows "已复制".
   const [copiedKey, setCopiedKey] = useState<null | 'claude' | 'codex' | 'trae'>(null)
   // Which MCP snippet tab is active (Claude Code by default).
@@ -288,10 +418,9 @@ export default function SettingsTab({ onLocaleChange }: Props) {
     refreshNormalWindows()
   }, [refreshNormalWindows])
 
-  // This panel's own window id. Recorded alongside the "serve connection"
-  // selection: picking which agent controls ALSO pins the local-agent bridge
-  // to THIS window, so the chosen agent only ever acts here (see
-  // `localAgentWindowId` in Settings and resolveBridgeScope in window-policy).
+  // This panel's own window id. Used to mark "this window" in the per-agent
+  // window-assignment selectors below (see `localAgentBindings` in Settings
+  // and resolveBridgeTarget in window-policy).
   const [myWindowId, setMyWindowId] = useState<number | undefined>(undefined)
   useEffect(() => {
     void chrome.windows
@@ -428,8 +557,9 @@ export default function SettingsTab({ onLocaleChange }: Props) {
     void load()
   }, [load])
 
-  // Poll the local-agent connection status while the card is mounted; the worker
-  // owns the socket, so the panel just reads it back every couple of seconds.
+  // Poll the local-agent connection status and the window list while the card
+  // is mounted; the worker owns the socket, so the panel reads both back every
+  // couple of seconds.
   useEffect(() => {
     const poll = (): void => {
       void sendCommand({ type: 'agent.status.get' })
@@ -439,10 +569,33 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         .catch(() => {
           // Worker may be momentarily unavailable; the next tick retries.
         })
+      void sendCommand({ type: 'agent.windows.list' })
+        .then((result) => {
+          if (result.type === 'agent.windows') setPluginWindows(result.windows)
+        })
+        .catch(() => {
+          // Same best-effort cadence as the status poll.
+        })
     }
     poll()
     const interval = setInterval(poll, 2000)
     return () => clearInterval(interval)
+  }, [])
+
+  // An assignment made in ANOTHER window's panel lands in storage behind our
+  // back: merge settings changes without going through applySettings, which
+  // would also overwrite the URL/token/model drafts this panel may be editing.
+  useEffect(() => {
+    const handler = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: string,
+    ): void => {
+      if (area !== 'local') return
+      const next = changes['settings']?.newValue as Settings | undefined
+      if (next) setSettings(normalizeSettings(next))
+    }
+    chrome.storage?.onChanged.addListener(handler)
+    return () => chrome.storage?.onChanged.removeListener(handler)
   }, [])
 
   // Reset the MCP copy-button label after a brief pause, and clear the timer on
@@ -1755,56 +1908,26 @@ export default function SettingsTab({ onLocaleChange }: Props) {
               </div>
             )}
 
-            {/* Which connected agent may control the browser. Surfaced ON the
-                card (not inside 配置接入) so a multi-agent setup can switch
-                control without expanding anything. Picking one also pins the
-                bridge to THIS window (`localAgentWindowId`): the chosen agent
-                then only ever acts in the window where the selection was made. */}
-            {(agentStatus?.agents ?? []).length > 1 && (
-              <div className="field">
-                <label htmlFor="agent-serve">{t.settingsLocalAgentActiveAgent}</label>
-                <select
-                  id="agent-serve"
-                  onChange={(event) =>
-                    void mutate({
-                      type: 'settings.set',
-                      patch: {
-                        localAgentActiveAgent: event.target.value,
-                        ...(myWindowId !== undefined ? { localAgentWindowId: myWindowId } : {}),
-                      },
-                    })
-                  }
-                  value={settings.localAgentActiveAgent}
-                >
-                  <option value="">{t.settingsLocalAgentActiveAgentAll}</option>
-                  {/* A previously selected connection may have dropped; keep it
-                      listed so the value never renders as a blank select. */}
-                  {settings.localAgentActiveAgent &&
-                    !(agentStatus?.agents ?? []).some(
-                      (agent) => agent.id === settings.localAgentActiveAgent,
-                    ) && (
-                      <option disabled value={settings.localAgentActiveAgent}>
-                        {settings.localAgentActiveAgent} · {t.settingsLocalAgentStatusDisconnected}
-                      </option>
-                    )}
-                  {(agentStatus?.agents ?? []).map((agent) => (
-                    <option key={agent.id} value={agent.id}>
-                      {agent.name}
-                    </option>
-                  ))}
-                </select>
-                <p className="hint" style={{ marginBottom: 0 }}>
-                  {t.settingsLocalAgentActiveAgentHint}
-                  {` ${t.settingsLocalAgentAgentsConnected({
-                    count: (agentStatus?.agents ?? []).length,
-                  })}`}
-                </p>
-              </div>
+            {/* Per-connection window assignment: each connected agent can be
+                bound to one window, so several agents drive SEPARATE windows
+                concurrently. Usable independently in every window's panel;
+                assignments are global settings synced via storage events. */}
+            {(agentStatus?.agents ?? []).length >= 1 && (
+              <AgentBindingsCard
+                t={t}
+                agents={agentStatus!.agents}
+                windows={pluginWindows}
+                bindings={settings.localAgentBindings ?? {}}
+                myWindowId={myWindowId}
+                onAssign={(agentId, agentName, windowId) =>
+                  void mutate({ type: 'agent.bindings.set', agentId, agentName, windowId })
+                }
+              />
             )}
 
             {/* Connection editing moved into the dialog (button below); this
                 card stays a status surface: enable switch, live state, and —
-                for a multi-agent setup — which connection to serve. */}
+                for a multi-agent setup — per-window connection assignment. */}
             <div className="actions">
               <button
                 onClick={() => {

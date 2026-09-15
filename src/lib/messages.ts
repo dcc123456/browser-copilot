@@ -214,6 +214,17 @@ export type Command =
    */
   | { type: 'panel.minimize'; windowId: number }
 
+  // --- Local-agent multi-window assignment ---
+  /** Lists normal windows with their plugin state for the assignment UI. */
+  | { type: 'agent.windows.list' }
+  /**
+   * Assigns a connected agent (by stable `agentName`) to a window, or removes
+   * its assignment (`windowId: null`). The worker performs an atomic
+   * read-modify-write of the whole bindings map so two panels assigning
+   * concurrently cannot lose each other's entry.
+   */
+  | { type: 'agent.bindings.set'; agentId?: string; agentName: string; windowId: number | null }
+
 /** Replies, discriminated by the command that produced them. */
 export type CommandResult =
   | { type: 'settings'; settings: Settings }
@@ -332,6 +343,7 @@ export type CommandResult =
 
   // --- Local agent bridge ---
   | { type: 'agent.status'; status: AgentStatus }
+  | { type: 'agent.windows'; windows: WindowChoice[] }
 
 /** Envelope so a failed command never looks like a successful one. */
 export type CommandResponse = { ok: true; data: CommandResult } | { ok: false; error: string }

@@ -181,7 +181,148 @@ describe('pick channel routing', () => {
   })
 })
 
-describe('resolveBridgeScope (local-agent window pin)', () => {
+describe('resolveBridgeWindow (pure per-connection policy)', () => {
+  let policy: typeof import('../src/background/window-policy')
+
+  beforeEach(async () => {
+    vi.resetModules()
+    policy = await import('../src/background/window-policy')
+  })
+
+  // Windows 1 (panel) and 2 (minimized) currently host the plugin.
+  const windows = [win(1, { isPanel: true }), win(2, { isMinimized: true })]
+  const id = { agentId: 'id-a', agentName: 'claude@proj' }
+
+  it('defaults with no identity and no bindings (zero-setup behaviour)', () => {
+    expect(
+      policy.resolveBridgeWindow({ bindings: {}, sessionBindings: new Map(), windows }),
+    ).toEqual({ kind: 'default' })
+  })
+
+  it('refuses an identity-less request once bindings exist', () => {
+    expect(
+      policy.resolveBridgeWindow({
+        bindings: { 'codex@other': 1 },
+        sessionBindings: new Map(),
+        windows,
+      }),
+    ).toEqual({ kind: 'unbound' })
+  })
+
+  it('uses the session id binding first', () => {
+    expect(
+      policy.resolveBridgeWindow({
+        identity: id,
+        bindings: { 'claude@proj': 1 },
+        sessionBindings: new Map([['id-a', 2]]),
+        windows,
+      }),
+    ).toEqual({ kind: 'window', windowId: 2, source: 'session-id' })
+  })
+
+  it('falls through a stale session binding to the name binding', () => {
+    expect(
+      policy.resolveBridgeWindow({
+        identity: id,
+        bindings: { 'claude@proj': 2 },
+        sessionBindings: new Map([['id-a', 9]]), // window 9 gone
+        windows,
+      }),
+    ).toEqual({ kind: 'window', windowId: 2, source: 'name' })
+  })
+
+  it('honours the deprecated legacy pair only when its id matches', () => {
+    expect(
+      policy.resolveBridgeWindow({
+        identity: id,
+        bindings: {},
+        sessionBindings: new Map(),
+        legacy: { activeAgentId: 'id-a', windowId: 2 },
+        windows,
+      }),
+    ).toEqual({ kind: 'window', windowId: 2, source: 'legacy' })
+
+    // A different agent's legacy selection neither serves nor binds it:
+    // no bindings exist anywhere, so the result is `default` (the old
+    // exclusive gate in agent-api.ts still handles the refusal).
+    expect(
+      policy.resolveBridgeWindow({
+        identity: id,
+        bindings: {},
+        sessionBindings: new Map(),
+        legacy: { activeAgentId: 'id-b', windowId: 2 },
+        windows,
+      }),
+    ).toEqual({ kind: 'default' })
+  })
+
+  it('defaults instead of swallowing an agent whose binding windows are all stale', () => {
+    expect(
+      policy.resolveBridgeWindow({
+        identity: id,
+        bindings: { 'claude@proj': 9 },
+        sessionBindings: new Map([['id-a', 8]]),
+        legacy: { activeAgentId: 'id-a', windowId: 7 },
+        windows,
+      }),
+    ).toEqual({ kind: 'default' })
+  })
+
+  it('refuses a known-but-unassigned connection once other assignments exist', () => {
+    expect(
+      policy.resolveBridgeWindow({
+        identity: { agentId: 'new', agentName: 'new@proj' },
+        bindings: { 'claude@proj': 1 },
+        sessionBindings: new Map(),
+        windows,
+      }),
+    ).toEqual({ kind: 'unbound' })
+  })
+
+  it('defaults an unassigned connection while no bindings exist', () => {
+    expect(
+      policy.resolveBridgeWindow({
+        identity: { agentId: 'new', agentName: 'new@proj' },
+        bindings: {},
+        sessionBindings: new Map(),
+        windows,
+      }),
+    ).toEqual({ kind: 'default' })
+  })
+
+  it('supports a name-only identity (older adapters without agentId)', () => {
+    expect(
+      policy.resolveBridgeWindow({
+        identity: { agentName: 'claude@proj' },
+        bindings: { 'claude@proj': 2 },
+        sessionBindings: new Map(),
+        windows,
+      }),
+    ).toEqual({ kind: 'window', windowId: 2, source: 'name' })
+
+    expect(
+      policy.resolveBridgeWindow({
+        identity: { agentName: 'new@proj' },
+        bindings: { 'claude@proj': 2 },
+        sessionBindings: new Map(),
+        windows,
+      }),
+    ).toEqual({ kind: 'unbound' })
+  })
+
+  it('shares one window between duplicate names (documented collision)', () => {
+    expect(
+      policy.resolveBridgeWindow({
+        identity: { agentId: 'second-id', agentName: 'claude@proj' },
+        bindings: { 'claude@proj': 1 },
+        sessionBindings: new Map(),
+        windows,
+      }),
+    ).toEqual({ kind: 'window', windowId: 1, source: 'name' })
+  })
+})
+
+describe('resolveBridgeTarget (local-agent per-connection windows)', () => {
   let policy: typeof import('../src/background/window-policy')
 
   /**
@@ -223,53 +364,119 @@ describe('resolveBridgeScope (local-agent window pin)', () => {
     delete (globalThis as Partial<{ chrome: unknown }>).chrome
   })
 
-  it('pins the run to the window the served agent was selected in', async () => {
-    stubChrome({ localAgentWindowId: 7 }, { 7: { id: 7, type: 'normal' } })
+  it('scopes a connection to its assigned panel window', async () => {
+    stubChrome(
+      { localAgentBindings: { 'claude@proj': 7 } },
+      { 7: { id: 7, type: 'normal' } },
+    )
     const scope = await import('../src/background/automation-scope')
     const port = { name: 'x' } as unknown as chrome.runtime.Port
     scope.registerPanelWindow(7, port)
 
-    await expect(policy.resolveBridgeScope()).resolves.toEqual({ windowId: 7 })
+    await expect(
+      policy.resolveBridgeTarget({ agentId: 'id-a', agentName: 'claude@proj' }),
+    ).resolves.toEqual({ scope: { windowId: 7 }, unbound: false })
   })
 
-  it('accepts a pinned minimized (plugin) window too', async () => {
-    stubChrome({ localAgentWindowId: 2 }, { 2: { id: 2, type: 'normal' } })
+  it('accepts an assigned minimized (plugin) window too', async () => {
+    stubChrome(
+      { localAgentBindings: { 'claude@proj': 2 } },
+      { 2: { id: 2, type: 'normal' } },
+    )
     const minimize = await import('../src/background/panel-minimize')
     minimize.minimizeWindow(2)
 
-    await expect(policy.resolveBridgeScope()).resolves.toEqual({ windowId: 2 })
+    await expect(
+      policy.resolveBridgeTarget({ agentId: 'id-a', agentName: 'claude@proj' }),
+    ).resolves.toEqual({ scope: { windowId: 2 }, unbound: false })
   })
 
-  it('falls back to the latest plugin window when the pin is not a plugin window', async () => {
-    // Window 3 exists and is normal, but hosts no panel and is not minimized.
-    // Window 1 (the registered panel window) must also be a real normal window:
-    // the fallback validates it through chrome.windows.get.
+  it('survives a worker restart: the name binding resolves with an empty session map', async () => {
+    // A fresh module (resetModules) has no agentId memory; the persisted name
+    // binding alone must be enough.
     stubChrome(
-      { localAgentWindowId: 3 },
+      { localAgentBindings: { 'claude@proj': 7 } },
+      { 7: { id: 7, type: 'normal' } },
+    )
+    const scope = await import('../src/background/automation-scope')
+    scope.registerPanelWindow(7, { name: 'x' } as unknown as chrome.runtime.Port)
+
+    const result = await policy.resolveBridgeTarget({
+      agentId: 'brand-new-process-id',
+      agentName: 'claude@proj',
+    })
+    expect(result).toEqual({ scope: { windowId: 7 }, unbound: false })
+  })
+
+  it('prefers an in-session id assignment over the persisted name binding', async () => {
+    stubChrome(
+      { localAgentBindings: { 'claude@proj': 1 } },
+      {
+        1: { id: 1, type: 'normal' },
+        2: { id: 2, type: 'normal' },
+      },
+    )
+    const scope = await import('../src/background/automation-scope')
+    scope.registerPanelWindow(1, { name: 'a' } as unknown as chrome.runtime.Port)
+    scope.registerPanelWindow(2, { name: 'b' } as unknown as chrome.runtime.Port)
+    // The panel assigned this id to window 2 during this worker's life.
+    policy.rememberAgentWindow('id-a', 2)
+
+    await expect(
+      policy.resolveBridgeTarget({ agentId: 'id-a', agentName: 'claude@proj' }),
+    ).resolves.toEqual({ scope: { windowId: 2 }, unbound: false })
+  })
+
+  it('reports unbound for an unassigned connection once bindings exist', async () => {
+    // No plugin window required: unbound returns before default resolution.
+    stubChrome({ localAgentBindings: { 'codex@other': 5 } }, {})
+
+    await expect(
+      policy.resolveBridgeTarget({ agentId: 'new', agentName: 'new@proj' }),
+    ).resolves.toEqual({ scope: undefined, unbound: true })
+
+    // Identity-less warmup (a plain ping) is unbound too.
+    await expect(policy.resolveBridgeTarget()).resolves.toEqual({
+      scope: undefined,
+      unbound: true,
+    })
+  })
+
+  it('falls back to the latest plugin window when the binding is stale', async () => {
+    // Bound to window 3, but it hosts no plugin anymore; panel window 1 is the
+    // default resolution target.
+    stubChrome(
+      { localAgentBindings: { 'claude@proj': 3 } },
       { 1: { id: 1, type: 'normal' }, 3: { id: 3, type: 'normal' } },
     )
     const scope = await import('../src/background/automation-scope')
-    const port = { name: 'x' } as unknown as chrome.runtime.Port
-    scope.registerPanelWindow(1, port)
+    scope.registerPanelWindow(1, { name: 'x' } as unknown as chrome.runtime.Port)
 
-    await expect(policy.resolveBridgeScope()).resolves.toEqual({ windowId: 1 })
+    await expect(
+      policy.resolveBridgeTarget({ agentId: 'id-a', agentName: 'claude@proj' }),
+    ).resolves.toEqual({ scope: { windowId: 1 }, unbound: false })
   })
 
-  it('falls back when the pinned window is gone', async () => {
-    stubChrome({ localAgentWindowId: 9 }, { 1: { id: 1, type: 'normal' } })
-    const scope = await import('../src/background/automation-scope')
-    const port = { name: 'x' } as unknown as chrome.runtime.Port
-    scope.registerPanelWindow(1, port)
-
-    await expect(policy.resolveBridgeScope()).resolves.toEqual({ windowId: 1 })
-  })
-
-  it('with no pin it behaves like the default unattended resolution', async () => {
+  it('with zero bindings it behaves like the default unattended resolution', async () => {
     stubChrome({}, { 1: { id: 1, type: 'normal' } })
     const scope = await import('../src/background/automation-scope')
-    const port = { name: 'x' } as unknown as chrome.runtime.Port
-    scope.registerPanelWindow(1, port)
+    scope.registerPanelWindow(1, { name: 'x' } as unknown as chrome.runtime.Port)
 
-    await expect(policy.resolveBridgeScope()).resolves.toEqual({ windowId: 1 })
+    await expect(
+      policy.resolveBridgeTarget({ agentId: 'id-a', agentName: 'claude@proj' }),
+    ).resolves.toEqual({ scope: { windowId: 1 }, unbound: false })
+  })
+
+  it('still honours the deprecated legacy selection for its matching id', async () => {
+    stubChrome(
+      { localAgentActiveAgent: 'id-a', localAgentWindowId: 7 },
+      { 7: { id: 7, type: 'normal' } },
+    )
+    const scope = await import('../src/background/automation-scope')
+    scope.registerPanelWindow(7, { name: 'x' } as unknown as chrome.runtime.Port)
+
+    await expect(
+      policy.resolveBridgeTarget({ agentId: 'id-a', agentName: 'claude@proj' }),
+    ).resolves.toEqual({ scope: { windowId: 7 }, unbound: false })
   })
 })

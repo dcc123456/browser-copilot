@@ -636,12 +636,22 @@ export interface Messages {
   settingsLocalAgentStatusError: (params: { error: string }) => string
   /** Shown instead of a raw `ERR_CONNECTION_REFUSED` when no adapter is listening. */
   settingsLocalAgentErrorRefused: string
-  /** Label of the "serve which connection" selector. */
-  settingsLocalAgentActiveAgent: string
-  /** Option value when the plugin serves every connected agent. */
-  settingsLocalAgentActiveAgentAll: string
-  /** Hint explaining the connection selector. */
-  settingsLocalAgentActiveAgentHint: string
+  /** Title of the per-window connection-assignment surface. */
+  settingsLocalAgentBindingsTitle: string
+  /** Hint explaining window assignments and the unassigned-refusal rule. */
+  settingsLocalAgentBindingsHint: string
+  /** Placeholder option: the connection is not assigned to any window. */
+  settingsLocalAgentBindingUnassigned: string
+  /** Suffix marking the window the current panel lives in. */
+  settingsLocalAgentBindingThisWindow: string
+  /** Disabled pseudo-option for an assignment whose window was closed. */
+  settingsLocalAgentBindingClosed: (params: { id: number }) => string
+  /** Warning shown when several live connections share the same name. */
+  settingsLocalAgentBindingDuplicate: string
+  /** Heading for assignments whose connection is no longer connected. */
+  settingsLocalAgentBindingStale: string
+  /** Button removing one stale assignment. */
+  settingsLocalAgentBindingRemove: string
   /** "N agent connection(s) connected" suffix next to the selector hint. */
   settingsLocalAgentAgentsConnected: (params: { count: number }) => string
   settingsLocalAgentMcpTitle: string
@@ -1437,10 +1447,16 @@ const en: Messages = {
   settingsLocalAgentStatusError: ({ error }) => `Error: ${error}`,
   settingsLocalAgentErrorRefused:
     'Adapter not running: the MCP adapter lives only while your coding-agent session runs. The plugin reconnects automatically (within ~30 s); run `node mcp-server.mjs --standalone` to keep it connected all the time.',
-  settingsLocalAgentActiveAgent: 'Serve connection',
-  settingsLocalAgentActiveAgentAll: 'All connections (default)',
-  settingsLocalAgentActiveAgentHint:
-    'Only requests from the selected connection are executed (others are refused until you switch back to "all"), and the agent only acts in the window where you made this selection.',
+  settingsLocalAgentBindingsTitle: 'Assign connections to windows',
+  settingsLocalAgentBindingsHint:
+    'Each connection acts only inside its assigned window. Once any assignment exists, unassigned connections are refused — assign them here, from the window they should use. With zero assignments every connection uses the latest plugin window. Running several agents in the same project folder? give each a unique BROWSER_COPILOT_AGENT_NAME.',
+  settingsLocalAgentBindingUnassigned: 'Unassigned',
+  settingsLocalAgentBindingThisWindow: 'this window',
+  settingsLocalAgentBindingClosed: ({ id }) => `#${id} · closed`,
+  settingsLocalAgentBindingDuplicate:
+    'Several connections share this name — the assignment applies to all of them. Set a unique BROWSER_COPILOT_AGENT_NAME for each agent to tell them apart.',
+  settingsLocalAgentBindingStale: 'Disconnected assignments',
+  settingsLocalAgentBindingRemove: 'Remove',
   settingsLocalAgentAgentsConnected: ({ count }) =>
     `${count} connection${count === 1 ? '' : 's'} connected`,
   settingsLocalAgentMcpTitle: 'MCP config',
@@ -2170,10 +2186,16 @@ const zhCN: Messages = {
   settingsLocalAgentStatusError: ({ error }) => `错误：${error}`,
   settingsLocalAgentErrorRefused:
     '本地适配器未运行：适配器只在编码 Agent 会话期间存活，会话结束即退出（插件因此显示“未连接”）。适配器启动后约 30 秒内会自动重连；想让插件保持常连，可单独运行 node mcp-server.mjs --standalone。',
-  settingsLocalAgentActiveAgent: '服务连接',
-  settingsLocalAgentActiveAgentAll: '全部连接（默认）',
-  settingsLocalAgentActiveAgentHint:
-    '只执行所选连接发来的请求（其余连接会被拒绝，直到切回“全部连接”），且该 agent 只能在你做出此选择时所在的窗口内操作页面。',
+  settingsLocalAgentBindingsTitle: '将连接分配到窗口',
+  settingsLocalAgentBindingsHint:
+    '每个连接只能在被分配的窗口内操作。一旦存在分配，未分配的连接会被拒绝——请在它要使用的窗口里打开插件并在此分配。零分配时所有连接默认操作最近活动的插件窗口。多个 agent 在同一个项目目录开会话时，请为各自设置不同的 BROWSER_COPILOT_AGENT_NAME。',
+  settingsLocalAgentBindingUnassigned: '未分配',
+  settingsLocalAgentBindingThisWindow: '本窗口',
+  settingsLocalAgentBindingClosed: ({ id }) => `#${id} · 窗口已关闭`,
+  settingsLocalAgentBindingDuplicate:
+    '有多个连接使用相同名称——该分配会同时作用于它们。请为各 agent 设置不同的 BROWSER_COPILOT_AGENT_NAME 以区分。',
+  settingsLocalAgentBindingStale: '已断开连接的分配',
+  settingsLocalAgentBindingRemove: '移除',
   settingsLocalAgentAgentsConnected: ({ count }) => `已接入 ${count} 个连接`,
   settingsLocalAgentMcpTitle: 'MCP 配置',
   settingsLocalAgentMcpHint:

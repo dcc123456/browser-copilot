@@ -66,8 +66,10 @@ const KEY_CONVERSATIONS_META = 'conversations'
  *   built-in `skill-generator` skill is seeded on install/upgrade.
  * - v4: takeover/local-agent settings.
  * - v5: built-in supervisor + specialist agents are seeded on install/upgrade.
+ * - v6: `localAgentBindings` (per-connection window assignments for the
+ *   local-agent bridge).
  */
-export const SCHEMA_VERSION = 5
+export const SCHEMA_VERSION = 6
 
 export const DEFAULT_SETTINGS: Settings = {
   providers: [],
@@ -85,6 +87,7 @@ export const DEFAULT_SETTINGS: Settings = {
   localAgentUrl: DEFAULT_LOCAL_AGENT_URL,
   localAgentActiveAgent: '',
   localAgentAdapterPath: '',
+  localAgentBindings: {},
   unattendedWindowPolicy: 'latest',
   takeoverModel: { providerId: '', model: '' },
   takeoverOnRun: false,
@@ -117,6 +120,32 @@ export function coerceMaxToolRounds(value: unknown): number {
   const n = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(n)) return DEFAULT_SETTINGS.maxToolRounds
   return Math.min(MAX_TOOL_ROUNDS_CAP, Math.max(MIN_TOOL_ROUNDS, Math.round(n)))
+}
+
+/**
+ * Normalizes the local-agent window-assignment map (`agentName -> windowId`).
+ *
+ * Storage is shared with hand-edited / downgraded records, so every entry is
+ * validated: a plain object with non-empty trimmed string keys and positive
+ * integer window ids; anything else (arrays, null, `NaN`, fractional or
+ * negative ids) is dropped. Returns an empty map for non-object input.
+ */
+export function normalizeLocalAgentBindings(raw: unknown): Record<string, number> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out: Record<string, number> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const name = key.trim()
+    if (
+      name &&
+      typeof value === 'number' &&
+      Number.isInteger(value) &&
+      value > 0 &&
+      Number.isFinite(value)
+    ) {
+      out[name] = value
+    }
+  }
+  return out
 }
 
 /**
@@ -194,6 +223,7 @@ export function normalizeStoredSettings(raw: unknown): Settings {
       typeof value.localAgentAdapterPath === 'string' ? value.localAgentAdapterPath : '',
     localAgentWindowId:
       typeof value.localAgentWindowId === 'number' ? value.localAgentWindowId : undefined,
+    localAgentBindings: normalizeLocalAgentBindings(value.localAgentBindings),
     unattendedWindowPolicy:
       value.unattendedWindowPolicy === 'ask' || value.unattendedWindowPolicy === 'fixed'
         ? value.unattendedWindowPolicy

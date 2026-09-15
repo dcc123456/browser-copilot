@@ -284,6 +284,78 @@ describe('driver panel-window scope', () => {
     browser().tabs.get(1)!.url = 'https://still-pin.example/'
     const tab = await driver.resolveAutomationTab(undefined, scope)
     expect(tab?.id).toBe(1)
+    driver.unpinTab(scope)
+  })
+
+  it('keeps independent pins per window scope for concurrent agents', async () => {
+    const scope1 = { windowId: 1 }
+    const scope2 = { windowId: 2 }
+    // A second, ACTIVE tab in window 1: with no pin resolution must pick it
+    // instead of the pinned tab 1, so the pin's effect is observable.
+    browser().tabs.set(3, {
+      id: 3,
+      windowId: 1,
+      url: 'https://active-w1.example/',
+      active: true,
+    })
+    browser().tabs.get(1)!.active = false
+    // Window 2 gets a different ACTIVE tab too, so resolving to the pinned
+    // tab 2 proves the pin (not ordinary active-tab resolution) is at work.
+    browser().tabs.set(4, {
+      id: 4,
+      windowId: 2,
+      url: 'https://active-w2.example/',
+      active: true,
+    })
+    browser().tabs.get(2)!.active = false
+
+    await driver.pinActiveTab(1, scope1)
+    await driver.pinActiveTab(2, scope2)
+
+    // Each scope resolves to its OWN pinned tab, not the active one.
+    expect((await driver.resolveAutomationTab(undefined, scope1))?.id).toBe(1)
+    expect((await driver.resolveAutomationTab(undefined, scope2))?.id).toBe(2)
+
+    // Unpinning in scope 1 must not touch scope 2's pin…
+    driver.unpinTab(scope1)
+    expect((await driver.resolveAutomationTab(undefined, scope1))?.id).toBe(3) // active again
+    expect((await driver.resolveAutomationTab(undefined, scope2))?.id).toBe(2) // still pinned
+
+    // …and the unscoped unpin slot is separate from scoped slots.
     driver.unpinTab()
+    expect((await driver.resolveAutomationTab(undefined, scope2))?.id).toBe(2)
+
+    // Once scope 2's own pin is removed, it falls back to its active tab 4.
+    driver.unpinTab(scope2)
+    expect((await driver.resolveAutomationTab(undefined, scope2))?.id).toBe(4)
+  })
+
+  it('expires each scope pin independently after the TTL', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000_000)
+    const scope1 = { windowId: 1 }
+    browser().tabs.set(3, {
+      id: 3,
+      windowId: 1,
+      url: 'https://active-w1.example/',
+      active: true,
+    })
+    browser().tabs.get(1)!.active = false
+    await driver.pinActiveTab(1, scope1)
+    expect((await driver.resolveAutomationTab(undefined, scope1))?.id).toBe(1)
+
+    // 6 minutes > the 5-minute TTL: the pin slot is swept lazily and the
+    // active tab wins again.
+    vi.advanceTimersByTime(6 * 60_000)
+    expect((await driver.resolveAutomationTab(undefined, scope1))?.id).toBe(3)
+    vi.useRealTimers()
+  })
+
+  it('rejects pinning an explicit tab that lives in another window', async () => {
+    const scope1 = { windowId: 1 }
+    // Tab 2 belongs to window 2; storing it under scope 1 would be a
+    // cross-window leak, so the call must fail rather than silently ignore it.
+    await expect(driver.pinActiveTab(2, scope1)).rejects.toThrow(/another window/)
+    expect((await driver.resolveAutomationTab(undefined, scope1))?.id).toBe(1)
   })
 })

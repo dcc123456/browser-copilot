@@ -17,7 +17,10 @@ const { runUnattendedPrompt } = vi.hoisted(() => ({ runUnattendedPrompt: vi.fn()
 // through tool/prompt/warmup — and that warmup NEVER attaches the CDP
 // monitor (a `chrome.debugger` attach would surface Chrome's native
 // "extension is debugging this browser" infobar on every heartbeat).
-const { resolveBridgeScope } = vi.hoisted(() => ({ resolveBridgeScope: vi.fn() }))
+const { resolveBridgeTarget, rememberAgentWindow } = vi.hoisted(() => ({
+  resolveBridgeTarget: vi.fn(),
+  rememberAgentWindow: vi.fn(),
+}))
 const { resolveAutomationTab, execOnActiveTab } = vi.hoisted(() => ({
   resolveAutomationTab: vi.fn(),
   execOnActiveTab: vi.fn(),
@@ -27,7 +30,7 @@ const { ensureTabMonitor, isMonitorHolding } = vi.hoisted(() => ({
   isMonitorHolding: vi.fn((): boolean => false),
 }))
 
-vi.mock('../src/background/window-policy', () => ({ resolveBridgeScope }))
+vi.mock('../src/background/window-policy', () => ({ resolveBridgeTarget, rememberAgentWindow }))
 vi.mock('../src/background/driver', () => ({ resolveAutomationTab, execOnActiveTab }))
 vi.mock('../src/background/cdp-monitor', () => ({ ensureTabMonitor, isMonitorHolding }))
 
@@ -142,6 +145,7 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     localAgentUrl: 'ws://127.0.0.1:8765',
     localAgentActiveAgent: '',
     localAgentAdapterPath: '',
+    localAgentBindings: {},
     unattendedWindowPolicy: 'latest',
     ...overrides,
   }
@@ -161,9 +165,9 @@ beforeEach(() => {
   // APIs; individual tests override these to exercise edge cases.
   vi.mocked(getSettings).mockResolvedValue(settings())
   vi.mocked(setSettings).mockResolvedValue(settings())
-  // Bridge scope: undefined = no pin and no plugin window = legacy global
-  // resolution; the pinning tests override this per case.
-  resolveBridgeScope.mockResolvedValue(undefined)
+  // Default: no window assignment and not unbound = legacy default resolution
+  // (undefined scope); the binding/unbound tests override this per case.
+  resolveBridgeTarget.mockResolvedValue({ scope: undefined, unbound: false })
   resolveAutomationTab.mockResolvedValue(undefined)
 })
 
@@ -403,9 +407,9 @@ describe('processAgentRequest · protocol & security gates', () => {
   })
 })
 
-describe('processAgentRequest · window pin & warmup', () => {
-  it('threads the pinned window scope into tool and prompt runs', async () => {
-    resolveBridgeScope.mockResolvedValue({ windowId: 5 })
+describe('processAgentRequest · per-connection windows & warmup', () => {
+  it('threads the assigned window scope into tool and prompt runs', async () => {
+    resolveBridgeTarget.mockResolvedValue({ scope: { windowId: 5 }, unbound: false })
     runToolStandalone.mockResolvedValueOnce({ ok: true, clicked: true })
     runUnattendedPrompt.mockResolvedValueOnce({ ok: true, answer: 'done', cancelled: false })
 
@@ -421,10 +425,66 @@ describe('processAgentRequest · window pin & warmup', () => {
     )
   })
 
+  it('passes the adapter-carried identity (agentId + agentName) into scope resolution', async () => {
+    resolveBridgeTarget.mockResolvedValue({ scope: { windowId: 3 }, unbound: false })
+    runToolStandalone.mockResolvedValueOnce({ ok: true })
+
+    await processAgentRequest(
+      {
+        type: 'tool',
+        tool: 'click',
+        args: {},
+        agentId: 'conn-9',
+        agentName: 'claude@proj',
+      },
+      settings(),
+    )
+    expect(resolveBridgeTarget).toHaveBeenLastCalledWith({
+      agentId: 'conn-9',
+      agentName: 'claude@proj',
+    })
+    expect(runToolStandalone).toHaveBeenLastCalledWith('click', {}, { windowId: 3 })
+  })
+
+  it('refuses an unbound tool/prompt with a bilingual assignment error', async () => {
+    resolveBridgeTarget.mockResolvedValue({ scope: undefined, unbound: true })
+
+    const toolResult = await processAgentRequest(
+      { type: 'tool', tool: 'click', args: {}, agentId: 'c', agentName: 'new@proj' },
+      settings(),
+    )
+    expect(toolResult.ok).toBe(false)
+    if (!toolResult.ok) {
+      expect(toolResult.error).toContain('new@proj')
+      expect(toolResult.error).toContain('还没有分配浏览器窗口')
+      expect(toolResult.error).toMatch(/not assigned to a browser window/i)
+    }
+    expect(runToolStandalone).not.toHaveBeenCalled()
+
+    const promptResult = await processAgentRequest(
+      { type: 'prompt', prompt: 'go', agentId: 'c', agentName: 'new@proj' },
+      settings(),
+    )
+    expect(promptResult.ok).toBe(false)
+    expect(runUnattendedPrompt).not.toHaveBeenCalled()
+  })
+
+  it('still answers ping/tools.list for an unbound connection but skips warmup', async () => {
+    resolveBridgeTarget.mockResolvedValue({ scope: undefined, unbound: true })
+
+    const ping = await processAgentRequest({ type: 'ping', agentId: 'c' }, settings())
+    expect(ping).toEqual({ ok: true, data: { pong: true } })
+    const tools = await processAgentRequest({ type: 'tools.list', agentId: 'c' }, settings())
+    expect(tools.ok).toBe(true)
+    // Unassigned warmup must not touch any tab (no cross-window activity).
+    expect(resolveAutomationTab).not.toHaveBeenCalled()
+    expect(execOnActiveTab).not.toHaveBeenCalled()
+  })
+
   it('warmup (ping) never attaches the CDP monitor — idle heartbeats stay infobar-free', async () => {
     // A resolvable tab means warmup reaches its deepest step; even then the
-    // monitor must not be attached (resolveBridgeScope already resolved above
-    // via the global default of undefined).
+    // monitor must not be attached (resolveBridgeTarget returned an undefined
+    // scope, i.e. default legacy resolution).
     resolveAutomationTab.mockResolvedValue({ id: 11, url: 'https://x.example/' })
     const result = await processAgentRequest({ type: 'ping' }, settings())
     expect(result).toEqual({ ok: true, data: { pong: true } })
@@ -606,7 +666,9 @@ describe('agentClient · outbound WebSocket', () => {
     expect(agentClient.getStatus().agents).toEqual([{ id: 'a2', name: 'agent-two' }])
   })
 
-  it('keeps a live pinned connection untouched after agents.update', async () => {
+  it('keeps a live pinned connection untouched after agents.update when no window is recorded', async () => {
+    // No localAgentWindowId: nothing to turn into a binding, so the legacy
+    // selection stays exactly as it was.
     vi.mocked(getSettings).mockResolvedValue(settings({ localAgentActiveAgent: 'a1' }))
     agentClient.start(settings())
     latestSocket().open()
@@ -621,5 +683,55 @@ describe('agentClient · outbound WebSocket', () => {
 
     expect(setSettings).not.toHaveBeenCalled()
     expect(agentClient.getStatus().agents).toEqual([{ id: 'a1', name: 'agent-one' }])
+  })
+
+  it('migrates the legacy selection + window pair into a name-keyed binding', async () => {
+    vi.mocked(getSettings).mockResolvedValue(
+      settings({ localAgentActiveAgent: 'a1', localAgentWindowId: 7 }),
+    )
+    agentClient.start(settings())
+    latestSocket().open()
+
+    latestSocket().receive(
+      JSON.stringify({
+        type: 'agents.update',
+        agents: [{ id: 'a1', name: 'agent-one' }],
+      }),
+    )
+    await flush()
+
+    expect(setSettings).toHaveBeenCalledTimes(1)
+    expect(setSettings).toHaveBeenCalledWith({
+      localAgentBindings: { 'agent-one': 7 },
+      localAgentActiveAgent: '',
+      localAgentWindowId: undefined,
+    })
+    // The session map learns the exact id -> window match immediately.
+    expect(rememberAgentWindow).toHaveBeenCalledWith('a1', 7)
+  })
+
+  it('keeps an existing binding for the name and just retires the legacy fields', async () => {
+    vi.mocked(getSettings).mockResolvedValue(
+      settings({
+        localAgentActiveAgent: 'a1',
+        localAgentWindowId: 7,
+        localAgentBindings: { 'agent-one': 3 },
+      }),
+    )
+    agentClient.start(settings())
+    latestSocket().open()
+
+    latestSocket().receive(
+      JSON.stringify({
+        type: 'agents.update',
+        agents: [{ id: 'a1', name: 'agent-one' }],
+      }),
+    )
+    await flush()
+
+    expect(setSettings).toHaveBeenCalledWith({
+      localAgentActiveAgent: '',
+      localAgentWindowId: undefined,
+    })
   })
 })

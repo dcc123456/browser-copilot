@@ -25,13 +25,19 @@ import {
   notifyAgentsChanged,
   notifySkillsChanged,
 } from '../lib/messages'
-import { handleWindowPickResponse, setWindowPickRequester } from './window-policy'
+import {
+  forgetAgentWindow,
+  handleWindowPickResponse,
+  rememberAgentWindow,
+  setWindowPickRequester,
+} from './window-policy'
 import { isInjectablePage } from '../lib/pages'
 import {
   hasPluginWindows,
   initScopeWindowCleanup,
   isPluginWindow,
   latestPluginWindowId,
+  listNormalWindows,
   normalScopeFromWindowId,
   registerPanelWindow,
   broadcastPanels,
@@ -816,6 +822,33 @@ async function handleCommand(
 
     case 'agent.status.get':
       return { type: 'agent.status', status: agentClient.getStatus() }
+
+    case 'agent.windows.list':
+      return { type: 'agent.windows', windows: await listNormalWindows() }
+
+    case 'agent.bindings.set': {
+      // Atomic read-modify-write of the whole name -> windowId map: two panels
+      // assigning different connections at the same instant must not lose each
+      // other's entry (a panel-side settings.set patch would clobber it).
+      const name = command.agentName.trim()
+      if (!name) throw new Error('agent.bindings.set: agentName is required.')
+      const current = await getSettings()
+      const bindings = { ...(current.localAgentBindings ?? {}) }
+      if (command.windowId === null) {
+        delete bindings[name]
+        forgetAgentWindow(command.agentId)
+      } else {
+        // Only a window that still exists and hosts the plugin can be assigned.
+        const scope = await normalScopeFromWindowId(command.windowId)
+        if (!scope || !isPluginWindow(scope.windowId)) {
+          throw new Error('agent.bindings.set: target window is not a plugin window.')
+        }
+        bindings[name] = scope.windowId
+        rememberAgentWindow(command.agentId, scope.windowId)
+      }
+      const settings = await setSettings({ localAgentBindings: bindings })
+      return { type: 'settings', settings }
+    }
 
     case 'panel.minimize': {
       // The panel reports its own window (a window-level UI resolves it via

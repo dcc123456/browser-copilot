@@ -41,16 +41,31 @@ import { newId } from '../lib/storage'
 import type { Settings } from '../lib/types'
 import { TOOLS, runToolStandalone } from './agent'
 import { runUnattendedPrompt } from './agent-unattended'
-import { resolveBridgeScope } from './window-policy'
+import { resolveBridgeTarget, type BridgeIdentity } from './window-policy'
 import { execOnActiveTab, resolveAutomationTab } from './driver'
+
+/**
+ * Bilingual, actionable error for a connection that has no window assignment
+ * once the user is using the bindings feature. The coding agent sees this as
+ * the tool result; naming the connection lets the user find the right row.
+ */
+function unboundAgentError(identity: BridgeIdentity): string {
+  const who = identity.agentName || identity.agentId || 'unknown'
+  return (
+    `连接「${who}」还没有分配浏览器窗口：请在要让它操作的窗口打开插件面板，在“本地 Agent 接入”里把该连接分配给本窗口后重试。 ` +
+    `The connection "${who}" is not assigned to a browser window yet. Open Browser Copilot in the window it should use, assign this connection to that window under Local agent access, then retry.`
+  )
+}
 
 /**
  * Session warmup, run when a remote agent pings or lists tools: resolve the
  * automation tab (fills the resolution cache) and prime the resident kernel in
  * the tab, so the FIRST real tool call doesn't pay cold-start costs (tab search
  * chain + kernel injection). Best-effort — any failure just means the first
- * call warms up instead. Scoped to the pinned/panel window via
- * {@link resolveBridgeScope}.
+ * call warms up instead. Scoped to the requesting connection's assigned window
+ * via {@link resolveBridgeTarget}; an unbound connection (assignments exist but
+ * none for it) skips warmup — pings must still succeed, and warming an
+ * unrelated window would be visible cross-window activity.
  *
  * Deliberately does NOT attach the CDP monitor: warmup runs on every adapter
  * heartbeat ping, and a `chrome.debugger` attachment makes Chrome pin its
@@ -59,9 +74,10 @@ import { execOnActiveTab, resolveAutomationTab } from './driver'
  * demand during real tool calls (action ops, console/network reads), so
  * warmup only pays for the cheap parts.
  */
-async function warmupAutomation(): Promise<void> {
+async function warmupAutomation(identity?: BridgeIdentity): Promise<void> {
   try {
-    const scope = await resolveBridgeScope()
+    const { scope, unbound } = await resolveBridgeTarget(identity)
+    if (unbound) return
     const tab = await resolveAutomationTab(undefined, scope)
     if (!tab || typeof tab.id !== 'number') return
     await execOnActiveTab({ action: 'page_signature' }, undefined, undefined, scope).catch(() => {})
@@ -80,22 +96,24 @@ export type ExternalAgentRequest =
       args?: Record<string, unknown>
       token?: string
       /**
-       * 发出请求的 Agent 连接 id（由适配器附带）。仅当用户在设置里选中了一个
-       * 连接、且该连接仍在当前已接入列表（`activeAgentIds`）中时，才用它拒绝
-       * 其它连接发来的 tool/prompt 请求；选中连接过期（已断开）时不参与过滤。
+       * 发出请求的 Agent 连接 id（适配器附带，进程级随机 UUID）。用于：
+       * ① 旧版「只服务所选连接」过滤；② worker 会话内的精确窗口匹配。
        */
       agentId?: string
+      /**
+       * 连接的稳定可读名（`launcher@项目名` 或 BROWSER_COPILOT_AGENT_NAME），
+       * 是持久化「连接→窗口」分配表的键。
+       */
+      agentName?: string
     }
   | {
       type: 'prompt'
       prompt: string
       token?: string
-      /**
-       * 发出请求的 Agent 连接 id（由适配器附带）。仅当用户在设置里选中了一个
-       * 连接、且该连接仍在当前已接入列表（`activeAgentIds`）中时，才用它拒绝
-       * 其它连接发来的 tool/prompt 请求；选中连接过期（已断开）时不参与过滤。
-       */
+      /** 同 tool 请求：连接 id，用于旧版过滤和会话内窗口匹配。 */
       agentId?: string
+      /** 同 tool 请求：稳定连接名，持久化窗口分配的键。 */
+      agentName?: string
     }
 
 /** Replies the plugin returns to the local adapter. */
@@ -160,15 +178,29 @@ export async function processAgentRequest(
     }
   }
 
+  // Connection identity carried by the adapter on every request. It selects
+  // the window this request is allowed to act in (localAgentBindings); ping
+  // has no identity semantics of its own but forwards whatever was attached.
+  const identity: BridgeIdentity = {
+    agentId:
+      'agentId' in req && typeof (req as { agentId?: unknown }).agentId === 'string'
+        ? ((req as { agentId: string }).agentId)
+        : undefined,
+    agentName:
+      'agentName' in req && typeof (req as { agentName?: unknown }).agentName === 'string'
+        ? ((req as { agentName: string }).agentName)
+        : undefined,
+  }
+
   switch (req.type) {
     case 'ping':
       // Await (not fire-and-forget): the reply doubles as a "warmed up" signal,
       // and awaiting keeps the service worker alive through the work.
-      await warmupAutomation()
+      await warmupAutomation(identity)
       return { ok: true, data: { pong: true } }
 
     case 'tools.list':
-      await warmupAutomation()
+      await warmupAutomation(identity)
       return { ok: true, data: { tools: TOOLS } }
 
     case 'tool': {
@@ -178,10 +210,13 @@ export async function processAgentRequest(
       const args =
         req.args && typeof req.args === 'object' && !Array.isArray(req.args) ? req.args : {}
       try {
-        // resolveBridgeScope pins the run to the window the user selected the
-        // served agent in; every tab resolution and debugger attachment below
-        // stays inside it (see window-policy.ts).
-        const scope = await resolveBridgeScope()
+        // resolveBridgeTarget pins the run to the window THIS connection was
+        // assigned to; every tab resolution and debugger attachment below
+        // stays inside it (see window-policy.ts). With assignments in use, an
+        // unassigned connection is refused instead of landing in another
+        // agent's window.
+        const { scope, unbound } = await resolveBridgeTarget(identity)
+        if (unbound) return { ok: false, error: unboundAgentError(identity) }
         const result = await runToolStandalone(req.tool, args, scope)
         return { ok: true, data: result }
       } catch (error) {
@@ -198,9 +233,10 @@ export async function processAgentRequest(
       }
       // Full autonomy: the caller explicitly asked the agent to "go do this",
       // with no human to approve each step. History id is namespaced so these
-      // turns never collide with side-panel conversations. Same window pin as
-      // the single-tool path above.
-      const scope = await resolveBridgeScope()
+      // turns never collide with side-panel conversations. Same per-connection
+      // window assignment as the single-tool path above.
+      const { scope, unbound } = await resolveBridgeTarget(identity)
+      if (unbound) return { ok: false, error: unboundAgentError(identity) }
       const result = await runUnattendedPrompt(req.prompt, `external:${newId()}`, 'full', {
         ...(scope ? { scopeWindowId: scope.windowId } : {}),
       })

@@ -39,25 +39,21 @@ import { fillViaCdp } from './cdp-typing'
  *   navigation block opened); it wins while still injectable.
  */
 /**
- * Cached result of the last successful {@link resolveAutomationTab}. Re-running
- * the full active-tab search chain (activeTab → getLastFocused → windows.getAll
- * → tabs.query, each an IPC round trip) before EVERY op is wasted work while
- * the user has not touched focus. The cache is invalidated by any focus,
- * activation, removal or navigation event, so a stale hit structurally cannot
- * outlive the state it describes.
+ * Cached result of the last successful {@link resolveAutomationTab}, keyed by
+ * the window scope it was resolved under (`undefined` = the unscoped legacy
+ * slot). Re-running the full active-tab search chain (activeTab →
+ * getLastFocused → windows.getAll → tabs.query, each an IPC round trip) before
+ * EVERY op is wasted work while the user has not touched focus. Per-scope
+ * slots let several agents drive different windows concurrently without
+ * thrashing one another's cache, and a cached tab from one scope can never
+ * satisfy another scope's call — the cross-window leak this module prevents.
+ * The cache is invalidated by any focus, activation, removal or navigation
+ * event, so a stale hit structurally cannot outlive the state it describes.
  */
-let cachedAutomationTab: chrome.tabs.Tab | undefined
-/**
- * The window scope the cache was resolved under. A cached tab from an
- * unscoped (unattended) run must never satisfy a panel-scoped call — that is
- * exactly the cross-window leak this module exists to prevent — so the cache
- * only hits when the scope key matches.
- */
-let cachedAutomationScopeWindowId: number | undefined
+const cachedAutomationTabs = new Map<number | undefined, chrome.tabs.Tab>()
 
 function invalidateAutomationTabCache(): void {
-  cachedAutomationTab = undefined
-  cachedAutomationScopeWindowId = undefined
+  cachedAutomationTabs.clear()
 }
 
 // Registered at import time, so guarded: unit tests import this module in a
@@ -67,10 +63,11 @@ if (typeof chrome !== 'undefined' && chrome.tabs?.onActivated) {
   chrome.tabs.onActivated.addListener(invalidateAutomationTabCache)
   chrome.tabs.onRemoved.addListener(invalidateAutomationTabCache)
   chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-    if (cachedAutomationTab?.id !== tabId) return
-    // A URL change or a fresh load means the tab (and its frames) changed.
-    if (changeInfo.url !== undefined || changeInfo.status === 'loading') {
-      invalidateAutomationTabCache()
+    // A URL change or a fresh load means the tab (and its frames) changed;
+    // drop only the slots that cached that tab.
+    if (changeInfo.url === undefined && changeInfo.status !== 'loading') return
+    for (const [key, tab] of cachedAutomationTabs) {
+      if (tab.id === tabId) cachedAutomationTabs.delete(key)
     }
   })
   chrome.windows.onFocusChanged.addListener(invalidateAutomationTabCache)
@@ -78,27 +75,36 @@ if (typeof chrome !== 'undefined' && chrome.tabs?.onActivated) {
 }
 
 /**
- * A tab pinned by the `pin_tab` tool: every automation call acts on it until
- * `unpin` runs or the TTL expires (so a forgotten pin cannot hijack the next
- * session). Sits between an explicit per-call preferredTabId (which still
- * wins) and the passive resolution cache.
- *
- * The pin records its tab's WINDOW. A window-scoped run (`scope`) only honors
- * pins that live in ITS window — otherwise a pin from window A's session
- * would hijack window B's scoped resolution for the TTL duration, a real
- * cross-window leak. Unscoped (unattended) resolution honors any pin, as
- * before.
+ * Tabs pinned by the `pin_tab` tool, keyed by the window scope they belong to
+ * (`undefined` = the unscoped legacy slot). Every automation call in a scope
+ * acts on that scope's pin until `unpin` runs or the TTL expires (so a
+ * forgotten pin cannot hijack a later session). With multiple local agents
+ * driving separate windows, each window therefore keeps its OWN pin: a pin
+ * from window A's agent never affects window B's agent, and an unscoped run
+ * never inherits a pin an agent created inside a scoped window (the old
+ * single-slot behaviour leaked both ways).
  */
 const PIN_TTL_MS = 5 * 60_000
-let pinnedTab: { id: number; windowId: number; at: number } | undefined
+const pinnedTabs = new Map<number | undefined, { id: number; windowId: number; at: number }>()
 
-function setPinnedTab(tabId: number | undefined, windowId?: number): void {
-  pinnedTab =
-    tabId === undefined || typeof windowId !== 'number'
-      ? undefined
-      : { id: tabId, windowId, at: Date.now() }
-  if (tabId !== undefined) {
-    cachedAutomationTab = undefined // force a fresh resolution for the pin
+/** Drops expired pins from every scope slot (cheap; slots are few). */
+function sweepExpiredPins(now: number = Date.now()): void {
+  for (const [key, pin] of pinnedTabs) {
+    if (now - pin.at >= PIN_TTL_MS) pinnedTabs.delete(key)
+  }
+}
+
+function setPinnedTab(
+  tabId: number | undefined,
+  windowId: number | undefined,
+  scopeKey?: number,
+): void {
+  const key = scopeKey
+  if (tabId === undefined || typeof windowId !== 'number') {
+    pinnedTabs.delete(key)
+  } else {
+    pinnedTabs.set(key, { id: tabId, windowId, at: Date.now() })
+    cachedAutomationTabs.delete(key) // force a fresh resolution for the pin
   }
 }
 
@@ -111,40 +117,35 @@ export async function resolveAutomationTab(
     if (pinned && isInjectablePage(pinned.url)) return pinned
   }
 
-  // A `pin_tab` pin wins over everything but an explicit per-call tab —
-  // but only within its own window for scoped runs.
-  const pinUsable =
-    pinnedTab !== undefined &&
-    Date.now() - pinnedTab.at < PIN_TTL_MS &&
-    (scope === undefined || pinnedTab.windowId === scope.windowId)
-  if (pinUsable) {
-    const pinned = await chrome.tabs.get(pinnedTab!.id).catch(() => undefined)
+  // A `pin_tab` pin wins over everything but an explicit per-call tab. Pins
+  // are per window scope: a scoped run only reads its own slot, and an
+  // unscoped run only reads the unscoped slot, so concurrent agents never
+  // inherit each other's pins.
+  const scopeKey = scope?.windowId
+  sweepExpiredPins()
+  const pin = pinnedTabs.get(scopeKey)
+  if (pin) {
+    const pinned = await chrome.tabs.get(pin.id).catch(() => undefined)
     if (pinned && isInjectablePage(pinned.url)) return pinned
-    pinnedTab = undefined // pinned tab closed or became uninjectable
-  } else if (pinnedTab && Date.now() - pinnedTab.at >= PIN_TTL_MS) {
-    pinnedTab = undefined
+    pinnedTabs.delete(scopeKey) // pinned tab closed or became uninjectable
   }
 
   // A cheap one-call existence check guards the cache; the event listeners
-  // above are the primary invalidation path. The cache only hits when it was
-  // resolved under the SAME window scope — a tab cached from an unscoped run
-  // must not leak into a panel-scoped call, or vice versa.
-  const scopeKey = scope?.windowId
-  const cached = cachedAutomationTab
-  if (cached && typeof cached.id === 'number' && cachedAutomationScopeWindowId === scopeKey) {
+  // above are the primary invalidation path. The cache only hits the slot
+  // resolved under the SAME window scope — a tab cached under one scope must
+  // not leak into a call under another.
+  const cached = cachedAutomationTabs.get(scopeKey)
+  if (cached && typeof cached.id === 'number') {
     const still = await chrome.tabs.get(cached.id).catch(() => undefined)
     if (still && isInjectablePage(still.url)) {
-      cachedAutomationTab = still
+      cachedAutomationTabs.set(scopeKey, still)
       return still
     }
-    cachedAutomationTab = undefined
+    cachedAutomationTabs.delete(scopeKey)
   }
 
   const resolved = await resolveAutomationTabUncached(scope)
-  if (resolved) {
-    cachedAutomationTab = resolved
-    cachedAutomationScopeWindowId = scopeKey
-  }
+  if (resolved) cachedAutomationTabs.set(scopeKey, resolved)
   return resolved
 }
 
@@ -1143,6 +1144,11 @@ export async function newTab(url?: string, scope?: ScopeWindow): Promise<DriverT
  * Pins a tab (default: the current automation target) so every subsequent
  * automation call acts on it — no tab_switch round trips when the caller works
  * across several tabs. Auto-expires via the TTL in resolveAutomationTab.
+ *
+ * The pin is stored in the run's window-scope slot: scoped runs only ever pin
+ * tabs inside their own window, and an explicitly foreign `tabId` is rejected
+ * outright rather than silently stored and ignored (which would look like a
+ * successful pin to the calling agent).
  */
 export async function pinActiveTab(tabId?: number, scope?: ScopeWindow): Promise<DriverTab> {
   const tab =
@@ -1152,13 +1158,22 @@ export async function pinActiveTab(tabId?: number, scope?: ScopeWindow): Promise
   if (!tab || typeof tab.id !== 'number' || !isInjectablePage(tab.url)) {
     throw new DriverError('pin_tab: 没有可钉住的 http(s) 标签页。')
   }
-  setPinnedTab(tab.id, tab.windowId)
+  if (
+    scope &&
+    typeof tab.windowId === 'number' &&
+    tab.windowId !== scope.windowId
+  ) {
+    throw new DriverError(
+      'pin_tab: 不能钉住其它窗口的标签页。 / pin_tab cannot pin a tab from another window.',
+    )
+  }
+  setPinnedTab(tab.id, tab.windowId, scope?.windowId)
   return toDriverTab(tab)
 }
 
-/** Removes the pin; subsequent calls resolve the active tab again. */
-export function unpinTab(): void {
-  setPinnedTab(undefined)
+/** Removes the pin for this scope; subsequent calls resolve the active tab. */
+export function unpinTab(scope?: ScopeWindow): void {
+  setPinnedTab(undefined, undefined, scope?.windowId)
 }
 
 export async function closeActiveTab(scope?: ScopeWindow): Promise<void> {

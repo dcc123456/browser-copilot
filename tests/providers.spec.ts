@@ -9,7 +9,7 @@ import {
   validateProfile,
   type ProviderProfile,
 } from '../src/lib/providers'
-import { normalizeStoredSettings } from '../src/lib/storage'
+import { normalizeLocalAgentBindings, normalizeStoredSettings } from '../src/lib/storage'
 
 function profile(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
   return {
@@ -158,6 +158,7 @@ describe('normalizeStoredSettings', () => {
         localAgentUrl: 'ws://127.0.0.1:8765',
         localAgentActiveAgent: '',
         localAgentAdapterPath: '',
+        localAgentBindings: {},
         unattendedWindowPolicy: 'latest',
         imageModel: { providerId: '', model: '' },
         ocrLanguage: 'eng',
@@ -183,6 +184,7 @@ describe('normalizeStoredSettings', () => {
       localAgentUrl: 'ws://127.0.0.1:8765',
       localAgentActiveAgent: '',
       localAgentAdapterPath: '',
+      localAgentBindings: {},
       unattendedWindowPolicy: 'latest',
       imageModel: { providerId: '', model: '' },
       ocrLanguage: 'chi_sim+eng',
@@ -221,6 +223,7 @@ describe('normalizeStoredSettings', () => {
       localAgentUrl: 'ws://127.0.0.1:8765',
       localAgentActiveAgent: '',
       localAgentAdapterPath: '',
+      localAgentBindings: {},
       unattendedWindowPolicy: 'latest',
       imageModel: { providerId: '', model: '' },
       ocrLanguage: 'eng',
@@ -286,6 +289,46 @@ describe('normalizeStoredSettings', () => {
           .localAgentActiveAgent,
       ).toBe('')
     }
+  })
+
+  it('keeps valid per-connection window bindings and drops malformed entries', () => {
+    expect(
+      normalizeStoredSettings({
+        providers: [],
+        localAgentBindings: {
+          'claude@proj': 7,
+          '  codex@other  ': 2,
+          'bad-string': '3',
+          'bad-float': 1.5,
+          'bad-negative': -1,
+          'bad-nan': Number.NaN,
+          '': 9,
+          '   ': 10,
+        },
+      }).localAgentBindings,
+    ).toEqual({ 'claude@proj': 7, 'codex@other': 2 })
+  })
+})
+
+describe('normalizeLocalAgentBindings', () => {
+  it('returns an empty map for non-object input', () => {
+    for (const bad of [undefined, null, 42, 'x', [], true]) {
+      expect(normalizeLocalAgentBindings(bad)).toEqual({})
+    }
+  })
+
+  it('keeps only positive integer window ids keyed by trimmed non-empty names', () => {
+    expect(
+      normalizeLocalAgentBindings({
+        a: 1,
+        b: 0,
+        c: -9,
+        d: 2.5,
+        e: '7',
+        f: Number.POSITIVE_INFINITY,
+        '  g  ': 3,
+      }),
+    ).toEqual({ a: 1, g: 3 })
   })
 })
 
@@ -355,6 +398,19 @@ describe('normalizeSettingsPayload · cross-version safety', () => {
         '',
       )
     }
+  })
+
+  it('preserves localAgentWindowId and sanitizes localAgentBindings', () => {
+    // Previously the panel payload normalizer dropped localAgentWindowId
+    // entirely; both window-assignment fields must now survive a skew.
+    expect(normalizeSettingsPayload({}).localAgentBindings).toEqual({})
+    expect(normalizeSettingsPayload({ localAgentWindowId: 5 }).localAgentWindowId).toBe(5)
+    const sanitized = normalizeSettingsPayload({
+      localAgentWindowId: 'nope',
+      localAgentBindings: { 'claude@proj': 3, bad: true },
+    })
+    expect(sanitized.localAgentWindowId).toBeUndefined()
+    expect(sanitized.localAgentBindings).toEqual({ 'claude@proj': 3 })
   })
 
   // The chat's end-of-turn save prompt must survive a version skew: a worker

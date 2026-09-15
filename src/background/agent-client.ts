@@ -24,6 +24,7 @@ import { getSettings, setSettings } from '../lib/storage'
 import type { AgentStatus, Settings } from '../lib/types'
 import { DEFAULT_LOCAL_AGENT_URL, normalizeLocalAgentUrl } from '../lib/types'
 import { processAgentRequest, type ExternalAgentResponse } from './agent-api'
+import { rememberAgentWindow } from './window-policy'
 
 /** First reconnect delay (ms); doubles on every failure until {@link RECONNECT_CAP_MS}. */
 const RECONNECT_BASE_MS = 1_000
@@ -207,13 +208,37 @@ async function applyAgentList(value: unknown): Promise<void> {
           name: typeof entry.name === 'string' && entry.name ? entry.name : entry.id,
         }))
     : []
-  const pinned = (await getSettings()).localAgentActiveAgent
+  const settings = await getSettings()
+  const pinned = settings.localAgentActiveAgent
   if (pinned && !agents.some((agent) => agent.id === pinned)) {
     console.warn(
       `[Browser Copilot] local agent "${pinned}" is no longer connected; clearing the pinned selection.`,
     )
     await setSettings({ localAgentActiveAgent: '' })
+    setStatus({ ...status, agents })
+    return
   }
+
+  // One-time migration of the deprecated global single-selection
+  // (localAgentActiveAgent + localAgentWindowId) into a name-keyed window
+  // binding. Needs the live agent list to resolve id -> name, which is why it
+  // happens here rather than in the schema migration. Bindings win: if one
+  // already exists for that name, just retire the legacy gate fields.
+  if (pinned && typeof settings.localAgentWindowId === 'number') {
+    const pinnedName = agents.find((agent) => agent.id === pinned)?.name
+    const bindings = settings.localAgentBindings ?? {}
+    if (pinnedName && typeof bindings[pinnedName] !== 'number') {
+      await setSettings({
+        localAgentBindings: { ...bindings, [pinnedName]: settings.localAgentWindowId },
+        localAgentActiveAgent: '',
+        localAgentWindowId: undefined,
+      })
+      rememberAgentWindow(pinned, settings.localAgentWindowId)
+    } else {
+      await setSettings({ localAgentActiveAgent: '', localAgentWindowId: undefined })
+    }
+  }
+
   setStatus({ ...status, agents })
 }
 

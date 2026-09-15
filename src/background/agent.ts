@@ -2309,7 +2309,7 @@ export async function executeTool(
 
     case 'unpin_tab': {
       throwIfAborted()
-      unpinTab()
+      unpinTab(ctx.scope)
       return JSON.stringify({ ok: true, note: 'Pin removed; actions target the active tab again.' })
     }
 
@@ -3339,8 +3339,9 @@ export async function runToolStandalone(
     return { ok: false, error: `The "${name}" tool is disabled in settings.` }
   }
   // The bridge has no sender window of its own: an explicitly passed scope
-  // (the pinned "current window", see resolveBridgeScope in window-policy)
-  // wins; otherwise while a panel window exists it is the monitored/controlled
+  // (the connection's assigned window, see resolveBridgeTarget in
+  // window-policy) wins; otherwise while a panel window exists it is the
+  // monitored/controlled
   // one, so scope to it; with no panel open the legacy global resolution
   // applies.
   const resolved = scope ?? (await resolveUnattendedScope())

@@ -23,9 +23,11 @@
  * `chrome`.
  *
  * The local-agent bridge has its own stricter resolution,
- * {@link resolveBridgeScope}: it pins runs to the window the user selected
- * the served agent in (`settings.localAgentWindowId`) before falling back to
- * the policies here.
+ * {@link resolveBridgeTarget}: each connected agent is assigned to a window via
+ * `settings.localAgentBindings` (connection name -> window id, N:N), so several
+ * agents can drive SEPARATE windows concurrently without leaking actions across
+ * them. A per-worker `agentId -> windowId` session map provides exact matching
+ * for the process-scoped random id and survives an agent rename until restart.
  *
  * @module background/window-policy
  */
@@ -179,34 +181,181 @@ export async function resolveUnattendedScope(): Promise<ScopeWindow | undefined>
   return scope && isPluginWindow(scope.windowId) ? scope : currentPluginScope()
 }
 
-/**
- * Window scope for the LOCAL-AGENT bridge specifically.
- *
- * When the user picks which connected agent the plugin serves (settings →
- * local agent → "serve connection"), the panel also records ITS window id in
- * `settings.localAgentWindowId`. From then on the chosen agent only ever acts
- * in THAT window — tab resolution and every `chrome.debugger` attachment stay
- * inside it, so the user's other windows are never touched (and never show
- * Chrome's native "extension is debugging" infobar either).
- *
- * The pin is validated at use time: a closed window, a non-`normal` window or
- * one that no longer hosts the plugin (panel closed AND not minimized) makes
- * the pin stale — the bridge then falls back to the default unattended
- * resolution (latest plugin window; global only when the plugin is closed
- * everywhere, the documented legacy behaviour). A stale pin is left in place:
- * it is harmless, and the next explicit selection overwrites it.
- */
-export async function resolveBridgeScope(): Promise<ScopeWindow | undefined> {
-  const settings = await getSettings()
-  if (typeof settings.localAgentWindowId === 'number') {
-    const pinned = await normalScopeFromWindowId(settings.localAgentWindowId)
-    if (pinned && isPluginWindow(pinned.windowId)) return pinned
-  }
-  return resolveUnattendedScope()
+// --- Local-agent bridge: per-connection window assignments (N:N) --------------
+
+/** Identity carried by every adapter request (agentId is a per-process UUID). */
+export interface BridgeIdentity {
+  agentId?: string
+  agentName?: string
 }
 
-/** Test helper: clears pending picks and the wired requester. */
+/**
+ * Process-scoped exact matches: the random `agentId` dies with every adapter
+ * process, so it cannot be persisted, but within one worker lifetime it lets a
+ * renamed agent keep its window (the panel assignment command seeds it; name
+ * hits memoize into it lazily). Disposable module state — rebuilt per wake.
+ */
+const sessionAgentWindows = new Map<string, number>()
+
+/** Records (or replaces) one connection's window for this worker lifetime. */
+export function rememberAgentWindow(agentId: string | undefined, windowId: number): void {
+  if (agentId) sessionAgentWindows.set(agentId, windowId)
+}
+
+/** Drops a connection's session binding (used when the assignment is removed). */
+export function forgetAgentWindow(agentId: string | undefined): void {
+  if (agentId) sessionAgentWindows.delete(agentId)
+}
+
+/** Outcome of the pure bridge-window decision. */
+export type BridgeWindowDecision =
+  | { kind: 'window'; windowId: number; source: 'session-id' | 'name' | 'legacy' }
+  /** The user opted into assignments but this identity has none. */
+  | { kind: 'unbound' }
+  /** No usable assignment: fall back to the default unattended resolution. */
+  | { kind: 'default' }
+
+/**
+ * Pure decision (unit-testable without `chrome`): which window a local-agent
+ * request may use.
+ *
+ * Candidates are checked in priority order — the per-worker session id map,
+ * then the persisted name binding, then the deprecated legacy pair (only when
+ * its selected id matches) — and the FIRST one whose window currently hosts
+ * the plugin (present in `windows`) wins. A configured-but-stale candidate
+ * (window closed / panel gone) is skipped rather than fatal: when the identity
+ * had ANY candidate the result is `default` (a bound connection must never be
+ * silently swallowed), while an identity with no candidate at all is `unbound`
+ * only once the user has created at least one binding. Zero bindings always
+ * stays `default`, preserving the zero-setup out-of-box behaviour.
+ */
+export function resolveBridgeWindow(input: {
+  identity?: BridgeIdentity
+  /** Persisted `agentName -> windowId` assignments. */
+  bindings: Record<string, number>
+  /** This worker's `agentId -> windowId` exact matches. */
+  sessionBindings: ReadonlyMap<string, number>
+  /** Deprecated global selection, honoured only for the matching id. */
+  legacy?: { activeAgentId?: string; windowId?: number }
+  /** Window ids that currently exist, are `normal`, and host the plugin. */
+  windows: ReadonlyArray<{ windowId: number }>
+}): BridgeWindowDecision {
+  const valid = new Set(input.windows.map((window) => window.windowId))
+  const candidates: Array<{ windowId: number; source: 'session-id' | 'name' | 'legacy' }> = []
+
+  const agentId = typeof input.identity?.agentId === 'string' ? input.identity.agentId : ''
+  const agentName = typeof input.identity?.agentName === 'string' ? input.identity.agentName : ''
+
+  if (agentId) {
+    const sessionWindow = input.sessionBindings.get(agentId)
+    if (typeof sessionWindow === 'number') {
+      candidates.push({ windowId: sessionWindow, source: 'session-id' })
+    }
+  }
+  if (agentName) {
+    const nameWindow = input.bindings[agentName]
+    if (typeof nameWindow === 'number') {
+      candidates.push({ windowId: nameWindow, source: 'name' })
+    }
+  }
+  if (
+    agentId &&
+    input.legacy?.activeAgentId === agentId &&
+    typeof input.legacy.windowId === 'number'
+  ) {
+    candidates.push({ windowId: input.legacy.windowId, source: 'legacy' })
+  }
+
+  for (const candidate of candidates) {
+    if (valid.has(candidate.windowId)) {
+      return { kind: 'window', windowId: candidate.windowId, source: candidate.source }
+    }
+  }
+  // The identity had a configured binding but every candidate is stale: serve
+  // it through the default resolution rather than dropping the request.
+  if (candidates.length > 0) return { kind: 'default' }
+  // No candidate at all: once the user opted into ANY assignment, unknown
+  // connections must be refused (the caller turns `unbound` into an actionable
+  // error) instead of landing in whichever window was used last.
+  if (Object.keys(input.bindings).length > 0) return { kind: 'unbound' }
+  return { kind: 'default' }
+}
+
+/**
+ * Window scope for one local-agent request.
+ *
+ * `{ scope, unbound: false }` — `scope` is the assigned window (validated at
+ * use time: it must still exist, be `normal` and host the plugin — panel open
+ * or minimized). A stale assignment degrades to the default unattended
+ * resolution instead of failing, so a closed window never wedges an agent.
+ *
+ * `{ scope: undefined, unbound: true }` — assignments exist but this
+ * connection has none; the caller refuses tool/prompt requests with an
+ * actionable bilingual error (ping/tools.list stay open and simply skip
+ * warmup).
+ *
+ * Each candidate window costs one `chrome.windows.get` (max three), never a
+ * full `windows.getAll`, so the hot path stays as cheap as the old single pin
+ * check.
+ */
+export async function resolveBridgeTarget(
+  identity?: BridgeIdentity,
+): Promise<{ scope: ScopeWindow | undefined; unbound: boolean }> {
+  const settings = await getSettings()
+  const bindings = settings.localAgentBindings ?? {}
+  const legacy = {
+    activeAgentId: settings.localAgentActiveAgent || undefined,
+    windowId:
+      typeof settings.localAgentWindowId === 'number'
+        ? settings.localAgentWindowId
+        : undefined,
+  }
+
+  // Collect the (max 3, de-duplicated) candidate window ids, then validate
+  // each cheaply. The pure decision itself sees only the ones still usable.
+  const candidateIds: number[] = []
+  if (identity?.agentId) {
+    const sessionWindow = sessionAgentWindows.get(identity.agentId)
+    if (typeof sessionWindow === 'number') candidateIds.push(sessionWindow)
+  }
+  if (identity?.agentName && typeof bindings[identity.agentName] === 'number') {
+    candidateIds.push(bindings[identity.agentName]!)
+  }
+  if (
+    identity?.agentId &&
+    settings.localAgentActiveAgent === identity.agentId &&
+    typeof settings.localAgentWindowId === 'number'
+  ) {
+    candidateIds.push(settings.localAgentWindowId)
+  }
+
+  const windows: Array<{ windowId: number }> = []
+  for (const windowId of [...new Set(candidateIds)]) {
+    const scope = await normalScopeFromWindowId(windowId)
+    if (scope && isPluginWindow(windowId)) windows.push({ windowId })
+  }
+
+  const decision = resolveBridgeWindow({
+    identity,
+    bindings,
+    sessionBindings: sessionAgentWindows,
+    legacy,
+    windows,
+  })
+
+  if (decision.kind === 'window') {
+    // Memoize the hit so a later rename of the connection keeps working for
+    // the rest of this worker's life even though the persisted name key moved.
+    if (identity?.agentId) sessionAgentWindows.set(identity.agentId, decision.windowId)
+    return { scope: { windowId: decision.windowId }, unbound: false }
+  }
+  if (decision.kind === 'unbound') return { scope: undefined, unbound: true }
+  return { scope: await resolveUnattendedScope(), unbound: false }
+}
+
+/** Test helper: clears pending picks, the wired requester and session binds. */
 export function _resetWindowPolicyForTests(): void {
   pickRequester = null
   pendingPicks.clear()
+  sessionAgentWindows.clear()
 }
