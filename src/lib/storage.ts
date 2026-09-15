@@ -13,18 +13,23 @@
  */
 
 import {
+  AGENTS_DIR,
   FsDirectory,
   fileStorageArea,
   getGrantedFsDirectory,
   SKILLS_DIR,
+  agentPath,
   skillPath,
 } from './fs-store'
 import { skillFromMarkdown, skillSlug, skillToMarkdown } from './skills-import'
+import { agentFromMarkdown, agentSlug, agentToMarkdown } from './agents-import'
 import { BUILT_IN_SKILLS } from './builtin-skills'
+import { BUILT_IN_AGENTS } from './builtin-agents'
 import { LOCALES, type LocaleSetting } from './i18n'
 import type { WireMessage } from './llm'
 import type { ProviderProfile } from './providers'
 import type {
+  Agent,
   ConversationMeta,
   HistoryEntry,
   PasswordEntry,
@@ -45,6 +50,7 @@ const area = fileStorageArea()
 const KEY_SCHEMA = 'schemaVersion'
 const KEY_SETTINGS = 'settings'
 const KEY_SKILLS = 'skills'
+const KEY_AGENTS = 'agents'
 const KEY_PROFILES = 'profiles'
 const KEY_PASSWORDS = 'passwords'
 const KEY_HISTORY = 'history'
@@ -58,8 +64,10 @@ const KEY_CONVERSATIONS_META = 'conversations'
  *   conversations (messages moved to `storage.local`).
  * - v3: `imageModel` (optional vision config) added to settings; the
  *   built-in `skill-generator` skill is seeded on install/upgrade.
+ * - v4: takeover/local-agent settings.
+ * - v5: built-in supervisor + specialist agents are seeded on install/upgrade.
  */
-export const SCHEMA_VERSION = 4
+export const SCHEMA_VERSION = 5
 
 export const DEFAULT_SETTINGS: Settings = {
   providers: [],
@@ -228,10 +236,13 @@ export async function ensureSchema(): Promise<void> {
   if (!Array.isArray(stored[KEY_PASSWORDS])) patch[KEY_PASSWORDS] = []
   if (!Array.isArray(stored[KEY_HISTORY])) patch[KEY_HISTORY] = []
   if (!Array.isArray(stored[KEY_CONVERSATIONS_META])) patch[KEY_CONVERSATIONS_META] = []
+  if (!Array.isArray(stored[KEY_AGENTS])) patch[KEY_AGENTS] = []
   await area.set(patch)
 
   // Ship the built-in skills (e.g. the skill-generator) on install/upgrade.
   await seedBuiltInSkills()
+  // Ship the built-in supervisor + specialist agents (v5).
+  await seedBuiltInAgents()
 }
 
 /**
@@ -256,6 +267,27 @@ export async function seedBuiltInSkills(): Promise<void> {
     }
     if (stored.id === builtin.id && stored.updatedAt === 0) {
       await saveSkill({ ...builtin })
+    }
+  }
+}
+
+/**
+ * Syncs the built-in agents (supervisor + specialists) into the store.
+ * Same contract as {@link seedBuiltInSkills}: insert by new name, refresh an
+ * untouched built-in copy (`updatedAt: 0`), never overwrite a user edit or a
+ * user-owned copy.
+ */
+export async function seedBuiltInAgents(): Promise<void> {
+  const agents = await listAgents()
+  const byName = new Map(agents.map((agent) => [agent.name.trim().toLowerCase(), agent]))
+  for (const builtin of BUILT_IN_AGENTS) {
+    const stored = byName.get(builtin.name.trim().toLowerCase())
+    if (!stored) {
+      await saveAgent(builtin)
+      continue
+    }
+    if (stored.id === builtin.id && stored.updatedAt === 0) {
+      await saveAgent({ ...builtin })
     }
   }
 }
@@ -467,6 +499,96 @@ export async function deleteSkill(id: string): Promise<void> {
   if (handle && victim) {
     const fs = new FsDirectory(handle)
     await fs.removeDirectory([SKILLS_DIR, skillSlug(victim.name)])
+  }
+}
+
+// --- Agents ------------------------------------------------------------------
+
+/**
+ * Agents mirror the skill persistence contract exactly: folder-per-agent
+ * `agents/<slug>/AGENT.md` (YAML frontmatter + Markdown body) when a directory
+ * is configured, `chrome.storage.local` under `agents` as the mirror/fallback.
+ */
+export async function listAgents(): Promise<Agent[]> {
+  const handle = await getGrantedFsDirectory()
+  if (handle) {
+    const fromFiles = await readAgentsFromFiles(handle)
+    if (fromFiles) return fromFiles
+  }
+  const stored = await area.get(KEY_AGENTS)
+  const agents = stored[KEY_AGENTS]
+  if (!Array.isArray(agents)) return []
+  return agents.filter(
+    (agent): agent is Agent =>
+      !!agent &&
+      typeof agent === 'object' &&
+      typeof (agent as Agent).id === 'string' &&
+      typeof (agent as Agent).name === 'string',
+  )
+}
+
+async function readAgentsFromFiles(
+  handle: FileSystemDirectoryHandle,
+): Promise<Agent[] | null> {
+  const fs = new FsDirectory(handle)
+  const slugs = await fs.listSubdirectories(AGENTS_DIR)
+  if (slugs === null) return null
+  const agents: Agent[] = []
+  for (const slug of slugs) {
+    const text = await fs.readText(agentPath(slug))
+    if (text === null) continue
+    const agent = agentFromMarkdown(text)
+    if (agent) agents.push(agent)
+  }
+  return agents.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export async function getAgent(id: string): Promise<Agent | undefined> {
+  return (await listAgents()).find((agent) => agent.id === id)
+}
+
+/** Finds an agent by name, case-insensitively (the supervisor delegates by name). */
+export async function findAgentByName(name: string): Promise<Agent | undefined> {
+  const wanted = name.trim().toLowerCase()
+  return (await listAgents()).find((agent) => agent.name.trim().toLowerCase() === wanted)
+}
+
+/** Agents allowed to run a delegation loop (the supervisors). */
+export async function listDelegatableAgents(): Promise<Agent[]> {
+  return (await listAgents()).filter((agent) => agent.delegatable === true)
+}
+
+/** Inserts or replaces an agent, keeping the list sorted by name. */
+export async function saveAgent(agent: Agent): Promise<void> {
+  const agents = await listAgents()
+  const existing = agents.find((entry) => entry.id === agent.id)
+  if (existing) agents[agents.indexOf(existing)] = agent
+  else agents.push(agent)
+  agents.sort((a, b) => a.name.localeCompare(b.name))
+  await area.set({ [KEY_AGENTS]: agents })
+
+  const handle = await getGrantedFsDirectory()
+  if (!handle) return
+  const fs = new FsDirectory(handle)
+  const slug = agentSlug(agent.name)
+  await fs.writeText(agentPath(slug), agentToMarkdown(agent))
+  // Drop the stale folder after a rename so the old name does not resurface.
+  if (existing && agentSlug(existing.name) !== slug) {
+    await fs.removeDirectory([AGENTS_DIR, agentSlug(existing.name)])
+  }
+}
+
+export async function deleteAgent(id: string): Promise<void> {
+  const agents = await listAgents()
+  const victim = agents.find((agent) => agent.id === id)
+  await area.set({
+    [KEY_AGENTS]: agents.filter((agent) => agent.id !== id),
+  })
+
+  const handle = await getGrantedFsDirectory()
+  if (handle && victim) {
+    const fs = new FsDirectory(handle)
+    await fs.removeDirectory([AGENTS_DIR, agentSlug(victim.name)])
   }
 }
 

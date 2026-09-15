@@ -166,6 +166,12 @@ export const TOOL_META: ToolMeta[] = [
     labelKey: 'toolLoadTools',
     warningKey: 'toolLoadToolsWarn',
   },
+  {
+    name: 'delegate_to_agent',
+    category: 'data',
+    labelKey: 'toolDelegate',
+    warningKey: 'toolDelegateWarn',
+  },
 ]
 
 export const TOOL_META_BY_NAME = new Map(TOOL_META.map((meta) => [meta.name, meta]))

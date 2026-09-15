@@ -44,6 +44,65 @@ export interface Skill {
 }
 
 /**
+ * A delegated worker the supervisor may hand a sub-task to.
+ *
+ * Distinct from {@link Skill}: a skill is a *passive* instruction block that
+ * gets injected into the active system prompt, whereas an agent is an
+ * *active* unit with its own identity, tool whitelist, and (for the
+ * supervisor) a task-splitting brief. An agent MAY reference skills by name
+ * (`skillNames`) and reuse the skill prompt renderer rather than carrying its
+ * own instruction copy.
+ *
+ * Keeping agents separate from skills means the skill "select-and-inject"
+ * hot path never has to carry fields it does not use.
+ */
+export type AgentRole = 'supervisor' | 'specialist'
+
+/** Functional area an agent specialises in; drives the catalogue wording. */
+export type AgentDomain =
+  | 'search'
+  | 'writing'
+  | 'operations'
+  | 'workflow'
+  | 'analysis'
+  | 'custom'
+
+export interface Agent {
+  id: string
+  /** ≤60. How the supervisor refers to it when delegating (models ignore ids). */
+  name: string
+  role: AgentRole
+  domain: AgentDomain
+  /**
+   * ≤300. When this agent should be delegated — written into the supervisor's
+   * agent catalogue (the analogue of `Skill.description`).
+   */
+  delegationHint: string
+  /** ≤8000 (mirrors MAX_INSTRUCTIONS_LENGTH). The agent's system-prompt body. */
+  instructions: string
+  /**
+   * Tool whitelist. Empty array = inherit ALL of the supervisor's tools
+   * (the default for custom agents). A non-empty list restricts the agent to
+   * exactly those tools.
+   */
+  tools: string[]
+  /** Skill names whose instructions are merged into this agent's prompt. */
+  skillNames: string[]
+  /**
+   * Whether this agent may be chosen as a delegation target. `false` means it
+   * is only pinnable for manual use in the UI. Sub-agents are always `false`
+   * to forbid recursive delegation (the supervisor is the only delegator).
+   */
+  delegatable: boolean
+  /** Per-delegation model↔tool round cap. Hard upper bound. Default 8. */
+  maxRounds: number
+  /** Built-in marker: read-only in the UI, copyable into a user-owned copy. */
+  builtIn?: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+/**
  * User settings.
  */
 export interface Settings {

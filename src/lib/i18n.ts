@@ -46,6 +46,7 @@ export interface Messages {
   // Tabs
   tabChat: string
   tabSkills: string
+  tabAgents: string
   tabTasks: string
   tabWorkflows: string
   tabData: string
@@ -583,6 +584,8 @@ export interface Messages {
   toolListTasksWarn: string
   toolLoadTools: string
   toolLoadToolsWarn: string
+  toolDelegate: string
+  toolDelegateWarn: string
 
   // Settings · page access
   settingsPageAccess: string
@@ -823,11 +826,57 @@ export interface Messages {
   skillsExportAll: string
   /** Imported-skills banner detail: name already taken. */
   skillsImportNameTaken: (params: { name: string }) => string
+
+  // --- Agents (supervisor/specialist delegation) ---
+  agentsTitle: string
+  agentsIntro: string
+  agentsEmpty: string
+  agentsAdd: string
+  agentsImport: string
+  agentsImportHint: string
+  agentsExport: string
+  agentsBuiltinNote: string
+  agentsCopyToMine: string
+  agentsBuiltinBadge: string
+  agentsSpecialistPill: string
+  agentsDelegatablePill: string
+  agentsToolsCount: (params: { count: number }) => string
+  agentsImportResultOk: (params: { count: number }) => string
+  agentsImportResultFail: (params: { ok: number; failed: number }) => string
+  agentsImportNameTaken: (params: { name: string }) => string
+  agentRole: string
+  agentRoleSupervisor: string
+  agentRoleSpecialist: string
+  agentDomain: string
+  agentDomainSearch: string
+  agentDomainWriting: string
+  agentDomainOperations: string
+  agentDomainWorkflow: string
+  agentDomainAnalysis: string
+  agentDomainCustom: string
+  agentHint: string
+  agentHintHint: string
+  agentTools: string
+  agentToolsHint: string
+  agentToolsInherit: string
+  agentSkills: string
+  agentSkillsHint: string
+  agentDelegatable: string
+  agentDelegatableHint: string
+  agentMaxRounds: string
+  agentSaved: (params: { name: string }) => string
+  agentDeleted: (params: { name: string }) => string
+  agentCopied: (params: { name: string }) => string
+  agentNameRequired: string
+  agentInstructionsRequired: string
+  agentNameTaken: string
+  agentBuiltInReadOnly: string
 }
 
 const en: Messages = {
   tabChat: 'Chat',
   tabSkills: 'Skills',
+  tabAgents: 'Agents',
   tabTasks: 'Tasks',
   tabWorkflows: 'Workflows',
   tabData: 'Data',
@@ -1329,6 +1378,9 @@ const en: Messages = {
   toolLoadTools: 'On-demand tool groups',
   toolLoadToolsWarn:
     'When off: the assistant cannot load hidden tool groups (tab management, saving files, saved profile/passwords, skills, network/console diagnostics), so those tasks will fail.',
+  toolDelegate: 'Delegate a sub-task to a specialist agent',
+  toolDelegateWarn:
+    'When off: the supervisor cannot hand sub-tasks to specialist agents; every task is handled directly in the main conversation.',
 
   toolRecognizeImage: 'Recognize text in an image (CAPTCHA, etc.)',
   toolRecognizeImageWarn:
@@ -1543,11 +1595,61 @@ const en: Messages = {
     `Import finished: ${ok} succeeded, ${failed} failed. Review problems above.`,
   skillsExportAll: 'Export all',
   skillsImportNameTaken: ({ name }) => `Skipped “${name}”: a skill with this name already exists.`,
+
+  agentsTitle: 'Agents',
+  agentsIntro:
+    'Agents are delegated workers. The supervisor splits a large task and hands scoped sub-tasks to specialist agents; small tasks are always done directly. Built-in agents are read-only — duplicate one to make it yours.',
+  agentsEmpty: 'No agents yet. Create one, or the built-in agents appear after a reload.',
+  agentsAdd: 'New agent',
+  agentsImport: 'Import',
+  agentsImportHint: 'Import agent files (.json, .yaml, .md) — or drop them anywhere on this tab.',
+  agentsExport: 'Export all',
+  agentsBuiltinNote:
+    'Built-in agents ship with the extension and stay read-only; use “Duplicate as mine” to customize a copy.',
+  agentsCopyToMine: 'Duplicate as mine',
+  agentsBuiltinBadge: 'Built-in',
+  agentsSpecialistPill: 'Specialist',
+  agentsDelegatablePill: 'Can delegate',
+  agentsToolsCount: ({ count }) => (count === 0 ? 'All tools' : `${count} tools`),
+  agentsImportResultOk: ({ count }) => `Imported ${count} agent${count === 1 ? '' : 's'}.`,
+  agentsImportResultFail: ({ ok, failed }) =>
+    `Import finished: ${ok} succeeded, ${failed} failed. Review problems above.`,
+  agentsImportNameTaken: ({ name }) => `Skipped “${name}”: an agent with this name already exists.`,
+  agentRole: 'Role',
+  agentRoleSupervisor: 'Supervisor (splits and delegates big tasks)',
+  agentRoleSpecialist: 'Specialist (executes delegated tasks)',
+  agentDomain: 'Specialty',
+  agentDomainSearch: 'Search / research',
+  agentDomainWriting: 'Writing',
+  agentDomainOperations: 'Operations',
+  agentDomainWorkflow: 'Workflow generation',
+  agentDomainAnalysis: 'Analysis',
+  agentDomainCustom: 'Custom',
+  agentHint: 'When to delegate it',
+  agentHintHint:
+    'One or two sentences the supervisor matches on. Only this text (never the instructions) is shown when deciding what to delegate.',
+  agentTools: 'Allowed tools',
+  agentToolsHint:
+    'Whitelist of tools this agent may call. Empty = inherit every tool available in the session.',
+  agentToolsInherit: 'Empty list: inherits all tools',
+  agentSkills: 'Linked skills',
+  agentSkillsHint: 'Selected skills are injected into this agent’s system prompt.',
+  agentDelegatable: 'Allow this agent to split and delegate to specialist agents',
+  agentDelegatableHint: 'Only supervisors delegate; specialist agents can never delegate further.',
+  agentMaxRounds: 'Max tool rounds per delegation',
+  agentSaved: ({ name }) => `Agent “${name}” saved.`,
+  agentDeleted: ({ name }) => `Agent “${name}” deleted.`,
+  agentCopied: ({ name }) => `Copied “${name}” into your own agent — rename and edit it.`,
+  agentNameRequired: 'Name is required.',
+  agentInstructionsRequired: 'Instructions are required.',
+  agentNameTaken: 'This name is already used by another agent.',
+  agentBuiltInReadOnly: 'Built-in agents are read-only. Duplicate one to customize a copy.',
 }
 
 const zhCN: Messages = {
   tabChat: '对话',
   tabSkills: '技能',
+  tabAgents: '智能体',
   tabTasks: '任务',
   tabWorkflows: '工作流',
   tabData: '数据',
@@ -2012,6 +2114,9 @@ const zhCN: Messages = {
   toolLoadTools: '按需加载工具组',
   toolLoadToolsWarn:
     '关闭后：助手无法按需加载隐藏的工具组（标签页管理、保存文件、已存资料/密码、技能、网络/控制台诊断），相关任务会失败。',
+  toolDelegate: '把 子任务委派给专长子智能体',
+  toolDelegateWarn:
+    '关闭后：主管无法把子任务分派给专长子智能体，所有任务都在主会话中直接完成。',
 
   toolRecognizeImage: '识别图片中的文字（验证码等）',
   toolRecognizeImageWarn: '关闭后：助手无法使用图片模型识别页面上的验证码或其他图片文字。',
@@ -2220,6 +2325,54 @@ const zhCN: Messages = {
     `导入完成：成功 ${ok} 个，失败 ${failed} 个，详情见上方提示。`,
   skillsExportAll: '全部导出',
   skillsImportNameTaken: ({ name }) => `已跳过 “${name}”：同名技能已存在。`,
+
+  agentsTitle: '智能体',
+  agentsIntro:
+    '智能体是可被委派的执行单元：主管会把大任务拆成子任务分派给专长智能体，小任务则始终直接完成。内置智能体只读——可复制一份再改成你自己的。',
+  agentsEmpty: '还没有智能体。可以新建；内置智能体会在重载后自动出现。',
+  agentsAdd: '新建智能体',
+  agentsImport: '导入',
+  agentsImportHint: '导入智能体文件（.json、.yaml、.md），也可直接拖入本页。',
+  agentsExport: '全部导出',
+  agentsBuiltinNote:
+    '内置智能体随扩展提供且只读；需要定制时请使用「复制为我的」生成副本。',
+  agentsCopyToMine: '复制为我的',
+  agentsBuiltinBadge: '内置',
+  agentsSpecialistPill: '专长',
+  agentsDelegatablePill: '可委派',
+  agentsToolsCount: ({ count }) => (count === 0 ? '全部工具' : `${count} 个工具`),
+  agentsImportResultOk: ({ count }) => `已成功导入 ${count} 个智能体。`,
+  agentsImportResultFail: ({ ok, failed }) =>
+    `导入完成：成功 ${ok} 个，失败 ${failed} 个，详情见上方提示。`,
+  agentsImportNameTaken: ({ name }) => `已跳过 “${name}”：同名智能体已存在。`,
+  agentRole: '角色',
+  agentRoleSupervisor: '主管（拆分并委派大任务）',
+  agentRoleSpecialist: '专长子智能体（执行被委派的任务）',
+  agentDomain: '专长领域',
+  agentDomainSearch: '浏览器检索',
+  agentDomainWriting: '文案写作',
+  agentDomainOperations: '平台运营',
+  agentDomainWorkflow: '工作流生成',
+  agentDomainAnalysis: '内容分析',
+  agentDomainCustom: '自定义',
+  agentHint: '何时委派给它',
+  agentHintHint:
+    '主管据此判断是否委派的一两句话。决定委派时只会展示这段文字（不会展示完整指令）。',
+  agentTools: '可用工具',
+  agentToolsHint: '该智能体可调用的工具白名单；留空表示继承会话中的全部工具。',
+  agentToolsInherit: '留空：继承全部工具',
+  agentSkills: '关联技能',
+  agentSkillsHint: '选中的技能会注入该智能体的系统提示词。',
+  agentDelegatable: '允许该智能体拆分任务并委派给专长子智能体',
+  agentDelegatableHint: '只有主管可以委派；子智能体不能再向下委派。',
+  agentMaxRounds: '单次委派最大工具轮次',
+  agentSaved: ({ name }) => `智能体 “${name}” 已保存。`,
+  agentDeleted: ({ name }) => `智能体 “${name}” 已删除。`,
+  agentCopied: ({ name }) => `已把 “${name}” 复制为你自己的智能体，请重命名并编辑。`,
+  agentNameRequired: '请填写名称。',
+  agentInstructionsRequired: '请填写指令。',
+  agentNameTaken: '该名称已被另一个智能体占用。',
+  agentBuiltInReadOnly: '内置智能体只读，请先复制为自己的副本再修改。',
 }
 
 const DICTIONARIES: Record<Locale, Messages> = { en, 'zh-CN': zhCN }

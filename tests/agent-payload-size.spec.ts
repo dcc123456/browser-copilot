@@ -12,8 +12,14 @@ import { buildSystemPrompt } from '../src/background/agent'
  * growing it (see the slimming notes on each schema).
  */
 const MAX_ADVERTISED_PAYLOAD_CHARS = 17_500
-/** The full catalog (core + every on-demand group) must also stay bounded. */
-const MAX_CATALOG_CHARS = 19_500
+/**
+ * The full catalog (core + every on-demand group) must also stay bounded.
+ * Raised 19_500 → 21_500 when the on-demand "delegate" group
+ * (`delegate_to_agent`) was added for multi-agent subcontracting. The
+ * delegate schema stays OUT of the advertised budget above because the group
+ * is only loaded via `load_tools({groups:['delegate']})`.
+ */
+const MAX_CATALOG_CHARS = 21_500
 
 describe('first-turn agent payload size (full auto)', () => {
   it('stays under the advertised-payload budget', () => {

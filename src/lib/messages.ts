@@ -12,6 +12,7 @@
 
 import type { ProviderProfile } from './providers'
 import type {
+  Agent,
   AgentStatus,
   ConversationMeta,
   HistoryEntry,
@@ -72,6 +73,9 @@ export type Command =
   | { type: 'skills.list' }
   | { type: 'skills.save'; skill: Skill }
   | { type: 'skills.delete'; id: string }
+  | { type: 'agents.list' }
+  | { type: 'agents.save'; agent: Agent }
+  | { type: 'agents.delete'; id: string }
   | { type: 'provider.save'; profile: ProviderProfile }
   | { type: 'provider.delete'; id: string }
   | { type: 'provider.activate'; id: string }
@@ -214,6 +218,9 @@ export type CommandResult =
   | { type: 'skills.list'; skills: Skill[] }
   | { type: 'skills.save'; skill: Skill }
   | { type: 'skills.delete' }
+  | { type: 'agents.list'; agents: Agent[] }
+  | { type: 'agents.save'; agent: Agent }
+  | { type: 'agents.delete' }
   | { type: 'provider.test' }
   | { type: 'provider.models'; models: string[] }
   | { type: 'page.read'; page: PageContext }
@@ -332,8 +339,9 @@ export type CommandResponse = { ok: true; data: CommandResult } | { ok: false; e
  * Skills can change from a context that is not a panel command — the agent's
  * `create_skill` tool inside a chat turn — so the panel cannot rely on command
  * replies to notice. Pages listen for `skills.changed` and re-read the list.
+ * The same applies to agents (`agents.changed`).
  */
-export type WorkerBroadcast = { type: 'skills.changed' }
+export type WorkerBroadcast = { type: 'skills.changed' } | { type: 'agents.changed' }
 
 /**
  * Fire-and-forget broadcast that the skill store changed.
@@ -345,6 +353,13 @@ export type WorkerBroadcast = { type: 'skills.changed' }
 export function notifySkillsChanged(): void {
   void chrome.runtime
     .sendMessage({ type: 'skills.changed' } satisfies WorkerBroadcast)
+    .catch(() => {})
+}
+
+/** Fire-and-forget broadcast that the agent store changed; never throws. */
+export function notifyAgentsChanged(): void {
+  void chrome.runtime
+    .sendMessage({ type: 'agents.changed' } satisfies WorkerBroadcast)
     .catch(() => {})
 }
 

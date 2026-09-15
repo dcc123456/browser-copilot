@@ -26,7 +26,8 @@
  * @module lib/fs-store
  */
 import { skillSlug, skillToMarkdown } from './skills-import'
-import type { Skill } from './types'
+import { agentSlug, agentToMarkdown } from './agents-import'
+import type { Agent, Skill } from './types'
 
 /**
  * Subfolder inside the picked directory that holds the JSON data files.
@@ -99,6 +100,17 @@ const SKILL_FILE = 'SKILL.md'
 
 export function skillPath(slug: string): string[] {
   return [SKILLS_DIR, sanitizeFileSegment(slug), SKILL_FILE]
+}
+
+/**
+ * Agents mirror the skill file layout — one folder per agent containing an
+ * `AGENT.md` (YAML frontmatter + Markdown body) under the data directory.
+ */
+export const AGENTS_DIR = 'agents'
+const AGENT_FILE = 'AGENT.md'
+
+export function agentPath(slug: string): string[] {
+  return [AGENTS_DIR, sanitizeFileSegment(slug), AGENT_FILE]
 }
 
 // --- IndexedDB: directory-handle persistence ---------------------------------
@@ -337,9 +349,12 @@ export function createFileArea(handle: FileSystemDirectoryHandle): StorageArea {
     },
     async set(items) {
       for (const [key, value] of Object.entries(items)) {
-        // Skills live as `skills/<slug>/SKILL.md` files, not as a JSON blob in
-        // the data folder; `storage.ts` writes those files directly.
-        if (key === SKILLS_DIR) continue
+        // Skills/agents live as folder-per-entity markdown files, not as a JSON
+        // blob in the data folder; `storage.ts` writes those files directly.
+        // Skipping BOTH keys here is essential — otherwise the collection
+        // double-writes as both `skills.json` and `skills/<slug>/SKILL.md`
+        // (likewise for agents), surfacing duplicate entries after upgrade.
+        if (key === SKILLS_DIR || key === AGENTS_DIR) continue
         try {
           await fs.writeText(keyToPath(key), JSON.stringify(value))
         } catch {
@@ -510,6 +525,10 @@ export async function syncToFiles(): Promise<void> {
   if (Array.isArray(skills)) {
     await syncSkillsToFiles(skills as Skill[], handle)
   }
+  const agents = (all as Record<string, unknown>)[AGENTS_DIR]
+  if (Array.isArray(agents)) {
+    await syncAgentsToFiles(agents as Agent[], handle)
+  }
 }
 
 /**
@@ -529,9 +548,9 @@ export async function syncEntriesToFiles(
   for (const [key, value] of Object.entries(entries)) {
     if (value === undefined) continue
     // Turn state is intentionally session-scoped and never persisted as files.
+    // Skills/agents are persisted as markdown files, not as a JSON blob.
     if (key.startsWith('turn:')) continue
-    // Skills are persisted as markdown files, not as a JSON blob.
-    if (key === SKILLS_DIR) continue
+    if (key === SKILLS_DIR || key === AGENTS_DIR) continue
     await area.set({ [key]: value })
   }
 }
@@ -549,6 +568,24 @@ export async function syncSkillsToFiles(
   for (const skill of skills) {
     try {
       await fs.writeText(skillPath(skillSlug(skill.name)), skillToMarkdown(skill))
+    } catch {
+      // Best-effort during migration; the mirror still holds the value.
+    }
+  }
+}
+
+/**
+ * Writes each mirrored agent to `agents/<slug>/AGENT.md` (idempotent, best
+ * effort), the agent counterpart of {@link syncSkillsToFiles}.
+ */
+export async function syncAgentsToFiles(
+  agents: readonly Agent[],
+  handle: FileSystemDirectoryHandle,
+): Promise<void> {
+  const fs = new FsDirectory(handle)
+  for (const agent of agents) {
+    try {
+      await fs.writeText(agentPath(agentSlug(agent.name)), agentToMarkdown(agent))
     } catch {
       // Best-effort during migration; the mirror still holds the value.
     }

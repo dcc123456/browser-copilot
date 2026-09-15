@@ -204,8 +204,11 @@ function unquote(value: string): string {
 /**
  * Parses one YAML document (string -> raw objects). Supports our tiny subset.
  * Returns null if the document doesn't parse cleanly.
+ *
+ * Exported so the sibling `agents-import` module serializes AGENT.md files
+ * through the same minimal parser rather than carrying a second copy.
  */
-function parseYamlDoc(doc: string): YamlDoc | null {
+export function parseYamlDoc(doc: string): YamlDoc | null {
   const rawLines = doc.split(/\r?\n/)
   // Remove trailing whitespace lines + initial comment/empty lines.
   const lines: string[] = []
@@ -582,8 +585,11 @@ export function exportSkillsJson(skills: readonly Skill[]): string {
  * Values that are safe plain scalars are emitted verbatim; anything that could
  * confuse the parser (or a general skill reader) is double-quoted with the
  * escapes our own subset understands (`\n`, `\"`, `\\`).
+ *
+ * Exported for the sibling `agents-import` module so both file formats escape
+ * identically.
  */
-function yamlScalar(value: string): string {
+export function yamlScalar(value: string): string {
   const text = String(value)
   const safePlain =
     text !== '' &&

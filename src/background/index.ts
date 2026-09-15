@@ -22,6 +22,7 @@ import {
   type CommandResponse,
   type CommandResult,
   type WindowPickRequest,
+  notifyAgentsChanged,
   notifySkillsChanged,
 } from '../lib/messages'
 import { handleWindowPickResponse, setWindowPickRequester } from './window-policy'
@@ -66,9 +67,11 @@ import {
 } from './workflow-triggers'
 import { validateProfile } from '../lib/providers'
 import { normalizeSkill, validateSkill, wrapSkillDirective } from '../lib/skills'
+import { normalizeAgent, validateAgent } from '../lib/agents'
 import {
   clearConversation,
   clearHistory,
+  deleteAgent,
   deleteConversation,
   deleteHistory,
   deletePassword,
@@ -76,7 +79,9 @@ import {
   deleteProvider,
   deleteSkill,
   ensureSchema,
+  getAgent,
   getTurnState,
+  listAgents,
   listConversations,
   listHistory,
   listPasswords,
@@ -84,6 +89,7 @@ import {
   listSkills,
   loadConversation,
   renameConversation,
+  saveAgent,
   saveConversation,
   savePassword,
   saveProfile,
@@ -846,6 +852,35 @@ async function handleCommand(
       await deleteSkill(command.id)
       notifySkillsChanged()
       return { type: 'skills.delete' }
+
+    case 'agents.list':
+      return { type: 'agents.list', agents: await listAgents() }
+
+    case 'agents.save': {
+      // Built-in agents are read-only: the panel edits a user-owned copy
+      // instead, so an attempted overwrite or rename is rejected outright.
+      if (command.agent.builtIn === true || (await getAgent(command.agent.id))?.builtIn) {
+        throw new Error('agent:builtInReadOnly')
+      }
+      const normalized = normalizeAgent(command.agent)
+      const problems = validateAgent(normalized, await listAgents())
+      if (problems.length > 0) {
+        // Codes, not sentences: the panel owns the localized wording.
+        throw new Error(`agent:${problems.map((problem) => problem.code).join(',')}`)
+      }
+      await saveAgent(normalized)
+      notifyAgentsChanged()
+      return { type: 'agents.save', agent: normalized }
+    }
+
+    case 'agents.delete': {
+      if ((await getAgent(command.id))?.builtIn) {
+        throw new Error('agent:builtInReadOnly')
+      }
+      await deleteAgent(command.id)
+      notifyAgentsChanged()
+      return { type: 'agents.delete' }
+    }
 
     case 'provider.save': {
       const problems = validateProfile(command.profile)
@@ -1935,6 +1970,9 @@ chrome.runtime.onConnect.addListener((port) => {
         const turnUsage = await runAgentTurn(history, {
           send: sendWithTracking,
           signal: turnController.signal,
+          // Panel conversations get the supervisor/delegation machinery;
+          // unattended entry points leave this off.
+          enableDelegation: true,
           ...(message.skillId ? { skillId: message.skillId } : {}),
           ...(grantedPageUrl ? { grantedPageUrl } : {}),
           ...(scope ? { scopeWindowId: scope.windowId } : {}),

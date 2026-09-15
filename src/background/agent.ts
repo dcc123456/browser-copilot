@@ -34,11 +34,19 @@ import {
 } from '../lib/llm'
 import type { AgentServerMessage, TurnTokenUsage } from '../lib/messages'
 import { notifySkillsChanged } from '../lib/messages'
+import {
+  renderAgentCatalogue,
+  renderSubAgentSection,
+  renderSupervisorGuide,
+} from '../lib/agents'
 import { renderSkillCatalogue, renderSkillPrompt, validateSkill } from '../lib/skills'
+import { BUILT_IN_SUPERVISOR_ID } from '../lib/builtin-agents'
+import { runDelegateTool, type DelegationRuntime } from './orchestrator'
 import {
   addHistory,
   findSkillByName,
   getActiveProvider,
+  listAgents,
   listPasswords,
   listProfiles,
   listSkills,
@@ -61,9 +69,10 @@ import { isSamePage } from '../lib/pages'
 import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
 import { buildToolErrorContext, recentFailedAttempts } from '../lib/tool-error'
 import {
+  type Agent,
+  type AgentMode,
   entryFields,
   findField,
-  type AgentMode,
   type PasswordEntry,
   type ProviderProfile,
   type Skill,
@@ -150,6 +159,18 @@ export function buildSystemPrompt(options: {
    * operating rules; an empty/undefined value means use the default.
    */
   basePrompt?: string | undefined
+  /**
+   * When set, turns this turn into a SUPERVISOR turn: the agent's own
+   * instructions are appended after the base rules, followed by the terse
+   * delegation guide and the specialist catalogue.
+   */
+  supervisor?: { agent: Agent; catalogue: string } | undefined
+  /**
+   * When set, this turn runs as a delegated specialist: the base operating
+   * rules still hold (approvals, secrets), then the specialist's instructions
+   * and linked skills replace the skill catalogue.
+   */
+  subAgent?: { agent: Agent; skills: readonly Skill[] } | undefined
 }): string {
   // Chat mode is pure conversation: no operating rules, no skill catalogue, no
   // mode instructions. Just a short identity line so the model stays in role.
@@ -157,14 +178,34 @@ export function buildSystemPrompt(options: {
     return 'You are Browser Copilot, a browser-extension assistant in the side panel. Answer the user conversationally in their language. You cannot read or act on the page in this mode; keep it concise.'
   }
 
-  const override = options.basePrompt?.trim()
+  // Delegated specialists always run on the project's base rules even when the
+  // user replaced the interactive prompt: the approval/secret guarantees must
+  // not silently disappear for a sub-agent.
+  const override = options.subAgent ? undefined : options.basePrompt?.trim()
   const base = override ? override : SYSTEM_PROMPT
   const parts = [base]
-  // The skill catalogue only matters when no skill is pinned: an active skill's
-  // full instructions are injected below instead.
-  if (!options.activeSkill && options.catalogue && options.catalogue.length > 0) {
-    const catalogue = renderSkillCatalogue(options.catalogue)
-    if (catalogue) parts.push(catalogue)
+
+  // A delegated specialist gets its identity block, then the mode rules; it
+  // never sees the interactive skill catalogue or the supervisor section.
+  if (options.subAgent) {
+    parts.push(renderSubAgentSection(options.subAgent.agent, options.subAgent.skills))
+  } else {
+    // The skill catalogue only matters when no skill is pinned: an active
+    // skill's full instructions are injected below instead.
+    if (!options.activeSkill && options.catalogue && options.catalogue.length > 0) {
+      const catalogue = renderSkillCatalogue(options.catalogue)
+      if (catalogue) parts.push(catalogue)
+    }
+
+    // Supervisor identity + delegation rules + the specialist catalogue. The
+    // guide is deliberately terse because this ships on every interactive
+    // turn; it goes BEFORE the mode paragraph and the active skill.
+    if (options.supervisor) {
+      const { agent, catalogue } = options.supervisor
+      parts.push(`## ACTING AS SUPERVISOR AGENT — ${agent.name}\n\n${agent.instructions}`)
+      parts.push(renderSupervisorGuide())
+      if (catalogue) parts.push(catalogue)
+    }
   }
 
   // State the operating mode so the model does not promise (or attempt) an
@@ -249,6 +290,9 @@ export const TOOL_GROUPS: Record<string, readonly string[]> = {
   data: ['save_local', 'get_my_profile', 'list_secrets', 'get_secret'],
   skills: ['use_skill', 'create_skill'],
   ops: ['list_network_requests', 'list_console_messages', 'list_scheduled_tasks'],
+  // Multi-agent delegation. On demand like the others so it stays out of the
+  // first-round payload; never loaded for a sub-agent (recursion guard).
+  delegate: ['delegate_to_agent'],
 }
 
 const TOOL_GROUP_BY_NAME = new Map(
@@ -736,7 +780,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'load_tools',
       description:
-        'Load a group of tools that are hidden by default to keep requests small. Groups: "tabs" (list/open/switch/close/pin tabs), "data" (save files, saved profile, saved passwords), "skills" (use/create saved skills), "ops" (network requests, console messages, scheduled tasks). Call this before using any tool that is not advertised in the current request; loaded groups stay available for the rest of the conversation.',
+        'Load a group of tools that are hidden by default to keep requests small. Groups: "tabs" (list/open/switch/close/pin tabs), "data" (save files, saved profile, saved passwords), "skills" (use/create saved skills), "ops" (network requests, console messages, scheduled tasks), "delegate" (delegate a sub-task to a specialist agent). Call this before using any tool that is not advertised in the current request; loaded groups stay available for the rest of the conversation.',
       parameters: {
         type: 'object',
         properties: {
@@ -747,6 +791,38 @@ export const TOOLS: WireTool[] = [
           },
         },
         required: ['groups'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delegate_to_agent',
+      description:
+        'Delegate ONE scoped sub-task to a specialist agent, which runs an isolated, approval-gated tool loop and returns a compact (≤1200 char) report plus artifact references. Use ONLY for a genuinely big task per the delegation rules; small tasks are refused. The specialist gets only what you put in "context", not this conversation. Independent calls can run in parallel in one response.',
+      parameters: {
+        type: 'object',
+        properties: {
+          agent: {
+            type: 'string',
+            description: 'Exact specialist name from the specialist catalogue (e.g. "search-expert").',
+          },
+          task: {
+            type: 'string',
+            description:
+              'Self-contained instruction: the goal, constraints, and what "done" looks like. Required.',
+          },
+          context: {
+            type: 'string',
+            description:
+              'Only the specific upstream outputs this sub-task needs. Never paste the whole transcript.',
+          },
+          expects: {
+            type: 'string',
+            description: 'The expected deliverable shape (e.g. "a 10-row markdown table with URLs").',
+          },
+        },
+        required: ['agent', 'task'],
       },
     },
   },
@@ -784,23 +860,33 @@ export interface ToolAdvertiseOptions {
   disabled?: ReadonlySet<string>
   /** On-demand groups already loaded for this conversation via `load_tools`. */
   loadedGroups?: ReadonlySet<string>
+  /**
+   * Specialist sub-agent tool boundary. When set, only tools in this set may be
+   * advertised (load_tools is always included so grouped tools can be
+   * preloaded). Undefined = inherit the full tool set (custom agents,
+   * supervisor, ordinary turns).
+   */
+  allowTools?: ReadonlySet<string>
 }
 
 /**
  * The tool schemas advertised for one conversation round: the core set, the
  * `load_tools` loader, and every tool of an already-loaded group — minus the
- * user's disabled tools and, in read-only mode, every page-changing action.
- * Chat mode advertises nothing at all.
+ * user's disabled tools, the specialist's whitelist boundary, and (in
+ * read-only mode) every page-changing action. Chat mode advertises nothing at
+ * all.
  */
 export function advertiseTools({
   mode,
   disabled = new Set<string>(),
   loadedGroups = new Set<string>(),
+  allowTools,
 }: ToolAdvertiseOptions): WireTool[] {
   if (mode === 'chat') return []
   return TOOLS.filter((tool) => {
     const name = tool.function.name
     if (disabled.has(name)) return false
+    if (allowTools && !allowTools.has(name)) return false
     if (mode === 'readonly' && ACTION_TOOLS.has(name)) return false
     const group = TOOL_GROUP_BY_NAME.get(name)
     if (group && !loadedGroups.has(group)) return false
@@ -849,6 +935,18 @@ export interface AgentDeps {
    * keep the legacy global resolution.
    */
   scopeWindowId?: number
+  /**
+   * Enables the supervisor/delegation machinery for this turn (system-prompt
+   * section + the on-demand "delegate" tool group + delegation budgets).
+   * Panel chat turns set this; unattended runs never do, so scheduled and
+   * Feishu prompts cannot fan out into sub-agents.
+   */
+  enableDelegation?: boolean
+  /**
+   * Set when this turn IS a delegated specialist run. The turn then uses the
+   * agent's identity prompt and tool whitelist and can never delegate again.
+   */
+  subAgent?: { agent: Agent; seq: number }
 }
 
 function parseArgs(raw: string): Record<string, unknown> {
@@ -1045,13 +1143,23 @@ async function recordAction(
   }
 }
 
-interface ToolContext {
+export interface ToolContext {
   conversationId: string
   /**
    * On-demand tool groups loaded so far in this conversation (live view — the
    * `load_tools` tool mutates it mid-turn). Undefined = none loaded.
    */
   loadedGroups?: ReadonlySet<string>
+  /**
+   * Present only on supervisor-enabled turns: the agent catalogue plus the
+   * per-turn delegation budget and same-target retry map. The
+   * `delegate_to_agent` tool refuses to run without it.
+   */
+  delegation?: DelegationRuntime
+  /** Present only when the turn is itself a delegated specialist run. */
+  subAgent?: { agent: Agent; seq: number }
+  /** Specialist tool whitelist boundary; undefined = inherit all tools. */
+  toolAllowSet?: ReadonlySet<string>
   /** Set when a click/action likely navigated, so the caller can re-snapshot. */
   navigated: boolean
   /** The most recently read URL; used to attach history hosts. */
@@ -1314,6 +1422,13 @@ function describeDetail(
         lines.push('Image: visible page')
       }
       break
+    case 'delegate_to_agent':
+      lines.push(`Agent: ${String(args.agent ?? '')}`)
+      if (typeof args.task === 'string') {
+        const task = args.task
+        lines.push(`Task: ${task.length > 120 ? `${task.slice(0, 120)}…` : task}`)
+      }
+      break
     case 'create_skill':
       lines.push(`Skill: ${String(args.name ?? '')}`)
       if (typeof args.description === 'string' && args.description) {
@@ -1419,6 +1534,8 @@ function describeAction(
       }`
     case 'create_skill':
       return `Create skill "${String(args.name ?? '')}"`
+    case 'delegate_to_agent':
+      return `Delegate a sub-task to agent "${String(args.agent ?? '')}"`
     default:
       return name
   }
@@ -2581,6 +2698,20 @@ function shortSummary(name: string, result: string): string {
       if (parsed.error) return `create_skill: ${parsed.error}`.slice(0, 200)
       return `${parsed.updated ? 'Updated' : 'Created'} skill "${parsed.skill ?? 'unknown'}"`
     }
+    if (name === 'delegate_to_agent') {
+      const parsed = JSON.parse(result) as {
+        agent?: string
+        status?: string
+        reason?: string
+        error?: string
+        rounds?: number
+      }
+      if (parsed.status === 'refused') return `Delegation refused: ${parsed.reason ?? ''}`.slice(0, 200)
+      if (parsed.error) return `delegate_to_agent: ${parsed.error}`.slice(0, 200)
+      return `Delegated to ${parsed.agent ?? 'agent'}: ${parsed.status ?? 'done'}${
+        parsed.rounds ? ` (${parsed.rounds} rounds)` : ''
+      }`
+    }
     if (parsed.navigated) return `${name} ✓ (page changed)`
     if (parsed.note) return `${name}: ${parsed.note}`
     return `${name} ✓`
@@ -2596,30 +2727,84 @@ export async function runAgentTurn(
   // These reads are independent and all hit local storage / the settings cache,
   // but running them in parallel shaves the serial round trips off the
   // time-to-first-token — most noticeable for short chat-mode turns.
-  const [preferredProvider, skillList, initialMode, toolConfig, maxToolRounds] = await Promise.all([
-    deps.getProvider ? deps.getProvider().catch(() => undefined) : Promise.resolve(undefined),
-    listSkills(),
-    deps.getMode(),
-    deps.getToolConfig(),
-    deps.getMaxToolRounds(),
-  ])
+  const [preferredProvider, skillList, initialMode, toolConfig, maxToolRounds, agentList] =
+    await Promise.all([
+      deps.getProvider ? deps.getProvider().catch(() => undefined) : Promise.resolve(undefined),
+      listSkills(),
+      deps.getMode(),
+      deps.getToolConfig(),
+      deps.getMaxToolRounds(),
+      // Unattended runs (no enableDelegation) never read the agent store, so
+      // scheduled/Feishu prompts cannot fan out into sub-agents.
+      deps.enableDelegation ? listAgents() : Promise.resolve([] as Agent[]),
+    ])
   const provider = preferredProvider ?? (await getActiveProvider())
   const activeSkill = deps.skillId ? await getSkill(deps.skillId) : undefined
   const catalogue = activeSkill ? [] : skillList
   const disabled = new Set(toolConfig.disabledTools)
-  const systemPrompt = buildSystemPrompt({
-    activeSkill,
-    catalogue,
-    mode: initialMode,
-    basePrompt: toolConfig.basePrompt,
-  })
+
+  // --- Specialist sub-agent turn -------------------------------------------
+  // A delegated run gets the agent's identity prompt + linked skills, a
+  // whitelist-clamped tool set, and no delegation machinery of its own.
+  let toolAllowSet: Set<string> | undefined
+  let systemPrompt: string
+  let delegation: DelegationRuntime | undefined
+
+  if (deps.subAgent) {
+    const agent = deps.subAgent.agent
+    if (agent.tools.length > 0) {
+      toolAllowSet = new Set([...agent.tools, 'load_tools'])
+      // Pre-load every on-demand group that contributes a whitelisted tool so
+      // the specialist has its full tool set from the FIRST request, under its
+      // own namespaced conversation id. The delegate group is excluded:
+      // specialists can never delegate.
+      const groups = Object.entries(TOOL_GROUPS)
+        .filter(
+          ([group, names]) =>
+            group !== 'delegate' && names.some((name) => toolAllowSet!.has(name)),
+        )
+        .map(([group]) => group)
+      storeLoadedGroups(deps.conversationId, groups)
+    }
+    systemPrompt = buildSystemPrompt({
+      mode: initialMode,
+      subAgent: { agent, skills: skillList },
+    })
+  } else {
+    // --- Supervisor turn ----------------------------------------------------
+    // Enable the delegation runtime only when a delegatable supervisor AND at
+    // least one cataloguable specialist actually exist; otherwise nothing in
+    // the prompt mentions delegation and the tool group stays pointless.
+    let supervisorBlock: { agent: Agent; catalogue: string } | undefined
+    if (deps.enableDelegation && initialMode !== 'chat') {
+      const specialists = agentList.filter((entry) => entry.role === 'specialist')
+      const specialistCatalogue = renderAgentCatalogue(specialists)
+      const supervisor =
+        agentList.find(
+          (entry) => entry.id === BUILT_IN_SUPERVISOR_ID && entry.delegatable,
+        ) ??
+        agentList.find((entry) => entry.role === 'supervisor' && entry.delegatable)
+      if (supervisor && specialistCatalogue) {
+        supervisorBlock = { agent: supervisor, catalogue: specialistCatalogue }
+        delegation = { agents: agentList, count: 0, attempts: new Map() }
+      }
+    }
+    systemPrompt = buildSystemPrompt({
+      activeSkill,
+      catalogue,
+      mode: initialMode,
+      basePrompt: toolConfig.basePrompt,
+      ...(supervisorBlock ? { supervisor: supervisorBlock } : {}),
+    })
+  }
   const roundsCap = maxToolRounds || DEFAULT_MAX_TOOL_ROUNDS
 
   // Filter the advertised tools per round (see advertiseTools): the core set
   // plus any on-demand group the model has loaded so far this conversation.
   //  - chat mode sends no tools at all (pure conversation);
   //  - read-only mode hides every action that changes the page;
-  //  - the user's disabled-tool list hides specific tools regardless of mode.
+  //  - the user's disabled-tool list hides specific tools regardless of mode;
+  //  - a specialist sub-agent additionally sees only its whitelist.
   // The execution switch below still rejects a tool that slips through, so a
   // stale model call cannot run a disabled or unadvertised tool.
   const loadedGroups = storeLoadedGroups(deps.conversationId, [])
@@ -2629,6 +2814,9 @@ export async function runAgentTurn(
     loadedGroups,
     navigated: false,
     disabled,
+    ...(delegation ? { delegation } : {}),
+    ...(deps.subAgent ? { subAgent: deps.subAgent } : {}),
+    ...(toolAllowSet ? { toolAllowSet } : {}),
     // Panel-scoped turns validate their window once here; a window that died
     // between the message and this point (or an editor-popup sender) degrades
     // to undefined = legacy global behaviour.
@@ -2672,7 +2860,12 @@ export async function runAgentTurn(
 
     // Recomputed per round: a load_tools call in this turn must widen the
     // advertised set from the very next request on.
-    const tools = advertiseTools({ mode: initialMode, disabled, loadedGroups: ctx.loadedGroups })
+    const tools = advertiseTools({
+      mode: initialMode,
+      disabled,
+      loadedGroups: ctx.loadedGroups,
+      ...(ctx.toolAllowSet ? { allowTools: ctx.toolAllowSet } : {}),
+    })
 
     // "Thinking" covers the request in flight until either text starts streaming
     // or a tool call is announced. The first text delta flips it to "Responding";
@@ -2869,12 +3062,56 @@ async function runOneToolCall(
     return
   }
 
+  // Supervisor → specialist delegation. Not a browser action, never approved
+  // or recorded as one (the specialist's own actions still are); all gates
+  // live in runDelegateTool. Runs the isolated sub-agent loop and returns a
+  // compressed report.
+  if (name === 'delegate_to_agent') {
+    const outcome = await runDelegateTool(args, deps, ctx)
+    pushResult(JSON.stringify(outcome))
+    if (outcome.status === 'refused') {
+      deps.send({
+        type: 'tool.result',
+        name,
+        summary: `Delegation refused: ${outcome.reason.slice(0, 120)}`,
+      })
+      return
+    }
+    deps.send({
+      type: 'tool.result',
+      name,
+      summary: `Delegated to ${outcome.agent}: ${outcome.status}${
+        outcome.rounds > 0 ? ` (${outcome.rounds} rounds)` : ''
+      }`,
+    })
+    await recordAction(
+      deps.conversationId,
+      name,
+      describeAction(name, args, ctx.snapshotTargets),
+      ctx.lastUrl ? hostOf(ctx.lastUrl) : undefined,
+      true,
+      outcome.ok,
+      describeDetail(name, args, ctx.snapshotTargets, JSON.stringify(outcome)),
+      { agent: outcome.agent, task: typeof args.task === 'string' ? args.task : '' },
+    )
+    return
+  }
+
   // The on-demand group loader: record the groups on this conversation so the
   // next round advertises them. Pure bookkeeping — no approval, no page touch.
   if (name === 'load_tools') {
     const requested = Array.isArray(args.groups) ? args.groups.map(String) : []
-    const valid = requested.filter((group) => Boolean(TOOL_GROUPS[group]))
+    let valid = requested.filter((group) => Boolean(TOOL_GROUPS[group]))
     const invalid = requested.filter((group) => !TOOL_GROUPS[group])
+    // A specialist can only load groups that contribute whitelisted tools,
+    // and never the delegate group (no recursive delegation).
+    if (ctx.subAgent) {
+      valid = valid.filter(
+        (group) =>
+          group !== 'delegate' &&
+          (!ctx.toolAllowSet || TOOL_GROUPS[group]!.some((tool) => ctx.toolAllowSet!.has(tool))),
+      )
+    }
     if (valid.length === 0) {
       pushResult(
         JSON.stringify({
@@ -2886,12 +3123,15 @@ async function runOneToolCall(
     }
     const fresh = valid.filter((group) => !ctx.loadedGroups?.has(group))
     const loaded = storeLoadedGroups(ctx.conversationId, valid)
+    const advertised = [...loaded].flatMap((group) => [...(TOOL_GROUPS[group] ?? [])])
     pushResult(
       JSON.stringify({
         loaded: fresh,
         alreadyLoaded: valid.filter((group) => !fresh.includes(group)),
         ...(invalid.length > 0 ? { unknownGroups: invalid } : {}),
-        toolsAdvertised: [...loaded].flatMap((group) => [...(TOOL_GROUPS[group] ?? [])]),
+        toolsAdvertised: ctx.toolAllowSet
+          ? advertised.filter((tool) => ctx.toolAllowSet!.has(tool))
+          : advertised,
       }),
     )
     deps.send({
@@ -2910,6 +3150,24 @@ async function runOneToolCall(
   // hint made weaker models give up and claim "tool limitations" to the user.
   const groupName = TOOL_GROUP_BY_NAME.get(name)
   if (groupName && !ctx.loadedGroups?.has(groupName)) {
+    // Sub-agent boundary: never auto-load the delegate group (recursion
+    // guard) or a group whose tools the specialist's whitelist excludes.
+    const blockedForSubAgent =
+      !!ctx.subAgent &&
+      (groupName === 'delegate' || (!!ctx.toolAllowSet && !ctx.toolAllowSet.has(name)))
+    if (blockedForSubAgent) {
+      pushResult(
+        JSON.stringify({
+          error: `The "${name}" tool is not available to this sub-agent. Complete the task with your advertised tools only.`,
+        }),
+      )
+      deps.send({
+        type: 'tool.result',
+        name,
+        summary: `Blocked (${name} not allowed for this sub-agent)`,
+      })
+      return
+    }
     storeLoadedGroups(ctx.conversationId, [groupName])
     pushResult(
       JSON.stringify({
@@ -2920,6 +3178,19 @@ async function runOneToolCall(
       type: 'tool.result',
       name,
       summary: `Auto-loaded ${groupName} group — retry ${name}`,
+    })
+    return
+  }
+
+  // Specialist tool boundary, defence in depth: even if a non-grouped tool
+  // slipped past advertisement, refuse it rather than executing it.
+  if (ctx.toolAllowSet && name !== 'load_tools' && !ctx.toolAllowSet.has(name)) {
+    const message = `The "${name}" tool is not allowed for this sub-agent.`
+    pushResult(JSON.stringify({ error: message }))
+    deps.send({
+      type: 'tool.result',
+      name,
+      summary: `Blocked (${name} not allowed for this sub-agent)`,
     })
     return
   }
