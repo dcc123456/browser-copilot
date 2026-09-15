@@ -41,6 +41,8 @@ interface Draft {
   maxRounds: number
   instructions: string
   createdAt: number
+  /** Kept while editing a built-in so the save preserves its identity. */
+  builtIn?: boolean
 }
 
 const newLocalId = (): string =>
@@ -59,6 +61,7 @@ function toDraft(agent: Agent): Draft {
     maxRounds: agent.maxRounds,
     instructions: agent.instructions,
     createdAt: agent.createdAt,
+    ...(agent.builtIn ? { builtIn: true as const } : {}),
   }
 }
 
@@ -117,7 +120,6 @@ export default function AgentsTab({ agents, skills, onChanged }: Props) {
         const name = rawDisplayName(problem.raw)
         return t.agentsImportNameTaken({ name: name || t.agentsAdd })
       }
-      if (code === 'builtInReadOnly') return t.agentBuiltInReadOnly
       return String(code)
     })
 
@@ -130,7 +132,6 @@ export default function AgentsTab({ agents, skills, onChanged }: Props) {
       nameRequired: t.agentNameRequired,
       instructionsRequired: t.agentInstructionsRequired,
       nameTaken: t.agentNameTaken,
-      builtInReadOnly: t.agentBuiltInReadOnly,
     }
     return codes
       .map((code) => lookup[code] ?? code)
@@ -153,6 +154,9 @@ export default function AgentsTab({ agents, skills, onChanged }: Props) {
       maxRounds: values.maxRounds,
       createdAt: draft.createdAt,
       updatedAt: Date.now(),
+      // A built-in keeps its marker through edits; reset restores shipped
+      // content under the same id.
+      ...(draft.builtIn ? { builtIn: true as const } : {}),
     }
     setSaving(true)
     setDraftError(null)
@@ -184,26 +188,18 @@ export default function AgentsTab({ agents, skills, onChanged }: Props) {
   }
 
   /**
-   * Duplicates a built-in as a user-owned agent, immediately persisting the
-   * copy (fresh id, no builtIn marker, fresh timestamps). The name gets a
-   * `-copy` suffix so it cannot clash with the original.
+   * Restores an edited built-in to the shipped version under the same id
+   * (the worker stamps updatedAt: 0 again, so future seed refreshes apply).
    */
-  const copyToMine = async (source: Agent): Promise<void> => {
-    const taken = new Set(agents.map((agent) => agent.name.trim().toLowerCase()))
-    let name = `${source.name}-copy`
-    for (let i = 2; taken.has(name.toLowerCase()); i += 1) name = `${source.name}-copy-${i}`
-    const copy: Agent = {
-      ...source,
-      id: newLocalId(),
-      name,
-      builtIn: undefined,
-      delegatable: source.role === 'supervisor' ? source.delegatable : false,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    }
+  const resetBuiltIn = async (agent: Agent): Promise<void> => {
     try {
-      await sendCommand({ type: 'agents.save', agent: copy })
-      setBanner({ kind: 'ok', text: t.agentCopied({ name: source.name }) })
+      const result = await sendCommand({ type: 'agents.reset', id: agent.id })
+      const restored = result.type === 'agents.reset' ? result.agent : agent
+      if (draft?.id === agent.id) {
+        setDraft(null)
+        setDraftError(null)
+      }
+      setBanner({ kind: 'ok', text: t.agentResetDone({ name: restored.name }) })
       onChanged()
     } catch (error) {
       setBanner({ kind: 'error', text: describeError(error as Error) })
@@ -371,19 +367,17 @@ export default function AgentsTab({ agents, skills, onChanged }: Props) {
           </div>
           {agent.delegationHint && <p className="hint">{agent.delegationHint}</p>}
           <div className="actions">
+            <button onClick={() => setDraft(toDraft(agent))} type="button">
+              {t.edit}
+            </button>
             {agent.builtIn ? (
-              <button className="primary" onClick={() => void copyToMine(agent)} type="button">
-                {t.agentsCopyToMine}
+              <button onClick={() => void resetBuiltIn(agent)} type="button">
+                {t.agentsReset}
               </button>
             ) : (
-              <>
-                <button onClick={() => setDraft(toDraft(agent))} type="button">
-                  {t.edit}
-                </button>
-                <button onClick={() => void remove(agent)} type="button">
-                  {t.delete}
-                </button>
-              </>
+              <button onClick={() => void remove(agent)} type="button">
+                {t.delete}
+              </button>
             )}
           </div>
         </div>

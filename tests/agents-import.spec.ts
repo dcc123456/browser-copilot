@@ -209,4 +209,37 @@ describe('seedBuiltInAgents (storage integration)', () => {
     expect(same.instructions).toBe('MY CUSTOM EDIT')
     expect(same.updatedAt).toBe(123456789)
   })
+
+  it('restores an edited (even renamed) built-in to the shipped version in place', async () => {
+    const storage = await import('../src/lib/storage')
+    const { BUILT_IN_AGENTS } = await import('../src/lib/builtin-agents')
+    await storage.seedBuiltInAgents()
+
+    const shipped = BUILT_IN_AGENTS[1]!
+    // Edit like the panel does: same id + builtIn marker, real timestamp, and
+    // even a rename — a later seed must not clobber it.
+    await storage.saveAgent({
+      ...shipped,
+      name: `${shipped.name}-hacked`,
+      instructions: 'MY EDIT',
+      updatedAt: 424242,
+    })
+    await storage.seedBuiltInAgents()
+    const edited = (await storage.listAgents()).find((a) => a.id === shipped.id)!
+    expect(edited.instructions).toBe('MY EDIT')
+
+    // One-click restore: shipped content, original name, updatedAt back to 0,
+    // no duplicate entry under the same id.
+    const restored = await storage.resetAgentToBuiltIn(shipped.id)
+    expect(restored).toEqual({ ...shipped })
+    expect(restored.updatedAt).toBe(0)
+    const all = await storage.listAgents()
+    expect(all.filter((a) => a.id === shipped.id)).toHaveLength(1)
+    expect(all.find((a) => a.id === shipped.id)!.name).toBe(shipped.name)
+  })
+
+  it('throws when resetting an id that is not a built-in', async () => {
+    const storage = await import('../src/lib/storage')
+    await expect(storage.resetAgentToBuiltIn('user-made-id')).rejects.toThrow(/built-in/)
+  })
 })

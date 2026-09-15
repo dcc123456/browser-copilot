@@ -20,7 +20,7 @@ import type { Agent, AgentDomain, Skill } from './types'
 export interface AgentProblem {
   field: 'name' | 'instructions'
   /** Message key, resolved by the caller so errors follow the UI language. */
-  code: 'nameRequired' | 'instructionsRequired' | 'nameTaken' | 'builtInReadOnly'
+  code: 'nameRequired' | 'instructionsRequired' | 'nameTaken'
 }
 
 /** Longest delegation hint accepted (mirrors the skill description cap). */
@@ -50,17 +50,15 @@ const DOMAINS: readonly AgentDomain[] = [
  * Checks an agent against the other stored agents.
  *
  * Name uniqueness is enforced case-insensitively, for the same reason as
- * skills: the supervisor selects agents by name. Built-in agents are
- * read-only — the UI edits a user-owned copy instead.
+ * skills: the supervisor selects agents by name. Built-in agents validate
+ * like any other — the user may edit them directly; "restore default" is a
+ * separate storage operation that writes the shipped copy back.
  */
 export function validateAgent(agent: Agent, existing: readonly Agent[]): AgentProblem[] {
   const problems: AgentProblem[] = []
   const name = agent.name.trim()
   const instructions = agent.instructions.trim()
 
-  if (agent.builtIn === true) {
-    problems.push({ field: 'name', code: 'builtInReadOnly' })
-  }
   if (name.length === 0) problems.push({ field: 'name', code: 'nameRequired' })
   if (instructions.length === 0) {
     problems.push({ field: 'instructions', code: 'instructionsRequired' })

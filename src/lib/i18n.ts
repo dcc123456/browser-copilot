@@ -836,7 +836,7 @@ export interface Messages {
   agentsImportHint: string
   agentsExport: string
   agentsBuiltinNote: string
-  agentsCopyToMine: string
+  agentsReset: string
   agentsBuiltinBadge: string
   agentsSpecialistPill: string
   agentsDelegatablePill: string
@@ -866,11 +866,10 @@ export interface Messages {
   agentMaxRounds: string
   agentSaved: (params: { name: string }) => string
   agentDeleted: (params: { name: string }) => string
-  agentCopied: (params: { name: string }) => string
+  agentResetDone: (params: { name: string }) => string
   agentNameRequired: string
   agentInstructionsRequired: string
   agentNameTaken: string
-  agentBuiltInReadOnly: string
 }
 
 const en: Messages = {
@@ -1598,15 +1597,15 @@ const en: Messages = {
 
   agentsTitle: 'Agents',
   agentsIntro:
-    'Agents are delegated workers. The supervisor splits a large task and hands scoped sub-tasks to specialist agents; small tasks are always done directly. Built-in agents are read-only — duplicate one to make it yours.',
+    'Agents are delegated workers. The supervisor splits a large task and hands scoped sub-tasks to specialist agents; small tasks are always done directly. Built-in agents can be edited directly and restored to defaults anytime.',
   agentsEmpty: 'No agents yet. Create one, or the built-in agents appear after a reload.',
   agentsAdd: 'New agent',
   agentsImport: 'Import',
   agentsImportHint: 'Import agent files (.json, .yaml, .md) — or drop them anywhere on this tab.',
   agentsExport: 'Export all',
   agentsBuiltinNote:
-    'Built-in agents ship with the extension and stay read-only; use “Duplicate as mine” to customize a copy.',
-  agentsCopyToMine: 'Duplicate as mine',
+    'Built-in agents ship with the extension. You can edit them in place; “Restore default” brings the shipped version back.',
+  agentsReset: 'Restore default',
   agentsBuiltinBadge: 'Built-in',
   agentsSpecialistPill: 'Specialist',
   agentsDelegatablePill: 'Can delegate',
@@ -1639,11 +1638,10 @@ const en: Messages = {
   agentMaxRounds: 'Max tool rounds per delegation',
   agentSaved: ({ name }) => `Agent “${name}” saved.`,
   agentDeleted: ({ name }) => `Agent “${name}” deleted.`,
-  agentCopied: ({ name }) => `Copied “${name}” into your own agent — rename and edit it.`,
+  agentResetDone: ({ name }) => `Restored the built-in agent “${name}” to its defaults.`,
   agentNameRequired: 'Name is required.',
   agentInstructionsRequired: 'Instructions are required.',
   agentNameTaken: 'This name is already used by another agent.',
-  agentBuiltInReadOnly: 'Built-in agents are read-only. Duplicate one to customize a copy.',
 }
 
 const zhCN: Messages = {
@@ -2328,15 +2326,15 @@ const zhCN: Messages = {
 
   agentsTitle: '智能体',
   agentsIntro:
-    '智能体是可被委派的执行单元：主管会把大任务拆成子任务分派给专长智能体，小任务则始终直接完成。内置智能体只读——可复制一份再改成你自己的。',
+    '智能体是可被委派的执行单元：主管会把大任务拆成子任务分派给专长智能体，小任务则始终直接完成。内置智能体可以直接编辑，也能随时一键恢复默认。',
   agentsEmpty: '还没有智能体。可以新建；内置智能体会在重载后自动出现。',
   agentsAdd: '新建智能体',
   agentsImport: '导入',
   agentsImportHint: '导入智能体文件（.json、.yaml、.md），也可直接拖入本页。',
   agentsExport: '全部导出',
   agentsBuiltinNote:
-    '内置智能体随扩展提供且只读；需要定制时请使用「复制为我的」生成副本。',
-  agentsCopyToMine: '复制为我的',
+    '内置智能体随扩展提供，可以就地编辑；「恢复默认」可随时还原为出厂版本。',
+  agentsReset: '恢复默认',
   agentsBuiltinBadge: '内置',
   agentsSpecialistPill: '专长',
   agentsDelegatablePill: '可委派',
@@ -2368,11 +2366,10 @@ const zhCN: Messages = {
   agentMaxRounds: '单次委派最大工具轮次',
   agentSaved: ({ name }) => `智能体 “${name}” 已保存。`,
   agentDeleted: ({ name }) => `智能体 “${name}” 已删除。`,
-  agentCopied: ({ name }) => `已把 “${name}” 复制为你自己的智能体，请重命名并编辑。`,
+  agentResetDone: ({ name }) => `内置智能体 “${name}” 已恢复为默认版本。`,
   agentNameRequired: '请填写名称。',
   agentInstructionsRequired: '请填写指令。',
   agentNameTaken: '该名称已被另一个智能体占用。',
-  agentBuiltInReadOnly: '内置智能体只读，请先复制为自己的副本再修改。',
 }
 
 const DICTIONARIES: Record<Locale, Messages> = { en, 'zh-CN': zhCN }

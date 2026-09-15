@@ -60,11 +60,8 @@ describe('validateAgent', () => {
     expect(validateAgent(agent({ id: 'other', name: 'Copywriter' }), existing)).toEqual([])
   })
 
-  it('refuses to validate a built-in agent (they are read-only)', () => {
-    expect(validateAgent(agent({ builtIn: true }), [])).toContainEqual({
-      field: 'name',
-      code: 'builtInReadOnly',
-    })
+  it('accepts direct edits to a built-in agent (restore-default lives in storage)', () => {
+    expect(validateAgent(agent({ builtIn: true }), [])).toEqual([])
   })
 })
 

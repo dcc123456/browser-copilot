@@ -79,7 +79,7 @@ import {
   deleteProvider,
   deleteSkill,
   ensureSchema,
-  getAgent,
+  resetAgentToBuiltIn,
   getTurnState,
   listAgents,
   listConversations,
@@ -857,11 +857,9 @@ async function handleCommand(
       return { type: 'agents.list', agents: await listAgents() }
 
     case 'agents.save': {
-      // Built-in agents are read-only: the panel edits a user-owned copy
-      // instead, so an attempted overwrite or rename is rejected outright.
-      if (command.agent.builtIn === true || (await getAgent(command.agent.id))?.builtIn) {
-        throw new Error('agent:builtInReadOnly')
-      }
+      // Built-in agents are directly editable: the edit carries a real
+      // updatedAt, which stops seed refreshes from overwriting it; the
+      // agents.reset command restores the shipped version on demand.
       const normalized = normalizeAgent(command.agent)
       const problems = validateAgent(normalized, await listAgents())
       if (problems.length > 0) {
@@ -873,13 +871,15 @@ async function handleCommand(
       return { type: 'agents.save', agent: normalized }
     }
 
-    case 'agents.delete': {
-      if ((await getAgent(command.id))?.builtIn) {
-        throw new Error('agent:builtInReadOnly')
-      }
+    case 'agents.delete':
       await deleteAgent(command.id)
       notifyAgentsChanged()
       return { type: 'agents.delete' }
+
+    case 'agents.reset': {
+      const agent = await resetAgentToBuiltIn(command.id)
+      notifyAgentsChanged()
+      return { type: 'agents.reset', agent }
     }
 
     case 'provider.save': {

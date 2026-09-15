@@ -281,7 +281,12 @@ export async function seedBuiltInAgents(): Promise<void> {
   const agents = await listAgents()
   const byName = new Map(agents.map((agent) => [agent.name.trim().toLowerCase(), agent]))
   for (const builtin of BUILT_IN_AGENTS) {
-    const stored = byName.get(builtin.name.trim().toLowerCase())
+    // Match by id FIRST: a user may rename a built-in while editing it, and
+    // the name lookup would then miss it and re-insert the shipped copy,
+    // silently reverting the edit on the next upgrade.
+    const stored =
+      agents.find((agent) => agent.id === builtin.id) ??
+      byName.get(builtin.name.trim().toLowerCase())
     if (!stored) {
       await saveAgent(builtin)
       continue
@@ -590,6 +595,22 @@ export async function deleteAgent(id: string): Promise<void> {
     const fs = new FsDirectory(handle)
     await fs.removeDirectory([AGENTS_DIR, agentSlug(victim.name)])
   }
+}
+
+/**
+ * Restores a built-in agent to the shipped version in place.
+ *
+ * Built-in agents are directly editable: an edit stamps a real `updatedAt`,
+ * which protects it from seed refreshes. Resetting writes the shipped copy
+ * back (with `updatedAt: 0`) under the SAME id — so a rename is undone too
+ * (saveAgent drops the stale folder). Throws when the id is not a built-in.
+ */
+export async function resetAgentToBuiltIn(id: string): Promise<Agent> {
+  const builtin = BUILT_IN_AGENTS.find((agent) => agent.id === id)
+  if (!builtin) throw new Error(`No built-in agent with id "${id}"`)
+  const restored: Agent = { ...builtin }
+  await saveAgent(restored)
+  return restored
 }
 
 /** Caps stored turns so a long session cannot grow unbounded. */

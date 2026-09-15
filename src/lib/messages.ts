@@ -76,6 +76,8 @@ export type Command =
   | { type: 'agents.list' }
   | { type: 'agents.save'; agent: Agent }
   | { type: 'agents.delete'; id: string }
+  /** Restores a built-in agent to its shipped version (same id). */
+  | { type: 'agents.reset'; id: string }
   | { type: 'provider.save'; profile: ProviderProfile }
   | { type: 'provider.delete'; id: string }
   | { type: 'provider.activate'; id: string }
@@ -221,6 +223,7 @@ export type CommandResult =
   | { type: 'agents.list'; agents: Agent[] }
   | { type: 'agents.save'; agent: Agent }
   | { type: 'agents.delete' }
+  | { type: 'agents.reset'; agent: Agent }
   | { type: 'provider.test' }
   | { type: 'provider.models'; models: string[] }
   | { type: 'page.read'; page: PageContext }
