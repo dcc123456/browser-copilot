@@ -1,5 +1,10 @@
 # Browser Copilot
 
+[![Version](https://img.shields.io/github/v/release/dcc123456/browser-copilot?label=version&color=5b8cff)](https://github.com/dcc123456/browser-copilot/releases)
+[![Chrome](https://img.shields.io/badge/Chrome-116%2B-4285f4?logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/develop)
+[![License](https://img.shields.io/badge/license-PolyForm--Noncommercial-6e40c9)](./LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/dcc123456/browser-copilot/ci.yml?label=ci)](https://github.com/dcc123456/browser-copilot/actions)
+
 **English** · [简体中文](README.zh-CN.md)
 
 Your AI assistant that actually _uses_ the web for you. Open the side panel,

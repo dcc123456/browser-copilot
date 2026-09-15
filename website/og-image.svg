@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6ea3ff"/>
+      <stop offset="100%" style="stop-color:#43c9a3"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="0%" r="70%">
+      <stop offset="0%" style="stop-color:#6ea3ff;stop-opacity:0.15"/>
+      <stop offset="100%" style="stop-color:#6ea3ff;stop-opacity:0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="#0f1115"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+
+  <!-- Subtle grid pattern -->
+  <g opacity="0.04" stroke="#6ea3ff" stroke-width="0.5">
+    <line x1="0" y1="100" x2="1200" y2="100"/>
+    <line x1="0" y1="200" x2="1200" y2="200"/>
+    <line x1="0" y1="300" x2="1200" y2="300"/>
+    <line x1="0" y1="400" x2="1200" y2="400"/>
+    <line x1="0" y1="500" x2="1200" y2="500"/>
+    <line x1="200" y1="0" x2="200" y2="630"/>
+    <line x1="400" y1="0" x2="400" y2="630"/>
+    <line x1="600" y1="0" x2="600" y2="630"/>
+    <line x1="800" y1="0" x2="800" y2="630"/>
+    <line x1="1000" y1="0" x2="1000" y2="630"/>
+  </g>
+
+  <!-- Bot icon (simplified) -->
+  <g transform="translate(540, 120)">
+    <!-- Face outline -->
+    <rect x="0" y="20" width="120" height="100" rx="20" fill="none" stroke="#e6e8ec" stroke-width="3"/>
+    <!-- Antenna -->
+    <line x1="60" y1="20" x2="60" y2="0" stroke="#e6e8ec" stroke-width="3"/>
+    <circle cx="60" cy="0" r="6" fill="#6ea3ff"/>
+    <!-- Eyes -->
+    <circle cx="38" cy="65" r="10" fill="#6ea3ff"/>
+    <circle cx="82" cy="65" r="10" fill="#6ea3ff"/>
+    <!-- Mouth -->
+    <line x1="40" y1="90" x2="80" y2="90" stroke="#e6e8ec" stroke-width="2" stroke-linecap="round"/>
+  </g>
+
+  <!-- Title -->
+  <text x="600" y="310" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="56" font-weight="700" fill="#e9ecf2">
+    Browser Copilot
+  </text>
+
+  <!-- Subtitle with gradient -->
+  <text x="600" y="370" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="28" fill="#9aa4b5">
+    AI Assistant That Uses the Web for You
+  </text>
+
+  <!-- Feature pills -->
+  <g transform="translate(600, 440)">
+    <!-- Pill 1 -->
+    <rect x="-380" y="0" width="160" height="36" rx="18" fill="#1e232c" stroke="#2a303c" stroke-width="1"/>
+    <text x="-300" y="23" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" fill="#9aa4b5">Open Source</text>
+    <!-- Pill 2 -->
+    <rect x="-200" y="0" width="160" height="36" rx="18" fill="#1e232c" stroke="#2a303c" stroke-width="1"/>
+    <text x="-120" y="23" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" fill="#9aa4b5">Private by Design</text>
+    <!-- Pill 3 -->
+    <rect x="-20" y="0" width="180" height="36" rx="18" fill="#1e232c" stroke="#2a303c" stroke-width="1"/>
+    <text x="70" y="23" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" fill="#9aa4b5">Workflow Automation</text>
+    <!-- Pill 4 -->
+    <rect x="180" y="0" width="200" height="36" rx="18" fill="#1e232c" stroke="#2a303c" stroke-width="1"/>
+    <text x="280" y="23" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" fill="#9aa4b5">Any OpenAI Model</text>
+  </g>
+
+  <!-- GitHub stars badge -->
+  <g transform="translate(520, 520)">
+    <rect x="0" y="0" width="160" height="36" rx="18" fill="none" stroke="url(#accent)" stroke-width="1.5"/>
+    <text x="80" y="23" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#6ea3ff">
+      &#9733; Free &amp; Open Source
+    </text>
+  </g>
+
+  <!-- Bottom border accent -->
+  <rect x="0" y="626" width="1200" height="4" fill="url(#accent)"/>
+</svg>

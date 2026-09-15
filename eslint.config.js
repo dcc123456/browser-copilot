@@ -17,6 +17,7 @@ export default tseslint.config(
       'preview/**',
       'public/**',
       'server/web/**',
+      'website/**',
       '*.config.js',
       '*.config.ts',
     ],

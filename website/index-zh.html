@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Browser Copilot — 替你操作网页的 AI 助手</title>
+    <meta
+      name="description"
+      content="开源 Chrome 扩展，能读取网页、点击按钮、填写表单、自动化工作流。支持 DeepSeek、OpenAI、Ollama 及任何 OpenAI 兼容模型。隐私优先，数据不出本机。"
+    />
+    <link rel="canonical" href="https://dcc123456.github.io/browser-copilot/index-zh.html" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Browser Copilot — 替你操作网页的 AI 助手" />
+    <meta
+      property="og:description"
+      content="开源 Chrome 扩展，能读取网页、点击按钮、填写表单、自动化工作流。支持 DeepSeek、OpenAI、Ollama 等模型。"
+    />
+    <meta property="og:url" content="https://dcc123456.github.io/browser-copilot/index-zh.html" />
+    <meta property="og:image" content="https://dcc123456.github.io/browser-copilot/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Browser Copilot — 替你操作网页的 AI 助手" />
+    <meta
+      name="twitter:description"
+      content="开源 Chrome 扩展，能读取网页、点击按钮、填写表单、自动化工作流。"
+    />
+    <meta name="twitter:image" content="https://dcc123456.github.io/browser-copilot/og-image.png" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="./icons/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="./icons/icon-16.png" />
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0f1115',
+              panel: '#161a21',
+              'panel-2': '#1e232c',
+              border: '#2a303c',
+              ink: '#e9ecf2',
+              muted: '#9aa4b5',
+              faint: '#687183',
+              accent: '#6ea3ff',
+              'accent-strong': '#8bb6ff',
+              ok: '#43c9a3',
+              err: '#ff6f6f',
+            },
+            fontFamily: {
+              sans: [
+                'ui-sans-serif',
+                'system-ui',
+                '-apple-system',
+                "'Segoe UI'",
+                'Roboto',
+                "'PingFang SC'",
+                "'Hiragino Sans GB'",
+                "'Microsoft YaHei'",
+                'sans-serif',
+              ],
+            },
+          },
+        },
+      }
+    </script>
+
+    <!-- JSON-LD Structured Data -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Browser Copilot",
+        "applicationCategory": "BrowserApplication",
+        "operatingSystem": "Chrome",
+        "description": "AI 侧边栏助手，能读取并操作任意网页。支持任何 OpenAI 兼容模型。",
+        "url": "https://github.com/dcc123456/browser-copilot",
+        "license": "https://polyformproject.org/licenses/noncommercial/1.0.0/",
+        "softwareVersion": "0.6.2",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "featureList": [
+          "AI 页面阅读与操作",
+          "56 种组件的可视化工作流构建器",
+          "定时任务自动化",
+          "可复用的技能系统",
+          "飞书/Lark 集成",
+          "面向编程代理的 MCP 服务器",
+          "基于 Tesseract.js 的本地 OCR"
+        ]
+      }
+    </script>
+
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      .gradient-text {
+        background: linear-gradient(135deg, #6ea3ff 0%, #8bb6ff 50%, #43c9a3 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      .card-glow:hover {
+        box-shadow: 0 0 30px rgba(110, 163, 255, 0.08);
+      }
+      .hero-glow {
+        background: radial-gradient(ellipse 60% 50% at 50% 0%, rgba(110, 163, 255, 0.12) 0%, transparent 70%);
+      }
+    </style>
+  </head>
+  <body class="bg-bg text-ink font-sans antialiased">
+    <!-- Navigation -->
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/80 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
+        <a href="./index-zh.html" class="flex items-center gap-3">
+          <img src="./icons/icon-32.png" alt="" class="h-8 w-8" />
+          <span class="text-lg font-semibold text-ink">Browser Copilot</span>
+        </a>
+        <div class="flex items-center gap-6">
+          <a href="#features" class="text-sm text-muted transition-colors hover:text-ink">功能</a>
+          <a href="#how-it-works" class="text-sm text-muted transition-colors hover:text-ink">快速上手</a>
+          <a href="#integrations" class="text-sm text-muted transition-colors hover:text-ink">生态集成</a>
+          <!-- Language switcher -->
+          <a href="./index.html" class="text-sm text-muted transition-colors hover:text-ink">EN</a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm text-muted transition-colors hover:border-accent hover:text-ink"
+          >
+            <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                fill-rule="evenodd"
+                d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
+                clip-rule="evenodd"
+              />
+            </svg>
+            GitHub
+          </a>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="hero-glow relative pt-32 pb-20">
+      <div class="mx-auto max-w-4xl px-6 text-center">
+        <div class="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-panel px-4 py-1.5">
+          <span class="h-2 w-2 rounded-full bg-ok"></span>
+          <span class="text-sm text-muted">v0.6.2 — 开源</span>
+        </div>
+        <h1 class="mb-6 text-5xl font-bold leading-tight tracking-tight md:text-6xl">
+          替你<span class="gradient-text">真正操作网页</span>的<br />
+          AI 助手
+        </h1>
+        <p class="mx-auto mb-10 max-w-2xl text-lg leading-relaxed text-muted">
+          打开侧边栏，用大白话说出需求，Browser Copilot 读取你正在看的页面并采取行动 —
+          点击按钮、填写表单、滚动页面、切换标签页、走完整个流程 — 你可以在一旁观看，也可以完全放手。
+        </p>
+        <div class="flex flex-wrap items-center justify-center gap-4">
+          <a
+            href="https://github.com/dcc123456/browser-copilot/releases"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="rounded-lg bg-accent px-6 py-3 text-sm font-semibold text-bg transition-colors hover:bg-accent-strong"
+          >
+            下载最新版本
+          </a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="rounded-lg border border-border px-6 py-3 text-sm font-semibold text-muted transition-colors hover:border-accent hover:text-ink"
+          >
+            查看 GitHub 仓库
+          </a>
+        </div>
+      </div>
+
+      <!-- Demo Video -->
+      <div class="mx-auto mt-16 max-w-4xl px-6">
+        <div class="overflow-hidden rounded-xl border border-border shadow-2xl">
+          <video
+            src="https://github.com/user-attachments/assets/17a30b54-608c-43a9-a5ee-770c1d809350"
+            controls
+            preload="metadata"
+            class="w-full"
+            aria-label="Browser Copilot 演示视频"
+          >
+            你的浏览器不支持视频标签。
+          </video>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features" class="py-24">
+      <div class="mx-auto max-w-6xl px-6">
+        <div class="mb-16 text-center">
+          <h2 class="mb-4 text-3xl font-bold md:text-4xl">你需要的一切，没有多余的</h2>
+          <p class="text-lg text-muted">隐私优先。无需注册、无遥测、无云端服务器。</p>
+        </div>
+        <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          <!-- Feature 1 -->
+          <div class="card-glow rounded-xl border border-border bg-panel p-6 transition-all">
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
+              <svg class="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              </svg>
+            </div>
+            <h3 class="mb-2 text-lg font-semibold">自带模型</h3>
+            <p class="text-sm leading-relaxed text-muted">
+              支持 DeepSeek、火山方舟 Ark、OpenAI、OpenRouter、Moonshot、DashScope，或本地 Ollama / LM Studio。任何 OpenAI 兼容端点均可。
+            </p>
+          </div>
+          <!-- Feature 2 -->
+          <div class="card-glow rounded-xl border border-border bg-panel p-6 transition-all">
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
+              <svg class="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+              </svg>
+            </div>
+            <h3 class="mb-2 text-lg font-semibold">自主程度由你掌控</h3>
+            <p class="text-sm leading-relaxed text-muted">
+              四种模式，从纯聊天到全自动。半自动模式会展示每一步操作供你审批——你始终掌握主动权。
+            </p>
+          </div>
+          <!-- Feature 3 -->
+          <div class="card-glow rounded-xl border border-border bg-panel p-6 transition-all">
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
+              <svg class="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+              </svg>
+            </div>
+            <h3 class="mb-2 text-lg font-semibold">可视化工作流编辑器</h3>
+            <p class="text-sm leading-relaxed text-muted">
+              录屏式记录一次操作，或在画布上用 56 种组件拼接工作流——点击、填写、循环、条件分支、AI 代理步骤，应有尽有。
+            </p>
+          </div>
+          <!-- Feature 4 -->
+          <div class="card-glow rounded-xl border border-border bg-panel p-6 transition-all">
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
+              <svg class="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h3 class="mb-2 text-lg font-semibold">定时自动化</h3>
+            <p class="text-sm leading-relaxed text-muted">
+              设置定时任务——每隔几分钟、每天、或工作日。自动运行提示词或总结 GitHub 代码审查队列，睡一觉起来就看结果。
+            </p>
+          </div>
+          <!-- Feature 5 -->
+          <div class="card-glow rounded-xl border border-border bg-panel p-6 transition-all">
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
+              <svg class="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+              </svg>
+            </div>
+            <h3 class="mb-2 text-lg font-semibold">技能系统</h3>
+            <p class="text-sm leading-relaxed text-muted">
+              将可重复的知识——审查清单、风格指南、提取格式——转化为模型必须遵循的一键指令。
+            </p>
+          </div>
+          <!-- Feature 6 -->
+          <div class="card-glow rounded-xl border border-border bg-panel p-6 transition-all">
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
+              <svg class="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            </div>
+            <h3 class="mb-2 text-lg font-semibold">隐私优先</h3>
+            <p class="text-sm leading-relaxed text-muted">
+              无需注册、无遥测、无云端服务器。密钥和数据留在你的机器上。密码在本地填写，绝不会展示给模型。
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- How It Works -->
+    <section id="how-it-works" class="border-t border-border bg-panel/30 py-24">
+      <div class="mx-auto max-w-6xl px-6">
+        <div class="mb-16 text-center">
+          <h2 class="mb-4 text-3xl font-bold md:text-4xl">几分钟就能用起来</h2>
+          <p class="text-lg text-muted">三个步骤，无需注册。</p>
+        </div>
+        <div class="grid gap-8 md:grid-cols-3">
+          <!-- Step 1 -->
+          <div class="relative text-center">
+            <div class="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-panel">
+              <span class="text-2xl font-bold text-accent">1</span>
+            </div>
+            <h3 class="mb-3 text-xl font-semibold">下载并安装</h3>
+            <p class="text-sm leading-relaxed text-muted">
+              从 GitHub Releases 下载最新 ZIP 包，解压后打开 <code class="rounded bg-panel-2 px-1.5 py-0.5 text-xs text-accent">chrome://extensions</code>，开启开发者模式，点击"加载已解压的扩展程序"。
+            </p>
+          </div>
+          <!-- Step 2 -->
+          <div class="relative text-center">
+            <div class="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-panel">
+              <span class="text-2xl font-bold text-accent">2</span>
+            </div>
+            <h3 class="mb-3 text-xl font-semibold">配置你的模型</h3>
+            <p class="text-sm leading-relaxed text-muted">
+              在侧边栏中打开设置，输入你偏好的模型提供商的 API 地址和密钥——DeepSeek、OpenAI、OpenRouter，或本地 Ollama 实例。
+            </p>
+          </div>
+          <!-- Step 3 -->
+          <div class="relative text-center">
+            <div class="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-panel">
+              <span class="text-2xl font-bold text-accent">3</span>
+            </div>
+            <h3 class="mb-3 text-xl font-semibold">开始提问</h3>
+            <p class="text-sm leading-relaxed text-muted">
+              在任意页面打开侧边栏，用自然语言提问。Browser Copilot 会读取页面并采取行动——也可以构建工作流来自动化整个流程。
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Integrations -->
+    <section id="integrations" class="py-24">
+      <div class="mx-auto max-w-6xl px-6">
+        <div class="mb-16 text-center">
+          <h2 class="mb-4 text-3xl font-bold md:text-4xl">适配你的技术栈</h2>
+          <p class="text-lg text-muted">
+            支持任何 OpenAI 兼容模型、通过 MCP 连接编程代理、以及飞书/Lark 团队协作。
+          </p>
+        </div>
+        <div class="grid gap-6 md:grid-cols-3">
+          <!-- Model Providers -->
+          <div class="rounded-xl border border-border bg-panel p-6">
+            <h3 class="mb-4 text-lg font-semibold">模型提供商</h3>
+            <ul class="space-y-3">
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>DeepSeek
+              </li>
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>OpenAI
+              </li>
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>OpenRouter
+              </li>
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>Moonshot / DashScope / SiliconFlow
+              </li>
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>Ollama / LM Studio（本地）
+              </li>
+            </ul>
+          </div>
+          <!-- Coding Agents -->
+          <div class="rounded-xl border border-border bg-panel p-6">
+            <h3 class="mb-4 text-lg font-semibold">编程代理（MCP）</h3>
+            <p class="mb-4 text-sm text-muted">
+              独立的 MCP 服务器为你的编程代理提供真实浏览器工具箱。
+            </p>
+            <ul class="space-y-3">
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-accent"></span>Claude Code
+              </li>
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-accent"></span>OpenAI Codex
+              </li>
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-accent"></span>Trae
+              </li>
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-accent"></span>任何 MCP 客户端
+              </li>
+            </ul>
+          </div>
+          <!-- Feishu/Lark -->
+          <div class="rounded-xl border border-border bg-panel p-6">
+            <h3 class="mb-4 text-lg font-semibold">飞书 / Lark</h3>
+            <p class="mb-4 text-sm text-muted">
+              任务完成时在群聊中收到通知。从手机给机器人发消息，看着它在你电脑的浏览器中执行并回复结果。
+            </p>
+            <ul class="space-y-3">
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>群聊通知
+              </li>
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>私聊机器人指令
+              </li>
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>远程浏览器执行
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="border-t border-border py-24">
+      <div class="mx-auto max-w-3xl px-6 text-center">
+        <h2 class="mb-4 text-3xl font-bold md:text-4xl">准备好自动化你的浏览器了？</h2>
+        <p class="mb-8 text-lg text-muted">
+          免费、开源、隐私优先。现在下载，两分钟内即可开始使用。
+        </p>
+        <div class="flex flex-wrap items-center justify-center gap-4">
+          <a
+            href="https://github.com/dcc123456/browser-copilot/releases"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="rounded-lg bg-accent px-8 py-3.5 text-sm font-semibold text-bg transition-colors hover:bg-accent-strong"
+          >
+            下载 v0.6.2
+          </a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot#quick-start"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="rounded-lg border border-border px-8 py-3.5 text-sm font-semibold text-muted transition-colors hover:border-accent hover:text-ink"
+          >
+            快速上手指南
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="border-t border-border py-10">
+      <div class="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 md:flex-row">
+        <div class="flex items-center gap-3">
+          <img src="./icons/icon-16.png" alt="" class="h-4 w-4" />
+          <span class="text-sm text-muted">Browser Copilot</span>
+        </div>
+        <div class="flex items-center gap-6">
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-sm text-muted transition-colors hover:text-ink"
+          >
+            GitHub
+          </a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-sm text-muted transition-colors hover:text-ink"
+          >
+            License
+          </a>
+          <span class="text-sm text-faint">PolyForm Noncommercial 1.0</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

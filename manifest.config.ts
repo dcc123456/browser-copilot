@@ -51,12 +51,15 @@ export default defineManifest(((env: ConfigEnv) => {
   return {
     manifest_version: 3,
     name: 'Browser Copilot',
+    short_name: 'BCopilot',
     version: VERSION,
     // Marks the lite build in chrome://extensions (the numeric `version` stays
     // identical so both variants track the same release).
     ...(ocr ? {} : { version_name: `${VERSION} (no OCR)` }),
     description:
       'A side-panel assistant that can read and act on the page you are looking at. Works with any OpenAI-compatible model.',
+    author: 'Browser Copilot',
+    homepage_url: 'https://github.com/dcc123456/browser-copilot',
     minimum_chrome_version: '116',
     permissions: [
       'storage',

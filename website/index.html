@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Browser Copilot — AI Assistant That Uses the Web for You</title>
+    <meta
+      name="description"
+      content="Open-source Chrome extension that reads pages, clicks buttons, fills forms, and automates workflows. Works with DeepSeek, OpenAI, Ollama and any OpenAI-compatible model. Private by design."
+    />
+    <link rel="canonical" href="https://dcc123456.github.io/browser-copilot/" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Browser Copilot — AI Assistant That Uses the Web for You" />
+    <meta
+      property="og:description"
+      content="Open-source Chrome extension that reads pages, clicks buttons, fills forms, and automates workflows. Works with any OpenAI-compatible model."
+    />
+    <meta property="og:url" content="https://dcc123456.github.io/browser-copilot/" />
+    <meta property="og:image" content="https://dcc123456.github.io/browser-copilot/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Browser Copilot — AI Assistant That Uses the Web for You" />
+    <meta
+      name="twitter:description"
+      content="Open-source Chrome extension that reads pages, clicks buttons, fills forms, and automates workflows."
+    />
+    <meta name="twitter:image" content="https://dcc123456.github.io/browser-copilot/og-image.png" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="./icons/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="./icons/icon-16.png" />
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0f1115',
+              panel: '#161a21',
+              'panel-2': '#1e232c',
+              border: '#2a303c',
+              ink: '#e9ecf2',
+              muted: '#9aa4b5',
+              faint: '#687183',
+              accent: '#6ea3ff',
+              'accent-strong': '#8bb6ff',
+              ok: '#43c9a3',
+              err: '#ff6f6f',
+            },
+            fontFamily: {
+              sans: [
+                'ui-sans-serif',
+                'system-ui',
+                '-apple-system',
+                "'Segoe UI'",
+                'Roboto',
+                "'PingFang SC'",
+                "'Hiragino Sans GB'",
+                "'Microsoft YaHei'",
+                'sans-serif',
+              ],
+            },
+          },
+        },
+      }
+    </script>
+
+    <!-- JSON-LD Structured Data -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Browser Copilot",
+        "applicationCategory": "BrowserApplication",
+        "operatingSystem": "Chrome",
+        "description": "AI side-panel assistant that reads and acts on any web page. Works with any OpenAI-compatible model.",
+        "url": "https://github.com/dcc123456/browser-copilot",
+        "license": "https://polyformproject.org/licenses/noncommercial/1.0.0/",
+        "softwareVersion": "0.6.2",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "featureList": [
+          "AI page reading and action",
+          "Visual workflow builder with 56 block types",
+          "Scheduled task automation",
+          "Skills system for reusable instructions",
+          "Feishu/Lark integration",
+          "MCP server for coding agents",
+          "Local OCR with Tesseract.js"
+        ]
+      }
+    </script>
+
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      .gradient-text {
+        background: linear-gradient(135deg, #6ea3ff 0%, #8bb6ff 50%, #43c9a3 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      .card-glow:hover {
+        box-shadow: 0 0 30px rgba(110, 163, 255, 0.08);
+      }
+      .hero-glow {
+        background: radial-gradient(ellipse 60% 50% at 50% 0%, rgba(110, 163, 255, 0.12) 0%, transparent 70%);
+      }
+    </style>
+  </head>
+  <body class="bg-bg text-ink font-sans antialiased">
+    <!-- Navigation -->
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/80 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
+        <a href="#" class="flex items-center gap-3">
+          <img src="./icons/icon-32.png" alt="" class="h-8 w-8" />
+          <span class="text-lg font-semibold text-ink">Browser Copilot</span>
+        </a>
+        <div class="flex items-center gap-6">
+          <a href="#features" class="text-sm text-muted transition-colors hover:text-ink">Features</a>
+          <a href="#how-it-works" class="text-sm text-muted transition-colors hover:text-ink">How It Works</a>
+          <a href="#integrations" class="text-sm text-muted transition-colors hover:text-ink">Integrations</a>
+          <!-- Language switcher -->
+          <a href="./index-zh.html" class="text-sm text-muted transition-colors hover:text-ink">中文</a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm text-muted transition-colors hover:border-accent hover:text-ink"
+          >
+            <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                fill-rule="evenodd"
+                d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
+                clip-rule="evenodd"
+              />
+            </svg>
+            GitHub
+          </a>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="hero-glow relative pt-32 pb-20">
+      <div class="mx-auto max-w-4xl px-6 text-center">
+        <div class="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-panel px-4 py-1.5">
+          <span class="h-2 w-2 rounded-full bg-ok"></span>
+          <span class="text-sm text-muted">v0.6.2 — Open Source</span>
+        </div>
+        <h1 class="mb-6 text-5xl font-bold leading-tight tracking-tight md:text-6xl">
+          Your AI assistant that<br />
+          <span class="gradient-text">actually uses the web</span>
+        </h1>
+        <p class="mx-auto mb-10 max-w-2xl text-lg leading-relaxed text-muted">
+          Open the side panel, ask in plain language, and Browser Copilot reads the page you're on
+          and takes action — clicking buttons, filling forms, scrolling, switching tabs, walking
+          through whole flows — while you watch or stay hands-off.
+        </p>
+        <div class="flex flex-wrap items-center justify-center gap-4">
+          <a
+            href="https://github.com/dcc123456/browser-copilot/releases"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="rounded-lg bg-accent px-6 py-3 text-sm font-semibold text-bg transition-colors hover:bg-accent-strong"
+          >
+            Download Latest Release
+          </a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="rounded-lg border border-border px-6 py-3 text-sm font-semibold text-muted transition-colors hover:border-accent hover:text-ink"
+          >
+            View on GitHub
+          </a>
+        </div>
+      </div>
+
+      <!-- Demo Video -->
+      <div class="mx-auto mt-16 max-w-4xl px-6">
+        <div class="overflow-hidden rounded-xl border border-border shadow-2xl">
+          <video
+            src="https://github.com/user-attachments/assets/17a30b54-608c-43a9-a5ee-770c1d809350"
+            controls
+            preload="metadata"
+            class="w-full"
+            aria-label="Browser Copilot demo video"
+          >
+            Your browser does not support the video tag.
+          </video>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features" class="py-24">
+      <div class="mx-auto max-w-6xl px-6">
+        <div class="mb-16 text-center">
+          <h2 class="mb-4 text-3xl font-bold md:text-4xl">Everything you need, nothing you don't</h2>
+          <p class="text-lg text-muted">
+            Private by construction. No accounts, no telemetry, no cloud server.
+          </p>
+        </div>
+        <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          <!-- Feature 1 -->
+          <div class="card-glow rounded-xl border border-border bg-panel p-6 transition-all">
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
+              <svg class="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              </svg>
+            </div>
+            <h3 class="mb-2 text-lg font-semibold">Bring Your Own Model</h3>
+            <p class="text-sm leading-relaxed text-muted">
+              Works with DeepSeek, OpenAI, OpenRouter, Moonshot, DashScope, or local Ollama / LM Studio. Any OpenAI-compatible endpoint.
+            </p>
+          </div>
+          <!-- Feature 2 -->
+          <div class="card-glow rounded-xl border border-border bg-panel p-6 transition-all">
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
+              <svg class="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+              </svg>
+            </div>
+            <h3 class="mb-2 text-lg font-semibold">You Choose Autonomy Level</h3>
+            <p class="text-sm leading-relaxed text-muted">
+              Four modes from plain chat to full auto. Semi-auto shows every action for your approval first — you stay in control.
+            </p>
+          </div>
+          <!-- Feature 3 -->
+          <div class="card-glow rounded-xl border border-border bg-panel p-6 transition-all">
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
+              <svg class="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+              </svg>
+            </div>
+            <h3 class="mb-2 text-lg font-semibold">Visual Workflow Builder</h3>
+            <p class="text-sm leading-relaxed text-muted">
+              Record yourself doing a task, or assemble it on a canvas from 56 block types — clicking, filling, loops, conditions, AI-agent steps.
+            </p>
+          </div>
+          <!-- Feature 4 -->
+          <div class="card-glow rounded-xl border border-border bg-panel p-6 transition-all">
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
+              <svg class="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h3 class="mb-2 text-lg font-semibold">Scheduled Automation</h3>
+            <p class="text-sm leading-relaxed text-muted">
+              Set recurring tasks — every few minutes, daily, or on weekdays. Run unattended prompts or summarize your GitHub review queue while you sleep.
+            </p>
+          </div>
+          <!-- Feature 5 -->
+          <div class="card-glow rounded-xl border border-border bg-panel p-6 transition-all">
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
+              <svg class="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+              </svg>
+            </div>
+            <h3 class="mb-2 text-lg font-semibold">Skills System</h3>
+            <p class="text-sm leading-relaxed text-muted">
+              Turn repeatable know-how — review checklists, style guides, extraction formats — into one-tap instructions the model must follow.
+            </p>
+          </div>
+          <!-- Feature 6 -->
+          <div class="card-glow rounded-xl border border-border bg-panel p-6 transition-all">
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
+              <svg class="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            </div>
+            <h3 class="mb-2 text-lg font-semibold">Private by Design</h3>
+            <p class="text-sm leading-relaxed text-muted">
+              No accounts, no telemetry, no cloud server. Your keys and data stay on your machine. Passwords are filled locally and never shown to the model.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- How It Works -->
+    <section id="how-it-works" class="border-t border-border bg-panel/30 py-24">
+      <div class="mx-auto max-w-6xl px-6">
+        <div class="mb-16 text-center">
+          <h2 class="mb-4 text-3xl font-bold md:text-4xl">Up and running in minutes</h2>
+          <p class="text-lg text-muted">Three steps. No sign-up required.</p>
+        </div>
+        <div class="grid gap-8 md:grid-cols-3">
+          <!-- Step 1 -->
+          <div class="relative text-center">
+            <div class="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-panel">
+              <span class="text-2xl font-bold text-accent">1</span>
+            </div>
+            <h3 class="mb-3 text-xl font-semibold">Download & Install</h3>
+            <p class="text-sm leading-relaxed text-muted">
+              Grab the latest ZIP from GitHub Releases. Unpack it, open <code class="rounded bg-panel-2 px-1.5 py-0.5 text-xs text-accent">chrome://extensions</code>, enable Developer mode, and click "Load unpacked".
+            </p>
+          </div>
+          <!-- Step 2 -->
+          <div class="relative text-center">
+            <div class="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-panel">
+              <span class="text-2xl font-bold text-accent">2</span>
+            </div>
+            <h3 class="mb-3 text-xl font-semibold">Configure Your Model</h3>
+            <p class="text-sm leading-relaxed text-muted">
+              Open Settings in the side panel. Enter the API endpoint and key for your preferred model provider — DeepSeek, OpenAI, OpenRouter, or a local Ollama instance.
+            </p>
+          </div>
+          <!-- Step 3 -->
+          <div class="relative text-center">
+            <div class="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-panel">
+              <span class="text-2xl font-bold text-accent">3</span>
+            </div>
+            <h3 class="mb-3 text-xl font-semibold">Start Asking</h3>
+            <p class="text-sm leading-relaxed text-muted">
+              Open the side panel on any page and ask in plain language. Browser Copilot reads the page and takes action — or build a workflow to automate entire procedures.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Integrations -->
+    <section id="integrations" class="py-24">
+      <div class="mx-auto max-w-6xl px-6">
+        <div class="mb-16 text-center">
+          <h2 class="mb-4 text-3xl font-bold md:text-4xl">Works with your stack</h2>
+          <p class="text-lg text-muted">
+            Any OpenAI-compatible model, coding agents via MCP, and Feishu/Lark for team collaboration.
+          </p>
+        </div>
+        <div class="grid gap-6 md:grid-cols-3">
+          <!-- Model Providers -->
+          <div class="rounded-xl border border-border bg-panel p-6">
+            <h3 class="mb-4 text-lg font-semibold">Model Providers</h3>
+            <ul class="space-y-3">
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>DeepSeek
+              </li>
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>OpenAI
+              </li>
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>OpenRouter
+              </li>
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>Moonshot / DashScope / SiliconFlow
+              </li>
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>Ollama / LM Studio (local)
+              </li>
+            </ul>
+          </div>
+          <!-- Coding Agents -->
+          <div class="rounded-xl border border-border bg-panel p-6">
+            <h3 class="mb-4 text-lg font-semibold">Coding Agents (MCP)</h3>
+            <p class="mb-4 text-sm text-muted">
+              A standalone MCP server gives your coding agent a real browser toolbox.
+            </p>
+            <ul class="space-y-3">
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-accent"></span>Claude Code
+              </li>
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-accent"></span>OpenAI Codex
+              </li>
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-accent"></span>Trae
+              </li>
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-accent"></span>Any MCP client
+              </li>
+            </ul>
+          </div>
+          <!-- Feishu/Lark -->
+          <div class="rounded-xl border border-border bg-panel p-6">
+            <h3 class="mb-4 text-lg font-semibold">Feishu / Lark</h3>
+            <p class="mb-4 text-sm text-muted">
+              Get notified in a group chat when a task finishes. DM the bot from your phone and watch it execute in the browser on your machine.
+            </p>
+            <ul class="space-y-3">
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>Group chat notifications
+              </li>
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>DM bot commands
+              </li>
+              <li class="flex items-center gap-3 text-sm text-muted">
+                <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>Remote browser execution
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="border-t border-border py-24">
+      <div class="mx-auto max-w-3xl px-6 text-center">
+        <h2 class="mb-4 text-3xl font-bold md:text-4xl">Ready to automate your browser?</h2>
+        <p class="mb-8 text-lg text-muted">
+          Free, open source, and private by design. Download now and start in under two minutes.
+        </p>
+        <div class="flex flex-wrap items-center justify-center gap-4">
+          <a
+            href="https://github.com/dcc123456/browser-copilot/releases"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="rounded-lg bg-accent px-8 py-3.5 text-sm font-semibold text-bg transition-colors hover:bg-accent-strong"
+          >
+            Download v0.6.2
+          </a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot#quick-start"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="rounded-lg border border-border px-8 py-3.5 text-sm font-semibold text-muted transition-colors hover:border-accent hover:text-ink"
+          >
+            Quick Start Guide
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="border-t border-border py-10">
+      <div class="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 md:flex-row">
+        <div class="flex items-center gap-3">
+          <img src="./icons/icon-16.png" alt="" class="h-4 w-4" />
+          <span class="text-sm text-muted">Browser Copilot</span>
+        </div>
+        <div class="flex items-center gap-6">
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-sm text-muted transition-colors hover:text-ink"
+          >
+            GitHub
+          </a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-sm text-muted transition-colors hover:text-ink"
+          >
+            License
+          </a>
+          <span class="text-sm text-faint">PolyForm Noncommercial 1.0</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>
