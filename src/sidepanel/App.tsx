@@ -3,7 +3,8 @@ import { Minimize2 } from 'lucide-react'
 import { effectiveLocale, messagesFor, type Messages } from '../lib/i18n'
 import { sendCommand } from '../lib/messages'
 import { syncToFiles } from '../lib/fs-store'
-import type { Skill } from '../lib/types'
+import type { Agent, Skill } from '../lib/types'
+import AgentsTab from './AgentsTab'
 import ChatTab from './ChatTab'
 import DataTab from './DataTab'
 import HistoryTab from './HistoryTab'
@@ -15,16 +16,17 @@ import WorkflowsTab from './WorkflowsTab'
 import WindowPicker from './WindowPicker'
 import { ConfirmHost } from '../ui/confirm'
 
-type TabId = 'chat' | 'skills' | 'tasks' | 'workflows' | 'history' | 'data' | 'settings'
+type TabId = 'chat' | 'skills' | 'agents' | 'tasks' | 'workflows' | 'history' | 'data' | 'settings'
 
 /** Always shown in the top bar. */
 const PINNED_TABS: TabId[] = ['chat', 'workflows', 'history', 'tasks']
-/** Collected under the fixed "More" dropdown. */
-const MORE_TABS: TabId[] = ['skills', 'data', 'settings']
+/** Collected under the fixed "More" dropdown. Agents sits right after skills. */
+const MORE_TABS: TabId[] = ['skills', 'agents', 'data', 'settings']
 
 const TAB_LABEL: Record<TabId, keyof Messages> = {
   chat: 'tabChat',
   skills: 'tabSkills',
+  agents: 'tabAgents',
   tasks: 'tabTasks',
   workflows: 'tabWorkflows',
   history: 'tabHistory',
@@ -47,6 +49,7 @@ export default function App() {
    */
   const [skills, setSkills] = useState<Skill[]>([])
   const [activeSkillId, setActiveSkillId] = useState<string | null>(null)
+  const [agents, setAgents] = useState<Agent[]>([])
 
   const refreshSkills = useCallback(async () => {
     try {
@@ -54,6 +57,15 @@ export default function App() {
       if (result.type === 'skills.list') setSkills(result.skills ?? [])
     } catch {
       // Non-fatal: the Skills tab shows its own error when the user opens it.
+    }
+  }, [])
+
+  const refreshAgents = useCallback(async () => {
+    try {
+      const result = await sendCommand({ type: 'agents.list' })
+      if (result.type === 'agents.list') setAgents(result.agents ?? [])
+    } catch {
+      // Non-fatal: the Agents tab shows its own error when the user opens it.
     }
   }, [])
 
@@ -67,26 +79,28 @@ export default function App() {
       }
     })()
     void refreshSkills()
+    void refreshAgents()
     // Best-effort push of any browser-mirror writes the service worker made
     // while the file handle was unavailable (e.g. right after a restart, before
     // the panel re-granted access). Idempotent and safe to run on every open.
     void syncToFiles().catch(() => {})
-  }, [refreshSkills])
+  }, [refreshSkills, refreshAgents])
 
   // Skills can change from outside this panel's commands — most visibly the
   // agent's `create_skill` tool inside a chat turn. The worker broadcasts
   // `skills.changed`, and without this listener a freshly created skill would
   // only appear after the panel was closed and reopened: missing from the
   // Skills tab, uneditable there, and absent from the composer's slash menu.
+  // Agents have the same refresh contract (`agents.changed`).
   useEffect(() => {
     const listener = (message: unknown): void => {
-      if ((message as { type?: string } | undefined)?.type === 'skills.changed') {
-        void refreshSkills()
-      }
+      const type = (message as { type?: string } | undefined)?.type
+      if (type === 'skills.changed') void refreshSkills()
+      if (type === 'agents.changed') void refreshAgents()
     }
     chrome.runtime.onMessage.addListener(listener)
     return () => chrome.runtime.onMessage.removeListener(listener)
-  }, [refreshSkills])
+  }, [refreshSkills, refreshAgents])
 
   const locale = effectiveLocale((localeSetting ?? 'auto') as 'auto', navigator.language)
   const i18n = useMemo(() => ({ locale, t: messagesFor(locale) }), [locale])
@@ -253,6 +267,9 @@ export default function App() {
             if (id) setActive('chat')
           }}
         />
+      </div>
+      <div style={{ display: active === 'agents' ? 'contents' : 'none' }}>
+        <AgentsTab agents={agents} skills={skills} onChanged={refreshAgents} />
       </div>
       <div style={{ display: active === 'tasks' ? 'contents' : 'none' }}>
         <TasksTab />
