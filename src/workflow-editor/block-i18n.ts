@@ -68,6 +68,7 @@ export const BLOCK_NAMES_ZH: Record<string, string> = {
   'regex-variable': '正则变量',
   'sort-data': '排序数据',
   'set-variable': '设置变量',
+  'get-secret': '获取凭证',
   'data-mapping': '数据映射',
   'log-data': '日志数据',
   // Conditions / control flow
@@ -152,6 +153,7 @@ export const BLOCK_DESCRIPTIONS_ZH: Record<string, string> = {
   'regex-variable': '用正则表达式匹配或变换变量值',
   'sort-data': '对数据集合排序',
   'set-variable': '把值存入工作流变量，供后续算子读取（支持 {{variables}}）',
+  'get-secret': '运行时从已保存的凭证中获取字段值，存入变量供后续算子使用（凭证值不会写入工作流）',
   'data-mapping': '重排数据表或变量的字段',
   'log-data': '读取工作流最近的日志数据',
   // Conditions / control flow

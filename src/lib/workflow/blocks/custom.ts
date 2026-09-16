@@ -121,6 +121,31 @@ export const CUSTOM_BLOCKS: BlockCatalogEntry[] = [
     },
     cloud: false,
   },
+  {
+    id: 'get-secret',
+    name: 'Get secret',
+    description:
+      'Fetch a stored credential field at runtime and store its value in a variable. The secret value is never embedded in the workflow — it is resolved fresh each run.',
+    icon: 'lucide:KeyRound',
+    category: 'data',
+    component: 'Default',
+    editComponent: 'EditGetSecret',
+    inputs: 1,
+    outputs: 1,
+    allowedInputs: true,
+    maxConnection: 1,
+    data: {
+      disableBlock: false,
+      description: '',
+      // Credential bundle id (from list_secrets).
+      secretId: '',
+      // Field key within the credential (e.g. 'password', 'username').
+      fieldName: 'password',
+      // Variable the resolved value is stored under.
+      variableName: 'lastSecret',
+    },
+    cloud: false,
+  },
 ]
 
 /** Ids of every local extension block. */

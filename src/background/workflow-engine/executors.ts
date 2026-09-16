@@ -775,6 +775,53 @@ const setVariable: BlockExecutor = async (data, ctx) => {
   return null
 }
 
+/**
+ * `get-secret` block: fetch a stored credential field at runtime and store its
+ * value in a variable. The secret value is never embedded in the workflow — it
+ * is resolved fresh each run, so credential updates are picked up automatically.
+ */
+const getSecret: BlockExecutor = async (data, ctx) => {
+  assertActive(ctx)
+  const secretId = String(data['secretId'] ?? '')
+  const fieldName = String(data['fieldName'] ?? 'password')
+  const variableName = String(data['variableName'] ?? 'lastSecret')
+
+  if (!secretId) {
+    ctx.emit('error', 'get-secret: 未指定凭证 ID')
+    return null
+  }
+
+  // Import here to avoid circular dependency issues at module load time.
+  const { listPasswords } = await import('../../lib/storage')
+  const { entryFields } = await import('../../lib/types')
+
+  let value = ''
+  try {
+    const entries = await listPasswords()
+    const entry = entries.find((e) => e.id === secretId)
+    if (entry) {
+      const fields = entryFields(entry)
+      const field = fields.find((f) => f.key === fieldName)
+      if (field) {
+        value = field.value
+      } else {
+        ctx.emit('error', `get-secret: 凭证中未找到字段 "${fieldName}"`)
+      }
+    } else {
+      ctx.emit('error', `get-secret: 未找到 ID 为 "${secretId}" 的凭证`)
+    }
+  } catch (err) {
+    ctx.emit('error', `get-secret: 读取凭证失败 — ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  ctx.variables[variableName] = value
+  // Log success without revealing the value.
+  if (value) {
+    ctx.emit('result', `已获取凭证字段 "${fieldName}" → 变量 ${variableName} (值已隐藏)`)
+  }
+  return null
+}
+
 const getVariable: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const value = ctx.variables[String(data['variableName'] ?? '')]
@@ -2014,6 +2061,7 @@ export const EXECUTORS: Record<string, BlockExecutor> = {
   // data
   'set-variable': setVariable,
   'get-variable': getVariable,
+  'get-secret': getSecret,
   'insert-data': insertData,
   'export-data': exportData,
   'increase-variable': increaseVariable,

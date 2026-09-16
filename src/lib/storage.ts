@@ -38,7 +38,7 @@ import type {
   Skill,
   UserProfile,
 } from './types'
-import { DEFAULT_LOCAL_AGENT_URL, normalizeLocalAgentUrl } from './types'
+import { DEFAULT_LOCAL_AGENT_URL, normalizeLocalAgentUrl, entryFields } from './types'
 import type { Workflow, WorkflowEdge, WorkflowNode, WorkflowSettings } from './workflow/types'
 
 /**
@@ -1040,6 +1040,12 @@ const ACTION_TO_BLOCK: Record<string, string> = {
   // as the local `ocr` block: at run time it re-captures the image from the
   // page and reads it offline with Tesseract.js.
   recognize_image: 'ocr',
+  // A credential fill (get_secret) writes a stored secret value into a form
+  // field without the model ever seeing the value. At workflow-generation time
+  // we emit a `get-secret` block (which resolves the credential at RUNTIME)
+  // followed by a `forms` block that references the variable — the secret
+  // value is never embedded in the workflow.
+  get_secret: 'get-secret',
 }
 
 /** The wait-page-load block inserted after navigation steps. */
@@ -1704,6 +1710,25 @@ function blockDataFromArgs(
         },
         selector ? target : undefined,
       )
+    case 'get_secret': {
+      // The agent filled a form field directly from a stored credential; the
+      // model never saw the value. We emit a `get-secret` block that resolves
+      // the credential at RUNTIME and stores the value in a variable — the
+      // secret value is never embedded in the workflow. The companion forms
+      // block (added by the caller) references this variable.
+      const secretId = typeof args?.id === 'string' ? args.id : ''
+      const fieldName = typeof args?.field === 'string' ? args.field : 'password'
+      // Generate a unique variable name for this secret reference.
+      const varName = `secret_${secretId || 'unknown'}_${fieldName}`
+      return {
+        description: `获取凭证字段: ${fieldName}`,
+        secretId,
+        fieldName,
+        variableName: varName,
+        // Pass through the variable name so the caller can wire up the forms block.
+        _secretVar: varName,
+      }
+    }
     default:
       return {}
   }
@@ -1797,7 +1822,46 @@ function nodeDescription(step: HistoryStep, selector: string): string {
  * an `ocr` node, so image recognition always shows up as the OCR operator.
  * Returns `null` when nothing could be mapped.
  */
-export function workflowFromHistory(entries: HistoryEntry[], name: string): Workflow | null {
+/**
+ * Resolves the current values of all secrets referenced by `get_secret` steps
+ * in the history. Returns a Map keyed by "secretId:fieldName" → value.
+ */
+export async function resolveSecretValuesForHistory(
+  entries: HistoryEntry[],
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>()
+  const secretIds = new Set<string>()
+  for (const entry of entries) {
+    if (entry.action !== 'get_secret') continue
+    const id = typeof entry.args?.id === 'string' ? entry.args.id : ''
+    if (id) secretIds.add(id)
+  }
+  if (secretIds.size === 0) return result
+
+  try {
+    const allEntries = await listPasswords()
+    for (const secretId of secretIds) {
+      const entry = allEntries.find((e) => e.id === secretId)
+      if (!entry) continue
+      // Resolve both 'password' (default) and any explicitly named field.
+      const fields = entryFields(entry)
+      for (const field of fields) {
+        result.set(`${secretId}:${field.key}`, field.value)
+      }
+    }
+  } catch {
+    /* non-fatal: callers get empty strings */
+  }
+  return result
+}
+
+export function workflowFromHistory(
+  entries: HistoryEntry[],
+  name: string,
+  // Kept for backward compatibility; secret values are now resolved at runtime
+  // via the `get-secret` block instead of being embedded in the workflow.
+  _secretValues?: Map<string, string>,
+): Workflow | null {
   const steps: HistoryStep[] = []
   for (const entry of entries) {
     // A `screenshot` whose prompt asks for text extraction (reading a captcha,
@@ -1874,6 +1938,7 @@ export function workflowFromHistory(entries: HistoryEntry[], name: string): Work
     // logic must see it (nodeDescription keeps the summary only when there is
     // no selector to show).
     const selector = selectorFromArgs(step.args) || jsFillSelector(step)
+    const target = richTargetFromArgs(step.args)
     let description = nodeDescription(step, selector)
 
     // OCR hand-off FIRST: a short-token fill shortly after a recognition step
@@ -1944,10 +2009,31 @@ export function workflowFromHistory(entries: HistoryEntry[], name: string): Work
       description =
         jsScriptComment(code) || describeJsScript(code) || jsFirstStatement(code) || description
     }
+    const blockData = blockDataFromArgs(step.action, step.args, aiVar, ocrVar)
+    // Strip internal markers from the block data before adding to the node.
+    const { _secretVar, ...cleanBlockData } = blockData as Record<string, unknown> & {
+      _secretVar?: string
+    }
     addNode(blockId, {
       description,
-      ...blockDataFromArgs(step.action, step.args, aiVar, ocrVar),
+      ...cleanBlockData,
     })
+
+    // A `get_secret` step emits a `get-secret` block (above) that resolves the
+    // credential at RUNTIME and stores the value in a variable. We must also
+    // emit a companion `forms` block that fills the target field with this
+    // variable — the secret value is never embedded in the workflow.
+    if (step.action === 'get_secret' && typeof _secretVar === 'string') {
+      addNode('forms', {
+        description,
+        selector,
+        findBy: 'cssSelector',
+        type: 'text-field',
+        value: `{{${_secretVar}}}`,
+        clearValue: true,
+        ...(target ? { target } : {}),
+      })
+    }
 
     // A recognition with NEITHER an image nor a selector OCR'd the WHOLE
     // visible page — in the conversation the model then picked the wanted
