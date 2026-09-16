@@ -137,12 +137,15 @@ export const CUSTOM_BLOCKS: BlockCatalogEntry[] = [
     data: {
       disableBlock: false,
       description: '',
-      // Credential bundle id (from list_secrets).
-      secretId: '',
-      // Field key within the credential (e.g. 'password', 'username').
-      fieldName: 'password',
-      // Variable the resolved value is stored under.
-      variableName: 'lastSecret',
+      // "<secretId>::<fieldKey>" reference into the user's configured secrets.
+      // The form picks this via a dropdown of (credential · field) pairs; the
+      // executor parses the same encoding back into the two halves. NO default:
+      // a workflow the model auto-generated without a real `id` would otherwise
+      // produce a node that fails at runtime AND keeps downstream `{{...}}`
+      // tokens interpolating to literal text. The user must explicitly pick a
+      // credential and name the output variable.
+      credential: '',
+      variableName: '',
     },
     cloud: false,
   },

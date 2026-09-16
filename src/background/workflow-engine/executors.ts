@@ -15,7 +15,8 @@
 
 import { isInjectablePage } from '../../lib/pages'
 import { streamCompletion, type WireMessage } from '../../lib/llm'
-import { getSettings } from '../../lib/storage'
+import { getSettings, listPasswords } from '../../lib/storage'
+import { entryFields, findField } from '../../lib/types'
 import { OCR_SUPPORTED } from '../../lib/ocr-support'
 import { interpolate } from '../../lib/workflow/interpolate'
 import { sanitizeModelAnswer } from '../../lib/model-output'
@@ -779,29 +780,48 @@ const setVariable: BlockExecutor = async (data, ctx) => {
  * `get-secret` block: fetch a stored credential field at runtime and store its
  * value in a variable. The secret value is never embedded in the workflow — it
  * is resolved fresh each run, so credential updates are picked up automatically.
+ *
+ * Both fields are REQUIRED — no silent defaults. A workflow auto-generated from
+ * incomplete history (no `id`, no field) MUST surface that here instead of
+ * falling back to `lastSecret`, otherwise downstream `{{lastSecret}}` literals
+ * end up in form inputs.
  */
 const getSecret: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const secretId = String(data['secretId'] ?? '')
-  const fieldName = String(data['fieldName'] ?? 'password')
-  const variableName = String(data['variableName'] ?? 'lastSecret')
+  const variableName = String(data['variableName'] ?? '').trim()
+
+  // The form encodes the user's pick as "<secretId>::<fieldKey>". A workflow
+  // generated before the dropdown refactor may still carry separate
+  // `secretId` + `fieldName` fields; fall back to that shape so older saved
+  // workflows keep running.
+  let credential = String(data['credential'] ?? '')
+  if (!credential) {
+    const legacyId = String(data['secretId'] ?? '')
+    const legacyField = String(data['fieldName'] ?? '')
+    if (legacyId) credential = legacyField ? `${legacyId}::${legacyField}` : legacyId
+  }
+  const sepIdx = credential.indexOf('::')
+  const secretId = sepIdx >= 0 ? credential.slice(0, sepIdx) : credential
+  const fieldName = sepIdx >= 0 ? credential.slice(sepIdx + 2) : ''
 
   if (!secretId) {
     ctx.emit('error', 'get-secret: 未指定凭证 ID')
     return null
   }
-
-  // Import here to avoid circular dependency issues at module load time.
-  const { listPasswords } = await import('../../lib/storage')
-  const { entryFields } = await import('../../lib/types')
+  if (!variableName) {
+    ctx.emit('error', 'get-secret: 未指定输出变量名')
+    return null
+  }
 
   let value = ''
   try {
     const entries = await listPasswords()
     const entry = entries.find((e) => e.id === secretId)
     if (entry) {
-      const fields = entryFields(entry)
-      const field = fields.find((f) => f.key === fieldName)
+      const field =
+        (fieldName && findField(entry, fieldName)) ??
+        findField(entry, 'password') ??
+        entryFields(entry)[0]
       if (field) {
         value = field.value
       } else {
@@ -817,7 +837,7 @@ const getSecret: BlockExecutor = async (data, ctx) => {
   ctx.variables[variableName] = value
   // Log success without revealing the value.
   if (value) {
-    ctx.emit('result', `已获取凭证字段 "${fieldName}" → 变量 ${variableName} (值已隐藏)`)
+    ctx.emit('result', `已获取凭证字段 "${fieldName || 'password'}" → 变量 ${variableName} (值已隐藏)`)
   }
   return null
 }

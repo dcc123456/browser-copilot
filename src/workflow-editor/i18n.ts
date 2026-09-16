@@ -79,6 +79,9 @@ export const EDITOR_STRINGS = {
     noteEdit: 'Edit note',
     workflowName: 'Workflow name',
     unsavedChanges: 'Unsaved changes',
+    unsavedChangesClosePrompt:
+      'You have unsaved changes. Save before closing?',
+    dontSave: "Don't save",
     selectBlockHint:
       'Select a block on the canvas to edit it.\nWorkflow name, trigger and run settings live on the Trigger block.',
     autoScroll: 'Auto-scroll',
@@ -182,6 +185,8 @@ export const EDITOR_STRINGS = {
     noteEdit: '编辑备注',
     workflowName: '工作流名称',
     unsavedChanges: '有未保存的更改',
+    unsavedChangesClosePrompt: '你有未保存的更改。是否在关闭前保存？',
+    dontSave: '不保存',
     selectBlockHint:
       '在画布上选择一个算子即可编辑。\n工作流名称、触发器和运行设置都在「触发器」算子中。',
     autoScroll: '自动滚动',
@@ -269,6 +274,12 @@ const BLOCK_FORM_STRINGS = {
     Variable: '变量',
     'Variable name': '变量名',
     'Output variable name': '输出变量名',
+    // — get-secret form —
+    Credential: '凭证',
+    'Loading credentials…': '正在加载凭证…',
+    'No credentials configured yet. Add one in Settings → Secrets.': '尚未配置凭证。请前往 设置 → 密钥 中添加。',
+    'The secret value is fetched at runtime and never stored in the workflow. Downstream blocks can reference it via {{variable name}}.': '凭证值在运行时获取，绝不会保存到工作流中。下游算子可通过 {{variable name}} 引用。',
+    'Variable the secret value is stored under': '存储该凭证值的变量名',
     Type: '类型',
     Action: '操作',
     Event: '事件',

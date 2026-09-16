@@ -1716,16 +1716,22 @@ function blockDataFromArgs(
       // the credential at RUNTIME and stores the value in a variable — the
       // secret value is never embedded in the workflow. The companion forms
       // block (added by the caller) references this variable.
+      //
+      // Recording is sometimes incomplete (e.g. model called get_secret but the
+      // recorded args lack `id`). In that case we still emit the get-secret
+      // block (with empty fields — the executor will refuse to run) but DO NOT
+      // emit a companion forms block; otherwise a literal `{{...}}` would land
+      // in the page input. The user has to wire both up by hand in the editor.
       const secretId = typeof args?.id === 'string' ? args.id : ''
-      const fieldName = typeof args?.field === 'string' ? args.field : 'password'
-      // Generate a unique variable name for this secret reference.
-      const varName = `secret_${secretId || 'unknown'}_${fieldName}`
+      const fieldName = typeof args?.field === 'string' ? args.field : ''
+      const credential = secretId && fieldName ? `${secretId}::${fieldName}` : ''
+      const varName = secretId && fieldName ? `secret_${secretId}_${fieldName}` : ''
       return {
-        description: `获取凭证字段: ${fieldName}`,
-        secretId,
-        fieldName,
+        description: fieldName ? `获取凭证字段: ${fieldName}` : '获取凭证字段',
+        credential,
         variableName: varName,
-        // Pass through the variable name so the caller can wire up the forms block.
+        // Empty when the recording is incomplete: the caller skips the
+        // companion forms block when this is falsy.
         _secretVar: varName,
       }
     }
@@ -2014,8 +2020,13 @@ export function workflowFromHistory(
     const { _secretVar, ...cleanBlockData } = blockData as Record<string, unknown> & {
       _secretVar?: string
     }
+    // `blockDataFromArgs` may supply a richer description for the block; prefer
+    // it when the local `description` (from args.label / step.summary) is empty.
+    const nodeDescriptionFinal =
+      (typeof cleanBlockData.description === 'string' && cleanBlockData.description) ||
+      description
     addNode(blockId, {
-      description,
+      description: nodeDescriptionFinal,
       ...cleanBlockData,
     })
 
@@ -2023,9 +2034,13 @@ export function workflowFromHistory(
     // credential at RUNTIME and stores the value in a variable. We must also
     // emit a companion `forms` block that fills the target field with this
     // variable — the secret value is never embedded in the workflow.
-    if (step.action === 'get_secret' && typeof _secretVar === 'string') {
+    //
+    // Skip the companion block when the recorded history was incomplete (no id
+    // or field). Emitting it would produce a Forms node that references a never-
+    // written variable, and the page would receive a literal `{{}}` token.
+    if (step.action === 'get_secret' && typeof _secretVar === 'string' && _secretVar) {
       addNode('forms', {
-        description,
+        description: nodeDescriptionFinal,
         selector,
         findBy: 'cssSelector',
         type: 'text-field',
