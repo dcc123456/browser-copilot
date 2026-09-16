@@ -4,5 +4,6 @@
 
 1. **提交信息必须使用英文**（Conventional Commits：`<type>(<scope>): <subject>`）。
 2. **代码样式必须使用 Tailwind CSS**（v4，语义 token 见 `src/ui/design-system.css`，禁止内联静态样式与硬编码颜色）。
+3. **文案提示** 所有的文案和提示都必须使用多语言，必须支持中文和英文。
 
 收尾自检：`pnpm typecheck`、`pnpm test`；涉及 UI / manifest / 构建配置时加跑 `pnpm build`。
