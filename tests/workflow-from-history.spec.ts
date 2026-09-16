@@ -160,6 +160,80 @@ describe('args fall through to flat block data', () => {
       { blockId: 'wait-connections', description: '等待页面加载', timeout: 10000 },
     ])
   })
+
+  it('get_secret with full args emits the get-secret block plus a companion forms block', () => {
+    const wf = workflowFromHistory(
+      [
+        entry('get_secret', {
+          id: 'secret-1',
+          field: 'api-key',
+          target: { primary: { how: 'css', value: 'input[name=api_key]' } },
+        }),
+      ],
+      'wf',
+    )
+    expect(wf?.drawflow.nodes).toHaveLength(3) // trigger + get-secret + forms
+    const [trigger, secret, forms] = wf!.drawflow.nodes
+    expect(trigger!.data.blockId).toBe('trigger')
+    expect(secret!.data).toEqual({
+      blockId: 'get-secret',
+      description: '获取凭证字段: api-key',
+      credential: 'secret-1::api-key',
+      variableName: 'secret_secret-1_api-key',
+    })
+    expect(forms!.data).toEqual({
+      blockId: 'forms',
+      description: '获取凭证字段: api-key',
+      selector: 'input[name=api_key]',
+      findBy: 'cssSelector',
+      type: 'text-field',
+      value: '{{secret_secret-1_api-key}}',
+      clearValue: true,
+      target: { primary: { how: 'css', value: 'input[name=api_key]' } },
+    })
+  })
+
+  it('get_secret with no recorded id emits only the get-secret block (no dangling {{...}} form fill)', () => {
+    const wf = workflowFromHistory(
+      [
+        entry('get_secret', {
+          // No `id` — the model never resolved which credential to use.
+          target: { primary: { how: 'css', value: 'input[name=api_key]' } },
+        }),
+      ],
+      'wf',
+    )
+    // Trigger + get-secret only. No companion forms block — emitting one would
+    // land a literal `{{}}` in the page input.
+    expect(wf?.drawflow.nodes).toHaveLength(2)
+    const [, secret] = wf!.drawflow.nodes
+    expect(secret!.data).toEqual({
+      blockId: 'get-secret',
+      description: '获取凭证字段',
+      credential: '',
+      variableName: '',
+    })
+  })
+
+  it('get_secret with no recorded field emits only the get-secret block', () => {
+    const wf = workflowFromHistory(
+      [
+        entry('get_secret', {
+          id: 'secret-1',
+          target: { primary: { how: 'css', value: 'input[name=api_key]' } },
+        }),
+      ],
+      'wf',
+    )
+    expect(wf?.drawflow.nodes).toHaveLength(2)
+    const [, secret] = wf!.drawflow.nodes
+    expect(secret!.data).toEqual({
+      blockId: 'get-secret',
+      description: '获取凭证字段',
+      credential: '',
+      variableName: '',
+    })
+  })
 })
 
 describe('trigger node', () => {
