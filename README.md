@@ -55,6 +55,9 @@ agent you connected over [MCP](#agent-integration-mcp).
 <img width="2496" height="1518" alt="image" src="https://github.com/user-attachments/assets/d3541ef0-c310-4016-ae21-fc7e38278adf" />
 <img width="2496" height="1518" alt="image" src="https://github.com/user-attachments/assets/57aec05d-b66c-4c24-b50c-6403f0661add" />
 <img width="2496" height="1518" alt="image" src="https://github.com/user-attachments/assets/3b449200-5f6c-4b3d-a171-28e0a729b26d" />
+<img width="2497" height="2088" alt="image" src="https://github.com/user-attachments/assets/c116a923-0519-4621-a7bf-ebc5e1e3dcc4" />
+<img width="2497" height="2088" alt="image" src="https://github.com/user-attachments/assets/9de97b1d-aa3e-407b-9f27-c3f44ea3ae91" />
+
 
 
 
