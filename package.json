@@ -29,10 +29,10 @@
     "browser-copilot"
   ],
   "scripts": {
-    "dev": "node scripts/vite.mjs",
-    "build": "node scripts/vite.mjs build",
-    "build:no-ocr": "node scripts/vite.mjs build --mode no-ocr",
-    "package": "node scripts/vite.mjs build && node scripts/build-zip.mjs ocr && node scripts/vite.mjs build --mode no-ocr && node scripts/build-zip.mjs no-ocr",
+    "dev": "vite",
+    "build": "vite build",
+    "build:no-ocr": "vite build --mode no-ocr",
+    "package": "vite build && node scripts/build-zip.mjs ocr && vite build --mode no-ocr && node scripts/build-zip.mjs no-ocr",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.tests.json",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
