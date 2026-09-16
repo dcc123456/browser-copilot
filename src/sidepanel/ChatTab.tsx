@@ -29,6 +29,7 @@ import {
   aiPrefillSteps,
   DEFAULT_CONVERSATION_ID,
   newId,
+  resolveSecretValuesForHistory,
   workflowFromHistory,
   type AiPrefillStep,
 } from '../lib/storage'
@@ -1134,7 +1135,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       .sort((a, b) => a.at - b.at)
     const meta = conversationsRef.current.find((c) => c.id === convId)
     const name = (meta?.title ?? '').trim() || `session-${convId.slice(0, 6)}`
-    const workflow = workflowFromHistory(session, name)
+    const secretValues = await resolveSecretValuesForHistory(session)
+    const workflow = workflowFromHistory(session, name, secretValues)
     if (!workflow) return
     const aiSteps = aiPrefillSteps(workflow)
     const aiSelections = Object.fromEntries(aiSteps.map((s) => [s.nodeId, true]))

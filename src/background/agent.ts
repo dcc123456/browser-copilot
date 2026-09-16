@@ -40,7 +40,9 @@ import {
   renderSupervisorGuide,
 } from '../lib/agents'
 import { renderSkillCatalogue, renderSkillPrompt, validateSkill } from '../lib/skills'
-import { BUILT_IN_SUPERVISOR_ID } from '../lib/builtin-agents'
+import { BUILT_IN_SUPERVISOR_ID, getBuiltinI18nKeys } from '../lib/builtin-agents'
+import type { Messages } from '../lib/i18n'
+import { effectiveLocale, messagesFor } from '../lib/i18n'
 import { runDelegateTool, type DelegationRuntime } from './orchestrator'
 import {
   addHistory,
@@ -171,6 +173,12 @@ export function buildSystemPrompt(options: {
    * and linked skills replace the skill catalogue.
    */
   subAgent?: { agent: Agent; skills: readonly Skill[] } | undefined
+  /**
+   * Resolved i18n dictionary for the user's locale. When provided, built-in
+   * agent instructions and specialist catalogue hints are rendered in the
+   * user's language instead of the stored English defaults.
+   */
+  messages?: Messages | undefined
 }): string {
   // Chat mode is pure conversation: no operating rules, no skill catalogue, no
   // mode instructions. Just a short identity line so the model stays in role.
@@ -188,7 +196,9 @@ export function buildSystemPrompt(options: {
   // A delegated specialist gets its identity block, then the mode rules; it
   // never sees the interactive skill catalogue or the supervisor section.
   if (options.subAgent) {
-    parts.push(renderSubAgentSection(options.subAgent.agent, options.subAgent.skills))
+    parts.push(
+      renderSubAgentSection(options.subAgent.agent, options.subAgent.skills, options.messages),
+    )
   } else {
     // The skill catalogue only matters when no skill is pinned: an active
     // skill's full instructions are injected below instead.
@@ -202,7 +212,12 @@ export function buildSystemPrompt(options: {
     // turn; it goes BEFORE the mode paragraph and the active skill.
     if (options.supervisor) {
       const { agent, catalogue } = options.supervisor
-      parts.push(`## ACTING AS SUPERVISOR AGENT — ${agent.name}\n\n${agent.instructions}`)
+      const keys = getBuiltinI18nKeys(agent.id)
+      const instructions =
+        options.messages && keys.instructions
+          ? (options.messages[keys.instructions] as string)
+          : agent.instructions
+      parts.push(`## ACTING AS SUPERVISOR AGENT — ${agent.name}\n\n${instructions}`)
       parts.push(renderSupervisorGuide())
       if (catalogue) parts.push(catalogue)
     }
@@ -2727,7 +2742,7 @@ export async function runAgentTurn(
   // These reads are independent and all hit local storage / the settings cache,
   // but running them in parallel shaves the serial round trips off the
   // time-to-first-token — most noticeable for short chat-mode turns.
-  const [preferredProvider, skillList, initialMode, toolConfig, maxToolRounds, agentList] =
+  const [preferredProvider, skillList, initialMode, toolConfig, maxToolRounds, agentList, settings] =
     await Promise.all([
       deps.getProvider ? deps.getProvider().catch(() => undefined) : Promise.resolve(undefined),
       listSkills(),
@@ -2737,11 +2752,13 @@ export async function runAgentTurn(
       // Unattended runs (no enableDelegation) never read the agent store, so
       // scheduled/Feishu prompts cannot fan out into sub-agents.
       deps.enableDelegation ? listAgents() : Promise.resolve([] as Agent[]),
+      getSettings(),
     ])
   const provider = preferredProvider ?? (await getActiveProvider())
   const activeSkill = deps.skillId ? await getSkill(deps.skillId) : undefined
   const catalogue = activeSkill ? [] : skillList
   const disabled = new Set(toolConfig.disabledTools)
+  const messages: Messages = messagesFor(effectiveLocale(settings.locale, navigator.language))
 
   // --- Specialist sub-agent turn -------------------------------------------
   // A delegated run gets the agent's identity prompt + linked skills, a
@@ -2769,6 +2786,7 @@ export async function runAgentTurn(
     systemPrompt = buildSystemPrompt({
       mode: initialMode,
       subAgent: { agent, skills: skillList },
+      messages,
     })
   } else {
     // --- Supervisor turn ----------------------------------------------------
@@ -2778,7 +2796,7 @@ export async function runAgentTurn(
     let supervisorBlock: { agent: Agent; catalogue: string } | undefined
     if (deps.enableDelegation && initialMode !== 'chat') {
       const specialists = agentList.filter((entry) => entry.role === 'specialist')
-      const specialistCatalogue = renderAgentCatalogue(specialists)
+      const specialistCatalogue = renderAgentCatalogue(specialists, messages)
       const supervisor =
         agentList.find(
           (entry) => entry.id === BUILT_IN_SUPERVISOR_ID && entry.delegatable,
@@ -2794,6 +2812,7 @@ export async function runAgentTurn(
       catalogue,
       mode: initialMode,
       basePrompt: toolConfig.basePrompt,
+      messages,
       ...(supervisorBlock ? { supervisor: supervisorBlock } : {}),
     })
   }

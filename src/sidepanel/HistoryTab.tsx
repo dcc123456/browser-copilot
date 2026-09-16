@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Check, Workflow as WorkflowIcon, X } from 'lucide-react'
 import { onReviewLog, sendCommand } from '../lib/messages'
-import { workflowFromHistory } from '../lib/storage'
+import { resolveSecretValuesForHistory, workflowFromHistory } from '../lib/storage'
 import { saveWorkflow } from '../lib/workflow/storage'
 import {
   applyNodeKeepSelection,
@@ -908,7 +908,12 @@ function OperationsSection({ t, flash }: SectionProps) {
 
   const rebuild = useCallback(
     async (groupTitle: string, groupEntries: HistoryEntry[]): Promise<void> => {
-      const workflow = workflowFromHistory([...groupEntries].reverse(), `从历史: ${groupTitle}`)
+      const secretValues = await resolveSecretValuesForHistory(groupEntries)
+      const workflow = workflowFromHistory(
+        [...groupEntries].reverse(),
+        `从历史: ${groupTitle}`,
+        secretValues,
+      )
       if (!workflow) {
         flash('error', t.dataHistoryToWorkflowEmpty)
         return

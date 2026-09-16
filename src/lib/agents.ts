@@ -15,6 +15,8 @@
 import { MAX_INSTRUCTIONS_LENGTH, MAX_NAME_LENGTH, renderSkillPrompt } from './skills'
 import { TOOL_META_BY_NAME } from './tool-catalog'
 import type { Agent, AgentDomain, Skill } from './types'
+import type { Messages } from './i18n'
+import { getBuiltinI18nKeys } from './builtin-agents'
 
 /** A validation failure tied to the field that caused it. */
 export interface AgentProblem {
@@ -128,13 +130,29 @@ export function normalizeAgent(agent: Agent): Agent {
  * not need a specialist's full prompt until it actually delegates. Agents
  * without a hint are omitted: the model would have nothing to match on.
  */
-export function renderAgentCatalogue(agents: readonly Agent[]): string {
-  const usable = agents.filter(
-    (agent) => agent.role === 'specialist' && agent.delegationHint.trim() !== '',
-  )
+export function renderAgentCatalogue(agents: readonly Agent[], messages?: Messages): string {
+  const usable = agents.filter((agent) => {
+    if (agent.role !== 'specialist') return false
+    // A built-in agent whose hint key resolves to an empty string is
+    // intentionally hidden from the catalogue (the supervisor has no brief
+    // to match on); user agents with empty hints are likewise omitted.
+    const keys = getBuiltinI18nKeys(agent.id)
+    const hint =
+      messages && keys.hint
+        ? (messages[keys.hint] as string)
+        : agent.delegationHint.trim()
+    return hint !== ''
+  })
   if (usable.length === 0) return ''
 
-  const lines = usable.map((agent) => `- ${agent.name}: ${agent.delegationHint.trim()}`)
+  const lines = usable.map((agent) => {
+    const keys = getBuiltinI18nKeys(agent.id)
+    const hint =
+      messages && keys.hint
+        ? (messages[keys.hint] as string).trim()
+        : agent.delegationHint.trim()
+    return `- ${agent.name}: ${hint}`
+  })
   return [
     '## Specialist agents you can delegate to',
     '',
@@ -217,7 +235,14 @@ export function renderDelegationPrompt(
  * agent's own instructions and referenced skill prompts are appended — the
  * same "active skill last-ish" ordering the main loop uses.
  */
-export function renderSubAgentSection(agent: Agent, skills: readonly Skill[]): string {
+export function renderSubAgentSection(
+  agent: Agent,
+  skills: readonly Skill[],
+  messages?: Messages,
+): string {
+  const keys = getBuiltinI18nKeys(agent.id)
+  const instructions =
+    messages && keys.instructions ? (messages[keys.instructions] as string) : agent.instructions
   const parts = [
     `## ACTING AS SPECIALIST AGENT — ${agent.name}`,
     '',
@@ -225,7 +250,7 @@ export function renderSubAgentSection(agent: Agent, skills: readonly Skill[]): s
     'apply your instructions to it directly.',
     '',
     '---',
-    agent.instructions,
+    instructions,
     '---',
   ]
   for (const skillName of agent.skillNames) {

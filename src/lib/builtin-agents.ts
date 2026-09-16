@@ -11,8 +11,62 @@
  * @module lib/builtin-agents
  */
 import type { Agent } from './types'
+import type { Messages } from './i18n'
 
 export const BUILT_IN_SUPERVISOR_ID = 'builtin-agent-supervisor'
+
+/**
+ * Maps a built-in agent id to the i18n keys that supply its display name,
+ * delegation hint, and instructions. Returns empty for non-built-in agents.
+ * UI and system-prompt code uses this to override stored English defaults
+ * with locale-appropriate text from the dictionary.
+ */
+export function getBuiltinI18nKeys(agentId: string): {
+  displayName?: keyof Messages
+  hint?: keyof Messages
+  instructions?: keyof Messages
+} {
+  switch (agentId) {
+    case BUILT_IN_SUPERVISOR_ID:
+      return {
+        displayName: 'builtinAgentSupervisorDisplayName',
+        hint: 'builtinAgentSupervisorHint',
+        instructions: 'builtinAgentSupervisorInstructions',
+      }
+    case 'builtin-agent-search-expert':
+      return {
+        displayName: 'builtinAgentSearchExpertDisplayName',
+        hint: 'builtinAgentSearchExpertHint',
+        instructions: 'builtinAgentSearchExpertInstructions',
+      }
+    case 'builtin-agent-copywriter':
+      return {
+        displayName: 'builtinAgentCopywriterDisplayName',
+        hint: 'builtinAgentCopywriterHint',
+        instructions: 'builtinAgentCopywriterInstructions',
+      }
+    case 'builtin-agent-ops-expert':
+      return {
+        displayName: 'builtinAgentOpsExpertDisplayName',
+        hint: 'builtinAgentOpsExpertHint',
+        instructions: 'builtinAgentOpsExpertInstructions',
+      }
+    case 'builtin-agent-workflow-expert':
+      return {
+        displayName: 'builtinAgentWorkflowExpertDisplayName',
+        hint: 'builtinAgentWorkflowExpertHint',
+        instructions: 'builtinAgentWorkflowExpertInstructions',
+      }
+    case 'builtin-agent-analyst':
+      return {
+        displayName: 'builtinAgentAnalystDisplayName',
+        hint: 'builtinAgentAnalystHint',
+        instructions: 'builtinAgentAnalystInstructions',
+      }
+    default:
+      return {}
+  }
+}
 
 export const BUILT_IN_AGENTS: readonly Agent[] = [
   {

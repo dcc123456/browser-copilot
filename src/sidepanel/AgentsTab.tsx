@@ -20,6 +20,7 @@ import {
   type AgentImportProblem,
 } from '../lib/agents-import'
 import { downloadBlob } from '../lib/export-answer'
+import { getBuiltinI18nKeys } from '../lib/builtin-agents'
 import { useT } from './i18n'
 import AgentEditDialog, { type AgentFormValues } from './AgentEditDialog'
 
@@ -352,36 +353,53 @@ export default function AgentsTab({ agents, skills, onChanged }: Props) {
 
       {agents.length === 0 && <div className="empty">{t.agentsEmpty}</div>}
 
-      {agents.map((agent) => (
-        <div className="card" key={agent.id}>
-          <div className="card-title">
-            {agent.name}
-            {agent.builtIn && <span className="pill">{t.agentsBuiltinBadge}</span>}
-            <span className="ml-1 rounded bg-accent-soft px-1.5 py-0.5 text-[11px] text-accent">
-              {agent.role === 'supervisor'
-                ? t.agentsDelegatablePill
-                : domainLabel[agent.domain]}
-            </span>
-            <span className="pill">{t.agentsToolsCount({ count: agent.tools.length })}</span>
-            {agent.role === 'specialist' && <span className="pill">{t.agentsSpecialistPill}</span>}
-          </div>
-          {agent.delegationHint && <p className="hint">{agent.delegationHint}</p>}
-          <div className="actions">
-            <button onClick={() => setDraft(toDraft(agent))} type="button">
-              {t.edit}
-            </button>
-            {agent.builtIn ? (
-              <button onClick={() => void resetBuiltIn(agent)} type="button">
-                {t.agentsReset}
+      {agents.map((agent) => {
+        // Untouched built-in agents (updatedAt === 0) show i18n translations;
+        // user-edited built-ins show their edited content.
+        const builtinKeys = getBuiltinI18nKeys(agent.id)
+        const isUntouchedBuiltin = agent.builtIn && agent.updatedAt === 0
+        const displayName =
+          isUntouchedBuiltin && builtinKeys.displayName
+            ? (t[builtinKeys.displayName] as string)
+            : agent.name
+        const displayHint =
+          isUntouchedBuiltin && builtinKeys.hint
+            ? (t[builtinKeys.hint] as string)
+            : agent.delegationHint
+        return (
+          <div className="card" key={agent.id}>
+            <div className="card-title">
+              {displayName}
+              {isUntouchedBuiltin && displayName !== agent.name && (
+                <span className="ml-1 text-[11px] text-muted">({agent.name})</span>
+              )}
+              {agent.builtIn && <span className="pill">{t.agentsBuiltinBadge}</span>}
+              <span className="ml-1 rounded bg-accent-soft px-1.5 py-0.5 text-[11px] text-accent">
+                {agent.role === 'supervisor'
+                  ? t.agentsDelegatablePill
+                  : domainLabel[agent.domain]}
+              </span>
+              <span className="pill">{t.agentsToolsCount({ count: agent.tools.length })}</span>
+              {agent.role === 'specialist' && <span className="pill">{t.agentsSpecialistPill}</span>}
+            </div>
+            {displayHint && <p className="hint">{displayHint}</p>}
+            <div className="actions">
+              <button onClick={() => setDraft(toDraft(agent))} type="button">
+                {t.edit}
               </button>
-            ) : (
-              <button onClick={() => void remove(agent)} type="button">
-                {t.delete}
-              </button>
-            )}
+              {agent.builtIn ? (
+                <button onClick={() => void resetBuiltIn(agent)} type="button">
+                  {t.agentsReset}
+                </button>
+              ) : (
+                <button onClick={() => void remove(agent)} type="button">
+                  {t.delete}
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
 
       <p className="hint">{t.agentsBuiltinNote}</p>
     </div>
