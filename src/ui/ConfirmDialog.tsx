@@ -29,14 +29,27 @@ export interface ConfirmOptions {
   danger?: boolean
   /** Alert mode: single "OK" button, no cancel. */
   alert?: boolean
+  /** Optional middle action label (e.g. "Save" in a Save/Don't save/Cancel trio).
+   *  When set, the dialog renders three buttons in the order Cancel · Extra · Confirm
+   *  and `confirmDialog()` resolves to `'extra' | true` (true for both Confirm and Extra,
+   *  distinguished by the caller's `extraText` knowledge). */
+  extraText?: string
+  /** Mark the middle (extra) action as destructive. Defaults to false. */
+  extraDanger?: boolean
 }
 
+/** Result of a confirm dialog. `'cancel'` (or `false`) means the user dismissed;
+ *  `true` means the primary Confirm was clicked; when `extraText` is set, the
+ *  middle button is signalled with the literal `'extra'` so callers can tell
+ *  the three apart. */
+export type ConfirmResult = boolean | 'extra'
+
 interface OpenDialog extends ConfirmOptions {
-  resolve: (value: boolean) => void
+  resolve: (value: ConfirmResult) => void
 }
 
 export function useConfirm(): {
-  confirm: (opts: ConfirmOptions) => Promise<boolean>
+  confirm: (opts: ConfirmOptions) => Promise<ConfirmResult>
   alert: (opts: ConfirmOptions) => Promise<void>
   node: React.ReactElement | null
 } {
@@ -44,13 +57,13 @@ export function useConfirm(): {
   const confirmRef = useRef<HTMLButtonElement | null>(null)
   const dialog = queue[0] ?? null
 
-  const open = useCallback((opts: ConfirmOptions, resolve: (v: boolean) => void) => {
+  const open = useCallback((opts: ConfirmOptions, resolve: (v: ConfirmResult) => void) => {
     setQueue((q) => [...q, { ...opts, resolve }])
   }, [])
 
   const confirm = useCallback(
     (opts: ConfirmOptions) =>
-      new Promise<boolean>((resolve) => open({ ...opts, alert: false }, resolve)),
+      new Promise<ConfirmResult>((resolve) => open({ ...opts, alert: false }, resolve)),
     [open],
   )
 
@@ -62,7 +75,7 @@ export function useConfirm(): {
     [open],
   )
 
-  const close = useCallback((result: boolean) => {
+  const close = useCallback((result: ConfirmResult) => {
     setQueue((q) => {
       q[0]?.resolve(result)
       return q.slice(1)
@@ -136,6 +149,20 @@ export function useConfirm(): {
               className="h-8 cursor-pointer rounded-lg border border-border bg-panel-2 px-3.5 text-[13px] font-medium text-muted transition-colors duration-150 hover:bg-hover hover:text-ink"
             >
               {dialog.cancelText ?? 'Cancel'}
+            </button>
+          )}
+          {dialog.extraText && !dialog.alert && (
+            <button
+              type="button"
+              onClick={() => close('extra')}
+              className={[
+                'h-8 cursor-pointer rounded-lg px-3.5 text-[13px] font-semibold transition-colors duration-150',
+                dialog.extraDanger
+                  ? 'border border-err bg-err text-white hover:brightness-110'
+                  : 'border border-accent bg-accent text-on-accent hover:bg-accent-strong',
+              ].join(' ')}
+            >
+              {dialog.extraText}
             </button>
           )}
           <button

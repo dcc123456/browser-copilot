@@ -11,15 +11,18 @@
  */
 
 import { useEffect, useState } from 'react'
-import { useConfirm, type ConfirmOptions } from './ConfirmDialog'
+import { useConfirm, type ConfirmOptions, type ConfirmResult } from './ConfirmDialog'
 
-type Pending = (ConfirmOptions & { resolve: (v: boolean) => void }) | null
+type Pending = (ConfirmOptions & { resolve: (v: ConfirmResult) => void }) | null
 
 let pushDialog: ((d: NonNullable<Pending>) => void) | null = null
 
-/** Show a confirm dialog; resolves `true` when confirmed, `false` otherwise. */
-export function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
+/** Show a confirm dialog; resolves `true` when the primary Confirm button is
+ *  clicked, `'extra'` when an optional middle (extraText) button is clicked,
+ *  `false` when cancelled. With no `extraText` set, `'extra'` is never
+ *  produced — the resolve is exactly `boolean`. */
+export function confirmDialog(opts: ConfirmOptions): Promise<ConfirmResult> {
+  return new Promise<ConfirmResult>((resolve) => {
     if (!pushDialog) {
       resolve(typeof window !== 'undefined' ? window.confirm(opts.message ?? opts.title) : false)
       return

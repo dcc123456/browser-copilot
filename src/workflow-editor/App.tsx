@@ -59,7 +59,7 @@ import TopToolbar from './toolbar/TopToolbar'
 import CanvasControls from './toolbar/CanvasControls'
 import { useToast } from './toast'
 import { ToastHost } from '../ui/toast'
-import { ConfirmHost } from '../ui/confirm'
+import { ConfirmHost, confirmDialog } from '../ui/confirm'
 import { makeTranslate, resolveEditorLocale } from './i18n'
 import {
   EditorLocaleContext,
@@ -226,6 +226,42 @@ export default function EditorApp() {
   useEffect(() => {
     if (loadedRef.current) setDirty(true)
   }, [nodes, edges, meta])
+
+  // Track Space-key state for drag-mode toggle:
+  //   - default: left-drag pans the canvas (React Flow default)
+  //   - hold Space: left-drag rubber-bands a selection box
+  // Space pressed inside a text input must NOT enter pan-mode (typing a space).
+  const [spaceDown, setSpaceDown] = useState(false)
+  useEffect(() => {
+    const isEditable = (target: EventTarget | null): boolean => {
+      const el = target as HTMLElement | null
+      return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+    }
+    const onDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat && !isEditable(e.target)) setSpaceDown(true)
+    }
+    const onUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !isEditable(e.target)) setSpaceDown(false)
+    }
+    window.addEventListener('keydown', onDown)
+    window.addEventListener('keyup', onUp)
+    return () => {
+      window.removeEventListener('keydown', onDown)
+      window.removeEventListener('keyup', onUp)
+    }
+  }, [])
+
+  // Native beforeunload prompt: catches the browser's window-close button on
+  // MV3 popup windows, which the in-app Ctrl+W interceptor can't reach.
+  useEffect(() => {
+    if (!dirty) return
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = '' // required for Chrome to surface the native prompt
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [dirty])
 
   const onNodesChange = useCallback((changes: NodeChange<FlowNode>[]) => {
     // Selection itself lives on the nodes (`n.selected`, see selectedIds) —
@@ -530,11 +566,36 @@ export default function EditorApp() {
       } else if (mod && e.key.toLowerCase() === 'b') {
         e.preventDefault()
         setPaletteOpen((o) => !o)
+      } else if (mod && e.key.toLowerCase() === 'w') {
+        // Ctrl+W / Cmd+W: only intercept when there are unsaved changes;
+        // otherwise let the browser handle window-close as usual.
+        if (!dirty) return
+        e.preventDefault()
+        void closeWithUnsavedGuard()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [handleSave, handleRun])
+  }, [handleSave, handleRun, dirty])
+
+  // Save / Don't save / Cancel prompt for closing the popup window with
+  // unsaved changes. Resolves the user's choice, then either saves and
+  // closes, closes without saving, or does nothing.
+  const closeWithUnsavedGuard = useCallback(async (): Promise<void> => {
+    const choice = await confirmDialog({
+      title: t('unsavedChanges'),
+      message: t('unsavedChangesClosePrompt'),
+      confirmText: t('dontSave'),
+      cancelText: t('cancel'),
+      extraText: t('save'),
+    })
+    if (choice === 'extra') {
+      await handleSave()
+      window.close()
+    } else if (choice === true) {
+      window.close()
+    }
+  }, [t, handleSave])
 
   // Node whose block-settings modal is open (gear in hover toolbar).
   const settingsNode = useMemo(
@@ -638,7 +699,7 @@ export default function EditorApp() {
           t={t}
         />
 
-        <div className="wf-canvas-wrap">
+        <div className="wf-canvas-wrap" data-pan-mode={spaceDown ? 'false' : 'true'}>
           <ReactFlow
             nodes={flowNodes}
             edges={edgeWithHighlight}
@@ -661,14 +722,13 @@ export default function EditorApp() {
             fitView
             deleteKeyCode={['Delete', 'Backspace']}
             multiSelectionKeyCode="Control"
-            // Rubber-band multi-select: LEFT-drag on empty canvas draws the
-            // selection box and every node the box touches (Partial) becomes
-            // selected; selected nodes then move/delete as a group (drag one
-            // selected node moves all; Delete/Backspace removes them together
-            // with their edges). Panning moves to the middle/right button or
-            // Space+drag; wheel zoom is unchanged.
-            selectionOnDrag
-            panOnDrag={[1, 2]}
+            // Default: LEFT-drag on empty canvas PANS the canvas (React Flow
+            // default). Hold Space to switch the same gesture into a
+            // rubber-band selection box — every node the box touches (Partial)
+            // becomes selected; selected nodes then move/delete as a group
+            // (drag one selected node moves all; Delete/Backspace removes
+            // them together with their edges). Wheel zoom is unchanged.
+            selectionOnDrag={spaceDown}
             selectionMode={SelectionMode.Partial}
             defaultEdgeOptions={{
               type: 'custom',

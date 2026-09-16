@@ -33,6 +33,16 @@
   min-height: 0;
 }
 
+/* Pan-mode cursor: the default left-drag pans the canvas, so the empty pane
+   looks grabbable. When Space is held the same gesture becomes a box-select
+   and the cursor returns to its default crosshair behaviour. */
+.wf-canvas-wrap[data-pan-mode='true'] .react-flow__pane {
+  cursor: grab;
+}
+.wf-canvas-wrap[data-pan-mode='true'] .react-flow__pane:active {
+  cursor: grabbing;
+}
+
 /* React flow surface */
 .wf-canvas-wrap .react-flow {
   background: var(--we-bg-soft);
