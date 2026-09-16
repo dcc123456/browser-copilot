@@ -50,8 +50,7 @@ agent you connected over [MCP](#agent-integration-mcp).
 
 <video src="https://github.com/user-attachments/assets/17a30b54-608c-43a9-a5ee-770c1d809350" controls="controls" width="100%"></video>
 
-<img width="2497" height="1518" alt="image" src="https://github.com/user-attachments/assets/d1f8d4b1-f2ae-4ed7-8d00-7b3b3fa0ed73" />
-
+<img width="2497" height="2088" alt="image" src="https://github.com/user-attachments/assets/9544fad7-98f5-45ec-96ca-6272261b877b" />
 <img width="2496" height="1518" alt="image" src="https://github.com/user-attachments/assets/9d73a3cc-1bc2-4e84-93ac-3e0cb8c015c7" />
 <img width="2496" height="1518" alt="image" src="https://github.com/user-attachments/assets/d3541ef0-c310-4016-ae21-fc7e38278adf" />
 <img width="2496" height="1518" alt="image" src="https://github.com/user-attachments/assets/57aec05d-b66c-4c24-b50c-6403f0661add" />
