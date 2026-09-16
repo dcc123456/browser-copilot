@@ -8,6 +8,107 @@ All notable changes to this project are documented here. The format is based on
 
 _Nothing yet._
 
+## [0.6.3] - 2026-09-16
+
+### Added — Built-in agents & delegation
+
+- **Agent type distinct from Skill**: agents are active, delegatable
+  execution units with their own `AGENT.md` persistence, import/export
+  and background handlers; skills stay passive injected instructions.
+  Six built-in agents ship (one supervisor + search / writing / ops /
+  workflow / analysis specialists).
+- **`delegate_to_agent` tool** in an on-demand group: runs an isolated
+  sub-agent loop (own namespaced conversation id and history, whitelisted
+  tools, ≤1200-char summary + artifact references) under the parent's
+  confirm / scope. Three hard gates: small-task refusal costing no LLM
+  call, ≤4 delegations per turn, ≤1 retry per (agent, task). Delegation
+  is opt-in for panel turns; unattended runs stay single-agent.
+- **Agents tab** in the side panel, mirroring the skills pattern:
+  create / edit name, delegation hint, role, domain, tool whitelist,
+  linked skills, delegation flag, round cap and instructions;
+  drag-and-drop import and JSON export; built-ins are read-only with a
+  "duplicate as mine" action.
+- **Built-in agents are editable**: edits keep the `id` and the
+  built-in marker under a real `updatedAt`, and the seeder matches by
+  `id` first so a renamed built-in survives an upgrade. New
+  `agents.reset` command and **Restore default** button write the
+  shipped version back (`updatedAt: 0`).
+- **Multi-window agent isolation (MCP)**: local bridge now binds
+  `agentName → windowId` (N:N, schema v6) plus a per-worker
+  `agentId → windowId` map for renames. An unassigned connection is
+  refused with an actionable bilingual error once any binding exists;
+  `ping` / `tools.list` stay open. `pin_tab` and the resolved-tab
+  cache are scoped per window. New worker commands
+  `agent.windows.list` and `agent.bindings.set`.
+- **Built-in agent i18n**: display name, hint and instructions follow
+  the user locale; user-edited built-ins show their custom content.
+
+### Added — Workflow secrets
+
+- **Secrets are no longer embedded in workflows**: when a workflow is
+  generated from chat history, `get_secret` actions now emit a
+  `get-secret` block that fetches the credential at runtime and stores
+  it in a variable, with a downstream `forms` block that references the
+  variable. Credential updates are picked up on the next run for free
+  and the value is never written into the workflow body.
+- **`get-secret` block becomes a dropdown**: catalog data, edit form
+  and executor carry a `(credential · field)` pair loaded via
+  `listPasswords()` (encoded as `credential="<id>::<field>"`). Older
+  workflows with separate `secretId` + `fieldName` keep working through
+  a backward-compat fallback. Static imports in the executor fix the
+  `window is not defined` crash the MV3 service worker hit on
+  `await import()`.
+- **`BLOCK_FORM_STRINGS`** gains Credential label, "Loading
+  credentials / no credentials" copy and a tip about runtime
+  resolution.
+
+### Added — Workflow editor UX
+
+- **Pan / box select**: left-drag pans the canvas; holding Space
+  switches to rubber-band selection. Cursor updates via
+  `[data-pan-mode]`.
+- **Unsaved-changes guard**: `beforeunload` surfaces a native confirm
+  when closing the popup mid-edit.
+- **Plain-language node descriptions**: generated JavaScript nodes are
+  titled by their effects (click, fill, React-compatible value set,
+  navigation, storage, network, event dispatch, scroll, …) instead of
+  by the first line of code, with specificity-ordered phrases and a
+  per-node cap so long batch scripts stay readable. Existing leading
+  comments still win.
+
+### Added — SEO & landing page
+
+- **SEO meta** added to all extension HTML pages (description, favicon
+  links, unified `lang`); manifest gains `short_name` / `author` /
+  `homepage_url`; `package.json` gains repository, bugs, author and
+  keywords.
+- **Bilingual landing page** (`website/`) with full SEO meta, Open
+  Graph, Twitter Card and JSON-LD structured data, auto-deployed by
+  `.github/workflows/pages.yml`.
+- **Shields.io badges** added to both READMEs.
+
+### Added — Documentation
+
+- **MCP multi-window agent assignment**: setup section explaining how
+  to bind each connected agent to its own browser window, the
+  isolation semantics, scoped `pin_tab`, refusal of unassigned
+  connections, `BROWSER_COPILOT_AGENT_NAME` disambiguation, and the
+  `agentId` / `agentName` identity fields in the WS protocol table.
+
+### Fixed
+
+- **Scheduled workflows no longer "look unstarted"**: `executeWorkflow`
+  now accepts `reuseRun` so a task-runner-opened run is the one its
+  steps land on. Per-storage-key write serialisation in `task-store`
+  prevents `recordFinishedRun` / `addRun` / `saveTask` from losing
+  each other. The opening line is per-kind (no more "Starting agent
+  task…" on a workflow task), and the run `source` is read from the
+  tracked value so both halves of one run stay in the same history
+  section.
+- **`pnpm dev` / `pnpm build` / `pnpm package` restored**: the
+  previous scripts/vite.mjs wrapper was never committed; pointing the
+  scripts back at `vite` directly is the working state.
+
 ## [0.6.2] - 2026-09-13
 
 ### Added — AI debugging reliability
