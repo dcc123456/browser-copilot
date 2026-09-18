@@ -10,9 +10,7 @@
  *    dialog, starts immediately, shows no confirm while in flight, and the
  *    landed verdict prunes the saved workflow;
  * 3. a failed review still ends with a confirm button (keep everything);
- * 4. cancel closes the dialog and keeps the card;
- * 5. the toolbar switch gates the whole flow: off → no card, no history query,
- *    and flipping it persists `chatWorkflowPromptEnabled` into settings.
+ * 4. cancel closes the dialog and keeps the card.
  */
 import { beforeAll, afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 
@@ -68,6 +66,54 @@ const historyEntries = (): HistoryEntry[] => [
   entry('click', { target: { primary: { how: 'css', value: '.go' } } }),
 ]
 
+/**
+ * The draft the operator-tool flow hands to the card in workflow mode: a
+ * trigger + open-url + page-load wait + click. `reviewStepsOf` groups the
+ * wait onto the open-url so the AI review sees exactly 2 steps
+ * (open-url, click) — clicking `click` in a verdict drops only that node,
+ * leaving the trigger + open-url + wait behind (3 nodes).
+ */
+function baseWorkflow(): Workflow {
+  return {
+    id: 'wf-base',
+    name: 'demo-workflow',
+    description: '',
+    trigger: { type: 'manual' },
+    settings: { saveLog: false, debugMode: false, notification: false, reuseLastState: false },
+    table: [],
+    drawflow: {
+      nodes: [
+        { id: 'n0', label: 'trigger', position: { x: 0, y: 0 }, data: { blockId: 'trigger' } },
+        {
+          id: 'n1',
+          label: 'open-url',
+          position: { x: 160, y: 80 },
+          data: { blockId: 'event-open-url', url: 'https://a.com', description: '打开页面' },
+        },
+        {
+          id: 'n2',
+          label: 'wait-connections',
+          position: { x: 160, y: 220 },
+          data: { blockId: 'wait-connections', description: '等待页面加载' },
+        },
+        {
+          id: 'n3',
+          label: 'click',
+          position: { x: 160, y: 360 },
+          data: { blockId: 'event-click', selector: '.go', description: '点击元素' },
+        },
+      ],
+      edges: [
+        { id: 'e0', source: 'n0', target: 'n1' },
+        { id: 'e1', source: 'n1', target: 'n2' },
+        { id: 'e2', source: 'n2', target: 'n3' },
+      ],
+    },
+    createdAt: 1,
+    updatedAt: 1,
+  }
+}
+
 /** The command channel: a verdict drop of the second step, like a real review. */
 let reviewBehavior: 'ok' | 'fail' = 'ok'
 /** When true the review reply parks until the test releases it. */
@@ -75,7 +121,14 @@ let holdReview = false
 let releaseReview: (() => void) | null = null
 const saveCommands: Extract<Command, { type: 'workflows.save' }>[] = []
 /** Settings payload served by the `settings.get` mock; tests may override. */
-let settingsPayload: Record<string, unknown> = { mode: 'semi' }
+let settingsPayload: Record<string, unknown> = { mode: 'workflow' }
+/**
+ * What `workflows.draft.get` answers. Defaults to the compiled draft; the
+ * empty-result tests swap in the two "nothing to save" shapes.
+ */
+let draftReply: unknown = { type: 'workflows.draft', workflow: baseWorkflow() }
+/** What `workflows.probe` answers — `null` means "could not probe". */
+let probeReply: unknown = null
 
 const portMessageListeners: ((message: unknown) => void)[] = []
 const fakePort = {
@@ -96,7 +149,9 @@ beforeEach(() => {
   holdReview = false
   releaseReview = null
   saveCommands.length = 0
-  settingsPayload = { mode: 'semi' }
+  settingsPayload = { mode: 'workflow' }
+  draftReply = { type: 'workflows.draft', workflow: baseWorkflow() }
+  probeReply = null
   portMessageListeners.length = 0
   mocks.sendCommand.mockReset()
   mocks.sendCommand.mockImplementation(async (command: Command) => {
@@ -110,6 +165,12 @@ beforeEach(() => {
       case 'settings.set':
         settingsPayload = { ...settingsPayload, ...command.patch }
         return { type: 'settings', settings: settingsPayload }
+      case 'workflows.draft.get':
+        return draftReply
+      case 'workflows.probe':
+        return { type: 'workflows.probe', probes: probeReply }
+      case 'workflows.draft.clear':
+        return { type: 'workflows.draft.clear' }
       case 'workflows.review': {
         if (reviewBehavior === 'fail') throw new Error('AI review timed out after 60s.')
         const workflow = (command as { workflow: Workflow }).workflow
@@ -414,8 +475,56 @@ describe('chat save-as-workflow flow', () => {
     }
   })
 
-  it('shows no card and sends no history query when the toolbar switch is off', async () => {
-    settingsPayload = { mode: 'semi', chatWorkflowPromptEnabled: false }
+  it('pops the save card from the operator-tool draft in workflow-generation mode', async () => {
+    settingsPayload = { mode: 'workflow' }
+    // The panel pulls the draft via workflows.draft.get on `done` and renders
+    // the same review/save card. Stub the command to return a small draft so
+    // we can assert the card appears and uses the draft text.
+    const draftWorkflow: Workflow = {
+      id: 'wf-draft',
+      name: 'demo-draft',
+      description: '',
+      trigger: { type: 'manual' },
+      settings: { saveLog: false, debugMode: false, notification: false, reuseLastState: false },
+      table: [],
+      drawflow: {
+        nodes: [
+          {
+            id: 'n1',
+            label: 'open-url',
+            position: { x: 0, y: 0 },
+            data: { url: 'https://example.com' },
+          },
+          {
+            id: 'n2',
+            label: 'click-element',
+            position: { x: 220, y: 0 },
+            data: { selector: 'button.submit' },
+          },
+        ],
+        edges: [],
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    mocks.sendCommand.mockImplementation(async (cmd: Command) => {
+      if (cmd.type === 'workflows.draft.get')
+        return { type: 'workflows.draft', workflow: draftWorkflow }
+      if (cmd.type === 'workflows.draft.clear') return { type: 'workflows.draft.clear' }
+      if (cmd.type === 'workflows.save') {
+        saveCommands.push(cmd)
+        return { type: 'workflows.save' }
+      }
+      if (cmd.type === 'settings.get') return { type: 'settings', settings: settingsPayload }
+      if (cmd.type === 'settings.set') {
+        settingsPayload = { ...settingsPayload, ...cmd.patch }
+        return { type: 'settings', settings: settingsPayload }
+      }
+      if (cmd.type === 'conversations.list')
+        return { type: 'conversations.list', conversations: [] }
+      return { type: 'noop' } as never
+    })
+
     const container = document.createElement('div')
     document.body.appendChild(container)
     const root = createRoot(container)
@@ -430,12 +539,28 @@ describe('chat save-as-workflow flow', () => {
         for (const listener of portMessageListeners) listener({ type: 'done' })
       })
       await flush()
-      expect(container.textContent).not.toContain('Save as workflow')
-      // Gated BEFORE any work: not even the history lookup happens.
+
+      // The panel must NOT fall through to the history path in workflow mode.
       const historyCalls = mocks.sendCommand.mock.calls.filter(
         ([command]) => (command as Command).type === 'history.list',
       )
       expect(historyCalls).toHaveLength(0)
+      const draftCalls = mocks.sendCommand.mock.calls.filter(
+        ([command]) => (command as Command).type === 'workflows.draft.get',
+      )
+      expect(draftCalls.length).toBeGreaterThan(0)
+
+      // The card appears with the draft-source text and the workflow name.
+      expect(container.textContent).toContain('demo-draft')
+      expect(container.textContent).toMatch(/draft/i)
+      expect(buttonTexts(container)).toContain('Save as workflow')
+
+      // Saving clears the draft so a later turn starts fresh.
+      await clickButton(container, 'Save as workflow')
+      const clearCalls = mocks.sendCommand.mock.calls.filter(
+        ([command]) => (command as Command).type === 'workflows.draft.clear',
+      )
+      expect(clearCalls).toHaveLength(1)
     } finally {
       await act(async () => {
         root.unmount()
@@ -444,62 +569,138 @@ describe('chat save-as-workflow flow', () => {
     }
   })
 
-  it('persists the toolbar switch and stops offering after it is turned off', async () => {
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
-    try {
+  /**
+   * The regression that made this whole flow look deleted: the card stopped
+   * appearing and the user had no way to tell "the feature is broken" from "the
+   * model recorded nothing". Every turn must END WITH SOMETHING VISIBLE.
+   */
+  describe('empty results are explained, never silent', () => {
+    const renderAndFinishTurn = async (): Promise<{
+      container: HTMLElement
+      root: Root
+    }> => {
+      const container = document.createElement('div')
+      document.body.appendChild(container)
+      const root = createRoot(container)
       await act(async () => {
         root.render(
           createElement(ChatTab, { skills: [], activeSkillId: null, onSelectSkill: () => {} }),
         )
       })
       await flush()
-
-      // The toolbar toggle is an icon button; it defaults to pressed
-      // (historical behavior) and explains itself on hover via `title`.
-      const toggle = [...container.querySelectorAll('button')].find(
-        (candidate) => candidate.getAttribute('aria-label') === 'Offer to save workflow',
-      )
-      expect(toggle).toBeDefined()
-      expect(toggle!.getAttribute('aria-pressed')).toBe('true')
-      expect(toggle!.getAttribute('title')).toContain('workflow')
-
-      // All three toolbar controls are icon-only buttons that render their
-      // lucide icon as an inline <svg>; if an icon import is ever dropped the
-      // button still exists but paints nothing, so pin the svg presence.
-      for (const label of ['Attach selection', 'Offer to save workflow', 'History']) {
-        const button = [...container.querySelectorAll('button')].find(
-          (candidate) => candidate.getAttribute('aria-label') === label,
-        )
-        expect(button, label).toBeDefined()
-        expect(button!.querySelector('svg'), label).not.toBeNull()
-      }
-
-      // Clicking it off persists the setting and dismisses any open card.
-      await act(async () => {
-        toggle!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-      })
-      await flush()
-      expect(toggle!.getAttribute('aria-pressed')).toBe('false')
-      expect(settingsPayload.chatWorkflowPromptEnabled).toBe(false)
-
-      // A subsequent turn end stays quiet: no card, no history query.
       await act(async () => {
         for (const listener of portMessageListeners) listener({ type: 'done' })
       })
       await flush()
-      expect(container.textContent).not.toContain('Save as workflow')
-      expect(
-        mocks.sendCommand.mock.calls.filter(
-          ([command]) => (command as Command).type === 'history.list',
-        ),
-      ).toHaveLength(0)
-    } finally {
+      return { container, root }
+    }
+
+    const cleanup = async (container: HTMLElement, root: Root): Promise<void> => {
       await act(async () => {
         root.unmount()
       })
       container.remove()
     }
+
+    it('explains that no page operations were recorded', async () => {
+      draftReply = { type: 'workflows.draft', empty: 'no-actions' }
+      const { container, root } = await renderAndFinishTurn()
+      try {
+        expect(container.textContent).toContain('no page operations were recorded')
+        expect(container.textContent).not.toContain('demo-workflow')
+        // The notice is the only feedback now: the manual "Save as workflow"
+        // button that used to sit next to the composer was removed on request.
+        expect(buttonTexts(container)).not.toContain('Save as workflow')
+      } finally {
+        await cleanup(container, root)
+      }
+    })
+
+    it('distinguishes "every action failed" from "nothing happened"', async () => {
+      // Only one of the two is worth telling the user to retry.
+      draftReply = { type: 'workflows.draft', empty: 'all-failed' }
+      const { container, root } = await renderAndFinishTurn()
+      try {
+        expect(container.textContent).toContain('every recorded action failed')
+        expect(container.textContent).not.toContain('no page operations were recorded')
+      } finally {
+        await cleanup(container, root)
+      }
+    })
+
+    it('clears the notice once a later turn does have something to save', async () => {
+      draftReply = { type: 'workflows.draft', empty: 'no-actions' }
+      const { container, root } = await renderAndFinishTurn()
+      try {
+        expect(container.textContent).toContain('no page operations were recorded')
+        draftReply = { type: 'workflows.draft', workflow: baseWorkflow() }
+        await act(async () => {
+          for (const listener of portMessageListeners) listener({ type: 'done' })
+        })
+        await flush()
+        expect(container.textContent).not.toContain('no page operations were recorded')
+        expect(container.textContent).toContain('demo-workflow')
+      } finally {
+        await cleanup(container, root)
+      }
+    })
+  })
+
+  /**
+   * The manual "Save as workflow" button was removed on request: the save card
+   * is meant to arrive on its own at the end of a workflow-mode turn, and a
+   * second, manual way in only invited saving a draft that was never exercised.
+   * These two cases pin the removal — the entry point must not come back
+   * without the behaviour behind it.
+   */
+  describe('manual entry point is gone', () => {
+    const draftRequests = (): unknown[] =>
+      mocks.sendCommand.mock.calls.filter(
+        ([command]) => (command as Command).type === 'workflows.draft.get',
+      )
+
+    const renderChat = async (): Promise<{ container: HTMLElement; root: Root }> => {
+      const container = document.createElement('div')
+      document.body.appendChild(container)
+      const root = createRoot(container)
+      await act(async () => {
+        root.render(
+          createElement(ChatTab, { skills: [], activeSkillId: null, onSelectSkill: () => {} }),
+        )
+      })
+      await flush()
+      return { container, root }
+    }
+
+    it('offers no manual button in workflow mode', async () => {
+      const { container, root } = await renderChat()
+      try {
+        // Workflow mode is the default payload; the button used to live here.
+        expect(buttonTexts(container)).not.toContain('Save as workflow')
+        // The behaviour, not just the label: the manual button asked the worker
+        // for the draft on click, so with no turn ended there must be no ask.
+        expect(draftRequests()).toHaveLength(0)
+        expect(container.textContent).not.toContain('demo-workflow')
+      } finally {
+        await act(async () => {
+          root.unmount()
+        })
+        container.remove()
+      }
+    })
+
+    it('offers no manual button outside workflow mode', async () => {
+      settingsPayload = { mode: 'full' }
+      const { container, root } = await renderChat()
+      try {
+        expect(buttonTexts(container)).not.toContain('Save as workflow')
+        expect(draftRequests()).toHaveLength(0)
+      } finally {
+        await act(async () => {
+          root.unmount()
+        })
+        container.remove()
+      }
+    })
   })
 })

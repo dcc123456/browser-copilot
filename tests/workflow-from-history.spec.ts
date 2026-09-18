@@ -340,6 +340,45 @@ describe('unmapped actions', () => {
   })
 })
 
+/**
+ * The forms block's read mode, as the operator bridge records it: a `read_form`
+ * action. Compiling it must produce a READ node — a `forms` node carrying a
+ * value would fill (and clear) the control on replay instead of reading it.
+ */
+describe('read_form maps to the forms block in read mode', () => {
+  it('compiles to a forms node with getValue and no value', () => {
+    const [data] = actionData([
+      entry('read_form', {
+        selector: '#email',
+        findBy: 'cssSelector',
+        getValue: true,
+        variableName: 'email',
+      }),
+    ])
+
+    expect(data!.blockId).toBe('forms')
+    expect(data!['getValue']).toBe(true)
+    expect(data!['variableName']).toBe('email')
+    expect(data!['value']).toBeUndefined()
+    expect(data!['selector']).toBe('#email')
+  })
+
+  it('names the variable even when the step did not', () => {
+    const [data] = actionData([entry('read_form', { selector: '#email' })])
+
+    expect(data!['variableName']).toBe('lastFormValue')
+  })
+
+  it('collapses two consecutive reads of the same control', () => {
+    const nodes = actionData([
+      entry('read_form', { selector: '#email', variableName: 'email' }),
+      entry('read_form', { selector: '#email', variableName: 'email' }),
+    ])
+
+    expect(nodes).toHaveLength(1)
+  })
+})
+
 describe('duplicate collapsing', () => {
   it('collapses consecutive open_url calls to the same URL into one block (with its wait)', () => {
     // Reproduces the saved workflow where the model opened the same URL twice

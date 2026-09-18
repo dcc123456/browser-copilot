@@ -385,7 +385,6 @@ export function normalizeSettingsPayload(raw: unknown): {
   ocrLanguage: string
   takeoverModel: { providerId: string; model: string }
   takeoverOnRun: boolean
-  chatWorkflowPromptEnabled: boolean
 } {
   const value = (raw ?? {}) as Record<string, unknown>
   const providers = Array.isArray(value.providers)
@@ -474,9 +473,5 @@ export function normalizeSettingsPayload(raw: unknown): {
     ocrLanguage,
     takeoverModel,
     takeoverOnRun: typeof value.takeoverOnRun === 'boolean' ? value.takeoverOnRun : false,
-    // The end-of-turn "save as workflow" card defaults to ON so the panel keeps
-    // prompting users who never opened settings after an upgrade.
-    chatWorkflowPromptEnabled:
-      typeof value.chatWorkflowPromptEnabled === 'boolean' ? value.chatWorkflowPromptEnabled : true,
   }
 }

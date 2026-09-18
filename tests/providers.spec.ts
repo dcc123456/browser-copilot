@@ -164,7 +164,6 @@ describe('normalizeStoredSettings', () => {
         ocrLanguage: 'eng',
         takeoverModel: { providerId: '', model: '' },
         takeoverOnRun: false,
-        chatWorkflowPromptEnabled: true,
       })
     }
   })
@@ -190,9 +189,17 @@ describe('normalizeStoredSettings', () => {
       ocrLanguage: 'chi_sim+eng',
       takeoverModel: { providerId: '', model: '' },
       takeoverOnRun: false,
-      chatWorkflowPromptEnabled: false,
     }
     expect(normalizeStoredSettings(settings)).toEqual(settings)
+  })
+
+  it('keeps a stored workflow mode instead of falling back to semi', () => {
+    const result = normalizeStoredSettings({
+      providers: [],
+      activeProviderId: '',
+      mode: 'workflow',
+    })
+    expect(result.mode).toBe('workflow')
   })
 
   it('repairs a dangling active pointer', () => {
@@ -229,7 +236,6 @@ describe('normalizeStoredSettings', () => {
       ocrLanguage: 'eng',
       takeoverModel: { providerId: '', model: '' },
       takeoverOnRun: false,
-      chatWorkflowPromptEnabled: true,
     })
   })
 
@@ -411,19 +417,5 @@ describe('normalizeSettingsPayload · cross-version safety', () => {
     })
     expect(sanitized.localAgentWindowId).toBeUndefined()
     expect(sanitized.localAgentBindings).toEqual({ 'claude@proj': 3 })
-  })
-
-  // The chat's end-of-turn save prompt must survive a version skew: a worker
-  // that does not know the field yet still yields the historical default ON.
-  it('defaults and preserves chatWorkflowPromptEnabled', () => {
-    expect(normalizeSettingsPayload({}).chatWorkflowPromptEnabled).toBe(true)
-    expect(
-      normalizeSettingsPayload({ chatWorkflowPromptEnabled: false }).chatWorkflowPromptEnabled,
-    ).toBe(false)
-    for (const bad of ['yes', 1, {}, null, undefined]) {
-      expect(
-        normalizeSettingsPayload({ chatWorkflowPromptEnabled: bad }).chatWorkflowPromptEnabled,
-      ).toBe(true)
-    }
   })
 })

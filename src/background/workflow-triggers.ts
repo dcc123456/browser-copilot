@@ -368,6 +368,10 @@ export async function rescheduleAllWorkflowTriggers(): Promise<void> {
   for (const wf of workflows) {
     await scheduleWorkflowTrigger(wf.id)
   }
+  // The observer registry is the other half of the trigger state: re-injecting
+  // is what both arms a newly added `element-change` trigger and drops one whose
+  // workflow was disabled, re-pointed or deleted.
+  await refreshElementChangeObservers()
 }
 
 /**
@@ -394,4 +398,284 @@ export async function handleWorkflowTriggerAlarm(alarmName: string): Promise<voi
     await chrome.alarms.clear(alarmName)
   }
   runWorkflowRef?.(workflowId, latestPluginWindowId())
+}
+
+// --- Element-change workflow triggers ----------------------------------------
+//
+// A workflow whose trigger block says `element-change` watches one element on
+// the page and runs when it mutates. The observer lives in the PAGE (the
+// service worker cannot see the DOM), so it is injected the same way the
+// keyboard-shortcut listener is: a self-contained function plus an in-page
+// registry that a re-injection replaces wholesale.
+//
+// Scope: an observer is only injected into tabs whose URL matches the trigger's
+// `matchPattern`, and the run is scoped to the reporting tab's window — the
+// mutation happened there, so that is where the workflow should act.
+
+/** What one `element-change` trigger watches. */
+export interface ElementChangeSpec {
+  workflowId: string
+  /** Element whose mutations fire the workflow. */
+  selector: string
+  /** URL glob the observer applies to; empty means "any http(s) page". */
+  matchPattern: string
+  options: {
+    subtree: boolean
+    childList: boolean
+    attributes: boolean
+    characterData: boolean
+    /** Only watched when `attributes` is on. */
+    attributeFilter: string[]
+  }
+}
+
+/** The trigger block's `observeElement` payload, when the graph has one. */
+function observeElementOf(wf: Workflow): Record<string, unknown> | undefined {
+  const data = triggerNodeData(wf)
+  const observe = data?.['observeElement']
+  return observe && typeof observe === 'object' ? (observe as Record<string, unknown>) : undefined
+}
+
+/** Every workflow configured to fire on an element change. */
+export async function elementChangeWorkflows(): Promise<ElementChangeSpec[]> {
+  const all = await listWorkflows()
+  const out: ElementChangeSpec[] = []
+  for (const wf of all) {
+    if (!triggerEnabled(wf) || effectiveTriggerKind(wf) !== 'element-change') continue
+    const observe = observeElementOf(wf)
+    const selector = typeof observe?.['selector'] === 'string' ? observe.selector.trim() : ''
+    // Without a selector there is nothing to watch; `validateWorkflowForRun`
+    // reports that separately.
+    if (!selector) continue
+    const raw = observe?.['targetOptions']
+    const target = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+    const filter = Array.isArray(target['attributeFilter'])
+      ? (target['attributeFilter'] as unknown[]).map(String).filter(Boolean)
+      : []
+    out.push({
+      workflowId: wf.id,
+      selector,
+      matchPattern: typeof observe?.['matchPattern'] === 'string' ? observe.matchPattern : '',
+      options: {
+        // `childList` defaults on: watching an element for "it changed" without
+        // noticing its children change is almost never what the user meant.
+        subtree: target['subtree'] === true,
+        childList: target['childList'] !== false,
+        attributes: target['attributes'] === true,
+        characterData: target['characterData'] === true,
+        attributeFilter: filter,
+      },
+    })
+  }
+  return out
+}
+
+/**
+ * Self-contained observer installer injected into each tab. Re-invocation
+ * REPLACES the previous registry, which is also how a disabled / deleted /
+ * re-pointed trigger is unregistered. No imports or closures (it is injected).
+ */
+export function elementChangeObserverInPage(specs: ElementChangeSpec[]): void {
+  const w = window as unknown as { __bcElementWatch?: { stop: () => void } }
+  if (w.__bcElementWatch) w.__bcElementWatch.stop()
+
+  const observers: MutationObserver[] = []
+  const timers = new Map<string, number>()
+
+  // A mutation arrives in bursts; one run per burst is the useful granularity,
+  // and it keeps a chatty DOM from queueing a run per node.
+  const report = (workflowId: string): void => {
+    if (timers.has(workflowId)) return
+    timers.set(
+      workflowId,
+      window.setTimeout(() => {
+        timers.delete(workflowId)
+        try {
+          // `sendMessage` returns a promise in MV3: an invalidated extension
+          // context REJECTS it rather than throwing, so the `catch` below alone
+          // would leave an unhandled rejection in the page's console.
+          const sent: unknown = chrome.runtime.sendMessage({
+            type: 'trigger:element-change',
+            workflowId,
+          })
+          void Promise.resolve(sent).catch(() => {
+            /* extension context gone */
+          })
+        } catch {
+          /* context gone */
+        }
+      }, 500),
+    )
+  }
+
+  for (const spec of specs) {
+    const options: MutationObserverInit = {
+      subtree: spec.options.subtree,
+      childList: spec.options.childList,
+      attributes: spec.options.attributes,
+      characterData: spec.options.characterData,
+    }
+    if (spec.options.attributes && spec.options.attributeFilter.length > 0) {
+      options.attributeFilter = spec.options.attributeFilter
+    }
+
+    const attach = (element: Element): void => {
+      const observer = new MutationObserver(() => report(spec.workflowId))
+      observer.observe(element, options)
+      observers.push(observer)
+    }
+
+    const found = document.querySelector(spec.selector)
+    if (found) {
+      attach(found)
+      continue
+    }
+    // The element may not exist yet (SPA, lazy render). Watch for it and attach
+    // the real observer the moment it appears — without this the workflow would
+    // silently never fire on any page that renders late. The placeholder itself
+    // never reports: only a real match does.
+    const placeholder = new MutationObserver(() => {
+      const element = document.querySelector(spec.selector)
+      if (!element) return
+      placeholder.disconnect()
+      attach(element)
+    })
+    placeholder.observe(document.documentElement, { childList: true, subtree: true })
+    observers.push(placeholder)
+  }
+
+  w.__bcElementWatch = {
+    stop() {
+      for (const observer of observers) observer.disconnect()
+      for (const timer of timers.values()) window.clearTimeout(timer)
+      timers.clear()
+      delete w.__bcElementWatch
+    },
+  }
+}
+
+/** Does this tab's URL fall inside the spec's match pattern? */
+function tabMatchesPattern(url: string | undefined, matchPattern: string): boolean {
+  if (!/^https?:/i.test(url ?? '')) return false
+  if (!matchPattern) return true
+  // Glob form (`https://example.com/*`): translate to a regex, like the
+  // visit-web matcher does.
+  const escaped = matchPattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')
+  try {
+    return new RegExp(`^${escaped}$`, 'i').test(url!)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Inject the current observer registry into every matching tab.
+ *
+ * Called on startup, on navigation, and after any workflow save / delete /
+ * toggle — re-injection is what both registers a new trigger and drops a
+ * removed one, so it must run whenever the set changes.
+ */
+export async function refreshElementChangeObservers(): Promise<void> {
+  let specs: ElementChangeSpec[]
+  try {
+    specs = await elementChangeWorkflows()
+  } catch {
+    return
+  }
+  let tabs: chrome.tabs.Tab[]
+  try {
+    tabs = await chrome.tabs.query({})
+  } catch {
+    return
+  }
+  for (const tab of tabs) {
+    if (typeof tab.id !== 'number') continue
+    const url = tab.url
+    if (!/^https?:/i.test(url ?? '')) continue
+    const mine = specs.filter((spec) => tabMatchesPattern(url, spec.matchPattern))
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id, allFrames: false },
+        func: elementChangeObserverInPage as unknown as (...args: unknown[]) => void,
+        args: [mine],
+      })
+    } catch {
+      /* ignore injection failures (restricted pages, tab gone) */
+    }
+  }
+}
+
+/** Workflows whose observer already fired a run that is still in flight. */
+const elementChangeRunning = new Set<string>()
+
+/**
+ * Wire element-change workflows: install the observers in existing tabs and in
+ * tabs that finish loading. Call once at service-worker startup.
+ *
+ * The navigation listener re-injects on every completed load because a new
+ * document has no observer at all — the injected registry does not survive a
+ * navigation.
+ */
+export function initElementChangeTriggers(): void {
+  void refreshElementChangeObservers()
+  chrome.webNavigation.onCompleted.addListener((details) => {
+    if (details.frameId !== 0) return
+    void (async () => {
+      let specs: ElementChangeSpec[]
+      try {
+        specs = await elementChangeWorkflows()
+      } catch {
+        return
+      }
+      const mine = specs.filter((spec) => tabMatchesPattern(details.url, spec.matchPattern))
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: details.tabId, allFrames: false },
+          func: elementChangeObserverInPage as unknown as (...args: unknown[]) => void,
+          args: [mine],
+        })
+      } catch {
+        /* ignore injection failures (restricted pages, tab gone) */
+      }
+    })()
+  })
+}
+
+/** Release the re-entrancy guard once a triggered run settles. */
+export function releaseElementChangeRun(workflowId: string): void {
+  elementChangeRunning.delete(workflowId)
+}
+
+/**
+ * Handle a `trigger:element-change` message from an injected observer; runs the
+ * bound workflow. Returns false for unrelated messages.
+ *
+ * Re-entrancy: a workflow that is already running because of this trigger is
+ * skipped. Without the guard, a workflow that itself mutates the observed
+ * element would feed itself forever.
+ */
+export async function handleElementChange(
+  message: unknown,
+  sender?: chrome.runtime.MessageSender,
+): Promise<boolean> {
+  const msg = message as { type?: string; workflowId?: string } | null
+  if (msg?.type !== 'trigger:element-change' || !msg.workflowId) return false
+  const workflowId = msg.workflowId
+  if (elementChangeRunning.has(workflowId)) return true
+  // Re-validate against storage: the observer may outlive a workflow that was
+  // disabled or deleted since it was injected.
+  const wf = await getWorkflow(workflowId)
+  if (!wf || !triggerEnabled(wf) || effectiveTriggerKind(wf) !== 'element-change') return true
+
+  elementChangeRunning.add(workflowId)
+  try {
+    // Scoped to the window the mutation happened in, like the shortcut path:
+    // the observed element lives there, so that is where the workflow acts.
+    runWorkflowRef?.(workflowId, sender?.tab?.windowId)
+  } finally {
+    // `runWorkflowRef` is fire-and-forget, so release on the next tick; a
+    // slower run is still protected by the observer's own debounce.
+    setTimeout(() => releaseElementChangeRun(workflowId), 1000)
+  }
+  return true
 }

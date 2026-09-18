@@ -29,10 +29,18 @@ import {
   aiPrefillSteps,
   DEFAULT_CONVERSATION_ID,
   newId,
-  resolveSecretValuesForHistory,
-  workflowFromHistory,
   type AiPrefillStep,
 } from '../lib/storage'
+import { isTriggerNode } from '../lib/workflow/migrate'
+import {
+  applyTriggerSelection,
+  triggerSelectionOf,
+  type TriggerSelection,
+} from '../lib/workflow/trigger-patch'
+import { OFFERED_TRIGGER_TYPES, type OfferedTriggerType } from '../lib/workflow/trigger-options'
+import type { RepeatSuggestion } from '../lib/workflow/loop-collapse'
+import { failingProbes, type SelectorProbeResult } from '../lib/workflow/selector-probe'
+import { checkWorkflowIntegrity, type WorkflowIntegrity } from '../lib/workflow/integrity'
 import {
   applyNodeKeepSelection,
   reviewStepsOf,
@@ -62,7 +70,8 @@ import {
   type AttachmentErrorCode,
   type AttachmentSummary,
 } from '../lib/attachments'
-import { useT } from './i18n'
+import { useI18n, useT } from './i18n'
+import type { Locale } from '../lib/i18n'
 import Markdown from './Markdown'
 import { downloadAnswer, hasTables, type AnswerFormat } from '../lib/export-answer'
 import {
@@ -77,8 +86,6 @@ import {
   Info,
   Loader2,
   Paperclip,
-  // `Workflow` the icon is aliased: the file's `Workflow` type (lib/workflow) wins.
-  Workflow as WorkflowIcon,
   Wrench,
 } from 'lucide-react'
 import { normalizeSkill } from '../lib/skills'
@@ -224,8 +231,24 @@ interface WorkflowPromptState {
   aiSteps: AiPrefillStep[]
   /** Per-node checkbox state; absent = enabled (the default). */
   aiSelections: Record<string, boolean>
+  /**
+   * Trigger the saved workflow will launch from. A generated workflow is
+   * useless without one, so the card always carries a selection (defaulting to
+   * the draft's trigger, i.e. `manual`) and {@link applyTriggerSelection} folds
+   * it into the preview — see `lib/workflow/trigger-patch` for why the graph
+   * node and the top-level mirror must both be patched.
+   */
+  trigger: TriggerSelection
   workflow: Workflow
   steps: number
+  /**
+   * Which mode produced this card. The history-derive path uses
+   * `chatSaveWorkflowPrompt` ("This session performed N steps…"); the
+   * workflow-draft path uses `chatSaveWorkflowDraftPrompt` ("Generated a
+   * workflow draft with N steps…"). Tracked separately because both reuse
+   * the same review/save machinery.
+   */
+  source: 'history' | 'draft'
   reviewing: boolean
   review: WorkflowReview | null
   /** Failure reason of the last review attempt (timeout / endpoint / parse). */
@@ -241,6 +264,45 @@ interface WorkflowPromptState {
   keep: Record<string, boolean> | null
   /** Reviewable steps of the base workflow, in chain order (stable). */
   stepList: ReviewStep[]
+  /**
+   * Repeat runs the draft contains, offered as folds. A generated workflow
+   * records one node per real interaction, so five identical clicks become five
+   * nodes; folding them into a loop is what makes the replay maintainable.
+   */
+  suggestions: RepeatSuggestion[]
+  /**
+   * Every selector in the graph checked against the live page. `null` means the
+   * page could not be probed at all — shown as "unverified" rather than as a
+   * pass, because a graph whose selectors were never checked is exactly the
+   * case that used to fail on first run.
+   */
+  probes: SelectorProbeResult[] | null
+  /**
+   * True while the probe request is in flight.
+   *
+   * The probe runs as its own command AFTER the card is on screen, so a page
+   * that is slow to answer — or refuses injection outright — cannot delay or
+   * swallow the card. Without this flag the panel would show "unverified"
+   * during the wait, which reads as a failure.
+   */
+  probesChecking: boolean
+  /**
+   * Internal consistency of the graph: references nothing can resolve, and
+   * nodes the trigger head cannot reach.
+   *
+   * The complement of {@link probes}: probing asks the page whether the steps
+   * still find their elements, this asks the graph whether the steps still hang
+   * together. A step that lost its edge, or a `{{variable}}` no block produces,
+   * replays as a silent no-op and looks like a page problem.
+   */
+  integrity: WorkflowIntegrity
+  /** Index of the suggestion currently being folded, for the busy state. */
+  folding: number | null
+  /**
+   * Outcome of the last fold. A refused fold (no page-verified selector) is a
+   * normal result, so it is reported here rather than thrown.
+   */
+  foldNote: string | null
 }
 
 let counter = 0
@@ -575,9 +637,9 @@ function ToolbarIconButton({
       })
   }
 
-  const download = (format: AnswerFormat): void => {
+  const download = async (format: AnswerFormat): Promise<void> => {
     setMenuOpen(false)
-    downloadAnswer({ text: entry.text, format, title })
+    await downloadAnswer({ text: entry.text, format, title })
   }
 
   // Clicking anywhere outside the open menu closes it (same deferred-listener
@@ -863,8 +925,314 @@ interface Props {
   onSelectSkill: (id: string | null) => void
 }
 
+/**
+ * Sensible starting parameters per trigger kind, applied when the user picks a
+ * kind. Without them, choosing `interval` would leave the required field blank
+ * and the card could save a workflow that never fires — or that the run gate
+ * rejects.
+ */
+const TRIGGER_KIND_DEFAULTS: Readonly<
+  Partial<Record<OfferedTriggerType, Record<string, unknown>>>
+> = {
+  'keyboard-shortcut': { shortcut: '' },
+  'context-menu': { contextMenuName: '' },
+  'visit-web': { url: '' },
+  interval: { interval: 30 },
+  'specific-day': { days: [1, 2, 3, 4, 5], time: '09:00' },
+  date: { date: '', time: '09:00' },
+  'element-change': {
+    observeElement: {
+      selector: '',
+      matchPattern: '',
+      // `childList` on by default, matching the observer's own default: a
+      // watched element whose children change is the common case, and a
+      // picker that watched nothing at all would look broken.
+      targetOptions: { subtree: false, childList: true, attributes: false, characterData: false },
+    },
+  },
+}
+
+/**
+ * Trigger picker for the save-as-workflow card.
+ *
+ * A generated workflow is useless without a trigger, and a trigger this build
+ * does not arm is worse than none — it looks configured but never fires. So the
+ * picker offers only {@link OFFERED_TRIGGER_TYPES} and collects the fields each
+ * kind's scheduler actually reads (see `workflowAutoTrigger`).
+ */
+/**
+ * The inputs a generated workflow needs, read from the denormalized trigger
+ * mirror and falling back to the trigger node's `data.parameters`.
+ *
+ * Generation declares these (see `lib/workflow/dynamic-data`) whenever a
+ * business value has no upstream producer; the save card lists them so the
+ * user can see what will be re-prompted / overridable on each run.
+ *
+ * @returns `name`/`defaultValue` pairs with no empty names.
+ */
+function declaredInputsOf(workflow: Workflow): { name: string; defaultValue: string }[] {
+  const fromMirror = workflow.trigger?.parameters
+  const triggerNode = workflow.drawflow.nodes.find(
+    (n) => (n.data?.['blockId'] as string) === 'trigger' || n.label === 'trigger',
+  )
+  const fromNode = triggerNode?.data?.['parameters']
+  const raw: unknown = Array.isArray(fromMirror) ? fromMirror : fromNode
+  if (!Array.isArray(raw)) return []
+  const out: { name: string; defaultValue: string }[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const record = item as Record<string, unknown>
+    const name = record['name']
+    if (typeof name !== 'string' || name.trim() === '') continue
+    out.push({
+      name,
+      defaultValue:
+        typeof record['defaultValue'] === 'string' ? (record['defaultValue'] as string) : '',
+    })
+  }
+  return out
+}
+
+/**
+ * The steps of a generated workflow that run raw JavaScript.
+ *
+ * A script step is only allowed when no declarative operator could do the job
+ * (see `lib/workflow/operator-tools`), and the reason travels on the node's
+ * `description`. Surfacing both here — before the user saves — is the point:
+ * the person who maintains this workflow later is the one who has to know
+ * which steps need code, and they can still ask for a rewrite now.
+ *
+ * @returns `label`/`reason` pairs, one per script node, in graph order.
+ */
+function codeNodesOf(workflow: Workflow): { id: string; reason: string }[] {
+  return workflow.drawflow.nodes
+    .filter((node) => {
+      const raw = node.data?.['blockId']
+      const blockId = typeof raw === 'string' && raw ? raw : node.label
+      return blockId === 'javascript-code'
+    })
+    .map((node) => {
+      const description = node.data?.['description']
+      return {
+        id: node.id,
+        reason: typeof description === 'string' ? description.trim() : '',
+      }
+    })
+}
+
+function WorkflowTriggerPicker({
+  locale,
+  selection,
+  onChange,
+}: {
+  locale: Locale
+  selection: TriggerSelection
+  onChange: (next: TriggerSelection) => void
+}) {
+  const t = useT()
+
+  const kindLabel: Record<OfferedTriggerType, string> = {
+    manual: t.triggerKindManual,
+    'on-startup': t.triggerKindOnStartup,
+    'keyboard-shortcut': t.triggerKindKeyboardShortcut,
+    'context-menu': t.triggerKindContextMenu,
+    'visit-web': t.triggerKindVisitWeb,
+    interval: t.triggerKindInterval,
+    'specific-day': t.triggerKindSpecificDay,
+    date: t.triggerKindDate,
+    'element-change': t.triggerKindElementChange,
+  }
+
+  const text = (field: string): string => {
+    const value = selection.params[field]
+    if (typeof value === 'string') return value
+    if (typeof value === 'number') return String(value)
+    return ''
+  }
+
+  const setParam = (field: string, value: unknown): void => {
+    onChange({ ...selection, params: { ...selection.params, [field]: value } })
+  }
+
+  // `element-change` is the one kind whose parameters are nested rather than
+  // flat: the observer reads `data.observeElement.{selector,matchPattern,
+  // targetOptions}`. These three helpers keep the nested writes readable.
+  const observe = (): Record<string, unknown> => {
+    const value = selection.params['observeElement']
+    return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  }
+  const setObserve = (patch: Record<string, unknown>): void => {
+    setParam('observeElement', { ...observe(), ...patch })
+  }
+  const targetOptions = (): Record<string, unknown> => {
+    const value = observe()['targetOptions']
+    return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  }
+  const setTargetOption = (field: string, value: boolean): void => {
+    setObserve({ targetOptions: { ...targetOptions(), [field]: value } })
+  }
+  const observeText = (field: string): string => {
+    const value = observe()[field]
+    return typeof value === 'string' ? value : ''
+  }
+
+  const changeKind = (type: OfferedTriggerType): void => {
+    // Keep whatever the user already entered for this kind, seed the rest.
+    // `applyTriggerSelection` clears the OTHER kinds' fields, so switching
+    // away and back is safe.
+    onChange({
+      type,
+      params: { ...(TRIGGER_KIND_DEFAULTS[type] ?? {}), ...selection.params },
+    })
+  }
+
+  const days: number[] = Array.isArray(selection.params['days'])
+    ? (selection.params['days'] as unknown[]).map(Number).filter((d) => Number.isInteger(d))
+    : []
+  const toggleDay = (day: number): void => {
+    const next = days.includes(day) ? days.filter((d) => d !== day) : [...days, day].sort()
+    setParam('days', next)
+  }
+  // Weekday names via Intl, so they follow the panel's locale for free.
+  const weekdayName = (day: number): string =>
+    new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(new Date(2024, 0, 7 + day))
+
+  const autoFires = selection.type !== 'manual'
+
+  return (
+    <div className="trigger-picker" role="group" aria-label={t.chatSaveWorkflowTriggerTitle}>
+      <p className="hint" style={{ margin: '6px 0 4px' }}>
+        {t.chatSaveWorkflowTriggerTitle}
+      </p>
+      <select
+        aria-label={t.chatSaveWorkflowTriggerTitle}
+        className="w-full"
+        disabled={false}
+        onChange={(event) => changeKind(event.target.value as OfferedTriggerType)}
+        value={selection.type}
+      >
+        {OFFERED_TRIGGER_TYPES.map((type) => (
+          <option key={type} value={type}>
+            {kindLabel[type]}
+          </option>
+        ))}
+      </select>
+
+      {selection.type === 'keyboard-shortcut' && (
+        <input
+          className="w-full"
+          onChange={(event) => setParam('shortcut', event.target.value)}
+          placeholder={t.chatSaveWorkflowTriggerShortcut}
+          value={text('shortcut')}
+        />
+      )}
+
+      {selection.type === 'context-menu' && (
+        <input
+          className="w-full"
+          onChange={(event) => setParam('contextMenuName', event.target.value)}
+          placeholder={t.chatSaveWorkflowTriggerMenuName}
+          value={text('contextMenuName')}
+        />
+      )}
+
+      {selection.type === 'visit-web' && (
+        <input
+          className="w-full"
+          onChange={(event) => setParam('url', event.target.value)}
+          placeholder={t.chatSaveWorkflowTriggerUrl}
+          value={text('url')}
+        />
+      )}
+
+      {selection.type === 'interval' && (
+        <input
+          className="w-full"
+          min={1}
+          onChange={(event) => setParam('interval', Number(event.target.value))}
+          placeholder={t.chatSaveWorkflowTriggerInterval}
+          type="number"
+          value={text('interval')}
+        />
+      )}
+
+      {selection.type === 'specific-day' && (
+        <div className="flex flex-wrap items-center gap-1">
+          {[0, 1, 2, 3, 4, 5, 6].map((day) => (
+            <label className="ai-prefill-item" key={day}>
+              <input checked={days.includes(day)} onChange={() => toggleDay(day)} type="checkbox" />
+              <span>{weekdayName(day)}</span>
+            </label>
+          ))}
+          <input
+            onChange={(event) => setParam('time', event.target.value)}
+            placeholder={t.chatSaveWorkflowTriggerTime}
+            value={text('time')}
+          />
+        </div>
+      )}
+
+      {selection.type === 'date' && (
+        <div className="flex flex-wrap items-center gap-1">
+          <input
+            onChange={(event) => setParam('date', event.target.value)}
+            placeholder={t.chatSaveWorkflowTriggerDate}
+            value={text('date')}
+          />
+          <input
+            onChange={(event) => setParam('time', event.target.value)}
+            placeholder={t.chatSaveWorkflowTriggerTime}
+            value={text('time')}
+          />
+        </div>
+      )}
+
+      {selection.type === 'element-change' && (
+        <div className="flex flex-col gap-1">
+          <input
+            className="w-full"
+            onChange={(event) => setObserve({ selector: event.target.value })}
+            placeholder={t.chatSaveWorkflowTriggerElementSelector}
+            value={observeText('selector')}
+          />
+          <input
+            className="w-full"
+            onChange={(event) => setObserve({ matchPattern: event.target.value })}
+            placeholder={t.chatSaveWorkflowTriggerElementPattern}
+            value={observeText('matchPattern')}
+          />
+          {(
+            [
+              ['subtree', t.chatSaveWorkflowTriggerElementSubtree],
+              ['childList', t.chatSaveWorkflowTriggerElementChildList],
+              ['attributes', t.chatSaveWorkflowTriggerElementAttributes],
+              ['characterData', t.chatSaveWorkflowTriggerElementCharacterData],
+            ] as const
+          ).map(([field, label]) => (
+            <label className="ai-prefill-item" key={field}>
+              <input
+                checked={targetOptions()[field] === true}
+                onChange={(event) => setTargetOption(field, event.target.checked)}
+                type="checkbox"
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
+      )}
+
+      <p className="hint" style={{ margin: '4px 0 0' }}>
+        {autoFires ? t.chatSaveWorkflowTriggerHintAuto : t.chatSaveWorkflowTriggerHintManual}
+      </p>
+    </div>
+  )
+}
+
 export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props) {
   const t = useT()
+  // Only the trigger picker needs the locale itself: weekday names come from
+  // `Intl.DateTimeFormat`, which localizes them correctly for free.
+  const { locale } = useI18n()
   const [entries, setEntries] = useState<Entry[]>([])
   const [draft, setDraft] = useState('')
   /** Files staged for the next message, mirrored in a ref for sequential validation. */
@@ -925,14 +1293,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   } | null>(null)
   const [mode, setMode] = useState<AgentMode>('semi')
   const [modeInfoOpen, setModeInfoOpen] = useState(false)
-  /**
-   * "Offer to save workflow" switch (the chat-toolbar checkbox). When off, the
-   * end-of-turn prompt never appears and the panel skips the history lookup
-   * entirely. Persisted in settings; defaults to on (the historical behavior).
-   */
-  const [workflowPromptEnabled, setWorkflowPromptEnabled] = useState(true)
-  const workflowPromptEnabledRef = useRef(true)
-  workflowPromptEnabledRef.current = workflowPromptEnabled
   /** Summed usage across turns in this conversation. */
   const [sessionUsage, setSessionUsage] = useState<TurnTokenUsage>(() => ({
     ...ZERO_USAGE,
@@ -1081,10 +1441,16 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
    */
   const tRef = useRef(t)
   tRef.current = t
-
+  /**
+   * Mirrors `mode` for the `done` handler — same trick as `tRef`. Without it the
+   * port's closure would capture the initial mode and a mode change would not
+   * gate the workflow-generation prompt until the panel reconnected.
+   */
+  const modeRef = useRef<AgentMode>(mode)
+  modeRef.current = mode
   /**
    * "Save this session as a workflow?" call-to-action, shown right after a turn
-   * that actually performed page operations in semi/full-auto. `conversationId`
+   * that actually performed page operations in workflow mode. `conversationId`
    * guards against saving another conversation's flow by mistake.
    *
    * The AI node review does NOT run while the card is open — it starts only
@@ -1095,8 +1461,15 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const [workflowPrompt, setWorkflowPrompt] = useState<WorkflowPromptState | null>(null)
   /** Last reuseable-step count we already asked about per conversation. */
   const promptedRef = useRef<Record<string, number>>({})
-  const conversationsRef = useRef<ConversationMeta[]>(conversations)
-  conversationsRef.current = conversations
+  /**
+   * One-line explanation shown when a workflow-generation turn produced nothing
+   * worth saving.
+   *
+   * Silence used to be the behaviour here, and silence is indistinguishable
+   * from a broken feature — which is exactly how the missing save card went
+   * unnoticed. `null` means "no notice to show".
+   */
+  const [saveNotice, setSaveNotice] = useState<string | null>(null)
 
   // Live AI review log: the port forwards pushed lines via emitReviewLog;
   // this subscription renders them in the open review dialog as they arrive.
@@ -1109,48 +1482,67 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   }, [])
 
   /**
-   * After a turn that performed page operations, offer to persist them as a
-   * reusable workflow. Only actions that actually ran (approved + ok) in this
-   * conversation count; if none map to a block we stay quiet. A per-conversation
-   * counter means we only ask again once new steps have accumulated.
+   * After a turn, offer to persist the result as a reusable workflow.
    *
-   * Gated by the toolbar's "offer to save workflow" switch: when it is off this
-   * returns before ANY work — no history query, no card, nothing at turn end.
+   * The end-of-turn card is GATED to workflow-generation mode — the user
+   * explicitly opted into a drafting session and the draft
+   * (`workflows.draft.get`) is the only artifact worth saving. In other modes
+   * (semi / full / read-only / chat) the model just answered a question, so
+   * we skip the card and the history query entirely.
    *
-   * The card opens WITHOUT the AI node review — that starts only when the user
-   * explicitly clicks "AI refine" (see {@link runSaveReview}); the primary
-   * save button persists directly and costs zero model tokens.
+   * Three outcomes, and all three are VISIBLE: a card to review, or a one-line
+   * explanation of why there is nothing to save. Never silence — a silent turn
+   * cannot be told apart from a broken feature.
    */
   const maybePromptSaveWorkflow = useCallback(async (convId: string) => {
-    if (!workflowPromptEnabledRef.current) return
+    if (modeRef.current !== 'workflow') return
+    let workflow: Workflow | null = null
+    let source: 'history' | 'draft' = 'draft'
     let result: Awaited<ReturnType<typeof sendCommand>>
     try {
-      result = await sendCommand({ type: 'history.list' })
+      result = await sendCommand({ type: 'workflows.draft.get', conversationId: convId })
     } catch {
       return
     }
-    if (result.type !== 'history.list') return
-    const session = result.entries
-      .filter((e) => e.conversationId === convId && e.ok && e.approved)
-      .sort((a, b) => a.at - b.at)
-    const meta = conversationsRef.current.find((c) => c.id === convId)
-    const name = (meta?.title ?? '').trim() || `session-${convId.slice(0, 6)}`
-    const secretValues = await resolveSecretValuesForHistory(session)
-    const workflow = workflowFromHistory(session, name, secretValues)
-    if (!workflow) return
+    if (result.type !== 'workflows.draft') return
+    if (!result.workflow) {
+      // The background says WHY: it never touched the page, or it tried and
+      // everything failed. Only the second is worth retrying.
+      setSaveNotice(
+        result.empty === 'all-failed'
+          ? tRef.current.chatWorkflowNothingSavedFailed
+          : tRef.current.chatWorkflowNothingSaved,
+      )
+      return
+    }
+    setSaveNotice(null)
+    workflow = result.workflow
+    // `history` means the panel compiled the actions the model actually
+    // performed; `draft` means the model placed operator blocks itself.
+    source = result.source ?? 'draft'
     const aiSteps = aiPrefillSteps(workflow)
     const aiSelections = Object.fromEntries(aiSteps.map((s) => [s.nodeId, true]))
-    const steps = workflow.drawflow.nodes.length
-    if (steps === 0) return
+    // Count only real action nodes: every draft carries a trigger head, so the
+    // raw node count is never 0 and would defeat the "nothing to save" guard.
+    const steps = workflow.drawflow.nodes.filter((n) => !isTriggerNode(n)).length
+    if (steps === 0) {
+      setSaveNotice(tRef.current.chatWorkflowNothingSaved)
+      return
+    }
     if ((promptedRef.current[convId] ?? 0) >= steps) return
     promptedRef.current[convId] = steps
+    const trigger = triggerSelectionOf(workflow)
     setWorkflowPrompt({
       conversationId: convId,
       base: workflow,
-      workflow,
+      // Seed the preview with the trigger folded in, so what the card shows and
+      // what gets saved are the same object from the first render on.
+      workflow: applyTriggerSelection(workflow, trigger),
       aiSteps,
       aiSelections,
+      trigger,
       steps,
+      source,
       reviewing: false,
       review: null,
       reviewError: null,
@@ -1160,7 +1552,33 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       saveError: null,
       keep: null,
       stepList: reviewStepsOf(workflow),
+      suggestions: result.suggestions ?? [],
+      probes: null,
+      probesChecking: true,
+      integrity: checkWorkflowIntegrity(workflow),
+      folding: null,
+      foldNote: null,
     })
+    // Probe AFTER the card is up, on its own command: injecting into the page
+    // can be slow or refused outright, and neither may keep the card away.
+    void sendCommand({ type: 'workflows.probe', conversationId: convId })
+      .then((probed) => {
+        if (probed.type !== 'workflows.probe') return
+        setWorkflowPrompt((prev) =>
+          // Guard against a card that was saved, discarded or replaced while
+          // the probe was in flight.
+          prev && prev.conversationId === convId && prev.base === workflow
+            ? { ...prev, probes: probed.probes, probesChecking: false }
+            : prev,
+        )
+      })
+      .catch(() => {
+        setWorkflowPrompt((prev) =>
+          prev && prev.conversationId === convId && prev.base === workflow
+            ? { ...prev, probes: null, probesChecking: false }
+            : prev,
+        )
+      })
   }, [])
 
   const append = useCallback((entry: Omit<Entry, 'id'>) => {
@@ -1516,17 +1934,13 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   }, [])
 
   // Load local settings once on mount: the autonomy mode rides along with each
-  // chat message (the worker reads settings itself), and the workflow-prompt
-  // switch gates the end-of-turn save card here in the panel.
+  // chat message (the worker reads settings itself).
   useEffect(() => {
     void (async () => {
       try {
         const result = await sendCommand({ type: 'settings.get' })
         if (result.type === 'settings') {
           setMode(result.settings.mode)
-          // `!== false` keeps a version-skewed worker (field missing) on the
-          // historical default: the prompt stays on until explicitly disabled.
-          setWorkflowPromptEnabled(result.settings.chatWorkflowPromptEnabled !== false)
         }
       } catch {
         /* keep defaults */
@@ -1535,11 +1949,17 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   }, [])
 
   const changeMode = async (next: AgentMode): Promise<void> => {
+    // Both "no per-step approval" modes get an explicit warning. Workflow
+    // generate is NOT a dry run: every operator really clicks, types and
+    // navigates, and `javascript-code` runs arbitrary JS in the page's MAIN
+    // world — so switching into it deserves the same gate as full auto.
+    const warning =
+      next === 'full' ? t.modeFullWarning : next === 'workflow' ? t.modeWorkflowWarning : ''
     if (
-      next === 'full' &&
+      warning &&
       !(await confirmDialog({
         title: t.dialogWarningTitle,
-        message: t.modeFullWarning,
+        message: warning,
         confirmText: t.dialogConfirm,
         cancelText: t.cancel,
         danger: true,
@@ -1930,8 +2350,17 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       prev && prev.conversationId === prompt.conversationId ? { ...prev, saving: true } : prev,
     )
     try {
-      const workflow = derivePreview(prompt.base, prompt.keep, prompt.aiSelections)
+      const workflow = derivePreview(prompt.base, prompt.keep, prompt.aiSelections, prompt.trigger)
       await sendCommand({ type: 'workflows.save', workflow })
+      // In draft mode the background still holds the operator-tool draft; drop
+      // it so a later turn in the same conversation starts with a clean slate
+      // rather than appending to the just-saved workflow. Fire-and-forget:
+      // a clear failure does not block the saved-status announcement below.
+      if (prompt.source === 'draft') {
+        sendCommand({ type: 'workflows.draft.clear', conversationId: prompt.conversationId }).catch(
+          () => undefined,
+        )
+      }
       setWorkflowPrompt(null)
       append({
         role: 'status',
@@ -1961,34 +2390,34 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   }
 
   const dismissPromptWorkflow = (): void => {
+    const prompt = workflowPrompt
     setWorkflowPrompt(null)
-  }
-
-  /**
-   * Toolbar switch: flips the end-of-turn save prompt and persists it. Turning
-   * it off also dismisses a card that is already showing — the user asked for
-   * quiet, so a stale offer should not linger.
-   */
-  const changeWorkflowPromptEnabled = async (enabled: boolean): Promise<void> => {
-    setWorkflowPromptEnabled(enabled)
-    if (!enabled) setWorkflowPrompt(null)
-    try {
-      await sendCommand({ type: 'settings.set', patch: { chatWorkflowPromptEnabled: enabled } })
-    } catch {
-      /* non-fatal: the switch stays flipped for this panel session */
+    // A "Skip" on a draft-sourced card means the user explicitly rejected the
+    // current draft — clear it so the next workflow-mode turn starts fresh
+    // instead of re-prompting with the same nodes.
+    if (prompt?.source === 'draft') {
+      sendCommand({ type: 'workflows.draft.clear', conversationId: prompt.conversationId }).catch(
+        () => undefined,
+      )
     }
   }
 
   /**
    * Re-derives the preview workflow from the untouched base: first the AI
-   * node-review keep set (dropping whole steps), then the AI-prefill toggles.
-   * Layering both from the base keeps every toggle idempotent.
+   * node-review keep set (dropping whole steps), then the AI-prefill toggles,
+   * then the trigger selection.
+   * Layering all three from the base keeps every toggle idempotent.
    */
   const derivePreview = (
     base: Workflow,
     keep: Record<string, boolean> | null,
     aiSelections: Record<string, boolean>,
-  ): Workflow => applyAiPrefillOptions(applyNodeKeepSelection(base, keep ?? {}), aiSelections)
+    trigger: TriggerSelection,
+  ): Workflow =>
+    applyTriggerSelection(
+      applyAiPrefillOptions(applyNodeKeepSelection(base, keep ?? {}), aiSelections),
+      trigger,
+    )
 
   /**
    * Toggle one AI-prefill checkbox and rebuild the preview workflow from the
@@ -2001,7 +2430,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       return {
         ...prev,
         aiSelections,
-        workflow: derivePreview(prev.base, prev.keep, aiSelections),
+        workflow: derivePreview(prev.base, prev.keep, aiSelections, prev.trigger),
       }
     })
   }
@@ -2011,7 +2440,70 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     setWorkflowPrompt((prev) => {
       if (!prev) return prev
       const keep = { ...prev.keep, [stepId]: kept }
-      return { ...prev, keep, workflow: derivePreview(prev.base, keep, prev.aiSelections) }
+      return {
+        ...prev,
+        keep,
+        workflow: derivePreview(prev.base, keep, prev.aiSelections, prev.trigger),
+      }
+    })
+  }
+
+  /**
+   * Change the trigger the saved workflow will launch from. Patched into the
+   * preview immediately so the card can show the resulting consequence (a
+   * time-based trigger starts firing as soon as the workflow is saved).
+   */
+  const changeTrigger = (trigger: TriggerSelection): void => {
+    setWorkflowPrompt((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        trigger,
+        workflow: derivePreview(prev.base, prev.keep, prev.aiSelections, trigger),
+      }
+    })
+  }
+
+  /**
+   * Fold one detected repeat run into a loop.
+   *
+   * The background rewrites the DRAFT and re-materialises the workflow, so the
+   * whole card is replaced from the response rather than patched locally —
+   * folding changes the node ids the review and AI-prefill state point at, and
+   * merging that by hand would be the easiest way to show a stale step list.
+   */
+  const foldRun = async (index: number): Promise<void> => {
+    const prompt = workflowPrompt
+    if (!prompt || prompt.folding !== null) return
+    setWorkflowPrompt({ ...prompt, folding: index, foldNote: null })
+    let result: Awaited<ReturnType<typeof sendCommand>>
+    try {
+      result = await sendCommand({
+        type: 'workflows.draft.fold',
+        conversationId: prompt.conversationId,
+        index,
+      })
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error)
+      setWorkflowPrompt((prev) => (prev ? { ...prev, folding: null, foldNote: text } : prev))
+      return
+    }
+    if (result.type !== 'workflows.draft.fold' || !result.workflow) {
+      setWorkflowPrompt((prev) => prev && { ...prev, folding: null })
+      return
+    }
+    const workflow = result.workflow
+    const trigger = triggerSelectionOf(workflow)
+    setWorkflowPrompt({
+      ...prompt,
+      base: workflow,
+      workflow: applyTriggerSelection(workflow, trigger),
+      trigger,
+      steps: workflow.drawflow.nodes.filter((n) => !isTriggerNode(n)).length,
+      stepList: reviewStepsOf(workflow),
+      suggestions: result.suggestions ?? [],
+      folding: null,
+      foldNote: result.folded ? t.chatFoldApplied : (result.reason ?? t.chatFoldRefused),
     })
   }
 
@@ -2197,8 +2689,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       <div className="chat-toolbar">
         {/*
           Icon-only toggles: three text labels squeezed the toolbar, so the
-          explanations moved into the hover tooltips. The workflow toggle shows
-          its ON state via the accent tint; hover any icon for the description.
+          explanations moved into the hover tooltips. The workflow-save card is
+          capped to workflow-generation mode (driven by `modeRef`).
         */}
         <div className="flex items-center gap-1">
           <ToolbarIconButton
@@ -2206,13 +2698,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             icon={<Highlighter size={15} className="shrink-0" aria-hidden="true" />}
             label={t.chatAttachSelection}
             onClick={() => setIncludeSelection((current) => !current)}
-          />
-          <ToolbarIconButton
-            active={workflowPromptEnabled}
-            hint={t.chatWorkflowPromptToggleHint}
-            icon={<WorkflowIcon size={15} className="shrink-0" aria-hidden="true" />}
-            label={t.chatWorkflowPromptToggle}
-            onClick={() => void changeWorkflowPromptEnabled(!workflowPromptEnabled)}
           />
         </div>
         <ToolbarIconButton
@@ -2294,12 +2779,25 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
           </div>
         ))}
 
+        {saveNotice && !workflowPrompt && (
+          <div className="confirm-card" data-kind="workflow">
+            <p className="hint" style={{ margin: 0 }} role="status">
+              {saveNotice}
+            </p>
+            <div className="actions">
+              <button onClick={() => setSaveNotice(null)} type="button">
+                {t.chatSaveWorkflowSkip}
+              </button>
+            </div>
+          </div>
+        )}
+
         {workflowPrompt && (
           <div className="confirm-card" data-kind="workflow">
             <strong>
-              {t.chatSaveWorkflowPrompt({
-                steps: workflowPrompt.workflow.drawflow.nodes.length,
-              })}
+              {workflowPrompt.source === 'draft'
+                ? t.chatSaveWorkflowDraftPrompt({ steps: workflowPrompt.steps })
+                : t.chatSaveWorkflowPrompt({ steps: workflowPrompt.steps })}
             </strong>
             <p className="hint" style={{ margin: '6px 0' }}>
               {workflowPrompt.workflow.name}
@@ -2308,6 +2806,109 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               <p className="hint text-err" style={{ margin: '6px 0' }} role="alert">
                 {workflowPrompt.saveError}
               </p>
+            )}
+            <WorkflowTriggerPicker
+              locale={locale}
+              onChange={changeTrigger}
+              selection={workflowPrompt.trigger}
+            />
+            {workflowPrompt.probesChecking && (
+              <p className="hint" style={{ margin: '4px 0' }} role="status">
+                {t.chatWorkflowProbeChecking}
+              </p>
+            )}
+            {!workflowPrompt.probesChecking &&
+              workflowPrompt.probes !== null &&
+              workflowPrompt.probes.length > 0 && (
+                <div className="ai-prefill-list" role="group" aria-label={t.chatWorkflowProbeTitle}>
+                  <p className="hint">{t.chatWorkflowProbeTitle}</p>
+                  {failingProbes(workflowPrompt.probes).length === 0 ? (
+                    <p className="hint" style={{ margin: '4px 0' }}>
+                      {t.chatWorkflowProbeAllOk({ count: workflowPrompt.probes.length })}
+                    </p>
+                  ) : (
+                    failingProbes(workflowPrompt.probes).map((probe) => (
+                      <div className="ai-prefill-item" key={probe.nodeId}>
+                        <span className="wf-input-name">{probe.blockId}</span>
+                        <span className="wf-input-default">
+                          {probe.status === 'ambiguous'
+                            ? t.chatWorkflowProbeAmbiguous({ count: probe.matches })
+                            : t.chatWorkflowProbeMissing}
+                          {` · ${probe.selector}`}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            {!workflowPrompt.probesChecking && workflowPrompt.probes === null && (
+              <p className="hint" style={{ margin: '4px 0' }}>
+                {t.chatWorkflowProbeUnverified}
+              </p>
+            )}
+            {(workflowPrompt.integrity.danglingVars.length > 0 ||
+              workflowPrompt.integrity.unreachable.length > 0) && (
+              <div
+                className="ai-prefill-list"
+                role="group"
+                aria-label={t.chatWorkflowIntegrityTitle}
+              >
+                <p className="hint text-err">{t.chatWorkflowIntegrityTitle}</p>
+                {workflowPrompt.integrity.danglingVars.map((dangling) => (
+                  <div
+                    className="ai-prefill-item"
+                    key={`${dangling.nodeId}:${dangling.param}:${dangling.reference}`}
+                  >
+                    <span className="wf-input-name">{`{{${dangling.reference}}}`}</span>
+                    <span className="wf-input-default">
+                      {t.chatWorkflowIntegrityDangling({ blockId: dangling.blockId })}
+                    </span>
+                  </div>
+                ))}
+                {workflowPrompt.integrity.unreachable.length > 0 && (
+                  <div className="ai-prefill-item">
+                    <span className="wf-input-name">
+                      {t.chatWorkflowIntegrityUnreachable({
+                        count: workflowPrompt.integrity.unreachable.length,
+                      })}
+                    </span>
+                    <span className="wf-input-default">
+                      {workflowPrompt.integrity.unreachable.join(', ')}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+            {declaredInputsOf(workflowPrompt.workflow).length > 0 && (
+              <div className="ai-prefill-list" role="group" aria-label={t.chatWorkflowInputsTitle}>
+                <p className="hint">{t.chatWorkflowInputsTitle}</p>
+                {declaredInputsOf(workflowPrompt.workflow).map((input) => (
+                  <label className="ai-prefill-item" key={input.name}>
+                    <span className="wf-input-name">{`{{${input.name}}}`}</span>
+                    <span className="wf-input-default">{input.defaultValue || '—'}</span>
+                  </label>
+                ))}
+                <p className="hint" style={{ margin: '4px 0 0' }}>
+                  {t.chatWorkflowInputsHint}
+                </p>
+              </div>
+            )}
+            {codeNodesOf(workflowPrompt.workflow).length > 0 && (
+              <div
+                className="ai-prefill-list"
+                role="group"
+                aria-label={t.chatWorkflowCodeNodesTitle}
+              >
+                <p className="hint">{t.chatWorkflowCodeNodesTitle}</p>
+                {codeNodesOf(workflowPrompt.workflow).map((node) => (
+                  <div className="ai-prefill-item" key={node.id}>
+                    <span>{node.reason || t.chatWorkflowCodeNodesNoReason}</span>
+                  </div>
+                ))}
+                <p className="hint" style={{ margin: '4px 0 0' }}>
+                  {t.chatWorkflowCodeNodesHint}
+                </p>
+              </div>
             )}
             {workflowPrompt.aiSteps.filter((step) =>
               workflowPrompt.workflow.drawflow.nodes.some((node) => node.id === step.nodeId),
@@ -2328,6 +2929,29 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                       <span>{step.label}</span>
                     </label>
                   ))}
+              </div>
+            )}
+            {workflowPrompt.suggestions.length > 0 && (
+              <div className="ai-prefill-list" role="group" aria-label={t.chatFoldTitle}>
+                <p className="hint">{t.chatFoldTitle}</p>
+                {workflowPrompt.suggestions.map((suggestion, index) => (
+                  <div
+                    className="ai-prefill-item"
+                    key={`${suggestion.kind}-${suggestion.runIds[0]}`}
+                  >
+                    <button
+                      disabled={workflowPrompt.folding !== null || workflowPrompt.saving}
+                      onClick={() => void foldRun(index)}
+                      type="button"
+                    >
+                      {workflowPrompt.folding === index ? t.chatFoldBusy : t.chatFoldApply}
+                    </button>
+                    <span>{suggestion.reason}</span>
+                  </div>
+                ))}
+                <p className="hint" style={{ margin: '4px 0 0' }}>
+                  {workflowPrompt.foldNote ?? t.chatFoldHint}
+                </p>
               </div>
             )}
             <div className="actions">
@@ -2503,6 +3127,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               <option value="readonly">🔒 {t.modeReadonly}</option>
               <option value="semi">🛡 {t.modeSemi}</option>
               <option value="full">⚡ {t.modeFull}</option>
+              <option value="workflow">🧩 {t.modeWorkflow}</option>
             </select>
             <button
               aria-label="mode info"
@@ -2534,6 +3159,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                   <b>⚡ {t.modeFull}</b>
                   <br />
                   {t.modeFullHint}
+                </p>
+                <p>
+                  <b>🧩 {t.modeWorkflow}</b>
+                  <br />
+                  {t.modeWorkflowHint}
                 </p>
               </div>
             )}

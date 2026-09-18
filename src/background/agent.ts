@@ -32,13 +32,31 @@ import {
   type WireTool,
   type WireToolCall,
 } from '../lib/llm'
+import {
+  isOperatorTool,
+  buildWorkflowAuthorTools,
+  buildWorkflowCategoryTools,
+  buildWorkflowCoreTools,
+  buildWorkflowEscapeTools,
+  OPERATOR_NAMES,
+  WORKFLOW_AUTHOR_OPERATOR_NAMES,
+  WORKFLOW_CATEGORY_TOOL_GROUPS,
+  WORKFLOW_ESCAPE_OPERATOR_NAMES,
+} from '../lib/workflow/operator-tools'
+import {
+  ADVERTISABLE_OPERATOR_CATEGORIES,
+  CORE_OPERATOR_TOOL_NAMES,
+  OPERATOR_CATEGORY_HINTS,
+  OPERATOR_CATEGORY_TOOL_NAMES,
+  categoryOfOperatorGroup,
+  isAdvertisableOperatorCategory,
+} from '../lib/workflow/operator-categories'
+import type { BlockCategory } from '../lib/workflow/blocks/types'
+import { composeWorkflowFromDraft } from './operator-tool-handler'
+import { runOperatorToolWithExecution } from './operator-tool-run'
 import type { AgentServerMessage, TurnTokenUsage } from '../lib/messages'
 import { notifySkillsChanged } from '../lib/messages'
-import {
-  renderAgentCatalogue,
-  renderSubAgentSection,
-  renderSupervisorGuide,
-} from '../lib/agents'
+import { renderAgentCatalogue, renderSubAgentSection, renderSupervisorGuide } from '../lib/agents'
 import { renderSkillCatalogue, renderSkillPrompt, validateSkill } from '../lib/skills'
 import { BUILT_IN_SUPERVISOR_ID, getBuiltinI18nKeys } from '../lib/builtin-agents'
 import type { Messages } from '../lib/i18n'
@@ -143,6 +161,20 @@ const READ_TOOLS = new Set([
   'list_network_requests',
 ])
 
+/**
+ * Does this tool touch the page? Covers both the raw page tools and every
+ * workflow operator, because an operator really clicks, types and navigates.
+ *
+ * Operators are only ADVERTISED in workflow mode, but that is not a gate: the
+ * advertised set is recomputed from the mode the turn STARTED with, so a turn
+ * that began in workflow generation and was switched to read-only mid-run
+ * would otherwise keep driving the page. Every mode gate must therefore go
+ * through this predicate rather than checking `ACTION_TOOLS` directly.
+ */
+export function isPageAction(name: string): boolean {
+  return ACTION_TOOLS.has(name) || isOperatorTool(name)
+}
+
 /** Fallback cap used when settings cannot supply one. */
 const DEFAULT_MAX_TOOL_ROUNDS = 20
 
@@ -233,6 +265,23 @@ export function buildSystemPrompt(options: {
     parts.push(
       'OPERATING MODE: FULL AUTO. Actions are pre-approved — do not ask for confirmation; batch multiple tool calls per response and take a fresh snapshot after navigations. Read errors back and stop if something looks dangerous.',
     )
+  } else if (options.mode === 'workflow') {
+    parts.push(
+      [
+        'OPERATING MODE: WORKFLOW GENERATE / 工作流生成.',
+        'Every step is a WORKFLOW OPERATOR call (`wf_op_*`). Each successful call really operates the page AND records the node, so the draft you build IS the workflow — the native action tools (`click` / `fill` / `open_url` / …) are not offered here because they would record nothing.',
+        `ALWAYS AVAILABLE / 常驻算子: ${CORE_OPERATOR_TOOL_NAMES.join(', ')} (navigate, click, fill-or-read a field, read text). Everything else needs its category: call \`use_operators\` with the categories this task needs — it REPLACES the current selection, so name everything you still need. Calling an undeclared operator also works: it activates that category and asks you to call it again, which costs a round.`,
+        'Target elements with `ref` from `snapshot_page` — the recorded node stores a durable selector; do not hand-write CSS.',
+        'EVERY STEP IS REPLAYED: no exploratory detours — going back, retrying a different element after a miss, or re-opening a view all become nodes.',
+        'READS RECORD NOTHING BY THEMSELVES. `read_current_page` / `snapshot_page` are for YOUR understanding only; to make a read part of the workflow call `wf_op_read-page` (whole page: visible text, your selection, or its HTML) or `wf_op_get-text` (one element, or every match with `multiple`).',
+        'Business data is never a literal: page content must be read by a step, never pasted in from what you saw. Small user knobs become workflow inputs (`inputName`); selectors, variable names and enums stay literal.',
+        'COLLECTING A LIST / 采集列表: `wf_op_get-text` with `multiple:true` + `saveData:true` + `dataColumn:"<name>"` appends every match to the data table — the only thing `wf_op_export-data` writes. A later read with a different `dataColumn` fills that column in on the same rows. If no read sets `saveData`, the export is an empty file.',
+        'SAVING TO DISK / 保存到本地: use `wf_op_save-local` (or `wf_op_export-data`) — it writes to the download folder configured in settings and reports success or failure. Never claim a file was written on the strength of a variable holding the text.',
+        'SCRIPTS ARE A LAST RESORT / 代码节点是最后手段: the workflow must stay maintainable by someone who does NOT read code, so `run_javascript` is NOT advertised. Exhaust the operators first; only when none can express the step, call `load_tools({groups:["operators_escape"]})` with a `justification` naming what you tried and why each fails — without it the call is refused.',
+        'Operators are pre-approved: do not ask, and batch independent calls. Use `wf_op_wait-connections` when a step needs the page to settle — it really waits, never "just in case".',
+        'When the task is done, END YOUR TURN. The panel shows a review card listing the recorded steps — do NOT call `compose_workflow` or any save tool.',
+      ].join(' '),
+    )
   } else {
     parts.push(
       'OPERATING MODE: SEMI-AUTO (default). Every page-changing action is shown to the user for one-shot approval; be precise so the summary is clear.',
@@ -308,13 +357,66 @@ export const TOOL_GROUPS: Record<string, readonly string[]> = {
   // Multi-agent delegation. On demand like the others so it stays out of the
   // first-round payload; never loaded for a sub-agent (recursion guard).
   delegate: ['delegate_to_agent'],
+  // Workflow generation. Legacy "everything at once" group, kept so a
+  // conversation that already loaded `operators` keeps working. It is a
+  // superset of `operators_author` + `operators_escape`, so `advertiseTools`
+  // treats it as "both on-demand tiers loaded".
+  operators: ['compose_workflow', ...OPERATOR_NAMES],
+  // The whole categorized operator set in one group: the "give me everything"
+  // escape hatch. It is the union of the per-category groups below, so the two
+  // tiers overlap on purpose and `TOOL_GROUP_BY_NAME` is built explicitly (see
+  // there) rather than by walking this object.
+  operators_author: [...WORKFLOW_AUTHOR_OPERATOR_NAMES],
+  // The escape hatch, on its own group so it can never arrive as a side effect
+  // of loading the authoring tail. `wf_op_javascript-code` lives here and
+  // nowhere else: a generated workflow must stay maintainable by someone who
+  // does not read code, so the block is reachable only after a deliberate load
+  // and only with a justification (see `operator-tool-run`).
+  operators_escape: [...WORKFLOW_ESCAPE_OPERATOR_NAMES],
+  // One group per advertisable catalog category (`op_interaction`,
+  // `op_browser`, …). This is the workflow-mode dispatch mechanism: the model
+  // declares the categories it needs through `use_operators` and only those
+  // schemas are advertised, which is what keeps the per-round payload from
+  // carrying all 54 operator schemas.
+  ...WORKFLOW_CATEGORY_TOOL_GROUPS,
 }
 
-const TOOL_GROUP_BY_NAME = new Map(
-  Object.entries(TOOL_GROUPS).flatMap(([group, names]) =>
-    names.map((name) => [name, group] as const),
-  ),
-)
+/**
+ * Tool → the on-demand group that owns it.
+ *
+ * Built explicitly instead of by walking `TOOL_GROUPS`, because several groups
+ * legitimately overlap: `operators_author` is the union of every category, the
+ * legacy `operators` group is a superset of both on-demand tiers, and the core
+ * four operators are also members of `op_interaction`. Object iteration order
+ * would then silently decide which group a stray `wf_op_*` call "belongs" to —
+ * and activating the wrong one either dumps 53 schemas into the next round or
+ * leaves the model unable to recover.
+ *
+ * Precedence, deliberately:
+ *   1. the broad operator groups, as the fallback;
+ *   2. the category groups — narrowest useful unit, so they win;
+ *   3. the escape hatch, which wins outright (`wf_op_javascript-code` must
+ *      never become reachable by activating a category);
+ *   4. everything else.
+ */
+const TOOL_GROUP_BY_NAME: ReadonlyMap<string, string> = (() => {
+  const map = new Map<string, string>()
+  const broad = ['operators', 'operators_author']
+  const categoryGroups = Object.keys(WORKFLOW_CATEGORY_TOOL_GROUPS)
+  for (const group of broad) {
+    for (const name of TOOL_GROUPS[group] ?? []) map.set(name, group)
+  }
+  for (const group of categoryGroups) {
+    for (const name of TOOL_GROUPS[group] ?? []) map.set(name, group)
+  }
+  for (const name of TOOL_GROUPS['operators_escape'] ?? []) map.set(name, 'operators_escape')
+  for (const [group, names] of Object.entries(TOOL_GROUPS)) {
+    if (broad.includes(group) || categoryGroups.includes(group)) continue
+    if (group === 'operators_escape') continue
+    for (const name of names) map.set(name, group)
+  }
+  return map
+})()
 
 export const TOOLS: WireTool[] = [
   {
@@ -820,7 +922,8 @@ export const TOOLS: WireTool[] = [
         properties: {
           agent: {
             type: 'string',
-            description: 'Exact specialist name from the specialist catalogue (e.g. "search-expert").',
+            description:
+              'Exact specialist name from the specialist catalogue (e.g. "search-expert").',
           },
           task: {
             type: 'string',
@@ -834,10 +937,31 @@ export const TOOLS: WireTool[] = [
           },
           expects: {
             type: 'string',
-            description: 'The expected deliverable shape (e.g. "a 10-row markdown table with URLs").',
+            description:
+              'The expected deliverable shape (e.g. "a 10-row markdown table with URLs").',
           },
         },
         required: ['agent', 'task'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'compose_workflow',
+      description:
+        'Workflow-generation mode only. Close the conversation draft built from prior wf_op_* calls into a Workflow and (by default) save it to the workflow editor. Returns the saved workflow id. After this call the draft is cleared. / 工作流生成模式专用：把当前会话累积的 wf_op_* 节点收尾成一个工作流（默认保存），返回保存后的工作流 id，调用后草稿被清空。',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Optional workflow display name.' },
+          description: { type: 'string', description: 'Optional human description.' },
+          save: {
+            type: 'boolean',
+            description:
+              'Default true. When false, only return the composed JSON without persisting.',
+          },
+        },
       },
     },
   },
@@ -870,11 +994,57 @@ function storeLoadedGroups(conversationId: string, groups: readonly string[]): S
   return existing
 }
 
+/**
+ * Conversation-scoped record of which operator CATEGORIES are active.
+ *
+ * Kept apart from {@link loadedToolGroupStore} because the two have opposite
+ * semantics and mixing them would break the mode in a subtle way:
+ *
+ *   - `load_tools` ACCUMULATES — the model asks for a group once and keeps it.
+ *   - `use_operators` REPLACES — the model names what the current step needs,
+ *     and the previous step's categories stop costing tokens.
+ *
+ * A category activated by a stray operator call (see the auto-load path) is
+ * merged into the current set rather than replacing it: the model is clearly
+ * mid-task, and silently dropping the categories it was already using would be
+ * worse than a slightly larger payload.
+ */
+const activeOperatorCategoryStore = new Map<string, Set<BlockCategory>>()
+
+function storeActiveOperatorCategories(
+  conversationId: string,
+  categories: Iterable<BlockCategory>,
+): Set<BlockCategory> {
+  const next = new Set(categories)
+  // Re-insert so Map iteration order doubles as LRU order.
+  activeOperatorCategoryStore.delete(conversationId)
+  activeOperatorCategoryStore.set(conversationId, next)
+  while (activeOperatorCategoryStore.size > LOADED_GROUP_STORE_CAP) {
+    const oldest = activeOperatorCategoryStore.keys().next().value
+    if (oldest === undefined) break
+    activeOperatorCategoryStore.delete(oldest)
+  }
+  return next
+}
+
+/** The categories currently active for a conversation (empty when none). */
+export function getActiveOperatorCategories(conversationId: string): Set<BlockCategory> {
+  return activeOperatorCategoryStore.get(conversationId) ?? new Set<BlockCategory>()
+}
+
 export interface ToolAdvertiseOptions {
   mode: AgentMode
   disabled?: ReadonlySet<string>
   /** On-demand groups already loaded for this conversation via `load_tools`. */
   loadedGroups?: ReadonlySet<string>
+  /**
+   * Operator categories currently ACTIVE for this conversation (see
+   * `use_operators`). Workflow mode advertises the core four operators plus
+   * exactly these categories' schemas. Unlike `loadedGroups` this set is
+   * replaced, not accumulated, so switching categories really does drop the
+   * previous ones from the payload.
+   */
+  activeOperatorCategories?: ReadonlySet<BlockCategory>
   /**
    * Specialist sub-agent tool boundary. When set, only tools in this set may be
    * advertised (load_tools is always included so grouped tools can be
@@ -883,6 +1053,57 @@ export interface ToolAdvertiseOptions {
    */
   allowTools?: ReadonlySet<string>
 }
+
+/**
+ * Tools workflow generation never advertises: everything that CHANGES the page.
+ *
+ * A workflow is only ever built from operator calls, because an operator call
+ * is the only thing that records a node. Leaving the native action tools
+ * advertised is how the mode stopped producing workflows — the model used the
+ * shorter, more familiar names, the draft stayed empty, and the save card had
+ * nothing to show. Each entry here has an operator equivalent:
+ *
+ *   click → wf_op_event-click · fill/select_option/set_checkbox → wf_op_forms
+ *   press_key → wf_op_press-key · scroll → wf_op_element-scroll
+ *   wait_for → wf_op_wait-connections · open_url/tab_* → wf_op_new-tab/switch-tab/…
+ *   save_local → wf_op_save-local
+ *
+ * `run_javascript` is deliberately NOT listed: it is withheld by its own branch
+ * below, which re-admits it once the `operators_escape` group is loaded.
+ */
+export const WORKFLOW_WITHHELD_TOOLS: ReadonlySet<string> = new Set([
+  'click',
+  'fill',
+  'select_option',
+  'set_checkbox',
+  'press_key',
+  'scroll',
+  'wait_for',
+  'open_url',
+  'tab_new',
+  'tab_switch',
+  'tab_close',
+  'pin_tab',
+  'unpin_tab',
+  'save_local',
+])
+
+/** Last definition wins, so a caller can override a base tool deliberately. */
+function dedupeToolsByName(tools: readonly WireTool[]): WireTool[] {
+  const byName = new Map<string, WireTool>()
+  for (const tool of tools) byName.set(tool.function.name, tool)
+  return [...byName.values()]
+}
+
+/**
+ * The always-advertised operator core, as a set.
+ *
+ * Needed by the auto-activate path: the core four are also members of
+ * `op_interaction`, so without this exemption a call to `wf_op_forms` while no
+ * category is active would be intercepted with "call it again" — for a tool
+ * that was advertised all along.
+ */
+const CORE_OPERATOR_TOOL_SET: ReadonlySet<string> = new Set(CORE_OPERATOR_TOOL_NAMES)
 
 /**
  * The tool schemas advertised for one conversation round: the core set, the
@@ -895,10 +1116,113 @@ export function advertiseTools({
   mode,
   disabled = new Set<string>(),
   loadedGroups = new Set<string>(),
+  activeOperatorCategories,
   allowTools,
 }: ToolAdvertiseOptions): WireTool[] {
   if (mode === 'chat') return []
-  return TOOLS.filter((tool) => {
+  if (mode === 'workflow') {
+    // Workflow generation is OPERATOR-DIRECT: the model performs the task with
+    // `wf_op_*` operator tools, each call really operates the page and appends
+    // a node to the conversation's draft, and the draft is what the save card
+    // persists.
+    //
+    // The native action tools (`click` / `fill` / `open_url` / …) are therefore
+    // WITHHELD. That is not a style preference: they record nothing, so a model
+    // that reaches for the shorter, more familiar action names completes the
+    // task and leaves an empty draft — the mode then has no workflow to offer,
+    // which is exactly how the save card disappeared. Everything they can do is
+    // expressible with an operator (see `WORKFLOW_WITHHELD_TOOLS`).
+    //
+    // Reads stay: `snapshot_page` is what `ref` targeting depends on, and
+    // `read_current_page` / `screenshot` / `recognize_image` observe without
+    // changing the page. `list_tabs` stays for the same reason — a task really
+    // can span tabs, and the tab *actions* are operators (`wf_op_switch-tab`,
+    // `wf_op_close-tab`, …) while only the listing is a read.
+    //
+    // Cost control is the other half. The 54 operator schemas are ~32.4k chars
+    // and used to be re-sent every round. Now only `CORE_OPERATOR_TOOL_NAMES`
+    // (four schemas, ~3.5k) is unconditional and the rest arrives per category,
+    // declared through `use_operators` — which REPLACES the active set, so a
+    // model that moves from scraping to data plumbing does not keep paying for
+    // both.
+    const authorLoaded = loadedGroups.has('operators_author') || loadedGroups.has('operators')
+    // The legacy `operators` group really does carry the escape hatch, so
+    // honour that rather than advertising a group whose tool list lies.
+    const escapeLoaded = loadedGroups.has('operators_escape') || loadedGroups.has('operators')
+    const core = TOOLS.filter((tool) => {
+      const name = tool.function.name
+      if (WORKFLOW_WITHHELD_TOOLS.has(name)) return false
+      // `compose_workflow` is in the `operators` group, so a conversation that
+      // loaded the legacy group would otherwise be handed a tool that composes
+      // a *second*, competing graph behind the panel's back.
+      if (name === 'compose_workflow') return false
+      // `load_tools` is replaced below by the workflow-specific copy, whose
+      // group menu only lists what this mode can widen with.
+      if (name === 'load_tools') return false
+      // `run_javascript` is core in every other mode; here it is the escape
+      // hatch, so it arrives only after a deliberate load and only with the
+      // justification the gate demands (see `runOperatorToolWithExecution`).
+      if (name === RUN_JAVASCRIPT_TOOL) return escapeLoaded
+      // The tab listing is a read and is always available; the tab actions are
+      // operators. Without this the whole `tabs` group would have to be loaded
+      // to see what is open — and loading it would hand back `tab_new` too.
+      if (name === 'list_tabs') return true
+      const group = TOOL_GROUP_BY_NAME.get(name)
+      if (group && !loadedGroups.has(group)) return false
+      return true
+    })
+    const operatorTools = [
+      ...buildWorkflowCoreTools(),
+      ...buildWorkflowCategoryTools(activeOperatorCategories ?? []),
+      ...(authorLoaded ? buildWorkflowAuthorTools() : []),
+      ...(escapeLoaded ? buildWorkflowEscapeTools() : []),
+    ]
+    // Dedupe by name: the core four are also members of `op_interaction`, so
+    // activating that category naively would advertise `wf_op_forms` twice and
+    // the provider rejects a tool list with repeated names.
+    return dedupeToolsByName([
+      ...core,
+      workflowLoadTools(),
+      useOperatorsTool(),
+      ...operatorTools,
+    ]).filter((tool) => {
+      if (disabled.has(tool.function.name)) return false
+      if (allowTools && !allowTools.has(tool.function.name)) return false
+      return true
+    })
+  }
+  return TOOLS.map((tool) => {
+    // Workflow-composition tools (`wf_op_*` / `compose_workflow`) are
+    // exclusive to workflow mode. In every other mode hide both operator
+    // groups from load_tools' group menu so the model never discovers them
+    // (the dispatch layer also refuses them; this only trims what's
+    // disclosed).
+    if (tool.function.name === 'load_tools') {
+      const params = tool.function.parameters as { properties?: Record<string, unknown> }
+      const properties = (params.properties ?? {}) as Record<string, unknown>
+      const groups = properties.groups as Record<string, unknown> | undefined
+      return {
+        ...tool,
+        function: {
+          ...tool.function,
+          parameters: {
+            ...params,
+            properties: {
+              ...properties,
+              groups: {
+                ...(groups ?? {}),
+                items: {
+                  type: 'string',
+                  enum: Object.keys(TOOL_GROUPS).filter((g) => !isWorkflowOnlyGroup(g)),
+                },
+              },
+            },
+          },
+        },
+      } as WireTool
+    }
+    return tool
+  }).filter((tool) => {
     const name = tool.function.name
     if (disabled.has(name)) return false
     if (allowTools && !allowTools.has(name)) return false
@@ -907,6 +1231,120 @@ export function advertiseTools({
     if (group && !loadedGroups.has(group)) return false
     return true
   })
+}
+
+/**
+ * The escape hatch's native-tool name. Named once because two places must
+ * agree on it: `advertiseTools` withholds it from workflow generation until
+ * the group is loaded, and the tool loop applies the justification gate to it.
+ */
+export const RUN_JAVASCRIPT_TOOL = 'run_javascript'
+
+/**
+ * Groups that exist only for workflow generation: their names must never
+ * appear in the ordinary `load_tools` menu, because outside this mode the
+ * dispatch layer refuses them anyway and disclosing them only teaches the
+ * model to ask for tools it cannot have.
+ */
+function isWorkflowOnlyGroup(group: string): boolean {
+  return (
+    group === 'operators' ||
+    group === 'operators_author' ||
+    group === 'operators_escape' ||
+    categoryOfOperatorGroup(group) !== undefined
+  )
+}
+
+/** Name of the workflow-mode category selector. Named once; dispatch and the auto-activate path share it. */
+export const USE_OPERATORS_TOOL = 'use_operators'
+
+/**
+ * `use_operators`: declare which operator categories this task needs.
+ *
+ * This is the whole token argument of operator-direct mode. All 54 operator
+ * schemas are ~32.4k chars and would otherwise be re-sent on every round of a
+ * 20-round budget; here the model names the one or two categories a step
+ * actually needs and only those arrive.
+ *
+ * The semantics are REPLACE, not accumulate, and the description says so: a
+ * model moving from scraping to data plumbing must be able to drop
+ * `interaction`, otherwise the set only ever grows back to "everything" and the
+ * saving disappears. The four core operators (`CORE_OPERATOR_TOOL_NAMES`) are
+ * always present, so a model that has not declared anything can still navigate,
+ * click, fill and read.
+ *
+ * Calling it for a category that is already active is a no-op, and the result
+ * echoes what changed so the model can see the effect without another round.
+ */
+function useOperatorsTool(): WireTool {
+  const menu = ADVERTISABLE_OPERATOR_CATEGORIES.map(
+    (category) => `"${category}" (${OPERATOR_CATEGORY_HINTS[category]})`,
+  ).join('; ')
+  return {
+    type: 'function',
+    function: {
+      name: USE_OPERATORS_TOOL,
+      description:
+        'Choose which groups of workflow step tools are available for the rest of this task. ' +
+        'REPLACES the current selection (it does not add to it), so name everything you still need. ' +
+        `Categories: ${menu}. ` +
+        `Always available without declaring anything: ${CORE_OPERATOR_TOOL_NAMES.join(', ')}. ` +
+        'Declare a category before using its tools; calling one that is not active also activates its category, but costs a round.',
+      parameters: {
+        type: 'object',
+        properties: {
+          categories: {
+            type: 'array',
+            items: { type: 'string', enum: [...ADVERTISABLE_OPERATOR_CATEGORIES] },
+            description:
+              'The categories to make available. Pass [] to fall back to the core four only.',
+          },
+        },
+        required: ['categories'],
+      },
+    },
+  } as WireTool
+}
+
+/**
+ * `load_tools`, re-skinned for workflow mode: same tool, but the group menu
+ * and the description only mention what this mode can actually widen with.
+ */
+function workflowLoadTools(): WireTool {
+  const base = TOOLS.find((tool) => tool.function.name === 'load_tools')!
+  const params = base.function.parameters as { properties?: Record<string, unknown> }
+  const properties = (params.properties ?? {}) as Record<string, unknown>
+  const groups = properties.groups as Record<string, unknown> | undefined
+  return {
+    ...base,
+    function: {
+      ...base.function,
+      description:
+        'Load the whole workflow step catalog at once, for the rare step no category covers. Group "operators_author": every `wf_op_*` block tool — loops, sub-workflows, data plumbing, disk writes, notifications. Prefer `use_operators` with the categories you need: this loads all 53 schemas and keeps them for the rest of the conversation. Group "operators_escape": `run_javascript` — raw JavaScript, LAST RESORT only, and every call must carry a `justification`. The remaining groups (`skills`, `data`, `ops`, `delegate`) are the ordinary non-page tools, available exactly as in the other modes.',
+      parameters: {
+        ...params,
+        properties: {
+          ...properties,
+          groups: {
+            ...(groups ?? {}),
+            // The tab group is deliberately absent: the tab LISTING is
+            // advertised outright and the tab ACTIONS are operators, so loading
+            // it would only hand back native tools that record nothing.
+            //
+            // Everything else that is not a page action stays loadable, so
+            // workflow generation really does have every capability of the
+            // other modes — it just has to express page changes as operators.
+            // (`save_local` lives in `data` but is withheld anyway; the
+            // operator `wf_op_save-local` is the recording equivalent.)
+            items: {
+              type: 'string',
+              enum: ['skills', 'data', 'ops', 'delegate', 'operators_author', 'operators_escape'],
+            },
+          },
+        },
+      },
+    },
+  } as WireTool
 }
 
 export interface AgentDeps {
@@ -1187,8 +1625,18 @@ export interface ToolContext {
    * and act tools resolve them here against the full durable target. The
    * snapshot's raw `target` objects never reach the model — that is where
    * most of the old snapshot's token weight lived. Cleared on navigation.
+   *
+   * `type` rides along so workflow generation can tell a password field from
+   * an ordinary input before typing into it (see `lib/workflow/secret-guard`).
    */
-  snapshotTargets?: Map<string, { target: Target; name: string }>
+  snapshotTargets?: Map<string, { target: Target; name: string; type?: string }>
+  /**
+   * Set by the operator branch of `executeTool` for the call in flight: the
+   * action name and RESOLVED args the history should record instead of the
+   * raw `wf_op_*` call. Cleared before every call so it can never leak from
+   * one step to the next.
+   */
+  operatorAudit?: { action: string; args: Record<string, unknown> }
   /**
    * Panel-window scope for this turn: every tab resolution, tab op and page
    * read stays inside this window. Undefined for unattended runs (legacy
@@ -1230,13 +1678,19 @@ function resolveTargetFrom(
 /** Stores the latest snapshot's ref→target mapping on the context. */
 function rememberSnapshotTargets(
   ctx: ToolContext,
-  snapshot: { elements: Array<{ ref?: unknown; name?: unknown; target?: unknown }> },
+  snapshot: {
+    elements: Array<{ ref?: unknown; name?: unknown; target?: unknown; type?: unknown }>
+  },
 ): void {
-  const map = new Map<string, { target: Target; name: string }>()
+  const map = new Map<string, { target: Target; name: string; type?: string }>()
   for (const el of snapshot.elements) {
     const target = asTarget(el.target)
     if (target && typeof el.ref === 'string') {
-      map.set(el.ref, { target, name: typeof el.name === 'string' ? el.name : '' })
+      map.set(el.ref, {
+        target,
+        name: typeof el.name === 'string' ? el.name : '',
+        ...(typeof el.type === 'string' && el.type ? { type: el.type } : {}),
+      })
     }
   }
   ctx.snapshotTargets = map.size > 0 ? map : undefined
@@ -2032,13 +2486,24 @@ export async function executeTool(
         }
       }
 
+      // When download directory is configured, always write silently without user confirmation
+      if (hasDir && dir) {
+        const ok = await writeFileToDownloadDir(dir, filename, content)
+        if (ok) return JSON.stringify({ ok: true, savedPath: filename, mode: 'auto' })
+        return JSON.stringify({
+          ok: false,
+          error: 'Failed to write to configured download directory. Check permissions.',
+        })
+      }
+
+      // No directory configured: fall back to user confirmation
       const transfer = resolveTransferMode('auto', settings.downloadAutoSave, hasDir)
       if (transfer === 'auto' && dir) {
         const ok = await writeFileToDownloadDir(dir, filename, content)
         if (ok) return JSON.stringify({ ok: true, savedPath: filename, mode: 'auto' })
       }
 
-      const res = await askSaveViaSidePanel(filename)
+      const res = await askSaveViaSidePanel(filename, { text: content })
       if (res.canceled)
         return JSON.stringify({ ok: false, canceled: true, error: 'User cancelled.' })
       if (res.ok) return JSON.stringify({ ok: true, savedPath: filename, mode: 'save-as' })
@@ -2465,8 +2930,87 @@ export async function executeTool(
       return JSON.stringify({ count: tasks.length, tasks })
     }
 
-    default:
+    case 'compose_workflow': {
+      throwIfAborted()
+      const out = await composeWorkflowFromDraft(ctx.conversationId, {
+        name: typeof args.name === 'string' ? args.name : undefined,
+        description: typeof args.description === 'string' ? args.description : undefined,
+        save: args.save === undefined ? true : Boolean(args.save),
+      })
+      if ('error' in out) return JSON.stringify({ error: out.error })
+      return JSON.stringify({
+        ok: true,
+        saved: out.saved,
+        workflowId: out.workflow.id,
+        name: out.workflow.name,
+        nodeCount: out.workflow.drawflow.nodes.length,
+      })
+    }
+
+    default: {
+      if (isOperatorTool(name)) {
+        throwIfAborted()
+        // Workflow generation is not a dry run: the operator really operates
+        // the page, and the node is recorded only once it succeeded. A failed
+        // action records nothing and hands the error back for the model to fix.
+        const out = await runOperatorToolWithExecution({
+          name,
+          args: (args ?? {}) as Record<string, unknown>,
+          conversationId: ctx.conversationId,
+          ...(ctx.snapshotTargets ? { snapshotTargets: ctx.snapshotTargets } : {}),
+          ...(ctx.scope ? { scope: ctx.scope } : {}),
+          // `executeTool`'s signal is optional; block executors require one.
+          signal: signal ?? new AbortController().signal,
+        })
+        if (!out.ok) return JSON.stringify({ error: out.error })
+        // Hand the audit record to `runOneToolCall`: the action history stores
+        // the browser action the operator really performed, with the resolved
+        // parameters, so the History tab reads naturally and the
+        // history→workflow path still compiles this conversation.
+        ctx.operatorAudit = out.audit
+        return JSON.stringify({
+          ok: true,
+          nodeId: out.nodeId,
+          workflowSize: out.workflowSize,
+          ...(out.executed ? {} : { recordedWithoutRunning: true }),
+          ...(out.note ? { note: out.note } : {}),
+          ...(out.branch ? { branch: out.branch } : {}),
+          // Tell the model its literal became a reference, so it does not
+          // "correct" the node back to the value on a later call.
+          ...(out.secretRedacted
+            ? {
+                secretRedacted: true,
+                secretNote:
+                  'A credential value in your parameters was replaced with its {{variable}} reference before the node was recorded. Pass references, never values.',
+              }
+            : {}),
+          // Same reason, for business data: a frozen keyword would make the
+          // workflow repeat this one run forever. Naming the new inputs lets
+          // the model REUSE them on later calls instead of re-typing literals.
+          ...(out.dynamicData
+            ? {
+                dynamicData: out.dynamicData,
+                dynamicNote:
+                  'Business values were recorded as references, not literals. ' +
+                  (out.dynamicData.declared.length > 0
+                    ? `These are now workflow inputs on the trigger: ${out.dynamicData.declared.join(', ')}. `
+                    : '') +
+                  'Reuse those names as {{name}} when the same value is needed again.',
+              }
+            : {}),
+          // The escape hatch was justified, so the user has to hear about it:
+          // they are the one who will maintain this workflow later.
+          ...(out.scriptJustification
+            ? {
+                scriptJustification: out.scriptJustification,
+                scriptNote:
+                  'This step uses raw JavaScript, which is a LAST RESORT. Keep going with declarative operators for the remaining steps, and state in your final summary which step needed code and why — the user maintains this workflow, so they must know.',
+              }
+            : {}),
+        })
+      }
       throw new Error(`Unknown tool: ${name}`)
+    }
   }
 }
 
@@ -2721,7 +3265,8 @@ function shortSummary(name: string, result: string): string {
         error?: string
         rounds?: number
       }
-      if (parsed.status === 'refused') return `Delegation refused: ${parsed.reason ?? ''}`.slice(0, 200)
+      if (parsed.status === 'refused')
+        return `Delegation refused: ${parsed.reason ?? ''}`.slice(0, 200)
       if (parsed.error) return `delegate_to_agent: ${parsed.error}`.slice(0, 200)
       return `Delegated to ${parsed.agent ?? 'agent'}: ${parsed.status ?? 'done'}${
         parsed.rounds ? ` (${parsed.rounds} rounds)` : ''
@@ -2742,18 +3287,25 @@ export async function runAgentTurn(
   // These reads are independent and all hit local storage / the settings cache,
   // but running them in parallel shaves the serial round trips off the
   // time-to-first-token — most noticeable for short chat-mode turns.
-  const [preferredProvider, skillList, initialMode, toolConfig, maxToolRounds, agentList, settings] =
-    await Promise.all([
-      deps.getProvider ? deps.getProvider().catch(() => undefined) : Promise.resolve(undefined),
-      listSkills(),
-      deps.getMode(),
-      deps.getToolConfig(),
-      deps.getMaxToolRounds(),
-      // Unattended runs (no enableDelegation) never read the agent store, so
-      // scheduled/Feishu prompts cannot fan out into sub-agents.
-      deps.enableDelegation ? listAgents() : Promise.resolve([] as Agent[]),
-      getSettings(),
-    ])
+  const [
+    preferredProvider,
+    skillList,
+    initialMode,
+    toolConfig,
+    maxToolRounds,
+    agentList,
+    settings,
+  ] = await Promise.all([
+    deps.getProvider ? deps.getProvider().catch(() => undefined) : Promise.resolve(undefined),
+    listSkills(),
+    deps.getMode(),
+    deps.getToolConfig(),
+    deps.getMaxToolRounds(),
+    // Unattended runs (no enableDelegation) never read the agent store, so
+    // scheduled/Feishu prompts cannot fan out into sub-agents.
+    deps.enableDelegation ? listAgents() : Promise.resolve([] as Agent[]),
+    getSettings(),
+  ])
   const provider = preferredProvider ?? (await getActiveProvider())
   const activeSkill = deps.skillId ? await getSkill(deps.skillId) : undefined
   const catalogue = activeSkill ? [] : skillList
@@ -2777,8 +3329,7 @@ export async function runAgentTurn(
       // specialists can never delegate.
       const groups = Object.entries(TOOL_GROUPS)
         .filter(
-          ([group, names]) =>
-            group !== 'delegate' && names.some((name) => toolAllowSet!.has(name)),
+          ([group, names]) => group !== 'delegate' && names.some((name) => toolAllowSet!.has(name)),
         )
         .map(([group]) => group)
       storeLoadedGroups(deps.conversationId, groups)
@@ -2798,9 +3349,7 @@ export async function runAgentTurn(
       const specialists = agentList.filter((entry) => entry.role === 'specialist')
       const specialistCatalogue = renderAgentCatalogue(specialists, messages)
       const supervisor =
-        agentList.find(
-          (entry) => entry.id === BUILT_IN_SUPERVISOR_ID && entry.delegatable,
-        ) ??
+        agentList.find((entry) => entry.id === BUILT_IN_SUPERVISOR_ID && entry.delegatable) ??
         agentList.find((entry) => entry.role === 'supervisor' && entry.delegatable)
       if (supervisor && specialistCatalogue) {
         supervisorBlock = { agent: supervisor, catalogue: specialistCatalogue }
@@ -2877,12 +3426,13 @@ export async function runAgentTurn(
 
     const messages: WireMessage[] = [{ role: 'system', content: systemPrompt }, ...history]
 
-    // Recomputed per round: a load_tools call in this turn must widen the
-    // advertised set from the very next request on.
+    // Recomputed per round: a `load_tools` or `use_operators` call in this turn
+    // must change the advertised set from the very next request on.
     const tools = advertiseTools({
       mode: initialMode,
       disabled,
       loadedGroups: ctx.loadedGroups,
+      activeOperatorCategories: getActiveOperatorCategories(ctx.conversationId),
       ...(ctx.toolAllowSet ? { allowTools: ctx.toolAllowSet } : {}),
     })
 
@@ -3037,6 +3587,48 @@ function enrichToolOutputError(
   return enrichToolError(record, history, name, lastUrl)
 }
 
+/**
+ * PURE one-click-approval predicate for a tool call: does `mode` auto-approve
+ * `name` without popping the confirm card?
+ *
+ * Full auto and workflow generation are the two never-ask modes — every tool
+ * the model calls runs immediately, whether it mutates the page or only reads
+ * it. In workflow generation the model must not stall behind one-click
+ * approval (the whole point is autonomous drafting); if it did, `open_url` /
+ * `click` would hang on a card and the turn would stop.
+ *
+ * In every other mode only non-action/non-read tools (get_secret, load_tools,
+ * pure queries) are auto-approved; anything that opens / clicks / types /
+ * attaches a page still reaches the approval card. Semi mode's granted-page
+ * read-drift is resolved separately in {@link runOneToolCall} against the
+ * live tab URL.
+ *
+ * Exported and side-effect free so the confirmation contract can be
+ * unit-tested without a browser driver.
+ */
+export function modeAutoApproves(mode: AgentMode, name: string): boolean {
+  if (mode === 'full' || mode === 'workflow') return true
+  return !(isPageAction(name) || READ_TOOLS.has(name))
+}
+
+/**
+ * The (action, args) pair the action history records for one tool call.
+ *
+ * A workflow operator is recorded as the browser action it actually performed,
+ * with its RESOLVED parameters — see `operatorAuditCall`. Everything else
+ * records itself. The raw tool name still drives execution, the model-facing
+ * result and the transcript; only the audit trail is remapped.
+ */
+function auditOf(
+  name: string,
+  args: Record<string, unknown>,
+  ctx: ToolContext,
+): { name: string; args: Record<string, unknown> } {
+  const audit = ctx.operatorAudit
+  if (!audit || !isOperatorTool(name)) return { name, args }
+  return { name: audit.action, args: audit.args }
+}
+
 async function runOneToolCall(
   call: WireToolCall,
   history: WireMessage[],
@@ -3044,6 +3636,9 @@ async function runOneToolCall(
   ctx: ToolContext,
 ): Promise<void> {
   const name = call.function.name
+  // Hygiene: the audit record is written by `executeTool`, and a call that is
+  // refused before reaching it must not inherit the previous step's record.
+  ctx.operatorAudit = undefined
   const pushResult = (content: string): void => {
     history.push({ role: 'tool', tool_call_id: call.id, content, name })
   }
@@ -3122,6 +3717,11 @@ async function runOneToolCall(
     const requested = Array.isArray(args.groups) ? args.groups.map(String) : []
     let valid = requested.filter((group) => Boolean(TOOL_GROUPS[group]))
     const invalid = requested.filter((group) => !TOOL_GROUPS[group])
+    // Workflow composition is exclusive to workflow mode: never let a
+    // non-workflow turn pull an operator group into the conversation.
+    if ((await deps.getMode()) !== 'workflow') {
+      valid = valid.filter((group) => !isWorkflowOnlyGroup(group))
+    }
     // A specialist can only load groups that contribute whitelisted tools,
     // and never the delegate group (no recursive delegation).
     if (ctx.subAgent) {
@@ -3132,9 +3732,12 @@ async function runOneToolCall(
       )
     }
     if (valid.length === 0) {
+      // Name only the groups this mode can actually offer: listing the
+      // workflow-only ones here would hand the model a menu it is refused.
+      const offered = Object.keys(TOOL_GROUPS).filter((group) => !isWorkflowOnlyGroup(group))
       pushResult(
         JSON.stringify({
-          error: `No valid group requested. Valid groups: ${Object.keys(TOOL_GROUPS).join(', ')}.`,
+          error: `No valid group requested. Valid groups: ${offered.join(', ')}.`,
         }),
       )
       deps.send({ type: 'tool.result', name, summary: 'load_tools: no valid group' })
@@ -3162,13 +3765,73 @@ async function runOneToolCall(
     return
   }
 
+  // The category selector: replace the active operator-category set so the
+  // next round advertises exactly the schemas this step needs. Pure
+  // bookkeeping — no approval, no page touch, and no node recorded (it chooses
+  // what the model can build WITH, it is not itself a workflow step).
+  if (name === USE_OPERATORS_TOOL) {
+    if ((await deps.getMode()) !== 'workflow') {
+      pushResult(
+        JSON.stringify({
+          error: `The "${USE_OPERATORS_TOOL}" tool is only available in workflow-generation mode.`,
+        }),
+      )
+      deps.send({
+        type: 'tool.result',
+        name,
+        summary: `Blocked (${name} is workflow-mode only)`,
+      })
+      return
+    }
+    const requested = Array.isArray(args.categories) ? args.categories.map(String) : []
+    const valid = requested.filter(isAdvertisableOperatorCategory)
+    const invalid = requested.filter((category) => !valid.includes(category as BlockCategory))
+    const before = getActiveOperatorCategories(ctx.conversationId)
+    const active = storeActiveOperatorCategories(ctx.conversationId, valid)
+    const advertised = [
+      ...CORE_OPERATOR_TOOL_NAMES,
+      ...valid.flatMap((category) => [...OPERATOR_CATEGORY_TOOL_NAMES[category]]),
+    ]
+    pushResult(
+      JSON.stringify({
+        active: [...active],
+        added: [...active].filter((category) => !before.has(category)),
+        removed: [...before].filter((category) => !active.has(category)),
+        ...(invalid.length > 0 ? { unknownCategories: invalid } : {}),
+        // Deduped: the core four are members of `interaction`, so naming it
+        // would otherwise report `wf_op_forms` twice.
+        toolsAdvertised: [...new Set(advertised)],
+      }),
+    )
+    deps.send({
+      type: 'tool.result',
+      name,
+      summary:
+        active.size > 0
+          ? `Operator categories: ${[...active].join(', ')}`
+          : 'Operator categories cleared (core four only)',
+    })
+    return
+  }
+
   // A tool hidden inside an unloaded group was never advertised, so a call to
   // it is a hallucination — but a deliberate one: the model clearly needs it.
   // Auto-load the group right away (equivalent to the model calling
   // load_tools first) and instruct an immediate retry. Refusing with merely a
   // hint made weaker models give up and claim "tool limitations" to the user.
   const groupName = TOOL_GROUP_BY_NAME.get(name)
-  if (groupName && !ctx.loadedGroups?.has(groupName)) {
+  // An operator whose CATEGORY was never declared is the common case now that
+  // the catalog is dispatched by category: activate the category and retry,
+  // rather than dumping the whole 53-schema catalog into the next round. The
+  // core four are exempt — they are advertised unconditionally, so a call to
+  // one is never a stray call.
+  const operatorCategory = groupName ? categoryOfOperatorGroup(groupName) : undefined
+  const groupUnavailable = CORE_OPERATOR_TOOL_SET.has(name)
+    ? false
+    : operatorCategory
+      ? !getActiveOperatorCategories(ctx.conversationId).has(operatorCategory)
+      : Boolean(groupName) && !ctx.loadedGroups?.has(groupName!)
+  if (groupName && groupUnavailable) {
     // Sub-agent boundary: never auto-load the delegate group (recursion
     // guard) or a group whose tools the specialist's whitelist excludes.
     const blockedForSubAgent =
@@ -3184,6 +3847,42 @@ async function runOneToolCall(
         type: 'tool.result',
         name,
         summary: `Blocked (${name} not allowed for this sub-agent)`,
+      })
+      return
+    }
+    // Composition tools are workflow-mode-only; never auto-load one of their
+    // groups to answer a stray call outside workflow generation.
+    if (isWorkflowOnlyGroup(groupName) && (await deps.getMode()) !== 'workflow') {
+      pushResult(
+        JSON.stringify({
+          error: `The "${name}" tool is only available in workflow-generation mode.`,
+        }),
+      )
+      deps.send({
+        type: 'tool.result',
+        name,
+        summary: `Blocked (${name} is workflow-mode only)`,
+      })
+      return
+    }
+    if (operatorCategory) {
+      // Activate just this category. Adding to the current set (rather than
+      // replacing it) keeps whatever the model was already using: it is
+      // mid-task, and dropping those schemas to teach a lesson about declaring
+      // categories early would cost more than the tokens saved.
+      storeActiveOperatorCategories(ctx.conversationId, [
+        ...getActiveOperatorCategories(ctx.conversationId),
+        operatorCategory,
+      ])
+      pushResult(
+        JSON.stringify({
+          error: `"${name}" was not available: the "${operatorCategory}" operator category has been activated now and will be advertised on the next request. Call "${name}" again immediately — do not tell the user you lack tools.`,
+        }),
+      )
+      deps.send({
+        type: 'tool.result',
+        name,
+        summary: `Activated operator category ${operatorCategory} — retry ${name}`,
       })
       return
     }
@@ -3221,8 +3920,10 @@ async function runOneToolCall(
   // Read-only mode refuses any action that changes the page. Defensive: the
   // tool isn't even advertised in this mode (when the turn started there),
   // but a turn that began in another mode can be switched to read-only
-  // mid-run; actions from that point must stop.
-  if ((mode === 'readonly' || mode === 'chat') && ACTION_TOOLS.has(name)) {
+  // mid-run; actions from that point must stop. `isPageAction` covers the
+  // workflow operators, which are the dangerous case — a workflow-generation
+  // turn keeps them in its advertised set for the whole turn.
+  if ((mode === 'readonly' || mode === 'chat') && isPageAction(name)) {
     const inChat = mode === 'chat'
     const message = inChat
       ? 'Chat mode is on. No page actions or tools are available. Ask the user to switch to Semi or Full auto in the panel to operate the page.'
@@ -3246,19 +3947,14 @@ async function runOneToolCall(
     return
   }
 
-  const needsApproval = ACTION_TOOLS.has(name) || READ_TOOLS.has(name)
   let approved = true
-  if (needsApproval) {
+  if (!modeAutoApproves(mode, name)) {
+    // Semi (and below): an action tool, or a read that drifted off the user's
+    // granted page, still reaches the one-click card.
     let mustConfirm = true
-    // Full auto means no confirmations — neither for actions that change the
-    // page nor for reads. The user chose this mode deliberately (the panel
-    // shows a warning before persisting it), so gating reads behind the attach
-    // checkbox would still pop a dialog and contradict the "full auto" promise.
-    if (mode === 'full') {
-      mustConfirm = false
-    } else if (READ_TOOLS.has(name) && deps.grantedPageUrl) {
-      // Semi mode: a page attached by the user is already consented to, but a
-      // read that drifted to another page still asks.
+    if (READ_TOOLS.has(name) && deps.grantedPageUrl) {
+      // A page attached by the user is already consented to, but a read that
+      // drifted to another page still asks.
       try {
         const tab = await activeTab()
         mustConfirm = needsConfirmation(name, deps.grantedPageUrl, tab?.url)
@@ -3299,15 +3995,16 @@ async function runOneToolCall(
     } catch {
       /* keep ok */
     }
+    const audit = auditOf(name, args, ctx)
     await recordAction(
       deps.conversationId,
-      name,
-      describeAction(name, args, ctx.snapshotTargets),
+      audit.name,
+      describeAction(audit.name, audit.args, ctx.snapshotTargets),
       ctx.lastUrl ? hostOf(ctx.lastUrl) : undefined,
       approved,
       ok,
-      describeDetail(name, args, ctx.snapshotTargets, output),
-      args,
+      describeDetail(audit.name, audit.args, ctx.snapshotTargets, output),
+      audit.args,
     )
   } catch (error) {
     // A termination must unwind the whole turn, not be recorded as a failed
@@ -3321,15 +4018,16 @@ async function runOneToolCall(
           : String(error)
     pushResult(enrichToolError({ error: message }, history, name, ctx.lastUrl))
     deps.send({ type: 'tool.result', name, summary: `Failed: ${message}` })
+    const audit = auditOf(name, args, ctx)
     await recordAction(
       deps.conversationId,
-      name,
-      describeAction(name, args, ctx.snapshotTargets),
+      audit.name,
+      describeAction(audit.name, audit.args, ctx.snapshotTargets),
       ctx.lastUrl ? hostOf(ctx.lastUrl) : undefined,
       approved,
       false,
-      [...describeDetail(name, args, ctx.snapshotTargets), `Error: ${message}`],
-      args,
+      [...describeDetail(audit.name, audit.args, ctx.snapshotTargets), `Error: ${message}`],
+      audit.args,
     )
   }
 }

@@ -36,6 +36,7 @@ import {
   hasPluginWindows,
   initScopeWindowCleanup,
   isPluginWindow,
+  currentPluginScope,
   latestPluginWindowId,
   listNormalWindows,
   normalScopeFromWindowId,
@@ -66,6 +67,8 @@ import {
   startupWorkflows,
   initShortcutTriggers,
   handleShortcutPressed,
+  initElementChangeTriggers,
+  handleElementChange,
   setWorkflowRunner,
   rescheduleAllWorkflowTriggers,
   isWorkflowTriggerAlarm,
@@ -108,6 +111,17 @@ import {
   touchConversation,
 } from '../lib/storage'
 import { runAgentTurn } from './agent'
+import {
+  clearDraft,
+  composeWorkflowFromDraft,
+  draftRepeatRuns,
+  foldDraftRun,
+} from './operator-tool-handler'
+import { createCollapseProbe } from './collapse-probe'
+import { forgetGenerationSecrets } from './operator-tool-run'
+import { resolveWorkflowForSave } from './history-compile'
+import { probeWorkflowSelectors } from './selector-probe'
+import { validateWorkflowForRun } from '../lib/workflow/validation'
 import { activeTab, readActivePage, readActiveSelection } from './page'
 import {
   clearRuns,
@@ -296,6 +310,7 @@ chrome.runtime.onStartup.addListener(() => {
       console.error('[Browser Copilot] on-startup workflows failed', error),
     )
   void initShortcutTriggers()
+  void initElementChangeTriggers()
 })
 
 // Also fire on-startup workflows once when the service worker boots after install.
@@ -687,6 +702,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       // 3. Keyboard-shortcut triggers from the injected tab listener.
       if (await handleShortcutPressed(message, sender)) {
+        sendResponse({ ok: true })
+        return
+      }
+
+      // 3.1 Element-change triggers from an injected MutationObserver.
+      if (await handleElementChange(message, sender)) {
         sendResponse({ ok: true })
         return
       }
@@ -1143,6 +1164,98 @@ async function handleCommand(
       await rescheduleAllWorkflowTriggers()
       return { type: 'workflows.delete' }
 
+    case 'workflows.draft.get': {
+      // Materialise the workflow for the panel's review card without persisting
+      // it. The user reviews and clicks save themselves.
+      //
+      // `resolveWorkflowForSave` owns the source order (operator draft, then
+      // compiled action history) AND the third outcome — "nothing to save, and
+      // here is why". It is deliberately not inlined here: the previous version
+      // of this case returned early whenever the draft was empty, which meant
+      // the history fallback below it never ran and the panel got neither a
+      // workflow nor an explanation. That is how the save card disappeared.
+      //
+      // The selector probes used to run here. They now go through
+      // `workflows.probe`, because probing injects a script into the page and
+      // must never be able to delay or swallow the card.
+      const conversation = (await listConversations()).find(
+        (entry) => entry.id === command.conversationId,
+      )
+      const resolved = await resolveWorkflowForSave(
+        command.conversationId,
+        conversation?.title?.trim() || 'Workflow',
+      )
+      if ('empty' in resolved) return { type: 'workflows.draft', empty: resolved.empty }
+      return {
+        type: 'workflows.draft',
+        workflow: resolved.workflow,
+        source: resolved.source,
+        // Pure detection, so the card can offer folding without a round trip.
+        // Only meaningful for a draft the model built step by step; a compiled
+        // history has no repeated runs to detect.
+        ...(resolved.source === 'draft'
+          ? { suggestions: await draftRepeatRuns(command.conversationId) }
+          : {}),
+      }
+    }
+
+    case 'workflows.probe': {
+      // Ask the page whether the graph's selectors still resolve. Re-resolving
+      // the workflow instead of taking it from the panel keeps this command
+      // stateless, and the answer is about the page — not about the trigger
+      // tweaks the panel may have made since.
+      const conversation = (await listConversations()).find(
+        (entry) => entry.id === command.conversationId,
+      )
+      const resolved = await resolveWorkflowForSave(
+        command.conversationId,
+        conversation?.title?.trim() || 'Workflow',
+      )
+      if ('empty' in resolved) return { type: 'workflows.probe', probes: null }
+      // A null scope (no plugin window reachable) is "not verified", and
+      // `probeWorkflowSelectors` reports that rather than pretending success.
+      const scope = await currentPluginScope()
+      return {
+        type: 'workflows.probe',
+        probes: await probeWorkflowSelectors(resolved.workflow, scope),
+      }
+    }
+
+    case 'workflows.draft.fold': {
+      // Folding rewrites the DRAFT (not a saved workflow): the user is still
+      // reviewing, and an unwanted fold is undone by discarding the card.
+      const outcome = await foldDraftRun(
+        command.conversationId,
+        command.index,
+        // The panel is the user's active surface, so probe the tab it is
+        // working in — the same scope the other panel-driven paths resolve.
+        createCollapseProbe(await currentPluginScope()),
+        new AbortController().signal,
+      )
+      const out = await composeWorkflowFromDraft(command.conversationId, { save: false })
+      if ('error' in out) {
+        return { type: 'workflows.draft.fold', folded: false, error: out.error }
+      }
+      return {
+        type: 'workflows.draft.fold',
+        workflow: out.workflow,
+        folded: outcome.folded,
+        ...(outcome.reason ? { reason: outcome.reason } : {}),
+        suggestions: await draftRepeatRuns(command.conversationId),
+      }
+    }
+
+    case 'workflows.draft.clear': {
+      // Panel finishes with a draft (saved or discarded) — drop both the
+      // cached copy and the persisted mirror so the next operator-tool turn in
+      // the same conversation starts fresh instead of appending to an
+      // already-saved workflow. Resolved credentials go with it: a value must
+      // not outlive the generation that resolved it.
+      await clearDraft(command.conversationId)
+      forgetGenerationSecrets(command.conversationId)
+      return { type: 'workflows.draft.clear' }
+    }
+
     case 'workflows.review': {
       // Null (unavailable) is a valid outcome: the panel then keeps every
       // step. A real failure (timeout / endpoint error / unusable reply)
@@ -1166,6 +1279,18 @@ async function handleCommand(
     case 'workflows.run': {
       const workflow = await getWorkflow(command.id)
       if (!workflow) throw new Error('Workflow not found.')
+      // Refuse to start a workflow that cannot work. This gate is ONLY on the
+      // user-initiated run path: `executeWorkflow` itself must stay permissive,
+      // because the alarm / context-menu / shortcut triggers reach it with
+      // graphs that are already known-good, and a newly added rule must not be
+      // able to break them. Warnings are surfaced to the run log instead of
+      // blocking — an unarmed trigger kind still runs perfectly well when the
+      // user starts it by hand.
+      const gate = validateWorkflowForRun(workflow)
+      if (gate.errors.length > 0) {
+        throw new Error(`无法运行该工作流：\n${gate.errors.map((e) => `· ${e}`).join('\n')}`)
+      }
+      for (const warning of gate.warnings) console.warn(`[workflows.run] ${warning}`)
       // Optional AI takeover on plain runs (settings.takeoverOnRun, default
       // off): a failed node gets one agent episode, its fix lands as pending
       // for user confirmation — same closure as the debug session, without

@@ -8,6 +8,7 @@ import {
   validateSkill,
   wrapSkillDirective,
 } from '../src/lib/skills'
+import { BUILT_IN_SKILLS } from '../src/lib/builtin-skills'
 import type { Skill } from '../src/lib/types'
 
 function skill(overrides: Partial<Skill> = {}): Skill {
@@ -154,5 +155,31 @@ describe('wrapSkillDirective', () => {
     expect(wrapped).toContain('Summarise')
     expect(wrapped).toContain('MUST apply')
     expect(wrapped).toContain('Translate this paragraph.')
+  })
+})
+
+/**
+ * The built-in workflow generator ships its whole operator guide as skill
+ * instructions, and the store truncates anything past
+ * `MAX_INSTRUCTIONS_LENGTH` (`.slice`). A guide that grows past the cap would
+ * lose its TAIL — the task instructions the model actually acts on — with no
+ * error anywhere. Pin the ceiling so that fails here instead of silently in
+ * production.
+ */
+describe('built-in skill instruction budget', () => {
+  it('keeps every built-in skill under the instruction cap', () => {
+    for (const builtin of BUILT_IN_SKILLS) {
+      expect(
+        builtin.instructions.length,
+        `${builtin.id} is ${builtin.instructions.length} chars`,
+      ).toBeLessThanOrEqual(MAX_INSTRUCTIONS_LENGTH)
+    }
+  })
+
+  it('leaves headroom in the workflow generator guide', () => {
+    // Not just under the cap: close enough to it that the next paragraph would
+    // silently truncate. Keep a working margin.
+    const generator = BUILT_IN_SKILLS.find((s) => s.id === 'builtin-workflow-generator')!
+    expect(MAX_INSTRUCTIONS_LENGTH - generator.instructions.length).toBeGreaterThanOrEqual(200)
   })
 })

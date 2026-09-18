@@ -23,8 +23,14 @@ export type { LocaleSetting }
  * - `full`: the agent may act without per-action confirmation. Reading a
  *   page still follows the attach consent rule, and all actions are still
  *   recorded in history.
+ * - `workflow`: drives the page exactly like `full`, but every step goes
+ *   through a workflow-operator tool (`wf_op_*`) instead of the raw page
+ *   tools. Each call really executes the block on the page and, only if it
+ *   succeeded, appends a node to the conversation's `WorkflowDraft`; the
+ *   side panel then offers to save that draft as a runnable workflow.
+ *   Inherits full-auto's "no per-action confirmation" semantics.
  */
-export type AgentMode = 'chat' | 'readonly' | 'semi' | 'full'
+export type AgentMode = 'chat' | 'readonly' | 'semi' | 'full' | 'workflow'
 
 /**
  * A reusable instruction pack.
@@ -59,13 +65,7 @@ export interface Skill {
 export type AgentRole = 'supervisor' | 'specialist'
 
 /** Functional area an agent specialises in; drives the catalogue wording. */
-export type AgentDomain =
-  | 'search'
-  | 'writing'
-  | 'operations'
-  | 'workflow'
-  | 'analysis'
-  | 'custom'
+export type AgentDomain = 'search' | 'writing' | 'operations' | 'workflow' | 'analysis' | 'custom'
 
 export interface Agent {
   id: string
@@ -216,11 +216,6 @@ export interface Settings {
    * 日常聊天成本。providerId/model 任一为空时回退到当前激活的会话模型。
    */
   takeoverModel: VisionConfig
-  /**
-   * 对话结束后是否提示“保存为工作流”。开启时回合结束展示保存卡片；
-   * 关闭时回合结束不做任何处理（不发 history 查询、不出卡片）。默认开启。
-   */
-  chatWorkflowPromptEnabled: boolean
   /**
    * 普通运行（面板“运行”按钮）失败时也允许 AI 接管。消耗模型调用，
    * 默认关闭；调试（workflows.debug）始终启用接管，与此开关无关。

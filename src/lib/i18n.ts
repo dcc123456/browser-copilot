@@ -348,17 +348,91 @@ export interface Messages {
   chatSlashNoMatch: string
   /** Ask whether to persist this session's operations as a reusable workflow. */
   chatSaveWorkflowPrompt: (params: { steps: number }) => string
+  /** Card title in workflow-generation mode (draft comes from operator tools, not history). */
+  chatSaveWorkflowDraftPrompt: (params: { steps: number }) => string
   chatSaveWorkflowSave: string
   chatSaveWorkflowSkip: string
+  /**
+   * Shown when a workflow-generation turn recorded nothing: the model never
+   * changed the page. Silence here is indistinguishable from a broken feature.
+   */
+  chatWorkflowNothingSaved: string
+  /** Same, but the model tried and every action failed — worth retrying. */
+  chatWorkflowNothingSavedFailed: string
+  /** The selector probe is still running, so nothing is known yet. */
+  chatWorkflowProbeChecking: string
+  /** Heading of the graph-consistency list on the save card. */
+  chatWorkflowIntegrityTitle: string
+  /** One `{{reference}}` no block produces and no input declares. */
+  chatWorkflowIntegrityDangling: (params: { blockId: string }) => string
+  /** Steps the trigger head cannot reach, so the replay will never run them. */
+  chatWorkflowIntegrityUnreachable: (params: { count: number }) => string
   chatSaveWorkflowSaved: (params: { name: string }) => string
   /** Title of the AI-prefill checkbox list on the workflow save card. */
   chatSaveWorkflowAiTitle: string
-  /** Toolbar switch controlling whether the end-of-turn save card appears. */
-  chatWorkflowPromptToggle: string
-  /** Tooltip for the toolbar switch. */
-  chatWorkflowPromptToggleHint: string
+  /** Heading for the declared-inputs list on the workflow save card. */
+  chatWorkflowInputsTitle: string
+  /** Hint under the declared-inputs list: the recorded value is a default. */
+  chatWorkflowInputsHint: string
+  /** Heading of the "this workflow needs code" list on the save card. */
+  chatWorkflowCodeNodesTitle: string
+  /** Hint under the code-node list: why it matters to a non-coder. */
+  chatWorkflowCodeNodesHint: string
+  /** Heading of the selector-health list on the save card. */
+  chatWorkflowProbeTitle: string
+  /** Every probed selector matched exactly one element. */
+  chatWorkflowProbeAllOk: (params: { count: number }) => string
+  /** The page could not be probed, so nothing was verified. */
+  chatWorkflowProbeUnverified: string
+  /** One probed selector matched nothing — the step will do nothing at replay. */
+  chatWorkflowProbeMissing: string
+  /** One probed selector matched several elements — the executor may pick the wrong one. */
+  chatWorkflowProbeAmbiguous: (params: { count: number }) => string
+  /** Fallback label for a code node that carries no description of its own. */
+  chatWorkflowCodeNodesNoReason: string
   /** Optional button on the save card that runs the (token-costly) AI review. */
   chatSaveWorkflowAiReview: string
+  /** Heading of the trigger picker on the save-as-workflow card. */
+  chatSaveWorkflowTriggerTitle: string
+  /** Shown when the chosen trigger never fires on its own. */
+  chatSaveWorkflowTriggerHintManual: string
+  /** Shown when the chosen trigger fires automatically after saving. */
+  chatSaveWorkflowTriggerHintAuto: string
+  chatSaveWorkflowTriggerShortcut: string
+  chatSaveWorkflowTriggerMenuName: string
+  chatSaveWorkflowTriggerUrl: string
+  chatSaveWorkflowTriggerInterval: string
+  chatSaveWorkflowTriggerDate: string
+  chatSaveWorkflowTriggerTime: string
+  /** Element-change trigger: the selector of the element to watch. */
+  chatSaveWorkflowTriggerElementSelector: string
+  /** Element-change trigger: URL glob the observer applies to. */
+  chatSaveWorkflowTriggerElementPattern: string
+  /** Element-change trigger: which mutations count as a change. */
+  chatSaveWorkflowTriggerElementSubtree: string
+  chatSaveWorkflowTriggerElementChildList: string
+  chatSaveWorkflowTriggerElementAttributes: string
+  chatSaveWorkflowTriggerElementCharacterData: string
+  /** Labels of the trigger kinds offered by the picker. */
+  triggerKindManual: string
+  triggerKindOnStartup: string
+  triggerKindKeyboardShortcut: string
+  triggerKindContextMenu: string
+  triggerKindVisitWeb: string
+  triggerKindInterval: string
+  triggerKindSpecificDay: string
+  triggerKindDate: string
+  triggerKindElementChange: string
+  /** Heading of the "fold repeated steps into a loop" section. */
+  chatFoldTitle: string
+  /** Why folding matters, and what a varying fold depends on. */
+  chatFoldHint: string
+  chatFoldApply: string
+  chatFoldBusy: string
+  /** Confirmation after a successful fold. */
+  chatFoldApplied: string
+  /** Shown when a fold was refused (no page-verified selector). */
+  chatFoldRefused: string
   /** In-progress line while the AI node review is running. */
   chatWorkflowReviewing: string
   /** Hint shown when the AI node review is unavailable (no provider / failure). */
@@ -390,11 +464,14 @@ export interface Messages {
   modeReadonly: string
   modeSemi: string
   modeFull: string
+  modeWorkflow: string
   modeChatHint: string
   modeReadonlyHint: string
   modeSemiHint: string
   modeFullHint: string
   modeFullWarning: string
+  modeWorkflowWarning: string
+  modeWorkflowHint: string
 
   // Token usage
   tokenUsage: string
@@ -524,6 +601,18 @@ export interface Messages {
   settingsToolsEnableAll: string
   settingsToolsDisableAll: string
   settingsToolsEnabled: string
+  /** Heading of the read-only workflow-operator reference in settings. */
+  settingsOperatorTools: string
+  /** Explains that these are workflow-mode-only and dispatched by category. */
+  settingsOperatorToolsHint: string
+  /** Badge on the always-advertised operators. */
+  settingsOperatorToolsCore: string
+  /** Badge on the operators that arrive only after the model asks. */
+  settingsOperatorToolsOnDemand: string
+  /** Tool count next to a category heading. */
+  settingsOperatorToolsCount: (params: { count: number }) => string
+  /** Note that this list is informational and cannot be disabled. */
+  settingsOperatorToolsReadOnly: string
   toolReadPage: string
   toolReadPageWarn: string
   toolSnapshot: string
@@ -586,6 +675,8 @@ export interface Messages {
   toolLoadToolsWarn: string
   toolDelegate: string
   toolDelegateWarn: string
+  toolOperator: string
+  toolOperatorWarn: string
 
   // Settings · page access
   settingsPageAccess: string
@@ -1163,15 +1254,72 @@ const en: Messages = {
   chatSlashNoMatch: 'No matching skill',
   chatSaveWorkflowPrompt: ({ steps }) =>
     `This session performed ${steps} step${steps > 1 ? 's' : ''} that can be reused. Save them as a workflow?`,
+  chatSaveWorkflowDraftPrompt: ({ steps }) =>
+    `Generated a workflow draft with ${steps} step${steps > 1 ? 's' : ''}. Save it to the workflow editor?`,
   chatSaveWorkflowSave: 'Save as workflow',
   chatSaveWorkflowSkip: 'Skip',
+  chatWorkflowNothingSaved:
+    'Nothing to save from this turn: no page operations were recorded. Do the task and try again, or ask the model to perform it on the page.',
+  chatWorkflowNothingSavedFailed:
+    'Nothing to save from this turn: every recorded action failed. Fix the failure and run it again.',
+  chatWorkflowProbeChecking: 'Checking the selectors against the current page…',
+  chatWorkflowIntegrityTitle: 'This graph will not run as saved',
+  chatWorkflowIntegrityDangling: ({ blockId }) =>
+    `no step produces this value — "${blockId}" will run with an empty value. Declare it as a workflow input or add the step that produces it.`,
+  chatWorkflowIntegrityUnreachable: ({ count }) =>
+    `${count} step(s) cannot be reached from the trigger:`,
   chatSaveWorkflowSaved: ({ name }) => `Saved workflow: ${name}`,
   chatSaveWorkflowAiTitle:
     'AI-generated content (checked = regenerate with AI at replay; unchecked = reuse the captured text)',
-  chatWorkflowPromptToggle: 'Offer to save workflow',
-  chatWorkflowPromptToggleHint:
-    'When on, the panel offers to save this session as a workflow after each turn ends.',
+  chatWorkflowInputsTitle: 'Workflow inputs',
+  chatWorkflowInputsHint:
+    'These values were captured at generation time and become run-time inputs ({{name}}). The saved value is only a default — the workflow re-prompts or uses the trigger value on each run.',
+  chatWorkflowCodeNodesTitle: 'Steps that need code',
+  chatWorkflowCodeNodesHint:
+    'These steps run JavaScript because no built-in operator could do them. Editing them means editing code — if you would rather not, ask the assistant to replace them with operators.',
+  chatWorkflowCodeNodesNoReason: 'No reason recorded',
+  chatWorkflowProbeTitle: 'Selector check against the current page',
+  chatWorkflowProbeAllOk: ({ count }) =>
+    `All ${count} selector${count > 1 ? 's' : ''} match exactly one element.`,
+  chatWorkflowProbeUnverified:
+    'The current page could not be checked, so these selectors are unverified.',
+  chatWorkflowProbeMissing: 'matches nothing — this step will do nothing',
+  chatWorkflowProbeAmbiguous: ({ count }) =>
+    `matches ${count} elements — the workflow may act on the wrong one`,
   chatSaveWorkflowAiReview: 'AI refine…',
+  chatSaveWorkflowTriggerTitle: 'Trigger',
+  chatSaveWorkflowTriggerHintManual: 'This workflow runs only when you start it.',
+  chatSaveWorkflowTriggerHintAuto:
+    'This trigger fires on its own — the workflow is armed as soon as you save it.',
+  chatSaveWorkflowTriggerShortcut: 'Shortcut (e.g. Ctrl+Shift+E)',
+  chatSaveWorkflowTriggerMenuName: 'Context-menu item name',
+  chatSaveWorkflowTriggerUrl: 'Run on URLs matching',
+  chatSaveWorkflowTriggerInterval: 'Every N minutes',
+  chatSaveWorkflowTriggerDate: 'Date (YYYY-MM-DD)',
+  chatSaveWorkflowTriggerTime: 'Time (HH:MM)',
+  chatSaveWorkflowTriggerElementSelector: 'Element selector to watch',
+  chatSaveWorkflowTriggerElementPattern: 'Only on URLs matching (optional)',
+  chatSaveWorkflowTriggerElementSubtree: 'Include descendants',
+  chatSaveWorkflowTriggerElementChildList: 'Content added or removed',
+  chatSaveWorkflowTriggerElementAttributes: 'Attributes changed',
+  chatSaveWorkflowTriggerElementCharacterData: 'Text changed',
+  triggerKindManual: 'Manually',
+  triggerKindOnStartup: 'On browser startup',
+  triggerKindKeyboardShortcut: 'Keyboard shortcut',
+  triggerKindContextMenu: 'Context menu',
+  triggerKindVisitWeb: 'When visiting a website',
+  triggerKindInterval: 'Interval',
+  triggerKindSpecificDay: 'On specific weekdays',
+  triggerKindDate: 'On a specific date',
+  triggerKindElementChange: 'When an element changes',
+  chatFoldTitle: 'Repeated steps',
+  chatFoldHint:
+    'Folding a repeated run into a loop keeps the workflow readable. A run over different elements needs a selector the page confirms, so it is skipped when the page cannot provide one.',
+  chatFoldApply: 'Fold into a loop',
+  chatFoldBusy: 'Folding…',
+  chatFoldApplied: 'Folded into a loop. Review it in the editor before saving.',
+  chatFoldRefused:
+    'The page could not confirm a selector for these elements, so nothing was folded.',
   chatWorkflowReviewing: 'AI is reviewing which nodes are worth keeping…',
   chatWorkflowReviewUnavailable: 'AI review unavailable — keeping all steps.',
   chatWorkflowReviewDropped: ({ count }) =>
@@ -1194,6 +1342,7 @@ const en: Messages = {
   modeReadonly: 'Read only',
   modeSemi: 'Semi-auto',
   modeFull: 'Full auto',
+  modeWorkflow: 'Workflow generate',
   modeChatHint:
     'Plain conversation. No operating rules or tools are sent, so it cannot read or act on the page, and uses the fewest tokens.',
   modeReadonlyHint: 'Can read pages and answer, but cannot click, type, or navigate.',
@@ -1201,6 +1350,10 @@ const en: Messages = {
   modeFullHint: 'The agent acts without asking each time. Watch the log.',
   modeFullWarning:
     'Full auto lets the agent click, type, and navigate without each approval. Use only on sites you trust, and review the action history afterwards.',
+  modeWorkflowWarning:
+    'Workflow generate is NOT a dry run: it drives the real page exactly like full auto — every operator clicks, types and navigates immediately, and JavaScript-code operators run arbitrary code in the page. Use only on sites you trust, and review the generated workflow before running it.',
+  modeWorkflowHint:
+    'Workflow generate drives the page exactly like full auto: every operator really runs on the page, and only a step that succeeded becomes a node in the draft — no per-step approval. A trigger node is added automatically; when the turn ends the panel pops the save-as-workflow card, where you can change the trigger type.',
 
   tokenUsage: 'Token usage',
   tokenTotal: 'Total',
@@ -1338,6 +1491,14 @@ const en: Messages = {
   settingsToolsEnableAll: 'Enable all',
   settingsToolsDisableAll: 'Disable all',
   settingsToolsEnabled: 'enabled',
+  settingsOperatorTools: 'Workflow operator tools',
+  settingsOperatorToolsHint:
+    'Workflow-generation mode only. The assistant picks a category and only those tools are sent, which is what keeps each request small. A tool you call from a category that was not sent activates that category automatically.',
+  settingsOperatorToolsCore: 'always sent',
+  settingsOperatorToolsOnDemand: 'on request',
+  settingsOperatorToolsCount: ({ count }) => `${count} tools`,
+  settingsOperatorToolsReadOnly:
+    'Informational: these are part of workflow generation and cannot be switched off here.',
   toolReadPage: 'Read page text',
   toolReadPageWarn: 'When off: the assistant cannot read the text of the current page.',
   toolSnapshot: 'Snapshot page elements',
@@ -1410,6 +1571,9 @@ const en: Messages = {
   toolDelegate: 'Delegate a sub-task to a specialist agent',
   toolDelegateWarn:
     'When off: the supervisor cannot hand sub-tasks to specialist agents; every task is handled directly in the main conversation.',
+  toolOperator: 'Workflow operator (draft writer)',
+  toolOperatorWarn:
+    'When off: this operator tool is hidden from the chat in workflow mode and cannot be added to the generated workflow.',
 
   toolRecognizeImage: 'Recognize text in an image (CAPTCHA, etc.)',
   toolRecognizeImageWarn:
@@ -1681,7 +1845,8 @@ const en: Messages = {
 
   // Built-in agent i18n (English values mirror builtin-agents.ts defaults)
   builtinAgentSupervisorDisplayName: 'Supervisor',
-  builtinAgentSupervisorHint: 'Owns the full request; delegates big multi-domain tasks to specialists.',
+  builtinAgentSupervisorHint:
+    'Owns the full request; delegates big multi-domain tasks to specialists.',
   builtinAgentSupervisorInstructions: `You are the supervisor agent for this Browser Copilot session.
 
 - You own the user's whole request and are accountable for the final answer.
@@ -2044,13 +2209,65 @@ const zhCN: Messages = {
   chatSlashNoMatch: '没有匹配的技能',
   chatSaveWorkflowPrompt: ({ steps }) =>
     `本次会话共执行了 ${steps} 步可复用操作，是否保存为工作流？`,
+  chatSaveWorkflowDraftPrompt: ({ steps }) =>
+    `已生成包含 ${steps} 步的工作流草稿，是否保存到工作流编辑器？`,
   chatSaveWorkflowSave: '保存为工作流',
   chatSaveWorkflowSkip: '跳过',
+  chatWorkflowNothingSaved:
+    '本轮没有可保存的内容：没有记录到任何页面操作。请先让模型在页面上完成任务，再试一次。',
+  chatWorkflowNothingSavedFailed:
+    '本轮没有可保存的内容：记录到的操作全部失败。请先解决失败原因，再重跑一次。',
+  chatWorkflowProbeChecking: '正在当前页面上检查选择器…',
+  chatWorkflowIntegrityTitle: '这个图按现状保存后跑不起来',
+  chatWorkflowIntegrityDangling: ({ blockId }) =>
+    `没有任何步骤能产出这个值——「${blockId}」会以空值执行。请把它声明成工作流输入，或补上产出它的步骤。`,
+  chatWorkflowIntegrityUnreachable: ({ count }) => `${count} 个步骤从触发器出发走不到：`,
   chatSaveWorkflowSaved: ({ name }) => `已保存工作流：${name}`,
   chatSaveWorkflowAiTitle: 'AI 生成内容（勾选 = 回放时用 AI 重新生成；取消 = 沿用本次填写的文本）',
-  chatWorkflowPromptToggle: '对话结束提示保存工作流',
-  chatWorkflowPromptToggleHint: '开启后，每轮对话结束会询问是否把本次操作保存为工作流。',
+  chatWorkflowInputsTitle: '工作流输入',
+  chatWorkflowInputsHint:
+    '这些值是在生成时采集的，会成为运行期输入（用 {{名称}} 引用）。保存的值只是默认值——每次运行都会重新提示或使用触发器传入的值。',
+  chatWorkflowCodeNodesTitle: '需要代码的步骤',
+  chatWorkflowCodeNodesHint:
+    '这些步骤用 JavaScript 实现，因为内置算子做不了。改它们就等于改代码——如果你不想碰代码，可以让助手把它们换成算子。',
+  chatWorkflowCodeNodesNoReason: '未记录原因',
+  chatWorkflowProbeTitle: '在当前页面上的选择器检查',
+  chatWorkflowProbeAllOk: ({ count }) => `${count} 个选择器都精确匹配到一个元素。`,
+  chatWorkflowProbeUnverified: '当前页面无法检查，这些选择器未经验证。',
+  chatWorkflowProbeMissing: '没有匹配到任何元素——这一步重放时什么都不会发生',
+  chatWorkflowProbeAmbiguous: ({ count }) => `匹配到 ${count} 个元素——工作流可能操作到错误的元素`,
   chatSaveWorkflowAiReview: 'AI 提炼…',
+  chatSaveWorkflowTriggerTitle: '触发器',
+  chatSaveWorkflowTriggerHintManual: '该工作流只会在你手动启动时运行。',
+  chatSaveWorkflowTriggerHintAuto: '该触发器会自动触发——保存后工作流立即进入待触发状态。',
+  chatSaveWorkflowTriggerShortcut: '快捷键（例如 Ctrl+Shift+E）',
+  chatSaveWorkflowTriggerMenuName: '右键菜单项名称',
+  chatSaveWorkflowTriggerUrl: '匹配以下网址时运行',
+  chatSaveWorkflowTriggerInterval: '每隔 N 分钟',
+  chatSaveWorkflowTriggerDate: '日期（YYYY-MM-DD）',
+  chatSaveWorkflowTriggerTime: '时间（HH:MM）',
+  chatSaveWorkflowTriggerElementSelector: '要监视的元素选择器',
+  chatSaveWorkflowTriggerElementPattern: '仅在匹配以下网址时（可选）',
+  chatSaveWorkflowTriggerElementSubtree: '包含后代元素',
+  chatSaveWorkflowTriggerElementChildList: '内容增删',
+  chatSaveWorkflowTriggerElementAttributes: '属性变化',
+  chatSaveWorkflowTriggerElementCharacterData: '文本变化',
+  triggerKindManual: '手动运行',
+  triggerKindOnStartup: '浏览器启动时',
+  triggerKindKeyboardShortcut: '快捷键',
+  triggerKindContextMenu: '右键菜单',
+  triggerKindVisitWeb: '访问网站时',
+  triggerKindInterval: '定时循环',
+  triggerKindSpecificDay: '指定星期几',
+  triggerKindDate: '指定日期',
+  triggerKindElementChange: '元素变化时',
+  chatFoldTitle: '重复步骤',
+  chatFoldHint:
+    '把重复出现的步骤折叠成循环，工作流才读得懂。作用于不同元素的重复段需要一个「页面能确认」的选择器，页面无法确认时不会折叠。',
+  chatFoldApply: '折叠为循环',
+  chatFoldBusy: '折叠中…',
+  chatFoldApplied: '已折叠为循环。保存前请在编辑器里复核。',
+  chatFoldRefused: '当前页面无法确认能精确匹配这些元素的选择器，未做折叠。',
   chatWorkflowReviewing: 'AI 正在审查哪些节点值得保留…',
   chatWorkflowReviewUnavailable: 'AI 审查不可用，已保留全部步骤。',
   chatWorkflowReviewDropped: ({ count }) => `AI 已剔除 ${count} 个无效步骤，取消勾选可保留。`,
@@ -2071,12 +2288,17 @@ const zhCN: Messages = {
   modeReadonly: '只读',
   modeSemi: '半自动',
   modeFull: '全自动',
+  modeWorkflow: '工作流生成',
   modeChatHint: '纯对话。不发送操作规则和工具，因此不能读取或操作页面，token 消耗最低。',
   modeReadonlyHint: '只能读取页面和回答问题，不能点击、输入或跳转。',
   modeSemiHint: '每个改变页面的操作都会先请你确认。',
   modeFullHint: '智能体直接操作，不再每次询问。请留意操作记录。',
   modeFullWarning:
     '全自动模式下智能体可自行点击、输入和跳转，无需逐项确认。建议仅在你信任的网站使用，并事后查看操作记录。',
+  modeWorkflowWarning:
+    '工作流生成模式并非"仅录制"：它会像全自动模式一样真实操作页面——每个算子都会立即点击、输入、跳转，JavaScript 代码算子还会在页面中执行任意脚本。建议仅在你信任的网站使用，并在运行生成的工作流前先检查一遍。',
+  modeWorkflowHint:
+    '工作流生成模式与全自动模式一样真实操作页面：每个算子都会立即在页面上执行，成功后才记录为草稿中的节点，无需逐项确认。工作流会自动带上触发器节点；回合结束后面板弹出「保存为工作流」卡片，可在其中修改触发器类型。',
 
   tokenUsage: 'Token 消耗',
   tokenTotal: '合计',
@@ -2206,6 +2428,13 @@ const zhCN: Messages = {
   settingsToolsEnableAll: '全部启用',
   settingsToolsDisableAll: '全部关闭',
   settingsToolsEnabled: '个已启用',
+  settingsOperatorTools: '工作流算子工具',
+  settingsOperatorToolsHint:
+    '仅在工作流生成模式下可用。助手先声明需要哪一类，只发送该类的工具，这是每次请求体积可控的关键。若调用了未发送分类下的工具，该分类会被自动激活。',
+  settingsOperatorToolsCore: '常驻',
+  settingsOperatorToolsOnDemand: '按需',
+  settingsOperatorToolsCount: ({ count }) => `${count} 个工具`,
+  settingsOperatorToolsReadOnly: '仅作说明：这些工具属于工作流生成能力，无法在此关闭。',
   toolReadPage: '读取页面文本',
   toolReadPageWarn: '关闭后：助手无法读取当前页面的文本。',
   toolSnapshot: '快照页面元素',
@@ -2262,8 +2491,9 @@ const zhCN: Messages = {
   toolLoadToolsWarn:
     '关闭后：助手无法按需加载隐藏的工具组（标签页管理、保存文件、已存资料/密码、技能、网络/控制台诊断），相关任务会失败。',
   toolDelegate: '把 子任务委派给专长子智能体',
-  toolDelegateWarn:
-    '关闭后：主管无法把子任务分派给专长子智能体，所有任务都在主会话中直接完成。',
+  toolDelegateWarn: '关闭后：主管无法把子任务分派给专长子智能体，所有任务都在主会话中直接完成。',
+  toolOperator: '工作流算子（草稿写入）',
+  toolOperatorWarn: '关闭后：该算子在工作流生成模式下不可用，也不会出现在生成的工作流中。',
 
   toolRecognizeImage: '识别图片中的文字（验证码等）',
   toolRecognizeImageWarn: '关闭后：助手无法使用图片模型识别页面上的验证码或其他图片文字。',
@@ -2487,8 +2717,7 @@ const zhCN: Messages = {
   agentsImport: '导入',
   agentsImportHint: '导入智能体文件（.json、.yaml、.md），也可直接拖入本页。',
   agentsExport: '全部导出',
-  agentsBuiltinNote:
-    '内置智能体随扩展提供，可以就地编辑；「恢复默认」可随时还原为出厂版本。',
+  agentsBuiltinNote: '内置智能体随扩展提供，可以就地编辑；「恢复默认」可随时还原为出厂版本。',
   agentsReset: '恢复默认',
   agentsBuiltinBadge: '内置',
   agentsSpecialistPill: '专长',
@@ -2509,8 +2738,7 @@ const zhCN: Messages = {
   agentDomainAnalysis: '内容分析',
   agentDomainCustom: '自定义',
   agentHint: '何时委派给它',
-  agentHintHint:
-    '主管据此判断是否委派的一两句话。决定委派时只会展示这段文字（不会展示完整指令）。',
+  agentHintHint: '主管据此判断是否委派的一两句话。决定委派时只会展示这段文字（不会展示完整指令）。',
   agentTools: '可用工具',
   agentToolsHint: '该智能体可调用的工具白名单；留空表示继承会话中的全部工具。',
   agentToolsInherit: '留空：继承全部工具',

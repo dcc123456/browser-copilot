@@ -29,6 +29,8 @@ import type { WorkflowDebugResult } from './workflow/auto-debug-patch'
 import type { PendingTakeoverInfo } from './workflow/takeover-pending'
 import type { DebugSessionStatsSummary, TakeoverStatsSummary } from './workflow/takeover-stats'
 import type { WorkflowReview } from './workflow/review-patch'
+import type { RepeatSuggestion } from './workflow/loop-collapse'
+import type { SelectorProbeResult } from './workflow/selector-probe'
 import type { AttachmentDescriptor, AttachmentSummary } from './attachments'
 
 /** Aggregated token usage for one agent turn (summed across all tool rounds). */
@@ -39,6 +41,17 @@ export interface TurnTokenUsage {
   reasoningTokens: number
   totalTokens: number
 }
+
+/**
+ * Why a workflow-generation turn has nothing to save.
+ *
+ * `no-actions` — the model never touched the page (it answered, or only read).
+ * `all-failed` — it tried, and every attempt failed, so nothing was recorded.
+ *
+ * The distinction exists so the panel can say something useful instead of
+ * showing nothing: only one of the two is worth suggesting a retry for.
+ */
+export type WorkflowDraftEmptyReason = 'no-actions' | 'all-failed'
 
 /** A running task as shown on the Tasks tab board. */
 export interface RunningTaskView {
@@ -133,6 +146,30 @@ export type Command =
   | { type: 'workflows.get'; id: string }
   | { type: 'workflows.save'; workflow: Workflow }
   | { type: 'workflows.delete'; id: string }
+  /**
+   * Materialises the current conversation's operator-tool draft into a
+   * Workflow WITHOUT persisting it. Used by the chat panel to populate the
+   * review card at end of a workflow-generation turn. `error` is set when
+   * there is no draft to compose.
+   */
+  | { type: 'workflows.draft.get'; conversationId: string }
+  /**
+   * Check every selector in the conversation's draft against the live page.
+   *
+   * Deliberately a separate command from `workflows.draft.get`: probing means
+   * injecting a script into the page, which can be slow or fail outright on a
+   * restricted URL. The save card must appear regardless, so the panel asks for
+   * the card first and fills the probe results in when they arrive.
+   */
+  | { type: 'workflows.probe'; conversationId: string }
+  /**
+   * Fold one detected repeat run of the draft into a loop block. A `varying`
+   * run is refused unless the page confirms a selector that matches exactly
+   * the recorded elements — `folded: false` with a `reason` then reports that.
+   */
+  | { type: 'workflows.draft.fold'; conversationId: string; index: number }
+  /** Drops the operator-tool draft after the panel has saved or discarded it. */
+  | { type: 'workflows.draft.clear'; conversationId: string }
   /**
    * AI node review of a conversation-generated workflow (before save): the
    * model judges which steps the replay genuinely needs. `review` is null
@@ -293,6 +330,51 @@ export type CommandResult =
   | { type: 'workflows.get'; workflow?: Workflow }
   | { type: 'workflows.save' }
   | { type: 'workflows.delete' }
+  | {
+      type: 'workflows.draft'
+      workflow?: Workflow
+      error?: string
+      /**
+       * Where `workflow` came from: `draft` when the model placed operator
+       * blocks itself, `history` when it was compiled from the actions the
+       * model performed. The card shows the difference because the history
+       * path can contain exploratory steps worth dropping.
+       */
+      source?: 'draft' | 'history'
+      /**
+       * Set when there is nothing to save, and says WHY. Distinct from
+       * `error`: an empty result is a normal outcome of a turn that only read
+       * the page, and the panel shows a one-line explanation rather than
+       * silence — a silent card is indistinguishable from a broken feature.
+       */
+      empty?: WorkflowDraftEmptyReason
+      /** Repeat runs worth folding, for the review card. */
+      suggestions?: RepeatSuggestion[]
+      /**
+       * Every selector in the graph checked against the live page. `null` means
+       * the page could not be probed — "not verified", not "all fine".
+       */
+      probes?: SelectorProbeResult[] | null
+    }
+  | {
+      type: 'workflows.probe'
+      /**
+       * Selector verdicts for the conversation's draft. `null` means the page
+       * could not be probed at all — "not verified", not "all fine".
+       */
+      probes: SelectorProbeResult[] | null
+    }
+  | {
+      type: 'workflows.draft.fold'
+      workflow?: Workflow
+      folded: boolean
+      /** Why nothing was folded, when `folded` is false. */
+      reason?: string
+      /** Set when the draft could not even be materialised. */
+      error?: string
+      suggestions?: RepeatSuggestion[]
+    }
+  | { type: 'workflows.draft.clear' }
   | {
       type: 'workflows.review'
       review: WorkflowReview | null
