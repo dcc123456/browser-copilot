@@ -37,8 +37,8 @@ through a whole checkout or setup flow — while you watch or stay hands-off.
   Your keys and data stay on your machine; passwords are filled locally and
   never shown to the model.
 - 💾 **Own your data as files.** Pick a folder in Settings and everything —
-  conversations, skills, workflows — is written to real files on your disk;
-  the browser cache is kept as a read mirror.
+  conversations, skills, workflows — is written to real files on your disk and
+  nowhere else; the browser's own storage is left empty.
 
 It never acts on its own initiative — every action is either part of answering
 something you just asked, a [scheduled task](#scheduled-tasks) you created, a
@@ -57,9 +57,6 @@ agent you connected over [MCP](#agent-integration-mcp).
 <img width="2496" height="1518" alt="image" src="https://github.com/user-attachments/assets/3b449200-5f6c-4b3d-a171-28e0a729b26d" />
 <img width="2497" height="2088" alt="image" src="https://github.com/user-attachments/assets/c116a923-0519-4621-a7bf-ebc5e1e3dcc4" />
 <img width="2497" height="2088" alt="image" src="https://github.com/user-attachments/assets/9de97b1d-aa3e-407b-9f27-c3f44ea3ae91" />
-
-
-
 
 ## Contents
 
@@ -524,15 +521,18 @@ written under a `browser-copilot/` folder inside your chosen directory:
 - `<key>.json` — everything else: settings, providers, workflows, profile,
   credentials, and more.
 
-`chrome.storage.local` becomes a read mirror used as a fallback whenever the
-disk is unavailable — nothing is lost if a write fails, and corrupted files
-fall back to the mirror automatically. Switch back to browser storage any time
-from the same settings card; existing data migrates to the folder the first
-time you pick it.
+Once a folder is chosen nothing is written to `chrome.storage.local` any more, so
+its 10 MB quota stops being a ceiling. The one thing that can still land there is
+a write made while the folder is momentarily unavailable — right after a browser
+restart, before you have re-granted access; it is readable from there and pushed
+into the folder the next time the panel opens. Switch back to browser storage any
+time from the same settings card: the folder is copied back first, so nothing is
+left behind. Existing data migrates to the folder the first time you pick it.
 
 | Permission            | Purpose                                                                                                   |
 | --------------------- | --------------------------------------------------------------------------------------------------------- |
 | `storage`             | Settings, providers, skills, conversations, workflows, profile, credentials.                              |
+| `unlimitedStorage`    | Lift `chrome.storage.local`'s 10 MB cap so long conversations and many workflows still save.              |
 | `tabs`                | Identify the active tab and open/switch/close tabs when asked (and for workflow tab blocks).              |
 | `scripting`           | Inject the page kernel, workflow recorder, element picker, and shortcut listener to read or act on a tab. |
 | `sidePanel`           | Show the panel.                                                                                           |
@@ -580,8 +580,9 @@ both loadable zips (full `-ocr` and lite `-no-ocr`) to the GitHub Release.
 Key design notes: Markdown is parsed to a typed tree (never HTML, no
 `dangerouslySetInnerHTML`); the in-page kernel is self-contained and injected
 across frames; durable state is persisted to real files when a storage folder is
-chosen (with `chrome.storage.local` as a mirror) so data survives MV3
-service-worker eviction at idle; mode and step cap are read per action so
+chosen (with `chrome.storage.local` holding only writes that could not reach the
+folder yet) so data survives MV3 service-worker eviction at idle; mode and step
+cap are read per action so
 settings changes apply without a reload.
 
 ---
