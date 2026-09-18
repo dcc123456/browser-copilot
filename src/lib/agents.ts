@@ -13,7 +13,7 @@
  * @module lib/agents
  */
 import { MAX_INSTRUCTIONS_LENGTH, MAX_NAME_LENGTH, renderSkillPrompt } from './skills'
-import { TOOL_META_BY_NAME } from './tool-catalog'
+import { TOOL_META_BY_NAME_MERGED } from './tool-catalog'
 import type { Agent, AgentDomain, Skill } from './types'
 import type { Messages } from './i18n'
 import { getBuiltinI18nKeys } from './builtin-agents'
@@ -112,7 +112,7 @@ export function normalizeAgent(agent: Agent): Agent {
     // delegate_to_agent is a supervisor-only power: strip it even if a
     // hand-edited file or stale data put it in a specialist whitelist.
     tools: uniqueStrings(agent.tools).filter(
-      (name) => TOOL_META_BY_NAME.has(name) && name !== 'delegate_to_agent',
+      (name) => TOOL_META_BY_NAME_MERGED.has(name) && name !== 'delegate_to_agent',
     ),
     skillNames: uniqueStrings(agent.skillNames),
     role,
@@ -138,9 +138,7 @@ export function renderAgentCatalogue(agents: readonly Agent[], messages?: Messag
     // to match on); user agents with empty hints are likewise omitted.
     const keys = getBuiltinI18nKeys(agent.id)
     const hint =
-      messages && keys.hint
-        ? (messages[keys.hint] as string)
-        : agent.delegationHint.trim()
+      messages && keys.hint ? (messages[keys.hint] as string) : agent.delegationHint.trim()
     return hint !== ''
   })
   if (usable.length === 0) return ''
@@ -148,9 +146,7 @@ export function renderAgentCatalogue(agents: readonly Agent[], messages?: Messag
   const lines = usable.map((agent) => {
     const keys = getBuiltinI18nKeys(agent.id)
     const hint =
-      messages && keys.hint
-        ? (messages[keys.hint] as string).trim()
-        : agent.delegationHint.trim()
+      messages && keys.hint ? (messages[keys.hint] as string).trim() : agent.delegationHint.trim()
     return `- ${agent.name}: ${hint}`
   })
   return [

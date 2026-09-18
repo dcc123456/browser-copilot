@@ -224,6 +224,16 @@ const TRIGGER_NODE_KINDS: ReadonlySet<string> = new Set([
 ])
 
 /**
+ * Whether this node is the graph's launch trigger. The block id is authoritative
+ * (`data.blockId`) with `label` as the legacy fallback — the same resolution the
+ * engine and the trigger readers use, kept in one place so the panel and the
+ * background never disagree about what counts as the trigger.
+ */
+export function isTriggerNode(node: WorkflowNode): boolean {
+  return (node.data?.['blockId'] as string) === 'trigger' || node.label === 'trigger'
+}
+
+/**
  * Denormalize the trigger block into the workflow's top-level `trigger`
  * field. The graph's trigger node is the Automa-style source of truth (edited
  * in `EditTrigger`), while listeners (`background/index.ts`) and the
@@ -235,9 +245,7 @@ const TRIGGER_NODE_KINDS: ReadonlySet<string> = new Set([
  * back to `'manual'`.
  */
 export function triggerFromNodes(nodes: WorkflowNode[]): WorkflowTrigger | undefined {
-  const node = nodes.find(
-    (n) => (n.data?.['blockId'] as string) === 'trigger' || n.label === 'trigger',
-  )
+  const node = nodes.find(isTriggerNode)
   if (!node) return undefined
   const rawType = node.data?.['type']
   const type = TRIGGER_NODE_KINDS.has(rawType as string)
@@ -251,6 +259,13 @@ export function triggerFromNodes(nodes: WorkflowNode[]): WorkflowTrigger | undef
   const contextMenuName = node.data?.['contextMenuName']
   if (type === 'context-menu' && typeof contextMenuName === 'string' && contextMenuName) {
     trigger.menuItemId = contextMenuName
+  }
+  // The declared inputs travel with the mirror because the RUN path seeds the
+  // variable scope from it. Dropping them here would leave every `{{input}}`
+  // reference a generated workflow recorded resolving to an empty string.
+  const parameters = node.data?.['parameters']
+  if (Array.isArray(parameters) && parameters.length > 0) {
+    trigger.parameters = parameters as WorkflowTrigger['parameters']
   }
   return trigger
 }

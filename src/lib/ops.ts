@@ -93,11 +93,13 @@ export type ActionName =
   | 'element_exists'
   | 'get_attribute'
   | 'set_attribute'
+  | 'get_value'
   | 'click_link'
   | 'read_form'
   | 'create_element'
   | 'handle_dialog'
   | 'count_elements'
+  | 'element_selector_at'
   | 'trigger_event'
   | 'capture'
   | 'page_signature'
@@ -121,6 +123,11 @@ export interface Op {
   value?: string | string[] | boolean
   /** Attribute name for `get_attribute` / `set_attribute` / `trigger_event`. */
   attribute?: string
+  /**
+   * Zero-based match index for `element_selector_at`: which of the elements
+   * matched by `value` to build a selector for.
+   */
+  index?: number
   scroll?: ScrollSpec
   /** Whether to clear an input before typing (default true for `fill`). */
   clear?: boolean

@@ -401,6 +401,45 @@ export const BLOCK_CATALOG: BlockCatalogEntry[] = [
     cloud: false,
   },
   {
+    // The recordable form of the chat agent's `read_current_page` tool. The tool
+    // only ever fed the model's own understanding, so a task that needed the
+    // page's text in the workflow had no step to record: `get-text` reads one
+    // element and the model had no way to say "this whole page". Reading the
+    // page is now a node like any other, and `saveData` lets it feed the data
+    // table that `export-data` writes.
+    id: 'read-page',
+    name: 'Read page',
+    description: "Read the active tab's visible text, your text selection, or its HTML",
+    icon: 'lucide:FileText',
+    component: 'Default',
+    editComponent: 'EditReadPage',
+    category: 'browser',
+    inputs: 1,
+    outputs: 1,
+    allowedInputs: true,
+    maxConnection: 1,
+    // `variableName` is the output downstream nodes can reference. `selector`
+    // is deliberately NOT listed: `refDataKeys` also drives
+    // `takesElementTarget`, which would graft the `ref`/`target`/`label`
+    // element-locator params onto a block that only scopes a read — and would
+    // overwrite the `selector` description with the "target an element" one.
+    refDataKeys: ['variableName'],
+    data: {
+      description: '',
+      disableBlock: false,
+      // 'text' (rendered body text) | 'selection' | 'html'
+      source: 'text',
+      // Optional element scope. Empty = the whole document.
+      selector: '',
+      maxChars: 20000,
+      variableName: '',
+      saveData: false,
+      dataColumn: '',
+      assignVariable: false,
+    },
+    cloud: false,
+  },
+  {
     id: 'browser-event',
     name: 'Browser event',
     description: 'Pause until a chosen browser event occurs',
@@ -1149,7 +1188,12 @@ export const BLOCK_CATALOG: BlockCatalogEntry[] = [
   {
     id: 'save-assets',
     name: 'Save assets',
-    description: 'Download an image, video, audio, or other file',
+    // Says plainly that it does nothing yet. The executor is a placeholder
+    // (`workflow-engine/executors.ts`), and a generated workflow must not pick
+    // this believing it downloads files — `save-local` / `export-data` are the
+    // steps that actually write.
+    description:
+      'Download an image, video, audio, or other file (NOT IMPLEMENTED YET — the executor is a placeholder; use Save to local instead)',
     icon: 'lucide:Image',
     component: 'Default',
     editComponent: 'EditSaveAssets',

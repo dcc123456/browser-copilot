@@ -518,6 +518,62 @@ export function runOp(op: Op): OpResult {
     return hosts
   }
 
+  /**
+   * Absolute `:nth-child` path from `body`/`html` down to `element`.
+   *
+   * Unique BY CONSTRUCTION (every step pins an absolute child index), which is
+   * exactly what {@link cssPath} cannot promise. Used only as the fallback for
+   * {@link uniqueCssPath}; returns null when the element lives in a shadow root,
+   * because a CSS selector cannot cross that boundary.
+   */
+  function positionalPath(element: Element): string | null {
+    const parts: string[] = []
+    let node: Element | null = element
+    while (node && node.nodeType === 1) {
+      const tag = node.tagName.toLowerCase()
+      if (tag === 'html' || tag === 'body') {
+        parts.unshift(tag)
+        break
+      }
+      const parent: Element | null = node.parentElement
+      if (!parent) return null
+      let position = 1
+      let sibling = node.previousElementSibling
+      while (sibling) {
+        position += 1
+        sibling = sibling.previousElementSibling
+      }
+      parts.unshift(`${tag}:nth-child(${position})`)
+      node = parent
+    }
+    return parts.length > 0 ? parts.join(' > ') : null
+  }
+
+  /**
+   * A CSS selector that matches `element` and nothing else.
+   *
+   * `cssPath` is preferred because it stays readable and survives a DOM shift
+   * (ids, `data-testid`s, stable ancestors). It is only *aimed* at uniqueness,
+   * so it is verified by re-querying; a path that still matches several
+   * elements would make a `loop-elements` body act on the WRONG element every
+   * iteration, silently. Falls back to the positional path, then to null.
+   */
+  function uniqueCssPath(element: Element): string | null {
+    const preferred = cssPath(element)
+    try {
+      if (preferred && safeQuery(preferred).length === 1) return preferred
+    } catch {
+      /* unusable path (shadow boundary, bad attribute) — fall through */
+    }
+    const positional = positionalPath(element)
+    if (!positional) return null
+    try {
+      return safeQuery(positional).length === 1 ? positional : null
+    } catch {
+      return null
+    }
+  }
+
   function specsFor(element: Element): TargetSpec[] {
     const specs: TargetSpec[] = []
     const tag = element.tagName.toLowerCase()
@@ -685,6 +741,50 @@ export function runOp(op: Op): OpResult {
         /* not focusable */
       }
     }
+  }
+
+  /**
+   * The LIVE value of one form control — what the user (or a previous step) has
+   * actually put there, not the HTML `value` attribute, which stays at its
+   * default and would report stale content.
+   *
+   * Per-type on purpose, mirroring the bulk `read_form` op so a workflow can
+   * read one field or all of them and get the same shapes:
+   *   - checkbox → boolean (`checked`)
+   *   - radio    → its value when selected, '' when not (an unselected radio's
+   *                value means nothing)
+   *   - select   → the value, or an array when `multiple`
+   *   - textarea / input / contenteditable → the text
+   *
+   * @returns the value, or null when the element is not something you can read
+   *   a value from (the caller turns that into a precise error).
+   */
+  function readControlValue(element: Element): string | boolean | string[] | null {
+    if (element instanceof HTMLTextAreaElement) return element.value
+    if (element instanceof HTMLSelectElement) {
+      return element.multiple
+        ? Array.prototype.slice
+            .call(element.selectedOptions)
+            .map((option: HTMLOptionElement) => option.value)
+        : element.value
+    }
+    if (element instanceof HTMLInputElement) {
+      const type = (element.type || 'text').toLowerCase()
+      if (type === 'checkbox') return element.checked
+      if (type === 'radio') return element.checked ? element.value : ''
+      if (type === 'file') return null
+      return element.value
+    }
+    const editable = element.getAttribute('contenteditable')
+    if (editable === '' || editable === 'true') return (element.textContent ?? '').trim()
+    return null
+  }
+
+  /** One-line preview of a read value, for the op's `note`. */
+  function readPreview(value: string | boolean | string[]): string {
+    if (typeof value === 'boolean') return value ? '已勾选 (true)' : '未勾选 (false)'
+    if (Array.isArray(value)) return value.length ? value.join(', ') : '(空)'
+    return value === '' ? '(空)' : value
   }
 
   // --- Simulated typing (stateful rich editors) ------------------------------
@@ -1487,10 +1587,32 @@ export function runOp(op: Op): OpResult {
       }
     }
 
+    if (op.action === 'element_selector_at') {
+      // Powers `loop-elements`: the engine asks for a selector for iteration
+      // N so the loop body can target `{{loopElementSelector}} ...`.
+      const selector = String(op.value ?? '')
+      const index = Math.max(0, Math.floor(Number(op.index ?? 0)))
+      const matches = safeQuery(selector)
+      if (!Number.isFinite(index) || index >= matches.length) {
+        return notFound(
+          `element_selector_at: "${selector}" has ${matches.length} match(es); index ${index} is out of range.`,
+        )
+      }
+      const path = uniqueCssPath(matches[index] as Element)
+      if (!path) {
+        return fail(
+          `element_selector_at: no unique CSS selector for match ${index} of "${selector}" (it may live in a shadow root).`,
+        )
+      }
+      return { ...base(), ok: true, found: true, note: path, data: path }
+    }
+
     if (op.action === 'read_form') {
       const results: Record<string, unknown> = {}
       const selector = op.value ? String(op.value) : 'input, select, textarea'
       const controls = safeQuery(selector)
+      // The per-type value extraction mirrors `readControlValue` (used by the
+      // single-target `get_value`); keep the two in sync.
       for (let i = 0; i < controls.length; i += 1) {
         const control = controls[i] as HTMLInputElement | HTMLTextAreaElement
         const name = control.getAttribute('name') || control.id || `field${i}`
@@ -1757,6 +1879,18 @@ export function runOp(op: Op): OpResult {
       if (value === '') element.removeAttribute(attribute)
       else element.setAttribute(attribute, value)
       return withMeta({ ...base(), ok: true, found: true, note: `set ${attribute}` })
+    }
+
+    if (op.action === 'get_value') {
+      const read = readControlValue(element)
+      if (read === null) {
+        return withMeta(
+          fail(
+            `${describeElement(element)} has no value to read — get_value works on inputs, textareas, selects and contenteditable elements.`,
+          ),
+        )
+      }
+      return withMeta({ ...base(), ok: true, found: true, note: readPreview(read), data: read })
     }
 
     if (op.action === 'click_link') {

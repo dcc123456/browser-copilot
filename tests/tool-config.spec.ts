@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildSystemPrompt, TOOLS } from '../src/background/agent'
 import { DEFAULT_SYSTEM_PROMPT } from '../src/lib/system-prompt'
-import { TOOL_META, TOOL_META_BY_NAME } from '../src/lib/tool-catalog'
+import { TOOL_META, TOOL_META_BY_NAME_MERGED } from '../src/lib/tool-catalog'
 
 describe('system prompt', () => {
   it('uses the full default operating rules when no override is given', () => {
@@ -60,7 +60,7 @@ describe('system prompt', () => {
 describe('tool catalog', () => {
   it('covers every tool the agent advertises', () => {
     for (const tool of TOOLS) {
-      expect(TOOL_META_BY_NAME.has(tool.function.name)).toBe(true)
+      expect(TOOL_META_BY_NAME_MERGED.has(tool.function.name)).toBe(true)
     }
   })
 

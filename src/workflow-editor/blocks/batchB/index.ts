@@ -3,7 +3,8 @@
  * block forms (new-tab, new-window, switch-tab, close-tab, go-back,
  * forward-page, reload-tab, tab-url, take-screenshot, clipboard, cookie,
  * handle-dialog, handle-download, save-local, delay, proxy, wait-connections,
- * save-assets, note) plus the local `ocr` extension form (EditOcr).
+ * save-assets, note) plus the local `ocr` (EditOcr) and `read-page`
+ * (EditReadPage) extension forms.
  *
  * Keys match Automa's `editComponent` names in the block catalog.
  *
@@ -22,6 +23,7 @@ import EditForwardPage from './EditForwardPage'
 import EditReloadTab from './EditReloadTab'
 import EditTabUrl from './EditTabUrl'
 import EditTakeScreenshot from './EditTakeScreenshot'
+import EditReadPage from './EditReadPage'
 import EditOcr from './EditOcr'
 import EditClipboard from './EditClipboard'
 import EditCookie from './EditCookie'
@@ -45,6 +47,7 @@ export const BatchBForms: Record<string, ComponentType<EditFormProps>> = {
   EditReloadTab,
   EditTabUrl,
   EditTakeScreenshot,
+  EditReadPage,
   EditOcr,
   EditClipboard,
   EditCookie,

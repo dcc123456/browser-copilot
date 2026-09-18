@@ -1,4 +1,6 @@
 import type { Messages } from './i18n'
+import { BLOCK_CATALOG } from './workflow/blocks/catalog'
+import { operatorExecClass } from './workflow/operator-class'
 
 /**
  * Human-readable metadata for each agent tool, shared by the tool definitions
@@ -172,6 +174,46 @@ export const TOOL_META: ToolMeta[] = [
     labelKey: 'toolDelegate',
     warningKey: 'toolDelegateWarn',
   },
+  {
+    name: 'compose_workflow',
+    category: 'data',
+    labelKey: 'toolOperator',
+    warningKey: 'toolOperatorWarn',
+  },
 ]
 
 export const TOOL_META_BY_NAME = new Map(TOOL_META.map((meta) => [meta.name, meta]))
+
+/**
+ * Operator tool metadata, derived from `BLOCK_CATALOG` so the settings panel
+ * can list, label and let the user disable workflow-operator tools exactly
+ * like the existing 31 tools. The label/warning i18n keys reuse the catalog
+ * entry name (the catalog already has English display names); settings UI
+ * resolves them via the block name until full per-tool translations land.
+ *
+ * The bucket comes from {@link operatorExecClass}, NOT from the block's palette
+ * category, because the two disagree in both directions: `proxy` /
+ * `browser-event` / `save-local` are catalogued under `browser` but only ever
+ * RECORD a node, while `conditions` / `clipboard` / `delay` are catalogued
+ * under `conditions` / `general` but genuinely run. Keying the "acts on your
+ * page" warning off the palette category therefore warned about tools that do
+ * nothing and stayed silent about tools that act.
+ */
+export const OPERATOR_META: ToolMeta[] = BLOCK_CATALOG.filter(
+  (entry) => !entry.cloud && !entry.disableEdit,
+).map((entry) => ({
+  name: 'wf_op_' + entry.id,
+  category: operatorExecClass(entry.id) === 'execute' ? 'act' : 'read',
+  labelKey: 'toolOperator',
+  warningKey: 'toolOperatorWarn',
+}))
+
+/**
+ * Single merged map. Consumers (settings panel, agent sub-agent filter)
+ * check membership here without caring whether the tool is a regular tool
+ * or a workflow operator.
+ */
+export const TOOL_META_BY_NAME_MERGED: ReadonlyMap<string, ToolMeta> = new Map([
+  ...TOOL_META_BY_NAME,
+  ...OPERATOR_META.map((meta) => [meta.name, meta] as const),
+])
