@@ -9,7 +9,10 @@
  * @module lib/workflow/validation
  */
 
-import type { Workflow } from './types'
+import { isOfferedTriggerType } from './trigger-options'
+import { dataValueSites } from './data-params'
+import { hasReference } from './dynamic-data'
+import type { Workflow, WorkflowNode } from './types'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -106,4 +109,169 @@ export function validateWorkflow(value: unknown): string[] {
 /** Convenience: does {@link validateWorkflow} report no problems? */
 export function isWorkflowValid(value: unknown): value is Workflow {
   return validateWorkflow(value).length === 0
+}
+
+/** Result of {@link validateWorkflowForRun}: hard blockers vs. soft advice. */
+export interface WorkflowRunValidation {
+  /** The workflow cannot run until these are fixed. */
+  errors: string[]
+  /** The workflow will run, but probably not the way the user expects. */
+  warnings: string[]
+}
+
+/** The trigger block's node, when the graph has one. */
+function triggerNodeOf(workflow: Workflow): WorkflowNode | undefined {
+  return workflow.drawflow.nodes.find(
+    (n) => (n.data?.['blockId'] as string) === 'trigger' || n.label === 'trigger',
+  )
+}
+
+/**
+ * The trigger's parameters, read from the graph node and filled in from the
+ * denormalized top-level mirror.
+ *
+ * The mirror is not a formality for the two kinds that carry a field there:
+ * `visit-web` matches on `workflow.trigger.urlPattern` and the context menu
+ * registers `workflow.trigger.menuItemId` — both are read from the MIRROR at
+ * run time, not from the node. A workflow created by another path (an older
+ * import, a `github` / `feishu` integration) may therefore carry only
+ * `workflow.trigger`, and reading the node alone would report a missing
+ * parameter and block a perfectly well-configured run.
+ */
+function triggerParamsOf(
+  workflow: Workflow,
+  triggerNode: WorkflowNode | undefined,
+): Record<string, unknown> {
+  const data: Record<string, unknown> = { ...(triggerNode?.data ?? {}) }
+  if (data['url'] === undefined && workflow.trigger?.urlPattern) {
+    data['url'] = workflow.trigger.urlPattern
+  }
+  if (data['contextMenuName'] === undefined && workflow.trigger?.menuItemId) {
+    data['contextMenuName'] = workflow.trigger.menuItemId
+  }
+  return data
+}
+
+function isNonEmptyString(value: unknown): boolean {
+  return typeof value === 'string' && value.trim() !== ''
+}
+
+/**
+ * The trigger field this kind cannot work without but that is missing or
+ * unusable, or null when the trigger is fully configured. Type-aware on
+ * purpose: an `interval` of `"abc"` is as broken as an empty one, and the
+ * engine's own coercion would silently fall back to a default.
+ */
+function missingTriggerParam(
+  type: string,
+  data: Record<string, unknown> | undefined,
+): string | null {
+  switch (type) {
+    case 'visit-web':
+      return isNonEmptyString(data?.['url']) ? null : 'url'
+    case 'keyboard-shortcut':
+      return isNonEmptyString(data?.['shortcut']) ? null : 'shortcut'
+    case 'context-menu':
+      return isNonEmptyString(data?.['contextMenuName']) ? null : 'contextMenuName'
+    case 'interval': {
+      const raw = data?.['interval']
+      const minutes = typeof raw === 'number' ? raw : Number(raw)
+      return Number.isFinite(minutes) && minutes > 0 ? null : 'interval'
+    }
+    case 'specific-day':
+      return Array.isArray(data?.['days']) && data['days'].length > 0 ? null : 'days'
+    case 'date':
+      return isNonEmptyString(data?.['date']) ? null : 'date'
+    case 'element-change': {
+      // The selector is nested: `data.observeElement.selector`. Without it the
+      // observer has nothing to watch, so the trigger would never fire.
+      const observe = data?.['observeElement']
+      const selector =
+        observe && typeof observe === 'object'
+          ? (observe as Record<string, unknown>)['selector']
+          : undefined
+      return isNonEmptyString(selector) ? null : 'observeElement.selector'
+    }
+    default:
+      return null
+  }
+}
+
+/**
+ * Semantic pre-run checks: is this workflow actually launchable?
+ *
+ * Deliberately separate from {@link validateWorkflow} (which only checks the
+ * payload's structure and is used by the importer). This one needs the full
+ * graph and is called on the *run* path only — never from `saveWorkflow`, so
+ * existing workflows with an odd shape stay editable.
+ *
+ * `errors` block the run; `warnings` do not. A trigger kind this build never
+ * arms (`scheduled`, ...) is a warning rather than an error because the graph
+ * is still runnable by hand.
+ */
+export function validateWorkflowForRun(workflow: Workflow): WorkflowRunValidation {
+  const errors: string[] = []
+  const warnings: string[] = []
+
+  const triggerNode = triggerNodeOf(workflow)
+  if (!triggerNode && !workflow.trigger) {
+    errors.push('工作流缺少触发器：请添加一个 trigger 节点，否则无法运行')
+  }
+
+  const triggerType =
+    (triggerNode?.data?.['type'] as string | undefined) ?? workflow.trigger?.type ?? 'manual'
+
+  if (workflow.trigger?.enabled === false) {
+    errors.push('触发器已被禁用：请先启用触发器再运行')
+  }
+
+  if (!isOfferedTriggerType(triggerType)) {
+    warnings.push(
+      `触发器类型 "${triggerType}" 在当前版本不会自动触发，只能手动运行；请在编辑器里改用其他类型`,
+    )
+  }
+
+  // Only enforce the kind's own parameters when the kind is one we arm — for an
+  // unarmed kind the field names may belong to another creation path.
+  if (isOfferedTriggerType(triggerType)) {
+    const missing = missingTriggerParam(triggerType, triggerParamsOf(workflow, triggerNode))
+    if (missing) {
+      errors.push(`触发器缺少必填参数 "${missing}"，无法运行`)
+    }
+  }
+
+  const actionNodes = workflow.drawflow.nodes.filter((n) => n !== triggerNode)
+  if (actionNodes.length === 0) {
+    errors.push('工作流没有可执行的节点：请在触发器之后至少添加一个算子')
+  }
+
+  // Residual dead data. Generation rewrites business literals into references
+  // (see `dynamic-data`), but a workflow can still arrive here holding one: it
+  // was hand-edited, imported, or saved by a path that predates the rewrite.
+  // A warning rather than an error — the step still runs, it just runs with a
+  // frozen value, and only the user can say whether that is what they want.
+  for (const node of actionNodes) {
+    const data = node.data ?? {}
+    const rawBlockId = data['blockId']
+    const blockId = typeof rawBlockId === 'string' && rawBlockId ? rawBlockId : node.label
+    for (const site of dataValueSites(blockId, data)) {
+      if (hasReference(site.value)) continue
+      warnings.push(
+        `节点 "${node.id}" 的 ${site.path.join('.')} 是固定值 "${site.value}"：` +
+          '重放时不会变化，如果它本该随数据改变，请改用 {{变量}} 引用或声明成工作流输入',
+      )
+    }
+  }
+
+  const nodeIds = new Set(workflow.drawflow.nodes.map((n) => n.id))
+  for (const edge of workflow.drawflow.edges) {
+    if (!nodeIds.has(edge.source)) {
+      errors.push(`存在无效连线：源节点 "${edge.source}" 不存在`)
+    }
+    if (!nodeIds.has(edge.target)) {
+      errors.push(`存在无效连线：目标节点 "${edge.target}" 不存在`)
+    }
+  }
+
+  return { errors, warnings }
 }

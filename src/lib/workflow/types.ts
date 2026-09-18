@@ -67,6 +67,39 @@ export interface WorkflowEdge {
   targetHandle?: string
 }
 
+/**
+ * A workflow INPUT: a named value the workflow needs but cannot produce on its
+ * own — the keyword to search for, the city to look up.
+ *
+ * Declared on the trigger (and/or on a `parameter-prompt` block) and resolved
+ * at run time, so the recorded graph carries `{{name}}` references instead of
+ * frozen literals. `defaultValue` is what the run uses when nothing else
+ * supplies the value, which is what keeps a generated workflow runnable as
+ * generated while still being editable.
+ *
+ * The shape mirrors Automa's parameter records so an imported workflow's
+ * parameters survive; it lives here rather than in the editor component
+ * because the engine, the storage layer and the operator bridge all need it
+ * and none of them may import a `.tsx`.
+ */
+export interface WorkflowParameter {
+  id?: string
+  name: string
+  /** `'string'` | `'number'` | `'json'` | `'checkbox'`; free-form for imports. */
+  type: string
+  description?: string
+  defaultValue?: string
+  placeholder?: string
+  /**
+   * Marks a credential input. Set when a user-typed account/password was
+   * captured during generation, so the value lives in the trigger variable set
+   * (as `defaultValue`) and is referenceable via `{{name}}` at replay. Mirrors
+   * the `secret` flag on stored credential fields (`lib/storage`, `DataTab`).
+   */
+  secret?: boolean
+  data?: { required?: boolean; [key: string]: unknown }
+}
+
 /** How a workflow gets launched. */
 export interface WorkflowTrigger {
   /**
@@ -102,6 +135,16 @@ export interface WorkflowTrigger {
    * the workflow's own id is used as the menu item id.
    */
   menuItemId?: string
+  /**
+   * The workflow's declared inputs, mirrored from the trigger node's
+   * `data.parameters` exactly like the rest of this interface.
+   *
+   * Read at run time to seed the variable scope: a `{{keyword}}` reference
+   * recorded during generation has nothing else to resolve against, because no
+   * caller passes `variables` into `executeWorkflow`. Without this mirror a
+   * generated workflow would replay its references as empty strings.
+   */
+  parameters?: WorkflowParameter[]
 }
 
 /** Execution / persistence options that travel with a workflow. */

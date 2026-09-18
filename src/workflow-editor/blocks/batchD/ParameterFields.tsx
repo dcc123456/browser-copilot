@@ -17,16 +17,12 @@
 import { Plus, Trash2 } from 'lucide-react'
 import { Checkbox, Expand, Select, TextArea, TextInput } from '../shared/Field'
 import { useEditorLocale } from '../../locale-context'
+import type { WorkflowParameter } from '../../../lib/workflow/types'
 
-export interface WorkflowParameter {
-  id?: string
-  name: string
-  type: string
-  description?: string
-  defaultValue?: string
-  placeholder?: string
-  data?: { required?: boolean; [key: string]: unknown }
-}
+// Re-exported so existing editor imports keep working; the type itself lives in
+// `lib/workflow/types` because the engine and the operator bridge need it too
+// and must not import from a `.tsx`.
+export type { WorkflowParameter }
 
 const PARAM_TYPES = [
   { value: 'string', label: 'Input (string)' },
