@@ -76,17 +76,6 @@ type FrameProbeResult =
   | { state: 'empty'; href: string; inventory: FrameInventoryEntry[] }
   | { state: 'missing'; href: string; inventory: FrameInventoryEntry[] }
 
-/** Reads a frame element's content location; cross-origin href is readable. */
-function frameHref(frame: Element): string {
-  try {
-    const win = (frame as HTMLIFrameElement).contentWindow
-    if (win?.location?.href) return win.location.href
-  } catch {
-    /* cross-origin — fall through to the attribute */
-  }
-  return String(frame.getAttribute('src') ?? '')
-}
-
 /**
  * Rect probe injected into the page's TOP frame for the crop fallback. Covers
  * MORE than the top document:
@@ -102,9 +91,24 @@ function frameHref(frame: Element): string {
  * below-the-fold captcha must become visible before the visible-page capture
  * can contain it. "missing" reports what was checked; "empty" means the
  * element exists with zero size (hidden).
+ *
+ * Everything it needs is declared inside: `executeScript` serializes this
+ * function's SOURCE, so a module-scope helper would be a `ReferenceError` in
+ * the page. `scripts/verify-injected-functions.mjs` enforces that.
  */
 export function probeTopDocument(selector: string): FrameProbeResult {
   const inventory: FrameInventoryEntry[] = []
+
+  /** Reads a frame element's content location; cross-origin href is readable. */
+  const frameHref = (frame: Element): string => {
+    try {
+      const win = (frame as HTMLIFrameElement).contentWindow
+      if (win?.location?.href) return win.location.href
+    } catch {
+      /* cross-origin — fall through to the attribute */
+    }
+    return String(frame.getAttribute('src') ?? '')
+  }
 
   const collect = (doc: Document, baseX: number, baseY: number, depth: number): void => {
     if (depth > 4) return

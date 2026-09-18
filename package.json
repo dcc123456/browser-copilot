@@ -40,6 +40,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "verify:injected": "node scripts/verify-injected-functions.mjs",
     "bench:debug": "node scripts/bench-debug.mjs",
     "server:start": "pnpm --filter browser-copilot-runner start",
     "server:dev": "pnpm --filter browser-copilot-runner dev",

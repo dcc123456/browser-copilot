@@ -351,11 +351,18 @@ async function waitForActionable(
  * Serialized into every frame per op (fast path). Calls the kernel the
  * persistent content script parked on the ISOLATED world's global
  * (`__browserCopilotKernel`, see src/inpage/content-kernel.ts). Self-contained
- * by the kernel's "one rule": no references outside its own body. Returns
- * nothing in frames where the kernel is not resident — the driver re-injects
- * the full kernel into those frames.
+ * by the kernel's "one rule": no references outside its own body.
+ *
+ * That rule is why the expected version arrives as an ARGUMENT rather than
+ * being closed over: `executeScript` serializes this function's source only,
+ * so a reference to the module-scope `KERNEL_VERSION` threw `ReferenceError`
+ * in the page and the fast path could never run.
+ * `scripts/verify-injected-functions.mjs` enforces this.
+ *
+ * Returns nothing in frames where the kernel is not resident — the driver
+ * re-injects the full kernel into those frames.
  */
-function runOpViaKernel(op: Op): OpResult | undefined {
+function runOpViaKernel(op: Op, kernelVersion: number): OpResult | undefined {
   const g = globalThis as {
     __browserCopilotKernel?: (o: Op) => OpResult
     __browserCopilotKernelVersion?: number
@@ -363,7 +370,7 @@ function runOpViaKernel(op: Op): OpResult | undefined {
   // Version mismatch = a kernel from a previous extension build still resident
   // in this frame (reload/update with no navigation since). Treat it as absent:
   // the driver re-injects the fresh kernel, which overwrites the global.
-  if (g.__browserCopilotKernelVersion !== KERNEL_VERSION) return undefined
+  if (g.__browserCopilotKernelVersion !== kernelVersion) return undefined
   const kernel = g.__browserCopilotKernel
   if (typeof kernel !== 'function') return undefined
   return kernel(op)
@@ -458,7 +465,7 @@ export async function execOnActiveTab(
       chrome.scripting.executeScript({
         target: { tabId: tab.id, allFrames: true },
         func: runOpViaKernel as unknown as (...args: unknown[]) => unknown,
-        args: [op as unknown as never],
+        args: [op as unknown as never, KERNEL_VERSION],
       }),
       signal,
     )
@@ -1158,11 +1165,7 @@ export async function pinActiveTab(tabId?: number, scope?: ScopeWindow): Promise
   if (!tab || typeof tab.id !== 'number' || !isInjectablePage(tab.url)) {
     throw new DriverError('pin_tab: 没有可钉住的 http(s) 标签页。')
   }
-  if (
-    scope &&
-    typeof tab.windowId === 'number' &&
-    tab.windowId !== scope.windowId
-  ) {
+  if (scope && typeof tab.windowId === 'number' && tab.windowId !== scope.windowId) {
     throw new DriverError(
       'pin_tab: 不能钉住其它窗口的标签页。 / pin_tab cannot pin a tab from another window.',
     )
@@ -1269,6 +1272,28 @@ export async function countElements(
     scope,
   )
   return typeof result.data === 'number' ? result.data : 0
+}
+
+/**
+ * A CSS selector matching only the `index`-th element matched by `selector`,
+ * or null when the page has no such element / cannot express it as CSS.
+ *
+ * The `loop-elements` engine hook uses this to hand each iteration its own
+ * element, so a folded loop body can target `{{loopElementSelector}} …`.
+ */
+export async function elementSelectorAt(
+  selector: string,
+  index: number,
+  signal?: AbortSignal,
+  scope?: ScopeWindow,
+): Promise<string | null> {
+  const result = await execOnActiveTab(
+    { action: 'element_selector_at', value: selector, index },
+    signal,
+    undefined,
+    scope,
+  )
+  return result.ok && typeof result.data === 'string' && result.data ? result.data : null
 }
 
 /** Result of evaluating user JavaScript in the page. */
