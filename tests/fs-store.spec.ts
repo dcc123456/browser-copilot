@@ -1,15 +1,31 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import {
   createFileArea,
+  fileStorageArea,
   FsDirectory,
   getStorageMode,
   keyToPath,
+  resetStorageCache,
   SKILLS_DIR,
   skillPath,
   syncEntriesToFiles,
+  syncFilesToBrowser,
   syncSkillsToFiles,
+  syncToFiles,
 } from '../src/lib/fs-store'
 import type { Skill } from '../src/lib/types'
+import { notifyStoreChanged } from '../src/lib/store-events'
+
+/**
+ * The change bus itself is covered by `tests/store-events.spec.ts`; what matters
+ * here is that the storage layer is wired to it, so it is mocked to a spy.
+ */
+vi.mock('../src/lib/store-events', () => ({
+  notifyStoreChanged: vi.fn(),
+  onStoreChanged: vi.fn(() => () => undefined),
+}))
 
 /**
  * In-memory `chrome.storage.local` double used to verify the mirror/fallback
@@ -18,8 +34,9 @@ import type { Skill } from '../src/lib/types'
 function makeChromeMock() {
   const store = new Map<string, unknown>()
   const local = {
-    get: vi.fn(async (keys: string | string[]) => {
-      const wanted = typeof keys === 'string' ? [keys] : keys
+    // `null` means "everything", the way `chrome.storage.local.get(null)` does.
+    get: vi.fn(async (keys: string | string[] | null) => {
+      const wanted = keys === null ? [...store.keys()] : typeof keys === 'string' ? [keys] : keys
       const out: Record<string, unknown> = {}
       for (const key of wanted) {
         if (store.has(key)) out[key] = store.get(key)
@@ -98,6 +115,49 @@ function dataDir(node: Extract<Node, { kind: 'dir' }>): Extract<Node, { kind: 'd
   return { kind: 'dir', children: new Map() }
 }
 
+/**
+ * Points the module's IndexedDB lookup at `handle` and reports it as granted, so
+ * the file-backed area resolves without a real File System Access API. The
+ * resolved handle is cached module-wide, so callers must `resetStorageCache()`
+ * before and after.
+ */
+function stubGrantedDirectory(handle: FakeDir): void {
+  const granted = {
+    name: 'picked',
+    queryPermission: async (): Promise<PermissionState> => 'granted',
+    getDirectoryHandle: (name: string, opts: { create?: boolean }) =>
+      handle.getDirectoryHandle(name, opts),
+    getFileHandle: (name: string, opts: { create?: boolean }) => handle.getFileHandle(name, opts),
+    removeEntry: (name: string) => handle.removeEntry(name),
+    values: () => handle.values(),
+  }
+  const db = {
+    transaction: () => ({
+      objectStore: () => ({
+        get: () => {
+          const request: { result: unknown; onsuccess: null | (() => void) } = {
+            result: granted,
+            onsuccess: null,
+          }
+          setTimeout(() => request.onsuccess?.(), 0)
+          return request
+        },
+      }),
+    }),
+  }
+  vi.stubGlobal('indexedDB', {
+    open: () => {
+      const request: {
+        result: unknown
+        onsuccess: null | (() => void)
+        onupgradeneeded: null | (() => void)
+      } = { result: db, onsuccess: null, onupgradeneeded: null }
+      setTimeout(() => request.onsuccess?.(), 0)
+      return request
+    },
+  })
+}
+
 describe('keyToPath', () => {
   it('maps a plain key to a root json file', () => {
     expect(keyToPath('settings')).toEqual(['settings.json'])
@@ -143,7 +203,7 @@ describe('createFileArea', () => {
     vi.restoreAllMocks()
   })
 
-  it('writes a value to a real file and mirrors it to chrome.storage', async () => {
+  it('writes a value to a real file and leaves the browser store empty', async () => {
     const { handle, node } = makeFakeRoot()
     const area = createFileArea(handle as FileSystemDirectoryHandle)
 
@@ -155,7 +215,58 @@ describe('createFileArea', () => {
     if (fileEntry && fileEntry.kind === 'file') {
       expect(JSON.parse(fileEntry.content)).toEqual({ locale: 'zh' })
     }
-    expect(chrome.store.get('settings')).toEqual({ locale: 'zh' })
+    // Deliberately NOT mirrored: a second copy in `chrome.storage.local` is what
+    // filled its 10 MB quota, and the user asked for data to live in the
+    // directory only.
+    expect(chrome.store.has('settings')).toBe(false)
+  })
+
+  it('throws instead of silently doing nothing when the file cannot be created', async () => {
+    // A revoked permission, a deleted directory, a full disk. The old code
+    // resolved without writing and the mirror hid it; with no mirror that
+    // silence would be silent data loss.
+    const unreachable = {
+      getDirectoryHandle: async () => ({
+        getDirectoryHandle: async () => ({
+          getFileHandle: async () => {
+            throw new Error('permission denied')
+          },
+        }),
+      }),
+    }
+    const area = createFileArea(unreachable as unknown as FileSystemDirectoryHandle)
+
+    await expect(area.set({ settings: { locale: 'zh' } })).rejects.toThrow(/settings/)
+    expect(chrome.store.has('settings')).toBe(false)
+  })
+
+  it('drops a staged copy once the value reaches a file', async () => {
+    // Otherwise the next `syncToFiles` would push the older staged value back
+    // over the newer file.
+    const { handle, node } = makeFakeRoot()
+    const area = createFileArea(handle as FileSystemDirectoryHandle)
+    chrome.store.set('settings', { locale: 'stale' })
+
+    await area.set({ settings: { locale: 'fresh' } })
+
+    expect(chrome.store.has('settings')).toBe(false)
+    const entry = dataDir(node).children.get('settings.json')
+    expect(entry?.kind).toBe('file')
+    if (entry?.kind === 'file') expect(JSON.parse(entry.content)).toEqual({ locale: 'fresh' })
+  })
+
+  it('announces every key it wrote, so listeners can re-read', async () => {
+    const { handle } = makeFakeRoot()
+    const area = createFileArea(handle as FileSystemDirectoryHandle)
+    const notify = vi.mocked(notifyStoreChanged)
+    notify.mockClear()
+
+    await area.set({ settings: { locale: 'zh' }, workflows: [] })
+    expect(notify.mock.calls.map((call) => call[0])).toEqual(['settings', 'workflows'])
+
+    notify.mockClear()
+    await area.remove('workflows')
+    expect(notify.mock.calls.map((call) => call[0])).toEqual(['workflows'])
   })
 
   it('reads a value back from the file', async () => {
@@ -178,13 +289,16 @@ describe('createFileArea', () => {
     expect(got.skills).toEqual([{ id: 's1', name: 'Scrape' }])
   })
 
-  it('removes both the file and the mirror entry', async () => {
+  it('removes the file and any staged copy of the key', async () => {
     const { handle, node } = makeFakeRoot()
     const area = createFileArea(handle as FileSystemDirectoryHandle)
 
     await area.set({ settings: { locale: 'en' } })
     expect(dataDir(node).children.has('settings.json')).toBe(true)
-    expect(chrome.store.has('settings')).toBe(true)
+
+    // A value staged while the handle was unavailable must not outlive the
+    // delete: the read fallback would resurrect it.
+    chrome.store.set('settings', { locale: 'stale' })
 
     await area.remove('settings')
     expect(dataDir(node).children.has('settings.json')).toBe(false)
@@ -240,8 +354,8 @@ describe('createFileArea', () => {
     const dir = dataDir(node)
     expect(dir.children.has('skills.json')).toBe(false)
     expect(dir.children.has('skills')).toBe(false)
-    // The mirror still records the value so reads/onChanged keep working.
-    expect(chrome.store.get('skills')).toEqual([{ id: 's1', name: 'Scrape' }])
+    // Nor may it be parked in the browser store: skills are SKILL.md files.
+    expect(chrome.store.has('skills')).toBe(false)
   })
 })
 
@@ -300,6 +414,27 @@ describe('syncEntriesToFiles', () => {
     const settingsFile = dir.children.get('settings.json') as FileNode
     expect(JSON.parse(settingsFile.content)).toEqual({ locale: 'zh' })
     expect(JSON.parse((dir.children.get('workflows.json') as FileNode).content)).toEqual([])
+  })
+
+  it('clears each migrated key from the browser store', async () => {
+    // The point of the migration: the data ends up in the user's directory and
+    // NOT in `chrome.storage.local`, which is what kept filling its quota.
+    const { handle, node } = makeFakeRoot()
+    const mirror = { settings: { locale: 'zh' }, workflows: [{ id: 'w1', name: 'Daily' }] }
+    for (const [key, value] of Object.entries(mirror)) chrome.store.set(key, value)
+
+    await syncEntriesToFiles(mirror, handle as FileSystemDirectoryHandle)
+
+    expect(chrome.store.has('settings')).toBe(false)
+    expect(chrome.store.has('workflows')).toBe(false)
+    // …and nothing was lost on the way: both landed as files.
+    const dir = dataDir(node)
+    expect(JSON.parse((dir.children.get('settings.json') as FileNode).content)).toEqual(
+      mirror.settings,
+    )
+    expect(JSON.parse((dir.children.get('workflows.json') as FileNode).content)).toEqual(
+      mirror.workflows,
+    )
   })
 
   it('never persists the skills key as a JSON file (SKILL.md is used instead)', async () => {
@@ -403,5 +538,170 @@ describe('getStorageMode', () => {
   it('reports browser mode when no directory handle exists', async () => {
     // No indexedDB in the node test environment, so the handle cannot resolve.
     expect(await getStorageMode()).toBe('browser')
+  })
+})
+
+describe('chrome.storage.local quota', () => {
+  /**
+   * The exact rejection Chrome produces past QUOTA_BYTES. A user hits it as a
+   * failed "save as workflow" with this string shown verbatim in the chat, so
+   * the assertion below pins the translation rather than the wording.
+   */
+  const CHROME_QUOTA_ERROR = 'Resource::kQuotaBytes quota exceeded'
+
+  /** Stubs a `chrome.storage.local` whose writes are always rejected. */
+  function stubFullStorage(reason = CHROME_QUOTA_ERROR): void {
+    vi.stubGlobal('chrome', {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({})),
+          set: vi.fn(async () => {
+            throw new Error(reason)
+          }),
+          remove: vi.fn(async () => undefined),
+        },
+      },
+    })
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('replaces the raw Chrome rejection with an actionable message', async () => {
+    // No indexedDB here, so the area resolves to the browser mirror — the mode
+    // a user is in before picking a storage directory, and the one where a full
+    // quota reaches them as a failed save.
+    stubFullStorage()
+
+    const failure = await fileStorageArea()
+      .set({ workflows: [] })
+      .then(
+        () => null,
+        (error: unknown) => error as Error,
+      )
+
+    expect(failure).toBeInstanceOf(Error)
+    const text = failure?.message ?? ''
+    // Actionable: names the settings path that removes the ceiling.
+    expect(text).toContain('数据存储')
+    // Diagnostic: keeps Chrome's original wording, so a bug report is greppable.
+    expect(text).toContain(CHROME_QUOTA_ERROR)
+    // And it is no longer ONLY that wording — which is what the user reported.
+    expect(text).not.toBe(CHROME_QUOTA_ERROR)
+  })
+
+  it('passes a non-quota write failure through untouched', async () => {
+    // Translating an unrelated failure would hide the real cause.
+    stubFullStorage('Extension context invalidated.')
+
+    await expect(fileStorageArea().set({ settings: {} })).rejects.toThrow(
+      'Extension context invalidated.',
+    )
+  })
+
+  it('keeps a file-backed save succeeding when only the mirror is full', async () => {
+    // The file write is the durable one; a full mirror must not turn a save
+    // that landed on disk into a reported failure.
+    const { handle, node } = makeFakeRoot()
+    stubFullStorage()
+
+    await expect(
+      createFileArea(handle as FileSystemDirectoryHandle).set({ settings: { locale: 'zh' } }),
+    ).resolves.toBeUndefined()
+
+    const entry = dataDir(node).children.get('settings.json')
+    expect(entry?.kind).toBe('file')
+  })
+
+  it('declares unlimitedStorage in the manifest', () => {
+    // Dropping this permission silently reinstates the 10 MB cap and, with it,
+    // a save that fails for a reason the user cannot act on.
+    const source = readFileSync(
+      fileURLToPath(new URL('../manifest.config.ts', import.meta.url)),
+      'utf8',
+    )
+    const permissions = /permissions:\s*\[([\s\S]*?)\]/.exec(source)?.[1] ?? ''
+    // Comments are stripped so only a real entry satisfies the assertion.
+    const entries = permissions.replace(/\/\/.*$/gm, '')
+    expect(entries).toContain("'unlimitedStorage'")
+  })
+})
+
+describe('switching back to browser storage', () => {
+  let chrome: ReturnType<typeof makeChromeMock>
+
+  beforeEach(() => {
+    chrome = makeChromeMock()
+    vi.stubGlobal('chrome', chrome)
+    resetStorageCache()
+  })
+
+  afterEach(() => {
+    resetStorageCache()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('round-trips: out to files, then back into the browser store', async () => {
+    // The guarantee that makes the switch non-destructive. Without the reverse
+    // copy the panel would come up empty after switching back, which reads as
+    // "everything was deleted".
+    const { handle, node } = makeFakeRoot()
+    stubGrantedDirectory(handle as FakeDir)
+    const original: Record<string, unknown> = {
+      settings: { locale: 'zh' },
+      workflows: [{ id: 'w1', name: 'Daily' }],
+      'conv:abc': { messages: [{ role: 'user', content: 'hi' }] },
+    }
+    for (const [key, value] of Object.entries(original)) chrome.store.set(key, value)
+
+    await syncToFiles()
+    // Migrated: on disk, and gone from the browser store.
+    expect(dataDir(node).children.has('settings.json')).toBe(true)
+    expect(chrome.store.has('settings')).toBe(false)
+    expect(chrome.store.has('conv:abc')).toBe(false)
+
+    await syncFilesToBrowser()
+
+    expect(chrome.store.get('settings')).toEqual(original.settings)
+    expect(chrome.store.get('workflows')).toEqual(original.workflows)
+    expect(chrome.store.get('conv:abc')).toEqual(original['conv:abc'])
+  })
+
+  it('rebuilds the skills collection from the SKILL.md folders', async () => {
+    // Skills are never a `<key>.json`, so the generic walk cannot find them —
+    // they have to be re-read from their folders.
+    const { handle } = makeFakeRoot()
+    stubGrantedDirectory(handle as FakeDir)
+    chrome.store.set('skills', [
+      {
+        id: 's1',
+        name: 'Scraper',
+        description: 'scrape pages',
+        instructions: 'Fetch the page.',
+        autoMatch: true,
+        createdAt: 1_720_000_000_000,
+        updatedAt: 1_720_000_000_001,
+      },
+    ])
+
+    await syncToFiles()
+    expect(chrome.store.has('skills')).toBe(false)
+
+    await syncFilesToBrowser()
+
+    const skills = chrome.store.get('skills') as Array<{ id: string; name: string }>
+    expect(skills.map((skill) => skill.id)).toEqual(['s1'])
+    expect(skills[0]?.name).toBe('Scraper')
+  })
+
+  it('writes nothing when the folder holds nothing', async () => {
+    const { handle } = makeFakeRoot()
+    stubGrantedDirectory(handle as FakeDir)
+
+    expect(await syncFilesToBrowser()).toBe(0)
+    expect(chrome.store.size).toBe(0)
   })
 })

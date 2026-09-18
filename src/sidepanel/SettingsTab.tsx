@@ -14,6 +14,14 @@ import {
 import type { AgentStatus, Settings, UnattendedWindowPolicy } from '../lib/types'
 import { TOOL_META } from '../lib/tool-catalog'
 import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
+import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
+import {
+  ADVERTISABLE_OPERATOR_CATEGORIES,
+  CORE_OPERATOR_BLOCK_IDS,
+  OPERATOR_CATEGORY_ENTRIES,
+  operatorCategoryLabel,
+} from '../lib/workflow/operator-categories'
+import { blockDisplayName, categoryDisplayName } from '../workflow-editor/block-i18n'
 import {
   clearStorageDirectory,
   ensureFileAccess,
@@ -23,11 +31,12 @@ import {
   type StorageMode,
 } from '../lib/fs-store'
 import { clearDownloadDir, getDownloadDir, setDownloadDir } from '../lib/download-dir'
+import { onStoreChanged } from '../lib/store-events'
 import { ADAPTER_ASSET_PATH, ADAPTER_EXPORT_FILENAME, buildMcpSnippet } from '../lib/mcp-adapter'
 import { OCR_SUPPORTED } from '../lib/ocr-support'
 import NumberInput from '../ui/NumberInput'
 import FormDialog, { FormDialogCancelButton, FormDialogPrimaryButton } from '../ui/FormDialog'
-import { useT } from './i18n'
+import { useI18n, useT } from './i18n'
 
 /** Editable form state; numbers stay strings so partial input is allowed. */
 interface Draft extends Omit<ProviderProfile, 'temperature' | 'maxTokens' | 'headers'> {
@@ -144,15 +153,14 @@ function AgentBindingsCard(props: {
 
   const windowLabel = (window: WindowChoice): string => {
     const title = window.title.trim()
-    const here = window.windowId === myWindowId ? `（${t.settingsLocalAgentBindingThisWindow}）` : ''
+    const here =
+      window.windowId === myWindowId ? `（${t.settingsLocalAgentBindingThisWindow}）` : ''
     return `${title || `#${window.windowId}`} · #${window.windowId}${here}`
   }
 
   return (
     <div className="mt-2 space-y-2 rounded-lg border border-border bg-panel-2 p-3">
-      <div className="text-[12.5px] font-medium text-ink">
-        {t.settingsLocalAgentBindingsTitle}
-      </div>
+      <div className="text-[12.5px] font-medium text-ink">{t.settingsLocalAgentBindingsTitle}</div>
       <p className="m-0 text-[11.5px] leading-relaxed text-muted">
         {t.settingsLocalAgentBindingsHint}
       </p>
@@ -160,8 +168,7 @@ function AgentBindingsCard(props: {
       {agents.map((agent) => {
         const bound = bindings[agent.name]
         const closed =
-          typeof bound === 'number' &&
-          !pluginWindows.some((window) => window.windowId === bound)
+          typeof bound === 'number' && !pluginWindows.some((window) => window.windowId === bound)
         return (
           <div key={agent.id} className="flex items-center gap-2">
             <div className="min-w-0 flex-1">
@@ -210,9 +217,7 @@ function AgentBindingsCard(props: {
 
       {staleNames.length > 0 && (
         <div className="space-y-1 border-t border-border pt-2">
-          <div className="text-[11.5px] text-muted">
-            {t.settingsLocalAgentBindingStale}
-          </div>
+          <div className="text-[11.5px] text-muted">{t.settingsLocalAgentBindingStale}</div>
           {staleNames.map((name) => (
             <div key={name} className="flex items-center gap-2">
               <span className="min-w-0 flex-1 truncate text-[12px] text-muted" title={name}>
@@ -322,6 +327,10 @@ interface Props {
 
 export default function SettingsTab({ onLocaleChange }: Props) {
   const t = useT()
+  const { locale } = useI18n()
+  // Block/category names come from the workflow editor's own dictionary, which
+  // keys off 'zh' rather than the panel's 'zh-CN'.
+  const editorLocale: 'en' | 'zh' = locale === 'zh-CN' ? 'zh' : 'en'
   const [settings, setSettings] = useState<Settings | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [banner, setBanner] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
@@ -337,6 +346,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   // the user expands whichever they want to inspect or change.
   const [promptOpen, setPromptOpen] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
+  const [operatorToolsOpen, setOperatorToolsOpen] = useState(false)
   // Local drafts for the local-agent URL and token so typing does not write to
   // storage on every keystroke; both are committed on blur.
   const [agentUrlDraft, setAgentUrlDraft] = useState('')
@@ -487,9 +497,14 @@ export default function SettingsTab({ onLocaleChange }: Props) {
     setStorageBusy(true)
     setStorageNotice(null)
     try {
+      // Copies the folder back into browser storage first, so switching back
+      // cannot look like the data disappeared.
       await clearStorageDirectory()
       setStorageMode('browser')
       setStorageDirName(null)
+    } catch (error) {
+      // The handle is still in place, so the folder remains the source of truth.
+      setStorageNotice({ kind: 'error', text: (error as Error).message })
     } finally {
       setStorageBusy(false)
     }
@@ -583,20 +598,11 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   }, [])
 
   // An assignment made in ANOTHER window's panel lands in storage behind our
-  // back: merge settings changes without going through applySettings, which
-  // would also overwrite the URL/token/model drafts this panel may be editing.
-  useEffect(() => {
-    const handler = (
-      changes: Record<string, chrome.storage.StorageChange>,
-      area: string,
-    ): void => {
-      if (area !== 'local') return
-      const next = changes['settings']?.newValue as Settings | undefined
-      if (next) setSettings(normalizeSettings(next))
-    }
-    chrome.storage?.onChanged.addListener(handler)
-    return () => chrome.storage?.onChanged.removeListener(handler)
-  }, [])
+  // back, so re-read it. Deliberately NOT `applySettings`: that also resets the
+  // URL/token/image-model drafts, which would wipe what this panel is editing.
+  // The notification carries only the key, never the value, so the read is what
+  // keeps this from acting on a stale copy.
+  useEffect(() => onStoreChanged('settings', () => void load()), [load])
 
   // Reset the MCP copy-button label after a brief pause, and clear the timer on
   // unmount so it never fires after the panel is gone.
@@ -1694,6 +1700,68 @@ export default function SettingsTab({ onLocaleChange }: Props) {
                 )
               })}
             </div>
+          </div>
+        )}
+
+        {/* Workflow operator tools — a read-only reference. These are dispatched
+            by category in workflow-generation mode, so they are not part of
+            `disabledTools`; showing them here answers "what can it actually
+            do?" without implying they can be switched off. */}
+        <button
+          aria-expanded={operatorToolsOpen}
+          className="disclosure"
+          onClick={() => setOperatorToolsOpen((open) => !open)}
+          type="button"
+        >
+          <span className="disclosure-caret" aria-hidden="true">
+            {operatorToolsOpen ? '▾' : '▸'}
+          </span>
+          <b>{t.settingsOperatorTools}</b>
+          <span className="disclosure-state">
+            {ADVERTISABLE_OPERATOR_CATEGORIES.reduce(
+              (sum, category) => sum + OPERATOR_CATEGORY_ENTRIES[category].length,
+              0,
+            )}{' '}
+            {t.settingsToolsEnabled}
+          </span>
+        </button>
+        {operatorToolsOpen && (
+          <div className="disclosure-body">
+            <p className="hint">{t.settingsOperatorToolsHint}</p>
+            <div className="tool-toggle-list">
+              <div className="tool-toggle">
+                <span>
+                  <b>{t.settingsOperatorToolsCore}</b>
+                  <code className="tool-name">
+                    {CORE_OPERATOR_BLOCK_IDS.map((id) =>
+                      blockDisplayName(id, BLOCK_BY_ID.get(id)?.name ?? id, editorLocale),
+                    ).join(' · ')}
+                  </code>
+                </span>
+              </div>
+              {ADVERTISABLE_OPERATOR_CATEGORIES.map((category) => (
+                <div className="tool-toggle" key={category}>
+                  <span>
+                    <b>
+                      {categoryDisplayName(category, operatorCategoryLabel(category), editorLocale)}{' '}
+                      <span className="tool-warn">
+                        {t.settingsOperatorToolsCount({
+                          count: OPERATOR_CATEGORY_ENTRIES[category].length,
+                        })}
+                      </span>
+                    </b>
+                    <code className="tool-name">
+                      {OPERATOR_CATEGORY_ENTRIES[category]
+                        .map((entry) => blockDisplayName(entry.id, entry.name, editorLocale))
+                        .join(' · ')}
+                    </code>
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="hint" style={{ marginTop: '8px' }}>
+              {t.settingsOperatorToolsReadOnly}
+            </p>
           </div>
         )}
       </div>

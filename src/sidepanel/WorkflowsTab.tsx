@@ -21,6 +21,7 @@ import type { DebugSessionStatsSummary, TakeoverStatsSummary } from '../lib/work
 import type { PendingTakeoverInfo } from '../lib/workflow/takeover-pending'
 import type { RunStep } from '../background/running-tasks'
 import { newId } from '../lib/storage'
+import { onStoreChanged } from '../lib/store-events'
 import { useT } from './i18n'
 import { confirmDialog } from '../ui/confirm'
 
@@ -287,18 +288,13 @@ export default function WorkflowsTab() {
     void load()
   }, [load])
 
-  // Auto-refresh when workflows are added/edited/deleted externally (e.g.
-  // saved from ChatTab's "save as workflow" prompt or imported in bulk).
-  useEffect(() => {
-    const handler = (
-      changes: { [key: string]: chrome.storage.StorageChange },
-      area: string,
-    ): void => {
-      if (area === 'local' && changes['workflows']) void load()
-    }
-    chrome.storage.onChanged.addListener(handler)
-    return () => chrome.storage.onChanged.removeListener(handler)
-  }, [load])
+  // Auto-refresh when workflows are added/edited/deleted elsewhere (saved from
+  // ChatTab's "save as workflow" prompt, imported in bulk, or written by the
+  // worker). `chrome.storage.onChanged` used to carry this, but file-backed
+  // storage no longer writes that store, so the storage layer notifies instead
+  // (see lib/store-events) — including for a save made in this same frame, which
+  // a runtime message alone could not deliver.
+  useEffect(() => onStoreChanged('workflows', () => void load()), [load])
 
   // Lightweight refresh so a workflow run launched elsewhere updates the
   // last-run status chip without the user having to re-open the tab. Live

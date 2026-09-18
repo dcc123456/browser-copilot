@@ -63,6 +63,16 @@ export default defineManifest(((env: ConfigEnv) => {
     minimum_chrome_version: '116',
     permissions: [
       'storage',
+      // `chrome.storage.local` hard-rejects a write past QUOTA_BYTES (10 MB
+      // since Chrome 114) with "Resource::kQuotaBytes quota exceeded" — a
+      // string that names an internal constant and tells the user nothing.
+      // Conversations, workflows, generation drafts, run checkpoints and tasks
+      // all live in that store, or are mirrored into it even when a directory
+      // is configured (see lib/fs-store.ts), so the cap is reached in ordinary
+      // use rather than a pathological one, and it surfaces as a failed
+      // "save as workflow". This permission lifts the cap; without it that
+      // failure is a hard write error, not a degraded experience.
+      'unlimitedStorage',
       'tabs',
       'scripting',
       'sidePanel',

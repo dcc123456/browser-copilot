@@ -8,14 +8,25 @@
  * IndexedDB, and a `browser-copilot` subfolder inside it holds one JSON file per
  * logical key (conversation transcripts under `conversations/<id>.json`).
  *
- * `chrome.storage.local` is demoted to a mirror: every write is also written
- * there so the service worker keeps a consistent, fast view even when the file
- * handle is momentarily unusable — re-requesting a dropped permission needs a
- * user gesture, which a background worker cannot provide. Reads prefer the file
- * when the handle is granted and fall back to the mirror only when a file is
- * absent or corrupt, so externally-edited files are picked up and nothing is
- * lost in the gap between choosing a directory and the first grant. The mirror
- * is also what fires `chrome.storage.onChanged` for the UI.
+ * `chrome.storage.local` is NOT a second copy of the data. Once a directory is
+ * configured, writes go to files only: the user asked for their data to live in
+ * that directory and nowhere else, and a full mirror is exactly what filled the
+ * store's 10 MB quota. What remains in `chrome.storage.local` is a narrow
+ * staging area for the one case a file write cannot serve — a write made while
+ * the handle is unavailable, since re-requesting a dropped permission needs a
+ * user gesture that a background worker cannot provide. Such a write lands in
+ * the mirror, is readable from there until it is flushed, and is pushed into
+ * files by {@link syncToFiles} on the next panel open. A key that reaches a file
+ * is removed from the mirror, so the staging area only ever holds writes that
+ * have not landed yet.
+ *
+ * Reads still prefer the file when the handle is granted and fall back to the
+ * mirror otherwise, so externally-edited files are picked up and a pending write
+ * is not lost in the gap between choosing a directory and the first grant.
+ *
+ * `chrome.storage.onChanged` used to be how the UI learned about a write. That
+ * store is no longer written, so `lib/store-events` carries the notification
+ * instead.
  *
  * The picker and permission requests require a window plus a user gesture, so
  * those entry points (`pickStorageDirectory`, `ensureFileAccess`, `syncToFiles`)
@@ -25,8 +36,9 @@
  *
  * @module lib/fs-store
  */
-import { skillSlug, skillToMarkdown } from './skills-import'
-import { agentSlug, agentToMarkdown } from './agents-import'
+import { skillFromMarkdown, skillSlug, skillToMarkdown } from './skills-import'
+import { agentFromMarkdown, agentSlug, agentToMarkdown } from './agents-import'
+import { notifyStoreChanged } from './store-events'
 import type { Agent, Skill } from './types'
 
 /**
@@ -228,7 +240,10 @@ export class FsDirectory {
   /** Creates or overwrites a file with the given text. */
   async writeText(segments: string[], text: string): Promise<void> {
     const fileHandle = await this.fileHandle(segments, true)
-    if (!fileHandle) return
+    // `create: true` was requested, so a missing handle means the directory
+    // could not be reached — not that the file was absent. Throwing is what
+    // stops a failed write from being indistinguishable from a successful one.
+    if (!fileHandle) throw new Error(`无法在存储目录中创建 ${segments.join('/')}`)
     const writable = await fileHandle.createWritable()
     try {
       await writable.write(text)
@@ -275,6 +290,29 @@ export class FsDirectory {
     }
   }
 
+  /**
+   * Lists the file names directly inside `segments` under the data folder (`[]`
+   * is the data folder root). Returns `[]` when that directory does not exist,
+   * which is the right answer for "nothing stored there" — the only caller walks
+   * the folder to rebuild the browser store, where an absent directory and an
+   * empty one are equivalent.
+   */
+  async listFiles(segments: string[] = []): Promise<string[]> {
+    try {
+      let handle = await this.dataDir()
+      for (const segment of segments) {
+        handle = await handle.getDirectoryHandle(segment, { create: false })
+      }
+      const names: string[] = []
+      for await (const entry of handle.values()) {
+        if (entry.kind === 'file') names.push(entry.name)
+      }
+      return names.sort()
+    } catch {
+      return []
+    }
+  }
+
   /** Recursively deletes a directory entry under the data folder. */
   async removeDirectory(segments: string[]): Promise<void> {
     const dir = await this.dataDir()
@@ -300,6 +338,28 @@ function hasChromeStorage(): boolean {
   return typeof chrome !== 'undefined' && !!chrome?.storage?.local
 }
 
+/**
+ * Chrome refuses a `storage.local` write past its quota with
+ * `Resource::kQuotaBytes quota exceeded` — a message naming an internal
+ * constant that suggests nothing. Since this string is exactly what a user sees
+ * when a save fails, it is replaced with the two things that actually help.
+ *
+ * The `unlimitedStorage` permission lifts the cap (see `manifest.config.ts`), so
+ * reaching here means either the permission is missing or a real disk limit was
+ * hit; in both cases moving the data into files is the way out. Non-quota
+ * errors pass through untouched — translating them would hide the real cause.
+ */
+function translateStorageError(error: unknown): Error {
+  const text = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+  if (!/quota/i.test(text)) return error instanceof Error ? error : new Error(text)
+  return new Error(
+    '浏览器存储空间已满，这次写入没有保存。' +
+      '请在「设置 → 数据存储」里选择一个本地目录——之后对话、工作流都会存成文件，' +
+      '不再受 chrome.storage.local 的上限限制；也可以先删掉一些旧对话再重试。' +
+      `（Chrome 原始报错：${text}）`,
+  )
+}
+
 const chromeArea: StorageArea = {
   async get(keys) {
     if (!hasChromeStorage()) return {}
@@ -308,7 +368,11 @@ const chromeArea: StorageArea = {
   },
   async set(items) {
     if (!hasChromeStorage()) return
-    await chrome.storage.local.set(items)
+    try {
+      await chrome.storage.local.set(items)
+    } catch (error) {
+      throw translateStorageError(error)
+    }
   },
   async remove(keys) {
     if (!hasChromeStorage()) return
@@ -319,9 +383,10 @@ const chromeArea: StorageArea = {
 // --- File-backed area --------------------------------------------------------
 
 /**
- * A `StorageArea` backed by real files. Reads that miss a file (first run before
- * migration, a corrupt record) fall back to the mirror; writes always mirror to
- * `chrome.storage.local` so the cache stays a consistent fast copy.
+ * A `StorageArea` backed by real files. Writes go to files only and announce
+ * themselves through `lib/store-events`; a read that misses a file falls back to
+ * the `chrome.storage.local` staging area, which by then holds only writes made
+ * while the handle was unavailable (see the module note).
  */
 export function createFileArea(handle: FileSystemDirectoryHandle): StorageArea {
   const fs = new FsDirectory(handle)
@@ -339,8 +404,8 @@ export function createFileArea(handle: FileSystemDirectoryHandle): StorageArea {
         try {
           out[key] = JSON.parse(text) as unknown
         } catch {
-          // Corrupt file — fall back to the mirror rather than surfacing an
-          // unparsable value to a caller that trusts the shape.
+          // Corrupt file — fall back to the staging area rather than surfacing
+          // an unparsable value to a caller that trusts the shape.
           missing.push(key)
         }
       }
@@ -348,6 +413,7 @@ export function createFileArea(handle: FileSystemDirectoryHandle): StorageArea {
       return out
     },
     async set(items) {
+      const written: string[] = []
       for (const [key, value] of Object.entries(items)) {
         // Skills/agents live as folder-per-entity markdown files, not as a JSON
         // blob in the data folder; `storage.ts` writes those files directly.
@@ -357,17 +423,31 @@ export function createFileArea(handle: FileSystemDirectoryHandle): StorageArea {
         if (key === SKILLS_DIR || key === AGENTS_DIR) continue
         try {
           await fs.writeText(keyToPath(key), JSON.stringify(value))
-        } catch {
-          // Best-effort: the mirror below still records the value, so the data
-          // is not lost even if the disk write fails mid-flight.
+        } catch (error) {
+          // A failed disk write must be visible. It used to be swallowed because
+          // the mirror still held the value; there is no full mirror any more,
+          // so silence here would be silent data loss.
+          throw new Error(
+            `写入存储目录失败（${key}）：${error instanceof Error ? error.message : String(error)}。` +
+              '请确认该目录仍然存在、且扩展仍有读写权限——在「设置 → 数据存储」里可以重新连接。',
+          )
         }
+        written.push(key)
       }
-      await chromeArea.set(items).catch(() => {})
+      if (written.length === 0) return
+      // Drop any staged copy of a key that just landed on disk. Without this the
+      // staging area could keep an older value for the same key, and the next
+      // `syncToFiles` would push that stale value over the newer file.
+      await chromeArea.remove(written).catch(() => {})
+      for (const key of written) notifyStoreChanged(key)
     },
     async remove(keys) {
       const wanted = typeof keys === 'string' ? [keys] : keys
       for (const key of wanted) await fs.remove(keyToPath(key))
+      // Clear the staging area BEFORE notifying: a listener that re-reads must
+      // not find the deleted value still sitting in the read fallback.
       await chromeArea.remove(wanted).catch(() => {})
+      for (const key of wanted) notifyStoreChanged(key)
     },
   }
 }
@@ -436,9 +516,14 @@ async function resolveHandle(request = false): Promise<FileSystemDirectoryHandle
 
 /**
  * The storage area used by the persistence modules. Resolves the configured
- * directory on every call and falls back to the `chrome.storage.local` mirror
- * when it is absent or not granted. A single instance is fine because the
- * backing choice is made per call.
+ * directory on every call, and falls back to `chrome.storage.local` when it is
+ * absent or not granted — either because no directory is configured (browser
+ * mode, the store *is* the data) or because the handle is momentarily
+ * unavailable (the write is staged there until {@link syncToFiles} flushes it).
+ * A single instance is fine because the backing choice is made per call.
+ *
+ * Notifications are emitted here on the fallback path only: `createFileArea`
+ * announces its own writes.
  */
 let sharedArea: StorageArea | null = null
 
@@ -451,13 +536,22 @@ export function fileStorageArea(): StorageArea {
       },
       async set(items) {
         const handle = await resolveHandle()
-        if (handle) await createFileArea(handle).set(items)
-        else await chromeArea.set(items)
+        if (handle) {
+          await createFileArea(handle).set(items)
+          return
+        }
+        await chromeArea.set(items)
+        for (const key of Object.keys(items)) notifyStoreChanged(key)
       },
       async remove(keys) {
         const handle = await resolveHandle()
-        if (handle) await createFileArea(handle).remove(keys)
-        else await chromeArea.remove(keys)
+        if (handle) {
+          await createFileArea(handle).remove(keys)
+          return
+        }
+        const wanted = typeof keys === 'string' ? [keys] : keys
+        await chromeArea.remove(wanted)
+        for (const key of wanted) notifyStoreChanged(key)
       },
     }
   }
@@ -482,9 +576,17 @@ export async function getStorageDirectoryName(): Promise<string | null> {
 /**
  * Re-checks the configured directory and tries to (re)grant permission when it
  * is merely pending. Returns the resulting mode.
+ *
+ * Re-granting is the moment writes staged while the handle was unavailable can
+ * finally reach the directory, so they are flushed here — otherwise they would
+ * linger in `chrome.storage.local` until the next panel open. The flush is
+ * best-effort, matching its other call site: a failure must not read as "the
+ * folder is not connected", and the staged data survives for the next attempt.
  */
 export async function ensureFileAccess(): Promise<StorageMode> {
-  return (await resolveHandle(true)) ? 'file' : 'browser'
+  if (!(await resolveHandle(true))) return 'browser'
+  await syncToFiles().catch(() => undefined)
+  return 'file'
 }
 
 /**
@@ -504,8 +606,16 @@ export async function pickStorageDirectory(): Promise<StorageMode> {
   return 'file'
 }
 
-/** Forgets the directory handle (files already written stay on disk). */
+/**
+ * Switches back to browser storage: copies the data folder into
+ * `chrome.storage.local` first, then forgets the handle.
+ *
+ * Order matters — the copy is what makes the switch non-destructive. It throws
+ * before the handle is dropped if the copy fails, so the directory is never
+ * abandoned while it is the only place the data exists.
+ */
 export async function clearStorageDirectory(): Promise<void> {
+  await syncFilesToBrowser()
   await idbDelete()
   resetStorageCache()
 }
@@ -519,26 +629,34 @@ export async function clearStorageDirectory(): Promise<void> {
 export async function syncToFiles(): Promise<void> {
   const handle = await resolveHandle(true)
   if (!handle || !hasChromeStorage()) return
-  const all = await chrome.storage.local.get(null)
-  await syncEntriesToFiles(all as Record<string, unknown>, handle)
-  const skills = (all as Record<string, unknown>)[SKILLS_DIR]
+  const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
+  // Each migrated key is dropped from the staging area as it lands on disk, so
+  // re-running cannot push an already-migrated value again.
+  await syncEntriesToFiles(all, handle)
+  // Skills and agents are written as markdown files, never as a JSON blob, so
+  // `syncEntriesToFiles` skipped them and they are still staged. Clear them once
+  // they are on disk — otherwise they would sit in the browser store forever,
+  // which is the very thing this migration exists to avoid.
+  const skills = all[SKILLS_DIR]
   if (Array.isArray(skills)) {
     await syncSkillsToFiles(skills as Skill[], handle)
+    await chromeArea.remove(SKILLS_DIR)
   }
-  const agents = (all as Record<string, unknown>)[AGENTS_DIR]
+  const agents = all[AGENTS_DIR]
   if (Array.isArray(agents)) {
     await syncAgentsToFiles(agents as Agent[], handle)
+    await chromeArea.remove(AGENTS_DIR)
   }
 }
 
 /**
- * Writes each provided entry to the file area under `handle`, skipping values
- * that must not be persisted: `undefined` (not representable), session-only
- * `turn:` state, and the `skills` key (skills are written as `SKILL.md` files
- * via {@link syncSkillsToFiles}). `createFileArea.set` also re-mirrors each
- * entry to `chrome.storage.local`, so this is idempotent and safe to re-run.
- * Extracted from `syncToFiles` so the migration path is testable with a fake
- * handle.
+ * Writes each provided entry to the file area under `handle` and drops it from
+ * the `chrome.storage.local` staging area (see `createFileArea.set`), skipping
+ * values that must not be persisted: `undefined` (not representable),
+ * session-only `turn:` state, and the `skills`/`agents` keys (those are written
+ * as `SKILL.md` / `AGENT.md` files by {@link syncSkillsToFiles} and
+ * {@link syncAgentsToFiles}). Extracted from `syncToFiles` so the migration path
+ * is testable with a fake handle.
  */
 export async function syncEntriesToFiles(
   entries: Record<string, unknown>,
@@ -556,9 +674,13 @@ export async function syncEntriesToFiles(
 }
 
 /**
- * Writes each mirrored skill to `skills/<slug>/SKILL.md` (idempotent, best
- * effort). Runs on first setup and on panel-open sync so browser-created skills
- * become real files like the general skills on disk.
+ * Writes each staged skill to `skills/<slug>/SKILL.md`. Runs on first setup and
+ * on panel-open sync so browser-created skills become real files like the
+ * general skills on disk.
+ *
+ * Throws when a write fails instead of swallowing it: `syncToFiles` clears the
+ * staged `skills` entry once this resolves, so a silent failure here would let
+ * the only remaining copy be deleted.
  */
 export async function syncSkillsToFiles(
   skills: readonly Skill[],
@@ -568,15 +690,18 @@ export async function syncSkillsToFiles(
   for (const skill of skills) {
     try {
       await fs.writeText(skillPath(skillSlug(skill.name)), skillToMarkdown(skill))
-    } catch {
-      // Best-effort during migration; the mirror still holds the value.
+    } catch (error) {
+      throw new Error(
+        `迁移技能「${skill.name}」失败：${error instanceof Error ? error.message : String(error)}`,
+      )
     }
   }
 }
 
 /**
- * Writes each mirrored agent to `agents/<slug>/AGENT.md` (idempotent, best
- * effort), the agent counterpart of {@link syncSkillsToFiles}.
+ * Writes each staged agent to `agents/<slug>/AGENT.md`, the agent counterpart of
+ * {@link syncSkillsToFiles} — including its "throw rather than lose the last
+ * copy" contract.
  */
 export async function syncAgentsToFiles(
   agents: readonly Agent[],
@@ -586,10 +711,73 @@ export async function syncAgentsToFiles(
   for (const agent of agents) {
     try {
       await fs.writeText(agentPath(agentSlug(agent.name)), agentToMarkdown(agent))
-    } catch {
-      // Best-effort during migration; the mirror still holds the value.
+    } catch (error) {
+      throw new Error(
+        `迁移智能体「${agent.name}」失败：${error instanceof Error ? error.message : String(error)}`,
+      )
     }
   }
+}
+
+/**
+ * Copies everything in the data folder into `chrome.storage.local` — the reverse
+ * of {@link syncToFiles}, used when the user switches back to browser storage.
+ *
+ * Without this the switch would look like data loss: once the handle is dropped
+ * the folder is simply not read any more, so the panel would come up empty. The
+ * files are never deleted, but "my conversations are gone" is not a state a user
+ * should have to reason their way out of.
+ *
+ * Returns the number of keys written, and `0` when nothing is configured (browser
+ * mode is already where the data lives). File names are mapped back to keys by
+ * stripping the `.json` suffix, which is exact for every key the extension
+ * writes — the path segment is only sanitized for keys that would be unsafe as
+ * file names, and those do not occur in practice.
+ */
+export async function syncFilesToBrowser(): Promise<number> {
+  const handle = await resolveHandle(true)
+  if (!handle || !hasChromeStorage()) return 0
+
+  const fs = new FsDirectory(handle)
+  const entries: Record<string, unknown> = {}
+  const collect = async (segments: string[], toKey: (name: string) => string): Promise<void> => {
+    for (const name of await fs.listFiles(segments)) {
+      const text = await fs.readText([...segments, name])
+      if (text === null) continue
+      try {
+        entries[toKey(name)] = JSON.parse(text) as unknown
+      } catch {
+        // A corrupt file must not abort the move — everything else still lands.
+      }
+    }
+  }
+
+  await collect([], (name) => name.replace(/\.json$/, ''))
+  await collect(['conversations'], (name) => `${CONVERSATION_PREFIX}${name.replace(/\.json$/, '')}`)
+  await collect(['checkpoints'], (name) => `${CHECKPOINT_PREFIX}${name.replace(/\.json$/, '')}`)
+
+  // Skills and agents are folder-per-entity markdown, not `<key>.json`, so they
+  // are rebuilt from their folders instead of by the generic walk above.
+  const skills: Skill[] = []
+  for (const slug of (await fs.listSubdirectories(SKILLS_DIR)) ?? []) {
+    const text = await fs.readText(skillPath(slug))
+    const skill = text === null ? null : skillFromMarkdown(text)
+    if (skill) skills.push(skill)
+  }
+  if (skills.length > 0) entries[SKILLS_DIR] = skills
+
+  const agents: Agent[] = []
+  for (const slug of (await fs.listSubdirectories(AGENTS_DIR)) ?? []) {
+    const text = await fs.readText(agentPath(slug))
+    const agent = text === null ? null : agentFromMarkdown(text)
+    if (agent) agents.push(agent)
+  }
+  if (agents.length > 0) entries[AGENTS_DIR] = agents
+
+  const count = Object.keys(entries).length
+  if (count === 0) return 0
+  await chromeArea.set(entries)
+  return count
 }
 
 /**

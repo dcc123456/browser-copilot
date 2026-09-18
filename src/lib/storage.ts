@@ -39,6 +39,7 @@ import type {
   UserProfile,
 } from './types'
 import { DEFAULT_LOCAL_AGENT_URL, normalizeLocalAgentUrl, entryFields } from './types'
+import { richTargetFromArgs, selectorFromArgs, withRichTarget } from './workflow/target-to-selector'
 import type { Workflow, WorkflowEdge, WorkflowNode, WorkflowSettings } from './workflow/types'
 
 /**
@@ -91,7 +92,6 @@ export const DEFAULT_SETTINGS: Settings = {
   unattendedWindowPolicy: 'latest',
   takeoverModel: { providerId: '', model: '' },
   takeoverOnRun: false,
-  chatWorkflowPromptEnabled: true,
 }
 
 /**
@@ -200,7 +200,11 @@ export function normalizeStoredSettings(raw: unknown): Settings {
     activeProviderId: active,
     locale: coerceLocale(value.locale),
     mode:
-      value.mode === 'chat' || value.mode === 'readonly' || value.mode === 'full'
+      value.mode === 'chat' ||
+      value.mode === 'readonly' ||
+      value.mode === 'semi' ||
+      value.mode === 'full' ||
+      value.mode === 'workflow'
         ? value.mode
         : 'semi',
     maxToolRounds: coerceMaxToolRounds(value.maxToolRounds),
@@ -232,10 +236,6 @@ export function normalizeStoredSettings(raw: unknown): Settings {
       typeof value.unattendedWindowId === 'number' ? value.unattendedWindowId : undefined,
     takeoverModel,
     takeoverOnRun: typeof value.takeoverOnRun === 'boolean' ? value.takeoverOnRun : false,
-    chatWorkflowPromptEnabled:
-      typeof value.chatWorkflowPromptEnabled === 'boolean'
-        ? value.chatWorkflowPromptEnabled
-        : DEFAULT_SETTINGS.chatWorkflowPromptEnabled,
   }
 }
 
@@ -502,7 +502,10 @@ export async function findSkillByName(name: string): Promise<Skill | undefined> 
 
 /** Inserts or replaces a skill, keeping the list sorted by name. */
 export async function saveSkill(skill: Skill): Promise<void> {
-  // Mirror first: keeps the UI/worker view consistent and fires onChanged.
+  // Persists the collection for browser mode. With a directory configured this
+  // write is deliberately skipped (`createFileArea.set` ignores the `skills`
+  // key) — the `SKILL.md` file below is the durable copy, and keeping a second
+  // one in `chrome.storage.local` is what used to fill its quota.
   const skills = await listSkills()
   const existing = skills.find((entry) => entry.id === skill.id)
   if (existing) skills[skills.indexOf(existing)] = skill
@@ -562,9 +565,7 @@ export async function listAgents(): Promise<Agent[]> {
   )
 }
 
-async function readAgentsFromFiles(
-  handle: FileSystemDirectoryHandle,
-): Promise<Agent[] | null> {
+async function readAgentsFromFiles(handle: FileSystemDirectoryHandle): Promise<Agent[] | null> {
   const fs = new FsDirectory(handle)
   const slugs = await fs.listSubdirectories(AGENTS_DIR)
   if (slugs === null) return null
@@ -1025,6 +1026,10 @@ const ACTION_TO_BLOCK: Record<string, string> = {
   fill: 'forms',
   select_option: 'forms',
   set_checkbox: 'forms',
+  // Reading a control's value (the forms block's "get form value" mode) is the
+  // read half of the same operator. Without this entry the step would be
+  // skipped when a conversation is compiled into a workflow, losing the read.
+  read_form: 'forms',
   press_key: 'press-key',
   scroll: 'element-scroll',
   // The agent's wait-for-selector paces the replay; the delay block is the
@@ -1065,69 +1070,6 @@ const OCR_VARIABLE = 'lastOcrText'
  */
 const OCR_IMAGE_VARIABLE = 'lastOcrImage'
 
-/** One target spec from an agent tool call (the `TARGET_SCHEMA` in agent.ts). */
-interface TargetSpec {
-  how?: string
-  value?: unknown
-  tag?: string
-  nth?: number
-}
-
-/** Best-effort CSS selector from a single target spec ('' when not expressible). */
-function selectorFromSpec(spec: TargetSpec | undefined): string {
-  if (!spec || typeof spec !== 'object') return ''
-  const nth = typeof spec.nth === 'number' && spec.nth > 0 ? `:nth-of-type(${spec.nth + 1})` : ''
-  const value = spec.value
-  switch (spec.how) {
-    case 'css':
-      return typeof value === 'string' ? value.trim() : ''
-    case 'id':
-      return typeof value === 'string' && value.trim() ? `#${value.trim()}` : ''
-    case 'name':
-      return typeof value === 'string' && value.trim() ? `[name="${value.trim()}"]${nth}` : ''
-    case 'testid':
-      return typeof value === 'string' && value.trim()
-        ? `[data-testid="${value.trim()}"]${nth}`
-        : ''
-    case 'tag':
-      return typeof spec.tag === 'string' && spec.tag.trim() ? `${spec.tag.trim()}${nth}` : ''
-    default:
-      // role / text — cannot be expressed as a stable CSS selector.
-      return ''
-  }
-}
-
-/**
- * Best-effort CSS selector from an agent action's args. An explicit
- * `selector` wins when present. Otherwise the rich `TargetSpec`'s `primary`
- * is re-expressed into a CSS selector, and when it does not map (the agent
- * usually targets elements by role/text) the `fallbacks` are tried in order —
- * the replayable workflow needs that fallback to carry a usable selector.
- * Mappable specs:
- *   - `how: 'css'`    → the raw selector
- *   - `how: 'id'`     → `#<value>`
- *   - `how: 'name'`   → `[name="<value>"]`
- *   - `how: 'testid'` → `[data-testid="<value>"]`
- *   - `how: 'tag'`    → the tag name (optionally scoped by `nth`)
- * `role`/`text` targets can't be safely turned into a plain CSS selector
- * without knowing the page, so they yield `''` (the node keeps the human
- * description instead).
- */
-function selectorFromArgs(args: Record<string, unknown> | undefined): string {
-  if (!args || typeof args !== 'object') return ''
-  if (typeof args.selector === 'string' && args.selector.trim()) return args.selector.trim()
-  const target = args.target as { primary?: TargetSpec; fallbacks?: TargetSpec[] } | undefined
-  if (!target) return ''
-  const primary = selectorFromSpec(target.primary)
-  if (primary) return primary
-  const fallbacks = Array.isArray(target.fallbacks) ? target.fallbacks : []
-  for (const spec of fallbacks) {
-    const selector = selectorFromSpec(spec)
-    if (selector) return selector
-  }
-  return ''
-}
-
 /**
  * Whether two consecutive history steps describe the same replayable action.
  * Navigation with the same URL is always a duplicate; element actions are
@@ -1158,6 +1100,12 @@ function sameStep(
       return (
         selectorFromArgs(a.args) === selectorFromArgs(b.args) &&
         String(a.args?.value ?? '') === String(b.args?.value ?? '')
+      )
+    case 'read_form':
+      // Reading the same control twice in a row is a repeat: the replay would
+      // end up with the last value in the variable either way.
+      return (
+        selectorFromArgs(a.args) !== '' && selectorFromArgs(a.args) === selectorFromArgs(b.args)
       )
     case 'set_checkbox':
       return (
@@ -1197,29 +1145,6 @@ function collapsesWith(prev: HistoryStep, step: HistoryStep): boolean {
   }
   const prevSelector = selectorFromArgs(prev.args)
   return prevSelector !== '' && prevSelector === selectorFromArgs(step.args)
-}
-
-/**
- * The conversation's rich element locator (`args.target`, the `TARGET_SCHEMA`
- * in agent.ts), passed through verbatim when it is a usable object. The
- * kernel resolves every spec strategy — role/text included — so replay hits
- * the same element even when no CSS selector can express it, and the edit
- * panel has something concrete to show.
- */
-function richTargetFromArgs(args: Record<string, unknown> | undefined): unknown {
-  const target = args?.target
-  if (!target || typeof target !== 'object') return undefined
-  const primary = (target as { primary?: unknown }).primary
-  if (!primary || typeof primary !== 'object') return undefined
-  const spec = primary as { how?: unknown; value?: unknown }
-  if (typeof spec.how !== 'string' || !spec.how) return undefined
-  if (typeof spec.value !== 'string') return undefined
-  return target
-}
-
-/** Attach the rich locator to flat block data when present. */
-function withRichTarget(data: Record<string, unknown>, target: unknown): Record<string, unknown> {
-  return target ? { ...data, target } : data
 }
 
 /**
@@ -1598,6 +1523,22 @@ function blockDataFromArgs(
       return {}
     case 'click':
       return withRichTarget({ selector, findBy: 'cssSelector' }, target)
+    case 'read_form':
+      // The forms block's read mode: same block, opposite direction. No
+      // `value` — a value here would make the replay fill (and clear) the
+      // control instead of reading it.
+      return withRichTarget(
+        {
+          selector,
+          findBy: 'cssSelector',
+          getValue: true,
+          variableName:
+            typeof args?.variableName === 'string' && args.variableName.trim()
+              ? args.variableName
+              : 'lastFormValue',
+        },
+        target,
+      )
     case 'fill':
       return withRichTarget(
         {
@@ -2023,8 +1964,7 @@ export function workflowFromHistory(
     // `blockDataFromArgs` may supply a richer description for the block; prefer
     // it when the local `description` (from args.label / step.summary) is empty.
     const nodeDescriptionFinal =
-      (typeof cleanBlockData.description === 'string' && cleanBlockData.description) ||
-      description
+      (typeof cleanBlockData.description === 'string' && cleanBlockData.description) || description
     addNode(blockId, {
       description: nodeDescriptionFinal,
       ...cleanBlockData,
