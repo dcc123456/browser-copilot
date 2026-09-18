@@ -45,15 +45,18 @@ describe('forms block: {{variable}} value handling', () => {
     clearValue: true,
   })
 
-  it('skips the fill with an error when the AI variable resolved to empty', async () => {
+  it('fails the fill when the AI variable resolved to empty', async () => {
     // Mirrors the replay path of an ai-agent step whose generation failed:
     // ctx.variables[variable] is pre-set to '' instead of staying undefined.
-    const { ctx, emit } = makeCtx({ aiFill1: '' })
-    const next = await EXECUTORS['forms']!(formsData('{{aiFill1}}'), ctx)
+    // Thrown, not logged — filling nothing would otherwise be recorded and
+    // replayed as if the form had been completed.
+    const { ctx } = makeCtx({ aiFill1: '' })
 
-    expect(next).toBeNull()
+    await expect(EXECUTORS['forms']!(formsData('{{aiFill1}}'), ctx)).rejects.toThrow(
+      '表单值引用的变量/AI 结果为空，无法填写',
+    )
+
     expect(driverMock).not.toHaveBeenCalled()
-    expect(emit).toHaveBeenCalledWith('error', '表单值引用的变量/AI 结果为空，已跳过本次填写')
   })
 
   it('interpolates a non-empty AI variable into the fill op', async () => {

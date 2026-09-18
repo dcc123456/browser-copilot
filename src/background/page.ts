@@ -61,6 +61,34 @@ export async function activeTab(scope?: ScopeWindow): Promise<chrome.tabs.Tab | 
 }
 
 /**
+ * The tab a page READ should target: an explicitly requested tab while it still
+ * exists, otherwise the window's active tab.
+ *
+ * The engine keeps a per-run target tab (`WorkflowExecCtx.tabId`, updated by
+ * `new-tab` / `switch-tab`) and passes it to every executor. The read blocks
+ * used to ignore it and call `activeTab(scope)` directly, so a `new-tab →
+ * get-text` pair could read a different tab than the very next `click` acted on
+ * — including the extension's own editor page, which cannot be injected into at
+ * all, which is how a generated scraper ends up "getting no page data".
+ *
+ * Deliberately NOT `driver.resolveAutomationTab`: that one layers per-scope pins
+ * and an event-invalidated cache for the action path. A read should target the
+ * tab the engine pinned for THIS run and nothing else, so a stale pin from a
+ * concurrent agent can never redirect it. It lives here because the dependency
+ * is one-way — `driver` imports `page`, never the reverse.
+ */
+export async function resolveTargetTab(
+  tabId?: number,
+  scope?: ScopeWindow,
+): Promise<chrome.tabs.Tab | undefined> {
+  if (typeof tabId === 'number') {
+    const explicit = await chrome.tabs.get(tabId).catch(() => undefined)
+    if (explicit) return explicit
+  }
+  return activeTab(scope)
+}
+
+/**
  * Reads the active tab's text.
  *
  * @throws {Error} when no tab is available or the page forbids injection —
@@ -69,8 +97,9 @@ export async function activeTab(scope?: ScopeWindow): Promise<chrome.tabs.Tab | 
 export async function readActivePage(
   maxChars = DEFAULT_MAX_CHARS,
   scope?: ScopeWindow,
+  tabId?: number,
 ): Promise<PageContext> {
-  const tab = await activeTab(scope)
+  const tab = await resolveTargetTab(tabId, scope)
   if (!tab || typeof tab.id !== 'number') {
     throw new Error('No active tab to read.')
   }
@@ -111,8 +140,11 @@ export async function readActivePage(
  *   because selections are not capped here.
  * @throws {Error} when no tab is available or the page forbids injection.
  */
-export async function readActiveSelection(scope?: ScopeWindow): Promise<PageContext> {
-  const tab = await activeTab(scope)
+export async function readActiveSelection(
+  scope?: ScopeWindow,
+  tabId?: number,
+): Promise<PageContext> {
+  const tab = await resolveTargetTab(tabId, scope)
   if (!tab || typeof tab.id !== 'number') {
     throw new Error('No active tab to read.')
   }

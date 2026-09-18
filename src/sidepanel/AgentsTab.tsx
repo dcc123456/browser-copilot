@@ -253,7 +253,7 @@ export default function AgentsTab({ agents, skills, onChanged }: Props) {
     }
   }
 
-  const exportAll = (): void => {
+  const exportAll = async (): Promise<void> => {
     // Built-ins re-seed on every install and re-import as user copies, so they
     // are excluded from the export.
     const mine = agents.filter((agent) => !agent.builtIn)
@@ -263,7 +263,7 @@ export default function AgentsTab({ agents, skills, onChanged }: Props) {
     }
     const json = exportAgentsJson(mine)
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-    downloadBlob(json, 'application/json', `agents-${stamp}.json`)
+    await downloadBlob(json, 'application/json', `agents-${stamp}.json`)
   }
 
   return (
@@ -375,12 +375,12 @@ export default function AgentsTab({ agents, skills, onChanged }: Props) {
               )}
               {agent.builtIn && <span className="pill">{t.agentsBuiltinBadge}</span>}
               <span className="ml-1 rounded bg-accent-soft px-1.5 py-0.5 text-[11px] text-accent">
-                {agent.role === 'supervisor'
-                  ? t.agentsDelegatablePill
-                  : domainLabel[agent.domain]}
+                {agent.role === 'supervisor' ? t.agentsDelegatablePill : domainLabel[agent.domain]}
               </span>
               <span className="pill">{t.agentsToolsCount({ count: agent.tools.length })}</span>
-              {agent.role === 'specialist' && <span className="pill">{t.agentsSpecialistPill}</span>}
+              {agent.role === 'specialist' && (
+                <span className="pill">{t.agentsSpecialistPill}</span>
+              )}
             </div>
             {displayHint && <p className="hint">{displayHint}</p>}
             <div className="actions">

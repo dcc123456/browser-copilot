@@ -51,6 +51,31 @@ vi.mock('../src/background/driver', async (importActual) => {
   }
 })
 
+/**
+ * `export-data` and `save-local` really write a file now: into the download
+ * directory configured in settings, falling back to a save picker. Neither
+ * exists in Node, so the write is captured in memory — the assertions below are
+ * about the exported text and where it landed, not about the File System Access
+ * API. Without this stub the picker fallback would (correctly) report a failure
+ * and fail the run.
+ */
+const { writtenFiles } = vi.hoisted(() => ({ writtenFiles: new Map<string, string>() }))
+
+vi.mock('../src/lib/download-dir', async (importActual) => {
+  const actual = await importActual<typeof import('../src/lib/download-dir')>()
+  return {
+    ...actual,
+    getDownloadDir: vi.fn(async () => ({
+      getFileHandle: async (name: string) => ({
+        createWritable: async () => ({
+          write: async (text: string) => void writtenFiles.set(name, text),
+          close: async () => {},
+        }),
+      }),
+    })),
+  }
+})
+
 /** Build a minimal Workflow from nodes + edges. */
 function makeWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[]): Workflow {
   return {
@@ -143,6 +168,10 @@ describe('workflow phase 4 — data & control-flow blocks via runWorkflow', () =
     ])
     // csv: header from the first row's keys; comma-bearing cells are quoted.
     expect(captured['lastExport']).toBe('a,b\n1,x\n2,"y,z"')
+    // The block's whole point is the file: an export that only filled a
+    // variable used to look identical to one that never wrote anything.
+    expect(writtenFiles.get('export.csv')).toBe('a,b\n1,x\n2,"y,z"')
+    expect(captured['lastExportPath']).toBe('export.csv')
   })
 
   it('javascript-code stores its return value in lastResult', async () => {
@@ -353,6 +382,118 @@ describe('workflow phase 4 — loop-data', () => {
     })
     expect(result.outcome).toBe('ok')
     expect(seen).toEqual([0, 1, 2])
+  })
+
+  it('publishes the current element as loopElementSelector each iteration', async () => {
+    const seen: unknown[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('loop', 'loop-elements', { selector: '.item' }),
+        node('body', 'body'),
+        node('exit', 'exit'),
+      ],
+      [edge('t', 'loop'), edge('loop', 'body'), edge('body', 'exit')],
+    )
+    const result = await runWorkflow(wf, {
+      loopElementCounter: async () => 3,
+      loopElementSelector: async (selector, index) => {
+        expect(selector).toBe('.item')
+        return `#item-${index}`
+      },
+      executors: {
+        ...EXECUTORS,
+        body: async (_d, ctx) => {
+          seen.push(ctx.variables['loopElementSelector'])
+          return null
+        },
+        exit: async () => null,
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual(['#item-0', '#item-1', '#item-2'])
+  })
+
+  it('resolves {{loopElementSelector}} in a body node\u2019s selector', async () => {
+    // The whole point of the token: a folded loop body written as
+    // `{{loopElementSelector}} .price` must reach its executor resolved, or
+    // every iteration would act on the same hard-coded element.
+    const seen: string[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('loop', 'loop-elements', { selector: '.item' }),
+        node('body', 'body', { selector: '{{loopElementSelector}} > .price' }),
+        node('exit', 'exit'),
+      ],
+      [edge('t', 'loop'), edge('loop', 'body'), edge('body', 'exit')],
+    )
+    const result = await runWorkflow(wf, {
+      loopElementCounter: async () => 2,
+      loopElementSelector: async (_selector, index) => `#item-${index}`,
+      executors: {
+        ...EXECUTORS,
+        body: async (data) => {
+          seen.push(String(data['selector']))
+          return null
+        },
+        exit: async () => null,
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual(['#item-0 > .price', '#item-1 > .price'])
+  })
+
+  it('reports a failed element resolution instead of silently reusing iteration 0', async () => {
+    const seen: unknown[] = []
+    const errors: string[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('loop', 'loop-elements', { selector: '.item' }),
+        node('body', 'body'),
+        node('exit', 'exit'),
+      ],
+      [edge('t', 'loop'), edge('loop', 'body'), edge('body', 'exit')],
+    )
+    const result = await runWorkflow(wf, {
+      loopElementCounter: async () => 2,
+      loopElementSelector: async () => null,
+      onStep: (kind, _nodeId, text) => {
+        if (kind === 'error') errors.push(text)
+      },
+      executors: {
+        ...EXECUTORS,
+        body: async (_d, ctx) => {
+          seen.push(ctx.variables['loopElementSelector'])
+          return null
+        },
+        exit: async () => null,
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual(['', ''])
+    expect(errors.some((text) => text.includes('唯一选择器'))).toBe(true)
+  })
+
+  it('interpolates tokens in a node\u2019s parameters', async () => {
+    const seen: unknown[] = []
+    const wf = makeWorkflow(
+      [node('t', 'manual'), node('a', 'body', { selector: '#row-{{loopIndex}}' })],
+      [edge('t', 'a')],
+    )
+    const result = await runWorkflow(wf, {
+      variables: { loopIndex: 2 },
+      executors: {
+        ...EXECUTORS,
+        body: async (data) => {
+          seen.push(data['selector'])
+          return null
+        },
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual(['#row-2'])
   })
 })
 

@@ -9,7 +9,7 @@
  */
 import { useState } from 'react'
 import FormDialog, { FormDialogCancelButton, FormDialogPrimaryButton } from '../ui/FormDialog'
-import { TOOL_META, type ToolCategory } from '../lib/tool-catalog'
+import { OPERATOR_META, TOOL_META, type ToolCategory } from '../lib/tool-catalog'
 import type { AgentDomain, AgentRole, Skill } from '../lib/types'
 import { useT } from './i18n'
 
@@ -38,11 +38,17 @@ interface Props {
 }
 
 /**
- * load_tools is always available implicitly and delegate_to_agent is a
- * supervisor-only power, so neither is whitelisted in an agent form.
+ * load_tools is always available implicitly, delegate_to_agent is a
+ * supervisor-only power, and compose_workflow is the supervisor's own
+ * draft-management tool — none belong on a specialist whitelist. Workflow
+ * operator tools (`wf_op_*`) ARE pickable so sub-agents can append to a
+ * draft just like the supervisor can.
  */
-const PICKABLE_TOOLS = TOOL_META.filter(
-  (meta) => meta.name !== 'load_tools' && meta.name !== 'delegate_to_agent',
+const PICKABLE_TOOLS = [...TOOL_META, ...OPERATOR_META].filter(
+  (meta) =>
+    meta.name !== 'load_tools' &&
+    meta.name !== 'delegate_to_agent' &&
+    meta.name !== 'compose_workflow',
 )
 
 const CATEGORY_ORDER: ToolCategory[] = ['read', 'nav', 'act', 'data']
@@ -117,9 +123,7 @@ export default function AgentEditDialog({
       <label className="field">
         <span>{t.agentRole}</span>
         <select
-          onChange={(event) =>
-            setValues({ ...values, role: event.target.value as AgentRole })
-          }
+          onChange={(event) => setValues({ ...values, role: event.target.value as AgentRole })}
           value={values.role}
         >
           <option value="specialist">{t.agentRoleSpecialist}</option>
@@ -163,9 +167,7 @@ export default function AgentEditDialog({
               <label className="checkbox" key={meta.name}>
                 <input
                   checked={values.tools.includes(meta.name)}
-                  onChange={() =>
-                    setValues({ ...values, tools: toggle(values.tools, meta.name) })
-                  }
+                  onChange={() => setValues({ ...values, tools: toggle(values.tools, meta.name) })}
                   type="checkbox"
                 />
                 <span>{t[meta.labelKey] as string}</span>
@@ -221,9 +223,7 @@ export default function AgentEditDialog({
         <input
           min={1}
           max={20}
-          onChange={(event) =>
-            setValues({ ...values, maxRounds: Number(event.target.value) || 8 })
-          }
+          onChange={(event) => setValues({ ...values, maxRounds: Number(event.target.value) || 8 })}
           type="number"
           value={values.maxRounds}
         />

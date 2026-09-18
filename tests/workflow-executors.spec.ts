@@ -60,7 +60,7 @@ function makeChromeMock() {
   const goForward = vi.fn(async () => {})
   const captureVisibleTab = vi.fn(async () => 'data:image/png;base64,ZZZ')
   const executeScript = vi.fn(async (_details: { target: { tabId: number }; args?: unknown[] }) => [
-    { result: 'hello text' as unknown },
+    { result: ['hello text'] as unknown },
   ])
   return {
     chrome: {
@@ -149,6 +149,18 @@ describe('workflow executors (browser class)', () => {
     expect(op.value).toBe('Enter')
   })
 
+  it('press-key reads the fields the catalog and the edit form actually write', async () => {
+    // `keys` is the recorder's combo, `keysToPress` the free-text field. The
+    // executor used to read only `key`, which neither of them produces, so a
+    // node authored in the editor pressed nothing at all.
+    for (const data of [{ keys: 'Control+S' }, { keysToPress: 'Enter' }]) {
+      driverMock.mockClear()
+      const { ctx } = makeCtx()
+      await EXECUTORS['press-key']!(data, ctx)
+      expect(driverMock.mock.calls[0]![0].value).toBe(Object.values(data)[0])
+    }
+  })
+
   it('scroll builds the right scroll spec for a mode', async () => {
     const { ctx } = makeCtx()
     await EXECUTORS['scroll']!({ cssSelector: '#footer', mode: 'bottom' }, ctx)
@@ -165,10 +177,12 @@ describe('workflow executors (browser class)', () => {
     expect(chromeRefs.update).toHaveBeenCalledWith(1, { url: 'https://example.com/path' })
 
     chromeRefs.update.mockClear()
-    const { ctx: ctx2, emit } = makeCtx()
-    await EXECUTORS['open-url']!({ url: 'file:///C:/x.html' }, ctx2)
+    const { ctx: ctx2 } = makeCtx()
+    // Thrown, not logged: a step that could not run has to fail the node, or the
+    // run reports success and the operator bridge records a node that never
+    // navigated.
+    await expect(EXECUTORS['open-url']!({ url: 'file:///C:/x.html' }, ctx2)).rejects.toThrow(/http/)
     expect(chromeRefs.update).not.toHaveBeenCalled()
-    expect(emit).toHaveBeenCalledWith('error', expect.stringContaining('http'))
   })
 
   it('take-screenshot stores its data url in variables.lastScreenshot', async () => {
@@ -178,7 +192,9 @@ describe('workflow executors (browser class)', () => {
 
     expect(chromeRefs.captureVisibleTab).toHaveBeenCalled()
     expect(ctx.variables['lastScreenshot']).toBe('data:image/png;base64,XYZ')
-    expect(emit).toHaveBeenCalledWith('result', '已截图')
+    // The label names the capture target, so a run log distinguishes a page
+    // snapshot from a full-page or element one.
+    expect(emit).toHaveBeenCalledWith('result', '已截图 (page)')
   })
 
   it('get-text injects a script and stores variables.lastText', async () => {
@@ -188,7 +204,9 @@ describe('workflow executors (browser class)', () => {
     expect(chromeRefs.executeScript).toHaveBeenCalledTimes(1)
     const [details] = chromeRefs.executeScript.mock.calls[0]!
     expect(details.target.tabId).toBe(1)
-    expect(details.args).toEqual(['.title'])
+    // selector, multiple, useTextContent, includeTags — the three flags used to
+    // be declared in the catalog and read by nobody.
+    expect(details.args).toEqual(['.title', false, false, false])
     expect(ctx.variables['lastText']).toBe('hello text')
   })
 
@@ -417,14 +435,18 @@ describe('workflow ocr block', () => {
     // The block retries, then reports WHY instead of an opaque failure.
     driverMock.mockResolvedValue({ ...opResult, ok: false, error: 'capture: SVG 加载失败' })
     chromeRefs.executeScript.mockResolvedValue([{ result: null }])
-    const { ctx, emit } = makeCtx()
-    await EXECUTORS['ocr']!({ source: 'element', selector: 'img.captcha' }, ctx)
+    const { ctx } = makeCtx()
+
+    // The explanation reaches the engine as a THROWN error (one message carrying
+    // both the "not found in any frame" and "selector mismatch" hints) instead
+    // of a log line the run then contradicted by reporting success.
+    await expect(
+      EXECUTORS['ocr']!({ source: 'element', selector: 'img.captcha' }, ctx),
+    ).rejects.toThrow(/所有框架中均找不到元素.*选择器不匹配/)
 
     expect(ocrMock).not.toHaveBeenCalled()
     // 3 attempts × (scroll + capture).
     expect(driverMock.mock.calls).toHaveLength(6)
-    expect(emit).toHaveBeenCalledWith('error', expect.stringContaining('所有框架中均找不到元素'))
-    expect(emit).toHaveBeenCalledWith('error', expect.stringContaining('选择器不匹配'))
   })
 
   it('variable source reads an image data URL from the named variable', async () => {
@@ -466,12 +488,14 @@ describe('workflow ocr block', () => {
   })
 
   it('variable source errors on a value that is not an image reference', async () => {
-    const { ctx, emit } = makeCtx()
+    const { ctx } = makeCtx()
     ctx.variables['shot'] = 'not-an-image-value'
-    await EXECUTORS['ocr']!({ source: 'variable', imageVariable: 'shot' }, ctx)
+
+    await expect(
+      EXECUTORS['ocr']!({ source: 'variable', imageVariable: 'shot' }, ctx),
+    ).rejects.toThrow(/base64/)
 
     expect(ocrMock).not.toHaveBeenCalled()
-    expect(emit).toHaveBeenCalledWith('error', expect.stringContaining('base64'))
   })
 
   it('an explicit lang overrides the global setting', async () => {
@@ -515,10 +539,11 @@ describe('workflow ocr block', () => {
   })
 
   it('a missing element selector errors without calling OCR', async () => {
-    const { ctx, emit } = makeCtx()
-    await EXECUTORS['ocr']!({ source: 'element', selector: '' }, ctx)
+    const { ctx } = makeCtx()
+    await expect(EXECUTORS['ocr']!({ source: 'element', selector: '' }, ctx)).rejects.toThrow(
+      /选择器/,
+    )
     expect(ocrMock).not.toHaveBeenCalled()
-    expect(emit).toHaveBeenCalledWith('error', expect.stringContaining('选择器'))
   })
 })
 

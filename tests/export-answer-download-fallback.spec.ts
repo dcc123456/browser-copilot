@@ -33,8 +33,8 @@ describe('downloadBlob — anchor fallback', () => {
     vi.unstubAllGlobals()
   })
 
-  it('falls back to an anchor click carrying the download filename', () => {
-    downloadBlob('hello', 'text/plain', 'note.txt')
+  it('falls back to an anchor click carrying the download filename', async () => {
+    await downloadBlob('hello', 'text/plain', 'note.txt')
     expect(createObjectURL).toHaveBeenCalledTimes(1)
     expect(clickSpy).toHaveBeenCalledTimes(1)
     const anchors = document.querySelectorAll('a')

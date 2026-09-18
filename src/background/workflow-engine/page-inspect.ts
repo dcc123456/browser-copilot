@@ -40,17 +40,20 @@ export interface PageInspection {
   interactive: InspectedElement[]
 }
 
-/** Text cap per element so one element can't blow the model context. */
-const TEXT_CAP = 80
-/** Caps on list sizes shipped to the model. */
-const MAX_CANDIDATES = 6
-const MAX_INTERACTIVE = 15
-
 /**
  * Top-level injected function (no closures): inspects the page around
- * `selector`. Must stay serializable for `chrome.scripting.executeScript`.
+ * `selector`. Must stay serializable for `chrome.scripting.executeScript` —
+ * every helper AND every constant it uses is declared inside the body, since
+ * the module scope does not exist in the page.
+ * `scripts/verify-injected-functions.mjs` enforces that.
  */
 function inspectPageInPage(selector: string): PageInspection {
+  /** Text cap per element so one element can't blow the model context. */
+  const TEXT_CAP = 80
+  /** Caps on list sizes shipped to the model. */
+  const MAX_CANDIDATES = 6
+  const MAX_INTERACTIVE = 15
+
   const cap = (text: string | null | undefined, max: number): string =>
     (text ?? '').replace(/\s+/g, ' ').trim().slice(0, max)
 

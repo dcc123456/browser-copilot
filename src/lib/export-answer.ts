@@ -358,10 +358,33 @@ ${body}
  *
  * Safe in browser contexts only; guarded to no-op when the DOM is missing so
  * callers in tests don't need to stub it out.
+ *
+ * When a download directory handle is provided, writes directly to that directory
+ * using the File System Access API for silent downloads without user confirmation.
  */
-export function downloadBlob(content: string, mime: string, filename: string): void {
-  const chromeDownloads =
-    typeof chrome !== 'undefined' ? chrome.downloads?.download : undefined
+export async function downloadBlob(
+  content: string,
+  mime: string,
+  filename: string,
+  downloadDir?: FileSystemDirectoryHandle | null,
+): Promise<boolean> {
+  // If a download directory is configured, write directly to it (silent download)
+  if (downloadDir) {
+    try {
+      const fileHandle = await downloadDir.getFileHandle(filename, { create: true })
+      const writable = await fileHandle.createWritable()
+      try {
+        await writable.write(content)
+      } finally {
+        await writable.close()
+      }
+      return true
+    } catch {
+      // Fall through to chrome.downloads API if File System Access fails
+    }
+  }
+
+  const chromeDownloads = typeof chrome !== 'undefined' ? chrome.downloads?.download : undefined
   const hasChrome = typeof chromeDownloads === 'function'
   // Bail only when there is no way to drive a download at all. Previously this
   // returned early whenever `document` was missing, which also skipped the
@@ -370,7 +393,7 @@ export function downloadBlob(content: string, mime: string, filename: string): v
   // anchor trick below, which silently no-ops when the blob URL is revoked too
   // early. Prefer the downloads API; it is reliable from the side panel.
   if (!hasChrome && (typeof document === 'undefined' || typeof URL === 'undefined')) {
-    return
+    return false
   }
   try {
     if (hasChrome) {
@@ -386,7 +409,7 @@ export function downloadBlob(content: string, mime: string, filename: string): v
       })
         .then(() => setTimeout(() => URL.revokeObjectURL(url), 1000))
         .catch(() => URL.revokeObjectURL(url))
-      return
+      return true
     }
     // Non-extension fallback (web preview / tests): plain anchor download.
     const url = URL.createObjectURL(new Blob([content], { type: mime }))
@@ -400,8 +423,10 @@ export function downloadBlob(content: string, mime: string, filename: string): v
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
     }, 1000)
+    return true
   } catch {
     /* ignore — user can still manually copy from the UI */
+    return false
   }
 }
 
@@ -417,14 +442,15 @@ export const MIME_FOR_FORMAT: Record<AnswerFormat, string> = {
 const BOM = String.fromCharCode(0xfeff)
 
 /** One helper that converts + downloads in a single call. */
-export function downloadAnswer(params: {
+export async function downloadAnswer(params: {
   text: string
   format: AnswerFormat
   title?: string
   fallbackSlug?: string
   at?: number
-}): string {
-  const { text, format, title, fallbackSlug, at } = params
+  downloadDir?: FileSystemDirectoryHandle | null
+}): Promise<{ ok: boolean; filename: string }> {
+  const { text, format, title, fallbackSlug, at, downloadDir } = params
   const filename = buildAnswerFilename(format, title, fallbackSlug, at)
   let body = ''
   switch (format) {
@@ -444,6 +470,6 @@ export function downloadAnswer(params: {
       body = BOM + toCsv(text)
       break
   }
-  downloadBlob(body, MIME_FOR_FORMAT[format], filename)
-  return filename
+  const ok = await downloadBlob(body, MIME_FOR_FORMAT[format], filename, downloadDir)
+  return { ok, filename }
 }

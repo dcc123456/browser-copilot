@@ -11,6 +11,7 @@
 
 import type { Workflow } from '../../lib/workflow/types'
 import { recordCheckpoint, resumePointOf } from '../../lib/workflow/checkpoints'
+import { seedFromTrigger } from '../../lib/workflow/workflow-inputs'
 import {
   createChromeCheckpointStore,
   findNewestPersistedRunId,
@@ -27,7 +28,7 @@ import {
   type RunSource,
   type RunningTask,
 } from '../running-tasks'
-import { countElements, execJsOnActiveTab } from '../driver'
+import { countElements, elementSelectorAt, execJsOnActiveTab } from '../driver'
 import { normalScopeFromWindowId } from '../automation-scope'
 import { BLOCK_BY_ID } from '../../lib/workflow/blocks/palette'
 import { runWorkflow } from './engine'
@@ -222,7 +223,12 @@ export async function executeWorkflow(
     // re-driving the whole graph. A login workflow re-run from its trigger hits
     // a login form that no longer exists; resuming skips what already landed.
     let startAt = opts.startAt
-    let variables = opts.variables
+    // The scope a run starts with. Declared inputs (the trigger's `parameters`)
+    // are seeded as DEFAULTS under whatever the caller supplied, so a trigger
+    // payload wins over them. Without this a generated workflow's `{{keyword}}`
+    // references — which is how it records business data instead of freezing it
+    // — would resolve to nothing and drive the page with empty values.
+    let variables = seedFromTrigger(effective.trigger, opts.variables)
     if (opts.resumeFrom) {
       const inMemory = checkpointStore.load(opts.resumeFrom)
       const checkpoints =
@@ -230,7 +236,9 @@ export async function executeWorkflow(
       const point = resumePointOf(effective, checkpoints)
       if (point) {
         startAt = point.nodeId
-        variables = { ...(opts.variables ?? {}), ...point.variables }
+        // Layered over the SEEDED bag, not over `opts.variables`: resuming must
+        // not drop the declared-input defaults the rest of the graph reads.
+        variables = { ...(variables ?? {}), ...point.variables }
         resumedFrom = point.fromStepIndex
         addStep(
           runId,
@@ -248,6 +256,10 @@ export async function executeWorkflow(
       ...(scope ? { scope } : {}),
       ...(opts.aiTakeover ? { aiTakeover: opts.aiTakeover } : {}),
       loopElementCounter: (selector, signal) => countElements(selector, signal, scope),
+      // Each iteration of a `loop-elements` body needs its own element; the
+      // body references it as `{{loopElementSelector}}`.
+      loopElementSelector: (selector, index, signal) =>
+        elementSelectorAt(selector, index, signal, scope),
       // JS conditions run in the page: the service worker CSP forbids eval.
       evaluateExpression: async (code, vars) => {
         const result = await execJsOnActiveTab(

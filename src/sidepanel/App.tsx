@@ -170,20 +170,50 @@ export default function App() {
   useEffect(() => {
     const type = 'download:save-picker'
     const handler = (
-      message: { type?: string; payload?: { suggestedName?: string } },
+      message: {
+        type?: string
+        payload?: { suggestedName?: string; text?: string; base64?: string }
+      },
       _sender: chrome.runtime.MessageSender,
       sendResponse: (response?: unknown) => void,
     ): boolean | undefined => {
       if (message?.type !== type) return
+      const payload = message.payload
       void (async () => {
+        // A picked location is not a saved file. The handle the picker returns
+        // exists only in this document, so the write has to happen here — the
+        // worker cannot reach it. (It used to discard the handle and answer
+        // `{ ok: true }` anyway, so every manual save reported success while
+        // writing nothing at all.)
+        let handle: FileSystemFileHandle
         try {
-          await window.showSaveFilePicker({
-            suggestedName: message.payload?.suggestedName ?? 'file.txt',
+          handle = await window.showSaveFilePicker({
+            suggestedName: payload?.suggestedName ?? 'file.txt',
           })
-          sendResponse({ ok: true })
         } catch (error) {
           const canceled = error instanceof DOMException && error.name === 'AbortError'
           sendResponse({ ok: false, canceled })
+          return
+        }
+        try {
+          const writable = await handle.createWritable()
+          try {
+            if (typeof payload?.base64 === 'string') {
+              const binary = atob(payload.base64)
+              const bytes = new Uint8Array(binary.length)
+              for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+              await writable.write(bytes)
+            } else {
+              await writable.write(payload?.text ?? '')
+            }
+          } finally {
+            await writable.close()
+          }
+          sendResponse({ ok: true })
+        } catch {
+          // Not a cancel: the user picked a location and the write itself
+          // failed, so the caller must report a failure rather than a save.
+          sendResponse({ ok: false, canceled: false })
         }
       })()
       return true

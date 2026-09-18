@@ -216,14 +216,14 @@ export default function SkillsTab({ skills, activeSkillId, onChanged, onUseInCha
   }
 
   /** Exports the whole local list as an indented JSON file for later re-import. */
-  const exportAll = (): void => {
+  const exportAll = async (): Promise<void> => {
     if (skills.length === 0) {
       setBanner({ kind: 'error', text: t.skillsEmpty })
       return
     }
     const json = exportSkillsJson(skills)
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-    downloadBlob(json, 'application/json', `skills-${stamp}.json`)
+    await downloadBlob(json, 'application/json', `skills-${stamp}.json`)
   }
 
   return (

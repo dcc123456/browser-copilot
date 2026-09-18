@@ -10,28 +10,54 @@
  * integration / trigger) are registered as placeholders until phase 4 fills
  * them in.
  *
+ * ## 失败必须抛错，不能只 `ctx.emit('error', …)`
+ *
+ * `emit('error')` 只是往运行日志写一行；引擎判定的失败路径**只有一条**——
+ * 执行器抛出的异常（`engine.ts` 的 `catch (e) → !succeeded`）。所以
+ * `ctx.emit('error', …); return null` 会让整轮运行继续按**成功**收尾，
+ * 并且有两个后果：
+ *
+ *   1. 重放时用户看到「运行成功」，但产物是空的，日志里那行红字很容易被忽略；
+ *   2. 生成时更糟——算子桥接（`operator-exec.ts`）按 `status` 判断，
+ *      `emit` 过的节点仍是 `'executed'`，于是**坏节点照样被记进草稿**，
+ *      模型以为这一步成功了，最后交付一个不可用的工作流。
+ *
+ * 因此：**本节点的主操作失败 → `throw`**。引擎会按节点自己的 onError 策略
+ * 处理（retry / fallback / continue / error），算子桥接会返回 `ok:false` +
+ * 错误消息，草稿保持不变，模型可以换个定位符重试。动作类执行器经 `runRaw`
+ * 本来就是这么做的（见其注释），其余块与它保持一致。
+ *
+ * 例外（有意保留的降级，不抛错）：`scroll` 的增量滚动中途失败只 `break`
+ * 提前结束本次滚动；`read-page` 的「选中文本」模式空选区只提示（没有声明式
+ * 的守卫算子能测「用户选没选」）。
+ *
  * @module background/workflow-engine/executors
  */
 
 import { isInjectablePage } from '../../lib/pages'
+import { truncate } from '../../lib/extract'
 import { streamCompletion, type WireMessage } from '../../lib/llm'
 import { getSettings, listPasswords } from '../../lib/storage'
 import { entryFields, findField } from '../../lib/types'
 import { OCR_SUPPORTED } from '../../lib/ocr-support'
-import { interpolate } from '../../lib/workflow/interpolate'
+import { interpolate, EMPTY_INTERP_KEY, getByPath } from '../../lib/workflow/interpolate'
+import {
+  coerceInputValue,
+  missingRequiredInputs,
+  workflowParametersOf,
+} from '../../lib/workflow/workflow-inputs'
 import { sanitizeModelAnswer } from '../../lib/model-output'
 import { preprocessImage } from '../../lib/vision'
 import { LoopBreakpointError } from './loop-breakpoint'
 import {
   askSaveViaSidePanel,
   getDownloadDir,
-  resolveTransferMode,
   writeFileToDownloadDir,
-  type SaveMode,
+  type SavePickerPayload,
 } from '../../lib/download-dir'
 import { aiAgent } from './ai-agent-executor'
 import type { Op, ScrollSpec, Target, TargetSpec } from '../../lib/ops'
-import { activeTab } from '../page'
+import { resolveTargetTab, readActivePage, readActiveSelection } from '../page'
 import { captureVisiblePage } from '../capture'
 import { captureElementRobust, imageHasInk } from '../element-capture'
 import type { ScopeWindow } from '../automation-scope'
@@ -53,20 +79,9 @@ import {
   ocrImage,
   resolveAutomationTab,
   newWindow as driverNewWindow,
-  switchTab as driverSwitchTab,
   execJsOnActiveTab,
   execWorkflowJsOnActiveTab,
 } from '../driver'
-
-/**
- * Params key the ENGINE sets on the interpolated parameter bag, listing the
- * string params whose `{{token}}` values all resolved to an empty string (e.g.
- * an `ai-agent` variable whose block produced nothing). Executors that must not
- * act on an accidentally-empty value (the forms fill) check this key to tell
- * "the referenced variable produced nothing" apart from a deliberate "".
- * Never persisted — it exists only on the per-run interpolated copy.
- */
-export const EMPTY_INTERP_KEY = '__bcEmptyInterp'
 
 /** Execution context handed to every block executor. */
 export interface WorkflowExecCtx {
@@ -244,10 +259,144 @@ async function runRaw(op: Op, ctx: WorkflowExecCtx): Promise<string | null> {
   return null
 }
 
-/** Top-level injected function for the `get-text` block. No closure. */
-function readTextInPage(selector: string): string {
-  const el = document.querySelector(selector)
-  return el ? (el.textContent ?? '').trim() : ''
+/**
+ * Top-level injected function for the `get-text` block. No closure.
+ *
+ * Always returns an array — one entry per matched element — because the block's
+ * `multiple` flag used to be silently ignored and a scalar return left no way
+ * for the caller to tell "one match" from "the first of many". The single-read
+ * case is simply a one-element array.
+ */
+function readTextsInPage(
+  selector: string,
+  multiple: boolean,
+  useTextContent: boolean,
+  includeTags: boolean,
+): string[] {
+  const nodes = selector ? Array.from(document.querySelectorAll(selector)) : []
+  if (nodes.length === 0) return []
+  const picked = multiple ? nodes : nodes.slice(0, 1)
+  return picked.map((node) => {
+    const el = node as HTMLElement
+    if (includeTags) return el.innerHTML ?? ''
+    if (useTextContent) return el.textContent ?? ''
+    // `innerText` is the RENDERED text, which is what the block's description
+    // promises; `textContent` also returns hidden nodes and script bodies. Fall
+    // back to `textContent` for a hidden element, where `innerText` is ''.
+    return el.innerText || el.textContent || ''
+  })
+}
+
+/** Top-level injected function for `read-page`'s HTML mode. No closure. */
+function readHtmlInPage(selector: string): string {
+  const el = selector ? document.querySelector(selector) : document.documentElement
+  return el ? el.outerHTML : ''
+}
+
+/**
+ * Cap on a data-table row index, so a corrupt `loopIndex` cannot make the
+ * fill loop below allocate forever.
+ */
+const MAX_TABLE_ROWS = 100_000
+
+/**
+ * Append read values into the data table — the ONLY thing `export-data` reads,
+ * so a read that does not land here leaves the export empty.
+ *
+ * Rows are addressed by index, and which index depends on context:
+ *
+ *   - inside a loop, the current `loopIndex` — one row per iteration, which is
+ *     what "read one column per iteration" means;
+ *   - outside a loop, the match index — `multiple: true` yields one row per
+ *     match.
+ *
+ * Writing a column onto a row that already exists REPLACES that cell instead of
+ * appending a row, so
+ * `get-text(multiple, dataColumn:'内容') → get-text(multiple, dataColumn:'热度')`
+ * produces a two-column table rather than doubling the row count.
+ *
+ * @returns how many rows were created, for the run log.
+ */
+function collectIntoDataTable(
+  ctx: WorkflowExecCtx,
+  column: string,
+  values: readonly string[],
+): number {
+  if (!column) return 0
+  if (!Array.isArray(ctx.variables['dataTable'])) ctx.variables['dataTable'] = []
+  const table = ctx.variables['dataTable'] as Record<string, unknown>[]
+  const loopIndex = ctx.variables['loopIndex']
+  const inLoop = typeof loopIndex === 'number' && Number.isFinite(loopIndex)
+  let created = 0
+  values.forEach((value, i) => {
+    const rowIndex = Math.floor(inLoop ? (loopIndex as number) : i)
+    if (rowIndex < 0 || rowIndex > MAX_TABLE_ROWS) return
+    while (table.length <= rowIndex) {
+      table.push({})
+      created += 1
+    }
+    table[rowIndex]![column] = value
+  })
+  return created
+}
+
+/**
+ * Write a read result to its output variable and, when the node asked for it,
+ * into the data table. Shared by `get-text` and `read-page` so the two cannot
+ * disagree about what `saveData` / `dataColumn` mean.
+ */
+function publishRead(
+  ctx: WorkflowExecCtx,
+  data: Record<string, unknown>,
+  values: readonly string[],
+  fallbackVariable: string,
+): void {
+  const value: unknown = data['multiple'] === true ? values : (values[0] ?? '')
+  const variable = String(data['variableName'] ?? '').trim() || fallbackVariable
+  ctx.variables[variable] = value
+  if (variable !== fallbackVariable) ctx.variables[fallbackVariable] = value
+  if (data['saveData'] === true) {
+    const column = String(data['dataColumn'] ?? '').trim()
+    if (!column) {
+      // Silently collecting nothing is how the export ends up empty with no
+      // explanation; say so instead.
+      ctx.emit('info', '未指定数据列名（dataColumn），本次读取未写入数据表')
+    } else {
+      ctx.emit('info', `已写入数据表列「${column}」${collectIntoDataTable(ctx, column, values)} 行`)
+    }
+  }
+  ctx.emit('result', Array.isArray(value) ? value.join('\n') : String(value))
+}
+
+/**
+ * Refuse to publish a read that produced nothing.
+ *
+ * A selector matching no element used to write `''` / `[]` and emit
+ * `result ''`, so a scraper with a wrong selector produced an empty export
+ * while the run reported 成功 and nothing anywhere said why. Two moments
+ * mattered:
+ *
+ *   - at replay, the empty file had no explanation;
+ *   - during generation it was worse — the operator bridge recorded the node
+ *     anyway, so the model shipped a step that reads nothing.
+ *
+ * Throwing fixes both: the engine fails the node with this text, and the bridge
+ * returns `ok:false` WITHOUT recording, so the model has to find a selector
+ * that actually matches. A legitimately optional read is not an exception to
+ * swallow — the operator guide's answer is `element-exists`, which routes
+ * exists / notExists declaratively instead of letting a read spin empty.
+ */
+function requireReadMatch(what: string, values: readonly string[]): void {
+  if (values.some((value) => String(value ?? '').trim() !== '')) return
+  throw new Error(
+    `${what} 没有读到任何内容。请依次排查：` +
+      '① 选择器是否写对——页面改版、类名变化都会让它失效；' +
+      '② 元素是否是页面加载后才由脚本渲染出来的——把这一步放到 wait-connections 或 delay 之后；' +
+      '③ 读的是否是目标标签页——读取跟着本轮的标签页走，先用 new-tab 打开再读；' +
+      '④ 元素是否在 iframe 内——当前只读主框架。' +
+      '如果这一步本来就是「有则读、没有就跳过」，请改用 element-exists 分 exists / notExists 两路，' +
+      '不要让读取节点空转。',
+  )
 }
 
 // --- Browser executors -------------------------------------------------------
@@ -291,6 +440,7 @@ const scroll: BlockExecutor = async (data, ctx) => {
   if (mode === 'incremental') {
     const step = Math.max(1, Number(data['step'] ?? 120))
     const steps = Math.max(1, Math.ceil(Math.max(Math.abs(x), Math.abs(y)) / step))
+    let stoppedAt: string | undefined
     for (let i = 0; i < steps; i += 1) {
       assertActive(ctx)
       const safe = {
@@ -300,11 +450,17 @@ const scroll: BlockExecutor = async (data, ctx) => {
       try {
         await execOnActiveTab(safe, ctx.signal, ctx.tabId, ctx.scope)
       } catch (error) {
-        ctx.emit('error', message(error))
+        // Deliberate degrade (the one place a failure is NOT rethrown): a
+        // partial scroll has still moved the page, and the next node locates
+        // its own element anyway, so stopping early beats failing the run.
+        // Reported as a partial result rather than "完成", which used to be
+        // claimed even after this break.
+        stoppedAt = `第 ${i + 1}/${steps} 步：${message(error)}`
         break
       }
     }
-    ctx.emit('result', `增量滚动完成`)
+    if (stoppedAt) ctx.emit('error', `增量滚动提前中止（${stoppedAt}）`)
+    else ctx.emit('result', '增量滚动完成')
     return null
   }
 
@@ -313,7 +469,11 @@ const scroll: BlockExecutor = async (data, ctx) => {
 
 const pressKey: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const key = String(data['key'] ?? '')
+  // The catalog and the edit form both write `keys` (the recorder's combo) or
+  // `keysToPress` (the free-text field); `key` is the shape the agent's own
+  // history path produces. Reading only `key` meant this block silently
+  // pressed nothing whenever it came from the editor or a generated node.
+  const key = String(data['keys'] ?? data['keysToPress'] ?? data['key'] ?? '')
   ctx.emit('status', `按下按键: ${key}`)
   return runRaw({ action: 'press_key', value: key }, ctx)
 }
@@ -350,40 +510,69 @@ const takeScreenshot: BlockExecutor = async (data, ctx) => {
   const type = (data['type'] as string | undefined) ?? 'page'
   const selector = sel(data)
   const variable = String(data['variableName'] ?? 'lastScreenshot')
+  // `ext` (png / jpeg) and `quality` are edit-form fields. Only the visible-page
+  // path can honour them: the in-page full-page / element capture always
+  // produces a PNG, so asking for JPEG there must not be answered by naming a
+  // PNG `.jpeg`.
+  const wantsJpeg = String(data['ext'] ?? 'png') === 'jpeg'
+  const quality = Number(data['quality'] ?? 100)
+
+  let dataUrl: string | undefined
+  let actualExt = 'png'
 
   // fullpage / element go through the in-page SVG->canvas capture path.
   if (type === 'fullpage' || type === 'element') {
-    try {
-      const op: Op = { action: 'capture' }
-      if (type === 'element') {
-        if (!selector) {
-          ctx.emit('error', '元素截图需要 CSS 选择器')
-          return null
-        }
-        op.value = selector
-      }
-      const result = await execOnActiveTab(op, ctx.signal, ctx.tabId, ctx.scope)
-      if (result.ok && typeof result.data === 'string') {
-        ctx.variables[variable] = result.data
-        ctx.emit('result', `已截图 (${type})`)
-      } else {
-        ctx.emit('error', result.error ?? '截图失败')
-      }
-    } catch (error) {
-      ctx.emit('error', message(error))
+    const op: Op = { action: 'capture' }
+    if (type === 'element') {
+      if (!selector) throw new Error('元素截图需要 CSS 选择器')
+      op.value = selector
     }
-    return null
+    const result = await execOnActiveTab(op, ctx.signal, ctx.tabId, ctx.scope)
+    if (!result.ok || typeof result.data !== 'string') {
+      throw new Error(result.error ?? '截图失败')
+    }
+    dataUrl = result.data
+    if (wantsJpeg) {
+      ctx.emit('info', '整页/元素截图固定为 PNG，已按 .png 保存（JPEG 只对可视区域截图生效）')
+    }
+  } else {
+    // Default: visible page snapshot. The shared capture helper restores a
+    // minimized window, retries transient races and — on failure — surfaces the
+    // underlying Chrome error instead of an opaque one.
+    const capture = await captureVisiblePage(ctx.scope, {
+      format: wantsJpeg ? 'jpeg' : 'png',
+      ...(wantsJpeg ? { quality } : {}),
+    })
+    if (!capture.ok) {
+      throw new Error(`截图失败: ${capture.error}`)
+    }
+    dataUrl = capture.dataUrl
+    actualExt = wantsJpeg ? 'jpeg' : 'png'
   }
 
-  // Default: visible page snapshot. The shared capture helper restores a
-  // minimized window, retries transient races and — on failure — surfaces the
-  // underlying Chrome error instead of an opaque one.
-  const capture = await captureVisiblePage(ctx.scope, { format: 'png' })
-  if (capture.ok) {
-    ctx.variables[variable] = capture.dataUrl
-    ctx.emit('result', '已截图')
-  } else {
-    ctx.emit('error', `截图失败: ${capture.error}`)
+  ctx.variables[variable] = dataUrl
+  ctx.emit('result', `已截图 (${type})`)
+
+  // "Save to computer" + file name + format. These were pure decoration: the
+  // capture only ever landed in a variable, so checking the box wrote nothing.
+  if (data['saveToComputer'] === true) {
+    const rawName = interpolate(String(data['fileName'] ?? ''), ctx.variables, ctx.refData).trim()
+    const base = rawName || 'screenshot'
+    const filename = /\.[a-z0-9]+$/i.test(base) ? base : `${base}.${actualExt}`
+    const outcome = await writeProducedFile(
+      'take-screenshot',
+      filename,
+      { base64: base64Body(dataUrl) },
+      ctx,
+    )
+    if (outcome === 'saved') ctx.variables['lastScreenshotPath'] = filename
+  }
+
+  // "Insert to table" reuses the same collection contract as `get-text` /
+  // `read-page`, so `export-data` can pick the column up.
+  const column = String(data['dataColumn'] ?? '').trim()
+  if (data['saveToColumn'] === true && column) {
+    collectIntoDataTable(ctx, column, [dataUrl])
   }
   return null
 }
@@ -391,19 +580,132 @@ const takeScreenshot: BlockExecutor = async (data, ctx) => {
 const getText: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const selector = sel(data)
-  const tab = await activeTab(ctx.scope)
+  if (!selector) {
+    // A generated node may carry only the conversation's rich locator
+    // (`data.target` with role/text specs). `targetFrom` can act on that, but
+    // this reader runs `querySelectorAll` and can only use a CSS selector — so
+    // say that instead of reading nothing and calling it a success.
+    throw new Error(
+      richTargetOf(data)
+        ? 'get-text: 这个节点只有富定位符（target），而读取只支持 CSS 选择器，请补上 selector。'
+        : 'get-text: 缺少 selector，不知道要读哪个元素。',
+    )
+  }
+  // The run's target tab, not the window's active tab — see `resolveTargetTab`.
+  // Reading the wrong tab is how `new-tab → get-text` returns nothing (or, when
+  // the active tab is the extension's own editor page, fails outright).
+  const tab = await resolveTargetTab(ctx.tabId, ctx.scope)
   if (!tab || typeof tab.id !== 'number') {
-    ctx.emit('error', '没有活动标签页')
-    return null
+    throw new Error('get-text: 没有可读的标签页')
   }
   const [injection] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
-    func: readTextInPage,
+    func: readTextsInPage,
+    args: [
+      selector,
+      data['multiple'] === true,
+      data['useTextContent'] === true,
+      data['includeTags'] === true,
+    ],
+  })
+  const values = (injection?.result as string[] | undefined) ?? []
+  // Reading nothing is a failed step, not an empty result — see
+  // `requireReadMatch`. Checked before `publishRead` so the empty value never
+  // reaches the variable bag or the data table.
+  requireReadMatch(`get-text(selector: "${selector}")`, values)
+  // The block's declared output is `variableName` — the catalog, the editor and
+  // the operator guide all say so — but this executor only ever wrote
+  // `lastText`, so a generated node that named its variable produced a
+  // `{{name}}` reference resolving to nothing at replay. Write the declared
+  // name, and keep `lastText` populated for the workflows already built on it.
+  //
+  // `multiple` / `saveData` / `dataColumn` were in the same state: declared in
+  // the catalog, given UI, documented in the operator guide's collection recipe
+  // — and read by nobody, which is why `export-data` always wrote an empty
+  // file. They now do what the guide says.
+  publishRead(ctx, data, values, 'lastText')
+  return null
+}
+
+/** The active tab's HTML, optionally scoped to one element, capped. */
+async function readHtmlFromActiveTab(
+  selector: string,
+  maxChars: number,
+  ctx: WorkflowExecCtx,
+): Promise<string> {
+  const tab = await resolveTargetTab(ctx.tabId, ctx.scope)
+  if (!tab || typeof tab.id !== 'number') throw new Error('没有活动标签页')
+  const [injection] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id, frameIds: [0] },
+    func: readHtmlInPage,
     args: [selector],
   })
-  const text = (injection?.result as string | undefined) ?? ''
-  ctx.variables['lastText'] = text
-  ctx.emit('result', text)
+  // HTML whitespace is content, so unlike the text path this is not collapsed —
+  // only capped, which is what keeps a huge document out of the variable bag.
+  return truncate((injection?.result as string | undefined) ?? '', maxChars).text
+}
+
+/** The text of every element matching `selector` in the run's target tab. */
+async function readTextsFromActiveTab(selector: string, ctx: WorkflowExecCtx): Promise<string[]> {
+  const tab = await resolveTargetTab(ctx.tabId, ctx.scope)
+  if (!tab || typeof tab.id !== 'number') throw new Error('没有活动标签页')
+  const [injection] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id, frameIds: [0] },
+    func: readTextsInPage,
+    args: [selector, false, false, false],
+  })
+  return (injection?.result as string[] | undefined) ?? []
+}
+
+/**
+ * `read-page` — the recordable form of the chat agent's `read_current_page`
+ * tool.
+ *
+ * The tool only ever fed the model's own understanding, so a task that needed
+ * the page's text *in the workflow* had no step to record: `get-text` reads one
+ * element, and the model had no way to say "this whole page". Reading the page
+ * is now a node like any other, and `saveData` lets it feed the table that
+ * `export-data` writes.
+ */
+const readPage: BlockExecutor = async (data, ctx) => {
+  assertActive(ctx)
+  const source = String(data['source'] ?? 'text')
+  const selector = String(data['selector'] ?? '').trim()
+  const requested = Number(data['maxChars'])
+  const maxChars = Number.isFinite(requested) && requested > 0 ? Math.floor(requested) : 20000
+
+  // A page that forbids injection (browser-internal, Web Store, local file)
+  // fails this step and says why, rather than recording a node that silently
+  // reads nothing at replay — so no catch here on purpose.
+  let values: string[]
+  if (source === 'selection') {
+    values = [(await readActiveSelection(ctx.scope, ctx.tabId)).selection]
+    // The one read that is allowed to come back empty: a selection can be
+    // legitimately absent, and no declarative block can test "did the user
+    // select anything" (element-exists works on elements). Reported loudly,
+    // but not fatal.
+    if (values.every((value) => !value.trim())) {
+      ctx.emit('error', 'read-page: 当前没有选中任何文本（source: selection）——读取结果为空')
+    }
+  } else if (source === 'html') {
+    values = [await readHtmlFromActiveTab(selector, maxChars, ctx)]
+    requireReadMatch(
+      selector ? `read-page(source: html, selector: "${selector}")` : 'read-page(source: html)',
+      values,
+    )
+  } else if (selector) {
+    // Element-scoped text: reading the page's own text would ignore the
+    // scope, so go through the element reader instead.
+    values = await readTextsFromActiveTab(selector, ctx)
+    requireReadMatch(`read-page(selector: "${selector}")`, values)
+  } else {
+    const page = await readActivePage(maxChars, ctx.scope, ctx.tabId)
+    if (page.truncated) ctx.emit('info', `页面正文超过 ${maxChars} 字，已截断`)
+    values = [page.text]
+    requireReadMatch('read-page(source: text)', values)
+  }
+
+  publishRead(ctx, data, values, 'lastReadPage')
   return null
 }
 
@@ -468,8 +770,7 @@ async function captureElementImage(selector: string, ctx: WorkflowExecCtx): Prom
     preferredTabId: ctx.tabId,
   })
   if (result.ok) return result.dataUrl
-  ctx.emit('error', `ocr: ${result.error}`)
-  return null
+  throw new Error(`ocr: ${result.error}`)
 }
 
 /**
@@ -560,8 +861,7 @@ const ocrBlock: BlockExecutor = async (data, ctx) => {
   // the editor there. A saved/imported workflow can still reference it, so the
   // executor answers with an explicit error instead of a confusing failure.
   if (!OCR_SUPPORTED) {
-    ctx.emit('error', 'ocr: 当前为无 OCR 精简版构建，此算子不可用 — 请安装完整版（含 OCR）')
-    return null
+    throw new Error('ocr: 当前为无 OCR 精简版构建，此算子不可用 — 请安装完整版（含 OCR）')
   }
   const source = String(data['source'] ?? (sel(data) ? 'element' : 'page'))
 
@@ -571,39 +871,33 @@ const ocrBlock: BlockExecutor = async (data, ctx) => {
     const raw = ctx.variables[name]
     const value = typeof raw === 'string' ? raw.trim() : ''
     if (!value) {
-      ctx.emit('error', `ocr: 变量 ${name} 为空或不是字符串`)
-      return null
+      throw new Error(`ocr: 变量 ${name} 为空或不是字符串`)
     }
     // base64 payloads are wrapped so the offscreen canvas can decode them;
     // http(s) links are fetched and re-encoded first (转成图片后识别).
     const normalized = await imageInputToDataUrl(value, ctx.signal)
     if (!normalized) {
-      ctx.emit(
-        'error',
+      throw new Error(
         `ocr: 变量 ${name} 不是可识别的图片（支持 base64、data URL 或 http(s) 图片链接）`,
       )
-      return null
     }
     image = normalized
   } else if (source === 'element') {
     const selector = sel(data)
     if (!selector) {
-      ctx.emit('error', 'ocr: 页面 img 元素识别需要 CSS 选择器')
-      return null
+      throw new Error('ocr: 页面 img 元素识别需要 CSS 选择器')
     }
     const captured = await captureElementImage(selector, ctx)
     if (!captured) return null // errors already emitted
     image = captured
   } else {
-    const tab = await activeTab(ctx.scope)
+    const tab = await resolveTargetTab(ctx.tabId, ctx.scope)
     if (!tab || typeof tab.windowId !== 'number') {
-      ctx.emit('error', 'ocr: 没有可截图的活动标签页')
-      return null
+      throw new Error('ocr: 没有可截图的活动标签页')
     }
-    const capture = await captureVisiblePage(ctx.scope, { format: 'png' })
+    const capture = await captureVisiblePage(ctx.scope, { format: 'png', tab })
     if (!capture.ok) {
-      ctx.emit('error', `ocr: ${capture.error}`)
-      return null
+      throw new Error(`ocr: ${capture.error}`)
     }
     image = capture.dataUrl
   }
@@ -680,13 +974,11 @@ const openUrl: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const url = String(data['url'] ?? '')
   if (!isInjectablePage(url)) {
-    ctx.emit('error', `仅允许打开 http(s) 页面: ${url}`)
-    return null
+    throw new Error(`仅允许打开 http(s) 页面: ${url}`)
   }
   const tab = await resolveAutomationTab(ctx.tabId, ctx.scope)
   if (!tab || typeof tab.id !== 'number') {
-    ctx.emit('error', '没有可操作的网页标签页')
-    return null
+    throw new Error('没有可操作的网页标签页')
   }
   await chrome.tabs.update(tab.id, { url })
   ctx.setTab?.(tab.id)
@@ -706,19 +998,82 @@ const newTabExec: BlockExecutor = async (data, ctx) => {
     }
     ctx.emit('result', `已新建标签页 #${tab.id}`)
   } catch (error) {
-    ctx.emit('error', message(error))
+    throw error
   }
   return null
+}
+
+/**
+ * Match a tab URL against an Automa-style match pattern (`https://*.example.com/*`).
+ * Only `*` is special — everything else is escaped, so a pattern containing
+ * regex metacharacters matches them literally.
+ */
+function globMatch(pattern: string, value: string): boolean {
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+  try {
+    return new RegExp(`^${escaped.split('*').join('.*')}$`).test(value)
+  } catch {
+    return false
+  }
 }
 
 const switchTabExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   try {
-    const tab = await driverSwitchTab(Number(data['index'] ?? 0), ctx.scope)
-    ctx.setTab?.(tab.id)
-    ctx.emit('result', `已切换到标签页 #${tab.id}`)
+    // `listAllTabUrls` does not promise an order; `tabIndex` means "the Nth
+    // tab", which is the driver's own `listTabs` order (ascending id).
+    const tabs = (await listAllTabUrls(ctx.scope)).sort((a, b) => a.id - b.id)
+    if (tabs.length === 0) {
+      throw new Error('switch-tab: 当前窗口没有可切换的标签页')
+    }
+    // `findTabBy` / `matchPattern` / `tabTitle` / `tabIndex` / `createIfNoMatch`
+    // / `activeTab` are all catalog + edit-form keys. Only `index` used to be
+    // read, and nothing ever wrote it — so `Number(undefined ?? 0)` made every
+    // switch land on tab 0 regardless of what the user configured.
+    const findBy = String(data['findTabBy'] ?? 'tab-index')
+    const pattern = interpolate(String(data['matchPattern'] ?? ''), ctx.variables, ctx.refData)
+    const title = interpolate(String(data['tabTitle'] ?? ''), ctx.variables, ctx.refData)
+    // "Next" / "previous" are relative to the tab the run is driving.
+    const current = (await resolveTargetTab(ctx.tabId, ctx.scope))?.id
+
+    let index = -1
+    if (findBy === 'match-patterns' && pattern) {
+      index = tabs.findIndex((tab) => globMatch(pattern, tab.url))
+    } else if (findBy === 'tab-title' && title) {
+      index = tabs.findIndex((tab) => tab.title.includes(title))
+    } else if (findBy === 'next-tab' || findBy === 'prev-tab') {
+      const at = tabs.findIndex((tab) => tab.id === current)
+      const step = findBy === 'next-tab' ? 1 : -1
+      index = at < 0 ? 0 : (at + step + tabs.length) % tabs.length
+    } else {
+      const wanted = Number(data['tabIndex'] ?? data['index'] ?? 0)
+      index = Number.isFinite(wanted) ? Math.trunc(wanted) : 0
+      if (index < 0 || index >= tabs.length) {
+        throw new Error(
+          `switch-tab: 标签页索引 ${index} 超出范围（本窗口共 ${tabs.length} 个），无法切换`,
+        )
+      }
+    }
+
+    if (index < 0) {
+      const createUrl = interpolate(String(data['url'] ?? ''), ctx.variables, ctx.refData)
+      if (data['createIfNoMatch'] === true && createUrl) {
+        const tab = await driverNewTab(createUrl, ctx.scope)
+        ctx.setTab?.(tab.id)
+        ctx.emit('result', `没有匹配的标签页，已新建 #${tab.id}`)
+        return null
+      }
+      throw new Error(`switch-tab: 没有匹配的标签页（findTabBy=${findBy}）`)
+    }
+
+    const target = tabs[index]!
+    // "Set as active tab" is what the checkbox means. Unchecking it still
+    // retargets the run at that tab, it just does not steal the user's focus.
+    if (data['activeTab'] !== false) await chrome.tabs.update(target.id, { active: true })
+    ctx.setTab?.(target.id)
+    ctx.emit('result', `已切换到标签页 #${target.id} ${target.title.slice(0, 40)}`)
   } catch (error) {
-    ctx.emit('error', message(error))
+    throw error
   }
   return null
 }
@@ -729,17 +1084,17 @@ const closeTabExec: BlockExecutor = async (_data, ctx) => {
     await closeActiveTab(ctx.scope)
     ctx.emit('result', '已关闭当前标签页')
   } catch (error) {
-    ctx.emit('error', message(error))
+    throw error
   }
   return null
 }
 
 const reloadTabExec: BlockExecutor = async (_data, ctx) => {
   assertActive(ctx)
-  const tab = await activeTab(ctx.scope)
+  // Reload the tab the RUN is driving, not whichever tab happens to be active.
+  const tab = await resolveTargetTab(ctx.tabId, ctx.scope)
   if (!tab || typeof tab.id !== 'number') {
-    ctx.emit('error', '没有活动标签页')
-    return null
+    throw new Error('没有活动标签页')
   }
   await chrome.tabs.reload(tab.id)
   ctx.emit('result', '已刷新当前标签页')
@@ -805,40 +1160,43 @@ const getSecret: BlockExecutor = async (data, ctx) => {
   const fieldName = sepIdx >= 0 ? credential.slice(sepIdx + 2) : ''
 
   if (!secretId) {
-    ctx.emit('error', 'get-secret: 未指定凭证 ID')
-    return null
+    throw new Error('get-secret: 未指定凭证 ID')
   }
   if (!variableName) {
-    ctx.emit('error', 'get-secret: 未指定输出变量名')
-    return null
+    throw new Error('get-secret: 未指定输出变量名')
   }
 
   let value = ''
+  // Every failure below throws rather than logging: the block's output is the
+  // credential, and writing `''` into `variableName` made a downstream
+  // `{{secret}}` resolve to an empty string — the step "succeeded" with a blank
+  // password.
   try {
     const entries = await listPasswords()
     const entry = entries.find((e) => e.id === secretId)
-    if (entry) {
-      const field =
-        (fieldName && findField(entry, fieldName)) ??
-        findField(entry, 'password') ??
-        entryFields(entry)[0]
-      if (field) {
-        value = field.value
-      } else {
-        ctx.emit('error', `get-secret: 凭证中未找到字段 "${fieldName}"`)
-      }
-    } else {
-      ctx.emit('error', `get-secret: 未找到 ID 为 "${secretId}" 的凭证`)
+    if (!entry) {
+      throw new Error(`get-secret: 未找到 ID 为 "${secretId}" 的凭证`)
     }
+    const field =
+      (fieldName && findField(entry, fieldName)) ??
+      findField(entry, 'password') ??
+      entryFields(entry)[0]
+    if (!field) {
+      throw new Error(`get-secret: 凭证中未找到字段 "${fieldName}"`)
+    }
+    value = field.value
   } catch (err) {
-    ctx.emit('error', `get-secret: 读取凭证失败 — ${err instanceof Error ? err.message : String(err)}`)
+    if (err instanceof Error && err.message.startsWith('get-secret:')) throw err
+    throw new Error(
+      `get-secret: 读取凭证失败 — ${err instanceof Error ? err.message : String(err)}`,
+    )
   }
 
   ctx.variables[variableName] = value
-  // Log success without revealing the value.
-  if (value) {
-    ctx.emit('result', `已获取凭证字段 "${fieldName || 'password'}" → 变量 ${variableName} (值已隐藏)`)
-  }
+  ctx.emit(
+    'result',
+    `已获取凭证字段 "${fieldName || 'password'}" → 变量 ${variableName} (值已隐藏)`,
+  )
   return null
 }
 
@@ -866,30 +1224,211 @@ const insertData: BlockExecutor = async (data, ctx) => {
   return null
 }
 
+/** Decode base64 into bytes, for the binary (screenshot) write paths. */
+function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(base64)
+  // Backed by a real ArrayBuffer (not ArrayBufferLike) so the result satisfies
+  // `BufferSource` for `createWritable().write`.
+  const bytes = new Uint8Array(new ArrayBuffer(binary.length))
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+  return bytes
+}
+
+/** Strip a `data:<mime>;base64,` prefix, leaving the payload alone. */
+function base64Body(dataUrl: string): string {
+  const comma = dataUrl.indexOf(',')
+  return comma === -1 ? dataUrl : dataUrl.slice(comma + 1)
+}
+
+/**
+ * Write a file, preferring the download directory configured in settings and
+ * falling back to the side panel's save picker.
+ *
+ * Shared by `save-local`, `export-data` and `take-screenshot`. It used to be
+ * inlined in `save-local` only, and `export-data` — whose catalog description
+ * reads "Write collected data out to a file" — wrote nothing to disk at all,
+ * just a variable. Three callers, one implementation, so they cannot drift
+ * again on the questions that matter: does a configured directory win, what
+ * happens when the write fails, and what the user is told either way.
+ *
+ * A configured download directory wins unconditionally, deliberately: the user
+ * set it up precisely so that saving stops asking. That does mean `save-local`'s
+ * `saveMode: 'manual'` cannot override it — preserved as-is rather than "fixed",
+ * because the opposite change would start prompting everyone who configured a
+ * directory. (`resolveTransferMode` in `lib/download-dir` encodes the stricter
+ * reading and is what the chat agent's own `save_local` tool consults.)
+ *
+ * @returns `'saved'` once a file exists, `'canceled'` when the user dismissed
+ *   the picker, `'failed'` when nothing could be written.
+ */
+async function writeToConfiguredDir(
+  filename: string,
+  payload: SavePickerPayload,
+  ctx: WorkflowExecCtx,
+): Promise<'saved' | 'canceled' | 'failed'> {
+  const dir = await getDownloadDir()
+  if (dir) {
+    // Trust the actual write attempt rather than `dir.queryPermission` — in a
+    // service worker that call can throw or report "denied" even when the
+    // persisted handle is still usable (e.g. after a worker/extension restart),
+    // which would push every run into the manual confirmation branch.
+    const data = payload.base64 === undefined ? (payload.text ?? '') : base64ToBytes(payload.base64)
+    if (await writeFileToDownloadDir(dir, filename, data)) {
+      ctx.emit('result', `已自动保存: ${filename}`)
+      return 'saved'
+    }
+    // Handle lost its permission, directory removed, …: go to the picker rather
+    // than re-attempting the same write.
+    ctx.emit('info', '写入配置目录失败，改为询问保存位置')
+  }
+
+  const res = await askSaveViaSidePanel(filename, payload)
+  if (res.canceled) {
+    ctx.emit('result', '用户取消了保存')
+    return 'canceled'
+  }
+  if (res.ok) {
+    ctx.emit('result', `已通过另存为保存: ${filename}`)
+    return 'saved'
+  }
+  ctx.emit('error', '无法弹出保存对话框：请打开侧面板后重试')
+  return 'failed'
+}
+
+/**
+ * Write a file a block produced, failing the step when it could not be written.
+ *
+ * Every caller used to ignore a `'failed'` outcome, so a node whose entire
+ * purpose is the file still reported success with nothing on disk — the same
+ * shape as the empty-read bug. `'canceled'` is the user's own choice and stays a
+ * non-error, but the caller must not then claim the file exists.
+ */
+async function writeProducedFile(
+  what: string,
+  filename: string,
+  payload: SavePickerPayload,
+  ctx: WorkflowExecCtx,
+): Promise<'saved' | 'canceled'> {
+  const outcome = await writeToConfiguredDir(filename, payload, ctx)
+  if (outcome === 'failed') {
+    throw new Error(`${what}: 写入 ${filename} 失败——无法打开保存对话框，请打开侧面板后重试。`)
+  }
+  return outcome
+}
+
+/**
+ * Render a collected table as the text the exported file will hold.
+ *
+ * `csv` quotes only the cells that need it and keeps the header; `plain-text`
+ * is the same rows without the header and without quoting. The two differ in
+ * exactly the ways someone choosing "CSV" over "Plain text" expects, which is
+ * the point: the form offers both, so both have to mean something.
+ */
+function renderTable(
+  table: Record<string, unknown>[],
+  format: string,
+  delimiter: string,
+  bom: boolean,
+): string {
+  if (format === 'json') return JSON.stringify(table)
+  if (table.length === 0) return ''
+  const header = Object.keys(table[0] as Record<string, unknown>)
+  if (format === 'plain-text') {
+    return table
+      .map((row) => header.map((key) => String(row[key] ?? '')).join(delimiter))
+      .join('\n')
+  }
+  const cell = (value: unknown): string => {
+    const raw = String(value ?? '')
+    const needsQuotes = raw.includes(delimiter) || /["\n\r]/.test(raw)
+    return needsQuotes ? `"${raw.replace(/"/g, '""')}"` : raw
+  }
+  const body = [header, ...table.map((row) => header.map((key) => cell(row[key])))]
+    .map((row) => row.join(delimiter))
+    .join('\n')
+  // Excel reads a UTF-8 CSV as the local codepage unless a BOM says otherwise,
+  // which turns every Chinese cell into mojibake. Off unless asked for, so the
+  // bytes of an existing workflow's export do not change under it.
+  return bom ? `\uFEFF${body}` : body
+}
+
 const exportData: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const table = Array.isArray(ctx.variables['dataTable'])
-    ? (ctx.variables['dataTable'] as Record<string, unknown>[])
-    : Array.isArray(ctx.refData)
-      ? (ctx.refData as Record<string, unknown>[])
-      : []
-  const format = String(data['format'] ?? 'csv')
-  let text = ''
-  if (format === 'json') {
-    text = JSON.stringify(table)
-  } else if (table.length === 0) {
-    text = ''
-  } else {
-    const header = Object.keys(table[0] as Record<string, unknown>)
-    const cell = (value: unknown): string => {
-      const raw = String(value ?? '')
-      return /[",\n]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw
-    }
-    const rows = [header, ...table.map((row) => header.map((key) => cell(row[key])))]
-    text = rows.map((row) => row.join(',')).join('\n')
+
+  // `type` / `name` are the keys the catalog declares, `EditExportData` edits and
+  // `operator-guide` tells the model to send (`export-data(name:'x.csv',
+  // type:'csv')`). `format` / `filename` are the names this executor used to
+  // read, kept as fallbacks so a workflow saved before the four agreed still
+  // names its file. Reading only the latter is how every field a user can set
+  // became inert: the file was always `export.csv` and "Export as JSON" always
+  // wrote CSV.
+  const format = String(data['type'] ?? data['format'] ?? 'csv')
+  const delimiter = String(data['csvDelimiter'] ?? '') || ','
+  const mode = String(data['dataToExport'] ?? 'data-columns')
+
+  if (mode === 'google-sheets') {
+    // Cloud block: no OAuth credentials are wired up here, so say that rather
+    // than write a local file under a Google label.
+    throw new Error('export-data: Google Sheets 导出需要 OAuth 凭据，尚未配置')
   }
+
+  let table: Record<string, unknown>[] = []
+  let text = ''
+
+  if (mode === 'variable') {
+    const variable = String(data['variableName'] ?? '').trim()
+    if (!variable) {
+      throw new Error('export-data: 导出目标是「变量」但没有填 variableName，无法导出')
+    }
+    const value = ctx.variables[variable]
+    if (value === undefined) {
+      // Naming the variable is the whole diagnosis: either the producing step
+      // never ran or it writes under a different name.
+      throw new Error(`export-data: 变量 ${variable} 还没有值，无法导出`)
+    }
+    text = format === 'json' ? JSON.stringify(value) : String(value)
+  } else {
+    table = Array.isArray(ctx.variables['dataTable'])
+      ? (ctx.variables['dataTable'] as Record<string, unknown>[])
+      : Array.isArray(ctx.refData)
+        ? (ctx.refData as Record<string, unknown>[])
+        : []
+    // An empty table is the single most common "工作流跑完了但文件是空的"
+    // report, and it is never what the user wanted. It used to be written out
+    // silently (with an `info` line at most), which is indistinguishable from a
+    // successful export — so refuse, and name every way it happens.
+    if (table.length === 0) {
+      throw new Error(
+        'export-data: 数据表是空的，没有内容可导出。' +
+          '数据表只由**读取节点**填充，请检查：' +
+          '① 读取步骤是否设了 saveData:true 并填了 dataColumn（列名）；' +
+          '② 读取步骤的选择器是否真的匹配到了元素（匹配不到会直接报错，不会再静默导出空文件）；' +
+          '③ 读取步骤是否排在导出之前。' +
+          '整张表导出请用 get-text(multiple:true) 采集，save-local 只适合单个值。',
+      )
+    }
+    text = renderTable(table, format, delimiter, data['addBOMHeader'] === true)
+  }
+
+  // Kept for downstream `{{lastExport}}` references: a workflow may export once
+  // and then send the same text to a webhook.
   ctx.variables['lastExport'] = text
-  ctx.emit('result', text.slice(0, 80))
+
+  // The block's whole point is the FILE.
+  const rawName = interpolate(
+    String(data['name'] ?? data['filename'] ?? ''),
+    ctx.variables,
+    ctx.refData,
+  )
+  const fallbackExtension = format === 'json' ? 'json' : format === 'plain-text' ? 'txt' : 'csv'
+  const filename = rawName.trim() || `export.${fallbackExtension}`
+  const outcome = await writeProducedFile('export-data', filename, { text }, ctx)
+  if (outcome === 'saved') {
+    // Downstream steps can reference where it landed; `lastExport` keeps the
+    // contents, so the two names cannot be confused for one another.
+    ctx.variables['lastExportPath'] = filename
+    ctx.emit('info', `已导出 ${table.length || 1} 行到 ${filename}`)
+  }
   return null
 }
 
@@ -923,15 +1462,65 @@ const breakpoint: BlockExecutor = async (_data, ctx) => {
   return null
 }
 
+/** Parse a response body according to the block's `responseType`. */
+function parseResponseBody(text: string, responseType: string): unknown {
+  if (responseType !== 'json') return text
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
+  }
+}
+
+/** Narrow a parsed body to the block's `dataPath` (`data.items.0.id`). */
+function pickDataPath(value: unknown, path: string): unknown {
+  const segments = path.split('.').filter((segment) => segment.trim() !== '')
+  if (segments.length === 0) return value
+  return getByPath(value, segments.join('.'))
+}
+
+/** Base64 of a response body, for `responseType: 'base64'`. */
+function toBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer)
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary)
+}
+
+/**
+ * Default request `content-type` per the form's "Content type" select. The
+ * header used to be hardcoded to JSON, so the select did nothing.
+ */
+const WEBHOOK_CONTENT_TYPES: Readonly<Record<string, string>> = {
+  json: 'application/json',
+  text: 'text/plain',
+  'form-data': 'multipart/form-data',
+  form: 'application/x-www-form-urlencoded',
+}
+
 const webhook: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const url = interpolate(String(data['url'] ?? ''), ctx.variables, ctx.refData)
   const method = String(data['method'] ?? 'POST').toUpperCase()
   const timeout = Math.max(0, Number(data['timeout'] ?? 30000))
-  const responseVariable = String(data['responseVariable'] ?? 'lastHttpResponse')
+  // `variableName` is the catalog + edit-form key (the "Assign response to a
+  // variable" field); `responseVariable` is the legacy name. Reading only the
+  // latter meant a user- or model-chosen name never existed, so every
+  // downstream `{{thatName}}` reference dangled and resolved to nothing.
+  const responseVariable = String(
+    data['variableName'] || data['responseVariable'] || 'lastHttpResponse',
+  )
+  // `responseType` decides how the body is decoded and `dataPath` narrows it.
+  // Both are edit-form fields that nothing used to read.
+  const responseType = String(data['responseType'] ?? 'json')
+  const dataPath = String(data['dataPath'] ?? '')
 
   // Headers: interpolated JSON string, e.g. `{"Authorization":"Bearer ..."}`.
-  let headers: Record<string, string> = { 'content-type': 'application/json' }
+  // The default content type comes from the form's own select.
+  let headers: Record<string, string> = {
+    'content-type':
+      WEBHOOK_CONTENT_TYPES[String(data['contentType'] ?? 'json')] ?? 'application/json',
+  }
   const headersRaw = interpolate(String(data['headers'] ?? ''), ctx.variables, ctx.refData)
   if (headersRaw.trim()) {
     try {
@@ -939,7 +1528,9 @@ const webhook: BlockExecutor = async (data, ctx) => {
       if (parsed && typeof parsed === 'object')
         headers = { ...headers, ...parsed } as Record<string, string>
     } catch {
-      ctx.emit('error', 'webhook: headers 不是合法 JSON，使用默认头')
+      throw new Error(
+        `webhook: headers 不是合法 JSON，请求头无法确定，已中止本次请求。收到的值：${headersRaw.slice(0, 120)}`,
+      )
     }
   }
 
@@ -968,12 +1559,17 @@ const webhook: BlockExecutor = async (data, ctx) => {
         body: bodyText,
         signal: controller.signal,
       })
-      const responseText = await response.text()
+      const responseText =
+        responseType === 'base64' ? toBase64(await response.arrayBuffer()) : await response.text()
       const record = {
         status: response.status,
         ok: response.ok,
         headers: Object.fromEntries(response.headers.entries()),
         body: responseText,
+        // The decoded body, narrowed by `dataPath` when one is set. Additive on
+        // purpose: `{{var.body}}` keeps working exactly as before, and `{{var}}`
+        // was already `[object Object]`, so nothing that worked stops working.
+        data: pickDataPath(parseResponseBody(responseText, responseType), dataPath),
       }
       ctx.variables[responseVariable] = record
       ctx.emit('result', `${method} ${response.status} ${responseText.slice(0, 80)}`)
@@ -982,8 +1578,16 @@ const webhook: BlockExecutor = async (data, ctx) => {
       ctx.signal.removeEventListener('abort', onAbort)
     }
   } catch (error) {
-    if ((error as Error)?.name !== 'AbortError') ctx.emit('error', message(error))
-    else ctx.emit('error', `${method} 请求超时或已取消`)
+    // A request that never completed is a failed step, not a note in the log.
+    // `AbortError` needs care here: this block aborts its own fetch on timeout,
+    // and the engine reads `AbortError` as "the user cancelled the run" — so a
+    // timeout is translated into a plain failure, while a genuine cancellation
+    // keeps propagating and the run still reports 已取消.
+    if ((error as Error)?.name === 'AbortError') {
+      if (ctx.signal.aborted) throw error
+      throw new Error(`${method} 请求超时（${timeout}ms）：${url}`)
+    }
+    throw error
   }
   return null
 }
@@ -994,11 +1598,9 @@ const notification: BlockExecutor = async (data, ctx) => {
   const body = interpolate(String(data['message'] ?? ''), ctx.variables, ctx.refData)
   const api = typeof chrome !== 'undefined' ? chrome.notifications : undefined
   if (api) {
-    try {
-      await api.create({ type: 'basic', iconUrl: 'icons/icon-48.png', title, message: body })
-    } catch (error) {
-      ctx.emit('error', message(error))
-    }
+    // No catch on purpose: a notification that could not be shown is a failed
+    // step, and `emit('error')` alone would still let the run report success.
+    await api.create({ type: 'basic', iconUrl: 'icons/icon-48.png', title, message: body })
   } else {
     ctx.emit('info', '通知不可用')
   }
@@ -1010,8 +1612,7 @@ const javascriptCode: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const code = String(data['code'] ?? '')
   if (!code.trim()) {
-    ctx.emit('error', 'javascript-code: 代码为空')
-    return null
+    throw new Error('javascript-code: 代码为空')
   }
   const timeout = Math.max(0, Number(data['timeout'] ?? 20000) || 20000)
 
@@ -1067,12 +1668,9 @@ const javascriptCode: BlockExecutor = async (data, ctx) => {
   // but MV3 workers forbid eval, so this path only succeeds off-page.
   const local = await evalLocalWorkflowJs(code, ctx.variables, timeout)
   if (!local.ok) {
-    if (triedPage) {
-      ctx.emit('error', `javascript-code: ${run && !run.ok ? run.error : local.error}`)
-    } else {
-      ctx.emit('error', `javascript-code: ${local.error}`)
-    }
-    return null
+    // Thrown: a code node that did not run leaves every variable it was supposed
+    // to produce unset, and the rest of the workflow then runs on stale data.
+    throw new Error(`javascript-code: ${triedPage && run && !run.ok ? run.error : local.error}`)
   }
   for (const [k, v] of Object.entries(local.variables ?? {})) ctx.variables[k] = v
   ctx.variables['lastResult'] = local.result
@@ -1275,24 +1873,22 @@ const cookieBlock: BlockExecutor = async (data, ctx) => {
       ctx.emit('result', cookie ? `已读取 ${name}` : `未找到 ${name}`)
     } else if (op === 'set') {
       if (!url) {
-        ctx.emit('error', 'cookie: 写入需要 URL')
-        return null
+        throw new Error('cookie: 写入需要 URL')
       }
       const expiry = Number(data['expirationDate'] ?? 0)
       await cookieSet(name, value, url, expiry > 0 ? { expirationDate: expiry } : {})
       ctx.emit('result', `已写入 ${name}`)
     } else if (op === 'remove') {
       if (!url) {
-        ctx.emit('error', 'cookie: 删除需要 URL')
-        return null
+        throw new Error('cookie: 删除需要 URL')
       }
       await cookieRemove(name, url)
       ctx.emit('result', `已删除 ${name}`)
     } else {
-      ctx.emit('error', `cookie: 不支持的操作 ${op}`)
+      throw new Error(`cookie: 不支持的操作 ${op}`)
     }
   } catch (error) {
-    ctx.emit('error', message(error))
+    throw error
   }
   return null
 }
@@ -1311,7 +1907,7 @@ const clipboardBlock: BlockExecutor = async (data, ctx) => {
       ctx.emit('result', '已写入剪贴板')
     }
   } catch (error) {
-    ctx.emit('error', `剪贴板 ${op}: ${message(error)}`)
+    throw new Error(`剪贴板 ${op} 失败: ${message(error)}`)
   }
   return null
 }
@@ -1355,13 +1951,13 @@ const linkBlock: BlockExecutor = async (data, ctx) => {
         ctx.scope,
       )
       if (waitLoaded) {
-        const tab = await activeTab(ctx.scope).catch(() => null)
+        const tab = await resolveTargetTab(ctx.tabId, ctx.scope).catch(() => null)
         if (tab && typeof tab.id === 'number') await waitForTabLoaded(tab.id, ctx.signal)
       }
       ctx.emit('result', '已点击链接')
     }
   } catch (error) {
-    ctx.emit('error', message(error))
+    throw error
   }
   return null
 }
@@ -1378,16 +1974,20 @@ const attributeValueExec: BlockExecutor = async (data, ctx) => {
   }
   if (op === 'set')
     opData.value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
-  try {
-    const result = await execOnActiveTab(opData, ctx.signal, ctx.tabId, ctx.scope)
-    if (op === 'get') {
-      ctx.variables[variable] = result.data ?? result.note ?? ''
-      ctx.emit('result', String(result.data ?? result.note ?? ''))
-    } else {
-      ctx.emit('result', `已设置属性 ${attribute}`)
-    }
-  } catch (error) {
-    ctx.emit('error', message(error))
+  const result = await execOnActiveTab(opData, ctx.signal, ctx.tabId, ctx.scope)
+  if (op === 'get') {
+    const value = result.data ?? result.note ?? ''
+    // Same rule as `get-text`: an attribute read that yields nothing (element
+    // not matched, attribute absent, or the driver reported a note instead of a
+    // value) must fail rather than write an empty string that a downstream
+    // export turns into a blank file.
+    requireReadMatch(`attribute-value(attribute: "${attribute || '(未指定)'}")`, [
+      typeof value === 'string' ? value : JSON.stringify(value ?? ''),
+    ])
+    ctx.variables[variable] = value
+    ctx.emit('result', String(value))
+  } else {
+    ctx.emit('result', `已设置属性 ${attribute}`)
   }
   return null
 }
@@ -1398,7 +1998,7 @@ const goBackExec: BlockExecutor = async (_data, ctx) => {
     await goBack(ctx.scope)
     ctx.emit('result', '已后退')
   } catch (error) {
-    ctx.emit('error', message(error))
+    throw error
   }
   return null
 }
@@ -1409,7 +2009,7 @@ const forwardPage: BlockExecutor = async (_data, ctx) => {
     await goForward(ctx.scope)
     ctx.emit('result', '已前进')
   } catch (error) {
-    ctx.emit('error', message(error))
+    throw error
   }
   return null
 }
@@ -1423,7 +2023,7 @@ const tabUrlExec: BlockExecutor = async (data, ctx) => {
     ctx.variables[variable] = current
     ctx.emit('result', Array.isArray(current) ? `共 ${current.length} 个标签页` : current.url)
   } catch (error) {
-    ctx.emit('error', message(error))
+    throw error
   }
   return null
 }
@@ -1436,7 +2036,7 @@ const activeTabExec: BlockExecutor = async (data, ctx) => {
     ctx.variables[variable] = info
     ctx.emit('result', `${info.title} · ${info.url}`)
   } catch (error) {
-    ctx.emit('error', message(error))
+    throw error
   }
   return null
 }
@@ -1448,7 +2048,7 @@ const newWindowExec: BlockExecutor = async (data, ctx) => {
     await driverNewWindow(url)
     ctx.emit('result', '已打开新窗口')
   } catch (error) {
-    ctx.emit('error', message(error))
+    throw error
   }
   return null
 }
@@ -1471,7 +2071,7 @@ const uploadFileExec: BlockExecutor = async (data, ctx) => {
     await execOnActiveTab(opData, ctx.signal, ctx.tabId, ctx.scope)
     ctx.emit('result', '已设置文件输入')
   } catch (error) {
-    ctx.emit('error', message(error))
+    throw error
   }
   return null
 }
@@ -1486,24 +2086,50 @@ const handleDialogExec: BlockExecutor = async (_data, ctx) => {
 const increaseVariable: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const name = String(data['variableName'] ?? '')
-  const step = Number(interpolate(String(data['value'] ?? '1'), ctx.variables, ctx.refData))
-  const current = Number((ctx.variables[name] ?? data['incType'] === 'multiply') ? 1 : 0)
+  if (!name) {
+    throw new Error('increase-variable: 缺少 variableName，无法执行')
+  }
+  // `increaseBy` is the catalog + edit-form key; `value` is the legacy name.
+  const step = Number(
+    interpolate(String(data['increaseBy'] ?? data['value'] ?? '1'), ctx.variables, ctx.refData),
+  )
+  // The current value must actually be read. This used to be
+  // `Number((vars[name] ?? incType === 'multiply') ? 1 : 0)`, which parses as
+  // `vars[name] ?? (incType === 'multiply')` — `??` binds looser than `===` —
+  // so any existing value collapsed to 1 and `counter = 5` + 1 became 2.
+  const current = Number(ctx.variables[name] ?? 0)
   const next = data['incType'] === 'multiply' ? current * step : current + step
   ctx.variables[name] = Number.isNaN(next) ? 0 : next
-  ctx.emit('result', `${name} = ${next}`)
+  ctx.emit('result', `${name} = ${ctx.variables[name]}`)
   return null
 }
 
 const sliceVariable: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const name = String(data['variableName'] ?? '')
-  const start = Number(data['start'] ?? 0)
-  const end = data['end'] === '' || data['end'] === undefined ? undefined : Number(data['end'])
+  if (!name) {
+    throw new Error('slice-variable: 缺少 variableName，无法执行')
+  }
+  // `startIndex` / `endIndex` (+ their `…IdxEnabled` toggles) are the catalog
+  // and edit-form keys; `start` / `end` are the legacy names. A legacy graph
+  // carries `end` with no toggle at all, and there the presence of `end` is
+  // itself the "use it" signal — otherwise it would silently slice to the end.
+  const hasLegacyEnd = data['end'] !== undefined && data['end'] !== ''
+  const startEnabled = data['startIdxEnabled'] !== false
+  const endEnabled =
+    data['endIdxEnabled'] === true || (data['endIdxEnabled'] === undefined && hasLegacyEnd)
+  const start = startEnabled ? Number(data['startIndex'] ?? data['start'] ?? 0) : 0
+  const rawEnd = data['endIndex'] ?? data['end']
+  const end = endEnabled && rawEnd !== '' && rawEnd !== undefined ? Number(rawEnd) : undefined
   const value = ctx.variables[name]
   let sliced: unknown
   if (typeof value === 'string') sliced = value.slice(start, end)
   else if (Array.isArray(value)) sliced = value.slice(start, end)
-  else sliced = value
+  else {
+    // Slicing a missing or non-sliceable value silently produced `undefined`,
+    // which downstream blocks then interpolate as an empty string.
+    throw new Error(`slice-variable: 变量 ${name} 不存在或不是字符串/数组，无法执行`)
+  }
   ctx.variables[String(data['output'] ?? name)] = sliced
   ctx.emit('result', String(sliced ?? ''))
   return null
@@ -1512,24 +2138,45 @@ const sliceVariable: BlockExecutor = async (data, ctx) => {
 const regexVariable: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const name = String(data['variableName'] ?? '')
-  const pattern = String(data['pattern'] ?? '')
-  const flags = String(data['flags'] ?? 'g')
-  const replace = interpolate(String(data['replace'] ?? ''), ctx.variables, ctx.refData)
+  if (!name) {
+    throw new Error('regex-variable: 缺少 variableName，无法执行')
+  }
+  // `expression` is the catalog + edit-form key (the field is literally called
+  // "Expression"); `pattern` is the legacy name. `flag` is an ARRAY in the
+  // catalog (the form renders checkboxes), so it has to be joined — reading it
+  // as a string produced `[object Array]` and `new RegExp` threw.
+  const pattern = String(data['expression'] ?? data['pattern'] ?? '')
+  const rawFlag = data['flag'] ?? data['flags'] ?? 'g'
+  const flags = Array.isArray(rawFlag) ? rawFlag.join('') : String(rawFlag)
+  const replace = interpolate(
+    String(data['replaceVal'] ?? data['replace'] ?? ''),
+    ctx.variables,
+    ctx.refData,
+  )
+  const operation = String(data['method'] ?? data['operation'] ?? 'match')
   const value = String(ctx.variables[name] ?? '')
+  if (!pattern) {
+    throw new Error('regex-variable: 正则表达式为空，无法执行')
+  }
   try {
     const regex = new RegExp(pattern, flags)
     let result: string
-    if (data['operation'] === 'replace') result = value.replace(regex, replace)
+    if (operation === 'replace') result = value.replace(regex, replace)
     else {
-      const flagsNoG = flags.replace('g', '')
-      const matches = value.match(new RegExp(pattern, flagsNoG)) ?? []
-      const all = flags.indexOf('g') !== -1 ? matches : [matches[0]].filter(Boolean)
-      result = JSON.stringify(all.map((m) => String(m)))
+      // `String.match` returns every hit only when the regex carries `g`;
+      // without it the result is a single match (length 1, plus `index`/`input`
+      // as non-enumerable properties). The old code stripped `g` before
+      // matching and then expected the global result, so "match all" could
+      // never return more than one hit.
+      const found = value.match(new RegExp(pattern, flags)) ?? []
+      result = JSON.stringify(found.map((m) => String(m)))
     }
     ctx.variables[String(data['output'] ?? name)] = result
     ctx.emit('result', result.slice(0, 80))
   } catch (error) {
-    ctx.emit('error', `regex: ${message(error)}`)
+    // A bad pattern leaves the variable unwritten, so downstream steps read a
+    // stale value — that is a failed step, not a log line.
+    throw new Error(`regex-variable: 正则表达式无效（${pattern}）：${message(error)}`)
   }
   return null
 }
@@ -1578,8 +2225,7 @@ const dataMapping: BlockExecutor = async (data, ctx) => {
   const wrapped = `return rows.map((item, index) => (${expression}));`
   const evaluated = await evalInPage(wrapped, { rows, vars: ctx.variables }, ctx)
   if (!evaluated.ok) {
-    ctx.emit('error', 'data-mapping: 映射表达式执行失败')
-    return null
+    throw new Error('data-mapping: 映射表达式执行失败')
   }
   const mapped = Array.isArray(evaluated.value) ? evaluated.value : []
   ctx.variables[String(data['output'] ?? 'mappedData')] = mapped
@@ -1613,16 +2259,55 @@ const workflowState: BlockExecutor = async (data, ctx) => {
 
 // --- Phase 5: integration / service blocks ----------------------------------
 
+/**
+ * Resolve a block's DECLARED inputs into the run's variable scope.
+ *
+ * This block used to read `prompt` / `defaultValue` / `variableName`, which no
+ * version of the catalog or the editor ever wrote — its real shape is a
+ * `parameters` list (`WorkflowParameter[]`), the same one the trigger carries.
+ * Reading the wrong keys made the block a no-op that emitted an empty string,
+ * so a workflow relying on it typed a blank field.
+ *
+ * There is no interactive prompt in this build: values come from the scope,
+ * which the run path seeds from the workflow's declared inputs (trigger
+ * parameters) and which earlier steps fill. A declared input that is still
+ * missing therefore FAILS when marked required, rather than silently passing
+ * `''` to the rest of the graph.
+ */
 const parameterPrompt: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const prompt = interpolate(String(data['prompt'] ?? '请输入值'), ctx.variables, ctx.refData)
-  const fallback = interpolate(String(data['defaultValue'] ?? ''), ctx.variables, ctx.refData)
-  // Engine is autonomous; surface the prompt and fall back to the default or
-  // an existing variable of the same name so workflows that pre-seed input work.
-  const variable = String(data['variableName'] ?? 'userInput')
-  if (ctx.variables[variable] === undefined && fallback !== '') ctx.variables[variable] = fallback
-  ctx.emit('info', `需要输入：${prompt}`)
-  ctx.emit('result', String(ctx.variables[variable] ?? ''))
+  const parameters = workflowParametersOf(data['parameters'])
+  if (parameters.length === 0) {
+    ctx.emit('info', '参数输入：未声明任何参数')
+    return null
+  }
+
+  // A default only fills a gap: a value the scope already holds came from a
+  // trigger payload or an earlier step and is the more specific answer.
+  for (const param of parameters) {
+    if (ctx.variables[param.name] !== undefined) continue
+    const fallback = param.defaultValue ?? ''
+    if (fallback !== '') {
+      ctx.variables[param.name] = coerceInputValue(
+        param,
+        interpolate(fallback, ctx.variables, ctx.refData),
+      )
+    }
+  }
+
+  const missing = missingRequiredInputs(parameters, ctx.variables)
+  if (missing.length > 0) {
+    // Throwing (not returning) is how a block fails: the return value picks the
+    // next output port, and silently taking the default one would drive the
+    // page with a blank value the user never supplied.
+    ctx.emit('error', `缺少必填输入：${missing.join('、')}`)
+    throw new Error(`Missing required workflow input(s): ${missing.join(', ')}`)
+  }
+
+  const resolved = parameters.map(
+    (param) => `${param.name}=${String(ctx.variables[param.name] ?? '')}`,
+  )
+  ctx.emit('result', resolved.join(' · '))
   return null
 }
 
@@ -1662,7 +2347,7 @@ const handleDownload: BlockExecutor = async (data, ctx) => {
       : null
     ctx.emit('result', match ? `最近下载: ${match.filename}` : '未找到匹配下载')
   } catch (error) {
-    ctx.emit('error', message(error))
+    throw error
   }
   return null
 }
@@ -1675,49 +2360,44 @@ const saveAssetsExec: BlockExecutor = async (_data, ctx) => {
 
 const saveLocal: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
+  const raw = String(data['value'] ?? '')
+  const value = interpolate(raw, ctx.variables, ctx.refData)
   // 空串也要回退到默认名（`data['filename'] ?? ...` 挡不住 `''`，那会让自动保存
   // 因非法文件名静默失败）。
   const filename = interpolate(String(data['filename'] || 'file.txt'), ctx.variables, ctx.refData)
-  const rawSaveMode = String(data['saveMode'] ?? 'auto')
-  const saveMode: SaveMode =
-    rawSaveMode === 'manual' ? 'manual' : rawSaveMode === 'force' ? 'force' : 'auto'
   const variable = String(data['variableName'] ?? 'lastSavedPath')
 
-  const settings = await getSettings()
-  const dir = await getDownloadDir()
-
-  // 存过期的句柄可能已丢失权限（worker 无法重新申请），用不落盘的权限查询判断其是否仍可用。
-  let hasDir = dir !== null
-  if (hasDir && dir) {
-    try {
-      hasDir = (await dir.queryPermission({ mode: 'readwrite' })) === 'granted'
-    } catch {
-      hasDir = false
-    }
+  // 一个 0 字节文件**看起来和成功一模一样**，却会覆盖上一次导出的好数据 ——
+  // 这是最坏的一种静默失败：用户只知道"文件是空的"，无从知道为什么。
+  // 两种成因都要点名，因为修法完全不同：
+  //  1. `value` 压根没传 —— 生成时最常见的错误是把 `variableName` 当成
+  //     "要保存的那个变量"（它是**输出**：保存后回填路径用的）。此时整个节点
+  //     只剩文件名，写出来必然是空的。
+  //  2. `value` 是 `{{引用}}`，但它引用的东西没产出 —— 引擎会把参数名记进
+  //     `EMPTY_INTERP_KEY`，这是"引用为空"与"故意写空"的唯一区分方式。
+  const flaggedEmpty = (data[EMPTY_INTERP_KEY] as string[] | undefined)?.includes('value') === true
+  if (value.trim() === '') {
+    const missing = data['value'] === undefined
+    // Thrown, not logged: `emit('error')` still let the run report success and
+    // still let the operator bridge record the node, which is how a generated
+    // workflow ended up with a save step that writes nothing.
+    throw new Error(
+      missing
+        ? `save-local: 没有内容可写 —— 缺少 value 参数，未写入 ${filename}。` +
+            '注意 variableName 是「保存后回填路径的变量名」，不是内容来源；' +
+            '内容要写成 value: "{{某个上游节点产出的变量}}"。'
+        : `save-local: value ${flaggedEmpty ? '引用的变量/AI 结果为空' : '是空的'}，未写入 ${filename}（避免生成 0 字节文件）。`,
+    )
   }
 
-  const transfer = resolveTransferMode(saveMode, settings.downloadAutoSave, hasDir)
-
-  if (transfer === 'auto' && dir) {
-    const ok = await writeFileToDownloadDir(dir, filename, value)
-    if (ok) {
-      ctx.variables[variable] = filename
-      ctx.emit('result', `已自动保存: ${filename}`)
-      return null
-    }
-    ctx.emit('info', '自动保存失败，改为询问保存位置')
-  }
-
-  const res = await askSaveViaSidePanel(filename)
-  if (res.canceled) {
-    ctx.emit('result', '用户取消了保存')
-  } else if (res.ok) {
-    // 与自动保存路径保持一致：另存为成功同样回填输出变量，避免下游读到陈旧值。
+  // The write path itself is shared with `export-data` — see
+  // `writeProducedFile` for the configured-directory-first policy and for why a
+  // failed write fails the step.
+  const outcome = await writeProducedFile('save-local', filename, { text: value }, ctx)
+  if (outcome === 'saved') {
+    // 与另存为路径保持一致：成功同样回填输出变量，避免下游读到陈旧值。
+    // 取消或失败则保持原值，让下游能看出这一步没有产出。
     ctx.variables[variable] = filename
-    ctx.emit('result', `已通过另存为保存: ${filename}`)
-  } else {
-    ctx.emit('error', '无法弹出保存对话框：请打开侧面板后重试')
   }
   return null
 }
@@ -1730,14 +2410,12 @@ const proxyExec: BlockExecutor = async (_data, ctx) => {
 
 const googleSheets: BlockExecutor = async (_data, ctx) => {
   assertActive(ctx)
-  ctx.emit('error', 'google-sheets: 需要 OAuth 凭据，尚未配置')
-  return null
+  throw new Error('google-sheets: 需要 OAuth 凭据，尚未配置')
 }
 
 const googleDrive: BlockExecutor = async (_data, ctx) => {
   assertActive(ctx)
-  ctx.emit('error', 'google-drive: 需要 OAuth 凭据，尚未配置')
-  return null
+  throw new Error('google-drive: 需要 OAuth 凭据，尚未配置')
 }
 
 /**
@@ -1751,7 +2429,7 @@ const waitConnections: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   let tabId = ctx.tabId
   if (typeof tabId !== 'number') {
-    const tab = await activeTab(ctx.scope).catch(() => null)
+    const tab = await resolveTargetTab(undefined, ctx.scope).catch(() => null)
     tabId = typeof tab?.id === 'number' ? tab.id : undefined
   }
   await new Promise<void>((resolve) => {
@@ -1798,7 +2476,7 @@ const getForm: BlockExecutor = async (data, ctx) => {
     ctx.variables[variable] = result.data ?? {}
     ctx.emit('result', JSON.stringify(result.data ?? {}).slice(0, 80))
   } catch (error) {
-    ctx.emit('error', message(error))
+    throw error
   }
   return null
 }
@@ -1888,6 +2566,13 @@ const formsBlock: BlockExecutor = async (data, ctx) => {
   const value = data['value']
   const target = targetFrom(data)
 
+  // "Get form value" mode. Checked BEFORE the write path below, because that
+  // path fills `value` — empty in this mode — which would CLEAR the very field
+  // the user asked to read. The editor has offered this toggle since the port,
+  // but nothing implemented it: the block silently wiped the control and no
+  // variable was ever set.
+  if (data['getValue'] === true) return readFormValue(data, target, ctx)
+
   if (type === 'checkbox' || type === 'radio') {
     const checked = typeof value === 'boolean' ? value : true
     ctx.emit('info', `[表单输入] ${describeBlockTarget(data)} ← ${checked ? '勾选' : '取消勾选'}`)
@@ -1895,12 +2580,22 @@ const formsBlock: BlockExecutor = async (data, ctx) => {
   }
   const raw = String(value ?? '')
   const filled = interpolate(raw, ctx.variables, ctx.refData)
-  if (raw.includes('{{') && filled.trim() === '') {
-    // The referenced variable/AI result is empty — echo what the node held so
-    // the log shows WHICH reference resolved to nothing.
-    ctx.emit('info', `[表单输入] 原值: ${logPreview(raw, 120) || '(空)'}`)
-    ctx.emit('error', '表单值引用的变量/AI 结果为空，已跳过本次填写')
-    return null
+  // Two ways to learn "the reference produced nothing":
+  //  - `raw` still holds the token (this executor was called directly, e.g. by
+  //    the generation-time operator bridge);
+  //  - the engine already interpolated the bag and flagged the param, so `raw`
+  //    is empty and only the flag tells it apart from a deliberate "".
+  const flaggedEmpty = (data[EMPTY_INTERP_KEY] as string[] | undefined)?.includes('value') === true
+  if (flaggedEmpty || (raw.includes('{{') && filled.trim() === '')) {
+    // Name the param that resolved to nothing. With an already-interpolated bag
+    // the original text is gone, so there is no value left to echo.
+    ctx.emit(
+      'info',
+      flaggedEmpty
+        ? '[表单输入] 原值: value 引用的变量/AI 结果为空'
+        : `[表单输入] 原值: ${logPreview(raw, 120)}`,
+    )
+    throw new Error('表单值引用的变量/AI 结果为空，无法填写')
   }
   // Input echo: what will be typed, and where — the two things a "did it fill
   // the right thing?" investigation needs.
@@ -1912,6 +2607,54 @@ const formsBlock: BlockExecutor = async (data, ctx) => {
     withWait({ action: 'fill', target, value: filled, clear: data['clearValue'] !== false }, data),
     ctx,
   )
+}
+
+/**
+ * "Get form value" mode of the `forms` block: read ONE control's live value
+ * into `variableName` instead of writing to it.
+ *
+ * A read needs somewhere to put the result, so a missing variable name is an
+ * error rather than a silent no-op — the model (and the user editing the node)
+ * gets told, instead of the workflow continuing with a variable that never
+ * exists. The value keeps its native type (checkbox → boolean, multi-select →
+ * array), which is what downstream operators such as `conditions` compare
+ * against.
+ */
+async function readFormValue(
+  data: Record<string, unknown>,
+  target: Target,
+  ctx: WorkflowExecCtx,
+): Promise<string | null> {
+  const variable = String(data['variableName'] ?? '').trim()
+  if (!variable) {
+    throw new Error('读取表单值需要填写变量名（variableName），无法读取')
+  }
+  try {
+    const result = await execOnActiveTab(
+      withWait({ action: 'get_value', target }, data),
+      ctx.signal,
+      ctx.tabId,
+      ctx.scope,
+    )
+    if (result && result.ok === false) throw new Error(result.error || '读取表单值失败')
+    ctx.variables[variable] = result?.data
+    ctx.emit(
+      'info',
+      `[表单读取] ${describeBlockTarget(data)} → {{${variable}}} = ${previewValue(result?.data)}`,
+    )
+    ctx.emit('result', previewValue(result?.data))
+  } catch (error) {
+    throw error
+  }
+  return null
+}
+
+/** Human-readable form of a read value, for the run log. */
+function previewValue(value: unknown): string {
+  if (typeof value === 'boolean') return value ? '已勾选' : '未勾选'
+  if (Array.isArray(value)) return value.length ? value.map(String).join(', ') : '(空)'
+  const text = String(value ?? '')
+  return text === '' ? '(空)' : logPreview(text, 120)
 }
 
 /** Automa `element-scroll` block: scroll an element or the window by X/Y. */
@@ -2066,6 +2809,7 @@ export const EXECUTORS: Record<string, BlockExecutor> = {
   'press-key': pressKey,
   'wait-for': waitFor,
   'take-screenshot': takeScreenshot,
+  'read-page': readPage,
   'get-text': getText,
   ocr: ocrBlock,
   hover: hover,

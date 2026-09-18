@@ -11,6 +11,7 @@
 
 import type { Workflow, WorkflowEdge, WorkflowNode } from '../../lib/workflow/types'
 import { getWorkflow } from '../../lib/workflow/storage'
+import { interpolateParams } from '../../lib/workflow/interpolate'
 import type { DebugStepLine } from '../../lib/workflow/auto-debug-patch'
 import type { ScopeWindow } from '../automation-scope'
 import type { BlockExecutor, WorkflowExecCtx } from './executors'
@@ -93,6 +94,22 @@ export interface WorkflowRunOptions {
    * tests a stub or a literal `count` value in the node data may be used.
    */
   loopElementCounter?: (cssSelector: string, signal: AbortSignal) => number | Promise<number>
+  /**
+   * Resolves a CSS selector for the `index`-th element matched by
+   * `cssSelector`, or null when the page cannot express it.
+   *
+   * A `loop-elements` body needs to act on the CURRENT element, and the only
+   * way to express that through a block's `selector` string is a token that
+   * resolves to a real selector — so each iteration publishes its element as
+   * `variables['loopElementSelector']` and a body node written as
+   * `'{{loopElementSelector}} .price'` targets the right one. Without this hook
+   * the token stays literal and every iteration acts on the same element.
+   */
+  loopElementSelector?: (
+    cssSelector: string,
+    index: number,
+    signal: AbortSignal,
+  ) => string | null | Promise<string | null>
   /**
    * Evaluates a JS condition/expression against the run's variables. Injected
    * by the integration layer so the pure engine stays chrome-free; in the real
@@ -349,6 +366,7 @@ async function runCore(
     resolveWorkflow,
     parentWorkflowIds = new Set<string>(),
     loopElementCounter,
+    loopElementSelector,
     evaluateExpression,
     onSnapshot,
     onCheckpoint,
@@ -476,7 +494,13 @@ async function runCore(
     const defaultNext = outEdges[0]?.target ?? null
 
     const blockId = blockIdOf(current)
-    const params = paramsOf(current)
+    // One interpolation pass over the whole bag, before anything reads it: the
+    // executors' shared locator helpers (`sel` / `targetFrom`) resolve
+    // `{{token}}` out of `data`, so a node carrying
+    // `selector: '{{loopElementSelector}} .price'` reaches the driver with a
+    // real selector. The loop / sub-workflow interpreters below read the same
+    // bag, so their `selector` and `workflowId` resolve too.
+    const params = interpolateParams(paramsOf(current), variables)
 
     // Cloud blocks are never executable locally.
     if (CLOUD_BLOCK_IDS.has(blockId)) {
@@ -807,6 +831,23 @@ async function runCore(
     for (let i = 0; i < count; i++) {
       if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
       variables['loopIndex'] = i
+      // Publish the CURRENT element as a selector the body can splice into its
+      // own (`'{{loopElementSelector}} .price'`). Resolution failure is not
+      // fatal: the body then fails on a literal token and the log says why,
+      // which beats silently re-targeting iteration 0's element every round.
+      if (loopElementSelector) {
+        let current: string | null = null
+        try {
+          current = await loopElementSelector(selector, i, signalToUse)
+        } catch (error) {
+          if (isAbort(error)) throw error
+          current = null
+        }
+        if (current === null) {
+          emit('error', loopNode.id, `无法为第 ${i + 1} 个元素生成唯一选择器，循环体可能定位失败`)
+        }
+        variables['loopElementSelector'] = current ?? ''
+      }
       const seg = await runLoopBody(loopNode, startId)
       if (seg === 'failed') return null
       if (seg === 'break') return endId
@@ -845,6 +886,7 @@ async function runCore(
       ...(resolveWorkflow ? { resolveWorkflow } : {}),
       parentWorkflowIds: childStack,
       loopElementCounter,
+      loopElementSelector,
       evaluateExpression,
       onSnapshot,
       // A child run shares the parent's checkpoint sink: it is the same

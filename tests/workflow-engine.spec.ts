@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runWorkflow } from '../src/background/workflow-engine/engine'
-import { interpolate } from '../src/lib/workflow/interpolate'
+import { EMPTY_INTERP_KEY, interpolate, interpolateParams } from '../src/lib/workflow/interpolate'
 import type { Workflow, WorkflowEdge, WorkflowNode } from '../src/lib/workflow/types'
 
 /** Build a minimal Workflow from nodes + edges. */
@@ -222,5 +222,59 @@ describe('interpolate', () => {
   it('stringifies function values', () => {
     const fn = () => 42
     expect(interpolate('{{fn}}', { fn })).toContain('=> 42')
+  })
+})
+
+describe('interpolateParams', () => {
+  it('resolves top-level string params', () => {
+    expect(interpolateParams({ selector: '#{{id}}', value: '{{pw}}' }, { id: 7, pw: 'x' })).toEqual(
+      {
+        selector: '#7',
+        value: 'x',
+      },
+    )
+  })
+
+  it('walks nested objects and arrays', () => {
+    // A `conditions` row's `right: '{{loopIndex}}'` is exactly as legitimate a
+    // place for a token as a top-level selector, and restricting this to the
+    // top level made it type the literal `{{loopIndex}}` into the page.
+    expect(
+      interpolateParams({ conditions: [{ left: '#a', right: '{{loopIndex}}' }] }, { loopIndex: 3 }),
+    ).toEqual({ conditions: [{ left: '#a', right: '3' }] })
+  })
+
+  it('leaves non-string values alone', () => {
+    expect(interpolateParams({ count: 5, flag: true, none: null }, {})).toEqual({
+      count: 5,
+      flag: true,
+      none: null,
+    })
+  })
+
+  it('returns the SAME object when nothing changed', () => {
+    // The engine calls this for every node of every run; allocating a copy on
+    // the common path would be pure waste.
+    const data = { selector: '#a', value: 'plain' }
+    expect(interpolateParams(data, {})).toBe(data)
+  })
+
+  it('flags params whose reference resolved to empty', () => {
+    // `forms` uses this to refuse to CLEAR a field, which is otherwise
+    // indistinguishable from a deliberate "" once interpolation has run.
+    const out = interpolateParams({ selector: '#pw', value: '{{pw}}' }, { pw: '' })
+    expect(out[EMPTY_INTERP_KEY]).toEqual(['value'])
+  })
+
+  it('does not flag a param whose token never resolved', () => {
+    // An unresolved token stays in the text, so the value is not empty and
+    // nothing was lost — the block will simply fail on the literal.
+    const out = interpolateParams({ value: '{{missing}}' }, {})
+    expect(out[EMPTY_INTERP_KEY]).toBeUndefined()
+  })
+
+  it('does not flag a deliberately empty value', () => {
+    const out = interpolateParams({ value: '' }, {})
+    expect(out[EMPTY_INTERP_KEY]).toBeUndefined()
   })
 })

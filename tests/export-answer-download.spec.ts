@@ -27,8 +27,8 @@ describe('downloadBlob — extension downloads API path', () => {
     delete (globalThis as { chrome?: unknown }).chrome
   })
 
-  it('routes an answer download through chrome.downloads.download', () => {
-    downloadAnswer({ text: '# Title\n\nbody', format: 'md', title: '我的对话' })
+  it('routes an answer download through chrome.downloads.download', async () => {
+    await downloadAnswer({ text: '# Title\n\nbody', format: 'md', title: '我的对话' })
     expect(createObjectURL).toHaveBeenCalledTimes(1)
     expect(download).toHaveBeenCalledTimes(1)
     const arg = download.mock.calls[0]![0]
@@ -41,9 +41,9 @@ describe('downloadBlob — extension downloads API path', () => {
     expect(revokeObjectURL).not.toHaveBeenCalled()
   })
 
-  it('does not bail when document is absent but the downloads API exists', () => {
+  it('does not bail when document is absent but the downloads API exists', async () => {
     expect(download).not.toHaveBeenCalled()
-    downloadBlob('x', 'text/plain', 'a.txt')
+    await downloadBlob('x', 'text/plain', 'a.txt')
     expect(download).toHaveBeenCalledTimes(1)
     expect(download.mock.calls[0]![0].filename).toBe('a.txt')
   })

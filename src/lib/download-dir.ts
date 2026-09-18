@@ -109,19 +109,20 @@ export function resolveTransferMode(
 }
 
 /**
- * 将一个文本文件写到下载目录。`create: true` 时若同名文件已存在会被覆盖。
+ * 将一个文件写到下载目录。`create: true` 时若同名文件已存在会被覆盖。
+ * `data` 可以是文本或二进制（截图等），底层 `createWritable().write` 两者都收。
  * 返回是否写入成功（如目录句柄无效或权限丢失时返回 `false`）。
  */
 export async function writeFileToDownloadDir(
   dir: FileSystemDirectoryHandle,
   filename: string,
-  text: string,
+  data: string | BufferSource,
 ): Promise<boolean> {
   try {
     const fileHandle = await dir.getFileHandle(filename, { create: true })
     const writable = await fileHandle.createWritable()
     try {
-      await writable.write(text)
+      await writable.write(data as FileSystemWriteChunkType)
     } finally {
       await writable.close()
     }
@@ -132,22 +133,41 @@ export async function writeFileToDownloadDir(
 }
 
 /**
+ * The file content handed to the side panel's save picker. Exactly one of the
+ * two is set: `text` for UTF-8 text, `base64` for binary (screenshots).
+ */
+export interface SavePickerPayload {
+  text?: string
+  base64?: string
+}
+
+/**
  * 内部使用 chrome.runtime 发送消息（仅调用时引用，import 本身不触发，
  * 因此在无 chrome 的测试环境中导入本模块不受影响）。
  *
  * Sends a "please pick a save location" request to the side panel, which is the
- * only context that can open `showSaveFilePicker` (it needs a document).
+ * only context that can open `showSaveFilePicker` (it needs a document). The
+ * CONTENT travels with the request: the handle the picker returns only exists
+ * in the panel, so the panel is the only place the write can happen.
+ *
  * Resolves false/false if the panel is closed or does not answer within 4s, so
  * callers can fall back instead of hanging. Shared by workflow blocks and the
  * chat agent's `save_local` tool.
  */
 export async function askSaveViaSidePanel(
   suggestedName: string,
+  payload: SavePickerPayload,
 ): Promise<{ ok: boolean; canceled: boolean }> {
+  // No extension context (tests, or a page that imported this module): there is
+  // no panel to ask, and touching `chrome` here would throw a ReferenceError
+  // inside the executor and fail the whole run instead of the one step.
+  if (typeof chrome === 'undefined' || !chrome.runtime) {
+    return { ok: false, canceled: false }
+  }
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve({ ok: false, canceled: false }), 4000)
     void chrome.runtime
-      .sendMessage({ type: 'download:save-picker', payload: { suggestedName } })
+      .sendMessage({ type: 'download:save-picker', payload: { suggestedName, ...payload } })
       .then(
         (reply) => {
           clearTimeout(timer)
