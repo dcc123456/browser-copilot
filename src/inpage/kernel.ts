@@ -645,6 +645,14 @@ export function runOp(op: Op): OpResult {
   function resolve(target: Target | undefined): Resolution | null {
     if (!target) return null
     const candidates: TargetSpec[] = [target.primary, ...(target.fallbacks ?? [])]
+    // Two-tier resolution. A spec that matches EXACTLY ONE element is almost
+    // certainly the element the user picked; a looser spec that matches many is
+    // often a positional CSS path outliving a layout change, and acting on its
+    // first match clicks the wrong element in silence. So an exact match
+    // anywhere in the candidate list wins over an earlier multi-match, and the
+    // first multi-match is remembered as the fallback — preserving the legacy
+    // "first visible of many" behavior for targets with no exact spec at all.
+    let loose: Resolution | null = null
     for (let index = 0; index < candidates.length; index += 1) {
       const spec = candidates[index]
       if (!spec) continue
@@ -658,14 +666,16 @@ export function runOp(op: Op): OpResult {
         chosen = visible[0] ?? all[0]
       }
       if (!chosen) continue
-      return {
+      const resolution: Resolution = {
         element: chosen,
         matched: all.length,
         usedSpec: serializeSpec(spec),
         usedFallback: index > 0,
       }
+      if (all.length === 1) return resolution
+      if (!loose) loose = resolution
     }
-    return null
+    return loose
   }
 
   // --- Interaction helpers ---------------------------------------------------

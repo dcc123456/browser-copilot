@@ -55,6 +55,46 @@ describe('system prompt', () => {
     // The skill block is the final block in the prompt.
     expect(prompt.lastIndexOf('Reply in bullets.')).toBeGreaterThan(skillAt)
   })
+
+  /**
+   * Workflow generation mounts the operator guide through `modeSkill`. When it
+   * is present the mode paragraph must DROP its duplicated domain rules (they
+   * would be paid twice on every round); when it is absent those rules must
+   * ride in the paragraph instead, so the mode is never left mechanics-only.
+   */
+  it('workflow mode mounts the mode skill and sheds duplicated domain rules', () => {
+    const skill = {
+      id: 'builtin-workflow-generator',
+      name: 'workflow-generator',
+      description: 'Turns operations into workflows',
+      instructions: '# 工作流算子指南\n\n对话动作 → 算子映射表。',
+      autoMatch: true,
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const mounted = buildSystemPrompt({ mode: 'workflow', modeSkill: skill })
+    expect(mounted).toContain('WORKFLOW GENERATE')
+    expect(mounted).toContain('MODE SKILL — workflow-generator (ACTIVE)')
+    expect(mounted).toContain('对话动作 → 算子映射表')
+    // Dedupe: rules that live in the guide leave the mode paragraph.
+    expect(mounted).not.toContain('READS RECORD NOTHING')
+    expect(mounted).not.toContain('COLLECTING A LIST')
+    // Mechanics stay in the paragraph even with the skill mounted.
+    expect(mounted).toContain('use_operators')
+    expect(mounted).toContain('END YOUR TURN')
+
+    // Order: the mode skill comes after the mode paragraph but BEFORE a pinned
+    // active skill, which stays the nearest instruction to the user's message.
+    const both = buildSystemPrompt({ mode: 'workflow', modeSkill: skill, activeSkill: skill })
+    expect(both.indexOf('MODE SKILL')).toBeLessThan(both.indexOf('ACTIVE SKILL'))
+  })
+
+  it('workflow mode without a mode skill keeps the domain rules in the paragraph', () => {
+    const prompt = buildSystemPrompt({ mode: 'workflow' })
+    expect(prompt).not.toContain('MODE SKILL')
+    expect(prompt).toContain('READS RECORD NOTHING')
+    expect(prompt).toContain('COLLECTING A LIST')
+  })
 })
 
 describe('tool catalog', () => {

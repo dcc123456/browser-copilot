@@ -52,6 +52,14 @@ export interface RecordedLocator {
   label?: string
   /** The target's `type` attribute, when the snapshot knew it. */
   type?: string
+  /**
+   * Whether the recorded `selector` was verified against the live page to
+   * match EXACTLY ONE element at record time. Absent when the selector was
+   * never probed (no page available). A `false` selector still plays — the
+   * kernel resolves the rich target's semantic specs as fallbacks — but it is
+   * the first suspect when a replay misses.
+   */
+  verified?: boolean
 }
 
 /**
@@ -139,6 +147,55 @@ export function richTargetFromAny(value: unknown): unknown {
 /** {@link richTargetFromAny} applied to an action's args. */
 export function richTargetFromArgs(args: Record<string, unknown> | undefined): unknown {
   return richTargetFromAny(args?.target)
+}
+
+/** Cap on probed candidates — a locator with more specs than this is noise. */
+const MAX_CANDIDATES = 8
+
+/**
+ * Every CSS selector worth probing for a locator, in preference order: the
+ * explicit/derived selector first, then the rich target's primary spec and its
+ * fallbacks (only the CSS-mappable ones). Deduplicated, non-empty.
+ */
+export function selectorCandidatesOf(locator: RecordedLocator): string[] {
+  const out: string[] = []
+  const push = (value: string): void => {
+    const trimmed = value.trim()
+    if (trimmed && !out.includes(trimmed)) out.push(trimmed)
+  }
+  push(locator.selector ?? '')
+  const raw = locator.target as RawTarget | undefined
+  if (raw && typeof raw === 'object') {
+    push(selectorFromSpec(raw.primary))
+    const fallbacks = Array.isArray(raw.fallbacks) ? raw.fallbacks : []
+    for (const spec of fallbacks) push(selectorFromSpec(spec))
+  }
+  return out.slice(0, MAX_CANDIDATES)
+}
+
+/**
+ * Pick the selector a node should record, given live match counts.
+ *
+ * A selector that matches EXACTLY ONE element on the page at record time is
+ * the only provably replayable one: the element the user actually picked. So
+ * the first candidate (preference order preserved) with a count of 1 wins and
+ * is marked verified. When nothing matches exactly, the best fallback is a
+ * candidate that at least matches something — the recorded behavior stays
+ * what it was, minus the pretense of being verified. When not even that
+ * exists, record NO selector: the rich target (role/text specs) becomes the
+ * replay's primary, which is exactly the case where a positional CSS path
+ * would only ever mislead.
+ */
+export function chooseRecordedSelector(
+  locator: RecordedLocator,
+  countOf: (selector: string) => number,
+): { selector: string; verified: boolean } {
+  const candidates = selectorCandidatesOf(locator)
+  for (const candidate of candidates) {
+    if (countOf(candidate) === 1) return { selector: candidate, verified: true }
+  }
+  const alive = candidates.find((candidate) => countOf(candidate) > 0)
+  return { selector: alive ?? '', verified: false }
 }
 
 /** Attach the rich locator to flat block data when present. */

@@ -61,4 +61,14 @@ export interface WorkflowDraft {
    * draft so a service-worker restart mid-run does not lose it.
    */
   variables?: Record<string, unknown>
+  /**
+   * The page the generation session FIRST acted on (full URL of the tab the
+   * first element-acting operator ran against).
+   *
+   * A graph that opens no page of its own (no `new-tab` before its first
+   * element action) can only replay on THAT page — the manual trigger drives
+   * whatever tab is active. The save card and the run gate read this to tell
+   * the user so before the workflow fails on the wrong page.
+   */
+  originUrl?: string
 }

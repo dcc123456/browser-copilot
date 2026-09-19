@@ -12,6 +12,7 @@
 import { isOfferedTriggerType } from './trigger-options'
 import { dataValueSites } from './data-params'
 import { hasReference } from './dynamic-data'
+import { unanchoredElementStart } from './runnability'
 import type { Workflow, WorkflowNode } from './types'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -243,6 +244,24 @@ export function validateWorkflowForRun(workflow: Workflow): WorkflowRunValidatio
   const actionNodes = workflow.drawflow.nodes.filter((n) => n !== triggerNode)
   if (actionNodes.length === 0) {
     errors.push('工作流没有可执行的节点：请在触发器之后至少添加一个算子')
+  }
+
+  // Generated-workflow page anchor. A manual trigger drives whatever tab is
+  // active, so a graph that starts acting on elements without ever opening a
+  // page can only replay on the page it was generated on — recorded here as
+  // `settings.generationOriginUrl` at generation time. A warning, not an
+  // error: the user may genuinely be on that page right now.
+  const generationOriginUrl = workflow.settings?.generationOriginUrl
+  if (
+    triggerType === 'manual' &&
+    typeof generationOriginUrl === 'string' &&
+    generationOriginUrl.trim() !== '' &&
+    unanchoredElementStart(workflow)
+  ) {
+    warnings.push(
+      `该工作流没有导航节点，直接操作生成时的页面（${generationOriginUrl}）。` +
+        '手动运行时它操作的是当前活动标签页——请先打开该页面再运行，或在图前加一个 new-tab 节点',
+    )
   }
 
   // Residual dead data. Generation rewrites business literals into references

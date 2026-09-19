@@ -164,6 +164,24 @@ export interface WorkflowSettings {
    * set 0 to disable the rewrite for this workflow.
    */
   defaultWaitMs?: number
+  /**
+   * Where this workflow's graph came from, when it was saved from the
+   * generation card (`chat-generate` = operator draft, `chat-history` =
+   * compiled action history). Absent for editor/imported workflows. Lets the
+   * run gate and future stats treat generated graphs differently from
+   * hand-tuned ones without a separate registry.
+   */
+  provenance?: 'chat-generate' | 'chat-history'
+  /**
+   * The page the generation session first acted on (http(s) URL).
+   *
+   * A generated graph with no navigation node before its first element action
+   * can only replay on THAT page — the manual trigger drives whatever tab is
+   * active. The run gate reads this to warn the user before the workflow
+   * fails on the wrong page; the engine emits a softer same-shape hint when
+   * the tab it lands on is a different origin.
+   */
+  generationOriginUrl?: string
 }
 
 /** A persisted workflow. */

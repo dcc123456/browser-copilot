@@ -215,6 +215,7 @@ export const BUILT_IN_AGENTS: readonly Agent[] = [
       'list_secrets',
       'get_secret',
       'list_scheduled_tasks',
+      'create_scheduled_task',
       'click',
       'fill',
       'select_option',

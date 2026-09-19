@@ -174,6 +174,15 @@ export async function compileConversationHistory(
     .filter((entry) => usable(entry, conversationId))
     .sort((a, b) => a.at - b.at)
   const workflow = workflowFromHistory(chronological, name)
+  if (workflow) {
+    // Provenance + best-effort page origin, same fields the operator-draft
+    // path stamps: the run gate's "open the page first" warning reads them.
+    // History entries only carry a host (no scheme/path), so the origin is
+    // reconstructed — a hint, not a guarantee.
+    workflow.settings.provenance = 'chat-history'
+    const host = chronological.find((entry) => entry.host)?.host
+    if (host) workflow.settings.generationOriginUrl = `https://${host}`
+  }
   const steps = workflow
     ? workflow.drawflow.nodes.filter((node) => node.data?.['blockId'] !== 'trigger').length
     : 0

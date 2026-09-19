@@ -120,6 +120,7 @@ let reviewBehavior: 'ok' | 'fail' = 'ok'
 let holdReview = false
 let releaseReview: (() => void) | null = null
 const saveCommands: Extract<Command, { type: 'workflows.save' }>[] = []
+const debugCommands: Extract<Command, { type: 'workflows.debug' }>[] = []
 /** Settings payload served by the `settings.get` mock; tests may override. */
 let settingsPayload: Record<string, unknown> = { mode: 'workflow' }
 /**
@@ -149,6 +150,7 @@ beforeEach(() => {
   holdReview = false
   releaseReview = null
   saveCommands.length = 0
+  debugCommands.length = 0
   settingsPayload = { mode: 'workflow' }
   draftReply = { type: 'workflows.draft', workflow: baseWorkflow() }
   probeReply = null
@@ -196,6 +198,18 @@ beforeEach(() => {
       case 'workflows.save':
         saveCommands.push(command)
         return { type: 'workflows.save' }
+      case 'workflows.debug':
+        debugCommands.push(command)
+        return {
+          type: 'workflows.debug',
+          result: {
+            ok: true,
+            attempts: 1,
+            summary: 'All steps completed without help.',
+            takeovers: [],
+            pendingChanges: [],
+          },
+        }
       default:
         throw new Error(`unexpected command: ${command.type}`)
     }
@@ -283,6 +297,65 @@ describe('chat save-as-workflow flow', () => {
       expect(reviewCommandCount()).toBe(0)
       // The card closed and a status line confirmed the save.
       expect(container.textContent).toContain('Saved workflow:')
+    } finally {
+      await act(async () => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+
+  it('saves with hardened graph and does NOT verify-run unless the user opts in', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await openCard(container, root)
+      await clickButton(container, 'Save as workflow')
+
+      // Generation saves mark themselves so the background hardens the graph
+      // (verified selectors + persisted waits); no verify run without the box.
+      expect(saveCommands).toHaveLength(1)
+      expect(saveCommands[0]!.fromGeneration).toBe(true)
+      expect(debugCommands).toHaveLength(0)
+      expect(container.textContent).not.toContain('Verify run started')
+    } finally {
+      await act(async () => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+
+  it('verify run is opt-in: checking the box debug-runs the saved workflow once', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await openCard(container, root)
+
+      // The verify-run checkbox sits next to the save actions.
+      const verifyLabel = [...container.querySelectorAll('label')].find((label) =>
+        label.textContent?.includes('Verify run after save'),
+      )
+      expect(verifyLabel).toBeDefined()
+      const checkbox = verifyLabel!.querySelector('input[type="checkbox"]')
+      expect(checkbox).not.toBeNull()
+      await act(async () => {
+        checkbox!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
+      await flush()
+
+      // The hint only shows while the box is checked.
+      expect(container.textContent).toContain('costs one model call')
+      await clickButton(container, 'Save as workflow')
+
+      expect(saveCommands).toHaveLength(1)
+      expect(debugCommands).toHaveLength(1)
+      expect(debugCommands[0]!.id).toBe(saveCommands[0]!.workflow.id)
+      // The verdict lands in the chat as status entries.
+      expect(container.textContent).toContain('Verify run started')
+      expect(container.textContent).toContain('Verify run passed')
     } finally {
       await act(async () => {
         root.unmount()

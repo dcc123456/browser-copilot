@@ -77,8 +77,6 @@ const KNOWN_INERT: Readonly<Record<string, readonly string[]>> = {
   ],
   'get-text': [
     'findBy',
-    'waitForSelector',
-    'waitSelectorTimeout',
     'regex',
     'prefixText',
     'suffixText',
@@ -90,8 +88,6 @@ const KNOWN_INERT: Readonly<Record<string, readonly string[]>> = {
   'element-scroll': ['incX', 'incY'],
   link: ['findBy', 'disableMultiple', 'openInNewTab'],
   'attribute-value': [
-    'waitForSelector',
-    'waitSelectorTimeout',
     'attributeValue',
     'attributeName',
     'action',
@@ -165,7 +161,9 @@ const KNOWN_INERT: Readonly<Record<string, readonly string[]>> = {
 
 /** name -> body, for every top-level declaration in the executors module. */
 function topLevelBodies(): Map<string, string> {
-  const re = /^(?:export )?(?:const|function|type|interface) (\w+)/gm
+  // `async function` declarations count too — a callee hidden from this map
+  // silently loses its transitive reads (pollRead hid waitForSelector once).
+  const re = /^(?:export )?(?:async )?(?:const|function|type|interface) (\w+)/gm
   const marks: { name: string; start: number }[] = []
   let match: RegExpExecArray | null
   while ((match = re.exec(SOURCE)) !== null) marks.push({ name: match[1]!, start: match.index })

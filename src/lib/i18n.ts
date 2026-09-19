@@ -388,6 +388,18 @@ export interface Messages {
   chatWorkflowProbeMissing: string
   /** One probed selector matched several elements — the executor may pick the wrong one. */
   chatWorkflowProbeAmbiguous: (params: { count: number }) => string
+  /** Checkbox on the save card: run the workflow once (with AI repair) right after saving. */
+  chatWorkflowVerifyRun: string
+  /** Hint under that checkbox: what it really does (side effects + model call). */
+  chatWorkflowVerifyRunHint: string
+  /** Status line once the verify run has been handed to the background. */
+  chatWorkflowVerifyStarted: string
+  /** The verify run finished green. */
+  chatWorkflowVerifyPassed: (params: { summary: string }) => string
+  /** The verify run failed; the reason is the run's own error text. */
+  chatWorkflowVerifyFailed: (params: { reason: string }) => string
+  /** The verify run passed via AI takeover, with fixes awaiting confirmation. */
+  chatWorkflowVerifyPending: (params: { count: number }) => string
   /** Fallback label for a code node that carries no description of its own. */
   chatWorkflowCodeNodesNoReason: string
   /** Optional button on the save card that runs the (token-costly) AI review. */
@@ -472,6 +484,32 @@ export interface Messages {
   modeFullWarning: string
   modeWorkflowWarning: string
   modeWorkflowHint: string
+
+  // Plan card (present_plan tool)
+  /** Card title for an agent-submitted execution plan. */
+  planCardTitle: string
+  /** Section label above the goal line. */
+  planCardGoal: string
+  /** Section label above the numbered step list. */
+  planCardSteps: string
+  /** Section label above the risk notes (login, CAPTCHA, irreversible steps). */
+  planCardRisks: string
+  /** Section label above the split/composition note (multi-workflow plans). */
+  planCardSplit: string
+  /** Approve button: unlock execution of the submitted plan. */
+  planApprove: string
+  /** Reject button: opens the feedback input for a revision. */
+  planRevise: string
+  /** Placeholder of the rejection feedback textarea. */
+  planFeedbackPlaceholder: string
+  /** Submit button of the rejection feedback input. */
+  planFeedbackSend: string
+  /** Read-only state label after the plan was approved. */
+  planApprovedChip: string
+  /** Read-only state label after the plan was rejected. */
+  planRejectedChip: string
+  /** Aria label for the plan approval card region. */
+  planCardAria: string
 
   // Token usage
   tokenUsage: string
@@ -671,10 +709,28 @@ export interface Messages {
   toolScreenshotWarn: string
   toolListTasks: string
   toolListTasksWarn: string
+  /** Label of the create_scheduled_task tool in the settings tool list. */
+  toolCreateTask: string
+  /** What breaks when create_scheduled_task is disabled. */
+  toolCreateTaskWarn: string
   toolLoadTools: string
   toolLoadToolsWarn: string
   toolDelegate: string
   toolDelegateWarn: string
+  /** Label of the ask_user tool in the settings tool list. */
+  toolAskUser: string
+  /** What breaks when ask_user is disabled. */
+  toolAskUserWarn: string
+  /** Label of the present_plan tool in the settings tool list. */
+  toolPresentPlan: string
+  /** What breaks when present_plan is disabled. */
+  toolPresentPlanWarn: string
+  /** Title of the ask_user card in the chat log. */
+  chatAskTitle: string
+  /** Placeholder of the free-text answer input on the ask_user card. */
+  chatAskPlaceholder: string
+  /** Chip marking the recommended (first) option on the ask_user card. */
+  chatAskRecommended: string
   toolOperator: string
   toolOperatorWarn: string
 
@@ -698,6 +754,7 @@ export interface Messages {
   settingsStorageUnsupported: string
   settingsStorageSynced: (params: { name: string }) => string
   settingsStorageNeedReconnect: (params: { name: string }) => string
+  settingsStoragePendingWrites: (params: { count: number }) => string
 
   // Settings · download directory
   settingsDownloadDir: string
@@ -1246,6 +1303,9 @@ const en: Messages = {
   chatApprove: 'Approve',
   chatDecline: 'Decline',
   chatConfirmTitle: ({ name }) => `Allow ${name}?`,
+  chatAskTitle: 'The assistant needs your answer',
+  chatAskPlaceholder: 'Type your answer…',
+  chatAskRecommended: 'Recommended',
   chatSkillActive: ({ name }) => `Skill: ${name}`,
   chatSkillGo: ({ name }) => `Apply the "${name}" skill now.`,
   chatSkillGoSelection: ({ name }) =>
@@ -1286,6 +1346,14 @@ const en: Messages = {
   chatWorkflowProbeMissing: 'matches nothing — this step will do nothing',
   chatWorkflowProbeAmbiguous: ({ count }) =>
     `matches ${count} elements — the workflow may act on the wrong one`,
+  chatWorkflowVerifyRun: 'Verify run after save',
+  chatWorkflowVerifyRunHint:
+    'Runs the workflow once for real and lets the AI repair failed steps (up to one repair round). Real side effects can happen (orders, posts, sends), and it costs one model call.',
+  chatWorkflowVerifyStarted: 'Verify run started — watch it live on the running board.',
+  chatWorkflowVerifyPassed: ({ summary }) => `Verify run passed: ${summary}`,
+  chatWorkflowVerifyFailed: ({ reason }) => `Verify run failed: ${reason}`,
+  chatWorkflowVerifyPending: ({ count }) =>
+    `Verify run passed with ${count} AI-repair change${count > 1 ? 's' : ''} awaiting your confirmation.`,
   chatSaveWorkflowAiReview: 'AI refine…',
   chatSaveWorkflowTriggerTitle: 'Trigger',
   chatSaveWorkflowTriggerHintManual: 'This workflow runs only when you start it.',
@@ -1354,6 +1422,19 @@ const en: Messages = {
     'Workflow generate is NOT a dry run: it drives the real page exactly like full auto — every operator clicks, types and navigates immediately, and JavaScript-code operators run arbitrary code in the page. Use only on sites you trust, and review the generated workflow before running it.',
   modeWorkflowHint:
     'Workflow generate drives the page exactly like full auto: every operator really runs on the page, and only a step that succeeded becomes a node in the draft — no per-step approval. A trigger node is added automatically; when the turn ends the panel pops the save-as-workflow card, where you can change the trigger type.',
+
+  planCardTitle: 'Execution plan',
+  planCardGoal: 'Goal',
+  planCardSteps: 'Steps',
+  planCardRisks: 'Risks',
+  planCardSplit: 'Workflow split',
+  planApprove: 'Approve & run',
+  planRevise: 'Revise plan',
+  planFeedbackPlaceholder: 'What should change in this plan?',
+  planFeedbackSend: 'Send feedback',
+  planApprovedChip: 'Plan approved',
+  planRejectedChip: 'Plan rejected',
+  planCardAria: 'Plan approval card',
 
   tokenUsage: 'Token usage',
   tokenTotal: 'Total',
@@ -1565,12 +1646,21 @@ const en: Messages = {
   toolListTasks: 'List scheduled tasks',
   toolListTasksWarn:
     'When off: the assistant cannot tell you which scheduled/recurring tasks are enabled.',
+  toolCreateTask: 'Create or update a scheduled task',
+  toolCreateTaskWarn:
+    'When off: the assistant cannot create or change scheduled/recurring tasks from chat — requests like "run this every morning at 9" fail.',
   toolLoadTools: 'On-demand tool groups',
   toolLoadToolsWarn:
     'When off: the assistant cannot load hidden tool groups (tab management, saving files, saved profile/passwords, skills, network/console diagnostics), so those tasks will fail.',
   toolDelegate: 'Delegate a sub-task to a specialist agent',
   toolDelegateWarn:
     'When off: the supervisor cannot hand sub-tasks to specialist agents; every task is handled directly in the main conversation.',
+  toolAskUser: 'Ask the user a clarifying question',
+  toolAskUserWarn:
+    'When off: the assistant cannot ask you to clarify unclear requests and must guess instead.',
+  toolPresentPlan: 'Submit an execution plan for approval',
+  toolPresentPlanWarn:
+    'When off: the plan-first flow cannot show its plan card, so tasks run without your plan approval.',
   toolOperator: 'Workflow operator (draft writer)',
   toolOperatorWarn:
     'When off: this operator tool is hidden from the chat in workflow mode and cannot be added to the generated workflow.',
@@ -1594,7 +1684,7 @@ const en: Messages = {
 
   settingsStorage: 'Storage location',
   settingsStorageIntro:
-    'All data (settings, conversations, tasks, workflows) is saved as plain JSON files in a folder you choose, instead of the browser\u2019s internal storage. The browser cache keeps a mirror so the extension keeps working offline.',
+    'Chats, workflows, history, skills, agents and other data are saved as plain JSON files in a folder you choose. Extension settings (model providers, the folder choice itself) stay in browser storage. While the folder is briefly unreachable, changes queue up and flush into it automatically once access is restored.',
   settingsStorageBrowser: 'Browser storage (default)',
   settingsStorageFile: 'Files on your computer',
   settingsStorageFolder: ({ name }) => `Folder: ${name}`,
@@ -1606,6 +1696,8 @@ const en: Messages = {
   settingsStorageSynced: ({ name }) => `Data saved to ${name}.`,
   settingsStorageNeedReconnect: ({ name }) =>
     `The folder "${name}" was chosen but access expired. Reconnect it to keep saving files.`,
+  settingsStoragePendingWrites: ({ count }) =>
+    `${count} change${count === 1 ? '' : 's'} waiting to be written to the folder — they flush automatically once it is reconnected.`,
 
   settingsDownloadDir: 'Download folder',
   settingsDownloadDirIntro:
@@ -2202,6 +2294,9 @@ const zhCN: Messages = {
   chatApprove: '允许',
   chatDecline: '拒绝',
   chatConfirmTitle: ({ name }) => `是否允许执行 ${name}？`,
+  chatAskTitle: '助手需要你的回答',
+  chatAskPlaceholder: '输入你的回答…',
+  chatAskRecommended: '推荐',
   chatSkillActive: ({ name }) => `技能：${name}`,
   chatSkillGo: ({ name }) => `请使用"${name}"技能处理。`,
   chatSkillGoSelection: ({ name }) => `请用"${name}"技能处理我在页面上选中的内容。`,
@@ -2236,6 +2331,14 @@ const zhCN: Messages = {
   chatWorkflowProbeUnverified: '当前页面无法检查，这些选择器未经验证。',
   chatWorkflowProbeMissing: '没有匹配到任何元素——这一步重放时什么都不会发生',
   chatWorkflowProbeAmbiguous: ({ count }) => `匹配到 ${count} 个元素——工作流可能操作到错误的元素`,
+  chatWorkflowVerifyRun: '保存后验证运行',
+  chatWorkflowVerifyRunHint:
+    '保存后立即真实执行一次，失败步骤由 AI 自动修复（最多一轮）。会产生真实副作用（下单、发帖、发送等），并消耗一次模型调用。',
+  chatWorkflowVerifyStarted: '验证运行已开始——可在运行面板实时查看进度。',
+  chatWorkflowVerifyPassed: ({ summary }) => `验证运行通过：${summary}`,
+  chatWorkflowVerifyFailed: ({ reason }) => `验证运行失败：${reason}`,
+  chatWorkflowVerifyPending: ({ count }) =>
+    `验证运行通过，但 AI 修复产生了 ${count} 处待你确认的修改。`,
   chatSaveWorkflowAiReview: 'AI 提炼…',
   chatSaveWorkflowTriggerTitle: '触发器',
   chatSaveWorkflowTriggerHintManual: '该工作流只会在你手动启动时运行。',
@@ -2299,6 +2402,19 @@ const zhCN: Messages = {
     '工作流生成模式并非"仅录制"：它会像全自动模式一样真实操作页面——每个算子都会立即点击、输入、跳转，JavaScript 代码算子还会在页面中执行任意脚本。建议仅在你信任的网站使用，并在运行生成的工作流前先检查一遍。',
   modeWorkflowHint:
     '工作流生成模式与全自动模式一样真实操作页面：每个算子都会立即在页面上执行，成功后才记录为草稿中的节点，无需逐项确认。工作流会自动带上触发器节点；回合结束后面板弹出「保存为工作流」卡片，可在其中修改触发器类型。',
+
+  planCardTitle: '执行计划',
+  planCardGoal: '目标',
+  planCardSteps: '步骤',
+  planCardRisks: '风险',
+  planCardSplit: '工作流拆分',
+  planApprove: '批准并执行',
+  planRevise: '修改计划',
+  planFeedbackPlaceholder: '这份计划需要怎么调整？',
+  planFeedbackSend: '提交反馈',
+  planApprovedChip: '计划已批准',
+  planRejectedChip: '计划已拒绝',
+  planCardAria: '计划确认卡片',
 
   tokenUsage: 'Token 消耗',
   tokenTotal: '合计',
@@ -2487,11 +2603,18 @@ const zhCN: Messages = {
   toolSkillWarn: '关闭后：助手无法加载或应用已保存的技能。',
   toolListTasks: '列出定时任务',
   toolListTasksWarn: '关闭后：助手无法告诉你当前启用了哪些定时/周期任务。',
+  toolCreateTask: '创建或更新定时任务',
+  toolCreateTaskWarn:
+    '关闭后：助手无法在聊天中创建或修改定时/周期任务——"每天早上9点运行"这类请求会失败。',
   toolLoadTools: '按需加载工具组',
   toolLoadToolsWarn:
     '关闭后：助手无法按需加载隐藏的工具组（标签页管理、保存文件、已存资料/密码、技能、网络/控制台诊断），相关任务会失败。',
   toolDelegate: '把 子任务委派给专长子智能体',
   toolDelegateWarn: '关闭后：主管无法把子任务分派给专长子智能体，所有任务都在主会话中直接完成。',
+  toolAskUser: '向用户提问确认',
+  toolAskUserWarn: '关闭后：助手无法就模糊需求向你确认，只能自行猜测。',
+  toolPresentPlan: '提交执行计划等待用户批准',
+  toolPresentPlanWarn: '关闭后：计划先行流程无法弹出计划卡片，任务将不再经过你的计划批准直接执行。',
   toolOperator: '工作流算子（草稿写入）',
   toolOperatorWarn: '关闭后：该算子在工作流生成模式下不可用，也不会出现在生成的工作流中。',
 
@@ -2512,7 +2635,7 @@ const zhCN: Messages = {
 
   settingsStorage: '存储位置',
   settingsStorageIntro:
-    '所有数据（设置、对话、任务、工作流）都会以 JSON 文件形式保存在你选择的文件夹中，而不是浏览器内置存储里。浏览器缓存会保留一份镜像，保证插件离线也能正常工作。',
+    '聊天记录、工作流、历史记录、技能、智能体等数据都会以 JSON 文件形式保存在你选择的文件夹中；扩展配置（模型服务、存储路径本身）仍保存在浏览器存储中。文件夹短暂不可用时，变更会先排队，恢复连接后自动写入。',
   settingsStorageBrowser: '浏览器存储（默认）',
   settingsStorageFile: '保存在你的电脑',
   settingsStorageFolder: ({ name }) => `文件夹：${name}`,
@@ -2524,6 +2647,8 @@ const zhCN: Messages = {
   settingsStorageSynced: ({ name }) => `数据已保存到 ${name}。`,
   settingsStorageNeedReconnect: ({ name }) =>
     `已选择文件夹「${name}」，但访问权限已失效。重新连接后即可继续保存文件。`,
+  settingsStoragePendingWrites: ({ count }) =>
+    `${count} 条变更待写入文件夹——重新连接后会自动写入。`,
 
   settingsDownloadDir: '下载目录',
   settingsDownloadDirIntro:

@@ -118,7 +118,7 @@ describe('a read that produced nothing fails the step', () => {
     const ctx = makeCtx()
 
     await expect(
-      EXECUTORS['get-text']!({ selector: '#pl_toplist td.td-02 a' }, ctx),
+      EXECUTORS['get-text']!({ selector: '#pl_toplist td.td-02 a', waitSelectorTimeout: 50 }, ctx),
     ).rejects.toThrow(/#pl_toplist/)
 
     // Nothing reached the variable bag, so no downstream step can export a
@@ -132,7 +132,13 @@ describe('a read that produced nothing fails the step', () => {
 
     await expect(
       EXECUTORS['get-text']!(
-        { selector: '.row', multiple: true, saveData: true, dataColumn: '标题' },
+        {
+          selector: '.row',
+          multiple: true,
+          saveData: true,
+          dataColumn: '标题',
+          waitSelectorTimeout: 50,
+        },
         ctx,
       ),
     ).rejects.toThrow(/没有读到任何内容/)
@@ -184,7 +190,9 @@ describe('a read that produced nothing fails the step', () => {
     installChrome([[]])
     const ctx = makeCtx()
 
-    const error = await failureOf(EXECUTORS['get-text']!({ selector: '.row' }, ctx))
+    const error = await failureOf(
+      EXECUTORS['get-text']!({ selector: '.row', waitSelectorTimeout: 50 }, ctx),
+    )
 
     // A bare "no match" leaves the user where they started; the message has to
     // name the causes and the declarative alternative.
@@ -194,11 +202,16 @@ describe('a read that produced nothing fails the step', () => {
 
   it('read-page: an empty page-text read fails instead of publishing ""', async () => {
     // `readActivePage` scrapes `raw` and collapses it; whitespace-only means the
-    // page had no readable text.
-    installChrome([{ url: 'https://example.com/', title: 't', selection: '', raw: '   \n ' }])
+    // page had no readable text. The read POLLS now (see `pollRead`), so the
+    // same whitespace-only page is served for every attempt until the window
+    // (pinned small here) expires.
+    const emptyPage = { url: 'https://example.com/', title: 't', selection: '', raw: '   \n ' }
+    installChrome([emptyPage, emptyPage, emptyPage, emptyPage, emptyPage])
     const ctx = makeCtx()
 
-    await expect(EXECUTORS['read-page']!({}, ctx)).rejects.toThrow(/没有读到任何内容/)
+    await expect(EXECUTORS['read-page']!({ waitSelectorTimeout: 50 }, ctx)).rejects.toThrow(
+      /没有读到任何内容/,
+    )
     expect(ctx.variables['lastReadPage']).toBeUndefined()
   })
 })
@@ -314,7 +327,7 @@ describe('the operator bridge records nothing when a step fails', () => {
 
     const outcome = await executeOperatorNode(
       'get-text',
-      { selector: '.row' },
+      { selector: '.row', waitSelectorTimeout: 50 },
       {
         variables: {},
         signal: new AbortController().signal,
@@ -335,7 +348,7 @@ describe('the operator bridge records nothing when a step fails', () => {
 
     const outcome = await executeOperatorNode(
       'read-page',
-      { selector: '.row' },
+      { selector: '.row', waitSelectorTimeout: 50 },
       {
         variables: {},
         signal: new AbortController().signal,

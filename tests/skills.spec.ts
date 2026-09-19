@@ -183,3 +183,32 @@ describe('built-in skill instruction budget', () => {
     expect(MAX_INSTRUCTIONS_LENGTH - generator.instructions.length).toBeGreaterThanOrEqual(200)
   })
 })
+
+/**
+ * The plan skill is the plan-first gate's trigger half: the gate only arms when
+ * a skill NAMED `plan` is pinned or loaded, so the shipped builtin must exist,
+ * be auto-matchable with a tight trigger, and teach the `present_plan` hand-off.
+ */
+describe('built-in plan skill', () => {
+  const plan = BUILT_IN_SKILLS.find((s) => s.id === 'builtin-plan')
+
+  it('ships under the reserved plan skill name', () => {
+    expect(plan).toBeDefined()
+    expect(plan!.name).toBe('plan')
+    expect(plan!.autoMatch).toBe(true)
+  })
+
+  it('keeps the trigger description tight (it gates every matched task)', () => {
+    // A vague trigger would route ordinary tasks through plan approval; the
+    // description must name the explicit planning requests it serves.
+    expect(plan!.description).toContain('present_plan')
+    expect(plan!.description).toContain('plan first')
+  })
+
+  it('teaches the present_plan hand-off and the no-execution rule', () => {
+    expect(plan!.instructions).toContain('present_plan')
+    expect(plan!.instructions).toContain('禁止')
+    expect(plan!.instructions).toContain('全自动 / 半自动模式')
+    expect(plan!.instructions).toContain('工作流生成模式')
+  })
+})

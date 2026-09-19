@@ -235,7 +235,28 @@ export interface CollapsibleGraph {
 export function detectRepeatRuns(graph: CollapsibleGraph): RepeatSuggestion[] {
   const chain = chainOf(graph)
   if (!chain) return []
+  // Compound runs are decided FIRST: a same-block run inside a compound period
+  // (e.g. the two detail reads of "open item → read → back") is a narrower,
+  // less faithful fold, and letting it claim the nodes would starve the
+  // compound scan. A compound suggestion never fires unless its whole body is
+  // stable, so preferring it never loses a more precise rewrite.
+  const compoundClaims = new Set<string>()
+  const compound = detectCompoundRuns(chain, compoundClaims)
+  const claimedByCompound = new Set<string>()
+  for (const run of compound) for (const id of run.runIds) claimedByCompound.add(id)
+  const blockRuns = detectBlockRuns(chain).filter(
+    (run) => !run.runIds.some((id) => claimedByCompound.has(id)),
+  )
+  return [...blockRuns, ...compound]
+}
 
+/** Blocks that must never join a run (a run of loops would nest loops). */
+function isFoldableBlock(blockId: string): boolean {
+  return blockId !== 'trigger' && blockId !== REPEAT_TASK && blockId !== LOOP_ELEMENTS
+}
+
+/** The existing scan: maximal runs of back-to-back same-block nodes. */
+function detectBlockRuns(chain: WorkflowNode[]): RepeatSuggestion[] {
   const suggestions: RepeatSuggestion[] = []
   let i = 0
   while (i < chain.length) {
@@ -243,8 +264,7 @@ export function detectRepeatRuns(graph: CollapsibleGraph): RepeatSuggestion[] {
     const blockId = blockIdOf(node)
     // A run never starts on the trigger, and a run of loop blocks would nest
     // loops the engine would then re-enter for no reason.
-    const foldable = blockId !== 'trigger' && blockId !== REPEAT_TASK && blockId !== LOOP_ELEMENTS
-    if (!foldable) {
+    if (!isFoldableBlock(blockId)) {
       i += 1
       continue
     }
@@ -303,6 +323,118 @@ export function detectRepeatRuns(graph: CollapsibleGraph): RepeatSuggestion[] {
     i += 1
   }
   return suggestions
+}
+
+/** Period lengths worth trying for a compound iteration. */
+const MIN_PERIOD = 2
+const MAX_PERIOD = 12
+
+/**
+ * The head node's identity EXCLUDING its target: two period heads are the same
+ * action on different list elements, so block/shape/value must repeat while the
+ * selector differs. A head whose value varies per period (a per-item form fill
+ * with different text) cannot be folded — the rewrite only replaces the
+ * selector, so the recorded value of one iteration would run for all of them.
+ */
+function headKeyOf(node: WorkflowNode): string {
+  const data = node.data ?? {}
+  const value = data['value'] ?? data['type'] ?? ''
+  return [blockIdOf(node), String(value), String(data['checked'] ?? ''), nodeShape(node)].join('|')
+}
+
+/**
+ * Find COMPOUND periods: a multi-step iteration repeated back-to-back —
+ * "open one list item → read its detail → go back", times N. The block-level
+ * scan above cannot see this shape (its blocks alternate), yet it is the
+ * natural recording of any "collect every entry's details" task, and folding
+ * it is what makes the replay iterate the CURRENT list instead of the exact
+ * items that happened to exist at generation time.
+ *
+ * The fold itself is the ordinary `varying` one: the period survives as the
+ * loop body, the body's FIRST node (the per-item action) is rewritten to
+ * `{{loopElementSelector}}`, and the loop selector must come from a
+ * page-verified probe. Refusals stay refusals — same rule as ever.
+ */
+function detectCompoundRuns(chain: WorkflowNode[], claimed: Set<string>): RepeatSuggestion[] {
+  const suggestions: RepeatSuggestion[] = []
+  for (let i = 0; i < chain.length; i += 1) {
+    if (claimed.has(chain[i]!.id)) continue
+    const head = chain[i]!
+    const headBlock = blockIdOf(head)
+    // The head is the per-item action: it must target an element, or there is
+    // nothing for the loop to iterate.
+    if (!isFoldableBlock(headBlock) || selectorOf(head) === '') continue
+    const headKey = headKeyOf(head)
+
+    for (let period = MIN_PERIOD; period <= MAX_PERIOD; period += 1) {
+      // Two full periods minimum; a partial trailing period stays linear.
+      if (i + 2 * period > chain.length) break
+      let repeats = 1
+      // Periods 0..repeats-1 are confirmed; the candidate is the one starting
+      // at `i + repeats * period`, so the bound covers its full span.
+      while (
+        i + (repeats + 1) * period <= chain.length &&
+        compoundPeriodMatches(chain, i, period, i + repeats * period, headKey, claimed)
+      ) {
+        repeats += 1
+      }
+      if (repeats < MIN_REPEAT_RUN) continue
+
+      const runIds = chain.slice(i, i + repeats * period).map((n) => n.id)
+      const bodyIds = chain.slice(i, i + period).map((n) => n.id)
+      const selectors = chain
+        .slice(i, i + repeats * period)
+        .filter((_, index) => index % period === 0)
+        .map((n) => selectorOf(n))
+      // Iterations must act on DIFFERENT elements — same rule as the
+      // block-level varying run; a fold onto one repeated element is a lie.
+      if (new Set(selectors).size !== selectors.length) continue
+
+      suggestions.push({
+        kind: 'varying',
+        runIds,
+        bodyIds,
+        repeat: repeats,
+        blockId: headBlock,
+        selectors,
+        reason: `${repeats} 组重复的「${headBlock} → …」${period} 步采集段，可折叠为逐条循环`,
+      })
+      for (const id of runIds) claimed.add(id)
+      break
+    }
+  }
+  return suggestions
+}
+
+/**
+ * Does the period starting at `start` repeat the one starting at `base`?
+ *
+ * The head repeats as the same action on another element; every FOLLOWING node
+ * of the period must be byte-identical (block, shape, selector, value) — the
+ * detail page's layout does not change between list items, and a read whose
+ * selector drifted is a different read, not an iteration.
+ */
+function compoundPeriodMatches(
+  chain: WorkflowNode[],
+  base: number,
+  period: number,
+  start: number,
+  headKey: string,
+  claimed: Set<string>,
+): boolean {
+  for (let offset = 0; offset < period; offset += 1) {
+    const node = chain[start + offset]!
+    if (claimed.has(node.id) || !isFoldableBlock(blockIdOf(node))) return false
+    if (offset === 0) {
+      if (headKeyOf(node) !== headKey || selectorOf(node) === '') return false
+    } else {
+      const first = chain[base + offset]!
+      if (nodeSignature(node) !== nodeSignature(first) || nodeShape(node) !== nodeShape(first)) {
+        return false
+      }
+    }
+  }
+  return true
 }
 
 /**
@@ -467,7 +599,10 @@ export function applyLoopElementsFold(
 
   const loop = loopNode(LOOP_ELEMENTS, body[0]!, {
     selector,
-    description: `遍历「${selector}」匹配的元素（折叠自 ${suggestion.repeat} 个录制步骤）`,
+    // `runIds.length` counts every recorded step the fold absorbed — for a
+    // compound run (open item → read → go back) that is more than the
+    // iteration count, and the editor label should say so.
+    description: `遍历「${selector}」匹配的元素（折叠自 ${suggestion.runIds.length} 个录制步骤，${suggestion.repeat} 次迭代）`,
   })
   const folded = foldRun(workflow, suggestion, loop)
   return {

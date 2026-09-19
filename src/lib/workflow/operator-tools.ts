@@ -29,7 +29,7 @@ import {
   OPERATOR_CATEGORY_TOOL_NAMES,
   operatorCategoryGroup,
 } from './operator-categories'
-import { JAVASCRIPT_BLOCK_ID } from './operator-class'
+import { EDIT_LESS_OPERATOR_IDS, JAVASCRIPT_BLOCK_ID } from './operator-class'
 
 /** Tool name prefix shared by every operator-derived tool. */
 export const WF_OP_PREFIX = 'wf_op_'
@@ -52,10 +52,11 @@ export function blockIdFromOperatorName(toolName: string): string | undefined {
 }
 
 /**
- * Operator block ids: every palette entry that exposes a real edit form.
- * Placeholder / no-edit blocks (`active-tab`, `go-back`, `forward-page`,
- * `loop-breakpoint`, `blocks-group`) are intentionally excluded because they
- * are runtime-only routing primitives the LLM has no business picking directly.
+ * Operator block ids: every palette entry that exposes a real edit form, plus
+ * the edit-less exceptions (`go-back` — see `EDIT_LESS_OPERATOR_IDS`).
+ * Placeholder / no-edit routing primitives (`active-tab`, `forward-page`,
+ * `loop-breakpoint`, `blocks-group`) stay excluded because they are
+ * runtime-only navigation the LLM has no business steering directly.
  *
  * Built from {@link PALETTE_BLOCKS} — not the raw catalog — so Browser
  * Copilot's own blocks (`ai-agent`, `ocr`, `set-variable`, `get-secret`) are
@@ -63,7 +64,7 @@ export function blockIdFromOperatorName(toolName: string): string | undefined {
  * image, then fill the code in") cannot be expressed at all.
  */
 const PALETTE_OPERATOR_ENTRIES: readonly BlockCatalogEntry[] = PALETTE_BLOCKS.filter(
-  (entry) => !entry.disableEdit,
+  (entry) => !entry.disableEdit || EDIT_LESS_OPERATOR_IDS.has(entry.id),
 )
 
 const PALETTE_OPERATOR_IDS: readonly string[] = PALETTE_OPERATOR_ENTRIES.map((entry) => entry.id)

@@ -12,7 +12,7 @@ import { operatorExecClass } from './workflow/operator-class'
  * @module lib/tool-catalog
  */
 
-export type ToolCategory = 'read' | 'act' | 'nav' | 'data'
+export type ToolCategory = 'read' | 'act' | 'nav' | 'data' | 'ask'
 
 type MessageKey = {
   [K in keyof Messages]: Messages[K] extends string ? K : never
@@ -163,6 +163,12 @@ export const TOOL_META: ToolMeta[] = [
     warningKey: 'toolListTasksWarn',
   },
   {
+    name: 'create_scheduled_task',
+    category: 'data',
+    labelKey: 'toolCreateTask',
+    warningKey: 'toolCreateTaskWarn',
+  },
+  {
     name: 'load_tools',
     category: 'read',
     labelKey: 'toolLoadTools',
@@ -173,6 +179,18 @@ export const TOOL_META: ToolMeta[] = [
     category: 'data',
     labelKey: 'toolDelegate',
     warningKey: 'toolDelegateWarn',
+  },
+  {
+    name: 'ask_user',
+    category: 'ask',
+    labelKey: 'toolAskUser',
+    warningKey: 'toolAskUserWarn',
+  },
+  {
+    name: 'present_plan',
+    category: 'ask',
+    labelKey: 'toolPresentPlan',
+    warningKey: 'toolPresentPlanWarn',
   },
   {
     name: 'compose_workflow',

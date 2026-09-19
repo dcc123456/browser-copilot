@@ -6,7 +6,96 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added — First-run success for generated workflows
+
+Generated workflows used to fail their first manual run almost every time. The
+root causes were replay-environment gaps the generation session never sees, and
+they are now closed on both sides (see
+`specs/2026-09-19-first-run-success-design.md`):
+
+- **Read blocks wait for the element to render.** `get-text` / `attribute-value`
+  / `read-page` were single-shot: one `querySelectorAll`, and an empty result
+  failed the step. A replay runs back-to-back, so a read right after a
+  click-triggered navigation raced the page's own rendering. They now poll
+  (120 ms interval, 5 s default window, per-node `waitSelectorTimeout`, explicit
+  `waitForSelector: false` opts out); only empty results are retried.
+- **Element resolution prefers an exact match.** The in-page kernel's `resolve`
+  took the first candidate spec that matched ANY element — a positional CSS
+  path that drifted into matching several elements clicked the wrong one in
+  silence. A spec matching exactly ONE element now wins over an earlier
+  multi-match, with the legacy first-visible behavior kept as the fallback.
+- **Recorded selectors are verified against the live page.** Each operator call
+  probes its CSS candidates in one injection and records the one matching
+  exactly one element (stamped `selectorVerified`); a locator with no live CSS
+  match records NO selector, so replay leans on the role/text rich locator
+  instead of a misleading positional path. Saving from the generation card also
+  hardens the whole graph in one batched pass — editor/import saves are never
+  rewritten.
+- **Element waits are persisted on the graph at save time** (`lib/workflow/
+  runnability`), idempotent and structure-preserving, so server/scheduler
+  runners and the editor see the same waits the run path force-enables.
+- **Missing page anchor is reported instead of failing silently.** A generated
+  graph whose first element action has no `new-tab` before it can only replay
+  on the page it was generated on; the run gate warns about it and the run log
+  gains an origin-mismatch hint when the active tab is a different site.
+  `settings.provenance` / `settings.generationOriginUrl` carry the provenance.
+- **Opt-in verify run from the save card.** A new checkbox ("Verify run after
+  save", default off — the run is real and costs a model call) hands the saved
+  workflow to the existing AI-debug loop: real replay, AI repair of failed
+  nodes, takeover-free re-verify, with the verdict landing back in the chat.
+
+### Fixed — Provider configuration loss after the storage split
+
+- **`ensureSchema` no longer fabricates defaults over an unreadable
+  directory.** When a storage directory is configured but its handle is
+  unavailable (extension reload / browser restart), absent config keys are
+  left absent instead of being replaced with defaults, and missing
+  collections are no longer seeded as empty arrays (a seeded `[]` reaching
+  the directory via the outbox replay would clobber the real records on
+  file). Browser mode keeps the seed-everything fresh-install behavior.
+- **`getSettings` adopts the legacy file when the stored value carries no
+  user data**: versions before the split migrated `settings` (the provider
+  profiles) into the directory; if a bootstrap already wrote fabricated
+  defaults into browser storage, the read path now recognizes the pristine
+  default and restores the real settings from `settings.json` — writing the
+  adopted value back so the repair sticks.
+- Regression-tested in `tests/settings-legacy-adopt.spec.ts`.
+
+### Fixed — Storage directory data loss
+
+- **Config/data split**: with a storage directory configured, user content
+  (chats, conversations, history, workflows, drafts, skills, agents,
+  profiles, passwords, tasks, checkpoints) is written ONLY to that
+  directory; extension configuration (`settings`, provider profiles,
+  Feishu config, schema version) stays in browser storage permanently.
+- **Outbox instead of a staging mirror**: writes made while the directory
+  handle is unavailable (e.g. right after a browser restart, before the
+  panel re-grants access) park in a durable outbox instead of being
+  misdirected into `chrome.storage.local`. Reads overlay pending entries
+  (and deletion tombstones), so a read-modify-write always starts from the
+  full latest state — the missing property that let a stale browser copy
+  overwrite whole workflow lists. Once access is restored the outbox
+  drains into the directory automatically, per-entry guarded so an entry
+  older than the file cannot regress it.
+- **Read cache**: the last value that reached a file is served while the
+  directory is unreachable, so the panel no longer renders empty lists
+  that look like data loss. Size-capped (5 MB, conversations evicted
+  first); cleared when file mode ends.
+- **Per-key write locks** for every read-modify-write collection
+  (workflows, settings/providers, skills, agents, conversations,
+  profiles, passwords, history, drafts) — shared implementation in
+  `lib/key-lock.ts`. Concurrent saves in the service worker no longer
+  drop one another's entries.
+- **Single writer**: the history tab now saves generated workflows through
+  a worker command instead of writing the collection directly from the
+  panel, removing the last cross-context race; a source-scan test keeps
+  UI contexts from re-importing content-write functions.
+- **Safe legacy migration**: pre-upgrade browser copies are merged into
+  the files per record (newest `updatedAt` wins) instead of overwriting
+  them; legacy config files are adopted back into browser storage on
+  first read.
+- Settings → storage shows how many changes are waiting to be written to
+  the folder.
 
 ## [0.6.3] - 2026-09-16
 

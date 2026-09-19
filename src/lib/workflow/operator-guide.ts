@@ -10,7 +10,9 @@
  *    the agent's instructions for authoring workflows in conversation.
  *
  * Pure text — no imports, no `chrome` — so both sides and the tests can use it
- * freely. Kept under the skill store's 8000-char instruction limit.
+ * freely. Kept within the skill store's instruction limit (see
+ * `MAX_INSTRUCTIONS_LENGTH` in `lib/skills`) with headroom for one more
+ * paragraph — the budget is pinned by `tests/skills.spec.ts`.
  *
  * @module lib/workflow/operator-guide
  */
@@ -26,11 +28,16 @@ export const OPERATOR_GUIDE = `# 工作流算子指南（Browser Copilot）
 ## 可靠性要求（生成时就要做到，重放才稳）
 
 - 元素定位优先用稳定选择器：#id、[data-testid="…"]、[name="…"]；避免脆弱的
-  结构性 nth-child 长链与自动生成的 class。
+  nth-child 长链与自动 class；录制时逐候选验证命中数，恰一命中者才作 selector。
 - 导航后（new-tab、导致跳转的 event-click/press-key）出现的交互节点，写上
   waitForSelector:true（默认轮询 5 秒；慢页面再加 waitSelectorTimeout），
   等元素真正出现再操作——比固定延时更稳。
 - 选择器拿不准时，把整条业务动作拆细，每步都用最能代表意图的定位方式。
+- "采集列表里每条的详情"类任务：完整迭代 2-3 条（点开一条 → 读取详情字段 →
+  go-back 返回列表），结束时停在列表页。重复段会被折叠成元素循环，重放时
+  遍历当次列表的全部条目——只录一条或手动展开 N 条都会失效。
+- 需求里有站点能力做不到的（如按通勤时间过滤），不要硬造步骤：改用站点自带
+  筛选（城市/区域/薪资/经验）近似，并说明哪部分做不到、用了什么近似。
 - 可有可无的步骤用 element-exists 分支跳过；写 always-fail 的节点靠 AI 调试兜底
   是下策。
 
@@ -120,6 +127,10 @@ export const OPERATOR_GUIDE = `# 工作流算子指南（Browser Copilot）
 | \`conditions\` | if/exists 分支、各类循环 |
 | \`general\` | 等待、子工作流、webhook、通知、剪贴板、嵌套 AI |
 
+对话模式的读取工具（\`read_current_page\` / \`snapshot_page\` / \`screenshot\`）只帮**你自己**看页面，
+**不记录节点**；要把"读"做成工作流步骤，用 \`wf_op_get-text\`（单元素或整列）或
+\`wf_op_read-page\`（整页）。
+
 ## 对话动作 → 算子映射
 
 | 对话动作 | 算子 | 分类 | 关键参数 |
@@ -194,5 +205,6 @@ export const OPERATOR_GUIDE = `# 工作流算子指南（Browser Copilot）
 
 ## 整理/生成工作流的输出要求
 
-先列步骤清单：每步一行——算子名 + 一句话说明 + 保留/剔除及剔除理由；然后给出与
-清单一致的节点与连边数据。保存确认卡片上会再做一次 AI 审查，判定标准与本指南一致。`
+先列步骤清单：每步一行——算子名 + 一句话说明 + 保留/剔除及剔除理由；节点与连边由
+\`wf_op_*\` 调用**自动记录**，不要手写 JSON。保存确认卡片上会再做一次 AI 审查，判定标准
+与本指南一致。`

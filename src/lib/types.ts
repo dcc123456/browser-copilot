@@ -78,7 +78,7 @@ export interface Agent {
    * agent catalogue (the analogue of `Skill.description`).
    */
   delegationHint: string
-  /** ≤8000 (mirrors MAX_INSTRUCTIONS_LENGTH). The agent's system-prompt body. */
+  /** ≤9000 (mirrors MAX_INSTRUCTIONS_LENGTH). The agent's system-prompt body. */
   instructions: string
   /**
    * Tool whitelist. Empty array = inherit ALL of the supervisor's tools

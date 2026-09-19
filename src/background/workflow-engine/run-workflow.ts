@@ -28,9 +28,15 @@ import {
   type RunSource,
   type RunningTask,
 } from '../running-tasks'
-import { countElements, elementSelectorAt, execJsOnActiveTab } from '../driver'
+import {
+  countElements,
+  elementSelectorAt,
+  execJsOnActiveTab,
+  resolveAutomationTab,
+} from '../driver'
 import { normalScopeFromWindowId } from '../automation-scope'
 import { BLOCK_BY_ID } from '../../lib/workflow/blocks/palette'
+import { unanchoredElementStart } from '../../lib/workflow/runnability'
 import { runWorkflow } from './engine'
 import type { AiTakeoverHook } from './engine'
 import { DEFAULT_WAIT_MS, applyDefaultWaits } from './debug-session'
@@ -229,6 +235,40 @@ export async function executeWorkflow(
     // references — which is how it records business data instead of freezing it
     // — would resolve to nothing and drive the page with empty values.
     let variables = seedFromTrigger(effective.trigger, opts.variables)
+    // Generated-graph page hint: before the run starts, check whether the tab
+    // it will drive is even the same origin as the page the graph was
+    // generated on — the cheapest possible explanation for "first step says
+    // element not found". Only fires for a manual trigger on an UNANCHORED
+    // graph (no new-tab before the first element action), so a graph that
+    // opens its own page is never bothered with it. Informational: the run
+    // proceeds, because acting on a similar page may be exactly what the
+    // user intends.
+    const generationOriginUrl = effective.settings?.generationOriginUrl
+    if (
+      (effective.trigger?.type ?? 'manual') === 'manual' &&
+      typeof generationOriginUrl === 'string' &&
+      generationOriginUrl.trim() !== '' &&
+      unanchoredElementStart(effective)
+    ) {
+      const tab = await resolveAutomationTab(undefined, scope).catch(() => undefined)
+      const originOf = (url: string): string | null => {
+        try {
+          return new URL(url).origin
+        } catch {
+          return null
+        }
+      }
+      const currentOrigin = typeof tab?.url === 'string' ? originOf(tab.url) : null
+      const generatedOrigin = originOf(generationOriginUrl)
+      if (currentOrigin && generatedOrigin && currentOrigin !== generatedOrigin) {
+        addStep(
+          runId,
+          'status',
+          `提示：当前页面（${currentOrigin}）与生成该工作流的页面（${generatedOrigin}）不同源，` +
+            '元素定位很可能失效。若运行失败，请先打开生成时的页面再运行。',
+        )
+      }
+    }
     if (opts.resumeFrom) {
       const inMemory = checkpointStore.load(opts.resumeFrom)
       const checkpoints =

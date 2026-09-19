@@ -15,6 +15,7 @@
 
 import { resolveRecordedLocator } from '../lib/workflow/target-to-selector'
 import type { RecordedLocator, SnapshotTargetEntry } from '../lib/workflow/target-to-selector'
+import { verifyRecordedSelector } from './selector-probe'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
 import {
   isOperatorTool,
@@ -50,6 +51,7 @@ import {
 } from './operator-tool-handler'
 import { executeOperatorNode } from './workflow-engine/operator-exec'
 import type { BlockExecutor } from './workflow-engine/executors'
+import { resolveAutomationTab } from './driver'
 
 /**
  * Pinned tab per conversation. Navigation blocks report the tab they opened so
@@ -193,14 +195,16 @@ export type OperatorRunResult =
  * Merge the resolved element locator into the node's parameters. The canonical
  * shape is a flat `selector` plus `findBy`, with the rich `target` kept
  * alongside so the kernel can still fall back to role/text specs when no CSS
- * selector can express the element.
+ * selector can express the element. A verified locator also stamps
+ * `selectorVerified`, and an unverified one that lost its CSS candidate
+ * records NO selector at all — the rich target becomes the replay's primary.
  */
 function withLocator(
   args: Record<string, unknown>,
   locator: RecordedLocator | undefined,
 ): Record<string, unknown> {
   if (!locator) return args
-  const { selector, target, label } = locator
+  const { selector, target, label, verified } = locator
   const out: Record<string, unknown> = { ...args }
   delete out.ref
   if (selector) {
@@ -209,6 +213,7 @@ function withLocator(
   }
   if (target) out.target = target
   if (label && typeof out.label !== 'string') out.label = label
+  if (typeof verified === 'boolean') out.selectorVerified = verified
   return out
 }
 
@@ -276,7 +281,15 @@ function rewriteForRecording(
   draft.variables = draft.variables ?? {}
 
   const raw = stripDraftOnlyKeys(args)
-  const locator = resolveOperatorLocator(blockId, raw, snapshotTargets)
+  const resolved = resolveOperatorLocator(blockId, raw, snapshotTargets)
+  // Verify the locator against the live page BEFORE acting: the candidate CSS
+  // selectors are counted in one injection, and the one matching exactly one
+  // element becomes the recorded `selector`. A locator nobody probed is kept
+  // as-is, so a refusal to inject can never degrade a working call.
+  const locator = await verifyRecordedSelector(resolved, {
+    ...(pinnedTab.has(conversationId) ? { tabId: pinnedTab.get(conversationId) } : {}),
+    ...(scope ? { scope } : {}),
+  })
 
   // Credential capture: a literal aimed at a password field is a user-typed
   // account/password from chat. Instead of refusing it (the old policy), we
@@ -320,6 +333,19 @@ function rewriteForRecording(
 
   if (outcome.status === 'failed') {
     return { ok: false, error: outcome.error ?? `${blockId} failed` }
+  }
+
+  // Remember the page this session first acted on (B2 of the first-run plan).
+  // A graph with no navigation before its first element action can only replay
+  // on THAT page, so the save card and the run gate need to know it. Only
+  // http(s) pages are automatable — anything else would poison the warning.
+  if (!draft.originUrl && blockTakesElement(blockId)) {
+    const tab = await resolveAutomationTab(
+      pinnedTab.has(conversationId) ? pinnedTab.get(conversationId) : undefined,
+      scope,
+    ).catch(() => undefined)
+    const url = typeof tab?.url === 'string' ? tab.url : ''
+    if (/^https?:/i.test(url)) draft.originUrl = url
   }
 
   // Harvest the executor's writes. `get-secret` is the only block that pulls a

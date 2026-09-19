@@ -6,6 +6,7 @@ import {
   OPERATOR_CATEGORY_TOOL_NAMES,
 } from '../src/lib/workflow/operator-categories'
 import { JAVASCRIPT_BLOCK_ID, operatorToolName } from '../src/lib/workflow/operator-tools'
+import { BUILT_IN_SKILLS } from '../src/lib/builtin-skills'
 import type { BlockCategory } from '../src/lib/workflow/blocks/types'
 
 /**
@@ -19,49 +20,79 @@ import type { BlockCategory } from '../src/lib/workflow/blocks/types'
  * mode cost ~50k chars per round and pushed a 10-step task into its 20-round
  * cap. The mode now advertises four operators outright and hands out the rest by
  * CATEGORY, so the budget that matters is "one category at a time".
+ *
+ * Raised 18_000 → 20_000 when `present_plan` (the plan skill's approval
+ * hand-off, ~1.2k schema) joined the always-advertised core: plan-first needs
+ * the tool reachable in round one, not after a load_tools round trip.
  */
-const MAX_ADVERTISED_PAYLOAD_CHARS = 17_500
+const MAX_ADVERTISED_PAYLOAD_CHARS = 20_000
 /**
  * The full catalog (core + every on-demand group) must also stay bounded.
  * Raised 19_500 → 21_500 when the on-demand "delegate" group
- * (`delegate_to_agent`) was added for multi-agent subcontracting. The delegate
- * schema stays OUT of the advertised budget above because the group is only
- * loaded via `load_tools({groups:['delegate']})`.
+ * (`delegate_to_agent`) was added, then → 24_500 when `create_scheduled_task`
+ * joined the `ops` group (~2.3k schema), then → 25_500 when `present_plan`
+ * (the plan skill's approval hand-off, ~1.2k schema) joined the core TOOLS.
+ * The delegate schema stays OUT of the advertised budget above because the
+ * group is only loaded via `load_tools({groups:['delegate']})`.
  */
-const MAX_CATALOG_CHARS = 21_500
+const MAX_CATALOG_CHARS = 25_500
 /**
  * Round 1 of a workflow conversation: the core tool set, the core four
- * operators, `use_operators` and the workflow-specific `load_tools`.
- * Measured ~14.6k, i.e. BELOW full auto despite the longer instructions —
- * because the native action tools it replaces were larger than the operators
- * that take their place.
+ * operators, `use_operators`, the workflow-specific `load_tools`, AND the
+ * mounted `workflow-generator` skill in the system prompt (see
+ * {@link workflowSystemPrompt}). Measured ~24.1k. Raised 16_500 → 25_000 when
+ * the operator guide started riding in the system prompt: the mode paragraph
+ * was trimmed to pure mechanics (dedupe), and the guide is the one place the
+ * action→operator mapping, the data rules and the keep/drop criteria live.
  */
-const MAX_WORKFLOW_PAYLOAD_CHARS = 16_000
+const MAX_WORKFLOW_PAYLOAD_CHARS = 25_000
 /**
  * The real per-round ceiling: one declared category on top of round 1. The
- * largest (`interaction`, 13 schemas) measures ~23.2k; the smallest (`data`)
- * ~18.2k. This is what replaced "all 54 schemas every round".
+ * largest (`interaction`, 13 schemas) measures ~32.8k; the smallest (`data`)
+ * ~28.3k. Raised 25_100 → 34_000 together with the round-1 budget (the mounted
+ * operator guide), after the mode paragraph's duplicated prose was deleted.
  */
-const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 25_000
+const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 34_000
 /**
  * The ceiling for the worst case the model can actually reach: every category
- * declared at once, which is the same set as `operators_author` (~42.9k). It is
- * an escape hatch, not a steady state, but it must not run away either.
+ * declared at once, which is the same set as `operators_author` (~42.9k of tool
+ * schemas). It is an escape hatch, not a steady state, but it must not run away
+ * either. Raised 46_700 → 56_000 together with the round-1 budget (the mounted
+ * operator guide).
  */
-const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 46_000
+const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 56_000
 /**
  * Absolute worst case: every category plus both escape hatches loaded. Stays
  * loaded for the rest of the conversation, so this is a per-round cost, not a
- * one-off.
+ * one-off. Raised 48_000 → 57_500 together with the round-1 budget (the
+ * mounted operator guide).
  */
-const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 48_000
+const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 57_500
 /**
- * The guardrails that actually matter, expressed as ratios against full auto:
- * the tool surface of round 1 must be meaningfully SMALLER (the whole point of
- * the dispatch), and the total round-1 cost must not exceed full auto's.
+ * The guardrails that matter, expressed as ratios against full auto: the tool
+ * surface of round 1 must be meaningfully SMALLER (the whole point of the
+ * dispatch) — that guard is unchanged. The total-cost ratio was raised
+ * 0.95 → 1.4 because workflow now carries the operator guide in its system
+ * prompt while full auto does not; the tool-surface ratio above still guards
+ * the dispatch mechanism itself.
  */
 const MAX_WORKFLOW_TOOLS_RATIO = 0.75
-const MAX_WORKFLOW_OVER_FULL_AUTO_RATIO = 0.95
+const MAX_WORKFLOW_OVER_FULL_AUTO_RATIO = 1.4
+
+/**
+ * Workflow-generation turns mount the built-in `workflow-generator` skill into
+ * the system prompt (see `modeSkill` in background/agent), so every workflow
+ * measurement below passes it — the numbers must reflect what production sends,
+ * not the bare prompt. Kept here once so the skill body and the budgets can
+ * never drift apart silently.
+ */
+const WORKFLOW_MODE_SKILL = BUILT_IN_SKILLS.find(
+  (skill) => skill.id === 'builtin-workflow-generator',
+)
+if (!WORKFLOW_MODE_SKILL) throw new Error('builtin-workflow-generator skill is missing')
+
+const workflowSystemPrompt = (): string =>
+  buildSystemPrompt({ mode: 'workflow', modeSkill: WORKFLOW_MODE_SKILL })
 
 const workflowRound1 = () => advertiseTools({ mode: 'workflow' })
 const workflowNames = (options: Parameters<typeof advertiseTools>[0]) =>
@@ -100,7 +131,7 @@ describe('first-turn agent payload size (workflow generate)', () => {
   })
 
   it('stays under the round-1 budget', () => {
-    const system = buildSystemPrompt({ mode: 'workflow' })
+    const system = workflowSystemPrompt()
     const tools = JSON.stringify(workflowRound1())
     const total = system.length + tools.length
 
@@ -114,7 +145,7 @@ describe('first-turn agent payload size (workflow generate)', () => {
 
   it('stays under the budget with any single category declared', () => {
     for (const category of ADVERTISABLE_OPERATOR_CATEGORIES) {
-      const system = buildSystemPrompt({ mode: 'workflow' })
+      const system = workflowSystemPrompt()
       const tools = JSON.stringify(
         advertiseTools({ mode: 'workflow', activeOperatorCategories: new Set([category]) }),
       )
@@ -128,7 +159,7 @@ describe('first-turn agent payload size (workflow generate)', () => {
   })
 
   it('stays bounded with every category declared at once', () => {
-    const system = buildSystemPrompt({ mode: 'workflow' })
+    const system = workflowSystemPrompt()
     const tools = JSON.stringify(
       advertiseTools({
         mode: 'workflow',
@@ -142,7 +173,7 @@ describe('first-turn agent payload size (workflow generate)', () => {
   })
 
   it('stays bounded once both escape hatches are loaded', () => {
-    const system = buildSystemPrompt({ mode: 'workflow' })
+    const system = workflowSystemPrompt()
     const tools = JSON.stringify(
       advertiseTools({
         mode: 'workflow',
@@ -178,8 +209,7 @@ describe('first-turn agent payload size (workflow generate)', () => {
     const full =
       buildSystemPrompt({ mode: 'full' }).length +
       JSON.stringify(advertiseTools({ mode: 'full' })).length
-    const workflow =
-      buildSystemPrompt({ mode: 'workflow' }).length + JSON.stringify(workflowRound1()).length
+    const workflow = workflowSystemPrompt().length + JSON.stringify(workflowRound1()).length
 
     console.log(
       `[payload-size] workflow/full round-1 total ratio: ${(workflow / full).toFixed(3)} ` +

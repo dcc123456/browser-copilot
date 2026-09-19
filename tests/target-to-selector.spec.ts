@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
+  chooseRecordedSelector,
   resolveRecordedLocator,
   richTargetFromAny,
   richTargetFromArgs,
+  selectorCandidatesOf,
   selectorFromArgs,
   selectorFromSpec,
   selectorFromTarget,
   withRichTarget,
 } from '../src/lib/workflow/target-to-selector'
-import type { SnapshotTargetEntry } from '../src/lib/workflow/target-to-selector'
+import type { RecordedLocator, SnapshotTargetEntry } from '../src/lib/workflow/target-to-selector'
 
 describe('selectorFromSpec', () => {
   it('keeps a css selector trimmed', () => {
@@ -167,5 +169,62 @@ describe('resolveRecordedLocator', () => {
     expect(resolveRecordedLocator(undefined)).toEqual({ selector: '' })
     expect(resolveRecordedLocator({ ref: 42 })).toEqual({ selector: '' })
     expect(resolveRecordedLocator({ ref: 'e1' })).toEqual({ selector: '' })
+  })
+})
+
+describe('chooseRecordedSelector / selectorCandidatesOf', () => {
+  const locator: RecordedLocator = {
+    selector: '.list > div',
+    target: {
+      primary: { how: 'id', value: 'picked' },
+      fallbacks: [
+        { how: 'role', value: 'Buy', role: 'button' },
+        { how: 'css', value: '.list > div:nth-child(2)' },
+      ],
+    },
+  }
+
+  it('collects CSS-expressible candidates in preference order, deduplicated', () => {
+    const candidates = selectorCandidatesOf(locator)
+    expect(candidates).toEqual(['.list > div', '#picked', '.list > div:nth-child(2)'])
+  })
+
+  it('picks the first candidate matching exactly one element', () => {
+    const chosen = chooseRecordedSelector(locator, (s) =>
+      s === '.list > div' ? 3 : s === '#picked' ? 1 : 0,
+    )
+    expect(chosen).toEqual({ selector: '#picked', verified: true })
+  })
+
+  it('keeps an explicit selector that uniquely matches without consulting specs', () => {
+    const chosen = chooseRecordedSelector(
+      { selector: '#only', target: { primary: { how: 'css', value: '.also-one' } } },
+      () => 1,
+    )
+    expect(chosen).toEqual({ selector: '#only', verified: true })
+  })
+
+  it('falls back to a candidate that at least matches something when nothing is exact', () => {
+    const chosen = chooseRecordedSelector(locator, (s) => (s === '.list > div' ? 3 : 0))
+    expect(chosen).toEqual({ selector: '.list > div', verified: false })
+  })
+
+  it('records NO selector when nothing matches, so replay leans on the rich target', () => {
+    const roleOnly: RecordedLocator = {
+      selector: '',
+      target: {
+        primary: { how: 'role', value: 'Buy', role: 'button' },
+        fallbacks: [{ how: 'css', value: '.stale' }],
+      },
+    }
+    const chosen = chooseRecordedSelector(roleOnly, () => 0)
+    expect(chosen).toEqual({ selector: '', verified: false })
+  })
+
+  it('degrades to empty for a locator with no candidates at all', () => {
+    expect(chooseRecordedSelector({ selector: '' }, () => 1)).toEqual({
+      selector: '',
+      verified: false,
+    })
   })
 })

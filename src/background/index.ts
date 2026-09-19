@@ -120,7 +120,8 @@ import {
 import { createCollapseProbe } from './collapse-probe'
 import { forgetGenerationSecrets } from './operator-tool-run'
 import { resolveWorkflowForSave } from './history-compile'
-import { probeWorkflowSelectors } from './selector-probe'
+import { probeWorkflowSelectors, hardenWorkflowSelectors } from './selector-probe'
+import { persistDefaultWaits } from '../lib/workflow/runnability'
 import { validateWorkflowForRun } from '../lib/workflow/validation'
 import { activeTab, readActivePage, readActiveSelection } from './page'
 import {
@@ -1154,10 +1155,25 @@ async function handleCommand(
     case 'workflows.get':
       return { type: 'workflows.get', workflow: await getWorkflow(command.id) }
 
-    case 'workflows.save':
-      await saveWorkflow(command.workflow)
+    case 'workflows.save': {
+      let workflow = command.workflow
+      if (command.fromGeneration) {
+        // A save from the generation card gets the two hardening passes (see
+        // specs/2026-09-19-first-run-success-design.md): element locators are
+        // re-picked against the live page (the page the user just generated
+        // on is the best evidence the graph will ever get), and the element
+        // waits the run path would force anyway are persisted so every
+        // consumer of the graph sees them. Editor/import saves skip both —
+        // hand-tuned selectors are never rewritten behind the user's back.
+        // The page may already be closed or restricted: hardening returns the
+        // graph unchanged then, which degrades to exactly the old behavior.
+        await hardenWorkflowSelectors(workflow, { scope: await currentPluginScope() })
+        workflow = persistDefaultWaits(workflow)
+      }
+      await saveWorkflow(workflow)
       await rescheduleAllWorkflowTriggers()
       return { type: 'workflows.save' }
+    }
 
     case 'workflows.delete':
       await deleteWorkflow(command.id)
@@ -1875,6 +1891,18 @@ chrome.runtime.onConnect.addListener((port) => {
 
   /** Pending confirmation resolvers, keyed by request id. */
   const pending = new Map<string, (approved: boolean) => void>()
+  /**
+   * Pending `ask_user` resolvers, keyed by request id. Resolves with the
+   * user's typed/picked answer, or `cancelled: true` when the question can no
+   * longer be answered (turn cancelled, panel closed).
+   */
+  const pendingAskUser = new Map<string, (answer: { answer: string; cancelled: boolean }) => void>()
+  /**
+   * Pending `present_plan` resolvers, keyed by request id. Resolves with the
+   * user's approve/reject decision (rejection carries revision feedback), or
+   * a rejected decision when the card can no longer be answered.
+   */
+  const pendingPlan = new Map<string, (decision: { approved: boolean; feedback?: string }) => void>()
   let controller: AbortController | null = null
 
   const send = (message: AgentServerMessage): void => {
@@ -1914,6 +1942,24 @@ chrome.runtime.onConnect.addListener((port) => {
     if (message.type === 'confirm') {
       pending.get(message.requestId)?.(message.approved)
       pending.delete(message.requestId)
+      return
+    }
+
+    if (message.type === 'ask_user.answer') {
+      pendingAskUser.get(message.requestId)?.({
+        answer: message.answer,
+        cancelled: message.cancelled,
+      })
+      pendingAskUser.delete(message.requestId)
+      return
+    }
+
+    if (message.type === 'plan.decision') {
+      pendingPlan.get(message.requestId)?.({
+        approved: message.approved,
+        ...(message.feedback ? { feedback: message.feedback } : {}),
+      })
+      pendingPlan.delete(message.requestId)
       return
     }
 
@@ -1958,6 +2004,13 @@ chrome.runtime.onConnect.addListener((port) => {
       // Unblock anything waiting on a confirmation.
       for (const resolve of pending.values()) resolve(false)
       pending.clear()
+      // …and on a pending clarifying question: nobody will answer it now.
+      for (const resolve of pendingAskUser.values()) resolve({ answer: '', cancelled: true })
+      pendingAskUser.clear()
+      // …and on a pending plan card: rejected, so the model stops instead of
+      // executing an unapproved plan.
+      for (const resolve of pendingPlan.values()) resolve({ approved: false })
+      pendingPlan.clear()
       return
     }
 
@@ -2144,6 +2197,33 @@ chrome.runtime.onConnect.addListener((port) => {
               pending.set(requestId, resolve)
               send({ type: 'confirm.request', requestId, name, argsPreview })
             }),
+          // ask_user uses the port-level `send` (not sendWithTracking), like
+          // `confirm`, so delegated sub-agents inherit a working question
+          // channel: their muted `deps.send` drops progress messages, but the
+          // question card must still reach the panel.
+          askUser: ({ question, options }) =>
+            new Promise<{ answer: string; cancelled: boolean }>((resolve) => {
+              const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+              pendingAskUser.set(requestId, resolve)
+              send({ type: 'ask_user.request', requestId, question, options })
+            }),
+          // present_plan rides the same port-level `send` as ask_user so
+          // delegated sub-agents inherit a working approval channel; the plan
+          // card must reach the panel even when the specialist's progress
+          // stream is muted.
+          planDecision: ({ goal, steps, risks, split }) =>
+            new Promise<{ approved: boolean; feedback?: string }>((resolve) => {
+              const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+              pendingPlan.set(requestId, resolve)
+              send({
+                type: 'plan.request',
+                requestId,
+                goal,
+                steps,
+                ...(risks ? { risks } : {}),
+                ...(split ? { split } : {}),
+              })
+            }),
         })
         sendWithTracking({ type: 'done', ...(turnUsage ? { usage: turnUsage } : {}) })
       } catch (error) {
@@ -2207,6 +2287,12 @@ chrome.runtime.onConnect.addListener((port) => {
     // gone, so they resolve as declined instead of hanging until the turn caps.
     for (const resolve of pending.values()) resolve(false)
     pending.clear()
+    // Same for pending clarifying questions: nobody can answer them now.
+    for (const resolve of pendingAskUser.values()) resolve({ answer: '', cancelled: true })
+    pendingAskUser.clear()
+    // Same for pending plan cards: nobody can approve them now.
+    for (const resolve of pendingPlan.values()) resolve({ approved: false })
+    pendingPlan.clear()
     // The window keeps hosting a panel only while at least one of its ports is
     // connected; dropping ours may retire it from the trigger guard.
     unregisterPort(port)

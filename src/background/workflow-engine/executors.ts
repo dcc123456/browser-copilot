@@ -399,6 +399,64 @@ function requireReadMatch(what: string, values: readonly string[]): void {
   )
 }
 
+/**
+ * Default poll window (ms) for READ blocks (`get-text` / `attribute-value` /
+ * `read-page`).
+ *
+ * Reads used to be single-shot: one `querySelectorAll`, and an empty result
+ * failed the step. That was fine while a human paced the generation session
+ * (seconds pass between two operator calls), but a replay runs back-to-back —
+ * a read right after a click-triggered navigation raced the page's own
+ * rendering and failed with "没有读到任何内容" before the element ever existed.
+ * Interaction blocks have had a forced wait since `applyDefaultWaits`; reads
+ * get the same treatment here, with a longer window on purpose: a read that
+ * gives up fails its step AND every downstream consumer of the value.
+ */
+export const DEFAULT_READ_WAIT_MS = 5000
+
+/** The poll window a read node should use. */
+interface ReadWaitSource {
+  waitForSelector?: unknown
+  waitSelectorTimeout?: unknown
+}
+
+/**
+ * Effective poll window for one read node: an explicit `waitForSelector:
+ * false` opts out entirely (single attempt, the old behavior); a positive
+ * `waitSelectorTimeout` wins over the default; anything else polls for
+ * {@link DEFAULT_READ_WAIT_MS}.
+ */
+export function readWaitMsOf(data: ReadWaitSource): number {
+  if (data.waitForSelector === false) return 0
+  const explicit = Number(data.waitSelectorTimeout)
+  return Number.isFinite(explicit) && explicit > 0 ? explicit : DEFAULT_READ_WAIT_MS
+}
+
+/**
+ * Retry a read injection until it produces content or the window expires.
+ *
+ * Only an EMPTY result is retried — a thrown injection error (restricted page,
+ * closed tab) propagates immediately, because retrying cannot fix those. The
+ * final empty result is returned as-is so the caller's `requireReadMatch` (or
+ * equivalent) produces the exact error text it always has.
+ */
+async function pollRead<T>(
+  data: ReadWaitSource,
+  ctx: { signal: AbortSignal },
+  attempt: () => Promise<T>,
+  isEmpty: (value: T) => boolean,
+): Promise<T> {
+  const windowMs = readWaitMsOf(data)
+  let value = await attempt()
+  if (!(windowMs > 0)) return value
+  const deadline = Date.now() + windowMs
+  while (isEmpty(value) && Date.now() < deadline) {
+    await sleep(120, ctx.signal)
+    value = await attempt()
+  }
+  return value
+}
+
 // --- Browser executors -------------------------------------------------------
 
 const click: BlockExecutor = async (data, ctx) => {
@@ -598,17 +656,28 @@ const getText: BlockExecutor = async (data, ctx) => {
   if (!tab || typeof tab.id !== 'number') {
     throw new Error('get-text: 没有可读的标签页')
   }
-  const [injection] = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: readTextsInPage,
-    args: [
-      selector,
-      data['multiple'] === true,
-      data['useTextContent'] === true,
-      data['includeTags'] === true,
-    ],
-  })
-  const values = (injection?.result as string[] | undefined) ?? []
+  const tabId: number = tab.id
+  // Poll until the element renders (see `pollRead`): a replay reaches this read
+  // immediately after the preceding navigation, and a single querySelectorAll
+  // raced the page's own rendering.
+  const values = await pollRead(
+    data,
+    ctx,
+    async () => {
+      const [injection] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: readTextsInPage,
+        args: [
+          selector,
+          data['multiple'] === true,
+          data['useTextContent'] === true,
+          data['includeTags'] === true,
+        ],
+      })
+      return (injection?.result as string[] | undefined) ?? []
+    },
+    (result) => result.length === 0,
+  )
   // Reading nothing is a failed step, not an empty result — see
   // `requireReadMatch`. Checked before `publishRead` so the empty value never
   // reaches the variable bag or the data table.
@@ -688,7 +757,18 @@ const readPage: BlockExecutor = async (data, ctx) => {
       ctx.emit('error', 'read-page: 当前没有选中任何文本（source: selection）——读取结果为空')
     }
   } else if (source === 'html') {
-    values = [await readHtmlFromActiveTab(selector, maxChars, ctx)]
+    // Poll only an empty element-scoped read; the full document is never empty
+    // once the page exists, so polling it would only burn the window.
+    values = [
+      await pollRead(
+        data,
+        ctx,
+        () => readHtmlFromActiveTab(selector, maxChars, ctx),
+        // The full document is never empty once the page exists — only an
+        // element-scoped read is worth polling.
+        (html) => selector !== '' && html === '',
+      ),
+    ]
     requireReadMatch(
       selector ? `read-page(source: html, selector: "${selector}")` : 'read-page(source: html)',
       values,
@@ -696,10 +776,20 @@ const readPage: BlockExecutor = async (data, ctx) => {
   } else if (selector) {
     // Element-scoped text: reading the page's own text would ignore the
     // scope, so go through the element reader instead.
-    values = await readTextsFromActiveTab(selector, ctx)
+    values = await pollRead(
+      data,
+      ctx,
+      () => readTextsFromActiveTab(selector, ctx),
+      (result) => result.length === 0,
+    )
     requireReadMatch(`read-page(selector: "${selector}")`, values)
   } else {
-    const page = await readActivePage(maxChars, ctx.scope, ctx.tabId)
+    const page = await pollRead(
+      data,
+      ctx,
+      () => readActivePage(maxChars, ctx.scope, ctx.tabId),
+      (result) => !result.text.trim(),
+    )
     if (page.truncated) ctx.emit('info', `页面正文超过 ${maxChars} 字，已截断`)
     values = [page.text]
     requireReadMatch('read-page(source: text)', values)
@@ -1972,6 +2062,11 @@ const attributeValueExec: BlockExecutor = async (data, ctx) => {
     target: targetFrom(data),
     attribute,
   }
+  // Reads must not race a just-navigated page either: the kernel polls the
+  // target's existence for `op.waitFor` ms before acting, same contract as the
+  // direct-injection reads above.
+  const waitMs = readWaitMsOf(data)
+  if (waitMs > 0) opData.waitFor = waitMs
   if (op === 'set')
     opData.value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
   const result = await execOnActiveTab(opData, ctx.signal, ctx.tabId, ctx.scope)

@@ -10,6 +10,7 @@
 
 import { newId } from './storage'
 import { fileStorageArea } from './fs-store'
+import { withKeyLock } from './key-lock'
 import {
   DEFAULT_TASK_MAX_TOOL_ROUNDS,
   EMPTY_FEISHU_CONFIG,
@@ -22,8 +23,9 @@ import {
 } from './scheduler-types'
 import { normalizeSchedule } from './schedule'
 
-/** Clamps a per-task tool-round budget to a sane positive range. */
-function coerceMaxToolRounds(value: unknown): number {
+/** Clamps a per-task tool-round budget to a sane positive range. Exported so
+ * the agent's `create_scheduled_task` tool applies the same clamp as storage. */
+export function coerceMaxToolRounds(value: unknown): number {
   const n = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(n)) return DEFAULT_TASK_MAX_TOOL_ROUNDS
   return Math.min(500, Math.max(1, Math.round(n)))
@@ -50,24 +52,8 @@ export const MAX_RUN_LOGS = 100
  * same base list and the later write silently dropped the other's entry, so a
  * finished run could disappear from the log entirely. Storage offers no
  * compare-and-swap, so the mutations are queued behind one another per key
- * instead. (Reproduced with a latency-simulating storage double: two concurrent
- * `recordFinishedRun` calls left only one of the two records.)
+ * instead — the shared implementation lives in `lib/key-lock.ts`.
  */
-const writeQueues = new Map<string, Promise<unknown>>()
-
-function withKeyLock<T>(key: string, run: () => Promise<T>): Promise<T> {
-  const tail = writeQueues.get(key) ?? Promise.resolve()
-  const next = tail.then(run, run)
-  // Swallow the settled result so one failed mutation cannot strand the queue.
-  writeQueues.set(
-    key,
-    next.then(
-      () => undefined,
-      () => undefined,
-    ),
-  )
-  return next
-}
 
 function asTask(value: unknown): ScheduledTask | null {
   if (!value || typeof value !== 'object') return null

@@ -80,9 +80,10 @@ export default function App() {
     })()
     void refreshSkills()
     void refreshAgents()
-    // Best-effort push of any browser-mirror writes the service worker made
-    // while the file handle was unavailable (e.g. right after a restart, before
-    // the panel re-granted access). Idempotent and safe to run on every open.
+    // Best-effort drain of the storage outbox: writes the service worker
+    // parked while the directory handle was unavailable (e.g. right after a
+    // restart, before the panel re-granted access) are pushed into the folder
+    // here. Idempotent and safe to run on every open.
     void syncToFiles().catch(() => {})
   }, [refreshSkills, refreshAgents])
 

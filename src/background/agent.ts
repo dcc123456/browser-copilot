@@ -57,7 +57,12 @@ import { runOperatorToolWithExecution } from './operator-tool-run'
 import type { AgentServerMessage, TurnTokenUsage } from '../lib/messages'
 import { notifySkillsChanged } from '../lib/messages'
 import { renderAgentCatalogue, renderSubAgentSection, renderSupervisorGuide } from '../lib/agents'
-import { renderSkillCatalogue, renderSkillPrompt, validateSkill } from '../lib/skills'
+import {
+  renderModeSkillPrompt,
+  renderSkillCatalogue,
+  renderSkillPrompt,
+  validateSkill,
+} from '../lib/skills'
 import { BUILT_IN_SUPERVISOR_ID, getBuiltinI18nKeys } from '../lib/builtin-agents'
 import type { Messages } from '../lib/i18n'
 import { effectiveLocale, messagesFor } from '../lib/i18n'
@@ -128,10 +133,27 @@ import {
 import { activeTab, readActivePage } from './page'
 import { captureVisiblePage } from './capture'
 import { captureElementRobust } from './element-capture'
-import { listTasks } from '../lib/task-store'
-import { describeSchedule } from '../lib/schedule'
+import { listTasks, createDraft, getTask, saveTask, coerceMaxToolRounds } from '../lib/task-store'
+import { describeSchedule, nextRunAt, normalizeSchedule } from '../lib/schedule'
+import type { Schedule, ScheduledTask } from '../lib/scheduler-types'
+import { getWorkflow, listWorkflows } from '../lib/workflow/storage'
+import { scheduleTask } from './scheduler'
+import { BUILT_IN_SKILLS } from '../lib/builtin-skills'
 
-/** Tools that change something and therefore always need approval. */
+/**
+ * Tools that change something and therefore always need approval.
+ *
+ * Mostly page actions, but the set is really "has a persistent side effect":
+ * `create_skill` writes to the skill store and `create_scheduled_task` arms a
+ * recurring unattended job, so both ask in semi mode like any click does. They
+ * never touch the page, which is why neither appears in WORKFLOW_WITHHELD_TOOLS.
+ *
+ * `ask_user` is deliberately absent from both this set and `READ_TOOLS`: asking
+ * IS the interaction, so it must never be held behind the approval card, and
+ * `modeAutoApproves` / `needsConfirmation` then auto-approve it in every mode.
+ * It is dispatched by a dedicated branch in `runOneToolCall`, never by
+ * `executeTool`.
+ */
 const ACTION_TOOLS = new Set([
   'click',
   'fill',
@@ -151,6 +173,7 @@ const ACTION_TOOLS = new Set([
   'recognize_image',
   'screenshot',
   'create_skill',
+  'create_scheduled_task',
   'run_plan',
 ])
 
@@ -175,6 +198,46 @@ export function isPageAction(name: string): boolean {
   return ACTION_TOOLS.has(name) || isOperatorTool(name)
 }
 
+/** The built-in plan skill (`lib/builtin-skills`) that arms the plan gate. */
+export const PLAN_SKILL_NAME = 'plan'
+
+/**
+ * Tools blocked by the plan gate despite being in ACTION_TOOLS: they look like
+ * actions only because they reach the image model, but they change nothing —
+ * and visual inspection of the page IS part of the plan skill's research
+ * phase ("查看页面，分析页面结构").
+ */
+const PLAN_PHASE_READS: ReadonlySet<string> = new Set(['screenshot', 'recognize_image'])
+
+/** Mutable, per-turn state of the plan-first gate (see {@link planGateBlocks}). */
+export interface PlanGate {
+  /** True while the plan skill governs this turn (pinned or use_skill-loaded). */
+  armed: boolean
+  /** Flips true only by an approved `present_plan` call; reset each turn. */
+  approved: boolean
+  /** The approved plan declared a multi-workflow split (releases compose_workflow). */
+  split: boolean
+}
+
+/**
+ * PURE plan-gate predicate: does the gate currently refuse `name`?
+ *
+ * The gate exists because prompting cannot guarantee plan-first: in full-auto
+ * (and workflow generation) every action tool is pre-approved, so a model that
+ * skips the plan would just act. When the plan skill governs the turn and its
+ * plan has not been approved yet, every page action — including every
+ * `wf_op_*` operator, which would otherwise record research detours into the
+ * draft — is refused with a pointer to `present_plan`. Reads (and the two
+ * read-like image tools) stay available so the research phase can work.
+ *
+ * Exported and side-effect free so the contract can be unit-tested without a
+ * browser driver. Callers pass `ctx.planGate`; absence means the gate is off.
+ */
+export function planGateBlocks(gate: PlanGate | undefined, name: string): boolean {
+  if (!gate || !gate.armed || gate.approved) return false
+  return isPageAction(name) && !PLAN_PHASE_READS.has(name)
+}
+
 /** Fallback cap used when settings cannot supply one. */
 const DEFAULT_MAX_TOOL_ROUNDS = 20
 
@@ -188,6 +251,16 @@ export function buildSystemPrompt(options: {
   activeSkill?: Skill | undefined
   catalogue?: readonly Skill[] | undefined
   mode?: AgentMode
+  /**
+   * A skill the MODE mounts for its duration, as opposed to one the user
+   * pinned. Workflow generation auto-activates the built-in `workflow-generator`
+   * skill so the full operator guide (action→operator mapping, data rules,
+   * keep/drop criteria) is in context from the first round — the condensed
+   * English paragraph below carries only the mode MECHANICS, not the domain
+   * knowledge. Resolved from the skill store by the caller, so user edits to
+   * the skill take effect on the next turn.
+   */
+  modeSkill?: Skill | undefined
   /**
    * User-edited base prompt. When a non-empty string it replaces the default
    * operating rules; an empty/undefined value means use the default.
@@ -263,7 +336,7 @@ export function buildSystemPrompt(options: {
     )
   } else if (options.mode === 'full') {
     parts.push(
-      'OPERATING MODE: FULL AUTO. Actions are pre-approved — do not ask for confirmation; batch multiple tool calls per response and take a fresh snapshot after navigations. Read errors back and stop if something looks dangerous.',
+      'OPERATING MODE: FULL AUTO. Actions are pre-approved — do not ask for confirmation; batch multiple tool calls per response and take a fresh snapshot after navigations. Read errors back and stop if something looks dangerous. Use ask_user SPARINGLY: only when a decision is truly blocking and hard to reverse (spends money, deletes or sends data); otherwise pick the best option yourself and state the assumption.',
     )
   } else if (options.mode === 'workflow') {
     parts.push(
@@ -273,15 +346,31 @@ export function buildSystemPrompt(options: {
         `ALWAYS AVAILABLE / 常驻算子: ${CORE_OPERATOR_TOOL_NAMES.join(', ')} (navigate, click, fill-or-read a field, read text). Everything else needs its category: call \`use_operators\` with the categories this task needs — it REPLACES the current selection, so name everything you still need. Calling an undeclared operator also works: it activates that category and asks you to call it again, which costs a round.`,
         'Target elements with `ref` from `snapshot_page` — the recorded node stores a durable selector; do not hand-write CSS.',
         'EVERY STEP IS REPLAYED: no exploratory detours — going back, retrying a different element after a miss, or re-opening a view all become nodes.',
-        'READS RECORD NOTHING BY THEMSELVES. `read_current_page` / `snapshot_page` are for YOUR understanding only; to make a read part of the workflow call `wf_op_read-page` (whole page: visible text, your selection, or its HTML) or `wf_op_get-text` (one element, or every match with `multiple`).',
-        'Business data is never a literal: page content must be read by a step, never pasted in from what you saw. Small user knobs become workflow inputs (`inputName`); selectors, variable names and enums stay literal.',
-        'COLLECTING A LIST / 采集列表: `wf_op_get-text` with `multiple:true` + `saveData:true` + `dataColumn:"<name>"` appends every match to the data table — the only thing `wf_op_export-data` writes. A later read with a different `dataColumn` fills that column in on the same rows. If no read sets `saveData`, the export is an empty file.',
-        'SAVING TO DISK / 保存到本地: use `wf_op_save-local` (or `wf_op_export-data`) — it writes to the download folder configured in settings and reports success or failure. Never claim a file was written on the strength of a variable holding the text.',
-        'SCRIPTS ARE A LAST RESORT / 代码节点是最后手段: the workflow must stay maintainable by someone who does NOT read code, so `run_javascript` is NOT advertised. Exhaust the operators first; only when none can express the step, call `load_tools({groups:["operators_escape"]})` with a `justification` naming what you tried and why each fails — without it the call is refused.',
+        'SCRIPTS ARE A LAST RESORT / 代码节点是最后手段: `run_javascript` is NOT advertised. Exhaust the operators first; only when none can express the step, call `load_tools({groups:["operators_escape"]})` — every call must carry a `justification` naming what you tried and why each operator fails, without it the call is refused.',
         'Operators are pre-approved: do not ask, and batch independent calls. Use `wf_op_wait-connections` when a step needs the page to settle — it really waits, never "just in case".',
         'When the task is done, END YOUR TURN. The panel shows a review card listing the recorded steps — do NOT call `compose_workflow` or any save tool.',
+        // The mode paragraph carries the MECHANICS only. The domain knowledge —
+        // which operator maps to which conversational action, the data rules,
+        // the keep/drop criteria — lives in the mounted skill below, once, so
+        // the two never drift apart (see `modeSkill` above).
+        ...(options.modeSkill
+          ? []
+          : [
+              'READS RECORD NOTHING BY THEMSELVES. `read_current_page` / `snapshot_page` are for YOUR understanding only; to make a read part of the workflow call `wf_op_read-page` (whole page) or `wf_op_get-text` (one element, or every match with `multiple`).',
+              'Business data is never a literal: page content must be read by a step, never pasted in from what you saw; small user knobs become workflow inputs (`inputName`).',
+              'COLLECTING A LIST / 采集列表: `wf_op_get-text` with `multiple:true` + `saveData:true` + `dataColumn:"<name>"` appends every match to the data table — the only thing `wf_op_export-data` writes.',
+              'SAVING TO DISK / 保存到本地: use `wf_op_save-local` (or `wf_op_export-data`) — it writes to the configured download folder and reports success or failure.',
+            ]),
       ].join(' '),
     )
+    // The mode-mounted skill goes after the mode paragraph. When it is absent
+    // (tests, or a skill store without the builtin) the domain rules ride in
+    // the paragraph above instead, so the mode is never left mechanics-only.
+    if (options.modeSkill) {
+      parts.push(
+        renderModeSkillPrompt(options.modeSkill, 'this turn runs in workflow-generation mode'),
+      )
+    }
   } else {
     parts.push(
       'OPERATING MODE: SEMI-AUTO (default). Every page-changing action is shown to the user for one-shot approval; be precise so the summary is clear.',
@@ -353,7 +442,12 @@ export const TOOL_GROUPS: Record<string, readonly string[]> = {
   tabs: ['list_tabs', 'tab_new', 'tab_switch', 'tab_close', 'pin_tab', 'unpin_tab'],
   data: ['save_local', 'get_my_profile', 'list_secrets', 'get_secret'],
   skills: ['use_skill', 'create_skill'],
-  ops: ['list_network_requests', 'list_console_messages', 'list_scheduled_tasks'],
+  ops: [
+    'list_network_requests',
+    'list_console_messages',
+    'list_scheduled_tasks',
+    'create_scheduled_task',
+  ],
   // Multi-agent delegation. On demand like the others so it stays out of the
   // first-round payload; never loaded for a sub-agent (recursion guard).
   delegate: ['delegate_to_agent'],
@@ -842,8 +936,79 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'list_scheduled_tasks',
       description:
-        'List enabled scheduled tasks (name, schedule, kind, prompt, latest status). Read-only.',
+        'List enabled scheduled tasks (id, name, schedule, kind, prompt, latest status). Read-only.',
       parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_scheduled_task',
+      description:
+        'Create (or, with an existing id, update) a scheduled task that runs unattended on a clock. ' +
+        'kind "agent-prompt" runs `prompt` through the agent in full auto; kind "workflow" runs a saved workflow by id. ' +
+        'Use when the user asks to do something regularly / every day / on weekdays / on a schedule ("每天早上…", "每周一…", "每隔30分钟…"). ' +
+        'Requires approval / 需要用户确认。',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Short display name shown in the Tasks tab, e.g. "Daily PR digest".',
+          },
+          schedule: {
+            type: 'object',
+            description:
+              'When it runs (local time). One shape per kind; pick the kind that matches the request.',
+            properties: {
+              kind: {
+                type: 'string',
+                enum: ['daily', 'weekdays', 'weekly', 'interval', 'none'],
+                description:
+                  '"daily" = every day at hour:minute; "weekdays" = Mon-Fri at hour:minute; "weekly" = the listed days at hour:minute; "interval" = every N minutes; "none" = manual only (no alarm).',
+              },
+              hour: { type: 'number', description: '0-23, for daily/weekdays/weekly.' },
+              minute: { type: 'number', description: '0-59, for daily/weekdays/weekly.' },
+              days: {
+                type: 'array',
+                items: { type: 'number' },
+                description: 'Weekdays for kind "weekly", 0=Sunday … 6=Saturday.',
+              },
+              minutes: { type: 'number', description: 'Interval length in minutes (1-1440).' },
+            },
+            required: ['kind'],
+          },
+          kind: {
+            type: 'string',
+            enum: ['agent-prompt', 'workflow'],
+            description: 'What runs: default "agent-prompt" executes `prompt` via the agent.',
+          },
+          prompt: {
+            type: 'string',
+            description:
+              'Required for kind "agent-prompt": the self-contained instruction for each unattended run (the agent runs full-auto, cannot ask questions).',
+          },
+          workflowId: {
+            type: 'string',
+            description: 'Required for kind "workflow": the saved workflow id to execute.',
+          },
+          id: {
+            type: 'string',
+            description:
+              'Existing task id (from list_scheduled_tasks or a previous create) to update; omit to create a new task.',
+          },
+          enabled: { type: 'boolean', description: 'Arm the schedule (default true).' },
+          notifyFeishu: {
+            type: 'boolean',
+            description: 'Also deliver each run result to Feishu (default false).',
+          },
+          maxToolRounds: {
+            type: 'number',
+            description: 'agent-prompt only: tool-round budget per run (default 50).',
+          },
+        },
+        required: ['name', 'schedule'],
+      },
     },
   },
   {
@@ -897,7 +1062,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'load_tools',
       description:
-        'Load a group of tools that are hidden by default to keep requests small. Groups: "tabs" (list/open/switch/close/pin tabs), "data" (save files, saved profile, saved passwords), "skills" (use/create saved skills), "ops" (network requests, console messages, scheduled tasks), "delegate" (delegate a sub-task to a specialist agent). Call this before using any tool that is not advertised in the current request; loaded groups stay available for the rest of the conversation.',
+        'Load a group of tools that are hidden by default to keep requests small. Groups: "tabs" (list/open/switch/close/pin tabs), "data" (save files, saved profile, saved passwords), "skills" (use/create saved skills), "ops" (network requests, console messages, scheduled tasks — list and create them), "delegate" (delegate a sub-task to a specialist agent). Call this before using any tool that is not advertised in the current request; loaded groups stay available for the rest of the conversation.',
       parameters: {
         type: 'object',
         properties: {
@@ -948,6 +1113,75 @@ export const TOOLS: WireTool[] = [
   {
     type: 'function',
     function: {
+      name: 'ask_user',
+      description:
+        'Ask the user to decide when the request is ambiguous or a required choice is missing. "question" must first EXPLAIN the situation and what exactly needs deciding; then "options" carries 3-6 candidate approaches, each with one-line "pros" and "cons", the RECOMMENDED one FIRST (the UI pre-selects it and the user confirms or types their own). NEVER call without options.',
+      parameters: {
+        type: 'object',
+        properties: {
+          question: {
+            type: 'string',
+            description: "Explain the situation and the decision needed, in the user's language.",
+          },
+          options: {
+            type: 'array',
+            minItems: 3,
+            maxItems: 6,
+            items: {
+              type: 'object',
+              properties: {
+                label: { type: 'string', description: 'The suggestion, one line.' },
+                pros: { type: 'string', description: 'Its main advantage.' },
+                cons: { type: 'string', description: 'Its main drawback or risk.' },
+              },
+              required: ['label', 'pros', 'cons'],
+            },
+          },
+        },
+        required: ['question', 'options'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'present_plan',
+      description:
+        'Submit the execution plan for user approval BEFORE acting (plan-first). Call it after researching the pages — reads stay allowed — and before any page action; while the plan is unapproved, page actions and workflow operators are refused. On rejection, revise per the feedback and resubmit.',
+      parameters: {
+        type: 'object',
+        properties: {
+          goal: { type: 'string', description: 'One-line task goal, in the user language.' },
+          steps: {
+            type: 'array',
+            description: 'Ordered plan steps, 2-20, one user-visible line each.',
+            items: {
+              type: 'object',
+              properties: {
+                title: { type: 'string', description: 'Tool/operator + target + expected result.' },
+                detail: { type: 'string', description: 'Optional note (input value, dependency).' },
+              },
+              required: ['title'],
+            },
+          },
+          risks: {
+            type: 'string',
+            description:
+              'Optional: login, CAPTCHA, irreversible steps, values the user must supply.',
+          },
+          split: {
+            type: 'string',
+            description:
+              'Workflow mode: when the plan splits into several workflows — how many, their names/responsibilities, how the orchestrator chains them. Omit for one workflow.',
+          },
+        },
+        required: ['goal', 'steps'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'compose_workflow',
       description:
         'Workflow-generation mode only. Close the conversation draft built from prior wf_op_* calls into a Workflow and (by default) save it to the workflow editor. Returns the saved workflow id. After this call the draft is cleared. / 工作流生成模式专用：把当前会话累积的 wf_op_* 节点收尾成一个工作流（默认保存），返回保存后的工作流 id，调用后草稿被清空。',
@@ -968,6 +1202,65 @@ export const TOOLS: WireTool[] = [
 ]
 
 export type ConfirmFn = (name: string, argsPreview: string) => Promise<boolean>
+
+/** One structured suggestion on an `ask_user` card. */
+export interface AskUserOption {
+  label: string
+  pros: string
+  cons: string
+}
+
+/** Payload of the `ask_user` tool: what the model wants to know. */
+export interface AskUserRequest {
+  question: string
+  /** 3-6 candidate approaches with pros/cons; index 0 is the recommendation. */
+  options: AskUserOption[]
+}
+
+/** What the user came back with: an answer, or a dismissal. */
+export interface AskUserAnswer {
+  answer: string
+  cancelled: boolean
+}
+
+/**
+ * Channel for the `ask_user` tool — the question/answer sibling of
+ * {@link ConfirmFn}. Implemented by the panel port (background/index.ts) so
+ * the request reaches the UI and the user's reply resolves the promise.
+ * Unattended runs omit it; the tool then reports the absence instead of
+ * stalling. Sub-agents inherit it via `...parent`, like `confirm`.
+ */
+export type AskUserFn = (request: AskUserRequest) => Promise<AskUserAnswer>
+
+/** One user-visible line of a submitted plan. */
+export interface PlanStep {
+  title: string
+  detail?: string
+}
+
+/** Payload of the `present_plan` tool: the plan awaiting approval. */
+export interface PlanRequest {
+  goal: string
+  steps: PlanStep[]
+  risks?: string
+  split?: string
+}
+
+/** What the user decided: approval, or rejection with revision feedback. */
+export interface PlanDecision {
+  approved: boolean
+  feedback?: string
+}
+
+/**
+ * Channel for the `present_plan` tool — the plan-approval sibling of
+ * {@link AskUserFn}. Implemented by the panel port (background/index.ts):
+ * the request renders as a plan card and the user's decision resolves the
+ * promise. Unattended runs omit it; the tool then auto-approves (the model
+ * states its plan in the answer and proceeds) instead of stalling.
+ * Sub-agents inherit it via `...parent`, like `confirm`.
+ */
+export type PlanDecisionFn = (request: PlanRequest) => Promise<PlanDecision>
 
 /**
  * Conversation-scoped record of which on-demand tool groups the model has
@@ -1032,6 +1325,33 @@ export function getActiveOperatorCategories(conversationId: string): Set<BlockCa
   return activeOperatorCategoryStore.get(conversationId) ?? new Set<BlockCategory>()
 }
 
+/**
+ * Conversation-scoped record of conversations where the PLAN skill became
+ * active through `use_skill` (a pinned plan skill is resolved per turn from
+ * `deps.skillId` instead, so it needs no store). Once armed, every later turn
+ * of the conversation starts with the plan gate on — the skill's own note says
+ * "follow for the rest of this conversation", so the gate must span turns too.
+ * In-memory only, LRU-capped like the group store.
+ */
+const planGateArmedStore = new Map<string, true>()
+const PLAN_GATE_STORE_CAP = 64
+
+/** Marks the conversation plan-gated (called when the plan skill is loaded). */
+export function armPlanGate(conversationId: string): void {
+  planGateArmedStore.delete(conversationId)
+  planGateArmedStore.set(conversationId, true)
+  while (planGateArmedStore.size > PLAN_GATE_STORE_CAP) {
+    const oldest = planGateArmedStore.keys().next().value
+    if (oldest === undefined) break
+    planGateArmedStore.delete(oldest)
+  }
+}
+
+/** Whether the conversation was plan-gated earlier (via a use_skill load). */
+export function isPlanGateArmed(conversationId: string): boolean {
+  return planGateArmedStore.get(conversationId) === true
+}
+
 export interface ToolAdvertiseOptions {
   mode: AgentMode
   disabled?: ReadonlySet<string>
@@ -1052,6 +1372,23 @@ export interface ToolAdvertiseOptions {
    * supervisor, ordinary turns).
    */
   allowTools?: ReadonlySet<string>
+  /**
+   * True when the plan-first flow approved a plan that declares a multi-
+   * workflow split. Workflow mode then also advertises `compose_workflow`, so
+   * the model can save each approved sub-workflow segment as it finishes
+   * recording it (each compose clears the draft for the next segment). Without
+   * an approved split the tool stays hidden — composition is exactly what the
+   * end-of-turn save card is for in the single-workflow flow.
+   */
+  planSplitApproved?: boolean
+  /**
+   * Tools withheld from the advertised set REGARDLESS of mode or groups —
+   * broader than `disabled` (user choice): this is the caller declaring the
+   * tool cannot work in this run. Used to hide `ask_user` from unattended
+   * runs (scheduled tasks, Feishu, workflow AI-agent blocks), where there is
+   * no human to answer and the schema would only waste a round on a refusal.
+   */
+  hidden?: ReadonlySet<string>
 }
 
 /**
@@ -1118,6 +1455,8 @@ export function advertiseTools({
   loadedGroups = new Set<string>(),
   activeOperatorCategories,
   allowTools,
+  planSplitApproved,
+  hidden,
 }: ToolAdvertiseOptions): WireTool[] {
   if (mode === 'chat') return []
   if (mode === 'workflow') {
@@ -1152,10 +1491,17 @@ export function advertiseTools({
     const core = TOOLS.filter((tool) => {
       const name = tool.function.name
       if (WORKFLOW_WITHHELD_TOOLS.has(name)) return false
+      // `ask_user` is FORBIDDEN in workflow generation: the mode's deliverable
+      // is the draft → save-card flow, which must not stall on questions, and
+      // the workflow's replay runs unattended anyway. (The dispatch layer
+      // refuses a stray call too — see the ask_user branch in runOneToolCall.)
+      if (name === 'ask_user') return false
       // `compose_workflow` is in the `operators` group, so a conversation that
       // loaded the legacy group would otherwise be handed a tool that composes
-      // a *second*, competing graph behind the panel's back.
-      if (name === 'compose_workflow') return false
+      // a *second*, competing graph behind the panel's back. It is re-admitted
+      // only by an approved plan split: the plan skill then saves each
+      // sub-workflow segment mid-turn (see `planSplitApproved`).
+      if (name === 'compose_workflow') return planSplitApproved === true
       // `load_tools` is replaced below by the workflow-specific copy, whose
       // group menu only lists what this mode can widen with.
       if (name === 'load_tools') return false
@@ -1188,6 +1534,7 @@ export function advertiseTools({
     ]).filter((tool) => {
       if (disabled.has(tool.function.name)) return false
       if (allowTools && !allowTools.has(tool.function.name)) return false
+      if (hidden?.has(tool.function.name)) return false
       return true
     })
   }
@@ -1226,6 +1573,7 @@ export function advertiseTools({
     const name = tool.function.name
     if (disabled.has(name)) return false
     if (allowTools && !allowTools.has(name)) return false
+    if (hidden?.has(name)) return false
     if (mode === 'readonly' && ACTION_TOOLS.has(name)) return false
     const group = TOOL_GROUP_BY_NAME.get(name)
     if (group && !loadedGroups.has(group)) return false
@@ -1350,6 +1698,20 @@ function workflowLoadTools(): WireTool {
 export interface AgentDeps {
   send: (message: AgentServerMessage) => void
   confirm: ConfirmFn
+  /**
+   * Interactive clarifying-question channel for the `ask_user` tool. Present
+   * only when a human can actually answer (panel port turns, including their
+   * delegated sub-agents); unattended runs omit it and the tool reports that
+   * gracefully instead of blocking the loop forever.
+   */
+  askUser?: AskUserFn
+  /**
+   * Interactive plan-approval channel for the `present_plan` tool. Present
+   * only when a human can decide (panel port turns, including their delegated
+   * sub-agents); unattended runs omit it and the tool auto-approves so the
+   * turn states its plan and proceeds instead of blocking forever.
+   */
+  planDecision?: PlanDecisionFn
   signal?: AbortSignal
   skillId?: string | undefined
   grantedPageUrl?: string | undefined
@@ -1644,6 +2006,16 @@ export interface ToolContext {
    * {@link normalScopeFromWindowId}.
    */
   scope?: ScopeWindow
+  /**
+   * Plan-first gate state for this turn (see {@link planGateBlocks}). Present
+   * only on interactive panel turns — unattended runs never arm it, and a
+   * sub-agent never arms it (it executes an already-approved sub-task).
+   * `armed` comes from the pinned plan skill, a previous `use_skill` load of
+   * it, or a mid-turn load; `approved` flips on an approved `present_plan`
+   * call and resets at the start of every turn (one user message = one task =
+   * one plan).
+   */
+  planGate?: PlanGate
 }
 
 /**
@@ -1944,6 +2316,11 @@ function describeAction(
       const more = steps.length > 6 ? `… (+${steps.length - 6} more steps)` : ''
       return `Run a ${steps.length}-step plan:\n${listed.join('\n')}${more ? `\n${more}` : ''}`
     }
+    case 'present_plan': {
+      const steps = Array.isArray(args.steps) ? args.steps : []
+      const goal = typeof args.goal === 'string' ? args.goal.trim() : ''
+      return `Submit the ${steps.length}-step execution plan${goal ? ` — ${goal.slice(0, 120)}` : ''}`
+    }
     case 'read_current_page':
       return 'Read the text of the current page'
     case 'snapshot_page':
@@ -2003,6 +2380,12 @@ function describeAction(
       }`
     case 'create_skill':
       return `Create skill "${String(args.name ?? '')}"`
+    case 'create_scheduled_task': {
+      const when = parseScheduleArg(args.schedule).schedule
+      const whenText = when ? describeSchedule(when, 'en') : 'on a schedule'
+      const updating = typeof args.id === 'string' && args.id.trim() !== ''
+      return `${updating ? 'Update' : 'Create'} scheduled task "${String(args.name ?? '')}" (${whenText})`
+    }
     case 'delegate_to_agent':
       return `Delegate a sub-task to agent "${String(args.agent ?? '')}"`
     default:
@@ -2086,6 +2469,183 @@ async function resolveToolImage(
  * Runs the tool after approval. `approved` is false when the user declined.
  * Returns the JSON string handed back to the model.
  */
+/**
+ * Validates and normalizes the `schedule` argument of `create_scheduled_task`.
+ *
+ * `normalizeSchedule` is the storage-side clamp: it silently coerces garbage
+ * into a runnable schedule. That is right for hand-edited records but wrong for
+ * a model call — a typo would silently become "daily 09:00" — so the kind and
+ * the shape are checked EXPLICITLY here first and only well-formed schedules
+ * are passed on for clamping.
+ */
+function parseScheduleArg(raw: unknown): { schedule?: Schedule; error?: string } {
+  if (!raw || typeof raw !== 'object') {
+    return { error: '"schedule" is required: an object with a "kind" field.' }
+  }
+  const value = raw as Record<string, unknown>
+  const num = (input: unknown): number | null => {
+    const n = typeof input === 'number' ? input : Number(input)
+    return Number.isFinite(n) ? n : null
+  }
+  const kind = value['kind']
+  if (kind === 'none') return { schedule: { kind: 'none' } }
+  if (kind === 'interval') {
+    const minutes = num(value['minutes'])
+    if (minutes === null || minutes <= 0) {
+      return { error: 'schedule.kind "interval" needs a positive "minutes" (1-1440).' }
+    }
+    return { schedule: { kind: 'interval', minutes } }
+  }
+  if (kind === 'daily' || kind === 'weekdays') {
+    const hour = num(value['hour'])
+    if (hour === null) return { error: `schedule.kind "${kind}" needs a numeric "hour" (0-23).` }
+    const minute = num(value['minute'])
+    if (value['minute'] !== undefined && minute === null) {
+      return { error: 'schedule."minute" must be a number (0-59).' }
+    }
+    return { schedule: { kind, hour, minute: minute ?? 0 } }
+  }
+  if (kind === 'weekly') {
+    const hour = num(value['hour'])
+    if (hour === null) return { error: 'schedule.kind "weekly" needs a numeric "hour" (0-23).' }
+    const minute = num(value['minute'])
+    if (value['minute'] !== undefined && minute === null) {
+      return { error: 'schedule."minute" must be a number (0-59).' }
+    }
+    const rawDays = Array.isArray(value['days']) ? value['days'].map((d) => Number(d)) : []
+    // Filter to the valid range FIRST, then reject: a list of out-of-range
+    // values must not silently collapse into "daily" (normalizeSchedule's
+    // fallback) when the model clearly meant specific days.
+    const days = rawDays.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+    if (days.length === 0) {
+      return {
+        error:
+          'schedule.kind "weekly" needs a non-empty "days" array of 0-6 (0=Sunday … 6=Saturday); use kind "daily" for every day.',
+      }
+    }
+    return { schedule: { kind: 'weekly', days, hour, minute: minute ?? 0 } }
+  }
+  return {
+    error:
+      'schedule.kind must be one of: "daily", "weekdays", "weekly", "interval", "none". ' +
+      'Examples: {"kind":"weekdays","hour":9} · {"kind":"weekly","days":[1],"hour":10,"minute":30} · {"kind":"interval","minutes":30}.',
+  }
+}
+
+/**
+ * The `create_scheduled_task` handler: validates the arguments, persists the
+ * task and (re)arms its alarm. Creating and updating share this path because a
+ * model asked to "change my task to 8am" has no other write surface — it can
+ * only pass the `id` it got from `list_scheduled_tasks` or a previous create.
+ *
+ * Exported for tests; not part of the public agent API.
+ */
+export async function createScheduledTaskFromArgs(args: Record<string, unknown>): Promise<string> {
+  const name = String(args.name ?? '').trim()
+  if (!name) return JSON.stringify({ ok: false, error: '"name" is required.' })
+
+  const parsedSchedule = parseScheduleArg(args.schedule)
+  if (parsedSchedule.error || !parsedSchedule.schedule) {
+    return JSON.stringify({ ok: false, error: parsedSchedule.error })
+  }
+  const schedule = normalizeSchedule(parsedSchedule.schedule)
+
+  const kind = args.kind === 'workflow' ? 'workflow' : 'agent-prompt'
+  const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : ''
+  const workflowId = typeof args.workflowId === 'string' ? args.workflowId.trim() : ''
+  if (kind === 'agent-prompt' && !prompt) {
+    return JSON.stringify({
+      ok: false,
+      error:
+        'kind "agent-prompt" requires "prompt": the self-contained instruction for each unattended run.',
+    })
+  }
+  if (kind === 'workflow' && !workflowId) {
+    return JSON.stringify({
+      ok: false,
+      error:
+        'kind "workflow" requires "workflowId". Call list_scheduled_tasks or ask the user for it.',
+    })
+  }
+
+  // A scheduled workflow must point at a workflow that exists: a typo would
+  // otherwise silently produce a task that fails on every future run.
+  if (kind === 'workflow') {
+    const workflow = await getWorkflow(workflowId)
+    if (!workflow) {
+      const available = (await listWorkflows())
+        .slice(0, 5)
+        .map((wf) => ({ id: wf.id, name: wf.name }))
+      return JSON.stringify({
+        ok: false,
+        error: `No workflow with id "${workflowId}".`,
+        ...(available.length > 0 ? { available } : {}),
+      })
+    }
+  }
+
+  const enabled = args.enabled === undefined ? true : args.enabled !== false
+  const notifyFeishu = args.notifyFeishu === true
+  const maxToolRounds = typeof args.maxToolRounds === 'number' ? args.maxToolRounds : undefined
+
+  const base: Partial<ScheduledTask> = {
+    name,
+    schedule,
+    kind,
+    prompt: kind === 'agent-prompt' ? prompt : undefined,
+    workflowId: kind === 'workflow' ? workflowId : undefined,
+    enabled,
+    notifyFeishu,
+    ...(maxToolRounds !== undefined ? { maxToolRounds: coerceMaxToolRounds(maxToolRounds) } : {}),
+  }
+
+  // Update path: an explicit id must exist. Create path: refuse a silent
+  // duplicate — same-name tasks are only distinguishable in the UI, so point
+  // the model at the existing id instead.
+  const existing = args.id !== undefined ? await getTask(String(args.id)) : undefined
+  if (args.id !== undefined && !existing) {
+    return JSON.stringify({ ok: false, error: `No scheduled task with id "${String(args.id)}".` })
+  }
+  let match = existing
+  if (!match) {
+    const all = await listTasks()
+    match = all.find((task) => task.name.trim().toLowerCase() === name.toLowerCase())
+    if (match) {
+      return JSON.stringify({
+        ok: false,
+        error: `A task named "${match.name}" already exists. To change it, pass its id ("${match.id}"); otherwise pick a different name.`,
+        existingId: match.id,
+      })
+    }
+  }
+
+  // createDraft is an allowlist constructor (it never copies `workflowId` and
+  // defaults `prompt` to ''), so the validated base is spread over it: the
+  // draft contributes id/createdAt/updatedAt and the maxToolRounds default,
+  // the base contributes exactly what was requested — including
+  // `prompt: undefined` for workflow tasks, matching how the Tasks-tab editor
+  // keeps them.
+  const task: ScheduledTask = match ? { ...match, ...base } : { ...createDraft(base), ...base }
+
+  await saveTask(task)
+  // Arms the one-shot alarm (or clears it for a disabled/manual task). This is
+  // the same call the Tasks tab's save command makes, so both entry points stay
+  // in sync by construction.
+  await scheduleTask(task.id)
+
+  const next = nextRunAt(schedule, Date.now())
+  return JSON.stringify({
+    ok: true,
+    id: task.id,
+    name: task.name,
+    kind: task.kind,
+    schedule: describeSchedule(schedule, 'en'),
+    ...(next !== null ? { nextRunAt: new Date(next).toISOString() } : { nextRunAt: null }),
+    updated: !!match,
+    note: 'Saved and armed. The user can manage it in the Tasks tab; each run executes unattended in full auto.',
+  })
+}
+
 /**
  * Executes a single browser tool directly (no approval, no audit — those live
  * in runOneToolCall). Exported for tests covering run_plan's validation paths;
@@ -2852,6 +3412,13 @@ export async function executeTool(
         const available = (await listSkills()).map((entry) => entry.name)
         return JSON.stringify({ error: `No skill named "${wanted}".`, available })
       }
+      // Loading the plan skill arms the plan gate for the rest of the
+      // conversation — its own note says "follow for the rest of this
+      // conversation", so the hard gate must span turns, not just this one.
+      if (skill.name === PLAN_SKILL_NAME) {
+        armPlanGate(ctx.conversationId)
+        if (ctx.planGate) ctx.planGate.armed = true
+      }
       return JSON.stringify({
         skill: skill.name,
         description: skill.description,
@@ -2916,6 +3483,7 @@ export async function executeTool(
       const tasks = all
         .filter((task) => task.enabled)
         .map((task) => ({
+          id: task.id,
           name: task.name,
           kind: task.kind,
           schedule: describeSchedule(task.schedule, 'en'),
@@ -2928,6 +3496,11 @@ export async function executeTool(
           ...(task.notifyFeishu ? { notifyFeishu: true } : {}),
         }))
       return JSON.stringify({ count: tasks.length, tasks })
+    }
+
+    case 'create_scheduled_task': {
+      throwIfAborted()
+      return await createScheduledTaskFromArgs(args)
     }
 
     case 'compose_workflow': {
@@ -3233,6 +3806,12 @@ function shortSummary(name: string, result: string): string {
       const loaded = JSON.parse(result) as { skill?: string; error?: string }
       return loaded.error ? loaded.error : `Using skill "${loaded.skill ?? 'unknown'}"`
     }
+    if (name === 'present_plan') {
+      const parsed = JSON.parse(result) as { approved?: boolean; auto?: boolean; error?: string }
+      if (parsed.error) return `present_plan: ${parsed.error}`.slice(0, 200)
+      if (parsed.approved) return parsed.auto ? 'Plan auto-approved (unattended)' : 'Plan approved'
+      return 'Plan rejected'
+    }
     if (name === 'list_scheduled_tasks') {
       const parsed = JSON.parse(result) as { count?: number }
       return `Listed scheduled tasks (${parsed.count ?? 0})`
@@ -3256,6 +3835,16 @@ function shortSummary(name: string, result: string): string {
       const parsed = JSON.parse(result) as { skill?: string; updated?: boolean; error?: string }
       if (parsed.error) return `create_skill: ${parsed.error}`.slice(0, 200)
       return `${parsed.updated ? 'Updated' : 'Created'} skill "${parsed.skill ?? 'unknown'}"`
+    }
+    if (name === 'create_scheduled_task') {
+      const parsed = JSON.parse(result) as {
+        name?: string
+        schedule?: string
+        updated?: boolean
+        error?: string
+      }
+      if (parsed.error) return `create_scheduled_task: ${parsed.error}`.slice(0, 200)
+      return `${parsed.updated ? 'Updated' : 'Created'} scheduled task "${parsed.name ?? 'task'}" (${parsed.schedule ?? 'scheduled'})`
     }
     if (name === 'delegate_to_agent') {
       const parsed = JSON.parse(result) as {
@@ -3308,7 +3897,40 @@ export async function runAgentTurn(
   ])
   const provider = preferredProvider ?? (await getActiveProvider())
   const activeSkill = deps.skillId ? await getSkill(deps.skillId) : undefined
-  const catalogue = activeSkill ? [] : skillList
+
+  // Plan-first gate (see `planGateBlocks`): arm when the plan skill governs
+  // this turn — pinned explicitly, or mounted earlier in the conversation via
+  // `use_skill` (conversation store). Only interactive panel turns arm it:
+  // unattended runs (no `planDecision` channel) get plan guidance from the
+  // skill's prompt alone, and a delegated specialist executes an
+  // already-approved sub-task. `approved` starts false every turn: one user
+  // message = one task = one plan.
+  const planGateArmed =
+    !deps.subAgent &&
+    deps.planDecision !== undefined &&
+    (activeSkill?.name === PLAN_SKILL_NAME || isPlanGateArmed(deps.conversationId))
+
+  // Workflow generation mounts the built-in `workflow-generator` skill for the
+  // whole turn: its operator guide (action→operator mapping, data rules,
+  // keep/drop criteria) is the domain knowledge the condensed mode paragraph
+  // deliberately no longer duplicates. Resolved from the skill store so user
+  // edits apply immediately; the shipped constant is the fallback for a store
+  // where the builtin was somehow removed. Specialists are excluded — the
+  // workflow-expert gets the same skill through its own linked-skills path.
+  const modeSkill =
+    !deps.subAgent && initialMode === 'workflow'
+      ? ((await findSkillByName('workflow-generator')) ??
+        BUILT_IN_SKILLS.find((skill) => skill.id === 'builtin-workflow-generator'))
+      : undefined
+
+  // The mounted skill must NOT also sit in the catalogue: the catalogue tells
+  // the model to load skills via `use_skill`, which would spend a round
+  // re-loading instructions that are already in the system prompt.
+  const catalogue: Skill[] = activeSkill
+    ? []
+    : modeSkill
+      ? skillList.filter((skill) => skill.id !== modeSkill.id)
+      : skillList
   const disabled = new Set(toolConfig.disabledTools)
   const messages: Messages = messagesFor(effectiveLocale(settings.locale, navigator.language))
 
@@ -3362,6 +3984,7 @@ export async function runAgentTurn(
       mode: initialMode,
       basePrompt: toolConfig.basePrompt,
       messages,
+      ...(modeSkill ? { modeSkill } : {}),
       ...(supervisorBlock ? { supervisor: supervisorBlock } : {}),
     })
   }
@@ -3390,6 +4013,9 @@ export async function runAgentTurn(
     // to undefined = legacy global behaviour.
     ...(deps.scopeWindowId !== undefined
       ? { scope: await normalScopeFromWindowId(deps.scopeWindowId) }
+      : {}),
+    ...(planGateArmed
+      ? { planGate: { armed: true, approved: false, split: false } satisfies PlanGate }
       : {}),
   }
 
@@ -3434,6 +4060,14 @@ export async function runAgentTurn(
       loadedGroups: ctx.loadedGroups,
       activeOperatorCategories: getActiveOperatorCategories(ctx.conversationId),
       ...(ctx.toolAllowSet ? { allowTools: ctx.toolAllowSet } : {}),
+      // An approved multi-workflow split releases `compose_workflow` so the
+      // plan's segments can be saved mid-turn (each compose clears the draft).
+      ...(ctx.planGate?.approved && ctx.planGate.split ? { planSplitApproved: true } : {}),
+      // Unattended runs (no panel port → no askUser dep) must not even SEE
+      // `ask_user`: scheduled tasks, Feishu commands and workflow AI-agent
+      // blocks have nobody to answer, so the schema is withheld outright and
+      // the dispatch-level refusal stays as defence in depth only.
+      ...(deps.askUser ? {} : { hidden: new Set<string>(['ask_user']) }),
     })
 
     // "Thinking" covers the request in flight until either text starts streaming
@@ -3913,6 +4547,255 @@ async function runOneToolCall(
     return
   }
 
+  // The clarifying-question channel. Not a page action and never behind the
+  // approval card (see the ACTION_TOOLS comment); deliberately handled BEFORE
+  // the mode gates so it also answers a stray call in readonly/chat mode
+  // instead of dying as an unknown tool in `executeTool`. Sub-agents reach
+  // this only past the whitelist check above — asking must be picked like any
+  // other tool. Forbidden contexts are refused here too, as defence in depth
+  // behind the withheld schema: workflow generation (the draft → save-card
+  // flow must not stall on questions, and replay runs unattended) and
+  // unattended runs (no `askUser` dep — nobody can answer).
+  if (name === 'ask_user') {
+    if ((await deps.getMode()) === 'workflow') {
+      pushResult(
+        JSON.stringify({
+          error:
+            'The "ask_user" tool is not available in workflow-generation mode. Record the standard flow with operators; the user reviews and adjusts it in the save card.',
+        }),
+      )
+      deps.send({ type: 'tool.result', name, summary: 'Blocked (workflow mode)' })
+      return
+    }
+    const question = typeof args.question === 'string' ? args.question.trim().slice(0, 2000) : ''
+    // Structured suggestions are MANDATORY: at least 3 candidates, each with a
+    // label AND its pros/cons, the recommended one first (the panel pre-selects
+    // it). A bare "how should I proceed?" card wastes the user's time — reject
+    // the call with one actionable message so the model can comply and retry.
+    const rawOptions = Array.isArray(args.options) ? args.options : []
+    const options: Array<{ label: string; pros: string; cons: string }> = []
+    for (const raw of rawOptions) {
+      if (typeof raw !== 'object' || raw === null) continue
+      const record = raw as Record<string, unknown>
+      const label = typeof record['label'] === 'string' ? record['label'].trim() : ''
+      const pros = typeof record['pros'] === 'string' ? record['pros'].trim() : ''
+      const cons = typeof record['cons'] === 'string' ? record['cons'].trim() : ''
+      if (!label || !pros || !cons) continue
+      options.push({
+        label: label.slice(0, 80),
+        pros: pros.slice(0, 200),
+        cons: cons.slice(0, 200),
+      })
+      if (options.length >= 6) break
+    }
+    if (!question || options.length < 3) {
+      pushResult(
+        JSON.stringify({
+          error:
+            'ask_user requires "question" (explain the situation) and 3-6 "options", each with non-empty "label", "pros" and "cons"; put the recommended option first.',
+        }),
+      )
+      deps.send({ type: 'tool.result', name, summary: 'ask_user: invalid arguments' })
+      return
+    }
+    if (!deps.askUser) {
+      pushResult(
+        JSON.stringify({
+          ok: false,
+          error:
+            'No interactive user is connected (unattended run): ask_user is unavailable. Decide with a reasonable default and state the assumption in your answer.',
+        }),
+      )
+      deps.send({ type: 'tool.result', name, summary: 'No interactive user (unattended run)' })
+      return
+    }
+    const answer = await deps.askUser({ question, options })
+    if (answer.cancelled) {
+      pushResult(
+        JSON.stringify({
+          ok: false,
+          cancelled: true,
+          error:
+            'The user dismissed the question without answering. Proceed with a sensible default and state the assumption, or stop.',
+        }),
+      )
+      deps.send({ type: 'tool.result', name, summary: 'User dismissed the question' })
+      await recordAction(
+        deps.conversationId,
+        name,
+        `Ask the user: ${question.slice(0, 120)}`,
+        ctx.lastUrl ? hostOf(ctx.lastUrl) : undefined,
+        true,
+        false,
+        [`Question: ${question}`, 'Answer: (dismissed)'],
+        { question, options },
+      )
+      return
+    }
+    const answerText = answer.answer.trim()
+    pushResult(JSON.stringify({ ok: true, answer: answerText }))
+    deps.send({
+      type: 'tool.result',
+      name,
+      summary: `User answered: "${answerText.slice(0, 80)}${answerText.length > 80 ? '…' : ''}"`,
+    })
+    await recordAction(
+      deps.conversationId,
+      name,
+      `Ask the user: ${question.slice(0, 120)}`,
+      ctx.lastUrl ? hostOf(ctx.lastUrl) : undefined,
+      true,
+      true,
+      [`Question: ${question}`, `Answer: ${answerText}`],
+      { question, options },
+    )
+    return
+  }
+
+  // The plan-approval hand-off (`present_plan`). Dispatched here — before the
+  // mode gates — because it is a UI interaction, not a page action: it must
+  // reach the panel in every mode, need no approval card itself, and, on
+  // approval, OPEN the plan gate that the branch below enforces. An unattended
+  // run (no `planDecision` dep) auto-approves so a scheduled task with the
+  // plan skill states its plan and proceeds instead of stalling.
+  if (name === 'present_plan') {
+    const goal = typeof args.goal === 'string' ? args.goal.trim() : ''
+    const rawSteps = Array.isArray(args.steps) ? args.steps : []
+    const steps: PlanStep[] = []
+    for (const raw of rawSteps) {
+      if (typeof raw !== 'object' || raw === null) continue
+      const record = raw as Record<string, unknown>
+      const title = typeof record['title'] === 'string' ? record['title'].trim() : ''
+      if (!title) continue
+      const detail = typeof record['detail'] === 'string' ? record['detail'].trim() : ''
+      steps.push(
+        detail
+          ? { title: title.slice(0, 500), detail: detail.slice(0, 500) }
+          : { title: title.slice(0, 500) },
+      )
+      if (steps.length >= 20) break
+    }
+    if (!goal || steps.length < 2) {
+      pushResult(
+        JSON.stringify({
+          error:
+            'present_plan requires "goal" (one line) and "steps" (2-20 items, each with a non-empty "title").',
+        }),
+      )
+      deps.send({ type: 'tool.result', name, summary: 'present_plan: invalid plan' })
+      return
+    }
+    const risks = typeof args.risks === 'string' ? args.risks.trim().slice(0, 2000) : ''
+    const split = typeof args.split === 'string' ? args.split.trim().slice(0, 2000) : ''
+    const plan: PlanRequest = {
+      goal: goal.slice(0, 500),
+      steps,
+      ...(risks ? { risks } : {}),
+      ...(split ? { split } : {}),
+    }
+    if (!deps.planDecision) {
+      if (ctx.planGate) ctx.planGate.approved = true
+      pushResult(
+        JSON.stringify({
+          ok: true,
+          approved: true,
+          auto: true,
+          note: 'No interactive user is connected (unattended run): the plan is auto-approved. State it in your answer and proceed as planned.',
+        }),
+      )
+      deps.send({
+        type: 'tool.result',
+        name,
+        summary: `Plan auto-approved (${steps.length} steps)`,
+      })
+      return
+    }
+    const decision = await deps.planDecision(plan)
+    if (decision.approved) {
+      // Open the gate. A plan that declared a split also releases
+      // `compose_workflow` for the rest of the turn (see `planSplitApproved`).
+      if (ctx.planGate) {
+        ctx.planGate.approved = true
+        ctx.planGate.split = split !== ''
+      }
+      pushResult(
+        JSON.stringify({
+          ok: true,
+          approved: true,
+          note: 'The user approved the plan. Execute it now; if the page no longer matches, explain the difference first.',
+        }),
+      )
+      deps.send({
+        type: 'tool.result',
+        name,
+        summary: `Plan approved (${steps.length} steps)`,
+      })
+      await recordAction(
+        deps.conversationId,
+        name,
+        `Plan approved: ${plan.goal.slice(0, 120)}`,
+        ctx.lastUrl ? hostOf(ctx.lastUrl) : undefined,
+        true,
+        true,
+        [`Goal: ${plan.goal}`, `Steps: ${steps.length}`, ...(split ? [`Split: ${split}`] : [])],
+        plan as unknown as Record<string, unknown>,
+      )
+      return
+    }
+    const feedback = (decision.feedback ?? '').trim()
+    pushResult(
+      JSON.stringify({
+        ok: false,
+        approved: false,
+        feedback,
+        error: `The user rejected the plan${feedback ? `: ${feedback}` : ' without feedback'}. Revise it accordingly and call present_plan again; after two rejected revisions, ask the user directly (ask_user) instead.`,
+      }),
+    )
+    deps.send({
+      type: 'tool.result',
+      name,
+      summary: `Plan rejected: ${feedback.slice(0, 120) || 'no feedback'}`,
+    })
+    await recordAction(
+      deps.conversationId,
+      name,
+      `Plan rejected: ${plan.goal.slice(0, 120)}`,
+      ctx.lastUrl ? hostOf(ctx.lastUrl) : undefined,
+      true,
+      false,
+      [`Goal: ${plan.goal}`, `Steps: ${steps.length}`, `Feedback: ${feedback || '(none)'}`],
+      plan as unknown as Record<string, unknown>,
+    )
+    return
+  }
+
+  // The plan-first gate: while the plan skill governs this turn and its plan
+  // has not been approved, every page action — including every `wf_op_*`
+  // operator, which would otherwise record research detours into the draft —
+  // is refused. Reads stay available (see `PLAN_PHASE_READS`): the research
+  // phase needs them. Deliberately BEFORE the mode gates: this is an
+  // additional, earlier gate, not a replacement for per-mode approval.
+  if (planGateBlocks(ctx.planGate, name)) {
+    pushResult(
+      JSON.stringify({
+        error:
+          'Plan-first is active: the plan has not been approved yet, so page actions are refused. Finish your research (reads stay available), then call present_plan with the steps and wait for approval.',
+      }),
+    )
+    deps.send({ type: 'tool.result', name, summary: 'Blocked (plan not approved)' })
+    await recordAction(
+      deps.conversationId,
+      name,
+      describeAction(name, args, ctx.snapshotTargets),
+      ctx.lastUrl ? hostOf(ctx.lastUrl) : undefined,
+      false,
+      false,
+      [...describeDetail(name, args, ctx.snapshotTargets), 'Blocked: plan not approved'],
+      args,
+    )
+    return
+  }
+
   // Read the mode freshly for every action, so switching it in the panel
   // applies to the very next tool call, even within the same turn.
   const mode = await deps.getMode()
@@ -4049,6 +4932,22 @@ export async function runToolStandalone(
 ): Promise<unknown> {
   if (!TOOLS.some((tool) => tool.function.name === name)) {
     return { ok: false, error: `Unknown tool: ${name}` }
+  }
+  // The bridge is unattended: there is no panel port to route a clarifying
+  // question to, so refuse it explicitly instead of the opaque "unknown" path
+  // below (ask_user IS in TOOLS, so tools.list does advertise it).
+  if (name === 'ask_user') {
+    return {
+      ok: false,
+      error: 'ask_user needs an interactive side panel and is not available over the bridge.',
+    }
+  }
+  // Same for the plan-approval card: there is nobody to approve a plan here.
+  if (name === 'present_plan') {
+    return {
+      ok: false,
+      error: 'present_plan needs an interactive side panel and is not available over the bridge.',
+    }
   }
   const settings = await getSettings()
   const disabled = new Set(settings.disabledTools)

@@ -88,6 +88,19 @@ export const PLACEHOLDER_BLOCK_IDS: ReadonlySet<string> = new Set([
  */
 export const JAVASCRIPT_BLOCK_ID = 'javascript-code'
 
+/**
+ * Edit-less blocks that ARE operators.
+ *
+ * The operator set is "palette blocks with a real edit form", which keeps the
+ * runtime-only routing primitives (`active-tab`, `forward-page`, …) away from
+ * the model. `go-back` is the deliberate exception: it takes no arguments at
+ * all, and without it the model cannot record "open a list item, read its
+ * detail, go back to the list" — the shape every collect-the-lists task needs
+ * and the one the loop folding looks for. Both derivations apply this set so
+ * they cannot disagree.
+ */
+export const EDIT_LESS_OPERATOR_IDS: ReadonlySet<string> = new Set(['go-back'])
+
 /** Human explanation for why a block was recorded without running. */
 export const RECORD_ONLY_REASONS: Readonly<Record<string, string>> = {
   trigger: 'trigger is the graph entry point; it is recorded, not run',

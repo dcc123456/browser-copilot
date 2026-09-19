@@ -22,7 +22,6 @@ import { useCallback, useEffect, useState } from 'react'
 import { Check, Workflow as WorkflowIcon, X } from 'lucide-react'
 import { onReviewLog, sendCommand } from '../lib/messages'
 import { resolveSecretValuesForHistory, workflowFromHistory } from '../lib/storage'
-import { saveWorkflow } from '../lib/workflow/storage'
 import {
   applyNodeKeepSelection,
   reviewStepsOf,
@@ -921,7 +920,10 @@ function OperationsSection({ t, flash }: SectionProps) {
       const stepList = reviewStepsOf(workflow)
       if (stepList.length === 0) {
         try {
-          await saveWorkflow(workflow)
+          // Through the worker, never a direct write: content keys are written
+          // only in the service worker, so the per-key queues serialize every
+          // read-modify-write (a direct panel write would race the worker).
+          await sendCommand({ type: 'workflows.save', workflow })
           flash('ok', t.dataHistoryToWorkflowDone)
         } catch (error) {
           flash('error', (error as Error).message)
@@ -960,7 +962,9 @@ function OperationsSection({ t, flash }: SectionProps) {
     if (!current) return
     try {
       const workflow = applyNodeKeepSelection(current.workflow, current.keep ?? {})
-      await saveWorkflow(workflow)
+      // Via the worker (see `rebuild`): content keys are written only in the
+      // service worker.
+      await sendCommand({ type: 'workflows.save', workflow })
       setReview(null)
       flash('ok', t.dataHistoryToWorkflowDone)
     } catch (error) {

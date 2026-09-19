@@ -307,3 +307,119 @@ describe('applyLoopElementsFold', () => {
     expect(applyLoopElementsFold(wf, suggestion!, '.row')).toBe(wf)
   })
 })
+
+describe('compound period detection (list → detail → back)', () => {
+  /**
+   * The natural recording of "collect every entry's details": per item, open
+   * the card, read two fields on the detail page, go back to the list.
+   */
+  function bossChain(items: number, extra: WorkflowNode[] = []): Workflow {
+    const nodes: WorkflowNode[] = []
+    for (let i = 0; i < items; i += 1) {
+      nodes.push(click(`card-${i}`, `.job-list > li:nth-child(${i + 1}) .job-name`))
+      nodes.push(node(`title-${i}`, 'get-text', { selector: '.job-detail .name', saveData: true }))
+      nodes.push(node(`req-${i}`, 'get-text', { selector: '.job-detail .req', saveData: true }))
+      nodes.push(node(`back-${i}`, 'go-back', {}))
+    }
+    return workflow([...nodes, ...extra])
+  }
+
+  it('detects the open → read → go-back period and folds it into one loop', () => {
+    const wf = bossChain(3)
+    const suggestions = detectRepeatRuns(wf)
+    // No same-block run exists here — the blocks alternate. The compound scan
+    // is what sees the period.
+    const [suggestion] = suggestions
+    expect(suggestion).toBeDefined()
+    expect(suggestion!.kind).toBe('varying')
+    expect(suggestion!.repeat).toBe(3)
+    // One full period survives as the body: click + two reads + go-back.
+    expect(suggestion!.bodyIds).toEqual(['card-0', 'title-0', 'req-0', 'back-0'])
+    // The per-item selectors the probe must verify, in recorded order.
+    expect(suggestion!.selectors).toHaveLength(3)
+
+    const out = applyLoopElementsFold(wf, suggestion!, '.job-list > li')
+    const loop = loopNodeOf(out, 'loop-elements')!
+    expect(loop.data['selector']).toBe('.job-list > li')
+    // Only the head acts on the loop element; the detail reads and the go-back
+    // keep their own targets.
+    const bodyHead = out.drawflow.nodes.find((n) => n.id === 'card-0')!
+    expect(bodyHead.data['selector']).toBe('{{loopElementSelector}}')
+    expect(out.drawflow.nodes.find((n) => n.id === 'title-0')!.data['selector']).toBe(
+      '.job-detail .name',
+    )
+    // Body cycle: head … body tail back into the loop; iterations 2-3 dropped.
+    expect(hasEdge(out, loop.id, 'card-0', 'loop-elements-output-1')).toBe(true)
+    expect(hasEdge(out, 'back-0', loop.id)).toBe(true)
+    const ids = new Set(out.drawflow.nodes.map((n) => n.id))
+    expect(ids.has('card-1')).toBe(false)
+    expect(ids.has('back-2')).toBe(false)
+  })
+
+  it('leaves a partial trailing period linear', () => {
+    // Two full periods plus a bare card click: the fold covers the periods and
+    // nothing else — inventing a body for the tail would fabricate behaviour.
+    const wf = bossChain(2, [click('card-2', '.job-list > li:nth-child(3) .job-name')])
+    const [suggestion] = detectRepeatRuns(wf)
+    expect(suggestion!.repeat).toBe(2)
+    const out = applyLoopElementsFold(wf, suggestion!, '.job-list > li')
+    const ids = new Set(out.drawflow.nodes.map((n) => n.id))
+    expect(ids.has('card-2')).toBe(true)
+    // The tail hangs off the loop's after-loop port.
+    const loop = loopNodeOf(out, 'loop-elements')!
+    expect(hasEdge(out, loop.id, 'card-2', 'loop-elements-output-2')).toBe(true)
+  })
+
+  it('does not fold when the head varies by value, not by target', () => {
+    // A per-item form fill with a DIFFERENT text each period cannot be folded:
+    // the rewrite replaces the selector only, so one recorded value would run
+    // for every iteration.
+    const wf = workflow([
+      fill('f-0', '.search input', '前端'),
+      node('r-0', 'get-text', { selector: '.count' }),
+      fill('f-1', '.search input', '上海'),
+      node('r-1', 'get-text', { selector: '.count' }),
+    ])
+    expect(detectRepeatRuns(wf)).toEqual([])
+  })
+
+  it('does not fold when a body step drifts between periods', () => {
+    // The second read's selector differs per item — that is a different read,
+    // not an iteration; folding it would replay one page's layout for all.
+    const wf = workflow([
+      click('card-0', '.list li:nth-child(1)'),
+      node('a-0', 'get-text', { selector: '.detail .name' }),
+      node('b-0', 'get-text', { selector: '.detail .req-1' }),
+      click('card-1', '.list li:nth-child(2)'),
+      node('a-1', 'get-text', { selector: '.detail .name' }),
+      node('b-1', 'get-text', { selector: '.detail .req-2' }),
+    ])
+    // The block-level scan may still offer its own (pre-existing) fold for the
+    // adjacent reads; the point is that no COMPOUND period is reported — every
+    // block-level suggestion carries a single-node body.
+    expect(detectRepeatRuns(wf).filter((s) => s.bodyIds.length > 1)).toEqual([])
+  })
+
+  it('does not double-report a period that overlaps a same-block run', () => {
+    // [click, click, read] × 2: the block scan claims the clicks; the compound
+    // scan must not also offer a fold over the same nodes.
+    const wf = workflow([
+      click('c-0', '.row:nth-child(1)'),
+      click('d-0', '.row:nth-child(1) .btn'),
+      node('r-0', 'get-text', { selector: '.status' }),
+      click('c-1', '.row:nth-child(2)'),
+      click('d-1', '.row:nth-child(2) .btn'),
+      node('r-1', 'get-text', { selector: '.status' }),
+    ])
+    const suggestions = detectRepeatRuns(wf)
+    const seen = new Set<string>()
+    for (const run of suggestions) {
+      for (const id of run.runIds) {
+        expect(seen.has(id), `node ${id} claimed twice`).toBe(false)
+        seen.add(id)
+      }
+    }
+    // The block-level click run is still there — it covers more iterations.
+    expect(suggestions.some((s) => s.blockId === 'event-click' && s.repeat === 2)).toBe(true)
+  })
+})

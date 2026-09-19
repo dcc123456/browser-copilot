@@ -15,8 +15,12 @@ export interface SkillProblem {
   code: 'nameRequired' | 'instructionsRequired' | 'nameTaken'
 }
 
-/** Longest instruction text accepted. */
-export const MAX_INSTRUCTIONS_LENGTH = 8000
+/**
+ * Longest instruction text accepted. 8000 covered every guide until the
+ * workflow generator's list-collection recipe arrived; 9000 keeps the same
+ * storage safety margin with room for the next paragraph.
+ */
+export const MAX_INSTRUCTIONS_LENGTH = 9000
 /** Longest skill name accepted. */
 export const MAX_NAME_LENGTH = 60
 
@@ -73,6 +77,31 @@ export function renderSkillPrompt(skill: Skill): string {
     "following instructions as your immediate task; the user's next message (and any",
     'selected page text) is the input to process with them. Apply them now and answer',
     "in the user's language:",
+    '',
+    '---',
+    skill.instructions,
+    '---',
+  ]
+    .filter((line) => line !== '')
+    .join('\n')
+}
+
+/**
+ * Renders the instruction block for a skill activated by the OPERATING MODE
+ * rather than by the user (workflow generation auto-mounts the built-in
+ * `workflow-generator` skill). Deliberately NOT the "user has selected this
+ * skill" phrasing of {@link renderSkillPrompt} — the user did nothing here, and
+ * telling the model they did invites it to defer to a selection that never
+ * happened.
+ */
+export function renderModeSkillPrompt(skill: Skill, reason: string): string {
+  return [
+    `## MODE SKILL — ${skill.name} (ACTIVE)`,
+    skill.description ? `Purpose: ${skill.description}` : '',
+    '',
+    `This skill is active because ${reason}. Treat it as the authoritative`,
+    'instructions for this mode; where it is more specific than the generic',
+    'rules above, the skill wins.',
     '',
     '---',
     skill.instructions,

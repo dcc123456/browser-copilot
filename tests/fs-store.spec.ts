@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
+  clearStorageDirectory,
   createFileArea,
   fileStorageArea,
   FsDirectory,
@@ -116,27 +117,42 @@ function dataDir(node: Extract<Node, { kind: 'dir' }>): Extract<Node, { kind: 'd
 }
 
 /**
- * Points the module's IndexedDB lookup at `handle` and reports it as granted, so
- * the file-backed area resolves without a real File System Access API. The
- * resolved handle is cached module-wide, so callers must `resetStorageCache()`
- * before and after.
+ * Points the module's IndexedDB lookup at `handle` with the given permission
+ * state, so the file-backed area resolves without a real File System Access
+ * API. The resolved handle is cached module-wide, so callers must
+ * `resetStorageCache()` before and after.
  */
-function stubGrantedDirectory(handle: FakeDir): void {
-  const granted = {
+function stubStoredHandle(handle: FakeDir, permission: PermissionState): void {
+  const stored = {
     name: 'picked',
-    queryPermission: async (): Promise<PermissionState> => 'granted',
+    queryPermission: async (): Promise<PermissionState> => permission,
     getDirectoryHandle: (name: string, opts: { create?: boolean }) =>
       handle.getDirectoryHandle(name, opts),
     getFileHandle: (name: string, opts: { create?: boolean }) => handle.getFileHandle(name, opts),
     removeEntry: (name: string) => handle.removeEntry(name),
     values: () => handle.values(),
   }
+  stubIndexedDb(stored)
+}
+
+/** Same, but the handle exists while its permission sits at `'prompt'` — the
+ *  post-restart state: a directory is configured yet unreachable from a
+ *  context that cannot request permission (no user gesture). */
+function stubPendingDirectory(handle: FakeDir): void {
+  stubStoredHandle(handle, 'prompt')
+}
+
+function stubGrantedDirectory(handle: FakeDir): void {
+  stubStoredHandle(handle, 'granted')
+}
+
+function stubIndexedDb(stored: unknown): void {
   const db = {
     transaction: () => ({
       objectStore: () => ({
         get: () => {
           const request: { result: unknown; onsuccess: null | (() => void) } = {
-            result: granted,
+            result: stored,
             onsuccess: null,
           }
           setTimeout(() => request.onsuccess?.(), 0)
@@ -658,9 +674,13 @@ describe('switching back to browser storage', () => {
     for (const [key, value] of Object.entries(original)) chrome.store.set(key, value)
 
     await syncToFiles()
-    // Migrated: on disk, and gone from the browser store.
-    expect(dataDir(node).children.has('settings.json')).toBe(true)
-    expect(chrome.store.has('settings')).toBe(false)
+    // Content migrated: on disk, and gone from the browser store. Config keys
+    // (`settings`) deliberately STAY in browser storage — the directory holds
+    // user content, not the extension's own configuration.
+    expect(dataDir(node).children.has('workflows.json')).toBe(true)
+    expect(chrome.store.has('settings')).toBe(true)
+    expect(dataDir(node).children.has('settings.json')).toBe(false)
+    expect(chrome.store.has('workflows')).toBe(false)
     expect(chrome.store.has('conv:abc')).toBe(false)
 
     await syncFilesToBrowser()
@@ -703,5 +723,198 @@ describe('switching back to browser storage', () => {
 
     expect(await syncFilesToBrowser()).toBe(0)
     expect(chrome.store.size).toBe(0)
+  })
+})
+
+describe('content/config key routing', () => {
+  let chrome: ReturnType<typeof makeChromeMock>
+
+  beforeEach(() => {
+    chrome = makeChromeMock()
+    vi.stubGlobal('chrome', chrome)
+    resetStorageCache()
+  })
+
+  afterEach(() => {
+    resetStorageCache()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('keeps config keys in browser storage even when a directory is granted', async () => {
+    const { handle, node } = makeFakeRoot()
+    stubGrantedDirectory(handle as FakeDir)
+    const area = fileStorageArea()
+
+    await area.set({ settings: { locale: 'zh' } })
+
+    expect(chrome.store.get('settings')).toEqual({ locale: 'zh' })
+    expect(dataDir(node).children.has('settings.json')).toBe(false)
+
+    // Content keys behave the opposite way: file only, never mirrored.
+    await area.set({ workflows: [{ id: 'w1', name: 'Daily' }] })
+    expect(dataDir(node).children.has('workflows.json')).toBe(true)
+    expect(chrome.store.has('workflows')).toBe(false)
+  })
+
+  it('adopts a legacy config file into browser storage on first read', async () => {
+    const { handle } = makeFakeRoot()
+    stubGrantedDirectory(handle as FakeDir)
+    // An older version migrated config into the directory; the new design
+    // reads config from browser storage, so the file is adopted once.
+    const fs = new FsDirectory(handle as FileSystemDirectoryHandle)
+    await fs.writeText(['settings.json'], JSON.stringify({ locale: 'zh' }))
+
+    const area = fileStorageArea()
+    const got = await area.get('settings')
+
+    expect(got.settings).toEqual({ locale: 'zh' })
+    expect(chrome.store.get('settings')).toEqual({ locale: 'zh' })
+  })
+
+  it('parks content writes in the outbox while the directory is unreachable', async () => {
+    const { handle } = makeFakeRoot()
+    stubPendingDirectory(handle as FakeDir)
+    const area = fileStorageArea()
+
+    const value = [{ id: 'w1', name: 'Daily' }]
+    await area.set({ workflows: value })
+
+    // Not misdirected into browser storage as a content key…
+    expect(chrome.store.has('workflows')).toBe(false)
+    // …but durably parked in the outbox…
+    const outbox = chrome.store.get('fs-outbox') as Record<string, { value: unknown; at: number }>
+    expect(outbox.workflows?.value).toEqual(value)
+    // …and no partial file was written.
+    const fs = new FsDirectory(handle as FileSystemDirectoryHandle)
+    expect(await fs.readText(['workflows.json'])).toBeNull()
+  })
+
+  it('overlays a parked outbox entry (and tombstone) on reads', async () => {
+    const { handle } = makeFakeRoot()
+    stubPendingDirectory(handle as FakeDir)
+    const area = fileStorageArea()
+
+    await area.set({ workflows: [{ id: 'w1', name: 'Daily' }] })
+    await area.set({ profiles: [{ id: 'p1' }] })
+    await area.remove('profiles')
+
+    expect(await area.get('workflows')).toEqual({ workflows: [{ id: 'w1', name: 'Daily' }] })
+    // The tombstone makes the key read as absent — it must not fall through to
+    // any other layer.
+    expect(await area.get('profiles')).toEqual({})
+  })
+
+  it('drains the outbox into the directory once access is back', async () => {
+    const { handle, node } = makeFakeRoot()
+    stubPendingDirectory(handle as FakeDir)
+    const area = fileStorageArea()
+    const value = [{ id: 'w1', name: 'Daily' }]
+    await area.set({ workflows: value })
+
+    stubGrantedDirectory(handle as FakeDir)
+    await syncToFiles()
+
+    expect(JSON.parse((dataDir(node).children.get('workflows.json') as FileNode).content)).toEqual(
+      value,
+    )
+    const outbox = (chrome.store.get('fs-outbox') ?? {}) as Record<string, unknown>
+    expect(outbox.workflows).toBeUndefined()
+    // Reads now come from the file.
+    expect(await area.get('workflows')).toEqual({ workflows: value })
+  })
+
+  it('carries a deletion made while unreachable into the directory', async () => {
+    const { handle, node } = makeFakeRoot()
+    stubGrantedDirectory(handle as FakeDir)
+    const area = fileStorageArea()
+    await area.set({ workflows: [{ id: 'w1', name: 'Daily' }] })
+
+    // Permission drops; the user deletes the workflow anyway.
+    stubPendingDirectory(handle as FakeDir)
+    await area.remove('workflows')
+
+    stubGrantedDirectory(handle as FakeDir)
+    await syncToFiles()
+
+    expect(dataDir(node).children.has('workflows.json')).toBe(false)
+    expect(await area.get('workflows')).toEqual({})
+  })
+
+  it('reads the cached value while the directory is unreachable', async () => {
+    const { handle } = makeFakeRoot()
+    stubGrantedDirectory(handle as FakeDir)
+    const area = fileStorageArea()
+    const value = [{ id: 'w1', name: 'Daily' }]
+    await area.set({ workflows: value })
+
+    // Post-restart, permission back at 'prompt': the files cannot be read, but
+    // the panel must not render an empty list (reads as data loss).
+    stubPendingDirectory(handle as FakeDir)
+    expect(await area.get('workflows')).toEqual({ workflows: value })
+  })
+
+  it('drops an outbox entry that is older than the file (staleness guard)', async () => {
+    const { handle, node } = makeFakeRoot()
+    stubGrantedDirectory(handle as FakeDir)
+    const area = fileStorageArea()
+
+    const newer = [{ id: 'w1', name: 'Saved after reconnect' }]
+    await area.set({ workflows: newer })
+
+    // Craft an outbox entry predating the file write (a write parked, then a
+    // newer direct write landed before the replay ran).
+    const older = [{ id: 'w1', name: 'Parked during the outage' }]
+    chrome.store.set('fs-outbox', { workflows: { value: older, at: Date.now() - 60_000 } })
+
+    await syncToFiles()
+
+    expect(JSON.parse((dataDir(node).children.get('workflows.json') as FileNode).content)).toEqual(
+      newer,
+    )
+    const outbox = (chrome.store.get('fs-outbox') ?? {}) as Record<string, unknown>
+    expect(outbox.workflows).toBeUndefined()
+  })
+
+  it('merges a legacy browser copy with the file instead of overwriting it', async () => {
+    const { handle, node } = makeFakeRoot()
+    stubGrantedDirectory(handle as FakeDir)
+    // File holds the newer w1; the legacy browser mirror holds a stale w1 AND
+    // a workflow the file never saw. The old whole-blob overwrite lost w2.
+    const fs = new FsDirectory(handle as FileSystemDirectoryHandle)
+    await fs.writeText(['workflows.json'], JSON.stringify([{ id: 'w1', updatedAt: 200 }]))
+    chrome.store.set('workflows', [
+      { id: 'w1', updatedAt: 100 },
+      { id: 'w2', updatedAt: 300 },
+    ])
+
+    await syncToFiles()
+
+    expect(JSON.parse((dataDir(node).children.get('workflows.json') as FileNode).content)).toEqual([
+      { id: 'w1', updatedAt: 200 },
+      { id: 'w2', updatedAt: 300 },
+    ])
+    // Migrated keys leave the browser store.
+    expect(chrome.store.has('workflows')).toBe(false)
+  })
+
+  it('folds the outbox into browser storage when switching back', async () => {
+    const { handle } = makeFakeRoot()
+    stubGrantedDirectory(handle as FakeDir)
+    const area = fileStorageArea()
+    await area.set({ workflows: [{ id: 'w1', name: 'On file' }] })
+
+    // One more write parks in the outbox (newer than the file)…
+    stubPendingDirectory(handle as FakeDir)
+    await area.set({ workflows: [{ id: 'w1', name: 'Parked later' }] })
+
+    // …and the switch to browser storage must land the NEWEST state, then
+    // clear the fallback structures.
+    stubGrantedDirectory(handle as FakeDir)
+    await clearStorageDirectory()
+
+    expect(chrome.store.get('workflows')).toEqual([{ id: 'w1', name: 'Parked later' }])
+    expect(chrome.store.has('fs-outbox')).toBe(false)
+    expect([...chrome.store.keys()].some((key) => key.startsWith('fs-cache:'))).toBe(false)
   })
 })

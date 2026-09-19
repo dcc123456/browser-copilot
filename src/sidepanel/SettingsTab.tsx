@@ -30,6 +30,7 @@ import {
   pickStorageDirectory,
   type StorageMode,
 } from '../lib/fs-store'
+import { outboxCount } from '../lib/fs-outbox'
 import { clearDownloadDir, getDownloadDir, setDownloadDir } from '../lib/download-dir'
 import { onStoreChanged } from '../lib/store-events'
 import { ADAPTER_ASSET_PATH, ADAPTER_EXPORT_FILENAME, buildMcpSnippet } from '../lib/mcp-adapter'
@@ -444,6 +445,8 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   // --- Storage location ------------------------------------------------------
   const [storageMode, setStorageMode] = useState<StorageMode>('browser')
   const [storageDirName, setStorageDirName] = useState<string | null>(null)
+  /** Writes parked in the outbox because the folder was unreachable. */
+  const [pendingWrites, setPendingWrites] = useState(0)
   const [storageBusy, setStorageBusy] = useState(false)
   const [storageNotice, setStorageNotice] = useState<{
     kind: 'ok' | 'error'
@@ -451,9 +454,14 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   } | null>(null)
 
   const refreshStorage = useCallback(async (): Promise<void> => {
-    const [mode, name] = await Promise.all([getStorageMode(), getStorageDirectoryName()])
+    const [mode, name, pending] = await Promise.all([
+      getStorageMode(),
+      getStorageDirectoryName(),
+      outboxCount().catch(() => 0),
+    ])
     setStorageMode(mode)
     setStorageDirName(name)
+    setPendingWrites(pending)
   }, [])
 
   useEffect(() => {
@@ -490,6 +498,8 @@ export default function SettingsTab({ onLocaleChange }: Props) {
       setStorageNotice({ kind: 'error', text: (error as Error).message })
     } finally {
       setStorageBusy(false)
+      // The reconnect flushes the outbox; refresh the pending badge with it.
+      void refreshStorage()
     }
   }
 
@@ -1832,6 +1842,9 @@ export default function SettingsTab({ onLocaleChange }: Props) {
           <p className={storageNotice.kind === 'ok' ? 'hint ok' : 'hint error'}>
             {storageNotice.text}
           </p>
+        )}
+        {pendingWrites > 0 && (
+          <p className="hint">{t.settingsStoragePendingWrites({ count: pendingWrites })}</p>
         )}
         <div className="actions">
           {storageDirName ? (

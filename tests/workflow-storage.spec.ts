@@ -125,6 +125,27 @@ describe('workflow storage', () => {
     expect(await getWorkflow('a')).toBeUndefined()
   })
 
+  it('serializes concurrent saves so neither is lost', async () => {
+    // The regression behind "my workflows keep disappearing": with a latency-y
+    // backend, two overlapping read-modify-write cycles both read the same base
+    // list and the later write silently dropped the other's workflow. The
+    // per-key queue (lib/key-lock.ts) must serialize them.
+    const originalGet = mocks.storage.local.get
+    mocks.storage.local.get = vi.fn(async (keys: string | string[]) => {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      return originalGet(keys)
+    })
+
+    await Promise.all([
+      saveWorkflow(makeWorkflow({ id: 'a', name: 'Alpha' })),
+      saveWorkflow(makeWorkflow({ id: 'b', name: 'Beta' })),
+      saveWorkflow(makeWorkflow({ id: 'c', name: 'Gamma' })),
+    ])
+
+    const ids = (await listWorkflows()).map((w) => w.id)
+    expect(ids.sort()).toEqual(['a', 'b', 'c'])
+  })
+
   it('duplicates a workflow under a new id with the given name', async () => {
     await saveWorkflow(makeWorkflow({ id: 'a', name: 'Original', table: 'tbl-1' }))
 

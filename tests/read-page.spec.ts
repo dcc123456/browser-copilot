@@ -238,12 +238,15 @@ describe('read-page executor', () => {
   it('fails when the selector matches nothing, naming the selector', async () => {
     // The reported symptom: a generated scraper whose selector no longer
     // matches writes an empty export and reports 成功.
+    // Reads poll for the element to render (see `pollRead` in executors), so
+    // this pins the window small: the failure must still name the selector
+    // once the window expires.
     chromeRefs.executeScript.mockResolvedValue([{ result: [] }])
     const { ctx } = makeCtx()
 
-    await expect(EXECUTORS['read-page']!({ selector: '.article' }, ctx)).rejects.toThrow(
-      /\.article/,
-    )
+    await expect(
+      EXECUTORS['read-page']!({ selector: '.article', waitSelectorTimeout: 50 }, ctx),
+    ).rejects.toThrow(/\.article/)
 
     expect(ctx.variables['lastReadPage']).toBeUndefined()
   })

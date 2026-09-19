@@ -219,6 +219,59 @@ describe('validateWorkflowForRun', () => {
     )
     expect(out.errors.some((e) => e.includes('"ghost"'))).toBe(true)
   })
+
+  it('warns when a generated unanchored graph has no navigation before its first element action', () => {
+    // The workflow was generated against https://gen.test/page and starts
+    // clicking right away: a replay only works on THAT page.
+    const out = validateWorkflowForRun(
+      workflow({
+        settings: {
+          saveLog: false,
+          debugMode: false,
+          notification: false,
+          reuseLastState: false,
+          generationOriginUrl: 'https://gen.test/page',
+        },
+      }),
+    )
+    expect(out.errors).toEqual([])
+    expect(out.warnings.some((w) => w.includes('gen.test'))).toBe(true)
+  })
+
+  it('does not warn when the graph opens its own page first', () => {
+    const out = validateWorkflowForRun(
+      workflow({
+        settings: {
+          saveLog: false,
+          debugMode: false,
+          notification: false,
+          reuseLastState: false,
+          generationOriginUrl: 'https://gen.test/page',
+        },
+        drawflow: {
+          nodes: [
+            node('t', 'trigger', { type: 'manual' }),
+            node('n', 'new-tab', { url: 'https://other.test' }),
+            node('a', 'event-click', { selector: '#x' }),
+          ],
+          edges: [
+            { id: 'e1', source: 't', target: 'n' },
+            { id: 'e2', source: 'n', target: 'a' },
+          ],
+        },
+      }),
+    )
+    // The dead-data warning on the literal URL is expected pre-existing
+    // behavior; the ANCHOR warning must be absent.
+    expect(out.warnings.every((w) => !w.includes('生成时的页面'))).toBe(true)
+  })
+
+  it('does not warn for workflows without a generation origin', () => {
+    // Hand-built / imported graphs have no generationOriginUrl — the anchor
+    // warning is scoped to generated workflows only.
+    const out = validateWorkflowForRun(workflow())
+    expect(out.warnings).toEqual([])
+  })
 })
 
 describe('OFFERED_TRIGGER_TYPES', () => {

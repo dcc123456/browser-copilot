@@ -51,7 +51,7 @@ const PICKABLE_TOOLS = [...TOOL_META, ...OPERATOR_META].filter(
     meta.name !== 'compose_workflow',
 )
 
-const CATEGORY_ORDER: ToolCategory[] = ['read', 'nav', 'act', 'data']
+const CATEGORY_ORDER: ToolCategory[] = ['read', 'nav', 'act', 'data', 'ask']
 
 function toggle(list: string[], value: string): string[] {
   return list.includes(value) ? list.filter((item) => item !== value) : [...list, value]

@@ -215,6 +215,31 @@ interface PendingConfirm {
 }
 
 /**
+ * A clarifying question from the agent's `ask_user` tool. `options` are the
+ * candidate approaches with pros/cons — index 0 is the agent's recommendation
+ * and is pre-selected; the free-text input lets the user answer with something
+ * else entirely.
+ */
+interface PendingAskUser {
+  requestId: string
+  question: string
+  options: Array<{ label: string; pros: string; cons: string }>
+}
+
+/**
+ * An execution plan submitted by the agent's `present_plan` tool (the plan
+ * skill's hand-off). Rendered as an approval card: approve to unlock
+ * execution, or reject with feedback so the agent revises the plan.
+ */
+interface PendingPlan {
+  requestId: string
+  goal: string
+  steps: { title: string; detail?: string }[]
+  risks?: string
+  split?: string
+}
+
+/**
  * State of the "save this session as a workflow?" card plus its save-time AI
  * node review. `reviewing` while the background verdict is in flight;
  * `review: null` after it settled means unavailable — every step stays.
@@ -303,6 +328,13 @@ interface WorkflowPromptState {
    * normal result, so it is reported here rather than thrown.
    */
   foldNote: string | null
+  /**
+   * Whether saving should be followed by a verify run (the AI-debug loop).
+   * Opt-in (default false, per the 2026-09-19 first-run plan): the verify run
+   * executes the workflow for real — real side effects and one model call —
+   * so it must be the user's explicit choice, not the default.
+   */
+  verifyRun: boolean
 }
 
 let counter = 0
@@ -334,6 +366,218 @@ function MessageAttachments({ attachments }: { attachments?: AttachmentSummary[]
 
 /** Localized-text bundle type, reused by the small render components below. */
 type ChatT = ReturnType<typeof useT>
+
+/**
+ * One agent `ask_user` question card: the question, the candidate approaches
+ * as a radio-style list (index 0 = the recommendation, pre-selected, each with
+ * its pros/cons), a free-text answer that overrides the selection, and a
+ * dismiss action. Lives above the composer in the chat log, in the same slot
+ * as the confirmation cards.
+ */
+function AskUserCard({
+  request,
+  onAnswer,
+  t,
+}: {
+  request: PendingAskUser
+  onAnswer: (requestId: string, answer: string, cancelled: boolean) => void
+  t: ChatT
+}) {
+  /** Index 0 is the agent's recommendation — pre-selected by default. */
+  const [selected, setSelected] = useState(0)
+  const [draft, setDraft] = useState('')
+  /** True during an IME composition, so Enter confirms the candidate, not the card. */
+  const composingRef = useRef(false)
+  const submit = (): void => {
+    // A typed answer always wins over the pre-selected suggestion.
+    const custom = draft.trim()
+    if (custom) {
+      onAnswer(request.requestId, custom, false)
+      return
+    }
+    const option = request.options[selected]
+    if (option) onAnswer(request.requestId, option.label, false)
+  }
+  return (
+    <div className="confirm-card" data-kind="ask">
+      <strong>{t.chatAskTitle}</strong>
+      <div className="confirm-action">{request.question}</div>
+      <div className="mt-2 flex flex-col gap-1.5">
+        {request.options.map((option, index) => {
+          const active = index === selected
+          return (
+            <button
+              className={`rounded-lg border px-2.5 py-2 text-left transition-colors ${
+                active ? 'border-accent bg-accent-soft' : 'border-border bg-panel hover:bg-hover'
+              }`}
+              key={`${option.label}-${index}`}
+              onClick={() => setSelected(index)}
+              type="button"
+            >
+              <span className="flex items-center gap-1.5 text-[13px] font-medium text-ink">
+                <span aria-hidden="true">{active ? '◉' : '○'}</span>
+                <span>{option.label}</span>
+                {index === 0 && (
+                  <span className="rounded bg-accent px-1.5 py-0.5 text-[10px] text-on-accent">
+                    {t.chatAskRecommended}
+                  </span>
+                )}
+              </span>
+              <span className="mt-1 block pl-5 text-[11.5px] leading-snug text-ok">
+                ✓ {option.pros}
+              </span>
+              <span className="block pl-5 text-[11.5px] leading-snug text-warn">
+                ✗ {option.cons}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <input
+          className="w-full rounded border border-border bg-sunken px-2 py-1.5 text-[13px] text-ink placeholder:text-faint"
+          onChange={(event) => setDraft(event.target.value)}
+          onCompositionEnd={() => {
+            composingRef.current = false
+          }}
+          onCompositionStart={() => {
+            composingRef.current = true
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !composingRef.current && !event.nativeEvent.isComposing) {
+              event.preventDefault()
+              submit()
+            }
+          }}
+          placeholder={t.chatAskPlaceholder}
+          value={draft}
+        />
+        <button
+          className="primary shrink-0"
+          disabled={request.options.length === 0 && !draft.trim()}
+          onClick={submit}
+          type="button"
+        >
+          {t.dialogConfirm}
+        </button>
+      </div>
+      <div className="actions mt-2">
+        <button onClick={() => onAnswer(request.requestId, '', true)} type="button">
+          {t.cancel}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One agent `present_plan` approval card: the goal, the numbered steps and the
+ * optional risk/split notes. Approve lets the agent execute the plan; "revise"
+ * opens a feedback input so the agent re-plans. While the plan is pending the
+ * plan gate refuses every page action, so the decision is the only way
+ * forward — deliberately the same slot as the confirmation cards.
+ */
+function PlanCard({
+  request,
+  onDecide,
+  t,
+}: {
+  request: PendingPlan
+  onDecide: (requestId: string, approved: boolean, feedback?: string) => void
+  t: ChatT
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  /** True during an IME composition, so Enter confirms the candidate, not the card. */
+  const composingRef = useRef(false)
+  const reject = (): void => {
+    const feedback = draft.trim()
+    if (!feedback) return
+    onDecide(request.requestId, false, feedback)
+  }
+  return (
+    <div className="confirm-card" data-kind="plan" role="region" aria-label={t.planCardAria}>
+      <strong>{t.planCardTitle}</strong>
+      <div className="mt-2">
+        <span className="text-xs font-medium text-muted">{t.planCardGoal}</span>
+        <div className="confirm-action">{request.goal}</div>
+      </div>
+      <div className="mt-2">
+        <span className="text-xs font-medium text-muted">{t.planCardSteps}</span>
+        <ol className="ml-4 list-decimal space-y-1 text-[13px] text-ink">
+          {request.steps.map((step, index) => (
+            <li key={index}>
+              <span>{step.title}</span>
+              {step.detail && <span className="text-xs text-muted"> — {step.detail}</span>}
+            </li>
+          ))}
+        </ol>
+      </div>
+      {request.risks && (
+        <div className="mt-2">
+          <span className="text-xs font-medium text-muted">{t.planCardRisks}</span>
+          <div className="text-[13px] text-err">{request.risks}</div>
+        </div>
+      )}
+      {request.split && (
+        <div className="mt-2">
+          <span className="text-xs font-medium text-muted">{t.planCardSplit}</span>
+          <div className="text-[13px] text-ink">{request.split}</div>
+        </div>
+      )}
+      <div className="actions mt-2">
+        <button className="primary" onClick={() => onDecide(request.requestId, true)} type="button">
+          {t.planApprove}
+        </button>
+        <button
+          onClick={() => {
+            setDraft('')
+            setEditing(true)
+          }}
+          type="button"
+        >
+          {t.planRevise}
+        </button>
+      </div>
+      {editing && (
+        <div className="mt-2 flex items-center gap-2">
+          <textarea
+            className="w-full rounded border border-border bg-sunken px-2 py-1.5 text-[13px] text-ink placeholder:text-faint"
+            onChange={(event) => setDraft(event.target.value)}
+            onCompositionEnd={() => {
+              composingRef.current = false
+            }}
+            onCompositionStart={() => {
+              composingRef.current = true
+            }}
+            onKeyDown={(event) => {
+              if (
+                event.key === 'Enter' &&
+                !event.shiftKey &&
+                !composingRef.current &&
+                !event.nativeEvent.isComposing
+              ) {
+                event.preventDefault()
+                reject()
+              }
+            }}
+            placeholder={t.planFeedbackPlaceholder}
+            rows={2}
+            value={draft}
+          />
+          <button
+            className="primary shrink-0"
+            disabled={!draft.trim()}
+            onClick={reject}
+            type="button"
+          >
+            {t.planFeedbackSend}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
 
 /**
  * One reasoning block (`<think>…</think>`) rendered apart from the answer:
@@ -1243,6 +1487,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const [includeSelection, setIncludeSelection] = useState(false)
   const [busy, setBusy] = useState(false)
   const [confirms, setConfirms] = useState<PendingConfirm[]>([])
+  /** Clarifying questions from the agent's `ask_user` tool, awaiting an answer. */
+  const [askUsers, setAskUsers] = useState<PendingAskUser[]>([])
+  /** Execution plans from the agent's `present_plan` tool, awaiting a decision. */
+  const [plans, setPlans] = useState<PendingPlan[]>([])
   const [conversationId, setConversationId] = useState<string>(() => loadStoredConversationId())
   /**
    * This panel's browser window, resolved once after mount. Gates the
@@ -1558,6 +1806,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       integrity: checkWorkflowIntegrity(workflow),
       folding: null,
       foldNote: null,
+      verifyRun: false,
     })
     // Probe AFTER the card is up, on its own command: injecting into the page
     // can be slow or refused outright, and neither may keep the card away.
@@ -1750,6 +1999,12 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             break
           case 'confirm.request':
             setConfirms((prev) => [...prev, message])
+            break
+          case 'ask_user.request':
+            setAskUsers((prev) => [...prev, message])
+            break
+          case 'plan.request':
+            setPlans((prev) => [...prev, message])
             break
           case 'status':
             // Free-form statuses (selection read results, etc.) replace the
@@ -2035,6 +2290,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     setConversationId(id)
     setEntries([])
     setConfirms([])
+    setAskUsers([])
     setWorkflowPrompt(null)
     streamingRef.current = null
     resetUsage()
@@ -2063,6 +2319,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     setConversationId(id)
     setEntries([])
     setConfirms([])
+    setAskUsers([])
     setWorkflowPrompt(null)
     streamingRef.current = null
     resetUsage()
@@ -2098,6 +2355,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     if (id === conversationId) {
       setEntries([])
       setConfirms([])
+      setAskUsers([])
       setWorkflowPrompt(null)
       streamingRef.current = null
       setConversationId(DEFAULT_CONVERSATION_ID)
@@ -2244,6 +2502,18 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     setConfirms((prev) => prev.filter((item) => item.requestId !== requestId))
   }
 
+  /** Replies to the agent's `ask_user` question: an answer, or a dismissal. */
+  const answerAskUser = (requestId: string, answer: string, cancelled: boolean): void => {
+    post({ type: 'ask_user.answer', requestId, answer, cancelled })
+    setAskUsers((prev) => prev.filter((item) => item.requestId !== requestId))
+  }
+
+  /** Decides the agent's submitted plan: approve, or reject with feedback. */
+  const answerPlan = (requestId: string, approved: boolean, feedback?: string): void => {
+    post({ type: 'plan.decision', requestId, approved, ...(feedback ? { feedback } : {}) })
+    setPlans((prev) => prev.filter((item) => item.requestId !== requestId))
+  }
+
   /**
    * Fires the AI node review for the card's base workflow (once — an
    * in-flight or landed verdict is reused). Used by BOTH the save click and
@@ -2351,7 +2621,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     )
     try {
       const workflow = derivePreview(prompt.base, prompt.keep, prompt.aiSelections, prompt.trigger)
-      await sendCommand({ type: 'workflows.save', workflow })
+      // `fromGeneration` lets the background harden the graph against the live
+      // page (verified selectors + persisted element waits) before persisting.
+      // Editor/import saves must NOT get this — hand-tuned selectors are
+      // never rewritten behind the user's back.
+      await sendCommand({ type: 'workflows.save', workflow, fromGeneration: true })
       // In draft mode the background still holds the operator-tool draft; drop
       // it so a later turn in the same conversation starts with a clean slate
       // rather than appending to the just-saved workflow. Fire-and-forget:
@@ -2366,6 +2640,46 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         role: 'status',
         text: tRef.current.chatSaveWorkflowSaved({ name: workflow.name }),
       })
+      if (prompt.verifyRun) {
+        // Opt-in verify run: the AI-debug loop re-executes the workflow for
+        // real, hands failed nodes to the AI (one repair round), and verifies
+        // the fixes takeover-free. Progress streams on the running board; the
+        // verdict lands here as chat entries.
+        append({ role: 'status', text: tRef.current.chatWorkflowVerifyStarted })
+        try {
+          const debug = await sendCommand({ type: 'workflows.debug', id: workflow.id })
+          if (debug.type === 'workflows.debug') {
+            const r = debug.result
+            if (r.ok && r.pendingChanges.length > 0) {
+              append({
+                role: 'status',
+                text: tRef.current.chatWorkflowVerifyPending({ count: r.pendingChanges.length }),
+              })
+            } else if (r.ok) {
+              append({
+                role: 'status',
+                text: tRef.current.chatWorkflowVerifyPassed({
+                  summary: (r.summary || '').slice(0, 200),
+                }),
+              })
+            } else if (r.cancelled) {
+              append({ role: 'status', text: tRef.current.taskOutcomeCancelled })
+            } else {
+              append({
+                role: 'error',
+                text: tRef.current.chatWorkflowVerifyFailed({
+                  reason: (r.error || r.summary || '').slice(0, 300),
+                }),
+              })
+            }
+          }
+        } catch (error) {
+          append({
+            role: 'error',
+            text: tRef.current.chatWorkflowVerifyFailed({ reason: (error as Error).message }),
+          })
+        }
+      }
     } catch (error) {
       const message = (error as Error).message
       setWorkflowPrompt((prev) =>
@@ -2462,6 +2776,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         workflow: derivePreview(prev.base, prev.keep, prev.aiSelections, trigger),
       }
     })
+  }
+
+  /** Toggle the opt-in verify run on the save card. */
+  const toggleVerifyRun = (enabled: boolean): void => {
+    setWorkflowPrompt((prev) => (prev ? { ...prev, verifyRun: enabled } : prev))
   }
 
   /**
@@ -2711,9 +3030,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       </div>
 
       <div className="pane chat-log" ref={logRef}>
-        {entries.length === 0 && confirms.length === 0 && (
-          <div className="empty">{t.chatEmpty}</div>
-        )}
+        {entries.length === 0 &&
+          confirms.length === 0 &&
+          askUsers.length === 0 &&
+          plans.length === 0 && <div className="empty">{t.chatEmpty}</div>}
 
         {groupEntries(entries).map((item) => {
           if (item.kind === 'single') {
@@ -2777,6 +3097,14 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               </button>
             </div>
           </div>
+        ))}
+
+        {askUsers.map((request) => (
+          <AskUserCard key={request.requestId} onAnswer={answerAskUser} request={request} t={t} />
+        ))}
+
+        {plans.map((request) => (
+          <PlanCard key={request.requestId} onDecide={answerPlan} request={request} t={t} />
         ))}
 
         {saveNotice && !workflowPrompt && (
@@ -2953,6 +3281,20 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                   {workflowPrompt.foldNote ?? t.chatFoldHint}
                 </p>
               </div>
+            )}
+            <label className="ai-prefill-item" style={{ marginTop: '4px' }}>
+              <input
+                checked={workflowPrompt.verifyRun}
+                disabled={workflowPrompt.saving}
+                onChange={(event) => toggleVerifyRun(event.target.checked)}
+                type="checkbox"
+              />
+              <span>{t.chatWorkflowVerifyRun}</span>
+            </label>
+            {workflowPrompt.verifyRun && (
+              <p className="hint" style={{ margin: '4px 0' }}>
+                {t.chatWorkflowVerifyRunHint}
+              </p>
             )}
             <div className="actions">
               <button

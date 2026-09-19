@@ -17,10 +17,13 @@ import {
   FsDirectory,
   fileStorageArea,
   getGrantedFsDirectory,
+  isStorageDirectoryConfigured,
+  adoptLegacyConfigValue,
   SKILLS_DIR,
   agentPath,
   skillPath,
 } from './fs-store'
+import { withKeyLock } from './key-lock'
 import { skillFromMarkdown, skillSlug, skillToMarkdown } from './skills-import'
 import { agentFromMarkdown, agentSlug, agentToMarkdown } from './agents-import'
 import { BUILT_IN_SKILLS } from './builtin-skills'
@@ -253,20 +256,39 @@ export async function ensureSchema(): Promise<void> {
     KEY_PASSWORDS,
     KEY_HISTORY,
     KEY_CONVERSATIONS_META,
+    KEY_AGENTS,
   ])
   if (stored[KEY_SCHEMA] === SCHEMA_VERSION) return
 
-  const patch: Record<string, unknown> = {
-    [KEY_SCHEMA]: SCHEMA_VERSION,
-    [KEY_SETTINGS]: normalizeStoredSettings(stored[KEY_SETTINGS]),
+  // With a storage directory configured, a key missing from browser storage
+  // may live in a file that is not readable yet: the handle's permission
+  // resets to 'prompt' after an extension reload or browser restart, and a
+  // service worker cannot re-grant it. Fabricating a default here would
+  // SHADOW the real value — once written, the read path stops treating the
+  // key as absent and never adopts the file (this is how provider
+  // configurations were lost). So absent keys are left absent while a
+  // directory is configured; browser mode keeps the old seed-everything
+  // behavior for fresh installs.
+  const configured = await isStorageDirectoryConfigured()
+  const unreadableGap = (key: string): boolean => configured && stored[key] === undefined
+
+  const patch: Record<string, unknown> = { [KEY_SCHEMA]: SCHEMA_VERSION }
+  if (!unreadableGap(KEY_SETTINGS)) {
+    patch[KEY_SETTINGS] = normalizeStoredSettings(stored[KEY_SETTINGS])
   }
   // Seed new collections as empty arrays so reads never need to special-case
-  // "key absent".
-  if (!Array.isArray(stored[KEY_PROFILES])) patch[KEY_PROFILES] = []
-  if (!Array.isArray(stored[KEY_PASSWORDS])) patch[KEY_PASSWORDS] = []
-  if (!Array.isArray(stored[KEY_HISTORY])) patch[KEY_HISTORY] = []
-  if (!Array.isArray(stored[KEY_CONVERSATIONS_META])) patch[KEY_CONVERSATIONS_META] = []
-  if (!Array.isArray(stored[KEY_AGENTS])) patch[KEY_AGENTS] = []
+  // "key absent" — but never over an unreadable gap, where the seeded empty
+  // array would reach the directory (via the outbox replay) and clobber the
+  // real records on file.
+  if (!Array.isArray(stored[KEY_PROFILES]) && !unreadableGap(KEY_PROFILES)) patch[KEY_PROFILES] = []
+  if (!Array.isArray(stored[KEY_PASSWORDS]) && !unreadableGap(KEY_PASSWORDS)) {
+    patch[KEY_PASSWORDS] = []
+  }
+  if (!Array.isArray(stored[KEY_HISTORY]) && !unreadableGap(KEY_HISTORY)) patch[KEY_HISTORY] = []
+  if (!Array.isArray(stored[KEY_CONVERSATIONS_META]) && !unreadableGap(KEY_CONVERSATIONS_META)) {
+    patch[KEY_CONVERSATIONS_META] = []
+  }
+  if (!Array.isArray(stored[KEY_AGENTS]) && !unreadableGap(KEY_AGENTS)) patch[KEY_AGENTS] = []
   await area.set(patch)
 
   // Ship the built-in skills (e.g. the skill-generator) on install/upgrade.
@@ -327,13 +349,48 @@ export async function seedBuiltInAgents(): Promise<void> {
   }
 }
 
+/**
+ * Whether a settings value is absent or normalizes to the pristine defaults —
+ * i.e. it carries no user data and a legacy file may hold the real settings.
+ */
+function isPristineSettings(raw: unknown): boolean {
+  if (raw === undefined) return true
+  try {
+    return (
+      JSON.stringify(normalizeStoredSettings(raw)) ===
+      JSON.stringify(normalizeStoredSettings(undefined))
+    )
+  } catch {
+    return false
+  }
+}
+
 /** Reads settings, normalizing whatever is on disk. */
 export async function getSettings(): Promise<Settings> {
   const stored = await area.get(KEY_SETTINGS)
-  return normalizeStoredSettings(stored[KEY_SETTINGS])
+  let raw = stored[KEY_SETTINGS]
+  if (isPristineSettings(raw)) {
+    // The value in browser storage is absent or a fabricated default while a
+    // legacy file may hold the real settings: versions before the config/data
+    // split migrated `settings` into the directory, and a schema bootstrap
+    // that ran while the directory handle was unavailable wrote defaults over
+    // the gap — which then blocked adoption forever (the read path only
+    // adopts absent keys). Adopting the file also writes it into browser
+    // storage, so the repair sticks.
+    const legacy = await adoptLegacyConfigValue(KEY_SETTINGS)
+    if (legacy !== undefined) raw = legacy
+  }
+  return normalizeStoredSettings(raw)
 }
 
 export async function setSettings(patch: Partial<Settings>): Promise<Settings> {
+  // Serialized per key (see `lib/key-lock.ts`): settings is a merged object,
+  // and two concurrent patches applied outside a queue would lose one.
+  return withKeyLock(KEY_SETTINGS, () => setSettingsLocked(patch))
+}
+
+/** {@link setSettings} without the queue — callers that already hold the lock. */
+async function setSettingsLocked(patch: Partial<Settings>): Promise<Settings> {
   const current = await getSettings()
   const merged: Settings = { ...current, ...patch }
   // Never leave the pointer dangling: a deleted or unknown active id falls back
@@ -366,23 +423,29 @@ export async function getActiveProvider(): Promise<ProviderProfile> {
 
 /** Inserts or replaces one provider profile. */
 export async function saveProvider(profile: ProviderProfile): Promise<Settings> {
-  const settings = await getSettings()
-  const providers = [...settings.providers]
-  const index = providers.findIndex((existing) => existing.id === profile.id)
-  if (index === -1) providers.push(profile)
-  else providers[index] = profile
-  // A first profile becomes active automatically; otherwise the choice stands.
-  const activeProviderId = settings.activeProviderId || profile.id
-  return setSettings({ providers, activeProviderId })
+  // The providers list is computed here and merged inside setSettingsLocked —
+  // both under the same queue, or two concurrent saves would lose one.
+  return withKeyLock(KEY_SETTINGS, async () => {
+    const settings = await getSettings()
+    const providers = [...settings.providers]
+    const index = providers.findIndex((existing) => existing.id === profile.id)
+    if (index === -1) providers.push(profile)
+    else providers[index] = profile
+    // A first profile becomes active automatically; otherwise the choice stands.
+    const activeProviderId = settings.activeProviderId || profile.id
+    return setSettingsLocked({ providers, activeProviderId })
+  })
 }
 
 export async function deleteProvider(id: string): Promise<Settings> {
-  const settings = await getSettings()
-  const providers = settings.providers.filter((profile) => profile.id !== id)
-  return setSettings({
-    providers,
-    activeProviderId:
-      settings.activeProviderId === id ? (providers[0]?.id ?? '') : settings.activeProviderId,
+  return withKeyLock(KEY_SETTINGS, async () => {
+    const settings = await getSettings()
+    const providers = settings.providers.filter((profile) => profile.id !== id)
+    return setSettingsLocked({
+      providers,
+      activeProviderId:
+        settings.activeProviderId === id ? (providers[0]?.id ?? '') : settings.activeProviderId,
+    })
   })
 }
 
@@ -502,42 +565,49 @@ export async function findSkillByName(name: string): Promise<Skill | undefined> 
 
 /** Inserts or replaces a skill, keeping the list sorted by name. */
 export async function saveSkill(skill: Skill): Promise<void> {
-  // Persists the collection for browser mode. With a directory configured this
-  // write is deliberately skipped (`createFileArea.set` ignores the `skills`
-  // key) — the `SKILL.md` file below is the durable copy, and keeping a second
-  // one in `chrome.storage.local` is what used to fill its quota.
-  const skills = await listSkills()
-  const existing = skills.find((entry) => entry.id === skill.id)
-  if (existing) skills[skills.indexOf(existing)] = skill
-  else skills.push(skill)
-  skills.sort((a, b) => a.name.localeCompare(b.name))
-  await area.set({ [KEY_SKILLS]: skills })
+  // Serialized per key: the collection RMW below (and the rename folder swap)
+  // must not interleave with another skill save. The markdown write inside the
+  // lock is deliberate — it keeps the folder and the collection consistent.
+  await withKeyLock(KEY_SKILLS, async () => {
+    // Persists the collection for browser mode. With a directory configured this
+    // write is deliberately skipped (`createFileArea.set` ignores the `skills`
+    // key) — the `SKILL.md` file below is the durable copy, and keeping a second
+    // one in `chrome.storage.local` is what used to fill its quota.
+    const skills = await listSkills()
+    const existing = skills.find((entry) => entry.id === skill.id)
+    if (existing) skills[skills.indexOf(existing)] = skill
+    else skills.push(skill)
+    skills.sort((a, b) => a.name.localeCompare(b.name))
+    await area.set({ [KEY_SKILLS]: skills })
 
-  // Durable copy as a folder-per-skill SKILL.md, like the general skills.
-  const handle = await getGrantedFsDirectory()
-  if (!handle) return
-  const fs = new FsDirectory(handle)
-  const slug = skillSlug(skill.name)
-  await fs.writeText(skillPath(slug), skillToMarkdown(skill))
-  // A rename changes the folder name; drop the stale folder so the old name
-  // does not resurface as a duplicate on the next file read.
-  if (existing && skillSlug(existing.name) !== slug) {
-    await fs.removeDirectory([SKILLS_DIR, skillSlug(existing.name)])
-  }
+    // Durable copy as a folder-per-skill SKILL.md, like the general skills.
+    const handle = await getGrantedFsDirectory()
+    if (!handle) return
+    const fs = new FsDirectory(handle)
+    const slug = skillSlug(skill.name)
+    await fs.writeText(skillPath(slug), skillToMarkdown(skill))
+    // A rename changes the folder name; drop the stale folder so the old name
+    // does not resurface as a duplicate on the next file read.
+    if (existing && skillSlug(existing.name) !== slug) {
+      await fs.removeDirectory([SKILLS_DIR, skillSlug(existing.name)])
+    }
+  })
 }
 
 export async function deleteSkill(id: string): Promise<void> {
-  const skills = await listSkills()
-  const victim = skills.find((skill) => skill.id === id)
-  await area.set({
-    [KEY_SKILLS]: skills.filter((skill) => skill.id !== id),
-  })
+  await withKeyLock(KEY_SKILLS, async () => {
+    const skills = await listSkills()
+    const victim = skills.find((skill) => skill.id === id)
+    await area.set({
+      [KEY_SKILLS]: skills.filter((skill) => skill.id !== id),
+    })
 
-  const handle = await getGrantedFsDirectory()
-  if (handle && victim) {
-    const fs = new FsDirectory(handle)
-    await fs.removeDirectory([SKILLS_DIR, skillSlug(victim.name)])
-  }
+    const handle = await getGrantedFsDirectory()
+    if (handle && victim) {
+      const fs = new FsDirectory(handle)
+      await fs.removeDirectory([SKILLS_DIR, skillSlug(victim.name)])
+    }
+  })
 }
 
 // --- Agents ------------------------------------------------------------------
@@ -596,36 +666,41 @@ export async function listDelegatableAgents(): Promise<Agent[]> {
 
 /** Inserts or replaces an agent, keeping the list sorted by name. */
 export async function saveAgent(agent: Agent): Promise<void> {
-  const agents = await listAgents()
-  const existing = agents.find((entry) => entry.id === agent.id)
-  if (existing) agents[agents.indexOf(existing)] = agent
-  else agents.push(agent)
-  agents.sort((a, b) => a.name.localeCompare(b.name))
-  await area.set({ [KEY_AGENTS]: agents })
+  // Serialized per key — same contract as {@link saveSkill}.
+  await withKeyLock(KEY_AGENTS, async () => {
+    const agents = await listAgents()
+    const existing = agents.find((entry) => entry.id === agent.id)
+    if (existing) agents[agents.indexOf(existing)] = agent
+    else agents.push(agent)
+    agents.sort((a, b) => a.name.localeCompare(b.name))
+    await area.set({ [KEY_AGENTS]: agents })
 
-  const handle = await getGrantedFsDirectory()
-  if (!handle) return
-  const fs = new FsDirectory(handle)
-  const slug = agentSlug(agent.name)
-  await fs.writeText(agentPath(slug), agentToMarkdown(agent))
-  // Drop the stale folder after a rename so the old name does not resurface.
-  if (existing && agentSlug(existing.name) !== slug) {
-    await fs.removeDirectory([AGENTS_DIR, agentSlug(existing.name)])
-  }
+    const handle = await getGrantedFsDirectory()
+    if (!handle) return
+    const fs = new FsDirectory(handle)
+    const slug = agentSlug(agent.name)
+    await fs.writeText(agentPath(slug), agentToMarkdown(agent))
+    // Drop the stale folder after a rename so the old name does not resurface.
+    if (existing && agentSlug(existing.name) !== slug) {
+      await fs.removeDirectory([AGENTS_DIR, agentSlug(existing.name)])
+    }
+  })
 }
 
 export async function deleteAgent(id: string): Promise<void> {
-  const agents = await listAgents()
-  const victim = agents.find((agent) => agent.id === id)
-  await area.set({
-    [KEY_AGENTS]: agents.filter((agent) => agent.id !== id),
-  })
+  await withKeyLock(KEY_AGENTS, async () => {
+    const agents = await listAgents()
+    const victim = agents.find((agent) => agent.id === id)
+    await area.set({
+      [KEY_AGENTS]: agents.filter((agent) => agent.id !== id),
+    })
 
-  const handle = await getGrantedFsDirectory()
-  if (handle && victim) {
-    const fs = new FsDirectory(handle)
-    await fs.removeDirectory([AGENTS_DIR, agentSlug(victim.name)])
-  }
+    const handle = await getGrantedFsDirectory()
+    if (handle && victim) {
+      const fs = new FsDirectory(handle)
+      await fs.removeDirectory([AGENTS_DIR, agentSlug(victim.name)])
+    }
+  })
 }
 
 /**
@@ -733,59 +808,69 @@ export async function touchConversation(
   conversationId: string,
   firstUserText?: string,
 ): Promise<ConversationMeta> {
-  const list = await listConversations()
-  const existing = list.find((meta) => meta.id === conversationId)
-  const now = Date.now()
-  if (existing) {
-    existing.updatedAt = now
-    if (firstUserText && (!existing.preview || existing.preview.trim().length === 0)) {
-      existing.preview = firstUserText.slice(0, 120)
+  return withKeyLock(KEY_CONVERSATIONS_META, async () => {
+    const list = await listConversations()
+    const existing = list.find((meta) => meta.id === conversationId)
+    const now = Date.now()
+    if (existing) {
+      existing.updatedAt = now
+      if (firstUserText && (!existing.preview || existing.preview.trim().length === 0)) {
+        existing.preview = firstUserText.slice(0, 120)
+      }
+      if (firstUserText && (!existing.title || existing.title === DEFAULT_CONVERSATION_TITLE)) {
+        existing.title = firstUserText.trim().slice(0, 60) || DEFAULT_CONVERSATION_TITLE
+      }
+      await area.set({ [KEY_CONVERSATIONS_META]: list })
+      return existing
     }
-    if (firstUserText && (!existing.title || existing.title === DEFAULT_CONVERSATION_TITLE)) {
-      existing.title = firstUserText.trim().slice(0, 60) || DEFAULT_CONVERSATION_TITLE
+    const trimmed = firstUserText?.trim() ?? ''
+    const created: ConversationMeta = {
+      id: conversationId,
+      title: trimmed.slice(0, 60) || DEFAULT_CONVERSATION_TITLE,
+      createdAt: now,
+      updatedAt: now,
+      preview: trimmed.slice(0, 120) || undefined,
     }
+    list.push(created)
     await area.set({ [KEY_CONVERSATIONS_META]: list })
-    return existing
-  }
-  const trimmed = firstUserText?.trim() ?? ''
-  const created: ConversationMeta = {
-    id: conversationId,
-    title: trimmed.slice(0, 60) || DEFAULT_CONVERSATION_TITLE,
-    createdAt: now,
-    updatedAt: now,
-    preview: trimmed.slice(0, 120) || undefined,
-  }
-  list.push(created)
-  await area.set({ [KEY_CONVERSATIONS_META]: list })
-  return created
+    return created
+  })
 }
 
 export async function renameConversation(conversationId: string, title: string): Promise<void> {
-  const list = await listConversations()
-  const meta = list.find((entry) => entry.id === conversationId)
-  if (meta) {
-    meta.title = title.trim().slice(0, 80) || DEFAULT_CONVERSATION_TITLE
-    meta.updatedAt = Date.now()
-    await area.set({ [KEY_CONVERSATIONS_META]: list })
-  }
+  await withKeyLock(KEY_CONVERSATIONS_META, async () => {
+    const list = await listConversations()
+    const meta = list.find((entry) => entry.id === conversationId)
+    if (meta) {
+      meta.title = title.trim().slice(0, 80) || DEFAULT_CONVERSATION_TITLE
+      meta.updatedAt = Date.now()
+      await area.set({ [KEY_CONVERSATIONS_META]: list })
+    }
+  })
 }
 
 export async function deleteConversation(conversationId: string): Promise<void> {
-  const [metaList] = await Promise.all([
-    area.get(KEY_CONVERSATIONS_META),
-    clearConversation(conversationId),
-  ])
-  const list = Array.isArray(metaList[KEY_CONVERSATIONS_META])
-    ? (metaList[KEY_CONVERSATIONS_META] as ConversationMeta[])
-    : []
-  await area.set({
-    [KEY_CONVERSATIONS_META]: list.filter((meta) => meta.id !== conversationId),
-  })
-  // Also drop turn state and any history for this thread.
-  await chrome.storage.session.remove(`${TURN_STATE_PREFIX}${conversationId}`)
-  const all = await listHistory()
-  await area.set({
-    [KEY_HISTORY]: all.filter((entry) => entry.conversationId !== conversationId),
+  // Lock order is always meta → history (the only nested pair), so no path can
+  // deadlock against another.
+  await withKeyLock(KEY_CONVERSATIONS_META, async () => {
+    const [metaList] = await Promise.all([
+      area.get(KEY_CONVERSATIONS_META),
+      clearConversation(conversationId),
+    ])
+    const list = Array.isArray(metaList[KEY_CONVERSATIONS_META])
+      ? (metaList[KEY_CONVERSATIONS_META] as ConversationMeta[])
+      : []
+    await area.set({
+      [KEY_CONVERSATIONS_META]: list.filter((meta) => meta.id !== conversationId),
+    })
+    // Also drop turn state and any history for this thread.
+    await chrome.storage.session.remove(`${TURN_STATE_PREFIX}${conversationId}`)
+    await withKeyLock(KEY_HISTORY, async () => {
+      const all = await listHistory()
+      await area.set({
+        [KEY_HISTORY]: all.filter((entry) => entry.conversationId !== conversationId),
+      })
+    })
   })
 }
 
@@ -836,18 +921,22 @@ export async function listProfiles(): Promise<UserProfile[]> {
 }
 
 export async function saveProfile(profile: UserProfile): Promise<void> {
-  const list = await listProfiles()
-  const index = list.findIndex((entry) => entry.id === profile.id)
-  const normalized: UserProfile = { ...profile, updatedAt: Date.now() }
-  if (index === -1) list.push(normalized)
-  else list[index] = normalized
-  await area.set({ [KEY_PROFILES]: list })
+  await withKeyLock(KEY_PROFILES, async () => {
+    const list = await listProfiles()
+    const index = list.findIndex((entry) => entry.id === profile.id)
+    const normalized: UserProfile = { ...profile, updatedAt: Date.now() }
+    if (index === -1) list.push(normalized)
+    else list[index] = normalized
+    await area.set({ [KEY_PROFILES]: list })
+  })
 }
 
 export async function deleteProfile(id: string): Promise<void> {
-  const list = await listProfiles()
-  await area.set({
-    [KEY_PROFILES]: list.filter((profile) => profile.id !== id),
+  await withKeyLock(KEY_PROFILES, async () => {
+    const list = await listProfiles()
+    await area.set({
+      [KEY_PROFILES]: list.filter((profile) => profile.id !== id),
+    })
   })
 }
 
@@ -908,44 +997,50 @@ export async function listPasswords(): Promise<PasswordEntry[]> {
 }
 
 export async function savePassword(entry: PasswordEntry): Promise<void> {
-  const list = await listPasswords()
-  const index = list.findIndex((existing) => existing.id === entry.id)
-  // Normalise: keep only well-formed fields, drop empty keys, and never persist
-  // the deprecated legacy columns once an entry is in the new shape.
-  const fields = (entry.fields ?? [])
-    .filter((f) => f && f.key.trim() !== '')
-    .map((f) => ({ key: f.key.trim(), value: f.value, ...(f.secret ? { secret: true } : {}) }))
-  const normalized: PasswordEntry = {
-    id: entry.id,
-    label: entry.label?.trim() || 'Credential',
-    ...(entry.url?.trim() ? { url: entry.url.trim() } : {}),
-    fields,
-    createdAt: entry.createdAt ?? Date.now(),
-    updatedAt: Date.now(),
-    useCount: entry.useCount ?? 0,
-    ...(typeof entry.lastUsedAt === 'number' ? { lastUsedAt: entry.lastUsedAt } : {}),
-  }
-  if (index === -1) list.push(normalized)
-  else list[index] = normalized
-  await area.set({ [KEY_PASSWORDS]: list })
+  await withKeyLock(KEY_PASSWORDS, async () => {
+    const list = await listPasswords()
+    const index = list.findIndex((existing) => existing.id === entry.id)
+    // Normalise: keep only well-formed fields, drop empty keys, and never persist
+    // the deprecated legacy columns once an entry is in the new shape.
+    const fields = (entry.fields ?? [])
+      .filter((f) => f && f.key.trim() !== '')
+      .map((f) => ({ key: f.key.trim(), value: f.value, ...(f.secret ? { secret: true } : {}) }))
+    const normalized: PasswordEntry = {
+      id: entry.id,
+      label: entry.label?.trim() || 'Credential',
+      ...(entry.url?.trim() ? { url: entry.url.trim() } : {}),
+      fields,
+      createdAt: entry.createdAt ?? Date.now(),
+      updatedAt: Date.now(),
+      useCount: entry.useCount ?? 0,
+      ...(typeof entry.lastUsedAt === 'number' ? { lastUsedAt: entry.lastUsedAt } : {}),
+    }
+    if (index === -1) list.push(normalized)
+    else list[index] = normalized
+    await area.set({ [KEY_PASSWORDS]: list })
+  })
 }
 
 export async function deletePassword(id: string): Promise<void> {
-  const list = await listPasswords()
-  await area.set({
-    [KEY_PASSWORDS]: list.filter((entry) => entry.id !== id),
+  await withKeyLock(KEY_PASSWORDS, async () => {
+    const list = await listPasswords()
+    await area.set({
+      [KEY_PASSWORDS]: list.filter((entry) => entry.id !== id),
+    })
   })
 }
 
 /** Bumps use counters so the most-used credentials surface first. */
 export async function recordPasswordUse(id: string): Promise<void> {
-  const list = await listPasswords()
-  const entry = list.find((item) => item.id === id)
-  if (entry) {
-    entry.useCount += 1
-    entry.lastUsedAt = Date.now()
-    await area.set({ [KEY_PASSWORDS]: list })
-  }
+  await withKeyLock(KEY_PASSWORDS, async () => {
+    const list = await listPasswords()
+    const entry = list.find((item) => item.id === id)
+    if (entry) {
+      entry.useCount += 1
+      entry.lastUsedAt = Date.now()
+      await area.set({ [KEY_PASSWORDS]: list })
+    }
+  })
 }
 
 // --- Action history ---------------------------------------------------------
@@ -985,22 +1080,28 @@ export async function listHistory(): Promise<HistoryEntry[]> {
 }
 
 export async function addHistory(entry: HistoryEntry): Promise<void> {
-  const list = await listHistory()
-  list.unshift(entry)
-  // listHistory sorts by time; cap the newest N.
-  const trimmed = list.slice(0, MAX_HISTORY_ENTRIES)
-  await area.set({ [KEY_HISTORY]: trimmed })
+  await withKeyLock(KEY_HISTORY, async () => {
+    const list = await listHistory()
+    list.unshift(entry)
+    // listHistory sorts by time; cap the newest N.
+    const trimmed = list.slice(0, MAX_HISTORY_ENTRIES)
+    await area.set({ [KEY_HISTORY]: trimmed })
+  })
 }
 
 export async function deleteHistory(id: string): Promise<void> {
-  const list = await listHistory()
-  await area.set({
-    [KEY_HISTORY]: list.filter((entry) => entry.id !== id),
+  await withKeyLock(KEY_HISTORY, async () => {
+    const list = await listHistory()
+    await area.set({
+      [KEY_HISTORY]: list.filter((entry) => entry.id !== id),
+    })
   })
 }
 
 export async function clearHistory(): Promise<void> {
-  await area.set({ [KEY_HISTORY]: [] })
+  await withKeyLock(KEY_HISTORY, async () => {
+    await area.set({ [KEY_HISTORY]: [] })
+  })
 }
 
 // --- Rebuild workflows from action history ----------------------------------

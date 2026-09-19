@@ -24,17 +24,18 @@
 import { CATEGORY_META } from './blocks/catalog'
 import { PALETTE_BLOCKS } from './blocks/palette'
 import type { BlockCatalogEntry, BlockCategory } from './blocks/types'
-import { JAVASCRIPT_BLOCK_ID } from './operator-class'
+import { EDIT_LESS_OPERATOR_IDS, JAVASCRIPT_BLOCK_ID } from './operator-class'
 
 /**
  * Every block an operator tool can name — the same predicate
  * `operator-tools` uses (`PALETTE_BLOCKS` minus the edit-less routing
- * primitives). Derived independently here rather than imported so the
- * dependency only runs one way; `tests/operator-categories.spec.ts` asserts the
- * two derivations agree, so they cannot drift apart silently.
+ * primitives, plus the edit-less exceptions). Derived independently here rather
+ * than imported so the dependency only runs one way;
+ * `tests/operator-categories.spec.ts` asserts the two derivations agree, so
+ * they cannot drift apart silently.
  */
 const OPERATOR_ENTRIES: readonly BlockCatalogEntry[] = PALETTE_BLOCKS.filter(
-  (entry) => !entry.disableEdit,
+  (entry) => !entry.disableEdit || EDIT_LESS_OPERATOR_IDS.has(entry.id),
 )
 
 /**
@@ -156,20 +157,26 @@ export function operatorCategoryLabel(category: BlockCategory): string {
 /**
  * The operators advertised on EVERY round, whatever the model declared.
  *
- * These four are the irreducible core of any page task — navigate, click, fill
- * or read a field, read text — and they are all in `interaction`, so a model
- * that declares nothing can still start working instead of burning a round on
- * a declaration. Together they cost ~3.5k chars.
+ * These are the irreducible core of any page task — navigate, click, fill or
+ * read a field, read text, and go back — and they are all in `interaction` (or
+ * `browser`, for the two navigation blocks), so a model that declares nothing
+ * can still start working instead of burning a round on a declaration. All
+ * five cost ~3.5k chars; `go-back` carries no arguments at all.
  *
- * `new-tab` is the only one outside the "interaction" mental model (it is
- * catalogued under `browser`); it is here because every task starts by getting
- * to a page.
+ * `go-back` is core because the list→detail→back collection pattern needs it
+ * every time: open an item, read its detail, return to the list. Without it
+ * that shape can only be faked by re-navigating, which re-shuffles the list
+ * the workflow is iterating.
+ *
+ * `new-tab` is outside the "interaction" mental model (it is catalogued under
+ * `browser`); it is here because every task starts by getting to a page.
  */
 export const CORE_OPERATOR_BLOCK_IDS: readonly string[] = [
   'new-tab',
   'event-click',
   'forms',
   'get-text',
+  'go-back',
 ]
 
 /** Tool names of the always-advertised core. */

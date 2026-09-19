@@ -15,6 +15,7 @@
  */
 
 import { fileStorageArea } from '../fs-store'
+import { withKeyLock } from '../key-lock'
 import type { DraftSource, PendingBranch, WorkflowDraft } from './draft-types'
 import type { WorkflowEdge, WorkflowNode } from './types'
 
@@ -123,21 +124,29 @@ export async function loadDraft(conversationId: string): Promise<WorkflowDraft |
 /**
  * Mirror a draft to durable storage, dropping the oldest conversations once the
  * cap is reached. Insertion order of the record is the eviction order.
+ *
+ * Serialized per key like every other read-modify-write collection (see
+ * `lib/key-lock.ts`): two agent tool calls settling together would otherwise
+ * race and one draft would be dropped from the record.
  */
 export async function saveDraft(draft: WorkflowDraft): Promise<void> {
-  const all = await readAll()
-  delete all[draft.conversationId]
-  all[draft.conversationId] = draft
-  const keys = Object.keys(all)
-  for (const key of keys.slice(0, Math.max(0, keys.length - MAX_STORED_DRAFTS))) {
-    delete all[key]
-  }
-  await area.set({ [KEY_WORKFLOW_DRAFTS]: all })
+  await withKeyLock(KEY_WORKFLOW_DRAFTS, async () => {
+    const all = await readAll()
+    delete all[draft.conversationId]
+    all[draft.conversationId] = draft
+    const keys = Object.keys(all)
+    for (const key of keys.slice(0, Math.max(0, keys.length - MAX_STORED_DRAFTS))) {
+      delete all[key]
+    }
+    await area.set({ [KEY_WORKFLOW_DRAFTS]: all })
+  })
 }
 
 export async function deleteDraft(conversationId: string): Promise<void> {
-  const all = await readAll()
-  if (!(conversationId in all)) return
-  delete all[conversationId]
-  await area.set({ [KEY_WORKFLOW_DRAFTS]: all })
+  await withKeyLock(KEY_WORKFLOW_DRAFTS, async () => {
+    const all = await readAll()
+    if (!(conversationId in all)) return
+    delete all[conversationId]
+    await area.set({ [KEY_WORKFLOW_DRAFTS]: all })
+  })
 }

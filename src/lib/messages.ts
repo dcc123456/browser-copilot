@@ -144,7 +144,14 @@ export type Command =
   // --- Workflows ---
   | { type: 'workflows.list' }
   | { type: 'workflows.get'; id: string }
-  | { type: 'workflows.save'; workflow: Workflow }
+  /**
+   * Persist a workflow. `fromGeneration` marks a save from the chat
+   * generation card: the background then hardens the graph against the live
+   * page (verified selectors, persisted element waits) before writing it.
+   * Editor/import saves skip that — hand-tuned selectors are never rewritten
+   * behind the user's back.
+   */
+  | { type: 'workflows.save'; workflow: Workflow; fromGeneration?: boolean }
   | { type: 'workflows.delete'; id: string }
   /**
    * Materialises the current conversation's operator-tool draft into a
@@ -491,6 +498,19 @@ export type AgentClientMessage =
       attachments?: AttachmentDescriptor[]
     }
   | { type: 'confirm'; requestId: string; approved: boolean }
+  /**
+   * Answer to a `plan.request`: the user either approved the submitted plan or
+   * rejected it with free-text feedback for the revision loop. Keyed by
+   * `requestId` like `confirm` so concurrent cards resolve independently.
+   */
+  | { type: 'plan.decision'; requestId: string; approved: boolean; feedback?: string }
+  /**
+   * Answer to an `ask_user.request`: the user either typed/picked an answer
+   * (`cancelled: false`) or dismissed the question (`cancelled: true`, empty
+   * `answer`). Keyed by `requestId` like `confirm` so concurrent questions
+   * resolve independently.
+   */
+  | { type: 'ask_user.answer'; requestId: string; answer: string; cancelled: boolean }
   | { type: 'cancel' }
   | { type: 'reset'; conversationId: string }
   /**
@@ -525,6 +545,42 @@ export type AgentServerMessage =
       name: string
       /** Pretty-printed arguments for the user to inspect before approving. */
       argsPreview: string
+    }
+  /**
+   * The agent is asking the user a clarifying question (`ask_user` tool). The
+   * panel renders the question with the candidate approaches (the FIRST one is
+   * the recommendation and is pre-selected) plus a free-text answer; the reply
+   * travels back as {@link AgentClientMessage}'s `ask_user.answer`. Same
+   * request/response shape as `confirm.request` — a pending question that
+   * nobody can answer (cancel, panel closed) resolves cancelled instead of
+   * hanging the turn.
+   */
+  | {
+      type: 'ask_user.request'
+      requestId: string
+      question: string
+      /** 3-6 candidate approaches with pros/cons; index 0 is the recommendation. */
+      options: Array<{ label: string; pros: string; cons: string }>
+    }
+  /**
+   * The agent submitted an execution plan (`present_plan` tool, active when the
+   * plan skill is loaded). The panel renders the goal, the numbered steps and
+   * the optional risk/split notes as an approval card; the reply travels back
+   * as {@link AgentClientMessage}'s `plan.decision`. Same lifecycle as
+   * `ask_user.request` — a pending card nobody answers (cancel, panel closed)
+   * resolves rejected instead of hanging the turn.
+   */
+  | {
+      type: 'plan.request'
+      requestId: string
+      /** One-line task goal the plan was derived from. */
+      goal: string
+      /** Ordered plan steps rendered as a numbered list. */
+      steps: { title: string; detail?: string }[]
+      /** Optional risk notes (login, CAPTCHA, irreversible steps). */
+      risks?: string
+      /** Optional split/composition note (workflow mode, multi-workflow plans). */
+      split?: string
     }
   | { type: 'status'; text: string }
   /**

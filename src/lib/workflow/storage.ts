@@ -13,6 +13,7 @@
 
 import { newId } from '../storage'
 import { fileStorageArea } from '../fs-store'
+import { withKeyLock } from '../key-lock'
 import { migrateWorkflow } from './migrate'
 import type { Workflow, WorkflowEdge, WorkflowNode, WorkflowSettings } from './types'
 
@@ -132,24 +133,32 @@ export async function getWorkflow(id: string): Promise<Workflow | undefined> {
 }
 
 export async function saveWorkflow(workflow: Workflow): Promise<void> {
-  const list = await listWorkflows()
-  const normalized = asWorkflow({ ...workflow, updatedAt: Date.now() })
-  if (!normalized) throw new Error('Invalid workflow')
-  // Canonicalize on write: legacy shapes (legacy block ids, `values.*` bags,
-  // handle-less edges) are migrated before persisting so every consumer — the
-  // editor, the engine, exports — reads the canonical flat shape. Idempotent
-  // for already-canonical workflows.
-  const canonical = migrateWorkflow(normalized)
-  const index = list.findIndex((existing) => existing.id === workflow.id)
-  if (index >= 0) list[index] = canonical
-  else list.push(canonical)
-  await area.set({ [KEY_WORKFLOWS]: list })
+  // Serialized per key: the read-modify-write below would otherwise race a
+  // concurrent save (both read the same base list, the later write silently
+  // dropped the other's workflow). All content writes run in the service
+  // worker, so this one-context queue is a complete serialization.
+  await withKeyLock(KEY_WORKFLOWS, async () => {
+    const list = await listWorkflows()
+    const normalized = asWorkflow({ ...workflow, updatedAt: Date.now() })
+    if (!normalized) throw new Error('Invalid workflow')
+    // Canonicalize on write: legacy shapes (legacy block ids, `values.*` bags,
+    // handle-less edges) are migrated before persisting so every consumer — the
+    // editor, the engine, exports — reads the canonical flat shape. Idempotent
+    // for already-canonical workflows.
+    const canonical = migrateWorkflow(normalized)
+    const index = list.findIndex((existing) => existing.id === workflow.id)
+    if (index >= 0) list[index] = canonical
+    else list.push(canonical)
+    await area.set({ [KEY_WORKFLOWS]: list })
+  })
 }
 
 export async function deleteWorkflow(id: string): Promise<void> {
-  const list = await listWorkflows()
-  await area.set({
-    [KEY_WORKFLOWS]: list.filter((workflow) => workflow.id !== id),
+  await withKeyLock(KEY_WORKFLOWS, async () => {
+    const list = await listWorkflows()
+    await area.set({
+      [KEY_WORKFLOWS]: list.filter((workflow) => workflow.id !== id),
+    })
   })
 }
 

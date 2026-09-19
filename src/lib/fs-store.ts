@@ -1,32 +1,28 @@
 /**
  * File-backed storage.
  *
- * The durable copy of every setting / conversation / task / workflow lives in
- * plain JSON files on the user's hard drive instead of inside
+ * The durable copy of every piece of USER CONTENT — conversations, workflows,
+ * drafts, history, profiles, passwords, tasks, checkpoints, skills, agents —
+ * lives in plain JSON files on the user's hard drive instead of inside
  * `chrome.storage.local`. The user picks a directory once via the File System
  * Access API (`showDirectoryPicker`); the directory handle is persisted in
- * IndexedDB, and a `browser-copilot` subfolder inside it holds one JSON file per
- * logical key (conversation transcripts under `conversations/<id>.json`).
+ * IndexedDB, and a `browser-copilot` subfolder inside it holds one JSON file
+ * per logical key (conversation transcripts under `conversations/<id>.json`).
  *
- * `chrome.storage.local` is NOT a second copy of the data. Once a directory is
- * configured, writes go to files only: the user asked for their data to live in
- * that directory and nowhere else, and a full mirror is exactly what filled the
- * store's 10 MB quota. What remains in `chrome.storage.local` is a narrow
- * staging area for the one case a file write cannot serve — a write made while
- * the handle is unavailable, since re-requesting a dropped permission needs a
- * user gesture that a background worker cannot provide. Such a write lands in
- * the mirror, is readable from there until it is flushed, and is pushed into
- * files by {@link syncToFiles} on the next panel open. A key that reaches a file
- * is removed from the mirror, so the staging area only ever holds writes that
- * have not landed yet.
- *
- * Reads still prefer the file when the handle is granted and fall back to the
- * mirror otherwise, so externally-edited files are picked up and a pending write
- * is not lost in the gap between choosing a directory and the first grant.
- *
- * `chrome.storage.onChanged` used to be how the UI learned about a write. That
- * store is no longer written, so `lib/store-events` carries the notification
- * instead.
+ * Two key classes, routed per write (see {@link isConfigKey}):
+ * - **Content keys** go to the directory. The directory is the only durable
+ *   home: nothing is mirrored back into `chrome.storage.local`. When the
+ *   handle is unavailable (right after a restart its permission may sit at
+ *   `'prompt'`, and re-granting needs a user gesture a background worker
+ *   cannot provide) writes park in a durable outbox and reads fall back to a
+ *   read cache — see `lib/fs-outbox.ts`. Neither structure is a second copy:
+ *   the outbox drains into files and empties, the cache is a read-side
+ *   convenience that is cleared when file mode ends.
+ * - **Config keys** (`settings`, `schemaVersion`, `feishuConfig`, panel
+ *   positions) are extension configuration, not user content: they live in
+ *   `chrome.storage.local` permanently, in every mode, and are never written
+ *   to the directory. (Older versions did migrate them into files; the read
+ *   path adopts such legacy files back into browser storage once.)
  *
  * The picker and permission requests require a window plus a user gesture, so
  * those entry points (`pickStorageDirectory`, `ensureFileAccess`, `syncToFiles`)
@@ -34,11 +30,34 @@
  * writes succeed as long as the permission is already granted for this
  * extension's origin (which it is once the user has chosen the directory).
  *
+ * Content writes happen ONLY in the service worker (panel UIs go through
+ * commands), which makes per-key write queues in the persistence modules a
+ * complete serialization of read-modify-write cycles — see `lib/key-lock.ts`.
+ *
+ * `chrome.storage.onChanged` is not how the UI learns about a write (the
+ * content keys no longer live there); `lib/store-events` carries the
+ * notification instead.
+ *
  * @module lib/fs-store
  */
 import { skillFromMarkdown, skillSlug, skillToMarkdown } from './skills-import'
 import { agentFromMarkdown, agentSlug, agentToMarkdown } from './agents-import'
 import { notifyStoreChanged } from './store-events'
+import {
+  CACHE_INDEX_KEY,
+  CACHE_PREFIX,
+  OUTBOX_KEY,
+  chromeLocalArea,
+  clearFallbacks,
+  dropOutboxEntry,
+  enqueueOutbox,
+  hasChromeStorage,
+  readCache,
+  readOutboxMap,
+  removeCache,
+  replayOutbox,
+  writeCache,
+} from './fs-outbox'
 import type { Agent, Skill } from './types'
 
 /**
@@ -74,6 +93,33 @@ export interface StorageArea {
   get(keys: string | string[]): Promise<Record<string, unknown>>
   set(items: Record<string, unknown>): Promise<void>
   remove(keys: string | string[]): Promise<void>
+}
+
+// --- Key classification --------------------------------------------------------
+
+/**
+ * Extension configuration keys. These stay in `chrome.storage.local` in EVERY
+ * mode — the directory holds user content, not the extension's own settings.
+ * Everything else routed through the area is user content and lives in the
+ * configured directory.
+ */
+export const CONFIG_KEYS: ReadonlySet<string> = new Set([
+  'settings',
+  'schemaVersion',
+  'feishuConfig',
+  // Written directly by `background/panel-minimize.ts` (never via the area);
+  // listed so a legacy copy is never migrated into the directory.
+  'floatingButtonPositions',
+])
+
+/** Whether `key` is extension configuration rather than user content. */
+export function isConfigKey(key: string): boolean {
+  return CONFIG_KEYS.has(key)
+}
+
+/** Whether a `chrome.storage.local` key belongs to one of the fallback structures. */
+function isFallbackKey(key: string): boolean {
+  return key === OUTBOX_KEY || key === CACHE_INDEX_KEY || key.startsWith(CACHE_PREFIX)
 }
 
 // --- Key → file mapping ------------------------------------------------------
@@ -214,7 +260,13 @@ export class FsDirectory {
     for (let i = 0; i < segments.length - 1; i += 1) {
       const segment = segments[i]
       if (!segment) return null
-      handle = await handle.getDirectoryHandle(segment, { create })
+      try {
+        handle = await handle.getDirectoryHandle(segment, { create })
+      } catch {
+        // A missing intermediate directory means the file is absent (read) or
+        // cannot exist (a create failure surfaces below / in writeText).
+        return null
+      }
     }
     const name = segments[segments.length - 1]
     if (!name) return null
@@ -237,7 +289,11 @@ export class FsDirectory {
     }
   }
 
-  /** Creates or overwrites a file with the given text. */
+  /**
+   * Creates or overwrites a file with the given text. `createWritable` writes
+   * to a swap file and commits on `close()`, so a crash mid-write leaves the
+   * previous content intact — no extra `.bak` step is needed.
+   */
   async writeText(segments: string[], text: string): Promise<void> {
     const fileHandle = await this.fileHandle(segments, true)
     // `create: true` was requested, so a missing handle means the directory
@@ -332,61 +388,18 @@ export class FsDirectory {
   }
 }
 
-// --- chrome.storage.local mirror ---------------------------------------------
-
-function hasChromeStorage(): boolean {
-  return typeof chrome !== 'undefined' && !!chrome?.storage?.local
-}
-
-/**
- * Chrome refuses a `storage.local` write past its quota with
- * `Resource::kQuotaBytes quota exceeded` — a message naming an internal
- * constant that suggests nothing. Since this string is exactly what a user sees
- * when a save fails, it is replaced with the two things that actually help.
- *
- * The `unlimitedStorage` permission lifts the cap (see `manifest.config.ts`), so
- * reaching here means either the permission is missing or a real disk limit was
- * hit; in both cases moving the data into files is the way out. Non-quota
- * errors pass through untouched — translating them would hide the real cause.
- */
-function translateStorageError(error: unknown): Error {
-  const text = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
-  if (!/quota/i.test(text)) return error instanceof Error ? error : new Error(text)
-  return new Error(
-    '浏览器存储空间已满，这次写入没有保存。' +
-      '请在「设置 → 数据存储」里选择一个本地目录——之后对话、工作流都会存成文件，' +
-      '不再受 chrome.storage.local 的上限限制；也可以先删掉一些旧对话再重试。' +
-      `（Chrome 原始报错：${text}）`,
-  )
-}
-
-const chromeArea: StorageArea = {
-  async get(keys) {
-    if (!hasChromeStorage()) return {}
-    const stored = await chrome.storage.local.get(keys)
-    return stored as Record<string, unknown>
-  },
-  async set(items) {
-    if (!hasChromeStorage()) return
-    try {
-      await chrome.storage.local.set(items)
-    } catch (error) {
-      throw translateStorageError(error)
-    }
-  },
-  async remove(keys) {
-    if (!hasChromeStorage()) return
-    await chrome.storage.local.remove(keys)
-  },
-}
-
 // --- File-backed area --------------------------------------------------------
 
 /**
  * A `StorageArea` backed by real files. Writes go to files only and announce
- * themselves through `lib/store-events`; a read that misses a file falls back to
- * the `chrome.storage.local` staging area, which by then holds only writes made
- * while the handle was unavailable (see the module note).
+ * themselves through `lib/store-events`.
+ *
+ * Reads are layered: the file first, then a pending outbox entry (a write made
+ * while the handle was unavailable — it REPLACES the file value, and a
+ * tombstone entry makes the key read as absent), then the read cache, then any
+ * legacy pre-outbox mirror value. The layers only ever answer for keys the
+ * more durable layer does not know (a tombstone never falls through), so a
+ * read-modify-write always starts from the full latest state.
  */
 export function createFileArea(handle: FileSystemDirectoryHandle): StorageArea {
   const fs = new FsDirectory(handle)
@@ -404,12 +417,40 @@ export function createFileArea(handle: FileSystemDirectoryHandle): StorageArea {
         try {
           out[key] = JSON.parse(text) as unknown
         } catch {
-          // Corrupt file — fall back to the staging area rather than surfacing
-          // an unparsable value to a caller that trusts the shape.
+          // Corrupt file — fall through to the pending/cache layers rather
+          // than surfacing an unparsable value to a caller that trusts the
+          // shape.
           missing.push(key)
         }
       }
-      if (missing.length > 0) Object.assign(out, await chromeArea.get(missing))
+      // Pending outbox entries overlay the file state: a value replaces it, a
+      // tombstone makes the key read as absent and never falls through.
+      const pending = await readOutboxMap()
+      for (const key of wanted) {
+        const entry = pending[key]
+        if (!entry) continue
+        if (entry.value === null) delete out[key]
+        else out[key] = entry.value
+      }
+      const tombstoned = new Set(
+        wanted.filter((key) => pending[key]?.value === null),
+      )
+      const unresolved = wanted.filter(
+        (key) => !(key in out) && !tombstoned.has(key),
+      )
+      if (unresolved.length === 0) return out
+      // Read cache: the last value that reached a file, served when the file
+      // cannot be read (handle down, or the file was removed externally).
+      const stillMissing: string[] = []
+      for (const key of unresolved) {
+        const cached = await readCache(key)
+        if (cached === undefined) stillMissing.push(key)
+        else out[key] = cached
+      }
+      if (stillMissing.length > 0) {
+        // Legacy mirror values (pre-outbox versions kept staged writes here).
+        Object.assign(out, await chromeLocalArea.get(stillMissing))
+      }
       return out
     },
     async set(items) {
@@ -424,9 +465,11 @@ export function createFileArea(handle: FileSystemDirectoryHandle): StorageArea {
         try {
           await fs.writeText(keyToPath(key), JSON.stringify(value))
         } catch (error) {
-          // A failed disk write must be visible. It used to be swallowed because
-          // the mirror still held the value; there is no full mirror any more,
-          // so silence here would be silent data loss.
+          // A failed disk write must be visible. The value is ALSO parked in
+          // the outbox so the write survives even if the caller ignores the
+          // error; the replay's staleness guard drops it once a newer direct
+          // write has landed.
+          await enqueueOutbox(key, value).catch(() => undefined)
           throw new Error(
             `写入存储目录失败（${key}）：${error instanceof Error ? error.message : String(error)}。` +
               '请确认该目录仍然存在、且扩展仍有读写权限——在「设置 → 数据存储」里可以重新连接。',
@@ -435,18 +478,26 @@ export function createFileArea(handle: FileSystemDirectoryHandle): StorageArea {
         written.push(key)
       }
       if (written.length === 0) return
-      // Drop any staged copy of a key that just landed on disk. Without this the
-      // staging area could keep an older value for the same key, and the next
-      // `syncToFiles` would push that stale value over the newer file.
-      await chromeArea.remove(written).catch(() => {})
-      for (const key of written) notifyStoreChanged(key)
+      for (const key of written) {
+        const value = items[key]
+        // Drop any legacy staged copy of a key that just landed on disk, and
+        // refresh the read cache (also the replay's version stamp).
+        await chromeLocalArea.remove(key).catch(() => undefined)
+        await dropOutboxEntry(key).catch(() => undefined)
+        await writeCache(key, value)
+        notifyStoreChanged(key)
+      }
     },
     async remove(keys) {
       const wanted = typeof keys === 'string' ? [keys] : keys
       for (const key of wanted) await fs.remove(keyToPath(key))
-      // Clear the staging area BEFORE notifying: a listener that re-reads must
-      // not find the deleted value still sitting in the read fallback.
-      await chromeArea.remove(wanted).catch(() => {})
+      // Clear the fallback layers BEFORE notifying: a listener that re-reads
+      // must not find the deleted value still sitting in a fallback.
+      for (const key of wanted) {
+        await dropOutboxEntry(key).catch(() => undefined)
+        await removeCache(key).catch(() => undefined)
+        await chromeLocalArea.remove(key).catch(() => undefined)
+      }
       for (const key of wanted) notifyStoreChanged(key)
     },
   }
@@ -470,7 +521,7 @@ export function resetStorageCache(): void {
  * `request` also attempts `requestPermission` when the permission is merely
  * pending. That call needs a user gesture and a window, so only the side panel
  * should pass `true`; a service worker would get `'prompt'` back and return
- * `null` (falling back to the mirror) instead of hanging.
+ * `null` (falling back to the outbox/cache) instead of hanging.
  */
 async function resolveHandle(request = false): Promise<FileSystemDirectoryHandle | null> {
   if (cachedHandle) {
@@ -512,17 +563,51 @@ async function resolveHandle(request = false): Promise<FileSystemDirectoryHandle
   return resolving
 }
 
+/** Whether a directory is configured at all (even if its permission is down). */
+async function isDirectoryConfigured(): Promise<boolean> {
+  return (await idbGet()) !== null
+}
+
+/** Exported for the schema bootstrap: see `ensureSchema` in `lib/storage.ts`. */
+export function isStorageDirectoryConfigured(): Promise<boolean> {
+  return isDirectoryConfigured()
+}
+
+/**
+ * Reads a config key's legacy file — left in the directory by versions that
+ * migrated config into it — and adopts the value into browser storage.
+ *
+ * Returns the file's value, or `undefined` when no directory is usable, the
+ * file is absent, or it is unparsable (in which case browser storage is left
+ * untouched). Only config keys are adoptable; content keys live in the file
+ * area and have their own read layers.
+ */
+export async function adoptLegacyConfigValue(key: string): Promise<unknown> {
+  if (!isConfigKey(key)) return undefined
+  const handle = await resolveHandle(false)
+  if (!handle) return undefined
+  const text = await new FsDirectory(handle).readText(keyToPath(key))
+  if (text === null) return undefined
+  try {
+    const value = JSON.parse(text) as unknown
+    await chromeLocalArea.set({ [key]: value }).catch(() => undefined)
+    return value
+  } catch {
+    return undefined
+  }
+}
+
 // --- Public entry points -----------------------------------------------------
 
 /**
- * The storage area used by the persistence modules. Resolves the configured
- * directory on every call, and falls back to `chrome.storage.local` when it is
- * absent or not granted — either because no directory is configured (browser
- * mode, the store *is* the data) or because the handle is momentarily
- * unavailable (the write is staged there until {@link syncToFiles} flushes it).
- * A single instance is fine because the backing choice is made per call.
+ * The storage area used by the persistence modules. Routes per key:
+ * config keys always go to `chrome.storage.local`; content keys go to the
+ * configured directory, park in the outbox while it is unreachable, and live
+ * directly in `chrome.storage.local` when no directory is configured at all
+ * (browser mode). A single instance is fine because the backing choice is made
+ * per call.
  *
- * Notifications are emitted here on the fallback path only: `createFileArea`
+ * Notifications are emitted here on the non-file paths: `createFileArea`
  * announces its own writes.
  */
 let sharedArea: StorageArea | null = null
@@ -531,31 +616,200 @@ export function fileStorageArea(): StorageArea {
   if (!sharedArea) {
     sharedArea = {
       async get(keys) {
+        const wanted = typeof keys === 'string' ? [keys] : keys
+        const out: Record<string, unknown> = {}
+        const configKeys = wanted.filter(isConfigKey)
+        const contentKeys = wanted.filter((key) => !isConfigKey(key))
+        if (configKeys.length > 0) Object.assign(out, await adoptConfigKeys(configKeys))
+        if (contentKeys.length === 0) return out
         const handle = await resolveHandle()
-        return handle ? createFileArea(handle).get(keys) : chromeArea.get(keys)
+        if (handle) {
+          Object.assign(out, await createFileArea(handle).get(contentKeys))
+          maybeReplayInBackground(handle)
+          return out
+        }
+        if (await isDirectoryConfigured()) {
+          // Configured but unreachable: outbox → cache → legacy layers inside
+          // a plain chrome.storage.local read (createFileArea's file layer is
+          // skipped because the handle is down).
+          Object.assign(out, await fallbackRead(contentKeys))
+          return out
+        }
+        // Browser mode: chrome.storage.local IS the content store.
+        Object.assign(out, await chromeLocalArea.get(contentKeys))
+        return out
       },
       async set(items) {
+        const configItems: Record<string, unknown> = {}
+        const contentItems: Record<string, unknown> = {}
+        for (const [key, value] of Object.entries(items)) {
+          if (value === undefined) continue
+          ;(isConfigKey(key) ? configItems : contentItems)[key] = value
+        }
+        if (Object.keys(configItems).length > 0) {
+          await chromeLocalArea.set(configItems)
+          for (const key of Object.keys(configItems)) notifyStoreChanged(key)
+        }
+        const contentEntries = Object.entries(contentItems)
+        if (contentEntries.length === 0) return
         const handle = await resolveHandle()
         if (handle) {
-          await createFileArea(handle).set(items)
+          await createFileArea(handle).set(contentItems)
+          maybeReplayInBackground(handle)
           return
         }
-        await chromeArea.set(items)
-        for (const key of Object.keys(items)) notifyStoreChanged(key)
+        if (await isDirectoryConfigured()) {
+          // The directory cannot be reached right now — park the write in the
+          // durable outbox instead of misdirecting it into browser storage.
+          // Reads overlay the outbox, so every later read-modify-write starts
+          // from the full latest state.
+          for (const [key, value] of contentEntries) await enqueueOutbox(key, value)
+          for (const [key] of contentEntries) notifyStoreChanged(key)
+          return
+        }
+        // Browser mode: chrome.storage.local IS the content store.
+        await chromeLocalArea.set(contentItems)
+        for (const [key] of contentEntries) notifyStoreChanged(key)
       },
       async remove(keys) {
+        const wanted = typeof keys === 'string' ? [keys] : keys
+        const configKeys = wanted.filter(isConfigKey)
+        const contentKeys = wanted.filter((key) => !isConfigKey(key))
+        if (configKeys.length > 0) {
+          await chromeLocalArea.remove(configKeys)
+          for (const key of configKeys) notifyStoreChanged(key)
+        }
+        if (contentKeys.length === 0) return
         const handle = await resolveHandle()
         if (handle) {
-          await createFileArea(handle).remove(keys)
+          await createFileArea(handle).remove(contentKeys)
           return
         }
-        const wanted = typeof keys === 'string' ? [keys] : keys
-        await chromeArea.remove(wanted)
-        for (const key of wanted) notifyStoreChanged(key)
+        if (await isDirectoryConfigured()) {
+          // The file cannot be reached to delete it — park a tombstone so the
+          // deletion survives until the replay can carry it out, and make the
+          // key read as absent meanwhile.
+          for (const key of contentKeys) await enqueueOutbox(key, null)
+          for (const key of contentKeys) {
+            await removeCache(key).catch(() => undefined)
+            await chromeLocalArea.remove(key).catch(() => undefined)
+            notifyStoreChanged(key)
+          }
+          return
+        }
+        await chromeLocalArea.remove(contentKeys)
+        for (const key of contentKeys) notifyStoreChanged(key)
       },
     }
   }
   return sharedArea
+}
+
+/**
+ * Config keys are read from `chrome.storage.local`; if a legacy file from an
+ * older version that migrated config into the directory still exists, its
+ * value is adopted into browser storage once (the file is left in place —
+ * deleting user files on read would be surprising).
+ */
+async function adoptConfigKeys(keys: string[]): Promise<Record<string, unknown>> {
+  const out = await chromeLocalArea.get(keys)
+  const missing = keys.filter((key) => out[key] === undefined)
+  if (missing.length === 0) return out
+  const handle = await resolveHandle()
+  if (!handle) return out
+  const fs = new FsDirectory(handle)
+  for (const key of missing) {
+    const text = await fs.readText(keyToPath(key))
+    if (text === null) continue
+    try {
+      const value = JSON.parse(text) as unknown
+      out[key] = value
+      await chromeLocalArea.set({ [key]: value }).catch(() => undefined)
+    } catch {
+      // Unparsable legacy file — ignore it.
+    }
+  }
+  return out
+}
+
+/**
+ * Reads content keys while the configured directory is unreachable:
+ * pending outbox entries (tombstones never fall through) → read cache →
+ * any legacy mirror value.
+ */
+async function fallbackRead(keys: string[]): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = {}
+  const pending = await readOutboxMap()
+  const unresolved: string[] = []
+  for (const key of keys) {
+    const entry = pending[key]
+    if (!entry) {
+      unresolved.push(key)
+      continue
+    }
+    if (entry.value !== null) out[key] = entry.value
+  }
+  const noCache: string[] = []
+  for (const key of unresolved) {
+    const cached = await readCache(key)
+    if (cached === undefined) noCache.push(key)
+    else out[key] = cached
+  }
+  if (noCache.length > 0) Object.assign(out, await chromeLocalArea.get(noCache))
+  return out
+}
+
+// --- Outbox replay -----------------------------------------------------------
+
+/**
+ * Drains the outbox into the directory. `value === null` entries are deletion
+ * tombstones and remove the file; the skills/agents collections are flushed as
+ * markdown folders (their JSON blob form only ever exists in the outbox, which
+ * skipped the file area).
+ */
+async function replayOutboxFor(handle: FileSystemDirectoryHandle): Promise<void> {
+  await replayOutbox({
+    writeEntry: async (key, value) => {
+      if (key === SKILLS_DIR || key === AGENTS_DIR) {
+        if (!Array.isArray(value)) return
+        if (key === SKILLS_DIR) await syncSkillsToFiles(value as Skill[], handle)
+        else await syncAgentsToFiles(value as Agent[], handle)
+        await writeCache(key, value)
+        await chromeLocalArea.remove(key).catch(() => undefined)
+        notifyStoreChanged(key)
+        return
+      }
+      if (value === null) {
+        await createFileArea(handle).remove(key)
+        return
+      }
+      await createFileArea(handle).set({ [key]: value })
+    },
+  })
+}
+
+/** Prevents overlapping background replays in one context. */
+let replayInFlight = false
+
+/**
+ * Best-effort outbox drain whenever a file operation notices that the handle
+ * is usable but writes are still parked (the usual post-restart state before
+ * the panel re-grants permission). Fire-and-forget: the next call retries.
+ */
+function maybeReplayInBackground(handle: FileSystemDirectoryHandle): void {
+  if (replayInFlight) return
+  replayInFlight = true
+  void (async () => {
+    try {
+      if (Object.keys(await readOutboxMap()).length > 0) {
+        await replayOutboxFor(handle)
+      }
+    } catch {
+      // Stays parked for the next opportunity.
+    } finally {
+      replayInFlight = false
+    }
+  })()
 }
 
 /** Whether the configured directory is currently usable. */
@@ -577,11 +831,10 @@ export async function getStorageDirectoryName(): Promise<string | null> {
  * Re-checks the configured directory and tries to (re)grant permission when it
  * is merely pending. Returns the resulting mode.
  *
- * Re-granting is the moment writes staged while the handle was unavailable can
- * finally reach the directory, so they are flushed here — otherwise they would
- * linger in `chrome.storage.local` until the next panel open. The flush is
- * best-effort, matching its other call site: a failure must not read as "the
- * folder is not connected", and the staged data survives for the next attempt.
+ * Re-granting is the moment writes parked in the outbox can finally reach the
+ * directory, so they are flushed here — the flush is best-effort: a failure
+ * must not read as "the folder is not connected", and the parked data survives
+ * for the next attempt.
  */
 export async function ensureFileAccess(): Promise<StorageMode> {
   if (!(await resolveHandle(true))) return 'browser'
@@ -612,64 +865,113 @@ export async function pickStorageDirectory(): Promise<StorageMode> {
  *
  * Order matters — the copy is what makes the switch non-destructive. It throws
  * before the handle is dropped if the copy fails, so the directory is never
- * abandoned while it is the only place the data exists.
+ * abandoned while it is the only place the data exists. Pending outbox entries
+ * are folded into the copy (they are newer than the files) and the fallback
+ * structures are then cleared: browser mode has no outbox and no cache.
  */
 export async function clearStorageDirectory(): Promise<void> {
   await syncFilesToBrowser()
+  await clearFallbacks()
   await idbDelete()
   resetStorageCache()
 }
 
+// --- Migration ---------------------------------------------------------------
+
 /**
- * Pushes every key currently in `chrome.storage.local` up to the files. Used to
- * migrate on first setup and to compensate for writes the service worker made
- * while the file handle was unavailable. Idempotent. Skills are synced
- * separately as folder-per-skill `SKILL.md` files (see {@link syncSkillsToFiles}).
+ * Keeps the newest version of each record: per-id union of two collection
+ * arrays, the record with the larger `updatedAt`/`at` stamp winning (ties go
+ * to `incoming`, the newer write). Used by the legacy-mirror migration, where
+ * the browser-stored copy may be older OR newer than the file and neither may
+ * be lost. Values that are not id-keyed arrays resolve to `fileValue` when one
+ * exists (the file is the durable copy; `incoming` only fills a gap).
+ */
+export function mergeCollection(fileValue: unknown, incoming: unknown): unknown {
+  if (fileValue === undefined) return incoming
+  if (fileValue === null) return incoming
+  if (!Array.isArray(fileValue) || !Array.isArray(incoming)) return fileValue
+  const hasId = (entry: unknown): entry is { id: string } =>
+    !!entry && typeof entry === 'object' && typeof (entry as { id?: unknown }).id === 'string'
+  if (!fileValue.every(hasId) || !incoming.every(hasId)) return fileValue
+  const stamp = (entry: unknown): number => {
+    if (!entry || typeof entry !== 'object') return 0
+    const record = entry as { updatedAt?: unknown; at?: unknown }
+    if (typeof record.updatedAt === 'number') return record.updatedAt
+    if (typeof record.at === 'number') return record.at
+    return 0
+  }
+  const byId = new Map<string, { id: string }>()
+  for (const entry of fileValue) byId.set(entry.id, entry)
+  for (const entry of incoming) {
+    const previous = byId.get(entry.id)
+    if (!previous || stamp(entry) > stamp(previous)) byId.set(entry.id, entry)
+  }
+  return [...byId.values()]
+}
+
+/**
+ * Pushes every content key still sitting in `chrome.storage.local` up to the
+ * files. Two eras of writes land here:
+ * - the pre-outbox design staged writes in browser storage and pushed them on
+ *   panel open;
+ * - the outbox design may hold values for keys whose outbox entry was already
+ *   drained but whose mirror cleanup raced an eviction.
+ *
+ * Each key is MERGED with the file ({@link mergeCollection}) so a stale browser
+ * copy can never regress a newer file — the exact whole-blob overwrite that
+ * used to lose entire workflow lists. Idempotent: each migrated key is removed
+ * from browser storage as it lands.
  */
 export async function syncToFiles(): Promise<void> {
   const handle = await resolveHandle(true)
   if (!handle || !hasChromeStorage()) return
+  await replayOutboxFor(handle)
   const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
-  // Each migrated key is dropped from the staging area as it lands on disk, so
-  // re-running cannot push an already-migrated value again.
-  await syncEntriesToFiles(all, handle)
-  // Skills and agents are written as markdown files, never as a JSON blob, so
-  // `syncEntriesToFiles` skipped them and they are still staged. Clear them once
-  // they are on disk — otherwise they would sit in the browser store forever,
-  // which is the very thing this migration exists to avoid.
-  const skills = all[SKILLS_DIR]
-  if (Array.isArray(skills)) {
-    await syncSkillsToFiles(skills as Skill[], handle)
-    await chromeArea.remove(SKILLS_DIR)
-  }
-  const agents = all[AGENTS_DIR]
-  if (Array.isArray(agents)) {
-    await syncAgentsToFiles(agents as Agent[], handle)
-    await chromeArea.remove(AGENTS_DIR)
+  for (const [key, value] of Object.entries(all)) {
+    if (value === undefined) continue
+    if (isConfigKey(key) || isFallbackKey(key)) continue
+    // Turn state is intentionally session-scoped and never persisted as files.
+    if (key.startsWith('turn:')) continue
+    if (key === SKILLS_DIR || key === AGENTS_DIR) {
+      if (!Array.isArray(value)) continue
+      if (key === SKILLS_DIR) await syncSkillsToFiles(value as Skill[], handle)
+      else await syncAgentsToFiles(value as Agent[], handle)
+      await writeCache(key, value)
+      await chromeLocalArea.remove(key).catch(() => undefined)
+      notifyStoreChanged(key)
+      continue
+    }
+    await syncEntriesToFiles({ [key]: value }, handle)
   }
 }
 
 /**
- * Writes each provided entry to the file area under `handle` and drops it from
- * the `chrome.storage.local` staging area (see `createFileArea.set`), skipping
- * values that must not be persisted: `undefined` (not representable),
- * session-only `turn:` state, and the `skills`/`agents` keys (those are written
- * as `SKILL.md` / `AGENT.md` files by {@link syncSkillsToFiles} and
- * {@link syncAgentsToFiles}). Extracted from `syncToFiles` so the migration path
- * is testable with a fake handle.
+ * Writes each provided entry to the file area under `handle`, MERGING with the
+ * current file content (see {@link mergeCollection}) and dropping the legacy
+ * browser copy once it has landed. Exported so the migration rules stay
+ * unit-testable with a fake handle.
  */
 export async function syncEntriesToFiles(
   entries: Record<string, unknown>,
   handle: FileSystemDirectoryHandle,
 ): Promise<void> {
+  const fs = new FsDirectory(handle)
   const area = createFileArea(handle)
   for (const [key, value] of Object.entries(entries)) {
     if (value === undefined) continue
-    // Turn state is intentionally session-scoped and never persisted as files.
-    // Skills/agents are persisted as markdown files, not as a JSON blob.
-    if (key.startsWith('turn:')) continue
     if (key === SKILLS_DIR || key === AGENTS_DIR) continue
-    await area.set({ [key]: value })
+    // Session-only state is never persisted as files, no matter the caller.
+    if (key.startsWith('turn:')) continue
+    const text = await fs.readText(keyToPath(key))
+    let fileValue: unknown
+    if (text !== null) {
+      try {
+        fileValue = JSON.parse(text) as unknown
+      } catch {
+        fileValue = undefined
+      }
+    }
+    await area.set({ [key]: mergeCollection(fileValue, value) })
   }
 }
 
@@ -726,7 +1028,9 @@ export async function syncAgentsToFiles(
  * Without this the switch would look like data loss: once the handle is dropped
  * the folder is simply not read any more, so the panel would come up empty. The
  * files are never deleted, but "my conversations are gone" is not a state a user
- * should have to reason their way out of.
+ * should have to reason their way out of. Pending outbox entries are folded in
+ * (they are newer than the files; tombstones delete their key) and the fallback
+ * structures are cleared by {@link clearStorageDirectory} afterwards.
  *
  * Returns the number of keys written, and `0` when nothing is configured (browser
  * mode is already where the data lives). File names are mapped back to keys by
@@ -774,9 +1078,17 @@ export async function syncFilesToBrowser(): Promise<number> {
   }
   if (agents.length > 0) entries[AGENTS_DIR] = agents
 
+  // Fold pending outbox entries over the file state: a parked value is newer
+  // than the file, a tombstone means the key was deleted meanwhile.
+  const pending = await readOutboxMap()
+  for (const [key, entry] of Object.entries(pending)) {
+    if (entry.value === null) delete entries[key]
+    else entries[key] = entry.value
+  }
+
   const count = Object.keys(entries).length
   if (count === 0) return 0
-  await chromeArea.set(entries)
+  await chromeLocalArea.set(entries)
   return count
 }
 
