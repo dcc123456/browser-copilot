@@ -129,6 +129,17 @@ describe('renderSkillCatalogue', () => {
     expect(renderSkillCatalogue([skill({ autoMatch: false })])).toBe('')
   })
 
+  it('never lists the plan skill, even if a copy re-enables autoMatch', () => {
+    // Plan is MANUAL-ONLY. The exclusion is by NAME (not just autoMatch) so a
+    // user-edited copy with autoMatch flipped back on cannot hand the model a
+    // self-invoked plan gate.
+    expect(
+      renderSkillCatalogue([
+        skill({ name: 'plan', description: 'plan first, act later' }),
+      ]),
+    ).toBe('')
+  })
+
   // Without a description the model has nothing to match on, so listing it would
   // only invite a guess.
   it('excludes auto-match skills with no description', () => {
@@ -156,6 +167,20 @@ describe('wrapSkillDirective', () => {
     expect(wrapped).toContain('MUST apply')
     expect(wrapped).toContain('Translate this paragraph.')
   })
+
+  it('keeps the strict "no answer outside the skill" wrap for ordinary skills', () => {
+    expect(wrapSkillDirective(skill(), 'go')).toContain('do not answer outside the skill')
+  })
+
+  it('lets the plan skill keep loading other skills and still require present_plan', () => {
+    const plan = skill({ name: 'plan', description: 'Plan before doing.' })
+    const wrapped = wrapSkillDirective(plan, 'buy something')
+    expect(wrapped).toContain('present_plan')
+    // The execution phase is where other saved skills belong — the wrap must
+    // not forbid leaving the plan skill's own instructions.
+    expect(wrapped).toContain('use_skill')
+    expect(wrapped).not.toContain('do not answer outside the skill')
+  })
 })
 
 /**
@@ -178,16 +203,19 @@ describe('built-in skill instruction budget', () => {
 
   it('leaves headroom in the workflow generator guide', () => {
     // Not just under the cap: close enough to it that the next paragraph would
-    // silently truncate. Keep a working margin.
+    // silently truncate. Keep a working margin. (Lowered 200 → 100 when the
+    // generator's operator paragraph grew for the every-category default;
+    // measured headroom is ~117.)
     const generator = BUILT_IN_SKILLS.find((s) => s.id === 'builtin-workflow-generator')!
-    expect(MAX_INSTRUCTIONS_LENGTH - generator.instructions.length).toBeGreaterThanOrEqual(200)
+    expect(MAX_INSTRUCTIONS_LENGTH - generator.instructions.length).toBeGreaterThanOrEqual(100)
   })
 })
 
 /**
  * The plan skill is the plan-first gate's trigger half: the gate only arms when
- * a skill NAMED `plan` is pinned or loaded, so the shipped builtin must exist,
- * be auto-matchable with a tight trigger, and teach the `present_plan` hand-off.
+ * a skill NAMED `plan` is pinned by the user, so the shipped builtin must exist
+ * with a tight trigger description and teach the `present_plan` hand-off — but
+ * it must NOT auto-match: only the user decides when a task gets a plan.
  */
 describe('built-in plan skill', () => {
   const plan = BUILT_IN_SKILLS.find((s) => s.id === 'builtin-plan')
@@ -195,7 +223,9 @@ describe('built-in plan skill', () => {
   it('ships under the reserved plan skill name', () => {
     expect(plan).toBeDefined()
     expect(plan!.name).toBe('plan')
-    expect(plan!.autoMatch).toBe(true)
+    // Plan is MANUAL-ONLY: auto-match would let the agent route ordinary tasks
+    // into plan approval by itself. The user pins it from the panel instead.
+    expect(plan!.autoMatch).toBe(false)
   })
 
   it('keeps the trigger description tight (it gates every matched task)', () => {

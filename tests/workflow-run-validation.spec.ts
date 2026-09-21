@@ -76,7 +76,7 @@ describe('validateWorkflowForRun', () => {
       workflow({
         trigger: { type: 'visit-web', urlPattern: 'https://mirror.test/*' },
         drawflow: {
-          nodes: [node('t', 'trigger', { type: 'visit-web' }), node('a', 'event-click')],
+          nodes: [node('t', 'trigger', { type: 'visit-web' }), node('a', 'event-click', { selector: '#x' })],
           edges: [],
         },
       }),
@@ -131,7 +131,7 @@ describe('validateWorkflowForRun', () => {
         drawflow: {
           nodes: [
             node('t', 'trigger', { type: 'visit-web', url: 'https://example.com/*' }),
-            node('a', 'event-click'),
+            node('a', 'event-click', { selector: '#x' }),
           ],
           edges: [{ id: 'e1', source: 't', target: 'a' }],
         },
@@ -161,7 +161,7 @@ describe('validateWorkflowForRun', () => {
       workflow({
         trigger: { type: 'scheduled', enabled: true },
         drawflow: {
-          nodes: [node('t', 'trigger', { type: 'scheduled' }), node('a', 'event-click')],
+          nodes: [node('t', 'trigger', { type: 'scheduled' }), node('a', 'event-click', { selector: '#x' })],
           edges: [{ id: 'e1', source: 't', target: 'a' }],
         },
       }),
@@ -195,7 +195,7 @@ describe('validateWorkflowForRun', () => {
               type: 'element-change',
               observeElement: { selector: '#feed' },
             }),
-            node('a', 'event-click'),
+            node('a', 'event-click', { selector: '#x' }),
           ],
           edges: [{ id: 'e1', source: 't', target: 'a' }],
         },

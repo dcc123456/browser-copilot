@@ -62,6 +62,8 @@ import {
   buildWorkflowEscapeTools,
   operatorToolName,
 } from '../src/lib/workflow/operator-tools'
+import { schemaRequiredArgs } from '../src/lib/workflow/block-requirements'
+import { PALETTE_BLOCKS } from '../src/lib/workflow/blocks/palette'
 
 /**
  * The operator surface is dispatched by CATEGORY. Four operators ride along on
@@ -170,21 +172,46 @@ describe('operator category partition', () => {
     expect(categoryOfOperatorGroup('operators_escape')).toBeUndefined()
   })
 
-  it('marks the escape hatch required-arg in its own schema only', () => {
+  it('declares required args exactly where block-requirements does', () => {
     const escape = buildWorkflowEscapeTools()[0]!
     const params = escape.function.parameters as { required?: string[] }
     expect(escape.function.name).toBe('wf_op_javascript-code')
-    expect(params.required).toEqual(['justification'])
-    // No declarative operator may carry a required arg — they must stay
-    // callable with whatever the page needs.
+    expect(params.required).toEqual(['code', 'justification'])
+    // Declarative operators carry ONLY the requirements the shared
+    // block-requirements table derives (`schemaRequiredArgs`) — the same table
+    // the record gate refuses calls on, so schema and gate cannot drift. The
+    // escape hatch's `justification` is a draft-only affordance the bridge
+    // strips, which is why it is appended on top of the table's `code`.
+    const expected = (name: string): string[] | undefined => {
+      const entry = PALETTE_BLOCKS.find((b) => operatorToolName(b.id) === name)
+      return entry
+        ? schemaRequiredArgs(entry.id).length > 0
+          ? schemaRequiredArgs(entry.id)
+          : undefined
+        : undefined
+    }
     const declarative = [
       ...buildWorkflowCoreTools(),
       ...buildWorkflowCategoryTools(ADVERTISABLE_OPERATOR_CATEGORIES),
       ...buildWorkflowAuthorTools(),
     ]
     for (const tool of declarative) {
-      expect((tool.function.parameters as { required?: string[] }).required).toBeUndefined()
+      expect((tool.function.parameters as { required?: string[] }).required).toEqual(
+        expected(tool.function.name),
+      )
     }
+    // Spot-check the contract itself, not just self-consistency: the blocks
+    // whose omissions produced unrunnable workflows are declared required.
+    const requiredOf = (name: string): string[] =>
+      (
+        declarative.find((t) => t.function.name === name)?.function.parameters as {
+          required?: string[]
+        }
+      )?.required ?? []
+    expect(requiredOf('wf_op_new-tab')).toEqual(['url'])
+    expect(requiredOf('wf_op_webhook')).toEqual(['url'])
+    expect(requiredOf('wf_op_set-variable')).toEqual(['variableName', 'value'])
+    expect(requiredOf('wf_op_get-secret')).toEqual(['credential', 'variableName'])
   })
 
   it('matches TOOL_GROUPS for the author, escape and category groups', () => {

@@ -117,6 +117,58 @@ describe('operator calls really operate the page', () => {
     const out = await run('c3', 'click', { selector: '#x' })
     expect(out.ok).toBe(false)
   })
+
+  it('refuses a call with no locator and records nothing', async () => {
+    // The empty-selector defect: element-exists with no locator used to report
+    // 元素不存在, read as success, and record an empty node. The gate refuses
+    // before the executor can succeed at nothing.
+    const { calls, executors } = okExecutors({
+      'element-exists': async () => null,
+    })
+    const out = await run('c-refuse-locator', 'wf_op_element-exists', {}, { executors })
+
+    expect(out.ok).toBe(false)
+    if (!out.ok) expect(out.error).toContain('selector')
+    expect(calls).toEqual([])
+    expect(actionNodesOf(getDraftSnapshot('c-refuse-locator')!)).toHaveLength(0)
+  })
+
+  it('refuses a key-less press-key and a url-less new-tab', async () => {
+    const { calls, executors } = okExecutors()
+
+    const noKey = await run('c-refuse-key', 'wf_op_press-key', { selector: '#x' }, { executors })
+    expect(noKey.ok).toBe(false)
+
+    const noUrl = await run('c-refuse-url', 'wf_op_new-tab', {}, { executors })
+    expect(noUrl.ok).toBe(false)
+
+    // Neither touched its executor, so neither could "succeed" at nothing.
+    expect(calls).toEqual([])
+  })
+
+  it('refuses a url-less webhook even though webhook never executes', async () => {
+    const { executors } = okExecutors()
+    const out = await run('c-refuse-webhook', 'wf_op_webhook', {}, { executors })
+    expect(out.ok).toBe(false)
+    if (!out.ok) expect(out.error).toContain('url')
+    expect(actionNodesOf(getDraftSnapshot('c-refuse-webhook')!)).toHaveLength(0)
+  })
+
+  it('accepts the same calls once the required parameters are present', async () => {
+    const { executors } = okExecutors({
+      'element-exists': async () => null,
+    })
+    const exists = await run(
+      'c-ok-locator',
+      'wf_op_element-exists',
+      { selector: '#maybe' },
+      { executors },
+    )
+    expect(exists.ok).toBe(true)
+
+    const press = await run('c-ok-key', 'wf_op_press-key', { keys: 'Enter' }, { executors })
+    expect(press.ok).toBe(true)
+  })
 })
 
 describe('locator resolution', () => {
@@ -256,7 +308,12 @@ describe('shared variable bag', () => {
       },
     }
 
-    await run('c12', 'wf_op_get-secret', { variableName: 'password' }, { executors })
+    await run(
+      'c12',
+      'wf_op_get-secret',
+      { credential: 'cred-1::password', variableName: 'password' },
+      { executors },
+    )
     const out = await run(
       'c12',
       'wf_op_forms',

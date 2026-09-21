@@ -61,11 +61,7 @@ const ENGINE_SERVED_EXECUTORS = new Set(['noop', 'placeholder'])
  *   rather than by the background executor.
  */
 const KNOWN_INERT: Readonly<Record<string, readonly string[]>> = {
-  'new-tab': ['userAgent', 'active', 'tabZoom', 'inGroup', 'updatePrevTab', 'customUserAgent'],
-  'new-window': ['top', 'left', 'width', 'height', 'type', 'incognito', 'windowState'],
   proxy: ['scheme', 'host', 'port', 'bypassList', 'clearProxy'],
-  'close-tab': ['url', 'activeTab', 'closeType', 'allWindows'],
-  'take-screenshot': ['fullPage', 'captureActiveTab'],
   'browser-event': [
     'timeout',
     'eventName',
@@ -86,30 +82,16 @@ const KNOWN_INERT: Readonly<Record<string, readonly string[]>> = {
     'extraRowDataColumn',
   ],
   'element-scroll': ['incX', 'incY'],
-  link: ['findBy', 'disableMultiple', 'openInNewTab'],
-  'attribute-value': [
-    'attributeValue',
-    'attributeName',
-    'action',
-    'addExtraRow',
-    'extraRowValue',
-    'extraRowDataColumn',
-  ],
+  // `switch-to` still carries the locator params (its catalog `refDataKeys`
+  // include `selector`), but its executor only logs the frame — nothing reads
+  // them yet. The executor-facing key (`frameSelector`) is taught instead.
+  'switch-to': ['selector'],
+  'attribute-value': ['addExtraRow', 'extraRowValue', 'extraRowDataColumn'],
   forms: ['selected', 'selectOptionBy', 'optionPosition', 'delay'],
   'javascript-code': ['context', 'preloadScripts', 'everyNewTab', 'runBeforeLoad'],
-  'trigger-event': [
-    'waitForSelector',
-    'waitSelectorTimeout',
-    'eventName',
-    'eventType',
-    'eventParams',
-  ],
+  'trigger-event': ['waitForSelector', 'waitSelectorTimeout'],
   conditions: ['retryConditions', 'retryCount', 'retryTimeout'],
   'element-exists': ['findBy', 'tryCount', 'timeout', 'throwError'],
-  clipboard: ['type', 'dataToCopy', 'copySelectedText'],
-  'insert-data': ['dataList'],
-  'switch-to': ['findBy', 'selector', 'windowType'],
-  'upload-file': ['findBy', 'waitForSelector', 'waitSelectorTimeout', 'filePaths'],
   'save-assets': [
     'findBy',
     'waitForSelector',
@@ -123,15 +105,9 @@ const KNOWN_INERT: Readonly<Record<string, readonly string[]>> = {
     'saveToGDrive',
   ],
   'press-key': ['selector', 'pressTime', 'action'],
-  'handle-dialog': ['accept', 'promptText'],
   'handle-download': ['timeout', 'waitForDownload', 'downloadId'],
-  'delete-data': ['deleteList'],
   'wait-connections': ['specificFlow', 'flowBlockId'],
   notification: ['iconUrl', 'imageUrl'],
-  'log-data': ['workflowId', 'variableName'],
-  'tab-url': ['type', 'qTitle', 'qMatchPatterns'],
-  'data-mapping': ['dataSource', 'sources', 'varSourceName', 'variableName'],
-  'sort-data': ['sortByProperty', 'itemProperties', 'dataSource', 'varSourceName', 'variableName'],
   'create-element': [
     'javascript',
     'css',
@@ -142,18 +118,6 @@ const KNOWN_INERT: Readonly<Record<string, readonly string[]>> = {
     'waitForSelector',
     'waitSelectorTimeout',
     'selector',
-  ],
-  cookie: [
-    'type',
-    'jsonCode',
-    'useJson',
-    'getAll',
-    'domain',
-    'path',
-    'sameSite',
-    'httpOnly',
-    'secure',
-    'session',
   ],
   'workflow-state': ['type', 'exceptCurrent', 'workflowsToStop', 'throwError', 'errorMessage'],
   'parameter-prompt': ['timeout'],

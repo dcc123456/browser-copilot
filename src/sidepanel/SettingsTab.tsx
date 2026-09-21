@@ -31,6 +31,7 @@ import {
   type StorageMode,
 } from '../lib/fs-store'
 import { outboxCount } from '../lib/fs-outbox'
+import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
 import { clearDownloadDir, getDownloadDir, setDownloadDir } from '../lib/download-dir'
 import { onStoreChanged } from '../lib/store-events'
 import { ADAPTER_ASSET_PATH, ADAPTER_EXPORT_FILENAME, buildMcpSnippet } from '../lib/mcp-adapter'
@@ -468,6 +469,18 @@ export default function SettingsTab({ onLocaleChange }: Props) {
     void refreshStorage()
   }, [refreshStorage])
 
+  // The auto-reconnect (lib/fs-reconnect) flips the folder back to connected
+  // on the panel's first interaction after an update. Since every tab stays
+  // mounted, this row would otherwise keep showing "needs reconnect" until it
+  // was reopened — listen and refresh in place.
+  useEffect(() => {
+    const handler = (): void => {
+      void refreshStorage()
+    }
+    window.addEventListener(STORAGE_RECONNECTED_EVENT, handler)
+    return () => window.removeEventListener(STORAGE_RECONNECTED_EVENT, handler)
+  }, [refreshStorage])
+
   const chooseFolder = async (): Promise<void> => {
     setStorageBusy(true)
     setStorageNotice(null)
@@ -493,6 +506,10 @@ export default function SettingsTab({ onLocaleChange }: Props) {
       if (mode === 'file') {
         const name = (await getStorageDirectoryName()) ?? ''
         setStorageNotice({ kind: 'ok', text: t.settingsStorageSynced({ name }) })
+        // The manual path ends in the same state as the automatic one, so it
+        // announces it the same way: every mounted tab reloads its data from
+        // the reconnected folder through this one event.
+        window.dispatchEvent(new Event(STORAGE_RECONNECTED_EVENT))
       }
     } catch (error) {
       setStorageNotice({ kind: 'error', text: (error as Error).message })

@@ -1300,12 +1300,20 @@ const getVariable: BlockExecutor = async (data, ctx) => {
 
 const insertData: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
+  // `dataList` is the catalog + tool-schema key (a real array); `data` is the
+  // JSON-string shape this executor used to read alone. Accepting both is what
+  // makes a generated node and a canvas node agree.
+  const rawList = data['dataList'] ?? data['data']
   let items: unknown[] = []
-  try {
-    const parsed = JSON.parse(String(data['data'] ?? '[]'))
-    if (Array.isArray(parsed)) items = parsed
-  } catch {
-    /* malformed json → insert nothing */
+  if (Array.isArray(rawList)) {
+    items = rawList
+  } else if (typeof rawList === 'string' && rawList.trim() !== '') {
+    try {
+      const parsed: unknown = JSON.parse(rawList)
+      if (Array.isArray(parsed)) items = parsed
+    } catch {
+      /* malformed json → insert nothing */
+    }
   }
   if (!Array.isArray(ctx.variables['dataTable'])) ctx.variables['dataTable'] = []
   const table = ctx.variables['dataTable'] as unknown[]
@@ -1947,7 +1955,10 @@ const noop: BlockExecutor = async () => Promise.resolve(null)
 
 const cookieBlock: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const op = String(data['op'] ?? 'get')
+  // `op` is the key the operator tool schema teaches; the edit form writes the
+  // drifted `type` plus a separate `getAll` flag — both kept as fallbacks.
+  const rawOp = String(data['op'] ?? data['type'] ?? 'get')
+  const op = rawOp === 'get' && data['getAll'] === true ? 'getAll' : rawOp
   const name = interpolate(String(data['name'] ?? ''), ctx.variables, ctx.refData)
   const value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
   const url = interpolate(String(data['url'] ?? ''), ctx.variables, ctx.refData)
@@ -1985,14 +1996,22 @@ const cookieBlock: BlockExecutor = async (data, ctx) => {
 
 const clipboardBlock: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const op = String(data['op'] ?? 'get')
+  // `op` / `text` are the keys the operator tool schema teaches; the edit form
+  // writes the drifted `type` (`get` / `insert`) + `dataToCopy` — kept as
+  // fallbacks so canvas-authored nodes keep working.
+  const rawOp = String(data['op'] ?? data['type'] ?? 'get')
+  const op = rawOp === 'insert' || rawOp === 'set' ? 'set' : 'get'
   try {
     if (op === 'get') {
       const text = await clipboardGet()
       ctx.variables[String(data['variableName'] ?? 'lastClipboard')] = text
       ctx.emit('result', text.slice(0, 80))
     } else {
-      const text = interpolate(String(data['text'] ?? ''), ctx.variables, ctx.refData)
+      const text = interpolate(
+        String(data['text'] ?? data['dataToCopy'] ?? ''),
+        ctx.variables,
+        ctx.refData,
+      )
       await clipboardInsert(text)
       ctx.emit('result', '已写入剪贴板')
     }
@@ -2015,7 +2034,10 @@ const elementExistsExec: BlockExecutor = async (data, ctx) => {
 const linkBlock: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const selector = sel(data)
-  const newTab = (data['newTab'] as boolean | undefined) ?? true
+  // `newTab` is the key the tool schema teaches; `openInNewTab` is the edit
+  // form's drifted name — kept as a fallback.
+  const newTab =
+    (data['newTab'] as boolean | undefined) ?? (data['openInNewTab'] as boolean | undefined) ?? true
   try {
     const result = await execOnActiveTab(
       { action: 'click_link', target: cssTarget(selector) },
@@ -2054,8 +2076,11 @@ const linkBlock: BlockExecutor = async (data, ctx) => {
 
 const attributeValueExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const op = String(data['op'] ?? 'get')
-  const attribute = String(data['attribute'] ?? '')
+  // `op` / `attribute` / `value` are the keys the operator tool schema teaches;
+  // `action` / `attributeName` / `attributeValue` are the edit form's drifted
+  // names — kept as fallbacks so canvas-authored nodes keep working.
+  const op = String(data['op'] ?? data['action'] ?? 'get')
+  const attribute = String(data['attribute'] ?? data['attributeName'] ?? '')
   const variable = String(data['variableName'] ?? 'lastAttribute')
   const opData: Op = {
     action: op === 'set' ? 'set_attribute' : 'get_attribute',
@@ -2067,8 +2092,13 @@ const attributeValueExec: BlockExecutor = async (data, ctx) => {
   // direct-injection reads above.
   const waitMs = readWaitMsOf(data)
   if (waitMs > 0) opData.waitFor = waitMs
-  if (op === 'set')
-    opData.value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
+  if (op === 'set') {
+    opData.value = interpolate(
+      String(data['value'] ?? data['attributeValue'] ?? ''),
+      ctx.variables,
+      ctx.refData,
+    )
+  }
   const result = await execOnActiveTab(opData, ctx.signal, ctx.tabId, ctx.scope)
   if (op === 'get') {
     const value = result.data ?? result.note ?? ''
@@ -2112,9 +2142,11 @@ const forwardPage: BlockExecutor = async (_data, ctx) => {
 const tabUrlExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const variable = String(data['variableName'] ?? 'lastTabUrl')
+  // `scope` is the tool-schema key; `type` is the edit form's drifted name.
+  const scope = String(data['scope'] ?? data['type'] ?? 'active-tab')
   try {
     const current =
-      data['scope'] === 'all' ? await listAllTabUrls(ctx.scope) : await getActiveTabInfo(ctx.scope)
+      scope === 'all' ? await listAllTabUrls(ctx.scope) : await getActiveTabInfo(ctx.scope)
     ctx.variables[variable] = current
     ctx.emit('result', Array.isArray(current) ? `共 ${current.length} 个标签页` : current.url)
   } catch (error) {
@@ -2323,7 +2355,9 @@ const dataMapping: BlockExecutor = async (data, ctx) => {
     throw new Error('data-mapping: 映射表达式执行失败')
   }
   const mapped = Array.isArray(evaluated.value) ? evaluated.value : []
-  ctx.variables[String(data['output'] ?? 'mappedData')] = mapped
+  // `output` is the executor's own key; `variableName` is what the catalog and
+  // the tool schema declare — accept both so the model's chosen name wins.
+  ctx.variables[String(data['output'] ?? data['variableName'] ?? 'mappedData')] = mapped
   ctx.variables['lastMappedData'] = mapped
   ctx.emit('result', `已映射 ${mapped.length} 行`)
   return null
@@ -2416,7 +2450,10 @@ const switchToExec: BlockExecutor = async (data, ctx) => {
 
 const triggerEventExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const event = String(data['event'] ?? '')
+  // `event` / `detail` are the keys the operator tool schema teaches (and the
+  // kernel reads); `eventName` / `eventType` are the catalog's drifted names —
+  // kept as fallbacks so editor-built nodes keep dispatching.
+  const event = String(data['event'] ?? data['eventName'] ?? '')
   const detail = interpolate(String(data['detail'] ?? 'null'), ctx.variables, ctx.refData)
   return runRaw(
     { action: 'trigger_event', target: targetFrom(data), attribute: event, value: detail },

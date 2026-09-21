@@ -14,7 +14,7 @@
  *    worker's session storage keyed by `conversationId`, so the conversation
  *    continues instead of silently restarting.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AGENT_PORT,
   type AgentClientMessage,
@@ -41,6 +41,7 @@ import { OFFERED_TRIGGER_TYPES, type OfferedTriggerType } from '../lib/workflow/
 import type { RepeatSuggestion } from '../lib/workflow/loop-collapse'
 import { failingProbes, type SelectorProbeResult } from '../lib/workflow/selector-probe'
 import { checkWorkflowIntegrity, type WorkflowIntegrity } from '../lib/workflow/integrity'
+import { validateWorkflowForRun } from '../lib/workflow/validation'
 import {
   applyNodeKeepSelection,
   reviewStepsOf,
@@ -59,6 +60,7 @@ import {
   moveSelection,
   type SlashQuery,
 } from '../lib/slash'
+import { isNearBottom } from '../lib/scroll'
 import type { Skill } from '../lib/types'
 import {
   FILE_INPUT_ACCEPT,
@@ -75,6 +77,7 @@ import type { Locale } from '../lib/i18n'
 import Markdown from './Markdown'
 import { downloadAnswer, hasTables, type AnswerFormat } from '../lib/export-answer'
 import {
+  ArrowDown,
   Brain,
   Check,
   ChevronRight,
@@ -88,7 +91,7 @@ import {
   Paperclip,
   Wrench,
 } from 'lucide-react'
-import { normalizeSkill } from '../lib/skills'
+import { normalizeSkill, PLAN_SKILL_NAME } from '../lib/skills'
 import { detectSkillCandidatesFromMarkdown, type DetectedSkill } from '../lib/skill-detect'
 import { splitThinkSegments, stripThinkBlocks } from '../lib/model-output'
 
@@ -1707,6 +1710,16 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
    * clicking save again; a landed verdict is reused.
    */
   const [workflowPrompt, setWorkflowPrompt] = useState<WorkflowPromptState | null>(null)
+  /**
+   * Runnability of the graph on the open save card, recomputed whenever the
+   * card's workflow changes (trigger selection, review edits, folding). The
+   * same checks the run gate applies (`validateWorkflowForRun`) — shown BEFORE
+   * saving so "must fix" problems block the save button instead of the run.
+   */
+  const runIssues = useMemo(
+    () => (workflowPrompt ? validateWorkflowForRun(workflowPrompt.workflow) : null),
+    [workflowPrompt],
+  )
   /** Last reuseable-step count we already asked about per conversation. */
   const promptedRef = useRef<Record<string, number>>({})
   /**
@@ -1940,6 +1953,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               }
             })
             setEntries(restored)
+            // A fresh conversation view always opens pinned to the bottom.
+            setAtBottom(true)
             // While a turn is still running, continue its stream into the last
             // restored assistant entry. Starting a fresh bubble here would
             // split the reply's tail (often its final line) into a second
@@ -2379,10 +2394,15 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     }
   }
 
-  // Keep the newest message in view.
+  // Stick-to-bottom: follow the newest output ONLY while the user is already
+  // at the bottom. Streaming deltas append constantly, and an unconditional
+  // scroll-to-bottom on every render yanked the view back down the moment the
+  // user tried to scroll up to reread something. When they scroll away, a
+  // "jump to latest" pill lets them return (and re-enable following).
+  const [atBottom, setAtBottom] = useState(true)
   useEffect(() => {
-    logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
-  }, [entries, confirms])
+    if (atBottom) logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
+  }, [entries, confirms, askUsers, plans, atBottom])
 
   /**
    * Sends over the live port, reconnecting once if it was just evicted.
@@ -2508,10 +2528,21 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     setAskUsers((prev) => prev.filter((item) => item.requestId !== requestId))
   }
 
-  /** Decides the agent's submitted plan: approve, or reject with feedback. */
+  /**
+   * Decides the agent's submitted plan: approve, or reject with feedback.
+   *
+   * Approval ENDS plan mode: the plan skill was a manual selection, so once
+   * its plan is approved the pin is cleared — the composer's plan chip
+   * disappears, the next message goes out unpinned, and the agent keeps
+   * executing the approved plan (other skills load normally mid-execution).
+   */
   const answerPlan = (requestId: string, approved: boolean, feedback?: string): void => {
     post({ type: 'plan.decision', requestId, approved, ...(feedback ? { feedback } : {}) })
     setPlans((prev) => prev.filter((item) => item.requestId !== requestId))
+    if (approved && activeSkillId !== null) {
+      const active = skills.find((entry) => entry.id === activeSkillId)
+      if (active?.name === PLAN_SKILL_NAME) onSelectSkill(null)
+    }
   }
 
   /**
@@ -2801,6 +2832,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         type: 'workflows.draft.fold',
         conversationId: prompt.conversationId,
         index,
+        // The exact ids the card rendered: the background re-detects runs on
+        // the current draft, so the ids — not the list position — pick the run
+        // the user actually clicked.
+        runIds: prompt.suggestions[index]?.runIds,
       })
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error)
@@ -3029,7 +3064,32 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         />
       </div>
 
-      <div className="pane chat-log" ref={logRef}>
+      <div
+        className="pane chat-log"
+        ref={logRef}
+        onScroll={(event) => {
+          const el = event.currentTarget
+          setAtBottom(isNearBottom(el.scrollTop, el.scrollHeight, el.clientHeight))
+        }}
+      >
+        {!atBottom && (
+          // A zero-height sticky wrapper keeps the pill pinned to the top edge
+          // of the scrollport without taking layout space (no content jump).
+          <div className="sticky top-0 z-10 h-0">
+            <button
+              className="absolute right-4 top-2 flex items-center gap-1 rounded-full border border-border bg-accent px-3 py-1 text-xs font-medium text-on-accent shadow-md hover:opacity-90"
+              onClick={() => {
+                setAtBottom(true)
+                logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
+              }}
+              title={t.chatJumpToLatest}
+              type="button"
+            >
+              <ArrowDown size={12} aria-hidden="true" />
+              {t.chatJumpToLatest}
+            </button>
+          </div>
+        )}
         {entries.length === 0 &&
           confirms.length === 0 &&
           askUsers.length === 0 &&
@@ -3207,6 +3267,36 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                 )}
               </div>
             )}
+            {runIssues && (runIssues.errors.length > 0 || runIssues.warnings.length > 0) && (
+              <div
+                className="ai-prefill-list"
+                role="group"
+                aria-label={t.chatWorkflowRunIssuesTitle}
+              >
+                <p className={`hint ${runIssues.errors.length > 0 ? 'text-err' : ''}`}>
+                  {t.chatWorkflowRunIssuesTitle}
+                </p>
+                {runIssues.errors.map((error, index) => (
+                  <div className="ai-prefill-item" key={`run-error-${index}`}>
+                    <span className="wf-input-name text-err">
+                      {t.chatWorkflowRunIssuesError}
+                    </span>
+                    <span className="wf-input-default">{error}</span>
+                  </div>
+                ))}
+                {runIssues.warnings.map((warning, index) => (
+                  <div className="ai-prefill-item" key={`run-warning-${index}`}>
+                    <span className="wf-input-name">{t.chatWorkflowRunIssuesWarning}</span>
+                    <span className="wf-input-default">{warning}</span>
+                  </div>
+                ))}
+                {runIssues.errors.length > 0 && (
+                  <p className="hint text-err mt-1">
+                    {t.chatWorkflowRunIssuesBlocked}
+                  </p>
+                )}
+              </div>
+            )}
             {declaredInputsOf(workflowPrompt.workflow).length > 0 && (
               <div className="ai-prefill-list" role="group" aria-label={t.chatWorkflowInputsTitle}>
                 <p className="hint">{t.chatWorkflowInputsTitle}</p>
@@ -3299,8 +3389,13 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             <div className="actions">
               <button
                 className="primary"
-                disabled={workflowPrompt.saving}
+                disabled={workflowPrompt.saving || (runIssues !== null && runIssues.errors.length > 0)}
                 onClick={savePromptWorkflowDirect}
+                title={
+                  runIssues !== null && runIssues.errors.length > 0
+                    ? t.chatWorkflowRunIssuesBlocked
+                    : undefined
+                }
                 type="button"
               >
                 {t.chatSaveWorkflowSave}
@@ -3356,21 +3451,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       </div>
 
       <div className="composer" style={{ height: composerHeight }}>
-        {activeSkill && (
-          <div className="skill-chip">
-            <span className="skill-chip-name">{t.chatSkillActive({ name: activeSkill.name })}</span>
-            <button
-              aria-label={t.skillsStopUsing}
-              className="skill-chip-clear"
-              onClick={() => onSelectSkill(null)}
-              title={t.skillsStopUsing}
-              type="button"
-            >
-              ×
-            </button>
-          </div>
-        )}
-
         {/*
           The menu sits above the textarea and is positioned by CSS rather than
           measured caret coordinates: the composer is only a few lines tall, so
@@ -3428,36 +3508,58 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             ))}
           </div>
         )}
-        <textarea
-          onChange={(event) => {
-            setDraft(event.target.value)
-            syncMenu(event.target.value, event.target.selectionStart)
-          }}
-          onCompositionEnd={() => {
-            composingRef.current = false
-          }}
-          onCompositionStart={() => {
-            composingRef.current = true
-          }}
-          onBlur={closeMenu}
-          onClick={(event) => syncMenu(draft, event.currentTarget.selectionStart)}
-          onKeyDown={handleKeyDown}
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.preventDefault()
-            void addFiles(event.dataTransfer?.files ?? null)
-          }}
-          onPaste={(event) => {
-            const files = event.clipboardData?.files
-            if (files && files.length > 0) {
+        {/*
+          The active-skill chip lives INSIDE the input box: the wrapper is the
+          positioning context, the chip floats over the textarea's top edge,
+          and the textarea gains matching top padding while it is shown.
+        */}
+        <div className="relative min-h-0 flex-1">
+          {activeSkill && (
+            <div className="skill-chip absolute left-2 top-1.5 z-10 mr-2">
+              <span className="skill-chip-name">{t.chatSkillActive({ name: activeSkill.name })}</span>
+              <button
+                aria-label={t.skillsStopUsing}
+                className="skill-chip-clear"
+                onClick={() => onSelectSkill(null)}
+                title={t.skillsStopUsing}
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+          )}
+          <textarea
+            className={`h-full w-full${activeSkill ? ' pt-8!' : ''}`}
+            onChange={(event) => {
+              setDraft(event.target.value)
+              syncMenu(event.target.value, event.target.selectionStart)
+            }}
+            onCompositionEnd={() => {
+              composingRef.current = false
+            }}
+            onCompositionStart={() => {
+              composingRef.current = true
+            }}
+            onBlur={closeMenu}
+            onClick={(event) => syncMenu(draft, event.currentTarget.selectionStart)}
+            onKeyDown={handleKeyDown}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
               event.preventDefault()
-              void addFiles(files)
-            }
-          }}
-          placeholder={skills.length > 0 ? t.chatPlaceholderWithSkills : t.chatPlaceholder}
-          ref={textareaRef}
-          value={draft}
-        />
+              void addFiles(event.dataTransfer?.files ?? null)
+            }}
+            onPaste={(event) => {
+              const files = event.clipboardData?.files
+              if (files && files.length > 0) {
+                event.preventDefault()
+                void addFiles(files)
+              }
+            }}
+            placeholder={skills.length > 0 ? t.chatPlaceholderWithSkills : t.chatPlaceholder}
+            ref={textareaRef}
+            value={draft}
+          />
+        </div>
         <div className="composer-row">
           <div className="mode-select">
             <select

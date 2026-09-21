@@ -206,6 +206,94 @@ describe('detectRepeatRuns', () => {
     })
     expect(detectRepeatRuns(wf)).toEqual([])
   })
+
+  // --- detection on an ALREADY-FOLDED graph --------------------------------
+  //
+  // One fold rewrites the chain into trigger → loop → body → (back to loop)
+  // → after-loop: a cycle plus a two-way split at the loop node. Detection
+  // used to bail on exactly that shape, so folding one run wiped every other
+  // suggestion off the review card.
+
+  it('still detects the remaining run after one fold', () => {
+    // A get-text sits between the two runs so the compound scan cannot bridge
+    // them into one bogus period (same-block neighbours would).
+    const wf = workflow([
+      click('x1', '#save'),
+      click('x2', '#save'),
+      click('x3', '#save'),
+      node('mid', 'get-text', { selector: '#status' }),
+      click('y1', '#next'),
+      click('y2', '#next'),
+      click('y3', '#next'),
+      fill('tail', '#note', 'done'),
+    ])
+    const [first] = detectRepeatRuns(wf)
+    expect(first!.runIds).toEqual(['x1', 'x2', 'x3'])
+
+    const folded = applyRepeatTaskFold(wf, first!)
+    const rest = detectRepeatRuns(folded)
+    expect(rest).toHaveLength(1)
+    expect(rest[0]!.runIds).toEqual(['y1', 'y2', 'y3'])
+    expect(rest[0]!.blockId).toBe('event-click')
+  })
+
+  it('walks a folded loop transparently (body then after-loop)', () => {
+    // The tail AFTER the loop is still reachable and still part of the chain:
+    // a run split across the loop's after-loop edge and later nodes is found.
+    const wf = workflow([
+      click('x1', '#save'),
+      click('x2', '#save'),
+      click('x3', '#save'),
+      fill('tail1', '#note', 'a'),
+      fill('tail2', '#note', 'a'),
+    ])
+    const [first] = detectRepeatRuns(wf)
+    const folded = applyRepeatTaskFold(wf, first!)
+    const rest = detectRepeatRuns(folded)
+    expect(rest).toHaveLength(1)
+    expect(rest[0]!.runIds).toEqual(['tail1', 'tail2'])
+  })
+
+  it('never offers a fold inside an existing loop body', () => {
+    // A nested loop is not a rewrite this module can stand behind; nodes
+    // inside the body are on the chain for coverage but off-limits for runs.
+    const wf = workflow([click('x1', '#save'), click('x2', '#save'), click('x3', '#save')])
+    const [first] = detectRepeatRuns(wf)
+    const folded = applyRepeatTaskFold(wf, first!)
+    // Replace the surviving single-node body with a repetitive body by hand:
+    // loop → b1 → b2 → b3 (all the same click) → back to loop → tail.
+    const loop = loopNodeOf(folded, 'repeat-task')!
+    const b1 = click('b1', '#row')
+    const b2 = click('b2', '#row')
+    const b3 = click('b3', '#row')
+    const tail = node('tail', 'get-text', { selector: '#status' })
+    const bodyHead = folded.drawflow.edges.find(
+      (edge) => edge.source === loop.id && edge.sourceHandle === 'repeat-task-output-1',
+    )!
+    const nodes = [
+      ...folded.drawflow.nodes.filter((n) => n.id !== bodyHead.target),
+      b1,
+      b2,
+      b3,
+      tail,
+    ]
+    const others = folded.drawflow.edges.filter(
+      (edge) => edge.source !== bodyHead.target && edge.target !== bodyHead.target,
+    )
+    const edges = [
+      ...others,
+      { id: 'lb1', source: loop.id, target: 'b1', sourceHandle: 'repeat-task-output-1' },
+      { id: 'b1b2', source: 'b1', target: 'b2', sourceHandle: 'event-click-output-1' },
+      { id: 'b2b3', source: 'b2', target: 'b3', sourceHandle: 'event-click-output-1' },
+      { id: 'b3l', source: 'b3', target: loop.id, sourceHandle: 'event-click-output-1' },
+      { id: 'ltail', source: loop.id, target: 'tail', sourceHandle: 'repeat-task-output-2' },
+    ]
+    const nested: Workflow = {
+      ...folded,
+      drawflow: { nodes, edges },
+    }
+    expect(detectRepeatRuns(nested)).toEqual([])
+  })
 })
 
 describe('applyRepeatTaskFold', () => {

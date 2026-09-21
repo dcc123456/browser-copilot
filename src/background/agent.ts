@@ -32,6 +32,7 @@ import {
   type WireTool,
   type WireToolCall,
 } from '../lib/llm'
+import { compactHistory, shouldCompact } from '../lib/context-compact'
 import {
   isOperatorTool,
   buildWorkflowAuthorTools,
@@ -58,6 +59,7 @@ import type { AgentServerMessage, TurnTokenUsage } from '../lib/messages'
 import { notifySkillsChanged } from '../lib/messages'
 import { renderAgentCatalogue, renderSubAgentSection, renderSupervisorGuide } from '../lib/agents'
 import {
+  PLAN_SKILL_NAME,
   renderModeSkillPrompt,
   renderSkillCatalogue,
   renderSkillPrompt,
@@ -198,8 +200,12 @@ export function isPageAction(name: string): boolean {
   return ACTION_TOOLS.has(name) || isOperatorTool(name)
 }
 
-/** The built-in plan skill (`lib/builtin-skills`) that arms the plan gate. */
-export const PLAN_SKILL_NAME = 'plan'
+/**
+ * The built-in plan skill (`lib/builtin-skills`) that arms the plan gate.
+ * Canonical value lives in `lib/skills` so lib-level prompt composition can
+ * key off it too; re-exported here for existing consumers.
+ */
+export { PLAN_SKILL_NAME }
 
 /**
  * Tools blocked by the plan gate despite being in ACTION_TOOLS: they look like
@@ -306,8 +312,13 @@ export function buildSystemPrompt(options: {
     )
   } else {
     // The skill catalogue only matters when no skill is pinned: an active
-    // skill's full instructions are injected below instead.
-    if (!options.activeSkill && options.catalogue && options.catalogue.length > 0) {
+    // skill's full instructions are injected below instead. The plan skill is
+    // the exception — its EXECUTION phase is where other saved skills apply,
+    // so the catalogue stays visible alongside it and the model can load a
+    // matching skill per approved step via `use_skill`.
+    const catalogueVisible =
+      !options.activeSkill || options.activeSkill.name === PLAN_SKILL_NAME
+    if (catalogueVisible && options.catalogue && options.catalogue.length > 0) {
       const catalogue = renderSkillCatalogue(options.catalogue)
       if (catalogue) parts.push(catalogue)
     }
@@ -343,7 +354,7 @@ export function buildSystemPrompt(options: {
       [
         'OPERATING MODE: WORKFLOW GENERATE / 工作流生成.',
         'Every step is a WORKFLOW OPERATOR call (`wf_op_*`). Each successful call really operates the page AND records the node, so the draft you build IS the workflow — the native action tools (`click` / `fill` / `open_url` / …) are not offered here because they would record nothing.',
-        `ALWAYS AVAILABLE / 常驻算子: ${CORE_OPERATOR_TOOL_NAMES.join(', ')} (navigate, click, fill-or-read a field, read text). Everything else needs its category: call \`use_operators\` with the categories this task needs — it REPLACES the current selection, so name everything you still need. Calling an undeclared operator also works: it activates that category and asks you to call it again, which costs a round.`,
+        `ALL OPERATORS ARE AVAILABLE / 全部算子已可见: every \`wf_op_*\` category schema is advertised from the first round — pick the operator that fits the step, no declaration needed. ${CORE_OPERATOR_TOOL_NAMES.join(', ')} are the usual starters (navigate, click, fill-or-read a field, read text). If the payload must be slimmed mid-task, call \`use_operators\` with only the categories you still need — it REPLACES the current selection, so name everything you keep.`,
         'Target elements with `ref` from `snapshot_page` — the recorded node stores a durable selector; do not hand-write CSS.',
         'EVERY STEP IS REPLAYED: no exploratory detours — going back, retrying a different element after a miss, or re-opening a view all become nodes.',
         'SCRIPTS ARE A LAST RESORT / 代码节点是最后手段: `run_javascript` is NOT advertised. Exhaust the operators first; only when none can express the step, call `load_tools({groups:["operators_escape"]})` — every call must carry a `justification` naming what you tried and why each operator fails, without it the call is refused.',
@@ -1321,8 +1332,14 @@ function storeActiveOperatorCategories(
 }
 
 /** The categories currently active for a conversation (empty when none). */
-export function getActiveOperatorCategories(conversationId: string): Set<BlockCategory> {
-  return activeOperatorCategoryStore.get(conversationId) ?? new Set<BlockCategory>()
+/**
+ * The categories the model narrowed the workflow surface to via
+ * `use_operators`, or undefined when it never declared anything — the
+ * distinction matters: never-declared means "show everything" (the round-1
+ * default), while an EXPLICIT empty declaration means "core operators only".
+ */
+export function getActiveOperatorCategories(conversationId: string): Set<BlockCategory> | undefined {
+  return activeOperatorCategoryStore.get(conversationId)
 }
 
 /**
@@ -1350,6 +1367,41 @@ export function armPlanGate(conversationId: string): void {
 /** Whether the conversation was plan-gated earlier (via a use_skill load). */
 export function isPlanGateArmed(conversationId: string): boolean {
   return planGateArmedStore.get(conversationId) === true
+}
+
+/**
+ * Clears a conversation's plan gate arm — called when the user APPROVES a
+ * submitted plan. Approval ends plan mode: the current turn proceeds under the
+ * approved plan, and later turns start ungated instead of re-arming from the
+ * conversation store.
+ */
+export function disarmPlanGate(conversationId: string): void {
+  planGateArmedStore.delete(conversationId)
+}
+
+/**
+ * Last reported input-token count per conversation (the provider's
+ * `prompt_tokens` for the most recent request — the ACTUAL current context
+ * size; `totalUsage` below is a turn-cumulative and cannot serve). Read at the
+ * top of each round to decide compaction, so a conversation that crossed the
+ * threshold in an earlier turn compacts at the start of this one. Capped like
+ * the plan-gate store.
+ */
+const lastInputStore = new Map<string, number>()
+const LAST_INPUT_STORE_CAP = 64
+
+function recordLastInputTokens(conversationId: string, tokens: number): void {
+  lastInputStore.delete(conversationId)
+  lastInputStore.set(conversationId, tokens)
+  while (lastInputStore.size > LAST_INPUT_STORE_CAP) {
+    const oldest = lastInputStore.keys().next().value
+    if (oldest === undefined) break
+    lastInputStore.delete(oldest)
+  }
+}
+
+function lastKnownInputTokens(conversationId: string): number {
+  return lastInputStore.get(conversationId) ?? 0
 }
 
 export interface ToolAdvertiseOptions {
@@ -1381,6 +1433,14 @@ export interface ToolAdvertiseOptions {
    * end-of-turn save card is for in the single-workflow flow.
    */
   planSplitApproved?: boolean
+  /**
+   * True when the plan skill is active this turn. `use_skill` then joins the
+   * CORE surface (it normally hides behind the on-demand `skills` group): the
+   * plan's approved-execution phase is exactly where other saved skills
+   * apply, and a model mid-plan will not stop to `load_tools` first — with
+   * the tool unadvertised it simply never loads a matching skill.
+   */
+  planSkillActive?: boolean
   /**
    * Tools withheld from the advertised set REGARDLESS of mode or groups —
    * broader than `disabled` (user choice): this is the caller declaring the
@@ -1456,6 +1516,7 @@ export function advertiseTools({
   activeOperatorCategories,
   allowTools,
   planSplitApproved,
+  planSkillActive,
   hidden,
 }: ToolAdvertiseOptions): WireTool[] {
   if (mode === 'chat') return []
@@ -1513,13 +1574,26 @@ export function advertiseTools({
       // operators. Without this the whole `tabs` group would have to be loaded
       // to see what is open — and loading it would hand back `tab_new` too.
       if (name === 'list_tabs') return true
+      // Plan-skill turns get `use_skill` in the core surface (see the option
+      // doc): loading a matching saved skill per approved step is part of the
+      // plan flow, and the on-demand detour kills it in practice.
+      if (name === 'use_skill' && planSkillActive) return true
       const group = TOOL_GROUP_BY_NAME.get(name)
       if (group && !loadedGroups.has(group)) return false
       return true
     })
     const operatorTools = [
       ...buildWorkflowCoreTools(),
-      ...buildWorkflowCategoryTools(activeOperatorCategories ?? []),
+      // NOTHING is hidden until the model narrows the set itself: category
+      // awakening was how the mode lost runs — a step whose operator sat in an
+      // undeclared category either stalled the turn on a use_operators detour
+      // or triggered the activate-and-retry penalty. When no declaration has
+      // been made yet, advertise the FULL category surface; `use_operators`
+      // then REPLACES it exactly (an explicit empty declaration drops back to
+      // the core five — narrowing is a conscious act).
+      ...buildWorkflowCategoryTools(
+        activeOperatorCategories ?? new Set<BlockCategory>(ADVERTISABLE_OPERATOR_CATEGORIES),
+      ),
       ...(authorLoaded ? buildWorkflowAuthorTools() : []),
       ...(escapeLoaded ? buildWorkflowEscapeTools() : []),
     ]
@@ -1575,6 +1649,10 @@ export function advertiseTools({
     if (allowTools && !allowTools.has(name)) return false
     if (hidden?.has(name)) return false
     if (mode === 'readonly' && ACTION_TOOLS.has(name)) return false
+    // Plan-skill turns get `use_skill` in the core surface (see the option
+    // doc). Deliberately AFTER disabled/allowTools/hidden so a user-disabled
+    // tool or a specialist's whitelist still wins.
+    if (name === 'use_skill' && planSkillActive) return true
     const group = TOOL_GROUP_BY_NAME.get(name)
     if (group && !loadedGroups.has(group)) return false
     return true
@@ -3407,17 +3485,22 @@ export async function executeTool(
     case 'use_skill': {
       const wanted = String(args.name ?? '').trim()
       if (!wanted) return JSON.stringify({ error: 'A skill name is required.' })
+      // Plan is MANUAL-ONLY: the user selects it from the panel (slash menu /
+      // Skills tab). An agent-initiated load would let the model hard-gate its
+      // own actions behind a plan nobody asked for, so it is refused outright
+      // and never arms the gate (see `armPlanGate`).
+      if (wanted.toLowerCase() === PLAN_SKILL_NAME) {
+        return JSON.stringify({
+          error:
+            'The "plan" skill is user-selected only: it cannot be loaded by the agent. ' +
+            'If the task genuinely needs a plan first, tell the user to pick the plan skill ' +
+            'in the chat composer (type "/plan") and resend the request.',
+        })
+      }
       const skill = await findSkillByName(wanted)
       if (!skill) {
         const available = (await listSkills()).map((entry) => entry.name)
         return JSON.stringify({ error: `No skill named "${wanted}".`, available })
-      }
-      // Loading the plan skill arms the plan gate for the rest of the
-      // conversation — its own note says "follow for the rest of this
-      // conversation", so the hard gate must span turns, not just this one.
-      if (skill.name === PLAN_SKILL_NAME) {
-        armPlanGate(ctx.conversationId)
-        if (ctx.planGate) ctx.planGate.armed = true
       }
       return JSON.stringify({
         skill: skill.name,
@@ -3869,6 +3952,35 @@ function shortSummary(name: string, result: string): string {
   }
 }
 
+/**
+ * LLM summarizer for context compaction: turns the removed-messages transcript
+ * into one compact paragraph the next request can stand on. No tools, no
+ * streaming relay — a plain one-shot completion. Errors propagate to
+ * `compactHistory`, which falls back to a mechanical digest.
+ */
+async function summarizeTranscript(
+  config: { apiKey: string; baseUrl: string; model: string; headers?: Record<string, string> },
+  transcript: string,
+): Promise<string> {
+  const result = await streamCompletion(
+    {
+      ...config,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You compress the earlier part of a browser-automation conversation into a summary the assistant will rely on. Keep: the user goal, decisions made, page structure facts, data collected (values, refs, URLs), and anything pending. Drop pleasantries and repetition. Output the summary only — no preamble, no commentary.',
+        },
+        { role: 'user', content: transcript },
+      ],
+      temperature: 0,
+      maxTokens: 1024,
+    },
+    {},
+  )
+  return result.content
+}
+
 export async function runAgentTurn(
   history: WireMessage[],
   deps: AgentDeps,
@@ -3926,8 +4038,17 @@ export async function runAgentTurn(
   // The mounted skill must NOT also sit in the catalogue: the catalogue tells
   // the model to load skills via `use_skill`, which would spend a round
   // re-loading instructions that are already in the system prompt.
+  // The catalogue is suppressed while a skill is pinned — its full
+  // instructions already ship in the system prompt. The plan skill is the
+  // exception: its approved-execution phase is where OTHER saved skills
+  // belong, so the catalogue stays visible (minus the plan skill itself and
+  // any mounted mode skill) and the model can `use_skill` a match per step.
   const catalogue: Skill[] = activeSkill
-    ? []
+    ? activeSkill.name === PLAN_SKILL_NAME
+      ? skillList.filter(
+          (skill) => skill.id !== activeSkill.id && skill.id !== modeSkill?.id,
+        )
+      : []
     : modeSkill
       ? skillList.filter((skill) => skill.id !== modeSkill.id)
       : skillList
@@ -3989,6 +4110,17 @@ export async function runAgentTurn(
     })
   }
   const roundsCap = maxToolRounds || DEFAULT_MAX_TOOL_ROUNDS
+  // Compaction is limited to one pass per turn: a single pass already removes
+  // every compactable turn, so repeated triggers in one turn would only burn
+  // summarizer calls on an unchanged history.
+  let compactedThisTurn = false
+  // The i18n strings for compaction, aliased BEFORE the loop: the per-round
+  // request array is also named `messages` inside the loop body and would
+  // shadow the dictionary (a TDZ trap for the hook below).
+  const compactionText = {
+    status: messages.contextCompacted,
+    marker: messages.contextCompactedMarker,
+  }
 
   // Filter the advertised tools per round (see advertiseTools): the core set
   // plus any on-demand group the model has loaded so far this conversation.
@@ -4050,6 +4182,37 @@ export async function runAgentTurn(
       retireOldPageReads(history, false)
     }
 
+    // Context compaction: when the last request's prompt_tokens reached 80% of
+    // the 256K window, replace older turns with an LLM summary before this
+    // request. Runs BEFORE building the request so the compacted history is
+    // what goes out. Once per turn (compactedThisTurn), and decided from the
+    // conversation-scoped last-input store so a conversation that crossed the
+    // threshold in an earlier turn compacts at the start of this one. Safe
+    // here: every round boundary leaves each tool_call paired with its result.
+    // Specialist sub-agents are skipped — their transcripts are short-lived
+    // and bounded by the delegation budget.
+    if (
+      !deps.subAgent &&
+      !compactedThisTurn &&
+      shouldCompact(lastKnownInputTokens(deps.conversationId))
+    ) {
+      compactedThisTurn = true
+      deps.send({ type: 'status', text: compactionText.status })
+      await compactHistory(history, {
+        marker: compactionText.marker,
+        summarize: (transcript) =>
+          summarizeTranscript(
+            {
+              apiKey: provider.apiKey,
+              baseUrl: provider.baseUrl,
+              model: provider.model,
+              ...(provider.headers ? { headers: provider.headers } : {}),
+            },
+            transcript,
+          ),
+      })
+    }
+
     const messages: WireMessage[] = [{ role: 'system', content: systemPrompt }, ...history]
 
     // Recomputed per round: a `load_tools` or `use_operators` call in this turn
@@ -4063,6 +4226,10 @@ export async function runAgentTurn(
       // An approved multi-workflow split releases `compose_workflow` so the
       // plan's segments can be saved mid-turn (each compose clears the draft).
       ...(ctx.planGate?.approved && ctx.planGate.split ? { planSplitApproved: true } : {}),
+      // While the plan skill governs the turn, `use_skill` rides the core
+      // surface: the approved plan's steps may each load a matching saved
+      // skill, and the on-demand `skills` group detour never happens mid-plan.
+      ...(activeSkill?.name === PLAN_SKILL_NAME ? { planSkillActive: true } : {}),
       // Unattended runs (no panel port → no askUser dep) must not even SEE
       // `ask_user`: scheduled tasks, Feishu commands and workflow AI-agent
       // blocks have nobody to answer, so the schema is withheld outright and
@@ -4120,6 +4287,14 @@ export async function runAgentTurn(
       if (error instanceof LlmError) throw error
       if ((error as Error)?.name === 'AbortError') return null
       throw error
+    }
+
+    // Track the ACTUAL context size: this request's prompt_tokens. Read from
+    // the resolved result (not onUsage) so mocked streams in tests can drive
+    // compaction the same way real ones do.
+    const roundUsage = result.usage
+    if (roundUsage && roundUsage.inputTokens > 0) {
+      recordLastInputTokens(deps.conversationId, roundUsage.inputTokens)
     }
 
     if (result.toolCalls.length === 0) {
@@ -4420,7 +4595,11 @@ async function runOneToolCall(
     const requested = Array.isArray(args.categories) ? args.categories.map(String) : []
     const valid = requested.filter(isAdvertisableOperatorCategory)
     const invalid = requested.filter((category) => !valid.includes(category as BlockCategory))
-    const before = getActiveOperatorCategories(ctx.conversationId)
+    // 'Before' is the set the model could actually see: everything, when it
+    // never narrowed the surface at all.
+    const before =
+      getActiveOperatorCategories(ctx.conversationId) ??
+      new Set<BlockCategory>(ADVERTISABLE_OPERATOR_CATEGORIES)
     const active = storeActiveOperatorCategories(ctx.conversationId, valid)
     const advertised = [
       ...CORE_OPERATOR_TOOL_NAMES,
@@ -4460,10 +4639,15 @@ async function runOneToolCall(
   // core four are exempt — they are advertised unconditionally, so a call to
   // one is never a stray call.
   const operatorCategory = groupName ? categoryOfOperatorGroup(groupName) : undefined
+  // No declaration on record means every category is advertised — nothing can
+  // be unavailable for category reasons.
+  const activeOperatorCategories =
+    getActiveOperatorCategories(ctx.conversationId) ??
+    new Set<BlockCategory>(ADVERTISABLE_OPERATOR_CATEGORIES)
   const groupUnavailable = CORE_OPERATOR_TOOL_SET.has(name)
     ? false
     : operatorCategory
-      ? !getActiveOperatorCategories(ctx.conversationId).has(operatorCategory)
+      ? !activeOperatorCategories.has(operatorCategory)
       : Boolean(groupName) && !ctx.loadedGroups?.has(groupName!)
   if (groupName && groupUnavailable) {
     // Sub-agent boundary: never auto-load the delegate group (recursion
@@ -4503,9 +4687,10 @@ async function runOneToolCall(
       // Activate just this category. Adding to the current set (rather than
       // replacing it) keeps whatever the model was already using: it is
       // mid-task, and dropping those schemas to teach a lesson about declaring
-      // categories early would cost more than the tokens saved.
+      // categories early would cost more than the tokens saved. Undeclared =
+      // the full default surface, so the union stays the full surface.
       storeActiveOperatorCategories(ctx.conversationId, [
-        ...getActiveOperatorCategories(ctx.conversationId),
+        ...(getActiveOperatorCategories(ctx.conversationId) ?? ADVERTISABLE_OPERATOR_CATEGORIES),
         operatorCategory,
       ])
       pushResult(
@@ -4712,8 +4897,12 @@ async function runOneToolCall(
     }
     const decision = await deps.planDecision(plan)
     if (decision.approved) {
-      // Open the gate. A plan that declared a split also releases
-      // `compose_workflow` for the rest of the turn (see `planSplitApproved`).
+      // Approval ENDS plan mode: open the gate for the rest of this turn and
+      // clear the conversation-level arm so later turns start ungated (the
+      // panel also unpins the plan skill on approval — one task, one plan).
+      // A plan that declared a split also releases `compose_workflow` for the
+      // rest of the turn (see `planSplitApproved`).
+      disarmPlanGate(ctx.conversationId)
       if (ctx.planGate) {
         ctx.planGate.approved = true
         ctx.planGate.split = split !== ''

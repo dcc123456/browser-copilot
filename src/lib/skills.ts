@@ -121,11 +121,29 @@ export function renderModeSkillPrompt(skill: Skill, reason: string): string {
  * directive apart from their actual request/selection.
  */
 export function wrapSkillDirective(skill: Skill, userContent: string): string {
+  // The plan skill governs a FLOW (research → present_plan → approved
+  // execution) rather than a transformation of the message itself, and its
+  // execution phase is exactly where other saved skills belong — so the
+  // generic "do not answer outside the skill" wrap would actively forbid the
+  // behaviour the skill needs. Bind a plan-specific directive instead.
+  if (skill.name === PLAN_SKILL_NAME) {
+    return [
+      `[The user has selected the skill "${skill.name}" and it is ACTIVE. Follow the plan-first flow it prescribes for the request below: research first, then submit the steps via the present_plan tool and wait for approval before any page action. Other saved skills stay usable: while executing the approved plan, load any skill whose description matches the step at hand with the use_skill tool and follow it for that step. Process the following as the task to plan:]`,
+      userContent,
+    ].join('\n\n')
+  }
   return [
     `[The user has selected the skill "${skill.name}" and it is ACTIVE. You MUST apply that skill's instructions (given in the system prompt) to everything below. Do not say you cannot use skills, and do not answer outside the skill — follow its instructions exactly. Process the following as this skill's input:]`,
     userContent,
   ].join('\n\n')
 }
+
+/**
+ * The built-in plan skill's reserved name (`lib/builtin-skills`). Lives here so
+ * lib-level prompt composition (catalogue retention, directive wrap) can key
+ * off it without importing the background agent module.
+ */
+export const PLAN_SKILL_NAME = 'plan'
 
 /**
  * Renders the catalogue of auto-matchable skills.
@@ -136,7 +154,13 @@ export function wrapSkillDirective(skill: Skill, userContent: string): string {
  * by name via the `use_skill` tool instead.
  */
 export function renderSkillCatalogue(skills: readonly Skill[]): string {
-  const usable = skills.filter((skill) => skill.autoMatch && skill.description.trim() !== '')
+  // The plan skill is MANUAL-ONLY: the user pins it from the panel, never the
+  // agent. Excluded here (not just via autoMatch) so a user-edited copy with
+  // autoMatch re-enabled cannot hand the model a self-invoked plan gate.
+  const usable = skills.filter(
+    (skill) =>
+      skill.autoMatch && skill.description.trim() !== '' && skill.name !== PLAN_SKILL_NAME,
+  )
   if (usable.length === 0) return ''
 
   const lines = usable.map((skill) => `- ${skill.name}: ${skill.description}`)
@@ -149,8 +173,9 @@ export function renderSkillCatalogue(skills: readonly Skill[]): string {
     ...lines,
     '',
     'How to use a skill:',
-    '1. If one clearly matches what the user is asking, STOP and call the `use_skill`',
-    "   tool with that skill's exact name BEFORE you write any answer.",
+    '1. If one clearly matches what the user is asking — including a step you are',
+    "   about to execute under an approved plan — call the `use_skill` tool with",
+    "   that skill's exact name BEFORE acting on it or writing your answer.",
     '   (The skills tools load on demand: if `use_skill` is not advertised, call',
     '   `load_tools` with groups: ["skills"] first.)',
     "2. The tool returns the skill's full instructions; read them and follow them",

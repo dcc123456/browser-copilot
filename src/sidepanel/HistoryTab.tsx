@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Check, Workflow as WorkflowIcon, X } from 'lucide-react'
 import { onReviewLog, sendCommand } from '../lib/messages'
+import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
 import { resolveSecretValuesForHistory, workflowFromHistory } from '../lib/storage'
 import {
   applyNodeKeepSelection,
@@ -123,6 +124,17 @@ export default function HistoryTab() {
 
   useEffect(() => {
     void reloadRuns()
+  }, [reloadRuns])
+
+  // The storage folder can reconnect itself mid-session (lib/fs-reconnect)
+  // after an extension update; lists read before that were cache/empty
+  // fallbacks. Every sub-section reloads on the shared event.
+  useEffect(() => {
+    const handler = (): void => {
+      void reloadRuns()
+    }
+    window.addEventListener(STORAGE_RECONNECTED_EVENT, handler)
+    return () => window.removeEventListener(STORAGE_RECONNECTED_EVENT, handler)
   }, [reloadRuns])
 
   // Deep links from other tabs (Workflows tab failed-run banner) arrive as a
@@ -323,6 +335,15 @@ function ConversationsSection({ t, flash }: SectionProps) {
 
   useEffect(() => {
     void load()
+  }, [load])
+
+  // Storage reconnect mid-session → reload the conversation list.
+  useEffect(() => {
+    const handler = (): void => {
+      void load()
+    }
+    window.addEventListener(STORAGE_RECONNECTED_EVENT, handler)
+    return () => window.removeEventListener(STORAGE_RECONNECTED_EVENT, handler)
   }, [load])
 
   const toggle = useCallback(
@@ -761,6 +782,15 @@ function OperationsSection({ t, flash }: SectionProps) {
 
   useEffect(() => {
     void load()
+  }, [load])
+
+  // Storage reconnect mid-session → reload history + conversations.
+  useEffect(() => {
+    const handler = (): void => {
+      void load()
+    }
+    window.addEventListener(STORAGE_RECONNECTED_EVENT, handler)
+    return () => window.removeEventListener(STORAGE_RECONNECTED_EVENT, handler)
   }, [load])
 
   const removeOne = useCallback(

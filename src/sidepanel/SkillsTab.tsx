@@ -17,6 +17,7 @@ import {
 } from '../lib/skills-import'
 import { downloadBlob } from '../lib/export-answer'
 import { useT } from './i18n'
+import { confirmDialog } from '../ui/confirm'
 import SkillEditDialog, { type SkillFormValues } from './SkillEditDialog'
 
 interface Props {
@@ -149,6 +150,16 @@ export default function SkillsTab({ skills, activeSkillId, onChanged, onUseInCha
   }
 
   const remove = async (skill: Skill): Promise<void> => {
+    // Deleting removes the saved instructions for good — same two-step guard
+    // as the Workflows tab's delete.
+    const ok = await confirmDialog({
+      title: t.dialogDeleteTitle,
+      message: t.skillsDeleteConfirm({ name: skill.name }),
+      confirmText: t.delete,
+      cancelText: t.cancel,
+      danger: true,
+    })
+    if (!ok) return
     try {
       await sendCommand({ type: 'skills.delete', id: skill.id })
       setBanner({ kind: 'ok', text: t.skillsDeleted({ name: skill.name }) })

@@ -363,6 +363,14 @@ export interface Messages {
   chatWorkflowProbeChecking: string
   /** Heading of the graph-consistency list on the save card. */
   chatWorkflowIntegrityTitle: string
+  /** Heading of the runnability (required-parameter) list on the save card. */
+  chatWorkflowRunIssuesTitle: string
+  /** Prefix for one blocking runnability problem on the save card. */
+  chatWorkflowRunIssuesError: string
+  /** Prefix for one non-blocking runnability warning on the save card. */
+  chatWorkflowRunIssuesWarning: string
+  /** Hint under blocking runnability problems: save is disabled. */
+  chatWorkflowRunIssuesBlocked: string
   /** One `{{reference}}` no block produces and no input declares. */
   chatWorkflowIntegrityDangling: (params: { blockId: string }) => string
   /** Steps the trigger head cannot reach, so the replay will never run them. */
@@ -510,6 +518,10 @@ export interface Messages {
   planRejectedChip: string
   /** Aria label for the plan approval card region. */
   planCardAria: string
+  /** Status line shown when the conversation history is compacted mid-turn. */
+  contextCompacted: string
+  /** Prefix stamped on the user-role message that carries the compaction summary. */
+  contextCompactedMarker: string
 
   // Token usage
   tokenUsage: string
@@ -548,6 +560,7 @@ export interface Messages {
   skillsAutoMatchHint: string
   skillsSaved: (params: { name: string }) => string
   skillsDeleted: (params: { name: string }) => string
+  skillsDeleteConfirm: (params: { name: string }) => string
   skillsNameRequired: string
   skillsInstructionsRequired: string
   skillsNameTaken: string
@@ -731,6 +744,8 @@ export interface Messages {
   chatAskPlaceholder: string
   /** Chip marking the recommended (first) option on the ask_user card. */
   chatAskRecommended: string
+  /** Floating pill shown when the user scrolled up during a streaming answer. */
+  chatJumpToLatest: string
   toolOperator: string
   toolOperatorWarn: string
 
@@ -1024,6 +1039,7 @@ export interface Messages {
   agentMaxRounds: string
   agentSaved: (params: { name: string }) => string
   agentDeleted: (params: { name: string }) => string
+  agentsDeleteConfirm: (params: { name: string }) => string
   agentResetDone: (params: { name: string }) => string
   agentNameRequired: string
   agentInstructionsRequired: string
@@ -1306,6 +1322,7 @@ const en: Messages = {
   chatAskTitle: 'The assistant needs your answer',
   chatAskPlaceholder: 'Type your answer…',
   chatAskRecommended: 'Recommended',
+  chatJumpToLatest: 'Jump to latest',
   chatSkillActive: ({ name }) => `Skill: ${name}`,
   chatSkillGo: ({ name }) => `Apply the "${name}" skill now.`,
   chatSkillGoSelection: ({ name }) =>
@@ -1324,6 +1341,11 @@ const en: Messages = {
     'Nothing to save from this turn: every recorded action failed. Fix the failure and run it again.',
   chatWorkflowProbeChecking: 'Checking the selectors against the current page…',
   chatWorkflowIntegrityTitle: 'This graph will not run as saved',
+  chatWorkflowRunIssuesTitle: 'Runnability check',
+  chatWorkflowRunIssuesError: 'Must fix',
+  chatWorkflowRunIssuesWarning: 'Worth checking',
+  chatWorkflowRunIssuesBlocked:
+    'Fix the problems marked "Must fix" first (in the workflow editor), then save. Saving is disabled because these steps cannot run.',
   chatWorkflowIntegrityDangling: ({ blockId }) =>
     `no step produces this value — "${blockId}" will run with an empty value. Declare it as a workflow input or add the step that produces it.`,
   chatWorkflowIntegrityUnreachable: ({ count }) =>
@@ -1435,6 +1457,8 @@ const en: Messages = {
   planApprovedChip: 'Plan approved',
   planRejectedChip: 'Plan rejected',
   planCardAria: 'Plan approval card',
+  contextCompacted: 'Context is large — older turns were summarized to stay within the model window.',
+  contextCompactedMarker: '[Context compacted] Summary of the earlier conversation:',
 
   tokenUsage: 'Token usage',
   tokenTotal: 'Total',
@@ -1470,6 +1494,8 @@ const en: Messages = {
     'When on, the agent may use this skill on its own if your message matches the description above.',
   skillsSaved: ({ name }) => `Saved “${name}”.`,
   skillsDeleted: ({ name }) => `Deleted “${name}”.`,
+  skillsDeleteConfirm: ({ name }) =>
+    `Delete skill “${name}”? Its instructions cannot be recovered.`,
   skillsNameRequired: 'Give the skill a name.',
   skillsInstructionsRequired: 'Instructions cannot be empty.',
   skillsNameTaken: 'A skill with that name already exists.',
@@ -1930,6 +1956,8 @@ const en: Messages = {
   agentMaxRounds: 'Max tool rounds per delegation',
   agentSaved: ({ name }) => `Agent “${name}” saved.`,
   agentDeleted: ({ name }) => `Agent “${name}” deleted.`,
+  agentsDeleteConfirm: ({ name }) =>
+    `Delete agent “${name}”? Its configuration cannot be recovered.`,
   agentResetDone: ({ name }) => `Restored the built-in agent “${name}” to its defaults.`,
   agentNameRequired: 'Name is required.',
   agentInstructionsRequired: 'Instructions are required.',
@@ -2297,6 +2325,7 @@ const zhCN: Messages = {
   chatAskTitle: '助手需要你的回答',
   chatAskPlaceholder: '输入你的回答…',
   chatAskRecommended: '推荐',
+  chatJumpToLatest: '回到最新',
   chatSkillActive: ({ name }) => `技能：${name}`,
   chatSkillGo: ({ name }) => `请使用"${name}"技能处理。`,
   chatSkillGoSelection: ({ name }) => `请用"${name}"技能处理我在页面上选中的内容。`,
@@ -2314,6 +2343,11 @@ const zhCN: Messages = {
     '本轮没有可保存的内容：记录到的操作全部失败。请先解决失败原因，再重跑一次。',
   chatWorkflowProbeChecking: '正在当前页面上检查选择器…',
   chatWorkflowIntegrityTitle: '这个图按现状保存后跑不起来',
+  chatWorkflowRunIssuesTitle: '可运行性检查',
+  chatWorkflowRunIssuesError: '必须修复',
+  chatWorkflowRunIssuesWarning: '建议检查',
+  chatWorkflowRunIssuesBlocked:
+    '请先在工作流编辑器里修复「必须修复」的问题再保存。这些步骤无法执行，所以保存按钮暂时禁用。',
   chatWorkflowIntegrityDangling: ({ blockId }) =>
     `没有任何步骤能产出这个值——「${blockId}」会以空值执行。请把它声明成工作流输入，或补上产出它的步骤。`,
   chatWorkflowIntegrityUnreachable: ({ count }) => `${count} 个步骤从触发器出发走不到：`,
@@ -2415,6 +2449,8 @@ const zhCN: Messages = {
   planApprovedChip: '计划已批准',
   planRejectedChip: '计划已拒绝',
   planCardAria: '计划确认卡片',
+  contextCompacted: '上下文较长——较早的回合已被摘要压缩，以留在模型窗口内。',
+  contextCompactedMarker: '[上下文已压缩] 此前对话摘要：',
 
   tokenUsage: 'Token 消耗',
   tokenTotal: '合计',
@@ -2447,6 +2483,7 @@ const zhCN: Messages = {
   skillsAutoMatchHint: '开启后，当你的消息与上面的“适用场景”相符时，agent 可自行使用该技能。',
   skillsSaved: ({ name }) => `已保存“${name}”。`,
   skillsDeleted: ({ name }) => `已删除“${name}”。`,
+  skillsDeleteConfirm: ({ name }) => `删除技能“${name}”？其指令内容无法恢复。`,
   skillsNameRequired: '请填写技能名称。',
   skillsInstructionsRequired: '指令内容不能为空。',
   skillsNameTaken: '已存在同名技能。',
@@ -2874,6 +2911,7 @@ const zhCN: Messages = {
   agentMaxRounds: '单次委派最大工具轮次',
   agentSaved: ({ name }) => `智能体 “${name}” 已保存。`,
   agentDeleted: ({ name }) => `智能体 “${name}” 已删除。`,
+  agentsDeleteConfirm: ({ name }) => `删除智能体“${name}”？其配置无法恢复。`,
   agentResetDone: ({ name }) => `内置智能体 “${name}” 已恢复为默认版本。`,
   agentNameRequired: '请填写名称。',
   agentInstructionsRequired: '请填写指令。',

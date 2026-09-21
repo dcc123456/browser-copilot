@@ -13,6 +13,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { sendCommand } from '../lib/messages'
+import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
 import { createDraft } from '../lib/task-store'
 import { describeSchedule, isManualSchedule } from '../lib/schedule'
 import type { FeishuConfig, ScheduledTask } from '../lib/scheduler-types'
@@ -83,6 +84,18 @@ export default function TasksTab() {
 
   useEffect(() => {
     void load()
+  }, [load])
+
+  // Storage reconnects itself on the panel's first interaction after an
+  // extension update (lib/fs-reconnect). Tasks/feishu/workflow lists were read
+  // while the handle was still unavailable — reload them the moment the
+  // folder is back instead of waiting for a panel restart.
+  useEffect(() => {
+    const handler = (): void => {
+      void load()
+    }
+    window.addEventListener(STORAGE_RECONNECTED_EVENT, handler)
+    return () => window.removeEventListener(STORAGE_RECONNECTED_EVENT, handler)
   }, [load])
 
   const persistTask = async (task: Draft): Promise<void> => {

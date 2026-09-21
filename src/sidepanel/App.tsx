@@ -3,6 +3,7 @@ import { Minimize2 } from 'lucide-react'
 import { effectiveLocale, messagesFor, type Messages } from '../lib/i18n'
 import { sendCommand } from '../lib/messages'
 import { syncToFiles } from '../lib/fs-store'
+import { autoReconnectStorage, STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
 import type { Agent, Skill } from '../lib/types'
 import AgentsTab from './AgentsTab'
 import ChatTab from './ChatTab'
@@ -85,6 +86,27 @@ export default function App() {
     // restart, before the panel re-granted access) are pushed into the folder
     // here. Idempotent and safe to run on every open.
     void syncToFiles().catch(() => {})
+  }, [refreshSkills, refreshAgents])
+
+  // An extension update drops the storage folder's granted permission (Chrome
+  // re-granting requires a user gesture, which the worker can never provide —
+  // see lib/fs-reconnect). `syncToFiles` above already fails silently in that
+  // state; this retries on the panel's first interaction so the folder
+  // reconnects itself instead of waiting for the manual button in Settings.
+  useEffect(() => autoReconnectStorage(), [])
+
+  // Storage (re)connection success — automatic (above) or via the manual
+  // button in Settings — re-reads the shared skill/agent lists. On the open
+  // sequence the first read runs while the handle is still 'prompt' and comes
+  // back from the cache/empty fallbacks; without this the skills loaded after
+  // the reconnect only appeared after a full panel restart.
+  useEffect(() => {
+    const listener = (): void => {
+      void refreshSkills()
+      void refreshAgents()
+    }
+    window.addEventListener(STORAGE_RECONNECTED_EVENT, listener)
+    return () => window.removeEventListener(STORAGE_RECONNECTED_EVENT, listener)
   }, [refreshSkills, refreshAgents])
 
   // Skills can change from outside this panel's commands — most visibly the

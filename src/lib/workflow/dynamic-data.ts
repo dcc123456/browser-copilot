@@ -342,6 +342,10 @@ export function rewriteDataParams(input: RewriteInput): RewriteResult {
 
   for (const site of sites) {
     const { value } = site
+    // Instruction text (the ai-agent prompt) stays a literal: it is addressed
+    // TO the step, not data the workflow obtains, so parameterising it would
+    // bury a readable instruction behind a `{{reference}}`.
+    if (site.instruction) continue
     if (hasReference(value)) continue
     if (!isRewritable(value)) continue
 
@@ -449,7 +453,7 @@ export function looksLikeBulkContent(value: string): boolean {
  *
  * A site is NOT flagged when an upstream variable already holds the value (a
  * producer ran earlier in the session) or when the parameter is exempt via
- * `allowBulk` (an instruction addressed TO the workflow).
+ * `instruction` (text addressed TO the workflow, such as the ai-agent prompt).
  *
  * What gets judged is the {@link literalResidue} — the part left after every
  * `{{token}}` is removed — not the raw string. A reference only makes a value
@@ -464,7 +468,7 @@ export function unproducedBulkData(
   variableIndex: ReadonlyMap<string, string>,
 ): DataValueSite | null {
   for (const site of dataValueSites(blockId, data)) {
-    if (site.allowBulk) continue
+    if (site.instruction) continue
     if (variableIndex.has(site.value)) continue
     const residue = literalResidue(site.value)
     // No literal left at all: the value IS its references. Nothing to freeze.

@@ -15,11 +15,14 @@ import type { BlockCategory } from '../src/lib/workflow/blocks/types'
  * round of every conversation. When you add a tool or expand descriptions, raise
  * a budget deliberately — and prefer deleting duplicated prose over growing it.
  *
- * Workflow generation is the interesting case. All 54 operator schemas are
- * ~32.4k chars on their own; advertising them every round is what made the old
- * mode cost ~50k chars per round and pushed a 10-step task into its 20-round
- * cap. The mode now advertises four operators outright and hands out the rest by
- * CATEGORY, so the budget that matters is "one category at a time".
+ * Workflow generation used to be the cheap case: four operators outright, the
+ * rest handed out by CATEGORY. That dispatch is what made the mode lose runs —
+ * a step whose operator sat in an undeclared category stalled the turn on a
+ * use_operators detour or the activate-and-retry penalty — so the mode now
+ * advertises EVERY operator category from round one (the model may still narrow
+ * the surface consciously via `use_operators`). The price is accepted
+ * deliberately: round 1 measures ~57.3k chars (~17.4k tokens), roughly 3× full
+ * auto, and only in this mode.
  *
  * Raised 18_000 → 20_000 when `present_plan` (the plan skill's approval
  * hand-off, ~1.2k schema) joined the always-advertised core: plan-first needs
@@ -37,47 +40,50 @@ const MAX_ADVERTISED_PAYLOAD_CHARS = 20_000
  */
 const MAX_CATALOG_CHARS = 25_500
 /**
- * Round 1 of a workflow conversation: the core tool set, the core four
- * operators, `use_operators`, the workflow-specific `load_tools`, AND the
- * mounted `workflow-generator` skill in the system prompt (see
- * {@link workflowSystemPrompt}). Measured ~24.1k. Raised 16_500 → 25_000 when
- * the operator guide started riding in the system prompt: the mode paragraph
- * was trimmed to pure mechanics (dedupe), and the guide is the one place the
- * action→operator mapping, the data rules and the keep/drop criteria live.
+ * Round 1 of a workflow conversation: the core tool set, EVERY operator
+ * category (the round-1 default — see the file header), `use_operators`, the
+ * workflow-specific `load_tools`, AND the mounted `workflow-generator` skill in
+ * the system prompt (see {@link workflowSystemPrompt}). Measures ~57.3k
+ * (~17.4k tokens) — the accepted price of never losing a run to an undeclared
+ * category. Kept separate from MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS (the
+ * numbers coincide today) so a future round-1 trim does not have to move the
+ * explicit-declaration ceiling and vice versa.
  */
-const MAX_WORKFLOW_PAYLOAD_CHARS = 25_000
+const MAX_WORKFLOW_ROUND1_CHARS = 58_000
 /**
  * The real per-round ceiling: one declared category on top of round 1. The
  * largest (`interaction`, 13 schemas) measures ~32.8k; the smallest (`data`)
  * ~28.3k. Raised 25_100 → 34_000 together with the round-1 budget (the mounted
  * operator guide), after the mode paragraph's duplicated prose was deleted.
+ * Raised 34_000 → 35_500 together with the round-1 budget (required args).
  */
-const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 34_000
+const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 35_500
 /**
  * The ceiling for the worst case the model can actually reach: every category
  * declared at once, which is the same set as `operators_author` (~42.9k of tool
  * schemas). It is an escape hatch, not a steady state, but it must not run away
  * either. Raised 46_700 → 56_000 together with the round-1 budget (the mounted
- * operator guide).
+ * operator guide). Raised 56_000 → 58_000 together with the round-1 budget
+ * (required args).
  */
-const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 56_000
+const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 58_000
 /**
  * Absolute worst case: every category plus both escape hatches loaded. Stays
  * loaded for the rest of the conversation, so this is a per-round cost, not a
  * one-off. Raised 48_000 → 57_500 together with the round-1 budget (the
- * mounted operator guide).
+ * mounted operator guide). Raised 57_500 → 59_500 together with the round-1
+ * budget (required args).
  */
-const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 57_500
+const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 59_500
 /**
- * The guardrails that matter, expressed as ratios against full auto: the tool
- * surface of round 1 must be meaningfully SMALLER (the whole point of the
- * dispatch) — that guard is unchanged. The total-cost ratio was raised
- * 0.95 → 1.4 because workflow now carries the operator guide in its system
- * prompt while full auto does not; the tool-surface ratio above still guards
- * the dispatch mechanism itself.
+ * The guardrails that matter, expressed as ratios against full auto. Round 1
+ * now deliberately carries EVERY operator schema, so workflow runs ~2.8× full
+ * auto's tool surface and ~2.9× its total payload — the accepted price of not
+ * losing runs to undeclared categories (see the file header). These ceilings
+ * (measured 2.79 / 2.95) keep that price from silently creeping further.
  */
-const MAX_WORKFLOW_TOOLS_RATIO = 0.75
-const MAX_WORKFLOW_OVER_FULL_AUTO_RATIO = 1.4
+const MAX_WORKFLOW_TOOLS_RATIO = 3
+const MAX_WORKFLOW_OVER_FULL_AUTO_RATIO = 3.2
 
 /**
  * Workflow-generation turns mount the built-in `workflow-generator` skill into
@@ -119,10 +125,15 @@ describe('first-turn agent payload size (full auto)', () => {
 })
 
 describe('first-turn agent payload size (workflow generate)', () => {
-  it('advertises only the core four operators before anything is declared', () => {
+  it('advertises every operator category before anything is declared', () => {
     const names = workflowNames({ mode: 'workflow' })
     const operators = names.filter((name) => name.startsWith('wf_op_'))
-    expect([...operators].sort()).toEqual([...CORE_OPERATOR_TOOL_NAMES].sort())
+    const expected = ADVERTISABLE_OPERATOR_CATEGORIES.flatMap(
+      (category) => OPERATOR_CATEGORY_TOOL_NAMES[category],
+    )
+    expect([...operators].sort()).toEqual([...expected].sort())
+    // The core four ride along in the workflow core set.
+    for (const name of CORE_OPERATOR_TOOL_NAMES) expect(names).toContain(name)
     // The native action tools are gone for good: they record nothing, so using
     // one produces an empty draft and the mode has no workflow to offer.
     for (const name of ['click', 'fill', 'open_url', 'press_key']) {
@@ -136,11 +147,11 @@ describe('first-turn agent payload size (workflow generate)', () => {
     const total = system.length + tools.length
 
     console.log(
-      `[payload-size] workflow round 1: core=${CORE_OPERATOR_TOOL_NAMES.length} ` +
+      `[payload-size] workflow round 1: categories=${ADVERTISABLE_OPERATOR_CATEGORIES.length} ` +
         `system=${system.length} tools=${tools.length} total=${total} chars ` +
         `(~${Math.round(total / 3.3)} tokens)`,
     )
-    expect(total).toBeLessThanOrEqual(MAX_WORKFLOW_PAYLOAD_CHARS)
+    expect(total).toBeLessThanOrEqual(MAX_WORKFLOW_ROUND1_CHARS)
   })
 
   it('stays under the budget with any single category declared', () => {
@@ -187,13 +198,28 @@ describe('first-turn agent payload size (workflow generate)', () => {
     expect(total).toBeLessThanOrEqual(MAX_WORKFLOW_FULL_PAYLOAD_CHARS)
   })
 
+  it('round-1 default equals the every-category surface', () => {
+    // The round-1 default IS the deliberate design: nothing hidden. If these
+    // two surfaces ever diverge, either a category lost its default visibility
+    // or an explicit declaration stopped being exact.
+    const round1 = [...workflowNames({ mode: 'workflow' })].sort()
+    const declaredAll = [
+      ...advertiseTools({
+        mode: 'workflow',
+        activeOperatorCategories: new Set(ADVERTISABLE_OPERATOR_CATEGORIES),
+      }).map((tool) => tool.function.name),
+    ].sort()
+    expect(round1).toEqual(declaredAll)
+  })
+
   /**
-   * The regression this whole change exists to prevent. The mode used to
-   * advertise all 54 operator schemas on every round; if its round-1 tool
-   * surface creeps back toward full auto's, an operator tier has quietly
-   * returned to the every-round advertisement.
+   * The cost of the default is accepted, but it must stay BOUNDED and known:
+   * workflow round 1 carries every operator schema, so it runs ~2.8× full
+   * auto's tool surface and ~2.9× its total payload. The ceilings below pin
+   * that tradeoff (measured 2.79 / 2.95); a change that pushes past them needs
+   * a deliberate budget decision, same as the absolute budgets above.
    */
-  it('advertises a round-1 tool surface well under full auto’s', () => {
+  it('round-1 tool surface stays within the accepted multiple of full auto', () => {
     const fullTools = JSON.stringify(advertiseTools({ mode: 'full' })).length
     const workflowTools = JSON.stringify(workflowRound1()).length
     const ratio = workflowTools / fullTools
@@ -205,7 +231,7 @@ describe('first-turn agent payload size (workflow generate)', () => {
     expect(ratio).toBeLessThanOrEqual(MAX_WORKFLOW_TOOLS_RATIO)
   })
 
-  it('costs no more per round than full auto', () => {
+  it('round-1 total payload stays within the accepted multiple of full auto', () => {
     const full =
       buildSystemPrompt({ mode: 'full' }).length +
       JSON.stringify(advertiseTools({ mode: 'full' })).length

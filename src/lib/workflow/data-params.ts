@@ -55,17 +55,20 @@ export interface DataParamSpec {
    */
   skipWhen?: (data: Record<string, unknown>) => boolean
   /**
-   * Exempt from the bulk-content gate (`unproducedBulkData`).
+   * The parameter is an INSTRUCTION — text addressed TO the workflow or to an
+   * AI step (the `ai-agent` prompt), never data obtained BY it. Instruction
+   * text stays a LITERAL end to end:
    *
-   * The gate exists because a LONG literal is almost always content the model
-   * read off the page itself instead of recording a step that reads it — a
-   * frozen snapshot masquerading as a workflow. An INSTRUCTION is the one
-   * legitimate long literal: it is the user's own words about what to do, not
-   * something the page produced, so declaring it as a workflow input is exactly
-   * right. Only set this where the value is addressed TO the workflow rather
-   * than obtained BY it.
+   *   - the record-time rewriter (`rewriteDataParams`) never parameterises it,
+   *   - the run gate's dead-literal warning (validation) never flags it,
+   *   - the bulk-content gate (`unproducedBulkData`) never refuses it — a long
+   *     instruction is the user's own words, not page content the model failed
+   *     to record a reader for.
+   *
+   * References the author writes INSIDE it (`{{...}}`) still interpolate and
+   * are still integrity-checked; only the automatic rewrite is suppressed.
    */
-  allowBulk?: boolean
+  instruction?: boolean
 }
 
 /**
@@ -143,11 +146,11 @@ const DATA_PARAMS: Readonly<Record<string, readonly DataParamSpec[]>> = {
   'execute-workflow': [{ key: 'globalData', deep: true }],
 
   // --- AI ------------------------------------------------------------------
-  // The prompt is business data: a frozen instruction is as dead as a frozen
-  // search keyword. It is also the one param exempt from the bulk gate — see
-  // `allowBulk` — because a long prompt is the user's instruction, not page
-  // content the model failed to record a reader for.
-  'ai-agent': [{ key: 'prompt', allowBulk: true }],
+  // The prompt is INSTRUCTION text addressed to the AI step, not business
+  // data: a generated workflow keeps it as a readable literal instead of a
+  // `{{reference}}` plus a default-value declaration (see `instruction`).
+  // References the author writes inside it still interpolate normally.
+  'ai-agent': [{ key: 'prompt', instruction: true }],
 
   // --- trigger -------------------------------------------------------------
   // Nothing is data here. `url` is a MATCH PATTERN (structure), and
@@ -183,11 +186,11 @@ export interface DataValueSite {
   value: string
   /**
    * Copied from the spec that produced this site — see
-   * {@link DataParamSpec.allowBulk}. Callers that gate on the SIZE of a
-   * literal must honour it, or a long `ai-agent` prompt gets mistaken for
-   * un-recorded page content.
+   * {@link DataParamSpec.instruction}. The rewriter skips such sites outright,
+   * and the gates (bulk content, dead-literal warning) must honour it too, or
+   * a long `ai-agent` prompt gets mistaken for un-recorded page content.
    */
-  allowBulk?: boolean
+  instruction?: boolean
 }
 
 /** Walk every string leaf under `value`, prefixing each with `path`. */
@@ -195,19 +198,19 @@ function collectLeaves(
   value: unknown,
   path: (string | number)[],
   out: DataValueSite[],
-  allowBulk: boolean,
+  instruction: boolean,
 ): void {
   if (typeof value === 'string') {
-    if (value.trim() !== '') out.push({ path, value, ...(allowBulk ? { allowBulk } : {}) })
+    if (value.trim() !== '') out.push({ path, value, ...(instruction ? { instruction } : {}) })
     return
   }
   if (Array.isArray(value)) {
-    value.forEach((item, i) => collectLeaves(item, [...path, i], out, allowBulk))
+    value.forEach((item, i) => collectLeaves(item, [...path, i], out, instruction))
     return
   }
   if (value !== null && typeof value === 'object') {
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      collectLeaves(item, [...path, key], out, allowBulk)
+      collectLeaves(item, [...path, key], out, instruction)
     }
   }
 }
@@ -237,7 +240,7 @@ export function dataValueSites(blockId: string, data: Record<string, unknown>): 
           out.push({
             path: [spec.key, i, spec.itemKey as string],
             value: leaf,
-            ...(spec.allowBulk ? { allowBulk: true } : {}),
+            ...(spec.instruction ? { instruction: true } : {}),
           })
         }
       })
@@ -246,7 +249,7 @@ export function dataValueSites(blockId: string, data: Record<string, unknown>): 
 
     if (spec.deep) {
       // A subtree: every string leaf inside it is data.
-      collectLeaves(value, [spec.key], out, spec.allowBulk === true)
+      collectLeaves(value, [spec.key], out, spec.instruction === true)
       continue
     }
 
@@ -254,7 +257,7 @@ export function dataValueSites(blockId: string, data: Record<string, unknown>): 
     // NOT recursing here — an unexpected object in a scalar slot should not
     // silently turn its inner strings into rewritable data.
     if (typeof value === 'string' && value.trim() !== '') {
-      out.push({ path: [spec.key], value, ...(spec.allowBulk ? { allowBulk: true } : {}) })
+      out.push({ path: [spec.key], value, ...(spec.instruction ? { instruction: true } : {}) })
     }
   }
   return out

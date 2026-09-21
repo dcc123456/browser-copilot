@@ -1247,6 +1247,10 @@ async function handleCommand(
         // working in — the same scope the other panel-driven paths resolve.
         createCollapseProbe(await currentPluginScope()),
         new AbortController().signal,
+        // Match the run by the ids the card rendered, not by list position:
+        // the background re-detects on the current draft, and positions can
+        // drift if anything touched the draft since the card was built.
+        command.runIds,
       )
       const out = await composeWorkflowFromDraft(command.conversationId, { save: false })
       if ('error' in out) {

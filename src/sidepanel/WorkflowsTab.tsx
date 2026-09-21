@@ -22,6 +22,7 @@ import type { PendingTakeoverInfo } from '../lib/workflow/takeover-pending'
 import type { RunStep } from '../background/running-tasks'
 import { newId } from '../lib/storage'
 import { onStoreChanged } from '../lib/store-events'
+import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
 import { useT } from './i18n'
 import { confirmDialog } from '../ui/confirm'
 
@@ -286,6 +287,17 @@ export default function WorkflowsTab() {
 
   useEffect(() => {
     void load()
+  }, [load])
+
+  // Same contract as the other tabs: the storage folder can reconnect itself
+  // mid-session (lib/fs-reconnect) after an extension update. The 5s poll
+  // below already converges eventually — this makes the reconnect instant.
+  useEffect(() => {
+    const handler = (): void => {
+      void load()
+    }
+    window.addEventListener(STORAGE_RECONNECTED_EVENT, handler)
+    return () => window.removeEventListener(STORAGE_RECONNECTED_EVENT, handler)
   }, [load])
 
   // Auto-refresh when workflows are added/edited/deleted elsewhere (saved from

@@ -133,14 +133,20 @@ export function selectorFromArgs(args: Record<string, unknown> | undefined): str
  * spec strategy — role/text included — so replay hits the same element even
  * when no CSS selector can express it, and the edit panel has something
  * concrete to show.
+ *
+ * The spec's `value` must be NON-EMPTY. This is the gate that keeps a
+ * `{primary: {how: 'role', value: ''}}` out of the graph: the kernel's role
+ * matcher treats an empty role AND empty value as "any element", so such a
+ * spec matched EVERYTHING on the page, the action "succeeded" against the
+ * first match, and the recorded node replayed against an arbitrary element.
  */
 export function richTargetFromAny(value: unknown): unknown {
   if (!value || typeof value !== 'object') return undefined
   const primary = (value as { primary?: unknown }).primary
   if (!primary || typeof primary !== 'object') return undefined
   const spec = primary as { how?: unknown; value?: unknown }
-  if (typeof spec.how !== 'string' || !spec.how) return undefined
-  if (typeof spec.value !== 'string') return undefined
+  if (typeof spec.how !== 'string' || !spec.how.trim()) return undefined
+  if (typeof spec.value !== 'string' || !spec.value.trim()) return undefined
   return value
 }
 

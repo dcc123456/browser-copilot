@@ -22,6 +22,7 @@ import {
 import { downloadBlob } from '../lib/export-answer'
 import { getBuiltinI18nKeys } from '../lib/builtin-agents'
 import { useT } from './i18n'
+import { confirmDialog } from '../ui/confirm'
 import AgentEditDialog, { type AgentFormValues } from './AgentEditDialog'
 
 interface Props {
@@ -175,6 +176,15 @@ export default function AgentsTab({ agents, skills, onChanged }: Props) {
   }
 
   const remove = async (agent: Agent): Promise<void> => {
+    // Same two-step guard as the Skills/Workflows tabs: deletion is final.
+    const ok = await confirmDialog({
+      title: t.dialogDeleteTitle,
+      message: t.agentsDeleteConfirm({ name: agent.name }),
+      confirmText: t.delete,
+      cancelText: t.cancel,
+      danger: true,
+    })
+    if (!ok) return
     try {
       await sendCommand({ type: 'agents.delete', id: agent.id })
       setBanner({ kind: 'ok', text: t.agentDeleted({ name: agent.name }) })

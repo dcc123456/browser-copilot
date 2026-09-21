@@ -18,6 +18,10 @@ import type { RecordedLocator, SnapshotTargetEntry } from '../lib/workflow/targe
 import { verifyRecordedSelector } from './selector-probe'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
 import {
+  formatRequirementRefusal,
+  missingRequirements,
+} from '../lib/workflow/block-requirements'
+import {
   isOperatorTool,
   blockIdFromOperatorName,
   JAVASCRIPT_BLOCK_ID,
@@ -40,10 +44,13 @@ import {
 import type { WorkflowDraft } from '../lib/workflow/draft-types'
 import type { ScopeWindow } from './automation-scope'
 import {
+  aiPrefillPlanOf,
   appendOperatorNode,
   declareWorkflowInputs,
   declaredInputs,
+  generatedFlagOf,
   hydrateDraft,
+  insertAiPrefillNode,
   outputSuffixOf,
   persistDraft,
   stripDraftOnlyKeys,
@@ -300,27 +307,55 @@ function rewriteForRecording(
   const secretPaths = credentialPath ? new Set([JSON.stringify(credentialPath)]) : undefined
 
   const data = withLocator(raw, locator)
+
   const explicitBranch = outputSuffixOf(args['next'])
   // Read BEFORE `stripDraftOnlyKeys` removed it: the model's name for an input
   // it knows the purpose of ("keyword") beats a name derived from the block.
   const inputHint = typeof args['inputName'] === 'string' ? args['inputName'].trim() : ''
+  // Read BEFORE the strip, same as `inputName`: the model's self-report on
+  // whether it composed this fill's text itself. Drives the AI-prefill
+  // insertion below (see `lib/workflow/ai-prefill`).
+  const generated = generatedFlagOf(args)
 
   // Credentials resolved earlier in this session are merged in for execution
   // only — see `secretBags`.
   const bag = secretBagOf(conversationId)
   const variables: Record<string, unknown> = { ...draft.variables, ...bag.values }
 
+  // A fill whose text the model COMPOSED itself must be produced by an
+  // ai-agent node at replay, not frozen as a literal or an input default —
+  // the same rule the history compiler applies to `fill` steps. The decision
+  // runs before the bulk gate so a decided prefill skips it: the bulk gate
+  // exists to stop page-read content, and `generated:true` is the model
+  // asserting the opposite provenance for the one param (`forms.value`) this
+  // decision covers.
+  const plan = aiPrefillPlanOf(draft, blockId, data, generated, buildVariableIndex(draft.variables ?? {}, bag.keys))
+
   // A data literal this big, with nothing in the graph producing it, is content
   // the model read with its own tools and pasted in. Refused BEFORE the page is
   // touched: recording it would declare a workflow input whose default is the
   // generation-time snapshot, so the saved workflow would never fetch anything.
-  // See `unproducedBulkData`.
-  const unproduced = unproducedBulkData(
-    blockId,
-    data,
-    buildVariableIndex(draft.variables ?? {}, bag.keys),
-  )
+  // See `unproducedBulkData`. This runs BEFORE the required-parameter gate so a
+  // pasted scrape in `save-local.value` gets the richer "record a producer"
+  // refusal instead of the blunter "value must be a reference" one — both are
+  // correct, the first is actionable.
+  const unproduced =
+    plan.kind === 'none'
+      ? unproducedBulkData(blockId, data, buildVariableIndex(draft.variables ?? {}, bag.keys))
+      : null
   if (unproduced) return { ok: false, error: unproducedDataRefusal(blockId, unproduced) }
+
+  // Required-parameter gate (see `lib/workflow/block-requirements`): a call a
+  // block cannot work with is refused BEFORE anything runs — the empty-locator
+  // `element-exists` that reported "元素不存在" and got recorded, the key-less
+  // `press-key`, the url-less `webhook` all die here now. Runs on the
+  // locator-merged `data` so a resolved `ref` counts as a locator.
+  // `mustReference` params (save-local.value) are skipped: the literal may yet
+  // be rewritten into a `{{reference}}`; the final gate below re-checks.
+  const requirementProblems = missingRequirements(blockId, data, { skipMustReference: true })
+  if (requirementProblems.length > 0) {
+    return { ok: false, error: formatRequirementRefusal(blockName(blockId), requirementProblems) }
+  }
 
   const outcome = await executeOperatorNode(blockId, data, {
     signal,
@@ -369,6 +404,17 @@ function rewriteForRecording(
   const index = buildSecretIndex(bag.values, bag.keys)
   const { data: redactedData, redacted } = redactRecordedParams(data, index)
 
+  // AI prefill: swap the composed literal for the producer's variable BEFORE
+  // the rewrite, so the rewriter sees a reference (nothing to declare) instead
+  // of declaring an input whose default freezes this conversation's copy. The
+  // producer node itself is appended only after the final gate passes — a
+  // refused call must not strand an orphaned ai-agent node in the draft. The
+  // page was really filled with the composed text above; the draft records the
+  // REPLAY plan, which regenerates the copy per run (the same semantics the
+  // history compiler applies).
+  const recordingData =
+    plan.kind === 'none' ? redactedData : { ...redactedData, value: `{{${plan.variableName}}}` }
+
   // Business data must not be frozen at record time. Redaction runs FIRST so a
   // credential literal is already a `{{secret}}` reference by now and the
   // general rewriter cannot claim it (which would record a plain variable
@@ -376,7 +422,7 @@ function rewriteForRecording(
   const dynamic = rewriteForRecording(
     draft,
     blockId,
-    redactedData,
+    recordingData,
     bag.keys,
     inputHint,
     secretPaths,
@@ -390,6 +436,19 @@ function rewriteForRecording(
     justification && !hasDescription(dynamic.data)
       ? { ...dynamic.data, description: justification }
       : dynamic.data
+
+  // Final required-parameter gate, on the POST-REWRITE data: a `mustReference`
+  // literal the rewriter turned into a `{{reference}}` now passes, while one
+  // the rewriter could not satisfy (nothing produces it) is refused here —
+  // still before the node joins the graph. The pre-execution pass above
+  // already refused everything rewrite-independent.
+  const finalProblems = missingRequirements(blockId, recorded)
+  if (finalProblems.length > 0) {
+    return { ok: false, error: formatRequirementRefusal(blockName(blockId), finalProblems) }
+  }
+
+  // The producer joins the chain first, so the forms node below wires from it.
+  insertAiPrefillNode(draft, plan)
 
   // The node joins the chain through whatever port the PREVIOUS block left
   // pending (or the tail's first output). `appendOperatorNode` consumes that.
@@ -431,8 +490,20 @@ function rewriteForRecording(
       ? { dynamicData: { rewrites: dynamic.rewrites, declared: dynamic.declared } }
       : {}),
     ...(justification ? { scriptJustification: justification } : {}),
-    audit: operatorAuditCall(blockId, recorded),
+    // History records what the page actually received: for a prefill fill that
+    // is the composed literal, not the `{{aiFillN}}` the recorded node carries
+    // — so a later history compile still recognizes the step as composed copy
+    // and inserts its own prefill producer.
+    audit: operatorAuditCall(
+      blockId,
+      plan.kind === 'none' ? recorded : { ...recorded, value: plan.fillValue },
+    ),
   }
+}
+
+/** Display name of a block, for gate refusals. */
+function blockName(blockId: string): string {
+  return BLOCK_BY_ID.get(blockId)?.name ?? blockId
 }
 
 /** Does this node already carry a human-written description? */

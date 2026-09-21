@@ -41,11 +41,22 @@ export const OPERATOR_GUIDE = `# 工作流算子指南（Browser Copilot）
 - 可有可无的步骤用 element-exists 分支跳过；写 always-fail 的节点靠 AI 调试兜底
   是下策。
 
+## 必填参数（缺参调用被直接拒绝，节点不记录；各工具 schema 已标 required）
+
+元素算子必须带定位：ref / 非空 selector / target（primary 的 how+value 非空），三者有其一——
+element-exists 没有 locator 不是"返回不存在"，而是整个调用被拒绝。
+其余必填以工具 schema 的 required 为准（press-key 的 keys、new-tab/webhook 的 url、
+forms 的 value、save-local 的 {{引用}} value 加 filename、export-data 的 name 等）；
+get-text/read-page 开 saveData 时 dataColumn 必填。trigger-event 用 event（非 eventName）。
+
 ## 数据必须是动态的（禁止死数据）
 
 工作流是给"以后每一次运行"用的，不是这一轮的录像。凡是**业务数据**——填进输入框的内容、
-要打开的网址、请求体、通知文案、比较的值、AI 的提示词——都不能记录成字面量，
+要打开的网址、请求体、通知文案、比较的值——都不能记录成字面量，
 必须记成 \`{{引用}}\`。字面量会把生成那一刻的值冻进节点，重放时永远只重复那一次，工作流就没有意义。
+
+唯一的例外：\`ai-agent\` 的 **prompt 是指令文本**，写给 AI 而不是从页面取得的数据——
+它保留字面量原样记录，不要改写成 \`{{引用}}\`；你在 prompt 里自己写的 \`{{引用}}\` 照常生效。
 
 两类来源，按顺序取：
 
@@ -110,7 +121,7 @@ export const OPERATOR_GUIDE = `# 工作流算子指南（Browser Copilot）
 
 ## 聊天里给出的账号密码（直接存进触发器变量集）
 
-用户在对话里直接给出的账号 / 密码（如"用 alice / s3cr3t 登录 example.com"）照常填进表单即可——value 写字面量。生成引擎会把它作为密文触发输入存进触发器变量集，节点自动改成引用，重放时自动填入；无需改用 get-secret，也不会写成死数据。建议用 inputName:'account' / 'password' 起清晰名字，后续直接复用。
+用户在对话里直接给出的账号 / 密码照常填进表单即可——value 写字面量。生成引擎会把它作为密文触发输入存进触发器变量集，节点自动改成引用，重放时自动填入；无需改用 get-secret，也不会写成死数据。建议用 inputName:'account' / 'password' 起清晰名字，后续直接复用。
 
 ## 工具分发：算子按分类发送
 
@@ -163,10 +174,10 @@ export const OPERATOR_GUIDE = `# 工作流算子指南（Browser Copilot）
 
 1. 导航后等待：new-tab 之后、或导致页面跳转的 event-click / press-key 之后接
    wait-connections（timeout 10000），防止重放跑在页面加载前面。
-2. AI 内容预填：需要 AI 撰写内容填表时 → ai-agent（prompt 说明要生成什么，
-   variableName 如 aiFill1，actOnPage:false）→ 后一个 forms 的 value 写 \`{{aiFill1}}\`。
-   字面量内容不要写进 forms.value——它要么引用上游变量，要么声明成工作流输入
-   （见"数据必须是动态的"）。
+2. AI 内容预填：你自己撰写的文案（帖子/评论/回复/正文）必须由 ai-agent 节点在重放时
+   生成——ai-agent（prompt 写明要求，variableName 如 aiFill1，actOnPage:false）→ forms 的
+   value 写 \`{{aiFill1}}\`。自撰文案不得当字面量传入 forms.value（记录时会自动补插该节点）；
+   仅用户逐字口述的值才声明成工作流输入（见"数据必须是动态的"）。
 3. 验证码识别：图片 URL 已知 → set-variable(lastOcrImage) → ocr(source:'variable',
    imageVariable:'lastOcrImage')；按元素截图 → ocr(source:'element', selector)；整页
    OCR 后还要提取关键信息 → 再接一个 ai-agent（purpose:'ocr-extract'）从

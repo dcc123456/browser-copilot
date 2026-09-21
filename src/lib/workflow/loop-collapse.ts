@@ -102,14 +102,42 @@ function nodeShape(node: WorkflowNode): string {
 }
 
 /**
- * The linear chain of action nodes, head first.
- *
- * The draft stores nodes in append order with the trigger as the head, so the
- * chain is simply that order with the trigger removed. Returns null when the
- * graph is not a simple chain (a branch means the run is not one straight
- * sequence and folding it would need real reachability analysis).
+ * Blocks that introduce a loop cycle in an already-folded graph. A fold rewrites
+ * a run into one of these, and the result is NOT a simple chain any more: the
+ * loop node has a body edge (`output-1`) plus an after-loop edge (`output-2`),
+ * and the body's tail points back at the loop. `chainOf` walks that shape
+ * linearly instead of bailing on it — otherwise ONE fold would make every
+ * remaining suggestion disappear from the review card.
  */
-function chainOf(graph: CollapsibleGraph): WorkflowNode[] | null {
+const LOOP_BLOCKS: ReadonlySet<string> = new Set([REPEAT_TASK, LOOP_ELEMENTS])
+
+/** What `chainOf` reports: the linear chain plus the nodes inside loop bodies. */
+interface ChainWalk {
+  chain: WorkflowNode[]
+  /**
+   * Nodes living INSIDE a loop body (any depth). They are on the chain for
+   * coverage, but must never join a NEW run — folding inside a body would nest
+   * loops the engine then re-enters for no reason.
+   */
+  loopBodyClaimed: Set<string>
+}
+
+/**
+ * The linear chain of action nodes, head first — loop-aware.
+ *
+ * The draft stores nodes in append order with the trigger as the head, so an
+ * unfolded graph's chain is simply that order with the trigger removed. A
+ * FOLDED graph is walked the same way by treating each loop block as one
+ * transparent step: enter through its body edge, and when the body's tail
+ * closes the cycle back at the loop, resume through the after-loop edge that
+ * was parked when the loop was entered (a stack, so nested loops unwind
+ * innermost-first).
+ *
+ * Returns null when the graph is not a straight sequence even under that
+ * reading — a real branch or merge means folding it would need genuine
+ * reachability analysis.
+ */
+function chainOf(graph: CollapsibleGraph): ChainWalk | null {
   const nodes = graph.drawflow.nodes
   const byId = new Map(nodes.map((node) => [node.id, node]))
   const outgoing = new Map<string, WorkflowEdge[]>()
@@ -127,20 +155,48 @@ function chainOf(graph: CollapsibleGraph): WorkflowNode[] | null {
 
   const chain: WorkflowNode[] = []
   const seen = new Set<string>()
+  const loopBodyClaimed = new Set<string>()
+  /** After-loop targets of loops whose body is being walked (innermost last). */
+  const pendingEnds: string[] = []
+  /** Body-nesting depth: > 0 while walking inside some loop's body. */
+  let bodyDepth = 0
   let cursor: string | undefined = start
   while (cursor) {
-    if (seen.has(cursor)) return null
+    if (seen.has(cursor)) {
+      // The only legal revisit is a loop body's tail closing its cycle. Resume
+      // after the loop; anything else is a genuine cycle — bail out.
+      const revisited = byId.get(cursor)
+      if (!revisited || !LOOP_BLOCKS.has(blockIdOf(revisited)) || pendingEnds.length === 0) {
+        return null
+      }
+      bodyDepth -= 1
+      cursor = pendingEnds.pop()
+      continue
+    }
     seen.add(cursor)
     const node = byId.get(cursor)
     if (!node) return null
     chain.push(node)
+    if (bodyDepth > 0) loopBodyClaimed.add(cursor)
     const next: WorkflowEdge[] = outgoing.get(cursor) ?? []
+    if (LOOP_BLOCKS.has(blockIdOf(node)) && next.length > 1) {
+      // A loop block: exactly a body edge and an after-loop edge. Walk the
+      // body now; the after-loop continuation resumes on cycle close.
+      const blockId = blockIdOf(node)
+      const bodyEdge = next.find((edge) => edge.sourceHandle === `${blockId}-${LOOP_PORT}`)
+      const endEdge = next.find((edge) => edge.sourceHandle === `${blockId}-${END_PORT}`)
+      if (!bodyEdge || !endEdge) return null
+      pendingEnds.push(endEdge.target)
+      bodyDepth += 1
+      cursor = bodyEdge.target
+      continue
+    }
     // A fork (or a merge) is not a straight line: bail out rather than guess.
     if (next.length > 1) return null
     cursor = next[0]?.target
   }
   // Every node must be on the chain; an orphan means the graph is not linear.
-  return chain.length === nodes.length - (head ? 1 : 0) ? chain : null
+  return chain.length === nodes.length - (head ? 1 : 0) ? { chain, loopBodyClaimed } : null
 }
 
 /**
@@ -233,19 +289,21 @@ export interface CollapsibleGraph {
  * selector.
  */
 export function detectRepeatRuns(graph: CollapsibleGraph): RepeatSuggestion[] {
-  const chain = chainOf(graph)
-  if (!chain) return []
+  const walk = chainOf(graph)
+  if (!walk) return []
+  const { chain, loopBodyClaimed } = walk
+  // Nodes inside an existing loop body are off-limits for new runs (a fold
+  // there would nest loops), so they are claimed UP FRONT — both detectors
+  // respect the set.
+  const claims = new Set<string>(loopBodyClaimed)
   // Compound runs are decided FIRST: a same-block run inside a compound period
   // (e.g. the two detail reads of "open item → read → back") is a narrower,
   // less faithful fold, and letting it claim the nodes would starve the
   // compound scan. A compound suggestion never fires unless its whole body is
   // stable, so preferring it never loses a more precise rewrite.
-  const compoundClaims = new Set<string>()
-  const compound = detectCompoundRuns(chain, compoundClaims)
-  const claimedByCompound = new Set<string>()
-  for (const run of compound) for (const id of run.runIds) claimedByCompound.add(id)
+  const compound = detectCompoundRuns(chain, claims)
   const blockRuns = detectBlockRuns(chain).filter(
-    (run) => !run.runIds.some((id) => claimedByCompound.has(id)),
+    (run) => !run.runIds.some((id) => claims.has(id)),
   )
   return [...blockRuns, ...compound]
 }

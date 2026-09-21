@@ -22,6 +22,7 @@
 import type { WireTool } from '../llm'
 import { PALETTE_BLOCKS } from './blocks/palette'
 import type { BlockCatalogEntry, BlockCategory } from './blocks/types'
+import { schemaRequiredArgs } from './block-requirements'
 import {
   ADVERTISABLE_OPERATOR_CATEGORIES,
   CORE_OPERATOR_BLOCK_IDS,
@@ -447,6 +448,11 @@ const SCHEMA_OVERRIDES: Readonly<Record<string, Record<string, unknown>>> = {
       description:
         'READ mode: capture the control’s value into `variableName` instead of writing (checkbox → boolean, multi-select → array). Read a field with this — never a script.',
     },
+    generated: {
+      type: 'boolean',
+      description:
+        'True when you composed the value yourself (post/reply/summary); false for user-dictated or page-read data. Composed copy is recorded behind an ai-agent node.',
+    },
   },
   'get-text': {
     multiple: {
@@ -557,34 +563,167 @@ const SCHEMA_OVERRIDES: Readonly<Record<string, Record<string, unknown>>> = {
       },
     },
   },
+  // --- executor-facing keys the catalog drifted away from -------------------
+  // Each entry teaches the key the executor ACTUALLY reads; the drifted catalog
+  // key is removed by SCHEMA_OMIT below. (`trigger-event` advertised
+  // `eventName` while the executor read `event`, so every generated node
+  // dispatched nothing at replay — the recorded schema must match the kernel.)
+  // Descriptions stay one-liners: these ride on every advertised payload.
+  'trigger-event': {
+    event: { type: 'string', description: 'Event to dispatch (click, input, …). Required.' },
+    detail: { type: 'string', description: 'Optional event detail; {{reference}} ok.' },
+  },
+  'attribute-value': {
+    op: { type: 'string', enum: ['get', 'set'], description: 'get (default) | set.' },
+    attribute: { type: 'string', description: 'Attribute to read/set. Required.' },
+    value: { type: 'string', description: 'Value to write when op:"set"; {{reference}} ok.' },
+  },
+  clipboard: {
+    op: { type: 'string', enum: ['get', 'set'], description: 'get (default) | set.' },
+    text: { type: 'string', description: 'Text to copy when op:"set"; {{reference}} ok.' },
+  },
+  cookie: {
+    op: {
+      type: 'string',
+      enum: ['get', 'getAll', 'set', 'remove'],
+      description: 'Which cookie operation (the executor reads `op`).',
+    },
+    name: { type: 'string', description: 'Cookie name (get/set/remove).' },
+    url: { type: 'string', description: 'Cookie URL (set/remove require it).' },
+    value: { type: 'string', description: 'Cookie value when op:"set".' },
+  },
+  'upload-file': {
+    fileData: { type: 'string', description: 'File as a data: URL. Required.' },
+  },
+  link: {
+    newTab: { type: 'boolean', description: 'Open in a new tab (default true).' },
+  },
+  'switch-to': {
+    frameSelector: { type: 'string', description: 'CSS selector of the iframe; empty = main window.' },
+  },
+  'take-screenshot': {
+    type: {
+      type: 'string',
+      enum: ['page', 'fullpage', 'element'],
+      description: 'page (default) | fullpage | element (needs a locator).',
+    },
+  },
+  webhook: {
+    headers: { type: 'string', description: 'Headers as a JSON object string.' },
+  },
+  'delete-data': {
+    clearAll: { type: 'boolean', description: 'Clear the whole data table.' },
+    key: { type: 'number', description: 'Row index (0-based) to delete.' },
+  },
+  'data-mapping': {
+    mapping: {
+      type: 'string',
+      description: 'Per-row JS expression over `item`/`index`. Required.',
+    },
+    variableName: { type: 'string', description: 'Output variable (default mappedData).' },
+  },
+  'sort-data': {
+    field: { type: 'string', description: 'Column to sort by. Required.' },
+    direction: { type: 'string', enum: ['asc', 'desc'], description: 'asc (default) | desc.' },
+  },
+  'log-data': {
+    text: { type: 'string', description: 'The log line; {{reference}} ok.' },
+  },
+  'tab-url': {
+    scope: {
+      type: 'string',
+      enum: ['active-tab', 'all'],
+      description: 'active-tab (default) | all.',
+    },
+  },
+  'while-loop': {
+    code: {
+      type: 'string',
+      description: 'JS condition evaluated in the page; the loop runs while true. Required.',
+    },
+  },
 }
 
 /**
- * Arguments a tool will not accept a call without. Only the escape hatch has
- * any: the model must state why no declarative operator can do the step, which
- * is both the enforcement point and the note the user reads on the canvas.
+ * Catalog-declared keys REMOVED from the tool schema: the executor does not
+ * read them, and a knob the model can set that silently does nothing is how a
+ * workflow comes to promise behaviour it does not have (the same reason
+ * `UI_ONLY_KEYS` exists — but these are per-block and ARE read by the edit
+ * form, so they cannot go into the global set). The executor-facing key that
+ * replaced each of them is declared in {@link SCHEMA_OVERRIDES}.
+ *
+ * Kept in lockstep with `KNOWN_INERT` in `tests/operator-param-coverage.spec.ts`:
+ * a key listed here must be removed from that list (it is no longer advertised).
  */
-const REQUIRED_ARGS: Readonly<Record<string, readonly string[]>> = {
-  [JAVASCRIPT_BLOCK_ID]: [SCRIPT_JUSTIFICATION_ARG],
+const SCHEMA_OMIT: Readonly<Record<string, readonly string[]>> = {
+  'new-tab': ['userAgent', 'active', 'tabZoom', 'inGroup', 'updatePrevTab', 'customUserAgent'],
+  'new-window': ['top', 'left', 'width', 'height', 'type', 'incognito', 'windowState'],
+  'close-tab': ['url', 'activeTab', 'closeType', 'allWindows'],
+  'take-screenshot': ['fullPage', 'captureActiveTab'],
+  link: ['findBy', 'disableMultiple', 'openInNewTab'],
+  'attribute-value': ['action', 'attributeName', 'attributeValue'],
+  'trigger-event': ['eventName', 'eventType', 'eventParams'],
+  clipboard: ['type', 'dataToCopy', 'copySelectedText'],
+  cookie: [
+    'type',
+    'jsonCode',
+    'useJson',
+    'getAll',
+    'domain',
+    'path',
+    'sameSite',
+    'httpOnly',
+    'secure',
+    'session',
+    'expirationDate',
+  ],
+  'upload-file': ['findBy', 'waitForSelector', 'waitSelectorTimeout', 'filePaths'],
+  'handle-dialog': ['accept', 'promptText'],
+  'switch-to': ['findBy', 'selector', 'windowType'],
+  'delete-data': ['deleteList'],
+  'data-mapping': ['dataSource', 'sources', 'varSourceName'],
+  'sort-data': ['sortByProperty', 'itemProperties', 'dataSource', 'varSourceName', 'variableName'],
+  'log-data': ['workflowId', 'variableName'],
+  'tab-url': ['type', 'qTitle', 'qMatchPatterns'],
+}
+
+/**
+ * Arguments a tool will not accept a call without. Derived per block from
+ * `block-requirements.schemaRequiredArgs` — the same table the record gate
+ * enforces — so what the schema marks required and what the gate refuses can
+ * never drift. The escape hatch keeps its justification, which is a draft-only
+ * affordance stripped before recording and therefore not in the block table.
+ */
+function requiredArgsOf(entry: BlockCatalogEntry): string[] {
+  const required = schemaRequiredArgs(entry.id)
+  if (entry.id === JAVASCRIPT_BLOCK_ID) required.push(SCRIPT_JUSTIFICATION_ARG)
+  return required
 }
 
 /**
  * The element-locator params added to every block that reads an element from
  * the page. `ref` is preferred: it comes from `snapshot_page` and already
  * carries a scored, multi-strategy locator, which the bridge resolves into the
- * node's `selector` + `target`.
+ * node's `selector` + `target`. The record gate refuses any call without one
+ * of the three (see `block-requirements`) — described in as few bytes as the
+ * contract allows, because these three ride on EVERY element block and the
+ * whole tool payload has a pinned budget (tests/agent-payload-size.spec.ts).
  */ const ELEMENT_TARGET_PROPERTIES: Readonly<Record<string, unknown>> = {
   ref: {
     type: 'string',
-    description: 'Element ref from snapshot_page (e.g. "e12"); preferred.',
+    description: 'Element ref from snapshot_page ("e12"). One of ref/target/selector is required.',
   },
   target: {
     type: 'object',
-    description: 'Rich locator {primary, fallbacks}; only when no ref is available.',
+    description:
+      'Rich locator; primary.how and primary.value must both be non-empty (else refused).',
     additionalProperties: true,
   },
   label: { type: 'string', description: 'Human-readable element name, for logs.' },
-  selector: { type: 'string', description: 'Raw CSS selector; last resort.' },
+  selector: {
+    type: 'string',
+    description: 'CSS selector. One of ref/target/selector is required.',
+  },
 }
 
 /** Whether a block reads an element from the page. */
@@ -598,6 +737,10 @@ export function takesElementTarget(entry: BlockCatalogEntry): boolean {
  * defaults recurse one level so `eventParams` / `targetOptions` show up as
  * structured objects, not opaque strings. Blocks that read an element also get
  * the locator params, so the model can target by `ref` instead of guessing CSS.
+ *
+ * Required-parameter enforcement lives in `block-requirements`: unconditional
+ * requirements become this schema's `required`, the conditional ones are
+ * enforced by the record gate.
  */
 export function dataSchemaFromEntry(entry: BlockCatalogEntry): Record<string, unknown> {
   const properties: Record<string, unknown> = {}
@@ -608,13 +751,17 @@ export function dataSchemaFromEntry(entry: BlockCatalogEntry): Record<string, un
     properties[key] = jsonSchemaForValue(value)
   }
   Object.assign(properties, SCHEMA_OVERRIDES[entry.id] ?? {})
+  // Omit AFTER the overrides so a dropped catalog key cannot come back through
+  // an override that shares its name, and BEFORE the locator params so a
+  // locator block always ends up with `ref` / `target` / `selector`.
+  for (const key of SCHEMA_OMIT[entry.id] ?? []) delete properties[key]
   if (takesElementTarget(entry)) Object.assign(properties, ELEMENT_TARGET_PROPERTIES)
-  const required = REQUIRED_ARGS[entry.id]
+  const required = requiredArgsOf(entry)
   return {
     type: 'object',
     additionalProperties: true,
     properties,
-    ...(required ? { required: [...required] } : {}),
+    ...(required.length > 0 ? { required } : {}),
   }
 }
 

@@ -174,7 +174,18 @@ export type Command =
    * run is refused unless the page confirms a selector that matches exactly
    * the recorded elements — `folded: false` with a `reason` then reports that.
    */
-  | { type: 'workflows.draft.fold'; conversationId: string; index: number }
+  | {
+      type: 'workflows.draft.fold'
+      conversationId: string
+      index: number
+      /**
+       * The folded run's node ids, from the suggestion the card rendered.
+       * Preferred over `index`: the background re-detects runs on the CURRENT
+       * draft, and an index computed against a stale list could target the
+       * wrong run. When absent the index is used as before.
+       */
+      runIds?: string[]
+    }
   /** Drops the operator-tool draft after the panel has saved or discarded it. */
   | { type: 'workflows.draft.clear'; conversationId: string }
   /**

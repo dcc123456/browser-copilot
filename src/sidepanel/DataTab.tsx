@@ -6,6 +6,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { sendCommand } from '../lib/messages'
+import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
 import { newId } from '../lib/storage'
 import type { PasswordEntry, UserProfile } from '../lib/types'
 import { entryFields } from '../lib/types'
@@ -86,6 +87,18 @@ export default function DataTab() {
   useEffect(() => {
     void loadProfiles().catch((error) => flash('error', (error as Error).message))
     void loadPasswords().catch((error) => flash('error', (error as Error).message))
+  }, [loadProfiles, loadPasswords])
+
+  // Same contract as the other tabs: the storage folder can reconnect itself
+  // mid-session (lib/fs-reconnect) after an extension update, and these lists
+  // were read before the handle was available — reload on the event.
+  useEffect(() => {
+    const handler = (): void => {
+      void loadProfiles().catch((error) => flash('error', (error as Error).message))
+      void loadPasswords().catch((error) => flash('error', (error as Error).message))
+    }
+    window.addEventListener(STORAGE_RECONNECTED_EVENT, handler)
+    return () => window.removeEventListener(STORAGE_RECONNECTED_EVENT, handler)
   }, [loadProfiles, loadPasswords])
 
   const startProfile = (profile?: UserProfile): void => {

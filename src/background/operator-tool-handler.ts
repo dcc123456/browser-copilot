@@ -27,6 +27,12 @@ import { isTriggerNode, triggerFromNodes } from '../lib/workflow/migrate'
 import { deleteDraft, loadDraft, saveDraft } from '../lib/workflow/draft-storage'
 import { TRIGGER_BLOCK_ID } from '../lib/workflow/draft-types'
 import { saveWorkflow } from '../lib/workflow/storage'
+import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
+import { aiPrefillNodeData } from '../lib/workflow/ai-prefill'
+import {
+  formatRequirementRefusal,
+  missingRequirements,
+} from '../lib/workflow/block-requirements'
 import {
   isOperatorTool,
   blockIdFromOperatorName,
@@ -50,6 +56,7 @@ import {
   unproducedBulkData,
   unproducedDataRefusal,
 } from '../lib/workflow/dynamic-data'
+import { isAiComposedFill } from '../lib/workflow/ai-prefill'
 import type { Workflow, WorkflowNode } from '../lib/workflow/types'
 
 export { TRIGGER_BLOCK_ID }
@@ -309,12 +316,44 @@ export async function runOperatorTool({
 
   const draft = await hydrateDraft(conversationId)
   const raw = stripDraftOnlyKeys(args)
+  // The AI-prefill self-report rides on the RAW args (stripped above): a fill
+  // whose text the model composed itself must be produced by an ai-agent node,
+  // not frozen as a literal or an input default. Same rule as the executing
+  // path — "no path records dead data" holds for composed copy too.
+  const generated = generatedFlagOf(args)
 
   // Same gate as the executing path: "no path records unproduced content" is
-  // cheaper to hold than "one path does not". See `unproducedBulkData`.
+  // cheaper to hold than "one path does not". See `unproducedBulkData`. Runs
+  // BEFORE the required-parameter gate so a pasted scrape gets the richer
+  // "record a producer" refusal first — same reasoning as the executing path.
+  // Skipped when AI prefill has decided: the (existing or inserted) producer
+  // replaces the literal, so the bulk judgment — aimed at page-read content —
+  // does not apply.
   const variableIndex = buildVariableIndex(draft.variables ?? {})
-  const unproduced = unproducedBulkData(blockId, raw, variableIndex)
+  const plan = aiPrefillPlanOf(draft, blockId, raw, generated, variableIndex)
+  const unproduced = plan.kind === 'none' ? unproducedBulkData(blockId, raw, variableIndex) : null
   if (unproduced) return { ok: false, error: unproducedDataRefusal(blockId, unproduced) }
+
+  // Same required-parameter gate as the executing path (see
+  // `lib/workflow/block-requirements`): "no path records a call a block cannot
+  // run" is cheaper to hold than "one path does not". The locator check reads
+  // the raw args here — an inline `target`/`selector` counts; a bare `ref`
+  // without the run's snapshot cache does not (that path is the executing
+  // bridge's to resolve). `mustReference` params (save-local.value) are
+  // skipped: the literal may be rewritten into a `{{reference}}` below, and
+  // the final gate re-checks after the rewrite.
+  const problems = missingRequirements(blockId, raw, { skipMustReference: true })
+  if (problems.length > 0) {
+    return { ok: false, error: formatRequirementRefusal(BLOCK_BY_ID.get(blockId)?.name ?? blockId, problems) }
+  }
+
+  // Swap the composed literal for the producer's variable BEFORE the rewrite,
+  // so the rewriter sees a reference (nothing to declare) rather than dead
+  // data. The node itself is appended only after the final gate passes — a
+  // refused call must not strand an orphaned producer in the draft.
+  if (plan.kind !== 'none') {
+    raw['value'] = `{{${plan.variableName}}}`
+  }
 
   const rewrite = rewriteDataParams({
     blockId,
@@ -322,6 +361,16 @@ export async function runOperatorTool({
     variableIndex,
     declared: declaredInputs(draft),
   })
+  // Final required-parameter gate on the POST-REWRITE data — the literal that
+  // became a `{{reference}}` now passes; an unsatisfiable one is refused.
+  const finalProblems = missingRequirements(blockId, rewrite.data)
+  if (finalProblems.length > 0) {
+    return {
+      ok: false,
+      error: formatRequirementRefusal(BLOCK_BY_ID.get(blockId)?.name ?? blockId, finalProblems),
+    }
+  }
+  insertAiPrefillNode(draft, plan)
   declareWorkflowInputs(draft, rewrite.newInputs)
   const appended = appendOperatorNode(draft, blockId, rewrite.data)
   const branch = outputSuffixOf(args['next'])
@@ -342,24 +391,137 @@ export async function runOperatorTool({
 
 /**
  * Drop the model-only affordances before persistence: `next` / `workflowName` /
- * `inputName` steer the draft rather than the node, and `justification` is the
- * escape hatch's reasoning — it is folded into the node's description by
- * `operator-tool-run` instead of being stored as a block parameter.
+ * `inputName` / `generated` steer the draft rather than the node, and
+ * `justification` is the escape hatch's reasoning — it is folded into the
+ * node's description by `operator-tool-run` instead of being stored as a block
+ * parameter.
  */
 export function stripDraftOnlyKeys(args: Record<string, unknown>): Record<string, unknown> {
   const {
     next: _next,
     workflowName: _wn,
     inputName: _in,
+    generated: _gen,
     justification: _j,
     ...rest
   } = args as Record<string, unknown> & {
     next?: unknown
     workflowName?: unknown
     inputName?: unknown
+    generated?: unknown
     justification?: unknown
   }
   return rest
+}
+
+/**
+ * The model's `generated` self-report for a fill call, read before
+ * {@link stripDraftOnlyKeys} removes it. `true` = the model composed the text
+ * itself; `false` = user-dictated or page-read data; undefined = unmarked.
+ */
+export function generatedFlagOf(args: Record<string, unknown>): boolean | undefined {
+  if (args['generated'] === true) return true
+  if (args['generated'] === false) return false
+  return undefined
+}
+
+/** Block id of the AI node a prefill insertion adds before a `forms` fill. */
+export const AI_PREFILL_BLOCK_ID = 'ai-agent'
+
+/**
+ * An unused `aiFillN` for one prefill producer.
+ *
+ * Names are claimed against BOTH the draft's ai-agent nodes and its session
+ * variables, so a name the model already used (its own `wf_op_ai-agent` call)
+ * is never silently reused into a second producer.
+ */
+export function nextAiFillName(draft: WorkflowDraft): string {
+  const used = new Set<string>(Object.keys(draft.variables ?? {}))
+  for (const node of draft.nodes) {
+    if (blockIdOfNode(node) !== AI_PREFILL_BLOCK_ID) continue
+    const name = node.data?.['variableName']
+    if (typeof name === 'string') used.add(name)
+  }
+  for (let n = 1; n < 1000; n += 1) {
+    const candidate = `aiFill${n}`
+    if (!used.has(candidate)) return candidate
+  }
+  return `aiFill${Date.now()}`
+}
+
+/** Human name of the form field a fill targeted (the inserted AI prompt's subject). */
+function formsFieldLabel(data: Record<string, unknown>): string {
+  const label = data['label']
+  if (typeof label === 'string' && label.trim()) return label.trim()
+  const selector = data['selector']
+  if (typeof selector === 'string' && selector.trim()) return selector.trim()
+  return '表单字段'
+}
+
+/**
+ * What the record paths should do about one composed `forms` fill.
+ *
+ * - `insert`: append an `ai-agent` producer before the fill and reference it.
+ * - `reuse`: the model itself recorded an `ai-agent` as the draft's tail (the
+ *   guide's recipe) but then passed the composed text as a literal — reference
+ *   THAT producer instead of inserting a duplicate. `ai-agent` is record-only
+ *   during generation, so its variable holds nothing yet and the value index
+ *   cannot have made this match.
+ * - `none`: nothing composed about this fill.
+ */
+export type AiPrefillPlan =
+  | { kind: 'none' }
+  | { kind: 'insert'; fillValue: string; fieldLabel: string; variableName: string }
+  | { kind: 'reuse'; fillValue: string; variableName: string }
+
+/** Decide the AI-prefill action for one `forms` write call. */
+export function aiPrefillPlanOf(
+  draft: WorkflowDraft,
+  blockId: string,
+  data: Record<string, unknown>,
+  generated: boolean | undefined,
+  variableIndex: ReadonlyMap<string, string>,
+): AiPrefillPlan {
+  const fillValue = isAiComposedFill({ blockId, data, generated, variableIndex })
+  if (!fillValue) return { kind: 'none' }
+  const tail = draft.tail ? draft.nodes.find((node) => node.id === draft.tail) : undefined
+  if (tail && blockIdOfNode(tail) === AI_PREFILL_BLOCK_ID) {
+    const variableName = tail.data?.['variableName']
+    if (typeof variableName === 'string' && variableName) {
+      return { kind: 'reuse', fillValue, variableName }
+    }
+  }
+  return {
+    kind: 'insert',
+    fillValue,
+    fieldLabel: formsFieldLabel(data),
+    variableName: nextAiFillName(draft),
+  }
+}
+
+/**
+ * Insert the `ai-agent` node that regenerates one composed fill value at
+ * replay, chained from the draft's current tail.
+ *
+ * Called by BOTH record paths after their gates have passed, immediately
+ * before the `forms` node is appended — so the graph reads
+ * ai-agent → forms, and the forms value the caller records is `{{variableName}}`.
+ * The node itself did not run during generation (the model wrote the text in
+ * conversation); that is the same accepted semantics as the history compiler's
+ * prefill insertion, and `referenceValue` keeps the save-card toggle able to
+ * fall back to the conversation's literal.
+ */
+export function insertAiPrefillNode(draft: WorkflowDraft, plan: AiPrefillPlan): void {
+  if (plan.kind !== 'insert') return
+  appendOperatorNode(
+    draft,
+    AI_PREFILL_BLOCK_ID,
+    aiPrefillNodeData({
+      fieldLabel: plan.fieldLabel,
+      referenceValue: plan.fillValue,
+      variableName: plan.variableName,
+    }),
+  )
 }
 
 /**
@@ -528,6 +690,11 @@ export interface FoldOutcome {
  *
  * A `varying` run needs a page-verified selector and is refused without one;
  * the caller passes the probe so this module never touches `chrome` itself.
+ * The run is matched by `runIds` (the exact node ids the card rendered) when
+ * given, falling back to `index` into the freshly detected list — the ids are
+ * authoritative, the index is a compatibility path for callers that predate
+ * them.
+ *
  * Returns `folded: false` with a reason rather than throwing, because "the page
  * would not confirm a selector" is a normal outcome the card has to explain.
  */
@@ -536,12 +703,17 @@ export async function foldDraftRun(
   index: number,
   probe: CollapseProbe,
   signal: AbortSignal,
+  runIds?: readonly string[],
 ): Promise<FoldOutcome> {
   const draft = draftStore.get(conversationId) ?? (await hydrateDraft(conversationId))
   ensureTriggerHead(draft)
   const before = draftAsWorkflow(draft)
   const suggestions = detectRepeatRuns(before)
-  const suggestion = suggestions[index]
+  const key = runIds && runIds.length > 0 ? runIds.join('\n') : null
+  const suggestion =
+    (key !== null
+      ? suggestions.find((entry) => entry.runIds.join('\n') === key)
+      : undefined) ?? suggestions[index]
   if (!suggestion) return { folded: false, reason: '没有可折叠的重复段' }
   let after: Workflow
   if (suggestion.kind === 'identical') {

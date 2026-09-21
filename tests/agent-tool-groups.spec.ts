@@ -200,9 +200,13 @@ describe('workflow operator tools are gated to workflow mode', () => {
     for (const name of ['click', 'fill', 'open_url', 'press_key', 'scroll', 'select_option']) {
       expect(wf).not.toContain(name)
     }
-    // The core four are advertised outright — and nothing else is.
+    // Every category is advertised from round one (the undeclared default);
+    // only an explicit use_operators declaration narrows the surface.
+    const expected = ADVERTISABLE_OPERATOR_CATEGORIES.flatMap(
+      (category) => OPERATOR_CATEGORY_TOOL_NAMES[category],
+    )
     const advertisedOperators = wf.filter((name) => name.startsWith('wf_op_'))
-    expect(advertisedOperators.sort()).toEqual([...CORE_OPERATOR_TOOL_NAMES].sort())
+    expect(advertisedOperators.sort()).toEqual([...expected].sort())
     expect(wf).not.toContain('compose_workflow')
   })
 
@@ -391,11 +395,16 @@ describe('workflow operator tools are gated to workflow mode', () => {
   })
 
   it('activates just the CATEGORY when an undeclared operator is called', async () => {
-    // A deliberate hallucination: the model needs `wf_op_loop-data` (category
-    // `conditions`) which it never declared. Activating only that category —
-    // rather than dumping all 53 schemas into the next round — is the whole
-    // point of the dispatch.
+    // With the every-category round-1 default, a stray operator call only
+    // happens after the model NARROWED the surface via use_operators — so the
+    // scenario is: declare `data`, then reach for `wf_op_loop-data` (category
+    // `conditions`). Activating just that category — and merging it into what
+    // is already active, mid-task — is the awakening contract.
     streamMock
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [toolCall('c0', USE_OPERATORS_TOOL, { categories: ['data'] })],
+      } as never)
       .mockResolvedValueOnce({
         content: '',
         toolCalls: [toolCall('c1', 'wf_op_loop-data', { selector: '#row' })],
@@ -410,13 +419,19 @@ describe('workflow operator tools are gated to workflow mode', () => {
       deps({ getMode: async () => 'workflow' as const }) as never,
     )
 
+    // The narrowing took effect first: after use_operators, `conditions` is out.
+    const narrowed = advertisedNames(1)
+    expect(narrowed).not.toContain('wf_op_loop-data')
+
     expect(JSON.stringify(history)).toContain('operator category has been activated')
-    const next = advertisedNames(1)
+    const next = advertisedNames(2)
     expect(next).toContain('wf_op_loop-data')
     for (const name of OPERATOR_CATEGORY_TOOL_NAMES.conditions) expect(next).toContain(name)
-    // Other categories stayed out: this is a category activation, not "load
-    // everything".
-    expect(next).not.toContain('wf_op_sort-data')
+    // The declared category survived the activation: it is a merge, not a
+    // replacement.
+    for (const name of OPERATOR_CATEGORY_TOOL_NAMES.data) expect(next).toContain(name)
+    // Categories that were neither declared nor awakened stay out.
+    expect(next).not.toContain('wf_op_webhook')
   })
 
   it('activates a category declared through use_operators', async () => {

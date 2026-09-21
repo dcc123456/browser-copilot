@@ -761,7 +761,9 @@ async function runCore(
     if (label === 'loop-data') {
       let items: unknown[] = []
       try {
-        const parsed = JSON.parse(String(params['data'] ?? '[]'))
+        // `loopData` is the catalog + tool-schema key; `data` is the engine
+        // shape. Reading only the latter made a generated loop iterate nothing.
+        const parsed = JSON.parse(String(params['data'] ?? params['loopData'] ?? '[]'))
         if (Array.isArray(parsed)) items = parsed
       } catch {
         emit('error', loopNode.id, 'loop-data: 数据解析失败')

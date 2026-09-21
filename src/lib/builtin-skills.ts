@@ -108,7 +108,7 @@ Tell the user the skill is saved and what it does in one line. After they use it
 
 1. **整理已有对话操作**（用户刚在普通模式下做过一遍）：先复述目标（一句话），列出步骤清单——每步一行：算子名 + 一句话说明 + 保留/剔除及剔除理由。剔除要果断，存疑则保留。
 2. **从需求直接生成**（用户只描述想要什么）：用一两行说出计划步骤（算子名 + 目的），不长篇大论，直接开始执行。
-3. **用算子工具真实执行每一步**：工作流生成模式下，每次 \`wf_op_*\` 调用既操作页面、也把节点记进草稿，所以"跑通一遍"就等于"把工作流搭好了"——你**不需要**手写节点与连边的 JSON。动手前先用 \`use_operators\` 声明要哪几类算子（常驻只有 new-tab / event-click / forms / get-text）。
+3. **用算子工具真实执行每一步**：工作流生成模式下，每次 \`wf_op_*\` 调用既操作页面、也把节点记进草稿，所以"跑通一遍"就等于"把工作流搭好了"——你**不需要**手写节点与连边的 JSON。全部类别的算子从第一回合起就可见，直接选用最合适的一个；确需收缩载荷时才用 \`use_operators\`（注意它会整体替换当前类别集合，替换时把仍需要的类别一并列全）。
 4. **description 必须自足**：写成"做什么 + 对什么对象 + 期望结果"（如「在搜索框输入关键词并提交」），不要只写"输入"。工作流保存时会把目标（会话标题）和各节点 description 组装成《目标与执行步骤说明》，后续 AI 自动调试完全依赖这份说明来复演与修复——写不清楚，调试就修不对。
 5. 跑完后**结束回合**：保存卡片会自动弹出，让用户确认；不要自己调用 \`compose_workflow\` 或任何保存工具。用户会在卡片上看到 AI 审查总结并逐步骤微调——你的清单和卡片的判定标准一致，别让两者互相矛盾。
 6. 触发方式：生成的工作流默认手动触发。用户明确要**定时运行**时，保存后用 \`create_scheduled_task\`（kind:'workflow' 传工作流 id）创建定时任务——该工具在 ops 组、不在常驻列表，先 \`load_tools({groups:["ops"]})\` 再调用。`,
@@ -148,6 +148,7 @@ Tell the user the skill is saved and what it does in one line. After they use it
 \`1. fill → 搜索框（ref e3）输入「iPhone 15」\`、\`2. click → 搜索按钮（ref e4）→ 出现结果列表\`。
 - 依赖前一步结果的步骤标出来（拿到结果后再补计划这一段）。
 - 通用动作（点同意、展开、登录）也要写进计划，用户才能预判风险。
+- 查看技能目录：某一步与已有技能的描述匹配（如验证码识别、特定站点的固定流程），在计划里标出「该步使用技能 X」——技能目录在本技能生效期间仍然可见。
 
 **工作流生成模式**：先分析页面结构，再规划步骤——
 - 页面结构分析写进计划：页面类型（列表/详情/表单/仪表盘）、关键可交互元素、列表容器与条目模式、表单字段、翻页/详情跳转方式。
@@ -164,11 +165,15 @@ Tell the user the skill is saved and what it does in one line. After they use it
 
 ### 第 4 步：批准后执行
 
+- 执行每一步前先看技能目录：与该步匹配的技能先用 use_skill 加载并遵循其说明，再动手——计划批准并不解除技能协同，本技能只约束"先计划后执行"这一个流程。
 - 全自动：按计划批量调用工具（一次响应发多个调用），每步核对 observation 再走下一步。
 - 半自动：正常走逐动作确认卡。
 - 工作流生成（未拆分）：照常结束回合由保存卡收尾，不要自己调用 compose_workflow。
 - 工作流生成（已拆分）：按计划用 wf_op_* 逐步录制（动手前 use_operators 声明所需类别）；每完成一段调用 compose_workflow(name=该段名) 保存（草稿清空）再录下一段——这是"已批准拆分"路径的例外；最后录 orchestrator 段（wf_op_execute-workflow 引用已保存的子工作流），结束回合由保存卡收尾。`,
-    autoMatch: true,
+    // Plan is MANUAL-ONLY: the user selects it from the panel (slash menu /
+    // Skills tab), never the agent. `renderSkillCatalogue` additionally
+    // excludes it by name, so even a user-edited copy cannot auto-match.
+    autoMatch: false,
     createdAt: 0,
     updatedAt: 0,
   },

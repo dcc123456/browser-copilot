@@ -13,6 +13,8 @@ import { isOfferedTriggerType } from './trigger-options'
 import { dataValueSites } from './data-params'
 import { hasReference } from './dynamic-data'
 import { unanchoredElementStart } from './runnability'
+import { missingRequirements, missingTriggerParam } from './block-requirements'
+import { BLOCK_BY_ID } from './blocks/palette'
 import type { Workflow, WorkflowNode } from './types'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -157,45 +159,33 @@ function isNonEmptyString(value: unknown): boolean {
   return typeof value === 'string' && value.trim() !== ''
 }
 
-/**
- * The trigger field this kind cannot work without but that is missing or
- * unusable, or null when the trigger is fully configured. Type-aware on
- * purpose: an `interval` of `"abc"` is as broken as an empty one, and the
- * engine's own coercion would silently fall back to a default.
- */
-function missingTriggerParam(
-  type: string,
-  data: Record<string, unknown> | undefined,
-): string | null {
-  switch (type) {
-    case 'visit-web':
-      return isNonEmptyString(data?.['url']) ? null : 'url'
-    case 'keyboard-shortcut':
-      return isNonEmptyString(data?.['shortcut']) ? null : 'shortcut'
-    case 'context-menu':
-      return isNonEmptyString(data?.['contextMenuName']) ? null : 'contextMenuName'
-    case 'interval': {
-      const raw = data?.['interval']
-      const minutes = typeof raw === 'number' ? raw : Number(raw)
-      return Number.isFinite(minutes) && minutes > 0 ? null : 'interval'
-    }
-    case 'specific-day':
-      return Array.isArray(data?.['days']) && data['days'].length > 0 ? null : 'days'
-    case 'date':
-      return isNonEmptyString(data?.['date']) ? null : 'date'
-    case 'element-change': {
-      // The selector is nested: `data.observeElement.selector`. Without it the
-      // observer has nothing to watch, so the trigger would never fire.
-      const observe = data?.['observeElement']
-      const selector =
-        observe && typeof observe === 'object'
-          ? (observe as Record<string, unknown>)['selector']
-          : undefined
-      return isNonEmptyString(selector) ? null : 'observeElement.selector'
-    }
-    default:
-      return null
+/** Canonical block id of a node: `data.blockId`, falling back to the label. */
+function blockIdOfNode(node: WorkflowNode): string {
+  const raw = node.data?.['blockId']
+  return typeof raw === 'string' && raw ? raw : node.label
+}
+
+/** Display name of a block, for gate messages (falls back to the raw id). */
+function blockDisplayName(blockId: string): string {
+  return BLOCK_BY_ID.get(blockId)?.name ?? blockId
+}
+
+/** Branch blocks whose two output ports replay can take. */
+const BRANCH_BLOCK_IDS: ReadonlySet<string> = new Set(['conditions', 'element-exists', 'webhook'])
+
+/** Does this node write rows into the data table when it runs? */
+function producesTableRows(blockId: string, data: Record<string, unknown>): boolean {
+  if (blockId === 'get-text' || blockId === 'read-page') {
+    return data['saveData'] === true && isNonEmptyString(data['dataColumn'])
   }
+  if (blockId === 'take-screenshot') {
+    return data['saveToColumn'] === true && isNonEmptyString(data['dataColumn'])
+  }
+  if (blockId === 'insert-data') {
+    const list = data['dataList']
+    return Array.isArray(list) ? list.length > 0 : isNonEmptyString(data['data'])
+  }
+  return false
 }
 
 /**
@@ -271,13 +261,67 @@ export function validateWorkflowForRun(workflow: Workflow): WorkflowRunValidatio
   // frozen value, and only the user can say whether that is what they want.
   for (const node of actionNodes) {
     const data = node.data ?? {}
-    const rawBlockId = data['blockId']
-    const blockId = typeof rawBlockId === 'string' && rawBlockId ? rawBlockId : node.label
-    for (const site of dataValueSites(blockId, data)) {
+    for (const site of dataValueSites(blockIdOfNode(node), data)) {
+      // Instruction text (the ai-agent prompt) is a legitimate literal: it is
+      // addressed to the step, not data the replay must re-obtain.
+      if (site.instruction) continue
       if (hasReference(site.value)) continue
       warnings.push(
         `节点 "${node.id}" 的 ${site.path.join('.')} 是固定值 "${site.value}"：` +
           '重放时不会变化，如果它本该随数据改变，请改用 {{变量}} 引用或声明成工作流输入',
+      )
+    }
+  }
+
+  // Required parameters per node — the same contract the generation-time
+  // record gate enforces (see `block-requirements`), applied to EVERY workflow
+  // no matter which path produced it. The empty-locator `element-exists`, the
+  // key-less `press-key` and the url-less `webhook` all die HERE now instead
+  // of failing (or silently doing nothing) mid-run. Errors, not warnings: the
+  // step cannot work, so running it can only surprise.
+  for (const node of actionNodes) {
+    const blockId = blockIdOfNode(node)
+    for (const problem of missingRequirements(blockId, node.data ?? {})) {
+      errors.push(
+        `节点 "${node.id}"（${blockDisplayName(blockId)}）缺少必填参数 ${problem.key}：${problem.message}`,
+      )
+    }
+  }
+
+  // A branch block whose OTHER port has no continuation: generation records
+  // only the branch that was taken, so the untaken port often dangles. Replay
+  // that takes it ends silently — say so before the run, not after.
+  for (const node of actionNodes) {
+    if (!BRANCH_BLOCK_IDS.has(blockIdOfNode(node))) continue
+    const handles = workflow.drawflow.edges
+      .filter((edge) => edge.source === node.id)
+      .map((edge) => edge.sourceHandle ?? '')
+    if (handles.length === 0) continue
+    const portConnected = (suffix: string): boolean =>
+      handles.some((handle) => handle.endsWith(`-${suffix}`))
+    if (!portConnected('output-1') || !portConnected('output-2')) {
+      warnings.push(
+        `节点 "${node.id}"（${blockDisplayName(blockIdOfNode(node))}）是分支节点，` +
+          '但有一条分支没有连接后续节点：重放走到该分支时会直接结束',
+      )
+    }
+  }
+
+  // An export that reads the data table needs a producer BEFORE it: a read
+  // with `saveData` + `dataColumn` (or an explicit insert). Without one the
+  // replay fails with "数据表是空的" — say so at the gate.
+  for (const node of actionNodes) {
+    if (blockIdOfNode(node) !== 'export-data') continue
+    const data = node.data ?? {}
+    if ((data['dataToExport'] ?? 'data-columns') !== 'data-columns') continue
+    const index = workflow.drawflow.nodes.indexOf(node)
+    const produced = workflow.drawflow.nodes
+      .slice(0, index === -1 ? undefined : index)
+      .some((earlier) => producesTableRows(blockIdOfNode(earlier), earlier.data ?? {}))
+    if (!produced) {
+      warnings.push(
+        `节点 "${node.id}"（${blockDisplayName('export-data')}）导出的是数据表，` +
+          '但它之前没有任何采集节点（get-text / read-page 开 saveData 并填 dataColumn）——重放时会因数据表为空而报错',
       )
     }
   }
