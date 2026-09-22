@@ -281,6 +281,33 @@ export interface Messages {
   workflowsDebugTakeoverDiscarded: string
   /** Pending chip on cards with unanswered takeover fixes: hint with time + count. */
   workflowsDebugTakeoverPendingHint: (params: { time: string; changes: number }) => string
+
+  // Unified workflow repair (spec §12)
+  workflowsRepairAnalyze: string
+  workflowsRepairAuto: string
+  workflowsRepairRunning: string
+  workflowsRepairTitle: string
+  workflowsRepairFailedNode: string
+  workflowsRepairRootCause: string
+  workflowsRepairVariables: string
+  workflowsRepairPatch: string
+  workflowsRepairReplay: string
+  workflowsRepairVerification: string
+  workflowsRepairStatusOk: string
+  workflowsRepairStatusMissing: string
+  workflowsRepairStatusEmpty: string
+  workflowsRepairStatusType: string
+  workflowsRepairVerified: string
+  workflowsRepairNotVerified: string
+  workflowsRepairRetryHint: string
+  workflowsRepairNoProvider: string
+  workflowsRepairCommit: string
+  workflowsRepairDiscard: string
+  workflowsRepairCommitted: string
+  workflowsRepairClose: string
+  workflowsRepairConfidence: (params: { percent: number }) => string
+  workflowsRepairBeforeAfter: string
+
   /** Activity board (History tab) collapse/expand toggle title. */
   tasksActivityCollapse: string
   tasksActivityExpand: string
@@ -357,6 +384,7 @@ export interface Messages {
    * changed the page. Silence here is indistinguishable from a broken feature.
    */
   chatWorkflowNothingSaved: string
+  chatWorkflowNotRunnable: (detail: string) => string
   /** Same, but the model tried and every action failed — worth retrying. */
   chatWorkflowNothingSavedFailed: string
   /** The selector probe is still running, so nothing is known yet. */
@@ -371,6 +399,12 @@ export interface Messages {
   chatWorkflowRunIssuesWarning: string
   /** Hint under blocking runnability problems: save is disabled. */
   chatWorkflowRunIssuesBlocked: string
+  /** Non-blocking hint: the workflow can still be saved despite these findings. */
+  chatWorkflowRunIssuesNonBlocking: string
+  /** Save first, then run the AI debug session on the saved workflow. */
+  chatWorkflowSaveThenDebug: string
+  chatWorkflowSaveThenDebugHint: string
+  chatWorkflowSaveThenDebugStarted: string
   /** One `{{reference}}` no block produces and no input declares. */
   chatWorkflowIntegrityDangling: (params: { blockId: string }) => string
   /** Steps the trigger head cannot reach, so the replay will never run them. */
@@ -1277,6 +1311,33 @@ const en: Messages = {
   workflowsDebugTakeoverDiscarded: 'AI takeover fixes discarded',
   workflowsDebugTakeoverPendingHint: ({ time, changes }) =>
     `AI takeover proposed ${changes} node fix(es) at ${time} — apply or discard`,
+
+  workflowsRepairAnalyze: 'AI Analyze',
+  workflowsRepairAuto: 'AI Auto Repair',
+  workflowsRepairRunning: 'AI repair running…',
+  workflowsRepairTitle: 'AI Workflow Repair',
+  workflowsRepairFailedNode: 'Failed Node',
+  workflowsRepairRootCause: 'Root Cause Node',
+  workflowsRepairVariables: 'Variable Dependencies',
+  workflowsRepairPatch: 'Patch',
+  workflowsRepairReplay: 'Replay',
+  workflowsRepairVerification: 'Verification',
+  workflowsRepairStatusOk: 'available',
+  workflowsRepairStatusMissing: 'missing',
+  workflowsRepairStatusEmpty: 'empty',
+  workflowsRepairStatusType: 'wrong type',
+  workflowsRepairVerified: 'Verified — the workflow runs independently without AI takeover.',
+  workflowsRepairNotVerified: 'Not verified — the repair did not pass an independent run.',
+  workflowsRepairRetryHint:
+    'The failure looks transient; a bounded retry is recommended before patching.',
+  workflowsRepairNoProvider: 'No AI model is configured, so no patch can be proposed.',
+  workflowsRepairCommit: 'Save repair',
+  workflowsRepairDiscard: 'Discard',
+  workflowsRepairCommitted: 'The verified repair was saved to the workflow.',
+  workflowsRepairClose: 'Close',
+  workflowsRepairConfidence: ({ percent }) => `Confidence ${percent}%`,
+  workflowsRepairBeforeAfter: 'before → after',
+
   tasksActivityCollapse: 'Collapse activity',
   tasksActivityExpand: 'Expand activity',
 
@@ -1337,8 +1398,11 @@ const en: Messages = {
   chatSaveWorkflowSkip: 'Skip',
   chatWorkflowNothingSaved:
     'Nothing to save from this turn: no page operations were recorded. Do the task and try again, or ask the model to perform it on the page.',
+  chatWorkflowNotRunnable: (detail) =>
+    `The generated workflow did not pass the runnability check, so there is nothing to save yet: ${detail}. Ask the AI to fix it and try again.`,
   chatWorkflowNothingSavedFailed:
     'Nothing to save from this turn: every recorded action failed. Fix the failure and run it again.',
+
   chatWorkflowProbeChecking: 'Checking the selectors against the current page…',
   chatWorkflowIntegrityTitle: 'This graph will not run as saved',
   chatWorkflowRunIssuesTitle: 'Runnability check',
@@ -1346,6 +1410,13 @@ const en: Messages = {
   chatWorkflowRunIssuesWarning: 'Worth checking',
   chatWorkflowRunIssuesBlocked:
     'Fix the problems marked "Must fix" first (in the workflow editor), then save. Saving is disabled because these steps cannot run.',
+  chatWorkflowRunIssuesNonBlocking:
+    'You can still save this workflow. After saving, run AI debug or fix these findings manually in the editor.',
+  chatWorkflowSaveThenDebug: 'Save & AI debug',
+  chatWorkflowSaveThenDebugHint:
+    'Save the workflow first, then run an AI debug session to repair these findings.',
+  chatWorkflowSaveThenDebugStarted:
+    'Workflow saved. Starting an AI debug session to repair the findings…',
   chatWorkflowIntegrityDangling: ({ blockId }) =>
     `no step produces this value — "${blockId}" will run with an empty value. Declare it as a workflow input or add the step that produces it.`,
   chatWorkflowIntegrityUnreachable: ({ count }) =>
@@ -1457,7 +1528,8 @@ const en: Messages = {
   planApprovedChip: 'Plan approved',
   planRejectedChip: 'Plan rejected',
   planCardAria: 'Plan approval card',
-  contextCompacted: 'Context is large — older turns were summarized to stay within the model window.',
+  contextCompacted:
+    'Context is large — older turns were summarized to stay within the model window.',
   contextCompactedMarker: '[Context compacted] Summary of the earlier conversation:',
 
   tokenUsage: 'Token usage',
@@ -2079,6 +2151,8 @@ Keep the whole report dense and within the message size cap.`,
 }
 
 const zhCN: Messages = {
+  chatWorkflowNotRunnable: (detail) =>
+    `生成的工作流未通过可运行性检查，暂时没有可保存的内容：${detail}。请让 AI 修复后重试。`,
   tabChat: '对话',
   tabSkills: '技能',
   tabAgents: '智能体',
@@ -2282,6 +2356,32 @@ const zhCN: Messages = {
   workflowsDebugTakeoverDiscarded: '已放弃 AI 接管的修改',
   workflowsDebugTakeoverPendingHint: ({ time, changes }) =>
     `AI 接管提出了 ${changes} 处节点修改（${time}），可应用或放弃`,
+
+  workflowsRepairAnalyze: 'AI 分析',
+  workflowsRepairAuto: 'AI 自动修复',
+  workflowsRepairRunning: 'AI 修复运行中…',
+  workflowsRepairTitle: 'AI 工作流修复',
+  workflowsRepairFailedNode: '失败节点',
+  workflowsRepairRootCause: '根因节点',
+  workflowsRepairVariables: '变量依赖',
+  workflowsRepairPatch: '补丁',
+  workflowsRepairReplay: '回放',
+  workflowsRepairVerification: '验证',
+  workflowsRepairStatusOk: '可用',
+  workflowsRepairStatusMissing: '缺失',
+  workflowsRepairStatusEmpty: '为空',
+  workflowsRepairStatusType: '类型错误',
+  workflowsRepairVerified: '已验证——工作流无需 AI 接管即可独立运行。',
+  workflowsRepairNotVerified: '未通过验证——修复没有通过独立运行。',
+  workflowsRepairRetryHint: '该失败看起来是暂时的，建议先做有限次重试再打补丁。',
+  workflowsRepairNoProvider: '尚未配置 AI 模型，无法提出补丁。',
+  workflowsRepairCommit: '保存修复',
+  workflowsRepairDiscard: '放弃',
+  workflowsRepairCommitted: '已将验证通过的修复保存到工作流。',
+  workflowsRepairClose: '关闭',
+  workflowsRepairConfidence: ({ percent }) => `置信度 ${percent}%`,
+  workflowsRepairBeforeAfter: '修改前 → 修改后',
+
   tasksActivityCollapse: '收起动态',
   tasksActivityExpand: '展开动态',
 
@@ -2348,6 +2448,11 @@ const zhCN: Messages = {
   chatWorkflowRunIssuesWarning: '建议检查',
   chatWorkflowRunIssuesBlocked:
     '请先在工作流编辑器里修复「必须修复」的问题再保存。这些步骤无法执行，所以保存按钮暂时禁用。',
+  chatWorkflowRunIssuesNonBlocking:
+    '你仍然可以保存这个工作流。保存后可以运行 AI 调试，或在编辑器里手动修复这些问题。',
+  chatWorkflowSaveThenDebug: '保存并 AI 调试',
+  chatWorkflowSaveThenDebugHint: '先保存工作流，再运行 AI 调试会话来修复这些问题。',
+  chatWorkflowSaveThenDebugStarted: '工作流已保存，正在启动 AI 调试会话修复问题…',
   chatWorkflowIntegrityDangling: ({ blockId }) =>
     `没有任何步骤能产出这个值——「${blockId}」会以空值执行。请把它声明成工作流输入，或补上产出它的步骤。`,
   chatWorkflowIntegrityUnreachable: ({ count }) => `${count} 个步骤从触发器出发走不到：`,

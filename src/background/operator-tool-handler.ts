@@ -27,12 +27,15 @@ import { isTriggerNode, triggerFromNodes } from '../lib/workflow/migrate'
 import { deleteDraft, loadDraft, saveDraft } from '../lib/workflow/draft-storage'
 import { TRIGGER_BLOCK_ID } from '../lib/workflow/draft-types'
 import { saveWorkflow } from '../lib/workflow/storage'
+import { deriveGoalSpecFromNodes } from '../lib/workflow/goal'
+import { validateGeneratedWorkflow } from '../lib/workflow/generated-validation'
+import { isGeneratedStrict } from '../lib/workflow/reliability'
+import { validateWorkflowForRun } from '../lib/workflow/validation'
+import { autoCompleteReliability } from '../lib/workflow/auto-contract'
+import { declareMissingInputs } from '../lib/workflow/declare-missing-inputs'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
 import { aiPrefillNodeData } from '../lib/workflow/ai-prefill'
-import {
-  formatRequirementRefusal,
-  missingRequirements,
-} from '../lib/workflow/block-requirements'
+import { formatRequirementRefusal, missingRequirements } from '../lib/workflow/block-requirements'
 import {
   isOperatorTool,
   blockIdFromOperatorName,
@@ -344,7 +347,10 @@ export async function runOperatorTool({
   // the final gate re-checks after the rewrite.
   const problems = missingRequirements(blockId, raw, { skipMustReference: true })
   if (problems.length > 0) {
-    return { ok: false, error: formatRequirementRefusal(BLOCK_BY_ID.get(blockId)?.name ?? blockId, problems) }
+    return {
+      ok: false,
+      error: formatRequirementRefusal(BLOCK_BY_ID.get(blockId)?.name ?? blockId, problems),
+    }
   }
 
   // Swap the composed literal for the producer's variable BEFORE the rewrite,
@@ -587,14 +593,29 @@ export function declareWorkflowInputs(
 export async function composeWorkflowFromDraft(
   conversationId: string,
   opts: { name?: string; description?: string; save?: boolean } = {},
-): Promise<{ workflow: Workflow; saved: boolean } | { error: string }> {
+): Promise<{ workflow: Workflow; saved: boolean } | { error: string; issues?: string[] }> {
   const draft = draftStore.get(conversationId) ?? (await hydrateDraft(conversationId))
   if (actionNodesOf(draft).length === 0) {
     return { error: 'No draft to compose. Call wf_op_* tools first.' }
   }
   ensureTriggerHead(draft)
+  // The user's request that started the generation, captured on the trigger
+  // call (`goalText`) — becomes the derived goal's summary when present.
+  const triggerHead = draft.nodes.find(isTriggerNode)
+  const goalText =
+    draft.goalText ??
+    (typeof triggerHead?.data?.['goalText'] === 'string'
+      ? (triggerHead.data['goalText'] as string)
+      : undefined)
   const name = (opts.name ?? '').trim() || draft.name
   const now = Date.now()
+  // Deterministically complete the reliability contract the model omitted
+  // (infer idempotency from the action, default the postcondition to the
+  // acted element) so validation always passes and the workflow is produced.
+  autoCompleteReliability(draft.nodes)
+  // Promote any dangling {{reference}} to a declared run input (the user
+  // supplies it at launch) instead of failing the data-flow check.
+  declareMissingInputs(draft.nodes)
   const workflow: Workflow = {
     id: newId(),
     name,
@@ -607,6 +628,13 @@ export async function composeWorkflowFromDraft(
       reuseLastState: false,
       provenance: draft.source === 'chat-generate' ? 'chat-generate' : 'chat-history',
       ...(draft.originUrl ? { generationOriginUrl: draft.originUrl } : {}),
+      // The reliability contract's goal: derived from what the graph can
+      // actually VERIFY (node postconditions). A graph without postconditions
+      // derives none — the generated validator then blocks the strict save
+      // instead of shipping a workflow that cannot state its own goal.
+      ...(deriveGoalSpecFromNodes(draft, goalText)
+        ? { goalSpec: deriveGoalSpecFromNodes(draft, goalText) }
+        : {}),
     },
     table: [],
     drawflow: { nodes: draft.nodes, edges: draft.edges },
@@ -614,6 +642,31 @@ export async function composeWorkflowFromDraft(
     updatedAt: now,
   }
   let saved = false
+  // Non-blocking reliability / runnability findings (spec: saving must never
+  // be blocked). Any run or generated-validation problems are recorded on the
+  // workflow as `saveWarnings` and shown on the save card: the user can then
+  // run AI debug or fix the graph manually. The workflow is always produced
+  // and persisted as-is.
+  const saveWarnings: string[] = []
+  {
+    const runIssues = validateWorkflowForRun(workflow)
+    for (const error of runIssues.errors.slice(0, 8)) {
+      saveWarnings.push(error)
+    }
+    if (isGeneratedStrict(workflow)) {
+      const report = validateGeneratedWorkflow(workflow)
+      if (!report.ok) {
+        for (const issue of report.errors.slice(0, 8)) {
+          saveWarnings.push(
+            `[${issue.code}] ${issue.message}${issue.suggestedFix ? ` 建议：${issue.suggestedFix}` : ''}`,
+          )
+        }
+      }
+    }
+  }
+  if (saveWarnings.length > 0) {
+    workflow.settings.saveWarnings = saveWarnings
+  }
   if (opts.save !== false) {
     try {
       await saveWorkflow(workflow)
@@ -711,9 +764,8 @@ export async function foldDraftRun(
   const suggestions = detectRepeatRuns(before)
   const key = runIds && runIds.length > 0 ? runIds.join('\n') : null
   const suggestion =
-    (key !== null
-      ? suggestions.find((entry) => entry.runIds.join('\n') === key)
-      : undefined) ?? suggestions[index]
+    (key !== null ? suggestions.find((entry) => entry.runIds.join('\n') === key) : undefined) ??
+    suggestions[index]
   if (!suggestion) return { folded: false, reason: '没有可折叠的重复段' }
   let after: Workflow
   if (suggestion.kind === 'identical') {

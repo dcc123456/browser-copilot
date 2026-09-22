@@ -182,6 +182,26 @@ export interface WorkflowSettings {
    * the tab it lands on is a different origin.
    */
   generationOriginUrl?: string
+  /**
+   * Which execution regime this workflow runs under (`lib/workflow/reliability`).
+   * Absent means "derive": a generation provenance implies `generated-strict`,
+   * everything else `compat`. An explicit value always wins.
+   */
+  reliabilityMode?: import('./reliability').WorkflowReliabilityMode
+  /**
+   * The workflow's goal contract (`lib/workflow/reliability`): what "success"
+   * means, as checkable conditions. Required for `generated-strict` (the
+   * generated validator blocks a strict workflow without one), ignored by
+   * `compat`.
+   */
+  goalSpec?: import('./reliability').WorkflowGoalSpec
+  /**
+   * Non-blocking reliability / runnability findings captured at save time.
+   * These NEVER prevent the workflow from being saved: they are surfaced on
+   * the save card so the user can either run AI debug or fix the graph
+   * manually. A workflow with warnings is still persisted as-is.
+   */
+  saveWarnings?: string[]
 }
 
 /** A persisted workflow. */

@@ -13,7 +13,7 @@
  * @module background/operator-tool-run
  */
 
-import { resolveRecordedLocator } from '../lib/workflow/target-to-selector'
+import { reliabilityLocatorOf, resolveRecordedLocator } from '../lib/workflow/target-to-selector'
 import type { RecordedLocator, SnapshotTargetEntry } from '../lib/workflow/target-to-selector'
 import { verifyRecordedSelector } from './selector-probe'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
@@ -205,6 +205,11 @@ export type OperatorRunResult =
  * selector can express the element. A verified locator also stamps
  * `selectorVerified`, and an unverified one that lost its CSS candidate
  * records NO selector at all — the rich target becomes the replay's primary.
+ *
+ * The reliability layer additionally saves the element's SEMANTIC identity
+ * under `__reliability.locator` (spec §5.5): role/accessible name/test id —
+ * meaning that survives DOM drift, not a positional path. The flat fields
+ * stay untouched; the metadata is additive.
  */
 function withLocator(
   args: Record<string, unknown>,
@@ -221,6 +226,14 @@ function withLocator(
   if (target) out.target = target
   if (label && typeof out.label !== 'string') out.label = label
   if (typeof verified === 'boolean') out.selectorVerified = verified
+  const reliabilityLocator = reliabilityLocatorOf(locator)
+  if (reliabilityLocator) {
+    const existing = out['__reliability']
+    out['__reliability'] = {
+      ...(existing && typeof existing === 'object' ? existing : {}),
+      locator: reliabilityLocator,
+    }
+  }
   return out
 }
 

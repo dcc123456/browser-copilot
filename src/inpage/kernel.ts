@@ -642,40 +642,182 @@ export function runOp(op: Op): OpResult {
     usedFallback: boolean
   }
 
-  function resolve(target: Target | undefined): Resolution | null {
+  /**
+   * A strict-mode refusal: the target matched, but not in a way the policy
+   * lets us act on. Carries the evidence (distinct match count + the matched
+   * specs and their scores) — structured fields, never a DOM dump.
+   */
+  interface ResolveRefusal {
+    refusal: {
+      code: 'LOCATOR_NOT_FOUND' | 'LOCATOR_AMBIGUOUS'
+      matchCount: number
+      candidates: { strategy: string; score: number }[]
+      error: string
+    }
+  }
+
+  type ResolveOutcome = Resolution | ResolveRefusal | null
+
+  /**
+   * The strict locator score, mirroring `lib/workflow/locator-score`
+   * (identity beats position). The kernel is serialized without closures, so
+   * the table lives here as a nested copy — kept intentionally small and
+   * labelled so the two stay in sync:
+   *   testid 100/92 · role+name 95 · stable id 90/78 · name 85 ·
+   *   stable data-* 75 · text 70 · css 35 (depth demoted) · xpath 25 ·
+   *   positional (nth / generated value) 10.
+   */
+  function strictScoreOf(spec: TargetSpec): number {
+    const POSITIONAL = 10
+    if (typeof spec.nth === 'number' && spec.nth > 0) return POSITIONAL
+    const value = spec.value.trim()
+    let base: number
+    switch (spec.how) {
+      case 'testid':
+        base = 100
+        break
+      case 'role':
+        // Role + accessible name; a role spec without a name matches broadly.
+        base = value ? 95 : 40
+        break
+      case 'id':
+        base = looksUnstable(value) ? POSITIONAL : 90
+        break
+      case 'name':
+        base = looksUnstable(value) ? POSITIONAL : 85
+        break
+      case 'text':
+        base = 70
+        break
+      case 'css':
+        if (value.startsWith('xpath:')) return 25
+        {
+          // Depth demotion + unstable-class demotion, mirroring the lib scorer.
+          const steps = (value.match(/[>\s]+/) ?? []).length
+          base = Math.max(1, 35 - Math.min(15, steps))
+          const classPattern = /\.([A-Za-z0-9_-]+)/g
+          let match: RegExpExecArray | null
+          while ((match = classPattern.exec(value)) !== null) {
+            if (looksUnstable(match[1] ?? '')) return POSITIONAL
+          }
+        }
+        break
+      default:
+        base = 0
+    }
+    return base
+  }
+
+  function resolve(target: Target | undefined): ResolveOutcome {
     if (!target) return null
+    const policy = op.resolvePolicy
     const candidates: TargetSpec[] = [target.primary, ...(target.fallbacks ?? [])]
-    // Two-tier resolution. A spec that matches EXACTLY ONE element is almost
-    // certainly the element the user picked; a looser spec that matches many is
-    // often a positional CSS path outliving a layout change, and acting on its
-    // first match clicks the wrong element in silence. So an exact match
-    // anywhere in the candidate list wins over an earlier multi-match, and the
-    // first multi-match is remembered as the fallback — preserving the legacy
-    // "first visible of many" behavior for targets with no exact spec at all.
-    let loose: Resolution | null = null
+    const tried = candidates.map((spec) => serializeSpec(spec)).join(', ')
+    const strict =
+      policy?.mode === 'strict' && (policy.ambiguity === 'score' || policy.ambiguity === 'error')
+
+    if (!strict) {
+      // Two-tier resolution. A spec that matches EXACTLY ONE element is almost
+      // certainly the element the user picked; a looser spec that matches many is
+      // often a positional CSS path outliving a layout change, and acting on its
+      // first match clicks the wrong element in silence. So an exact match
+      // anywhere in the candidate list wins over an earlier multi-match, and the
+      // first multi-match is remembered as the fallback — preserving the legacy
+      // "first visible of many" behavior for targets with no exact spec at all.
+      let loose: Resolution | null = null
+      for (let index = 0; index < candidates.length; index += 1) {
+        const spec = candidates[index]
+        if (!spec) continue
+        const all = queryAll(spec)
+        if (all.length === 0) continue
+        let chosen: Element | undefined
+        if (typeof spec.nth === 'number') {
+          chosen = all[spec.nth]
+        } else {
+          const visible = all.filter((element) => isVisible(element))
+          chosen = visible[0] ?? all[0]
+        }
+        if (!chosen) continue
+        const resolution: Resolution = {
+          element: chosen,
+          matched: all.length,
+          usedSpec: serializeSpec(spec),
+          usedFallback: index > 0,
+        }
+        if (all.length === 1) return resolution
+        if (!loose) loose = resolution
+      }
+      return loose
+    }
+
+    // --- strict: never guess ------------------------------------------------
+    // Score every matched spec; a winner must point at exactly ONE element,
+    // reach minScore, and beat the runner-up by minMargin. Everything else is
+    // a refusal with structured evidence.
+    const matched: { spec: TargetSpec; all: Element[]; score: number; index: number }[] = []
+    const union = new Set<Element>()
     for (let index = 0; index < candidates.length; index += 1) {
       const spec = candidates[index]
       if (!spec) continue
       const all = queryAll(spec)
       if (all.length === 0) continue
-      let chosen: Element | undefined
-      if (typeof spec.nth === 'number') {
-        chosen = all[spec.nth]
-      } else {
-        const visible = all.filter((element) => isVisible(element))
-        chosen = visible[0] ?? all[0]
-      }
-      if (!chosen) continue
-      const resolution: Resolution = {
-        element: chosen,
-        matched: all.length,
-        usedSpec: serializeSpec(spec),
-        usedFallback: index > 0,
-      }
-      if (all.length === 1) return resolution
-      if (!loose) loose = resolution
+      matched.push({ spec, all, score: strictScoreOf(spec), index })
+      for (const element of all) union.add(element)
     }
-    return loose
+    if (union.size === 0) {
+      return {
+        refusal: {
+          code: 'LOCATOR_NOT_FOUND',
+          matchCount: 0,
+          candidates: [],
+          error: `定位不确定：没有任何候选命中。Tried: ${tried}`,
+        },
+      }
+    }
+    if (union.size === 1) {
+      const element = union.values().next().value as Element | undefined
+      const hit =
+        element !== undefined ? matched.find((m) => m.all.includes(element)) : undefined
+      if (element && hit) {
+        return {
+          element,
+          matched: 1,
+          usedSpec: serializeSpec(hit.spec),
+          usedFallback: hit.index > 0,
+        }
+      }
+    }
+    const evidence = matched.map((m) => ({ strategy: serializeSpec(m.spec), score: m.score }))
+    const refuse = (why: string): ResolveRefusal => ({
+      refusal: {
+        code: 'LOCATOR_AMBIGUOUS',
+        matchCount: union.size,
+        candidates: evidence,
+        error: `定位不确定（${why}），拒绝在 ${union.size} 个候选中猜测。Tried: ${tried}`,
+      },
+    })
+    if (policy?.ambiguity === 'error') return refuse('ambiguity=error')
+    // Score policy: only a spec matching EXACTLY ONE element may win, and
+    // only above the floor with a wide-enough margin over the runner-up.
+    const minScore = typeof policy?.minScore === 'number' ? policy.minScore : 70
+    const minMargin = typeof policy?.minMargin === 'number' ? policy.minMargin : 12
+    const eligible = matched
+      .filter((m) => m.all.length === 1 && m.score >= minScore)
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+    if (eligible.length === 0) {
+      return refuse('最高分不足 minScore')
+    }
+    const top = eligible[0]!
+    const runnerUp = eligible[1]
+    if (runnerUp && top.score - runnerUp.score < minMargin) {
+      return refuse('前两名分差不足 minMargin')
+    }
+    return {
+      element: top.all[0]!,
+      matched: 1,
+      usedSpec: serializeSpec(top.spec),
+      usedFallback: top.index > 0,
+    }
   }
 
   // --- Interaction helpers ---------------------------------------------------
@@ -1316,7 +1458,7 @@ export function runOp(op: Op): OpResult {
     const findHost = (): HTMLElement | null => {
       if (op.target) {
         const resolution = resolve(op.target)
-        if (resolution) return resolution.element as HTMLElement
+        if (resolution && !('refusal' in resolution)) return resolution.element as HTMLElement
       }
       if (selector) return (document.querySelector(selector) as HTMLElement | null) ?? null
       // No selector → the whole page, like before.
@@ -1527,7 +1669,9 @@ export function runOp(op: Op): OpResult {
       // is synchronous, so animation stability (a rect that keeps moving) is
       // the DRIVER's job: it samples this op twice and compares rects.
       const resolution = resolve(op.target)
-      if (!resolution) {
+      if (!resolution || 'refusal' in resolution) {
+        // Unresolvable under the strict policy (or absent): the pre-check is
+        // fail-open, so report missing — the real op reports the refusal.
         return { ...base(), ok: true, found: false, data: { state: 'missing' } }
       }
       const element = resolution.element
@@ -1689,22 +1833,50 @@ export function runOp(op: Op): OpResult {
       return (async () => {
         const deadline = Date.now() + waitMs
         let res = resolve(target)
-        while (!res && Date.now() < deadline) {
+        while ((!res || 'refusal' in res) && Date.now() < deadline) {
+          // Not found yet — or found but still ambiguous (a settling page can
+          // resolve its own ambiguity): keep polling, never guess.
           await new Promise((r) => setTimeout(r, 120))
           res = resolve(target)
         }
-        if (!res) return notFound(`No element matched within ${waitMs}ms. Tried: ${tried}`)
+        if (!res || 'refusal' in res) {
+          const refusal = res && 'refusal' in res ? res.refusal : null
+          const result = notFound(
+            refusal?.error ?? `No element matched within ${waitMs}ms. Tried: ${tried}`,
+          )
+          return {
+            ...result,
+            found: refusal?.code === 'LOCATOR_AMBIGUOUS' ? true : result.found,
+            ...(refusal
+              ? { code: refusal.code, matchCount: refusal.matchCount, candidates: refusal.candidates }
+              : {}),
+          }
+        }
         op.waitFor = 0
         return runOp(op)
       })() as unknown as OpResult
     }
 
     const resolution = resolve(op.target)
-    if (!resolution) {
+    if (!resolution || 'refusal' in resolution) {
       const tried = [op.target.primary, ...(op.target.fallbacks ?? [])]
         .map((spec) => serializeSpec(spec))
         .join(', ')
-      return notFound(`No element matched. Tried: ${tried}`)
+      const refusal = resolution && 'refusal' in resolution ? resolution.refusal : null
+      // A strict refusal is NOT the legacy "not found": the element may be
+      // right there — the IDENTITY is unclear. The structured code + match
+      // count + scored candidates are the evidence the failure classifier and
+      // the AI repair read; guessing would be the bug this prevents.
+      // An AMBIGUOUS refusal is not "not found": the elements are THERE, the
+      // identity is unclear — `found: true` + `ok: false` says exactly that.
+      const result = notFound(refusal?.error ?? `No element matched. Tried: ${tried}`)
+      return {
+        ...result,
+        found: refusal?.code === 'LOCATOR_AMBIGUOUS' ? true : result.found,
+        ...(refusal
+          ? { code: refusal.code, matchCount: refusal.matchCount, candidates: refusal.candidates }
+          : {}),
+      }
     }
 
     const element = resolution.element

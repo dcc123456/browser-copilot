@@ -40,6 +40,11 @@ export const OPERATOR_GUIDE = `# 工作流算子指南（Browser Copilot）
   筛选（城市/区域/薪资/经验）近似，并说明哪部分做不到、用了什么近似。
 - 可有可无的步骤用 element-exists 分支跳过；写 always-fail 的节点靠 AI 调试兜底
   是下策。
+- 生成首个 trigger 调用时带上 goalText:'<用户这次的需求原文>'；关键动作(forms 提交、
+  业务 event-click、webhook)必须带契约否则保存被拒:
+  data.__reliability={intent:'意图',idempotency:'unsafe',postconditions:[{kind:'urlContains',
+  value:'/dashboard'}或{kind:'elementText',target:{testId:'msg'},expected:'成功',
+  match:'contains'}]}(完成后必然可观察的事实)。
 
 ## 必填参数（缺参调用被直接拒绝，节点不记录；各工具 schema 已标 required）
 

@@ -174,7 +174,10 @@ describe('buildTakeoverPrompt', () => {
     expect(prompt).toContain('…')
     // The fixed guidance (incl. the upstream root-cause sections) is ~3.7k
     // chars; the bound catches param blow-ups.
-    expect(prompt.length).toBeLessThan(3800)
+    // Phase 12 added the mandatory reliability rules (only-the-failed-step /
+    // no blind replay / local-patch-only) to the takeover prompt; the context
+    // budget grows accordingly and stays well under the model window.
+    expect(prompt.length).toBeLessThan(4400)
   })
 })
 

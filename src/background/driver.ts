@@ -317,14 +317,17 @@ async function waitForActionable(
   tabId: number,
   target: Target,
   signal?: AbortSignal,
+  resolvePolicy?: Op['resolvePolicy'],
 ): Promise<void> {
   const deadline = Date.now() + 1200
   let prevRect: string | null = null
   while (Date.now() < deadline) {
     if (signal?.aborted) return
-    const result = await execOnActiveTab({ action: 'actionability', target }, signal, tabId).catch(
-      () => undefined,
-    )
+    const result = await execOnActiveTab(
+      resolvePolicy ? { action: 'actionability', target, resolvePolicy } : { action: 'actionability', target },
+      signal,
+      tabId,
+    ).catch(() => undefined)
     const data = result?.data as
       | {
           state?: 'ready' | 'blocked' | 'missing'
@@ -436,7 +439,7 @@ export async function execOnActiveTab(
   // element — wait for readiness first (budget-capped, fail-open). Skipped
   // for closed-shadow targets, which take the CDP path below anyway.
   if (typeof tab.id === 'number' && PRECHECK_OPS.has(op.action) && op.target) {
-    await waitForActionable(tab.id, op.target, signal)
+    await waitForActionable(tab.id, op.target, signal, op.resolvePolicy)
   }
 
   if (typeof tab.id === 'number' && targetIsClosedShadow(op.target)) {

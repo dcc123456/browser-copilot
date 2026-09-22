@@ -51,7 +51,11 @@ export interface TurnTokenUsage {
  * The distinction exists so the panel can say something useful instead of
  * showing nothing: only one of the two is worth suggesting a retry for.
  */
-export type WorkflowDraftEmptyReason = 'no-actions' | 'all-failed'
+export type WorkflowDraftEmptyReason = 'no-actions' | 'all-failed' | 'validation-failed'
+/** Extra context for the `validation-failed` empty reason (the issue list). */
+export interface WorkflowDraftEmptyDetail {
+  detail?: string
+}
 
 /** A running task as shown on the Tasks tab board. */
 export interface RunningTaskView {
@@ -215,6 +219,23 @@ export type Command =
    * `background/workflow-engine/ai-takeover`.
    */
   | { type: 'workflows.debug'; id: string; /** See workflows.run.windowId. */ windowId?: number }
+  /**
+   * Unified repair (spec §10). The shared WorkflowRepairEngine runs a
+   * takeover-free execution, diagnoses the failed vs root-cause nodes, and —
+   * depending on `mode` — returns the analysis, a previewable patch, or an
+   * applied + verified repair working copy (kept in the background pending the
+   * user's commit; the formal workflow is never replaced automatically).
+   */
+  | {
+      type: 'workflows.repair'
+      id: string
+      mode: 'ANALYZE' | 'SUGGEST' | 'AUTO_REPAIR'
+      /** See workflows.run.windowId. */ windowId?: number
+    }
+  /** Commit (formally save) the verified repair working copy. */
+  | { type: 'workflows.repairCommit'; id: string }
+  /** Discard the repair working copy / pending patch. */
+  | { type: 'workflows.repairDiscard'; id: string }
   /** Workflows with pending AI-takeover fixes awaiting user confirmation. */
   | { type: 'workflows.takeoverPending' }
   /** Aggregate AI-takeover success-rate stats (debug埋点). */
@@ -366,6 +387,7 @@ export type CommandResult =
        * silence — a silent card is indistinguishable from a broken feature.
        */
       empty?: WorkflowDraftEmptyReason
+      detail?: string
       /** Repeat runs worth folding, for the review card. */
       suggestions?: RepeatSuggestion[]
       /**
@@ -404,6 +426,12 @@ export type CommandResult =
       outcome: { ok: boolean; skipped: boolean; summary: string; error?: string; runId?: string }
     }
   | { type: 'workflows.debug'; result: WorkflowDebugResult }
+  | {
+      type: 'workflows.repair'
+      data: import('./workflow/repair/repair-response').RepairResponseData
+    }
+  | { type: 'workflows.repairCommit' }
+  | { type: 'workflows.repairDiscard' }
   | { type: 'workflows.takeoverPending'; items: PendingTakeoverInfo[] }
   | { type: 'workflows.takeoverStats'; summary: TakeoverStatsSummary }
   | { type: 'workflows.debugStats'; summary: DebugSessionStatsSummary }

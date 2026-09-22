@@ -120,6 +120,19 @@ export interface WorkflowExecCtx {
    * show the variable values at each step.
    */
   snapshot?: (nodeId: string, label: string, variables: Record<string, unknown>) => void
+  /**
+   * The workflow's resolved reliability contract (see
+   * `lib/workflow/reliability`). Present only on generated-strict runs: every
+   * element op then carries the strict resolve policy, so the kernel refuses
+   * ambiguous matches instead of acting on the first of many. Absent = the
+   * legacy compat behavior, bit for bit.
+   */
+  reliability?: {
+    mode: 'generated-strict'
+    ambiguity: 'error' | 'score' | 'first-visible'
+    minScore: number
+    minMargin: number
+  }
 }
 
 /**
@@ -249,9 +262,30 @@ async function evalInPage(
  * click that navigated mid-call is reported by the driver as `ok: true` with
  * a note — still a success, by design.
  */
+/**
+ * The strict resolve policy an element op carries on a generated-strict run,
+ * or `undefined` on a compat run (the kernel then keeps the legacy resolver).
+ */
+function resolvePolicyOf(ctx: WorkflowExecCtx): Op['resolvePolicy'] {
+  const reliability = ctx.reliability
+  if (!reliability) return undefined
+  return {
+    mode: 'strict',
+    ambiguity: reliability.ambiguity,
+    minScore: reliability.minScore,
+    minMargin: reliability.minMargin,
+  }
+}
+
 async function runRaw(op: Op, ctx: WorkflowExecCtx): Promise<string | null> {
   assertActive(ctx)
-  const result = await execOnActiveTab(op, ctx.signal, ctx.tabId, ctx.scope)
+  const policy = resolvePolicyOf(ctx)
+  const result = await execOnActiveTab(
+    policy ? { ...op, resolvePolicy: policy } : op,
+    ctx.signal,
+    ctx.tabId,
+    ctx.scope,
+  )
   if (result && result.ok === false) {
     throw new Error(result.error || `${op.action} 失败`)
   }

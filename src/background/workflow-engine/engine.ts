@@ -12,11 +12,28 @@
 import type { Workflow, WorkflowEdge, WorkflowNode } from '../../lib/workflow/types'
 import { getWorkflow } from '../../lib/workflow/storage'
 import { interpolateParams } from '../../lib/workflow/interpolate'
+import {
+  ambiguityPolicyOf,
+  idempotencyOf,
+  isGeneratedStrict,
+  nodeReliabilityOf,
+  STRICT_MIN_MARGIN,
+  STRICT_MIN_SCORE,
+} from '../../lib/workflow/reliability'
+import { describeCondition } from '../../lib/workflow/conditions'
+import { checkPageContext, pageContextOf } from '../../lib/workflow/page-context'
+import { ELEMENT_OP_BLOCKS } from '../../lib/workflow/generated-validation'
 import type { DebugStepLine } from '../../lib/workflow/auto-debug-patch'
 import type { ScopeWindow } from '../automation-scope'
 import type { BlockExecutor, WorkflowExecCtx } from './executors'
 import { EXECUTORS } from './executors'
 import { LoopBreakpointError } from './loop-breakpoint'
+import {
+  prepareNodeExecution,
+  verifyPostActionReadiness,
+  type ReadinessProbe,
+} from './readiness-engine'
+import { withFailureVerdict } from './failure-classifier'
 
 export type EmitKind = 'tool' | 'status' | 'result' | 'error' | 'info'
 
@@ -71,6 +88,22 @@ export interface WorkflowRunOptions {
   scope?: ScopeWindow
   /** Called for every status/result/error/info a block emits, plus engine errors. */
   onStep?(kind: EmitKind, nodeId: string, text: string): void
+  /**
+   * The readiness probe for generated-strict runs (see
+   * `readiness-engine`). When absent, readiness waits are skipped for the
+   * run — the engine never fails merely because no probe was wired.
+   */
+  readinessProbe?: ReadinessProbe
+  /**
+   * Evaluates one reliability condition against the live page + variables
+   * (generated-strict pre/postconditions). Absent → conditions are skipped.
+   */
+  evaluateCondition?: (condition: import('../../lib/workflow/conditions').WorkflowCondition) => Promise<boolean>
+  /**
+   * Observes the CURRENT page (url/title) for the page-context guard (§11).
+   * Absent → no guard. Refreshed whenever the automation tab changes.
+   */
+  getPageContext?: () => Promise<import('../../lib/workflow/page-context').CurrentPageContext | undefined>
   /** Override / inject the block-executor map. When omitted, the browser
    * executors are lazy-loaded (they pull the chrome-coupled driver chain);
    * Node-based runners such as the server runner always pass their own map,
@@ -138,6 +171,8 @@ export interface WorkflowRunOptions {
     nodeId: string
     status: 'ok' | 'failed' | 'cancelled'
     variables: Record<string, unknown>
+    /** Fine-grained phase (spec §14) — set on side-effect-safety entries. */
+    phase?: import('../../lib/workflow/checkpoints').CheckpointPhase
   }) => void
   /**
    * AI takeover (AI 接管): when a block fails, the engine hands that ONE node
@@ -317,6 +352,7 @@ function buildExecCtx(
   tabId: number | undefined,
   setTab: (id: number) => void,
   scope: ScopeWindow | undefined,
+  reliability: WorkflowExecCtx['reliability'],
 ): WorkflowExecCtx {
   return {
     variables,
@@ -327,6 +363,7 @@ function buildExecCtx(
     tabId,
     setTab,
     ...(scope ? { scope } : {}),
+    ...(reliability ? { reliability } : {}),
     emit: (kind, text) => onStep(kind, currentId, text),
   }
 }
@@ -371,6 +408,9 @@ async function runCore(
     onSnapshot,
     onCheckpoint,
     aiTakeover,
+    readinessProbe,
+    evaluateCondition,
+    getPageContext,
   } = options
 
   // The browser executors are statically imported above. Node-based runners
@@ -379,6 +419,27 @@ async function runCore(
   // NOTE: dynamic `import()` is disallowed in ServiceWorkerGlobalScope per
   // the HTML spec, so we must use a static import instead.
   const executorsMap: Partial<Record<string, BlockExecutor>> = executors ?? EXECUTORS
+
+  // The workflow's reliability contract, resolved once and threaded onto every
+  // executor ctx. Generated-strict runs attach the strict resolve policy to
+  // every element op (the kernel refuses ambiguous matches); compat runs get
+  // `undefined` and keep the legacy resolver bit for bit.
+  // Page-context guard state (§11): the expected fingerprint is derived ONCE
+  // (generation origin or explicit settings.pageContext); the CURRENT page is
+  // observed lazily and re-observed whenever the automation tab changes.
+  const expectedPageContext = isGeneratedStrict(workflow)
+    ? pageContextOf(workflow)
+    : undefined
+  let pageContextCheckedForTab: number | undefined | 'none' = 'none'
+
+  const reliability: WorkflowExecCtx['reliability'] = isGeneratedStrict(workflow)
+    ? {
+        mode: 'generated-strict',
+        ambiguity: ambiguityPolicyOf(workflow),
+        minScore: STRICT_MIN_SCORE,
+        minMargin: STRICT_MIN_MARGIN,
+      }
+    : undefined
 
   const nodes = workflow.drawflow.nodes
   const edges = workflow.drawflow.edges
@@ -423,7 +484,11 @@ async function runCore(
    * variables are structurally cloned: a snapshot must be serializable, and it
    * must not alias the live store the next block is about to mutate.
    */
-  const emitCheckpoint = (nodeId: string, status: 'ok' | 'failed' | 'cancelled'): void => {
+  const emitCheckpoint = (
+    nodeId: string,
+    status: 'ok' | 'failed' | 'cancelled',
+    phase?: import('../../lib/workflow/checkpoints').CheckpointPhase,
+  ): void => {
     if (!onCheckpoint) return
     let snapshot: Record<string, unknown> = {}
     try {
@@ -431,7 +496,13 @@ async function runCore(
     } catch {
       snapshot = {}
     }
-    onCheckpoint({ stepIndex: checkpointStep++, nodeId, status, variables: snapshot })
+    onCheckpoint({
+      stepIndex: checkpointStep++,
+      nodeId,
+      status,
+      variables: snapshot,
+      ...(phase ? { phase } : {}),
+    })
   }
 
   /** Overwrites `target` in place with `from` (keeps the object identity). */
@@ -557,8 +628,55 @@ async function runCore(
         targetTabId = id
       },
       scope,
+      reliability,
     )
     const policy = onErrorPolicy(params)
+
+    // Phase checkpoints for SIDE-EFFECT safety (spec §14): an unsafe node
+    // (login/submit/send/create/delete/pay — classified by idempotencyOf)
+    // records WHERE it got to, so a resume can tell "never fired" (safe to
+    // re-run) from "fired but unobserved" (must never blind-replay).
+    // Page-context guard (§11): before a strict run touches a page, the
+    // current page must BE the page the workflow was made for. Checked on
+    // the first page-acting node and refreshed whenever the tab changed.
+    const pageActing = ELEMENT_OP_BLOCKS.has(blockId) || blockId === 'open-url' || blockId === 'new-tab'
+    if (
+      expectedPageContext &&
+      getPageContext &&
+      pageActing &&
+      pageContextCheckedForTab !== (targetTabId ?? undefined)
+    ) {
+      const current = await getPageContext()
+      const verdict = checkPageContext(expectedPageContext, current ?? {})
+      if (!verdict.ok) {
+        throw new Error(`${verdict.code}: ${verdict.message}`)
+      }
+      pageContextCheckedForTab = targetTabId ?? undefined
+    }
+
+    const unsafeSpec = nodeReliabilityOf(current)
+    const unsafe = idempotencyOf(blockId, params, unsafeSpec) === 'unsafe'
+    if (unsafe) emitCheckpoint(nodeId, 'ok', 'nodeStarted')
+
+    // Terminal-state skip (spec §8.6/§14): on a strict run, an UNSAFE action
+    // whose declared postconditions ALREADY hold must not re-fire — the goal
+    // end state is there, and re-executing a submit/login to "prove" it is
+    // the exact bug class the contract forbids. Skip the node, log why.
+    if (unsafe && reliability && evaluateCondition && unsafeSpec?.postconditions?.length) {
+      let terminalStateHolds = true
+      for (const condition of unsafeSpec.postconditions) {
+        if (!(await evaluateCondition(condition))) {
+          terminalStateHolds = false
+          break
+        }
+      }
+      if (terminalStateHolds) {
+        emit('status', nodeId, `终态已满足（${blockId} 动作早已生效），跳过该节点`)
+        completedNodeIds.push(nodeId)
+        emitCheckpoint(nodeId, 'ok', 'nodeCommitted')
+        return defaultNext
+      }
+    }
 
     // Execute with Automa's onError semantics: retry up to retryTimes (with
     // retryInterval between attempts), then either route to the fallback handle
@@ -587,7 +705,68 @@ async function runCore(
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         if (attempt > 0 && beforeNode) restoreVariables(variables, beforeNode)
+        // Generated-strict readiness: the page must be READY before the action
+        // (§7), re-checked on every attempt — a retry re-observes, it does not
+        // assume. The readiness failure throws like any executor failure, so
+        // onError (retry/fallback/continue) keeps its exact semantics.
+        // Generated-strict preconditions: facts that must hold BEFORE the
+        // action (spec §8.3). A failed precondition throws before the page is
+        // touched — the retry path re-observes instead of blindly re-acting.
+        const nodeSpec = nodeReliabilityOf(current)
+        if (reliability && evaluateCondition && nodeSpec?.preconditions?.length) {
+          for (const condition of nodeSpec.preconditions) {
+            if (await evaluateCondition(condition)) continue
+            throw new Error(
+              `PRECONDITION_FAILED: ${describeCondition(condition)}`,
+            )
+          }
+        }
+        if (reliability && readinessProbe) {
+          const before = await prepareNodeExecution({
+            node: current,
+            blockId,
+            params,
+            nodeSelector: String(params['selector'] ?? params['cssSelector'] ?? ''),
+            signal: signalToUse,
+            probe: readinessProbe,
+          })
+          if (!before.ok) {
+            throw new Error(
+              `READINESS_TIMEOUT(${before.state}): ${before.detail ?? '页面未就绪'}`,
+            )
+          }
+        }
+        if (unsafe) emitCheckpoint(nodeId, 'ok', 'sideEffectStarted')
         resolver = await executor(params, ctx)
+        // Generated-strict post-action readiness (value committed, navigation
+        // settled): verified BEFORE the node can count as succeeded.
+        if (reliability && readinessProbe) {
+          const after = await verifyPostActionReadiness({
+            node: current,
+            blockId,
+            params,
+            nodeSelector: String(params['selector'] ?? params['cssSelector'] ?? ''),
+            signal: signalToUse,
+            probe: readinessProbe,
+          })
+          if (!after.ok) {
+            throw new Error(
+              `READINESS_TIMEOUT(${after.state}): ${after.detail ?? '动作后状态未确认'}`,
+            )
+          }
+        }
+        // Generated-strict postconditions: the step's own claim about what its
+        // success MEANS (spec §8). "Executor returned" is not "the step worked" —
+        // only the declared facts make it so.
+        if (reliability && evaluateCondition && nodeSpec?.postconditions?.length) {
+          for (const condition of nodeSpec.postconditions) {
+            if (await evaluateCondition(condition)) continue
+            throw new Error(
+              `POSTCONDITION_FAILED: ${describeCondition(condition)}`,
+            )
+          }
+        }
+        if (unsafe) emitCheckpoint(nodeId, 'ok', 'sideEffectObserved')
         succeeded = true
         break
       } catch (e) {
@@ -644,19 +823,28 @@ async function runCore(
         emit('status', nodeId, '运行失败，AI 开始接管该节点…')
         let outcome: AiTakeoverOutcome | null = null
         try {
-          outcome = await aiTakeover({
-            workflow,
-            failingNodeId: nodeId,
-            failedBlockId: blockId,
-            failedParams: params,
-            failedError: text,
-            ...(previousNodeId ? { previousNodeId } : {}),
-            steps: stepLines.slice(-25),
-            variables,
-            signal: signalToUse,
-            ...(scope ? { scope } : {}),
-            ...(targetTabId !== undefined ? { tabId: targetTabId } : {}),
-          })
+          outcome = await aiTakeover(
+            withFailureVerdict(
+              {
+                workflow,
+                failingNodeId: nodeId,
+                failedBlockId: blockId,
+                failedParams: params,
+                failedError: text,
+                ...(previousNodeId ? { previousNodeId } : {}),
+                steps: stepLines.slice(-25),
+                variables,
+                signal: signalToUse,
+                ...(scope ? { scope } : {}),
+                ...(targetTabId !== undefined ? { tabId: targetTabId } : {}),
+              },
+              {
+                selector: String(params['selector'] ?? params['cssSelector'] ?? '') || undefined,
+                variables,
+                stepLines: stepLines.map((line) => line.text),
+              },
+            ),
+          )
         } catch (takeoverError) {
           outcome = { completed: false, reason: message(takeoverError) }
         }
@@ -695,7 +883,7 @@ async function runCore(
         onSnapshot(nodeId, blockId, {})
       }
     }
-    emitCheckpoint(nodeId, 'ok')
+    emitCheckpoint(nodeId, 'ok', unsafe ? 'nodeCommitted' : undefined)
     return nextResult
   }
 

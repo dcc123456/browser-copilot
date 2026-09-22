@@ -160,6 +160,15 @@ import { readPersistedCheckpoints } from './checkpoint-store'
 import { resumePointOf } from '../lib/workflow/checkpoints'
 import { createAiTakeover } from './workflow-engine/ai-takeover'
 import { runDebugSession, DEFAULT_MAX_ROUNDS } from './workflow-engine/debug-session'
+import { runUnifiedDebug } from './workflow-engine/repair/unified-debug'
+import { createBackgroundRunner } from './workflow-engine/repair/background-runner'
+import { createAiRepairProposer } from './workflow-engine/repair/repair-provider'
+import { toRepairResponse } from '../lib/workflow/repair/repair-response'
+import {
+  discardRepairSession,
+  putRepairSession,
+  takeRepairSession,
+} from './workflow-engine/repair/repair-session-store'
 import { runUnattendedPrompt } from './agent-unattended'
 import { streamCompletion } from '../lib/llm'
 import { stripThinkBlocks } from '../lib/model-output'
@@ -1201,7 +1210,8 @@ async function handleCommand(
         command.conversationId,
         conversation?.title?.trim() || 'Workflow',
       )
-      if ('empty' in resolved) return { type: 'workflows.draft', empty: resolved.empty }
+      if ('empty' in resolved)
+        return { type: 'workflows.draft', empty: resolved.empty, detail: resolved.detail }
       return {
         type: 'workflows.draft',
         workflow: resolved.workflow,
@@ -1374,7 +1384,11 @@ async function handleCommand(
       const checkpoints =
         inMemory.length > 0 ? inMemory : await readPersistedCheckpoints(runId).catch(() => [])
       const point = resumePointOf(workflow, checkpoints)
-      if (!point) return { type: 'workflows.resumePoint', resumable: false }
+      if (!point || point.kind !== 'ok') {
+        // side-effect-unknown / fingerprint-mismatch are not offerable — the
+        // resume itself will report the structured reason.
+        return { type: 'workflows.resumePoint', resumable: false }
+      }
       return {
         type: 'workflows.resumePoint',
         resumable: true,
@@ -1755,6 +1769,90 @@ async function handleCommand(
       }
     }
 
+    case 'workflows.repair': {
+      // Unified repair (spec §10). The same engine drives all three modes;
+      // AI takeover is disabled for every execution. The formal workflow is
+      // never replaced here — a verified working copy waits in memory until
+      // the user sends workflows.repairCommit.
+      const repairWorkflow = await getWorkflow(command.id)
+      if (!repairWorkflow) throw new Error('Workflow not found.')
+      const runner = createBackgroundRunner({
+        executeWorkflow,
+        ...(command.windowId !== undefined ? { scopeWindowId: command.windowId } : {}),
+      })
+      const settings = await getSettings()
+      const modelConfig = takeoverProviderOf(settings)
+      const proposer = modelConfig
+        ? createAiRepairProposer({
+            apiKey: modelConfig.apiKey,
+            baseUrl: modelConfig.baseUrl,
+            model: modelConfig.model,
+            headers: modelConfig.headers,
+          })
+        : undefined
+
+      retain()
+      try {
+        const result = await runUnifiedDebug(repairWorkflow, command.mode, {
+          runner,
+          // The repair engine needs a checkpoint store for replay planning.
+          // Use the run-workflow module's real (synchronous) store: the
+          // checkpoints were written during the just-finished execution.
+          store: getCheckpointStore(),
+          ...(proposer ? { propose: (ctx) => proposer.propose(ctx) } : {}),
+        })
+
+        // A verified AUTO_REPAIR: keep the working copy for the commit step.
+        if (command.mode === 'AUTO_REPAIR' && result.ok && result.workingCopy && result.patch) {
+          putRepairSession({
+            workflowId: repairWorkflow.id,
+            workingCopy: result.workingCopy,
+            patch: result.patch,
+            analysis: result.analysis,
+            verification: result.verification,
+            createdAt: Date.now(),
+          })
+        }
+
+        return {
+          type: 'workflows.repair',
+          data: toRepairResponse(
+            repairWorkflow.id,
+            result.analysis,
+            result.verification,
+            command.mode,
+            result.patch?.operations ?? [],
+            { ok: result.ok, reason: result.reason },
+          ),
+        }
+      } finally {
+        release()
+      }
+    }
+
+    case 'workflows.repairCommit': {
+      // Formally save the verified repair working copy. The pending session
+      // must exist and its working copy must have been verified WITHOUT AI
+      // takeover (it is only ever stored after such a result).
+      const pending = takeRepairSession(command.id)
+      if (!pending) throw new Error('No verified repair to commit for this workflow.')
+      const repaired: Workflow = {
+        ...pending.workingCopy,
+        updatedAt: Date.now(),
+      }
+      await saveWorkflow(repaired)
+      return { type: 'workflows.repairCommit' }
+    }
+
+    case 'workflows.repairDiscard': {
+      const existed = discardRepairSession(command.id)
+      if (!existed) {
+        // Nothing in-memory (worker may have restarted): report honestly.
+        return { type: 'workflows.repairDiscard' }
+      }
+      return { type: 'workflows.repairDiscard' }
+    }
+
     case 'workflows.takeoverPending':
       return { type: 'workflows.takeoverPending', items: await listPendingTakeovers() }
 
@@ -1906,7 +2004,10 @@ chrome.runtime.onConnect.addListener((port) => {
    * user's approve/reject decision (rejection carries revision feedback), or
    * a rejected decision when the card can no longer be answered.
    */
-  const pendingPlan = new Map<string, (decision: { approved: boolean; feedback?: string }) => void>()
+  const pendingPlan = new Map<
+    string,
+    (decision: { approved: boolean; feedback?: string }) => void
+  >()
   let controller: AbortController | null = null
 
   const send = (message: AgentServerMessage): void => {

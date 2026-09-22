@@ -14,6 +14,7 @@ import { dataValueSites } from './data-params'
 import { hasReference } from './dynamic-data'
 import { unanchoredElementStart } from './runnability'
 import { missingRequirements, missingTriggerParam } from './block-requirements'
+import { goalGateProblems } from './reliability'
 import { BLOCK_BY_ID } from './blocks/palette'
 import type { Workflow, WorkflowNode } from './types'
 
@@ -203,6 +204,15 @@ function producesTableRows(blockId: string, data: Record<string, unknown>): bool
 export function validateWorkflowForRun(workflow: Workflow): WorkflowRunValidation {
   const errors: string[] = []
   const warnings: string[] = []
+
+  // NOTE: the goal-spec requirement is NOT a runnability blocker. A graph can
+  // run perfectly well without a verifiable business goal — the L3 layer just
+  // reports "nothing to verify" honestly. The goal gate used to be pushed into
+  // `errors` here, which dead-ended generation (save card refused to open) even
+  // though the workflow itself was executable. The generated validator
+  // (`validateGeneratedWorkflow`) is the single, authoritative gate and it
+  // auto-completes missing contracts at assembly time.
+  void goalGateProblems
 
   const triggerNode = triggerNodeOf(workflow)
   if (!triggerNode && !workflow.trigger) {

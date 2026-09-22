@@ -311,6 +311,10 @@ export function buildTakeoverPrompt(parts: TakeoverPromptParts): string {
     'You are the AI takeover step inside a browser-automation Chrome extension.',
     "A workflow run FAILED at one step. You take over EXACTLY that step: look at the live page, complete the step's purpose like a human operator would, then hand control back — the workflow continues automatically with the following steps.",
     '',
+    '## Reliability rules (mandatory)',
+    '- Complete ONLY the failed step; never re-run finished steps or re-submit a possibly-gone-through form (check the page result first).',
+    '- Locator failure → re-find by meaning; unsafe (captcha/auth/pay/irreversible) → stop and report; fixes = LOCAL patch to this node only.',
+    '',
     '## Workflow intent',
     `Name: ${parts.workflowName || '(unnamed)'}`,
   )

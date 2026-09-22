@@ -25,6 +25,8 @@ import { onStoreChanged } from '../lib/store-events'
 import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
 import { useT } from './i18n'
 import { confirmDialog } from '../ui/confirm'
+import { RepairDialog } from './RepairDialog'
+import type { RepairResponseData } from '../lib/workflow/repair/repair-response'
 
 /**
  * Localized label for a classified takeover failure reason (stats line).
@@ -408,6 +410,63 @@ export default function WorkflowsTab() {
   const [debugStats, setDebugStats] = useState<DebugSessionStatsSummary | null>(null)
   const debuggingNameRef = useRef('')
   const debugStartedAtRef = useRef(0)
+
+  // Unified repair (spec §12): the latest serialized repair result shown in
+  // the RepairDialog; null when no dialog is open.
+  const [repairData, setRepairData] = useState<RepairResponseData | null>(null)
+  const [repairBusy, setRepairBusy] = useState(false)
+
+  /**
+   * Run the shared WorkflowRepairEngine in one of the three modes. The first
+   * pass is always a takeover-free execution; only AUTO_REPAIR produces a
+   * committable (verified) working copy.
+   */
+  const runRepair = async (
+    id: string,
+    mode: 'ANALYZE' | 'SUGGEST' | 'AUTO_REPAIR',
+  ): Promise<void> => {
+    setRepairBusy(true)
+    try {
+      const result = await sendCommand({ type: 'workflows.repair', id, mode })
+      if (result.type === 'workflows.repair') {
+        setRepairData(result.data)
+      }
+    } catch (error) {
+      setBanner({
+        kind: 'error',
+        text: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setRepairBusy(false)
+    }
+  }
+
+  /** Formally save the verified repair working copy. */
+  const commitRepair = async (id: string): Promise<void> => {
+    setRepairBusy(true)
+    try {
+      await sendCommand({ type: 'workflows.repairCommit', id })
+      setBanner({ kind: 'ok', text: t.workflowsRepairCommitted })
+      setRepairData(null)
+      await load()
+    } catch (error) {
+      setBanner({
+        kind: 'error',
+        text: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setRepairBusy(false)
+    }
+  }
+
+  /** Discard the pending repair working copy / result. */
+  const discardRepair = async (id: string): Promise<void> => {
+    try {
+      await sendCommand({ type: 'workflows.repairDiscard', id }).catch(() => undefined)
+    } finally {
+      setRepairData(null)
+    }
+  }
   const logOpenRef = useRef(false)
   const logBodyRef = useRef<HTMLDivElement | null>(null)
 
@@ -1096,6 +1155,28 @@ export default function WorkflowsTab() {
                   >
                     {debuggingId === wf.id ? t.workflowsDebugging : t.workflowsDebug}
                   </button>
+                  {/* Unified repair (spec §12): shared diagnose vs constrained
+                      patch engine. ANALYZE is read-only; AUTO_REPAIR applies to
+                      a verified working copy and never touches the formal wf
+                      before the dialog's commit. */}
+                  <button
+                    className="task-action-repair"
+                    disabled={busy || repairBusy}
+                    title={t.workflowsRepairAnalyze}
+                    onClick={() => void runRepair(wf.id, 'ANALYZE')}
+                    type="button"
+                  >
+                    {repairBusy ? t.workflowsRepairRunning : t.workflowsRepairAnalyze}
+                  </button>
+                  <button
+                    className="task-action-repair"
+                    disabled={busy || repairBusy}
+                    title={t.workflowsRepairAuto}
+                    onClick={() => void runRepair(wf.id, 'AUTO_REPAIR')}
+                    type="button"
+                  >
+                    {repairBusy ? t.workflowsRepairRunning : t.workflowsRepairAuto}
+                  </button>
                   <button disabled={busy} onClick={() => openEditor(wf.id)} type="button">
                     {t.workflowsEdit}
                   </button>
@@ -1144,6 +1225,16 @@ export default function WorkflowsTab() {
             )
           })}
         </ul>
+      )}
+
+      {repairData && (
+        <RepairDialog
+          data={repairData}
+          busy={repairBusy}
+          onClose={() => setRepairData(null)}
+          onCommit={() => void commitRepair(repairData.workflowId)}
+          onDiscard={() => void discardRepair(repairData.workflowId)}
+        />
       )}
 
       {logOpen && (

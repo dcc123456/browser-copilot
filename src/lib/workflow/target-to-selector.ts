@@ -16,7 +16,16 @@
  * @module lib/workflow/target-to-selector
  */
 
-/** One target spec as it arrives from the model: unvalidated JSON. */
+import { semanticLocatorFromTarget, type SemanticLocator } from './element-fingerprint'
+import {
+  candidateFromSelectorString,
+  scoreCandidate,
+  type LocatorCandidate,
+} from './locator-score'
+import type { NodeLocatorSpec } from './reliability'
+
+/**
+ * One target spec as it arrives from the model: unvalidated JSON. */
 interface RawSpec {
   how?: unknown
   value?: unknown
@@ -60,6 +69,12 @@ export interface RecordedLocator {
    * the first suspect when a replay misses.
    */
   verified?: boolean
+  /**
+   * The element's semantic identity (role/accessible name/test id/stable
+   * attributes), derived from the rich target. The selector is ONE hint; this
+   * is the identity the strict runtime and the validators read.
+   */
+  semantic?: SemanticLocator
 }
 
 /**
@@ -183,25 +198,101 @@ export function selectorCandidatesOf(locator: RecordedLocator): string[] {
  * Pick the selector a node should record, given live match counts.
  *
  * A selector that matches EXACTLY ONE element on the page at record time is
- * the only provably replayable one: the element the user actually picked. So
- * the first candidate (preference order preserved) with a count of 1 wins and
- * is marked verified. When nothing matches exactly, the best fallback is a
- * candidate that at least matches something — the recorded behavior stays
- * what it was, minus the pretense of being verified. When not even that
- * exists, record NO selector: the rich target (role/text specs) becomes the
- * replay's primary, which is exactly the case where a positional CSS path
- * would only ever mislead.
+ * the only provably replayable one: the element the user actually picked.
+ * Among the exact-one candidates the highest-SCORED one wins (see
+ * `locator-score`) — an identity-bearing locator (#id, [data-testid],
+ * [name]) beats a positional CSS path that merely got lucky, which is the
+ * spec's "不要因为 CSS 是第一候选就胜出". Preference order breaks ties.
+ * When nothing matches exactly, the best fallback is a candidate that at
+ * least matches something — the recorded behavior stays what it was, minus
+ * the pretense of being verified. When not even that exists, record NO
+ * selector: the rich target (role/text specs) becomes the replay's primary,
+ * which is exactly the case where a positional CSS path would only ever
+ * mislead.
  */
 export function chooseRecordedSelector(
   locator: RecordedLocator,
   countOf: (selector: string) => number,
 ): { selector: string; verified: boolean } {
-  const candidates = selectorCandidatesOf(locator)
-  for (const candidate of candidates) {
-    if (countOf(candidate) === 1) return { selector: candidate, verified: true }
+  const scored = scoredSelectorCandidatesOf(locator, countOf)
+  const exact = scored.filter((entry) => entry.count === 1)
+  if (exact.length > 0) {
+    // scoreCandidates sorts by score; rebuild here so the ORIGINAL preference
+    // order breaks ties (stable: equal scores keep their relative order).
+    let best = exact[0]!
+    for (const entry of exact) {
+      if (entry.score > best.score) best = entry
+    }
+    return { selector: best.selector, verified: true }
   }
-  const alive = candidates.find((candidate) => countOf(candidate) > 0)
-  return { selector: alive ?? '', verified: false }
+  const alive = scored.find((entry) => entry.count > 0)
+  return { selector: alive?.selector ?? '', verified: false }
+}
+
+/** One candidate selector with its origin spec, live count and score. */
+interface ScoredSelectorCandidate {
+  selector: string
+  candidate: LocatorCandidate
+  count: number
+  score: number
+}
+
+/**
+ * Every CSS selector worth probing for a locator, paired with the candidate
+ * metadata the scorer needs: the explicit/derived selector first, then the
+ * rich target's primary spec and its fallbacks (only the CSS-mappable ones).
+ * Deduplicated, non-empty, each scored with `verified = (count === 1)`.
+ */
+function scoredSelectorCandidatesOf(
+  locator: RecordedLocator,
+  countOf: (selector: string) => number,
+): ScoredSelectorCandidate[] {
+  const out: ScoredSelectorCandidate[] = []
+  const push = (selector: string, candidate: LocatorCandidate): void => {
+    const trimmed = selector.trim()
+    if (!trimmed) return
+    if (out.some((entry) => entry.selector === trimmed)) return
+    const verified = countOf(trimmed) === 1
+    const withVerification: LocatorCandidate = { ...candidate, verified }
+    out.push({
+      selector: trimmed,
+      candidate: withVerification,
+      count: countOf(trimmed),
+      score: scoreCandidate(withVerification),
+    })
+  }
+  // The explicit selector's provenance is unknown — classify it by shape.
+  const explicit = (locator.selector ?? '').trim()
+  if (explicit) push(explicit, candidateFromSelectorString(explicit))
+  const raw = locator.target as RawTarget | undefined
+  if (raw && typeof raw === 'object') {
+    const specs = [raw.primary, ...(Array.isArray(raw.fallbacks) ? raw.fallbacks : [])]
+    for (const spec of specs) {
+      const selector = selectorFromSpec(spec)
+      if (!selector) continue
+      const how = typeof spec?.how === 'string' ? spec.how : 'css'
+      const value = typeof spec?.value === 'string' ? spec.value.trim() : ''
+      const nth = typeof spec?.nth === 'number' && spec.nth > 0 ? spec.nth : undefined
+      let candidate: LocatorCandidate
+      switch (how) {
+        case 'testid':
+          candidate = { kind: 'testid', value }
+          break
+        case 'id':
+          candidate = { kind: 'id', value }
+          break
+        case 'name':
+          candidate = { kind: 'name', value }
+          break
+        default:
+          candidate = candidateFromSelectorString(selector)
+          break
+      }
+      if (nth) candidate = { ...candidate, kind: 'positional', value: selector }
+      push(selector, candidate)
+    }
+  }
+  return out.slice(0, MAX_CANDIDATES)
 }
 
 /** Attach the rich locator to flat block data when present. */
@@ -240,11 +331,29 @@ export function resolveRecordedLocator(
   const inlineLabel = typeof args?.label === 'string' ? args.label.trim() : ''
   const label = inlineLabel || hit?.name || ''
   const type = typeof hit?.type === 'string' && hit.type.trim() ? hit.type.trim() : ''
+  const semantic = semanticLocatorFromTarget(target)
 
   return {
     selector,
     ...(target ? { target } : {}),
     ...(label ? { label } : {}),
     ...(type ? { type } : {}),
+    ...(semantic ? { semantic } : {}),
+  }
+}
+
+/**
+ * The `__reliability.locator` node-data patch a recorded locator implies
+ * (spec §5.5): the semantic identity when one was observed, plus the live
+ * probe result. `undefined` when the locator carries neither — there is
+ * nothing reliability-relevant to say, and the node data stays untouched.
+ */
+export function reliabilityLocatorOf(locator: RecordedLocator): NodeLocatorSpec | undefined {
+  const semantic = locator.semantic ?? semanticLocatorFromTarget(locator.target)
+  const selectorVerified = typeof locator.verified === 'boolean' ? locator.verified : undefined
+  if (!semantic && selectorVerified === undefined) return undefined
+  return {
+    ...(semantic ? { semantic } : {}),
+    ...(selectorVerified !== undefined ? { selectorVerified } : {}),
   }
 }

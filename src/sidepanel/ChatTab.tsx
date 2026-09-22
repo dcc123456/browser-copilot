@@ -1772,7 +1772,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       setSaveNotice(
         result.empty === 'all-failed'
           ? tRef.current.chatWorkflowNothingSavedFailed
-          : tRef.current.chatWorkflowNothingSaved,
+          : result.empty === 'validation-failed'
+            ? // The draft exists but failed the runnability/reliability gate:
+              // no broken card is offered — the reason goes back to the model.
+              tRef.current.chatWorkflowNotRunnable(result.detail ?? '')
+            : tRef.current.chatWorkflowNothingSaved,
       )
       return
     }
@@ -2722,6 +2726,52 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     }
   }
 
+  /**
+   * "Save then AI debug": persist the workflow FIRST (saving is never
+   * blocked), then run the AI debug session so the model can repair any
+   * runnability problems. Debug fixes still require the user's confirmation
+   * before they overwrite the just-saved workflow.
+   */
+  const saveThenDebug = async (workflow: Workflow): Promise<void> => {
+    const prompt = workflowPrompt
+    if (!prompt || prompt.saving) return
+    await persistPromptWorkflow(prompt)
+    // persistPromptWorkflow closes the card on success; the debug session runs
+    // against the now-saved workflow and streams onto the running board.
+    append({ role: 'status', text: tRef.current.chatWorkflowSaveThenDebugStarted })
+    try {
+      const debug = await sendCommand({ type: 'workflows.debug', id: workflow.id })
+      if (debug.type === 'workflows.debug') {
+        const r = debug.result
+        if (r.ok && r.pendingChanges.length > 0) {
+          append({
+            role: 'status',
+            text: tRef.current.chatWorkflowVerifyPending({ count: r.pendingChanges.length }),
+          })
+        } else if (r.ok) {
+          append({
+            role: 'status',
+            text: tRef.current.chatWorkflowVerifyPassed({
+              summary: (r.summary || '').slice(0, 200),
+            }),
+          })
+        } else if (!r.cancelled) {
+          append({
+            role: 'error',
+            text: tRef.current.chatWorkflowVerifyFailed({
+              reason: (r.error || r.summary || '').slice(0, 300),
+            }),
+          })
+        }
+      }
+    } catch (error) {
+      append({
+        role: 'error',
+        text: tRef.current.chatWorkflowVerifyFailed({ reason: (error as Error).message }),
+      })
+    }
+  }
+
   /** Review dialog confirm: save with the (possibly AI-adjusted) keep set. */
   const confirmSaveReview = (): void => {
     const prompt = workflowPrompt
@@ -3278,9 +3328,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                 </p>
                 {runIssues.errors.map((error, index) => (
                   <div className="ai-prefill-item" key={`run-error-${index}`}>
-                    <span className="wf-input-name text-err">
-                      {t.chatWorkflowRunIssuesError}
-                    </span>
+                    <span className="wf-input-name text-err">{t.chatWorkflowRunIssuesError}</span>
                     <span className="wf-input-default">{error}</span>
                   </div>
                 ))}
@@ -3291,9 +3339,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                   </div>
                 ))}
                 {runIssues.errors.length > 0 && (
-                  <p className="hint text-err mt-1">
-                    {t.chatWorkflowRunIssuesBlocked}
-                  </p>
+                  <p className="hint text-warn mt-1">{t.chatWorkflowRunIssuesNonBlocking}</p>
                 )}
               </div>
             )}
@@ -3389,17 +3435,22 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             <div className="actions">
               <button
                 className="primary"
-                disabled={workflowPrompt.saving || (runIssues !== null && runIssues.errors.length > 0)}
+                disabled={workflowPrompt.saving}
                 onClick={savePromptWorkflowDirect}
-                title={
-                  runIssues !== null && runIssues.errors.length > 0
-                    ? t.chatWorkflowRunIssuesBlocked
-                    : undefined
-                }
                 type="button"
               >
                 {t.chatSaveWorkflowSave}
               </button>
+              {runIssues !== null && runIssues.errors.length > 0 && (
+                <button
+                  disabled={workflowPrompt.saving || workflowPrompt.reviewing}
+                  onClick={() => void saveThenDebug(workflowPrompt.workflow)}
+                  title={t.chatWorkflowSaveThenDebugHint}
+                  type="button"
+                >
+                  {t.chatWorkflowSaveThenDebug}
+                </button>
+              )}
               {workflowPrompt.stepList.length > 0 && (
                 <button
                   disabled={workflowPrompt.saving || workflowPrompt.reviewing}
@@ -3516,7 +3567,9 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         <div className="relative min-h-0 flex-1">
           {activeSkill && (
             <div className="skill-chip absolute left-2 top-1.5 z-10 mr-2">
-              <span className="skill-chip-name">{t.chatSkillActive({ name: activeSkill.name })}</span>
+              <span className="skill-chip-name">
+                {t.chatSkillActive({ name: activeSkill.name })}
+              </span>
               <button
                 aria-label={t.skillsStopUsing}
                 className="skill-chip-clear"
