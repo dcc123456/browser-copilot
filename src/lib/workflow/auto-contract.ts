@@ -11,6 +11,9 @@
  *     unsafe; plain clicks → safe).
  *   - a missing postcondition defaults to the one observable fact the block
  *     itself targets (the acted element) — never an invented business result.
+ *   - a missing readiness spec is filled from the per-block default table
+ *     (`readiness#defaultReadinessFor`), so every key element action waits on
+ *     observable state rather than on a fixed sleep.
  *
  * What this does NOT do: it never invents a business goal, never marks an
  * unsafe action safe, and never weakens an existing contract. It only fills
@@ -19,6 +22,7 @@
  */
 import { NODE_RELIABILITY_KEY, type NodeReliabilitySpec } from './reliability'
 import { nodeReliabilityOf } from './reliability'
+import { defaultReadinessFor } from './readiness'
 
 /** Verbs that classify an action as unsafe (non-idempotent). */
 const UNSAFE_VERBS: ReadonlySet<string> = new Set([
@@ -130,6 +134,13 @@ interface LikeNode {
  * in place. Idempotent: existing (model-written) contracts always win — the
  * completion only fills gaps, it never overrides or relaxes anything.
  *
+ * Fills, independently:
+ *
+ *   - readiness      — every key element action that has a block default
+ *                      (`defaultReadinessFor`) but no explicit readiness spec;
+ *   - idempotency    — an inferred-unsafe node with no declared level;
+ *   - postconditions — an inferred-unsafe node with none.
+ *
  * Returns the number of nodes completed, so callers/logs can report it.
  */
 export function autoCompleteReliability(nodes: LikeNode[]): number {
@@ -142,15 +153,23 @@ export function autoCompleteReliability(nodes: LikeNode[]): number {
 
     const existing = nodeReliabilityOf({ data } as never)
     const inferred = inferIdempotency(blockId, data)
-    const needsIdempotency = inferred === 'unsafe' && !existing?.idempotency
-    const needsPost =
-      inferred === 'unsafe' && (!existing?.postconditions || existing.postconditions.length === 0)
-    if (!needsIdempotency && !needsPost) continue
+    const unsafe = inferred === 'unsafe'
+    const needsIdempotency = unsafe && !existing?.idempotency
+    const needsPost = unsafe && (!existing?.postconditions || existing.postconditions.length === 0)
+    // Attach a block-default readiness only when the contract carries no
+    // explicit readiness yet (model-written readiness always wins).
+    const needsReadiness =
+      !existing?.readiness && defaultReadinessFor(blockId, data) !== undefined
+    if (!needsIdempotency && !needsPost && !needsReadiness) continue
 
     const base: Record<string, unknown> = isRecord(data[NODE_RELIABILITY_KEY])
       ? { ...(data[NODE_RELIABILITY_KEY] as Record<string, unknown>) }
       : {}
     if (needsIdempotency) base['idempotency'] = 'unsafe'
+    if (needsReadiness) {
+      // Non-optional: guarded above.
+      base['readiness'] = defaultReadinessFor(blockId, data)
+    }
     if (needsPost) {
       const post =
         defaultPostcondition(data) ??
