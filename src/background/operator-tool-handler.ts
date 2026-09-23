@@ -50,6 +50,7 @@ import {
   type CollapseProbe,
   type RepeatSuggestion,
 } from '../lib/workflow/loop-collapse'
+import { normalizeWorkflowDraft } from './workflow-engine/generation/normalize'
 import type { DraftSource, PendingBranch, WorkflowDraft } from '../lib/workflow/draft-types'
 import type { DeclaredInput } from '../lib/workflow/dynamic-data'
 import {
@@ -599,6 +600,15 @@ export async function composeWorkflowFromDraft(
     return { error: 'No draft to compose. Call wf_op_* tools first.' }
   }
   ensureTriggerHead(draft)
+  // Normalize the captured action list into a tighter program BEFORE the
+  // reliability contract is completed (spec §7): collapse duplicate clicks /
+  // navigation, drop redundant delays before readiness-protected actions and
+  // remove exploratory actions. The same draft is updated in place — compose
+  // is the terminal operation over it.
+  const normalized = normalizeWorkflowDraft(draft)
+  draft.nodes = normalized.draft.nodes
+  draft.edges = normalized.draft.edges
+  draft.tail = normalized.draft.tail
   // The user's request that started the generation, captured on the trigger
   // call (`goalText`) — becomes the derived goal's summary when present.
   const triggerHead = draft.nodes.find(isTriggerNode)
