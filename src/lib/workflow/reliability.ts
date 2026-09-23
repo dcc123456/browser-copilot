@@ -88,6 +88,17 @@ export interface NodeReliabilitySpec {
   readiness?: ReadinessSpec
   /** Locator reliability metadata (semantic identity + probe result). */
   locator?: NodeLocatorSpec
+  /**
+   * Repair hints recorded at generation time (spec §36): tells the repair
+   * orchestrator which strategies to prefer for THIS node — e.g. "fix the
+   * selector first" or "selector repair is low-value, go straight to a
+   * semantic target".
+   */
+  repairHints?: {
+    preferredStrategies?: import('./repair-session').RepairStrategy[]
+    allowGraphEdit?: boolean
+    allowReplan?: boolean
+  }
 }
 
 // --- Mode resolution -----------------------------------------------------------
