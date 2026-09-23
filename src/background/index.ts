@@ -182,6 +182,16 @@ import {
   putRepairSession,
   takeRepairSession,
 } from './workflow-engine/repair/repair-session-store'
+import {
+  autoRepairEvents,
+  autoRepairRunning,
+  cancelAutoRepair,
+  startBackgroundAutoRepair,
+} from './workflow-engine/auto-repair/background-adapter'
+import { failureSnapshotForRun } from './workflow-engine/auto-repair/failure-snapshot'
+import { rememberFailedRun, lastFailedRun } from './workflow-engine/auto-repair/failure-snapshot'
+import type { ExecutionTrace } from '../lib/workflow/repair/types'
+import { isGeneratedStrict } from '../lib/workflow/reliability'
 import { runUnattendedPrompt } from './agent-unattended'
 import { streamCompletion } from '../lib/llm'
 import { stripThinkBlocks } from '../lib/model-output'
@@ -758,6 +768,21 @@ setWindowPickRequester(async (request: WindowPickRequest) => {
     // open panel) — the timeout fallback in window-policy answers null.
   }
 })
+
+/**
+ * Push an unsolicited repair progress event to every open panel. No receiver
+ * is fine: the settled command result still carries the final status.
+ */
+async function broadcastRepairEvent(
+  event: import('../lib/workflow/repair-events').RepairProgressEvent,
+): Promise<void> {
+  const message = { type: 'workflows.repairEvent', event }
+  try {
+    await chrome.runtime.sendMessage(message)
+  } catch {
+    // No panel subscribed.
+  }
+}
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // 0. Floating-button protocol — MUST be handled before any await: the
@@ -1522,13 +1547,55 @@ async function handleCommand(
         // editor popup, which is not a normal window).
         ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
       })
+
+      // Auto repair (spec §30 Run defaults): a generated-strict workflow's
+      // first-run failure enters the autonomous repair loop automatically —
+      // no user click. The repair runs in the background; events stream to
+      // the panel and the run result below reports whether it recovered.
+      let autoRepairOutcome:
+        | { status: 'success' | 'exhausted' | 'blocked'; revision?: number; reason?: string }
+        | undefined
+      if (r.outcome === 'failed' && isGeneratedStrict(workflow) && !takeover && r.trace) {
+        rememberFailedRun(workflow.id, r.runId, r.trace)
+        const repairSettings = await getSettings()
+        const repairModelConfig = takeoverProviderOf(repairSettings)
+        try {
+          autoRepairOutcome = await startBackgroundAutoRepair({
+            workflow,
+            runId: r.runId,
+            failure: failureSnapshotForRun(workflow, r.runId),
+            ...(repairModelConfig
+              ? {
+                  model: {
+                    apiKey: repairModelConfig.apiKey,
+                    baseUrl: repairModelConfig.baseUrl,
+                    model: repairModelConfig.model,
+                    headers: repairModelConfig.headers,
+                  },
+                }
+              : {}),
+            save: { saveWorkflow, getWorkflow },
+            ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
+            forward: (event) => {
+              void broadcastRepairEvent(event)
+            },
+          })
+        } catch (error) {
+          console.warn('[workflows.run] auto repair failed to start', error)
+        }
+      }
+
+      const runOk = r.outcome === 'ok' || autoRepairOutcome?.status === 'success'
       return {
         type: 'workflows.run',
         outcome: {
-          ok: r.outcome === 'ok',
+          ok: runOk,
           skipped: false,
-          summary: r.summary ?? '',
-          error: r.outcome === 'failed' ? r.summary : undefined,
+          summary:
+            runOk && r.outcome !== 'ok'
+              ? `auto-repaired at revision ${autoRepairOutcome?.revision ?? ''}`
+              : r.summary ?? '',
+          error: runOk ? undefined : r.summary,
           runId: r.runId,
         },
       }
@@ -2237,6 +2304,61 @@ async function handleCommand(
             ...(recoveryProposer ? { propose: (ctx) => recoveryProposer.propose(ctx) } : {}),
           })
           if (!suggestion.patch) {
+            // Spec §21 / §15: "no patch proposed" is NOT a human takeover —
+            // it only says the first (lowest) strategy had no candidate. The
+            // autonomous repair ladder advances through the remaining
+            // strategies; HUMAN_TAKEOVER is reserved for a genuine blocker
+            // or an exhausted ladder. Hand the run off to the new
+            // orchestrator (fire-and-forget; events stream to the panel).
+            const failedRunId =
+              (suggestion as { lastRunId?: string }).lastRunId ??
+              command.runId ??
+              listFinished().find((run) => run.workflowId === targetWorkflow.id && run.outcome === 'failed')
+                ?.runId ??
+              ''
+            if (failedRunId) {
+              try {
+                // Build failure evidence. Prefer the remembered trace;
+                // otherwise synthesize minimal evidence from the debug
+                // summary (the orchestrator re-diagnoses as its first step).
+                if (!lastFailedRun(targetWorkflow.id)) {
+                  const synthetic: ExecutionTrace = {
+                    traceId: failedRunId,
+                    nodeExecutions: [],
+                    events: [],
+                  } as unknown as ExecutionTrace
+                  rememberFailedRun(targetWorkflow.id, failedRunId, synthetic)
+                }
+                void startBackgroundAutoRepair({
+                  workflow: targetWorkflow,
+                  runId: failedRunId,
+                  failure: failureSnapshotForRun(targetWorkflow, failedRunId),
+                  ...(recoveryModel
+                    ? {
+                        model: {
+                          apiKey: recoveryModel.apiKey,
+                          baseUrl: recoveryModel.baseUrl,
+                          model: recoveryModel.model,
+                          headers: recoveryModel.headers,
+                        },
+                      }
+                    : {}),
+                  save: { saveWorkflow, getWorkflow },
+                  forward: (event) => {
+                    void broadcastRepairEvent(event)
+                  },
+                }).catch((error: unknown) => {
+                  console.warn('[workflows.recovery] autonomous repair failed', error)
+                })
+                const outcome = { phase: 'DIAGNOSING', status: 'running' } as const
+                rememberRecoveryOutcome(command.requestId, outcome)
+                return recoveryEnvelopeResult(command, outcome,
+                  suggestion.reason ?? 'continuing with additional repair strategies',
+                  command.timestamp)
+              } catch (error) {
+                console.warn('[workflows.recovery] could not start autonomous repair', error)
+              }
+            }
             const outcome = { phase: 'HUMAN_TAKEOVER', status: 'failed' } as const
             rememberRecoveryOutcome(command.requestId, outcome)
             return recoveryEnvelopeResult(command, outcome,
@@ -2354,6 +2476,79 @@ async function handleCommand(
     }
     case 'record.status':
       return { type: 'record.status', recording: isRecording() }
+
+    case 'workflows.autoRepair': {
+      // Autonomous repair (spec §12–§24): run the full bounded loop. Events
+      // are streamed to the panel; the final result is returned here.
+      const target = await getWorkflow(command.id)
+      if (!target) throw new Error('Workflow not found.')
+      const settings = await getSettings()
+      const modelConfig = takeoverProviderOf(settings)
+      retain()
+      try {
+        const outcome = await startBackgroundAutoRepair({
+          workflow: target,
+          runId: command.runId,
+          failure: await failureSnapshotForRun(target, command.runId),
+          ...(modelConfig
+            ? {
+                model: {
+                  apiKey: modelConfig.apiKey,
+                  baseUrl: modelConfig.baseUrl,
+                  model: modelConfig.model,
+                  headers: modelConfig.headers,
+                },
+              }
+            : {}),
+          save: {
+            saveWorkflow,
+            getWorkflow,
+          },
+          ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
+          forward: (event) => {
+            void broadcastRepairEvent(event)
+          },
+        })
+        return {
+          type: 'workflows.autoRepairResult',
+          status: outcome.status,
+          ...(outcome.reason ? { reason: outcome.reason } : {}),
+          ...(outcome.revision !== undefined ? { revision: outcome.revision } : {}),
+          attempts: outcome.attempts,
+          durationMs: outcome.durationMs,
+          committed: outcome.committed,
+        }
+      } finally {
+        release()
+      }
+    }
+
+    case 'workflows.autoRepairCancel': {
+      const stopped = cancelAutoRepair(command.id)
+      return {
+        type: 'workflows.autoRepairResult',
+        status: 'blocked',
+        reason: stopped ? 'repair cancelled' : 'no active repair',
+        attempts: 0,
+        durationMs: 0,
+        committed: false,
+      }
+    }
+
+    case 'workflows.autoRepairStatus': {
+      // Event replay for a late subscriber.
+      const events = autoRepairEvents(command.id)
+      for (const event of events) {
+        await broadcastRepairEvent(event)
+      }
+      return {
+        type: 'workflows.autoRepairResult',
+        status: autoRepairRunning(command.id) ? 'success' : 'blocked',
+        attempts: events.length,
+        durationMs: 0,
+        committed: false,
+      }
+    }
 
     default: {
       const exhaustive: never = command

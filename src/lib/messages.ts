@@ -344,6 +344,26 @@ export type Command =
       | { action: 'CANCEL' }
     ))
 
+  // --- Autonomous repair (spec §12–§24 · Commit 7-14) ---
+  /**
+   * Start the autonomous repair orchestrator for a failed run (for
+   * generated-strict workflows this may also be fired automatically by the
+   * run path). The orchestrator runs diagnose → strategy → candidate → apply
+   * → resume → verify, advancing strategies without asking until it either
+   * commits a verified revision or hits a genuine blocker. Progress is
+   * streamed through `workflows.repairEvent` messages.
+   */
+  | {
+      type: 'workflows.autoRepair'
+      id: string
+      runId: string
+      /** See workflows.run.windowId. */ windowId?: number
+    }
+  /** Cancel an in-flight autonomous repair (before it commits). */
+  | { type: 'workflows.autoRepairCancel'; id: string }
+  /** The current autonomous repair session snapshot (for late subscribers). */
+  | { type: 'workflows.autoRepairStatus'; id: string }
+
   // --- Workflow recording (see background/record-controller.ts) ---
   /**
    * Start recording: injects the recorder into all http tabs (of `windowId`
@@ -530,6 +550,21 @@ export type CommandResult =
        * phases; the formal workflow is never modified from these.
        */
       operations?: import('./workflow/repair/types').WorkflowPatchOperation[]
+    }
+  /** One autonomous-repair progress event (streamed while the repair runs). */
+  | {
+      type: 'workflows.repairEvent'
+      event: import('./workflow/repair-events').RepairProgressEvent
+    }
+  /** The autonomous repair settled; carries the final status. */
+  | {
+      type: 'workflows.autoRepairResult'
+      status: 'success' | 'exhausted' | 'blocked'
+      reason?: string
+      revision?: number
+      attempts: number
+      durationMs: number
+      committed: boolean
     }
   | { type: 'workflows.takeoverPending'; items: PendingTakeoverInfo[] }
   | { type: 'workflows.takeoverStats'; summary: TakeoverStatsSummary }
