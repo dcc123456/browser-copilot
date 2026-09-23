@@ -33,6 +33,10 @@ export const EDITOR_STRINGS = {
     autoLayout: 'Auto-layout (beautify)',
     autoLayoutDone: 'Layout tidy applied',
     edgeDeleted: 'Connection removed',
+    loopBackConnected:
+      'Loop-back connected: this branch will re-run from the earlier block.',
+    loopBackHint:
+      'A branch routed back to an earlier block repeats it. Make sure the condition eventually changes, or the run stops at the step limit.',
     searchNodes: 'Search nodes',
     searchPlaceholder: 'Search nodes',
     noMatches: 'No matches',
@@ -139,6 +143,9 @@ export const EDITOR_STRINGS = {
     autoLayout: '一键美化排版',
     autoLayoutDone: '已自动排版',
     edgeDeleted: '连接线已删除',
+    loopBackConnected: '已连接回跳：该分支将从之前的算子重新执行。',
+    loopBackHint:
+      '分支回连到之前的算子会重复执行它。请确保条件最终会发生变化，否则运行会在达到步骤上限后停止。',
     searchNodes: '搜索节点',
     searchPlaceholder: '搜索节点',
     noMatches: '无匹配',

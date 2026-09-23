@@ -14,6 +14,8 @@ import { BaseEdge, getSmoothStepPath, type EdgeProps, type Edge } from '@xyflow/
 export type CustomEdgeData = {
   highlighted?: boolean
   arrow?: boolean
+  /** True when this edge loops back to an earlier node (branch retry). */
+  loopBack?: boolean
   [key: string]: unknown
 }
 
@@ -40,6 +42,7 @@ function CustomEdgeComponent({
   })
 
   const active = selected || data?.highlighted
+  const loopBack = data?.loopBack === true
 
   return (
     <>
@@ -49,11 +52,18 @@ function CustomEdgeComponent({
         id={id}
         path={path}
         markerEnd={data?.arrow === false ? undefined : markerEnd}
-        className={`wf-edge ${active ? 'wf-edge-active' : ''}`}
+        className={`wf-edge ${active ? 'wf-edge-active' : ''} ${loopBack ? 'wf-edge-loopback' : ''}`}
         interactionWidth={0}
         style={{
-          stroke: active ? 'var(--we-edge-selected)' : 'var(--we-edge)',
+          stroke: active
+            ? 'var(--we-edge-selected)'
+            : loopBack
+              ? 'var(--we-accent)'
+              : 'var(--we-edge)',
           strokeWidth: active ? 2.5 : 2,
+          // Dashed line marks a branch routed BACK to repeat an earlier node;
+          // undefined keeps ordinary edges solid.
+          strokeDasharray: loopBack ? '6 4' : undefined,
         }}
       />
     </>

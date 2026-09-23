@@ -12,6 +12,16 @@
  *   A node has a single fallback branch (the engine indexes one `fallback`
  *   target per node), so re-drawing a node's fallback replaces its previous
  *   fallback edge instead of stacking a second one.
+ * - LOOP-BACK connections are exempt just like fallbacks: a branch (conditions
+ *   / element-exists / loop) routed back to an earlier, already-wired node
+ *   closes a directed cycle — that edge must NOT replace the target's normal
+ *   incoming edge, or the main chain breaks on the very draw meant to repeat
+ *   it ("element not found → go back and retry"). The engine re-enters nodes
+ *   freely (MAX_STEPS guards an infinite run), so the cycle is valid here.
+ *   Whether an edge closes a cycle is decided structurally
+ *   ({@link edgeClosesCycle}: the target already reaches the source), not from
+ *   canvas coordinates, so disconnected/backward-placed redraws keep the
+ *   ordinary replace-input behaviour.
  *
  * @module workflow-editor/flow/connections
  */
@@ -25,6 +35,42 @@ const FALLBACK_SUFFIX = '-output-fallback'
 
 export function isFallbackHandle(handle: string | null | undefined): boolean {
   return typeof handle === 'string' && handle.endsWith(FALLBACK_SUFFIX)
+}
+
+/**
+ * True when adding `source → target` to `edges` would close a directed cycle:
+ * `target` can already reach `source` by following existing edges.
+ *
+ * Fallback edges are ignored when deciding reachability — they model error
+ * recovery rather than the normal control flow, and treating them as ordinary
+ * links here would misclassify draws on graphs that already carry one. An edge
+ * from a node back to ITSELF is a cycle too (rejected earlier by the caller).
+ */
+export function edgeClosesCycle(
+  edges: Edge[],
+  source: string,
+  target: string,
+): boolean {
+  if (source === target) return true
+  const outgoing = new Map<string, string[]>()
+  for (const edge of edges) {
+    if (isFallbackHandle(edge.sourceHandle)) continue
+    const list = outgoing.get(edge.source)
+    if (list) list.push(edge.target)
+    else outgoing.set(edge.source, [edge.target])
+  }
+  const seen = new Set<string>([target])
+  const queue = [target]
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    for (const next of outgoing.get(current) ?? []) {
+      if (next === source) return true
+      if (seen.has(next)) continue
+      seen.add(next)
+      queue.push(next)
+    }
+  }
+  return false
 }
 
 type NodeHandleInfo = { blockId: string; sources: Set<string>; hasTarget: boolean }
@@ -97,12 +143,32 @@ export function applyConnection(eds: Edge[], conn: Connection): Edge[] {
     ]
   }
 
+  // Loop-back: the draw closes a directed cycle (a branch routes back to an
+  // earlier node to repeat it). Coexist with the target's normal incoming edge
+  // exactly like a fallback — replacing it would sever the main chain. Re-
+  // drawing from the SAME branch handle moves that branch's loop-back target.
+  const closesCycle = edgeClosesCycle(eds, conn.source, conn.target)
+  if (closesCycle) {
+    return [
+      ...eds.filter((e) => !(e.source === conn.source && e.sourceHandle === conn.sourceHandle)),
+      newEdge(conn),
+    ]
+  }
+
   // Normal connection: replace the edge occupying the input handle, keeping
-  // fallback edges (they attach to the same handle visually but never occupy
-  // it — the fallback line coexists with the node's regular incoming edge).
+  // fallback AND loop-back edges (they attach to the same handle visually but
+  // never occupy it — they coexist with the node's regular incoming edge).
+  // Every existing edge is cycle-tested ONCE against a fixed graph, keyed by
+  // id; a recomputation per compared edge would re-walk the graph each time.
+  const loopBackIds = new Set<string>()
+  for (const e of eds) {
+    if (isFallbackHandle(e.sourceHandle)) continue
+    if (edgeClosesCycle(eds, e.source, e.target)) loopBackIds.add(e.id)
+  }
   const occupiesInput = (e: Edge): boolean =>
     e.target === conn.target &&
     e.targetHandle === conn.targetHandle &&
-    !isFallbackHandle(e.sourceHandle)
+    !isFallbackHandle(e.sourceHandle) &&
+    !loopBackIds.has(e.id)
   return [...eds.filter((e) => !occupiesInput(e)), newEdge(conn)]
 }

@@ -48,7 +48,7 @@ import { newId } from '../lib/storage'
 
 import { nodeTypes, type BlockNodeData } from './flow/BlockNode'
 import { edgeTypes } from './flow/CustomEdge'
-import { applyConnection, healEdgeHandles } from './flow/connections'
+import { applyConnection, edgeClosesCycle, healEdgeHandles } from './flow/connections'
 import Sidebar, { loadWidth } from './sidebar/Sidebar'
 import BlockPalette from './sidebar/BlockPalette'
 import BlockEditForm from './sidebar/BlockEditForm'
@@ -274,11 +274,26 @@ export default function EditorApp() {
     setEdges((eds) => applyEdgeChanges(changes, eds))
   }, [])
 
-  const onConnect = useCallback((conn: Connection) => {
-    // See flow/connections.ts: occupied inputs are replaced EXCEPT by fallback
-    // connections, which must coexist with the target's incoming edge.
-    setEdges((eds) => applyConnection(eds, conn))
-  }, [])
+  const onConnect = useCallback(
+    (conn: Connection) => {
+      // See flow/connections.ts: occupied inputs are replaced EXCEPT by fallback
+      // and loop-back connections, which must coexist with the target's
+      // incoming edge. A loop-back (branch routed to an earlier node) gets a
+      // confirmation toast so the retry semantics are explicit.
+      setEdges((eds) => {
+        if (
+          conn.source &&
+          conn.target &&
+          conn.source !== conn.target &&
+          edgeClosesCycle(eds, conn.source, conn.target)
+        ) {
+          toast.show(t('loopBackConnected'), 'info')
+        }
+        return applyConnection(eds, conn)
+      })
+    },
+    [toast, t],
+  )
 
   // Double-clicking a connection removes it (matches Automa's edge behaviour).
   // Selecting the edge first and pressing Delete also works via the default
@@ -612,17 +627,46 @@ export default function EditorApp() {
     [nodes],
   )
 
+  /**
+   * Ids of edges that close a directed cycle (a branch looping back to an
+   * earlier node). Computed from the live graph so a saved loop-back edge is
+   * recognized on load too; used to render them as dashed "loop-back" lines.
+   */
+  const loopBackIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const e of edges) {
+      if (edgeClosesCycle(edges, e.source, e.target)) ids.add(e.id)
+    }
+    return ids
+  }, [edges])
+
   const edgeWithHighlight = useMemo(
     () =>
-      edges.map((e) => ({
-        ...e,
-        data: {
-          ...(e.data as Record<string, unknown> | undefined),
-          highlighted:
-            selectedIds.size > 0 && (selectedIds.has(e.source) || selectedIds.has(e.target)),
-        },
-      })),
-    [edges, selectedIds],
+      edges.map((e) => {
+        const loopBack = loopBackIds.has(e.id)
+        return {
+          ...e,
+          // The dashed loop-back line uses the accent colour — give its arrow
+          // marker the same colour (the global default marker is --we-edge).
+          ...(loopBack
+            ? {
+                markerEnd: {
+                  type: MarkerType.ArrowClosed,
+                  width: 18,
+                  height: 18,
+                  color: 'var(--we-accent)',
+                },
+              }
+            : {}),
+          data: {
+            ...(e.data as Record<string, unknown> | undefined),
+            highlighted:
+              selectedIds.size > 0 && (selectedIds.has(e.source) || selectedIds.has(e.target)),
+            loopBack,
+          },
+        }
+      }),
+    [edges, selectedIds, loopBackIds],
   )
 
   // Edit overlay for the LEFT panel (Automa: the edit form replaces/overlays

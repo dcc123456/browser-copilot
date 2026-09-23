@@ -187,6 +187,50 @@ describe('workflow engine', () => {
     expect(seen).toEqual([{ id: 'open-url', url: 'https://github.com/pulls/review-requested' }])
   })
 
+  it('re-runs an earlier node when a branch loops back, then continues', async () => {
+    // retry → exists(element-exists) → done; on "not exists" the branch loops
+    // back to `retry`, which flips the condition until the element appears.
+    const order: string[] = []
+    const wf = makeWorkflow(
+      [
+        node('retry', 'retry-step'),
+        node('exists', 'element-exists'),
+        node('done', 'finish'),
+      ],
+      [
+        edge('retry', 'exists'),
+        edge('exists', 'done', 'exists-output-1'),
+        edge('exists', 'retry', 'exists-output-2'),
+      ],
+    )
+    let attempts = 0
+    const result = await runWorkflow(wf, {
+      executors: {
+        'retry-step': async () => {
+          attempts += 1
+          order.push('retry')
+          return null
+        },
+        'element-exists': async (_data, ctx) => {
+          const found = attempts >= 3
+          order.push(found ? 'exists' : 'not-exists')
+          return (found ? ctx.outputs!['exists'] : ctx.outputs!['notExists']) ?? null
+        },
+        finish: trace('done', order),
+      },
+    })
+    expect(order).toEqual([
+      'retry',
+      'not-exists',
+      'retry',
+      'not-exists',
+      'retry',
+      'exists',
+      'done',
+    ])
+    expect(result.outcome).toBe('ok')
+  })
+
   it('guards against dead loops once MAX_STEPS is exceeded', async () => {
     const order: string[] = []
     const wf = makeWorkflow(
