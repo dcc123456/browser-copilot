@@ -150,8 +150,10 @@ for (const file of program.getSourceFiles()) {
     if (!ts.isCallExpression(node)) return
     const callee = node.expression
     if (!ts.isPropertyAccessExpression(callee) || callee.name.text !== 'executeScript') return
-    const [options] = node.arguments
-    if (!options || !ts.isObjectLiteralExpression(options)) return
+    const optionsNode = node.arguments[0]
+    if (!optionsNode) return
+    const options = unwrap(optionsNode)
+    if (!ts.isObjectLiteralExpression(options)) return
     const prop = options.properties.find(
       (p) =>
         (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) &&
