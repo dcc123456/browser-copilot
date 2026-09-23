@@ -55,6 +55,11 @@ export interface RepairResponseData {
   warnings: string[]
   error?: string
   reason?: string
+  /**
+   * A low-confidence valid patch awaits explicit confirmation (P2). Nothing was
+   * applied; the panel re-sends AUTO_REPAIR after the user confirms.
+   */
+  needsConfirmation?: boolean
 }
 
 function evidenceStatus(row: VariableEvidence): RepairVariableRow['status'] {
@@ -71,7 +76,7 @@ export function toRepairResponse(
   verification: VerificationResult,
   mode: RepairResponseData['mode'],
   operations: readonly WorkflowPatchOperation[] = [],
-  extra: { ok?: boolean; reason?: string } = {},
+  extra: { ok?: boolean; reason?: string; needsConfirmation?: boolean } = {},
 ): RepairResponseData {
   const producerOf = new Map<string, string | undefined>()
   for (const row of analysis.variableEvidence) {
@@ -105,5 +110,6 @@ export function toRepairResponse(
     warnings: verification.warnings.map((warning) => warning.message),
     ...(verification.error ? { error: verification.error } : {}),
     ...(extra.reason ? { reason: extra.reason } : {}),
+    ...(extra.needsConfirmation ? { needsConfirmation: true } : {}),
   }
 }

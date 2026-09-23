@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Circle, Download, Plus, Square, Trash2, Upload } from 'lucide-react'
 import { sendCommand } from '../lib/messages'
+import type { CommandResult } from '../lib/messages'
 import type { TaskRunLog } from '../lib/scheduler-types'
 import type { Workflow } from '../lib/workflow/types'
 import type { WorkflowDebugResult } from '../lib/workflow/auto-debug-patch'
@@ -424,10 +425,16 @@ export default function WorkflowsTab() {
   const runRepair = async (
     id: string,
     mode: 'ANALYZE' | 'SUGGEST' | 'AUTO_REPAIR',
+    confirmed = false,
   ): Promise<void> => {
     setRepairBusy(true)
     try {
-      const result = await sendCommand({ type: 'workflows.repair', id, mode })
+      const result = await sendCommand({
+        type: 'workflows.repair',
+        id,
+        mode,
+        ...(confirmed ? { confirmed: true } : {}),
+      })
       if (result.type === 'workflows.repair') {
         setRepairData(result.data)
       }
@@ -584,7 +591,24 @@ export default function WorkflowsTab() {
           })
           if (confirmed) {
             try {
-              const applyResult = await sendCommand({ type: 'workflows.takeoverApply', id })
+              let applyResult = await sendCommand({
+                type: 'workflows.takeoverApply',
+                id,
+              })
+              if (
+                applyResult.type === 'workflows.takeoverApply' &&
+                applyResult.riskConfirmationNeeded
+              ) {
+                // CRITICAL rewrite risk: ask once more, then re-apply confirmed.
+                const accepted = await confirmRiskDialog(applyResult)
+                if (accepted) {
+                  applyResult = await sendCommand({
+                    type: 'workflows.takeoverApply',
+                    id,
+                    confirmedRisk: true,
+                  })
+                }
+              }
               if (applyResult.type === 'workflows.takeoverApply') {
                 setBanner({
                   kind: 'ok',
@@ -685,7 +709,17 @@ export default function WorkflowsTab() {
     if (!confirmed) return
     setBusy(true)
     try {
-      const result = await sendCommand({ type: 'workflows.takeoverApply', id })
+      let result = await sendCommand({ type: 'workflows.takeoverApply', id })
+      if (result.type === 'workflows.takeoverApply' && result.riskConfirmationNeeded) {
+        const accepted = await confirmRiskDialog(result)
+        if (accepted) {
+          result = await sendCommand({
+            type: 'workflows.takeoverApply',
+            id,
+            confirmedRisk: true,
+          })
+        }
+      }
       if (result.type === 'workflows.takeoverApply') {
         setBanner({
           kind: 'ok',
@@ -698,6 +732,26 @@ export default function WorkflowsTab() {
     } finally {
       setBusy(false)
     }
+  }
+
+  /**
+   * Second confirmation for a CRITICAL whole-graph rewrite (P2, spec §8.4):
+   * shows the risk level and contributing reasons before re-applying.
+   */
+  const confirmRiskDialog = async (
+    result: Extract<CommandResult, { type: 'workflows.takeoverApply' }>,
+  ): Promise<boolean> => {
+    const level = result.rewriteRisk ?? 'CRITICAL'
+    const reasons = result.rewriteRiskReasons ?? []
+    const accepted = await confirmDialog({
+      title: t.workflowsRewriteRiskTitle,
+      message: `${t.workflowsRewriteRiskMessage({ level })}\n${
+        reasons.length ? `\n${reasons.map((reason) => `· ${reason}`).join('\n')}` : ''
+      }`,
+      confirmText: t.workflowsRewriteRiskAccept,
+      cancelText: t.workflowsDebugTakeoverDiscard,
+    })
+    return accepted === true
   }
 
   const discardPendingFixes = async (id: string): Promise<void> => {
@@ -1171,6 +1225,15 @@ export default function WorkflowsTab() {
                   <button
                     className="task-action-repair"
                     disabled={busy || repairBusy}
+                    title={t.workflowsRepairSuggest}
+                    onClick={() => void runRepair(wf.id, 'SUGGEST')}
+                    type="button"
+                  >
+                    {repairBusy ? t.workflowsRepairRunning : t.workflowsRepairSuggest}
+                  </button>
+                  <button
+                    className="task-action-repair"
+                    disabled={busy || repairBusy}
                     title={t.workflowsRepairAuto}
                     onClick={() => void runRepair(wf.id, 'AUTO_REPAIR')}
                     type="button"
@@ -1234,6 +1297,7 @@ export default function WorkflowsTab() {
           onClose={() => setRepairData(null)}
           onCommit={() => void commitRepair(repairData.workflowId)}
           onDiscard={() => void discardRepair(repairData.workflowId)}
+          onConfirmLowConfidence={() => void runRepair(repairData.workflowId, 'AUTO_REPAIR', true)}
         />
       )}
 

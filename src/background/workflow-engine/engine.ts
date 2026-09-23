@@ -98,12 +98,16 @@ export interface WorkflowRunOptions {
    * Evaluates one reliability condition against the live page + variables
    * (generated-strict pre/postconditions). Absent → conditions are skipped.
    */
-  evaluateCondition?: (condition: import('../../lib/workflow/conditions').WorkflowCondition) => Promise<boolean>
+  evaluateCondition?: (
+    condition: import('../../lib/workflow/conditions').WorkflowCondition,
+  ) => Promise<boolean>
   /**
    * Observes the CURRENT page (url/title) for the page-context guard (§11).
    * Absent → no guard. Refreshed whenever the automation tab changes.
    */
-  getPageContext?: () => Promise<import('../../lib/workflow/page-context').CurrentPageContext | undefined>
+  getPageContext?: () => Promise<
+    import('../../lib/workflow/page-context').CurrentPageContext | undefined
+  >
   /** Override / inject the block-executor map. When omitted, the browser
    * executors are lazy-loaded (they pull the chrome-coupled driver chain);
    * Node-based runners such as the server runner always pass their own map,
@@ -183,6 +187,13 @@ export interface WorkflowRunOptions {
    * hook lives in `workflow-engine/ai-takeover`.
    */
   aiTakeover?: AiTakeoverHook
+  /**
+   * Sub-workflow nesting notifications (P3, spec §15 Phase 8): called with
+   * 'enter' before an `execute-workflow` runs its child and 'exit' after it
+   * returns. The integration layer uses this to keep one trace spanning the
+   * full parent→child chain. Omitted ⇒ no nesting events.
+   */
+  onSubWorkflow?: (phase: 'enter' | 'exit', workflowId: string) => void
 }
 
 export interface WorkflowRunResult {
@@ -411,6 +422,7 @@ async function runCore(
     readinessProbe,
     evaluateCondition,
     getPageContext,
+    onSubWorkflow,
   } = options
 
   // The browser executors are statically imported above. Node-based runners
@@ -427,9 +439,7 @@ async function runCore(
   // Page-context guard state (§11): the expected fingerprint is derived ONCE
   // (generation origin or explicit settings.pageContext); the CURRENT page is
   // observed lazily and re-observed whenever the automation tab changes.
-  const expectedPageContext = isGeneratedStrict(workflow)
-    ? pageContextOf(workflow)
-    : undefined
+  const expectedPageContext = isGeneratedStrict(workflow) ? pageContextOf(workflow) : undefined
   let pageContextCheckedForTab: number | undefined | 'none' = 'none'
 
   const reliability: WorkflowExecCtx['reliability'] = isGeneratedStrict(workflow)
@@ -639,7 +649,8 @@ async function runCore(
     // Page-context guard (§11): before a strict run touches a page, the
     // current page must BE the page the workflow was made for. Checked on
     // the first page-acting node and refreshed whenever the tab changed.
-    const pageActing = ELEMENT_OP_BLOCKS.has(blockId) || blockId === 'open-url' || blockId === 'new-tab'
+    const pageActing =
+      ELEMENT_OP_BLOCKS.has(blockId) || blockId === 'open-url' || blockId === 'new-tab'
     if (
       expectedPageContext &&
       getPageContext &&
@@ -716,9 +727,7 @@ async function runCore(
         if (reliability && evaluateCondition && nodeSpec?.preconditions?.length) {
           for (const condition of nodeSpec.preconditions) {
             if (await evaluateCondition(condition)) continue
-            throw new Error(
-              `PRECONDITION_FAILED: ${describeCondition(condition)}`,
-            )
+            throw new Error(`PRECONDITION_FAILED: ${describeCondition(condition)}`)
           }
         }
         if (reliability && readinessProbe) {
@@ -731,9 +740,7 @@ async function runCore(
             probe: readinessProbe,
           })
           if (!before.ok) {
-            throw new Error(
-              `READINESS_TIMEOUT(${before.state}): ${before.detail ?? '页面未就绪'}`,
-            )
+            throw new Error(`READINESS_TIMEOUT(${before.state}): ${before.detail ?? '页面未就绪'}`)
           }
         }
         if (unsafe) emitCheckpoint(nodeId, 'ok', 'sideEffectStarted')
@@ -761,9 +768,7 @@ async function runCore(
         if (reliability && evaluateCondition && nodeSpec?.postconditions?.length) {
           for (const condition of nodeSpec.postconditions) {
             if (await evaluateCondition(condition)) continue
-            throw new Error(
-              `POSTCONDITION_FAILED: ${describeCondition(condition)}`,
-            )
+            throw new Error(`POSTCONDITION_FAILED: ${describeCondition(condition)}`)
           }
         }
         if (unsafe) emitCheckpoint(nodeId, 'ok', 'sideEffectObserved')
@@ -1068,6 +1073,7 @@ async function runCore(
 
     const childStack = new Set(parentWorkflowIds)
     childStack.add(childId)
+    onSubWorkflow?.('enter', childId)
     await runCore(child, {
       variables,
       signal: signalToUse,
@@ -1082,8 +1088,11 @@ async function runCore(
       // A child run shares the parent's checkpoint sink: it is the same
       // logical run, and the parent's integration layer owns the run id.
       onCheckpoint,
+      // Keep one trace spanning the full parent→child nesting (P3).
+      onSubWorkflow,
       onStep: onStep ? (kind, nodeId, text) => onStep(kind, nodeId, `[子] ${text}`) : undefined,
     })
+    onSubWorkflow?.('exit', childId)
     return defaultNext
   }
 

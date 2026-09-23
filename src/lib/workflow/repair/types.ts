@@ -60,6 +60,8 @@ export interface TraceEvent {
   kind: 'tool' | 'status' | 'result' | 'error' | 'info' | 'checkpoint'
   nodeId?: string
   text: string
+  /** Workflow nesting for events emitted inside a sub-workflow (P3). */
+  workflowPathIndex?: number
 }
 
 /** Redacted, stable summary of a variable value (never the raw secret). */
@@ -98,6 +100,11 @@ export interface NodeExecutionTrace {
   status: 'running' | 'ok' | 'failed' | 'cancelled' | 'skipped'
   startedAt?: number
   finishedAt?: number
+  /**
+   * Index into ExecutionTrace.workflowPath for the workflow this node ran in
+   * (P3): 0 = root workflow, 1+ = a nested sub-workflow. Absent ⇒ root.
+   */
+  workflowPathIndex?: number
   inputVariables: VariableUseEvidence[]
   outputVariables: VariableProductionEvidence[]
   error?: TraceFailure
@@ -140,6 +147,14 @@ export interface ExecutionTrace {
   finalVariables: Record<string, VariableValueSummary>
   failedNodeId?: string
   failure?: TraceFailure
+
+  /**
+   * Ordered workflow nesting for this trace (P3, spec §15 Phase 8): the root
+   * workflow id first, then each nested sub-workflow entered via
+   * `execute-workflow`. Every node execution records the index into this path
+   * it ran in, so a failure inside a child can be attributed across the chain.
+   */
+  workflowPath?: string[]
 
   currentUrl?: string
   currentTabId?: number
@@ -326,6 +341,13 @@ export interface RepairPolicy {
   maxProbePerNode: number
   maxTotalDurationMs: number
   allowWholeWorkflowRewrite: boolean
+  /**
+   * Confidence below which a repair is NOT applied automatically (P2, spec
+   * §6.5/§17.2). When both the diagnosis and the proposed patch are below this
+   * threshold the engine returns the proposal for explicit human confirmation
+   * instead of mutating a working copy.
+   */
+  autoApplyConfidenceThreshold: number
 }
 
 export const DEFAULT_REPAIR_POLICY: RepairPolicy = {
@@ -337,6 +359,7 @@ export const DEFAULT_REPAIR_POLICY: RepairPolicy = {
   maxProbePerNode: 1,
   maxTotalDurationMs: 120_000,
   allowWholeWorkflowRewrite: true,
+  autoApplyConfidenceThreshold: 0.75,
 }
 
 export type RepairSessionStatus =

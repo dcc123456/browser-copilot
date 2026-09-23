@@ -241,6 +241,10 @@ export interface Messages {
   workflowsDebugRewriteApply: string
   /** Banner after the rebuilt workflow was applied. */
   workflowsDebugRewriteApplied: string
+  /** CRITICAL rewrite-risk second confirmation (P2, spec §8.4). */
+  workflowsRewriteRiskTitle: string
+  workflowsRewriteRiskMessage: (params: { level: string }) => string
+  workflowsRewriteRiskAccept: string
   /** Banner when the run passed via AI but the fixes did NOT verify. */
   workflowsDebugNotVerified: string
   /** Lifetime takeover success-rate line in the debug modal footer. */
@@ -284,6 +288,7 @@ export interface Messages {
 
   // Unified workflow repair (spec §12)
   workflowsRepairAnalyze: string
+  workflowsRepairSuggest: string
   workflowsRepairAuto: string
   workflowsRepairRunning: string
   workflowsRepairTitle: string
@@ -306,6 +311,10 @@ export interface Messages {
   workflowsRepairCommitted: string
   workflowsRepairClose: string
   workflowsRepairConfidence: (params: { percent: number }) => string
+  /** Low-confidence proposal needs explicit human confirmation (P2). */
+  workflowsRepairLowConfidenceTitle: string
+  workflowsRepairLowConfidenceHint: string
+  workflowsRepairLowConfidenceAccept: string
   workflowsRepairBeforeAfter: string
 
   /** Activity board (History tab) collapse/expand toggle title. */
@@ -444,6 +453,18 @@ export interface Messages {
   chatWorkflowVerifyPending: (params: { count: number }) => string
   /** Fallback label for a code node that carries no description of its own. */
   chatWorkflowCodeNodesNoReason: string
+  /** Heading of the independent-verification section on the save card. */
+  chatWorkflowRepairTitle: string
+  /** The generated workflow ran independently without AI takeover. */
+  chatWorkflowRepairVerified: string
+  /** The repair loop ended without an independent verification. */
+  chatWorkflowRepairNotVerified: string
+  /** Label for the failed (symptom) node row on the save card. */
+  chatWorkflowRepairFailedNode: (params: { nodeId: string }) => string
+  /** Label for the root-cause node list on the save card. */
+  chatWorkflowRepairRootCauses: (params: { nodes: string }) => string
+  /** Hint that verification did not block saving; AI debug can continue repair. */
+  chatWorkflowRepairHint: string
   /** Optional button on the save card that runs the (token-costly) AI review. */
   chatSaveWorkflowAiReview: string
   /** Heading of the trigger picker on the save-as-workflow card. */
@@ -1279,6 +1300,10 @@ const en: Messages = {
     `AI replayed the task like a chat run, audited the graph (wrong / missing / redundant / fallback nodes) and produced a corrected version that ran clean on its own. Applying REPLACES the current graph. Diagnosis: ${diagnosis}`,
   workflowsDebugRewriteApply: 'Apply rebuilt workflow',
   workflowsDebugRewriteApplied: 'The AI-rebuilt workflow has been applied',
+  workflowsRewriteRiskTitle: 'High-risk rewrite — are you sure?',
+  workflowsRewriteRiskMessage: ({ level }) =>
+    `This whole-graph rewrite is classified ${level}. It removes or replaces core structure (e.g. the trigger or goal). Apply it only if you understand the consequences.`,
+  workflowsRewriteRiskAccept: 'I understand — apply it',
   workflowsDebugVerified: ({ count }) =>
     `Verified: the fixed workflow ran clean without AI (${count} fix(es) awaiting confirmation)`,
   workflowsDebugNotVerified:
@@ -1313,6 +1338,7 @@ const en: Messages = {
     `AI takeover proposed ${changes} node fix(es) at ${time} — apply or discard`,
 
   workflowsRepairAnalyze: 'AI Analyze',
+  workflowsRepairSuggest: 'AI Suggest Fix',
   workflowsRepairAuto: 'AI Auto Repair',
   workflowsRepairRunning: 'AI repair running…',
   workflowsRepairTitle: 'AI Workflow Repair',
@@ -1336,6 +1362,10 @@ const en: Messages = {
   workflowsRepairCommitted: 'The verified repair was saved to the workflow.',
   workflowsRepairClose: 'Close',
   workflowsRepairConfidence: ({ percent }) => `Confidence ${percent}%`,
+  workflowsRepairLowConfidenceTitle: 'Low confidence — please review before applying',
+  workflowsRepairLowConfidenceHint:
+    'The diagnosis or the proposed patch is uncertain. Nothing has been changed. Apply it only if this looks right.',
+  workflowsRepairLowConfidenceAccept: 'I reviewed it — apply anyway',
   workflowsRepairBeforeAfter: 'before → after',
 
   tasksActivityCollapse: 'Collapse activity',
@@ -1431,6 +1461,15 @@ const en: Messages = {
   chatWorkflowCodeNodesHint:
     'These steps run JavaScript because no built-in operator could do them. Editing them means editing code — if you would rather not, ask the assistant to replace them with operators.',
   chatWorkflowCodeNodesNoReason: 'No reason recorded',
+  chatWorkflowRepairTitle: 'Independent verification',
+  chatWorkflowRepairVerified:
+    'Verified: this workflow ran on its own without AI takeover and reached its goal.',
+  chatWorkflowRepairNotVerified:
+    'Not independently verified yet — saving is not blocked; run AI debug to keep repairing.',
+  chatWorkflowRepairFailedNode: ({ nodeId }) => `Failed at node ${nodeId} (the symptom).`,
+  chatWorkflowRepairRootCauses: ({ nodes }) => `Root cause node(s): ${nodes}`,
+  chatWorkflowRepairHint:
+    'Verification never blocks saving. Open AI debug if the workflow still needs repair.',
   chatWorkflowProbeTitle: 'Selector check against the current page',
   chatWorkflowProbeAllOk: ({ count }) =>
     `All ${count} selector${count > 1 ? 's' : ''} match exactly one element.`,
@@ -2326,6 +2365,10 @@ const zhCN: Messages = {
     `AI 已像聊天一样复演了整个任务，并审计了工作流图（哪些节点不对/缺失/多余/需兜底），生成了可独立运行的新版本。应用后将替换当前流程图。诊断：${diagnosis}`,
   workflowsDebugRewriteApply: '应用重建的工作流',
   workflowsDebugRewriteApplied: '已应用 AI 重建的工作流',
+  workflowsRewriteRiskTitle: '高风险整图重写——确认继续？',
+  workflowsRewriteRiskMessage: ({ level }) =>
+    `此次整图重写的风险等级为 ${level}，会删除或替换核心结构（例如触发器或目标）。请确认了解后果后再应用。`,
+  workflowsRewriteRiskAccept: '我了解风险——仍然应用',
   workflowsDebugVerified: ({ count }) =>
     `已验证：修复后的流程无需 AI 也能跑通（${count} 处修改待确认）`,
   workflowsDebugNotVerified: '本次运行靠 AI 救回，但修复未通过验证——请仔细确认后再应用',
@@ -2358,6 +2401,7 @@ const zhCN: Messages = {
     `AI 接管提出了 ${changes} 处节点修改（${time}），可应用或放弃`,
 
   workflowsRepairAnalyze: 'AI 分析',
+  workflowsRepairSuggest: 'AI 建议修复',
   workflowsRepairAuto: 'AI 自动修复',
   workflowsRepairRunning: 'AI 修复运行中…',
   workflowsRepairTitle: 'AI 工作流修复',
@@ -2380,6 +2424,10 @@ const zhCN: Messages = {
   workflowsRepairCommitted: '已将验证通过的修复保存到工作流。',
   workflowsRepairClose: '关闭',
   workflowsRepairConfidence: ({ percent }) => `置信度 ${percent}%`,
+  workflowsRepairLowConfidenceTitle: '置信度不足——应用前请先确认',
+  workflowsRepairLowConfidenceHint:
+    '诊断或补丁建议存在不确定性。当前未做任何修改。只有确认无误后再应用。',
+  workflowsRepairLowConfidenceAccept: '我已确认——仍然应用',
   workflowsRepairBeforeAfter: '修改前 → 修改后',
 
   tasksActivityCollapse: '收起动态',
@@ -2465,6 +2513,12 @@ const zhCN: Messages = {
   chatWorkflowCodeNodesHint:
     '这些步骤用 JavaScript 实现，因为内置算子做不了。改它们就等于改代码——如果你不想碰代码，可以让助手把它们换成算子。',
   chatWorkflowCodeNodesNoReason: '未记录原因',
+  chatWorkflowRepairTitle: '独立验证',
+  chatWorkflowRepairVerified: '已验证：该工作流在无 AI 接管的情况下独立运行并达成目标。',
+  chatWorkflowRepairNotVerified: '尚未独立验证——不阻止保存；可运行 AI 调试继续修复。',
+  chatWorkflowRepairFailedNode: ({ nodeId }) => `失败于节点 ${nodeId}（症状）。`,
+  chatWorkflowRepairRootCauses: ({ nodes }) => `根因节点：${nodes}`,
+  chatWorkflowRepairHint: '验证从不阻止保存。若工作流仍需修复，请打开 AI 调试。',
   chatWorkflowProbeTitle: '在当前页面上的选择器检查',
   chatWorkflowProbeAllOk: ({ count }) => `${count} 个选择器都精确匹配到一个元素。`,
   chatWorkflowProbeUnverified: '当前页面无法检查，这些选择器未经验证。',

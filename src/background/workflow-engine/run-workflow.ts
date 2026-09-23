@@ -605,6 +605,12 @@ export async function executeWorkflow(
           closeTraceNode(nodeId, status === 'ok' ? 'ok' : status)
         }
       },
+      onSubWorkflow: (phase, subWorkflowId) => {
+        // Keep ONE trace spanning the parent→child nesting (P3, spec §15
+        // Phase 8). Node executions inside the child carry workflowPathIndex.
+        if (phase === 'enter') traceCollector.enterSubWorkflow(subWorkflowId)
+        else traceCollector.exitSubWorkflow()
+      },
       onStep: (kind, nodeId, text) => {
         // Trace state machine (see helpers above).
         traceCollector.recordStep(kind, nodeId || undefined, text)

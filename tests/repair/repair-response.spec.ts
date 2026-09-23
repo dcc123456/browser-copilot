@@ -86,13 +86,7 @@ describe('repair response projection', () => {
         evidenceIds: ['ev1'],
       },
     ]
-    const data = toRepairResponse(
-      'wf-1',
-      analysis(),
-      verification(true),
-      'AUTO_REPAIR',
-      operations,
-    )
+    const data = toRepairResponse('wf-1', analysis(), verification(true), 'AUTO_REPAIR', operations)
     expect(data.workflowId).toBe('wf-1')
     expect(data.mode).toBe('AUTO_REPAIR')
     expect(data.ok).toBe(true)
@@ -118,14 +112,10 @@ describe('repair response projection', () => {
   })
 
   it('carries the reason on a degraded proposal', () => {
-    const data = toRepairResponse(
-      'wf',
-      analysis(),
-      verification(false),
-      'SUGGEST',
-      [],
-      { ok: false, reason: 'no patch proposed' },
-    )
+    const data = toRepairResponse('wf', analysis(), verification(false), 'SUGGEST', [], {
+      ok: false,
+      reason: 'no patch proposed',
+    })
     expect(data.ok).toBe(false)
     expect(data.reason).toBe('no patch proposed')
   })
@@ -147,6 +137,8 @@ describe('repair session store', () => {
       },
       analysis: analysis(),
       verification: verification(true),
+      baseUpdatedAt: 0,
+      baseHash: 'base',
       createdAt: 1,
     })
     expect(pendingRepairWorkflowIds()).toContain('wf-store')
@@ -172,6 +164,8 @@ describe('repair session store', () => {
       },
       analysis: analysis(),
       verification: verification(true),
+      baseUpdatedAt: 0,
+      baseHash: 'base',
       createdAt: 1,
     })
     expect(discardRepairSession('wf-discard')).toBe(true)

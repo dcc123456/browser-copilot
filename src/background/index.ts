@@ -157,10 +157,12 @@ import {
 } from '../lib/workflow/ai-takeover'
 import { executeWorkflow, findRunIdFor, getCheckpointStore } from './workflow-engine/run-workflow'
 import { readPersistedCheckpoints } from './checkpoint-store'
-import { resumePointOf } from '../lib/workflow/checkpoints'
+import { resumePointOf, workflowFingerprintOf } from '../lib/workflow/checkpoints'
 import { createAiTakeover } from './workflow-engine/ai-takeover'
 import { runDebugSession, DEFAULT_MAX_ROUNDS } from './workflow-engine/debug-session'
 import { runUnifiedDebug } from './workflow-engine/repair/unified-debug'
+import { finalizeGeneratedWorkflow } from './workflow-engine/repair/generation-repair'
+import { recordRepairRound } from '../lib/workflow/repair-metrics'
 import { createBackgroundRunner } from './workflow-engine/repair/background-runner'
 import { createAiRepairProposer } from './workflow-engine/repair/repair-provider'
 import { toRepairResponse } from '../lib/workflow/repair/repair-response'
@@ -180,6 +182,7 @@ import {
   parseGoalVerdict,
   parseWorkflowAudit,
 } from '../lib/workflow/debug-rewrite'
+import { classifyRewriteRisk } from '../lib/workflow/rewrite-risk'
 import {
   recordDebugSession,
   recordTakeoverStat,
@@ -404,6 +407,120 @@ async function runWorkflowKeepalive(workflowId: string, scopeWindowId?: number):
       source: 'manual',
       ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
     })
+  } finally {
+    release()
+  }
+}
+
+/**
+ * Run a generated draft through the shared repair engine (spec §10.1).
+ *
+ * The first (and every) verification is an independent, takeover-free run;
+ * when it fails the deterministic analyzer locates the root cause and a
+ * minimal patch is proposed, validated, applied to the working copy and
+ * replayed. Saving is never blocked by the outcome:
+ *
+ *   - VERIFIED → the draft ran independently; returned as-is.
+ *   - DRAFT    → budget exhausted on a non-structural failure; the possibly
+ *                patched workflow is still offered, with the diagnosis.
+ *   - BLOCKED  → a structural problem; the workflow is still returned so the
+ *                user can open AI debug, but the card flags the structure.
+ *
+ * Runs entirely under a keepalive retain so the worker cannot be evicted mid
+ * verification. Execution errors are contained: a repair run that itself
+ * throws degrades to returning the original draft (never a lost generation).
+ */
+async function verifyGeneratedDraft(workflow: Workflow): Promise<{
+  workflow: Workflow
+  info: import('../lib/messages').GeneratedWorkflowRepairInfo
+}> {
+  const settings = await getSettings()
+  const modelConfig = takeoverProviderOf(settings)
+  const proposer = modelConfig
+    ? createAiRepairProposer({
+        apiKey: modelConfig.apiKey,
+        baseUrl: modelConfig.baseUrl,
+        model: modelConfig.model,
+        headers: modelConfig.headers,
+      })
+    : undefined
+
+  const runner = createBackgroundRunner({ executeWorkflow })
+  let rounds = 0
+  retain()
+  try {
+    const result = await finalizeGeneratedWorkflow(workflow, {
+      runner,
+      // Replay planning reads the durable checkpoints the verify run just
+      // wrote through the real run-workflow store.
+      store: getCheckpointStore(),
+      ...(proposer ? { propose: (context) => proposer.propose(context) } : {}),
+      // Conservative generation policy: keep the total verification bounded so
+      // offering the save card never stalls the turn for long.
+      policy: { maxRepairRounds: 2, maxTotalDurationMs: 45_000 },
+      onStep: () => undefined,
+    })
+    rounds = result.patches.length
+    // Repair telemetry (spec §14): one round log for the generation entry, with
+    // no raw variable values — only node ids, the failure code and the result.
+    const startedAtForMetric = Date.now()
+    void recordRepairRound({
+      at: Date.now(),
+      sessionId: `gen-${workflow.id}-${startedAtForMetric}`,
+      round: Math.max(1, rounds),
+      entry: 'GENERATION',
+      ...(result.lastAnalysis?.failedNodeId
+        ? { failedNodeId: result.lastAnalysis.failedNodeId }
+        : {}),
+      rootCauseNodeIds: result.lastAnalysis?.rootCauseNodeIds ?? [],
+      ...(result.lastAnalysis?.failureType ? { failureType: result.lastAnalysis.failureType } : {}),
+      transientRetries: 0,
+      ...(result.patches[result.patches.length - 1]?.patchSetId
+        ? { patchSetId: result.patches[result.patches.length - 1]!.patchSetId }
+        : {}),
+      patchedNodeIds: [
+        ...new Set(result.patches.flatMap((patch) => patch.operations.map((op) => op.nodeId))),
+      ],
+      ...(result.lastVerification?.checkpointId
+        ? { replayFromNodeId: result.lastAnalysis?.replayFromNodeId }
+        : {}),
+      usedCheckpoint: !!result.lastVerification?.checkpointId,
+      usedAiTakeover: result.lastVerification?.usedAiTakeover === true,
+      ...(result.lastVerification?.goalAchieved !== undefined
+        ? { goalAchieved: result.lastVerification.goalAchieved }
+        : {}),
+      result:
+        result.status === 'VERIFIED' ? 'VERIFIED' : result.status === 'BLOCKED' ? 'DRAFT' : 'DRAFT',
+      durationMs: 0,
+    })
+    return {
+      workflow: result.workingCopy,
+      info: {
+        verified: result.status === 'VERIFIED',
+        status: result.status,
+        ...(result.lastAnalysis?.failedNodeId
+          ? { failedNodeId: result.lastAnalysis.failedNodeId }
+          : {}),
+        rootCauseNodeIds: result.lastAnalysis?.rootCauseNodeIds ?? [],
+        ...(result.lastAnalysis?.failureType
+          ? { failureType: result.lastAnalysis.failureType }
+          : {}),
+        explanation: result.lastAnalysis?.explanation ?? result.reason ?? '',
+        rounds,
+      },
+    }
+  } catch (error) {
+    // The repair orchestration must never make the generated workflow vanish.
+    return {
+      workflow,
+      info: {
+        verified: false,
+        status: 'DRAFT',
+        rootCauseNodeIds: [],
+        explanation: error instanceof Error ? error.message : String(error),
+        rounds,
+      },
+    }
   } finally {
     release()
   }
@@ -1212,10 +1329,23 @@ async function handleCommand(
       )
       if ('empty' in resolved)
         return { type: 'workflows.draft', empty: resolved.empty, detail: resolved.detail }
+
+      // Generation repair (spec §10.1, Phase 7): run the already-formed
+      // generated workflow through the SAME shared repair engine the debug
+      // path uses — independent (takeover-free) verify → diagnose → minimal
+      // patch → replay. First-pass verification never permits AI takeover.
+      //
+      // This is deliberately NON-BLOCKING: a verified workflow is returned as
+      // is; when the repair budget is exhausted the (possibly patched) draft
+      // is still offered, with the diagnosis carried in `repair` so the card
+      // can show the symptom vs root cause. Only structural problems surface
+      // as a status; the user can still save and continue in AI debug.
+      const repairSummary = await verifyGeneratedDraft(resolved.workflow)
       return {
         type: 'workflows.draft',
-        workflow: resolved.workflow,
+        workflow: repairSummary.workflow,
         source: resolved.source,
+        repair: repairSummary.info,
         // Pure detection, so the card can offer folding without a round trip.
         // Only meaningful for a draft the model built step by step; a compiled
         // history has no repeated runs to detect.
@@ -1635,6 +1765,10 @@ async function handleCommand(
                 summary: result.summary,
                 error: result.error,
                 ...(result.variables ? { variables: result.variables } : {}),
+                // Node-aware failure evidence (spec §13): the actual failed
+                // node from the real trace, so the repeat-dead-end signature
+                // distinguishes different nodes instead of using 'session'.
+                ...(result.trace?.failedNodeId ? { failedNodeId: result.trace.failedNodeId } : {}),
                 steps: evidenceSteps.slice(-40),
               }
             })
@@ -1800,6 +1934,8 @@ async function handleCommand(
           // checkpoints were written during the just-finished execution.
           store: getCheckpointStore(),
           ...(proposer ? { propose: (ctx) => proposer.propose(ctx) } : {}),
+          // Pass the user's explicit low-confidence acceptance through (P2).
+          ...(command.confirmed ? { userConfirmed: true } : {}),
         })
 
         // A verified AUTO_REPAIR: keep the working copy for the commit step.
@@ -1810,6 +1946,10 @@ async function handleCommand(
             patch: result.patch,
             analysis: result.analysis,
             verification: result.verification,
+            // Optimistic-lock base (spec §11.3): bind the pending repair to the
+            // formal workflow version + content it was produced against.
+            baseUpdatedAt: repairWorkflow.updatedAt,
+            baseHash: workflowFingerprintOf(repairWorkflow),
             createdAt: Date.now(),
           })
         }
@@ -1822,7 +1962,11 @@ async function handleCommand(
             result.verification,
             command.mode,
             result.patch?.operations ?? [],
-            { ok: result.ok, reason: result.reason },
+            {
+              ok: result.ok,
+              reason: result.reason,
+              ...(result.needsConfirmation ? { needsConfirmation: true } : {}),
+            },
           ),
         }
       } finally {
@@ -1836,6 +1980,27 @@ async function handleCommand(
       // takeover (it is only ever stored after such a result).
       const pending = takeRepairSession(command.id)
       if (!pending) throw new Error('No verified repair to commit for this workflow.')
+
+      // Optimistic lock (spec §11.3): re-read the formal workflow and verify it
+      // has not changed since the repair was produced. A stale patch — one that
+      // would overwrite newer edits — is refused together with its session, and
+      // the user must re-run the diagnosis against the current workflow.
+      const current = await getWorkflow(command.id)
+      if (current) {
+        if (current.updatedAt !== pending.baseUpdatedAt) {
+          discardRepairSession(command.id)
+          throw new Error(
+            'The workflow changed since this repair was proposed; the patch is stale. Please run AI repair again.',
+          )
+        }
+        if (workflowFingerprintOf(current) !== pending.baseHash) {
+          discardRepairSession(command.id)
+          throw new Error(
+            'The workflow content changed since this repair was proposed; the patch is stale. Please run AI repair again.',
+          )
+        }
+      }
+
       const repaired: Workflow = {
         ...pending.workingCopy,
         updatedAt: Date.now(),
@@ -1876,7 +2041,24 @@ async function handleCommand(
       if (!workflow) throw new Error('Workflow not found.')
       let applied = workflow
       let appliedCount = 0
+      let rewriteRisk: import('../lib/workflow/rewrite-risk').RewriteRiskVerdict | undefined
       if (pending.rewrite) {
+        // Risk gate (P2, spec §8.4): classify the whole-graph rewrite against
+        // the current workflow before anything is written. CRITICAL rewrites
+        // (trigger/goal removed, etc.) are refused until the user explicitly
+        // accepts the risk via confirmedRisk.
+        const candidate: Workflow = { ...pending.rewrite.workflow, id: workflow.id }
+        rewriteRisk = classifyRewriteRisk(workflow, candidate)
+        if (rewriteRisk.level === 'CRITICAL' && command.confirmedRisk !== true) {
+          return {
+            type: 'workflows.takeoverApply',
+            workflow,
+            appliedCount: 0,
+            rewriteRisk: rewriteRisk.level,
+            rewriteRiskReasons: rewriteRisk.reasons,
+            riskConfirmationNeeded: true,
+          }
+        }
         applied = { ...pending.rewrite.workflow, id: workflow.id, updatedAt: Date.now() }
         appliedCount = pending.rewrite.changes.length
       } else {
@@ -1921,6 +2103,12 @@ async function handleCommand(
         type: 'workflows.takeoverApply',
         workflow: applied,
         appliedCount,
+        ...(rewriteRisk
+          ? {
+              rewriteRisk: rewriteRisk.level,
+              ...(rewriteRisk.reasons.length ? { rewriteRiskReasons: rewriteRisk.reasons } : {}),
+            }
+          : {}),
         ...(verified !== undefined
           ? { verified, ...(verifySummary !== undefined ? { verifySummary } : {}) }
           : {}),

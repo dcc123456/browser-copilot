@@ -21,6 +21,7 @@
 
 import { WorkflowRepairEngine } from './repair-engine'
 import { buildRepairContext } from './repair-agent'
+import { decideConfidence } from '../../../lib/workflow/repair/confirmation-gate'
 import type {
   FailureAnalysis,
   RepairContext,
@@ -117,6 +118,23 @@ export async function finalizeGeneratedWorkflow(
     if (!validation.ok) {
       log('error', `Patch rejected: ${validation.issues.map((i) => i.message).join('; ')}`)
       break
+    }
+
+    // Confidence gate (P2, spec §6.5): a valid but low-confidence patch is not
+    // applied automatically in generation mode (there is no user present to
+    // confirm). Preserve the workflow as a DRAFT carrying the diagnosis rather
+    // than mutating it on an uncertain signal.
+    const confidence = decideConfidence({ analysis, patch, policy })
+    if (confidence.requiresConfirmation) {
+      log('error', `Low confidence, not auto-applying: ${confidence.reason}`)
+      return {
+        status: 'DRAFT',
+        workingCopy,
+        lastVerification: verification,
+        lastAnalysis: analysis,
+        patches,
+        reason: confidence.reason,
+      }
     }
 
     workingCopy = engine.apply(workingCopy, analysis, patch).workflow

@@ -132,6 +132,8 @@ export interface DebugRunResult {
   outcome: 'ok' | 'cancelled' | 'failed'
   summary?: string
   error?: string
+  /** The actual failed (symptom) node id from the run trace, when known. */
+  failedNodeId?: string
   /** Final variable values (goal-check evidence). */
   variables?: Record<string, unknown>
   /** Step tail (goal-check evidence), oldest last. */
@@ -260,10 +262,15 @@ export async function runDebugSession(
   /**
    * Records a failure signature; returns true when the SAME failure has now
    * recurred enough times that walking into it again is pointless.
+   *
+   * The signature is node-aware (spec §13): it uses the actual failed node id
+   * from the run trace rather than a fixed 'session', so identical error text
+   * at DIFFERENT nodes is not misread as the same dead end. Falls back to the
+   * run id only when no node evidence exists.
    */
-  const isRepeatedDeadEnd = (error: string | undefined): boolean => {
+  const isRepeatedDeadEnd = (error: string | undefined, nodeId?: string): boolean => {
     if (!error) return false
-    const signature = failureSignature('session', error)
+    const signature = failureSignature(nodeId ?? lastRunId ?? 'unknown', error)
     seenSignatures.push(signature)
     return seenSignatures.filter((s) => s === signature).length > REPEAT_FAILURE_LIMIT
   }
@@ -620,7 +627,7 @@ export async function runDebugSession(
       // the goal ALREADY holds and its preconditions are gone. Check first.
       const satisfied = await judgeAlreadySatisfied(r)
       if (satisfied) return alreadySatisfiedResult(satisfied)
-      if (isRepeatedDeadEnd(r.error ?? r.summary)) {
+      if (isRepeatedDeadEnd(r.error ?? r.summary, r.failedNodeId)) {
         return stopOnRepeatedDeadEnd(r.error ?? r.summary)
       }
       // Nothing to patch — escalate straight to replay + graph audit.
@@ -728,7 +735,7 @@ export async function runDebugSession(
     // same way. Check the terminal state before burning another round.
     const satisfied = await judgeAlreadySatisfied(v)
     if (satisfied) return alreadySatisfiedResult(satisfied)
-    if (isRepeatedDeadEnd(lastError)) {
+    if (isRepeatedDeadEnd(lastError, v.failedNodeId)) {
       return stopOnRepeatedDeadEnd(lastError)
     }
     if (round < maxRounds) {

@@ -57,6 +57,32 @@ export interface WorkflowDraftEmptyDetail {
   detail?: string
 }
 
+/**
+ * Independent verification summary for a generated workflow (spec §5.5, §10.1).
+ *
+ * The draft card runs the shared repair engine's takeover-free verification
+ * before it is offered, and reports the outcome here. A `verified` workflow is
+ * one that executed successfully WITHOUT AI takeover and with the goal
+ * achieved; anything else is still offered (saving is never blocked) but the
+ * card shows why it is not yet independently proven.
+ */
+export interface GeneratedWorkflowRepairInfo {
+  /** Whether the workflow ran successfully without AI takeover + goal achieved. */
+  verified: boolean
+  /** "VERIFIED" | "DRAFT" | "BLOCKED" outcome of the repair loop. */
+  status: 'VERIFIED' | 'DRAFT' | 'BLOCKED'
+  /** Symptom node (where execution failed), when known. */
+  failedNodeId?: string
+  /** Root-cause node(s) located by the deterministic analyzer. */
+  rootCauseNodeIds: string[]
+  /** Shared failure code (VerificationFailureType), when known. */
+  failureType?: string
+  /** Human-readable explanation of the diagnosis (redacted). */
+  explanation: string
+  /** How many repair rounds were attempted. */
+  rounds: number
+}
+
 /** A running task as shown on the Tasks tab board. */
 export interface RunningTaskView {
   runId: string
@@ -231,6 +257,11 @@ export type Command =
       id: string
       mode: 'ANALYZE' | 'SUGGEST' | 'AUTO_REPAIR'
       /** See workflows.run.windowId. */ windowId?: number
+      /**
+       * Set true when the user explicitly accepts a low-confidence proposal
+       * (P2); absent ⇒ a low-confidence AUTO_REPAIR only returns the preview.
+       */
+      confirmed?: boolean
     }
   /** Commit (formally save) the verified repair working copy. */
   | { type: 'workflows.repairCommit'; id: string }
@@ -243,7 +274,17 @@ export type Command =
   /** Aggregate debug-SESSION stats: verified success rate + phase timing. */
   | { type: 'workflows.debugStats' }
   /** Applies the pending AI-takeover fixes to this workflow (user confirmed). */
-  | { type: 'workflows.takeoverApply'; id: string; verify?: boolean }
+  | {
+      type: 'workflows.takeoverApply'
+      id: string
+      verify?: boolean
+      /**
+       * Set true when the user accepts a CRITICAL whole-graph rewrite after
+       * seeing its risk level (P2, spec §8.4); absent ⇒ a CRITICAL rewrite is
+       * refused and its risk is returned for confirmation.
+       */
+      confirmedRisk?: boolean
+    }
   /** Discards the pending AI-takeover fixes for this workflow. */
   | { type: 'workflows.takeoverDiscard'; id: string }
   /**
@@ -391,6 +432,12 @@ export type CommandResult =
       /** Repeat runs worth folding, for the review card. */
       suggestions?: RepeatSuggestion[]
       /**
+       * Independent verification + repair summary for the generated workflow
+       * (spec §10.1). Populated when the background ran the shared repair
+       * engine's takeover-free verification before offering the card.
+       */
+      repair?: GeneratedWorkflowRepairInfo
+      /**
        * Every selector in the graph checked against the live page. `null` means
        * the page could not be probed — "not verified", not "all fine".
        */
@@ -462,6 +509,15 @@ export type CommandResult =
       verified?: boolean
       /** Run summary from the verification re-run (first error when it failed). */
       verifySummary?: string
+      /**
+       * Risk level of a whole-graph rewrite (P2, spec §8.4). When a CRITICAL
+       * rewrite was not confirmed, the apply is refused and this (with the
+       * reasons) tells the panel to ask the user.
+       */
+      rewriteRisk?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+      rewriteRiskReasons?: string[]
+      /** True when the rewrite awaits explicit confirmation — nothing written. */
+      riskConfirmationNeeded?: boolean
     }
   | { type: 'workflows.takeoverDiscard' }
   | { type: 'workflows.running'; runs: RunningTaskView[]; finished: FinishedTaskView[] }

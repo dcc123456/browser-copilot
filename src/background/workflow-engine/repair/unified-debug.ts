@@ -17,10 +17,13 @@
 
 import { WorkflowRepairEngine } from './repair-engine'
 import { buildRepairContext } from './repair-agent'
+import { decideConfidence } from '../../../lib/workflow/repair/confirmation-gate'
+import { DEFAULT_REPAIR_POLICY } from '../../../lib/workflow/repair/types'
 import type {
   FailureAnalysis,
   RepairContext,
   RepairRoundSummary,
+  RepairPolicy,
   VerificationResult,
   WorkflowPatchSet,
 } from '../../../lib/workflow/repair/types'
@@ -37,6 +40,14 @@ export interface UnifiedDebugDeps {
   propose?: (context: RepairContext) => Promise<WorkflowPatchSet | null>
   onStep?: (kind: 'info' | 'status' | 'error' | 'result', text: string) => void
   sessionId?: string
+  /** Repair policy (confidence gate etc.); defaults to DEFAULT_REPAIR_POLICY. */
+  policy?: import('../../../lib/workflow/repair/types').RepairPolicy
+  /**
+   * Set true by the caller when the user explicitly accepted a low-confidence
+   * proposal. When false and confidence is below the threshold, AUTO_REPAIR
+   * returns the proposal for confirmation instead of applying it (P2).
+   */
+  userConfirmed?: boolean
 }
 
 export interface UnifiedDebugResult {
@@ -50,6 +61,11 @@ export interface UnifiedDebugResult {
   workingCopy?: Workflow
   /** Why the action could not complete. */
   reason?: string
+  /**
+   * True when a low-confidence valid patch awaits explicit user confirmation —
+   * nothing was applied. The panel re-sends AUTO_REPAIR with userConfirmed.
+   */
+  needsConfirmation?: boolean
 }
 
 /**
@@ -123,6 +139,24 @@ export async function runUnifiedDebug(
   if (mode === 'SUGGEST') {
     // Only a preview: no working-copy change.
     return { mode, ok: true, analysis, verification, patch: proposed }
+  }
+
+  // Confidence gate (P2, spec §6.5/§17.2): a valid but low-confidence patch is
+  // not applied without the user's explicit confirmation. Return it as a
+  // preview (needsConfirmation) — never drop it, never mutate the working copy.
+  const policy: RepairPolicy = deps.policy ?? DEFAULT_REPAIR_POLICY
+  const confidence = decideConfidence({ analysis, patch: proposed, policy })
+  if (confidence.requiresConfirmation && !deps.userConfirmed) {
+    log('status', 'Low confidence: waiting for explicit user confirmation.')
+    return {
+      mode,
+      ok: false,
+      analysis,
+      verification,
+      patch: proposed,
+      reason: confidence.reason,
+      needsConfirmation: true,
+    }
   }
 
   // AUTO_REPAIR: apply to a debug working copy, then replay + verify.

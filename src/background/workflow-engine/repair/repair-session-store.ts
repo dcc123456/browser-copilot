@@ -28,6 +28,17 @@ export interface PendingRepairSession {
   patch: WorkflowPatchSet
   analysis: FailureAnalysis
   verification: VerificationResult
+  /**
+   * Formal workflow's `updatedAt` at the moment the repair was produced.
+   *
+   * Optimistic-lock base (spec §11.3): when the user later commits, the formal
+   * workflow is re-read and its `updatedAt` compared to this value. A formal
+   * workflow that changed underneath the pending repair means the patch may be
+   * stale; the commit is refused and a fresh diagnosis is required.
+   */
+  baseUpdatedAt: number
+  /** Stable content hash of the base workflow, as a second lock signal. */
+  baseHash: string
   createdAt: number
 }
 

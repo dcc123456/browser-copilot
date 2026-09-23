@@ -19,6 +19,7 @@ import {
   AGENT_PORT,
   type AgentClientMessage,
   type AgentServerMessage,
+  type GeneratedWorkflowRepairInfo,
   type TurnTokenUsage,
   emitReviewLog,
   onReviewLog,
@@ -338,6 +339,12 @@ interface WorkflowPromptState {
    * so it must be the user's explicit choice, not the default.
    */
   verifyRun: boolean
+  /**
+   * Independent verification + repair summary for the generated workflow
+   * (spec §10.1). Populated when the background ran the shared repair engine
+   * before offering the card; null on older responses that lack it.
+   */
+  repair: GeneratedWorkflowRepairInfo | null
 }
 
 let counter = 0
@@ -1824,6 +1831,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       folding: null,
       foldNote: null,
       verifyRun: false,
+      repair: result.repair ?? null,
     })
     // Probe AFTER the card is up, on its own command: injecting into the page
     // can be slow or refused outright, and neither may keep the card away.
@@ -3283,6 +3291,44 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               <p className="hint" style={{ margin: '4px 0' }}>
                 {t.chatWorkflowProbeUnverified}
               </p>
+            )}
+            {workflowPrompt.repair && (
+              <div className="ai-prefill-list" role="group" aria-label={t.chatWorkflowRepairTitle}>
+                <p className={`hint ${workflowPrompt.repair.verified ? 'text-ok' : 'text-warn'}`}>
+                  {t.chatWorkflowRepairTitle}
+                </p>
+                <div className="ai-prefill-item">
+                  {workflowPrompt.repair.verified ? (
+                    <span className="wf-input-default">{t.chatWorkflowRepairVerified}</span>
+                  ) : (
+                    <span className="wf-input-default">{t.chatWorkflowRepairNotVerified}</span>
+                  )}
+                </div>
+                {!workflowPrompt.repair.verified && workflowPrompt.repair.failedNodeId && (
+                  <div className="ai-prefill-item">
+                    <span className="wf-input-name">
+                      {t.chatWorkflowRepairFailedNode({
+                        nodeId: workflowPrompt.repair.failedNodeId,
+                      })}
+                    </span>
+                  </div>
+                )}
+                {!workflowPrompt.repair.verified &&
+                  workflowPrompt.repair.rootCauseNodeIds.length > 0 && (
+                    <div className="ai-prefill-item">
+                      <span className="wf-input-name">
+                        {t.chatWorkflowRepairRootCauses({
+                          nodes: workflowPrompt.repair.rootCauseNodeIds.join(', '),
+                        })}
+                      </span>
+                    </div>
+                  )}
+                {!workflowPrompt.repair.verified && workflowPrompt.repair.explanation && (
+                  <div className="ai-prefill-item">
+                    <span className="wf-input-default">{workflowPrompt.repair.explanation}</span>
+                  </div>
+                )}
+              </div>
             )}
             {(workflowPrompt.integrity.danglingVars.length > 0 ||
               workflowPrompt.integrity.unreachable.length > 0) && (

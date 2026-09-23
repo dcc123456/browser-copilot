@@ -115,12 +115,18 @@ export interface TraceCollectorOptions {
 export class TraceCollector {
   private readonly trace: ExecutionTrace
   private sequence = 0
+  /**
+   * Workflow nesting stack (P3): root workflow id first; pushed when an
+   * `execute-workflow` enters a child, popped when it returns.
+   */
+  private readonly workflowStack: string[]
   /** nodeId → attempt counter (0-based); each retry adds a new record. */
   private readonly attempts = new Map<string, number>()
   /** nodeId → current in-flight record. */
   private readonly active = new Map<string, NodeExecutionTrace>()
 
   constructor(options: TraceCollectorOptions) {
+    this.workflowStack = [options.workflowId]
     this.trace = {
       traceId: newTraceId(),
       workflowId: options.workflowId,
@@ -133,7 +139,28 @@ export class TraceCollector {
       nodeExecutions: [],
       checkpoints: [],
       finalVariables: {},
+      workflowPath: [options.workflowId],
     }
+  }
+
+  /**
+   * Enter a nested sub-workflow (P3). Idempotent for the same id so a nested
+   * run of the SAME child still nests correctly.
+   */
+  enterSubWorkflow(workflowId: string): void {
+    this.workflowStack.push(workflowId)
+    this.trace.workflowPath = [...this.workflowStack]
+  }
+
+  /** Leave the current nested sub-workflow, returning to its parent. */
+  exitSubWorkflow(): void {
+    if (this.workflowStack.length > 1) this.workflowStack.pop()
+    this.trace.workflowPath = [...this.workflowStack]
+  }
+
+  /** Index into the workflow path the collector is currently executing in. */
+  currentWorkflowPathIndex(): number {
+    return this.workflowStack.length - 1
   }
 
   /** Record one engine step line. */
@@ -145,6 +172,9 @@ export class TraceCollector {
       ...(nodeId ? { nodeId } : {}),
       text,
     }
+    // Stamp the workflow nesting for child steps (P3).
+    const pathIndex = this.currentWorkflowPathIndex()
+    if (pathIndex > 0) event['workflowPathIndex'] = pathIndex
     this.trace.events.push(event)
   }
 
@@ -163,6 +193,9 @@ export class TraceCollector {
       inputVariables: inputRefsOf(node, variables),
       outputVariables: [],
     }
+    // Stamp the workflow this node runs in (P3): omit for the root workflow.
+    const pathIndex = this.currentWorkflowPathIndex()
+    if (pathIndex > 0) record.workflowPathIndex = pathIndex
     this.active.set(node.id, record)
     this.trace.nodeExecutions.push(record)
   }
