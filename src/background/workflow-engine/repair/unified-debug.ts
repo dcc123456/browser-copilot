@@ -18,6 +18,12 @@
 import { WorkflowRepairEngine } from './repair-engine'
 import { buildRepairContext } from './repair-agent'
 import { decideConfidence } from '../../../lib/workflow/repair/confirmation-gate'
+import {
+  isTransientFailure,
+  nextTransientRetry,
+  transientPolicyOf,
+  waitForTransientRetry,
+} from '../../../lib/workflow/repair/transient-retry'
 import { DEFAULT_REPAIR_POLICY } from '../../../lib/workflow/repair/types'
 import type {
   FailureAnalysis,
@@ -87,11 +93,50 @@ export async function runUnifiedDebug(
   const log = (kind: 'info' | 'status' | 'error' | 'result', text: string): void =>
     deps.onStep?.(kind, text)
 
+  const policy: RepairPolicy = deps.policy ?? DEFAULT_REPAIR_POLICY
+
   // 1. Independent execution.
   log('status', 'Running the workflow without AI takeover…')
-  const verification = await engine.verify(workflow, { entry: 'DEBUG' })
+  let verification = await engine.verify(workflow, { entry: 'DEBUG' })
   // 2. Deterministic diagnosis from the real trace.
-  const analysis = engine.diagnose(workflow, verification.trace)
+  let analysis = engine.diagnose(workflow, verification.trace)
+
+  // §6.3: bounded transient retries BEFORE any patch. ANALYZE still reports
+  // the diagnosis (including retryRecommended), but does not retry; SUGGEST /
+  // AUTO_REPAIR spend the shared transient budget first.
+  if (mode !== 'ANALYZE' && !verification.verified) {
+    const transientPolicy = transientPolicyOf(policy)
+    let transientRetries = 0
+    while (
+      analysis.retryRecommended ||
+      isTransientFailure(analysis.failureType, verification.trace.failure?.retryable)
+    ) {
+      const retry = nextTransientRetry({ retries: transientRetries }, transientPolicy)
+      if (!retry) {
+        log('status', 'Transient retry budget exhausted; proceeding to a minimal patch.')
+        break
+      }
+      transientRetries += 1
+      log(
+        'status',
+        `Bounded transient retry ${transientRetries}/${transientPolicy.maxRetries} in ${retry.delayMs}ms…`,
+      )
+      await waitForTransientRetry(retry.delayMs)
+      verification = await engine.verify(workflow, { entry: 'DEBUG' })
+      analysis = engine.diagnose(workflow, verification.trace)
+      if (verification.verified) {
+        log('result', 'Recovered after a bounded transient retry; no patch needed.')
+        return {
+          mode,
+          ok: true,
+          analysis,
+          verification,
+          ...(mode === 'AUTO_REPAIR' ? { workingCopy: workflow } : {}),
+        }
+      }
+    }
+  }
+
   log('result', analysis.explanation)
 
   if (mode === 'ANALYZE') {
@@ -144,7 +189,6 @@ export async function runUnifiedDebug(
   // Confidence gate (P2, spec §6.5/§17.2): a valid but low-confidence patch is
   // not applied without the user's explicit confirmation. Return it as a
   // preview (needsConfirmation) — never drop it, never mutate the working copy.
-  const policy: RepairPolicy = deps.policy ?? DEFAULT_REPAIR_POLICY
   const confidence = decideConfidence({ analysis, patch: proposed, policy })
   if (confidence.requiresConfirmation && !deps.userConfirmed) {
     log('status', 'Low confidence: waiting for explicit user confirmation.')

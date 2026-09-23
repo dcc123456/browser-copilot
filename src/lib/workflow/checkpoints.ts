@@ -48,6 +48,12 @@ export interface RunCheckpoint {
    * accepted.
    */
   workflowFingerprint?: string
+  /**
+   * Whether the variable snapshot was captured (spec §5.1). False ⇒ the bag
+   * could not be deep-copied and this point is not a valid resume state;
+   * absent ⇒ legacy record, treated as available.
+   */
+  snapshotAvailable?: boolean
   at: number
 }
 
@@ -208,6 +214,9 @@ export function resumePointOf(workflow: Workflow, checkpoints: RunCheckpoint[]):
   // Newest clean step wins — the furthest point the run provably reached.
   for (let i = checkpoints.length - 1; i >= 0; i -= 1) {
     const cp = checkpoints[i]!
+    // The variable snapshot failed (spec §5.1): resuming would seed an empty
+    // bag mislabeled as this point. Skip it rather than pretending to restore.
+    if (cp.snapshotAvailable === false) continue
     if (
       cp.workflowFingerprint &&
       cp.workflowFingerprint !== currentFingerprint

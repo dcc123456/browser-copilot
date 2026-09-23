@@ -20,10 +20,17 @@
  *
  * @module background/workflow-engine/debug-session
  */
-import { failureSignature, validationFailure } from '../../lib/workflow/ai-takeover'
+import { validationFailure } from '../../lib/workflow/ai-takeover'
 import type { TakeoverFix, TakeoverReport } from '../../lib/workflow/ai-takeover'
 import type { GoalVerdict, NodeAudit } from '../../lib/workflow/debug-rewrite'
 import { patchNodeParams, type WorkflowDebugResult } from '../../lib/workflow/auto-debug-patch'
+import {
+  buildFailureSignature,
+  createRepeatCounter,
+  reachedFailureThreshold,
+} from '../../lib/workflow/repair/failure-signature'
+import type { VerificationFailureType } from '../../lib/workflow/repair/types'
+import { classifyVerificationFailure } from '../../lib/workflow/repair/failure-classifier'
 import type { Workflow } from '../../lib/workflow/types'
 import type { AiTakeoverHook } from './engine'
 
@@ -107,6 +114,11 @@ export function withWaitFor(workflow: Workflow, ms = DEBUG_WAIT_MS): Workflow {
 /**
  * Applies takeover fixes to a workflow copy. Pure: `patchNodeParams` clones
  * internally; the input object is never mutated.
+ *
+ * MIGRATION BOUNDARY (spec §15 Phase 9): the second sanctioned direct use of
+ * the low-level graph op. The unified `workflows.repair` entry already uses
+ * PatchEngine; when the legacy `workflows.debug` entry is retired this helper
+ * and its patchNodeParams import are removed together.
  */
 export function applyTakeoverFixes(
   workflow: Workflow,
@@ -226,6 +238,12 @@ export interface DebugSessionDeps {
   sessionId?: string
   /** Run→fix→verify rounds; the first takeover run counts as round 1. */
   maxRounds?: number
+  /**
+   * Repeat-dead-end threshold (spec §13 maxSameFailureSignature). Defaults to
+   * {@link REPEAT_FAILURE_LIMIT}; the unified entry passes the shared policy
+   * value so the breaker is not driven by a hardcoded constant.
+   */
+  maxSameFailureSignature?: number
 }
 
 /**
@@ -252,27 +270,39 @@ export async function runDebugSession(
   let lastError: string | undefined
   let roundsSeen = 0
   /**
-   * Failure signatures seen this session (ordered, oldest first) — the
-   * anti-infinite-retry breaker. A non-idempotent workflow that already landed
-   * fails identically on every round, so seeing the same signature again is a
-   * signal to STOP (see {@link REPEAT_FAILURE_LIMIT}).
+   * Repeat-dead-end bookkeeping (spec §13). The signature is node +
+   * root-cause aware — workflowId, the failed node, failureType, normalized
+   * error, root-cause node ids and relevant variable names — so identical
+   * error text at a DIFFERENT node (or after the root cause moved) is not
+   * misread as the same dead end. The threshold comes from the shared policy.
    */
-  const seenSignatures: string[] = []
+  const repeatCounter = createRepeatCounter()
+  const signatureThreshold = Math.max(
+    1,
+    deps.maxSameFailureSignature ?? REPEAT_FAILURE_LIMIT,
+  )
 
   /**
-   * Records a failure signature; returns true when the SAME failure has now
-   * recurred enough times that walking into it again is pointless.
-   *
-   * The signature is node-aware (spec §13): it uses the actual failed node id
-   * from the run trace rather than a fixed 'session', so identical error text
-   * at DIFFERENT nodes is not misread as the same dead end. Falls back to the
-   * run id only when no node evidence exists.
+   * Record a failure; returns true when the same node+root-cause signature has
+   * reached the policy threshold (`maxSameFailureSignature`).
    */
   const isRepeatedDeadEnd = (error: string | undefined, nodeId?: string): boolean => {
     if (!error) return false
-    const signature = failureSignature(nodeId ?? lastRunId ?? 'unknown', error)
-    seenSignatures.push(signature)
-    return seenSignatures.filter((s) => s === signature).length > REPEAT_FAILURE_LIMIT
+    const classified = classifyVerificationFailure(error)
+    const signature = buildFailureSignature({
+      workflowId: workflow.id,
+      nodeId: nodeId ?? lastRunId,
+      failureType: classified.type as VerificationFailureType,
+      error,
+      // Root-cause ids/variables are not yet known on the plain-debug path;
+      // the symptom node + failure type still disambiguate far beyond the
+      // legacy 'session' signature.
+      rootCauseNodeIds: [],
+      relevantVariableNames: [],
+    })
+    const prior = repeatCounter.count(signature)
+    repeatCounter.record(signature)
+    return reachedFailureThreshold(prior, signatureThreshold)
   }
 
   /** Plain-failure result (no escalation available / escalation failed). */
@@ -310,7 +340,7 @@ export async function runDebugSession(
     const detail = error ?? '(无详情)'
     log(
       'error',
-      `同一错误已连续出现超过 ${REPEAT_FAILURE_LIMIT} 次：${detail} —— 继续重试不会有新结果，停止调试`,
+      `同一节点+根因签名已达到阈值 ${signatureThreshold}：${detail} —— 继续重试不会有新结果，停止调试`,
     )
     return failedResult(
       `重复失败：${detail}。连续多次卡在同一个错误，继续重试不会回到初始状态（若是登录/提交类流程，请先手动复位到未登录/未提交状态再调试）`,

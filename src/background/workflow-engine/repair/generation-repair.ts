@@ -22,6 +22,12 @@
 import { WorkflowRepairEngine } from './repair-engine'
 import { buildRepairContext } from './repair-agent'
 import { decideConfidence } from '../../../lib/workflow/repair/confirmation-gate'
+import {
+  isTransientFailure,
+  nextTransientRetry,
+  transientPolicyOf,
+  waitForTransientRetry,
+} from '../../../lib/workflow/repair/transient-retry'
 import type {
   FailureAnalysis,
   RepairContext,
@@ -43,6 +49,13 @@ export interface GenerationRepairResult {
   lastAnalysis?: FailureAnalysis
   patches: WorkflowPatchSet[]
   reason?: string
+  /** Bounded transient retries performed (§6.3). */
+  transientRetries: number
+  /**
+   * True when the workflow passed only after a transient retry (no patch):
+   * the caller records `TRANSIENT_RECOVERY` telemetry.
+   */
+  recoveredFromTransient: boolean
 }
 
 export interface GenerationRepairDeps {
@@ -77,6 +90,8 @@ export async function finalizeGeneratedWorkflow(
   let workingCopy = workflow
   const patches: WorkflowPatchSet[] = []
   const deadline = Date.now() + policy.maxTotalDurationMs
+  let transientRetries = 0
+  let recoveredFromTransient = false
 
   for (let round = 0; round < policy.maxRepairRounds; round += 1) {
     if (Date.now() > deadline) break
@@ -84,7 +99,14 @@ export async function finalizeGeneratedWorkflow(
     const verification = await engine.verify(workingCopy, { entry: 'GENERATION' })
     if (verification.verified) {
       log('result', 'Generated workflow verified without AI takeover.')
-      return { status: 'VERIFIED', workingCopy, lastVerification: verification, patches }
+      return {
+        status: 'VERIFIED',
+        workingCopy,
+        lastVerification: verification,
+        patches,
+        transientRetries,
+        recoveredFromTransient,
+      }
     }
 
     const analysis = engine.diagnose(workingCopy, verification.trace)
@@ -99,15 +121,47 @@ export async function finalizeGeneratedWorkflow(
         lastAnalysis: analysis,
         patches,
         reason: analysis.explanation,
+        transientRetries,
+        recoveredFromTransient,
       }
     }
 
-    // retryRecommended is surfaced; the next verify pass is the bounded retry
-    // when the runner supports it. No patch is generated for transient causes.
-    if (analysis.retryRecommended && round < policy.maxRepairRounds - 1) {
-      log('status', `${analysis.explanation} Retrying…`)
-      workingCopy = { ...workingCopy, updatedAt: workingCopy.updatedAt }
-      continue
+    // §6.3: bounded transient retries run BEFORE any patch, with their own
+    // budget (maxTransientRetries) and backoff [500, 1500]ms. A retry that
+    // succeeds is a TRANSIENT_RECOVERY — no patch is produced.
+    if (
+      analysis.retryRecommended ||
+      isTransientFailure(analysis.failureType, verification.trace.failure?.retryable)
+    ) {
+      const transientPolicy = transientPolicyOf(policy)
+      const retry = nextTransientRetry({ retries: transientRetries }, transientPolicy)
+      if (retry) {
+        transientRetries += 1
+        log(
+          'status',
+          `${analysis.explanation} Bounded retry ${transientRetries}/${transientPolicy.maxRetries} in ${retry.delayMs}ms…`,
+        )
+        await waitForTransientRetry(retry.delayMs)
+        const retried = await engine.verify(workingCopy, { entry: 'GENERATION' })
+        if (retried.verified) {
+          recoveredFromTransient = true
+          log('result', 'Recovered after a bounded transient retry; no patch needed.')
+          return {
+            status: 'VERIFIED',
+            workingCopy,
+            lastVerification: retried,
+            lastAnalysis: analysis,
+            patches,
+            transientRetries,
+            recoveredFromTransient,
+          }
+        }
+        // Still failing: loop again (another transient retry, or fall through
+        // to a patch once the transient budget is spent).
+        round -= 1
+        continue
+      }
+      log('status', 'Transient retry budget exhausted; proceeding to a minimal patch.')
     }
 
     const context = buildRepairContext(workingCopy, verification.trace, analysis, [])
@@ -134,6 +188,8 @@ export async function finalizeGeneratedWorkflow(
         lastAnalysis: analysis,
         patches,
         reason: confidence.reason,
+        transientRetries,
+        recoveredFromTransient,
       }
     }
 
@@ -149,6 +205,8 @@ export async function finalizeGeneratedWorkflow(
         lastVerification: replay,
         lastAnalysis: analysis,
         patches,
+        transientRetries,
+        recoveredFromTransient,
       }
     }
   }
@@ -164,5 +222,7 @@ export async function finalizeGeneratedWorkflow(
     lastAnalysis,
     patches,
     reason: 'repair budget exhausted',
+    transientRetries,
+    recoveredFromTransient,
   }
 }

@@ -195,6 +195,7 @@ export interface VariableChainLink {
 export function traceVariableChain(
   graph: DataFlowGraph,
   consumerNodeId: string,
+  trace?: ExecutionTrace,
 ): { chain: VariableChainLink[]; roots: string[]; cycle: boolean } {
   const chain: VariableChainLink[] = []
   const roots = new Set<string>()
@@ -235,6 +236,17 @@ export function traceVariableChain(
           variable: edge.variable,
           relation: 'TRANSFORMS',
         })
+        continue
+      }
+      // A non-transform producer whose OUTPUT CONTRACT was violated (spec
+      // §5.3) is the root cause: do not walk past it either. A valid producer
+      // means keep tracing upstream along its own inputs.
+      const producerRecord = trace?.nodeExecutions
+        .filter((record) => record.nodeId === producerNodeId)
+        .flatMap((record) => record.outputVariables)
+        .find((output) => output.variable === edge.variable)
+      if (producerRecord?.contract && !producerRecord.contract.valid) {
+        roots.add(producerNodeId)
         continue
       }
       roots.add(producerNodeId)

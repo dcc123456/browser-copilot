@@ -117,6 +117,14 @@ export interface TraceCheckpoint {
   status: 'running' | 'ok' | 'failed' | 'cancelled'
   variableSummaries: Record<string, VariableValueSummary>
   pageState?: unknown
+  /**
+   * Whether the variable snapshot was captured successfully (spec §5.1).
+   *
+   * `false` when the variable bag could not be deep-copied: the summaries
+   * MUST NOT be silently treated as an empty-variable state. Callers planning
+   * a checkpoint replay refuse to resume from such a point.
+   */
+  snapshotAvailable: boolean
   at: number
 }
 
@@ -381,7 +389,7 @@ export interface RepairRoundSummary {
   rootCauseNodeIds: string[]
   failureType?: VerificationFailureType
   patchSetId?: string
-  result: 'VERIFIED' | 'FAILED' | 'DRAFT' | 'CANCELLED'
+  result: 'VERIFIED' | 'TRANSIENT_RECOVERY' | 'FAILED' | 'DRAFT' | 'CANCELLED'
 }
 
 export interface RepairContext {

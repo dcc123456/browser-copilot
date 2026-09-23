@@ -175,6 +175,12 @@ export interface WorkflowRunOptions {
     nodeId: string
     status: 'ok' | 'failed' | 'cancelled'
     variables: Record<string, unknown>
+    /**
+     * Whether the variable snapshot was captured (spec §5.1). False when the
+     * variables could not be deep-copied; the integration layer must then not
+     * treat the point as an empty-variable / resumable state.
+     */
+    snapshotAvailable: boolean
     /** Fine-grained phase (spec §14) — set on side-effect-safety entries. */
     phase?: import('../../lib/workflow/checkpoints').CheckpointPhase
   }) => void
@@ -501,16 +507,21 @@ async function runCore(
   ): void => {
     if (!onCheckpoint) return
     let snapshot: Record<string, unknown> = {}
+    let snapshotAvailable = true
     try {
       snapshot = JSON.parse(JSON.stringify(variables ?? {})) as Record<string, unknown>
     } catch {
+      // A non-serializable bag must NOT be silently presented as empty vars
+      // (spec §5.1). Mark the point unusable for a snapshot resume.
       snapshot = {}
+      snapshotAvailable = false
     }
     onCheckpoint({
       stepIndex: checkpointStep++,
       nodeId,
       status,
       variables: snapshot,
+      snapshotAvailable,
       ...(phase ? { phase } : {}),
     })
   }

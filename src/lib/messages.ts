@@ -81,6 +81,13 @@ export interface GeneratedWorkflowRepairInfo {
   explanation: string
   /** How many repair rounds were attempted. */
   rounds: number
+  /** Bounded transient retries performed before any patch (spec §6.3). */
+  transientRetries?: number
+  /**
+   * True when verification succeeded only after a bounded transient retry —
+   * telemetry bucket `TRANSIENT_RECOVERY`, distinct from first-pass success.
+   */
+  transientRecovery?: boolean
 }
 
 /** A running task as shown on the Tasks tab board. */

@@ -127,5 +127,20 @@ describe('ExecutionTrace collector (Phase 1)', () => {
     const trace = collector.build('ok', { v: 1 })
     expect(trace.checkpoints).toHaveLength(1)
     expect(trace.checkpoints[0]!.checkpointId).toBe('r:0')
+    expect(trace.checkpoints[0]!.snapshotAvailable).toBe(true)
+  })
+
+  it('marks snapshotAvailable=false explicitly instead of silent empty vars', () => {
+    const collector = new TraceCollector({ workflowId: 'wf', runId: 'r', entry: 'REPLAY' })
+    // Snapshot failed: summaries must NOT be treated as a real empty state.
+    collector.recordCheckpoint(2, 'a', 'ok', { v: 1 }, false)
+    const trace = collector.build('ok', {})
+    const checkpoint = trace.checkpoints[0]!
+    expect(checkpoint.snapshotAvailable).toBe(false)
+    expect(checkpoint.variableSummaries).toEqual({})
+    // An explicit, non-silent error event is recorded.
+    expect(
+      trace.events.some((event) => event.kind === 'error' && /snapshot unavailable/.test(event.text)),
+    ).toBe(true)
   })
 })

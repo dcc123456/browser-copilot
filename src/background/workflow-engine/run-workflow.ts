@@ -576,7 +576,14 @@ export async function executeWorkflow(
       // M4 checkpoints: one entry per settled node, persisted to
       // `checkpoints/<runId>.json`. The engine only reports the step; the run
       // id and the durable write live here so the engine stays chrome-free.
-      onCheckpoint: ({ stepIndex, nodeId, status, variables: checkpointVars, phase }) => {
+      onCheckpoint: ({
+        stepIndex,
+        nodeId,
+        status,
+        variables: checkpointVars,
+        snapshotAvailable,
+        phase,
+      }) => {
         if (wantCheckpoints) {
           recordCheckpoint(checkpointStore, {
             runId,
@@ -585,6 +592,9 @@ export async function executeWorkflow(
             nodeId,
             status,
             variables: checkpointVars,
+            // Bind the resume guard + the snapshot-availability signal to this
+            // point; a point with snapshotAvailable=false is never resumed.
+            ...(snapshotAvailable === false ? { snapshotAvailable: false } : {}),
             // Resume guard (spec §14): the recorded state is bound to THIS
             // graph; a resume onto a different fingerprint is refused.
             workflowFingerprint: workflowFingerprintOf(effective),
@@ -599,6 +609,7 @@ export async function executeWorkflow(
           nodeId,
           status,
           checkpointVars,
+          snapshotAvailable,
           ...(phase !== undefined ? [phase] : []),
         )
         if (phase === undefined && nodeId && traceActiveNodeId === nodeId) {

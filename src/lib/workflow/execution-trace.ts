@@ -16,6 +16,8 @@
 
 import { referencesIn } from './dynamic-data'
 import { summarizeValue, summarizeVariables } from './repair/redaction'
+import { contractOfNode } from './variable-contract'
+import { evaluateContract } from './variable-contract'
 import type {
   ExecutionTrace,
   NodeExecutionTrace,
@@ -230,20 +232,39 @@ export class TraceCollector {
     for (const name of Object.keys(after)) {
       if (!Object.prototype.hasOwnProperty.call(before, name)) producedNames.add(name)
     }
-    record.outputVariables = [...producedNames].sort().map((variable) => ({
-      variable,
-      producerNodeId: node.id,
-      summary: summarizeValue(after[variable], variable),
-    }))
+    // Contract a producer node imposes on its own output (spec §5.3). Evaluated
+    // right after production so an empty / wrong-typed output is an early,
+    // deterministic repair signal the analyzer can cite.
+    const contract = contractOfNode(node)
+    record.outputVariables = [...producedNames].sort().map((variable) => {
+      const produced = Object.prototype.hasOwnProperty.call(after, variable)
+      const contractResult = contract
+        ? evaluateContract(after[variable], contract, { produced })
+        : undefined
+      return {
+        variable,
+        producerNodeId: node.id,
+        summary: summarizeValue(after[variable], variable),
+        ...(contractResult && !contractResult.valid ? { contract: contractResult } : {}),
+      }
+    })
     if (failure) record.error = failure
   }
 
-  /** Record one durable checkpoint. */
+  /**
+   * Record one durable checkpoint.
+   *
+   * @param snapshotAvailable whether the variable snapshot was captured. When
+   * false (the bag could not be deep-copied) an explicit warning event is
+   * recorded so the failure is never silent (spec §5.1) — such a point must
+   * not be treated as "empty variables" or used for a checkpoint replay.
+   */
   recordCheckpoint(
     stepIndex: number,
     nodeId: string | undefined,
     status: 'running' | 'ok' | 'failed' | 'cancelled',
     variables: Readonly<Record<string, unknown>>,
+    snapshotAvailable = true,
     pageState?: unknown,
   ): void {
     this.trace.checkpoints.push({
@@ -251,10 +272,23 @@ export class TraceCollector {
       stepIndex,
       ...(nodeId ? { nodeId } : {}),
       status,
-      variableSummaries: summarizeVariables(variables),
+      variableSummaries: snapshotAvailable
+        ? summarizeVariables(variables)
+        : {},
+      snapshotAvailable,
       ...(pageState !== undefined ? { pageState } : {}),
       at: Date.now(),
     })
+    if (!snapshotAvailable) {
+      const event: TraceEvent = {
+        sequence: this.sequence++,
+        at: Date.now(),
+        kind: 'error',
+        ...(nodeId ? { nodeId } : {}),
+        text: 'checkpoint variable snapshot unavailable (deep copy failed); not resumable from this point',
+      }
+      this.trace.events.push(event)
+    }
   }
 
   /** Record page/tab/frame state for the tail of the trace. */

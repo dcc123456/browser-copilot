@@ -162,6 +162,7 @@ import { createAiTakeover } from './workflow-engine/ai-takeover'
 import { runDebugSession, DEFAULT_MAX_ROUNDS } from './workflow-engine/debug-session'
 import { runUnifiedDebug } from './workflow-engine/repair/unified-debug'
 import { finalizeGeneratedWorkflow } from './workflow-engine/repair/generation-repair'
+import { DEFAULT_REPAIR_POLICY } from '../lib/workflow/repair/types'
 import { recordRepairRound } from '../lib/workflow/repair-metrics'
 import { createBackgroundRunner } from './workflow-engine/repair/background-runner'
 import { createAiRepairProposer } from './workflow-engine/repair/repair-provider'
@@ -474,7 +475,7 @@ async function verifyGeneratedDraft(workflow: Workflow): Promise<{
         : {}),
       rootCauseNodeIds: result.lastAnalysis?.rootCauseNodeIds ?? [],
       ...(result.lastAnalysis?.failureType ? { failureType: result.lastAnalysis.failureType } : {}),
-      transientRetries: 0,
+      transientRetries: result.transientRetries,
       ...(result.patches[result.patches.length - 1]?.patchSetId
         ? { patchSetId: result.patches[result.patches.length - 1]!.patchSetId }
         : {}),
@@ -489,8 +490,16 @@ async function verifyGeneratedDraft(workflow: Workflow): Promise<{
       ...(result.lastVerification?.goalAchieved !== undefined
         ? { goalAchieved: result.lastVerification.goalAchieved }
         : {}),
+      // A verified outcome reached WITHOUT a patch but after a bounded retry
+      // is a TRANSIENT_RECOVERY — a distinct telemetry bucket (§1.3).
       result:
-        result.status === 'VERIFIED' ? 'VERIFIED' : result.status === 'BLOCKED' ? 'DRAFT' : 'DRAFT',
+        result.status === 'VERIFIED'
+          ? result.recoveredFromTransient
+            ? 'TRANSIENT_RECOVERY'
+            : 'VERIFIED'
+          : result.status === 'BLOCKED'
+            ? 'DRAFT'
+            : 'DRAFT',
       durationMs: 0,
     })
     return {
@@ -507,6 +516,8 @@ async function verifyGeneratedDraft(workflow: Workflow): Promise<{
           : {}),
         explanation: result.lastAnalysis?.explanation ?? result.reason ?? '',
         rounds,
+        transientRetries: result.transientRetries,
+        ...(result.recoveredFromTransient ? { transientRecovery: true } : {}),
       },
     }
   } catch (error) {
@@ -1687,6 +1698,9 @@ async function handleCommand(
           : undefined
         const result = await runDebugSession(workflow, {
           maxRounds: 2,
+          // Repeat-dead-end threshold from the shared repair policy (spec §13),
+          // not the legacy hardcoded constant.
+          maxSameFailureSignature: DEFAULT_REPAIR_POLICY.maxSameFailureSignature,
           // M4: stamp the session id onto every run this session spawns.
           sessionId,
           ...(replay && audit
@@ -2062,6 +2076,11 @@ async function handleCommand(
         applied = { ...pending.rewrite.workflow, id: workflow.id, updatedAt: Date.now() }
         appliedCount = pending.rewrite.changes.length
       } else {
+        // LEGACY confirm path (spec §15 Phase 9): user-approved pending
+        // takeover fixes are merged via the low-level graph op. This is the
+        // one sanctioned direct patchNodeParams call outside PatchEngine; it
+        // must be folded into PatchEngine when the old takeover pending format
+        // is retired.
         const changes: string[] = []
         for (const fix of pending.fixes) {
           const result = patchNodeParams(applied, fix.nodeId, fix.paramsPatch)

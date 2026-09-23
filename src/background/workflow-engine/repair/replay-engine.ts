@@ -117,6 +117,9 @@ export function planReplay(input: PlanReplayInput): ReplayDecision {
   let checkpoint: RunCheckpoint | undefined
   for (let i = checkpoints.length - 1; i >= 0; i -= 1) {
     const candidate = checkpoints[i]!
+    // A point whose variable snapshot failed (spec §5.1) is not a valid resume
+    // state — never silently replay it as empty variables.
+    if (candidate.snapshotAvailable === false) continue
     if (
       candidate.nodeId === beforeNodeId &&
       candidate.status === 'ok' &&

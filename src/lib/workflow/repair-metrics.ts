@@ -23,7 +23,12 @@ import type { VerificationFailureType } from './repair/types'
 export type RepairEntry = 'GENERATION' | 'DEBUG'
 
 /** How the repair round ended. */
-export type RepairRoundResult = 'VERIFIED' | 'FAILED' | 'DRAFT' | 'CANCELLED'
+export type RepairRoundResult =
+  | 'VERIFIED'
+  | 'TRANSIENT_RECOVERY'
+  | 'FAILED'
+  | 'DRAFT'
+  | 'CANCELLED'
 
 /** One logged repair round (spec §14 RepairRoundLog). */
 export interface RepairRoundLog {
@@ -88,6 +93,7 @@ export async function summarizeRepairRounds(entry?: RepairEntry): Promise<{
   const logs = (await loadLogs()).filter((log) => !entry || log.entry === entry)
   const byResult: Record<RepairRoundResult, number> = {
     VERIFIED: 0,
+    TRANSIENT_RECOVERY: 0,
     FAILED: 0,
     DRAFT: 0,
     CANCELLED: 0,

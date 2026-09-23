@@ -1,23 +1,17 @@
 /**
- * ReliabilityPatch — the ONLY shape the AI-repair loop may use to change a
- * workflow (spec §12/§13 Phase 8).
+ * ReliabilityPatch — LEGACY patch shape, superseded by the unified
+ * {@link WorkflowPatchSet} + {@link PatchEngine} (spec §5.6/§8).
  *
- * A patch is a LOCAL, single-node param change with a stated confidence and
- * reason. It can never: touch another node, add/remove/retype a node
- * (`blockId` is protected), disable a node (`disableBlock` is protected),
- * or RELAX a contract (idempotency may only be tightened; postconditions may
- * only be added, never removed).
+ * @deprecated No business code calls this module anymore — the generation and
+ * debug entries both go through `src/lib/workflow/repair/patch-engine.ts`. It
+ * is retained only for `tests/reliability-patch.spec.ts` and will be removed
+ * once that regression coverage is ported onto PatchEngine-based tests.
  *
- * Confidence gates (§13.2):
- *   - `confidence < 0.75`            → refuse auto-apply (suggest to the user)
- *   - `0.75 ≤ confidence < 0.9`      → apply in memory, verify by re-running
- *   - `confidence ≥ 0.9`             → apply + verify chain (the re-run may
- *     itself rely on earlier verified patches)
- *
- * The circuit breaker (§13.4) hashes the patch's identity: the SAME patch for
- * the SAME failure code on the SAME node is refused once it has already been
- * applied and the failure recurred — looping the same "fix" is how an agent
- * burns rounds while pretending to make progress.
+ * Originally the ONLY shape the AI-repair loop could use to change a workflow:
+ * a LOCAL, single-node param change with a stated confidence and reason. It
+ * could never touch another node, add/remove/retype a node (`blockId` is
+ * protected), disable a node (`disableBlock` is protected), or RELAX a contract
+ * (idempotency may only be tightened; postconditions may only be added).
  *
  * @module lib/workflow/reliability-patch
  */

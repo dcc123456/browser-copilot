@@ -99,10 +99,29 @@ function buildVariableEvidence(
       record.outputVariables.some((output) => output.variable === use.variable),
     )
     const lastProduction = producerExecutions[producerExecutions.length - 1]
+    // The producer's own output contract (spec §5.3): the deterministic
+    // signal that its output is empty / wrong-typed even when it exists.
+    const outputContract = lastProduction?.outputVariables.find(
+      (output) => output.variable === use.variable,
+    )?.contract
 
     let kind: VariableEvidence['kind'] = 'PRODUCED'
     let detail = `${use.variable} is available`
-    if (!summary?.exists) {
+    if (outputContract && !outputContract.valid) {
+      // Contract first: distinguishes EMPTY vs TYPE vs a generic violation.
+      const state = outputContract.violations.join('; ')
+      if (/empty/.test(state)) {
+        kind = 'EMPTY'
+        detail = `${use.variable} was produced but is empty (contract: ${state})`
+      } else if (/type/.test(state)) {
+        kind = 'TYPE'
+        detail = `${use.variable} has the wrong type (contract: ${state})`
+      } else {
+        kind = 'EMPTY'
+        detail = `${use.variable} violates its output contract: ${state}`
+      }
+      abnormalVariables.push(use.variable)
+    } else if (!summary?.exists) {
       kind = 'MISSING'
       detail = `${use.variable} was never produced`
       abnormalVariables.push(use.variable)
@@ -120,6 +139,7 @@ function buildVariableEvidence(
       nodeId: lastProduction?.nodeId,
       kind,
       summary: summary ?? { exists: false, redacted: false },
+      ...(outputContract ? { contract: outputContract } : {}),
       detail,
     })
   }
@@ -218,9 +238,11 @@ export function analyzeFailure(input: AnalyzeInput): FailureAnalysis {
   // Build the graph (trace-backed so multi-producer cases resolve).
   const graph = analyzeDataFlow(workflow, trace)
 
-  // Root-cause walk from the failed node along its variable inputs.
+  // Root-cause walk from the failed node along its variable inputs. The trace
+  // supplies per-producer output contracts (§5.3) so the walk stops at the
+  // first node that actually violated its contract (Case B/C).
   const chainResult = failedNodeId
-    ? traceVariableChain(graph, failedNodeId)
+    ? traceVariableChain(graph, failedNodeId, trace)
     : { chain: [], roots: [], cycle: false }
 
   const variableResult = failedNode
