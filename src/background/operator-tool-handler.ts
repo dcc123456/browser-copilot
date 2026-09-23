@@ -51,6 +51,7 @@ import {
   type RepeatSuggestion,
 } from '../lib/workflow/loop-collapse'
 import { normalizeWorkflowDraft } from './workflow-engine/generation/normalize'
+import { generalizeInputs } from '../lib/workflow/input-generalization'
 import type { DraftSource, PendingBranch, WorkflowDraft } from '../lib/workflow/draft-types'
 import type { DeclaredInput } from '../lib/workflow/dynamic-data'
 import {
@@ -609,6 +610,14 @@ export async function composeWorkflowFromDraft(
   draft.nodes = normalized.draft.nodes
   draft.edges = normalized.draft.edges
   draft.tail = normalized.draft.tail
+  // Generalize the captured BUSINESS inputs into trigger parameters: task-text
+  // driven literals (the keyword, the order id) become {{token}} references
+  // (spec §7). The declarations are merged onto the trigger head.
+  const generalized = generalizeInputs(draft)
+  draft.nodes = generalized.draft.nodes
+  if (generalized.declarations.length > 0) {
+    declareWorkflowInputs(draft, generalized.declarations)
+  }
   // The user's request that started the generation, captured on the trigger
   // call (`goalText`) — becomes the derived goal's summary when present.
   const triggerHead = draft.nodes.find(isTriggerNode)
