@@ -52,6 +52,11 @@ export interface WorkflowDraft {
   /** Branch awaiting a target; set by an executed branch node or `next`. */
   pendingBranch?: PendingBranch
   /**
+   * The user's request that started this generation, when the UI captured it.
+   * Becomes the derived goal spec's summary — the honest statement of intent.
+   */
+  goalText?: string
+  /**
    * Generation-time variable bag.
    *
    * Operators like `set-variable` / `get-secret` / `conditions` read and write

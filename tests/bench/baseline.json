@@ -1,0 +1,136 @@
+{
+  "commit": "86eb1f06a411c9964bb21158cb2bfcdadd5566cc",
+  "sampleSizes": {
+    "generation": 5,
+    "execution": 10,
+    "debug": 9,
+    "stability": 10
+  },
+  "generation": {
+    "parseRate": 0.8,
+    "compileRate": 0.8,
+    "cases": {
+      "G01": {
+        "parsed": true,
+        "compiled": true,
+        "issues": []
+      },
+      "G02": {
+        "parsed": true,
+        "compiled": true,
+        "issues": []
+      },
+      "G03": {
+        "parsed": true,
+        "compiled": true,
+        "issues": []
+      },
+      "G04": {
+        "parsed": true,
+        "compiled": true,
+        "issues": []
+      },
+      "G05": {
+        "parsed": false,
+        "compiled": false,
+        "issues": []
+      }
+    }
+  },
+  "execution": {
+    "firstRunSuccess": 0.3,
+    "goalSuccess": 0.3,
+    "cases": {
+      "R01": {
+        "ok": true,
+        "submitCalls": 0
+      },
+      "R02": {
+        "ok": false,
+        "submitCalls": 0
+      },
+      "R03": {
+        "ok": false,
+        "submitCalls": 0
+      },
+      "R04": {
+        "ok": true,
+        "submitCalls": 0
+      },
+      "R05": {
+        "ok": false,
+        "submitCalls": 0
+      },
+      "R06": {
+        "ok": true,
+        "submitCalls": 0
+      },
+      "R07": {
+        "ok": false,
+        "submitCalls": 0
+      },
+      "R08": {
+        "ok": false,
+        "submitCalls": 0
+      },
+      "R09": {
+        "ok": false,
+        "submitCalls": 1
+      },
+      "R10": {
+        "ok": false,
+        "submitCalls": 0
+      }
+    }
+  },
+  "debug": {
+    "verifiedRecoveryRate": 0.6667,
+    "total": 9,
+    "verified": 6
+  },
+  "stability": {
+    "replaySuccessRate": 0.3,
+    "cases": {
+      "R01": {
+        "first": true,
+        "second": true
+      },
+      "R02": {
+        "first": false,
+        "second": false
+      },
+      "R03": {
+        "first": false,
+        "second": false
+      },
+      "R04": {
+        "first": true,
+        "second": true
+      },
+      "R05": {
+        "first": false,
+        "second": false
+      },
+      "R06": {
+        "first": true,
+        "second": true
+      },
+      "R07": {
+        "first": false,
+        "second": false
+      },
+      "R08": {
+        "first": false,
+        "second": false
+      },
+      "R09": {
+        "first": false,
+        "second": false
+      },
+      "R10": {
+        "first": false,
+        "second": false
+      }
+    }
+  }
+}

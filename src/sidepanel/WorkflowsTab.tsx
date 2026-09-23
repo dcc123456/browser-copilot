@@ -12,45 +12,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Circle, Download, Plus, Square, Trash2, Upload } from 'lucide-react'
 import { sendCommand } from '../lib/messages'
+import type { CommandResult } from '../lib/messages'
 import type { TaskRunLog } from '../lib/scheduler-types'
 import type { Workflow } from '../lib/workflow/types'
-import type { WorkflowDebugResult } from '../lib/workflow/auto-debug-patch'
-import { debugRunLabel } from '../lib/workflow/ai-takeover'
-import type { TakeoverReasonKind } from '../lib/workflow/ai-takeover'
-import type { DebugSessionStatsSummary, TakeoverStatsSummary } from '../lib/workflow/takeover-stats'
 import type { PendingTakeoverInfo } from '../lib/workflow/takeover-pending'
-import type { RunStep } from '../background/running-tasks'
 import { newId } from '../lib/storage'
 import { onStoreChanged } from '../lib/store-events'
 import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
 import { useT } from './i18n'
 import { confirmDialog } from '../ui/confirm'
-
-/**
- * Localized label for a classified takeover failure reason (stats line).
- * Falls back to the raw reason for unknown values.
- */
-function reasonLabelOf(
-  reason: TakeoverReasonKind | 'unclassified',
-  t: ReturnType<typeof useT>,
-): string {
-  switch (reason) {
-    case 'auth':
-      return t.workflowsDebugReasonAuth
-    case 'captcha':
-      return t.workflowsDebugReasonCaptcha
-    case 'notfound':
-      return t.workflowsDebugReasonNotfound
-    case 'timeout':
-      return t.workflowsDebugReasonTimeout
-    case 'network':
-      return t.workflowsDebugReasonNetwork
-    case 'other':
-      return t.workflowsDebugReasonOther
-    default:
-      return t.workflowsDebugReasonUnclassified
-  }
-}
+import { FailureCenterDialog } from './FailureCenter'
+import { WorkflowHealthView } from './WorkflowHealthView'
+import { summarizeWorkflowHealth } from '../lib/workflow/workflow-health'
 
 /**
  * Effective launch type for the list chip: the trigger BLOCK inside the graph
@@ -392,215 +365,16 @@ export default function WorkflowsTab() {
     }
   }
 
-  /** Id of the workflow currently inside the AI debug loop (button shows it). */
-  const [debuggingId, setDebuggingId] = useState<string | null>(null)
-  // Live debug-log modal: polls the running-tasks board for the wrapped
-  // "AI 调试: …" session run while a debug is in flight, so the user watches
-  // the AI work instead of waiting silently.
-  const [logOpen, setLogOpen] = useState(false)
-  const [debugSteps, setDebugSteps] = useState<RunStep[]>([])
-  const [debugSettled, setDebugSettled] = useState(false)
-  // Lifetime takeover stats (fetched once per settled debug session) for the
-  // success-rate line at the bottom of the debug log modal.
-  const [takeoverStats, setTakeoverStats] = useState<TakeoverStatsSummary | null>(null)
-  // Lifetime debug-SESSION stats: the strict "verified (no AI needed)" rate and
-  // phase timing, shown next to the takeover rate.
-  const [debugStats, setDebugStats] = useState<DebugSessionStatsSummary | null>(null)
-  const debuggingNameRef = useRef('')
-  const debugStartedAtRef = useRef(0)
-  const logOpenRef = useRef(false)
-  const logBodyRef = useRef<HTMLDivElement | null>(null)
-
-  const openLog = (): void => {
-    logOpenRef.current = true
-    setLogOpen(true)
-    setTakeoverStats(null)
-  }
-  const closeLog = (): void => {
-    logOpenRef.current = false
-    setLogOpen(false)
-  }
-
-  // Keep the log body pinned to the newest step while it is open.
-  useEffect(() => {
-    if (!logOpen) return
-    const body = logBodyRef.current
-    if (body) body.scrollTop = body.scrollHeight
-  }, [debugSteps, logOpen])
-
-  const pollDebugRun = useCallback(async (): Promise<void> => {
-    try {
-      const result = await sendCommand({ type: 'tasks.running' })
-      if (result.type !== 'tasks.running') return
-      const label = debugRunLabel(debuggingNameRef.current)
-      const since = debugStartedAtRef.current - 1000
-      const running = result.runs.find((r) => r.label === label && r.startedAt >= since)
-      const finished = result.finished.find((r) => r.label === label && r.startedAt >= since)
-      if (finished) {
-        setDebugSteps(finished.steps)
-        setDebugSettled(true)
-      } else if (running) {
-        setDebugSteps(running.steps)
-        setDebugSettled(false)
-      }
-    } catch {
-      /* polling is best-effort */
-    }
-  }, [])
-
-  // Poll the board while a debug session is in flight.
-  useEffect(() => {
-    if (!debuggingId) return
-    void pollDebugRun()
-    const timer = setInterval(() => void pollDebugRun(), 1500)
-    return () => clearInterval(timer)
-  }, [debuggingId, pollDebugRun])
-
   /**
-   * Multi-line list of the pending AI-takeover fixes, shown in the confirm
-   * dialog: one bullet per node with WHAT the AI changed.
+   * Single-entry failure center (spec §11 · Commit 11): the workflow + run the
+   * AI repair dialog is open for; null when the dialog is closed.
    */
-  const formatPendingFixes = (r: WorkflowDebugResult): string => {
-    return r.pendingChanges.map((fix) => `· ${fix.note}`).join('\n')
-  }
+  const [failureCenter, setFailureCenter] = useState<{
+    workflowId: string
+    runId: string
+    revision?: number
+  } | null>(null)
 
-  /**
-   * AI takeover debug (AI 调试): run the workflow once. When a node fails the
-   * AI takes over that node — it looks at the live page and completes the
-   * step's purpose — then the remaining nodes keep running (up to 3 takeover
-   * attempts per node). The workflow itself is only changed AFTER the user
-   * confirms the AI's proposed node fixes.
-   * The session streams into the live log modal as it works.
-   */
-  const debugNow = async (id: string, name: string): Promise<void> => {
-    debuggingNameRef.current = name
-    debugStartedAtRef.current = Date.now()
-    setDebugSteps([])
-    setDebugSettled(false)
-    setDebuggingId(id)
-    setBusy(true)
-    openLog()
-    try {
-      const result = await sendCommand({ type: 'workflows.debug', id })
-      if (result.type === 'workflows.debug') {
-        const r = result.result
-        const completedTakeovers = r.takeovers.filter((t) => t.completed).length
-        if (r.ok && r.rewrite) {
-          // The replay+audit path rebuilt the whole graph and the rebuild
-          // passed its own takeover-free verify run.
-          setBanner({
-            kind: 'ok',
-            text: t.workflowsDebugRewriteVerified({ count: r.rewrite.changes.length }),
-          })
-        } else if (r.ok && r.verified && completedTakeovers === 0) {
-          setBanner({ kind: 'ok', text: r.summary || t.workflowsDebugOkNoChanges })
-        } else if (r.ok && r.verified) {
-          // The verify run (no AI) passed: the fixes genuinely work on their own.
-          setBanner({
-            kind: 'ok',
-            text: t.workflowsDebugVerified({ count: r.pendingChanges.length }),
-          })
-        } else if (r.ok) {
-          // Passed via AI but the fixes failed (or skipped) verification.
-          setBanner({ kind: 'ok', text: t.workflowsDebugNotVerified })
-        } else if (r.cancelled) {
-          setBanner({ kind: 'error', text: t.taskOutcomeCancelled })
-        } else {
-          // Failed debug banner keeps the deep-link into the session's
-          // history entry; when the audit ran, the summary IS the diagnosis.
-          setBanner({
-            kind: 'error',
-            text: r.summary || t.workflowsDebugFailed,
-            ...(r.lastRunId ? { runId: r.lastRunId } : {}),
-          })
-        }
-        // The audit rebuilt the workflow: ask the user to apply the new
-        // version (a whole-graph swap on confirm). Nothing was written yet.
-        if (r.ok && r.rewrite) {
-          const confirmed = await confirmDialog({
-            title: t.workflowsDebugRewriteConfirmTitle,
-            message: `${t.workflowsDebugRewriteConfirmMessage({ diagnosis: r.rewrite.diagnosis })}\n\n${r.rewrite.changes.map((change) => `· ${change}`).join('\n')}`,
-            confirmText: t.workflowsDebugRewriteApply,
-            cancelText: t.workflowsDebugTakeoverDiscard,
-          })
-          if (confirmed) {
-            try {
-              const applyResult = await sendCommand({ type: 'workflows.takeoverApply', id })
-              if (applyResult.type === 'workflows.takeoverApply') {
-                setBanner({
-                  kind: 'ok',
-                  text:
-                    applyResult.appliedCount > 0
-                      ? t.workflowsDebugRewriteApplied
-                      : t.workflowsDebugTakeoverNothing,
-                })
-              }
-            } catch (error) {
-              setBanner({
-                kind: 'error',
-                text: error instanceof Error ? error.message : String(error),
-              })
-            }
-          } else {
-            await sendCommand({ type: 'workflows.takeoverDiscard', id }).catch(() => undefined)
-            setBanner({ kind: 'ok', text: t.workflowsDebugTakeoverDiscarded })
-          }
-        } else if (r.pendingChanges.length > 0) {
-          // The AI completed steps AND proposed node fixes: ask the user to
-          // apply them. Nothing was written to the workflow before this point.
-          const confirmed = await confirmDialog({
-            title: t.workflowsDebugTakeoverConfirmTitle,
-            message: `${t.workflowsDebugTakeoverConfirmMessage}\n\n${formatPendingFixes(r)}`,
-            confirmText: t.workflowsDebugTakeoverApply,
-            cancelText: t.workflowsDebugTakeoverDiscard,
-          })
-          if (confirmed) {
-            try {
-              const applyResult = await sendCommand({ type: 'workflows.takeoverApply', id })
-              if (applyResult.type === 'workflows.takeoverApply') {
-                setBanner({
-                  kind: 'ok',
-                  text:
-                    applyResult.appliedCount > 0
-                      ? t.workflowsDebugTakeoverApplied
-                      : t.workflowsDebugTakeoverNothing,
-                })
-              }
-            } catch (error) {
-              setBanner({
-                kind: 'error',
-                text: error instanceof Error ? error.message : String(error),
-              })
-            }
-          } else {
-            await sendCommand({ type: 'workflows.takeoverDiscard', id }).catch(() => undefined)
-            setBanner({ kind: 'ok', text: t.workflowsDebugTakeoverDiscarded })
-          }
-        }
-      }
-      await load()
-    } catch (error) {
-      setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
-    } finally {
-      // One last poll so a still-open modal shows the session's final steps.
-      await pollDebugRun()
-      // Refresh the lifetime takeover + session stats for the modal's lines.
-      try {
-        const stats = await sendCommand({ type: 'workflows.takeoverStats' })
-        if (stats.type === 'workflows.takeoverStats') setTakeoverStats(stats.summary)
-      } catch {
-        /* stats line is best-effort */
-      }
-      try {
-        const stats = await sendCommand({ type: 'workflows.debugStats' })
-        if (stats.type === 'workflows.debugStats') setDebugStats(stats.summary)
-      } catch {
-        /* stats line is best-effort */
-      }
-      setBusy(false)
-      setDebuggingId(null)
-    }
-  }
 
   /**
    * Pending chip actions: apply the AI's proposed fixes (or the audit's
@@ -626,7 +400,17 @@ export default function WorkflowsTab() {
     if (!confirmed) return
     setBusy(true)
     try {
-      const result = await sendCommand({ type: 'workflows.takeoverApply', id })
+      let result = await sendCommand({ type: 'workflows.takeoverApply', id })
+      if (result.type === 'workflows.takeoverApply' && result.riskConfirmationNeeded) {
+        const accepted = await confirmRiskDialog(result)
+        if (accepted) {
+          result = await sendCommand({
+            type: 'workflows.takeoverApply',
+            id,
+            confirmedRisk: true,
+          })
+        }
+      }
       if (result.type === 'workflows.takeoverApply') {
         setBanner({
           kind: 'ok',
@@ -639,6 +423,26 @@ export default function WorkflowsTab() {
     } finally {
       setBusy(false)
     }
+  }
+
+  /**
+   * Second confirmation for a CRITICAL whole-graph rewrite (P2, spec §8.4):
+   * shows the risk level and contributing reasons before re-applying.
+   */
+  const confirmRiskDialog = async (
+    result: Extract<CommandResult, { type: 'workflows.takeoverApply' }>,
+  ): Promise<boolean> => {
+    const level = result.rewriteRisk ?? 'CRITICAL'
+    const reasons = result.rewriteRiskReasons ?? []
+    const accepted = await confirmDialog({
+      title: t.workflowsRewriteRiskTitle,
+      message: `${t.workflowsRewriteRiskMessage({ level })}\n${
+        reasons.length ? `\n${reasons.map((reason) => `· ${reason}`).join('\n')}` : ''
+      }`,
+      confirmText: t.workflowsRewriteRiskAccept,
+      cancelText: t.workflowsDebugTakeoverDiscard,
+    })
+    return accepted === true
   }
 
   const discardPendingFixes = async (id: string): Promise<void> => {
@@ -910,9 +714,16 @@ export default function WorkflowsTab() {
   }
 
   /** Most recent persisted run for a workflow, or null when it never ran. */
-  const lastRunFor = (wf: Workflow): { time: number; ok: boolean; skipped: boolean } | null => {
+  const lastRunFor = (wf: Workflow): {
+    time: number
+    ok: boolean
+    skipped: boolean
+    runId: string
+  } | null => {
     const best = lastRunOf(runs, wf)
-    return best ? { time: best.finishedAt ?? best.at, ok: best.ok, skipped: best.skipped } : null
+    return best
+      ? { time: best.finishedAt ?? best.at, ok: best.ok, skipped: best.skipped, runId: best.id }
+      : null
   }
 
   const lastRunLabel = (wf: Workflow): string => {
@@ -1023,6 +834,7 @@ export default function WorkflowsTab() {
         <ul className="task-list">
           {workflows.map((wf) => {
             const last = lastRunFor(wf)
+            const health = summarizeWorkflowHealth(runs, wf.id)
             return (
               <li className="task-item" key={wf.id}>
                 <div className="task-item-head">
@@ -1054,6 +866,7 @@ export default function WorkflowsTab() {
                     {t.workflowsLastRun}: {new Date(last.time).toLocaleString(navigator.language)}
                   </div>
                 )}
+                <WorkflowHealthView health={health} />
                 <div className="actions task-actions">
                   <button
                     className="task-action-run"
@@ -1079,23 +892,25 @@ export default function WorkflowsTab() {
                       {t.workflowsResume}
                     </button>
                   )}
-                  <button
-                    className="task-action-debug"
-                    disabled={busy && debuggingId !== wf.id}
-                    title={debuggingId === wf.id ? t.workflowsDebugLogTitle : undefined}
-                    onClick={() => {
-                      // While this workflow is debugging the button reopens
-                      // the live log; otherwise it starts a debug session.
-                      if (debuggingId === wf.id) {
-                        openLog()
-                      } else {
-                        void debugNow(wf.id, wf.name)
+                  {/* Single-entry AI repair (spec §11): opens the Failure
+                      Center, which runs diagnose → proposal automatically and
+                      pauses at the two human confirmation points. Shown only
+                      when the last run failed. */}
+                  {last && !last.ok && !last.skipped && (
+                    <button
+                      className="text-accent! border-accent!"
+                      disabled={busy}
+                      onClick={() =>
+                        setFailureCenter({
+                          workflowId: wf.id,
+                          runId: last.runId,
+                        })
                       }
-                    }}
-                    type="button"
-                  >
-                    {debuggingId === wf.id ? t.workflowsDebugging : t.workflowsDebug}
-                  </button>
+                      type="button"
+                    >
+                      {t.failureCenterAiRepair}
+                    </button>
+                  )}
                   <button disabled={busy} onClick={() => openEditor(wf.id)} type="button">
                     {t.workflowsEdit}
                   </button>
@@ -1146,105 +961,18 @@ export default function WorkflowsTab() {
         </ul>
       )}
 
-      {logOpen && (
-        <div
-          className="fixed inset-0 z-[1000] flex items-start justify-center p-4 pt-[6vh]"
-          role="presentation"
-        >
-          <div
-            className="absolute inset-0 bg-slate-950/55 backdrop-blur-[2px]"
-            onClick={closeLog}
-          />
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={t.workflowsDebugLogTitle}
-            className="relative flex max-h-[84vh] w-full max-w-[440px] flex-col rounded-xl border border-border bg-panel p-4 shadow-[var(--bc-shadow)]"
-          >
-            <div className="flex flex-none items-center justify-between gap-3">
-              <h3 className="m-0 text-[14px] font-semibold leading-snug text-ink">
-                {t.workflowsDebugLogTitle}
-              </h3>
-              <span
-                className={`flex-none rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                  debugSettled ? 'bg-panel-2 text-muted' : 'bg-accent-soft text-accent'
-                }`}
-              >
-                {debugSettled ? t.workflowsDebugLogDone : t.workflowsDebugLogLive}
-              </span>
-            </div>
-            {/* flex-1 + min-h-0: the only reliable flex scroll layout — the
-                body shrinks to the panel's max height and scrolls alone. */}
-            <div
-              ref={logBodyRef}
-              className="debug-log-scroll mt-3 flex min-h-[72px] flex-1 flex-col gap-1.5 overflow-y-auto pr-1"
-            >
-              {debugSteps.length === 0 && (
-                <p className="m-0 text-[12.5px] text-muted">{t.workflowsDebugLogEmpty}</p>
-              )}
-              {debugSteps.map((step, index) => (
-                <div
-                  key={`${step.at}-${index}`}
-                  className="flex gap-2 border-b border-border/60 pb-1.5 text-[12px] leading-relaxed"
-                >
-                  <span className="flex-none tabular-nums text-muted">
-                    {new Date(step.at).toLocaleTimeString(navigator.language, { hour12: false })}
-                  </span>
-                  <span
-                    className={
-                      step.kind === 'error'
-                        ? 'text-err'
-                        : step.kind === 'result'
-                          ? 'text-accent'
-                          : 'text-ink'
-                    }
-                  >
-                    {step.text}
-                  </span>
-                </div>
-              ))}
-            </div>
-            {debugSettled && takeoverStats && (
-              <div className="mb-0 mt-3 flex-none space-y-0.5">
-                <p className="m-0 text-[11.5px] leading-relaxed text-muted">
-                  {t.workflowsDebugStats({
-                    rate: Math.round(takeoverStats.successRate * 100),
-                    total: takeoverStats.total,
-                  })}
-                  {takeoverStats.byReason.length > 0 &&
-                    ` · ${takeoverStats.byReason
-                      .slice(0, 2)
-                      .map((entry) => `${reasonLabelOf(entry.reason, t)} ×${entry.count}`)
-                      .join(' · ')}`}
-                </p>
-                {debugStats && debugStats.total > 0 && (
-                  <p className="m-0 text-[11.5px] leading-relaxed text-muted">
-                    {t.workflowsDebugSessionStats({
-                      rate: Math.round(debugStats.successRate * 100),
-                      total: debugStats.total,
-                      p50: debugStats.p50DurationMs,
-                    })}
-                    {debugStats.byPhase.length > 0 &&
-                      ` · ${debugStats.byPhase
-                        .slice(0, 2)
-                        .map((entry) => `${entry.phase} ×${entry.count}`)
-                        .join(' · ')}`}
-                  </p>
-                )}
-              </div>
-            )}
-            <div className="mt-4 flex flex-none justify-end">
-              <button
-                type="button"
-                onClick={closeLog}
-                className="h-8 cursor-pointer rounded-lg border border-accent bg-accent px-3.5 text-[13px] font-semibold text-on-accent transition-colors duration-150 hover:bg-accent-strong"
-              >
-                {t.workflowsDebugLogClose}
-              </button>
-            </div>
-          </div>
-        </div>
+      {failureCenter && (
+        <FailureCenterDialog
+          runId={failureCenter.runId}
+          workflowId={failureCenter.workflowId}
+          workflowRevision={failureCenter.revision}
+          onClose={() => {
+            setFailureCenter(null)
+            void load()
+          }}
+        />
       )}
+
     </div>
   )
 }

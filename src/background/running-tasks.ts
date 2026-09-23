@@ -239,6 +239,14 @@ export interface FinishOptions {
   summary?: string
   /** Full error text for a failed run; surfaced in the run history. */
   error?: string
+  /** Classified failure category for a failed run (spec §22 · Commit 15). */
+  failureCategory?: string
+  /** Whether the run completed after resuming from a checkpoint. */
+  resumed?: boolean
+  /** Whether the run completed after an AI repair commit. */
+  repaired?: boolean
+  /** Whether an AI takeover step ran during the execution. */
+  takeover?: boolean
 }
 
 /**
@@ -262,6 +270,10 @@ export function finishRun(runId: string, options?: FinishOptions): void {
     summary: options?.summary,
     ...(options?.error ? { error: options.error } : {}),
     steps: task.steps,
+    ...(options?.failureCategory ? { failureCategory: options.failureCategory } : {}),
+    ...(options?.resumed ? { resumed: true } : {}),
+    ...(options?.repaired ? { repaired: true } : {}),
+    ...(options?.takeover ? { takeover: true } : {}),
     ...(task.snapshots && task.snapshots.length ? { snapshots: task.snapshots } : {}),
   }
   finished.unshift(entry)

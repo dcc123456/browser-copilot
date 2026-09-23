@@ -157,9 +157,41 @@ import {
 } from '../lib/workflow/ai-takeover'
 import { executeWorkflow, findRunIdFor, getCheckpointStore } from './workflow-engine/run-workflow'
 import { readPersistedCheckpoints } from './checkpoint-store'
-import { resumePointOf } from '../lib/workflow/checkpoints'
+import { resumePointOf, workflowFingerprintOf } from '../lib/workflow/checkpoints'
 import { createAiTakeover } from './workflow-engine/ai-takeover'
 import { runDebugSession, DEFAULT_MAX_ROUNDS } from './workflow-engine/debug-session'
+import { runUnifiedDebug } from './workflow-engine/repair/unified-debug'
+import type {
+  RecoveryPhaseState,
+  RecoveryProtocolStatus,
+} from '../lib/workflow/recovery-protocol'
+import {
+  commitWorkflowRevision,
+  currentRevisionOf,
+  revisionMatchesBase,
+} from '../lib/workflow/workflow-revision'
+import { finalizeGeneratedWorkflow } from './workflow-engine/repair/generation-repair'
+import { DEFAULT_REPAIR_POLICY } from '../lib/workflow/repair/types'
+import { recordRepairRound } from '../lib/workflow/repair-metrics'
+import { createBackgroundRunner } from './workflow-engine/repair/background-runner'
+import { createAiRepairProposer } from './workflow-engine/repair/repair-provider'
+import { toRepairResponse } from '../lib/workflow/repair/repair-response'
+import {
+  discardRepairSession,
+  getRepairSession,
+  putRepairSession,
+  takeRepairSession,
+} from './workflow-engine/repair/repair-session-store'
+import {
+  autoRepairEvents,
+  autoRepairRunning,
+  cancelAutoRepair,
+  startBackgroundAutoRepair,
+} from './workflow-engine/auto-repair/background-adapter'
+import { failureSnapshotForRun } from './workflow-engine/auto-repair/failure-snapshot'
+import { rememberFailedRun, lastFailedRun } from './workflow-engine/auto-repair/failure-snapshot'
+import type { ExecutionTrace } from '../lib/workflow/repair/types'
+import { isGeneratedStrict } from '../lib/workflow/reliability'
 import { runUnattendedPrompt } from './agent-unattended'
 import { streamCompletion } from '../lib/llm'
 import { stripThinkBlocks } from '../lib/model-output'
@@ -171,6 +203,7 @@ import {
   parseGoalVerdict,
   parseWorkflowAudit,
 } from '../lib/workflow/debug-rewrite'
+import { classifyRewriteRisk } from '../lib/workflow/rewrite-risk'
 import {
   recordDebugSession,
   recordTakeoverStat,
@@ -400,6 +433,130 @@ async function runWorkflowKeepalive(workflowId: string, scopeWindowId?: number):
   }
 }
 
+/**
+ * Run a generated draft through the shared repair engine (spec §10.1).
+ *
+ * The first (and every) verification is an independent, takeover-free run;
+ * when it fails the deterministic analyzer locates the root cause and a
+ * minimal patch is proposed, validated, applied to the working copy and
+ * replayed. Saving is never blocked by the outcome:
+ *
+ *   - VERIFIED → the draft ran independently; returned as-is.
+ *   - DRAFT    → budget exhausted on a non-structural failure; the possibly
+ *                patched workflow is still offered, with the diagnosis.
+ *   - BLOCKED  → a structural problem; the workflow is still returned so the
+ *                user can open AI debug, but the card flags the structure.
+ *
+ * Runs entirely under a keepalive retain so the worker cannot be evicted mid
+ * verification. Execution errors are contained: a repair run that itself
+ * throws degrades to returning the original draft (never a lost generation).
+ */
+async function verifyGeneratedDraft(workflow: Workflow): Promise<{
+  workflow: Workflow
+  info: import('../lib/messages').GeneratedWorkflowRepairInfo
+}> {
+  const settings = await getSettings()
+  const modelConfig = takeoverProviderOf(settings)
+  const proposer = modelConfig
+    ? createAiRepairProposer({
+        apiKey: modelConfig.apiKey,
+        baseUrl: modelConfig.baseUrl,
+        model: modelConfig.model,
+        headers: modelConfig.headers,
+      })
+    : undefined
+
+  const runner = createBackgroundRunner({ executeWorkflow })
+  let rounds = 0
+  retain()
+  try {
+    const result = await finalizeGeneratedWorkflow(workflow, {
+      runner,
+      // Replay planning reads the durable checkpoints the verify run just
+      // wrote through the real run-workflow store.
+      store: getCheckpointStore(),
+      ...(proposer ? { propose: (context) => proposer.propose(context) } : {}),
+      // Conservative generation policy: keep the total verification bounded so
+      // offering the save card never stalls the turn for long.
+      policy: { maxRepairRounds: 2, maxTotalDurationMs: 45_000 },
+      onStep: () => undefined,
+    })
+    rounds = result.patches.length
+    // Repair telemetry (spec §14): one round log for the generation entry, with
+    // no raw variable values — only node ids, the failure code and the result.
+    const startedAtForMetric = Date.now()
+    void recordRepairRound({
+      at: Date.now(),
+      sessionId: `gen-${workflow.id}-${startedAtForMetric}`,
+      round: Math.max(1, rounds),
+      entry: 'GENERATION',
+      ...(result.lastAnalysis?.failedNodeId
+        ? { failedNodeId: result.lastAnalysis.failedNodeId }
+        : {}),
+      rootCauseNodeIds: result.lastAnalysis?.rootCauseNodeIds ?? [],
+      ...(result.lastAnalysis?.failureType ? { failureType: result.lastAnalysis.failureType } : {}),
+      transientRetries: result.transientRetries,
+      ...(result.patches[result.patches.length - 1]?.patchSetId
+        ? { patchSetId: result.patches[result.patches.length - 1]!.patchSetId }
+        : {}),
+      patchedNodeIds: [
+        ...new Set(result.patches.flatMap((patch) => patch.operations.map((op) => op.nodeId))),
+      ],
+      ...(result.lastVerification?.checkpointId
+        ? { replayFromNodeId: result.lastAnalysis?.replayFromNodeId }
+        : {}),
+      usedCheckpoint: !!result.lastVerification?.checkpointId,
+      usedAiTakeover: result.lastVerification?.usedAiTakeover === true,
+      ...(result.lastVerification?.goalAchieved !== undefined
+        ? { goalAchieved: result.lastVerification.goalAchieved }
+        : {}),
+      // A verified outcome reached WITHOUT a patch but after a bounded retry
+      // is a TRANSIENT_RECOVERY — a distinct telemetry bucket (§1.3).
+      result:
+        result.status === 'VERIFIED'
+          ? result.recoveredFromTransient
+            ? 'TRANSIENT_RECOVERY'
+            : 'VERIFIED'
+          : result.status === 'BLOCKED'
+            ? 'DRAFT'
+            : 'DRAFT',
+      durationMs: 0,
+    })
+    return {
+      workflow: result.workingCopy,
+      info: {
+        verified: result.status === 'VERIFIED',
+        status: result.status,
+        ...(result.lastAnalysis?.failedNodeId
+          ? { failedNodeId: result.lastAnalysis.failedNodeId }
+          : {}),
+        rootCauseNodeIds: result.lastAnalysis?.rootCauseNodeIds ?? [],
+        ...(result.lastAnalysis?.failureType
+          ? { failureType: result.lastAnalysis.failureType }
+          : {}),
+        explanation: result.lastAnalysis?.explanation ?? result.reason ?? '',
+        rounds,
+        transientRetries: result.transientRetries,
+        ...(result.recoveredFromTransient ? { transientRecovery: true } : {}),
+      },
+    }
+  } catch (error) {
+    // The repair orchestration must never make the generated workflow vanish.
+    return {
+      workflow,
+      info: {
+        verified: false,
+        status: 'DRAFT',
+        rootCauseNodeIds: [],
+        explanation: error instanceof Error ? error.message : String(error),
+        rounds,
+      },
+    }
+  } finally {
+    release()
+  }
+}
+
 // Let the trigger module launch workflows (keyboard-shortcut triggers carry
 // the window they were pressed in; alarm-driven ones pass nothing).
 setWorkflowRunner((workflowId, scopeWindowId) => {
@@ -611,6 +768,21 @@ setWindowPickRequester(async (request: WindowPickRequest) => {
     // open panel) — the timeout fallback in window-policy answers null.
   }
 })
+
+/**
+ * Push an unsolicited repair progress event to every open panel. No receiver
+ * is fine: the settled command result still carries the final status.
+ */
+async function broadcastRepairEvent(
+  event: import('../lib/workflow/repair-events').RepairProgressEvent,
+): Promise<void> {
+  const message = { type: 'workflows.repairEvent', event }
+  try {
+    await chrome.runtime.sendMessage(message)
+  } catch {
+    // No panel subscribed.
+  }
+}
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // 0. Floating-button protocol — MUST be handled before any await: the
@@ -1170,6 +1342,20 @@ async function handleCommand(
         await hardenWorkflowSelectors(workflow, { scope: await currentPluginScope() })
         workflow = persistDefaultWaits(workflow)
       }
+      // Every formal save is a commit on the revision sequence: a new workflow
+      // starts at revision 1; a later save (manual edit or re-generated content)
+      // bumps it. Bump here so callers never have to compute the number.
+      {
+        const nextSave = commitWorkflowRevision(workflow, {
+          source: command.fromGeneration ? 'generation' : 'manual-edit',
+        })
+        workflow = {
+          ...workflow,
+          updatedAt: workflow.updatedAt || Date.now(),
+          revision: nextSave.revision,
+          revisionHistory: nextSave.revisionHistory,
+        }
+      }
       await saveWorkflow(workflow)
       await rescheduleAllWorkflowTriggers()
       return { type: 'workflows.save' }
@@ -1201,11 +1387,25 @@ async function handleCommand(
         command.conversationId,
         conversation?.title?.trim() || 'Workflow',
       )
-      if ('empty' in resolved) return { type: 'workflows.draft', empty: resolved.empty }
+      if ('empty' in resolved)
+        return { type: 'workflows.draft', empty: resolved.empty, detail: resolved.detail }
+
+      // Generation repair (spec §10.1, Phase 7): run the already-formed
+      // generated workflow through the SAME shared repair engine the debug
+      // path uses — independent (takeover-free) verify → diagnose → minimal
+      // patch → replay. First-pass verification never permits AI takeover.
+      //
+      // This is deliberately NON-BLOCKING: a verified workflow is returned as
+      // is; when the repair budget is exhausted the (possibly patched) draft
+      // is still offered, with the diagnosis carried in `repair` so the card
+      // can show the symptom vs root cause. Only structural problems surface
+      // as a status; the user can still save and continue in AI debug.
+      const repairSummary = await verifyGeneratedDraft(resolved.workflow)
       return {
         type: 'workflows.draft',
-        workflow: resolved.workflow,
+        workflow: repairSummary.workflow,
         source: resolved.source,
+        repair: repairSummary.info,
         // Pure detection, so the card can offer folding without a round trip.
         // Only meaningful for a draft the model built step by step; a compiled
         // history has no repeated runs to detect.
@@ -1347,13 +1547,55 @@ async function handleCommand(
         // editor popup, which is not a normal window).
         ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
       })
+
+      // Auto repair (spec §30 Run defaults): a generated-strict workflow's
+      // first-run failure enters the autonomous repair loop automatically —
+      // no user click. The repair runs in the background; events stream to
+      // the panel and the run result below reports whether it recovered.
+      let autoRepairOutcome:
+        | { status: 'success' | 'exhausted' | 'blocked'; revision?: number; reason?: string }
+        | undefined
+      if (r.outcome === 'failed' && isGeneratedStrict(workflow) && !takeover && r.trace) {
+        rememberFailedRun(workflow.id, r.runId, r.trace)
+        const repairSettings = await getSettings()
+        const repairModelConfig = takeoverProviderOf(repairSettings)
+        try {
+          autoRepairOutcome = await startBackgroundAutoRepair({
+            workflow,
+            runId: r.runId,
+            failure: failureSnapshotForRun(workflow, r.runId),
+            ...(repairModelConfig
+              ? {
+                  model: {
+                    apiKey: repairModelConfig.apiKey,
+                    baseUrl: repairModelConfig.baseUrl,
+                    model: repairModelConfig.model,
+                    headers: repairModelConfig.headers,
+                  },
+                }
+              : {}),
+            save: { saveWorkflow, getWorkflow },
+            ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
+            forward: (event) => {
+              void broadcastRepairEvent(event)
+            },
+          })
+        } catch (error) {
+          console.warn('[workflows.run] auto repair failed to start', error)
+        }
+      }
+
+      const runOk = r.outcome === 'ok' || autoRepairOutcome?.status === 'success'
       return {
         type: 'workflows.run',
         outcome: {
-          ok: r.outcome === 'ok',
+          ok: runOk,
           skipped: false,
-          summary: r.summary ?? '',
-          error: r.outcome === 'failed' ? r.summary : undefined,
+          summary:
+            runOk && r.outcome !== 'ok'
+              ? `auto-repaired at revision ${autoRepairOutcome?.revision ?? ''}`
+              : r.summary ?? '',
+          error: runOk ? undefined : r.summary,
           runId: r.runId,
         },
       }
@@ -1374,7 +1616,11 @@ async function handleCommand(
       const checkpoints =
         inMemory.length > 0 ? inMemory : await readPersistedCheckpoints(runId).catch(() => [])
       const point = resumePointOf(workflow, checkpoints)
-      if (!point) return { type: 'workflows.resumePoint', resumable: false }
+      if (!point || point.kind !== 'ok') {
+        // side-effect-unknown / fingerprint-mismatch are not offerable — the
+        // resume itself will report the structured reason.
+        return { type: 'workflows.resumePoint', resumable: false }
+      }
       return {
         type: 'workflows.resumePoint',
         resumable: true,
@@ -1543,6 +1789,9 @@ async function handleCommand(
           : undefined
         const result = await runDebugSession(workflow, {
           maxRounds: 2,
+          // Repeat-dead-end threshold from the shared repair policy (spec §13),
+          // not the legacy hardcoded constant.
+          maxSameFailureSignature: DEFAULT_REPAIR_POLICY.maxSameFailureSignature,
           // M4: stamp the session id onto every run this session spawns.
           sessionId,
           ...(replay && audit
@@ -1621,6 +1870,10 @@ async function handleCommand(
                 summary: result.summary,
                 error: result.error,
                 ...(result.variables ? { variables: result.variables } : {}),
+                // Node-aware failure evidence (spec §13): the actual failed
+                // node from the real trace, so the repeat-dead-end signature
+                // distinguishes different nodes instead of using 'session'.
+                ...(result.trace?.failedNodeId ? { failedNodeId: result.trace.failedNodeId } : {}),
                 steps: evidenceSteps.slice(-40),
               }
             })
@@ -1755,6 +2008,128 @@ async function handleCommand(
       }
     }
 
+    case 'workflows.repair': {
+      // Unified repair (spec §10). The same engine drives all three modes;
+      // AI takeover is disabled for every execution. The formal workflow is
+      // never replaced here — a verified working copy waits in memory until
+      // the user sends workflows.repairCommit.
+      const repairWorkflow = await getWorkflow(command.id)
+      if (!repairWorkflow) throw new Error('Workflow not found.')
+      const runner = createBackgroundRunner({
+        executeWorkflow,
+        ...(command.windowId !== undefined ? { scopeWindowId: command.windowId } : {}),
+      })
+      const settings = await getSettings()
+      const modelConfig = takeoverProviderOf(settings)
+      const proposer = modelConfig
+        ? createAiRepairProposer({
+            apiKey: modelConfig.apiKey,
+            baseUrl: modelConfig.baseUrl,
+            model: modelConfig.model,
+            headers: modelConfig.headers,
+          })
+        : undefined
+
+      retain()
+      try {
+        const result = await runUnifiedDebug(repairWorkflow, command.mode, {
+          runner,
+          // The repair engine needs a checkpoint store for replay planning.
+          // Use the run-workflow module's real (synchronous) store: the
+          // checkpoints were written during the just-finished execution.
+          store: getCheckpointStore(),
+          ...(proposer ? { propose: (ctx) => proposer.propose(ctx) } : {}),
+          // Pass the user's explicit low-confidence acceptance through (P2).
+          ...(command.confirmed ? { userConfirmed: true } : {}),
+        })
+
+        // A verified AUTO_REPAIR: keep the working copy for the commit step.
+        if (command.mode === 'AUTO_REPAIR' && result.ok && result.workingCopy && result.patch) {
+          putRepairSession({
+            workflowId: repairWorkflow.id,
+            workingCopy: result.workingCopy,
+            patch: result.patch,
+            analysis: result.analysis,
+            verification: result.verification,
+            // Optimistic-lock base (spec §11.3): bind the pending repair to the
+            // formal workflow version + content it was produced against.
+            baseUpdatedAt: repairWorkflow.updatedAt,
+            baseHash: workflowFingerprintOf(repairWorkflow),
+            baseRevision: currentRevisionOf(repairWorkflow),
+            createdAt: Date.now(),
+          })
+        }
+
+        return {
+          type: 'workflows.repair',
+          data: toRepairResponse(
+            repairWorkflow.id,
+            result.analysis,
+            result.verification,
+            command.mode,
+            result.patch?.operations ?? [],
+            {
+              ok: result.ok,
+              reason: result.reason,
+              ...(result.needsConfirmation ? { needsConfirmation: true } : {}),
+            },
+          ),
+        }
+      } finally {
+        release()
+      }
+    }
+
+    case 'workflows.repairCommit': {
+      // Formally save the verified repair working copy. The pending session
+      // must exist and its working copy must have been verified WITHOUT AI
+      // takeover (it is only ever stored after such a result).
+      const pending = takeRepairSession(command.id)
+      if (!pending) throw new Error('No verified repair to commit for this workflow.')
+
+      // Optimistic lock (spec §11.3): re-read the formal workflow and verify it
+      // has not changed since the repair was produced. A stale patch — one that
+      // would overwrite newer edits — is refused together with its session, and
+      // the user must re-run the diagnosis against the current workflow.
+      const current = await getWorkflow(command.id)
+      if (current) {
+        if (current.updatedAt !== pending.baseUpdatedAt) {
+          discardRepairSession(command.id)
+          throw new Error(
+            'The workflow changed since this repair was proposed; the patch is stale. Please run AI repair again.',
+          )
+        }
+        if (workflowFingerprintOf(current) !== pending.baseHash) {
+          discardRepairSession(command.id)
+          throw new Error(
+            'The workflow content changed since this repair was proposed; the patch is stale. Please run AI repair again.',
+          )
+        }
+      }
+
+      // Keep the revision sequence consistent even on the legacy commit path.
+      const nextRevision = commitWorkflowRevision(pending.workingCopy, {
+        source: 'ai-repair',
+      })
+      const repaired: Workflow = {
+        ...pending.workingCopy,
+        updatedAt: Date.now(),
+        revision: nextRevision.revision,
+        revisionHistory: nextRevision.revisionHistory,
+      }
+      await saveWorkflow(repaired)
+      return { type: 'workflows.repairCommit' }
+    }
+
+    case 'workflows.repairDiscard': {
+      const existed = discardRepairSession(command.id)
+      if (!existed) {
+        // Nothing in-memory (worker may have restarted): report honestly.
+        return { type: 'workflows.repairDiscard' }
+      }
+      return { type: 'workflows.repairDiscard' }
+    }
+
     case 'workflows.takeoverPending':
       return { type: 'workflows.takeoverPending', items: await listPendingTakeovers() }
 
@@ -1778,10 +2153,32 @@ async function handleCommand(
       if (!workflow) throw new Error('Workflow not found.')
       let applied = workflow
       let appliedCount = 0
+      let rewriteRisk: import('../lib/workflow/rewrite-risk').RewriteRiskVerdict | undefined
       if (pending.rewrite) {
+        // Risk gate (P2, spec §8.4): classify the whole-graph rewrite against
+        // the current workflow before anything is written. CRITICAL rewrites
+        // (trigger/goal removed, etc.) are refused until the user explicitly
+        // accepts the risk via confirmedRisk.
+        const candidate: Workflow = { ...pending.rewrite.workflow, id: workflow.id }
+        rewriteRisk = classifyRewriteRisk(workflow, candidate)
+        if (rewriteRisk.level === 'CRITICAL' && command.confirmedRisk !== true) {
+          return {
+            type: 'workflows.takeoverApply',
+            workflow,
+            appliedCount: 0,
+            rewriteRisk: rewriteRisk.level,
+            rewriteRiskReasons: rewriteRisk.reasons,
+            riskConfirmationNeeded: true,
+          }
+        }
         applied = { ...pending.rewrite.workflow, id: workflow.id, updatedAt: Date.now() }
         appliedCount = pending.rewrite.changes.length
       } else {
+        // LEGACY confirm path (spec §15 Phase 9): user-approved pending
+        // takeover fixes are merged via the low-level graph op. This is the
+        // one sanctioned direct patchNodeParams call outside PatchEngine; it
+        // must be folded into PatchEngine when the old takeover pending format
+        // is retired.
         const changes: string[] = []
         for (const fix of pending.fixes) {
           const result = patchNodeParams(applied, fix.nodeId, fix.paramsPatch)
@@ -1798,6 +2195,12 @@ async function handleCommand(
         return { type: 'workflows.takeoverApply', workflow, appliedCount: 0 }
       }
       applied.updatedAt = Date.now()
+      {
+        // Applying AI-takeover fixes is itself a formal commit (spec §18).
+        const nextApplied = commitWorkflowRevision(applied, { source: 'ai-repair' })
+        applied.revision = nextApplied.revision
+        applied.revisionHistory = nextApplied.revisionHistory
+      }
       await saveWorkflow(applied)
       await rescheduleAllWorkflowTriggers()
       await clearPendingTakeover(command.id)
@@ -1823,6 +2226,12 @@ async function handleCommand(
         type: 'workflows.takeoverApply',
         workflow: applied,
         appliedCount,
+        ...(rewriteRisk
+          ? {
+              rewriteRisk: rewriteRisk.level,
+              ...(rewriteRisk.reasons.length ? { rewriteRiskReasons: rewriteRisk.reasons } : {}),
+            }
+          : {}),
         ...(verified !== undefined
           ? { verified, ...(verifySummary !== undefined ? { verifySummary } : {}) }
           : {}),
@@ -1839,6 +2248,221 @@ async function handleCommand(
       return { type: 'workflows.running', ...boards }
     }
 
+    case 'workflows.recovery': {
+      // Single-entry recovery protocol (spec §11 · Commit 10/11). Drives the
+      // unified engine: START runs Diagnose → Proposal automatically and pauses;
+      // CONFIRM_REPAIR applies + verifies and pauses; CONFIRM_OVERWRITE commits;
+      // CANCEL discards. De-dupe identical in-flight actions (double click).
+      const key = `${command.requestId}:${command.action}`
+      if (recoveryActionSeen.has(key)) {
+        return recoveryEnvelopeResult(command, recoveryOutcomeFor(command.requestId),
+          'duplicate action ignored', command.timestamp)
+      }
+      recoveryActionSeen.add(key)
+
+      const targetWorkflow = await getWorkflow(command.workflowId)
+      if (!targetWorkflow) throw new Error('Workflow not found.')
+
+      if (command.action === 'CANCEL') {
+        discardRepairSession(command.workflowId)
+        rememberRecoveryOutcome(command.requestId, {
+          phase: 'CANCELLED', status: 'done',
+        })
+        return recoveryEnvelopeResult(command,
+          { phase: 'CANCELLED', status: 'done' }, 'recovery cancelled', command.timestamp)
+      }
+
+      // Engine dependencies (same construction as workflows.repair).
+      const recoveryRunner = createBackgroundRunner({ executeWorkflow })
+      const recoverySettings = await getSettings()
+      const recoveryModel = takeoverProviderOf(recoverySettings)
+      const recoveryProposer = recoveryModel
+        ? createAiRepairProposer({
+            apiKey: recoveryModel.apiKey,
+            baseUrl: recoveryModel.baseUrl,
+            model: recoveryModel.model,
+            headers: recoveryModel.headers,
+          })
+        : undefined
+
+      retain()
+      try {
+        if (command.action === 'START') {
+          // Diagnose → Proposal, automatically and in sequence.
+          const analysis = await runUnifiedDebug(targetWorkflow, 'ANALYZE', {
+            runner: recoveryRunner,
+            store: getCheckpointStore(),
+          })
+          if (analysis.ok) {
+            const outcome = { phase: 'DONE', status: 'done' } as const
+            rememberRecoveryOutcome(command.requestId, outcome)
+            return recoveryEnvelopeResult(command, outcome, 'workflow already healthy', command.timestamp)
+          }
+          const suggestion = await runUnifiedDebug(targetWorkflow, 'SUGGEST', {
+            runner: recoveryRunner,
+            store: getCheckpointStore(),
+            ...(recoveryProposer ? { propose: (ctx) => recoveryProposer.propose(ctx) } : {}),
+          })
+          if (!suggestion.patch) {
+            // Spec §21 / §15: "no patch proposed" is NOT a human takeover —
+            // it only says the first (lowest) strategy had no candidate. The
+            // autonomous repair ladder advances through the remaining
+            // strategies; HUMAN_TAKEOVER is reserved for a genuine blocker
+            // or an exhausted ladder. Hand the run off to the new
+            // orchestrator (fire-and-forget; events stream to the panel).
+            const failedRunId =
+              (suggestion as { lastRunId?: string }).lastRunId ??
+              command.runId ??
+              listFinished().find((run) => run.workflowId === targetWorkflow.id && run.outcome === 'failed')
+                ?.runId ??
+              ''
+            if (failedRunId) {
+              try {
+                // Build failure evidence. Prefer the remembered trace;
+                // otherwise synthesize minimal evidence from the debug
+                // summary (the orchestrator re-diagnoses as its first step).
+                if (!lastFailedRun(targetWorkflow.id)) {
+                  const synthetic: ExecutionTrace = {
+                    traceId: failedRunId,
+                    nodeExecutions: [],
+                    events: [],
+                  } as unknown as ExecutionTrace
+                  rememberFailedRun(targetWorkflow.id, failedRunId, synthetic)
+                }
+                void startBackgroundAutoRepair({
+                  workflow: targetWorkflow,
+                  runId: failedRunId,
+                  failure: failureSnapshotForRun(targetWorkflow, failedRunId),
+                  ...(recoveryModel
+                    ? {
+                        model: {
+                          apiKey: recoveryModel.apiKey,
+                          baseUrl: recoveryModel.baseUrl,
+                          model: recoveryModel.model,
+                          headers: recoveryModel.headers,
+                        },
+                      }
+                    : {}),
+                  save: { saveWorkflow, getWorkflow },
+                  forward: (event) => {
+                    void broadcastRepairEvent(event)
+                  },
+                }).catch((error: unknown) => {
+                  console.warn('[workflows.recovery] autonomous repair failed', error)
+                })
+                const outcome = { phase: 'DIAGNOSING', status: 'running' } as const
+                rememberRecoveryOutcome(command.requestId, outcome)
+                return recoveryEnvelopeResult(command, outcome,
+                  suggestion.reason ?? 'continuing with additional repair strategies',
+                  command.timestamp)
+              } catch (error) {
+                console.warn('[workflows.recovery] could not start autonomous repair', error)
+              }
+            }
+            const outcome = { phase: 'HUMAN_TAKEOVER', status: 'failed' } as const
+            rememberRecoveryOutcome(command.requestId, outcome)
+            return recoveryEnvelopeResult(command, outcome,
+              suggestion.reason ?? 'no patch proposed', command.timestamp)
+          }
+          // Keep the patch for CONFIRM_REPAIR (no working copy applied yet).
+          putRepairSession({
+            workflowId: targetWorkflow.id,
+            workingCopy: targetWorkflow,
+            patch: suggestion.patch,
+            analysis: suggestion.analysis,
+            verification: suggestion.verification,
+            baseUpdatedAt: targetWorkflow.updatedAt,
+            baseHash: workflowFingerprintOf(targetWorkflow),
+            baseRevision: currentRevisionOf(targetWorkflow),
+            requestId: command.requestId,
+            createdAt: Date.now(),
+          })
+          const summary = `proposal ready: ${suggestion.patch.operations.length} operation(s)`
+          const outcome = { phase: 'AWAIT_REPAIR_CONFIRM', status: 'waiting' } as const
+          rememberRecoveryOutcome(command.requestId, outcome)
+          return recoveryEnvelopeResult(command, outcome, summary, command.timestamp,
+            suggestion.patch.operations)
+        }
+
+        if (command.action === 'CONFIRM_REPAIR') {
+          const pending = getRepairSession(command.workflowId)
+          if (!pending?.patch) throw new Error('No repair proposal to apply.')
+          // Apply + verify on a working copy via AUTO_REPAIR with explicit accept.
+          const applied = await runUnifiedDebug(targetWorkflow, 'AUTO_REPAIR', {
+            runner: recoveryRunner,
+            store: getCheckpointStore(),
+            ...(recoveryProposer ? { propose: (ctx) => recoveryProposer.propose(ctx) } : {}),
+            userConfirmed: true,
+          })
+          if (!applied.ok || !applied.workingCopy || !applied.verification?.verified) {
+            const outcome = { phase: 'FAILED', status: 'failed' } as const
+            rememberRecoveryOutcome(command.requestId, outcome)
+            return recoveryEnvelopeResult(command, outcome,
+              applied.reason ?? 'the patched workflow did not verify on replay', command.timestamp)
+          }
+          putRepairSession({
+            workflowId: targetWorkflow.id,
+            workingCopy: applied.workingCopy,
+            patch: pending.patch,
+            analysis: applied.analysis,
+            verification: applied.verification,
+            baseUpdatedAt: targetWorkflow.updatedAt,
+            baseHash: workflowFingerprintOf(targetWorkflow),
+            baseRevision: pending.baseRevision,
+            requestId: command.requestId,
+            createdAt: Date.now(),
+          })
+          const outcome = { phase: 'AWAIT_OVERWRITE_CONFIRM', status: 'waiting' } as const
+          rememberRecoveryOutcome(command.requestId, outcome)
+          return recoveryEnvelopeResult(command, outcome,
+            'repair verified; awaiting overwrite confirmation', command.timestamp)
+        }
+
+        // CONFIRM_OVERWRITE — commit the verified working copy.
+        const pending = getRepairSession(command.workflowId)
+        if (!pending?.workingCopy) throw new Error('No verified repair to commit.')
+        const current = await getWorkflow(command.workflowId)
+        if (current) {
+          // Revision conflict: any concurrent commit (manual, generation or a
+          // newer repair) moves the formal revision past the base.
+          if (!revisionMatchesBase(current, pending.baseRevision)) {
+            discardRepairSession(command.workflowId)
+            throw new Error(
+              'The workflow revision changed since this repair was proposed; the patch is stale. Please run AI repair again.',
+            )
+          }
+          if (current.updatedAt !== pending.baseUpdatedAt) {
+            discardRepairSession(command.workflowId)
+            throw new Error('The workflow changed since this repair was proposed; the patch is stale.')
+          }
+          if (workflowFingerprintOf(current) !== pending.baseHash) {
+            discardRepairSession(command.workflowId)
+            throw new Error('The workflow content changed since this repair was proposed; the patch is stale.')
+          }
+        }
+        const next = commitWorkflowRevision(pending.workingCopy, {
+          source: 'ai-repair',
+          repairSessionId: command.requestId,
+        })
+        const committed: Workflow = {
+          ...pending.workingCopy,
+          updatedAt: Date.now(),
+          revision: next.revision,
+          revisionHistory: next.revisionHistory,
+        }
+        await saveWorkflow(committed)
+        discardRepairSession(command.workflowId)
+        {
+          const outcome = { phase: 'DONE', status: 'done' } as const
+          rememberRecoveryOutcome(command.requestId, outcome)
+          return recoveryEnvelopeResult(command, outcome,
+            `workflow updated to revision ${next.revision}`, command.timestamp)
+        }
+      } finally {
+        release()
+      }
+    }
+
     case 'record.start':
       // Recording is confined to the command's window scope when present
       // (the editor's host window); otherwise it stays global as before.
@@ -1852,6 +2476,79 @@ async function handleCommand(
     }
     case 'record.status':
       return { type: 'record.status', recording: isRecording() }
+
+    case 'workflows.autoRepair': {
+      // Autonomous repair (spec §12–§24): run the full bounded loop. Events
+      // are streamed to the panel; the final result is returned here.
+      const target = await getWorkflow(command.id)
+      if (!target) throw new Error('Workflow not found.')
+      const settings = await getSettings()
+      const modelConfig = takeoverProviderOf(settings)
+      retain()
+      try {
+        const outcome = await startBackgroundAutoRepair({
+          workflow: target,
+          runId: command.runId,
+          failure: await failureSnapshotForRun(target, command.runId),
+          ...(modelConfig
+            ? {
+                model: {
+                  apiKey: modelConfig.apiKey,
+                  baseUrl: modelConfig.baseUrl,
+                  model: modelConfig.model,
+                  headers: modelConfig.headers,
+                },
+              }
+            : {}),
+          save: {
+            saveWorkflow,
+            getWorkflow,
+          },
+          ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
+          forward: (event) => {
+            void broadcastRepairEvent(event)
+          },
+        })
+        return {
+          type: 'workflows.autoRepairResult',
+          status: outcome.status,
+          ...(outcome.reason ? { reason: outcome.reason } : {}),
+          ...(outcome.revision !== undefined ? { revision: outcome.revision } : {}),
+          attempts: outcome.attempts,
+          durationMs: outcome.durationMs,
+          committed: outcome.committed,
+        }
+      } finally {
+        release()
+      }
+    }
+
+    case 'workflows.autoRepairCancel': {
+      const stopped = cancelAutoRepair(command.id)
+      return {
+        type: 'workflows.autoRepairResult',
+        status: 'blocked',
+        reason: stopped ? 'repair cancelled' : 'no active repair',
+        attempts: 0,
+        durationMs: 0,
+        committed: false,
+      }
+    }
+
+    case 'workflows.autoRepairStatus': {
+      // Event replay for a late subscriber.
+      const events = autoRepairEvents(command.id)
+      for (const event of events) {
+        await broadcastRepairEvent(event)
+      }
+      return {
+        type: 'workflows.autoRepairResult',
+        status: autoRepairRunning(command.id) ? 'success' : 'blocked',
+        attempts: events.length,
+        durationMs: 0,
+        committed: false,
+      }
+    }
 
     default: {
       const exhaustive: never = command
@@ -1870,6 +2567,60 @@ async function handleCommand(
  * Durable data (the transcript) lives in session storage instead.
  */
 const activeTurns = new Set<string>()
+
+/**
+ * Recovery action de-dupe keys (`requestId:ACTION`) for the in-flight recovery
+ * protocol. Module scope is intentional: worker eviction cancels every in-flight
+ * request, so a fresh empty map is correct after a restart.
+ */
+const recoveryActionSeen = new Set<string>()
+
+/** Outcome last observed for a recovery request, for a duplicate-action echo. */
+const recoveryOutcomes = new Map<
+  string,
+  { phase: RecoveryPhaseState; status: RecoveryProtocolStatus }
+>()
+
+function rememberRecoveryOutcome(
+  requestId: string,
+  outcome: { phase: RecoveryPhaseState; status: RecoveryProtocolStatus },
+): void {
+  recoveryOutcomes.set(requestId, outcome)
+}
+
+function recoveryOutcomeFor(requestId: string): {
+  phase: RecoveryPhaseState
+  status: RecoveryProtocolStatus
+} {
+  return recoveryOutcomes.get(requestId) ?? { phase: 'DIAGNOSING', status: 'running' }
+}
+
+type RecoveryCommand = Extract<Command, { type: 'workflows.recovery' }>
+
+/** Build a workflows.recovery result echoing the request id and outcome. */
+function recoveryEnvelopeResult(
+  command: RecoveryCommand,
+  outcome: { phase: RecoveryPhaseState; status: RecoveryProtocolStatus },
+  summary: string,
+  timestamp: number,
+  operations?: RecoveryResultOperations,
+): Extract<CommandResult, { type: 'workflows.recovery' }> {
+  return {
+    type: 'workflows.recovery',
+    requestId: command.requestId,
+    ...(typeof command.workflowRevision === 'number'
+      ? { workflowRevision: command.workflowRevision }
+      : {}),
+    phase: outcome.phase,
+    status: outcome.status,
+    summary,
+    timestamp,
+    ...(operations && operations.length > 0 ? { operations } : {}),
+  }
+}
+
+type RecoveryResultOperations =
+  Extract<CommandResult, { type: 'workflows.recovery' }>['operations']
 
 /**
  * Live in-memory transcripts of currently running turns, keyed by
@@ -1906,7 +2657,10 @@ chrome.runtime.onConnect.addListener((port) => {
    * user's approve/reject decision (rejection carries revision feedback), or
    * a rejected decision when the card can no longer be answered.
    */
-  const pendingPlan = new Map<string, (decision: { approved: boolean; feedback?: string }) => void>()
+  const pendingPlan = new Map<
+    string,
+    (decision: { approved: boolean; feedback?: string }) => void
+  >()
   let controller: AbortController | null = null
 
   const send = (message: AgentServerMessage): void => {

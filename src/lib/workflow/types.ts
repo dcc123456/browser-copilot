@@ -182,9 +182,52 @@ export interface WorkflowSettings {
    * the tab it lands on is a different origin.
    */
   generationOriginUrl?: string
+  /**
+   * Which execution regime this workflow runs under (`lib/workflow/reliability`).
+   * Absent means "derive": a generation provenance implies `generated-strict`,
+   * everything else `compat`. An explicit value always wins.
+   */
+  reliabilityMode?: import('./reliability').WorkflowReliabilityMode
+  /**
+   * The workflow's goal contract (`lib/workflow/reliability`): what "success"
+   * means, as checkable conditions. Required for `generated-strict` (the
+   * generated validator blocks a strict workflow without one), ignored by
+   * `compat`.
+   */
+  goalSpec?: import('./reliability').WorkflowGoalSpec
+  /**
+   * Non-blocking reliability / runnability findings captured at save time.
+   * These NEVER prevent the workflow from being saved: they are surfaced on
+   * the save card so the user can either run AI debug or fix the graph
+   * manually. A workflow with warnings is still persisted as-is.
+   */
+  saveWarnings?: string[]
+  /**
+   * Per-stage report of the generation pipeline (spec §6 · Commit 07), shown on
+   * the generation card so the user sees the work done at each stage rather
+   * than a single "generation succeeded". Optional: absent on hand-built and
+   * older workflows.
+   */
+  generationStages?: import('./generation-report').GenerationStageReport[]
 }
 
 /** A persisted workflow. */
+/**
+ * Metadata for one committed workflow revision (spec §18 · Commit 14).
+ *
+ * The graph content lives on the workflow itself; this record is the audit line
+ * for a single commit so a future rollback / compare can trace provenance. The
+ * full prior content is intentionally NOT copied here (history is capped and
+ * graphs can be large) — the parent revision number is the pointer.
+ */
+export interface WorkflowRevisionMetadata {
+  revision: number
+  updatedAt: number
+  source: 'manual-edit' | 'ai-repair' | 'generation'
+  parentRevision?: number
+  repairSessionId?: string
+}
+
 export interface Workflow {
   id: string
   name: string
@@ -211,6 +254,17 @@ export interface Workflow {
   settings: WorkflowSettings
   /** Backing data-store reference (e.g. a spreadsheet table id). */
   table?: unknown
+  /**
+   * Monotonic revision number, starting at 1 for the first commit (spec §18).
+   * Absent on records persisted before revisioning; read via
+   * `currentRevisionOf` which treats undefined as 0 (un-revisioned).
+   */
+  revision?: number
+  /**
+   * Per-commit metadata, newest last, capped at {@link REVISION_HISTORY_LIMIT}.
+   * Only metadata is retained (not full graph snapshots). Absent on old records.
+   */
+  revisionHistory?: WorkflowRevisionMetadata[]
 }
 
 /** A named value a workflow reads and writes at runtime. */

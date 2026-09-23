@@ -110,6 +110,14 @@ function preview(value: unknown): string {
  * Merges corrected params flat onto one node's `data` (the canonical shape).
  * `blockId` / `disableBlock` are protected: the AI must not re-type a node or
  * silently disable it.
+ *
+ * MIGRATION BOUNDARY (spec §8/§15 Phase 9): this is a LOW-LEVEL graph op, not
+ * a policy gate — it performs no root-cause scoping, `before` optimistic lock
+ * or dynamic-data validation. New AI repair paths must NOT call it directly;
+ * they go through `repair/patch-engine.ts` (PatchEngine), which is the single
+ * write entry for AI changes. It remains for (a) the legacy
+ * `workflows.takeoverApply` confirm path and (b) `debug-session` internals,
+ * both scheduled to be folded into PatchEngine.
  */
 export function patchNodeParams(
   workflow: Workflow,

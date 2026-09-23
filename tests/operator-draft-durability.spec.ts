@@ -150,9 +150,18 @@ describe('workflow draft survives a service-worker restart', () => {
 
   it('drops the persisted mirror when a draft is composed and saved', async () => {
     const before = await freshHandler()
+    // The click node carries the reliability contract (spec §9 save gate:
+    // a generated-strict workflow without postconditions does not save).
     await before.runOperatorTool({
       name: 'wf_op_event-click',
-      args: { selector: '#x' },
+      args: {
+        selector: '#x',
+        __reliability: {
+          intent: '点击目标元素',
+          idempotency: 'safe',
+          postconditions: [{ kind: 'elementExists', target: { testId: 'x' } }],
+        },
+      },
       conversationId: 'conv',
     })
     const composed = await before.composeWorkflowFromDraft('conv', { save: true })

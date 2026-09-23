@@ -41,6 +41,7 @@ import { getSettings, listPasswords } from '../../lib/storage'
 import { entryFields, findField } from '../../lib/types'
 import { OCR_SUPPORTED } from '../../lib/ocr-support'
 import { interpolate, EMPTY_INTERP_KEY, getByPath } from '../../lib/workflow/interpolate'
+import { interpretScriptResult } from '../../lib/workflow/script-result'
 import {
   coerceInputValue,
   missingRequiredInputs,
@@ -120,6 +121,19 @@ export interface WorkflowExecCtx {
    * show the variable values at each step.
    */
   snapshot?: (nodeId: string, label: string, variables: Record<string, unknown>) => void
+  /**
+   * The workflow's resolved reliability contract (see
+   * `lib/workflow/reliability`). Present only on generated-strict runs: every
+   * element op then carries the strict resolve policy, so the kernel refuses
+   * ambiguous matches instead of acting on the first of many. Absent = the
+   * legacy compat behavior, bit for bit.
+   */
+  reliability?: {
+    mode: 'generated-strict'
+    ambiguity: 'error' | 'score' | 'first-visible'
+    minScore: number
+    minMargin: number
+  }
 }
 
 /**
@@ -249,9 +263,30 @@ async function evalInPage(
  * click that navigated mid-call is reported by the driver as `ok: true` with
  * a note — still a success, by design.
  */
+/**
+ * The strict resolve policy an element op carries on a generated-strict run,
+ * or `undefined` on a compat run (the kernel then keeps the legacy resolver).
+ */
+function resolvePolicyOf(ctx: WorkflowExecCtx): Op['resolvePolicy'] {
+  const reliability = ctx.reliability
+  if (!reliability) return undefined
+  return {
+    mode: 'strict',
+    ambiguity: reliability.ambiguity,
+    minScore: reliability.minScore,
+    minMargin: reliability.minMargin,
+  }
+}
+
 async function runRaw(op: Op, ctx: WorkflowExecCtx): Promise<string | null> {
   assertActive(ctx)
-  const result = await execOnActiveTab(op, ctx.signal, ctx.tabId, ctx.scope)
+  const policy = resolvePolicyOf(ctx)
+  const result = await execOnActiveTab(
+    policy ? { ...op, resolvePolicy: policy } : op,
+    ctx.signal,
+    ctx.tabId,
+    ctx.scope,
+  )
   if (result && result.ok === false) {
     throw new Error(result.error || `${op.action} 失败`)
   }
@@ -1745,6 +1780,12 @@ const javascriptCode: BlockExecutor = async (data, ctx) => {
       for (const [k, v] of Object.entries(run.data.variables)) ctx.variables[k] = v
     }
     const result = run.data.result
+    // A failure envelope returned to the page harness is a node failure: the
+    // script ran but reported it did not reach its target.
+    const pageVerdict = interpretScriptResult(result)
+    if (!pageVerdict.ok) {
+      throw new Error(`javascript-code: ${pageVerdict.reason}`)
+    }
     ctx.variables['lastResult'] = result
     if (result !== undefined) {
       ctx.emit('result', typeof result === 'string' ? result : safeStringify(result))
@@ -1772,6 +1813,11 @@ const javascriptCode: BlockExecutor = async (data, ctx) => {
   }
   for (const [k, v] of Object.entries(local.variables ?? {})) ctx.variables[k] = v
   ctx.variables['lastResult'] = local.result
+  // A returned failure envelope is a failed node even off-page.
+  const envelopeVerdict = interpretScriptResult(local.result)
+  if (!envelopeVerdict.ok) {
+    throw new Error(`javascript-code: ${envelopeVerdict.reason}`)
+  }
   if (local.result !== undefined) {
     ctx.emit(
       'result',

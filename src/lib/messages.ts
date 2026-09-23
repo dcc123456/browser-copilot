@@ -51,7 +51,44 @@ export interface TurnTokenUsage {
  * The distinction exists so the panel can say something useful instead of
  * showing nothing: only one of the two is worth suggesting a retry for.
  */
-export type WorkflowDraftEmptyReason = 'no-actions' | 'all-failed'
+export type WorkflowDraftEmptyReason = 'no-actions' | 'all-failed' | 'validation-failed'
+/** Extra context for the `validation-failed` empty reason (the issue list). */
+export interface WorkflowDraftEmptyDetail {
+  detail?: string
+}
+
+/**
+ * Independent verification summary for a generated workflow (spec §5.5, §10.1).
+ *
+ * The draft card runs the shared repair engine's takeover-free verification
+ * before it is offered, and reports the outcome here. A `verified` workflow is
+ * one that executed successfully WITHOUT AI takeover and with the goal
+ * achieved; anything else is still offered (saving is never blocked) but the
+ * card shows why it is not yet independently proven.
+ */
+export interface GeneratedWorkflowRepairInfo {
+  /** Whether the workflow ran successfully without AI takeover + goal achieved. */
+  verified: boolean
+  /** "VERIFIED" | "DRAFT" | "BLOCKED" outcome of the repair loop. */
+  status: 'VERIFIED' | 'DRAFT' | 'BLOCKED'
+  /** Symptom node (where execution failed), when known. */
+  failedNodeId?: string
+  /** Root-cause node(s) located by the deterministic analyzer. */
+  rootCauseNodeIds: string[]
+  /** Shared failure code (VerificationFailureType), when known. */
+  failureType?: string
+  /** Human-readable explanation of the diagnosis (redacted). */
+  explanation: string
+  /** How many repair rounds were attempted. */
+  rounds: number
+  /** Bounded transient retries performed before any patch (spec §6.3). */
+  transientRetries?: number
+  /**
+   * True when verification succeeded only after a bounded transient retry —
+   * telemetry bucket `TRANSIENT_RECOVERY`, distinct from first-pass success.
+   */
+  transientRecovery?: boolean
+}
 
 /** A running task as shown on the Tasks tab board. */
 export interface RunningTaskView {
@@ -215,6 +252,28 @@ export type Command =
    * `background/workflow-engine/ai-takeover`.
    */
   | { type: 'workflows.debug'; id: string; /** See workflows.run.windowId. */ windowId?: number }
+  /**
+   * Unified repair (spec §10). The shared WorkflowRepairEngine runs a
+   * takeover-free execution, diagnoses the failed vs root-cause nodes, and —
+   * depending on `mode` — returns the analysis, a previewable patch, or an
+   * applied + verified repair working copy (kept in the background pending the
+   * user's commit; the formal workflow is never replaced automatically).
+   */
+  | {
+      type: 'workflows.repair'
+      id: string
+      mode: 'ANALYZE' | 'SUGGEST' | 'AUTO_REPAIR'
+      /** See workflows.run.windowId. */ windowId?: number
+      /**
+       * Set true when the user explicitly accepts a low-confidence proposal
+       * (P2); absent ⇒ a low-confidence AUTO_REPAIR only returns the preview.
+       */
+      confirmed?: boolean
+    }
+  /** Commit (formally save) the verified repair working copy. */
+  | { type: 'workflows.repairCommit'; id: string }
+  /** Discard the repair working copy / pending patch. */
+  | { type: 'workflows.repairDiscard'; id: string }
   /** Workflows with pending AI-takeover fixes awaiting user confirmation. */
   | { type: 'workflows.takeoverPending' }
   /** Aggregate AI-takeover success-rate stats (debug埋点). */
@@ -222,7 +281,17 @@ export type Command =
   /** Aggregate debug-SESSION stats: verified success rate + phase timing. */
   | { type: 'workflows.debugStats' }
   /** Applies the pending AI-takeover fixes to this workflow (user confirmed). */
-  | { type: 'workflows.takeoverApply'; id: string; verify?: boolean }
+  | {
+      type: 'workflows.takeoverApply'
+      id: string
+      verify?: boolean
+      /**
+       * Set true when the user accepts a CRITICAL whole-graph rewrite after
+       * seeing its risk level (P2, spec §8.4); absent ⇒ a CRITICAL rewrite is
+       * refused and its risk is returned for confirmation.
+       */
+      confirmedRisk?: boolean
+    }
   /** Discards the pending AI-takeover fixes for this workflow. */
   | { type: 'workflows.takeoverDiscard'; id: string }
   /**
@@ -245,6 +314,55 @@ export type Command =
    */
   | { type: 'workflows.resumePoint'; id: string }
   | { type: 'workflows.running'; workflowId?: string }
+
+  // --- Workflow recovery protocol (spec §11 · Commit 10) ---
+  /**
+   * Single-entry recovery protocol. Carries an envelope with a unique request
+   * id, the run/workflow and its revision, the phase, status, action and
+   * timestamp. The action discriminates the operation:
+   *
+   *   - START             begin Diagnose → Proposal, then pause;
+   *   - CONFIRM_REPAIR    apply + verify, then pause;
+   *   - CONFIRM_OVERWRITE commit the verified working copy;
+   *   - CANCEL            cancel before commit.
+   *
+   * A repeated START/confirm for the same request id is deduplicated by the
+   * handler, and any response whose request/revision is stale is dropped by
+   * the client guard.
+   */
+  | ({
+      type: 'workflows.recovery'
+      requestId: string
+      runId: string
+      workflowId: string
+      workflowRevision?: number
+      timestamp: number
+    } & (
+      | { action: 'START' }
+      | { action: 'CONFIRM_REPAIR' }
+      | { action: 'CONFIRM_OVERWRITE' }
+      | { action: 'CANCEL' }
+    ))
+
+  // --- Autonomous repair (spec §12–§24 · Commit 7-14) ---
+  /**
+   * Start the autonomous repair orchestrator for a failed run (for
+   * generated-strict workflows this may also be fired automatically by the
+   * run path). The orchestrator runs diagnose → strategy → candidate → apply
+   * → resume → verify, advancing strategies without asking until it either
+   * commits a verified revision or hits a genuine blocker. Progress is
+   * streamed through `workflows.repairEvent` messages.
+   */
+  | {
+      type: 'workflows.autoRepair'
+      id: string
+      runId: string
+      /** See workflows.run.windowId. */ windowId?: number
+    }
+  /** Cancel an in-flight autonomous repair (before it commits). */
+  | { type: 'workflows.autoRepairCancel'; id: string }
+  /** The current autonomous repair session snapshot (for late subscribers). */
+  | { type: 'workflows.autoRepairStatus'; id: string }
 
   // --- Workflow recording (see background/record-controller.ts) ---
   /**
@@ -366,8 +484,15 @@ export type CommandResult =
        * silence — a silent card is indistinguishable from a broken feature.
        */
       empty?: WorkflowDraftEmptyReason
+      detail?: string
       /** Repeat runs worth folding, for the review card. */
       suggestions?: RepeatSuggestion[]
+      /**
+       * Independent verification + repair summary for the generated workflow
+       * (spec §10.1). Populated when the background ran the shared repair
+       * engine's takeover-free verification before offering the card.
+       */
+      repair?: GeneratedWorkflowRepairInfo
       /**
        * Every selector in the graph checked against the live page. `null` means
        * the page could not be probed — "not verified", not "all fine".
@@ -404,6 +529,43 @@ export type CommandResult =
       outcome: { ok: boolean; skipped: boolean; summary: string; error?: string; runId?: string }
     }
   | { type: 'workflows.debug'; result: WorkflowDebugResult }
+  | {
+      type: 'workflows.repair'
+      data: import('./workflow/repair/repair-response').RepairResponseData
+    }
+  | { type: 'workflows.repairCommit' }
+  | { type: 'workflows.repairDiscard' }
+  | {
+      type: 'workflows.recovery'
+      /** Mirrors the request id; a client drops it when it no longer matches. */
+      requestId: string
+      workflowRevision?: number
+      phase: import('./workflow/recovery-protocol').RecoveryPhaseState
+      status: import('./workflow/recovery-protocol').RecoveryProtocolStatus
+      summary: string
+      timestamp: number
+      /**
+       * Patch operations carried with the AWAIT_REPAIR_CONFIRM proposal so the
+       * client can render the per-node before/after and risk. Absent on other
+       * phases; the formal workflow is never modified from these.
+       */
+      operations?: import('./workflow/repair/types').WorkflowPatchOperation[]
+    }
+  /** One autonomous-repair progress event (streamed while the repair runs). */
+  | {
+      type: 'workflows.repairEvent'
+      event: import('./workflow/repair-events').RepairProgressEvent
+    }
+  /** The autonomous repair settled; carries the final status. */
+  | {
+      type: 'workflows.autoRepairResult'
+      status: 'success' | 'exhausted' | 'blocked'
+      reason?: string
+      revision?: number
+      attempts: number
+      durationMs: number
+      committed: boolean
+    }
   | { type: 'workflows.takeoverPending'; items: PendingTakeoverInfo[] }
   | { type: 'workflows.takeoverStats'; summary: TakeoverStatsSummary }
   | { type: 'workflows.debugStats'; summary: DebugSessionStatsSummary }
@@ -434,6 +596,15 @@ export type CommandResult =
       verified?: boolean
       /** Run summary from the verification re-run (first error when it failed). */
       verifySummary?: string
+      /**
+       * Risk level of a whole-graph rewrite (P2, spec §8.4). When a CRITICAL
+       * rewrite was not confirmed, the apply is refused and this (with the
+       * reasons) tells the panel to ask the user.
+       */
+      rewriteRisk?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+      rewriteRiskReasons?: string[]
+      /** True when the rewrite awaits explicit confirmation — nothing written. */
+      riskConfirmationNeeded?: boolean
     }
   | { type: 'workflows.takeoverDiscard' }
   | { type: 'workflows.running'; runs: RunningTaskView[]; finished: FinishedTaskView[] }

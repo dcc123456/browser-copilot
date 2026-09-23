@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { applyConnection, isFallbackHandle } from '../src/workflow-editor/flow/connections'
+import {
+  applyConnection,
+  edgeClosesCycle,
+  isFallbackHandle,
+} from '../src/workflow-editor/flow/connections'
 import type { Connection, Edge } from '@xyflow/react'
 
 function edge(p: Partial<Edge>): Edge {
@@ -146,6 +150,116 @@ describe('applyConnection (canvas edge bookkeeping)', () => {
     expect(fallbacks[0]!.target).toBe('b')
     // The redrawn normal input edge of the new fallback target survives.
     expect(out.map((e) => e.id)).toContain('e1')
+  })
+
+  it('keeps the target’s incoming edge when a branch loops back to an earlier node', () => {
+    // t → a → b (element-exists), then b’s "not exists" branch loops back to a.
+    // Node a’s normal incoming edge (t → a) must survive — previously the
+    // loop-back replaced it and severed the chain.
+    const eds = [
+      edge({
+        id: 'e1',
+        source: 't',
+        target: 'a',
+        sourceHandle: 't-output-1',
+        targetHandle: 'a-input-1',
+      }),
+      edge({
+        id: 'e2',
+        source: 'a',
+        target: 'b',
+        sourceHandle: 'a-output-1',
+        targetHandle: 'b-input-1',
+      }),
+    ]
+    const out = applyConnection(
+      eds,
+      conn({
+        source: 'b',
+        target: 'a',
+        sourceHandle: 'element-exists-output-2',
+        targetHandle: 'a-input-1',
+      }),
+    )
+    expect(out.map((e) => e.id)).toEqual(['e1', 'e2', expect.any(String)])
+    const loopBack = out.find((e) => e.source === 'b' && e.target === 'a')
+    expect(loopBack?.sourceHandle).toBe('element-exists-output-2')
+  })
+
+  it('moves a branch’s loop-back target when redrawn from the same handle', () => {
+    const eds = [
+      edge({
+        id: 'e1',
+        source: 't',
+        target: 'a',
+        sourceHandle: 't-output-1',
+        targetHandle: 'a-input-1',
+      }),
+      edge({
+        id: 'e2',
+        source: 'a',
+        target: 'b',
+        sourceHandle: 'a-output-1',
+        targetHandle: 'b-input-1',
+      }),
+      edge({
+        id: 'e3',
+        source: 'b',
+        target: 'a',
+        sourceHandle: 'element-exists-output-2',
+        targetHandle: 'a-input-1',
+      }),
+    ]
+    const out = applyConnection(
+      eds,
+      conn({
+        source: 'b',
+        target: 't',
+        sourceHandle: 'element-exists-output-2',
+        targetHandle: 't-input-1',
+      }),
+    )
+    const loopBacks = out.filter((e) => e.source === 'b' && e.sourceHandle === 'element-exists-output-2')
+    expect(loopBacks).toHaveLength(1)
+    expect(loopBacks[0]!.target).toBe('t')
+    // The earlier chain edges are untouched.
+    expect(out.map((e) => e.id)).toContain('e1')
+    expect(out.map((e) => e.id)).toContain('e2')
+  })
+
+  it('does not treat a draw to a disconnected node as a loop-back', () => {
+    // A normal draw onto an occupied input still replaces it when the draw
+    // closes no cycle (the target merely sits left/upstream on the canvas).
+    const eds = [
+      edge({
+        id: 'e1',
+        source: 'a',
+        target: 'b',
+        sourceHandle: 'a-output-1',
+        targetHandle: 'b-input-1',
+      }),
+    ]
+    const out = applyConnection(
+      eds,
+      conn({ source: 'c', target: 'b', sourceHandle: 'c-output-1', targetHandle: 'b-input-1' }),
+    )
+    expect(out).toHaveLength(1)
+    expect(out[0]!.source).toBe('c')
+  })
+
+  it('edgeClosesCycle detects only edges that close a directed cycle', () => {
+    const eds = [
+      edge({ source: 'a', target: 'b', sourceHandle: 'a-output-1' }),
+      edge({ source: 'b', target: 'c', sourceHandle: 'b-output-1' }),
+      edge({ source: 'x', target: 'y', sourceHandle: 'x-output-fallback' }),
+    ]
+    // b can reach a? No. a can reach b already — drawing b → a closes a cycle.
+    expect(edgeClosesCycle(eds, 'b', 'a')).toBe(true)
+    expect(edgeClosesCycle(eds, 'c', 'a')).toBe(true)
+    expect(edgeClosesCycle(eds, 'a', 'c')).toBe(false)
+    // A fallback edge is error-recovery, not part of the cycle test.
+    expect(edgeClosesCycle(eds, 'y', 'x')).toBe(false)
+    expect(edgeClosesCycle(eds, 'a', 'a')).toBe(true)
   })
 
   it('keeps existing fallback edges when a normal edge redraws onto the same input', () => {

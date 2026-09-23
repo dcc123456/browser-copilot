@@ -648,6 +648,7 @@ describe('runDebugSession non-idempotent goals (已达成就不再重试)', () =
         runId: `r${i + 1}`,
         outcome: 'failed' as const,
         error: LOGIN_ERROR,
+        failedNodeId: 'b',
       })),
     )
     const result = await runDebugSession(
@@ -709,5 +710,65 @@ describe('runDebugSession non-idempotent goals (已达成就不再重试)', () =
     })
     expect(result).toMatchObject({ ok: true, verified: true, goalAchieved: true })
     expect(result.alreadySatisfied).toBeUndefined()
+  })
+
+  it('the repeat signature uses the actual failed node (node-aware, spec §13)', async () => {
+    // Repeated failures at the SAME node with the SAME error still trip the
+    // breaker, just as before.
+    const { run, calls } = scriptedRun(
+      Array.from({ length: 10 }, () => ({
+        runId: 'r1',
+        outcome: 'failed' as const,
+        error: LOGIN_ERROR,
+        failedNodeId: 'b',
+      })),
+    )
+    const result = await runDebugSession(
+      makeWorkflow([node('a', 'trigger'), node('b', 'forms', { selector: '#username' })]),
+      {
+        run,
+        createTakeover: hookReporting(takeoverReport(true, fix('b', '.other'))),
+        savePending: vi.fn(),
+        maxRounds: 5,
+      },
+    )
+    expect(calls.length).toBeLessThan(10)
+    expect(result.ok).toBe(false)
+  })
+
+  it('identical error text at DIFFERENT nodes is not one dead end (spec §13)', async () => {
+    // The takeover phase always succeeds and proposes a fix, so each round runs
+    // the node-level path then the takeover-free verify; that verify returns
+    // the same error TEXT but from a different node each time. With a node-aware
+    // signature these are distinct, so the breaker must NOT fire and the loop
+    // walks the whole budget instead of stopping after two rounds.
+    const verifyFailures = ['b', 'c', 'd']
+    // Round i: takeover run succeeds-with-fix, verify run fails at node i.
+    const results: DebugRunResult[] = []
+    for (const failedNodeId of verifyFailures) {
+      results.push({ runId: `t-${failedNodeId}`, outcome: 'ok', summary: 'takeover' })
+      results.push({
+        runId: `v-${failedNodeId}`,
+        outcome: 'failed',
+        error: 'something went wrong',
+        failedNodeId,
+      })
+    }
+    const { run, calls } = scriptedRun(results)
+    const result = await runDebugSession(
+      makeWorkflow([
+        node('a', 'trigger'),
+        ...verifyFailures.map((id) => node(id, 'forms', { selector: `#${id}` })),
+      ]),
+      {
+        run,
+        createTakeover: hookReporting(takeoverReport(true, fix('b', '.other'))),
+        savePending: vi.fn(),
+        maxRounds: 3,
+      },
+    )
+    // No false "repeated dead end": all three rounds (6 runs) were attempted.
+    expect(calls).toHaveLength(6)
+    expect(result.summary).not.toContain('重复失败')
   })
 })

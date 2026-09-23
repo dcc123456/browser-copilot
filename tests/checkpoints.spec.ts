@@ -143,9 +143,10 @@ describe('resumePointOf (M4)', () => {
       at(2, 'dashboard', 'failed'),
     ])
     // Not the trigger — the login must NOT be re-driven.
-    expect(point?.nodeId).toBe('dashboard')
-    expect(point?.variables).toEqual({ step: 1 })
-    expect(point?.fromStepIndex).toBe(1)
+    expect(point?.kind).toBe('ok')
+    expect(point?.kind === 'ok' && point.nodeId).toBe('dashboard')
+    expect(point?.kind === 'ok' && point.variables).toEqual({ step: 1 })
+    expect(point?.kind === 'ok' && point.fromStepIndex).toBe(1)
   })
 
   it('ignores a failed tail: resumes at the first step that did NOT settle', () => {
@@ -153,8 +154,8 @@ describe('resumePointOf (M4)', () => {
     // node after the last CLEAN step (a), i.e. b gets re-driven.
     const wf = workflow(['a', 'b', 'c'])
     const point = resumePointOf(wf, [at(0, 'a'), at(1, 'b', 'failed'), at(2, 'c', 'failed')])
-    expect(point?.nodeId).toBe('b')
-    expect(point?.fromStepIndex).toBe(0)
+    expect(point?.kind === 'ok' && point.nodeId).toBe('b')
+    expect(point?.kind === 'ok' && point.fromStepIndex).toBe(0)
   })
 
   it('has no resume point without any clean step', () => {
@@ -191,5 +192,113 @@ describe('resumePointOf (M4)', () => {
       },
     }
     expect(resumePointOf(wf, [at(0, 'a')])?.nodeId).toBe('b')
+  })
+})
+
+// --- Phase 9: checkpoint phases, terminal-state resume, resume guard ----------
+
+import { workflowFingerprintOf } from '../src/lib/workflow/checkpoints'
+
+describe('workflow fingerprint', () => {
+  const makeGraph = makeWorkflowDefer()
+  function makeWorkflowDefer() {
+    return (nodeIds: string[]): Workflow => ({
+      id: 'wf',
+      name: 'wf',
+      createdAt: 0,
+      updatedAt: 0,
+      drawflow: {
+        nodes: nodeIds.map((id) => ({ id, label: id, position: { x: 0, y: 0 }, data: {} })),
+        edges: nodeIds.slice(0, -1).map((source, i) => ({ id: `e${i}`, source, target: nodeIds[i + 1]! })),
+      },
+      settings: { saveLog: false, debugMode: false, notification: false, reuseLastState: false },
+    })
+  }
+  it('is stable for the same graph and changes when the graph changes', () => {
+    const wf = makeGraph(['a', 'b'])
+    expect(workflowFingerprintOf(wf)).toBe(workflowFingerprintOf(makeGraph(['a', 'b'])))
+    expect(workflowFingerprintOf(wf)).not.toBe(workflowFingerprintOf(makeGraph(['a', 'c'])))
+  })
+
+  it('changes when node params change but not when canvas position does', () => {
+    const wf = makeGraph(['a'])
+    wf.drawflow.nodes[0]!.data['selector'] = '.x'
+    const before = workflowFingerprintOf(wf)
+    wf.drawflow.nodes[0]!.data['selector'] = '.y'
+    expect(workflowFingerprintOf(wf)).not.toBe(before)
+    wf.drawflow.nodes[0]!.position = { x: 999, y: 999 }
+    expect(workflowFingerprintOf(wf)).toBe(workflowFingerprintOf({ ...wf }))
+  })
+})
+
+describe('phase-aware resume (spec §14)', () => {
+  const makeWorkflow = (nodeIds: string[]): Workflow => ({
+    id: 'wf',
+    name: 'wf',
+    createdAt: 0,
+    updatedAt: 0,
+    drawflow: {
+      nodes: nodeIds.map((id) => ({
+        id,
+        label: id,
+        position: { x: 0, y: 0 },
+        data: {},
+      })),
+      edges: nodeIds.slice(0, -1).map((source, i) => ({
+        id: `e${i}`,
+        source,
+        target: nodeIds[i + 1]!,
+      })),
+    },
+    settings: { saveLog: false, debugMode: false, notification: false, reuseLastState: false },
+  })
+  const wf = makeWorkflow(['a', 'login', 'dashboard'])
+
+  function cp(step: number, node: string, status: RunCheckpoint['status'], phase?: RunCheckpoint['phase']): RunCheckpoint {
+    return { runId: 'r', stepIndex: step, nodeId: node, status, variables: {}, at: 0, ...(phase ? { phase } : {}) }
+  }
+
+  it('sideEffectStarted without observation → SIDE_EFFECT_UNKNOWN, never a replay point', () => {
+    const decision = resumePointOf(wf, [
+      cp(0, 'a', 'ok'),
+      cp(1, 'login', 'ok', 'sideEffectStarted'),
+    ])
+    expect(decision?.kind).toBe('side-effect-unknown')
+  })
+
+  it('sideEffectObserved counts as committed → resume after the unsafe node', () => {
+    const decision = resumePointOf(wf, [
+      cp(0, 'a', 'ok'),
+      cp(1, 'login', 'ok', 'sideEffectStarted'),
+      cp(2, 'login', 'ok', 'sideEffectObserved'),
+    ])
+    expect(decision?.kind).toBe('ok')
+    expect(decision?.kind === 'ok' && decision.nodeId).toBe('dashboard')
+  })
+
+  it('nodeStarted alone means the node never committed → resume FROM it', () => {
+    const decision = resumePointOf(wf, [cp(0, 'a', 'ok'), cp(1, 'login', 'ok', 'nodeStarted')])
+    expect(decision?.kind).toBe('ok')
+    expect(decision?.kind === 'ok' && decision.nodeId).toBe('login')
+  })
+
+  it('resume guard: a fingerprint mismatch refuses the resume', () => {
+    const decision = resumePointOf(wf, [
+      { ...cp(0, 'a', 'ok'), workflowFingerprint: 'wf-fp-deadbeef-99' },
+    ])
+    expect(decision?.kind).toBe('fingerprint-mismatch')
+  })
+
+  it('legacy checkpoints without a fingerprint still resume (compat)', () => {
+    const decision = resumePointOf(wf, [cp(0, 'a', 'ok')])
+    expect(decision?.kind).toBe('ok')
+  })
+
+  it('current-graph fingerprints match and resume normally', () => {
+    const decision = resumePointOf(wf, [
+      { ...cp(0, 'a', 'ok'), workflowFingerprint: workflowFingerprintOf(wf) },
+    ])
+    expect(decision?.kind).toBe('ok')
+    expect(decision?.kind === 'ok' && decision.nodeId).toBe('login')
   })
 })

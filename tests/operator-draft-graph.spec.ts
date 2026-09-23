@@ -164,6 +164,29 @@ describe('composeWorkflowFromDraft', () => {
     expect(out).toEqual({ error: 'No draft to compose. Call wf_op_* tools first.' })
   })
 
+  it('derives goalSpec from node postconditions + the trigger goalText', async () => {
+    const conversation = 'c-goal'
+    await append(conversation, 'wf_op_trigger', { goalText: '登录后台查看订单' })
+    await append(conversation, 'wf_op_forms', {
+      action: 'submit',
+      selector: '#login',
+      type: 'text-field',
+      value: 'secret123',
+      variableName: 'loginResult',
+      __reliability: {
+        intent: '提交登录表单',
+        idempotency: 'unsafe',
+        postconditions: [{ kind: 'urlContains', value: '/dashboard' }],
+      },
+    })
+    const out = await composeWorkflowFromDraft(conversation, { save: false })
+    if ('error' in out) throw new Error(out.error)
+    expect(out.workflow.settings.goalSpec).toMatchObject({
+      summary: '登录后台查看订单',
+      successConditions: [{ kind: 'urlContains', value: '/dashboard' }],
+    })
+  })
+
   it('derives the top-level trigger mirror from the graph trigger node', async () => {
     const conversation = 'c-compose'
     const draft = await append(conversation, 'wf_op_event-click', { selector: '#x' })
@@ -178,6 +201,31 @@ describe('composeWorkflowFromDraft', () => {
     expect(out.saved).toBe(false)
     expect(out.workflow.trigger).toEqual({ type: 'interval', enabled: true })
     expect(out.workflow.drawflow.nodes[0]!.data.blockId).toBe('trigger')
+  })
+
+  it('never blocks saving: a graph with a runnability error is produced with the finding in saveWarnings', async () => {
+    const conversation = 'c-warn'
+    await append(conversation, 'wf_op_trigger', { goalText: '' })
+    await append(conversation, 'wf_op_event-click', { selector: '#x' })
+    // Force a structural runnability error the auto-completer cannot repair:
+    // an edge referencing a node that does not exist.
+    const draft = getDraftSnapshot(conversation)!
+    draft.edges.push({
+      id: 'broken-edge',
+      source: 'missing-node',
+      target: draft.nodes.find((n) => n.data.blockId === 'event-click')!.id,
+      sourceHandle: 'x-output-1',
+      targetHandle: 'event-click-input-1',
+    })
+
+    const out = await composeWorkflowFromDraft(conversation, { save: false })
+    if ('error' in out) throw new Error(`saving must not be blocked: ${out.error}`)
+    // The workflow is still produced with the invalid-edge finding carried as
+    // a non-blocking warning.
+    expect(out.workflow).toBeDefined()
+    expect(out.workflow.settings.saveWarnings ?? []).toContainEqual(
+      expect.stringContaining('missing-node'),
+    )
   })
 
   it('leaves the draft in place when composing without saving', async () => {

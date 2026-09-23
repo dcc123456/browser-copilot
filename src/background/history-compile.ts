@@ -118,7 +118,7 @@ export type SaveEmptyReason = WorkflowDraftEmptyReason
  * no workflow and no explanation.
  */
 export type SaveResolution =
-  { workflow: Workflow; source: 'draft' | 'history' } | { empty: SaveEmptyReason }
+  { workflow: Workflow; source: 'draft' | 'history' } | { empty: SaveEmptyReason; detail?: string }
 
 /** Nodes the graph holds apart from its trigger head. */
 function actionNodeCount(workflow: Workflow): number {
@@ -149,6 +149,10 @@ export async function resolveWorkflowForSave(
   name: string,
 ): Promise<SaveResolution> {
   const out = await composeWorkflowFromDraft(conversationId, { save: false })
+  // Saving is never blocked by reliability / runnability findings: they are
+  // carried on the workflow as non-blocking `saveWarnings`. An error here has
+  // exactly one cause — an empty draft — so fall through to the history
+  // compile instead of hiding the card.
   const draft = 'error' in out ? null : out.workflow
   if (draft && actionNodeCount(draft) > 0) return { workflow: draft, source: 'draft' }
 

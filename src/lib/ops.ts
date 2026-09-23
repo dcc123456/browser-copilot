@@ -79,6 +79,25 @@ export function locatorHintOf(target: unknown): string | undefined {
   }
 }
 
+/**
+ * How the kernel may resolve a target when it matches several elements.
+ *
+ * `compat` keeps the legacy two-tier behavior (exact match wins; the first
+ * multi-match acts on its first visible element). `strict` refuses to guess:
+ * with `ambiguity: 'score'` the matched specs compete by locator score
+ * (`lib/workflow/locator-score`) and a winner needs both a high enough score
+ * and a wide enough margin over the runner-up; `ambiguity: 'error'` fails on
+ * ANY multi-match. Generated-strict workflows run with score.
+ */
+export interface ResolvePolicy {
+  mode: 'compat' | 'strict'
+  ambiguity: 'error' | 'score' | 'first-visible'
+  /** Minimum score a winning spec must reach (score policy). */
+  minScore?: number
+  /** Minimum gap between the top two scores (score policy). */
+  minMargin?: number
+}
+
 /** Every action the kernel understands. */
 export type ActionName =
   | 'click'
@@ -148,8 +167,16 @@ export interface Op {
    * `rows`). Values must be structured-cloneable (they cross into the page).
    */
   jsArgs?: Record<string, unknown>
-  /** Parameter names for `jsArgs`, in order. Defaults to the keys of jsArgs. */
+  /**
+   * Parameter names for `jsArgs`, in order. Defaults to the keys of jsArgs.
+   */
   jsArgNames?: string[]
+  /**
+   * The resolve policy for THIS op's target (see {@link ResolvePolicy}).
+   * Absent = compat. The engine attaches it from the workflow's reliability
+   * contract on every element op of a generated-strict run.
+   */
+  resolvePolicy?: ResolvePolicy
 }
 
 /** A snapshot entry for one interactive element. */
@@ -218,4 +245,20 @@ export interface OpResult {
   note?: string
   /** Structured payload for data-producing ops (attribute, form, count). */
   data?: unknown
+  /**
+   * Machine-readable failure code on structured failures (strict resolver:
+   * `LOCATOR_NOT_FOUND` / `LOCATOR_AMBIGUOUS`). The FailureCode vocabulary of
+   * the reliability layer builds on this (see `lib/workflow/failure-code`).
+   */
+  code?: string
+  /**
+   * Number of DISTINCT elements the target matched, when the failure is a
+   * locator failure (evidence for the failure classifier and AI repair).
+   */
+  matchCount?: number
+  /**
+   * The matched specs and their scores, winner first — the explainability
+   * payload of a strict ambiguity refusal. Spec strings, not DOM dumps.
+   */
+  candidates?: { strategy: string; score: number }[]
 }
