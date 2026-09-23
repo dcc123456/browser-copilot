@@ -165,6 +165,11 @@ import type {
   RecoveryPhaseState,
   RecoveryProtocolStatus,
 } from '../lib/workflow/recovery-protocol'
+import {
+  commitWorkflowRevision,
+  currentRevisionOf,
+  revisionMatchesBase,
+} from '../lib/workflow/workflow-revision'
 import { finalizeGeneratedWorkflow } from './workflow-engine/repair/generation-repair'
 import { DEFAULT_REPAIR_POLICY } from '../lib/workflow/repair/types'
 import { recordRepairRound } from '../lib/workflow/repair-metrics'
@@ -1312,6 +1317,20 @@ async function handleCommand(
         await hardenWorkflowSelectors(workflow, { scope: await currentPluginScope() })
         workflow = persistDefaultWaits(workflow)
       }
+      // Every formal save is a commit on the revision sequence: a new workflow
+      // starts at revision 1; a later save (manual edit or re-generated content)
+      // bumps it. Bump here so callers never have to compute the number.
+      {
+        const nextSave = commitWorkflowRevision(workflow, {
+          source: command.fromGeneration ? 'generation' : 'manual-edit',
+        })
+        workflow = {
+          ...workflow,
+          updatedAt: workflow.updatedAt || Date.now(),
+          revision: nextSave.revision,
+          revisionHistory: nextSave.revisionHistory,
+        }
+      }
       await saveWorkflow(workflow)
       await rescheduleAllWorkflowTriggers()
       return { type: 'workflows.save' }
@@ -1969,6 +1988,7 @@ async function handleCommand(
             // formal workflow version + content it was produced against.
             baseUpdatedAt: repairWorkflow.updatedAt,
             baseHash: workflowFingerprintOf(repairWorkflow),
+            baseRevision: currentRevisionOf(repairWorkflow),
             createdAt: Date.now(),
           })
         }
@@ -2020,9 +2040,15 @@ async function handleCommand(
         }
       }
 
+      // Keep the revision sequence consistent even on the legacy commit path.
+      const nextRevision = commitWorkflowRevision(pending.workingCopy, {
+        source: 'ai-repair',
+      })
       const repaired: Workflow = {
         ...pending.workingCopy,
         updatedAt: Date.now(),
+        revision: nextRevision.revision,
+        revisionHistory: nextRevision.revisionHistory,
       }
       await saveWorkflow(repaired)
       return { type: 'workflows.repairCommit' }
@@ -2102,6 +2128,12 @@ async function handleCommand(
         return { type: 'workflows.takeoverApply', workflow, appliedCount: 0 }
       }
       applied.updatedAt = Date.now()
+      {
+        // Applying AI-takeover fixes is itself a formal commit (spec §18).
+        const nextApplied = commitWorkflowRevision(applied, { source: 'ai-repair' })
+        applied.revision = nextApplied.revision
+        applied.revisionHistory = nextApplied.revisionHistory
+      }
       await saveWorkflow(applied)
       await rescheduleAllWorkflowTriggers()
       await clearPendingTakeover(command.id)
@@ -2219,6 +2251,8 @@ async function handleCommand(
             verification: suggestion.verification,
             baseUpdatedAt: targetWorkflow.updatedAt,
             baseHash: workflowFingerprintOf(targetWorkflow),
+            baseRevision: currentRevisionOf(targetWorkflow),
+            requestId: command.requestId,
             createdAt: Date.now(),
           })
           const summary = `proposal ready: ${suggestion.patch.operations.length} operation(s)`
@@ -2252,6 +2286,8 @@ async function handleCommand(
             verification: applied.verification,
             baseUpdatedAt: targetWorkflow.updatedAt,
             baseHash: workflowFingerprintOf(targetWorkflow),
+            baseRevision: pending.baseRevision,
+            requestId: command.requestId,
             createdAt: Date.now(),
           })
           const outcome = { phase: 'AWAIT_OVERWRITE_CONFIRM', status: 'waiting' } as const
@@ -2265,6 +2301,14 @@ async function handleCommand(
         if (!pending?.workingCopy) throw new Error('No verified repair to commit.')
         const current = await getWorkflow(command.workflowId)
         if (current) {
+          // Revision conflict: any concurrent commit (manual, generation or a
+          // newer repair) moves the formal revision past the base.
+          if (!revisionMatchesBase(current, pending.baseRevision)) {
+            discardRepairSession(command.workflowId)
+            throw new Error(
+              'The workflow revision changed since this repair was proposed; the patch is stale. Please run AI repair again.',
+            )
+          }
           if (current.updatedAt !== pending.baseUpdatedAt) {
             discardRepairSession(command.workflowId)
             throw new Error('The workflow changed since this repair was proposed; the patch is stale.')
@@ -2274,16 +2318,23 @@ async function handleCommand(
             throw new Error('The workflow content changed since this repair was proposed; the patch is stale.')
           }
         }
+        const next = commitWorkflowRevision(pending.workingCopy, {
+          source: 'ai-repair',
+          repairSessionId: command.requestId,
+        })
         const committed: Workflow = {
           ...pending.workingCopy,
           updatedAt: Date.now(),
+          revision: next.revision,
+          revisionHistory: next.revisionHistory,
         }
         await saveWorkflow(committed)
         discardRepairSession(command.workflowId)
         {
           const outcome = { phase: 'DONE', status: 'done' } as const
           rememberRecoveryOutcome(command.requestId, outcome)
-          return recoveryEnvelopeResult(command, outcome, 'workflow updated', command.timestamp)
+          return recoveryEnvelopeResult(command, outcome,
+            `workflow updated to revision ${next.revision}`, command.timestamp)
         }
       } finally {
         release()

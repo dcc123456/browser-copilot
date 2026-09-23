@@ -139,6 +139,7 @@ describe('repair session store', () => {
       verification: verification(true),
       baseUpdatedAt: 0,
       baseHash: 'base',
+      baseRevision: 0,
       createdAt: 1,
     })
     expect(pendingRepairWorkflowIds()).toContain('wf-store')
@@ -166,6 +167,7 @@ describe('repair session store', () => {
       verification: verification(true),
       baseUpdatedAt: 0,
       baseHash: 'base',
+      baseRevision: 0,
       createdAt: 1,
     })
     expect(discardRepairSession('wf-discard')).toBe(true)

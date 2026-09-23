@@ -212,6 +212,22 @@ export interface WorkflowSettings {
 }
 
 /** A persisted workflow. */
+/**
+ * Metadata for one committed workflow revision (spec §18 · Commit 14).
+ *
+ * The graph content lives on the workflow itself; this record is the audit line
+ * for a single commit so a future rollback / compare can trace provenance. The
+ * full prior content is intentionally NOT copied here (history is capped and
+ * graphs can be large) — the parent revision number is the pointer.
+ */
+export interface WorkflowRevisionMetadata {
+  revision: number
+  updatedAt: number
+  source: 'manual-edit' | 'ai-repair' | 'generation'
+  parentRevision?: number
+  repairSessionId?: string
+}
+
 export interface Workflow {
   id: string
   name: string
@@ -238,6 +254,17 @@ export interface Workflow {
   settings: WorkflowSettings
   /** Backing data-store reference (e.g. a spreadsheet table id). */
   table?: unknown
+  /**
+   * Monotonic revision number, starting at 1 for the first commit (spec §18).
+   * Absent on records persisted before revisioning; read via
+   * `currentRevisionOf` which treats undefined as 0 (un-revisioned).
+   */
+  revision?: number
+  /**
+   * Per-commit metadata, newest last, capped at {@link REVISION_HISTORY_LIMIT}.
+   * Only metadata is retained (not full graph snapshots). Absent on old records.
+   */
+  revisionHistory?: WorkflowRevisionMetadata[]
 }
 
 /** A named value a workflow reads and writes at runtime. */

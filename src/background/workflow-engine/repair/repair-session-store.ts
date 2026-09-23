@@ -39,6 +39,14 @@ export interface PendingRepairSession {
   baseUpdatedAt: number
   /** Stable content hash of the base workflow, as a second lock signal. */
   baseHash: string
+  /**
+   * Workflow revision the repair was produced against (spec §18 · Commit 14).
+   * A pre-revisioning base is 0. A concurrent commit moves the formal revision
+   * past this value and the pending repair is refused as stale.
+   */
+  baseRevision: number
+  /** Recovery request id that owns this pending repair, for audit linkage. */
+  requestId?: string
   createdAt: number
 }
 
