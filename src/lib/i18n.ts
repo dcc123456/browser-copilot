@@ -461,6 +461,20 @@ export interface Messages {
   proposalVerificationTitle: string
   /** Affected nodes section title. */
   proposalAffectedTitle: string
+  /** Health status stable. */
+  healthStatusStable: string
+  /** Health status needs attention. */
+  healthStatusNeedsAttention: string
+  /** Health status no data. */
+  healthStatusNoData: string
+  /** Health pass ratio: passed / total runs. */
+  healthRunsPassed: (params: { passed: number; total: number }) => string
+  /** Health line: last verified at a relative/absolute time. */
+  healthLastVerified: (params: { time: string }) => string
+  /** Health line: last failure category. */
+  healthLastFailure: (params: { category: string }) => string
+  /** Health recovery line: repaired and resumed counts. */
+  healthRecoveryCounts: (params: { repaired: number; resumed: number }) => string
   /** Hint under the declared-inputs list: the recorded value is a default. */
   chatWorkflowInputsHint: string
   /** Heading of the "this workflow needs code" list on the save card. */
@@ -1512,6 +1526,13 @@ const en: Messages = {
   proposalEvidenceTitle: 'Evidence',
   proposalVerificationTitle: 'Verification plan',
   proposalAffectedTitle: 'Affected nodes',
+  healthStatusStable: 'Stable',
+  healthStatusNeedsAttention: 'Needs attention',
+  healthStatusNoData: 'No runs yet',
+  healthRunsPassed: ({ passed, total }) => `${passed} / ${total} runs passed`,
+  healthLastVerified: ({ time }) => `Last verified: ${time}`,
+  healthLastFailure: ({ category }) => `Last failure: ${category}`,
+  healthRecoveryCounts: ({ repaired, resumed }) => `${repaired} repaired · ${resumed} resumed`,
   chatWorkflowInputsHint:
     'These values were captured at generation time and become run-time inputs ({{name}}). The saved value is only a default — the workflow re-prompts or uses the trigger value on each run.',
   chatWorkflowCodeNodesTitle: 'Steps that need code',
@@ -2583,6 +2604,13 @@ const zhCN: Messages = {
   proposalEvidenceTitle: '证据',
   proposalVerificationTitle: '验证计划',
   proposalAffectedTitle: '受影响节点',
+  healthStatusStable: '稳定',
+  healthStatusNeedsAttention: '需要关注',
+  healthStatusNoData: '暂无运行',
+  healthRunsPassed: ({ passed, total }) => `${passed} / ${total} 次运行通过`,
+  healthLastVerified: ({ time }) => `上次验证：${time}`,
+  healthLastFailure: ({ category }) => `上次失败：${category}`,
+  healthRecoveryCounts: ({ repaired, resumed }) => `${repaired} 次修复 · ${resumed} 次续跑`,
   chatWorkflowInputsHint:
     '这些值是在生成时采集的，会成为运行期输入（用 {{名称}} 引用）。保存的值只是默认值——每次运行都会重新提示或使用触发器传入的值。',
   chatWorkflowCodeNodesTitle: '需要代码的步骤',

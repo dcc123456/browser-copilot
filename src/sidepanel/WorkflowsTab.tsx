@@ -22,6 +22,8 @@ import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
 import { useT } from './i18n'
 import { confirmDialog } from '../ui/confirm'
 import { FailureCenterDialog } from './FailureCenter'
+import { WorkflowHealthView } from './WorkflowHealthView'
+import { summarizeWorkflowHealth } from '../lib/workflow/workflow-health'
 
 /**
  * Effective launch type for the list chip: the trigger BLOCK inside the graph
@@ -832,6 +834,7 @@ export default function WorkflowsTab() {
         <ul className="task-list">
           {workflows.map((wf) => {
             const last = lastRunFor(wf)
+            const health = summarizeWorkflowHealth(runs, wf.id)
             return (
               <li className="task-item" key={wf.id}>
                 <div className="task-item-head">
@@ -863,6 +866,7 @@ export default function WorkflowsTab() {
                     {t.workflowsLastRun}: {new Date(last.time).toLocaleString(navigator.language)}
                   </div>
                 )}
+                <WorkflowHealthView health={health} />
                 <div className="actions task-actions">
                   <button
                     className="task-action-run"

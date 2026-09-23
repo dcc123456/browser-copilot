@@ -125,6 +125,18 @@ export interface TaskRunLog {
   error?: string
   /** Detailed progress steps, persisted so history survives a worker restart. */
   steps?: TaskRunStep[]
+  /**
+   * Classified failure category for a failed run (spec §17/§22 · Commit 15),
+   * e.g. LOCATOR / TIMING / NAVIGATION. Absent on success or when a run
+   * predates classification. Used by the workflow health summary.
+   */
+  failureCategory?: string
+  /** True when this run completed after resuming from a plain checkpoint. */
+  resumed?: boolean
+  /** True when this run completed after an AI repair commit was applied. */
+  repaired?: boolean
+  /** True when an AI takeover step ran during this execution. */
+  takeover?: boolean
 }
 
 /**

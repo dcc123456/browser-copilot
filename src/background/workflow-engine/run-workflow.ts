@@ -52,6 +52,7 @@ import { validateGeneratedWorkflow } from '../../lib/workflow/generated-validati
 import { TraceCollector } from '../../lib/workflow/execution-trace'
 import { traceFailureFrom } from '../../lib/workflow/repair/failure-classifier'
 import type { TraceEntry } from '../../lib/workflow/repair/types'
+import { classifyRunFailure } from './recovery-classifier'
 
 /**
  * One store for the whole background script: checkpoints are per-run, and the
@@ -722,7 +723,17 @@ export async function executeWorkflow(
     )
     // A reused run is the caller's to finish — it may still add lines (e.g. a
     // notification step) after the engine settles.
-    if (ownsRun) finishRun(runId, { outcome, summary, error })
+    let failureCategory: string | undefined
+    if (outcome === 'failed') {
+      // Classify from real trace evidence for the health summary. Degrade to
+      // undefined on any failure so a classification bug never breaks finish.
+      try {
+        failureCategory = classifyRunFailure({ workflow, trace }).category
+      } catch {
+        failureCategory = undefined
+      }
+    }
+    if (ownsRun) finishRun(runId, { outcome, summary, error, ...(failureCategory ? { failureCategory } : {}) })
     // Retire the oldest runs' checkpoints so repeated debugging cannot fill
     // the data directory. Fire-and-forget: pruning must never hold the run.
     if (wantCheckpoints) void prunePersistedCheckpoints()
