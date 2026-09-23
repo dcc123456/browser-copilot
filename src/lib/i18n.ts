@@ -1171,6 +1171,38 @@ export interface Messages {
   builtinAgentAnalystDisplayName: string
   builtinAgentAnalystHint: string
   builtinAgentAnalystInstructions: string
+
+  // --- Workflow generation dialog (spec §32) ---
+  workflowGenerationTitle: string
+  workflowGenerationUnderstanding: string
+  workflowGenerationWorking: string
+  workflowGenerationRecovering: string
+  workflowGenerationCompiling: string
+  workflowGenerationValidating: string
+  workflowGenerationReady: string
+  workflowGenerationSaved: string
+  workflowGenerationCancel: string
+  workflowGenerationBackground: string
+  workflowGenerationClose: string
+  workflowGenerationError: string
+  workflowGenerationSave: string
+  workflowGenerationEdit: string
+  workflowGenerationSavedDetail: string
+  workflowGenerationActionCount: ({ count }: { count: number }) => string
+  workflowGenerationRecoveredCount: ({ count }: { count: number }) => string
+
+  // --- Workflow repair (spec §32) ---
+  workflowRepairStarting: string
+  workflowRepairDiagnosing: string
+  workflowRepairApplying: string
+  workflowRepairVerifying: string
+  workflowRepairSuccess: string
+  workflowRepairExhausted: string
+  workflowRepairBlocked: string
+  workflowRepairNeedHuman: string
+  workflowRepairAutoTitle: string
+  workflowRepairVerifiedDetail: string
+  workflowRepairRevisionCommitted: ({ revision }: { revision: number }) => string
 }
 
 const en: Messages = {
@@ -2265,6 +2297,38 @@ Rules:
   you DO have and list exactly what additional evidence is needed.
 
 Keep the whole report dense and within the message size cap.`,
+
+  // Workflow generation dialog
+  workflowGenerationTitle: 'Workflow generation',
+  workflowGenerationUnderstanding: 'Understanding the task and confirming the target outcome…',
+  workflowGenerationWorking: 'Performing the task…',
+  workflowGenerationRecovering: 'Recovering from a failed action…',
+  workflowGenerationCompiling: 'Compiling the workflow…',
+  workflowGenerationValidating: 'Validating and hardening the workflow…',
+  workflowGenerationReady: 'Workflow ready',
+  workflowGenerationSaved: 'Workflow saved',
+  workflowGenerationCancel: 'Cancel generation',
+  workflowGenerationBackground: 'Run in background',
+  workflowGenerationClose: 'Close',
+  workflowGenerationError: 'Generation failed',
+  workflowGenerationSave: 'Save workflow',
+  workflowGenerationEdit: 'Edit',
+  workflowGenerationSavedDetail: 'The workflow was saved and is ready to run.',
+  workflowGenerationActionCount: ({ count }) => `${count} action(s) performed`,
+  workflowGenerationRecoveredCount: ({ count }) => `${count} issue(s) recovered`,
+
+  // Workflow repair
+  workflowRepairStarting: 'Starting automatic repair…',
+  workflowRepairDiagnosing: 'Analyzing the failed step…',
+  workflowRepairApplying: 'Applying the repair…',
+  workflowRepairVerifying: 'Verifying the repair…',
+  workflowRepairSuccess: 'Workflow auto-repaired',
+  workflowRepairExhausted: 'Automatic repair exhausted',
+  workflowRepairBlocked: 'Human action required',
+  workflowRepairNeedHuman: 'Take over manually',
+  workflowRepairAutoTitle: 'AI is auto-repairing…',
+  workflowRepairVerifiedDetail: 'Verification passed: the workflow runs independently.',
+  workflowRepairRevisionCommitted: ({ revision }) => `Committed as revision ${revision}.`,
 }
 
 const zhCN: Messages = {
@@ -3260,6 +3324,38 @@ const zhCN: Messages = {
 - 如果证据不足，返回 partial 状态：给出你有的发现，并列出还需要哪些额外证据。
 
 保持整个报告密集且在消息大小限制内。`,
+
+  // Workflow generation dialog
+  workflowGenerationTitle: '工作流生成',
+  workflowGenerationUnderstanding: '正在理解任务并确认目标终态…',
+  workflowGenerationWorking: '正在执行任务…',
+  workflowGenerationRecovering: '正在从失败动作中恢复…',
+  workflowGenerationCompiling: '正在编译工作流…',
+  workflowGenerationValidating: '正在校验并加固工作流…',
+  workflowGenerationReady: '工作流已就绪',
+  workflowGenerationSaved: '工作流已保存',
+  workflowGenerationCancel: '取消生成',
+  workflowGenerationBackground: '后台运行',
+  workflowGenerationClose: '关闭',
+  workflowGenerationError: '生成失败',
+  workflowGenerationSave: '保存工作流',
+  workflowGenerationEdit: '编辑',
+  workflowGenerationSavedDetail: '工作流已保存，可以开始运行。',
+  workflowGenerationActionCount: ({ count }) => `已执行 ${count} 个动作`,
+  workflowGenerationRecoveredCount: ({ count }) => `已恢复 ${count} 个问题`,
+
+  // Workflow repair
+  workflowRepairStarting: '正在启动自动修复…',
+  workflowRepairDiagnosing: '正在分析失败步骤…',
+  workflowRepairApplying: '正在应用修复…',
+  workflowRepairVerifying: '正在验证修复…',
+  workflowRepairSuccess: '工作流已自动修复',
+  workflowRepairExhausted: '自动修复策略已耗尽',
+  workflowRepairBlocked: '需要人工操作',
+  workflowRepairNeedHuman: '人工接管',
+  workflowRepairAutoTitle: 'AI 正在自动修复…',
+  workflowRepairVerifiedDetail: '验证通过：工作流可独立运行。',
+  workflowRepairRevisionCommitted: ({ revision }) => `已提交为第 ${revision} 个修订版本。`,
 }
 
 const DICTIONARIES: Record<Locale, Messages> = { en, 'zh-CN': zhCN }

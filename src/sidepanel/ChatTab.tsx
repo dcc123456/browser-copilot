@@ -51,6 +51,10 @@ import {
 } from '../lib/workflow/review-patch'
 import { WorkflowReviewDialog } from './WorkflowReviewList'
 import { GenerationStagesView } from './GenerationStages'
+import { WorkflowGenerationDialog } from './components/WorkflowGenerationDialog'
+import type { WorkflowGenerationViewState } from './components/WorkflowGenerationDialog'
+import { RepairProgressDialog } from './components/RepairProgressDialog'
+import { useRepairEvents } from './hooks/useWorkflowRuntimeEvents'
 import SkillEditDialog from './SkillEditDialog'
 import type { Workflow } from '../lib/workflow/types'
 import type { AgentMode, ConversationMeta } from '../lib/types'
@@ -1718,6 +1722,37 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
    * clicking save again; a landed verdict is reused.
    */
   const [workflowPrompt, setWorkflowPrompt] = useState<WorkflowPromptState | null>(null)
+
+  // --- Workflow generation modal (spec §10, §33) ---
+  //
+  // A portal dialog that opens IMMEDIATELY when a workflow-mode request is
+  // sent and stays open through the generation. This is view state only: the
+  // generation session is owned by the background, so unmounting/hiding the
+  // dialog never cancels it. Closing while the turn runs = background.
+  const [generationDialog, setGenerationDialog] = useState<{
+    conversationId: string
+    open: boolean
+    actionCount: number
+    recoveredCount: number
+    latestAction: string
+    state: WorkflowGenerationViewState
+  } | null>(null)
+  const generationDialogRef = useRef(generationDialog)
+  generationDialogRef.current = generationDialog
+
+  // Autonomous repair event stream + dialog visibility (spec §31.2). Events
+  // are global (per repair session); the dialog opens on the first event and
+  // stays until the user dismisses a terminal state.
+  const repairEvents = useRepairEvents()
+  const [repairDialogOpen, setRepairDialogOpen] = useState(false)
+  const repairDialogSeenRef = useRef(0)
+  useEffect(() => {
+    if (repairEvents.state.events.length > repairDialogSeenRef.current) {
+      repairDialogSeenRef.current = repairEvents.state.events.length
+      const terminal = !repairEvents.state.running
+      if (!terminal) setRepairDialogOpen(true)
+    }
+  }, [repairEvents.state])
   /**
    * Runnability of the graph on the open save card, recomputed whenever the
    * card's workflow changes (trigger selection, review edits, folding). The
@@ -1739,6 +1774,18 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
    * unnoticed. `null` means "no notice to show".
    */
   const [saveNotice, setSaveNotice] = useState<string | null>(null)
+
+  // When the end-of-turn save card materializes in workflow mode, switch the
+  // modal from GENERATING to READY: the preview/save actions now drive the
+  // same WorkflowPromptState the card used.
+  useEffect(() => {
+    if (!workflowPrompt) return
+    setGenerationDialog((prev) =>
+      prev && prev.conversationId === workflowPrompt.conversationId
+        ? { ...prev, state: 'READY', latestAction: workflowPrompt.workflow.name }
+        : prev,
+    )
+  }, [workflowPrompt])
 
   // Live AI review log: the port forwards pushed lines via emitReviewLog;
   // this subscription renders them in the open review dialog as they arrive.
@@ -1995,8 +2042,33 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             clearPhase()
             streamingRef.current = null
             append({ role: 'tool', text: '', toolName: message.name })
+            setGenerationDialog((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    latestAction: message.name,
+                    actionCount: prev.actionCount + 1,
+                    state: message.name.includes('repair') || message.name.includes('recover')
+                      ? 'RECOVERING'
+                      : prev.state === 'RECOVERING'
+                        ? 'RECOVERING'
+                        : 'GENERATING',
+                  }
+                : prev,
+            )
             break
           case 'tool.result':
+            setGenerationDialog((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    latestAction: message.summary || prev.latestAction,
+                    ...(/(fail|error|no patch)/i.test(message.summary)
+                      ? { recoveredCount: prev.recoveredCount, state: 'RECOVERING' as const }
+                      : {}),
+                  }
+                : prev,
+            )
             setEntries((prev) => {
               // Attach to the first still-running call of this tool: the
               // calls of one round execute and report in order (FIFO). A
@@ -2100,6 +2172,9 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             streamingRef.current = null
             append({ role: 'error', text: message.message })
             setBusy(false)
+            setGenerationDialog((prev) =>
+              prev ? { ...prev, state: 'ERROR' } : prev,
+            )
             break
         }
       })
@@ -2528,6 +2603,20 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     pendingAttachmentsRef.current = []
     setPendingAttachments([])
     setWorkflowPrompt(null)
+
+    // Workflow generation mode: open the modal immediately (spec §10.2), so
+    // the user gets feedback within the first frame rather than after the
+    // whole turn settles.
+    if (modeRef.current === 'workflow') {
+      setGenerationDialog({
+        conversationId,
+        open: true,
+        actionCount: 0,
+        recoveredCount: 0,
+        latestAction: outgoing.slice(0, 120),
+        state: 'GENERATING',
+      })
+    }
   }
 
   const answerConfirm = (requestId: string, approved: boolean): void => {
@@ -3239,7 +3328,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
           </div>
         )}
 
-        {workflowPrompt && (
+        {/* The save card renders inside the WorkflowGenerationDialog modal
+            when that flow owns it; only show it inline otherwise. */}
+        {workflowPrompt &&
+          !(generationDialog?.open && generationDialog.conversationId === workflowPrompt.conversationId) && (
           <div className="confirm-card" data-kind="workflow">
             <strong>
               {workflowPrompt.source === 'draft'
@@ -3767,6 +3859,51 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
           <TokenBarGroup label={t.tokenBarSession} t={t} usage={sessionUsage} />
         </div>
       </div>
+
+      {/* Generation modal (portal) */}
+      {generationDialog ? (
+        <WorkflowGenerationDialog
+          open={generationDialog.open}
+          progress={{
+            state: generationDialog.state,
+            stages: generationStages(generationDialog.state),
+            latestAction: generationDialog.latestAction,
+            actionCount: generationDialog.actionCount,
+            recoveredCount: generationDialog.recoveredCount,
+          }}
+          workflow={workflowPrompt?.workflow}
+          onBackground={() =>
+            setGenerationDialog((prev) => (prev ? { ...prev, open: false } : prev))
+          }
+          onCancel={() => {
+            post({ type: 'cancel' })
+            setGenerationDialog(null)
+          }}
+          onSave={() => {
+            void savePromptWorkflowDirect()
+            setGenerationDialog((prev) =>
+              prev ? { ...prev, state: 'SAVING' } : prev,
+            )
+          }}
+          onEdit={() => {
+            // The chat card is the full review surface; backgrounding the
+            // modal leaves it open for detailed edits / trigger selection.
+            setGenerationDialog((prev) => (prev ? { ...prev, open: false } : prev))
+          }}
+          onClose={() => setGenerationDialog(null)}
+        />
+      ) : null}
+
+      {/* Autonomous repair modal (portal): visible while events stream */}
+      <RepairProgressDialog
+        open={repairDialogOpen && repairEvents.state.events.length > 0}
+        workflowId=""
+        events={repairEvents.state.events}
+        onClose={() => setRepairDialogOpen(false)}
+        onHumanTakeover={() => {
+          setRepairDialogOpen(false)
+        }}
+      />
     </>
   )
 }
@@ -3844,6 +3981,45 @@ function ConversationRow({
       </div>
     </div>
   )
+}
+
+/** Stage rows for the generation dialog, derived from the view state. */
+function generationStages(
+  state: WorkflowGenerationViewState,
+): Array<{
+  key: string
+  labelKey: string
+  status: 'running' | 'done' | 'pending' | 'warn'
+}> {
+  const order: WorkflowGenerationViewState[] = [
+    'GENERATING',
+    'RECOVERING',
+    'COMPILING',
+    'VALIDATING',
+    'READY',
+    'SAVED',
+  ]
+  const labels: Partial<Record<WorkflowGenerationViewState, string>> = {
+    GENERATING: 'workflowGenerationWorking',
+    RECOVERING: 'workflowGenerationRecovering',
+    COMPILING: 'workflowGenerationCompiling',
+    VALIDATING: 'workflowGenerationValidating',
+    READY: 'workflowGenerationReady',
+    SAVED: 'workflowGenerationSaved',
+  }
+  const activeIndex = order.indexOf(state === 'SAVING' ? 'READY' : state)
+  return order.map((stage, index) => ({
+    key: stage,
+    labelKey: labels[stage]!,
+    status:
+      state === 'ERROR' && index === Math.max(activeIndex, 0)
+        ? ('warn' as const)
+        : index < activeIndex
+          ? ('done' as const)
+          : index === activeIndex
+            ? ('running' as const)
+            : ('pending' as const),
+  }))
 }
 
 /** Compact token count for the chip: 1.2k / 3.4m style. */

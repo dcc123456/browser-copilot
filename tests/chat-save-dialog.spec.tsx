@@ -218,6 +218,7 @@ beforeEach(() => {
     runtime: {
       connect: vi.fn(() => fakePort),
       sendMessage: vi.fn(async () => undefined),
+      onMessage: { addListener: () => {}, removeListener: () => {} },
     },
     windows: { getCurrent: vi.fn(async () => ({ id: 1 })) },
     storage: {
