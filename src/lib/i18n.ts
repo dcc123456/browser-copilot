@@ -437,6 +437,20 @@ export interface Messages {
   generationStageStaticValidate: string
   /** Stage label: independent verify. */
   generationStageIndependentVerify: string
+  /** The single AI repair CTA on a failed workflow. */
+  failureCenterAiRepair: string
+  /** Failure center dialog title. */
+  failureCenterTitle: string
+  /** Button: confirm the proposed repair. */
+  failureCenterConfirmRepair: string
+  /** Button: cancel the recovery. */
+  failureCenterCancel: string
+  /** Button: confirm overwrite of the formal workflow. */
+  failureCenterConfirmOverwrite: string
+  /** Button: keep the current workflow (do not overwrite). */
+  failureCenterKeepCurrent: string
+  /** Generic close button for terminal states. */
+  failureCenterClose: string
   /** Hint under the declared-inputs list: the recorded value is a default. */
   chatWorkflowInputsHint: string
   /** Heading of the "this workflow needs code" list on the save card. */
@@ -1476,6 +1490,13 @@ const en: Messages = {
   generationStageBuildReliability: 'Build reliability',
   generationStageStaticValidate: 'Static validate',
   generationStageIndependentVerify: 'Independent verify',
+  failureCenterAiRepair: 'AI repair',
+  failureCenterTitle: 'Workflow recovery',
+  failureCenterConfirmRepair: 'Confirm repair',
+  failureCenterCancel: 'Cancel',
+  failureCenterConfirmOverwrite: 'Overwrite workflow',
+  failureCenterKeepCurrent: 'Not now',
+  failureCenterClose: 'Close',
   chatWorkflowInputsHint:
     'These values were captured at generation time and become run-time inputs ({{name}}). The saved value is only a default — the workflow re-prompts or uses the trigger value on each run.',
   chatWorkflowCodeNodesTitle: 'Steps that need code',
@@ -2535,6 +2556,13 @@ const zhCN: Messages = {
   generationStageBuildReliability: '构建可靠性契约',
   generationStageStaticValidate: '静态校验',
   generationStageIndependentVerify: '独立验证',
+  failureCenterAiRepair: 'AI 修复',
+  failureCenterTitle: '工作流恢复',
+  failureCenterConfirmRepair: '确认修复',
+  failureCenterCancel: '取消',
+  failureCenterConfirmOverwrite: '覆盖工作流',
+  failureCenterKeepCurrent: '暂不覆盖',
+  failureCenterClose: '关闭',
   chatWorkflowInputsHint:
     '这些值是在生成时采集的，会成为运行期输入（用 {{名称}} 引用）。保存的值只是默认值——每次运行都会重新提示或使用触发器传入的值。',
   chatWorkflowCodeNodesTitle: '需要代码的步骤',

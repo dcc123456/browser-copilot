@@ -161,6 +161,10 @@ import { resumePointOf, workflowFingerprintOf } from '../lib/workflow/checkpoint
 import { createAiTakeover } from './workflow-engine/ai-takeover'
 import { runDebugSession, DEFAULT_MAX_ROUNDS } from './workflow-engine/debug-session'
 import { runUnifiedDebug } from './workflow-engine/repair/unified-debug'
+import type {
+  RecoveryPhaseState,
+  RecoveryProtocolStatus,
+} from '../lib/workflow/recovery-protocol'
 import { finalizeGeneratedWorkflow } from './workflow-engine/repair/generation-repair'
 import { DEFAULT_REPAIR_POLICY } from '../lib/workflow/repair/types'
 import { recordRepairRound } from '../lib/workflow/repair-metrics'
@@ -169,6 +173,7 @@ import { createAiRepairProposer } from './workflow-engine/repair/repair-provider
 import { toRepairResponse } from '../lib/workflow/repair/repair-response'
 import {
   discardRepairSession,
+  getRepairSession,
   putRepairSession,
   takeRepairSession,
 } from './workflow-engine/repair/repair-session-store'
@@ -2145,49 +2150,142 @@ async function handleCommand(
     }
 
     case 'workflows.recovery': {
-      // De-dupe repeated actions for the same in-flight request (a double
-      // click must not submit two patches). The orchestrator registry enforces
-      // a single active session; this map guards identical action repeats.
+      // Single-entry recovery protocol (spec §11 · Commit 10/11). Drives the
+      // unified engine: START runs Diagnose → Proposal automatically and pauses;
+      // CONFIRM_REPAIR applies + verifies and pauses; CONFIRM_OVERWRITE commits;
+      // CANCEL discards. De-dupe identical in-flight actions (double click).
       const key = `${command.requestId}:${command.action}`
       if (recoveryActionSeen.has(key)) {
-        return {
-          type: 'workflows.recovery',
-          requestId: command.requestId,
-          ...(typeof command.workflowRevision === 'number'
-            ? { workflowRevision: command.workflowRevision }
-            : {}),
-          phase: currentRecoveryPhase(command.requestId),
-          status: 'waiting',
-          summary: 'duplicate action ignored',
-          timestamp: command.timestamp,
-        }
+        return recoveryEnvelopeResult(command, recoveryOutcomeFor(command.requestId),
+          'duplicate action ignored', command.timestamp)
       }
       recoveryActionSeen.add(key)
-      // The full engine adapter is wired with the Failure Center (Commit 11);
-      // until then report an honest failure rather than fake a repair.
+
+      const targetWorkflow = await getWorkflow(command.workflowId)
+      if (!targetWorkflow) throw new Error('Workflow not found.')
+
       if (command.action === 'CANCEL') {
-        return {
-          type: 'workflows.recovery',
-          requestId: command.requestId,
-          ...(typeof command.workflowRevision === 'number'
-            ? { workflowRevision: command.workflowRevision }
-            : {}),
-          phase: 'CANCELLED',
-          status: 'done',
-          summary: 'recovery cancelled',
-          timestamp: command.timestamp,
-        }
+        discardRepairSession(command.workflowId)
+        rememberRecoveryOutcome(command.requestId, {
+          phase: 'CANCELLED', status: 'done',
+        })
+        return recoveryEnvelopeResult(command,
+          { phase: 'CANCELLED', status: 'done' }, 'recovery cancelled', command.timestamp)
       }
-      return {
-        type: 'workflows.recovery',
-        requestId: command.requestId,
-        ...(typeof command.workflowRevision === 'number'
-          ? { workflowRevision: command.workflowRevision }
-          : {}),
-        phase: 'FAILED',
-        status: 'failed',
-        summary: 'recovery engine not wired yet',
-        timestamp: command.timestamp,
+
+      // Engine dependencies (same construction as workflows.repair).
+      const recoveryRunner = createBackgroundRunner({ executeWorkflow })
+      const recoverySettings = await getSettings()
+      const recoveryModel = takeoverProviderOf(recoverySettings)
+      const recoveryProposer = recoveryModel
+        ? createAiRepairProposer({
+            apiKey: recoveryModel.apiKey,
+            baseUrl: recoveryModel.baseUrl,
+            model: recoveryModel.model,
+            headers: recoveryModel.headers,
+          })
+        : undefined
+
+      retain()
+      try {
+        if (command.action === 'START') {
+          // Diagnose → Proposal, automatically and in sequence.
+          const analysis = await runUnifiedDebug(targetWorkflow, 'ANALYZE', {
+            runner: recoveryRunner,
+            store: getCheckpointStore(),
+          })
+          if (analysis.ok) {
+            const outcome = { phase: 'DONE', status: 'done' } as const
+            rememberRecoveryOutcome(command.requestId, outcome)
+            return recoveryEnvelopeResult(command, outcome, 'workflow already healthy', command.timestamp)
+          }
+          const suggestion = await runUnifiedDebug(targetWorkflow, 'SUGGEST', {
+            runner: recoveryRunner,
+            store: getCheckpointStore(),
+            ...(recoveryProposer ? { propose: (ctx) => recoveryProposer.propose(ctx) } : {}),
+          })
+          if (!suggestion.patch) {
+            const outcome = { phase: 'HUMAN_TAKEOVER', status: 'failed' } as const
+            rememberRecoveryOutcome(command.requestId, outcome)
+            return recoveryEnvelopeResult(command, outcome,
+              suggestion.reason ?? 'no patch proposed', command.timestamp)
+          }
+          // Keep the patch for CONFIRM_REPAIR (no working copy applied yet).
+          putRepairSession({
+            workflowId: targetWorkflow.id,
+            workingCopy: targetWorkflow,
+            patch: suggestion.patch,
+            analysis: suggestion.analysis,
+            verification: suggestion.verification,
+            baseUpdatedAt: targetWorkflow.updatedAt,
+            baseHash: workflowFingerprintOf(targetWorkflow),
+            createdAt: Date.now(),
+          })
+          const summary = `proposal ready: ${suggestion.patch.operations.length} operation(s)`
+          const outcome = { phase: 'AWAIT_REPAIR_CONFIRM', status: 'waiting' } as const
+          rememberRecoveryOutcome(command.requestId, outcome)
+          return recoveryEnvelopeResult(command, outcome, summary, command.timestamp)
+        }
+
+        if (command.action === 'CONFIRM_REPAIR') {
+          const pending = getRepairSession(command.workflowId)
+          if (!pending?.patch) throw new Error('No repair proposal to apply.')
+          // Apply + verify on a working copy via AUTO_REPAIR with explicit accept.
+          const applied = await runUnifiedDebug(targetWorkflow, 'AUTO_REPAIR', {
+            runner: recoveryRunner,
+            store: getCheckpointStore(),
+            ...(recoveryProposer ? { propose: (ctx) => recoveryProposer.propose(ctx) } : {}),
+            userConfirmed: true,
+          })
+          if (!applied.ok || !applied.workingCopy || !applied.verification?.verified) {
+            const outcome = { phase: 'FAILED', status: 'failed' } as const
+            rememberRecoveryOutcome(command.requestId, outcome)
+            return recoveryEnvelopeResult(command, outcome,
+              applied.reason ?? 'the patched workflow did not verify on replay', command.timestamp)
+          }
+          putRepairSession({
+            workflowId: targetWorkflow.id,
+            workingCopy: applied.workingCopy,
+            patch: pending.patch,
+            analysis: applied.analysis,
+            verification: applied.verification,
+            baseUpdatedAt: targetWorkflow.updatedAt,
+            baseHash: workflowFingerprintOf(targetWorkflow),
+            createdAt: Date.now(),
+          })
+          const outcome = { phase: 'AWAIT_OVERWRITE_CONFIRM', status: 'waiting' } as const
+          rememberRecoveryOutcome(command.requestId, outcome)
+          return recoveryEnvelopeResult(command, outcome,
+            'repair verified; awaiting overwrite confirmation', command.timestamp)
+        }
+
+        // CONFIRM_OVERWRITE — commit the verified working copy.
+        const pending = getRepairSession(command.workflowId)
+        if (!pending?.workingCopy) throw new Error('No verified repair to commit.')
+        const current = await getWorkflow(command.workflowId)
+        if (current) {
+          if (current.updatedAt !== pending.baseUpdatedAt) {
+            discardRepairSession(command.workflowId)
+            throw new Error('The workflow changed since this repair was proposed; the patch is stale.')
+          }
+          if (workflowFingerprintOf(current) !== pending.baseHash) {
+            discardRepairSession(command.workflowId)
+            throw new Error('The workflow content changed since this repair was proposed; the patch is stale.')
+          }
+        }
+        const committed: Workflow = {
+          ...pending.workingCopy,
+          updatedAt: Date.now(),
+        }
+        await saveWorkflow(committed)
+        discardRepairSession(command.workflowId)
+        {
+          const outcome = { phase: 'DONE', status: 'done' } as const
+          rememberRecoveryOutcome(command.requestId, outcome)
+          return recoveryEnvelopeResult(command, outcome, 'workflow updated', command.timestamp)
+        }
+      } finally {
+        release()
       }
     }
 
@@ -2230,9 +2328,46 @@ const activeTurns = new Set<string>()
  */
 const recoveryActionSeen = new Set<string>()
 
-/** Phase observed for a recovery request; defaults to DIAGNOSING. */
-function currentRecoveryPhase(_requestId: string): import('../lib/workflow/recovery-protocol').RecoveryPhaseState {
-  return 'DIAGNOSING'
+/** Outcome last observed for a recovery request, for a duplicate-action echo. */
+const recoveryOutcomes = new Map<
+  string,
+  { phase: RecoveryPhaseState; status: RecoveryProtocolStatus }
+>()
+
+function rememberRecoveryOutcome(
+  requestId: string,
+  outcome: { phase: RecoveryPhaseState; status: RecoveryProtocolStatus },
+): void {
+  recoveryOutcomes.set(requestId, outcome)
+}
+
+function recoveryOutcomeFor(requestId: string): {
+  phase: RecoveryPhaseState
+  status: RecoveryProtocolStatus
+} {
+  return recoveryOutcomes.get(requestId) ?? { phase: 'DIAGNOSING', status: 'running' }
+}
+
+type RecoveryCommand = Extract<Command, { type: 'workflows.recovery' }>
+
+/** Build a workflows.recovery result echoing the request id and outcome. */
+function recoveryEnvelopeResult(
+  command: RecoveryCommand,
+  outcome: { phase: RecoveryPhaseState; status: RecoveryProtocolStatus },
+  summary: string,
+  timestamp: number,
+): Extract<CommandResult, { type: 'workflows.recovery' }> {
+  return {
+    type: 'workflows.recovery',
+    requestId: command.requestId,
+    ...(typeof command.workflowRevision === 'number'
+      ? { workflowRevision: command.workflowRevision }
+      : {}),
+    phase: outcome.phase,
+    status: outcome.status,
+    summary,
+    timestamp,
+  }
 }
 
 /**

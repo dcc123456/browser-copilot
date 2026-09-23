@@ -27,6 +27,7 @@ import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
 import { useT } from './i18n'
 import { confirmDialog } from '../ui/confirm'
 import { RepairDialog } from './RepairDialog'
+import { FailureCenterDialog } from './FailureCenter'
 import type { RepairResponseData } from '../lib/workflow/repair/repair-response'
 
 /**
@@ -416,6 +417,15 @@ export default function WorkflowsTab() {
   // the RepairDialog; null when no dialog is open.
   const [repairData, setRepairData] = useState<RepairResponseData | null>(null)
   const [repairBusy, setRepairBusy] = useState(false)
+  /**
+   * Single-entry failure center (spec §11 · Commit 11): the workflow + run the
+   * AI repair dialog is open for; null when the dialog is closed.
+   */
+  const [failureCenter, setFailureCenter] = useState<{
+    workflowId: string
+    runId: string
+    revision?: number
+  } | null>(null)
 
   /**
    * Run the shared WorkflowRepairEngine in one of the three modes. The first
@@ -1023,9 +1033,16 @@ export default function WorkflowsTab() {
   }
 
   /** Most recent persisted run for a workflow, or null when it never ran. */
-  const lastRunFor = (wf: Workflow): { time: number; ok: boolean; skipped: boolean } | null => {
+  const lastRunFor = (wf: Workflow): {
+    time: number
+    ok: boolean
+    skipped: boolean
+    runId: string
+  } | null => {
     const best = lastRunOf(runs, wf)
-    return best ? { time: best.finishedAt ?? best.at, ok: best.ok, skipped: best.skipped } : null
+    return best
+      ? { time: best.finishedAt ?? best.at, ok: best.ok, skipped: best.skipped, runId: best.id }
+      : null
   }
 
   const lastRunLabel = (wf: Workflow): string => {
@@ -1192,6 +1209,25 @@ export default function WorkflowsTab() {
                       {t.workflowsResume}
                     </button>
                   )}
+                  {/* Single-entry AI repair (spec §11): opens the Failure
+                      Center, which runs diagnose → proposal automatically and
+                      pauses at the two human confirmation points. Shown only
+                      when the last run failed. */}
+                  {last && !last.ok && !last.skipped && (
+                    <button
+                      className="text-accent! border-accent!"
+                      disabled={busy}
+                      onClick={() =>
+                        setFailureCenter({
+                          workflowId: wf.id,
+                          runId: last.runId,
+                        })
+                      }
+                      type="button"
+                    >
+                      {t.failureCenterAiRepair}
+                    </button>
+                  )}
                   <button
                     className="task-action-debug"
                     disabled={busy && debuggingId !== wf.id}
@@ -1298,6 +1334,18 @@ export default function WorkflowsTab() {
           onCommit={() => void commitRepair(repairData.workflowId)}
           onDiscard={() => void discardRepair(repairData.workflowId)}
           onConfirmLowConfidence={() => void runRepair(repairData.workflowId, 'AUTO_REPAIR', true)}
+        />
+      )}
+
+      {failureCenter && (
+        <FailureCenterDialog
+          runId={failureCenter.runId}
+          workflowId={failureCenter.workflowId}
+          workflowRevision={failureCenter.revision}
+          onClose={() => {
+            setFailureCenter(null)
+            void load()
+          }}
         />
       )}
 
