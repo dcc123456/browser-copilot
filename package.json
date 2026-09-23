@@ -50,7 +50,9 @@
     "server:test": "pnpm --filter browser-copilot-runner test",
     "server:smoke": "pnpm --filter browser-copilot-runner smoke",
     "icons": "node scripts/generate-icons.mjs",
-    "bench:reliability": "node scripts/bench-workflow-reliability.mjs"
+    "bench:reliability": "node scripts/bench-workflow-reliability.mjs",
+    "bench:workflow-generation": "node scripts/bench-workflow-generation.mjs",
+    "bench:workflow-repair": "node scripts/bench-workflow-repair.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
