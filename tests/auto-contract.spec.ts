@@ -101,7 +101,9 @@ describe('auto reliability completion (generation must always succeed)', () => {
     if ('error' in out) throw new Error(`generation failed: ${out.error}`)
 
     const reliability = out.workflow.drawflow.nodes
-      .map((n): NodeReliabilitySpec | undefined => n.data?.['__reliability'])
+      .map((n): NodeReliabilitySpec | undefined =>
+        (n.data?.['__reliability'] as NodeReliabilitySpec | undefined),
+      )
       .filter((spec): spec is NodeReliabilitySpec => Boolean(spec))
     expect(reliability.some((spec) => spec.readiness)).toBe(true)
     const report = validateGeneratedWorkflow(out.workflow)

@@ -202,6 +202,13 @@ export interface WorkflowSettings {
    * manually. A workflow with warnings is still persisted as-is.
    */
   saveWarnings?: string[]
+  /**
+   * Per-stage report of the generation pipeline (spec §6 · Commit 07), shown on
+   * the generation card so the user sees the work done at each stage rather
+   * than a single "generation succeeded". Optional: absent on hand-built and
+   * older workflows.
+   */
+  generationStages?: import('./generation-report').GenerationStageReport[]
 }
 
 /** A persisted workflow. */

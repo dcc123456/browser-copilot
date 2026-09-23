@@ -31,7 +31,6 @@ import { deriveGoalSpecFromNodes } from '../lib/workflow/goal'
 import { validateGeneratedWorkflow } from '../lib/workflow/generated-validation'
 import { isGeneratedStrict } from '../lib/workflow/reliability'
 import { validateWorkflowForRun } from '../lib/workflow/validation'
-import { autoCompleteReliability } from '../lib/workflow/auto-contract'
 import { declareMissingInputs } from '../lib/workflow/declare-missing-inputs'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
 import { aiPrefillNodeData } from '../lib/workflow/ai-prefill'
@@ -50,8 +49,11 @@ import {
   type CollapseProbe,
   type RepeatSuggestion,
 } from '../lib/workflow/loop-collapse'
-import { normalizeWorkflowDraft } from './workflow-engine/generation/normalize'
-import { generalizeInputs } from '../lib/workflow/input-generalization'
+import {
+  independentVerifyStage,
+  runDraftPipeline,
+  staticValidateStage,
+} from './workflow-engine/generation/generation-pipeline'
 import type { DraftSource, PendingBranch, WorkflowDraft } from '../lib/workflow/draft-types'
 import type { DeclaredInput } from '../lib/workflow/dynamic-data'
 import {
@@ -601,23 +603,14 @@ export async function composeWorkflowFromDraft(
     return { error: 'No draft to compose. Call wf_op_* tools first.' }
   }
   ensureTriggerHead(draft)
-  // Normalize the captured action list into a tighter program BEFORE the
-  // reliability contract is completed (spec §7): collapse duplicate clicks /
-  // navigation, drop redundant delays before readiness-protected actions and
-  // remove exploratory actions. The same draft is updated in place — compose
-  // is the terminal operation over it.
-  const normalized = normalizeWorkflowDraft(draft)
-  draft.nodes = normalized.draft.nodes
-  draft.edges = normalized.draft.edges
-  draft.tail = normalized.draft.tail
-  // Generalize the captured BUSINESS inputs into trigger parameters: task-text
-  // driven literals (the keyword, the order id) become {{token}} references
-  // (spec §7). The declarations are merged onto the trigger head.
-  const generalized = generalizeInputs(draft)
-  draft.nodes = generalized.draft.nodes
-  if (generalized.declarations.length > 0) {
-    declareWorkflowInputs(draft, generalized.declarations)
-  }
+  // Formal generation pipeline (spec §6): Normalize → Generalize Inputs →
+  // Harden Targets → Build Reliability. The draft transforms here and each
+  // stage is reported for the generation card (no bare "success").
+  const pipeline = runDraftPipeline(draft)
+  draft.nodes = pipeline.draft.nodes
+  draft.edges = pipeline.draft.edges
+  draft.tail = pipeline.draft.tail
+  const generationStages = [...pipeline.stages]
   // The user's request that started the generation, captured on the trigger
   // call (`goalText`) — becomes the derived goal's summary when present.
   const triggerHead = draft.nodes.find(isTriggerNode)
@@ -628,12 +621,9 @@ export async function composeWorkflowFromDraft(
       : undefined)
   const name = (opts.name ?? '').trim() || draft.name
   const now = Date.now()
-  // Deterministically complete the reliability contract the model omitted
-  // (infer idempotency from the action, default the postcondition to the
-  // acted element) so validation always passes and the workflow is produced.
-  autoCompleteReliability(draft.nodes)
-  // Promote any dangling {{reference}} to a declared run input (the user
-  // supplies it at launch) instead of failing the data-flow check.
+  // The pipeline already completed the reliability contract; only promote any
+  // dangling {{reference}} to a declared run input (the user supplies it at
+  // launch) instead of failing the data-flow check.
   declareMissingInputs(draft.nodes)
   const workflow: Workflow = {
     id: newId(),
@@ -667,13 +657,17 @@ export async function composeWorkflowFromDraft(
   // run AI debug or fix the graph manually. The workflow is always produced
   // and persisted as-is.
   const saveWarnings: string[] = []
+  let runErrorCount = 0
+  let generatedErrorCount = 0
   {
     const runIssues = validateWorkflowForRun(workflow)
+    runErrorCount = runIssues.errors.length
     for (const error of runIssues.errors.slice(0, 8)) {
       saveWarnings.push(error)
     }
     if (isGeneratedStrict(workflow)) {
       const report = validateGeneratedWorkflow(workflow)
+      generatedErrorCount = report.errors.length
       if (!report.ok) {
         for (const issue of report.errors.slice(0, 8)) {
           saveWarnings.push(
@@ -683,6 +677,10 @@ export async function composeWorkflowFromDraft(
       }
     }
   }
+  // Finish the stage reports: static validation + independent verification.
+  generationStages.push(staticValidateStage(runErrorCount, generatedErrorCount))
+  generationStages.push(independentVerifyStage())
+  workflow.settings.generationStages = generationStages
   if (saveWarnings.length > 0) {
     workflow.settings.saveWarnings = saveWarnings
   }

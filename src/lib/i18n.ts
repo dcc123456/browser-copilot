@@ -423,6 +423,20 @@ export interface Messages {
   chatSaveWorkflowAiTitle: string
   /** Heading for the declared-inputs list on the workflow save card. */
   chatWorkflowInputsTitle: string
+  /** Heading for the generation pipeline stages on the save card. */
+  generationStagesTitle: string
+  /** Stage label: normalize. */
+  generationStageNormalize: string
+  /** Stage label: generalize inputs. */
+  generationStageGeneralizeInputs: string
+  /** Stage label: harden targets. */
+  generationStageHardenTargets: string
+  /** Stage label: build reliability contract. */
+  generationStageBuildReliability: string
+  /** Stage label: static validate. */
+  generationStageStaticValidate: string
+  /** Stage label: independent verify. */
+  generationStageIndependentVerify: string
   /** Hint under the declared-inputs list: the recorded value is a default. */
   chatWorkflowInputsHint: string
   /** Heading of the "this workflow needs code" list on the save card. */
@@ -1455,6 +1469,13 @@ const en: Messages = {
   chatSaveWorkflowAiTitle:
     'AI-generated content (checked = regenerate with AI at replay; unchecked = reuse the captured text)',
   chatWorkflowInputsTitle: 'Workflow inputs',
+  generationStagesTitle: 'Generation stages',
+  generationStageNormalize: 'Normalize',
+  generationStageGeneralizeInputs: 'Generalize inputs',
+  generationStageHardenTargets: 'Harden targets',
+  generationStageBuildReliability: 'Build reliability',
+  generationStageStaticValidate: 'Static validate',
+  generationStageIndependentVerify: 'Independent verify',
   chatWorkflowInputsHint:
     'These values were captured at generation time and become run-time inputs ({{name}}). The saved value is only a default — the workflow re-prompts or uses the trigger value on each run.',
   chatWorkflowCodeNodesTitle: 'Steps that need code',
@@ -2507,6 +2528,13 @@ const zhCN: Messages = {
   chatSaveWorkflowSaved: ({ name }) => `已保存工作流：${name}`,
   chatSaveWorkflowAiTitle: 'AI 生成内容（勾选 = 回放时用 AI 重新生成；取消 = 沿用本次填写的文本）',
   chatWorkflowInputsTitle: '工作流输入',
+  generationStagesTitle: '生成阶段',
+  generationStageNormalize: '规范化',
+  generationStageGeneralizeInputs: '泛化输入',
+  generationStageHardenTargets: '加固目标',
+  generationStageBuildReliability: '构建可靠性契约',
+  generationStageStaticValidate: '静态校验',
+  generationStageIndependentVerify: '独立验证',
   chatWorkflowInputsHint:
     '这些值是在生成时采集的，会成为运行期输入（用 {{名称}} 引用）。保存的值只是默认值——每次运行都会重新提示或使用触发器传入的值。',
   chatWorkflowCodeNodesTitle: '需要代码的步骤',

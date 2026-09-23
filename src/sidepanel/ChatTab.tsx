@@ -50,6 +50,7 @@ import {
   type WorkflowReview,
 } from '../lib/workflow/review-patch'
 import { WorkflowReviewDialog } from './WorkflowReviewList'
+import { GenerationStagesView } from './GenerationStages'
 import SkillEditDialog from './SkillEditDialog'
 import type { Workflow } from '../lib/workflow/types'
 import type { AgentMode, ConversationMeta } from '../lib/types'
@@ -3258,6 +3259,13 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               onChange={changeTrigger}
               selection={workflowPrompt.trigger}
             />
+            {workflowPrompt.workflow.settings.generationStages &&
+              workflowPrompt.workflow.settings.generationStages.length > 0 && (
+                <GenerationStagesView
+                  t={t}
+                  stages={workflowPrompt.workflow.settings.generationStages}
+                />
+              )}
             {workflowPrompt.probesChecking && (
               <p className="hint" style={{ margin: '4px 0' }} role="status">
                 {t.chatWorkflowProbeChecking}
