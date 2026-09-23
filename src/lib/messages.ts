@@ -315,6 +315,35 @@ export type Command =
   | { type: 'workflows.resumePoint'; id: string }
   | { type: 'workflows.running'; workflowId?: string }
 
+  // --- Workflow recovery protocol (spec §11 · Commit 10) ---
+  /**
+   * Single-entry recovery protocol. Carries an envelope with a unique request
+   * id, the run/workflow and its revision, the phase, status, action and
+   * timestamp. The action discriminates the operation:
+   *
+   *   - START             begin Diagnose → Proposal, then pause;
+   *   - CONFIRM_REPAIR    apply + verify, then pause;
+   *   - CONFIRM_OVERWRITE commit the verified working copy;
+   *   - CANCEL            cancel before commit.
+   *
+   * A repeated START/confirm for the same request id is deduplicated by the
+   * handler, and any response whose request/revision is stale is dropped by
+   * the client guard.
+   */
+  | ({
+      type: 'workflows.recovery'
+      requestId: string
+      runId: string
+      workflowId: string
+      workflowRevision?: number
+      timestamp: number
+    } & (
+      | { action: 'START' }
+      | { action: 'CONFIRM_REPAIR' }
+      | { action: 'CONFIRM_OVERWRITE' }
+      | { action: 'CANCEL' }
+    ))
+
   // --- Workflow recording (see background/record-controller.ts) ---
   /**
    * Start recording: injects the recorder into all http tabs (of `windowId`
@@ -486,6 +515,16 @@ export type CommandResult =
     }
   | { type: 'workflows.repairCommit' }
   | { type: 'workflows.repairDiscard' }
+  | {
+      type: 'workflows.recovery'
+      /** Mirrors the request id; a client drops it when it no longer matches. */
+      requestId: string
+      workflowRevision?: number
+      phase: import('./workflow/recovery-protocol').RecoveryPhaseState
+      status: import('./workflow/recovery-protocol').RecoveryProtocolStatus
+      summary: string
+      timestamp: number
+    }
   | { type: 'workflows.takeoverPending'; items: PendingTakeoverInfo[] }
   | { type: 'workflows.takeoverStats'; summary: TakeoverStatsSummary }
   | { type: 'workflows.debugStats'; summary: DebugSessionStatsSummary }

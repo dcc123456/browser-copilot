@@ -2144,6 +2144,53 @@ async function handleCommand(
       return { type: 'workflows.running', ...boards }
     }
 
+    case 'workflows.recovery': {
+      // De-dupe repeated actions for the same in-flight request (a double
+      // click must not submit two patches). The orchestrator registry enforces
+      // a single active session; this map guards identical action repeats.
+      const key = `${command.requestId}:${command.action}`
+      if (recoveryActionSeen.has(key)) {
+        return {
+          type: 'workflows.recovery',
+          requestId: command.requestId,
+          ...(typeof command.workflowRevision === 'number'
+            ? { workflowRevision: command.workflowRevision }
+            : {}),
+          phase: currentRecoveryPhase(command.requestId),
+          status: 'waiting',
+          summary: 'duplicate action ignored',
+          timestamp: command.timestamp,
+        }
+      }
+      recoveryActionSeen.add(key)
+      // The full engine adapter is wired with the Failure Center (Commit 11);
+      // until then report an honest failure rather than fake a repair.
+      if (command.action === 'CANCEL') {
+        return {
+          type: 'workflows.recovery',
+          requestId: command.requestId,
+          ...(typeof command.workflowRevision === 'number'
+            ? { workflowRevision: command.workflowRevision }
+            : {}),
+          phase: 'CANCELLED',
+          status: 'done',
+          summary: 'recovery cancelled',
+          timestamp: command.timestamp,
+        }
+      }
+      return {
+        type: 'workflows.recovery',
+        requestId: command.requestId,
+        ...(typeof command.workflowRevision === 'number'
+          ? { workflowRevision: command.workflowRevision }
+          : {}),
+        phase: 'FAILED',
+        status: 'failed',
+        summary: 'recovery engine not wired yet',
+        timestamp: command.timestamp,
+      }
+    }
+
     case 'record.start':
       // Recording is confined to the command's window scope when present
       // (the editor's host window); otherwise it stays global as before.
@@ -2175,6 +2222,18 @@ async function handleCommand(
  * Durable data (the transcript) lives in session storage instead.
  */
 const activeTurns = new Set<string>()
+
+/**
+ * Recovery action de-dupe keys (`requestId:ACTION`) for the in-flight recovery
+ * protocol. Module scope is intentional: worker eviction cancels every in-flight
+ * request, so a fresh empty map is correct after a restart.
+ */
+const recoveryActionSeen = new Set<string>()
+
+/** Phase observed for a recovery request; defaults to DIAGNOSING. */
+function currentRecoveryPhase(_requestId: string): import('../lib/workflow/recovery-protocol').RecoveryPhaseState {
+  return 'DIAGNOSING'
+}
 
 /**
  * Live in-memory transcripts of currently running turns, keyed by
