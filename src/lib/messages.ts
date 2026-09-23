@@ -524,6 +524,12 @@ export type CommandResult =
       status: import('./workflow/recovery-protocol').RecoveryProtocolStatus
       summary: string
       timestamp: number
+      /**
+       * Patch operations carried with the AWAIT_REPAIR_CONFIRM proposal so the
+       * client can render the per-node before/after and risk. Absent on other
+       * phases; the formal workflow is never modified from these.
+       */
+      operations?: import('./workflow/repair/types').WorkflowPatchOperation[]
     }
   | { type: 'workflows.takeoverPending'; items: PendingTakeoverInfo[] }
   | { type: 'workflows.takeoverStats'; summary: TakeoverStatsSummary }

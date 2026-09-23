@@ -153,4 +153,28 @@ describe('FailureCenter single-entry AI repair', () => {
     await mount()
     expect(container.textContent).toContain('HUMAN_TAKEOVER')
   })
+
+  it('renders the per-node before/after, risk and verification plan', async () => {
+    sendCommandMock.mockImplementationOnce(async (command: { requestId: string }) => ({
+      ...recoveryResult('AWAIT_REPAIR_CONFIRM', 'waiting', 'proposal ready', command.requestId),
+      operations: [
+        {
+          operationId: 'o1',
+          nodeId: 'n5',
+          kind: 'REPLACE_TARGET',
+          before: '.stale',
+          after: '.fresh',
+          reason: 'old selector missed',
+          evidenceIds: ['ev1'],
+        },
+      ],
+    }))
+    await mount()
+
+    expect(container.textContent).toContain('.stale')
+    expect(container.textContent).toContain('.fresh')
+    expect(container.textContent).toContain('old selector missed')
+    expect(container.textContent).toContain('MEDIUM')
+    expect(container.textContent).toContain('ev1')
+  })
 })

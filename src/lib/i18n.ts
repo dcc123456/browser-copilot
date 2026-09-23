@@ -451,6 +451,16 @@ export interface Messages {
   failureCenterKeepCurrent: string
   /** Generic close button for terminal states. */
   failureCenterClose: string
+  /** Title for the per-node change list. */
+  proposalChangesTitle: string
+  /** Risk label with level. */
+  proposalRiskLabel: (params: { level: string }) => string
+  /** Evidence section title. */
+  proposalEvidenceTitle: string
+  /** Verification plan section title. */
+  proposalVerificationTitle: string
+  /** Affected nodes section title. */
+  proposalAffectedTitle: string
   /** Hint under the declared-inputs list: the recorded value is a default. */
   chatWorkflowInputsHint: string
   /** Heading of the "this workflow needs code" list on the save card. */
@@ -1497,6 +1507,11 @@ const en: Messages = {
   failureCenterConfirmOverwrite: 'Overwrite workflow',
   failureCenterKeepCurrent: 'Not now',
   failureCenterClose: 'Close',
+  proposalChangesTitle: 'Proposed changes',
+  proposalRiskLabel: ({ level }) => `Risk: ${level}`,
+  proposalEvidenceTitle: 'Evidence',
+  proposalVerificationTitle: 'Verification plan',
+  proposalAffectedTitle: 'Affected nodes',
   chatWorkflowInputsHint:
     'These values were captured at generation time and become run-time inputs ({{name}}). The saved value is only a default — the workflow re-prompts or uses the trigger value on each run.',
   chatWorkflowCodeNodesTitle: 'Steps that need code',
@@ -2563,6 +2578,11 @@ const zhCN: Messages = {
   failureCenterConfirmOverwrite: '覆盖工作流',
   failureCenterKeepCurrent: '暂不覆盖',
   failureCenterClose: '关闭',
+  proposalChangesTitle: '建议修改',
+  proposalRiskLabel: ({ level }) => `风险：${level}`,
+  proposalEvidenceTitle: '证据',
+  proposalVerificationTitle: '验证计划',
+  proposalAffectedTitle: '受影响节点',
   chatWorkflowInputsHint:
     '这些值是在生成时采集的，会成为运行期输入（用 {{名称}} 引用）。保存的值只是默认值——每次运行都会重新提示或使用触发器传入的值。',
   chatWorkflowCodeNodesTitle: '需要代码的步骤',

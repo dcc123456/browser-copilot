@@ -2224,7 +2224,8 @@ async function handleCommand(
           const summary = `proposal ready: ${suggestion.patch.operations.length} operation(s)`
           const outcome = { phase: 'AWAIT_REPAIR_CONFIRM', status: 'waiting' } as const
           rememberRecoveryOutcome(command.requestId, outcome)
-          return recoveryEnvelopeResult(command, outcome, summary, command.timestamp)
+          return recoveryEnvelopeResult(command, outcome, summary, command.timestamp,
+            suggestion.patch.operations)
         }
 
         if (command.action === 'CONFIRM_REPAIR') {
@@ -2356,6 +2357,7 @@ function recoveryEnvelopeResult(
   outcome: { phase: RecoveryPhaseState; status: RecoveryProtocolStatus },
   summary: string,
   timestamp: number,
+  operations?: RecoveryResultOperations,
 ): Extract<CommandResult, { type: 'workflows.recovery' }> {
   return {
     type: 'workflows.recovery',
@@ -2367,8 +2369,12 @@ function recoveryEnvelopeResult(
     status: outcome.status,
     summary,
     timestamp,
+    ...(operations && operations.length > 0 ? { operations } : {}),
   }
 }
+
+type RecoveryResultOperations =
+  Extract<CommandResult, { type: 'workflows.recovery' }>['operations']
 
 /**
  * Live in-memory transcripts of currently running turns, keyed by
