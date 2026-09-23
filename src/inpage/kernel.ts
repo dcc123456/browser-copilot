@@ -2233,8 +2233,49 @@ export function runExecJs(input: {
  * Returns a structured payload — never throws:
  *   { ok, data, variables, logs: [{level, args}], error? }
  */
-export function runWorkflowJs(input: {
-  code: string
+/**
+ * Self-contained failure-envelope check for the workflow JS harness.
+ *
+ * Mirrors lib/workflow/script-result but is inlined here because the kernel is
+ * serialized as source and cannot import runtime helpers. A returned
+ * `{ success:false }`, `{ ok:false }` or non-empty `{ error }` (without a
+ * positive marker) is an expected FAILURE; plain values and `false` are not.
+ */
+function interpretWorkflowScriptEnvelope(value: unknown):
+  | { ok: true }
+  | { ok: false; reason: string } {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return { ok: true }
+  }
+  const envelope = value as {
+    success?: unknown
+    ok?: unknown
+    message?: unknown
+    error?: unknown
+  }
+  const fieldText = (field: unknown): string | null => {
+    if (field === null || field === undefined || field === '') return null
+    if (typeof field === 'string') return field
+    if (typeof field === 'number' || typeof field === 'boolean') return String(field)
+    if (field instanceof Error) return field.message
+    try {
+      return JSON.stringify(field)
+    } catch {
+      return String(field)
+    }
+  }
+  const text = fieldText(envelope.message) ?? fieldText(envelope.error)
+  if (envelope.success === false || envelope.ok === false) {
+    return { ok: false, reason: text ?? 'script reported failure' }
+  }
+  const positive = envelope.success === true || envelope.ok === true
+  if (!positive && envelope.error !== undefined && envelope.error !== null && envelope.error !== '') {
+    return { ok: false, reason: text ?? 'script reported an error' }
+  }
+  return { ok: true }
+}
+
+export function runWorkflowJs(input: {  code: string
   variables?: Record<string, unknown>
   timeout?: number
 }): Promise<
@@ -2427,6 +2468,15 @@ export function runWorkflowJs(input: {
 
       const settleWith = (data: unknown) => {
         restoreConsole()
+        // A returned failure envelope ({ success:false } / { ok:false } /
+        // { error }) is a real failure, not a success: only a thrown error used
+        // to fail the node, so a script that did not reach its target reported
+        // success and the workflow goal silently did not complete.
+        const verdict = interpretWorkflowScriptEnvelope(data)
+        if (!verdict.ok) {
+          finish({ ok: false, error: verdict.reason })
+          return
+        }
         finish({ ok: true, data, variables })
       }
 

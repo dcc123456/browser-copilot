@@ -41,6 +41,7 @@ import { getSettings, listPasswords } from '../../lib/storage'
 import { entryFields, findField } from '../../lib/types'
 import { OCR_SUPPORTED } from '../../lib/ocr-support'
 import { interpolate, EMPTY_INTERP_KEY, getByPath } from '../../lib/workflow/interpolate'
+import { interpretScriptResult } from '../../lib/workflow/script-result'
 import {
   coerceInputValue,
   missingRequiredInputs,
@@ -1779,6 +1780,12 @@ const javascriptCode: BlockExecutor = async (data, ctx) => {
       for (const [k, v] of Object.entries(run.data.variables)) ctx.variables[k] = v
     }
     const result = run.data.result
+    // A failure envelope returned to the page harness is a node failure: the
+    // script ran but reported it did not reach its target.
+    const pageVerdict = interpretScriptResult(result)
+    if (!pageVerdict.ok) {
+      throw new Error(`javascript-code: ${pageVerdict.reason}`)
+    }
     ctx.variables['lastResult'] = result
     if (result !== undefined) {
       ctx.emit('result', typeof result === 'string' ? result : safeStringify(result))
@@ -1806,6 +1813,11 @@ const javascriptCode: BlockExecutor = async (data, ctx) => {
   }
   for (const [k, v] of Object.entries(local.variables ?? {})) ctx.variables[k] = v
   ctx.variables['lastResult'] = local.result
+  // A returned failure envelope is a failed node even off-page.
+  const envelopeVerdict = interpretScriptResult(local.result)
+  if (!envelopeVerdict.ok) {
+    throw new Error(`javascript-code: ${envelopeVerdict.reason}`)
+  }
   if (local.result !== undefined) {
     ctx.emit(
       'result',
