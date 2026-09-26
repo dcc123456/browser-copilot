@@ -403,6 +403,8 @@ export interface RepairContext {
   allowedParamPaths: Record<string, string[]>
   recentTrace: TraceEvent[]
   repairHistory: RepairRoundSummary[]
+  /** Goal-driven repair context (spec §19): keeps the repair anchored to the workflow goal. */
+  goalRepairContext?: import('../goal-repair-context').GoalRepairContext
 }
 
 export interface WorkflowRepairSession {

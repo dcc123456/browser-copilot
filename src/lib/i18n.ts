@@ -57,6 +57,11 @@ export interface Messages {
   // Panel minimize (floating page button)
   panelMinimize: string
 
+  // Workflow upload-file block (user-select mode runtime prompt)
+  uploadFileWaiting: string
+  uploadFileChoose: string
+  uploadFileReading: string
+
   // Multi-window picker (unattended window policy = ask)
   windowPickTitle: string
   windowPickHint: string
@@ -394,6 +399,12 @@ export interface Messages {
    */
   chatWorkflowNothingSaved: string
   chatWorkflowNotRunnable: (detail: string) => string
+  /** Button on the not-runnable notice: feed the missing steps back and re-run. */
+  chatWorkflowRegenerate: string
+  /** Tooltip for the regenerate button. */
+  chatWorkflowRegenerateHint: string
+  /** Message sent to the model when regenerating after a validation failure. */
+  chatWorkflowRegeneratePrompt: (detail: string) => string
   /** Same, but the model tried and every action failed — worth retrying. */
   chatWorkflowNothingSavedFailed: string
   /** The selector probe is still running, so nothing is known yet. */
@@ -1180,6 +1191,11 @@ export interface Messages {
   workflowGenerationCompiling: string
   workflowGenerationValidating: string
   workflowGenerationReady: string
+  /** Transitional loading title while the finished task is compiled/validated
+   *  into the save card (after `done`, before the card popup can appear). */
+  workflowGenerationPreparing: string
+  /** Body hint under the preparing spinner. */
+  workflowGenerationPreparingHint: string
   workflowGenerationSaved: string
   workflowGenerationCancel: string
   workflowGenerationBackground: string
@@ -1187,8 +1203,13 @@ export interface Messages {
   workflowGenerationError: string
   workflowGenerationSave: string
   workflowGenerationEdit: string
+  /** Dismiss the READY dialog without cancelling generation or saving. */
+  workflowGenerationDismiss: string
+  /** Reopen the READY save dialog from the inline chat card. */
+  workflowGenerationReopen: string
   workflowGenerationSavedDetail: string
   workflowGenerationActionCount: ({ count }: { count: number }) => string
+  workflowGenerationLogTitle: ({ count }: { count: number }) => string
   workflowGenerationRecoveredCount: ({ count }: { count: number }) => string
 
   // --- Workflow repair (spec §32) ---
@@ -1216,6 +1237,9 @@ const en: Messages = {
   tabHistory: 'History',
   tabMore: 'More',
   panelMinimize: 'Minimize to a floating button',
+  uploadFileWaiting: 'The workflow is waiting for you to choose a file.',
+  uploadFileChoose: 'Choose file',
+  uploadFileReading: 'Reading file…',
   windowPickTitle: 'Choose a window',
   windowPickHint: 'A background task needs to know which browser window to run in.',
   windowPickBadgeThisPanel: 'This panel',
@@ -1514,6 +1538,11 @@ const en: Messages = {
     'Nothing to save from this turn: no page operations were recorded. Do the task and try again, or ask the model to perform it on the page.',
   chatWorkflowNotRunnable: (detail) =>
     `The generated workflow did not pass the runnability check, so there is nothing to save yet: ${detail}. Ask the AI to fix it and try again.`,
+  chatWorkflowRegenerate: 'Regenerate workflow',
+  chatWorkflowRegenerateHint:
+    'Send the missing steps back to the AI and run one more generation round.',
+  chatWorkflowRegeneratePrompt: (detail) =>
+    `The generated workflow is missing the steps that produce its data, so it cannot run: ${detail}. Please first add the reading steps (wf_op_get-text / wf_op_read-page / wf_op_attribute-value / wf_op_ai-agent) that produce every referenced value, wire them before the consuming nodes, and then end your turn again. Do not paste page content as literals.`,
   chatWorkflowNothingSavedFailed:
     'Nothing to save from this turn: every recorded action failed. Fix the failure and run it again.',
 
@@ -2306,6 +2335,9 @@ Keep the whole report dense and within the message size cap.`,
   workflowGenerationCompiling: 'Compiling the workflow…',
   workflowGenerationValidating: 'Validating and hardening the workflow…',
   workflowGenerationReady: 'Workflow ready',
+  workflowGenerationPreparing: 'Preparing workflow…',
+  workflowGenerationPreparingHint:
+    'Compiling and validating the recorded steps. This can take a few seconds.',
   workflowGenerationSaved: 'Workflow saved',
   workflowGenerationCancel: 'Cancel generation',
   workflowGenerationBackground: 'Run in background',
@@ -2313,8 +2345,11 @@ Keep the whole report dense and within the message size cap.`,
   workflowGenerationError: 'Generation failed',
   workflowGenerationSave: 'Save workflow',
   workflowGenerationEdit: 'Edit',
+  workflowGenerationDismiss: 'Cancel',
+  workflowGenerationReopen: 'Open save dialog',
   workflowGenerationSavedDetail: 'The workflow was saved and is ready to run.',
   workflowGenerationActionCount: ({ count }) => `${count} action(s) performed`,
+  workflowGenerationLogTitle: ({ count }) => `Generation log (${count})`,
   workflowGenerationRecoveredCount: ({ count }) => `${count} issue(s) recovered`,
 
   // Workflow repair
@@ -2334,6 +2369,10 @@ Keep the whole report dense and within the message size cap.`,
 const zhCN: Messages = {
   chatWorkflowNotRunnable: (detail) =>
     `生成的工作流未通过可运行性检查，暂时没有可保存的内容：${detail}。请让 AI 修复后重试。`,
+  chatWorkflowRegenerate: '重新生成工作流',
+  chatWorkflowRegenerateHint: '把缺失步骤反馈给 AI，再跑一轮生成。',
+  chatWorkflowRegeneratePrompt: (detail) =>
+    `生成的工作流缺少产出数据的步骤，无法运行：${detail}。请先补加读取步骤（wf_op_get-text / wf_op_read-page / wf_op_attribute-value / wf_op_ai-agent），让每个被引用的值都有对应的生产者节点，并把它们接在消费节点之前，然后再结束回合。不要把页面内容直接当字面量粘贴。`,
   tabChat: '对话',
   tabSkills: '技能',
   tabAgents: '智能体',
@@ -2344,6 +2383,9 @@ const zhCN: Messages = {
   tabHistory: '历史',
   tabMore: '更多',
   panelMinimize: '最小化为悬浮按钮',
+  uploadFileWaiting: '工作流正在等待你选择文件。',
+  uploadFileChoose: '选择文件',
+  uploadFileReading: '正在读取文件…',
   windowPickTitle: '选择要操作的窗口',
   windowPickHint: '一个后台任务需要确定在哪个浏览器窗口中执行。',
   windowPickBadgeThisPanel: '本面板',
@@ -3333,6 +3375,8 @@ const zhCN: Messages = {
   workflowGenerationCompiling: '正在编译工作流…',
   workflowGenerationValidating: '正在校验并加固工作流…',
   workflowGenerationReady: '工作流已就绪',
+  workflowGenerationPreparing: '正在整理工作流…',
+  workflowGenerationPreparingHint: '正在编译并校验录制的步骤，可能需要几秒钟。',
   workflowGenerationSaved: '工作流已保存',
   workflowGenerationCancel: '取消生成',
   workflowGenerationBackground: '后台运行',
@@ -3340,8 +3384,11 @@ const zhCN: Messages = {
   workflowGenerationError: '生成失败',
   workflowGenerationSave: '保存工作流',
   workflowGenerationEdit: '编辑',
+  workflowGenerationDismiss: '取消',
+  workflowGenerationReopen: '打开保存弹窗',
   workflowGenerationSavedDetail: '工作流已保存，可以开始运行。',
   workflowGenerationActionCount: ({ count }) => `已执行 ${count} 个动作`,
+  workflowGenerationLogTitle: ({ count }) => `生成日志（${count} 条）`,
   workflowGenerationRecoveredCount: ({ count }) => `已恢复 ${count} 个问题`,
 
   // Workflow repair
