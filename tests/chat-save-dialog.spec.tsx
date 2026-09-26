@@ -270,7 +270,7 @@ describe('chat save-as-workflow flow', () => {
     // the popup to reveal the inline review card, the surface these tests
     // drive.
     const closeButton = document.body.querySelector<HTMLButtonElement>(
-      'button[aria-label="Close"]',
+      'button[aria-label="Run in background"]',
     )
     expect(closeButton).not.toBeNull()
     await act(async () => {
@@ -318,7 +318,7 @@ describe('chat save-as-workflow flow', () => {
    */
   const closeSaveCardPopup = async (): Promise<void> => {
     const closeButton = document.body.querySelector<HTMLButtonElement>(
-      'button[aria-label="Close"]',
+      'button[aria-label="Run in background"]',
     )
     if (!closeButton) return
     await act(async () => {
@@ -843,10 +843,10 @@ describe('chat save-as-workflow flow', () => {
       await flush()
     }
 
-    /** The popup's header close button (an X with an aria-label, no text). */
+    /** The popup's header collapse button (a minus glyph with an aria-label). */
     const closePopup = async (): Promise<void> => {
       const closeButton = document.body.querySelector<HTMLButtonElement>(
-        'button[aria-label="Close"]',
+        'button[aria-label="Run in background"]',
       )
       expect(closeButton).not.toBeNull()
       await act(async () => {

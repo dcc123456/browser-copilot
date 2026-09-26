@@ -50,6 +50,7 @@ import {
   type ReviewStep,
   type WorkflowReview,
 } from '../lib/workflow/review-patch'
+import { requiredStepIdsOf } from '../lib/workflow/required-steps'
 import { WorkflowReviewDialog } from './WorkflowReviewList'
 import { GenerationStagesView } from './GenerationStages'
 import { WorkflowGenerationDialog } from './components/WorkflowGenerationDialog'
@@ -95,6 +96,7 @@ import {
   History,
   Info,
   Loader2,
+  Minus,
   Paperclip,
   Wrench,
   X,
@@ -1820,6 +1822,16 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     () => (workflowPrompt ? validateWorkflowForRun(workflowPrompt.workflow) : null),
     [workflowPrompt],
   )
+  /**
+   * Review steps that cannot be dropped: dropping them would introduce a new
+   * hard run error (a later node would lose its only variable producer, …).
+   * Computed on the CURRENT preview graph, so it covers the original card and
+   * every state reached while the refine dialog is open.
+   */
+  const requiredStepIds = useMemo(
+    () => (workflowPrompt ? requiredStepIdsOf(workflowPrompt.workflow) : []),
+    [workflowPrompt],
+  )
   /** Last reuseable-step count we already asked about per conversation. */
   const promptedRef = useRef<Record<string, number>>({})
   /**
@@ -2514,6 +2526,9 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     setConfirms([])
     setAskUsers([])
     setWorkflowPrompt(null)
+    // The save-card popup belongs to the previous conversation: close it, or it
+    // floats over the newly opened chat with a card that no longer exists.
+    setSaveCardModalOpen(false)
     streamingRef.current = null
     resetUsage()
     // The port's resume effect fires on conversationId change and restores.
@@ -2543,6 +2558,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     setConfirms([])
     setAskUsers([])
     setWorkflowPrompt(null)
+    // Close the previous conversation's save-card popup (see openConversation).
+    setSaveCardModalOpen(false)
     streamingRef.current = null
     resetUsage()
     void refreshConversations()
@@ -2579,6 +2596,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       setConfirms([])
       setAskUsers([])
       setWorkflowPrompt(null)
+      setSaveCardModalOpen(false)
       streamingRef.current = null
       setConversationId(DEFAULT_CONVERSATION_ID)
     }
@@ -2848,6 +2866,12 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
           if (result.review) {
             for (const verdict of result.review.steps) keep[verdict.id] = verdict.keep
           }
+          // Required steps override the model: dropping one would break
+          // runnability, so force it back on.
+          const baseRequired = requiredStepIdsOf(prompt.base)
+          for (const requiredId of baseRequired) {
+            if (keep[requiredId] === false) keep[requiredId] = true
+          }
           const dropped = result.review?.steps.filter((verdict) => !verdict.keep).length ?? 0
           const logLine = result.review
             ? dropped > 0
@@ -2922,7 +2946,24 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       prev && prev.conversationId === prompt.conversationId ? { ...prev, saving: true } : prev,
     )
     try {
-      const workflow = derivePreview(prompt.base, prompt.keep, prompt.aiSelections, prompt.trigger)
+      // Required steps are judged against the untouched base: if a required
+      // step is marked dropped in `keep`, re-derive with it forced back on, so
+      // the saved workflow can never lose a node it needs to run.
+      const baseRequired = requiredStepIdsOf(prompt.base)
+      const correctedKeep = { ...prompt.keep }
+      let forced = false
+      for (const requiredId of baseRequired) {
+        if (correctedKeep[requiredId] === false) {
+          correctedKeep[requiredId] = true
+          forced = true
+        }
+      }
+      const workflow = derivePreview(
+        prompt.base,
+        forced ? correctedKeep : prompt.keep,
+        prompt.aiSelections,
+        prompt.trigger,
+      )
       // `fromGeneration` lets the background harden the graph against the live
       // page (verified selectors + persisted element waits) before persisting.
       // Editor/import saves must NOT get this — hand-tuned selectors are
@@ -3105,6 +3146,9 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const toggleStepKeep = (stepId: string, kept: boolean): void => {
     setWorkflowPrompt((prev) => {
       if (!prev) return prev
+      // Defensive guard: a required step (its loss would introduce a run
+      // blocker) can never be dropped, even if a non-locked UI reached here.
+      if (!kept && requiredStepIds.includes(stepId)) return prev
       const keep = { ...prev.keep, [stepId]: kept }
       return {
         ...prev,
@@ -3830,23 +3874,30 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         {!saveCardModalOpen && saveCard}
 
 
-        {workflowPrompt?.reviewOpen && (
-          <WorkflowReviewDialog
-            keep={workflowPrompt.keep}
-            log={workflowPrompt.reviewLog}
-            review={workflowPrompt.review}
-            reviewing={workflowPrompt.reviewing}
-            saveError={workflowPrompt.saveError ?? undefined}
-            steps={workflowPrompt.stepList}
-            subtitle={workflowPrompt.workflow.name}
-            title={t.workflowReviewDialogTitle}
-            unavailableReason={workflowPrompt.reviewError ?? undefined}
-            onCancel={cancelSaveReview}
-            onConfirm={confirmSaveReview}
-            onRetry={retrySaveReview}
-            onToggle={toggleStepKeep}
-          />
-        )}
+        {/* The AI-refine dialog is a body portal (not inline in the log): it
+            opens ON TOP of the save-card popup, which itself is a z-[9999]
+            body portal; an inline render was covered by the save card. */}
+        {workflowPrompt?.reviewOpen
+          ? createPortal(
+              <WorkflowReviewDialog
+                keep={workflowPrompt.keep}
+                log={workflowPrompt.reviewLog}
+                review={workflowPrompt.review}
+                reviewing={workflowPrompt.reviewing}
+                requiredStepIds={requiredStepIds}
+                saveError={workflowPrompt.saveError ?? undefined}
+                steps={workflowPrompt.stepList}
+                subtitle={workflowPrompt.workflow.name}
+                title={t.workflowReviewDialogTitle}
+                unavailableReason={workflowPrompt.reviewError ?? undefined}
+                onCancel={cancelSaveReview}
+                onConfirm={confirmSaveReview}
+                onRetry={retrySaveReview}
+                onToggle={toggleStepKeep}
+              />,
+              document.body,
+            )
+          : null}
       </div>
 
       <div
@@ -4181,9 +4232,9 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                     type="button"
                     onClick={() => setSaveCardModalOpen(false)}
                     className="flex h-7 w-7 flex-none items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-ink"
-                    aria-label={t.workflowGenerationClose}
+                    aria-label={t.workflowGenerationBackground}
                   >
-                    <X className="h-4 w-4" aria-hidden />
+                    <Minus className="h-4 w-4" aria-hidden />
                   </button>
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto p-3">{saveCard}</div>

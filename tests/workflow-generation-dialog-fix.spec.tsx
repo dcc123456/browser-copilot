@@ -129,7 +129,7 @@ describe('workflow generation inline progress and save card popup', () => {
       expect(text).toContain('Save as workflow')
       expect(text).not.toContain('Generation log')
       // Closing the popup moves the card inline above the composer.
-      const closeButton = document.body.querySelector<HTMLButtonElement>('button[aria-label="Close"]')
+      const closeButton = document.body.querySelector<HTMLButtonElement>('button[aria-label="Run in background"]')
       expect(closeButton).not.toBeNull()
       await act(async () => { closeButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
       await flush()
