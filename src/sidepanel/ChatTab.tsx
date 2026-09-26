@@ -15,6 +15,7 @@
  *    continues instead of silently restarting.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   AGENT_PORT,
   type AgentClientMessage,
@@ -96,6 +97,7 @@ import {
   Loader2,
   Paperclip,
   Wrench,
+  X,
 } from 'lucide-react'
 import { normalizeSkill, PLAN_SKILL_NAME } from '../lib/skills'
 import { detectSkillCandidatesFromMarkdown, type DetectedSkill } from '../lib/skill-detect'
@@ -1722,23 +1724,78 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
    * clicking save again; a landed verdict is reused.
    */
   const [workflowPrompt, setWorkflowPrompt] = useState<WorkflowPromptState | null>(null)
+  /**
+   * Whether the save card currently renders as a modal popup. The card pops up
+   * automatically the moment a workflow-mode task completes; closing it moves
+   * the card back inline (above the composer), where it stays actionable.
+   */
+  const [saveCardModalOpen, setSaveCardModalOpen] = useState(false)
+  /**
+   * Transitional loading shown AFTER the task reports `done` but BEFORE the
+   * save card popup is ready: the background still has to compile/validate the
+   * draft (`workflows.draft.get`), which can take seconds. Without this the UI
+   * looked frozen with no popup. Carries the conversation id and tails logs.
+   */
+  const [savePreparing, setSavePreparing] = useState<string | null>(null)
+  // Esc closes the popup without touching the card itself.
+  useEffect(() => {
+    if (!saveCardModalOpen) return
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setSaveCardModalOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [saveCardModalOpen])
 
   // --- Workflow generation modal (spec §10, §33) ---
   //
-  // A portal dialog that opens IMMEDIATELY when a workflow-mode request is
-  // sent and stays open through the generation. This is view state only: the
-  // generation session is owned by the background, so unmounting/hiding the
-  // dialog never cancels it. Closing while the turn runs = background.
+  // The dialog opens as soon as a workflow-mode turn is SENT and stays up while
+  // the task runs: loading stages (GENERATING → RECOVERING → COMPILING →
+  // VALIDATING) plus the live generation log. When the turn settles and the
+  // draft is compiled/validated, the dialog is closed and replaced by the save
+  // card popup (see `saveCardModalOpen`). View state only: the generation is
+  // owned by the background, so hiding the dialog never cancels it; closing
+  // while work runs = background.
   const [generationDialog, setGenerationDialog] = useState<{
     conversationId: string
     open: boolean
     actionCount: number
     recoveredCount: number
-    latestAction: string
+    latestAction?: string
     state: WorkflowGenerationViewState
+    logs: string[]
   } | null>(null)
   const generationDialogRef = useRef(generationDialog)
   generationDialogRef.current = generationDialog
+  /** Generation log lines collected during the task, even with no open dialog. */
+  const generationLogsRef = useRef<string[]>([])
+  /** The save card whose final-generation modal was already opened once. */
+  const modalOpenedForRef = useRef<unknown>(null)
+  /** Append one timestamped line to the generation log and the open dialog. */
+  const appendGenerationLog = useCallback((line: string): void => {
+    if (!line.trim()) return
+    const stamped = line
+    generationLogsRef.current.push(stamped)
+    setGenerationDialog((prev) =>
+      prev ? { ...prev, logs: [...prev.logs, stamped] } : prev,
+    )
+  }, [])
+
+  /**
+   * Closes the loading dialog without discarding it, so the "reopen" action on
+   * the save card can bring the log back. Used when a turn settles without a
+   * save-worthy workflow, and when the save card takes over as the popup.
+   */
+  const closeGenerationLoading = useCallback((conversationId: string): void => {
+    setGenerationDialog((prev) =>
+      prev && prev.conversationId === conversationId ? { ...prev, open: false } : prev,
+    )
+  }, [])
+
+  /** Dismiss the transitional "Preparing workflow…" popup for one turn. */
+  const clearSavePreparing = useCallback((conversationId: string): void => {
+    setSavePreparing((prev) => (prev === conversationId ? null : prev))
+  }, [])
 
   // Autonomous repair event stream + dialog visibility (spec §31.2). Events
   // are global (per repair session); the dialog opens on the first event and
@@ -1774,18 +1831,30 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
    * unnoticed. `null` means "no notice to show".
    */
   const [saveNotice, setSaveNotice] = useState<string | null>(null)
+  /**
+   * Detail carried by a `validation-failed` save notice, so the Regenerate
+   * action can feed the missing producers back to the model. `null` when the
+   * current notice has nothing actionable.
+   */
+  const [validationDetail, setValidationDetail] = useState<string | null>(null)
 
-  // When the end-of-turn save card materializes in workflow mode, switch the
-  // modal from GENERATING to READY: the preview/save actions now drive the
-  // same WorkflowPromptState the card used.
+  // When the end-of-turn save card materializes in workflow mode, pop the card
+  // up as a modal IMMEDIATELY (replacing the loading dialog). The preview/save
+  // actions drive the same WorkflowPromptState the card used. Closing the
+  // popup moves the card back inline — nothing is lost.
   useEffect(() => {
     if (!workflowPrompt) return
-    setGenerationDialog((prev) =>
-      prev && prev.conversationId === workflowPrompt.conversationId
-        ? { ...prev, state: 'READY', latestAction: workflowPrompt.workflow.name }
-        : prev,
-    )
-  }, [workflowPrompt])
+    // The save card is ready: always dismiss the preparing popup, even if
+    // this card was already opened before (later updates must not leave it up).
+    clearSavePreparing(workflowPrompt.conversationId)
+    // The popup is opened only ONCE per save card. After the user closes it,
+    // later card updates (probe results, review retry) must not force it open.
+    if (modalOpenedForRef.current === workflowPrompt.conversationId) return
+    modalOpenedForRef.current = workflowPrompt.conversationId
+    appendGenerationLog(`✓ ${workflowPrompt.workflow.name}`)
+    closeGenerationLoading(workflowPrompt.conversationId)
+    setSaveCardModalOpen(true)
+  }, [workflowPrompt, appendGenerationLog, closeGenerationLoading, clearSavePreparing])
 
   // Live AI review log: the port forwards pushed lines via emitReviewLog;
   // this subscription renders them in the open review dialog as they arrive.
@@ -1818,9 +1887,15 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     try {
       result = await sendCommand({ type: 'workflows.draft.get', conversationId: convId })
     } catch {
+      closeGenerationLoading(convId)
+      clearSavePreparing(convId)
       return
     }
-    if (result.type !== 'workflows.draft') return
+    if (result.type !== 'workflows.draft') {
+      closeGenerationLoading(convId)
+      clearSavePreparing(convId)
+      return
+    }
     if (!result.workflow) {
       // The background says WHY: it never touched the page, or it tried and
       // everything failed. Only the second is worth retrying.
@@ -1828,14 +1903,21 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         result.empty === 'all-failed'
           ? tRef.current.chatWorkflowNothingSavedFailed
           : result.empty === 'validation-failed'
-            ? // The draft exists but failed the runnability/reliability gate:
-              // no broken card is offered — the reason goes back to the model.
+            ? // The draft exists but failed the producer-completeness gate: no
+              // broken card is offered — the reason can be sent back to the
+              // model via Regenerate.
               tRef.current.chatWorkflowNotRunnable(result.detail ?? '')
             : tRef.current.chatWorkflowNothingSaved,
       )
+      setValidationDetail(
+        result.empty === 'validation-failed' ? (result.detail ?? '') : null,
+      )
+      closeGenerationLoading(convId)
+      clearSavePreparing(convId)
       return
     }
     setSaveNotice(null)
+    setValidationDetail(null)
     workflow = result.workflow
     // `history` means the panel compiled the actions the model actually
     // performed; `draft` means the model placed operator blocks itself.
@@ -1847,9 +1929,16 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     const steps = workflow.drawflow.nodes.filter((n) => !isTriggerNode(n)).length
     if (steps === 0) {
       setSaveNotice(tRef.current.chatWorkflowNothingSaved)
+      setValidationDetail(null)
+      closeGenerationLoading(convId)
+      clearSavePreparing(convId)
       return
     }
-    if ((promptedRef.current[convId] ?? 0) >= steps) return
+    if ((promptedRef.current[convId] ?? 0) >= steps) {
+      closeGenerationLoading(convId)
+      clearSavePreparing(convId)
+      return
+    }
     promptedRef.current[convId] = steps
     const trigger = triggerSelectionOf(workflow)
     setWorkflowPrompt({
@@ -1901,7 +1990,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             : prev,
         )
       })
-  }, [])
+  }, [closeGenerationLoading, clearSavePreparing])
 
   const append = useCallback((entry: Omit<Entry, 'id'>) => {
     setEntries((prev) => [...prev, { id: nextId(), ...entry }])
@@ -2031,6 +2120,23 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                   text: tRef.current.chatReattached,
                 },
               ])
+              // Reattached mid-turn in workflow mode: restore the dialog
+              // state (so the save card can reopen its log later), but keep
+              // it hidden — progress continues inline in the chat stream.
+              if (modeRef.current === 'workflow') {
+                setGenerationDialog((prev) =>
+                  prev
+                    ? prev
+                    : {
+                        conversationId,
+                        open: false,
+                        actionCount: 0,
+                        recoveredCount: 0,
+                        state: 'GENERATING',
+                        logs: [...generationLogsRef.current],
+                      },
+                )
+              }
             }
             break
           }
@@ -2042,6 +2148,9 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             clearPhase()
             streamingRef.current = null
             append({ role: 'tool', text: '', toolName: message.name })
+            if (modeRef.current === 'workflow') {
+              appendGenerationLog(`→ ${message.name}`)
+            }
             setGenerationDialog((prev) =>
               prev
                 ? {
@@ -2058,6 +2167,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             )
             break
           case 'tool.result':
+            if (modeRef.current === 'workflow') {
+              appendGenerationLog(
+                `← ${message.name}: ${message.summary || 'done'}`,
+              )
+            }
             setGenerationDialog((prev) =>
               prev
                 ? {
@@ -2149,6 +2263,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             const finishingId = streamingRef.current
             streamingRef.current = null
             setBusy(false)
+            // Surface a preparing popup immediately in workflow mode: the save
+            // card only appears after the background compiles/validates the
+            // draft, which can take seconds.
+            if (modeRef.current === 'workflow') setSavePreparing(conversationId)
             void maybePromptSaveWorkflow(conversationId)
             if (message.usage) {
               // Tag the just-finished assistant bubble so hovering it shows the
@@ -2172,6 +2290,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             streamingRef.current = null
             append({ role: 'error', text: message.message })
             setBusy(false)
+            clearSavePreparing(conversationId)
             setGenerationDialog((prev) =>
               prev ? { ...prev, state: 'ERROR' } : prev,
             )
@@ -2604,17 +2723,67 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     setPendingAttachments([])
     setWorkflowPrompt(null)
 
-    // Workflow generation mode: open the modal immediately (spec §10.2), so
-    // the user gets feedback within the first frame rather than after the
-    // whole turn settles.
+    // Workflow generation mode: reset the generation log and open the loading
+    // dialog for the whole task — stage spinner plus the live generation log.
+    // When the turn settles, the save card takes over as the popup.
     if (modeRef.current === 'workflow') {
+      generationLogsRef.current = [outgoing.slice(0, 200)]
+      modalOpenedForRef.current = null
+      setSaveCardModalOpen(false)
+      setSavePreparing(null)
       setGenerationDialog({
         conversationId,
-        open: true,
+        // Progress stays inline in the chat stream; the popup is only opened
+        // on demand (the save card's "generation log" action), never auto.
+        open: false,
         actionCount: 0,
         recoveredCount: 0,
-        latestAction: outgoing.slice(0, 120),
+        latestAction: undefined,
         state: 'GENERATING',
+        logs: [...generationLogsRef.current],
+      })
+    }
+  }
+
+  /**
+   * Regenerate after a `validation-failed` notice: send the missing-producer
+   * detail back to the model as one more workflow-mode turn. The broken draft
+   * is kept (not cleared) so the model adds the missing read nodes and the
+   * next save card materializes with a complete chain.
+   */
+  const regenerateAfterValidation = (): void => {
+    if (busy) return
+    const detail = validationDetail ?? ''
+    const outgoing = tRef.current.chatWorkflowRegeneratePrompt(detail)
+    const delivered = post({
+      type: 'chat',
+      conversationId,
+      text: outgoing,
+      includeSelection: false,
+    })
+    if (!delivered) {
+      append({ role: 'error', text: tRef.current.chatExtensionReloaded })
+      return
+    }
+    append({ role: 'user', text: outgoing })
+    streamingRef.current = null
+    turnUsageRef.current = null
+    setBusy(true)
+    setSaveNotice(null)
+    setValidationDetail(null)
+    if (modeRef.current === 'workflow') {
+      generationLogsRef.current = [outgoing.slice(0, 200)]
+      modalOpenedForRef.current = null
+      setSaveCardModalOpen(false)
+      setSavePreparing(null)
+      setGenerationDialog({
+        conversationId,
+        open: false,
+        actionCount: 0,
+        recoveredCount: 0,
+        latestAction: undefined,
+        state: 'GENERATING',
+        logs: [...generationLogsRef.current],
       })
     }
   }
@@ -2769,6 +2938,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         )
       }
       setWorkflowPrompt(null)
+      // The save card (modal or inline) follows `workflowPrompt` and closes
+      // itself; the chat entry below announces the saved workflow.
       append({
         role: 'status',
         text: tRef.current.chatSaveWorkflowSaved({ name: workflow.name }),
@@ -2820,6 +2991,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
           ? { ...prev, saving: false, saveError: message }
           : prev,
       )
+      // The save card stays up with the reason shown (`saveError`), so the
+      // attempt can be retried — never stuck on a spinner.
       append({ role: 'error', text: message })
     }
   }
@@ -3113,6 +3286,307 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   // turn) carries the download action; earlier replies keep copy alone.
   const lastAssistantId = [...entries].reverse().find((e) => e.role === 'assistant')?.id
 
+  /**
+   * The end-of-turn save card. Rendered inline in the message list, or —
+   * right after a workflow-mode task completes — inside a modal popup
+   * (see `saveCardModalOpen`; closing the popup moves the card inline).
+   */
+  // The popup title is the generated workflow's name (not a fixed phrase).
+  const saveCardTitle = workflowPrompt?.workflow.name ?? ''
+  const saveCard = workflowPrompt ? (
+    <div className="confirm-card" data-kind="workflow">
+      <strong>
+        {workflowPrompt.source === 'draft'
+          ? t.chatSaveWorkflowDraftPrompt({ steps: workflowPrompt.steps })
+          : t.chatSaveWorkflowPrompt({ steps: workflowPrompt.steps })}
+      </strong>
+      <p className="hint" style={{ margin: '6px 0' }}>
+        {workflowPrompt.workflow.name}
+      </p>
+      {workflowPrompt.saveError && (
+        <p className="hint text-err" style={{ margin: '6px 0' }} role="alert">
+          {workflowPrompt.saveError}
+        </p>
+      )}
+      <WorkflowTriggerPicker
+        locale={locale}
+        onChange={changeTrigger}
+        selection={workflowPrompt.trigger}
+      />
+      {workflowPrompt.workflow.settings.generationStages &&
+        workflowPrompt.workflow.settings.generationStages.length > 0 && (
+          <GenerationStagesView
+            t={t}
+            stages={workflowPrompt.workflow.settings.generationStages}
+          />
+        )}
+      {workflowPrompt.probesChecking && (
+        <p className="hint" style={{ margin: '4px 0' }} role="status">
+          {t.chatWorkflowProbeChecking}
+        </p>
+      )}
+      {!workflowPrompt.probesChecking &&
+        workflowPrompt.probes !== null &&
+        workflowPrompt.probes.length > 0 && (
+          <div className="ai-prefill-list" role="group" aria-label={t.chatWorkflowProbeTitle}>
+            <p className="hint">{t.chatWorkflowProbeTitle}</p>
+            {failingProbes(workflowPrompt.probes).length === 0 ? (
+              <p className="hint" style={{ margin: '4px 0' }}>
+                {t.chatWorkflowProbeAllOk({ count: workflowPrompt.probes.length })}
+              </p>
+            ) : (
+              failingProbes(workflowPrompt.probes).map((probe) => (
+                <div className="ai-prefill-item" key={probe.nodeId}>
+                  <span className="wf-input-name">{probe.blockId}</span>
+                  <span className="wf-input-default">
+                    {probe.status === 'ambiguous'
+                      ? t.chatWorkflowProbeAmbiguous({ count: probe.matches })
+                      : t.chatWorkflowProbeMissing}
+                    {` · ${probe.selector}`}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      {!workflowPrompt.probesChecking && workflowPrompt.probes === null && (
+        <p className="hint" style={{ margin: '4px 0' }}>
+          {t.chatWorkflowProbeUnverified}
+        </p>
+      )}
+      {workflowPrompt.repair && (
+        <div className="ai-prefill-list" role="group" aria-label={t.chatWorkflowRepairTitle}>
+          <p className={`hint ${workflowPrompt.repair.verified ? 'text-ok' : 'text-warn'}`}>
+            {t.chatWorkflowRepairTitle}
+          </p>
+          <div className="ai-prefill-item">
+            {workflowPrompt.repair.verified ? (
+              <span className="wf-input-default">{t.chatWorkflowRepairVerified}</span>
+            ) : (
+              <span className="wf-input-default">{t.chatWorkflowRepairNotVerified}</span>
+            )}
+          </div>
+          {!workflowPrompt.repair.verified && workflowPrompt.repair.failedNodeId && (
+            <div className="ai-prefill-item">
+              <span className="wf-input-name">
+                {t.chatWorkflowRepairFailedNode({
+                  nodeId: workflowPrompt.repair.failedNodeId,
+                })}
+              </span>
+            </div>
+          )}
+          {!workflowPrompt.repair.verified &&
+            workflowPrompt.repair.rootCauseNodeIds.length > 0 && (
+              <div className="ai-prefill-item">
+                <span className="wf-input-name">
+                  {t.chatWorkflowRepairRootCauses({
+                    nodes: workflowPrompt.repair.rootCauseNodeIds.join(', '),
+                  })}
+                </span>
+              </div>
+            )}
+          {!workflowPrompt.repair.verified && workflowPrompt.repair.explanation && (
+            <div className="ai-prefill-item">
+              <span className="wf-input-default">{workflowPrompt.repair.explanation}</span>
+            </div>
+          )}
+        </div>
+      )}
+      {(workflowPrompt.integrity.danglingVars.length > 0 ||
+        workflowPrompt.integrity.unreachable.length > 0) && (
+        <div
+          className="ai-prefill-list"
+          role="group"
+          aria-label={t.chatWorkflowIntegrityTitle}
+        >
+          <p className="hint text-err">{t.chatWorkflowIntegrityTitle}</p>
+          {workflowPrompt.integrity.danglingVars.map((dangling) => (
+            <div
+              className="ai-prefill-item"
+              key={`${dangling.nodeId}:${dangling.param}:${dangling.reference}`}
+            >
+              <span className="wf-input-name">{`{{${dangling.reference}}}`}</span>
+              <span className="wf-input-default">
+                {t.chatWorkflowIntegrityDangling({ blockId: dangling.blockId })}
+              </span>
+            </div>
+          ))}
+          {workflowPrompt.integrity.unreachable.length > 0 && (
+            <div className="ai-prefill-item">
+              <span className="wf-input-name">
+                {t.chatWorkflowIntegrityUnreachable({
+                  count: workflowPrompt.integrity.unreachable.length,
+                })}
+              </span>
+              <span className="wf-input-default">
+                {workflowPrompt.integrity.unreachable.join(', ')}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+      {runIssues && (runIssues.errors.length > 0 || runIssues.warnings.length > 0) && (
+        <div
+          className="ai-prefill-list"
+          role="group"
+          aria-label={t.chatWorkflowRunIssuesTitle}
+        >
+          <p className={`hint ${runIssues.errors.length > 0 ? 'text-err' : ''}`}>
+            {t.chatWorkflowRunIssuesTitle}
+          </p>
+          {runIssues.errors.map((error, index) => (
+            <div className="ai-prefill-item" key={`run-error-${index}`}>
+              <span className="wf-input-name text-err">{t.chatWorkflowRunIssuesError}</span>
+              <span className="wf-input-default">{error}</span>
+            </div>
+          ))}
+          {runIssues.warnings.map((warning, index) => (
+            <div className="ai-prefill-item" key={`run-warning-${index}`}>
+              <span className="wf-input-name">{t.chatWorkflowRunIssuesWarning}</span>
+              <span className="wf-input-default">{warning}</span>
+            </div>
+          ))}
+          {runIssues.errors.length > 0 && (
+            <p className="hint text-warn mt-1">{t.chatWorkflowRunIssuesNonBlocking}</p>
+          )}
+        </div>
+      )}
+      {declaredInputsOf(workflowPrompt.workflow).length > 0 && (
+        <div className="ai-prefill-list" role="group" aria-label={t.chatWorkflowInputsTitle}>
+          <p className="hint">{t.chatWorkflowInputsTitle}</p>
+          {declaredInputsOf(workflowPrompt.workflow).map((input) => (
+            <label className="ai-prefill-item" key={input.name}>
+              <span className="wf-input-name">{`{{${input.name}}}`}</span>
+              <span className="wf-input-default">{input.defaultValue || '—'}</span>
+            </label>
+          ))}
+          <p className="hint" style={{ margin: '4px 0 0' }}>
+            {t.chatWorkflowInputsHint}
+          </p>
+        </div>
+      )}
+      {codeNodesOf(workflowPrompt.workflow).length > 0 && (
+        <div
+          className="ai-prefill-list"
+          role="group"
+          aria-label={t.chatWorkflowCodeNodesTitle}
+        >
+          <p className="hint">{t.chatWorkflowCodeNodesTitle}</p>
+          {codeNodesOf(workflowPrompt.workflow).map((node) => (
+            <div className="ai-prefill-item" key={node.id}>
+              <span>{node.reason || t.chatWorkflowCodeNodesNoReason}</span>
+            </div>
+          ))}
+          <p className="hint" style={{ margin: '4px 0 0' }}>
+            {t.chatWorkflowCodeNodesHint}
+          </p>
+        </div>
+      )}
+      {workflowPrompt.aiSteps.filter((step) =>
+        workflowPrompt.workflow.drawflow.nodes.some((node) => node.id === step.nodeId),
+      ).length > 0 && (
+        <div className="ai-prefill-list" role="group" aria-label={t.chatSaveWorkflowAiTitle}>
+          <p className="hint">{t.chatSaveWorkflowAiTitle}</p>
+          {workflowPrompt.aiSteps
+            .filter((step) =>
+              workflowPrompt.workflow.drawflow.nodes.some((node) => node.id === step.nodeId),
+            )
+            .map((step) => (
+              <label key={step.nodeId} className="ai-prefill-item">
+                <input
+                  checked={workflowPrompt.aiSelections[step.nodeId] !== false}
+                  onChange={(event) => toggleAiPrefill(step.nodeId, event.target.checked)}
+                  type="checkbox"
+                />
+                <span>{step.label}</span>
+              </label>
+            ))}
+        </div>
+      )}
+      {workflowPrompt.suggestions.length > 0 && (
+        <div className="ai-prefill-list" role="group" aria-label={t.chatFoldTitle}>
+          <p className="hint">{t.chatFoldTitle}</p>
+          {workflowPrompt.suggestions.map((suggestion, index) => (
+            <div
+              className="ai-prefill-item"
+              key={`${suggestion.kind}-${suggestion.runIds[0]}`}
+            >
+              <button
+                disabled={workflowPrompt.folding !== null || workflowPrompt.saving}
+                onClick={() => void foldRun(index)}
+                type="button"
+              >
+                {workflowPrompt.folding === index ? t.chatFoldBusy : t.chatFoldApply}
+              </button>
+              <span>{suggestion.reason}</span>
+            </div>
+          ))}
+          <p className="hint" style={{ margin: '4px 0 0' }}>
+            {workflowPrompt.foldNote ?? t.chatFoldHint}
+          </p>
+        </div>
+      )}
+      <label className="ai-prefill-item" style={{ marginTop: '4px' }}>
+        <input
+          checked={workflowPrompt.verifyRun}
+          disabled={workflowPrompt.saving}
+          onChange={(event) => toggleVerifyRun(event.target.checked)}
+          type="checkbox"
+        />
+        <span>{t.chatWorkflowVerifyRun}</span>
+      </label>
+      {workflowPrompt.verifyRun && (
+        <p className="hint" style={{ margin: '4px 0' }}>
+          {t.chatWorkflowVerifyRunHint}
+        </p>
+      )}
+      <div className="actions">
+        {/* Reopen the save-card popup after the user closed it. Hidden while
+            the popup is already open, since this same card lives inside it. */}
+        {!saveCardModalOpen && (
+          <button onClick={() => setSaveCardModalOpen(true)} type="button">
+            {t.workflowGenerationReopen}
+          </button>
+        )}
+        <button
+          className="primary"
+          disabled={workflowPrompt.saving}
+          onClick={savePromptWorkflowDirect}
+          type="button"
+        >
+          {t.chatSaveWorkflowSave}
+        </button>
+        {runIssues !== null && runIssues.errors.length > 0 && (
+          <button
+            disabled={workflowPrompt.saving || workflowPrompt.reviewing}
+            onClick={() => void saveThenDebug(workflowPrompt.workflow)}
+            title={t.chatWorkflowSaveThenDebugHint}
+            type="button"
+          >
+            {t.chatWorkflowSaveThenDebug}
+          </button>
+        )}
+        {workflowPrompt.stepList.length > 0 && (
+          <button
+            disabled={workflowPrompt.saving || workflowPrompt.reviewing}
+            onClick={refinePromptWorkflow}
+            title={t.chatWorkflowReviewing}
+            type="button"
+          >
+            {t.chatSaveWorkflowAiReview}
+          </button>
+        )}
+        <button
+          disabled={workflowPrompt.saving}
+          onClick={dismissPromptWorkflow}
+          type="button"
+        >
+          {t.chatSaveWorkflowSkip}
+        </button>
+      </div>
+    </div>
+  ) : null
+
   return (
     <>
       {/* History drawer (left side) */}
@@ -3321,302 +3795,40 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               {saveNotice}
             </p>
             <div className="actions">
-              <button onClick={() => setSaveNotice(null)} type="button">
+              {validationDetail !== null && (
+                <button
+                  className="primary"
+                  disabled={busy}
+                  onClick={regenerateAfterValidation}
+                  title={t.chatWorkflowRegenerateHint}
+                  type="button"
+                >
+                  {t.chatWorkflowRegenerate}
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setSaveNotice(null)
+                  setValidationDetail(null)
+                  // A rejected broken draft must not seed the next turn: drop it
+                  // (same contract as the save-card Skip action).
+                  sendCommand({
+                    type: 'workflows.draft.clear',
+                    conversationId,
+                  }).catch(() => undefined)
+                }}
+                type="button"
+              >
                 {t.chatSaveWorkflowSkip}
               </button>
             </div>
           </div>
         )}
 
-        {/* The save card renders inside the WorkflowGenerationDialog modal
-            when that flow owns it; only show it inline otherwise. */}
-        {workflowPrompt &&
-          !(generationDialog?.open && generationDialog.conversationId === workflowPrompt.conversationId) && (
-          <div className="confirm-card" data-kind="workflow">
-            <strong>
-              {workflowPrompt.source === 'draft'
-                ? t.chatSaveWorkflowDraftPrompt({ steps: workflowPrompt.steps })
-                : t.chatSaveWorkflowPrompt({ steps: workflowPrompt.steps })}
-            </strong>
-            <p className="hint" style={{ margin: '6px 0' }}>
-              {workflowPrompt.workflow.name}
-            </p>
-            {workflowPrompt.saveError && (
-              <p className="hint text-err" style={{ margin: '6px 0' }} role="alert">
-                {workflowPrompt.saveError}
-              </p>
-            )}
-            <WorkflowTriggerPicker
-              locale={locale}
-              onChange={changeTrigger}
-              selection={workflowPrompt.trigger}
-            />
-            {workflowPrompt.workflow.settings.generationStages &&
-              workflowPrompt.workflow.settings.generationStages.length > 0 && (
-                <GenerationStagesView
-                  t={t}
-                  stages={workflowPrompt.workflow.settings.generationStages}
-                />
-              )}
-            {workflowPrompt.probesChecking && (
-              <p className="hint" style={{ margin: '4px 0' }} role="status">
-                {t.chatWorkflowProbeChecking}
-              </p>
-            )}
-            {!workflowPrompt.probesChecking &&
-              workflowPrompt.probes !== null &&
-              workflowPrompt.probes.length > 0 && (
-                <div className="ai-prefill-list" role="group" aria-label={t.chatWorkflowProbeTitle}>
-                  <p className="hint">{t.chatWorkflowProbeTitle}</p>
-                  {failingProbes(workflowPrompt.probes).length === 0 ? (
-                    <p className="hint" style={{ margin: '4px 0' }}>
-                      {t.chatWorkflowProbeAllOk({ count: workflowPrompt.probes.length })}
-                    </p>
-                  ) : (
-                    failingProbes(workflowPrompt.probes).map((probe) => (
-                      <div className="ai-prefill-item" key={probe.nodeId}>
-                        <span className="wf-input-name">{probe.blockId}</span>
-                        <span className="wf-input-default">
-                          {probe.status === 'ambiguous'
-                            ? t.chatWorkflowProbeAmbiguous({ count: probe.matches })
-                            : t.chatWorkflowProbeMissing}
-                          {` · ${probe.selector}`}
-                        </span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-            {!workflowPrompt.probesChecking && workflowPrompt.probes === null && (
-              <p className="hint" style={{ margin: '4px 0' }}>
-                {t.chatWorkflowProbeUnverified}
-              </p>
-            )}
-            {workflowPrompt.repair && (
-              <div className="ai-prefill-list" role="group" aria-label={t.chatWorkflowRepairTitle}>
-                <p className={`hint ${workflowPrompt.repair.verified ? 'text-ok' : 'text-warn'}`}>
-                  {t.chatWorkflowRepairTitle}
-                </p>
-                <div className="ai-prefill-item">
-                  {workflowPrompt.repair.verified ? (
-                    <span className="wf-input-default">{t.chatWorkflowRepairVerified}</span>
-                  ) : (
-                    <span className="wf-input-default">{t.chatWorkflowRepairNotVerified}</span>
-                  )}
-                </div>
-                {!workflowPrompt.repair.verified && workflowPrompt.repair.failedNodeId && (
-                  <div className="ai-prefill-item">
-                    <span className="wf-input-name">
-                      {t.chatWorkflowRepairFailedNode({
-                        nodeId: workflowPrompt.repair.failedNodeId,
-                      })}
-                    </span>
-                  </div>
-                )}
-                {!workflowPrompt.repair.verified &&
-                  workflowPrompt.repair.rootCauseNodeIds.length > 0 && (
-                    <div className="ai-prefill-item">
-                      <span className="wf-input-name">
-                        {t.chatWorkflowRepairRootCauses({
-                          nodes: workflowPrompt.repair.rootCauseNodeIds.join(', '),
-                        })}
-                      </span>
-                    </div>
-                  )}
-                {!workflowPrompt.repair.verified && workflowPrompt.repair.explanation && (
-                  <div className="ai-prefill-item">
-                    <span className="wf-input-default">{workflowPrompt.repair.explanation}</span>
-                  </div>
-                )}
-              </div>
-            )}
-            {(workflowPrompt.integrity.danglingVars.length > 0 ||
-              workflowPrompt.integrity.unreachable.length > 0) && (
-              <div
-                className="ai-prefill-list"
-                role="group"
-                aria-label={t.chatWorkflowIntegrityTitle}
-              >
-                <p className="hint text-err">{t.chatWorkflowIntegrityTitle}</p>
-                {workflowPrompt.integrity.danglingVars.map((dangling) => (
-                  <div
-                    className="ai-prefill-item"
-                    key={`${dangling.nodeId}:${dangling.param}:${dangling.reference}`}
-                  >
-                    <span className="wf-input-name">{`{{${dangling.reference}}}`}</span>
-                    <span className="wf-input-default">
-                      {t.chatWorkflowIntegrityDangling({ blockId: dangling.blockId })}
-                    </span>
-                  </div>
-                ))}
-                {workflowPrompt.integrity.unreachable.length > 0 && (
-                  <div className="ai-prefill-item">
-                    <span className="wf-input-name">
-                      {t.chatWorkflowIntegrityUnreachable({
-                        count: workflowPrompt.integrity.unreachable.length,
-                      })}
-                    </span>
-                    <span className="wf-input-default">
-                      {workflowPrompt.integrity.unreachable.join(', ')}
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-            {runIssues && (runIssues.errors.length > 0 || runIssues.warnings.length > 0) && (
-              <div
-                className="ai-prefill-list"
-                role="group"
-                aria-label={t.chatWorkflowRunIssuesTitle}
-              >
-                <p className={`hint ${runIssues.errors.length > 0 ? 'text-err' : ''}`}>
-                  {t.chatWorkflowRunIssuesTitle}
-                </p>
-                {runIssues.errors.map((error, index) => (
-                  <div className="ai-prefill-item" key={`run-error-${index}`}>
-                    <span className="wf-input-name text-err">{t.chatWorkflowRunIssuesError}</span>
-                    <span className="wf-input-default">{error}</span>
-                  </div>
-                ))}
-                {runIssues.warnings.map((warning, index) => (
-                  <div className="ai-prefill-item" key={`run-warning-${index}`}>
-                    <span className="wf-input-name">{t.chatWorkflowRunIssuesWarning}</span>
-                    <span className="wf-input-default">{warning}</span>
-                  </div>
-                ))}
-                {runIssues.errors.length > 0 && (
-                  <p className="hint text-warn mt-1">{t.chatWorkflowRunIssuesNonBlocking}</p>
-                )}
-              </div>
-            )}
-            {declaredInputsOf(workflowPrompt.workflow).length > 0 && (
-              <div className="ai-prefill-list" role="group" aria-label={t.chatWorkflowInputsTitle}>
-                <p className="hint">{t.chatWorkflowInputsTitle}</p>
-                {declaredInputsOf(workflowPrompt.workflow).map((input) => (
-                  <label className="ai-prefill-item" key={input.name}>
-                    <span className="wf-input-name">{`{{${input.name}}}`}</span>
-                    <span className="wf-input-default">{input.defaultValue || '—'}</span>
-                  </label>
-                ))}
-                <p className="hint" style={{ margin: '4px 0 0' }}>
-                  {t.chatWorkflowInputsHint}
-                </p>
-              </div>
-            )}
-            {codeNodesOf(workflowPrompt.workflow).length > 0 && (
-              <div
-                className="ai-prefill-list"
-                role="group"
-                aria-label={t.chatWorkflowCodeNodesTitle}
-              >
-                <p className="hint">{t.chatWorkflowCodeNodesTitle}</p>
-                {codeNodesOf(workflowPrompt.workflow).map((node) => (
-                  <div className="ai-prefill-item" key={node.id}>
-                    <span>{node.reason || t.chatWorkflowCodeNodesNoReason}</span>
-                  </div>
-                ))}
-                <p className="hint" style={{ margin: '4px 0 0' }}>
-                  {t.chatWorkflowCodeNodesHint}
-                </p>
-              </div>
-            )}
-            {workflowPrompt.aiSteps.filter((step) =>
-              workflowPrompt.workflow.drawflow.nodes.some((node) => node.id === step.nodeId),
-            ).length > 0 && (
-              <div className="ai-prefill-list" role="group" aria-label={t.chatSaveWorkflowAiTitle}>
-                <p className="hint">{t.chatSaveWorkflowAiTitle}</p>
-                {workflowPrompt.aiSteps
-                  .filter((step) =>
-                    workflowPrompt.workflow.drawflow.nodes.some((node) => node.id === step.nodeId),
-                  )
-                  .map((step) => (
-                    <label key={step.nodeId} className="ai-prefill-item">
-                      <input
-                        checked={workflowPrompt.aiSelections[step.nodeId] !== false}
-                        onChange={(event) => toggleAiPrefill(step.nodeId, event.target.checked)}
-                        type="checkbox"
-                      />
-                      <span>{step.label}</span>
-                    </label>
-                  ))}
-              </div>
-            )}
-            {workflowPrompt.suggestions.length > 0 && (
-              <div className="ai-prefill-list" role="group" aria-label={t.chatFoldTitle}>
-                <p className="hint">{t.chatFoldTitle}</p>
-                {workflowPrompt.suggestions.map((suggestion, index) => (
-                  <div
-                    className="ai-prefill-item"
-                    key={`${suggestion.kind}-${suggestion.runIds[0]}`}
-                  >
-                    <button
-                      disabled={workflowPrompt.folding !== null || workflowPrompt.saving}
-                      onClick={() => void foldRun(index)}
-                      type="button"
-                    >
-                      {workflowPrompt.folding === index ? t.chatFoldBusy : t.chatFoldApply}
-                    </button>
-                    <span>{suggestion.reason}</span>
-                  </div>
-                ))}
-                <p className="hint" style={{ margin: '4px 0 0' }}>
-                  {workflowPrompt.foldNote ?? t.chatFoldHint}
-                </p>
-              </div>
-            )}
-            <label className="ai-prefill-item" style={{ marginTop: '4px' }}>
-              <input
-                checked={workflowPrompt.verifyRun}
-                disabled={workflowPrompt.saving}
-                onChange={(event) => toggleVerifyRun(event.target.checked)}
-                type="checkbox"
-              />
-              <span>{t.chatWorkflowVerifyRun}</span>
-            </label>
-            {workflowPrompt.verifyRun && (
-              <p className="hint" style={{ margin: '4px 0' }}>
-                {t.chatWorkflowVerifyRunHint}
-              </p>
-            )}
-            <div className="actions">
-              <button
-                className="primary"
-                disabled={workflowPrompt.saving}
-                onClick={savePromptWorkflowDirect}
-                type="button"
-              >
-                {t.chatSaveWorkflowSave}
-              </button>
-              {runIssues !== null && runIssues.errors.length > 0 && (
-                <button
-                  disabled={workflowPrompt.saving || workflowPrompt.reviewing}
-                  onClick={() => void saveThenDebug(workflowPrompt.workflow)}
-                  title={t.chatWorkflowSaveThenDebugHint}
-                  type="button"
-                >
-                  {t.chatWorkflowSaveThenDebug}
-                </button>
-              )}
-              {workflowPrompt.stepList.length > 0 && (
-                <button
-                  disabled={workflowPrompt.saving || workflowPrompt.reviewing}
-                  onClick={refinePromptWorkflow}
-                  title={t.chatWorkflowReviewing}
-                  type="button"
-                >
-                  {t.chatSaveWorkflowAiReview}
-                </button>
-              )}
-              <button
-                disabled={workflowPrompt.saving}
-                onClick={dismissPromptWorkflow}
-                type="button"
-              >
-                {t.chatSaveWorkflowSkip}
-              </button>
-            </div>
-          </div>
-        )}
+        {/* The save card pops up as a modal the moment the task completes;
+            closing it moves the card back inline above the composer. */}
+        {!saveCardModalOpen && saveCard}
+
 
         {workflowPrompt?.reviewOpen && (
           <WorkflowReviewDialog
@@ -3860,7 +4072,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         </div>
       </div>
 
-      {/* Generation modal (portal) */}
+      {/* Generation modal (portal) — the loading/log surface while the
+          workflow-mode task runs; the save card popup replaces it on done. */}
       {generationDialog ? (
         <WorkflowGenerationDialog
           open={generationDialog.open}
@@ -3870,8 +4083,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             latestAction: generationDialog.latestAction,
             actionCount: generationDialog.actionCount,
             recoveredCount: generationDialog.recoveredCount,
+            logs: generationDialog.logs,
           }}
-          workflow={workflowPrompt?.workflow}
           onBackground={() =>
             setGenerationDialog((prev) => (prev ? { ...prev, open: false } : prev))
           }
@@ -3879,20 +4092,106 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             post({ type: 'cancel' })
             setGenerationDialog(null)
           }}
-          onSave={() => {
-            void savePromptWorkflowDirect()
-            setGenerationDialog((prev) =>
-              prev ? { ...prev, state: 'SAVING' } : prev,
-            )
-          }}
-          onEdit={() => {
-            // The chat card is the full review surface; backgrounding the
-            // modal leaves it open for detailed edits / trigger selection.
-            setGenerationDialog((prev) => (prev ? { ...prev, open: false } : prev))
-          }}
+          errorMessage={
+            generationDialog.state === 'ERROR' ? tRef.current.workflowGenerationError : undefined
+          }
           onClose={() => setGenerationDialog(null)}
         />
       ) : null}
+
+      {/* Preparing popup (portal): bridges the gap between `done` and the save
+          card — spinner + tail of the generation log so the wait is visible. */}
+      {savePreparing
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4"
+              role="presentation"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget) clearSavePreparing(savePreparing)
+              }}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-busy="true"
+                aria-label={t.workflowGenerationPreparing}
+                className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-border bg-panel shadow-xl"
+              >
+                <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Loader2 className="h-4 w-4 flex-none animate-spin text-accent" aria-hidden />
+                    <h2 className="truncate text-sm font-semibold text-ink">
+                      {t.workflowGenerationPreparing}
+                    </h2>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => clearSavePreparing(savePreparing)}
+                    className="flex h-7 w-7 flex-none items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-ink"
+                    aria-label={t.workflowGenerationClose}
+                  >
+                    <X className="h-4 w-4" aria-hidden />
+                  </button>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+                  <p className="m-0 text-xs leading-relaxed text-muted">
+                    {t.workflowGenerationPreparingHint}
+                  </p>
+                  {generationDialog?.logs && generationDialog.logs.length > 0 && (
+                    <ul className="m-0 mt-2 flex flex-col gap-0.5 p-0">
+                      {generationDialog.logs.slice(-30).map((line, index) => (
+                        <li
+                          key={`${index}-${line.slice(0, 12)}`}
+                          className="break-words font-mono text-[11px] leading-snug text-muted"
+                        >
+                          {line}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {/* Save card popup (portal): replaces the loading dialog the moment the
+          task completes; closing it returns the card to the message list. */}
+      {saveCardModalOpen && saveCard
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4"
+              role="presentation"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget) setSaveCardModalOpen(false)
+              }}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label={saveCardTitle}
+                className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-border bg-panel shadow-xl"
+              >
+                <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+                  <h2 className="truncate text-sm font-semibold text-ink">
+                    {saveCardTitle}
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setSaveCardModalOpen(false)}
+                    className="flex h-7 w-7 flex-none items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-ink"
+                    aria-label={t.workflowGenerationClose}
+                  >
+                    <X className="h-4 w-4" aria-hidden />
+                  </button>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto p-3">{saveCard}</div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       {/* Autonomous repair modal (portal): visible while events stream */}
       <RepairProgressDialog
