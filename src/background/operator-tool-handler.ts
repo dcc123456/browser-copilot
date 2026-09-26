@@ -34,14 +34,20 @@ import { validateWorkflowForRun } from '../lib/workflow/validation'
 import { declareMissingInputs } from '../lib/workflow/declare-missing-inputs'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
 import { aiPrefillNodeData } from '../lib/workflow/ai-prefill'
+import { withNodeGoalContract } from '../lib/workflow/node-goal-contract'
+import { resolveNodeGoalContract } from '../lib/workflow/node-goal-instantiation'
+import { describeCondition } from '../lib/workflow/conditions'
+import {
+  loadGenerationGoal,
+  clearGenerationGoal,
+} from '../lib/workflow/generation-goal-storage'
 import { formatRequirementRefusal, missingRequirements } from '../lib/workflow/block-requirements'
 import {
   isOperatorTool,
   blockIdFromOperatorName,
   JAVASCRIPT_BLOCK_ID,
-  SCRIPT_REFUSAL,
-  scriptJustification,
 } from '../lib/workflow/operator-tools'
+import { evaluateJsPermission } from '../lib/workflow/capability-gap'
 import {
   applyLoopElementsFold,
   applyRepeatTaskFold,
@@ -317,8 +323,13 @@ export async function runOperatorTool({
 
   // The escape hatch's gate, applied here too: "no path records a script
   // nobody justified" is a cheaper invariant to hold than "one path does not".
-  if (blockId === JAVASCRIPT_BLOCK_ID && !scriptJustification(args)) {
-    return { ok: false, error: SCRIPT_REFUSAL }
+  // Same UNIFIED gate as the executing path (accepts capabilityGap or
+  // justification), so the two cannot disagree.
+  if (blockId === JAVASCRIPT_BLOCK_ID) {
+    const stepIntent =
+      typeof args['description'] === 'string' ? (args['description'] as string) : ''
+    const permission = evaluateJsPermission({ stepIntent, args })
+    if (!permission.allowed) return { ok: false, error: permission.error }
   }
 
   const draft = await hydrateDraft(conversationId)
@@ -382,7 +393,18 @@ export async function runOperatorTool({
   }
   insertAiPrefillNode(draft, plan)
   declareWorkflowInputs(draft, rewrite.newInputs)
-  const appended = appendOperatorNode(draft, blockId, rewrite.data)
+  // Attach the Node Goal Contract to the recorded data on this composed path
+  // too, so every recorded node carries a structured goal (same as the real
+  // execution path in `operator-tool-run`).
+  const goalContract = resolveNodeGoalContract(
+    blockId,
+    rewrite.data,
+    args['goalContract'],
+  )
+  const dataWithGoal = goalContract
+    ? withNodeGoalContract(rewrite.data, goalContract)
+    : rewrite.data
+  const appended = appendOperatorNode(draft, blockId, dataWithGoal)
   const branch = outputSuffixOf(args['next'])
   if (branch) {
     draft.pendingBranch = {
@@ -402,9 +424,9 @@ export async function runOperatorTool({
 /**
  * Drop the model-only affordances before persistence: `next` / `workflowName` /
  * `inputName` / `generated` steer the draft rather than the node, and
- * `justification` is the escape hatch's reasoning — it is folded into the
- * node's description by `operator-tool-run` instead of being stored as a block
- * parameter.
+ * `justification` / `capabilityGap` are the escape hatch's reasoning — folded
+ * into the node's description by `operator-tool-run` instead of stored as
+ * block parameters.
  */
 export function stripDraftOnlyKeys(args: Record<string, unknown>): Record<string, unknown> {
   const {
@@ -413,6 +435,8 @@ export function stripDraftOnlyKeys(args: Record<string, unknown>): Record<string
     inputName: _in,
     generated: _gen,
     justification: _j,
+    capabilityGap: _gap,
+    goalContract: _gc,
     ...rest
   } = args as Record<string, unknown> & {
     next?: unknown
@@ -420,6 +444,8 @@ export function stripDraftOnlyKeys(args: Record<string, unknown>): Record<string
     inputName?: unknown
     generated?: unknown
     justification?: unknown
+    capabilityGap?: unknown
+    goalContract?: unknown
   }
   return rest
 }
@@ -523,13 +549,20 @@ export function aiPrefillPlanOf(
  */
 export function insertAiPrefillNode(draft: WorkflowDraft, plan: AiPrefillPlan): void {
   if (plan.kind !== 'insert') return
+  const prefillData = aiPrefillNodeData({
+    fieldLabel: plan.fieldLabel,
+    referenceValue: plan.fillValue,
+    variableName: plan.variableName,
+  })
   appendOperatorNode(
     draft,
     AI_PREFILL_BLOCK_ID,
-    aiPrefillNodeData({
-      fieldLabel: plan.fieldLabel,
-      referenceValue: plan.fillValue,
-      variableName: plan.variableName,
+    withNodeGoalContract(prefillData, {
+      version: 1,
+      goal: `Generate the composed text for "${plan.fieldLabel}"`,
+      successCriteria: [
+        { kind: 'variableExists', name: plan.variableName },
+      ],
     }),
   )
 }
@@ -619,7 +652,23 @@ export async function composeWorkflowFromDraft(
     (typeof triggerHead?.data?.['goalText'] === 'string'
       ? (triggerHead.data['goalText'] as string)
       : undefined)
-  const name = (opts.name ?? '').trim() || draft.name
+  // The goal-first contract established via prepare_workflow_goal is the
+  // authoritative workflow goal; prefer it over a purely derived one and fill
+  // the trigger description when empty. Rehydrate it in case the worker recycled.
+  const preparedContract = await loadGenerationGoal(conversationId)
+  if (preparedContract) {
+    if (!draft.name || draft.name === 'New workflow') draft.name = preparedContract.name
+  }
+  const name = (opts.name ?? '').trim() || draft.name || preparedContract?.name || 'New workflow'
+  if (preparedContract && triggerHead) {
+    const conditionsText = preparedContract.goalSpec.successConditions
+      .map((c) => describeCondition(c))
+      .join('; ')
+    const description = `${preparedContract.goalSpec.summary}${conditionsText ? ` | Success: ${conditionsText}` : ''}`
+    if (!triggerHead.data['description']) triggerHead.data['description'] = description
+    // Keep the machine-readable goal on the trigger so later edits stay in sync.
+    triggerHead.data['goalSpec'] = preparedContract.goalSpec
+  }
   const now = Date.now()
   // The pipeline already completed the reliability contract; only promote any
   // dangling {{reference}} to a declared run input (the user supplies it at
@@ -641,9 +690,11 @@ export async function composeWorkflowFromDraft(
       // actually VERIFY (node postconditions). A graph without postconditions
       // derives none — the generated validator then blocks the strict save
       // instead of shipping a workflow that cannot state its own goal.
-      ...(deriveGoalSpecFromNodes(draft, goalText)
-        ? { goalSpec: deriveGoalSpecFromNodes(draft, goalText) }
-        : {}),
+      ...(preparedContract
+        ? { goalSpec: preparedContract.goalSpec }
+        : deriveGoalSpecFromNodes(draft, goalText)
+          ? { goalSpec: deriveGoalSpecFromNodes(draft, goalText) }
+          : {}),
     },
     table: [],
     drawflow: { nodes: draft.nodes, edges: draft.edges },
@@ -689,6 +740,7 @@ export async function composeWorkflowFromDraft(
       await saveWorkflow(workflow)
       saved = true
       await clearDraft(conversationId)
+      await clearGenerationGoal(conversationId)
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) }
     }

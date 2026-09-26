@@ -91,6 +91,17 @@ export interface OperatorExecResult {
   error?: string
   /** Why a block was recorded without running (record-only status). */
   note?: string
+  /**
+   * The locator the page-side kernel REALLY resolved the element with, for
+   * element-taking blocks that ran through `runRaw`. The operator bridge uses
+   * it to record the exact locator that worked instead of a pre-execution
+   * guess. Absent for non-element blocks or when the kernel reported nothing.
+   */
+  resolution?: {
+    usedSpec: string
+    usedFallback: boolean
+    matched: number
+  }
 }
 
 /** Build a single-node execution context for the bridge. */
@@ -135,6 +146,9 @@ export async function executeOperatorNode(
     }
   }
 
+  // Pre-execution cancellation: never start the page action after a stop.
+  if (deps.signal.aborted) throw new DOMException('Aborted', 'AbortError')
+
   const registry = deps.executors ?? EXECUTORS
   const executor = registry[blockId]
   if (!executor) {
@@ -168,12 +182,20 @@ export async function executeOperatorNode(
     const result: OperatorExecResult = { status: 'executed', lines }
     const branch = isBranch && typeof next === 'string' ? SENTINEL_TO_BRANCH[next] : undefined
     if (branch) result.branch = branch
+    // Surface the exact locator the kernel resolved, so the caller records
+    // what really worked rather than a pre-execution candidate.
+    if (ctx.lastResolution) result.resolution = { ...ctx.lastResolution }
     return result
   } catch (error) {
+    // Cancellation must propagate, not be downgraded to a failed tool result
+    // (which would let the model keep going after the user pressed stop).
+    if ((error as Error)?.name === 'AbortError') throw error
     return {
       status: 'failed',
       lines,
       error: error instanceof Error ? error.message : String(error),
+      // Keep the attempted resolution as evidence even on failure.
+      ...(ctx.lastResolution ? { resolution: { ...ctx.lastResolution } } : {}),
     }
   }
 }

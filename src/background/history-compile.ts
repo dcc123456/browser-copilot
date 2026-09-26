@@ -32,6 +32,10 @@ import {
   rewriteDataParams,
 } from '../lib/workflow/dynamic-data'
 import type { Workflow } from '../lib/workflow/types'
+import {
+  checkProducerCompleteness,
+  describeProducerIssues,
+} from '../lib/workflow/producer-completeness'
 import { composeWorkflowFromDraft } from './operator-tool-handler'
 
 export interface HistoryCompileResult {
@@ -154,10 +158,20 @@ export async function resolveWorkflowForSave(
   // exactly one cause — an empty draft — so fall through to the history
   // compile instead of hiding the card.
   const draft = 'error' in out ? null : out.workflow
-  if (draft && actionNodeCount(draft) > 0) return { workflow: draft, source: 'draft' }
+  if (draft && actionNodeCount(draft) > 0) {
+    const incomplete = checkProducerCompleteness(draft)
+    if (incomplete.length > 0)
+      return { empty: 'validation-failed', detail: describeProducerIssues(incomplete) }
+    return { workflow: draft, source: 'draft' }
+  }
 
   const compiled = await compileConversationHistory(conversationId, name)
-  if (compiled.workflow) return { workflow: compiled.workflow, source: 'history' }
+  if (compiled.workflow) {
+    const incomplete = checkProducerCompleteness(compiled.workflow)
+    if (incomplete.length > 0)
+      return { empty: 'validation-failed', detail: describeProducerIssues(incomplete) }
+    return { workflow: compiled.workflow, source: 'history' }
+  }
 
   // Actions were recorded but none of them produced a node: the model tried and
   // every attempt failed. Distinct from "it never touched the page", because

@@ -187,8 +187,12 @@ function cssFromSemantic(target: SemanticLocator): string | undefined {
 function targetFor(target: SemanticLocator, nodeSelector?: string): Target | undefined {
   const spec = targetSpecFromSemantic(target)
   if (spec) return { primary: spec, fallbacks: [] }
-  if (nodeSelector?.trim()) {
-    return { primary: { how: 'css', value: nodeSelector.trim() }, fallbacks: [] }
+  // The `data-css` stable attribute is the documented carrier for a recorded
+  // CSS selector (see auto-contract): an honest, machine-checkable CSS target.
+  const cssFromAttr = target.stableAttributes?.['data-css']
+  const css = (cssFromAttr?.trim() || nodeSelector?.trim()) as string | undefined
+  if (css) {
+    return { primary: { how: 'css', value: css }, fallbacks: [] }
   }
   return undefined
 }

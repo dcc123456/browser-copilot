@@ -14,8 +14,17 @@
  */
 
 import { reliabilityLocatorOf, resolveRecordedLocator } from '../lib/workflow/target-to-selector'
+import { selectorAfterExecution, selectorCandidatesOf } from '../lib/workflow/target-to-selector'
 import type { RecordedLocator, SnapshotTargetEntry } from '../lib/workflow/target-to-selector'
-import { verifyRecordedSelector } from './selector-probe'
+import { countSelectorMatches } from './selector-probe'
+import {
+  beginSelectorTrace,
+  commitSelectorTrace,
+  markChosen,
+  markExecuted,
+  markProbed,
+  markResolved,
+} from './selector-trace'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
 import {
   formatRequirementRefusal,
@@ -25,10 +34,12 @@ import {
   isOperatorTool,
   blockIdFromOperatorName,
   JAVASCRIPT_BLOCK_ID,
-  SCRIPT_REFUSAL,
-  scriptJustification,
 } from '../lib/workflow/operator-tools'
+import { evaluateJsPermission } from '../lib/workflow/capability-gap'
 import { operatorAuditCall } from '../lib/workflow/operator-history'
+import { resolveNodeGoalContract } from '../lib/workflow/node-goal-instantiation'
+import { withNodeGoalContract } from '../lib/workflow/node-goal-contract'
+
 import {
   buildSecretIndex,
   redactRecordedParams,
@@ -214,19 +225,37 @@ export type OperatorRunResult =
 function withLocator(
   args: Record<string, unknown>,
   locator: RecordedLocator | undefined,
+  recorded?: { selector: string; verified: boolean },
 ): Record<string, unknown> {
   if (!locator) return args
-  const { selector, target, label, verified } = locator
+  const { target, label } = locator
+  // When post-execution evidence exists it decides the flat selector;
+  // otherwise keep the resolved locator's selector (it still plays, even
+  // unverified — the kernel's rich target is the fallback).
+  const selector = recorded ? recorded.selector : locator.selector
+  const verified = recorded ? recorded.verified : locator.verified
   const out: Record<string, unknown> = { ...args }
   delete out.ref
   if (selector) {
     out.selector = selector
     out.findBy = 'cssSelector'
+  } else if (recorded) {
+    // Post-execution explicitly chose the rich target: make sure a stale
+    // selector from the raw args cannot linger ahead of it.
+    delete out.selector
+    delete out.findBy
   }
   if (target) out.target = target
   if (label && typeof out.label !== 'string') out.label = label
   if (typeof verified === 'boolean') out.selectorVerified = verified
-  const reliabilityLocator = reliabilityLocatorOf(locator)
+  // Stamp the verified state onto the locator so the reliability metadata
+  // reflects what really happened, not the pre-execution guess.
+  const effectiveLocator: RecordedLocator = {
+    ...locator,
+    ...(selector ? { selector } : {}),
+    ...(typeof verified === 'boolean' ? { verified } : {}),
+  }
+  const reliabilityLocator = reliabilityLocatorOf(effectiveLocator)
   if (reliabilityLocator) {
     const existing = out['__reliability']
     out['__reliability'] = {
@@ -291,25 +320,57 @@ function rewriteForRecording(
   if (!blockId) return { ok: false, error: `Bad operator tool name: ${name}` }
 
   // The escape hatch is gated before anything else happens — no page touch, no
-  // draft write, no partial node. See `scriptJustification`.
-  const justification = blockId === JAVASCRIPT_BLOCK_ID ? scriptJustification(args) : null
-  if (blockId === JAVASCRIPT_BLOCK_ID && !justification) {
-    return { ok: false, error: SCRIPT_REFUSAL }
+  // draft write, no partial node. The UNIFIED gate accepts either a documented
+  // capabilityGap or a justification, so a valid gap can no longer be refused
+  // by the stricter single-argument check.
+  let justification: string | null = null
+  if (blockId === JAVASCRIPT_BLOCK_ID) {
+    const stepIntent =
+      typeof args['description'] === 'string' ? (args['description'] as string) : ''
+    const permission = evaluateJsPermission({ stepIntent, args })
+    if (!permission.allowed) return { ok: false, error: permission.error }
+    justification = permission.justification
   }
 
   const draft = await hydrateDraft(conversationId)
   draft.variables = draft.variables ?? {}
 
+  const suppliedGoalContract = args['goalContract']
   const raw = stripDraftOnlyKeys(args)
   const resolved = resolveOperatorLocator(blockId, raw, snapshotTargets)
-  // Verify the locator against the live page BEFORE acting: the candidate CSS
-  // selectors are counted in one injection, and the one matching exactly one
-  // element becomes the recorded `selector`. A locator nobody probed is kept
-  // as-is, so a refusal to inject can never degrade a working call.
-  const locator = await verifyRecordedSelector(resolved, {
-    ...(pinnedTab.has(conversationId) ? { tabId: pinnedTab.get(conversationId) } : {}),
-    ...(scope ? { scope } : {}),
-  })
+
+  // Begin the fine-grained selector trace immediately: even a refusal below
+  // must leave evidence of the exact locator arguments the model sent.
+  const trace = beginSelectorTrace({ conversationId, toolName: name, blockId, rawArgs: raw })
+  if (resolved) {
+    markResolved(trace, {
+      selector: resolved.selector,
+      hasTarget: resolved.target !== undefined,
+      ...(resolved.label ? { label: resolved.label } : {}),
+    })
+  }
+
+  // Probe the locator's CSS candidates against the live page BEFORE acting.
+  // The probe is EVIDENCE now, not the decision: counts are carried into the
+  // post-execution pick (see `selectorAfterExecution`), so the node records
+  // what the kernel really clicked with rather than a pre-execution guess.
+  // A locator with no CSS candidates (role/text only) is left untouched.
+  const probeCandidates = resolved
+    ? selectorCandidatesOf(resolved)
+    : []
+  const probeCounts = probeCandidates.length > 0
+    ? await countSelectorMatches(probeCandidates, {
+        ...(pinnedTab.has(conversationId) ? { tabId: pinnedTab.get(conversationId) } : {}),
+        ...(scope ? { scope } : {}),
+      })
+    : null
+  const locator: RecordedLocator | undefined =
+    resolved && probeCounts
+      ? { ...resolved, verified: undefined }
+      : resolved
+  if (probeCounts && locator) {
+    markProbed(trace, probeCandidates, probeCounts)
+  }
 
   // Credential capture: a literal aimed at a password field is a user-typed
   // account/password from chat. Instead of refusing it (the old policy), we
@@ -356,7 +417,11 @@ function rewriteForRecording(
     plan.kind === 'none'
       ? unproducedBulkData(blockId, data, buildVariableIndex(draft.variables ?? {}, bag.keys))
       : null
-  if (unproduced) return { ok: false, error: unproducedDataRefusal(blockId, unproduced) }
+  if (unproduced) {
+    const error = unproducedDataRefusal(blockId, unproduced)
+    commitSelectorTrace(trace, { ok: false, error })
+    return { ok: false, error }
+  }
 
   // Required-parameter gate (see `lib/workflow/block-requirements`): a call a
   // block cannot work with is refused BEFORE anything runs — the empty-locator
@@ -367,7 +432,9 @@ function rewriteForRecording(
   // be rewritten into a `{{reference}}`; the final gate below re-checks.
   const requirementProblems = missingRequirements(blockId, data, { skipMustReference: true })
   if (requirementProblems.length > 0) {
-    return { ok: false, error: formatRequirementRefusal(blockName(blockId), requirementProblems) }
+    const error = formatRequirementRefusal(blockName(blockId), requirementProblems)
+    commitSelectorTrace(trace, { ok: false, error })
+    return { ok: false, error }
   }
 
   const outcome = await executeOperatorNode(blockId, data, {
@@ -380,7 +447,16 @@ function rewriteForRecording(
   })
 
   if (outcome.status === 'failed') {
-    return { ok: false, error: outcome.error ?? `${blockId} failed` }
+    if (outcome.resolution) {
+      markExecuted(trace, outcome.resolution)
+    }
+    const error = outcome.error ?? `${blockId} failed`
+    commitSelectorTrace(trace, { ok: false, error })
+    return { ok: false, error }
+  }
+  // Record-only (side-effect blocks during drafting): no live resolution.
+  if (outcome.resolution) {
+    markExecuted(trace, outcome.resolution)
   }
 
   // Remember the page this session first acted on (B2 of the first-run plan).
@@ -417,6 +493,34 @@ function rewriteForRecording(
   const index = buildSecretIndex(bag.values, bag.keys)
   const { data: redactedData, redacted } = redactRecordedParams(data, index)
 
+  // Reconstruct the locator from what the kernel REALLY executed. The flat
+  // selector on the recorded node must be the exact locator that worked —
+  // when the executed spec had a CSS form it is recorded verbatim (never a
+  // generic stand-in); role/text executions keep the rich target primary and
+  // only adopt a proven-unique CSS candidate. Pre-execution probe counts
+  // supply the evidence. When no probe ran (or no resolution was reported),
+  // the locator stays as resolved.
+  let recordedSelector: { selector: string; verified: boolean } | undefined
+  if (locator && outcome.resolution) {
+    const countOf = (selector: string): number => {
+      const idx = probeCandidates.indexOf(selector)
+      return idx >= 0 ? (probeCounts?.[idx] ?? 0) : 0
+    }
+    recordedSelector = selectorAfterExecution({
+      usedSpec: outcome.resolution.usedSpec,
+      locator,
+      countOf,
+    })
+    markChosen(trace, recordedSelector)
+  }
+
+  // Rebuild the recorded data with the post-execution locator. `withLocator`
+  // also strips a stale pre-execution selector when the node must rely on
+  // the rich target.
+  const locatedRedactedData = recordedSelector
+    ? withLocator(redactedData, locator, recordedSelector)
+    : redactedData
+
   // AI prefill: swap the composed literal for the producer's variable BEFORE
   // the rewrite, so the rewriter sees a reference (nothing to declare) instead
   // of declaring an input whose default freezes this conversation's copy. The
@@ -426,7 +530,7 @@ function rewriteForRecording(
   // REPLAY plan, which regenerates the copy per run (the same semantics the
   // history compiler applies).
   const recordingData =
-    plan.kind === 'none' ? redactedData : { ...redactedData, value: `{{${plan.variableName}}}` }
+    plan.kind === 'none' ? locatedRedactedData : { ...locatedRedactedData, value: `{{${plan.variableName}}}` }
 
   // Business data must not be frozen at record time. Redaction runs FIRST so a
   // credential literal is already a `{{secret}}` reference by now and the
@@ -457,15 +561,24 @@ function rewriteForRecording(
   // already refused everything rewrite-independent.
   const finalProblems = missingRequirements(blockId, recorded)
   if (finalProblems.length > 0) {
-    return { ok: false, error: formatRequirementRefusal(blockName(blockId), finalProblems) }
+    const error = formatRequirementRefusal(blockName(blockId), finalProblems)
+    commitSelectorTrace(trace, { ok: false, error })
+    return { ok: false, error }
   }
 
   // The producer joins the chain first, so the forms node below wires from it.
   insertAiPrefillNode(draft, plan)
 
+  // Attach the Node Goal Contract to the recorded data so every recorded node
+  // carries a structured goal. A model-supplied contract wins; otherwise it is
+  // instantiated from the operator default and the call arguments. Engine-
+  // interpreted nodes keep their own shape.
+  const goalContract = resolveNodeGoalContract(blockId, data, suppliedGoalContract)
+  const dataWithGoal = goalContract ? withNodeGoalContract(recorded, goalContract) : recorded
+
   // The node joins the chain through whatever port the PREVIOUS block left
   // pending (or the tail's first output). `appendOperatorNode` consumes that.
-  const appended = appendOperatorNode(draft, blockId, recorded)
+  const appended = appendOperatorNode(draft, blockId, dataWithGoal)
 
   // Which port THIS block routes the next node through. An executed branch
   // block reports the port it actually took — that is the truth, and it is
@@ -490,6 +603,16 @@ function rewriteForRecording(
 
   const executed = outcome.status === 'executed'
   const note = outcome.note ?? (output ? `next node attaches to ${output}` : undefined)
+  // Ensure the trace carries the locator the node actually recorded, even
+  // when the executor reported no live resolution (record-only / mock):
+  // read it back off the final recorded data.
+  if (!trace.chosen && typeof recorded['selector'] === 'string' && recorded['selector']) {
+    markChosen(trace, {
+      selector: recorded['selector'] as string,
+      verified: recorded['selectorVerified'] === true,
+    })
+  }
+  commitSelectorTrace(trace, { ok: true })
   return {
     ok: true,
     nodeId: appended.nodeId,

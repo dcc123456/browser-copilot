@@ -14,6 +14,7 @@
  */
 
 import { PatchEngine } from '../../../lib/workflow/repair/patch-engine'
+import { buildGoalRepairContext, renderGoalRepairContext } from '../../../lib/workflow/goal-repair-context'
 import { allowedParamPathsOf } from '../../../lib/workflow/repair/patch-policy'
 import type {
   FailureAnalysis,
@@ -46,6 +47,7 @@ export function buildRepairContext(
 ): RepairContext {
   const patchEngine = new PatchEngine()
   const allowedNodeIds = patchEngine.allowedNodeIds(analysis)
+  const failedNode = workflow.drawflow.nodes.find((node) => node.id === analysis.failedNodeId)
   return {
     failedNodeId: analysis.failedNodeId,
     rootCauseNodeIds: analysis.rootCauseNodeIds,
@@ -63,6 +65,9 @@ export function buildRepairContext(
     })(),
     recentTrace: trace.events.slice(-20),
     repairHistory: history,
+    ...(failedNode
+      ? { goalRepairContext: buildGoalRepairContext(workflow, failedNode) }
+      : {}),
   }
 }
 
@@ -90,7 +95,14 @@ export function buildRepairMessages(context: RepairContext): RepairChatMessage[]
     { role: 'system', content: REPAIR_SYSTEM_PROMPT },
     {
       role: 'user',
-      content: `Repair context (redacted):\n${JSON.stringify(context, null, 2)}`,
+      content: [
+        context.goalRepairContext ? renderGoalRepairContext(context.goalRepairContext) : '',
+        `Repair context (redacted):\n${JSON.stringify(
+          { ...context, ...(context.goalRepairContext ? { goalRepairContext: '[rendered above]' } : {}) },
+          null,
+          2,
+        )}`,
+      ].filter(Boolean).join('\n\n'),
     },
   ]
 }
