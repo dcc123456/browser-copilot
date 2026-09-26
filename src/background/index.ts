@@ -162,6 +162,7 @@ import { resumePointOf, workflowFingerprintOf } from '../lib/workflow/checkpoint
 import { createAiTakeover } from './workflow-engine/ai-takeover'
 import { runDebugSession, DEFAULT_MAX_ROUNDS } from './workflow-engine/debug-session'
 import { runUnifiedDebug } from './workflow-engine/repair/unified-debug'
+import { runNodeFix } from './workflow-engine/node-fix-engine'
 import type {
   RecoveryPhaseState,
   RecoveryProtocolStatus,
@@ -2156,6 +2157,52 @@ async function handleCommand(
       return { type: 'workflows.repairDiscard' }
     }
 
+    case 'workflows.nodeFix': {
+      // Per-node AI Fix. Repair failures settle as a result (never reject the
+      // whole command) so the modal can show WHY; cancellation is surfaced the
+      // same safe way.
+      const controller = new AbortController()
+      nodeFixAborts.set(command.sessionId, controller)
+      try {
+        const data = await runNodeFix(
+          {
+            sessionId: command.sessionId,
+            blockId: command.blockId,
+            blockData: command.blockData,
+            userSuggestion: command.userSuggestion,
+            ...(command.windowId !== undefined ? { windowId: command.windowId } : {}),
+          },
+          {
+            signal: controller.signal,
+            emit: (event) => broadcastPanels({ type: 'workflows.nodeFixEvent', event }),
+          },
+        )
+        return { type: 'workflows.nodeFix', data }
+      } catch (error) {
+        const aborted = (error as Error)?.name === 'AbortError' || controller.signal.aborted
+        return {
+          type: 'workflows.nodeFix',
+          data: {
+            success: false,
+            rounds: 0,
+            reason: aborted
+              ? 'AI fix was cancelled.'
+              : error instanceof Error
+                ? error.message
+                : String(error),
+          },
+        }
+      } finally {
+        nodeFixAborts.delete(command.sessionId)
+      }
+    }
+
+    case 'workflows.nodeFixCancel': {
+      nodeFixAborts.get(command.sessionId)?.abort()
+      nodeFixAborts.delete(command.sessionId)
+      return { type: 'workflows.nodeFixCancel' }
+    }
+
     case 'workflows.takeoverPending':
       return { type: 'workflows.takeoverPending', items: await listPendingTakeovers() }
 
@@ -2600,6 +2647,13 @@ const activeTurns = new Set<string>()
  * request, so a fresh empty map is correct after a restart.
  */
 const recoveryActionSeen = new Set<string>()
+
+/**
+ * Active per-node AI-fix runs keyed by session id. The abort controller lets
+ * `workflows.nodeFixCancel` interrupt the trial execution and the LLM call;
+ * entries are removed in the command's `finally`.
+ */
+const nodeFixAborts = new Map<string, AbortController>()
 
 /** Outcome last observed for a recovery request, for a duplicate-action echo. */
 const recoveryOutcomes = new Map<

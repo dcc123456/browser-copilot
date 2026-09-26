@@ -274,6 +274,24 @@ export type Command =
   | { type: 'workflows.repairCommit'; id: string }
   /** Discard the repair working copy / pending patch. */
   | { type: 'workflows.repairDiscard'; id: string }
+  /**
+   * Per-node AI Fix: repair ONE operator node bounded by its own goal and
+   * success criteria. Runs a bounded observe → execute → diagnose → verify
+   * loop in the background; progress streams through `workflows.nodeFixEvent`
+   * and the verified parameters come back for the user to apply manually. The
+   * caller's node data is never mutated until the user applies the result.
+   */
+  | {
+      type: 'workflows.nodeFix'
+      sessionId: string
+      blockId: string
+      blockData: Record<string, unknown>
+      userSuggestion: string
+      /** See workflows.run.windowId. */
+      windowId?: number
+    }
+  /** Cancel an in-flight per-node AI fix (aborts execution and the LLM call). */
+  | { type: 'workflows.nodeFixCancel'; sessionId: string }
   /** Workflows with pending AI-takeover fixes awaiting user confirmation. */
   | { type: 'workflows.takeoverPending' }
   /** Aggregate AI-takeover success-rate stats (debug埋点). */
@@ -536,6 +554,11 @@ export type CommandResult =
   | { type: 'workflows.repairCommit' }
   | { type: 'workflows.repairDiscard' }
   | {
+      type: 'workflows.nodeFix'
+      data: import('./workflow/node-fix').NodeFixResultData
+    }
+  | { type: 'workflows.nodeFixCancel' }
+  | {
       type: 'workflows.recovery'
       /** Mirrors the request id; a client drops it when it no longer matches. */
       requestId: string
@@ -793,6 +816,11 @@ export type AgentServerMessage =
    * subscribes via {@link onReviewLog} and renders the lines as they come.
    */
   | { type: 'workflows.reviewLog'; text: string }
+  /** One per-node AI-fix progress event (streamed while the fix runs). */
+  | {
+      type: 'workflows.nodeFixEvent'
+      event: import('./workflow/node-fix').NodeFixEvent
+    }
   /**
    * The stored transcript replayed after `resume`. `running` tells the panel
    * whether to show itself as busy because a turn continued without it.
