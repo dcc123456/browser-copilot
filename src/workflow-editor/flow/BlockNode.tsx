@@ -25,6 +25,8 @@ import {
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { BlockIcon } from '../../lib/workflow/blocks/icons'
+import { Target } from 'lucide-react'
+import { nodeGoalContractOf } from '../../lib/workflow/node-goal-contract'
 import { OCR_SUPPORTED } from '../../lib/ocr-support'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
 import { useEditorLocale } from '../locale-context'
@@ -132,11 +134,12 @@ export const BRANCH_HANDLES: Record<string, { idSuffix: string; label: string }[
 }
 
 function BlockNodeComponent({ id, data, selected }: NodeProps) {
-  const { blockName, bt } = useEditorLocale()
+  const { blockName, bt, t } = useEditorLocale()
   const node = data as unknown as BlockNodeData
   const block = node.block
   if (!block) return null
   const bd = node.blockData ?? {}
+  const nodeGoal = nodeGoalContractOf(bd)
   // Grayed out when the user disabled the block — or in the no-ocr build for
   // OCR-only operators (requiresOcr; execution refuses with an explicit error).
   const disabled = bd.disableBlock === true || (block.requiresOcr === true && !OCR_SUPPORTED)
@@ -195,6 +198,15 @@ function BlockNodeComponent({ id, data, selected }: NodeProps) {
           {hasError && <TriangleAlert size={13} className="wf-node-alert" />}
           <p className="wf-node-name">{node.label || displayName}</p>
           {summary && <p className="wf-node-desc">{summary}</p>}
+          {nodeGoal && (
+            <span
+              className="nodrag mt-0.5 inline-flex items-center gap-1 rounded-full border border-border bg-accent-soft px-1.5 py-px text-[10px] leading-tight text-accent"
+              title={nodeGoal.goal}
+            >
+              <Target size={10} />
+              {t('nodeGoal')}
+            </span>
+          )}
           {bd.loopId ? (
             <span className="wf-node-loopid" title={bt('Loop id (click to copy)')}>
               {String(bd.loopId)}

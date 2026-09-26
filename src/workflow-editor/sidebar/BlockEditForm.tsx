@@ -17,6 +17,7 @@ import { isCustomBlock } from '../../lib/workflow/blocks/custom'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
 import NumberInput from '../../ui/NumberInput'
 import { EditForms } from '../blocks/EditForms'
+import NodeGoalInspector from './NodeGoalInspector'
 import type { TranslateFn } from '../i18n'
 import { useEditorLocale } from '../locale-context'
 
@@ -128,18 +129,24 @@ export default function BlockEditForm({
         )}
       </div>
 
-      {cloud ? (
-        <div className="wf-form wf-form-unsupported">
-          <Cloud size={14} />
-          <p>{bt("This block requires Automa's cloud service and is not supported.")}</p>
-        </div>
-      ) : block.disableEdit ? (
-        <p className="wf-form-note">{bt('This block has no editable settings.')}</p>
-      ) : EditComponent ? (
-        <EditComponent data={data} onChange={onChange} blockId={block.id} />
-      ) : (
-        <GenericForm data={data} onChange={onChange} />
-      )}
+      <div className="wf-edit-body">
+        {/* The goal contract (goal, success criteria, failure meaning, repair
+            hints) is AI-internal bookkeeping. For upload-file the user only
+            picks a selector and a file source, so hide it entirely. */}
+        {block.id !== 'upload-file' && <NodeGoalInspector data={data} onChange={onChange} t={t} />}
+        {cloud ? (
+          <div className="wf-form wf-form-unsupported">
+            <Cloud size={14} />
+            <p>{bt("This block requires Automa's cloud service and is not supported.")}</p>
+          </div>
+        ) : block.disableEdit ? (
+          <p className="wf-form-note">{bt('This block has no editable settings.')}</p>
+        ) : EditComponent ? (
+          <EditComponent data={data} onChange={onChange} blockId={block.id} />
+        ) : (
+          <GenericForm data={data} onChange={onChange} />
+        )}
+      </div>
     </div>
   )
 }

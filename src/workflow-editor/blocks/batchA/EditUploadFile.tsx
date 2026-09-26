@@ -1,66 +1,133 @@
 /**
  * EditUploadFile — "Upload file" block form.
  *
- * React port of Automa's EditUploadFile.vue. The interaction skeleton handles
- * the `<input type="file">` selector; the trailing fields manage a list of
- * file paths / URLs / base64 values (`filePaths`), each with a remove action,
- * plus an "Add file" button.
+ * Two source modes share one node (spec §4, §14):
  *
- * Note: Automa hides the list behind a `browser.extension.isAllowedFileSchemeAccess()`
- * / Firefox check and shows a warning instead; the React editor always shows
- * the path list (the requirement/permission messaging is surfaced by the
- * runtime instead).
+ *   - `user-select`: the user picks local files at run time from a Browser
+ *     Copilot "Choose file" card (real user gesture); the Workflow then
+ *     injects them automatically.
+ *   - `workflow-file`: files already in a Workflow variable (screenshot,
+ *     JavaScript-generated image, file artifact or array) are injected
+ *     without opening the OS chooser.
+ *
+ * The selector field, multiple flag and wait-for-selector options are shared.
+ * Styled with Tailwind semantic tokens; form labels pass through `bt()`.
  *
  * @module workflow-editor/blocks/batchA/EditUploadFile
  */
-import { Trash2 } from 'lucide-react'
-import { Field, IconButton, TextInput } from '../shared/Field'
+import { useEditorLocale } from '../../locale-context'
+import { Checkbox, Field, TextInput } from '../shared/Field'
+import SelectorField from '../shared/SelectorField'
 import type { EditFormProps } from '../EditForms'
-import InteractionBase from '../shared/InteractionBase'
 
 export default function EditUploadFile({ data, onChange }: EditFormProps) {
-  const filePaths: string[] = Array.isArray(data.filePaths)
-    ? (data.filePaths as unknown[]).map((p) => (typeof p === 'string' ? p : ''))
-    : []
+  const { bt } = useEditorLocale()
+  const sourceMode = data.sourceMode === 'workflow-file' ? 'workflow-file' : 'user-select'
+  const selector = typeof data.selector === 'string' ? data.selector : ''
 
-  const setPaths = (paths: string[]) => onChange({ filePaths: paths })
+  // Common file-producing variables suggested for the variable field
+  // (screenshot / OCR / generated-image outputs and file variables).
+  const SUGGESTED_VARIABLES = [
+    'lastScreenshot',
+    'generatedImage',
+    'screenshotData',
+    'fileArtifact',
+    'lastFile',
+  ]
 
   return (
-    <InteractionBase data={data} onChange={onChange}>
-      <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {filePaths.map((path, index) => (
-          <Field key={index} label={index === 0 ? 'URL or File path' : undefined}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ flex: 1 }}>
-                <TextInput
-                  value={path}
-                  placeholder="URL/File path/base64"
-                  onChange={(v) => setPaths(filePaths.map((p, i) => (i === index ? v : p)))}
-                />
-              </div>
-              <IconButton
-                icon={Trash2}
-                title="Remove file"
-                onClick={() => setPaths(filePaths.filter((_, i) => i !== index))}
+    <div className="wf-form flex flex-col gap-3">
+      <Field label="Upload source">
+        <div className="flex flex-col gap-1.5">
+          {(
+            [
+              ['user-select', 'User picks files'],
+              ['workflow-file', 'Workflow file variable'],
+            ] as const
+          ).map(([value, label]) => (
+            <label
+              key={value}
+              className="flex cursor-pointer items-center gap-2 text-sm text-ink"
+            >
+              <input
+                type="radio"
+                name="upload-source-mode"
+                value={value}
+                checked={sourceMode === value}
+                onChange={() => onChange({ sourceMode: value })}
+                className="accent-accent"
               />
-            </div>
-          </Field>
-        ))}
-        <button
-          type="button"
-          className="wf-btn-accent"
-          style={{
-            alignSelf: 'flex-start',
-            padding: '6px 12px',
-            borderRadius: 8,
-            border: 'none',
-            cursor: 'pointer',
-          }}
-          onClick={() => setPaths([...filePaths, ''])}
+              <span>{bt(label)}</span>
+            </label>
+          ))}
+        </div>
+      </Field>
+
+      {sourceMode === 'user-select' ? (
+        <Field
+          label="Accepted file types"
+          title="Optional accept filter, e.g. image/png,application/pdf"
         >
-          Add file
-        </button>
-      </div>
-    </InteractionBase>
+          <TextInput
+            value={typeof data.accept === 'string' ? data.accept : ''}
+            placeholder="image/*,.pdf (optional)"
+            onChange={(v) => onChange({ accept: v })}
+          />
+        </Field>
+      ) : (
+        <Field
+          label="File variable"
+          title="Variable holding a data URL, a file artifact, or an array of artifacts"
+        >
+          <TextInput
+            value={typeof data.fileVariable === 'string' ? data.fileVariable : ''}
+            placeholder="e.g. lastScreenshot"
+            list="upload-file-variables"
+            onChange={(v) => onChange({ fileVariable: v })}
+          />
+          <datalist id="upload-file-variables">
+            {SUGGESTED_VARIABLES.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
+        </Field>
+      )}
+
+      <SelectorField
+        data={data}
+        selector={selector}
+        onSelector={(v) => onChange({ selector: v })}
+        findBy={data.findBy === 'xpath' ? 'xpath' : 'cssSelector'}
+        onFindBy={(v) => onChange({ findBy: v })}
+        multiple={false}
+      />
+
+      <Checkbox
+        checked={data.multiple === true}
+        onChange={(v) => onChange({ multiple: v })}
+        label="Allow multiple files"
+        title="Upload several files at once (the page input must accept multiple)"
+      />
+
+      <Checkbox
+        checked={data.waitForSelector === true}
+        onChange={(v) => onChange({ waitForSelector: v })}
+        label="Wait for selector before uploading"
+      />
+      {data.waitForSelector === true && (
+        <Field label="Selector timeout (ms)">
+          <TextInput
+            value={String(data.waitSelectorTimeout ?? 10000)}
+            onChange={(v) => onChange({ waitSelectorTimeout: Number(v) || 0 })}
+          />
+        </Field>
+      )}
+
+      <Checkbox
+        checked={data.verifyAfterUpload !== false}
+        onChange={(v) => onChange({ verifyAfterUpload: v })}
+        label="Verify files reached the upload control"
+      />
+    </div>
   )
 }

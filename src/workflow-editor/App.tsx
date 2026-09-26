@@ -56,6 +56,8 @@ import BlockSettingsModal from './blocks/shared/BlockSettingsModal'
 import LogsModal from './sidebar/LogsModal'
 import { WorkflowMetaProvider } from './blocks/batchD/WorkflowInfoFields'
 import TopToolbar from './toolbar/TopToolbar'
+import CertificationModal from './sidebar/CertificationModal'
+import type { VerificationReport } from '../background/workflow-engine/goal-verification'
 import CanvasControls from './toolbar/CanvasControls'
 import { useToast } from './toast'
 import { ToastHost } from '../ui/toast'
@@ -125,6 +127,7 @@ export default function EditorApp() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
+  const [certReport, setCertReport] = useState<VerificationReport | null>(null)
   const [recording, setRecording] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -469,6 +472,8 @@ export default function EditorApp() {
           ...(windowId !== undefined ? { windowId } : {}),
         })
         if (r.type === 'workflows.run') {
+          const cert = (r.outcome as { certification?: VerificationReport }).certification
+          if (cert) setCertReport(cert)
           if (r.outcome.ok)
             toast.show(startNodeId ? t('runFromHereFinished') : t('runFinished'), 'ok')
           else {
@@ -704,7 +709,12 @@ export default function EditorApp() {
             block={editBlock}
             nodeName={String(editNode.data.blockData?.description ?? editBlock.name)}
             data={editNode.data.blockData}
-            onChange={(patch) => patchNode(editNode.id, patch)}
+            onChange={(patch) => {
+              patchNode(editNode.id, patch)
+              // Editing node data (including the Goal Contract) invalidates a
+              // prior certification until L3 is re-run.
+              setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
+            }}
             t={t}
             onBack={() => {
               setEditingId(null)
@@ -831,6 +841,7 @@ export default function EditorApp() {
         />
 
         {/* Run-logs / debug viewer modal. */}
+        <CertificationModal report={certReport} onClose={() => setCertReport(null)} t={t} />
         <LogsModal
           open={logsOpen}
           onClose={() => setLogsOpen(false)}
