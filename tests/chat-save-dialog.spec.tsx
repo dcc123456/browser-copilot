@@ -128,8 +128,14 @@ let settingsPayload: Record<string, unknown> = { mode: 'workflow' }
  * empty-result tests swap in the two "nothing to save" shapes.
  */
 let draftReply: unknown = { type: 'workflows.draft', workflow: baseWorkflow() }
+/** When true, `workflows.draft.get` stays pending until `releaseDraft` fires —
+ *  lets tests observe the transitional "Preparing workflow…" popup. */
+let holdDraft = false
+let releaseDraft: (() => void) | null = null
 /** What `workflows.probe` answers — `null` means "could not probe". */
 let probeReply: unknown = null
+/** When 'fail' the mocked workflows.save rejects; tests exercise the retry path. */
+let saveBehavior: 'ok' | 'fail' = 'ok'
 
 const portMessageListeners: ((message: unknown) => void)[] = []
 const fakePort = {
@@ -151,9 +157,12 @@ beforeEach(() => {
   releaseReview = null
   saveCommands.length = 0
   debugCommands.length = 0
+  holdDraft = false
+  releaseDraft = null
   settingsPayload = { mode: 'workflow' }
   draftReply = { type: 'workflows.draft', workflow: baseWorkflow() }
   probeReply = null
+  saveBehavior = 'ok'
   portMessageListeners.length = 0
   mocks.sendCommand.mockReset()
   mocks.sendCommand.mockImplementation(async (command: Command) => {
@@ -168,6 +177,11 @@ beforeEach(() => {
         settingsPayload = { ...settingsPayload, ...command.patch }
         return { type: 'settings', settings: settingsPayload }
       case 'workflows.draft.get':
+        if (holdDraft) {
+          return new Promise((resolve) => {
+            releaseDraft = () => resolve(draftReply)
+          })
+        }
         return draftReply
       case 'workflows.probe':
         return { type: 'workflows.probe', probes: probeReply }
@@ -197,6 +211,7 @@ beforeEach(() => {
       }
       case 'workflows.save':
         saveCommands.push(command)
+        if (saveBehavior === 'fail') throw new Error('save failed: disk full')
         return { type: 'workflows.save' }
       case 'workflows.debug':
         debugCommands.push(command)
@@ -251,14 +266,25 @@ describe('chat save-as-workflow flow', () => {
       for (const listener of portMessageListeners) listener({ type: 'done' })
     })
     await flush()
+    // The save card first pops up as a modal when the task completes. Close
+    // the popup to reveal the inline review card, the surface these tests
+    // drive.
+    const closeButton = document.body.querySelector<HTMLButtonElement>(
+      'button[aria-label="Close"]',
+    )
+    expect(closeButton).not.toBeNull()
+    await act(async () => {
+      closeButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    await flush()
     expect(container.textContent).toContain('Save as workflow')
   }
 
   const buttonTexts = (container: HTMLElement): string[] =>
     [...container.querySelectorAll('button')].map((button) => button.textContent?.trim() ?? '')
 
-  const clickButton = async (container: HTMLElement, label: string): Promise<void> => {
-    const button = [...container.querySelectorAll('button')].find(
+  const clickButton = async (_container: HTMLElement, label: string): Promise<void> => {
+    const button = [...document.body.querySelectorAll('button')].find(
       (candidate) => candidate.textContent?.trim() === label,
     )
     expect(button).toBeDefined()
@@ -269,8 +295,8 @@ describe('chat save-as-workflow flow', () => {
   }
 
   /** Click a button by a UNIQUE SUBSTRING (composite labels like the log toggle). */
-  const clickButtonContaining = async (container: HTMLElement, label: string): Promise<void> => {
-    const matches = [...container.querySelectorAll('button')].filter((candidate) =>
+  const clickButtonContaining = async (_container: HTMLElement, label: string): Promise<void> => {
+    const matches = [...document.body.querySelectorAll('button')].filter((candidate) =>
       candidate.textContent?.includes(label),
     )
     expect(matches).toHaveLength(1)
@@ -284,6 +310,22 @@ describe('chat save-as-workflow flow', () => {
     mocks.sendCommand.mock.calls.filter(
       ([command]) => (command as Command).type === 'workflows.review',
     ).length
+
+  /**
+   * Close the save-card popup (the X in the modal header) so the inline save
+   * card becomes available. No-op when no popup is open (empty-result turns
+   * render no card).
+   */
+  const closeSaveCardPopup = async (): Promise<void> => {
+    const closeButton = document.body.querySelector<HTMLButtonElement>(
+      'button[aria-label="Close"]',
+    )
+    if (!closeButton) return
+    await act(async () => {
+      closeButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    await flush()
+  }
 
   it('saves directly from the card with ZERO review calls (no model tokens)', async () => {
     const container = document.createElement('div')
@@ -613,6 +655,7 @@ describe('chat save-as-workflow flow', () => {
         for (const listener of portMessageListeners) listener({ type: 'done' })
       })
       await flush()
+      await closeSaveCardPopup()
 
       // The panel must NOT fall through to the history path in workflow mode.
       const historyCalls = mocks.sendCommand.mock.calls.filter(
@@ -712,6 +755,7 @@ describe('chat save-as-workflow flow', () => {
           for (const listener of portMessageListeners) listener({ type: 'done' })
         })
         await flush()
+        await closeSaveCardPopup()
         expect(container.textContent).not.toContain('no page operations were recorded')
         expect(container.textContent).toContain('demo-workflow')
       } finally {
@@ -769,6 +813,261 @@ describe('chat save-as-workflow flow', () => {
       try {
         expect(buttonTexts(container)).not.toContain('Save as workflow')
         expect(draftRequests()).toHaveLength(0)
+      } finally {
+        await act(async () => {
+          root.unmount()
+        })
+        container.remove()
+      }
+    })
+  })
+
+  describe('save card popup lifecycle', () => {
+    const flush = async (): Promise<void> => {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+    }
+
+    const bodyButtons = (): string[] =>
+      [...document.body.querySelectorAll('button')].map((b) => b.textContent?.trim() ?? '')
+
+    const clickBodyButton = async (label: string): Promise<void> => {
+      const button = [...document.body.querySelectorAll('button')].find(
+        (candidate) => candidate.textContent?.trim() === label,
+      )
+      expect(button).toBeDefined()
+      await act(async () => {
+        button!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
+      await flush()
+    }
+
+    /** The popup's header close button (an X with an aria-label, no text). */
+    const closePopup = async (): Promise<void> => {
+      const closeButton = document.body.querySelector<HTMLButtonElement>(
+        'button[aria-label="Close"]',
+      )
+      expect(closeButton).not.toBeNull()
+      await act(async () => {
+        closeButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
+      await flush()
+    }
+
+    /**
+     * Renders the chat, sends one workflow-mode turn through the composer (the
+     * send opens the loading dialog), then ends the turn: the save card pops
+     * up as a modal the moment the task completes.
+     */
+    const endTurnAndOpenPopup = async (): Promise<{
+      container: HTMLElement
+      root: Root
+    }> => {
+      const container = document.createElement('div')
+      document.body.appendChild(container)
+      const root = createRoot(container)
+      await act(async () => {
+        root.render(
+          createElement(ChatTab, {
+            skills: [],
+            activeSkillId: null,
+            onSelectSkill: () => {},
+          }),
+        )
+      })
+      await flush()
+      const textarea = container.querySelector('textarea')!
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        'value',
+      )!.set!
+      await act(async () => {
+        setter.call(textarea, 'do the task')
+        textarea.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+      const send = [...container.querySelectorAll('button')].find(
+        (b) => b.textContent?.trim() === 'Send',
+      )
+      expect(send).toBeDefined()
+      await act(async () => {
+        send!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
+      await flush()
+      // No loading dialog while the task runs — progress stays inline.
+      expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+      await act(async () => {
+        for (const listener of portMessageListeners) listener({ type: 'done' })
+      })
+      await flush()
+      return { container, root }
+    }
+
+    it('shows a preparing popup with logs while the draft compiles', async () => {
+      // Hold the draft so the gap between `done` and the card is observable.
+      holdDraft = true
+      const container = document.createElement('div')
+      document.body.appendChild(container)
+      const root = createRoot(container)
+      try {
+        await act(async () => {
+          root.render(
+            createElement(ChatTab, {
+              skills: [],
+              activeSkillId: null,
+              onSelectSkill: () => {},
+            }),
+          )
+        })
+        await flush()
+        const textarea = container.querySelector('textarea')!
+        const setter = Object.getOwnPropertyDescriptor(
+          window.HTMLTextAreaElement.prototype,
+          'value',
+        )!.set!
+        await act(async () => {
+          setter.call(textarea, 'do the task')
+          textarea.dispatchEvent(new Event('input', { bubbles: true }))
+        })
+        const send = [...container.querySelectorAll('button')].find(
+          (b) => b.textContent?.trim() === 'Send',
+        )
+        await act(async () => {
+          send!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        })
+        await flush()
+        // Turn ends: no save card yet, but the preparing popup is visible.
+        await act(async () => {
+          for (const listener of portMessageListeners) listener({ type: 'done' })
+        })
+        await flush()
+        const preparing = document.body.querySelector('[role="dialog"]')
+        expect(preparing).not.toBeNull()
+        expect(preparing!.getAttribute('aria-label')).toBe('Preparing workflow…')
+        expect(document.body.textContent).toContain(
+          'Compiling and validating the recorded steps',
+        )
+
+        // Release the draft: the preparing popup is replaced by the save card.
+        await act(async () => {
+          releaseDraft!()
+        })
+        await flush()
+        await flush()
+        const dialog = document.body.querySelector('[role="dialog"]')
+        expect(dialog).not.toBeNull()
+        expect(dialog!.getAttribute('aria-label')).toBe('demo-workflow')
+        expect(bodyButtons()).toContain('Save as workflow')
+      } finally {
+        await act(async () => {
+          root.unmount()
+        })
+        container.remove()
+      }
+    })
+
+    it('auto-opens the save-card popup when the task completes', async () => {
+      const { container, root } = await endTurnAndOpenPopup()
+      try {
+        // The loading dialog was replaced by the save card popup.
+        const dialog = document.body.querySelector('[role="dialog"]')
+        expect(dialog).not.toBeNull()
+        expect(dialog!.getAttribute('aria-label')).toBe('demo-workflow')
+        expect(bodyButtons()).toContain('Save as workflow')
+        expect(bodyButtons()).toContain('Skip')
+        // The card lives in the portal, so assert on the whole body.
+        expect(document.body.textContent).toContain('demo-workflow')
+      } finally {
+        await act(async () => {
+          root.unmount()
+        })
+        container.remove()
+      }
+    })
+
+    it('closing the popup moves the card inline and lets it be reopened', async () => {
+      const { container, root } = await endTurnAndOpenPopup()
+      try {
+        await closePopup()
+        // Popup gone; the save card is inline with the reopen entry.
+        expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+        expect(container.textContent).toContain('Save as workflow')
+        expect(bodyButtons()).toContain('Open save dialog')
+
+        // Reopen brings the save-card popup (titled with the workflow name)
+        // back — not the generation-log dialog.
+        await clickBodyButton('Open save dialog')
+        const dialog = document.body.querySelector('[role="dialog"]')
+        expect(dialog).not.toBeNull()
+        expect(dialog!.getAttribute('aria-label')).toBe('demo-workflow')
+        expect(document.body.textContent).not.toContain('Generation log')
+      } finally {
+        await act(async () => {
+          root.unmount()
+        })
+        container.remove()
+      }
+    })
+
+    it('after a successful save the card and reopen entry are gone', async () => {
+      const { container, root } = await endTurnAndOpenPopup()
+      try {
+        await clickBodyButton('Save as workflow')
+        expect(saveCommands).toHaveLength(1)
+        // Saved: the card closes (popup AND inline); nothing reopenable remains.
+        expect(bodyButtons()).not.toContain('Save as workflow')
+        expect(bodyButtons()).not.toContain('Open save dialog')
+        expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+      } finally {
+        await act(async () => {
+          root.unmount()
+        })
+        container.remove()
+      }
+    })
+
+    it('offers Regenerate on the validation-failed notice', async () => {
+      // Background refused the card: producer-completeness failed.
+      draftReply = {
+        type: 'workflows.draft',
+        empty: 'validation-failed',
+        detail: 'Node "save-local" references "{{title}}" with no producer.',
+      }
+      const { container, root } = await endTurnAndOpenPopup()
+      try {
+        // No card popup: the loading dialog closed, the notice explains why.
+        expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+        expect(bodyButtons()).toContain('Regenerate workflow')
+        const postedBefore = fakePort.postMessage.mock.calls.length
+        await clickBodyButton('Regenerate workflow')
+        // One more workflow-mode turn was posted carrying the missing detail.
+        const posted = fakePort.postMessage.mock.calls.slice(postedBefore)
+        expect(posted).toHaveLength(1)
+        const message = posted[0]![0] as { type: string; text: string }
+        expect(message.type).toBe('chat')
+        expect(message.text).toContain('{{title}}')
+      } finally {
+        await act(async () => {
+          root.unmount()
+        })
+        container.remove()
+      }
+    })
+
+    it('keeps the popup with the save error after a failed save so it can be retried', async () => {
+      saveBehavior = 'fail'
+      const { container, root } = await endTurnAndOpenPopup()
+      try {
+        await clickBodyButton('Save as workflow')
+        // Not stuck on a spinner: the card stays up with the error visible.
+        expect(container.textContent).toContain('disk full')
+        expect(bodyButtons()).toContain('Save as workflow')
+
+        // Retry succeeds and closes the card.
+        saveBehavior = 'ok'
+        await clickBodyButton('Save as workflow')
+        expect(saveCommands).toHaveLength(2)
+        expect(bodyButtons()).not.toContain('Save as workflow')
       } finally {
         await act(async () => {
           root.unmount()

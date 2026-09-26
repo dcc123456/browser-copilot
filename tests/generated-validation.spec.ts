@@ -10,6 +10,7 @@ import {
   blockingIssues,
 } from '../src/lib/workflow/generated-validation'
 import type { Workflow, WorkflowEdge, WorkflowNode } from '../src/lib/workflow/types'
+import { withNodeGoalContract } from '../src/lib/workflow/node-goal-contract'
 
 // --- graph builder ---------------------------------------------------------------
 
@@ -19,7 +20,17 @@ function nid(): string {
 }
 
 function makeNode(blockId: string, data: Record<string, unknown> = {}, label = blockId): WorkflowNode {
-  return { id: nid(), label, position: { x: 0, y: 0 }, data: { blockId, ...data } }
+  const node: WorkflowNode = { id: nid(), label, position: { x: 0, y: 0 }, data: { blockId, ...data } }
+  // Generated action nodes carry a Node Goal Contract by default; individual
+  // negative tests can still assert NODE_GOAL_MISSING by stripping the key.
+  if (blockId !== 'trigger' && !(data as Record<string, unknown>)['__noNodeGoal']) {
+    node.data = withNodeGoalContract(node.data, {
+      version: 1,
+      goal: typeof data['description'] === 'string' ? (data['description'] as string) : `${blockId} node goal`,
+      successCriteria: [{ kind: 'variableExists', name: 'nodeOk' }],
+    })
+  }
+  return node
 }
 
 function makeEdge(source: string, target: string, sourceHandle = 'next'): WorkflowEdge {

@@ -294,6 +294,98 @@ describe('detectRepeatRuns', () => {
     }
     expect(detectRepeatRuns(nested)).toEqual([])
   })
+
+  // --- script blocks never fold ---------------------------------------------
+  it('never folds javascript-code nodes even when identical', () => {
+    const wf = workflow([
+      node('s1', 'javascript-code', { code: 'console.log(1)' }),
+      node('s2', 'javascript-code', { code: 'console.log(1)' }),
+    ])
+    expect(detectRepeatRuns(wf)).toEqual([])
+  })
+
+  it('does not fold a compound period whose body contains a script', () => {
+    // open item → run script → back, repeated; the script node poisons the run.
+    const period = (p: string) => [
+      node(`${p}-open`, 'event-click', { selector: `#${p}` }),
+      node(`${p}-js`, 'javascript-code', { code: 'automaNextBlock()' }),
+      node(`${p}-back`, 'go-back'),
+    ]
+    const wf = workflow([...period('a'), ...period('b')])
+    expect(detectRepeatRuns(wf)).toEqual([])
+  })
+
+  // --- AI blocks require identical prompt ------------------------------------
+  it('folds ai-agent nodes only when prompts are identical', () => {
+    const wf = workflow([
+      node('ai1', 'ai-agent', { selector: '#row-1', prompt: 'Summarize this.' }),
+      node('ai2', 'ai-agent', { selector: '#row-2', prompt: 'Summarize this.' }),
+    ])
+    const [suggestion] = detectRepeatRuns(wf)
+    expect(suggestion).toMatchObject({ kind: 'varying', blockId: 'ai-agent', repeat: 2 })
+  })
+
+  it('does not fold ai-agent nodes with different prompts', () => {
+    const wf = workflow([
+      node('ai1', 'ai-agent', { selector: '#row-1', prompt: 'Summarize this.' }),
+      node('ai2', 'ai-agent', { selector: '#row-2', prompt: 'Translate this.' }),
+    ])
+    expect(detectRepeatRuns(wf)).toEqual([])
+  })
+
+  it('does not fold ai-prompt nodes with different prompts', () => {
+    const wf = workflow([
+      node('p1', 'ai-prompt', { selector: '#a', prompt: 'Rewrite A' }),
+      node('p2', 'ai-prompt', { selector: '#b', prompt: 'Rewrite B' }),
+    ])
+    expect(detectRepeatRuns(wf)).toEqual([])
+  })
+
+  // --- varying output must survive per iteration ----------------------------
+  it('folds a varying read when it writes to the data table', () => {
+    const wf = workflow([
+      node('r1', 'get-text', { selector: '#row-1', saveData: true, dataColumn: 'price' }),
+      node('r2', 'get-text', { selector: '#row-2', saveData: true, dataColumn: 'price' }),
+    ])
+    const [suggestion] = detectRepeatRuns(wf)
+    expect(suggestion).toMatchObject({ kind: 'varying', blockId: 'get-text' })
+  })
+
+  it('refuses a varying read writing to a fixed scalar variable', () => {
+    const wf = workflow([
+      node('r1', 'get-text', { selector: '#row-1', variableName: 'price' }),
+      node('r2', 'get-text', { selector: '#row-2', variableName: 'price' }),
+    ])
+    expect(detectRepeatRuns(wf)).toEqual([])
+  })
+
+  it('refuses a varying read relying on the block default variable', () => {
+    // No variableName: the executor falls back to lastText, a fixed scalar.
+    const wf = workflow([
+      node('r1', 'get-text', { selector: '#row-1' }),
+      node('r2', 'get-text', { selector: '#row-2' }),
+    ])
+    expect(detectRepeatRuns(wf)).toEqual([])
+  })
+
+  it('folds a varying read when the variable name uses loopIndex', () => {
+    const wf = workflow([
+      node('r1', 'get-text', { selector: '#row-1', variableName: 'price_{{loopIndex}}' }),
+      node('r2', 'get-text', { selector: '#row-2', variableName: 'price_{{loopIndex}}' }),
+    ])
+    const [suggestion] = detectRepeatRuns(wf)
+    expect(suggestion).toMatchObject({ kind: 'varying' })
+  })
+
+  it('still folds an identical run writing a fixed scalar variable', () => {
+    // Repeating the SAME read keeps the same value; the final state is equal.
+    const wf = workflow([
+      node('r1', 'get-text', { selector: '#row', variableName: 'price' }),
+      node('r2', 'get-text', { selector: '#row', variableName: 'price' }),
+    ])
+    const [suggestion] = detectRepeatRuns(wf)
+    expect(suggestion).toMatchObject({ kind: 'identical' })
+  })
 })
 
 describe('applyRepeatTaskFold', () => {
@@ -405,8 +497,12 @@ describe('compound period detection (list → detail → back)', () => {
     const nodes: WorkflowNode[] = []
     for (let i = 0; i < items; i += 1) {
       nodes.push(click(`card-${i}`, `.job-list > li:nth-child(${i + 1}) .job-name`))
-      nodes.push(node(`title-${i}`, 'get-text', { selector: '.job-detail .name', saveData: true }))
-      nodes.push(node(`req-${i}`, 'get-text', { selector: '.job-detail .req', saveData: true }))
+      nodes.push(node(`title-${i}`, 'get-text', {
+        selector: '.job-detail .name', saveData: true, dataColumn: 'name',
+      }))
+      nodes.push(node(`req-${i}`, 'get-text', {
+        selector: '.job-detail .req', saveData: true, dataColumn: 'requirement',
+      }))
       nodes.push(node(`back-${i}`, 'go-back', {}))
     }
     return workflow([...nodes, ...extra])

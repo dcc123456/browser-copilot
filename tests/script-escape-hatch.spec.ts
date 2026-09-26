@@ -148,6 +148,28 @@ describe('the escape hatch is gated at the call site', () => {
     expect(node.data).not.toHaveProperty('justification')
   })
 
+  it('accepts a documented capabilityGap in place of a justification', async () => {
+    const { out, calls } = await run('esc5', 'wf_op_javascript-code', {
+      code: 'automaSetVariable("generatedImage", canvas.toDataURL())',
+      capabilityGap: {
+        missingCapability: 'generate a canvas PNG via toDataURL',
+        triedOperators: ['get-text', 'forms', 'event-click'],
+        whyInsufficient:
+          'No declarative operator can draw on a canvas or produce a binary image.',
+        expectedResult: 'A data URL string is stored as the generatedImage variable.',
+      },
+    })
+
+    expect(out.ok).toBe(true)
+    if (!out.ok) return
+    expect(out.executed).toBe(true)
+    expect(calls.map((c) => c.blockId)).toEqual(['javascript-code'])
+    const node = actionNodesOf(getDraftSnapshot('esc5')!).at(-1)!
+    // The gap becomes the node description so the reason survives the save.
+    expect(node.data.description).toContain('canvas PNG')
+    expect(node.data).not.toHaveProperty('capabilityGap')
+  })
+
   it('keeps the model’s own description when it wrote one', async () => {
     const { out } = await run('esc4', 'wf_op_javascript-code', {
       code: 'return window.__APP__.token',

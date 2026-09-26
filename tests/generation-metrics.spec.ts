@@ -1,0 +1,41 @@
+import { describe, expect, it } from 'vitest'
+import { newGenerationMetrics, recordMetric, summarizeMetrics } from '../src/lib/workflow/generation-metrics'
+describe('generation metrics', () => {
+  it('records a discovery + candidate count', () => {
+    const m = newGenerationMetrics(0)
+    recordMetric(m, { type: 'discovery', candidates: 4 })
+    expect(m.discoveryCalls).toBe(1)
+    expect(m.candidatesReturned).toBe(4)
+  })
+  it('tracks native-rejected and gap-allowed JS separately', () => {
+    const m = newGenerationMetrics(0)
+    recordMetric(m, { type: 'js-request' })
+    recordMetric(m, { type: 'js-rejected-native' })
+    recordMetric(m, { type: 'js-request' })
+    recordMetric(m, { type: 'js-allowed-gap' })
+    expect(m.jsCalls).toBe(2)
+    expect(m.jsRejectedNative).toBe(1)
+    expect(m.jsAllowedCapabilityGap).toBe(1)
+  })
+  it('summarizes attempts per node, failure rate and JS-via-gap', () => {
+    const m = newGenerationMetrics(0)
+    for (let i = 0; i < 3; i++) recordMetric(m, { type: 'operator-attempt' })
+    recordMetric(m, { type: 'operator-failure' })
+    recordMetric(m, { type: 'node-recorded' })
+    recordMetric(m, { type: 'node-recorded' })
+    recordMetric(m, { type: 'js-request' })
+    recordMetric(m, { type: 'js-allowed-gap' })
+    recordMetric(m, { type: 'tokens', prompt: 100, completion: 20 })
+    recordMetric(m, { type: 'finish' })
+    const s = summarizeMetrics(m)
+    expect(s.attemptsPerNode).toBe(1.5)
+    expect(s.failureRate).toBeCloseTo(1 / 3)
+    expect(s.jsOnlyViaGap).toBe(true)
+    expect(s.totalTokens).toBe(120)
+  })
+  it('flags JS that ran without a gap', () => {
+    const m = newGenerationMetrics(0)
+    recordMetric(m, { type: 'js-request' })
+    expect(summarizeMetrics(m).jsOnlyViaGap).toBe(false)
+  })
+})

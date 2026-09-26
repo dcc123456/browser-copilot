@@ -21,7 +21,7 @@ import type { BlockCategory } from '../src/lib/workflow/blocks/types'
  * use_operators detour or the activate-and-retry penalty — so the mode now
  * advertises EVERY operator category from round one (the model may still narrow
  * the surface consciously via `use_operators`). The price is accepted
- * deliberately: round 1 measures ~57.3k chars (~17.4k tokens), roughly 3× full
+ * deliberately: round 1 measures ~59k chars (~17.9k tokens), roughly 3× full
  * auto, and only in this mode.
  *
  * Raised 18_000 → 20_000 when `present_plan` (the plan skill's approval
@@ -47,34 +47,39 @@ const MAX_CATALOG_CHARS = 25_500
  * (~17.4k tokens) — the accepted price of never losing a run to an undeclared
  * category. Kept separate from MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS (the
  * numbers coincide today) so a future round-1 trim does not have to move the
- * explicit-declaration ceiling and vice versa.
+ * explicit-declaration ceiling and vice versa. Raised 58_000 → 59_500 when
+ * prepare_workflow_goal and find_workflow_operators (the generation goal gate
+ * and discovery engine) joined the round-1 core.
  */
-const MAX_WORKFLOW_ROUND1_CHARS = 58_000
+const MAX_WORKFLOW_ROUND1_CHARS = 59_500
 /**
  * The real per-round ceiling: one declared category on top of round 1. The
  * largest (`interaction`, 13 schemas) measures ~32.8k; the smallest (`data`)
  * ~28.3k. Raised 25_100 → 34_000 together with the round-1 budget (the mounted
  * operator guide), after the mode paragraph's duplicated prose was deleted.
  * Raised 34_000 → 35_500 together with the round-1 budget (required args).
+ * Raised 35_500 → 37_000 when the generation goal and discovery tools joined.
  */
-const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 35_500
+const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 37_000
 /**
  * The ceiling for the worst case the model can actually reach: every category
  * declared at once, which is the same set as `operators_author` (~42.9k of tool
  * schemas). It is an escape hatch, not a steady state, but it must not run away
  * either. Raised 46_700 → 56_000 together with the round-1 budget (the mounted
  * operator guide). Raised 56_000 → 58_000 together with the round-1 budget
- * (required args).
+ * (required args). Raised 58_000 → 59_500 when the generation goal and
+ * discovery tools joined.
  */
-const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 58_000
+const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 59_500
 /**
  * Absolute worst case: every category plus both escape hatches loaded. Stays
  * loaded for the rest of the conversation, so this is a per-round cost, not a
  * one-off. Raised 48_000 → 57_500 together with the round-1 budget (the
  * mounted operator guide). Raised 57_500 → 59_500 together with the round-1
- * budget (required args).
+ * budget (required args). Raised 59_500 → 60_800 when the generation goal and
+ * discovery tools joined.
  */
-const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 59_500
+const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 60_800
 /**
  * The guardrails that matter, expressed as ratios against full auto. Round 1
  * now deliberately carries EVERY operator schema, so workflow runs ~2.8× full

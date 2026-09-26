@@ -53,6 +53,18 @@ const triggerNode: WorkflowNode = {
   data: { blockId: 'trigger', type: 'manual' },
 }
 
+/**
+ * Trigger head declaring the `keyword` input, so a workflow of
+ * trigger + forms({{keyword}}) passes the producer-completeness gate.
+ */
+const triggerNodeWithInput: WorkflowNode = {
+  ...triggerNode,
+  data: {
+    ...triggerNode.data,
+    parameters: [{ name: 'keyword', defaultValue: '' }],
+  },
+}
+
 const actionNode = (id: string): WorkflowNode => ({
   id,
   label: 'forms',
@@ -61,7 +73,7 @@ const actionNode = (id: string): WorkflowNode => ({
 })
 
 /** A draft carrying one real step. */
-const draftWithStep = () => makeWorkflow([triggerNode, actionNode('a')])
+const draftWithStep = () => makeWorkflow([triggerNodeWithInput, actionNode('a')])
 /** What `composeWorkflowFromDraft` returns for a conversation with no draft. */
 const NO_DRAFT = { error: 'No draft to compose' }
 
@@ -99,7 +111,9 @@ describe('resolveWorkflowForSave — source order', () => {
     // never appeared.
     composeMock.mockResolvedValue(NO_DRAFT)
     listHistoryMock.mockResolvedValue([historyEntry()])
-    fromHistoryMock.mockReturnValue(makeWorkflow([triggerNode, actionNode('h')]))
+    fromHistoryMock.mockReturnValue(
+      makeWorkflow([triggerNodeWithInput, actionNode('h')]),
+    )
 
     const out = await resolveWorkflowForSave('c1', 'My flow')
 
@@ -112,10 +126,34 @@ describe('resolveWorkflowForSave — source order', () => {
     // "did compose return something".
     composeMock.mockResolvedValue({ workflow: makeWorkflow([triggerNode]) })
     listHistoryMock.mockResolvedValue([historyEntry()])
-    fromHistoryMock.mockReturnValue(makeWorkflow([triggerNode, actionNode('h')]))
+    fromHistoryMock.mockReturnValue(
+      makeWorkflow([triggerNodeWithInput, actionNode('h')]),
+    )
 
     const out = await resolveWorkflowForSave('c1', 'My flow')
     expect(out).toMatchObject({ source: 'history' })
+  })
+
+  it('returns validation-failed when the draft references a value with no producer', async () => {
+    // The node-missing failure: the model explored with read tools (recorded
+    // nothing) and placed a save-local node referencing {{title}} with no read
+    // step upstream. No broken card is offered; the detail feeds Regenerate.
+    const broken = makeWorkflow([
+      triggerNode,
+      {
+        id: 's',
+        label: 'save-local',
+        position: { x: 0, y: 0 },
+        data: { blockId: 'save-local', value: '{{title}}', filename: 'a.txt' },
+      },
+    ])
+    composeMock.mockResolvedValue({ workflow: broken })
+
+    const out = await resolveWorkflowForSave('c1', 'My flow')
+
+    expect(out).toMatchObject({ empty: 'validation-failed' })
+    expect('detail' in out ? out.detail : '').toContain('{{title}}')
+    expect(listHistoryMock).not.toHaveBeenCalled()
   })
 
   it('passes the conversation title through as the workflow name', async () => {
