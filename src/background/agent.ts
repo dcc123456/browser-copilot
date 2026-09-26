@@ -32,9 +32,17 @@ import {
   type WireTool,
   type WireToolCall,
 } from '../lib/llm'
-import { compactHistory, shouldCompact } from '../lib/context-compact'
+import {
+  compactHistory,
+  COMPACT_THRESHOLD_TOKENS,
+  estimateInputTokens,
+  hardCapHistory,
+  shouldCompact,
+} from '../lib/context-compact'
 import {
   isOperatorTool,
+  operatorToolFromEntry,
+  blockIdFromOperatorName,
   buildWorkflowAuthorTools,
   buildWorkflowCategoryTools,
   buildWorkflowCoreTools,
@@ -141,6 +149,22 @@ import type { Schedule, ScheduledTask } from '../lib/scheduler-types'
 import { getWorkflow, listWorkflows } from '../lib/workflow/storage'
 import { scheduleTask } from './scheduler'
 import { BUILT_IN_SKILLS } from '../lib/builtin-skills'
+import {
+  generateWorkflowName,
+  isAcceptableWorkflowName,
+  normalizeGenerationGoalContract,
+} from '../lib/workflow/generation-goal'
+import {
+  saveGenerationGoal,
+  loadGenerationGoal,
+} from '../lib/workflow/generation-goal-storage'
+import { findWorkflowOperators } from '../lib/workflow/operator-discovery'
+import {
+  evaluateJsPermission,
+} from '../lib/workflow/capability-gap'
+import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
+
+
 
 /**
  * Tools that change something and therefore always need approval.
@@ -357,7 +381,7 @@ export function buildSystemPrompt(options: {
         `ALL OPERATORS ARE AVAILABLE / 全部算子已可见: every \`wf_op_*\` category schema is advertised from the first round — pick the operator that fits the step, no declaration needed. ${CORE_OPERATOR_TOOL_NAMES.join(', ')} are the usual starters (navigate, click, fill-or-read a field, read text). If the payload must be slimmed mid-task, call \`use_operators\` with only the categories you still need — it REPLACES the current selection, so name everything you keep.`,
         'Target elements with `ref` from `snapshot_page` — the recorded node stores a durable selector; do not hand-write CSS.',
         'EVERY STEP IS REPLAYED: no exploratory detours — going back, retrying a different element after a miss, or re-opening a view all become nodes.',
-        'SCRIPTS ARE A LAST RESORT / 代码节点是最后手段: `run_javascript` is NOT advertised. Exhaust the operators first; only when none can express the step, call `load_tools({groups:["operators_escape"]})` — every call must carry a `justification` naming what you tried and why each operator fails, without it the call is refused.',
+        'SCRIPTS ARE A LAST RESORT / 代码节点是最后手段: there is no raw-JS tool (`run_javascript` is unavailable here). Exhaust the operators first; when none can express the step, `load_tools({groups:["operators_escape"]})` then call `wf_op_javascript-code`, which runs the page script AND records the node (a bare expression or a `return` body). Carry a `justification` naming what you tried and why each operator fails, else the call is refused.',
         'Operators are pre-approved: do not ask, and batch independent calls. Use `wf_op_wait-connections` when a step needs the page to settle — it really waits, never "just in case".',
         'When the task is done, END YOUR TURN. The panel shows a review card listing the recorded steps — do NOT call `compose_workflow` or any save tool.',
         // The mode paragraph carries the MECHANICS only. The domain knowledge —
@@ -1331,6 +1355,57 @@ function storeActiveOperatorCategories(
   return next
 }
 
+
+/**
+ * Conversation-scoped block ids activated by `find_workflow_operators`
+ * (candidate-only activation). These are ADDED to the advertised operator
+ * schemas from the next round on, without a use_operators round. In-memory and
+ * LRU-capped like the other per-conversation stores.
+ */
+const candidateBlockStore = new Map<string, Set<string>>()
+
+function touchCandidateLru(conversationId: string): void {
+  const value = candidateBlockStore.get(conversationId)
+  if (value) {
+    candidateBlockStore.delete(conversationId)
+    candidateBlockStore.set(conversationId, value)
+  }
+  while (candidateBlockStore.size > LOADED_GROUP_STORE_CAP) {
+    const oldest = candidateBlockStore.keys().next().value
+    if (oldest === undefined) break
+    candidateBlockStore.delete(oldest)
+  }
+}
+
+/** Activate discovered candidate block ids for a conversation. */
+export function activateCandidateBlockIds(
+  conversationId: string,
+  blockIds: readonly string[],
+): void {
+  const existing = candidateBlockStore.get(conversationId) ?? new Set<string>()
+  for (const id of blockIds) existing.add(id)
+  candidateBlockStore.set(conversationId, existing)
+  touchCandidateLru(conversationId)
+}
+
+/** Candidate block ids activated for a conversation. */
+export function getCandidateBlockIds(conversationId: string): Set<string> {
+  return candidateBlockStore.get(conversationId) ?? new Set<string>()
+}
+
+/** Build tool schemas for candidate-activated block ids. */
+function buildCandidateTools(conversationId: string | undefined): WireTool[] {
+  if (!conversationId) return []
+  const ids = getCandidateBlockIds(conversationId)
+  if (ids.size === 0) return []
+  const built: WireTool[] = []
+  for (const id of ids) {
+    const entry = BLOCK_BY_ID.get(id)
+    if (entry) built.push(operatorToolFromEntry(entry))
+  }
+  return built
+}
+
 /** The categories currently active for a conversation (empty when none). */
 /**
  * The categories the model narrowed the workflow surface to via
@@ -1390,6 +1465,21 @@ export function disarmPlanGate(conversationId: string): void {
 const lastInputStore = new Map<string, number>()
 const LAST_INPUT_STORE_CAP = 64
 
+/** Upper input-token bound stated in a provider length error, if any. */
+export function inputLimitFromError(message: string): number | undefined {
+  // DashScope: "Range of input length should be [1, 983616]" and similar
+  // "maximum context length ... N tokens" shapes.
+  const patterns = [new RegExp('\\[\\s*\\d+\\s*,\\s*(\\d+)', 'i'), new RegExp('input length[^\\d]*\\d+[^\\d]+(\\d+)', 'i'), new RegExp('input length[^\\d]*(\\d+)', 'i'), new RegExp('context length[^\\d]*(\\d+)', 'i'), new RegExp('max[^\\d]+(\\d+)\\s*tokens?', 'i')]
+  for (const pattern of patterns) {
+    const match = message.match(pattern)
+    if (match && match[1]) {
+      const value = Number(match[1])
+      if (Number.isFinite(value) && value > 1_000) return value
+    }
+  }
+  return undefined
+}
+
 function recordLastInputTokens(conversationId: string, tokens: number): void {
   lastInputStore.delete(conversationId)
   lastInputStore.set(conversationId, tokens)
@@ -1406,6 +1496,8 @@ function lastKnownInputTokens(conversationId: string): number {
 
 export interface ToolAdvertiseOptions {
   mode: AgentMode
+  /** Conversation id, used to read candidate-activated block ids. */
+  conversationId?: string
   disabled?: ReadonlySet<string>
   /** On-demand groups already loaded for this conversation via `load_tools`. */
   loadedGroups?: ReadonlySet<string>
@@ -1511,6 +1603,7 @@ const CORE_OPERATOR_TOOL_SET: ReadonlySet<string> = new Set(CORE_OPERATOR_TOOL_N
  */
 export function advertiseTools({
   mode,
+  conversationId: advertiseConversationId,
   disabled = new Set<string>(),
   loadedGroups = new Set<string>(),
   activeOperatorCategories,
@@ -1566,10 +1659,12 @@ export function advertiseTools({
       // `load_tools` is replaced below by the workflow-specific copy, whose
       // group menu only lists what this mode can widen with.
       if (name === 'load_tools') return false
-      // `run_javascript` is core in every other mode; here it is the escape
-      // hatch, so it arrives only after a deliberate load and only with the
-      // justification the gate demands (see `runOperatorToolWithExecution`).
-      if (name === RUN_JAVASCRIPT_TOOL) return escapeLoaded
+      // `run_javascript` is core in every other mode but is NEVER offered here,
+      // not even after loading `operators_escape`: workflow generation must
+      // record a node for every script, which only `wf_op_javascript-code`
+      // does. The escape group carries that operator alone, and the dispatch
+      // layer below refuses a stray `run_javascript` call too.
+      if (name === RUN_JAVASCRIPT_TOOL) return false
       // The tab listing is a read and is always available; the tab actions are
       // operators. Without this the whole `tabs` group would have to be loaded
       // to see what is open — and loading it would hand back `tab_new` too.
@@ -1596,6 +1691,7 @@ export function advertiseTools({
       ),
       ...(authorLoaded ? buildWorkflowAuthorTools() : []),
       ...(escapeLoaded ? buildWorkflowEscapeTools() : []),
+      ...buildCandidateTools(advertiseConversationId),
     ]
     // Dedupe by name: the core four are also members of `op_interaction`, so
     // activating that category naively would advertise `wf_op_forms` twice and
@@ -1604,6 +1700,8 @@ export function advertiseTools({
       ...core,
       workflowLoadTools(),
       useOperatorsTool(),
+      prepareWorkflowGoalTool(),
+      findWorkflowOperatorsTool(),
       ...operatorTools,
     ]).filter((tool) => {
       if (disabled.has(tool.function.name)) return false
@@ -1746,7 +1844,7 @@ function workflowLoadTools(): WireTool {
     function: {
       ...base.function,
       description:
-        'Load the whole workflow step catalog at once, for the rare step no category covers. Group "operators_author": every `wf_op_*` block tool — loops, sub-workflows, data plumbing, disk writes, notifications. Prefer `use_operators` with the categories you need: this loads all 53 schemas and keeps them for the rest of the conversation. Group "operators_escape": `run_javascript` — raw JavaScript, LAST RESORT only, and every call must carry a `justification`. The remaining groups (`skills`, `data`, `ops`, `delegate`) are the ordinary non-page tools, available exactly as in the other modes.',
+        'Load the whole operator catalog at once for a step no category covers. "operators_author": every `wf_op_*` — loops, sub-workflows, data plumbing, disk writes, notifications (prefer `use_operators` with just the categories you need). "operators_escape": the single `wf_op_javascript-code` operator — raw JS, LAST RESORT, runs the page script and records the node (bare expression or `return` body), requires a `justification`. The other groups (`skills`, `data`, `ops`, `delegate`) are the ordinary non-page tools.',
       parameters: {
         ...params,
         properties: {
@@ -1772,6 +1870,77 @@ function workflowLoadTools(): WireTool {
     },
   } as WireTool
 }
+
+// --- Goal-first generation tools ------------------------------------------------
+
+export const PREPARE_WORKFLOW_GOAL_TOOL = 'prepare_workflow_goal'
+export const FIND_WORKFLOW_OPERATORS_TOOL = 'find_workflow_operators'
+
+/**
+ * `prepare_workflow_goal`: establish the workflow Goal Contract BEFORE any
+ * operator executes. The system fills a missing name and validates that the
+ * success criteria are machine-checkable; the model supplies the goal summary,
+ * success criteria, required capabilities and (optionally) constraints and
+ * expected inputs.
+ */
+function prepareWorkflowGoalTool(): WireTool {
+  return {
+    type: 'function',
+    function: {
+      name: PREPARE_WORKFLOW_GOAL_TOOL,
+      description:
+        'Workflow-generation FIRST step. Define the goal before any wf_op_*: name (auto if omitted), '
+        + 'summary, machine-checkable successConditions, requiredCapabilities, optional constraints/expectedInputs. '
+        + 'No wf_op_* runs until this exists. / 生成第一步：先建立目标契约。',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          summary: { type: 'string', description: 'What done means.' },
+          successConditions: {
+            type: 'array',
+            description: 'Machine-checkable conditions ({kind,...}); at least one.',
+            items: { type: 'object', additionalProperties: true },
+          },
+          terminalStateConditions: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          requiredCapabilities: { type: 'array', items: { type: 'string' } },
+          constraints: { type: 'array', items: { type: 'string' } },
+          expectedInputs: { type: 'array', items: { type: 'object', additionalProperties: true } },
+        },
+        required: ['summary', 'successConditions', 'requiredCapabilities'],
+      },
+    },
+  } as WireTool
+}
+
+/**
+ * `find_workflow_operators`: retrieve a small, deterministically ranked set of
+ * candidate operators for one step. The returned candidates are ACTIVATED for
+ * the next round automatically (no further use_operators call). Legacy
+ * use_operators remains supported.
+ */
+function findWorkflowOperatorsTool(): WireTool {
+  return {
+    type: 'function',
+    function: {
+      name: FIND_WORKFLOW_OPERATORS_TOOL,
+      description:
+        'Find a small ranked set of wf_op_* candidates for one step (with scores/reasons) and auto-activate '
+        + 'them; no use_operators round trip. javascript-code is never an ordinary candidate. '
+        + '/ 检索少量候选算子并自动激活。',
+      parameters: {
+        type: 'object',
+        properties: {
+          stepIntent: { type: 'string' },
+          pageSignals: { type: 'object', additionalProperties: true },
+          limit: { type: 'number' },
+        },
+        required: ['stepIntent'],
+      },
+    },
+  } as WireTool
+}
+
 
 export interface AgentDeps {
   send: (message: AgentServerMessage) => void
@@ -3603,9 +3772,123 @@ export async function executeTool(
       })
     }
 
+    case PREPARE_WORKFLOW_GOAL_TOOL: {
+      throwIfAborted()
+      const summary = typeof args.summary === 'string' ? args.summary : ''
+      if (!summary.trim()) {
+        return JSON.stringify({ error: 'A non-empty goal summary is required.' })
+      }
+      const rawConditions = Array.isArray(args.successConditions)
+        ? args.successConditions
+        : []
+      const { normalizeGoalSpec } = await import('../lib/workflow/goal')
+      const goalSpec = normalizeGoalSpec({
+        summary,
+        successConditions: rawConditions,
+        ...(Array.isArray(args.terminalStateConditions)
+          ? { terminalStateConditions: args.terminalStateConditions }
+          : {}),
+      })
+      if (!goalSpec) {
+        return JSON.stringify({
+          error:
+            'Invalid goal contract: provide at least one machine-checkable success condition with a kind and target/predicate.',
+        })
+      }
+      const requiredCapabilities = Array.isArray(args.requiredCapabilities)
+        ? args.requiredCapabilities.filter((item): item is string => typeof item === 'string')
+        : []
+      // Resolve a meaningful name: the supplied acceptable name, else a stable
+      // auto-derived one. Never accept "new workflow" / "test" / random ids.
+      const suppliedName = typeof args.name === 'string' ? args.name.trim() : ''
+      const name = suppliedName && isAcceptableWorkflowName(suppliedName)
+        ? suppliedName
+        : generateWorkflowName(summary)
+      const contract = normalizeGenerationGoalContract({
+        version: 1,
+        name,
+        goalSpec,
+        requiredCapabilities,
+        ...(Array.isArray(args.constraints)
+          ? { constraints: args.constraints.filter((i): i is string => typeof i === 'string') }
+          : {}),
+        ...(Array.isArray(args.expectedInputs) ? { expectedInputs: args.expectedInputs } : {}),
+      })
+      if (!contract) {
+        return JSON.stringify({ error: 'The goal contract could not be validated.' })
+      }
+      await saveGenerationGoal(ctx.conversationId, contract)
+      return JSON.stringify({
+        ok: true,
+        name: contract.name,
+        goalSpec: contract.goalSpec,
+        requiredCapabilities: contract.requiredCapabilities,
+        note: 'Goal contract established. Operators may now execute; final success is judged against this goal.',
+      })
+    }
+
+    case FIND_WORKFLOW_OPERATORS_TOOL: {
+      throwIfAborted()
+      const stepIntent = typeof args.stepIntent === 'string' ? args.stepIntent : ''
+      if (!stepIntent.trim()) {
+        return JSON.stringify({ error: 'A non-empty stepIntent is required.' })
+      }
+      // A Goal Contract must exist before discovery activates executable tools.
+      const goal = await loadGenerationGoal(ctx.conversationId)
+      if (!goal) {
+        return JSON.stringify({
+          error: 'Call prepare_workflow_goal first; no wf_op_* discovery without a goal contract.',
+        })
+      }
+      const result = findWorkflowOperators({
+        stepIntent,
+        workflowGoal: goal.goalSpec.summary,
+        ...(args.pageSignals && typeof args.pageSignals === 'object'
+          ? { pageSignals: args.pageSignals as Parameters<typeof findWorkflowOperators>[0]['pageSignals'] }
+          : {}),
+        ...(typeof args.limit === 'number' ? { limit: args.limit } : {}),
+      })
+      // Candidate-only activation: remember the discovered block ids so they are
+      // advertised from the next round without a use_operators round.
+      activateCandidateBlockIds(ctx.conversationId, result.candidateBlockIds)
+      return JSON.stringify({
+        candidates: result.candidates,
+        detectedIntents: result.detectedIntents,
+        activated: result.candidateBlockIds,
+        note: 'Candidates are active for the next round. JavaScript remains hidden absent a capability gap.',
+      })
+    }
+
     default: {
       if (isOperatorTool(name)) {
         throwIfAborted()
+        // GATE: no wf_op_* execution without an established Goal Contract.
+        const establishedGoal = await loadGenerationGoal(ctx.conversationId)
+        if (!establishedGoal) {
+          return JSON.stringify({
+            error:
+              'Workflow generation requires a goal contract first. Call prepare_workflow_goal before any wf_op_* operator.',
+          })
+        }
+        // NATIVE-FIRST JS GATE: javascript-code may run only after a
+        // documented capability gap or a justification. The unified gate
+        // (evaluateJsPermission) accepts either shape; when a native operator
+        // covers the intent the call is rejected and points at native blocks.
+        if (blockIdFromOperatorName(name) === 'javascript-code') {
+          const stepIntent =
+            typeof args['description'] === 'string'
+              ? (args['description'] as string)
+              : establishedGoal.goalSpec.summary
+          const permission = evaluateJsPermission({ stepIntent, args })
+          if (!permission.allowed) {
+            return JSON.stringify({
+              error: permission.error,
+              ...(permission.nativeBlockIds
+                ? { nativeBlockIds: permission.nativeBlockIds }
+                : {}),
+            })
+          }
+        }
         // Workflow generation is not a dry run: the operator really operates
         // the page, and the node is recorded only once it succeeded. A failed
         // action records nothing and hands the error back for the model to fix.
@@ -4114,6 +4397,11 @@ export async function runAgentTurn(
   // every compactable turn, so repeated triggers in one turn would only burn
   // summarizer calls on an unchanged history.
   let compactedThisTurn = false
+  // One reactive compaction+retry per turn: when the provider itself returns
+  // an input-length 400 (the estimate missed — non-reporting endpoint or a
+  // different real window), aggressively compact to the provider's reported
+  // limit and resend the identical request exactly once.
+  let lengthErrorRetried = false
   // The i18n strings for compaction, aliased BEFORE the loop: the per-round
   // request array is also named `messages` inside the loop body and would
   // shadow the dictionary (a TDZ trap for the hook below).
@@ -4219,6 +4507,7 @@ export async function runAgentTurn(
     // must change the advertised set from the very next request on.
     const tools = advertiseTools({
       mode: initialMode,
+      conversationId: ctx.conversationId,
       disabled,
       loadedGroups: ctx.loadedGroups,
       activeOperatorCategories: getActiveOperatorCategories(ctx.conversationId),
@@ -4236,6 +4525,43 @@ export async function runAgentTurn(
       // the dispatch-level refusal stays as defence in depth only.
       ...(deps.askUser ? {} : { hidden: new Set<string>(['ask_user']) }),
     })
+
+    // Proactive size guard: the usage-driven compaction above only works when a
+    // prior request reported prompt_tokens. Here we ESTIMATE the full outgoing
+    // request (system prompt + history + serialised tool schemas) and compact
+    // before sending, so a conversation whose usage was never reported cannot
+    // hit the provider's input-length 400. Threshold = the same 80% of the
+    // assumed window; the emergency hard cap is the backstop.
+    if (!deps.subAgent) {
+      const requestTokens = (): number =>
+        estimateInputTokens(
+          [{ role: 'system', content: systemPrompt }, ...history],
+          { text: JSON.stringify(tools ?? []) },
+        )
+      if (shouldCompact(requestTokens()) && !compactedThisTurn) {
+        compactedThisTurn = true
+        deps.send({ type: 'status', text: compactionText.status })
+        await compactHistory(history, {
+          marker: compactionText.marker,
+          summarize: (transcript) =>
+            summarizeTranscript(
+              {
+                apiKey: provider.apiKey,
+                baseUrl: provider.baseUrl,
+                model: provider.model,
+                ...(provider.headers ? { headers: provider.headers } : {}),
+              },
+              transcript,
+            ),
+        })
+      }
+      // Final backstop regardless of the turn flag: if the estimate still
+      // crosses the threshold (compaction returned null or was not enough),
+      // truncate message content in place so the request physically fits.
+      if (requestTokens() >= COMPACT_THRESHOLD_TOKENS) {
+        hardCapHistory(history, COMPACT_THRESHOLD_TOKENS - 4_096)
+      }
+    }
 
     // "Thinking" covers the request in flight until either text starts streaming
     // or a tool call is announced. The first text delta flips it to "Responding";
@@ -4284,8 +4610,47 @@ export async function runAgentTurn(
         },
       )
     } catch (error) {
-      if (error instanceof LlmError) throw error
       if ((error as Error)?.name === 'AbortError') return null
+      // Reactive recovery from an over-length request that the proactive
+      // estimate did not prevent: read the provider's stated limit, compact
+      // aggressively (keep only the newest turn), hard-cap to fit, and resend
+      // exactly once.
+      if (
+        error instanceof LlmError &&
+        error.status === 400 &&
+        !lengthErrorRetried &&
+        !deps.subAgent &&
+        inputLimitFromError(error.message)
+      ) {
+        lengthErrorRetried = true
+        const providerLimit = inputLimitFromError(error.message)!
+        deps.send({ type: 'status', text: compactionText.status })
+        const outcome = await compactHistory(history, {
+          marker: compactionText.marker,
+          keepRecentTurns: 1,
+          summarize: (transcript) =>
+            summarizeTranscript(
+              {
+                apiKey: provider.apiKey,
+                baseUrl: provider.baseUrl,
+                model: provider.model,
+                ...(provider.headers ? { headers: provider.headers } : {}),
+              },
+              transcript,
+            ),
+        })
+        // Leave headroom (80%) for the system prompt, schemas and the answer.
+        const budget = Math.floor(providerLimit * 0.8)
+        if (!outcome) {
+          // Nothing was summary-compactable: truncate content directly.
+          hardCapHistory(history, budget - 4_096)
+        } else {
+          hardCapHistory(history, budget - 4_096)
+        }
+        recordLastInputTokens(deps.conversationId, budget)
+        continue
+      }
+      if (error instanceof LlmError) throw error
       throw error
     }
 
@@ -4482,6 +4847,19 @@ async function runOneToolCall(
     const message = `The "${name}" tool is disabled in settings.`
     pushResult(JSON.stringify({ error: message }))
     deps.send({ type: 'tool.result', name, summary: `Blocked (${name} disabled)` })
+    return
+  }
+
+  // Workflow generation records a node for every action, which only the
+  // `wf_op_javascript-code` operator does — `run_javascript` is never
+  // advertised here. Refuse a hallucinated/stray call and point at the right
+  // tool so the model recovers instead of running an unrecorded script.
+  if (name === RUN_JAVASCRIPT_TOOL && (await deps.getMode()) === 'workflow') {
+    const message =
+      '`run_javascript` is unavailable in workflow-generation mode. ' +
+      'For a script step load `operators_escape` and call `wf_op_javascript-code` — it runs the page script AND records the node, and accepts a bare expression or a `return` body.'
+    pushResult(JSON.stringify({ error: message }))
+    deps.send({ type: 'tool.result', name, summary: 'Blocked (use wf_op_javascript-code)' })
     return
   }
 

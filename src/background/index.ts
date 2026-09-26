@@ -156,6 +156,7 @@ import {
   type TakeoverReasonKind,
 } from '../lib/workflow/ai-takeover'
 import { executeWorkflow, findRunIdFor, getCheckpointStore } from './workflow-engine/run-workflow'
+import { createDriverConditionProbe } from './workflow-engine/condition-runtime'
 import { readPersistedCheckpoints } from './checkpoint-store'
 import { resumePointOf, workflowFingerprintOf } from '../lib/workflow/checkpoints'
 import { createAiTakeover } from './workflow-engine/ai-takeover'
@@ -1586,6 +1587,30 @@ async function handleCommand(
       }
 
       const runOk = r.outcome === 'ok' || autoRepairOutcome?.status === 'success'
+      // CERTIFICATION: for a successful run of a goal-bearing workflow, run the
+      // L1/L2/L3 verification and persist the certification status. L3 must
+      // pass for the workflow to be marked Certified; a successful run whose
+      // goal conditions fail stays unverified.
+      let certification: import('./workflow-engine/goal-verification').VerificationReport | undefined
+      if (runOk && workflow.settings?.goalSpec) {
+        try {
+          const { verifyWorkflowGoal } = await import('./workflow-engine/goal-verification')
+          const scopeWindow = scopeWindowId === undefined
+            ? undefined
+            : await normalScopeFromWindowId(scopeWindowId).catch(() => undefined)
+          const probe = createDriverConditionProbe(new AbortController().signal, scopeWindow)
+          certification = await verifyWorkflowGoal(workflow, r, probe)
+          workflow.settings = {
+            ...workflow.settings,
+            certificationStatus: certification.certified ? 'certified' : 'unverified',
+          }
+          await saveWorkflow(workflow)
+        } catch (error) {
+          console.warn('[workflows.run] goal verification failed', error)
+        }
+      } else if (!runOk) {
+        workflow.settings = { ...workflow.settings, certificationStatus: 'unverified' }
+      }
       return {
         type: 'workflows.run',
         outcome: {
@@ -1597,6 +1622,7 @@ async function handleCommand(
               : r.summary ?? '',
           error: runOk ? undefined : r.summary,
           runId: r.runId,
+          ...(certification ? { certification } : {}),
         },
       }
     }
