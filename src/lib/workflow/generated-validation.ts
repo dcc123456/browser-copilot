@@ -27,6 +27,7 @@ import {
   type NodeReliabilitySpec,
 } from './reliability'
 import { deriveGoalSpecFromNodes } from './goal'
+import { nodeGoalContractOf } from './node-goal-contract'
 import type { Workflow, WorkflowNode } from './types'
 
 /** Severity: `error` blocks the save/run; `warning`/`info` only annotate. */
@@ -398,6 +399,20 @@ function validateGoal(workflow: Workflow, ctx: ValidateCtx): GeneratedValidation
   const goal =
     goalSpecOf(workflow) ??
     deriveGoalSpecFromNodes({ name: workflow.name, nodes: workflow.drawflow?.nodes ?? [] })
+  // Every generated action node must carry a Node Goal Contract (spec V64).
+  for (const node of workflow.drawflow?.nodes ?? []) {
+    if (node.data?.blockId === 'trigger') continue
+    if (!nodeGoalContractOf(node.data)) {
+      issues.push({
+        code: 'NODE_GOAL_MISSING',
+        severity: 'error',
+        nodeId: node.id,
+        path: `drawflow.nodes[${node.id}].data.__workflowAi`,
+        message: '生成的动作节点缺少节点目标契约（node goal contract）。',
+        suggestedFix: '重新生成该节点，使其携带 goal 与 successCriteria。',
+      })
+    }
+  }
   if (!goal) {
     issues.push({
       code: 'GOAL_MISSING',
