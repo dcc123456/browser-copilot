@@ -462,6 +462,28 @@ export interface Messages {
   failureCenterKeepCurrent: string
   /** Generic close button for terminal states. */
   failureCenterClose: string
+  /** Phase label: analyzing the failure. */
+  failureCenterPhaseDiagnosing: string
+  /** Phase label: preparing the repair proposal. */
+  failureCenterPhaseProposing: string
+  /** Phase label: waiting for the user to confirm the repair. */
+  failureCenterPhaseAwaitRepair: string
+  /** Phase label: applying the repair to the working copy. */
+  failureCenterPhaseApplying: string
+  /** Phase label: verifying the repaired workflow. */
+  failureCenterPhaseVerifying: string
+  /** Phase label: waiting for the user to confirm overwriting the workflow. */
+  failureCenterPhaseAwaitOverwrite: string
+  /** Phase label: committing the new workflow revision. */
+  failureCenterPhaseCommitting: string
+  /** Phase label: recovery completed. */
+  failureCenterPhaseDone: string
+  /** Phase label: recovery cancelled. */
+  failureCenterPhaseCancelled: string
+  /** Phase label: recovery failed. */
+  failureCenterPhaseFailed: string
+  /** Phase label: a human must take over the browser. */
+  failureCenterPhaseHumanTakeover: string
   /** Title for the per-node change list. */
   proposalChangesTitle: string
   /** Risk label with level. */
@@ -1582,6 +1604,17 @@ const en: Messages = {
   failureCenterConfirmOverwrite: 'Overwrite workflow',
   failureCenterKeepCurrent: 'Not now',
   failureCenterClose: 'Close',
+  failureCenterPhaseDiagnosing: 'Analyzing the failure…',
+  failureCenterPhaseProposing: 'Preparing the repair…',
+  failureCenterPhaseAwaitRepair: 'Review the proposed repair',
+  failureCenterPhaseApplying: 'Applying the repair…',
+  failureCenterPhaseVerifying: 'Verifying the repair…',
+  failureCenterPhaseAwaitOverwrite: 'Review and overwrite',
+  failureCenterPhaseCommitting: 'Saving the workflow…',
+  failureCenterPhaseDone: 'Recovery completed',
+  failureCenterPhaseCancelled: 'Recovery cancelled',
+  failureCenterPhaseFailed: 'Recovery failed',
+  failureCenterPhaseHumanTakeover: 'Manual takeover needed',
   proposalChangesTitle: 'Proposed changes',
   proposalRiskLabel: ({ level }) => `Risk: ${level}`,
   proposalEvidenceTitle: 'Evidence',
@@ -2705,6 +2738,17 @@ const zhCN: Messages = {
   failureCenterConfirmOverwrite: '覆盖工作流',
   failureCenterKeepCurrent: '暂不覆盖',
   failureCenterClose: '关闭',
+  failureCenterPhaseDiagnosing: '正在分析失败原因…',
+  failureCenterPhaseProposing: '正在准备修复方案…',
+  failureCenterPhaseAwaitRepair: '请确认修复方案',
+  failureCenterPhaseApplying: '正在应用修复…',
+  failureCenterPhaseVerifying: '正在验证修复效果…',
+  failureCenterPhaseAwaitOverwrite: '请确认并覆盖',
+  failureCenterPhaseCommitting: '正在保存工作流…',
+  failureCenterPhaseDone: '修复完成',
+  failureCenterPhaseCancelled: '已取消修复',
+  failureCenterPhaseFailed: '修复失败',
+  failureCenterPhaseHumanTakeover: '需要人工接管',
   proposalChangesTitle: '建议修改',
   proposalRiskLabel: ({ level }) => `风险：${level}`,
   proposalEvidenceTitle: '证据',

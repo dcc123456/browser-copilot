@@ -97,6 +97,37 @@ const RISK_CLASS: Record<RepairProposalView['risk'], string> = {
   HIGH: 'text-err',
 }
 
+/** Map internal recovery phases to human-readable, localized labels. */
+function phaseLabel(
+  phase: RecoveryPhaseState,
+  t: ReturnType<typeof useT>,
+): string {
+  switch (phase) {
+    case 'DIAGNOSING':
+      return t.failureCenterPhaseDiagnosing
+    case 'PROPOSING':
+      return t.failureCenterPhaseProposing
+    case 'AWAIT_REPAIR_CONFIRM':
+      return t.failureCenterPhaseAwaitRepair
+    case 'APPLYING':
+      return t.failureCenterPhaseApplying
+    case 'VERIFYING':
+      return t.failureCenterPhaseVerifying
+    case 'AWAIT_OVERWRITE_CONFIRM':
+      return t.failureCenterPhaseAwaitOverwrite
+    case 'COMMITTING':
+      return t.failureCenterPhaseCommitting
+    case 'DONE':
+      return t.failureCenterPhaseDone
+    case 'CANCELLED':
+      return t.failureCenterPhaseCancelled
+    case 'FAILED':
+      return t.failureCenterPhaseFailed
+    case 'HUMAN_TAKEOVER':
+      return t.failureCenterPhaseHumanTakeover
+  }
+}
+
 /** Per-node before/after, reason, evidence, risk and verification plan. */
 function ProposalView({ proposal }: { proposal: RepairProposalView }): ReactNode {
   const t = useT()
@@ -252,7 +283,7 @@ export function FailureCenterDialog({
               <PhaseGlyph phase={phase} status={state?.status ?? 'running'} />
             </span>
             <div className="flex min-w-0 flex-col gap-1">
-              <span className="text-sm font-medium text-ink">{phase}</span>
+              <span className="text-sm font-medium text-ink">{phaseLabel(phase, t)}</span>
               {state?.summary && (
                 <span className="break-words text-xs text-muted">{state.summary}</span>
               )}

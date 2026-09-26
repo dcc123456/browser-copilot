@@ -98,7 +98,7 @@ describe('FailureCenter single-entry AI repair', () => {
       workflowId: 'wf1',
       runId: 'run1',
     })
-    expect(container.textContent).toContain('AWAIT_REPAIR_CONFIRM')
+    expect(container.textContent).toContain('Review the proposed repair')
     expect(container.textContent).toContain('proposal ready')
     expect(buttonTexts(container)).toContain('Confirm repair')
   })
@@ -117,7 +117,7 @@ describe('FailureCenter single-entry AI repair', () => {
     await mount()
     await clickButton(container, 'Confirm repair')
 
-    expect(container.textContent).toContain('AWAIT_OVERWRITE_CONFIRM')
+    expect(container.textContent).toContain('Review and overwrite')
     expect(sendCommandMock).toHaveBeenCalledTimes(2)
     expect(sendCommandMock.mock.calls[1]![0]).toMatchObject({ action: 'CONFIRM_REPAIR' })
     expect(buttonTexts(container)).toContain('Overwrite workflow')
@@ -141,7 +141,7 @@ describe('FailureCenter single-entry AI repair', () => {
     await clickButton(container, 'Confirm repair')
     await clickButton(container, 'Overwrite workflow')
 
-    expect(container.textContent).toContain('DONE')
+    expect(container.textContent).toContain('Recovery completed')
     expect(sendCommandMock).toHaveBeenCalledTimes(3)
     expect(sendCommandMock.mock.calls[2]![0]).toMatchObject({ action: 'CONFIRM_OVERWRITE' })
   })
@@ -151,7 +151,7 @@ describe('FailureCenter single-entry AI repair', () => {
       recoveryResult('HUMAN_TAKEOVER', 'failed', 'no patch proposed', command.requestId),
     )
     await mount()
-    expect(container.textContent).toContain('HUMAN_TAKEOVER')
+    expect(container.textContent).toContain('Manual takeover needed')
   })
 
   it('renders the per-node before/after, risk and verification plan', async () => {
