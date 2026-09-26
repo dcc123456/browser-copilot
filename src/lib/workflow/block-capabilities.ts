@@ -195,7 +195,7 @@ const OVERRIDES: Record<string, Override> = {
   },
   'ai-agent': {
     kind: 'general',
-    actions: [],
+    actions: ['ai-generate'],
     needsTarget: false,
     hasSideEffect: false,
   },

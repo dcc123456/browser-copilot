@@ -439,7 +439,20 @@ const SCHEMA_OVERRIDES: Readonly<Record<string, Record<string, unknown>>> = {
     [SCRIPT_JUSTIFICATION_ARG]: {
       type: 'string',
       description:
-        'Required. Why no declarative operator can do this step: name the operators you tried and the concrete reason each fails. A call without it is refused.',
+        'Why no declarative operator can do this (operators tried + why). OR use capabilityGap; neither ⇒ refused.',
+    },
+    capabilityGap: {
+      type: 'object',
+      description:
+        'Documented gap; alternative to justification (all four fields required).',
+      properties: {
+        missingCapability: { type: 'string' },
+        triedOperators: { type: 'array', items: { type: 'string' } },
+        whyInsufficient: { type: 'string' },
+        expectedResult: { type: 'string' },
+      },
+      required: ['missingCapability', 'triedOperators', 'whyInsufficient', 'expectedResult'],
+      additionalProperties: true,
     },
   },
   forms: {
@@ -593,7 +606,15 @@ const SCHEMA_OVERRIDES: Readonly<Record<string, Record<string, unknown>>> = {
     value: { type: 'string', description: 'Cookie value when op:"set".' },
   },
   'upload-file': {
-    fileData: { type: 'string', description: 'File as a data: URL. Required.' },
+    sourceMode: {
+      type: 'string',
+      enum: ['user-select', 'workflow-file'],
+      description: 'user-select (pick) | workflow-file (variable).',
+    },
+    fileVariable: {
+      type: 'string',
+      description: 'Artifact/data-URL variable.',
+    },
   },
   link: {
     newTab: { type: 'boolean', description: 'Open in a new tab (default true).' },
@@ -677,7 +698,14 @@ const SCHEMA_OMIT: Readonly<Record<string, readonly string[]>> = {
     'session',
     'expirationDate',
   ],
-  'upload-file': ['findBy', 'waitForSelector', 'waitSelectorTimeout', 'filePaths'],
+  'upload-file': [
+    'findBy',
+    'filePaths',
+    'waitSelectorTimeout',
+    'accept',
+    'multiple',
+    'waitForSelector',
+  ],
   'handle-dialog': ['accept', 'promptText'],
   'switch-to': ['findBy', 'selector', 'windowType'],
   'delete-data': ['deleteList'],
@@ -691,13 +719,12 @@ const SCHEMA_OMIT: Readonly<Record<string, readonly string[]>> = {
  * Arguments a tool will not accept a call without. Derived per block from
  * `block-requirements.schemaRequiredArgs` — the same table the record gate
  * enforces — so what the schema marks required and what the gate refuses can
- * never drift. The escape hatch keeps its justification, which is a draft-only
- * affordance stripped before recording and therefore not in the block table.
+ * never drift. The escape hatch needs one of `justification` / `capabilityGap`
+ * (an anyOf that JSON Schema cannot state on the parent object), so neither is
+ * listed here; the unified gate (evaluateJsPermission) enforces it.
  */
 function requiredArgsOf(entry: BlockCatalogEntry): string[] {
-  const required = schemaRequiredArgs(entry.id)
-  if (entry.id === JAVASCRIPT_BLOCK_ID) required.push(SCRIPT_JUSTIFICATION_ARG)
-  return required
+  return schemaRequiredArgs(entry.id)
 }
 
 /**

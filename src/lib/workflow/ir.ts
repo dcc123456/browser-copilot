@@ -22,6 +22,7 @@
  */
 
 import type { WorkflowCondition } from './conditions'
+import { withNodeGoalContract } from './node-goal-contract'
 import type { SemanticLocator } from './element-fingerprint'
 import type { Workflow, WorkflowEdge, WorkflowNode } from './types'
 import { targetSpecFromSemantic } from './element-fingerprint'
@@ -51,6 +52,7 @@ export type SemanticAction =
   | { kind: 'hover' }
   | { kind: 'element-exists' }
   | { kind: 'execute-js'; code?: string }
+  | { kind: 'ai-generate'; prompt?: string }
 
 export const SEMANTIC_ACTION_KINDS: readonly SemanticAction['kind'][] = [
   'navigate',
@@ -68,6 +70,7 @@ export const SEMANTIC_ACTION_KINDS: readonly SemanticAction['kind'][] = [
   'hover',
   'element-exists',
   'execute-js',
+  'ai-generate',
 ]
 
 /** A reference to a value: a variable, an IR input, or a literal. */
@@ -258,16 +261,38 @@ function blockIdForAction(action: SemanticAction): string {
       return 'element-exists'
     case 'execute-js':
       return 'javascript-code'
+    case 'ai-generate':
+      return 'ai-agent'
   }
 }
 
 /** The minimal block params for one IR step (structural, not capability-driven). */
+function cssFromTargetSpec(spec: { how?: string; value?: string }): string {
+  const value = typeof spec.value === 'string' ? spec.value : ''
+  if (!value) return ''
+  switch (spec.how) {
+    case 'id': return `#${value}`
+    case 'testid': return `[data-testid="${value}"]`
+    case 'name': return `[name="${value}"]`
+    case 'text':
+    case 'role':
+    default:
+      // Text/role targets are not CSS-expressible; the rich target is kept.
+      return ''
+  }
+}
+
 function paramsForStep(step: WorkflowStepIR): Record<string, unknown> {
   const params: Record<string, unknown> = {}
   const semantic = step.target?.semantic
   if (semantic) {
     const spec = targetSpecFromSemantic(semantic)
-    if (spec) params['target'] = { primary: spec, fallbacks: [] }
+    if (spec) {
+      params['target'] = { primary: spec, fallbacks: [] }
+      // A semantic target is the recorded locator; render it as a CSS selector
+      // string so locator-aware validation sees the node as grounded.
+      params['selector'] = cssFromTargetSpec(spec)
+    }
   }
   if (step.target?.selectorHint) params['selector'] = step.target.selectorHint
 
@@ -295,6 +320,9 @@ function paramsForStep(step: WorkflowStepIR): Record<string, unknown> {
       break
     case 'wait-time':
       params['timeout'] = step.action.ms ?? 1000
+      break
+    case 'ai-generate':
+      params['prompt'] = step.action.prompt ?? ''
       break
     default:
       break
@@ -324,11 +352,28 @@ export function compileIR(ir: WorkflowIR): Workflow {
 
   ir.steps.forEach((step, index) => {
     const blockId = blockIdForAction(step.action)
+    const stepData: Record<string, unknown> = { blockId, description: step.intent, ...paramsForStep(step) }
+    // Preserve the Node Goal Contract across compilation: the step intent is
+    // the node goal and its post/preconditions are the checkable contract.
+    const criteria = step.postconditions ?? []
+    if (criteria.length > 0) {
+      Object.assign(
+        stepData,
+        withNodeGoalContract(stepData, {
+          version: 1,
+          goal: step.intent,
+          successCriteria: criteria,
+          ...(step.preconditions && step.preconditions.length > 0
+            ? { preconditions: step.preconditions }
+            : {}),
+        }),
+      )
+    }
     nodes.push({
       id: step.id,
       label: blockId,
       position: { x: 160, y: 80 + index * 140 },
-      data: { blockId, description: step.intent, ...paramsForStep(step) },
+      data: stepData,
     })
   })
 
@@ -386,6 +431,18 @@ export function compileIR(ir: WorkflowIR): Workflow {
       notification: false,
       reuseLastState: false,
       provenance: 'chat-generate',
+      ...(ir.goal.summary
+        ? {
+            goalSpec: {
+              summary: ir.goal.summary,
+              successConditions: ir.goal.successConditions ?? [],
+              ...(ir.goal.terminalStateConditions
+                ? { terminalStateConditions: ir.goal.terminalStateConditions }
+                : {}),
+            },
+          }
+        : {}),
+      certificationStatus: 'unverified',
       ...(ir.metadata.originUrl ? { generationOriginUrl: ir.metadata.originUrl } : {}),
     },
   }

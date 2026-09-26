@@ -192,9 +192,20 @@ const REQUIREMENTS: Readonly<Record<string, RequirementSet>> = {
   },
   'upload-file': {
     locator: LOCATOR_MESSAGE,
-    params: [
-      { key: 'fileData', message: '必须给 fileData（文件的 data: URL），否则上传没有内容' },
-    ],
+    check: (data) => {
+      const mode = data['sourceMode']
+      if (mode !== 'user-select' && mode !== 'workflow-file') {
+        return "必须给出 sourceMode：'user-select' 或 'workflow-file'"
+      }
+      if (
+        mode === 'workflow-file' &&
+        !String(data['fileVariable'] ?? '').trim() &&
+        data['fileData'] === undefined
+      ) {
+        return "workflow-file 模式必须给出 fileVariable（存放文件的变量名）"
+      }
+      return null
+    },
   },
   'create-element': {
     params: [{ key: 'html', message: '必须给 html（要注入页面的元素标记）' }],

@@ -30,6 +30,8 @@ export type FailureCode =
   | 'WRONG_PAGE'
   // static validation (Phase 6)
   | 'VALIDATION_FAILED'
+  // file upload (spec §16)
+  | 'UPLOAD_FILE_FAILED'
   // legacy / unclassified
   | 'ELEMENT_NOT_FOUND'
   | 'TIMEOUT'
@@ -142,6 +144,54 @@ export const FAILURE_TABLE: ReadonlyArray<
     hint: '页面元素未找到（兼容路径），选择器可能过期。',
   },
   {
+    prefixes: ['UPLOAD_USER_SELECTION_CANCELLED'],
+    code: 'UPLOAD_FILE_FAILED',
+    category: 'cancelled',
+    recoverable: false,
+    aiRepairable: false,
+    hint: '用户取消了文件选择。',
+  },
+  {
+    prefixes: ['UPLOAD_USER_SELECTION_TIMEOUT'],
+    code: 'UPLOAD_FILE_FAILED',
+    category: 'environment',
+    recoverable: true,
+    aiRepairable: false,
+    hint: '等待用户选择文件超时。',
+  },
+  {
+    prefixes: ['UPLOAD_TARGET_NOT_FOUND', 'UPLOAD_TARGET_NOT_FILE_INPUT'],
+    code: 'UPLOAD_FILE_FAILED',
+    category: 'locator',
+    recoverable: true,
+    aiRepairable: true,
+    hint: '文件上传目标缺失或不是文件控件，重新定位 input[type=file] 或拖拽区。',
+  },
+  {
+    prefixes: ['UPLOAD_FILE_VARIABLE_NOT_FOUND', 'UPLOAD_FILE_VARIABLE_INVALID', 'UPLOAD_FILE_DATA_INVALID'],
+    code: 'UPLOAD_FILE_FAILED',
+    category: 'workflow',
+    recoverable: true,
+    aiRepairable: true,
+    hint: '文件变量缺失或数据无效，检查 fileVariable 与文件数据。',
+  },
+  {
+    prefixes: ['UPLOAD_MULTIPLE_NOT_SUPPORTED'],
+    code: 'UPLOAD_FILE_FAILED',
+    category: 'workflow',
+    recoverable: true,
+    aiRepairable: true,
+    hint: '上传控件不支持多文件，调整文件数量或 multiple 配置。',
+  },
+  {
+    prefixes: ['UPLOAD_FILE_INJECTION_FAILED', 'UPLOAD_FILE_VERIFICATION_FAILED', 'UPLOAD_DROPZONE_UNSUPPORTED'],
+    code: 'UPLOAD_FILE_FAILED',
+    category: 'workflow',
+    recoverable: true,
+    aiRepairable: true,
+    hint: '文件未能真正进入页面上传控件，检查目标控件与拖拽区。',
+  },
+  {
     prefixes: ['AbortError', 'aborted', '已取消'],
     code: 'ABORTED',
     category: 'cancelled',
@@ -196,6 +246,7 @@ export const FAILURE_CODES: readonly FailureCode[] = [
   'WRONG_ORIGIN',
   'WRONG_PAGE',
   'VALIDATION_FAILED',
+  'UPLOAD_FILE_FAILED',
   'ELEMENT_NOT_FOUND',
   'TIMEOUT',
   'ABORTED',

@@ -65,43 +65,25 @@ get-text/read-page 开 saveData 时 dataColumn 必填。trigger-event 用 event�
 
 两类来源，按顺序取：
 
-1. **上游步骤产出**：前面有 get-text / attribute-value / ai-agent / ocr 等把值写进了变量，
-   就直接引用那个变量名，如 \`{{lastTitle}}\`。
-2. **只能从外部传入**：图里没有任何步骤能产出它（用户只是说"搜 iPhone"），
-   它就成为一个**工作流输入**，声明在触发器上。生成时观察到的值会成为该输入的默认值，
-   所以工作流开箱即可运行；用户之后可以在触发器上改，触发时也能覆盖。
+1. **上游步骤产出**（get-text / attribute-value / ai-agent / ocr 等写入的变量）→ 直接引用，如 \`{{lastTitle}}\`。
+2. **只能外部传入**（图里没有节点产出它，如用户只说"搜 iPhone"）→ 声明为**工作流输入**在触发器上；
+   生成时观察值成为默认值，开箱可跑，用户可在触发器上改。可用 \`inputName\` 起名（\`keyword\`、\`city\`）。
 
-业务值没有上游来源时，可以用 \`inputName\` 给这个输入起名（如 \`keyword\`、\`city\`）——不起也能跑，
-只是名字会按算子自动生成。名字一旦定下，后续同一个值直接写 \`{{那个名字}}\` 复用。
+**结构性参数保持字面量**：\`selector\` / \`findBy\` / \`target\`、\`variableName\`、\`attributeName\`、
+枚举与时间配置、\`workflowId\`。选择器写成 \`{{x}}\` 会让节点读不懂、重放不了。
 
-**结构性参数保持字面量，不要动态化**：\`selector\` / \`findBy\` / \`target\`（元素定位）、
-\`variableName\`（变量名）、\`attributeName\`、\`type\` / \`method\` / \`responseType\`（枚举）、
-\`days\` / \`shortcut\` / \`interval\` / \`time\`（配置）、\`workflowId\`。
-把选择器写成 \`{{x}}\` 只会让节点既读不懂也重放不了。
+**页面内容必须有"生产者"节点**：清单、排名、正文来自页面时，图里必须有节点**读取它**，
+再用 \`{{变量}}\` 引用。声明成工作流输入等于把快照当默认值，重放永远是旧数据。
 
-**页面内容必须有"生产者"节点**：清单、排名、正文这类内容如果来自页面，
-图里就必须有一个节点**读取它**，后续步骤再用 \`{{变量}}\` 引用。
-把页面内容声明成工作流输入是**错的**——那等于把生成那一刻的快照当默认值，
-工作流每次运行都吐出同一份旧数据，永远不会再去抓页面。
+采集清单（热搜、搜索结果、表格行）的固定写法：
 
-采集清单（热搜、搜索结果、列表、表格行）的固定写法：
+- \`get-text\` 配 \`multiple:true\` + \`saveData:true\` + \`dataColumn:"<列名>"\`，一次收进整列；
+  同序号换列名是补列，循环里按 \`loopIndex\` 分行。
+- 整页正文 / 选中文本 / HTML 用 \`read-page\`；需要理解改写用 \`ai-agent\`（prompt + variableName）。
+- 用 \`export-data\` 导出数据表；\`save-local\` 只存单个值，其 \`value\` 必须是 \`{{引用}}\`
+  （上游产出或导出表），\`filename\` 可声明为输入；大段字面量会被拒绝。
 
-- \`get-text\` 配 \`multiple:true\` + \`saveData:true\` + \`dataColumn:"<列名>"\`：
-  一次调用收进整列，不需要逐个点。数据表按序号定位行，同序号换列名是**补列**而非新增行；
-  在循环里则按 \`loopIndex\` 分行。
-- 整页正文 / 选中文本 / HTML 用 \`read-page\`（同样支持 \`saveData\`）。
-- 需要理解/改写页面内容时用 \`ai-agent\`（prompt + variableName），结果进变量。
-- 最后用 \`export-data\` 导出数据表；\`save-local\` 只适合**单个值**，不适合整张表。
-
-**save-local 尤其要注意**：\`value\` 是"要写进文件的内容"、\`filename\` 是文件名。
-文件名这类小配置可以声明成工作流输入；\`value\` 若来自页面则**必须引用上游产出**
-（如 \`{{lastTitle}}\`、\`{{aiFill1}}\`），或来自 \`export-data\` 导出的数据表。
-**绝不要**把 \`report-2026-09-17.txt\`、整段正文、整份清单这类字面量直接写进
-\`value\` / \`filename\`——内容没有生产者时，先去补读取节点，而不是声明成输入。
-把大段页面内容当字面量传入会被**直接拒绝**，并提示改用哪个算子。
-
-（真的用到代码节点时）\`javascript-code\` 的 \`code\` 是程序文本，不是数据；但**代码里用到的业务数据必须走
-\`vars.xxx\` / \`refData\`**，不要硬编码进代码字符串。
+代码节点的 \`code\` 是程序文本（结构性），其中业务数据走 \`vars.xxx\` / \`refData\`。
 
 ## 代码节点是最后手段（默认禁止）
 
@@ -116,18 +98,29 @@ get-text/read-page 开 saveData 时 dataColumn 必填。trigger-event 用 event�
 1. 先用声明式算子做；失败了把失败原因记下来。
 2. 确认没有算子组合能完成，才 \`load_tools({groups:["operators_escape"]})\` 载入代码节点工具
    （它**不在**常驻工具列表里，平时看不到）。
-3. 调用时必须带 \`justification\`：写清楚试过哪些算子、它们为什么不行、这一步为什么只能靠代码。
-   缺了它调用会被**直接拒绝**，不会记录节点。
-4. 这段理由会成为节点 description 显示在画布上；收尾时也要在总结里告诉用户
-   "有 1 个代码节点，原因是……"，让用户自己决定是否保留。
+3. 调用时必须带**二选一**的理由，否则**直接拒绝**、不记录节点：\`justification\`
+   （一段话：试过哪些算子、各自为什么不行）或 \`capabilityGap\`（四个字段
+   missingCapability / triedOperators / whyInsufficient / expectedResult）。
+4. 理由会成为节点 description；收尾时告诉用户"有 1 个代码节点，原因是……"。
 
-上面「对话动作 → 算子映射」表里的算子都试过仍不行，才用代码节点——并且**只把那一步**
-放进代码，其余步骤继续用算子。
+上面映射表的算子都试过仍不行，才用代码节点——**只把那一步**放进代码。
+
+代码体两种写法等价：直接写裸表达式（\`document.title\`、\`await fetch('/api').then(r=>r.json())\`）
+会自动把结果作为节点返回值；也可以写语句体，用 \`return ...\` 或 \`automaNextBlock(...)\` 给出结果。
+
+**脚本产物交给后续算子（生成 canvas 图片再上传）**：代码里用
+\`automaSetVariable('<名>', 值)\` 暴露 data URL，再接 \`wf_op_upload-file\`：
+\`sourceMode:'workflow-file'\`、\`fileVariable:'<名>'\`、\`selector\` 指向控件。
+例：\`automaSetVariable('generatedImage', document.querySelector('#chart').toDataURL()); automaNextBlock()\`
 
 ## 聊天里给出的账号密码（直接存进触发器变量集）
 
 用户在对话里直接给出的账号 / 密码照常填进表单即可——value 写字面量。生成引擎会把它作为密文触发输入存进触发器变量集，节点自动改成引用，重放时自动填入；无需改用 get-secret，也不会写成死数据。建议用 inputName:'account' / 'password' 起清晰名字，后续直接复用。
 
+## upload-file
+
+\`user-select\` 选择后注入；\`workflow-file\` 填 \`fileVariable\`（URL/Artifact）。
+\`selector\` 指向控件/拖拽区，禁fill。
 ## 工具分发：算子按分类发送
 
 工作流模式**不会一次给你全部算子工具**。常驻只有 4 个：\`new-tab\`、\`event-click\`、
@@ -171,7 +164,7 @@ get-text/read-page 开 saveData 时 dataColumn 必填。trigger-event 用 event�
 | 保存单个值 | save-local | browser | value（**必须 \`{{引用}}\`**）, filename；写入配置的下载目录，成功/失败都提示 |
 | 导出数据表 | export-data | general | name, type:'csv'\|'json'\|'plain-text' |
 | 桌面通知 / 执行子工作流 | notification / execute-workflow | general | title+body / workflowId |
-| 运行 JavaScript（**最后手段**，见上） | javascript-code | escape | code, timeout, justification |
+| 运行 JavaScript（**最后手段**，见上） | javascript-code | escape | code, timeout, justification 或 capabilityGap |
 
 \`trigger\` 是起点（\`data.type:'manual'\`），固定开头，永不被剔除。
 
