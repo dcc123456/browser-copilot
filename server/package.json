@@ -11,7 +11,8 @@
     "test": "vitest run",
     "build": "vite build",
     "web:dev": "vite",
-    "smoke": "tsx scripts/smoke.ts"
+    "smoke": "tsx scripts/smoke.ts",
+    "replay-smoke": "tsx scripts/replay-smoke.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

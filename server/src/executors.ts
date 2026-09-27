@@ -421,21 +421,28 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
 
   // --- Browser executors -------------------------------------------------------
 
+  // `withWait` parity with the extension's executors: `applyDefaultWaits`
+  // force-sets `waitForSelector` on these blocks, and a flag the executor
+  // ignores is a wait that never happens — the runner would then fail steps
+  // the extension replays fine.
   const click: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    return runRaw({ action: 'click', target: targetFrom(data) }, ctx)
+    return runRaw(withWait({ action: 'click', target: targetFrom(data) }, data), ctx)
   }
 
   const fill: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const value = String(data['value'] ?? '')
-    return runRaw({ action: 'fill', target: targetFrom(data), value }, ctx)
+    return runRaw(withWait({ action: 'fill', target: targetFrom(data), value }, data), ctx)
   }
 
   const selectOption: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const value = String(data['value'] ?? '')
-    return runRaw({ action: 'select_option', target: targetFrom(data), value }, ctx)
+    return runRaw(
+      withWait({ action: 'select_option', target: targetFrom(data), value }, data),
+      ctx,
+    )
   }
 
   const scroll: BlockExecutor = async (data, ctx) => {
@@ -475,7 +482,7 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
       return null
     }
 
-    return runRaw(op, ctx)
+    return runRaw(withWait(op, data), ctx)
   }
 
   const pressKey: BlockExecutor = async (data, ctx) => {
@@ -487,13 +494,16 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
 
   const hover: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    return runRaw({ action: 'hover', target: targetFrom(data) }, ctx)
+    return runRaw(withWait({ action: 'hover', target: targetFrom(data) }, data), ctx)
   }
 
   const setCheckbox: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const checked = (data['checked'] as boolean | undefined) ?? true
-    return runRaw({ action: 'set_checkbox', target: targetFrom(data), value: checked }, ctx)
+    return runRaw(
+      withWait({ action: 'set_checkbox', target: targetFrom(data), value: checked }, data),
+      ctx,
+    )
   }
 
   const waitFor: BlockExecutor = async (data, ctx) => {
@@ -608,43 +618,36 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
   }
 
   // --- Navigation executors ------------------------------------------------------
+  //
+  // All three tab blocks rethrow, like the extension's (`executors.ts`
+  // `newTabExec`/`switchTabExec`/`closeTabExec`). Reporting a tab that never
+  // opened as green is the worst failure mode a replay can have: every later
+  // step then runs against the page the workflow had already left.
 
   const newTabExec: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const url = data['url'] ? String(data['url']) : undefined
-    try {
-      const tab = await driver.newTab(url)
-      ctx.setTab?.(tab.id)
-      if (url && data['waitTabLoaded'] !== false) {
-        await driver.waitForLoaded(tab.id)
-      }
-      ctx.emit('result', `已打开 ${url ?? '新标签页'} (tab #${tab.id})`)
-    } catch (error) {
-      ctx.emit('error', message(error))
+    const tab = await driver.newTab(url)
+    ctx.setTab?.(tab.id)
+    if (url && data['waitTabLoaded'] !== false) {
+      await driver.waitForLoaded(tab.id)
     }
+    ctx.emit('result', `已打开 ${url ?? '新标签页'} (tab #${tab.id})`)
     return null
   }
 
   const switchTabExec: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    try {
-      const tab = await driver.switchTab(Number(data['index'] ?? 0))
-      ctx.setTab?.(tab.id)
-      ctx.emit('result', `已切换到标签页 #${tab.id} (${tab.url})`)
-    } catch (error) {
-      ctx.emit('error', message(error))
-    }
+    const tab = await driver.switchTab(Number(data['index'] ?? 0))
+    ctx.setTab?.(tab.id)
+    ctx.emit('result', `已切换到标签页 #${tab.id} (${tab.url})`)
     return null
   }
 
   const closeTabExec: BlockExecutor = async (_data, ctx) => {
     assertActive(ctx)
-    try {
-      await driver.closeActiveTab()
-      ctx.emit('result', '已关闭当前标签页')
-    } catch (error) {
-      ctx.emit('error', message(error))
-    }
+    await driver.closeActiveTab()
+    ctx.emit('result', '已关闭当前标签页')
     return null
   }
 

@@ -56,6 +56,9 @@ function isContextLost(message: string): boolean {
   )
 }
 
+/** How long `switch-tab` waits for a tab that a previous click just opened. */
+const TAB_APPEAR_TIMEOUT_MS = 3_000
+
 export class RunDriver {
   private pages: Page[] = []
   private pageIds = new Map<Page, number>()
@@ -153,7 +156,12 @@ export class RunDriver {
   }
 
   listTabs(): DriverTab[] {
-    return this.pages.filter((p) => !p.isClosed()).map((page) => this.tabOf(page))
+    return this.openPages().map((page) => this.tabOf(page))
+  }
+
+  /** Open pages, in registration order (this is what `switch-tab` indexes). */
+  private openPages(): Page[] {
+    return this.pages.filter((page) => !page.isClosed())
   }
 
   /**
@@ -186,8 +194,18 @@ export class RunDriver {
   }
 
   async switchTab(index: number): Promise<DriverTab> {
-    const open = this.pages.filter((p) => !p.isClosed())
-    const page = open[Math.max(0, Math.floor(index))]
+    const wanted = Math.max(0, Math.floor(index))
+    // Runner-only race: the extension's `switch-tab` queries `chrome.tabs`, which
+    // already lists a tab that a click just spawned, while Playwright reports new
+    // pages through an event that arrives after the click resolves. Without the
+    // wait the step silently keeps driving the page the workflow left behind.
+    const deadline = Date.now() + TAB_APPEAR_TIMEOUT_MS
+    let open = this.openPages()
+    while (open.length <= wanted && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      open = this.openPages()
+    }
+    const page = open[wanted]
     if (!page) throw new DriverError(`switch-tab: 标签页序号不存在 (${index})`)
     this.active = page
     return { ...this.tabOf(page), title: await page.title().catch(() => '') }

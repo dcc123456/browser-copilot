@@ -1,0 +1,62 @@
+{
+  "id": "replay-slow-form",
+  "name": "replay smoke: fill a form that renders late",
+  "createdAt": 1700000000000,
+  "updatedAt": 1700000000000,
+  "revision": 1,
+  "settings": {
+    "saveLog": false,
+    "debugMode": false,
+    "notification": false,
+    "reuseLastState": true,
+    "provenance": "chat-generate",
+    "reliabilityMode": "generated-strict",
+    "defaultWaitMs": 4000,
+    "generationOriginUrl": "__BASE__/slow"
+  },
+  "drawflow": {
+    "nodes": [
+      {
+        "id": "t",
+        "label": "trigger",
+        "position": { "x": 0, "y": 0 },
+        "data": { "blockId": "trigger" }
+      },
+      {
+        "id": "open",
+        "label": "new-tab",
+        "position": { "x": 1, "y": 0 },
+        "data": { "blockId": "new-tab", "url": "__BASE__/slow" }
+      },
+      {
+        "id": "note",
+        "label": "forms",
+        "position": { "x": 2, "y": 0 },
+        "data": {
+          "blockId": "forms",
+          "type": "text-field",
+          "selector": "#note",
+          "value": "hello"
+        }
+      },
+      {
+        "id": "save",
+        "label": "click",
+        "position": { "x": 3, "y": 0 },
+        "data": { "blockId": "click", "selector": "#save" }
+      },
+      {
+        "id": "read",
+        "label": "get-text",
+        "position": { "x": 4, "y": 0 },
+        "data": { "blockId": "get-text", "selector": "#out" }
+      }
+    ],
+    "edges": [
+      { "id": "e0", "source": "t", "target": "open" },
+      { "id": "e1", "source": "open", "target": "note" },
+      { "id": "e2", "source": "note", "target": "save" },
+      { "id": "e3", "source": "save", "target": "read" }
+    ]
+  }
+}

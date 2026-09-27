@@ -1,0 +1,64 @@
+{
+  "id": "replay-popup-tab",
+  "name": "replay smoke: follow a link that opens a new tab",
+  "createdAt": 1700000000000,
+  "updatedAt": 1700000000000,
+  "revision": 1,
+  "settings": {
+    "saveLog": false,
+    "debugMode": false,
+    "notification": false,
+    "reuseLastState": true,
+    "provenance": "chat-generate",
+    "reliabilityMode": "generated-strict",
+    "defaultWaitMs": 4000,
+    "generationOriginUrl": "__BASE__/popup"
+  },
+  "drawflow": {
+    "nodes": [
+      {
+        "id": "t",
+        "label": "trigger",
+        "position": { "x": 0, "y": 0 },
+        "data": { "blockId": "trigger" }
+      },
+      {
+        "id": "open",
+        "label": "new-tab",
+        "position": { "x": 1, "y": 0 },
+        "data": { "blockId": "new-tab", "url": "__BASE__/popup" }
+      },
+      {
+        "id": "link",
+        "label": "click",
+        "position": { "x": 2, "y": 0 },
+        "data": { "blockId": "click", "selector": "#open" }
+      },
+      {
+        "id": "switch",
+        "label": "switch-tab",
+        "position": { "x": 3, "y": 0 },
+        "data": { "blockId": "switch-tab", "index": 2 }
+      },
+      {
+        "id": "settle",
+        "label": "delay",
+        "position": { "x": 4, "y": 0 },
+        "data": { "blockId": "delay", "time": 1200 }
+      },
+      {
+        "id": "read",
+        "label": "get-text",
+        "position": { "x": 5, "y": 0 },
+        "data": { "blockId": "get-text", "selector": "#detail-title" }
+      }
+    ],
+    "edges": [
+      { "id": "e0", "source": "t", "target": "open" },
+      { "id": "e1", "source": "open", "target": "link" },
+      { "id": "e2", "source": "link", "target": "switch" },
+      { "id": "e3", "source": "switch", "target": "settle" },
+      { "id": "e4", "source": "settle", "target": "read" }
+    ]
+  }
+}

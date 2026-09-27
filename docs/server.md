@@ -405,4 +405,15 @@ data/
 pnpm --dir server typecheck   # 类型检查
 pnpm --dir server test        # 单元测试（无浏览器）
 pnpm --dir server smoke       # 端到端冒烟：起本地夹具页 + 真实 Chromium 跑父子工作流
+pnpm --dir server replay-smoke  # 回放冒烟：夹具站点 + 真 Chromium 验证生成工作流的首跑要素
 ```
+
+`replay-smoke`（等价于根目录 `pnpm test:replay`）验证的是"生成的工作流第一次回放能不能跑通"：
+
+- 夹具站点故意做出真实站点的四种劣化形态——延迟渲染、五行同构按钮、提交后整块 DOM 被替换、点击后开新标签页；
+- 工作流夹具在 `test/fixtures/replay/*.workflow.json`，形状与生成产物一致（`data.selector` + `data.target` 候选链）；
+- 两个层次：A 层直接对内核 `runOp` 下发 `resolvePolicy`，逐级验证降级阶梯（rung 1/2/3/4）与关掉阶梯时的 `LOCATOR_AMBIGUOUS` 拒答；B 层用共享引擎整图回放，并且**每个绿色断言都配一次反证**（去掉候选链 / 去掉元素等待后必须失败或点错行）；
+- 「点击开新标签页 → switch-tab」这条链在 runner 里额外需要等待：Playwright 的新页面事件晚于点击返回，所以 `RunDriver.switchTab` 会等目标序号出现（上限 3s）；同时 tab 类块（`new-tab`/`switch-tab`/`close-tab`）失败一律让节点失败，与插件端一致——把没切成功的标签页报成绿色，后面的步骤就会在错误的页面上假绿到底；
+- 需要 `npx playwright install chromium`；它**不进** `pnpm test`（根 vitest 是 node 环境），也不要挂进 CI 的默认档。
+
+诚实边界：runner 有自己的 executors/driver，不会给 op 下发 `resolvePolicy`，所以 A 层是 op 级验证内核解析器，B 层是节点级验证 compat 解析；自愈回写（`node.data.__resolution`）与需要后台钩子的严格门禁（readiness、条件求值）在这里够不到。注入内核的端到端覆盖见 `tests/kernel-degrade-ladder.spec.ts`。
