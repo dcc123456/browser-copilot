@@ -255,3 +255,29 @@ export function targetSpecFromSemantic(
   }
   return undefined
 }
+
+/**
+ * EVERY kernel spec a semantic locator can honestly express, strongest first —
+ * the identity {@link targetSpecFromSemantic} picks plus the recorded CSS
+ * selector carried under the `data-css` stable attribute (see `auto-contract`).
+ *
+ * Probes observe through the full chain because an element the node can click
+ * must never read as "absent" to a wait or a condition. A single-spec locator is
+ * how an `elementExists` postcondition stayed permanently false after harmless
+ * DOM drift. Specs with an empty value are dropped: `{how:'role', value:''}` is
+ * the shape the kernel resolves to EVERY element on the page.
+ */
+export function targetSpecsFromSemantic(
+  locator: SemanticLocator,
+): import('../ops').TargetSpec[] {
+  const out: import('../ops').TargetSpec[] = []
+  const push = (spec: import('../ops').TargetSpec | undefined): void => {
+    if (!spec || !spec.value.trim()) return
+    if (out.some((s) => s.how === spec.how && s.value === spec.value)) return
+    out.push(spec)
+  }
+  push(targetSpecFromSemantic(locator))
+  const css = locator.stableAttributes?.['data-css']
+  if (typeof css === 'string') push({ how: 'css', value: css.trim() })
+  return out
+}

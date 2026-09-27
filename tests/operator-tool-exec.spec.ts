@@ -230,7 +230,12 @@ describe('locator resolution', () => {
     expect(actionNodesOf(getDraftSnapshot('c-stale-ref')!)).toHaveLength(0)
   })
 
-  it('refuses an ambiguous role/text target that matched multiple elements', async () => {
+  it('records an ambiguous role/text target rather than refusing the step', async () => {
+    // Refusing was the old policy: a locator that matched several elements lost
+    // a step the agent had ALREADY performed correctly, so generation produced
+    // fewer nodes than the task needed. The node is now recorded and replay
+    // walks its candidate chain (see `recordedTargetChainOf` / the rank
+    // resolver), degrading inside the step instead of dropping it.
     const executors: Record<string, BlockExecutor> = {
       'event-click': async (_data, ctx) => {
         ctx.lastResolution = { usedSpec: 'role|button', usedFallback: false, matched: 3 }
@@ -244,9 +249,14 @@ describe('locator resolution', () => {
       { executors },
     )
 
-    expect(out.ok).toBe(false)
-    if (!out.ok) expect(out.error).toContain('多个元素')
-    expect(actionNodesOf(getDraftSnapshot('c-ambiguous')!)).toHaveLength(0)
+    expect(out.ok).toBe(true)
+    const node = actionNodesOf(getDraftSnapshot('c-ambiguous')!)[0]!
+    // No probe evidence, no CSS form for a role spec: nothing is fabricated.
+    expect(node.data).not.toHaveProperty('selector')
+    expect(node.data.target).toEqual({
+      primary: { how: 'role', value: 'button' },
+      fallbacks: [],
+    })
   })
 
   it('does not inject a selector into a block that takes no element', async () => {

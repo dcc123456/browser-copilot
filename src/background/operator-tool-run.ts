@@ -13,9 +13,15 @@
  * @module background/operator-tool-run
  */
 
-import { reliabilityLocatorOf, resolveRecordedLocator } from '../lib/workflow/target-to-selector'
-import { selectorAfterExecution, selectorCandidatesOf } from '../lib/workflow/target-to-selector'
+import {
+  recordedTargetChainOf,
+  resolveRecordedLocator,
+  reliabilityLocatorOf,
+  selectorAfterExecution,
+  selectorCandidatesOf,
+} from '../lib/workflow/target-to-selector'
 import type { RecordedLocator, SnapshotTargetEntry } from '../lib/workflow/target-to-selector'
+import type { Target } from '../lib/ops'
 import { countSelectorMatches } from './selector-probe'
 import {
   beginSelectorTrace,
@@ -219,6 +225,10 @@ export type OperatorRunResult =
  * `selectorVerified`, and an unverified one that lost its CSS candidate
  * records NO selector at all — the rich target becomes the replay's primary.
  *
+ * When `chain` is supplied it REPLACES the target the call was made with: it is
+ * the same locator's specs plus every candidate the live page proved unique,
+ * ordered for replay. The flat selector stays the kernel's primary either way.
+ *
  * The reliability layer additionally saves the element's SEMANTIC identity
  * under `__reliability.locator` (spec §5.5): role/accessible name/test id —
  * meaning that survives DOM drift, not a positional path. The flat fields
@@ -228,9 +238,11 @@ function withLocator(
   args: Record<string, unknown>,
   locator: RecordedLocator | undefined,
   recorded?: { selector: string; verified: boolean },
+  chain?: Target,
 ): Record<string, unknown> {
   if (!locator) return args
-  const { target, label } = locator
+  const { label } = locator
+  const target = chain ?? locator.target
   // When post-execution evidence exists it decides the flat selector;
   // otherwise keep the resolved locator's selector (it still plays, even
   // unverified — the kernel's rich target is the fallback).
@@ -527,6 +539,7 @@ function rewriteForRecording(
   // supply the evidence. When no probe ran (or no resolution was reported),
   // the locator stays as resolved.
   let recordedSelector: { selector: string; verified: boolean } | undefined
+  let chain: Target | undefined
   if (locator && outcome.resolution) {
     const countOf = (selector: string): number => {
       const idx = probeCandidates.indexOf(selector)
@@ -538,34 +551,26 @@ function rewriteForRecording(
       countOf,
     })
     markChosen(trace, recordedSelector)
+    chain = recordedTargetChainOf({
+      locator,
+      usedSpec: outcome.resolution.usedSpec,
+      countOf,
+    })
   }
 
-  // A2 — a node that records NO flat selector (relies on the rich role/text
-  // target) is only replayable when that target resolves to EXACTLY ONE element.
-  // At generation the legacy resolver acts on the first of many without
-  // refusing, so an ambiguous role/text match records a node that would click
-  // the wrong element at replay. Refuse and demand stronger evidence.
-  if (
-    recordedSelector &&
-    recordedSelector.selector === '' &&
-    outcome.resolution &&
-    typeof outcome.resolution.matched === 'number' &&
-    outcome.resolution.matched > 1
-  ) {
-    const error =
-      'Refused: this element resolved by role/text but matched multiple elements (' +
-      `${outcome.resolution.matched}); a node with no unique CSS selector would replay against the wrong element. ` +
-      '已拒绝：该元素以 role/text 定位但命中了多个元素，无法保证重放唯一性。本次未执行、未记录节点。' +
-      '请补强证据：提供唯一 data-testid / id / name，或精确到唯一元素的稳定选择器。'
-    commitSelectorTrace(trace, { ok: false, error })
-    return { ok: false, error }
-  }
+  // A node that records no flat selector replays on its rich target's specs. It
+  // used to be refused when the executed spec matched several elements — the
+  // legacy resolver takes the first match, so the recorded node could click the
+  // wrong one. Refusal was the wrong remedy: it lost a step the agent had
+  // already performed correctly, and the chain above is the better answer. An
+  // ambiguous target now degrades through that chain at replay (see the rank
+  // resolver) and reports what it clicked, instead of never being recorded.
 
   // Rebuild the recorded data with the post-execution locator. `withLocator`
   // also strips a stale pre-execution selector when the node must rely on
   // the rich target.
   const locatedRedactedData = recordedSelector
-    ? withLocator(redactedData, locator, recordedSelector)
+    ? withLocator(redactedData, locator, recordedSelector, chain)
     : redactedData
 
   // AI prefill: swap the composed literal for the producer's variable BEFORE
