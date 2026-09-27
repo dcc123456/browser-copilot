@@ -27,6 +27,8 @@ export interface PendingRepairSession {
   workingCopy: Workflow
   patch: WorkflowPatchSet
   analysis: FailureAnalysis
+  /** Trace of the failed run the proposal was produced from (replay planning). */
+  trace: import('../../../lib/workflow/repair/types').ExecutionTrace
   verification: VerificationResult
   /**
    * Formal workflow's `updatedAt` at the moment the repair was produced.

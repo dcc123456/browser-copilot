@@ -77,6 +77,17 @@ export function hasLocator(data: Record<string, unknown>): boolean {
   return richTargetFromAny(data['target']) !== undefined
 }
 
+/**
+ * Whether this block REQUIRES an element locator. Distinct from "can take one"
+ * (`blockTakesElement`, which reflects `refDataKeys`): `press-key` and
+ * `element-scroll` accept an optional `selector` but work without one, so only
+ * the blocks carrying a `locator` requirement in the table must be refused when
+ * their locator resolves to nothing.
+ */
+export function requiresLocator(blockId: string): boolean {
+  return REQUIREMENTS[blockId]?.locator !== undefined
+}
+
 const LOCATOR_MESSAGE =
   '缺少元素定位：请传 snapshot 的 ref，或非空 selector，或 target（primary 的 how 与 value 都必须非空）。' +
   '三者有其一，否则本节点不会记录。'
@@ -192,9 +203,20 @@ const REQUIREMENTS: Readonly<Record<string, RequirementSet>> = {
   },
   'upload-file': {
     locator: LOCATOR_MESSAGE,
-    params: [
-      { key: 'fileData', message: '必须给 fileData（文件的 data: URL），否则上传没有内容' },
-    ],
+    check: (data) => {
+      const mode = data['sourceMode']
+      if (mode !== 'user-select' && mode !== 'workflow-file') {
+        return "必须给出 sourceMode：'user-select' 或 'workflow-file'"
+      }
+      if (
+        mode === 'workflow-file' &&
+        !String(data['fileVariable'] ?? '').trim() &&
+        data['fileData'] === undefined
+      ) {
+        return "workflow-file 模式必须给出 fileVariable（存放文件的变量名）"
+      }
+      return null
+    },
   },
   'create-element': {
     params: [{ key: 'html', message: '必须给 html（要注入页面的元素标记）' }],

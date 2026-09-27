@@ -15,6 +15,7 @@ import SkillsTab from './SkillsTab'
 import TasksTab from './TasksTab'
 import WorkflowsTab from './WorkflowsTab'
 import WindowPicker from './WindowPicker'
+import UserFilePickerCardHost from './UserFilePickerCard'
 import { ConfirmHost } from '../ui/confirm'
 
 type TabId = 'chat' | 'skills' | 'agents' | 'tasks' | 'workflows' | 'history' | 'data' | 'settings'
@@ -343,6 +344,8 @@ export default function App() {
       <ConfirmHost />
       {/* Multi-window picker for "ask" unattended runs (see background/window-policy). */}
       <WindowPicker />
+      {/* Workflow upload-file blocks in user-select mode ask here for files. */}
+      <UserFilePickerCardHost />
     </I18nProvider>
   )
 }

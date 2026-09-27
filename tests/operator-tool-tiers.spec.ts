@@ -176,12 +176,22 @@ describe('operator category partition', () => {
     const escape = buildWorkflowEscapeTools()[0]!
     const params = escape.function.parameters as { required?: string[] }
     expect(escape.function.name).toBe('wf_op_javascript-code')
-    expect(params.required).toEqual(['code', 'justification'])
+    // The escape hatch needs `code` plus one of justification / capabilityGap
+    // (a parent-level anyOf JSON Schema cannot express); only `code` is listed
+    // required, and the unified gate (evaluateJsPermission) enforces the rest.
+    expect(params.required).toEqual(['code'])
+    const properties = (params as { properties: Record<string, unknown> }).properties
+    expect(properties).toHaveProperty('justification')
+    const gapSchema = properties['capabilityGap'] as { required?: string[] }
+    expect(gapSchema.required).toEqual([
+      'missingCapability',
+      'triedOperators',
+      'whyInsufficient',
+      'expectedResult',
+    ])
     // Declarative operators carry ONLY the requirements the shared
     // block-requirements table derives (`schemaRequiredArgs`) — the same table
-    // the record gate refuses calls on, so schema and gate cannot drift. The
-    // escape hatch's `justification` is a draft-only affordance the bridge
-    // strips, which is why it is appended on top of the table's `code`.
+    // the record gate refuses calls on, so schema and gate cannot drift.
     const expected = (name: string): string[] | undefined => {
       const entry = PALETTE_BLOCKS.find((b) => operatorToolName(b.id) === name)
       return entry

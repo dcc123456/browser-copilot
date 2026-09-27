@@ -1140,7 +1140,7 @@ export const BLOCK_CATALOG: BlockCatalogEntry[] = [
   {
     id: 'upload-file',
     name: 'Upload file',
-    description: 'Attach a file to a file input element',
+    description: 'Attach a user-selected or Workflow-generated file to an upload control',
     icon: 'lucide:FileUp',
     component: 'Default',
     editComponent: 'EditUploadFile',
@@ -1149,14 +1149,20 @@ export const BLOCK_CATALOG: BlockCatalogEntry[] = [
     outputs: 1,
     allowedInputs: true,
     maxConnection: 1,
-    refDataKeys: ['selector', 'filePaths'],
+    refDataKeys: ['selector'],
     data: {
       disableBlock: false,
       findBy: 'cssSelector',
-      waitForSelector: false,
-      waitSelectorTimeout: 5000,
+      // Source: 'user-select' (native picker in the Browser Copilot UI) or
+      // 'workflow-file' (a file already in a Workflow variable).
+      sourceMode: 'user-select',
       selector: '',
-      filePaths: [],
+      fileVariable: '',
+      accept: '',
+      multiple: false,
+      waitForSelector: false,
+      waitSelectorTimeout: 10000,
+      verifyAfterUpload: true,
     },
     cloud: false,
   },

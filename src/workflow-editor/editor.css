@@ -441,6 +441,8 @@
   gap: 2px;
 }
 .wf-tab {
+  display: inline-flex;
+  align-items: center;
   border: none;
   background: transparent;
   padding: 6px 12px;

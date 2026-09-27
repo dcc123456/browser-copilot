@@ -295,6 +295,118 @@ function scoredSelectorCandidatesOf(
   return out.slice(0, MAX_CANDIDATES)
 }
 
+/**
+ * Parse one kernel-serialized spec (`how|value` or `how|value|role=x|tag=y|
+ * nth=z`) back into its components. The kernel's `serializeSpec` joins with
+ * `|`, so the value runs from after the first `|` up to the first recognized
+ * `role=`/`tag=`/`nth=` suffix. Returns null when the shape is unusable.
+ */
+export function parseSerializedSpec(text: string): {
+  how: string
+  value: string
+  role?: string
+  tag?: string
+  nth?: number
+} | null {
+  if (typeof text !== 'string') return null
+  const bar = text.indexOf('|')
+  if (bar <= 0) return null
+  const how = text.slice(0, bar).trim()
+  if (!how) return null
+  let rest = text.slice(bar + 1)
+  let role: string | undefined
+  let tag: string | undefined
+  let nth: number | undefined
+  // Repeatedly peel a trailing `key=value` suffix; value itself never
+  // contains `|role=` etc. (it is selector/name text).
+  for (;;) {
+    const match = /\|(role|tag|nth)=([^|]*)$/.exec(rest)
+    if (!match) break
+    const key = match[1]
+    const rawValue = match[2] ?? ''
+    if (key === 'role') role = rawValue
+    else if (key === 'tag') tag = rawValue
+    else {
+      const parsed = Number(rawValue)
+      if (Number.isFinite(parsed)) nth = parsed
+    }
+    rest = rest.slice(0, match.index)
+  }
+  return { how, value: rest, ...(role ? { role } : {}), ...(tag ? { tag } : {}), ...(typeof nth === 'number' ? { nth } : {}) }
+}
+
+/**
+ * Choose the recorded locator AFTER execution, from the spec the kernel
+ * really resolved.
+ *
+ * The pre-execution picker chose among candidates it HOPED would match; this
+ * picks from what DID. When the executed spec is CSS-mappable (css/id/name/
+ * testid/tag) its own selector is recorded verbatim — the exact locator that
+ * worked, never a generic stand-in. When the executed spec was role/text (no
+ * safe CSS form), the rich target stays primary and the CSS candidates the
+ * kernel's target also carries become the flat selector only if one of them
+ * is verified to match exactly one element — preserving the old fallback
+ * behavior without ever preferring a generic path over a precise one.
+ *
+ * @returns the flat selector ('' = rely on the rich target) and whether it
+ *   was verified to match exactly one element.
+ */
+export function selectorAfterExecution(input: {
+  /** The kernel's serialized spec that really matched the element. */
+  usedSpec: string
+  /** The full locator the call was made with (rich target + candidates). */
+  locator: RecordedLocator
+  /** Live match counts for the locator's CSS candidates, already probed. */
+  countOf: (selector: string) => number
+}): { selector: string; verified: boolean } {
+  const executed = parseSerializedSpec(input.usedSpec)
+  if (executed) {
+    const direct = selectorFromSpec({
+      how: executed.how,
+      value: executed.value,
+      tag: executed.tag,
+      nth: executed.nth,
+    })
+    if (direct) {
+      const count = input.countOf(direct)
+      // When no live probe was possible (countOf has no evidence, returns 0
+      // for everything) fall back to the kernel's own resolution: the spec
+      // matched the element, and when the whole target matched exactly one
+      // the locator is verified. Never fabricate verification when the
+      // evidence exists and says otherwise.
+      if (count === 1) return { selector: direct, verified: true }
+      if (count > 1) return { selector: direct, verified: false }
+      const noEvidence =
+        selectorCandidatesOf(input.locator).every((s) => input.countOf(s) === 0)
+      if (noEvidence) {
+        return {
+          selector: direct,
+          verified:
+            typeof input.locator.verified === 'boolean'
+              ? input.locator.verified
+              : true,
+        }
+      }
+      return { selector: direct, verified: false }
+    }
+  }
+  // Executed by role/text: no CSS form of the winning spec. Keep a CSS
+  // candidate from the SAME target only when one is proven unique; prefer
+  // the highest-scored exact-one candidate, as the pre-execution picker did.
+  const scored = scoredSelectorCandidatesOf(input.locator, input.countOf)
+  const exact = scored.filter((entry) => entry.count === 1)
+  if (exact.length > 0) {
+    let best = exact[0]!
+    for (const entry of exact) {
+      if (entry.score > best.score) best = entry
+    }
+    return { selector: best.selector, verified: true }
+  }
+  // Nothing CSS is provably unique. Record no flat selector: the rich
+  // target (the role/text spec that worked) is the replay's primary.
+  return { selector: '', verified: false }
+}
+
 /** Attach the rich locator to flat block data when present. */
 export function withRichTarget(
   data: Record<string, unknown>,

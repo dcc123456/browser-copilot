@@ -24,6 +24,7 @@ import { sanitizeModelAnswer } from '../../src/lib/model-output'
 import { streamCompletion, type WireMessage } from '../../src/lib/llm'
 import { preprocessImage } from '../../src/lib/vision'
 import { interpolate } from '../../src/lib/workflow/interpolate'
+import { normalizeWorkflowFiles } from '../../src/lib/workflow/file-artifact'
 import type { Op, ScrollSpec, Target, TargetSpec } from '../../src/lib/ops'
 import type { RunnerConfig } from './config'
 import type { RunDriver } from './driver'
@@ -1130,24 +1131,55 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
   const uploadFileExec: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const selector = sel(data)
-    const dataUrl = interpolate(String(data['fileData'] ?? ''), ctx.variables, ctx.refData)
-    try {
-      const payload = dataUrlToFilePayload(dataUrl)
-      if (!payload) {
-        ctx.emit('error', 'upload-file: fileData 需要是 data: URL（base64）')
-        return null
-      }
-      const page = driver.pageForUpload(ctx.tabId)
-      const locator = page.locator(selector).first()
-      await locator.setInputFiles({
-        name: `${payload.name}.${mimeTypeExtension(payload.mimeType)}`,
-        mimeType: payload.mimeType,
-        buffer: payload.buffer,
-      })
-      ctx.emit('result', '已设置文件输入')
-    } catch (error) {
-      ctx.emit('error', message(error))
+    if (!selector) throw new Error('upload-file: missing selector')
+
+    const rawMode = String(data['sourceMode'] ?? '').trim()
+    const sourceMode: 'user-select' | 'workflow-file' =
+      rawMode === 'workflow-file'
+        ? 'workflow-file'
+        : rawMode === 'user-select'
+          ? 'user-select'
+          : data['fileData'] !== undefined
+            ? 'workflow-file'
+            : 'user-select'
+
+    if (sourceMode === 'user-select') {
+      // The headless server has no UI to pick a local file.
+      throw new Error(
+        'upload-file: user-select mode is unavailable in the headless server; use workflow-file mode.',
+      )
     }
+
+    const fileVariable = String(data['fileVariable'] ?? '').trim()
+    let raw: unknown
+    if (fileVariable) {
+      if (!(fileVariable in ctx.variables)) {
+        throw new Error(`upload-file: variable "${fileVariable}" is not set.`)
+      }
+      raw = ctx.variables[fileVariable]
+    } else if (data['fileData'] !== undefined) {
+      raw = interpolate(String(data['fileData'] ?? ''), ctx.variables, ctx.refData)
+    } else {
+      throw new Error('upload-file: workflow-file mode requires a fileVariable.')
+    }
+
+    const files = normalizeWorkflowFiles(raw)
+    const payloads = files.map((f) => {
+      const payload = dataUrlToFilePayload(f.dataUrl)
+      if (!payload) throw new Error(`upload-file: invalid data URL for "${f.name}"`)
+      return {
+        name: f.name,
+        mimeType: f.mimeType || payload.mimeType,
+        buffer: payload.buffer,
+      }
+    })
+
+    const page = driver.pageForUpload(ctx.tabId)
+    const locator = page.locator(selector).first()
+    await locator.setInputFiles(
+      payloads as unknown as Parameters<typeof locator.setInputFiles>[0],
+    )
+    ctx.emit('result', `Uploaded ${payloads.length} file(s)`)
     return null
   }
 
@@ -1651,19 +1683,4 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     'specific-day': noop,
     'element-change': noop,
   }
-}
-
-// --- Helpers ---------------------------------------------------------------------
-
-function mimeTypeExtension(mimeType: string): string {
-  const table: Record<string, string> = {
-    'image/png': 'png',
-    'image/jpeg': 'jpg',
-    'image/gif': 'gif',
-    'image/webp': 'webp',
-    'application/pdf': 'pdf',
-    'text/plain': 'txt',
-    'text/csv': 'csv',
-  }
-  return table[mimeType] ?? 'bin'
 }

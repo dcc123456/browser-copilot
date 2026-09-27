@@ -123,6 +123,8 @@ export type ActionName =
   | 'capture'
   | 'page_signature'
   | 'actionability'
+  | 'upload_files'
+  | 'drop_files'
   | 'exec_js'
   | 'exec_workflow_js'
 
@@ -172,11 +174,30 @@ export interface Op {
    */
   jsArgNames?: string[]
   /**
+   * Files for `upload_files` / `drop_files`: plain descriptors carrying a
+   * data URL, decoded in-page into `Blob`/`File` objects (see
+   * `lib/workflow/file-artifact`).
+   */
+  files?: PageFilePayload[]
+  /**
+   * Target strategy for file ops. `input` injects into input.files;
+   * `dropzone` synthesizes dragenter/dragover/drop; `auto` picks based on
+   * the resolved element (file input → inject, otherwise drop).
+   */
+  fileTarget?: 'input' | 'dropzone' | 'auto'
+  /**
    * The resolve policy for THIS op's target (see {@link ResolvePolicy}).
    * Absent = compat. The engine attaches it from the workflow's reliability
    * contract on every element op of a generated-strict run.
    */
   resolvePolicy?: ResolvePolicy
+}
+
+/** One file descriptor handed into the page for upload/drop ops. */
+export interface PageFilePayload {
+  name: string
+  mimeType: string
+  dataUrl: string
 }
 
 /** A snapshot entry for one interactive element. */

@@ -56,6 +56,8 @@ import BlockSettingsModal from './blocks/shared/BlockSettingsModal'
 import LogsModal from './sidebar/LogsModal'
 import { WorkflowMetaProvider } from './blocks/batchD/WorkflowInfoFields'
 import TopToolbar from './toolbar/TopToolbar'
+import CertificationModal from './sidebar/CertificationModal'
+import type { VerificationReport } from '../background/workflow-engine/goal-verification'
 import CanvasControls from './toolbar/CanvasControls'
 import { useToast } from './toast'
 import { ToastHost } from '../ui/toast'
@@ -125,6 +127,7 @@ export default function EditorApp() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
+  const [certReport, setCertReport] = useState<VerificationReport | null>(null)
   const [recording, setRecording] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -353,6 +356,66 @@ export default function EditorApp() {
     )
   }, [])
 
+  // Replace a node's ENTIRE block data (used when applying an AI-fix result or
+  // reverting it). Unlike patchNode this does not merge, so parameters the fix
+  // removed do not linger in the node.
+  const replaceNodeData = useCallback((id: string, next: Record<string, unknown>) => {
+    setNodes((nds) =>
+      nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, blockData: next } } : n)),
+    )
+  }, [])
+
+  // Per-node pre-fix snapshots for manual restore (in-memory, session only).
+  // Keyed by node id; each stack holds the blockData captured before a fix.
+  const fixSnapshotsRef = useRef<Map<string, Record<string, unknown>[]>>(new Map())
+  // Node ids that currently have at least one snapshot; drives canRevert.
+  const [revertibleIds, setRevertibleIds] = useState<ReadonlySet<string>>(new Set())
+
+  const syncRevertible = useCallback(() => {
+    setRevertibleIds(
+      (prev) => {
+        const next = new Set<string>()
+        for (const [id, stack] of fixSnapshotsRef.current) {
+          if (stack.length > 0) next.add(id)
+        }
+        // Keep reference equality when unchanged to avoid extra renders.
+        if (prev.size === next.size && [...prev].every((id) => next.has(id))) return prev
+        return next
+      },
+    )
+  }, [])
+
+  const applyNodeFix = useCallback(
+    (id: string, next: Record<string, unknown>) => {
+      const target = nodes.find((n) => n.id === id)
+      if (!target) return
+      const stack = fixSnapshotsRef.current.get(id) ?? []
+      stack.push(structuredClone(target.data.blockData))
+      // Bound the undo history.
+      if (stack.length > 10) stack.shift()
+      fixSnapshotsRef.current.set(id, stack)
+      replaceNodeData(id, structuredClone(next))
+      // Applying a fix invalidates a prior certification until re-run.
+      setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
+      syncRevertible()
+    },
+    [nodes, replaceNodeData, syncRevertible],
+  )
+
+  const revertNodeFix = useCallback(
+    (id: string) => {
+      const stack = fixSnapshotsRef.current.get(id)
+      const snapshot = stack?.pop()
+      if (!snapshot || !stack) return
+      if (stack.length === 0) fixSnapshotsRef.current.delete(id)
+      replaceNodeData(id, snapshot)
+      setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
+      syncRevertible()
+      toast.show(t('nodeFixRevertDone'), 'ok')
+    },
+    [replaceNodeData, syncRevertible, toast, t],
+  )
+
   const deleteNode = useCallback(
     (id: string) => {
       setNodes((nds) => nds.filter((n) => n.id !== id))
@@ -469,6 +532,8 @@ export default function EditorApp() {
           ...(windowId !== undefined ? { windowId } : {}),
         })
         if (r.type === 'workflows.run') {
+          const cert = (r.outcome as { certification?: VerificationReport }).certification
+          if (cert) setCertReport(cert)
           if (r.outcome.ok)
             toast.show(startNodeId ? t('runFromHereFinished') : t('runFinished'), 'ok')
           else {
@@ -704,12 +769,21 @@ export default function EditorApp() {
             block={editBlock}
             nodeName={String(editNode.data.blockData?.description ?? editBlock.name)}
             data={editNode.data.blockData}
-            onChange={(patch) => patchNode(editNode.id, patch)}
+            onChange={(patch) => {
+              patchNode(editNode.id, patch)
+              // Editing node data (including the Goal Contract) invalidates a
+              // prior certification until L3 is re-run.
+              setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
+            }}
             t={t}
             onBack={() => {
               setEditingId(null)
               setNodes((nds) => nds.map((n) => ({ ...n, selected: false })))
             }}
+            onApplyFix={(next) => applyNodeFix(editNode.id, next)}
+            windowId={hostWindowId()}
+            canRevert={revertibleIds.has(editNode.id)}
+            onRevert={() => revertNodeFix(editNode.id)}
           />
         </WorkflowMetaProvider>
       </div>
@@ -831,6 +905,7 @@ export default function EditorApp() {
         />
 
         {/* Run-logs / debug viewer modal. */}
+        <CertificationModal report={certReport} onClose={() => setCertReport(null)} t={t} />
         <LogsModal
           open={logsOpen}
           onClose={() => setLogsOpen(false)}

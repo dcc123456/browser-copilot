@@ -30,8 +30,14 @@ export interface WorkflowReviewListProps {
    * error / unusable reply), shown under the generic hint when present.
    */
   unavailableReason?: string
-  /** stepId → keep; absent = keep (also the state before the review lands). */
+  /** stepId → keep; absent = keep (state before the review lands). */
   keep: Record<string, boolean> | null
+  /**
+   * Steps that cannot be dropped: removing them would break runnability
+   * (missing variable producer, last action node…). Their checkbox is locked
+   * on and shown with an explanatory tooltip.
+   */
+  requiredStepIds?: readonly string[]
   onToggle: (stepId: string, keep: boolean) => void
 }
 
@@ -49,10 +55,12 @@ export function WorkflowReviewList({
   reviewing,
   unavailableReason,
   keep,
+  requiredStepIds,
   onToggle,
 }: WorkflowReviewListProps): ReactElement {
   const { t } = useI18n()
   const blockName = useBlockName()
+  const required = new Set(requiredStepIds ?? [])
 
   if (!review) {
     return (
@@ -87,16 +95,22 @@ export function WorkflowReviewList({
           checklist scrolls with it instead of nesting scrollbars. */}
       <div className="flex flex-col gap-0.5 pr-1">
         {steps.map((step) => {
-          const kept = keep?.[step.id] !== false
+          const isRequired = required.has(step.id)
+          // A required step can never be unkept even if `keep` says otherwise.
+          const kept = isRequired || keep?.[step.id] !== false
           const reason = reasonOf.get(step.id)
           return (
             <label
               key={step.id}
-              className="flex cursor-pointer items-start gap-2 rounded-md px-1.5 py-1 transition-colors duration-150 hover:bg-hover"
+              className={`flex items-start gap-2 rounded-md px-1.5 py-1 transition-colors duration-150 ${
+                isRequired ? 'cursor-not-allowed' : 'cursor-pointer hover:bg-hover'
+              }`}
+              title={isRequired ? t.chatWorkflowStepRequiredHint : undefined}
             >
               <input
                 checked={kept}
                 className="mt-0.5"
+                disabled={isRequired}
                 onChange={(event) => onToggle(step.id, event.target.checked)}
                 type="checkbox"
               />
@@ -104,6 +118,11 @@ export function WorkflowReviewList({
                 <span className="block break-words text-[12.5px] leading-snug text-ink">
                   {blockName(step.blockId)}
                   {step.description ? ` · ${step.description}` : ''}
+                  {isRequired && (
+                    <span className="ml-1 text-[10.5px] font-medium text-accent">
+                      {t.chatWorkflowStepRequired}
+                    </span>
+                  )}
                 </span>
                 {step.satelliteSummary.length > 0 && (
                   <span className="block break-words text-[11.5px] leading-snug text-muted">
@@ -164,6 +183,7 @@ export function WorkflowReviewDialog({
   onConfirm,
   onCancel,
   onRetry,
+  requiredStepIds,
   ...list
 }: WorkflowReviewDialogProps): ReactElement {
   const { t } = useI18n()
@@ -180,7 +200,7 @@ export function WorkflowReviewDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[1000] flex items-start justify-center p-4 pt-[9vh]"
+      className="fixed inset-0 z-[10001] flex items-start justify-center p-4 pt-[9vh]"
       role="presentation"
     >
       {/* `fixed` backdrop: covers the viewport even when the dialog below
@@ -229,7 +249,7 @@ export function WorkflowReviewDialog({
             )}
           </div>
         )}
-        <WorkflowReviewList {...list} />
+        <WorkflowReviewList {...list} requiredStepIds={requiredStepIds} />
         {saveError && (
           <p className="m-0 mt-1.5 text-[11.5px] leading-relaxed break-words text-err" role="alert">
             {saveError}

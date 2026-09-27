@@ -11,12 +11,16 @@
  * @module workflow-editor/sidebar/BlockEditForm
  */
 
-import { ArrowLeft, Cloud, Info } from 'lucide-react'
+import { useState } from 'react'
+import { ArrowLeft, Cloud, Info, RotateCcw, Wand2 } from 'lucide-react'
 import { isCloudBlock } from '../../lib/workflow/blocks/cloud-blocks'
 import { isCustomBlock } from '../../lib/workflow/blocks/custom'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
 import NumberInput from '../../ui/NumberInput'
 import { EditForms } from '../blocks/EditForms'
+import { Expand } from '../blocks/shared/Field'
+import NodeGoalInspector from './NodeGoalInspector'
+import NodeFixModal from './NodeFixModal'
 import type { TranslateFn } from '../i18n'
 import { useEditorLocale } from '../locale-context'
 
@@ -27,6 +31,14 @@ export interface BlockEditFormProps {
   onChange: (patch: Record<string, unknown>) => void
   onBack: () => void
   t: TranslateFn
+  /** Apply verified AI-fix parameters (whole replacement). */
+  onApplyFix: (next: Record<string, unknown>) => void
+  /** Editor host window the fix trial run / verification are scoped to. */
+  windowId?: number
+  /** Whether a pre-fix snapshot exists to restore. */
+  canRevert: boolean
+  /** Restore the node data captured before the last AI fix. */
+  onRevert: () => void
 }
 
 function GenericForm({
@@ -102,10 +114,15 @@ export default function BlockEditForm({
   onChange,
   onBack,
   t,
+  onApplyFix,
+  windowId,
+  canRevert,
+  onRevert,
 }: BlockEditFormProps) {
   const { blockName, bt } = useEditorLocale()
   const EditComponent = block.editComponent ? EditForms[block.editComponent] : undefined
   const cloud = isCloudBlock(block.id)
+  const [fixOpen, setFixOpen] = useState(false)
 
   return (
     <div className="wf-edit-block">
@@ -115,6 +132,16 @@ export default function BlockEditForm({
         </button>
         <p className="wf-edit-title">{nodeName || blockName(block.id, block.name)}</p>
         <span className="wf-edit-spacer" />
+        {!cloud && (
+          <button
+            type="button"
+            onClick={() => setFixOpen(true)}
+            title={bt('AI Fix')}
+            className="wf-icon-btn text-accent"
+          >
+            <Wand2 size={14} />
+          </button>
+        )}
         {!isCustomBlock(block.id) && (
           <a
             href={`https://docs.extension.automa.site/blocks/${block.id}.html`}
@@ -128,18 +155,50 @@ export default function BlockEditForm({
         )}
       </div>
 
-      {cloud ? (
-        <div className="wf-form wf-form-unsupported">
-          <Cloud size={14} />
-          <p>{bt("This block requires Automa's cloud service and is not supported.")}</p>
-        </div>
-      ) : block.disableEdit ? (
-        <p className="wf-form-note">{bt('This block has no editable settings.')}</p>
-      ) : EditComponent ? (
-        <EditComponent data={data} onChange={onChange} blockId={block.id} />
-      ) : (
-        <GenericForm data={data} onChange={onChange} />
-      )}
+      <div className="wf-edit-body">
+        {cloud ? (
+          <div className="wf-form wf-form-unsupported">
+            <Cloud size={14} />
+            <p>{bt("This block requires Automa's cloud service and is not supported.")}</p>
+          </div>
+        ) : block.disableEdit ? (
+          <p className="wf-form-note">{bt('This block has no editable settings.')}</p>
+        ) : EditComponent ? (
+          <EditComponent data={data} onChange={onChange} blockId={block.id} />
+        ) : (
+          <GenericForm data={data} onChange={onChange} />
+        )}
+
+        {/* Goal + success criteria sit BELOW the block's own fields (and the
+            description), collapsed by default; the user expands to edit. For
+            upload-file the user only picks a selector and a file source. */}
+        {block.id !== 'upload-file' && (
+          <Expand title={t('nodeGoalSection')} defaultOpen={false}>
+            <NodeGoalInspector data={data} onChange={onChange} t={t} />
+          </Expand>
+        )}
+
+        {canRevert && (
+          <button
+            type="button"
+            onClick={onRevert}
+            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-panel text-xs font-medium text-muted transition-colors hover:bg-hover hover:text-ink"
+          >
+            <RotateCcw size={13} />
+            {t('nodeFixRevert')}
+          </button>
+        )}
+      </div>
+
+      <NodeFixModal
+        open={fixOpen}
+        onClose={() => setFixOpen(false)}
+        blockId={block.id}
+        data={data}
+        onApply={onApplyFix}
+        windowId={windowId}
+        t={t}
+      />
     </div>
   )
 }

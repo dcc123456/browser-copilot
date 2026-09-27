@@ -155,6 +155,7 @@ const FROM_FAILURE_CODE: Record<FailureCode, WorkflowFailureKind> = {
   WRONG_ORIGIN: 'wrong-origin',
   WRONG_PAGE: 'wrong-origin',
   VALIDATION_FAILED: 'graph',
+  UPLOAD_FILE_FAILED: 'graph',
   ELEMENT_NOT_FOUND: 'locator-not-found',
   TIMEOUT: 'readiness',
   ABORTED: 'unknown',

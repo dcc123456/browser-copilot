@@ -107,7 +107,10 @@ const DATA_PARAMS: Readonly<Record<string, readonly DataParamSpec[]>> = {
   ],
   'attribute-value': [{ key: 'attributeValue' }, { key: 'extraRowValue' }],
   'press-key': [],
-  'upload-file': [{ key: 'filePaths', deep: true }],
+  // Files come from either the user picker (runtime) or a Workflow variable;
+  // every configured field is structural. The legacy `filePaths` rewriting is
+  // intentionally removed so new workflows never freeze paths/data inline.
+  'upload-file': [],
   'handle-dialog': [{ key: 'promptText' }],
   'create-element': [],
 

@@ -34,6 +34,24 @@ const END_PORT = 'output-2'
 /** Minimum run length worth folding — two nodes are barely a loop. */
 export const MIN_REPEAT_RUN = 2
 
+/**
+ * Blocks that can NEVER join a run.
+ *
+ * A script block's logic lives in its own `code`: it can set variables, touch
+ * the DOM, or rely on fixed indices, and folding it into a loop cannot make
+ * those effects change per iteration (the engine only publishes the loop
+ * context — it does not rewrite the script). Repeating it verbatim is therefore
+ * either a pointless re-run or a semantic change, so it is never folded.
+ */
+const NEVER_FOLD_BLOCKS: ReadonlySet<string> = new Set(['javascript-code'])
+
+/**
+ * AI operator blocks: their "copy" is the `prompt`. Two of them only describe
+ * the same iteration when their prompts are byte-identical (a prompt the model
+ * wrote differently per call is a different instruction, not a repeat).
+ */
+const AI_FOLD_BLOCKS: ReadonlySet<string> = new Set(['ai-agent', 'ai-prompt'])
+
 /** One repeated run found in the recorded chain. */
 export interface RepeatSuggestion {
   kind: 'identical' | 'varying'
@@ -67,6 +85,27 @@ function blockIdOf(node: WorkflowNode): string {
 function selectorOf(node: WorkflowNode): string {
   const raw = node.data?.['selector'] ?? node.data?.['cssSelector']
   return typeof raw === 'string' ? raw.trim() : ''
+}
+
+/**
+ * The AI operator's copy — its `prompt`, trimmed. Only meaningful for blocks in
+ * {@link AI_FOLD_BLOCKS}. Empty string when the node carries no prompt.
+ */
+function promptOf(node: WorkflowNode): string {
+  const raw = node.data?.['prompt']
+  return typeof raw === 'string' ? raw.trim() : ''
+}
+
+/**
+ * Whether two nodes of an AI block carry the SAME instruction. Non-AI blocks
+ * always pass (their comparison is the ordinary signature/shape path). Embedded
+ * `{{variable}}` tokens are compared as text — the requirement is identical
+ * copy, not identical runtime values.
+ */
+function aiPromptMatches(a: WorkflowNode, b: WorkflowNode): boolean {
+  const blockId = blockIdOf(a)
+  if (!AI_FOLD_BLOCKS.has(blockId)) return true
+  return blockIdOf(b) === blockId && promptOf(a) === promptOf(b)
 }
 
 /**
@@ -280,6 +319,79 @@ export interface CollapsibleGraph {
 }
 
 /**
+ * Blocks that ALWAYS write a scalar output even when the node does not opt into
+ * a variable: their executors publish to a fixed fallback name (`lastText`,
+ * `lastOcrText`, … — see `workflow-engine/executors.ts`). Mirrors the engine's
+ * fallbacks so the guard treats the implicit write the same as an explicit
+ * `variableName`.
+ */
+const DEFAULT_OUTPUT_BLOCKS: ReadonlyMap<string, string> = new Map([
+  ['get-text', 'lastText'],
+  ['read-page', 'lastReadPage'],
+  ['ocr', 'lastOcrText'],
+  ['screenshot', 'lastScreenshot'],
+  ['get-attribute', 'lastAttribute'],
+  ['cookie', 'lastCookie'],
+  ['clipboard', 'lastClipboard'],
+  ['tab-url', 'lastTabUrl'],
+  ['active-tab', 'lastActiveTab'],
+  ['forms', 'lastForms'],
+  ['http-request', 'lastHttpResponse'],
+])
+
+/** True when a string names a value that changes per iteration (`loopIndex`). */
+function variesWithIteration(value: string): boolean {
+  // A reference carrying the loop index somewhere, e.g. `price_{{loopIndex}}`.
+  return /\{\{[^}]*loopIndex[^}]*\}\}/.test(value)
+}
+
+/**
+ * One node's output destination for the fold analysis.
+ *
+ * Returns:
+ *  - `'safe'`     — a data-table write (rows are indexed by `loopIndex`), or a
+ *                   variable whose name varies with the iteration;
+ *  - `'fixed'`    — a single scalar variable name shared by every iteration;
+ *  - `'none'`     — the block produces no captured output.
+ */
+function outputKindOf(node: WorkflowNode): 'safe' | 'fixed' | 'none' {
+  const data = node.data ?? {}
+  // Writing to the data table is the iteration-safe destination: the engine
+  // puts each pass on its own row/column by loopIndex.
+  if (data['saveData'] === true && String(data['dataColumn'] ?? '').trim()) return 'safe'
+
+  const explicit = String(data['variableName'] ?? '').trim()
+  const fallback = DEFAULT_OUTPUT_BLOCKS.get(blockIdOf(node))
+  const name = explicit || (fallback ?? '')
+  if (!name) return 'none'
+  return variesWithIteration(name) ? 'safe' : 'fixed'
+}
+
+/**
+ * Whether folding `nodes` (the recorded run, in order) into a loop preserves
+ * what the original sequence output.
+ *
+ * - `identical` runs repeat the SAME action/value: even a fixed scalar ends in
+ *   the same value, so collapsing them cannot lose data.
+ * - `varying` runs act on DIFFERENT elements per pass: a fixed scalar would be
+ *   overwritten each iteration and only the last value survives, so every
+ *   output must be iteration-safe (data table, or a name built on loopIndex).
+ */
+function runOutputPreservesSemantics(
+  nodes: readonly WorkflowNode[],
+  kind: RepeatSuggestion['kind'],
+): boolean {
+  if (kind === 'identical') return true
+  return nodes.every((node) => outputKindOf(node) !== 'fixed')
+}
+
+/** Resolve the nodes of a suggestion's run from the chain, skipping gaps. */
+function runNodesOf(chain: readonly WorkflowNode[], runIds: readonly string[]): WorkflowNode[] {
+  const ids = new Set(runIds)
+  return chain.filter((node) => ids.has(node.id))
+}
+
+/**
  * Find the runs in a recorded chain that are worth folding into a loop.
  *
  * Reports at most one suggestion per maximal run. `identical` runs are always
@@ -308,9 +420,15 @@ export function detectRepeatRuns(graph: CollapsibleGraph): RepeatSuggestion[] {
   return [...blockRuns, ...compound]
 }
 
-/** Blocks that must never join a run (a run of loops would nest loops). */
+/** Blocks that must never join a run (scripts are unsafe to repeat; a run of
+ *  loops would nest loops). */
 function isFoldableBlock(blockId: string): boolean {
-  return blockId !== 'trigger' && blockId !== REPEAT_TASK && blockId !== LOOP_ELEMENTS
+  return (
+    blockId !== 'trigger' &&
+    blockId !== REPEAT_TASK &&
+    blockId !== LOOP_ELEMENTS &&
+    !NEVER_FOLD_BLOCKS.has(blockId)
+  )
 }
 
 /** The existing scan: maximal runs of back-to-back same-block nodes. */
@@ -329,7 +447,13 @@ function detectBlockRuns(chain: WorkflowNode[]): RepeatSuggestion[] {
 
     const signature = nodeSignature(node)
     let j = i + 1
-    while (j < chain.length && nodeSignature(chain[j]!) === signature) j += 1
+    while (
+      j < chain.length &&
+      nodeSignature(chain[j]!) === signature &&
+      aiPromptMatches(node, chain[j]!)
+    ) {
+      j += 1
+    }
     const identical = j - i
     if (identical >= MIN_REPEAT_RUN) {
       suggestions.push({
@@ -353,7 +477,8 @@ function detectBlockRuns(chain: WorkflowNode[]): RepeatSuggestion[] {
       k < chain.length &&
       blockIdOf(chain[k]!) === blockId &&
       nodeShape(chain[k]!) === shape &&
-      selectorOf(chain[k]!) !== ''
+      selectorOf(chain[k]!) !== '' &&
+      aiPromptMatches(node, chain[k]!)
     ) {
       k += 1
     }
@@ -365,10 +490,17 @@ function detectBlockRuns(chain: WorkflowNode[]): RepeatSuggestion[] {
     // describes all of them is a question only the page can answer, so the
     // caller probes before applying.
     const distinct = new Set(selectors).size === selectors.length
-    if (varying >= MIN_REPEAT_RUN && selectorOf(node) !== '' && distinct) {
+    const runIds = chain.slice(i, k).map((n) => n.id)
+    if (
+      varying >= MIN_REPEAT_RUN &&
+      selectorOf(node) !== '' &&
+      distinct &&
+      // Refuse when a fixed scalar would keep only the last iteration's value.
+      runOutputPreservesSemantics(runNodesOf(chain, runIds), 'varying')
+    ) {
       suggestions.push({
         kind: 'varying',
-        runIds: chain.slice(i, k).map((n) => n.id),
+        runIds,
         bodyIds: [chain[i]!.id],
         repeat: varying,
         blockId,
@@ -447,6 +579,8 @@ function detectCompoundRuns(chain: WorkflowNode[], claimed: Set<string>): Repeat
       // Iterations must act on DIFFERENT elements — same rule as the
       // block-level varying run; a fold onto one repeated element is a lie.
       if (new Set(selectors).size !== selectors.length) continue
+      // Every output in the multi-step body must survive per iteration.
+      if (!runOutputPreservesSemantics(runNodesOf(chain, runIds), 'varying')) continue
 
       suggestions.push({
         kind: 'varying',
@@ -485,11 +619,14 @@ function compoundPeriodMatches(
     if (claimed.has(node.id) || !isFoldableBlock(blockIdOf(node))) return false
     if (offset === 0) {
       if (headKeyOf(node) !== headKey || selectorOf(node) === '') return false
+      // The per-item head may be an AI block: its instruction must match too.
+      if (!aiPromptMatches(chain[base]!, node)) return false
     } else {
       const first = chain[base + offset]!
       if (nodeSignature(node) !== nodeSignature(first) || nodeShape(node) !== nodeShape(first)) {
         return false
       }
+      if (!aiPromptMatches(first, node)) return false
     }
   }
   return true

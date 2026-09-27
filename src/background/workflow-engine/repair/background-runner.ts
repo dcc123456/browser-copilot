@@ -29,6 +29,10 @@ export interface ExecuteWorkflowCall {
       aiTakeover?: AiTakeoverHook
       sessionId?: string
       scopeWindowId?: number
+      /** Run from this node (replay subset), defaults to the trigger. */
+      startAt?: string
+      /** Seed variables for a checkpoint resume (replay). */
+      variables?: Record<string, unknown>
     },
   ): Promise<{
     runId: string
@@ -70,6 +74,11 @@ export function createBackgroundRunner(options: BackgroundRunnerOptions): Workfl
         traceEntry: runOptions.entry,
         ...(options.sessionId ? { sessionId: options.sessionId } : {}),
         ...(options.scopeWindowId !== undefined ? { scopeWindowId: options.scopeWindowId } : {}),
+        // Replay subset (D2): the repair engine plans a checkpoint resume or a
+        // reduced start; without these, the production run would ignore the
+        // plan and replay the whole workflow (or lose the resume variables).
+        ...(runOptions.startAt ? { startAt: runOptions.startAt } : {}),
+        ...(runOptions.variables ? { variables: runOptions.variables } : {}),
       })
       return {
         outcome: result.outcome,

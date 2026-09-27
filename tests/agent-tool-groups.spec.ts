@@ -200,6 +200,9 @@ describe('workflow operator tools are gated to workflow mode', () => {
     for (const name of ['click', 'fill', 'open_url', 'press_key', 'scroll', 'select_option']) {
       expect(wf).not.toContain(name)
     }
+    // `run_javascript` is never offered in this mode, even after loading the
+    // escape group: the recording equivalent is `wf_op_javascript-code`.
+    expect(wf).not.toContain('run_javascript')
     // Every category is advertised from round one (the undeclared default);
     // only an explicit use_operators declaration narrows the surface.
     const expected = ADVERTISABLE_OPERATOR_CATEGORIES.flatMap(
@@ -288,7 +291,7 @@ describe('workflow operator tools are gated to workflow mode', () => {
     expect(enum_).not.toContain('tabs')
   })
 
-  it('only advertises the JavaScript escape hatch after it was loaded', () => {
+  it('only advertises the JavaScript escape operator after it was loaded (never run_javascript)', () => {
     const names = (groups: string[]) =>
       advertiseTools({ mode: 'workflow', loadedGroups: new Set(groups) }).map(
         (tool) => tool.function.name,
@@ -300,6 +303,11 @@ describe('workflow operator tools are gated to workflow mode', () => {
     // The legacy all-in-one group really does carry it, so loading that one
     // must not produce an advertised set that contradicts its own tool list.
     expect(names(['operators'])).toContain(escapeName)
+    // Whichever group is loaded, the native `run_javascript` never appears —
+    // only the recording operator carries script steps here.
+    for (const groups of [['operators_escape'], ['operators'], ['operators_author']]) {
+      expect(names(groups)).not.toContain('run_javascript')
+    }
   })
 
   it('never advertises wf_op_* or compose_workflow outside workflow mode', () => {

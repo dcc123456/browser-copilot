@@ -16,7 +16,8 @@
  */
 
 import { WorkflowRepairEngine } from './repair-engine'
-import { buildRepairContext } from './repair-agent'
+import { buildRepairContext, enrichContextWithLivePage } from './repair-agent'
+import { liveSelectorProbe, proposeWithSelectorVerification } from './proposal-verification'
 import { decideConfidence } from '../../../lib/workflow/repair/confirmation-gate'
 import {
   isTransientFailure,
@@ -156,8 +157,27 @@ export async function runUnifiedDebug(
 
   const history: RepairRoundSummary[] = []
   const context = buildRepairContext(workflow, verification.trace, analysis, history)
+  // Live-page grounding: inspect the real tab and attach its elements (with
+  // generated selectors), so a missing/stale selector can be fixed rather
+  // than guessed. Best effort.
+  await enrichContextWithLivePage(context, workflow, verification.trace.currentTabId)
   log('status', 'Requesting a minimal patch proposal…')
-  const proposed = await engine.propose(analysis, context)
+  // D1 — closed loop: probe every selector the proposal sets against the live
+  // page, reject dead/ambiguous ones, feed the real candidates back and
+  // re-propose (bounded). A selector that survives is proven unique.
+  const proposalResult = await proposeWithSelectorVerification(
+    (ctx) => engine.propose(analysis, ctx),
+    liveSelectorProbe(verification.trace.currentTabId),
+    context,
+    policy.maxRepairRounds,
+  )
+  if (proposalResult.rejected.length > 0) {
+    log(
+      'status',
+      `Rejected ${proposalResult.rejected.length} non-unique selector fix(es) across ${proposalResult.rounds} round(s).`,
+    )
+  }
+  const proposed = proposalResult.patch
   if (!proposed) {
     return {
       mode,

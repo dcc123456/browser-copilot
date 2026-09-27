@@ -120,6 +120,27 @@ function inspectPageInPage(selector: string): PageInspection {
     }
   }
 
+  // An empty selector (a node recorded without one): no target/candidates,
+  // the interactive element list below is the only signal.
+  if (!selector.trim()) {
+    const interactiveEmpty: InspectedElement[] = []
+    try {
+      const actionable = document.querySelectorAll(
+        'a[href], button, input, select, textarea, [role="button"]',
+      )
+      for (const el of Array.from(actionable).slice(0, MAX_INTERACTIVE)) {
+        interactiveEmpty.push(infoOf(el))
+      }
+    } catch {
+      /* ignore */
+    }
+    return {
+      target: { selectorUsed: '', found: false, matches: 0 },
+      candidates: [],
+      interactive: interactiveEmpty,
+    }
+  }
+
   const isXpath = /^\s*[/(]/.test(selector)
   let target: PageInspection['target']
   if (isXpath) {
@@ -212,10 +233,13 @@ function inspectPageInPage(selector: string): PageInspection {
 export async function inspectPage(
   selector: string,
   scope?: ScopeWindow,
+  explicitTabId?: number,
 ): Promise<PageInspection | null> {
-  if (!selector) return null
-  const tab = await resolveAutomationTab(undefined, scope).catch(() => undefined)
-  const tabId = typeof tab?.id === 'number' ? tab.id : undefined
+  let tabId: number | undefined = explicitTabId
+  if (typeof tabId !== 'number') {
+    const tab = await resolveAutomationTab(undefined, scope).catch(() => undefined)
+    tabId = typeof tab?.id === 'number' ? tab.id : undefined
+  }
   if (typeof tabId !== 'number') return null
   try {
     const [injection] = await chrome.scripting.executeScript({

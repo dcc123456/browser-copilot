@@ -156,11 +156,13 @@ import {
   type TakeoverReasonKind,
 } from '../lib/workflow/ai-takeover'
 import { executeWorkflow, findRunIdFor, getCheckpointStore } from './workflow-engine/run-workflow'
+import { createDriverConditionProbe } from './workflow-engine/condition-runtime'
 import { readPersistedCheckpoints } from './checkpoint-store'
 import { resumePointOf, workflowFingerprintOf } from '../lib/workflow/checkpoints'
 import { createAiTakeover } from './workflow-engine/ai-takeover'
 import { runDebugSession, DEFAULT_MAX_ROUNDS } from './workflow-engine/debug-session'
 import { runUnifiedDebug } from './workflow-engine/repair/unified-debug'
+import { runNodeFix } from './workflow-engine/node-fix-engine'
 import type {
   RecoveryPhaseState,
   RecoveryProtocolStatus,
@@ -170,9 +172,7 @@ import {
   currentRevisionOf,
   revisionMatchesBase,
 } from '../lib/workflow/workflow-revision'
-import { finalizeGeneratedWorkflow } from './workflow-engine/repair/generation-repair'
 import { DEFAULT_REPAIR_POLICY } from '../lib/workflow/repair/types'
-import { recordRepairRound } from '../lib/workflow/repair-metrics'
 import { createBackgroundRunner } from './workflow-engine/repair/background-runner'
 import { createAiRepairProposer } from './workflow-engine/repair/repair-provider'
 import { toRepairResponse } from '../lib/workflow/repair/repair-response'
@@ -190,7 +190,12 @@ import {
 } from './workflow-engine/auto-repair/background-adapter'
 import { failureSnapshotForRun } from './workflow-engine/auto-repair/failure-snapshot'
 import { rememberFailedRun, lastFailedRun } from './workflow-engine/auto-repair/failure-snapshot'
-import type { ExecutionTrace } from '../lib/workflow/repair/types'
+import type {
+  ExecutionTrace,
+  FailureAnalysis,
+  VerificationResult,
+  WorkflowPatchSet,
+} from '../lib/workflow/repair/types'
 import { isGeneratedStrict } from '../lib/workflow/reliability'
 import { runUnattendedPrompt } from './agent-unattended'
 import { streamCompletion } from '../lib/llm'
@@ -451,109 +456,78 @@ async function runWorkflowKeepalive(workflowId: string, scopeWindowId?: number):
  * verification. Execution errors are contained: a repair run that itself
  * throws degrades to returning the original draft (never a lost generation).
  */
-async function verifyGeneratedDraft(workflow: Workflow): Promise<{
-  workflow: Workflow
-  info: import('../lib/messages').GeneratedWorkflowRepairInfo
+/**
+ * Apply a user-confirmed patch set directly to the workflow, then replay +
+ * verify the working copy WITHOUT AI takeover. Unlike a fresh AUTO_REPAIR
+ * pass this never asks the model for another proposal — it validates and
+ * applies the exact patch the user approved.
+ */
+async function applyAndVerifyConfirmedPatch(
+  workflow: Workflow,
+  input: {
+    patch: WorkflowPatchSet
+    analysis: FailureAnalysis
+    /** Trace of the failed run that produced this proposal (for replay planning). */
+    trace: ExecutionTrace
+    runner: import('./workflow-engine/repair/verification-runner').WorkflowRunner
+    store: import('../lib/workflow/checkpoints').CheckpointStore
+  },
+): Promise<{
+  ok: boolean
+  reason?: string
+  analysis: FailureAnalysis
+  workingCopy?: Workflow
+  verification?: VerificationResult
 }> {
-  const settings = await getSettings()
-  const modelConfig = takeoverProviderOf(settings)
-  const proposer = modelConfig
-    ? createAiRepairProposer({
-        apiKey: modelConfig.apiKey,
-        baseUrl: modelConfig.baseUrl,
-        model: modelConfig.model,
-        headers: modelConfig.headers,
-      })
-    : undefined
+  const { PatchEngine } = await import('../lib/workflow/repair/patch-engine')
+  const { planReplay, executeReplay } = await import(
+    './workflow-engine/repair/replay-engine'
+  )
+  const engine = new PatchEngine()
 
-  const runner = createBackgroundRunner({ executeWorkflow })
-  let rounds = 0
-  retain()
-  try {
-    const result = await finalizeGeneratedWorkflow(workflow, {
-      runner,
-      // Replay planning reads the durable checkpoints the verify run just
-      // wrote through the real run-workflow store.
-      store: getCheckpointStore(),
-      ...(proposer ? { propose: (context) => proposer.propose(context) } : {}),
-      // Conservative generation policy: keep the total verification bounded so
-      // offering the save card never stalls the turn for long.
-      policy: { maxRepairRounds: 2, maxTotalDurationMs: 45_000 },
-      onStep: () => undefined,
-    })
-    rounds = result.patches.length
-    // Repair telemetry (spec §14): one round log for the generation entry, with
-    // no raw variable values — only node ids, the failure code and the result.
-    const startedAtForMetric = Date.now()
-    void recordRepairRound({
-      at: Date.now(),
-      sessionId: `gen-${workflow.id}-${startedAtForMetric}`,
-      round: Math.max(1, rounds),
-      entry: 'GENERATION',
-      ...(result.lastAnalysis?.failedNodeId
-        ? { failedNodeId: result.lastAnalysis.failedNodeId }
-        : {}),
-      rootCauseNodeIds: result.lastAnalysis?.rootCauseNodeIds ?? [],
-      ...(result.lastAnalysis?.failureType ? { failureType: result.lastAnalysis.failureType } : {}),
-      transientRetries: result.transientRetries,
-      ...(result.patches[result.patches.length - 1]?.patchSetId
-        ? { patchSetId: result.patches[result.patches.length - 1]!.patchSetId }
-        : {}),
-      patchedNodeIds: [
-        ...new Set(result.patches.flatMap((patch) => patch.operations.map((op) => op.nodeId))),
-      ],
-      ...(result.lastVerification?.checkpointId
-        ? { replayFromNodeId: result.lastAnalysis?.replayFromNodeId }
-        : {}),
-      usedCheckpoint: !!result.lastVerification?.checkpointId,
-      usedAiTakeover: result.lastVerification?.usedAiTakeover === true,
-      ...(result.lastVerification?.goalAchieved !== undefined
-        ? { goalAchieved: result.lastVerification.goalAchieved }
-        : {}),
-      // A verified outcome reached WITHOUT a patch but after a bounded retry
-      // is a TRANSIENT_RECOVERY — a distinct telemetry bucket (§1.3).
-      result:
-        result.status === 'VERIFIED'
-          ? result.recoveredFromTransient
-            ? 'TRANSIENT_RECOVERY'
-            : 'VERIFIED'
-          : result.status === 'BLOCKED'
-            ? 'DRAFT'
-            : 'DRAFT',
-      durationMs: 0,
-    })
+  // Re-validate the approved patch against the current graph.
+  const validation = engine.validatePatch(workflow, input.analysis, input.patch)
+  if (!validation.ok) {
     return {
-      workflow: result.workingCopy,
-      info: {
-        verified: result.status === 'VERIFIED',
-        status: result.status,
-        ...(result.lastAnalysis?.failedNodeId
-          ? { failedNodeId: result.lastAnalysis.failedNodeId }
-          : {}),
-        rootCauseNodeIds: result.lastAnalysis?.rootCauseNodeIds ?? [],
-        ...(result.lastAnalysis?.failureType
-          ? { failureType: result.lastAnalysis.failureType }
-          : {}),
-        explanation: result.lastAnalysis?.explanation ?? result.reason ?? '',
-        rounds,
-        transientRetries: result.transientRetries,
-        ...(result.recoveredFromTransient ? { transientRecovery: true } : {}),
-      },
+      ok: false,
+      analysis: input.analysis,
+      reason: validation.issues.map((issue) => issue.message).join('; '),
     }
-  } catch (error) {
-    // The repair orchestration must never make the generated workflow vanish.
-    return {
-      workflow,
-      info: {
-        verified: false,
-        status: 'DRAFT',
-        rootCauseNodeIds: [],
-        explanation: error instanceof Error ? error.message : String(error),
-        rounds,
-      },
-    }
-  } finally {
-    release()
+  }
+
+  // Apply the confirmed patch to a working copy.
+  const applied = engine.applyPatch(workflow, input.analysis, input.patch)
+  const workingCopy = applied.workflow
+
+  // Independent replay (takeover disabled); a verified pass is the proof.
+  const decision = planReplay({
+    workflow: workingCopy,
+    analysis: input.analysis,
+    trace: input.trace,
+    store: input.store,
+  })
+  const replayOutcome = await executeReplay(workingCopy, decision, {
+    run: (wf, options) => input.runner.run(wf, options),
+  })
+  const verification: VerificationResult = {
+    success: replayOutcome.outcome === 'ok',
+    verified: replayOutcome.outcome === 'ok',
+    trace: (replayOutcome.trace as ExecutionTrace | undefined) ?? input.trace,
+    ...(replayOutcome.error ? { error: replayOutcome.error } : {}),
+    executedNodes: [],
+    skippedNodes: [],
+    warnings: [],
+    usedAiTakeover: false,
+    usedFallbackReplay: false,
+  }
+  return {
+    ok: verification.verified,
+    analysis: input.analysis,
+    workingCopy,
+    verification,
+    ...(verification.verified
+      ? {}
+      : { reason: replayOutcome.error ?? 'replay did not verify' }),
   }
 }
 
@@ -1390,22 +1364,14 @@ async function handleCommand(
       if ('empty' in resolved)
         return { type: 'workflows.draft', empty: resolved.empty, detail: resolved.detail }
 
-      // Generation repair (spec §10.1, Phase 7): run the already-formed
-      // generated workflow through the SAME shared repair engine the debug
-      // path uses — independent (takeover-free) verify → diagnose → minimal
-      // patch → replay. First-pass verification never permits AI takeover.
-      //
-      // This is deliberately NON-BLOCKING: a verified workflow is returned as
-      // is; when the repair budget is exhausted the (possibly patched) draft
-      // is still offered, with the diagnosis carried in `repair` so the card
-      // can show the symptom vs root cause. Only structural problems surface
-      // as a status; the user can still save and continue in AI debug.
-      const repairSummary = await verifyGeneratedDraft(resolved.workflow)
+      // No automatic runnability verification on generation: the generated
+      // workflow is returned as-is (no real replay, no model repair call).
+      // Verification is the user's explicit choice on the save card ("Verify
+      // run after save") or via AI repair after a failed run.
       return {
         type: 'workflows.draft',
-        workflow: repairSummary.workflow,
+        workflow: resolved.workflow,
         source: resolved.source,
-        repair: repairSummary.info,
         // Pure detection, so the card can offer folding without a round trip.
         // Only meaningful for a draft the model built step by step; a compiled
         // history has no repeated runs to detect.
@@ -1586,6 +1552,30 @@ async function handleCommand(
       }
 
       const runOk = r.outcome === 'ok' || autoRepairOutcome?.status === 'success'
+      // CERTIFICATION: for a successful run of a goal-bearing workflow, run the
+      // L1/L2/L3 verification and persist the certification status. L3 must
+      // pass for the workflow to be marked Certified; a successful run whose
+      // goal conditions fail stays unverified.
+      let certification: import('./workflow-engine/goal-verification').VerificationReport | undefined
+      if (runOk && workflow.settings?.goalSpec) {
+        try {
+          const { verifyWorkflowGoal } = await import('./workflow-engine/goal-verification')
+          const scopeWindow = scopeWindowId === undefined
+            ? undefined
+            : await normalScopeFromWindowId(scopeWindowId).catch(() => undefined)
+          const probe = createDriverConditionProbe(new AbortController().signal, scopeWindow)
+          certification = await verifyWorkflowGoal(workflow, r, probe)
+          workflow.settings = {
+            ...workflow.settings,
+            certificationStatus: certification.certified ? 'certified' : 'unverified',
+          }
+          await saveWorkflow(workflow)
+        } catch (error) {
+          console.warn('[workflows.run] goal verification failed', error)
+        }
+      } else if (!runOk) {
+        workflow.settings = { ...workflow.settings, certificationStatus: 'unverified' }
+      }
       return {
         type: 'workflows.run',
         outcome: {
@@ -1597,6 +1587,7 @@ async function handleCommand(
               : r.summary ?? '',
           error: runOk ? undefined : r.summary,
           runId: r.runId,
+          ...(certification ? { certification } : {}),
         },
       }
     }
@@ -2050,6 +2041,7 @@ async function handleCommand(
             workingCopy: result.workingCopy,
             patch: result.patch,
             analysis: result.analysis,
+            trace: result.verification.trace,
             verification: result.verification,
             // Optimistic-lock base (spec §11.3): bind the pending repair to the
             // formal workflow version + content it was produced against.
@@ -2124,10 +2116,56 @@ async function handleCommand(
     case 'workflows.repairDiscard': {
       const existed = discardRepairSession(command.id)
       if (!existed) {
-        // Nothing in-memory (worker may have restarted): report honestly.
+        // Nothing in-memory (worker may have started): report honestly.
         return { type: 'workflows.repairDiscard' }
       }
       return { type: 'workflows.repairDiscard' }
+    }
+
+    case 'workflows.nodeFix': {
+      // Per-node AI Fix. Repair failures settle as a result (never reject the
+      // whole command) so the modal can show WHY; cancellation propagates as an
+      // abort and is surfaced the same safe way.
+      const controller = new AbortController()
+      nodeFixAborts.set(command.sessionId, controller)
+      try {
+        const data = await runNodeFix(
+          {
+            sessionId: command.sessionId,
+            blockId: command.blockId,
+            blockData: command.blockData,
+            userSuggestion: command.userSuggestion,
+            ...(command.windowId !== undefined ? { windowId: command.windowId } : {}),
+          },
+          {
+            signal: controller.signal,
+            emit: (event) => broadcastPanels({ type: 'workflows.nodeFixEvent', event }),
+          },
+        )
+        return { type: 'workflows.nodeFix', data }
+      } catch (error) {
+        const aborted = (error as Error)?.name === 'AbortError' || controller.signal.aborted
+        return {
+          type: 'workflows.nodeFix',
+          data: {
+            success: false,
+            rounds: 0,
+            reason: aborted
+              ? 'AI fix was cancelled.'
+              : error instanceof Error
+                ? error.message
+                : String(error),
+          },
+        }
+      } finally {
+        nodeFixAborts.delete(command.sessionId)
+      }
+    }
+
+    case 'workflows.nodeFixCancel': {
+      nodeFixAborts.get(command.sessionId)?.abort()
+      nodeFixAborts.delete(command.sessionId)
+      return { type: 'workflows.nodeFixCancel' }
     }
 
     case 'workflows.takeoverPending':
@@ -2370,6 +2408,7 @@ async function handleCommand(
             workingCopy: targetWorkflow,
             patch: suggestion.patch,
             analysis: suggestion.analysis,
+            trace: suggestion.verification.trace,
             verification: suggestion.verification,
             baseUpdatedAt: targetWorkflow.updatedAt,
             baseHash: workflowFingerprintOf(targetWorkflow),
@@ -2387,12 +2426,15 @@ async function handleCommand(
         if (command.action === 'CONFIRM_REPAIR') {
           const pending = getRepairSession(command.workflowId)
           if (!pending?.patch) throw new Error('No repair proposal to apply.')
-          // Apply + verify on a working copy via AUTO_REPAIR with explicit accept.
-          const applied = await runUnifiedDebug(targetWorkflow, 'AUTO_REPAIR', {
+          // Apply the proposal the user JUST confirmed — do not re-run the
+          // whole AUTO_REPAIR ladder (which asks the model for a NEW patch and
+          // could silently no-op when that second proposal differs/vanishes).
+          const applied = await applyAndVerifyConfirmedPatch(targetWorkflow, {
+            patch: pending.patch,
+            analysis: pending.analysis,
+            trace: pending.trace,
             runner: recoveryRunner,
             store: getCheckpointStore(),
-            ...(recoveryProposer ? { propose: (ctx) => recoveryProposer.propose(ctx) } : {}),
-            userConfirmed: true,
           })
           if (!applied.ok || !applied.workingCopy || !applied.verification?.verified) {
             const outcome = { phase: 'FAILED', status: 'failed' } as const
@@ -2405,6 +2447,7 @@ async function handleCommand(
             workingCopy: applied.workingCopy,
             patch: pending.patch,
             analysis: applied.analysis,
+            trace: applied.verification?.trace ?? pending.trace,
             verification: applied.verification,
             baseUpdatedAt: targetWorkflow.updatedAt,
             baseHash: workflowFingerprintOf(targetWorkflow),
@@ -2574,6 +2617,13 @@ const activeTurns = new Set<string>()
  * request, so a fresh empty map is correct after a restart.
  */
 const recoveryActionSeen = new Set<string>()
+
+/**
+ * Active per-node AI-fix runs keyed by session id. The abort controller lets
+ * `workflows.nodeFixCancel` interrupt the trial execution and the LLM call;
+ * entries are removed in the command's `finally`.
+ */
+const nodeFixAborts = new Map<string, AbortController>()
 
 /** Outcome last observed for a recovery request, for a duplicate-action echo. */
 const recoveryOutcomes = new Map<

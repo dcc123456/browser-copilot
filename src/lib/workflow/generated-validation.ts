@@ -27,6 +27,7 @@ import {
   type NodeReliabilitySpec,
 } from './reliability'
 import { deriveGoalSpecFromNodes } from './goal'
+import { nodeGoalContractOf } from './node-goal-contract'
 import type { Workflow, WorkflowNode } from './types'
 
 /** Severity: `error` blocks the save/run; `warning`/`info` only annotate. */
@@ -209,28 +210,27 @@ function validateGraph(workflow: Workflow, ctx: ValidateCtx): GeneratedValidatio
   return issues
 }
 
-function validateDataFlow(workflow: Workflow, ctx: ValidateCtx): GeneratedValidationIssue[] {
-  const issues: GeneratedValidationIssue[] = []
-  const nodes = workflow.drawflow?.nodes ?? []
+/** Variables a single node WRITES (its definite definitions). This replaces the
+ * old process-wide `written` Set with a per-node view for the CFG analysis. */
+function variableWritesOf(node: WorkflowNode): Set<string> {
   const written = new Set<string>()
-  for (const n of nodes) {
-    const blockId = blockIdOf(n)
-    if (!VARIABLE_WRITER_BLOCKS.has(blockId)) continue
-    const p = paramsOf(n)
-    const name = typeof p['variableName'] === 'string' ? p['variableName'] : ''
-    if (name) written.add(name)
-    // forms fill writes its declared field variables at run time.
-    if (blockId === 'forms' && Array.isArray(p['fields'])) {
-      for (const field of p['fields'] as Array<Record<string, unknown>>) {
-        if (typeof field?.['variableName'] === 'string') written.add(field['variableName'])
-      }
-    }
-    if (blockId === 'forms' && typeof p['variableName'] === 'string') {
-      written.add(p['variableName'])
+  const blockId = blockIdOf(node)
+  if (!VARIABLE_WRITER_BLOCKS.has(blockId)) return written
+  const p = paramsOf(node)
+  if (typeof p['variableName'] === 'string' && p['variableName']) written.add(p['variableName'])
+  // forms fill writes its declared field variables at run time.
+  if (blockId === 'forms' && Array.isArray(p['fields'])) {
+    for (const field of p['fields'] as Array<Record<string, unknown>>) {
+      if (typeof field?.['variableName'] === 'string') written.add(field['variableName'])
     }
   }
-  // Declared run inputs count as written (they are provided by the launcher).
-  // They live in TWO homes: settings.inputs, and the trigger node's declared
+  return written
+}
+
+/** Declared run inputs (provided by the launcher) are pre-defined at entry. */
+function declaredInputsOf(workflow: Workflow, nodes: WorkflowNode[]): Set<string> {
+  const written = new Set<string>()
+  // Inputs live in TWO homes: settings.inputs, and the trigger node's declared
   // list (where the generation path puts them, mirrored onto workflow.trigger).
   const triggerNode = nodes.find((n) => blockIdOf(n) === 'trigger')
   const triggerParams = triggerNode ? paramsOf(triggerNode) : undefined
@@ -247,17 +247,123 @@ function validateDataFlow(workflow: Workflow, ctx: ValidateCtx): GeneratedValida
       if (typeof input?.['name'] === 'string') written.add(input['name'])
     }
   }
+  return written
+}
+
+/** Intersection of several sets (the meet of a must-analysis). */
+function intersectSets(sets: Set<string>[]): Set<string> {
+  if (sets.length === 0) return new Set<string>()
+  const [first, ...rest] = sets
+  const out = new Set<string>()
+  for (const v of first ?? new Set<string>()) {
+    if (rest.every((s) => s.has(v))) out.add(v)
+  }
+  return out
+}
+
+function validateDataFlow(workflow: Workflow, ctx: ValidateCtx): GeneratedValidationIssue[] {
+  const issues: GeneratedValidationIssue[] = []
+  const nodes = workflow.drawflow?.nodes ?? []
+  const edges = workflow.drawflow?.edges ?? []
+  if (nodes.length === 0) return issues
+
+  const nodeIds = new Set(nodes.map((n) => n.id))
+  const preds = new Map<string, string[]>()
+  const succs = new Map<string, string[]>()
   for (const n of nodes) {
+    preds.set(n.id, [])
+    succs.set(n.id, [])
+  }
+  for (const e of edges) {
+    if (!nodeIds.has(e.source) || !nodeIds.has(e.target)) continue
+    preds.get(e.target)!.push(e.source)
+    succs.get(e.source)!.push(e.target)
+  }
+
+  // Control-flow entry: the trigger node, else the first node.
+  const head = nodes.find((n) => blockIdOf(n) === 'trigger') ?? nodes[0]
+  const entryId = head?.id
+  const reachable = new Set<string>()
+  if (entryId) {
+    const queue = [entryId]
+    reachable.add(entryId)
+    while (queue.length) {
+      const id = queue.shift()!
+      for (const next of succs.get(id) ?? []) {
+        if (!reachable.has(next)) {
+          reachable.add(next)
+          queue.push(next)
+        }
+      }
+    }
+  }
+
+  const declaredInputs = declaredInputsOf(workflow, nodes)
+  const writes = new Map<string, Set<string>>()
+  for (const n of nodes) writes.set(n.id, variableWritesOf(n))
+
+  // Definite-assignment (CFG IN/OUT). `in` holds the set provably defined on
+  // EVERY path from the entry to the node (must-analysis; meet = intersection),
+  // so a branch reconvergence requires the definition on all incoming branches
+  // and a node reached only through one branch sees only that branch's writes.
+  const inMap = new Map<string, Set<string>>()
+  const outMap = new Map<string, Set<string>>()
+  for (const id of reachable) {
+    inMap.set(id, new Set<string>())
+    outMap.set(id, new Set<string>())
+  }
+  if (entryId && reachable.has(entryId)) {
+    inMap.set(entryId, new Set(declaredInputs))
+    outMap.set(entryId, new Set([...declaredInputs, ...(writes.get(entryId) ?? new Set<string>())]))
+  }
+
+  // Topological order over the reachable subgraph (a DAG: loops are single
+  // nodes, so there is no back-edge to warrant a fixpoint).
+  const indegree = new Map<string, number>()
+  for (const id of reachable) indegree.set(id, 0)
+  for (const id of reachable) {
+    for (const next of succs.get(id) ?? []) {
+      if (reachable.has(next)) indegree.set(next, (indegree.get(next) ?? 0) + 1)
+    }
+  }
+  const order: string[] = []
+  const ready = [...reachable].filter((id) => indegree.get(id) === 0)
+  while (ready.length) {
+    const id = ready.shift()!
+    order.push(id)
+    for (const next of succs.get(id) ?? []) {
+      if (!reachable.has(next)) continue
+      const degree = (indegree.get(next) ?? 1) - 1
+      indegree.set(next, degree)
+      if (degree === 0) ready.push(next)
+    }
+  }
+
+  for (const id of order) {
+    if (id === entryId) continue
+    const predIds = (preds.get(id) ?? []).filter((p) => reachable.has(p))
+    const inSet = predIds.length
+      ? intersectSets(predIds.map((p) => outMap.get(p) ?? new Set<string>()))
+      : new Set<string>()
+    inMap.set(id, new Set(inSet))
+    outMap.set(id, new Set([...inSet, ...(writes.get(id) ?? new Set<string>())]))
+  }
+
+  for (const n of nodes) {
+    // Unreachable nodes are layer A's concern (GRAPH_UNREACHABLE_NODE); they
+    // must not also surface as data-flow false positives here.
+    if (!reachable.has(n.id)) continue
+    const defined = inMap.get(n.id) ?? new Set<string>()
     const { vars } = refsOf(n)
     for (const v of vars) {
-      if (!written.has(v)) {
+      if (!defined.has(v)) {
         issues.push({
           code: 'DATA_UNWRITTEN_VARIABLE',
           severity: 'error',
           nodeId: n.id,
           path: `drawflow.nodes[id=${n.id}]`,
-          message: `引用了变量 {{${v}}}，但没有任何节点写入它（运行时会替换为空）。`,
-          suggestedFix: `先添加 set-variable 写入 ${v}，或改为字面量。`,
+          message: `引用了变量 {{${v}}}，但当前控制流路径上没有节点写入它（运行时会替换为空）。`,
+          suggestedFix: `先添加 set-variable 写入 ${v}（需在同一可达分支上），或改为字面量。`,
         })
       }
     }
@@ -398,6 +504,20 @@ function validateGoal(workflow: Workflow, ctx: ValidateCtx): GeneratedValidation
   const goal =
     goalSpecOf(workflow) ??
     deriveGoalSpecFromNodes({ name: workflow.name, nodes: workflow.drawflow?.nodes ?? [] })
+  // Every generated action node must carry a Node Goal Contract (spec V64).
+  for (const node of workflow.drawflow?.nodes ?? []) {
+    if (node.data?.blockId === 'trigger') continue
+    if (!nodeGoalContractOf(node.data)) {
+      issues.push({
+        code: 'NODE_GOAL_MISSING',
+        severity: 'error',
+        nodeId: node.id,
+        path: `drawflow.nodes[${node.id}].data.__workflowAi`,
+        message: '生成的动作节点缺少节点目标契约（node goal contract）。',
+        suggestedFix: '重新生成该节点，使其携带 goal 与 successCriteria。',
+      })
+    }
+  }
   if (!goal) {
     issues.push({
       code: 'GOAL_MISSING',

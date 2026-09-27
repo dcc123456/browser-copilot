@@ -1921,6 +1921,196 @@ export function runOp(op: Op): OpResult {
       return withMeta({ ...base(), ok: true, found: true })
     }
 
+    // --- File upload / drop ------------------------------------------------
+    //
+    // dataUrl → Blob → File → DataTransfer → input.files → input/change
+    // (spec §9). File descriptors arrive on op.files; the target element was
+    // resolved by the normal resolver above.
+    if (op.action === 'upload_files' || op.action === 'drop_files') {
+      const payload = Array.isArray(op.files) ? op.files : []
+
+      // Decode one data URL descriptor into a browser File. Synchronous base64
+      // decode keeps the kernel's no-await rule.
+      const makeFileObject = (descriptor: {
+        name: string
+        mimeType: string
+        dataUrl: string
+      }): File => {
+        const comma = descriptor.dataUrl.indexOf(',')
+        const header = descriptor.dataUrl.slice(0, comma)
+        const body = descriptor.dataUrl.slice(comma + 1)
+        const mimeMatch = /^data:([^;,]+)/.exec(header)
+        const mimeType =
+          descriptor.mimeType ||
+          (mimeMatch ? (mimeMatch[1] as string) : '') ||
+          'application/octet-stream'
+        const binary = atob(body.replace(/\s+/g, ''))
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+        return new File([bytes], descriptor.name, {
+          type: mimeType,
+          lastModified: Date.now(),
+        })
+      }
+
+      let fileList: File[]
+      try {
+        fileList = payload.map(makeFileObject)
+      } catch (error) {
+        return withMeta(
+          fail(
+            `Failed to decode file data: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          ),
+        )
+      }
+
+      const makeDataTransfer = (): DataTransfer => {
+        const dataTransfer = new DataTransfer()
+        for (const f of fileList) dataTransfer.items.add(f)
+        return dataTransfer
+      }
+
+      // Inject files into a real file input: assign FileList then fire the
+      // input/change sequence the framework listens to. React's onChange for
+      // file inputs is a direct listener on the input (not value-tracked like
+      // text fields), so a bubbling change reliably reaches it. Returns a
+      // success result describing what landed, or null when this input cannot
+      // take the payload (single-file mismatch).
+      const injectIntoInput = (fileInput: HTMLInputElement, where: string): OpResult | null => {
+        if (!fileInput.multiple && fileList.length > 1) return null
+        const dataTransfer = makeDataTransfer()
+        fileInput.files = dataTransfer.files
+        // Some components read on `input` as well as `change`.
+        fileInput.dispatchEvent(new Event('input', { bubbles: true }))
+        fileInput.dispatchEvent(new Event('change', { bubbles: true }))
+        return withMeta({
+          ...base(),
+          ok: true,
+          found: true,
+          note: `Injected ${fileInput.files.length} file(s) into ${where} input.`,
+          data: summary(fileInput.files),
+        })
+      }
+
+      // Locate the page's real file input for a visible upload trigger.
+      //
+      // Upload libraries render the input OUTSIDE the clickable area:
+      //   rc-upload: <span class="rc-upload"><div class="…drag">{trigger}</div>
+      //              <input type="file" class="rc-upload-input"></span>
+      // so the input is a SIBLING of the visible trigger, not a descendant.
+      // Search order: target subtree → ancestors' subtrees (the rc-upload
+      // wrapper) → document-wide, preferring an input whose `accept` matches the
+      // payload. Open shadow roots are included by queryAllElements.
+      const findFileInputFor = (target: Element): HTMLInputElement | null => {
+        const asFileInput = (el: Element | null | undefined): HTMLInputElement | null =>
+          el instanceof HTMLInputElement && el.type === 'file' ? el : null
+
+        const within = target.querySelector('input[type=file]')
+        if (within instanceof HTMLInputElement) return within
+
+        let ancestor: Element | null = target
+        while (ancestor) {
+          const found = ancestor.querySelector('input[type=file]')
+          if (found instanceof HTMLInputElement) return found
+          ancestor = ancestor.parentElement
+        }
+
+        const candidates = safeQuery('input[type=file]').filter(
+          (el): el is HTMLInputElement => asFileInput(el) !== null,
+        )
+        if (candidates.length === 0) return null
+        const isImage = fileList.every((f) => f.type.startsWith('image/'))
+        const acceptsImages = (el: HTMLInputElement): boolean => {
+          const accept = el.getAttribute('accept') ?? ''
+          return accept === '' || accept.includes('image') || accept.includes('*/*')
+        }
+        const matching = candidates.find((el) => (isImage ? acceptsImages(el) : true))
+        return matching ?? candidates[0] ?? null
+      }
+
+      const dispatchDrag = (
+        target: Element,
+        type: string,
+        dataTransfer: DataTransfer,
+      ): void => {
+        target.dispatchEvent(
+          new DragEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer,
+          }),
+        )
+      }
+
+      const summary = (files: File[] | FileList): unknown => ({
+        count: files.length,
+        files: Array.from(files).map((f) => ({
+          name: f.name,
+          type: f.type,
+          size: f.size,
+        })),
+      })
+
+      // Decide the strategy. A drop_files op always drops. upload_files with
+      // fileTarget 'dropzone' drops too; 'auto' (default) injects when the
+      // target is a file input, otherwise drops.
+      const wantsDrop =
+        op.action === 'drop_files' || op.fileTarget === 'dropzone'
+
+      if (!wantsDrop && element instanceof HTMLInputElement) {
+        if (element.type !== 'file') {
+          return withMeta(
+            fail('Upload target is an input but not input[type=file].'),
+          )
+        }
+        if (!element.multiple && fileList.length > 1) {
+          return withMeta(
+            fail(
+              `Target does not support multiple files (${fileList.length} provided).`,
+            ),
+          )
+        }
+        const injected = injectIntoInput(element, 'target')
+        if (injected) return injected
+      }
+
+      if (op.fileTarget === 'input') {
+        return withMeta(
+          fail('Upload target is not an input[type=file] element.'),
+        )
+      }
+
+      // Upload trigger / dropzone path. Prefer the page's real file input even
+      // when it is a SIBLING of the visible trigger (rc-upload/antd), not a
+      // descendant: setting files + change fires the component's real onChange.
+      if (op.action === 'upload_files' && op.fileTarget !== 'dropzone') {
+        const fileInput = findFileInputFor(element)
+        if (fileInput) {
+          const injected = injectIntoInput(fileInput, 'associated')
+          if (injected) return injected
+          return withMeta(
+            fail(
+              `Associated file input does not support multiple files (${fileList.length} provided).`,
+            ),
+          )
+        }
+      }
+
+      const dataTransfer = makeDataTransfer()
+      dispatchDrag(element, 'dragenter', dataTransfer)
+      dispatchDrag(element, 'dragover', dataTransfer)
+      dispatchDrag(element, 'drop', dataTransfer)
+      return withMeta({
+        ...base(),
+        ok: true,
+        found: true,
+        note: `Dispatched dragenter/dragover/drop with ${fileList.length} file(s).`,
+        data: summary(fileList),
+      })
+    }
+
     scrollIntoView(element)
     if (!isVisible(element)) {
       return withMeta(fail(`${describeElement(element)} exists but is not visible.`))
@@ -2438,20 +2628,49 @@ export function runWorkflowJs(input: {
 
       armTimeout()
 
-      const fn = new Function(
-        'automaNextBlock',
-        'automaSetVariable',
-        'automaRefData',
-        'automaResetTimeout',
-        'variables',
-        `"use strict";\n${code}`,
-      ) as (
-        a: typeof helpers.automaNextBlock,
-        b: typeof helpers.automaSetVariable,
-        c: typeof helpers.automaRefData,
-        d: typeof helpers.automaResetTimeout,
-        v: Record<string, unknown>,
-      ) => unknown
+      // A bare expression (`document.title`, `1 + 2`, `await f()` — no
+      // statement keyword) is treated like the agent's run_javascript: wrap it
+      // as an ASYNC function so a top-level `await` works, and its value is the
+      // result without requiring `return`. Falls back to the plain body (a
+      // `return`/automaNextBlock step) whenever the expression wrap does not
+      // compile.
+      const statementWord =
+        /\b(return|const|let|var|if|for|while|function|switch|try|throw)\b/
+      const looksLikeExpression = !statementWord.test(code)
+
+      const buildFn = (wrap?: (src: string) => string) =>
+        new Function(
+          'automaNextBlock',
+          'automaSetVariable',
+          'automaRefData',
+          'automaResetTimeout',
+          'variables',
+          wrap ? wrap(code) : `"use strict";\n${code}`,
+        ) as (
+          a: typeof helpers.automaNextBlock,
+          b: typeof helpers.automaSetVariable,
+          c: typeof helpers.automaRefData,
+          d: typeof helpers.automaResetTimeout,
+          v: Record<string, unknown>,
+        ) => unknown
+
+      const fn = looksLikeExpression
+        ? (() => {
+            // `new Function` COMPILES without calling, so a shape the
+            // expression wrap rejects (e.g. an object literal `{...}`, a
+            // labelled statement) throws here — fall back to the plain body.
+            // Do NOT invoke it: that would run the user code twice.
+            try {
+              // An async arrow IIFE: `async () => (<expr>)` keeps a top-level
+              // `await` valid and makes the expression value the body's result.
+              // (Bare `async (<expr>)` would parse as coercion of an async fn,
+              // not an arrow.)
+              return buildFn((src) => `"use strict";\nreturn (async () => (\n${src}\n))();`)
+            } catch {
+              return buildFn()
+            }
+          })()
+        : buildFn()
 
       let ret: unknown
       try {

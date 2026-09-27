@@ -37,6 +37,8 @@ import { useT } from './i18n'
 import { buildRepairProposal, evidenceOfProposal } from '../lib/workflow/repair/repair-proposal'
 import type { RepairProposalView } from '../lib/workflow/repair/repair-proposal'
 import type { WorkflowPatchOperation } from '../lib/workflow/repair/types'
+import { displayNameOfNodeId } from '../lib/workflow/node-name'
+import type { Workflow } from '../lib/workflow/types'
 
 type RecoveryResult = Extract<CommandResult, { type: 'workflows.recovery' }>
 
@@ -97,8 +99,45 @@ const RISK_CLASS: Record<RepairProposalView['risk'], string> = {
   HIGH: 'text-err',
 }
 
+/** Map internal recovery phases to human-readable, localized labels. */
+function phaseLabel(
+  phase: RecoveryPhaseState,
+  t: ReturnType<typeof useT>,
+): string {
+  switch (phase) {
+    case 'DIAGNOSING':
+      return t.failureCenterPhaseDiagnosing
+    case 'PROPOSING':
+      return t.failureCenterPhaseProposing
+    case 'AWAIT_REPAIR_CONFIRM':
+      return t.failureCenterPhaseAwaitRepair
+    case 'APPLYING':
+      return t.failureCenterPhaseApplying
+    case 'VERIFYING':
+      return t.failureCenterPhaseVerifying
+    case 'AWAIT_OVERWRITE_CONFIRM':
+      return t.failureCenterPhaseAwaitOverwrite
+    case 'COMMITTING':
+      return t.failureCenterPhaseCommitting
+    case 'DONE':
+      return t.failureCenterPhaseDone
+    case 'CANCELLED':
+      return t.failureCenterPhaseCancelled
+    case 'FAILED':
+      return t.failureCenterPhaseFailed
+    case 'HUMAN_TAKEOVER':
+      return t.failureCenterPhaseHumanTakeover
+  }
+}
+
 /** Per-node before/after, reason, evidence, risk and verification plan. */
-function ProposalView({ proposal }: { proposal: RepairProposalView }): ReactNode {
+function ProposalView({
+  proposal,
+  nameOf,
+}: {
+  proposal: RepairProposalView
+  nameOf: (nodeId: string) => string
+}): ReactNode {
   const t = useT()
   const evidence = evidenceOfProposal(proposal)
   return (
@@ -118,7 +157,7 @@ function ProposalView({ proposal }: { proposal: RepairProposalView }): ReactNode
           >
             <div className="flex items-center justify-between gap-2">
               <span className="truncate text-[11px] font-semibold text-ink">
-                {change.nodeId}
+                {nameOf(change.nodeId)}
                 <span className="text-muted"> · {change.kind}</span>
               </span>
               <span className={`text-[10.5px] font-medium ${RISK_CLASS[change.risk]}`}>
@@ -163,7 +202,7 @@ function ProposalView({ proposal }: { proposal: RepairProposalView }): ReactNode
       <div className="flex flex-col gap-0.5">
         <span className="text-[11px] font-semibold text-ink">{t.proposalAffectedTitle}</span>
         <span className="break-words text-[10.5px] text-muted">
-          {proposal.affectedNodeIds.join(', ')}
+          {proposal.affectedNodeIds.map((id) => nameOf(id)).join(', ')}
         </span>
       </div>
     </div>
@@ -180,13 +219,39 @@ export function FailureCenterDialog({
   const t = useT()
   const [state, setState] = useState<FailureCenterState | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /** Action currently awaiting a background response (local busy indicator). */
+  const [pendingAction, setPendingAction] = useState<string | null>(null)
+  // The formal workflow, used only to resolve node ids to display names in the
+  // proposal. Loaded once; missing/deleted workflow degrades to raw ids.
+  const [workflow, setWorkflow] = useState<Workflow | null>(null)
 
   // One request for the whole flow; created once.
   const [requestId] = useState(() => newRecoveryRequestId(workflowId))
 
+  useEffect(() => {
+    void (async () => {
+      try {
+        const result = (await sendCommand({
+          type: 'workflows.get',
+          id: workflowId,
+        })) as Extract<CommandResult, { type: 'workflows.get' }>
+        if (result.workflow) setWorkflow(result.workflow)
+      } catch {
+        // Name resolution is cosmetic; ignore.
+      }
+    })()
+  }, [workflowId])
+
+  const nameOf = useCallback(
+    (nodeId: string): string =>
+      workflow ? displayNameOfNodeId(workflow, nodeId) : nodeId,
+    [workflow],
+  )
+
   const run = useCallback(
     async (action: 'START' | 'CONFIRM_REPAIR' | 'CONFIRM_OVERWRITE' | 'CANCEL') => {
       setError(null)
+      setPendingAction(action)
       try {
         const result = await sendRecovery(requestId, runId, workflowId, action, workflowRevision)
         setState({
@@ -198,6 +263,8 @@ export function FailureCenterDialog({
         })
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setPendingAction(null)
       }
     },
     [requestId, runId, workflowId, workflowRevision],
@@ -212,7 +279,9 @@ export function FailureCenterDialog({
   const waitingRepair = phase === 'AWAIT_REPAIR_CONFIRM'
   const waitingOverwrite = phase === 'AWAIT_OVERWRITE_CONFIRM'
   const terminal = phase === 'DONE' || phase === 'CANCELLED'
-  const busy = state?.status === 'running'
+  // Busy while the background reports running OR a local action is in flight
+  // (the latter covers the gap before the first state update).
+  const busy = state?.status === 'running' || pendingAction !== null
 
   const proposal: RepairProposalView | null =
     waitingRepair && state?.operations && state.operations.length > 0
@@ -252,7 +321,7 @@ export function FailureCenterDialog({
               <PhaseGlyph phase={phase} status={state?.status ?? 'running'} />
             </span>
             <div className="flex min-w-0 flex-col gap-1">
-              <span className="text-sm font-medium text-ink">{phase}</span>
+              <span className="text-sm font-medium text-ink">{phaseLabel(phase, t)}</span>
               {state?.summary && (
                 <span className="break-words text-xs text-muted">{state.summary}</span>
               )}
@@ -264,7 +333,7 @@ export function FailureCenterDialog({
             </div>
           </div>
 
-          {proposal && <ProposalView proposal={proposal} />}
+          {proposal && <ProposalView proposal={proposal} nameOf={nameOf} />}
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-3">

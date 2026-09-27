@@ -10,6 +10,7 @@ import {
   blockingIssues,
 } from '../src/lib/workflow/generated-validation'
 import type { Workflow, WorkflowEdge, WorkflowNode } from '../src/lib/workflow/types'
+import { withNodeGoalContract } from '../src/lib/workflow/node-goal-contract'
 
 // --- graph builder ---------------------------------------------------------------
 
@@ -19,7 +20,17 @@ function nid(): string {
 }
 
 function makeNode(blockId: string, data: Record<string, unknown> = {}, label = blockId): WorkflowNode {
-  return { id: nid(), label, position: { x: 0, y: 0 }, data: { blockId, ...data } }
+  const node: WorkflowNode = { id: nid(), label, position: { x: 0, y: 0 }, data: { blockId, ...data } }
+  // Generated action nodes carry a Node Goal Contract by default; individual
+  // negative tests can still assert NODE_GOAL_MISSING by stripping the key.
+  if (blockId !== 'trigger' && !(data as Record<string, unknown>)['__noNodeGoal']) {
+    node.data = withNodeGoalContract(node.data, {
+      version: 1,
+      goal: typeof data['description'] === 'string' ? (data['description'] as string) : `${blockId} node goal`,
+      successCriteria: [{ kind: 'variableExists', name: 'nodeOk' }],
+    })
+  }
+  return node
 }
 
 function makeEdge(source: string, target: string, sourceHandle = 'next'): WorkflowEdge {
@@ -69,8 +80,10 @@ function validWorkflow(): Workflow {
   return linearWorkflow(
     triggerNode(),
     makeNode('open-url', { url: 'https://x.test/login' }),
-    makeNode('forms', { action: 'fill', selector: '#user', value: '{{user}}', fields: [] }),
+    // `user` is written BEFORE the fill that references {{user}}; the control-
+    // flow-aware data-flow layer rejects a reference that precedes its writer.
     makeNode('set-variable', { variableName: 'user', value: 'u1' }),
+    makeNode('forms', { action: 'fill', selector: '#user', value: '{{user}}', fields: [] }),
     makeNode('forms', { action: 'submit', selector: '#login', value: '', ...SUBMIT_CONTRACT }),
     makeNode('get-text', { selector: 'h1', variableName: 'title', saveData: false }),
   )
@@ -151,6 +164,71 @@ describe('layer B — data flow', () => {
       triggerNode(),
       makeNode('set-variable', { variableName: 'q', value: '{{table[0][1]}}' }),
       makeNode('forms', { action: 'fill', selector: '#q', value: '{{q}}' }),
+    )
+    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('DATA_'))).toHaveLength(0)
+  })
+})
+
+// --- layer B: data flow, control-flow aware (C1) -----------------------------------
+
+/** A strict workflow assembled from explicit nodes + edges (non-linear). */
+function gatedWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[]): Workflow {
+  return {
+    id: 'wf',
+    name: 'wf',
+    description: '',
+    trigger: { type: 'manual', enabled: true },
+    settings: { ...({ provenance: 'chat-generate' } as unknown as Workflow['settings']) },
+    table: [],
+    drawflow: { nodes, edges },
+    createdAt: 0,
+    updatedAt: 0,
+  }
+}
+
+describe('layer B — control-flow aware data flow', () => {
+  it('a reference in the else branch is an error when the writer lives only in the if branch', () => {
+    const t = triggerNode()
+    const cond = makeNode('element-exists', { selector: '#x' })
+    const writeQ = makeNode('set-variable', { variableName: 'q', value: 'v' })
+    const useQ = makeNode('forms', { action: 'fill', selector: '#q', value: '{{q}}' })
+    const wf = gatedWorkflow(
+      [t, cond, writeQ, useQ],
+      [
+        makeEdge(t.id, cond.id, 'next'),
+        makeEdge(cond.id, writeQ.id, 'element-exists-output-1'), // if-branch writes q
+        makeEdge(cond.id, useQ.id, 'element-exists-output-2'), // else-branch reads q
+      ],
+    )
+    const report = validateGeneratedWorkflow(wf)
+    const unwritten = report.errors.filter((e) => e.code === 'DATA_UNWRITTEN_VARIABLE')
+    expect(unwritten.length).toBe(1)
+    expect(unwritten[0]?.nodeId).toBe(useQ.id)
+  })
+
+  it('a reachable definition on the same branch satisfies the reference', () => {
+    const t = triggerNode()
+    const cond = makeNode('element-exists', { selector: '#x' })
+    const writeQ = makeNode('set-variable', { variableName: 'q', value: 'v' })
+    const useQ = makeNode('forms', { action: 'fill', selector: '#q', value: '{{q}}' })
+    const wf = gatedWorkflow(
+      [t, cond, writeQ, useQ],
+      [
+        makeEdge(t.id, cond.id, 'next'),
+        makeEdge(cond.id, writeQ.id, 'element-exists-output-1'),
+        makeEdge(writeQ.id, useQ.id, 'next'), // q flows straight to useQ
+      ],
+    )
+    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('DATA_'))).toHaveLength(0)
+  })
+
+  it('a loop node output variable is a reachable definition downstream', () => {
+    const t = triggerNode()
+    const loop = makeNode('while-loop', { variableName: 'item' })
+    const use = makeNode('forms', { action: 'fill', selector: '#q', value: '{{item}}' })
+    const wf = gatedWorkflow(
+      [t, loop, use],
+      [makeEdge(t.id, loop.id, 'next'), makeEdge(loop.id, use.id, 'next')],
     )
     expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('DATA_'))).toHaveLength(0)
   })

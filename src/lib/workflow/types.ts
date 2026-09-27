@@ -209,6 +209,12 @@ export interface WorkflowSettings {
    * older workflows.
    */
   generationStages?: import('./generation-report').GenerationStageReport[]
+  /**
+   * Certification status from the three-level (L1/L2/L3) verification.
+   * 'certified' only after an L3 PASS; any edit that invalidates the contract
+   * drops it back to 'unverified'. Absent = 'unverified' for legacy data.
+   */
+  certificationStatus?: 'unverified' | 'certified'
 }
 
 /** A persisted workflow. */

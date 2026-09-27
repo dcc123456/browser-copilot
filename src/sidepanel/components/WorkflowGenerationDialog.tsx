@@ -4,12 +4,14 @@
  * The generation UI as a portal modal rendered on `document.body`, outside
  * the chat layout: opening/closing the dialog never moves the chat and never
  * cancels the generation — the session lives in the background. The dialog
- * only subscribes to progress events and renders the lifecycle:
+ * is the LOADING surface for a workflow-mode task, rendering the lifecycle:
  *
  * ```text
- * GENERATING → RECOVERING → COMPILING → VALIDATING → READY
- *            → SAVING → SAVED (or ERROR)
+ * GENERATING → RECOVERING → COMPILING → VALIDATING (or ERROR)
  * ```
+ *
+ * When the task settles, the save card popup takes over (see ChatTab) — this
+ * dialog is only reopened for its log via the card's "generation log" action.
  *
  * Keyboard (spec §10.3):
  *   - Esc while idle/not running closes;
@@ -29,7 +31,6 @@ import {
   TriangleAlert,
   X,
 } from 'lucide-react'
-import type { Workflow } from '../../lib/workflow/types'
 import { useT } from '../i18n'
 
 export type WorkflowGenerationViewState =
@@ -55,24 +56,20 @@ export interface WorkflowGenerationProgress {
   latestAction?: string
   actionCount: number
   recoveredCount: number
+  /** Generation log lines collected through the whole task. */
+  logs?: string[]
 }
 
 export interface WorkflowGenerationDialogProps {
   open: boolean
   progress: WorkflowGenerationProgress
-  /** Present once generation ends in READY: the workflow to preview/save. */
-  workflow?: Workflow
   /** Error message when state is ERROR. */
   errorMessage?: string
   /** Minimize/background the dialog (the generation keeps running). */
   onBackground: () => void
   /** Explicitly cancel the generation. */
   onCancel: () => void
-  /** Save the ready workflow. */
-  onSave: () => void
-  /** Open the workflow in the editor (preview). */
-  onEdit: () => void
-  /** Close after SAVED / ERROR. */
+  /** Close when the generation ended (ERROR) or was cancelled. */
   onClose: () => void
 }
 
@@ -199,6 +196,22 @@ export function WorkflowGenerationDialog(props: WorkflowGenerationDialogProps): 
             ))}
           </ul>
 
+          {/* Generation log */}
+          {props.progress.logs && props.progress.logs.length > 0 ? (
+            <details className="group/log rounded-lg border border-border" open>
+              <summary className="cursor-pointer select-none px-2.5 py-1.5 text-[12px] font-medium text-ink">
+                {t.workflowGenerationLogTitle({ count: props.progress.logs.length })}
+              </summary>
+              <ul className="m-0 max-h-44 flex-col gap-0.5 overflow-y-auto px-2.5 pb-2">
+                {props.progress.logs.map((line, index) => (
+                  <li key={`${index}-${line.slice(0, 12)}`} className="break-words font-mono text-[11px] leading-snug text-muted">
+                    {line}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+
           {/* Counters */}
           <div className="flex items-center gap-4 text-[11.5px] text-muted">
             <span>{t.workflowGenerationActionCount({ count: props.progress.actionCount })}</span>
@@ -207,18 +220,13 @@ export function WorkflowGenerationDialog(props: WorkflowGenerationDialogProps): 
             ) : null}
           </div>
 
-          {/* Error */}
-          {props.progress.state === 'ERROR' && props.errorMessage ? (
-            <div className="rounded-lg border border-err/30 bg-err-surface px-3 py-2 text-xs text-err">
+          {/* Error (generation failure) */}
+          {props.errorMessage ? (
+            <div
+              className="rounded-lg border border-err/30 bg-err-surface px-3 py-2 text-xs text-err"
+              role="alert"
+            >
               {props.errorMessage}
-            </div>
-          ) : null}
-
-          {/* Saved confirmation */}
-          {props.progress.state === 'SAVED' ? (
-            <div className="flex items-center gap-2 rounded-lg border border-ok/30 bg-ok-surface px-3 py-2 text-xs text-ok">
-              <CheckCircle2 className="h-4 w-4 flex-none" aria-hidden />
-              {t.workflowGenerationSavedDetail}
             </div>
           ) : null}
         </div>
@@ -240,23 +248,6 @@ export function WorkflowGenerationDialog(props: WorkflowGenerationDialogProps): 
                 className="h-8 rounded-lg bg-accent px-3 text-xs font-semibold text-on-accent transition-colors hover:bg-accent-strong"
               >
                 {t.workflowGenerationBackground}
-              </button>
-            </>
-          ) : props.progress.state === 'READY' ? (
-            <>
-              <button
-                type="button"
-                onClick={props.onEdit}
-                className="h-8 rounded-lg border border-border bg-panel-2 px-3 text-xs font-medium text-muted transition-colors hover:bg-hover hover:text-ink"
-              >
-                {t.workflowGenerationEdit}
-              </button>
-              <button
-                type="button"
-                onClick={props.onSave}
-                className="h-8 rounded-lg bg-accent px-3.5 text-xs font-semibold text-on-accent transition-colors hover:bg-accent-strong"
-              >
-                {t.workflowGenerationSave}
               </button>
             </>
           ) : (

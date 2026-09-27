@@ -43,6 +43,12 @@ import { OCR_SUPPORTED } from '../../lib/ocr-support'
 import { interpolate, EMPTY_INTERP_KEY, getByPath } from '../../lib/workflow/interpolate'
 import { interpretScriptResult } from '../../lib/workflow/script-result'
 import {
+  UploadFileError,
+  normalizeWorkflowFiles,
+  type WorkflowFileArtifact,
+} from '../../lib/workflow/file-artifact'
+import { requestUserFiles } from '../../lib/workflow/user-file-picker'
+import {
   coerceInputValue,
   missingRequiredInputs,
   workflowParametersOf,
@@ -121,6 +127,22 @@ export interface WorkflowExecCtx {
    * show the variable values at each step.
    */
   snapshot?: (nodeId: string, label: string, variables: Record<string, unknown>) => void
+  /**
+   * Populated by `runRaw` after an element op: the spec the page-side kernel
+   * REALLY resolved the element with, and how many elements the whole target
+   * matched. The operator bridge reads it to record what actually worked —
+   * instead of recording a pre-execution guessed selector — and the selector
+   * trace compares it against the recorded locator. Engine-driven runs ignore
+   * it; the field stays unset unless an op reports it.
+   */
+  lastResolution?: {
+    /** Kernel's serialized spec (`how|value`) that matched the element. */
+    usedSpec: string
+    /** A fallback (not the primary spec) won. */
+    usedFallback: boolean
+    /** Elements the resolved target matched. */
+    matched: number
+  }
   /**
    * The workflow's resolved reliability contract (see
    * `lib/workflow/reliability`). Present only on generated-strict runs: every
@@ -288,7 +310,26 @@ async function runRaw(op: Op, ctx: WorkflowExecCtx): Promise<string | null> {
     ctx.scope,
   )
   if (result && result.ok === false) {
+    // Stash the evidence of what the kernel tried before throwing, so the
+    // operator bridge / selector trace can report the attempted resolution
+    // rather than just the error message.
+    if (typeof result.usedSpec === 'string') {
+      ctx.lastResolution = {
+        usedSpec: result.usedSpec,
+        usedFallback: result.usedFallback === true,
+        matched: typeof result.matched === 'number' ? result.matched : 0,
+      }
+    }
     throw new Error(result.error || `${op.action} 失败`)
+  }
+  // Remember what the page REALLY clicked with. This — not the pre-execution
+  // candidate — is what the recorded node must replay.
+  if (result && typeof result.usedSpec === 'string') {
+    ctx.lastResolution = {
+      usedSpec: result.usedSpec,
+      usedFallback: result.usedFallback === true,
+      matched: typeof result.matched === 'number' ? result.matched : 0,
+    }
   }
   ctx.emit('result', result?.note ?? 'ok')
   return null
@@ -543,9 +584,11 @@ const scroll: BlockExecutor = async (data, ctx) => {
       try {
         await execOnActiveTab(safe, ctx.signal, ctx.tabId, ctx.scope)
       } catch (error) {
+        // Cancellation unwinds immediately, not as a partial scroll.
+        if ((error as Error)?.name === 'AbortError') throw error
         // Deliberate degrade (the one place a failure is NOT rethrown): a
         // partial scroll has still moved the page, and the next node locates
-        // its own element anyway, so stopping early beats failing the run.
+        // its own element anyway, so stopping early beats failing run.
         // Reported as a partial result rather than "完成", which used to be
         // claimed even after this break.
         stoppedAt = `第 ${i + 1}/${steps} 步：${message(error)}`
@@ -1884,20 +1927,37 @@ async function evalLocalWorkflowJs(
       },
     }
 
-    const fn = new Function(
-      'automaNextBlock',
-      'automaSetVariable',
-      'automaRefData',
-      'automaResetTimeout',
-      'variables',
-      `"use strict";\n${code}`,
-    ) as (
-      a: typeof helpers.automaNextBlock,
-      b: typeof helpers.automaSetVariable,
-      c: typeof helpers.automaRefData,
-      d: typeof helpers.automaResetTimeout,
-      v: Record<string, unknown>,
-    ) => unknown
+    // Match the page harness: a bare expression is auto-returned (like the
+    // agent's run_javascript); a source with a statement keyword uses the
+    // plain body (`return` / automaNextBlock). `new Function` only compiles,
+    // so a rejected expression wrap falls back to the body without running.
+    const statementWord = /\b(return|const|let|var|if|for|while|function|switch|try|throw)\b/
+    const buildFn = (wrap?: (src: string) => string) =>
+      new Function(
+        'automaNextBlock',
+        'automaSetVariable',
+        'automaRefData',
+        'automaResetTimeout',
+        'variables',
+        wrap ? wrap(code) : `"use strict";\n${code}`,
+      ) as (
+        a: typeof helpers.automaNextBlock,
+        b: typeof helpers.automaSetVariable,
+        c: typeof helpers.automaRefData,
+        d: typeof helpers.automaResetTimeout,
+        v: Record<string, unknown>,
+      ) => unknown
+
+    const fn =
+      !statementWord.test(code)
+        ? (() => {
+            try {
+              return buildFn((src) => `"use strict";\nreturn (async () => (\n${src}\n))();`)
+            } catch {
+              return buildFn()
+            }
+          })()
+        : buildFn()
 
     const awaited = await Promise.race([
       Promise.resolve(
@@ -2235,17 +2295,146 @@ const createElementExec: BlockExecutor = async (data, ctx) => {
 const uploadFileExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const selector = sel(data)
-  const dataUrl = interpolate(String(data['fileData'] ?? ''), ctx.variables, ctx.refData)
-  try {
-    // Conversion of arbitrary local files into an in-page File is not available
-    // to MV3 extensions. We accept a data-url and hand it to the input; a
-    // re-run against a blob/data URL produces a usable File for many pipelines.
-    const opData: Op = { action: 'fill', target: cssTarget(selector), value: dataUrl }
-    await execOnActiveTab(opData, ctx.signal, ctx.tabId, ctx.scope)
-    ctx.emit('result', '已设置文件输入')
-  } catch (error) {
-    throw error
+  if (!selector) {
+    throw new UploadFileError(
+      'UPLOAD_TARGET_NOT_FOUND',
+      'upload-file: missing selector for the upload target.',
+    )
   }
+
+  // Source mode. Legacy nodes without sourceMode carried `fileData` (a data
+  // URL string) or `filePaths` (array); read them but new workflows never
+  // write those fields.
+  const rawMode = String(data['sourceMode'] ?? '').trim()
+  const sourceMode: 'user-select' | 'workflow-file' =
+    rawMode === 'workflow-file'
+      ? 'workflow-file'
+      : rawMode === 'user-select'
+        ? 'user-select'
+        : data['fileData'] !== undefined ||
+            (Array.isArray(data['filePaths']) && (data['filePaths'] as unknown[]).length > 0)
+          ? 'workflow-file'
+          : 'user-select'
+
+  let files: WorkflowFileArtifact[]
+  if (sourceMode === 'user-select') {
+    ctx.emit('status', 'Waiting for the user to choose a file…')
+    files = await requestUserFiles({
+      accept: String(data['accept'] ?? ''),
+      multiple: data['multiple'] === true,
+    })
+  } else {
+    const fileVariable = String(data['fileVariable'] ?? '').trim()
+    let raw: unknown
+    if (fileVariable) {
+      if (!(fileVariable in ctx.variables)) {
+        throw new UploadFileError(
+          'UPLOAD_FILE_VARIABLE_NOT_FOUND',
+          `upload-file: variable "${fileVariable}" is not set.`,
+          { selector },
+        )
+      }
+      raw = ctx.variables[fileVariable]
+    } else if (data['fileData'] !== undefined) {
+      // Legacy: data URL literal/interpolated string.
+      raw = interpolate(String(data['fileData'] ?? ''), ctx.variables, ctx.refData)
+    } else if (Array.isArray(data['filePaths'])) {
+      // Legacy: list of data URLs (non-data-URL path entries can't be read by
+      // an extension; normalization will reject them explicitly).
+      raw = (data['filePaths'] as unknown[])
+        .map((p) => (typeof p === 'string' ? interpolate(p, ctx.variables, ctx.refData) : p))
+        .filter((p) => p !== '')
+    } else {
+      throw new UploadFileError(
+        'UPLOAD_FILE_VARIABLE_NOT_FOUND',
+        'upload-file: workflow-file mode requires a fileVariable.',
+        { selector },
+      )
+    }
+    try {
+      files = normalizeWorkflowFiles(raw)
+    } catch (error) {
+      if (error instanceof UploadFileError) throw error
+      throw new UploadFileError(
+        'UPLOAD_FILE_VARIABLE_INVALID',
+        `upload-file: ${message(error)}`,
+        { selector },
+      )
+    }
+  }
+
+  // Unified page-upload entry. The kernel resolves input vs drop zone.
+  const waitFor =
+    data['waitForSelector'] === true
+      ? Math.max(0, Number(data['waitSelectorTimeout'] ?? 10000))
+      : 0
+  const op: Op = {
+    action: 'upload_files',
+    target: targetFrom(data),
+    files: files.map((f) => ({
+      name: f.name,
+      mimeType: f.mimeType,
+      dataUrl: f.dataUrl,
+    })),
+    fileTarget: 'auto',
+    ...(waitFor > 0 ? { waitFor } : {}),
+  }
+
+  const result = await execOnActiveTab(op, ctx.signal, ctx.tabId, ctx.scope)
+  if (!result || result.ok === false) {
+    throw new UploadFileError(
+      'UPLOAD_FILE_INJECTION_FAILED',
+      result?.error || 'upload-file: page injection failed.',
+      { selector },
+    )
+  }
+
+  // Node-level verification: the kernel reports what actually landed.
+  const evidence = result.data as
+    | { count?: number; files?: { name: string; type: string; size: number }[] }
+    | undefined
+  if (data['verifyAfterUpload'] !== false) {
+    const injected = evidence?.files ?? []
+    if (injected.length !== files.length) {
+      throw new UploadFileError(
+        'UPLOAD_FILE_VERIFICATION_FAILED',
+        `Expected ${files.length} file(s) in the control, found ${injected.length}.`,
+        { selector },
+      )
+    }
+    for (const expected of files) {
+      const actual = injected.find((f) => f.name === expected.name)
+      if (!actual) {
+        throw new UploadFileError(
+          'UPLOAD_FILE_VERIFICATION_FAILED',
+          `File "${expected.name}" did not reach the upload control.`,
+          { selector },
+        )
+      }
+      if (actual.type && expected.mimeType && actual.type !== expected.mimeType) {
+        throw new UploadFileError(
+          'UPLOAD_FILE_VERIFICATION_FAILED',
+          `File "${expected.name}" MIME type is ${actual.type}, expected ${expected.mimeType}.`,
+          { selector },
+        )
+      }
+    }
+  }
+
+  ctx.variables['lastUploadResult'] = {
+    nodeId: String(data['id'] ?? ''),
+    selector,
+    sourceMode,
+    ...(evidence ?? { count: files.length }),
+  }
+  ctx.emit(
+    'result',
+    `${evidence?.count ?? files.length} file(s) in the upload control: ${(
+      evidence?.files ?? []
+    )
+      .map((f) => f.name)
+      .join(', ')}`,
+  )
   return null
 }
 
@@ -2610,14 +2799,14 @@ const waitConnections: BlockExecutor = async (data, ctx) => {
     const tab = await resolveTargetTab(undefined, ctx.scope).catch(() => null)
     tabId = typeof tab?.id === 'number' ? tab.id : undefined
   }
-  await new Promise<void>((resolve) => {
-    if (ctx.signal.aborted) return resolve()
+  await new Promise<void>((resolve, reject) => {
+    if (ctx.signal.aborted) return reject(new DOMException('Aborted', 'AbortError'))
     const timer = setTimeout(resolve, 300)
     ctx.signal.addEventListener(
       'abort',
       () => {
         clearTimeout(timer)
-        resolve()
+        reject(new DOMException('Aborted', 'AbortError'))
       },
       { once: true },
     )
@@ -2696,7 +2885,7 @@ async function waitForTabLoaded(
   if (typeof tabId !== 'number' || !chrome?.tabs?.onUpdated) return
   const check = await chrome.tabs.get(tabId).catch(() => null)
   if (check?.status === 'complete') return
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
       chrome.tabs.onUpdated.removeListener(listener)
       signal?.removeEventListener('abort', cancel)
@@ -2705,7 +2894,7 @@ async function waitForTabLoaded(
     const cancel = () => {
       clearTimeout(timeout)
       chrome.tabs.onUpdated.removeListener(listener)
-      resolve()
+      reject(new DOMException('Aborted', 'AbortError'))
     }
     const listener = (id: number, info: chrome.tabs.TabChangeInfo) => {
       if (id === tabId && info.status === 'complete') {

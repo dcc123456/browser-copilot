@@ -34,6 +34,112 @@ export function shouldCompact(lastInputTokens: number): boolean {
   return lastInputTokens >= COMPACT_THRESHOLD_TOKENS
 }
 
+// --- Token estimation (for requests that never reported usage) ---------------------
+//
+// The server reports prompt_tokens only AFTER a request succeeds. When a
+// conversation grows large without a prior usage report (first long turn,
+// non-reporting endpoint, or history accumulated mid-turn), the real size is
+// unknown and the over-limit request 400s before any token is counted. The
+// estimators below bound that case. They deliberately OVER-estimate: a CJK
+// code point counts as one token (Qwen's BPE is CJK-dense) and other text as
+// ~0.35 token/char (~3 chars/token).
+
+/** Conservative token estimate for a piece of text. */
+export function estimateTextTokens(text: string): number {
+  let tokens = 0
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 0
+    const isCjk =
+      (code >= 0x3000 && code <= 0x30ff) || // CJK punctuation, hiragana, katakana
+      (code >= 0x4e00 && code <= 0x9fff) || // CJK unified ideographs
+      (code >= 0xac00 && code <= 0xd7a3) || // Hangul syllables
+      (code >= 0xf900 && code <= 0xfaff) || // CJK compatibility ideographs
+      (code >= 0xff00 && code <= 0xffef) // full/halfwidth forms
+    if (isCjk) tokens += 1
+    else if (ch.trim() !== '') tokens += 0.35
+  }
+  return Math.ceil(tokens)
+}
+
+/** Conservative token estimate for one wire message (struct + content + calls). */
+export function estimateMessageTokens(message: WireMessage): number {
+  let tokens = 4 // per-message structural overhead
+  const loose = message as Record<string, unknown>
+  if (typeof loose['content'] === 'string') tokens += estimateTextTokens(loose['content'])
+  if (typeof loose['name'] === 'string') tokens += estimateTextTokens(loose['name'])
+  for (const call of (loose['tool_calls'] as WireToolCall[] | undefined) ?? []) {
+    tokens += estimateTextTokens(call.function.name)
+    tokens += estimateTextTokens(call.function.arguments)
+    tokens += 4
+  }
+  return tokens
+}
+
+/**
+ * Total estimated input size of a request array. Extra text (serialised tool
+ * schemas, system prompt carried outside the array) is converted at the
+ * non-CJK rate when it is not passed as its own message.
+ */
+export function estimateInputTokens(
+  messages: WireMessage[],
+  extra?: { text?: string; messages?: WireMessage[] },
+): number {
+  const body = messages.reduce((sum, m) => sum + estimateMessageTokens(m), 0)
+  const addedMessages = extra?.messages?.reduce(
+    (sum, m) => sum + estimateMessageTokens(m),
+    0,
+  ) ?? 0
+  const addedText = extra?.text ? estimateTextTokens(extra.text) : 0
+  return body + addedMessages + addedText + 2
+}
+
+/**
+ * Last-resort emergency bound: shorten the CONTENT of the largest messages
+ * (oldest non-user messages first) until the estimated size fits
+ * tokenBudget. Messages are never deleted here (that would orphan tool-call
+ * pairs); they are truncated in place. User messages are touched only if every
+ * other message is gone and the budget still does not fit. Returns the number
+ * of characters removed.
+ */
+export function hardCapHistory(
+  history: WireMessage[],
+  tokenBudget: number,
+): number {
+  if (estimateInputTokens(history) <= tokenBudget) return 0
+  let removed = 0
+  const truncate = (message: WireMessage): boolean => {
+    if (typeof message.content !== 'string' || message.content.length <= 300) return false
+    const excessTokens = estimateInputTokens(history) - tokenBudget
+    // Convert the token excess to chars at the dense rate (+ margin), but keep
+    // at least 300 chars of the message.
+    const wantedCut = Math.ceil(excessTokens / 0.9) + 16
+    const cut = Math.min(message.content.length - 300, wantedCut)
+    message.content = `${message.content.slice(0, message.content.length - cut)}\u2026[truncated]`
+    removed += cut
+    return true
+  }
+  // Pass 1: keep truncating the oldest non-user messages that still hold
+  // content, iterating until the budget fits or none of them is cuttable.
+  let progressed = true
+  while (progressed && estimateInputTokens(history) > tokenBudget) {
+    progressed = false
+    for (const message of history) {
+      if (estimateInputTokens(history) <= tokenBudget) return removed
+      if (message.role !== 'user' && truncate(message)) progressed = true
+    }
+  }
+  // Pass 2: user content only as the final emergency.
+  progressed = true
+  while (progressed && estimateInputTokens(history) > tokenBudget) {
+    progressed = false
+    for (const message of history) {
+      if (estimateInputTokens(history) <= tokenBudget) return removed
+      if (truncate(message)) progressed = true
+    }
+  }
+  return removed
+}
+
 export interface CompactOutcome {
   /** Removed messages replaced by the summary. */
   removed: number
