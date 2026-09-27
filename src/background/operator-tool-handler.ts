@@ -38,6 +38,7 @@ import {
 import { isGeneratedStrict } from '../lib/workflow/reliability'
 import { locatorConcernLines } from '../lib/workflow/selector-probe'
 import { validateWorkflowForRun } from '../lib/workflow/validation'
+import { ensureNavigationAnchor, persistDefaultRetries } from '../lib/workflow/runnability'
 import { probeWorkflowLocators } from './selector-probe'
 import { declareMissingInputs } from '../lib/workflow/declare-missing-inputs'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
@@ -79,6 +80,9 @@ import {
 } from '../lib/workflow/dynamic-data'
 import { isAiComposedFill } from '../lib/workflow/ai-prefill'
 import type { Workflow, WorkflowNode } from '../lib/workflow/types'
+import type { TrialRunRecord } from '../lib/workflow/trial-run'
+import { withTrialRecord } from './workflow-engine/repair/generation-trial'
+import type { TrialRunner } from './workflow-engine/repair/generation-trial'
 
 export { TRIGGER_BLOCK_ID }
 export type { DraftSource, PendingBranch, WorkflowDraft }
@@ -635,10 +639,20 @@ export function declareWorkflowInputs(
  * `triggerFromNodes` — `saveWorkflow` does not do that sync itself, and a
  * stale mirror would mis-route the alarm / context-menu / visit-web
  * registrations.
+ *
+ * `opts.trial` is the pre-save replay of the finished graph. Only a call that
+ * actually saves supplies it (reviewing a draft must never touch the page), and
+ * its result can only ever change what is RECORDED on the workflow — never
+ * whether it is saved.
  */
 export async function composeWorkflowFromDraft(
   conversationId: string,
-  opts: { name?: string; description?: string; save?: boolean } = {},
+  opts: {
+    name?: string
+    description?: string
+    save?: boolean
+    trial?: TrialRunner
+  } = {},
 ): Promise<{ workflow: Workflow; saved: boolean } | { error: string; issues?: string[] }> {
   const draft = draftStore.get(conversationId) ?? (await hydrateDraft(conversationId))
   if (actionNodesOf(draft).length === 0) {
@@ -683,7 +697,7 @@ export async function composeWorkflowFromDraft(
   // dangling {{reference}} to a declared run input (the user supplies it at
   // launch) instead of failing the data-flow check.
   declareMissingInputs(draft.nodes)
-  const workflow: Workflow = {
+  let workflow: Workflow = {
     id: newId(),
     name,
     description: opts.description ?? '',
@@ -710,6 +724,17 @@ export async function composeWorkflowFromDraft(
     createdAt: now,
     updatedAt: now,
   }
+  // Replay anchor. The generation session acted on a page the user already had
+  // open, so the graph records interactions and no navigation — replayed
+  // tomorrow it would type into whichever tab happens to be active. Opening
+  // the recorded page first is the single biggest first-run fix available, and
+  // it is purely additive: no existing node is touched, and a graph that
+  // already navigates (or has no recorded origin) comes back untouched.
+  workflow = ensureNavigationAnchor(workflow)
+  // Replay pacing: every repeat-safe page step gets the short retry the model
+  // was during generation. Soft by construction — it only ever adds an
+  // attempt, and never re-fires a step that submits anything.
+  workflow = persistDefaultRetries(workflow)
   let saved = false
   // Non-blocking reliability / runnability findings (spec: saving must never
   // be blocked). Any run or generated-validation problems are recorded on the
@@ -768,10 +793,22 @@ export async function composeWorkflowFromDraft(
       }
     }
   }
+  // The pre-save trial replay: one bounded, real run of the finished graph,
+  // stopping in front of the first step that cannot be undone. It runs ONLY on
+  // a call that is about to save — materialising a draft for the review card
+  // must never move the user's page. Every outcome, including a failure, still
+  // saves: the trial buys evidence and a self-heal write-back, not a gate.
+  let trialRecord: TrialRunRecord | undefined
+  if (opts.save !== false && opts.trial) {
+    const trial = await opts.trial(workflow)
+    workflow = trial.workflow
+    trialRecord = trial.record
+  }
   // Finish the stage reports: static validation + independent verification.
   generationStages.push(staticValidateStage(runErrorCount, generatedErrorCount))
-  generationStages.push(independentVerifyStage())
+  generationStages.push(independentVerifyStage(trialRecord))
   workflow.settings.generationStages = generationStages
+  if (trialRecord) workflow = withTrialRecord(workflow, trialRecord)
   if (saveWarnings.length > 0) {
     workflow.settings.saveWarnings = saveWarnings
   }

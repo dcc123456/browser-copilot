@@ -1,20 +1,30 @@
 /**
- * Save-time runnability: persisted element waits, the page-anchor predicate,
- * and the save-time selector-hardening pass.
+ * Save-time runnability: the page anchor, persisted replay tolerance, the
+ * page-anchor predicate, and the save-time selector-hardening pass.
  *
  * The generation session proves each step works; the replay is what fails when
- * pages render late or the graph never opens a page of its own. These tests
- * pin the three guards a regression would silently undo:
+ * the graph never opens a page, when pages render late, or when a locator
+ * matched nothing on the tab that happened to be active. These tests pin the
+ * guards a regression would silently undo:
  *
  *  1. `persistDefaultWaits` — waits persisted ON the graph at save time,
  *     idempotently, without touching the graph's structure.
  *  2. `unanchoredElementStart` — a graph whose first element action has no
  *     page-opening block before it replays only on the generation-time page.
- *  3. `hardenWorkflowSelectors` — one batched probe re-picks every recorded
+ *  3. `ensureNavigationAnchor` — that graph gets a `new-tab` of the recorded
+ *     origin spliced in front of it, additively and once.
+ *  4. `persistDefaultRetries` — every repeat-safe page step gets the pacing the
+ *     model used to supply by hand; unsafe and pre-configured steps do not.
+ *  5. `hardenWorkflowSelectors` — one batched probe re-picks every recorded
  *     selector, and a refused probe leaves the graph untouched.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { persistDefaultWaits, unanchoredElementStart } from '../src/lib/workflow/runnability'
+import {
+  ensureNavigationAnchor,
+  persistDefaultRetries,
+  persistDefaultWaits,
+  unanchoredElementStart,
+} from '../src/lib/workflow/runnability'
 import { hardenWorkflowSelectors } from '../src/background/selector-probe'
 import type { Workflow, WorkflowNode } from '../src/lib/workflow/types'
 import { newId } from '../src/lib/storage'
@@ -114,6 +124,125 @@ describe('unanchoredElementStart', () => {
   it('is false for a graph with no element-acting blocks at all', () => {
     const wf = workflowOf([node('delay', { time: 500 })])
     expect(unanchoredElementStart(wf)).toBe(false)
+  })
+})
+
+describe('ensureNavigationAnchor', () => {
+  function anchored(nodes: WorkflowNode[], originUrl?: string): Workflow {
+    const wf = workflowOf(nodes)
+    if (originUrl) wf.settings.generationOriginUrl = originUrl
+    return wf
+  }
+
+  it('puts a new-tab opening the origin in front of the chain and rewires the trigger', () => {
+    const click = node('event-click', { selector: '#go' })
+    const wf = anchored([click], 'https://shop.example/search')
+    const trigger = wf.drawflow.nodes[0]!
+    wf.drawflow.edges = [{ id: 'e1', source: trigger.id, target: click.id }]
+
+    const out = ensureNavigationAnchor(wf)
+    const anchor = out.drawflow.nodes[1]!
+    expect(anchor.id).toBe('page-anchor')
+    expect(anchor.data['blockId']).toBe('new-tab')
+    expect(anchor.data['url']).toBe('https://shop.example/search')
+    // trigger → anchor → click, and nothing else moved.
+    expect(out.drawflow.nodes.map((n) => n.id)).toEqual([trigger.id, 'page-anchor', click.id])
+    expect(out.drawflow.edges.find((e) => e.source === trigger.id)?.target).toBe('page-anchor')
+    expect(out.drawflow.edges.find((e) => e.source === 'page-anchor')?.target).toBe(click.id)
+    // The splice kept the original edge id, so an editor session does not see
+    // the connection as a delete-and-add.
+    expect(out.drawflow.edges.find((e) => e.id === 'e1')?.target).toBe('page-anchor')
+  })
+
+  it('never touches an existing node', () => {
+    const click = node('event-click', { selector: '#go' })
+    const wf = anchored([click], 'https://shop.example/')
+    const out = ensureNavigationAnchor(wf)
+    expect(out.drawflow.nodes.find((n) => n.id === click.id)).toBe(click)
+  })
+
+  it('declines a graph that already opens a page, one with no origin, and an anchored graph twice', () => {
+    const withNav = anchored([node('new-tab', { url: 'https://x.test' }), node('event-click', {})])
+    expect(ensureNavigationAnchor(withNav)).toBe(withNav)
+
+    const noOrigin = anchored([node('event-click', { selector: '#go' })])
+    expect(ensureNavigationAnchor(noOrigin)).toBe(noOrigin)
+
+    const anchoredOnce = ensureNavigationAnchor(anchored([node('event-click', {})], 'https://x.test/'))
+    expect(ensureNavigationAnchor(anchoredOnce)).toBe(anchoredOnce)
+  })
+
+  it('links the trigger when the graph has no edges at all', () => {
+    const wf = anchored([node('forms', { selector: '#q' })], 'https://x.test/a')
+    const trigger = wf.drawflow.nodes[0]!
+    const head = wf.drawflow.nodes[1]!
+    const out = ensureNavigationAnchor(wf)
+    expect(out.drawflow.edges.some((e) => e.source === trigger.id && e.target === 'page-anchor')).toBe(true)
+    expect(out.drawflow.edges.some((e) => e.source === 'page-anchor' && e.target === head.id)).toBe(true)
+  })
+
+  it('takes the URL from the argument, and refuses a non-http origin', () => {
+    const wf = anchored([node('event-click', {})], 'file:///tmp/page.html')
+    expect(ensureNavigationAnchor(wf)).toBe(wf)
+    const out = ensureNavigationAnchor(wf, 'https://given.example/')
+    expect(out.drawflow.nodes[1]?.data['url']).toBe('https://given.example/')
+  })
+})
+
+describe('persistDefaultRetries', () => {
+  it('arms a retry on page steps only', () => {
+    const wf = workflowOf([
+      node('event-click', { selector: '#go' }),
+      node('get-text', { selector: '.out' }),
+      node('set-variable', { variableName: 'x' }),
+      node('loop-data', { dataKey: 'rows' }),
+      node('delay', { time: 500 }),
+    ])
+    const out = persistDefaultRetries(wf)
+    const policy = (blockId: string) =>
+      out.drawflow.nodes.find((n) => n.data['blockId'] === blockId)!.data['onError']
+
+    expect(policy('event-click')).toEqual({
+      enable: true,
+      toDo: 'retry',
+      retryTimes: 2,
+      retryInterval: 800,
+    })
+    expect(policy('get-text')).toBeTruthy()
+    // A retry of a variable step fixes nothing and a retry of a loop re-runs
+    // its whole body; the trigger is not a step at all.
+    expect(policy('set-variable')).toBeUndefined()
+    expect(policy('loop-data')).toBeUndefined()
+    expect(policy('delay')).toBeUndefined()
+    expect(wf.drawflow.nodes[1]!.data['onError']).toBeUndefined()
+  })
+
+  it('never re-fires a step that submits, sends or logs in', () => {
+    const wf = workflowOf([
+      node('forms', { selector: '#q', action: 'submit' }),
+      node('event-click', { selector: '#buy', description: '提交订单' }),
+      node('webhook', { url: 'https://hook.test' }),
+    ])
+    const out = persistDefaultRetries(wf)
+    for (const blockId of ['forms', 'event-click', 'webhook']) {
+      expect(out.drawflow.nodes.find((n) => n.data['blockId'] === blockId)!.data['onError']).toBeUndefined()
+    }
+  })
+
+  it('respects an error policy the node already has', () => {
+    const wf = workflowOf([
+      node('event-click', { selector: '#go', onError: { enable: true, toDo: 'fallback' } }),
+    ])
+    const out = persistDefaultRetries(wf)
+    expect(out.drawflow.nodes[1]!.data['onError']).toEqual({ enable: true, toDo: 'fallback' })
+    expect(out).toBe(wf)
+  })
+
+  it('is idempotent and keeps the graph structure', () => {
+    const wf = workflowOf([node('event-click', { selector: '#go' })])
+    const once = persistDefaultRetries(wf)
+    expect(persistDefaultRetries(once)).toBe(once)
+    expect(once.drawflow.nodes.map((n) => n.id)).toEqual(wf.drawflow.nodes.map((n) => n.id))
   })
 })
 
