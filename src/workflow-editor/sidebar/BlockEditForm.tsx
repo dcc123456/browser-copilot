@@ -18,6 +18,7 @@ import { isCustomBlock } from '../../lib/workflow/blocks/custom'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
 import NumberInput from '../../ui/NumberInput'
 import { EditForms } from '../blocks/EditForms'
+import { Expand } from '../blocks/shared/Field'
 import NodeGoalInspector from './NodeGoalInspector'
 import NodeFixModal from './NodeFixModal'
 import type { TranslateFn } from '../i18n'
@@ -155,10 +156,6 @@ export default function BlockEditForm({
       </div>
 
       <div className="wf-edit-body">
-        {/* The goal contract (goal, success criteria, failure meaning, repair
-            hints) is AI-internal bookkeeping. For upload-file the user only
-            picks a selector and a file source, so hide it entirely. */}
-        {block.id !== 'upload-file' && <NodeGoalInspector data={data} onChange={onChange} t={t} />}
         {cloud ? (
           <div className="wf-form wf-form-unsupported">
             <Cloud size={14} />
@@ -170,6 +167,15 @@ export default function BlockEditForm({
           <EditComponent data={data} onChange={onChange} blockId={block.id} />
         ) : (
           <GenericForm data={data} onChange={onChange} />
+        )}
+
+        {/* Goal + success criteria sit BELOW the block's own fields (and the
+            description), collapsed by default; the user expands to edit. For
+            upload-file the user only picks a selector and a file source. */}
+        {block.id !== 'upload-file' && (
+          <Expand title={t('nodeGoalSection')} defaultOpen={false}>
+            <NodeGoalInspector data={data} onChange={onChange} t={t} />
+          </Expand>
         )}
 
         {canRevert && (

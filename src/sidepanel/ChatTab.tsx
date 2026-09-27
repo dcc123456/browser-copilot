@@ -51,6 +51,7 @@ import {
   type WorkflowReview,
 } from '../lib/workflow/review-patch'
 import { requiredStepIdsOf } from '../lib/workflow/required-steps'
+import { displayNameOfNodeId } from '../lib/workflow/node-name'
 import { WorkflowReviewDialog } from './WorkflowReviewList'
 import { GenerationStagesView } from './GenerationStages'
 import { WorkflowGenerationDialog } from './components/WorkflowGenerationDialog'
@@ -3364,6 +3365,17 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             stages={workflowPrompt.workflow.settings.generationStages}
           />
         )}
+      {workflowPrompt.workflow.settings.saveWarnings &&
+        workflowPrompt.workflow.settings.saveWarnings.length > 0 && (
+          <div className="ai-prefill-list" role="group" aria-label={t.chatSaveWorkflowWarningsTitle}>
+            <p className="hint text-warn">{t.chatSaveWorkflowWarningsTitle}</p>
+            {workflowPrompt.workflow.settings.saveWarnings.map((warning, index) => (
+              <div className="ai-prefill-item" key={index}>
+                <span className="wf-input-default">{warning}</span>
+              </div>
+            ))}
+          </div>
+        )}
       {workflowPrompt.probesChecking && (
         <p className="hint" style={{ margin: '4px 0' }} role="status">
           {t.chatWorkflowProbeChecking}
@@ -3414,7 +3426,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             <div className="ai-prefill-item">
               <span className="wf-input-name">
                 {t.chatWorkflowRepairFailedNode({
-                  nodeId: workflowPrompt.repair.failedNodeId,
+                  nodeId: displayNameOfNodeId(
+                    workflowPrompt.workflow,
+                    workflowPrompt.repair.failedNodeId,
+                  ),
                 })}
               </span>
             </div>
@@ -3424,7 +3439,9 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               <div className="ai-prefill-item">
                 <span className="wf-input-name">
                   {t.chatWorkflowRepairRootCauses({
-                    nodes: workflowPrompt.repair.rootCauseNodeIds.join(', '),
+                    nodes: workflowPrompt.repair.rootCauseNodeIds
+                      .map((id) => displayNameOfNodeId(workflowPrompt.workflow, id))
+                      .join(', '),
                   })}
                 </span>
               </div>

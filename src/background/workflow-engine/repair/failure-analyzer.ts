@@ -22,6 +22,7 @@
  */
 
 import { checkWorkflowIntegrity } from '../../../lib/workflow/integrity'
+import { missingRequirements } from '../../../lib/workflow/block-requirements'
 import {
   analyzeDataFlow,
   traceVariableChain,
@@ -163,6 +164,13 @@ function buildPageEvidence(failedNode: WorkflowNode, trace: ExecutionTrace): Pag
   if (trace.currentUrl) add('URL', trace.currentUrl)
   const selector = failedNode.data?.['selector']
   if (typeof selector === 'string' && selector.trim()) add('SELECTOR', selector)
+  // Missing required params of the failed node are concrete evidence the model
+  // can cite when it fills them (e.g. 'get-text: missing selector'). Without
+  // these rows a SET_PARAM creating the key had nothing to reference.
+  const blockId = blockIdOf(failedNode)
+  for (const problem of missingRequirements(blockId, failedNode.data ?? {})) {
+    add('LOCATOR', `missing required param: ${problem.key} — ${problem.message}`)
+  }
   return rows
 }
 

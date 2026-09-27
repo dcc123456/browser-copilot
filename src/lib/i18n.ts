@@ -436,6 +436,8 @@ export interface Messages {
   chatWorkflowInputsTitle: string
   /** Heading for the generation pipeline stages on the save card. */
   generationStagesTitle: string
+  /** Heading for the non-blocking save-time warnings on the save card. */
+  chatSaveWorkflowWarningsTitle: string
   /** Stage label: normalize. */
   generationStageNormalize: string
   /** Stage label: generalize inputs. */
@@ -603,6 +605,10 @@ export interface Messages {
   chatWorkflowReviewAllKept: string
   /** Title of the step checklist on the save card / review dialog. */
   chatWorkflowStepsTitle: string
+  /** Badge on a step that cannot be dropped (its loss would break runnability). */
+  chatWorkflowStepRequired: string
+  /** Tooltip on a required step's locked checkbox. */
+  chatWorkflowStepRequiredHint: string
   /** Title of the history-tab review dialog. */
   workflowReviewDialogTitle: string
   workflowReviewDialogConfirm: string
@@ -1591,6 +1597,7 @@ const en: Messages = {
     'AI-generated content (checked = regenerate with AI at replay; unchecked = reuse the captured text)',
   chatWorkflowInputsTitle: 'Workflow inputs',
   generationStagesTitle: 'Generation stages',
+  chatSaveWorkflowWarningsTitle: 'Warnings',
   generationStageNormalize: 'Normalize',
   generationStageGeneralizeInputs: 'Generalize inputs',
   generationStageHardenTargets: 'Harden targets',
@@ -1698,6 +1705,9 @@ const en: Messages = {
     `AI dropped ${count} ineffective step${count > 1 ? 's' : ''} (unchecked); check to keep one.`,
   chatWorkflowReviewAllKept: 'AI reviewed every step — none look ineffective.',
   chatWorkflowStepsTitle: 'Steps (uncheck to remove from the workflow)',
+  chatWorkflowStepRequired: 'Required',
+  chatWorkflowStepRequiredHint:
+    'This step is required: removing it would break the workflow (a later step would lose its input, or no executable steps would remain). It cannot be unchecked.',
   workflowReviewDialogTitle: 'Review steps before saving',
   workflowReviewDialogConfirm: 'Save workflow',
   workflowReviewDialogCancel: 'Cancel',
@@ -2725,6 +2735,7 @@ const zhCN: Messages = {
   chatSaveWorkflowAiTitle: 'AI 生成内容（勾选 = 回放时用 AI 重新生成；取消 = 沿用本次填写的文本）',
   chatWorkflowInputsTitle: '工作流输入',
   generationStagesTitle: '生成阶段',
+  chatSaveWorkflowWarningsTitle: '警告',
   generationStageNormalize: '规范化',
   generationStageGeneralizeInputs: '泛化输入',
   generationStageHardenTargets: '加固目标',
@@ -2823,6 +2834,9 @@ const zhCN: Messages = {
   chatWorkflowReviewDropped: ({ count }) => `AI 已剔除 ${count} 个无效步骤，取消勾选可保留。`,
   chatWorkflowReviewAllKept: 'AI 已逐项审查：没有发现无效步骤。',
   chatWorkflowStepsTitle: '步骤清单（取消勾选即从工作流中移除）',
+  chatWorkflowStepRequired: '必保',
+  chatWorkflowStepRequiredHint:
+    '该步骤必须保留：删除它会破坏工作流（后续节点会失去输入，或没有任何可执行节点），因此不允许取消勾选。',
   workflowReviewDialogTitle: '保存前先审查步骤',
   workflowReviewDialogConfirm: '保存工作流',
   workflowReviewDialogCancel: '取消',

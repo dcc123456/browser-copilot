@@ -20,6 +20,12 @@ export interface SelectorProbeResult {
   /** Matches found. `-1` when the selector itself is invalid. */
   matches: number
   status: SelectorStatus
+  /**
+   * Actionability of the unique match (spec C2): `false` when the element is
+   * hidden or obscured, `true` when it is visible and clickable. Absent when
+   * `matches !== 1` or when actionability could not be determined.
+   */
+  actionable?: boolean
 }
 
 /** Cap on selectors probed in one injection — a graph this size is not real. */
@@ -54,4 +60,34 @@ export function selectorsOf(
 /** The probes that need the user's attention before the workflow is saved. */
 export function failingProbes(probes: readonly SelectorProbeResult[]): SelectorProbeResult[] {
   return probes.filter((probe) => probe.status !== 'unique')
+}
+
+/**
+ * Bilingual `saveWarnings` lines for the two live-locator concerns the static
+ * validator cannot catch (spec C2): a selector that matches MANY elements
+ * (ambiguous — the step may act on the wrong one), and a selector that matches
+ * exactly one element but is hidden/obscured (not actionable — the click/fill
+ * will no-op or fail at replay).
+ *
+ * Missing selectors (zero matches) are layer C's `LOCATOR_MISSING` territory
+ * and are surfaced there; this helper only turns the ACTIONABILITY evidence the
+ * live probe adds into copy. Pure and chrome-free, so it is unit-testable.
+ */
+export function locatorConcernLines(probes: readonly SelectorProbeResult[]): string[] {
+  const lines: string[] = []
+  for (const probe of probes) {
+    if (probe.status === 'ambiguous') {
+      lines.push(
+        `Ambiguous locator: "${probe.selector}" matches ${probe.matches} elements, so the step ` +
+          `may act on the wrong one. ` +
+          `歧义定位器："${probe.selector}" 匹配了 ${probe.matches} 个元素，该步骤可能作用在错误的元素上。`,
+      )
+    } else if (probe.status === 'unique' && probe.actionable === false) {
+      lines.push(
+        `Not actionable: "${probe.selector}" matches one element, but it is hidden or obscured. ` +
+          `不可行动："${probe.selector}" 唯一匹配但元素被隐藏或遮挡，点击/输入将失效。`,
+      )
+    }
+  }
+  return lines
 }

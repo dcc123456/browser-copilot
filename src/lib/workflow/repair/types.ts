@@ -405,6 +405,39 @@ export interface RepairContext {
   repairHistory: RepairRoundSummary[]
   /** Goal-driven repair context (spec §19): keeps the repair anchored to the workflow goal. */
   goalRepairContext?: import('../goal-repair-context').GoalRepairContext
+  /**
+   * Live inspection of the page the run is driving (real elements and their
+   * generated CSS selectors). Grounds selector fixes so the model does not
+   * guess. Structure mirrors `workflow-engine/page-inspect`'s PageInspection.
+   */
+  livePageInspection?: {
+    target: {
+      selectorUsed: string
+      found: boolean
+      matches: number
+      info?: {
+        selector: string
+        tag: string
+        id?: string
+        classes?: string
+        text?: string
+      }
+    }
+    candidates: {
+      selector: string
+      tag: string
+      id?: string
+      classes?: string
+      text?: string
+    }[]
+    interactive: {
+      selector: string
+      tag: string
+      id?: string
+      classes?: string
+      text?: string
+    }[]
+  }
 }
 
 export interface WorkflowRepairSession {

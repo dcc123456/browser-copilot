@@ -19,6 +19,7 @@
  */
 
 import { isDataParam } from '../data-params'
+import { missingRequirements } from '../block-requirements'
 import type { FailureAnalysis, ReplaySafety } from './types'
 import type { Workflow, WorkflowNode } from '../types'
 
@@ -146,6 +147,20 @@ export function allowedParamPathsOf(
   for (const key of Object.keys(node.data ?? {})) {
     if (PROTECTED_PARAMS.has(key)) continue
     paths.add(key)
+  }
+
+  // Missing REQUIRED parameters must be fillable: the repair's whole point is
+  // to fix failures such as 'get-text: missing selector', but a `selector`
+  // key the node never carried was absent from the allowed paths, so the
+  // model's SET_PARAM was rejected every time. Add each missing required key
+  // (the locator requirement reports 'selector'; anyOf reports 'a|b').
+  const blockIdOfNode =
+    typeof node.data?.['blockId'] === 'string' ? (node.data['blockId'] as string) : node.label
+  for (const problem of missingRequirements(blockIdOfNode, node.data ?? {})) {
+    for (const key of problem.key.split('|')) {
+      const trimmed = key.trim()
+      if (trimmed && !PROTECTED_PARAMS.has(trimmed)) paths.add(trimmed)
+    }
   }
 
   // The symptom node is restricted to the consumer reference paths bound to

@@ -20,7 +20,8 @@
  */
 
 import { WorkflowRepairEngine } from './repair-engine'
-import { buildRepairContext } from './repair-agent'
+import { buildRepairContext, enrichContextWithLivePage } from './repair-agent'
+import { liveSelectorProbe, proposeWithSelectorVerification } from './proposal-verification'
 import { decideConfidence } from '../../../lib/workflow/repair/confirmation-gate'
 import {
   isTransientFailure,
@@ -165,7 +166,19 @@ export async function finalizeGeneratedWorkflow(
     }
 
     const context = buildRepairContext(workingCopy, verification.trace, analysis, [])
-    const patch = await engine.propose(analysis, context)
+    // Same live-page grounding as the debug path (selector fixes).
+    await enrichContextWithLivePage(context, workingCopy, verification.trace.currentTabId)
+    // D1 — closed loop: reject dead/ambiguous selector fixes, re-propose with the
+    // real candidates, bounded by the repair round budget.
+    const { patch, rejected } = await proposeWithSelectorVerification(
+      (ctx) => engine.propose(analysis, ctx),
+      liveSelectorProbe(verification.trace.currentTabId),
+      context,
+      policy.maxRepairRounds,
+    )
+    if (rejected.length > 0) {
+      log('status', `Rejected ${rejected.length} non-unique selector fix(es).`)
+    }
     if (!patch) break
 
     const validation = engine.validatePatch(workingCopy, analysis, patch)

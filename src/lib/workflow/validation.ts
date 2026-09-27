@@ -15,7 +15,7 @@ import { hasReference } from './dynamic-data'
 import { unanchoredElementStart } from './runnability'
 import { missingRequirements, missingTriggerParam } from './block-requirements'
 import { goalGateProblems } from './reliability'
-import { BLOCK_BY_ID } from './blocks/palette'
+import { nodeDisplayNameOf } from './node-name'
 import type { Workflow, WorkflowNode } from './types'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -166,11 +166,6 @@ function blockIdOfNode(node: WorkflowNode): string {
   return typeof raw === 'string' && raw ? raw : node.label
 }
 
-/** Display name of a block, for gate messages (falls back to the raw id). */
-function blockDisplayName(blockId: string): string {
-  return BLOCK_BY_ID.get(blockId)?.name ?? blockId
-}
-
 /** Branch blocks whose two output ports replay can take. */
 const BRANCH_BLOCK_IDS: ReadonlySet<string> = new Set(['conditions', 'element-exists', 'webhook'])
 
@@ -277,7 +272,7 @@ export function validateWorkflowForRun(workflow: Workflow): WorkflowRunValidatio
       if (site.instruction) continue
       if (hasReference(site.value)) continue
       warnings.push(
-        `节点 "${node.id}" 的 ${site.path.join('.')} 是固定值 "${site.value}"：` +
+        `节点 "${nodeDisplayNameOf(node)}" 的 ${site.path.join('.')} 是固定值 "${site.value}"：` +
           '重放时不会变化，如果它本该随数据改变，请改用 {{变量}} 引用或声明成工作流输入',
       )
     }
@@ -293,7 +288,7 @@ export function validateWorkflowForRun(workflow: Workflow): WorkflowRunValidatio
     const blockId = blockIdOfNode(node)
     for (const problem of missingRequirements(blockId, node.data ?? {})) {
       errors.push(
-        `节点 "${node.id}"（${blockDisplayName(blockId)}）缺少必填参数 ${problem.key}：${problem.message}`,
+        `节点 "${nodeDisplayNameOf(node)}" 缺少必填参数 ${problem.key}：${problem.message}`,
       )
     }
   }
@@ -311,7 +306,7 @@ export function validateWorkflowForRun(workflow: Workflow): WorkflowRunValidatio
       handles.some((handle) => handle.endsWith(`-${suffix}`))
     if (!portConnected('output-1') || !portConnected('output-2')) {
       warnings.push(
-        `节点 "${node.id}"（${blockDisplayName(blockIdOfNode(node))}）是分支节点，` +
+        `节点 "${nodeDisplayNameOf(node)}" 是分支节点，` +
           '但有一条分支没有连接后续节点：重放走到该分支时会直接结束',
       )
     }
@@ -330,7 +325,7 @@ export function validateWorkflowForRun(workflow: Workflow): WorkflowRunValidatio
       .some((earlier) => producesTableRows(blockIdOfNode(earlier), earlier.data ?? {}))
     if (!produced) {
       warnings.push(
-        `节点 "${node.id}"（${blockDisplayName('export-data')}）导出的是数据表，` +
+        `节点 "${nodeDisplayNameOf(node)}" 导出的是数据表，` +
           '但它之前没有任何采集节点（get-text / read-page 开 saveData 并填 dataColumn）——重放时会因数据表为空而报错',
       )
     }

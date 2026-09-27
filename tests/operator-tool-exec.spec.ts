@@ -31,6 +31,7 @@ import { runOperatorToolWithExecution } from '../src/background/operator-tool-ru
 import { actionNodesOf } from '../src/background/operator-tool-handler'
 import type { BlockExecutor } from '../src/background/workflow-engine/executors'
 import type { SnapshotTargetEntry } from '../src/lib/workflow/target-to-selector'
+import { failedBlockIdsOf, forgetCoverage } from '../src/lib/workflow/generation-coverage'
 
 const signal = new AbortController().signal
 
@@ -217,6 +218,37 @@ describe('locator resolution', () => {
     expect(node.data).not.toHaveProperty('ref')
   })
 
+  it('refuses a stale ref that no longer resolves, instead of recording a dead node', async () => {
+    const { calls, executors } = okExecutors()
+    // No snapshotTargets supplied: the ref resolves to nothing, so the node
+    // would carry no element reference.
+    const out = await run('c-stale-ref', 'wf_op_event-click', { ref: 'eStale' }, { executors })
+
+    expect(out.ok).toBe(false)
+    if (!out.ok) expect(out.error).toContain('ref')
+    expect(calls).toEqual([])
+    expect(actionNodesOf(getDraftSnapshot('c-stale-ref')!)).toHaveLength(0)
+  })
+
+  it('refuses an ambiguous role/text target that matched multiple elements', async () => {
+    const executors: Record<string, BlockExecutor> = {
+      'event-click': async (_data, ctx) => {
+        ctx.lastResolution = { usedSpec: 'role|button', usedFallback: false, matched: 3 }
+        return null
+      },
+    }
+    const out = await run(
+      'c-ambiguous',
+      'wf_op_event-click',
+      { target: { primary: { how: 'role', value: 'button' }, fallbacks: [] } },
+      { executors },
+    )
+
+    expect(out.ok).toBe(false)
+    if (!out.ok) expect(out.error).toContain('多个元素')
+    expect(actionNodesOf(getDraftSnapshot('c-ambiguous')!)).toHaveLength(0)
+  })
+
   it('does not inject a selector into a block that takes no element', async () => {
     const { executors } = okExecutors()
     await run('c6', 'wf_op_press-key', { key: 'Enter', ref: 'e1' }, { executors })
@@ -331,5 +363,25 @@ describe('shared variable bag', () => {
     // of baking the secret into the saved workflow.
     const forms = actionNodesOf(draft)[1]!
     expect(forms.data.value).toBe('{{password}}')
+  })
+})
+
+describe('generation coverage tracking', () => {
+  it('marks a failed operator call and clears it on a successful retry', async () => {
+    forgetCoverage('c-cov')
+    const failing: Record<string, BlockExecutor> = {
+      'event-click': async () => {
+        throw new Error('no element matched "#gone"')
+      },
+    }
+    await run('c-cov', 'wf_op_event-click', { selector: '#gone' }, { executors: failing })
+
+    expect(failedBlockIdsOf('c-cov')).toEqual(['event-click'])
+
+    // A successful retry of the same block fills the hole.
+    const { executors } = okExecutors()
+    await run('c-cov', 'wf_op_event-click', { selector: '#ok' }, { executors })
+
+    expect(failedBlockIdsOf('c-cov')).toEqual([])
   })
 })

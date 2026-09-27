@@ -29,6 +29,7 @@ import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
 import {
   formatRequirementRefusal,
   missingRequirements,
+  requiresLocator,
 } from '../lib/workflow/block-requirements'
 import {
   isOperatorTool,
@@ -36,6 +37,7 @@ import {
   JAVASCRIPT_BLOCK_ID,
 } from '../lib/workflow/operator-tools'
 import { evaluateJsPermission } from '../lib/workflow/capability-gap'
+import { markOperatorFailure, markOperatorRecovery } from '../lib/workflow/generation-coverage'
 import { operatorAuditCall } from '../lib/workflow/operator-history'
 import { resolveNodeGoalContract } from '../lib/workflow/node-goal-instantiation'
 import { withNodeGoalContract } from '../lib/workflow/node-goal-contract'
@@ -350,6 +352,29 @@ function rewriteForRecording(
     })
   }
 
+  // A1 — an element step that resolved to NOTHING (no selector AND no rich
+  // target) would record a node with no element reference and fail every
+  // replay. The generic required-parameter gate catches this too, but with a
+  // blunter message; here the diagnosis is specific — a stale `ref` (its
+  // snapshot is gone) or an empty `target`/`selector` — so the model knows
+  // whether to re-snapshot or to inline a locator.
+  if (
+    requiresLocator(blockId) &&
+    hasLocatorInput(raw) &&
+    resolved &&
+    !resolved.selector &&
+    !resolved.target
+  ) {
+    const error =
+      'Refused: this element step resolved to no locator — its ref no longer resolves in this session ' +
+      '(the snapshot it came from is gone) and no inline target/selector was provided, so the node ' +
+      'would carry no element reference and fail every replay. ' +
+      '已拒绝：该元素步骤未能解析出任何定位（ref 已失效，或 target/selector 为空）。本次未执行、未记录节点。' +
+      '请重新调用 snapshot_page 获取新的 ref，或提供非空的 target / selector（如 data-testid）。'
+    commitSelectorTrace(trace, { ok: false, error })
+    return { ok: false, error }
+  }
+
   // Probe the locator's CSS candidates against the live page BEFORE acting.
   // The probe is EVIDENCE now, not the decision: counts are carried into the
   // post-execution pick (see `selectorAfterExecution`), so the node records
@@ -451,6 +476,7 @@ function rewriteForRecording(
       markExecuted(trace, outcome.resolution)
     }
     const error = outcome.error ?? `${blockId} failed`
+    markOperatorFailure(conversationId, blockId)
     commitSelectorTrace(trace, { ok: false, error })
     return { ok: false, error }
   }
@@ -512,6 +538,27 @@ function rewriteForRecording(
       countOf,
     })
     markChosen(trace, recordedSelector)
+  }
+
+  // A2 — a node that records NO flat selector (relies on the rich role/text
+  // target) is only replayable when that target resolves to EXACTLY ONE element.
+  // At generation the legacy resolver acts on the first of many without
+  // refusing, so an ambiguous role/text match records a node that would click
+  // the wrong element at replay. Refuse and demand stronger evidence.
+  if (
+    recordedSelector &&
+    recordedSelector.selector === '' &&
+    outcome.resolution &&
+    typeof outcome.resolution.matched === 'number' &&
+    outcome.resolution.matched > 1
+  ) {
+    const error =
+      'Refused: this element resolved by role/text but matched multiple elements (' +
+      `${outcome.resolution.matched}); a node with no unique CSS selector would replay against the wrong element. ` +
+      '已拒绝：该元素以 role/text 定位但命中了多个元素，无法保证重放唯一性。本次未执行、未记录节点。' +
+      '请补强证据：提供唯一 data-testid / id / name，或精确到唯一元素的稳定选择器。'
+    commitSelectorTrace(trace, { ok: false, error })
+    return { ok: false, error }
   }
 
   // Rebuild the recorded data with the post-execution locator. `withLocator`
@@ -602,6 +649,7 @@ function rewriteForRecording(
   await persistDraft(draft)
 
   const executed = outcome.status === 'executed'
+  if (executed) markOperatorRecovery(conversationId, blockId)
   const note = outcome.note ?? (output ? `next node attaches to ${output}` : undefined)
   // Ensure the trace carries the locator the node actually recorded, even
   // when the executor reported no live resolution (record-only / mock):

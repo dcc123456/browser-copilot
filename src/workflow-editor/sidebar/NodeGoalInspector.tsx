@@ -1,7 +1,11 @@
 /**
- * Node Goal Inspector — displays (and optionally edits) a node's structured
- * Goal Contract: goal, success criteria, preconditions, failure meaning and
- * repair hints. Hidden entirely for legacy nodes without `__workflowAi`.
+ * Node Goal Inspector — edit a node's structured Goal Contract: goal, success
+ * criteria, preconditions, failure meaning and repair hints.
+ *
+ * Unlike the earlier read-only version this is shown for EVERY node: when no
+ * contract exists the user can add the goal and success criteria manually. The
+ * contract is only persisted once it has a non-empty goal AND at least one
+ * well-formed success criterion; before that the section stays in edit mode.
  *
  * Editing the contract invalidates the workflow's certification (the caller
  * marks the workflow unverified).
@@ -9,16 +13,15 @@
  * @module workflow-editor/sidebar/NodeGoalInspector
  */
 
-import { ListChecks, ShieldAlert, Target, Wrench } from 'lucide-react'
-import { describeCondition } from '../../lib/workflow/conditions'
+import { useState } from 'react'
+import type { WorkflowCondition } from '../../lib/workflow/conditions'
 import {
   nodeGoalContractOf,
   normalizeNodeGoalContract,
   withNodeGoalContract,
-  type WorkflowNodeGoalContract,
 } from '../../lib/workflow/node-goal-contract'
 import type { TranslateFn } from '../i18n'
-import { useEditorLocale } from '../locale-context'
+import ConditionEditor from './ConditionEditor'
 
 export interface NodeGoalInspectorProps {
   data: Record<string, unknown>
@@ -26,82 +29,79 @@ export interface NodeGoalInspectorProps {
   t: TranslateFn
 }
 
-function Row({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
+function Label({ children }: { children: React.ReactNode }) {
   return (
-    <section className="rounded-lg border border-border bg-panel p-3">
-      <h4 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-strong">
-        {icon}
-        {label}
-      </h4>
-      {children}
-    </section>
+    <span className="text-[11px] font-semibold text-strong">{children}</span>
   )
 }
 
 export default function NodeGoalInspector({ data, onChange, t }: NodeGoalInspectorProps) {
-  const { bt } = useEditorLocale()
-  const contract = nodeGoalContractOf(data)
-  if (!contract) return null
+  const existing = nodeGoalContractOf(data)
 
-  const update = (patch: Partial<WorkflowNodeGoalContract>) => {
-    const next = normalizeNodeGoalContract({ ...contract, ...patch })
-    if (!next) return
-    onChange(withNodeGoalContract(data, next))
+  // Local draft used when no valid contract exists yet, so the user can type a
+  // goal and add conditions before the contract is well-formed enough to store.
+  const [draft, setDraft] = useState<{
+    goal: string
+    successCriteria: WorkflowCondition[]
+  }>(() => ({
+    goal: typeof data?.['description'] === 'string' ? data['description'] : '',
+    successCriteria: [],
+  }))
+
+  const goal = existing?.goal ?? draft.goal
+  const successCriteria = existing?.successCriteria ?? draft.successCriteria
+
+  const commit = (nextGoal: string, nextCriteria: WorkflowCondition[]) => {
+    // Persist only when a valid contract can be built.
+    const normalized = normalizeNodeGoalContract({
+      version: 1,
+      goal: nextGoal,
+      successCriteria: nextCriteria,
+    })
+    if (normalized) {
+      onChange(withNodeGoalContract(data, normalized))
+      return
+    }
+    // Otherwise keep editing the local draft.
+    setDraft({ goal: nextGoal, successCriteria: nextCriteria })
   }
 
   return (
-    <div className="flex flex-col gap-2.5">
-      <Row icon={<Target size={13} />} label={t('nodeInspectorGoal')}>
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-1">
+        <Label>{t('nodeInspectorGoal')}</Label>
         <textarea
-          className="wf-input"
+          className="block w-full resize-y rounded-md border border-border bg-panel px-2 py-1.5 text-xs text-ink outline-none focus:border-accent"
           rows={2}
-          value={contract.goal}
-          onChange={(e) => update({ goal: e.target.value })}
+          value={goal}
+          onChange={(e) => commit(e.target.value, successCriteria)}
         />
-      </Row>
+      </div>
 
-      <Row icon={<ListChecks size={13} />} label={t('nodeInspectorSuccessCriteria')}>
-        {contract.successCriteria.length === 0 ? (
-          <p className="text-xs text-muted">{bt('No success criteria.')}</p>
-        ) : (
-          <ul className="flex list-disc flex-col gap-1 pl-4 text-xs text-muted">
-            {contract.successCriteria.map((condition, i) => (
-              <li key={i}>{describeCondition(condition)}</li>
-            ))}
-          </ul>
-        )}
-      </Row>
+      <div className="flex flex-col gap-1">
+        <Label>{t('nodeInspectorSuccessCriteria')}</Label>
+        <ConditionEditor
+          conditions={successCriteria}
+          t={t}
+          onChange={(next) => commit(goal, next)}
+        />
+      </div>
 
-      {contract.preconditions && contract.preconditions.length > 0 && (
-        <Row icon={<ShieldAlert size={13} />} label={t('nodeInspectorPreconditions')}>
-          <ul className="flex list-disc flex-col gap-1 pl-4 text-xs text-muted">
-            {contract.preconditions.map((condition, i) => (
-              <li key={i}>{describeCondition(condition)}</li>
-            ))}
-          </ul>
-        </Row>
-      )}
-
-      {contract.failureMeaning && contract.failureMeaning.length > 0 && (
-        <Row icon={<ShieldAlert size={13} />} label={t('nodeInspectorFailureMeaning')}>
-          <ul className="flex list-disc flex-col gap-1 pl-4 text-xs text-muted">
-            {contract.failureMeaning.map((item, i) => (
-              <li key={i}>{item}</li>
-            ))}
-          </ul>
-        </Row>
-      )}
-
-      {contract.repairHints && contract.repairHints.length > 0 && (
-        <Row icon={<Wrench size={13} />} label={t('nodeInspectorRepairHints')}>
-          <ul className="flex list-disc flex-col gap-1 pl-4 text-xs text-muted">
-            {contract.repairHints.map((hint, i) => (
-              <li key={i}>
-                <code>{hint.target}</code>: {hint.action}
-              </li>
-            ))}
-          </ul>
-        </Row>
+      {existing?.preconditions && existing.preconditions.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <Label>{t('nodeInspectorPreconditions')}</Label>
+          <ConditionEditor
+            conditions={existing.preconditions}
+            t={t}
+            onChange={(next) => {
+              const updated = normalizeNodeGoalContract({
+                ...existing,
+                preconditions: next,
+              })
+              if (updated) onChange(withNodeGoalContract(data, updated))
+            }}
+          />
+        </div>
       )}
 
       <p className="text-[11px] text-muted">{t('nodeInspectorEditInvalidates')}</p>

@@ -51,6 +51,44 @@ function countMatchesInPage(selectors: string[]): number[] {
 }
 
 /**
+ * Live-probe result for one element locator (spec C2): the match count plus,
+ * for a unique match, whether the element is actionable (visible & unobscured).
+ *
+ * Self-contained like {@link countMatchesInPage}: everything (including the
+ * actionability helper) is declared inside the body, because
+ * `chrome.scripting.executeScript` serialises only the function source.
+ */
+function probeLocatorsInPage(selectors: string[]): { matches: number; actionable?: boolean }[] {
+  function isActionable(el: Element): boolean {
+    const html = el as HTMLElement
+    if (html.hidden) return false
+    const style = window.getComputedStyle(html)
+    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+      return false
+    }
+    const rect = html.getBoundingClientRect()
+    if (rect.width < 1 || rect.height < 1) return false
+    // A click lands at the element's center; if the top-most element there is
+    // not this element (nor one of its descendants), an overlay intercepts it.
+    const x = rect.left + rect.width / 2
+    const y = rect.top + rect.height / 2
+    const top = document.elementFromPoint(x, y)
+    if (!top) return false
+    return top === html || html.contains(top)
+  }
+  return selectors.map((selector) => {
+    let elements: Element[]
+    try {
+      elements = Array.from(document.querySelectorAll(selector))
+    } catch {
+      return { matches: -1 }
+    }
+    if (elements.length !== 1) return { matches: elements.length }
+    return { matches: 1, actionable: isActionable(elements[0]!) }
+  })
+}
+
+/**
  * Probe every selector in the graph against the current page.
  *
  * @returns null when the page cannot be probed at all (no injectable tab,
@@ -87,6 +125,53 @@ export async function probeWorkflowSelectors(
   return targets.map((target, i) => {
     const matches = counts[i] ?? 0
     return { ...target, matches, status: statusOf(matches) }
+  })
+}
+
+/**
+ * Probe every selector in the graph against the current page, WITH actionability
+ * (spec C2). Like {@link probeWorkflowSelectors} but one extra injection reports,
+ * for each unique match, whether the element is hidden/obscured — the evidence
+ * {@link locatorConcernLines} turns into `saveWarnings`.
+ *
+ * @returns null when the page cannot be probed at all (no injectable tab,
+ * restricted origin, injection failure) — the caller must then keep the graph
+ * as-is rather than claim every locator is healthy.
+ */
+export async function probeWorkflowLocators(
+  workflow: Workflow,
+  scope?: ScopeWindow,
+): Promise<SelectorProbeResult[] | null> {
+  const targets = selectorsOf(workflow)
+  if (targets.length === 0) return []
+
+  const tab = await resolveAutomationTab(undefined, scope).catch(() => undefined)
+  const tabId = typeof tab?.id === 'number' ? tab.id : undefined
+  if (typeof tabId !== 'number') return null
+
+  let rows: { matches: number; actionable?: boolean }[]
+  try {
+    const [injection] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: probeLocatorsInPage,
+      args: [targets.map((target) => target.selector)],
+    })
+    const result = injection?.result
+    if (!Array.isArray(result)) return null
+    rows = result as { matches: number; actionable?: boolean }[]
+  } catch {
+    return null
+  }
+
+  if (rows.length !== targets.length) return null
+  return targets.map((target, i) => {
+    const row = rows[i] ?? { matches: 0 }
+    return {
+      ...target,
+      matches: row.matches,
+      status: statusOf(row.matches),
+      ...(row.actionable !== undefined ? { actionable: row.actionable } : {}),
+    }
   })
 }
 

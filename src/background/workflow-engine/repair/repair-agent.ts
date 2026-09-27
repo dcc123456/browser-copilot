@@ -16,6 +16,8 @@
 import { PatchEngine } from '../../../lib/workflow/repair/patch-engine'
 import { buildGoalRepairContext, renderGoalRepairContext } from '../../../lib/workflow/goal-repair-context'
 import { allowedParamPathsOf } from '../../../lib/workflow/repair/patch-policy'
+import { inspectPage } from '../page-inspect'
+import type { PageEvidence } from '../../../lib/workflow/repair/types'
 import type {
   FailureAnalysis,
   RepairContext,
@@ -71,12 +73,44 @@ export function buildRepairContext(
   }
 }
 
+/**
+ * Enrich a repair context with a LIVE inspection of the page the run is
+ * driving: the real elements and their generated CSS selectors, as DOM
+ * evidence rows. A missing/stale selector cannot be guessed; this grounding
+ * is what lets the model set the correct `selector`. Best effort — failures
+ * (non-injectable tab, no tab) leave the context untouched.
+ */
+export async function enrichContextWithLivePage(
+  context: RepairContext,
+  workflow: Workflow,
+  tabId?: number,
+): Promise<void> {
+  const failedNode = workflow.drawflow.nodes.find((n) => n.id === context.failedNodeId)
+  const failedSelector =
+    typeof failedNode?.data?.['selector'] === 'string' ? failedNode.data['selector'] : ''
+  const inspection = await inspectPage(failedSelector, undefined, tabId).catch(() => null)
+  if (!inspection) return
+  context.livePageInspection = inspection
+  let count = 0
+  for (const element of inspection.interactive) {
+    const row: PageEvidence = {
+      evidenceId: `page-live-${(count += 1)}`,
+      nodeId: context.failedNodeId,
+      kind: 'DOM',
+      detail: `${element.selector} <${element.tag}>${element.text ? ` "${element.text}"` : ''}`,
+    }
+    context.pageEvidence.push(row)
+  }
+}
+
 /** System instructions enforcing the JSON contract. */
 export const REPAIR_SYSTEM_PROMPT = `You are a workflow repair agent. You propose a MINIMAL, atomic patch set.
 
 Rules:
 - Modify ONLY nodes in allowedNodeIds and param paths in allowedParamPaths.
-- Every operation must cite evidence ids and include the current value in "before".
+- allowedParamPaths may include a parameter key the node does NOT currently carry (e.g. a missing "selector"): SET_PARAM with that path CREATES it. For such a path omit "before" (it is undefined).
+- When the error is a missing required parameter (e.g. 'get-text: missing selector'), you MUST inspect the live page and fill it: snapshot_page first, then set the stable locator of the real target (#id, [data-testid=…], unique tag.class, or an nth-child path) as "selector".
+- Every other operation must cite evidence ids and include the current value in "before".
 - Do not change blockId, disableBlock, onError, goal/trigger, or conditions that define success.
 - Do not introduce static bulk page content; keep {{variable}} references.
 - If no safe minimal patch exists, return {"operations": []}.

@@ -69,6 +69,8 @@ describe('FailureCenter single-entry AI repair', () => {
     act(() => root?.unmount())
   })
 
+
+
   const mount = async (): Promise<void> => {
     container = document.createElement('div')
     document.body.appendChild(container)
@@ -85,14 +87,28 @@ describe('FailureCenter single-entry AI repair', () => {
     await flush()
   }
 
+  // Route workflows.get to nothing and serve recovery responses from a queue.
+  const mockRecovery = (responses: unknown[]) => {
+    const queue = responses.slice()
+    sendCommandMock.mockImplementation((command: { type: string }) => {
+      if (command.type === 'workflows.get') {
+        return Promise.resolve({ type: 'workflows.get' })
+      }
+      return Promise.resolve(queue.shift())
+    })
+  }
+
   it('sends START on open and pauses at repair confirmation', async () => {
-    sendCommandMock.mockImplementationOnce(async (command: { requestId: string }) =>
-      recoveryResult('AWAIT_REPAIR_CONFIRM', 'waiting', 'proposal ready', command.requestId),
-    )
+    mockRecovery([
+      recoveryResult('AWAIT_REPAIR_CONFIRM', 'waiting', 'proposal ready', 'r1'),
+    ])
     await mount()
 
-    expect(sendCommandMock).toHaveBeenCalledTimes(1)
-    expect(sendCommandMock.mock.calls[0]![0]).toMatchObject({
+    const recoveryCalls = sendCommandMock.mock.calls
+      .map((call) => call[0])
+      .filter((command) => (command as { type: string }).type === 'workflows.recovery')
+    expect(recoveryCalls).toHaveLength(1)
+    expect(recoveryCalls[0]).toMatchObject({
       type: 'workflows.recovery',
       action: 'START',
       workflowId: 'wf1',
@@ -104,71 +120,67 @@ describe('FailureCenter single-entry AI repair', () => {
   })
 
   it('pauses at overwrite after confirm-repair, without committing', async () => {
-    const captured = { requestId: '' }
-    sendCommandMock
-      .mockImplementationOnce(async (command: { requestId: string }) => {
-        captured.requestId = command.requestId
-        return recoveryResult('AWAIT_REPAIR_CONFIRM', 'waiting', 'proposal', command.requestId)
-      })
-      .mockImplementationOnce(async () =>
-        recoveryResult('AWAIT_OVERWRITE_CONFIRM', 'waiting', 'verified', captured.requestId),
-      )
+    mockRecovery([
+      recoveryResult('AWAIT_REPAIR_CONFIRM', 'waiting', 'proposal', 'r1'),
+      recoveryResult('AWAIT_OVERWRITE_CONFIRM', 'waiting', 'verified', 'r1'),
+    ])
 
     await mount()
     await clickButton(container, 'Confirm repair')
 
     expect(container.textContent).toContain('Review and overwrite')
-    expect(sendCommandMock).toHaveBeenCalledTimes(2)
-    expect(sendCommandMock.mock.calls[1]![0]).toMatchObject({ action: 'CONFIRM_REPAIR' })
+    const recoveryCalls = sendCommandMock.mock.calls
+      .map((call) => call[0])
+      .filter((command) => (command as { type: string }).type === 'workflows.recovery')
+    expect(recoveryCalls).toHaveLength(2)
+    expect(recoveryCalls[1]).toMatchObject({ action: 'CONFIRM_REPAIR' })
     expect(buttonTexts(container)).toContain('Overwrite workflow')
   })
 
   it('commits only after overwrite confirmation', async () => {
-    const captured = { requestId: '' }
-    sendCommandMock
-      .mockImplementationOnce(async (command: { requestId: string }) => {
-        captured.requestId = command.requestId
-        return recoveryResult('AWAIT_REPAIR_CONFIRM', 'waiting', 'p', command.requestId)
-      })
-      .mockImplementationOnce(async () =>
-        recoveryResult('AWAIT_OVERWRITE_CONFIRM', 'waiting', 'v', captured.requestId),
-      )
-      .mockImplementationOnce(async () =>
-        recoveryResult('DONE', 'done', 'updated', captured.requestId),
-      )
+    mockRecovery([
+      recoveryResult('AWAIT_REPAIR_CONFIRM', 'waiting', 'p', 'r1'),
+      recoveryResult('AWAIT_OVERWRITE_CONFIRM', 'waiting', 'v', 'r1'),
+      recoveryResult('DONE', 'done', 'updated', 'r1'),
+    ])
 
     await mount()
     await clickButton(container, 'Confirm repair')
     await clickButton(container, 'Overwrite workflow')
 
     expect(container.textContent).toContain('Recovery completed')
-    expect(sendCommandMock).toHaveBeenCalledTimes(3)
-    expect(sendCommandMock.mock.calls[2]![0]).toMatchObject({ action: 'CONFIRM_OVERWRITE' })
+    const recoveryCalls = sendCommandMock.mock.calls
+      .map((call) => call[0])
+      .filter((command) => (command as { type: string }).type === 'workflows.recovery')
+    expect(recoveryCalls).toHaveLength(3)
+    expect(recoveryCalls[2]).toMatchObject({ action: 'CONFIRM_OVERWRITE' })
   })
 
   it('reports human takeover when no patch is available', async () => {
-    sendCommandMock.mockImplementationOnce(async (command: { requestId: string }) =>
-      recoveryResult('HUMAN_TAKEOVER', 'failed', 'no patch proposed', command.requestId),
-    )
+    mockRecovery([
+      recoveryResult('HUMAN_TAKEOVER', 'failed', 'no patch proposed', 'r1'),
+    ])
     await mount()
     expect(container.textContent).toContain('Manual takeover needed')
   })
 
   it('renders the per-node before/after, risk and verification plan', async () => {
-    sendCommandMock.mockImplementationOnce(async (command: { requestId: string }) => ({
-      ...recoveryResult('AWAIT_REPAIR_CONFIRM', 'waiting', 'proposal ready', command.requestId),
-      operations: [
-        {
-          operationId: 'o1',
-          nodeId: 'n5',
-          kind: 'REPLACE_TARGET',
-          before: '.stale',
-          after: '.fresh',
-          reason: 'old selector missed',
-          evidenceIds: ['ev1'],
-        },
-      ],
-    }))
+    mockRecovery([
+      {
+        ...recoveryResult('AWAIT_REPAIR_CONFIRM', 'waiting', 'proposal ready', 'r1'),
+        operations: [
+          {
+            operationId: 'o1',
+            nodeId: 'n5',
+            kind: 'REPLACE_TARGET',
+            before: '.stale',
+            after: '.fresh',
+            reason: 'old selector missed',
+            evidenceIds: ['ev1'],
+          },
+        ],
+      },
+    ])
     await mount()
 
     expect(container.textContent).toContain('.stale')

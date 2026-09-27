@@ -29,8 +29,16 @@ import { TRIGGER_BLOCK_ID } from '../lib/workflow/draft-types'
 import { saveWorkflow } from '../lib/workflow/storage'
 import { deriveGoalSpecFromNodes } from '../lib/workflow/goal'
 import { validateGeneratedWorkflow } from '../lib/workflow/generated-validation'
+import {
+  coverageWarningLines,
+  failedBlockIdsOf,
+  forgetCoverage,
+  isRecordOnlyBlock,
+} from '../lib/workflow/generation-coverage'
 import { isGeneratedStrict } from '../lib/workflow/reliability'
+import { locatorConcernLines } from '../lib/workflow/selector-probe'
 import { validateWorkflowForRun } from '../lib/workflow/validation'
+import { probeWorkflowLocators } from './selector-probe'
 import { declareMissingInputs } from '../lib/workflow/declare-missing-inputs'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
 import { aiPrefillNodeData } from '../lib/workflow/ai-prefill'
@@ -197,6 +205,7 @@ export function getDraftSnapshot(conversationId: string): WorkflowDraft | undefi
 /** Drop a draft everywhere — cache and storage. */
 export async function clearDraft(conversationId: string): Promise<void> {
   draftStore.delete(conversationId)
+  forgetCoverage(conversationId)
   try {
     await deleteDraft(conversationId)
   } catch {
@@ -725,6 +734,37 @@ export async function composeWorkflowFromDraft(
             `[${issue.code}] ${issue.message}${issue.suggestedFix ? ` 建议：${issue.suggestedFix}` : ''}`,
           )
         }
+      }
+    }
+  }
+  // B1 — generation coverage: steps that failed during generation and were
+  // never retried leave holes in the graph, record-only steps run unproven on
+  // the first replay, and a history-compiled draft is lower fidelity. These are
+  // soft warnings — the workflow still saves — but the model/user is told the
+  // graph may be missing what actually happened.
+  {
+    const coverage = coverageWarningLines({
+      failedBlockIds: failedBlockIdsOf(conversationId),
+      recordOnlyBlockIds: actionNodesOf(draft)
+        .map(blockIdOfNode)
+        .filter(isRecordOnlyBlock),
+      fromHistory: draft.source === 'chat-history',
+    })
+    for (const warning of coverage) {
+      saveWarnings.push(warning)
+    }
+  }
+  // C2 — live locator evidence (uniqueness + actionability): the static
+  // validator can only check that a selector EXISTS, not that it matches
+  // exactly one actionable element on the real page. Probe the page (it is
+  // still open after generation) and surface ambiguous / hidden-or-obscured
+  // locators as soft warnings. A refused probe (page gone, restricted origin)
+  // must NOT block the save — the locator is kept as-is.
+  {
+    const probes = await probeWorkflowLocators(workflow)
+    if (probes) {
+      for (const warning of locatorConcernLines(probes)) {
+        saveWarnings.push(warning)
       }
     }
   }

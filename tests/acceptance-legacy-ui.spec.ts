@@ -31,9 +31,19 @@ describe('V03 legacy workflow compatibility', () => {
     expect(() => nodeGoalContractOf(data)).not.toThrow()
     expect(nodeGoalContractOf(data)).toBeUndefined()
   })
-  it('the inspector renders nothing for a legacy node (no crash)', () => {
-    const html = renderToStaticMarkup(createElement(NodeGoalInspector, { data: { blockId: 'event-click' }, onChange: noop, t }))
-    expect(html).toBe('')
+  it('the inspector offers an editable goal form for a legacy node (no crash)', () => {
+    // Legacy nodes now expose the goal/conditions editor instead of rendering
+    // nothing, so users can manually define the goal and success criteria.
+    const html = renderToStaticMarkup(
+      createElement(NodeGoalInspector, {
+        data: { blockId: 'event-click' },
+        onChange: noop,
+        t,
+      }),
+    )
+    expect(html).toContain('textarea')
+    expect(html).toContain('nodeInspectorGoal')
+    expect(html).toContain('nodeConditionAdd')
   })
   it('verification does not crash / does not certify a goal-less legacy workflow', async () => {
     const probe: ConditionPageProbe = {

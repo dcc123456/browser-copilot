@@ -283,6 +283,22 @@ describe('chat save-as-workflow flow', () => {
   const buttonTexts = (container: HTMLElement): string[] =>
     [...container.querySelectorAll('button')].map((button) => button.textContent?.trim() ?? '')
 
+  /**
+   * All currently visible surface text: the container plus the body-portal
+   * dialogs (the AI-refine dialog portals to document.body, above the save
+   * card). Assertions use this so a portal-rendered dialog is found.
+   */
+  const surfaceText = (container: HTMLElement): string =>
+    `${container.textContent ?? ''}${document.body.textContent ?? ''}`
+
+  /** All buttons on the container AND in body portals. */
+  const surfaceButtonTexts = (container: HTMLElement): string[] => [
+    ...buttonTexts(container),
+    ...[...document.body.querySelectorAll('button')]
+      .filter((button) => !container.contains(button))
+      .map((button) => button.textContent?.trim() ?? ''),
+  ]
+
   const clickButton = async (_container: HTMLElement, label: string): Promise<void> => {
     const button = [...document.body.querySelectorAll('button')].find(
       (candidate) => candidate.textContent?.trim() === label,
@@ -417,10 +433,10 @@ describe('chat save-as-workflow flow', () => {
 
       // "AI refine…" opens the review dialog and the review STARTS at once.
       await clickButton(container, 'AI refine…')
-      expect(container.textContent).toContain('Sent 2 steps to the AI reviewer…')
-      expect(container.textContent).toContain('AI is reviewing which nodes are worth keeping…')
+      expect(surfaceText(container)).toContain('Sent 2 steps to the AI reviewer…')
+      expect(surfaceText(container)).toContain('AI is reviewing which nodes are worth keeping…')
       // No confirm button while the review is in flight.
-      expect(buttonTexts(container)).not.toContain('Save workflow')
+      expect(surfaceButtonTexts(container)).not.toContain('Save workflow')
       // Exactly one review command, for the base workflow.
       expect(reviewCommandCount()).toBe(1)
 
@@ -429,8 +445,8 @@ describe('chat save-as-workflow flow', () => {
         releaseReview?.()
       })
       await flush()
-      expect(container.textContent).toContain('AI dropped 1 ineffective step')
-      expect(buttonTexts(container)).toContain('Save workflow')
+      expect(surfaceText(container)).toContain('AI dropped 1 ineffective step')
+      expect(surfaceButtonTexts(container)).toContain('Save workflow')
       await clickButton(container, 'Save workflow')
       expect(saveCommands).toHaveLength(1)
       const saved = saveCommands[0]!.workflow
@@ -455,9 +471,9 @@ describe('chat save-as-workflow flow', () => {
       await openCard(container, root)
       await clickButton(container, 'AI refine…')
       await flush()
-      expect(container.textContent).toContain('Review failed')
+      expect(surfaceText(container)).toContain('Review failed')
       // A settled (failed) review still ends with a confirm button.
-      expect(buttonTexts(container)).toContain('Save workflow')
+      expect(surfaceButtonTexts(container)).toContain('Save workflow')
       await clickButton(container, 'Save workflow')
       expect(saveCommands).toHaveLength(1)
       // Unavailable review keeps EVERYTHING (4 nodes incl. the click + wait).
@@ -477,9 +493,9 @@ describe('chat save-as-workflow flow', () => {
     try {
       await openCard(container, root)
       await clickButton(container, 'AI refine…')
-      expect(container.textContent).toContain('Review steps before saving')
+      expect(surfaceText(container)).toContain('Review steps before saving')
       await clickButton(container, 'Cancel')
-      expect(container.textContent).not.toContain('Review steps before saving')
+      expect(surfaceText(container)).not.toContain('Review steps before saving')
       expect(container.textContent).toContain('Save as workflow')
       expect(saveCommands).toHaveLength(0)
     } finally {
@@ -515,8 +531,8 @@ describe('chat save-as-workflow flow', () => {
       await openCard(container, root)
       await clickButton(container, 'AI refine…')
       // The collapsible log section is visible with the local start line.
-      expect(container.textContent).toContain('Review log')
-      expect(container.textContent).toContain('Sent 2 steps to the AI reviewer…')
+      expect(surfaceText(container)).toContain('Review log')
+      expect(surfaceText(container)).toContain('Sent 2 steps to the AI reviewer…')
 
       // The worker pushes live lines over the agent port mid-review.
       await act(async () => {
@@ -525,22 +541,22 @@ describe('chat save-as-workflow flow', () => {
         }
       })
       await flush()
-      expect(container.textContent).toContain('Model: test-model · reviewing 2 steps…')
+      expect(surfaceText(container)).toContain('Model: test-model · reviewing 2 steps…')
 
       // Collapse hides the lines but keeps the header; expand restores them.
       await clickButtonContaining(container, 'Collapse')
-      expect(container.textContent).not.toContain('Model: test-model · reviewing 2 steps…')
-      expect(container.textContent).toContain('Review log')
-      expect(container.textContent).toContain('Expand')
+      expect(surfaceText(container)).not.toContain('Model: test-model · reviewing 2 steps…')
+      expect(surfaceText(container)).toContain('Review log')
+      expect(surfaceText(container)).toContain('Expand')
       await clickButtonContaining(container, 'Expand')
-      expect(container.textContent).toContain('Model: test-model · reviewing 2 steps…')
+      expect(surfaceText(container)).toContain('Model: test-model · reviewing 2 steps…')
 
       // The verdict lands and its outcome line joins the log.
       await act(async () => {
         releaseReview?.()
       })
       await flush()
-      expect(container.textContent).toContain('AI dropped 1 ineffective step')
+      expect(surfaceText(container)).toContain('AI dropped 1 ineffective step')
     } finally {
       await act(async () => {
         root.unmount()
@@ -559,7 +575,7 @@ describe('chat save-as-workflow flow', () => {
       await openCard(container, root)
       await clickButton(container, 'AI refine…')
       await flush()
-      expect(container.textContent).toContain('Retry review')
+      expect(surfaceText(container)).toContain('Retry review')
 
       // Retry: hold the second attempt, assert the in-flight state again.
       reviewBehavior = 'ok'
@@ -567,19 +583,19 @@ describe('chat save-as-workflow flow', () => {
       await clickButton(container, 'Retry review')
       // The retry button is gone while the second attempt is in flight (the
       // failed log LINE still mentions retrying, so assert on the button).
-      expect(buttonTexts(container)).not.toContain('Retry review')
-      expect(container.textContent).toContain('AI is reviewing which nodes are worth keeping…')
-      expect(buttonTexts(container)).not.toContain('Save workflow')
+      expect(surfaceButtonTexts(container)).not.toContain('Retry review')
+      expect(surfaceText(container)).toContain('AI is reviewing which nodes are worth keeping…')
+      expect(surfaceButtonTexts(container)).not.toContain('Save workflow')
       // Two review commands now, and a second "sent" log line.
       expect(reviewCommandCount()).toBe(2)
-      expect(container.textContent.match(/Sent 2 steps to the AI reviewer…/g)).toHaveLength(2)
+      expect(surfaceText(container).match(/Sent 2 steps to the AI reviewer…/g)).toHaveLength(2)
 
       // The retried verdict lands and saves with its keep set.
       await act(async () => {
         releaseReview?.()
       })
       await flush()
-      expect(buttonTexts(container)).toContain('Save workflow')
+      expect(surfaceButtonTexts(container)).toContain('Save workflow')
       await clickButton(container, 'Save workflow')
       expect(saveCommands).toHaveLength(1)
       expect(saveCommands[0]!.workflow.drawflow.nodes).toHaveLength(3)
