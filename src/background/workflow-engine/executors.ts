@@ -63,7 +63,7 @@ import {
   type SavePickerPayload,
 } from '../../lib/download-dir'
 import { aiAgent } from './ai-agent-executor'
-import type { Op, ScrollSpec, Target, TargetSpec } from '../../lib/ops'
+import type { DegradeEvidence, Op, OpResult, ScrollSpec, Target, TargetSpec } from '../../lib/ops'
 import { resolveTargetTab, readActivePage, readActiveSelection } from '../page'
 import { captureVisiblePage } from '../capture'
 import { captureElementRobust, imageHasInk } from '../element-capture'
@@ -78,6 +78,8 @@ import {
   cookieSet,
   elementExists,
   execOnActiveTab,
+  DriverError,
+  NO_INJECTABLE_TAB,
   getActiveTabInfo,
   goBack,
   goForward,
@@ -142,6 +144,12 @@ export interface WorkflowExecCtx {
     usedFallback: boolean
     /** Elements the resolved target matched. */
     matched: number
+    /**
+     * The rung the `rank` policy had to fall to in order to act at all (see
+     * `DegradeEvidence`). Set = the step ran on a weaker locator than the node
+     * was authored with, which is what the self-heal write-back consumes.
+     */
+    degrade?: DegradeEvidence
   }
   /**
    * The workflow's resolved reliability contract (see
@@ -153,6 +161,8 @@ export interface WorkflowExecCtx {
   reliability?: {
     mode: 'generated-strict'
     ambiguity: 'error' | 'score' | 'first-visible'
+    /** Score first, then degrade through the candidate chain (see `rank`). */
+    degrade?: boolean
     minScore: number
     minMargin: number
   }
@@ -294,42 +304,62 @@ function resolvePolicyOf(ctx: WorkflowExecCtx): Op['resolvePolicy'] {
   if (!reliability) return undefined
   return {
     mode: 'strict',
-    ambiguity: reliability.ambiguity,
+    // `degradeReplay` trades the refusal for the ladder: identical scoring
+    // decides the winner, but where strict stops with `LOCATOR_AMBIGUOUS` the
+    // kernel walks down to a weaker candidate and reports the rung it landed
+    // on. The step runs, and the run knows it ran on borrowed confidence.
+    ambiguity: reliability.degrade ? 'rank' : reliability.ambiguity,
     minScore: reliability.minScore,
     minMargin: reliability.minMargin,
+  }
+}
+
+/**
+ * Run one op against the run's tab, re-pinning the tab ONCE when the page the
+ * run was driving is no longer scriptable.
+ *
+ * A click that opens a new tab (or a tab the user closed) leaves `ctx.tabId`
+ * pointing at something the driver refuses to script, and then EVERY later step
+ * fails with "no operable page" — a navigation problem wearing a locator
+ * costume, which is why generated workflows fail in clusters. Only the
+ * `NO_INJECTABLE_TAB` error re-resolves: any other failure means the op already
+ * reached the page, and re-sending a click or a submit would repeat the action.
+ */
+async function execOnRunTab(payload: Op, ctx: WorkflowExecCtx): Promise<OpResult> {
+  try {
+    return await execOnActiveTab(payload, ctx.signal, ctx.tabId, ctx.scope)
+  } catch (error) {
+    if (!(error instanceof DriverError) || error.code !== NO_INJECTABLE_TAB) throw error
+    const tab = await resolveAutomationTab(undefined, ctx.scope).catch(() => undefined)
+    if (!tab || typeof tab.id !== 'number' || tab.id === ctx.tabId) throw error
+    const retry = await execOnActiveTab(payload, ctx.signal, tab.id, ctx.scope)
+    // Pin it for the rest of the run: the workflow has moved on to that page,
+    // and the next step must follow it instead of re-detecting every time.
+    ctx.setTab?.(tab.id)
+    ctx.emit('status', `原标签页已不可操作，本次运行改用标签页 ${tab.id}`)
+    return retry
   }
 }
 
 async function runRaw(op: Op, ctx: WorkflowExecCtx): Promise<string | null> {
   assertActive(ctx)
   const policy = resolvePolicyOf(ctx)
-  const result = await execOnActiveTab(
-    policy ? { ...op, resolvePolicy: policy } : op,
-    ctx.signal,
-    ctx.tabId,
-    ctx.scope,
-  )
-  if (result && result.ok === false) {
-    // Stash the evidence of what the kernel tried before throwing, so the
-    // operator bridge / selector trace can report the attempted resolution
-    // rather than just the error message.
-    if (typeof result.usedSpec === 'string') {
-      ctx.lastResolution = {
-        usedSpec: result.usedSpec,
-        usedFallback: result.usedFallback === true,
-        matched: typeof result.matched === 'number' ? result.matched : 0,
-      }
-    }
-    throw new Error(result.error || `${op.action} 失败`)
-  }
-  // Remember what the page REALLY clicked with. This — not the pre-execution
-  // candidate — is what the recorded node must replay.
+  const result = await execOnRunTab(policy ? { ...op, resolvePolicy: policy } : op, ctx)
+  // Remember what the page REALLY acted on: the spec that won, whether a
+  // fallback won, how many elements the target matched, and how far down the
+  // degradation ladder the kernel had to fall. Recorded both on success and on
+  // failure — the operator bridge wants the spec that worked, the failure
+  // classifier wants the evidence behind the refusal.
   if (result && typeof result.usedSpec === 'string') {
     ctx.lastResolution = {
       usedSpec: result.usedSpec,
       usedFallback: result.usedFallback === true,
       matched: typeof result.matched === 'number' ? result.matched : 0,
+      ...(result.degrade ? { degrade: result.degrade } : {}),
     }
+  }
+  if (result && result.ok === false) {
+    throw new Error(result.error || `${op.action} 失败`)
   }
   ctx.emit('result', result?.note ?? 'ok')
   return null
@@ -535,21 +565,28 @@ async function pollRead<T>(
 
 // --- Browser executors -------------------------------------------------------
 
+// The legacy ids of `event-click` / `hover-element` / `forms`. They respect
+// `waitForSelector` for the same reason: `applyDefaultWaits` arms these very
+// ids, and a wait flag the executor ignores is a wait that never happens —
+// which is what made "element not found" on a slow render cost a takeover.
 const click: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  return runRaw({ action: 'click', target: targetFrom(data) }, ctx)
+  return runRaw(withWait({ action: 'click', target: targetFrom(data) }, data), ctx)
 }
 
 const fill: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const value = String(data['value'] ?? '')
-  return runRaw({ action: 'fill', target: targetFrom(data), value }, ctx)
+  return runRaw(
+    withWait({ action: 'fill', target: targetFrom(data), value }, data),
+    ctx,
+  )
 }
 
 const selectOption: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const value = String(data['value'] ?? '')
-  return runRaw({ action: 'select_option', target: targetFrom(data), value }, ctx)
+  return runRaw(withWait({ action: 'select_option', target: targetFrom(data), value }, data), ctx)
 }
 
 const scroll: BlockExecutor = async (data, ctx) => {
@@ -600,7 +637,7 @@ const scroll: BlockExecutor = async (data, ctx) => {
     return null
   }
 
-  return runRaw(op, ctx)
+  return runRaw(withWait(op, data), ctx)
 }
 
 const pressKey: BlockExecutor = async (data, ctx) => {
@@ -616,13 +653,16 @@ const pressKey: BlockExecutor = async (data, ctx) => {
 
 const hover: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  return runRaw({ action: 'hover', target: targetFrom(data) }, ctx)
+  return runRaw(withWait({ action: 'hover', target: targetFrom(data) }, data), ctx)
 }
 
 const setCheckbox: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const checked = (data['checked'] as boolean | undefined) ?? true
-  return runRaw({ action: 'set_checkbox', target: targetFrom(data), value: checked }, ctx)
+  return runRaw(
+    withWait({ action: 'set_checkbox', target: targetFrom(data), value: checked }, data),
+    ctx,
+  )
 }
 
 const waitFor: BlockExecutor = async (data, ctx) => {

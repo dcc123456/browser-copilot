@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 import type { Workflow, WorkflowNode } from '../src/lib/workflow/types'
 import {
   ambiguityPolicyOf,
+  degradeReplayOf,
   goalGateProblems,
   goalSpecOf,
   idempotencyOf,
@@ -122,6 +123,35 @@ describe('reliability mode resolution', () => {
     const wf = workflowOf({ saveLog: false, debugMode: false, notification: false, __reliability: { junk: true } })
     expect(() => reliabilityModeOf(wf)).not.toThrow()
     expect(reliabilityModeOf(wf)).toBe('compat')
+  })
+})
+
+describe('degradeReplay default', () => {
+  const base = { saveLog: false, debugMode: false, notification: false }
+
+  it('is ON for a generated-strict workflow and OFF for a compat one', () => {
+    // The default is the whole point of the ladder: strict mode only becomes
+    // affordable to turn on because a generated workflow degrades rather than
+    // refuses. A hand-built workflow keeps the behavior it always had.
+    expect(
+      degradeReplayOf(workflowOf({ ...base, provenance: 'chat-generate' })),
+    ).toBe(true)
+    expect(degradeReplayOf(workflowOf({ ...base }))).toBe(false)
+  })
+
+  it('an explicit setting wins in both directions', () => {
+    const generated = { ...base, provenance: 'chat-generate' as const }
+    expect(
+      degradeReplayOf(workflowOf({ ...generated, degradeReplay: false })),
+    ).toBe(false)
+    expect(degradeReplayOf(workflowOf({ ...base, degradeReplay: true }))).toBe(true)
+  })
+
+  it('a non-boolean value is ignored, not coerced', () => {
+    expect(degradeReplayOf(workflowOf({ ...base, degradeReplay: 'yes' }))).toBe(false)
+    expect(
+      degradeReplayOf(workflowOf({ ...base, provenance: 'chat-generate', degradeReplay: 1 })),
+    ).toBe(true)
   })
 })
 

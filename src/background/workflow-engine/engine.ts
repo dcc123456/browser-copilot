@@ -11,16 +11,24 @@
 
 import type { Workflow, WorkflowEdge, WorkflowNode } from '../../lib/workflow/types'
 import { getWorkflow } from '../../lib/workflow/storage'
-import { interpolateParams } from '../../lib/workflow/interpolate'
+import { interpolateParams, UNRESOLVED_INTERP_KEY } from '../../lib/workflow/interpolate'
 import {
   ambiguityPolicyOf,
+  degradeReplayOf,
   idempotencyOf,
   isGeneratedStrict,
   nodeReliabilityOf,
   STRICT_MIN_MARGIN,
   STRICT_MIN_SCORE,
 } from '../../lib/workflow/reliability'
-import { describeCondition } from '../../lib/workflow/conditions'
+import {
+  conditionRequiresBaseline,
+  describeCondition,
+  isHardCondition,
+  type WorkflowCondition,
+} from '../../lib/workflow/conditions'
+import type { ConditionBaseline } from './condition-runtime'
+import type { NodeDegradation } from '../../lib/workflow/self-heal'
 import { checkPageContext, pageContextOf } from '../../lib/workflow/page-context'
 import { ELEMENT_OP_BLOCKS } from '../../lib/workflow/generated-validation'
 import type { DebugStepLine } from '../../lib/workflow/auto-debug-patch'
@@ -76,6 +84,14 @@ export type AiTakeoverHook = (request: AiTakeoverRequest) => Promise<AiTakeoverO
 export interface WorkflowRunOptions {
   /** Node id to start from. Defaults to the first trigger or, failing that, the first node. */
   startAt?: string
+  /**
+   * Stop the run BEFORE executing this node — the graph is still walked from
+   * the start, and reaching the cutoff is a SUCCESS (`outcome: 'ok'`), not a
+   * failure. Used by the pre-save trial replay, which proves the steps a
+   * replay can repeat and refuses to re-fire the first step that cannot
+   * (submit / send / login), see `lib/workflow/reliability.idempotencyOf`.
+   */
+  stopBefore?: string
   /** Initial runtime variables. */
   variables?: Record<string, unknown>
   /** Shared abort signal; aborting requests a `'cancelled'` outcome. */
@@ -97,10 +113,23 @@ export interface WorkflowRunOptions {
   /**
    * Evaluates one reliability condition against the live page + variables
    * (generated-strict pre/postconditions). Absent → conditions are skipped.
+   *
+   * `baseline` is the page's before-state for the conditions that describe a
+   * CHANGE; the engine captures it (via
+   * {@link WorkflowRunOptions.captureConditionBaseline}) while the step is about
+   * to run, because afterwards there is nothing left to compare against.
    */
   evaluateCondition?: (
-    condition: import('../../lib/workflow/conditions').WorkflowCondition,
+    condition: WorkflowCondition,
+    baseline?: ConditionBaseline,
   ) => Promise<boolean>
+  /**
+   * Observe the pre-step page for conditions that need it. Absent → the
+   * change-conditions report as unevaluated instead of being guessed.
+   */
+  captureConditionBaseline?: (
+    conditions: readonly WorkflowCondition[],
+  ) => Promise<ConditionBaseline | undefined>
   /**
    * Observes the CURRENT page (url/title) for the page-context guard (§11).
    * Absent → no guard. Refreshed whenever the automation tab changes.
@@ -216,6 +245,24 @@ export interface WorkflowRunResult {
   variables?: Record<string, unknown>
   /** Tail of the run's step lines (oldest last), for the same evidence. */
   steps?: DebugStepLine[]
+  /**
+   * Nodes whose locator had to degrade to act (see `lib/workflow/self-heal`).
+   * Empty on a run where every step resolved cleanly.
+   */
+  degradations?: NodeDegradation[]
+  /**
+   * Soft conditions that did not hold: the step ran, the page just did not
+   * confirm the outcome the generator predicted. The run still succeeded —
+   * these are the reasons it cannot be called VERIFIED, and what a later
+   * repair reads as the trigger to widen a step.
+   */
+  conditionWarnings?: string[]
+  /**
+   * Set when the run stopped at a {@link WorkflowRunOptions.stopBefore} cutoff
+   * instead of reaching the end of the graph — the caller needs to know that
+   * 'ok' means "the prefix it asked for ran", not "the workflow finished".
+   */
+  stoppedBefore?: string
 }
 
 /** Guards against infinite/long loops in mis-wired graphs. */
@@ -273,7 +320,7 @@ function onErrorPolicy(params: Record<string, unknown>): OnErrorPolicy | null {
   if (wantsRetry && interval > 0 && interval < 60) interval = interval * 1000
   return {
     ...p,
-    toDo: wantsRetry ? 'retry' : p.toDo === 'continue' ? 'error' : (p.toDo ?? 'error'),
+    toDo: wantsRetry ? 'retry' : (p.toDo ?? 'error'),
     retryInterval: interval,
   }
 }
@@ -412,6 +459,7 @@ async function runCore(
 ): Promise<WorkflowRunResult> {
   const {
     startAt,
+    stopBefore,
     variables = {},
     signal,
     scope,
@@ -427,6 +475,7 @@ async function runCore(
     aiTakeover,
     readinessProbe,
     evaluateCondition,
+    captureConditionBaseline,
     getPageContext,
     onSubWorkflow,
   } = options
@@ -452,6 +501,9 @@ async function runCore(
     ? {
         mode: 'generated-strict',
         ambiguity: ambiguityPolicyOf(workflow),
+        // Score first; where the score alone would refuse the match, walk down
+        // the node's recorded candidate chain and report the rung that won.
+        degrade: degradeReplayOf(workflow),
         minScore: STRICT_MIN_SCORE,
         minMargin: STRICT_MIN_MARGIN,
       }
@@ -478,6 +530,16 @@ async function runCore(
   const signalToUse = signal ?? new AbortController().signal
 
   const completedNodeIds: string[] = []
+  /**
+   * Nodes that had to fall down the locator ladder to act at all. Reported to
+   * the caller so the same node does not degrade on every future replay —
+   * see `lib/workflow/self-heal`.
+   */
+  const degradations: NodeDegradation[] = []
+  /** Soft conditions that did not hold — see {@link WorkflowRunResult.conditionWarnings}. */
+  const conditionWarnings: string[] = []
+  /** Set when a `stopBefore` cutoff ended the run (see {@link WorkflowRunResult}). */
+  let stoppedBefore: string | undefined
   let outcome: WorkflowRunResult['outcome'] = 'ok'
   let summary: string | undefined
   let error: string | undefined
@@ -535,12 +597,56 @@ async function runCore(
     Object.assign(target, from)
   }
 
+  /**
+   * Check a node's declared conditions with HARD / SOFT semantics
+   * (`lib/workflow/conditions`' `isHardCondition`).
+   *
+   * A hard condition is a fact the step can be held to (the variable it should
+   * have produced, the checkbox that must now be ticked): failing one fails the
+   * node, exactly as before.
+   *
+   * A soft condition is a PREDICTION about the business outcome — the generator
+   * wrote "a row appears in .list" and the page filed it under a class name that
+   * has since changed. The step it describes was performed; the executor said
+   * so. Failing the node on that prediction is how a workflow that works gets
+   * thrown away, so a soft miss is reported on the run log, recorded as the
+   * reason this run cannot be called verified, and handed to the repair layer as
+   * the thing to look at. It never throws.
+   */
+  const checkNodeConditions = async (
+    conditions: readonly WorkflowCondition[],
+    phase: 'precondition' | 'postcondition',
+    nodeId: string,
+    baseline?: ConditionBaseline,
+  ): Promise<void> => {
+    if (!evaluateCondition) return
+    for (const condition of conditions) {
+      if (await evaluateCondition(condition, baseline)) continue
+      if (isHardCondition(condition)) {
+        throw new Error(
+          `${phase.toUpperCase()}_FAILED: ${describeCondition(condition)}`,
+        )
+      }
+      const description = describeCondition(condition)
+      conditionWarnings.push(`${nodeId}: ${description}`)
+      emit('status', nodeId, `条件未确认（${description}），本步已执行但运行未获验证`)
+    }
+  }
+
   /** Run exactly one node; returns the next node id or `null` to finish. */
   async function runNode(nodeId: string): Promise<string | null> {
     if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
 
     const current = nodeById.get(nodeId)
     if (!current) return null
+    // Trial-replay cutoff: reaching it is the run succeeding at what it was
+    // asked to prove. Checked BEFORE the node is entered, so the step the
+    // caller ruled out for side effects is never touched.
+    if (stopBefore && nodeId === stopBefore) {
+      stoppedBefore = nodeId
+      emit('status', nodeId, '试跑在此步骤前停止：该步骤会提交或发送内容，不能重复执行')
+      return null
+    }
     currentNodeId = nodeId
 
     // Emit a per-block marker so run logs show every block entered, even ones
@@ -726,6 +832,22 @@ async function runCore(
     }
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
+        // An unresolved `{{token}}` must never reach the page. Generation put
+        // business DATA there (the keyword it searched, the name it typed), so
+        // the literal braces make the page search for "{{keyword}}" — a step
+        // that appears to work and silently does the wrong thing, taking every
+        // later step to the wrong page with it. Failing the NODE with the
+        // token's name is both the honest outcome and the actionable one, and
+        // throwing INSIDE the loop keeps this on the same path as any other
+        // node failure: retry, fallback, continue and AI takeover all apply.
+        // The saved workflow is untouched, and a declared input seeded with its
+        // recorded default never gets here.
+        if (pageActing) {
+          const unresolved = params[UNRESOLVED_INTERP_KEY]
+          if (Array.isArray(unresolved) && unresolved.length > 0) {
+            throw new Error(`UNRESOLVED_INPUT: {{${unresolved.join('}}, {{')}}}`)
+          }
+        }
         if (attempt > 0 && beforeNode) restoreVariables(variables, beforeNode)
         // Generated-strict readiness: the page must be READY before the action
         // (§7), re-checked on every attempt — a retry re-observes, it does not
@@ -735,11 +857,21 @@ async function runCore(
         // action (spec §8.3). A failed precondition throws before the page is
         // touched — the retry path re-observes instead of blindly re-acting.
         const nodeSpec = nodeReliabilityOf(current)
-        if (reliability && evaluateCondition && nodeSpec?.preconditions?.length) {
-          for (const condition of nodeSpec.preconditions) {
-            if (await evaluateCondition(condition)) continue
-            throw new Error(`PRECONDITION_FAILED: ${describeCondition(condition)}`)
-          }
+        if (reliability && nodeSpec?.preconditions?.length) {
+          await checkNodeConditions(nodeSpec.preconditions, 'precondition', nodeId)
+        }
+        // What the step is supposed to CHANGE can only be judged against the
+        // page as it was before the step, so this is the last moment to look.
+        // Captured per attempt: a retry's "before" is the page the failed
+        // attempt left, which is what its own postconditions must be read
+        // against.
+        let conditionBaseline: ConditionBaseline | undefined
+        if (
+          reliability &&
+          captureConditionBaseline &&
+          nodeSpec?.postconditions?.some(conditionRequiresBaseline)
+        ) {
+          conditionBaseline = await captureConditionBaseline(nodeSpec.postconditions)
         }
         if (reliability && readinessProbe) {
           const before = await prepareNodeExecution({
@@ -774,15 +906,40 @@ async function runCore(
           }
         }
         // Generated-strict postconditions: the step's own claim about what its
-        // success MEANS (spec §8). "Executor returned" is not "the step worked" —
-        // only the declared facts make it so.
-        if (reliability && evaluateCondition && nodeSpec?.postconditions?.length) {
-          for (const condition of nodeSpec.postconditions) {
-            if (await evaluateCondition(condition)) continue
-            throw new Error(`POSTCONDITION_FAILED: ${describeCondition(condition)}`)
-          }
+        // success MEANS (spec §8). "Executor returned" is not "the step worked".
+        // Only the hard subset (variable / attribute facts) can fail a node —
+        // a business-outcome observation that misses is a warning that marks
+        // the run unverified, never a reason to throw away a working replay.
+        if (reliability && nodeSpec?.postconditions?.length) {
+          await checkNodeConditions(
+            nodeSpec.postconditions,
+            'postcondition',
+            nodeId,
+            conditionBaseline,
+          )
         }
         if (unsafe) emitCheckpoint(nodeId, 'ok', 'sideEffectObserved')
+        // The step ran on a weaker locator than the node was authored with.
+        // Collected for the caller's self-heal write-back; the run log says it
+        // out loud so a "success" never hides a guess.
+        const degrade = ctx.lastResolution?.degrade
+        if (degrade) {
+          // The per-candidate score table stays in the run log: the write-back
+          // needs the decision, not the whole ballot.
+          degradations.push({
+            nodeId,
+            rung: degrade.rung,
+            from: degrade.from,
+            to: degrade.to,
+            matchCount: degrade.matchCount,
+          })
+          emit(
+            'status',
+            nodeId,
+            `定位降级（第 ${degrade.rung} 级）：${degrade.from} → ${degrade.to}` +
+              `（${degrade.matchCount} 个候选元素）`,
+          )
+        }
         succeeded = true
         break
       } catch (e) {
@@ -1138,5 +1295,8 @@ async function runCore(
     ...(error ? { error } : {}),
     variables,
     steps: stepLines.slice(-40),
+    degradations,
+    conditionWarnings,
+    ...(stoppedBefore ? { stoppedBefore } : {}),
   }
 }

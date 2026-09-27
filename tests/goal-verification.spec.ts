@@ -54,4 +54,43 @@ describe('goal verification engine', () => {
     expect(report.certified).toBe(false)
     expect(report.reason).toContain('L3')
   })
+  it('a step that never ran fails L1 even when the run as a whole finished OK', async () => {
+    // `onError: continue` and untaken branches produce exactly this run: outcome
+    // 'ok' with a node left behind. Certifying it would call a partial run a
+    // verified one.
+    const partialRun: ExecuteWorkflowResult = {
+      ...okRun,
+      completedNodeIds: [],
+    }
+    const report = await verifyWorkflowGoal(workflowWith({}), partialRun, probe)
+    expect(report.l1[0]?.satisfied).toBe(false)
+    expect(report.certified).toBe(false)
+    expect(report.reason).toContain('L1')
+  })
+  it('an unconfirmed declared outcome withholds the badge without failing the run', async () => {
+    const data = withNodeGoalContract({ blockId: 'forms' }, {
+      version: 1, goal: 'fill the result', successCriteria: [{ kind: 'variableExists', name: 'result' }],
+    })
+    const softRun: ExecuteWorkflowResult = {
+      ...okRun,
+      completedNodeIds: ['n1'],
+      conditionWarnings: ['n2: 元素新出现 [role=dialog]'],
+    }
+    const report = await verifyWorkflowGoal(workflowWith(data), softRun, probe)
+    expect(report.l3.allHeld).toBe(true)
+    expect(report.softUnconfirmed).toEqual(['n2: 元素新出现 [role=dialog]'])
+    expect(report.certified).toBe(false)
+    expect(report.reason).toContain('not confirmed')
+  })
+  it('reports L2 as unevaluated when no node declared a contract', async () => {
+    const report = await verifyWorkflowGoal(
+      workflowWith({}),
+      { ...okRun, completedNodeIds: ['n1'] },
+      probe,
+    )
+    expect(report.l2.allHeld).toBe(true)
+    expect(report.l2.evaluated).toBe(false)
+    // Nothing at the node layer was checked, so a pass here comes from L3 alone.
+    expect(report.l2.nodes[0]?.criteria).toHaveLength(0)
+  })
 })

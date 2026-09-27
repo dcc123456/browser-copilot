@@ -23,9 +23,16 @@
  */
 import { streamCompletion } from '../../../lib/llm'
 import { normalScopeFromWindowId } from '../../automation-scope'
-import { evaluateAllConditions } from '../condition-runtime'
-import { createDriverConditionProbe } from '../condition-runtime'
-import { executeWorkflow } from '../run-workflow'
+import {
+  createDriverConditionProbe,
+  evaluateAllConditions,
+} from '../condition-runtime'
+import { createDriverReadinessProbe, executeWorkflow } from '../run-workflow'
+import {
+  effectiveReadinessSpec,
+  prepareNodeExecution,
+} from '../readiness-engine'
+import { nodeReliabilityOf } from '../../../lib/workflow/reliability'
 import { commitWorkflowRevision } from '../../../lib/workflow/workflow-revision'
 import {
   runAutoRepair,
@@ -34,7 +41,6 @@ import {
   type ResumeResult,
 } from './orchestrator'
 import type { AutoRepairDeps } from './orchestrator'
-import type { RepairCandidate } from '../../../lib/workflow/repair-candidate'
 import type { FailureSnapshot } from '../../../lib/workflow/repair-session'
 import type { Workflow } from '../../../lib/workflow/types'
 import type { WorkflowCondition } from '../../../lib/workflow/conditions'
@@ -171,18 +177,63 @@ function makeCandidateProducer(
 // --- Readiness recovery (S1) --------------------------------------------------
 
 /**
- * Deterministic readiness recovery: the engine itself forces short element
- * waits on interaction blocks, so here we simply re-observe after a tick. A
- * genuine wait/scroll/focus would be driven by the readiness engine; this
- * adapter reports the conservative result.
+ * Deterministic readiness recovery (S1): re-OBSERVE the page against the failed
+ * step's own readiness states and preconditions.
+ *
+ * The previous version slept 300 ms and reported success. That is not recovery:
+ * it is a coin toss dressed up as a strategy, and the "no graph change" note it
+ * returned let the orchestrator bank a verification pass the run had never
+ * earned. Polling the real probe costs nothing when the page is already ready
+ * (the first check answers) and fixes the transient case when it is not.
  */
-async function defaultReadinessRecovery(
-  _workflow: Workflow,
-  _failure: FailureSnapshot,
-): Promise<{ ok: boolean; note?: string; candidate?: RepairCandidate }> {
-  // Wait one short frame for late rendering, then claim nothing structural.
-  await new Promise((resolve) => setTimeout(resolve, 300))
-  return { ok: true, note: 're-observed after a short wait; no graph change' }
+export function makeReadinessRecovery(
+  signal: AbortSignal,
+  scopeWindowId: number | undefined,
+): AutoRepairDeps['attemptReadinessRecovery'] {
+  return async (workflow, failure) => {
+    const node = workflow.drawflow.nodes.find((candidate) => candidate.id === failure.nodeId)
+    if (!node) return { ok: false, note: 'the failed step is no longer in the graph' }
+    const params = (node.data ?? {}) as Record<string, unknown>
+    const requirements = effectiveReadinessSpec(node, failure.blockId, params)?.before ?? []
+    const preconditions = nodeReliabilityOf(node)?.preconditions ?? []
+    if (requirements.length === 0 && preconditions.length === 0) {
+      // The step declared nothing the page could be late with. Waiting on a
+      // step that is not waiting on anything is how S1 used to fake a fix;
+      // hand it to a strategy that can actually change something.
+      return { ok: false, note: 'this step declares no readiness or precondition to re-observe' }
+    }
+    const scope =
+      scopeWindowId !== undefined
+        ? await normalScopeFromWindowId(scopeWindowId).catch(() => undefined)
+        : undefined
+    const ready = await prepareNodeExecution({
+      node,
+      blockId: failure.blockId,
+      params,
+      nodeSelector: String(params['selector'] ?? params['cssSelector'] ?? ''),
+      signal,
+      probe: createDriverReadinessProbe(signal, scope),
+    })
+    if (!ready.ok) {
+      return {
+        ok: false,
+        note: `readiness still unmet: ${ready.state ?? 'unknown'}${ready.detail ? ` (${ready.detail})` : ''}`,
+      }
+    }
+    if (preconditions.length > 0) {
+      const result = await evaluateAllConditions(
+        preconditions,
+        { variables: {}, probe: createDriverConditionProbe(signal, scope) },
+        false,
+      )
+      const unmet = result.outcomes.find((outcome) => !outcome.satisfied)
+      if (unmet) return { ok: false, note: `precondition still unmet: ${unmet.description}` }
+    }
+    return {
+      ok: true,
+      note: `re-observed after ${ready.waitedMs}ms: ${requirements.length} readiness state(s), ${preconditions.length} precondition(s) hold`,
+    }
+  }
 }
 
 // --- Resume -------------------------------------------------------------------
@@ -308,7 +359,7 @@ export async function startBackgroundAutoRepair(
 
   const deps: AutoRepairDeps = {
     produceCandidate: makeCandidateProducer(input.model),
-    attemptReadinessRecovery: defaultReadinessRecovery,
+    attemptReadinessRecovery: makeReadinessRecovery(controller.signal, input.scopeWindowId),
     resumeRun: makeResumeRun(input.scopeWindowId),
     verification: makeVerification(controller.signal, input.scopeWindowId),
     commit: makeCommit(input.save),

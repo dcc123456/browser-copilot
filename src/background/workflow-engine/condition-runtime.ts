@@ -13,7 +13,10 @@
  */
 import type { SemanticLocator } from '../../lib/workflow/element-fingerprint'
 import type { WorkflowCondition } from '../../lib/workflow/conditions'
-import { describeCondition } from '../../lib/workflow/conditions'
+import {
+  conditionLocatorKey,
+  describeCondition,
+} from '../../lib/workflow/conditions'
 
 /**
  * The page observations conditions may need. Implementations must observe
@@ -36,6 +39,69 @@ export interface ConditionPageProbe {
 export interface ConditionEvalDeps {
   variables: Record<string, unknown>
   probe: ConditionPageProbe
+  /**
+   * What the page looked like BEFORE the step, when the condition asks what
+   * CHANGED. Absent means nobody observed it, which is reported as
+   * unsatisfied-with-detail rather than as a pass: "cannot tell" must never be
+   * recorded as "the task worked".
+   */
+  baseline?: ConditionBaseline
+}
+
+/** A pre-step snapshot of the page, keyed by {@link conditionLocatorKey}. */
+export interface ConditionBaseline {
+  url?: string
+  counts: Record<string, number>
+  exists: Record<string, boolean>
+}
+
+/**
+ * Observe the page once, before the step, for the conditions that describe a
+ * CHANGE (the row vanished, the list grew, the dialog closed, the URL moved on).
+ *
+ * Returns undefined when nothing was observable — a page the probe cannot read
+ * gives no honest baseline, and pretending otherwise would let a step claim it
+ * changed something it never looked at.
+ */
+export async function captureConditionBaseline(
+  conditions: readonly WorkflowCondition[],
+  probe: ConditionPageProbe,
+): Promise<ConditionBaseline | undefined> {
+  const counts: Record<string, number> = {}
+  const exists: Record<string, boolean> = {}
+  let url: string | undefined
+  let observed = false
+  for (const condition of conditions) {
+    if (condition.kind === 'urlChanged') {
+      const before = await probe.url()
+      if (before !== undefined) {
+        url = before
+        observed = true
+      }
+      continue
+    }
+    if (
+      condition.kind !== 'elementGone' &&
+      condition.kind !== 'elementAppeared' &&
+      condition.kind !== 'countIncreased'
+    ) {
+      continue
+    }
+    const key = conditionLocatorKey(condition.target)
+    if (condition.kind === 'countIncreased') {
+      if (!(key in counts)) {
+        counts[key] = await probe.count(condition.target)
+        observed = true
+      }
+      continue
+    }
+    if (!(key in exists)) {
+      exists[key] = await probe.exists(condition.target)
+      observed = true
+    }
+  }
+  if (!observed) return undefined
+  return { ...(url !== undefined ? { url } : {}), counts, exists }
 }
 
 /** One evaluated condition. */
@@ -141,6 +207,37 @@ export async function evaluateCondition(
           ? { satisfied: true, description }
           : unsatisfied(`实际数量 ${n}`)
       }
+      case 'urlChanged': {
+        const before = deps.baseline?.url
+        if (before === undefined) return unsatisfied('缺少步骤前的 URL 观测')
+        const after = await deps.probe.url()
+        if (after === undefined) return unsatisfied('步骤后的 URL 不可观测')
+        return after !== before
+          ? { satisfied: true, description }
+          : unsatisfied(`URL 仍为 "${after}"`)
+      }
+      case 'elementGone': {
+        const key = conditionLocatorKey(condition.target)
+        if (!(key in (deps.baseline?.exists ?? {}))) return unsatisfied('缺少步骤前的元素观测')
+        const still = await deps.probe.exists(condition.target)
+        return still ? unsatisfied('元素仍然存在') : { satisfied: true, description }
+      }
+      case 'elementAppeared': {
+        const key = conditionLocatorKey(condition.target)
+        if (!(key in (deps.baseline?.exists ?? {}))) return unsatisfied('缺少步骤前的元素观测')
+        if (deps.baseline?.exists?.[key]) return unsatisfied('步骤前就已存在')
+        const now = await deps.probe.exists(condition.target)
+        return now ? { satisfied: true, description } : unsatisfied('元素没有出现')
+      }
+      case 'countIncreased': {
+        const key = conditionLocatorKey(condition.target)
+        const before = deps.baseline?.counts?.[key]
+        if (before === undefined) return unsatisfied('缺少步骤前的数量观测')
+        const after = await deps.probe.count(condition.target)
+        return after > before
+          ? { satisfied: true, description }
+          : unsatisfied(`数量 ${before} → ${after}`)
+      }
     }
   } catch (e) {
     return unsatisfied(e instanceof Error ? e.message : String(e))
@@ -164,37 +261,21 @@ export async function evaluateAllConditions(
 
 // --- Driver-backed probe factory (browser integration) -------------------------------
 
-import type { Target, TargetSpec } from '../../lib/ops'
-import { execOnActiveTab, execJsOnActiveTab, resolveAutomationTab } from '../driver'
-import { targetSpecFromSemantic } from '../../lib/workflow/element-fingerprint'
+import type { Target } from '../../lib/ops'
+import { execOnActiveTab, resolveAutomationTab } from '../driver'
+import { targetSpecsFromSemantic } from '../../lib/workflow/element-fingerprint'
 import type { ScopeWindow } from '../automation-scope'
 
 /**
- * A CSS selector that uniquely expresses a kernel-expressible locator, or
- * undefined for role/text locators (no honest CSS exists — the caller gets
- * "not observable" instead of a guess).
+ * The kernel Target a condition observes: every spec the semantic locator can
+ * honestly express (see `targetSpecsFromSemantic`). An observation must be able
+ * to find the element the node itself can click, so a condition walks the SAME
+ * candidate chain replay does rather than betting on one spec. Nothing is
+ * refused here: a locator with no expressible spec reads as "not observable".
  */
-function cssFromSemantic(target: SemanticLocator): string | undefined {
-  const spec: TargetSpec | undefined = targetSpecFromSemantic(target)
-  if (!spec) return undefined
-  if (spec.how === 'testid') return `[data-testid=${JSON.stringify(spec.value)}]`
-  if (spec.how === 'id') return `#${CSS.escape(spec.value)}`
-  if (spec.how === 'name') return `[name=${JSON.stringify(spec.value)}]`
-  return undefined
-}
-
-/** Resolve a semantic locator to a kernel Target, or fall back to a CSS spec. */
-function targetFor(target: SemanticLocator, nodeSelector?: string): Target | undefined {
-  const spec = targetSpecFromSemantic(target)
-  if (spec) return { primary: spec, fallbacks: [] }
-  // The `data-css` stable attribute is the documented carrier for a recorded
-  // CSS selector (see auto-contract): an honest, machine-checkable CSS target.
-  const cssFromAttr = target.stableAttributes?.['data-css']
-  const css = (cssFromAttr?.trim() || nodeSelector?.trim()) as string | undefined
-  if (css) {
-    return { primary: { how: 'css', value: css }, fallbacks: [] }
-  }
-  return undefined
+function targetFor(target: SemanticLocator): Target | undefined {
+  const [primary, ...fallbacks] = targetSpecsFromSemantic(target)
+  return primary ? { primary, fallbacks } : undefined
 }
 
 /**
@@ -226,30 +307,31 @@ export function createDriverConditionProbe(
       const t = targetFor(target)
       if (!t) return false
       const result = await op({ action: 'actionability', target: t })
-      return (result?.data as { state?: string } | undefined)?.state !== 'missing'
+      return (result?.data as { visible?: boolean } | undefined)?.visible === true
     },
     enabled: async (target) => {
       const t = targetFor(target)
       if (!t) return false
       const result = await op({ action: 'actionability', target: t })
-      return (result?.data as { state?: string } | undefined)?.state === 'ready'
+      return (result?.data as { enabled?: boolean } | undefined)?.enabled === true
     },
     text: async (target) => {
-      const css = cssFromSemantic(target)
-      if (!css) return undefined // role/text locators are not CSS-observable
-      const result = await execJsOnActiveTab(
-        `return (document.querySelector(${JSON.stringify(css)})?.innerText ?? null);`,
-        {},
-        signal,
-        undefined,
-        scope,
-      ).catch(() => undefined)
-      return result && result.ok ? ((result.data as string | null) ?? '') : undefined
+      const t = targetFor(target)
+      if (!t) return undefined
+      // The kernel reads the text of whatever its resolver picked, so role and
+      // accessible-name locators are observable too. A CSS-only read (the old
+      // path) reported "not observable" for exactly the locators a recorded run
+      // produces, which made their success criteria unsatisfiable.
+      const result = await op({ action: 'get_text', target: t })
+      return typeof result?.data === 'string' ? result.data : undefined
     },
     attribute: async (target, name) => {
       const t = targetFor(target)
       if (!t) return undefined
-      const result = await op({ action: 'get_attribute', target: t, value: name })
+      // `get_attribute` reads `op.attribute`, not `op.value` — sending the name
+      // in `value` made every attribute condition fail with "needs an attribute
+      // name", which reads as "condition not met".
+      const result = await op({ action: 'get_attribute', target: t, attribute: name })
       return typeof result?.data === 'string' ? result.data : undefined
     },
     url: async () => {
@@ -270,7 +352,8 @@ export async function evaluateConditionWithProbe(
   condition: WorkflowCondition,
   variables: Record<string, unknown>,
   probe: ConditionPageProbe,
+  baseline?: ConditionBaseline,
 ): Promise<boolean> {
-  const outcome = await evaluateCondition(condition, { variables, probe })
+  const outcome = await evaluateCondition(condition, { variables, probe, baseline })
   return outcome.satisfied
 }

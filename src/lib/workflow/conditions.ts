@@ -38,6 +38,19 @@ export type WorkflowCondition =
   | { kind: 'variableEquals'; name: string; expected: unknown }
   | { kind: 'variableExists'; name: string }
   | { kind: 'count'; target: SemanticLocator; op: 'eq' | 'gte' | 'lte'; value: number }
+  /**
+   * The four CHANGING conditions: what the step did to the page, rather than
+   * what is on it. Each needs an observation from BEFORE the step (see
+   * `conditionRequiresBaseline`), which is why they are their own group — a
+   * replay that collected no baseline cannot claim them either way.
+   *
+   * They are also the business-outcome signals: "the URL moved on", "the row
+   * disappeared", "the list grew by one", "the dialog closed".
+   */
+  | { kind: 'urlChanged' }
+  | { kind: 'elementGone'; target: SemanticLocator }
+  | { kind: 'elementAppeared'; target: SemanticLocator }
+  | { kind: 'countIncreased'; target: SemanticLocator }
 
 /** The `kind` whitelist — the guard used on every untrusted condition. */
 const CONDITION_KINDS: readonly string[] = [
@@ -51,6 +64,10 @@ const CONDITION_KINDS: readonly string[] = [
   'variableEquals',
   'variableExists',
   'count',
+  'urlChanged',
+  'elementGone',
+  'elementAppeared',
+  'countIncreased',
 ]
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -70,6 +87,9 @@ export function isWorkflowCondition(value: unknown): value is WorkflowCondition 
     kind === 'elementEnabled' ||
     kind === 'elementText' ||
     kind === 'attributeEquals' ||
+    kind === 'elementGone' ||
+    kind === 'elementAppeared' ||
+    kind === 'countIncreased' ||
     kind === 'count'
   ) {
     const target = value['target']
@@ -146,6 +166,14 @@ export function describeCondition(condition: WorkflowCondition): string {
       return `元素数量 ${condition.op} ${condition.value}（${describeSemanticLocator(
         condition.target,
       )}）`
+    case 'urlChanged':
+      return 'URL 已离开原页面'
+    case 'elementGone':
+      return `元素已消失 ${describeSemanticLocator(condition.target)}`
+    case 'elementAppeared':
+      return `元素新出现 ${describeSemanticLocator(condition.target)}`
+    case 'countIncreased':
+      return `元素数量增加（${describeSemanticLocator(condition.target)}）`
   }
 }
 
@@ -156,4 +184,50 @@ export function describeCondition(condition: WorkflowCondition): string {
  */
 export function isVariableOnlyCondition(condition: WorkflowCondition): boolean {
   return condition.kind === 'variableEquals' || condition.kind === 'variableExists'
+}
+
+/**
+ * Hard conditions: facts the run can be held to without any interpretation.
+ *
+ * Everything else is SOFT, and a soft condition that does not hold must never
+ * fail a step. The reason is the whole point of the reliability contract being
+ * introduced to a replay: a step the agent demonstrably performed, that the
+ * executor reports as done, and whose only sin is that a page phrase the
+ * generator guessed is worded differently on a later day, is a step that WORKS.
+ * Failing it turns a passing workflow into a failing one — the exact trade the
+ * project must not make. A soft miss is recorded as evidence that this run is
+ * UNVERIFIED and as the trigger for a wider retry; it is not an error.
+ *
+ * `attributeEquals` is hard because it is a fact about a control the step just
+ * touched (a checkbox that did not check, an option that did not select) — the
+ * executor's own success claim, not a guess about business outcomes.
+ */
+export function isHardCondition(condition: WorkflowCondition): boolean {
+  return (
+    condition.kind === 'variableExists' ||
+    condition.kind === 'variableEquals' ||
+    condition.kind === 'attributeEquals'
+  )
+}
+
+/** The conditions whose verdict needs an observation from before the step. */
+export function conditionRequiresBaseline(condition: WorkflowCondition): boolean {
+  return (
+    condition.kind === 'urlChanged' ||
+    condition.kind === 'elementGone' ||
+    condition.kind === 'elementAppeared' ||
+    condition.kind === 'countIncreased'
+  )
+}
+
+/**
+ * A stable key for a semantic locator, so a baseline captured before the step
+ * can be found again after it. Key order is sorted: two writes of the same
+ * locator (one from the model, one from a rehydration) must collide.
+ */
+export function conditionLocatorKey(target: SemanticLocator): string {
+  const entries = Object.keys(target)
+    .sort()
+    .map((key) => `${key}=${JSON.stringify((target as Record<string, unknown>)[key]) ?? ''}`)
+  return entries.join(',')
 }

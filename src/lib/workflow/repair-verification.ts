@@ -54,6 +54,11 @@ export interface RepairVerificationResult {
   /** Whether the goal was already satisfied (no dangerous replay happened). */
   alreadySatisfied: boolean
   layers: VerificationLayerResult
+  /**
+   * Which layers actually had something to check. `layers.*: true` with
+   * `evaluated.*: false` means "nothing contradicted us", not "we proved it".
+   */
+  evaluated: { postconditions: boolean; goal: boolean }
   /** Human/audit description of the unmet conditions. */
   unmet: string[]
   /** Conditions the verification actually evaluated. */
@@ -63,18 +68,37 @@ export interface RepairVerificationResult {
 
 // --- Condition aggregation ---------------------------------------------------
 
+/**
+ * Aggregate a layer's conditions.
+ *
+ * `satisfied` answers "did anything contradict the claim"; `observed` answers
+ * "was anything checked at all". An empty list is vacuously satisfied, and a
+ * caller that reads that as VERIFIED is reporting the absence of evidence as
+ * success — which is how a repair that did nothing claims the goal was met.
+ * Every short-circuit therefore has to demand `observed` as well.
+ */
 async function evaluateAll(
   deps: VerificationDeps,
   conditions: WorkflowCondition[],
-): Promise<{ satisfied: boolean; unmet: string[]; evaluated: WorkflowCondition[] }> {
+): Promise<{
+  satisfied: boolean
+  observed: boolean
+  unmet: string[]
+  evaluated: WorkflowCondition[]
+}> {
   if (conditions.length === 0) {
-    return { satisfied: true, unmet: [], evaluated: [] }
+    return { satisfied: true, observed: false, unmet: [], evaluated: [] }
   }
   const outcomes = await deps.evaluateConditions(conditions)
   const unmet = outcomes
     .filter((outcome) => !outcome.satisfied)
     .map((outcome) => outcome.note ?? describeCondition(outcome.condition))
-  return { satisfied: unmet.length === 0, unmet, evaluated: conditions }
+  return {
+    satisfied: unmet.length === 0,
+    observed: outcomes.length > 0,
+    unmet,
+    evaluated: conditions,
+  }
 }
 
 /**
@@ -85,22 +109,34 @@ async function evaluateAll(
 export async function checkGoalAlreadySatisfied(
   workflow: Workflow,
   deps: VerificationDeps,
-): Promise<{ satisfied: boolean; note?: string }> {
+): Promise<{
+  satisfied: boolean
+  evaluated: WorkflowCondition[]
+  note?: string
+}> {
   const goal = goalSpecOf(workflow)
-  if (!goal) return { satisfied: false }
+  if (!goal) return { satisfied: false, evaluated: [] }
   const success = await evaluateAll(deps, goal.successConditions)
-  if (success.satisfied) {
-    return { satisfied: true, note: 'goal success conditions already hold' }
+  if (success.satisfied && success.observed) {
+    return {
+      satisfied: true,
+      evaluated: [...goal.successConditions],
+      note: 'goal success conditions already hold',
+    }
   }
   // Variable-only conditions can be checked even without a live page; when
   // all success conditions are variable-only and failed, the goal is not met.
   if (goal.terminalStateConditions?.length) {
     const terminal = await evaluateAll(deps, goal.terminalStateConditions)
-    if (terminal.satisfied) {
-      return { satisfied: true, note: 'terminal state already holds' }
+    if (terminal.satisfied && terminal.observed) {
+      return {
+        satisfied: true,
+        evaluated: [...goal.terminalStateConditions],
+        note: 'terminal state already holds',
+      }
     }
   }
-  return { satisfied: false }
+  return { satisfied: false, evaluated: [...success.evaluated] }
 }
 
 export interface VerifyCandidateInput {
@@ -120,33 +156,37 @@ export async function verifyRepairCandidate(
 ): Promise<RepairVerificationResult> {
   const { workflow, candidate, nodeSucceeded, deps } = input
   const unmet: string[] = []
-  const evaluated: WorkflowCondition[] = []
+  const checked: WorkflowCondition[] = []
 
   // L2: candidate expected postconditions.
   const post = await evaluateAll(deps, candidate.expectedPostconditions)
   unmet.push(...post.unmet)
-  evaluated.push(...post.evaluated)
+  checked.push(...post.evaluated)
   const postconditionsHeld = post.satisfied
 
   // L3: workflow goal.
   const goal = goalSpecOf(workflow)
   let goalHeld = false
+  let goalEvaluated = false
   if (goal) {
     const success = await evaluateAll(deps, goal.successConditions)
     unmet.push(...success.unmet)
-    evaluated.push(...success.evaluated)
-    if (success.satisfied) {
+    checked.push(...success.evaluated)
+    goalEvaluated = success.observed
+    if (success.satisfied && success.observed) {
       goalHeld = true
     } else if (goal.terminalStateConditions?.length) {
       // Terminal-state conditions: the action already landed earlier.
       const terminal = await evaluateAll(deps, goal.terminalStateConditions)
       unmet.push(...terminal.unmet)
-      evaluated.push(...terminal.evaluated)
-      goalHeld = terminal.satisfied
+      checked.push(...terminal.evaluated)
+      goalEvaluated = terminal.observed
+      goalHeld = terminal.satisfied && terminal.observed
     }
   } else {
     // A workflow with no goal spec is L3-valid once L1+L2 hold (compat /
-    // simple read flows).
+    // simple read flows). It is reported as NOT evaluated so no caller reads
+    // this branch as "the goal was verified".
     goalHeld = true
   }
 
@@ -155,10 +195,16 @@ export async function verifyRepairCandidate(
     passed,
     alreadySatisfied: false,
     layers: { node: nodeSucceeded, postconditions: postconditionsHeld, goal: goalHeld },
+    evaluated: { postconditions: post.observed, goal: goalEvaluated },
     unmet,
-    evaluatedConditions: evaluated,
+    evaluatedConditions: checked,
     ...(passed
-      ? { note: 'all verification layers passed' }
+      ? {
+          note:
+            goalEvaluated || post.observed
+              ? 'all verification layers passed'
+              : 'candidate accepted on the node result alone (no goal contract to verify)',
+        }
       : { note: unmet[0] ?? 'verification failed' }),
   }
 }
@@ -180,8 +226,10 @@ export async function verifyRepair(
       passed: true,
       alreadySatisfied: true,
       layers: { node: true, postconditions: true, goal: true },
+      // Nothing was replayed: only the goal observation below is evidence.
+      evaluated: { postconditions: false, goal: true },
       unmet: [],
-      evaluatedConditions: [],
+      evaluatedConditions: already.evaluated,
       note: already.note,
     }
   }
