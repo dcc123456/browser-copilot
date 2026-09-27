@@ -299,7 +299,22 @@ function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
 }
 
 /** A driver error — something the harness owns, distinct from an op failure. */
-export class DriverError extends Error {}
+export class DriverError extends Error {
+  /**
+   * Machine-readable reason, when the throw site has one. The engine routes on
+   * this (`NO_INJECTABLE_TAB` re-pins the run's tab and retries once); the
+   * message stays the human-facing sentence, which must never be parsed.
+   */
+  constructor(
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message)
+  }
+}
+
+/** No scriptable http(s) tab is available to act on. */
+export const NO_INJECTABLE_TAB = 'NO_INJECTABLE_TAB'
 
 /** Element actions that benefit from an actionability pre-check. */
 const PRECHECK_OPS = new Set(['click', 'fill', 'press_key', 'select_option', 'set_checkbox'])
@@ -397,6 +412,7 @@ export async function execOnActiveTab(
       scope
         ? '插件窗口内没有可操作的网页标签页（不跨窗口查找）。请先在插件窗口打开一个普通 http(s) 页面。'
         : '没有可操作的网页：请先在普通 http(s) 网页标签页上运行工作流（不能在扩展弹窗 / chrome:// 页面上执行页面操作）。',
+      NO_INJECTABLE_TAB,
     )
   }
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')

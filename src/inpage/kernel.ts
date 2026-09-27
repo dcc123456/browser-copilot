@@ -640,6 +640,18 @@ export function runOp(op: Op): OpResult {
     matched: number
     usedSpec: string
     usedFallback: boolean
+    /**
+     * Set when a `rank` policy had to fall below the clean strict winner to
+     * reach an element — how far down the ladder it went, and the evidence it
+     * passed over. Absent means "the authored locator won on its own merits".
+     */
+    degrade?: {
+      rung: 2 | 3 | 4
+      from: string
+      to: string
+      matchCount: number
+      candidates: { strategy: string; score: number }[]
+    }
   }
 
   /**
@@ -714,7 +726,8 @@ export function runOp(op: Op): OpResult {
     const candidates: TargetSpec[] = [target.primary, ...(target.fallbacks ?? [])]
     const tried = candidates.map((spec) => serializeSpec(spec)).join(', ')
     const strict =
-      policy?.mode === 'strict' && (policy.ambiguity === 'score' || policy.ambiguity === 'error')
+      policy?.mode === 'strict' &&
+      (policy.ambiguity === 'score' || policy.ambiguity === 'error' || policy.ambiguity === 'rank')
 
     if (!strict) {
       // Two-tier resolution. A spec that matches EXACTLY ONE element is almost
@@ -801,23 +814,76 @@ export function runOp(op: Op): OpResult {
     // only above the floor with a wide-enough margin over the runner-up.
     const minScore = typeof policy?.minScore === 'number' ? policy.minScore : 70
     const minMargin = typeof policy?.minMargin === 'number' ? policy.minMargin : 12
+    const authored = serializeSpec(candidates[0]!)
+    /**
+     * Act on a matched candidate, tagging how far down the degradation ladder
+     * the decision had to fall. Rung 1 is the clean strict winner and reports
+     * nothing; 2 waives the margin, 3 waives the score floor, 4 is the legacy
+     * first-visible guess.
+     */
+    const take = (hit: { spec: TargetSpec; all: Element[]; index: number }, rung: 1 | 2 | 3 | 4, element?: Element): Resolution => {
+      const chosen = element ?? hit.all[0]
+      const usedSpec = serializeSpec(hit.spec)
+      return {
+        element: chosen as Element,
+        matched: hit.all.length,
+        usedSpec,
+        usedFallback: hit.index > 0,
+        ...(rung === 1
+          ? {}
+          : { degrade: { rung, from: authored, to: usedSpec, matchCount: union.size, candidates: evidence } }),
+      }
+    }
     const eligible = matched
       .filter((m) => m.all.length === 1 && m.score >= minScore)
       .sort((a, b) => b.score - a.score || a.index - b.index)
-    if (eligible.length === 0) {
-      return refuse('最高分不足 minScore')
-    }
-    const top = eligible[0]!
-    const runnerUp = eligible[1]
-    if (runnerUp && top.score - runnerUp.score < minMargin) {
+    const rank = policy?.ambiguity === 'rank'
+    if (eligible.length > 0) {
+      const top = eligible[0]!
+      const runnerUp = eligible[1]
+      if (!runnerUp || top.score - runnerUp.score >= minMargin) return take(top, 1)
+      // rung 2 — a single-element winner above the score floor; the only thing
+      // missing was distance from the runner-up.
+      if (rank) return take(top, 2)
       return refuse('前两名分差不足 minMargin')
     }
-    return {
-      element: top.all[0]!,
-      matched: 1,
-      usedSpec: serializeSpec(top.spec),
-      usedFallback: top.index > 0,
+    if (rank) {
+      // rung 3 — any candidate that provably points at ONE element, in the
+      // order it was recorded: the caller's chain order is intent we can honour
+      // even when our own score table dislikes the locator.
+      const unique = matched
+        .filter((m) => m.all.length === 1)
+        .sort((a, b) => a.index - b.index)[0]
+      if (unique) return take(unique, 3)
+      // rung 4 — the legacy resolver: the first visible match of the first spec
+      // that matched anything. This is the rung that can pick the WRONG row, so
+      // it is reported, never silent.
+      for (const hit of matched) {
+        let chosen: Element | undefined
+        if (typeof hit.spec.nth === 'number') {
+          chosen = hit.all[hit.spec.nth]
+        } else {
+          const visible = hit.all.filter((element) => isVisible(element))
+          chosen = visible[0] ?? hit.all[0]
+        }
+        if (chosen) return take(hit, 4, chosen)
+      }
     }
+    return refuse('最高分不足 minScore')
+  }
+
+  /**
+   * How many DISTINCT elements a target matches, counting its primary and
+   * every fallback. Existence/counting questions must be answerable without an
+   * ambiguity verdict, so this deliberately bypasses `resolve` and its policy.
+   */
+  function countTargetMatches(target: Target): number {
+    const union = new Set<Element>()
+    for (const spec of [target.primary, ...(target.fallbacks ?? [])]) {
+      if (!spec) continue
+      for (const element of queryAll(spec)) union.add(element)
+    }
+    return union.size
   }
 
   // --- Interaction helpers ---------------------------------------------------
@@ -1685,6 +1751,12 @@ export function runOp(op: Op): OpResult {
         found: true,
         data: {
           state: visible && enabled && !occluded ? 'ready' : 'blocked',
+          // The three facts, not just their conjunction: a waiter on
+          // `visible` must not be blocked by an occlusion, and a waiter on
+          // `enabled` must not be blocked by a scroll position.
+          visible,
+          enabled,
+          occluded,
           rect: { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
         },
       }
@@ -1727,9 +1799,18 @@ export function runOp(op: Op): OpResult {
     }
 
     if (op.action === 'element_exists' || op.action === 'count_elements') {
+      // Two payload shapes are legitimate here and both are used: a flat CSS
+      // string (`op.value`, the driver's `elementExists(selector)`) and a rich
+      // target (`op.target`, the readiness/condition probes). A probe asks
+      // "is it there", so it resolves leniently — it must never be able to
+      // answer "no" merely because the strict ambiguity policy declined to
+      // pick one element out of several matches.
       const selector = String(op.value ?? '')
-      const matches = safeQuery(selector)
-      const count = matches.length
+      const count = selector
+        ? safeQuery(selector).length
+        : op.target
+          ? countTargetMatches(op.target)
+          : 0
       if (op.action === 'count_elements')
         return { ...base(), ok: true, found: true, note: `count=${count}`, data: count }
       return {
@@ -1835,7 +1916,12 @@ export function runOp(op: Op): OpResult {
         let res = resolve(target)
         while ((!res || 'refusal' in res) && Date.now() < deadline) {
           // Not found yet — or found but still ambiguous (a settling page can
-          // resolve its own ambiguity): keep polling, never guess.
+          // resolve its own ambiguity): keep polling, never guess. A `rank`
+          // policy never reports ambiguity as a refusal, so it leaves this loop
+          // with its degraded hit instead of spending the whole window: the
+          // ladder already chose the best available candidate, and making every
+          // drifted step wait out the timeout is a latency cost the run does
+          // not pay for.
           await new Promise((r) => setTimeout(r, 120))
           res = resolve(target)
         }
@@ -1885,6 +1971,7 @@ export function runOp(op: Op): OpResult {
       matched: resolution.matched,
       usedSpec: resolution.usedSpec,
       usedFallback: resolution.usedFallback,
+      ...(resolution.degrade ? { degrade: resolution.degrade } : {}),
     })
 
     if (op.action === 'wait_for') {
@@ -2242,6 +2329,20 @@ export function runOp(op: Op): OpResult {
       if (!attribute) return withMeta(fail('get_attribute needs an attribute name.'))
       const value = element.getAttribute(attribute) ?? ''
       return withMeta({ ...base(), ok: true, found: true, note: value, data: value })
+    }
+
+    if (op.action === 'get_text') {
+      // Text of whatever the target resolved to — role/text locators included.
+      // Condition/goal checks need this: reading text through a CSS-only path
+      // silently reported "not observable" for exactly the locators a recorded
+      // run relies on.
+      const html = element as HTMLElement
+      const raw =
+        typeof html.innerText === 'string' && html.innerText.length > 0
+          ? html.innerText
+          : (element.textContent ?? '')
+      const text = raw.trim()
+      return withMeta({ ...base(), ok: true, found: true, note: text, data: text })
     }
 
     if (op.action === 'set_attribute') {
