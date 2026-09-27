@@ -28,6 +28,7 @@ import type { Workflow } from './workflow/types'
 import type { WorkflowDebugResult } from './workflow/auto-debug-patch'
 import type { PendingTakeoverInfo } from './workflow/takeover-pending'
 import type { DebugSessionStatsSummary, TakeoverStatsSummary } from './workflow/takeover-stats'
+import type { ReplayFirstRunRecord } from './workflow/replay-metrics'
 import type { WorkflowReview } from './workflow/review-patch'
 import type { RepeatSuggestion } from './workflow/loop-collapse'
 import type { SelectorProbeResult } from './workflow/selector-probe'
@@ -298,6 +299,12 @@ export type Command =
   | { type: 'workflows.takeoverStats' }
   /** Aggregate debug-SESSION stats: verified success rate + phase timing. */
   | { type: 'workflows.debugStats' }
+  /**
+   * Newest first-replay record per workflow — how the generated graph scored on
+   * its first run at the revision it was generated at. Read-only evidence for
+   * the workflow card; nothing about a run outcome gates anything.
+   */
+  | { type: 'workflows.firstRuns' }
   /** Applies the pending AI-takeover fixes to this workflow (user confirmed). */
   | {
       type: 'workflows.takeoverApply'
@@ -592,6 +599,7 @@ export type CommandResult =
   | { type: 'workflows.takeoverPending'; items: PendingTakeoverInfo[] }
   | { type: 'workflows.takeoverStats'; summary: TakeoverStatsSummary }
   | { type: 'workflows.debugStats'; summary: DebugSessionStatsSummary }
+  | { type: 'workflows.firstRuns'; records: ReplayFirstRunRecord[] }
   | {
       type: 'workflows.resume'
       outcome: {

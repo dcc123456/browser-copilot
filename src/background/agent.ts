@@ -62,6 +62,8 @@ import {
 } from '../lib/workflow/operator-categories'
 import type { BlockCategory } from '../lib/workflow/blocks/types'
 import { composeWorkflowFromDraft } from './operator-tool-handler'
+import { executeWorkflow } from './workflow-engine/run-workflow'
+import { createTrialRunner } from './workflow-engine/repair/generation-trial'
 import { runOperatorToolWithExecution } from './operator-tool-run'
 import type { AgentServerMessage, TurnTokenUsage } from '../lib/messages'
 import { notifySkillsChanged } from '../lib/messages'
@@ -3761,6 +3763,15 @@ export async function executeTool(
         name: typeof args.name === 'string' ? args.name : undefined,
         description: typeof args.description === 'string' ? args.description : undefined,
         save: args.save === undefined ? true : Boolean(args.save),
+        // The graph is about to be saved, so it gets one real, bounded replay
+        // first — evidence for the card, and a self-heal write-back while the
+        // page is still the page it was generated on. It never blocks the save,
+        // and never re-fires a step that submits something.
+        trial: createTrialRunner({
+          executeWorkflow,
+          ...(ctx.scope ? { scopeWindowId: ctx.scope.windowId } : {}),
+          ...(signal ? { signal } : {}),
+        }),
       })
       if ('error' in out) return JSON.stringify({ error: out.error })
       return JSON.stringify({

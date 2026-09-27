@@ -156,6 +156,11 @@ import {
   type TakeoverReasonKind,
 } from '../lib/workflow/ai-takeover'
 import { executeWorkflow, findRunIdFor, getCheckpointStore } from './workflow-engine/run-workflow'
+import {
+  createTrialExecute,
+  runGenerationTrial,
+  withTrialRecord,
+} from './workflow-engine/repair/generation-trial'
 import { createDriverConditionProbe } from './workflow-engine/condition-runtime'
 import { readPersistedCheckpoints } from './checkpoint-store'
 import { resumePointOf, workflowFingerprintOf } from '../lib/workflow/checkpoints'
@@ -197,6 +202,7 @@ import type {
   WorkflowPatchSet,
 } from '../lib/workflow/repair/types'
 import { isGeneratedStrict } from '../lib/workflow/reliability'
+import { latestFirstRuns, observeFirstRunOfRevision } from '../lib/workflow/replay-metrics'
 import { runUnattendedPrompt } from './agent-unattended'
 import { streamCompletion } from '../lib/llm'
 import { stripThinkBlocks } from '../lib/model-output'
@@ -942,6 +948,36 @@ function runningBoardsView(workflowIdFilter?: string): {
 }
 
 /**
+ * Replay a just-saved generated workflow once, on the page that is still open,
+ * and record what happened on the stored workflow.
+ *
+ * The save never waits for this. Two things can change in the seconds the
+ * replay takes, and both are checked before anything is written back: the
+ * workflow may be gone, and the user may have edited it — recording a replay of
+ * the OLD graph onto a NEW one would be a false "verified" stamp and would
+ * silently discard their work, so the verdict is dropped instead.
+ */
+async function recordGenerationTrial(
+  workflow: Workflow,
+  scope: { windowId: number } | undefined,
+): Promise<void> {
+  try {
+    const trial = await runGenerationTrial(workflow, {
+      execute: createTrialExecute({
+        executeWorkflow,
+        ...(scope ? { scopeWindowId: scope.windowId } : {}),
+      }),
+    })
+    const stored = await getWorkflow(workflow.id)
+    if (!stored || stored.updatedAt !== workflow.updatedAt) return
+    await saveWorkflow({ ...withTrialRecord(trial.workflow, trial.record), updatedAt: Date.now() })
+  } catch {
+    // Evidence that failed to land is not worth a rejected promise: the user's
+    // workflow is already saved and the next run reports the truth anyway.
+  }
+}
+
+/**
  * The window scope of an extension-page sender (side panel / editor): the
  * sender tab's window, validated to still exist and be `normal`. The editor
  * popup is a `popup`-type window, so its commands degrade to unscoped.
@@ -1303,6 +1339,7 @@ async function handleCommand(
 
     case 'workflows.save': {
       let workflow = command.workflow
+      let generationScope: { windowId: number } | undefined
       if (command.fromGeneration) {
         // A save from the generation card gets the two hardening passes (see
         // specs/2026-09-19-first-run-success-design.md): element locators are
@@ -1313,7 +1350,8 @@ async function handleCommand(
         // hand-tuned selectors are never rewritten behind the user's back.
         // The page may already be closed or restricted: hardening returns the
         // graph unchanged then, which degrades to exactly the old behavior.
-        await hardenWorkflowSelectors(workflow, { scope: await currentPluginScope() })
+        generationScope = await currentPluginScope()
+        await hardenWorkflowSelectors(workflow, { scope: generationScope })
         workflow = persistDefaultWaits(workflow)
       }
       // Every formal save is a commit on the revision sequence: a new workflow
@@ -1332,6 +1370,14 @@ async function handleCommand(
       }
       await saveWorkflow(workflow)
       await rescheduleAllWorkflowTriggers()
+      // A generated workflow is replayed once for real before the user ever
+      // runs it. That replay runs AFTER this save on purpose: the card already
+      // proved a replay can take tens of seconds, and making the user's save
+      // button wait on a page would risk the one thing this feature may never
+      // cost — a workflow that does not get saved. The verdict (and any locator
+      // the trial had to work around) lands on the stored record a moment
+      // later, which is where the health card and the generation card read it.
+      if (command.fromGeneration) void recordGenerationTrial(workflow, generationScope)
       return { type: 'workflows.save' }
     }
 
@@ -1518,10 +1564,11 @@ async function handleCommand(
       // first-run failure enters the autonomous repair loop automatically —
       // no user click. The repair runs in the background; events stream to
       // the panel and the run result below reports whether it recovered.
+      const generatedRun = isGeneratedStrict(workflow)
       let autoRepairOutcome:
         | { status: 'success' | 'exhausted' | 'blocked'; revision?: number; reason?: string }
         | undefined
-      if (r.outcome === 'failed' && isGeneratedStrict(workflow) && !takeover && r.trace) {
+      if (r.outcome === 'failed' && generatedRun && !takeover && r.trace) {
         rememberFailedRun(workflow.id, r.runId, r.trace)
         const repairSettings = await getSettings()
         const repairModelConfig = takeoverProviderOf(repairSettings)
@@ -1552,30 +1599,95 @@ async function handleCommand(
       }
 
       const runOk = r.outcome === 'ok' || autoRepairOutcome?.status === 'success'
+      // SELF-HEAL write-back: a step that had to fall down the locator ladder
+      // found a candidate the live page prefers. Rotate it into the graph now,
+      // so the NEXT replay starts from what actually works instead of re-running
+      // the same guess every time. Skipped while the auto-repair loop owns the
+      // graph (it writes its own revision), and never blocks the run.
+      let healed = workflow
+      if (r.degradations?.length && autoRepairOutcome === undefined) {
+        try {
+          const { applySelfHeal } = await import('../lib/workflow/self-heal')
+          const result = applySelfHeal(workflow, r.degradations, { runId: r.runId })
+          if (result.changes.length > 0) {
+            healed = result.workflow
+            for (const change of result.changes) console.info(`[workflows.run] ${change}`)
+          }
+          // Rung 4 is the first-visible guess. A node that keeps needing it is
+          // not self-healed, it is broken — say so instead of banking confidence.
+          if (result.uncertify) {
+            healed = {
+              ...healed,
+              settings: { ...healed.settings, certificationStatus: 'unverified' },
+            }
+          }
+        } catch (error) {
+          console.warn('[workflows.run] self-heal write-back failed', error)
+        }
+      }
       // CERTIFICATION: for a successful run of a goal-bearing workflow, run the
       // L1/L2/L3 verification and persist the certification status. L3 must
       // pass for the workflow to be marked Certified; a successful run whose
       // goal conditions fail stays unverified.
       let certification: import('./workflow-engine/goal-verification').VerificationReport | undefined
-      if (runOk && workflow.settings?.goalSpec) {
+      if (runOk && healed.settings?.goalSpec) {
         try {
           const { verifyWorkflowGoal } = await import('./workflow-engine/goal-verification')
           const scopeWindow = scopeWindowId === undefined
             ? undefined
             : await normalScopeFromWindowId(scopeWindowId).catch(() => undefined)
           const probe = createDriverConditionProbe(new AbortController().signal, scopeWindow)
-          certification = await verifyWorkflowGoal(workflow, r, probe)
-          workflow.settings = {
-            ...workflow.settings,
-            certificationStatus: certification.certified ? 'certified' : 'unverified',
+          certification = await verifyWorkflowGoal(healed, r, probe)
+          healed = {
+            ...healed,
+            settings: {
+              ...healed.settings,
+              certificationStatus: certification.certified ? 'certified' : 'unverified',
+            },
           }
-          await saveWorkflow(workflow)
+          await saveWorkflow(healed)
         } catch (error) {
           console.warn('[workflows.run] goal verification failed', error)
         }
-      } else if (!runOk) {
-        workflow.settings = { ...workflow.settings, certificationStatus: 'unverified' }
+      } else {
+        if (!runOk) {
+          healed = {
+            ...healed,
+            settings: { ...healed.settings, certificationStatus: 'unverified' },
+          }
+        } else if (r.conditionWarnings?.length) {
+          // Every step ran; the page just never confirmed what the generator
+          // said would happen. That is enough to withhold the badge (D3) and
+          // not enough to call the run a failure.
+          for (const warning of r.conditionWarnings) {
+            console.warn(`[workflows.run] unconfirmed outcome: ${warning}`)
+          }
+          healed = {
+            ...healed,
+            settings: { ...healed.settings, certificationStatus: 'unverified' },
+          }
+        }
+        // Anything the branches above changed (healed locators, a withheld
+        // badge) has to reach storage, or the next replay repeats this run.
+        if (healed !== workflow) {
+          await saveWorkflow(healed).catch((error) => {
+            console.warn('[workflows.run] post-run save failed', error)
+          })
+        }
       }
+      // FIRST-RUN METRIC — the number this whole line of work is measured by.
+      // One record per graph revision, and the record describes THIS attempt:
+      // a run that only worked because autonomous repair took over is logged as
+      // failed with `autoRepaired`, because "the generated graph did not run"
+      // is exactly what we are trying to make rarer.
+      observeFirstRunOfRevision(workflow, {
+        outcome: r.outcome,
+        error: r.error,
+        summary: r.summary,
+        trace: r.trace,
+        degradations: r.degradations,
+        autoRepaired: autoRepairOutcome !== undefined,
+      })
       return {
         type: 'workflows.run',
         outcome: {
@@ -2176,6 +2288,9 @@ async function handleCommand(
 
     case 'workflows.debugStats':
       return { type: 'workflows.debugStats', summary: await summarizeDebugSessions() }
+
+    case 'workflows.firstRuns':
+      return { type: 'workflows.firstRuns', records: await latestFirstRuns() }
 
     case 'workflows.takeoverApply': {
       // Applies the PENDING AI-takeover fixes to the workflow — only ever on

@@ -510,6 +510,22 @@ export interface Messages {
   healthLastFailure: (params: { category: string }) => string
   /** Health recovery line: repaired and resumed counts. */
   healthRecoveryCounts: (params: { repaired: number; resumed: number }) => string
+  /** First-replay line: the generated graph ran on its first try. */
+  healthFirstRunPassed: string
+  /** First-replay line: it ran, but N steps needed a fallback locator. */
+  healthFirstRunFallbacks: (params: { steps: number }) => string
+  /** First-replay line: it ran only because a step guessed the first visible element. */
+  healthFirstRunGuessedLocator: string
+  /** First-replay line: it failed and only passed after an AI repair. */
+  healthFirstRunNeededRepair: string
+  /** First-replay line: it failed with a machine-readable failure code. */
+  healthFirstRunFailed: (params: { code: string }) => string
+  /** First-replay line: it failed, with no code to name. */
+  healthFirstRunFailedPlain: string
+  /** First-replay line: the first run was cancelled by the user. */
+  healthFirstRunCancelled: string
+  /** First-replay line: the first run was skipped before it started. */
+  healthFirstRunSkipped: string
   /** Hint under the declared-inputs list: the recorded value is a default. */
   chatWorkflowInputsHint: string
   /** Heading of the "this workflow needs code" list on the save card. */
@@ -1634,6 +1650,14 @@ const en: Messages = {
   healthLastVerified: ({ time }) => `Last verified: ${time}`,
   healthLastFailure: ({ category }) => `Last failure: ${category}`,
   healthRecoveryCounts: ({ repaired, resumed }) => `${repaired} repaired · ${resumed} resumed`,
+  healthFirstRunPassed: 'First replay passed',
+  healthFirstRunFallbacks: ({ steps }) => `First replay passed after ${steps} locator fallback(s)`,
+  healthFirstRunGuessedLocator: 'First replay passed on a guessed locator',
+  healthFirstRunNeededRepair: 'First replay failed until AI repair',
+  healthFirstRunFailed: ({ code }) => `First replay failed (${code})`,
+  healthFirstRunFailedPlain: 'First replay failed',
+  healthFirstRunCancelled: 'First replay was cancelled',
+  healthFirstRunSkipped: 'First replay was skipped',
   chatWorkflowInputsHint:
     'These values were captured at generation time and become run-time inputs ({{name}}). The saved value is only a default — the workflow re-prompts or uses the trigger value on each run.',
   chatWorkflowCodeNodesTitle: 'Steps that need code',
@@ -2772,6 +2796,14 @@ const zhCN: Messages = {
   healthLastVerified: ({ time }) => `上次验证：${time}`,
   healthLastFailure: ({ category }) => `上次失败：${category}`,
   healthRecoveryCounts: ({ repaired, resumed }) => `${repaired} 次修复 · ${resumed} 次续跑`,
+  healthFirstRunPassed: '首次回放通过',
+  healthFirstRunFallbacks: ({ steps }) => `首次回放通过（${steps} 步改用备选定位）`,
+  healthFirstRunGuessedLocator: '首次回放靠猜测定位通过',
+  healthFirstRunNeededRepair: '首次回放失败，经 AI 修复后通过',
+  healthFirstRunFailed: ({ code }) => `首次回放失败（${code}）`,
+  healthFirstRunFailedPlain: '首次回放失败',
+  healthFirstRunCancelled: '首次回放被取消',
+  healthFirstRunSkipped: '首次回放被跳过',
   chatWorkflowInputsHint:
     '这些值是在生成时采集的，会成为运行期输入（用 {{名称}} 引用）。保存的值只是默认值——每次运行都会重新提示或使用触发器传入的值。',
   chatWorkflowCodeNodesTitle: '需要代码的步骤',
