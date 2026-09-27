@@ -203,6 +203,13 @@ export interface WorkflowSettings {
    */
   saveWarnings?: string[]
   /**
+   * The pre-save trial replay's verdict on this graph
+   * (`lib/workflow/trial-run`). Evidence, never a gate: whatever this says, the
+   * workflow was saved. `false` is the opt-out — it turns the trial off for a
+   * workflow whose first run must not touch the page on its own.
+   */
+  trialRun?: import('./trial-run').TrialRunRecord | false
+  /**
    * Per-stage report of the generation pipeline (spec §6 · Commit 07), shown on
    * the generation card so the user sees the work done at each stage rather
    * than a single "generation succeeded". Optional: absent on hand-built and
@@ -215,6 +222,22 @@ export interface WorkflowSettings {
    * drops it back to 'unverified'. Absent = 'unverified' for legacy data.
    */
   certificationStatus?: 'unverified' | 'certified'
+  /**
+   * Ask before every run of this workflow, regardless of the global automation
+   * scope. A generated workflow whose steps have side effects (submit, delete,
+   * purchase) defaults this ON: replaying it unattended is the user's call, not
+   * the generator's.
+   */
+  takeoverOnRun?: boolean
+  /**
+   * Score locators strictly and, where strict mode would refuse an ambiguous
+   * match, degrade through the node's recorded candidate chain instead (see
+   * `ResolvePolicy`'s `rank`). Defaults ON for generated-strict workflows: a
+   * step the agent already performed must not be thrown away because the page
+   * drifted, and every degraded rung is reported on the node. `false` restores
+   * the refuse-instead-of-guessing behavior.
+   */
+  degradeReplay?: boolean
 }
 
 /** A persisted workflow. */

@@ -364,3 +364,23 @@ export const STRICT_MIN_MARGIN = 12
 export function ambiguityPolicyOf(workflow: Workflow): AmbiguityPolicy {
   return isGeneratedStrict(workflow) ? STRICT_AMBIGUITY : 'first-visible'
 }
+
+/**
+ * Whether a strict run may DEGRADE through the node's candidate chain where the
+ * score alone would refuse the match (the `rank` policy, see `lib/ops`).
+ *
+ * Default ON for generated-strict workflows. Refusal was the wrong remedy for
+ * an ambiguous locator: it lost a step the agent had already performed
+ * correctly, so a workflow that should have replayed eight of eight steps came
+ * home with seven and an apology. Degrading keeps the step AND keeps the
+ * evidence — every rung below the clean winner is reported on the node, so a
+ * run that needed the ladder is never mistaken for a verified one.
+ * `settings.degradeReplay: false` is the explicit opt-out.
+ */
+export function degradeReplayOf(workflow: Workflow): boolean {
+  const raw = (workflow.settings as unknown as Record<string, unknown> | undefined)?.[
+    'degradeReplay'
+  ]
+  if (typeof raw === 'boolean') return raw
+  return isGeneratedStrict(workflow)
+}

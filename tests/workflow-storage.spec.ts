@@ -8,6 +8,7 @@ import {
 } from '../src/lib/workflow/storage'
 import type { Workflow } from '../src/lib/workflow/types'
 import { validateWorkflow } from '../src/lib/workflow/validation'
+import { ambiguityPolicyOf, degradeReplayOf, isGeneratedStrict } from '../src/lib/workflow/reliability'
 
 /**
  * In-memory `chrome.storage.local` double. Only `get`/`set` are needed here
@@ -85,6 +86,118 @@ describe('workflow storage', () => {
   it('returns an empty list when nothing is stored', async () => {
     expect(await listWorkflows()).toEqual([])
     expect(await getWorkflow('missing')).toBeUndefined()
+  })
+
+  it('persists everything that makes a GENERATED workflow generated', async () => {
+    // The bug this pins: `asWorkflow` rebuilt `settings` from a five-boolean
+    // whitelist, so provenance / reliabilityMode / goalSpec / the origin URL /
+    // the trial record were destroyed at the moment of saving. A generated
+    // graph therefore came back as a legacy compat workflow and EVERY strict
+    // mechanism the record path had built — scored resolution, readiness gates,
+    // candidate chains, self-heal — was silently skipped on replay. The
+    // workflow that lost its identity is also the one that started failing on
+    // first replay.
+    const now = Date.now()
+    await saveWorkflow(
+      makeWorkflow({
+        id: 'generated',
+        revision: 4,
+        revisionHistory: [
+          { revision: 3, updatedAt: now - 1000, source: 'generation' },
+          { revision: 4, updatedAt: now, source: 'ai-repair', parentRevision: 3 },
+        ],
+        settings: {
+          saveLog: true,
+          debugMode: false,
+          notification: false,
+          reuseLastState: false,
+          defaultWaitMs: 0,
+          provenance: 'chat-generate',
+          reliabilityMode: 'generated-strict',
+          generationOriginUrl: 'https://shop.example/cart',
+          goalSpec: {
+            summary: 'Submit the order',
+            successConditions: [{ kind: 'urlContains', value: '/orders' }],
+          },
+          saveWarnings: ['缺少导航锚点'],
+          certificationStatus: 'unverified',
+          takeoverOnRun: true,
+          degradeReplay: false,
+          trialRun: {
+            outcome: 'partial',
+            at: now,
+            full: false,
+            coveredSteps: 3,
+            totalSteps: 5,
+          },
+        },
+      }),
+    )
+
+    const got = (await getWorkflow('generated'))!
+    expect(got.settings).toMatchObject({
+      saveLog: true,
+      defaultWaitMs: 0,
+      provenance: 'chat-generate',
+      reliabilityMode: 'generated-strict',
+      generationOriginUrl: 'https://shop.example/cart',
+      saveWarnings: ['缺少导航锚点'],
+      certificationStatus: 'unverified',
+      takeoverOnRun: true,
+      degradeReplay: false,
+    })
+    expect(got.settings.goalSpec?.successConditions[0]).toMatchObject({ kind: 'urlContains' })
+    expect(got.settings.trialRun).toMatchObject({
+      outcome: 'partial',
+      coveredSteps: 3,
+      totalSteps: 5,
+      full: false,
+    })
+    expect(got.revision).toBe(4)
+    expect(got.revisionHistory?.map((entry) => entry.revision)).toEqual([3, 4])
+    // The identity is not decorative: with it persisted, the run resolves to
+    // the strict regime; without it the same record would run as legacy compat.
+    expect(isGeneratedStrict(got)).toBe(true)
+    expect(ambiguityPolicyOf(got)).toBe('score')
+    expect(degradeReplayOf(got)).toBe(false)
+  })
+
+  it('drops malformed settings keys instead of trusting them', async () => {
+    // The whitelist gained real weight: the same guard that keeps a half-written
+    // record from poisoning a run must not smuggle garbage into the strict path.
+    await saveWorkflow(
+      makeWorkflow({
+        id: 'garbage',
+        revision: 'not-a-number' as unknown as number,
+        settings: {
+          saveLog: false,
+          debugMode: false,
+          notification: false,
+          reuseLastState: false,
+          provenance: 'from-a-mars-attack' as never,
+          reliabilityMode: 'maybe' as never,
+          goalSpec: 'nope' as never,
+          defaultWaitMs: '2000' as never,
+          saveWarnings: ['ok', 42 as never],
+          // A stored record the reader cannot understand must not survive as a
+          // "certified" claim: `passed` is exactly the word a health card keys on.
+          trialRun: { outcome: 'passed' } as never,
+          certificationStatus: 'gold-certified' as never,
+        },
+      }),
+    )
+    const stored = (await getWorkflow('garbage'))!
+    const settings = stored.settings as unknown as Record<string, unknown>
+    expect(settings.provenance).toBeUndefined()
+    expect(settings.reliabilityMode).toBeUndefined()
+    expect(settings.goalSpec).toBeUndefined()
+    expect(settings.defaultWaitMs).toBeUndefined()
+    expect(settings.certificationStatus).toBeUndefined()
+    expect(settings.trialRun).toBeUndefined()
+    expect(settings.saveWarnings).toEqual(['ok'])
+    expect(stored.revision).toBeUndefined()
+    // Nothing left to derive strictness from: this one runs as legacy compat.
+    expect(isGeneratedStrict(stored)).toBe(false)
   })
 
   it('sorts saved workflows by updatedAt descending', async () => {
