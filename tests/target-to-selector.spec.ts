@@ -170,6 +170,26 @@ describe('resolveRecordedLocator', () => {
     expect(resolveRecordedLocator({ ref: 42 })).toEqual({ selector: '' })
     expect(resolveRecordedLocator({ ref: 'e1' })).toEqual({ selector: '' })
   })
+
+  it('turns findBy:"text" into a text locator with no CSS selector', () => {
+    const out = resolveRecordedLocator({ findBy: 'text', selector: '上传图文' })
+    expect(out.selector).toBe('')
+    expect(out.target).toEqual({ primary: { how: 'text', value: '上传图文' }, fallbacks: [] })
+    expect(out.semantic).toEqual({ text: '上传图文' })
+  })
+
+  it('keeps an explicit target by text even when findBy:"text" is also set', () => {
+    const out = resolveRecordedLocator({
+      findBy: 'text',
+      selector: '上传图文',
+      target: { primary: { how: 'role', value: 'button', role: 'button' }, fallbacks: [] },
+    })
+    expect(out.selector).toBe('上传图文')
+    expect(out.target).toEqual({
+      primary: { how: 'role', value: 'button', role: 'button' },
+      fallbacks: [],
+    })
+  })
 })
 
 describe('chooseRecordedSelector / selectorCandidatesOf', () => {

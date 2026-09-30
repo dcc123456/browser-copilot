@@ -23,6 +23,7 @@ import { WorkflowRepairEngine } from './repair-engine'
 import { buildRepairContext, enrichContextWithLivePage } from './repair-agent'
 import { liveSelectorProbe, proposeWithSelectorVerification } from './proposal-verification'
 import { decideConfidence } from '../../../lib/workflow/repair/confirmation-gate'
+import { pageContextReanchorPatchSet } from '../../../lib/workflow/page-context-reanchor'
 import {
   isTransientFailure,
   nextTransientRetry,
@@ -165,19 +166,30 @@ export async function finalizeGeneratedWorkflow(
       log('status', 'Transient retry budget exhausted; proceeding to a minimal patch.')
     }
 
-    const context = buildRepairContext(workingCopy, verification.trace, analysis, [])
-    // Same live-page grounding as the debug path (selector fixes).
-    await enrichContextWithLivePage(context, workingCopy, verification.trace.currentTabId)
-    // D1 — closed loop: reject dead/ambiguous selector fixes, re-propose with the
-    // real candidates, bounded by the repair round budget.
-    const { patch, rejected } = await proposeWithSelectorVerification(
-      (ctx) => engine.propose(analysis, ctx),
-      liveSelectorProbe(verification.trace.currentTabId),
-      context,
-      policy.maxRepairRounds,
-    )
-    if (rejected.length > 0) {
-      log('status', `Rejected ${rejected.length} non-unique selector fix(es).`)
+    // Deterministic reanchor before any model call: when the recorded
+    // grounding contradicts the graph's own static navigation, moving the
+    // anchor IS the fix; the repaired replay below proves it.
+    let patch: WorkflowPatchSet | null = null
+    if (analysis.failureType === 'WRONG_ORIGIN' || analysis.failureType === 'WRONG_PAGE') {
+      patch = pageContextReanchorPatchSet(workingCopy, analysis.analysisId)
+      if (patch) log('status', `Deterministic page-context reanchor: ${patch.reason}`)
+    }
+    if (!patch) {
+      const context = buildRepairContext(workingCopy, verification.trace, analysis, [])
+      // Same live-page grounding as the debug path (selector fixes).
+      await enrichContextWithLivePage(context, workingCopy, verification.trace.currentTabId)
+      // D1 — closed loop: reject dead/ambiguous selector fixes, re-propose with the
+      // real candidates, bounded by the repair round budget.
+      const proposalResult = await proposeWithSelectorVerification(
+        (ctx) => engine.propose(analysis, ctx),
+        liveSelectorProbe(verification.trace.currentTabId),
+        context,
+        policy.maxRepairRounds,
+      )
+      if (proposalResult.rejected.length > 0) {
+        log('status', `Rejected ${proposalResult.rejected.length} non-unique selector fix(es).`)
+      }
+      patch = proposalResult.patch
     }
     if (!patch) break
 

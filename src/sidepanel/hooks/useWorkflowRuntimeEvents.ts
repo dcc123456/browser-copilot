@@ -16,6 +16,8 @@ import type { RepairProgressEvent } from '../../lib/workflow/repair-events'
 export interface RepairEventState {
   events: RepairProgressEvent[]
   running: boolean
+  /** Workflow the accumulated session belongs to ('' before `repair.started`). */
+  workflowId: string
 }
 
 interface RepairEventMessage {
@@ -40,11 +42,13 @@ export function useRepairEvents(workflowId?: string): {
   const [events, setEvents] = useState<RepairProgressEvent[]>([])
   const runningRef = useRef(false)
   const [running, setRunning] = useState(false)
+  const [sessionWorkflowId, setSessionWorkflowId] = useState('')
 
   const reset = useCallback(() => {
     setEvents([])
     runningRef.current = false
     setRunning(false)
+    setSessionWorkflowId('')
   }, [])
 
   useEffect(() => {
@@ -55,6 +59,7 @@ export function useRepairEvents(workflowId?: string): {
       const event = message.event
       if (event.type === 'repair.started') {
         sessionWorkflow.set(event.sessionId, event.workflowId)
+        setSessionWorkflowId(event.workflowId)
       }
       if (workflowId) {
         const owner =
@@ -74,5 +79,8 @@ export function useRepairEvents(workflowId?: string): {
     return () => chrome.runtime.onMessage.removeListener(listener)
   }, [workflowId])
 
-  return { state: { events, running }, reset }
+  return {
+    state: { events, running, workflowId: workflowId ?? sessionWorkflowId },
+    reset,
+  }
 }

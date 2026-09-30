@@ -758,6 +758,9 @@ export interface Messages {
   settingsTakeoverModelIntro: string
   settingsTakeoverOnRun: string
   settingsTakeoverOnRunIntro: string
+  /** Auto-repair-on-run-failure opt-in (off by default). */
+  settingsAutoRepairOnRun: string
+  settingsAutoRepairOnRunIntro: string
   settingsTakeoverModelProvider: string
   settingsTakeoverModelSelectHint: string
   settingsTakeoverModelSaved: string
@@ -1261,6 +1264,10 @@ export interface Messages {
   workflowRepairDiagnosing: string
   workflowRepairApplying: string
   workflowRepairVerifying: string
+  /** One repair round that did not fix the step. */
+  workflowRepairAttemptFailed: string
+  /** Cancel the in-flight automatic repair. */
+  workflowRepairCancel: string
   workflowRepairSuccess: string
   workflowRepairExhausted: string
   workflowRepairBlocked: string
@@ -1856,6 +1863,9 @@ const en: Messages = {
   settingsTakeoverOnRun: 'Also allow AI takeover when a plain run fails (uses model calls)',
   settingsTakeoverOnRunIntro:
     'Off by default: plain runs fail fast. When on, a failed node gets one AI takeover episode and any proposed fix lands as pending for your confirmation.',
+  settingsAutoRepairOnRun: 'Start AI auto-repair when a run fails',
+  settingsAutoRepairOnRunIntro:
+    'Off by default: a failed run stays failed and you can start a repair from the failure center. When on, a failed run of a generated workflow enters the auto-repair loop in the background — you can cancel it while it runs.',
   settingsTakeoverModelProvider: 'Provider',
   settingsTakeoverModelSelectHint:
     'Pick a model from the dropdown, or keep the provider default. Fetch the list first if it is empty.',
@@ -2424,6 +2434,8 @@ Keep the whole report dense and within the message size cap.`,
   workflowRepairDiagnosing: 'Analyzing the failed step…',
   workflowRepairApplying: 'Applying the repair…',
   workflowRepairVerifying: 'Verifying the repair…',
+  workflowRepairAttemptFailed: 'This repair attempt failed',
+  workflowRepairCancel: 'Cancel repair',
   workflowRepairSuccess: 'Workflow auto-repaired',
   workflowRepairExhausted: 'Automatic repair exhausted',
   workflowRepairBlocked: 'Human action required',
@@ -2983,6 +2995,9 @@ const zhCN: Messages = {
   settingsTakeoverOnRun: '普通运行失败时也允许 AI 接管（会消耗模型调用）',
   settingsTakeoverOnRunIntro:
     '默认关闭：普通运行失败即失败。开启后失败节点会获得一次 AI 接管机会，产生的修改建议进入待确认列表。',
+  settingsAutoRepairOnRun: '运行失败后自动进入 AI 修复',
+  settingsAutoRepairOnRunIntro:
+    '默认关闭：运行失败就是失败，你可以在失败中心手动发起修复。开启后，AI 生成的工作流运行失败会在后台自动进入修复循环，修复过程中可随时取消。',
   settingsTakeoverModelProvider: '模型服务',
   settingsTakeoverModelSelectHint: '从下拉中选择模型，或保持服务默认。列表为空时请先获取模型列表。',
   settingsTakeoverModelSaved: 'AI 接管模型已保存。',
@@ -3486,6 +3501,8 @@ const zhCN: Messages = {
   workflowRepairDiagnosing: '正在分析失败步骤…',
   workflowRepairApplying: '正在应用修复…',
   workflowRepairVerifying: '正在验证修复…',
+  workflowRepairAttemptFailed: '本轮修复尝试未成功',
+  workflowRepairCancel: '取消修复',
   workflowRepairSuccess: '工作流已自动修复',
   workflowRepairExhausted: '自动修复策略已耗尽',
   workflowRepairBlocked: '需要人工操作',

@@ -309,21 +309,26 @@ function start(settings: Settings): void {
     void handleMessage(ws, event)
   }
 
-  ws.onerror = (event) => {
+  ws.onerror = () => {
     if (socket !== ws) return
-    const message =
-      (event as { message?: string }).message ??
-      (event as { error?: Error }).error?.message ??
-      'WebSocket error.'
-    setStatus({ enabled: true, url, state: 'disconnected', error: message, agents: [] })
+    // Chrome reports a failed handshake as a console-style string ("WebSocket
+    // connection to … failed: … net::ERR_CONNECTION_REFUSED"). That is the
+    // normal state while no adapter is listening, so it stays out of the
+    // user-visible status; the disconnected badge conveys it.
+    setStatus({ enabled: true, url, state: 'disconnected', error: undefined, agents: [] })
   }
 
   ws.onclose = (event) => {
     if (socket !== ws) return
     socket = null
     stopHeartbeat()
-    const message = (event as { reason?: string }).reason || 'Connection closed.'
-    setStatus({ enabled: true, url, state: 'disconnected', error: message, agents: [] })
+    setStatus({
+      enabled: true,
+      url,
+      state: 'disconnected',
+      error: event.reason || undefined,
+      agents: [],
+    })
     scheduleReconnect()
   }
 }

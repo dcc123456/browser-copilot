@@ -221,6 +221,12 @@ export interface Settings {
    * 默认关闭；调试（workflows.debug）始终启用接管，与此开关无关。
    */
   takeoverOnRun: boolean
+  /**
+   * 运行失败后是否自动进入 AI 自主修复循环（仅对生成式严格工作流有意义）。
+   * 默认关闭：失败就如实报失败，用户可在失败中心手动发起修复，或在设置里
+   * 开启此项让修复自动开始（修复过程中仍可取消）。
+   */
+  autoRepairOnRun: boolean
 }
 
 /** 无人值守运行的窗口选择策略（见 {@link Settings.unattendedWindowPolicy}）。 */

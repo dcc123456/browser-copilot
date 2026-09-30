@@ -52,4 +52,29 @@ describe('failure classification', () => {
     expect(fromFailureKind('locator-not-found')).toBe('ELEMENT_NOT_FOUND')
     expect(fromFailureKind('readiness')).toBe('PAGE_NOT_READY')
   })
+
+  it('classifies the page-context guard as PAGE_CONTEXT_MISMATCH', () => {
+    const guardMessage =
+      'WRONG_ORIGIN: 当前页面（https://creator.xiaohongshu.com）不是该工作流的目标站点（https://github.com）'
+    const result = classifyFailure({ message: guardMessage })
+    expect(result.type).toBe('PAGE_CONTEXT_MISMATCH')
+    expect(result.basis).toBe('message-pattern')
+    expect(classifyFailure({ message: 'WRONG_PAGE: 页面路径（/settings）不符合预期（/docs/*）' }).type).toBe(
+      'PAGE_CONTEXT_MISMATCH',
+    )
+    // A structured legacy code beats message guessing.
+    const structured = classifyFailure({ message: 'something else', code: 'WRONG_ORIGIN' })
+    expect(structured.type).toBe('PAGE_CONTEXT_MISMATCH')
+    expect(structured.basis).toBe('structured-code')
+    expect(fromVerificationFailure('WRONG_PAGE')).toBe('PAGE_CONTEXT_MISMATCH')
+    expect(fromFailureKind('wrong-origin')).toBe('PAGE_CONTEXT_MISMATCH')
+  })
+
+  it('treats a page-context mismatch as ordinary auto-repair, never a human gate', () => {
+    const policy = failureTypePolicy('PAGE_CONTEXT_MISMATCH')
+    expect(policy.autoRepairable).toBe(true)
+    expect(policy.humanGate).toBe(false)
+    expect(policy.unsafeToRetry).toBe(false)
+    expect(allowsImmediateHumanTakeover('PAGE_CONTEXT_MISMATCH')).toBe(false)
+  })
 })

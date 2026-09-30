@@ -28,6 +28,8 @@ import {
 } from './reliability'
 import { deriveGoalSpecFromNodes } from './goal'
 import { nodeGoalContractOf } from './node-goal-contract'
+import { resolveNodeGoalContract } from './node-goal-instantiation'
+import { richTargetFromAny, selectorFromTarget } from './target-to-selector'
 import type { Workflow, WorkflowNode } from './types'
 
 /** Severity: `error` blocks the save/run; `warning`/`info` only annotate. */
@@ -110,6 +112,7 @@ function selectorOf(node: WorkflowNode): string {
   return (
     (typeof p['selector'] === 'string' && p['selector']) ||
     (typeof p['cssSelector'] === 'string' && p['cssSelector']) ||
+    selectorFromTarget(p['target']) ||
     ''
   )
 }
@@ -378,7 +381,7 @@ function validateLocators(workflow: Workflow, ctx: ValidateCtx): GeneratedValida
     const blockId = blockIdOf(n)
     if (!ELEMENT_OP_BLOCKS.has(blockId)) continue
     const selector = selectorOf(n)
-    if (!selector.trim()) {
+    if (!selector.trim() && !richTargetFromAny(paramsOf(n)['target'])) {
       issues.push({
         code: 'LOCATOR_MISSING',
         severity: 'error',
@@ -389,6 +392,7 @@ function validateLocators(workflow: Workflow, ctx: ValidateCtx): GeneratedValida
       })
       continue
     }
+    if (!selector.trim()) continue
     if (!ctx.isStrict) continue
     // Strict: identity beats position. A positional chain (nth-child / :eq /
     // bare index) is refused at GENERATION time — the runtime would only
@@ -505,18 +509,24 @@ function validateGoal(workflow: Workflow, ctx: ValidateCtx): GeneratedValidation
     goalSpecOf(workflow) ??
     deriveGoalSpecFromNodes({ name: workflow.name, nodes: workflow.drawflow?.nodes ?? [] })
   // Every generated action node must carry a Node Goal Contract (spec V64).
+  // A block that CANNOT bear one (no locator, no produced variable, no
+  // reliability postconditions — the instantiation path deliberately leaves
+  // such nodes contract-less) is not a gap; only flag nodes the block was
+  // supposed to contract but did not.
   for (const node of workflow.drawflow?.nodes ?? []) {
     if (node.data?.blockId === 'trigger') continue
-    if (!nodeGoalContractOf(node.data)) {
-      issues.push({
-        code: 'NODE_GOAL_MISSING',
-        severity: 'error',
-        nodeId: node.id,
-        path: `drawflow.nodes[${node.id}].data.__workflowAi`,
-        message: '生成的动作节点缺少节点目标契约（node goal contract）。',
-        suggestedFix: '重新生成该节点，使其携带 goal 与 successCriteria。',
-      })
-    }
+    if (nodeGoalContractOf(node.data)) continue
+    const params = paramsOf(node)
+    const blockId = typeof params['blockId'] === 'string' ? params['blockId'] : ''
+    if (!blockId || resolveNodeGoalContract(blockId, params, undefined) === undefined) continue
+    issues.push({
+      code: 'NODE_GOAL_MISSING',
+      severity: 'error',
+      nodeId: node.id,
+      path: `drawflow.nodes[${node.id}].data.__workflowAi`,
+      message: '生成的动作节点缺少节点目标契约（node goal contract）。',
+      suggestedFix: '重新生成该节点，使其携带 goal 与 successCriteria。',
+    })
   }
   if (!goal) {
     issues.push({

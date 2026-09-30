@@ -120,6 +120,7 @@ import {
 import { createCollapseProbe } from './collapse-probe'
 import { forgetGenerationSecrets } from './operator-tool-run'
 import { resolveWorkflowForSave } from './history-compile'
+import { saveConfirmedWorkflowName } from '../lib/workflow/generation-goal-storage'
 import { probeWorkflowSelectors, hardenWorkflowSelectors } from './selector-probe'
 import { persistDefaultWaits } from '../lib/workflow/runnability'
 import { validateWorkflowForRun } from '../lib/workflow/validation'
@@ -179,6 +180,10 @@ import {
 } from '../lib/workflow/workflow-revision'
 import { DEFAULT_REPAIR_POLICY } from '../lib/workflow/repair/types'
 import { createBackgroundRunner } from './workflow-engine/repair/background-runner'
+// Static, not dynamic: `await import()` in the MV3 service worker throws
+// `window is not defined` (see CHANGELOG 0.6.3 get-secret fix).
+import { PatchEngine } from '../lib/workflow/repair/patch-engine'
+import { planReplay, executeReplay } from './workflow-engine/repair/replay-engine'
 import { createAiRepairProposer } from './workflow-engine/repair/repair-provider'
 import { toRepairResponse } from '../lib/workflow/repair/repair-response'
 import {
@@ -202,6 +207,9 @@ import type {
   WorkflowPatchSet,
 } from '../lib/workflow/repair/types'
 import { isGeneratedStrict } from '../lib/workflow/reliability'
+// Static imports — same SW dynamic-import crash fix as above.
+import { applySelfHeal } from '../lib/workflow/self-heal'
+import { verifyWorkflowGoal, type VerificationReport } from './workflow-engine/goal-verification'
 import { latestFirstRuns, observeFirstRunOfRevision } from '../lib/workflow/replay-metrics'
 import { runUnattendedPrompt } from './agent-unattended'
 import { streamCompletion } from '../lib/llm'
@@ -485,10 +493,6 @@ async function applyAndVerifyConfirmedPatch(
   workingCopy?: Workflow
   verification?: VerificationResult
 }> {
-  const { PatchEngine } = await import('../lib/workflow/repair/patch-engine')
-  const { planReplay, executeReplay } = await import(
-    './workflow-engine/repair/replay-engine'
-  )
   const engine = new PatchEngine()
 
   // Re-validate the approved patch against the current graph.
@@ -1560,54 +1564,52 @@ async function handleCommand(
         ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
       })
 
-      // Auto repair (spec §30 Run defaults): a generated-strict workflow's
-      // first-run failure enters the autonomous repair loop automatically —
-      // no user click. The repair runs in the background; events stream to
-      // the panel and the run result below reports whether it recovered.
+      // Auto repair (spec §30 Run defaults): the repair loop is an OPT-IN
+      // (`settings.autoRepairOnRun`, off by default) — a plain run reports its
+      // own outcome and the user can still start a repair from the failure
+      // center. When enabled, the loop runs in the BACKGROUND (like the
+      // recovery path) so `workflows.run` settles with the real run result
+      // instead of blocking for the whole repair; progress streams to the panel
+      // as `workflows.repairEvent`, where the user can watch or cancel it.
       const generatedRun = isGeneratedStrict(workflow)
-      let autoRepairOutcome:
-        | { status: 'success' | 'exhausted' | 'blocked'; revision?: number; reason?: string }
-        | undefined
-      if (r.outcome === 'failed' && generatedRun && !takeover && r.trace) {
-        rememberFailedRun(workflow.id, r.runId, r.trace)
-        const repairSettings = await getSettings()
-        const repairModelConfig = takeoverProviderOf(repairSettings)
-        try {
-          autoRepairOutcome = await startBackgroundAutoRepair({
-            workflow,
-            runId: r.runId,
-            failure: failureSnapshotForRun(workflow, r.runId),
-            ...(repairModelConfig
-              ? {
-                  model: {
-                    apiKey: repairModelConfig.apiKey,
-                    baseUrl: repairModelConfig.baseUrl,
-                    model: repairModelConfig.model,
-                    headers: repairModelConfig.headers,
-                  },
-                }
-              : {}),
-            save: { saveWorkflow, getWorkflow },
-            ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
-            forward: (event) => {
-              void broadcastRepairEvent(event)
-            },
-          })
-        } catch (error) {
-          console.warn('[workflows.run] auto repair failed to start', error)
-        }
+      if (r.outcome === 'failed' && r.trace) rememberFailedRun(workflow.id, r.runId, r.trace)
+      const repairStarted =
+        r.outcome === 'failed' && generatedRun && !takeover && !!r.trace && settings.autoRepairOnRun
+      if (repairStarted) {
+        const repairModelConfig = takeoverProviderOf(settings)
+        void startBackgroundAutoRepair({
+          workflow,
+          runId: r.runId,
+          failure: failureSnapshotForRun(workflow, r.runId),
+          ...(repairModelConfig
+            ? {
+                model: {
+                  apiKey: repairModelConfig.apiKey,
+                  baseUrl: repairModelConfig.baseUrl,
+                  model: repairModelConfig.model,
+                  headers: repairModelConfig.headers,
+                },
+              }
+            : {}),
+          save: { saveWorkflow, getWorkflow },
+          ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
+          forward: (event) => {
+            void broadcastRepairEvent(event)
+          },
+        }).catch((error: unknown) => {
+          console.warn('[workflows.run] background auto repair failed', error)
+        })
       }
 
-      const runOk = r.outcome === 'ok' || autoRepairOutcome?.status === 'success'
+      const runOk = r.outcome === 'ok'
       // SELF-HEAL write-back: a step that had to fall down the locator ladder
       // found a candidate the live page prefers. Rotate it into the graph now,
       // so the NEXT replay starts from what actually works instead of re-running
       // the same guess every time. Skipped while the auto-repair loop owns the
       // graph (it writes its own revision), and never blocks the run.
       let healed = workflow
-      if (r.degradations?.length && autoRepairOutcome === undefined) {
+      if (r.degradations?.length && !repairStarted) {
         try {
-          const { applySelfHeal } = await import('../lib/workflow/self-heal')
           const result = applySelfHeal(workflow, r.degradations, { runId: r.runId })
           if (result.changes.length > 0) {
             healed = result.workflow
@@ -1629,10 +1631,9 @@ async function handleCommand(
       // L1/L2/L3 verification and persist the certification status. L3 must
       // pass for the workflow to be marked Certified; a successful run whose
       // goal conditions fail stays unverified.
-      let certification: import('./workflow-engine/goal-verification').VerificationReport | undefined
+      let certification: VerificationReport | undefined
       if (runOk && healed.settings?.goalSpec) {
         try {
-          const { verifyWorkflowGoal } = await import('./workflow-engine/goal-verification')
           const scopeWindow = scopeWindowId === undefined
             ? undefined
             : await normalScopeFromWindowId(scopeWindowId).catch(() => undefined)
@@ -1686,17 +1687,14 @@ async function handleCommand(
         summary: r.summary,
         trace: r.trace,
         degradations: r.degradations,
-        autoRepaired: autoRepairOutcome !== undefined,
+        autoRepaired: repairStarted,
       })
       return {
         type: 'workflows.run',
         outcome: {
           ok: runOk,
           skipped: false,
-          summary:
-            runOk && r.outcome !== 'ok'
-              ? `auto-repaired at revision ${autoRepairOutcome?.revision ?? ''}`
-              : r.summary ?? '',
+          summary: r.summary ?? '',
           error: runOk ? undefined : r.summary,
           runId: r.runId,
           ...(certification ? { certification } : {}),
@@ -2979,6 +2977,14 @@ chrome.runtime.onConnect.addListener((port) => {
       let failure: string | undefined
       try {
         sendWithTracking({ type: 'phase', phase: 'preparing' })
+        // Workflow generation mode: persist the name the user confirmed at
+        // task start BEFORE the turn runs, so `prepare_workflow_goal` adopts
+        // it as the authoritative contract name (survives worker recycling).
+        const confirmedWorkflowName =
+          typeof message.workflowName === 'string' ? message.workflowName.trim() : ''
+        if (confirmedWorkflowName) {
+          await saveConfirmedWorkflowName(conversationId, confirmedWorkflowName)
+        }
         history = await loadConversation(conversationId)
         // Register the live transcript so a panel that reconnects mid-turn
         // (minimize/expand, crash, worker recycle) resumes the CURRENT state,

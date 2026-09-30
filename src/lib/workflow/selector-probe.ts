@@ -9,6 +9,7 @@
  */
 
 import type { Workflow } from './types'
+import { selectorFromTarget } from './target-to-selector'
 
 /** How a selector fared against the live page. */
 export type SelectorStatus = 'unique' | 'ambiguous' | 'missing'
@@ -49,8 +50,13 @@ export function selectorsOf(
   const found: { nodeId: string; blockId: string; selector: string }[] = []
   for (const node of workflow.drawflow.nodes) {
     const blockId = typeof node.data?.['blockId'] === 'string' ? node.data['blockId'] : ''
-    const selector = node.data?.['selector']
     if (!blockId || blockId === 'trigger') continue
+    // A node that recorded a rich target (role/text/ref spec) with no flat
+    // selector is still located — probe the CSS form of the target so the
+    // save card has live evidence for it too (mirrors `selectorOf`).
+    const selector =
+      (typeof node.data?.['selector'] === 'string' && node.data['selector']) ||
+      selectorFromTarget(node.data?.['target'])
     if (typeof selector !== 'string' || !selector.trim()) continue
     found.push({ nodeId: node.id, blockId, selector: selector.trim().slice(0, 300) })
   }

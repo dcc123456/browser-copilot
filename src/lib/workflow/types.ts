@@ -183,6 +183,13 @@ export interface WorkflowSettings {
    */
   generationOriginUrl?: string
   /**
+   * Explicit page-context fingerprint (`lib/workflow/page-context`): the page
+   * this workflow expects to act on. Takes precedence over
+   * `generationOriginUrl`. Written by the page-context-reanchor repair when
+   * the graph's own navigation contradicts the recorded grounding.
+   */
+  pageContext?: import('./page-context').PageContextFingerprint
+  /**
    * Which execution regime this workflow runs under (`lib/workflow/reliability`).
    * Absent means "derive": a generation provenance implies `generated-strict`,
    * everything else `compat`. An explicit value always wins.

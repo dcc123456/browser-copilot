@@ -45,6 +45,7 @@ export type RepairPhase =
 export type RepairStrategy =
   | 'terminal-state-check'
   | 'readiness-recovery'
+  | 'page-context-reanchor'
   | 'locator-repair'
   | 'parameter-repair'
   | 'local-graph-repair'
@@ -55,6 +56,7 @@ export type RepairStrategy =
 export const REPAIR_STRATEGIES: readonly RepairStrategy[] = [
   'terminal-state-check',
   'readiness-recovery',
+  'page-context-reanchor',
   'locator-repair',
   'parameter-repair',
   'local-graph-repair',

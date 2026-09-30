@@ -272,6 +272,44 @@ describe('validateWorkflowForRun', () => {
     const out = validateWorkflowForRun(workflow())
     expect(out.warnings).toEqual([])
   })
+
+  it('runs a graph whose scroll node has nothing to scroll, and says so', () => {
+    // A `element-scroll` with neither a locator nor a delta is a NO-OP, not a
+    // broken step. The gate used to refuse the entire run over it, which threw
+    // away every node that did work — and a workflow generated before the
+    // compile fix (`mode:'top'` → scrollY 0) stays runnable after it.
+    const out = validateWorkflowForRun(
+      workflow({
+        drawflow: {
+          nodes: [
+            node('t', 'trigger', { type: 'manual' }),
+            node('s', 'element-scroll', { selector: '', scrollX: 0, scrollY: 0 }),
+            node('a', 'event-click', { selector: '#x' }),
+          ],
+          edges: [
+            { id: 'e1', source: 't', target: 's' },
+            { id: 'e2', source: 's', target: 'a' },
+          ],
+        },
+      }),
+    )
+    expect(out.errors).toEqual([])
+    expect(out.warnings.some((w) => w.includes('缺少滚动目标'))).toBe(true)
+  })
+
+  it('still blocks a node whose step cannot work at all', () => {
+    // The counterfactual for the warning above: severity is per finding, not a
+    // blanket downgrade of the requirement table.
+    const out = validateWorkflowForRun(
+      workflow({
+        drawflow: {
+          nodes: [node('t', 'trigger', { type: 'manual' }), node('a', 'press-key')],
+          edges: [{ id: 'e1', source: 't', target: 'a' }],
+        },
+      }),
+    )
+    expect(out.errors.some((e) => e.includes('要按的键'))).toBe(true)
+  })
 })
 
 describe('OFFERED_TRIGGER_TYPES', () => {

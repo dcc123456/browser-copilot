@@ -385,6 +385,7 @@ export function normalizeSettingsPayload(raw: unknown): {
   ocrLanguage: string
   takeoverModel: { providerId: string; model: string }
   takeoverOnRun: boolean
+  autoRepairOnRun: boolean
 } {
   const value = (raw ?? {}) as Record<string, unknown>
   const providers = Array.isArray(value.providers)
@@ -473,5 +474,6 @@ export function normalizeSettingsPayload(raw: unknown): {
     ocrLanguage,
     takeoverModel,
     takeoverOnRun: typeof value.takeoverOnRun === 'boolean' ? value.takeoverOnRun : false,
+    autoRepairOnRun: typeof value.autoRepairOnRun === 'boolean' ? value.autoRepairOnRun : false,
   }
 }

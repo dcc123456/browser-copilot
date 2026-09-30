@@ -1458,6 +1458,21 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         </label>
         <p className="hint">{t.settingsTakeoverOnRunIntro}</p>
 
+        <label className="checkbox">
+          <input
+            checked={settings.autoRepairOnRun}
+            onChange={(event) =>
+              void mutate({
+                type: 'settings.set',
+                patch: { autoRepairOnRun: event.target.checked },
+              })
+            }
+            type="checkbox"
+          />
+          {t.settingsAutoRepairOnRun}
+        </label>
+        <p className="hint">{t.settingsAutoRepairOnRunIntro}</p>
+
         <div className="actions">
           <button onClick={() => setOpenDialog('takeover')} type="button">
             {t.settingsModify}

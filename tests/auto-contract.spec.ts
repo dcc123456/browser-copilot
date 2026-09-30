@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   autoCompleteReliability,
   inferIdempotency,
@@ -8,6 +8,34 @@ import { goalSpecOf } from '../src/lib/workflow/reliability'
 import { validateWorkflowForRun } from '../src/lib/workflow/validation'
 import { validateGeneratedWorkflow } from '../src/lib/workflow/generated-validation'
 import type { NodeReliabilitySpec } from '../src/lib/workflow/reliability'
+
+/** In-memory `chrome.storage.local` double. */
+function makeChromeMock() {
+  const store = new Map<string, unknown>()
+  return {
+    storage: {
+      local: {
+        get: vi.fn(async (keys: string | string[]) => {
+          const wanted = typeof keys === 'string' ? [keys] : keys
+          const out: Record<string, unknown> = {}
+          for (const key of wanted) if (store.has(key)) out[key] = store.get(key)
+          return out
+        }),
+        set: vi.fn(async (items: Record<string, unknown>) => {
+          for (const [key, value] of Object.entries(items)) store.set(key, value)
+        }),
+        remove: vi.fn(async (keys: string | string[]) => {
+          const wanted = typeof keys === 'string' ? [keys] : keys
+          for (const key of wanted) store.delete(key)
+        }),
+      },
+    },
+  }
+}
+
+beforeEach(() => {
+  vi.stubGlobal('chrome', makeChromeMock())
+})
 
 describe('auto reliability completion (generation must always succeed)', () => {
   it('infers idempotency from the action semantics', () => {

@@ -132,12 +132,42 @@ describe('args fall through to flat block data', () => {
     ])
   })
 
-  it('scroll maps mode/y to scrollX/scrollY (a target, if any, is not attached)', () => {
+  it('scroll maps mode/y to scrollX/scrollY and keeps the element it scrolls', () => {
     expect(
       actionData([
         entry('scroll', { mode: 'by', y: 100, target: { primary: { how: 'css', value: '.x' } } }),
       ]),
-    ).toEqual([{ blockId: 'element-scroll', description: '', scrollX: 0, scrollY: 100 }])
+    ).toEqual([
+      {
+        blockId: 'element-scroll',
+        description: '',
+        selector: '.x',
+        findBy: 'cssSelector',
+        scrollX: 0,
+        scrollY: 100,
+        target: { primary: { how: 'css', value: '.x' } },
+      },
+    ])
+  })
+
+  it('a wheel scroll with no element scrolls the window explicitly', () => {
+    expect(actionData([entry('scroll', { mode: 'by', y: 100 })])).toEqual([
+      {
+        blockId: 'element-scroll',
+        description: 'scroll',
+        selector: 'html',
+        findBy: 'cssSelector',
+        scrollX: 0,
+        scrollY: 100,
+      },
+    ])
+  })
+
+  it('mode top/bottom compile to a large delta, never to a 0/0 no-op', () => {
+    const [top] = actionData([entry('scroll', { mode: 'top' })])
+    const [bottom] = actionData([entry('scroll', { mode: 'bottom' })])
+    expect(top).toMatchObject({ blockId: 'element-scroll', scrollY: -100000 })
+    expect(bottom).toMatchObject({ blockId: 'element-scroll', scrollY: 100000 })
   })
 
   it('wait_for becomes a delay block carrying the timeout as delay time', () => {

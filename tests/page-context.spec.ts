@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   checkPageContext,
+  navigationDestinationOf,
   originOfUrl,
   pageContextOf,
 } from '../src/lib/workflow/page-context'
@@ -61,6 +62,38 @@ describe('checkPageContext', () => {
   it('title check is case-insensitive and skipped when no title is observable', () => {
     expect(checkPageContext({ origin: 'https://x.test', titleHint: 'ADMIN' }, { url: 'https://x.test/', title: 'admin panel' }).ok).toBe(true)
     expect(checkPageContext({ origin: 'https://x.test', titleHint: 'ADMIN' }, { url: 'https://x.test/' }).ok).toBe(true)
+  })
+
+  it('names the compared subject so a destination is never reported as the current page', () => {
+    const current = checkPageContext({ origin: 'https://shop.test' }, { url: 'https://other.test' })
+    expect(!current.ok && current.message).toContain('当前页面')
+    const destination = checkPageContext(
+      { origin: 'https://shop.test' },
+      { url: 'https://other.test' },
+      { label: '导航目标' },
+    )
+    expect(!destination.ok && destination.message).toContain('导航目标（https://other.test）')
+    expect(!destination.ok && destination.message).not.toContain('当前页面')
+  })
+})
+
+describe('navigationDestinationOf', () => {
+  it('returns the destination of a navigation block with a static http(s) url', () => {
+    expect(navigationDestinationOf('new-tab', { url: 'https://creator.test/publish' })).toBe(
+      'https://creator.test/publish',
+    )
+    expect(navigationDestinationOf('open-url', { url: '  http://localhost:3000/  ' })).toBe(
+      'http://localhost:3000/',
+    )
+  })
+
+  it('refuses to anchor on anything the engine cannot resolve yet', () => {
+    expect(navigationDestinationOf('new-tab', { url: '{{target}}' })).toBeUndefined()
+    expect(navigationDestinationOf('new-tab', { url: 'https://a.test/{{path}}' })).toBeUndefined()
+    expect(navigationDestinationOf('new-tab', { url: 'file:///tmp/x.html' })).toBeUndefined()
+    expect(navigationDestinationOf('new-tab', { url: 'not a url' })).toBeUndefined()
+    expect(navigationDestinationOf('new-tab', {})).toBeUndefined()
+    expect(navigationDestinationOf('event-click', { url: 'https://a.test/' })).toBeUndefined()
   })
 })
 

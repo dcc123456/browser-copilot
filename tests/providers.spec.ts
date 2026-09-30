@@ -164,6 +164,7 @@ describe('normalizeStoredSettings', () => {
         ocrLanguage: 'eng',
         takeoverModel: { providerId: '', model: '' },
         takeoverOnRun: false,
+        autoRepairOnRun: false,
       })
     }
   })
@@ -189,6 +190,7 @@ describe('normalizeStoredSettings', () => {
       ocrLanguage: 'chi_sim+eng',
       takeoverModel: { providerId: '', model: '' },
       takeoverOnRun: false,
+      autoRepairOnRun: false,
     }
     expect(normalizeStoredSettings(settings)).toEqual(settings)
   })
@@ -236,6 +238,7 @@ describe('normalizeStoredSettings', () => {
       ocrLanguage: 'eng',
       takeoverModel: { providerId: '', model: '' },
       takeoverOnRun: false,
+      autoRepairOnRun: false,
     })
   })
 

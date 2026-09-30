@@ -709,6 +709,12 @@ export type AgentClientMessage =
        * The worker re-validates them before persisting.
        */
       attachments?: AttachmentDescriptor[]
+      /**
+       * Workflow name the user confirmed BEFORE the task started (workflow
+       * generation mode only). The worker persists it so `prepare_workflow_goal`
+       * adopts it as the authoritative contract name instead of deriving one.
+       */
+      workflowName?: string
     }
   | { type: 'confirm'; requestId: string; approved: boolean }
   /**

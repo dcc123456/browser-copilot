@@ -282,11 +282,19 @@ export function validateWorkflowForRun(workflow: Workflow): WorkflowRunValidatio
   // record gate enforces (see `block-requirements`), applied to EVERY workflow
   // no matter which path produced it. The empty-locator `element-exists`, the
   // key-less `press-key` and the url-less `webhook` all die HERE now instead
-  // of failing (or silently doing nothing) mid-run. Errors, not warnings: the
-  // step cannot work, so running it can only surprise.
+  // of failing (or silently doing nothing) mid-run. `'error'` findings block:
+  // the step cannot work, so running it can only surprise. `'warning'` findings
+  // are reported and run anyway — a step that merely does nothing (a scroll
+  // with no delta) is worth far less to the user than the run it would block.
   for (const node of actionNodes) {
     const blockId = blockIdOfNode(node)
     for (const problem of missingRequirements(blockId, node.data ?? {})) {
+      if (problem.severity === 'warning') {
+        warnings.push(
+          `节点 "${nodeDisplayNameOf(node)}" 的参数可能无效 ${problem.key}：${problem.message}`,
+        )
+        continue
+      }
       errors.push(
         `节点 "${nodeDisplayNameOf(node)}" 缺少必填参数 ${problem.key}：${problem.message}`,
       )

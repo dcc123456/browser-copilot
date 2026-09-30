@@ -551,16 +551,26 @@ export function resolveRecordedLocator(
 
   const explicit =
     typeof args?.selector === 'string' && args.selector.trim() ? args.selector.trim() : ''
-  const selector = explicit || selectorFromTarget(target)
+  // `findBy:'text'` means the `selector` field carries a literal text to match,
+  // not a CSS selector. The kernel's `text` strategy walks the DOM for the
+  // leaf element whose rendered text equals it — there is no CSS form, so the
+  // locator keeps a rich text target and records no flat selector.
+  const findBy = typeof args?.findBy === 'string' ? args.findBy.trim() : ''
+  let effectiveTarget: unknown = target
+  let selector = explicit || selectorFromTarget(target)
+  if (findBy === 'text' && !target && explicit) {
+    effectiveTarget = { primary: { how: 'text', value: explicit }, fallbacks: [] }
+    selector = ''
+  }
 
   const inlineLabel = typeof args?.label === 'string' ? args.label.trim() : ''
   const label = inlineLabel || hit?.name || ''
   const type = typeof hit?.type === 'string' && hit.type.trim() ? hit.type.trim() : ''
-  const semantic = semanticLocatorFromTarget(target)
+  const semantic = semanticLocatorFromTarget(effectiveTarget)
 
   return {
     selector,
-    ...(target ? { target } : {}),
+    ...(effectiveTarget ? { target: effectiveTarget } : {}),
     ...(label ? { label } : {}),
     ...(type ? { type } : {}),
     ...(semantic ? { semantic } : {}),

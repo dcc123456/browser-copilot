@@ -235,6 +235,18 @@ function richTargetOf(data: Record<string, unknown>): Target | undefined {
 function targetFrom(data: Record<string, unknown>): Target {
   const selector = sel(data)
   const rich = richTargetOf(data)
+  if (data['findBy'] === 'text') {
+    // The `selector` field holds the literal text to match, not a CSS selector.
+    // Build a `text` primary and keep any other rich specs as fallbacks, so a
+    // node recorded from a `findBy:'text'` call resolves straight to the leaf
+    // whose rendered text equals it instead of trying the text as bogus CSS.
+    const fallbacks = rich
+      ? [rich.primary, ...rich.fallbacks].filter(
+          (spec) => !(spec.how === 'text' && spec.value === selector),
+        )
+      : []
+    return { primary: { how: 'text', value: selector }, fallbacks }
+  }
   if (data['findBy'] === 'xpath') {
     const fallbacks = rich ? [rich.primary, ...rich.fallbacks] : []
     return { primary: { how: 'css', value: `xpath:${selector}` }, fallbacks }

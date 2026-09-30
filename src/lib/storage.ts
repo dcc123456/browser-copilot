@@ -99,6 +99,7 @@ export const DEFAULT_SETTINGS: Settings = {
   unattendedWindowPolicy: 'latest',
   takeoverModel: { providerId: '', model: '' },
   takeoverOnRun: false,
+  autoRepairOnRun: false,
 }
 
 /**
@@ -243,6 +244,7 @@ export function normalizeStoredSettings(raw: unknown): Settings {
       typeof value.unattendedWindowId === 'number' ? value.unattendedWindowId : undefined,
     takeoverModel,
     takeoverOnRun: typeof value.takeoverOnRun === 'boolean' ? value.takeoverOnRun : false,
+    autoRepairOnRun: typeof value.autoRepairOnRun === 'boolean' ? value.autoRepairOnRun : false,
   }
 }
 
@@ -1611,6 +1613,9 @@ function httpImageUrlArg(args: Record<string, unknown> | undefined): string {
   return /^https?:\/\//i.test(image) ? image : ''
 }
 
+/** Wheel delta that stands for "scroll to the edge" — the browser clamps it there. */
+const SCROLL_TO_EDGE = 100_000
+
 /**
  * Builds the canonical flat block data for a mapped tool action, best-effort
  * from its args. `aiVar` (set for AI-prefilled fills) replaces the literal
@@ -1703,10 +1708,32 @@ function blockDataFromArgs(
       if (mode === 'into_view' && (selector || target)) {
         return withRichTarget({ selector, findBy: 'cssSelector', scrollIntoView: true }, target)
       }
-      // `element-scroll` models top/bottom/by as an X/Y wheel scroll.
+      // `element-scroll` models top/bottom/by as an X/Y wheel scroll. The
+      // extremes are a LARGE delta rather than 0: `scrollBy` clamps at the edge,
+      // so ±SCROLL_TO_EDGE lands on top/bottom while a 0/0 node replays as
+      // nothing at all.
       const y =
-        mode === 'top' ? 0 : mode === 'bottom' ? 100000 : typeof args?.y === 'number' ? args.y : 600
-      return { scrollX: typeof args?.x === 'number' ? args.x : 0, scrollY: y }
+        mode === 'top'
+          ? -SCROLL_TO_EDGE
+          : mode === 'bottom'
+            ? SCROLL_TO_EDGE
+            : typeof args?.y === 'number'
+              ? args.y
+              : 600
+      // What MOVED is either a chosen element (the operator path scrolls a
+      // `selector`) or the window — a rich `target` alone does not count,
+      // because a wheel scroll never touched that element. `html` is how the
+      // executor names the scrolling element; writing it keeps the node honest
+      // about what it scrolls instead of leaving a locator-less step behind.
+      return withRichTarget(
+        {
+          selector: selector || 'html',
+          findBy: 'cssSelector',
+          scrollX: typeof args?.x === 'number' ? args.x : 0,
+          scrollY: y,
+        },
+        selector ? target : undefined,
+      )
     }
     case 'wait_for':
       // Mapped to the `delay` block: replay the agent's pacing as a pause.

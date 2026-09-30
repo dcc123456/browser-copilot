@@ -32,6 +32,7 @@
 
 import { checkWorkflowIntegrity, integrityIsClean } from '../integrity'
 import { validateWorkflowForRun } from '../validation'
+import { pageContextOf } from '../page-context'
 import { referencesIn } from '../dynamic-data'
 import { looksLikeBulkContent } from '../dynamic-data'
 import { allowedNodeIdsOf, allowedParamPathsOf, isDataPath, PROTECTED_PARAMS } from './patch-policy'
@@ -64,6 +65,25 @@ const STRUCTURAL_OPERATIONS: ReadonlySet<WorkflowPatchOperation['kind']> = new S
 function blockIdOf(node: WorkflowNode): string {
   const raw = node.data?.['blockId']
   return typeof raw === 'string' && raw ? raw : node.label
+}
+
+/**
+ * Workflow-level operations target `workflow.settings`, not a node: `nodeId`
+ * carries no meaning for them and the allowed-node / allowed-path gates do
+ * not apply. Their value shape is checked here instead.
+ */
+const WORKFLOW_LEVEL_OPERATIONS: ReadonlySet<WorkflowPatchOperation['kind']> = new Set([
+  'SET_PAGE_CONTEXT_ORIGIN',
+])
+
+/** Whether a value is a canonical origin (scheme + host [+ port]). */
+function isCanonicalOrigin(value: unknown): boolean {
+  if (typeof value !== 'string' || !/^https?:\/\/.+/.test(value)) return false
+  try {
+    return new URL(value).origin === value
+  } catch {
+    return false
+  }
 }
 
 /** Read a value at a dot path inside a param bag. */
@@ -152,6 +172,29 @@ export class PatchEngine {
 
     // Per-operation checks 3–8.
     for (const operation of patch.operations) {
+      // Workflow-level operations patch `settings`, not a node: they skip the
+      // node-scope gates and carry their own value checks instead.
+      if (WORKFLOW_LEVEL_OPERATIONS.has(operation.kind)) {
+        if (operation.kind === 'SET_PAGE_CONTEXT_ORIGIN') {
+          if (!isCanonicalOrigin(operation.after)) {
+            problem(
+              'SET_PAGE_CONTEXT_ORIGIN requires a canonical http(s) origin as after',
+              operation.operationId,
+            )
+          }
+          if (
+            operation.before !== undefined &&
+            !deepEqual(pageContextOf(workflow)?.origin, operation.before)
+          ) {
+            problem(
+              'stale patch: the recorded page context no longer matches "before"; re-diagnosis required',
+              operation.operationId,
+            )
+          }
+        }
+        continue
+      }
+
       // 3. target node exists (structural ops carry the node id as anchor).
       const node = workflow.drawflow.nodes.find((item) => item.id === operation.nodeId)
       if (!node && !STRUCTURAL_OPERATIONS.has(operation.kind)) {
@@ -317,6 +360,13 @@ export class PatchEngine {
     const clone = structuredClone(workflow)
     const changed = new Set<string>()
     for (const operation of patch.operations) {
+      if (operation.kind === 'SET_PAGE_CONTEXT_ORIGIN') {
+        clone.settings = {
+          ...clone.settings,
+          pageContext: { origin: String(operation.after) },
+        }
+        continue
+      }
       const node = clone.drawflow.nodes.find((item) => item.id === operation.nodeId)
       if (!node) throw new Error(`node ${operation.nodeId} vanished during apply`)
       changed.add(operation.nodeId)

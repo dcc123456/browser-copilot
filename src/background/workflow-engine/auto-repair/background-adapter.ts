@@ -382,9 +382,26 @@ export async function startBackgroundAutoRepair(
       durationMs: session.final?.durationMs ?? Date.now() - entry.startedAt,
       committed: session.final?.committed ?? false,
     }
+  } catch (error) {
+    // The orchestrator re-throws anything that is not a user cancel. Without a
+    // terminal event here the panel would keep its "AI is repairing…" spinner
+    // forever, and the registry entry would block every later repair for this
+    // workflow — so settle both.
+    entry.settled = true
+    const reason = error instanceof Error ? error.message : String(error)
+    console.warn('[auto-repair] repair aborted by an unexpected error', error)
+    const sessionId = entry.events.find((event) => event.type === 'repair.started')?.sessionId
+    if (sessionId) emit({ type: 'repair.blocked', sessionId, reason })
+    return {
+      status: 'blocked',
+      reason,
+      attempts: entry.events.filter((event) => event.type === 'repair.attempt-failed').length,
+      durationMs: Date.now() - entry.startedAt,
+      committed: false,
+    }
   } finally {
-    // Keep the settled entry around briefly for event replay; drop it on a
-    // later start (registry entries are replaced above).
-    if (entry.settled) active.delete(input.workflow.id)
+    // Settled either way: drop the registry entry so a later run can start a
+    // fresh repair.
+    active.delete(input.workflow.id)
   }
 }

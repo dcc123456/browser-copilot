@@ -34,6 +34,7 @@ import {
   type AiPrefillStep,
 } from '../lib/storage'
 import { isTriggerNode } from '../lib/workflow/migrate'
+import { generateWorkflowName } from '../lib/workflow/generation-goal'
 import {
   applyTriggerSelection,
   triggerSelectionOf,
@@ -1770,6 +1771,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   } | null>(null)
   const generationDialogRef = useRef(generationDialog)
   generationDialogRef.current = generationDialog
+  // --- Workflow name confirmed at TASK START (workflow generation mode) ---
+  // Workflow names are auto-generated from task text; no blocking dialog.
   /** Generation log lines collected during the task, even with no open dialog. */
   const generationLogsRef = useRef<string[]>([])
   /** The save card whose final-generation modal was already opened once. */
@@ -2709,11 +2712,16 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       outgoing = includeSelection ? t.chatSkillGoSelection({ name }) : t.chatSkillGo({ name })
     }
 
+    // Workflow generation mode: auto-generate name from task text without blocking.
+    const workflowName =
+      modeRef.current === 'workflow' ? generateWorkflowName(outgoing) : undefined
+
     const delivered = post({
       type: 'chat',
       conversationId,
       text: outgoing,
       includeSelection,
+      ...(workflowName ? { workflowName } : {}),
       ...(activeSkillId ? { skillId: activeSkillId } : {}),
       ...(pendingAttachments.length ? { attachments: pendingAttachments } : {}),
     })
@@ -4264,9 +4272,14 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       {/* Autonomous repair modal (portal): visible while events stream */}
       <RepairProgressDialog
         open={repairDialogOpen && repairEvents.state.events.length > 0}
-        workflowId=""
+        workflowId={repairEvents.state.workflowId}
         events={repairEvents.state.events}
         onClose={() => setRepairDialogOpen(false)}
+        onCancelRepair={() => {
+          const id = repairEvents.state.workflowId
+          if (!id) return
+          void sendCommand({ type: 'workflows.autoRepairCancel', id }).catch(() => undefined)
+        }}
         onHumanTakeover={() => {
           setRepairDialogOpen(false)
         }}

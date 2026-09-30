@@ -128,7 +128,28 @@ describe('repair policy ladder', () => {
   it('flags model use and escalation direction', () => {
     expect(strategyUsesModel('locator-repair')).toBe(true)
     expect(strategyUsesModel('readiness-recovery')).toBe(false)
+    expect(strategyUsesModel('page-context-reanchor')).toBe(false)
     expect(isEscalation('full-workflow-replan')).toBe(true)
     expect(isEscalation('terminal-state-check')).toBe(false)
+  })
+
+  it('puts the deterministic reanchor right after S0 for a page-context mismatch', () => {
+    const ladder = ladderForFailure('PAGE_CONTEXT_MISMATCH')
+    expect(ladder[0]).toBe('terminal-state-check')
+    expect(ladder[1]).toBe('page-context-reanchor')
+    expect(ladder).not.toContain('readiness-recovery')
+
+    const second = nextStrategyOf({
+      failureType: 'PAGE_CONTEXT_MISMATCH',
+      attempts: [
+        attempt({ attempt: 1, strategy: 'terminal-state-check' }),
+        attempt({ attempt: 2, strategy: 'terminal-state-check' }),
+      ],
+      budget: DEFAULT_REPAIR_BUDGET,
+      modelCalls: 0,
+      startedAt,
+      now: startedAt + 200,
+    })
+    expect(second).toMatchObject({ kind: 'next', strategy: 'page-context-reanchor' })
   })
 })

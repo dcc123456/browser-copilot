@@ -7,6 +7,8 @@
  * ```text
  * S0 terminal-state-check   goal already satisfied?
  * S1 readiness-recovery     wait / scroll / focus / re-observe / retry
+ * S1.5 page-context-reanchor  move the recorded grounding to the site the
+ *                            graph's own first navigation drives onto
  * S2 locator-repair         verified selector → testid → aria → role+name …
  * S3 parameter-repair       input value / timeout / options / key sequence
  * S4 local-graph-repair     insert / delete / replace within failed node ±2
@@ -67,6 +69,7 @@ const PREFERRED_FIRST: Partial<Record<WorkflowFailureType, RepairStrategy>> = {
   INPUT_REJECTED: 'parameter-repair',
   INVALID_PARAMETER: 'parameter-repair',
   STATE_MISMATCH: 'local-graph-repair',
+  PAGE_CONTEXT_MISMATCH: 'page-context-reanchor',
   POSTCONDITION_FAILED: 'parameter-repair',
   GOAL_NOT_SATISFIED: 'section-replan',
   WORKFLOW_GRAPH_INVALID: 'local-graph-repair',

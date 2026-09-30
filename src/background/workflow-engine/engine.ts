@@ -29,7 +29,11 @@ import {
 } from '../../lib/workflow/conditions'
 import type { ConditionBaseline } from './condition-runtime'
 import type { NodeDegradation } from '../../lib/workflow/self-heal'
-import { checkPageContext, pageContextOf } from '../../lib/workflow/page-context'
+import {
+  checkPageContext,
+  navigationDestinationOf,
+  pageContextOf,
+} from '../../lib/workflow/page-context'
 import { ELEMENT_OP_BLOCKS } from '../../lib/workflow/generated-validation'
 import type { DebugStepLine } from '../../lib/workflow/auto-debug-patch'
 import type { ScopeWindow } from '../automation-scope'
@@ -774,8 +778,18 @@ async function runCore(
       pageActing &&
       pageContextCheckedForTab !== (targetTabId ?? undefined)
     ) {
-      const current = await getPageContext()
-      const verdict = checkPageContext(expectedPageContext, current ?? {})
+      // A block that navigates of its own accord is judged on its DESTINATION,
+      // not on the stale current tab — otherwise the first step of a workflow
+      // that opens the grounded site is rejected as "wrong origin".
+      const destination = navigationDestinationOf(blockId, params)
+      const current = destination
+        ? { url: destination }
+        : ((await getPageContext()) ?? {})
+      const verdict = checkPageContext(
+        expectedPageContext,
+        current,
+        destination ? { label: '导航目标' } : {},
+      )
       if (!verdict.ok) {
         throw new Error(`${verdict.code}: ${verdict.message}`)
       }

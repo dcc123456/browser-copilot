@@ -17,6 +17,8 @@
  * @module lib/workflow/page-context
  */
 
+import { hasReference } from './dynamic-data'
+
 /** The declared page context a workflow expects at run time. */
 export interface PageContextFingerprint {
   /** Origin the workflow was generated for (scheme + host + port). */
@@ -46,6 +48,31 @@ export function originOfUrl(url: string): string {
   } catch {
     return ''
   }
+}
+
+/**
+ * Blocks that navigate somewhere of their own accord before any page is
+ * acted on. For these the page UNDER ACT IS THE DESTINATION — gating them on
+ * the stale current tab rejects a workflow whose very first step walks onto
+ * the grounded site (the false WRONG_ORIGIN class).
+ */
+const NAVIGATION_BLOCKS: ReadonlySet<string> = new Set(['new-tab', 'open-url'])
+
+/**
+ * The destination URL a navigation block is about to open, when the block is
+ * one and the (already interpolated) params carry a resolvable http(s) url.
+ * Undefined ⇒ the guard must fall back to the current page.
+ */
+export function navigationDestinationOf(
+  blockId: string,
+  params: Record<string, unknown>,
+): string | undefined {
+  if (!NAVIGATION_BLOCKS.has(blockId)) return undefined
+  const raw = params['url']
+  if (typeof raw !== 'string') return undefined
+  const url = raw.trim()
+  if (!/^https?:\/\//i.test(url) || hasReference(url)) return undefined
+  return originOfUrl(url) ? url : undefined
 }
 
 /**
@@ -92,11 +119,17 @@ function pathnameMatches(pathname: string, pattern: string): boolean {
 /**
  * Compare the current page against the expected fingerprint. Origin first —
  * a different origin makes every locator answer meaningless.
+ *
+ * `subject.label` names what is being compared (当前页面 vs 导航目标) so a
+ * destination check never reports the destination as if it were the page the
+ * user is standing on.
  */
 export function checkPageContext(
   expected: PageContextFingerprint,
   current: CurrentPageContext,
+  subject: { label?: string } = {},
 ): PageContextVerdict {
+  const who = subject.label ?? '当前页面'
   const url = current.url ?? ''
   if (!url) return { ok: true } // nothing observed yet — do not invent a failure
   const actualOrigin = originOfUrl(url)
@@ -104,7 +137,7 @@ export function checkPageContext(
     return {
       ok: false,
       code: 'WRONG_ORIGIN',
-      message: `当前页面（${actualOrigin}）不是该工作流的目标站点（${expected.origin}）`,
+      message: `${who}（${actualOrigin}）不是该工作流的目标站点（${expected.origin}）`,
     }
   }
   if (expected.pathnamePattern) {
@@ -118,7 +151,7 @@ export function checkPageContext(
       return {
         ok: false,
         code: 'WRONG_PAGE',
-        message: `当前页面路径（${pathname}）不符合预期（${expected.pathnamePattern}）`,
+        message: `${who}路径（${pathname}）不符合预期（${expected.pathnamePattern}）`,
       }
     }
   }

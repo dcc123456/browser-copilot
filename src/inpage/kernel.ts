@@ -1378,6 +1378,32 @@ export function runOp(op: Op): OpResult {
       seen.push(candidate)
     }
 
+    // Second pass: clickable text leaves. Plain divs/spans wired to JS clicks
+    // (an "upload" affordance is rarely a real <button>) are invisible to the
+    // selector list above. A leaf whose rendered text is non-empty and whose
+    // computed cursor is pointer is the best in-page click signal; append these
+    // AFTER the standard set (real controls keep priority) and skip any already
+    // inside a captured element (a <span> inside a <button> duplicates it).
+    for (const el of safeQuery('*')) {
+      if (el.children.length !== 0) continue
+      const style = styleOf(el)
+      if (!style || style.cursor !== 'pointer') continue
+      const own = visibleText(el)
+      if (!own || own.length > 80) continue
+      if (seen.indexOf(el) !== -1) continue
+      let ancestor: Element | null = el.parentElement
+      let insideSeen = false
+      while (ancestor) {
+        if (seen.indexOf(ancestor) !== -1) {
+          insideSeen = true
+          break
+        }
+        ancestor = ancestor.parentElement
+      }
+      if (insideSeen) continue
+      seen.push(el)
+    }
+
     const elements: SnapshotElement[] = []
     const limit = Math.max(1, maxElements)
     for (let i = 0; i < seen.length && elements.length < limit; i += 1) {

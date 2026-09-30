@@ -48,7 +48,7 @@ vi.mock('../src/background/workflow-engine/engine', () => ({ runWorkflow: vi.fn(
 vi.mock('../src/background/automation-scope', () => ({
   normalScopeFromWindowId: vi.fn(async () => undefined),
 }))
-vi.mock('../src/lib/workflow/blocks/palette', () => ({ BLOCK_BY_ID: new Map() }))
+vi.mock('../src/lib/workflow/blocks/palette', () => ({ BLOCK_BY_ID: new Map(), PALETTE_BLOCKS: [] }))
 
 const { createDriverReadinessProbe } = await import(
   '../src/background/workflow-engine/run-workflow'

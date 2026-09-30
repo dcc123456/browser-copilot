@@ -49,7 +49,9 @@ import { describeCondition } from '../lib/workflow/conditions'
 import {
   loadGenerationGoal,
   clearGenerationGoal,
+  clearConfirmedWorkflowName,
 } from '../lib/workflow/generation-goal-storage'
+import { isAcceptableWorkflowName, generateWorkflowName } from '../lib/workflow/generation-goal'
 import { formatRequirementRefusal, missingRequirements } from '../lib/workflow/block-requirements'
 import {
   isOperatorTool,
@@ -679,10 +681,18 @@ export async function composeWorkflowFromDraft(
   // authoritative workflow goal; prefer it over a purely derived one and fill
   // the trigger description when empty. Rehydrate it in case the worker recycled.
   const preparedContract = await loadGenerationGoal(conversationId)
-  if (preparedContract) {
-    if (!draft.name || draft.name === 'New workflow') draft.name = preparedContract.name
+  // A name that is still the `workflow-xxxxxx` placeholder (or otherwise
+  // meaningless) must never survive into the saved workflow: the goal
+  // contract's name is authoritative — the user confirms it at task start.
+  if (preparedContract && (!draft.name || !isAcceptableWorkflowName(draft.name))) {
+    draft.name = preparedContract.name
   }
-  const name = (opts.name ?? '').trim() || draft.name || preparedContract?.name || 'New workflow'
+  const name =
+    (opts.name ?? '').trim() ||
+    draft.name ||
+    preparedContract?.name ||
+    (goalText ? generateWorkflowName(goalText) : '') ||
+    'New workflow'
   if (preparedContract && triggerHead) {
     const conditionsText = preparedContract.goalSpec.successConditions
       .map((c) => describeCondition(c))
@@ -768,8 +778,12 @@ export async function composeWorkflowFromDraft(
   // soft warnings — the workflow still saves — but the model/user is told the
   // graph may be missing what actually happened.
   {
+    // A block that failed during generation but whose step DID make it into
+    // the graph (a later successful call recovered it) is not a hole — the
+    // graph is not missing the step. Only report blocks with no node at all.
+    const draftBlocks = new Set(actionNodesOf(draft).map(blockIdOfNode))
     const coverage = coverageWarningLines({
-      failedBlockIds: failedBlockIdsOf(conversationId),
+      failedBlockIds: failedBlockIdsOf(conversationId).filter((id) => !draftBlocks.has(id)),
       recordOnlyBlockIds: actionNodesOf(draft)
         .map(blockIdOfNode)
         .filter(isRecordOnlyBlock),
@@ -818,6 +832,9 @@ export async function composeWorkflowFromDraft(
       saved = true
       await clearDraft(conversationId)
       await clearGenerationGoal(conversationId)
+      // The confirmed name rode into the contract; drop it so the next
+      // generation task in this conversation asks for a fresh one.
+      await clearConfirmedWorkflowName(conversationId)
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) }
     }

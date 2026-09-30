@@ -35,6 +35,7 @@ export type WorkflowFailureType =
   | 'INPUT_REJECTED'
   | 'INVALID_PARAMETER'
   | 'STATE_MISMATCH'
+  | 'PAGE_CONTEXT_MISMATCH'
   | 'POSTCONDITION_FAILED'
   | 'GOAL_NOT_SATISFIED'
   | 'WORKFLOW_GRAPH_INVALID'
@@ -60,6 +61,7 @@ export const WORKFLOW_FAILURE_TYPES: readonly WorkflowFailureType[] = [
   'INPUT_REJECTED',
   'INVALID_PARAMETER',
   'STATE_MISMATCH',
+  'PAGE_CONTEXT_MISMATCH',
   'POSTCONDITION_FAILED',
   'GOAL_NOT_SATISFIED',
   'WORKFLOW_GRAPH_INVALID',
@@ -103,6 +105,7 @@ const TYPE_POLICY: Record<WorkflowFailureType, FailureTypePolicy> = {
   INPUT_REJECTED: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
   INVALID_PARAMETER: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
   STATE_MISMATCH: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
+  PAGE_CONTEXT_MISMATCH: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
   POSTCONDITION_FAILED: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
   GOAL_NOT_SATISFIED: { retryable: false, autoRepairable: true, unsafeToRetry: true, humanGate: false },
   WORKFLOW_GRAPH_INVALID: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
@@ -142,6 +145,7 @@ export function allowsImmediateHumanTakeover(type: WorkflowFailureType): boolean
  */
 const MESSAGE_RULES: ReadonlyArray<{ pattern: RegExp; type: WorkflowFailureType }> = [
   { pattern: /SIDE_EFFECT_UNKNOWN|side effect.*unknown|副作用结果未知|结果未知.*拒绝自动重放/i, type: 'SIDE_EFFECT_UNKNOWN' },
+  { pattern: /\bWRONG_(ORIGIN|PAGE)\b|wrong (origin|page)|不是该工作流的目标站点|页面上下文不匹配/i, type: 'PAGE_CONTEXT_MISMATCH' },
   { pattern: /\bMFA\b|multi[\s-]?factor|2FA|两步验证|二次验证|验证码(?!.*captcha)/i, type: 'MFA_REQUIRED' },
   { pattern: /captcha|人机验证|安全验证/i, type: 'CAPTCHA_REQUIRED' },
   { pattern: /auth(entication)? required|login required|sign[\s-]?in required|需要登录|请先登录|未登录/i, type: 'AUTH_REQUIRED' },
@@ -204,6 +208,14 @@ export function classifyFailure(input: ClassifyFailureInput): ClassifiedFailure 
   if (input.code && isWorkflowFailureType(input.code)) {
     return { type: input.code, basis: 'structured-code', policy: TYPE_POLICY[input.code] }
   }
+  if (input.code) {
+    // A structured code from the older runner vocabulary (WRONG_ORIGIN,
+    // TARGET_NOT_FOUND …) still beats message-pattern guessing.
+    const legacy = fromVerificationFailure(input.code)
+    if (legacy !== 'UNKNOWN') {
+      return { type: legacy, basis: 'structured-code', policy: TYPE_POLICY[legacy] }
+    }
+  }
   // 2. Known error mapping (message patterns).
   const message = input.message ?? ''
   for (const rule of MESSAGE_RULES) {
@@ -264,7 +276,7 @@ export function fromVerificationFailure(code: string): WorkflowFailureType {
       return 'GOAL_NOT_SATISFIED'
     case 'WRONG_ORIGIN':
     case 'WRONG_PAGE':
-      return 'STATE_MISMATCH'
+      return 'PAGE_CONTEXT_MISMATCH'
     case 'SIDE_EFFECT_UNSAFE':
       return 'SIDE_EFFECT_UNKNOWN'
     case 'AUTH_REQUIRED':
@@ -296,6 +308,7 @@ export function fromFailureKind(kind: string): WorkflowFailureType {
     case 'page-state':
       return 'STATE_MISMATCH'
     case 'wrong-origin':
+      return 'PAGE_CONTEXT_MISMATCH'
     case 'navigation':
       return 'NAVIGATION_TIMEOUT'
     case 'side-effect':

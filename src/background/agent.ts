@@ -156,9 +156,13 @@ import {
   isAcceptableWorkflowName,
   normalizeGenerationGoalContract,
 } from '../lib/workflow/generation-goal'
+// Static, not dynamic: a dynamic `await import()` in the MV3 service worker
+// throws `window is not defined` (see CHANGELOG 0.6.3 get-secret fix).
+import { normalizeGoalSpec } from '../lib/workflow/goal'
 import {
   saveGenerationGoal,
   loadGenerationGoal,
+  loadConfirmedWorkflowName,
 } from '../lib/workflow/generation-goal-storage'
 import { findWorkflowOperators } from '../lib/workflow/operator-discovery'
 import {
@@ -383,7 +387,7 @@ export function buildSystemPrompt(options: {
         `ALL OPERATORS ARE AVAILABLE / 全部算子已可见: every \`wf_op_*\` category schema is advertised from the first round — pick the operator that fits the step, no declaration needed. ${CORE_OPERATOR_TOOL_NAMES.join(', ')} are the usual starters (navigate, click, fill-or-read a field, read text). If the payload must be slimmed mid-task, call \`use_operators\` with only the categories you still need — it REPLACES the current selection, so name everything you keep.`,
         'Target elements with `ref` from `snapshot_page` — the recorded node stores a durable selector; do not hand-write CSS.',
         'EVERY STEP IS REPLAYED: no exploratory detours — going back, retrying a different element after a miss, or re-opening a view all become nodes.',
-        'SCRIPTS ARE A LAST RESORT / 代码节点是最后手段: there is no raw-JS tool (`run_javascript` is unavailable here). Exhaust the operators first; when none can express the step, `load_tools({groups:["operators_escape"]})` then call `wf_op_javascript-code`, which runs the page script AND records the node (a bare expression or a `return` body). Carry a `justification` naming what you tried and why each operator fails, else the call is refused.',
+        'SCRIPTS ARE A LAST RESORT / 代码节点是最后手段: there is no raw-JS tool (`run_javascript` is unavailable here). Exhaust the operators first; when none can express the step, `load_tools({groups:["operators_escape"]})` then call `wf_op_javascript-code`, which runs the page script AND records the node (a bare expression or a `return` body). Carry a `justification` naming what you tried and why each operator fails, else the call is refused',
         'Operators are pre-approved: do not ask, and batch independent calls. Use `wf_op_wait-connections` when a step needs the page to settle — it really waits, never "just in case".',
         'When the task is done, END YOUR TURN. The panel shows a review card listing the recorded steps — do NOT call `compose_workflow` or any save tool.',
         // The mode paragraph carries the MECHANICS only. The domain knowledge —
@@ -1891,7 +1895,7 @@ function prepareWorkflowGoalTool(): WireTool {
     function: {
       name: PREPARE_WORKFLOW_GOAL_TOOL,
       description:
-        'Workflow-generation FIRST step. Define the goal before any wf_op_*: name (auto if omitted), '
+        'Workflow-generation FIRST step. Define the goal before any wf_op_*: name (auto-filled; the name the user confirmed at task start always wins), '
         + 'summary, machine-checkable successConditions, requiredCapabilities, optional constraints/expectedInputs. '
         + 'No wf_op_* runs until this exists. / 生成第一步：先建立目标契约。',
       parameters: {
@@ -3792,7 +3796,6 @@ export async function executeTool(
       const rawConditions = Array.isArray(args.successConditions)
         ? args.successConditions
         : []
-      const { normalizeGoalSpec } = await import('../lib/workflow/goal')
       const goalSpec = normalizeGoalSpec({
         summary,
         successConditions: rawConditions,
@@ -3809,12 +3812,17 @@ export async function executeTool(
       const requiredCapabilities = Array.isArray(args.requiredCapabilities)
         ? args.requiredCapabilities.filter((item): item is string => typeof item === 'string')
         : []
-      // Resolve a meaningful name: the supplied acceptable name, else a stable
+      // Resolve a meaningful name: the name the USER confirmed at task start
+      // is authoritative, then an acceptable model-supplied one, then a stable
       // auto-derived one. Never accept "new workflow" / "test" / random ids.
+      const confirmedName = await loadConfirmedWorkflowName(ctx.conversationId)
       const suppliedName = typeof args.name === 'string' ? args.name.trim() : ''
-      const name = suppliedName && isAcceptableWorkflowName(suppliedName)
-        ? suppliedName
-        : generateWorkflowName(summary)
+      const name =
+        confirmedName && isAcceptableWorkflowName(confirmedName)
+          ? confirmedName
+          : suppliedName && isAcceptableWorkflowName(suppliedName)
+            ? suppliedName
+            : generateWorkflowName(summary)
       const contract = normalizeGenerationGoalContract({
         version: 1,
         name,

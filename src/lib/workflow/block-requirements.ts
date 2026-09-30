@@ -15,7 +15,9 @@
  *      requirements become JSON-Schema `required`, so the model is told the
  *      contract in round one;
  *   3. the run gate (`lib/workflow/validation.validateWorkflowForRun`) — the
- *      same checks as ERRORS for every workflow, whatever path produced it.
+ *      same checks for every workflow, whatever path produced it, with
+ *      `'error'` findings blocking the run and `'warning'` findings only
+ *      reported (see {@link RequirementProblem.severity}).
  *
  * Modelled on `data-params.ts`: pure data + pure functions (no `chrome`), so
  * the background bridge, the tool catalogue and the tests all read the SAME
@@ -33,6 +35,14 @@ export interface RequirementProblem {
   key: string
   /** What to do about it, phrased as a fix, not a complaint. */
   message: string
+  /**
+   * `'error'` (the default) means the step cannot work as written, so the run
+   * gate refuses the workflow. `'warning'` marks a finding on a step that is
+   * still EXECUTABLE — reporting it is honest, blocking the whole run over it
+   * is not. The record gate refuses on either severity, because there the model
+   * is present and can fix the call.
+   */
+  severity?: 'error' | 'warning'
 }
 
 /** A parameter that must be filled (non-empty) for the step to work. */
@@ -55,8 +65,8 @@ interface RequirementSet {
   anyOf?: { keys: string[]; message: string }[]
   /** The block acts on a page element: `selector` or a valid `target` is mandatory. */
   locator?: string
-  /** Bespoke checks (enums, cross-parameter rules) — return a message when unmet. */
-  check?: (data: Record<string, unknown>) => string | null
+  /** Bespoke checks (enums, cross-parameter rules) — return a finding when unmet. */
+  check?: (data: Record<string, unknown>) => string | RequirementProblem | null
 }
 
 /** Is `value` something the step can work with? */
@@ -151,12 +161,22 @@ const REQUIREMENTS: Readonly<Record<string, RequirementSet>> = {
   link: { locator: LOCATOR_MESSAGE },
   'element-exists': { locator: LOCATOR_MESSAGE },
   'element-scroll': {
+    // A scroll that moves nothing is a NO-OP, not a broken step: the executor
+    // runs it, the page stays put and every later node still gets its turn.
+    // Warning severity on purpose — one useless node must not dead-end a
+    // workflow the user already saved (that refusal used to block the whole
+    // run, which costs far more than the no-op does).
     check: (data) =>
       hasLocator(data) ||
       Number(data['scrollX'] ?? 0) !== 0 ||
       Number(data['scrollY'] ?? 0) !== 0
         ? null
-        : '缺少滚动目标：请传元素定位（ref / selector / target），或给出非零的 scrollX / scrollY',
+        : {
+            key: 'parameters',
+            message:
+              '缺少滚动目标：请传元素定位（ref / selector / target），或给出非零的 scrollX / scrollY。本节点重放时不会滚动页面。',
+            severity: 'warning',
+          },
   },
   'get-text': {
     locator: LOCATOR_MESSAGE,
@@ -507,8 +527,10 @@ export function missingRequirements(
   }
 
   if (requirements.check) {
-    const message = requirements.check(data)
-    if (message) problems.push({ key: 'parameters', message })
+    const found = requirements.check(data)
+    if (found) {
+      problems.push(typeof found === 'string' ? { key: 'parameters', message: found } : found)
+    }
   }
 
   return problems
