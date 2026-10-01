@@ -143,4 +143,31 @@ describe('runUnattendedPrompt answer assembly', () => {
     expect(result.ok).toBe(false)
     expect(result.error).toMatch(/produced no answer/i)
   })
+
+  it('names the round cap as the cause when the loop stopped on its budget', async () => {
+    // A saved graph gave its AI nodes two tool rounds; both went to `load_tools`
+    // and `use_skill`, the loop emitted its cap notice, and the workflow step died
+    // as "AI 智能体: 运行失败" with no reason anywhere in the run log.
+    scriptTurn([
+      { type: 'tool.start', name: 'load_tools' },
+      { type: 'tool.result', summary: 'Loaded tools: skills' },
+      { type: 'tool.start', name: 'use_skill' },
+      { type: 'tool.result', summary: 'Using skill "xiaohongshu-viral-writer"' },
+      { type: 'status', text: 'Stopped after 2 tool rounds to avoid a loop.' },
+    ])
+    const result = await runUnattendedPrompt('do it', 'conv')
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/Stopped after 2 tool rounds/)
+    expect(result.error).toMatch(/tool-round budget/)
+  })
+
+  it('names the last tool call when the turn simply ended without an answer', async () => {
+    scriptTurn([
+      { type: 'tool.start', name: 'snapshot_page' },
+      { type: 'tool.result', summary: 'Declined by user' },
+    ])
+    const result = await runUnattendedPrompt('do it', 'conv', 'readonly')
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/snapshot_page/)
+  })
 })

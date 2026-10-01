@@ -165,6 +165,13 @@ const MESSAGE_RULES: ReadonlyArray<{ pattern: RegExp; type: WorkflowFailureType 
   { pattern: /navigation timeout|navigate.*timeout|NAVIGATION_TIMEOUT|导航超时/i, type: 'NAVIGATION_TIMEOUT' },
   { pattern: /page not ready|not ready|PAGE_NOT_READY|WAIT_CONDITION_UNMET|页面(未|没有)(就绪|加载完成)|尚未加载/i, type: 'PAGE_NOT_READY' },
   { pattern: /input rejected|rejected input|INPUT_REJECTED|输入被拒绝/i, type: 'INPUT_REJECTED' },
+  {
+    // An `ai-agent` block whose tool-round budget ran out before the answer round
+    // — the fix is a parameter on that node (a bigger budget, a shorter task), so
+    // it must enter the parameter-repair ladder rather than read as an unknown.
+    pattern: /stopped after \d+ tool rounds|tool-round budget|ran out of rounds/i,
+    type: 'INVALID_PARAMETER',
+  },
   { pattern: /invalid parameter|invalid argument|missing required|INVALID_PARAMETER|UNRESOLVED_INPUT|unresolved input|参数(无效|缺失|不合法)/i, type: 'INVALID_PARAMETER' },
   { pattern: /state mismatch|unexpected state|STATE_MISMATCH|状态(不一致|不匹配)/i, type: 'STATE_MISMATCH' },
 ]

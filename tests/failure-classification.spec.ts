@@ -31,6 +31,19 @@ describe('failure classification', () => {
     expect(classifyFailure({ message: 'element not visible' }).type).toBe('ELEMENT_NOT_VISIBLE')
   })
 
+  it('routes an exhausted AI round budget into parameter repair', () => {
+    // The message an `ai-agent` block now throws when its tool rounds ran out
+    // before the answer round. It is a node parameter, not a mystery, so the
+    // repair ladder must be allowed to propose a patch for it.
+    const result = classifyFailure({
+      message:
+        "AI 智能体: Stopped after 2 tool rounds to avoid a loop. The turn ran out of rounds before it produced a final answer — raise the block's tool-round budget or shorten its task.",
+    })
+    expect(result.type).toBe('INVALID_PARAMETER')
+    expect(result.basis).toBe('message-pattern')
+    expect(failureTypePolicy(result.type).autoRepairable).toBe(true)
+  })
+
   it('uses structured codes as the strongest basis', () => {
     const result = classifyFailure({
       message: 'something else',

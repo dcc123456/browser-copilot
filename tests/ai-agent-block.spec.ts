@@ -240,6 +240,27 @@ describe('ai-agent executor', () => {
     expect(ctx.variables['lastAIAgent']).toBe('clicked')
   })
 
+  it('raises a round budget too small to answer with', async () => {
+    // Two saved graphs shipped `maxToolRounds: 2`; each spent both rounds on
+    // `load_tools` + `use_skill`, so the loop stopped before any answer round and
+    // the node failed with "AI 智能体: 运行失败". A tool call and its answer are
+    // separate rounds, so a budget that leaves no room for the reply is a
+    // guaranteed failure — the floor is the fix, not a retry.
+    configuredSettings()
+    runUnattended.mockResolvedValue({ ok: true, answer: 'titled' })
+    const { ctx } = makeCtx()
+
+    await EXECUTORS['ai-agent']!({ prompt: 'Write a title', maxToolRounds: 2 }, ctx)
+
+    const [, , , options] = runUnattended.mock.calls[0] as [
+      string,
+      string,
+      string,
+      { maxToolRounds: number },
+    ]
+    expect(options.maxToolRounds).toBe(6)
+  })
+
   it('pins the nested unattended turn to the workflow window scope', async () => {
     configuredSettings()
     runUnattended.mockResolvedValue({ ok: true, answer: 'scoped' })

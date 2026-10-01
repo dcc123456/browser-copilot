@@ -66,6 +66,24 @@ export interface UnattendedOptions {
 }
 
 /**
+ * Why an answerless turn ended, in one line the caller can act on.
+ *
+ * The `ai-agent` block surfaces this string into the run history, and the repair
+ * engine classifies failures from it. Returning `undefined` here made every
+ * budget-exhausted node read as a bare "运行失败" with no cause attached, which
+ * is the difference between "raise the block's tool-round budget" and a shrug.
+ */
+function failureReason(stopNotice: string, transcript: readonly string[]): string {
+  if (stopNotice) {
+    return `${stopNotice} The turn ran out of rounds before it produced a final answer — raise the block's tool-round budget or shorten its task.`
+  }
+  const lastCall = [...transcript].reverse().find((line) => line.startsWith('→ '))
+  return lastCall
+    ? `The agent produced no answer (it ended after calling ${lastCall.slice(2)}).`
+    : 'The agent produced no answer.'
+}
+
+/**
  * @param prompt The user instruction.
  * @param conversationId Stable id for history/action recording.
  * @param modeOverride When set, forces the autonomy mode for this turn (used by
@@ -98,6 +116,12 @@ export async function runUnattendedPrompt(
      * reasoning junk in it would be filled into pages verbatim.
      */
     const finalChunks: string[] = []
+    /**
+     * The loop's own "why did you stop" line, when it stopped for a reason
+     * rather than finishing: the round cap. Kept so a turn that never answered
+     * can report the cause instead of a bare failure.
+     */
+    let stopNotice = ''
     const history: { role: string; content: string }[] = [{ role: 'user', content: prompt }]
 
     await runAgentTurn(history as never, {
@@ -120,6 +144,7 @@ export async function runUnattendedPrompt(
           options.onStep?.('result', `← ${message.summary}`)
         }
         if (message.type === 'status') {
+          if (/^Stopped after \d+ tool rounds/.test(message.text)) stopNotice = message.text
           options.onStep?.('status', message.text)
         }
         if (message.type === 'phase') {
@@ -173,7 +198,7 @@ export async function runUnattendedPrompt(
     return {
       ok: false,
       answer: trace || '(no answer)',
-      error: trace ? undefined : 'The agent produced no answer.',
+      error: failureReason(stopNotice, collected),
     }
   } catch (error) {
     // An AbortError is a deliberate cancellation, not a failure to report loudly.

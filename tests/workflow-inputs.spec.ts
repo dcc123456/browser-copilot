@@ -57,6 +57,24 @@ describe('workflowParametersOf', () => {
     expect(workflowParametersOf([{ name: 'b', type: 'wat' }])[0]!.type).toBe('string')
   })
 
+  it('reads a model-authored `default` as the declared default', () => {
+    // A generated graph's trigger row carried `{"name":"topic","default":"周末城市漫步·咖啡店探店"}`
+    // while the editor writes `defaultValue`. Reading only the canonical key left
+    // the input unseeded, so `{{topic}}` never resolved and the run died at the
+    // fill step with `UNRESOLVED_INPUT: {{topic}}` — after opening tabs and
+    // spending two AI-node model calls.
+    const params = workflowParametersOf([{ name: 'topic', type: 'string', default: '北京' }])
+    expect(params[0]?.defaultValue).toBe('北京')
+    expect(seedInputs(params)).toEqual({ topic: '北京' })
+  })
+
+  it('keeps the canonical defaultValue when a row carries both keys', () => {
+    const params = workflowParametersOf([
+      { name: 'topic', type: 'string', defaultValue: 'canonical', default: 'legacy' },
+    ])
+    expect(params[0]?.defaultValue).toBe('canonical')
+  })
+
   it('returns an empty list for a non-array', () => {
     expect(workflowParametersOf(undefined)).toEqual([])
     expect(workflowParametersOf({ name: 'x' })).toEqual([])

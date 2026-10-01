@@ -202,14 +202,17 @@ export const aiAgent: BlockExecutor = async (data, ctx) => {
   const useSnapshot = asBool(data['useSnapshot'], true)
   const variable = String(data['variableName'] ?? 'lastAIAgent') || 'lastAIAgent'
   /**
-   * Round budget. The floor is TWO, not one: a round that calls a tool spends
-   * itself on the call, and the answer arrives in the NEXT round. A block
-   * configured with `maxToolRounds: 1` (generation wrote exactly that in round
-   * 6 of the harness) could only ever observe, then the loop stopped — and the
-   * run stored the model's pre-tool narration as the note text it typed into
-   * the page.
+   * Round budget. The floor is SIX, not one or two: a round that calls a tool
+   * spends itself on the call, and the answer arrives in the NEXT round, so a
+   * budget that fits the number of tool calls the node actually makes ends the
+   * turn with no answer and the block fails. Generation wrote `maxToolRounds: 1`
+   * in round 6 of the harness (the run stored the model's pre-tool narration as
+   * the note text it typed into the page) and `maxToolRounds: 2` in two later
+   * graphs — both of which spent their budget on `load_tools` + `use_skill` and
+   * died with "Stopped after 2 tool rounds to avoid a loop." Two spare rounds
+   * cover a dynamic-tool load and one observation before the answer round.
    */
-  const rounds = Math.min(50, Math.max(2, Number(data['maxToolRounds'] ?? 20) || 20))
+  const rounds = Math.min(50, Math.max(6, Number(data['maxToolRounds'] ?? 20) || 20))
 
   /**
    * Config/runtime failures THROW, not emit-and-continue: the engine's
