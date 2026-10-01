@@ -215,8 +215,14 @@ function closeTabsArg(args: Record<string, unknown>): { closeTabsAtEnd?: boolean
  * gets it: a graph being saved is not the moment to fire its side effects, but a
  * replay someone asked for by id is theirs to decide about.
  */
-function commitCutoffArg(args: Record<string, unknown>): { commitCutoffOnly?: boolean } {
-  return args['commitCutoffOnly'] === true ? { commitCutoffOnly: true } : {}
+function commitCutoffArg(args: Record<string, unknown>): {
+  commitCutoffOnly?: boolean
+  allowDraftCommit?: boolean
+} {
+  return {
+    ...(args['commitCutoffOnly'] === true ? { commitCutoffOnly: true } : {}),
+    ...(args['allowDraftCommit'] === true ? { allowDraftCommit: true } : {}),
+  }
 }
 
 /**

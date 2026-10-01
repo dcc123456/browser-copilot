@@ -52,7 +52,13 @@ const MAX_ADVERTISED_PAYLOAD_CHARS = 20_000
  * map that supplies the values a PARAMETERISED workflow declares — a graph that
  * searches for `{{keyword}}` asks a human for it when Run is clicked, and an
  * unattended replay has nobody to ask, so without this entry it can only ever
- * fail `UNRESOLVED_INPUT`) → 29_100. All four are bridge-only entries
+ * fail `UNRESOLVED_INPUT`) → 29_100. `verify_workflow` and `repair_workflow` then
+ * each gained an `allowDraftCommit` argument (~340 chars apiece: the opt-in that fires
+ * the graph's OWN draft-save step — without it a 19-node draft workflow replays 17 of
+ * 18 steps and the draft is still not written, so the goal can never be certified;
+ * it is the one replay argument that writes into the user's account, which is why it
+ * is spelled out instead of folded into commitCutoffOnly) → 29_800. All four are
+ * bridge-only entries
  * (BRIDGE_ONLY_TOOLS): they are filtered out of every advertised surface, so
  * the round-1 budgets below are unchanged — this cap is the only place they
  * cost anything, and it is the catalog the local-agent bridge reads for
@@ -60,7 +66,7 @@ const MAX_ADVERTISED_PAYLOAD_CHARS = 20_000
  * The delegate schema stays OUT of the advertised budget above because the
  * group is only loaded via `load_tools({groups:['delegate']})`.
  */
-const MAX_CATALOG_CHARS = 29_100
+const MAX_CATALOG_CHARS = 29_800
 /**
  * Round 1 of a workflow conversation: the core tool set, EVERY operator
  * category (the round-1 default — see the file header), `use_operators`, the

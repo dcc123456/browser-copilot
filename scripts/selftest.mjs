@@ -55,6 +55,11 @@
  * and reports `partial` forever. With it, the steps that prepare a commit run; the
  * commit itself (an unsafe click / submit / key / script / webhook) still halts the
  * replay. Off by default, because the default is what protects an unattended run.
+ *
+ * `--allow-draft-commit` goes one step further and fires THAT last step: the graph's
+ * own commit, when its own words name a draft (草稿 / 暂存 / draft) and no outward
+ * verb. It writes into the user's account, so it is never implied by anything else —
+ * and a publish, a submit, a send or a payment still halts the run.
  */
 import process from 'node:process'
 import { spawn } from 'node:child_process'
@@ -73,7 +78,7 @@ const USAGE =
   'usage: node scripts/selftest.mjs [--goal <text>] [--workflow <id>] [--from build|reload|generate|verify]' +
   ' [--skip-build] [--skip-reload] [--ack-reload] [--skip-repair] [--keep-tabs] [--reattach <conversationId>]' +
   ' [--interval 10] [--timeout 60] [--budget 300] [--reload-wait 30] [--run-to-draft]' +
-  ' [--input name=value …] [--report <path>]'
+  ' [--allow-draft-commit] [--input name=value …] [--report <path>]'
 
 /**
  * The default goal is the scenario this pipeline was built for: draw an image
@@ -107,6 +112,12 @@ const options = {
   // for a draft workflow means it never writes anything and can only ever report
   // `partial`.
   runToDraft: false,
+  // OFF by default, and it is the one flag that WRITES INTO THE USER'S ACCOUNT: the
+  // graph's own commit step runs, provided its own words name a draft (草稿 / 暂存 /
+  // draft) and no outward verb. A publish, a submit, a send or a payment still stops
+  // the run, so this answers the question `--run-to-draft` cannot: whether the draft
+  // is actually written.
+  allowDraftCommit: false,
   // The values for the inputs the saved workflow DECLARES (its trigger
   // parameters). A generated graph that references {{topic}} is parameterised on
   // purpose, and the panel asks a human for the value when Run is clicked — an
@@ -133,6 +144,12 @@ while (argv.length > 0) {
   else if (arg === '--budget') options.budgetMs = Number(argv.shift()) * 1000
   else if (arg === '--reload-wait') options.reloadWaitMs = Number(argv.shift()) * 60_000
   else if (arg === '--run-to-draft') options.runToDraft = true
+  else if (arg === '--allow-draft-commit') {
+    options.allowDraftCommit = true
+    // The draft commit is a commit, so the run is already in commit-cutoff mode;
+    // requiring both flags would only let a caller ask for one and get silence.
+    options.runToDraft = true
+  }
   else if (arg === '--input') {
     const pair = String(argv.shift() ?? '')
     const eq = pair.indexOf('=')
@@ -383,6 +400,7 @@ async function main() {
                 budgetMs: options.budgetMs,
                 ...(options.closeTabs ? { closeTabsAtEnd: true } : {}),
                 ...(options.runToDraft ? { commitCutoffOnly: true } : {}),
+                ...(options.allowDraftCommit ? { allowDraftCommit: true } : {}),
                 ...(Object.keys(options.inputs).length > 0 ? { inputs: options.inputs } : {}),
               },
             }),
@@ -417,7 +435,11 @@ async function main() {
           trial.reason ??
           (goalUnmet
             ? goal.reason
-            : 'the replay ran without failing a step, and its goal held afterwards'),
+            : goal === undefined
+              ? // The coverage verdict must not read as a goal verdict: a graph with
+                // no goal contract proves its STEPS, and nothing about the task.
+                'the replay ran without failing a step; its goal was not judged (the graph carries no goal contract)'
+              : 'the replay ran without failing a step, and its goal held afterwards'),
         outcome: trial.outcome,
         verified: result.workflow?.verified === true,
         /** A full graph, no step failed: the only replay that proves the workflow. */
@@ -427,7 +449,13 @@ async function main() {
         goalLevel: goal?.level,
         goalReason: goal?.reason,
         /** Which cutoff the replay ran under, so a reader knows what was refused. */
-        cutoffMode: options.runToDraft ? 'commit-only' : 'first-unsafe',
+        cutoffMode: options.allowDraftCommit
+          ? 'draft-commit'
+          : options.runToDraft
+            ? 'commit-only'
+            : 'first-unsafe',
+        /** True when this run was allowed to write a draft into the user's account. */
+        draftCommitAllowed: options.allowDraftCommit === true,
         coveredSteps: trial.coveredSteps,
         totalSteps: trial.totalSteps,
         cutoffNodeId: trial.cutoffNodeId,
@@ -475,10 +503,15 @@ async function main() {
             : []
           : [`  closed ${result.tabsClosed} tab(s) this run opened`]),
         ...(options.runToDraft && trial.outcome === 'partial' && trial.cutoffNodeId
-          ? [
-              `  commit cutoff still stopped at ${trial.cutoffNodeId} — that step is an unsafe ` +
-                'click/submit/key, or the loaded build predates commitCutoffOnly (build + reload)',
-            ]
+          ? options.allowDraftCommit
+            ? [
+                `  the draft opt-in still stopped at ${trial.cutoffNodeId} — that commit is not worded ` +
+                  'as a draft save, or the loaded build predates allowDraftCommit (build + reload)',
+              ]
+            : [
+                `  commit cutoff still stopped at ${trial.cutoffNodeId} — that step is an unsafe ` +
+                  'click/submit/key, or the loaded build predates commitCutoffOnly (build + reload)',
+              ]
           : []),
         ...(replayFailed
           ? ['REPLAY FAILED — evidence is in the report file']
@@ -488,7 +521,12 @@ async function main() {
               ]
             : result.workflow?.verified
               ? ['PASS — the generated graph replays end to end and its goal held']
-              : options.runToDraft
+              : options.allowDraftCommit
+                ? [
+                    'RAN THROUGH ITS OWN DRAFT COMMIT — the graph’s save step executed, so a draft now ' +
+                      'sits in the account; a publish would still have stopped the run',
+                  ]
+                : options.runToDraft
                 ? [
                     'RAN TO THE COMMIT POINT — steps before it executed for real; the draft is written only if the graph reached its own save step',
                   ]

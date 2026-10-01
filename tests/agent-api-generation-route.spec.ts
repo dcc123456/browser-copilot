@@ -177,6 +177,22 @@ describe('verify_workflow over the local-agent bridge', () => {
 
     await call({ prompt: 'x', commitCutoffOnly: true })
     expect(startGenerationRun).toHaveBeenLastCalledWith({ prompt: 'x', scopeWindowId: 7 })
+
+    // The draft opt-in is read the same strict way: it writes into the user's
+    // account, so a truthy string is not a request for it.
+    await callVerify({ workflowId: 'wf-1', commitCutoffOnly: true, allowDraftCommit: true })
+    expect(startVerificationRun).toHaveBeenLastCalledWith({
+      workflowId: 'wf-1',
+      scopeWindowId: 7,
+      commitCutoffOnly: true,
+      allowDraftCommit: true,
+    })
+
+    await callVerify({ workflowId: 'wf-1', allowDraftCommit: 'yes' })
+    expect(startVerificationRun).toHaveBeenLastCalledWith({
+      workflowId: 'wf-1',
+      scopeWindowId: 7,
+    })
   })
 
   it('forwards the declared inputs, and drops a map it cannot read', async () => {

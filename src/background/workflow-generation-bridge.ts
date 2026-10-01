@@ -244,6 +244,19 @@ export interface UnattendedVerificationRequest {
    */
   commitCutoffOnly?: boolean
   /**
+   * Also fire the commit the workflow's OWN words describe as saving a draft.
+   *
+   * Implies {@link commitCutoffOnly}. Without it a draft-goal graph is stuck
+   * reporting `partial` forever: its last step is 「保存为草稿，不发布」, the
+   * classifier cannot tell that from 「点击发布」, and the one effect the goal asked
+   * for is the one the replay refuses to produce. With it that step runs — and
+   * only that shape of step. A publish, a submit, a send, a payment, a webhook, and
+   * any commit too vaguely written to prove it stays inside the composer still stop
+   * the run. The caller asks for this one explicitly because it writes into the
+   * user's account; nothing upstream defaults it.
+   */
+  allowDraftCommit?: boolean
+  /**
    * Values for the inputs the workflow DECLARES (its trigger `parameters`).
    *
    * A generated graph that searches for `{{keyword}}` is parameterised on
@@ -413,6 +426,7 @@ async function replayOnce(
     ...(req.scopeWindowId !== undefined ? { scopeWindowId: req.scopeWindowId } : {}),
     ...(req.signal ? { signal: req.signal } : {}),
     ...(req.commitCutoffOnly ? { commitCutoffOnly: true } : {}),
+    ...(req.allowDraftCommit ? { allowDraftCommit: true } : {}),
     ...(req.inputs ? { inputs: req.inputs } : {}),
   })
   const { workflow, record, result } = await trial(stored)

@@ -186,6 +186,53 @@ const COMMIT_BLOCK_IDS: ReadonlySet<string> = new Set([
 ])
 
 /**
+ * What makes a script a commit — read off the script's OWN body.
+ *
+ * A JS node is judged by its prose everywhere else, and prose is the weaker
+ * source here: the step that draws three poster canvases was classified as an
+ * unreversible commit because its capability-gap justification says 「没有任何算子能
+ * 新建一张画布」 (an unrelated 新建), and the step that types into the Quill editor
+ * says 存草稿 in its explanation. Neither line of code presses anything. The body is
+ * the thing that will actually run, so the body decides.
+ *
+ * Every term is a control press, a form submission, a navigation away, or a
+ * request that leaves the page — the four ways a replay can do something a user
+ * cannot take back. An event dispatch that is NOT one of those (a Quill work-around
+ * fires `new InputEvent('input')` to make the editor re-read its own state) is
+ * typing, which the `forms` fill this policy already allows.
+ */
+const JS_COMMIT_EVIDENCE =
+  /\.(?:click|submit|requestSubmit)\s*\(\s*\)|new\s+(?:Mouse|Pointer|Keyboard|Touch|HTMLEvents|UI)Event|window\.open\s*\(|(?:location|window\.location)\s*=|location\.(?:assign|replace)\s*\(|\bfetch\s*\(|\bnew\s+XMLHttpRequest\b|sendBeacon|\bnew\s+WebSocket\b|EventSource/
+
+/**
+ * What proves a script stays inside the page: it draws an artifact no declarative
+ * operator produces, or it writes text into a field.
+ *
+ * The exemption needs POSITIVE evidence, not just the absence of a `.click()` — a
+ * body that shows neither may be doing something no keyword list predicts (a
+ * `localStorage` cart write, a call into the site's own publish handler), and the
+ * cautious reading of an unparseable script is the one the whole policy uses:
+ * refuse. `javascript-code` is unsafe by default; only a body that says otherwise
+ * gets run.
+ */
+const JS_IN_PAGE_EVIDENCE =
+  /getContext\s*\(\s*['"`]2d|toDataURL|\.toBlob\s*\(|convertToBlob|\bdrawImage\b|createImageBitmap|\bImageBitmap\b|OffscreenCanvas|html2canvas|dom-to-image|image\/(?:png|jpe?g|webp|gif|bmp)|\.innerHTML\s*=|\.innerText\s*=|\.textContent\s*=|\.value\s*=\s*|insertText\s*\(|setText\s*\(|\.setContents\s*\(|execCommand\s*\(|dispatchEvent\s*\(\s*new\s+InputEvent/
+
+/**
+ * Does this script do nothing but draw an artifact or edit the page it runs on?
+ *
+ * Then it presses nothing and sends nothing out, which is the same class of
+ * side effect as the `forms` fill this policy lets through: a replay repeating it
+ * leaves the page exactly where it was.
+ */
+function isInPageScript(code: unknown): boolean {
+  if (typeof code === 'string' && code !== '' && !JS_COMMIT_EVIDENCE.test(code)) {
+    return JS_IN_PAGE_EVIDENCE.test(code)
+  }
+  return false
+}
+
+/**
  * Is this the step that commits — the one a second run cannot take back?
  *
  * The LABEL is scanned whenever the step has no contract prose to read. A `click`
@@ -203,6 +250,8 @@ export function isCommitNode(node: WorkflowNode): boolean {
   // A `forms` block commits only when it SUBMITS; filling a field does not.
   if (blockId === 'forms')
     return String(node.data?.['action'] ?? 'fill') === 'submit' || readsLikeACommit
+  // A script commits unless its own body proves it only draws or edits the page.
+  if (blockId === 'javascript-code') return !isInPageScript(node.data?.['code'])
   return COMMIT_BLOCK_IDS.has(blockId)
 }
 
@@ -220,6 +269,58 @@ export function isCommitNode(node: WorkflowNode): boolean {
  */
 export function commitCutoffNodeId(workflow: Workflow): string | undefined {
   return executionPath(workflow).find((node) => isCommitNode(node))?.id
+}
+
+/** The words that name a draft: the work is kept, not sent. */
+const DRAFT_COMMIT_PATTERN = /(草稿|暂存|存稿|draft)/i
+
+/**
+ * The verbs that take the work OUT of the composer.
+ *
+ * Narrower on purpose than the reliability keyword test: that one asks "could
+ * this step be unreversible?", and 删除 / 创建 / 登录 qualify. This one asks "is this
+ * the press the user kept for themselves?", and deleting a duplicate cover image
+ * on the way to a draft is not.
+ */
+const OUTWARD_COMMIT_PATTERN =
+  /(发布|发表|提交|发送|下单|支付|付款|购买|publish|\bpost\b|submit|send|checkout|purchase|place[\s-]?order)/i
+
+/** A clause that FORBIDS a verb is not asking for it — 「保存为草稿，不发布」. */
+const NEGATED_COMMIT_VERB =
+  /(?:绝不|决不|不可|不能|不要|不用|无法|禁止|未|别|勿|不|\bnot\b|\bnever\b|\bwithout\b)[\s,，、]{0,6}?(?:点击|按下|单击|click|press)?[\s,，、]{0,4}?(?:发布|发表|提交|发送|下单|支付|付款|购买|publish|\bpost\b|submit|send|checkout|purchase)/gi
+
+/**
+ * Is this commit the step the goal ASKED for — writing a draft — rather than the
+ * step it forbids — sending the work out?
+ *
+ * The prohibition is stripped before the verbs are compared: the ONE sentence that
+ * documents a draft save also names the publish it declines, and a keyword scan
+ * cannot tell 「点击发布，保存草稿」 from 「保存为草稿，不发布」. What is left after the
+ * forbidden verbs go must positively name a draft and name nothing outward — a
+ * step whose prose is too tangled to prove it stays inside the composer is not
+ * executed, which is the direction this policy always errs in.
+ */
+export function isDraftSaveNode(node: WorkflowNode): boolean {
+  const prose = (intentOf(node) || node.label || '').replace(NEGATED_COMMIT_VERB, ' ')
+  if (!DRAFT_COMMIT_PATTERN.test(prose)) return false
+  return !OUTWARD_COMMIT_PATTERN.test(prose)
+}
+
+/**
+ * The cutoff for a caller that granted this workflow its OWN commit — and only a
+ * draft-shaped one.
+ *
+ * `--run-to-draft` / `commitCutoffOnly` proves every step UP TO the press of the
+ * commit control; a graph whose last step is 「保存为草稿」 therefore ends `partial`
+ * and can never certify the goal, because the one effect the goal asked for never
+ * happened. This lets exactly that step run: a commit whose own words name a draft
+ * and no outward verb. Every other refusal stands — a publish, a submit, a send, a
+ * payment, a webhook, and any commit too vaguely written to prove it stays inside
+ * the composer. A run under this flag can write a draft into the user's account, so
+ * it is opt-in at every layer between the caller and the engine.
+ */
+export function draftCommitCutoffNodeId(workflow: Workflow): string | undefined {
+  return executionPath(workflow).find((node) => isCommitNode(node) && !isDraftSaveNode(node))?.id
 }
 
 /**

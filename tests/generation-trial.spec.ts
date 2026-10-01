@@ -20,8 +20,10 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   TRIAL_BUDGET_MS,
   commitCutoffNodeId,
+  draftCommitCutoffNodeId,
   executionPath,
   isCommitNode,
+  isDraftSaveNode,
   isUnsafeNode,
   normalizeTrialRun,
   skippedTrialRecord,
@@ -292,6 +294,93 @@ describe('commit cutoff (the run-to-draft policy)', () => {
     expect(isCommitNode(read)).toBe(false)
     expect(commitCutoffNodeId(chain([read, readStep()]))).toBeUndefined()
   })
+
+  it('judges a script by its body, not by the prose around it', () => {
+    // The real graph: the step that draws three poster canvases documents why no
+    // declarative operator can do it — and that justification says 「没有任何算子能
+    // 新建一张画布」. The keyword test reads 新建 and calls it a commit, so a
+    // draft-goal replay stopped at step 9 and could never reach the draft-save.
+    // The body draws pixels and presses nothing, so the body wins.
+    const canvas = node('javascript-code', {
+      code: "const c = document.createElement('canvas');const x = c.getContext('2d');x.fillText('hi',0,0);return c.toDataURL('image/jpeg', 0.9);",
+      description: '声明式算子无法生成并输出图片：没有任何声明式算子能新建一张画布并输出图片数据',
+    })
+    // The Quill work-around: dispatching an input event is how a script types
+    // where the native `forms` block cannot reach — a fill, and a fill is allowed.
+    const typing = node('javascript-code', {
+      code: "ed.innerHTML = html;ed.dispatchEvent(new InputEvent('input', { bubbles: true }));return { done };",
+      description: '只有脚本能新建一个输入事件，把 AI 正文写进 Quill 富文本编辑器',
+    })
+    expect(isCommitNode(canvas)).toBe(false)
+    expect(isCommitNode(typing)).toBe(false)
+    // The default policy still refuses every script; this loosening is only what
+    // the caller that accepted the preparing side effects opted into.
+    expect(trialCutoffNodeId(chain([canvas, typing]))).toBe(canvas.id)
+    expect(
+      commitCutoffNodeId(chain([uploadStep(), canvas, typing, fillBodyStep()])),
+    ).toBeUndefined()
+  })
+
+  it('still stops at a script that presses, submits, navigates or sends', () => {
+    for (const code of [
+      "document.querySelector('#publish-btn').click()",
+      'form.submit()',
+      "el.dispatchEvent(new MouseEvent('click', { bubbles: true }))",
+      "window.location = '/note/publish'",
+      "location.assign('/publish')",
+      "fetch('/api/publish', { method: 'POST' })",
+      'navigator.sendBeacon("/hook", data)',
+      "new WebSocket('wss://x')",
+      // No in-page evidence at all: an unreadable body stays the commit it was.
+      'x',
+    ]) {
+      const step = node('javascript-code', {
+        code,
+        __reliability: { intent: '把这篇笔记发布出去' },
+      })
+      expect(isCommitNode(step)).toBe(true)
+      expect(commitCutoffNodeId(chain([readStep(), step]))).toBe(step.id)
+    }
+  })
+
+  it('tells the commit the goal asked for from the one it forbade', () => {
+    // The real graph ends on this step, and the keyword test calls it unsafe
+    // because the sentence that saves the draft also names the publish it
+    // declines. Splitting into clauses and dropping the forbidden ones is what
+    // lets an opted-in run WRITE the draft instead of stopping in front of it.
+    const saveDraft = node('event-click', {
+      selector: '#draft',
+      __reliability: { intent: '把已填好标题、正文与 3 张配图的图文笔记保存为草稿，不发布' },
+    })
+    const publish = node('event-click', {
+      selector: '#publish',
+      __reliability: { intent: '点击发布按钮，把笔记发布出去，不要重复点击' },
+    })
+    // No positive draft wording: a commit nobody can prove stays inside the
+    // composer is not fired.
+    const opaque = node('event-click', {
+      selector: '#save',
+      __reliability: { intent: '点击提交按钮，把这篇笔记保存下来' },
+    })
+    expect(isDraftSaveNode(saveDraft)).toBe(true)
+    expect(isDraftSaveNode(publish)).toBe(false)
+    expect(isDraftSaveNode(opaque)).toBe(false)
+    // A step that saves AND sends is not a draft save: the prohibition only
+    // excuses the verb it is attached to, and this 发布 has none.
+    const both = node('event-click', {
+      selector: '#both',
+      __reliability: { intent: '先把笔记保存为草稿，再发布出去' },
+    })
+    expect(isDraftSaveNode(both)).toBe(false)
+    expect(
+      draftCommitCutoffNodeId(chain([uploadStep(), fillBodyStep(), saveDraft, readStep()])),
+    ).toBeUndefined()
+    expect(draftCommitCutoffNodeId(chain([saveDraft, publish]))).toBe(publish.id)
+    expect(draftCommitCutoffNodeId(chain([fillBodyStep(), both]))).toBe(both.id)
+    expect(draftCommitCutoffNodeId(chain([fillBodyStep(), opaque]))).toBe(opaque.id)
+    // Both are commits — the refusals the two modes share are the same list.
+    expect(isCommitNode(saveDraft)).toBe(true)
+  })
 })
 
 describe('trialRecordOf', () => {
@@ -463,6 +552,50 @@ describe('runGenerationTrial', () => {
       coveredSteps: 2,
     })
     expect(trialCertifies(out.record)).toBe(false)
+  })
+
+  it('runs the draft commit itself under the account-writing opt-in', async () => {
+    // The whole point of the flag: `--run-to-draft` proves 17 of 18 steps and the
+    // draft is still not there, because the 18th step presses 存草稿. Given the
+    // opt-in, nothing is withheld — the graph has no step that is not either a
+    // read, a preparation, or the draft the goal asked for.
+    const saveDraft = node('event-click', {
+      selector: '#draft',
+      __reliability: { intent: '把填好的图文笔记保存为草稿，不发布' },
+    })
+    const wf = chain([uploadStep(), fillBodyStep(), saveDraft])
+    const seen: Parameters<TrialExecute>[1][] = []
+    const execute = vi.fn(async (_workflow: Workflow, options: Parameters<TrialExecute>[1]) => {
+      seen.push(options)
+      return resultOf({
+        outcome: 'ok',
+        completedNodeIds: wf.drawflow.nodes.slice(1).map((n) => n.id),
+      })
+    })
+    const out = await runGenerationTrial(wf, { execute, allowDraftCommit: true })
+    expect(seen[0]?.stopBefore).toBeUndefined()
+    expect(out.record).toMatchObject({ outcome: 'passed', full: true, coveredSteps: 3 })
+    expect(trialCertifies(out.record)).toBe(true)
+  })
+
+  it('still stops a draft-commit run in front of a publish', async () => {
+    const publish = node('event-click', {
+      selector: '#publish',
+      __reliability: { intent: '点击发布，把笔记发布出去' },
+    })
+    const wf = chain([uploadStep(), fillBodyStep(), publish])
+    const seen: Parameters<TrialExecute>[1][] = []
+    const execute = vi.fn(async (_workflow: Workflow, options: Parameters<TrialExecute>[1]) => {
+      seen.push(options)
+      return resultOf({
+        outcome: 'ok',
+        completedNodeIds: [wf.drawflow.nodes[1]!.id, wf.drawflow.nodes[2]!.id],
+        stoppedBefore: publish.id,
+      })
+    })
+    const out = await runGenerationTrial(wf, { execute, allowDraftCommit: true })
+    expect(seen[0]?.stopBefore).toBe(publish.id)
+    expect(out.record).toMatchObject({ outcome: 'partial', cutoffNodeId: publish.id })
   })
 
   it('does not count the trigger as a step it proved', async () => {

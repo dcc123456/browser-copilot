@@ -24,6 +24,7 @@ import { applySelfHeal } from '../../../lib/workflow/self-heal'
 import { rememberFailedRun } from '../auto-repair/failure-snapshot'
 import {
   commitCutoffNodeId,
+  draftCommitCutoffNodeId,
   executionPath,
   isTriggerNode,
   skippedTrialRecord,
@@ -90,6 +91,16 @@ export interface GenerationTrialDeps {
    * that sends, a posted script, a webhook. 发布 stays unreachable.
    */
   commitCutoffOnly?: boolean
+  /**
+   * Also run the graph's OWN draft-save commit.
+   *
+   * Implies {@link commitCutoffOnly}. Off by default, because the step it lets
+   * through writes into the user's account: a draft box entry, a note left in the
+   * composer. It only fires for a commit whose own words name a draft (草稿 / 暂存 /
+   * draft) and no outward verb, so a publish, a submit, a send or a payment still
+   * stops the run — the line the caller cannot cross on the user's behalf.
+   */
+  allowDraftCommit?: boolean
 }
 
 /**
@@ -131,9 +142,11 @@ export async function runGenerationTrial(
     return { workflow, record: skippedTrialRecord('disabled by settings', at) }
   }
   const totalSteps = executionPath(workflow).length
-  const cutoffNodeId = deps.commitCutoffOnly
-    ? commitCutoffNodeId(workflow)
-    : trialCutoffNodeId(workflow)
+  const cutoffNodeId = deps.allowDraftCommit
+    ? draftCommitCutoffNodeId(workflow)
+    : deps.commitCutoffOnly
+      ? commitCutoffNodeId(workflow)
+      : trialCutoffNodeId(workflow)
   if (trialHasNothingToProve(workflow, cutoffNodeId ?? null)) {
     return {
       workflow,
@@ -294,6 +307,8 @@ export function createTrialRunner(deps: {
   signal?: AbortSignal
   /** See {@link GenerationTrialDeps.commitCutoffOnly}. */
   commitCutoffOnly?: boolean
+  /** See {@link GenerationTrialDeps.allowDraftCommit}. */
+  allowDraftCommit?: boolean
   /** See {@link GenerationTrialDeps.inputs}. */
   inputs?: Record<string, unknown>
 }): TrialRunner {
@@ -307,6 +322,7 @@ export function createTrialRunner(deps: {
       ...(deps.budgetMs !== undefined ? { budgetMs: deps.budgetMs } : {}),
       ...(deps.signal ? { signal: deps.signal } : {}),
       ...(deps.commitCutoffOnly ? { commitCutoffOnly: true } : {}),
+      ...(deps.allowDraftCommit ? { allowDraftCommit: true, commitCutoffOnly: true } : {}),
       ...(deps.inputs ? { inputs: deps.inputs } : {}),
     })
 }

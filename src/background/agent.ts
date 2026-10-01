@@ -1288,6 +1288,15 @@ export const TOOLS: WireTool[] = [
               'click/submit/key still stops the run. Default false. / 同时放行“为提交做准备”的步骤' +
               '（上传、填写、存草稿）；真正的提交动作仍会拦下。默认关闭。',
           },
+          allowDraftCommit: {
+            type: 'boolean',
+            description:
+              'With commitCutoffOnly: also fire the graph’s own commit when its own words name a ' +
+              'DRAFT (草稿/暂存/draft) and no outward verb (发布/提交/发送/支付). Writes into the ' +
+              'user’s account, so ask first. A publish still stops the run. Default false. / ' +
+              '配合 commitCutoffOnly：连工作流自己的“存草稿”提交也执行（步骤措辞明确是草稿且不含' +
+              '发布/提交/发送/支付）。这会在用户账号里写入内容，需先征得同意；发布仍会拦下。默认关闭。',
+          },
           inputs: {
             type: 'object',
             description:
@@ -1322,6 +1331,15 @@ export const TOOLS: WireTool[] = [
               'Also run the steps that only PREPARE a commit (upload, fill, save-draft); an unsafe ' +
               'click/submit/key still stops the run. Default false. / 同时放行“为提交做准备”的步骤' +
               '（上传、填写、存草稿）；真正的提交动作仍会拦下。默认关闭。',
+          },
+          allowDraftCommit: {
+            type: 'boolean',
+            description:
+              'With commitCutoffOnly: also fire the graph’s own commit when its own words name a ' +
+              'DRAFT (草稿/暂存/draft) and no outward verb (发布/提交/发送/支付). Writes into the ' +
+              'user’s account, so ask first. A publish still stops the run. Default false. / ' +
+              '配合 commitCutoffOnly：连工作流自己的“存草稿”提交也执行（步骤措辞明确是草稿且不含' +
+              '发布/提交/发送/支付）。这会在用户账号里写入内容，需先征得同意；发布仍会拦下。默认关闭。',
           },
           inputs: {
             type: 'object',
