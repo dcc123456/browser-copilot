@@ -51,10 +51,13 @@ export function inferIdempotency(
   if (UNSAFE_BLOCKS.has(blockId)) return 'unsafe'
   const verb = String(data['action'] ?? data['event'] ?? '').toLowerCase()
   if (UNSAFE_VERBS.has(verb)) return 'unsafe'
-  // forms defaults to submit when no action given.
-  if (blockId === 'forms' && (!verb || UNSAFE_VERBS.has(verb))) {
-    return verb === '' ? 'unsafe' : UNSAFE_VERBS.has(verb) ? 'unsafe' : 'safe'
-  }
+  // A `forms` node with no `action` is a FILL, not a submit — that is what the
+  // executor sends (`{action:'fill'}`, and `idempotencyOf` defaults the same
+  // way). This inference used to read the missing verb as a submit, and because
+  // what it infers it also WRITES, the contradiction stuck: an explicit
+  // `idempotency: 'unsafe'` landed on a title field that is harmless to refill,
+  // and the trial stopped there instead of proving the rest of the graph.
+  if (blockId === 'forms') return 'conditional'
   return 'safe'
 }
 

@@ -2,6 +2,7 @@
  * Goal Verification — the three-level (L1/L2/L3) certification engine.
  */
 import { goalSpecOf } from '../../lib/workflow/reliability'
+import { provesLandedEffect } from '../../lib/workflow/repair-verification'
 import { nodeGoalContractOf, type WorkflowNodeGoalContract } from '../../lib/workflow/node-goal-contract'
 import type { Workflow, WorkflowNode } from '../../lib/workflow/types'
 import { evaluateCondition, type ConditionPageProbe } from './condition-runtime'
@@ -72,13 +73,19 @@ export async function verifyWorkflowGoal(workflow: Workflow, run: ExecuteWorkflo
   const l2AllHeld = nodeReports.every((report) => report.criteria.every((c) => c.satisfied) && report.preconditions.every((c) => c.satisfied))
   const goalSpec = goalSpecOf(workflow)
   const l3Conditions: ConditionEvidence[] = []
+  // A URL row says where the run IS, not what it DID, and a graph that opens the
+  // publish page satisfies `/publish` before its first step. S0 already refuses
+  // that as evidence (see `provesLandedEffect`); L3 has to use the same standard
+  // or a replay that clicked nothing certifies its own goal.
+  let l3EffectProven = false
   if (goalSpec) {
     for (const condition of goalSpec.successConditions) {
       const outcome = await evaluateCondition(condition, { variables, probe })
       l3Conditions.push({ description: outcome.description, satisfied: outcome.satisfied, ...(outcome.detail ? { detail: outcome.detail } : {}) })
+      if (outcome.satisfied && provesLandedEffect(condition)) l3EffectProven = true
     }
   }
-  const l3AllHeld = !!goalSpec && l3Conditions.length > 0 && l3Conditions.every((c) => c.satisfied)
+  const l3AllHeld = !!goalSpec && l3Conditions.length > 0 && l3Conditions.every((c) => c.satisfied) && l3EffectProven
   // Soft postconditions (business-outcome predictions the generator wrote): a
   // miss never failed the step, but a run whose declared outcomes were not
   // observed cannot be certified. This is D3 — signal, not gate.
@@ -94,9 +101,11 @@ export async function verifyWorkflowGoal(workflow: Workflow, run: ExecuteWorkflo
   const reason = !l1Pass
     ? 'L1 failed: one or more nodes did not execute.'
     : !l3AllHeld
-      ? goalSpec
-        ? 'L3 failed: the workflow goal success conditions did not all hold.'
-        : 'L3 failed: the workflow has no goal contract to verify.'
+      ? !goalSpec
+        ? 'L3 failed: the workflow has no goal contract to verify.'
+        : l3Evaluated && l3Conditions.every((c) => c.satisfied)
+          ? 'L3 failed: every success condition holds from the page the workflow opens (a URL row), so none of them proves the goal landed.'
+          : 'L3 failed: the workflow goal success conditions did not all hold.'
       : !l2AllHeld
         ? 'L2 failed: a node goal contract did not hold.'
         : softUnconfirmed.length > 0

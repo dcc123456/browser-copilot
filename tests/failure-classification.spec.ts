@@ -53,6 +53,19 @@ describe('failure classification', () => {
     expect(fromFailureKind('readiness')).toBe('PAGE_NOT_READY')
   })
 
+  it('reads a missing declared input as a parameter, not as an unknown graph defect', () => {
+    // Round 8: `UNRESOLVED_INPUT: {{topic}}` classified `UNKNOWN`, so the repair
+    // ladder treated a value the CALLER never supplied as a locator defect and
+    // spent its whole attempt budget on it. Both routes have to say the same
+    // thing: the snapshot classifies from the trace's code, the trial record from
+    // the message text.
+    expect(fromVerificationFailure('UNRESOLVED_INPUT')).toBe('INVALID_PARAMETER')
+    const result = classifyFailure({ message: 'UNRESOLVED_INPUT: {{topic}}' })
+    expect(result.type).toBe('INVALID_PARAMETER')
+    expect(result.basis).toBe('message-pattern')
+    expect(failureTypePolicy(result.type).retryable).toBe(false)
+  })
+
   it('classifies the page-context guard as PAGE_CONTEXT_MISMATCH', () => {
     const guardMessage =
       'WRONG_ORIGIN: 当前页面（https://creator.xiaohongshu.com）不是该工作流的目标站点（https://github.com）'

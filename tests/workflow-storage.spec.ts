@@ -115,6 +115,10 @@ describe('workflow storage', () => {
           provenance: 'chat-generate',
           reliabilityMode: 'generated-strict',
           generationOriginUrl: 'https://shop.example/cart',
+          pageContext: {
+            origin: 'https://shop.example',
+            additionalOrigins: ['https://github.com'],
+          },
           goalSpec: {
             summary: 'Submit the order',
             successConditions: [{ kind: 'urlContains', value: '/orders' }],
@@ -141,6 +145,10 @@ describe('workflow storage', () => {
       provenance: 'chat-generate',
       reliabilityMode: 'generated-strict',
       generationOriginUrl: 'https://shop.example/cart',
+      pageContext: {
+        origin: 'https://shop.example',
+        additionalOrigins: ['https://github.com'],
+      },
       saveWarnings: ['缺少导航锚点'],
       certificationStatus: 'unverified',
       takeoverOnRun: true,

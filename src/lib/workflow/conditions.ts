@@ -17,27 +17,27 @@
  *
  * @module lib/workflow/conditions
  */
-import type { SemanticLocator } from './element-fingerprint'
-import { describeSemanticLocator } from './element-fingerprint'
+import type { ConditionTarget } from './element-fingerprint'
+import { describeConditionTarget } from './element-fingerprint'
 
 /** One checkable fact. All kinds are deterministic except none — the LLM is not a condition. */
 export type WorkflowCondition =
   | { kind: 'urlContains'; value: string }
   | { kind: 'urlMatches'; value: string }
-  | { kind: 'elementExists'; target: SemanticLocator }
-  | { kind: 'elementVisible'; target: SemanticLocator }
-  | { kind: 'elementEnabled'; target: SemanticLocator }
+  | { kind: 'elementExists'; target: ConditionTarget }
+  | { kind: 'elementVisible'; target: ConditionTarget }
+  | { kind: 'elementEnabled'; target: ConditionTarget }
   | {
       kind: 'elementText'
-      target: SemanticLocator
+      target: ConditionTarget
       expected: string
       /** Default `exact`: a goal condition must not pass on a substring. */
       match?: 'exact' | 'contains'
     }
-  | { kind: 'attributeEquals'; target: SemanticLocator; name: string; expected: string }
+  | { kind: 'attributeEquals'; target: ConditionTarget; name: string; expected: string }
   | { kind: 'variableEquals'; name: string; expected: unknown }
   | { kind: 'variableExists'; name: string }
-  | { kind: 'count'; target: SemanticLocator; op: 'eq' | 'gte' | 'lte'; value: number }
+  | { kind: 'count'; target: ConditionTarget; op: 'eq' | 'gte' | 'lte'; value: number }
   /**
    * The four CHANGING conditions: what the step did to the page, rather than
    * what is on it. Each needs an observation from BEFORE the step (see
@@ -48,9 +48,9 @@ export type WorkflowCondition =
    * disappeared", "the list grew by one", "the dialog closed".
    */
   | { kind: 'urlChanged' }
-  | { kind: 'elementGone'; target: SemanticLocator }
-  | { kind: 'elementAppeared'; target: SemanticLocator }
-  | { kind: 'countIncreased'; target: SemanticLocator }
+  | { kind: 'elementGone'; target: ConditionTarget }
+  | { kind: 'elementAppeared'; target: ConditionTarget }
+  | { kind: 'countIncreased'; target: ConditionTarget }
 
 /** The `kind` whitelist — the guard used on every untrusted condition. */
 const CONDITION_KINDS: readonly string[] = [
@@ -72,6 +72,13 @@ const CONDITION_KINDS: readonly string[] = [
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+/** A recorded `TargetSpec`: something the observation layer can search for. */
+function hasResolvableSpec(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  if (typeof value['how'] !== 'string' || !value['how'].trim()) return false
+  return typeof value['value'] === 'string' && !!value['value'].trim()
 }
 
 /** Structural check of a raw (untrusted) condition object. */
@@ -96,6 +103,10 @@ export function isWorkflowCondition(value: unknown): value is WorkflowCondition 
     if (!isRecord(target)) return false
     // At least one identity field must be present — an empty locator matches
     // everything, which is exactly the bug class the contract prevents.
+    // A recorded rich `Target` (`{ primary, fallbacks }`, the shape generation
+    // actually emits) counts too: its specs are resolvable by the observer even
+    // though they carry no locator fields, and refusing them silently deleted
+    // whole success criteria — an unverified step reported as a passed one.
     const hasIdentity =
       typeof target['role'] === 'string' ||
       typeof target['accessibleName'] === 'string' ||
@@ -103,7 +114,9 @@ export function isWorkflowCondition(value: unknown): value is WorkflowCondition 
       typeof target['label'] === 'string' ||
       typeof target['placeholder'] === 'string' ||
       typeof target['testId'] === 'string' ||
-      isRecord(target['stableAttributes'])
+      isRecord(target['stableAttributes']) ||
+      hasResolvableSpec(target['primary']) ||
+      (Array.isArray(target['fallbacks']) && target['fallbacks'].some(hasResolvableSpec))
     if (!hasIdentity) return false
   }
   if (kind === 'elementText') {
@@ -131,10 +144,33 @@ export function isWorkflowCondition(value: unknown): value is WorkflowCondition 
   return true
 }
 
+/**
+ * Unwrap a model-authored condition value into a LIST, judging only its shape.
+ *
+ * The list is JSON from a generation model, and three shapes arrive in practice:
+ * a proper array, a single bare condition, and a one-element array serialized
+ * as an object (`{item: {…}}`, `{"0": {…}}`). The last two would otherwise be
+ * dropped without a trace, taking a step's whole claim about what it achieved
+ * with them. Members are returned unvalidated — pair with
+ * {@link isWorkflowCondition} or a looser check, per consumer.
+ */
+export function conditionListValue(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value
+  if (!isRecord(value)) return []
+  if (typeof value['kind'] === 'string') return [value]
+  const entries = Object.values(value)
+  if (
+    entries.length > 0 &&
+    entries.every((entry) => isRecord(entry) && typeof entry['kind'] === 'string')
+  ) {
+    return entries
+  }
+  return []
+}
+
 /** Narrow an untrusted list to valid conditions, dropping the rest. */
 export function workflowConditionsOf(value: unknown): WorkflowCondition[] {
-  if (!Array.isArray(value)) return []
-  return value.filter(isWorkflowCondition)
+  return conditionListValue(value).filter(isWorkflowCondition)
 }
 
 /** One-line human-readable form, for validator messages and run logs. */
@@ -145,17 +181,17 @@ export function describeCondition(condition: WorkflowCondition): string {
     case 'urlMatches':
       return `URL 匹配 "${condition.value}"`
     case 'elementExists':
-      return `元素存在 ${describeSemanticLocator(condition.target)}`
+      return `元素存在 ${describeConditionTarget(condition.target)}`
     case 'elementVisible':
-      return `元素可见 ${describeSemanticLocator(condition.target)}`
+      return `元素可见 ${describeConditionTarget(condition.target)}`
     case 'elementEnabled':
-      return `元素可点 ${describeSemanticLocator(condition.target)}`
+      return `元素可点 ${describeConditionTarget(condition.target)}`
     case 'elementText':
       return `文本${
         condition.match === 'exact' ? '等于' : '包含'
-      } "${condition.expected}"（${describeSemanticLocator(condition.target)}）`
+      } "${condition.expected}"（${describeConditionTarget(condition.target)}）`
     case 'attributeEquals':
-      return `属性 ${condition.name}="${condition.expected}"（${describeSemanticLocator(
+      return `属性 ${condition.name}="${condition.expected}"（${describeConditionTarget(
         condition.target,
       )}）`
     case 'variableEquals':
@@ -163,17 +199,17 @@ export function describeCondition(condition: WorkflowCondition): string {
     case 'variableExists':
       return `变量 ${condition.name} 存在`
     case 'count':
-      return `元素数量 ${condition.op} ${condition.value}（${describeSemanticLocator(
+      return `元素数量 ${condition.op} ${condition.value}（${describeConditionTarget(
         condition.target,
       )}）`
     case 'urlChanged':
       return 'URL 已离开原页面'
     case 'elementGone':
-      return `元素已消失 ${describeSemanticLocator(condition.target)}`
+      return `元素已消失 ${describeConditionTarget(condition.target)}`
     case 'elementAppeared':
-      return `元素新出现 ${describeSemanticLocator(condition.target)}`
+      return `元素新出现 ${describeConditionTarget(condition.target)}`
     case 'countIncreased':
-      return `元素数量增加（${describeSemanticLocator(condition.target)}）`
+      return `元素数量增加（${describeConditionTarget(condition.target)}）`
   }
 }
 
@@ -225,7 +261,7 @@ export function conditionRequiresBaseline(condition: WorkflowCondition): boolean
  * can be found again after it. Key order is sorted: two writes of the same
  * locator (one from the model, one from a rehydration) must collide.
  */
-export function conditionLocatorKey(target: SemanticLocator): string {
+export function conditionLocatorKey(target: ConditionTarget): string {
   const entries = Object.keys(target)
     .sort()
     .map((key) => `${key}=${JSON.stringify((target as Record<string, unknown>)[key]) ?? ''}`)

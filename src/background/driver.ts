@@ -23,7 +23,13 @@ import type { Op, OpResult, PageSnapshot, SnapshotElement, Target } from '../lib
 import { runOp, runExecJs, runWorkflowJs } from '../inpage/kernel'
 import { activeTab } from './page'
 import { getLastInjectableTab } from './last-tab'
-import { clickClosedShadow, snapshotClosedShadow, type CdpSession } from './cdp-shadow'
+import {
+  clickClosedShadow,
+  probeClosedShadow,
+  snapshotClosedShadow,
+  type CdpSession,
+  type ShadowProbe,
+} from './cdp-shadow'
 import { fillViaCdp } from './cdp-typing'
 
 /**
@@ -452,8 +458,9 @@ export async function execOnActiveTab(
   }
 
   // Actionability pre-check: don't click into a moving/hidden/disabled
-  // element — wait for readiness first (budget-capped, fail-open). Skipped
-  // for closed-shadow targets, which take the CDP path below anyway.
+  // element — wait for readiness first (budget-capped, fail-open). Closed-shadow
+  // targets are included: their probe is answered over CDP below, so the wait
+  // sees the real rendered state instead of the kernel's empty answer.
   if (typeof tab.id === 'number' && PRECHECK_OPS.has(op.action) && op.target) {
     await waitForActionable(tab.id, op.target, signal, op.resolvePolicy)
   }
@@ -461,6 +468,9 @@ export async function execOnActiveTab(
   if (typeof tab.id === 'number' && targetIsClosedShadow(op.target)) {
     if (op.action === 'click' || op.action === 'hover') {
       return runClosedShadowAction(tab.id, tab.url ?? '', op)
+    }
+    if (op.action === 'element_exists' || op.action === 'count_elements' || op.action === 'actionability') {
+      return runClosedShadowProbe(tab.id, tab.url ?? '', op)
     }
     return {
       ok: false,
@@ -659,6 +669,68 @@ async function runClosedShadowAction(tabId: number, frameUrl: string, op: Op): P
 }
 
 /**
+ * Read-only probe of a closed-shadow target (`element_exists` / `count_elements`
+ * / `actionability`), answered through CDP because the in-page kernel cannot see
+ * inside a closed root at all. Without this a `present`/`visible`/`enabled`
+ * readiness wait on such an element times out no matter what the page does —
+ * while the very next step is a click the same element happily accepts.
+ *
+ * The pierced tree is top-frame only (same limitation as
+ * {@link runClosedShadowAction}); a shadowed element in a sub-frame is not
+ * reachable through this channel.
+ */
+async function runClosedShadowProbe(tabId: number, frameUrl: string, op: Op): Promise<OpResult> {
+  const base: OpResult = { ok: false, found: false, frameUrl, isTopFrame: true }
+  if (!chrome.debugger) {
+    return {
+      ...base,
+      error: '该元素位于封闭 Shadow DOM 中，读取其状态需要调试器（chrome.debugger）权限；当前环境不可用。',
+    }
+  }
+  let probe: ShadowProbe
+  try {
+    probe = await withCdpSession(tabId, (session) =>
+      probeClosedShadow(session, op.target as Target),
+    )
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return { ...base, error: `封闭 Shadow DOM 状态读取失败：${message}` }
+  }
+  if (op.action === 'actionability') {
+    return {
+      ...base,
+      ok: true,
+      found: probe.state !== 'missing',
+      note: `封闭 Shadow DOM：${probe.state}`,
+      data: {
+        state: probe.state,
+        visible: probe.visible,
+        enabled: probe.enabled,
+        occluded: probe.occluded,
+        rect: probe.rect,
+      },
+    }
+  }
+  if (op.action === 'count_elements') {
+    // Same payload as the kernel: a count is an answer, not a match verdict.
+    return {
+      ...base,
+      ok: true,
+      found: true,
+      note: `count=${probe.matchCount}`,
+      data: probe.matchCount,
+    }
+  }
+  return {
+    ...base,
+    ok: true,
+    found: probe.matchCount > 0,
+    note: probe.matchCount > 0 ? `存在 ${probe.matchCount} 个匹配元素` : '未找到匹配元素',
+    data: probe.matchCount,
+  }
+}
+
+/**
  * Translate a thrown evaluation error into a clear message, recognizing CSP
  * blocks (the page forbids `unsafe-eval`).
  */
@@ -767,12 +839,14 @@ function withCdpSession<T>(tabId: number, fn: (session: CdpSession) => Promise<T
   }
   const prev = cdpQueues.get(tabId) ?? Promise.resolve()
   const next = prev.then(run, run)
-  cdpQueues.set(
-    tabId,
-    next.finally(() => {
-      if (cdpQueues.get(tabId) === next) cdpQueues.delete(tabId)
-    }),
-  )
+  const queued = next.finally(() => {
+    if (cdpQueues.get(tabId) === queued) cdpQueues.delete(tabId)
+  })
+  // The caller awaits `next`; the queue link only exists to serialize ops, so
+  // its own rejection has nowhere to go. Swallow it here, or every failed CDP
+  // op surfaces as an unhandled rejection in the service worker.
+  queued.catch(() => {})
+  cdpQueues.set(tabId, queued)
   return next as Promise<T>
 }
 

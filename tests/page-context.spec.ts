@@ -9,6 +9,7 @@ import {
   navigationDestinationOf,
   originOfUrl,
   pageContextOf,
+  recordedPageContext,
 } from '../src/lib/workflow/page-context'
 import { ELEMENT_OP_BLOCKS } from '../src/lib/workflow/generated-validation'
 
@@ -103,5 +104,93 @@ describe('guard coverage', () => {
       expect(ELEMENT_OP_BLOCKS.has(blockId)).toBe(true)
     }
     expect(originOfUrl('https://shop.test/x?y=1')).toBe('https://shop.test')
+  })
+})
+
+/**
+ * A workflow is single-anchored but not single-SITE. The regression this pins:
+ * a goal that read a README on github.com and then published on
+ * creator.xiaohongshu.com had its OWN first step refused in 6ms
+ * (WRONG_ORIGIN), so its pre-save verification never executed a step.
+ */
+describe('cross-site workflows', () => {
+  const crossSite = {
+    origin: 'https://creator.xiaohongshu.com',
+    additionalOrigins: ['https://github.com'],
+    pathnamePattern: '/new/*',
+  }
+
+  it('accepts every origin the session really acted on', () => {
+    expect(checkPageContext(crossSite, { url: 'https://github.com/o/r' })).toEqual({ ok: true })
+    expect(checkPageContext(crossSite, { url: 'https://creator.xiaohongshu.com/new/home' })).toEqual({
+      ok: true,
+    })
+  })
+
+  it('still refuses a site outside the recorded set, and names the whole set', () => {
+    const verdict = checkPageContext(crossSite, { url: 'https://evil.test/o/r' })
+    expect(!verdict.ok && verdict.code).toBe('WRONG_ORIGIN')
+    expect(!verdict.ok && verdict.message).toContain('https://creator.xiaohongshu.com')
+    expect(!verdict.ok && verdict.message).toContain('https://github.com')
+  })
+
+  it("does not enforce the primary site's path pattern on a secondary origin", () => {
+    // The pattern describes the anchor site's page; github has no recorded path.
+    expect(checkPageContext(crossSite, { url: 'https://github.com/anything' })).toEqual({ ok: true })
+    expect(
+      checkPageContext(crossSite, { url: 'https://creator.xiaohongshu.com/settings' }).ok,
+    ).toBe(false)
+  })
+
+  it('normalizes a stored set: parseable, deduped, primary never repeated', () => {
+    expect(
+      pageContextOf({
+        settings: {
+          pageContext: {
+            origin: 'https://b.test',
+            additionalOrigins: [
+              'https://c.test/x',
+              'https://b.test/other',
+              'https://c.test/y',
+              'not a url',
+              42,
+            ],
+          },
+        },
+      }),
+    ).toEqual({ origin: 'https://b.test', additionalOrigins: ['https://c.test'] })
+  })
+
+  it('omits the field entirely for a single-site workflow', () => {
+    expect(pageContextOf({ settings: { pageContext: { origin: 'https://b.test' } } })).toEqual({
+      origin: 'https://b.test',
+    })
+  })
+})
+
+describe('recordedPageContext', () => {
+  it('states the anchor plus the other sites the session acted on', () => {
+    expect(
+      recordedPageContext('https://github.com/o/r', [
+        'https://github.com',
+        'https://creator.xiaohongshu.com',
+      ]),
+    ).toEqual({
+      origin: 'https://github.com',
+      additionalOrigins: ['https://creator.xiaohongshu.com'],
+    })
+  })
+
+  it('returns nothing when there is no second site to state', () => {
+    // A single site is already covered by deriving from generationOriginUrl;
+    // writing a fingerprint would freeze an anchor the repair may still move.
+    expect(recordedPageContext('https://github.com/o/r', ['https://github.com'])).toBeUndefined()
+    expect(recordedPageContext('https://github.com/o/r', undefined)).toBeUndefined()
+    expect(recordedPageContext('https://github.com/o/r', [])).toBeUndefined()
+  })
+
+  it('never invents an anchor', () => {
+    expect(recordedPageContext(undefined, ['https://a.test'])).toBeUndefined()
+    expect(recordedPageContext('not a url', ['https://a.test'])).toBeUndefined()
   })
 })

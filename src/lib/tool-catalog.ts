@@ -198,6 +198,30 @@ export const TOOL_META: ToolMeta[] = [
     labelKey: 'toolOperator',
     warningKey: 'toolOperatorWarn',
   },
+  {
+    name: 'generate_workflow',
+    category: 'data',
+    labelKey: 'toolOperator',
+    warningKey: 'toolOperatorWarn',
+  },
+  {
+    name: 'verify_workflow',
+    category: 'data',
+    labelKey: 'toolOperator',
+    warningKey: 'toolOperatorWarn',
+  },
+  {
+    name: 'repair_workflow',
+    category: 'data',
+    labelKey: 'toolRepairWorkflow',
+    warningKey: 'toolRepairWorkflowWarn',
+  },
+  {
+    name: 'reload_extension',
+    category: 'data',
+    labelKey: 'toolReloadExtension',
+    warningKey: 'toolReloadExtensionWarn',
+  },
 ]
 
 export const TOOL_META_BY_NAME = new Map(TOOL_META.map((meta) => [meta.name, meta]))

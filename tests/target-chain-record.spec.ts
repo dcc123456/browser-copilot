@@ -204,11 +204,13 @@ describe('targetSpecsFromSemantic', () => {
 
 describe('auto-complete reliability contracts', () => {
   it('derives an observable postcondition from a role locator', () => {
-    // `forms` with no verb defaults to submit ⇒ unsafe ⇒ a postcondition.
+    // A real submit ⇒ unsafe ⇒ a postcondition. (`forms` with no verb is a FILL,
+    // which the executor proves, and a fill is not unsafe.)
     const nodes = [
       {
         data: {
           blockId: 'forms',
+          action: 'submit',
           value: 'x',
           target: targetOf({ how: 'role', value: 'Pay', role: 'button' }),
         },
@@ -225,7 +227,7 @@ describe('auto-complete reliability contracts', () => {
     // A snapshot `ref` is conversation-scoped: gone by replay. And the old
     // last-resort fabricated an attribute no page carries, so the node failed a
     // goal check it could never have passed.
-    const nodes = [{ data: { blockId: 'forms', value: 'x', ref: 'e12' } }]
+    const nodes = [{ data: { blockId: 'forms', action: 'submit', value: 'x', ref: 'e12' } }]
     autoCompleteReliability(nodes)
     const spec = nodeReliabilityOf(nodes[0] as never)
     expect(spec?.idempotency).toBe('unsafe')

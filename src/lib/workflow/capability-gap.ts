@@ -85,7 +85,11 @@ export interface CapabilityGapRecord {
  * Deliberately narrow: an intent qualifies only when it BOTH produces
  * something AND names an image artifact, and never when a native operator
  * already covers it (a page or canvas capture is `take-screenshot`'s job;
- * captcha solving stays a human gate).
+ * captcha solving stays a human gate). A script body naming a pixel API is
+ * accepted as the same fact ({@link SanctionedJsGap.codeEvidence}), because the
+ * description is written while the model is still looking at the page and often
+ * names the button it means to reach ("点击图片上传入口") rather than the
+ * artifact the script produces.
  */
 interface SanctionedJsGap {
   id: string
@@ -93,6 +97,8 @@ interface SanctionedJsGap {
   production: RegExp
   /** The artifact no operator can produce. */
   artifact: RegExp
+  /** Script-body APIs whose only purpose is drawing or exporting pixels. */
+  codeEvidence?: RegExp
   /** Intents that look like production but have a native operator. */
   excluded: RegExp
   missingCapability: string
@@ -103,10 +109,17 @@ interface SanctionedJsGap {
 const SANCTIONED_JS_GAPS: readonly SanctionedJsGap[] = [
   {
     id: 'image-artifact',
+    // No bare `画`: it is also inside 计划 / 规划, which would sanction any
+    // plan-shaped step that happens to mention an image.
     production:
-      /(生成|绘制|渲染|合成|制作|导出|转成|draw|render|\bgenerat\w*\b|\bcreat\w*\b|\bproduce\b|toDataURL)/i,
+      /(生成|绘制|渲染|合成|制作|导出|转成|输出|拼接|画出|画到|画在|画一|draw|render|\bgenerat\w*\b|\bcreat\w*\b|\bproduce\b|toDataURL)/i,
     artifact:
-      /(图片|图像|海报|图表|二维码|canvas|png|jpe?g|webp|bmp|data\s?url|\bimage\b|\bchart\b|qr ?code)/i,
+      /(图片|图像|海报|图表|二维码|插画|插图|长图|头像|图标|缩略图|壁纸|配图|表情包|画布|封面图|canvas|png|jpe?g|webp|bmp|data\s?url|\bimage\b|\bchart\b|qr ?code|poster|thumbnail|artwork|illustration|avatar|\bicon\b)/i,
+    // `new Image()` / `createObjectURL` / `DataTransfer` on their own only MOVE
+    // bytes, so they are not evidence; every pattern here draws or encodes
+    // pixels, which no declarative operator can do.
+    codeEvidence:
+      /(toDataURL|\.toBlob\(|convertToBlob|getContext\(\s*['"`]2d['"`]|new\s+OffscreenCanvas|\bdrawImage\b|createImageBitmap|\bImageBitmap\b|html2canvas|dom-to-image|image\/(?:png|jpe?g|webp|gif|bmp))/i,
     excluded: /(截图|屏幕快照|screenshot|验证码|captcha|mfa|人机验证)/i,
     missingCapability: 'produce an image artifact (canvas drawing / data URL)',
     whyInsufficient:
@@ -119,20 +132,29 @@ const SANCTIONED_JS_GAPS: readonly SanctionedJsGap[] = [
 /**
  * The documented gap for an intent the policy already knows no operator can
  * serve, or undefined when the caller must document it itself.
+ *
+ * `scriptCode` is the node's own script, judged as a second source of the same
+ * fact: a body that encodes pixels is producing an image artifact whatever the
+ * description says. Exclusions still veto, so a captcha or screenshot step is
+ * refused no matter what its script contains.
  */
-export function sanctionedJsGap(stepIntent: string): CapabilityGapRecord | undefined {
+export function sanctionedJsGap(
+  stepIntent: string,
+  scriptCode?: string,
+): CapabilityGapRecord | undefined {
   const intent = stepIntent.trim()
-  if (!intent) return undefined
+  const code = typeof scriptCode === 'string' ? scriptCode : ''
+  if (!intent && !code) return undefined
   for (const gap of SANCTIONED_JS_GAPS) {
     // No /g flag on purpose: RegExp.test on a global regex is stateful.
     if (gap.excluded.test(intent)) continue
-    if (gap.production.test(intent) && gap.artifact.test(intent)) {
-      return {
-        missingCapability: `${gap.missingCapability} [${gap.id}]`,
-        triedOperators: ['declarative ladder: none produces an image artifact'],
-        whyInsufficient: gap.whyInsufficient,
-        expectedResult: gap.expectedResult,
-      }
+    const described = gap.production.test(intent) && gap.artifact.test(intent)
+    if (!described && !(code && gap.codeEvidence?.test(code))) continue
+    return {
+      missingCapability: `${gap.missingCapability} [${gap.id}]`,
+      triedOperators: ['declarative ladder: none produces an image artifact'],
+      whyInsufficient: gap.whyInsufficient,
+      expectedResult: gap.expectedResult,
     }
   }
   return undefined
@@ -149,10 +171,12 @@ export function sanctionedJsGap(stepIntent: string): CapabilityGapRecord | undef
 export function evaluateCapabilityGap(input: {
   /** The natural-language intent of the step. */
   stepIntent: string
+  /** The node's script body, when the caller has it. */
+  scriptCode?: string
   /** Optional documented gap. */
   gap?: Partial<CapabilityGapRecord>
 }): CapabilityGapDecision {
-  const sanctioned = sanctionedJsGap(input.stepIntent)
+  const sanctioned = sanctionedJsGap(input.stepIntent, input.scriptCode)
   if (sanctioned) return { allowed: true, capabilityGap: sanctioned }
 
   const native = NATIVE_INTENT_MAP.find((entry) => entry.test.test(input.stepIntent))
@@ -230,11 +254,21 @@ export function evaluateJsPermission(input: {
   /** Full tool-call arguments (carries capabilityGap and/or justification). */
   args: Record<string, unknown>
 }): JsPermission {
-  const sanctioned = sanctionedJsGap(input.stepIntent)
+  // The script body is the second half of the sanctioned-gap test: a node that
+  // encodes pixels is producing an image artifact even when its description
+  // reads like a click ("点击图片上传入口"), which is how image steps used to be
+  // refused as native intents.
+  const scriptCode = typeof input.args['code'] === 'string' ? (input.args['code'] as string) : ''
+  const sanctioned = sanctionedJsGap(input.stepIntent, scriptCode)
   if (sanctioned) {
+    // Permission is already settled by policy; a gap the caller documented
+    // itself is still the better text — it names what THIS node produces, and
+    // it is what lands on the canvas card.
+    const gap =
+      validateGapRecord(input.args['capabilityGap'] as Partial<CapabilityGapRecord>) ?? sanctioned
     return {
       allowed: true,
-      justification: `${sanctioned.missingCapability}: ${sanctioned.whyInsufficient} (tried: ${sanctioned.triedOperators.join(', ')})`,
+      justification: `${gap.missingCapability}: ${gap.whyInsufficient} (tried: ${gap.triedOperators.join(', ')})`,
     }
   }
 
@@ -252,6 +286,7 @@ export function evaluateJsPermission(input: {
 
   const decision = evaluateCapabilityGap({
     stepIntent: input.stepIntent,
+    ...(scriptCode ? { scriptCode } : {}),
     gap: input.args['capabilityGap'] as Parameters<typeof evaluateCapabilityGap>[0]['gap'],
   })
   if (decision.allowed) {

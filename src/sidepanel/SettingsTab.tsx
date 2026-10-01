@@ -2107,6 +2107,21 @@ export default function SettingsTab({ onLocaleChange }: Props) {
           </label>
           <p className="hint error">{t.settingsLocalAgentWarning}</p>
 
+          <label className="checkbox">
+            <input
+              checked={settings.localAgentAllowReload}
+              onChange={(event) =>
+                void mutate({
+                  type: 'settings.set',
+                  patch: { localAgentAllowReload: event.target.checked },
+                })
+              }
+              type="checkbox"
+            />
+            {t.settingsLocalAgentAllowReload}
+          </label>
+          <p className="hint">{t.settingsLocalAgentAllowReloadHint}</p>
+
           <div className="mt-3 rounded-lg border border-border bg-panel-2 p-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">

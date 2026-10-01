@@ -34,6 +34,7 @@ import type { ReadinessSpec } from './readiness'
 import { normalizeReadinessSpec } from './readiness'
 import type { SemanticLocator } from './element-fingerprint'
 import type { Workflow, WorkflowNode } from './types'
+import { BLOCK_CATALOG } from './blocks/catalog'
 
 /** Which execution regime a workflow runs under. */
 export type WorkflowReliabilityMode = 'compat' | 'generated-strict'
@@ -202,7 +203,11 @@ export function nodeReliabilityOf(node: WorkflowNode): NodeReliabilitySpec | und
   if (!isRecord(raw)) return undefined
   const spec: NodeReliabilitySpec = {}
   if (typeof raw['intent'] === 'string' && raw['intent'].trim()) spec.intent = raw['intent']
-  if (raw['idempotency'] === 'safe' || raw['idempotency'] === 'conditional' || raw['idempotency'] === 'unsafe') {
+  if (
+    raw['idempotency'] === 'safe' ||
+    raw['idempotency'] === 'conditional' ||
+    raw['idempotency'] === 'unsafe'
+  ) {
     spec.idempotency = raw['idempotency']
   }
   const preconditions = workflowConditionsOf(raw['preconditions'])
@@ -301,6 +306,50 @@ const UNSAFE_BLOCK_IDS: ReadonlySet<string> = new Set(['webhook', 'feishu-messag
 const UNSAFE_INTENT_PATTERN =
   /(登录|登入|提交|发送|创建|新建|删除|支付|付款|发布|下单|购买|下单|确认订单|注销|login|log[\s-]?in|sign[\s-]?in|submit|send|create|delete|remove|pay|payment|checkout|publish|purchase|place[\s-]?order)/i
 
+/**
+ * Only the hyphenated block ids are scrubbed. A single-word id (`forms`, `note`,
+ * `link`, `clipboard`) is ordinary English that a real intent may well contain,
+ * and none of them hide an unsafe keyword; the multi-segment ones are operator
+ * names, which only ever appear in prose ABOUT the toolset.
+ */
+const BLOCK_NAME_PATTERN = (() => {
+  const names = BLOCK_CATALOG.map((entry) => entry.id)
+    .filter((id) => /^[a-z0-9]+(?:-[a-z0-9]+)+$/.test(id))
+    .sort((a, b) => b.length - a.length)
+  return names.length > 0 ? new RegExp(names.join('|'), 'gi') : null
+})()
+
+/**
+ * The keyword test reads prose the model wrote about a step, and that prose names
+ * OTHER operators: an escape-hatch justification reads
+ * `(tried: take-screenshot, save-assets, create-element, …)`. `create` inside
+ * `create-element` is not a step that creates anything — and it classified the
+ * node that DRAWS AN IMAGE as unsafe, so the trial stopped before the graph's own
+ * core step and a 10-step workflow came back having proved 2 steps.
+ *
+ * Scrubbing only ever DELETES text, so it cannot manufacture an unsafe match: a
+ * step that really publishes still reads `点击发布` / `press Enter to submit` and
+ * is still upgraded. What it gives up is an intent written ONLY as an operator
+ * name, which is not a sentence about the site.
+ */
+function intentForKeywordScan(intent: string): string {
+  return BLOCK_NAME_PATTERN ? intent.replace(BLOCK_NAME_PATTERN, ' ') : intent
+}
+
+/**
+ * Does this prose describe an action that cannot be taken back?
+ *
+ * The keyword test the reliability contract runs on a step's intent, exposed for
+ * callers that have nothing else to read. A node generated without a contract
+ * carries its meaning in its LABEL — 「点击「发布」按钮」 and no intent field — and
+ * a caller deciding whether to re-fire that click cannot afford to see a
+ * harmless block id and assume the step is harmless.
+ */
+export function hasUnsafeIntent(text: string): boolean {
+  if (!text) return false
+  return UNSAFE_INTENT_PATTERN.test(intentForKeywordScan(text))
+}
+
 /** The node's declared intent, from the contract (falls back to `description`). */
 export function intentOf(node: WorkflowNode): string {
   const spec = nodeReliabilityOf(node)
@@ -336,7 +385,7 @@ export function idempotencyOf(
       position: { x: 0, y: 0 },
       data,
     })
-    return UNSAFE_INTENT_PATTERN.test(intent) ? 'unsafe' : 'conditional'
+    return hasUnsafeIntent(intent) ? 'unsafe' : 'conditional'
   }
   return 'conditional'
 }

@@ -10,6 +10,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { crx } from '@crxjs/vite-plugin'
 import manifest from './manifest.config'
+import { sourceFingerprintSync } from './scripts/build-stamp.mjs'
 
 /**
  * Build variants driven by `mode`:
@@ -26,6 +27,7 @@ import manifest from './manifest.config'
 export default defineConfig(({ mode }) => {
   const ocrEnabled = mode !== 'no-ocr'
   const outDir = ocrEnabled ? 'dist' : 'dist-no-ocr'
+  const sourceStamp = sourceFingerprintSync()
   return {
     plugins: [
       react(),
@@ -51,6 +53,9 @@ export default defineConfig(({ mode }) => {
     ],
     define: {
       __OCR__: JSON.stringify(ocrEnabled),
+      // The hash of the sources, reported by the running extension over the
+      // local bridge so a self-test can tell which build the browser loaded.
+      __BUILD_STAMP__: JSON.stringify(sourceStamp),
     },
     build: {
       target: 'chrome116',

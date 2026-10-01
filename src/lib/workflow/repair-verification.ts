@@ -69,6 +69,24 @@ export interface RepairVerificationResult {
 // --- Condition aggregation ---------------------------------------------------
 
 /**
+ * Can this condition, read true on the live page, prove that the FAILED step's
+ * effect landed?
+ *
+ * A URL says where the run IS, not what it DID: the publish page keeps
+ * `/publish/` in its address whether or not the title ever committed, so a goal
+ * whose success row is `urlContains /publish/` holds before the workflow starts.
+ * Answering S0 with that closes the entire ladder on the first attempt — every
+ * strategy "passes" without changing anything, which is the repair equivalent of
+ * reading the absence of evidence as success. `terminalStateConditions` are
+ * exempt because reaching a DIFFERENT address is exactly the documented proof
+ * that an action already landed elsewhere; this predicate is applied to the
+ * success row only, at the S0 call site.
+ */
+export function provesLandedEffect(condition: WorkflowCondition): boolean {
+  return condition.kind !== 'urlContains' && condition.kind !== 'urlMatches'
+}
+
+/**
  * Aggregate a layer's conditions.
  *
  * `satisfied` answers "did anything contradict the claim"; `observed` answers
@@ -116,11 +134,18 @@ export async function checkGoalAlreadySatisfied(
 }> {
   const goal = goalSpecOf(workflow)
   if (!goal) return { satisfied: false, evaluated: [] }
-  const success = await evaluateAll(deps, goal.successConditions)
+  // Only conditions that can prove the FAILED STEP's effect landed. A URL
+  // condition holds before the step, while it and after it — the publish page is
+  // still `/publish/publish` when the title never committed — so accepting one
+  // here lets the whole ladder short-circuit on the first attempt and report a
+  // repair that changed nothing. Terminal-state conditions keep their own
+  // meaning below (a URL the page reaches ONLY after the action).
+  const evidence = goal.successConditions.filter(provesLandedEffect)
+  const success = await evaluateAll(deps, evidence)
   if (success.satisfied && success.observed) {
     return {
       satisfied: true,
-      evaluated: [...goal.successConditions],
+      evaluated: [...evidence],
       note: 'goal success conditions already hold',
     }
   }

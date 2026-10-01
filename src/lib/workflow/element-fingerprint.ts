@@ -48,6 +48,15 @@ export interface SemanticLocator {
   }
 }
 
+/**
+ * What a condition or probe may be pointed at: the structured identity a
+ * workflow records, OR the node's own rich `Target` — which is what a generation
+ * model actually writes into `condition.target`. Observers accept both (see
+ * {@link conditionTargetSpecs}); identity-only matching would read a clickable
+ * element as permanently absent.
+ */
+export type ConditionTarget = SemanticLocator | import('../ops').Target
+
 /** What a live element looks like when fingerprinted. */
 export interface ElementFingerprint {
   tagName: string
@@ -205,6 +214,99 @@ export function semanticLocatorFromTarget(target: unknown): SemanticLocator | un
     }
   }
   return undefined
+}
+
+/**
+ * The element NAME a condition target expresses, for editors and logs. A
+ * `role`/`text`/`cdp-shadow` spec's value IS the accessible name; a positional
+ * chain has none, so it reports the label it was recorded under.
+ */
+export function conditionTargetName(target: unknown): string {
+  if (!target || typeof target !== 'object') return ''
+  const raw = target as {
+    label?: unknown
+    primary?: import('../ops').TargetSpec
+  } & SemanticLocator
+  const specs = [raw.primary]
+  for (const spec of specs) {
+    if (spec && typeof spec === 'object' && (spec.how === 'role' || spec.how === 'text' || spec.how === 'cdp-shadow')) {
+      if (typeof spec.value === 'string' && spec.value.trim()) return spec.value.trim()
+    }
+  }
+  if (typeof raw.label === 'string' && raw.label.trim()) return raw.label.trim()
+  return raw.accessibleName ?? raw.text ?? ''
+}
+
+/**
+ * The same target shape with its element name replaced — what a "which element"
+ * field writes. A rich chain keeps its other specs: an editor changes the name,
+ * it does not re-derive the whole locator.
+ */
+export function withConditionTargetName(
+  target: ConditionTarget,
+  name: string,
+): ConditionTarget {
+  const primary = (target as { primary?: import('../ops').TargetSpec }).primary
+  if (primary && typeof primary === 'object' && typeof primary.how === 'string') {
+    const named = primary.how === 'role' || primary.how === 'text' || primary.how === 'cdp-shadow'
+    if (named) return { ...(target as import('../ops').Target), primary: { ...primary, value: name } }
+    return { ...(target as import('../ops').Target), label: name }
+  }
+  return { ...target, accessibleName: name }
+}
+
+/**
+ * The spec chain an OBSERVER should use for a recorded condition target.
+ *
+ * `WorkflowCondition.target` is typed as a {@link SemanticLocator}, but the
+ * graphs a generation model produces put the node's own rich `Target`
+ * (`{ primary, fallbacks }`) there. Read as a locator that object carries no
+ * identity fields at all, so {@link targetSpecsFromSemantic} returns nothing and
+ * an `elementExists` criterion about an element the node can act on evaluates to
+ * permanently false — which fails L2 verification and sinks every repair
+ * candidate that depends on it. Positional and `cdp-shadow` specs are not
+ * identity, but they ARE observable, and an observation must be able to find
+ * exactly what the action can act on; that is the same rule the readiness probe
+ * follows. So: the recorded chain first, in the order replay tries it, and the
+ * locator vocabulary only as a fallback.
+ */
+export function conditionTargetSpecs(target: unknown): import('../ops').TargetSpec[] {
+  if (!target || typeof target !== 'object') return []
+  const raw = target as {
+    primary?: import('../ops').TargetSpec
+    fallbacks?: import('../ops').TargetSpec[]
+  }
+  const recorded = [raw.primary, ...(Array.isArray(raw.fallbacks) ? raw.fallbacks : [])]
+  const out: import('../ops').TargetSpec[] = []
+  for (const spec of recorded) {
+    // An empty value is dropped, not kept: `{how:'role', value:''}` is the spec
+    // the kernel resolves to every element on the page.
+    if (!spec || typeof spec !== 'object') continue
+    if (typeof spec.how !== 'string' || typeof spec.value !== 'string') continue
+    const value = spec.value.trim()
+    if (!value) continue
+    if (out.some((s) => s.how === spec.how && s.value === value)) continue
+    out.push({ ...spec, value })
+  }
+  if (out.length > 0) return out
+  return targetSpecsFromSemantic(target as SemanticLocator)
+}
+
+/**
+ * Human-readable identity of a condition target, in either shape. Falls back to
+ * the spec vocabulary so a run log never renders `元素存在 ` with nothing in it.
+ */
+export function describeConditionTarget(target: unknown): string {
+  const semantic = semanticLocatorFromTarget(target)
+  const described = semantic ? describeSemanticLocator(semantic) : ''
+  if (described) return described
+  const [primary] = conditionTargetSpecs(target)
+  const name = conditionTargetName(target)
+  if (name) return `${primary?.role ? `${primary.role} ` : ''}"${name}"`
+  // A positional chain with no name at all: say which vocabulary it speaks
+  // rather than pretending it has an identity.
+  if (primary) return `${primary.how} "${primary.value.slice(0, 60)}"`
+  return describeSemanticLocator(target as SemanticLocator)
 }
 
 /**

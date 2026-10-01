@@ -37,6 +37,7 @@ import {
 } from '../driver'
 import { normalScopeFromWindowId, type ScopeWindow } from '../automation-scope'
 import { BLOCK_BY_ID } from '../../lib/workflow/blocks/palette'
+import { valueCommittedMatches } from '../../lib/workflow/readiness'
 import { unanchoredElementStart } from '../../lib/workflow/runnability'
 import { runWorkflow } from './engine'
 import type { AiTakeoverHook } from './engine'
@@ -100,7 +101,10 @@ export async function findRunIdFor(workflowId: string): Promise<string | undefin
   return persisted
 }
 
-/** Resolve a node id to a human-readable block label for run logs. */function nodeLabel(workflow: Workflow, nodeId: string): string {
+/** Resolve a node id to a human-readable block label for run logs. */ function nodeLabel(
+  workflow: Workflow,
+  nodeId: string,
+): string {
   const node = workflow.drawflow.nodes.find((n) => n.id === nodeId)
   if (!node) return nodeId
   const blockId = (node.data?.['blockId'] as string) || node.label
@@ -268,24 +272,40 @@ export function createDriverReadinessProbe(
    * behind it (`targetFrom`), so a wait that probed the semantic identity INSTEAD
    * of the selector could go green on one element while the action hit another —
    * or never go green at all after harmless DOM drift.
+   *
+   * `nodeTarget` IS that chain, so it leads. Rebuilding it from `nodeSelector`
+   * alone was the narrower view the comment above warns about: a node recorded
+   * with a text or role locator has an empty `selector`, and its readiness wait
+   * then had nothing to probe and timed out a step the action could perform.
    */
   const targetFor = (
     requirement: import('../../lib/workflow/readiness').ReadinessRequirement,
     nodeSelector: string,
+    nodeTarget?: Target,
   ): Target | undefined => {
     const specs: TargetSpec[] = []
-    const flat = nodeSelector.trim()
-    if (flat) specs.push({ how: 'css', value: flat })
-    for (const spec of requirement.target ? targetSpecsFromSemantic(requirement.target) : []) {
+    const push = (spec: TargetSpec | undefined): void => {
+      if (!spec || !spec.value.trim()) return
       if (!specs.some((s) => s.how === spec.how && s.value === spec.value)) specs.push(spec)
+    }
+    if (nodeTarget) {
+      push(nodeTarget.primary)
+      for (const spec of nodeTarget.fallbacks) push(spec)
+    }
+    const flat = nodeSelector.trim()
+    if (flat) push({ how: 'css', value: flat })
+    for (const spec of requirement.target ? targetSpecsFromSemantic(requirement.target) : []) {
+      push(spec)
     }
     const [primary, ...fallbacks] = specs
     return primary ? { primary, fallbacks } : undefined
   }
-  return async (requirement, nodeSelector) => {
+  // The wait's own signal is ignored on purpose: the driver calls keep the
+  // run-level signal this probe was built with.
+  return async (requirement, nodeSelector, _signal, nodeTarget) => {
     switch (requirement.state) {
       case 'present': {
-        const target = targetFor(requirement, nodeSelector)
+        const target = targetFor(requirement, nodeSelector, nodeTarget)
         if (!target) return { satisfied: false, detail: '没有可探测的定位' }
         // The kernel counts a target's matches directly; it must NOT be routed
         // through `resolve`, or a strict ambiguity refusal would read as
@@ -302,7 +322,7 @@ export function createDriverReadinessProbe(
       }
       case 'visible':
       case 'enabled': {
-        const target = targetFor(requirement, nodeSelector)
+        const target = targetFor(requirement, nodeSelector, nodeTarget)
         if (!target) return { satisfied: false, detail: '没有可探测的定位' }
         const result = await execOnActiveTab(
           { action: 'actionability', target },
@@ -311,8 +331,7 @@ export function createDriverReadinessProbe(
           scope,
         ).catch(() => undefined)
         const data = result?.data as
-          | { state?: string; visible?: boolean; enabled?: boolean }
-          | undefined
+          { state?: string; visible?: boolean; enabled?: boolean } | undefined
         if (!data?.state) return { satisfied: false, detail: '元素尚未出现' }
         if (data.state === 'missing') return { satisfied: false, detail: '元素尚未出现' }
         // `state: 'ready'` is visible ∧ enabled ∧ unoccluded — using it for a
@@ -347,7 +366,7 @@ export function createDriverReadinessProbe(
         }
       }
       case 'value-committed': {
-        const target = targetFor(requirement, nodeSelector)
+        const target = targetFor(requirement, nodeSelector, nodeTarget)
         if (!target) return { satisfied: false, detail: '没有可探测的定位' }
         const result = await execOnActiveTab(
           { action: 'get_value', target },
@@ -355,20 +374,35 @@ export function createDriverReadinessProbe(
           undefined,
           scope,
         ).catch(() => undefined)
-        const value = typeof result?.data === 'string' ? result.data : undefined
+        // The kernel reads a checkbox as a boolean and a multi-select as an
+        // array. Reading only `string` made those controls un-verifiable — a
+        // gate that always reports "cannot read" fails a step that flipped the
+        // box correctly, so normalize to the form the expectation was written in.
+        const raw = result?.data
+        const value =
+          typeof raw === 'string'
+            ? raw
+            : typeof raw === 'boolean' || typeof raw === 'number'
+              ? String(raw)
+              : Array.isArray(raw)
+                ? raw.map((item) => String(item)).join(',')
+                : undefined
         if (value === undefined) {
           return { satisfied: false, detail: '无法读取控件值' }
         }
         const expected = requirement.value ?? ''
-        return value === expected
+        return valueCommittedMatches(expected, value)
           ? { satisfied: true }
-          : { satisfied: false, detail: `控件值尚未提交（期望 "${expected}"，实际 "${value}"）` }
+          : {
+              satisfied: false,
+              detail: `控件值尚未提交（期望 "${expected}"，实际 "${value}"）`,
+            }
       }
       case 'stable': {
         // "Not still animating" is observable: the kernel samples one rect, and
         // two consecutive identical samples mean the layout has quiesced (the
         // same trick the driver's actionability pre-check uses).
-        const target = targetFor(requirement, nodeSelector)
+        const target = targetFor(requirement, nodeSelector, nodeTarget)
         if (!target) return { satisfied: false, detail: '没有可探测的定位' }
         const sample = async (): Promise<string | undefined> => {
           const result = await execOnActiveTab(
@@ -377,7 +411,8 @@ export function createDriverReadinessProbe(
             undefined,
             scope,
           ).catch(() => undefined)
-          const data = result?.data as { state?: string; rect?: { x: number; y: number; w: number; h: number } } | undefined
+          const data = result?.data as
+            { state?: string; rect?: { x: number; y: number; w: number; h: number } } | undefined
           if (!data || data.state === 'missing' || !data.rect) return undefined
           const { x, y, w, h } = data.rect
           return `${x}|${y}|${w}|${h}`
@@ -780,9 +815,7 @@ export async function executeWorkflow(
     // alreadySatisfied; the LLM can never forge success. Failure rewrites the
     // outcome — execution success is not goal success.
     let goalNote: string | undefined
-    let outcome: ExecuteWorkflowResult['outcome'] = runSignal.aborted
-      ? 'cancelled'
-      : result.outcome
+    let outcome: ExecuteWorkflowResult['outcome'] = runSignal.aborted ? 'cancelled' : result.outcome
     // A run that stopped at a trial cutoff never reached the goal by design:
     // gating it would call a safe partial trial a failure.
     if (outcome === 'ok' && !result.stoppedBefore) {
@@ -832,7 +865,8 @@ export async function executeWorkflow(
         failureCategory = undefined
       }
     }
-    if (ownsRun) finishRun(runId, { outcome, summary, error, ...(failureCategory ? { failureCategory } : {}) })
+    if (ownsRun)
+      finishRun(runId, { outcome, summary, error, ...(failureCategory ? { failureCategory } : {}) })
     // Retire the oldest runs' checkpoints so repeated debugging cannot fill
     // the data directory. Fire-and-forget: pruning must never hold the run.
     if (wantCheckpoints) void prunePersistedCheckpoints()
@@ -845,17 +879,14 @@ export async function executeWorkflow(
       ...(result.variables ? { variables: result.variables } : {}),
       ...(result.steps ? { steps: result.steps } : {}),
       ...(result.degradations?.length ? { degradations: result.degradations } : {}),
-      ...(result.conditionWarnings?.length
-        ? { conditionWarnings: result.conditionWarnings }
-        : {}),
+      ...(result.conditionWarnings?.length ? { conditionWarnings: result.conditionWarnings } : {}),
       completedNodeIds: result.completedNodeIds,
       ...(result.stoppedBefore ? { stoppedBefore: result.stoppedBefore } : {}),
       ...(resumedFrom !== undefined ? { resumedFrom } : {}),
     }
   } catch (e) {
     // A cancellation or engine error that leaked out of runWorkflow.
-    const aborted =
-      runSignal.aborted || (e instanceof DOMException && e.name === 'AbortError')
+    const aborted = runSignal.aborted || (e instanceof DOMException && e.name === 'AbortError')
     if (aborted) {
       const trace = traceCollector.build('cancelled', variables ?? {})
       if (ownsRun) finishRun(runId, { outcome: 'cancelled' })

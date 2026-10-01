@@ -165,7 +165,7 @@ const MESSAGE_RULES: ReadonlyArray<{ pattern: RegExp; type: WorkflowFailureType 
   { pattern: /navigation timeout|navigate.*timeout|NAVIGATION_TIMEOUT|导航超时/i, type: 'NAVIGATION_TIMEOUT' },
   { pattern: /page not ready|not ready|PAGE_NOT_READY|WAIT_CONDITION_UNMET|页面(未|没有)(就绪|加载完成)|尚未加载/i, type: 'PAGE_NOT_READY' },
   { pattern: /input rejected|rejected input|INPUT_REJECTED|输入被拒绝/i, type: 'INPUT_REJECTED' },
-  { pattern: /invalid parameter|invalid argument|missing required|INVALID_PARAMETER|参数(无效|缺失|不合法)/i, type: 'INVALID_PARAMETER' },
+  { pattern: /invalid parameter|invalid argument|missing required|INVALID_PARAMETER|UNRESOLVED_INPUT|unresolved input|参数(无效|缺失|不合法)/i, type: 'INVALID_PARAMETER' },
   { pattern: /state mismatch|unexpected state|STATE_MISMATCH|状态(不一致|不匹配)/i, type: 'STATE_MISMATCH' },
 ]
 
@@ -266,6 +266,11 @@ export function fromVerificationFailure(code: string): WorkflowFailureType {
     case 'VARIABLE_MISSING':
     case 'VARIABLE_EMPTY':
     case 'VARIABLE_TYPE_ERROR':
+      return 'INVALID_PARAMETER'
+    case 'UNRESOLVED_INPUT':
+      // The graph references a declared input nobody supplied. It is a parameter
+      // the run was missing, not a broken step: classified `UNKNOWN` it walked the
+      // whole locator ladder and repaired nothing.
       return 'INVALID_PARAMETER'
     case 'CONTRACT_VIOLATION':
     case 'PRECONDITION_FAILED':

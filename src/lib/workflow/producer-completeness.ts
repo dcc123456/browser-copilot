@@ -24,9 +24,7 @@
 
 import type { Workflow, WorkflowNode } from './types'
 
-export type ProducerCompletenessCode =
-  | 'MISSING_PRODUCER'
-  | 'MISSING_TABLE_PRODUCER'
+export type ProducerCompletenessCode = 'MISSING_PRODUCER' | 'MISSING_TABLE_PRODUCER'
 
 export interface ProducerCompletenessIssue {
   code: ProducerCompletenessCode
@@ -58,8 +56,15 @@ function blockIdOf(node: WorkflowNode): string {
  * Blocks that write a named session variable, and the data field carrying that
  * variable's name. Every one of these blocks is a valid "producer" for a
  * `{{reference}}` consumed downstream.
+ *
+ * This is the ONE definition of "which field of which block holds the variable
+ * it writes" — `generated-validation`'s data-flow analysis reads it instead of
+ * keeping its own list, which had already drifted (it omitted `ai-agent`, so a
+ * graph whose title came from an ai-agent node was reported as reading a
+ * variable nothing writes, and it read `variableName` for `webhook`, which
+ * publishes through `responseVariable`).
  */
-const VARIABLE_PRODUCER_FIELD: Readonly<Record<string, string>> = {
+export const VARIABLE_PRODUCER_FIELD: Readonly<Record<string, string>> = {
   'get-text': 'variableName',
   'attribute-value': 'variableName',
   'read-page': 'variableName',
@@ -160,9 +165,7 @@ function referencesIn(node: WorkflowNode): string[] {
  * producer (deduplicated by node + reference); an empty array means the graph
  * carries producers for everything it consumes.
  */
-export function checkProducerCompleteness(
-  workflow: Workflow,
-): ProducerCompletenessIssue[] {
+export function checkProducerCompleteness(workflow: Workflow): ProducerCompletenessIssue[] {
   const nodes = workflow.drawflow?.nodes ?? []
   const declared = triggerInputs(nodes)
   const issues: ProducerCompletenessIssue[] = []
@@ -217,8 +220,6 @@ export function checkProducerCompleteness(
 }
 
 /** Flatten issues into a one-per-line detail string for the save resolution. */
-export function describeProducerIssues(
-  issues: readonly ProducerCompletenessIssue[],
-): string {
+export function describeProducerIssues(issues: readonly ProducerCompletenessIssue[]): string {
   return issues.map((issue) => issue.message).join('; ')
 }

@@ -5,7 +5,7 @@ export default defineConfig({
   // compile-time `__OCR__` flag injected by the root `vite.config.ts`. Mirror
   // it here so importing engine modules under vitest does not throw
   // `ReferenceError: __OCR__ is not defined`.
-  define: { __OCR__: 'true' },
+  define: { __OCR__: 'true', __BUILD_STAMP__: "'server-tests'" },
   test: {
     // `.smoke.ts` covers the end-to-end runner boot test (see test/e2e/).
     include: ['test/**/*.test.ts', 'test/**/*.smoke.ts'],

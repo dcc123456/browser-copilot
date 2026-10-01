@@ -10,10 +10,18 @@
  * These tests pin the distinction between "nothing contradicted us" (`satisfied`)
  * and "we actually looked" (`evaluated`) — the repair loop still accepts the
  * first, but the record now says which one happened.
+ *
+ * The second rule pinned here is about WHAT counts as evidence at S0. A URL
+ * records where the run IS, not what it DID: the publish page is still
+ * `/publish/` when the title never committed, so a goal whose only success row
+ * is `urlContains` holds before the failed step, while it and after it. Reading
+ * that as "already satisfied" closes the whole ladder on attempt one and reports
+ * a repair that changed nothing.
  */
 import { describe, expect, it } from 'vitest'
 import {
   checkGoalAlreadySatisfied,
+  provesLandedEffect,
   verifyRepair,
   verifyRepairCandidate,
   type VerificationDeps,
@@ -81,6 +89,9 @@ function answering(satisfied: boolean): VerificationDeps & { asked: WorkflowCond
 
 const urlHolds: WorkflowCondition[] = [{ kind: 'urlContains', value: '/orders/1' }]
 
+/** A success row that could only be true AFTER the failed step did its work. */
+const landedEffect: WorkflowCondition[] = [{ kind: 'variableExists', name: 'draftId' }]
+
 describe('repair verification layers', () => {
   it('accepts a goal-less candidate on the node result, and says so', async () => {
     const result = await verifyRepairCandidate({
@@ -143,21 +154,39 @@ describe('repair verification layers', () => {
 })
 
 describe('S0 terminal-state short-circuit', () => {
-  it('only short-circuits on conditions it actually evaluated', async () => {
+  it('short-circuits only on a success row that can prove the effect landed', async () => {
     const deps = answering(true)
-    const already = await checkGoalAlreadySatisfied(workflowWithGoal(urlHolds), deps)
+    const already = await checkGoalAlreadySatisfied(workflowWithGoal(landedEffect), deps)
     expect(already.satisfied).toBe(true)
-    expect(already.evaluated).toEqual(urlHolds)
+    expect(already.evaluated).toEqual(landedEffect)
     expect(already.note).toContain('already hold')
   })
 
-  it('claims nothing for a goal whose conditions all failed', async () => {
+  it('will not read a URL as proof of a step that never happened', async () => {
+    const deps = answering(true)
+    const already = await checkGoalAlreadySatisfied(workflowWithGoal(urlHolds), deps)
+    expect(already.satisfied).toBe(false)
+    expect(already.evaluated).toEqual([])
+    // The URL was never even looked at: it cannot answer the S0 question.
+    expect(deps.asked).toHaveLength(0)
+  })
+
+  it('still credits a terminal state the page reached after the action', async () => {
     const already = await checkGoalAlreadySatisfied(
-      workflowWithGoal(urlHolds),
+      workflowWithGoal(urlHolds, [{ kind: 'urlContains', value: '/orders/123' }]),
+      answering(true),
+    )
+    expect(already.satisfied).toBe(true)
+    expect(already.note).toContain('terminal state')
+  })
+
+  it('claims nothing for a goal whose evidence conditions all failed', async () => {
+    const already = await checkGoalAlreadySatisfied(
+      workflowWithGoal(landedEffect),
       answering(false),
     )
     expect(already.satisfied).toBe(false)
-    expect(already.evaluated).toEqual(urlHolds)
+    expect(already.evaluated).toEqual(landedEffect)
   })
 
   it('has no goal to confirm on a goal-less workflow', async () => {
@@ -167,10 +196,34 @@ describe('S0 terminal-state short-circuit', () => {
   })
 
   it('reports the goal observation as the evidence, not the layers it never ran', async () => {
-    const result = await verifyRepair(workflowWithGoal(urlHolds), noop, false, answering(true))
+    const result = await verifyRepair(workflowWithGoal(landedEffect), noop, false, answering(true))
     expect(result.passed).toBe(true)
     expect(result.alreadySatisfied).toBe(true)
     expect(result.evaluated).toEqual({ postconditions: false, goal: true })
-    expect(result.evaluatedConditions).toEqual(urlHolds)
+    expect(result.evaluatedConditions).toEqual(landedEffect)
+  })
+
+  it('makes an address-only goal run the ladder instead of skipping it', async () => {
+    const result = await verifyRepair(workflowWithGoal(urlHolds), noop, false, answering(true))
+    expect(result.alreadySatisfied).toBe(false)
+    // L1 came from the caller, and a failing node cannot be talked around.
+    expect(result.passed).toBe(false)
+    expect(result.evaluated.postconditions).toBe(false)
+    expect(result.evaluated.goal).toBe(true)
+  })
+})
+
+describe('provesLandedEffect', () => {
+  it('rejects location-only evidence and accepts everything else', () => {
+    expect(provesLandedEffect({ kind: 'urlContains', value: '/publish/' })).toBe(false)
+    expect(provesLandedEffect({ kind: 'urlMatches', value: '.*/publish/.*' })).toBe(false)
+    expect(provesLandedEffect({ kind: 'variableExists', name: 'draftId' })).toBe(true)
+    expect(
+      provesLandedEffect({
+        kind: 'elementVisible',
+        target: { role: 'textbox', accessibleName: '标题' },
+      }),
+    ).toBe(true)
+    expect(provesLandedEffect({ kind: 'urlChanged' })).toBe(true)
   })
 })

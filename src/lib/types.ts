@@ -176,6 +176,13 @@ export interface Settings {
    */
   localAgentAdapterPath: string
   /**
+   * 开发用：允许本地 Agent 桥调用 `reload_extension` 让插件自我重载
+   * （`chrome.runtime.reload()`），使自测脚本在 `pnpm build` 之后不必人工到
+   * chrome://extensions 点“重新加载”。默认关闭；开启后仍受桥接的既有门禁
+   * 约束（仅 127.0.0.1、`localAgentEnabled`、可选 token、窗口分配）。
+   */
+  localAgentAllowReload: boolean
+  /**
    * 本地 Agent 桥接锁定的“当前窗口”id。用户在某个窗口的面板里选择由哪个
    * agent 控制时，随选择一并记录该窗口；此后桥接的 tool/prompt 运行只在
    * 该窗口内的标签页上执行（含 CDP 附加），绝不触及其它窗口。窗口已关闭

@@ -12,7 +12,17 @@ import {
   type ConditionPageProbe,
 } from '../src/background/workflow-engine/condition-runtime'
 import { verifyGoalSpec } from '../src/background/workflow-engine/goal-verifier'
+import {
+  describeCondition,
+  isWorkflowCondition,
+  workflowConditionsOf,
+} from '../src/lib/workflow/conditions'
 import type { WorkflowCondition } from '../src/lib/workflow/conditions'
+import {
+  conditionTargetName,
+  conditionTargetSpecs,
+  withConditionTargetName,
+} from '../src/lib/workflow/element-fingerprint'
 import { node } from '../specs/reliability-fixtures/harness'
 
 /** A page probe driven by a plain record — deterministic and observable. */
@@ -230,5 +240,88 @@ describe('verifyGoalSpec', () => {
     })
     expect(absent.achieved).toBe(false)
     expect(absent.note).toContain('目标未达成')
+  })
+})
+
+describe('a condition recorded as the node\'s own rich Target', () => {
+  // Generation writes `condition.target` as the `{ primary, fallbacks }` chain its
+  // snapshot produced. That shape is what a replay can actually click, so neither
+  // the guard, the log line, nor the observation may treat it as noise.
+  const closedShadow = {
+    label: '暂存离开',
+    fallbacks: [],
+    primary: {
+      how: 'cdp-shadow',
+      value: '暂存离开',
+      role: 'button',
+      tag: 'button',
+      shadowHosts: ['xhs-publish-btn'],
+      closedShadow: true,
+    },
+  }
+  const roleWithCssFallback = {
+    label: '填写标题会有更多赞哦',
+    primary: { how: 'role', role: 'textbox', value: '填写标题会有更多赞哦' },
+    fallbacks: [{ how: 'css', value: 'div > div:nth-of-type(2) > input' }],
+  }
+
+  it('the guard keeps a positional-only target: dropping it deleted the step\'s whole claim', () => {
+    const cssOnly = { kind: 'elementExists', target: { fallbacks: [], primary: { how: 'css', value: 'body > div' } } }
+    expect(isWorkflowCondition(cssOnly)).toBe(true)
+    expect(workflowConditionsOf([cssOnly])).toHaveLength(1)
+    // Counterfactual guard: an EMPTY chain matches everything, so it stays refused.
+    expect(isWorkflowCondition({ kind: 'elementExists', target: { fallbacks: [], primary: { how: 'css', value: '  ' } } })).toBe(false)
+    expect(isWorkflowCondition({ kind: 'elementExists', target: {} })).toBe(false)
+  })
+
+  it('observes the recorded chain, in order, with the closed-shadow fields intact', () => {
+    expect(conditionTargetSpecs(closedShadow)).toEqual([closedShadow.primary])
+    expect(conditionTargetSpecs(roleWithCssFallback).map((spec) => spec.how)).toEqual([
+      'role',
+      'css',
+    ])
+    // A semantic locator still resolves through the locator vocabulary.
+    expect(conditionTargetSpecs({ stableAttributes: { 'data-css': '#go' } })).toEqual([
+      { how: 'css', value: '#go' },
+    ])
+  })
+
+  it('names the element in the run log instead of rendering "元素存在 "', () => {
+    const condition = { kind: 'elementExists', target: closedShadow } as unknown as WorkflowCondition
+    expect(describeCondition(condition)).toBe('元素存在 button "暂存离开"')
+    expect(conditionTargetName(closedShadow)).toBe('暂存离开')
+    expect(conditionTargetName({ role: 'button', accessibleName: '发货' })).toBe('发货')
+  })
+
+  it('evaluates as satisfied when the page has the element the step clicks', async () => {
+    const seen: unknown[] = []
+    const probe: ConditionPageProbe = {
+      ...fakeProbe({}),
+      exists: async (target) => {
+        seen.push(target)
+        return true
+      },
+    }
+    const outcome = await evaluateCondition(
+      { kind: 'elementExists', target: roleWithCssFallback } as unknown as WorkflowCondition,
+      { variables: {}, probe },
+    )
+    expect(outcome.satisfied).toBe(true)
+    expect(seen[0]).toBe(roleWithCssFallback)
+  })
+
+  it('an editor rename writes the name into the spec that holds a name', () => {
+    const renamed = withConditionTargetName(
+      roleWithCssFallback as unknown as Parameters<typeof withConditionTargetName>[0],
+      '搜索',
+    )
+    expect(renamed).toMatchObject({ primary: { how: 'role', value: '搜索' } })
+    const positional = withConditionTargetName(closedShadow as never, '保存')
+    expect(positional).toMatchObject({ primary: { value: '保存' } })
+    const cssChain = withConditionTargetName(
+      { primary: { how: 'css', value: '#go' }, fallbacks: [] } as never,
+      '买',
+    )
+    expect(cssChain).toMatchObject({ label: '买', primary: { how: 'css', value: '#go' } })
   })
 })

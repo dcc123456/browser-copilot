@@ -65,17 +65,47 @@ export function getByPath(root: unknown, path: string): unknown {
 }
 
 /**
+ * Escape a substituted value so it cannot break out of the JavaScript literal
+ * it lands in.
+ *
+ * A `javascript-code` block references variables the same `{{name}}` way every
+ * other block does, and the substitution is TEXTUAL — the engine replaces the
+ * token inside `const text = '{{noteContent}}'`. So a value holding one apostrophe
+ * (an AI-written `it'll`, a quoted product name, a newline) closes the string
+ * literal mid-sentence and the block dies with a SyntaxError before it runs —
+ * this time reported as `javascript-code: Unexpected identifier 'll'`. Numbers,
+ * booleans and plain words pass through untouched, so a token used outside a
+ * literal keeps working exactly as before.
+ */
+export function escapeForJsLiteral(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '\\"')
+    .replace(/`/g, '\\`')
+    .replace(/\$/g, '\\$')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
+}
+
+/**
  * Replace every `{{name}}` / `{{name.key}}` token in `text`.
  *
  * - `name` is resolved against `vars`, except the special key `refData` which
  *   resolves to the `refData` value itself (its nested keys work too).
  * - Function and object values are stringified via their `toString`.
  * - Tokens that don't match anything are left in the text unchanged.
+ * - `escape` is applied to each substituted value only (never to the template),
+ *   for the parameters whose text is CODE rather than prose — see
+ *   {@link escapeForJsLiteral}.
  */
 export function interpolate(
   text: string,
   vars: Record<string, unknown>,
   refData?: unknown,
+  escape?: (value: string) => string,
 ): string {
   return text.replace(TOKEN, (whole, expression: string) => {
     const expr = expression.trim()
@@ -87,7 +117,8 @@ export function interpolate(
     const root = name === 'refData' ? refData : vars[name]
     const value = rest === '' ? root : getByPath(root, rest)
     if (value === undefined) return whole
-    return typeof value === 'function' ? value.toString() : String(value)
+    const rendered = typeof value === 'function' ? value.toString() : String(value)
+    return escape ? escape(rendered) : rendered
   })
 }
 
@@ -100,15 +131,21 @@ export function interpolate(
  * hole in it is as unresolved as a top-level `value`, and the caller cannot see
  * it by re-scanning the value, because an unchanged branch returns the
  * ORIGINAL object reference.
+ *
+ * `escape` applies to this value's substitutions only; a nested object or array
+ * is walked without it, because the source-escaping opt-in is about the one
+ * parameter that IS a program, not about selectors and strings living inside
+ * other parameters.
  */
 function interpolateValue(
   value: unknown,
   vars: Record<string, unknown>,
   refData?: unknown,
+  escape?: (value: string) => string,
 ): { value: unknown; changed: boolean; tokens: string[] } {
   if (typeof value === 'string') {
     if (!value.includes('{{')) return { value, changed: false, tokens: [] }
-    const next = interpolate(value, vars, refData)
+    const next = interpolate(value, vars, refData, escape)
     return { value: next, changed: next !== value, tokens: leftoverTokens(next) }
   }
   if (Array.isArray(value)) {
@@ -141,6 +178,21 @@ function interpolateValue(
 }
 
 /**
+ * The handful of parameters whose text is JavaScript SOURCE.
+ *
+ * Their `{{token}}` values are substituted into the middle of a program —
+ * typically inside a string literal the generated code wrote around the token —
+ * so the value must be escaped for that literal or one apostrophe turns the
+ * whole step into a SyntaxError. Every other parameter is prose or a selector,
+ * where a backslash would be a bug, so the escape is strictly opt-in.
+ */
+const JS_SOURCE_PARAMS: ReadonlySet<string> = new Set(['code'])
+
+function escapeOf(key: string): ((value: string) => string) | undefined {
+  return JS_SOURCE_PARAMS.has(key) ? escapeForJsLiteral : undefined
+}
+
+/**
  * Interpolate every `{{token}}` in a block's parameter bag against the run's
  * variables, ready to hand to the executor.
  *
@@ -170,7 +222,7 @@ export function interpolateParams(
   const unresolved: string[] = []
   let changed = false
   for (const [key, value] of Object.entries(data)) {
-    const result = interpolateValue(value, vars, refData)
+    const result = interpolateValue(value, vars, refData, escapeOf(key))
     if (result.changed) changed = true
     out[key] = result.value
     if (

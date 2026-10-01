@@ -28,6 +28,7 @@ import {
   type WorkflowCondition,
 } from '../../lib/workflow/conditions'
 import type { ConditionBaseline } from './condition-runtime'
+import { provesLandedEffect } from '../../lib/workflow/repair-verification'
 import type { NodeDegradation } from '../../lib/workflow/self-heal'
 import {
   checkPageContext,
@@ -38,7 +39,7 @@ import { ELEMENT_OP_BLOCKS } from '../../lib/workflow/generated-validation'
 import type { DebugStepLine } from '../../lib/workflow/auto-debug-patch'
 import type { ScopeWindow } from '../automation-scope'
 import type { BlockExecutor, WorkflowExecCtx } from './executors'
-import { EXECUTORS } from './executors'
+import { EXECUTORS, targetFrom } from './executors'
 import { LoopBreakpointError } from './loop-breakpoint'
 import {
   prepareNodeExecution,
@@ -804,9 +805,17 @@ async function runCore(
     // whose declared postconditions ALREADY hold must not re-fire — the goal
     // end state is there, and re-executing a submit/login to "prove" it is
     // the exact bug class the contract forbids. Skip the node, log why.
-    if (unsafe && reliability && evaluateCondition && unsafeSpec?.postconditions?.length) {
+    //
+    // Only a condition that can PROVE a landed effect may justify the skip. A
+    // URL is on the address bar whether or not this step ever ran — and the
+    // model writes `urlContains /publish/` for a button that lives ON the
+    // publish page — so reading it as "already applied" would delete the step's
+    // action while reporting it covered. Same predicate the repair ladder uses
+    // at S0 for the same reason.
+    const terminalProof = (unsafeSpec?.postconditions ?? []).filter(provesLandedEffect)
+    if (unsafe && reliability && evaluateCondition && terminalProof.length) {
       let terminalStateHolds = true
-      for (const condition of unsafeSpec.postconditions) {
+      for (const condition of terminalProof) {
         if (!(await evaluateCondition(condition))) {
           terminalStateHolds = false
           break
@@ -893,8 +902,12 @@ async function runCore(
             blockId,
             params,
             nodeSelector: String(params['selector'] ?? params['cssSelector'] ?? ''),
+            // The chain the executor below is about to use — a wait that probed
+            // less than this could not see a text/role-located node at all.
+            nodeTarget: targetFrom(params),
             signal: signalToUse,
             probe: readinessProbe,
+            vars: variables,
           })
           if (!before.ok) {
             throw new Error(`READINESS_TIMEOUT(${before.state}): ${before.detail ?? '页面未就绪'}`)
@@ -910,8 +923,10 @@ async function runCore(
             blockId,
             params,
             nodeSelector: String(params['selector'] ?? params['cssSelector'] ?? ''),
+            nodeTarget: targetFrom(params),
             signal: signalToUse,
             probe: readinessProbe,
+            vars: variables,
           })
           if (!after.ok) {
             throw new Error(

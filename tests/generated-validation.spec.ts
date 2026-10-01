@@ -5,10 +5,7 @@
  * annotate. Compat (non-generated) workflows are never gated.
  */
 import { describe, expect, it } from 'vitest'
-import {
-  validateGeneratedWorkflow,
-  blockingIssues,
-} from '../src/lib/workflow/generated-validation'
+import { validateGeneratedWorkflow, blockingIssues } from '../src/lib/workflow/generated-validation'
 import type { Workflow, WorkflowEdge, WorkflowNode } from '../src/lib/workflow/types'
 import { withNodeGoalContract } from '../src/lib/workflow/node-goal-contract'
 
@@ -19,14 +16,26 @@ function nid(): string {
   return `n${++seq}`
 }
 
-function makeNode(blockId: string, data: Record<string, unknown> = {}, label = blockId): WorkflowNode {
-  const node: WorkflowNode = { id: nid(), label, position: { x: 0, y: 0 }, data: { blockId, ...data } }
+function makeNode(
+  blockId: string,
+  data: Record<string, unknown> = {},
+  label = blockId,
+): WorkflowNode {
+  const node: WorkflowNode = {
+    id: nid(),
+    label,
+    position: { x: 0, y: 0 },
+    data: { blockId, ...data },
+  }
   // Generated action nodes carry a Node Goal Contract by default; individual
   // negative tests can still assert NODE_GOAL_MISSING by stripping the key.
   if (blockId !== 'trigger' && !(data as Record<string, unknown>)['__noNodeGoal']) {
     node.data = withNodeGoalContract(node.data, {
       version: 1,
-      goal: typeof data['description'] === 'string' ? (data['description'] as string) : `${blockId} node goal`,
+      goal:
+        typeof data['description'] === 'string'
+          ? (data['description'] as string)
+          : `${blockId} node goal`,
       successCriteria: [{ kind: 'variableExists', name: 'nodeOk' }],
     })
   }
@@ -126,7 +135,9 @@ describe('layer A — graph', () => {
     const tail = wf.drawflow.nodes[1]!
     wf.drawflow.edges.push(makeEdge(tail.id, cond.id, 'next'))
     wf.drawflow.edges.push(makeEdge(cond.id, branch.id, 'element-exists-output-1'))
-    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('GRAPH_'))).toHaveLength(0)
+    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('GRAPH_'))).toHaveLength(
+      0,
+    )
   })
 })
 
@@ -147,7 +158,34 @@ describe('layer B — data flow', () => {
       makeNode('set-variable', { variableName: 'q', value: 'phone' }),
       makeNode('forms', { action: 'fill', selector: '#q', value: '{{q}}' }),
     )
-    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('DATA_'))).toHaveLength(0)
+    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('DATA_'))).toHaveLength(
+      0,
+    )
+  })
+
+  it('an ai-agent node writes the variable it names', () => {
+    // The generated cover-image graph wrote its title and body in two ai-agent
+    // nodes, and the save was flagged as reading variables nothing writes: the
+    // local writer list did not know `ai-agent` even though the producer map does.
+    const wf = linearWorkflow(
+      triggerNode(),
+      makeNode('ai-agent', { prompt: '写一个标题', variableName: 'noteTitle' }),
+      makeNode('forms', { action: 'fill', selector: '#t', value: '{{noteTitle}}' }),
+    )
+    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('DATA_'))).toHaveLength(
+      0,
+    )
+  })
+
+  it('a webhook publishes through responseVariable', () => {
+    const wf = linearWorkflow(
+      triggerNode(),
+      makeNode('webhook', { url: 'https://x.test/api', responseVariable: 'payload' }),
+      makeNode('forms', { action: 'fill', selector: '#t', value: '{{payload}}' }),
+    )
+    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('DATA_'))).toHaveLength(
+      0,
+    )
   })
 
   it('declared workflow inputs count as written', () => {
@@ -156,7 +194,9 @@ describe('layer B — data flow', () => {
       makeNode('open-url', { url: 'https://x.test/?q={{keyword}}' }),
     )
     ;(wf.settings as unknown as Record<string, unknown>)['inputs'] = [{ name: 'keyword' }]
-    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('DATA_'))).toHaveLength(0)
+    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('DATA_'))).toHaveLength(
+      0,
+    )
   })
 
   it('table references do not need a variable writer', () => {
@@ -165,7 +205,9 @@ describe('layer B — data flow', () => {
       makeNode('set-variable', { variableName: 'q', value: '{{table[0][1]}}' }),
       makeNode('forms', { action: 'fill', selector: '#q', value: '{{q}}' }),
     )
-    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('DATA_'))).toHaveLength(0)
+    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('DATA_'))).toHaveLength(
+      0,
+    )
   })
 })
 
@@ -219,7 +261,9 @@ describe('layer B — control-flow aware data flow', () => {
         makeEdge(writeQ.id, useQ.id, 'next'), // q flows straight to useQ
       ],
     )
-    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('DATA_'))).toHaveLength(0)
+    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('DATA_'))).toHaveLength(
+      0,
+    )
   })
 
   it('a loop node output variable is a reachable definition downstream', () => {
@@ -230,7 +274,9 @@ describe('layer B — control-flow aware data flow', () => {
       [t, loop, use],
       [makeEdge(t.id, loop.id, 'next'), makeEdge(loop.id, use.id, 'next')],
     )
-    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('DATA_'))).toHaveLength(0)
+    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('DATA_'))).toHaveLength(
+      0,
+    )
   })
 })
 
@@ -263,7 +309,9 @@ describe('layer C — locator', () => {
       triggerNode(),
       makeNode('event-click', { selector: '[data-testid="checkout"]', ...CLICK_CONTRACT }),
     )
-    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('LOCATOR_'))).toHaveLength(0)
+    expect(
+      codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('LOCATOR_')),
+    ).toHaveLength(0)
   })
 
   it('positional selectors are allowed on compat workflows (never gated)', () => {
@@ -272,7 +320,9 @@ describe('layer C — locator', () => {
       makeNode('event-click', { selector: '.list > div:nth-child(2) button' }),
     )
     wf.settings = { ...wf.settings, provenance: undefined }
-    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('LOCATOR_'))).toHaveLength(0)
+    expect(
+      codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('LOCATOR_')),
+    ).toHaveLength(0)
   })
 })
 
@@ -308,7 +358,9 @@ describe('layer D — readiness', () => {
         },
       }),
     )
-    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('READINESS_'))).toHaveLength(0)
+    expect(
+      codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('READINESS_')),
+    ).toHaveLength(0)
   })
 })
 
@@ -337,17 +389,30 @@ describe('layer E — side effects', () => {
   })
 
   it('submit with the full contract passes the side-effect layer', () => {
-    const wf = linearWorkflow(triggerNode(), makeNode('forms', { action: 'submit', selector: '#login', value: '', ...SUBMIT_CONTRACT }))
-    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('SIDE_EFFECT_'))).toHaveLength(0)
+    const wf = linearWorkflow(
+      triggerNode(),
+      makeNode('forms', { action: 'submit', selector: '#login', value: '', ...SUBMIT_CONTRACT }),
+    )
+    expect(
+      codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('SIDE_EFFECT_')),
+    ).toHaveLength(0)
   })
 
   it('safe fills are not gated by the side-effect layer', () => {
-    const wf = linearWorkflow(triggerNode(), makeNode('forms', { action: 'fill', selector: '#q', value: 'x' }))
-    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('SIDE_EFFECT_'))).toHaveLength(0)
+    const wf = linearWorkflow(
+      triggerNode(),
+      makeNode('forms', { action: 'fill', selector: '#q', value: 'x' }),
+    )
+    expect(
+      codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('SIDE_EFFECT_')),
+    ).toHaveLength(0)
   })
 
   it('unsafe submits on compat workflows are not gated', () => {
-    const wf = linearWorkflow(triggerNode(), makeNode('forms', { action: 'submit', selector: '#login', value: '' }))
+    const wf = linearWorkflow(
+      triggerNode(),
+      makeNode('forms', { action: 'submit', selector: '#login', value: '' }),
+    )
     wf.settings = { ...wf.settings, provenance: undefined }
     expect(validateGeneratedWorkflow(wf).ok).toBe(true)
   })
@@ -370,7 +435,9 @@ describe('layer F — goal', () => {
       makeNode('event-click', { selector: '#x' }),
       makeNode('get-text', { selector: 'h1', variableName: 'title', saveData: false }),
     )
-    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('GOAL_'))).toHaveLength(0)
+    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('GOAL_'))).toHaveLength(
+      0,
+    )
   })
 
   it('goalSpec derived from postconditions satisfies the layer', () => {
@@ -378,7 +445,9 @@ describe('layer F — goal', () => {
       triggerNode(),
       makeNode('event-click', { selector: '#x', ...CLICK_CONTRACT }),
     )
-    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('GOAL_'))).toHaveLength(0)
+    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('GOAL_'))).toHaveLength(
+      0,
+    )
   })
 
   it('an empty declared goalSpec with nothing derivable stays GOAL_MISSING', () => {
@@ -410,7 +479,12 @@ describe('report shape and gating', () => {
   })
 
   it('every error carries a code and message; most carry a suggestedFix', () => {
-    const report = validateGeneratedWorkflow(linearWorkflow(triggerNode(), makeNode('forms', { action: 'submit', selector: '#l', value: '' })))
+    const report = validateGeneratedWorkflow(
+      linearWorkflow(
+        triggerNode(),
+        makeNode('forms', { action: 'submit', selector: '#l', value: '' }),
+      ),
+    )
     for (const issue of report.errors) {
       expect(issue.code).toMatch(/^[A-Z_]+$/)
       expect(issue.message).toBeTruthy()

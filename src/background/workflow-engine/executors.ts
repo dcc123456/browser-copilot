@@ -231,8 +231,13 @@ function richTargetOf(data: Record<string, unknown>): Target | undefined {
  * express). It never overrides the editable selector: a non-empty `selector`
  * stays the primary and the rich specs become fallbacks; with no selector
  * the rich target is used as-is.
+ *
+ * Exported because the readiness probe must observe THIS chain and not a
+ * narrower view of it: a node located by text or role has an empty `selector`,
+ * and a wait that only looked at `selector` had nothing to probe, so it timed
+ * out a step the action itself could have performed.
  */
-function targetFrom(data: Record<string, unknown>): Target {
+export function targetFrom(data: Record<string, unknown>): Target {
   const selector = sel(data)
   const rich = richTargetOf(data)
   if (data['findBy'] === 'text') {

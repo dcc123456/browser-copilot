@@ -26,7 +26,7 @@
  * @module lib/workflow/trial-run
  */
 
-import { idempotencyOf, nodeReliabilityOf } from './reliability'
+import { hasUnsafeIntent, idempotencyOf, intentOf, nodeReliabilityOf } from './reliability'
 import type { Workflow, WorkflowNode } from './types'
 
 /** How long a trial may take before it is stopped and recorded as such. */
@@ -137,6 +137,17 @@ export function executionPath(workflow: Workflow): WorkflowNode[] {
 }
 
 /**
+ * The node that starts a run instead of doing work.
+ *
+ * The engine lists it among the nodes that executed, the trial does not count it
+ * as a step (see {@link executionPath}) — so a clean full run of a 12-step graph
+ * would otherwise report 13/12.
+ */
+export function isTriggerNode(node: WorkflowNode): boolean {
+  return TRIGGER_BLOCK_IDS.has(blockIdOf(node))
+}
+
+/**
  * The first step on the execution path that must not be re-fired.
  *
  * Reads come first and are exactly what the trial is for; the cutoff is where
@@ -153,15 +164,80 @@ export function isUnsafeNode(node: WorkflowNode): boolean {
 }
 
 /**
+ * The blocks that ACTUATE something, as opposed to merely touching the page.
+ *
+ * `unsafe` is a keyword test over prose the model wrote, and it over-classifies:
+ * an upload step whose intent reads "上传到图文发布的图片上传入口" is unsafe because
+ * the NAME of the page contains 发布, and a body-text step is unsafe because its
+ * intent says "不点击任何发布按钮". Neither commits anything — one adds a file to a
+ * form, the other types into a box. What a replay genuinely must not re-fire is
+ * the press of the control: a click, a submit, a key that sends, a script told to
+ * post, a webhook.
+ */
+const COMMIT_BLOCK_IDS: ReadonlySet<string> = new Set([
+  'click',
+  'event-click',
+  'press-key',
+  'trigger-event',
+  'handle-dialog',
+  'javascript-code',
+  'webhook',
+  'feishu-message',
+])
+
+/**
+ * Is this the step that commits — the one a second run cannot take back?
+ *
+ * The LABEL is scanned whenever the step has no contract prose to read. A `click`
+ * node generated without a `__reliability` field has an empty intent, and its
+ * entire meaning is the words 「点击「发布」」 on its label; reading only the contract
+ * would let the publish through — the one failure mode this policy exists to
+ * prevent. A step that DOES declare an intent has already had that sentence
+ * classified by the keyword test, so its label — a terse paraphrase that can name
+ * the page it happens on («图文发布页保存草稿») — is not second-guessed.
+ */
+export function isCommitNode(node: WorkflowNode): boolean {
+  const blockId = blockIdOf(node)
+  const readsLikeACommit = !intentOf(node) && hasUnsafeIntent(node.label ?? '')
+  if (!isUnsafeNode(node) && !readsLikeACommit) return false
+  // A `forms` block commits only when it SUBMITS; filling a field does not.
+  if (blockId === 'forms')
+    return String(node.data?.['action'] ?? 'fill') === 'submit' || readsLikeACommit
+  return COMMIT_BLOCK_IDS.has(blockId)
+}
+
+/**
+ * The cutoff for a caller that has ACCEPTED the side effects of the steps leading
+ * up to a commit — a draft, a cart, a form filled and left unsent.
+ *
+ * {@link trialCutoffNodeId} refuses every unsafe step, which is right for a run
+ * nobody asked for and wrong for proving a workflow whose whole job is to write
+ * something. This keeps the one refusal that matters: the run goes all the way to
+ * the press of the commit control and stops there. A publish is always recorded as
+ * a click or a submit with a publish intent, so it stays unreachable; a graph with
+ * no commit step at all runs to its end, which is the only way a replay can ever
+ * read `full` and certify the workflow.
+ */
+export function commitCutoffNodeId(workflow: Workflow): string | undefined {
+  return executionPath(workflow).find((node) => isCommitNode(node))?.id
+}
+
+/**
  * Is there anything worth running before the cutoff?
  *
  * When the graph's FIRST action is the unsafe one, the trial would run zero
  * steps of the actual workflow — it would only open a tab and stop. Skipping is
  * the honest report there; running would spend 45 seconds proving a step the
  * generation session already proved (the anchor) and tell the user nothing.
+ *
+ * `cutoffInForce` is the cutoff the CALLER actually computed. Passing `null`
+ * means "my policy found none" — which is not the same as saying nothing, where
+ * the default policy is assumed: a graph whose only unsafe step is a cover upload
+ * has no cutoff under the commit policy, and re-deriving the unsafe one here would
+ * skip a trial that has twelve steps left to prove.
  */
-export function trialHasNothingToProve(workflow: Workflow): boolean {
-  const cutoff = trialCutoffNodeId(workflow)
+export function trialHasNothingToProve(workflow: Workflow, cutoffInForce?: string | null): boolean {
+  const cutoff = cutoffInForce === undefined ? trialCutoffNodeId(workflow) : cutoffInForce
   if (!cutoff) return false
   return executionPath(workflow)[0]?.id === cutoff
 }
@@ -286,11 +362,11 @@ export function normalizeTrialRun(raw: unknown): TrialRunRecord | undefined {
  * `cancelled` are silence — none of them may be presented to the user as
  * "verified", and none of them may be used to certify a goal.
  */
-export function trialCertifies(record: TrialRunRecord | undefined): boolean {
-  return record?.outcome === 'passed'
+export function trialCertifies(record: TrialRunRecord | false | undefined): boolean {
+  return !!record && record.outcome === 'passed'
 }
 
 /** Does the record say the graph is broken, as opposed to unproven? */
-export function trialFailed(record: TrialRunRecord | undefined): boolean {
-  return record?.outcome === 'failed'
+export function trialFailed(record: TrialRunRecord | false | undefined): boolean {
+  return !!record && record.outcome === 'failed'
 }

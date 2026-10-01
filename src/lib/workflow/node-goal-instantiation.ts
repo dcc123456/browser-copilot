@@ -19,6 +19,7 @@ import {
   type WorkflowNodeGoalContract,
 } from './node-goal-contract'
 import type { WorkflowCondition } from './conditions'
+import { conditionListValue } from './conditions'
 import type { SemanticLocator } from './element-fingerprint'
 
 /** Generic operator goal templates (en), keyed by block id. */
@@ -81,11 +82,12 @@ function describeTarget(args: Record<string, unknown>): string {
 function criteriaFromReliability(args: Record<string, unknown>): WorkflowCondition[] {
   const reliability = args['__reliability']
   if (!reliability || typeof reliability !== 'object') return []
-  const post = (reliability as Record<string, unknown>)['postconditions']
-  if (!Array.isArray(post)) return []
-  // Reuse the condition guard indirectly by normalising a throwaway contract.
-  return post.filter(
-    (condition): condition is WorkflowCondition =>
+  // Unwrapped like the runtime does (a bare condition or an object-keyed
+  // one-element array are both seen in generated graphs), but kept as lax as it
+  // always was here: an element criterion may carry a full Target rather than a
+  // SemanticLocator, which `isWorkflowCondition` would refuse.
+  return conditionListValue((reliability as Record<string, unknown>)['postconditions']).filter(
+    (condition: unknown): condition is WorkflowCondition =>
       !!condition &&
       typeof condition === 'object' &&
       typeof (condition as Record<string, unknown>)['kind'] === 'string',
@@ -160,6 +162,11 @@ function fallbackCriteria(args: Record<string, unknown>): WorkflowCondition[] {
 
 function locatorOf(args: Record<string, unknown>): SemanticLocator | undefined {
   const target = args['target']
+  // A recorded target can arrive as either a semantic locator OR a rich
+  // `{ primary, fallbacks }` Target. Both pass through verbatim: the observation
+  // layer resolves either shape (`conditionTargetSpecs`), and rewriting a
+  // `cdp-shadow` or CSS chain into "identity only" would leave a criterion that
+  // no page can ever satisfy.
   if (target && typeof target === 'object') return target as SemanticLocator
   // A recorded CSS selector is carried honestly as the `data-css` stable
   // attribute — the documented convention (auto-contract), resolved back to a

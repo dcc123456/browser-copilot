@@ -388,6 +388,220 @@ async function syntheticClickNode(
 }
 
 /**
+ * What {@link probeClosedShadow} observes about a shadowed element. The fields
+ * mirror the kernel's `actionability` payload exactly, so a readiness wait cannot
+ * tell the two channels apart.
+ */
+export interface ShadowProbe {
+  /** How many shadowed elements the target's whole spec chain matched. */
+  matchCount: number
+  state: 'ready' | 'blocked' | 'missing'
+  visible: boolean
+  enabled: boolean
+  occluded: boolean
+  rect: { x: number; y: number; w: number; h: number } | null
+}
+
+/** The minimal DOM surface {@link readRenderedState} touches (it is serialized). */
+interface ProbeNode {
+  nodeType: number
+  isConnected?: boolean
+  disabled?: boolean
+  parentNode?: ProbeNode | null
+  assignedSlot?: ProbeNode | null
+  getRootNode?: () => { host?: ProbeNode } | null
+  getAttribute?: (name: string) => string | null
+  contains?: (other: ProbeNode | null) => boolean
+  getBoundingClientRect?: () => {
+    x: number
+    y: number
+    width: number
+    height: number
+    left: number
+    top: number
+  }
+}
+
+/**
+ * Serialized into the page through `Runtime.callFunctionOn`, so it must stay
+ * self-contained (no reference outside its own body) and return only
+ * JSON-serializable values. `this` is the element CDP resolved — which is the
+ * whole point: the debugger holds a node inside a CLOSED shadow root that page
+ * scripts can never obtain.
+ */
+function readShadowActionability(this: ProbeNode): {
+  visible: boolean
+  enabled: boolean
+  occluded: boolean
+  rect: { x: number; y: number; w: number; h: number } | null
+} {
+  const self = this
+  const measured = self.getBoundingClientRect?.()
+  const rect = measured
+    ? { x: measured.x, y: measured.y, w: measured.width, h: measured.height }
+    : null
+  // Walking up must cross the shadow boundary, or every element inside a root
+  // looks disconnected from the document. `parentNode` stops at the root; its
+  // `host` is the light-DOM element that renders it.
+  const composedParent = (node: ProbeNode): ProbeNode | null => {
+    if (node.assignedSlot) return node.assignedSlot
+    if (node.parentNode) return node.parentNode
+    const root = node.getRootNode ? node.getRootNode() : null
+    return root?.host ?? null
+  }
+
+  let visible =
+    self.isConnected !== false && !!measured && measured.width > 0 && measured.height > 0
+  // A function handed to `Runtime.callFunctionOn` runs in strict mode, where
+  // reading a property of `null` throws instead of yielding undefined: the
+  // parent walk must stop on the condition, not in the call.
+  let node: ProbeNode | null | undefined = self
+  for (let depth = 0; visible && node && depth < 64; depth += 1) {
+    if (node.nodeType === 1) {
+      const style = getComputedStyle(node as unknown as Element)
+      if (
+        style.display === 'none' ||
+        style.visibility === 'hidden' ||
+        style.visibility === 'collapse' ||
+        Number(style.opacity) === 0
+      ) {
+        visible = false
+      }
+    }
+    node = node ? composedParent(node) : null
+  }
+
+  let enabled = self.disabled !== true && self.getAttribute?.('aria-disabled') !== 'true'
+
+  // `elementFromPoint` retargets through the shadow boundary and reports the
+  // light-DOM HOST, so "occluded" is decided by whether the hit lands anywhere
+  // on this node's composed path (host included) rather than on the node itself.
+  let occluded = false
+  if (visible && measured && typeof document.elementFromPoint === 'function') {
+    const hit = document.elementFromPoint(
+      measured.left + measured.width / 2,
+      measured.top + measured.height / 2,
+    ) as ProbeNode | null
+    if (hit && hit !== self && self.contains?.(hit) !== true) {
+      let onOwnPath = false
+      let up: ProbeNode | null = self
+      for (let depth = 0; up && depth < 64; depth += 1) {
+        if (up === hit) {
+          onOwnPath = true
+          break
+        }
+        up = composedParent(up)
+      }
+      occluded = !onOwnPath
+    }
+  }
+
+  return { visible, enabled, occluded, rect }
+}
+
+/**
+ * Read the rendered state of a resolved shadow node. Falls back to the box
+ * model (the channel {@link clickClosedShadow} itself uses) when the page-side
+ * read is unavailable: a box exists only for a laid-out element, so it answers
+ * "is it there and drawn" even if nothing else does.
+ */
+async function readRenderedState(
+  session: CdpSession,
+  nodeId: number,
+  disabledByAttribute: boolean,
+): Promise<Omit<ShadowProbe, 'matchCount' | 'state'>> {
+  try {
+    const resolved = (await session.send('DOM.resolveNode', { nodeId })) as {
+      object?: { objectId?: string }
+    }
+    const objectId = resolved.object?.objectId
+    if (!objectId) throw new Error('no object id')
+    const call = (await session.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: readShadowActionability.toString(),
+      returnByValue: true,
+    })) as {
+      result?: { value?: { visible?: unknown; enabled?: unknown; occluded?: unknown; rect?: unknown } }
+    }
+    const value = call.result?.value
+    if (!value || typeof value.visible !== 'boolean') throw new Error('unreadable value')
+    const rect = value.rect as { x?: number; y?: number; w?: number; h?: number } | null
+    return {
+      visible: value.visible,
+      enabled: value.enabled !== false && !disabledByAttribute,
+      occluded: value.occluded === true,
+      rect:
+        rect && typeof rect.w === 'number' && typeof rect.h === 'number'
+          ? { x: rect.x ?? 0, y: rect.y ?? 0, w: rect.w, h: rect.h }
+          : null,
+    }
+  } catch {
+    let box: { model?: CdpBoxModel; content?: unknown } | undefined
+    try {
+      box = (await session.send('DOM.getBoxModel', { nodeId })) as typeof box
+    } catch {
+      box = undefined
+    }
+    const center = boxCenter(box)
+    return {
+      visible: center !== null,
+      enabled: !disabledByAttribute,
+      occluded: false,
+      rect: null,
+    }
+  }
+}
+
+/**
+ * Answer "is this target there, drawn and usable?" for an element inside a
+ * CLOSED shadow root — the question the in-page kernel structurally cannot ask,
+ * because a closed root exposes no element to page JS.
+ *
+ * `present` / `visible` / `enabled` readiness waits and the `element_exists`
+ * condition otherwise get an empty kernel result for such a target and time out
+ * on a button the driver can click all day.
+ */
+export async function probeClosedShadow(
+  session: CdpSession,
+  target: Target,
+): Promise<ShadowProbe> {
+  const doc = (await session.send('DOM.getDocument', {
+    depth: -1,
+    pierce: true,
+  })) as { root?: CdpNode }
+  const candidates = buildShadowCandidates(doc.root ?? ({} as CdpNode))
+  const specs = [target.primary, ...(target.fallbacks ?? [])].filter((s): s is TargetSpec => !!s)
+  const best = matchCandidates(candidates, target)
+  // Same first-spec-wins rule the kernel counts with, so a rich target and a
+  // flat selector never disagree about how many elements answered.
+  let matched: ShadowCandidate[] = []
+  for (const spec of specs) {
+    const hits = candidates.filter((c) => candidateMatches(c, spec))
+    if (hits.length > 0) {
+      matched = hits
+      break
+    }
+  }
+  const nodeId = best?.node.nodeId
+  if (!best || matched.length === 0 || typeof nodeId !== 'number') {
+    return {
+      matchCount: matched.length,
+      state: 'missing',
+      visible: false,
+      enabled: false,
+      occluded: false,
+      rect: null,
+    }
+  }
+  const observed = await readRenderedState(session, nodeId, best.disabled)
+  return {
+    matchCount: matched.length,
+    state: observed.visible && observed.enabled && !observed.occluded ? 'ready' : 'blocked',
+    ...observed,
+  }
+}
+
+/**
  * Click (or hover) an element inside a closed shadow root via trusted CDP
  * input events. Resolves the target inside the pierced tree, scrolls it into
  * view, and dispatches real mouse input at its center — input the browser

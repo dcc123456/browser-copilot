@@ -187,8 +187,64 @@ describe('composeWorkflowFromDraft', () => {
     })
   })
 
-  it('derives the top-level trigger mirror from the graph trigger node', async () => {
-    const conversation = 'c-compose'
+  it('anchors a cross-site session on every origin it really acted on', async () => {
+    const conversation = 'c-multisite'
+    const draft = await append(conversation, 'wf_op_new-tab', { url: 'https://github.com/o/r' })
+    draft.originUrl = 'https://github.com/o/r'
+    draft.actedOrigins = ['https://github.com', 'https://creator.xiaohongshu.com']
+
+    const out = await composeWorkflowFromDraft(conversation, { save: false })
+    if ('error' in out) throw new Error(out.error)
+    // Without this the graph's own first step is refused on replay
+    // (WRONG_ORIGIN) and its verification never executes a step.
+    expect(out.workflow.settings.pageContext).toEqual({
+      origin: 'https://github.com',
+      additionalOrigins: ['https://creator.xiaohongshu.com'],
+    })
+    expect(out.workflow.settings.generationOriginUrl).toBe('https://github.com/o/r')
+  })
+
+  it('writes no explicit anchor for a single-site session', async () => {
+    const conversation = 'c-singlesite'
+    const draft = await append(conversation, 'wf_op_new-tab', { url: 'https://github.com/o/r' })
+    draft.originUrl = 'https://github.com/o/r'
+    draft.actedOrigins = ['https://github.com']
+
+    const out = await composeWorkflowFromDraft(conversation, { save: false })
+    if ('error' in out) throw new Error(out.error)
+    // Deriving from generationOriginUrl already covers it, and a frozen
+    // fingerprint would block the reanchor repair from moving the anchor.
+    expect(out.workflow.settings.pageContext).toBeUndefined()
+  })
+
+  it('says so on the save card when the verification replay failed', async () => {
+    const conversation = 'c-unverified'
+    await append(conversation, 'wf_op_new-tab', { url: 'https://shop.test/list' })
+
+    const out = await composeWorkflowFromDraft(conversation, {
+      save: true,
+      trial: async (workflow) => ({
+        workflow,
+        record: {
+          outcome: 'failed',
+          at: 1,
+          full: false,
+          coveredSteps: 1,
+          totalSteps: 22,
+          failureCode: 'WRONG_ORIGIN',
+          reason: '导航目标（https://github.com）不是该工作流的目标站点',
+        },
+      }),
+    })
+    if ('error' in out) throw new Error(out.error)
+    // A failed verification never blocks the save — but it must not be silent.
+    expect(out.saved).toBe(true)
+    expect(out.workflow.settings.saveWarnings?.join('\n')).toContain('验证未通过')
+    expect(out.workflow.settings.saveWarnings?.join('\n')).toContain('1/22')
+    expect(out.workflow.settings.saveWarnings?.join('\n')).toContain('WRONG_ORIGIN')
+  })
+
+  it('derives the top-level trigger mirror from the graph trigger node', async () => {    const conversation = 'c-compose'
     const draft = await append(conversation, 'wf_op_event-click', { selector: '#x' })
     // Simulate the user picking a schedule in the save card.
     const triggerNode = draft.nodes.find((n) => n.data.blockId === 'trigger')!

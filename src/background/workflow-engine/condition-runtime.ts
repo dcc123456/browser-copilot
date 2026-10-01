@@ -11,7 +11,7 @@
  *
  * @module background/workflow-engine/condition-runtime
  */
-import type { SemanticLocator } from '../../lib/workflow/element-fingerprint'
+import type { ConditionTarget } from '../../lib/workflow/element-fingerprint'
 import type { WorkflowCondition } from '../../lib/workflow/conditions'
 import {
   conditionLocatorKey,
@@ -23,15 +23,15 @@ import {
  * FRESH state per call (same rule as the readiness probe).
  */
 export interface ConditionPageProbe {
-  exists(target: SemanticLocator): Promise<boolean>
-  visible(target: SemanticLocator): Promise<boolean>
-  enabled(target: SemanticLocator): Promise<boolean>
+  exists(target: ConditionTarget): Promise<boolean>
+  visible(target: ConditionTarget): Promise<boolean>
+  enabled(target: ConditionTarget): Promise<boolean>
   /** The element's text, or undefined when it does not exist. */
-  text(target: SemanticLocator): Promise<string | undefined>
+  text(target: ConditionTarget): Promise<string | undefined>
   /** One attribute value, or undefined when absent (element or attribute). */
-  attribute(target: SemanticLocator, name: string): Promise<string | undefined>
+  attribute(target: ConditionTarget, name: string): Promise<string | undefined>
   /** How many elements the locator matches. */
-  count(target: SemanticLocator): Promise<number>
+  count(target: ConditionTarget): Promise<number>
   /** The current page URL. */
   url(): Promise<string | undefined>
 }
@@ -263,18 +263,20 @@ export async function evaluateAllConditions(
 
 import type { Target } from '../../lib/ops'
 import { execOnActiveTab, resolveAutomationTab } from '../driver'
-import { targetSpecsFromSemantic } from '../../lib/workflow/element-fingerprint'
+import { conditionTargetSpecs } from '../../lib/workflow/element-fingerprint'
 import type { ScopeWindow } from '../automation-scope'
 
 /**
- * The kernel Target a condition observes: every spec the semantic locator can
- * honestly express (see `targetSpecsFromSemantic`). An observation must be able
- * to find the element the node itself can click, so a condition walks the SAME
- * candidate chain replay does rather than betting on one spec. Nothing is
- * refused here: a locator with no expressible spec reads as "not observable".
+ * The kernel Target a condition observes: every spec the recorded target can
+ * honestly express (see `conditionTargetSpecs`). An observation must be able to
+ * find the element the node itself can click, so a condition walks the SAME
+ * candidate chain replay does rather than betting on one spec — and a target
+ * the generator recorded as a rich `Target` is not silently unobservable.
+ * Nothing is refused here: a target with no expressible spec reads as
+ * "not observable".
  */
-function targetFor(target: SemanticLocator): Target | undefined {
-  const [primary, ...fallbacks] = targetSpecsFromSemantic(target)
+function targetFor(target: ConditionTarget): Target | undefined {
+  const [primary, ...fallbacks] = conditionTargetSpecs(target)
   return primary ? { primary, fallbacks } : undefined
 }
 

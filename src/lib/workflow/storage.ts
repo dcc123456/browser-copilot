@@ -16,6 +16,7 @@ import { fileStorageArea } from '../fs-store'
 import { withKeyLock } from '../key-lock'
 import { migrateWorkflow } from './migrate'
 import { normalizeTrialRun } from './trial-run'
+import { pageContextOf } from './page-context'
 import type {
   Workflow,
   WorkflowEdge,
@@ -97,6 +98,16 @@ export function asWorkflow(value: unknown): Workflow | null {
   // `false` is the opt-out flag, an object is a record — and an object that
   // does not rebuild into a record is neither, so it is dropped.
   const trialRunRecord = normalizeTrialRun(rawTrialRun)
+  // The page-context anchor set. It was missing from this whitelist, so the
+  // reanchor repair wrote `settings.pageContext` and the next save dropped it —
+  // the guard went back to refusing the very site the repair had moved it to.
+  // Normalized through the module that reads it, so storage never grows a
+  // second, divergent idea of what a valid fingerprint is.
+  const rawPageContext = rawSettings.pageContext
+  const pageContext =
+    rawPageContext && typeof rawPageContext === 'object'
+      ? pageContextOf({ settings: { pageContext: rawPageContext } })
+      : undefined
   const settings: WorkflowSettings = {
     ...DEFAULT_SETTINGS,
     saveLog: rawSettings.saveLog === true,
@@ -124,6 +135,7 @@ export function asWorkflow(value: unknown): Workflow | null {
     ...(typeof rawSettings.generationOriginUrl === 'string'
       ? { generationOriginUrl: rawSettings.generationOriginUrl }
       : {}),
+    ...(pageContext ? { pageContext } : {}),
     ...(typeof rawSettings.defaultWaitMs === 'number'
       ? { defaultWaitMs: rawSettings.defaultWaitMs }
       : {}),

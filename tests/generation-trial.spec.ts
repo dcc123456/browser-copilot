@@ -19,7 +19,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   TRIAL_BUDGET_MS,
+  commitCutoffNodeId,
   executionPath,
+  isCommitNode,
   isUnsafeNode,
   normalizeTrialRun,
   skippedTrialRecord,
@@ -54,6 +56,11 @@ function node(blockId: string, data: Record<string, unknown> = {}): WorkflowNode
   }
 }
 
+/** A step whose LABEL carries the prose — what a graph without `__reliability` has. */
+function labeled(blockId: string, label: string, data: Record<string, unknown> = {}) {
+  return { ...node(blockId, data), label }
+}
+
 /** A trigger followed by `steps`, wired as the single chain the engine walks. */
 function chain(steps: WorkflowNode[], name = 'trial'): Workflow {
   const trigger = node('trigger', { type: 'manual' })
@@ -84,6 +91,30 @@ function unsafeStep(): WorkflowNode {
   return node('event-click', {
     selector: '#pay',
     __reliability: { intent: 'submit the order' },
+  })
+}
+
+/**
+ * The cover-image upload of the real 小红书 graph: unsafe to the keyword test
+ * because the page it uploads to is called 图文发布, and a cutoff that refuses it
+ * is a replay that can never reach the draft.
+ */
+function uploadStep(): WorkflowNode {
+  return node('upload-file', {
+    selector: 'input[type="file"]',
+    __reliability: { intent: '把 canvas 生成的封面图上传到图文发布的图片上传入口' },
+  })
+}
+
+/**
+ * The body-text fill of the same graph: a keyword hit on 发布 inside a sentence
+ * whose whole point is forbidding it.
+ */
+function fillBodyStep(): WorkflowNode {
+  return node('forms', {
+    selector: '.ql-editor',
+    value: '{{aiBody}}',
+    __reliability: { intent: '在正文富文本编辑器填写 AI 生成的笔记正文，不点击任何发布按钮' },
   })
 }
 
@@ -134,12 +165,132 @@ describe('trial cutoff', () => {
     )
   })
 
+  it('a forms fill is not a cutoff', () => {
+    // Refilling a title field is harmless, and the executor sends a fill when the
+    // node carries no `action`. A graph generated for 小红书 stopped its trial at
+    // exactly such a node because the contract inference had read the missing
+    // verb as a submit.
+    const wf = chain([
+      readStep(),
+      node('forms', { selector: '#title', value: 'a note title' }),
+      node('event-click', { selector: '#draft' }),
+    ])
+    expect(trialCutoffNodeId(wf)).toBeUndefined()
+  })
+
   it('has nothing to prove when the graph starts by committing', () => {
     const submit = unsafeStep()
     expect(trialHasNothingToProve(chain([submit, readStep()]))).toBe(true)
     expect(trialHasNothingToProve(chain([readStep(), submit]))).toBe(false)
     // No cutoff means the whole graph is safe, which is the opposite of nothing.
     expect(trialHasNothingToProve(chain([readStep()]))).toBe(false)
+  })
+
+  it('honours the cutoff the caller already chose', () => {
+    // Under the commit policy this graph has no cutoff at all — and asking
+    // "is there nothing to prove?" without saying so would re-derive the
+    // first-unsafe one and skip a trial that has the whole graph to prove.
+    const cover = uploadStep()
+    const wf = chain([cover, readStep()])
+    expect(trialHasNothingToProve(wf, commitCutoffNodeId(wf) ?? null)).toBe(false)
+    // Saying nothing keeps the old default; a cutoff on the FIRST step is the skip.
+    expect(trialHasNothingToProve(wf)).toBe(true)
+    expect(trialHasNothingToProve(chain([cover]), cover.id)).toBe(true)
+  })
+})
+
+describe('commit cutoff (the run-to-draft policy)', () => {
+  it('lets a step that merely prepares a commit through', () => {
+    // The real defect: a generated 小红书 graph is unsafe from the intent-keyword
+    // test because the NAME of its page contains 发布, so the first-unsafe cutoff
+    // stopped the replay in front of the cover upload and the body fill. Neither
+    // commits anything, and a replay that refuses them proves nothing.
+    const wf = chain([uploadStep(), fillBodyStep(), node('event-click', { selector: '#draft' })])
+    expect(commitCutoffNodeId(wf)).toBeUndefined()
+    expect(trialCutoffNodeId(wf)).toBe(wf.drawflow.nodes[1]!.id)
+  })
+
+  it('stops at the press of the commit control', () => {
+    const publish = node('event-click', {
+      selector: '#publish',
+      __reliability: { intent: '点击发布按钮，把笔记发布出去' },
+    })
+    const wf = chain([uploadStep(), fillBodyStep(), publish, readStep()])
+    expect(commitCutoffNodeId(wf)).toBe(publish.id)
+    expect(isCommitNode(publish)).toBe(true)
+  })
+
+  it('stops at a submit, a send-key, a posted script and a webhook', () => {
+    for (const step of [
+      node('forms', { selector: '#f', action: 'submit', __reliability: { intent: '提交表单' } }),
+      node('press-key', { selector: '#box', __reliability: { intent: 'press Enter to send' } }),
+      node('javascript-code', { code: 'x', __reliability: { intent: 'publish the note' } }),
+      node('webhook', { url: 'https://x' }),
+    ]) {
+      expect(commitCutoffNodeId(chain([readStep(), step]))).toBe(step.id)
+    }
+  })
+
+  it('never treats a read, a navigation or a variable as a commit', () => {
+    for (const step of [
+      readStep(),
+      node('new-tab', { url: 'https://x' }),
+      node('set-variable', { variableName: 'a', value: 'b' }),
+      node('get-text', { selector: '#t', variableName: 'v' }),
+    ]) {
+      expect(isCommitNode(step)).toBe(false)
+    }
+  })
+
+  it('reads the LABEL when the step has no contract prose', () => {
+    // A `click` generated without `__reliability` is repeat-safe by block id
+    // alone, and everything that says it presses 发布 lives in its label. The
+    // commit policy has to see it, or the one action this policy exists to
+    // refuse is the one it runs.
+    const publish = labeled('event-click', '点击「发布」按钮', { selector: '#publish' })
+    const submit = labeled('forms', '点击发布提交表单', { selector: '#f' })
+    expect(isCommitNode(publish)).toBe(true)
+    expect(isCommitNode(submit)).toBe(true)
+    expect(commitCutoffNodeId(chain([uploadStep(), fillBodyStep(), publish, submit]))).toBe(
+      publish.id,
+    )
+  })
+
+  it('reads an intent that names the commit verb, even as a prohibition', () => {
+    // 「…绝不发布」 forbids the publish and the keyword test still calls the step
+    // unsafe, so the commit run stops in front of it. Deliberate: the test cannot
+    // tell «点击发布，不要重复» from «绝不点击发布», and the two possible mistakes are
+    // not equal — stopping early is a `partial` in the report, firing the wrong
+    // click publishes a note nobody approved.
+    const publishish = labeled('event-click', '在图文发布页保存草稿', {
+      selector: '#draft',
+      __reliability: { intent: '点击「暂存草稿」按钮，把笔记留在草稿箱，绝不发布' },
+    })
+    expect(isCommitNode(publishish)).toBe(true)
+    expect(commitCutoffNodeId(chain([fillBodyStep(), publishish]))).toBe(publishish.id)
+  })
+
+  it('does not second-guess a written intent with the label', () => {
+    // The label names the PAGE («图文发布»); the intent says what the step does,
+    // and the keyword test has already read it. Reading the label on top would put
+    // every step on this page behind a cutoff.
+    const saveDraft = labeled('event-click', '在图文发布页保存草稿', {
+      selector: '#draft',
+      __reliability: { intent: '点击「暂存草稿」按钮，把笔记留在草稿箱' },
+    })
+    expect(isCommitNode(saveDraft)).toBe(false)
+    expect(commitCutoffNodeId(chain([fillBodyStep(), saveDraft, readStep()]))).toBeUndefined()
+  })
+
+  it('cannot turn a step that does not actuate into a commit', () => {
+    // The label scan only decides WHETHER to look at the block id; a read whose
+    // text happens to mention 发布 stays a read.
+    const read = labeled('get-text', '读取发布按钮的文案', {
+      selector: '#publish-btn',
+      variableName: 'label',
+    })
+    expect(isCommitNode(read)).toBe(false)
+    expect(commitCutoffNodeId(chain([read, readStep()]))).toBeUndefined()
   })
 })
 
@@ -268,6 +419,120 @@ describe('runGenerationTrial', () => {
     expect(out.record).toMatchObject({ outcome: 'partial', coveredSteps: 1, totalSteps: 2 })
   })
 
+  it('runs the preparing steps when the caller opted into the commit cutoff', async () => {
+    // The upload and the body fill are unsafe to the keyword test and harmless to
+    // replay; the publish click is the one step no replay may re-fire. Under this
+    // policy the run is handed NO cutoff at all, because the graph's only unsafe
+    // step is the draft save — which is what "did the workflow do its job" asks.
+    const wf = chain([uploadStep(), fillBodyStep(), node('event-click', { selector: '#draft' })])
+    const seen: Parameters<TrialExecute>[1][] = []
+    const execute = vi.fn(async (_workflow: Workflow, options: Parameters<TrialExecute>[1]) => {
+      seen.push(options)
+      return resultOf({
+        outcome: 'ok',
+        completedNodeIds: wf.drawflow.nodes.slice(1).map((n) => n.id),
+      })
+    })
+    const out = await runGenerationTrial(wf, { execute, commitCutoffOnly: true })
+    expect(seen[0]?.stopBefore).toBeUndefined()
+    expect(out.record).toMatchObject({ outcome: 'passed', full: true, coveredSteps: 3 })
+    expect(trialCertifies(out.record)).toBe(true)
+  })
+
+  it('still stops a commit-only run in front of the publish click', async () => {
+    const publish = node('event-click', {
+      selector: '#publish',
+      __reliability: { intent: '点击发布，把笔记发布出去' },
+    })
+    const wf = chain([uploadStep(), fillBodyStep(), publish])
+    const seen: Parameters<TrialExecute>[1][] = []
+    const execute = vi.fn(async (_workflow: Workflow, options: Parameters<TrialExecute>[1]) => {
+      seen.push(options)
+      return resultOf({
+        outcome: 'ok',
+        completedNodeIds: [wf.drawflow.nodes[1]!.id, wf.drawflow.nodes[2]!.id],
+        stoppedBefore: publish.id,
+      })
+    })
+    const out = await runGenerationTrial(wf, { execute, commitCutoffOnly: true })
+    expect(seen[0]?.stopBefore).toBe(publish.id)
+    expect(out.record).toMatchObject({
+      outcome: 'partial',
+      full: false,
+      cutoffNodeId: publish.id,
+      coveredSteps: 2,
+    })
+    expect(trialCertifies(out.record)).toBe(false)
+  })
+
+  it('does not count the trigger as a step it proved', async () => {
+    // Round 9 reported `13/12 steps` for a graph that had run everything: the
+    // engine lists the trigger among the nodes that executed, the trial's
+    // `totalSteps` is the chain of STEPS. One currency, or the ratio says the
+    // replay covered more than the graph contains.
+    const wf = chain([readStep(), uploadStep(), fillBodyStep()])
+    const execute = vi.fn(async () =>
+      resultOf({ outcome: 'ok', completedNodeIds: wf.drawflow.nodes.map((n) => n.id) }),
+    )
+    const out = await runGenerationTrial(wf, { execute })
+    expect(out.record).toMatchObject({ outcome: 'passed', coveredSteps: 3, totalSteps: 3 })
+  })
+
+  it('counts a loop body once, not once per iteration', async () => {
+    // `completedNodeIds` is the engine's run log: a node that ran three times is
+    // in it three times. Coverage is about which steps ran.
+    const wf = chain([readStep(), node('loop-elements', { selector: 'li' })])
+    const loopId = wf.drawflow.nodes[2]!.id
+    const execute = vi.fn(async () =>
+      resultOf({
+        outcome: 'ok',
+        completedNodeIds: [wf.drawflow.nodes[0]!.id, wf.drawflow.nodes[1]!.id, loopId, loopId, loopId],
+      }),
+    )
+    const out = await runGenerationTrial(wf, { execute })
+    expect(out.record).toMatchObject({ coveredSteps: 2, totalSteps: 2 })
+  })
+
+  it('hands the caller the run itself, for the goal it must judge', async () => {
+    // The record describes coverage; only the execution carries the variables and
+    // the per-node completion the L1/L2/L3 certification is built from.
+    const wf = chain([readStep()])
+    const execute = vi.fn(async () =>
+      resultOf({ outcome: 'ok', completedNodeIds: [wf.drawflow.nodes[1]!.id], variables: { hit: '1' } }),
+    )
+    const out = await runGenerationTrial(wf, { execute })
+    expect(out.result).toMatchObject({ outcome: 'ok', variables: { hit: '1' } })
+  })
+
+  it('hands the run the declared inputs the caller supplied', async () => {
+    const seen: Parameters<TrialExecute>[1][] = []
+    const execute = vi.fn(async (_workflow: Workflow, options: Parameters<TrialExecute>[1]) => {
+      seen.push(options)
+      return resultOf()
+    })
+    await runGenerationTrial(chain([readStep()]), { execute, inputs: { topic: '周末探店' } })
+    expect(seen[0]?.inputs).toEqual({ topic: '周末探店' })
+    // Saying nothing keeps the run exactly as it was: no inputs key, so the
+    // engine seeds only from the declared defaults.
+    seen.length = 0
+    await runGenerationTrial(chain([readStep()]), { execute })
+    expect('inputs' in (seen[0] ?? {})).toBe(false)
+  })
+
+  it('keeps the default policy at the first unsafe step, commit or not', async () => {
+    // The opt-in must not quietly become the default: an upload the keyword test
+    // calls unsafe still cuts the trial of a run nobody asked for.
+    const cover = uploadStep()
+    const wf = chain([readStep(), cover])
+    const seen: Parameters<TrialExecute>[1][] = []
+    const execute = vi.fn(async (_workflow: Workflow, options: Parameters<TrialExecute>[1]) => {
+      seen.push(options)
+      return resultOf({ outcome: 'ok', completedNodeIds: [wf.drawflow.nodes[1]!.id] })
+    })
+    await runGenerationTrial(wf, { execute })
+    expect(seen[0]?.stopBefore).toBe(cover.id)
+  })
+
   it('turns a throw into a skipped trial on the SAME graph', async () => {
     const wf = chain([readStep()])
     const out = await runGenerationTrial(wf, {
@@ -317,9 +582,7 @@ describe('runGenerationTrial', () => {
     expect(healed.data['selector']).toBe('#pay')
     expect(healed.data['__resolution']).toMatchObject({ rung: 2, to: 'css|#pay' })
     // The caller's graph is never mutated in place: the save writes the copy.
-    expect(wf.drawflow.nodes.find((n) => n.id === click.id)!.data['selector']).toBe(
-      '.order button',
-    )
+    expect(wf.drawflow.nodes.find((n) => n.id === click.id)!.data['selector']).toBe('.order button')
   })
 
   it('records a timeout when the budget runs out', async () => {
@@ -328,9 +591,13 @@ describe('runGenerationTrial', () => {
       budgetMs: 5,
       execute: (_workflow, options) =>
         new Promise<ExecuteWorkflowResult>((resolve) => {
-          options.signal.addEventListener('abort', () => resolve(resultOf({ outcome: 'cancelled' })), {
-            once: true,
-          })
+          options.signal.addEventListener(
+            'abort',
+            () => resolve(resultOf({ outcome: 'cancelled' })),
+            {
+              once: true,
+            },
+          )
         }),
     })
     expect(out.record.outcome).toBe('timeout')
@@ -345,9 +612,13 @@ describe('runGenerationTrial', () => {
       signal: controller.signal,
       execute: (_workflow, options) =>
         new Promise<ExecuteWorkflowResult>((resolve) => {
-          options.signal.addEventListener('abort', () => resolve(resultOf({ outcome: 'cancelled' })), {
-            once: true,
-          })
+          options.signal.addEventListener(
+            'abort',
+            () => resolve(resultOf({ outcome: 'cancelled' })),
+            {
+              once: true,
+            },
+          )
         }),
     })
     controller.abort()
@@ -376,12 +647,18 @@ describe('runGenerationTrial', () => {
 describe('createTrialExecute', () => {
   it('runs the graph as a verification run, with no AI takeover', async () => {
     const executeWorkflow = vi.fn(
-      async (_workflow: Workflow, _options: ExecuteWorkflowOptions): Promise<ExecuteWorkflowResult> =>
-        resultOf(),
+      async (
+        _workflow: Workflow,
+        _options: ExecuteWorkflowOptions,
+      ): Promise<ExecuteWorkflowResult> => resultOf(),
     )
     const execute = createTrialExecute({ executeWorkflow, scopeWindowId: 7 })
     const wf = chain([readStep()])
-    await execute(wf, { stopBefore: 'n9', signal: new AbortController().signal, traceEntry: 'VERIFY' })
+    await execute(wf, {
+      stopBefore: 'n9',
+      signal: new AbortController().signal,
+      traceEntry: 'VERIFY',
+    })
     expect(executeWorkflow).toHaveBeenCalledWith(wf, {
       source: 'manual',
       traceEntry: 'VERIFY',
@@ -392,6 +669,26 @@ describe('createTrialExecute', () => {
     // The trial proves the GRAPH, so a model that fixes a step mid-run would
     // prove nothing: takeover is never passed.
     expect(executeWorkflow.mock.calls[0]![1].aiTakeover).toBeUndefined()
+  })
+
+  it('seeds the run with the inputs the caller supplied', async () => {
+    // A generated graph that references {{topic}} is PARAMETERISED, and the
+    // panel asks a human for the value when Run is clicked. An unattended replay
+    // has nobody to ask — without this the step fails UNRESOLVED_INPUT and the
+    // repair loop walks its budget over a caller argument nobody supplied.
+    const executeWorkflow = vi.fn(
+      async (
+        _workflow: Workflow,
+        _options: ExecuteWorkflowOptions,
+      ): Promise<ExecuteWorkflowResult> => resultOf(),
+    )
+    const execute = createTrialExecute({ executeWorkflow, scopeWindowId: 7 })
+    await execute(chain([readStep()]), {
+      signal: new AbortController().signal,
+      traceEntry: 'VERIFY',
+      inputs: { topic: '周末探店' },
+    })
+    expect(executeWorkflow.mock.calls[0]![1]).toMatchObject({ variables: { topic: '周末探店' } })
   })
 })
 

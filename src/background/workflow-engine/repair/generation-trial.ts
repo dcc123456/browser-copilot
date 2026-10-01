@@ -21,8 +21,11 @@
  */
 
 import { applySelfHeal } from '../../../lib/workflow/self-heal'
+import { rememberFailedRun } from '../auto-repair/failure-snapshot'
 import {
+  commitCutoffNodeId,
   executionPath,
+  isTriggerNode,
   skippedTrialRecord,
   trialCutoffNodeId,
   trialHasNothingToProve,
@@ -31,10 +34,7 @@ import {
   type TrialRunRecord,
 } from '../../../lib/workflow/trial-run'
 import type { Workflow } from '../../../lib/workflow/types'
-import type {
-  ExecuteWorkflowOptions,
-  ExecuteWorkflowResult,
-} from '../run-workflow'
+import type { ExecuteWorkflowOptions, ExecuteWorkflowResult } from '../run-workflow'
 
 /** The run primitive shape the trial needs — production's `executeWorkflow`. */
 export type TrialExecuteWorkflow = (
@@ -45,7 +45,13 @@ export type TrialExecuteWorkflow = (
 /** The one run call the trial makes, with its options already narrowed. */
 export type TrialExecute = (
   workflow: Workflow,
-  options: { stopBefore?: string; signal: AbortSignal; traceEntry: 'VERIFY' },
+  options: {
+    stopBefore?: string
+    signal: AbortSignal
+    traceEntry: 'VERIFY'
+    /** The workflow's declared inputs, supplied by the caller. */
+    inputs?: Record<string, unknown>
+  },
 ) => Promise<ExecuteWorkflowResult>
 
 export interface GenerationTrialDeps {
@@ -55,6 +61,52 @@ export interface GenerationTrialDeps {
   /** Caller's cancellation (the generation turn was stopped): a `cancelled` trial. */
   signal?: AbortSignal
   now?: () => number
+  /**
+   * The values for the inputs the workflow DECLARES (its trigger `parameters`).
+   *
+   * A generated graph that searches for `{{keyword}}` is parameterised on
+   * purpose, and the run that replays it has to say what the keyword is — the
+   * same thing the panel's run button asks a human for. Seeded under the
+   * declared defaults by `seedFromTrigger`, so a parameter whose default the
+   * generation recorded still wins when the caller says nothing. Without a value
+   * and without a default the step fails `UNRESOLVED_INPUT`, which is the honest
+   * outcome: the graph never ran, so it proves nothing.
+   */
+  inputs?: Record<string, unknown>
+  /**
+   * Stop at the graph's COMMIT step instead of at its first unsafe step.
+   *
+   * Off by default, and the default is the right thing for a run nobody asked
+   * for. It is wrong for proving a workflow whose entire job is to write
+   * something: `idempotencyOf` reads prose, so a cover-image upload whose intent
+   * says "上传到图文发布的图片上传入口" is unsafe because the NAME of the page
+   * contains 发布, and the replay stops in front of it. Filled and healed for
+   * four steps, such a graph never proves the other eight and can never be
+   * certified, because a prefix is not a pass.
+   *
+   * With this on, the steps that only prepare a commit DO run — that is the
+   * evidence being asked for, and the caller opted into it explicitly. What still
+   * stops the run is the press of the control itself: a click, a submit, a key
+   * that sends, a posted script, a webhook. 发布 stays unreachable.
+   */
+  commitCutoffOnly?: boolean
+}
+
+/**
+ * How many STEPS the run settled.
+ *
+ * The engine's list is in the engine's currency: it includes the trigger node,
+ * and it includes a loop body once per iteration. `totalSteps` is the chain of
+ * steps the graph can reach, in the trial's currency. Reduced to node ids rather
+ * than to a count, so the two report the same thing and `12/12` means "the whole
+ * graph ran" instead of `13/12`.
+ */
+function countedSteps(workflow: Workflow, completedNodeIds: string[] | undefined): number {
+  if (!completedNodeIds) return 0
+  const steps = new Set(
+    workflow.drawflow.nodes.filter((node) => !isTriggerNode(node)).map((node) => node.id),
+  )
+  return new Set(completedNodeIds.filter((id) => steps.has(id))).size
 }
 
 /**
@@ -63,27 +115,35 @@ export interface GenerationTrialDeps {
  * Returns the (possibly healed) workflow to save plus the record to store on
  * `settings.trialRun`. The two are one object out because the healing and the
  * evidence describe the same run — a caller that saved the healed graph but
- * dropped the record would hide that the first replay had to guess.
+ * dropped the record would hide that the first replay had to guess. `result` is
+ * the run itself, for the caller that goes on to verify the GOAL against the live
+ * page: the record describes coverage, and only the execution carries the
+ * variables and the per-node completion the certification is built from.
  */
 export async function runGenerationTrial(
   workflow: Workflow,
   deps: GenerationTrialDeps,
-): Promise<{ workflow: Workflow; record: TrialRunRecord }> {
+): Promise<{ workflow: Workflow; record: TrialRunRecord; result?: ExecuteWorkflowResult }> {
   const now = deps.now ?? Date.now
   const at = now()
   // `settings.trialRun === false` is the opt-out (an object is a record).
   if (workflow.settings?.trialRun === false) {
     return { workflow, record: skippedTrialRecord('disabled by settings', at) }
   }
-  if (trialHasNothingToProve(workflow)) {
+  const totalSteps = executionPath(workflow).length
+  const cutoffNodeId = deps.commitCutoffOnly
+    ? commitCutoffNodeId(workflow)
+    : trialCutoffNodeId(workflow)
+  if (trialHasNothingToProve(workflow, cutoffNodeId ?? null)) {
     return {
       workflow,
-      record: skippedTrialRecord('its first step cannot be repeated, so nothing is safe to prove', at),
+      record: skippedTrialRecord(
+        'its first step cannot be repeated, so nothing is safe to prove',
+        at,
+      ),
     }
   }
 
-  const totalSteps = executionPath(workflow).length
-  const cutoffNodeId = trialCutoffNodeId(workflow)
   const budgetMs = deps.budgetMs ?? TRIAL_BUDGET_MS
   const controller = new AbortController()
   let timedOut = false
@@ -105,6 +165,7 @@ export async function runGenerationTrial(
   try {
     result = await deps.execute(workflow, {
       ...(cutoffNodeId ? { stopBefore: cutoffNodeId } : {}),
+      ...(deps.inputs ? { inputs: deps.inputs } : {}),
       signal: controller.signal,
       traceEntry: 'VERIFY',
     })
@@ -141,7 +202,7 @@ export async function runGenerationTrial(
       ...(result.stoppedBefore ? { stoppedBefore: result.stoppedBefore } : {}),
       ...(result.trace?.failedNodeId ? { failedNodeId: result.trace.failedNodeId } : {}),
       ...(result.error ? { error: result.error } : {}),
-      completedSteps: result.completedNodeIds?.length ?? 0,
+      completedSteps: countedSteps(workflow, result.completedNodeIds),
       degradedSteps: result.degradations?.length,
       timedOut,
       cancelledByCaller: !!deps.signal?.aborted,
@@ -152,16 +213,28 @@ export async function runGenerationTrial(
     { ...(cutoffNodeId ? { cutoffNodeId } : {}), totalSteps },
   )
 
+  // A failed trial is the failure the repair loop needs to see: the panel run
+  // path remembers its own, but a trial replay is the only execution a freshly
+  // generated graph ever gets, and without this the repair orchestrator would be
+  // handed a workflow id and no evidence at all.
+  if (record.outcome === 'failed' && result.trace) {
+    try {
+      rememberFailedRun(workflow.id, result.runId, result.trace)
+    } catch (error) {
+      console.warn('[trial] could not remember the failed run', error)
+    }
+  }
+
   // A step that degrades to act is a step the NEXT replay should not have to
   // guess at: the winner goes back into the graph here, at the one moment we
   // know the page is open and the answer is fresh.
   const degradations = result.degradations ?? []
-  if (degradations.length === 0) return { workflow, record }
+  if (degradations.length === 0) return { workflow, record, result }
   const healed = applySelfHeal(workflow, degradations, {
     ...(result.runId ? { runId: result.runId } : { runId: 'trial' }),
     at,
   })
-  return { workflow: healed.workflow, record }
+  return { workflow: healed.workflow, record, result }
 }
 
 /**
@@ -188,6 +261,7 @@ export function createTrialExecute(deps: {
       traceEntry: runOptions.traceEntry,
       ...(deps.scopeWindowId !== undefined ? { scopeWindowId: deps.scopeWindowId } : {}),
       ...(runOptions.stopBefore ? { stopBefore: runOptions.stopBefore } : {}),
+      ...(runOptions.inputs ? { variables: runOptions.inputs } : {}),
       signal: runOptions.signal,
     })
 }
@@ -205,6 +279,7 @@ export function createTrialExecute(deps: {
 export type TrialRunner = (workflow: Workflow) => Promise<{
   workflow: Workflow
   record: TrialRunRecord
+  result?: ExecuteWorkflowResult
 }>
 
 /** Put a trial's record on the workflow the trial describes. */
@@ -217,6 +292,10 @@ export function createTrialRunner(deps: {
   scopeWindowId?: number
   budgetMs?: number
   signal?: AbortSignal
+  /** See {@link GenerationTrialDeps.commitCutoffOnly}. */
+  commitCutoffOnly?: boolean
+  /** See {@link GenerationTrialDeps.inputs}. */
+  inputs?: Record<string, unknown>
 }): TrialRunner {
   const execute = createTrialExecute({
     executeWorkflow: deps.executeWorkflow,
@@ -227,5 +306,7 @@ export function createTrialRunner(deps: {
       execute,
       ...(deps.budgetMs !== undefined ? { budgetMs: deps.budgetMs } : {}),
       ...(deps.signal ? { signal: deps.signal } : {}),
+      ...(deps.commitCutoffOnly ? { commitCutoffOnly: true } : {}),
+      ...(deps.inputs ? { inputs: deps.inputs } : {}),
     })
 }

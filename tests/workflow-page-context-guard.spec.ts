@@ -62,6 +62,27 @@ describe('page-context guard at the engine', () => {
     expect(getPageContext).not.toHaveBeenCalled()
   })
 
+  it('lets a cross-site graph act on every origin its session really used', async () => {
+    // The regression: a goal that read a README on github.com and published on
+    // creator.xiaohongshu.com had its OWN first step refused in 6ms, so its
+    // pre-save verification never executed a step. One anchor, many sites.
+    const workflow = strictGraph('https://github.com/o/r', {
+      pageContext: {
+        origin: 'https://creator.xiaohongshu.com',
+        additionalOrigins: ['https://github.com'],
+      },
+    })
+    const { ran, executors } = recorder()
+
+    const result = await runWorkflow(workflow, {
+      executors,
+      getPageContext: async () => ({ url: 'https://creator.xiaohongshu.com/new/home' }),
+    })
+
+    expect(result.error).toBeUndefined()
+    expect(ran).toEqual(['new-tab', 'event-click'])
+  })
+
   it('still refuses a navigation whose own destination is off-site', async () => {
     const workflow = strictGraph('https://evil.test/github', {
       generationOriginUrl: 'https://github.com',

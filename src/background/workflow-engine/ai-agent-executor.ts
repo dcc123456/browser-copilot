@@ -201,7 +201,15 @@ export const aiAgent: BlockExecutor = async (data, ctx) => {
   const actOnPage = asBool(data['actOnPage'], false)
   const useSnapshot = asBool(data['useSnapshot'], true)
   const variable = String(data['variableName'] ?? 'lastAIAgent') || 'lastAIAgent'
-  const rounds = Math.min(50, Math.max(1, Number(data['maxToolRounds'] ?? 20) || 20))
+  /**
+   * Round budget. The floor is TWO, not one: a round that calls a tool spends
+   * itself on the call, and the answer arrives in the NEXT round. A block
+   * configured with `maxToolRounds: 1` (generation wrote exactly that in round
+   * 6 of the harness) could only ever observe, then the loop stopped — and the
+   * run stored the model's pre-tool narration as the note text it typed into
+   * the page.
+   */
+  const rounds = Math.min(50, Math.max(2, Number(data['maxToolRounds'] ?? 20) || 20))
 
   /**
    * Config/runtime failures THROW, not emit-and-continue: the engine's

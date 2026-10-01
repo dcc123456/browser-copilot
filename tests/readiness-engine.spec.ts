@@ -14,6 +14,7 @@ import {
   type ReadinessCheckResult,
 } from '../src/background/workflow-engine/readiness-engine'
 import type { ReadinessRequirement } from '../src/lib/workflow/readiness'
+import { valueCommittedMatches } from '../src/lib/workflow/readiness'
 import { node } from '../specs/reliability-fixtures/harness'
 
 const signal = new AbortController().signal
@@ -192,6 +193,52 @@ describe('prepareNodeExecution / verifyPostActionReadiness', () => {
     expect(observed).toBe('value-committed')
   })
 
+  it('resolves a stored value-committed expectation against the run variables', async () => {
+    // The contract was written at generation with the template in it; the fill
+    // put the resolved text on the page. Comparing the two literally is the bug
+    // that fails a step which worked.
+    const n = node('a', 'forms', {
+      __reliability: {
+        readiness: { after: [{ state: 'value-committed', value: '{{noteTitle}}' }] },
+      },
+    })
+    const seen: (string | undefined)[] = []
+    const outcome = await verifyPostActionReadiness({
+      node: n,
+      blockId: 'forms',
+      params: { action: 'fill', value: '手搓脚本太累 3步搞定浏览器自动化' },
+      nodeSelector: '#title',
+      signal,
+      vars: { noteTitle: '手搓脚本太累 3步搞定浏览器自动化' },
+      probe: async (requirement) => {
+        seen.push(requirement.value)
+        return { satisfied: requirement.value === '手搓脚本太累 3步搞定浏览器自动化' }
+      },
+    })
+    expect(outcome.ok).toBe(true)
+    expect(seen).toEqual(['手搓脚本太累 3步搞定浏览器自动化'])
+  })
+
+  it('leaves an expectation whose variable the run never produced as written', async () => {
+    const n = node('a', 'forms', {
+      __reliability: { readiness: { after: [{ state: 'value-committed', value: '{{missing}}' }] } },
+    })
+    let observed: string | undefined
+    await verifyPostActionReadiness({
+      node: n,
+      blockId: 'forms',
+      params: {},
+      nodeSelector: '#title',
+      signal,
+      vars: { other: 'x' },
+      probe: async (requirement) => {
+        observed = requirement.value
+        return { satisfied: true }
+      },
+    })
+    expect(observed).toBe('{{missing}}')
+  })
+
   it('navigation blocks verify navigation-settled after', async () => {
     const n = node('a', 'new-tab', {})
     let failedOnce = false
@@ -211,5 +258,26 @@ describe('prepareNodeExecution / verifyPostActionReadiness', () => {
       },
     })
     expect(outcome.ok).toBe(true)
+  })
+})
+
+describe('value-committed comparison', () => {
+  it('matches a control whose separators the DOM reflowed', () => {
+    // The kernel reads a contenteditable as `textContent`: block structure the
+    // page inserted turns the newline we wrote into no separator at all. That is
+    // a committed value, not a failed fill.
+    expect(valueCommittedMatches('draft', 'draft')).toBe(true)
+    expect(valueCommittedMatches('标题\n\n正文第一段', '标题正文第一段')).toBe(true)
+    expect(valueCommittedMatches('a  b\n', 'a b')).toBe(true)
+    expect(valueCommittedMatches('draft', '  draft ')).toBe(true)
+  })
+
+  it('does not read a prefix, a different value or an empty field as committed', () => {
+    expect(valueCommittedMatches('draft', 'drafting')).toBe(false)
+    expect(valueCommittedMatches('a', 'ab')).toBe(false)
+    expect(valueCommittedMatches('标题', '正文')).toBe(false)
+    expect(valueCommittedMatches('标题', '')).toBe(false)
+    expect(valueCommittedMatches('', '标题')).toBe(false)
+    expect(valueCommittedMatches('', '')).toBe(true)
   })
 })

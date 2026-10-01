@@ -145,6 +145,7 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     localAgentUrl: 'ws://127.0.0.1:8765',
     localAgentActiveAgent: '',
     localAgentAdapterPath: '',
+    localAgentAllowReload: false,
     localAgentBindings: {},
     unattendedWindowPolicy: 'latest',
     ...overrides,

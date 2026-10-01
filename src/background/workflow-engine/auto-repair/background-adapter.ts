@@ -32,6 +32,7 @@ import {
   effectiveReadinessSpec,
   prepareNodeExecution,
 } from '../readiness-engine'
+import { targetFrom } from '../executors'
 import { nodeReliabilityOf } from '../../../lib/workflow/reliability'
 import { commitWorkflowRevision } from '../../../lib/workflow/workflow-revision'
 import {
@@ -211,6 +212,7 @@ export function makeReadinessRecovery(
       blockId: failure.blockId,
       params,
       nodeSelector: String(params['selector'] ?? params['cssSelector'] ?? ''),
+      nodeTarget: targetFrom(params),
       signal,
       probe: createDriverReadinessProbe(signal, scope),
     })
@@ -375,13 +377,23 @@ export async function startBackgroundAutoRepair(
       signal: controller.signal,
     })
     entry.settled = true
-    return {
+    const outcome: BackgroundAutoRepairOutcome = {
       status: session.final?.status ?? 'exhausted',
       ...(session.final?.reason ? { reason: session.final.reason } : {}),
       attempts: session.final?.attempts ?? session.attempts.length,
       durationMs: session.final?.durationMs ?? Date.now() - entry.startedAt,
       committed: session.final?.committed ?? false,
     }
+    // Without a model, every model strategy in the ladder "produced a
+    // candidate" that patched nothing — so the attempt count and
+    // `attempt budget exhausted` describe a walk that never really happened.
+    // Say what was missing instead of leaving the caller to guess.
+    if (!input.model && outcome.status === 'exhausted') {
+      outcome.reason = `${outcome.reason ?? 'exhausted'} (no repair model configured: ${
+        outcome.attempts
+      } strategy slot(s) burned without a model call)`
+    }
+    return outcome
   } catch (error) {
     // The orchestrator re-throws anything that is not a user cancel. Without a
     // terminal event here the panel would keep its "AI is repairing…" spinner

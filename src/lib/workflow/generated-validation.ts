@@ -27,6 +27,7 @@ import {
   type NodeReliabilitySpec,
 } from './reliability'
 import { deriveGoalSpecFromNodes } from './goal'
+import { VARIABLE_PRODUCER_FIELD } from './producer-completeness'
 import { nodeGoalContractOf } from './node-goal-contract'
 import { resolveNodeGoalContract } from './node-goal-instantiation'
 import { richTargetFromAny, selectorFromTarget } from './target-to-selector'
@@ -218,8 +219,16 @@ function validateGraph(workflow: Workflow, ctx: ValidateCtx): GeneratedValidatio
 function variableWritesOf(node: WorkflowNode): Set<string> {
   const written = new Set<string>()
   const blockId = blockIdOf(node)
-  if (!VARIABLE_WRITER_BLOCKS.has(blockId)) return written
   const p = paramsOf(node)
+  // The producer map is the authoritative "which field of which block holds the
+  // variable it writes"; VARIABLE_WRITER_BLOCKS below only knows `variableName`
+  // and predates the map, so consult the map for EVERY block first. Without it
+  // an ai-agent node writing `noteTitle` was reported as a variable nothing
+  // writes, and webhook (which publishes `responseVariable`) was missed too.
+  const producerField = VARIABLE_PRODUCER_FIELD[blockId]
+  const produced = producerField ? p[producerField] : undefined
+  if (typeof produced === 'string' && produced) written.add(produced)
+  if (!VARIABLE_WRITER_BLOCKS.has(blockId)) return written
   if (typeof p['variableName'] === 'string' && p['variableName']) written.add(p['variableName'])
   // forms fill writes its declared field variables at run time.
   if (blockId === 'forms' && Array.isArray(p['fields'])) {

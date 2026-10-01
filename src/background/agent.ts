@@ -165,12 +165,8 @@ import {
   loadConfirmedWorkflowName,
 } from '../lib/workflow/generation-goal-storage'
 import { findWorkflowOperators } from '../lib/workflow/operator-discovery'
-import {
-  evaluateJsPermission,
-} from '../lib/workflow/capability-gap'
+import { evaluateJsPermission } from '../lib/workflow/capability-gap'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
-
-
 
 /**
  * Tools that change something and therefore always need approval.
@@ -228,6 +224,17 @@ const READ_TOOLS = new Set([
  */
 export function isPageAction(name: string): boolean {
   return ACTION_TOOLS.has(name) || isOperatorTool(name)
+}
+
+/**
+ * Does this tool only OBSERVE — read the page, take a picture of it, list tabs
+ * or requests? It changes nothing, so an unattended turn with no human to click
+ * approve may run it without asking. `screenshot` / `recognize_image` count as
+ * observations even though they sit in {@link ACTION_TOOLS} for the plan gate's
+ * purposes; the same reasoning that exempts them there exempts them here.
+ */
+export function isObservationTool(name: string): boolean {
+  return READ_TOOLS.has(name) || PLAN_PHASE_READS.has(name)
 }
 
 /**
@@ -346,8 +353,7 @@ export function buildSystemPrompt(options: {
     // the exception — its EXECUTION phase is where other saved skills apply,
     // so the catalogue stays visible alongside it and the model can load a
     // matching skill per approved step via `use_skill`.
-    const catalogueVisible =
-      !options.activeSkill || options.activeSkill.name === PLAN_SKILL_NAME
+    const catalogueVisible = !options.activeSkill || options.activeSkill.name === PLAN_SKILL_NAME
     if (catalogueVisible && options.catalogue && options.catalogue.length > 0) {
       const catalogue = renderSkillCatalogue(options.catalogue)
       if (catalogue) parts.push(catalogue)
@@ -1240,7 +1246,133 @@ export const TOOLS: WireTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'generate_workflow',
+      description:
+        'Unattended workflow generation. Pass {prompt} to start a generation turn — every step it performs is recorded as a node, then the graph is saved and trial-replayed — and pass the returned {conversationId} to poll that run, because the turn outlasts a single request. / 无人值守生成工作流：传 prompt 启动一轮生成（每一步都会记成节点，随后保存并试重放），再用返回的 conversationId 轮询，因为一轮生成超过一次请求的时限。',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'The user goal, verbatim.' },
+          conversationId: { type: 'string', description: 'The id a previous start returned.' },
+          closeTabsAtEnd: {
+            type: 'boolean',
+            description: 'Close the tabs this turn opened. / 关闭本轮新开的标签页。',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'verify_workflow',
+      description:
+        'Replay an already-saved workflow and report whether it runs. Pass {workflowId} (optionally budgetMs) to start the replay — it stops in front of the first step that cannot be undone, so it never publishes or submits — and pass the returned {conversationId} to poll it. The settled result carries verified/verification and the trial record. / 重放一个已保存的工作流并报告它能否跑通：传 workflowId（可选 budgetMs）启动重放，遇到不可撤销的步骤会停下（绝不发布或提交），再用返回的 conversationId 轮询；结果里带 verified/verification 与试跑记录。',
+      parameters: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string', description: 'Id of a saved workflow.' },
+          conversationId: { type: 'string', description: 'The id a previous start returned.' },
+          budgetMs: { type: 'number', description: 'Optional replay budget in ms.' },
+          closeTabsAtEnd: {
+            type: 'boolean',
+            description: 'Close tabs this run opened. / 关闭本次运行新开的标签页。',
+          },
+          commitCutoffOnly: {
+            type: 'boolean',
+            description:
+              'Also run the steps that only PREPARE a commit (upload, fill, save-draft); an unsafe ' +
+              'click/submit/key still stops the run. Default false. / 同时放行“为提交做准备”的步骤' +
+              '（上传、填写、存草稿）；真正的提交动作仍会拦下。默认关闭。',
+          },
+          inputs: {
+            type: 'object',
+            description:
+              'Values for the inputs the workflow declares (its trigger parameters), e.g. ' +
+              '{"topic":"周末探店"}; a step referencing {{topic}} with no default fails ' +
+              'UNRESOLVED_INPUT without them. / 为工作流声明的输入参数赋值；缺值时无默认值的 ' +
+              '{{topic}} 引用会报 UNRESOLVED_INPUT。',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'repair_workflow',
+      description:
+        'Replay an already-saved workflow and, if a step fails, run the autonomous repair loop over it and replay it once more. Pass {workflowId} (optionally budgetMs) to start it, then poll the returned {conversationId}. The reply carries `repair` — status not-needed/success/exhausted/blocked with the attempt count — beside the final replay verdict. / 重放已保存的工作流，若有步骤失败就自动修复并重放一次：传 workflowId 启动，用返回的 conversationId 轮询；结果里 repair 说明修复状态与尝试次数。',
+      parameters: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string', description: 'Id of a saved workflow.' },
+          conversationId: { type: 'string', description: 'The id a previous start returned.' },
+          budgetMs: { type: 'number', description: 'Optional replay budget in ms.' },
+          closeTabsAtEnd: {
+            type: 'boolean',
+            description: 'Close tabs this run opened. / 关闭本次运行新开的标签页。',
+          },
+          commitCutoffOnly: {
+            type: 'boolean',
+            description:
+              'Also run the steps that only PREPARE a commit (upload, fill, save-draft); an unsafe ' +
+              'click/submit/key still stops the run. Default false. / 同时放行“为提交做准备”的步骤' +
+              '（上传、填写、存草稿）；真正的提交动作仍会拦下。默认关闭。',
+          },
+          inputs: {
+            type: 'object',
+            description:
+              'Values for the inputs the workflow declares (its trigger parameters), e.g. ' +
+              '{"topic":"周末探店"}; a step referencing {{topic}} with no default fails ' +
+              'UNRESOLVED_INPUT without them. / 为工作流声明的输入参数赋值；缺值时无默认值的 ' +
+              '{{topic}} 引用会报 UNRESOLVED_INPUT。',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'reload_extension',
+      description:
+        'Dev-only, bridge: reload the extension so a fresh build takes effect. Needs the settings toggle and {confirm:"reload"}. / 开发者用：重载扩展以加载新构建。',
+      parameters: {
+        type: 'object',
+        properties: {
+          confirm: { type: 'string', description: 'Literal "reload".' },
+        },
+        required: ['confirm'],
+      },
+    },
+  },
 ]
+
+/**
+ * Tools the local-agent bridge calls and the model must never see:
+ * `generate_workflow` starts a whole generation turn, so offering it inside a
+ * turn would let the agent recurse — and the panel owns the review card that
+ * turn's draft feeds. `verify_workflow` is the same shape one step later: it
+ * executes a saved graph, which is a decision for the user or the bridge, not
+ * something a model mid-turn should trigger on its own. `repair_workflow` is
+ * `verify_workflow` plus a write-back — it commits new revisions to storage — so
+ * it belongs to the caller too. `reload_extension`
+ * restarts the worker the turn is running in, so it is the bridge's call alone
+ * (and gated on a setting that is off by default). All four are still in
+ * {@link TOOLS} because that array is what `tools.list` hands the bridge for
+ * discovery; `agent-api.ts` intercepts the calls by name, so none is ever
+ * resolved through `runToolStandalone`.
+ */
+export const BRIDGE_ONLY_TOOLS = new Set([
+  'generate_workflow',
+  'verify_workflow',
+  'repair_workflow',
+  'reload_extension',
+])
 
 export type ConfirmFn = (name: string, argsPreview: string) => Promise<boolean>
 
@@ -1361,7 +1493,6 @@ function storeActiveOperatorCategories(
   return next
 }
 
-
 /**
  * Conversation-scoped block ids activated by `find_workflow_operators`
  * (candidate-only activation). These are ADDED to the advertised operator
@@ -1419,7 +1550,9 @@ function buildCandidateTools(conversationId: string | undefined): WireTool[] {
  * distinction matters: never-declared means "show everything" (the round-1
  * default), while an EXPLICIT empty declaration means "core operators only".
  */
-export function getActiveOperatorCategories(conversationId: string): Set<BlockCategory> | undefined {
+export function getActiveOperatorCategories(
+  conversationId: string,
+): Set<BlockCategory> | undefined {
   return activeOperatorCategoryStore.get(conversationId)
 }
 
@@ -1475,7 +1608,13 @@ const LAST_INPUT_STORE_CAP = 64
 export function inputLimitFromError(message: string): number | undefined {
   // DashScope: "Range of input length should be [1, 983616]" and similar
   // "maximum context length ... N tokens" shapes.
-  const patterns = [new RegExp('\\[\\s*\\d+\\s*,\\s*(\\d+)', 'i'), new RegExp('input length[^\\d]*\\d+[^\\d]+(\\d+)', 'i'), new RegExp('input length[^\\d]*(\\d+)', 'i'), new RegExp('context length[^\\d]*(\\d+)', 'i'), new RegExp('max[^\\d]+(\\d+)\\s*tokens?', 'i')]
+  const patterns = [
+    new RegExp('\\[\\s*\\d+\\s*,\\s*(\\d+)', 'i'),
+    new RegExp('input length[^\\d]*\\d+[^\\d]+(\\d+)', 'i'),
+    new RegExp('input length[^\\d]*(\\d+)', 'i'),
+    new RegExp('context length[^\\d]*(\\d+)', 'i'),
+    new RegExp('max[^\\d]+(\\d+)\\s*tokens?', 'i'),
+  ]
   for (const pattern of patterns) {
     const match = message.match(pattern)
     if (match && match[1]) {
@@ -1651,6 +1790,10 @@ export function advertiseTools({
     const core = TOOLS.filter((tool) => {
       const name = tool.function.name
       if (WORKFLOW_WITHHELD_TOOLS.has(name)) return false
+      // `generate_workflow` starts a whole generation turn: offering it inside a
+      // turn would let the model recurse into itself, and it would also blow the
+      // payload budget this surface is guarded by.
+      if (BRIDGE_ONLY_TOOLS.has(name)) return false
       // `ask_user` is FORBIDDEN in workflow generation: the mode's deliverable
       // is the draft → save-card flow, which must not stall on questions, and
       // the workflow's replay runs unattended anyway. (The dispatch layer
@@ -1752,6 +1895,7 @@ export function advertiseTools({
     if (disabled.has(name)) return false
     if (allowTools && !allowTools.has(name)) return false
     if (hidden?.has(name)) return false
+    if (BRIDGE_ONLY_TOOLS.has(name)) return false
     if (mode === 'readonly' && ACTION_TOOLS.has(name)) return false
     // Plan-skill turns get `use_skill` in the core surface (see the option
     // doc). Deliberately AFTER disabled/allowTools/hidden so a user-disabled
@@ -1895,9 +2039,9 @@ function prepareWorkflowGoalTool(): WireTool {
     function: {
       name: PREPARE_WORKFLOW_GOAL_TOOL,
       description:
-        'Workflow-generation FIRST step. Define the goal before any wf_op_*: name (auto-filled; the name the user confirmed at task start always wins), '
-        + 'summary, machine-checkable successConditions, requiredCapabilities, optional constraints/expectedInputs. '
-        + 'No wf_op_* runs until this exists. / 生成第一步：先建立目标契约。',
+        'Workflow-generation FIRST step. Define the goal before any wf_op_*: name (auto-filled; the name the user confirmed at task start always wins), ' +
+        'summary, machine-checkable successConditions, requiredCapabilities, optional constraints/expectedInputs. ' +
+        'No wf_op_* runs until this exists. / 生成第一步：先建立目标契约。',
       parameters: {
         type: 'object',
         properties: {
@@ -1908,7 +2052,10 @@ function prepareWorkflowGoalTool(): WireTool {
             description: 'Machine-checkable conditions ({kind,...}); at least one.',
             items: { type: 'object', additionalProperties: true },
           },
-          terminalStateConditions: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          terminalStateConditions: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
           requiredCapabilities: { type: 'array', items: { type: 'string' } },
           constraints: { type: 'array', items: { type: 'string' } },
           expectedInputs: { type: 'array', items: { type: 'object', additionalProperties: true } },
@@ -1931,9 +2078,9 @@ function findWorkflowOperatorsTool(): WireTool {
     function: {
       name: FIND_WORKFLOW_OPERATORS_TOOL,
       description:
-        'Find a small ranked set of wf_op_* candidates for one step (with scores/reasons) and auto-activate '
-        + 'them; no use_operators round trip. javascript-code is never an ordinary candidate. '
-        + '/ 检索少量候选算子并自动激活。',
+        'Find a small ranked set of wf_op_* candidates for one step (with scores/reasons) and auto-activate ' +
+        'them; no use_operators round trip. javascript-code is never an ordinary candidate. ' +
+        '/ 检索少量候选算子并自动激活。',
       parameters: {
         type: 'object',
         properties: {
@@ -1946,7 +2093,6 @@ function findWorkflowOperatorsTool(): WireTool {
     },
   } as WireTool
 }
-
 
 export interface AgentDeps {
   send: (message: AgentServerMessage) => void
@@ -3793,9 +3939,7 @@ export async function executeTool(
       if (!summary.trim()) {
         return JSON.stringify({ error: 'A non-empty goal summary is required.' })
       }
-      const rawConditions = Array.isArray(args.successConditions)
-        ? args.successConditions
-        : []
+      const rawConditions = Array.isArray(args.successConditions) ? args.successConditions : []
       const goalSpec = normalizeGoalSpec({
         summary,
         successConditions: rawConditions,
@@ -3863,7 +4007,11 @@ export async function executeTool(
         stepIntent,
         workflowGoal: goal.goalSpec.summary,
         ...(args.pageSignals && typeof args.pageSignals === 'object'
-          ? { pageSignals: args.pageSignals as Parameters<typeof findWorkflowOperators>[0]['pageSignals'] }
+          ? {
+              pageSignals: args.pageSignals as Parameters<
+                typeof findWorkflowOperators
+              >[0]['pageSignals'],
+            }
           : {}),
         ...(typeof args.limit === 'number' ? { limit: args.limit } : {}),
       })
@@ -3902,9 +4050,7 @@ export async function executeTool(
           if (!permission.allowed) {
             return JSON.stringify({
               error: permission.error,
-              ...(permission.nativeBlockIds
-                ? { nativeBlockIds: permission.nativeBlockIds }
-                : {}),
+              ...(permission.nativeBlockIds ? { nativeBlockIds: permission.nativeBlockIds } : {}),
             })
           }
         }
@@ -4347,9 +4493,7 @@ export async function runAgentTurn(
   // any mounted mode skill) and the model can `use_skill` a match per step.
   const catalogue: Skill[] = activeSkill
     ? activeSkill.name === PLAN_SKILL_NAME
-      ? skillList.filter(
-          (skill) => skill.id !== activeSkill.id && skill.id !== modeSkill?.id,
-        )
+      ? skillList.filter((skill) => skill.id !== activeSkill.id && skill.id !== modeSkill?.id)
       : []
     : modeSkill
       ? skillList.filter((skill) => skill.id !== modeSkill.id)
@@ -4553,10 +4697,9 @@ export async function runAgentTurn(
     // assumed window; the emergency hard cap is the backstop.
     if (!deps.subAgent) {
       const requestTokens = (): number =>
-        estimateInputTokens(
-          [{ role: 'system', content: systemPrompt }, ...history],
-          { text: JSON.stringify(tools ?? []) },
-        )
+        estimateInputTokens([{ role: 'system', content: systemPrompt }, ...history], {
+          text: JSON.stringify(tools ?? []),
+        })
       if (shouldCompact(requestTokens()) && !compactedThisTurn) {
         compactedThisTurn = true
         deps.send({ type: 'status', text: compactionText.status })

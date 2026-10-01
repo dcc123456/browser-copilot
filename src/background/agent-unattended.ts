@@ -4,7 +4,8 @@
  * Shared by scheduled "agent prompt" tasks and by ad-hoc Feishu commands, so the
  * two entry points behave identically: the agent has no panel to stream to and no
  * human to click an approval button, so deltas are buffered into a string and
- * confirmations are auto-resolved.
+ * confirmations are resolved by policy — an action only when the caller granted
+ * full autonomy, an observation (read / screenshot / list) always.
  *
  * ## Autonomy
  *
@@ -18,7 +19,7 @@
  * @module background/agent-unattended
  */
 
-import { runAgentTurn } from './agent'
+import { runAgentTurn, isObservationTool } from './agent'
 import { resolveUnattendedScope } from './window-policy'
 import { getSettings } from '../lib/storage'
 import { sanitizeModelAnswer } from '../lib/model-output'
@@ -89,8 +90,6 @@ export async function runUnattendedPrompt(
         ? { windowId: options.scopeWindowId }
         : await resolveUnattendedScope()
     const collected: string[] = []
-    /** Every text delta of the turn (all rounds) — fallback + diagnostics. */
-    const chunks: string[] = []
     /**
      * Text streamed since the last tool call. The agent loop streams
      * narration ("let me check the page…") in the rounds BETWEEN tool calls;
@@ -107,7 +106,6 @@ export async function runUnattendedPrompt(
       ...(scope ? { scopeWindowId: scope.windowId } : {}),
       send: (message) => {
         if (message.type === 'delta') {
-          chunks.push(message.text)
           finalChunks.push(message.text)
         }
         if (message.type === 'tool.start') {
@@ -132,10 +130,13 @@ export async function runUnattendedPrompt(
           options.onStep?.('error', message.message)
         }
       },
-      // No human is watching: auto-decline any confirmation. In full mode the
-      // agent does not ask in the first place, so this only matters for
-      // read/semi where it makes the model report a refusal and move on.
-      confirm: async () => (modeOverride === 'full' ? true : false),
+      // No human is watching: an action needs the caller to have granted full
+      // autonomy, and an OBSERVATION (read the page, screenshot it, list tabs)
+      // is approved on the spot — it changes nothing, and declining it made a
+      // `readonly` AI-agent block stall on its first read and then answer from
+      // its own imagination. Anything else stays declined, so the model is
+      // told it was refused and moves on.
+      confirm: async (name) => modeOverride === 'full' || isObservationTool(name),
       getMode: async () => modeOverride ?? settings.mode,
       getMaxToolRounds: async () => options.maxToolRounds ?? settings.maxToolRounds,
       ...(options.provider ? { getProvider: async () => options.provider } : {}),
@@ -145,10 +146,15 @@ export async function runUnattendedPrompt(
       }),
     })
 
-    // The final-round text wins; when the turn never produced one (round cap
-    // hit mid-run, tool-only rounds) fall back to the whole transcript so a
-    // usable answer is not lost.
-    const rawAnswer = (finalChunks.join('') || chunks.join('')).trim()
+    // The answer is the text of the round that ENDED the turn. The previous
+    // fallback to the whole transcript laundered pre-tool narration into
+    // workflow variables: a `readonly` AI-agent block that hit its round cap
+    // right after its first tool call handed downstream blocks the model's
+    // "I'll start by taking a snapshot of the current page…" — and the workflow
+    // typed that into the page as the note body. Text streamed before a tool
+    // call is narration by construction, so a turn that ends without a final
+    // text round reports no answer and the caller fails loudly.
+    const rawAnswer = finalChunks.join('').trim()
     // Strip reasoning-model `<think>` blocks and a wrapping code fence: this
     // string is stored into workflow variables / sent to chat verbatim.
     const answer = sanitizeModelAnswer(rawAnswer)

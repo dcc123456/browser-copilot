@@ -40,9 +40,22 @@ beforeEach(() => {
 describe('auto reliability completion (generation must always succeed)', () => {
   it('infers idempotency from the action semantics', () => {
     expect(inferIdempotency('forms', { action: 'submit' })).toBe('unsafe')
-    expect(inferIdempotency('forms', {})).toBe('unsafe')
     expect(inferIdempotency('event-click', {})).toBe('safe')
     expect(inferIdempotency('webhook', {})).toBe('unsafe')
+  })
+
+  it('a forms node with no action is a fill, not a submit', () => {
+    // The executor sends `{action:'fill'}` when no verb is given, so reading the
+    // missing verb as a submit invented an `idempotency: 'unsafe'` on a title
+    // field — and since the trial never replays past an unsafe step, that cut a
+    // generated graph off eight steps in and left the rest unproven.
+    expect(inferIdempotency('forms', {})).toBe('conditional')
+    const nodes: Array<{ data: Record<string, unknown> }> = [
+      { data: { blockId: 'forms', selector: '#title', value: 'note title' } },
+    ]
+    autoCompleteReliability(nodes)
+    const spec = (nodes[0]!.data!['__reliability'] ?? {}) as Record<string, unknown>
+    expect(spec['idempotency']).toBeUndefined()
   })
 
   it('never overrides a model-written contract, only fills gaps', () => {

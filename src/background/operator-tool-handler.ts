@@ -83,6 +83,8 @@ import {
 import { isAiComposedFill } from '../lib/workflow/ai-prefill'
 import type { Workflow, WorkflowNode } from '../lib/workflow/types'
 import type { TrialRunRecord } from '../lib/workflow/trial-run'
+import { trialFailed } from '../lib/workflow/trial-run'
+import { recordedPageContext } from '../lib/workflow/page-context'
 import { withTrialRecord } from './workflow-engine/repair/generation-trial'
 import type { TrialRunner } from './workflow-engine/repair/generation-trial'
 
@@ -707,6 +709,12 @@ export async function composeWorkflowFromDraft(
   // dangling {{reference}} to a declared run input (the user supplies it at
   // launch) instead of failing the data-flow check.
   declareMissingInputs(draft.nodes)
+  // The sites this generation actually acted on. A goal that spans origins —
+  // read a document on one, publish on another — produces a graph whose own
+  // first step would be refused by the page-context guard if the anchor stayed
+  // single-site, which is how a cross-site graph came to fail its pre-save
+  // verification in 6ms without executing a step.
+  const recordedContext = recordedPageContext(draft.originUrl, draft.actedOrigins)
   let workflow: Workflow = {
     id: newId(),
     name,
@@ -719,6 +727,7 @@ export async function composeWorkflowFromDraft(
       reuseLastState: false,
       provenance: draft.source === 'chat-generate' ? 'chat-generate' : 'chat-history',
       ...(draft.originUrl ? { generationOriginUrl: draft.originUrl } : {}),
+      ...(recordedContext ? { pageContext: recordedContext } : {}),
       // The reliability contract's goal: derived from what the graph can
       // actually VERIFY (node postconditions). A graph without postconditions
       // derives none — the generated validator then blocks the strict save
@@ -817,6 +826,16 @@ export async function composeWorkflowFromDraft(
     const trial = await opts.trial(workflow)
     workflow = trial.workflow
     trialRecord = trial.record
+    // The verdict is the whole point of running it. A graph whose own
+    // verification replay failed is still saved (a trial never gates), but it
+    // must not reach the user looking like a workflow that runs.
+    if (trialFailed(trialRecord)) {
+      const code = trialRecord.failureCode ? `[${trialRecord.failureCode}] ` : ''
+      const why = trialRecord.reason ? `：${trialRecord.reason}` : ''
+      saveWarnings.push(
+        `验证未通过 · 保存前的试重放在第 ${trialRecord.coveredSteps}/${trialRecord.totalSteps} 步失败 ${code}${why}`.trimEnd(),
+      )
+    }
   }
   // Finish the stage reports: static validation + independent verification.
   generationStages.push(staticValidateStage(runErrorCount, generatedErrorCount))

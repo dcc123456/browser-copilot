@@ -913,6 +913,10 @@ export interface Messages {
   chatJumpToLatest: string
   toolOperator: string
   toolOperatorWarn: string
+  toolReloadExtension: string
+  toolReloadExtensionWarn: string
+  toolRepairWorkflow: string
+  toolRepairWorkflowWarn: string
 
   // Settings · page access
   settingsPageAccess: string
@@ -1003,6 +1007,8 @@ export interface Messages {
   settingsLocalAgentCopy: string
   settingsLocalAgentCopied: string
   settingsLocalAgentWarning: string
+  settingsLocalAgentAllowReload: string
+  settingsLocalAgentAllowReloadHint: string
 
   // Data / memory
   dataTitle: string
@@ -2017,6 +2023,12 @@ const en: Messages = {
   toolOperator: 'Workflow operator (draft writer)',
   toolOperatorWarn:
     'When off: this operator tool is hidden from the chat in workflow mode and cannot be added to the generated workflow.',
+  toolReloadExtension: 'Reload the extension (developer, bridge only)',
+  toolReloadExtensionWarn:
+    'When off: a local self-test script can no longer pick up a fresh build by itself and you have to reload the unpacked extension in chrome://extensions. Never offered to the chat model.',
+  toolRepairWorkflow: 'Repair a saved workflow (bridge only)',
+  toolRepairWorkflowWarn:
+    'When off: a local agent can no longer replay a saved workflow and hand a failing replay to the autonomous repair loop, which writes a new revision. Never offered to the chat model.',
 
   toolRecognizeImage: 'Recognize text in an image (CAPTCHA, etc.)',
   toolRecognizeImageWarn:
@@ -2110,6 +2122,9 @@ const en: Messages = {
   settingsLocalAgentCopied: 'Copied ✓',
   settingsLocalAgentWarning:
     'While enabled, any page on this machine can drive the browser. Only enable it while your local agent is running.',
+  settingsLocalAgentAllowReload: 'Let the local agent reload the extension (developer)',
+  settingsLocalAgentAllowReloadHint:
+    'Exposes reload_extension on the bridge so a self-test script can pick up a fresh build without reopening chrome://extensions. Off by default; reload only restarts the service worker.',
 
   dataTitle: 'Personal data',
   dataIntro:
@@ -3128,6 +3143,12 @@ const zhCN: Messages = {
   toolPresentPlanWarn: '关闭后：计划先行流程无法弹出计划卡片，任务将不再经过你的计划批准直接执行。',
   toolOperator: '工作流算子（草稿写入）',
   toolOperatorWarn: '关闭后：该算子在工作流生成模式下不可用，也不会出现在生成的工作流中。',
+  toolReloadExtension: '重载扩展（开发者，仅本地桥）',
+  toolReloadExtensionWarn:
+    '关闭后：本地自测脚本无法自行加载新构建，需要你到 chrome://extensions 手动重新加载。该工具永远不会出现在聊天模型的工具列表里。',
+  toolRepairWorkflow: '修复已保存的工作流（仅本地桥）',
+  toolRepairWorkflowWarn:
+    '关闭后：本地 agent 无法再重放已保存的工作流并把失败的步骤交给自动修复循环（修复会写入新版本）。该工具永远不会出现在聊天模型的工具列表里。',
 
   toolRecognizeImage: '识别图片中的文字（验证码等）',
   toolRecognizeImageWarn: '关闭后：助手无法使用图片模型识别页面上的验证码或其他图片文字。',
@@ -3217,6 +3238,9 @@ const zhCN: Messages = {
   settingsLocalAgentCopy: '复制',
   settingsLocalAgentCopied: '已复制 ✓',
   settingsLocalAgentWarning: '开启后本机任意页面都能驱动浏览器，请仅在本地 agent 运行时开启。',
+  settingsLocalAgentAllowReload: '允许本地 agent 重载扩展（开发者）',
+  settingsLocalAgentAllowReloadHint:
+    '开启后桥接会暴露 reload_extension，自测脚本在 build 之后可自行重载扩展，不必再去 chrome://extensions 手点。默认关闭；重载只会重启 service worker。',
 
   dataTitle: '个人数据',
   dataIntro:

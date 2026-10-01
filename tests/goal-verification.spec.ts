@@ -93,4 +93,34 @@ describe('goal verification engine', () => {
     // Nothing at the node layer was checked, so a pass here comes from L3 alone.
     expect(report.l2.nodes[0]?.criteria).toHaveLength(0)
   })
+  it('a URL-only success row cannot certify, even when it holds', async () => {
+    // The round-9 graph, exactly: its goal row was `urlContains
+    // creator.xiaohongshu.com/publish`, the page it opens IS the publish page, so
+    // the condition was true before step 1 ran and stayed true whatever the graph
+    // did. Certifying on that is the facade — S0 already refuses a URL as
+    // evidence (`provesLandedEffect`), and L3 has to use the same standard or the
+    // two layers disagree about what counts as proof.
+    const workflow = workflowWith({})
+    workflow.settings!.goalSpec = {
+      summary: 'A draft is saved on the publish page.',
+      successConditions: [{ kind: 'urlContains', value: 'example.com/done' }],
+    }
+    const report = await verifyWorkflowGoal(workflow, { ...okRun, completedNodeIds: ['n1'] }, probe)
+    expect(report.l3.conditions[0]?.satisfied).toBe(true)
+    expect(report.l3.allHeld).toBe(false)
+    expect(report.certified).toBe(false)
+    expect(report.reason).toContain('proves the goal landed')
+  })
+  it('one effect-proving condition among the URL rows is enough', async () => {
+    const workflow = workflowWith({})
+    workflow.settings!.goalSpec = {
+      summary: 'A draft is saved.',
+      successConditions: [
+        { kind: 'urlContains', value: 'example.com/done' },
+        { kind: 'variableExists', name: 'result' },
+      ],
+    }
+    const report = await verifyWorkflowGoal(workflow, { ...okRun, completedNodeIds: ['n1'] }, probe)
+    expect(report.certified).toBe(true)
+  })
 })

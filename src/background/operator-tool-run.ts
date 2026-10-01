@@ -61,6 +61,7 @@ import {
   type DataRewrite,
 } from '../lib/workflow/dynamic-data'
 import type { WorkflowDraft } from '../lib/workflow/draft-types'
+import { isNavigationBlock, originOfUrl } from '../lib/workflow/page-context'
 import type { ScopeWindow } from './automation-scope'
 import {
   aiPrefillPlanOf,
@@ -135,6 +136,22 @@ export function blockTakesElement(blockId: string): boolean {
   const entry = BLOCK_BY_ID.get(blockId)
   if (!entry) return false
   return (entry.refDataKeys ?? []).includes('selector')
+}
+
+/** Categories whose executors run against a tab rather than in the worker. */
+const PAGE_TOUCHING_CATEGORIES: ReadonlySet<string> = new Set(['browser', 'interaction'])
+
+/**
+ * Does this block put the session ON a page — act on an element, read the
+ * document, or navigate somewhere? Pure-worker blocks (`ai-agent`, variables,
+ * conditions) are excluded on purpose: the tab that happens to be in scope
+ * while they run is not a site the workflow acts on, and recording it would
+ * widen the replay guard on a coincidence.
+ */
+export function blockTouchesPage(blockId: string): boolean {
+  if (isNavigationBlock(blockId) || blockTakesElement(blockId)) return true
+  const category = BLOCK_BY_ID.get(blockId)?.category
+  return typeof category === 'string' && PAGE_TOUCHING_CATEGORIES.has(category)
 }
 
 /** Did the caller give us anything we could turn into a locator? */
@@ -497,17 +514,29 @@ function rewriteForRecording(
     markExecuted(trace, outcome.resolution)
   }
 
-  // Remember the page this session first acted on (B2 of the first-run plan).
+  // Remember the pages this session acted on (B2 of the first-run plan).
   // A graph with no navigation before its first element action can only replay
   // on THAT page, so the save card and the run gate need to know it. Only
   // http(s) pages are automatable — anything else would poison the warning.
-  if (!draft.originUrl && blockTakesElement(blockId)) {
+  //
+  // `originUrl` keeps its original meaning (the FIRST such page: it is what an
+  // unanchored graph replays on), and `actedOrigins` collects the whole set,
+  // because a goal that spans sites — read a document on one, publish on
+  // another — acts on all of them and the page-context guard must accept all of
+  // them on replay. Refusing the second site is what made a cross-site graph
+  // fail its own pre-save verification in milliseconds.
+  if (blockTouchesPage(blockId)) {
     const tab = await resolveAutomationTab(
       pinnedTab.has(conversationId) ? pinnedTab.get(conversationId) : undefined,
       scope,
     ).catch(() => undefined)
     const url = typeof tab?.url === 'string' ? tab.url : ''
-    if (/^https?:/i.test(url)) draft.originUrl = url
+    if (/^https?:/i.test(url)) {
+      if (!draft.originUrl) draft.originUrl = url
+      const origin = originOfUrl(url)
+      const acted = draft.actedOrigins ?? []
+      if (origin && !acted.includes(origin)) draft.actedOrigins = [...acted, origin]
+    }
   }
 
   // Harvest the executor's writes. `get-secret` is the only block that pulls a
