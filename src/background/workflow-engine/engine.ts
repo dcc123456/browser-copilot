@@ -139,6 +139,15 @@ export interface WorkflowRunOptions {
     conditions: readonly WorkflowCondition[],
   ) => Promise<ConditionBaseline | undefined>
   /**
+   * The goal-level capture: the same pre-run observation, plus the values the
+   * goal's OTHER rows quote (a text row's words, a visible row's state). Absent
+   * → the goal baseline falls back to {@link captureConditionBaseline}, which
+   * remembers only the change rows' before-state.
+   */
+  captureGoalBaseline?: (
+    conditions: readonly WorkflowCondition[],
+  ) => Promise<ConditionBaseline | undefined>
+  /**
    * Observes the CURRENT page (url/title) for the page-context guard (§11).
    * Absent → no guard. Refreshed whenever the automation tab changes.
    */
@@ -278,9 +287,10 @@ export interface WorkflowRunResult {
    */
   stoppedBefore?: string
   /**
-   * The page as it stood BEFORE the first step, for the goal's change-conditions.
-   * Captured at the only moment it exists so the certification layer can read
-   * 「the draft list grew」 instead of skipping the row.
+   * The page as it stood BEFORE the first step, for the goal's success rows.
+   * Captured at the only moment it exists, so the certification layer can read
+   * both 「the draft list grew」 and 「this text row was already on the page before
+   * the run」 instead of skipping the row.
    */
   goalBaseline?: ConditionBaseline
 }
@@ -503,6 +513,7 @@ async function runCore(
     readinessProbe,
     evaluateCondition,
     captureConditionBaseline,
+    captureGoalBaseline,
     getPageContext,
     onSubWorkflow,
   } = options
@@ -562,10 +573,16 @@ async function runCore(
   // which left the standing page furniture (小红书 shows 「草稿箱(100)」 whether or not
   // this run saved anything) as the only row that could ever certify a draft goal.
   const goalConditions = goalSpecOf(workflow)?.successConditions ?? []
+  // When the caller can observe what the goal rows QUOTE, the before-page is
+  // taken for every goal: a text row that held before the run describes the site,
+  // not this run, and only a snapshot tells the two apart. Callers that only
+  // remember the change rows' before-state keep the narrower, cheaper snapshot.
+  const readGoalBaseline = captureGoalBaseline ?? captureConditionBaseline
+  const wantGoalBaseline =
+    goalConditions.length > 0 &&
+    (captureGoalBaseline !== undefined || goalConditions.some(conditionRequiresBaseline))
   const goalBaseline =
-    captureConditionBaseline && goalConditions.some(conditionRequiresBaseline)
-      ? await captureConditionBaseline(goalConditions)
-      : undefined
+    wantGoalBaseline && readGoalBaseline ? await readGoalBaseline(goalConditions) : undefined
 
   const completedNodeIds: string[] = []
   /**

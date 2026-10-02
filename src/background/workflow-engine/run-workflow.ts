@@ -47,6 +47,7 @@ import { targetSpecsFromSemantic } from '../../lib/workflow/element-fingerprint'
 import type { Target, TargetSpec } from '../../lib/ops'
 import {
   captureConditionBaseline,
+  captureGoalBaseline,
   createDriverConditionProbe,
   evaluateConditionWithProbe,
   type ConditionBaseline,
@@ -699,6 +700,8 @@ export async function executeWorkflow(
         ),
       captureConditionBaseline: (conditions) =>
         captureConditionBaseline(conditions, createDriverConditionProbe(runSignal, scope)),
+      captureGoalBaseline: (conditions) =>
+        captureGoalBaseline(conditions, createDriverConditionProbe(runSignal, scope)),
       // Page-context guard (§11): observe the live tab cheaply; the engine
       // checks it before strict page-acting nodes (first + after tab change).
       getPageContext: async () => {

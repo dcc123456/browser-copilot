@@ -250,6 +250,69 @@ describe('goal verification against the pre-run baseline the run carries', () =>
     expect(report.l3.allHeld).toBe(false)
     expect(report.certified).toBe(false)
   })
+
+  it('refuses a satisfied text row whose words the page showed before the run', async () => {
+    // Round 77, to the letter: 13/13 steps, the draft really saved, and the only
+    // success row the goal had was 「页面文本包含 草稿」 aimed at 「草稿箱」 — a row that
+    // read true on the untouched page. It holds now, so it is not a failed
+    // condition; it just proves nothing, and the verdict has to say so.
+    const showsDraftBox: ConditionPageProbe = {
+      ...probe,
+      text: async () => '草稿箱(100)',
+    }
+    const workflow = workflowWith({})
+    workflow.settings!.goalSpec = {
+      summary: 'The draft list shows the saved draft.',
+      successConditions: [
+        { kind: 'elementText', target: draftBox, match: 'contains', expected: '草稿' },
+      ],
+    }
+    // The row is read back normalized — an `elementText` locator aligns to the
+    // words it demands (`alignElementTextTarget`), and the engine snapshots THAT
+    // target, so the baseline key is the aligned one, not the words the model
+    // happened to write.
+    const showsDraft = conditionLocatorKey({ text: '草稿' })
+    const baseline: ConditionBaseline = {
+      counts: {},
+      exists: { [showsDraft]: true },
+      texts: { [showsDraft]: '草稿箱(100)' },
+    }
+    const report = await verifyWorkflowGoal(workflow, runWithBaseline(baseline), showsDraftBox)
+    expect(report.l3.conditions[0]?.satisfied).toBe(true)
+    expect(report.l3.conditions[0]?.detail).toContain('步骤前')
+    expect(report.l3.allHeld).toBe(false)
+    expect(report.certified).toBe(false)
+    expect(report.reason).toContain('before the run')
+  })
+
+  it('certifies a text row that names the artifact through a run variable', async () => {
+    // The same row shape, but the words are the ones THIS run wrote into a
+    // variable, so they cannot have been on the page before it started.
+    const draftTitle = { selector: '.draft-title' }
+    const key = conditionLocatorKey(draftTitle)
+    const workflow = workflowWith({})
+    workflow.settings!.goalSpec = {
+      summary: 'The saved draft is listed under the title this run wrote.',
+      successConditions: [
+        { kind: 'elementText', target: draftTitle, match: 'contains', expected: '{{title}}' },
+      ],
+    }
+    const report = await verifyWorkflowGoal(
+      workflow,
+      {
+        ...runWithBaseline({
+          counts: {},
+          exists: { [key]: false },
+          texts: { [key]: '草稿箱(100)' },
+        }),
+        variables: { result: 'done', title: '图文推广草稿' },
+      },
+      { ...probe, text: async () => '图文推广草稿' },
+    )
+    expect(report.l3.conditions[0]?.satisfied).toBe(true)
+    expect(report.l3.allHeld).toBe(true)
+    expect(report.certified).toBe(true)
+  })
 })
 
 describe('L2 votes with the observation taken at the step', () => {

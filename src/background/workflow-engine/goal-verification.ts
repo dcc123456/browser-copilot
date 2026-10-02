@@ -6,7 +6,7 @@ import { conditionRequiresBaseline, describeCondition, type WorkflowCondition } 
 import { provesLandedEffect } from '../../lib/workflow/repair-verification'
 import { nodeGoalContractOf, type WorkflowNodeGoalContract } from '../../lib/workflow/node-goal-contract'
 import type { Workflow, WorkflowNode } from '../../lib/workflow/types'
-import { evaluateCondition, type ConditionPageProbe } from './condition-runtime'
+import { evaluateCondition, didHoldBeforeTheRun, type ConditionPageProbe } from './condition-runtime'
 import type { ExecuteWorkflowResult } from './run-workflow'
 export type VerificationLevel = 'L1' | 'L2' | 'L3'
 export interface ConditionEvidence { description: string; satisfied: boolean; detail?: string }
@@ -184,6 +184,8 @@ export async function verifyWorkflowGoal(
   // that as evidence (see `provesLandedEffect`); L3 has to use the same standard
   // or a replay that clicked nothing certifies its own goal.
   let l3EffectProven = false
+  /** Satisfied rows the run's own pre-run snapshot showed were already true. */
+  const furnitureRows: string[] = []
   let settledAfterMs: number | undefined
   let settleWaitedMs = 0
   const l3Unevaluated: string[] = []
@@ -240,8 +242,25 @@ export async function verifyWorkflowGoal(
       }
     }
     for (const row of rows) {
+      if (!row.evidence.satisfied || !provesLandedEffect(row.condition)) {
+        l3Conditions.push(row.evidence)
+        continue
+      }
+      // A row can only be the mark the run left on the world if the untouched
+      // page did NOT already show it. Round 77 replayed 13/13, really saved the
+      // draft, and certified on 「页面文本包含 草稿」 — words 小红书 prints whether or
+      // not anything was saved. The run's own pre-run snapshot answers that, and
+      // a row that held then is reported as what it is: furniture, not evidence.
+      if (await didHoldBeforeTheRun(row.condition, goalBaseline)) {
+        furnitureRows.push(row.evidence.description)
+        l3Conditions.push({
+          ...row.evidence,
+          detail: '步骤前就已成立，不作为落库证据',
+        })
+        continue
+      }
+      l3EffectProven = true
       l3Conditions.push(row.evidence)
-      if (row.evidence.satisfied && provesLandedEffect(row.condition)) l3EffectProven = true
     }
   }
   const l3AllHeld = !!goalSpec && l3Conditions.length > 0 && l3Conditions.every((c) => c.satisfied) && l3EffectProven
@@ -266,7 +285,9 @@ export async function verifyWorkflowGoal(
         : !l3Evaluated && l3Unevaluated.length > 0
           ? 'L3 failed: every success condition compares against an observation from before its step, which cannot be re-checked after the run — the goal states nothing observable now.'
           : l3Evaluated && l3Conditions.every((c) => c.satisfied)
-            ? 'L3 failed: every success condition holds from the page the workflow opens (a URL row), so none of them proves the goal landed.'
+            ? furnitureRows.length > 0
+              ? `L3 failed: the success rows that could prove the goal (${furnitureRows.slice(0, 3).join('、')}) were already true on the page before the run — they describe the site, not what this run did. State a row that can only be true afterwards: the list grew, the dialog vanished, or the produced artifact found by a name the graph wrote into a variable.`
+              : 'L3 failed: every success condition holds from the page the workflow opens (a URL row), so none of them proves the goal landed.'
             : `L3 failed: the workflow goal success conditions did not all hold${
                 settleWaitedMs > 0 ? ` (the page was re-read for ${settleWaitedMs} ms after the run and they still did not).` : '.'
               }`

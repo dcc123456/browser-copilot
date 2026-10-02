@@ -17,6 +17,7 @@ import {
   conditionLocatorKey,
   describeCondition,
 } from '../../lib/workflow/conditions'
+import { interpolate } from '../../lib/workflow/interpolate'
 
 /**
  * The page observations conditions may need. Implementations must observe
@@ -53,6 +54,10 @@ export interface ConditionBaseline {
   url?: string
   counts: Record<string, number>
   exists: Record<string, boolean>
+  /** The words each targeted element showed, for the rows that quote text. */
+  texts?: Record<string, string>
+  /** Whether each targeted element was showing, for the rows that claim it was. */
+  visible?: Record<string, boolean>
 }
 
 /**
@@ -104,6 +109,158 @@ export async function captureConditionBaseline(
   return { ...(url !== undefined ? { url } : {}), counts, exists }
 }
 
+/**
+ * The page facts a goal row QUOTES, as they stood before the first step.
+ *
+ * A row like 「页面显示「草稿」」 says nothing about this run unless someone
+ * looked at the same words before it started: 小红书 shows 「草稿箱(100)」 the whole
+ * time, saved drafts or not. The rows that claim a CHANGE already get their
+ * before-state above; every other row gets its own quoted fact here, so the
+ * certification layer can ask the one question a live read cannot answer.
+ */
+async function captureQuotedObservations(
+  conditions: readonly WorkflowCondition[],
+  probe: ConditionPageProbe,
+): Promise<ConditionBaseline | undefined> {
+  const counts: Record<string, number> = {}
+  const exists: Record<string, boolean> = {}
+  const visible: Record<string, boolean> = {}
+  const texts: Record<string, string> = {}
+  let url: string | undefined
+  let observed = false
+  for (const condition of conditions) {
+    if (condition.kind === 'urlContains' || condition.kind === 'urlMatches') {
+      if (url === undefined) {
+        url = await probe.url()
+        if (url !== undefined) observed = true
+      }
+      continue
+    }
+    if (!('target' in condition)) continue
+    const key = conditionLocatorKey(condition.target)
+    if (condition.kind === 'elementVisible') {
+      if (!(key in visible)) {
+        visible[key] = await probe.visible(condition.target)
+        observed = true
+      }
+      continue
+    }
+    if (condition.kind === 'elementExists') {
+      if (!(key in exists)) {
+        exists[key] = await probe.exists(condition.target)
+        observed = true
+      }
+      continue
+    }
+    if (condition.kind === 'elementText') {
+      if (!(key in exists)) {
+        exists[key] = await probe.exists(condition.target)
+        observed = true
+      }
+      if (!(key in texts)) {
+        const text = await probe.text(condition.target)
+        if (text !== undefined) {
+          texts[key] = text
+          observed = true
+        }
+      }
+      continue
+    }
+    if (condition.kind === 'count') {
+      if (!(key in counts)) {
+        counts[key] = await probe.count(condition.target)
+        observed = true
+      }
+    }
+  }
+  if (!observed) return undefined
+  return {
+    ...(url !== undefined ? { url } : {}),
+    counts,
+    exists,
+    ...(Object.keys(visible).length > 0 ? { visible } : {}),
+    ...(Object.keys(texts).length > 0 ? { texts } : {}),
+  }
+}
+
+/**
+ * Everything the goal's success rows need in order to be re-read AFTER the run
+ * against the page as it was BEFORE it: the change rows' before-state and the
+ * quoted rows' before-values. The one moment this can be taken is before the
+ * first step, so the engine takes it whether or not the goal asked for it.
+ */
+export async function captureGoalBaseline(
+  conditions: readonly WorkflowCondition[],
+  probe: ConditionPageProbe,
+): Promise<ConditionBaseline | undefined> {
+  const changed = await captureConditionBaseline(conditions, probe)
+  const quoted = await captureQuotedObservations(conditions, probe)
+  if (!changed && !quoted) return undefined
+  const merged: ConditionBaseline = {
+    counts: { ...changed?.counts, ...quoted?.counts },
+    exists: { ...changed?.exists, ...quoted?.exists },
+  }
+  const url = changed?.url ?? quoted?.url
+  if (url !== undefined) merged.url = url
+  for (const field of ['visible', 'texts'] as const) {
+    const values = { ...changed?.[field], ...quoted?.[field] }
+    if (Object.keys(values).length > 0) merged[field] = values
+  }
+  return merged
+}
+
+/**
+ * The snapshot as a page: the same comparisons read against what was there
+ * before the run instead of what is there now. Observations the snapshot never
+ * took answer "not there" — which makes a row read false, never a false proof
+ * that the page changed.
+ */
+function probeFromBaseline(baseline: ConditionBaseline): ConditionPageProbe {
+  const read = (bag: Record<string, unknown> | undefined, target: ConditionTarget) =>
+    bag?.[conditionLocatorKey(target)]
+  return {
+    exists: async (target) => read(baseline.exists, target) === true,
+    visible: async (target) => read(baseline.visible, target) === true,
+    // The snapshot never recorded usability or attributes: a row that quotes
+    // them cannot be shown to have held before, so it stays on the honest side
+    // of this gate ("not proven to be furniture") rather than refused by it.
+    enabled: async () => false,
+    text: async (target) => {
+      const value = read(baseline.texts, target)
+      return typeof value === 'string' ? value : undefined
+    },
+    attribute: async () => undefined,
+    count: async (target) => {
+      const value = read(baseline.counts, target)
+      return typeof value === 'number' ? value : 0
+    },
+    url: async () => baseline.url,
+  }
+}
+
+/**
+ * Did this row already hold on the untouched page?
+ *
+ * A goal row is the mark the run is supposed to leave on the world, so a row
+ * that read true BEFORE anything ran proves nothing — that is the hole round 77
+ * fell through, where the only row the goal had was 「页面文本包含 草稿」 on a page
+ * that always shows 草稿箱. Re-evaluated against the snapshot with an EMPTY
+ * variable bag, because the words a row quotes through `{{title}}` did not
+ * exist until this run wrote them.
+ */
+export async function didHoldBeforeTheRun(
+  condition: WorkflowCondition,
+  baseline: ConditionBaseline | undefined,
+): Promise<boolean> {
+  if (!baseline) return false
+  const outcome = await evaluateCondition(condition, {
+    variables: {},
+    probe: probeFromBaseline(baseline),
+    baseline,
+  })
+  return outcome.satisfied
+}
+
 /** One evaluated condition. */
 export interface ConditionOutcome {
   satisfied: boolean
@@ -133,21 +290,26 @@ export async function evaluateCondition(
     description,
     ...(detail ? { detail } : {}),
   })
+  // A row may name the thing this run PRODUCES (`expected: "{{title}}"`). Without
+  // this the comparison would be against the literal template, and the goal could
+  // only ever be written as words that are on the page anyway.
+  const fill = (text: string): string => interpolate(text, deps.variables)
   try {
     switch (condition.kind) {
       case 'urlContains': {
         const url = (await deps.probe.url()) ?? ''
-        return url.includes(condition.value)
+        return url.includes(fill(condition.value))
           ? { satisfied: true, description }
           : unsatisfied(`URL "${url}" 不包含 "${condition.value}"`)
       }
       case 'urlMatches': {
         const url = (await deps.probe.url()) ?? ''
+        const pattern = fill(condition.value)
         let matched = false
         try {
-          matched = new RegExp(condition.value).test(url)
+          matched = new RegExp(pattern).test(url)
         } catch {
-          matched = url.includes(condition.value)
+          matched = url.includes(pattern)
         }
         return matched
           ? { satisfied: true, description }
@@ -170,8 +332,8 @@ export async function evaluateCondition(
         if (text === undefined) return unsatisfied('元素不存在')
         const ok =
           (condition.match ?? 'exact') === 'exact'
-            ? text.trim() === condition.expected
-            : text.includes(condition.expected)
+            ? text.trim() === fill(condition.expected)
+            : text.includes(fill(condition.expected))
         return ok
           ? { satisfied: true, description }
           : unsatisfied(`文本为 "${text.trim().slice(0, 80)}"`)
@@ -179,7 +341,7 @@ export async function evaluateCondition(
       case 'attributeEquals': {
         const value = await deps.probe.attribute(condition.target, condition.name)
         if (value === undefined) return unsatisfied(`属性 ${condition.name} 不存在`)
-        return value === condition.expected
+        return value === fill(condition.expected)
           ? { satisfied: true, description }
           : unsatisfied(`属性 ${condition.name} 为 "${value}"`)
       }

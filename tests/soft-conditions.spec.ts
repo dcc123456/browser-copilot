@@ -22,6 +22,8 @@ import { conditionLocatorKey, describeCondition, isHardCondition } from '../src/
 import { withNodeGoalContract } from '../src/lib/workflow/node-goal-contract'
 import {
   captureConditionBaseline,
+  captureGoalBaseline,
+  didHoldBeforeTheRun,
   evaluateCondition,
   type ConditionBaseline,
   type ConditionPageProbe,
@@ -460,5 +462,126 @@ describe('the run records what each step observed on its own page', () => {
     })
     expect(result.outcome).toBe('ok')
     expect(result.nodeConditions?.[0]?.satisfied).toBe(false)
+  })
+})
+
+// --- The goal's before-page ---------------------------------------------------
+
+const pageText = (text: string, url = 'https://x.test/publish'): ConditionPageProbe => ({
+  exists: async () => true,
+  visible: async () => true,
+  enabled: async () => true,
+  text: async () => text,
+  attribute: async () => undefined,
+  count: async () => 1,
+  url: async () => url,
+})
+
+describe('a row quotes the words this run produced', () => {
+  const draft = { selector: '.draft' }
+
+  it('fills {{variable}} inside a text comparison from the run\'s variables', async () => {
+    const row = { kind: 'elementText', target: draft, match: 'contains', expected: '{{title}}' } as const
+    expect(
+      (await evaluateCondition(row, { variables: { title: '图文笔记' }, probe: pageText('已保存：图文笔记') })).satisfied,
+    ).toBe(true)
+    // The unfilled template is not a pass: a row naming a variable the graph
+    // never wrote reads false, which is the whole point of letting rows name
+    // artifacts.
+    expect(
+      (await evaluateCondition(row, { variables: {}, probe: pageText('已保存：图文笔记') })).satisfied,
+    ).toBe(false)
+  })
+
+  it('fills a URL row the same way', async () => {
+    const outcome = await evaluateCondition(
+      { kind: 'urlContains', value: '/draft/{{id}}' },
+      { variables: { id: 'abc' }, probe: pageText('x', 'https://x.test/draft/abc') },
+    )
+    expect(outcome.satisfied).toBe(true)
+  })
+})
+
+describe('the goal snapshot and what it can prove', () => {
+  const box = { text: '草稿' }
+  const key = conditionLocatorKey(box)
+  const heading = { role: 'heading' }
+
+  it('remembers the facts every goal row quotes, not only the change rows', async () => {
+    const baseline = await captureGoalBaseline(
+      [
+        { kind: 'elementText', target: box, match: 'contains', expected: '草稿' },
+        { kind: 'elementVisible', target: heading },
+        { kind: 'countIncreased', target: box },
+        { kind: 'urlContains', value: '/publish' },
+      ],
+      { ...pageText('草稿箱(100)'), count: async () => 3 },
+    )
+    expect(baseline).toEqual({
+      url: 'https://x.test/publish',
+      counts: { [key]: 3 },
+      exists: { [key]: true },
+      visible: { [conditionLocatorKey(heading)]: true },
+      texts: { [key]: '草稿箱(100)' },
+    })
+  })
+
+  it('reads a furniture row as already true and a changed page as new', async () => {
+    const baseline: ConditionBaseline = { counts: {}, exists: { [key]: true }, texts: { [key]: '草稿箱(100)' } }
+    expect(
+      await didHoldBeforeTheRun({ kind: 'elementText', target: box, match: 'contains', expected: '草稿' }, baseline),
+    ).toBe(true)
+    expect(
+      await didHoldBeforeTheRun(
+        { kind: 'elementText', target: box, match: 'contains', expected: '图文笔记' },
+        baseline,
+      ),
+    ).toBe(false)
+    // The artifact named through a variable cannot have been on the page before
+    // the run wrote its name — even though the words are there now.
+    expect(
+      await didHoldBeforeTheRun(
+        { kind: 'elementText', target: box, match: 'contains', expected: '{{title}}' },
+        { ...baseline, texts: { [key]: '图文笔记' } },
+      ),
+    ).toBe(false)
+    // With no snapshot nobody can say, and "cannot say" is not "it changed".
+    expect(
+      await didHoldBeforeTheRun(
+        { kind: 'elementText', target: box, match: 'contains', expected: '草稿' },
+        undefined,
+      ),
+    ).toBe(false)
+  })
+
+  it('is taken for every goal once the caller can observe quoted rows', async () => {
+    const workflow = strictWorkflow({})
+    ;(workflow.settings as unknown as Record<string, unknown>).goalSpec = {
+      summary: 'the draft box shows the saved word',
+      successConditions: [{ kind: 'elementText', target: box, match: 'contains', expected: '草稿' }],
+    }
+    const captured: number[] = []
+    const withQuoted = await runWorkflow(workflow, {
+      executors: { 'event-click': async () => null },
+      captureGoalBaseline: async () => {
+        captured.push(1)
+        return { counts: {}, exists: {}, texts: { [key]: '草稿箱(100)' } }
+      },
+    })
+    expect(withQuoted.outcome).toBe('ok')
+    expect(captured).toEqual([1])
+    expect(withQuoted.goalBaseline?.texts).toEqual({ [key]: '草稿箱(100)' })
+
+    // A caller that only remembers change rows keeps the old, narrower snapshot:
+    // nothing needs the before-page for a plain row, so nothing looks at it.
+    const changeOnly = await runWorkflow(workflow, {
+      executors: { 'event-click': async () => null },
+      captureConditionBaseline: async () => {
+        captured.push(2)
+        return { counts: {}, exists: {} }
+      },
+    })
+    expect(changeOnly.goalBaseline).toBeUndefined()
+    expect(captured).toEqual([1])
   })
 })
