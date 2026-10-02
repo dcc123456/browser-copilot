@@ -215,6 +215,18 @@ describe('trial cutoff', () => {
     expect(trialCutoffNodeId(wf)).toBeDefined()
   })
 
+  // The draft save is reserved even when no keyword calls it unsafe. Round 74's
+  // trial ran 16/16 with no cutoff at all and wrote real drafts, because
+  // 「保存为草稿」 is not in the unsafe vocabulary.
+  it('cuts off the draft save the caller has not opted into', () => {
+    const draft = node('event-click', {
+      selector: '#stay',
+      label: '暂存离开按钮 - 保存为草稿 暂存离开',
+    })
+    const wf = chain([readStep(), node('forms', { selector: '#t', value: 'a title' }), draft])
+    expect(trialCutoffNodeId(wf)).toBe(draft.id)
+  })
+
   it('still refuses the click that names 发布', () => {
     const wf = chain([readStep(), node('event-click', { selector: '#p', description: '点击发布按钮' })])
     expect(trialCutoffNodeId(wf)).toBeDefined()

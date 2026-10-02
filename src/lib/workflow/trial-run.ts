@@ -163,9 +163,17 @@ export function isTriggerNode(node: WorkflowNode): boolean {
  * Reads come first and are exactly what the trial is for; the cutoff is where
  * "prove it again" turns into "do it again". A graph with no such step returns
  * undefined, and the trial runs the whole thing.
+ *
+ * The draft save counts even though no keyword makes it unsafe: 「保存为草稿」 is not
+ * in the unsafe vocabulary because it is not irreversible for a site, but THIS
+ * user reserved it behind `--allow-draft-commit`, and a round-74 trial that looked
+ * only for unsafe steps ran a whole graph with no cutoff and wrote three real
+ * drafts into a box pinned at its 100 cap — silently evicting the oldest.
  */
 export function trialCutoffNodeId(workflow: Workflow): string | undefined {
-  return executionPath(workflow).find((node) => isUnsafeNode(node))?.id
+  return executionPath(workflow).find(
+    (node) => isUnsafeNode(node) || (isActuationNode(node) && isDraftSaveNode(node)),
+  )?.id
 }
 
 /** Does this node's step repeat something the site already committed? */
