@@ -109,11 +109,33 @@ export function resolveTransferMode(
 }
 
 /**
+ * The directory an UNATTENDED run writes into when nobody can answer the save
+ * picker: the extension's own OPFS origin directory, a subfolder of it.
+ *
+ * It needs no user gesture, no `showDirectoryPicker`, and no persisted handle, so
+ * a bridge / harness / scheduled replay always has exactly one place that is sure
+ * to be writable — which is the difference between a run that finishes and one that
+ * dies at 16/44 on «无法打开保存对话框» (round 71). The path is on disk under the
+ * profile (`…/<Profile>/File System/…`) and the run event names the file, so nothing
+ * is hidden; it is only ever reached AFTER the configured download dir and AFTER the
+ * side panel failed to answer, so an attended run still behaves exactly as before.
+ */
+export async function getUnattendedDownloadDir(): Promise<FileSystemDirectoryHandle | null> {
+  try {
+    const storage = navigator.storage as { getDirectory?: () => Promise<FileSystemDirectoryHandle> }
+    const root = await storage?.getDirectory?.()
+    if (!root) return null
+    return await root.getDirectoryHandle('browser-copilot-downloads', { create: true })
+  } catch {
+    return null
+  }
+}
+
+/**
  * 将一个文件写到下载目录。`create: true` 时若同名文件已存在会被覆盖。
  * `data` 可以是文本或二进制（截图等），底层 `createWritable().write` 两者都收。
  * 返回是否写入成功（如目录句柄无效或权限丢失时返回 `false`）。
- */
-export async function writeFileToDownloadDir(
+ */export async function writeFileToDownloadDir(
   dir: FileSystemDirectoryHandle,
   filename: string,
   data: string | BufferSource,

@@ -59,6 +59,7 @@ import { LoopBreakpointError } from './loop-breakpoint'
 import {
   askSaveViaSidePanel,
   getDownloadDir,
+  getUnattendedDownloadDir,
   writeFileToDownloadDir,
   type SavePickerPayload,
 } from '../../lib/download-dir'
@@ -1500,12 +1501,12 @@ async function writeToConfiguredDir(
   ctx: WorkflowExecCtx,
 ): Promise<'saved' | 'canceled' | 'failed'> {
   const dir = await getDownloadDir()
+  const data = payload.base64 === undefined ? (payload.text ?? '') : base64ToBytes(payload.base64)
   if (dir) {
     // Trust the actual write attempt rather than `dir.queryPermission` — in a
     // service worker that call can throw or report "denied" even when the
     // persisted handle is still usable (e.g. after a worker/extension restart),
     // which would push every run into the manual confirmation branch.
-    const data = payload.base64 === undefined ? (payload.text ?? '') : base64ToBytes(payload.base64)
     if (await writeFileToDownloadDir(dir, filename, data)) {
       ctx.emit('result', `已自动保存: ${filename}`)
       return 'saved'
@@ -1522,6 +1523,17 @@ async function writeToConfiguredDir(
   }
   if (res.ok) {
     ctx.emit('result', `已通过另存为保存: ${filename}`)
+    return 'saved'
+  }
+  // Nobody answered — an unattended run (bridge, harness, scheduled task) has no
+  // panel open and no hand to click the dialog, so the step whose entire purpose is
+  // the file used to kill the graph (round 71 stopped at 16/44 on «无法打开保存对话
+  // 框»). The extension's own OPFS directory always needs neither a gesture nor a
+  // permission, so the file is written there and named in the run event; only when
+  // even that is unavailable does the step fail loudly, as it must.
+  const unattended = await getUnattendedDownloadDir()
+  if (unattended && (await writeFileToDownloadDir(unattended, filename, data))) {
+    ctx.emit('result', `无人值守：已写入扩展本地目录 browser-copilot-downloads/${filename}`)
     return 'saved'
   }
   ctx.emit('error', '无法弹出保存对话框：请打开侧面板后重试')
