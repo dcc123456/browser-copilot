@@ -2096,9 +2096,9 @@ function prepareWorkflowGoalTool(): WireTool {
           successConditions: {
             type: 'array',
             description:
-              'Machine-checkable; ≥1 must hold AFTER the last step, on the page it lands on ' +
-              '(URL alone refused). Name elements by VISIBLE WORDS (text/label/accessibleName); ' +
-              'selector/testid/role refused. / 禁止猜测 class。',
+              '≥1 row must be FALSE before the run, true where it lands ' +
+              '(URL/standing text refused). Prefer elementAppeared/countIncreased or ' +
+              'expected:"{{var}}". Name by VISIBLE WORDS; no selector/testid/role.',
             items: { type: 'object', additionalProperties: true },
           },
           terminalStateConditions: {
