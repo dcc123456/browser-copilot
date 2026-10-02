@@ -14,6 +14,7 @@
 import { newId } from '../storage'
 import { fileStorageArea } from '../fs-store'
 import { withKeyLock } from '../key-lock'
+import { shedBulkDataUrls } from '../persist-budget'
 import { migrateWorkflow } from './migrate'
 import { normalizeTrialRun } from './trial-run'
 import { pageContextOf } from './page-context'
@@ -231,9 +232,14 @@ export async function saveWorkflow(workflow: Workflow): Promise<void> {
     // editor, the engine, exports — reads the canonical flat shape. Idempotent
     // for already-canonical workflows.
     const canonical = migrateWorkflow(normalized)
+    // No persisted copy of the graph may carry a megabyte data URL, including one
+    // inlined in a code node's literal: `workflows` is ONE key rewritten whole on
+    // every save, so a single fat param costs the key its durability — and a
+    // draft sealed straight from such a graph measured 36 MB in one write.
+    const storable = shedBulkDataUrls(canonical) as Workflow
     const index = list.findIndex((existing) => existing.id === workflow.id)
-    if (index >= 0) list[index] = canonical
-    else list.push(canonical)
+    if (index >= 0) list[index] = storable
+    else list.push(storable)
     await area.set({ [KEY_WORKFLOWS]: list })
   })
 }

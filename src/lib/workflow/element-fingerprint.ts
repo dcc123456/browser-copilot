@@ -35,6 +35,13 @@ export interface SemanticLocator {
   placeholder?: string
   /** `data-testid`-style attribute value (the `attr` is in stableAttributes). */
   testId?: string
+  /**
+   * A recorded CSS selector. Positional, not identity — but OBSERVABLE, and a
+   * generation model writes goal conditions as `target: {selector: "…"`, so an
+   * observer that skips this field reads a present element as permanently
+   * absent and the goal can never certify.
+   */
+  selector?: string
   /** Stable, non-random attributes worth matching (`id`, `name`, `data-*`). */
   stableAttributes?: Record<string, string>
   /** Relation that narrows a ambiguous match to the RIGHT one. */
@@ -379,6 +386,9 @@ export function targetSpecsFromSemantic(
     out.push(spec)
   }
   push(targetSpecFromSemantic(locator))
+  // A recorded CSS selector is not identity, but it is the chain the node itself
+  // acted on — dropping it would make its own postcondition unsatisfiable.
+  if (typeof locator.selector === 'string') push({ how: 'css', value: locator.selector.trim() })
   const css = locator.stableAttributes?.['data-css']
   if (typeof css === 'string') push({ how: 'css', value: css.trim() })
   return out

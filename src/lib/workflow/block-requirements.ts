@@ -150,13 +150,59 @@ function hasConditionsContent(data: Record<string, unknown>): boolean {
  */
 const JAVASCRIPT_CODE_BLOCK_ID = 'javascript-code'
 
+/** A CSS locator that names a file input, in any of the forms a model writes. */
+const FILE_INPUT_SELECTOR_PATTERN = /\[\s*type\s*=\s*["']?file["']?\s*\]|:file\b/i
+
+/** Every CSS string one node's locator carries (flat selector and target chain). */
+function cssLocatorsOf(data: Record<string, unknown>): string[] {
+  const out: string[] = []
+  if (typeof data['selector'] === 'string') out.push(data['selector'])
+  const target = data['target']
+  if (target && typeof target === 'object') {
+    const record = target as Record<string, unknown>
+    if (typeof record['selector'] === 'string') out.push(record['selector'])
+    const specs: unknown[] = []
+    if (record['primary'] !== undefined) specs.push(record['primary'])
+    if (Array.isArray(record['fallbacks'])) specs.push(...record['fallbacks'])
+    for (const spec of specs) {
+      if (!spec || typeof spec !== 'object') continue
+      const entry = spec as Record<string, unknown>
+      if (entry['how'] === 'css' && typeof entry['value'] === 'string') out.push(entry['value'])
+    }
+  }
+  return out
+}
+
+/**
+ * A click aimed at a file input uploads NOTHING. The browser opens the chooser
+ * only for a gesture that came from a real user, so the step executes "successfully"
+ * and the page never gets a file — round 53 recorded three of them on 小红书, the
+ * replay then covered 21/21 steps, no image was ever attached, and the draft save at
+ * the end had nothing to save. Refuse it where the call is made and name the block
+ * that can do the job: the model has one tool left to try, so this is not a dead end.
+ *
+ * Warning severity, deliberately: the record gate refuses on either severity (the
+ * model is present and can fix the call), while an `error` would retroactively refuse
+ * to RUN graphs that are already saved.
+ */
+function clickOnFileInputProblem(data: Record<string, unknown>): RequirementProblem | null {
+  if (!cssLocatorsOf(data).some((css) => FILE_INPUT_SELECTOR_PATTERN.test(css))) return null
+  return {
+    key: 'selector',
+    message:
+      '点击目标是文件输入框（input[type="file"]）：浏览器只在真人手势下打开文件选择器，无人值守时这一步只会空跑，不会上传任何文件。' +
+      '请改用 Upload file 算子（wf_op_upload-file，sourceMode:"workflow-file"，fileVariable 指向脚本生成的图片变量）。',
+    severity: 'warning',
+  }
+}
+
 /**
  * blockId → its requirements. Only blocks reachable from the workflow
  * generator need an entry; every other block is unconstrained.
  */
 const REQUIREMENTS: Readonly<Record<string, RequirementSet>> = {
   // --- interaction ---------------------------------------------------------
-  'event-click': { locator: LOCATOR_MESSAGE },
+  'event-click': { locator: LOCATOR_MESSAGE, check: clickOnFileInputProblem },
   'hover-element': { locator: LOCATOR_MESSAGE },
   link: { locator: LOCATOR_MESSAGE },
   'element-exists': { locator: LOCATOR_MESSAGE },

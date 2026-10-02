@@ -206,12 +206,21 @@ async function main() {
     // reload is only demanded when that hash is not this checkout's.
     const stamp = sourceFingerprintSync()
     report.buildStamp = stamp
-    if (started <= 1 && options.reload) {
-      const live = await waitForPlugin(conn, { log, timeoutMs: 30_000 })
+    // Not gated on `--from`: a replay measured against a worker still running an
+    // older build is not evidence about THIS code, and rounds 31–32 were exactly
+    // that — `--from verify` skipped the gate, so three shipped fixes were
+    // reported as having changed nothing. `--skip-reload` is the opt-out.
+    if (options.reload) {
+      // Generous on purpose: right after a browser restart the extension's
+      // outbound reconnect fires on the adapter's own ~30-second cadence, and a
+      // preflight that gives up before that reads as "the plugin is broken".
+      const live = await waitForPlugin(conn, { log, timeoutMs: 120_000 })
       if (!live.ok)
         die(
           3,
-          'the bridge is not answering — is the extension loaded with Local agent access enabled?',
+          'the bridge is not answering after 120s — is the extension loaded with Local agent ' +
+            'access enabled? After a browser restart the worker reconnects on its own; if it has ' +
+            'been longer than a minute, the service worker is dead and Chrome needs a restart.',
         )
       if (live.build === stamp) {
         await writeLoadedStamp(stamp)
@@ -344,8 +353,12 @@ async function main() {
       const result = run.status?.result ?? {}
       report.phases.generate = { conversationId: run.conversationId, result }
       workflowId = result.workflow?.id ?? ''
-      const generationFailed =
-        !result.ok || !result.workflow?.saved || !(result.workflow?.nodeCount > 0)
+      // What this run was for is the SAVED GRAPH, not the model's closing prose.
+      // Round 48 composed and saved 12 nodes, then ended its turn right after the last
+      // tool call with no answer text — and the old gate threw the whole round away on
+      // that `ok:false`, refusing to replay the only artifact it had produced.
+      const graphSaved = result.workflow?.saved === true && result.workflow?.nodeCount > 0
+      const generationFailed = !graphSaved
       if (generationFailed) {
         report.verdict = {
           pass: false,
@@ -366,7 +379,58 @@ async function main() {
         ...(result.workflow.saveWarnings?.length
           ? [`  save warnings: ${result.workflow.saveWarnings.join(' | ')}`]
           : []),
+        ...(result.ok
+          ? []
+          : [
+              `  note: the turn never wrote a final answer (${String(
+                result.error ?? 'unknown',
+              ).slice(0, 140)}) — the graph is saved, so the replay runs anyway`,
+            ]),
       )
+      // The bridge re-asked the model for its missing last step when the first turn
+      // ended without one. Named here because it doubles the round's wall time, and
+      // because `recorded 0 more` is the evidence that the hole is behavioural.
+      if (result.terminalStepContinuation) {
+        const c = result.terminalStepContinuation
+        log(
+          `  terminal-step re-ask: turn ended at ${c.stepsBefore} steps with no draft save,` +
+            ` the extra turn took it to ${c.stepsAfter} (ok=${c.ok})`,
+          `  re-ask answered: ${String(c.answer ?? '(nothing)').slice(0, 300)}`,
+        )
+      }
+      // The last steps of the graph, each with the words on the element its click
+      // targets. Whether a draft save exists is decided from those words, so this
+      // line separates the two ways to fail the gate: the words were never
+      // recorded (a capture-time hole) or they were recorded and name a different
+      // button (the model clicked the wrong thing).
+      const graphTail = (result.workflow.nodes ?? []).slice(-4)
+      if (graphTail.length > 0) {
+        log(
+          '  graph tail: ' +
+            graphTail
+              .map((n) => `${n.blockId}${n.words ? ` «${n.words}»` : ''} · ${String(n.intent ?? '').slice(0, 46)}`)
+              .join(' | '),
+        )
+      }
+      // The bridge answers this from the graph, so it is known BEFORE any replay:
+      // the goal asks for a draft and no node writes one. Replaying such a graph
+      // cannot tell you anything you do not already have — round 22 ran 26/26 clean,
+      // reported `verified: true`, and saved nothing — so stop here with the reason
+      // instead of spending another twelve minutes proving it.
+      if (result.workflow.terminalStepMissing === true) {
+        report.verdict = {
+          pass: false,
+          stage: 'generate',
+          reason:
+            'the goal asks for a draft and no node in the graph saves one — replay skipped, ' +
+            'the graph is missing its terminal action',
+          workflowId,
+          nodeCount: result.workflow.nodeCount,
+        }
+        log(`INCOMPLETE GENERATION: ${report.verdict.reason}`)
+        process.exitCode = 2
+        return
+      }
     } else {
       report.phases.generate = { skipped: true, workflowId }
     }
@@ -427,30 +491,53 @@ async function main() {
       // judged — no goal contract, or a replay that stopped before the end.
       const goal = result.workflow?.goal
       const goalUnmet = goal !== undefined && goal.certified !== true
+      // A cutoff run proves its PREFIX, nothing else. Round 18 reported `pass`
+      // for a replay that covered 10 of 26 steps and never reached the save, and
+      // printed «RAN THROUGH ITS OWN DRAFT COMMIT» for a run that wrote no draft:
+      // both claims come from what the extension actually observed — the record's
+      // `draftSaved` is answered from the graph, not from the caller's flag.
+      const ranToTheEnd = trial.outcome === 'passed'
+      const draftSaved = trial.draftSaved === true
+      const stoppedShort = !replayFailed && !ranToTheEnd && !draftSaved
       report.verdict = {
-        pass: !replayFailed && !goalUnmet,
-        stage: replayFailed ? 'verify' : goalUnmet ? 'goal' : 'ok',
+        pass: !replayFailed && !goalUnmet && !stoppedShort,
+        stage: replayFailed ? 'verify' : goalUnmet ? 'goal' : stoppedShort ? 'cutoff' : 'ok',
         reason:
           result.error ??
           trial.reason ??
-          (goalUnmet
-            ? goal.reason
-            : goal === undefined
-              ? // The coverage verdict must not read as a goal verdict: a graph with
-                // no goal contract proves its STEPS, and nothing about the task.
-                'the replay ran without failing a step; its goal was not judged (the graph carries no goal contract)'
-              : 'the replay ran without failing a step, and its goal held afterwards'),
+          (stoppedShort
+            ? `the replay stopped at step ${trial.coveredSteps ?? '?'}/${trial.totalSteps ?? '?'} at its cutoff (${trial.cutoffNodeId ?? '?'}) and never fired the graph's draft save — nothing was written and the steps after the cutoff are unproven`
+            : goalUnmet
+              ? goal.unmet?.length
+                ? `${goal.reason} Unmet: ${goal.unmet.join(' | ')}.`
+                : goal.reason
+              : goal === undefined
+                ? // The coverage verdict must not read as a goal verdict: a graph with
+                  // no goal contract proves its STEPS, and nothing about the task.
+                  'the replay ran without failing a step; its goal was not judged (the graph carries no goal contract)'
+                : 'the replay ran without failing a step, and its goal held afterwards'),
         outcome: trial.outcome,
         verified: result.workflow?.verified === true,
         /** A full graph, no step failed: the only replay that proves the workflow. */
         proven: trial.outcome === 'passed' && trial.full === true,
+        /** Did a draft actually land in the account on this run. */
+        draftSaved,
         /** L1/L2/L3 certification of the goal itself, judged on the live page. */
         goalCertified: goal?.certified,
         goalLevel: goal?.level,
         goalReason: goal?.reason,
-        /** Which cutoff the replay ran under, so a reader knows what was refused. */
+        /** Which condition rows failed, in their own words. */
+        goalUnmet: goal?.unmet,
+        /** Set when a row failed on the instant-of-run read and only held on a later read. */
+        goalSettledAfterMs: goal?.settledAfterMs,
+        /** Which cutoff the replay ran under, so a reader knows what was refused.
+         * Named with what the graph actually offered: the caller's flag alone calls
+         * round 22 a `draft-commit` run, and the honest fact is that the graph had
+         * no draft-save step to commit to. */
         cutoffMode: options.allowDraftCommit
-          ? 'draft-commit'
+          ? result.workflow?.terminalStepMissing === true
+            ? 'draft-commit-absent'
+            : 'draft-commit'
           : options.runToDraft
             ? 'commit-only'
             : 'first-unsafe',
@@ -472,7 +559,10 @@ async function main() {
         `  verified(clean full replay)=${report.verdict.verified} · degraded locators=${trial.degradedSteps ?? 0}`,
         ...(goal
           ? [
-              `  goal ${goal.certified ? 'CERTIFIED' : 'NOT CERTIFIED'} (${goal.level}) — ${goal.reason}`,
+              `  goal ${goal.certified ? 'CERTIFIED' : 'NOT CERTIFIED'} (${goal.level}) — ${goal.reason}` +
+                (goal.settledAfterMs !== undefined
+                  ? ` [a success row only held ${goal.settledAfterMs} ms after the run — the page needed to settle]`
+                  : ''),
             ]
           : trial.outcome === 'passed'
             ? [
@@ -485,7 +575,9 @@ async function main() {
         ...(trial.failureCode === 'UNRESOLVED_INPUT'
           ? [
               `  ${trial.reason ?? 'a declared input had no value'} — this replay cannot fix it:` +
-                ' the workflow asks for a value nobody gave it. Rerun with --input name=value.',
+                ' if the name is a parameter the workflow DECLARES, rerun with --input name=value;' +
+                ' if a step inside the graph was supposed to WRITE it (an ai-agent / canvas node),' +
+                ' --input cannot help — the graph is missing its producer.',
             ]
           : []),
         ...(repair.status && repair.status !== 'not-needed'
@@ -519,22 +611,29 @@ async function main() {
             ? [
                 'RAN CLEAN, GOAL NOT CERTIFIED — every step returned without an error, but the goal conditions the workflow carries were not met on the page; read the L3 line above before calling this a success',
               ]
-            : result.workflow?.verified
-              ? ['PASS — the generated graph replays end to end and its goal held']
-              : options.allowDraftCommit
+            : stoppedShort
+              ? [
+                  `STOPPED SHORT OF ITS COMMIT — the run covered ${trial.coveredSteps ?? '?'}/${trial.totalSteps ?? '?'} steps and never fired the graph’s save step, so NO draft was written. This is not a pass: the steps after the cutoff, including the one the goal asked for, are unproven.`,
+                ]
+              : draftSaved
                 ? [
-                    'RAN THROUGH ITS OWN DRAFT COMMIT — the graph’s save step executed, so a draft now ' +
-                      'sits in the account; a publish would still have stopped the run',
+                    'DRAFT WRITTEN — the graph’s own save step executed, so a draft now sits in the account; a publish would still have stopped the run',
                   ]
-                : options.runToDraft
-                ? [
-                    'RAN TO THE COMMIT POINT — steps before it executed for real; the draft is written only if the graph reached its own save step',
-                  ]
-                : [
-                    'RAN, NOT FULLY PROVEN — the replay stopped at its unsafe-step cutoff (rerun with --run-to-draft to execute the steps before the commit)',
-                  ]),
+                : result.workflow?.verified
+                  ? ['PASS — the generated graph replays end to end and its goal held']
+                  : options.allowDraftCommit
+                    ? [
+                        'RAN TO THE END OF ITS GRAPH — every step executed; nothing published',
+                      ]
+                    : options.runToDraft
+                      ? [
+                          'RAN TO THE COMMIT POINT — steps before it executed for real; the draft is written only if the graph reached its own save step',
+                        ]
+                      : [
+                          'RAN, NOT FULLY PROVEN — the replay stopped at its unsafe-step cutoff (rerun with --run-to-draft to execute the steps before the commit)',
+                        ]),
       )
-      process.exitCode = replayFailed || goalUnmet ? 2 : 0
+      process.exitCode = replayFailed || goalUnmet || stoppedShort ? 2 : 0
       return
     }
 

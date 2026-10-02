@@ -188,6 +188,45 @@ describe('schemaRequiredArgs (what the tool schema marks required)', () => {
   })
 })
 
+describe('a click cannot be aimed at a file input', () => {
+  // Round 53 recorded three `event-click` steps on `input[type="file"]`. Each one
+  // "succeeded" — the browser only opens the chooser for a real user gesture — so
+  // the replay covered 21/21 steps with no image ever attached, and the draft save
+  // at the end had nothing to save. The refusal names the block that can do the job,
+  // so the call has exactly one fix instead of a dead end.
+  const click = (selector: string) =>
+    missingRequirements('event-click', { selector, blockId: 'event-click' })
+
+  it('refuses the forms a model writes a file input in', () => {
+    for (const selector of [
+      'input[type="file"]',
+      'div.upload-box > input[type=file]',
+      'input:file',
+    ]) {
+      const problems = click(selector)
+      expect(problems.map((p) => p.key)).toContain('selector')
+      expect(problems[0]?.message).toContain('wf_op_upload-file')
+    }
+  })
+
+  it('reads the selector through the target chain too', () => {
+    const problems = missingRequirements('event-click', {
+      target: { primary: { how: 'css', value: 'input[type="file"]' }, fallbacks: [] },
+    })
+    expect(problems[0]?.key).toBe('selector')
+  })
+
+  it('is a warning, so a saved graph still runs', () => {
+    expect(click('input[type="file"]')[0]?.severity).toBe('warning')
+  })
+
+  it('leaves every other click alone', () => {
+    expect(click('input[type="text"]')).toEqual([])
+    expect(click('#publish-btn')).toEqual([])
+    expect(click('div > div:nth-of-type(2) > input')).toEqual([])
+  })
+})
+
 describe('the refusal the model sees', () => {
   it('names the block, every missing parameter and the fact nothing was recorded', () => {
     const message = formatRequirementRefusal('Element exists', [

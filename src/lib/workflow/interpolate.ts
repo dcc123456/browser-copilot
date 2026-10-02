@@ -50,12 +50,44 @@ function leftoverTokens(text: string): string[] {
 }
 
 /**
+ * A JSON object/array hidden inside a string, or `undefined`.
+ *
+ * Blocks that answer with model prose store TEXT: an ai-agent asked for
+ * `{title, body}` lands in `ctx.variables` as the string `{"title":…}`, because
+ * the executor cannot know whether its consumer wants the document or the
+ * sentence. The reference side is where that is decidable — `{{articleData.title}}`
+ * is only ever written when the value is meant to have fields — so the parse
+ * happens here rather than by rewriting the variable's type at the producer and
+ * breaking every `{{articleData}}` that wanted the string. Fences come off
+ * first; models wrap JSON in ```json blocks whatever the prompt says.
+ */
+function parseJsonDocument(text: string): unknown {
+  const trimmed = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim()
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return undefined
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    return parsed !== null && typeof parsed === 'object' ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Walk a dot-separated `path` (e.g. `a.b.0`) across nested objects / arrays.
  * Returns `undefined` for any missing segment or a non-object step.
  */
 export function getByPath(root: unknown, path: string): unknown {
   let cursor = root
   for (const segment of path.split('.')) {
+    if (typeof cursor === 'string') {
+      const parsed = parseJsonDocument(cursor)
+      if (parsed === undefined) return undefined
+      cursor = parsed
+    }
     if (cursor === null || cursor === undefined || typeof cursor !== 'object') {
       return undefined
     }

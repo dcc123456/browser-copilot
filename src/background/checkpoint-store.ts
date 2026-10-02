@@ -23,6 +23,43 @@ const DEFAULT_LIMIT = 50
 /** How many finished runs keep their checkpoints on disk. */
 const DEFAULT_MAX_PERSISTED_RUNS = 20
 
+/**
+ * Byte budget (JSON characters) for ONE run's durable checkpoints. The count
+ * cap alone was not enough: a variable bag that carries script-generated
+ * images as data URLs puts megabytes into a SINGLE checkpoint, and the whole
+ * per-run list is rewritten on every flush — through the browser-storage
+ * fallback when the data directory is down, where a hundreds-of-megabytes
+ * write takes the service worker down with it.
+ */
+const DEFAULT_MAX_PERSISTED_BYTES = 2 * 1024 * 1024
+
+/**
+ * The newest suffix of `list` that fits `budget`, or `undefined` when even the
+ * single newest checkpoint is too large to persist. Measured newest-first with
+ * the scan stopping as soon as the budget is spent, so an oversized tail costs
+ * one serialization rather than one per entry.
+ */
+export function fitCheckpointsToBytes(
+  list: RunCheckpoint[],
+  budget: number,
+): RunCheckpoint[] | undefined {
+  let bytes = 0
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    let text: string
+    try {
+      text = JSON.stringify(list[i])
+    } catch {
+      return undefined
+    }
+    bytes += text.length + 1 // +1 for the list separator
+    if (bytes > budget) {
+      if (i === list.length - 1) return undefined
+      return list.slice(i + 1)
+    }
+  }
+  return list
+}
+
 /** Storage key of one run's checkpoints. */
 export function checkpointKey(runId: string): string {
   return `${CHECKPOINT_PREFIX}${runId}`
@@ -40,6 +77,8 @@ function asCheckpoints(value: unknown): RunCheckpoint[] {
 export interface ChromeCheckpointStoreOptions {
   /** Per-run checkpoint cap. */
   limit?: number
+  /** Byte budget for one run's durable copy. */
+  maxPersistedBytes?: number
   /** Injected storage area (tests pass a fake; default: `fileStorageArea()`). */
   area?: StorageArea
 }
@@ -54,6 +93,7 @@ export function createChromeCheckpointStore(
   options: ChromeCheckpointStoreOptions = {},
 ): CheckpointStore {
   const limit = options.limit ?? DEFAULT_LIMIT
+  const maxPersistedBytes = options.maxPersistedBytes ?? DEFAULT_MAX_PERSISTED_BYTES
   const area = options.area ?? fileStorageArea()
   const byRun = new Map<string, RunCheckpoint[]>()
   /** Coalesces bursts of step writes into one storage call per tick. */
@@ -67,8 +107,14 @@ export function createChromeCheckpointStore(
     for (const runId of runIds) {
       const list = byRun.get(runId) ?? []
       // A failed write must never break the run: checkpoints are an
-      // optimization, not a correctness requirement.
-      void area.set({ [checkpointKey(runId)]: list }).catch(() => undefined)
+      // optimization, not a correctness requirement. Same reason the oversized
+      // ones are skipped instead of awaited-and-thrown.
+      const kept = fitCheckpointsToBytes(list, maxPersistedBytes)
+      if (!kept) {
+        console.warn(`[checkpoints] ${runId}: newest checkpoint exceeds the persist budget, skipped`)
+        continue
+      }
+      void area.set({ [checkpointKey(runId)]: kept }).catch(() => undefined)
     }
   }
 

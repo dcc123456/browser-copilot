@@ -24,6 +24,7 @@ import {
   skillPath,
 } from './fs-store'
 import { withKeyLock } from './key-lock'
+import { jsonBytes } from './persist-budget'
 import { skillFromMarkdown, skillSlug, skillToMarkdown } from './skills-import'
 import { agentFromMarkdown, agentSlug, agentToMarkdown } from './agents-import'
 import { BUILT_IN_SKILLS } from './builtin-skills'
@@ -769,14 +770,77 @@ export async function loadConversation(conversationId: string): Promise<WireMess
   return Array.isArray(value) ? (value as WireMessage[]) : []
 }
 
+/**
+ * Longest attachment data URL kept in a PERSISTED transcript. The descriptor's
+ * own limits allow a turn to carry 8 MB of base64, and the transcript lives
+ * under one `conv:<id>` key that is rewritten on every turn — with the data
+ * directory unreachable that whole value is parked in the storage fallback,
+ * where an over-budget entry is refused and the conversation loses its durable
+ * write. The bytes of a big image are also the one part nobody re-reads: the
+ * model already saw it, and the panel renders the chip without a thumbnail.
+ */
+const MAX_PERSISTED_DATA_URL_CHARS = 512 * 1024
+
+/** Byte budget for one persisted transcript, past which oldest turns go. */
+const MAX_STORED_CONVERSATION_BYTES = 1_500_000
+
+/**
+ * Shrink the bulk payloads of one transcript so the key can be carried.
+ *
+ * Two shapes reach megabyte size in practice, both in workflow-generating
+ * chats: an image a turn attached, and an image a step handed back as a data
+ * URL in a tool result. Clearing a data URL rather than truncating it is
+ * deliberate — {@link isImageAttachment} is what decides whether an attachment
+ * becomes an `image_url` content part, and whether a tool result is a plain
+ * string, so an absent payload simply makes the turn text-only while a
+ * half-written one would be sent to a provider as a broken URL. `tool_calls`
+ * arguments are left alone: they are JSON that a provider re-validates, and
+ * trimming inside it would corrupt the request rather than slim it.
+ */
+/** A data URL too big to keep — the only strings in a transcript reach megabytes. */
+function isBulkDataUrl(value: string): boolean {
+  return value.startsWith('data:') && value.length > MAX_PERSISTED_DATA_URL_CHARS
+}
+
+function withoutOversizePayloads(messages: WireMessage[]): WireMessage[] {
+  return messages.map((message) => {
+    // Narrowed per branch so the rebuilt object keeps each variant's own
+    // `content` type instead of widening the union to `string | null`.
+    const shedContent =
+      typeof message.content === 'string' && isBulkDataUrl(message.content)
+        ? `[data URL omitted from history: ${message.content.length} chars]`
+        : null
+    if (message.role !== 'user' || !message.attachments || message.attachments.length === 0)
+      return shedContent === null ? message : { ...message, content: shedContent }
+    const attachments = message.attachments.map((attachment) =>
+      typeof attachment.dataUrl === 'string' && isBulkDataUrl(attachment.dataUrl)
+        ? { ...attachment, dataUrl: undefined }
+        : attachment,
+    )
+    return shedContent === null
+      ? { ...message, attachments }
+      : { ...message, content: shedContent, attachments }
+  })
+}
+
+/** Shrink a transcript from the oldest turn until it fits the per-key budget. */
+function withinTranscriptBudget(messages: WireMessage[]): WireMessage[] {
+  let list = messages
+  while (list.length > 1 && jsonBytes(list) > MAX_STORED_CONVERSATION_BYTES) {
+    // `trimConversation` owns the invariant that a retained window may not start
+    // on a tool result, so the shrink goes through it rather than a raw slice.
+    list = trimConversation(list, Math.max(1, Math.floor(list.length * 0.8)))
+  }
+  return list
+}
+
 /** Persists a conversation, trimmed via {@link trimConversation}. */
 export async function saveConversation(
   conversationId: string,
   messages: WireMessage[],
 ): Promise<void> {
-  await area.set({
-    [conversationKey(conversationId)]: trimConversation(messages),
-  })
+  const stored = withinTranscriptBudget(withoutOversizePayloads(trimConversation(messages)))
+  await area.set({ [conversationKey(conversationId)]: stored })
 }
 
 export async function clearConversation(conversationId: string): Promise<void> {

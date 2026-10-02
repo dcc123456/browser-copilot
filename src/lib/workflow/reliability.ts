@@ -34,6 +34,7 @@ import type { ReadinessSpec } from './readiness'
 import { normalizeReadinessSpec } from './readiness'
 import type { SemanticLocator } from './element-fingerprint'
 import type { Workflow, WorkflowNode } from './types'
+import { nodeGoalContractOf } from './node-goal-contract'
 import { BLOCK_CATALOG } from './blocks/catalog'
 
 /** Which execution regime a workflow runs under. */
@@ -320,20 +321,43 @@ const BLOCK_NAME_PATTERN = (() => {
 })()
 
 /**
- * The keyword test reads prose the model wrote about a step, and that prose names
- * OTHER operators: an escape-hatch justification reads
- * `(tried: take-screenshot, save-assets, create-element, …)`. `create` inside
- * `create-element` is not a step that creates anything — and it classified the
- * node that DRAWS AN IMAGE as unsafe, so the trial stopped before the graph's own
- * core step and a 10-step workflow came back having proved 2 steps.
+ * A clause that FORBIDS a verb is not asking for it — 「保存为草稿，不发布」.
  *
- * Scrubbing only ever DELETES text, so it cannot manufacture an unsafe match: a
- * step that really publishes still reads `点击发布` / `press Enter to submit` and
- * is still upgraded. What it gives up is an intent written ONLY as an operator
- * name, which is not a sentence about the site.
+ * Exported because the draft-save test needs the same reading: the one sentence
+ * that documents a draft also names the publish it declines.
+ *
+ * The two optional groups exist because a prohibition is usually written with a
+ * light verb and an adverb between the negation and the act: round 30's terminal
+ * step said 「保存为草稿，不执行正式发布」 and the bare form matched none of it, so the
+ * graph that really ended on its draft save was reported as having no save step
+ * at all. The window stays clause-local (no wildcard over punctuation), so
+ * 「点击发布，不要撤销」 still reads as the publish it is.
+ */
+export const NEGATED_COMMIT_VERB =
+  /(?:绝不|决不|不可|不能|不要|不用|无法|禁止|未|别|勿|不|\bnot\b|\bnever\b|\bwithout\b)[\s,，、]{0,6}?(?:执行|进行|实施|予以|做|发起|触发|点击|按下|单击|会|能|要|应|打算|准备|计划|click|press|execute|perform)?[\s,，、]{0,4}?(?:正式|直接|手动|自动|再次|重复|actually|really|manually|directly)?[\s,，、]{0,4}?(?:发布|发表|提交|发送|下单|支付|付款|购买|publish|\bpost\b|submit|send|checkout|purchase)/gi
+
+/** 「发布页 / 发布平台 / 图文发布」 names the PAGE the step sits on, not the act. */
+export const PAGE_NAME_ESCAPE =
+  /(发布|发表|提交|发送)[\s,，、]?(?:页面?|页|平台|中心|编辑器|区|列表|管理)/g
+
+/**
+ * The prose the unsafe-intent keywords are scanned against.
+ *
+ * The page-name escape removes a phrase that names the PLACE a step stands on —
+ * 「图文发布页」 is not a step that publishes. Without it, a generated upload step
+ * whose own contract mentions the 发布页 it sits on classifies as a publish and
+ * the trial stops before the images the goal asked for (round 20 stopped at 11/26
+ * on exactly that sentence, and the script path has carried this escape ever since).
+ *
+ * A PROHIBITION is deliberately not removed here. 「把笔记留在草稿箱，绝不发布」 still
+ * refuses the step under the default policy: naming a publish, even to decline it,
+ * is not evidence that the step is safe to re-fire. Running such a step is a
+ * separate, opt-in decision, and `isDraftSaveNode` is where that decision strips
+ * the negation and asks whether the step instead names a DRAFT.
  */
 function intentForKeywordScan(intent: string): string {
-  return BLOCK_NAME_PATTERN ? intent.replace(BLOCK_NAME_PATTERN, ' ') : intent
+  const withoutBlockNames = BLOCK_NAME_PATTERN ? intent.replace(BLOCK_NAME_PATTERN, ' ') : intent
+  return withoutBlockNames.replace(PAGE_NAME_ESCAPE, '页')
 }
 
 /**
@@ -355,7 +379,15 @@ export function intentOf(node: WorkflowNode): string {
   const spec = nodeReliabilityOf(node)
   if (spec?.intent) return spec.intent
   const description = node.data?.['description']
-  return typeof description === 'string' ? description : ''
+  if (typeof description === 'string' && description) return description
+  // A chat-generated step has neither: `appendOperatorNode` labels the node with
+  // the block id, and the sentence the model spoke for the step — 「点击暂存草稿」,
+  // which is the ONLY thing distinguishing it from 「点击发布」 — is recorded on the
+  // node's goal contract. Without this reading, every generated click is
+  // prose-less, so the commit policy cannot refuse a publish and a run that did
+  // save a draft cannot prove it.
+  const goal = node.data ? nodeGoalContractOf(node.data)?.goal : undefined
+  return typeof goal === 'string' ? goal : ''
 }
 
 /**
@@ -397,6 +429,40 @@ export function requiresTerminalStateCheck(
   spec?: NodeReliabilitySpec,
 ): boolean {
   return idempotencyOf(blockId, data, spec) === 'unsafe'
+}
+
+// --- Cleanup steps ---------------------------------------------------------------
+
+/** 「关闭 / 收起 / dismiss / close」 — an act of making something go away. */
+const DISMISS_VERB = /关闭|关掉|收起|取消|退出|隐藏|撤掉|移除|\bdismiss\b|\bclose\b|\bcancel\b|\bhide\b/i
+
+/** The thing dismissed: an overlay the page shows CONDITIONALLY. */
+const OVERLAY_NOUN =
+  /抽屉|弹[出窗框级]|对话框|遮罩|浮层|弹窗|侧栏|提示|气泡|drawer|modal|dialog|overlay|popup|popover|toast|backdrop|banner/i
+
+/**
+ * Is this click only there to dismiss an overlay?
+ *
+ * An exploratory session opens things: the agent browsing 小红书 pulled the
+ * 草稿箱 drawer out, then clicked its close button, and that cleanup became a
+ * node in the graph (round 31, node `muqd93gb` — 8 s of waiting, then
+ * `READINESS_TIMEOUT(visible)` at step 7 of 17, because on a clean replay the
+ * drawer was NEVER OPEN and its close button stays hidden).
+ *
+ * Such a step is skipped, not failed, when its target does not appear: its own
+ * success state is "this overlay is gone", which holds just as hard when there
+ * was nothing to dismiss — the page is in the same state either way. Requiring
+ * BOTH a dismissal verb and an overlay noun keeps this to cleanup; a step that
+ * names an outward act is never excused this way.
+ */
+export function isDismissStep(node: WorkflowNode): boolean {
+  const blockId = String(node.data?.['blockId'] ?? node.label ?? '')
+  if (blockId !== 'click' && blockId !== 'event-click') return false
+  const prose = [intentOf(node), String(node.data?.['label'] ?? '')]
+    .join(' ')
+    .trim()
+  if (!prose || hasUnsafeIntent(prose)) return false
+  return DISMISS_VERB.test(prose) && OVERLAY_NOUN.test(prose)
 }
 
 // --- Ambiguity policy --------------------------------------------------------------

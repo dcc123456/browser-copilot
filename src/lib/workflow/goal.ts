@@ -12,6 +12,8 @@
 import { workflowConditionsOf, type WorkflowCondition } from './conditions'
 import { nodeReliabilityOf } from './reliability'
 import type { WorkflowGoalSpec } from './reliability'
+import { conditionRequiresBaseline } from './conditions'
+import { provesLandedEffect } from './repair-verification'
 import type { WorkflowNode } from './types'
 
 /**
@@ -76,5 +78,90 @@ export function deriveGoalSpecFromNodes(
     summary,
     successConditions,
     ...(terminalStateConditions.length ? { terminalStateConditions } : {}),
+  }
+}
+
+/** Whole-token `indexOf`: `noteTitle` must not match inside `noteTitleActual`. */
+function mentionsName(haystack: string, name: string): boolean {
+  const isWordChar = (ch: string | undefined): boolean => !!ch && /[A-Za-z0-9_]/.test(ch)
+  let from = 0
+  for (;;) {
+    const at = haystack.indexOf(name, from)
+    if (at === -1) return false
+    if (!isWordChar(haystack[at - 1]) && !isWordChar(haystack[at + name.length])) return true
+    from = at + name.length
+  }
+}
+
+/**
+ * Ground a goal-first contract in the graph that was actually built.
+ *
+ * `prepare_workflow_goal` runs on the FIRST turn, before a single node exists,
+ * so its success conditions name the variables the model EXPECTED to write. The
+ * graph then writes its own (`xhsTitle`, `noteBody`, …), and a 「变量
+ * xiaohongshuTitle 存在」 row can never hold: the replay runs 26/26 clean, the
+ * goal is permanently uncertifiable, and the one number everyone was supposed to
+ * trust becomes the thing you learn to ignore. An unverifiable row is not a
+ * strict goal — it is a broken instrument, and a broken instrument reads false
+ * even when the goal landed.
+ *
+ * The test is deliberately the WEAKEST claim of "this graph knows the name":
+ * the name appears anywhere in a node's data, or is declared as a run input.
+ * An exact producer-field whitelist would be stricter, but the set of blocks
+ * that write a variable is wider than any list here keeps current (see
+ * `VARIABLE_PRODUCER_FIELD`, which had already drifted once) — and a row that
+ * drops a checkable goal is a silent weakening, while a row kept on a name the
+ * graph genuinely writes can still fail on its merits.
+ *
+ * Dropping loses evidence, so the graph's own verified postconditions
+ * (`deriveGoalSpecFromNodes`) fill in, and they are added only as needed to
+ * restore a landed-effect proof — a URL row cannot be that proof, and a goal
+ * reduced to one is not a goal. If the graph offers nothing, the contract is
+ * returned untouched: better a loud, permanent failure than a certificate for a
+ * run that did nothing.
+ */
+export function groundGoalSpecToGraph(
+  goalSpec: WorkflowGoalSpec,
+  source: GoalDerivationSource,
+): { goalSpec: WorkflowGoalSpec; dropped: WorkflowCondition[] } {
+  const nodes = source.nodes
+  const isTrigger = (node: Pick<WorkflowNode, 'data'>): boolean => node.data?.['blockId'] === 'trigger'
+  const haystack = [
+    nodes.filter((node) => !isTrigger(node)).map((node) => JSON.stringify(node.data ?? {})).join('\n'),
+    JSON.stringify(nodes.find(isTrigger)?.data?.['parameters'] ?? ''),
+  ].join('\n')
+
+  const dropped: WorkflowCondition[] = []
+  const kept = goalSpec.successConditions.filter((condition) => {
+    if (condition.kind !== 'variableExists' && condition.kind !== 'variableEquals') return true
+    if (mentionsName(haystack, condition.name)) return true
+    dropped.push(condition)
+    return false
+  })
+  if (dropped.length === 0) return { goalSpec, dropped: [] }
+
+  const successConditions = [...kept]
+  if (!successConditions.some(provesLandedEffect)) {
+    for (const condition of deriveGoalSpecFromNodes(source)?.successConditions ?? []) {
+      // A row that compares against an observation from BEFORE its step is not
+      // checkable once the run is over (see `conditionRequiresBaseline`), so
+      // installing one as the replacement proof would recreate the very defect
+      // grounding removes: a goal that reads false no matter what happened.
+      if (conditionRequiresBaseline(condition)) continue
+      if (successConditions.some((c) => JSON.stringify(c) === JSON.stringify(condition))) continue
+      successConditions.push(condition)
+      if (successConditions.some(provesLandedEffect)) break
+    }
+  }
+  if (successConditions.length === 0) return { goalSpec, dropped: [] }
+  return {
+    goalSpec: {
+      summary: goalSpec.summary,
+      successConditions,
+      ...(goalSpec.terminalStateConditions?.length
+        ? { terminalStateConditions: goalSpec.terminalStateConditions }
+        : {}),
+    },
+    dropped,
   }
 }

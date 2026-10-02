@@ -46,6 +46,7 @@ import {
   runOperatorTool,
 } from '../src/background/operator-tool-handler'
 import type { WorkflowDraft } from '../src/background/operator-tool-handler'
+import { saveGenerationGoal } from '../src/lib/workflow/generation-goal-storage'
 import type { Workflow } from '../src/lib/workflow/types'
 
 /** Append one operator node and return the resulting draft. */
@@ -185,6 +186,45 @@ describe('composeWorkflowFromDraft', () => {
       summary: '登录后台查看订单',
       successConditions: [{ kind: 'urlContains', value: '/dashboard' }],
     })
+  })
+
+  it('grounds a goal-first contract in the graph it actually built', async () => {
+    // `prepare_workflow_goal` runs before any node exists, so its rows can name
+    // variables the graph never writes. Shipping them anyway is how a 26/26
+    // replay ends permanently 「goal NOT CERTIFIED」 on a row no run could satisfy.
+    const conversation = 'c-grounded'
+    await saveGenerationGoal(conversation, {
+      version: 1,
+      name: '发布图文草稿',
+      goalSpec: {
+        summary: '图文草稿已保存',
+        successConditions: [
+          { kind: 'variableExists', name: 'xiaohongshuTitle' },
+          { kind: 'urlContains', value: 'xiaohongshu.com' },
+        ],
+      },
+      requiredCapabilities: ['set-variable', 'event-click'],
+    })
+    await append(conversation, 'wf_op_trigger', { goalText: '去小红书保存图文草稿' })
+    await append(conversation, 'wf_op_set-variable', { variableName: 'xhsTitle', value: '标题' })
+    await append(conversation, 'wf_op_event-click', {
+      selector: '[data-act=draft]',
+      __reliability: {
+        intent: '点击保存草稿',
+        idempotency: 'unsafe',
+        postconditions: [{ kind: 'elementVisible', target: { role: 'button', name: '草稿箱' } }],
+      },
+    })
+
+    const out = await composeWorkflowFromDraft(conversation, { save: false })
+    if ('error' in out) throw new Error(out.error)
+    const goalSpec = out.workflow.settings.goalSpec!
+    expect(JSON.stringify(goalSpec)).not.toContain('xiaohongshuTitle')
+    // The goal keeps its effect-proving rows, so grounding never weakens it to
+    // a URL the workflow satisfies by opening the page.
+    expect(goalSpec.successConditions.some((c) => c.kind !== 'urlContains' && c.kind !== 'urlMatches')).toBe(true)
+    const trigger = out.workflow.drawflow.nodes.find((n) => n.data.blockId === 'trigger')
+    expect(JSON.stringify(trigger?.data?.['goalSpec'])).not.toContain('xiaohongshuTitle')
   })
 
   it('anchors a cross-site session on every origin it really acted on', async () => {

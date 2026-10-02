@@ -33,6 +33,14 @@ export interface ReadinessCheckResult {
   satisfied: boolean
   /** Why it was not satisfied yet — surfaced in the timeout failure. */
   detail?: string
+  /**
+   * Polling will never help: the requirement is unsatisfiable IN PRINCIPLE for
+   * this element (a click waiting for a file input to become visible). End the
+   * wait now with this detail instead of spending the window on it. The failure
+   * keeps the `READINESS_TIMEOUT` code — one less axis for the repair budgets and
+   * the dashboards to classify — and the detail carries the truth.
+   */
+  hopeless?: boolean
 }
 
 /**
@@ -120,6 +128,10 @@ export async function awaitReadiness(options: ReadinessWaitOptions): Promise<Rea
         continue
       }
       lastDetail = check.detail
+      if (check.hopeless) {
+        unsatisfied = requirement
+        break
+      }
       if (Date.now() >= deadline) {
         unsatisfied = requirement
         break

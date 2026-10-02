@@ -16,6 +16,7 @@
 
 import { fileStorageArea } from '../fs-store'
 import { withKeyLock } from '../key-lock'
+import { capPersistedStrings, jsonBytes, shedBulkDataUrls } from '../persist-budget'
 import type { DraftSource, PendingBranch, WorkflowDraft } from './draft-types'
 import type { WorkflowEdge, WorkflowNode } from './types'
 
@@ -23,6 +24,15 @@ const KEY_WORKFLOW_DRAFTS = 'workflow-drafts'
 
 /** Cap on retained drafts; the oldest conversations are dropped first. */
 const MAX_STORED_DRAFTS = 32
+
+/**
+ * Byte budget for the whole `workflow-drafts` key. The count cap alone allowed
+ * a bag of long-enough values to grow past what the storage fallback can carry:
+ * with the data directory unreachable, every content key is parked as ONE
+ * `chrome.storage.local` value, and one over the fallback's per-entry budget is
+ * refused outright — the session would lose its whole draft, not just a value.
+ */
+const MAX_STORED_BYTES = 1_500_000
 
 const DRAFT_SOURCES: ReadonlySet<string> = new Set<DraftSource>(['chat-generate', 'chat-history'])
 
@@ -133,10 +143,32 @@ export async function saveDraft(draft: WorkflowDraft): Promise<void> {
   await withKeyLock(KEY_WORKFLOW_DRAFTS, async () => {
     const all = await readAll()
     delete all[draft.conversationId]
-    all[draft.conversationId] = draft
+    // Two different bounds, because the two payloads fail differently.
+    //
+    // Bulk data URLs go from the WHOLE draft — variables AND node params. A
+    // generated graph can inline the PNG its code node just drew into that node's
+    // `code` literal, and the one measured write of this key reached 36 MB that
+    // way: a single oversize value under this key is rewritten whole on every
+    // save, which is the shape of write that takes the service worker down. The
+    // step that made the value re-runs on replay, and the compiler would refuse
+    // to inline a literal this large anyway.
+    //
+    // Ordinary oversize strings are only capped inside the variable BAG: the
+    // graph's own text (scripts, prompts, selectors) is content the user edits,
+    // so truncating it would corrupt the workflow rather than slim it.
+    const shed = shedBulkDataUrls(draft) as WorkflowDraft
+    all[draft.conversationId] = shed.variables
+      ? { ...shed, variables: capPersistedStrings(shed.variables) as Record<string, unknown> }
+      : shed
     const keys = Object.keys(all)
     for (const key of keys.slice(0, Math.max(0, keys.length - MAX_STORED_DRAFTS))) {
       delete all[key]
+    }
+    // Then by bytes, oldest first — the draft just written is never the victim.
+    let stored = jsonBytes(all)
+    while (stored > MAX_STORED_BYTES && Object.keys(all).length > 1) {
+      delete all[Object.keys(all)[0]!]
+      stored = jsonBytes(all)
     }
     await area.set({ [KEY_WORKFLOW_DRAFTS]: all })
   })

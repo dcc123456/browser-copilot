@@ -37,6 +37,40 @@ export type GoalLlmJudge = (
 ) => Promise<{ plausible: boolean; note: string } | null>
 
 /**
+ * The window this gate spends RE-READING a goal row that came back false.
+ *
+ * A success row is a claim about the page AFTER the last step, and the last step
+ * of a committing workflow is a navigation: round 59 replayed 19/19, clicked
+ * 「暂存离开」, and this gate read 「元素存在 草稿箱」 once, mid-navigation, while the
+ * creator page was still rebuilding its menu — the run was declared failed on a
+ * goal the page had already met seconds later (the repair layer's own follow-up
+ * read said «goal success conditions already hold»). The certification engine
+ * learned the same lesson in round 33 and got a settle window then; this earlier
+ * gate decides the trial's outcome and had none.
+ *
+ * It is only ever paid when a row already failed, so a goal that holds costs
+ * nothing extra. The gate itself defaults to `0` — a caller that reads a LIVE
+ * page opts in (see `run-workflow`), so unit tests keep the pure single read.
+ */
+export const DEFAULT_GOAL_VERIFY_SETTLE_MS = 12_000
+const DEFAULT_GOAL_VERIFY_POLL_MS = 1_500
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+export interface GoalVerifySettleOptions {
+  /** Extra window (ms) spent re-reading rows that came back unsatisfied. */
+  settleMs?: number
+  /** Spacing between re-reads. */
+  pollMs?: number
+  /** Injectable sleep (tests); defaults to a real timer. */
+  sleep?: (ms: number) => Promise<void>
+  /** A cancelled run must stop waiting, not poll a page the user abandoned. */
+  signal?: AbortSignal
+}
+
+/**
  * Verify a goal spec against the live page and the run's variables.
  * Deterministic conditions decide; an unmet goal checks the terminal-state
  * conditions before giving up (alreadySatisfied — spec §8.6).
@@ -45,8 +79,24 @@ export async function verifyGoalSpec(
   goal: WorkflowGoalSpec,
   deps: ConditionEvalDeps,
   llmJudge?: GoalLlmJudge,
+  options: GoalVerifySettleOptions = {},
 ): Promise<GoalVerification> {
-  const success = await evaluateAllConditions(goal.successConditions, deps)
+  const {
+    settleMs = 0,
+    pollMs = DEFAULT_GOAL_VERIFY_POLL_MS,
+    sleep = defaultSleep,
+    signal,
+  } = options
+  // Every row, every pass: a run whose goal failed should say WHICH rows, not
+  // just the first one the short-circuit happened to stop at.
+  let success = await evaluateAllConditions(goal.successConditions, deps, false)
+  let settleWaitedMs = 0
+  while (settleWaitedMs < settleMs && !success.allSatisfied && !signal?.aborted) {
+    const slice = Math.min(pollMs, settleMs - settleWaitedMs)
+    await sleep(slice)
+    settleWaitedMs += slice
+    success = await evaluateAllConditions(goal.successConditions, deps, false)
+  }
   if (success.allSatisfied) {
     return { achieved: true, unmet: [], note: `目标达成：${goal.summary}` }
   }

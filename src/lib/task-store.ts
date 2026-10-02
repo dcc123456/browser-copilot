@@ -11,6 +11,7 @@
 import { newId } from './storage'
 import { fileStorageArea } from './fs-store'
 import { withKeyLock } from './key-lock'
+import { capPersistedStrings, jsonBytes } from './persist-budget'
 import {
   DEFAULT_TASK_MAX_TOOL_ROUNDS,
   EMPTY_FEISHU_CONFIG,
@@ -43,6 +44,16 @@ const area = fileStorageArea()
 
 /** Hard cap so a daily task running for years cannot grow storage unbounded. */
 export const MAX_RUN_LOGS = 100
+
+/**
+ * Byte budget for the whole `scheduledTaskRuns` key. The count cap cannot bound
+ * it: one workflow run with debug mode on writes a step per block, and the
+ * variable bags those steps carry can hold megabyte image data URLs. Under the
+ * count limit such a list still exceeds what the storage fallback can park — and
+ * a value the fallback refuses is lost whole, so the run log would lose every
+ * run it held, not just the oversized one. Oldest runs are shed to stay inside.
+ */
+const MAX_STORED_RUN_BYTES = 1_500_000
 
 /**
  * Serializes read-modify-write cycles per storage key.
@@ -190,6 +201,13 @@ function asRun(value: unknown): TaskRunLog | null {
     summary: typeof v.summary === 'string' ? v.summary : '',
     notified: v.notified === true,
     error: typeof v.error === 'string' ? v.error : undefined,
+    // How the run recovered. The health summary counts these, so they must
+    // survive the round trip — a run that only exists in memory cannot tell a
+    // restarted worker that it needed an AI repair.
+    ...(typeof v.failureCategory === 'string' ? { failureCategory: v.failureCategory } : {}),
+    ...(v.resumed === true ? { resumed: true } : {}),
+    ...(v.repaired === true ? { repaired: true } : {}),
+    ...(v.takeover === true ? { takeover: true } : {}),
     ...(Array.isArray(v.steps)
       ? {
           steps: v.steps
@@ -207,7 +225,12 @@ function asRun(value: unknown): TaskRunLog | null {
             .map((s) => ({
               at: typeof s.at === 'number' ? s.at : 0,
               kind: s.kind,
-              text: s.text,
+              // Caps are applied on read as well as on write: a log written by an
+              // older build can already hold a data URL, and this is the one
+              // place every reader passes through.
+              text: capPersistedStrings(s.text) as string,
+              ...(typeof s.nodeId === 'string' ? { nodeId: s.nodeId } : {}),
+              ...(typeof s.label === 'string' ? { label: s.label } : {}),
             })),
         }
       : {}),
@@ -230,12 +253,39 @@ export async function listRuns(taskId?: string): Promise<TaskRunLog[]> {
   )
 }
 
+/**
+ * Write the run log: count-capped, then byte-capped (oldest runs shed first).
+ *
+ * Every entry is pushed through {@link asRun} before it lands, so what is
+ * stored is exactly what a reader gets back. That matters because the caller
+ * hands over the in-memory steps of a finished run, and a debug-mode step
+ * carries its block's whole variable bag — screenshots and generated images as
+ * base64 data URLs, megabytes each. Those bags are dropped on read already, so
+ * persisting them bought nothing and cost the key its durability: over the
+ * fallback's per-entry budget a value is refused outright, and the run log would
+ * lose every run it held.
+ */
+async function persistRuns(list: TaskRunLog[]): Promise<void> {
+  const runs = list
+    .map(asRun)
+    .filter((run): run is TaskRunLog => run !== null)
+    .slice(0, MAX_RUN_LOGS)
+  const bytes = runs.map(jsonBytes)
+  let total = bytes.reduce((sum, b) => sum + b + 1, 0) // +1 per list separator
+  let end = runs.length
+  while (total > MAX_STORED_RUN_BYTES && end > 1) {
+    end--
+    total -= (bytes[end] ?? 0) + 1
+  }
+  await area.set({ [KEY_RUNS]: runs.slice(0, end) })
+}
+
 export async function addRun(run: Omit<TaskRunLog, 'id' | 'at'>): Promise<TaskRunLog> {
   return withKeyLock(KEY_RUNS, async () => {
     const list = await listRuns()
     const entry: TaskRunLog = { ...run, id: newId(), at: Date.now() }
     list.unshift(entry)
-    await area.set({ [KEY_RUNS]: list.slice(0, MAX_RUN_LOGS) })
+    await persistRuns(list)
     return entry
   })
 }
@@ -261,6 +311,11 @@ export interface FinishedRunInput {
   summary?: string
   error?: string
   steps?: TaskRunStep[]
+  /** How the run recovered, forwarded from the in-memory board (see TaskRunLog). */
+  failureCategory?: string
+  resumed?: boolean
+  repaired?: boolean
+  takeover?: boolean
 }
 
 export async function recordFinishedRun(input: FinishedRunInput): Promise<TaskRunLog | null> {
@@ -286,13 +341,17 @@ export async function recordFinishedRun(input: FinishedRunInput): Promise<TaskRu
       skipped: input.outcome === 'skipped',
       summary: input.summary ?? '',
       ...(input.error ? { error: input.error } : {}),
+      ...(input.failureCategory ? { failureCategory: input.failureCategory } : {}),
+      ...(input.resumed ? { resumed: true } : {}),
+      ...(input.repaired ? { repaired: true } : {}),
+      ...(input.takeover ? { takeover: true } : {}),
       ...(input.steps && input.steps.length > 0 ? { steps: input.steps } : {}),
     }
     // If a placeholder/earlier record with the same id exists, replace it.
     const existing = list.findIndex((r) => r.id === input.runId)
     if (existing !== -1) list[existing] = entry
     else list.unshift(entry)
-    await area.set({ [KEY_RUNS]: list.slice(0, MAX_RUN_LOGS) })
+    await persistRuns(list)
     return entry
   })
 }
@@ -304,7 +363,7 @@ export async function clearRuns(taskId?: string): Promise<void> {
       return
     }
     const list = await listRuns()
-    await area.set({ [KEY_RUNS]: list.filter((run) => run.taskId !== taskId) })
+    await persistRuns(list.filter((run) => run.taskId !== taskId))
   })
 }
 
@@ -312,7 +371,7 @@ export async function clearRuns(taskId?: string): Promise<void> {
 export async function deleteRun(id: string): Promise<void> {
   await withKeyLock(KEY_RUNS, async () => {
     const list = await listRuns()
-    await area.set({ [KEY_RUNS]: list.filter((run) => run.id !== id) })
+    await persistRuns(list.filter((run) => run.id !== id))
   })
 }
 

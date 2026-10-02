@@ -27,7 +27,7 @@ import { isTriggerNode, triggerFromNodes } from '../lib/workflow/migrate'
 import { deleteDraft, loadDraft, saveDraft } from '../lib/workflow/draft-storage'
 import { TRIGGER_BLOCK_ID } from '../lib/workflow/draft-types'
 import { saveWorkflow } from '../lib/workflow/storage'
-import { deriveGoalSpecFromNodes } from '../lib/workflow/goal'
+import { deriveGoalSpecFromNodes, groundGoalSpecToGraph } from '../lib/workflow/goal'
 import { validateGeneratedWorkflow } from '../lib/workflow/generated-validation'
 import {
   coverageWarningLines,
@@ -83,7 +83,7 @@ import {
 import { isAiComposedFill } from '../lib/workflow/ai-prefill'
 import type { Workflow, WorkflowNode } from '../lib/workflow/types'
 import type { TrialRunRecord } from '../lib/workflow/trial-run'
-import { trialFailed } from '../lib/workflow/trial-run'
+import { trialFailed, unfiredDraftSaveNotice } from '../lib/workflow/trial-run'
 import { recordedPageContext } from '../lib/workflow/page-context'
 import { withTrialRecord } from './workflow-engine/repair/generation-trial'
 import type { TrialRunner } from './workflow-engine/repair/generation-trial'
@@ -435,7 +435,13 @@ export async function runOperatorTool({
   if (nameHint && draft.name.startsWith('workflow-')) draft.name = nameHint
 
   await persistDraft(draft)
-  return { ok: true, nodeId: appended.nodeId, workflowSize: appended.workflowSize }
+  const notice = unfiredDraftSaveNotice(draft)
+  return {
+    ok: true,
+    nodeId: appended.nodeId,
+    workflowSize: appended.workflowSize,
+    ...(notice ? { note: notice } : {}),
+  }
 }
 
 /**
@@ -695,20 +701,34 @@ export async function composeWorkflowFromDraft(
     preparedContract?.name ||
     (goalText ? generateWorkflowName(goalText) : '') ||
     'New workflow'
-  if (preparedContract && triggerHead) {
-    const conditionsText = preparedContract.goalSpec.successConditions
-      .map((c) => describeCondition(c))
-      .join('; ')
-    const description = `${preparedContract.goalSpec.summary}${conditionsText ? ` | Success: ${conditionsText}` : ''}`
-    if (!triggerHead.data['description']) triggerHead.data['description'] = description
-    // Keep the machine-readable goal on the trigger so later edits stay in sync.
-    triggerHead.data['goalSpec'] = preparedContract.goalSpec
-  }
   const now = Date.now()
   // The pipeline already completed the reliability contract; only promote any
   // dangling {{reference}} to a declared run input (the user supplies it at
   // launch) instead of failing the data-flow check.
   declareMissingInputs(draft.nodes)
+  // The goal-first contract was written before this graph existed, so a row like
+  // 「变量 xiaohongshuTitle 存在」 can name a variable no node ever writes — and
+  // a replay of THIS graph could never satisfy it. Ground the goal in the graph
+  // and say out loud what that removed.
+  const grounded = preparedContract
+    ? groundGoalSpecToGraph(preparedContract.goalSpec, { name, nodes: draft.nodes })
+    : undefined
+  if (grounded && grounded.dropped.length > 0) {
+    console.warn(
+      `[workflow-generation] goal grounded to the graph: ${grounded.dropped.length} success ` +
+        `condition(s) name a variable this graph never mentions and were replaced: ` +
+        grounded.dropped.map((condition) => describeCondition(condition)).join('; '),
+    )
+  }
+  const goalSpec = grounded?.goalSpec ?? preparedContract?.goalSpec
+  const settingsGoalSpec = goalSpec ?? deriveGoalSpecFromNodes({ name, nodes: draft.nodes }, goalText)
+  if (goalSpec && triggerHead) {
+    const conditionsText = goalSpec.successConditions.map((c) => describeCondition(c)).join('; ')
+    const description = `${goalSpec.summary}${conditionsText ? ` | Success: ${conditionsText}` : ''}`
+    if (!triggerHead.data['description']) triggerHead.data['description'] = description
+    // Keep the machine-readable goal on the trigger so later edits stay in sync.
+    triggerHead.data['goalSpec'] = goalSpec
+  }
   // The sites this generation actually acted on. A goal that spans origins —
   // read a document on one, publish on another — produces a graph whose own
   // first step would be refused by the page-context guard if the anchor stayed
@@ -728,15 +748,12 @@ export async function composeWorkflowFromDraft(
       provenance: draft.source === 'chat-generate' ? 'chat-generate' : 'chat-history',
       ...(draft.originUrl ? { generationOriginUrl: draft.originUrl } : {}),
       ...(recordedContext ? { pageContext: recordedContext } : {}),
-      // The reliability contract's goal: derived from what the graph can
-      // actually VERIFY (node postconditions). A graph without postconditions
-      // derives none — the generated validator then blocks the strict save
-      // instead of shipping a workflow that cannot state its own goal.
-      ...(preparedContract
-        ? { goalSpec: preparedContract.goalSpec }
-        : deriveGoalSpecFromNodes(draft, goalText)
-          ? { goalSpec: deriveGoalSpecFromNodes(draft, goalText) }
-          : {}),
+      // The reliability contract's goal: the prepared goal, grounded to what the
+      // graph can actually VERIFY, or derived from its node postconditions. A
+      // graph without postconditions derives none — the generated validator then
+      // blocks the strict save instead of shipping a workflow that cannot state
+      // its own goal.
+      ...(settingsGoalSpec ? { goalSpec: settingsGoalSpec } : {}),
     },
     table: [],
     drawflow: { nodes: draft.nodes, edges: draft.edges },

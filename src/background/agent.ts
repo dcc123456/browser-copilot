@@ -159,6 +159,9 @@ import {
 // Static, not dynamic: a dynamic `await import()` in the MV3 service worker
 // throws `window is not defined` (see CHANGELOG 0.6.3 get-secret fix).
 import { normalizeGoalSpec } from '../lib/workflow/goal'
+import { conditionTargetIsNamed, describeCondition } from '../lib/workflow/conditions'
+import { provesLandedEffect } from '../lib/workflow/repair-verification'
+import { goalAsksForDraftSave } from '../lib/workflow/trial-run'
 import {
   saveGenerationGoal,
   loadGenerationGoal,
@@ -390,12 +393,38 @@ export function buildSystemPrompt(options: {
       [
         'OPERATING MODE: WORKFLOW GENERATE / 工作流生成.',
         'Every step is a WORKFLOW OPERATOR call (`wf_op_*`). Each successful call really operates the page AND records the node, so the draft you build IS the workflow — the native action tools (`click` / `fill` / `open_url` / …) are not offered here because they would record nothing.',
-        `ALL OPERATORS ARE AVAILABLE / 全部算子已可见: every \`wf_op_*\` category schema is advertised from the first round — pick the operator that fits the step, no declaration needed. ${CORE_OPERATOR_TOOL_NAMES.join(', ')} are the usual starters (navigate, click, fill-or-read a field, read text). If the payload must be slimmed mid-task, call \`use_operators\` with only the categories you still need — it REPLACES the current selection, so name everything you keep.`,
-        'Target elements with `ref` from `snapshot_page` — the recorded node stores a durable selector; do not hand-write CSS.',
-        'EVERY STEP IS REPLAYED: no exploratory detours — going back, retrying a different element after a miss, or re-opening a view all become nodes.',
-        'SCRIPTS ARE A LAST RESORT / 代码节点是最后手段: there is no raw-JS tool (`run_javascript` is unavailable here). Exhaust the operators first; when none can express the step, `load_tools({groups:["operators_escape"]})` then call `wf_op_javascript-code`, which runs the page script AND records the node (a bare expression or a `return` body). Carry a `justification` naming what you tried and why each operator fails, else the call is refused',
-        'Operators are pre-approved: do not ask, and batch independent calls. Use `wf_op_wait-connections` when a step needs the page to settle — it really waits, never "just in case".',
-        'When the task is done, END YOUR TURN. The panel shows a review card listing the recorded steps — do NOT call `compose_workflow` or any save tool.',
+        `ALL OPERATORS ARE AVAILABLE / 全部算子已可见: every \`wf_op_*\` category schema is advertised from the first round — pick the operator that fits the step, no declaration needed. ${CORE_OPERATOR_TOOL_NAMES.join(', ')} are the usual starters (navigate, click, fill-or-read a field, read text). \`use_operators\` REPLACES the current selection if the payload must be slimmed mid-task.`,
+        'EVERY STEP IS REPLAYED: no detours — going back, retrying another element or re-opening a view all become nodes.',
+        // Round 22 replayed 26/26 steps clean and had saved nothing: its last three
+        // nodes were `诊断：…` probes and a length check, and the step the user named
+        // was never in the graph. `prepare_workflow_goal` says the draft version of
+        // this once, on the first turn, and by the fortieth round that sentence is
+        // long off the model's attention — so the rule belongs where every round
+        // re-reads it. It is stated as a shape, not a refusal: a graph ending on a
+        // read still saves (D2). Wording is byte-budgeted by
+        // tests/agent-payload-size.spec.ts; the WHY lives here, not in the prompt.
+        'THE LAST STEP IS THE GOAL / 最后一步是目标: end the graph on the action the user named, never on a read, probe or format check.',
+        // Round 60 replayed 16/16 and still could not certify: its one success row was
+        // `elementExists {role:'button', accessibleName:'保存草稿'}` — the control the
+        // LAST step presses, whose real text is 「暂存离开」, and which the post-click
+        // navigation removes. A row about the pressed button can never be true after
+        // the run ends, so the goal is proven by the RESULT the site shows afterwards.
+        'GOAL ROW = STATE AFTER THE LAST ACT / 目标是动作后的状态: not the button pressed; what shows when done (a list entry, 「保存于…」, a count).',
+        // Round 62 recorded 27 nodes and its replay stopped at 19: the step that
+        // opens the composer is a nav item whose own words are 「发布图文笔记」, and an
+        // unattended run refuses every click whose words name 发布 — a refusal that
+        // must stay, because the press of the real publish control is not separable
+        // from the entry by words alone, and publishing belongs to the user. The safe
+        // route to the editor is a navigation block, which no such refusal touches.
+        'REPLAY REFUSES A CLICK WHOSE WORDS NAME 发布: enter the composer with `new-tab`, not 「发布笔记」.',
+        // The paragraph's remaining sentences were compressed to pay for the line
+        // above, since all four payload ceilings were already within single-digit
+        // characters of their caps; each keeps its rule and loses only rationale
+        // that the tool schema or this comment already carries.
+        'Target elements by `ref` from `snapshot_page`; never hand-write CSS.',
+        'SCRIPTS ARE A LAST RESORT: exhaust the operators first; when none can express the step, `load_tools({groups:["operators_escape"]})` → `wf_op_javascript-code`, which runs AND records the script. Carry a `justification` naming what you tried, else it is refused',
+        'Operators are pre-approved: batch independent calls. `wf_op_wait-connections` waits — use it when a step needs the page to settle.',
+        'When done, END YOUR TURN — the panel shows the review card; never call `compose_workflow` or a save tool.',
         // The mode paragraph carries the MECHANICS only. The domain knowledge —
         // which operator maps to which conversational action, the data rules,
         // the keep/drop criteria — lives in the mounted skill below, once, so
@@ -2057,9 +2086,8 @@ function prepareWorkflowGoalTool(): WireTool {
     function: {
       name: PREPARE_WORKFLOW_GOAL_TOOL,
       description:
-        'Workflow-generation FIRST step. Define the goal before any wf_op_*: name (auto-filled; the name the user confirmed at task start always wins), ' +
-        'summary, machine-checkable successConditions, requiredCapabilities, optional constraints/expectedInputs. ' +
-        'No wf_op_* runs until this exists. / 生成第一步：先建立目标契约。',
+        'Workflow-generation FIRST step, before any wf_op_*: name (auto-filled; a user-confirmed name wins), ' +
+        'summary, machine-checkable successConditions, requiredCapabilities, optional constraints/expectedInputs.',
       parameters: {
         type: 'object',
         properties: {
@@ -2067,7 +2095,10 @@ function prepareWorkflowGoalTool(): WireTool {
           summary: { type: 'string', description: 'What done means.' },
           successConditions: {
             type: 'array',
-            description: 'Machine-checkable conditions ({kind,...}); at least one.',
+            description:
+              'Machine-checkable; ≥1 must hold AFTER the last step, on the page it lands on ' +
+              '(URL alone refused). Name elements by VISIBLE WORDS (text/label/accessibleName); ' +
+              'selector/testid/role refused. / 禁止猜测 class。',
             items: { type: 'object', additionalProperties: true },
           },
           terminalStateConditions: {
@@ -3968,7 +3999,51 @@ export async function executeTool(
       if (!goalSpec) {
         return JSON.stringify({
           error:
-            'Invalid goal contract: provide at least one machine-checkable success condition with a kind and target/predicate.',
+            'Invalid goal contract: none of the success conditions were readable. An element row is ' +
+            '{kind:"elementExists", target:{text:"草稿箱"}} — target is an OBJECT carrying at least ' +
+            'one of text / label / accessibleName / role / placeholder / selector / testId (prefer the ' +
+            'words a person sees; a row naming its element only by a selector or test id is refused ' +
+            'below); a ' +
+            'variable row is {kind:"variableExists", name:"…"}. If this was rejected, say which row ' +
+            'and its exact JSON rather than retrying a guess.',
+        })
+      }
+      // A goal whose success rows are all URLs can never be certified: the page
+      // the workflow opens already matches them, so L3 either passes a run that
+      // clicked nothing or fails a run that did the whole job (the 18/18 draft
+      // graph that could not say so). Refuse it here, where restating is one
+      // round trip, not at verification time where nobody can act on it.
+      if (!goalSpec.successConditions.some(provesLandedEffect)) {
+        return JSON.stringify({
+          error:
+            'Every success condition is a URL check, so none of them can prove the goal landed — ' +
+            'the page this workflow opens matches them before its first step. Give at least one ' +
+            'condition the page must satisfy AFTER the action (elementText / elementVisible / ' +
+            'elementExists / elementAppeared / countIncreased / count / attributeEquals / ' +
+            'variableExists) and move the URL row to terminalStateConditions.',
+        })
+      }
+      // The same seam, one failure class later: a proof that names its element by
+      // source code. A chat turn never shows the model source code, so a bare CSS
+      // selector or `data-testid` in a success row is invented, and an invented
+      // locator reads false no matter how well the run went — rounds 26, 43 and 44
+      // replayed cleanly and certified nothing (`.publishBtn`, testid `draft-saved`,
+      // `.note-item`), while the one L3 pass rested on `{text: "草稿箱"}`. Ask for the
+      // visible words here, where restating is one round trip.
+      const invented = goalSpec.successConditions.filter(
+        (condition) => provesLandedEffect(condition) && !conditionTargetIsNamed(condition),
+      )
+      if (invented.length > 0) {
+        return JSON.stringify({
+          error:
+            `The success condition ${describeCondition(invented[0]!)} does not name its element in the ` +
+            'words a person sees — a bare CSS selector or test id is source code nobody observed, and a ' +
+            'lone role is satisfied by the first matching element anywhere — so it can never certify the ' +
+            'run: the workflow would finish its whole job and the goal would still read false (or true by ' +
+            'accident). Restate every element condition as the words on the page: ' +
+            '{kind:"elementExists", target:{text:"草稿箱"}} or ' +
+            '{kind:"elementVisible", target:{role:"button", accessibleName:"暂存离开"}}. A `selector` or a ' +
+            '`role` is allowed only on a row that also carries text / label / accessibleName.',
         })
       }
       const requiredCapabilities = Array.isArray(args.requiredCapabilities)
@@ -4004,7 +4079,18 @@ export async function executeTool(
         name: contract.name,
         goalSpec: contract.goalSpec,
         requiredCapabilities: contract.requiredCapabilities,
-        note: 'Goal contract established. Operators may now execute; final success is judged against this goal.',
+        note:
+          'Goal contract established. Operators may now execute; final success is judged against this goal.' +
+          // The round-22 graph replayed 26/26 clean and saved nothing, because its
+          // last three nodes were leftover diagnostics and the step the user named
+          // was never in the graph. Say the requirement where the plan is made.
+          (goalAsksForDraftSave(summary)
+            ? ' This goal asks for a DRAFT: the graph must END with the step that saves it (e.g. 点击保存草稿), not with a read or a diagnostic check — a run that never performs that step achieved nothing, however cleanly its steps return. Compose only after that step has run.' +
+              // Round 50 replayed 33/33 clean and still certified nothing: its proof
+              // was the EDITOR's 「暂存离开」 button, and after that click the page IS
+              // the 草稿箱 list, so the row checked a page the run had already left.
+              ' A success row is read on the page the run ENDS on, not on the page a mid-run step acted on: after 暂存离开 the page is the 草稿箱 list, so prove the draft landed THERE (e.g. {kind:"elementExists", target:{text:"草稿箱"}}) rather than by an editor control that is no longer on screen.'
+            : ''),
       })
     }
 

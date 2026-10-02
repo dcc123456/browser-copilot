@@ -44,6 +44,12 @@ describe('goal verification engine', () => {
     const report = await verifyWorkflowGoal(workflowWith(data), okRun, probe)
     expect(report.level).toBe('L2')
     expect(report.certified).toBe(false)
+    // Round 57 replayed 20/20 and saved the draft, and «a node goal contract did
+    // not hold» was the whole answer — no step, no condition. The sentence has to
+    // name which promise broke, or a reader cannot tell a failed run from a
+    // contract written wrong.
+    expect(report.reason).toContain('forms')
+    expect(report.reason).toContain('missing')
   })
   it('last node succeeds but goal fails: L3 fail, not certified', async () => {
     const workflow = workflowWith({})
@@ -121,6 +127,77 @@ describe('goal verification engine', () => {
       ],
     }
     const report = await verifyWorkflowGoal(workflow, { ...okRun, completedNodeIds: ['n1'] }, probe)
+    expect(report.certified).toBe(true)
+  })
+  it('a missing variable row names the variables this run DID hold', async () => {
+    // 「变量 xiaohongshuTitle 不存在」 alone cannot be acted on: it is either the
+    // goal naming an invention or the run failing to produce it, and the run's
+    // own variable names are the only evidence that tells them apart.
+    const workflow = workflowWith({})
+    workflow.settings!.goalSpec = {
+      summary: 'A draft is saved.',
+      successConditions: [
+        { kind: 'variableExists', name: 'result' },
+        { kind: 'variableExists', name: 'xiaohongshuTitle' },
+      ],
+    }
+    const run: ExecuteWorkflowResult = {
+      runId: 'r5',
+      outcome: 'ok',
+      completedNodeIds: ['n1'],
+      variables: { result: 'done', xhsTitle: '这个 AI 会替你点网页', noteBody: '正文' },
+    }
+    const report = await verifyWorkflowGoal(workflow, run, probe)
+    const unmet = report.l3.conditions.find((c) => !c.satisfied)
+    expect(unmet?.detail).toContain('xhsTitle')
+    expect(unmet?.detail).toContain('noteBody')
+    // A row that holds carries no such note.
+    expect(report.l3.conditions.find((c) => c.satisfied)?.detail).toBeUndefined()
+  })
+  it('does not re-observe a goal row that only compares against the state before its step', async () => {
+    // `urlChanged` was checked by the engine AT that node against the page before
+    // it; after the run there is no baseline, so observing it again can only read
+    // false — which is how a graph that really moved the page failed its own goal.
+    // Its miss is not lost: a change condition is soft, so it reaches us through
+    // `conditionWarnings` (see the next-but-one test above).
+    const workflow = workflowWith({})
+    workflow.settings!.goalSpec = {
+      summary: 'The page changed and the banner is up.',
+      successConditions: [
+        { kind: 'urlChanged' },
+        { kind: 'variableExists', name: 'result' },
+      ],
+    }
+    const report = await verifyWorkflowGoal(workflow, { ...okRun, completedNodeIds: ['n1'] }, probe)
+    expect(report.l3.conditions.map((c) => c.satisfied)).toEqual([true])
+    expect(report.l3.unevaluated).toHaveLength(1)
+    expect(report.certified).toBe(true)
+  })
+  it('a goal of nothing but before-the-step rows certifies nothing', async () => {
+    const workflow = workflowWith({})
+    workflow.settings!.goalSpec = {
+      summary: 'The URL changed.',
+      successConditions: [{ kind: 'urlChanged' }, { kind: 'elementAppeared', target: { text: '草稿箱' } }],
+    }
+    const report = await verifyWorkflowGoal(workflow, { ...okRun, completedNodeIds: ['n1'] }, probe)
+    expect(report.l3.conditions).toEqual([])
+    expect(report.l3.allHeld).toBe(false)
+    expect(report.certified).toBe(false)
+    expect(report.reason).toContain('before its step')
+  })
+  it('a node contract row needing a baseline leaves the L2 ballot unevaluated', async () => {
+    const data = withNodeGoalContract({ blockId: 'forms' }, {
+      version: 1,
+      goal: 'the page moved',
+      successCriteria: [
+        { kind: 'elementGone', target: { text: '加载中' } },
+        { kind: 'variableExists', name: 'result' },
+      ],
+    })
+    const report = await verifyWorkflowGoal(workflowWith(data), { ...okRun, completedNodeIds: ['n1'] }, probe)
+    expect(report.l2.nodes[0]?.criteria.map((c) => c.satisfied)).toEqual([true])
+    expect(report.l2.nodes[0]?.unevaluated).toHaveLength(1)
+    expect(report.l2.unevaluated).toHaveLength(1)
     expect(report.certified).toBe(true)
   })
 })

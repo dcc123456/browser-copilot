@@ -88,7 +88,7 @@ function deps(conversationId: string) {
 const goalArgs = {
   name: 'Model Suggested Name',
   summary: 'The success banner is shown after submit.',
-  successConditions: [{ kind: 'elementExists', target: { testId: 'success' } }],
+  successConditions: [{ kind: 'elementExists', target: { text: 'success' } }],
   requiredCapabilities: ['click', 'element-exists'],
 }
 

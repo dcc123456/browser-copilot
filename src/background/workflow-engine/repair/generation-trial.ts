@@ -25,6 +25,7 @@ import { rememberFailedRun } from '../auto-repair/failure-snapshot'
 import {
   commitCutoffNodeId,
   draftCommitCutoffNodeId,
+  draftSaveExecuted,
   executionPath,
   isTriggerNode,
   skippedTrialRecord,
@@ -225,6 +226,13 @@ export async function runGenerationTrial(
     },
     { ...(cutoffNodeId ? { cutoffNodeId } : {}), totalSteps },
   )
+  // «A draft was written» is a claim about the user's account, not about the flag
+  // the caller waved: a run whose cutoff fell before the save step wrote nothing.
+  // Only a run that reached its stop point says where it got to — a timeout or a
+  // cancel can halt anywhere, so it is given no claim at all.
+  if (deps.allowDraftCommit && (record.outcome === 'partial' || record.outcome === 'passed')) {
+    record.draftSaved = draftSaveExecuted(workflow, record.cutoffNodeId ?? null)
+  }
 
   // A failed trial is the failure the repair loop needs to see: the panel run
   // path remembers its own, but a trial replay is the only execution a freshly

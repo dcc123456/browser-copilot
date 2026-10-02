@@ -54,8 +54,20 @@ function workflowWithGoal(
   } as unknown as Workflow
 }
 
-const goalless = {
-  id: 'w0',
+/** A graph whose first node navigates to `url` — the anchor generation adds. */
+function navigatingWorkflow(url: string): Workflow {
+  const workflow = workflowWithGoal([])
+  workflow.drawflow.nodes = [
+    {
+      id: 'n1',
+      label: 'Open tab',
+      data: { blockId: 'open-url', url },
+    },
+  ] as never
+  return workflow
+}
+
+const goalless = {  id: 'w0',
   name: 'Read',
   createdAt: 0,
   updatedAt: 0,
@@ -180,6 +192,38 @@ describe('S0 terminal-state short-circuit', () => {
     expect(already.note).toContain('terminal state')
   })
 
+  it('refuses a terminal URL the workflow puts the browser on itself', async () => {
+    // The round-17 draft graph, exactly: its only terminal row was
+    // `urlContains creator.xiaohongshu.com` while its first node OPENS that
+    // page. S0 read that as "terminal state already holds", the repair committed
+    // nothing, and a step that ran out of its tool budget was reported repaired.
+    const graph = navigatingWorkflow('https://creator.xiaohongshu.com/publish/publish')
+    graph.settings!.goalSpec = {
+      summary: 'draft saved',
+      successConditions: urlHolds,
+      terminalStateConditions: [{ kind: 'urlContains', value: 'creator.xiaohongshu.com' }],
+    }
+    const deps = answering(true)
+    const already = await checkGoalAlreadySatisfied(graph, deps)
+    expect(already.satisfied).toBe(false)
+    expect(already.evaluated).toEqual([])
+    expect(deps.asked).toHaveLength(0)
+  })
+
+  it('draws the line at the address, not at the site', async () => {
+    // Same host, different page: the draft list is only reachable once the draft
+    // exists, so that row is real evidence and stays credited.
+    const graph = navigatingWorkflow('https://creator.xiaohongshu.com/publish/publish')
+    graph.settings!.goalSpec = {
+      summary: 'draft saved',
+      successConditions: urlHolds,
+      terminalStateConditions: [{ kind: 'urlContains', value: '/creator/draft' }],
+    }
+    const already = await checkGoalAlreadySatisfied(graph, answering(true))
+    expect(already.satisfied).toBe(true)
+    expect(already.note).toContain('terminal state')
+  })
+
   it('claims nothing for a goal whose evidence conditions all failed', async () => {
     const already = await checkGoalAlreadySatisfied(
       workflowWithGoal(landedEffect),
@@ -187,6 +231,37 @@ describe('S0 terminal-state short-circuit', () => {
     )
     expect(already.satisfied).toBe(false)
     expect(already.evaluated).toEqual(landedEffect)
+  })
+
+  it('refuses a terminal row that only asserts the document exists', async () => {
+    // Round 31, verbatim: the goal's terminal row was `elementExists` on `body` —
+    // the locator a model writes when it has none. Making `{selector}` targets
+    // observable made the row RESOLVE, and it resolves always, so S0 closed the
+    // ladder in 14 ms with "terminal state already holds" over a step that had
+    // just died on 小红书's hidden upload control, and the repair reported success
+    // without a model call. An absence would prove something; this proves nothing.
+    const vacuous: WorkflowCondition = { kind: 'elementExists', target: { selector: 'body' } }
+    const deps = answering(true)
+    const already = await checkGoalAlreadySatisfied(
+      workflowWithGoal([vacuous], [vacuous]),
+      deps,
+    )
+    expect(already.satisfied).toBe(false)
+    expect(already.evaluated).toEqual([])
+    expect(deps.asked).toHaveLength(0)
+  })
+
+  it('still credits a terminal row that names a locator of its own', async () => {
+    const named: WorkflowCondition = {
+      kind: 'elementExists',
+      target: { selector: '.d-drawer .draft-card' },
+    }
+    const already = await checkGoalAlreadySatisfied(
+      workflowWithGoal([named], [named]),
+      answering(true),
+    )
+    expect(already.satisfied).toBe(true)
+    expect(already.note).toContain('already')
   })
 
   it('has no goal to confirm on a goal-less workflow', async () => {
@@ -225,5 +300,11 @@ describe('provesLandedEffect', () => {
       }),
     ).toBe(true)
     expect(provesLandedEffect({ kind: 'urlChanged' })).toBe(true)
+    // The document root is present before, during and after a failed step.
+    expect(provesLandedEffect({ kind: 'elementExists', target: { selector: 'body' } })).toBe(false)
+    expect(provesLandedEffect({ kind: 'elementVisible', target: { selector: 'HTML' } })).toBe(false)
+    expect(
+      provesLandedEffect({ kind: 'elementExists', target: { selector: '.save-draft' } }),
+    ).toBe(true)
   })
 })

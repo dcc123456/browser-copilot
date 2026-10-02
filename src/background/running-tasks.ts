@@ -101,6 +101,16 @@ export interface FinishedTask {
   steps: RunStep[]
   /** Debug-mode per-block variable snapshots (see RunningTask.snapshots). */
   snapshots?: { nodeId: string; label: string; at: number; variables: Record<string, unknown> }[]
+  /**
+   * How the run recovered (an AI repair, a checkpoint resume, a takeover), and
+   * the category of the failure it overcame. `finishRun` fills these from its
+   * options; they are what lets the health summary and the durable run log tell
+   * a repaired workflow apart from one that never needed healing.
+   */
+  failureCategory?: string
+  resumed?: boolean
+  repaired?: boolean
+  takeover?: boolean
 }
 
 const runs = new Map<string, RunningTask>()

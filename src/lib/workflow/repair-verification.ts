@@ -83,7 +83,83 @@ export interface RepairVerificationResult {
  * success row only, at the S0 call site.
  */
 export function provesLandedEffect(condition: WorkflowCondition): boolean {
-  return condition.kind !== 'urlContains' && condition.kind !== 'urlMatches'
+  return (
+    condition.kind !== 'urlContains' &&
+    condition.kind !== 'urlMatches' &&
+    !isVacuousPresenceRow(condition)
+  )
+}
+
+/**
+ * A presence row pointed at the document root — `elementExists` on `body`, which
+ * is what a model writes when it has no locator to name.
+ *
+ * Making a `{selector}` target observable (round 26's fix) is what opened this:
+ * such a row now resolves, and resolves ALWAYS. Left as evidence it certifies a
+ * goal nothing wrote, and it short-circuits the repair ladder into reporting
+ * `terminal state already holds` in 14 ms for a step that failed on a hidden
+ * upload control (round 31). An absence would prove something; this cannot.
+ */
+const ROOT_SELECTOR = /^(?:body|html|\*|:root)$/i
+
+export function isVacuousPresenceRow(condition: WorkflowCondition): boolean {
+  if (
+    condition.kind !== 'elementExists' &&
+    condition.kind !== 'elementVisible' &&
+    condition.kind !== 'elementEnabled'
+  ) {
+    return false
+  }
+  const selector = (condition.target as { selector?: unknown }).selector
+  return typeof selector === 'string' && ROOT_SELECTOR.test(selector.trim())
+}
+
+/**
+ * Does this URL row hold because the workflow itself puts the browser there?
+ *
+ * A terminal-state row is supposed to name the address the page reaches ONLY
+ * AFTER the action landed. In practice generation files the address it was
+ * already sitting on there (the round-17 draft graph: `urlContains
+ * creator.xiaohongshu.com`, while its own first node opens that page), and then
+ * S0 reports "terminal state already holds" for a step that failed, the repair
+ * commits nothing, and the run is called a success. Any URL the graph names in
+ * its own params — an open-url, a recorded origin — is satisfied by construction
+ * and can carry no evidence about this step.
+ */
+export function urlHoldsByConstruction(workflow: Workflow, condition: WorkflowCondition): boolean {
+  if (condition.kind !== 'urlContains' && condition.kind !== 'urlMatches') return false
+  const needle = condition.value.trim().toLowerCase()
+  if (!needle) return false
+  const haystacks: string[] = []
+  for (const node of workflow.drawflow?.nodes ?? []) {
+    for (const value of Object.values((node.data ?? {}) as Record<string, unknown>)) {
+      if (typeof value === 'string') haystacks.push(value)
+    }
+  }
+  const settings = workflow.settings as unknown as Record<string, unknown> | undefined
+  if (typeof settings?.['generationOriginUrl'] === 'string') {
+    haystacks.push(settings['generationOriginUrl'] as string)
+  }
+  const context = settings?.['pageContext'] as
+    | { origin?: string; additionalOrigins?: string[] }
+    | undefined
+  if (typeof context?.origin === 'string') haystacks.push(context.origin)
+  haystacks.push(...(context?.additionalOrigins ?? []))
+  return haystacks.some((text) => text.toLowerCase().includes(needle))
+}
+
+/**
+ * Can this terminal-state row carry the layer, for THIS workflow?
+ *
+ * Terminal rows keep the URL exemption {@link provesLandedEffect} denies a
+ * success row — reaching a DIFFERENT address is exactly the documented trace an
+ * action leaves behind. What they do not keep is an address the graph visits by
+ * design, nor a presence row pointed at the document root: `body` is there
+ * whether the step ran or not, and that is the row round 31's S0 read as
+ * "terminal state already holds" over a failed upload step.
+ */
+export function provesTerminalEffect(workflow: Workflow, condition: WorkflowCondition): boolean {
+  return !urlHoldsByConstruction(workflow, condition) && !isVacuousPresenceRow(condition)
 }
 
 /**
@@ -151,12 +227,17 @@ export async function checkGoalAlreadySatisfied(
   }
   // Variable-only conditions can be checked even without a live page; when
   // all success conditions are variable-only and failed, the goal is not met.
-  if (goal.terminalStateConditions?.length) {
-    const terminal = await evaluateAll(deps, goal.terminalStateConditions)
+  // Terminal rows keep their URL exemption above, but only for URLs the graph
+  // does not open itself — one it navigates to proves nothing about this step.
+  const terminalEvidence = (goal.terminalStateConditions ?? []).filter((condition) =>
+    provesTerminalEffect(workflow, condition),
+  )
+  if (terminalEvidence.length) {
+    const terminal = await evaluateAll(deps, terminalEvidence)
     if (terminal.satisfied && terminal.observed) {
       return {
         satisfied: true,
-        evaluated: [...goal.terminalStateConditions],
+        evaluated: [...terminalEvidence],
         note: 'terminal state already holds',
       }
     }
@@ -200,13 +281,20 @@ export async function verifyRepairCandidate(
     goalEvaluated = success.observed
     if (success.satisfied && success.observed) {
       goalHeld = true
-    } else if (goal.terminalStateConditions?.length) {
-      // Terminal-state conditions: the action already landed earlier.
-      const terminal = await evaluateAll(deps, goal.terminalStateConditions)
-      unmet.push(...terminal.unmet)
-      checked.push(...terminal.evaluated)
-      goalEvaluated = terminal.observed
-      goalHeld = terminal.satisfied && terminal.observed
+    } else {
+      // Terminal-state conditions: the action already landed earlier — but a
+      // URL the graph navigates to itself holds before any step ran, so it
+      // cannot carry this layer either.
+      const terminalEvidence = (goal.terminalStateConditions ?? []).filter((condition) =>
+        provesTerminalEffect(workflow, condition),
+      )
+      if (terminalEvidence.length) {
+        const terminal = await evaluateAll(deps, terminalEvidence)
+        unmet.push(...terminal.unmet)
+        checked.push(...terminal.evaluated)
+        goalEvaluated = terminal.observed
+        goalHeld = terminal.satisfied && terminal.observed
+      }
     }
   } else {
     // A workflow with no goal spec is L3-valid once L1+L2 hold (compat /

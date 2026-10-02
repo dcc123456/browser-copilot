@@ -108,6 +108,7 @@ export function isWorkflowCondition(value: unknown): value is WorkflowCondition 
     // though they carry no locator fields, and refusing them silently deleted
     // whole success criteria — an unverified step reported as a passed one.
     const hasIdentity =
+      (typeof target['selector'] === 'string' && !!target['selector'].trim()) ||
       typeof target['role'] === 'string' ||
       typeof target['accessibleName'] === 'string' ||
       typeof target['text'] === 'string' ||
@@ -144,6 +145,55 @@ export function isWorkflowCondition(value: unknown): value is WorkflowCondition 
   return true
 }
 
+/** The condition kinds that look at an element on a page. */
+const ELEMENT_TARGET_KINDS: readonly WorkflowCondition['kind'][] = [
+  'elementExists',
+  'elementVisible',
+  'elementEnabled',
+  'elementText',
+  'attributeEquals',
+  'elementGone',
+  'elementAppeared',
+  'countIncreased',
+  'count',
+]
+
+/**
+ * Does an element row name its element the way a person would see it?
+ *
+ * A row whose only locator is a CSS selector or a `data-testid` value identifies an
+ * element by its source code — and nothing in a chat turn shows the model source
+ * code, so such a locator is invented, and an invented one reads false however well
+ * the run went: round 26 failed on `.publishBtn, .btn.submit`, round 43 on testid
+ * `draft-saved`, round 44 on `.publish-container, .draft-list, .note-item`. Three
+ * clean replays that certified nothing, against the one L3 pass (round 34), whose
+ * proof was `elementExists {text: "草稿箱"}`. A target that came FROM an observation —
+ * the rich `primary`/`fallbacks` shape generation emits, or a non-empty
+ * `stableAttributes` — counts as named, because someone looked at the page first.
+ *
+ * A bare `role` does NOT count, and round 50 is the reason. Its proof reached the
+ * replay as `{role: "button"}` once the model's `name` key was dropped as an unknown
+ * field; the run covered 33/33 steps and «元素存在 button» was satisfied by the first
+ * button anywhere on the page. A role narrows a name — on its own it matches
+ * whatever the page happens to carry, which is a vacuous proof rather than an
+ * invented one, and no goal gate catches it.
+ */
+export function conditionTargetIsNamed(condition: WorkflowCondition): boolean {
+  if (!ELEMENT_TARGET_KINDS.includes(condition.kind)) return true
+  const target = (condition as { target?: unknown }).target
+  if (!isRecord(target)) return false
+  for (const field of ['accessibleName', 'text', 'label', 'placeholder']) {
+    const value = target[field]
+    if (typeof value === 'string' && value.trim()) return true
+  }
+  const stable = target['stableAttributes']
+  if (isRecord(stable) && Object.keys(stable).length > 0) return true
+  if (hasResolvableSpec(target['primary'])) return true
+  return (
+    Array.isArray(target['fallbacks']) && target['fallbacks'].some((spec) => hasResolvableSpec(spec))
+  )
+}
+
 /**
  * Unwrap a model-authored condition value into a LIST, judging only its shape.
  *
@@ -169,8 +219,89 @@ export function conditionListValue(value: unknown): unknown[] {
 }
 
 /** Narrow an untrusted list to valid conditions, dropping the rest. */
+/**
+ * Read a model-authored element target into the shape the observer takes.
+ *
+ * The `prepare_workflow_goal` schema says only `{kind, ...}`, and a model that has
+ * just read a selector off the page writes `target: "input[maxlength=\"20\"]"` — a
+ * bare string — or lifts `selector` to the top level. Both name exactly one
+ * element, and refusing them cost round 24 its ENTIRE generation: nine guesses at
+ * the shape, nine rejections, no `wf_op_*` call ever ran. The shorthand becomes the
+ * object here so everything downstream keeps reading one shape; the empty-locator
+ * invariant is untouched, because {@link isWorkflowCondition} still judges the
+ * lifted object.
+ */
+const TARGET_FIELDS = [
+  'selector',
+  'role',
+  'accessibleName',
+  'text',
+  'label',
+  'placeholder',
+  'testId',
+  'stableAttributes',
+  'relation',
+  'primary',
+  'fallbacks',
+] as const
+
+export function liftConditionShorthand(value: unknown): unknown {
+  if (!isRecord(value)) return value
+  const target = value['target']
+  if (typeof target === 'string') {
+    const selector = target.trim()
+    return selector ? { ...value, target: { selector } } : value
+  }
+  const emptyTarget = target === undefined || (isRecord(target) && Object.keys(target).length === 0)
+  if (!emptyTarget) {
+    // A model that has just read a button writes `name` — the accessibility tree's
+    // word for it — while the field the observer searches is `accessibleName`. An
+    // unknown key is dropped without a trace, so round 50's proof «button 暂存离开
+    // exists» degraded to «any button exists» and failed on a page with no button.
+    if (
+      isRecord(target) &&
+      typeof target['name'] === 'string' &&
+      target['name'].trim() &&
+      target['accessibleName'] === undefined
+    ) {
+      const { name, ...rest } = target
+      return { ...value, target: { ...rest, accessibleName: String(name).trim() } }
+    }
+    return value
+  }
+  const lifted: Record<string, unknown> = {}
+  for (const field of TARGET_FIELDS) {
+    if (value[field] !== undefined) lifted[field] = value[field]
+  }
+  if (Object.keys(lifted).length === 0) return value
+  const rest: Record<string, unknown> = { ...value }
+  for (const field of TARGET_FIELDS) delete rest[field]
+  return { ...rest, target: lifted }
+}
+
 export function workflowConditionsOf(value: unknown): WorkflowCondition[] {
-  return conditionListValue(value).filter(isWorkflowCondition)
+  return conditionListValue(value)
+    .map(liftConditionShorthand)
+    .filter(isWorkflowCondition)
+    .map(alignElementTextTarget)
+}
+
+/**
+ * An `elementText` row makes ONE claim: the page says `expected`. When the model
+ * also locates by words it usually picks a DIFFERENT fragment of the same visible
+ * phrase — round 70's goal row located text 「保存」 and demanded it read 「草稿」,
+ * while the button says 「保存草稿」 — so the row could not hold on any page, and the
+ * replay that really saved a draft was reported as 目标未达成. The expectation is the
+ * claim and the locator is the weaker guess, so align the locator to it. Nothing is
+ * dropped, and a page that says neither word still fails the row.
+ */
+export function alignElementTextTarget(condition: WorkflowCondition): WorkflowCondition {
+  if (condition.kind !== 'elementText') return condition
+  const target = condition.target as { text?: unknown } | undefined
+  const words = typeof target?.text === 'string' ? target.text.trim() : ''
+  const expected = typeof condition.expected === 'string' ? condition.expected.trim() : ''
+  if (!words || !expected || words === expected) return condition
+  return { ...condition, target: { ...(target as object), text: expected } }
 }
 
 /** One-line human-readable form, for validator messages and run logs. */

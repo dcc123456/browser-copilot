@@ -20,7 +20,7 @@
  * goal, so a goal that ends at a draft is what this should be pointed at.
  */
 import process from 'node:process'
-import { connectBridge, unwrapReply } from './bridge-client.mjs'
+import { connectBridge, unwrapReply, explainSilence } from './bridge-client.mjs'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const USAGE =
@@ -111,14 +111,26 @@ async function run(client) {
   let reported = -1
   while (Date.now() < deadline) {
     await sleep(options.intervalMs)
-    const status = unwrap(
-      await client.request({
-        type: 'tool',
-        tool,
-        args: { conversationId: started.conversationId },
-      }),
-    )
-    if (status?.status === 'unknown') die(`the extension no longer knows ${started.conversationId}`)
+    let status
+    try {
+      // unwrapReply throws on a refusal, so the diagnosis below can catch it —
+      // unwrap() would exit first and the run would die without a cause.
+      status = unwrapReply(
+        await client.request({
+          type: 'tool',
+          tool,
+          args: { conversationId: started.conversationId },
+        }),
+      )
+    } catch {
+      // A refused poll means the reporter is gone, which is not the same failure
+      // as a run that stopped reporting. Name the difference before dying.
+      die(`${tool} run ${started.conversationId} went silent: ${await explainSilence(client, started.conversationId)}`)
+    }
+    if (status?.status === 'unknown')
+      die(
+        `the extension no longer knows ${started.conversationId}: ${await explainSilence(client, started.conversationId)}`,
+      )
     if (status?.status === 'running') {
       if (status.nodes !== reported) {
         reported = status.nodes

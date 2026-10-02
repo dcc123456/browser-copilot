@@ -474,21 +474,36 @@ export function runOp(op: Op): OpResult {
       case 'text': {
         const wanted = spec.value
         const all = querySelectorIn(roots, tagPrefix || '*')
-        const exact: Element[] = []
-        for (const candidate of all) {
-          if (visibleText(candidate) !== wanted) continue
-          let hasMatchingDescendant = false
-          const descendants = candidate.querySelectorAll(tagPrefix || '*')
-          for (let i = 0; i < descendants.length; i += 1) {
-            const descendant = descendants[i]
-            if (descendant && visibleText(descendant) === wanted) {
-              hasMatchingDescendant = true
-              break
+        // The tightest element whose text holds: an element qualifies only when
+        // none of its own descendants qualifies, so a word never resolves to the
+        // page-wide container that happens to contain it.
+        const tightest = (holds: (text: string) => boolean): Element[] => {
+          const found: Element[] = []
+          for (const candidate of all) {
+            if (!holds(visibleText(candidate))) continue
+            let deeper = false
+            const descendants = candidate.querySelectorAll(tagPrefix || '*')
+            for (let i = 0; i < descendants.length; i += 1) {
+              const descendant = descendants[i]
+              if (descendant && holds(visibleText(descendant))) {
+                deeper = true
+                break
+              }
             }
+            if (!deeper) found.push(candidate)
           }
-          if (!hasMatchingDescendant) exact.push(candidate)
+          return found
         }
-        return exact
+        const exact = tightest((text) => text === wanted)
+        if (exact.length > 0) return exact
+        // Round 68 replayed 19/19 steps and really saved the draft, and the one
+        // unmet row was its own goal condition «文本包含 "草稿"»: the page says
+        // 「草稿箱(100)」, and an exact-only text locator can never see a word it
+        // abbreviated. The fallback only runs when the exact pass found NOTHING,
+        // so it cannot re-point a spec that already resolved — and where the
+        // looser pass matches several elements, the existing reliability layer
+        // scores them and refuses on ambiguity, exactly as it does today.
+        return tightest((text) => text.includes(wanted))
       }
     }
   }
@@ -720,6 +735,55 @@ export function runOp(op: Op): OpResult {
     return base
   }
 
+  /**
+   * The words the element was picked with, as the node still carries them: its
+   * `text`/`role` specs (a `role` spec's value is its accessible name) and its
+   * recorded label. A locator is machine-readable evidence; this is the only
+   * HUMAN-READABLE evidence in the node, and so the only thing a locator match
+   * can be checked against.
+   */
+  function identityWordsOf(target: Target): string[] {
+    const words: string[] = []
+    for (const spec of [target.primary, ...(target.fallbacks ?? [])]) {
+      if (!spec || typeof spec.value !== 'string') continue
+      if (spec.how !== 'text' && spec.how !== 'role') continue
+      const word = spec.value.trim()
+      if (word) words.push(word)
+    }
+    const label = (target as { label?: unknown }).label
+    if (typeof label === 'string' && label.trim()) words.push(label.trim())
+    return words
+  }
+
+  /** Whether a spec is a machine locator (as opposed to a human string). */
+  function isLocatorSpec(spec: TargetSpec): boolean {
+    return spec.how === 'css' || spec.how === 'id' || spec.how === 'testid' || spec.how === 'name'
+  }
+
+  /**
+   * Does the element still carry the words it was chosen for?
+   *
+   * A locator can match exactly ONE element and still be the wrong one: a
+   * positional `nth-of-type` chain that outlived a layout change pointed at
+   * 草稿箱 where it was recorded on 上传图文, the run clicked straight through into
+   * that drawer, and the modal then obscured every later step. Comparing the
+   * match against the recorded words turns that silent misclick into something
+   * the identity can overrule.
+   */
+  function elementCarriesWords(element: Element, words: readonly string[]): boolean {
+    const haystacks = [visibleText(element).trim(), accessibleName(element).trim()].filter(
+      (text) => text !== '',
+    )
+    for (const word of words) {
+      const needle = word.toLowerCase()
+      for (const hay of haystacks) {
+        const text = hay.toLowerCase()
+        if (text.includes(needle) || needle.includes(text)) return true
+      }
+    }
+    return false
+  }
+
   function resolve(target: Target | undefined): ResolveOutcome {
     if (!target) return null
     const policy = op.resolvePolicy
@@ -738,6 +802,9 @@ export function runOp(op: Op): OpResult {
       // first multi-match is remembered as the fallback — preserving the legacy
       // "first visible of many" behavior for targets with no exact spec at all.
       let loose: Resolution | null = null
+      let looseAgreeing: Resolution | null = null
+      let exactVetoed: Resolution | null = null
+      const words = identityWordsOf(target)
       for (let index = 0; index < candidates.length; index += 1) {
         const spec = candidates[index]
         if (!spec) continue
@@ -757,10 +824,24 @@ export function runOp(op: Op): OpResult {
           usedSpec: serializeSpec(spec),
           usedFallback: index > 0,
         }
-        if (all.length === 1) return resolution
+        // A human-string spec agrees with its own words by construction; only a
+        // locator match has to be checked.
+        const agrees =
+          words.length === 0 || !isLocatorSpec(spec) || elementCarriesWords(chosen, words)
+        if (all.length === 1) {
+          if (agrees) return resolution
+          // Unique, but it does not say what the node says it should say. Keep it
+          // as the answer of last resort and look for a spec whose match agrees.
+          if (!exactVetoed) exactVetoed = resolution
+          continue
+        }
+        if (agrees && !looseAgreeing) looseAgreeing = resolution
         if (!loose) loose = resolution
       }
-      return loose
+      // An agreeing-but-ambiguous element beats a unique one that contradicts the
+      // recorded words; when nothing agrees, the legacy answer stands (this can
+      // only ever be as wrong as it was before, never more).
+      return looseAgreeing ?? exactVetoed ?? loose
     }
 
     // --- strict: never guess ------------------------------------------------
@@ -1783,6 +1864,11 @@ export function runOp(op: Op): OpResult {
           visible,
           enabled,
           occluded,
+          // `input[type=file]` is the element pages hide on purpose behind a
+          // styled drop zone, so a wait for it to become visible has no chance
+          // of ending. The waiter needs that distinction from a merely
+          // not-yet-rendered element; see the `hopeless` readiness result.
+          fileInput: element instanceof HTMLInputElement && element.type === 'file',
           rect: { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
         },
       }

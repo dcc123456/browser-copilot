@@ -1307,7 +1307,16 @@ export const BLOCK_CATALOG: BlockCatalogEntry[] = [
   {
     id: 'save-local',
     name: 'Save to local',
-    description: 'Write a value or data to a local file',
+    // The catalog line is what a generation model selects the block with, and the
+    // unattended case is the one it cannot see from the recorder: rounds 40 and 47
+    // both generated a disk write for their script-made images and then failed the
+    // replay on «无法打开保存对话框» — nobody is there to answer the save dialog.
+    // Round 63 regenerated the SAME five `save-local` nodes because the previous
+    // line promised no dialog: the dialog only stays away when a download folder is
+    // configured in settings, so the line states that precondition instead of
+    // denying the failure mode. Feed an image to `upload-file` from a variable.
+    description:
+      'Write a value to a local file — unattended needs a download folder set, else a save dialog blocks it',
     icon: 'lucide:Save',
     component: 'Default',
     editComponent: 'EditSaveLocal',

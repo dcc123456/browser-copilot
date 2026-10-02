@@ -17,7 +17,10 @@
  *   is back (single-writer design: the outbox value is the newest complete
  *   state of that key, so it replaces the file wholesale) and deletes the
  *   entry only after its file write succeeded, so a service-worker eviction
- *   mid-replay resumes cleanly.
+ *   mid-replay resumes cleanly. Like the read cache below, the outbox is
+ *   size-capped: it is rewritten WHOLE on every enqueue, so one unbounded entry
+ *   (a run's checkpoints after an image step) turns into a worker-killing
+ *   rewrite instead of a safety net.
  * - **Read cache** (`fs-cache:<key>`): the last value that reached a file.
  *   Purely a READ fallback for when the handle is unavailable — without it the
  *   panel would render empty lists and look like data loss. Size-capped and
@@ -89,16 +92,49 @@ export const OUTBOX_KEY = 'fs-outbox'
 export const CACHE_PREFIX = 'fs-cache:'
 export const CACHE_INDEX_KEY = 'fs-cache:index'
 
+/**
+ * Total budget for the outbox, in JSON characters. The map is rewritten WHOLE
+ * on every enqueue (one `chrome.storage.local` key holds it), so its size is
+ * not just a quota question: a several-hundred-megabyte rewrite starves the
+ * service worker mid-write, which is how an unattended run died with every
+ * other key already safe on disk.
+ */
+const OUTBOX_BUDGET = 8 * 1024 * 1024
+
+/** Largest single value the outbox will carry. */
+const OUTBOX_ENTRY_BUDGET = 2 * 1024 * 1024
+
+/**
+ * Past this many stored bytes the buffer is not trimmed but discarded: reading
+ * a map that large back into the worker is the failure the repair exists to
+ * end, and the selective path needs the whole map in hand to choose.
+ */
+const OUTBOX_DISCARD_LIMIT = 24 * 1024 * 1024
+
 interface OutboxEntry {
   /** Latest value for the key; `null` marks a deletion (tombstone). */
   value: unknown
   at: number
+  /**
+   * JSON length of `value`, recorded at enqueue so the budget is enforced
+   * without re-serializing payloads that may be megabytes. Entries written
+   * before the budget existed count as 0 and roll off with their key.
+   */
+  bytes?: number
 }
 
 type OutboxMap = Record<string, OutboxEntry>
 
-/** The whole outbox map (key → entry). Read-side helper for overlays. */
+/**
+ * The whole outbox map (key → entry). Read-side helper for overlays.
+ *
+ * Every fallback read goes through here, so this is where an oversized leftover
+ * is refused: probing the stored size first means a buffer no worker can survive
+ * reading is discarded before ANY caller asks for it, rather than depending on
+ * some boot-time call winning the race against every other storage reader.
+ */
 export async function readOutboxMap(): Promise<OutboxMap> {
+  if (await discardOversizedOutbox()) return {}
   const stored = await chromeLocalArea.get(OUTBOX_KEY)
   const raw = stored[OUTBOX_KEY]
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
@@ -106,17 +142,134 @@ export async function readOutboxMap(): Promise<OutboxMap> {
 }
 
 /**
+ * True when the buffer was past the point where reading it back is safe, and
+ * has therefore just been removed. Its writes never reached the directory
+ * either, so what is lost is the gap back to the last state that landed on
+ * disk — which is exactly what a worker killed mid-read would cost anyway.
+ */
+async function discardOversizedOutbox(): Promise<boolean> {
+  const used = await outboxBytesInUse()
+  if (used === undefined || used <= OUTBOX_DISCARD_LIMIT) return false
+  await chromeLocalArea.remove(OUTBOX_KEY)
+  console.warn(`[fs-outbox] ${used} bytes parked past the recoverable limit — buffer discarded`)
+  return true
+}
+
+/**
  * Parks a write in the outbox. One entry per key — a newer write for the same
  * key replaces the older one, so a burst of writes during an outage costs one
  * entry, not many. Serialized on the outbox key itself so two concurrent
  * enqueues cannot drop one another's entry.
+ *
+ * Bounded: an entry over {@link OUTBOX_ENTRY_BUDGET} is refused (the write
+ * stays lost, as it would be with no fallback at all — but parking it would
+ * take the whole worker down with it), and past {@link OUTBOX_BUDGET} entries
+ * are evicted cheapest-first: checkpoints before transcripts before anything
+ * structural, oldest within each class. The entry just written is never the
+ * victim.
  */
 export async function enqueueOutbox(key: string, value: unknown): Promise<void> {
+  let bytes: number
+  try {
+    const text = JSON.stringify(value)
+    if (text === undefined) return
+    bytes = text.length
+  } catch {
+    return
+  }
+  if (bytes > OUTBOX_ENTRY_BUDGET) {
+    console.warn(`[fs-outbox] ${key} (${bytes} chars) exceeds the buffer limit; dropped`)
+    return
+  }
   await withKeyLock(OUTBOX_KEY, async () => {
     const all = await readOutboxMap()
-    all[key] = { value, at: Date.now() }
+    all[key] = { value, at: Date.now(), bytes }
+    let total = totalBytes(all)
+    while (total > OUTBOX_BUDGET) {
+      const victim = cheapestVictim(all, key)
+      if (!victim) break
+      total -= all[victim]?.bytes ?? 0
+      delete all[victim]
+    }
     await chromeLocalArea.set({ [OUTBOX_KEY]: all })
   })
+}
+
+/** Checkpoints are a resume optimization, transcripts next, the rest structural. */
+function evictionClass(key: string): number {
+  if (key.startsWith('cp:')) return 0
+  if (key.startsWith('conv:')) return 1
+  return 2
+}
+
+function totalBytes(all: OutboxMap): number {
+  let total = 0
+  for (const entry of Object.values(all)) total += entry?.bytes ?? 0
+  return total
+}
+
+/** The key to evict to make room: lowest class, then oldest. Never `keep`. */
+function cheapestVictim(all: OutboxMap, keep: string): string | undefined {
+  let best: string | undefined
+  let bestClass = Number.POSITIVE_INFINITY
+  let bestAt = Number.POSITIVE_INFINITY
+  for (const [key, entry] of Object.entries(all)) {
+    if (key === keep) continue
+    const classOf = evictionClass(key)
+    const at = entry?.at ?? 0
+    if (classOf < bestClass || (classOf === bestClass && at < bestAt)) {
+      best = key
+      bestClass = classOf
+      bestAt = at
+    }
+  }
+  return best
+}
+
+/**
+ * Repair an outbox a build WITHOUT the cap may have left behind: the buffer
+ * itself is already handled by {@link readOutboxMap} (oversized ⇒ discarded
+ * before anyone reads it), so what is left to do is shed the fat-but-readable
+ * remainder. Checkpoints go first — they are the class that grew, and the class
+ * that is safe to lose, checkpoints being a resume optimization — then ordinary
+ * budget eviction. Called at worker start; later writes carry `bytes`, so the
+ * enqueue's own budget keeps it small from then on.
+ */
+export async function trimOutboxToBudget(): Promise<void> {
+  let dropped = 0
+  await withKeyLock(OUTBOX_KEY, async () => {
+    const all = await readOutboxMap()
+    for (const [key, entry] of Object.entries(all)) {
+      if (entry && typeof entry.bytes !== 'number' && evictionClass(key) === 0) {
+        delete all[key]
+        dropped += 1
+      }
+    }
+    let total = totalBytes(all)
+    while (total > OUTBOX_BUDGET) {
+      const victim = cheapestVictim(all, '')
+      if (!victim) break
+      total -= all[victim]?.bytes ?? 0
+      delete all[victim]
+      dropped += 1
+    }
+    if (dropped === 0) return
+    await chromeLocalArea.set({ [OUTBOX_KEY]: all })
+  })
+  if (dropped > 0) console.warn(`[fs-outbox] shed ${dropped} over-budget key(s)`)
+}
+
+/**
+ * Bytes `chrome.storage.local` spends on the outbox map, or `undefined` where
+ * the API is unavailable (browser mode without chrome, tests without a mock).
+ */
+async function outboxBytesInUse(): Promise<number | undefined> {
+  if (!hasChromeStorage()) return undefined
+  try {
+    return await chrome.storage.local.getBytesInUse(OUTBOX_KEY)
+  } catch {
+    return undefined
+  }
 }
 
 /** Number of keys currently parked in the outbox (for the settings badge). */
@@ -290,14 +443,20 @@ export async function dropOutboxEntry(key: string): Promise<void> {
   })
 }
 
-/** Drops the outbox and every cache entry (used when leaving file mode). */
+/**
+ * Removes the outbox and every cache entry (used when leaving file mode).
+ *
+ * Enumerates through the cache index rather than `get(null)`: this runs after
+ * {@link syncFilesToBrowser} has folded the pending writes back in, so nothing
+ * here needs to SEE the stored values — and a whole-store read would
+ * deserialize whatever size the pre-budget builds left behind, which is the
+ * exact read that takes a worker down. Keys are removed by name instead.
+ */
 export async function clearFallbacks(): Promise<void> {
   try {
-    const all = (await chromeLocalArea.get(null)) as Record<string, unknown>
-    const stale = Object.keys(all).filter(
-      (key) => key === OUTBOX_KEY || key === CACHE_INDEX_KEY || key.startsWith(CACHE_PREFIX),
-    )
-    if (stale.length > 0) await chromeLocalArea.remove(stale)
+    const stale = [OUTBOX_KEY, CACHE_INDEX_KEY]
+    for (const key of Object.keys(await readCacheIndex())) stale.push(`${CACHE_PREFIX}${key}`)
+    await chromeLocalArea.remove(stale)
   } catch {
     // Best effort.
   }

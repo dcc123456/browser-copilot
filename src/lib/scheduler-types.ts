@@ -81,6 +81,14 @@ export interface TaskRunStep {
   kind: 'tool' | 'status' | 'result' | 'error' | 'info'
   /** Human-readable text. */
   text: string
+  /**
+   * Workflow block this line belongs to, and its resolved label. They survive a
+   * restart so the run's timeline still groups by block after the worker is
+   * evicted; the debug variable snapshot a step can also carry is NOT persisted
+   * (see `FinishedRunInput.steps`).
+   */
+  nodeId?: string
+  label?: string
 }
 
 /** How a run ended. */

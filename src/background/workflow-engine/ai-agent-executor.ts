@@ -199,20 +199,33 @@ export const aiAgent: BlockExecutor = async (data, ctx) => {
   const findBy = typeof data['findBy'] === 'string' ? data['findBy'] : 'cssSelector'
   const userPrompt = interpolate(String(data['prompt'] ?? ''), ctx.variables, ctx.refData)
   const actOnPage = asBool(data['actOnPage'], false)
-  const useSnapshot = asBool(data['useSnapshot'], true)
+  const wantsPage = actOnPage || selector !== ''
+  /**
+   * `useSnapshot` orders the agent to OPEN with `snapshot_page` (see
+   * `buildAgentPrompt`). For a node that neither acts on the page nor targets an
+   * element, there is nothing to snapshot — and the default `true` made every
+   * generated content-writing node obey an instruction to go look at the page,
+   * spend its whole round budget on observations, and die with "Stopped after 12
+   * tool rounds" (round 55, step 20 of 24: an ai-agent node whose only job was to
+   * write the article body). A content producer answers from its prompt alone.
+   */
+  const useSnapshot = wantsPage ? asBool(data['useSnapshot'], true) : false
   const variable = String(data['variableName'] ?? 'lastAIAgent') || 'lastAIAgent'
   /**
-   * Round budget. The floor is SIX, not one or two: a round that calls a tool
+   * Round budget. The floor is TWELVE, not one or two: a round that calls a tool
    * spends itself on the call, and the answer arrives in the NEXT round, so a
    * budget that fits the number of tool calls the node actually makes ends the
    * turn with no answer and the block fails. Generation wrote `maxToolRounds: 1`
    * in round 6 of the harness (the run stored the model's pre-tool narration as
    * the note text it typed into the page) and `maxToolRounds: 2` in two later
    * graphs — both of which spent their budget on `load_tools` + `use_skill` and
-   * died with "Stopped after 2 tool rounds to avoid a loop." Two spare rounds
-   * cover a dynamic-tool load and one observation before the answer round.
+   * died with "Stopped after 2 tool rounds to avoid a loop." Round 17 raised the
+   * floor again: an 8-round node died mid-task on replay (step 11/16 failed) even
+   * though it only had to produce text, because the rounds went on tool
+   * round-trips and never on the answer. Twelve leaves room for a dynamic-tool
+   * load, a few observations, and the round that finally answers.
    */
-  const rounds = Math.min(50, Math.max(6, Number(data['maxToolRounds'] ?? 20) || 20))
+  const rounds = Math.min(50, Math.max(12, Number(data['maxToolRounds'] ?? 20) || 20))
 
   /**
    * Config/runtime failures THROW, not emit-and-continue: the engine's

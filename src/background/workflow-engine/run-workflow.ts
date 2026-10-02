@@ -50,7 +50,7 @@ import {
   createDriverConditionProbe,
   evaluateConditionWithProbe,
 } from './condition-runtime'
-import { verifyGoalSpec } from './goal-verifier'
+import { DEFAULT_GOAL_VERIFY_SETTLE_MS, verifyGoalSpec } from './goal-verifier'
 import { workflowFingerprintOf } from '../../lib/workflow/checkpoints'
 import { goalSpecOf, isGeneratedStrict } from '../../lib/workflow/reliability'
 import { validateGeneratedWorkflow } from '../../lib/workflow/generated-validation'
@@ -331,7 +331,8 @@ export function createDriverReadinessProbe(
           scope,
         ).catch(() => undefined)
         const data = result?.data as
-          { state?: string; visible?: boolean; enabled?: boolean } | undefined
+          | { state?: string; visible?: boolean; enabled?: boolean; fileInput?: boolean }
+          | undefined
         if (!data?.state) return { satisfied: false, detail: '元素尚未出现' }
         if (data.state === 'missing') return { satisfied: false, detail: '元素尚未出现' }
         // `state: 'ready'` is visible ∧ enabled ∧ unoccluded — using it for a
@@ -341,6 +342,20 @@ export function createDriverReadinessProbe(
         const wanted = requirement.state === 'enabled' ? data.enabled : data.visible
         if (wanted === true) return { satisfied: true }
         if (wanted === undefined) return { satisfied: data.state === 'ready' }
+        // A click aimed at a file input waits on a condition that will never
+        // hold: pages hide `input[type=file]` behind a styled drop zone on
+        // purpose, and the kernel cannot see a future where it renders. Round 51
+        // burned its whole 180 s window and six repair attempts on exactly that
+        // wait. Say so at once, and say what the step should have been.
+        if (requirement.state === 'visible' && data.fileInput === true) {
+          return {
+            satisfied: false,
+            hopeless: true,
+            detail:
+              '点击目标是一个隐藏的 input[type=file]（文件选择控件），它永远不会变为可见，等待它没有意义。' +
+              '该步骤应改用 Upload file（上传文件）块，把文件直接注入这个 input，而不是点击它。',
+          }
+        }
         return {
           satisfied: false,
           detail: requirement.state === 'enabled' ? '元素暂不可用' : '元素尚未可见',
@@ -821,10 +836,15 @@ export async function executeWorkflow(
     if (outcome === 'ok' && !result.stoppedBefore) {
       const goal = goalSpecOf(effective)
       if (goal) {
-        const verification = await verifyGoalSpec(goal, {
-          variables: result.variables ?? variables ?? {},
-          probe: createDriverConditionProbe(runSignal, scope),
-        })
+        const verification = await verifyGoalSpec(
+          goal,
+          {
+            variables: result.variables ?? variables ?? {},
+            probe: createDriverConditionProbe(runSignal, scope),
+          },
+          undefined,
+          { settleMs: DEFAULT_GOAL_VERIFY_SETTLE_MS, signal: runSignal },
+        )
         goalNote = verification.note
         addStep(runId, 'status', goalNote)
         if (!verification.achieved) {

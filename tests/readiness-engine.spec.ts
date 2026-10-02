@@ -261,6 +261,50 @@ describe('prepareNodeExecution / verifyPostActionReadiness', () => {
   })
 })
 
+describe('a hopeless observation ends the wait at once', () => {
+  // Round 51 died on an event-click aimed at a hidden `input[type=file]`: pages
+  // hide that control behind a styled drop zone on purpose, so the visibility wait
+  // polled a condition with no chance of holding for its whole 180 s window, and
+  // the repair ladder then spent six attempts re-running it. A probe may say
+  // «not yet» — or «not ever». Only the second one ends the wait early, and the
+  // reason it names is what makes the failure repairable.
+  it('stops on the first observation and keeps its detail', async () => {
+    let calls = 0
+    const outcome = await awaitReadiness({
+      requirements: [{ state: 'visible' }],
+      nodeSelector: 'input[type="file"]',
+      signal,
+      probe: async () => {
+        calls += 1
+        return {
+          satisfied: false,
+          hopeless: true,
+          detail: '点击目标是一个隐藏的 input[type=file]，该步骤应改用 Upload file 块',
+        }
+      },
+      sleep: instantSleep,
+      timeoutMs: 60_000,
+    })
+    expect(calls).toBe(1)
+    expect(outcome.ok).toBe(false)
+    expect(outcome.state).toBe('visible')
+    expect(outcome.detail).toContain('Upload file')
+  })
+
+  it('still polls an ordinary «not yet» for the whole window', async () => {
+    const { probe, calls } = countingProbe(3)
+    const outcome = await awaitReadiness({
+      requirements: [{ state: 'visible' }],
+      nodeSelector: '#a',
+      signal,
+      probe,
+      sleep: instantSleep,
+    })
+    expect(calls()).toBe(3)
+    expect(outcome.ok).toBe(true)
+  })
+})
+
 describe('value-committed comparison', () => {
   it('matches a control whose separators the DOM reflowed', () => {
     // The kernel reads a contenteditable as `textContent`: block structure the

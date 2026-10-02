@@ -111,3 +111,50 @@ describe('kernel resolve: exact match preferred', () => {
     expect(result.usedSpec).toContain('solo')
   })
 })
+
+describe('kernel resolve: the recorded words overrule a drifted locator', () => {
+  // Round 56's pre-check: a click recorded on 上传图文 carried a positional
+  // chain that, after the page re-rendered, matched 草稿箱 EXACTLY — and the
+  // unique match was trusted, the drawer opened, and its modal obscured every
+  // later step. The node also recorded the words on the element it was supposed
+  // to hit, and that human string is now evidence a locator match can be held to.
+  beforeEach(() => {
+    makePage(`
+      <div class="menu"><span>草稿箱</span></div>
+      <div class="menu"><span>上传图文</span></div>
+    `)
+  })
+
+  it('takes the text spec over a unique locator match that says something else', () => {
+    const target: Target = {
+      primary: { how: 'css', value: '.menu:nth-of-type(1) > span' },
+      fallbacks: [{ how: 'text', value: '上传图文' }],
+    }
+    const result = runOp(clickOp(target)) as OpResult
+
+    expect(result.ok).toBe(true)
+    expect(result.usedSpec).toContain('上传图文')
+  })
+
+  it('still trusts a unique locator match whose element does carry the words', () => {
+    const target: Target = {
+      primary: { how: 'css', value: '.menu:nth-of-type(2) > span' },
+      fallbacks: [{ how: 'text', value: '上传图文' }],
+    }
+    const result = runOp(clickOp(target)) as OpResult
+
+    expect(result.ok).toBe(true)
+    expect(result.usedSpec).toContain('.menu:nth-of-type(2)')
+  })
+
+  it('falls back to the drifted locator when nothing on the page agrees', () => {
+    const target: Target = {
+      primary: { how: 'css', value: '.menu:nth-of-type(1) > span' },
+      fallbacks: [{ how: 'text', value: '不存在的按钮' }],
+    }
+    const result = runOp(clickOp(target)) as OpResult
+
+    expect(result.ok).toBe(true)
+    expect(result.usedSpec).toContain('.menu:nth-of-type(1)')
+  })
+})

@@ -16,6 +16,7 @@ import {
   ambiguityPolicyOf,
   degradeReplayOf,
   idempotencyOf,
+  isDismissStep,
   isGeneratedStrict,
   nodeReliabilityOf,
   STRICT_MIN_MARGIN,
@@ -910,6 +911,15 @@ async function runCore(
             vars: variables,
           })
           if (!before.ok) {
+            // A cleanup step that finds nothing to clean up did its job: the
+            // drawer it was closing is not on the page. Skip it instead of
+            // failing the run (see `isDismissStep`).
+            if (isDismissStep(current) && (before.state === 'present' || before.state === 'visible')) {
+              emit('status', nodeId, '页面上没有该浮层，无需关闭，跳过该节点')
+              completedNodeIds.push(nodeId)
+              emitCheckpoint(nodeId, 'ok', unsafe ? 'nodeCommitted' : undefined)
+              return defaultNext
+            }
             throw new Error(`READINESS_TIMEOUT(${before.state}): ${before.detail ?? '页面未就绪'}`)
           }
         }

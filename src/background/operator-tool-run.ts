@@ -46,6 +46,7 @@ import { evaluateJsPermission } from '../lib/workflow/capability-gap'
 import { markOperatorFailure, markOperatorRecovery } from '../lib/workflow/generation-coverage'
 import { operatorAuditCall } from '../lib/workflow/operator-history'
 import { resolveNodeGoalContract } from '../lib/workflow/node-goal-instantiation'
+import { unfiredDraftSaveNotice } from '../lib/workflow/trial-run'
 import { withNodeGoalContract } from '../lib/workflow/node-goal-contract'
 
 import {
@@ -684,7 +685,13 @@ function rewriteForRecording(
 
   const executed = outcome.status === 'executed'
   if (executed) markOperatorRecovery(conversationId, blockId)
-  const note = outcome.note ?? (output ? `next node attaches to ${output}` : undefined)
+  const note = [
+    outcome.note ?? (output ? `next node attaches to ${output}` : undefined),
+    unfiredDraftSaveNotice(draft),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .slice(0, 900)
   // Ensure the trace carries the locator the node actually recorded, even
   // when the executor reported no live resolution (record-only / mock):
   // read it back off the final recorded data.

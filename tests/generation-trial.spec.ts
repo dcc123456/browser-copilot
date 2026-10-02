@@ -21,7 +21,9 @@ import {
   TRIAL_BUDGET_MS,
   commitCutoffNodeId,
   draftCommitCutoffNodeId,
+  draftSaveExecuted,
   executionPath,
+  goalAsksForDraftSave,
   isCommitNode,
   isDraftSaveNode,
   isUnsafeNode,
@@ -319,6 +321,23 @@ describe('commit cutoff (the run-to-draft policy)', () => {
     expect(
       commitCutoffNodeId(chain([uploadStep(), canvas, typing, fillBodyStep()])),
     ).toBeUndefined()
+    // Round 19's real cutoff, and the lesson is that the VERB is not the request:
+    // this step draws the three posters and converts its own `data:image/png`
+    // strings into Files with `await fetch(dataUrl)`. Nothing leaves the browser,
+    // so the images the goal asked for are not a commit.
+    const drawAndAttach = node('javascript-code', {
+      code: "const res = await fetch(dataUrl);const blob = await res.blob();const file = new File([blob], 'p1.png', { type: 'image/png' });const dt = new DataTransfer();dt.items.add(file);input.files = dt.files;return c.toDataURL('image/png');",
+      description: '用脚本生成 3 张配图并挂到图文上传入口',
+    })
+    expect(isCommitNode(drawAndAttach)).toBe(false)
+    // The same step with a mutating verb is a write, and no prose reading redeems it.
+    expect(
+      isCommitNode(
+        node('javascript-code', {
+          code: "const res = await fetch('/api/note', { method: 'POST', body: form });return res;",
+        }),
+      ),
+    ).toBe(true)
   })
 
   it('still stops at a script that presses, submits, navigates or sends', () => {
@@ -341,6 +360,92 @@ describe('commit cutoff (the run-to-draft policy)', () => {
       expect(isCommitNode(step)).toBe(true)
       expect(commitCutoffNodeId(chain([readStep(), step]))).toBe(step.id)
     }
+  })
+
+  it('runs a script that only presses a tab on the page it is standing on', () => {
+    // Round 18, verbatim: the graph stopped at 10/26 on a step whose body finds
+    // the 「上传图文」 tab by visible text and `.click()`s it — the switch to the
+    // mode the GOAL asked for. Its description calls the page it sits on the
+    // 发布页, and a page name is not an act: pressing something inside the open
+    // page is judged by the words the step carries, like every other block.
+    const tabSwitch = node('javascript-code', {
+      code: "const t = hits.find((h) => h.textContent.trim() === '上传图文');t.click();return 'clicked ' + t.tagName;",
+      description: '点击小红书发布页上的「上传图文」标签页（文本被拆成多个嵌套节点，选择器命中不到）',
+    })
+    expect(isCommitNode(tabSwitch)).toBe(false)
+    expect(commitCutoffNodeId(chain([uploadStep(), tabSwitch, fillBodyStep()]))).toBeUndefined()
+    // The same body with commit words in its own sentence is still the commit:
+    // judging a press by its words is not a licence, it is the standard.
+    const publishPress = node('javascript-code', {
+      code: "const t = hits.find((h) => h.textContent.trim() === '发布');t.click();return t;",
+      __reliability: { intent: '点击发布，把这篇笔记发布出去' },
+    })
+    expect(isCommitNode(publishPress)).toBe(true)
+    expect(draftCommitCutoffNodeId(chain([tabSwitch, publishPress]))).toBe(publishPress.id)
+    // And a script that talks to a server is never redeemed by its prose.
+    const remote = node('javascript-code', {
+      code: "btn.click();fetch('/api/note/draft', { method: 'POST' })",
+      description: '点击保存草稿按钮',
+    })
+    expect(isCommitNode(remote)).toBe(true)
+  })
+
+  it('does not read a pasted note body as the step that presses publish', () => {
+    // Round 64, verbatim: a `press-key` step carried the AI-written note body as its
+    // key argument, so its contract sentence is «Press the 💡 使用场景：… 批量下单 …
+    // key» — the block's own template with a placeholder in the MIDDLE. The
+    // outward-verb scan matched 下单 INSIDE that content and the opt-in replay
+    // refused at 15/19: data read as an instruction, and the draft never written.
+    const keys = '\n\n💡 使用场景：\n• 电商购物：自动比价、批量下单\n• 数据采集：批量填表\n'
+    const typing = node('press-key', {
+      keys,
+      __reliability: { intent: `Press the ${keys} key` },
+    })
+    expect(draftCommitCutoffNodeId(chain([typing]))).toBeUndefined()
+    // The template frame is what gets discounted, never a step that says what it
+    // presses in its own words.
+    const declared = node('press-key', {
+      keys: 'Enter',
+      __reliability: { intent: '按下回车把这篇笔记发布出去' },
+    })
+    expect(draftCommitCutoffNodeId(chain([typing, declared]))).toBe(declared.id)
+  })
+
+  it('runs a script that only reads the page, the way get-text does', () => {
+    // Round 20's cutoff: a diagnostic step that reported each candidate tab's tag,
+    // class, rect and visibility so the NEXT step could pick a locator. It writes
+    // nothing, presses nothing and asks nothing of a server — a read — but its
+    // description says 前几次点击没有生效 and names the 发布页, so the keyword test
+    // sent it to the body, and the body had no WRITE evidence either.
+    const diagnostic = node('javascript-code', {
+      code: "const all = Array.prototype.slice.call(document.querySelectorAll('div,span,button'));const out = [];for (const el of all) { const r = el.getBoundingClientRect(); out.push({ tag: el.tagName, w: Math.round(r.width), visible: el.getClientRects().length > 0 }); } return JSON.stringify({ tabs: out.slice(0, 12), url: location.href });",
+      description:
+        '诊断小红书发布页标签页的真实 DOM 结构：前几次点击没有生效，需要读取候选元素的标签名、类名、可见性与位置，才能决定用哪个声明算子和什么选择器',
+    })
+    expect(isCommitNode(diagnostic)).toBe(false)
+    expect(
+      commitCutoffNodeId(chain([uploadStep(), diagnostic, fillBodyStep()])),
+    ).toBeUndefined()
+    // A read-shaped body that ends in the site's own outward handler is still the
+    // commit — the exemption needs the absence of a write, not the presence of a
+    // querySelector.
+    expect(
+      isCommitNode(
+        node('javascript-code', {
+          code: "const el = document.querySelector('#publish');window.app.publish(el);return el.tagName;",
+        }),
+      ),
+    ).toBe(true)
+    // And one that writes page state under a read-shaped surface: the query is
+    // evidence of a read only while nothing in the body writes.
+    expect(
+      isCommitNode(
+        node('javascript-code', {
+          code: "const n = document.querySelectorAll('div').length;localStorage.setItem('cart', n);return n;",
+          description: '统计候选元素数量，供后续判断是否已经发布',
+        }),
+      ),
+    ).toBe(true)
   })
 
   it('tells the commit the goal asked for from the one it forbade', () => {
@@ -380,6 +485,54 @@ describe('commit cutoff (the run-to-draft policy)', () => {
     expect(draftCommitCutoffNodeId(chain([fillBodyStep(), opaque]))).toBe(opaque.id)
     // Both are commits — the refusals the two modes share are the same list.
     expect(isCommitNode(saveDraft)).toBe(true)
+  })
+
+  it('says whether the run actually wrote the draft', () => {
+    // Round 18's report claimed «RAN THROUGH ITS OWN DRAFT COMMIT» for a replay
+    // that stopped at step 10 of 26 and never reached the save. The answer is not
+    // the flag the caller passed — it is where the cutoff fell in the graph.
+    const save = node('event-click', {
+      selector: '#draft',
+      __reliability: { intent: '把已填好标题、正文与 3 张配图的图文笔记保存为草稿，不发布' },
+    })
+    const publish = node('event-click', {
+      selector: '#publish',
+      __reliability: { intent: '点击发布按钮，把笔记发布出去' },
+    })
+    // Stopping AT the publish still ran the save: a draft is in the account.
+    expect(draftSaveExecuted(chain([fillBodyStep(), save, publish]), publish.id)).toBe(true)
+    // Stopping before it wrote nothing.
+    expect(
+      draftSaveExecuted(chain([fillBodyStep(), save, publish]), fillBodyStep().id),
+    ).toBe(false)
+    // No cutoff at all: the graph ran to its end, save included.
+    expect(draftSaveExecuted(chain([fillBodyStep(), save]), null)).toBe(true)
+    // A cutoff this graph does not contain is silence, not a pass.
+    expect(draftSaveExecuted(chain([fillBodyStep(), save]), 'not-in-graph')).toBe(false)
+    // A step that merely mentions 草稿 without acting is not a save.
+    const notes = node('note', { description: '这里会保存为草稿' })
+    expect(draftSaveExecuted(chain([fillBodyStep(), notes, publish]), publish.id)).toBe(false)
+  })
+
+  it('poses the terminal-step question only to a goal that wants a draft', () => {
+    // The standing test target, verbatim: it ends on the draft save, so a graph
+    // without that step is incomplete and must be said so before the replay.
+    expect(
+      goalAsksForDraftSave(
+        '结合这个项目的readme文档https://github.com/dcc123456/browser-copilot，去小红书上生成推广文章，要求使用图文模式，使用脚本生成3张图片，保存成草稿',
+      ),
+    ).toBe(true)
+    expect(goalAsksForDraftSave('生成图文草稿')).toBe(true)
+    // The prohibition still excuses the publish, exactly as in `isDraftSaveNode`.
+    expect(goalAsksForDraftSave('把笔记保存为草稿，不发布')).toBe(true)
+    // A draft-shaped READ never asked for a draft to be written.
+    expect(goalAsksForDraftSave('读取草稿箱数量')).toBe(false)
+    // A goal that also goes outward is not this check's business — that commit is
+    // never fired, so promising a draft there would be a lie.
+    expect(goalAsksForDraftSave('保存草稿并发布')).toBe(false)
+    expect(goalAsksForDraftSave('打开发布页')).toBe(false)
+    expect(goalAsksForDraftSave(undefined)).toBe(false)
+    expect(goalAsksForDraftSave('')).toBe(false)
   })
 })
 
@@ -448,6 +601,7 @@ describe('normalizeTrialRun', () => {
       totalSteps: 5,
       runId: 'r',
       cutoffNodeId: 'n9',
+      draftSaved: true,
       degradedSteps: 1,
     }
     expect(normalizeTrialRun(JSON.parse(JSON.stringify(record)))).toEqual(record)
@@ -506,6 +660,46 @@ describe('runGenerationTrial', () => {
     expect(seen[0]?.stopBefore).toBe(submit.id)
     expect(seen[0]?.traceEntry).toBe('VERIFY')
     expect(out.record).toMatchObject({ outcome: 'partial', coveredSteps: 1, totalSteps: 2 })
+  })
+
+  it('reports the draft as written only when the save step ran', async () => {
+    // Round 18: a `--allow-draft-commit` replay reached 10/26 and the harness told
+    // the user a draft was in the account. The flag says what the caller ALLOWED;
+    // only the graph says what happened.
+    const run = (steps: WorkflowNode[]) => {
+      const wf = chain(steps)
+      const cutoff = draftCommitCutoffNodeId(wf)
+      return runGenerationTrial(wf, {
+        allowDraftCommit: true,
+        execute: vi.fn(async () =>
+          resultOf({
+            outcome: 'ok',
+            completedNodeIds: wf.drawflow.nodes
+              .slice(1)
+              .map((n) => n.id)
+              .filter((id) => id !== cutoff),
+            ...(cutoff ? { stoppedBefore: cutoff } : {}),
+          }),
+        ),
+      })
+    }
+    const save = node('event-click', {
+      selector: '#draft',
+      __reliability: { intent: '把已填好标题与正文的图文笔记保存为草稿，不发布' },
+    })
+    const publish = node('event-click', {
+      selector: '#publish',
+      __reliability: { intent: '点击发布按钮，把笔记发布出去' },
+    })
+    // The save is behind the publish the run refused: a draft exists.
+    expect((await run([fillBodyStep(), save, publish])).record.draftSaved).toBe(true)
+    // A save the graph cannot prove is a draft is its own cutoff: it never runs,
+    // so nothing was written — the claim this field exists to stop.
+    const opaque = node('event-click', {
+      selector: '#save',
+      __reliability: { intent: '点击提交按钮，把这篇笔记保存下来' },
+    })
+    expect((await run([fillBodyStep(), opaque, publish])).record.draftSaved).toBe(false)
   })
 
   it('runs the preparing steps when the caller opted into the commit cutoff', async () => {

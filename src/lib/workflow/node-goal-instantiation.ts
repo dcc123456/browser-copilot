@@ -22,8 +22,14 @@ import type { WorkflowCondition } from './conditions'
 import { conditionListValue } from './conditions'
 import type { SemanticLocator } from './element-fingerprint'
 
-/** Generic operator goal templates (en), keyed by block id. */
-const DEFAULT_GOAL_TEMPLATES: Record<string, string> = {
+/**
+ * Generic operator goal templates (en), keyed by block id.
+ *
+ * Exported for the commit policy: a step whose intent is one of these sentences
+ * declares nothing about the element it acted on, so its own words must be read too
+ * (see `commitProseOf` in `trial-run`).
+ */
+export const DEFAULT_GOAL_TEMPLATES: Record<string, string> = {
   'new-tab': 'Open {{url}}',
   'event-click': 'Click the target element',
   forms: 'Fill the form field',
@@ -132,7 +138,7 @@ export function resolveNodeGoalContract(
   // variable-exists criterion for any produced variable so it stays verifiable.
   const finalCriteria: WorkflowCondition[] = successCriteria.length
     ? successCriteria
-    : fallbackCriteria(args)
+    : fallbackCriteria(args, blockId)
 
   if (finalCriteria.length === 0) return undefined
   return {
@@ -145,7 +151,10 @@ export function resolveNodeGoalContract(
   }
 }
 
-function fallbackCriteria(args: Record<string, unknown>): WorkflowCondition[] {
+function fallbackCriteria(
+  args: Record<string, unknown>,
+  blockId: string,
+): WorkflowCondition[] {
   const variableName = args['variableName']
   if (typeof variableName === 'string' && variableName.trim()) {
     return [{ kind: 'variableExists', name: variableName }]
@@ -154,10 +163,75 @@ function fallbackCriteria(args: Record<string, unknown>): WorkflowCondition[] {
   // locator reaches its target. This is a real check at L2, not an empty
   // placeholder, and keeps every generated action node goal-verifiable.
   const locator = locatorOf(args)
-  if (locator) return [{ kind: 'elementExists', target: locator }]
+  if (locator) {
+    // A click's own target is what had to exist BEFORE the press — it is a
+    // precondition, not evidence the press worked. Round 67 replayed 14/14 and
+    // really saved the draft; the one row barring certification was its
+    // `event-click` step's «元素存在 "上传图文"» — the menu entry that click enters,
+    // which the navigation it causes then removes. Declaring nothing is honest;
+    // declaring that row is a gate the step can only pass by not navigating.
+    if (blockId === 'event-click' && namedByVisibleWords(locator)) return []
+    // …unless this step WRITES INTO the element it was located by, and the words
+    // it was located by are the element's EMPTY state. Round 58 replayed 20/20
+    // and really saved the draft, and the one thing barring certification was the
+    // row its own `forms` step declared — «元素存在 textbox "填写标题会有更多赞哦"».
+    // That string is the placeholder of an empty title box: typing the title
+    // removes it, so the step could only pass by failing its own postcondition.
+    // Prefer the selector the step recorded (it survives the typing); with only
+    // the hint words left, the step has no honest postcondition to declare, and a
+    // false one is worse than none.
+    if (writesIntoTarget(blockId, args) && namedByVisibleWords(locator)) {
+      const raw =
+        typeof args['selector'] === 'string' && args['selector'].trim()
+          ? args['selector'].trim()
+          : ''
+      // …and the recorded selector is only a rescue when it does not name the
+      // very attribute the fill overwrites. Round 68 replayed 19/19, `draftSaved`
+      // and the goal row both held, and the one row left barring certification
+      // was the title `forms` step's «元素存在 css "input[placeholder*=\"标题\"]"» — the
+      // box it had just typed into no longer carries a 标题 placeholder, so the
+      // handle survived nothing but its own action.
+      const survives = raw !== '' && !/\[\s*\w*placeholder/i.test(raw)
+      return survives
+        ? [{ kind: 'elementExists', target: { stableAttributes: { 'data-css': raw } } }]
+        : []
+    }
+    return [{ kind: 'elementExists', target: locator }]
+  }
   // A key press / navigation without a locator can still verify against URL
   // when the arguments imply one.
   return []
+}
+
+/** Does this step put a value INTO its target (a fill), rather than act on it? */
+function writesIntoTarget(blockId: string, args: Record<string, unknown>): boolean {
+  if (blockId === 'forms') return true
+  const value = args['value']
+  return typeof value === 'string' && value.trim() !== ''
+}
+
+/**
+ * Does this locator identify the element by the words a person reads on it?
+ *
+ * Those are exactly the words the page owns and can change — including by the
+ * step's own action — whereas a selector or a test id is a machine handle the
+ * step leaves alone.
+ */
+function namedByVisibleWords(locator: SemanticLocator): boolean {
+  const record = locator as Record<string, unknown>
+  for (const key of ['placeholder', 'accessibleName', 'text', 'label']) {
+    if (typeof record[key] === 'string' && (record[key] as string).trim()) return true
+  }
+  const specs: unknown[] = [
+    record['primary'],
+    ...(Array.isArray(record['fallbacks']) ? record['fallbacks'] : []),
+  ]
+  for (const spec of specs) {
+    const row = spec as { how?: unknown; value?: unknown } | undefined
+    if (!row || typeof row.value !== 'string' || !row.value.trim()) continue
+    if (row.how === 'text' || row.how === 'role') return true
+  }
+  return false
 }
 
 function locatorOf(args: Record<string, unknown>): SemanticLocator | undefined {

@@ -209,7 +209,7 @@ import type {
 import { isGeneratedStrict } from '../lib/workflow/reliability'
 // Static imports — same SW dynamic-import crash fix as above.
 import { applySelfHeal } from '../lib/workflow/self-heal'
-import { verifyWorkflowGoal, type VerificationReport } from './workflow-engine/goal-verification'
+import { DEFAULT_GOAL_SETTLE_MS, verifyWorkflowGoal, type VerificationReport } from './workflow-engine/goal-verification'
 import { latestFirstRuns, observeFirstRunOfRevision } from '../lib/workflow/replay-metrics'
 import { runUnattendedPrompt } from './agent-unattended'
 import { streamCompletion } from '../lib/llm'
@@ -237,6 +237,7 @@ import { rescheduleAll, scheduleTask, triggerNow, onAlarm } from './scheduler'
 import { FeishuBot, FEISHU_WATCHDOG_ALARM } from './feishu-bot'
 import { isWebhookUrl, sendWebhookText } from '../lib/feishu'
 import { agentClient } from './agent-client'
+import { trimOutboxToBudget } from '../lib/fs-outbox'
 import {
   addStep,
   cancelRun,
@@ -286,6 +287,12 @@ setFinishedPersister((run: FinishedTask) => {
     outcome: run.outcome,
     summary: run.summary,
     ...(run.error ? { error: run.error } : {}),
+    // How the run recovered: the health summary counts repaired/resumed runs and
+    // shows the newest failure's category, so these have to be durable too.
+    ...(run.failureCategory ? { failureCategory: run.failureCategory } : {}),
+    ...(run.resumed ? { resumed: true } : {}),
+    ...(run.repaired ? { repaired: true } : {}),
+    ...(run.takeover ? { takeover: true } : {}),
     steps: run.steps,
   }).catch((error: unknown) => {
     console.error('[Browser Copilot] could not persist finished run', error)
@@ -312,6 +319,11 @@ void listRuns()
           finishedAt: r.finishedAt!,
           outcome: r.outcome!,
           ...(r.summary ? { summary: r.summary } : {}),
+          ...(r.error ? { error: r.error } : {}),
+          ...(r.failureCategory ? { failureCategory: r.failureCategory } : {}),
+          ...(r.resumed ? { resumed: true } : {}),
+          ...(r.repaired ? { repaired: true } : {}),
+          ...(r.takeover ? { takeover: true } : {}),
           steps: r.steps ?? [],
         })),
     )
@@ -622,6 +634,11 @@ function recordStep(
 ): void {
   addStep(runId, kind, text)
 }
+
+// An outbox that grew past its budget in an older build poisons every read of
+// the store afterwards; shed the excess at module load, like the other
+// cold-start reconciliation below.
+void trimOutboxToBudget().catch(() => undefined)
 
 // An MV3 worker can start cold on any event (an alarm, a port reconnect, a
 // command). Reconcile schedules and the bot connection at module load so a task
@@ -1638,7 +1655,7 @@ async function handleCommand(
             ? undefined
             : await normalScopeFromWindowId(scopeWindowId).catch(() => undefined)
           const probe = createDriverConditionProbe(new AbortController().signal, scopeWindow)
-          certification = await verifyWorkflowGoal(healed, r, probe)
+          certification = await verifyWorkflowGoal(healed, r, probe, { settleMs: DEFAULT_GOAL_SETTLE_MS })
           healed = {
             ...healed,
             settings: {

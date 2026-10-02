@@ -58,6 +58,7 @@ vi.mock('../src/background/workflow-engine/auto-repair/failure-snapshot', () => 
 }))
 const verifyWorkflowGoal = vi.fn()
 vi.mock('../src/background/workflow-engine/goal-verification', () => ({
+  DEFAULT_GOAL_SETTLE_MS: 6000,
   verifyWorkflowGoal: (...args: unknown[]) => verifyWorkflowGoal(...args),
 }))
 vi.mock('../src/lib/workflow/storage', () => ({
@@ -138,7 +139,7 @@ function makeTabs(initial: FakeTab[]) {
 
 /** Let the background generation promise chain settle. */
 async function flush(): Promise<void> {
-  for (let i = 0; i < 8; i++) await Promise.resolve()
+  for (let i = 0; i < 12; i++) await Promise.resolve()
 }
 
 beforeEach(() => {
@@ -201,6 +202,67 @@ describe('generateWorkflowUnattended', () => {
       generationOriginUrl: 'https://creator.xiaohongshu.com/new/home',
       saveWarnings: ['[NODE_NO_WAIT] step 2 has no readiness gate'],
     })
+  })
+
+  it('re-asks the missing terminal step once, in the same conversation', async () => {
+    runUnattendedPrompt.mockResolvedValue({ ok: true, answer: '已保存草稿' })
+    composeWorkflowFromDraft.mockResolvedValue({ workflow: savedWorkflow(), saved: true })
+    // Round 39's shape: a draft-goal conversation whose last recorded step is a
+    // click on the body editor, so nothing in the graph writes a draft.
+    // Round 40's shape: an unattended bridge turn whose last recorded step is a
+    // click on the body editor, so nothing in the graph writes a draft. The draft
+    // carries NO goal text of its own — only the caller's prompt says what was asked.
+    hydrateDraft.mockResolvedValue({
+      nodes: [
+        { id: 'n0', data: { blockId: 'new-tab' } },
+        { id: 'n1', data: { blockId: 'event-click', description: '点击正文编辑区' } },
+      ],
+    })
+
+    const out = await generateWorkflowUnattended(
+      { prompt: '去小红书生成推广文章并保存成草稿', scopeWindowId: 42 },
+      'external-gen:9',
+    )
+
+    const calls = runUnattendedPrompt.mock.calls as [string, string, string][]
+    // Once, not repeatedly: a second re-ask of a model that just ignored the first
+    // is a retry, and it costs a full turn.
+    expect(calls).toHaveLength(2)
+    const second = calls[1] as [string, string, string]
+    expect(second[1]).toBe('external-gen:9')
+    expect(second[2]).toBe('workflow')
+    expect(second[0]).toContain('补做回合')
+    expect(second[0]).toContain('绝不点击「发布」')
+    expect(out.terminalStepContinuation).toMatchObject({
+      stepsBefore: 2,
+      stepsAfter: 2,
+      ok: true,
+    })
+  })
+
+  it('does not re-ask when the recorded draft already ends on its draft save', async () => {
+    runUnattendedPrompt.mockResolvedValue({ ok: true, answer: 'done' })
+    composeWorkflowFromDraft.mockResolvedValue({ workflow: savedWorkflow(), saved: true })
+    hydrateDraft.mockResolvedValue({
+      nodes: [
+        { id: 'n0', data: { blockId: 'new-tab' } },
+        {
+          id: 'n1',
+          data: {
+            blockId: 'event-click',
+            description: '点击「暂存离开」，把笔记保存为草稿，不执行正式发布',
+          },
+        },
+      ],
+    })
+
+    const out = await generateWorkflowUnattended(
+      { prompt: '去小红书生成推广文章并保存成草稿' },
+      'external-gen:10',
+    )
+
+    expect(runUnattendedPrompt).toHaveBeenCalledTimes(1)
+    expect(out.terminalStepContinuation).toBeUndefined()
   })
 
   it('reports a cancelled turn without touching the draft', async () => {
@@ -419,6 +481,14 @@ describe('verifySavedWorkflowUnattended', () => {
       level: 'L3',
       certified: false,
       reason: 'L3 failed: every success condition holds from the page the workflow opens.',
+      l3: {
+        goalSummary: 'A draft is saved.',
+        conditions: [
+          { description: 'URL 包含 /publish', satisfied: true },
+          { description: '元素可见「草稿」', satisfied: false, detail: '未找到该元素' },
+        ],
+        allHeld: false,
+      },
     })
 
     const out = await verifySavedWorkflowUnattended({ workflowId: 'wf-1' }, 'external-verify:9')
@@ -427,12 +497,71 @@ describe('verifySavedWorkflowUnattended', () => {
       certified: false,
       level: 'L3',
       reason: expect.stringContaining('holds from the page'),
+      // WHICH row failed, not just which layer: `reason` says L3, `unmet` names
+      // the condition, and only the second one tells a repair what to aim at.
+      unmet: ['元素可见「草稿」 — 未找到该元素'],
     })
     expect(out.workflow?.verified).toBe(true)
     expect(out.ok).toBe(true)
     expect(saveWorkflow.mock.lastCall?.[0]).toMatchObject({
       settings: { certificationStatus: 'unverified' },
     })
+  })
+
+  it('says before the replay that the graph has no step saving the draft it asked for', async () => {
+    // Round 22 replayed 26/26 clean, `verified: true`, and wrote nothing, because
+    // the step the user named was never in the graph. That is knowable the moment
+    // the graph exists, so it is said then — not after twelve minutes of replay
+    // that cannot discover it.
+    const draftGoal = {
+      summary: '生成图文草稿',
+      successConditions: [{ kind: 'urlContains', value: 'xiaohongshu.com' }] as never,
+    }
+    const stored = savedWorkflow({
+      settings: { ...savedWorkflow().settings, goalSpec: draftGoal },
+    })
+    getWorkflow.mockResolvedValue(stored)
+    trialRunner.mockResolvedValue({
+      workflow: stored,
+      record: record({ outcome: 'passed', full: true, coveredSteps: 3, totalSteps: 3 }),
+      result: { runId: 'r11', outcome: 'ok' } as never,
+    })
+    verifyWorkflowGoal.mockResolvedValue({
+      level: 'L3',
+      certified: true,
+      reason: 'L3 passed: the workflow achieved its goal.',
+      l3: { goalSummary: '生成图文草稿', conditions: [{ description: 'URL 命中', satisfied: true }], allHeld: true },
+    })
+
+    expect((await verifySavedWorkflowUnattended({ workflowId: 'wf-1' }, 'external-verify:11')).workflow?.terminalStepMissing).toBe(
+      true,
+    )
+
+    // The same goal on a graph that DOES contain its terminal action says nothing.
+    const withSave = savedWorkflow({
+      settings: { ...savedWorkflow().settings, goalSpec: draftGoal },
+      drawflow: {
+        nodes: [
+          {
+            id: 'n1',
+            data: {
+              blockId: 'event-click',
+              __reliability: { intent: '把笔记保存为草稿，不发布', idempotency: 'unsafe' },
+            },
+          },
+        ] as never,
+        edges: [] as never,
+      },
+    })
+    getWorkflow.mockResolvedValue(withSave)
+    trialRunner.mockResolvedValue({
+      workflow: withSave,
+      record: record({ outcome: 'passed', full: true, coveredSteps: 1, totalSteps: 1 }),
+      result: { runId: 'r12', outcome: 'ok' } as never,
+    })
+
+    const ok = await verifySavedWorkflowUnattended({ workflowId: 'wf-1' }, 'external-verify:12')
+    expect(ok.workflow?.terminalStepMissing).toBeUndefined()
   })
 
   it('leaves the goal unjudged when the replay did not run the whole graph', async () => {

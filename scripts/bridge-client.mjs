@@ -176,12 +176,43 @@ export async function waitForBuild(
 }
 
 /**
+ * Ask the bridge whether the plugin is still there, and name the cause of a
+ * run that stopped answering.
+ *
+ * "no verdict" and "the extension no longer knows this run" have three very
+ * different causes, and telling them apart decides whether a human has to
+ * restart a browser: a run still going, a service worker that DIED mid-run
+ * (this project has done that by outgrowing a storage key), and a worker that
+ * restarted and lost its in-memory run map. Zero-cost to ask — the adapter
+ * answers `tools.list` itself — and the answer is the difference between a
+ * reattach and a restart.
+ */
+export async function explainSilence(client, conversationId = '') {
+  let probe
+  try {
+    probe = await client.request({ type: 'tools.list' }, 10_000)
+  } catch (error) {
+    return `the adapter is unreachable (${error instanceof Error ? error.message : String(error)}) — the bridge process, not the extension, is the broken half`
+  }
+  if (probe?.ok !== true)
+    return (
+      'the extension service worker is GONE — it died during the run, so nothing is reattachable. ' +
+      'A worker that dies mid-run in this project has historically been outgrown by a storage key ' +
+      '(see the [fs-outbox] warn in chrome://extensions → Inspect views). Quit and restart the browser: ' +
+      'an unpacked extension is re-read from disk, so the restart installs the current build too.' +
+      (String(probe?.error ?? '').includes('未连接') ? '' : ` It refused with: ${String(probe?.error ?? 'unknown')}`)
+    )
+  return `the worker answers, but does not know run ${conversationId || '(none)'} — it restarted during the run (build ${probe.data?.build || 'unreported'}); the work it was doing is gone from memory, so re-generate rather than reattach`
+}
+
+/**
  * Drive one start/poll pair over the bridge.
  *
  * `generate_workflow`, `verify_workflow` and `repair_workflow` all outlive a
  * single request, so each is a tool that STARTS a run (returning a
  * `conversationId`) and is called again with that id to READ the run. Every real
- * generation or replay ends up here.
+ * generation or replay ends up here. A run that stops answering is diagnosed by
+ * {@link explainSilence} rather than reported as a bare timeout.
  */
 export async function pollRun(
   client,
@@ -198,15 +229,29 @@ export async function pollRun(
   let reported = -1
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, intervalMs))
-    const status = unwrapReply(
-      await client.request({
-        type: 'tool',
-        tool,
-        args: { conversationId: started.conversationId },
-      }),
-    )
+    let status
+    try {
+      status = unwrapReply(
+        await client.request({
+          type: 'tool',
+          tool,
+          args: { conversationId: started.conversationId },
+        }),
+      )
+    } catch (error) {
+      // The bridge itself refused the poll — the run has no one left to report to.
+      throw new Error(
+        `${tool} run ${started.conversationId} went silent: ${await explainSilence(
+          client,
+          started.conversationId,
+        )}`,
+        { cause: error },
+      )
+    }
     if (status?.status === 'unknown')
-      throw new Error(`the extension no longer knows ${started.conversationId}`)
+      throw new Error(
+        `the extension no longer knows ${started.conversationId}: ${await explainSilence(client, started.conversationId)}`,
+      )
     if (status?.status === 'running') {
       if (status.nodes !== reported) {
         reported = status.nodes
@@ -220,7 +265,25 @@ export async function pollRun(
       elapsedMs: Date.now() - (deadline - timeoutMs),
     }
   }
+  // One last poll before blaming the timeout: a run that still reports as going
+  // is a different problem from a run whose reporter has vanished.
+  let final
+  try {
+    final = unwrapReply(
+      await client.request({
+        type: 'tool',
+        tool,
+        args: { conversationId: started.conversationId },
+      }),
+    )
+  } catch {
+    final = null
+  }
+  if (final?.status === 'running')
+    throw new Error(
+      `no verdict within ${Math.round(timeoutMs / 60_000)}min; ${tool} run ${started.conversationId} is still going (${final.nodes} node(s) at ${Math.round((final.elapsedMs ?? 0) / 1000)}s) — reattach with it`,
+    )
   throw new Error(
-    `no verdict within ${Math.round(timeoutMs / 60_000)}min; the run is still going — reattach with conversationId ${started.conversationId}`,
+    `no verdict within ${Math.round(timeoutMs / 60_000)}min; ${await explainSilence(client, started.conversationId)}`,
   )
 }
