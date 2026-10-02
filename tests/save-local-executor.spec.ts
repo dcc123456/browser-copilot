@@ -252,8 +252,6 @@ function queryPermissionOf(handle: unknown): ReturnType<typeof vi.fn> {
   return (handle as { queryPermission: ReturnType<typeof vi.fn> }).queryPermission
 }
 
-import { getUnattendedDownloadDir } from '../src/lib/download-dir'
-
 describe('an unattended replay with nobody to answer the picker', () => {
   it('writes into the extension\'s own directory rather than failing the graph', async () => {
     // Round 71 stopped at 16/44 on «无法打开保存对话框»: a bridge/harness/scheduled

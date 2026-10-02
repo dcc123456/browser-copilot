@@ -46,6 +46,8 @@ import {
   UploadFileError,
   normalizeWorkflowFiles,
   type WorkflowFileArtifact,
+  isFileContentLiteral,
+  variableNameOf,
 } from '../../lib/workflow/file-artifact'
 import { requestUserFiles } from '../../lib/workflow/user-file-picker'
 import {
@@ -2393,13 +2395,28 @@ const uploadFileExec: BlockExecutor = async (data, ctx) => {
       multiple: data['multiple'] === true,
     })
   } else {
-    const fileVariable = String(data['fileVariable'] ?? '').trim()
+    const fileVariable = variableNameOf(String(data['fileVariable'] ?? ''))
     let raw: unknown
     if (fileVariable) {
+      if (isFileContentLiteral(fileVariable)) {
+        // Round 71 burned 21 operator calls and its whole 100-round budget here:
+        // the parameter was described as an "Artifact/data-URL variable", so the
+        // model pasted the generated image's base64 in as the value and got the
+        // same «variable is not set» every time — a message with no remedy in it.
+        // Saying WHAT TO DO INSTEAD is what lets the turn converge on a graph
+        // whose images are produced by its own script node.
+        throw new UploadFileError(
+          'UPLOAD_FILE_VARIABLE_NOT_FOUND',
+          'upload-file: fileVariable takes a variable NAME only, never the file ' +
+            "content. Have an earlier node (javascript-code's returned value, or " +
+            'set-variable) hold the image, then name that variable here.',
+          { selector },
+        )
+      }
       if (!(fileVariable in ctx.variables)) {
         throw new UploadFileError(
           'UPLOAD_FILE_VARIABLE_NOT_FOUND',
-          `upload-file: variable "${fileVariable}" is not set.`,
+          `upload-file: variable "${fileVariable}" is not set. It must be produced by an earlier node in this graph.`,
           { selector },
         )
       }

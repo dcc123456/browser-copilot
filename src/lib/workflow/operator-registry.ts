@@ -29,6 +29,7 @@ import {
   JAVASCRIPT_BLOCK_ID,
 } from './operator-class'
 import type { WorkflowNodeGoalContract } from './node-goal-contract'
+import { isFileContentLiteral, variableNameOf } from './file-artifact'
 
 /** How visible an operator is during generation. */
 export type AiExposure = 'core' | 'on-demand' | 'fallback' | 'hidden'
@@ -155,20 +156,23 @@ const OVERRIDES: Record<string, OperatorOverride> = {
         typeof args['selector'] === 'string' ? args['selector'].trim() : ''
       if (!selector) return undefined
       const mode = args['sourceMode'] === 'workflow-file' ? 'workflow-file' : 'user-select'
-      const fileVariable =
-        typeof args['fileVariable'] === 'string' ? args['fileVariable'].trim() : ''
+      const fileVariable = variableNameOf(
+        typeof args['fileVariable'] === 'string' ? args['fileVariable'] : '',
+      )
+      // A content literal pasted in place of a name is not a variable, so it
+      // cannot be a precondition either — and it must never reach the goal
+      // string, which would carry hundreds of KB of base64 into every prompt.
+      const namesVariable = mode === 'workflow-file' && fileVariable !== '' && !isFileContentLiteral(fileVariable)
       const target = { stableAttributes: { 'data-css': selector } }
       const successCriteria = [
         { kind: 'elementExists' as const, target },
-        ...(mode === 'workflow-file' && fileVariable
-          ? [{ kind: 'variableExists' as const, name: fileVariable }]
-          : []),
+        ...(namesVariable ? [{ kind: 'variableExists' as const, name: fileVariable }] : []),
       ]
       return {
         version: 1 as const,
         goal:
           mode === 'workflow-file'
-            ? `Put file(s) from variable "${fileVariable || '?'}" into the upload control (${selector})`
+            ? `Put file(s) from variable "${namesVariable ? fileVariable : '?'}" into the upload control (${selector})`
             : `Put the user-selected file(s) into the upload control (${selector})`,
         successCriteria,
         failureMeaning: [
@@ -178,9 +182,7 @@ const OVERRIDES: Record<string, OperatorOverride> = {
         ],
         evidence: [
           { kind: 'element', ref: selector, note: 'upload target' },
-          ...(mode === 'workflow-file' && fileVariable
-            ? [{ kind: 'variable' as const, ref: fileVariable, note: 'file source' }]
-            : []),
+          ...(namesVariable ? [{ kind: 'variable' as const, ref: fileVariable, note: 'file source' }] : []),
         ],
         repairHints: [
           { target: 'locator', action: 'Re-locate the real input[type=file], including hidden inputs.' },

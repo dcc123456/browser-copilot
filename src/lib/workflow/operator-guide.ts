@@ -120,7 +120,7 @@ get-text/read-page 开 saveData 时 dataColumn 必填。trigger-event 用 event�
 
 ## upload-file
 
-\`user-select\` 选择后注入；\`workflow-file\` 填 \`fileVariable\`（URL/Artifact）。
+\`user-select\` 选择后注入；\`workflow-file\` 填 \`fileVariable\`（变量名，非内容）。
 \`selector\` 指向控件/拖拽区，禁fill。
 ## 工具分发：算子按分类发送
 
