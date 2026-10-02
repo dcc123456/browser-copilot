@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { verifyWorkflowGoal } from '../src/background/workflow-engine/goal-verification'
-import type { ConditionPageProbe } from '../src/background/workflow-engine/condition-runtime'
+import type { ConditionBaseline, ConditionPageProbe } from '../src/background/workflow-engine/condition-runtime'
+import { conditionLocatorKey } from '../src/lib/workflow/conditions'
 import type { ExecuteWorkflowResult } from '../src/background/workflow-engine/run-workflow'
 import type { Workflow } from '../src/lib/workflow/types'
 import { withNodeGoalContract } from '../src/lib/workflow/node-goal-contract'
@@ -199,5 +200,54 @@ describe('goal verification engine', () => {
     expect(report.l2.nodes[0]?.unevaluated).toHaveLength(1)
     expect(report.l2.unevaluated).toHaveLength(1)
     expect(report.certified).toBe(true)
+  })
+})
+
+describe('goal verification against the pre-run baseline the run carries', () => {
+  const draftBox = { text: '草稿箱' }
+  const runWithBaseline = (baseline: ConditionBaseline): ExecuteWorkflowResult => ({
+    ...okRun,
+    completedNodeIds: ['n1'],
+    goalBaseline: baseline,
+  })
+
+  it('certifies a goal the run made TRUE against the page it started from', async () => {
+    // The list had no rows before step 1 and has one now — a claim the standing
+    // furniture cannot support, and the reason the engine keeps a snapshot of the
+    // page from before the first step.
+    const workflow = workflowWith({})
+    workflow.settings!.goalSpec = {
+      summary: 'A new draft row appears in the list.',
+      successConditions: [{ kind: 'countIncreased', target: { selector: '.note-item' } }],
+    }
+    const baseline: ConditionBaseline = {
+      counts: { [conditionLocatorKey({ selector: '.note-item' })]: 0 },
+      exists: {},
+    }
+    const report = await verifyWorkflowGoal(workflow, runWithBaseline(baseline), probe)
+    expect(report.l3.unevaluated).toBeUndefined()
+    expect(report.l3.conditions[0]?.satisfied).toBe(true)
+    expect(report.certified).toBe(true)
+  })
+
+  it('refuses a presence row the page already satisfied before the run', async () => {
+    // Round 74 certified a goal whose only holding row was satisfied by the page
+    // standing furniture (小红书 shows 草稿箱(100) whether or not this run saved
+    // anything). Given the page from BEFORE the run, the row that claims the box
+    // APPEARED reads false, and the furniture row left alone no longer carries
+    // the goal.
+    const workflow = workflowWith({})
+    workflow.settings!.goalSpec = {
+      summary: 'A draft is saved.',
+      successConditions: [
+        { kind: 'elementVisible', target: draftBox },
+        { kind: 'elementAppeared', target: draftBox },
+      ],
+    }
+    const baseline: ConditionBaseline = { counts: {}, exists: { [conditionLocatorKey(draftBox)]: true } }
+    const report = await verifyWorkflowGoal(workflow, runWithBaseline(baseline), probe)
+    expect(report.l3.conditions.map((c) => c.satisfied)).toEqual([true, false])
+    expect(report.l3.allHeld).toBe(false)
+    expect(report.certified).toBe(false)
   })
 })

@@ -18,6 +18,7 @@ import {
   idempotencyOf,
   isDismissStep,
   isGeneratedStrict,
+  goalSpecOf,
   nodeReliabilityOf,
   STRICT_MIN_MARGIN,
   STRICT_MIN_SCORE,
@@ -269,6 +270,12 @@ export interface WorkflowRunResult {
    * 'ok' means "the prefix it asked for ran", not "the workflow finished".
    */
   stoppedBefore?: string
+  /**
+   * The page as it stood BEFORE the first step, for the goal's change-conditions.
+   * Captured at the only moment it exists so the certification layer can read
+   * 「the draft list grew」 instead of skipping the row.
+   */
+  goalBaseline?: ConditionBaseline
 }
 
 /** Guards against infinite/long loops in mis-wired graphs. */
@@ -534,6 +541,17 @@ async function runCore(
     onStep?.(kind, nodeId, text)
   }
   const signalToUse = signal ?? new AbortController().signal
+
+  // A goal row that describes a CHANGE — the draft list grew, the dialog closed —
+  // is readable only against the page as it was BEFORE the run, and after the run
+  // that moment is gone. The certification layer used to skip such rows outright,
+  // which left the standing page furniture (小红书 shows 「草稿箱(100)」 whether or not
+  // this run saved anything) as the only row that could ever certify a draft goal.
+  const goalConditions = goalSpecOf(workflow)?.successConditions ?? []
+  const goalBaseline =
+    captureConditionBaseline && goalConditions.some(conditionRequiresBaseline)
+      ? await captureConditionBaseline(goalConditions)
+      : undefined
 
   const completedNodeIds: string[] = []
   /**
@@ -1337,5 +1355,6 @@ async function runCore(
     degradations,
     conditionWarnings,
     ...(stoppedBefore ? { stoppedBefore } : {}),
+    ...(goalBaseline ? { goalBaseline } : {}),
   }
 }

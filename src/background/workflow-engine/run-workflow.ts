@@ -49,6 +49,7 @@ import {
   captureConditionBaseline,
   createDriverConditionProbe,
   evaluateConditionWithProbe,
+  type ConditionBaseline,
 } from './condition-runtime'
 import { DEFAULT_GOAL_VERIFY_SETTLE_MS, verifyGoalSpec } from './goal-verifier'
 import { workflowFingerprintOf } from '../../lib/workflow/checkpoints'
@@ -238,6 +239,12 @@ export interface ExecuteWorkflowResult {
    * cutoff step never started.
    */
   stoppedBefore?: string
+  /**
+   * The page as it stood before the first step, for the goal's change-conditions
+   * (`elementAppeared` / `countIncreased` / ...). Only the run itself can hand
+   * this over — the moment is gone by verification time.
+   */
+  goalBaseline?: ConditionBaseline
 }
 
 /**
@@ -902,6 +909,7 @@ export async function executeWorkflow(
       ...(result.conditionWarnings?.length ? { conditionWarnings: result.conditionWarnings } : {}),
       completedNodeIds: result.completedNodeIds,
       ...(result.stoppedBefore ? { stoppedBefore: result.stoppedBefore } : {}),
+      ...(result.goalBaseline ? { goalBaseline: result.goalBaseline } : {}),
       ...(resumedFrom !== undefined ? { resumedFrom } : {}),
     }
   } catch (e) {

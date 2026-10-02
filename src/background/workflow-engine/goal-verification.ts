@@ -154,6 +154,7 @@ export async function verifyWorkflowGoal(
   const l2Evaluated = nodeReports.some((report) => report.criteria.length > 0 || report.preconditions.length > 0)
   const l2AllHeld = nodeReports.every((report) => report.criteria.every((c) => c.satisfied) && report.preconditions.every((c) => c.satisfied))
   const goalSpec = goalSpecOf(workflow)
+  const goalBaseline = run.goalBaseline
   const l3Conditions: ConditionEvidence[] = []
   // A URL row says where the run IS, not what it DID, and a graph that opens the
   // publish page satisfies `/publish` before its first step. S0 already refuses
@@ -174,7 +175,11 @@ export async function verifyWorkflowGoal(
       : `${detail ?? ''}（本次运行的变量：${variableNames.slice(0, 12).join(', ')}）` || undefined
   if (goalSpec) {
     const readRow = async (condition: WorkflowCondition): Promise<ConditionEvidence> => {
-      const outcome = await evaluateCondition(condition, { variables, probe })
+      const outcome = await evaluateCondition(condition, {
+        variables,
+        probe,
+        ...(goalBaseline ? { baseline: goalBaseline } : {}),
+      })
       const detail =
         !outcome.satisfied && (condition.kind === 'variableExists' || condition.kind === 'variableEquals')
           ? withBag(outcome.detail)
@@ -183,7 +188,12 @@ export async function verifyWorkflowGoal(
     }
     const rows: { condition: WorkflowCondition; evidence: ConditionEvidence }[] = []
     for (const condition of goalSpec.successConditions) {
-      if (!reObservableAfterTheRun(condition)) {
+      // A change row needs the page as it stood BEFORE the run, and only the run
+      // still has it (`goalBaseline`). Re-observing it here would compare the
+      // page against itself and report "it changed" for a page that never moved,
+      // which is the vacuous pass this layer exists to refuse — so with no
+      // snapshot the row stays unevaluated, exactly as before.
+      if (!reObservableAfterTheRun(condition) && !goalBaseline) {
         l3Unevaluated.push(describeCondition(condition))
         continue
       }
