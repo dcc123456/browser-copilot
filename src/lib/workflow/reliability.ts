@@ -341,6 +341,26 @@ export const PAGE_NAME_ESCAPE =
   /(发布|发表|提交|发送)[\s,，、]?(?:页面?|页|平台|中心|编辑器|区|列表|管理)/g
 
 /**
+ * Closing an overlay is not the act its name reminds of.
+ *
+ * Round 73's trial stopped at step 7/29 on 「关闭登录弹窗」 — a click that shuts a
+ * login popup — because 登录/login is an unsafe keyword and the popup's own name
+ * was the only prose the step had. The escape needs the OVERLAY noun, not just the
+ * verb: 「关闭订单」 is a real state change and must keep refusing.
+ */
+const DISMISS_OVERLAY_ESCAPE =
+  /(?:关闭|关掉|收起|取消|忽略|跳过|dismiss|close|cancel|hide)[^，,。.;；\n]{0,14}?(?:弹窗|弹层|对话框|对话窗|浮层|浮窗|遮罩|提示框|popup|popover|modal|dialog|toast|overlay)/gi
+
+/**
+ * A selector is a machine handle, not a claim about the action.
+ *
+ * The node label the generator stamps embeds the resolved selector — 「Click the
+ * target element (.close-circle, .login-close, …)」 — and `.login-close` matched
+ * the login keyword for the same reason the block ids had to be scrubbed.
+ */
+const SELECTOR_PARENTHETICAL = /\((?:[^()]*[.#[\]>][^()]*)\)/g
+
+/**
  * The prose the unsafe-intent keywords are scanned against.
  *
  * The page-name escape removes a phrase that names the PLACE a step stands on —
@@ -357,7 +377,10 @@ export const PAGE_NAME_ESCAPE =
  */
 function intentForKeywordScan(intent: string): string {
   const withoutBlockNames = BLOCK_NAME_PATTERN ? intent.replace(BLOCK_NAME_PATTERN, ' ') : intent
-  return withoutBlockNames.replace(PAGE_NAME_ESCAPE, '页')
+  return withoutBlockNames
+    .replace(SELECTOR_PARENTHETICAL, ' ')
+    .replace(DISMISS_OVERLAY_ESCAPE, '关闭浮层')
+    .replace(PAGE_NAME_ESCAPE, '页')
 }
 
 /**

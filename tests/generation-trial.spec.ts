@@ -182,6 +182,44 @@ describe('trial cutoff', () => {
     expect(trialCutoffNodeId(wf)).toBeUndefined()
   })
 
+  // Round 73 stopped its trial at step 7/29 on a click whose only prose was
+  // 「关闭登录弹窗」 / 「(.close-circle, .login-close, …)」: 登录 and login are unsafe
+  // keywords, so shutting a popup away read as signing in.
+  it('a popup dismissal is not a cutoff', () => {
+    const wf = chain([
+      readStep(),
+      node('event-click', { selector: '.close-circle', description: '关闭登录弹窗' }),
+      node('event-click', { selector: '#draft' }),
+    ])
+    expect(trialCutoffNodeId(wf)).toBeUndefined()
+  })
+
+  it('a selector in the label is not prose about the action', () => {
+    const wf = chain([
+      readStep(),
+      node('event-click', {
+        selector: '.close-circle, .login-close',
+        __reliability: {
+          intent: "Click the target element (.close-circle, .login-close, [class*='close'])",
+        },
+      }),
+    ])
+    expect(trialCutoffNodeId(wf)).toBeUndefined()
+  })
+
+  it('does not launder the commit sharing the sentence', () => {
+    const wf = chain([
+      readStep(),
+      node('event-click', { selector: '#p', description: '关闭弹窗后点击发布' }),
+    ])
+    expect(trialCutoffNodeId(wf)).toBeDefined()
+  })
+
+  it('still refuses the click that names 发布', () => {
+    const wf = chain([readStep(), node('event-click', { selector: '#p', description: '点击发布按钮' })])
+    expect(trialCutoffNodeId(wf)).toBeDefined()
+  })
+
   it('has nothing to prove when the graph starts by committing', () => {
     const submit = unsafeStep()
     expect(trialHasNothingToProve(chain([submit, readStep()]))).toBe(true)
