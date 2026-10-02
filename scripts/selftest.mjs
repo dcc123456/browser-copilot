@@ -72,7 +72,7 @@ import {
   waitForBuild,
   waitForPlugin,
 } from './bridge-client.mjs'
-import { sourceFingerprintSync, writeLoadedStamp } from './build-stamp.mjs'
+import { readBuiltStamp, sourceFingerprintSync, writeBuiltStamp, writeLoadedStamp } from './build-stamp.mjs'
 
 const USAGE =
   'usage: node scripts/selftest.mjs [--goal <text>] [--workflow <id>] [--from build|reload|generate|verify]' +
@@ -189,12 +189,14 @@ async function main() {
   }
 
   try {
+    let builtThisRun = false
     // --- build ------------------------------------------------------------------
     if (started <= 0 && options.build) {
       log('build: pnpm build')
       const code = await runBuild()
       report.phases.build = { exitCode: code }
       if (code !== 0) die(3, `build failed with exit code ${code}`)
+      builtThisRun = true
     } else {
       report.phases.build = { skipped: true }
     }
@@ -206,6 +208,9 @@ async function main() {
     // reload is only demanded when that hash is not this checkout's.
     const stamp = sourceFingerprintSync()
     report.buildStamp = stamp
+    // `dist/` now compiles from these sources, so a later round that skips the
+    // build can still prove a reload would reach this stamp.
+    if (builtThisRun) await writeBuiltStamp(stamp)
     // Not gated on `--from`: a replay measured against a worker still running an
     // older build is not evidence about THIS code, and rounds 31–32 were exactly
     // that — `--from verify` skipped the gate, so three shipped fixes were
@@ -224,6 +229,7 @@ async function main() {
         )
       if (live.build === stamp) {
         await writeLoadedStamp(stamp)
+        await writeBuiltStamp(stamp)
         report.phases.reload = {
           skipped: 'already-current',
           stamp,
@@ -245,6 +251,18 @@ async function main() {
         report.phases.reload = { acknowledged: true, stamp, advertisedTools: live.toolNames.length }
         log(`  recorded build ${stamp} as the one the browser is running`)
       } else {
+        // A reload loads `dist/`, not the sources on disk. If this round skipped
+        // the build, no reload can ever make the browser report `stamp` — asking
+        // for one on a loop would spend the whole wait reloading the same old
+        // code, on the user's browser, over and over.
+        const built = await readBuiltStamp()
+        if (built !== stamp)
+          die(
+            3,
+            `src is ${stamp}, but the build in dist/ compiled ${built || '(unrecorded)'} — ` +
+              'a reload only picks up dist/, so this round cannot reach the new code. ' +
+              'Drop --skip-build, or use --from build, so the build phase runs first.',
+          )
         log(
           `reload: browser runs build ${live.build || '(a build too old to report one)'}, this is ${stamp}`,
         )

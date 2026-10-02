@@ -103,6 +103,31 @@ export async function writeLoadedStamp(fingerprint, cwd = process.cwd()) {
   return true
 }
 
+/**
+ * The source stamp the LAST SUCCESSFUL build baked into `dist/`.
+ *
+ * A reload picks up `dist/`, not the sources on disk, so a round that skipped the
+ * build cannot pick up code newer than that record — reloading would only put the
+ * SAME old build back, and the reload wait would spend its whole budget thrashing
+ * the browser. This file is how the harness knows.
+ */
+export function builtStampFile(cwd = process.cwd()) {
+  return path.join(cwd, 'tmp', 'selftest-built-build.stamp')
+}
+
+export async function readBuiltStamp(cwd = process.cwd()) {
+  return readFile(builtStampFile(cwd), 'utf8')
+    .then((text) => text.trim())
+    .catch(() => '')
+}
+
+export async function writeBuiltStamp(fingerprint, cwd = process.cwd()) {
+  if (!fingerprint) return false
+  await mkdir(path.dirname(builtStampFile(cwd)), { recursive: true })
+  await writeFile(builtStampFile(cwd), `${fingerprint}\n`, 'utf8')
+  return true
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === new URL(import.meta.url).pathname) {
   const stamp = sourceFingerprintSync()
   if (!stamp) {
