@@ -23,6 +23,7 @@ import {
   STRICT_MIN_MARGIN,
   STRICT_MIN_SCORE,
 } from '../../lib/workflow/reliability'
+import { nodeGoalContractOf } from '../../lib/workflow/node-goal-contract'
 import {
   conditionRequiresBaseline,
   describeCondition,
@@ -265,6 +266,12 @@ export interface WorkflowRunResult {
    */
   conditionWarnings?: string[]
   /**
+   * Conditions observed while their own step was still the page in front of the
+   * run, keyed by node. The certification layer reads a step's promise from here
+   * instead of re-asking a page the run has already navigated away from.
+   */
+  nodeConditions?: NodeConditionEvidence[]
+  /**
    * Set when the run stopped at a {@link WorkflowRunOptions.stopBefore} cutoff
    * instead of reaching the end of the graph — the caller needs to know that
    * 'ok' means "the prefix it asked for ran", not "the workflow finished".
@@ -276,6 +283,13 @@ export interface WorkflowRunResult {
    * 「the draft list grew」 instead of skipping the row.
    */
   goalBaseline?: ConditionBaseline
+}
+
+/** One condition the run observed at the step that declared it. */
+export interface NodeConditionEvidence {
+  nodeId: string
+  description: string
+  satisfied: boolean
 }
 
 /** Guards against infinite/long loops in mis-wired graphs. */
@@ -562,6 +576,17 @@ async function runCore(
   const degradations: NodeDegradation[] = []
   /** Soft conditions that did not hold — see {@link WorkflowRunResult.conditionWarnings}. */
   const conditionWarnings: string[] = []
+  /**
+   * Every condition the run actually got an answer to, observed AT the step that
+   * promised it — see {@link WorkflowRunResult.nodeConditions}.
+   */
+  const nodeConditions: NodeConditionEvidence[] = []
+  const observed = (nodeId: string, description: string): boolean =>
+    nodeConditions.some((e) => e.nodeId === nodeId && e.description === description)
+  const recordCondition = (nodeId: string, description: string, satisfied: boolean): void => {
+    if (observed(nodeId, description)) return
+    nodeConditions.push({ nodeId, description, satisfied })
+  }
   /** Set when a `stopBefore` cutoff ended the run (see {@link WorkflowRunResult}). */
   let stoppedBefore: string | undefined
   let outcome: WorkflowRunResult['outcome'] = 'ok'
@@ -645,15 +670,39 @@ async function runCore(
   ): Promise<void> => {
     if (!evaluateCondition) return
     for (const condition of conditions) {
-      if (await evaluateCondition(condition, baseline)) continue
-      if (isHardCondition(condition)) {
-        throw new Error(
-          `${phase.toUpperCase()}_FAILED: ${describeCondition(condition)}`,
-        )
-      }
       const description = describeCondition(condition)
+      const satisfied = await evaluateCondition(condition, baseline)
+      recordCondition(nodeId, description, satisfied)
+      if (satisfied) continue
+      if (isHardCondition(condition)) {
+        throw new Error(`${phase.toUpperCase()}_FAILED: ${description}`)
+      }
       conditionWarnings.push(`${nodeId}: ${description}`)
       emit('status', nodeId, `条件未确认（${description}），本步已执行但运行未获验证`)
+    }
+  }
+
+  /**
+   * Observe the step's OWN goal contract at the moment it is still true or false
+   * for the right reason.
+   *
+   * A contract row names an element on the page THAT STEP stood on; by the end of
+   * the run the page has moved on (saving a draft navigates away from the title
+   * input), and a certification layer re-reading it then reports a step that
+   * worked as unverified — round 76 replayed 13/13 and was refused on exactly
+   * that. Recording the observation here costs the verifier no independence it
+   * could otherwise have used: an end-of-run re-read of a gone element is not
+   * evidence, it is an artifact.
+   */
+  const observeNodeContract = async (node: WorkflowNode, baseline?: ConditionBaseline): Promise<void> => {
+    if (!evaluateCondition) return
+    const contract = nodeGoalContractOf(node.data ?? {})
+    if (!contract) return
+    for (const condition of contract.successCriteria) {
+      const description = describeCondition(condition)
+      if (observed(node.id, description)) continue
+      const satisfied = await evaluateCondition(condition, baseline).catch(() => false)
+      recordCondition(node.id, description, satisfied)
     }
   }
 
@@ -975,6 +1024,7 @@ async function runCore(
             conditionBaseline,
           )
         }
+        await observeNodeContract(current, conditionBaseline)
         if (unsafe) emitCheckpoint(nodeId, 'ok', 'sideEffectObserved')
         // The step ran on a weaker locator than the node was authored with.
         // Collected for the caller's self-heal write-back; the run log says it
@@ -1354,6 +1404,7 @@ async function runCore(
     steps: stepLines.slice(-40),
     degradations,
     conditionWarnings,
+    ...(nodeConditions.length ? { nodeConditions } : {}),
     ...(stoppedBefore ? { stoppedBefore } : {}),
     ...(goalBaseline ? { goalBaseline } : {}),
   }

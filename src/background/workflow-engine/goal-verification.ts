@@ -110,6 +110,14 @@ export async function verifyWorkflowGoal(
   // engine's own list; without it there is no per-node truth to report, so the
   // run outcome is all we honestly have.
   const completed = run.completedNodeIds ? new Set(run.completedNodeIds) : undefined
+  // Rows the run already observed at their own step, keyed by node + row text.
+  // Anything the engine never answered still gets the end-of-run read below.
+  const liveBallot = new Map<string, boolean>()
+  for (const entry of run.nodeConditions ?? []) {
+    liveBallot.set(`${entry.nodeId}\u0000${entry.description}`, entry.satisfied)
+  }
+  const liveFor = (nodeId: string, condition: WorkflowCondition): boolean | undefined =>
+    liveBallot.get(`${nodeId}\u0000${describeCondition(condition)}`)
   const l1: ConditionEvidence[] = nodes.map((node) => {
     const executed = completed ? completed.has(node.id) : run.outcome === 'ok'
     return {
@@ -130,6 +138,16 @@ export async function verifyWorkflowGoal(
     const unevaluated: string[] = []
     if (contract) {
       for (const condition of contract.successCriteria) {
+        // A promise is judged where it was made. The run recorded this row while
+        // its own step was the page in front of it; re-asking at the end reads
+        // false for every step the run navigated away from — round 76 replayed
+        // 13/13 and was refused by the title input of a form the draft save had
+        // already left behind.
+        const seen = liveFor(node.id, condition)
+        if (seen !== undefined) {
+          criteria.push({ description: describeCondition(condition), satisfied: seen })
+          continue
+        }
         if (!reObservableAfterTheRun(condition)) {
           unevaluated.push(describeCondition(condition))
           continue
@@ -138,6 +156,11 @@ export async function verifyWorkflowGoal(
         criteria.push({ description: outcome.description, satisfied: outcome.satisfied, ...(outcome.detail ? { detail: outcome.detail } : {}) })
       }
       for (const condition of contract.preconditions ?? []) {
+        const seen = liveFor(node.id, condition)
+        if (seen !== undefined) {
+          preconditions.push({ description: describeCondition(condition), satisfied: seen })
+          continue
+        }
         if (!reObservableAfterTheRun(condition)) {
           unevaluated.push(describeCondition(condition))
           continue

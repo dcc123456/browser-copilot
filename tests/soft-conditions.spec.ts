@@ -18,7 +18,8 @@ import { describe, expect, it } from 'vitest'
 import { runWorkflow } from '../src/background/workflow-engine/engine'
 import type { Workflow, WorkflowNode } from '../src/lib/workflow/types'
 import type { WorkflowCondition } from '../src/lib/workflow/conditions'
-import { conditionLocatorKey, isHardCondition } from '../src/lib/workflow/conditions'
+import { conditionLocatorKey, describeCondition, isHardCondition } from '../src/lib/workflow/conditions'
+import { withNodeGoalContract } from '../src/lib/workflow/node-goal-contract'
 import {
   captureConditionBaseline,
   evaluateCondition,
@@ -431,5 +432,33 @@ describe('condition vocabulary', () => {
     ] as WorkflowCondition[]) {
       expect(isHardCondition(condition)).toBe(false)
     }
+  })
+})
+
+describe('the run records what each step observed on its own page', () => {
+  const titleRow = { kind: 'elementExists', target: { selector: 'input[placeholder*="标题"]' } } as const
+  const nodeData = (): Record<string, unknown> =>
+    withNodeGoalContract({}, {
+      version: 1, goal: 'fill the title', successCriteria: [titleRow],
+    })
+
+  it('writes the step-page answer into the run result', async () => {
+    const result = await runWorkflow(strictWorkflow(nodeData()), {
+      executors: { 'event-click': async () => null },
+      evaluateCondition: async () => true,
+    })
+    expect(result.outcome).toBe('ok')
+    expect(result.nodeConditions).toEqual([
+      { nodeId: 'a', description: describeCondition(titleRow), satisfied: true },
+    ])
+  })
+
+  it('records a miss without failing the step — the badge is the certification layer\'s to withhold', async () => {
+    const result = await runWorkflow(strictWorkflow(nodeData()), {
+      executors: { 'event-click': async () => null },
+      evaluateCondition: async () => false,
+    })
+    expect(result.outcome).toBe('ok')
+    expect(result.nodeConditions?.[0]?.satisfied).toBe(false)
   })
 })

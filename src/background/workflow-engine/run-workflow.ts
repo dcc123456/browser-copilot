@@ -227,6 +227,8 @@ export interface ExecuteWorkflowResult {
    * workflow `unverified` from this — it is never a failure on its own.
    */
   conditionWarnings?: string[]
+  /** Conditions the engine observed at the step that declared them (see `engine.NodeConditionEvidence`). */
+  nodeConditions?: import('./engine').NodeConditionEvidence[]
   /**
    * Nodes that actually ran, in order (the engine's own list). A caller that
    * measures coverage — "did the trial reach the end?" — reads this instead of
@@ -907,6 +909,7 @@ export async function executeWorkflow(
       ...(result.steps ? { steps: result.steps } : {}),
       ...(result.degradations?.length ? { degradations: result.degradations } : {}),
       ...(result.conditionWarnings?.length ? { conditionWarnings: result.conditionWarnings } : {}),
+      ...(result.nodeConditions?.length ? { nodeConditions: result.nodeConditions } : {}),
       completedNodeIds: result.completedNodeIds,
       ...(result.stoppedBefore ? { stoppedBefore: result.stoppedBefore } : {}),
       ...(result.goalBaseline ? { goalBaseline: result.goalBaseline } : {}),

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { verifyWorkflowGoal } from '../src/background/workflow-engine/goal-verification'
 import type { ConditionBaseline, ConditionPageProbe } from '../src/background/workflow-engine/condition-runtime'
-import { conditionLocatorKey } from '../src/lib/workflow/conditions'
+import { conditionLocatorKey, describeCondition } from '../src/lib/workflow/conditions'
 import type { ExecuteWorkflowResult } from '../src/background/workflow-engine/run-workflow'
 import type { Workflow } from '../src/lib/workflow/types'
 import { withNodeGoalContract } from '../src/lib/workflow/node-goal-contract'
@@ -249,5 +249,60 @@ describe('goal verification against the pre-run baseline the run carries', () =>
     expect(report.l3.conditions.map((c) => c.satisfied)).toEqual([true, false])
     expect(report.l3.allHeld).toBe(false)
     expect(report.certified).toBe(false)
+  })
+})
+
+describe('L2 votes with the observation taken at the step', () => {
+  // The page the LAST step left is not the page an earlier step promised.
+  const goneNow: ConditionPageProbe = {
+    exists: async () => false, visible: async () => false, enabled: async () => false,
+    text: async () => '', attribute: async () => '', count: async () => 0,
+    url: async () => 'https://creator.xiaohongshu.com/new/home',
+  }
+  const titleInput = { selector: 'input[placeholder*="标题"]' }
+  const formsWorkflow = (): Workflow => {
+    const workflow = workflowWith(
+      withNodeGoalContract({ blockId: 'forms' }, {
+        version: 1, goal: 'fill the title', successCriteria: [{ kind: 'elementExists', target: titleInput }],
+      }),
+    )
+    workflow.settings!.goalSpec = {
+      summary: 'A variable was produced.',
+      successConditions: [{ kind: 'variableExists', name: 'result' }],
+    }
+    return workflow
+  }
+
+  it('does not fail a step whose element the run has since navigated away from', async () => {
+    // Round 76: 13/13 steps, the draft really saved, and the ballot refused it
+    // because the title input of the publish form is not on the page the save
+    // navigated to. The engine saw that input while the step still stood on it.
+    const run: ExecuteWorkflowResult = {
+      ...okRun,
+      completedNodeIds: ['n1'],
+      nodeConditions: [{ nodeId: 'n1', description: describeCondition({ kind: 'elementExists', target: titleInput }), satisfied: true }],
+    }
+    const report = await verifyWorkflowGoal(formsWorkflow(), run, goneNow)
+    expect(report.l2.nodes[0]?.criteria).toEqual([
+      { description: describeCondition({ kind: 'elementExists', target: titleInput }), satisfied: true },
+    ])
+    expect(report.certified).toBe(true)
+  })
+
+  it('keeps a step that really broke failed, even when the element is back', async () => {
+    const run: ExecuteWorkflowResult = {
+      ...okRun,
+      completedNodeIds: ['n1'],
+      nodeConditions: [{ nodeId: 'n1', description: describeCondition({ kind: 'elementExists', target: titleInput }), satisfied: false }],
+    }
+    const report = await verifyWorkflowGoal(formsWorkflow(), run, probe)
+    expect(report.l2.nodes[0]?.criteria[0]?.satisfied).toBe(false)
+    expect(report.certified).toBe(false)
+    expect(report.reason).toContain('标题')
+  })
+
+  it('re-reads a row the run never observed', async () => {
+    const report = await verifyWorkflowGoal(formsWorkflow(), { ...okRun, completedNodeIds: ['n1'] }, goneNow)
+    expect(report.l2.nodes[0]?.criteria[0]?.satisfied).toBe(false)
   })
 })
