@@ -668,6 +668,48 @@ export function unfiredDraftSaveNotice(draft: {
   return '目标要求保存草稿，但已记录的步骤里还没有一步真正保存它：请把「暂存离开 / 存草稿」那一次点击继续做完并记录为最后一步，否则回放再干净也没有完成任务。 (The goal asks for a draft and no recorded step saves one yet — finish the 「save draft」 click and record it as the graph\'s last step, or a clean replay still achieves nothing.)'
 }
 
+/** What a step must name to be a visit to where the drafts are LISTED. */
+const DRAFT_LIST_PATTERN = /(草稿箱|草稿列表|我的草稿|drafts?\s+(list|box|folder))/i
+
+/**
+ * The draft is saved in the record — but nothing in the record LOOKS at it.
+ *
+ * The other half of the same hole, and the one round 80 died on. A graph whose
+ * last step is 「暂存离开」 does write a draft, and since the certification layer
+ * refuses any success row the untouched page already satisfied, a goal whose only
+ * true row quotes the publish page's own 「保存草稿」 button reads as furniture with
+ * nothing left to overrule it: the visit that would make the draft VISIBLE was
+ * never recorded. The fix is a step, not a looser gate — clicking into 草稿箱 is
+ * idempotent and safe to replay, and the run then ends on a page where the saved
+ * note can actually be counted. A state read, not a rule repeated: it goes quiet
+ * the moment a step after the save names the draft list.
+ */
+export function unvisitedDraftListNotice(draft: {
+  nodes: readonly WorkflowNode[]
+  goalText?: string
+}): string {
+  const head = draft.nodes.find(isTriggerNode)
+  const headGoal = typeof head?.data?.['goalText'] === 'string' ? (head.data['goalText'] as string) : ''
+  const goalText = draft.goalText?.trim() || headGoal
+  if (!goalAsksForDraftSave(goalText)) return ''
+  const saveIndex = draft.nodes.findIndex((node) => isActuationNode(node) && isDraftSaveNode(node))
+  if (saveIndex < 0) return ''
+  if (draft.nodes.slice(saveIndex + 1).some((node) => DRAFT_LIST_PATTERN.test(commitProseOf(node)))) return ''
+  return '草稿已保存，但记录里没有一步去看它：请在保存之后再加最后一步——点开「草稿箱 / 草稿列表」，让回放结束在能数到刚保存那篇的页面上，否则再干净的回放也没有成功条件可以证明草稿落库。 (The draft save is recorded but no later step looks at it — record one final step that opens 草稿箱 / the draft list, so the replay ends on a page where the saved note can be counted; otherwise no success condition can prove the draft landed.)'
+}
+
+/**
+ * The draft-goal hole this record still has, in priority order: first the save
+ * itself, then the visit that could prove it. One string, for the three sites
+ * that hand a notice back to the model while its turn is still open.
+ */
+export function draftGoalGapNotice(draft: {
+  nodes: readonly WorkflowNode[]
+  goalText?: string
+}): string {
+  return unfiredDraftSaveNotice(draft) || unvisitedDraftListNotice(draft)
+}
+
 /**
  * Did this run actually fire the graph's draft save?
  *

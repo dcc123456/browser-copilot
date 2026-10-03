@@ -46,7 +46,7 @@ import { evaluateJsPermission } from '../lib/workflow/capability-gap'
 import { markOperatorFailure, markOperatorRecovery } from '../lib/workflow/generation-coverage'
 import { operatorAuditCall } from '../lib/workflow/operator-history'
 import { resolveNodeGoalContract } from '../lib/workflow/node-goal-instantiation'
-import { unfiredDraftSaveNotice } from '../lib/workflow/trial-run'
+import { draftGoalGapNotice } from '../lib/workflow/trial-run'
 import { withNodeGoalContract } from '../lib/workflow/node-goal-contract'
 
 import {
@@ -687,7 +687,7 @@ function rewriteForRecording(
   if (executed) markOperatorRecovery(conversationId, blockId)
   const note = [
     outcome.note ?? (output ? `next node attaches to ${output}` : undefined),
-    unfiredDraftSaveNotice(draft),
+    draftGoalGapNotice(draft),
   ]
     .filter(Boolean)
     .join(' ')

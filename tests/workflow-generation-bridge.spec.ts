@@ -240,29 +240,51 @@ describe('generateWorkflowUnattended', () => {
     })
   })
 
-  it('does not re-ask when the recorded draft already ends on its draft save', async () => {
+  it('re-asks once for the step that can SEE the draft a saved graph wrote', async () => {
     runUnattendedPrompt.mockResolvedValue({ ok: true, answer: 'done' })
     composeWorkflowFromDraft.mockResolvedValue({ workflow: savedWorkflow(), saved: true })
-    hydrateDraft.mockResolvedValue({
-      nodes: [
-        { id: 'n0', data: { blockId: 'new-tab' } },
-        {
-          id: 'n1',
-          data: {
-            blockId: 'event-click',
-            description: '点击「暂存离开」，把笔记保存为草稿，不执行正式发布',
-          },
+    const draftNodes = [
+      { id: 'n0', data: { blockId: 'new-tab' } },
+      {
+        id: 'n1',
+        data: {
+          blockId: 'event-click',
+          description: '点击「暂存离开」，把笔记保存为草稿，不执行正式发布',
         },
-      ],
-    })
+      },
+    ]
+    hydrateDraft.mockResolvedValue({ nodes: draftNodes })
 
     const out = await generateWorkflowUnattended(
       { prompt: '去小红书生成推广文章并保存成草稿' },
       'external-gen:10',
     )
 
+    // A graph ending on its save really does write a draft, and no success row of
+    // it can be true afterwards unless a later step looks at the draft list. The
+    // cap is one continuation turn (MAX_TERMINAL_STEP_CONTINUATIONS), and the same
+    // prompt keeps the 发布 prohibition.
+    expect(runUnattendedPrompt).toHaveBeenCalledTimes(2)
+    const second = runUnattendedPrompt.mock.calls[1] as [string, string, string]
+    expect(second[0]).toContain('草稿箱')
+    expect(second[0]).toContain('绝不点击「发布」')
+    expect(out.terminalStepContinuation).toMatchObject({ ok: true })
+
+    // And the re-ask is a state read, not a rule repeated: a graph whose last step
+    // already opens the draft list gets no continuation at all.
+    runUnattendedPrompt.mockClear()
+    hydrateDraft.mockResolvedValue({
+      nodes: [
+        ...draftNodes,
+        { id: 'n2', data: { blockId: 'event-click', description: '点击「草稿箱」，查看刚保存的草稿笔记' } },
+      ],
+    })
+    const visited = await generateWorkflowUnattended(
+      { prompt: '去小红书生成推广文章并保存成草稿' },
+      'external-gen:11',
+    )
     expect(runUnattendedPrompt).toHaveBeenCalledTimes(1)
-    expect(out.terminalStepContinuation).toBeUndefined()
+    expect(visited.terminalStepContinuation).toBeUndefined()
   })
 
   it('reports a cancelled turn without touching the draft', async () => {

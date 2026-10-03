@@ -3,9 +3,11 @@ import {
   commitCutoffNodeId,
   draftCommitCutoffNodeId,
   draftSaveExecuted,
+  draftGoalGapNotice,
   isCommitNode,
   isDraftSaveNode,
   unfiredDraftSaveNotice,
+  unvisitedDraftListNotice,
 } from '../src/lib/workflow/trial-run'
 import { intentOf } from '../src/lib/workflow/reliability'
 import type { Workflow, WorkflowNode } from '../src/lib/workflow/types'
@@ -319,6 +321,47 @@ describe('the recording tool tells the model its terminal step is still missing'
       data: { blockId: 'trigger', goalText: '去小红书生成推广文章，保存成草稿' },
     } as unknown as WorkflowNode
     expect(unfiredDraftSaveNotice({ nodes: [head, generated('focus', '点击正文编辑区')] })).toContain('草稿')
+  })
+})
+
+describe('a saved draft still needs a step that looks at it', () => {
+  const goal = '结合这个项目的readme文档，去小红书上生成推广文章，要求使用图文模式，使用脚本生成3张图片，保存成草稿'
+  const save = () => generated('save', '点击「暂存离开」按钮，把笔记保存为草稿，不执行正式发布')
+
+  it('fires once the save is recorded and nothing visits the draft list', () => {
+    // Round 80's graph exactly: 18/18, a real draft, and the only success row the
+    // sealed goal had quoted the publish page's own 「保存草稿」 — furniture. The
+    // certification layer is right to refuse it; what was missing was a step.
+    const notice = unvisitedDraftListNotice({ nodes: [generated('focus', '点击正文编辑区'), save()], goalText: goal })
+    expect(notice).toContain('草稿箱')
+    expect(notice).toContain('最后一步')
+  })
+
+  it('stops when a step AFTER the save opens the draft list', () => {
+    expect(
+      unvisitedDraftListNotice({
+        nodes: [save(), generated('drafts', '点击「草稿箱」，查看刚保存的草稿笔记')],
+        goalText: goal,
+      }),
+    ).toBe('')
+  })
+
+  it('a visit BEFORE the save proves nothing about the draft it has not written yet', () => {
+    const notice = unvisitedDraftListNotice({
+      nodes: [generated('drafts', '点击「草稿箱」查看草稿列表'), generated('focus', '点击正文编辑区'), save()],
+      goalText: goal,
+    })
+    expect(notice).toContain('草稿箱')
+  })
+
+  it('stays silent while the save itself is still missing, and the gap notice names one hole', () => {
+    // The two notices are a queue, not a chorus: a reader gets the next missing
+    // step, never two instructions at once.
+    const noSave = [generated('focus', '点击正文编辑区')]
+    expect(unvisitedDraftListNotice({ nodes: noSave, goalText: goal })).toBe('')
+    expect(draftGoalGapNotice({ nodes: noSave, goalText: goal })).toContain('最后一步')
+    expect(draftGoalGapNotice({ nodes: [save()], goalText: goal })).toContain('草稿箱')
+    expect(draftGoalGapNotice({ nodes: [save(), generated('drafts', '打开草稿列表')], goalText: goal })).toBe('')
   })
 })
 

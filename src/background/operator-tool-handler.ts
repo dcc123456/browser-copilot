@@ -83,7 +83,7 @@ import {
 import { isAiComposedFill } from '../lib/workflow/ai-prefill'
 import type { Workflow, WorkflowNode } from '../lib/workflow/types'
 import type { TrialRunRecord } from '../lib/workflow/trial-run'
-import { trialFailed, unfiredDraftSaveNotice } from '../lib/workflow/trial-run'
+import { trialFailed, draftGoalGapNotice } from '../lib/workflow/trial-run'
 import { recordedPageContext } from '../lib/workflow/page-context'
 import { withTrialRecord } from './workflow-engine/repair/generation-trial'
 import type { TrialRunner } from './workflow-engine/repair/generation-trial'
@@ -435,7 +435,7 @@ export async function runOperatorTool({
   if (nameHint && draft.name.startsWith('workflow-')) draft.name = nameHint
 
   await persistDraft(draft)
-  const notice = unfiredDraftSaveNotice(draft)
+  const notice = draftGoalGapNotice(draft)
   return {
     ok: true,
     nodeId: appended.nodeId,

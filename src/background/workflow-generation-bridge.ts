@@ -31,7 +31,7 @@ import {
   goalAsksForDraftSave,
   trialCertifies,
   trialFailed,
-  unfiredDraftSaveNotice,
+  draftGoalGapNotice,
 } from '../lib/workflow/trial-run'
 import type { PageContextFingerprint } from '../lib/workflow/page-context'
 import { intentOf, reliabilityModeOf } from '../lib/workflow/reliability'
@@ -281,7 +281,7 @@ async function runGenerationTurn(
     // `draft.goalText` when a human chats, a bridge turn does not, and the recorded
     // steps themselves say nothing about what was asked. The caller's own prompt is
     // the request this draft answers, so it is what the notice reads.
-    const notice = unfiredDraftSaveNotice({
+    const notice = draftGoalGapNotice({
       nodes: draft.nodes,
       goalText: draft.goalText?.trim() || req.prompt,
     })
