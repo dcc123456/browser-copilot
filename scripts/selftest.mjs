@@ -628,6 +628,16 @@ async function main() {
           : goalUnmet
             ? [
                 'RAN CLEAN, GOAL NOT CERTIFIED — every step returned without an error, but the goal conditions the workflow carries were not met on the page; read the L3 line above before calling this a success',
+                // A row that quotes the TASK's words instead of the PAGE's is the
+                // one failure a reader can fix in seconds if it can see both at
+                // once — round 80 failed L3 on 「元素存在 "保存草稿"」 while its own
+                // save step had recorded the button as 「暂存离开」, and finding that
+                // out took a storage read, not the report.
+                `  words the steps really recorded: ${((result.workflow?.nodes ?? [])
+                  .slice(-4)
+                  .map((node) => node.words)
+                  .filter(Boolean)
+                  .join(' | ') || '(none)').slice(0, 300)}`,
               ]
             : stoppedShort
               ? [
