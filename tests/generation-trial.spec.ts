@@ -541,6 +541,28 @@ describe('commit cutoff (the run-to-draft policy)', () => {
     expect(isCommitNode(saveDraft)).toBe(true)
   })
 
+  it('a step that names the composer MODE is not a publish act', () => {
+    // Round 81 stopped at step 6 of 41 on this sentence, so the 35 steps after it —
+    // including the draft save the goal asked for — went unproven and the trial
+    // reported `draftSaved: false` for a graph that was never allowed to run. The
+    // step says 发布模式, which is the composer's own name for its tab.
+    const tabSwitch = node('event-click', {
+      selector: 'div:nth-of-type(5) > span',
+      __reliability: { intent: '在发布页顶部切换到「上传图文」发布模式' },
+    })
+    expect(isUnsafeNode(tabSwitch)).toBe(false)
+    // The escape is a place name, not a way through: a step whose own words press
+    // the control still refuses.
+    expect(
+      isUnsafeNode(
+        node('event-click', {
+          selector: 'button.publish',
+          __reliability: { intent: '点击发布按钮，把笔记发布出去' },
+        }),
+      ),
+    ).toBe(true)
+  })
+
   it('says whether the run actually wrote the draft', () => {
     // Round 18's report claimed «RAN THROUGH ITS OWN DRAFT COMMIT» for a replay
     // that stopped at step 10 of 26 and never reached the save. The answer is not

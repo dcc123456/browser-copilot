@@ -336,9 +336,18 @@ const BLOCK_NAME_PATTERN = (() => {
 export const NEGATED_COMMIT_VERB =
   /(?:绝不|决不|不可|不能|不要|不用|无法|禁止|未|别|勿|不|\bnot\b|\bnever\b|\bwithout\b)[\s,，、]{0,6}?(?:执行|进行|实施|予以|做|发起|触发|点击|按下|单击|会|能|要|应|打算|准备|计划|click|press|execute|perform)?[\s,，、]{0,4}?(?:正式|直接|手动|自动|再次|重复|actually|really|manually|directly)?[\s,，、]{0,4}?(?:发布|发表|提交|发送|下单|支付|付款|购买|publish|\bpost\b|submit|send|checkout|purchase)/gi
 
-/** 「发布页 / 发布平台 / 图文发布」 names the PAGE the step sits on, not the act. */
+/**
+ * 「发布页 / 发布平台 / 图文发布 / 发布模式」 names WHERE the step stands, not what it does.
+ *
+ * The mode variant is round 81: a generated step whose job was switching the
+ * composer to 图文 mode says 「在发布页顶部切换到「上传图文」发布模式」, the trial read the
+ * remaining 发布 as a publish act, stopped at step 6 of 41, and never reached the
+ * draft save. A mode tab is the same class of place name as a page tab — what
+ * makes a step unsafe is its own words naming the press (「点击发布按钮」), and those
+ * are untouched here.
+ */
 export const PAGE_NAME_ESCAPE =
-  /(发布|发表|提交|发送)[\s,，、]?(?:页面?|页|平台|中心|编辑器|区|列表|管理)/g
+  /(发布|发表|提交|发送)[\s,，、]?(?:页面?|页|平台|中心|编辑器|区|列表|管理|模式)/g
 
 /**
  * Closing an overlay is not the act its name reminds of.
