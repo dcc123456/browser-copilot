@@ -334,11 +334,12 @@ describe('a saved draft still needs a step that looks at it', () => {
     // certification layer is right to refuse it; what was missing was a step.
     const notice = unvisitedDraftListNotice({ nodes: [generated('focus', '点击正文编辑区'), save()], goalText: goal })
     expect(notice).toContain('草稿箱')
-    expect(notice).toContain('最后一步')
+    expect(notice).toContain('补两步')
     // The visit alone is not the fix: a 草稿箱 that was already in the page's own
-    // navigation is furniture too, so the notice has to ask for the row shape that
-    // can only be true afterwards.
+    // navigation is furniture too, and a row aimed at a locator no step recorded is
+    // no evidence, so the notice asks for the read step and the row shape together.
     expect(notice).toContain('countIncreased')
+    expect(notice).toContain('等待或读取')
   })
 
   it('stops when a step AFTER the save opens the draft list', () => {

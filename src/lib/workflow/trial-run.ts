@@ -679,9 +679,12 @@ const DRAFT_LIST_PATTERN = /(草稿箱|草稿列表|我的草稿|drafts?\s+(list
  * refuses any success row the untouched page already satisfied, a goal whose only
  * true row quotes the publish page's own 「保存草稿」 button reads as furniture with
  * nothing left to overrule it: the visit that would make the draft VISIBLE was
- * never recorded. The fix is a step, not a looser gate — clicking into 草稿箱 is
- * idempotent and safe to replay, and the run then ends on a page where the saved
- * note can actually be counted. A state read, not a rule repeated: it goes quiet
+ * never recorded. The fix is a step, not a looser gate — and a step that only
+ * NAVIGATES is not enough either: the success rows are the postconditions the
+ * steps declare (`deriveGoalSpecFromNodes`), and a differential row aimed at a
+ * locator no step recorded is no evidence, so the notice asks for the visit plus
+ * the read that records the list's own selector. Opening 草稿箱 is idempotent and
+ * safe to replay. A state read, not a rule repeated: it goes quiet
  * the moment a step after the save names the draft list.
  */
 export function unvisitedDraftListNotice(draft: {
@@ -695,7 +698,7 @@ export function unvisitedDraftListNotice(draft: {
   const saveIndex = draft.nodes.findIndex((node) => isActuationNode(node) && isDraftSaveNode(node))
   if (saveIndex < 0) return ''
   if (draft.nodes.slice(saveIndex + 1).some((node) => DRAFT_LIST_PATTERN.test(commitProseOf(node)))) return ''
-  return '草稿已保存，但记录里没有一步去看它：请在保存之后再加最后一步——点开「草稿箱 / 草稿列表」，并把这一步的成功条件写成只有保存之后才可能成立的断言（例如列表数量增加 countIncreased，或列表里出现标题为 {{变量}} 的那一篇），否则再干净的回放也没有成功条件可以证明草稿落库。 (The draft save is recorded but no later step looks at it — record one final step that opens 草稿箱 / the draft list, and give that step a postcondition that can only hold afterwards (the draft list count increased, `countIncreased`, or the row whose title is the {{variable}} this run wrote); a page the run merely navigated to, and a 草稿箱 that was already in the navigation, prove nothing.)'
+  return '草稿已保存，但记录里没有一步去看它：请在保存之后补两步——第一步点开「草稿箱 / 草稿列表」，第二步等待或读取列表里的笔记行（让它自己记下真实选择器），并把第二步的成功条件写成只有保存之后才可能成立的断言（该行数量增加 countIncreased，或出现标题为 {{变量}} 的那一篇）。只写「元素存在」会被当成页面自带的家具，指向没有步骤记录过的选择器会被当成没有证据。 (The draft save is recorded but no later step looks at it — add TWO steps after it: open 草稿箱 / the draft list, then wait for or read the note rows so that step records their real selector, and give the second step a postcondition that can only hold afterwards (`countIncreased` on those rows, or the row whose title is the {{variable}} this run wrote).)'
 }
 
 /**
