@@ -18,7 +18,10 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import {
+  TRIAL_AI_STEP_MS,
+  TRIAL_BUDGET_MAX_MS,
   TRIAL_BUDGET_MS,
+  TRIAL_STEP_MS,
   commitCutoffNodeId,
   draftCommitCutoffNodeId,
   draftSaveExecuted,
@@ -31,6 +34,7 @@ import {
   skippedTrialRecord,
   trialCertifies,
   trialCutoffNodeId,
+  trialBudgetFor,
   trialFailed,
   trialHasNothingToProve,
   trialRecordOf,
@@ -979,6 +983,31 @@ describe('runGenerationTrial', () => {
     })
     expect(out.record.outcome).toBe('timeout')
     expect(out.workflow).toBe(wf)
+  })
+
+  it('sizes the default budget to the graph it is about to run', () => {
+    // Round 79 recorded a 19-node graph as `timeout · verified=false` at the flat
+    // 45 s, and the same graph replayed 18/18 clean in 60 s one round later: the
+    // budget was what failed, not the page. An ai-agent step carries the model
+    // call the trial pays for the first time, so it weighs more than a read.
+    const twelve = chain(Array.from({ length: 12 }, () => readStep()))
+    expect(trialBudgetFor(twelve)).toBe(12 * TRIAL_STEP_MS)
+    const withAi = chain([
+      node('ai-agent', { variableName: 'copy' }),
+      ...Array.from({ length: 11 }, () => readStep()),
+    ])
+    expect(trialBudgetFor(withAi)).toBe(TRIAL_AI_STEP_MS + 11 * TRIAL_STEP_MS)
+
+    // Only what runs before the cutoff is worth waiting for, and a short safe
+    // prefix keeps the floor it always had.
+    const long = chain(Array.from({ length: 20 }, () => readStep()))
+    expect(trialBudgetFor(long)).toBe(20 * TRIAL_STEP_MS)
+    expect(trialBudgetFor(long, long.drawflow.nodes[3]?.id ?? null)).toBe(TRIAL_BUDGET_MS)
+
+    // The trial still delays the save, so it can never hold it open forever.
+    expect(trialBudgetFor(chain(Array.from({ length: 100 }, () => readStep())))).toBe(
+      TRIAL_BUDGET_MAX_MS,
+    )
   })
 
   it('stops the run when the caller cancels', async () => {

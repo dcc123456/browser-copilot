@@ -390,8 +390,9 @@ function terminalStepPrompt(notice: string, stepsBefore: number, lastStep: strin
 /**
  * How long an explicitly requested verification may run.
  *
- * The pre-save trial keeps a tight budget (`TRIAL_BUDGET_MS`) because it is one
- * gate inside a turn that is already minutes long. A verification the caller
+ * The pre-save trial budgets by graph size (`trialBudgetFor`, floor
+ * `TRIAL_BUDGET_MS`) because it is one gate inside a turn that is already minutes
+ * long. A verification the caller
  * asked for IS the whole request: cutting a cold 40-step replay off at 45s
  * reports `timeout` — "the page was slow" — for a graph that runs fine, which is
  * a wrong answer rather than a cautious one.

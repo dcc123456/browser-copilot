@@ -40,6 +40,32 @@ import { DEFAULT_GOAL_TEMPLATES } from './node-goal-instantiation'
 /** How long a trial may take before it is stopped and recorded as such. */
 export const TRIAL_BUDGET_MS = 45_000
 
+/**
+ * What one step of the safe prefix is worth, and what the AI steps cost.
+ *
+ * A flat 45 s for every graph is a false negative written into the evidence: the
+ * round-79 19-node graph was recorded with three `ai-agent` steps that generation
+ * never EXECUTES (they run for the first time on replay), the trial was cut off at
+ * 45 s and saved as `timeout · verified=false`, and the same graph replayed
+ * 18/18 clean in 60 s one round later under a real budget. So the default budget
+ * is now sized to the steps the trial will actually run — with the AI steps
+ * carrying their model call, which is the part no page speed explains.
+ */
+export const TRIAL_STEP_MS = 6_000
+export const TRIAL_AI_STEP_MS = 45_000
+/** Ceilings because the trial delays the save; a hung page must not hold it open. */
+export const TRIAL_BUDGET_MAX_MS = 5 * 60_000
+
+/** The budget for THIS graph: what runs before the cutoff, weighted by block. */
+export function trialBudgetFor(workflow: Workflow, cutoffNodeId?: string | null): number {
+  let ms = 0
+  for (const node of executionPath(workflow)) {
+    if (cutoffNodeId && node.id === cutoffNodeId) break
+    ms += blockIdOf(node) === 'ai-agent' ? TRIAL_AI_STEP_MS : TRIAL_STEP_MS
+  }
+  return Math.max(TRIAL_BUDGET_MS, Math.min(TRIAL_BUDGET_MAX_MS, ms))
+}
+
 export type TrialOutcome =
   /** Every step in the reachable graph ran clean. */
   | 'passed'

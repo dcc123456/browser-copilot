@@ -32,7 +32,7 @@ import {
   trialCutoffNodeId,
   trialHasNothingToProve,
   trialRecordOf,
-  TRIAL_BUDGET_MS,
+  trialBudgetFor,
   type TrialRunRecord,
 } from '../../../lib/workflow/trial-run'
 import type { Workflow } from '../../../lib/workflow/types'
@@ -158,7 +158,7 @@ export async function runGenerationTrial(
     }
   }
 
-  const budgetMs = deps.budgetMs ?? TRIAL_BUDGET_MS
+  const budgetMs = deps.budgetMs ?? trialBudgetFor(workflow, cutoffNodeId ?? null)
   const controller = new AbortController()
   let timedOut = false
   const timer = setTimeout(() => {
