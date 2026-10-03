@@ -5,6 +5,7 @@ import { goalSpecOf } from '../../lib/workflow/reliability'
 import { conditionRequiresBaseline, describeCondition, type WorkflowCondition } from '../../lib/workflow/conditions'
 import { provesLandedEffect } from '../../lib/workflow/repair-verification'
 import { nodeGoalContractOf, type WorkflowNodeGoalContract } from '../../lib/workflow/node-goal-contract'
+import { draftSaveExecuted } from '../../lib/workflow/trial-run'
 import type { Workflow, WorkflowNode } from '../../lib/workflow/types'
 import { evaluateCondition, didHoldBeforeTheRun, type ConditionPageProbe } from './condition-runtime'
 import type { ExecuteWorkflowResult } from './run-workflow'
@@ -277,6 +278,18 @@ export async function verifyWorkflowGoal(
   let level: VerificationLevel = 'L1'
   if (l1Pass) level = l2AllHeld && l3Evaluated ? 'L3' : 'L2'
   const l2Unevaluated = nodeReports.flatMap((report) => report.unevaluated ?? [])
+  // «A draft now sits in the account» is answered from the graph and this run's
+  // own stopping point, never from a flag: the save counts only if the run
+  // executed it. When it did, a goal that failed purely for lack of proof is not
+  // a run that did nothing — it is a run nobody can tell did something, and the
+  // missing step (open 草稿箱) and missing row (「草稿列表数量增加」) are the only
+  // actionable fix.
+  const draftSaveLanded = draftSaveExecuted(workflow, run.stoppedBefore ?? null)
+  const noLandingProof = (diagnosis: string): string =>
+    `L3 failed: ${diagnosis}` +
+    (draftSaveLanded
+      ? ' This run did execute the graph\'s draft-save step, so a draft was written — what it lacks is a row that could see it: add a step that opens 草稿箱 and state 「草稿列表数量增加」.'
+      : '')
   const reason = !l1Pass
     ? 'L1 failed: one or more nodes did not execute.'
     : !l3AllHeld
@@ -286,8 +299,8 @@ export async function verifyWorkflowGoal(
           ? 'L3 failed: every success condition compares against an observation from before its step, which cannot be re-checked after the run — the goal states nothing observable now.'
           : l3Evaluated && l3Conditions.every((c) => c.satisfied)
             ? furnitureRows.length > 0
-              ? `L3 failed: the success rows that could prove the goal (${furnitureRows.slice(0, 3).join('、')}) were already true on the page before the run — they describe the site, not what this run did. State a row that can only be true afterwards: the list grew, the dialog vanished, or the produced artifact found by a name the graph wrote into a variable.`
-              : 'L3 failed: every success condition holds from the page the workflow opens (a URL row), so none of them proves the goal landed.'
+              ? noLandingProof(`the success rows that could prove the goal (${furnitureRows.slice(0, 3).join('、')}) were already true on the page before the run — they describe the site, not what this run did. State a row that can only be true afterwards: the list grew, the dialog vanished, or the produced artifact found by a name the graph wrote into a variable.`)
+              : noLandingProof('every success condition holds from the page the workflow opens (a URL row), so none of them proves the goal landed.')
             : `L3 failed: the workflow goal success conditions did not all hold${
                 settleWaitedMs > 0 ? ` (the page was re-read for ${settleWaitedMs} ms after the run and they still did not).` : '.'
               }`

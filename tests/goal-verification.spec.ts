@@ -285,6 +285,49 @@ describe('goal verification against the pre-run baseline the run carries', () =>
     expect(report.reason).toContain('before the run')
   })
 
+  it('says the draft really landed when the goal has no row that could see it', async () => {
+    // Round 80 replayed 18/18 and wrote a real 图文 draft, and the verdict a
+    // reader got was a refusal to believe it. When the graph's own draft-save
+    // step ran in THIS run, «no landing proof» is a goal-writing gap, not a
+    // failed run, and the only actionable fix is the missing step and row.
+    const workflow = workflowWith({})
+    workflow.drawflow.nodes.push({
+      id: 'n2',
+      label: 'event-click',
+      position: { x: 0, y: 0 },
+      data: { blockId: 'event-click', selector: '#draft', __reliability: { intent: '把已填好标题与正文的图文笔记保存为草稿，不发布' } },
+    } as never)
+    workflow.drawflow.edges.push({ source: 'n1', target: 'n2' } as never)
+    workflow.settings!.goalSpec = {
+      summary: 'The draft list shows the saved draft.',
+      successConditions: [{ kind: 'elementText', target: draftBox, match: 'contains', expected: '草稿' }],
+    }
+    const showsDraft = conditionLocatorKey({ text: '草稿' })
+    const baseline: ConditionBaseline = {
+      counts: {},
+      exists: { [showsDraft]: true },
+      texts: { [showsDraft]: '草稿箱(100)' },
+    }
+    const run = {
+      ...okRun,
+      completedNodeIds: ['n1', 'n2'],
+      goalBaseline: baseline,
+    }
+    const report = await verifyWorkflowGoal(workflow, run, { ...probe, text: async () => '草稿箱(100)' })
+    expect(report.certified).toBe(false)
+    expect(report.reason).toContain('a draft was written')
+    expect(report.reason).toContain('草稿箱')
+
+    // A run that stopped AT the save wrote nothing, and the sentence must go.
+    const stopped = await verifyWorkflowGoal(
+      workflow,
+      { ...run, stoppedBefore: 'n2' },
+      { ...probe, text: async () => '草稿箱(100)' },
+    )
+    expect(stopped.reason).toContain('before the run')
+    expect(stopped.reason).not.toContain('a draft was written')
+  })
+
   it('certifies a text row that names the artifact through a run variable', async () => {
     // The same row shape, but the words are the ones THIS run wrote into a
     // variable, so they cannot have been on the page before it started.
