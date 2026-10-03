@@ -236,6 +236,57 @@ describe('groundGoalSpecToGraph', () => {
     expect(selfReferential.dropped).toHaveLength(1)
   })
 
+  it('re-words a presence row that quotes the task instead of the page', () => {
+    // Round 80, exactly: 18/18 clean, a real draft saved, and the goal read false
+    // on 「元素存在 "保存草稿"」 because 小红书's button says 「暂存离开」. The step that
+    // pressed it is the only thing that knows both halves — its prose names the
+    // control in the user's words, its recorded target holds the page's.
+    const saveStep = node('b', 'event-click', {
+      label: '点击暂存离开按钮保存草稿',
+      target: { primary: { how: 'text', value: '暂存离开' } },
+      __reliability: { intent: '点击暂存离开按钮保存草稿' },
+    })
+    const out = groundGoalSpecToGraph(
+      {
+        summary: 's',
+        successConditions: [
+          { kind: 'elementExists', target: { text: '保存草稿' }},
+          { kind: 'elementExists', target: { text: '暂存离开' } },
+        ],
+      },
+      { name: 'x', nodes: [node('a', 'trigger', {}), saveStep] },
+    )
+    expect((out.goalSpec.successConditions[0] as { target: { text: string } }).target.text).toBe(
+      '暂存离开',
+    )
+    // A row the page already answers is left exactly as it was.
+    expect(out.goalSpec.successConditions[1]).toEqual({ kind: 'elementExists', target: { text: '暂存离开' } })
+  })
+
+  it('does not re-word a row that aims at state no step ever spoke about', () => {
+    // A goal may legitimately describe what appears AFTER the last recorded step
+    // (a toast the save triggers, a dialog that closes). Nothing in the graph says
+    // what 「保存成功」 should become, so guessing would be the fabrication this file
+    // removes — the row stays, and it fails loudly if it never lands.
+    const out = groundGoalSpecToGraph(
+      { summary: 's', successConditions: [{ kind: 'elementExists', target: { text: '保存成功' } }] },
+      {
+        name: 'x',
+        nodes: [
+          node('a', 'trigger', {}),
+          node('b', 'event-click', {
+            target: { primary: { how: 'text', value: '暂存离开' } },
+            __reliability: { intent: '点击暂存离开' },
+          }),
+        ],
+      },
+    )
+    expect(out.goalSpec.successConditions[0]).toEqual({
+      kind: 'elementExists',
+      target: { text: '保存成功' },
+    })
+  })
+
   it('hands back the untouched contract rather than an empty goal', () => {
     const original = { summary: 's', successConditions: [invented] }
     const out = groundGoalSpecToGraph(original, {

@@ -120,6 +120,89 @@ function mentionsName(haystack: string, name: string): boolean {
  * returned untouched: better a loud, permanent failure than a certificate for a
  * run that did nothing.
  */
+/**
+ * The words a step's locator really matched, with the prose that describes it
+ * kept OUT.
+ *
+ * A recorded target carries `{how:'text'|'role', value}` and the fingerprint's
+ * `accessibleName`/`label`/`text` — all copied off the page — while the node's
+ * own label and intent are sentences someone wrote about it. Round 80's graph
+ * ends on a step labelled 「点击暂存离开按钮保存草稿」 whose target text is
+ * 「暂存离开」: the prose names a control the page never showed, and only the
+ * target knows what the page does show. `elementWordsOf` mixes the two because a
+ * COMMIT policy has to read both, which is the wrong corpus for this question.
+ */
+function recordedPageWords(node: GoalDerivationSource['nodes'][number]): string[] {
+  const data = (node.data ?? {}) as Record<string, unknown>
+  const target = data['target'] as
+    | {
+        label?: unknown
+        primary?: { how?: unknown; value?: unknown }
+        fallbacks?: { how?: unknown; value?: unknown }[]
+      }
+    | undefined
+  const parts: string[] = []
+  for (const spec of [target?.primary, ...(target?.fallbacks ?? [])]) {
+    if (!spec || typeof spec.value !== 'string') continue
+    if (spec.how !== 'text' && spec.how !== 'role') continue
+    parts.push(spec.value)
+  }
+  if (typeof target?.label === 'string') parts.push(target.label)
+  const locator = (data['__reliability'] as { locator?: Record<string, unknown> } | undefined)
+    ?.locator
+  for (const key of ['accessibleName', 'label', 'text']) {
+    const value = locator?.[key]
+    if (typeof value === 'string') parts.push(value)
+  }
+  return [...new Set(parts.map((part) => part.replace(/\s+/g, ' ').trim()).filter(Boolean))]
+}
+
+/** The sentences written ABOUT a step: its label, its declared intent. */
+function stepProse(node: GoalDerivationSource['nodes'][number]): string {
+  const reliability = node.data?.['__reliability'] as { intent?: unknown } | undefined
+  return [node.label ?? '', typeof reliability?.intent === 'string' ? reliability.intent : ''].join(' ')
+}
+
+/**
+ * Re-word a presence row that quotes the TASK instead of the PAGE.
+ *
+ * `prepare_workflow_goal` runs before a single page is read, so the model names a
+ * control in the words the user used: 「元素存在 "保存草稿"」, and 小红书's button
+ * reads 「暂存离开」. That row can never hold, and the verdict blames the run
+ * (`元素不存在`) for a defect in the instrument — round 80 replayed 18/18 clean and
+ * saved a real draft, and its goal still read false over those two words.
+ *
+ * The rewrite is only allowed where the graph itself resolves the ambiguity: the
+ * row's words appear in one step's PROSE, that step recorded PAGE words, and the
+ * page never showed the row's words. Then the row aims at the same control by the
+ * name the page has, and `describeCondition` renders the words a reader can check.
+ * A row naming words no
+ * step ever spoke is left alone — a goal may legitimately aim at state that
+ * appears after the last recorded step, and silently re-wording a guess would be
+ * the same fabrication this file exists to remove.
+ */
+function alignRowWordsToPage(
+  conditions: WorkflowCondition[],
+  nodes: GoalDerivationSource['nodes'],
+  isTrigger: (node: Pick<WorkflowNode, 'data'>) => boolean,
+): WorkflowCondition[] {
+  const steps = nodes.filter((node) => !isTrigger(node))
+  const page = steps.map(recordedPageWords)
+  const prose = steps.map(stepProse)
+  return conditions.map((condition) => {
+    if (condition.kind !== 'elementExists' && condition.kind !== 'elementVisible') return condition
+    const target = (condition as unknown as { target?: Record<string, unknown> }).target
+    const words = typeof target?.['text'] === 'string' ? (target['text'] as string).trim() : ''
+    if (!words) return condition
+    if (page.some((seen) => seen.some((word) => word.includes(words)))) return condition
+    const index = prose.findIndex((text) => text.includes(words))
+    if (index < 0) return condition
+    const seen = (page[index] ?? []).slice().sort((a, b) => a.length - b.length)[0]
+    if (!seen || seen === words) return condition
+    return { ...condition, target: { ...target, text: seen } } as unknown as WorkflowCondition
+  })
+}
+
 export function groundGoalSpecToGraph(
   goalSpec: WorkflowGoalSpec,
   source: GoalDerivationSource,
@@ -132,13 +215,22 @@ export function groundGoalSpecToGraph(
   ].join('\n')
 
   const dropped: WorkflowCondition[] = []
-  const kept = goalSpec.successConditions.filter((condition) => {
+  const aligned = alignRowWordsToPage(goalSpec.successConditions, nodes, isTrigger)
+  const reworded = JSON.stringify(aligned) !== JSON.stringify(goalSpec.successConditions)
+  const specWith = (successConditions: WorkflowCondition[]): WorkflowGoalSpec => ({
+    summary: goalSpec.summary,
+    successConditions,
+    ...(goalSpec.terminalStateConditions?.length
+      ? { terminalStateConditions: goalSpec.terminalStateConditions }
+      : {}),
+  })
+  const kept = aligned.filter((condition) => {
     if (condition.kind !== 'variableExists' && condition.kind !== 'variableEquals') return true
     if (mentionsName(haystack, condition.name)) return true
     dropped.push(condition)
     return false
   })
-  if (dropped.length === 0) return { goalSpec, dropped: [] }
+  if (dropped.length === 0) return { goalSpec: reworded ? specWith(aligned) : goalSpec, dropped: [] }
 
   const successConditions = [...kept]
   if (!successConditions.some(provesLandedEffect)) {
