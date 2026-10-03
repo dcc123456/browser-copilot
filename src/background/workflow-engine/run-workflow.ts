@@ -853,6 +853,12 @@ export async function executeWorkflow(
           {
             variables: result.variables ?? variables ?? {},
             probe: createDriverConditionProbe(runSignal, scope),
+            // 「the list grew」/「the dialog vanished」 are judgeable only against
+            // the page from before step 1, and the run is the only thing that
+            // still has it. Without this the gate reads 缺少步骤前的…观测 for a row
+            // the certification layer evaluates as true — the same goal, two
+            // answers, and this gate is the one that fails the run.
+            ...(result.goalBaseline ? { baseline: result.goalBaseline } : {}),
           },
           undefined,
           { settleMs: DEFAULT_GOAL_VERIFY_SETTLE_MS, signal: runSignal },

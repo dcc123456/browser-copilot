@@ -142,12 +142,19 @@ export function groundGoalSpecToGraph(
 
   const successConditions = [...kept]
   if (!successConditions.some(provesLandedEffect)) {
-    for (const condition of deriveGoalSpecFromNodes(source)?.successConditions ?? []) {
-      // A row that compares against an observation from BEFORE its step is not
-      // checkable once the run is over (see `conditionRequiresBaseline`), so
-      // installing one as the replacement proof would recreate the very defect
-      // grounding removes: a goal that reads false no matter what happened.
-      if (conditionRequiresBaseline(condition)) continue
+    const derived = deriveGoalSpecFromNodes(source)?.successConditions ?? []
+    // A CHANGE row (「the draft list grew」, 「the dialog vanished」) is the better
+    // proof, and it used to be the forbidden one: nothing remembered the page
+    // from before its step, so installing one meant a goal that read false no
+    // matter what happened. A run now carries that snapshot and both goal layers
+    // read it, which leaves the other direction as the real risk — a plain
+    // presence row is satisfied by standing page furniture, and a goal that the
+    // untouched page already meets is the broken instrument again, one layer up.
+    const candidates = [
+      ...derived.filter(conditionRequiresBaseline),
+      ...derived.filter((condition) => !conditionRequiresBaseline(condition)),
+    ]
+    for (const condition of candidates) {
       if (successConditions.some((c) => JSON.stringify(c) === JSON.stringify(condition))) continue
       successConditions.push(condition)
       if (successConditions.some(provesLandedEffect)) break

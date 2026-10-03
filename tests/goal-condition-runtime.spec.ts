@@ -13,6 +13,7 @@ import {
 } from '../src/background/workflow-engine/condition-runtime'
 import { verifyGoalSpec } from '../src/background/workflow-engine/goal-verifier'
 import {
+  conditionLocatorKey,
   describeCondition,
   isWorkflowCondition,
   workflowConditionsOf,
@@ -168,13 +169,15 @@ describe('groundGoalSpecToGraph', () => {
     expect(out.goalSpec.successConditions.map((c) => c.kind)).toEqual(['elementVisible'])
   })
 
-  it('never installs a row that only compares against the state before its step', () => {
-    // `urlChanged` was checked by the engine AT that node, with the observation
-    // from before it. After the run there is nothing left to compare against, so
-    // as a GOAL row it can never be decided — the same broken instrument
-    // grounding exists to remove. What survives is the URL row, which observes
-    // fine but proves nothing landed, so the goal stays a loud failure instead of
-    // dressing itself up in a row nobody can check.
+  it('prefers a differential row as the landed-effect proof over a standing presence row', () => {
+    // A change row used to be undecidable once the run was over, so grounding
+    // refused to install one and left the goal holding only a URL row — a loud
+    // failure, which was the honest answer. That premise is gone: a production
+    // run now snapshots the goal's own rows before step 1 (`result.goalBaseline`)
+    // and both readers (the §8.4 gate and the certification layer) judge the
+    // change against it. So the row this graph CAN decide is the differential
+    // one, while 「草稿箱 可见」 is precisely what that snapshot disproves as
+    // evidence (round 77: it was true before the run started).
     const contract: { summary: string; successConditions: WorkflowCondition[] } = {
       summary: 's',
       successConditions: [invented, { kind: 'urlContains', value: 'xiaohongshu.com' }],
@@ -184,12 +187,18 @@ describe('groundGoalSpecToGraph', () => {
       nodes: [
         node('a', 'trigger', {}),
         node('b', 'event-click', {
-          __reliability: { intent: '保存草稿', postconditions: [{ kind: 'urlChanged' }] },
+          __reliability: {
+            intent: '保存草稿',
+            postconditions: [{ kind: 'elementVisible', target: { role: 'button', name: '草稿箱' } }],
+          },
+        }),
+        node('c', 'event-click', {
+          __reliability: { intent: '回到草稿列表', postconditions: [{ kind: 'urlChanged' }] },
         }),
       ],
     })
     expect(out.dropped).toEqual([invented])
-    expect(out.goalSpec.successConditions.map((c) => c.kind)).toEqual(['urlContains'])
+    expect(out.goalSpec.successConditions.map((c) => c.kind)).toEqual(['urlContains', 'urlChanged'])
   })
 
   it('counts a declared run input as grounding, and the trigger\'s own goal copy as not', () => {
@@ -385,6 +394,36 @@ describe('verifyGoalSpec', () => {
     })
     expect(absent.achieved).toBe(false)
     expect(absent.note).toContain('目标未达成')
+  })
+
+  it('judges a change row against the baseline the caller passes', async () => {
+    // The guidance now asks the model for a differential row (`countIncreased`),
+    // and the gate is the thing that FAILS a replay, so it has to be able to read
+    // that row. Passing the run's pre-step snapshot is what makes 「the draft list
+    // grew」 checkable; without it the very row we asked for reports
+    // 缺少步骤前的数量观测 and a run that landed reads as a failure.
+    const target = { selector: '.note-item' }
+    const draftGoal = {
+      summary: '草稿箱多了一篇',
+      successConditions: [{ kind: 'countIncreased', target } as unknown as WorkflowCondition],
+    }
+    const deps = {
+      variables: {},
+      probe: fakeProbe({ count: 100 }),
+      baseline: { counts: { [conditionLocatorKey(target)]: 99 }, exists: {} },
+    }
+    const grown = await verifyGoalSpec(draftGoal, deps)
+    expect(grown.achieved).toBe(true)
+    expect(grown.unmet).toHaveLength(0)
+
+    // Without the snapshot the same row cannot be decided at all, and the gate
+    // says so as a failure — which is the defect this wiring removes.
+    const noBaseline = await verifyGoalSpec(draftGoal, {
+      variables: {},
+      probe: fakeProbe({ count: 100 }),
+    })
+    expect(noBaseline.achieved).toBe(false)
+    expect(noBaseline.unmet).toEqual(['元素数量增加（css ".note-item"）'])
   })
 })
 
