@@ -695,7 +695,7 @@ export function unvisitedDraftListNotice(draft: {
   const saveIndex = draft.nodes.findIndex((node) => isActuationNode(node) && isDraftSaveNode(node))
   if (saveIndex < 0) return ''
   if (draft.nodes.slice(saveIndex + 1).some((node) => DRAFT_LIST_PATTERN.test(commitProseOf(node)))) return ''
-  return '草稿已保存，但记录里没有一步去看它：请在保存之后再加最后一步——点开「草稿箱 / 草稿列表」，让回放结束在能数到刚保存那篇的页面上，否则再干净的回放也没有成功条件可以证明草稿落库。 (The draft save is recorded but no later step looks at it — record one final step that opens 草稿箱 / the draft list, so the replay ends on a page where the saved note can be counted; otherwise no success condition can prove the draft landed.)'
+  return '草稿已保存，但记录里没有一步去看它：请在保存之后再加最后一步——点开「草稿箱 / 草稿列表」，并把这一步的成功条件写成只有保存之后才可能成立的断言（例如列表数量增加 countIncreased，或列表里出现标题为 {{变量}} 的那一篇），否则再干净的回放也没有成功条件可以证明草稿落库。 (The draft save is recorded but no later step looks at it — record one final step that opens 草稿箱 / the draft list, and give that step a postcondition that can only hold afterwards (the draft list count increased, `countIncreased`, or the row whose title is the {{variable}} this run wrote); a page the run merely navigated to, and a 草稿箱 that was already in the navigation, prove nothing.)'
 }
 
 /**

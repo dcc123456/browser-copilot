@@ -335,6 +335,10 @@ describe('a saved draft still needs a step that looks at it', () => {
     const notice = unvisitedDraftListNotice({ nodes: [generated('focus', '点击正文编辑区'), save()], goalText: goal })
     expect(notice).toContain('草稿箱')
     expect(notice).toContain('最后一步')
+    // The visit alone is not the fix: a 草稿箱 that was already in the page's own
+    // navigation is furniture too, so the notice has to ask for the row shape that
+    // can only be true afterwards.
+    expect(notice).toContain('countIncreased')
   })
 
   it('stops when a step AFTER the save opens the draft list', () => {
