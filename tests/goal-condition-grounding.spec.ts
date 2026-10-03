@@ -65,6 +65,27 @@ describe('a goal row is only as checkable as the evidence behind its locator', (
     expect(lines[0]).toContain('no step of the graph')
   })
 
+  it('names an invented selector on a differential row too', () => {
+    // The row the draft-list notice asks the model to write: 「草稿列表数量增加」 on the
+    // note rows, aimed from a step that clicked the 草稿箱 navigation and never
+    // recorded the list's own selector. Such a row cannot pass even when the draft
+    // really landed, and nothing said the reason.
+    const lines = ungroundedGoalConditions(
+      graphWith(['a.drafts-nav'], {
+        success: [{ kind: 'countIncreased', target: { selector: '.note-item' } }],
+      }),
+    )
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain('.note-item')
+    expect(
+      ungroundedGoalConditions(
+        graphWith(['.note-item'], {
+          success: [{ kind: 'countIncreased', target: { selector: '.note-item' } }],
+        }),
+      ),
+    ).toEqual([])
+  })
+
   it('leaves a row whose locator a step really acted on alone', () => {
     expect(
       ungroundedGoalConditions(

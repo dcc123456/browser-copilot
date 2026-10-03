@@ -107,6 +107,16 @@ const ELEMENT_KINDS: readonly WorkflowCondition['kind'][] = [
   'elementText',
   'attributeEquals',
   'count',
+  // The DIFFERENTIAL element rows. They read as evidence only through the run's
+  // pre-run snapshot, so an invented locator here does not produce a false pass —
+  // it produces a row that can never hold, and a certification that fails without
+  // naming the reason. This matters because this is exactly the row shape the
+  // draft-list notice asks the model to write (「草稿列表数量增加」), and the step that
+  // gets it is a click on the navigation entry, which never records the list's own
+  // selector.
+  'countIncreased',
+  'elementAppeared',
+  'elementGone',
 ]
 
 /**
