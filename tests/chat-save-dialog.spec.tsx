@@ -374,8 +374,10 @@ describe('chat save-as-workflow flow', () => {
 
       // Generation saves mark themselves so the background hardens the graph
       // (verified selectors + persisted waits); no verify run without the box.
+      // `verifyRun: false` is what keeps the background from replaying it too.
       expect(saveCommands).toHaveLength(1)
       expect(saveCommands[0]!.fromGeneration).toBe(true)
+      expect(saveCommands[0]!.verifyRun).toBe(false)
       expect(debugCommands).toHaveLength(0)
       expect(container.textContent).not.toContain('Verify run started')
     } finally {
@@ -415,6 +417,40 @@ describe('chat save-as-workflow flow', () => {
       // The verdict lands in the chat as status entries.
       expect(container.textContent).toContain('Verify run started')
       expect(container.textContent).toContain('Verify run passed')
+    } finally {
+      await act(async () => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+
+  it('groups the dense card into detail sections that start collapsed', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await openCard(container, root)
+
+      // The card reads as a short list of categories: every detail group is
+      // closed until the user opens it, and its header says how much it hides.
+      const sections = [...container.querySelectorAll('details')]
+      expect(sections.length).toBeGreaterThan(0)
+      expect(sections.every((section) => !section.open)).toBe(true)
+      const headers = sections.map((section) => section.querySelector('summary')?.textContent)
+      expect(headers.join(' |')).toContain('Checks & risks')
+      expect(headers.join(' |')).toContain('1 item')
+      // The consequential choice and the actions never sit behind a fold.
+      expect(surfaceText(container)).toContain('Verify run after save')
+      expect(surfaceButtonTexts(container)).toContain('Save as workflow')
+
+      const first = sections[0]!.querySelector('summary')
+      expect(first).not.toBeNull()
+      await act(async () => {
+        first!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
+      await flush()
+      expect(sections[0]!.open).toBe(true)
     } finally {
       await act(async () => {
         root.unmount()
@@ -978,9 +1014,7 @@ describe('chat save-as-workflow flow', () => {
         const preparing = document.body.querySelector('[role="dialog"]')
         expect(preparing).not.toBeNull()
         expect(preparing!.getAttribute('aria-label')).toBe('Preparing workflow…')
-        expect(document.body.textContent).toContain(
-          'Compiling and validating the recorded steps',
-        )
+        expect(document.body.textContent).toContain('Compiling and validating the recorded steps')
 
         // Release the draft: the preparing popup is replaced by the save card.
         await act(async () => {

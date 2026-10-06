@@ -1392,13 +1392,18 @@ async function handleCommand(
       await saveWorkflow(workflow)
       await rescheduleAllWorkflowTriggers()
       // A generated workflow is replayed once for real before the user ever
-      // runs it. That replay runs AFTER this save on purpose: the card already
+      // runs it — but only when the card's "verify run after save" box was
+      // checked: `verifyRun` is the user's opt-in, and unchecked means the save
+      // touches no page beyond the read-only hardening above (no replay, no
+      // self-heal write-back, and the health card reports an unverified graph).
+      // That replay runs AFTER this save on purpose: the card already
       // proved a replay can take tens of seconds, and making the user's save
       // button wait on a page would risk the one thing this feature may never
       // cost — a workflow that does not get saved. The verdict (and any locator
       // the trial had to work around) lands on the stored record a moment
       // later, which is where the health card and the generation card read it.
-      if (command.fromGeneration) void recordGenerationTrial(workflow, generationScope)
+      if (command.fromGeneration && command.verifyRun)
+        void recordGenerationTrial(workflow, generationScope)
       return { type: 'workflows.save' }
     }
 

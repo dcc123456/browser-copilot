@@ -42,8 +42,14 @@ export const MIN_REPEAT_RUN = 2
  * those effects change per iteration (the engine only publishes the loop
  * context — it does not rewrite the script). Repeating it verbatim is therefore
  * either a pointless re-run or a semantic change, so it is never folded.
+ *
+ * An upload block's payload is the file it names (`data.files` / `fileVariable`
+ * / a file the user picks each time). A fold rewrites only the *selector* per
+ * iteration, never the file, so folding N recorded uploads replays ONE file N
+ * times — and in user-select mode it would additionally demand N separate
+ * picker interactions for a loop the whole point of which is to run unsupervised.
  */
-const NEVER_FOLD_BLOCKS: ReadonlySet<string> = new Set(['javascript-code'])
+const NEVER_FOLD_BLOCKS: ReadonlySet<string> = new Set(['javascript-code', 'upload-file'])
 
 /**
  * AI operator blocks: their "copy" is the `prompt`. Two of them only describe
