@@ -57,7 +57,7 @@ function isContextLost(message: string): boolean {
 }
 
 /** How long `switch-tab` waits for a tab that a previous click just opened. */
-const TAB_APPEAR_TIMEOUT_MS = 3_000
+export const TAB_APPEAR_TIMEOUT_MS = 3_000
 
 export class RunDriver {
   private pages: Page[] = []
@@ -181,10 +181,20 @@ export class RunDriver {
 
   // --- Tab management -----------------------------------------------------------
 
-  async newTab(url?: string): Promise<DriverTab> {
+  async newTab(url?: string, userAgent?: string): Promise<DriverTab> {
     const page = await this.session.context.newPage()
     this.register(page)
     this.active = page
+    // Playwright sets the UA per context, not per page, so the block's
+    // "Custom User Agent" is a header rewrite on everything this tab requests.
+    // It has to be installed before the first navigation.
+    if (userAgent) {
+      await page.route('**/*', (route) =>
+        route.continue({
+          headers: { ...route.request().headers(), 'user-agent': userAgent },
+        }),
+      )
+    }
     if (url) {
       await page.goto(url, { waitUntil: 'load', timeout: 30_000 }).catch(() => {
         /* best-effort, like the extension's waitForTabLoaded */
@@ -235,6 +245,24 @@ export class RunDriver {
   async activeInfo(): Promise<DriverTab> {
     const page = this.pageOf()
     return { ...this.tabOf(page), title: await page.title().catch(() => '') }
+  }
+
+  /** The page's current URL (a click that navigates has to leave this one). */
+  currentUrl(tabId?: number): string {
+    return this.pageOf(tabId).url()
+  }
+
+  /**
+   * Wait for a same-tab navigation started by a click to actually begin.
+   *
+   * `waitForLoaded` alone cannot see it: the synthetic click returns while the
+   * navigation is still queued, so the page reports `load` (from the PREVIOUS
+   * document) and the runner told the workflow the link was open. A following
+   * history step (go-back) then fired mid-navigation.
+   */
+  async waitForUrlLeave(tabId: number | undefined, before: string, maxMs = 15_000): Promise<void> {
+    const page = this.pageOf(tabId)
+    await page.waitForURL((url) => url.toString() !== before, { timeout: maxMs }).catch(() => {})
   }
 
   /** Mirrors the extension's `waitForTabLoaded`: best-effort load-state wait. */
@@ -402,6 +430,16 @@ export class RunDriver {
   async countElements(selector: string, tabId?: number): Promise<number> {
     const result = await this.execOp({ action: 'count_elements', value: selector }, tabId)
     return typeof result.data === 'number' ? result.data : 0
+  }
+
+  /**
+   * CSS selector matching only the `index`-th element matched by `selector`.
+   * The engine's element-loop hook needs it or every iteration re-targets the
+   * first element.
+   */
+  async elementSelectorAt(selector: string, index: number, tabId?: number): Promise<string | null> {
+    const result = await this.execOp({ action: 'element_selector_at', value: selector, index }, tabId)
+    return result.ok && typeof result.data === 'string' && result.data !== '' ? result.data : null
   }
 
   async elementExists(selector: string, tabId?: number): Promise<number> {

@@ -75,13 +75,15 @@ function delayArgs(args: Record<string, unknown>): Record<string, unknown> {
 
 /**
  * `element-scroll` models an element scroll (`scrollIntoView`) or a wheel
- * scroll (`incX`/`incY`, falling back to the absolute `scrollX`/`scrollY`);
- * the `scroll` action reads `mode` + `x`/`y`.
+ * scroll, whose amount is `scrollX`/`scrollY` (or `incX`/`incY` when a node
+ * carries them as numbers); the `scroll` action reads `mode` + `x`/`y`.
  */
 function scrollArgs(args: Record<string, unknown>): Record<string, unknown> {
   if (args['scrollIntoView']) return { ...args, mode: 'into_view' }
-  const x = args['incX'] ?? args['scrollX'] ?? 0
-  const y = args['incY'] ?? args['scrollY'] ?? 600
+  // `incX`/`incY` are the editor's booleans, not amounts: reading them as the
+  // offset meant a node with "Increment" off scrolled `false`, i.e. nowhere.
+  const x = typeof args['incX'] === 'number' ? args['incX'] : (args['scrollX'] ?? 0)
+  const y = typeof args['incY'] === 'number' ? args['incY'] : (args['scrollY'] ?? 600)
   return { ...args, mode: 'by', x, y }
 }
 

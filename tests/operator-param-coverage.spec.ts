@@ -20,13 +20,15 @@
  * import. The alternative is a hand-maintained table, which would drift in
  * exactly the way this test exists to prevent. Reads are resolved transitively
  * through the file's own top-level helpers (`withWait`, `publishRead`,
- * `collectIntoDataTable`, `targetFrom`, …), because most executors do their
- * reading through one of those.
+ * `collectIntoDataTable`, `targetFrom`, …) and through the shared `src/lib`
+ * modules both hosts import (`applyAssignVariable`, …), because most executors
+ * do their reading through one of those.
  */
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import { BLOCK_CATALOG } from '../src/lib/workflow/blocks/catalog'
+import { CUSTOM_BLOCKS } from '../src/lib/workflow/blocks/custom'
 import {
   UI_ONLY_KEYS,
   dataSchemaFromEntry,
@@ -34,7 +36,32 @@ import {
   operatorToolName,
 } from '../src/lib/workflow/operator-tools'
 
+/**
+ * Every entry the editor's palette can show: the Automa-shaped catalog plus the
+ * Browser-Copilot-only blocks `palette.ts` merges in after it. A guard that
+ * walked `BLOCK_CATALOG` alone left `ai-agent` / `ocr` / `set-variable` /
+ * `get-secret` — four real nodes — permanently unchecked.
+ */
+const PALETTE = [...BLOCK_CATALOG, ...CUSTOM_BLOCKS]
+
 const SOURCE = readFileSync('src/background/workflow-engine/executors.ts', 'utf8')
+
+/**
+ * Shared modules the executors delegate their `data` reads to.
+ *
+ * The parser below resolves reads transitively through callees, so a helper that
+ * takes `data` and reads it has to be visible even when it lives in `src/lib`
+ * (both hosts import it, per the cross-host rule). Without this,
+ * `applyAssignVariable` hides `assignVariable` / `variableName` and the guard
+ * reports a parameter as unread while the block writes it correctly.
+ */
+const SHARED_HELPER_SOURCES = [
+  'src/lib/workflow/block-output.ts',
+  // `ai-agent`'s executor is its own module, registered as `'ai-agent': aiAgent`.
+  // Without it the guard sees an executor that reads nothing and reports the
+  // block's entire parameter set as inert.
+  'src/background/workflow-engine/ai-agent-executor.ts',
+]
 
 /**
  * Executor bodies that belong to the ENGINE rather than to a block: triggers
@@ -74,20 +101,13 @@ const KNOWN_INERT: Readonly<Record<string, readonly string[]>> = {
   'get-text': [
     'findBy',
     'regex',
-    'prefixText',
-    'suffixText',
     'regexExp',
     'addExtraRow',
     'extraRowValue',
     'extraRowDataColumn',
   ],
-  'element-scroll': ['incX', 'incY'],
-  // `switch-to` still carries the locator params (its catalog `refDataKeys`
-  // include `selector`), but its executor only logs the frame — nothing reads
-  // them yet. The executor-facing key (`frameSelector`) is taught instead.
-  'switch-to': ['selector'],
   'attribute-value': ['addExtraRow', 'extraRowValue', 'extraRowDataColumn'],
-  forms: ['selected', 'selectOptionBy', 'optionPosition', 'delay'],
+  forms: ['delay'],
   'javascript-code': ['context', 'preloadScripts', 'everyNewTab', 'runBeforeLoad'],
   'trigger-event': ['waitForSelector', 'waitSelectorTimeout'],
   conditions: ['retryConditions', 'retryCount', 'retryTimeout'],
@@ -104,13 +124,15 @@ const KNOWN_INERT: Readonly<Record<string, readonly string[]>> = {
     'variableName',
     'saveToGDrive',
   ],
-  'press-key': ['selector', 'pressTime', 'action'],
-  'handle-download': ['timeout', 'waitForDownload', 'downloadId'],
+  'press-key': ['pressTime', 'action'],
+  // `ocr` captures the element through the page-capture primitives, which are
+  // CSS-only (its own error says 需要 CSS 选择器), so the catalog's Automa-shaped
+  // `findBy` is carried but not honoured.
+  ocr: ['findBy'],
+  'handle-download': ['downloadId'],
   'wait-connections': ['specificFlow', 'flowBlockId'],
   notification: ['iconUrl', 'imageUrl'],
   'create-element': [
-    'javascript',
-    'css',
     'preloadScripts',
     'findBy',
     'insertAt',
@@ -119,27 +141,30 @@ const KNOWN_INERT: Readonly<Record<string, readonly string[]>> = {
     'waitSelectorTimeout',
     'selector',
   ],
-  'workflow-state': ['type', 'exceptCurrent', 'workflowsToStop', 'throwError', 'errorMessage'],
+  'workflow-state': ['exceptCurrent', 'workflowsToStop'],
   'parameter-prompt': ['timeout'],
 }
 
 /** name -> body, for every top-level declaration in the executors module. */
-function topLevelBodies(): Map<string, string> {
+function bodiesOf(text: string): Map<string, string> {
   // `async function` declarations count too — a callee hidden from this map
   // silently loses its transitive reads (pollRead hid waitForSelector once).
   const re = /^(?:export )?(?:async )?(?:const|function|type|interface) (\w+)/gm
   const marks: { name: string; start: number }[] = []
   let match: RegExpExecArray | null
-  while ((match = re.exec(SOURCE)) !== null) marks.push({ name: match[1]!, start: match.index })
+  while ((match = re.exec(text)) !== null) marks.push({ name: match[1]!, start: match.index })
   const bodies = new Map<string, string>()
   marks.forEach((mark, index) => {
-    const end = index + 1 < marks.length ? marks[index + 1]!.start : SOURCE.length
-    bodies.set(mark.name, SOURCE.slice(mark.start, end))
+    const end = index + 1 < marks.length ? marks[index + 1]!.start : text.length
+    bodies.set(mark.name, text.slice(mark.start, end))
   })
   return bodies
 }
 
-const BODIES = topLevelBodies()
+const BODIES = new Map<string, string>()
+for (const file of ['src/background/workflow-engine/executors.ts', ...SHARED_HELPER_SOURCES]) {
+  for (const [name, body] of bodiesOf(readFileSync(file, 'utf8'))) BODIES.set(name, body)
+}
 
 /** Keys read off a `data` parameter, via `data['x']` or `data.x`. */
 function literalReads(body: string): Set<string> {
@@ -194,7 +219,7 @@ const EXECUTOR_VAR = executorVarOf()
 
 /** Advertised schema keys of one block, in declaration order. */
 function advertisedKeys(blockId: string): string[] {
-  const entry = BLOCK_CATALOG.find((candidate) => candidate.id === blockId)
+  const entry = PALETTE.find((candidate) => candidate.id === blockId)
   if (!entry) return []
   const schema = dataSchemaFromEntry(entry)
   return Object.keys((schema['properties'] as Record<string, unknown>) ?? {})
@@ -203,7 +228,7 @@ function advertisedKeys(blockId: string): string[] {
 describe('operator parameter coverage', () => {
   it('never advertises a parameter its executor does not read', () => {
     const offenders: string[] = []
-    for (const entry of BLOCK_CATALOG) {
+    for (const entry of PALETTE) {
       if (!isOperatorTool(operatorToolName(entry.id))) continue
       const varName = EXECUTOR_VAR.get(entry.id)
       if (varName === undefined || ENGINE_SERVED_EXECUTORS.has(varName)) continue
@@ -229,7 +254,7 @@ describe('operator parameter coverage', () => {
     // The collect trio is the legitimate case: `get-text` / `read-page` do read
     // `multiple` / `saveData` / `dataColumn`, so re-exposing them is the point.
     const leaked: string[] = []
-    for (const entry of BLOCK_CATALOG) {
+    for (const entry of PALETTE) {
       if (!isOperatorTool(operatorToolName(entry.id))) continue
       const varName = EXECUTOR_VAR.get(entry.id)
       const read = varName === undefined ? new Set<string>() : readsOf(varName)
@@ -263,7 +288,7 @@ describe('operator parameter coverage', () => {
   it('covers every block that is wired to an executor', () => {
     // A block with an executor but no operator tool is fine (a canvas-only
     // block); the reverse — an operator tool with no executor — is not.
-    const orphaned = BLOCK_CATALOG.filter(
+    const orphaned = PALETTE.filter(
       (entry) => isOperatorTool(operatorToolName(entry.id)) && !EXECUTOR_VAR.has(entry.id),
     ).map((entry) => entry.id)
     expect(orphaned, 'operator tools with no registered executor').toEqual([])

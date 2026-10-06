@@ -12,6 +12,7 @@
 import type { Workflow, WorkflowEdge, WorkflowNode } from '../../lib/workflow/types'
 import { getWorkflow } from '../../lib/workflow/storage'
 import { interpolateParams, UNRESOLVED_INTERP_KEY } from '../../lib/workflow/interpolate'
+import { conditionGroupsMatch, hasConditionGroups } from '../../lib/workflow/condition-tree'
 import {
   ambiguityPolicyOf,
   degradeReplayOf,
@@ -454,6 +455,7 @@ function buildExecCtx(
   setTab: (id: number) => void,
   scope: ScopeWindow | undefined,
   reliability: WorkflowExecCtx['reliability'],
+  getRunLog: () => string[],
 ): WorkflowExecCtx {
   return {
     variables,
@@ -463,6 +465,7 @@ function buildExecCtx(
     defaultNext,
     tabId,
     setTab,
+    getRunLog,
     ...(scope ? { scope } : {}),
     ...(reliability ? { reliability } : {}),
     emit: (kind, text) => onStep(kind, currentId, text),
@@ -846,6 +849,7 @@ async function runCore(
       },
       scope,
       reliability,
+      () => stepLines.map((line) => line.text),
     )
     const policy = onErrorPolicy(params)
 
@@ -1244,16 +1248,77 @@ async function runCore(
     const label = blockIdOf(loopNode)
 
     if (label === 'loop-data') {
+      // The editor's "Loop through" select offers Table / Numbers / Variable /
+      // Elements / Custom data / Google Sheets, but this path only ever parsed
+      // `loopData` — so every mode except custom JSON iterated zero items and
+      // the run reported 成功 with an empty loop. The legacy shape (a JSON array
+      // in `data`/`loopData` with no mode chosen) still wins, so graphs saved
+      // before this keep working.
+      const legacy = String(params['data'] ?? params['loopData'] ?? '').trim()
+      const through = String(params['loopThrough'] ?? '').trim()
       let items: unknown[] = []
-      try {
-        // `loopData` is the catalog + tool-schema key; `data` is the engine
-        // shape. Reading only the latter made a generated loop iterate nothing.
-        const parsed = JSON.parse(String(params['data'] ?? params['loopData'] ?? '[]'))
-        if (Array.isArray(parsed)) items = parsed
-      } catch {
-        emit('error', loopNode.id, 'loop-data: 数据解析失败')
+      let unsupported = ''
+      if (legacy !== '' && legacy !== '[]' && through !== 'elements') {
+        try {
+          const parsed = JSON.parse(legacy)
+          if (Array.isArray(parsed)) items = parsed
+        } catch {
+          emit('error', loopNode.id, 'loop-data: 数据解析失败')
+          return null
+        }
+      } else if (through === 'numbers') {
+        const from = Math.floor(Number(params['fromNumber'] ?? 1))
+        const to = Math.floor(Number(params['toNumber'] ?? 10))
+        if (Number.isFinite(from) && Number.isFinite(to)) {
+          for (let n = from; from <= to ? n <= to : n >= to; n += from <= to ? 1 : -1) items.push(n)
+        }
+      } else if (through === 'data-columns') {
+        items = Array.isArray(variables['dataTable'])
+          ? (variables['dataTable'] as unknown[])
+          : []
+      } else if (through === 'variable') {
+        const name = String(params['variableName'] ?? '').trim()
+        const value = name === '' ? undefined : variables[name]
+        if (Array.isArray(value)) items = value
+        else if (typeof value === 'string' && value.trim() !== '') {
+          try {
+            const parsed = JSON.parse(value)
+            items = Array.isArray(parsed) ? parsed : [parsed]
+          } catch {
+            items = [value]
+          }
+        } else if (value !== undefined && value !== null) items = [value]
+        if (name === '') unsupported = `loop-data: 循环来源是「变量」但没有填 variableName`
+      } else if (through === 'google-sheets') {
+        unsupported = 'loop-data: Google Sheets 循环需要 OAuth 凭据，尚未配置'
+      }
+      if (unsupported !== '') {
+        emit('error', loopNode.id, unsupported)
         return null
       }
+      if (params['reverseLoop'] === true) items = items.slice().reverse()
+      const cap = Math.floor(Number(params['maxLoop'] ?? 0))
+      if (Number.isFinite(cap) && cap > 0 && items.length > cap) items = items.slice(0, cap)
+
+      if (through === 'elements') {
+        const selector = String(params['elementSelector'] ?? params['selector'] ?? '')
+        const count = loopElementCounter ? await loopElementCounter(selector, signalToUse) : 0
+        emit('status', loopNode.id, `遍历 ${count} 个元素`)
+        if (startId === null) return endId
+        for (let i = 0; i < count; i++) {
+          if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
+          variables['loopIndex'] = i
+          variables['loopItem'] = null
+          variables['loopElementSelector'] = loopElementSelector
+            ? ((await loopElementSelector(selector, i, signalToUse)) ?? '')
+            : ''
+          const seg = await runLoopBody(loopNode, startId)
+          if (seg === 'failed') return null
+          if (seg === 'break') return endId
+        }
+        return endId
+      }
+
       emit('status', loopNode.id, `开始循环，共 ${items.length} 项`)
       if (startId === null) return endId
       for (let i = 0; i < items.length; i++) {
@@ -1284,10 +1349,28 @@ async function runCore(
     }
 
     if (label === 'while-loop') {
-      const code = String(params['code'] ?? 'false')
+      // The editor stores the condition as a builder tree on `conditions`; the
+      // generated/chat shape is a `code` expression. Reading only the latter
+      // made an editor-built while-loop iterate zero times and report 成功.
+      const tree = paramsOf(loopNode)['conditions'] ?? loopNode.data?.['conditions']
+      const code = String(params['code'] ?? '')
+      const runConditionCode = (source: string): unknown => {
+        if (evaluateExpression) return evaluateExpression(source, variables)
+        try {
+          return new Function('vars', `return (${source})`)(variables)
+        } catch {
+          return false
+        }
+      }
+      const test = async (): Promise<boolean> => {
+        if (hasConditionGroups(tree)) return conditionGroupsMatch(tree, { vars: variables, runCode: runConditionCode })
+        if (code !== '') return evalCondition(code, variables, evaluateExpression)
+        emit('error', loopNode.id, 'while-loop: 没有配置条件，循环不会执行')
+        return false
+      }
       if (startId === null) return endId
       let iterations = 0
-      while (await evalCondition(code, variables, evaluateExpression)) {
+      while (await test()) {
         if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
         variables['loopIndex'] = iterations
         const seg = await runLoopBody(loopNode, startId)

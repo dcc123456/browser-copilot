@@ -1141,13 +1141,39 @@ export function runOp(op: Op): OpResult {
    * fields but jsdom (and some pages' wrappers) do not, so they are forced onto
    * the instance when missing.
    */
+  /**
+   * `Control+A` into the key Chrome would report plus the modifier flags.
+   *
+   * The `press-key` block's catalog value is a combo string, and dispatching it
+   * whole gave the page `key === 'Control+A'` with no modifiers set — the
+   * shortcut never fired for any listener.
+   */
+  function parseKeyCombo(key: string): {
+    key: string
+    modifiers: { ctrl?: boolean; meta?: boolean; shift?: boolean; alt?: boolean }
+  } {
+    const parts = key.split('+')
+    const modifiers: { ctrl?: boolean; meta?: boolean; shift?: boolean; alt?: boolean } = {}
+    if (parts.length < 2 || key === '+') return { key, modifiers }
+    for (const part of parts.slice(0, -1)) {
+      const name = part.trim().toLowerCase()
+      if (name === 'control' || name === 'ctrl') modifiers.ctrl = true
+      else if (name === 'shift') modifiers.shift = true
+      else if (name === 'alt' || name === 'option') modifiers.alt = true
+      else if (name === 'meta' || name === 'command' || name === 'cmd') modifiers.meta = true
+    }
+    let main = (parts[parts.length - 1] ?? key).trim()
+    // A real keydown reports a bare letter lowercase unless Shift is held.
+    if (/^[a-z]$/i.test(main)) main = modifiers.shift === true ? main.toUpperCase() : main.toLowerCase()
+    return { key: main, modifiers }
+  }
+
   function dispatchKey(
     element: Element,
     type: string,
     key: string,
     modifiers: { ctrl?: boolean; meta?: boolean; shift?: boolean; alt?: boolean } = {},
-  ): void {
-    const keyCode = keyCodeForKey(key)
+  ): void {    const keyCode = keyCodeForKey(key)
     const init: KeyboardEventInit = {
       key,
       code: codeForKey(key),
@@ -1888,6 +1914,12 @@ export function runOp(op: Op): OpResult {
         if (spec.mode === 'top') window.scrollTo({ top: 0, left: 0, behavior })
         else if (spec.mode === 'bottom')
           window.scrollTo({ top: document.documentElement.scrollHeight ?? 0, left: 0, behavior })
+        else if (spec.mode === 'to')
+          window.scrollTo({
+            left: (spec.x ?? 0) + (spec.xIncremental ? window.scrollX : 0),
+            top: (spec.y ?? 0) + (spec.yIncremental ? window.scrollY : 0),
+            behavior,
+          })
         else
           window.scrollBy({
             top: 'y' in spec ? (spec.y ?? 0) : 0,
@@ -1901,13 +1933,13 @@ export function runOp(op: Op): OpResult {
     }
 
     if (op.action === 'press_key' && !op.target) {
-      const key = String(op.value ?? '')
-      if (!key) return fail('press_key needs a key name.')
+      const combo = parseKeyCombo(String(op.value ?? ''))
+      if (!combo.key) return fail('press_key needs a key name.')
       const active = (document.activeElement ?? document.body) as Element
-      dispatchKey(active, 'keydown', key)
-      dispatchKey(active, 'keypress', key)
-      dispatchKey(active, 'keyup', key)
-      return { ...base(), ok: true, found: true, note: `pressed ${key}` }
+      dispatchKey(active, 'keydown', combo.key, combo.modifiers)
+      dispatchKey(active, 'keypress', combo.key, combo.modifiers)
+      dispatchKey(active, 'keyup', combo.key, combo.modifiers)
+      return { ...base(), ok: true, found: true, note: `pressed ${combo.key}` }
     }
 
     if (op.action === 'element_exists' || op.action === 'count_elements') {
@@ -1983,10 +2015,33 @@ export function runOp(op: Op): OpResult {
 
     if (op.action === 'create_element') {
       const html = String(op.value ?? '')
+      // The block's own "CSS" and "JavaScript" fields: styles go into a
+      // `<style>` element, and the script runs once per created element with
+      // `this` bound to it — which is the only way that field is useful.
+      if (op.css && op.css.trim() !== '') {
+        const style = document.createElement('style')
+        style.textContent = op.css
+        document.head.appendChild(style)
+      }
       const wrapper = document.createElement('div')
       wrapper.innerHTML = html
       const inserted = Array.prototype.slice.call(wrapper.children) as Element[]
       for (const child of inserted) document.body.appendChild(child)
+      if (op.javascript && op.javascript.trim() !== '') {
+        for (const child of inserted) {
+          try {
+            // eslint-disable-next-line no-new-func -- the block's contract is running author-written page JS
+            new Function(op.javascript).call(child)
+          } catch (error) {
+            return {
+              ...base(),
+              ok: false,
+              found: true,
+              note: `create_element 脚本执行失败：${String(error)}`,
+            }
+          }
+        }
+      }
       return { ...base(), ok: true, found: true, note: `created ${inserted.length} element(s)` }
     }
 
@@ -2003,7 +2058,13 @@ export function runOp(op: Op): OpResult {
           }
         }
         set(window, 'onbeforeunload', null)
-        set(window, 'confirm', () => true)
+        // The block's "accept" toggle and prompt text used to reach nobody: every
+        // dialog was auto-accepted and every prompt() answered with null.
+        set(window, 'confirm', () => op.accept !== false)
+        if (typeof op.value === 'string' && op.value !== '') {
+          const answer = op.value
+          set(window, 'prompt', () => answer)
+        }
       } catch {
         /* handlers may be non-configurable on some pages */
       }
@@ -2110,6 +2171,13 @@ export function runOp(op: Op): OpResult {
           ;(element as HTMLElement).scrollBy?.({
             top: 'y' in spec ? (spec.y ?? 0) : 0,
             left: 'x' in spec ? (spec.x ?? 0) : 0,
+            behavior,
+          })
+        } else if (spec.mode === 'to') {
+          const box = element as HTMLElement
+          box.scrollTo?.({
+            left: (spec.x ?? 0) + (spec.xIncremental ? box.scrollLeft : 0),
+            top: (spec.y ?? 0) + (spec.yIncremental ? box.scrollTop : 0),
             behavior,
           })
         } else if (spec.mode === 'top') (element as HTMLElement).scrollTo?.({ top: 0, behavior })
@@ -2392,9 +2460,27 @@ export function runOp(op: Op): OpResult {
       const wanted = Array.isArray(op.value) ? op.value.map(String) : [String(op.value ?? '')]
       const available: string[] = []
       const chosen: HTMLOptionElement[] = []
+      // "Select an option by" also offers positions (first / last / custom), not
+      // just the value, and nothing used to read that choice — every positional
+      // mode fell through to the value match and failed on a blank value box.
+      const byPosition = op.selectBy === 'first' || op.selectBy === 'last' || op.selectBy === 'index'
+      const position =
+        op.selectBy === 'last'
+          ? element.options.length - 1
+          : op.selectBy === 'first'
+            ? 0
+            : Math.trunc(op.index ?? 0)
+      if (byPosition) {
+        const at = element.options[position]
+        if (!at || position < 0)
+          return withMeta(
+            fail(`No option at position ${position + 1}. Available: ${element.options.length}`),
+          )
+        chosen.push(at)
+      }
       for (let i = 0; i < element.options.length; i += 1) {
         const option = element.options[i]
-        if (!option) continue
+        if (!option || byPosition) continue
         const label = collapse(option.textContent ?? '')
         available.push(label || option.value)
         if (wanted.indexOf(option.value) !== -1 || wanted.indexOf(label) !== -1) chosen.push(option)
@@ -2512,16 +2598,16 @@ export function runOp(op: Op): OpResult {
     }
 
     if (op.action === 'press_key') {
-      const key = String(op.value ?? '')
-      if (!key) return withMeta(fail('press_key needs a key name.'))
+      const combo = parseKeyCombo(String(op.value ?? ''))
+      if (!combo.key) return withMeta(fail('press_key needs a key name.'))
       focusElement(element)
       // dispatchKey carries keyCode/which — DraftJS-style editors read `e.which`
       // (a bare `new KeyboardEvent({ key })` reports 0 and is ignored).
-      dispatchKey(element, 'keydown', key)
-      dispatchKey(element, 'keypress', key)
-      dispatchKey(element, 'keyup', key)
+      dispatchKey(element, 'keydown', combo.key, combo.modifiers)
+      dispatchKey(element, 'keypress', combo.key, combo.modifiers)
+      dispatchKey(element, 'keyup', combo.key, combo.modifiers)
       let navigates = false
-      if (key === 'Enter') {
+      if (combo.key === 'Enter') {
         const form = (element as HTMLInputElement).form
         if (form) {
           navigates = true
@@ -2867,6 +2953,17 @@ export function runWorkflowJs(input: {
           v: Record<string, unknown>,
         ) => unknown
 
+      // A statement body compiles as written — unless it uses a top-level
+      // `await`, which `new Function` rejects at compile time. Wrapping the body
+      // in an async IIFE keeps `return` working (it returns from the IIFE, whose
+      // promise the harness awaits below) so the very common
+      // `const r = await fetch(...)` script runs instead of dying before its
+      // first line. The original error is what the author sees when the wrapped
+      // shape does not compile either (a real syntax error).
+      const awaitWord = /\bawait\b/
+      const wrapStatements = (src: string): string =>
+        `"use strict";\nreturn (async () => {\n${src}\n})();`
+
       const fn = looksLikeExpression
         ? (() => {
             // `new Function` COMPILES without calling, so a shape the
@@ -2883,7 +2980,18 @@ export function runWorkflowJs(input: {
               return buildFn()
             }
           })()
-        : buildFn()
+        : (() => {
+            try {
+              return buildFn()
+            } catch (error) {
+              if (!awaitWord.test(code)) throw error
+              try {
+                return buildFn(wrapStatements)
+              } catch {
+                throw error
+              }
+            }
+          })()
 
       let ret: unknown
       try {

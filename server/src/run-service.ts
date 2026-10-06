@@ -22,6 +22,8 @@
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { runWorkflow } from '../../src/background/workflow-engine/engine'
+import { triggerFromNodes } from '../../src/lib/workflow/migrate'
+import { seedFromTrigger } from '../../src/lib/workflow/workflow-inputs'
 import {
   DEFAULT_WAIT_MS,
   applyDefaultWaits,
@@ -264,7 +266,21 @@ export class RunService {
         opts.workflow.settings?.defaultWaitMs ?? DEFAULT_WAIT_MS,
       )
       const result = await runWorkflow(effective, {
-        variables: { ...(opts.variables ?? {}) },
+        // Declared trigger inputs (and their graph defaults) are seeded as
+        // defaults UNDER whatever the request supplied — the extension does this
+        // at run start. Skipping it here meant a graph default like
+        // `city = Shanghai` never existed on the server and every `{{city}}`
+        // reference stayed unresolved.
+        //
+        // An editor-authored / PUT graph carries its inputs on the trigger NODE,
+        // not on `workflow.trigger`, so the mirror is derived when the top-level
+        // object has none.
+        variables: seedFromTrigger(
+          effective.trigger?.parameters?.length
+            ? effective.trigger
+            : triggerFromNodes(effective.drawflow.nodes),
+          opts.variables,
+        ),
         signal,
         // M4: one checkpoint per settled node, written to
         // `<dataDir>/checkpoints/checkpoint-<runId>.json`.
@@ -282,6 +298,9 @@ export class RunService {
         executors: createExecutors(deps),
         resolveWorkflow: this.library.resolveWorkflow,
         loopElementCounter: (selector) => driver.countElements(selector),
+        // Without this hook the engine publishes an empty `loopElementSelector`
+        // and every folded element-loop body reads a blank selector.
+        loopElementSelector: (selector, index) => driver.elementSelectorAt(selector, index),
         evaluateExpression: async (code, vars) => {
           const evaluated = await driver.execJs(`return (${code});`, { vars })
           return evaluated.ok ? evaluated.data : undefined

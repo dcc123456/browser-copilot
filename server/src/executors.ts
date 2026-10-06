@@ -24,10 +24,28 @@ import { sanitizeModelAnswer } from '../../src/lib/model-output'
 import { streamCompletion, type WireMessage } from '../../src/lib/llm'
 import { preprocessImage } from '../../src/lib/vision'
 import { interpolate } from '../../src/lib/workflow/interpolate'
+import { conditionGroupsMatch } from '../../src/lib/workflow/condition-tree'
+import {
+  applyAssignVariable,
+  compareDataItems,
+  cutBetweenMarkers,
+  readRecordList,
+  selectOptionFields,
+  pickTabIndex,
+  scrollSpecFrom,
+  webhookContentTypeOf,
+  webhookRecord,
+} from '../../src/lib/workflow/block-output'
 import { normalizeWorkflowFiles } from '../../src/lib/workflow/file-artifact'
+import {
+  coerceInputValue,
+  missingRequiredInputs,
+  workflowParametersOf,
+} from '../../src/lib/workflow/workflow-inputs'
 import type { Op, ScrollSpec, Target, TargetSpec } from '../../src/lib/ops'
 import type { RunnerConfig } from './config'
 import type { RunDriver } from './driver'
+import { TAB_APPEAR_TIMEOUT_MS } from './driver'
 import { runAgentTurnForBlock } from './agent/agent-loop'
 
 // --- Small shared helpers (ported verbatim) -----------------------------------
@@ -266,49 +284,6 @@ function clarifyWorkerJsError(error: unknown): string {
   return raw
 }
 
-/** Evaluate one Automa condition row against runtime variables (ported). */
-interface ConditionRow {
-  type?: string
-  compare?: string
-  value?: unknown
-  name?: string
-}
-
-function evalConditionRow(row: ConditionRow, vars: Record<string, unknown>): boolean {
-  const left = row.name !== undefined && row.name !== '' ? vars[row.name] : row.value
-  const right = row.value
-  const present = left !== undefined && left !== null && left !== ''
-  switch (row.compare ?? '') {
-    case 'nq':
-    case 'not-exists':
-    case 'not-visible':
-      return !present
-    case 'exists':
-    case 'visible':
-    case 'visible-screen':
-      return present
-    case 'cnt':
-    case 'contains':
-      return String(left ?? '').includes(String(right ?? ''))
-    case 'nct':
-      return !String(left ?? '').includes(String(right ?? ''))
-    case 'gt':
-      return Number(left) > Number(right)
-    case 'gte':
-      return Number(left) >= Number(right)
-    case 'lt':
-      return Number(left) < Number(right)
-    case 'lte':
-      return Number(left) <= Number(right)
-    case 'eql':
-    case 'eq':
-    default:
-      if (typeof left === 'number' || typeof right === 'number')
-        return Number(left) === Number(right)
-      return String(left ?? '') === String(right ?? '')
-  }
-}
-
 /** Local OCR via Tesseract.js (Node): the offscreen-document equivalent. */
 async function ocrImageNode(
   dataUrl: string,
@@ -487,9 +462,13 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
 
   const pressKey: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    const key = String(data['key'] ?? '')
-    ctx.emit('status', `按下按键: ${key}`)
-    return runRaw({ action: 'press_key', value: key }, ctx)
+    const key = String(data['keys'] ?? data['keysToPress'] ?? data['key'] ?? '')
+    // The form's target field decides WHICH control receives the key; without it
+    // the event went to whatever the page had focused (nothing, on a fresh tab).
+    const selector = sel(data)
+    ctx.emit('status', `按下按键: ${key}${selector ? ` → ${selector}` : ''}`)
+    if (!selector) return runRaw({ action: 'press_key', value: key }, ctx)
+    return runRaw(withWait({ action: 'press_key', value: key, target: targetFrom(data) }, data), ctx)
   }
 
   const hover: BlockExecutor = async (data, ctx) => {
@@ -527,23 +506,194 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
       )
       ctx.variables[variable] = dataUrl
       ctx.emit('result', `已截图 (${type})`)
+
+      // The edit form's "save to computer" / column fields were pure decoration
+      // here: the capture only ever landed in a variable, so checking the box
+      // wrote nothing — same contract the extension engine now honours.
+      if (data['saveToComputer'] === true) {
+        const rawName = interpolate(
+          String(data['fileName'] ?? ''),
+          ctx.variables,
+          ctx.refData,
+        ).trim()
+        const ext = dataUrl.startsWith('data:image/jpeg') ? 'jpeg' : 'png'
+        const base = rawName || 'screenshot'
+        const filename = /\.[a-z0-9]+$/i.test(base) ? base : `${base}.${ext}`
+        mkdirSync(artifactsDir, { recursive: true })
+        const path = join(artifactsDir, filename.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_'))
+        writeFileSync(path, Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64'))
+        ctx.variables['lastScreenshotPath'] = filename
+        ctx.emit('info', `已写出文件: ${path}`)
+      }
+      const column = String(data['dataColumn'] ?? '').trim()
+      if (data['saveToColumn'] === true && column) {
+        ctx.emit(
+          'info',
+          `已写入数据表列「${column}」${collectReadColumn(ctx, column, [dataUrl])} 行`,
+        )
+      }
     } catch (error) {
       ctx.emit('error', `截图失败: ${message(error)}`)
     }
     return null
   }
 
+  /**
+   * Reads publish through the same contract the extension engine uses: the
+   * declared `variableName` (plus the legacy fallback name), and the data table
+   * column when `saveData` is on — otherwise `export-data` writes an empty file.
+   */
+  function collectReadColumn(
+    ctx: WorkflowExecCtx,
+    column: string,
+    values: readonly string[],
+  ): number {
+    if (!Array.isArray(ctx.variables['dataTable'])) ctx.variables['dataTable'] = []
+    const table = ctx.variables['dataTable'] as Record<string, unknown>[]
+    values.forEach((value, index) => {
+      while (table.length <= index) table.push({})
+      table[index][column] = value
+    })
+    return values.length
+  }
+
+  function requireReadMatch(what: string, values: readonly string[]): void {
+    if (values.some((value) => String(value ?? '').trim() !== '')) return
+    throw new Error(
+      `${what} 没有读到任何内容。请依次排查：① 选择器是否写对；② 元素是否由脚本稍后渲染（加 wait-connections 或 delay）；③ 读的是否是本轮标签页；④ 元素是否在 iframe 内（只读主框架）。若要「有则读、没有就跳过」，请改用 element-exists 分支。`,
+    )
+  }
+
+  function publishRead(
+    ctx: WorkflowExecCtx,
+    data: Record<string, unknown>,
+    values: readonly string[],
+    fallbackVariable: string,
+  ): void {
+    // "Text prefix" / "Text suffix" are markers, not decoration (see
+    // `cutBetweenMarkers`); nothing applied them, so a read configured to strip
+    // its label published the whole element text.
+    const prefix = String(data['prefixText'] ?? '')
+    const suffix = String(data['suffixText'] ?? '')
+    const kept =
+      prefix === '' && suffix === ''
+        ? values
+        : values.map((text) => cutBetweenMarkers(text, prefix, suffix))
+    const value: unknown = data['multiple'] === true ? kept : (kept[0] ?? '')
+    const variable = String(data['variableName'] ?? '').trim() || fallbackVariable
+    ctx.variables[variable] = value
+    if (variable !== fallbackVariable) ctx.variables[fallbackVariable] = value
+    if (data['saveData'] === true) {
+      const column = String(data['dataColumn'] ?? '').trim()
+      if (!column) {
+        ctx.emit('info', '未指定数据列名（dataColumn），本次读取未写入数据表')
+      } else {
+        ctx.emit(
+          'info',
+          `已写入数据表列「${column}」${collectReadColumn(ctx, column, kept)} 行`,
+        )
+      }
+    }
+    ctx.emit('result', Array.isArray(value) ? value.join('\n') : String(value))
+  }
+
+  /** The same in-page read the extension injects (no closure over helpers). */
+  function readTextsJs(
+    selector: string,
+    multiple: boolean,
+    useTextContent: boolean,
+    includeTags: boolean,
+  ): string {
+    return `(() => {
+      const selector = ${JSON.stringify(selector)}
+      const nodes = selector ? Array.from(document.querySelectorAll(selector)) : []
+      if (nodes.length === 0) return []
+      const picked = ${multiple} ? nodes : nodes.slice(0, 1)
+      return picked.map((node) => {
+        const el = node
+        if (${includeTags}) return el.innerHTML ?? ''
+        if (${useTextContent}) return el.textContent ?? ''
+        return el.innerText || el.textContent || ''
+      })
+    })()`
+  }
+
+  /** Run an in-page read, polling while it comes back empty (a replay races the page). */
+  async function readValues(
+    code: string,
+    ctx: WorkflowExecCtx,
+    waitMs: number,
+  ): Promise<string[]> {
+    const deadline = Date.now() + Math.max(0, waitMs)
+    for (;;) {
+      const result = await driver.execJs(code, {}, ctx.tabId)
+      const raw = result.ok ? result.data : undefined
+      const values = Array.isArray(raw) ? raw.map((v) => String(v)) : []
+      if (values.length > 0 || Date.now() >= deadline) return values
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+  }
+
+  function readWaitMs(data: Record<string, unknown>): number {
+    if (data['waitForSelector'] !== true) return 0
+    return Math.max(0, Number(data['waitSelectorTimeout'] ?? 5000))
+  }
+
   const getText: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const selector = sel(data)
-    const result = await driver.execJs(
-      `(() => { const el = document.querySelector(${JSON.stringify(selector)}); return el ? (el.textContent ?? '').trim() : '' })()`,
-      {},
-      ctx.tabId,
+    if (!selector) {
+      throw new Error('get-text: 缺少 selector，不知道要读哪个元素。')
+    }
+    const values = await readValues(
+      readTextsJs(
+        selector,
+        data['multiple'] === true,
+        data['useTextContent'] === true,
+        data['includeTags'] === true,
+      ),
+      ctx,
+      readWaitMs(data),
     )
-    const text = result.ok ? String(result.data ?? '') : ''
-    ctx.variables['lastText'] = text
-    ctx.emit('result', text)
+    requireReadMatch(`get-text(selector: "${selector}")`, values)
+    publishRead(ctx, data, values, 'lastText')
+    return null
+  }
+
+  const readPage: BlockExecutor = async (data, ctx) => {
+    assertActive(ctx)
+    const source = String(data['source'] ?? 'text')
+    const selector = String(data['selector'] ?? '').trim()
+    const requested = Number(data['maxChars'])
+    const maxChars = Number.isFinite(requested) && requested > 0 ? Math.floor(requested) : 20000
+    let values: string[]
+    if (source === 'selection') {
+      const result = await driver.execJs('window.getSelection().toString()', {}, ctx.tabId)
+      values = [String(result.ok ? result.data : '')]
+      if (!values[0].trim()) {
+        ctx.emit('error', 'read-page: 当前没有选中任何文本（source: selection）——读取结果为空')
+      }
+    } else if (source === 'html') {
+      const code = `(() => {
+        const selector = ${JSON.stringify(selector)}
+        const el = selector ? document.querySelector(selector) : document.documentElement
+        return el ? el.outerHTML : ''
+      })()`
+      const html = await driver.execJs(code, {}, ctx.tabId)
+      values = [String(html.ok ? html.data : '').slice(0, maxChars)]
+      if (selector && !values[0]) {
+        throw new Error(`read-page: 选择器 ${selector} 没有匹配到元素，无法读取 HTML`)
+      }
+    } else {
+      const read = await readValues(
+        readTextsJs(selector || 'body', true, false, false),
+        ctx,
+        readWaitMs(data),
+      )
+      values = [read.join('\n').slice(0, maxChars)]
+    }
+    requireReadMatch(`read-page(source: "${source}")`, values)
+    publishRead(ctx, { ...data, multiple: false }, values, 'lastPageText')
     return null
   }
 
@@ -627,7 +777,11 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
   const newTabExec: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const url = data['url'] ? String(data['url']) : undefined
-    const tab = await driver.newTab(url)
+    const ua =
+      data['customUserAgent'] === true
+        ? interpolate(String(data['userAgent'] ?? ''), ctx.variables, ctx.refData).trim()
+        : ''
+    const tab = await driver.newTab(url, ua === '' ? undefined : ua)
     ctx.setTab?.(tab.id)
     if (url && data['waitTabLoaded'] !== false) {
       await driver.waitForLoaded(tab.id)
@@ -638,7 +792,53 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
 
   const switchTabExec: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    const tab = await driver.switchTab(Number(data['index'] ?? 0))
+    // Same lookup as the extension (`pickTabIndex`). This read only `index` — a
+    // key the editor never writes — so every authored node jumped to tab 0 and
+    // still reported 已切换.
+    const listed0 = driver.listTabs()
+    if (listed0.length === 0) throw new Error('switch-tab: 没有可切换的标签页')
+    const pattern = interpolate(String(data['matchPattern'] ?? ''), ctx.variables, ctx.refData)
+    const title = interpolate(String(data['tabTitle'] ?? ''), ctx.variables, ctx.refData)
+    const current = ctx.tabId
+    // Runner-only race, the same one `driver.switchTab` waits out: a page a click
+    // just spawned is reported by Playwright's `page` event AFTER the click
+    // resolves, so a by-URL/by-title lookup run immediately can miss a tab the
+    // workflow really opened.
+    const deadline = Date.now() + TAB_APPEAR_TIMEOUT_MS
+    let tabs: { id: number; url: string; title: string }[] = []
+    let picked = { index: -1, byIndex: false }
+    for (;;) {
+      // `listTabs` reports an empty title (Playwright reads it per page, async).
+      tabs = await Promise.all(
+        driver.listTabs().map(async (tab) => ({
+          ...tab,
+          title: (await driver.pageById(tab.id)?.title().catch(() => tab.title)) ?? tab.title,
+        })),
+      )
+      picked = pickTabIndex(data, tabs, current, { matchPattern: pattern, tabTitle: title })
+      if (picked.index >= 0 || picked.byIndex || Date.now() >= deadline) break
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    const { index, byIndex } = picked
+    if (byIndex && (index < 0 || index >= tabs.length)) {
+      throw new Error(
+        `switch-tab: 标签页索引 ${index} 超出范围（本次运行共 ${tabs.length} 个），无法切换`,
+      )
+    }
+    if (index < 0) {
+      const createUrl = interpolate(String(data['url'] ?? ''), ctx.variables, ctx.refData)
+      if (data['createIfNoMatch'] === true && createUrl) {
+        const tab = await driver.newTab(createUrl)
+        ctx.setTab?.(tab.id)
+        await driver.waitForLoaded(tab.id)
+        ctx.emit('result', `没有匹配的标签页，已新建 #${tab.id}`)
+        return null
+      }
+      throw new Error(
+        `switch-tab: 没有匹配的标签页（findTabBy=${String(data['findTabBy'] ?? 'match-patterns')}）`,
+      )
+    }
+    const tab = await driver.switchTab(index)
     ctx.setTab?.(tab.id)
     ctx.emit('result', `已切换到标签页 #${tab.id} (${tab.url})`)
     return null
@@ -647,6 +847,10 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
   const closeTabExec: BlockExecutor = async (_data, ctx) => {
     assertActive(ctx)
     await driver.closeActiveTab()
+    // The driver hands activation to the last surviving page; the run's tab
+    // pointer has to follow it, or every later step drives a closed page.
+    const survivor = driver.activeTabId()
+    if (survivor !== undefined) ctx.setTab?.(survivor)
     ctx.emit('result', '已关闭当前标签页')
     return null
   }
@@ -693,51 +897,91 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
 
   const insertData: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    let items: unknown[] = []
-    try {
-      const parsed = JSON.parse(String(data['data'] ?? '[]'))
-      if (Array.isArray(parsed)) items = parsed
-    } catch {
-      /* malformed json → insert nothing */
-    }
+    // Mirror of the extension executor: `dataList` items are either editor
+    // instructions (`{ type: 'table' | 'variable', name, value }`) or the
+    // records a generated graph writes directly. Pushing the instructions as
+    // rows silently filled the table with `{ type, name, value }` objects.
+    const items = readRecordList(data['dataList'] ?? data['data'])
     if (!Array.isArray(ctx.variables['dataTable'])) ctx.variables['dataTable'] = []
-    const table = ctx.variables['dataTable'] as unknown[]
-    table.push(...items)
-    ctx.emit('result', `已插入 ${items.length} 行`)
+    const table = ctx.variables['dataTable'] as Record<string, unknown>[]
+    let rows = 0
+    for (const item of items) {
+      const record = (item ?? {}) as Record<string, unknown>
+      const kind = String(record['type'] ?? '')
+      const name = String(record['name'] ?? '').trim()
+      if (kind === 'table' || kind === 'variable') {
+        if (name === '') continue
+        const value = interpolate(String(record['value'] ?? ''), ctx.variables, ctx.refData)
+        if (kind === 'variable') {
+          ctx.variables[name] =
+            record['action'] === 'append'
+              ? `${ctx.variables[name] ?? ''}${value}`
+              : value
+        } else {
+          if (table.length === 0) table.push({})
+          for (const row of table) row[name] = value
+        }
+        rows += 1
+        continue
+      }
+      table.push(item as Record<string, unknown>)
+      rows += 1
+    }
+    ctx.emit('result', `已插入 ${rows} 项`)
     return null
   }
 
   const exportData: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    const table = Array.isArray(ctx.variables['dataTable'])
-      ? (ctx.variables['dataTable'] as Record<string, unknown>[])
-      : Array.isArray(ctx.refData)
-        ? (ctx.refData as Record<string, unknown>[])
-        : []
-    const format = String(data['format'] ?? 'csv')
+    // `type` / `name` are the keys the catalog declares and the edit form writes;
+    // `format` / `filename` are this executor's older names, kept as fallbacks.
+    const format = String(data['type'] ?? data['format'] ?? 'csv')
+    const delimiter = String(data['csvDelimiter'] ?? '') || ','
+    const mode = String(data['dataToExport'] ?? 'data-columns')
+    if (mode === 'google-sheets') {
+      throw new Error('export-data: Google Sheets 导出需要 OAuth 凭据，尚未配置')
+    }
     let text = ''
-    if (format === 'json') {
-      text = JSON.stringify(table)
-    } else if (table.length === 0) {
-      text = ''
-    } else {
-      const header = Object.keys(table[0] as Record<string, unknown>)
-      const cell = (value: unknown): string => {
-        const raw = String(value ?? '')
-        return /[",\n]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw
+    if (mode === 'variable') {
+      const variable = String(data['variableName'] ?? '').trim()
+      if (!variable) {
+        throw new Error('export-data: 导出目标是「变量」但没有填 variableName，无法导出')
       }
-      const rows = [header, ...table.map((row) => header.map((key) => cell(row[key])))]
-      text = rows.map((row) => row.join(',')).join('\n')
+      const value = ctx.variables[variable]
+      text = typeof value === 'string' ? value : JSON.stringify(value ?? '')
+    } else {
+      const table = Array.isArray(ctx.variables['dataTable'])
+        ? (ctx.variables['dataTable'] as Record<string, unknown>[])
+        : Array.isArray(ctx.refData)
+          ? (ctx.refData as Record<string, unknown>[])
+          : []
+      if (format === 'json') {
+        text = JSON.stringify(table)
+      } else if (table.length === 0) {
+        text = ''
+      } else {
+        const header = Object.keys(table[0] as Record<string, unknown>)
+        const cell = (value: unknown): string => {
+          const raw = String(value ?? '')
+          return /[",\n]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw
+        }
+        const rows = [header, ...table.map((row) => header.map((key) => cell(row[key])))]
+        text = rows.map((row) => row.join(delimiter)).join('\n')
+      }
     }
     ctx.variables['lastExport'] = text
     // Server convenience on top of the extension contract: the export also
     // lands in the run's artifacts directory, so the file is retrievable.
     if (text) {
-      const path = writeArtifact(
-        artifactsDir,
-        `export-${Date.now()}.${format === 'json' ? 'json' : 'csv'}`,
-        text,
-      )
+      const ext = format === 'json' ? 'json' : 'csv'
+      const rawName = interpolate(
+        String(data['name'] ?? data['filename'] ?? ''),
+        ctx.variables,
+        ctx.refData,
+      ).trim()
+      const fileName = rawName.includes('.') ? rawName : `${rawName || `export-${Date.now()}`}.${ext}`
+      const body = format === 'csv' && data['addBOMHeader'] === true ? `﻿${text}` : text
+      const path = writeArtifact(artifactsDir, fileName, body)
       ctx.emit('info', `已写出文件: ${path}`)
     }
     ctx.emit('result', text.slice(0, 80))
@@ -778,9 +1022,19 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     const url = interpolate(String(data['url'] ?? ''), ctx.variables, ctx.refData)
     const method = String(data['method'] ?? 'POST').toUpperCase()
     const timeout = Math.max(0, Number(data['timeout'] ?? 30000))
-    const responseVariable = String(data['responseVariable'] ?? 'lastHttpResponse')
+    // `variableName` is the catalog + edit-form key; `responseVariable` is the
+    // legacy name. The extension accepts both; reading only the latter meant a
+    // user- or model-chosen name never existed downstream.
+    const responseVariable = String(
+      data['variableName'] || data['responseVariable'] || 'lastHttpResponse',
+    )
+    // `responseType` decides how the body is decoded and `dataPath` narrows it —
+    // both are edit-form fields the port used to ignore, so the stored record had
+    // no `data` key and `{{resp.data.total}}` dangled there.
+    const responseType = String(data['responseType'] ?? 'json')
+    const dataPath = String(data['dataPath'] ?? '')
 
-    let headers: Record<string, string> = { 'content-type': 'application/json' }
+    let headers: Record<string, string> = { 'content-type': webhookContentTypeOf(data) }
     const headersRaw = interpolate(String(data['headers'] ?? ''), ctx.variables, ctx.refData)
     if (headersRaw.trim()) {
       try {
@@ -816,22 +1070,19 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
           body: bodyText,
           signal: controller.signal,
         })
-        const responseText = await response.text()
-        const record = {
-          status: response.status,
-          ok: response.ok,
-          headers: Object.fromEntries(response.headers.entries()),
-          body: responseText,
-        }
+        const record = await webhookRecord(response, responseType, dataPath)
         ctx.variables[responseVariable] = record
-        ctx.emit('result', `${method} ${response.status} ${responseText.slice(0, 80)}`)
+        ctx.emit('result', `${method} ${response.status} ${record.body.slice(0, 80)}`)
       } finally {
         if (timer !== undefined) clearTimeout(timer)
         ctx.signal.removeEventListener('abort', onAbort)
       }
     } catch (error) {
-      if ((error as Error)?.name !== 'AbortError') ctx.emit('error', message(error))
-      else ctx.emit('error', `${method} 请求超时或已取消`)
+      // A request that never landed must fail the step, like it does on the
+      // extension: logging it and returning let a workflow continue as though
+      // the webhook had been delivered.
+      if ((error as Error)?.name === 'AbortError') throw new Error(`${method} 请求超时或已取消`)
+      throw error
     }
     return null
   }
@@ -930,7 +1181,10 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
 
   const cookieBlock: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    const op = String(data['op'] ?? 'get')
+    // `type` is the edit form's name for this choice and `op` the tool schema's;
+    // the extension accepts both, the port read only `op` — so an editor-built
+    // "set cookie" node ran the GET branch and silently did nothing.
+    const op = String(data['op'] ?? data['type'] ?? 'get')
     const name = interpolate(String(data['name'] ?? ''), ctx.variables, ctx.refData)
     const value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
     const url = interpolate(String(data['url'] ?? ''), ctx.variables, ctx.refData)
@@ -968,16 +1222,39 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     return null
   }
 
+  /** The page's current text selection — `copySelectedText`'s source. */
+  async function pageSelectionText(ctx: WorkflowExecCtx): Promise<string> {
+    const run = await driver.execWorkflowJs(
+      'return String(window.getSelection ? window.getSelection().toString() : "")',
+      ctx.variables,
+      10_000,
+      ctx.tabId,
+    )
+    if (!run.ok) throw new Error(run.error)
+    return typeof run.data.result === 'string' ? run.data.result : ''
+  }
+
   const clipboardBlock: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    const op = String(data['op'] ?? 'get')
+    // Same drift as `cookie`: the editor writes `type`, the tool schema `op`.
+    const op = String(data['op'] ?? data['type'] ?? 'get')
     try {
       if (op === 'get') {
-        const text = await driver.clipboardGet()
+        // Mirror of the extension: `copySelectedText` (the form's "Copy selected
+        // text" checkbox) reads the page selection, not the system clipboard.
+        const text =
+          data['copySelectedText'] === true
+            ? await pageSelectionText(ctx)
+            : await driver.clipboardGet()
         ctx.variables[String(data['variableName'] ?? 'lastClipboard')] = text
         ctx.emit('result', text.slice(0, 80))
       } else {
-        const text = interpolate(String(data['text'] ?? ''), ctx.variables, ctx.refData)
+        // `dataToCopy` is the catalog's name for the text; `text` the schema's.
+        const text = interpolate(
+          String(data['text'] ?? data['dataToCopy'] ?? ''),
+          ctx.variables,
+          ctx.refData,
+        )
         await driver.clipboardInsert(text)
         ctx.emit('result', '已写入剪贴板')
       }
@@ -1000,7 +1277,12 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
   const linkBlock: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const selector = sel(data)
-    const newTab = (data['newTab'] as boolean | undefined) ?? true
+    // `newTab` is what the tool schema teaches, `openInNewTab` what the edit form
+    // writes; reading only the former left the form's choice ignored.
+    const newTab =
+      (data['newTab'] as boolean | undefined) ??
+      (data['openInNewTab'] as boolean | undefined) ??
+      true
     try {
       const result = await driver.execOp(
         { action: 'click_link', target: cssTarget(selector) },
@@ -1017,8 +1299,17 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
         }
         ctx.emit('result', `已在新标签页打开 ${href}`)
       } else {
+        // A same-tab link is only "opened" once the page has left this URL: the
+        // synthetic click returns while the navigation is still queued, so
+        // `waitForLoaded` saw the PREVIOUS document's load state and reported
+        // 已点击链接 too early — a following go-back then raced mid-navigation.
+        const before = driver.currentUrl(ctx.tabId)
+        const navigates = href !== '' && !href.startsWith('#') && !href.startsWith('javascript:')
         await runRaw(withWait({ action: 'click', target: cssTarget(selector) }, data), ctx)
-        if (waitLoaded) await driver.waitForLoaded(ctx.tabId)
+        if (waitLoaded) {
+          if (navigates) await driver.waitForUrlLeave(ctx.tabId, before)
+          await driver.waitForLoaded(ctx.tabId)
+        }
         ctx.emit('result', '已点击链接')
       }
     } catch (error) {
@@ -1029,8 +1320,8 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
 
   const attributeValueExec: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    const op = String(data['op'] ?? 'get')
-    const attribute = String(data['attribute'] ?? '')
+    const op = String(data['op'] ?? data['action'] ?? 'get')
+    const attribute = String(data['attribute'] ?? data['attributeName'] ?? '')
     const variable = String(data['variableName'] ?? 'lastAttribute')
     const opData: Op = {
       action: op === 'set' ? 'set_attribute' : 'get_attribute',
@@ -1038,7 +1329,11 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
       attribute,
     }
     if (op === 'set')
-      opData.value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
+      opData.value = interpolate(
+        String(data['value'] ?? data['attributeValue'] ?? ''),
+        ctx.variables,
+        ctx.refData,
+      )
     try {
       const result = await driver.execOp(opData, ctx.tabId)
       if (op === 'get') {
@@ -1078,14 +1373,20 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
   const tabUrlExec: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const variable = String(data['variableName'] ?? 'lastTabUrl')
+    // `scope` is the tool-schema key; `type` is the edit form's drifted name.
+    const scopeKey = String(data['scope'] ?? data['type'] ?? 'active-tab')
     try {
       const tabs = driver.listTabs()
       const current =
-        data['scope'] === 'all'
+        scopeKey === 'all'
           ? tabs
           : (tabs.find((tab) => tab.id === (ctx.tabId ?? driver.activeTabId())) ??
             tabs[tabs.length - 1])
-      ctx.variables[variable] = current
+      // The block's name promises a URL: storing the tab OBJECT made every
+      // downstream `{{u}}` render as `[object Object]`.
+      ctx.variables[variable] = Array.isArray(current)
+        ? current.map((tab) => String(tab.url ?? '')).join('\n')
+        : (current?.url ?? '')
       ctx.emit(
         'result',
         Array.isArray(current) ? `共 ${current.length} 个标签页` : (current?.url ?? ''),
@@ -1128,7 +1429,14 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
   const createElementExec: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const html = interpolate(String(data['html'] ?? ''), ctx.variables, ctx.refData)
-    return runRaw({ action: 'create_element', value: html }, ctx)
+    const op: Op = { action: 'create_element', value: html }
+    // The form has three content fields, not one: `css` becomes a `<style>` and
+    // `javascript` runs against each created element. Only `html` reached the page.
+    const css = interpolate(String(data['css'] ?? ''), ctx.variables, ctx.refData)
+    const javascript = interpolate(String(data['javascript'] ?? ''), ctx.variables, ctx.refData)
+    if (css.trim() !== '') op.css = css
+    if (javascript.trim() !== '') op.javascript = javascript
+    return runRaw(op, ctx)
   }
 
   const uploadFileExec: BlockExecutor = async (data, ctx) => {
@@ -1186,11 +1494,15 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     return null
   }
 
-  const handleDialogExec: BlockExecutor = async (_data, ctx) => {
+  const handleDialogExec: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     // Playwright auto-accepts every dialog at the page level (unattended);
-    // the kernel handler is still invoked for parity with flows that check it.
-    return runRaw({ action: 'handle_dialog' }, ctx)
+    // the kernel handler is still invoked with the block's own accept/prompt
+    // settings, so in-page confirm()/prompt() overrides honour them for parity.
+    const op: Op = { action: 'handle_dialog', accept: data['accept'] !== false }
+    const promptText = interpolate(String(data['promptText'] ?? ''), ctx.variables, ctx.refData)
+    if (promptText !== '') op.value = promptText
+    return runRaw(op, ctx)
   }
 
   // --- Data / variable operations (ported) --------------------------------------
@@ -1198,9 +1510,17 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
   const increaseVariable: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const name = String(data['variableName'] ?? '')
-    const step = Number(interpolate(String(data['value'] ?? '1'), ctx.variables, ctx.refData))
-    const current = Number(ctx.variables[name] ?? (data['incType'] === 'multiply' ? 1 : 0))
-    const next = data['incType'] === 'multiply' ? current * step : current + step
+    if (!name) {
+      throw new Error('increase-variable: 缺少 variableName，无法执行')
+    }
+    const step = Number(
+      interpolate(String(data['increaseBy'] ?? data['value'] ?? '1'), ctx.variables, ctx.refData),
+    )
+    // Mirrors the extension, including the absent-variable case: `multiply` starts
+    // from the identity 1 so a fresh variable does not stay 0 forever.
+    const isMultiply = data['incType'] === 'multiply'
+    const current = Number(ctx.variables[name] ?? (isMultiply ? 1 : 0))
+    const next = isMultiply ? current * step : current + step
     ctx.variables[name] = Number.isNaN(next) ? 0 : next
     ctx.emit('result', `${name} = ${next}`)
     return null
@@ -1209,13 +1529,20 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
   const sliceVariable: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const name = String(data['variableName'] ?? '')
-    const start = Number(data['start'] ?? 0)
-    const end = data['end'] === '' || data['end'] === undefined ? undefined : Number(data['end'])
+    // `startIndex`/`endIndex` (+ `…IdxEnabled` toggles) are the editor's keys;
+    // `start`/`end` are legacy names kept as fallbacks.
+    const hasLegacyEnd = data['end'] !== undefined && data['end'] !== ''
+    const startEnabled = data['startIdxEnabled'] !== false
+    const endEnabled =
+      data['endIdxEnabled'] === true || (data['endIdxEnabled'] === undefined && hasLegacyEnd)
+    const start = startEnabled ? Number(data['startIndex'] ?? data['start'] ?? 0) : 0
+    const rawEnd = data['endIndex'] ?? data['end']
+    const end = endEnabled && rawEnd !== '' && rawEnd !== undefined ? Number(rawEnd) : undefined
     const value = ctx.variables[name]
     let sliced: unknown
     if (typeof value === 'string') sliced = value.slice(start, end)
     else if (Array.isArray(value)) sliced = value.slice(start, end)
-    else sliced = value
+    else throw new Error(`slice-variable: 变量 ${name} 不存在或不是字符串/数组，无法执行`)
     ctx.variables[String(data['output'] ?? name)] = sliced
     ctx.emit('result', String(sliced ?? ''))
     return null
@@ -1224,18 +1551,27 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
   const regexVariable: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const name = String(data['variableName'] ?? '')
-    const pattern = String(data['pattern'] ?? '')
-    const flags = String(data['flags'] ?? 'g')
-    const replace = interpolate(String(data['replace'] ?? ''), ctx.variables, ctx.refData)
+    const pattern = String(data['expression'] ?? data['pattern'] ?? '')
+    const flags = String(data['flag'] ?? data['flags'] ?? 'g')
+    const replace = interpolate(
+      String(data['replaceVal'] ?? data['replace'] ?? ''),
+      ctx.variables,
+      ctx.refData,
+    )
     const value = String(ctx.variables[name] ?? '')
     try {
       const regex = new RegExp(pattern, flags)
       let result: string
-      if (data['operation'] === 'replace') result = value.replace(regex, replace)
+      if (String(data['method'] ?? data['operation'] ?? 'match') === 'replace')
+        result = value.replace(regex, replace)
       else {
-        const flagsNoG = flags.replace('g', '')
-        const matches = value.match(new RegExp(pattern, flagsNoG)) ?? []
-        const all = flags.indexOf('g') !== -1 ? matches : [matches[0]].filter(Boolean)
+        // `String(value.match(/re/))` without the `g` flag returns only the
+        // first match, so the global list has to be taken with the flags the
+        // user chose; stripping `g` here made "match all" return one item.
+        const all =
+          flags.indexOf('g') !== -1
+            ? (value.match(regex) ?? [])
+            : (value.match(new RegExp(pattern, flags.replace('g', ''))) ?? []).slice(0, 1)
         result = JSON.stringify(all.map((m) => String(m)))
       }
       ctx.variables[String(data['output'] ?? name)] = result
@@ -1251,95 +1587,194 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
 
   const deleteDataExec: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    const target = tableOf(ctx)
-    const key = Number(data['key'] ?? -1)
-    const all = data['clearAll'] === true
-    if (all) ctx.variables['dataTable'] = []
-    else if (key >= 0 && key < target.length) target.splice(key, 1)
-    ctx.emit('result', all ? '已清空数据表' : `已删除第 ${key} 行`)
+    // Mirror of the extension executor: the editor writes `deleteList` items
+    // `{ type, columnId, variableName }`, never the row index read here before.
+    const items = readRecordList(data['deleteList'])
+    let removedColumns = 0
+    let removedVariables = 0
+    for (const item of items) {
+      const record = (item ?? {}) as Record<string, unknown>
+      if (String(record['type'] ?? 'table') === 'variable') {
+        const name = String(record['variableName'] ?? '').trim()
+        if (name !== '' && name in ctx.variables) {
+          delete ctx.variables[name]
+          removedVariables += 1
+        }
+        continue
+      }
+      const column = String(record['columnId'] ?? '[all]').trim()
+      if (column === '' || column === '[all]') {
+        ctx.variables['dataTable'] = []
+        removedColumns += 1
+        continue
+      }
+      for (const row of tableOf(ctx)) {
+        if (row && typeof row === 'object') delete (row as Record<string, unknown>)[column]
+      }
+      removedColumns += 1
+    }
+    ctx.emit(
+      'result',
+      `已删除 ${removedColumns} 列 / ${removedVariables} 个变量${removedColumns + removedVariables === 0 ? '（未配置删除项）' : ''}`,
+    )
     return null
   }
 
   const sortDataExec: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    const target = (ctx.variables['dataTable'] as Record<string, unknown>[]) ?? []
-    const field = String(data['field'] ?? '')
-    const direction = String(data['direction'] ?? 'asc') === 'desc' ? -1 : 1
-    const sorted = [...target].filter((row) => row && typeof row === 'object')
-    sorted.sort((a, b) => {
-      const va = field ? a[field] : a['value']
-      const vb = field ? b[field] : b['value']
-      if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * direction
-      return String(va ?? '').localeCompare(String(vb ?? '')) * direction
+    // Mirror of the extension executor — `itemProperties` (`{ name, order }`)
+    // over `dataSource` / `varSourceName`, not the invented `field` key.
+    const fromVariable = String(data['dataSource'] ?? 'table') === 'variable'
+    const sourceName = String(data['varSourceName'] ?? '').trim()
+    const target = fromVariable
+      ? readRecordList(ctx.variables[sourceName])
+      : ((ctx.variables['dataTable'] as unknown[]) ?? [])
+    const keys = readRecordList(data['itemProperties']).map((property) => {
+      const record = (property ?? {}) as Record<string, unknown>
+      return {
+        field: String(record['name'] ?? ''),
+        direction: String(record['order'] ?? 'asc') === 'desc' ? -1 : 1,
+      }
     })
-    ctx.variables['dataTable'] = sorted
-    ctx.emit('result', `已按 ${field || '值'} 排序`)
+    const criteria =
+      data['sortByProperty'] === true && keys.length > 0 ? keys : [{ field: '', direction: 1 }]
+    const rows = [...target]
+    rows.sort((left, right) => compareDataItems(left, right, criteria))
+    if (fromVariable && sourceName !== '') ctx.variables[sourceName] = rows
+    else ctx.variables['dataTable'] = rows
+    applyAssignVariable(data, ctx.variables, rows)
+    ctx.emit('result', `已按 ${criteria[0]?.field || '值'} 排序（${rows.length} 行）`)
     return null
   }
 
   const dataMapping: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    const rows = tableOf(ctx).filter(
-      (row): row is Record<string, unknown> => !!row && typeof row === 'object',
-    )
-    const expression = String(data['mapping'] ?? 'item')
-    const wrapped = `return rows.map((item, index) => (${expression}));`
-    const evaluated = await evalInPage(wrapped, { rows, vars: ctx.variables }, ctx)
-    if (!evaluated.ok) {
-      ctx.emit('error', 'data-mapping: 映射表达式执行失败')
-      return null
-    }
-    const mapped = Array.isArray(evaluated.value) ? evaluated.value : []
-    ctx.variables[String(data['output'] ?? 'mappedData')] = mapped
+    // Mirror of the extension executor: `sources[].destinations[]` renames
+    // fields; the page-evaluated `mapping` expression read no editor key.
+    const fromVariable = String(data['dataSource'] ?? 'table') === 'variable'
+    const sourceName = String(data['varSourceName'] ?? '').trim()
+    const rows = (
+      fromVariable ? readRecordList(ctx.variables[sourceName]) : tableOf(ctx)
+    ).filter((row): row is Record<string, unknown> => !!row && typeof row === 'object')
+    const renames = readRecordList(data['sources']).flatMap((source) => {
+      const record = (source ?? {}) as Record<string, unknown>
+      const from = String(record['name'] ?? '').trim()
+      if (from === '') return []
+      return readRecordList(record['destinations'])
+        .map(
+          (destination) =>
+            String((destination as Record<string, unknown>)?.['name'] ?? '').trim(),
+        )
+        .filter((to) => to !== '' && to !== from)
+        .map((to) => ({ from, to }))
+    })
+    const mapped = rows.map((row) => {
+      const next: Record<string, unknown> = { ...row }
+      for (const { from, to } of renames) {
+        if (!(from in next)) continue
+        next[to] = next[from]
+        delete next[from]
+      }
+      return next
+    })
+    if (fromVariable && sourceName !== '') ctx.variables[sourceName] = mapped
+    applyAssignVariable(data, ctx.variables, mapped)
     ctx.variables['lastMappedData'] = mapped
-    ctx.emit('result', `已映射 ${mapped.length} 行`)
+    ctx.emit('result', `已映射 ${mapped.length} 行（${renames.length} 个字段改名）`)
     return null
   }
 
   const logData: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    const text = interpolate(String(data['text'] ?? ''), ctx.variables, ctx.refData)
+    // Mirror of the extension executor: the catalog promises the run's recent
+    // log entries, and only the current run's log exists in either host.
+    const wanted = String(data['workflowId'] ?? '').trim()
+    if (wanted !== '') {
+      throw new Error(`log-data: 只保留当前运行的日志，工作流「${wanted}」的历史日志无法读取`)
+    }
+    const text = (ctx.getRunLog?.() ?? []).join('\n')
+    applyAssignVariable(data, ctx.variables, text)
+    if (data['saveData'] === true) {
+      const column = String(data['dataColumn'] ?? '').trim()
+      if (column !== '') {
+        if (!Array.isArray(ctx.variables['dataTable'])) ctx.variables['dataTable'] = []
+        const table = ctx.variables['dataTable'] as Record<string, unknown>[]
+        table.push({ [column]: text })
+      }
+    }
     ctx.emit('info', text)
     return null
   }
 
   const workflowState: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    const op = String(data['op'] ?? 'get')
+    // The editor's field is `type` (get / set / stop-*), `op` is the tool-schema
+    // name; reading only `op` made every editor-configured node fall through to
+    // `get`, so "set the state" read it instead.
+    const op = String(data['type'] ?? data['op'] ?? 'get')
     const variable = String(data['variableName'] ?? 'state')
     if (op === 'set') {
       const value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
       ctx.variables[variable] = value
       ctx.emit('result', `已设置状态 ${variable}`)
-    } else {
+      return null
+    }
+    if (op === 'get') {
       const value = ctx.variables[variable]
       ctx.variables['lastState'] = value
       ctx.emit('result', String(value ?? ''))
+      return null
     }
-    return null
+    // Stopping a run belongs to the scheduler, which no block can reach; the
+    // `throwError` toggle says what the workflow wants when that happens.
+    if (data['throwError'] === true) {
+      const detail = interpolate(String(data['errorMessage'] ?? ''), ctx.variables, ctx.refData)
+      throw new Error(detail.trim() === '' ? `workflow-state: 无法执行「${op}」` : detail)
+    }
+    throw new Error(`workflow-state: 「${op}」需要运行调度器接口，块内无法停止运行`)
   }
 
   const parameterPrompt: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
+    // The editor writes a `parameters` list (name / default / required); reading
+    // `defaultValue` + `variableName` instead honoured none of what the form
+    // configured. There is no prompt UI on the server — values arrive with the
+    // run request — so this block's job here is the extension's: fill defaults
+    // into the gaps and refuse to drive the page without a required input.
+    const parameters = workflowParametersOf(data['parameters'])
+    for (const param of parameters) {
+      if (ctx.variables[param.name] !== undefined) continue
+      const fallback = param.defaultValue ?? ''
+      if (fallback !== '') {
+        ctx.variables[param.name] = coerceInputValue(
+          param,
+          interpolate(fallback, ctx.variables, ctx.refData),
+        )
+      }
+    }
+    const missing = missingRequiredInputs(parameters, ctx.variables)
+    if (missing.length > 0) {
+      throw new Error(`parameter-prompt: 缺少必填输入：${missing.join('、')}`)
+    }
     const prompt = interpolate(String(data['prompt'] ?? '请输入值'), ctx.variables, ctx.refData)
-    const fallback = interpolate(String(data['defaultValue'] ?? ''), ctx.variables, ctx.refData)
-    const variable = String(data['variableName'] ?? 'userInput')
-    if (ctx.variables[variable] === undefined && fallback !== '') ctx.variables[variable] = fallback
     ctx.emit('info', `需要输入：${prompt}（服务端通过 API 变量传入）`)
-    ctx.emit('result', String(ctx.variables[variable] ?? ''))
+    for (const param of parameters) {
+      ctx.emit('result', `${param.name}=${String(ctx.variables[param.name] ?? '')}`)
+    }
     return null
   }
 
   const switchToExec: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    const frame = String(data['frameSelector'] ?? '')
+    // `EditSwitchTo` writes `selector`; `frameSelector` is the tool-schema name.
+    const frame = String(data['frameSelector'] ?? data['selector'] ?? '')
     ctx.emit('info', frame ? `已定位 iframe ${frame}` : '已定位到顶层页面')
     return null
   }
 
   const triggerEventExec: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    const event = String(data['event'] ?? '')
+    const event = String(data['event'] ?? data['eventName'] ?? '')
     const detail = interpolate(String(data['detail'] ?? 'null'), ctx.variables, ctx.refData)
     return runRaw(
       { action: 'trigger_event', target: targetFrom(data), attribute: event, value: detail },
@@ -1357,8 +1792,11 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     assertActive(ctx)
     const filename = String(data['filename'] ?? '')
     const variable = String(data['variableName'] ?? 'lastDownload')
+    // The block's own `timeout` field, like the extension: the port waited a
+    // hardcoded 30s, so a node asking for 2s held the run for half a minute.
+    const waitMs = data['waitForDownload'] === false ? 0 : Math.max(0, Number(data['timeout'] ?? 20000))
     try {
-      const match = await driver.waitForDownload(filename || undefined, 30_000)
+      const match = await driver.waitForDownload(filename || undefined, waitMs)
       ctx.variables[variable] = match
         ? { filename: match.filename, path: match.path, url: match.url }
         : null
@@ -1398,8 +1836,12 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
 
   const proxyExec: BlockExecutor = async (_data, ctx) => {
     assertActive(ctx)
-    ctx.emit('info', 'proxy: 服务端代理通过运行参数/API 配置（per-context proxy），块内不生效')
-    return null
+    // Mirrors the extension: an info line plus `return null` is a green step that
+    // changed nothing, which is the worst outcome for a block whose whole purpose
+    // is to move traffic onto another exit.
+    throw new Error(
+      'proxy: 未实现 —— 扩展未声明 proxy 权限，服务端也仅能通过运行参数配置代理，本块无法改变网络出口；宁可直接失败，也不要在静默直连的情况下报告成功。',
+    )
   }
 
   const unsupportedCloud =
@@ -1456,7 +1898,10 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
   const selectRadio: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const checked = data['value'] !== '' && data['value'] !== false
-    return runRaw({ action: 'set_checkbox', target: targetFrom(data), value: checked }, ctx)
+    return runRaw(
+      withWait({ action: 'set_checkbox', target: targetFrom(data), value: checked }, data),
+      ctx,
+    )
   }
 
   /** Emit an "info" notice and let the engine continue. */
@@ -1478,14 +1923,56 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     return '(无定位)'
   }
 
+  /** Human-readable form of a read value, for the run log. */
+  function previewValue(value: unknown): string {
+    if (typeof value === 'boolean') return value ? '已勾选' : '未勾选'
+    if (Array.isArray(value)) return value.length ? value.map(String).join(', ') : '(空)'
+    const text = String(value ?? '')
+    return text === '' ? '(空)' : logPreview(text, 120)
+  }
+
+  /**
+   * The form's "Get form value" mode (mirror of the extension's `readFormValue`):
+   * read the control instead of writing it, keeping the native type so
+   * downstream `conditions` can compare against it.
+   */
+  async function readFormValue(
+    data: Record<string, unknown>,
+    target: Target,
+    ctx: WorkflowExecCtx,
+  ): Promise<string | null> {
+    const variable = String(data['variableName'] ?? '').trim()
+    if (!variable) throw new Error('读取表单值需要填写变量名（variableName），无法读取')
+    const result = await driver.execOp(withWait({ action: 'get_value', target }, data), ctx.tabId)
+    if (result && result.ok === false) throw new Error(result.error || '读取表单值失败')
+    ctx.variables[variable] = result?.data
+    ctx.emit(
+      'info',
+      `[表单读取] ${describeBlockTarget(data)} → {{${variable}}} = ${previewValue(result?.data)}`,
+    )
+    ctx.emit('result', previewValue(result?.data))
+    return null
+  }
+
   const formsBlock: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const type = String(data['type'] ?? 'text-field')
     const value = data['value']
     const target = targetFrom(data)
 
+    // Checked before the write path: that path fills `value`, which is empty in
+    // read mode, so it would clear the very control being read.
+    if (data['getValue'] === true) return readFormValue(data, target, ctx)
+
     if (type === 'checkbox' || type === 'radio') {
-      const checked = typeof value === 'boolean' ? value : true
+      // The editor's "Selected" toggle writes `selected`; only the legacy chat
+      // shape writes `value`. Reading just `value` made unticking impossible.
+      const checked =
+        typeof data['selected'] === 'boolean'
+          ? data['selected']
+          : typeof value === 'boolean'
+            ? value
+            : true
       ctx.emit('info', `[表单输入] ${describeBlockTarget(data)} ← ${checked ? '勾选' : '取消勾选'}`)
       return runRaw(withWait({ action: 'set_checkbox', target, value: checked }, data), ctx)
     }
@@ -1501,7 +1988,12 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
       `[表单输入] ${describeBlockTarget(data)} ← ${logPreview(filled, 120) || '(空)'}`,
     )
     if (type === 'select') {
-      return runRaw(withWait({ action: 'select_option', target, value: filled }, data), ctx)
+      const op = withWait({ action: 'select_option', target, value: filled }, data)
+      // "Select an option by" also offers first / last / custom position, which
+      // carry no value at all; sending only `value` left three of the four modes
+      // unable to select anything.
+      Object.assign(op, selectOptionFields(data))
+      return runRaw(op, ctx)
     }
     return runRaw(
       withWait(
@@ -1514,30 +2006,22 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
 
   const elementScroll: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    const x = Number(data['scrollX'] ?? 0)
-    const y = Number(data['scrollY'] ?? 0)
-    const smooth = data['smooth'] === true
-    const selector = sel(data)
+    const scroll = scrollSpecFrom(data)
+    // The form's "Container selector" names the element that actually scrolls;
+    // nothing read it, so a container scroll moved the window instead.
+    const selector = sel(data) || String(data['containerSelector'] ?? '')
     if (selector === 'window' || selector === 'html') {
-      return runRaw({ action: 'scroll', scroll: { mode: 'by', x, y, smooth } }, ctx)
+      return runRaw({ action: 'scroll', scroll }, ctx)
     }
     if (selector) {
+      const target = sel(data) ? targetFrom(data) : targetFrom({ ...data, selector })
       if (data['scrollIntoView']) {
         return runRaw(
-          withWait(
-            { action: 'scroll', target: targetFrom(data), scroll: { mode: 'into_view' } },
-            data,
-          ),
+          withWait({ action: 'scroll', target, scroll: { mode: 'into_view' } }, data),
           ctx,
         )
       }
-      return runRaw(
-        withWait(
-          { action: 'scroll', target: targetFrom(data), scroll: { mode: 'by', x, y, smooth } },
-          data,
-        ),
-        ctx,
-      )
+      return runRaw(withWait({ action: 'scroll', target, scroll }, data), ctx)
     }
     if (data['scrollIntoView'] && richTargetOf(data)) {
       return runRaw(
@@ -1548,7 +2032,7 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
         ctx,
       )
     }
-    return runRaw({ action: 'scroll', scroll: { mode: 'by', x, y, smooth } }, ctx)
+    return runRaw({ action: 'scroll', scroll }, ctx)
   }
 
   const conditionsBlock: BlockExecutor = async (data, ctx) => {
@@ -1563,13 +2047,21 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
       )
       matched = evaluated.ok ? Boolean(evaluated.value) : false
     } else {
-      const groups = (data['conditions'] as { conditions?: ConditionRow[] }[] | undefined) ?? []
-      matched = groups.some(
-        (g) =>
-          Array.isArray(g.conditions) &&
-          g.conditions.length > 0 &&
-          g.conditions.every((row) => evalConditionRow(row, ctx.variables)),
-      )
+      // The editor writes an OR-group tree of builder items; the shared
+      // evaluator also accepts the flat `{ name, compare, value }` rows a
+      // generated graph writes, so both shapes answer the same way here.
+      matched = await conditionGroupsMatch(data['conditions'], {
+        vars: ctx.variables,
+        runCode: async (source) => {
+          const evaluated = await evalInPage(
+            `return (${source});`,
+            { vars: ctx.variables, refData: ctx.refData },
+            ctx,
+          )
+          if (!evaluated.ok) throw new Error('conditions: 页面求值失败')
+          return evaluated.value
+        },
+      })
     }
     ctx.emit('result', matched ? '条件成立' : '条件不成立')
     return matched
@@ -1601,6 +2093,7 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     'wait-for': waitFor,
     'take-screenshot': takeScreenshot,
     'get-text': getText,
+    'read-page': readPage,
     ocr: ocrBlock,
     hover: hover,
     'set-checkbox': setCheckbox,

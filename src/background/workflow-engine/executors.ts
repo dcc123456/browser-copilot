@@ -40,7 +40,19 @@ import { streamCompletion, type WireMessage } from '../../lib/llm'
 import { getSettings, listPasswords } from '../../lib/storage'
 import { entryFields, findField } from '../../lib/types'
 import { OCR_SUPPORTED } from '../../lib/ocr-support'
-import { interpolate, EMPTY_INTERP_KEY, getByPath } from '../../lib/workflow/interpolate'
+import { interpolate, EMPTY_INTERP_KEY } from '../../lib/workflow/interpolate'
+import { conditionGroupsMatch } from '../../lib/workflow/condition-tree'
+import {
+  applyAssignVariable,
+  compareDataItems,
+  cutBetweenMarkers,
+  readRecordList,
+  selectOptionFields,
+  pickTabIndex,
+  scrollSpecFrom,
+  webhookContentTypeOf,
+  webhookRecord,
+} from '../../lib/workflow/block-output'
 import { interpretScriptResult } from '../../lib/workflow/script-result'
 import {
   UploadFileError,
@@ -111,6 +123,12 @@ export interface WorkflowExecCtx {
   outputs?: Record<string, string>
   /** The default out-edge target node id; used when the executor returns null. */
   defaultNext?: string | null
+  /**
+   * The step lines this run has emitted so far, oldest first. `log-data` is the
+   * consumer the catalog describes ("read the most recent log entries"); the
+   * engine owns the buffer, executors only read it.
+   */
+  getRunLog?: () => string[]
   /**
    * The tab this run is acting on. Undefined until resolved; navigation blocks
    * update it when they open/switch tabs so later steps follow the right page
@@ -477,7 +495,16 @@ function publishRead(
   values: readonly string[],
   fallbackVariable: string,
 ): void {
-  const value: unknown = data['multiple'] === true ? values : (values[0] ?? '')
+  // "Text prefix" / "Text suffix" are markers, not decoration (see
+  // `cutBetweenMarkers`); nothing applied them, so a read configured to strip
+  // its label published the whole element text.
+  const prefix = String(data['prefixText'] ?? '')
+  const suffix = String(data['suffixText'] ?? '')
+  const kept =
+    prefix === '' && suffix === ''
+      ? values
+      : values.map((text) => cutBetweenMarkers(text, prefix, suffix))
+  const value: unknown = data['multiple'] === true ? kept : (kept[0] ?? '')
   const variable = String(data['variableName'] ?? '').trim() || fallbackVariable
   ctx.variables[variable] = value
   if (variable !== fallbackVariable) ctx.variables[fallbackVariable] = value
@@ -488,7 +515,7 @@ function publishRead(
       // explanation; say so instead.
       ctx.emit('info', '未指定数据列名（dataColumn），本次读取未写入数据表')
     } else {
-      ctx.emit('info', `已写入数据表列「${column}」${collectIntoDataTable(ctx, column, values)} 行`)
+      ctx.emit('info', `已写入数据表列「${column}」${collectIntoDataTable(ctx, column, kept)} 行`)
     }
   }
   ctx.emit('result', Array.isArray(value) ? value.join('\n') : String(value))
@@ -667,8 +694,13 @@ const pressKey: BlockExecutor = async (data, ctx) => {
   // history path produces. Reading only `key` meant this block silently
   // pressed nothing whenever it came from the editor or a generated node.
   const key = String(data['keys'] ?? data['keysToPress'] ?? data['key'] ?? '')
-  ctx.emit('status', `按下按键: ${key}`)
-  return runRaw({ action: 'press_key', value: key }, ctx)
+  // The form's target field decides WHICH control gets the key: without a target
+  // the event goes to whatever the page happens to have focused, so "press Enter
+  // in this input" typed into nothing on a freshly opened tab.
+  const selector = sel(data)
+  ctx.emit('status', `按下按键: ${key}${selector ? ` → ${selector}` : ''}`)
+  if (!selector) return runRaw({ action: 'press_key', value: key }, ctx)
+  return runRaw(withWait({ action: 'press_key', value: key, target: targetFrom(data) }, data), ctx)
 }
 
 const hover: BlockExecutor = async (data, ctx) => {
@@ -1231,20 +1263,6 @@ const newTabExec: BlockExecutor = async (data, ctx) => {
   return null
 }
 
-/**
- * Match a tab URL against an Automa-style match pattern (`https://*.example.com/*`).
- * Only `*` is special — everything else is escaped, so a pattern containing
- * regex metacharacters matches them literally.
- */
-function globMatch(pattern: string, value: string): boolean {
-  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-  try {
-    return new RegExp(`^${escaped.split('*').join('.*')}$`).test(value)
-  } catch {
-    return false
-  }
-}
-
 const switchTabExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   try {
@@ -1254,33 +1272,22 @@ const switchTabExec: BlockExecutor = async (data, ctx) => {
     if (tabs.length === 0) {
       throw new Error('switch-tab: 当前窗口没有可切换的标签页')
     }
-    // `findTabBy` / `matchPattern` / `tabTitle` / `tabIndex` / `createIfNoMatch`
-    // / `activeTab` are all catalog + edit-form keys. Only `index` used to be
-    // read, and nothing ever wrote it — so `Number(undefined ?? 0)` made every
-    // switch land on tab 0 regardless of what the user configured.
-    const findBy = String(data['findTabBy'] ?? 'tab-index')
+    // The lookup is shared with the Runner port (`pickTabIndex`): `findTabBy`
+    // names the mode and each mode reads its own field, so a host that invents
+    // a key of its own lands on tab 0 while reporting success.
+    const findBy = String(data['findTabBy'] ?? 'match-patterns')
     const pattern = interpolate(String(data['matchPattern'] ?? ''), ctx.variables, ctx.refData)
     const title = interpolate(String(data['tabTitle'] ?? ''), ctx.variables, ctx.refData)
     // "Next" / "previous" are relative to the tab the run is driving.
     const current = (await resolveTargetTab(ctx.tabId, ctx.scope))?.id
-
-    let index = -1
-    if (findBy === 'match-patterns' && pattern) {
-      index = tabs.findIndex((tab) => globMatch(pattern, tab.url))
-    } else if (findBy === 'tab-title' && title) {
-      index = tabs.findIndex((tab) => tab.title.includes(title))
-    } else if (findBy === 'next-tab' || findBy === 'prev-tab') {
-      const at = tabs.findIndex((tab) => tab.id === current)
-      const step = findBy === 'next-tab' ? 1 : -1
-      index = at < 0 ? 0 : (at + step + tabs.length) % tabs.length
-    } else {
-      const wanted = Number(data['tabIndex'] ?? data['index'] ?? 0)
-      index = Number.isFinite(wanted) ? Math.trunc(wanted) : 0
-      if (index < 0 || index >= tabs.length) {
-        throw new Error(
-          `switch-tab: 标签页索引 ${index} 超出范围（本窗口共 ${tabs.length} 个），无法切换`,
-        )
-      }
+    const { index, byIndex } = pickTabIndex(data, tabs, current, {
+      matchPattern: pattern,
+      tabTitle: title,
+    })
+    if (byIndex && (index < 0 || index >= tabs.length)) {
+      throw new Error(
+        `switch-tab: 标签页索引 ${index} 超出范围（本窗口共 ${tabs.length} 个），无法切换`,
+      )
     }
 
     if (index < 0) {
@@ -1310,6 +1317,10 @@ const closeTabExec: BlockExecutor = async (_data, ctx) => {
   assertActive(ctx)
   try {
     await closeActiveTab(ctx.scope)
+    // Follow the tab Chrome focused in the closed one's place. Leaving `tabId`
+    // on a dead id makes every later step drive a tab that no longer exists.
+    const [survivor] = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (typeof survivor?.id === 'number') ctx.setTab?.(survivor.id)
     ctx.emit('result', '已关闭当前标签页')
   } catch (error) {
     throw error
@@ -1438,25 +1449,43 @@ const getVariable: BlockExecutor = async (data, ctx) => {
 
 const insertData: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  // `dataList` is the catalog + tool-schema key (a real array); `data` is the
-  // JSON-string shape this executor used to read alone. Accepting both is what
-  // makes a generated node and a canvas node agree.
-  const rawList = data['dataList'] ?? data['data']
-  let items: unknown[] = []
-  if (Array.isArray(rawList)) {
-    items = rawList
-  } else if (typeof rawList === 'string' && rawList.trim() !== '') {
-    try {
-      const parsed: unknown = JSON.parse(rawList)
-      if (Array.isArray(parsed)) items = parsed
-    } catch {
-      /* malformed json → insert nothing */
-    }
-  }
+  // `dataList` is what both the editor form (`EditInsertData`) and the tool
+  // schema write; `data` is the legacy JSON-string shape. Items come in two
+  // flavours and both are real: the editor writes column/variable instructions
+  // (`{ type: 'table' | 'variable', name, value }`), while a generated graph
+  // writes the records themselves (`{ a: 1, b: 'x' }`). Reading only the second
+  // one — as this executor did — turned every canvas-configured insert into a
+  // table of `{ type, name, value }` objects: wrong data, no error.
+  const items = readRecordList(data['dataList'] ?? data['data'])
   if (!Array.isArray(ctx.variables['dataTable'])) ctx.variables['dataTable'] = []
-  const table = ctx.variables['dataTable'] as unknown[]
-  table.push(...items)
-  ctx.emit('result', `已插入 ${items.length} 行`)
+  const table = ctx.variables['dataTable'] as Record<string, unknown>[]
+  let rows = 0
+  for (const item of items) {
+    const record = (item ?? {}) as Record<string, unknown>
+    const kind = String(record['type'] ?? '')
+    const name = String(record['name'] ?? '').trim()
+    if ((kind === 'table' || kind === 'variable') && name !== '') {
+      const value = interpolate(String(record['value'] ?? ''), ctx.variables, ctx.refData)
+      if (kind === 'variable') {
+        if (record['action'] === 'append') {
+          const previous = ctx.variables[name]
+          ctx.variables[name] = `${previous ?? ''}${value}`
+        } else {
+          ctx.variables[name] = value
+        }
+      } else {
+        // A table item fills one column across the rows that already exist;
+        // with no rows yet it seeds the first one.
+        if (table.length === 0) table.push({})
+        for (const row of table) row[name] = value
+        rows += 1
+      }
+      continue
+    }
+    table.push(item as Record<string, unknown>)
+    rows += 1
+  }
+  ctx.emit('result', `已插入 ${rows} 项`)
   return null
 }
 
@@ -1709,42 +1738,11 @@ const breakpoint: BlockExecutor = async (_data, ctx) => {
   return null
 }
 
-/** Parse a response body according to the block's `responseType`. */
-function parseResponseBody(text: string, responseType: string): unknown {
-  if (responseType !== 'json') return text
-  try {
-    return JSON.parse(text)
-  } catch {
-    return text
-  }
-}
-
-/** Narrow a parsed body to the block's `dataPath` (`data.items.0.id`). */
-function pickDataPath(value: unknown, path: string): unknown {
-  const segments = path.split('.').filter((segment) => segment.trim() !== '')
-  if (segments.length === 0) return value
-  return getByPath(value, segments.join('.'))
-}
-
-/** Base64 of a response body, for `responseType: 'base64'`. */
-function toBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer)
-  let binary = ''
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary)
-}
-
 /**
- * Default request `content-type` per the form's "Content type" select. The
- * header used to be hardcoded to JSON, so the select did nothing.
+ * The webhook block's response contract lives in `lib/workflow/block-output`
+ * (`webhookContentTypeOf` + `webhookRecord`) so the Runner port cannot drift
+ * from it — it had dropped the `data` key and the content-type select there.
  */
-const WEBHOOK_CONTENT_TYPES: Readonly<Record<string, string>> = {
-  json: 'application/json',
-  text: 'text/plain',
-  'form-data': 'multipart/form-data',
-  form: 'application/x-www-form-urlencoded',
-}
-
 const webhook: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const url = interpolate(String(data['url'] ?? ''), ctx.variables, ctx.refData)
@@ -1764,10 +1762,7 @@ const webhook: BlockExecutor = async (data, ctx) => {
 
   // Headers: interpolated JSON string, e.g. `{"Authorization":"Bearer ..."}`.
   // The default content type comes from the form's own select.
-  let headers: Record<string, string> = {
-    'content-type':
-      WEBHOOK_CONTENT_TYPES[String(data['contentType'] ?? 'json')] ?? 'application/json',
-  }
+  let headers: Record<string, string> = { 'content-type': webhookContentTypeOf(data) }
   const headersRaw = interpolate(String(data['headers'] ?? ''), ctx.variables, ctx.refData)
   if (headersRaw.trim()) {
     try {
@@ -1806,20 +1801,9 @@ const webhook: BlockExecutor = async (data, ctx) => {
         body: bodyText,
         signal: controller.signal,
       })
-      const responseText =
-        responseType === 'base64' ? toBase64(await response.arrayBuffer()) : await response.text()
-      const record = {
-        status: response.status,
-        ok: response.ok,
-        headers: Object.fromEntries(response.headers.entries()),
-        body: responseText,
-        // The decoded body, narrowed by `dataPath` when one is set. Additive on
-        // purpose: `{{var.body}}` keeps working exactly as before, and `{{var}}`
-        // was already `[object Object]`, so nothing that worked stops working.
-        data: pickDataPath(parseResponseBody(responseText, responseType), dataPath),
-      }
+      const record = await webhookRecord(response, responseType, dataPath)
       ctx.variables[responseVariable] = record
-      ctx.emit('result', `${method} ${response.status} ${responseText.slice(0, 80)}`)
+      ctx.emit('result', `${method} ${response.status} ${record.body.slice(0, 80)}`)
     } finally {
       if (timer !== undefined) clearTimeout(timer)
       ctx.signal.removeEventListener('abort', onAbort)
@@ -2171,6 +2155,23 @@ const cookieBlock: BlockExecutor = async (data, ctx) => {
   return null
 }
 
+/**
+ * The page's current text selection — the source the clipboard block's
+ * "Copy selected text" checkbox asks for.
+ */
+async function pageSelectionText(ctx: WorkflowExecCtx): Promise<string> {
+  const run = await execWorkflowJsOnActiveTab(
+    'return String(window.getSelection ? window.getSelection().toString() : "")',
+    ctx.variables,
+    10_000,
+    ctx.signal,
+    ctx.tabId,
+    ctx.scope,
+  )
+  if (!run.ok) throw new Error(run.error)
+  return typeof run.data.result === 'string' ? run.data.result : ''
+}
+
 const clipboardBlock: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   // `op` / `text` are the keys the operator tool schema teaches; the edit form
@@ -2180,7 +2181,11 @@ const clipboardBlock: BlockExecutor = async (data, ctx) => {
   const op = rawOp === 'insert' || rawOp === 'set' ? 'set' : 'get'
   try {
     if (op === 'get') {
-      const text = await clipboardGet()
+      // `copySelectedText` is the form's "Copy selected text" checkbox. Reading
+      // the system clipboard anyway made it inert: the variable got whatever an
+      // earlier block had copied, not the selection on the page.
+      const text =
+        data['copySelectedText'] === true ? await pageSelectionText(ctx) : await clipboardGet()
       ctx.variables[String(data['variableName'] ?? 'lastClipboard')] = text
       ctx.emit('result', text.slice(0, 80))
     } else {
@@ -2324,7 +2329,9 @@ const tabUrlExec: BlockExecutor = async (data, ctx) => {
   try {
     const current =
       scope === 'all' ? await listAllTabUrls(ctx.scope) : await getActiveTabInfo(ctx.scope)
-    ctx.variables[variable] = current
+    // The block's name promises a URL; storing the tab object made every
+    // downstream `{{u}}` render as `[object Object]`.
+    ctx.variables[variable] = Array.isArray(current) ? current.join('\n') : current.url
     ctx.emit('result', Array.isArray(current) ? `共 ${current.length} 个标签页` : current.url)
   } catch (error) {
     throw error
@@ -2360,7 +2367,14 @@ const newWindowExec: BlockExecutor = async (data, ctx) => {
 const createElementExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const html = interpolate(String(data['html'] ?? ''), ctx.variables, ctx.refData)
-  return runRaw({ action: 'create_element', value: html }, ctx)
+  const op: Op = { action: 'create_element', value: html }
+  // The form has three content fields, not one: `css` becomes a `<style>` and
+  // `javascript` runs against each created element. Only `html` reached the page.
+  const css = interpolate(String(data['css'] ?? ''), ctx.variables, ctx.refData)
+  const javascript = interpolate(String(data['javascript'] ?? ''), ctx.variables, ctx.refData)
+  if (css.trim() !== '') op.css = css
+  if (javascript.trim() !== '') op.javascript = javascript
+  return runRaw(op, ctx)
 }
 
 const uploadFileExec: BlockExecutor = async (data, ctx) => {
@@ -2524,9 +2538,12 @@ const uploadFileExec: BlockExecutor = async (data, ctx) => {
   return null
 }
 
-const handleDialogExec: BlockExecutor = async (_data, ctx) => {
+const handleDialogExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  return runRaw({ action: 'handle_dialog' }, ctx)
+  const op: Op = { action: 'handle_dialog', accept: data['accept'] !== false }
+  const promptText = interpolate(String(data['promptText'] ?? ''), ctx.variables, ctx.refData)
+  if (promptText !== '') op.value = promptText
+  return runRaw(op, ctx)
 }
 
 // --- Phase 3: data / variable operations ------------------------------------
@@ -2545,8 +2562,14 @@ const increaseVariable: BlockExecutor = async (data, ctx) => {
   // `Number((vars[name] ?? incType === 'multiply') ? 1 : 0)`, which parses as
   // `vars[name] ?? (incType === 'multiply')` — `??` binds looser than `===` —
   // so any existing value collapsed to 1 and `counter = 5` + 1 became 2.
-  const current = Number(ctx.variables[name] ?? 0)
-  const next = data['incType'] === 'multiply' ? current * step : current + step
+  // An ABSENT variable is the multiplicative identity (1) under `multiply`, not
+  // 0: a multiply chain that starts from 0 pins the variable there forever.
+  // (Reading an EXISTING value is the part that used to be broken — the old
+  // `Number((vars[name] ?? incType === 'multiply') ? 1 : 0)` collapsed every
+  // value to 1 because `??` binds looser than `===`.)
+  const isMultiply = data['incType'] === 'multiply'
+  const current = Number(ctx.variables[name] ?? (isMultiply ? 1 : 0))
+  const next = isMultiply ? current * step : current + step
   ctx.variables[name] = Number.isNaN(next) ? 0 : next
   ctx.emit('result', `${name} = ${ctx.variables[name]}`)
   return null
@@ -2636,75 +2659,163 @@ function tableOf(ctx: WorkflowExecCtx): unknown[] {
 
 const deleteDataExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const target = tableOf(ctx)
-  const key = Number(data['key'] ?? -1)
-  const all = data['clearAll'] === true
-  if (all) ctx.variables['dataTable'] = []
-  else if (key >= 0 && key < target.length) target.splice(key, 1)
-  ctx.emit('result', all ? '已清空数据表' : `已删除第 ${key} 行`)
+  // The editor (`EditDeleteData`) writes `deleteList` items shaped
+  // `{ type: 'table' | 'variable', columnId, variableName }` — it never writes
+  // the row index this executor used to read, so a canvas-configured delete
+  // removed nothing and still reported success.
+  const items = readRecordList(data['deleteList'])
+  let removedColumns = 0
+  let removedVariables = 0
+  for (const item of items) {
+    const record = (item ?? {}) as Record<string, unknown>
+    if (String(record['type'] ?? 'table') === 'variable') {
+      const name = String(record['variableName'] ?? '').trim()
+      if (name !== '' && name in ctx.variables) {
+        delete ctx.variables[name]
+        removedVariables += 1
+      }
+      continue
+    }
+    const column = String(record['columnId'] ?? '[all]').trim()
+    if (column === '' || column === '[all]') {
+      ctx.variables['dataTable'] = []
+      removedColumns += 1
+      continue
+    }
+    for (const row of tableOf(ctx)) {
+      if (row && typeof row === 'object') delete (row as Record<string, unknown>)[column]
+    }
+    removedColumns += 1
+  }
+  ctx.emit(
+    'result',
+    `已删除 ${removedColumns} 列 / ${removedVariables} 个变量${removedColumns + removedVariables === 0 ? '（未配置删除项）' : ''}`,
+  )
   return null
 }
 
 const sortDataExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const target = (ctx.variables['dataTable'] as Record<string, unknown>[]) ?? []
-  const field = String(data['field'] ?? '')
-  const direction = String(data['direction'] ?? 'asc') === 'desc' ? -1 : 1
-  const sorted = [...target].filter((row) => row && typeof row === 'object')
-  sorted.sort((a, b) => {
-    const va = field ? a[field] : a['value']
-    const vb = field ? b[field] : b['value']
-    if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * direction
-    return String(va ?? '').localeCompare(String(vb ?? '')) * direction
+  // `EditSortData` writes `dataSource` ('table' | 'variable'), `varSourceName`,
+  // `sortByProperty` and up to three `itemProperties` (`{ name, order }`). The
+  // single `field` / `direction` pair this executor read came from nowhere, so
+  // every canvas sort fell back to a `value` key most rows never have.
+  const fromVariable = String(data['dataSource'] ?? 'table') === 'variable'
+  const sourceName = String(data['varSourceName'] ?? '').trim()
+  const target = fromVariable
+    ? readRecordList(ctx.variables[sourceName])
+    : ((ctx.variables['dataTable'] as unknown[]) ?? [])
+  const keys = readRecordList(data['itemProperties']).map((property) => {
+    const record = (property ?? {}) as Record<string, unknown>
+    return {
+      field: String(record['name'] ?? ''),
+      direction: String(record['order'] ?? 'asc') === 'desc' ? -1 : 1,
+    }
   })
-  ctx.variables['dataTable'] = sorted
-  ctx.emit('result', `已按 ${field || '值'} 排序`)
+  // `sortByProperty: false` (or an empty list) orders by the item itself.
+  const criteria =
+    data['sortByProperty'] === true && keys.length > 0
+      ? keys
+      : [{ field: '', direction: 1 }]
+  const rows = [...target]
+  rows.sort((left, right) => compareDataItems(left, right, criteria))
+  if (fromVariable && sourceName !== '') ctx.variables[sourceName] = rows
+  else ctx.variables['dataTable'] = rows
+  applyAssignVariable(data, ctx.variables, rows)
+  ctx.emit('result', `已按 ${criteria[0]?.field || '值'} 排序（${rows.length} 行）`)
   return null
 }
 
 const dataMapping: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const rows = tableOf(ctx).filter(
-    (row): row is Record<string, unknown> => !!row && typeof row === 'object',
-  )
-  const expression = String(data['mapping'] ?? 'item')
-  // Map every row in ONE page injection (rather than one eval per row). The
-  // expression is evaluated with `item`, `index`, and `vars` in scope.
-  const wrapped = `return rows.map((item, index) => (${expression}));`
-  const evaluated = await evalInPage(wrapped, { rows, vars: ctx.variables }, ctx)
-  if (!evaluated.ok) {
-    throw new Error('data-mapping: 映射表达式执行失败')
-  }
-  const mapped = Array.isArray(evaluated.value) ? evaluated.value : []
-  // `output` is the executor's own key; `variableName` is what the catalog and
-  // the tool schema declare — accept both so the model's chosen name wins.
-  ctx.variables[String(data['output'] ?? data['variableName'] ?? 'mappedData')] = mapped
+  // `EditDataMapping` writes `sources: [{ name, destinations: [{ name }] }]`
+  // and renames fields; the `mapping` JS expression this executor evaluated in
+  // the page is a key no form or tool schema produces, so a canvas-configured
+  // mapping returned the rows untouched and reported the count as mapped.
+  const fromVariable = String(data['dataSource'] ?? 'table') === 'variable'
+  const sourceName = String(data['varSourceName'] ?? '').trim()
+  const rows = (
+    fromVariable ? readRecordList(ctx.variables[sourceName]) : tableOf(ctx)
+  ).filter((row): row is Record<string, unknown> => !!row && typeof row === 'object')
+  const renames = readRecordList(data['sources']).flatMap((source) => {
+    const record = (source ?? {}) as Record<string, unknown>
+    const from = String(record['name'] ?? '').trim()
+    if (from === '') return []
+    return readRecordList(record['destinations'])
+      .map((destination) => String((destination as Record<string, unknown>)?.['name'] ?? '').trim())
+      .filter((to) => to !== '' && to !== from)
+      .map((to) => ({ from, to }))
+  })
+  const mapped = rows.map((row) => {
+    const next: Record<string, unknown> = { ...row }
+    for (const { from, to } of renames) {
+      if (!(from in next)) continue
+      next[to] = next[from]
+      delete next[from]
+    }
+    return next
+  })
+  if (fromVariable && sourceName !== '') ctx.variables[sourceName] = mapped
+  applyAssignVariable(data, ctx.variables, mapped)
   ctx.variables['lastMappedData'] = mapped
-  ctx.emit('result', `已映射 ${mapped.length} 行`)
+  ctx.emit('result', `已映射 ${mapped.length} 行（${renames.length} 个字段改名）`)
   return null
 }
 
 const logData: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const text = interpolate(String(data['text'] ?? ''), ctx.variables, ctx.refData)
+  // The catalog sells this block as "read the most recent log entries of a
+  // workflow", and the form writes `workflowId` / `dataColumn` / `saveData` /
+  // `assignVariable` / `variableName`. It never wrote the `text` key this
+  // executor printed, so a canvas-configured log node emitted an empty line.
+  // Past runs are not persisted anywhere in either host, so only the current
+  // run's log can be answered — said out loud instead of logging nothing.
+  const wanted = String(data['workflowId'] ?? '').trim()
+  if (wanted !== '') {
+    throw new Error(`log-data: 只保留当前运行的日志，工作流「${wanted}」的历史日志无法读取`)
+  }
+  const text = (ctx.getRunLog?.() ?? []).join('\n')
+  applyAssignVariable(data, ctx.variables, text)
+  if (data['saveData'] === true) {
+    const column = String(data['dataColumn'] ?? '').trim()
+    if (column !== '') {
+      if (!Array.isArray(ctx.variables['dataTable'])) ctx.variables['dataTable'] = []
+      const table = ctx.variables['dataTable'] as Record<string, unknown>[]
+      table.push({ [column]: text })
+    }
+  }
   ctx.emit('info', text)
   return null
 }
 
 const workflowState: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const op = String(data['op'] ?? 'get')
+  // The editor's field is `type` (get / set / stop-*), `op` is the tool-schema
+  // name; reading only `op` made every editor-configured node fall through to
+  // `get`, so "set the state" read it instead.
+  const op = String(data['type'] ?? data['op'] ?? 'get')
   const variable = String(data['variableName'] ?? 'state')
   if (op === 'set') {
     const value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
     ctx.variables[variable] = value
     ctx.emit('result', `已设置状态 ${variable}`)
-  } else {
+    return null
+  }
+  if (op === 'get') {
     const value = ctx.variables[variable]
     ctx.variables['lastState'] = value
     ctx.emit('result', String(value ?? ''))
+    return null
   }
-  return null
+  // Stopping a run belongs to the scheduler, which no block can reach. The
+  // `throwError` toggle says what the workflow wants when that happens; without
+  // it the node still has to fail loudly, because reporting success here would
+  // leave a workflow believing it stopped something it did not.
+  if (data['throwError'] === true) {
+    const detail = interpolate(String(data['errorMessage'] ?? ''), ctx.variables, ctx.refData)
+    throw new Error(detail.trim() === '' ? `workflow-state: 无法执行「${op}」` : detail)
+  }
+  throw new Error(`workflow-state: 「${op}」需要运行调度器接口，块内无法停止运行`)
 }
 
 // --- Phase 5: integration / service blocks ----------------------------------
@@ -2764,7 +2875,7 @@ const parameterPrompt: BlockExecutor = async (data, ctx) => {
 const switchToExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   // The driver already searches all frames; record the iframe target as context.
-  const frame = String(data['frameSelector'] ?? '')
+  const frame = String(data['frameSelector'] ?? data['selector'] ?? '')
   ctx.emit('info', frame ? `已定位 iframe ${frame}` : '已定位到顶层页面')
   return null
 }
@@ -2792,9 +2903,19 @@ const handleDownload: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const filename = String(data['filename'] ?? '')
   const variable = String(data['variableName'] ?? 'lastDownload')
+  // `waitForDownload` + `timeout` are this block's own fields. The download a
+  // previous click started is rarely already on disk when the node runs, and
+  // searching once reported 未找到匹配下载 for a file that landed a moment later.
+  const waitMs = data['waitForDownload'] === false ? 0 : Math.max(0, Number(data['timeout'] ?? 20000))
+  const deadline = Date.now() + waitMs
   try {
-    const items = await chrome.downloads.search({})
-    const match = filename ? items.find((item) => item.filename.includes(filename)) : items[0]
+    let match: chrome.downloads.DownloadItem | undefined
+    for (;;) {
+      const items = await chrome.downloads.search({})
+      match = filename ? items.find((item) => item.filename.includes(filename)) : items[0]
+      if (match || Date.now() >= deadline || ctx.signal.aborted) break
+      await new Promise((resolve) => setTimeout(resolve, 250))
+    }
     ctx.variables[variable] = match
       ? { id: match.id, filename: match.filename, url: match.url }
       : null
@@ -2857,8 +2978,15 @@ const saveLocal: BlockExecutor = async (data, ctx) => {
 
 const proxyExec: BlockExecutor = async (_data, ctx) => {
   assertActive(ctx)
-  ctx.emit('info', 'proxy: 代理配置需浏览器级设置，当前为占位实现')
-  return null
+  // The manifest declares no `proxy` permission, so nothing here can change the
+  // traffic path. The placeholder used to emit an info line and return null,
+  // which let a workflow that exists to hide the real IP report success while
+  // running entirely direct — the worst kind of silent failure. Refusing is the
+  // honest floor until the permission question is decided.
+  throw new Error(
+    'proxy: 未实现 —— 扩展未声明 proxy 权限，本块无法改变网络出口；' +
+      '宁可直接失败，也不要在静默直连的情况下报告成功。',
+  )
 }
 
 const googleSheets: BlockExecutor = async (_data, ctx) => {
@@ -3027,7 +3155,15 @@ const formsBlock: BlockExecutor = async (data, ctx) => {
   if (data['getValue'] === true) return readFormValue(data, target, ctx)
 
   if (type === 'checkbox' || type === 'radio') {
-    const checked = typeof value === 'boolean' ? value : true
+    // The editor's "Selected" toggle writes `selected`; only the legacy chat
+    // shape writes `value`. Reading just `value` made unticking impossible —
+    // the block could only ever check a box.
+    const checked =
+      typeof data['selected'] === 'boolean'
+        ? data['selected']
+        : typeof value === 'boolean'
+          ? value
+          : true
     ctx.emit('info', `[表单输入] ${describeBlockTarget(data)} ← ${checked ? '勾选' : '取消勾选'}`)
     return runRaw(withWait({ action: 'set_checkbox', target, value: checked }, data), ctx)
   }
@@ -3054,7 +3190,12 @@ const formsBlock: BlockExecutor = async (data, ctx) => {
   // the right thing?" investigation needs.
   ctx.emit('info', `[表单输入] ${describeBlockTarget(data)} ← ${logPreview(filled, 120) || '(空)'}`)
   if (type === 'select') {
-    return runRaw(withWait({ action: 'select_option', target, value: filled }, data), ctx)
+    const op = withWait({ action: 'select_option', target, value: filled }, data)
+    // "Select an option by" also offers first / last / custom position, which
+    // carry no value at all; sending only `value` left three of the four modes
+    // unable to select anything.
+    Object.assign(op, selectOptionFields(data))
+    return runRaw(op, ctx)
   }
   return runRaw(
     withWait({ action: 'fill', target, value: filled, clear: data['clearValue'] !== false }, data),
@@ -3113,30 +3254,25 @@ function previewValue(value: unknown): string {
 /** Automa `element-scroll` block: scroll an element or the window by X/Y. */
 const elementScroll: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const x = Number(data['scrollX'] ?? 0)
-  const y = Number(data['scrollY'] ?? 0)
-  const smooth = data['smooth'] === true
-  const selector = sel(data)
+  const scroll = scrollSpecFrom(data)
+  // The form's "Container selector" names the element that actually scrolls;
+  // nothing read it, so a container scroll moved the window instead.
+  const selector = sel(data) || String(data['containerSelector'] ?? '')
+  const source = sel(data) ? data : { ...data, selector }
   if (selector === 'window' || selector === 'html') {
-    return runRaw({ action: 'scroll', scroll: { mode: 'by', x, y, smooth } }, ctx)
+    return runRaw({ action: 'scroll', scroll }, ctx)
   }
   if (selector) {
     if (data['scrollIntoView']) {
       return runRaw(
         withWait(
-          { action: 'scroll', target: targetFrom(data), scroll: { mode: 'into_view' } },
+          { action: 'scroll', target: targetFrom(source), scroll: { mode: 'into_view' } },
           data,
         ),
         ctx,
       )
     }
-    return runRaw(
-      withWait(
-        { action: 'scroll', target: targetFrom(data), scroll: { mode: 'by', x, y, smooth } },
-        data,
-      ),
-      ctx,
-    )
+    return runRaw(withWait({ action: 'scroll', target: targetFrom(source), scroll }, data), ctx)
   }
   // No CSS selector: a conversation-generated node may still carry the rich
   // locator — scrollIntoView applies to that element.
@@ -3146,7 +3282,7 @@ const elementScroll: BlockExecutor = async (data, ctx) => {
       ctx,
     )
   }
-  return runRaw({ action: 'scroll', scroll: { mode: 'by', x, y, smooth } }, ctx)
+  return runRaw({ action: 'scroll', scroll }, ctx)
 }
 
 /**
@@ -3166,66 +3302,26 @@ const conditionsBlock: BlockExecutor = async (data, ctx) => {
     )
     matched = evaluated.ok ? Boolean(evaluated.value) : false
   } else {
-    // Evaluate condition rows: a group is true when all its rows compare true.
-    const groups = (data['conditions'] as { conditions?: ConditionRow[] }[] | undefined) ?? []
-    matched = groups.some(
-      (g) =>
-        Array.isArray(g.conditions) &&
-        g.conditions.length > 0 &&
-        g.conditions.every((row) => evalConditionRow(row, ctx.variables)),
-    )
+    // The editor writes an OR-group tree of builder items; the shared evaluator
+    // also understands the flat `{ name, compare, value }` rows a generated
+    // graph writes. Page lookups (element/text/code) go through `execJs`.
+    matched = await conditionGroupsMatch(data['conditions'], {
+      vars: ctx.variables,
+      runCode: async (source) => {
+        const evaluated = await evalInPage(
+          `return (${source});`,
+          { vars: ctx.variables, refData: ctx.refData },
+          ctx,
+        )
+        if (!evaluated.ok) throw new Error('conditions: 页面求值失败')
+        return evaluated.value
+      },
+    })
   }
   ctx.emit('result', matched ? '条件成立' : '条件不成立')
   return matched
     ? (ctx.outputs?.['true'] ?? ctx.outputs?.['output-1'] ?? ctx.defaultNext ?? null)
     : (ctx.outputs?.['false'] ?? ctx.outputs?.['output-2'] ?? ctx.defaultNext ?? null)
-}
-
-interface ConditionRow {
-  /** Value type (value/element data/...); here we interpret `value` literals. */
-  type?: string
-  /** Automa compare operator: eql, nq, cnt, contains, exists, ... */
-  compare?: string
-  value?: unknown
-  /** Variable name referenced by the row, when type is a data lookup. */
-  name?: string
-}
-
-/** Evaluate one Automa condition row against runtime variables. */
-function evalConditionRow(row: ConditionRow, vars: Record<string, unknown>): boolean {
-  const left = row.name !== undefined && row.name !== '' ? vars[row.name] : row.value
-  const right = row.value
-  const present = left !== undefined && left !== null && left !== ''
-  switch (row.compare ?? '') {
-    case 'nq':
-    case 'not-exists':
-    case 'not-visible':
-      return !present
-    case 'exists':
-    case 'visible':
-    case 'visible-screen':
-      return present
-    case 'cnt':
-    case 'contains':
-      return String(left ?? '').includes(String(right ?? ''))
-    case 'nct':
-      return !String(left ?? '').includes(String(right ?? ''))
-    case 'gt':
-      return Number(left) > Number(right)
-    case 'gte':
-      return Number(left) >= Number(right)
-    case 'lt':
-      return Number(left) < Number(right)
-    case 'lte':
-      return Number(left) <= Number(right)
-    case 'eql':
-    case 'eq':
-    default:
-      // Equality with type coercion for numbers, else string compare.
-      if (typeof left === 'number' || typeof right === 'number')
-        return Number(left) === Number(right)
-      return String(left ?? '') === String(right ?? '')
-  }
 }
 
 /** Automa `event-click` / `hover-element` respect waitForSelector too. */

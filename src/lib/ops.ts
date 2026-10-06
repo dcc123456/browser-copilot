@@ -163,6 +163,19 @@ export type ScrollSpec =
   | { mode: 'incremental'; x?: number; y?: number }
   | { mode: 'top'; smooth?: boolean }
   | { mode: 'bottom'; smooth?: boolean }
+  /**
+   * "Scroll element" block's offset box. `incX`/`incY` from the editor decide per
+   * axis whether that axis is added to the current position; the default (both
+   * off) is an absolute position, which `by` cannot express.
+   */
+  | {
+      mode: 'to'
+      x?: number
+      y?: number
+      smooth?: boolean
+      xIncremental?: boolean
+      yIncremental?: boolean
+    }
 
 /** One operation, handed across the structured-clone boundary. */
 export interface Op {
@@ -177,7 +190,22 @@ export interface Op {
    * matched by `value` to build a selector for.
    */
   index?: number
+  /**
+   * For `select_option`: which of the editor's "Select an option by" modes the
+   * block chose. `value` matches `value`/label (the default); the positional
+   * modes use `index`, where `last` ignores its value.
+   */
+  selectBy?: 'value' | 'first' | 'last' | 'index'
+  /** For `create_element`: the form's "CSS" field, injected as a `<style>`. */
+  css?: string
+  /** For `create_element`: the form's "JavaScript" field, run per created element. */
+  javascript?: string
   scroll?: ScrollSpec
+  /**
+   * For `handle_dialog`: dismiss the dialog instead of accepting it. The block's
+   * `accept` checkbox was reaching nobody — every dialog was auto-accepted.
+   */
+  accept?: boolean
   /** Whether to clear an input before typing (default true for `fill`). */
   clear?: boolean
   /**
