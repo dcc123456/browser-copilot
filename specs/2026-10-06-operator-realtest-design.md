@@ -72,24 +72,25 @@ node tmp/operator-matrix/matrix.mjs --only data # 单子集
 
 ## 5. 复现与验证
 
-- 单元层：`pnpm typecheck && pnpm test`（含 `tests/operator-param-coverage.spec.ts` 的四条守卫：广告出去的参数必须被读到、UI-only key 不得被重新广告、KNOWN_INERT 不得过期、算子不得无 executor）。该守卫现在会把 `src/lib/workflow/block-output.ts` 一并解析，否则共享 helper 里的 `data['variableName']` 会被误判为「无人读取」。
+- 单元层：`pnpm typecheck && pnpm test`（含 `tests/operator-param-coverage.spec.ts` 的四条守卫：广告出去的参数必须被读到、UI-only key 不得被重新广告、KNOWN_INERT 不得过期、算子不得无 executor）。该守卫现在会把 `src/lib/workflow/block-output.ts` 一并解析，否则共享 helper 里的 `data['variableName']` 会被误判为「无人读取」。本轮改到的扩展 executor 行为另有 `tests/webhook-response.spec.ts`、`tests/variable-blocks.spec.ts` 与新增的 `tests/clipboard-selection-download-wait.spec.ts`（钉住 `copySelectedText` 与 `handle-download` 的等待语义——静态守卫抓不到 `clipboard`，因为它没有被广告成算子工具）。
 - 端口层：`pnpm server:typecheck && pnpm server:test`。**端口改动必须单独跑 `server:typecheck`**：根 `pnpm typecheck` 不覆盖 `server/`，本轮就在 `server/` 里写过 `effective.nodes`（图实际在 `effective.drawflow.nodes`），类型检查没拦到、真跑时 146 条用例一起崩成 `Cannot read properties of undefined (reading 'find')`。
 - 真实浏览器层：`node tmp/operator-matrix/matrix.mjs`（本报告 §6 的全部结论来源）。
+- 扩展宿主层（端口答不了的那些）：`pnpm build` → bridge 的 `reload_extension`（`{confirm:"reload"}`，载入构建戳）→ `generate_workflow` 对着同一个 fixture 站点起一轮生成，它会保存并试重放，`trialRun` 的 `coveredSteps` 与 `goalSpec` 的 `variableExists` 条件就是扩展内的判定证据；再用 `tab_switch` + `run_javascript` 回读 fixture 的状态镜像（`/form` 的 `#log-all`、`#key-log`）确认写入不是「没报错」而是真落到页面状态。结论见 §6.3。
 - 引擎相关改动附带 `pnpm bench:debug`。
 
 ## 6. 逐算子判定
 
 规模：面板 67 个算子（`BLOCK_CATALOG` 63 + `CUSTOM_BLOCKS` 4），146 条真跑用例覆盖 62 个，其余 5 个记入 `UNTESTABLE`（cloud-only / 需真实 Google 授权，见 §7）；`tmp/operator-matrix/coverage.mjs` 双向校验「算子没有用例」与「用例指向不存在的算子」，当前两侧都是 0。逐条观察证据（每步日志、hook 收到的 JSON、下载/上传计数）在机器生成版 `tmp/operator-matrix/operator-matrix.md`；本节只给结论。
 
-最后一轮全量：**140 PASS / 3 FAIL / 3 BLOCKED**。判据的证据面：矩阵跑的是 Runner 端口，但它与扩展共用同一引擎（`src/background/workflow-engine/engine.ts`）、同一页面 kernel（端口直接 `import { runExecJs, runOp, runWorkflowJs } from '../src/inpage/kernel'`）与同一批共享 helper，只有 executor 的宿主 API 调用是两份对照实现；扩展侧的改动由 `pnpm test`（3823 例）与静态参数守卫把关。收敛过程：一次崩盘 8 PASS / 138 FAIL（`effective.nodes` 事故）→ 127 → 134 → 138 → 140，其间 16→3 的差额里，产品缺陷与「用例自己写错/证据通道竞态」几乎各半（§4 第 11-14 条与 §5）。
+最后一轮全量：**140 PASS / 3 FAIL / 3 BLOCKED**。判据的证据面：矩阵跑的是 Runner 端口，但它与扩展共用同一引擎（`src/background/workflow-engine/engine.ts`）、同一页面 kernel（端口直接 `import { runExecJs, runOp, runWorkflowJs } from '../src/inpage/kernel'`）与同一批共享 helper，只有 executor 的宿主 API 调用是两份对照实现；扩展侧的改动由 `pnpm test` 与静态参数守卫把关，端口答不了的四条（contenteditable 受信任按键、`await` 语句体、iframe 作用域、变量读取）另跑了一轮**真扩展生成 + 试重放**复验，结论与一处改判见 §6.3。收敛过程：一次崩盘 8 PASS / 138 FAIL（`effective.nodes` 事故）→ 127 → 134 → 138 → 140，其间 16→3 的差额里，产品缺陷与「用例自己写错/证据通道竞态」几乎各半（§4 第 11-14 条与 §5）。
 
 四类判定：
 
 1. **功能正常**——140 条。判据不是「没报错」，而是本轮修复前反复出现的那类假绿：证据必须由「块自己产生、且只有这条功能生效才可能出现的形状」承载（见 §4 第 11-13 条）。
-2. **端口能力缺失，不是产品缺陷**——2 条：
-   - `forms.content-editable`：kernel 在 `src/inpage/kernel.ts:1404` 明确返回「编辑器未接受模拟输入（内部状态未更新，字数仍为 0）。将尝试通过受信任键盘输入重试」，扩展宿主确实接住了这条重试（`src/background/driver.ts:593` + `src/background/cdp-typing.ts:265`，走 chrome.debugger 受信任按键），端口没有对应实现。扩展内可用，服务端不可用。
-   - `switch-to.iframe`：两个宿主里这个块都只打印一行「已定位 iframe …」（扩展 `executors.ts:2869-2875`、端口 `server/src/executors.ts:1752-1758`），不改变后续步骤的作用域。扩展之所以还能读 iframe 内容，是 driver 以 `allFrames: true` 注入 kernel、在所有 frame 里排序取最佳（`src/background/driver.ts:2、8、495`）；端口经由同一 kernel 只读主框架，所以用例里 `#frame-title` 读不到。判定：算子本身没有可观察效果（一条日志），要真正生效需要引入 run 级 frame 上下文并让目标解析遵守它——跨宿主架构改动，不在本轮范围。
-3. **语义无法实现（架构）**——1 条：`wait-connections.join-incoming-flows`，单路径引擎（§7）。
+2. **端口能力缺失，不是产品缺陷**——1 条，且已在扩展宿主里坐实：
+   - `forms.content-editable`：kernel 在 `src/inpage/kernel.ts:1404` 明确返回「编辑器未接受模拟输入（内部状态未更新，字数仍为 0）。将尝试通过受信任键盘输入重试」，扩展宿主确实接住了这条重试（`src/background/driver.ts:593` + `src/background/cdp-typing.ts:265`，走 chrome.debugger 受信任按键），端口没有对应实现。判定：扩展内可用（见 §6.3 第 1 条的真页面回读），服务端不可用。
+3. **语义无法实现（架构）**——2 条：`wait-connections.join-incoming-flows`（单路径引擎，§7），以及下面这条**由扩展宿主复验改判**的：
+   - `switch-to.iframe`：两个宿主里这个块都只打印一行「已定位 iframe …」（扩展 `executors.ts:2869-2875`、端口 `server/src/executors.ts:1752-1758`），不改变后续步骤的作用域。**本节此前的一处结论是错的，现按扩展宿主的实测改判**：我原来写「扩展之所以还能读 iframe 内容，是 driver 以 `allFrames: true` 注入 kernel」，但 `allFrames`（`src/background/driver.ts:8、495`）只覆盖走 driver 的元素动作与 `element-exists`/计数（`driver.ts:1341-1353`）；`get-text` 与 `read-page` 两个读取块在扩展里就是按主框架注入的（`executors.ts:878、892` 的 `frameIds: [0]`），端口经由同一 kernel 也只读主框架。真扩展里对着 `#frame-title` 发 `get-text`，返回的正是扩展自己的第④条提示「元素是否在 iframe 内——当前只读主框架」（`executors.ts:549`），读取失败——见 §6.3 第 3 条。判定改为：**读取路径两个宿主都把 iframe 排除在外，`switch-to` 两个宿主都没有可观察效果**；要让承诺生效需要 run 级 frame 上下文 + 目标解析遵守它，并且要把 `readTextsFromActiveTab` 的注入目标一起改掉——跨宿主架构改动，不在本轮范围。残余的端口差异只剩「元素动作」一侧。
 4. **本环境无法验证**——3 条 BLOCKED：`proxy.apply`（扩展未声明 proxy 权限，块按设计直接抛错）、`ai-agent.read-only`（无 `BC_LLM_*` 模型配置）、`upload-file.set-file`（headless 无 OS 文件选择器，`user-select` 模式按设计拒绝）。
 
 ### 6.1 广告出去但确实不生效的功能
@@ -134,7 +135,7 @@ node tmp/operator-matrix/matrix.mjs --only data # 单子集
 | `element-scroll` | 3: 3P/0F/0B | 正常 | — |
 | `link` | 2: 2P/0F/0B | 正常 | — |
 | `attribute-value` | 2: 2P/0F/0B | 正常 | addExtraRow, extraRowValue, extraRowDataColumn |
-| `forms` | 12: 11P/1F/0B | 部分不通过（contenteditable 需端口缺受信任按键重试） | — |
+| `forms` | 12: 11P/1F/0B | 端口侧那 1 条不通过 = 端口缺受信任按键重试；扩展宿主实测通过（§6.3 第 1 条） | — |
 | `repeat-task` | 1: 1P/0F/0B | 正常 | — |
 | `javascript-code` | 3: 3P/0F/0B | 正常 | context, preloadScripts, everyNewTab, runBeforeLoad |
 | `trigger-event` | 1: 1P/0F/0B | 正常 | waitForSelector, waitSelectorTimeout |
@@ -151,7 +152,7 @@ node tmp/operator-matrix/matrix.mjs --only data # 单子集
 | `blocks-group` | 1: 1P/0F/0B | 正常 | — |
 | `clipboard` | 2: 2P/0F/0B | 正常 | — |
 | `insert-data` | 3: 3P/0F/0B | 正常 | — |
-| `switch-to` | 1: 0P/1F/0B | 不通过（两宿主都只打印日志，不改作用域） | — |
+| `switch-to` | 1: 0P/1F/0B | 不通过（两宿主都只打印日志，不改作用域；真扩展里 `get-text` 读 iframe 同样失败，§6.3 第 3 条） | — |
 | `upload-file` | 1: 0P/0F/1B | 环境阻塞（headless 无 OS 文件选择器） | — |
 | `hover-element` | 1: 1P/0F/0B | 正常 | — |
 | `save-assets` | 1: 1P/0F/0B | 正常（仅「不崩」；两宿主都是占位实现） | findBy, waitForSelector, waitSelectorTimeout, selector, type, url, filename, saveDownloadIds, variableName, saveToGDrive |
@@ -181,9 +182,22 @@ node tmp/operator-matrix/matrix.mjs --only data # 单子集
 | `set-variable` | 2: 2P/0F/0B | 正常 | — |
 | `get-secret` | 1: 1P/0F/0B | 正常 | — |
 
+### 6.3 扩展宿主复验（真扩展，非端口）
+
+矩阵跑在 Runner 端口上，端口能答的结论到这里为止；剩下四条只有真扩展能答。`pnpm build` → `reload_extension`（载入构建戳 `b0339aa56c50a26a`）→ 用 `generate_workflow` 在同一个 fixture 站点（:8798）生成并**试重放**一张 14 节点图（保存为 `muwcneo7-5dss6b05`），结果 `trialRun.outcome = passed`、`coveredSteps 13/13`、三个 `variableExists` 目标条件全部成立。逐条：
+
+1. **`forms` 写 contenteditable —— 真扩展里确实生效**。判据不是「节点没报错」：重放结束后回读 fixture 自己的状态镜像 `#log-all`，得到 `ce=hello-extension`，同页 `#key-log` 留下 `Backspace:`——即 chrome.debugger 受信任按键真的打进了编辑器内部状态。这把 §6 第 2 类的「端口缺失、扩展可用」从代码推断升级为实测。
+2. **`javascript-code` 顶层 `await` —— 修复在载入的构建里生效**。节点 3 是 `const r = await fetch('/api/json'); const j = await r.json(); return j.total;`（语句体 + 顶层 await），在扩展里跑通并产出 `jsonTotal`，正是本轮 kernel 那处语句体 async 包裹兜底（`src/inpage/kernel.ts:2963-2965`）的靶子。
+3. **`switch-to.iframe` —— 推翻并改判了本节的一处结论**（详见 §6 第 3 类）。同一张图里 `switch-to` 之后对 `#frame-title` 发 `get-text`，扩展返回它自己的第④条排查提示「元素是否在 iframe 内——当前只读主框架」，读取失败；`element-exists` 也报 0（它是单次查询、`tryCount`/`timeout` 不生效，见 §6.1，于是和 iframe 文档加载赛跑）。图里的 iframe 读取最终只能由一段 `javascript-code` 用 `contentDocument` 完成。
+4. **新边界：Agent 的 `run_javascript` 工具不是算子路径**。同一份代码 `const r = await fetch(...)` 交给 `run_javascript` 时，扩展直接返回 `await is only valid in async functions and the top level bodies of modules`——因为该工具走 `exec_js` → `kernel.runExecJs`（`src/inpage/kernel.ts:2644-2707`），那是一个同步 harness：语句体不 async 包裹，返回的 Promise 也不 await。`javascript-code` 算子走的是另一条 `exec_workflow_js` → `runWorkflowJs`（异步、有 Automa 助手），两者不要混谈。本轮按「就此收尾」只记录不实现。
+
+单元面：扩展侧这轮新读的两个参数（`clipboard.copySelectedText`、`handle-download` 的 `timeout`/`waitForDownload`）此前只有端口矩阵的证据，现在补了 `tests/clipboard-selection-download-wait.spec.ts`（6 例）钉住扩展 executor 本身——`copySelectedText` 走页面选区读取而不是系统剪贴板、剪贴板读取失败必须抛错、下载按 `timeout` 轮询到出现即返回、`waitForDownload: false` 只查一次、超时归 null。
+
 ## 7. 已知边界
 
 - `ai-workflow` / `block-package` / `google-sheets-drive` 是 cloud-only 块（`isCloudBlock`），本地面板不展示、本地执行拒绝，不构成本地缺陷。
 - `google-sheets` / `google-drive` 需要真实 Google 授权，本环境无凭据。
 - `trigger-event` / `interact-handle-download` 一类依赖原生弹窗、真实用户手势或 OS 剪贴板权限的路径，在 Playwright 无头环境里的表现与扩展内不完全一致，结论必须区分「产品缺陷」与「端口能力缺失」。
 - 引擎是单路径执行（`runNode` 只跟随 `resolver ?? defaultNext`，没有入边队列），因此 `wait-connections` 承诺的「等待所有入边汇合」在任何图上都不成立；这不是参数漂移，是语义无法实现。
+- **iframe 内容在两个宿主里都读不出来**：`get-text`/`read-page` 按主框架注入（扩展 `executors.ts:878、892` 的 `frameIds: [0]`；端口经由同一 kernel 只有主框架），`allFrames` 只覆盖走 driver 的元素动作与 `element-exists`/计数。唯一可行路径是 `javascript-code` 里用 `contentDocument`（同源 iframe），见 §6.3 第 3 条。
+- **Agent 工具 `run_javascript` 与 `javascript-code` 算子是两套 harness**：前者同步、不支持顶层 `await`、不 await 返回的 Promise（`kernel.ts:2644-2707`），后者异步（`kernel.ts:2725+`）。评估算子时不要把工具层的失败算成算子缺陷，反之亦然。
