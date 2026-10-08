@@ -38,6 +38,7 @@ import {
   strategyUsesModel,
   type NextStrategyResult,
 } from '../../../lib/workflow/repair-policy'
+import { pageContextReanchorCandidate } from '../../../lib/workflow/page-context-reanchor'
 import {
   beginAttempt,
   currentAttempt,
@@ -229,7 +230,24 @@ export async function runAutoRepair(input: StartAutoRepairInput): Promise<Repair
         continue
       }
 
-      if (strategy === 'readiness-recovery') {
+      if (strategy === 'page-context-reanchor') {
+        // Deterministic (S1.5): the graph's own first navigation contradicts
+        // its recorded grounding — move the anchor onto the recorded fact. No
+        // model call, no page touch; the replay is the proof.
+        const reanchor = pageContextReanchorCandidate(candidateWorkflow)
+        if (!reanchor) {
+          session = finishAttempt(session, {}, 'no-candidate')
+          deps.emit({
+            type: 'repair.attempt-failed',
+            sessionId: session.id,
+            attempt: attemptNumber,
+            reason: 'the graph carries no static navigation target to re-anchor the page context onto',
+          })
+          next = advance(session, failure)
+          continue
+        }
+        candidate = reanchor
+      } else if (strategy === 'readiness-recovery') {
         // S1: deterministic wait / scroll / focus / retry.
         const readiness = await deps.attemptReadinessRecovery(workflow, failure)
         if (readiness.ok && readiness.candidate) {

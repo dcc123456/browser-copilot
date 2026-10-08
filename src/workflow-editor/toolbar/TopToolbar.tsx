@@ -11,6 +11,7 @@
 
 import {
   Bug,
+  CheckCircle2,
   CircleDot,
   CircleStop,
   LoaderCircle,
@@ -20,12 +21,15 @@ import {
   Play,
   Save,
   SquareTerminal,
+  TriangleAlert,
   WandSparkles,
+  X,
 } from 'lucide-react'
 import { useState } from 'react'
 import { BlockIcon } from '../../lib/workflow/blocks/icons'
 import Modal from '../ui/Modal'
 import type { TranslateFn } from '../i18n'
+import type { EditorRepairStatus } from '../use-repair-events'
 
 export default function TopToolbar({
   workflowName,
@@ -44,6 +48,8 @@ export default function TopToolbar({
   onOpenLogs,
   onToggleRecording,
   onAutoLayout,
+  repair,
+  onCancelRepair,
   t,
 }: {
   workflowName: string
@@ -64,6 +70,9 @@ export default function TopToolbar({
   onOpenLogs: () => void
   onToggleRecording: () => void
   onAutoLayout: () => void
+  /** Background AI repair status for the workflow in this editor. */
+  repair?: EditorRepairStatus
+  onCancelRepair?: () => void
   t: TranslateFn
 }) {
   // Rename dialog state: the toolbar shows the name as a button; editing
@@ -129,6 +138,44 @@ export default function TopToolbar({
           {t('logs')}
         </button>
       </div>
+
+      {repair && repair.state !== 'idle' ? (
+        <div className="wf-toolbar-group flex items-center gap-1.5">
+          <span
+            title={repair.state === 'failed' ? repair.reason : undefined}
+            className={`flex items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-[11px] font-medium ${
+              repair.state === 'running'
+                ? 'text-accent'
+                : repair.state === 'success'
+                  ? 'text-ok'
+                  : 'text-err'
+            }`}
+          >
+            {repair.state === 'running' ? (
+              <LoaderCircle size={13} className="wf-spin" aria-hidden />
+            ) : repair.state === 'success' ? (
+              <CheckCircle2 size={13} aria-hidden />
+            ) : (
+              <TriangleAlert size={13} aria-hidden />
+            )}
+            {repair.state === 'running'
+              ? t('repairRunning')
+              : repair.state === 'success'
+                ? t('repairSuccess')
+                : t('repairFailed')}
+          </span>
+          {repair.state === 'running' ? (
+            <button
+              type="button"
+              className="wf-icon-btn"
+              title={t('repairCancel')}
+              onClick={onCancelRepair}
+            >
+              <X size={13} />
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       <span className="wf-toolbar-spacer" />
 

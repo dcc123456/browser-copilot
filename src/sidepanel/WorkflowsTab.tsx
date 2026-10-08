@@ -16,6 +16,7 @@ import type { CommandResult } from '../lib/messages'
 import type { TaskRunLog } from '../lib/scheduler-types'
 import type { Workflow } from '../lib/workflow/types'
 import type { PendingTakeoverInfo } from '../lib/workflow/takeover-pending'
+import type { ReplayFirstRunRecord } from '../lib/workflow/replay-metrics'
 import { newId } from '../lib/storage'
 import { onStoreChanged } from '../lib/store-events'
 import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
@@ -189,6 +190,12 @@ export default function WorkflowsTab() {
   // from. Only the worker can read checkpoints, so the panel asks and then
   // offers the Resume action just for the workflows that answered yes.
   const [resumePoints, setResumePoints] = useState<Record<string, string>>({})
+  /**
+   * First-replay verdict per workflow id (see `lib/workflow/replay-metrics`).
+   * Purely informational: it labels a card, it never enables or disables an
+   * action, so a missing entry is just a card without that line.
+   */
+  const [firstRuns, setFirstRuns] = useState<Record<string, ReplayFirstRunRecord>>({})
   /** Set of (workflow, last-run) pairs the current `resumePoints` belongs to. */
   const probeSignatureRef = useRef('')
 
@@ -242,14 +249,22 @@ export default function WorkflowsTab() {
 
   const load = useCallback(async () => {
     try {
-      const [workflowResult, runsResult, pendingResult] = await Promise.all([
+      const [workflowResult, runsResult, pendingResult, firstRunResult] = await Promise.all([
         sendCommand({ type: 'workflows.list' }),
         sendCommand({ type: 'tasks.runs' }),
         sendCommand({ type: 'workflows.takeoverPending' }),
+        // One read for the whole list; a failed metric read costs the card its
+        // first-replay line and nothing else.
+        sendCommand({ type: 'workflows.firstRuns' }).catch(() => undefined),
       ])
       if (workflowResult.type === 'workflows.list') setWorkflows(workflowResult.workflows)
       if (runsResult.type === 'tasks.runs') setRuns(runsResult.runs)
       if (pendingResult.type === 'workflows.takeoverPending') setPending(pendingResult.items)
+      if (firstRunResult?.type === 'workflows.firstRuns') {
+        const byWorkflow: Record<string, ReplayFirstRunRecord> = {}
+        for (const record of firstRunResult.records) byWorkflow[record.workflowId] = record
+        setFirstRuns(byWorkflow)
+      }
       if (workflowResult.type === 'workflows.list' && runsResult.type === 'tasks.runs') {
         await probeResumePoints(workflowResult.workflows, runsResult.runs)
       }
@@ -866,7 +881,7 @@ export default function WorkflowsTab() {
                     {t.workflowsLastRun}: {new Date(last.time).toLocaleString(navigator.language)}
                   </div>
                 )}
-                <WorkflowHealthView health={health} />
+                <WorkflowHealthView health={health} firstRun={firstRuns[wf.id]} />
                 <div className="actions task-actions">
                   <button
                     className="task-action-run"

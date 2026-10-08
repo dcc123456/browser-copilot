@@ -32,7 +32,7 @@ import {
   getDraftSnapshot,
   TRIGGER_BLOCK_ID,
 } from '../src/background/operator-tool-handler'
-import { runOperatorToolWithExecution } from '../src/background/operator-tool-run'
+import { blockTouchesPage, runOperatorToolWithExecution } from '../src/background/operator-tool-run'
 import type { BlockExecutor } from '../src/background/workflow-engine/executors'
 import {
   ADVERTISABLE_OPERATOR_CATEGORIES,
@@ -336,5 +336,27 @@ describe('wf_op_trigger edits the trigger head in place', () => {
     const head = draft.nodes.find((n) => n.label === TRIGGER_BLOCK_ID)!
     expect(out.nodeId).toBe(head.id)
     expect(out.workflowSize).toBe(0)
+  })
+})
+
+/**
+ * Which operators put the generation session ON a page. This gate decides what
+ * gets recorded as an origin the saved graph may act on, so it must include the
+ * blocks that read or navigate (a cross-site goal's second site is usually
+ * reached by a read, not a click) and exclude the ones that only run in the
+ * worker — the tab in scope during an `ai-agent` call is a coincidence, not a
+ * site the workflow acts on.
+ */
+describe('blockTouchesPage', () => {
+  it('counts navigation, element ops and page reads', () => {
+    for (const blockId of ['new-tab', 'open-url', 'event-click', 'forms', 'read-page', 'get-text', 'upload-file']) {
+      expect(blockTouchesPage(blockId)).toBe(true)
+    }
+  })
+
+  it('excludes worker-only blocks and unknown ids', () => {
+    for (const blockId of ['ai-agent', 'set-variable', 'conditions', 'wait', 'nope-not-a-block']) {
+      expect(blockTouchesPage(blockId)).toBe(false)
+    }
   })
 })

@@ -172,3 +172,92 @@ describe('workflow draft survives a service-worker restart', () => {
     expect(after.actionNodesOf(fresh)).toHaveLength(0)
   })
 })
+
+/**
+ * The pre-save trial replay as the compose path uses it (first-run-success D2).
+ *
+ * The one property worth a worker-restart-grade test: the trial is evidence,
+ * so a graph it dislikes must still end up in storage. The other is that
+ * reviewing a draft never replays it — the user's page is not the review card's
+ * to drive.
+ */
+describe('the pre-save trial in the compose path', () => {
+  async function draftWithOneClick() {
+    const handler = await freshHandler()
+    await handler.runOperatorTool({
+      name: 'wf_op_event-click',
+      args: {
+        selector: '#x',
+        __reliability: {
+          intent: '点击目标元素',
+          idempotency: 'safe',
+          postconditions: [{ kind: 'elementExists', target: { testId: 'x' } }],
+        },
+      },
+      conversationId: 'conv',
+    })
+    return handler
+  }
+
+  const failedRecord = {
+    outcome: 'failed' as const,
+    at: 1,
+    full: false,
+    coveredSteps: 1,
+    totalSteps: 2,
+    failureCode: 'LOCATOR_NOT_FOUND',
+  }
+
+  it('saves the workflow even when the trial says it is broken', async () => {
+    const handler = await draftWithOneClick()
+    const composed = await handler.composeWorkflowFromDraft('conv', {
+      save: true,
+      trial: async (workflow) => ({ workflow, record: failedRecord }),
+    })
+    expect('error' in composed).toBe(false)
+    if ('error' in composed) throw new Error(composed.error)
+    expect(composed.saved).toBe(true)
+
+    const { getWorkflow } = await import('../src/lib/workflow/storage')
+    const stored = await getWorkflow(composed.workflow.id)
+    expect(stored?.settings.trialRun).toMatchObject({ outcome: 'failed' })
+    expect(
+      stored?.settings.generationStages?.find((stage) => stage.stage === 'INDEPENDENT_VERIFY'),
+    ).toMatchObject({ status: 'warn' })
+  })
+
+  it('saves the graph the trial healed, not the one it started from', async () => {
+    const handler = await draftWithOneClick()
+    const composed = await handler.composeWorkflowFromDraft('conv', {
+      save: true,
+      trial: async (workflow) => {
+        const healed = structuredClone(workflow)
+        const click = healed.drawflow.nodes.find((n) => n.data['blockId'] === 'event-click')!
+        click.data['selector'] = '#healed'
+        return {
+          workflow: healed,
+          record: { ...failedRecord, outcome: 'partial' as const, degradedSteps: 1 },
+        }
+      },
+    })
+    if ('error' in composed) throw new Error(composed.error)
+    const { getWorkflow } = await import('../src/lib/workflow/storage')
+    const stored = await getWorkflow(composed.workflow.id)
+    expect(
+      stored?.drawflow.nodes.find((n) => n.data['blockId'] === 'event-click')?.data['selector'],
+    ).toBe('#healed')
+  })
+
+  it('does not replay a draft that is only being reviewed', async () => {
+    const handler = await draftWithOneClick()
+    let calls = 0
+    await handler.composeWorkflowFromDraft('conv', {
+      save: false,
+      trial: async (workflow) => {
+        calls += 1
+        return { workflow, record: failedRecord }
+      },
+    })
+    expect(calls).toBe(0)
+  })
+})

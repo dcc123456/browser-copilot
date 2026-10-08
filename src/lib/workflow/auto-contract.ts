@@ -51,10 +51,13 @@ export function inferIdempotency(
   if (UNSAFE_BLOCKS.has(blockId)) return 'unsafe'
   const verb = String(data['action'] ?? data['event'] ?? '').toLowerCase()
   if (UNSAFE_VERBS.has(verb)) return 'unsafe'
-  // forms defaults to submit when no action given.
-  if (blockId === 'forms' && (!verb || UNSAFE_VERBS.has(verb))) {
-    return verb === '' ? 'unsafe' : UNSAFE_VERBS.has(verb) ? 'unsafe' : 'safe'
-  }
+  // A `forms` node with no `action` is a FILL, not a submit — that is what the
+  // executor sends (`{action:'fill'}`, and `idempotencyOf` defaults the same
+  // way). This inference used to read the missing verb as a submit, and because
+  // what it infers it also WRITES, the contradiction stuck: an explicit
+  // `idempotency: 'unsafe'` landed on a title field that is harmless to refill,
+  // and the trial stopped there instead of proving the rest of the graph.
+  if (blockId === 'forms') return 'conditional'
   return 'safe'
 }
 
@@ -66,7 +69,7 @@ export function inferIdempotency(
 /** Extract a usable locator from EVERY home the tools accept. */
 function locatorOf(
   data: Record<string, unknown>,
-): { css?: string; testId?: string; id?: string; name?: string; text?: string; role?: string; ref?: string } | undefined {
+): { css?: string; testId?: string; id?: string; name?: string; text?: string; role?: string } | undefined {
   if (typeof data['testId'] === 'string' && data['testId']) return { testId: data['testId'] }
   if (typeof data['selector'] === 'string' && data['selector']) return { css: data['selector'] }
   if (typeof data['css'] === 'string' && data['css']) return { css: data['css'] }
@@ -81,23 +84,31 @@ function locatorOf(
   if (target && typeof target === 'object') {
     const primary = (target as Record<string, unknown>)['primary']
     if (primary && typeof primary === 'object') {
-      const how = String((primary as Record<string, unknown>)['how'] ?? '')
-      const value = String((primary as Record<string, unknown>)['value'] ?? '')
+      const spec = primary as Record<string, unknown>
+      const how = String(spec['how'] ?? '')
+      const value = String(spec['value'] ?? '')
       if (value) {
         if (how === 'css' || how === 'css selector' || how === '') return { css: value }
         if (how === 'id') return { id: value }
         if (how === 'name') return { name: value }
         if (how === 'text') return { text: value }
-        if (how === 'testId' || how === 'data-testid') return { testId: value }
-        // role-like primary: keep as a css token so the condition still parses.
-        return { css: value }
+        if (how === 'testid' || how === 'testId' || how === 'data-testid') return { testId: value }
+        // A `role` spec's value is the ACCESSIBLE NAME, not a selector. Turning
+        // it into a CSS token produced a postcondition no page could ever match
+        // (`querySelector('提交')` throws), i.e. a permanently-false gate. Keep
+        // the semantics the observation layer understands — and when the role
+        // itself is unknown, produce NO locator rather than a guessed one.
+        if (how === 'role') {
+          const role = spec['role']
+          if (typeof role === 'string' && role.trim()) return { role: role.trim(), name: value }
+          return undefined
+        }
       }
     }
   }
-  // Snapshot ref (element handle): no selector is recoverable, but a
-  // postcondition must still exist — record the handle token so the goal gate
-  // passes (verification resolves it the same way the executor does).
-  if (typeof data['ref'] === 'string' && data['ref']) return { ref: data['ref'] }
+  // No `ref` branch on purpose: a snapshot handle is conversation-scoped and
+  // is gone by replay. A postcondition built from it would be unverifiable, so
+  // `defaultPostcondition` yields none instead — no gate, no false gate.
   return undefined
 }
 
@@ -115,7 +126,6 @@ function defaultPostcondition(
   else if (found.id) target['stableAttributes'] = { id: found.id }
   else if (found.name) target['stableAttributes'] = { name: found.name }
   else if (found.text) target['text'] = found.text
-  else if (found.ref) target['testId'] = found.ref
   else if (found.css) target['stableAttributes'] = { 'data-css': found.css }
   else return undefined
   return [{ kind: 'elementExists', target }]
@@ -171,14 +181,13 @@ export function autoCompleteReliability(nodes: LikeNode[]): number {
       base['readiness'] = defaultReadinessFor(blockId, data)
     }
     if (needsPost) {
-      const post =
-        defaultPostcondition(data) ??
-        // Last-resort guarantee for an unsafe node carrying NO recoverable
-        // locator: a parseable, non-empty target the verification resolves at
-        // run time. It will fail honestly at L3 if the action did not happen
-        // — but it never blocks generation.
-        [{ kind: 'elementExists', target: { stableAttributes: { 'data-action-target': 'action' } } }]
-      base['postconditions'] = post
+      // No recoverable locator ⇒ no postcondition. The previous last-resort
+      // (`elementExists` on a fabricated `data-action-target` attribute) named
+      // an element nothing on any page can carry, so the unsafe node that was
+      // hardest to locate was guaranteed to fail its own goal check. Absent
+      // evidence is reported as unverified, never as a false gate.
+      const post = defaultPostcondition(data)
+      if (post) base['postconditions'] = post
     }
     data[NODE_RELIABILITY_KEY] = base
     touched += 1

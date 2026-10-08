@@ -24,6 +24,7 @@ import {
   skillPath,
 } from './fs-store'
 import { withKeyLock } from './key-lock'
+import { jsonBytes } from './persist-budget'
 import { skillFromMarkdown, skillSlug, skillToMarkdown } from './skills-import'
 import { agentFromMarkdown, agentSlug, agentToMarkdown } from './agents-import'
 import { BUILT_IN_SKILLS } from './builtin-skills'
@@ -95,10 +96,12 @@ export const DEFAULT_SETTINGS: Settings = {
   localAgentUrl: DEFAULT_LOCAL_AGENT_URL,
   localAgentActiveAgent: '',
   localAgentAdapterPath: '',
+  localAgentAllowReload: false,
   localAgentBindings: {},
   unattendedWindowPolicy: 'latest',
   takeoverModel: { providerId: '', model: '' },
   takeoverOnRun: false,
+  autoRepairOnRun: false,
 }
 
 /**
@@ -232,6 +235,8 @@ export function normalizeStoredSettings(raw: unknown): Settings {
       typeof value.localAgentActiveAgent === 'string' ? value.localAgentActiveAgent : '',
     localAgentAdapterPath:
       typeof value.localAgentAdapterPath === 'string' ? value.localAgentAdapterPath : '',
+    localAgentAllowReload:
+      typeof value.localAgentAllowReload === 'boolean' ? value.localAgentAllowReload : false,
     localAgentWindowId:
       typeof value.localAgentWindowId === 'number' ? value.localAgentWindowId : undefined,
     localAgentBindings: normalizeLocalAgentBindings(value.localAgentBindings),
@@ -243,6 +248,7 @@ export function normalizeStoredSettings(raw: unknown): Settings {
       typeof value.unattendedWindowId === 'number' ? value.unattendedWindowId : undefined,
     takeoverModel,
     takeoverOnRun: typeof value.takeoverOnRun === 'boolean' ? value.takeoverOnRun : false,
+    autoRepairOnRun: typeof value.autoRepairOnRun === 'boolean' ? value.autoRepairOnRun : false,
   }
 }
 
@@ -764,14 +770,77 @@ export async function loadConversation(conversationId: string): Promise<WireMess
   return Array.isArray(value) ? (value as WireMessage[]) : []
 }
 
+/**
+ * Longest attachment data URL kept in a PERSISTED transcript. The descriptor's
+ * own limits allow a turn to carry 8 MB of base64, and the transcript lives
+ * under one `conv:<id>` key that is rewritten on every turn — with the data
+ * directory unreachable that whole value is parked in the storage fallback,
+ * where an over-budget entry is refused and the conversation loses its durable
+ * write. The bytes of a big image are also the one part nobody re-reads: the
+ * model already saw it, and the panel renders the chip without a thumbnail.
+ */
+const MAX_PERSISTED_DATA_URL_CHARS = 512 * 1024
+
+/** Byte budget for one persisted transcript, past which oldest turns go. */
+const MAX_STORED_CONVERSATION_BYTES = 1_500_000
+
+/**
+ * Shrink the bulk payloads of one transcript so the key can be carried.
+ *
+ * Two shapes reach megabyte size in practice, both in workflow-generating
+ * chats: an image a turn attached, and an image a step handed back as a data
+ * URL in a tool result. Clearing a data URL rather than truncating it is
+ * deliberate — {@link isImageAttachment} is what decides whether an attachment
+ * becomes an `image_url` content part, and whether a tool result is a plain
+ * string, so an absent payload simply makes the turn text-only while a
+ * half-written one would be sent to a provider as a broken URL. `tool_calls`
+ * arguments are left alone: they are JSON that a provider re-validates, and
+ * trimming inside it would corrupt the request rather than slim it.
+ */
+/** A data URL too big to keep — the only strings in a transcript reach megabytes. */
+function isBulkDataUrl(value: string): boolean {
+  return value.startsWith('data:') && value.length > MAX_PERSISTED_DATA_URL_CHARS
+}
+
+function withoutOversizePayloads(messages: WireMessage[]): WireMessage[] {
+  return messages.map((message) => {
+    // Narrowed per branch so the rebuilt object keeps each variant's own
+    // `content` type instead of widening the union to `string | null`.
+    const shedContent =
+      typeof message.content === 'string' && isBulkDataUrl(message.content)
+        ? `[data URL omitted from history: ${message.content.length} chars]`
+        : null
+    if (message.role !== 'user' || !message.attachments || message.attachments.length === 0)
+      return shedContent === null ? message : { ...message, content: shedContent }
+    const attachments = message.attachments.map((attachment) =>
+      typeof attachment.dataUrl === 'string' && isBulkDataUrl(attachment.dataUrl)
+        ? { ...attachment, dataUrl: undefined }
+        : attachment,
+    )
+    return shedContent === null
+      ? { ...message, attachments }
+      : { ...message, content: shedContent, attachments }
+  })
+}
+
+/** Shrink a transcript from the oldest turn until it fits the per-key budget. */
+function withinTranscriptBudget(messages: WireMessage[]): WireMessage[] {
+  let list = messages
+  while (list.length > 1 && jsonBytes(list) > MAX_STORED_CONVERSATION_BYTES) {
+    // `trimConversation` owns the invariant that a retained window may not start
+    // on a tool result, so the shrink goes through it rather than a raw slice.
+    list = trimConversation(list, Math.max(1, Math.floor(list.length * 0.8)))
+  }
+  return list
+}
+
 /** Persists a conversation, trimmed via {@link trimConversation}. */
 export async function saveConversation(
   conversationId: string,
   messages: WireMessage[],
 ): Promise<void> {
-  await area.set({
-    [conversationKey(conversationId)]: trimConversation(messages),
-  })
+  const stored = withinTranscriptBudget(withoutOversizePayloads(trimConversation(messages)))
+  await area.set({ [conversationKey(conversationId)]: stored })
 }
 
 export async function clearConversation(conversationId: string): Promise<void> {
@@ -1611,6 +1680,9 @@ function httpImageUrlArg(args: Record<string, unknown> | undefined): string {
   return /^https?:\/\//i.test(image) ? image : ''
 }
 
+/** Wheel delta that stands for "scroll to the edge" — the browser clamps it there. */
+const SCROLL_TO_EDGE = 100_000
+
 /**
  * Builds the canonical flat block data for a mapped tool action, best-effort
  * from its args. `aiVar` (set for AI-prefilled fills) replaces the literal
@@ -1703,10 +1775,32 @@ function blockDataFromArgs(
       if (mode === 'into_view' && (selector || target)) {
         return withRichTarget({ selector, findBy: 'cssSelector', scrollIntoView: true }, target)
       }
-      // `element-scroll` models top/bottom/by as an X/Y wheel scroll.
+      // `element-scroll` models top/bottom/by as an X/Y wheel scroll. The
+      // extremes are a LARGE delta rather than 0: `scrollBy` clamps at the edge,
+      // so ±SCROLL_TO_EDGE lands on top/bottom while a 0/0 node replays as
+      // nothing at all.
       const y =
-        mode === 'top' ? 0 : mode === 'bottom' ? 100000 : typeof args?.y === 'number' ? args.y : 600
-      return { scrollX: typeof args?.x === 'number' ? args.x : 0, scrollY: y }
+        mode === 'top'
+          ? -SCROLL_TO_EDGE
+          : mode === 'bottom'
+            ? SCROLL_TO_EDGE
+            : typeof args?.y === 'number'
+              ? args.y
+              : 600
+      // What MOVED is either a chosen element (the operator path scrolls a
+      // `selector`) or the window — a rich `target` alone does not count,
+      // because a wheel scroll never touched that element. `html` is how the
+      // executor names the scrolling element; writing it keeps the node honest
+      // about what it scrolls instead of leaving a locator-less step behind.
+      return withRichTarget(
+        {
+          selector: selector || 'html',
+          findBy: 'cssSelector',
+          scrollX: typeof args?.x === 'number' ? args.x : 0,
+          scrollY: y,
+        },
+        selector ? target : undefined,
+      )
     }
     case 'wait_for':
       // Mapped to the `delay` block: replay the agent's pacing as a pause.

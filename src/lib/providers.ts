@@ -377,6 +377,7 @@ export function normalizeSettingsPayload(raw: unknown): {
   localAgentUrl: string
   localAgentActiveAgent: string
   localAgentAdapterPath: string
+  localAgentAllowReload: boolean
   localAgentWindowId?: number
   localAgentBindings: Record<string, number>
   unattendedWindowPolicy: UnattendedWindowPolicy
@@ -385,6 +386,7 @@ export function normalizeSettingsPayload(raw: unknown): {
   ocrLanguage: string
   takeoverModel: { providerId: string; model: string }
   takeoverOnRun: boolean
+  autoRepairOnRun: boolean
 } {
   const value = (raw ?? {}) as Record<string, unknown>
   const providers = Array.isArray(value.providers)
@@ -419,6 +421,8 @@ export function normalizeSettingsPayload(raw: unknown): {
     typeof value.localAgentActiveAgent === 'string' ? value.localAgentActiveAgent : ''
   const localAgentAdapterPath =
     typeof value.localAgentAdapterPath === 'string' ? value.localAgentAdapterPath : ''
+  const localAgentAllowReload =
+    typeof value.localAgentAllowReload === 'boolean' ? value.localAgentAllowReload : false
   const localAgentWindowId =
     typeof value.localAgentWindowId === 'number' ? value.localAgentWindowId : undefined
   const localAgentBindings = normalizeLocalAgentBindings(value.localAgentBindings)
@@ -465,6 +469,7 @@ export function normalizeSettingsPayload(raw: unknown): {
     localAgentUrl,
     localAgentActiveAgent,
     localAgentAdapterPath,
+    localAgentAllowReload,
     localAgentWindowId,
     localAgentBindings,
     unattendedWindowPolicy,
@@ -473,5 +478,6 @@ export function normalizeSettingsPayload(raw: unknown): {
     ocrLanguage,
     takeoverModel,
     takeoverOnRun: typeof value.takeoverOnRun === 'boolean' ? value.takeoverOnRun : false,
+    autoRepairOnRun: typeof value.autoRepairOnRun === 'boolean' ? value.autoRepairOnRun : false,
   }
 }

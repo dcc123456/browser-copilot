@@ -1458,6 +1458,21 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         </label>
         <p className="hint">{t.settingsTakeoverOnRunIntro}</p>
 
+        <label className="checkbox">
+          <input
+            checked={settings.autoRepairOnRun}
+            onChange={(event) =>
+              void mutate({
+                type: 'settings.set',
+                patch: { autoRepairOnRun: event.target.checked },
+              })
+            }
+            type="checkbox"
+          />
+          {t.settingsAutoRepairOnRun}
+        </label>
+        <p className="hint">{t.settingsAutoRepairOnRunIntro}</p>
+
         <div className="actions">
           <button onClick={() => setOpenDialog('takeover')} type="button">
             {t.settingsModify}
@@ -2091,6 +2106,21 @@ export default function SettingsTab({ onLocaleChange }: Props) {
             <span>{t.settingsLocalAgentToken}</span>
           </label>
           <p className="hint error">{t.settingsLocalAgentWarning}</p>
+
+          <label className="checkbox">
+            <input
+              checked={settings.localAgentAllowReload}
+              onChange={(event) =>
+                void mutate({
+                  type: 'settings.set',
+                  patch: { localAgentAllowReload: event.target.checked },
+                })
+              }
+              type="checkbox"
+            />
+            {t.settingsLocalAgentAllowReload}
+          </label>
+          <p className="hint">{t.settingsLocalAgentAllowReloadHint}</p>
 
           <div className="mt-3 rounded-lg border border-border bg-panel-2 p-3">
             <div className="flex items-start justify-between gap-3">

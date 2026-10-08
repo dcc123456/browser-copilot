@@ -31,6 +31,7 @@ import {
   type DeclaredInput,
 } from '../../../lib/workflow/dynamic-data'
 import { defaultReadinessFor } from '../../../lib/workflow/readiness'
+import type { TrialRunRecord } from '../../../lib/workflow/trial-run'
 import {
   stageReport,
   type GenerationStageReport,
@@ -199,14 +200,59 @@ export function staticValidateStage(
 }
 
 /**
- * Independent Verify stage. Verification requires a live replay, which is not
- * available at assembly time, so it is reported as pending (ready on the
- * first run) rather than faked as success.
+ * Independent Verify stage — the pre-save trial replay's own verdict.
+ *
+ * Without a record the stage is genuinely pending (a draft materialised for
+ * the review card is not saved, so nothing was replayed). With one, the stage
+ * reports what the replay of the REAL graph on the REAL page showed, and never
+ * more than that: a `partial` proves the prefix it ran, a `skipped` proves
+ * nothing and stays pending. The stage can only ever be `ok` / `warn` /
+ * `pending` — it is evidence on a card, not a gate on the save.
  */
-export function independentVerifyStage(): GenerationStageReport {
+export function independentVerifyStage(record?: TrialRunRecord): GenerationStageReport {
+  if (!record) {
+    return stageReport(
+      'INDEPENDENT_VERIFY',
+      'pending',
+      'pending first run — goal is verified on replay',
+    )
+  }
+  const coverage = `${record.coveredSteps}/${record.totalSteps} step(s)`
+  if (record.outcome === 'passed') {
+    return stageReport('INDEPENDENT_VERIFY', 'ok', `trial replay ran clean (${coverage})`, {
+      coveredSteps: record.coveredSteps,
+      totalSteps: record.totalSteps,
+      ...(record.degradedSteps ? { degradedSteps: record.degradedSteps } : {}),
+    })
+  }
+  if (record.outcome === 'partial') {
+    return stageReport(
+      'INDEPENDENT_VERIFY',
+      'ok',
+      `trial replay ran the safe prefix clean (${coverage}); steps after the cutoff cannot be re-run automatically`,
+      {
+        coveredSteps: record.coveredSteps,
+        totalSteps: record.totalSteps,
+        ...(record.degradedSteps ? { degradedSteps: record.degradedSteps } : {}),
+      },
+    )
+  }
+  if (record.outcome === 'failed') {
+    return stageReport(
+      'INDEPENDENT_VERIFY',
+      'warn',
+      `trial replay failed${record.failureCode ? ` at ${record.failureCode}` : ''} (${coverage}) — saved anyway, run AI repair or fix the graph`,
+      {
+        coveredSteps: record.coveredSteps,
+        totalSteps: record.totalSteps,
+        ...(record.failedNodeId ? { failedNode: 1 } : {}),
+      },
+    )
+  }
+  // skipped / timeout / cancelled: no evidence either way.
   return stageReport(
     'INDEPENDENT_VERIFY',
     'pending',
-    'pending first run — goal is verified on replay',
+    `trial did not run (${record.reason ?? 'no trial'}) — goal is verified on replay`,
   )
 }

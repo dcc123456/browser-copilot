@@ -510,6 +510,22 @@ export interface Messages {
   healthLastFailure: (params: { category: string }) => string
   /** Health recovery line: repaired and resumed counts. */
   healthRecoveryCounts: (params: { repaired: number; resumed: number }) => string
+  /** First-replay line: the generated graph ran on its first try. */
+  healthFirstRunPassed: string
+  /** First-replay line: it ran, but N steps needed a fallback locator. */
+  healthFirstRunFallbacks: (params: { steps: number }) => string
+  /** First-replay line: it ran only because a step guessed the first visible element. */
+  healthFirstRunGuessedLocator: string
+  /** First-replay line: it failed and only passed after an AI repair. */
+  healthFirstRunNeededRepair: string
+  /** First-replay line: it failed with a machine-readable failure code. */
+  healthFirstRunFailed: (params: { code: string }) => string
+  /** First-replay line: it failed, with no code to name. */
+  healthFirstRunFailedPlain: string
+  /** First-replay line: the first run was cancelled by the user. */
+  healthFirstRunCancelled: string
+  /** First-replay line: the first run was skipped before it started. */
+  healthFirstRunSkipped: string
   /** Hint under the declared-inputs list: the recorded value is a default. */
   chatWorkflowInputsHint: string
   /** Heading of the "this workflow needs code" list on the save card. */
@@ -742,6 +758,9 @@ export interface Messages {
   settingsTakeoverModelIntro: string
   settingsTakeoverOnRun: string
   settingsTakeoverOnRunIntro: string
+  /** Auto-repair-on-run-failure opt-in (off by default). */
+  settingsAutoRepairOnRun: string
+  settingsAutoRepairOnRunIntro: string
   settingsTakeoverModelProvider: string
   settingsTakeoverModelSelectHint: string
   settingsTakeoverModelSaved: string
@@ -894,6 +913,10 @@ export interface Messages {
   chatJumpToLatest: string
   toolOperator: string
   toolOperatorWarn: string
+  toolReloadExtension: string
+  toolReloadExtensionWarn: string
+  toolRepairWorkflow: string
+  toolRepairWorkflowWarn: string
 
   // Settings · page access
   settingsPageAccess: string
@@ -984,6 +1007,8 @@ export interface Messages {
   settingsLocalAgentCopy: string
   settingsLocalAgentCopied: string
   settingsLocalAgentWarning: string
+  settingsLocalAgentAllowReload: string
+  settingsLocalAgentAllowReloadHint: string
 
   // Data / memory
   dataTitle: string
@@ -1245,6 +1270,10 @@ export interface Messages {
   workflowRepairDiagnosing: string
   workflowRepairApplying: string
   workflowRepairVerifying: string
+  /** One repair round that did not fix the step. */
+  workflowRepairAttemptFailed: string
+  /** Cancel the in-flight automatic repair. */
+  workflowRepairCancel: string
   workflowRepairSuccess: string
   workflowRepairExhausted: string
   workflowRepairBlocked: string
@@ -1634,6 +1663,14 @@ const en: Messages = {
   healthLastVerified: ({ time }) => `Last verified: ${time}`,
   healthLastFailure: ({ category }) => `Last failure: ${category}`,
   healthRecoveryCounts: ({ repaired, resumed }) => `${repaired} repaired · ${resumed} resumed`,
+  healthFirstRunPassed: 'First replay passed',
+  healthFirstRunFallbacks: ({ steps }) => `First replay passed after ${steps} locator fallback(s)`,
+  healthFirstRunGuessedLocator: 'First replay passed on a guessed locator',
+  healthFirstRunNeededRepair: 'First replay failed until AI repair',
+  healthFirstRunFailed: ({ code }) => `First replay failed (${code})`,
+  healthFirstRunFailedPlain: 'First replay failed',
+  healthFirstRunCancelled: 'First replay was cancelled',
+  healthFirstRunSkipped: 'First replay was skipped',
   chatWorkflowInputsHint:
     'These values were captured at generation time and become run-time inputs ({{name}}). The saved value is only a default — the workflow re-prompts or uses the trigger value on each run.',
   chatWorkflowCodeNodesTitle: 'Steps that need code',
@@ -1832,6 +1869,9 @@ const en: Messages = {
   settingsTakeoverOnRun: 'Also allow AI takeover when a plain run fails (uses model calls)',
   settingsTakeoverOnRunIntro:
     'Off by default: plain runs fail fast. When on, a failed node gets one AI takeover episode and any proposed fix lands as pending for your confirmation.',
+  settingsAutoRepairOnRun: 'Start AI auto-repair when a run fails',
+  settingsAutoRepairOnRunIntro:
+    'Off by default: a failed run stays failed and you can start a repair from the failure center. When on, a failed run of a generated workflow enters the auto-repair loop in the background — you can cancel it while it runs.',
   settingsTakeoverModelProvider: 'Provider',
   settingsTakeoverModelSelectHint:
     'Pick a model from the dropdown, or keep the provider default. Fetch the list first if it is empty.',
@@ -1983,6 +2023,12 @@ const en: Messages = {
   toolOperator: 'Workflow operator (draft writer)',
   toolOperatorWarn:
     'When off: this operator tool is hidden from the chat in workflow mode and cannot be added to the generated workflow.',
+  toolReloadExtension: 'Reload the extension (developer, bridge only)',
+  toolReloadExtensionWarn:
+    'When off: a local self-test script can no longer pick up a fresh build by itself and you have to reload the unpacked extension in chrome://extensions. Never offered to the chat model.',
+  toolRepairWorkflow: 'Repair a saved workflow (bridge only)',
+  toolRepairWorkflowWarn:
+    'When off: a local agent can no longer replay a saved workflow and hand a failing replay to the autonomous repair loop, which writes a new revision. Never offered to the chat model.',
 
   toolRecognizeImage: 'Recognize text in an image (CAPTCHA, etc.)',
   toolRecognizeImageWarn:
@@ -2076,6 +2122,9 @@ const en: Messages = {
   settingsLocalAgentCopied: 'Copied ✓',
   settingsLocalAgentWarning:
     'While enabled, any page on this machine can drive the browser. Only enable it while your local agent is running.',
+  settingsLocalAgentAllowReload: 'Let the local agent reload the extension (developer)',
+  settingsLocalAgentAllowReloadHint:
+    'Exposes reload_extension on the bridge so a self-test script can pick up a fresh build without reopening chrome://extensions. Off by default; reload only restarts the service worker.',
 
   dataTitle: 'Personal data',
   dataIntro:
@@ -2400,6 +2449,8 @@ Keep the whole report dense and within the message size cap.`,
   workflowRepairDiagnosing: 'Analyzing the failed step…',
   workflowRepairApplying: 'Applying the repair…',
   workflowRepairVerifying: 'Verifying the repair…',
+  workflowRepairAttemptFailed: 'This repair attempt failed',
+  workflowRepairCancel: 'Cancel repair',
   workflowRepairSuccess: 'Workflow auto-repaired',
   workflowRepairExhausted: 'Automatic repair exhausted',
   workflowRepairBlocked: 'Human action required',
@@ -2772,6 +2823,14 @@ const zhCN: Messages = {
   healthLastVerified: ({ time }) => `上次验证：${time}`,
   healthLastFailure: ({ category }) => `上次失败：${category}`,
   healthRecoveryCounts: ({ repaired, resumed }) => `${repaired} 次修复 · ${resumed} 次续跑`,
+  healthFirstRunPassed: '首次回放通过',
+  healthFirstRunFallbacks: ({ steps }) => `首次回放通过（${steps} 步改用备选定位）`,
+  healthFirstRunGuessedLocator: '首次回放靠猜测定位通过',
+  healthFirstRunNeededRepair: '首次回放失败，经 AI 修复后通过',
+  healthFirstRunFailed: ({ code }) => `首次回放失败（${code}）`,
+  healthFirstRunFailedPlain: '首次回放失败',
+  healthFirstRunCancelled: '首次回放被取消',
+  healthFirstRunSkipped: '首次回放被跳过',
   chatWorkflowInputsHint:
     '这些值是在生成时采集的，会成为运行期输入（用 {{名称}} 引用）。保存的值只是默认值——每次运行都会重新提示或使用触发器传入的值。',
   chatWorkflowCodeNodesTitle: '需要代码的步骤',
@@ -2951,6 +3010,9 @@ const zhCN: Messages = {
   settingsTakeoverOnRun: '普通运行失败时也允许 AI 接管（会消耗模型调用）',
   settingsTakeoverOnRunIntro:
     '默认关闭：普通运行失败即失败。开启后失败节点会获得一次 AI 接管机会，产生的修改建议进入待确认列表。',
+  settingsAutoRepairOnRun: '运行失败后自动进入 AI 修复',
+  settingsAutoRepairOnRunIntro:
+    '默认关闭：运行失败就是失败，你可以在失败中心手动发起修复。开启后，AI 生成的工作流运行失败会在后台自动进入修复循环，修复过程中可随时取消。',
   settingsTakeoverModelProvider: '模型服务',
   settingsTakeoverModelSelectHint: '从下拉中选择模型，或保持服务默认。列表为空时请先获取模型列表。',
   settingsTakeoverModelSaved: 'AI 接管模型已保存。',
@@ -3081,6 +3143,12 @@ const zhCN: Messages = {
   toolPresentPlanWarn: '关闭后：计划先行流程无法弹出计划卡片，任务将不再经过你的计划批准直接执行。',
   toolOperator: '工作流算子（草稿写入）',
   toolOperatorWarn: '关闭后：该算子在工作流生成模式下不可用，也不会出现在生成的工作流中。',
+  toolReloadExtension: '重载扩展（开发者，仅本地桥）',
+  toolReloadExtensionWarn:
+    '关闭后：本地自测脚本无法自行加载新构建，需要你到 chrome://extensions 手动重新加载。该工具永远不会出现在聊天模型的工具列表里。',
+  toolRepairWorkflow: '修复已保存的工作流（仅本地桥）',
+  toolRepairWorkflowWarn:
+    '关闭后：本地 agent 无法再重放已保存的工作流并把失败的步骤交给自动修复循环（修复会写入新版本）。该工具永远不会出现在聊天模型的工具列表里。',
 
   toolRecognizeImage: '识别图片中的文字（验证码等）',
   toolRecognizeImageWarn: '关闭后：助手无法使用图片模型识别页面上的验证码或其他图片文字。',
@@ -3170,6 +3238,9 @@ const zhCN: Messages = {
   settingsLocalAgentCopy: '复制',
   settingsLocalAgentCopied: '已复制 ✓',
   settingsLocalAgentWarning: '开启后本机任意页面都能驱动浏览器，请仅在本地 agent 运行时开启。',
+  settingsLocalAgentAllowReload: '允许本地 agent 重载扩展（开发者）',
+  settingsLocalAgentAllowReloadHint:
+    '开启后桥接会暴露 reload_extension，自测脚本在 build 之后可自行重载扩展，不必再去 chrome://extensions 手点。默认关闭；重载只会重启 service worker。',
 
   dataTitle: '个人数据',
   dataIntro:
@@ -3454,6 +3525,8 @@ const zhCN: Messages = {
   workflowRepairDiagnosing: '正在分析失败步骤…',
   workflowRepairApplying: '正在应用修复…',
   workflowRepairVerifying: '正在验证修复…',
+  workflowRepairAttemptFailed: '本轮修复尝试未成功',
+  workflowRepairCancel: '取消修复',
   workflowRepairSuccess: '工作流已自动修复',
   workflowRepairExhausted: '自动修复策略已耗尽',
   workflowRepairBlocked: '需要人工操作',

@@ -50,7 +50,14 @@ export function workflowParametersOf(value: unknown): WorkflowParameter[] {
     const param: WorkflowParameter = { name: name.trim(), type }
     if (typeof record['id'] === 'string') param.id = record['id']
     if (typeof record['description'] === 'string') param.description = record['description']
-    if (typeof record['defaultValue'] === 'string') param.defaultValue = record['defaultValue']
+    // A model-authored trigger row writes plain `default` where the editor and
+    // `dynamic-data` write `defaultValue`, and both shapes are already sitting in
+    // saved graphs. Reading only the canonical key left such an input unseeded, so
+    // its `{{reference}}` never resolved and the run died several steps later with
+    // `UNRESOLVED_INPUT: {{topic}}` — after the tabs were opened and the AI nodes
+    // had already run.
+    const rawDefault = record['defaultValue'] ?? record['default']
+    if (typeof rawDefault === 'string') param.defaultValue = rawDefault
     if (typeof record['placeholder'] === 'string') param.placeholder = record['placeholder']
     if (record['secret'] === true) param.secret = true
     if (record['data'] !== null && typeof record['data'] === 'object') {

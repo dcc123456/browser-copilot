@@ -32,6 +32,33 @@ describe('upload-file node goal contract', () => {
     expect(contract?.successCriteria.some((c) => c.kind === 'variableExists')).toBe(true)
   })
 
+  // Round 71: the model read «data-URL variable» literally and pasted the
+  // generated image in as the variable name. A contract may not promise a
+  // variable called "data:image/png;base64,…" — no run can ever satisfy it,
+  // and the base64 would ride into every prompt that carries the goal.
+  it('takes no variable promise from file content passed as the name', () => {
+    const contract = resolveNodeGoalContract('upload-file', {
+      sourceMode: 'workflow-file',
+      selector: 'input[type=file]',
+      fileVariable: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA',
+    })!
+    expect(contract.successCriteria.some((c) => c.kind === 'variableExists')).toBe(false)
+    expect(contract.goal).not.toContain('base64')
+    expect(contract.evidence?.some((e) => e.kind === 'variable')).toBe(false)
+  })
+
+  it('normalizes a {{reference}} written in place of a name', () => {
+    const contract = resolveNodeGoalContract('upload-file', {
+      sourceMode: 'workflow-file',
+      selector: 'input[type=file]',
+      fileVariable: '{{generatedImage}}',
+    })!
+    expect(contract.successCriteria).toContainEqual({
+      kind: 'variableExists',
+      name: 'generatedImage',
+    })
+  })
+
   it('returns undefined without a selector (no fabricated contract)', () => {
     const entry = operatorEntry('upload-file')
     expect(entry?.buildGoalContract?.({})).toBeUndefined()

@@ -474,21 +474,36 @@ export function runOp(op: Op): OpResult {
       case 'text': {
         const wanted = spec.value
         const all = querySelectorIn(roots, tagPrefix || '*')
-        const exact: Element[] = []
-        for (const candidate of all) {
-          if (visibleText(candidate) !== wanted) continue
-          let hasMatchingDescendant = false
-          const descendants = candidate.querySelectorAll(tagPrefix || '*')
-          for (let i = 0; i < descendants.length; i += 1) {
-            const descendant = descendants[i]
-            if (descendant && visibleText(descendant) === wanted) {
-              hasMatchingDescendant = true
-              break
+        // The tightest element whose text holds: an element qualifies only when
+        // none of its own descendants qualifies, so a word never resolves to the
+        // page-wide container that happens to contain it.
+        const tightest = (holds: (text: string) => boolean): Element[] => {
+          const found: Element[] = []
+          for (const candidate of all) {
+            if (!holds(visibleText(candidate))) continue
+            let deeper = false
+            const descendants = candidate.querySelectorAll(tagPrefix || '*')
+            for (let i = 0; i < descendants.length; i += 1) {
+              const descendant = descendants[i]
+              if (descendant && holds(visibleText(descendant))) {
+                deeper = true
+                break
+              }
             }
+            if (!deeper) found.push(candidate)
           }
-          if (!hasMatchingDescendant) exact.push(candidate)
+          return found
         }
-        return exact
+        const exact = tightest((text) => text === wanted)
+        if (exact.length > 0) return exact
+        // Round 68 replayed 19/19 steps and really saved the draft, and the one
+        // unmet row was its own goal condition «文本包含 "草稿"»: the page says
+        // 「草稿箱(100)」, and an exact-only text locator can never see a word it
+        // abbreviated. The fallback only runs when the exact pass found NOTHING,
+        // so it cannot re-point a spec that already resolved — and where the
+        // looser pass matches several elements, the existing reliability layer
+        // scores them and refuses on ambiguity, exactly as it does today.
+        return tightest((text) => text.includes(wanted))
       }
     }
   }
@@ -640,6 +655,18 @@ export function runOp(op: Op): OpResult {
     matched: number
     usedSpec: string
     usedFallback: boolean
+    /**
+     * Set when a `rank` policy had to fall below the clean strict winner to
+     * reach an element — how far down the ladder it went, and the evidence it
+     * passed over. Absent means "the authored locator won on its own merits".
+     */
+    degrade?: {
+      rung: 2 | 3 | 4
+      from: string
+      to: string
+      matchCount: number
+      candidates: { strategy: string; score: number }[]
+    }
   }
 
   /**
@@ -708,13 +735,63 @@ export function runOp(op: Op): OpResult {
     return base
   }
 
+  /**
+   * The words the element was picked with, as the node still carries them: its
+   * `text`/`role` specs (a `role` spec's value is its accessible name) and its
+   * recorded label. A locator is machine-readable evidence; this is the only
+   * HUMAN-READABLE evidence in the node, and so the only thing a locator match
+   * can be checked against.
+   */
+  function identityWordsOf(target: Target): string[] {
+    const words: string[] = []
+    for (const spec of [target.primary, ...(target.fallbacks ?? [])]) {
+      if (!spec || typeof spec.value !== 'string') continue
+      if (spec.how !== 'text' && spec.how !== 'role') continue
+      const word = spec.value.trim()
+      if (word) words.push(word)
+    }
+    const label = (target as { label?: unknown }).label
+    if (typeof label === 'string' && label.trim()) words.push(label.trim())
+    return words
+  }
+
+  /** Whether a spec is a machine locator (as opposed to a human string). */
+  function isLocatorSpec(spec: TargetSpec): boolean {
+    return spec.how === 'css' || spec.how === 'id' || spec.how === 'testid' || spec.how === 'name'
+  }
+
+  /**
+   * Does the element still carry the words it was chosen for?
+   *
+   * A locator can match exactly ONE element and still be the wrong one: a
+   * positional `nth-of-type` chain that outlived a layout change pointed at
+   * 草稿箱 where it was recorded on 上传图文, the run clicked straight through into
+   * that drawer, and the modal then obscured every later step. Comparing the
+   * match against the recorded words turns that silent misclick into something
+   * the identity can overrule.
+   */
+  function elementCarriesWords(element: Element, words: readonly string[]): boolean {
+    const haystacks = [visibleText(element).trim(), accessibleName(element).trim()].filter(
+      (text) => text !== '',
+    )
+    for (const word of words) {
+      const needle = word.toLowerCase()
+      for (const hay of haystacks) {
+        const text = hay.toLowerCase()
+        if (text.includes(needle) || needle.includes(text)) return true
+      }
+    }
+    return false
+  }
+
   function resolve(target: Target | undefined): ResolveOutcome {
     if (!target) return null
     const policy = op.resolvePolicy
     const candidates: TargetSpec[] = [target.primary, ...(target.fallbacks ?? [])]
     const tried = candidates.map((spec) => serializeSpec(spec)).join(', ')
     const strict =
-      policy?.mode === 'strict' && (policy.ambiguity === 'score' || policy.ambiguity === 'error')
+      policy?.mode === 'strict' &&
+      (policy.ambiguity === 'score' || policy.ambiguity === 'error' || policy.ambiguity === 'rank')
 
     if (!strict) {
       // Two-tier resolution. A spec that matches EXACTLY ONE element is almost
@@ -725,6 +802,9 @@ export function runOp(op: Op): OpResult {
       // first multi-match is remembered as the fallback — preserving the legacy
       // "first visible of many" behavior for targets with no exact spec at all.
       let loose: Resolution | null = null
+      let looseAgreeing: Resolution | null = null
+      let exactVetoed: Resolution | null = null
+      const words = identityWordsOf(target)
       for (let index = 0; index < candidates.length; index += 1) {
         const spec = candidates[index]
         if (!spec) continue
@@ -744,10 +824,24 @@ export function runOp(op: Op): OpResult {
           usedSpec: serializeSpec(spec),
           usedFallback: index > 0,
         }
-        if (all.length === 1) return resolution
+        // A human-string spec agrees with its own words by construction; only a
+        // locator match has to be checked.
+        const agrees =
+          words.length === 0 || !isLocatorSpec(spec) || elementCarriesWords(chosen, words)
+        if (all.length === 1) {
+          if (agrees) return resolution
+          // Unique, but it does not say what the node says it should say. Keep it
+          // as the answer of last resort and look for a spec whose match agrees.
+          if (!exactVetoed) exactVetoed = resolution
+          continue
+        }
+        if (agrees && !looseAgreeing) looseAgreeing = resolution
         if (!loose) loose = resolution
       }
-      return loose
+      // An agreeing-but-ambiguous element beats a unique one that contradicts the
+      // recorded words; when nothing agrees, the legacy answer stands (this can
+      // only ever be as wrong as it was before, never more).
+      return looseAgreeing ?? exactVetoed ?? loose
     }
 
     // --- strict: never guess ------------------------------------------------
@@ -801,23 +895,76 @@ export function runOp(op: Op): OpResult {
     // only above the floor with a wide-enough margin over the runner-up.
     const minScore = typeof policy?.minScore === 'number' ? policy.minScore : 70
     const minMargin = typeof policy?.minMargin === 'number' ? policy.minMargin : 12
+    const authored = serializeSpec(candidates[0]!)
+    /**
+     * Act on a matched candidate, tagging how far down the degradation ladder
+     * the decision had to fall. Rung 1 is the clean strict winner and reports
+     * nothing; 2 waives the margin, 3 waives the score floor, 4 is the legacy
+     * first-visible guess.
+     */
+    const take = (hit: { spec: TargetSpec; all: Element[]; index: number }, rung: 1 | 2 | 3 | 4, element?: Element): Resolution => {
+      const chosen = element ?? hit.all[0]
+      const usedSpec = serializeSpec(hit.spec)
+      return {
+        element: chosen as Element,
+        matched: hit.all.length,
+        usedSpec,
+        usedFallback: hit.index > 0,
+        ...(rung === 1
+          ? {}
+          : { degrade: { rung, from: authored, to: usedSpec, matchCount: union.size, candidates: evidence } }),
+      }
+    }
     const eligible = matched
       .filter((m) => m.all.length === 1 && m.score >= minScore)
       .sort((a, b) => b.score - a.score || a.index - b.index)
-    if (eligible.length === 0) {
-      return refuse('最高分不足 minScore')
-    }
-    const top = eligible[0]!
-    const runnerUp = eligible[1]
-    if (runnerUp && top.score - runnerUp.score < minMargin) {
+    const rank = policy?.ambiguity === 'rank'
+    if (eligible.length > 0) {
+      const top = eligible[0]!
+      const runnerUp = eligible[1]
+      if (!runnerUp || top.score - runnerUp.score >= minMargin) return take(top, 1)
+      // rung 2 — a single-element winner above the score floor; the only thing
+      // missing was distance from the runner-up.
+      if (rank) return take(top, 2)
       return refuse('前两名分差不足 minMargin')
     }
-    return {
-      element: top.all[0]!,
-      matched: 1,
-      usedSpec: serializeSpec(top.spec),
-      usedFallback: top.index > 0,
+    if (rank) {
+      // rung 3 — any candidate that provably points at ONE element, in the
+      // order it was recorded: the caller's chain order is intent we can honour
+      // even when our own score table dislikes the locator.
+      const unique = matched
+        .filter((m) => m.all.length === 1)
+        .sort((a, b) => a.index - b.index)[0]
+      if (unique) return take(unique, 3)
+      // rung 4 — the legacy resolver: the first visible match of the first spec
+      // that matched anything. This is the rung that can pick the WRONG row, so
+      // it is reported, never silent.
+      for (const hit of matched) {
+        let chosen: Element | undefined
+        if (typeof hit.spec.nth === 'number') {
+          chosen = hit.all[hit.spec.nth]
+        } else {
+          const visible = hit.all.filter((element) => isVisible(element))
+          chosen = visible[0] ?? hit.all[0]
+        }
+        if (chosen) return take(hit, 4, chosen)
+      }
     }
+    return refuse('最高分不足 minScore')
+  }
+
+  /**
+   * How many DISTINCT elements a target matches, counting its primary and
+   * every fallback. Existence/counting questions must be answerable without an
+   * ambiguity verdict, so this deliberately bypasses `resolve` and its policy.
+   */
+  function countTargetMatches(target: Target): number {
+    const union = new Set<Element>()
+    for (const spec of [target.primary, ...(target.fallbacks ?? [])]) {
+      if (!spec) continue
+      for (const element of queryAll(spec)) union.add(element)
+    }
+    return union.size
   }
 
   // --- Interaction helpers ---------------------------------------------------
@@ -994,13 +1141,39 @@ export function runOp(op: Op): OpResult {
    * fields but jsdom (and some pages' wrappers) do not, so they are forced onto
    * the instance when missing.
    */
+  /**
+   * `Control+A` into the key Chrome would report plus the modifier flags.
+   *
+   * The `press-key` block's catalog value is a combo string, and dispatching it
+   * whole gave the page `key === 'Control+A'` with no modifiers set — the
+   * shortcut never fired for any listener.
+   */
+  function parseKeyCombo(key: string): {
+    key: string
+    modifiers: { ctrl?: boolean; meta?: boolean; shift?: boolean; alt?: boolean }
+  } {
+    const parts = key.split('+')
+    const modifiers: { ctrl?: boolean; meta?: boolean; shift?: boolean; alt?: boolean } = {}
+    if (parts.length < 2 || key === '+') return { key, modifiers }
+    for (const part of parts.slice(0, -1)) {
+      const name = part.trim().toLowerCase()
+      if (name === 'control' || name === 'ctrl') modifiers.ctrl = true
+      else if (name === 'shift') modifiers.shift = true
+      else if (name === 'alt' || name === 'option') modifiers.alt = true
+      else if (name === 'meta' || name === 'command' || name === 'cmd') modifiers.meta = true
+    }
+    let main = (parts[parts.length - 1] ?? key).trim()
+    // A real keydown reports a bare letter lowercase unless Shift is held.
+    if (/^[a-z]$/i.test(main)) main = modifiers.shift === true ? main.toUpperCase() : main.toLowerCase()
+    return { key: main, modifiers }
+  }
+
   function dispatchKey(
     element: Element,
     type: string,
     key: string,
     modifiers: { ctrl?: boolean; meta?: boolean; shift?: boolean; alt?: boolean } = {},
-  ): void {
-    const keyCode = keyCodeForKey(key)
+  ): void {    const keyCode = keyCodeForKey(key)
     const init: KeyboardEventInit = {
       key,
       code: codeForKey(key),
@@ -1310,6 +1483,32 @@ export function runOp(op: Op): OpResult {
       if (!isVisible(candidate)) continue
       if (seen.indexOf(candidate) !== -1) continue
       seen.push(candidate)
+    }
+
+    // Second pass: clickable text leaves. Plain divs/spans wired to JS clicks
+    // (an "upload" affordance is rarely a real <button>) are invisible to the
+    // selector list above. A leaf whose rendered text is non-empty and whose
+    // computed cursor is pointer is the best in-page click signal; append these
+    // AFTER the standard set (real controls keep priority) and skip any already
+    // inside a captured element (a <span> inside a <button> duplicates it).
+    for (const el of safeQuery('*')) {
+      if (el.children.length !== 0) continue
+      const style = styleOf(el)
+      if (!style || style.cursor !== 'pointer') continue
+      const own = visibleText(el)
+      if (!own || own.length > 80) continue
+      if (seen.indexOf(el) !== -1) continue
+      let ancestor: Element | null = el.parentElement
+      let insideSeen = false
+      while (ancestor) {
+        if (seen.indexOf(ancestor) !== -1) {
+          insideSeen = true
+          break
+        }
+        ancestor = ancestor.parentElement
+      }
+      if (insideSeen) continue
+      seen.push(el)
     }
 
     const elements: SnapshotElement[] = []
@@ -1685,6 +1884,17 @@ export function runOp(op: Op): OpResult {
         found: true,
         data: {
           state: visible && enabled && !occluded ? 'ready' : 'blocked',
+          // The three facts, not just their conjunction: a waiter on
+          // `visible` must not be blocked by an occlusion, and a waiter on
+          // `enabled` must not be blocked by a scroll position.
+          visible,
+          enabled,
+          occluded,
+          // `input[type=file]` is the element pages hide on purpose behind a
+          // styled drop zone, so a wait for it to become visible has no chance
+          // of ending. The waiter needs that distinction from a merely
+          // not-yet-rendered element; see the `hopeless` readiness result.
+          fileInput: element instanceof HTMLInputElement && element.type === 'file',
           rect: { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
         },
       }
@@ -1704,6 +1914,12 @@ export function runOp(op: Op): OpResult {
         if (spec.mode === 'top') window.scrollTo({ top: 0, left: 0, behavior })
         else if (spec.mode === 'bottom')
           window.scrollTo({ top: document.documentElement.scrollHeight ?? 0, left: 0, behavior })
+        else if (spec.mode === 'to')
+          window.scrollTo({
+            left: (spec.x ?? 0) + (spec.xIncremental ? window.scrollX : 0),
+            top: (spec.y ?? 0) + (spec.yIncremental ? window.scrollY : 0),
+            behavior,
+          })
         else
           window.scrollBy({
             top: 'y' in spec ? (spec.y ?? 0) : 0,
@@ -1717,19 +1933,28 @@ export function runOp(op: Op): OpResult {
     }
 
     if (op.action === 'press_key' && !op.target) {
-      const key = String(op.value ?? '')
-      if (!key) return fail('press_key needs a key name.')
+      const combo = parseKeyCombo(String(op.value ?? ''))
+      if (!combo.key) return fail('press_key needs a key name.')
       const active = (document.activeElement ?? document.body) as Element
-      dispatchKey(active, 'keydown', key)
-      dispatchKey(active, 'keypress', key)
-      dispatchKey(active, 'keyup', key)
-      return { ...base(), ok: true, found: true, note: `pressed ${key}` }
+      dispatchKey(active, 'keydown', combo.key, combo.modifiers)
+      dispatchKey(active, 'keypress', combo.key, combo.modifiers)
+      dispatchKey(active, 'keyup', combo.key, combo.modifiers)
+      return { ...base(), ok: true, found: true, note: `pressed ${combo.key}` }
     }
 
     if (op.action === 'element_exists' || op.action === 'count_elements') {
+      // Two payload shapes are legitimate here and both are used: a flat CSS
+      // string (`op.value`, the driver's `elementExists(selector)`) and a rich
+      // target (`op.target`, the readiness/condition probes). A probe asks
+      // "is it there", so it resolves leniently — it must never be able to
+      // answer "no" merely because the strict ambiguity policy declined to
+      // pick one element out of several matches.
       const selector = String(op.value ?? '')
-      const matches = safeQuery(selector)
-      const count = matches.length
+      const count = selector
+        ? safeQuery(selector).length
+        : op.target
+          ? countTargetMatches(op.target)
+          : 0
       if (op.action === 'count_elements')
         return { ...base(), ok: true, found: true, note: `count=${count}`, data: count }
       return {
@@ -1790,10 +2015,33 @@ export function runOp(op: Op): OpResult {
 
     if (op.action === 'create_element') {
       const html = String(op.value ?? '')
+      // The block's own "CSS" and "JavaScript" fields: styles go into a
+      // `<style>` element, and the script runs once per created element with
+      // `this` bound to it — which is the only way that field is useful.
+      if (op.css && op.css.trim() !== '') {
+        const style = document.createElement('style')
+        style.textContent = op.css
+        document.head.appendChild(style)
+      }
       const wrapper = document.createElement('div')
       wrapper.innerHTML = html
       const inserted = Array.prototype.slice.call(wrapper.children) as Element[]
       for (const child of inserted) document.body.appendChild(child)
+      if (op.javascript && op.javascript.trim() !== '') {
+        for (const child of inserted) {
+          try {
+            // eslint-disable-next-line no-new-func -- the block's contract is running author-written page JS
+            new Function(op.javascript).call(child)
+          } catch (error) {
+            return {
+              ...base(),
+              ok: false,
+              found: true,
+              note: `create_element 脚本执行失败：${String(error)}`,
+            }
+          }
+        }
+      }
       return { ...base(), ok: true, found: true, note: `created ${inserted.length} element(s)` }
     }
 
@@ -1810,7 +2058,13 @@ export function runOp(op: Op): OpResult {
           }
         }
         set(window, 'onbeforeunload', null)
-        set(window, 'confirm', () => true)
+        // The block's "accept" toggle and prompt text used to reach nobody: every
+        // dialog was auto-accepted and every prompt() answered with null.
+        set(window, 'confirm', () => op.accept !== false)
+        if (typeof op.value === 'string' && op.value !== '') {
+          const answer = op.value
+          set(window, 'prompt', () => answer)
+        }
       } catch {
         /* handlers may be non-configurable on some pages */
       }
@@ -1835,7 +2089,12 @@ export function runOp(op: Op): OpResult {
         let res = resolve(target)
         while ((!res || 'refusal' in res) && Date.now() < deadline) {
           // Not found yet — or found but still ambiguous (a settling page can
-          // resolve its own ambiguity): keep polling, never guess.
+          // resolve its own ambiguity): keep polling, never guess. A `rank`
+          // policy never reports ambiguity as a refusal, so it leaves this loop
+          // with its degraded hit instead of spending the whole window: the
+          // ladder already chose the best available candidate, and making every
+          // drifted step wait out the timeout is a latency cost the run does
+          // not pay for.
           await new Promise((r) => setTimeout(r, 120))
           res = resolve(target)
         }
@@ -1885,6 +2144,7 @@ export function runOp(op: Op): OpResult {
       matched: resolution.matched,
       usedSpec: resolution.usedSpec,
       usedFallback: resolution.usedFallback,
+      ...(resolution.degrade ? { degrade: resolution.degrade } : {}),
     })
 
     if (op.action === 'wait_for') {
@@ -1911,6 +2171,13 @@ export function runOp(op: Op): OpResult {
           ;(element as HTMLElement).scrollBy?.({
             top: 'y' in spec ? (spec.y ?? 0) : 0,
             left: 'x' in spec ? (spec.x ?? 0) : 0,
+            behavior,
+          })
+        } else if (spec.mode === 'to') {
+          const box = element as HTMLElement
+          box.scrollTo?.({
+            left: (spec.x ?? 0) + (spec.xIncremental ? box.scrollLeft : 0),
+            top: (spec.y ?? 0) + (spec.yIncremental ? box.scrollTop : 0),
             behavior,
           })
         } else if (spec.mode === 'top') (element as HTMLElement).scrollTo?.({ top: 0, behavior })
@@ -2193,9 +2460,27 @@ export function runOp(op: Op): OpResult {
       const wanted = Array.isArray(op.value) ? op.value.map(String) : [String(op.value ?? '')]
       const available: string[] = []
       const chosen: HTMLOptionElement[] = []
+      // "Select an option by" also offers positions (first / last / custom), not
+      // just the value, and nothing used to read that choice — every positional
+      // mode fell through to the value match and failed on a blank value box.
+      const byPosition = op.selectBy === 'first' || op.selectBy === 'last' || op.selectBy === 'index'
+      const position =
+        op.selectBy === 'last'
+          ? element.options.length - 1
+          : op.selectBy === 'first'
+            ? 0
+            : Math.trunc(op.index ?? 0)
+      if (byPosition) {
+        const at = element.options[position]
+        if (!at || position < 0)
+          return withMeta(
+            fail(`No option at position ${position + 1}. Available: ${element.options.length}`),
+          )
+        chosen.push(at)
+      }
       for (let i = 0; i < element.options.length; i += 1) {
         const option = element.options[i]
-        if (!option) continue
+        if (!option || byPosition) continue
         const label = collapse(option.textContent ?? '')
         available.push(label || option.value)
         if (wanted.indexOf(option.value) !== -1 || wanted.indexOf(label) !== -1) chosen.push(option)
@@ -2242,6 +2527,20 @@ export function runOp(op: Op): OpResult {
       if (!attribute) return withMeta(fail('get_attribute needs an attribute name.'))
       const value = element.getAttribute(attribute) ?? ''
       return withMeta({ ...base(), ok: true, found: true, note: value, data: value })
+    }
+
+    if (op.action === 'get_text') {
+      // Text of whatever the target resolved to — role/text locators included.
+      // Condition/goal checks need this: reading text through a CSS-only path
+      // silently reported "not observable" for exactly the locators a recorded
+      // run relies on.
+      const html = element as HTMLElement
+      const raw =
+        typeof html.innerText === 'string' && html.innerText.length > 0
+          ? html.innerText
+          : (element.textContent ?? '')
+      const text = raw.trim()
+      return withMeta({ ...base(), ok: true, found: true, note: text, data: text })
     }
 
     if (op.action === 'set_attribute') {
@@ -2299,16 +2598,16 @@ export function runOp(op: Op): OpResult {
     }
 
     if (op.action === 'press_key') {
-      const key = String(op.value ?? '')
-      if (!key) return withMeta(fail('press_key needs a key name.'))
+      const combo = parseKeyCombo(String(op.value ?? ''))
+      if (!combo.key) return withMeta(fail('press_key needs a key name.'))
       focusElement(element)
       // dispatchKey carries keyCode/which — DraftJS-style editors read `e.which`
       // (a bare `new KeyboardEvent({ key })` reports 0 and is ignored).
-      dispatchKey(element, 'keydown', key)
-      dispatchKey(element, 'keypress', key)
-      dispatchKey(element, 'keyup', key)
+      dispatchKey(element, 'keydown', combo.key, combo.modifiers)
+      dispatchKey(element, 'keypress', combo.key, combo.modifiers)
+      dispatchKey(element, 'keyup', combo.key, combo.modifiers)
       let navigates = false
-      if (key === 'Enter') {
+      if (combo.key === 'Enter') {
         const form = (element as HTMLInputElement).form
         if (form) {
           navigates = true
@@ -2654,6 +2953,17 @@ export function runWorkflowJs(input: {
           v: Record<string, unknown>,
         ) => unknown
 
+      // A statement body compiles as written — unless it uses a top-level
+      // `await`, which `new Function` rejects at compile time. Wrapping the body
+      // in an async IIFE keeps `return` working (it returns from the IIFE, whose
+      // promise the harness awaits below) so the very common
+      // `const r = await fetch(...)` script runs instead of dying before its
+      // first line. The original error is what the author sees when the wrapped
+      // shape does not compile either (a real syntax error).
+      const awaitWord = /\bawait\b/
+      const wrapStatements = (src: string): string =>
+        `"use strict";\nreturn (async () => {\n${src}\n})();`
+
       const fn = looksLikeExpression
         ? (() => {
             // `new Function` COMPILES without calling, so a shape the
@@ -2670,7 +2980,18 @@ export function runWorkflowJs(input: {
               return buildFn()
             }
           })()
-        : buildFn()
+        : (() => {
+            try {
+              return buildFn()
+            } catch (error) {
+              if (!awaitWord.test(code)) throw error
+              try {
+                return buildFn(wrapStatements)
+              } catch {
+                throw error
+              }
+            }
+          })()
 
       let ret: unknown
       try {

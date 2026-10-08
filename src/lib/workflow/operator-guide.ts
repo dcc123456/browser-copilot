@@ -97,10 +97,11 @@ get-text/read-page 开 saveData 时 dataColumn 必填。trigger-event 用 event�
 
 1. 先用声明式算子做；失败了把失败原因记下来。
 2. 确认没有算子组合能完成，才 \`load_tools({groups:["operators_escape"]})\` 载入代码节点工具
-   （它**不在**常驻工具列表里，平时看不到）。
+   （不在常驻列表）。
 3. 调用时必须带**二选一**的理由，否则**直接拒绝**、不记录节点：\`justification\`
    （一段话：试过哪些算子、各自为什么不行）或 \`capabilityGap\`（四个字段
    missingCapability / triedOperators / whyInsufficient / expectedResult）。
+   **例外**：图片/canvas 产物（图表、海报、二维码）属已认定缺口，**无需论证**；截图走 \`take-screenshot\`。
 4. 理由会成为节点 description；收尾时告诉用户"有 1 个代码节点，原因是……"。
 
 上面映射表的算子都试过仍不行，才用代码节点——**只把那一步**放进代码。
@@ -119,7 +120,7 @@ get-text/read-page 开 saveData 时 dataColumn 必填。trigger-event 用 event�
 
 ## upload-file
 
-\`user-select\` 选择后注入；\`workflow-file\` 填 \`fileVariable\`（URL/Artifact）。
+\`user-select\` 选择后注入；\`workflow-file\` 填 \`fileVariable\`（变量名，非内容）。
 \`selector\` 指向控件/拖拽区，禁fill。
 ## 工具分发：算子按分类发送
 

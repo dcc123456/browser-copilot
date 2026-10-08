@@ -23,12 +23,14 @@ import {
   type LocatorCandidate,
 } from './locator-score'
 import type { NodeLocatorSpec } from './reliability'
+import type { Target, TargetSpec } from '../ops'
 
 /**
  * One target spec as it arrives from the model: unvalidated JSON. */
 interface RawSpec {
   how?: unknown
   value?: unknown
+  role?: unknown
   tag?: unknown
   nth?: unknown
 }
@@ -112,13 +114,63 @@ export function selectorFromSpec(spec: RawSpec | undefined): string {
   }
 }
 
+/** The locator strategies the kernel resolves. Anything else is not a spec. */
+const SPEC_STRATEGIES: readonly string[] = [
+  'testid',
+  'id',
+  'name',
+  'role',
+  'text',
+  'css',
+  'cdp-shadow',
+]
+
+/**
+ * Validate one raw spec, passed through unconverted. The chain must not smuggle
+ * a malformed spec into the graph, so every entry gets the same check
+ * `richTargetFromAny` applies to the primary: a known strategy and a NON-EMPTY
+ * value (an empty `role`/`text` value is the spec that matched everything).
+ * Fields the kernel understands beyond these (`shadowHosts`, `closedShadow`)
+ * travel untouched, because dropping them would make a shadow-DOM target
+ * unresolvable at replay.
+ */
+function specFromRaw(spec: RawSpec | undefined): TargetSpec | undefined {
+  if (!spec || typeof spec !== 'object') return undefined
+  if (typeof spec.how !== 'string' || !SPEC_STRATEGIES.includes(spec.how)) return undefined
+  if (typeof spec.value !== 'string' || !spec.value.trim()) return undefined
+  return spec as unknown as TargetSpec
+}
+
+/** Rebuild the spec the kernel serialized into `usedSpec` (see `serializeSpec`). */
+export function specFromSerialized(text: string | undefined): TargetSpec | undefined {
+  const parsed = text ? parseSerializedSpec(text) : null
+  if (!parsed) return undefined
+  return specFromRaw({
+    how: parsed.how,
+    value: parsed.value,
+    ...(parsed.role ? { role: parsed.role } : {}),
+    ...(parsed.tag ? { tag: parsed.tag } : {}),
+    ...(typeof parsed.nth === 'number' ? { nth: parsed.nth } : {}),
+  })
+}
+
+/** Whether two specs ask for the same element by the same means. */
+export function sameSpec(a: TargetSpec, b: TargetSpec): boolean {
+  return (
+    a.how === b.how &&
+    a.value === b.value &&
+    a.role === b.role &&
+    a.tag === b.tag &&
+    a.nth === b.nth
+  )
+}
+
 /**
  * Best-effort CSS selector from a rich locator. The `primary` spec is
  * re-expressed into CSS, and when it does not map (the agent usually targets
  * elements by role/text) the `fallbacks` are tried in order — the replayable
  * workflow needs that fallback to carry a usable selector.
- */
-export function selectorFromTarget(target: unknown): string {
+ */export function selectorFromTarget(target: unknown): string {
   if (!target || typeof target !== 'object') return ''
   const raw = target as RawTarget
   const primary = selectorFromSpec(raw.primary)
@@ -230,11 +282,17 @@ export function chooseRecordedSelector(
 }
 
 /** One candidate selector with its origin spec, live count and score. */
-interface ScoredSelectorCandidate {
+export interface ScoredSelectorCandidate {
   selector: string
   candidate: LocatorCandidate
   count: number
   score: number
+  /**
+   * The rich target spec this selector came from, when it did. Keeping it lets
+   * the recorded chain carry the semantic spec (`{how:'testid'}`) instead of
+   * degrading it to an equivalent-but-plain CSS spec.
+   */
+  spec?: TargetSpec
 }
 
 /**
@@ -243,12 +301,12 @@ interface ScoredSelectorCandidate {
  * rich target's primary spec and its fallbacks (only the CSS-mappable ones).
  * Deduplicated, non-empty, each scored with `verified = (count === 1)`.
  */
-function scoredSelectorCandidatesOf(
+export function scoredSelectorCandidatesOf(
   locator: RecordedLocator,
   countOf: (selector: string) => number,
 ): ScoredSelectorCandidate[] {
   const out: ScoredSelectorCandidate[] = []
-  const push = (selector: string, candidate: LocatorCandidate): void => {
+  const push = (selector: string, candidate: LocatorCandidate, spec?: TargetSpec): void => {
     const trimmed = selector.trim()
     if (!trimmed) return
     if (out.some((entry) => entry.selector === trimmed)) return
@@ -259,6 +317,7 @@ function scoredSelectorCandidatesOf(
       candidate: withVerification,
       count: countOf(trimmed),
       score: scoreCandidate(withVerification),
+      ...(spec ? { spec } : {}),
     })
   }
   // The explicit selector's provenance is unknown — classify it by shape.
@@ -289,7 +348,7 @@ function scoredSelectorCandidatesOf(
           break
       }
       if (nth) candidate = { ...candidate, kind: 'positional', value: selector }
-      push(selector, candidate)
+      push(selector, candidate, specFromRaw(spec))
     }
   }
   return out.slice(0, MAX_CANDIDATES)
@@ -407,6 +466,60 @@ export function selectorAfterExecution(input: {
   return { selector: '', verified: false }
 }
 
+/**
+ * The candidate chain a recorded node should carry, built from EVIDENCE rather
+ * than from whatever specs the model happened to send.
+ *
+ * Replay reads this chain (`targetFrom` in the executors): the flat selector is
+ * the primary and these specs are its fallbacks, tried in order. A node that
+ * records one CSS selector and no chain has exactly one chance to find its
+ * element — the page drifts, the selector matches nothing, the step fails. Here
+ * we keep every locator that was PROVEN to identify one element on the live
+ * page at record time, ordered by score, plus the spec the kernel really
+ * clicked with first of all.
+ *
+ * This only ever ADDS candidates; nothing is refused or dropped, so a richer
+ * chain cannot lower the odds of a step running. Specs whose live count was
+ * ambiguous (more than one match) are deliberately not added as new fallbacks:
+ * a locator that could not tell two elements apart at record time is a
+ * mis-click risk, not a safety net. The author's own fallbacks still ride along
+ * untouched, because they carry semantic intent the probe cannot score.
+ */
+export function recordedTargetChainOf(input: {
+  /** The locator the call was made with (rich target + derived selector). */
+  locator: RecordedLocator
+  /** The kernel's serialized spec that really matched, when reported. */
+  usedSpec?: string
+  /** Live match counts for the locator's CSS candidates, already probed. */
+  countOf: (selector: string) => number
+}): Target | undefined {
+  const raw = input.locator.target as RawTarget | undefined
+  if (!raw || typeof raw !== 'object') return undefined
+  const primary = specFromRaw(raw.primary)
+  if (!primary) return undefined
+
+  const fallbacks: TargetSpec[] = []
+  const push = (spec: TargetSpec | undefined): void => {
+    if (!spec) return
+    if (sameSpec(spec, primary)) return
+    if (fallbacks.some((entry) => sameSpec(entry, spec))) return
+    fallbacks.push(spec)
+  }
+
+  // 1. What actually worked, in the exact form the kernel resolved it.
+  push(specFromSerialized(input.usedSpec))
+  // 2. Every CSS candidate proven unique on the live page, strongest first.
+  const unique = scoredSelectorCandidatesOf(input.locator, input.countOf)
+    .filter((entry) => entry.count === 1)
+    .sort((a, b) => b.score - a.score)
+  for (const entry of unique) push(entry.spec ?? { how: 'css', value: entry.selector })
+  // 3. The specs the caller sent, in the caller's order.
+  const authored = Array.isArray(raw.fallbacks) ? raw.fallbacks : []
+  for (const spec of authored) push(specFromRaw(spec))
+
+  return { primary, fallbacks: fallbacks.slice(0, MAX_CANDIDATES - 1) }
+}
+
 /** Attach the rich locator to flat block data when present. */
 export function withRichTarget(
   data: Record<string, unknown>,
@@ -438,16 +551,26 @@ export function resolveRecordedLocator(
 
   const explicit =
     typeof args?.selector === 'string' && args.selector.trim() ? args.selector.trim() : ''
-  const selector = explicit || selectorFromTarget(target)
+  // `findBy:'text'` means the `selector` field carries a literal text to match,
+  // not a CSS selector. The kernel's `text` strategy walks the DOM for the
+  // leaf element whose rendered text equals it — there is no CSS form, so the
+  // locator keeps a rich text target and records no flat selector.
+  const findBy = typeof args?.findBy === 'string' ? args.findBy.trim() : ''
+  let effectiveTarget: unknown = target
+  let selector = explicit || selectorFromTarget(target)
+  if (findBy === 'text' && !target && explicit) {
+    effectiveTarget = { primary: { how: 'text', value: explicit }, fallbacks: [] }
+    selector = ''
+  }
 
   const inlineLabel = typeof args?.label === 'string' ? args.label.trim() : ''
   const label = inlineLabel || hit?.name || ''
   const type = typeof hit?.type === 'string' && hit.type.trim() ? hit.type.trim() : ''
-  const semantic = semanticLocatorFromTarget(target)
+  const semantic = semanticLocatorFromTarget(effectiveTarget)
 
   return {
     selector,
-    ...(target ? { target } : {}),
+    ...(effectiveTarget ? { target: effectiveTarget } : {}),
     ...(label ? { label } : {}),
     ...(type ? { type } : {}),
     ...(semantic ? { semantic } : {}),

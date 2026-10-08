@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   autoCompleteReliability,
   inferIdempotency,
@@ -9,12 +9,53 @@ import { validateWorkflowForRun } from '../src/lib/workflow/validation'
 import { validateGeneratedWorkflow } from '../src/lib/workflow/generated-validation'
 import type { NodeReliabilitySpec } from '../src/lib/workflow/reliability'
 
+/** In-memory `chrome.storage.local` double. */
+function makeChromeMock() {
+  const store = new Map<string, unknown>()
+  return {
+    storage: {
+      local: {
+        get: vi.fn(async (keys: string | string[]) => {
+          const wanted = typeof keys === 'string' ? [keys] : keys
+          const out: Record<string, unknown> = {}
+          for (const key of wanted) if (store.has(key)) out[key] = store.get(key)
+          return out
+        }),
+        set: vi.fn(async (items: Record<string, unknown>) => {
+          for (const [key, value] of Object.entries(items)) store.set(key, value)
+        }),
+        remove: vi.fn(async (keys: string | string[]) => {
+          const wanted = typeof keys === 'string' ? [keys] : keys
+          for (const key of wanted) store.delete(key)
+        }),
+      },
+    },
+  }
+}
+
+beforeEach(() => {
+  vi.stubGlobal('chrome', makeChromeMock())
+})
+
 describe('auto reliability completion (generation must always succeed)', () => {
   it('infers idempotency from the action semantics', () => {
     expect(inferIdempotency('forms', { action: 'submit' })).toBe('unsafe')
-    expect(inferIdempotency('forms', {})).toBe('unsafe')
     expect(inferIdempotency('event-click', {})).toBe('safe')
     expect(inferIdempotency('webhook', {})).toBe('unsafe')
+  })
+
+  it('a forms node with no action is a fill, not a submit', () => {
+    // The executor sends `{action:'fill'}` when no verb is given, so reading the
+    // missing verb as a submit invented an `idempotency: 'unsafe'` on a title
+    // field — and since the trial never replays past an unsafe step, that cut a
+    // generated graph off eight steps in and left the rest unproven.
+    expect(inferIdempotency('forms', {})).toBe('conditional')
+    const nodes: Array<{ data: Record<string, unknown> }> = [
+      { data: { blockId: 'forms', selector: '#title', value: 'note title' } },
+    ]
+    autoCompleteReliability(nodes)
+    const spec = (nodes[0]!.data!['__reliability'] ?? {}) as Record<string, unknown>
+    expect(spec['idempotency']).toBeUndefined()
   })
 
   it('never overrides a model-written contract, only fills gaps', () => {

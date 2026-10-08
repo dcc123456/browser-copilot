@@ -124,4 +124,29 @@ describe('kernel open shadow DOM', () => {
     expect(names).not.toContain('发布')
     expect(names).toContain('Light')
   })
+
+  it('answers a closed-shadow READ with nothing, which is why the driver must not ask', () => {
+    // The premise of the CDP read channel (src/background/cdp-shadow.ts): a
+    // count or an actionability probe for a `cdp-shadow` spec cannot be
+    // answered in-page, so a readiness gate built on the kernel could never
+    // open. The driver routes these to chrome.debugger instead.
+    makePage({ closed: true })
+    const target: Target = {
+      primary: {
+        how: 'cdp-shadow',
+        value: '发布',
+        role: 'button',
+        tag: 'button',
+        closedShadow: true,
+      },
+      fallbacks: [],
+    }
+
+    const exists = runOp({ action: 'element_exists', target } as Op)
+    expect(exists.found).toBe(false)
+    expect(exists.data).toBe(0)
+
+    const actionable = runOp({ action: 'actionability', target } as Op)
+    expect(actionable.data).toMatchObject({ state: 'missing' })
+  })
 })

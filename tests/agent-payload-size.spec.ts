@@ -34,11 +34,39 @@ const MAX_ADVERTISED_PAYLOAD_CHARS = 20_000
  * Raised 19_500 → 21_500 when the on-demand "delegate" group
  * (`delegate_to_agent`) was added, then → 24_500 when `create_scheduled_task`
  * joined the `ops` group (~2.3k schema), then → 25_500 when `present_plan`
- * (the plan skill's approval hand-off, ~1.2k schema) joined the core TOOLS.
+ * (the plan skill's approval hand-off, ~1.2k schema) joined the core TOOLS,
+ * then → 25_800 for `generate_workflow` (~230 chars), then → 26_800 for
+ * `verify_workflow` (~760 chars), then → 27_000 for `reload_extension`
+ * (~250 chars, the developer-only bridge call a self-test uses to pick up a
+ * fresh build), then → 27_700 for `repair_workflow` (~700 chars: replay a saved
+ * graph and hand a failing replay to the repair loop — the entry that makes
+ * "fix it yourself if the replay fails" reachable without a human). Three of
+ * them carry a `closeTabsAtEnd` argument (~95 chars each), the opt-in that lets
+ * an unattended caller close the tabs its own re-runs opened — a human-driven
+ * run leaves them on screen — hence → 28_000. `verify_workflow` and
+ * `repair_workflow` then each gained a `commitCutoffOnly` argument (~230 chars
+ * apiece: the opt-in that runs the steps PREPARING a commit while still refusing
+ * the commit itself — without it a draft workflow's replay halts at step 4 of 12
+ * in front of a cover upload whose intent merely names the 图文发布 page, so the
+ * graph can never be certified), and an `inputs` argument (~210 chars apiece: the
+ * map that supplies the values a PARAMETERISED workflow declares — a graph that
+ * searches for `{{keyword}}` asks a human for it when Run is clicked, and an
+ * unattended replay has nobody to ask, so without this entry it can only ever
+ * fail `UNRESOLVED_INPUT`) → 29_100. `verify_workflow` and `repair_workflow` then
+ * each gained an `allowDraftCommit` argument (~340 chars apiece: the opt-in that fires
+ * the graph's OWN draft-save step — without it a 19-node draft workflow replays 17 of
+ * 18 steps and the draft is still not written, so the goal can never be certified;
+ * it is the one replay argument that writes into the user's account, which is why it
+ * is spelled out instead of folded into commitCutoffOnly) → 29_800. All four are
+ * bridge-only entries
+ * (BRIDGE_ONLY_TOOLS): they are filtered out of every advertised surface, so
+ * the round-1 budgets below are unchanged — this cap is the only place they
+ * cost anything, and it is the catalog the local-agent bridge reads for
+ * discovery.
  * The delegate schema stays OUT of the advertised budget above because the
  * group is only loaded via `load_tools({groups:['delegate']})`.
  */
-const MAX_CATALOG_CHARS = 25_500
+const MAX_CATALOG_CHARS = 29_800
 /**
  * Round 1 of a workflow conversation: the core tool set, EVERY operator
  * category (the round-1 default — see the file header), `use_operators`, the

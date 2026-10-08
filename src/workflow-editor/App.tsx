@@ -56,6 +56,7 @@ import BlockSettingsModal from './blocks/shared/BlockSettingsModal'
 import LogsModal from './sidebar/LogsModal'
 import { WorkflowMetaProvider } from './blocks/batchD/WorkflowInfoFields'
 import TopToolbar from './toolbar/TopToolbar'
+import { useRepairEvents as useEditorRepairEvents } from './use-repair-events'
 import CertificationModal from './sidebar/CertificationModal'
 import type { VerificationReport } from '../background/workflow-engine/goal-verification'
 import CanvasControls from './toolbar/CanvasControls'
@@ -131,6 +132,11 @@ export default function EditorApp() {
   const [recording, setRecording] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Background AI repair for this workflow (started by the run path when the
+  // user enabled it): progress chip + cancel in the toolbar.
+  const { status: repairStatus, cancel: cancelRepair } = useEditorRepairEvents(
+    workflowId ?? undefined,
+  )
   const [editorLocale, setEditorLocale] = useState<EditorLocaleValue>(() =>
     makeEditorLocale(resolveEditorLocale(undefined), makeTranslate(resolveEditorLocale(undefined))),
   )
@@ -814,6 +820,8 @@ export default function EditorApp() {
           onOpenLogs={() => setLogsOpen(true)}
           onToggleRecording={() => void toggleRecording()}
           onAutoLayout={handleAutoLayout}
+          repair={repairStatus}
+          onCancelRepair={cancelRepair}
           t={t}
         />
 

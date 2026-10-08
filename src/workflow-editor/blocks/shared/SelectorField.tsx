@@ -68,7 +68,9 @@ export default function SelectorField({
       ? bt('Leave empty to use the conversation locator above; type a CSS selector to override')
       : findBy === 'xpath'
         ? '//div[@class="..."]'
-        : '.css-selector')
+        : findBy === 'text'
+          ? bt('Text to match')
+          : '.css-selector')
 
   const control =
     inputVariant === 'input' ? (
@@ -92,6 +94,7 @@ export default function SelectorField({
               options={[
                 { value: 'cssSelector', label: 'CSS selector' },
                 { value: 'xpath', label: 'XPath' },
+                { value: 'text', label: bt('Text') },
               ]}
             />
           </div>
@@ -100,13 +103,15 @@ export default function SelectorField({
             <span style={{ fontSize: 12, opacity: 0.75 }}>{bt('CSS Selector')}</span>
           </div>
         )}
-        <ElSelectorActions
-          selector={selector}
-          findBy={findBy === 'xpath' ? 'xpath' : 'cssSelector'}
-          multiple={multiple}
-          onSelector={onSelector}
-          onMessage={reportVerify}
-        />
+        {findBy !== 'text' && (
+          <ElSelectorActions
+            selector={selector}
+            findBy={findBy === 'xpath' ? 'xpath' : 'cssSelector'}
+            multiple={multiple}
+            onSelector={onSelector}
+            onMessage={reportVerify}
+          />
+        )}
       </div>
       {verifyStatus && (
         <p className={`wf-form-note wf-verify-${verifyStatus.kind}`}>{verifyStatus.text}</p>

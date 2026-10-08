@@ -14,8 +14,17 @@
 import { newId } from '../storage'
 import { fileStorageArea } from '../fs-store'
 import { withKeyLock } from '../key-lock'
+import { shedBulkDataUrls } from '../persist-budget'
 import { migrateWorkflow } from './migrate'
-import type { Workflow, WorkflowEdge, WorkflowNode, WorkflowSettings } from './types'
+import { normalizeTrialRun } from './trial-run'
+import { pageContextOf } from './page-context'
+import type {
+  Workflow,
+  WorkflowEdge,
+  WorkflowNode,
+  WorkflowRevisionMetadata,
+  WorkflowSettings,
+} from './types'
 
 const KEY_WORKFLOWS = 'workflows'
 
@@ -85,6 +94,21 @@ export function asWorkflow(value: unknown): Workflow | null {
       : undefined
 
   const rawSettings = (v.settings ?? {}) as Partial<WorkflowSettings>
+  const rawGoalSpec = rawSettings.goalSpec
+  const rawTrialRun = rawSettings.trialRun
+  // `false` is the opt-out flag, an object is a record — and an object that
+  // does not rebuild into a record is neither, so it is dropped.
+  const trialRunRecord = normalizeTrialRun(rawTrialRun)
+  // The page-context anchor set. It was missing from this whitelist, so the
+  // reanchor repair wrote `settings.pageContext` and the next save dropped it —
+  // the guard went back to refusing the very site the repair had moved it to.
+  // Normalized through the module that reads it, so storage never grows a
+  // second, divergent idea of what a valid fingerprint is.
+  const rawPageContext = rawSettings.pageContext
+  const pageContext =
+    rawPageContext && typeof rawPageContext === 'object'
+      ? pageContextOf({ settings: { pageContext: rawPageContext } })
+      : undefined
   const settings: WorkflowSettings = {
     ...DEFAULT_SETTINGS,
     saveLog: rawSettings.saveLog === true,
@@ -94,6 +118,53 @@ export function asWorkflow(value: unknown): Workflow | null {
     ...(typeof rawSettings.defaultColumnName === 'string'
       ? { defaultColumnName: rawSettings.defaultColumnName }
       : {}),
+    // Everything below is what makes a GENERATED workflow generated: its
+    // provenance, the execution regime it must run under, the goal it is
+    // verified against. A whitelist that forgot them silently downgraded a
+    // strict generated graph to legacy compat the moment it was saved — the
+    // record path had written the contract, the run path read nothing back.
+    // Each key keeps the same per-key type guard as the rest: an unusable
+    // value is dropped, never trusted.
+    ...(rawSettings.provenance === 'chat-generate' || rawSettings.provenance === 'chat-history'
+      ? { provenance: rawSettings.provenance }
+      : {}),
+    ...(rawSettings.reliabilityMode === 'generated-strict' ||
+    rawSettings.reliabilityMode === 'compat'
+      ? { reliabilityMode: rawSettings.reliabilityMode }
+      : {}),
+    ...(rawGoalSpec && typeof rawGoalSpec === 'object' ? { goalSpec: rawGoalSpec } : {}),
+    ...(typeof rawSettings.generationOriginUrl === 'string'
+      ? { generationOriginUrl: rawSettings.generationOriginUrl }
+      : {}),
+    ...(pageContext ? { pageContext } : {}),
+    ...(typeof rawSettings.defaultWaitMs === 'number'
+      ? { defaultWaitMs: rawSettings.defaultWaitMs }
+      : {}),
+    ...(Array.isArray(rawSettings.saveWarnings)
+      ? {
+          saveWarnings: rawSettings.saveWarnings.filter(
+            (warning): warning is string => typeof warning === 'string',
+          ),
+        }
+      : {}),
+    ...(Array.isArray(rawSettings.generationStages)
+      ? { generationStages: rawSettings.generationStages as WorkflowSettings['generationStages'] }
+      : {}),
+    ...(rawSettings.certificationStatus === 'certified' ||
+    rawSettings.certificationStatus === 'unverified'
+      ? { certificationStatus: rawSettings.certificationStatus }
+      : {}),
+    ...(typeof rawSettings.takeoverOnRun === 'boolean'
+      ? { takeoverOnRun: rawSettings.takeoverOnRun }
+      : {}),
+    ...(typeof rawSettings.degradeReplay === 'boolean'
+      ? { degradeReplay: rawSettings.degradeReplay }
+      : {}),
+    ...(rawTrialRun === false
+      ? { trialRun: false }
+      : trialRunRecord
+        ? { trialRun: trialRunRecord }
+        : {}),
   }
 
   return {
@@ -115,6 +186,21 @@ export function asWorkflow(value: unknown): Workflow | null {
       ? { trigger: v.trigger }
       : {}),
     ...(v.table !== undefined ? { table: v.table } : {}),
+    // Revisioning lives at the TOP level, so it needs its own guard: dropping
+    // it made every save erase the audit line the repair/generation paths just
+    // wrote, and `currentRevisionOf` read 0 on a workflow with a history.
+    ...(typeof v.revision === 'number' ? { revision: v.revision } : {}),
+    ...(Array.isArray(v.revisionHistory)
+      ? {
+          revisionHistory: v.revisionHistory.filter(
+            (entry): entry is WorkflowRevisionMetadata =>
+              !!entry &&
+              typeof entry === 'object' &&
+              typeof entry.revision === 'number' &&
+              typeof entry.updatedAt === 'number',
+          ),
+        }
+      : {}),
   }
 }
 
@@ -146,9 +232,14 @@ export async function saveWorkflow(workflow: Workflow): Promise<void> {
     // editor, the engine, exports — reads the canonical flat shape. Idempotent
     // for already-canonical workflows.
     const canonical = migrateWorkflow(normalized)
+    // No persisted copy of the graph may carry a megabyte data URL, including one
+    // inlined in a code node's literal: `workflows` is ONE key rewritten whole on
+    // every save, so a single fat param costs the key its durability — and a
+    // draft sealed straight from such a graph measured 36 MB in one write.
+    const storable = shedBulkDataUrls(canonical) as Workflow
     const index = list.findIndex((existing) => existing.id === workflow.id)
-    if (index >= 0) list[index] = canonical
-    else list.push(canonical)
+    if (index >= 0) list[index] = storable
+    else list.push(storable)
     await area.set({ [KEY_WORKFLOWS]: list })
   })
 }

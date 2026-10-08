@@ -1,0 +1,86 @@
+{
+  "id": "replay-drift-card",
+  "name": "replay smoke: re-fill an input whose node was replaced",
+  "createdAt": 1700000000000,
+  "updatedAt": 1700000000000,
+  "revision": 1,
+  "settings": {
+    "saveLog": false,
+    "debugMode": false,
+    "notification": false,
+    "reuseLastState": true,
+    "provenance": "chat-generate",
+    "reliabilityMode": "generated-strict",
+    "defaultWaitMs": 4000,
+    "generationOriginUrl": "__BASE__/drift"
+  },
+  "drawflow": {
+    "nodes": [
+      {
+        "id": "t",
+        "label": "trigger",
+        "position": { "x": 0, "y": 0 },
+        "data": { "blockId": "trigger" }
+      },
+      {
+        "id": "open",
+        "label": "new-tab",
+        "position": { "x": 1, "y": 0 },
+        "data": { "blockId": "new-tab", "url": "__BASE__/drift" }
+      },
+      {
+        "id": "fill-before",
+        "label": "forms",
+        "position": { "x": 2, "y": 0 },
+        "data": {
+          "blockId": "forms",
+          "type": "text-field",
+          "selector": "#amount-old",
+          "value": "42"
+        }
+      },
+      {
+        "id": "next",
+        "label": "click",
+        "position": { "x": 3, "y": 0 },
+        "data": { "blockId": "click", "selector": "#next" }
+      },
+      {
+        "id": "fill-after",
+        "label": "forms",
+        "position": { "x": 4, "y": 0 },
+        "data": {
+          "blockId": "forms",
+          "type": "text-field",
+          "selector": "#amount-old",
+          "value": "42",
+          "target": {
+            "primary": { "how": "css", "value": "#amount-old" },
+            "fallbacks": [{ "how": "name", "value": "amount" }],
+            "label": "Amount input (re-rendered after Next)"
+          }
+        }
+      },
+      {
+        "id": "confirm",
+        "label": "click",
+        "position": { "x": 5, "y": 0 },
+        "data": { "blockId": "click", "selector": "#again" }
+      },
+      {
+        "id": "read",
+        "label": "get-text",
+        "position": { "x": 6, "y": 0 },
+        "data": { "blockId": "get-text", "selector": "#receipt" }
+      }
+    ],
+    "edges": [
+      { "id": "e0", "source": "t", "target": "open" },
+      { "id": "e1", "source": "open", "target": "fill-before" },
+      { "id": "e2", "source": "fill-before", "target": "next" },
+      { "id": "e3", "source": "next", "target": "fill-after" },
+      { "id": "e4", "source": "fill-after", "target": "confirm" },
+      { "id": "e5", "source": "confirm", "target": "read" }
+    ]
+  }
+}

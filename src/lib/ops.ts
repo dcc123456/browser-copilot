@@ -88,14 +88,41 @@ export function locatorHintOf(target: unknown): string | undefined {
  * (`lib/workflow/locator-score`) and a winner needs both a high enough score
  * and a wide enough margin over the runner-up; `ambiguity: 'error'` fails on
  * ANY multi-match. Generated-strict workflows run with score.
+ *
+ * `rank` scores exactly like `score` — and then, where score would refuse,
+ * walks DOWN a fixed ladder of ever-weaker inferences instead of failing the
+ * step: margin waived, then any candidate that provably points at one element
+ * in recorded order, then the legacy first visible match. Every rung below the
+ * first reports {@link DegradeEvidence} on the result, so "it ran" never means
+ * "it was sure". This is what makes strict mode affordable to turn on: the
+ * evidence still decides the winner, and a step the agent already performed is
+ * never thrown away because the page drifted.
  */
 export interface ResolvePolicy {
   mode: 'compat' | 'strict'
-  ambiguity: 'error' | 'score' | 'first-visible'
+  ambiguity: 'error' | 'score' | 'first-visible' | 'rank'
   /** Minimum score a winning spec must reach (score policy). */
   minScore?: number
   /** Minimum gap between the top two scores (score policy). */
   minMargin?: number
+}
+
+/**
+ * What the kernel gave up to reach an element, and how far down the ladder it
+ * had to go. `rung` 1 is the clean strict winner (never reported); 2 waives the
+ * score margin, 3 takes the first single-match candidate in recorded order, 4
+ * falls back to the legacy first-visible guess.
+ */
+export interface DegradeEvidence {
+  rung: 2 | 3 | 4
+  /** The spec the node was authored with (its flat selector / primary). */
+  from: string
+  /** The spec that actually got acted on. */
+  to: string
+  /** DISTINCT elements the whole target matched. */
+  matchCount: number
+  /** The matched specs and their scores, for the audit trail. */
+  candidates: { strategy: string; score: number }[]
 }
 
 /** Every action the kernel understands. */
@@ -111,6 +138,7 @@ export type ActionName =
   | 'snapshot'
   | 'element_exists'
   | 'get_attribute'
+  | 'get_text'
   | 'set_attribute'
   | 'get_value'
   | 'click_link'
@@ -135,6 +163,19 @@ export type ScrollSpec =
   | { mode: 'incremental'; x?: number; y?: number }
   | { mode: 'top'; smooth?: boolean }
   | { mode: 'bottom'; smooth?: boolean }
+  /**
+   * "Scroll element" block's offset box. `incX`/`incY` from the editor decide per
+   * axis whether that axis is added to the current position; the default (both
+   * off) is an absolute position, which `by` cannot express.
+   */
+  | {
+      mode: 'to'
+      x?: number
+      y?: number
+      smooth?: boolean
+      xIncremental?: boolean
+      yIncremental?: boolean
+    }
 
 /** One operation, handed across the structured-clone boundary. */
 export interface Op {
@@ -149,7 +190,22 @@ export interface Op {
    * matched by `value` to build a selector for.
    */
   index?: number
+  /**
+   * For `select_option`: which of the editor's "Select an option by" modes the
+   * block chose. `value` matches `value`/label (the default); the positional
+   * modes use `index`, where `last` ignores its value.
+   */
+  selectBy?: 'value' | 'first' | 'last' | 'index'
+  /** For `create_element`: the form's "CSS" field, injected as a `<style>`. */
+  css?: string
+  /** For `create_element`: the form's "JavaScript" field, run per created element. */
+  javascript?: string
   scroll?: ScrollSpec
+  /**
+   * For `handle_dialog`: dismiss the dialog instead of accepting it. The block's
+   * `accept` checkbox was reaching nobody — every dialog was auto-accepted.
+   */
+  accept?: boolean
   /** Whether to clear an input before typing (default true for `fill`). */
   clear?: boolean
   /**
@@ -282,4 +338,11 @@ export interface OpResult {
    * payload of a strict ambiguity refusal. Spec strings, not DOM dumps.
    */
   candidates?: { strategy: string; score: number }[]
+  /**
+   * Set when a `rank` policy had to fall below the clean strict winner to act
+   * (see {@link DegradeEvidence}). The op SUCCEEDED — this is the record that
+   * it succeeded on a weaker inference than the authored locator, which is what
+   * lets the engine self-heal the node and still call the run unverified.
+   */
+  degrade?: DegradeEvidence
 }

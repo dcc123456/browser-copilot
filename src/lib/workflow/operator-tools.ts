@@ -613,7 +613,7 @@ const SCHEMA_OVERRIDES: Readonly<Record<string, Record<string, unknown>>> = {
     },
     fileVariable: {
       type: 'string',
-      description: 'Artifact/data-URL variable.',
+      description: 'Variable NAME holding the file, not the data URL.',
     },
   },
   link: {

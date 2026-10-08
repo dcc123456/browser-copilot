@@ -24,24 +24,40 @@ import {
 } from '../../lib/workflow/readiness'
 import type { NodeReliabilitySpec } from '../../lib/workflow/reliability'
 import { nodeReliabilityOf } from '../../lib/workflow/reliability'
+import { interpolate } from '../../lib/workflow/interpolate'
 import type { WorkflowNode } from '../../lib/workflow/types'
+import type { Target } from '../../lib/ops'
 
 /** The result of one probe observation. */
 export interface ReadinessCheckResult {
   satisfied: boolean
   /** Why it was not satisfied yet — surfaced in the timeout failure. */
   detail?: string
+  /**
+   * Polling will never help: the requirement is unsatisfiable IN PRINCIPLE for
+   * this element (a click waiting for a file input to become visible). End the
+   * wait now with this detail instead of spending the window on it. The failure
+   * keeps the `READINESS_TIMEOUT` code — one less axis for the repair budgets and
+   * the dashboards to classify — and the detail carries the truth.
+   */
+  hopeless?: boolean
 }
 
 /**
  * One readiness observation. Implementations must be FRESH every call (re-
  * resolve the element, re-read the state) — a cached first answer is exactly
  * the stale-observation bug this engine exists to prevent.
+ *
+ * `nodeTarget` is the locator chain the node's own executor will use
+ * (`executors.targetFrom`). A probe that observes anything narrower is
+ * observing a different element than the action will act on — or, for a node
+ * located by text/role with an empty `selector`, nothing at all.
  */
 export type ReadinessProbe = (
   requirement: ReadinessRequirement,
   nodeSelector: string,
   signal: AbortSignal,
+  nodeTarget?: Target,
 ) => Promise<ReadinessCheckResult>
 
 /** The outcome of a readiness wait. */
@@ -61,6 +77,8 @@ export interface ReadinessWaitOptions {
   requirements: readonly ReadinessRequirement[]
   /** The node's own element selector (requirements may default to it). */
   nodeSelector: string
+  /** The node's full locator chain, for nodes a flat selector cannot express. */
+  nodeTarget?: Target
   signal: AbortSignal
   probe: ReadinessProbe
   /** Window for the whole wait (ms); per-requirement overrides win. */
@@ -101,7 +119,7 @@ export async function awaitReadiness(options: ReadinessWaitOptions): Promise<Rea
     for (const [requirement, deadline] of pending) {
       let check: ReadinessCheckResult
       try {
-        check = await probe(requirement, nodeSelector, signal)
+        check = await probe(requirement, nodeSelector, signal, options.nodeTarget)
       } catch (e) {
         check = { satisfied: false, detail: e instanceof Error ? e.message : String(e) }
       }
@@ -110,6 +128,10 @@ export async function awaitReadiness(options: ReadinessWaitOptions): Promise<Rea
         continue
       }
       lastDetail = check.detail
+      if (check.hopeless) {
+        unsatisfied = requirement
+        break
+      }
       if (Date.now() >= deadline) {
         unsatisfied = requirement
         break
@@ -159,6 +181,34 @@ export function effectiveReadinessSpec(
 }
 
 /**
+ * Resolve the `{{tokens}}` a stored requirement still holds.
+ *
+ * An explicit `__reliability.readiness` contract is written at GENERATION time,
+ * when the value it expects was still a `{{variable}}` template — and only the
+ * template was carried into the graph. The step's own `value` param, by
+ * contrast, goes through `interpolateParams` before the executor sees it. So
+ * without this pass the after-gate compares the live control against the literal
+ * braces: the fill worked, the AI title is on the page, and the step times out
+ * on `expected "{{noteTitle}}"`. The default table has no such problem — it
+ * builds its expectation out of the already-interpolated params.
+ *
+ * A token that the run's variables cannot resolve stays as written, exactly as
+ * `interpolate` behaves everywhere else: the gate then fails on a graph with a
+ * hole in it, which is the honest answer.
+ */
+function resolveRequirements(
+  requirements: readonly ReadinessRequirement[],
+  vars: Record<string, unknown> | undefined,
+): readonly ReadinessRequirement[] {
+  if (!vars) return requirements
+  return requirements.map((requirement) =>
+    typeof requirement.value === 'string' && requirement.value.includes('{{')
+      ? { ...requirement, value: interpolate(requirement.value, vars) }
+      : requirement,
+  )
+}
+
+/**
  * Pre-action wait: poll the spec's `before` requirements (empty → no wait).
  */
 export async function prepareNodeExecution(args: {
@@ -166,15 +216,19 @@ export async function prepareNodeExecution(args: {
   blockId: string
   params: Record<string, unknown>
   nodeSelector: string
+  nodeTarget?: Target
   signal: AbortSignal
   probe?: ReadinessProbe
+  /** The run's variable bag, for a stored expectation still written as a token. */
+  vars?: Record<string, unknown>
 }): Promise<ReadinessOutcome> {
   const spec = effectiveReadinessSpec(args.node, args.blockId, args.params)
-  const requirements = spec?.before ?? []
+  const requirements = resolveRequirements(spec?.before ?? [], args.vars)
   if (requirements.length === 0 || !args.probe) return { ok: true, waitedMs: 0 }
   return awaitReadiness({
     requirements,
     nodeSelector: args.nodeSelector,
+    ...(args.nodeTarget ? { nodeTarget: args.nodeTarget } : {}),
     signal: args.signal,
     probe: args.probe,
     ...(spec?.timeoutMs !== undefined ? { timeoutMs: spec.timeoutMs } : {}),
@@ -191,15 +245,19 @@ export async function verifyPostActionReadiness(args: {
   blockId: string
   params: Record<string, unknown>
   nodeSelector: string
+  nodeTarget?: Target
   signal: AbortSignal
   probe?: ReadinessProbe
+  /** The run's variable bag, for a stored expectation still written as a token. */
+  vars?: Record<string, unknown>
 }): Promise<ReadinessOutcome> {
   const spec = effectiveReadinessSpec(args.node, args.blockId, args.params)
-  const requirements = spec?.after ?? []
+  const requirements = resolveRequirements(spec?.after ?? [], args.vars)
   if (requirements.length === 0 || !args.probe) return { ok: true, waitedMs: 0 }
   return awaitReadiness({
     requirements,
     nodeSelector: args.nodeSelector,
+    ...(args.nodeTarget ? { nodeTarget: args.nodeTarget } : {}),
     signal: args.signal,
     probe: args.probe,
     ...(spec?.timeoutMs !== undefined ? { timeoutMs: spec.timeoutMs } : {}),

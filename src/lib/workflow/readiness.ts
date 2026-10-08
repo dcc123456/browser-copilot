@@ -78,7 +78,11 @@ export function defaultReadinessFor(
     case 'event-click':
     case 'hover-element':
       return {
-        before: [requirement({ state: 'present' }), requirement({ state: 'visible' }), requirement({ state: 'enabled' })],
+        before: [
+          requirement({ state: 'present' }),
+          requirement({ state: 'visible' }),
+          requirement({ state: 'enabled' }),
+        ],
       }
     case 'forms':
     case 'fill': {
@@ -87,22 +91,54 @@ export function defaultReadinessFor(
         // A submit acts on its control; the VERIFIED outcome is page-level and
         // belongs to postconditions, not to a default here.
         return {
-          before: [requirement({ state: 'present' }), requirement({ state: 'visible' }), requirement({ state: 'enabled' })],
+          before: [
+            requirement({ state: 'present' }),
+            requirement({ state: 'visible' }),
+            requirement({ state: 'enabled' }),
+          ],
         }
       }
       return {
-        before: [requirement({ state: 'present' }), requirement({ state: 'visible' }), requirement({ state: 'enabled' })],
+        before: [
+          requirement({ state: 'present' }),
+          requirement({ state: 'visible' }),
+          requirement({ state: 'enabled' }),
+        ],
         after: [requirement({ state: 'value-committed', value: String(data['value'] ?? '') })],
       }
     }
     case 'select-option':
-    case 'set-checkbox':
       return {
-        before: [requirement({ state: 'present' }), requirement({ state: 'visible' }), requirement({ state: 'enabled' })],
+        before: [
+          requirement({ state: 'present' }),
+          requirement({ state: 'visible' }),
+          requirement({ state: 'enabled' }),
+        ],
         after: [requirement({ state: 'value-committed', value: String(data['value'] ?? '') })],
+      }
+    case 'set-checkbox':
+      // The checkbox executor drives `checked` (a boolean) and the kernel reads a
+      // checkbox back as `checked`. Building the expectation from `value` — the
+      // block's data payload, not the control state — yields `''` against a
+      // control reporting `true`, i.e. a gate a working step can never pass.
+      return {
+        before: [
+          requirement({ state: 'present' }),
+          requirement({ state: 'visible' }),
+          requirement({ state: 'enabled' }),
+        ],
+        after: [requirement({ state: 'value-committed', value: String(data['checked'] ?? true) })],
       }
     case 'get-text':
       return { before: [requirement({ state: 'present' }), requirement({ state: 'visible' })] }
+    case 'upload-file':
+      // A file input is the one control that is legitimately INVISIBLE: pages
+      // style a drop zone and keep `input[type="file"]` hidden (the actionability
+      // probe said exactly that about this graph's upload target). The kernel
+      // injects files programmatically, so all it needs is for the element to
+      // EXIST — a `visible` or `enabled` wait here polls a condition that is
+      // false forever and times out a step that works.
+      return { before: [requirement({ state: 'present' })] }
     case 'attribute-value':
       return { before: [requirement({ state: 'present' })] }
     case 'read-page':
@@ -132,11 +168,40 @@ export function isReadinessState(value: unknown): value is ReadinessState {
   )
 }
 
+/**
+ * Did the control commit the value the step wrote?
+ *
+ * Byte equality cannot express it. A contenteditable reads back as `textContent`
+ * (kernel `readControlValue`), so block structure the page inserted between the
+ * paragraphs we wrote shows up as NO separator where the source had a newline —
+ * and a page that re-trims or re-wraps on input is normal behaviour, not a
+ * failed fill. Failing such a step is the worse error: the executor reported the
+ * write, the text is demonstrably in the field, and a gate that rejects it sends
+ * the repair ladder after a node that works.
+ *
+ * So the comparison is exact-modulo-whitespace, at two coarsening levels:
+ * separators collapsed to one space, then separators removed entirely (for the
+ * DOM-dropped case). It is NOT containment — "a" matching a select whose value
+ * is "ab" would read an uncommitted option as committed.
+ */
+export function valueCommittedMatches(expected: string, actual: string): boolean {
+  if (expected === actual) return true
+  const collapse = (value: string): string => value.replace(/\s+/g, ' ').trim()
+  const strip = (value: string): string => value.replace(/\s+/g, '')
+  const want = collapse(expected)
+  const have = collapse(actual)
+  if (want === have) return true
+  return want !== '' && strip(want) === strip(have)
+}
+
 function isRequirement(value: unknown): value is ReadinessRequirement {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as Record<string, unknown>
   if (!isReadinessState(raw['state'])) return false
-  if (raw['target'] !== undefined && (typeof raw['target'] !== 'object' || raw['target'] === null)) {
+  if (
+    raw['target'] !== undefined &&
+    (typeof raw['target'] !== 'object' || raw['target'] === null)
+  ) {
     return false
   }
   if (raw['timeoutMs'] !== undefined && typeof raw['timeoutMs'] !== 'number') return false

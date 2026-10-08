@@ -15,7 +15,9 @@
  *      requirements become JSON-Schema `required`, so the model is told the
  *      contract in round one;
  *   3. the run gate (`lib/workflow/validation.validateWorkflowForRun`) — the
- *      same checks as ERRORS for every workflow, whatever path produced it.
+ *      same checks for every workflow, whatever path produced it, with
+ *      `'error'` findings blocking the run and `'warning'` findings only
+ *      reported (see {@link RequirementProblem.severity}).
  *
  * Modelled on `data-params.ts`: pure data + pure functions (no `chrome`), so
  * the background bridge, the tool catalogue and the tests all read the SAME
@@ -33,6 +35,14 @@ export interface RequirementProblem {
   key: string
   /** What to do about it, phrased as a fix, not a complaint. */
   message: string
+  /**
+   * `'error'` (the default) means the step cannot work as written, so the run
+   * gate refuses the workflow. `'warning'` marks a finding on a step that is
+   * still EXECUTABLE — reporting it is honest, blocking the whole run over it
+   * is not. The record gate refuses on either severity, because there the model
+   * is present and can fix the call.
+   */
+  severity?: 'error' | 'warning'
 }
 
 /** A parameter that must be filled (non-empty) for the step to work. */
@@ -55,8 +65,8 @@ interface RequirementSet {
   anyOf?: { keys: string[]; message: string }[]
   /** The block acts on a page element: `selector` or a valid `target` is mandatory. */
   locator?: string
-  /** Bespoke checks (enums, cross-parameter rules) — return a message when unmet. */
-  check?: (data: Record<string, unknown>) => string | null
+  /** Bespoke checks (enums, cross-parameter rules) — return a finding when unmet. */
+  check?: (data: Record<string, unknown>) => string | RequirementProblem | null
 }
 
 /** Is `value` something the step can work with? */
@@ -140,23 +150,79 @@ function hasConditionsContent(data: Record<string, unknown>): boolean {
  */
 const JAVASCRIPT_CODE_BLOCK_ID = 'javascript-code'
 
+/** A CSS locator that names a file input, in any of the forms a model writes. */
+const FILE_INPUT_SELECTOR_PATTERN = /\[\s*type\s*=\s*["']?file["']?\s*\]|:file\b/i
+
+/** Every CSS string one node's locator carries (flat selector and target chain). */
+function cssLocatorsOf(data: Record<string, unknown>): string[] {
+  const out: string[] = []
+  if (typeof data['selector'] === 'string') out.push(data['selector'])
+  const target = data['target']
+  if (target && typeof target === 'object') {
+    const record = target as Record<string, unknown>
+    if (typeof record['selector'] === 'string') out.push(record['selector'])
+    const specs: unknown[] = []
+    if (record['primary'] !== undefined) specs.push(record['primary'])
+    if (Array.isArray(record['fallbacks'])) specs.push(...record['fallbacks'])
+    for (const spec of specs) {
+      if (!spec || typeof spec !== 'object') continue
+      const entry = spec as Record<string, unknown>
+      if (entry['how'] === 'css' && typeof entry['value'] === 'string') out.push(entry['value'])
+    }
+  }
+  return out
+}
+
+/**
+ * A click aimed at a file input uploads NOTHING. The browser opens the chooser
+ * only for a gesture that came from a real user, so the step executes "successfully"
+ * and the page never gets a file — round 53 recorded three of them on 小红书, the
+ * replay then covered 21/21 steps, no image was ever attached, and the draft save at
+ * the end had nothing to save. Refuse it where the call is made and name the block
+ * that can do the job: the model has one tool left to try, so this is not a dead end.
+ *
+ * Warning severity, deliberately: the record gate refuses on either severity (the
+ * model is present and can fix the call), while an `error` would retroactively refuse
+ * to RUN graphs that are already saved.
+ */
+function clickOnFileInputProblem(data: Record<string, unknown>): RequirementProblem | null {
+  if (!cssLocatorsOf(data).some((css) => FILE_INPUT_SELECTOR_PATTERN.test(css))) return null
+  return {
+    key: 'selector',
+    message:
+      '点击目标是文件输入框（input[type="file"]）：浏览器只在真人手势下打开文件选择器，无人值守时这一步只会空跑，不会上传任何文件。' +
+      '请改用 Upload file 算子（wf_op_upload-file，sourceMode:"workflow-file"，fileVariable 指向脚本生成的图片变量）。',
+    severity: 'warning',
+  }
+}
+
 /**
  * blockId → its requirements. Only blocks reachable from the workflow
  * generator need an entry; every other block is unconstrained.
  */
 const REQUIREMENTS: Readonly<Record<string, RequirementSet>> = {
   // --- interaction ---------------------------------------------------------
-  'event-click': { locator: LOCATOR_MESSAGE },
+  'event-click': { locator: LOCATOR_MESSAGE, check: clickOnFileInputProblem },
   'hover-element': { locator: LOCATOR_MESSAGE },
   link: { locator: LOCATOR_MESSAGE },
   'element-exists': { locator: LOCATOR_MESSAGE },
   'element-scroll': {
+    // A scroll that moves nothing is a NO-OP, not a broken step: the executor
+    // runs it, the page stays put and every later node still gets its turn.
+    // Warning severity on purpose — one useless node must not dead-end a
+    // workflow the user already saved (that refusal used to block the whole
+    // run, which costs far more than the no-op does).
     check: (data) =>
       hasLocator(data) ||
       Number(data['scrollX'] ?? 0) !== 0 ||
       Number(data['scrollY'] ?? 0) !== 0
         ? null
-        : '缺少滚动目标：请传元素定位（ref / selector / target），或给出非零的 scrollX / scrollY',
+        : {
+            key: 'parameters',
+            message:
+              '缺少滚动目标：请传元素定位（ref / selector / target），或给出非零的 scrollX / scrollY。本节点重放时不会滚动页面。',
+            severity: 'warning',
+          },
   },
   'get-text': {
     locator: LOCATOR_MESSAGE,
@@ -507,8 +573,10 @@ export function missingRequirements(
   }
 
   if (requirements.check) {
-    const message = requirements.check(data)
-    if (message) problems.push({ key: 'parameters', message })
+    const found = requirements.check(data)
+    if (found) {
+      problems.push(typeof found === 'string' ? { key: 'parameters', message: found } : found)
+    }
   }
 
   return problems

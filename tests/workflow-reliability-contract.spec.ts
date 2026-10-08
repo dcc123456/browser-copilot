@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 import type { Workflow, WorkflowNode } from '../src/lib/workflow/types'
 import {
   ambiguityPolicyOf,
+  degradeReplayOf,
   goalGateProblems,
   goalSpecOf,
   idempotencyOf,
@@ -20,10 +21,7 @@ import {
   withNodeReliability,
 } from '../src/lib/workflow/reliability'
 import { isWorkflowCondition, describeCondition } from '../src/lib/workflow/conditions'
-import {
-  defaultReadinessFor,
-  normalizeReadinessSpec,
-} from '../src/lib/workflow/readiness'
+import { defaultReadinessFor, normalizeReadinessSpec } from '../src/lib/workflow/readiness'
 import {
   semanticLocatorFromTarget,
   stableAttributesOf,
@@ -119,9 +117,39 @@ describe('reliability mode resolution', () => {
   })
 
   it('old workflow JSON with extra unknown settings still deserializes', () => {
-    const wf = workflowOf({ saveLog: false, debugMode: false, notification: false, __reliability: { junk: true } })
+    const wf = workflowOf({
+      saveLog: false,
+      debugMode: false,
+      notification: false,
+      __reliability: { junk: true },
+    })
     expect(() => reliabilityModeOf(wf)).not.toThrow()
     expect(reliabilityModeOf(wf)).toBe('compat')
+  })
+})
+
+describe('degradeReplay default', () => {
+  const base = { saveLog: false, debugMode: false, notification: false }
+
+  it('is ON for a generated-strict workflow and OFF for a compat one', () => {
+    // The default is the whole point of the ladder: strict mode only becomes
+    // affordable to turn on because a generated workflow degrades rather than
+    // refuses. A hand-built workflow keeps the behavior it always had.
+    expect(degradeReplayOf(workflowOf({ ...base, provenance: 'chat-generate' }))).toBe(true)
+    expect(degradeReplayOf(workflowOf({ ...base }))).toBe(false)
+  })
+
+  it('an explicit setting wins in both directions', () => {
+    const generated = { ...base, provenance: 'chat-generate' as const }
+    expect(degradeReplayOf(workflowOf({ ...generated, degradeReplay: false }))).toBe(false)
+    expect(degradeReplayOf(workflowOf({ ...base, degradeReplay: true }))).toBe(true)
+  })
+
+  it('a non-boolean value is ignored, not coerced', () => {
+    expect(degradeReplayOf(workflowOf({ ...base, degradeReplay: 'yes' }))).toBe(false)
+    expect(
+      degradeReplayOf(workflowOf({ ...base, provenance: 'chat-generate', degradeReplay: 1 })),
+    ).toBe(true)
   })
 })
 
@@ -213,17 +241,14 @@ describe('node reliability accessor', () => {
   it('keeps well-formed fields and drops garbage ones', () => {
     const spec = nodeReliabilityOf(
       nodeOf(
-        withNodeReliability(
-          { blockId: 'click' },
-          {
-            intent: '点击发货按钮',
-            idempotency: 'conditional',
-            preconditions: [{ kind: 'variableExists', name: 'orderId' }],
-            postconditions: '不是数组',
-            readiness: { before: [{ state: 'visible' }] },
-            locator: { selectorVerified: true },
-          } as unknown as Parameters<typeof withNodeReliability>[1],
-        ),
+        withNodeReliability({ blockId: 'click' }, {
+          intent: '点击发货按钮',
+          idempotency: 'conditional',
+          preconditions: [{ kind: 'variableExists', name: 'orderId' }],
+          postconditions: '不是数组',
+          readiness: { before: [{ state: 'visible' }] },
+          locator: { selectorVerified: true },
+        } as unknown as Parameters<typeof withNodeReliability>[1]),
       ),
     )
     expect(spec?.intent).toBe('点击发货按钮')
@@ -234,10 +259,50 @@ describe('node reliability accessor', () => {
     expect(spec?.locator?.selectorVerified).toBe(true)
   })
 
+  it('recovers a condition the model serialized as an object, not an array', () => {
+    // Observed in a generated graph: `"postconditions": {"item": {kind: …}}`,
+    // and the same drift one level up as a bare condition. Read as a
+    // non-array, both are dropped — leaving an UNSAFE step labelled with no
+    // claim about what it achieved, so L2 verification had nothing to check and
+    // the goal-derived condition silently disappeared.
+    const keyed = nodeReliabilityOf(
+      nodeOf({
+        blockId: 'event-click',
+        __reliability: {
+          idempotency: 'unsafe',
+          postconditions: { item: { kind: 'urlContains', value: '/publish/' } },
+        },
+      }),
+    )
+    expect(keyed?.postconditions).toEqual([{ kind: 'urlContains', value: '/publish/' }])
+
+    const bare = nodeReliabilityOf(
+      nodeOf({
+        blockId: 'event-click',
+        __reliability: { idempotency: 'unsafe', postconditions: { kind: 'urlChanged' } },
+      }),
+    )
+    expect(bare?.postconditions).toEqual([{ kind: 'urlChanged' }])
+
+    // A bag of things that are not conditions stays garbage.
+    const garbage = nodeReliabilityOf(
+      nodeOf({
+        blockId: 'event-click',
+        __reliability: {
+          idempotency: 'unsafe',
+          postconditions: { note: 'the page changed', count: 2 },
+        },
+      }),
+    )
+    expect(garbage?.postconditions).toBeUndefined()
+  })
+
   it('rejects an idempotency value outside the whitelist', () => {
     const spec = nodeReliabilityOf(
       nodeOf(
-        withNodeReliability({ blockId: 'click' }, { idempotency: 'yolo' } as unknown as Parameters<typeof withNodeReliability>[1]),
+        withNodeReliability({ blockId: 'click' }, { idempotency: 'yolo' } as unknown as Parameters<
+          typeof withNodeReliability
+        >[1]),
       ),
     )
     expect(spec?.idempotency).toBeUndefined()
@@ -271,7 +336,32 @@ describe('idempotency classification (block + intent)', () => {
   it('an unsafe intent upgrades a conditional block', () => {
     expect(idempotencyOf('click', { description: '点击登录按钮' })).toBe('unsafe')
     expect(idempotencyOf('forms', { action: 'fill', description: '填写并提交订单' })).toBe('unsafe')
-    expect(idempotencyOf('press-key', { description: 'press Enter to submit the form' })).toBe('unsafe')
+    expect(idempotencyOf('press-key', { description: 'press Enter to submit the form' })).toBe(
+      'unsafe',
+    )
+  })
+
+  it('an operator name in the prose is not an intent', () => {
+    // The escape-hatch justification names the operators it tried. `create`
+    // inside `create-element` used to read as "this step creates something",
+    // which cut the trial off before the node that draws the cover image.
+    const gap =
+      '算子集中没有任何“绘制/生成图片并产出文件”的算子：take-screenshot 只能截取页面，' +
+      'save-assets 标注未实现。: 必须在 canvas 上绘制文字并 toDataURL 导出，' +
+      'create-element 只能插入 DOM 节点而无法导出位图文件。 (tried: take-screenshot, save-assets, create-element, get-text, read-page)'
+    expect(idempotencyOf('javascript-code', { description: gap })).toBe('conditional')
+    expect(
+      idempotencyOf('event-click', { description: 'run create-element to insert a box' }),
+    ).toBe('conditional')
+  })
+
+  it('a real unsafe intent survives the operator names around it', () => {
+    expect(
+      idempotencyOf('javascript-code', {
+        description: '点击立即发布提交笔记（forms / create-element 做不到）',
+      }),
+    ).toBe('unsafe')
+    expect(idempotencyOf('click', { description: 'click the create button' })).toBe('unsafe')
   })
 
   it('a benign intent keeps conditional', () => {
@@ -279,9 +369,13 @@ describe('idempotency classification (block + intent)', () => {
   })
 
   it('the explicit contract wins over every default', () => {
-    const spec = nodeReliabilityOf(nodeOf(withNodeReliability({ blockId: 'click' }, { idempotency: 'safe' })))
+    const spec = nodeReliabilityOf(
+      nodeOf(withNodeReliability({ blockId: 'click' }, { idempotency: 'safe' })),
+    )
     expect(idempotencyOf('click', {}, spec)).toBe('safe')
-    const unsafe = nodeReliabilityOf(nodeOf(withNodeReliability({ blockId: 'get-text' }, { idempotency: 'unsafe' })))
+    const unsafe = nodeReliabilityOf(
+      nodeOf(withNodeReliability({ blockId: 'get-text' }, { idempotency: 'unsafe' })),
+    )
     expect(idempotencyOf('get-text', {}, unsafe)).toBe('unsafe')
   })
 
@@ -323,9 +417,7 @@ describe('condition guards', () => {
   })
 
   it('rejects a condition with an empty (identity-less) target', () => {
-    expect(
-      isWorkflowCondition({ kind: 'elementExists', target: {} }),
-    ).toBe(false)
+    expect(isWorkflowCondition({ kind: 'elementExists', target: {} })).toBe(false)
   })
 
   it('rejects unknown kinds and malformed payloads', () => {

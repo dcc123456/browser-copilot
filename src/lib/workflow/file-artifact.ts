@@ -87,6 +87,28 @@ export function isDataUrl(value: unknown): value is string {
 }
 
 /**
+ * Read a `fileVariable` argument as the variable name it is meant to be.
+ *
+ * A whole-value `{{name}}` is a reference to `name`; the executor resolves
+ * variables by key, so both the executor and the node goal contract must see
+ * the same stripped name or the contract would demand a variable literally
+ * called "{{name}}" — a row no run could ever satisfy.
+ */
+export function variableNameOf(raw: string): string {
+  const m = /^\{\{\s*([\w.-]+)\s*\}\}$/.exec(raw.trim())
+  return (m?.[1] ?? raw).trim()
+}
+
+/**
+ * True when a value given in place of a variable name actually carries file
+ * bytes. Generated graphs hit this when the model reads «data-URL variable»
+ * literally and pastes the image content in as the name.
+ */
+export function isFileContentLiteral(value: string): boolean {
+  return value.startsWith('data:') || value.includes(';base64,')
+}
+
+/**
  * Parse a data URL into its MIME type and the base64 payload body (the part
  * after the comma). Returns null when it is not a well-formed data URL.
  */

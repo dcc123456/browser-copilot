@@ -5,14 +5,25 @@
  * success. The derived goal spec is grounded in node postconditions only.
  */
 import { describe, expect, it } from 'vitest'
-import { deriveGoalSpecFromNodes, normalizeGoalSpec } from '../src/lib/workflow/goal'
+import { deriveGoalSpecFromNodes, groundGoalSpecToGraph, normalizeGoalSpec } from '../src/lib/workflow/goal'
 import {
   evaluateAllConditions,
   evaluateCondition,
   type ConditionPageProbe,
 } from '../src/background/workflow-engine/condition-runtime'
 import { verifyGoalSpec } from '../src/background/workflow-engine/goal-verifier'
+import {
+  conditionLocatorKey,
+  describeCondition,
+  isWorkflowCondition,
+  workflowConditionsOf,
+} from '../src/lib/workflow/conditions'
 import type { WorkflowCondition } from '../src/lib/workflow/conditions'
+import {
+  conditionTargetName,
+  conditionTargetSpecs,
+  withConditionTargetName,
+} from '../src/lib/workflow/element-fingerprint'
 import { node } from '../specs/reliability-fixtures/harness'
 
 /** A page probe driven by a plain record — deterministic and observable. */
@@ -80,6 +91,210 @@ describe('deriveGoalSpecFromNodes', () => {
       '随便点点',
     )
     expect(goal).toBeUndefined()
+  })
+})
+
+describe('groundGoalSpecToGraph', () => {
+  const invented = { kind: 'variableExists', name: 'xiaohongshuTitle' } as WorkflowCondition
+  const inventedContent = { kind: 'variableExists', name: 'xiaohongshuContent' } as WorkflowCondition
+
+  it('drops the goal rows that name a variable this graph never writes', () => {
+    // The round-22 graph: 26/26 clean, and an L3 that could never hold because
+    // `prepare_workflow_goal` named variables the model EXPECTED and the graph
+    // wrote under its own names. A row nobody can satisfy is a broken
+    // instrument, not a strict goal.
+    const nodes = [
+      node('a', 'trigger', {}),
+      node('b', 'ai-agent', { variableName: 'xhsTitle' }),
+      node('c', 'event-click', {
+        __reliability: {
+          intent: '点击保存草稿',
+          idempotency: 'unsafe',
+          postconditions: [{ kind: 'elementVisible', target: { role: 'button', name: '草稿箱' } }],
+        },
+      }),
+    ]
+    const out = groundGoalSpecToGraph(
+      {
+        summary: '生成图文草稿',
+        successConditions: [invented, inventedContent, { kind: 'urlContains', value: 'xiaohongshu.com' }],
+      },
+      { name: 'xhs', nodes },
+    )
+    expect(out.dropped).toEqual([invented, inventedContent])
+    expect(out.goalSpec.successConditions.map((c) => c.kind)).toEqual(['urlContains', 'elementVisible'])
+    expect(out.goalSpec.summary).toBe('生成图文草稿')
+  })
+
+  it('keeps a row the graph genuinely writes, by name or by reference', () => {
+    const graph = [
+      node('a', 'trigger', {}),
+      node('b', 'set-variable', { variableName: 'noteTitle' }),
+      node('c', 'forms', { value: '{{noteBody}}' }),
+    ]
+    const out = groundGoalSpecToGraph(
+      {
+        summary: 's',
+        successConditions: [
+          { kind: 'variableExists', name: 'noteTitle' },
+          { kind: 'variableEquals', name: 'noteBody', expected: 'hi' },
+        ],
+      },
+      { name: 'x', nodes: graph },
+    )
+    expect(out.dropped).toEqual([])
+    expect(out.goalSpec.successConditions).toHaveLength(2)
+  })
+
+  it('matches a name as a whole token, not as a prefix', () => {
+    // `noteTitleActual` is a different variable; a goal row on `noteTitle` that
+    // only that node writes must still be reported as unverifiable.
+    const out = groundGoalSpecToGraph(
+      { summary: 's', successConditions: [{ kind: 'variableExists', name: 'noteTitle' }] },
+      {
+        name: 'x',
+        nodes: [
+          node('a', 'trigger', {}),
+          node('b', 'get-text', { variableName: 'noteTitleActual' }),
+          node('c', 'event-click', {
+            __reliability: {
+              intent: '保存草稿',
+              postconditions: [{ kind: 'elementVisible', target: { role: 'button', name: '草稿箱' } }],
+            },
+          }),
+        ],
+      },
+    )
+    expect(out.dropped.map((c) => (c as { name: string }).name)).toEqual(['noteTitle'])
+    expect(out.goalSpec.successConditions.map((c) => c.kind)).toEqual(['elementVisible'])
+  })
+
+  it('prefers a differential row as the landed-effect proof over a standing presence row', () => {
+    // A change row used to be undecidable once the run was over, so grounding
+    // refused to install one and left the goal holding only a URL row — a loud
+    // failure, which was the honest answer. That premise is gone: a production
+    // run now snapshots the goal's own rows before step 1 (`result.goalBaseline`)
+    // and both readers (the §8.4 gate and the certification layer) judge the
+    // change against it. So the row this graph CAN decide is the differential
+    // one, while 「草稿箱 可见」 is precisely what that snapshot disproves as
+    // evidence (round 77: it was true before the run started).
+    const contract: { summary: string; successConditions: WorkflowCondition[] } = {
+      summary: 's',
+      successConditions: [invented, { kind: 'urlContains', value: 'xiaohongshu.com' }],
+    }
+    const out = groundGoalSpecToGraph(contract, {
+      name: 'x',
+      nodes: [
+        node('a', 'trigger', {}),
+        node('b', 'event-click', {
+          __reliability: {
+            intent: '保存草稿',
+            postconditions: [{ kind: 'elementVisible', target: { role: 'button', name: '草稿箱' } }],
+          },
+        }),
+        node('c', 'event-click', {
+          __reliability: { intent: '回到草稿列表', postconditions: [{ kind: 'urlChanged' }] },
+        }),
+      ],
+    })
+    expect(out.dropped).toEqual([invented])
+    expect(out.goalSpec.successConditions.map((c) => c.kind)).toEqual(['urlContains', 'urlChanged'])
+  })
+
+  it('counts a declared run input as grounding, and the trigger\'s own goal copy as not', () => {
+    const grounded = groundGoalSpecToGraph(
+      { summary: 's', successConditions: [{ kind: 'variableExists', name: 'apiKey' }] },
+      {
+        name: 'x',
+        nodes: [node('a', 'trigger', { parameters: [{ name: 'apiKey' }] }), node('b', 'forms', {})],
+      },
+    )
+    expect(grounded.dropped).toEqual([])
+
+    // The seal writes the contract onto the trigger node itself; that copy is
+    // the row quoting its own name, not the graph producing it.
+    const selfReferential = groundGoalSpecToGraph(
+      { summary: 's', successConditions: [{ kind: 'variableExists', name: 'noteTitle' }] },
+      {
+        name: 'x',
+        nodes: [
+          node('a', 'trigger', {
+            goalSpec: {
+              summary: 's',
+              successConditions: [{ kind: 'variableExists', name: 'noteTitle' }],
+            },
+          }),
+          node('b', 'forms', {
+            __reliability: {
+              intent: '填写标题',
+              postconditions: [{ kind: 'elementVisible', target: { text: '草稿箱' } }],
+            },
+          }),
+        ],
+      },
+    )
+    expect(selfReferential.dropped).toHaveLength(1)
+  })
+
+  it('re-words a presence row that quotes the task instead of the page', () => {
+    // Round 80, exactly: 18/18 clean, a real draft saved, and the goal read false
+    // on 「元素存在 "保存草稿"」 because 小红书's button says 「暂存离开」. The step that
+    // pressed it is the only thing that knows both halves — its prose names the
+    // control in the user's words, its recorded target holds the page's.
+    const saveStep = node('b', 'event-click', {
+      label: '点击暂存离开按钮保存草稿',
+      target: { primary: { how: 'text', value: '暂存离开' } },
+      __reliability: { intent: '点击暂存离开按钮保存草稿' },
+    })
+    const out = groundGoalSpecToGraph(
+      {
+        summary: 's',
+        successConditions: [
+          { kind: 'elementExists', target: { text: '保存草稿' }},
+          { kind: 'elementExists', target: { text: '暂存离开' } },
+        ],
+      },
+      { name: 'x', nodes: [node('a', 'trigger', {}), saveStep] },
+    )
+    expect((out.goalSpec.successConditions[0] as { target: { text: string } }).target.text).toBe(
+      '暂存离开',
+    )
+    // A row the page already answers is left exactly as it was.
+    expect(out.goalSpec.successConditions[1]).toEqual({ kind: 'elementExists', target: { text: '暂存离开' } })
+  })
+
+  it('does not re-word a row that aims at state no step ever spoke about', () => {
+    // A goal may legitimately describe what appears AFTER the last recorded step
+    // (a toast the save triggers, a dialog that closes). Nothing in the graph says
+    // what 「保存成功」 should become, so guessing would be the fabrication this file
+    // removes — the row stays, and it fails loudly if it never lands.
+    const out = groundGoalSpecToGraph(
+      { summary: 's', successConditions: [{ kind: 'elementExists', target: { text: '保存成功' } }] },
+      {
+        name: 'x',
+        nodes: [
+          node('a', 'trigger', {}),
+          node('b', 'event-click', {
+            target: { primary: { how: 'text', value: '暂存离开' } },
+            __reliability: { intent: '点击暂存离开' },
+          }),
+        ],
+      },
+    )
+    expect(out.goalSpec.successConditions[0]).toEqual({
+      kind: 'elementExists',
+      target: { text: '保存成功' },
+    })
+  })
+
+  it('hands back the untouched contract rather than an empty goal', () => {
+    const original = { summary: 's', successConditions: [invented] }
+    const out = groundGoalSpecToGraph(original, {
+      name: 'x',
+      nodes: [node('a', 'trigger', {}), node('b', 'event-click', {})],
+    })
+    expect(out.goalSpec).toBe(original)
+    expect(out.dropped).toEqual([])
   })
 })
 
@@ -230,5 +445,196 @@ describe('verifyGoalSpec', () => {
     })
     expect(absent.achieved).toBe(false)
     expect(absent.note).toContain('目标未达成')
+  })
+
+  it('judges a change row against the baseline the caller passes', async () => {
+    // The guidance now asks the model for a differential row (`countIncreased`),
+    // and the gate is the thing that FAILS a replay, so it has to be able to read
+    // that row. Passing the run's pre-step snapshot is what makes 「the draft list
+    // grew」 checkable; without it the very row we asked for reports
+    // 缺少步骤前的数量观测 and a run that landed reads as a failure.
+    const target = { selector: '.note-item' }
+    const draftGoal = {
+      summary: '草稿箱多了一篇',
+      successConditions: [{ kind: 'countIncreased', target } as unknown as WorkflowCondition],
+    }
+    const deps = {
+      variables: {},
+      probe: fakeProbe({ count: 100 }),
+      baseline: { counts: { [conditionLocatorKey(target)]: 99 }, exists: {} },
+    }
+    const grown = await verifyGoalSpec(draftGoal, deps)
+    expect(grown.achieved).toBe(true)
+    expect(grown.unmet).toHaveLength(0)
+
+    // Without the snapshot the same row cannot be decided at all, and the gate
+    // says so as a failure — which is the defect this wiring removes.
+    const noBaseline = await verifyGoalSpec(draftGoal, {
+      variables: {},
+      probe: fakeProbe({ count: 100 }),
+    })
+    expect(noBaseline.achieved).toBe(false)
+    expect(noBaseline.unmet).toEqual(['元素数量增加（css ".note-item"）'])
+  })
+})
+
+describe("the goal gate's settle window", () => {
+  // Round 59 replayed 19/19, clicked 「暂存离开」, and this gate read 「元素存在
+  // 草稿箱」 ONCE mid-navigation — the run was failed on a goal the page met seconds
+  // later. The window is only paid when a row already failed.
+  const goal = {
+    summary: '草稿已入库',
+    successConditions: [{ kind: 'urlContains', value: '/dashboard' }] as WorkflowCondition[],
+  }
+
+  it('re-reads a failed row and certifies once it holds', async () => {
+    const state = { url: 'https://x.test/publish' }
+    const sleeps: number[] = []
+    const verdict = await verifyGoalSpec(
+      goal,
+      { variables: {}, probe: fakeProbe(state) },
+      undefined,
+      {
+        settleMs: 6000,
+        pollMs: 1500,
+        sleep: async (ms) => {
+          sleeps.push(ms)
+          if (sleeps.length === 2) state.url = 'https://x.test/dashboard'
+        },
+      },
+    )
+    expect(verdict.achieved).toBe(true)
+    expect(sleeps).toEqual([1500, 1500])
+  })
+
+  it('gives up after the window, reporting every unmet row', async () => {
+    const reads = { url: 'https://x.test/publish', n: 0 }
+    const probe = fakeProbe(reads)
+    const original = probe.url
+    probe.url = async () => {
+      reads.n += 1
+      return original.call(probe)
+    }
+    const verdict = await verifyGoalSpec(
+      goal,
+      { variables: {}, probe },
+      undefined,
+      { settleMs: 3000, pollMs: 1500, sleep: async () => {} },
+    )
+    expect(verdict.achieved).toBe(false)
+    // first pass + two re-reads — the window is bounded, not a spin
+    expect(reads.n).toBe(3)
+    expect(verdict.unmet).toEqual(['URL 包含 "/dashboard"'])
+  })
+
+  it('defaults to the pure single read (no test pays a timer)', async () => {
+    const verdict = await verifyGoalSpec(
+      goal,
+      { variables: {}, probe: fakeProbe({ url: 'https://x.test/publish' }) },
+    )
+    expect(verdict.achieved).toBe(false)
+  })
+
+  it('a cancelled run stops waiting instead of polling an abandoned page', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const sleeps: number[] = []
+    const verdict = await verifyGoalSpec(
+      goal,
+      { variables: {}, probe: fakeProbe({ url: 'https://x.test/publish' }) },
+      undefined,
+      {
+        settleMs: 6000,
+        sleep: async (ms) => {
+          sleeps.push(ms)
+        },
+        signal: controller.signal,
+      },
+    )
+    expect(verdict.achieved).toBe(false)
+    expect(sleeps).toHaveLength(0)
+  })
+})
+
+describe('a condition recorded as the node\'s own rich Target', () => {
+  // Generation writes `condition.target` as the `{ primary, fallbacks }` chain its
+  // snapshot produced. That shape is what a replay can actually click, so neither
+  // the guard, the log line, nor the observation may treat it as noise.
+  const closedShadow = {
+    label: '暂存离开',
+    fallbacks: [],
+    primary: {
+      how: 'cdp-shadow',
+      value: '暂存离开',
+      role: 'button',
+      tag: 'button',
+      shadowHosts: ['xhs-publish-btn'],
+      closedShadow: true,
+    },
+  }
+  const roleWithCssFallback = {
+    label: '填写标题会有更多赞哦',
+    primary: { how: 'role', role: 'textbox', value: '填写标题会有更多赞哦' },
+    fallbacks: [{ how: 'css', value: 'div > div:nth-of-type(2) > input' }],
+  }
+
+  it('the guard keeps a positional-only target: dropping it deleted the step\'s whole claim', () => {
+    const cssOnly = { kind: 'elementExists', target: { fallbacks: [], primary: { how: 'css', value: 'body > div' } } }
+    expect(isWorkflowCondition(cssOnly)).toBe(true)
+    expect(workflowConditionsOf([cssOnly])).toHaveLength(1)
+    // Counterfactual guard: an EMPTY chain matches everything, so it stays refused.
+    expect(isWorkflowCondition({ kind: 'elementExists', target: { fallbacks: [], primary: { how: 'css', value: '  ' } } })).toBe(false)
+    expect(isWorkflowCondition({ kind: 'elementExists', target: {} })).toBe(false)
+  })
+
+  it('observes the recorded chain, in order, with the closed-shadow fields intact', () => {
+    expect(conditionTargetSpecs(closedShadow)).toEqual([closedShadow.primary])
+    expect(conditionTargetSpecs(roleWithCssFallback).map((spec) => spec.how)).toEqual([
+      'role',
+      'css',
+    ])
+    // A semantic locator still resolves through the locator vocabulary.
+    expect(conditionTargetSpecs({ stableAttributes: { 'data-css': '#go' } })).toEqual([
+      { how: 'css', value: '#go' },
+    ])
+  })
+
+  it('names the element in the run log instead of rendering "元素存在 "', () => {
+    const condition = { kind: 'elementExists', target: closedShadow } as unknown as WorkflowCondition
+    expect(describeCondition(condition)).toBe('元素存在 button "暂存离开"')
+    expect(conditionTargetName(closedShadow)).toBe('暂存离开')
+    expect(conditionTargetName({ role: 'button', accessibleName: '发货' })).toBe('发货')
+  })
+
+  it('evaluates as satisfied when the page has the element the step clicks', async () => {
+    const seen: unknown[] = []
+    const probe: ConditionPageProbe = {
+      ...fakeProbe({}),
+      exists: async (target) => {
+        seen.push(target)
+        return true
+      },
+    }
+    const outcome = await evaluateCondition(
+      { kind: 'elementExists', target: roleWithCssFallback } as unknown as WorkflowCondition,
+      { variables: {}, probe },
+    )
+    expect(outcome.satisfied).toBe(true)
+    expect(seen[0]).toBe(roleWithCssFallback)
+  })
+
+  it('an editor rename writes the name into the spec that holds a name', () => {
+    const renamed = withConditionTargetName(
+      roleWithCssFallback as unknown as Parameters<typeof withConditionTargetName>[0],
+      '搜索',
+    )
+    expect(renamed).toMatchObject({ primary: { how: 'role', value: '搜索' } })
+    const positional = withConditionTargetName(closedShadow as never, '保存')
+    expect(positional).toMatchObject({ primary: { value: '保存' } })
+    const cssChain = withConditionTargetName(
+      { primary: { how: 'css', value: '#go' }, fallbacks: [] } as never,
+      '买',
+    )
+    expect(cssChain).toMatchObject({ label: '买', primary: { how: 'css', value: '#go' } })
   })
 })

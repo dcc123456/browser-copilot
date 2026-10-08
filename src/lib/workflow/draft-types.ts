@@ -76,4 +76,14 @@ export interface WorkflowDraft {
    * the user so before the workflow fails on the wrong page.
    */
   originUrl?: string
+  /**
+   * Every origin the session actually acted on, in first-seen order
+   * (`originUrl` is `actedOrigins[0]`'s full URL).
+   *
+   * A goal that spans sites — read a document on one, publish on another —
+   * acts on all of them, and the page-context guard must accept all of them on
+   * replay. Only what the session REALLY did is recorded here, never a url a
+   * node merely mentions.
+   */
+  actedOrigins?: string[]
 }

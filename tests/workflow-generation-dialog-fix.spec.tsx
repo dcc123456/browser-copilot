@@ -99,6 +99,15 @@ async function sendMessage(container: HTMLElement, text: string): Promise<void> 
   const send = container.querySelector('button[aria-label="Send"]') ?? sendButtons[0]!
   await act(async () => { send.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
   await flush()
+  // Workflow generation confirms the workflow NAME before dispatching the
+  // turn: accept the suggested name so the task actually posts.
+  const start = [...document.body.querySelectorAll('button')].find(
+    (b) => b.textContent?.trim() === 'Start task',
+  )
+  if (start) {
+    await act(async () => { start.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    await flush()
+  }
 }
 
 describe('workflow generation inline progress and save card popup', () => {

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentServerMessage } from '../src/lib/messages'
 import {
   advertiseTools,
+  isObservationTool,
   isPageAction,
   modeAutoApproves,
   runAgentTurn,
@@ -493,6 +494,39 @@ describe('workflow operator tools are gated to workflow mode', () => {
     expect(final.filter((name) => name.startsWith('wf_op_')).sort()).toEqual(
       [...CORE_OPERATOR_TOOL_NAMES].sort(),
     )
+  })
+})
+
+describe('observation tools (isObservationTool)', () => {
+  // An unattended run has no human to click approve, so it grants exactly this
+  // class of tool: reading the page changes nothing. Anything that could mutate
+  // the page or the extension's own state stays refused.
+  it('covers the reads, including the visual ones', () => {
+    for (const name of [
+      'read_current_page',
+      'snapshot_page',
+      'list_tabs',
+      'list_network_requests',
+      'screenshot',
+      'recognize_image',
+    ]) {
+      expect(isObservationTool(name), name).toBe(true)
+    }
+  })
+
+  it('refuses every action, raw or operator', () => {
+    for (const name of [
+      'click',
+      'fill',
+      'open_url',
+      'run_javascript',
+      'wf_op_forms',
+      'wf_op_event-click',
+      'create_scheduled_task',
+      'pin_tab',
+    ]) {
+      expect(isObservationTool(name), name).toBe(false)
+    }
   })
 })
 

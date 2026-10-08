@@ -13,9 +13,15 @@
  * @module background/operator-tool-run
  */
 
-import { reliabilityLocatorOf, resolveRecordedLocator } from '../lib/workflow/target-to-selector'
-import { selectorAfterExecution, selectorCandidatesOf } from '../lib/workflow/target-to-selector'
+import {
+  recordedTargetChainOf,
+  resolveRecordedLocator,
+  reliabilityLocatorOf,
+  selectorAfterExecution,
+  selectorCandidatesOf,
+} from '../lib/workflow/target-to-selector'
 import type { RecordedLocator, SnapshotTargetEntry } from '../lib/workflow/target-to-selector'
+import type { Target } from '../lib/ops'
 import { countSelectorMatches } from './selector-probe'
 import {
   beginSelectorTrace,
@@ -40,6 +46,7 @@ import { evaluateJsPermission } from '../lib/workflow/capability-gap'
 import { markOperatorFailure, markOperatorRecovery } from '../lib/workflow/generation-coverage'
 import { operatorAuditCall } from '../lib/workflow/operator-history'
 import { resolveNodeGoalContract } from '../lib/workflow/node-goal-instantiation'
+import { draftGoalGapNotice } from '../lib/workflow/trial-run'
 import { withNodeGoalContract } from '../lib/workflow/node-goal-contract'
 
 import {
@@ -55,6 +62,7 @@ import {
   type DataRewrite,
 } from '../lib/workflow/dynamic-data'
 import type { WorkflowDraft } from '../lib/workflow/draft-types'
+import { isNavigationBlock, originOfUrl } from '../lib/workflow/page-context'
 import type { ScopeWindow } from './automation-scope'
 import {
   aiPrefillPlanOf,
@@ -129,6 +137,22 @@ export function blockTakesElement(blockId: string): boolean {
   const entry = BLOCK_BY_ID.get(blockId)
   if (!entry) return false
   return (entry.refDataKeys ?? []).includes('selector')
+}
+
+/** Categories whose executors run against a tab rather than in the worker. */
+const PAGE_TOUCHING_CATEGORIES: ReadonlySet<string> = new Set(['browser', 'interaction'])
+
+/**
+ * Does this block put the session ON a page — act on an element, read the
+ * document, or navigate somewhere? Pure-worker blocks (`ai-agent`, variables,
+ * conditions) are excluded on purpose: the tab that happens to be in scope
+ * while they run is not a site the workflow acts on, and recording it would
+ * widen the replay guard on a coincidence.
+ */
+export function blockTouchesPage(blockId: string): boolean {
+  if (isNavigationBlock(blockId) || blockTakesElement(blockId)) return true
+  const category = BLOCK_BY_ID.get(blockId)?.category
+  return typeof category === 'string' && PAGE_TOUCHING_CATEGORIES.has(category)
 }
 
 /** Did the caller give us anything we could turn into a locator? */
@@ -219,6 +243,10 @@ export type OperatorRunResult =
  * `selectorVerified`, and an unverified one that lost its CSS candidate
  * records NO selector at all — the rich target becomes the replay's primary.
  *
+ * When `chain` is supplied it REPLACES the target the call was made with: it is
+ * the same locator's specs plus every candidate the live page proved unique,
+ * ordered for replay. The flat selector stays the kernel's primary either way.
+ *
  * The reliability layer additionally saves the element's SEMANTIC identity
  * under `__reliability.locator` (spec §5.5): role/accessible name/test id —
  * meaning that survives DOM drift, not a positional path. The flat fields
@@ -228,9 +256,11 @@ function withLocator(
   args: Record<string, unknown>,
   locator: RecordedLocator | undefined,
   recorded?: { selector: string; verified: boolean },
+  chain?: Target,
 ): Record<string, unknown> {
   if (!locator) return args
-  const { target, label } = locator
+  const { label } = locator
+  const target = chain ?? locator.target
   // When post-execution evidence exists it decides the flat selector;
   // otherwise keep the resolved locator's selector (it still plays, even
   // unverified — the kernel's rich target is the fallback).
@@ -485,17 +515,29 @@ function rewriteForRecording(
     markExecuted(trace, outcome.resolution)
   }
 
-  // Remember the page this session first acted on (B2 of the first-run plan).
+  // Remember the pages this session acted on (B2 of the first-run plan).
   // A graph with no navigation before its first element action can only replay
   // on THAT page, so the save card and the run gate need to know it. Only
   // http(s) pages are automatable — anything else would poison the warning.
-  if (!draft.originUrl && blockTakesElement(blockId)) {
+  //
+  // `originUrl` keeps its original meaning (the FIRST such page: it is what an
+  // unanchored graph replays on), and `actedOrigins` collects the whole set,
+  // because a goal that spans sites — read a document on one, publish on
+  // another — acts on all of them and the page-context guard must accept all of
+  // them on replay. Refusing the second site is what made a cross-site graph
+  // fail its own pre-save verification in milliseconds.
+  if (blockTouchesPage(blockId)) {
     const tab = await resolveAutomationTab(
       pinnedTab.has(conversationId) ? pinnedTab.get(conversationId) : undefined,
       scope,
     ).catch(() => undefined)
     const url = typeof tab?.url === 'string' ? tab.url : ''
-    if (/^https?:/i.test(url)) draft.originUrl = url
+    if (/^https?:/i.test(url)) {
+      if (!draft.originUrl) draft.originUrl = url
+      const origin = originOfUrl(url)
+      const acted = draft.actedOrigins ?? []
+      if (origin && !acted.includes(origin)) draft.actedOrigins = [...acted, origin]
+    }
   }
 
   // Harvest the executor's writes. `get-secret` is the only block that pulls a
@@ -527,6 +569,7 @@ function rewriteForRecording(
   // supply the evidence. When no probe ran (or no resolution was reported),
   // the locator stays as resolved.
   let recordedSelector: { selector: string; verified: boolean } | undefined
+  let chain: Target | undefined
   if (locator && outcome.resolution) {
     const countOf = (selector: string): number => {
       const idx = probeCandidates.indexOf(selector)
@@ -538,34 +581,26 @@ function rewriteForRecording(
       countOf,
     })
     markChosen(trace, recordedSelector)
+    chain = recordedTargetChainOf({
+      locator,
+      usedSpec: outcome.resolution.usedSpec,
+      countOf,
+    })
   }
 
-  // A2 — a node that records NO flat selector (relies on the rich role/text
-  // target) is only replayable when that target resolves to EXACTLY ONE element.
-  // At generation the legacy resolver acts on the first of many without
-  // refusing, so an ambiguous role/text match records a node that would click
-  // the wrong element at replay. Refuse and demand stronger evidence.
-  if (
-    recordedSelector &&
-    recordedSelector.selector === '' &&
-    outcome.resolution &&
-    typeof outcome.resolution.matched === 'number' &&
-    outcome.resolution.matched > 1
-  ) {
-    const error =
-      'Refused: this element resolved by role/text but matched multiple elements (' +
-      `${outcome.resolution.matched}); a node with no unique CSS selector would replay against the wrong element. ` +
-      '已拒绝：该元素以 role/text 定位但命中了多个元素，无法保证重放唯一性。本次未执行、未记录节点。' +
-      '请补强证据：提供唯一 data-testid / id / name，或精确到唯一元素的稳定选择器。'
-    commitSelectorTrace(trace, { ok: false, error })
-    return { ok: false, error }
-  }
+  // A node that records no flat selector replays on its rich target's specs. It
+  // used to be refused when the executed spec matched several elements — the
+  // legacy resolver takes the first match, so the recorded node could click the
+  // wrong one. Refusal was the wrong remedy: it lost a step the agent had
+  // already performed correctly, and the chain above is the better answer. An
+  // ambiguous target now degrades through that chain at replay (see the rank
+  // resolver) and reports what it clicked, instead of never being recorded.
 
   // Rebuild the recorded data with the post-execution locator. `withLocator`
   // also strips a stale pre-execution selector when the node must rely on
   // the rich target.
   const locatedRedactedData = recordedSelector
-    ? withLocator(redactedData, locator, recordedSelector)
+    ? withLocator(redactedData, locator, recordedSelector, chain)
     : redactedData
 
   // AI prefill: swap the composed literal for the producer's variable BEFORE
@@ -650,7 +685,13 @@ function rewriteForRecording(
 
   const executed = outcome.status === 'executed'
   if (executed) markOperatorRecovery(conversationId, blockId)
-  const note = outcome.note ?? (output ? `next node attaches to ${output}` : undefined)
+  const note = [
+    outcome.note ?? (output ? `next node attaches to ${output}` : undefined),
+    draftGoalGapNotice(draft),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .slice(0, 900)
   // Ensure the trace carries the locator the node actually recorded, even
   // when the executor reported no live resolution (record-only / mock):
   // read it back off the final recorded data.

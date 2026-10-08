@@ -4,7 +4,7 @@ import {
   executeOperatorNode,
   operatorExecClass,
 } from '../src/background/workflow-engine/operator-exec'
-import { interpolateParams } from '../src/lib/workflow/interpolate'
+import { interpolateParams, UNRESOLVED_INTERP_KEY } from '../src/lib/workflow/interpolate'
 import { OPERATOR_META } from '../src/lib/tool-catalog'
 import { EXECUTORS, type BlockExecutor } from '../src/background/workflow-engine/executors'
 
@@ -113,7 +113,7 @@ describe('interpolateParams', () => {
   })
 
   it('leaves non-string values untouched', () => {
-    const data = { n: 3, flag: true, plain: 'hello', nested: { a: '{{x}}' } }
+    const data = { n: 3, flag: true, plain: 'hello', nested: { a: 'x' } }
     expect(interpolateParams(data, {})).toBe(data)
   })
 
@@ -125,8 +125,22 @@ describe('interpolateParams', () => {
     })
   })
 
+  it('reports a leftover token instead of hiding it in the value', () => {
+    // A nested hole is as real as a top-level one — `target.primary` is a
+    // nested param — so the report walks the whole bag.
+    expect(interpolateParams({ nested: { a: '{{x}}' } }, {})).toEqual({
+      nested: { a: '{{x}}' },
+      [UNRESOLVED_INTERP_KEY]: ['x'],
+    })
+  })
+
   it('leaves an unresolved token in place rather than blanking it', () => {
-    expect(interpolateParams({ value: '{{missing}}' }, {})).toEqual({ value: '{{missing}}' })
+    // The bridge's own job: never swallow the text. What the leftover means is
+    // the engine's business (it fails the node), not the bridge's.
+    expect(interpolateParams({ value: '{{missing}}' }, {})).toEqual({
+      value: '{{missing}}',
+      [UNRESOLVED_INTERP_KEY]: ['missing'],
+    })
   })
 })
 

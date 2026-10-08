@@ -21,7 +21,10 @@ vi.mock('../src/background/driver', () => ({
 vi.mock('../src/background/automation-scope', () => ({
   normalScopeFromWindowId: vi.fn(async () => undefined),
 }))
-vi.mock('../src/lib/workflow/blocks/palette', () => ({ BLOCK_BY_ID: new Map() }))
+vi.mock('../src/lib/workflow/blocks/palette', () => ({
+  BLOCK_BY_ID: new Map(),
+  PALETTE_BLOCKS: [],
+}))
 
 // task-runner's other dependencies, so importing it stays cheap and inert.
 const deps = vi.hoisted(() => ({

@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { runUnifiedDebug } from '../../src/background/workflow-engine/repair/unified-debug'
 import { finalizeGeneratedWorkflow } from '../../src/background/workflow-engine/repair/generation-repair'
+import { pageContextOf } from '../../src/lib/workflow/page-context'
 import type { RepairContext, WorkflowPatchSet } from '../../src/lib/workflow/repair/types'
 import { createMemoryCheckpointStore } from '../../src/lib/workflow/checkpoints'
 import { recordCheckpoint } from '../../src/lib/workflow/checkpoints'
@@ -9,7 +10,7 @@ import type {
   RunnerOutcome,
   WorkflowRunner,
 } from '../../src/background/workflow-engine/repair/verification-runner'
-import { edge, makeWorkflow, node } from './helpers'
+import { buildTrace, edge, makeWorkflow, node } from './helpers'
 
 /** t → n3 get-text captcha → n5 click {{captcha}} */
 function workflow() {
@@ -196,6 +197,100 @@ describe('unified debug orchestration', () => {
     })
     expect(result.ok).toBe(false)
     expect(result.reason).toBe('provider unavailable')
+  })
+})
+
+describe('deterministic page-context reanchor', () => {
+  const GUARD_MESSAGE =
+    'WRONG_ORIGIN: 当前页面（https://creator.xiaohongshu.com）不是该工作流的目标站点（https://github.com）'
+
+  /** t → new-tab(creator…) → click, grounded on github. */
+  function contradictingWorkflow() {
+    const wf = makeWorkflow(
+      [
+        node('t', 'trigger'),
+        node('nav', 'new-tab', { url: 'https://creator.example.com/publish' }),
+        node('click', 'event-click', { selector: '.publish' }),
+      ],
+      [edge('t', 'nav'), edge('nav', 'click')],
+    )
+    return {
+      ...wf,
+      settings: { ...wf.settings, generationOriginUrl: 'https://github.com' },
+    }
+  }
+
+  function wrongOriginTrace(wf: ReturnType<typeof contradictingWorkflow>, runId: string) {
+    return buildTrace(
+      wf,
+      runId,
+      [
+        { id: 't', status: 'ok', variables: {} },
+        { id: 'nav', status: 'failed', variables: {}, error: GUARD_MESSAGE },
+        { id: 'click', status: 'skipped', variables: {} },
+      ],
+      {
+        failure: {
+          code: 'WRONG_ORIGIN',
+          message: GUARD_MESSAGE,
+          nodeId: 'nav',
+          retryable: false,
+          source: 'CONTRACT',
+        },
+      },
+    )
+  }
+
+  function okTrace(wf: ReturnType<typeof contradictingWorkflow>, runId: string) {
+    return buildTrace(
+      wf,
+      runId,
+      [
+        { id: 't', status: 'ok', variables: {} },
+        { id: 'nav', status: 'ok', variables: {} },
+        { id: 'click', status: 'ok', variables: {} },
+      ],
+      {},
+    )
+  }
+
+  it('AUTO_REPAIR re-anchors and verifies with no proposal provider at all', async () => {
+    const wf = contradictingWorkflow()
+    const propose = vi.fn(async () => {
+      throw new Error('the deterministic reanchor must not reach the provider')
+    })
+    const runner = scriptedRunner(
+      { outcome: 'failed', error: GUARD_MESSAGE, trace: wrongOriginTrace(wf, 'r1') },
+      { outcome: 'ok', trace: okTrace(wf, 'r2') },
+    )
+    const result = await runUnifiedDebug(wf, 'AUTO_REPAIR', {
+      runner,
+      store: createMemoryCheckpointStore(),
+      propose,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.patch?.operations[0]?.kind).toBe('SET_PAGE_CONTEXT_ORIGIN')
+    expect(propose).not.toHaveBeenCalled()
+    expect(pageContextOf(result.workingCopy!)).toEqual({ origin: 'https://creator.example.com' })
+    // The formal workflow keeps its recorded grounding.
+    expect(pageContextOf(wf)?.origin).toBe('https://github.com')
+  })
+
+  it('generation finalize re-anchors the draft instead of leaving it BLOCKED', async () => {
+    const wf = contradictingWorkflow()
+    const runner = scriptedRunner(
+      { outcome: 'failed', error: GUARD_MESSAGE, trace: wrongOriginTrace(wf, 'r1') },
+      { outcome: 'ok', trace: okTrace(wf, 'r2') },
+    )
+    const result = await finalizeGeneratedWorkflow(wf, {
+      runner,
+      store: createMemoryCheckpointStore(),
+    })
+
+    expect(result.status).toBe('VERIFIED')
+    expect(pageContextOf(result.workingCopy)).toEqual({ origin: 'https://creator.example.com' })
+    expect(result.patches[0]?.operations[0]?.kind).toBe('SET_PAGE_CONTEXT_ORIGIN')
   })
 })
 

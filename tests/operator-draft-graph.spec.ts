@@ -46,6 +46,7 @@ import {
   runOperatorTool,
 } from '../src/background/operator-tool-handler'
 import type { WorkflowDraft } from '../src/background/operator-tool-handler'
+import { saveGenerationGoal } from '../src/lib/workflow/generation-goal-storage'
 import type { Workflow } from '../src/lib/workflow/types'
 
 /** Append one operator node and return the resulting draft. */
@@ -187,8 +188,103 @@ describe('composeWorkflowFromDraft', () => {
     })
   })
 
-  it('derives the top-level trigger mirror from the graph trigger node', async () => {
-    const conversation = 'c-compose'
+  it('grounds a goal-first contract in the graph it actually built', async () => {
+    // `prepare_workflow_goal` runs before any node exists, so its rows can name
+    // variables the graph never writes. Shipping them anyway is how a 26/26
+    // replay ends permanently 「goal NOT CERTIFIED」 on a row no run could satisfy.
+    const conversation = 'c-grounded'
+    await saveGenerationGoal(conversation, {
+      version: 1,
+      name: '发布图文草稿',
+      goalSpec: {
+        summary: '图文草稿已保存',
+        successConditions: [
+          { kind: 'variableExists', name: 'xiaohongshuTitle' },
+          { kind: 'urlContains', value: 'xiaohongshu.com' },
+        ],
+      },
+      requiredCapabilities: ['set-variable', 'event-click'],
+    })
+    await append(conversation, 'wf_op_trigger', { goalText: '去小红书保存图文草稿' })
+    await append(conversation, 'wf_op_set-variable', { variableName: 'xhsTitle', value: '标题' })
+    await append(conversation, 'wf_op_event-click', {
+      selector: '[data-act=draft]',
+      __reliability: {
+        intent: '点击保存草稿',
+        idempotency: 'unsafe',
+        postconditions: [{ kind: 'elementVisible', target: { role: 'button', name: '草稿箱' } }],
+      },
+    })
+
+    const out = await composeWorkflowFromDraft(conversation, { save: false })
+    if ('error' in out) throw new Error(out.error)
+    const goalSpec = out.workflow.settings.goalSpec!
+    expect(JSON.stringify(goalSpec)).not.toContain('xiaohongshuTitle')
+    // The goal keeps its effect-proving rows, so grounding never weakens it to
+    // a URL the workflow satisfies by opening the page.
+    expect(goalSpec.successConditions.some((c) => c.kind !== 'urlContains' && c.kind !== 'urlMatches')).toBe(true)
+    const trigger = out.workflow.drawflow.nodes.find((n) => n.data.blockId === 'trigger')
+    expect(JSON.stringify(trigger?.data?.['goalSpec'])).not.toContain('xiaohongshuTitle')
+  })
+
+  it('anchors a cross-site session on every origin it really acted on', async () => {
+    const conversation = 'c-multisite'
+    const draft = await append(conversation, 'wf_op_new-tab', { url: 'https://github.com/o/r' })
+    draft.originUrl = 'https://github.com/o/r'
+    draft.actedOrigins = ['https://github.com', 'https://creator.xiaohongshu.com']
+
+    const out = await composeWorkflowFromDraft(conversation, { save: false })
+    if ('error' in out) throw new Error(out.error)
+    // Without this the graph's own first step is refused on replay
+    // (WRONG_ORIGIN) and its verification never executes a step.
+    expect(out.workflow.settings.pageContext).toEqual({
+      origin: 'https://github.com',
+      additionalOrigins: ['https://creator.xiaohongshu.com'],
+    })
+    expect(out.workflow.settings.generationOriginUrl).toBe('https://github.com/o/r')
+  })
+
+  it('writes no explicit anchor for a single-site session', async () => {
+    const conversation = 'c-singlesite'
+    const draft = await append(conversation, 'wf_op_new-tab', { url: 'https://github.com/o/r' })
+    draft.originUrl = 'https://github.com/o/r'
+    draft.actedOrigins = ['https://github.com']
+
+    const out = await composeWorkflowFromDraft(conversation, { save: false })
+    if ('error' in out) throw new Error(out.error)
+    // Deriving from generationOriginUrl already covers it, and a frozen
+    // fingerprint would block the reanchor repair from moving the anchor.
+    expect(out.workflow.settings.pageContext).toBeUndefined()
+  })
+
+  it('says so on the save card when the verification replay failed', async () => {
+    const conversation = 'c-unverified'
+    await append(conversation, 'wf_op_new-tab', { url: 'https://shop.test/list' })
+
+    const out = await composeWorkflowFromDraft(conversation, {
+      save: true,
+      trial: async (workflow) => ({
+        workflow,
+        record: {
+          outcome: 'failed',
+          at: 1,
+          full: false,
+          coveredSteps: 1,
+          totalSteps: 22,
+          failureCode: 'WRONG_ORIGIN',
+          reason: '导航目标（https://github.com）不是该工作流的目标站点',
+        },
+      }),
+    })
+    if ('error' in out) throw new Error(out.error)
+    // A failed verification never blocks the save — but it must not be silent.
+    expect(out.saved).toBe(true)
+    expect(out.workflow.settings.saveWarnings?.join('\n')).toContain('验证未通过')
+    expect(out.workflow.settings.saveWarnings?.join('\n')).toContain('1/22')
+    expect(out.workflow.settings.saveWarnings?.join('\n')).toContain('WRONG_ORIGIN')
+  })
+
+  it('derives the top-level trigger mirror from the graph trigger node', async () => {    const conversation = 'c-compose'
     const draft = await append(conversation, 'wf_op_event-click', { selector: '#x' })
     // Simulate the user picking a schedule in the save card.
     const triggerNode = draft.nodes.find((n) => n.data.blockId === 'trigger')!

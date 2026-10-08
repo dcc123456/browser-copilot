@@ -34,6 +34,8 @@ import type { ReadinessSpec } from './readiness'
 import { normalizeReadinessSpec } from './readiness'
 import type { SemanticLocator } from './element-fingerprint'
 import type { Workflow, WorkflowNode } from './types'
+import { nodeGoalContractOf } from './node-goal-contract'
+import { BLOCK_CATALOG } from './blocks/catalog'
 
 /** Which execution regime a workflow runs under. */
 export type WorkflowReliabilityMode = 'compat' | 'generated-strict'
@@ -202,7 +204,11 @@ export function nodeReliabilityOf(node: WorkflowNode): NodeReliabilitySpec | und
   if (!isRecord(raw)) return undefined
   const spec: NodeReliabilitySpec = {}
   if (typeof raw['intent'] === 'string' && raw['intent'].trim()) spec.intent = raw['intent']
-  if (raw['idempotency'] === 'safe' || raw['idempotency'] === 'conditional' || raw['idempotency'] === 'unsafe') {
+  if (
+    raw['idempotency'] === 'safe' ||
+    raw['idempotency'] === 'conditional' ||
+    raw['idempotency'] === 'unsafe'
+  ) {
     spec.idempotency = raw['idempotency']
   }
   const preconditions = workflowConditionsOf(raw['preconditions'])
@@ -301,12 +307,119 @@ const UNSAFE_BLOCK_IDS: ReadonlySet<string> = new Set(['webhook', 'feishu-messag
 const UNSAFE_INTENT_PATTERN =
   /(登录|登入|提交|发送|创建|新建|删除|支付|付款|发布|下单|购买|下单|确认订单|注销|login|log[\s-]?in|sign[\s-]?in|submit|send|create|delete|remove|pay|payment|checkout|publish|purchase|place[\s-]?order)/i
 
+/**
+ * Only the hyphenated block ids are scrubbed. A single-word id (`forms`, `note`,
+ * `link`, `clipboard`) is ordinary English that a real intent may well contain,
+ * and none of them hide an unsafe keyword; the multi-segment ones are operator
+ * names, which only ever appear in prose ABOUT the toolset.
+ */
+const BLOCK_NAME_PATTERN = (() => {
+  const names = BLOCK_CATALOG.map((entry) => entry.id)
+    .filter((id) => /^[a-z0-9]+(?:-[a-z0-9]+)+$/.test(id))
+    .sort((a, b) => b.length - a.length)
+  return names.length > 0 ? new RegExp(names.join('|'), 'gi') : null
+})()
+
+/**
+ * A clause that FORBIDS a verb is not asking for it — 「保存为草稿，不发布」.
+ *
+ * Exported because the draft-save test needs the same reading: the one sentence
+ * that documents a draft also names the publish it declines.
+ *
+ * The two optional groups exist because a prohibition is usually written with a
+ * light verb and an adverb between the negation and the act: round 30's terminal
+ * step said 「保存为草稿，不执行正式发布」 and the bare form matched none of it, so the
+ * graph that really ended on its draft save was reported as having no save step
+ * at all. The window stays clause-local (no wildcard over punctuation), so
+ * 「点击发布，不要撤销」 still reads as the publish it is.
+ */
+export const NEGATED_COMMIT_VERB =
+  /(?:绝不|决不|不可|不能|不要|不用|无法|禁止|未|别|勿|不|\bnot\b|\bnever\b|\bwithout\b)[\s,，、]{0,6}?(?:执行|进行|实施|予以|做|发起|触发|点击|按下|单击|会|能|要|应|打算|准备|计划|click|press|execute|perform)?[\s,，、]{0,4}?(?:正式|直接|手动|自动|再次|重复|actually|really|manually|directly)?[\s,，、]{0,4}?(?:发布|发表|提交|发送|下单|支付|付款|购买|publish|\bpost\b|submit|send|checkout|purchase)/gi
+
+/**
+ * 「发布页 / 发布平台 / 图文发布 / 发布模式」 names WHERE the step stands, not what it does.
+ *
+ * The mode variant is round 81: a generated step whose job was switching the
+ * composer to 图文 mode says 「在发布页顶部切换到「上传图文」发布模式」, the trial read the
+ * remaining 发布 as a publish act, stopped at step 6 of 41, and never reached the
+ * draft save. A mode tab is the same class of place name as a page tab — what
+ * makes a step unsafe is its own words naming the press (「点击发布按钮」), and those
+ * are untouched here.
+ */
+export const PAGE_NAME_ESCAPE =
+  /(发布|发表|提交|发送)[\s,，、]?(?:页面?|页|平台|中心|编辑器|区|列表|管理|模式)/g
+
+/**
+ * Closing an overlay is not the act its name reminds of.
+ *
+ * Round 73's trial stopped at step 7/29 on 「关闭登录弹窗」 — a click that shuts a
+ * login popup — because 登录/login is an unsafe keyword and the popup's own name
+ * was the only prose the step had. The escape needs the OVERLAY noun, not just the
+ * verb: 「关闭订单」 is a real state change and must keep refusing.
+ */
+const DISMISS_OVERLAY_ESCAPE =
+  /(?:关闭|关掉|收起|取消|忽略|跳过|dismiss|close|cancel|hide)[^，,。.;；\n]{0,14}?(?:弹窗|弹层|对话框|对话窗|浮层|浮窗|遮罩|提示框|popup|popover|modal|dialog|toast|overlay)/gi
+
+/**
+ * A selector is a machine handle, not a claim about the action.
+ *
+ * The node label the generator stamps embeds the resolved selector — 「Click the
+ * target element (.close-circle, .login-close, …)」 — and `.login-close` matched
+ * the login keyword for the same reason the block ids had to be scrubbed.
+ */
+const SELECTOR_PARENTHETICAL = /\((?:[^()]*[.#[\]>][^()]*)\)/g
+
+/**
+ * The prose the unsafe-intent keywords are scanned against.
+ *
+ * The page-name escape removes a phrase that names the PLACE a step stands on —
+ * 「图文发布页」 is not a step that publishes. Without it, a generated upload step
+ * whose own contract mentions the 发布页 it sits on classifies as a publish and
+ * the trial stops before the images the goal asked for (round 20 stopped at 11/26
+ * on exactly that sentence, and the script path has carried this escape ever since).
+ *
+ * A PROHIBITION is deliberately not removed here. 「把笔记留在草稿箱，绝不发布」 still
+ * refuses the step under the default policy: naming a publish, even to decline it,
+ * is not evidence that the step is safe to re-fire. Running such a step is a
+ * separate, opt-in decision, and `isDraftSaveNode` is where that decision strips
+ * the negation and asks whether the step instead names a DRAFT.
+ */
+function intentForKeywordScan(intent: string): string {
+  const withoutBlockNames = BLOCK_NAME_PATTERN ? intent.replace(BLOCK_NAME_PATTERN, ' ') : intent
+  return withoutBlockNames
+    .replace(SELECTOR_PARENTHETICAL, ' ')
+    .replace(DISMISS_OVERLAY_ESCAPE, '关闭浮层')
+    .replace(PAGE_NAME_ESCAPE, '页')
+}
+
+/**
+ * Does this prose describe an action that cannot be taken back?
+ *
+ * The keyword test the reliability contract runs on a step's intent, exposed for
+ * callers that have nothing else to read. A node generated without a contract
+ * carries its meaning in its LABEL — 「点击「发布」按钮」 and no intent field — and
+ * a caller deciding whether to re-fire that click cannot afford to see a
+ * harmless block id and assume the step is harmless.
+ */
+export function hasUnsafeIntent(text: string): boolean {
+  if (!text) return false
+  return UNSAFE_INTENT_PATTERN.test(intentForKeywordScan(text))
+}
+
 /** The node's declared intent, from the contract (falls back to `description`). */
 export function intentOf(node: WorkflowNode): string {
   const spec = nodeReliabilityOf(node)
   if (spec?.intent) return spec.intent
   const description = node.data?.['description']
-  return typeof description === 'string' ? description : ''
+  if (typeof description === 'string' && description) return description
+  // A chat-generated step has neither: `appendOperatorNode` labels the node with
+  // the block id, and the sentence the model spoke for the step — 「点击暂存草稿」,
+  // which is the ONLY thing distinguishing it from 「点击发布」 — is recorded on the
+  // node's goal contract. Without this reading, every generated click is
+  // prose-less, so the commit policy cannot refuse a publish and a run that did
+  // save a draft cannot prove it.
+  const goal = node.data ? nodeGoalContractOf(node.data)?.goal : undefined
+  return typeof goal === 'string' ? goal : ''
 }
 
 /**
@@ -336,7 +449,7 @@ export function idempotencyOf(
       position: { x: 0, y: 0 },
       data,
     })
-    return UNSAFE_INTENT_PATTERN.test(intent) ? 'unsafe' : 'conditional'
+    return hasUnsafeIntent(intent) ? 'unsafe' : 'conditional'
   }
   return 'conditional'
 }
@@ -348,6 +461,40 @@ export function requiresTerminalStateCheck(
   spec?: NodeReliabilitySpec,
 ): boolean {
   return idempotencyOf(blockId, data, spec) === 'unsafe'
+}
+
+// --- Cleanup steps ---------------------------------------------------------------
+
+/** 「关闭 / 收起 / dismiss / close」 — an act of making something go away. */
+const DISMISS_VERB = /关闭|关掉|收起|取消|退出|隐藏|撤掉|移除|\bdismiss\b|\bclose\b|\bcancel\b|\bhide\b/i
+
+/** The thing dismissed: an overlay the page shows CONDITIONALLY. */
+const OVERLAY_NOUN =
+  /抽屉|弹[出窗框级]|对话框|遮罩|浮层|弹窗|侧栏|提示|气泡|drawer|modal|dialog|overlay|popup|popover|toast|backdrop|banner/i
+
+/**
+ * Is this click only there to dismiss an overlay?
+ *
+ * An exploratory session opens things: the agent browsing 小红书 pulled the
+ * 草稿箱 drawer out, then clicked its close button, and that cleanup became a
+ * node in the graph (round 31, node `muqd93gb` — 8 s of waiting, then
+ * `READINESS_TIMEOUT(visible)` at step 7 of 17, because on a clean replay the
+ * drawer was NEVER OPEN and its close button stays hidden).
+ *
+ * Such a step is skipped, not failed, when its target does not appear: its own
+ * success state is "this overlay is gone", which holds just as hard when there
+ * was nothing to dismiss — the page is in the same state either way. Requiring
+ * BOTH a dismissal verb and an overlay noun keeps this to cleanup; a step that
+ * names an outward act is never excused this way.
+ */
+export function isDismissStep(node: WorkflowNode): boolean {
+  const blockId = String(node.data?.['blockId'] ?? node.label ?? '')
+  if (blockId !== 'click' && blockId !== 'event-click') return false
+  const prose = [intentOf(node), String(node.data?.['label'] ?? '')]
+    .join(' ')
+    .trim()
+  if (!prose || hasUnsafeIntent(prose)) return false
+  return DISMISS_VERB.test(prose) && OVERLAY_NOUN.test(prose)
 }
 
 // --- Ambiguity policy --------------------------------------------------------------
@@ -363,4 +510,24 @@ export const STRICT_MIN_MARGIN = 12
 /** The ambiguity policy a workflow runs with: strict scores, compat keeps the legacy first-visible. */
 export function ambiguityPolicyOf(workflow: Workflow): AmbiguityPolicy {
   return isGeneratedStrict(workflow) ? STRICT_AMBIGUITY : 'first-visible'
+}
+
+/**
+ * Whether a strict run may DEGRADE through the node's candidate chain where the
+ * score alone would refuse the match (the `rank` policy, see `lib/ops`).
+ *
+ * Default ON for generated-strict workflows. Refusal was the wrong remedy for
+ * an ambiguous locator: it lost a step the agent had already performed
+ * correctly, so a workflow that should have replayed eight of eight steps came
+ * home with seven and an apology. Degrading keeps the step AND keeps the
+ * evidence — every rung below the clean winner is reported on the node, so a
+ * run that needed the ladder is never mistaken for a verified one.
+ * `settings.degradeReplay: false` is the explicit opt-out.
+ */
+export function degradeReplayOf(workflow: Workflow): boolean {
+  const raw = (workflow.settings as unknown as Record<string, unknown> | undefined)?.[
+    'degradeReplay'
+  ]
+  if (typeof raw === 'boolean') return raw
+  return isGeneratedStrict(workflow)
 }

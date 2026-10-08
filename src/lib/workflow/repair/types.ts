@@ -303,6 +303,7 @@ export interface WorkflowPatchOperation {
     | 'INSERT_NODE'
     | 'REMOVE_NODE'
     | 'REWIRE_EDGE'
+    | 'SET_PAGE_CONTEXT_ORIGIN'
   path?: string
   before?: unknown
   after?: unknown

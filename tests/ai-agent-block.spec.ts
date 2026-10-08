@@ -180,6 +180,37 @@ describe('ai-agent executor', () => {
     expect(emit).not.toHaveBeenCalled()
   })
 
+  // Round 55 died at step 20/24 on `Stopped after 12 tool rounds`: `useSnapshot`
+  // defaults to true, and its prompt line ORDERS the agent to open with
+  // `snapshot_page`. A node that neither acts on the page nor targets an element is
+  // writing text from its prompt alone, so the only thing that instruction produced
+  // was a round budget spent looking at a page it had no business touching.
+  it('does not send a content-writing node off to snapshot the page', async () => {
+    configuredSettings()
+    runUnattended.mockResolvedValue({ ok: true, answer: '正文……' })
+    const { ctx } = makeCtx()
+    await EXECUTORS['ai-agent']!({ prompt: '写一篇推广正文', variableName: 'body' }, ctx)
+    const [prompt] = runUnattended.mock.calls[0] as [string]
+    expect(prompt).not.toContain('Start by calling snapshot_page')
+    expect(prompt).toContain('READ-ONLY')
+  })
+
+  it('keeps the snapshot instruction for a node that really acts on the page', async () => {
+    configuredSettings()
+    runUnattended.mockResolvedValue({ ok: true, answer: 'done' })
+    const tab = { id: 7, url: 'https://example.com/', title: 'x', active: true }
+    const { ctx } = makeCtx({
+      tabs: { get: vi.fn(async () => tab), query: vi.fn(async () => [tab]) },
+      scripting: { executeScript: vi.fn(async () => [{ result: { exists: false, text: '' } }]) },
+    })
+    await EXECUTORS['ai-agent']!(
+      { prompt: '把正文写进编辑区', actOnPage: true, variableName: 'r' },
+      ctx,
+    )
+    const [prompt] = runUnattended.mock.calls[0] as [string]
+    expect(prompt).toContain('Start by calling snapshot_page')
+  })
+
   it('runs read-only by default and stores the answer in the output variable', async () => {
     configuredSettings()
     runUnattended.mockResolvedValue({ ok: true, answer: 'all done' })
@@ -225,7 +256,7 @@ describe('ai-agent executor', () => {
     ctx.variables['name'] = 'Bob'
 
     await EXECUTORS['ai-agent']!(
-      { prompt: 'Do {{name}}', actOnPage: true, maxToolRounds: 8, useSnapshot: false },
+      { prompt: 'Do {{name}}', actOnPage: true, maxToolRounds: 30, useSnapshot: false },
       ctx,
     )
 
@@ -236,8 +267,31 @@ describe('ai-agent executor', () => {
       { maxToolRounds: number },
     ]
     expect(mode).toBe('full')
-    expect(options.maxToolRounds).toBe(8)
+    expect(options.maxToolRounds).toBe(30)
     expect(ctx.variables['lastAIAgent']).toBe('clicked')
+  })
+
+  it('raises a round budget too small to answer with', async () => {
+    // Two saved graphs shipped `maxToolRounds: 2`; each spent both rounds on
+    // `load_tools` + `use_skill`, so the loop stopped before any answer round and
+    // the node failed with "AI 智能体: 运行失败". A tool call and its answer are
+    // separate rounds, so a budget that leaves no room for the reply is a
+    // guaranteed failure — the floor is the fix, not a retry. Round 17 of the
+    // harness moved the floor to twelve: a node the generator inserted with 8
+    // rounds died the same way, mid-task, failing the replay at step 11/16.
+    configuredSettings()
+    runUnattended.mockResolvedValue({ ok: true, answer: 'titled' })
+    const { ctx } = makeCtx()
+
+    await EXECUTORS['ai-agent']!({ prompt: 'Write a title', maxToolRounds: 2 }, ctx)
+
+    const [, , , options] = runUnattended.mock.calls[0] as [
+      string,
+      string,
+      string,
+      { maxToolRounds: number },
+    ]
+    expect(options.maxToolRounds).toBe(12)
   })
 
   it('pins the nested unattended turn to the workflow window scope', async () => {

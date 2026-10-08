@@ -19,6 +19,7 @@ import { runUnattendedPrompt } from './agent-unattended'
 import { resolveUnattendedScope } from './window-policy'
 import { retain, release } from './keepalive'
 import { getWorkflow } from '../lib/workflow/storage'
+import { observeFirstRunOfRevision } from '../lib/workflow/replay-metrics'
 import { executeWorkflow } from './workflow-engine/run-workflow'
 import {
   addStep,
@@ -239,6 +240,16 @@ async function runWorkflowTask(task: ScheduledTask, tracked: RunningTask): Promi
     feishuChatId: tracked.feishuChatId,
     reuseRun: tracked,
     ...(scope ? { scopeWindowId: scope.windowId } : {}),
+  })
+  // An unattended run is as much an exam for a generated graph as the panel's
+  // Run button: without this, a workflow whose first replay came from a
+  // schedule would be graded by whichever later run happened to be clicked.
+  observeFirstRunOfRevision(workflow, {
+    outcome: outcome.outcome,
+    error: outcome.error,
+    summary: outcome.summary,
+    trace: outcome.trace,
+    degradations: outcome.degradations,
   })
   return {
     ok: outcome.outcome === 'ok',

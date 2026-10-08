@@ -872,6 +872,22 @@ describe('chat save-as-workflow flow', () => {
     }
 
     /**
+     * Workflow generation now confirms the workflow NAME before the task is
+     * dispatched: accept the suggested name so the turn actually posts.
+     * A no-op when the dialog is not up (name already confirmed).
+     */
+    const confirmWorkflowNameDialog = async (): Promise<void> => {
+      const start = [...document.body.querySelectorAll('button')].find(
+        (candidate) => candidate.textContent?.trim() === 'Start task',
+      )
+      if (!start) return
+      await act(async () => {
+        start.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
+      await flush()
+    }
+
+    /**
      * Renders the chat, sends one workflow-mode turn through the composer (the
      * send opens the loading dialog), then ends the turn: the save card pops
      * up as a modal the moment the task completes.
@@ -910,6 +926,7 @@ describe('chat save-as-workflow flow', () => {
         send!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       })
       await flush()
+      await confirmWorkflowNameDialog()
       // No loading dialog while the task runs — progress stays inline.
       expect(document.body.querySelector('[role="dialog"]')).toBeNull()
       await act(async () => {
@@ -952,6 +969,7 @@ describe('chat save-as-workflow flow', () => {
           send!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
         })
         await flush()
+        await confirmWorkflowNameDialog()
         // Turn ends: no save card yet, but the preparing popup is visible.
         await act(async () => {
           for (const listener of portMessageListeners) listener({ type: 'done' })

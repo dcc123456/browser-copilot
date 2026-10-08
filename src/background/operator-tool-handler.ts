@@ -27,7 +27,7 @@ import { isTriggerNode, triggerFromNodes } from '../lib/workflow/migrate'
 import { deleteDraft, loadDraft, saveDraft } from '../lib/workflow/draft-storage'
 import { TRIGGER_BLOCK_ID } from '../lib/workflow/draft-types'
 import { saveWorkflow } from '../lib/workflow/storage'
-import { deriveGoalSpecFromNodes } from '../lib/workflow/goal'
+import { deriveGoalSpecFromNodes, groundGoalSpecToGraph } from '../lib/workflow/goal'
 import { validateGeneratedWorkflow } from '../lib/workflow/generated-validation'
 import {
   coverageWarningLines,
@@ -38,6 +38,7 @@ import {
 import { isGeneratedStrict } from '../lib/workflow/reliability'
 import { locatorConcernLines } from '../lib/workflow/selector-probe'
 import { validateWorkflowForRun } from '../lib/workflow/validation'
+import { ensureNavigationAnchor, persistDefaultRetries } from '../lib/workflow/runnability'
 import { probeWorkflowLocators } from './selector-probe'
 import { declareMissingInputs } from '../lib/workflow/declare-missing-inputs'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
@@ -48,7 +49,9 @@ import { describeCondition } from '../lib/workflow/conditions'
 import {
   loadGenerationGoal,
   clearGenerationGoal,
+  clearConfirmedWorkflowName,
 } from '../lib/workflow/generation-goal-storage'
+import { isAcceptableWorkflowName, generateWorkflowName } from '../lib/workflow/generation-goal'
 import { formatRequirementRefusal, missingRequirements } from '../lib/workflow/block-requirements'
 import {
   isOperatorTool,
@@ -79,6 +82,11 @@ import {
 } from '../lib/workflow/dynamic-data'
 import { isAiComposedFill } from '../lib/workflow/ai-prefill'
 import type { Workflow, WorkflowNode } from '../lib/workflow/types'
+import type { TrialRunRecord } from '../lib/workflow/trial-run'
+import { trialFailed, draftGoalGapNotice } from '../lib/workflow/trial-run'
+import { recordedPageContext } from '../lib/workflow/page-context'
+import { withTrialRecord } from './workflow-engine/repair/generation-trial'
+import type { TrialRunner } from './workflow-engine/repair/generation-trial'
 
 export { TRIGGER_BLOCK_ID }
 export type { DraftSource, PendingBranch, WorkflowDraft }
@@ -427,7 +435,13 @@ export async function runOperatorTool({
   if (nameHint && draft.name.startsWith('workflow-')) draft.name = nameHint
 
   await persistDraft(draft)
-  return { ok: true, nodeId: appended.nodeId, workflowSize: appended.workflowSize }
+  const notice = draftGoalGapNotice(draft)
+  return {
+    ok: true,
+    nodeId: appended.nodeId,
+    workflowSize: appended.workflowSize,
+    ...(notice ? { note: notice } : {}),
+  }
 }
 
 /**
@@ -635,10 +649,20 @@ export function declareWorkflowInputs(
  * `triggerFromNodes` — `saveWorkflow` does not do that sync itself, and a
  * stale mirror would mis-route the alarm / context-menu / visit-web
  * registrations.
+ *
+ * `opts.trial` is the pre-save replay of the finished graph. Only a call that
+ * actually saves supplies it (reviewing a draft must never touch the page), and
+ * its result can only ever change what is RECORDED on the workflow — never
+ * whether it is saved.
  */
 export async function composeWorkflowFromDraft(
   conversationId: string,
-  opts: { name?: string; description?: string; save?: boolean } = {},
+  opts: {
+    name?: string
+    description?: string
+    save?: boolean
+    trial?: TrialRunner
+  } = {},
 ): Promise<{ workflow: Workflow; saved: boolean } | { error: string; issues?: string[] }> {
   const draft = draftStore.get(conversationId) ?? (await hydrateDraft(conversationId))
   if (actionNodesOf(draft).length === 0) {
@@ -665,25 +689,53 @@ export async function composeWorkflowFromDraft(
   // authoritative workflow goal; prefer it over a purely derived one and fill
   // the trigger description when empty. Rehydrate it in case the worker recycled.
   const preparedContract = await loadGenerationGoal(conversationId)
-  if (preparedContract) {
-    if (!draft.name || draft.name === 'New workflow') draft.name = preparedContract.name
+  // A name that is still the `workflow-xxxxxx` placeholder (or otherwise
+  // meaningless) must never survive into the saved workflow: the goal
+  // contract's name is authoritative — the user confirms it at task start.
+  if (preparedContract && (!draft.name || !isAcceptableWorkflowName(draft.name))) {
+    draft.name = preparedContract.name
   }
-  const name = (opts.name ?? '').trim() || draft.name || preparedContract?.name || 'New workflow'
-  if (preparedContract && triggerHead) {
-    const conditionsText = preparedContract.goalSpec.successConditions
-      .map((c) => describeCondition(c))
-      .join('; ')
-    const description = `${preparedContract.goalSpec.summary}${conditionsText ? ` | Success: ${conditionsText}` : ''}`
-    if (!triggerHead.data['description']) triggerHead.data['description'] = description
-    // Keep the machine-readable goal on the trigger so later edits stay in sync.
-    triggerHead.data['goalSpec'] = preparedContract.goalSpec
-  }
+  const name =
+    (opts.name ?? '').trim() ||
+    draft.name ||
+    preparedContract?.name ||
+    (goalText ? generateWorkflowName(goalText) : '') ||
+    'New workflow'
   const now = Date.now()
   // The pipeline already completed the reliability contract; only promote any
   // dangling {{reference}} to a declared run input (the user supplies it at
   // launch) instead of failing the data-flow check.
   declareMissingInputs(draft.nodes)
-  const workflow: Workflow = {
+  // The goal-first contract was written before this graph existed, so a row like
+  // 「变量 xiaohongshuTitle 存在」 can name a variable no node ever writes — and
+  // a replay of THIS graph could never satisfy it. Ground the goal in the graph
+  // and say out loud what that removed.
+  const grounded = preparedContract
+    ? groundGoalSpecToGraph(preparedContract.goalSpec, { name, nodes: draft.nodes })
+    : undefined
+  if (grounded && grounded.dropped.length > 0) {
+    console.warn(
+      `[workflow-generation] goal grounded to the graph: ${grounded.dropped.length} success ` +
+        `condition(s) name a variable this graph never mentions and were replaced: ` +
+        grounded.dropped.map((condition) => describeCondition(condition)).join('; '),
+    )
+  }
+  const goalSpec = grounded?.goalSpec ?? preparedContract?.goalSpec
+  const settingsGoalSpec = goalSpec ?? deriveGoalSpecFromNodes({ name, nodes: draft.nodes }, goalText)
+  if (goalSpec && triggerHead) {
+    const conditionsText = goalSpec.successConditions.map((c) => describeCondition(c)).join('; ')
+    const description = `${goalSpec.summary}${conditionsText ? ` | Success: ${conditionsText}` : ''}`
+    if (!triggerHead.data['description']) triggerHead.data['description'] = description
+    // Keep the machine-readable goal on the trigger so later edits stay in sync.
+    triggerHead.data['goalSpec'] = goalSpec
+  }
+  // The sites this generation actually acted on. A goal that spans origins —
+  // read a document on one, publish on another — produces a graph whose own
+  // first step would be refused by the page-context guard if the anchor stayed
+  // single-site, which is how a cross-site graph came to fail its pre-save
+  // verification in 6ms without executing a step.
+  const recordedContext = recordedPageContext(draft.originUrl, draft.actedOrigins)
+  let workflow: Workflow = {
     id: newId(),
     name,
     description: opts.description ?? '',
@@ -695,21 +747,30 @@ export async function composeWorkflowFromDraft(
       reuseLastState: false,
       provenance: draft.source === 'chat-generate' ? 'chat-generate' : 'chat-history',
       ...(draft.originUrl ? { generationOriginUrl: draft.originUrl } : {}),
-      // The reliability contract's goal: derived from what the graph can
-      // actually VERIFY (node postconditions). A graph without postconditions
-      // derives none — the generated validator then blocks the strict save
-      // instead of shipping a workflow that cannot state its own goal.
-      ...(preparedContract
-        ? { goalSpec: preparedContract.goalSpec }
-        : deriveGoalSpecFromNodes(draft, goalText)
-          ? { goalSpec: deriveGoalSpecFromNodes(draft, goalText) }
-          : {}),
+      ...(recordedContext ? { pageContext: recordedContext } : {}),
+      // The reliability contract's goal: the prepared goal, grounded to what the
+      // graph can actually VERIFY, or derived from its node postconditions. A
+      // graph without postconditions derives none — the generated validator then
+      // blocks the strict save instead of shipping a workflow that cannot state
+      // its own goal.
+      ...(settingsGoalSpec ? { goalSpec: settingsGoalSpec } : {}),
     },
     table: [],
     drawflow: { nodes: draft.nodes, edges: draft.edges },
     createdAt: now,
     updatedAt: now,
   }
+  // Replay anchor. The generation session acted on a page the user already had
+  // open, so the graph records interactions and no navigation — replayed
+  // tomorrow it would type into whichever tab happens to be active. Opening
+  // the recorded page first is the single biggest first-run fix available, and
+  // it is purely additive: no existing node is touched, and a graph that
+  // already navigates (or has no recorded origin) comes back untouched.
+  workflow = ensureNavigationAnchor(workflow)
+  // Replay pacing: every repeat-safe page step gets the short retry the model
+  // was during generation. Soft by construction — it only ever adds an
+  // attempt, and never re-fires a step that submits anything.
+  workflow = persistDefaultRetries(workflow)
   let saved = false
   // Non-blocking reliability / runnability findings (spec: saving must never
   // be blocked). Any run or generated-validation problems are recorded on the
@@ -743,8 +804,12 @@ export async function composeWorkflowFromDraft(
   // soft warnings — the workflow still saves — but the model/user is told the
   // graph may be missing what actually happened.
   {
+    // A block that failed during generation but whose step DID make it into
+    // the graph (a later successful call recovered it) is not a hole — the
+    // graph is not missing the step. Only report blocks with no node at all.
+    const draftBlocks = new Set(actionNodesOf(draft).map(blockIdOfNode))
     const coverage = coverageWarningLines({
-      failedBlockIds: failedBlockIdsOf(conversationId),
+      failedBlockIds: failedBlockIdsOf(conversationId).filter((id) => !draftBlocks.has(id)),
       recordOnlyBlockIds: actionNodesOf(draft)
         .map(blockIdOfNode)
         .filter(isRecordOnlyBlock),
@@ -768,10 +833,32 @@ export async function composeWorkflowFromDraft(
       }
     }
   }
+  // The pre-save trial replay: one bounded, real run of the finished graph,
+  // stopping in front of the first step that cannot be undone. It runs ONLY on
+  // a call that is about to save — materialising a draft for the review card
+  // must never move the user's page. Every outcome, including a failure, still
+  // saves: the trial buys evidence and a self-heal write-back, not a gate.
+  let trialRecord: TrialRunRecord | undefined
+  if (opts.save !== false && opts.trial) {
+    const trial = await opts.trial(workflow)
+    workflow = trial.workflow
+    trialRecord = trial.record
+    // The verdict is the whole point of running it. A graph whose own
+    // verification replay failed is still saved (a trial never gates), but it
+    // must not reach the user looking like a workflow that runs.
+    if (trialFailed(trialRecord)) {
+      const code = trialRecord.failureCode ? `[${trialRecord.failureCode}] ` : ''
+      const why = trialRecord.reason ? `：${trialRecord.reason}` : ''
+      saveWarnings.push(
+        `验证未通过 · 保存前的试重放在第 ${trialRecord.coveredSteps}/${trialRecord.totalSteps} 步失败 ${code}${why}`.trimEnd(),
+      )
+    }
+  }
   // Finish the stage reports: static validation + independent verification.
   generationStages.push(staticValidateStage(runErrorCount, generatedErrorCount))
-  generationStages.push(independentVerifyStage())
+  generationStages.push(independentVerifyStage(trialRecord))
   workflow.settings.generationStages = generationStages
+  if (trialRecord) workflow = withTrialRecord(workflow, trialRecord)
   if (saveWarnings.length > 0) {
     workflow.settings.saveWarnings = saveWarnings
   }
@@ -781,6 +868,9 @@ export async function composeWorkflowFromDraft(
       saved = true
       await clearDraft(conversationId)
       await clearGenerationGoal(conversationId)
+      // The confirmed name rode into the contract; drop it so the next
+      // generation task in this conversation asks for a fresh one.
+      await clearConfirmedWorkflowName(conversationId)
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) }
     }

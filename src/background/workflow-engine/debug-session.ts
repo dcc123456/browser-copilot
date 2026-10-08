@@ -64,6 +64,7 @@ export const WAIT_BLOCKS: readonly string[] = [
   // legacy ids (same executors, editor/recorder may emit either)
   'click',
   'fill',
+  'hover',
   'select-option',
   'set-checkbox',
   'scroll',

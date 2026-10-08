@@ -60,6 +60,15 @@ export interface RepairCandidate {
     workflow: Partial<Workflow>
   }
 
+  /**
+   * Workflow-level settings change (deterministic strategies only — the model
+   * response parser never fills it). Used by page-context reanchoring to move
+   * the recorded grounding to the site the graph actually navigates to.
+   */
+  settingsPatch?: {
+    pageContext?: { origin: string }
+  }
+
   expectedPostconditions: WorkflowCondition[]
 
   confidence?: number
@@ -80,6 +89,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 const STRATEGY_SET: ReadonlySet<RepairStrategy> = new Set<RepairStrategy>([
   'terminal-state-check',
   'readiness-recovery',
+  'page-context-reanchor',
   'locator-repair',
   'parameter-repair',
   'local-graph-repair',
@@ -390,6 +400,14 @@ export function applyRepairCandidate(workflow: Workflow, candidate: RepairCandid
       )
       changed.add(patch.source)
       changed.add(patch.target)
+    }
+  }
+
+  // Settings patch (deterministic strategies; merged key by key).
+  if (candidate.settingsPatch?.pageContext?.origin) {
+    clone.settings = {
+      ...clone.settings,
+      pageContext: { origin: candidate.settingsPatch.pageContext.origin },
     }
   }
 

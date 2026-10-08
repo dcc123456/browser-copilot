@@ -35,6 +35,7 @@ export type WorkflowFailureType =
   | 'INPUT_REJECTED'
   | 'INVALID_PARAMETER'
   | 'STATE_MISMATCH'
+  | 'PAGE_CONTEXT_MISMATCH'
   | 'POSTCONDITION_FAILED'
   | 'GOAL_NOT_SATISFIED'
   | 'WORKFLOW_GRAPH_INVALID'
@@ -60,6 +61,7 @@ export const WORKFLOW_FAILURE_TYPES: readonly WorkflowFailureType[] = [
   'INPUT_REJECTED',
   'INVALID_PARAMETER',
   'STATE_MISMATCH',
+  'PAGE_CONTEXT_MISMATCH',
   'POSTCONDITION_FAILED',
   'GOAL_NOT_SATISFIED',
   'WORKFLOW_GRAPH_INVALID',
@@ -103,6 +105,7 @@ const TYPE_POLICY: Record<WorkflowFailureType, FailureTypePolicy> = {
   INPUT_REJECTED: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
   INVALID_PARAMETER: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
   STATE_MISMATCH: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
+  PAGE_CONTEXT_MISMATCH: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
   POSTCONDITION_FAILED: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
   GOAL_NOT_SATISFIED: { retryable: false, autoRepairable: true, unsafeToRetry: true, humanGate: false },
   WORKFLOW_GRAPH_INVALID: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
@@ -142,6 +145,7 @@ export function allowsImmediateHumanTakeover(type: WorkflowFailureType): boolean
  */
 const MESSAGE_RULES: ReadonlyArray<{ pattern: RegExp; type: WorkflowFailureType }> = [
   { pattern: /SIDE_EFFECT_UNKNOWN|side effect.*unknown|副作用结果未知|结果未知.*拒绝自动重放/i, type: 'SIDE_EFFECT_UNKNOWN' },
+  { pattern: /\bWRONG_(ORIGIN|PAGE)\b|wrong (origin|page)|不是该工作流的目标站点|页面上下文不匹配/i, type: 'PAGE_CONTEXT_MISMATCH' },
   { pattern: /\bMFA\b|multi[\s-]?factor|2FA|两步验证|二次验证|验证码(?!.*captcha)/i, type: 'MFA_REQUIRED' },
   { pattern: /captcha|人机验证|安全验证/i, type: 'CAPTCHA_REQUIRED' },
   { pattern: /auth(entication)? required|login required|sign[\s-]?in required|需要登录|请先登录|未登录/i, type: 'AUTH_REQUIRED' },
@@ -161,7 +165,14 @@ const MESSAGE_RULES: ReadonlyArray<{ pattern: RegExp; type: WorkflowFailureType 
   { pattern: /navigation timeout|navigate.*timeout|NAVIGATION_TIMEOUT|导航超时/i, type: 'NAVIGATION_TIMEOUT' },
   { pattern: /page not ready|not ready|PAGE_NOT_READY|WAIT_CONDITION_UNMET|页面(未|没有)(就绪|加载完成)|尚未加载/i, type: 'PAGE_NOT_READY' },
   { pattern: /input rejected|rejected input|INPUT_REJECTED|输入被拒绝/i, type: 'INPUT_REJECTED' },
-  { pattern: /invalid parameter|invalid argument|missing required|INVALID_PARAMETER|参数(无效|缺失|不合法)/i, type: 'INVALID_PARAMETER' },
+  {
+    // An `ai-agent` block whose tool-round budget ran out before the answer round
+    // — the fix is a parameter on that node (a bigger budget, a shorter task), so
+    // it must enter the parameter-repair ladder rather than read as an unknown.
+    pattern: /stopped after \d+ tool rounds|tool-round budget|ran out of rounds/i,
+    type: 'INVALID_PARAMETER',
+  },
+  { pattern: /invalid parameter|invalid argument|missing required|INVALID_PARAMETER|UNRESOLVED_INPUT|unresolved input|参数(无效|缺失|不合法)/i, type: 'INVALID_PARAMETER' },
   { pattern: /state mismatch|unexpected state|STATE_MISMATCH|状态(不一致|不匹配)/i, type: 'STATE_MISMATCH' },
 ]
 
@@ -203,6 +214,14 @@ export function classifyFailure(input: ClassifyFailureInput): ClassifiedFailure 
   // 1. Structured code.
   if (input.code && isWorkflowFailureType(input.code)) {
     return { type: input.code, basis: 'structured-code', policy: TYPE_POLICY[input.code] }
+  }
+  if (input.code) {
+    // A structured code from the older runner vocabulary (WRONG_ORIGIN,
+    // TARGET_NOT_FOUND …) still beats message-pattern guessing.
+    const legacy = fromVerificationFailure(input.code)
+    if (legacy !== 'UNKNOWN') {
+      return { type: legacy, basis: 'structured-code', policy: TYPE_POLICY[legacy] }
+    }
   }
   // 2. Known error mapping (message patterns).
   const message = input.message ?? ''
@@ -255,6 +274,11 @@ export function fromVerificationFailure(code: string): WorkflowFailureType {
     case 'VARIABLE_EMPTY':
     case 'VARIABLE_TYPE_ERROR':
       return 'INVALID_PARAMETER'
+    case 'UNRESOLVED_INPUT':
+      // The graph references a declared input nobody supplied. It is a parameter
+      // the run was missing, not a broken step: classified `UNKNOWN` it walked the
+      // whole locator ladder and repaired nothing.
+      return 'INVALID_PARAMETER'
     case 'CONTRACT_VIOLATION':
     case 'PRECONDITION_FAILED':
       return 'STATE_MISMATCH'
@@ -264,7 +288,7 @@ export function fromVerificationFailure(code: string): WorkflowFailureType {
       return 'GOAL_NOT_SATISFIED'
     case 'WRONG_ORIGIN':
     case 'WRONG_PAGE':
-      return 'STATE_MISMATCH'
+      return 'PAGE_CONTEXT_MISMATCH'
     case 'SIDE_EFFECT_UNSAFE':
       return 'SIDE_EFFECT_UNKNOWN'
     case 'AUTH_REQUIRED':
@@ -296,6 +320,7 @@ export function fromFailureKind(kind: string): WorkflowFailureType {
     case 'page-state':
       return 'STATE_MISMATCH'
     case 'wrong-origin':
+      return 'PAGE_CONTEXT_MISMATCH'
     case 'navigation':
       return 'NAVIGATION_TIMEOUT'
     case 'side-effect':

@@ -22,7 +22,7 @@ vi.mock('../src/background/driver', () => ({
 vi.mock('../src/background/automation-scope', () => ({
   normalScopeFromWindowId: vi.fn(async () => undefined),
 }))
-vi.mock('../src/lib/workflow/blocks/palette', () => ({ BLOCK_BY_ID: new Map() }))
+vi.mock('../src/lib/workflow/blocks/palette', () => ({ BLOCK_BY_ID: new Map(), PALETTE_BLOCKS: [] }))
 
 import { executeWorkflow } from '../src/background/workflow-engine/run-workflow'
 import { getRun, listRunning, startRun } from '../src/background/running-tasks'

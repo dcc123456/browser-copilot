@@ -121,6 +121,43 @@ describe('durable checkpoint persistence', () => {
     expect(await readPersistedCheckpoints('missing', area)).toEqual([])
   })
 
+  it('caps the durable copy by bytes, keeping the newest checkpoints', async () => {
+    const area = fakeArea()
+    const budget = 300
+    const store = createChromeCheckpointStore({ area, maxPersistedBytes: budget })
+    for (let i = 0; i < 6; i++) store.save(cp('r1', i, 'ok'))
+    await flush()
+
+    const persisted = await readPersistedCheckpoints('r1', area)
+    const steps = persisted.map((entry) => entry.stepIndex)
+    expect(steps[steps.length - 1]).toBe(5)
+    expect(steps.length).toBeLessThan(6)
+    // A contiguous NEWEST suffix, not a sample: resume scans backward and
+    // needs the state of the last clean step.
+    expect(steps).toEqual(Array.from({ length: steps.length }, (_, k) => 6 - steps.length + k))
+    expect(JSON.stringify(persisted).length).toBeLessThanOrEqual(budget)
+    // The in-memory hot path is untouched by the persist budget.
+    expect(store.load('r1').map((entry) => entry.stepIndex)).toEqual([0, 1, 2, 3, 4, 5])
+  })
+
+  it('skips the durable write when one checkpoint is already too big, and still runs', async () => {
+    const area = fakeArea()
+    const store = createChromeCheckpointStore({ area, maxPersistedBytes: 500 })
+    // A step that put a base64 image into the variable bag: the snapshot alone
+    // is larger than the whole budget.
+    store.save({
+      runId: 'r1',
+      stepIndex: 0,
+      status: 'ok',
+      variables: { image: 'data:image/png;base64,' + 'A'.repeat(4000) },
+      at: 1000,
+    })
+    await flush()
+
+    expect(area.data.has(checkpointKey('r1'))).toBe(false)
+    expect(store.latest('r1')?.variables.image).toContain('data:image/png;base64,')
+  })
+
   it('clearPersistedCheckpoints removes only that run', async () => {
     const area = fakeArea()
     await area.set({ [checkpointKey('r1')]: [cp('r1', 0, 'ok')] })

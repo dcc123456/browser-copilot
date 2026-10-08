@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildSystemPrompt, TOOLS } from '../src/background/agent'
+import { advertiseTools, BRIDGE_ONLY_TOOLS, buildSystemPrompt, TOOLS } from '../src/background/agent'
 import { DEFAULT_SYSTEM_PROMPT } from '../src/lib/system-prompt'
 import { TOOL_META, TOOL_META_BY_NAME_MERGED } from '../src/lib/tool-catalog'
 
@@ -114,6 +114,25 @@ describe('tool catalog', () => {
       expect(meta.labelKey).toBeTruthy()
       expect(meta.warningKey).toBeTruthy()
       expect(meta.labelKey).not.toBe(meta.warningKey)
+    }
+  })
+
+  it('never advertises a bridge-only tool to the model', () => {
+    // `generate_workflow` starts a whole generation turn and `verify_workflow`
+    // executes a saved graph. Both exist for the local-agent bridge: offered
+    // mid-turn, the first lets the agent recurse into itself and the second runs
+    // a workflow against the page that nobody in that conversation asked for.
+    const surfaces: Parameters<typeof advertiseTools>[0][] = [
+      { mode: 'full' },
+      { mode: 'workflow' },
+      {
+        mode: 'workflow',
+        loadedGroups: new Set(['operators_author', 'operators_escape']),
+      },
+    ]
+    for (const options of surfaces) {
+      const names = advertiseTools(options).map((tool) => tool.function.name)
+      for (const bridgeOnly of BRIDGE_ONLY_TOOLS) expect(names).not.toContain(bridgeOnly)
     }
   })
 })

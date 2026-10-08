@@ -31,6 +31,19 @@ describe('failure classification', () => {
     expect(classifyFailure({ message: 'element not visible' }).type).toBe('ELEMENT_NOT_VISIBLE')
   })
 
+  it('routes an exhausted AI round budget into parameter repair', () => {
+    // The message an `ai-agent` block now throws when its tool rounds ran out
+    // before the answer round. It is a node parameter, not a mystery, so the
+    // repair ladder must be allowed to propose a patch for it.
+    const result = classifyFailure({
+      message:
+        "AI 智能体: Stopped after 2 tool rounds to avoid a loop. The turn ran out of rounds before it produced a final answer — raise the block's tool-round budget or shorten its task.",
+    })
+    expect(result.type).toBe('INVALID_PARAMETER')
+    expect(result.basis).toBe('message-pattern')
+    expect(failureTypePolicy(result.type).autoRepairable).toBe(true)
+  })
+
   it('uses structured codes as the strongest basis', () => {
     const result = classifyFailure({
       message: 'something else',
@@ -51,5 +64,43 @@ describe('failure classification', () => {
     expect(fromVerificationFailure('GOAL_NOT_ACHIEVED')).toBe('GOAL_NOT_SATISFIED')
     expect(fromFailureKind('locator-not-found')).toBe('ELEMENT_NOT_FOUND')
     expect(fromFailureKind('readiness')).toBe('PAGE_NOT_READY')
+  })
+
+  it('reads a missing declared input as a parameter, not as an unknown graph defect', () => {
+    // Round 8: `UNRESOLVED_INPUT: {{topic}}` classified `UNKNOWN`, so the repair
+    // ladder treated a value the CALLER never supplied as a locator defect and
+    // spent its whole attempt budget on it. Both routes have to say the same
+    // thing: the snapshot classifies from the trace's code, the trial record from
+    // the message text.
+    expect(fromVerificationFailure('UNRESOLVED_INPUT')).toBe('INVALID_PARAMETER')
+    const result = classifyFailure({ message: 'UNRESOLVED_INPUT: {{topic}}' })
+    expect(result.type).toBe('INVALID_PARAMETER')
+    expect(result.basis).toBe('message-pattern')
+    expect(failureTypePolicy(result.type).retryable).toBe(false)
+  })
+
+  it('classifies the page-context guard as PAGE_CONTEXT_MISMATCH', () => {
+    const guardMessage =
+      'WRONG_ORIGIN: 当前页面（https://creator.xiaohongshu.com）不是该工作流的目标站点（https://github.com）'
+    const result = classifyFailure({ message: guardMessage })
+    expect(result.type).toBe('PAGE_CONTEXT_MISMATCH')
+    expect(result.basis).toBe('message-pattern')
+    expect(classifyFailure({ message: 'WRONG_PAGE: 页面路径（/settings）不符合预期（/docs/*）' }).type).toBe(
+      'PAGE_CONTEXT_MISMATCH',
+    )
+    // A structured legacy code beats message guessing.
+    const structured = classifyFailure({ message: 'something else', code: 'WRONG_ORIGIN' })
+    expect(structured.type).toBe('PAGE_CONTEXT_MISMATCH')
+    expect(structured.basis).toBe('structured-code')
+    expect(fromVerificationFailure('WRONG_PAGE')).toBe('PAGE_CONTEXT_MISMATCH')
+    expect(fromFailureKind('wrong-origin')).toBe('PAGE_CONTEXT_MISMATCH')
+  })
+
+  it('treats a page-context mismatch as ordinary auto-repair, never a human gate', () => {
+    const policy = failureTypePolicy('PAGE_CONTEXT_MISMATCH')
+    expect(policy.autoRepairable).toBe(true)
+    expect(policy.humanGate).toBe(false)
+    expect(policy.unsafeToRetry).toBe(false)
+    expect(allowsImmediateHumanTakeover('PAGE_CONTEXT_MISMATCH')).toBe(false)
   })
 })

@@ -14,6 +14,10 @@
 
 import { Plus, Trash2 } from 'lucide-react'
 import type { WorkflowCondition } from '../../lib/workflow/conditions'
+import {
+  conditionTargetName,
+  withConditionTargetName,
+} from '../../lib/workflow/element-fingerprint'
 import type { TranslateFn } from '../i18n'
 
 /** Condition kinds offered in the manual editor. */
@@ -58,7 +62,7 @@ function blankCondition(kind: string): WorkflowCondition {
 /** Read the accessible-name field off a locator-bearing condition. */
 function nameOf(condition: WorkflowCondition): string {
   if (!('target' in condition)) return ''
-  return condition.target.accessibleName ?? condition.target.text ?? ''
+  return conditionTargetName(condition.target)
 }
 
 function ConditionRow({
@@ -74,7 +78,7 @@ function ConditionRow({
 }) {
   const setName = (accessibleName: string) => {
     if (!('target' in condition)) return
-    onPatch({ ...condition, target: { ...condition.target, accessibleName } })
+    onPatch({ ...condition, target: withConditionTargetName(condition.target, accessibleName) })
   }
 
   return (

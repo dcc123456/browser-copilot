@@ -1,0 +1,58 @@
+{
+  "id": "replay-invoice-chain",
+  "name": "replay smoke: pay the flagged invoice",
+  "createdAt": 1700000000000,
+  "updatedAt": 1700000000000,
+  "revision": 1,
+  "settings": {
+    "saveLog": false,
+    "debugMode": false,
+    "notification": false,
+    "reuseLastState": true,
+    "provenance": "chat-generate",
+    "reliabilityMode": "generated-strict",
+    "defaultWaitMs": 4000,
+    "generationOriginUrl": "__BASE__/invoices"
+  },
+  "drawflow": {
+    "nodes": [
+      {
+        "id": "t",
+        "label": "trigger",
+        "position": { "x": 0, "y": 0 },
+        "data": { "blockId": "trigger" }
+      },
+      {
+        "id": "open",
+        "label": "new-tab",
+        "position": { "x": 1, "y": 0 },
+        "data": { "blockId": "new-tab", "url": "__BASE__/invoices" }
+      },
+      {
+        "id": "pay",
+        "label": "click",
+        "position": { "x": 2, "y": 0 },
+        "data": {
+          "blockId": "click",
+          "selector": "button.pay",
+          "target": {
+            "primary": { "how": "css", "value": "button.pay" },
+            "fallbacks": [{ "how": "testid", "value": "pay-invoice-3" }],
+            "label": "Pay button of invoice A3"
+          }
+        }
+      },
+      {
+        "id": "read",
+        "label": "get-text",
+        "position": { "x": 3, "y": 0 },
+        "data": { "blockId": "get-text", "selector": "#echo" }
+      }
+    ],
+    "edges": [
+      { "id": "e0", "source": "t", "target": "open" },
+      { "id": "e1", "source": "open", "target": "pay" },
+      { "id": "e2", "source": "pay", "target": "read" }
+    ]
+  }
+}

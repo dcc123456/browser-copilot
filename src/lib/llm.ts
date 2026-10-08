@@ -95,6 +95,7 @@ export function toApiMessages(messages: readonly WireMessage[]): unknown[] {
     if (message.content.trim().length > 0) {
       parts.push({ type: 'text', text: message.content })
     }
+    const shedNames: string[] = []
     for (const attachment of message.attachments) {
       if (isImageAttachment(attachment)) {
         // Narrowed by isImageAttachment; asserted for the discriminated union.
@@ -105,7 +106,19 @@ export function toApiMessages(messages: readonly WireMessage[]): unknown[] {
           type: 'text',
           text: `[Attachment: ${attachment.name}]\n\`\`\`\`\n${attachment.content}\n\`\`\`\``,
         })
+      } else if (attachment.mimeType.startsWith('image/')) {
+        // An image whose bytes the persist budget dropped (see `lib/storage`).
+        shedNames.push(attachment.name)
       }
+    }
+    if (parts.length === 0 && shedNames.length > 0) {
+      // An empty content array is only ever produced here for an attachment the
+      // provider cannot see; say what is missing rather than send a turn with no
+      // content, which some providers reject outright.
+      parts.push({
+        type: 'text',
+        text: `[Image attachment no longer available: ${shedNames.join(', ')}]`,
+      })
     }
     return { role: 'user', content: parts }
   })

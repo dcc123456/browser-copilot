@@ -149,6 +149,11 @@ export const EDITOR_STRINGS = {
     fallbackBranch: 'Execute the fallback branch',
     errorMessageOptional: 'Error message (optional)',
     defaultErrorMessage: 'Default error message',
+    // — run-level background AI repair (toolbar chip) —
+    repairRunning: 'AI repairing…',
+    repairSuccess: 'Repaired',
+    repairFailed: 'Repair failed',
+    repairCancel: 'Cancel repair',
     // — per-node AI fix —
     nodeFixButton: 'AI Fix',
     nodeFixTitle: 'AI Fix this block',
@@ -308,6 +313,11 @@ export const EDITOR_STRINGS = {
     fallbackBranch: '执行回退分支',
     errorMessageOptional: '错误信息（可选）',
     defaultErrorMessage: '使用默认错误信息',
+    // — run-level background AI repair (toolbar chip) —
+    repairRunning: 'AI 正在修复…',
+    repairSuccess: '已修复',
+    repairFailed: '修复失败',
+    repairCancel: '取消修复',
     // — per-node AI fix —
     nodeFixButton: 'AI 修复',
     nodeFixTitle: 'AI 修复此算子',
@@ -360,6 +370,7 @@ const BLOCK_FORM_STRINGS = {
     'CSS selector': 'CSS 选择器',
     'CSS Selector or XPath': 'CSS 选择器或 XPath',
     'Find element by': '查找元素方式',
+    'Text to match': '要匹配的文本（精确匹配该可见文本的叶子元素）',
     'Selector options': '选择器选项',
     'Select multiple elements': '选择多个元素',
     'Mark the element on execution': '执行时标记元素',

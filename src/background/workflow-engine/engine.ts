@@ -11,22 +11,39 @@
 
 import type { Workflow, WorkflowEdge, WorkflowNode } from '../../lib/workflow/types'
 import { getWorkflow } from '../../lib/workflow/storage'
-import { interpolateParams } from '../../lib/workflow/interpolate'
+import { interpolateParams, UNRESOLVED_INTERP_KEY } from '../../lib/workflow/interpolate'
+import { conditionGroupsMatch, hasConditionGroups } from '../../lib/workflow/condition-tree'
 import {
   ambiguityPolicyOf,
+  degradeReplayOf,
   idempotencyOf,
+  isDismissStep,
   isGeneratedStrict,
+  goalSpecOf,
   nodeReliabilityOf,
   STRICT_MIN_MARGIN,
   STRICT_MIN_SCORE,
 } from '../../lib/workflow/reliability'
-import { describeCondition } from '../../lib/workflow/conditions'
-import { checkPageContext, pageContextOf } from '../../lib/workflow/page-context'
+import { nodeGoalContractOf } from '../../lib/workflow/node-goal-contract'
+import {
+  conditionRequiresBaseline,
+  describeCondition,
+  isHardCondition,
+  type WorkflowCondition,
+} from '../../lib/workflow/conditions'
+import type { ConditionBaseline } from './condition-runtime'
+import { provesLandedEffect } from '../../lib/workflow/repair-verification'
+import type { NodeDegradation } from '../../lib/workflow/self-heal'
+import {
+  checkPageContext,
+  navigationDestinationOf,
+  pageContextOf,
+} from '../../lib/workflow/page-context'
 import { ELEMENT_OP_BLOCKS } from '../../lib/workflow/generated-validation'
 import type { DebugStepLine } from '../../lib/workflow/auto-debug-patch'
 import type { ScopeWindow } from '../automation-scope'
 import type { BlockExecutor, WorkflowExecCtx } from './executors'
-import { EXECUTORS } from './executors'
+import { EXECUTORS, targetFrom } from './executors'
 import { LoopBreakpointError } from './loop-breakpoint'
 import {
   prepareNodeExecution,
@@ -76,6 +93,14 @@ export type AiTakeoverHook = (request: AiTakeoverRequest) => Promise<AiTakeoverO
 export interface WorkflowRunOptions {
   /** Node id to start from. Defaults to the first trigger or, failing that, the first node. */
   startAt?: string
+  /**
+   * Stop the run BEFORE executing this node — the graph is still walked from
+   * the start, and reaching the cutoff is a SUCCESS (`outcome: 'ok'`), not a
+   * failure. Used by the pre-save trial replay, which proves the steps a
+   * replay can repeat and refuses to re-fire the first step that cannot
+   * (submit / send / login), see `lib/workflow/reliability.idempotencyOf`.
+   */
+  stopBefore?: string
   /** Initial runtime variables. */
   variables?: Record<string, unknown>
   /** Shared abort signal; aborting requests a `'cancelled'` outcome. */
@@ -97,10 +122,32 @@ export interface WorkflowRunOptions {
   /**
    * Evaluates one reliability condition against the live page + variables
    * (generated-strict pre/postconditions). Absent → conditions are skipped.
+   *
+   * `baseline` is the page's before-state for the conditions that describe a
+   * CHANGE; the engine captures it (via
+   * {@link WorkflowRunOptions.captureConditionBaseline}) while the step is about
+   * to run, because afterwards there is nothing left to compare against.
    */
   evaluateCondition?: (
-    condition: import('../../lib/workflow/conditions').WorkflowCondition,
+    condition: WorkflowCondition,
+    baseline?: ConditionBaseline,
   ) => Promise<boolean>
+  /**
+   * Observe the pre-step page for conditions that need it. Absent → the
+   * change-conditions report as unevaluated instead of being guessed.
+   */
+  captureConditionBaseline?: (
+    conditions: readonly WorkflowCondition[],
+  ) => Promise<ConditionBaseline | undefined>
+  /**
+   * The goal-level capture: the same pre-run observation, plus the values the
+   * goal's OTHER rows quote (a text row's words, a visible row's state). Absent
+   * → the goal baseline falls back to {@link captureConditionBaseline}, which
+   * remembers only the change rows' before-state.
+   */
+  captureGoalBaseline?: (
+    conditions: readonly WorkflowCondition[],
+  ) => Promise<ConditionBaseline | undefined>
   /**
    * Observes the CURRENT page (url/title) for the page-context guard (§11).
    * Absent → no guard. Refreshed whenever the automation tab changes.
@@ -216,6 +263,44 @@ export interface WorkflowRunResult {
   variables?: Record<string, unknown>
   /** Tail of the run's step lines (oldest last), for the same evidence. */
   steps?: DebugStepLine[]
+  /**
+   * Nodes whose locator had to degrade to act (see `lib/workflow/self-heal`).
+   * Empty on a run where every step resolved cleanly.
+   */
+  degradations?: NodeDegradation[]
+  /**
+   * Soft conditions that did not hold: the step ran, the page just did not
+   * confirm the outcome the generator predicted. The run still succeeded —
+   * these are the reasons it cannot be called VERIFIED, and what a later
+   * repair reads as the trigger to widen a step.
+   */
+  conditionWarnings?: string[]
+  /**
+   * Conditions observed while their own step was still the page in front of the
+   * run, keyed by node. The certification layer reads a step's promise from here
+   * instead of re-asking a page the run has already navigated away from.
+   */
+  nodeConditions?: NodeConditionEvidence[]
+  /**
+   * Set when the run stopped at a {@link WorkflowRunOptions.stopBefore} cutoff
+   * instead of reaching the end of the graph — the caller needs to know that
+   * 'ok' means "the prefix it asked for ran", not "the workflow finished".
+   */
+  stoppedBefore?: string
+  /**
+   * The page as it stood BEFORE the first step, for the goal's success rows.
+   * Captured at the only moment it exists, so the certification layer can read
+   * both 「the draft list grew」 and 「this text row was already on the page before
+   * the run」 instead of skipping the row.
+   */
+  goalBaseline?: ConditionBaseline
+}
+
+/** One condition the run observed at the step that declared it. */
+export interface NodeConditionEvidence {
+  nodeId: string
+  description: string
+  satisfied: boolean
 }
 
 /** Guards against infinite/long loops in mis-wired graphs. */
@@ -273,7 +358,7 @@ function onErrorPolicy(params: Record<string, unknown>): OnErrorPolicy | null {
   if (wantsRetry && interval > 0 && interval < 60) interval = interval * 1000
   return {
     ...p,
-    toDo: wantsRetry ? 'retry' : p.toDo === 'continue' ? 'error' : (p.toDo ?? 'error'),
+    toDo: wantsRetry ? 'retry' : (p.toDo ?? 'error'),
     retryInterval: interval,
   }
 }
@@ -370,6 +455,7 @@ function buildExecCtx(
   setTab: (id: number) => void,
   scope: ScopeWindow | undefined,
   reliability: WorkflowExecCtx['reliability'],
+  getRunLog: () => string[],
 ): WorkflowExecCtx {
   return {
     variables,
@@ -379,6 +465,7 @@ function buildExecCtx(
     defaultNext,
     tabId,
     setTab,
+    getRunLog,
     ...(scope ? { scope } : {}),
     ...(reliability ? { reliability } : {}),
     emit: (kind, text) => onStep(kind, currentId, text),
@@ -412,6 +499,7 @@ async function runCore(
 ): Promise<WorkflowRunResult> {
   const {
     startAt,
+    stopBefore,
     variables = {},
     signal,
     scope,
@@ -427,6 +515,8 @@ async function runCore(
     aiTakeover,
     readinessProbe,
     evaluateCondition,
+    captureConditionBaseline,
+    captureGoalBaseline,
     getPageContext,
     onSubWorkflow,
   } = options
@@ -452,6 +542,9 @@ async function runCore(
     ? {
         mode: 'generated-strict',
         ambiguity: ambiguityPolicyOf(workflow),
+        // Score first; where the score alone would refuse the match, walk down
+        // the node's recorded candidate chain and report the rung that won.
+        degrade: degradeReplayOf(workflow),
         minScore: STRICT_MIN_SCORE,
         minMargin: STRICT_MIN_MARGIN,
       }
@@ -477,7 +570,45 @@ async function runCore(
   }
   const signalToUse = signal ?? new AbortController().signal
 
+  // A goal row that describes a CHANGE — the draft list grew, the dialog closed —
+  // is readable only against the page as it was BEFORE the run, and after the run
+  // that moment is gone. The certification layer used to skip such rows outright,
+  // which left the standing page furniture (小红书 shows 「草稿箱(100)」 whether or not
+  // this run saved anything) as the only row that could ever certify a draft goal.
+  const goalConditions = goalSpecOf(workflow)?.successConditions ?? []
+  // When the caller can observe what the goal rows QUOTE, the before-page is
+  // taken for every goal: a text row that held before the run describes the site,
+  // not this run, and only a snapshot tells the two apart. Callers that only
+  // remember the change rows' before-state keep the narrower, cheaper snapshot.
+  const readGoalBaseline = captureGoalBaseline ?? captureConditionBaseline
+  const wantGoalBaseline =
+    goalConditions.length > 0 &&
+    (captureGoalBaseline !== undefined || goalConditions.some(conditionRequiresBaseline))
+  const goalBaseline =
+    wantGoalBaseline && readGoalBaseline ? await readGoalBaseline(goalConditions) : undefined
+
   const completedNodeIds: string[] = []
+  /**
+   * Nodes that had to fall down the locator ladder to act at all. Reported to
+   * the caller so the same node does not degrade on every future replay —
+   * see `lib/workflow/self-heal`.
+   */
+  const degradations: NodeDegradation[] = []
+  /** Soft conditions that did not hold — see {@link WorkflowRunResult.conditionWarnings}. */
+  const conditionWarnings: string[] = []
+  /**
+   * Every condition the run actually got an answer to, observed AT the step that
+   * promised it — see {@link WorkflowRunResult.nodeConditions}.
+   */
+  const nodeConditions: NodeConditionEvidence[] = []
+  const observed = (nodeId: string, description: string): boolean =>
+    nodeConditions.some((e) => e.nodeId === nodeId && e.description === description)
+  const recordCondition = (nodeId: string, description: string, satisfied: boolean): void => {
+    if (observed(nodeId, description)) return
+    nodeConditions.push({ nodeId, description, satisfied })
+  }
+  /** Set when a `stopBefore` cutoff ended the run (see {@link WorkflowRunResult}). */
+  let stoppedBefore: string | undefined
   let outcome: WorkflowRunResult['outcome'] = 'ok'
   let summary: string | undefined
   let error: string | undefined
@@ -535,12 +666,80 @@ async function runCore(
     Object.assign(target, from)
   }
 
+  /**
+   * Check a node's declared conditions with HARD / SOFT semantics
+   * (`lib/workflow/conditions`' `isHardCondition`).
+   *
+   * A hard condition is a fact the step can be held to (the variable it should
+   * have produced, the checkbox that must now be ticked): failing one fails the
+   * node, exactly as before.
+   *
+   * A soft condition is a PREDICTION about the business outcome — the generator
+   * wrote "a row appears in .list" and the page filed it under a class name that
+   * has since changed. The step it describes was performed; the executor said
+   * so. Failing the node on that prediction is how a workflow that works gets
+   * thrown away, so a soft miss is reported on the run log, recorded as the
+   * reason this run cannot be called verified, and handed to the repair layer as
+   * the thing to look at. It never throws.
+   */
+  const checkNodeConditions = async (
+    conditions: readonly WorkflowCondition[],
+    phase: 'precondition' | 'postcondition',
+    nodeId: string,
+    baseline?: ConditionBaseline,
+  ): Promise<void> => {
+    if (!evaluateCondition) return
+    for (const condition of conditions) {
+      const description = describeCondition(condition)
+      const satisfied = await evaluateCondition(condition, baseline)
+      recordCondition(nodeId, description, satisfied)
+      if (satisfied) continue
+      if (isHardCondition(condition)) {
+        throw new Error(`${phase.toUpperCase()}_FAILED: ${description}`)
+      }
+      conditionWarnings.push(`${nodeId}: ${description}`)
+      emit('status', nodeId, `条件未确认（${description}），本步已执行但运行未获验证`)
+    }
+  }
+
+  /**
+   * Observe the step's OWN goal contract at the moment it is still true or false
+   * for the right reason.
+   *
+   * A contract row names an element on the page THAT STEP stood on; by the end of
+   * the run the page has moved on (saving a draft navigates away from the title
+   * input), and a certification layer re-reading it then reports a step that
+   * worked as unverified — round 76 replayed 13/13 and was refused on exactly
+   * that. Recording the observation here costs the verifier no independence it
+   * could otherwise have used: an end-of-run re-read of a gone element is not
+   * evidence, it is an artifact.
+   */
+  const observeNodeContract = async (node: WorkflowNode, baseline?: ConditionBaseline): Promise<void> => {
+    if (!evaluateCondition) return
+    const contract = nodeGoalContractOf(node.data ?? {})
+    if (!contract) return
+    for (const condition of contract.successCriteria) {
+      const description = describeCondition(condition)
+      if (observed(node.id, description)) continue
+      const satisfied = await evaluateCondition(condition, baseline).catch(() => false)
+      recordCondition(node.id, description, satisfied)
+    }
+  }
+
   /** Run exactly one node; returns the next node id or `null` to finish. */
   async function runNode(nodeId: string): Promise<string | null> {
     if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
 
     const current = nodeById.get(nodeId)
     if (!current) return null
+    // Trial-replay cutoff: reaching it is the run succeeding at what it was
+    // asked to prove. Checked BEFORE the node is entered, so the step the
+    // caller ruled out for side effects is never touched.
+    if (stopBefore && nodeId === stopBefore) {
+      stoppedBefore = nodeId
+      emit('status', nodeId, '试跑在此步骤前停止：该步骤会提交或发送内容，不能重复执行')
+      return null
+    }
     currentNodeId = nodeId
 
     // Emit a per-block marker so run logs show every block entered, even ones
@@ -650,6 +849,7 @@ async function runCore(
       },
       scope,
       reliability,
+      () => stepLines.map((line) => line.text),
     )
     const policy = onErrorPolicy(params)
 
@@ -668,8 +868,18 @@ async function runCore(
       pageActing &&
       pageContextCheckedForTab !== (targetTabId ?? undefined)
     ) {
-      const current = await getPageContext()
-      const verdict = checkPageContext(expectedPageContext, current ?? {})
+      // A block that navigates of its own accord is judged on its DESTINATION,
+      // not on the stale current tab — otherwise the first step of a workflow
+      // that opens the grounded site is rejected as "wrong origin".
+      const destination = navigationDestinationOf(blockId, params)
+      const current = destination
+        ? { url: destination }
+        : ((await getPageContext()) ?? {})
+      const verdict = checkPageContext(
+        expectedPageContext,
+        current,
+        destination ? { label: '导航目标' } : {},
+      )
       if (!verdict.ok) {
         throw new Error(`${verdict.code}: ${verdict.message}`)
       }
@@ -684,9 +894,17 @@ async function runCore(
     // whose declared postconditions ALREADY hold must not re-fire — the goal
     // end state is there, and re-executing a submit/login to "prove" it is
     // the exact bug class the contract forbids. Skip the node, log why.
-    if (unsafe && reliability && evaluateCondition && unsafeSpec?.postconditions?.length) {
+    //
+    // Only a condition that can PROVE a landed effect may justify the skip. A
+    // URL is on the address bar whether or not this step ever ran — and the
+    // model writes `urlContains /publish/` for a button that lives ON the
+    // publish page — so reading it as "already applied" would delete the step's
+    // action while reporting it covered. Same predicate the repair ladder uses
+    // at S0 for the same reason.
+    const terminalProof = (unsafeSpec?.postconditions ?? []).filter(provesLandedEffect)
+    if (unsafe && reliability && evaluateCondition && terminalProof.length) {
       let terminalStateHolds = true
-      for (const condition of unsafeSpec.postconditions) {
+      for (const condition of terminalProof) {
         if (!(await evaluateCondition(condition))) {
           terminalStateHolds = false
           break
@@ -726,6 +944,22 @@ async function runCore(
     }
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
+        // An unresolved `{{token}}` must never reach the page. Generation put
+        // business DATA there (the keyword it searched, the name it typed), so
+        // the literal braces make the page search for "{{keyword}}" — a step
+        // that appears to work and silently does the wrong thing, taking every
+        // later step to the wrong page with it. Failing the NODE with the
+        // token's name is both the honest outcome and the actionable one, and
+        // throwing INSIDE the loop keeps this on the same path as any other
+        // node failure: retry, fallback, continue and AI takeover all apply.
+        // The saved workflow is untouched, and a declared input seeded with its
+        // recorded default never gets here.
+        if (pageActing) {
+          const unresolved = params[UNRESOLVED_INTERP_KEY]
+          if (Array.isArray(unresolved) && unresolved.length > 0) {
+            throw new Error(`UNRESOLVED_INPUT: {{${unresolved.join('}}, {{')}}}`)
+          }
+        }
         if (attempt > 0 && beforeNode) restoreVariables(variables, beforeNode)
         // Generated-strict readiness: the page must be READY before the action
         // (§7), re-checked on every attempt — a retry re-observes, it does not
@@ -735,11 +969,21 @@ async function runCore(
         // action (spec §8.3). A failed precondition throws before the page is
         // touched — the retry path re-observes instead of blindly re-acting.
         const nodeSpec = nodeReliabilityOf(current)
-        if (reliability && evaluateCondition && nodeSpec?.preconditions?.length) {
-          for (const condition of nodeSpec.preconditions) {
-            if (await evaluateCondition(condition)) continue
-            throw new Error(`PRECONDITION_FAILED: ${describeCondition(condition)}`)
-          }
+        if (reliability && nodeSpec?.preconditions?.length) {
+          await checkNodeConditions(nodeSpec.preconditions, 'precondition', nodeId)
+        }
+        // What the step is supposed to CHANGE can only be judged against the
+        // page as it was before the step, so this is the last moment to look.
+        // Captured per attempt: a retry's "before" is the page the failed
+        // attempt left, which is what its own postconditions must be read
+        // against.
+        let conditionBaseline: ConditionBaseline | undefined
+        if (
+          reliability &&
+          captureConditionBaseline &&
+          nodeSpec?.postconditions?.some(conditionRequiresBaseline)
+        ) {
+          conditionBaseline = await captureConditionBaseline(nodeSpec.postconditions)
         }
         if (reliability && readinessProbe) {
           const before = await prepareNodeExecution({
@@ -747,10 +991,23 @@ async function runCore(
             blockId,
             params,
             nodeSelector: String(params['selector'] ?? params['cssSelector'] ?? ''),
+            // The chain the executor below is about to use — a wait that probed
+            // less than this could not see a text/role-located node at all.
+            nodeTarget: targetFrom(params),
             signal: signalToUse,
             probe: readinessProbe,
+            vars: variables,
           })
           if (!before.ok) {
+            // A cleanup step that finds nothing to clean up did its job: the
+            // drawer it was closing is not on the page. Skip it instead of
+            // failing the run (see `isDismissStep`).
+            if (isDismissStep(current) && (before.state === 'present' || before.state === 'visible')) {
+              emit('status', nodeId, '页面上没有该浮层，无需关闭，跳过该节点')
+              completedNodeIds.push(nodeId)
+              emitCheckpoint(nodeId, 'ok', unsafe ? 'nodeCommitted' : undefined)
+              return defaultNext
+            }
             throw new Error(`READINESS_TIMEOUT(${before.state}): ${before.detail ?? '页面未就绪'}`)
           }
         }
@@ -764,8 +1021,10 @@ async function runCore(
             blockId,
             params,
             nodeSelector: String(params['selector'] ?? params['cssSelector'] ?? ''),
+            nodeTarget: targetFrom(params),
             signal: signalToUse,
             probe: readinessProbe,
+            vars: variables,
           })
           if (!after.ok) {
             throw new Error(
@@ -774,15 +1033,41 @@ async function runCore(
           }
         }
         // Generated-strict postconditions: the step's own claim about what its
-        // success MEANS (spec §8). "Executor returned" is not "the step worked" —
-        // only the declared facts make it so.
-        if (reliability && evaluateCondition && nodeSpec?.postconditions?.length) {
-          for (const condition of nodeSpec.postconditions) {
-            if (await evaluateCondition(condition)) continue
-            throw new Error(`POSTCONDITION_FAILED: ${describeCondition(condition)}`)
-          }
+        // success MEANS (spec §8). "Executor returned" is not "the step worked".
+        // Only the hard subset (variable / attribute facts) can fail a node —
+        // a business-outcome observation that misses is a warning that marks
+        // the run unverified, never a reason to throw away a working replay.
+        if (reliability && nodeSpec?.postconditions?.length) {
+          await checkNodeConditions(
+            nodeSpec.postconditions,
+            'postcondition',
+            nodeId,
+            conditionBaseline,
+          )
         }
+        await observeNodeContract(current, conditionBaseline)
         if (unsafe) emitCheckpoint(nodeId, 'ok', 'sideEffectObserved')
+        // The step ran on a weaker locator than the node was authored with.
+        // Collected for the caller's self-heal write-back; the run log says it
+        // out loud so a "success" never hides a guess.
+        const degrade = ctx.lastResolution?.degrade
+        if (degrade) {
+          // The per-candidate score table stays in the run log: the write-back
+          // needs the decision, not the whole ballot.
+          degradations.push({
+            nodeId,
+            rung: degrade.rung,
+            from: degrade.from,
+            to: degrade.to,
+            matchCount: degrade.matchCount,
+          })
+          emit(
+            'status',
+            nodeId,
+            `定位降级（第 ${degrade.rung} 级）：${degrade.from} → ${degrade.to}` +
+              `（${degrade.matchCount} 个候选元素）`,
+          )
+        }
         succeeded = true
         break
       } catch (e) {
@@ -963,16 +1248,77 @@ async function runCore(
     const label = blockIdOf(loopNode)
 
     if (label === 'loop-data') {
+      // The editor's "Loop through" select offers Table / Numbers / Variable /
+      // Elements / Custom data / Google Sheets, but this path only ever parsed
+      // `loopData` — so every mode except custom JSON iterated zero items and
+      // the run reported 成功 with an empty loop. The legacy shape (a JSON array
+      // in `data`/`loopData` with no mode chosen) still wins, so graphs saved
+      // before this keep working.
+      const legacy = String(params['data'] ?? params['loopData'] ?? '').trim()
+      const through = String(params['loopThrough'] ?? '').trim()
       let items: unknown[] = []
-      try {
-        // `loopData` is the catalog + tool-schema key; `data` is the engine
-        // shape. Reading only the latter made a generated loop iterate nothing.
-        const parsed = JSON.parse(String(params['data'] ?? params['loopData'] ?? '[]'))
-        if (Array.isArray(parsed)) items = parsed
-      } catch {
-        emit('error', loopNode.id, 'loop-data: 数据解析失败')
+      let unsupported = ''
+      if (legacy !== '' && legacy !== '[]' && through !== 'elements') {
+        try {
+          const parsed = JSON.parse(legacy)
+          if (Array.isArray(parsed)) items = parsed
+        } catch {
+          emit('error', loopNode.id, 'loop-data: 数据解析失败')
+          return null
+        }
+      } else if (through === 'numbers') {
+        const from = Math.floor(Number(params['fromNumber'] ?? 1))
+        const to = Math.floor(Number(params['toNumber'] ?? 10))
+        if (Number.isFinite(from) && Number.isFinite(to)) {
+          for (let n = from; from <= to ? n <= to : n >= to; n += from <= to ? 1 : -1) items.push(n)
+        }
+      } else if (through === 'data-columns') {
+        items = Array.isArray(variables['dataTable'])
+          ? (variables['dataTable'] as unknown[])
+          : []
+      } else if (through === 'variable') {
+        const name = String(params['variableName'] ?? '').trim()
+        const value = name === '' ? undefined : variables[name]
+        if (Array.isArray(value)) items = value
+        else if (typeof value === 'string' && value.trim() !== '') {
+          try {
+            const parsed = JSON.parse(value)
+            items = Array.isArray(parsed) ? parsed : [parsed]
+          } catch {
+            items = [value]
+          }
+        } else if (value !== undefined && value !== null) items = [value]
+        if (name === '') unsupported = `loop-data: 循环来源是「变量」但没有填 variableName`
+      } else if (through === 'google-sheets') {
+        unsupported = 'loop-data: Google Sheets 循环需要 OAuth 凭据，尚未配置'
+      }
+      if (unsupported !== '') {
+        emit('error', loopNode.id, unsupported)
         return null
       }
+      if (params['reverseLoop'] === true) items = items.slice().reverse()
+      const cap = Math.floor(Number(params['maxLoop'] ?? 0))
+      if (Number.isFinite(cap) && cap > 0 && items.length > cap) items = items.slice(0, cap)
+
+      if (through === 'elements') {
+        const selector = String(params['elementSelector'] ?? params['selector'] ?? '')
+        const count = loopElementCounter ? await loopElementCounter(selector, signalToUse) : 0
+        emit('status', loopNode.id, `遍历 ${count} 个元素`)
+        if (startId === null) return endId
+        for (let i = 0; i < count; i++) {
+          if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
+          variables['loopIndex'] = i
+          variables['loopItem'] = null
+          variables['loopElementSelector'] = loopElementSelector
+            ? ((await loopElementSelector(selector, i, signalToUse)) ?? '')
+            : ''
+          const seg = await runLoopBody(loopNode, startId)
+          if (seg === 'failed') return null
+          if (seg === 'break') return endId
+        }
+        return endId
+      }
+
       emit('status', loopNode.id, `开始循环，共 ${items.length} 项`)
       if (startId === null) return endId
       for (let i = 0; i < items.length; i++) {
@@ -1003,10 +1349,28 @@ async function runCore(
     }
 
     if (label === 'while-loop') {
-      const code = String(params['code'] ?? 'false')
+      // The editor stores the condition as a builder tree on `conditions`; the
+      // generated/chat shape is a `code` expression. Reading only the latter
+      // made an editor-built while-loop iterate zero times and report 成功.
+      const tree = paramsOf(loopNode)['conditions'] ?? loopNode.data?.['conditions']
+      const code = String(params['code'] ?? '')
+      const runConditionCode = (source: string): unknown => {
+        if (evaluateExpression) return evaluateExpression(source, variables)
+        try {
+          return new Function('vars', `return (${source})`)(variables)
+        } catch {
+          return false
+        }
+      }
+      const test = async (): Promise<boolean> => {
+        if (hasConditionGroups(tree)) return conditionGroupsMatch(tree, { vars: variables, runCode: runConditionCode })
+        if (code !== '') return evalCondition(code, variables, evaluateExpression)
+        emit('error', loopNode.id, 'while-loop: 没有配置条件，循环不会执行')
+        return false
+      }
       if (startId === null) return endId
       let iterations = 0
-      while (await evalCondition(code, variables, evaluateExpression)) {
+      while (await test()) {
         if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
         variables['loopIndex'] = iterations
         const seg = await runLoopBody(loopNode, startId)
@@ -1138,5 +1502,10 @@ async function runCore(
     ...(error ? { error } : {}),
     variables,
     steps: stepLines.slice(-40),
+    degradations,
+    conditionWarnings,
+    ...(nodeConditions.length ? { nodeConditions } : {}),
+    ...(stoppedBefore ? { stoppedBefore } : {}),
+    ...(goalBaseline ? { goalBaseline } : {}),
   }
 }

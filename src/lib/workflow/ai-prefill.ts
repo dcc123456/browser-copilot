@@ -77,11 +77,21 @@ export interface AiPrefillNodeData extends Record<string, unknown> {
   selector: ''
   actOnPage: false
   useSnapshot: false
-  maxToolRounds: 8
+  maxToolRounds: 20
   variableName: string
   /** The conversation's literal, kept for the save-card toggle's fallback. */
   referenceValue: string
 }
+
+/**
+ * The round budget a prefill node gets: the `ai-agent` block's own default (20),
+ * not a smaller one. A round that calls a tool spends itself and the answer only
+ * arrives in the NEXT round, so a cap sized to the calls the node "should" make
+ * ends the turn with nothing stored. The harness measured exactly that: the 8
+ * these nodes used to carry ran out mid-task on replay and failed the graph at
+ * step 11/16 — a node the generator inserted, never ran, and under-budgeted.
+ */
+const AI_PREFILL_TOOL_ROUNDS = 20
 
 /** Build the `ai-agent` node data for one prefill insertion. */
 export function aiPrefillNodeData(options: {
@@ -96,7 +106,7 @@ export function aiPrefillNodeData(options: {
     selector: '',
     actOnPage: false,
     useSnapshot: false,
-    maxToolRounds: 8,
+    maxToolRounds: AI_PREFILL_TOOL_ROUNDS,
     variableName: options.variableName,
     referenceValue: options.referenceValue,
   }

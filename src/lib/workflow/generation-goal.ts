@@ -128,8 +128,10 @@ const OBJECT_RULES: ReadonlyArray<{ test: RegExp; en: string; zh: string }> = [
   { test: /(发票|invoice)/i, en: 'Invoice', zh: '发票' },
 ]
 
-/** Names that must never be accepted. */
-const FORBIDDEN_NAMES = /^(workflow-[a-z0-9]+|new workflow|test|untitled|未命名工作流)$/i
+/** Names that must never be accepted. The `workflow-…` branch covers the
+ *  per-conversation draft placeholder (`workflow-${conversationId.slice(0, 6)}`),
+ *  whose tail can itself contain hyphens (e.g. `workflow-c-trig`). */
+const FORBIDDEN_NAMES = /^(workflow-[a-z0-9-]+|new workflow|test|untitled|未命名工作流)$/i
 
 /** Whether a candidate name is acceptable (meaningful, not a placeholder). */
 export function isAcceptableWorkflowName(name: string): boolean {

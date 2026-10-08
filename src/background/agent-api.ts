@@ -22,6 +22,14 @@
  * - `{ id, type: 'prompt', prompt, token? }` → run a full unattended agent turn
  *   in full-auto mode and return its final answer.
  *
+ * Three tools outrun the adapter's response timeout, and all three are start/poll
+ * pairs: `generate_workflow` runs a whole generation turn against a live page,
+ * `verify_workflow` replays a saved one, `repair_workflow` replays it and runs the
+ * autonomous repair loop when a step fails before measuring it again. Call any of
+ * them with its starting argument (`prompt` / `workflowId`) to get a
+ * `conversationId`, then with that `conversationId` until the run reports
+ * `settled`.
+ *
  * `id` lets the WS client correlate a reply to its request; the processor below
  * does not echo it back — the WS client wraps the response with the request's
  * `id` when sending it.
@@ -41,6 +49,13 @@ import { newId } from '../lib/storage'
 import type { Settings } from '../lib/types'
 import { TOOLS, runToolStandalone } from './agent'
 import { runUnattendedPrompt } from './agent-unattended'
+import {
+  readGenerationRun,
+  startGenerationRun,
+  startRepairRun,
+  startVerificationRun,
+} from './workflow-generation-bridge'
+import { takeoverProviderOf } from '../lib/workflow/ai-takeover'
 import { resolveBridgeTarget, type BridgeIdentity } from './window-policy'
 import { execOnActiveTab, resolveAutomationTab } from './driver'
 
@@ -55,6 +70,69 @@ function unboundAgentError(identity: BridgeIdentity): string {
     `连接「${who}」还没有分配浏览器窗口：请在要让它操作的窗口打开插件面板，在“本地 Agent 接入”里把该连接分配给本窗口后重试。 ` +
     `The connection "${who}" is not assigned to a browser window yet. Open Browser Copilot in the window it should use, assign this connection to that window under Local agent access, then retry.`
   )
+}
+
+/**
+ * How long the reply gets to reach the socket before the worker is torn down.
+ * `chrome.runtime.reload()` kills this service worker, and with it the
+ * WebSocket carrying the answer, so the reload is scheduled rather than
+ * awaited: the caller sends the envelope, then Chrome restarts the extension
+ * and the client redials.
+ */
+const RELOAD_FLUSH_MS = 300
+
+/**
+ * Handles the bridge's `reload_extension` call.
+ *
+ * Two conditions, both already local-only: the setting the user flips once
+ * (`localAgentAllowReload`, off by default) and a literal `confirm` argument so
+ * a stray or replayed request cannot restart the worker. Everything else about
+ * the connection is gated upstream (loopback URL, `localAgentEnabled`, optional
+ * shared token, window assignment).
+ *
+ * `settings` is the connection's live copy, refreshed by `agentClient.sync()` on
+ * every `settings.set` — which is how ticking the switch while a self-test waits
+ * on a reload unsticks it without reconnecting the bridge.
+ */
+function reloadExtensionForBridge(
+  args: Record<string, unknown>,
+  settings: Settings,
+): ExternalAgentResponse {
+  if (!settings.localAgentAllowReload) {
+    return {
+      ok: false,
+      error:
+        'reload_extension 已被拒绝：请在插件设置 →「本地 Agent 接入」里开启“允许本地 agent 重载扩展（开发者）”。 ' +
+        'reload_extension refused: enable "Let the local agent reload the extension (developer)" under Local agent access in the plugin settings.',
+    }
+  }
+  // Listed in the settings tool catalogue like every advertised tool, so
+  // switching it off there has to actually stop it.
+  if (settings.disabledTools.includes('reload_extension')) {
+    return {
+      ok: false,
+      error:
+        'reload_extension 已在设置的工具列表里被关闭。reload_extension is disabled in Settings → Tools.',
+    }
+  }
+  if (args['confirm'] !== 'reload') {
+    return {
+      ok: false,
+      error: 'reload_extension needs {confirm:"reload"} — it restarts the service worker.',
+    }
+  }
+  setTimeout(() => chrome.runtime.reload(), RELOAD_FLUSH_MS)
+  return {
+    ok: true,
+    data: {
+      reloading: true,
+      version: chrome.runtime.getManifest().version,
+      build: __BUILD_STAMP__,
+      // The bridge drops with the worker; a caller that waits for this to come
+      // back is waiting for the new build, not for this reply.
+      note: 'the extension reloads now and the bridge reconnects on its own; poll tools.list until it answers',
+    },
+  }
 }
 
 /**
@@ -118,6 +196,58 @@ export type ExternalAgentRequest =
 
 /** Replies the plugin returns to the local adapter. */
 export type ExternalAgentResponse = { ok: true; data?: unknown } | { ok: false; error: string }
+
+/**
+ * Read the `closeTabsAtEnd` opt-in off a generation/verify/repair call.
+ *
+ * Only a literal `true` counts, and the count is the caller's decision, not a
+ * setting: a harness that re-runs a graph twenty times knows it is the one that
+ * has to clean up afterwards.
+ */
+function closeTabsArg(args: Record<string, unknown>): { closeTabsAtEnd?: boolean } {
+  return args['closeTabsAtEnd'] === true ? { closeTabsAtEnd: true } : {}
+}
+
+/**
+ * Read the `commitCutoffOnly` opt-in off a verify/repair call.
+ *
+ * Off unless the caller says so explicitly, and the generation-time trial never
+ * gets it: a graph being saved is not the moment to fire its side effects, but a
+ * replay someone asked for by id is theirs to decide about.
+ */
+function commitCutoffArg(args: Record<string, unknown>): {
+  commitCutoffOnly?: boolean
+  allowDraftCommit?: boolean
+} {
+  return {
+    ...(args['commitCutoffOnly'] === true ? { commitCutoffOnly: true } : {}),
+    ...(args['allowDraftCommit'] === true ? { allowDraftCommit: true } : {}),
+  }
+}
+
+/**
+ * Read the `inputs` map off a verify/repair call.
+ *
+ * Primitives only, and only under a non-empty string key: these become the run's
+ * variable scope, and a caller that sent an object, an array or `__proto__` would
+ * otherwise be handing the graph a value no executor was written to read. A
+ * malformed map is dropped rather than partially applied — a replay that ran with
+ * half the inputs it asked for is worse evidence than one that ran with none.
+ */
+function inputsArg(args: Record<string, unknown>): { inputs?: Record<string, unknown> } {
+  const raw = args['inputs']
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (key.trim() === '') return {}
+    // Assigned into a plain object, so these three names would write the
+    // prototype rather than a variable.
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') return {}
+    if (value === null || typeof value === 'object') return {}
+    out[key] = value
+  }
+  return Object.keys(out).length > 0 ? { inputs: out } : {}
+}
 
 /**
  * Processes one request from the local adapter. Synchronous validation first,
@@ -184,11 +314,11 @@ export async function processAgentRequest(
   const identity: BridgeIdentity = {
     agentId:
       'agentId' in req && typeof (req as { agentId?: unknown }).agentId === 'string'
-        ? ((req as { agentId: string }).agentId)
+        ? (req as { agentId: string }).agentId
         : undefined,
     agentName:
       'agentName' in req && typeof (req as { agentName?: unknown }).agentName === 'string'
-        ? ((req as { agentName: string }).agentName)
+        ? (req as { agentName: string }).agentName
         : undefined,
   }
 
@@ -201,7 +331,10 @@ export async function processAgentRequest(
 
     case 'tools.list':
       await warmupAutomation(identity)
-      return { ok: true, data: { tools: TOOLS } }
+      // `build` is the hash of the sources this worker was compiled from: a
+      // self-test compares it with its own checkout to learn whether the browser
+      // picked up the build, instead of trusting that a reload took effect.
+      return { ok: true, data: { tools: TOOLS, build: __BUILD_STAMP__ } }
 
     case 'tool': {
       if (!req.tool || typeof req.tool !== 'string') {
@@ -217,6 +350,102 @@ export async function processAgentRequest(
         // agent's window.
         const { scope, unbound } = await resolveBridgeTarget(identity)
         if (unbound) return { ok: false, error: unboundAgentError(identity) }
+        // Developer affordance, handled before anything touches a tab: a local
+        // self-test rebuilds `dist` and needs the new code running, and the only
+        // alternative is a human clicking reload in chrome://extensions.
+        if (req.tool === 'reload_extension') return reloadExtensionForBridge(args, settings)
+        // Generation mode is a whole turn, not a tool call: `runToolStandalone`
+        // gives every call a fresh conversation, so a bridge caller could never
+        // accumulate the `wf_op_*` draft its own `compose_workflow` expects.
+        // That entry runs the turn and closes the draft in one shot;
+        // `verify_workflow` is its sibling — one replay of a graph that is
+        // already saved — and `repair_workflow` replays that graph and hands a
+        // failing replay to the autonomous repair loop before measuring it again.
+        //
+        // All three are the long-running kind, so all three are split into start
+        // + poll: either outlasts the bridge's own response timeout, and a reply
+        // that arrives after that timeout is discarded. The distinguishing
+        // argument starts a run and hands back its id; `conversationId` reads
+        // that run.
+        if (
+          req.tool === 'generate_workflow' ||
+          req.tool === 'verify_workflow' ||
+          req.tool === 'repair_workflow'
+        ) {
+          const poll = (args as { conversationId?: unknown }).conversationId
+          if (typeof poll === 'string' && poll.trim() !== '') {
+            return { ok: true, data: await readGenerationRun(poll) }
+          }
+          if (req.tool === 'generate_workflow') {
+            const prompt = (args as { prompt?: unknown }).prompt
+            if (typeof prompt !== 'string' || prompt.trim() === '') {
+              return {
+                ok: false,
+                error:
+                  'generate_workflow needs a non-empty `prompt` to start a run, or a `conversationId` to read one.',
+              }
+            }
+            const handle = startGenerationRun({
+              prompt,
+              ...(scope ? { scopeWindowId: scope.windowId } : {}),
+              ...closeTabsArg(args),
+            })
+            // The envelope reports the call was handled; the run's own verdict is
+            // on the `result` the poll returns — same shape as every other tool
+            // result here, and a failed generation still carries its evidence.
+            return { ok: true, data: handle }
+          }
+          const workflowId = (args as { workflowId?: unknown }).workflowId
+          if (typeof workflowId !== 'string' || workflowId.trim() === '') {
+            return {
+              ok: false,
+              error: `${req.tool} needs the \`workflowId\` of a saved workflow to start, or a \`conversationId\` to read a run.`,
+            }
+          }
+          const budgetMs = (args as { budgetMs?: unknown }).budgetMs
+          const run = {
+            workflowId,
+            ...(scope ? { scopeWindowId: scope.windowId } : {}),
+            ...(typeof budgetMs === 'number' && budgetMs > 0 ? { budgetMs } : {}),
+            ...closeTabsArg(args),
+            ...commitCutoffArg(args),
+            ...inputsArg(args),
+          }
+          if (req.tool === 'verify_workflow') {
+            return { ok: true, data: startVerificationRun(run) }
+          }
+          // The repair loop reads no settings of its own, so the model it consults
+          // per candidate patch is resolved here — the same takeover provider the
+          // panel's run button uses.
+          //
+          // Listed in the settings tool catalogue like every advertised tool, and
+          // this one WRITES (it commits new revisions), so switching it off there
+          // has to actually stop it.
+          if (settings.disabledTools.includes('repair_workflow')) {
+            return {
+              ok: false,
+              error:
+                'repair_workflow 已在设置的工具列表里被关闭。repair_workflow is disabled in Settings → Tools.',
+            }
+          }
+          const model = takeoverProviderOf(settings)
+          return {
+            ok: true,
+            data: startRepairRun({
+              ...run,
+              ...(model
+                ? {
+                    model: {
+                      apiKey: model.apiKey,
+                      baseUrl: model.baseUrl,
+                      model: model.model,
+                      headers: model.headers,
+                    },
+                  }
+                : {}),
+            }),
+          }
+        }
         const result = await runToolStandalone(req.tool, args, scope)
         return { ok: true, data: result }
       } catch (error) {

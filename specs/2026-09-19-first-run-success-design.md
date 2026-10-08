@@ -114,6 +114,8 @@
 | `tests/chat-save-dialog.spec.tsx`（扩展） | 生成保存带 `fromGeneration`、验证运行默认不发、勾选后发一次 `workflows.debug` 且 id 正确 |
 | `tests/visible-failure.spec.ts` / `read-page.spec.ts` | 空读失败契约测试补小窗口（轮询后语义不变，只是更晚失败） |
 | `tests/operator-param-coverage.spec.ts` | 分析器正则补 `async function`（`pollRead` 曾对它不可见）；`attribute-value`/`get-text` 的 `waitForSelector` 出惰性清单 |
+| `tests/workflow-from-history.spec.ts`（扩展，§7） | 四种 scroll mode 的编译产物：top/bottom 为大增量、滚窗写 `html`、元素滚动保留 selector+target |
+| `tests/workflow-run-validation.spec.ts`（扩展，§7） | 空操作滚动只 warning 不阻塞；`press-key` 缺键仍是 error（分级未泛化） |
 
 ## 5. 明确不做
 
@@ -127,3 +129,24 @@
 - 历史编译路径的 `generationOriginUrl` 只有 host 级精度。
 - 未锚定警告按节点数组顺序判断，不遍历边（生成图是单链，手编多分支图的首个元素动作
   语义上仍成立）。
+
+## 7. 后续修复（2026-09-27）：滚动节点不得阻塞整图
+
+现场反馈：生成的工作流点运行即报
+`无法运行该工作流：· 节点 "Scroll element" 缺少必填参数 parameters：缺少滚动目标…`，
+整个图一个节点都跑不了。定位到两处独立成因，分别修：
+
+- **编译**（`lib/storage.ts` `blockDataFromArgs` 的 `scroll` 分支）：agent 的
+  `mode:'top'` 被编译成 `scrollX:0 / scrollY:0`——既是一个空操作节点，又正好触发运行
+  闸门。改为极值用大增量表达（top `-100000` / bottom `+100000`，`scrollBy` 在边缘自然
+  截断），并显式写出滚动主体：有 `selector` 就滚该元素，否则 `selector:'html'`
+  表意"滚窗口"。富 `target` 只在 selector 存在时随带——agent 的滚轮滚动从不作用于
+  元素，记录它等于记录一个没发生过的动作。
+- **闸门分级**（`block-requirements.ts` + `validation.ts`）：`RequirementProblem` 新增
+  `severity`，`'error'`（默认，步骤根本不可执行）阻塞运行，`'warning'`（步骤可执行、
+  只是没意义）只上报。`element-scroll` 的"既无定位也无增量"降级为 warning：一个空操作
+  节点不值得废掉用户已经保存的整条工作流。录制期闸门（模型还在场、可以立刻改调用）
+  两种 severity 一律照旧拒绝。
+
+这与 §D 的取向一致：失败面收窄到"这一节点没做事"，而不是扩大到"整图拒绝运行"。生成
+成功率不受影响（保存路径本来就不读这道闸门）。

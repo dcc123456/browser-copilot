@@ -62,6 +62,8 @@ import {
 } from '../lib/workflow/operator-categories'
 import type { BlockCategory } from '../lib/workflow/blocks/types'
 import { composeWorkflowFromDraft } from './operator-tool-handler'
+import { executeWorkflow } from './workflow-engine/run-workflow'
+import { createTrialRunner } from './workflow-engine/repair/generation-trial'
 import { runOperatorToolWithExecution } from './operator-tool-run'
 import type { AgentServerMessage, TurnTokenUsage } from '../lib/messages'
 import { notifySkillsChanged } from '../lib/messages'
@@ -154,17 +156,20 @@ import {
   isAcceptableWorkflowName,
   normalizeGenerationGoalContract,
 } from '../lib/workflow/generation-goal'
+// Static, not dynamic: a dynamic `await import()` in the MV3 service worker
+// throws `window is not defined` (see CHANGELOG 0.6.3 get-secret fix).
+import { normalizeGoalSpec } from '../lib/workflow/goal'
+import { conditionTargetIsNamed, describeCondition } from '../lib/workflow/conditions'
+import { provesLandedEffect } from '../lib/workflow/repair-verification'
+import { goalAsksForDraftSave } from '../lib/workflow/trial-run'
 import {
   saveGenerationGoal,
   loadGenerationGoal,
+  loadConfirmedWorkflowName,
 } from '../lib/workflow/generation-goal-storage'
 import { findWorkflowOperators } from '../lib/workflow/operator-discovery'
-import {
-  evaluateJsPermission,
-} from '../lib/workflow/capability-gap'
+import { evaluateJsPermission } from '../lib/workflow/capability-gap'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
-
-
 
 /**
  * Tools that change something and therefore always need approval.
@@ -222,6 +227,17 @@ const READ_TOOLS = new Set([
  */
 export function isPageAction(name: string): boolean {
   return ACTION_TOOLS.has(name) || isOperatorTool(name)
+}
+
+/**
+ * Does this tool only OBSERVE — read the page, take a picture of it, list tabs
+ * or requests? It changes nothing, so an unattended turn with no human to click
+ * approve may run it without asking. `screenshot` / `recognize_image` count as
+ * observations even though they sit in {@link ACTION_TOOLS} for the plan gate's
+ * purposes; the same reasoning that exempts them there exempts them here.
+ */
+export function isObservationTool(name: string): boolean {
+  return READ_TOOLS.has(name) || PLAN_PHASE_READS.has(name)
 }
 
 /**
@@ -340,8 +356,7 @@ export function buildSystemPrompt(options: {
     // the exception — its EXECUTION phase is where other saved skills apply,
     // so the catalogue stays visible alongside it and the model can load a
     // matching skill per approved step via `use_skill`.
-    const catalogueVisible =
-      !options.activeSkill || options.activeSkill.name === PLAN_SKILL_NAME
+    const catalogueVisible = !options.activeSkill || options.activeSkill.name === PLAN_SKILL_NAME
     if (catalogueVisible && options.catalogue && options.catalogue.length > 0) {
       const catalogue = renderSkillCatalogue(options.catalogue)
       if (catalogue) parts.push(catalogue)
@@ -378,12 +393,38 @@ export function buildSystemPrompt(options: {
       [
         'OPERATING MODE: WORKFLOW GENERATE / 工作流生成.',
         'Every step is a WORKFLOW OPERATOR call (`wf_op_*`). Each successful call really operates the page AND records the node, so the draft you build IS the workflow — the native action tools (`click` / `fill` / `open_url` / …) are not offered here because they would record nothing.',
-        `ALL OPERATORS ARE AVAILABLE / 全部算子已可见: every \`wf_op_*\` category schema is advertised from the first round — pick the operator that fits the step, no declaration needed. ${CORE_OPERATOR_TOOL_NAMES.join(', ')} are the usual starters (navigate, click, fill-or-read a field, read text). If the payload must be slimmed mid-task, call \`use_operators\` with only the categories you still need — it REPLACES the current selection, so name everything you keep.`,
-        'Target elements with `ref` from `snapshot_page` — the recorded node stores a durable selector; do not hand-write CSS.',
-        'EVERY STEP IS REPLAYED: no exploratory detours — going back, retrying a different element after a miss, or re-opening a view all become nodes.',
-        'SCRIPTS ARE A LAST RESORT / 代码节点是最后手段: there is no raw-JS tool (`run_javascript` is unavailable here). Exhaust the operators first; when none can express the step, `load_tools({groups:["operators_escape"]})` then call `wf_op_javascript-code`, which runs the page script AND records the node (a bare expression or a `return` body). Carry a `justification` naming what you tried and why each operator fails, else the call is refused.',
-        'Operators are pre-approved: do not ask, and batch independent calls. Use `wf_op_wait-connections` when a step needs the page to settle — it really waits, never "just in case".',
-        'When the task is done, END YOUR TURN. The panel shows a review card listing the recorded steps — do NOT call `compose_workflow` or any save tool.',
+        `ALL OPERATORS ARE AVAILABLE / 全部算子已可见: every \`wf_op_*\` category schema is advertised from the first round — pick the operator that fits the step, no declaration needed. ${CORE_OPERATOR_TOOL_NAMES.join(', ')} are the usual starters (navigate, click, fill-or-read a field, read text). \`use_operators\` REPLACES the current selection if the payload must be slimmed mid-task.`,
+        'EVERY STEP IS REPLAYED: no detours — going back, retrying another element or re-opening a view all become nodes.',
+        // Round 22 replayed 26/26 steps clean and had saved nothing: its last three
+        // nodes were `诊断：…` probes and a length check, and the step the user named
+        // was never in the graph. `prepare_workflow_goal` says the draft version of
+        // this once, on the first turn, and by the fortieth round that sentence is
+        // long off the model's attention — so the rule belongs where every round
+        // re-reads it. It is stated as a shape, not a refusal: a graph ending on a
+        // read still saves (D2). Wording is byte-budgeted by
+        // tests/agent-payload-size.spec.ts; the WHY lives here, not in the prompt.
+        'THE LAST STEP IS THE GOAL / 最后一步是目标: end the graph on the action the user named, never on a read, probe or format check.',
+        // Round 60 replayed 16/16 and still could not certify: its one success row was
+        // `elementExists {role:'button', accessibleName:'保存草稿'}` — the control the
+        // LAST step presses, whose real text is 「暂存离开」, and which the post-click
+        // navigation removes. A row about the pressed button can never be true after
+        // the run ends, so the goal is proven by the RESULT the site shows afterwards.
+        'GOAL ROW = STATE AFTER THE LAST ACT / 目标是动作后的状态: not the button pressed; what shows when done (a list entry, 「保存于…」, a count).',
+        // Round 62 recorded 27 nodes and its replay stopped at 19: the step that
+        // opens the composer is a nav item whose own words are 「发布图文笔记」, and an
+        // unattended run refuses every click whose words name 发布 — a refusal that
+        // must stay, because the press of the real publish control is not separable
+        // from the entry by words alone, and publishing belongs to the user. The safe
+        // route to the editor is a navigation block, which no such refusal touches.
+        'REPLAY REFUSES A CLICK WHOSE WORDS NAME 发布: enter the composer with `new-tab`, not 「发布笔记」.',
+        // The paragraph's remaining sentences were compressed to pay for the line
+        // above, since all four payload ceilings were already within single-digit
+        // characters of their caps; each keeps its rule and loses only rationale
+        // that the tool schema or this comment already carries.
+        'Target elements by `ref` from `snapshot_page`; never hand-write CSS.',
+        'SCRIPTS ARE A LAST RESORT: exhaust the operators first; when none can express the step, `load_tools({groups:["operators_escape"]})` → `wf_op_javascript-code`, which runs AND records the script. Carry a `justification` naming what you tried, else it is refused',
+        'Operators are pre-approved: batch independent calls. `wf_op_wait-connections` waits — use it when a step needs the page to settle.',
+        'When done, END YOUR TURN — the panel shows the review card; never call `compose_workflow` or a save tool.',
         // The mode paragraph carries the MECHANICS only. The domain knowledge —
         // which operator maps to which conversational action, the data rules,
         // the keep/drop criteria — lives in the mounted skill below, once, so
@@ -1234,7 +1275,151 @@ export const TOOLS: WireTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'generate_workflow',
+      description:
+        'Unattended workflow generation. Pass {prompt} to start a generation turn — every step it performs is recorded as a node, then the graph is saved and trial-replayed — and pass the returned {conversationId} to poll that run, because the turn outlasts a single request. / 无人值守生成工作流：传 prompt 启动一轮生成（每一步都会记成节点，随后保存并试重放），再用返回的 conversationId 轮询，因为一轮生成超过一次请求的时限。',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'The user goal, verbatim.' },
+          conversationId: { type: 'string', description: 'The id a previous start returned.' },
+          closeTabsAtEnd: {
+            type: 'boolean',
+            description: 'Close the tabs this turn opened. / 关闭本轮新开的标签页。',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'verify_workflow',
+      description:
+        'Replay an already-saved workflow and report whether it runs. Pass {workflowId} (optionally budgetMs) to start the replay — it stops in front of the first step that cannot be undone, so it never publishes or submits — and pass the returned {conversationId} to poll it. The settled result carries verified/verification and the trial record. / 重放一个已保存的工作流并报告它能否跑通：传 workflowId（可选 budgetMs）启动重放，遇到不可撤销的步骤会停下（绝不发布或提交），再用返回的 conversationId 轮询；结果里带 verified/verification 与试跑记录。',
+      parameters: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string', description: 'Id of a saved workflow.' },
+          conversationId: { type: 'string', description: 'The id a previous start returned.' },
+          budgetMs: { type: 'number', description: 'Optional replay budget in ms.' },
+          closeTabsAtEnd: {
+            type: 'boolean',
+            description: 'Close tabs this run opened. / 关闭本次运行新开的标签页。',
+          },
+          commitCutoffOnly: {
+            type: 'boolean',
+            description:
+              'Also run the steps that only PREPARE a commit (upload, fill, save-draft); an unsafe ' +
+              'click/submit/key still stops the run. Default false. / 同时放行“为提交做准备”的步骤' +
+              '（上传、填写、存草稿）；真正的提交动作仍会拦下。默认关闭。',
+          },
+          allowDraftCommit: {
+            type: 'boolean',
+            description:
+              'With commitCutoffOnly: also fire the graph’s own commit when its own words name a ' +
+              'DRAFT (草稿/暂存/draft) and no outward verb (发布/提交/发送/支付). Writes into the ' +
+              'user’s account, so ask first. A publish still stops the run. Default false. / ' +
+              '配合 commitCutoffOnly：连工作流自己的“存草稿”提交也执行（步骤措辞明确是草稿且不含' +
+              '发布/提交/发送/支付）。这会在用户账号里写入内容，需先征得同意；发布仍会拦下。默认关闭。',
+          },
+          inputs: {
+            type: 'object',
+            description:
+              'Values for the inputs the workflow declares (its trigger parameters), e.g. ' +
+              '{"topic":"周末探店"}; a step referencing {{topic}} with no default fails ' +
+              'UNRESOLVED_INPUT without them. / 为工作流声明的输入参数赋值；缺值时无默认值的 ' +
+              '{{topic}} 引用会报 UNRESOLVED_INPUT。',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'repair_workflow',
+      description:
+        'Replay an already-saved workflow and, if a step fails, run the autonomous repair loop over it and replay it once more. Pass {workflowId} (optionally budgetMs) to start it, then poll the returned {conversationId}. The reply carries `repair` — status not-needed/success/exhausted/blocked with the attempt count — beside the final replay verdict. / 重放已保存的工作流，若有步骤失败就自动修复并重放一次：传 workflowId 启动，用返回的 conversationId 轮询；结果里 repair 说明修复状态与尝试次数。',
+      parameters: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string', description: 'Id of a saved workflow.' },
+          conversationId: { type: 'string', description: 'The id a previous start returned.' },
+          budgetMs: { type: 'number', description: 'Optional replay budget in ms.' },
+          closeTabsAtEnd: {
+            type: 'boolean',
+            description: 'Close tabs this run opened. / 关闭本次运行新开的标签页。',
+          },
+          commitCutoffOnly: {
+            type: 'boolean',
+            description:
+              'Also run the steps that only PREPARE a commit (upload, fill, save-draft); an unsafe ' +
+              'click/submit/key still stops the run. Default false. / 同时放行“为提交做准备”的步骤' +
+              '（上传、填写、存草稿）；真正的提交动作仍会拦下。默认关闭。',
+          },
+          allowDraftCommit: {
+            type: 'boolean',
+            description:
+              'With commitCutoffOnly: also fire the graph’s own commit when its own words name a ' +
+              'DRAFT (草稿/暂存/draft) and no outward verb (发布/提交/发送/支付). Writes into the ' +
+              'user’s account, so ask first. A publish still stops the run. Default false. / ' +
+              '配合 commitCutoffOnly：连工作流自己的“存草稿”提交也执行（步骤措辞明确是草稿且不含' +
+              '发布/提交/发送/支付）。这会在用户账号里写入内容，需先征得同意；发布仍会拦下。默认关闭。',
+          },
+          inputs: {
+            type: 'object',
+            description:
+              'Values for the inputs the workflow declares (its trigger parameters), e.g. ' +
+              '{"topic":"周末探店"}; a step referencing {{topic}} with no default fails ' +
+              'UNRESOLVED_INPUT without them. / 为工作流声明的输入参数赋值；缺值时无默认值的 ' +
+              '{{topic}} 引用会报 UNRESOLVED_INPUT。',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'reload_extension',
+      description:
+        'Dev-only, bridge: reload the extension so a fresh build takes effect. Needs the settings toggle and {confirm:"reload"}. / 开发者用：重载扩展以加载新构建。',
+      parameters: {
+        type: 'object',
+        properties: {
+          confirm: { type: 'string', description: 'Literal "reload".' },
+        },
+        required: ['confirm'],
+      },
+    },
+  },
 ]
+
+/**
+ * Tools the local-agent bridge calls and the model must never see:
+ * `generate_workflow` starts a whole generation turn, so offering it inside a
+ * turn would let the agent recurse — and the panel owns the review card that
+ * turn's draft feeds. `verify_workflow` is the same shape one step later: it
+ * executes a saved graph, which is a decision for the user or the bridge, not
+ * something a model mid-turn should trigger on its own. `repair_workflow` is
+ * `verify_workflow` plus a write-back — it commits new revisions to storage — so
+ * it belongs to the caller too. `reload_extension`
+ * restarts the worker the turn is running in, so it is the bridge's call alone
+ * (and gated on a setting that is off by default). All four are still in
+ * {@link TOOLS} because that array is what `tools.list` hands the bridge for
+ * discovery; `agent-api.ts` intercepts the calls by name, so none is ever
+ * resolved through `runToolStandalone`.
+ */
+export const BRIDGE_ONLY_TOOLS = new Set([
+  'generate_workflow',
+  'verify_workflow',
+  'repair_workflow',
+  'reload_extension',
+])
 
 export type ConfirmFn = (name: string, argsPreview: string) => Promise<boolean>
 
@@ -1355,7 +1540,6 @@ function storeActiveOperatorCategories(
   return next
 }
 
-
 /**
  * Conversation-scoped block ids activated by `find_workflow_operators`
  * (candidate-only activation). These are ADDED to the advertised operator
@@ -1413,7 +1597,9 @@ function buildCandidateTools(conversationId: string | undefined): WireTool[] {
  * distinction matters: never-declared means "show everything" (the round-1
  * default), while an EXPLICIT empty declaration means "core operators only".
  */
-export function getActiveOperatorCategories(conversationId: string): Set<BlockCategory> | undefined {
+export function getActiveOperatorCategories(
+  conversationId: string,
+): Set<BlockCategory> | undefined {
   return activeOperatorCategoryStore.get(conversationId)
 }
 
@@ -1469,7 +1655,13 @@ const LAST_INPUT_STORE_CAP = 64
 export function inputLimitFromError(message: string): number | undefined {
   // DashScope: "Range of input length should be [1, 983616]" and similar
   // "maximum context length ... N tokens" shapes.
-  const patterns = [new RegExp('\\[\\s*\\d+\\s*,\\s*(\\d+)', 'i'), new RegExp('input length[^\\d]*\\d+[^\\d]+(\\d+)', 'i'), new RegExp('input length[^\\d]*(\\d+)', 'i'), new RegExp('context length[^\\d]*(\\d+)', 'i'), new RegExp('max[^\\d]+(\\d+)\\s*tokens?', 'i')]
+  const patterns = [
+    new RegExp('\\[\\s*\\d+\\s*,\\s*(\\d+)', 'i'),
+    new RegExp('input length[^\\d]*\\d+[^\\d]+(\\d+)', 'i'),
+    new RegExp('input length[^\\d]*(\\d+)', 'i'),
+    new RegExp('context length[^\\d]*(\\d+)', 'i'),
+    new RegExp('max[^\\d]+(\\d+)\\s*tokens?', 'i'),
+  ]
   for (const pattern of patterns) {
     const match = message.match(pattern)
     if (match && match[1]) {
@@ -1645,6 +1837,10 @@ export function advertiseTools({
     const core = TOOLS.filter((tool) => {
       const name = tool.function.name
       if (WORKFLOW_WITHHELD_TOOLS.has(name)) return false
+      // `generate_workflow` starts a whole generation turn: offering it inside a
+      // turn would let the model recurse into itself, and it would also blow the
+      // payload budget this surface is guarded by.
+      if (BRIDGE_ONLY_TOOLS.has(name)) return false
       // `ask_user` is FORBIDDEN in workflow generation: the mode's deliverable
       // is the draft → save-card flow, which must not stall on questions, and
       // the workflow's replay runs unattended anyway. (The dispatch layer
@@ -1746,6 +1942,7 @@ export function advertiseTools({
     if (disabled.has(name)) return false
     if (allowTools && !allowTools.has(name)) return false
     if (hidden?.has(name)) return false
+    if (BRIDGE_ONLY_TOOLS.has(name)) return false
     if (mode === 'readonly' && ACTION_TOOLS.has(name)) return false
     // Plan-skill turns get `use_skill` in the core surface (see the option
     // doc). Deliberately AFTER disabled/allowTools/hidden so a user-disabled
@@ -1889,9 +2086,8 @@ function prepareWorkflowGoalTool(): WireTool {
     function: {
       name: PREPARE_WORKFLOW_GOAL_TOOL,
       description:
-        'Workflow-generation FIRST step. Define the goal before any wf_op_*: name (auto if omitted), '
-        + 'summary, machine-checkable successConditions, requiredCapabilities, optional constraints/expectedInputs. '
-        + 'No wf_op_* runs until this exists. / 生成第一步：先建立目标契约。',
+        'Workflow-generation FIRST step, before any wf_op_*: name (auto-filled; a user-confirmed name wins), ' +
+        'summary, machine-checkable successConditions, requiredCapabilities, optional constraints/expectedInputs.',
       parameters: {
         type: 'object',
         properties: {
@@ -1899,10 +2095,16 @@ function prepareWorkflowGoalTool(): WireTool {
           summary: { type: 'string', description: 'What done means.' },
           successConditions: {
             type: 'array',
-            description: 'Machine-checkable conditions ({kind,...}); at least one.',
+            description:
+              '≥1 row must be FALSE before the run, true where it lands ' +
+              '(URL/standing text refused). Prefer elementAppeared/countIncreased or ' +
+              'expected:"{{var}}". Name by VISIBLE WORDS; no selector/testid/role.',
             items: { type: 'object', additionalProperties: true },
           },
-          terminalStateConditions: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          terminalStateConditions: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
           requiredCapabilities: { type: 'array', items: { type: 'string' } },
           constraints: { type: 'array', items: { type: 'string' } },
           expectedInputs: { type: 'array', items: { type: 'object', additionalProperties: true } },
@@ -1925,9 +2127,9 @@ function findWorkflowOperatorsTool(): WireTool {
     function: {
       name: FIND_WORKFLOW_OPERATORS_TOOL,
       description:
-        'Find a small ranked set of wf_op_* candidates for one step (with scores/reasons) and auto-activate '
-        + 'them; no use_operators round trip. javascript-code is never an ordinary candidate. '
-        + '/ 检索少量候选算子并自动激活。',
+        'Find a small ranked set of wf_op_* candidates for one step (with scores/reasons) and auto-activate ' +
+        'them; no use_operators round trip. javascript-code is never an ordinary candidate. ' +
+        '/ 检索少量候选算子并自动激活。',
       parameters: {
         type: 'object',
         properties: {
@@ -1940,7 +2142,6 @@ function findWorkflowOperatorsTool(): WireTool {
     },
   } as WireTool
 }
-
 
 export interface AgentDeps {
   send: (message: AgentServerMessage) => void
@@ -3761,6 +3962,15 @@ export async function executeTool(
         name: typeof args.name === 'string' ? args.name : undefined,
         description: typeof args.description === 'string' ? args.description : undefined,
         save: args.save === undefined ? true : Boolean(args.save),
+        // The graph is about to be saved, so it gets one real, bounded replay
+        // first — evidence for the card, and a self-heal write-back while the
+        // page is still the page it was generated on. It never blocks the save,
+        // and never re-fires a step that submits something.
+        trial: createTrialRunner({
+          executeWorkflow,
+          ...(ctx.scope ? { scopeWindowId: ctx.scope.windowId } : {}),
+          ...(signal ? { signal } : {}),
+        }),
       })
       if ('error' in out) return JSON.stringify({ error: out.error })
       return JSON.stringify({
@@ -3778,10 +3988,7 @@ export async function executeTool(
       if (!summary.trim()) {
         return JSON.stringify({ error: 'A non-empty goal summary is required.' })
       }
-      const rawConditions = Array.isArray(args.successConditions)
-        ? args.successConditions
-        : []
-      const { normalizeGoalSpec } = await import('../lib/workflow/goal')
+      const rawConditions = Array.isArray(args.successConditions) ? args.successConditions : []
       const goalSpec = normalizeGoalSpec({
         summary,
         successConditions: rawConditions,
@@ -3792,18 +3999,67 @@ export async function executeTool(
       if (!goalSpec) {
         return JSON.stringify({
           error:
-            'Invalid goal contract: provide at least one machine-checkable success condition with a kind and target/predicate.',
+            'Invalid goal contract: none of the success conditions were readable. An element row is ' +
+            '{kind:"elementExists", target:{text:"草稿箱"}} — target is an OBJECT carrying at least ' +
+            'one of text / label / accessibleName / role / placeholder / selector / testId (prefer the ' +
+            'words a person sees; a row naming its element only by a selector or test id is refused ' +
+            'below); a ' +
+            'variable row is {kind:"variableExists", name:"…"}. If this was rejected, say which row ' +
+            'and its exact JSON rather than retrying a guess.',
+        })
+      }
+      // A goal whose success rows are all URLs can never be certified: the page
+      // the workflow opens already matches them, so L3 either passes a run that
+      // clicked nothing or fails a run that did the whole job (the 18/18 draft
+      // graph that could not say so). Refuse it here, where restating is one
+      // round trip, not at verification time where nobody can act on it.
+      if (!goalSpec.successConditions.some(provesLandedEffect)) {
+        return JSON.stringify({
+          error:
+            'Every success condition is a URL check, so none of them can prove the goal landed — ' +
+            'the page this workflow opens matches them before its first step. Give at least one ' +
+            'condition the page must satisfy AFTER the action (elementText / elementVisible / ' +
+            'elementExists / elementAppeared / countIncreased / count / attributeEquals / ' +
+            'variableExists) and move the URL row to terminalStateConditions.',
+        })
+      }
+      // The same seam, one failure class later: a proof that names its element by
+      // source code. A chat turn never shows the model source code, so a bare CSS
+      // selector or `data-testid` in a success row is invented, and an invented
+      // locator reads false no matter how well the run went — rounds 26, 43 and 44
+      // replayed cleanly and certified nothing (`.publishBtn`, testid `draft-saved`,
+      // `.note-item`), while the one L3 pass rested on `{text: "草稿箱"}`. Ask for the
+      // visible words here, where restating is one round trip.
+      const invented = goalSpec.successConditions.filter(
+        (condition) => provesLandedEffect(condition) && !conditionTargetIsNamed(condition),
+      )
+      if (invented.length > 0) {
+        return JSON.stringify({
+          error:
+            `The success condition ${describeCondition(invented[0]!)} does not name its element in the ` +
+            'words a person sees — a bare CSS selector or test id is source code nobody observed, and a ' +
+            'lone role is satisfied by the first matching element anywhere — so it can never certify the ' +
+            'run: the workflow would finish its whole job and the goal would still read false (or true by ' +
+            'accident). Restate every element condition as the words on the page: ' +
+            '{kind:"elementExists", target:{text:"草稿箱"}} or ' +
+            '{kind:"elementVisible", target:{role:"button", accessibleName:"暂存离开"}}. A `selector` or a ' +
+            '`role` is allowed only on a row that also carries text / label / accessibleName.',
         })
       }
       const requiredCapabilities = Array.isArray(args.requiredCapabilities)
         ? args.requiredCapabilities.filter((item): item is string => typeof item === 'string')
         : []
-      // Resolve a meaningful name: the supplied acceptable name, else a stable
+      // Resolve a meaningful name: the name the USER confirmed at task start
+      // is authoritative, then an acceptable model-supplied one, then a stable
       // auto-derived one. Never accept "new workflow" / "test" / random ids.
+      const confirmedName = await loadConfirmedWorkflowName(ctx.conversationId)
       const suppliedName = typeof args.name === 'string' ? args.name.trim() : ''
-      const name = suppliedName && isAcceptableWorkflowName(suppliedName)
-        ? suppliedName
-        : generateWorkflowName(summary)
+      const name =
+        confirmedName && isAcceptableWorkflowName(confirmedName)
+          ? confirmedName
+          : suppliedName && isAcceptableWorkflowName(suppliedName)
+            ? suppliedName
+            : generateWorkflowName(summary)
       const contract = normalizeGenerationGoalContract({
         version: 1,
         name,
@@ -3823,7 +4079,18 @@ export async function executeTool(
         name: contract.name,
         goalSpec: contract.goalSpec,
         requiredCapabilities: contract.requiredCapabilities,
-        note: 'Goal contract established. Operators may now execute; final success is judged against this goal.',
+        note:
+          'Goal contract established. Operators may now execute; final success is judged against this goal.' +
+          // The round-22 graph replayed 26/26 clean and saved nothing, because its
+          // last three nodes were leftover diagnostics and the step the user named
+          // was never in the graph. Say the requirement where the plan is made.
+          (goalAsksForDraftSave(summary)
+            ? ' This goal asks for a DRAFT: the graph must END with the step that saves it (e.g. 点击保存草稿), not with a read or a diagnostic check — a run that never performs that step achieved nothing, however cleanly its steps return. Compose only after that step has run.' +
+              // Round 50 replayed 33/33 clean and still certified nothing: its proof
+              // was the EDITOR's 「暂存离开」 button, and after that click the page IS
+              // the 草稿箱 list, so the row checked a page the run had already left.
+              ' A success row is read on the page the run ENDS on, not on the page a mid-run step acted on: after 暂存离开 the page is the 草稿箱 list, so prove the draft landed THERE (e.g. {kind:"elementExists", target:{text:"草稿箱"}}) rather than by an editor control that is no longer on screen.'
+            : ''),
       })
     }
 
@@ -3844,7 +4111,11 @@ export async function executeTool(
         stepIntent,
         workflowGoal: goal.goalSpec.summary,
         ...(args.pageSignals && typeof args.pageSignals === 'object'
-          ? { pageSignals: args.pageSignals as Parameters<typeof findWorkflowOperators>[0]['pageSignals'] }
+          ? {
+              pageSignals: args.pageSignals as Parameters<
+                typeof findWorkflowOperators
+              >[0]['pageSignals'],
+            }
           : {}),
         ...(typeof args.limit === 'number' ? { limit: args.limit } : {}),
       })
@@ -3883,9 +4154,7 @@ export async function executeTool(
           if (!permission.allowed) {
             return JSON.stringify({
               error: permission.error,
-              ...(permission.nativeBlockIds
-                ? { nativeBlockIds: permission.nativeBlockIds }
-                : {}),
+              ...(permission.nativeBlockIds ? { nativeBlockIds: permission.nativeBlockIds } : {}),
             })
           }
         }
@@ -4328,9 +4597,7 @@ export async function runAgentTurn(
   // any mounted mode skill) and the model can `use_skill` a match per step.
   const catalogue: Skill[] = activeSkill
     ? activeSkill.name === PLAN_SKILL_NAME
-      ? skillList.filter(
-          (skill) => skill.id !== activeSkill.id && skill.id !== modeSkill?.id,
-        )
+      ? skillList.filter((skill) => skill.id !== activeSkill.id && skill.id !== modeSkill?.id)
       : []
     : modeSkill
       ? skillList.filter((skill) => skill.id !== modeSkill.id)
@@ -4534,10 +4801,9 @@ export async function runAgentTurn(
     // assumed window; the emergency hard cap is the backstop.
     if (!deps.subAgent) {
       const requestTokens = (): number =>
-        estimateInputTokens(
-          [{ role: 'system', content: systemPrompt }, ...history],
-          { text: JSON.stringify(tools ?? []) },
-        )
+        estimateInputTokens([{ role: 'system', content: systemPrompt }, ...history], {
+          text: JSON.stringify(tools ?? []),
+        })
       if (shouldCompact(requestTokens()) && !compactedThisTurn) {
         compactedThisTurn = true
         deps.send({ type: 'status', text: compactionText.status })

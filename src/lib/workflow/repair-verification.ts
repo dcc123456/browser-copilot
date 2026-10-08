@@ -54,6 +54,11 @@ export interface RepairVerificationResult {
   /** Whether the goal was already satisfied (no dangerous replay happened). */
   alreadySatisfied: boolean
   layers: VerificationLayerResult
+  /**
+   * Which layers actually had something to check. `layers.*: true` with
+   * `evaluated.*: false` means "nothing contradicted us", not "we proved it".
+   */
+  evaluated: { postconditions: boolean; goal: boolean }
   /** Human/audit description of the unmet conditions. */
   unmet: string[]
   /** Conditions the verification actually evaluated. */
@@ -63,18 +68,131 @@ export interface RepairVerificationResult {
 
 // --- Condition aggregation ---------------------------------------------------
 
+/**
+ * Can this condition, read true on the live page, prove that the FAILED step's
+ * effect landed?
+ *
+ * A URL says where the run IS, not what it DID: the publish page keeps
+ * `/publish/` in its address whether or not the title ever committed, so a goal
+ * whose success row is `urlContains /publish/` holds before the workflow starts.
+ * Answering S0 with that closes the entire ladder on the first attempt — every
+ * strategy "passes" without changing anything, which is the repair equivalent of
+ * reading the absence of evidence as success. `terminalStateConditions` are
+ * exempt because reaching a DIFFERENT address is exactly the documented proof
+ * that an action already landed elsewhere; this predicate is applied to the
+ * success row only, at the S0 call site.
+ */
+export function provesLandedEffect(condition: WorkflowCondition): boolean {
+  return (
+    condition.kind !== 'urlContains' &&
+    condition.kind !== 'urlMatches' &&
+    !isVacuousPresenceRow(condition)
+  )
+}
+
+/**
+ * A presence row pointed at the document root — `elementExists` on `body`, which
+ * is what a model writes when it has no locator to name.
+ *
+ * Making a `{selector}` target observable (round 26's fix) is what opened this:
+ * such a row now resolves, and resolves ALWAYS. Left as evidence it certifies a
+ * goal nothing wrote, and it short-circuits the repair ladder into reporting
+ * `terminal state already holds` in 14 ms for a step that failed on a hidden
+ * upload control (round 31). An absence would prove something; this cannot.
+ */
+const ROOT_SELECTOR = /^(?:body|html|\*|:root)$/i
+
+export function isVacuousPresenceRow(condition: WorkflowCondition): boolean {
+  if (
+    condition.kind !== 'elementExists' &&
+    condition.kind !== 'elementVisible' &&
+    condition.kind !== 'elementEnabled'
+  ) {
+    return false
+  }
+  const selector = (condition.target as { selector?: unknown }).selector
+  return typeof selector === 'string' && ROOT_SELECTOR.test(selector.trim())
+}
+
+/**
+ * Does this URL row hold because the workflow itself puts the browser there?
+ *
+ * A terminal-state row is supposed to name the address the page reaches ONLY
+ * AFTER the action landed. In practice generation files the address it was
+ * already sitting on there (the round-17 draft graph: `urlContains
+ * creator.xiaohongshu.com`, while its own first node opens that page), and then
+ * S0 reports "terminal state already holds" for a step that failed, the repair
+ * commits nothing, and the run is called a success. Any URL the graph names in
+ * its own params — an open-url, a recorded origin — is satisfied by construction
+ * and can carry no evidence about this step.
+ */
+export function urlHoldsByConstruction(workflow: Workflow, condition: WorkflowCondition): boolean {
+  if (condition.kind !== 'urlContains' && condition.kind !== 'urlMatches') return false
+  const needle = condition.value.trim().toLowerCase()
+  if (!needle) return false
+  const haystacks: string[] = []
+  for (const node of workflow.drawflow?.nodes ?? []) {
+    for (const value of Object.values((node.data ?? {}) as Record<string, unknown>)) {
+      if (typeof value === 'string') haystacks.push(value)
+    }
+  }
+  const settings = workflow.settings as unknown as Record<string, unknown> | undefined
+  if (typeof settings?.['generationOriginUrl'] === 'string') {
+    haystacks.push(settings['generationOriginUrl'] as string)
+  }
+  const context = settings?.['pageContext'] as
+    | { origin?: string; additionalOrigins?: string[] }
+    | undefined
+  if (typeof context?.origin === 'string') haystacks.push(context.origin)
+  haystacks.push(...(context?.additionalOrigins ?? []))
+  return haystacks.some((text) => text.toLowerCase().includes(needle))
+}
+
+/**
+ * Can this terminal-state row carry the layer, for THIS workflow?
+ *
+ * Terminal rows keep the URL exemption {@link provesLandedEffect} denies a
+ * success row — reaching a DIFFERENT address is exactly the documented trace an
+ * action leaves behind. What they do not keep is an address the graph visits by
+ * design, nor a presence row pointed at the document root: `body` is there
+ * whether the step ran or not, and that is the row round 31's S0 read as
+ * "terminal state already holds" over a failed upload step.
+ */
+export function provesTerminalEffect(workflow: Workflow, condition: WorkflowCondition): boolean {
+  return !urlHoldsByConstruction(workflow, condition) && !isVacuousPresenceRow(condition)
+}
+
+/**
+ * Aggregate a layer's conditions.
+ *
+ * `satisfied` answers "did anything contradict the claim"; `observed` answers
+ * "was anything checked at all". An empty list is vacuously satisfied, and a
+ * caller that reads that as VERIFIED is reporting the absence of evidence as
+ * success — which is how a repair that did nothing claims the goal was met.
+ * Every short-circuit therefore has to demand `observed` as well.
+ */
 async function evaluateAll(
   deps: VerificationDeps,
   conditions: WorkflowCondition[],
-): Promise<{ satisfied: boolean; unmet: string[]; evaluated: WorkflowCondition[] }> {
+): Promise<{
+  satisfied: boolean
+  observed: boolean
+  unmet: string[]
+  evaluated: WorkflowCondition[]
+}> {
   if (conditions.length === 0) {
-    return { satisfied: true, unmet: [], evaluated: [] }
+    return { satisfied: true, observed: false, unmet: [], evaluated: [] }
   }
   const outcomes = await deps.evaluateConditions(conditions)
   const unmet = outcomes
     .filter((outcome) => !outcome.satisfied)
     .map((outcome) => outcome.note ?? describeCondition(outcome.condition))
-  return { satisfied: unmet.length === 0, unmet, evaluated: conditions }
+  return {
+    satisfied: unmet.length === 0,
+    observed: outcomes.length > 0,
+    unmet,
+    evaluated: conditions,
+  }
 }
 
 /**
@@ -85,22 +203,46 @@ async function evaluateAll(
 export async function checkGoalAlreadySatisfied(
   workflow: Workflow,
   deps: VerificationDeps,
-): Promise<{ satisfied: boolean; note?: string }> {
+): Promise<{
+  satisfied: boolean
+  evaluated: WorkflowCondition[]
+  note?: string
+}> {
   const goal = goalSpecOf(workflow)
-  if (!goal) return { satisfied: false }
-  const success = await evaluateAll(deps, goal.successConditions)
-  if (success.satisfied) {
-    return { satisfied: true, note: 'goal success conditions already hold' }
+  if (!goal) return { satisfied: false, evaluated: [] }
+  // Only conditions that can prove the FAILED STEP's effect landed. A URL
+  // condition holds before the step, while it and after it — the publish page is
+  // still `/publish/publish` when the title never committed — so accepting one
+  // here lets the whole ladder short-circuit on the first attempt and report a
+  // repair that changed nothing. Terminal-state conditions keep their own
+  // meaning below (a URL the page reaches ONLY after the action).
+  const evidence = goal.successConditions.filter(provesLandedEffect)
+  const success = await evaluateAll(deps, evidence)
+  if (success.satisfied && success.observed) {
+    return {
+      satisfied: true,
+      evaluated: [...evidence],
+      note: 'goal success conditions already hold',
+    }
   }
   // Variable-only conditions can be checked even without a live page; when
   // all success conditions are variable-only and failed, the goal is not met.
-  if (goal.terminalStateConditions?.length) {
-    const terminal = await evaluateAll(deps, goal.terminalStateConditions)
-    if (terminal.satisfied) {
-      return { satisfied: true, note: 'terminal state already holds' }
+  // Terminal rows keep their URL exemption above, but only for URLs the graph
+  // does not open itself — one it navigates to proves nothing about this step.
+  const terminalEvidence = (goal.terminalStateConditions ?? []).filter((condition) =>
+    provesTerminalEffect(workflow, condition),
+  )
+  if (terminalEvidence.length) {
+    const terminal = await evaluateAll(deps, terminalEvidence)
+    if (terminal.satisfied && terminal.observed) {
+      return {
+        satisfied: true,
+        evaluated: [...terminalEvidence],
+        note: 'terminal state already holds',
+      }
     }
   }
-  return { satisfied: false }
+  return { satisfied: false, evaluated: [...success.evaluated] }
 }
 
 export interface VerifyCandidateInput {
@@ -120,33 +262,44 @@ export async function verifyRepairCandidate(
 ): Promise<RepairVerificationResult> {
   const { workflow, candidate, nodeSucceeded, deps } = input
   const unmet: string[] = []
-  const evaluated: WorkflowCondition[] = []
+  const checked: WorkflowCondition[] = []
 
   // L2: candidate expected postconditions.
   const post = await evaluateAll(deps, candidate.expectedPostconditions)
   unmet.push(...post.unmet)
-  evaluated.push(...post.evaluated)
+  checked.push(...post.evaluated)
   const postconditionsHeld = post.satisfied
 
   // L3: workflow goal.
   const goal = goalSpecOf(workflow)
   let goalHeld = false
+  let goalEvaluated = false
   if (goal) {
     const success = await evaluateAll(deps, goal.successConditions)
     unmet.push(...success.unmet)
-    evaluated.push(...success.evaluated)
-    if (success.satisfied) {
+    checked.push(...success.evaluated)
+    goalEvaluated = success.observed
+    if (success.satisfied && success.observed) {
       goalHeld = true
-    } else if (goal.terminalStateConditions?.length) {
-      // Terminal-state conditions: the action already landed earlier.
-      const terminal = await evaluateAll(deps, goal.terminalStateConditions)
-      unmet.push(...terminal.unmet)
-      evaluated.push(...terminal.evaluated)
-      goalHeld = terminal.satisfied
+    } else {
+      // Terminal-state conditions: the action already landed earlier — but a
+      // URL the graph navigates to itself holds before any step ran, so it
+      // cannot carry this layer either.
+      const terminalEvidence = (goal.terminalStateConditions ?? []).filter((condition) =>
+        provesTerminalEffect(workflow, condition),
+      )
+      if (terminalEvidence.length) {
+        const terminal = await evaluateAll(deps, terminalEvidence)
+        unmet.push(...terminal.unmet)
+        checked.push(...terminal.evaluated)
+        goalEvaluated = terminal.observed
+        goalHeld = terminal.satisfied && terminal.observed
+      }
     }
   } else {
     // A workflow with no goal spec is L3-valid once L1+L2 hold (compat /
-    // simple read flows).
+    // simple read flows). It is reported as NOT evaluated so no caller reads
+    // this branch as "the goal was verified".
     goalHeld = true
   }
 
@@ -155,10 +308,16 @@ export async function verifyRepairCandidate(
     passed,
     alreadySatisfied: false,
     layers: { node: nodeSucceeded, postconditions: postconditionsHeld, goal: goalHeld },
+    evaluated: { postconditions: post.observed, goal: goalEvaluated },
     unmet,
-    evaluatedConditions: evaluated,
+    evaluatedConditions: checked,
     ...(passed
-      ? { note: 'all verification layers passed' }
+      ? {
+          note:
+            goalEvaluated || post.observed
+              ? 'all verification layers passed'
+              : 'candidate accepted on the node result alone (no goal contract to verify)',
+        }
       : { note: unmet[0] ?? 'verification failed' }),
   }
 }
@@ -180,8 +339,10 @@ export async function verifyRepair(
       passed: true,
       alreadySatisfied: true,
       layers: { node: true, postconditions: true, goal: true },
+      // Nothing was replayed: only the goal observation below is evidence.
+      evaluated: { postconditions: false, goal: true },
       unmet: [],
-      evaluatedConditions: [],
+      evaluatedConditions: already.evaluated,
       note: already.note,
     }
   }

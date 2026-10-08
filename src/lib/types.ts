@@ -176,6 +176,13 @@ export interface Settings {
    */
   localAgentAdapterPath: string
   /**
+   * 开发用：允许本地 Agent 桥调用 `reload_extension` 让插件自我重载
+   * （`chrome.runtime.reload()`），使自测脚本在 `pnpm build` 之后不必人工到
+   * chrome://extensions 点“重新加载”。默认关闭；开启后仍受桥接的既有门禁
+   * 约束（仅 127.0.0.1、`localAgentEnabled`、可选 token、窗口分配）。
+   */
+  localAgentAllowReload: boolean
+  /**
    * 本地 Agent 桥接锁定的“当前窗口”id。用户在某个窗口的面板里选择由哪个
    * agent 控制时，随选择一并记录该窗口；此后桥接的 tool/prompt 运行只在
    * 该窗口内的标签页上执行（含 CDP 附加），绝不触及其它窗口。窗口已关闭
@@ -221,6 +228,12 @@ export interface Settings {
    * 默认关闭；调试（workflows.debug）始终启用接管，与此开关无关。
    */
   takeoverOnRun: boolean
+  /**
+   * 运行失败后是否自动进入 AI 自主修复循环（仅对生成式严格工作流有意义）。
+   * 默认关闭：失败就如实报失败，用户可在失败中心手动发起修复，或在设置里
+   * 开启此项让修复自动开始（修复过程中仍可取消）。
+   */
+  autoRepairOnRun: boolean
 }
 
 /** 无人值守运行的窗口选择策略（见 {@link Settings.unattendedWindowPolicy}）。 */

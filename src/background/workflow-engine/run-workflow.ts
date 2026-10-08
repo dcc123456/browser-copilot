@@ -37,15 +37,22 @@ import {
 } from '../driver'
 import { normalScopeFromWindowId, type ScopeWindow } from '../automation-scope'
 import { BLOCK_BY_ID } from '../../lib/workflow/blocks/palette'
+import { valueCommittedMatches } from '../../lib/workflow/readiness'
 import { unanchoredElementStart } from '../../lib/workflow/runnability'
 import { runWorkflow } from './engine'
 import type { AiTakeoverHook } from './engine'
 import { DEFAULT_WAIT_MS, applyDefaultWaits } from './debug-session'
 import type { ReadinessProbe } from './readiness-engine'
-import { targetSpecFromSemantic } from '../../lib/workflow/element-fingerprint'
-import type { Target } from '../../lib/ops'
-import { createDriverConditionProbe, evaluateConditionWithProbe } from './condition-runtime'
-import { verifyGoalSpec } from './goal-verifier'
+import { targetSpecsFromSemantic } from '../../lib/workflow/element-fingerprint'
+import type { Target, TargetSpec } from '../../lib/ops'
+import {
+  captureConditionBaseline,
+  captureGoalBaseline,
+  createDriverConditionProbe,
+  evaluateConditionWithProbe,
+  type ConditionBaseline,
+} from './condition-runtime'
+import { DEFAULT_GOAL_VERIFY_SETTLE_MS, verifyGoalSpec } from './goal-verifier'
 import { workflowFingerprintOf } from '../../lib/workflow/checkpoints'
 import { goalSpecOf, isGeneratedStrict } from '../../lib/workflow/reliability'
 import { validateGeneratedWorkflow } from '../../lib/workflow/generated-validation'
@@ -96,8 +103,10 @@ export async function findRunIdFor(workflowId: string): Promise<string | undefin
   return persisted
 }
 
-/** Resolve a node id to a human-readable block label for run logs. */
-function nodeLabel(workflow: Workflow, nodeId: string): string {
+/** Resolve a node id to a human-readable block label for run logs. */ function nodeLabel(
+  workflow: Workflow,
+  nodeId: string,
+): string {
   const node = workflow.drawflow.nodes.find((n) => n.id === nodeId)
   if (!node) return nodeId
   const blockId = (node.data?.['blockId'] as string) || node.label
@@ -122,6 +131,12 @@ export interface ExecuteWorkflowOptions {
   scopeWindowId?: number
   /** Node id to start execution from ("run workflow from here"); defaults to the trigger/first node. */
   startAt?: string
+  /**
+   * Node id to stop in FRONT of: reaching it is a clean finish, executing it is
+   * not allowed. The pre-save trial replay uses it to run everything the page
+   * can undo and none of what it cannot (a second login, a second submit).
+   */
+  stopBefore?: string
   /** Capture per-block variable snapshots for the logs viewer (debug mode). */
   debug?: boolean
   /**
@@ -173,6 +188,13 @@ export interface ExecuteWorkflowOptions {
    * the editor's run logs still find it.
    */
   reuseRun?: RunningTask
+  /**
+   * Extra abort signal, OR-ed with the run's own cancellation. A caller that
+   * must not wait for a run — the pre-save trial replay with its time budget —
+   * aborts this and the run stops where the panel's Cancel button stops it.
+   * The run keeps honoring `tasks.cancel` regardless.
+   */
+  signal?: AbortSignal
 }
 
 export interface ExecuteWorkflowResult {
@@ -194,6 +216,38 @@ export interface ExecuteWorkflowResult {
    * engine callbacks. Optional for legacy callers / records.
    */
   trace?: import('../../lib/workflow/repair/types').ExecutionTrace
+  /**
+   * Nodes that resolved their element only by degrading down the locator ladder
+   * (see `lib/workflow/self-heal`). The caller writes the winners back so the
+   * next replay does not have to guess again.
+   */
+  degradations?: import('../../lib/workflow/self-heal').NodeDegradation[]
+  /**
+   * Soft postconditions that did not hold (see the engine's hard/soft split):
+   * the steps ran, but the run cannot be called verified. A caller marks the
+   * workflow `unverified` from this — it is never a failure on its own.
+   */
+  conditionWarnings?: string[]
+  /** Conditions the engine observed at the step that declared them (see `engine.NodeConditionEvidence`). */
+  nodeConditions?: import('./engine').NodeConditionEvidence[]
+  /**
+   * Nodes that actually ran, in order (the engine's own list). A caller that
+   * measures coverage — "did the trial reach the end?" — reads this instead of
+   * counting trace nodes, which include skipped and cancelled ones.
+   */
+  completedNodeIds?: string[]
+  /**
+   * Set when the run stopped at a {@link ExecuteWorkflowOptions.stopBefore}
+   * cutoff instead of running out of graph: the steps before it settled, the
+   * cutoff step never started.
+   */
+  stoppedBefore?: string
+  /**
+   * The page as it stood before the first step, for the goal's change-conditions
+   * (`elementAppeared` / `countIncreased` / ...). Only the run itself can hand
+   * this over — the moment is gone by verification time.
+   */
+  goalBaseline?: ConditionBaseline
 }
 
 /**
@@ -205,6 +259,9 @@ export interface ExecuteWorkflowResult {
  * steps land on it and this function does NOT finish it (the caller does), so
  * a scheduled workflow task is ONE run-log entry rather than two.
  */
+/** Gap between the two rect samples that decide a `stable` readiness wait. */
+const STABLE_SAMPLE_INTERVAL_MS = 120
+
 /**
  * The REAL readiness probe for generated-strict runs, over the driver.
  *
@@ -219,24 +276,50 @@ export function createDriverReadinessProbe(
   signal: AbortSignal,
   scope?: ScopeWindow,
 ): ReadinessProbe {
+  /**
+   * The Target a readiness wait observes: the SAME chain the node will click
+   * with. The executors put the block's flat selector first and its rich specs
+   * behind it (`targetFrom`), so a wait that probed the semantic identity INSTEAD
+   * of the selector could go green on one element while the action hit another —
+   * or never go green at all after harmless DOM drift.
+   *
+   * `nodeTarget` IS that chain, so it leads. Rebuilding it from `nodeSelector`
+   * alone was the narrower view the comment above warns about: a node recorded
+   * with a text or role locator has an empty `selector`, and its readiness wait
+   * then had nothing to probe and timed out a step the action could perform.
+   */
   const targetFor = (
     requirement: import('../../lib/workflow/readiness').ReadinessRequirement,
     nodeSelector: string,
+    nodeTarget?: Target,
   ): Target | undefined => {
-    if (requirement.target) {
-      const spec = targetSpecFromSemantic(requirement.target)
-      if (spec) return { primary: spec, fallbacks: [] }
+    const specs: TargetSpec[] = []
+    const push = (spec: TargetSpec | undefined): void => {
+      if (!spec || !spec.value.trim()) return
+      if (!specs.some((s) => s.how === spec.how && s.value === spec.value)) specs.push(spec)
     }
-    if (nodeSelector.trim()) {
-      return { primary: { how: 'css', value: nodeSelector.trim() }, fallbacks: [] }
+    if (nodeTarget) {
+      push(nodeTarget.primary)
+      for (const spec of nodeTarget.fallbacks) push(spec)
     }
-    return undefined
+    const flat = nodeSelector.trim()
+    if (flat) push({ how: 'css', value: flat })
+    for (const spec of requirement.target ? targetSpecsFromSemantic(requirement.target) : []) {
+      push(spec)
+    }
+    const [primary, ...fallbacks] = specs
+    return primary ? { primary, fallbacks } : undefined
   }
-  return async (requirement, nodeSelector) => {
+  // The wait's own signal is ignored on purpose: the driver calls keep the
+  // run-level signal this probe was built with.
+  return async (requirement, nodeSelector, _signal, nodeTarget) => {
     switch (requirement.state) {
       case 'present': {
-        const target = targetFor(requirement, nodeSelector)
+        const target = targetFor(requirement, nodeSelector, nodeTarget)
         if (!target) return { satisfied: false, detail: '没有可探测的定位' }
+        // The kernel counts a target's matches directly; it must NOT be routed
+        // through `resolve`, or a strict ambiguity refusal would read as
+        // "element absent" and this wait could never be satisfied.
         const result = await execOnActiveTab(
           { action: 'element_exists', target },
           signal,
@@ -249,7 +332,7 @@ export function createDriverReadinessProbe(
       }
       case 'visible':
       case 'enabled': {
-        const target = targetFor(requirement, nodeSelector)
+        const target = targetFor(requirement, nodeSelector, nodeTarget)
         if (!target) return { satisfied: false, detail: '没有可探测的定位' }
         const result = await execOnActiveTab(
           { action: 'actionability', target },
@@ -257,17 +340,36 @@ export function createDriverReadinessProbe(
           undefined,
           scope,
         ).catch(() => undefined)
-        const state = (result?.data as { state?: string } | undefined)?.state
-        if (state === 'ready') return { satisfied: true }
-        if (state === 'blocked') {
-          // Blocked covers disabled/occluded — precise enough for both waits
-          // to keep polling without a second injection.
+        const data = result?.data as
+          | { state?: string; visible?: boolean; enabled?: boolean; fileInput?: boolean }
+          | undefined
+        if (!data?.state) return { satisfied: false, detail: '元素尚未出现' }
+        if (data.state === 'missing') return { satisfied: false, detail: '元素尚未出现' }
+        // `state: 'ready'` is visible ∧ enabled ∧ unoccluded — using it for a
+        // `visible` wait made an occluded-but-rendered element (a sticky header
+        // over a button, extremely common) time out a wait that had nothing to
+        // do with occlusion. Read the fact that was actually asked for.
+        const wanted = requirement.state === 'enabled' ? data.enabled : data.visible
+        if (wanted === true) return { satisfied: true }
+        if (wanted === undefined) return { satisfied: data.state === 'ready' }
+        // A click aimed at a file input waits on a condition that will never
+        // hold: pages hide `input[type=file]` behind a styled drop zone on
+        // purpose, and the kernel cannot see a future where it renders. Round 51
+        // burned its whole 180 s window and six repair attempts on exactly that
+        // wait. Say so at once, and say what the step should have been.
+        if (requirement.state === 'visible' && data.fileInput === true) {
           return {
             satisfied: false,
-            detail: requirement.state === 'enabled' ? '元素暂不可用' : '元素尚未可见或被遮挡',
+            hopeless: true,
+            detail:
+              '点击目标是一个隐藏的 input[type=file]（文件选择控件），它永远不会变为可见，等待它没有意义。' +
+              '该步骤应改用 Upload file（上传文件）块，把文件直接注入这个 input，而不是点击它。',
           }
         }
-        return { satisfied: false, detail: '元素尚未出现' }
+        return {
+          satisfied: false,
+          detail: requirement.state === 'enabled' ? '元素暂不可用' : '元素尚未可见',
+        }
       }
       case 'navigation-settled': {
         // The tab the automation is bound to must have finished loading.
@@ -289,7 +391,7 @@ export function createDriverReadinessProbe(
         }
       }
       case 'value-committed': {
-        const target = targetFor(requirement, nodeSelector)
+        const target = targetFor(requirement, nodeSelector, nodeTarget)
         if (!target) return { satisfied: false, detail: '没有可探测的定位' }
         const result = await execOnActiveTab(
           { action: 'get_value', target },
@@ -297,19 +399,64 @@ export function createDriverReadinessProbe(
           undefined,
           scope,
         ).catch(() => undefined)
-        const value = typeof result?.data === 'string' ? result.data : undefined
+        // The kernel reads a checkbox as a boolean and a multi-select as an
+        // array. Reading only `string` made those controls un-verifiable — a
+        // gate that always reports "cannot read" fails a step that flipped the
+        // box correctly, so normalize to the form the expectation was written in.
+        const raw = result?.data
+        const value =
+          typeof raw === 'string'
+            ? raw
+            : typeof raw === 'boolean' || typeof raw === 'number'
+              ? String(raw)
+              : Array.isArray(raw)
+                ? raw.map((item) => String(item)).join(',')
+                : undefined
         if (value === undefined) {
           return { satisfied: false, detail: '无法读取控件值' }
         }
         const expected = requirement.value ?? ''
-        return value === expected
+        return valueCommittedMatches(expected, value)
           ? { satisfied: true }
-          : { satisfied: false, detail: `控件值尚未提交（期望 "${expected}"，实际 "${value}"）` }
+          : {
+              satisfied: false,
+              detail: `控件值尚未提交（期望 "${expected}"，实际 "${value}"）`,
+            }
+      }
+      case 'stable': {
+        // "Not still animating" is observable: the kernel samples one rect, and
+        // two consecutive identical samples mean the layout has quiesced (the
+        // same trick the driver's actionability pre-check uses).
+        const target = targetFor(requirement, nodeSelector, nodeTarget)
+        if (!target) return { satisfied: false, detail: '没有可探测的定位' }
+        const sample = async (): Promise<string | undefined> => {
+          const result = await execOnActiveTab(
+            { action: 'actionability', target },
+            signal,
+            undefined,
+            scope,
+          ).catch(() => undefined)
+          const data = result?.data as
+            { state?: string; rect?: { x: number; y: number; w: number; h: number } } | undefined
+          if (!data || data.state === 'missing' || !data.rect) return undefined
+          const { x, y, w, h } = data.rect
+          return `${x}|${y}|${w}|${h}`
+        }
+        const first = await sample()
+        if (first === undefined) return { satisfied: false, detail: '元素尚未出现' }
+        await new Promise<void>((resolve) => setTimeout(resolve, STABLE_SAMPLE_INTERVAL_MS))
+        if (signal.aborted) return { satisfied: false, detail: '探测已取消' }
+        const second = await sample()
+        if (second === undefined) return { satisfied: false, detail: '元素尚未出现' }
+        return second === first
+          ? { satisfied: true }
+          : { satisfied: false, detail: '元素仍在移动或重绘' }
       }
       default:
-        // `stable` / `data-ready`: no page-level probe yet — satisfied, so the
-        // wait never blocks on a state we cannot observe.
-        return { satisfied: true }
+        // `data-ready`: no page-level signal exists for "the application's own
+        // data has arrived". Fail OPEN and say so — a wait we cannot observe
+        // must not be able to fail a step that would otherwise have worked.
+        return { satisfied: true, detail: '数据就绪无法观测，已跳过' }
     }
   }
 }
@@ -330,6 +477,12 @@ export async function executeWorkflow(
       ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
     })
   const runId = run.runId
+  // The signal this run obeys: its own cancellation controller (the panel's
+  // Cancel button) AND whatever the caller supplied — a bounded trial replay
+  // stops the run through that one, at the same seams a cancel does.
+  const runSignal = opts.signal
+    ? AbortSignal.any([run.controller.signal, opts.signal])
+    : run.controller.signal
   lastRunByWorkflow.set(workflow.id, runId)
   // The reused run was opened by the task runner, which knows the task but not
   // the workflow: back-fill the id so the editor's run logs still match it.
@@ -529,20 +682,26 @@ export async function executeWorkflow(
     const result = await runWorkflow(effective, {
       startAt,
       variables,
-      signal: run.controller.signal,
+      signal: runSignal,
+      ...(opts.stopBefore ? { stopBefore: opts.stopBefore } : {}),
       ...(scope ? { scope } : {}),
       ...(opts.aiTakeover ? { aiTakeover: opts.aiTakeover } : {}),
       // Generated-strict readiness: the real probe reads live page state per
       // poll (element presence/visibility, committed values, tab settle).
-      readinessProbe: createDriverReadinessProbe(run.controller.signal, scope),
+      readinessProbe: createDriverReadinessProbe(runSignal, scope),
       // Generated-strict pre/postconditions and (after the run) goal
       // verification run through the same driver-backed page probe.
-      evaluateCondition: (condition) =>
+      evaluateCondition: (condition, baseline) =>
         evaluateConditionWithProbe(
           condition,
           variables,
-          createDriverConditionProbe(run.controller.signal, scope),
+          createDriverConditionProbe(runSignal, scope),
+          baseline,
         ),
+      captureConditionBaseline: (conditions) =>
+        captureConditionBaseline(conditions, createDriverConditionProbe(runSignal, scope)),
+      captureGoalBaseline: (conditions) =>
+        captureGoalBaseline(conditions, createDriverConditionProbe(runSignal, scope)),
       // Page-context guard (§11): observe the live tab cheaply; the engine
       // checks it before strict page-acting nodes (first + after tab change).
       getPageContext: async () => {
@@ -563,7 +722,7 @@ export async function executeWorkflow(
         const result = await execJsOnActiveTab(
           `return (${code});`,
           { vars },
-          run.controller.signal,
+          runSignal,
           undefined,
           scope,
         )
@@ -683,16 +842,27 @@ export async function executeWorkflow(
     // alreadySatisfied; the LLM can never forge success. Failure rewrites the
     // outcome — execution success is not goal success.
     let goalNote: string | undefined
-    let outcome: ExecuteWorkflowResult['outcome'] = run.controller.signal.aborted
-      ? 'cancelled'
-      : result.outcome
-    if (outcome === 'ok') {
+    let outcome: ExecuteWorkflowResult['outcome'] = runSignal.aborted ? 'cancelled' : result.outcome
+    // A run that stopped at a trial cutoff never reached the goal by design:
+    // gating it would call a safe partial trial a failure.
+    if (outcome === 'ok' && !result.stoppedBefore) {
       const goal = goalSpecOf(effective)
       if (goal) {
-        const verification = await verifyGoalSpec(goal, {
-          variables: result.variables ?? variables ?? {},
-          probe: createDriverConditionProbe(run.controller.signal, scope),
-        })
+        const verification = await verifyGoalSpec(
+          goal,
+          {
+            variables: result.variables ?? variables ?? {},
+            probe: createDriverConditionProbe(runSignal, scope),
+            // 「the list grew」/「the dialog vanished」 are judgeable only against
+            // the page from before step 1, and the run is the only thing that
+            // still has it. Without this the gate reads 缺少步骤前的…观测 for a row
+            // the certification layer evaluates as true — the same goal, two
+            // answers, and this gate is the one that fails the run.
+            ...(result.goalBaseline ? { baseline: result.goalBaseline } : {}),
+          },
+          undefined,
+          { settleMs: DEFAULT_GOAL_VERIFY_SETTLE_MS, signal: runSignal },
+        )
         goalNote = verification.note
         addStep(runId, 'status', goalNote)
         if (!verification.achieved) {
@@ -733,7 +903,8 @@ export async function executeWorkflow(
         failureCategory = undefined
       }
     }
-    if (ownsRun) finishRun(runId, { outcome, summary, error, ...(failureCategory ? { failureCategory } : {}) })
+    if (ownsRun)
+      finishRun(runId, { outcome, summary, error, ...(failureCategory ? { failureCategory } : {}) })
     // Retire the oldest runs' checkpoints so repeated debugging cannot fill
     // the data directory. Fire-and-forget: pruning must never hold the run.
     if (wantCheckpoints) void prunePersistedCheckpoints()
@@ -745,12 +916,17 @@ export async function executeWorkflow(
       trace,
       ...(result.variables ? { variables: result.variables } : {}),
       ...(result.steps ? { steps: result.steps } : {}),
+      ...(result.degradations?.length ? { degradations: result.degradations } : {}),
+      ...(result.conditionWarnings?.length ? { conditionWarnings: result.conditionWarnings } : {}),
+      ...(result.nodeConditions?.length ? { nodeConditions: result.nodeConditions } : {}),
+      completedNodeIds: result.completedNodeIds,
+      ...(result.stoppedBefore ? { stoppedBefore: result.stoppedBefore } : {}),
+      ...(result.goalBaseline ? { goalBaseline: result.goalBaseline } : {}),
       ...(resumedFrom !== undefined ? { resumedFrom } : {}),
     }
   } catch (e) {
     // A cancellation or engine error that leaked out of runWorkflow.
-    const aborted =
-      run.controller.signal.aborted || (e instanceof DOMException && e.name === 'AbortError')
+    const aborted = runSignal.aborted || (e instanceof DOMException && e.name === 'AbortError')
     if (aborted) {
       const trace = traceCollector.build('cancelled', variables ?? {})
       if (ownsRun) finishRun(runId, { outcome: 'cancelled' })

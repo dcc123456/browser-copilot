@@ -158,12 +158,14 @@ describe('normalizeStoredSettings', () => {
         localAgentUrl: 'ws://127.0.0.1:8765',
         localAgentActiveAgent: '',
         localAgentAdapterPath: '',
+      localAgentAllowReload: false,
         localAgentBindings: {},
         unattendedWindowPolicy: 'latest',
         imageModel: { providerId: '', model: '' },
         ocrLanguage: 'eng',
         takeoverModel: { providerId: '', model: '' },
         takeoverOnRun: false,
+        autoRepairOnRun: false,
       })
     }
   })
@@ -183,12 +185,14 @@ describe('normalizeStoredSettings', () => {
       localAgentUrl: 'ws://127.0.0.1:8765',
       localAgentActiveAgent: '',
       localAgentAdapterPath: '',
+      localAgentAllowReload: false,
       localAgentBindings: {},
       unattendedWindowPolicy: 'latest',
       imageModel: { providerId: '', model: '' },
       ocrLanguage: 'chi_sim+eng',
       takeoverModel: { providerId: '', model: '' },
       takeoverOnRun: false,
+      autoRepairOnRun: false,
     }
     expect(normalizeStoredSettings(settings)).toEqual(settings)
   })
@@ -230,12 +234,14 @@ describe('normalizeStoredSettings', () => {
       localAgentUrl: 'ws://127.0.0.1:8765',
       localAgentActiveAgent: '',
       localAgentAdapterPath: '',
+      localAgentAllowReload: false,
       localAgentBindings: {},
       unattendedWindowPolicy: 'latest',
       imageModel: { providerId: '', model: '' },
       ocrLanguage: 'eng',
       takeoverModel: { providerId: '', model: '' },
       takeoverOnRun: false,
+      autoRepairOnRun: false,
     })
   })
 

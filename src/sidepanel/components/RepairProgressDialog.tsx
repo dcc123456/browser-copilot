@@ -39,6 +39,8 @@ export interface RepairProgressDialogProps {
   onClose: () => void
   /** Human takeover action (blocked / exhausted states only). */
   onHumanTakeover: () => void
+  /** Cancel the in-flight repair (only offered while it is still running). */
+  onCancelRepair?: () => void
 }
 
 type DerivedState = 'running' | 'success' | 'exhausted' | 'blocked'
@@ -56,8 +58,9 @@ function stateOf(events: RepairProgressEvent[]): DerivedState {
 function stepRowsOf(
   events: RepairProgressEvent[],
   t: ReturnType<typeof useT>,
-): Array<{ key: string; status: 'done' | 'running' | 'pending'; text: string }> {
-  const rows: Array<{ key: string; status: 'done' | 'running' | 'pending'; text: string }> = []
+  state: DerivedState,
+): Array<{ key: string; status: RowStatus; text: string }> {
+  const rows: Array<{ key: string; status: RowStatus; text: string }> = []
   for (const event of events) {
     if (event.type === 'repair.diagnosing') {
       rows.push({ key: `${event.type}-${event.sessionId}-${event.attempt}`, status: 'done', text: t.workflowRepairDiagnosing })
@@ -65,9 +68,15 @@ function stepRowsOf(
       rows.push({ key: `${event.type}-${event.sessionId}-${event.strategy}`, status: 'done', text: t.workflowRepairApplying })
     } else if (event.type === 'repair.verifying') {
       rows.push({ key: `${event.type}-${event.sessionId}`, status: 'running', text: t.workflowRepairVerifying })
+    } else if (event.type === 'repair.attempt-failed') {
+      rows.push({
+        key: `${event.type}-${event.sessionId}-${event.attempt}`,
+        status: 'failed',
+        text: t.workflowRepairAttemptFailed,
+      })
     }
   }
-  // Mark all but the last running row done.
+  // Only the trailing in-flight step is 'running'; earlier ones already settled.
   let lastRunningSeen = false
   for (let i = rows.length - 1; i >= 0; i -= 1) {
     const row = rows[i]!
@@ -77,13 +86,23 @@ function stepRowsOf(
     }
   }
   if (rows.length === 0) {
-    rows.push({ key: 'starting', status: 'running', text: t.workflowRepairStarting })
+    rows.push({ key: 'starting', status: state === 'running' ? 'running' : 'pending', text: t.workflowRepairStarting })
+  }
+  // The repair has settled: nothing may still look in-flight, or the spinner
+  // reads as "the AI is still working" long after it gave up.
+  if (state !== 'running') {
+    for (const row of rows) {
+      if (row.status === 'running') row.status = state === 'success' ? 'done' : 'failed'
+    }
   }
   return rows.slice(-6)
 }
 
-function RowGlyph({ status }: { status: 'done' | 'running' | 'pending' }): ReactNode {
+type RowStatus = 'done' | 'running' | 'pending' | 'failed'
+
+function RowGlyph({ status }: { status: RowStatus }): ReactNode {
   if (status === 'done') return <CheckCircle2 className="h-4 w-4 text-ok" aria-hidden />
+  if (status === 'failed') return <TriangleAlert className="h-4 w-4 text-err" aria-hidden />
   if (status === 'running') return <Loader2 className="h-4 w-4 animate-spin text-accent" aria-hidden />
   return <CircleDashed className="h-4 w-4 text-muted" aria-hidden />
 }
@@ -105,7 +124,7 @@ export function RepairProgressDialog(props: RepairProgressDialogProps): ReactNod
 
   if (!open) return null
 
-  const rows = stepRowsOf(events, t)
+  const rows = stepRowsOf(events, t, state)
   const lastEvent = events.at(-1)
   const detail =
     lastEvent && 'reason' in lastEvent ? lastEvent.reason : undefined
@@ -173,6 +192,15 @@ export function RepairProgressDialog(props: RepairProgressDialogProps): ReactNod
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
+          {state === 'running' && props.onCancelRepair ? (
+            <button
+              type="button"
+              onClick={props.onCancelRepair}
+              className="h-8 rounded-lg border border-err/60 bg-panel-2 px-3 text-xs font-medium text-err transition-colors hover:bg-hover"
+            >
+              {t.workflowRepairCancel}
+            </button>
+          ) : null}
           {state === 'blocked' || state === 'exhausted' ? (
             <button
               type="button"

@@ -9,6 +9,8 @@
  */
 
 import type { Workflow } from './types'
+import { selectorFromTarget } from './target-to-selector'
+import { conditionTargetIsNamed, describeCondition, type WorkflowCondition } from './conditions'
 
 /** How a selector fared against the live page. */
 export type SelectorStatus = 'unique' | 'ambiguous' | 'missing'
@@ -49,8 +51,13 @@ export function selectorsOf(
   const found: { nodeId: string; blockId: string; selector: string }[] = []
   for (const node of workflow.drawflow.nodes) {
     const blockId = typeof node.data?.['blockId'] === 'string' ? node.data['blockId'] : ''
-    const selector = node.data?.['selector']
     if (!blockId || blockId === 'trigger') continue
+    // A node that recorded a rich target (role/text/ref spec) with no flat
+    // selector is still located — probe the CSS form of the target so the
+    // save card has live evidence for it too (mirrors `selectorOf`).
+    const selector =
+      (typeof node.data?.['selector'] === 'string' && node.data['selector']) ||
+      selectorFromTarget(node.data?.['target'])
     if (typeof selector !== 'string' || !selector.trim()) continue
     found.push({ nodeId: node.id, blockId, selector: selector.trim().slice(0, 300) })
   }
@@ -90,4 +97,65 @@ export function locatorConcernLines(probes: readonly SelectorProbeResult[]): str
     }
   }
   return lines
+}
+
+/** The condition kinds that look at an element on a page. */
+const ELEMENT_KINDS: readonly WorkflowCondition['kind'][] = [
+  'elementExists',
+  'elementVisible',
+  'elementEnabled',
+  'elementText',
+  'attributeEquals',
+  'count',
+  // The DIFFERENTIAL element rows. They read as evidence only through the run's
+  // pre-run snapshot, so an invented locator here does not produce a false pass —
+  // it produces a row that can never hold, and a certification that fails without
+  // naming the reason. This matters because this is exactly the row shape the
+  // draft-list notice asks the model to write (「草稿列表数量增加」), and the step that
+  // gets it is a click on the navigation entry, which never records the list's own
+  // selector.
+  'countIncreased',
+  'elementAppeared',
+  'elementGone',
+]
+
+/**
+ * Goal rows whose ONLY locator is a selector no step of this graph ever used.
+ *
+ * The graph's own nodes are the evidence of what was really on the page. Round 26
+ * replayed 18/18 and still failed its goal on a row naming
+ * `.publishBtn, .btn.submit` — classes 小红书 does not have — so the check was
+ * unsatisfiable from the moment it was sealed, and `元素不存在` read as "the run
+ * did not work" when the truth is "nobody ever saw that element". Evidence, not a
+ * gate: a row may legitimately aim at state the graph reaches later, and a row that
+ * names its element with visible words (role/name/text/label) is checkable without a
+ * selector. A test id is NOT in that set — round 43 failed L3 on an invented
+ * `draft-saved` while looking grounded, because a test id is as much a guess as a
+ * CSS class until a step proves the page has it.
+ */
+export function ungroundedGoalConditions(workflow: Workflow): string[] {
+  const spec = workflow.settings.goalSpec
+  if (!spec) return []
+  const seen = new Set(selectorsOf(workflow).map((found) => found.selector))
+  const lines: string[] = []
+  for (const row of [...spec.successConditions, ...(spec.terminalStateConditions ?? [])]) {
+    if (!ELEMENT_KINDS.includes(row.kind)) continue
+    const target = (row as { target?: unknown }).target
+    if (!target || typeof target !== 'object') continue
+    const raw = target as Record<string, unknown>
+    if (conditionTargetIsNamed(row)) continue
+    const selector =
+      (typeof raw['selector'] === 'string' && raw['selector'].trim()) ||
+      // What the observer would actually search for: a test id is a DOM attribute,
+      // so a step that recorded `[data-testid="…"]` grounds the row.
+      (typeof raw['testId'] === 'string' && raw['testId'].trim()
+        ? `[data-testid="${(raw['testId'] as string).trim()}"]`
+        : '') ||
+      selectorFromTarget(target) ||
+      ''
+    if (!selector || seen.has(selector)) continue
+    const line = `${describeCondition(row)} — this locator appears in no step of the graph`
+    if (!lines.includes(line)) lines.push(line)
+  }
+  return lines.slice(0, MAX_SELECTORS)
 }
