@@ -70,19 +70,25 @@ node tmp/operator-matrix/matrix.mjs --only data # 单子集
 19. **`javascript-code` 语句体里的顶层 `await` 编译即死**。kernel 只对「不含语句关键字」的裸表达式做 async 包装；`const r = await fetch(...); return (await r.json()).total` 这种最常见的写法落进同步 `new Function` 体，在编译期就抛 `await is only valid in async functions...`。现在语句体编译失败且代码含 `await` 时重试一次 async IIFE 包装（包装也编译不过则抛原始错误，不把真正的语法错误换成噪音）。
 20. **`link` 块（同标签页）在导航真正开始前就报完成**。`waitForLoaded` 读的是**上一份**文档的 load 状态：合成点击返回时导航还在队列里，于是端口立刻报「已点击链接」。紧跟 `go-back` 时，历史回退发生在导航中途，页面落到 `about:blank`（探针实测 `AFTERBACK=about:blank`、`history.length=3`）。端口新增 `driver.currentUrl` + `waitForUrlLeave`，同标签页点击后先等 URL 离开原值再等 load；锚点（`#`）与 `javascript:` 链接不等。
 
+第三轮（矩阵全绿之后由用户在实际编辑器里报出，矩阵抓不到——见条目本身）：
+
+21. **互斥分支只连一个端口时，另一个分支照样执行**。`element-exists` 只连了「存在时」的线，元素**不存在**也照样跑了存在分支；`conditions` 同理（只连 true 口时 false 判定也走 true）。根因在共享引擎的 `defaultNext = outEdges[0]?.target ?? null`：分支块执行器返回 `outputs[taken] ?? ctx.defaultNext`，而 `outputs[taken]` 在「那个口根本没连线」时是 undefined，于是一路回落到**第一条出边**——恰恰可能是判定没走的那个口。修法在 `src/background/workflow-engine/engine.ts`：新增 `EXCLUSIVE_BRANCH_BLOCKS = {conditions, element-exists}`，当该块**每一条**出边都带端口标签（`portEdges === outEdges.length && portEdges > 0`）时 `defaultNext` 取 `null`（图在此结束）；未带标签的老式直通连线仍然直通。循环块（`loop-data`/`while-loop`/`repeat-task`）刻意排除在外：它们的 `output-1` 是循环体，续行由引擎的循环解释器决定，而解释器依赖 `defaultNext`。因为这是共享引擎，扩展与 Runner 端口一次修复。
+    - **为什么 146 条用例没抓到**：`element-exists.exists`/`notExists`/`retry` 与 `conditions.true-branch`/`false-branch` 全都把 `output-1` 和 `output-2` **两个口都连上**，`outputs[taken]` 总能命中，`defaultNext` 这条回落路径从未被走到。真实用户只连一个口，才暴露出这个形状。
+    - 证据（修复前 FAIL / 修复后 PASS，两个面各一次）：单元面 `tests/branch-fallthrough.spec.ts`（真引擎 + 真 `EXECUTORS`，仅 mock `driver.elementExists`）3 FAIL → 7 PASS；真实浏览器面新增 `element-exists.single-port-exists-only-absent`、`conditions.single-port-true-only-false`（只连 `output-1`，断言门后没有任何 hook 证据且运行不失败），把 `defaultNext` 改回旧表达式后两条都是 FAIL 且 `hook={"branch":"exists"}`（元素不存在却跑了存在分支），恢复修复后两条 PASS。
+
 ## 5. 复现与验证
 
-- 单元层：`pnpm typecheck && pnpm test`（含 `tests/operator-param-coverage.spec.ts` 的四条守卫：广告出去的参数必须被读到、UI-only key 不得被重新广告、KNOWN_INERT 不得过期、算子不得无 executor）。该守卫现在会把 `src/lib/workflow/block-output.ts` 一并解析，否则共享 helper 里的 `data['variableName']` 会被误判为「无人读取」。本轮改到的扩展 executor 行为另有 `tests/webhook-response.spec.ts`、`tests/variable-blocks.spec.ts` 与新增的 `tests/clipboard-selection-download-wait.spec.ts`（钉住 `copySelectedText` 与 `handle-download` 的等待语义——静态守卫抓不到 `clipboard`，因为它没有被广告成算子工具）。
+- 单元层：`pnpm typecheck && pnpm test`（含 `tests/operator-param-coverage.spec.ts` 的四条守卫：广告出去的参数必须被读到、UI-only key 不得被重新广告、KNOWN_INERT 不得过期、算子不得无 executor）。该守卫现在会把 `src/lib/workflow/block-output.ts` 一并解析，否则共享 helper 里的 `data['variableName']` 会被误判为「无人读取」。本轮改到的扩展 executor 行为另有 `tests/webhook-response.spec.ts`、`tests/variable-blocks.spec.ts` 与新增的 `tests/clipboard-selection-download-wait.spec.ts`（钉住 `copySelectedText` 与 `handle-download` 的等待语义——静态守卫抓不到 `clipboard`，因为它没有被广告成算子工具）。分支路由的回落语义由 `tests/branch-fallthrough.spec.ts` 钉住（真引擎 + 真 `EXECUTORS`，只 mock `driver.elementExists`；覆盖 §4 第 21 条的单端口形状与「未标签连线仍直通」的兼容分支）。
 - 端口层：`pnpm server:typecheck && pnpm server:test`。**端口改动必须单独跑 `server:typecheck`**：根 `pnpm typecheck` 不覆盖 `server/`，本轮就在 `server/` 里写过 `effective.nodes`（图实际在 `effective.drawflow.nodes`），类型检查没拦到、真跑时 146 条用例一起崩成 `Cannot read properties of undefined (reading 'find')`。
-- 真实浏览器层：`node tmp/operator-matrix/matrix.mjs`（本报告 §6 的全部结论来源）。
+- 真实浏览器层：`node tmp/operator-matrix/matrix.mjs`（本报告 §6 的全部结论来源；补入 §4 第 21 条的两条单端口用例后共 148 条）。
 - 扩展宿主层（端口答不了的那些）：`pnpm build` → bridge 的 `reload_extension`（`{confirm:"reload"}`，载入构建戳）→ `generate_workflow` 对着同一个 fixture 站点起一轮生成，它会保存并试重放，`trialRun` 的 `coveredSteps` 与 `goalSpec` 的 `variableExists` 条件就是扩展内的判定证据；再用 `tab_switch` + `run_javascript` 回读 fixture 的状态镜像（`/form` 的 `#log-all`、`#key-log`）确认写入不是「没报错」而是真落到页面状态。结论见 §6.3。
 - 引擎相关改动附带 `pnpm bench:debug`。
 
 ## 6. 逐算子判定
 
-规模：面板 67 个算子（`BLOCK_CATALOG` 63 + `CUSTOM_BLOCKS` 4），146 条真跑用例覆盖 62 个，其余 5 个记入 `UNTESTABLE`（cloud-only / 需真实 Google 授权，见 §7）；`tmp/operator-matrix/coverage.mjs` 双向校验「算子没有用例」与「用例指向不存在的算子」，当前两侧都是 0。逐条观察证据（每步日志、hook 收到的 JSON、下载/上传计数）在机器生成版 `tmp/operator-matrix/operator-matrix.md`；本节只给结论。
+规模：面板 67 个算子（`BLOCK_CATALOG` 63 + `CUSTOM_BLOCKS` 4），148 条真跑用例覆盖 62 个，其余 5 个记入 `UNTESTABLE`（cloud-only / 需真实 Google 授权，见 §7）；`tmp/operator-matrix/coverage.mjs` 双向校验「算子没有用例」与「用例指向不存在的算子」，当前两侧都是 0。逐条观察证据（每步日志、hook 收到的 JSON、下载/上传计数）在机器生成版 `tmp/operator-matrix/operator-matrix.md`；本节只给结论。
 
-最后一轮全量：**140 PASS / 3 FAIL / 3 BLOCKED**。判据的证据面：矩阵跑的是 Runner 端口，但它与扩展共用同一引擎（`src/background/workflow-engine/engine.ts`）、同一页面 kernel（端口直接 `import { runExecJs, runOp, runWorkflowJs } from '../src/inpage/kernel'`）与同一批共享 helper，只有 executor 的宿主 API 调用是两份对照实现；扩展侧的改动由 `pnpm test` 与静态参数守卫把关，端口答不了的四条（contenteditable 受信任按键、`await` 语句体、iframe 作用域、变量读取）另跑了一轮**真扩展生成 + 试重放**复验，结论与一处改判见 §6.3。收敛过程：一次崩盘 8 PASS / 138 FAIL（`effective.nodes` 事故）→ 127 → 134 → 138 → 140，其间 16→3 的差额里，产品缺陷与「用例自己写错/证据通道竞态」几乎各半（§4 第 11-14 条与 §5）。
+最后一轮全量：**142 PASS / 3 FAIL / 3 BLOCKED**（148 条，含 §4 第 21 条补入的两条单端口用例；三条 FAIL 与补用例前的三条同名单，分支路由改动无回归）。判据的证据面：矩阵跑的是 Runner 端口，但它与扩展共用同一引擎（`src/background/workflow-engine/engine.ts`）、同一页面 kernel（端口直接 `import { runExecJs, runOp, runWorkflowJs } from '../src/inpage/kernel'`）与同一批共享 helper，只有 executor 的宿主 API 调用是两份对照实现；扩展侧的改动由 `pnpm test` 与静态参数守卫把关，端口答不了的四条（contenteditable 受信任按键、`await` 语句体、iframe 作用域、变量读取）另跑了一轮**真扩展生成 + 试重放**复验，结论与一处改判见 §6.3。收敛过程：一次崩盘 8 PASS / 138 FAIL（`effective.nodes` 事故）→ 127 → 134 → 138 → 140，其间 16→3 的差额里，产品缺陷与「用例自己写错/证据通道竞态」几乎各半（§4 第 11-14 条与 §5）。
 
 四类判定：
 
@@ -142,8 +148,8 @@ node tmp/operator-matrix/matrix.mjs --only data # 单子集
 | `google-sheets` | 0 | 不可测（需真实授权凭据） | — |
 | `google-sheets-drive` | 0 | 不可测（cloud-only 块） | — |
 | `google-drive` | 0 | 不可测（需真实授权凭据） | — |
-| `conditions` | 14: 14P/0F/0B | 正常 | — |
-| `element-exists` | 3: 3P/0F/0B | 正常 | findBy, tryCount, timeout, throwError |
+| `conditions` | 15: 15P/0F/0B | 正常 | — |
+| `element-exists` | 4: 4P/0F/0B | 正常 | findBy, tryCount, timeout, throwError |
 | `webhook` | 5: 5P/0F/0B | 正常 | — |
 | `while-loop` | 2: 2P/0F/0B | 正常 | — |
 | `loop-data` | 5: 5P/0F/0B | 正常 | — |
