@@ -20,7 +20,7 @@
  */
 
 import { isManualSchedule, nextRunAt } from '../lib/schedule'
-import { getTask, listTasks, saveTask } from '../lib/task-store'
+import { getTask, listTasks, disableTask, saveTask } from '../lib/task-store'
 import type { ScheduledTask } from '../lib/scheduler-types'
 import { runTask } from './task-runner'
 
@@ -66,7 +66,8 @@ export async function scheduleTask(taskId: string): Promise<void> {
     return
   }
   const when = nextRunAt(task.schedule, Date.now())
-  // nextRunAt only returns null for the manual schedule, handled above.
+  // null also means a one-shot whose instant is gone: leave it unarmed rather
+  // than clamping it to "soon", which would re-fire a run that already happened.
   if (when === null) {
     await chrome.alarms.clear(name)
     return
@@ -114,8 +115,20 @@ async function handleScheduledRun(taskId: string): Promise<void> {
   const task = await getTask(taskId)
   if (!task || !task.enabled) return
 
-  // The alarm is one-shot; queue the next firing before running so a crash in
-  // the task does not leave the schedule stranded.
+  // A one-shot is finished the moment it fires, so it is put away BEFORE running
+  // rather than re-armed after: if the run throws, or the worker is evicted
+  // mid-run, nothing is left to fire it a second time. `disableTask` goes through
+  // the store's key lock (the run about to settle writes the same record), and
+  // `rescheduleAll` only knows enabled tasks, so this one stays down.
+  if (task.schedule.kind === 'once') {
+    await disableTask(taskId)
+    await chrome.alarms.clear(alarmNameFor(task))
+    await runTask(task, 'schedule')
+    return
+  }
+
+  // Recurring: the alarm is one-shot; queue the next firing before running so a
+  // crash in the task does not leave the schedule stranded.
   await scheduleTask(taskId)
   await runTask(task, 'schedule')
 }
