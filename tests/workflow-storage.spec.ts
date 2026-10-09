@@ -8,7 +8,11 @@ import {
 } from '../src/lib/workflow/storage'
 import type { Workflow } from '../src/lib/workflow/types'
 import { validateWorkflow } from '../src/lib/workflow/validation'
-import { ambiguityPolicyOf, degradeReplayOf, isGeneratedStrict } from '../src/lib/workflow/reliability'
+import {
+  ambiguityPolicyOf,
+  degradeReplayOf,
+  isGeneratedStrict,
+} from '../src/lib/workflow/reliability'
 
 /**
  * In-memory `chrome.storage.local` double. Only `get`/`set` are needed here

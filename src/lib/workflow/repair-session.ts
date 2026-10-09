@@ -282,10 +282,7 @@ export function setRepairPhase(
 // --- Attempt management -------------------------------------------------------
 
 /** Begin a new attempt for `strategy` (phase planning). */
-export function beginAttempt(
-  session: RepairSession,
-  strategy: RepairStrategy,
-): RepairSession {
+export function beginAttempt(session: RepairSession, strategy: RepairStrategy): RepairSession {
   const attempt: RepairAttempt = {
     attempt: session.attempts.length + 1,
     strategy,
@@ -373,10 +370,7 @@ export function durationBudgetExceeded(session: RepairSession, now = Date.now())
 }
 
 /** Settle the session with a final result. */
-export function settleRepair(
-  session: RepairSession,
-  final: RepairFinalResult,
-): RepairSession {
+export function settleRepair(session: RepairSession, final: RepairFinalResult): RepairSession {
   const phase: RepairPhase =
     final.status === 'success' ? 'success' : final.status === 'blocked' ? 'blocked' : 'exhausted'
   return {

@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { resolveNodeGoalContract } from '../src/lib/workflow/node-goal-instantiation'
+import { nodeGoalContractOf, withNodeGoalContract } from '../src/lib/workflow/node-goal-contract'
 import {
-  nodeGoalContractOf, withNodeGoalContract,
-} from '../src/lib/workflow/node-goal-contract'
-import {
-  generateWorkflowName, isAcceptableWorkflowName, normalizeGenerationGoalContract,
+  generateWorkflowName,
+  isAcceptableWorkflowName,
+  normalizeGenerationGoalContract,
 } from '../src/lib/workflow/generation-goal'
 describe('29.7 node goal', () => {
   it('instantiates a specific node goal with checkable criteria', () => {
     const contract = resolveNodeGoalContract('forms', {
-      selector: '#email', value: 'alice@example.com', variableName: 'emailValue',
+      selector: '#email',
+      value: 'alice@example.com',
+      variableName: 'emailValue',
     })
     expect(contract).toBeDefined()
     expect(contract!.goal.length).toBeGreaterThan(0)
@@ -18,7 +20,11 @@ describe('29.7 node goal', () => {
     expect(nodeGoalContractOf(data)?.goal).toBe(contract!.goal)
   })
   it('prefers a supplied model-authored contract', () => {
-    const supplied = { version: 1, goal: 'custom authored goal', successCriteria: [{ kind: 'variableExists', name: 'x' }] }
+    const supplied = {
+      version: 1,
+      goal: 'custom authored goal',
+      successCriteria: [{ kind: 'variableExists', name: 'x' }],
+    }
     const contract = resolveNodeGoalContract('forms', {}, supplied)
     expect(contract!.goal).toBe('custom authored goal')
   })
@@ -55,7 +61,10 @@ describe('29.8 workflow goal', () => {
   })
   it('rejects a contract without success conditions', () => {
     const contract = normalizeGenerationGoalContract({
-      version: 1, name: 'Broken', goalSpec: { summary: 'done', successConditions: [] }, requiredCapabilities: [],
+      version: 1,
+      name: 'Broken',
+      goalSpec: { summary: 'done', successConditions: [] },
+      requiredCapabilities: [],
     })
     expect(contract).toBeUndefined()
   })

@@ -1,24 +1,52 @@
 import { describe, expect, it } from 'vitest'
 import {
-  buildGoalRepairContext, renderGoalRepairContext,
+  buildGoalRepairContext,
+  renderGoalRepairContext,
 } from '../src/lib/workflow/goal-repair-context'
 import type { Workflow, WorkflowNode } from '../src/lib/workflow/types'
 import { withNodeGoalContract } from '../src/lib/workflow/node-goal-contract'
 function setup(): { workflow: Workflow; failed: WorkflowNode } {
-  const failedData = withNodeGoalContract({ blockId: 'event-click' }, {
-    version: 1,
-    goal: 'Open the create-customer form',
-    successCriteria: [{ kind: 'elementExists', target: { testId: 'create-form' } }],
-    preconditions: [{ kind: 'elementVisible', target: { testId: 'nav' } }],
-    failureMeaning: ['The form did not open.'],
-    repairHints: [{ target: 'locator', action: 'Re-ground on the nav button.' }],
-  })
-  const failed: WorkflowNode = { id: 'n2', label: 'event-click', position:{x:0,y:0}, data: failedData }
-  const trigger: WorkflowNode = { id: 'trigger', label: 'trigger', position:{x:0,y:0}, data: { blockId: 'trigger' } }
+  const failedData = withNodeGoalContract(
+    { blockId: 'event-click' },
+    {
+      version: 1,
+      goal: 'Open the create-customer form',
+      successCriteria: [{ kind: 'elementExists', target: { testId: 'create-form' } }],
+      preconditions: [{ kind: 'elementVisible', target: { testId: 'nav' } }],
+      failureMeaning: ['The form did not open.'],
+      repairHints: [{ target: 'locator', action: 'Re-ground on the nav button.' }],
+    },
+  )
+  const failed: WorkflowNode = {
+    id: 'n2',
+    label: 'event-click',
+    position: { x: 0, y: 0 },
+    data: failedData,
+  }
+  const trigger: WorkflowNode = {
+    id: 'trigger',
+    label: 'trigger',
+    position: { x: 0, y: 0 },
+    data: { blockId: 'trigger' },
+  }
   const workflow = {
-    id: 'w', name: 'w', description: '', createdAt: 0, updatedAt: 0,
+    id: 'w',
+    name: 'w',
+    description: '',
+    createdAt: 0,
+    updatedAt: 0,
     trigger: { type: 'manual', enabled: true },
-    settings: { saveLog:false, debugMode:false, notification:false, reuseLastState:false, provenance:'chat-generate', goalSpec: { summary: 'A customer is created.', successConditions: [{ kind: 'elementExists', target: { testId: 'customer-created' } }] } },
+    settings: {
+      saveLog: false,
+      debugMode: false,
+      notification: false,
+      reuseLastState: false,
+      provenance: 'chat-generate',
+      goalSpec: {
+        summary: 'A customer is created.',
+        successConditions: [{ kind: 'elementExists', target: { testId: 'customer-created' } }],
+      },
+    },
     drawflow: { nodes: [trigger, failed], edges: [] },
   } as unknown as Workflow
   return { workflow, failed }

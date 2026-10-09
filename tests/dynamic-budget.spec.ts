@@ -94,8 +94,8 @@ describe('dynamic repair budget', () => {
   })
 
   it('builds stable failure signatures', () => {
-    expect(
-      failureSignatureOf({ failedNodeId: 'n5', code: 'TARGET_NOT_FOUND', message: 'x' }),
-    ).toBe('n5|TARGET_NOT_FOUND|x')
+    expect(failureSignatureOf({ failedNodeId: 'n5', code: 'TARGET_NOT_FOUND', message: 'x' })).toBe(
+      'n5|TARGET_NOT_FOUND|x',
+    )
   })
 })

@@ -341,8 +341,7 @@ export function createDriverReadinessProbe(
           scope,
         ).catch(() => undefined)
         const data = result?.data as
-          | { state?: string; visible?: boolean; enabled?: boolean; fileInput?: boolean }
-          | undefined
+          { state?: string; visible?: boolean; enabled?: boolean; fileInput?: boolean } | undefined
         if (!data?.state) return { satisfied: false, detail: '元素尚未出现' }
         if (data.state === 'missing') return { satisfied: false, detail: '元素尚未出现' }
         // `state: 'ready'` is visible ∧ enabled ∧ unoccluded — using it for a

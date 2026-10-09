@@ -157,14 +157,20 @@ function parseEdgePatch(value: unknown, issues: string[]): EdgePatch | undefined
             op,
             source: value['source'],
             target: value['target'],
-            ...(typeof value['sourceHandle'] === 'string' ? { sourceHandle: value['sourceHandle'] } : {}),
-            ...(typeof value['targetHandle'] === 'string' ? { targetHandle: value['targetHandle'] } : {}),
+            ...(typeof value['sourceHandle'] === 'string'
+              ? { sourceHandle: value['sourceHandle'] }
+              : {}),
+            ...(typeof value['targetHandle'] === 'string'
+              ? { targetHandle: value['targetHandle'] }
+              : {}),
           }
         : {
             op,
             source: value['source'],
             target: value['target'],
-            ...(typeof value['sourceHandle'] === 'string' ? { sourceHandle: value['sourceHandle'] } : {}),
+            ...(typeof value['sourceHandle'] === 'string'
+              ? { sourceHandle: value['sourceHandle'] }
+              : {}),
           }
     return out
   }
@@ -296,10 +302,7 @@ function extractJson(text: string): unknown {
 }
 
 /** Strictly validate an already-parsed candidate (spec §17 parsing rules). */
-export function validateRepairCandidate(
-  candidate: RepairCandidate,
-  workflow: Workflow,
-): string[] {
+export function validateRepairCandidate(candidate: RepairCandidate, workflow: Workflow): string[] {
   const issues: string[] = []
   const nodeIds = new Set(workflow.drawflow.nodes.map((node) => node.id))
   for (const patch of candidate.nodePatches) {
@@ -315,7 +318,9 @@ export function validateRepairCandidate(
     const endpointsExist = nodeIds.has(patch.source) && nodeIds.has(patch.target)
     // A connect may reference a node inserted by the same candidate.
     const inserted = candidate.nodePatches.some(
-      (nodePatch) => nodePatch.op === 'insert-node' && (nodePatch.node.id === patch.source || nodePatch.node.id === patch.target),
+      (nodePatch) =>
+        nodePatch.op === 'insert-node' &&
+        (nodePatch.node.id === patch.source || nodePatch.node.id === patch.target),
     )
     if (!endpointsExist && !inserted) {
       issues.push(`edge endpoint missing: ${patch.source} → ${patch.target}`)

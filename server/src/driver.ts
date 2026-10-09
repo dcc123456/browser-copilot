@@ -438,7 +438,10 @@ export class RunDriver {
    * first element.
    */
   async elementSelectorAt(selector: string, index: number, tabId?: number): Promise<string | null> {
-    const result = await this.execOp({ action: 'element_selector_at', value: selector, index }, tabId)
+    const result = await this.execOp(
+      { action: 'element_selector_at', value: selector, index },
+      tabId,
+    )
     return result.ok && typeof result.data === 'string' && result.data !== '' ? result.data : null
   }
 

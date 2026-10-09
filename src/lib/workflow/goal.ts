@@ -160,7 +160,9 @@ function recordedPageWords(node: GoalDerivationSource['nodes'][number]): string[
 /** The sentences written ABOUT a step: its label, its declared intent. */
 function stepProse(node: GoalDerivationSource['nodes'][number]): string {
   const reliability = node.data?.['__reliability'] as { intent?: unknown } | undefined
-  return [node.label ?? '', typeof reliability?.intent === 'string' ? reliability.intent : ''].join(' ')
+  return [node.label ?? '', typeof reliability?.intent === 'string' ? reliability.intent : ''].join(
+    ' ',
+  )
 }
 
 /**
@@ -208,9 +210,13 @@ export function groundGoalSpecToGraph(
   source: GoalDerivationSource,
 ): { goalSpec: WorkflowGoalSpec; dropped: WorkflowCondition[] } {
   const nodes = source.nodes
-  const isTrigger = (node: Pick<WorkflowNode, 'data'>): boolean => node.data?.['blockId'] === 'trigger'
+  const isTrigger = (node: Pick<WorkflowNode, 'data'>): boolean =>
+    node.data?.['blockId'] === 'trigger'
   const haystack = [
-    nodes.filter((node) => !isTrigger(node)).map((node) => JSON.stringify(node.data ?? {})).join('\n'),
+    nodes
+      .filter((node) => !isTrigger(node))
+      .map((node) => JSON.stringify(node.data ?? {}))
+      .join('\n'),
     JSON.stringify(nodes.find(isTrigger)?.data?.['parameters'] ?? ''),
   ].join('\n')
 
@@ -230,7 +236,8 @@ export function groundGoalSpecToGraph(
     dropped.push(condition)
     return false
   })
-  if (dropped.length === 0) return { goalSpec: reworded ? specWith(aligned) : goalSpec, dropped: [] }
+  if (dropped.length === 0)
+    return { goalSpec: reworded ? specWith(aligned) : goalSpec, dropped: [] }
 
   const successConditions = [...kept]
   if (!successConditions.some(provesLandedEffect)) {

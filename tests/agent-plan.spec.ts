@@ -61,8 +61,7 @@ afterEach(() => {
 function deps(
   overrides: Partial<Parameters<typeof runAgentTurn>[1]> & { conversationId?: string } = {},
 ) {
-  const conversationId =
-    overrides.conversationId ?? `conv-${Math.random().toString(36).slice(2)}`
+  const conversationId = overrides.conversationId ?? `conv-${Math.random().toString(36).slice(2)}`
   return {
     send: (_message: AgentServerMessage): void => {},
     confirm: vi.fn(async () => true),
@@ -203,8 +202,7 @@ describe('use_skill surface while the plan skill is pinned', () => {
       createdAt: 0,
       updatedAt: 0,
     })
-    streamMock
-      .mockResolvedValueOnce({ content: 'done', toolCalls: [] } as never)
+    streamMock.mockResolvedValueOnce({ content: 'done', toolCalls: [] } as never)
     const history: { role: string; name?: string; content?: string }[] = [
       { role: 'user', content: 'plan something' },
     ]
@@ -429,7 +427,10 @@ describe('plan gate across a turn', () => {
     ]
     await runAgentTurn(
       history as never,
-      deps({ conversationId: `conv-${Math.random().toString(36).slice(2)}`, skillId: 'plan-skill-id' }) as never,
+      deps({
+        conversationId: `conv-${Math.random().toString(36).slice(2)}`,
+        skillId: 'plan-skill-id',
+      }) as never,
     )
     expect(String(toolResult(history, 'click')['error'])).toContain('Plan-first is active')
   })
@@ -464,7 +465,11 @@ describe('skill catalogue composition while the plan skill is pinned', () => {
 
   it('keeps the catalogue visible in the system prompt so steps can load skills', () => {
     getSkillMock.mockResolvedValue(planSkill)
-    const prompt = buildSystemPrompt({ activeSkill: planSkill, catalogue: [helperSkill], mode: 'full' })
+    const prompt = buildSystemPrompt({
+      activeSkill: planSkill,
+      catalogue: [helperSkill],
+      mode: 'full',
+    })
     expect(prompt).toContain('captcha-helper')
     expect(prompt).toContain('use_skill')
     expect(prompt).toContain('## ACTIVE SKILL — APPLY NOW: plan')
@@ -485,10 +490,12 @@ describe('skill catalogue composition while the plan skill is pinned', () => {
     streamMock
       .mockResolvedValueOnce({
         content: '',
-        toolCalls: [toolCall('c1', 'present_plan', {
-          goal: 'g',
-          steps: [{ title: 's1' }, { title: 's2' }],
-        })],
+        toolCalls: [
+          toolCall('c1', 'present_plan', {
+            goal: 'g',
+            steps: [{ title: 's1' }, { title: 's2' }],
+          }),
+        ],
       } as never)
       .mockResolvedValueOnce({ content: 'done', toolCalls: [] } as never)
     const history: { role: string; name?: string; content?: string }[] = [
@@ -497,7 +504,11 @@ describe('skill catalogue composition while the plan skill is pinned', () => {
     const sent: AgentServerMessage[] = []
     await runAgentTurn(
       history as never,
-      deps({ conversationId: `conv-${Math.random().toString(36).slice(2)}`, skillId: 'plan-skill-id', send: (m) => sent.push(m) }) as never,
+      deps({
+        conversationId: `conv-${Math.random().toString(36).slice(2)}`,
+        skillId: 'plan-skill-id',
+        send: (m) => sent.push(m),
+      }) as never,
     )
     // The turn's catalogue passed into the prompt never advertises 'plan' itself.
     const promptCall = streamMock.mock.calls[0]?.[0] as { messages: { content: string }[] }
@@ -547,7 +558,10 @@ describe('context compaction hook (runAgentTurn)', () => {
       } as never)
 
     const sent: AgentServerMessage[] = []
-    await runAgentTurn(history as never, deps({ conversationId, send: (m) => sent.push(m) }) as never)
+    await runAgentTurn(
+      history as never,
+      deps({ conversationId, send: (m) => sent.push(m) }) as never,
+    )
 
     // Status line announced.
     const status = sent.find((m) => m.type === 'status')
@@ -561,7 +575,11 @@ describe('context compaction hook (runAgentTurn)', () => {
     // user messages and the marker summary present.
     const nextCall = streamMock.mock.calls[2]?.[0] as { messages: { content: string }[] }
     const sent1 = nextCall.messages.map((m) => String(m.content))
-    expect(sent1.some((content) => content.includes('[Context compacted]') || content.includes('[上下文已压缩]'))).toBe(true)
+    expect(
+      sent1.some(
+        (content) => content.includes('[Context compacted]') || content.includes('[上下文已压缩]'),
+      ),
+    ).toBe(true)
     expect(sent1.some((content) => content.includes('turn A long answer'))).toBe(false)
     expect(sent1.some((content) => content.includes('turn A question'))).toBe(true)
     expect(sent1.some((content) => content.includes('turn B long answer'))).toBe(true)
@@ -592,7 +610,10 @@ describe('context compaction hook (runAgentTurn)', () => {
       .mockResolvedValueOnce({ content: 'done', usage: usage(4_000), toolCalls: [] } as never)
 
     const sent: AgentServerMessage[] = []
-    await runAgentTurn(history as never, deps({ conversationId, send: (m) => sent.push(m) }) as never)
+    await runAgentTurn(
+      history as never,
+      deps({ conversationId, send: (m) => sent.push(m) }) as never,
+    )
 
     const statuses = sent.filter(
       (m) => m.type === 'status' && 'text' in m && /summar|摘要/.test(String(m.text)),

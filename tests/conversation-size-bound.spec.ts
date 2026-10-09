@@ -66,11 +66,14 @@ describe('transcript size bound', () => {
       {
         role: 'user',
         content: '用这张封面图',
-        attachments: [imageAttachment('cover.png', 3 * 1024 * 1024), imageAttachment('logo.png', 200)],
+        attachments: [
+          imageAttachment('cover.png', 3 * 1024 * 1024),
+          imageAttachment('logo.png', 200),
+        ],
       },
     ])
 
-    const stored = (data.get(KEY) as WireMessage[])
+    const stored = data.get(KEY) as WireMessage[]
     const attachments = (stored[0] as { attachments?: { name: string; dataUrl?: string }[] })
       .attachments!
     // The turn keeps its shape — name, mime type and the text the user typed.
@@ -83,7 +86,11 @@ describe('transcript size bound', () => {
   it('replaces a tool result that is nothing but a data URL', async () => {
     await saveConversation('c-1', [
       { role: 'user', content: '生成 3 张图' },
-      { role: 'tool', tool_call_id: 't1', content: `data:image/png;base64,${'B'.repeat(4 * 1024 * 1024)}` },
+      {
+        role: 'tool',
+        tool_call_id: 't1',
+        content: `data:image/png;base64,${'B'.repeat(4 * 1024 * 1024)}`,
+      },
     ] as WireMessage[])
 
     const stored = data.get(KEY) as { role: string; content: string }[]

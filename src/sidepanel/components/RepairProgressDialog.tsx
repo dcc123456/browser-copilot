@@ -19,14 +19,7 @@
  */
 import { useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import {
-  CheckCircle2,
-  CircleDashed,
-  Loader2,
-  TriangleAlert,
-  UserRound,
-  X,
-} from 'lucide-react'
+import { CheckCircle2, CircleDashed, Loader2, TriangleAlert, UserRound, X } from 'lucide-react'
 import type { RepairProgressEvent } from '../../lib/workflow/repair-events'
 import { repairEventIsTerminal } from '../../lib/workflow/repair-events'
 import { useT } from '../i18n'
@@ -63,11 +56,23 @@ function stepRowsOf(
   const rows: Array<{ key: string; status: RowStatus; text: string }> = []
   for (const event of events) {
     if (event.type === 'repair.diagnosing') {
-      rows.push({ key: `${event.type}-${event.sessionId}-${event.attempt}`, status: 'done', text: t.workflowRepairDiagnosing })
+      rows.push({
+        key: `${event.type}-${event.sessionId}-${event.attempt}`,
+        status: 'done',
+        text: t.workflowRepairDiagnosing,
+      })
     } else if (event.type === 'repair.applying') {
-      rows.push({ key: `${event.type}-${event.sessionId}-${event.strategy}`, status: 'done', text: t.workflowRepairApplying })
+      rows.push({
+        key: `${event.type}-${event.sessionId}-${event.strategy}`,
+        status: 'done',
+        text: t.workflowRepairApplying,
+      })
     } else if (event.type === 'repair.verifying') {
-      rows.push({ key: `${event.type}-${event.sessionId}`, status: 'running', text: t.workflowRepairVerifying })
+      rows.push({
+        key: `${event.type}-${event.sessionId}`,
+        status: 'running',
+        text: t.workflowRepairVerifying,
+      })
     } else if (event.type === 'repair.attempt-failed') {
       rows.push({
         key: `${event.type}-${event.sessionId}-${event.attempt}`,
@@ -86,7 +91,11 @@ function stepRowsOf(
     }
   }
   if (rows.length === 0) {
-    rows.push({ key: 'starting', status: state === 'running' ? 'running' : 'pending', text: t.workflowRepairStarting })
+    rows.push({
+      key: 'starting',
+      status: state === 'running' ? 'running' : 'pending',
+      text: t.workflowRepairStarting,
+    })
   }
   // The repair has settled: nothing may still look in-flight, or the spinner
   // reads as "the AI is still working" long after it gave up.
@@ -103,7 +112,8 @@ type RowStatus = 'done' | 'running' | 'pending' | 'failed'
 function RowGlyph({ status }: { status: RowStatus }): ReactNode {
   if (status === 'done') return <CheckCircle2 className="h-4 w-4 text-ok" aria-hidden />
   if (status === 'failed') return <TriangleAlert className="h-4 w-4 text-err" aria-hidden />
-  if (status === 'running') return <Loader2 className="h-4 w-4 animate-spin text-accent" aria-hidden />
+  if (status === 'running')
+    return <Loader2 className="h-4 w-4 animate-spin text-accent" aria-hidden />
   return <CircleDashed className="h-4 w-4 text-muted" aria-hidden />
 }
 
@@ -126,10 +136,8 @@ export function RepairProgressDialog(props: RepairProgressDialogProps): ReactNod
 
   const rows = stepRowsOf(events, t, state)
   const lastEvent = events.at(-1)
-  const detail =
-    lastEvent && 'reason' in lastEvent ? lastEvent.reason : undefined
-  const revision =
-    lastEvent?.type === 'repair.success' ? lastEvent.revision : undefined
+  const detail = lastEvent && 'reason' in lastEvent ? lastEvent.reason : undefined
+  const revision = lastEvent?.type === 'repair.success' ? lastEvent.revision : undefined
 
   let title: string
   if (state === 'success') title = t.workflowRepairSuccess
@@ -178,9 +186,7 @@ export function RepairProgressDialog(props: RepairProgressDialogProps): ReactNod
             ))}
           </ul>
 
-          {detail ? (
-            <p className="m-0 text-xs text-muted break-words">{detail}</p>
-          ) : null}
+          {detail ? <p className="m-0 text-xs text-muted break-words">{detail}</p> : null}
 
           {state === 'success' ? (
             <p className="m-0 text-[11.5px] text-muted">

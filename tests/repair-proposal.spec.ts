@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import {
-  buildRepairProposal,
-  evidenceOfProposal,
-} from '../src/lib/workflow/repair/repair-proposal'
-import type {
-  WorkflowPatchOperation,
-  WorkflowPatchSet,
-} from '../src/lib/workflow/repair/types'
+import { buildRepairProposal, evidenceOfProposal } from '../src/lib/workflow/repair/repair-proposal'
+import type { WorkflowPatchOperation, WorkflowPatchSet } from '../src/lib/workflow/repair/types'
 
 function op(
   partial: Partial<WorkflowPatchOperation> & Pick<WorkflowPatchOperation, 'kind' | 'nodeId'>,
@@ -86,9 +80,7 @@ describe('repair proposal model', () => {
   })
 
   it('derives a verification plan including the expected effect', () => {
-    const proposal = buildRepairProposal(
-      patch([op({ kind: 'REPLACE_TARGET', nodeId: 'n5' })]),
-    )
+    const proposal = buildRepairProposal(patch([op({ kind: 'REPLACE_TARGET', nodeId: 'n5' })]))
     expect(proposal.verificationPlan.length).toBeGreaterThan(0)
     expect(proposal.verificationPlan.at(-1)).toContain('goal achieved')
     expect(proposal.verificationPlan.some((s) => s.includes('n5'))).toBe(true)

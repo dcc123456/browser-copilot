@@ -171,9 +171,7 @@ function fallbackEn(text: string): string {
   const words = text.split(/\s+/).filter(Boolean).slice(0, 4)
   const joined = words
     .map((word, index) =>
-      index === 0
-        ? word.charAt(0).toUpperCase() + word.slice(1)
-        : word.toLowerCase(),
+      index === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word.toLowerCase(),
     )
     .join(' ')
   return joined || 'Workflow'

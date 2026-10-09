@@ -4,7 +4,13 @@ describe('V44 AI agent failure recovery', () => {
   it('does not jump to JS and offers a retry for an empty/malformed output', () => {
     const session = startRecovery({
       stepIntent: 'draft the personalized email',
-      failed: [reportOperatorFailure({ operator: 'ai-agent', message: 'empty model output', phase: 'execution' })],
+      failed: [
+        reportOperatorFailure({
+          operator: 'ai-agent',
+          message: 'empty model output',
+          phase: 'execution',
+        }),
+      ],
     })
     const first = advanceRecovery(session).action.kind
     expect(first).not.toBe('capability-gap-js')
@@ -13,10 +19,18 @@ describe('V44 AI agent failure recovery', () => {
   it('can report a semantic-generation failure after analysis', () => {
     const session = startRecovery({
       stepIntent: 'draft the personalized email',
-      failed: [reportOperatorFailure({ operator: 'ai-agent', message: 'unsupported', phase: 'unsupported' })],
+      failed: [
+        reportOperatorFailure({
+          operator: 'ai-agent',
+          message: 'unsupported',
+          phase: 'unsupported',
+        }),
+      ],
     })
     // The decision must not silently succeed; it stays within the recovery ladder.
     const step = advanceRecovery(session)
-    expect(['expand-search','use-ai-agent','capability-gap-js','report-blocked']).toContain(step.action.kind)
+    expect(['expand-search', 'use-ai-agent', 'capability-gap-js', 'report-blocked']).toContain(
+      step.action.kind,
+    )
   })
 })

@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  HEALTH_WINDOW,
-  summarizeWorkflowHealth,
-} from '../src/lib/workflow/workflow-health'
+import { HEALTH_WINDOW, summarizeWorkflowHealth } from '../src/lib/workflow/workflow-health'
 import type { TaskRunLog } from '../src/lib/scheduler-types'
 
 function run(partial: Partial<TaskRunLog> & { at: number; ok: boolean }): TaskRunLog {
@@ -24,10 +21,7 @@ describe('workflow health summary', () => {
 
   it('only counts runs of the given workflow', () => {
     const health = summarizeWorkflowHealth(
-      [
-        run({ at: 1, ok: true, workflowId: 'other' }),
-        run({ at: 2, ok: false, workflowId: 'wf1' }),
-      ],
+      [run({ at: 1, ok: true, workflowId: 'other' }), run({ at: 2, ok: false, workflowId: 'wf1' })],
       'wf1',
     )
     expect(health.totalRuns).toBe(1)
@@ -37,10 +31,7 @@ describe('workflow health summary', () => {
 
   it('is stable when every counted run passed', () => {
     const health = summarizeWorkflowHealth(
-      [
-        run({ at: 1, ok: true, workflowId: 'wf1' }),
-        run({ at: 2, ok: true, workflowId: 'wf1' }),
-      ],
+      [run({ at: 1, ok: true, workflowId: 'wf1' }), run({ at: 2, ok: true, workflowId: 'wf1' })],
       'wf1',
     )
     expect(health.status).toBe('stable')

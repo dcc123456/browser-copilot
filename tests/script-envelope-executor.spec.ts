@@ -51,9 +51,9 @@ describe('javascript-code failure envelope', () => {
   })
 
   it('throws when the script returns { ok:false }', async () => {
-    await expect(
-      executor({ code: 'return { ok: false }', timeout: 5000 }, ctx()),
-    ).rejects.toThrow(/failure/)
+    await expect(executor({ code: 'return { ok: false }', timeout: 5000 }, ctx())).rejects.toThrow(
+      /failure/,
+    )
   })
 
   it('still succeeds for { success:true }', async () => {
@@ -63,8 +63,6 @@ describe('javascript-code failure envelope', () => {
   })
 
   it('still succeeds for a plain return value', async () => {
-    await expect(
-      executor({ code: 'return 42', timeout: 5000 }, ctx()),
-    ).resolves.toBeNull()
+    await expect(executor({ code: 'return 42', timeout: 5000 }, ctx())).resolves.toBeNull()
   })
 })

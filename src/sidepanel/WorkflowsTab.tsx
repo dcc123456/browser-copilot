@@ -390,7 +390,6 @@ export default function WorkflowsTab() {
     revision?: number
   } | null>(null)
 
-
   /**
    * Pending chip actions: apply the AI's proposed fixes (or the audit's
    * whole-graph rewrite — the takeover session may have settled while the
@@ -729,7 +728,9 @@ export default function WorkflowsTab() {
   }
 
   /** Most recent persisted run for a workflow, or null when it never ran. */
-  const lastRunFor = (wf: Workflow): {
+  const lastRunFor = (
+    wf: Workflow,
+  ): {
     time: number
     ok: boolean
     skipped: boolean
@@ -987,7 +988,6 @@ export default function WorkflowsTab() {
           }}
         />
       )}
-
     </div>
   )
 }

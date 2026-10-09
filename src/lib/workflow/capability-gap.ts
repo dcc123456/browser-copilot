@@ -40,7 +40,11 @@ const NATIVE_INTENT_MAP: ReadonlyArray<{
 }> = [
   { test: /(点击|\bclick\b|\btap\b)/i, nativeBlockIds: ['event-click'], label: 'click' },
   { test: /(填写|输入|\btype\b|\bfill\b|\benter\b)/i, nativeBlockIds: ['forms'], label: 'fill' },
-  { test: /(读取文本|\bread text\b|\bget text\b)/i, nativeBlockIds: ['get-text'], label: 'read text' },
+  {
+    test: /(读取文本|\bread text\b|\bget text\b)/i,
+    nativeBlockIds: ['get-text'],
+    label: 'read text',
+  },
   {
     test: /(读取属性|\battribute\b|\battributes\b)/i,
     nativeBlockIds: ['attribute-value'],
@@ -53,7 +57,11 @@ const NATIVE_INTENT_MAP: ReadonlyArray<{
   },
   { test: /(等待|\bwait\b)/i, nativeBlockIds: ['wait-connections', 'delay'], label: 'wait' },
   { test: /(条件|\bcondition\b|\bif\b)/i, nativeBlockIds: ['conditions'], label: 'condition' },
-  { test: /(循环|遍历|\bloop\b|\bfor each\b)/i, nativeBlockIds: ['loop-elements', 'loop-data'], label: 'loop' },
+  {
+    test: /(循环|遍历|\bloop\b|\bfor each\b)/i,
+    nativeBlockIds: ['loop-elements', 'loop-data'],
+    label: 'loop',
+  },
 ]
 
 /** Decision returned by the gate. */
@@ -206,7 +214,9 @@ export function evaluateCapabilityGap(input: {
   return { allowed: true, capabilityGap: record }
 }
 
-function validateGapRecord(value: Partial<CapabilityGapRecord> | undefined): CapabilityGapRecord | null {
+function validateGapRecord(
+  value: Partial<CapabilityGapRecord> | undefined,
+): CapabilityGapRecord | null {
   if (!value) return null
   if (typeof value.missingCapability !== 'string' || !value.missingCapability.trim()) return null
   if (!Array.isArray(value.triedOperators) || value.triedOperators.length === 0) return null

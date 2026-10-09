@@ -93,28 +93,113 @@ export interface FailureTypePolicy {
 }
 
 const TYPE_POLICY: Record<WorkflowFailureType, FailureTypePolicy> = {
-  ELEMENT_NOT_FOUND: { retryable: true, autoRepairable: true, unsafeToRetry: false, humanGate: false },
-  ELEMENT_AMBIGUOUS: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
-  ELEMENT_NOT_VISIBLE: { retryable: true, autoRepairable: true, unsafeToRetry: false, humanGate: false },
-  ELEMENT_NOT_INTERACTABLE: { retryable: true, autoRepairable: true, unsafeToRetry: false, humanGate: false },
+  ELEMENT_NOT_FOUND: {
+    retryable: true,
+    autoRepairable: true,
+    unsafeToRetry: false,
+    humanGate: false,
+  },
+  ELEMENT_AMBIGUOUS: {
+    retryable: false,
+    autoRepairable: true,
+    unsafeToRetry: false,
+    humanGate: false,
+  },
+  ELEMENT_NOT_VISIBLE: {
+    retryable: true,
+    autoRepairable: true,
+    unsafeToRetry: false,
+    humanGate: false,
+  },
+  ELEMENT_NOT_INTERACTABLE: {
+    retryable: true,
+    autoRepairable: true,
+    unsafeToRetry: false,
+    humanGate: false,
+  },
   SELECTOR_STALE: { retryable: true, autoRepairable: true, unsafeToRetry: false, humanGate: false },
   PAGE_NOT_READY: { retryable: true, autoRepairable: true, unsafeToRetry: false, humanGate: false },
-  NAVIGATION_TIMEOUT: { retryable: true, autoRepairable: true, unsafeToRetry: false, humanGate: false },
-  FRAME_NOT_FOUND: { retryable: true, autoRepairable: true, unsafeToRetry: false, humanGate: false },
+  NAVIGATION_TIMEOUT: {
+    retryable: true,
+    autoRepairable: true,
+    unsafeToRetry: false,
+    humanGate: false,
+  },
+  FRAME_NOT_FOUND: {
+    retryable: true,
+    autoRepairable: true,
+    unsafeToRetry: false,
+    humanGate: false,
+  },
   TAB_NOT_FOUND: { retryable: true, autoRepairable: true, unsafeToRetry: false, humanGate: false },
-  INPUT_REJECTED: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
-  INVALID_PARAMETER: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
-  STATE_MISMATCH: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
-  PAGE_CONTEXT_MISMATCH: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
-  POSTCONDITION_FAILED: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
-  GOAL_NOT_SATISFIED: { retryable: false, autoRepairable: true, unsafeToRetry: true, humanGate: false },
-  WORKFLOW_GRAPH_INVALID: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
-  MODEL_NO_CANDIDATE: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
-  MODEL_OUTPUT_INVALID: { retryable: false, autoRepairable: true, unsafeToRetry: false, humanGate: false },
+  INPUT_REJECTED: {
+    retryable: false,
+    autoRepairable: true,
+    unsafeToRetry: false,
+    humanGate: false,
+  },
+  INVALID_PARAMETER: {
+    retryable: false,
+    autoRepairable: true,
+    unsafeToRetry: false,
+    humanGate: false,
+  },
+  STATE_MISMATCH: {
+    retryable: false,
+    autoRepairable: true,
+    unsafeToRetry: false,
+    humanGate: false,
+  },
+  PAGE_CONTEXT_MISMATCH: {
+    retryable: false,
+    autoRepairable: true,
+    unsafeToRetry: false,
+    humanGate: false,
+  },
+  POSTCONDITION_FAILED: {
+    retryable: false,
+    autoRepairable: true,
+    unsafeToRetry: false,
+    humanGate: false,
+  },
+  GOAL_NOT_SATISFIED: {
+    retryable: false,
+    autoRepairable: true,
+    unsafeToRetry: true,
+    humanGate: false,
+  },
+  WORKFLOW_GRAPH_INVALID: {
+    retryable: false,
+    autoRepairable: true,
+    unsafeToRetry: false,
+    humanGate: false,
+  },
+  MODEL_NO_CANDIDATE: {
+    retryable: false,
+    autoRepairable: true,
+    unsafeToRetry: false,
+    humanGate: false,
+  },
+  MODEL_OUTPUT_INVALID: {
+    retryable: false,
+    autoRepairable: true,
+    unsafeToRetry: false,
+    humanGate: false,
+  },
   AUTH_REQUIRED: { retryable: false, autoRepairable: false, unsafeToRetry: false, humanGate: true },
-  CAPTCHA_REQUIRED: { retryable: false, autoRepairable: false, unsafeToRetry: false, humanGate: true },
+  CAPTCHA_REQUIRED: {
+    retryable: false,
+    autoRepairable: false,
+    unsafeToRetry: false,
+    humanGate: true,
+  },
   MFA_REQUIRED: { retryable: false, autoRepairable: false, unsafeToRetry: false, humanGate: true },
-  SIDE_EFFECT_UNKNOWN: { retryable: false, autoRepairable: false, unsafeToRetry: true, humanGate: false },
+  SIDE_EFFECT_UNKNOWN: {
+    retryable: false,
+    autoRepairable: false,
+    unsafeToRetry: true,
+    humanGate: false,
+  },
   MODEL_ERROR: { retryable: true, autoRepairable: true, unsafeToRetry: false, humanGate: false },
   UNKNOWN: { retryable: false, autoRepairable: false, unsafeToRetry: false, humanGate: false },
 }
@@ -144,26 +229,90 @@ export function allowsImmediateHumanTakeover(type: WorkflowFailureType): boolean
  * timeout only where they can overlap).
  */
 const MESSAGE_RULES: ReadonlyArray<{ pattern: RegExp; type: WorkflowFailureType }> = [
-  { pattern: /SIDE_EFFECT_UNKNOWN|side effect.*unknown|副作用结果未知|结果未知.*拒绝自动重放/i, type: 'SIDE_EFFECT_UNKNOWN' },
-  { pattern: /\bWRONG_(ORIGIN|PAGE)\b|wrong (origin|page)|不是该工作流的目标站点|页面上下文不匹配/i, type: 'PAGE_CONTEXT_MISMATCH' },
-  { pattern: /\bMFA\b|multi[\s-]?factor|2FA|两步验证|二次验证|验证码(?!.*captcha)/i, type: 'MFA_REQUIRED' },
+  {
+    pattern: /SIDE_EFFECT_UNKNOWN|side effect.*unknown|副作用结果未知|结果未知.*拒绝自动重放/i,
+    type: 'SIDE_EFFECT_UNKNOWN',
+  },
+  {
+    pattern: /\bWRONG_(ORIGIN|PAGE)\b|wrong (origin|page)|不是该工作流的目标站点|页面上下文不匹配/i,
+    type: 'PAGE_CONTEXT_MISMATCH',
+  },
+  {
+    pattern: /\bMFA\b|multi[\s-]?factor|2FA|两步验证|二次验证|验证码(?!.*captcha)/i,
+    type: 'MFA_REQUIRED',
+  },
   { pattern: /captcha|人机验证|安全验证/i, type: 'CAPTCHA_REQUIRED' },
-  { pattern: /auth(entication)? required|login required|sign[\s-]?in required|需要登录|请先登录|未登录/i, type: 'AUTH_REQUIRED' },
-  { pattern: /no patch proposed|no candidate|MODEL_NO_CANDIDATE|没有可(用的)?(修复|补丁|patch)|empty proposal/i, type: 'MODEL_NO_CANDIDATE' },
-  { pattern: /invalid model output|malformed (response|output|candidate)|bad json|MODEL_OUTPUT_INVALID|模型输出(无效|不合法)/i, type: 'MODEL_OUTPUT_INVALID' },
-  { pattern: /model error|llm error|provider error|completion.*failed|模型(调用)?(错误|失败)/i, type: 'MODEL_ERROR' },
-  { pattern: /postcondition.*(fail|unmet|not)|POSTCONDITION_FAILED|后置条件(失败|未满足|不成立)/i, type: 'POSTCONDITION_FAILED' },
-  { pattern: /goal.*(not|unmet|fail)|GOAL_NOT_(ACHIEVED|SATISFIED)|目标未达成|目标不满足|目标未满足/i, type: 'GOAL_NOT_SATISFIED' },
-  { pattern: /graph invalid|invalid graph|unreachable|orphan|WORKFLOW_GRAPH_INVALID|图(无效|不合法)|断链/i, type: 'WORKFLOW_GRAPH_INVALID' },
-  { pattern: /ambiguous|more than one|multiple elements|ELEMENT_AMBIGUOUS|TARGET_AMBIGUOUS|多个元素|不唯一/i, type: 'ELEMENT_AMBIGUOUS' },
-  { pattern: /not interactable|not clickable|occluded|ELEMENT_NOT_INTERACTABLE|不可交互|被遮挡/i, type: 'ELEMENT_NOT_INTERACTABLE' },
-  { pattern: /not visible|hidden|invisible|ELEMENT_NOT_VISIBLE|不可见|未显示/i, type: 'ELEMENT_NOT_VISIBLE' },
-  { pattern: /stale (element|node|reference)|detached (from|element)|SELECTOR_STALE|元素已失效|已脱离/i, type: 'SELECTOR_STALE' },
-  { pattern: /element not found|no element|cannot find (the )?element|TARGET_NOT_FOUND|ELEMENT_NOT_FOUND|找不到元素|未找到元素|无法找到.*元素/i, type: 'ELEMENT_NOT_FOUND' },
-  { pattern: /frame not found|no frame|FRAME_NOT_(FOUND|READY)|找不到(框架|frame)|frame.*(not|unavailable)/i, type: 'FRAME_NOT_FOUND' },
+  {
+    pattern:
+      /auth(entication)? required|login required|sign[\s-]?in required|需要登录|请先登录|未登录/i,
+    type: 'AUTH_REQUIRED',
+  },
+  {
+    pattern:
+      /no patch proposed|no candidate|MODEL_NO_CANDIDATE|没有可(用的)?(修复|补丁|patch)|empty proposal/i,
+    type: 'MODEL_NO_CANDIDATE',
+  },
+  {
+    pattern:
+      /invalid model output|malformed (response|output|candidate)|bad json|MODEL_OUTPUT_INVALID|模型输出(无效|不合法)/i,
+    type: 'MODEL_OUTPUT_INVALID',
+  },
+  {
+    pattern: /model error|llm error|provider error|completion.*failed|模型(调用)?(错误|失败)/i,
+    type: 'MODEL_ERROR',
+  },
+  {
+    pattern: /postcondition.*(fail|unmet|not)|POSTCONDITION_FAILED|后置条件(失败|未满足|不成立)/i,
+    type: 'POSTCONDITION_FAILED',
+  },
+  {
+    pattern:
+      /goal.*(not|unmet|fail)|GOAL_NOT_(ACHIEVED|SATISFIED)|目标未达成|目标不满足|目标未满足/i,
+    type: 'GOAL_NOT_SATISFIED',
+  },
+  {
+    pattern:
+      /graph invalid|invalid graph|unreachable|orphan|WORKFLOW_GRAPH_INVALID|图(无效|不合法)|断链/i,
+    type: 'WORKFLOW_GRAPH_INVALID',
+  },
+  {
+    pattern:
+      /ambiguous|more than one|multiple elements|ELEMENT_AMBIGUOUS|TARGET_AMBIGUOUS|多个元素|不唯一/i,
+    type: 'ELEMENT_AMBIGUOUS',
+  },
+  {
+    pattern: /not interactable|not clickable|occluded|ELEMENT_NOT_INTERACTABLE|不可交互|被遮挡/i,
+    type: 'ELEMENT_NOT_INTERACTABLE',
+  },
+  {
+    pattern: /not visible|hidden|invisible|ELEMENT_NOT_VISIBLE|不可见|未显示/i,
+    type: 'ELEMENT_NOT_VISIBLE',
+  },
+  {
+    pattern:
+      /stale (element|node|reference)|detached (from|element)|SELECTOR_STALE|元素已失效|已脱离/i,
+    type: 'SELECTOR_STALE',
+  },
+  {
+    pattern:
+      /element not found|no element|cannot find (the )?element|TARGET_NOT_FOUND|ELEMENT_NOT_FOUND|找不到元素|未找到元素|无法找到.*元素/i,
+    type: 'ELEMENT_NOT_FOUND',
+  },
+  {
+    pattern:
+      /frame not found|no frame|FRAME_NOT_(FOUND|READY)|找不到(框架|frame)|frame.*(not|unavailable)/i,
+    type: 'FRAME_NOT_FOUND',
+  },
   { pattern: /tab not found|no tab|TAB_NOT_FOUND|找不到标签页/i, type: 'TAB_NOT_FOUND' },
-  { pattern: /navigation timeout|navigate.*timeout|NAVIGATION_TIMEOUT|导航超时/i, type: 'NAVIGATION_TIMEOUT' },
-  { pattern: /page not ready|not ready|PAGE_NOT_READY|WAIT_CONDITION_UNMET|页面(未|没有)(就绪|加载完成)|尚未加载/i, type: 'PAGE_NOT_READY' },
+  {
+    pattern: /navigation timeout|navigate.*timeout|NAVIGATION_TIMEOUT|导航超时/i,
+    type: 'NAVIGATION_TIMEOUT',
+  },
+  {
+    pattern:
+      /page not ready|not ready|PAGE_NOT_READY|WAIT_CONDITION_UNMET|页面(未|没有)(就绪|加载完成)|尚未加载/i,
+    type: 'PAGE_NOT_READY',
+  },
   { pattern: /input rejected|rejected input|INPUT_REJECTED|输入被拒绝/i, type: 'INPUT_REJECTED' },
   {
     // An `ai-agent` block whose tool-round budget ran out before the answer round
@@ -172,8 +321,15 @@ const MESSAGE_RULES: ReadonlyArray<{ pattern: RegExp; type: WorkflowFailureType 
     pattern: /stopped after \d+ tool rounds|tool-round budget|ran out of rounds/i,
     type: 'INVALID_PARAMETER',
   },
-  { pattern: /invalid parameter|invalid argument|missing required|INVALID_PARAMETER|UNRESOLVED_INPUT|unresolved input|参数(无效|缺失|不合法)/i, type: 'INVALID_PARAMETER' },
-  { pattern: /state mismatch|unexpected state|STATE_MISMATCH|状态(不一致|不匹配)/i, type: 'STATE_MISMATCH' },
+  {
+    pattern:
+      /invalid parameter|invalid argument|missing required|INVALID_PARAMETER|UNRESOLVED_INPUT|unresolved input|参数(无效|缺失|不合法)/i,
+    type: 'INVALID_PARAMETER',
+  },
+  {
+    pattern: /state mismatch|unexpected state|STATE_MISMATCH|状态(不一致|不匹配)/i,
+    type: 'STATE_MISMATCH',
+  },
 ]
 
 /** DOM evidence that can disambiguate beyond the message text. */
@@ -237,13 +393,25 @@ export function classifyFailure(input: ClassifyFailureInput): ClassifiedFailure 
       return { type: 'PAGE_NOT_READY', basis: 'dom-evidence', policy: TYPE_POLICY.PAGE_NOT_READY }
     }
     if (dom.elementExists === false || dom.matchCount === 0) {
-      return { type: 'ELEMENT_NOT_FOUND', basis: 'dom-evidence', policy: TYPE_POLICY.ELEMENT_NOT_FOUND }
+      return {
+        type: 'ELEMENT_NOT_FOUND',
+        basis: 'dom-evidence',
+        policy: TYPE_POLICY.ELEMENT_NOT_FOUND,
+      }
     }
     if (dom.visible === false) {
-      return { type: 'ELEMENT_NOT_VISIBLE', basis: 'dom-evidence', policy: TYPE_POLICY.ELEMENT_NOT_VISIBLE }
+      return {
+        type: 'ELEMENT_NOT_VISIBLE',
+        basis: 'dom-evidence',
+        policy: TYPE_POLICY.ELEMENT_NOT_VISIBLE,
+      }
     }
     if (typeof dom.matchCount === 'number' && dom.matchCount > 1) {
-      return { type: 'ELEMENT_AMBIGUOUS', basis: 'dom-evidence', policy: TYPE_POLICY.ELEMENT_AMBIGUOUS }
+      return {
+        type: 'ELEMENT_AMBIGUOUS',
+        basis: 'dom-evidence',
+        policy: TYPE_POLICY.ELEMENT_AMBIGUOUS,
+      }
     }
   }
   return { type: 'UNKNOWN', basis: 'unknown', policy: TYPE_POLICY.UNKNOWN }

@@ -6,7 +6,6 @@
 
 ---
 
-
 ## 0. 执行摘要
 
 当前系统已经具备以下基础能力：
@@ -127,16 +126,16 @@
 
 发布前建立基线，至少记录以下指标；不得只以“模型看起来更聪明”作为验收：
 
-| 指标                         | 定义                                       | 验收方向            |
-| -------------------------- | ---------------------------------------- | --------------- |
-| Generation Verified Rate   | 生成后在预算内完成无 AI 接管验证的比例                    | 不低于改造前基线，目标显著提升 |
+| 指标                       | 定义                                                        | 验收方向                       |
+| -------------------------- | ----------------------------------------------------------- | ------------------------------ |
+| Generation Verified Rate   | 生成后在预算内完成无 AI 接管验证的比例                      | 不低于改造前基线，目标显著提升 |
 | Debug Verified Repair Rate | AI 调试产生补丁后，无 AI 接管 replay 成功且 goal 通过的比例 | 不低于改造前基线，目标显著提升 |
-| Root Cause Precision       | 测试集内 `rootCauseNodeIds` 与标注根因一致的比例       | P0 测试集 100%     |
-| Wrong-Node Patch Rate      | patch 修改非根因且无依赖证据节点的比例                   | P0 测试集 0%       |
-| Collateral Change Rate     | patch 后无关节点发生变化的比例                       | 0%              |
-| Draft Preservation Rate    | 非结构失败且预算耗尽时草稿可恢复比例                       | 100%            |
-| False Verified Rate        | 有 AI 接管或 goal 未通过却标记 verified 的比例        | 0%              |
-| Repair Loop Termination    | 所有失败路径都在预算内结束                            | 100%            |
+| Root Cause Precision       | 测试集内 `rootCauseNodeIds` 与标注根因一致的比例            | P0 测试集 100%                 |
+| Wrong-Node Patch Rate      | patch 修改非根因且无依赖证据节点的比例                      | P0 测试集 0%                   |
+| Collateral Change Rate     | patch 后无关节点发生变化的比例                              | 0%                             |
+| Draft Preservation Rate    | 非结构失败且预算耗尽时草稿可恢复比例                        | 100%                           |
+| False Verified Rate        | 有 AI 接管或 goal 未通过却标记 verified 的比例              | 0%                             |
+| Repair Loop Termination    | 所有失败路径都在预算内结束                                  | 100%                           |
 
 生产遥测必须区分：
 
@@ -171,24 +170,23 @@
 
 Coding Agent 开始前必须核对以下真实入口，不得按旧文档猜路径，也不得重复创建已有职责模块。
 
-
 ### 3.1 工作流生成模式
 
-| 职责                         | 当前文件与关键符号                                                                     |
-| -------------------------- | ----------------------------------------------------------------------------- |
-| workflow 模式工具广告、分类分发、算子调用  | `src/background/agent.ts`：`advertiseTools`、`runOneToolCall`、`executeTool`     |
-| 算子工具定义                     | `src/lib/workflow/operator-tools.ts`                                          |
-| 算子分类单一真相源                  | `src/lib/workflow/operator-categories.ts`、`blocks/catalog.ts`                 |
-| 执行分类                       | `src/lib/workflow/operator-class.ts`                                          |
-| 执行并记录                      | `src/background/operator-tool-run.ts`：`runOperatorToolWithExecution`          |
-| 复用运行时执行器                   | `src/background/workflow-engine/operator-exec.ts`：`executeOperatorNode`       |
-| 草稿拼接与持久化                   | `src/background/operator-tool-handler.ts`、`src/lib/workflow/draft-storage.ts` |
-| 回合结束保存决策                   | `src/background/history-compile.ts`：`resolveWorkflowForSave`                  |
-| 保存卡片                       | `src/sidepanel/ChatTab.tsx`：`maybePromptSaveWorkflow`                         |
-| 结构完整性                      | `src/lib/workflow/integrity.ts`：`checkWorkflowIntegrity`                      |
-| selector probe / hardening | `src/lib/workflow/selector-probe.ts`、`src/background/selector-probe.ts`       |
-| 默认等待与可运行性                  | `src/lib/workflow/runnability.ts`                                             |
-| 保存命令                       | `src/background/index.ts`：`workflows.save`                                    |
+| 职责                                      | 当前文件与关键符号                                                             |
+| ----------------------------------------- | ------------------------------------------------------------------------------ |
+| workflow 模式工具广告、分类分发、算子调用 | `src/background/agent.ts`：`advertiseTools`、`runOneToolCall`、`executeTool`   |
+| 算子工具定义                              | `src/lib/workflow/operator-tools.ts`                                           |
+| 算子分类单一真相源                        | `src/lib/workflow/operator-categories.ts`、`blocks/catalog.ts`                 |
+| 执行分类                                  | `src/lib/workflow/operator-class.ts`                                           |
+| 执行并记录                                | `src/background/operator-tool-run.ts`：`runOperatorToolWithExecution`          |
+| 复用运行时执行器                          | `src/background/workflow-engine/operator-exec.ts`：`executeOperatorNode`       |
+| 草稿拼接与持久化                          | `src/background/operator-tool-handler.ts`、`src/lib/workflow/draft-storage.ts` |
+| 回合结束保存决策                          | `src/background/history-compile.ts`：`resolveWorkflowForSave`                  |
+| 保存卡片                                  | `src/sidepanel/ChatTab.tsx`：`maybePromptSaveWorkflow`                         |
+| 结构完整性                                | `src/lib/workflow/integrity.ts`：`checkWorkflowIntegrity`                      |
+| selector probe / hardening                | `src/lib/workflow/selector-probe.ts`、`src/background/selector-probe.ts`       |
+| 默认等待与可运行性                        | `src/lib/workflow/runnability.ts`                                              |
+| 保存命令                                  | `src/background/index.ts`：`workflows.save`                                    |
 
 必须保持以下现有不变量：
 
@@ -199,23 +197,22 @@ Coding Agent 开始前必须核对以下真实入口，不得按旧文档猜路�
 5. 生成数据必须遵守动态数据规则，不能把网页快照冻结成静态默认值；
 6. 文件写入节点必须把失败抛给引擎，不能只 `emit('error')`。
 
-
 ### 3.2 工作流面板 AI 调试
 
-| 职责                                     | 当前文件与关键符号                                                                         |
-| -------------------------------------- | --------------------------------------------------------------------------------- |
-| AI 调试按钮、实时日志、确认弹窗                      | `src/sidepanel/WorkflowsTab.tsx`：`debugNow`                                       |
-| 保存后可选验证入口                              | `src/sidepanel/ChatTab.tsx`                                                       |
-| 消息协议                                   | `src/lib/messages.ts`：`workflows.debug`、`workflows.takeoverApply` 等               |
-| 后台装配                                   | `src/background/index.ts`：`case 'workflows.debug'`                                |
-| 调试循环                                   | `src/background/workflow-engine/debug-session.ts`：`runDebugSession`               |
-| 参数补丁                                   | `src/lib/workflow/auto-debug-patch.ts`：`patchNodeParams`                          |
-| replay / audit / rewrite / goal prompt | `src/lib/workflow/debug-rewrite.ts`                                               |
-| takeover 判定与错误分类                       | `src/lib/workflow/ai-takeover.ts`、`src/background/workflow-engine/ai-takeover.ts` |
-| 执行入口                                   | `src/background/workflow-engine/run-workflow.ts`：`executeWorkflow`                |
-| 引擎 hook                                | `src/background/workflow-engine/engine.ts`                                        |
-| working copy / pending                 | `src/lib/workflow/takeover-pending.ts`                                            |
-| 指标                                     | `src/lib/workflow/takeover-stats.ts`                                              |
+| 职责                                   | 当前文件与关键符号                                                                 |
+| -------------------------------------- | ---------------------------------------------------------------------------------- |
+| AI 调试按钮、实时日志、确认弹窗        | `src/sidepanel/WorkflowsTab.tsx`：`debugNow`                                       |
+| 保存后可选验证入口                     | `src/sidepanel/ChatTab.tsx`                                                        |
+| 消息协议                               | `src/lib/messages.ts`：`workflows.debug`、`workflows.takeoverApply` 等             |
+| 后台装配                               | `src/background/index.ts`：`case 'workflows.debug'`                                |
+| 调试循环                               | `src/background/workflow-engine/debug-session.ts`：`runDebugSession`               |
+| 参数补丁                               | `src/lib/workflow/auto-debug-patch.ts`：`patchNodeParams`                          |
+| replay / audit / rewrite / goal prompt | `src/lib/workflow/debug-rewrite.ts`                                                |
+| takeover 判定与错误分类                | `src/lib/workflow/ai-takeover.ts`、`src/background/workflow-engine/ai-takeover.ts` |
+| 执行入口                               | `src/background/workflow-engine/run-workflow.ts`：`executeWorkflow`                |
+| 引擎 hook                              | `src/background/workflow-engine/engine.ts`                                         |
+| working copy / pending                 | `src/lib/workflow/takeover-pending.ts`                                             |
+| 指标                                   | `src/lib/workflow/takeover-stats.ts`                                               |
 
 必须保留以下现有安全边界：
 
@@ -262,7 +259,6 @@ Coding Agent 开始前必须核对以下真实入口，不得按旧文档猜路�
 
 ## 5. 统一领域模型
 
-
 ### 5.1 ExecutionTrace
 
 新增：
@@ -279,11 +275,11 @@ interface ExecutionTrace {
   workflowId: string
   sessionId?: string
   runId: string
-  entry: "GENERATION" | "DEBUG" | "VERIFY" | "REPLAY"
+  entry: 'GENERATION' | 'DEBUG' | 'VERIFY' | 'REPLAY'
 
   startedAt: number
   finishedAt?: number
-  outcome: "ok" | "failed" | "cancelled"
+  outcome: 'ok' | 'failed' | 'cancelled'
 
   events: TraceEvent[]
   nodeExecutions: NodeExecutionTrace[]
@@ -301,7 +297,7 @@ interface ExecutionTrace {
 interface TraceEvent {
   sequence: number
   at: number
-  kind: "tool" | "status" | "result" | "error" | "info" | "checkpoint"
+  kind: 'tool' | 'status' | 'result' | 'error' | 'info' | 'checkpoint'
   nodeId?: string
   text: string
 }
@@ -310,7 +306,7 @@ interface NodeExecutionTrace {
   nodeId: string
   blockId?: string
   attempt: number
-  status: "running" | "ok" | "failed" | "cancelled" | "skipped"
+  status: 'running' | 'ok' | 'failed' | 'cancelled' | 'skipped'
   startedAt?: number
   finishedAt?: number
 
@@ -323,7 +319,7 @@ interface TraceCheckpoint {
   checkpointId: string
   stepIndex: number
   nodeId?: string
-  status: "running" | "ok" | "failed" | "cancelled"
+  status: 'running' | 'ok' | 'failed' | 'cancelled'
   variableSummaries: Record<string, VariableValueSummary>
   pageState?: unknown
   at: number
@@ -334,7 +330,7 @@ interface TraceFailure {
   message: string
   nodeId?: string
   retryable: boolean
-  source: "EXECUTOR" | "CONTRACT" | "POSTCONDITION" | "GOAL" | "STRUCTURE"
+  source: 'EXECUTOR' | 'CONTRACT' | 'POSTCONDITION' | 'GOAL' | 'STRUCTURE'
 }
 ```
 
@@ -345,7 +341,6 @@ interface TraceFailure {
 - checkpoint 的变量快照深拷贝失败时必须记录 `snapshotAvailable: false`，不能静默当作空变量；
 - 子工作流事件要携带 `workflowPath` 或 `parentNodeId`，不能假设 `stepIndex` 与顶层节点一一对应；
 - 历史调用方允许 `trace` 为可选，确保兼容旧代码和旧记录。
-
 
 ### 5.2 Variable Provenance 与 Data Flow
 
@@ -363,12 +358,7 @@ interface VariableProvenance {
   variable: string
   producerNodeId?: string
   producerKind:
-    | "WORKFLOW_INPUT"
-    | "NODE_OUTPUT"
-    | "ENGINE_ALIAS"
-    | "TRANSFORM"
-    | "LOOP_CONTEXT"
-    | "UNKNOWN"
+    'WORKFLOW_INPUT' | 'NODE_OUTPUT' | 'ENGINE_ALIAS' | 'TRANSFORM' | 'LOOP_CONTEXT' | 'UNKNOWN'
   sourcePath?: string
   sourceVariable?: string
 }
@@ -407,7 +397,7 @@ interface DataDependencyEdge {
   fromNodeId?: string
   variable: string
   toNodeId: string
-  relation: "PRODUCES" | "CONSUMES" | "TRANSFORMS" | "CONTROL_DEPENDENCY"
+  relation: 'PRODUCES' | 'CONSUMES' | 'TRANSFORMS' | 'CONTROL_DEPENDENCY'
 }
 ```
 
@@ -437,7 +427,7 @@ interface DataDependencyEdge {
 
 ```ts
 interface VariableContract {
-  type?: "string" | "number" | "boolean" | "array" | "object"
+  type?: 'string' | 'number' | 'boolean' | 'array' | 'object'
   required?: boolean
   allowEmpty?: boolean
   minLength?: number
@@ -467,11 +457,7 @@ interface FailureAnalysis {
   rootCauseNodeIds: string[]
   failureType: VerificationFailureType
 
-  repairTarget:
-    | "FAILED_NODE"
-    | "UPSTREAM_NODE"
-    | "MULTIPLE_NODES"
-    | "NO_SAFE_REPAIR"
+  repairTarget: 'FAILED_NODE' | 'UPSTREAM_NODE' | 'MULTIPLE_NODES' | 'NO_SAFE_REPAIR'
 
   dependencyChain: DependencyNode[]
   variableEvidence: VariableEvidence[]
@@ -494,11 +480,7 @@ interface RootCauseCandidate {
 interface DependencyNode {
   nodeId?: string
   variable?: string
-  relation:
-    | "USES_VARIABLE"
-    | "PRODUCES_VARIABLE"
-    | "TRANSFORMS_VARIABLE"
-    | "CONTROL_DEPENDENCY"
+  relation: 'USES_VARIABLE' | 'PRODUCES_VARIABLE' | 'TRANSFORMS_VARIABLE' | 'CONTROL_DEPENDENCY'
 }
 ```
 
@@ -555,14 +537,14 @@ interface WorkflowPatchOperation {
   operationId: string
   nodeId: string
   kind:
-    | "SET_PARAM"
-    | "REMOVE_PARAM"
-    | "REPLACE_TARGET"
-    | "REPLACE_INPUT_REF"
-    | "REPLACE_OUTPUT"
-    | "INSERT_NODE"
-    | "REMOVE_NODE"
-    | "REWIRE_EDGE"
+    | 'SET_PARAM'
+    | 'REMOVE_PARAM'
+    | 'REPLACE_TARGET'
+    | 'REPLACE_INPUT_REF'
+    | 'REPLACE_OUTPUT'
+    | 'INSERT_NODE'
+    | 'REMOVE_NODE'
+    | 'REWIRE_EDGE'
   path?: string
   before?: unknown
   after?: unknown
@@ -573,43 +555,33 @@ interface WorkflowPatchOperation {
 
 `before` 必须由 Patch Engine 从 working copy 校验，不能只信模型；若当前值与 `before` 不一致，patch 必须拒绝并重新诊断，防止并发或陈旧 patch 覆盖新修改。
 
-
 ### 5.7 统一 Repair Engine
 
 ```ts
 interface WorkflowRepairEngine {
-  diagnose(
-    workflow: Workflow,
-    trace: ExecutionTrace
-  ): Promise<FailureAnalysis>
+  diagnose(workflow: Workflow, trace: ExecutionTrace): Promise<FailureAnalysis>
 
   propose(
     workflow: Workflow,
     analysis: FailureAnalysis,
-    context: RepairContext
+    context: RepairContext,
   ): Promise<WorkflowPatchSet | null>
 
   validatePatch(
     workflow: Workflow,
     analysis: FailureAnalysis,
-    patch: WorkflowPatchSet
+    patch: WorkflowPatchSet,
   ): PatchValidationResult
 
-  apply(
-    workflow: Workflow,
-    patch: WorkflowPatchSet
-  ): PatchApplyResult
+  apply(workflow: Workflow, patch: WorkflowPatchSet): PatchApplyResult
 
   replay(
     workflow: Workflow,
     analysis: FailureAnalysis,
-    options?: ReplayOptions
+    options?: ReplayOptions,
   ): Promise<VerificationResult>
 
-  verify(
-    workflow: Workflow,
-    options?: VerificationOptions
-  ): Promise<VerificationResult>
+  verify(workflow: Workflow, options?: VerificationOptions): Promise<VerificationResult>
 }
 ```
 
@@ -683,7 +655,7 @@ const transientPolicy = {
   maxRetries: 2,
   retryDelayMs: [500, 1500],
   requireStableUrlBeforeRepair: true,
-  requireStableDomProbeBeforeSelectorPatch: true
+  requireStableDomProbeBeforeSelectorPatch: true,
 }
 ```
 
@@ -908,11 +880,7 @@ Checkpoint(Node2)
 
 ```ts
 type ReplaySafety =
-  | "SAFE"
-  | "IDEMPOTENT"
-  | "REQUIRES_STATE_CHECK"
-  | "REQUIRES_CONFIRMATION"
-  | "FORBIDDEN_AUTO_REPLAY"
+  'SAFE' | 'IDEMPOTENT' | 'REQUIRES_STATE_CHECK' | 'REQUIRES_CONFIRMATION' | 'FORBIDDEN_AUTO_REPLAY'
 ```
 
 例如提交订单、发送消息、删除数据、支付、发布内容，不得自动 full replay。必须先检查“是否已完成”，无法判断时要求用户确认。
@@ -936,7 +904,6 @@ patched working copy
 
 ## 10. 两种入口的统一流程
 
-
 ### 10.1 Generation Agent
 
 ```ts
@@ -945,20 +912,17 @@ async function finalizeGeneratedWorkflow(session: GenerationSession) {
 
   for (let round = 0; round < session.policy.maxRepairRounds; round++) {
     const verification = await repairEngine.verify(workingCopy, {
-      entry: "GENERATION",
-      allowAiTakeover: false
+      entry: 'GENERATION',
+      allowAiTakeover: false,
     })
 
     if (verification.verified) {
       return commitVerifiedWorkflow(workingCopy, session, verification)
     }
 
-    const analysis = await repairEngine.diagnose(
-      workingCopy,
-      verification.trace
-    )
+    const analysis = await repairEngine.diagnose(workingCopy, verification.trace)
 
-    if (analysis.failureType === "STRUCTURAL_ERROR") {
+    if (analysis.failureType === 'STRUCTURAL_ERROR') {
       return blockCommitWithRecoverableSession(session, analysis)
     }
 
@@ -972,22 +936,18 @@ async function finalizeGeneratedWorkflow(session: GenerationSession) {
     const patch = await repairEngine.propose(
       workingCopy,
       analysis,
-      buildRepairContext(workingCopy, verification, analysis)
+      buildRepairContext(workingCopy, verification, analysis),
     )
 
     if (!patch) break
 
-    const validation = repairEngine.validatePatch(
-      workingCopy,
-      analysis,
-      patch
-    )
+    const validation = repairEngine.validatePatch(workingCopy, analysis, patch)
     if (!validation.ok) break
 
     workingCopy = repairEngine.apply(workingCopy, patch).workflow
 
     const replay = await repairEngine.replay(workingCopy, analysis, {
-      allowAiTakeover: false
+      allowAiTakeover: false,
     })
     if (replay.verified) {
       return commitVerifiedWorkflow(workingCopy, session, replay)
@@ -1064,8 +1024,7 @@ Execute
 const generationAnalysis = await engine.diagnose(workflow, trace)
 const debugAnalysis = await engine.diagnose(workflow, trace)
 
-expect(canonicalize(generationAnalysis))
-  .toEqual(canonicalize(debugAnalysis))
+expect(canonicalize(generationAnalysis)).toEqual(canonicalize(debugAnalysis))
 ```
 
 两个入口不得把 mode 注入到 Analyzer 中影响根因结果。入口信息只用于日志和提交策略。
@@ -1080,7 +1039,7 @@ expect(canonicalize(generationAnalysis))
 interface WorkflowRepairSession {
   sessionId: string
   workflowId: string
-  entry: "GENERATION" | "DEBUG"
+  entry: 'GENERATION' | 'DEBUG'
   status: RepairSessionStatus
 
   originalWorkflow: Workflow
@@ -1097,17 +1056,17 @@ interface WorkflowRepairSession {
 }
 
 type RepairSessionStatus =
-  | "EXECUTING"
-  | "ANALYZING"
-  | "DIAGNOSED"
-  | "PATCH_PROPOSED"
-  | "PATCHING"
-  | "REPLAYING"
-  | "VERIFYING"
-  | "VERIFIED"
-  | "DRAFT"
-  | "FAILED"
-  | "CANCELLED"
+  | 'EXECUTING'
+  | 'ANALYZING'
+  | 'DIAGNOSED'
+  | 'PATCH_PROPOSED'
+  | 'PATCHING'
+  | 'REPLAYING'
+  | 'VERIFYING'
+  | 'VERIFIED'
+  | 'DRAFT'
+  | 'FAILED'
+  | 'CANCELLED'
 ```
 
 ### 11.2 保存规则
@@ -1240,7 +1199,7 @@ const defaultRepairPolicy: RepairPolicy = {
   maxTransientRetries: 2,
   maxProbePerNode: 1,
   maxTotalDurationMs: 120_000,
-  allowWholeWorkflowRewrite: true
+  allowWholeWorkflowRewrite: true,
 }
 ```
 
@@ -1282,7 +1241,7 @@ relevantVariableNames
 interface RepairRoundLog {
   sessionId: string
   round: number
-  entry: "GENERATION" | "DEBUG"
+  entry: 'GENERATION' | 'DEBUG'
   failedNodeId?: string
   rootCauseNodeIds: string[]
   failureType?: VerificationFailureType
@@ -1293,7 +1252,7 @@ interface RepairRoundLog {
   usedCheckpoint: boolean
   usedAiTakeover: boolean
   goalAchieved?: boolean
-  result: "VERIFIED" | "FAILED" | "DRAFT" | "CANCELLED"
+  result: 'VERIFIED' | 'FAILED' | 'DRAFT' | 'CANCELLED'
   durationMs: number
 }
 ```

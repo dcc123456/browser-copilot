@@ -192,9 +192,7 @@ const FROM_VERIFICATION_FAILURE: Record<VerificationFailureType, WorkflowFailure
   UNKNOWN: 'unknown',
 }
 
-export function kindFromVerificationFailure(
-  type: VerificationFailureType,
-): WorkflowFailureKind {
+export function kindFromVerificationFailure(type: VerificationFailureType): WorkflowFailureKind {
   return FROM_VERIFICATION_FAILURE[type] ?? 'unknown'
 }
 

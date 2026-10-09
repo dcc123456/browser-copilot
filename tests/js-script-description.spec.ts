@@ -118,7 +118,9 @@ describe('workflowFromHistory javascript-code descriptions', () => {
   })
 
   it('ignores a content-free step marker and falls back to the behaviour', () => {
-    const node = jsNodeOf([entry('run_javascript', { code: `// step 2\ndocument.querySelector('#x').click()` })])
+    const node = jsNodeOf([
+      entry('run_javascript', { code: `// step 2\ndocument.querySelector('#x').click()` }),
+    ])
     expect(node?.data?.['description']).toContain('点击页面元素')
   })
 

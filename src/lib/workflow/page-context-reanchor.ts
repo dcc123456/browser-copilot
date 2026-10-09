@@ -75,7 +75,10 @@ export function navigationAnchorOf(workflow: Workflow): NavigationAnchor | undef
     if (TRIGGER_BLOCK_IDS.has(blockId)) {
       // continue to the first step
     } else if (blockId === 'new-tab' || blockId === 'open-url') {
-      const destination = navigationDestinationOf(blockId, (current.data ?? {}) as Record<string, unknown>)
+      const destination = navigationDestinationOf(
+        blockId,
+        (current.data ?? {}) as Record<string, unknown>,
+      )
       if (destination) {
         const origin = originOfUrl(destination)
         if (origin) return { nodeId: current.id, url: destination, origin }

@@ -306,9 +306,7 @@ export async function resolveBridgeTarget(
   const legacy = {
     activeAgentId: settings.localAgentActiveAgent || undefined,
     windowId:
-      typeof settings.localAgentWindowId === 'number'
-        ? settings.localAgentWindowId
-        : undefined,
+      typeof settings.localAgentWindowId === 'number' ? settings.localAgentWindowId : undefined,
   }
 
   // Collect the (max 3, de-duplicated) candidate window ids, then validate

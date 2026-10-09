@@ -96,10 +96,7 @@ export function hasConditionGroups(groups: unknown): boolean {
 }
 
 /** OR over the groups; a group holds when all of its rows hold. */
-export async function conditionGroupsMatch(
-  groups: unknown,
-  env: ConditionEnv,
-): Promise<boolean> {
+export async function conditionGroupsMatch(groups: unknown, env: ConditionEnv): Promise<boolean> {
   if (!Array.isArray(groups)) return false
   for (const group of groups) {
     const rows = (group as ConditionGroup | null)?.conditions
@@ -117,10 +114,7 @@ export async function conditionGroupsMatch(
 }
 
 /** Evaluate one row: the editor's item list, or the legacy flat `{name,compare,value}`. */
-async function conditionRowMatches(
-  row: ConditionAndRow,
-  env: ConditionEnv,
-): Promise<boolean> {
+async function conditionRowMatches(row: ConditionAndRow, env: ConditionEnv): Promise<boolean> {
   if (!row || typeof row !== 'object') return false
   if (Array.isArray(row.items)) return evaluateBuilderRow(row.items, env)
   return evaluateFlatRow(row, env)

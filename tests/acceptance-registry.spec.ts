@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
-  allOperators, auditRegistry, generationOperators, operatorEntry,
+  allOperators,
+  auditRegistry,
+  generationOperators,
+  operatorEntry,
 } from '../src/lib/workflow/operator-registry'
 import { PALETTE_BLOCKS } from '../src/lib/workflow/blocks/palette'
 import { capabilityOf } from '../src/lib/workflow/block-capabilities'
@@ -16,8 +19,8 @@ describe('V01 all executable blocks inventoried', () => {
   })
   it('flags placeholder/cloud-only and generation policy per entry', () => {
     for (const entry of allOperators()) {
-      expect(['core','on-demand','fallback','hidden']).toContain(entry.aiExposure)
-      expect(['none','page','external']).toContain(entry.sideEffect)
+      expect(['core', 'on-demand', 'fallback', 'hidden']).toContain(entry.aiExposure)
+      expect(['none', 'page', 'external']).toContain(entry.sideEffect)
       expect(typeof entry.allowGeneration).toBe('boolean')
     }
     const saveAssets = operatorEntry('save-assets')!
@@ -36,7 +39,17 @@ describe('V02 generation registry decoupled from editor catalog', () => {
   })
 })
 describe('V04 capability metadata correctness', () => {
-  const blocks = ['javascript-code','ai-agent','read-page','get-text','attribute-value','element-exists','event-click','forms','press-key']
+  const blocks = [
+    'javascript-code',
+    'ai-agent',
+    'read-page',
+    'get-text',
+    'attribute-value',
+    'element-exists',
+    'event-click',
+    'forms',
+    'press-key',
+  ]
   it.each(blocks)('has capability facts for %s', (blockId) => {
     const capability = capabilityOf(blockId)
     expect(capability).toBeDefined()
@@ -55,7 +68,7 @@ describe('V15/V16/V17 operator classification', () => {
     const coreIds = generationOperators('core').map((e) => e.id)
     // Core/on-demand operators cover read, click, fill and wait capabilities.
     const capabilities = new Set(coreIds.flatMap((id) => operatorEntry(id)!.capabilities))
-    for (const action of ['click','fill']) expect([...capabilities].join(',')).toContain(action)
+    for (const action of ['click', 'fill']) expect([...capabilities].join(',')).toContain(action)
   })
   it('keeps unreliable placeholders out of ordinary discovery exposure', () => {
     const core = generationOperators('core')

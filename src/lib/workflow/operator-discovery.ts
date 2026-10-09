@@ -17,10 +17,7 @@
  * @module lib/workflow/operator-discovery
  */
 
-import {
-  allOperators,
-  type OperatorRegistryEntry,
-} from './operator-registry'
+import { allOperators, type OperatorRegistryEntry } from './operator-registry'
 import {
   detectSemanticIntents,
   type DetectedIntent,
@@ -77,7 +74,10 @@ const WEIGHTS = {
   failurePenalty: 0.35,
 } as const
 
-function phraseScore(entry: OperatorRegistryEntry, intent: string): { score: number; hits: string[] } {
+function phraseScore(
+  entry: OperatorRegistryEntry,
+  intent: string,
+): { score: number; hits: string[] } {
   const text = ` ${intent.toLowerCase()} `
   const hits = entry.semanticPhrases.filter((phrase) => text.includes(` ${phrase}`))
   // Cap phrase contribution so a keyword alone cannot dominate.
@@ -96,7 +96,10 @@ function intentScore(entry: OperatorRegistryEntry, intents: DetectedIntent[]): n
   return Math.min(WEIGHTS.intent, matched * 0.3)
 }
 
-function capabilityMatchesIntent(entry: OperatorRegistryEntry, intent: DetectedIntent['intent']): boolean {
+function capabilityMatchesIntent(
+  entry: OperatorRegistryEntry,
+  intent: DetectedIntent['intent'],
+): boolean {
   const caps = entry.capabilities
   switch (intent) {
     case 'interaction-click':
@@ -121,7 +124,10 @@ function goalAlignment(entry: OperatorRegistryEntry, goal: string): number {
   return hit ? WEIGHTS.goalAlignment : 0
 }
 
-function pageEvidenceScore(entry: OperatorRegistryEntry, page: PageStructureSignals | undefined): number {
+function pageEvidenceScore(
+  entry: OperatorRegistryEntry,
+  page: PageStructureSignals | undefined,
+): number {
   if (!page) return 0
   let score = 0
   if (page.hasForm && (entry.capabilities.includes('fill') || entry.id === 'forms')) score += 0.06

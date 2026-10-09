@@ -1783,9 +1783,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     if (!line.trim()) return
     const stamped = line
     generationLogsRef.current.push(stamped)
-    setGenerationDialog((prev) =>
-      prev ? { ...prev, logs: [...prev.logs, stamped] } : prev,
-    )
+    setGenerationDialog((prev) => (prev ? { ...prev, logs: [...prev.logs, stamped] } : prev))
   }, [])
 
   /**
@@ -1896,118 +1894,119 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
    * explanation of why there is nothing to save. Never silence — a silent turn
    * cannot be told apart from a broken feature.
    */
-  const maybePromptSaveWorkflow = useCallback(async (convId: string) => {
-    if (modeRef.current !== 'workflow') return
-    let workflow: Workflow | null = null
-    let source: 'history' | 'draft' = 'draft'
-    let result: Awaited<ReturnType<typeof sendCommand>>
-    try {
-      result = await sendCommand({ type: 'workflows.draft.get', conversationId: convId })
-    } catch {
-      closeGenerationLoading(convId)
-      clearSavePreparing(convId)
-      return
-    }
-    if (result.type !== 'workflows.draft') {
-      closeGenerationLoading(convId)
-      clearSavePreparing(convId)
-      return
-    }
-    if (!result.workflow) {
-      // The background says WHY: it never touched the page, or it tried and
-      // everything failed. Only the second is worth retrying.
-      setSaveNotice(
-        result.empty === 'all-failed'
-          ? tRef.current.chatWorkflowNothingSavedFailed
-          : result.empty === 'validation-failed'
-            ? // The draft exists but failed the producer-completeness gate: no
-              // broken card is offered — the reason can be sent back to the
-              // model via Regenerate.
-              tRef.current.chatWorkflowNotRunnable(result.detail ?? '')
-            : tRef.current.chatWorkflowNothingSaved,
-      )
-      setValidationDetail(
-        result.empty === 'validation-failed' ? (result.detail ?? '') : null,
-      )
-      closeGenerationLoading(convId)
-      clearSavePreparing(convId)
-      return
-    }
-    setSaveNotice(null)
-    setValidationDetail(null)
-    workflow = result.workflow
-    // `history` means the panel compiled the actions the model actually
-    // performed; `draft` means the model placed operator blocks itself.
-    source = result.source ?? 'draft'
-    const aiSteps = aiPrefillSteps(workflow)
-    const aiSelections = Object.fromEntries(aiSteps.map((s) => [s.nodeId, true]))
-    // Count only real action nodes: every draft carries a trigger head, so the
-    // raw node count is never 0 and would defeat the "nothing to save" guard.
-    const steps = workflow.drawflow.nodes.filter((n) => !isTriggerNode(n)).length
-    if (steps === 0) {
-      setSaveNotice(tRef.current.chatWorkflowNothingSaved)
+  const maybePromptSaveWorkflow = useCallback(
+    async (convId: string) => {
+      if (modeRef.current !== 'workflow') return
+      let workflow: Workflow | null = null
+      let source: 'history' | 'draft' = 'draft'
+      let result: Awaited<ReturnType<typeof sendCommand>>
+      try {
+        result = await sendCommand({ type: 'workflows.draft.get', conversationId: convId })
+      } catch {
+        closeGenerationLoading(convId)
+        clearSavePreparing(convId)
+        return
+      }
+      if (result.type !== 'workflows.draft') {
+        closeGenerationLoading(convId)
+        clearSavePreparing(convId)
+        return
+      }
+      if (!result.workflow) {
+        // The background says WHY: it never touched the page, or it tried and
+        // everything failed. Only the second is worth retrying.
+        setSaveNotice(
+          result.empty === 'all-failed'
+            ? tRef.current.chatWorkflowNothingSavedFailed
+            : result.empty === 'validation-failed'
+              ? // The draft exists but failed the producer-completeness gate: no
+                // broken card is offered — the reason can be sent back to the
+                // model via Regenerate.
+                tRef.current.chatWorkflowNotRunnable(result.detail ?? '')
+              : tRef.current.chatWorkflowNothingSaved,
+        )
+        setValidationDetail(result.empty === 'validation-failed' ? (result.detail ?? '') : null)
+        closeGenerationLoading(convId)
+        clearSavePreparing(convId)
+        return
+      }
+      setSaveNotice(null)
       setValidationDetail(null)
-      closeGenerationLoading(convId)
-      clearSavePreparing(convId)
-      return
-    }
-    if ((promptedRef.current[convId] ?? 0) >= steps) {
-      closeGenerationLoading(convId)
-      clearSavePreparing(convId)
-      return
-    }
-    promptedRef.current[convId] = steps
-    const trigger = triggerSelectionOf(workflow)
-    setWorkflowPrompt({
-      conversationId: convId,
-      base: workflow,
-      // Seed the preview with the trigger folded in, so what the card shows and
-      // what gets saved are the same object from the first render on.
-      workflow: applyTriggerSelection(workflow, trigger),
-      aiSteps,
-      aiSelections,
-      trigger,
-      steps,
-      source,
-      reviewing: false,
-      review: null,
-      reviewError: null,
-      reviewOpen: false,
-      reviewLog: [],
-      saving: false,
-      saveError: null,
-      keep: null,
-      stepList: reviewStepsOf(workflow),
-      suggestions: result.suggestions ?? [],
-      probes: null,
-      probesChecking: true,
-      integrity: checkWorkflowIntegrity(workflow),
-      folding: null,
-      foldNote: null,
-      verifyRun: false,
-      repair: result.repair ?? null,
-    })
-    // Probe AFTER the card is up, on its own command: injecting into the page
-    // can be slow or refused outright, and neither may keep the card away.
-    void sendCommand({ type: 'workflows.probe', conversationId: convId })
-      .then((probed) => {
-        if (probed.type !== 'workflows.probe') return
-        setWorkflowPrompt((prev) =>
-          // Guard against a card that was saved, discarded or replaced while
-          // the probe was in flight.
-          prev && prev.conversationId === convId && prev.base === workflow
-            ? { ...prev, probes: probed.probes, probesChecking: false }
-            : prev,
-        )
+      workflow = result.workflow
+      // `history` means the panel compiled the actions the model actually
+      // performed; `draft` means the model placed operator blocks itself.
+      source = result.source ?? 'draft'
+      const aiSteps = aiPrefillSteps(workflow)
+      const aiSelections = Object.fromEntries(aiSteps.map((s) => [s.nodeId, true]))
+      // Count only real action nodes: every draft carries a trigger head, so the
+      // raw node count is never 0 and would defeat the "nothing to save" guard.
+      const steps = workflow.drawflow.nodes.filter((n) => !isTriggerNode(n)).length
+      if (steps === 0) {
+        setSaveNotice(tRef.current.chatWorkflowNothingSaved)
+        setValidationDetail(null)
+        closeGenerationLoading(convId)
+        clearSavePreparing(convId)
+        return
+      }
+      if ((promptedRef.current[convId] ?? 0) >= steps) {
+        closeGenerationLoading(convId)
+        clearSavePreparing(convId)
+        return
+      }
+      promptedRef.current[convId] = steps
+      const trigger = triggerSelectionOf(workflow)
+      setWorkflowPrompt({
+        conversationId: convId,
+        base: workflow,
+        // Seed the preview with the trigger folded in, so what the card shows and
+        // what gets saved are the same object from the first render on.
+        workflow: applyTriggerSelection(workflow, trigger),
+        aiSteps,
+        aiSelections,
+        trigger,
+        steps,
+        source,
+        reviewing: false,
+        review: null,
+        reviewError: null,
+        reviewOpen: false,
+        reviewLog: [],
+        saving: false,
+        saveError: null,
+        keep: null,
+        stepList: reviewStepsOf(workflow),
+        suggestions: result.suggestions ?? [],
+        probes: null,
+        probesChecking: true,
+        integrity: checkWorkflowIntegrity(workflow),
+        folding: null,
+        foldNote: null,
+        verifyRun: false,
+        repair: result.repair ?? null,
       })
-      .catch(() => {
-        setWorkflowPrompt((prev) =>
-          prev && prev.conversationId === convId && prev.base === workflow
-            ? { ...prev, probes: null, probesChecking: false }
-            : prev,
-        )
-      })
-  }, [closeGenerationLoading, clearSavePreparing])
+      // Probe AFTER the card is up, on its own command: injecting into the page
+      // can be slow or refused outright, and neither may keep the card away.
+      void sendCommand({ type: 'workflows.probe', conversationId: convId })
+        .then((probed) => {
+          if (probed.type !== 'workflows.probe') return
+          setWorkflowPrompt((prev) =>
+            // Guard against a card that was saved, discarded or replaced while
+            // the probe was in flight.
+            prev && prev.conversationId === convId && prev.base === workflow
+              ? { ...prev, probes: probed.probes, probesChecking: false }
+              : prev,
+          )
+        })
+        .catch(() => {
+          setWorkflowPrompt((prev) =>
+            prev && prev.conversationId === convId && prev.base === workflow
+              ? { ...prev, probes: null, probesChecking: false }
+              : prev,
+          )
+        })
+    },
+    [closeGenerationLoading, clearSavePreparing],
+  )
 
   const append = useCallback((entry: Omit<Entry, 'id'>) => {
     setEntries((prev) => [...prev, { id: nextId(), ...entry }])
@@ -2174,20 +2173,19 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                     ...prev,
                     latestAction: message.name,
                     actionCount: prev.actionCount + 1,
-                    state: message.name.includes('repair') || message.name.includes('recover')
-                      ? 'RECOVERING'
-                      : prev.state === 'RECOVERING'
+                    state:
+                      message.name.includes('repair') || message.name.includes('recover')
                         ? 'RECOVERING'
-                        : 'GENERATING',
+                        : prev.state === 'RECOVERING'
+                          ? 'RECOVERING'
+                          : 'GENERATING',
                   }
                 : prev,
             )
             break
           case 'tool.result':
             if (modeRef.current === 'workflow') {
-              appendGenerationLog(
-                `← ${message.name}: ${message.summary || 'done'}`,
-              )
+              appendGenerationLog(`← ${message.name}: ${message.summary || 'done'}`)
             }
             setGenerationDialog((prev) =>
               prev
@@ -2308,9 +2306,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             append({ role: 'error', text: message.message })
             setBusy(false)
             clearSavePreparing(conversationId)
-            setGenerationDialog((prev) =>
-              prev ? { ...prev, state: 'ERROR' } : prev,
-            )
+            setGenerationDialog((prev) => (prev ? { ...prev, state: 'ERROR' } : prev))
             break
         }
       })
@@ -2714,8 +2710,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     }
 
     // Workflow generation mode: auto-generate name from task text without blocking.
-    const workflowName =
-      modeRef.current === 'workflow' ? generateWorkflowName(outgoing) : undefined
+    const workflowName = modeRef.current === 'workflow' ? generateWorkflowName(outgoing) : undefined
 
     const delivered = post({
       type: 'chat',
@@ -3702,7 +3697,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         </button>
       </div>
     </div>
-
   ) : null
 
   return (
@@ -3946,7 +3940,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         {/* The save card pops up as a modal the moment the task completes;
             closing it moves the card back inline above the composer. */}
         {!saveCardModalOpen && saveCard}
-
 
         {/* The AI-refine dialog is a body portal (not inline in the log): it
             opens ON TOP of the save-card popup, which itself is a z-[9999]
@@ -4299,9 +4292,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                 className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-border bg-panel shadow-xl"
               >
                 <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-                  <h2 className="truncate text-sm font-semibold text-ink">
-                    {saveCardTitle}
-                  </h2>
+                  <h2 className="truncate text-sm font-semibold text-ink">{saveCardTitle}</h2>
                   <button
                     type="button"
                     onClick={() => setSaveCardModalOpen(false)}
@@ -4413,9 +4404,7 @@ function ConversationRow({
 }
 
 /** Stage rows for the generation dialog, derived from the view state. */
-function generationStages(
-  state: WorkflowGenerationViewState,
-): Array<{
+function generationStages(state: WorkflowGenerationViewState): Array<{
   key: string
   labelKey: string
   status: 'running' | 'done' | 'pending' | 'warn'

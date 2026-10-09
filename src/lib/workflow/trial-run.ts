@@ -661,11 +661,12 @@ export function unfiredDraftSaveNotice(draft: {
   goalText?: string
 }): string {
   const head = draft.nodes.find(isTriggerNode)
-  const headGoal = typeof head?.data?.['goalText'] === 'string' ? (head.data['goalText'] as string) : ''
+  const headGoal =
+    typeof head?.data?.['goalText'] === 'string' ? (head.data['goalText'] as string) : ''
   const goalText = draft.goalText?.trim() || headGoal
   if (!goalAsksForDraftSave(goalText)) return ''
   if (draft.nodes.some((node) => isActuationNode(node) && isDraftSaveNode(node))) return ''
-  return '目标要求保存草稿，但已记录的步骤里还没有一步真正保存它：请把「暂存离开 / 存草稿」那一次点击继续做完并记录为最后一步，否则回放再干净也没有完成任务。 (The goal asks for a draft and no recorded step saves one yet — finish the 「save draft」 click and record it as the graph\'s last step, or a clean replay still achieves nothing.)'
+  return "目标要求保存草稿，但已记录的步骤里还没有一步真正保存它：请把「暂存离开 / 存草稿」那一次点击继续做完并记录为最后一步，否则回放再干净也没有完成任务。 (The goal asks for a draft and no recorded step saves one yet — finish the 「save draft」 click and record it as the graph's last step, or a clean replay still achieves nothing.)"
 }
 
 /** What a step must name to be a visit to where the drafts are LISTED. */
@@ -692,12 +693,14 @@ export function unvisitedDraftListNotice(draft: {
   goalText?: string
 }): string {
   const head = draft.nodes.find(isTriggerNode)
-  const headGoal = typeof head?.data?.['goalText'] === 'string' ? (head.data['goalText'] as string) : ''
+  const headGoal =
+    typeof head?.data?.['goalText'] === 'string' ? (head.data['goalText'] as string) : ''
   const goalText = draft.goalText?.trim() || headGoal
   if (!goalAsksForDraftSave(goalText)) return ''
   const saveIndex = draft.nodes.findIndex((node) => isActuationNode(node) && isDraftSaveNode(node))
   if (saveIndex < 0) return ''
-  if (draft.nodes.slice(saveIndex + 1).some((node) => DRAFT_LIST_PATTERN.test(commitProseOf(node)))) return ''
+  if (draft.nodes.slice(saveIndex + 1).some((node) => DRAFT_LIST_PATTERN.test(commitProseOf(node))))
+    return ''
   return '草稿已保存，但记录里没有一步去看它：请在保存之后补两步——第一步点开「草稿箱 / 草稿列表」，第二步等待或读取列表里的笔记行（让它自己记下真实选择器），并把第二步的成功条件写成只有保存之后才可能成立的断言（该行数量增加 countIncreased，或出现标题为 {{变量}} 的那一篇）。只写「元素存在」会被当成页面自带的家具，指向没有步骤记录过的选择器会被当成没有证据。 (The draft save is recorded but no later step looks at it — add TWO steps after it: open 草稿箱 / the draft list, then wait for or read the note rows so that step records their real selector, and give the second step a postcondition that can only hold afterwards (`countIncreased` on those rows, or the row whose title is the {{variable}} this run wrote).)'
 }
 

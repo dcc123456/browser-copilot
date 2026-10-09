@@ -206,7 +206,11 @@ export async function runAutoRepair(input: StartAutoRepairInput): Promise<Repair
         if (already.passed && already.alreadySatisfied) {
           // Goal already holds — nothing to repair; report success without a
           // revision (the workflow is correct as saved).
-          session = finishAttempt(session, { verification: toSessionVerification(already) }, 'verified')
+          session = finishAttempt(
+            session,
+            { verification: toSessionVerification(already) },
+            'verified',
+          )
           deps.emit({ type: 'repair.verifying', sessionId: session.id })
           deps.emit({ type: 'repair.success', sessionId: session.id, note: already.note })
           return settleRepair(session, {
@@ -241,7 +245,8 @@ export async function runAutoRepair(input: StartAutoRepairInput): Promise<Repair
             type: 'repair.attempt-failed',
             sessionId: session.id,
             attempt: attemptNumber,
-            reason: 'the graph carries no static navigation target to re-anchor the page context onto',
+            reason:
+              'the graph carries no static navigation target to re-anchor the page context onto',
           })
           next = advance(session, failure)
           continue
@@ -263,7 +268,12 @@ export async function runAutoRepair(input: StartAutoRepairInput): Promise<Repair
           }
         } else {
           session = finishAttempt(session, {}, 'no-candidate')
-          deps.emit({ type: 'repair.attempt-failed', sessionId: session.id, attempt: attemptNumber, reason: 'readiness recovery failed' })
+          deps.emit({
+            type: 'repair.attempt-failed',
+            sessionId: session.id,
+            attempt: attemptNumber,
+            reason: 'readiness recovery failed',
+          })
           next = advance(session, failure)
           continue
         }
@@ -301,7 +311,11 @@ export async function runAutoRepair(input: StartAutoRepairInput): Promise<Repair
               diagnosis: {
                 type: 'MODEL_NO_CANDIDATE',
                 rootCauseNodeIds: [failure.nodeId],
-                explanation: describeParseOutcome(parsed.kind, undefined, parsed.kind === 'refusal' ? parsed.reason : undefined),
+                explanation: describeParseOutcome(
+                  parsed.kind,
+                  undefined,
+                  parsed.kind === 'refusal' ? parsed.reason : undefined,
+                ),
                 confidence: 0,
               },
             },
@@ -311,7 +325,11 @@ export async function runAutoRepair(input: StartAutoRepairInput): Promise<Repair
             type: 'repair.attempt-failed',
             sessionId: session.id,
             attempt: attemptNumber,
-            reason: describeParseOutcome(parsed.kind, undefined, parsed.kind === 'refusal' ? parsed.reason : undefined),
+            reason: describeParseOutcome(
+              parsed.kind,
+              undefined,
+              parsed.kind === 'refusal' ? parsed.reason : undefined,
+            ),
           })
           next = advance(session, failure)
           continue
@@ -381,7 +399,11 @@ export async function runAutoRepair(input: StartAutoRepairInput): Promise<Repair
       // --- Resume from the clean checkpoint ---
       const checkpointNode = failure.checkpoint?.nodeId
       const resumeVariables = failure.checkpoint?.variables ?? {}
-      deps.emit({ type: 'repair.resuming', sessionId: session.id, nodeId: checkpointNode ?? failure.nodeId })
+      deps.emit({
+        type: 'repair.resuming',
+        sessionId: session.id,
+        nodeId: checkpointNode ?? failure.nodeId,
+      })
       const resumed = await deps.resumeRun(candidateWorkflow, checkpointNode, resumeVariables)
 
       if (resumed.outcome === 'cancelled') {
@@ -391,17 +413,31 @@ export async function runAutoRepair(input: StartAutoRepairInput): Promise<Repair
       // --- Verify (L1 / L2 / L3) ---
       deps.emit({ type: 'repair.verifying', sessionId: session.id })
       const nodeSucceeded = resumed.outcome === 'passed'
-      const verification = await verifyRepair(candidateWorkflow, candidate, nodeSucceeded, deps.verification)
+      const verification = await verifyRepair(
+        candidateWorkflow,
+        candidate,
+        nodeSucceeded,
+        deps.verification,
+      )
       session = updateCurrentAttempt(session, {
         applyResult: { changedNodeIds: applied.changedNodeIds, appliedAt: Date.now() },
       })
 
       if (verification.passed) {
-        session = finishAttempt(session, { verification: toSessionVerification(verification) }, 'verified')
+        session = finishAttempt(
+          session,
+          { verification: toSessionVerification(verification) },
+          'verified',
+        )
 
         // Auto-commit the verified workflow as an ai-repair revision.
         const revision = await deps.commit(candidateWorkflow, session.id)
-        deps.emit({ type: 'repair.success', sessionId: session.id, revision, note: verification.note })
+        deps.emit({
+          type: 'repair.success',
+          sessionId: session.id,
+          revision,
+          note: verification.note,
+        })
         return settleRepair(session, {
           status: 'success',
           strategy,

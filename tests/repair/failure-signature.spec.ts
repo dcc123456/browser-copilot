@@ -98,9 +98,7 @@ describe('signatureFromAnalysis', () => {
     rootCauseNodeIds: ['n3'],
     failureType: 'VARIABLE_EMPTY',
     repairTarget: 'UPSTREAM_NODE',
-    dependencyChain: [
-      { nodeId: 'n5', variable: 'captcha', relation: 'USES_VARIABLE' },
-    ],
+    dependencyChain: [{ nodeId: 'n5', variable: 'captcha', relation: 'USES_VARIABLE' }],
     variableEvidence: [
       {
         evidenceId: 'ev-1',

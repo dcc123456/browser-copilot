@@ -12,10 +12,7 @@
  *
  * @module background/workflow-engine/failure-classifier
  */
-import {
-  classifyFailureMessage,
-  type FailureClassification,
-} from '../../lib/workflow/failure-code'
+import { classifyFailureMessage, type FailureClassification } from '../../lib/workflow/failure-code'
 import {
   buildExecutionEvidence,
   type ExecutionEvidence,
@@ -67,7 +64,8 @@ export function classifyFailure(input: ClassifyFailureInput): FailureVerdict {
       ? 'locator'
       : classification.code === 'READINESS_TIMEOUT'
         ? 'readiness'
-        : classification.code === 'PRECONDITION_FAILED' || classification.code === 'POSTCONDITION_FAILED'
+        : classification.code === 'PRECONDITION_FAILED' ||
+            classification.code === 'POSTCONDITION_FAILED'
           ? 'contract'
           : 'none'
   const evidence = buildExecutionEvidence({
@@ -97,8 +95,6 @@ export function withFailureVerdict(
   input: Omit<ClassifyFailureInput, 'error'>,
 ): AiTakeoverRequest {
   const verdict = classifyFailure({ ...input, error: request.failedError })
-  ;(
-    request as AiTakeoverRequest & { failure?: FailureVerdict }
-  )['failure'] = verdict
+  ;(request as AiTakeoverRequest & { failure?: FailureVerdict })['failure'] = verdict
   return request
 }

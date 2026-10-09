@@ -8,10 +8,7 @@
  *   - unique + actionable → healthy, no warning
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  locatorConcernLines,
-  type SelectorProbeResult,
-} from '../src/lib/workflow/selector-probe'
+import { locatorConcernLines, type SelectorProbeResult } from '../src/lib/workflow/selector-probe'
 import { probeWorkflowLocators } from '../src/background/selector-probe'
 import type { Workflow, WorkflowNode } from '../src/lib/workflow/types'
 import { newId } from '../src/lib/storage'

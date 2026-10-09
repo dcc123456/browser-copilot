@@ -420,9 +420,7 @@ export function detectRepeatRuns(graph: CollapsibleGraph): RepeatSuggestion[] {
   // compound scan. A compound suggestion never fires unless its whole body is
   // stable, so preferring it never loses a more precise rewrite.
   const compound = detectCompoundRuns(chain, claims)
-  const blockRuns = detectBlockRuns(chain).filter(
-    (run) => !run.runIds.some((id) => claims.has(id)),
-  )
+  const blockRuns = detectBlockRuns(chain).filter((run) => !run.runIds.some((id) => claims.has(id)))
   return [...blockRuns, ...compound]
 }
 

@@ -102,7 +102,10 @@ const GENERATION_CASES: { id: string; entries: HistoryEntry[] }[] = [
 ]
 
 /** Parse one raw trace; then compile (strict-validate) the parsed workflow. */
-function compileTrace(entries: HistoryEntry[], name: string): {
+function compileTrace(
+  entries: HistoryEntry[],
+  name: string,
+): {
   parsed: boolean
   compiled: boolean
   issues: string[]
@@ -168,9 +171,7 @@ async function measure(): Promise<BaselineReport> {
       submitCalls: result.submitCalls,
     }
   }
-  const firstRunOk = RELIABILITY_SCENARIOS.filter(
-    (s) => executionCases[s.id]!.ok,
-  ).length
+  const firstRunOk = RELIABILITY_SCENARIOS.filter((s) => executionCases[s.id]!.ok).length
 
   // Debug (offline benchmark over the real debug-session loop).
   const debugReport = await runBench()
@@ -186,8 +187,7 @@ async function measure(): Promise<BaselineReport> {
     }
   }
   const replayOk = RELIABILITY_SCENARIOS.filter(
-    (s) =>
-      stabilityCases[s.id]!.first && stabilityCases[s.id]!.second,
+    (s) => stabilityCases[s.id]!.first && stabilityCases[s.id]!.second,
   ).length
 
   let commit = 'unknown'

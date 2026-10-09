@@ -47,9 +47,7 @@ vi.mock('../src/lib/workflow/storage', async (importOriginal) => {
   return {
     ...actual,
     getWorkflow: vi.fn(async (id: string) =>
-      id === 'wf-1'
-        ? ({ id: 'wf-1', name: 'Collect headlines' } as unknown)
-        : undefined,
+      id === 'wf-1' ? ({ id: 'wf-1', name: 'Collect headlines' } as unknown) : undefined,
     ),
     listWorkflows: vi.fn(async () => [{ id: 'wf-1', name: 'Collect headlines' } as unknown]),
   }
@@ -275,11 +273,7 @@ describe('create_scheduled_task execution', () => {
 
   it.each([
     ['missing name', { schedule: { kind: 'daily', hour: 9 }, prompt: 'x' }, 'name'],
-    [
-      'agent-prompt without prompt',
-      { name: 'X', schedule: { kind: 'daily', hour: 9 } },
-      'prompt',
-    ],
+    ['agent-prompt without prompt', { name: 'X', schedule: { kind: 'daily', hour: 9 } }, 'prompt'],
     [
       'workflow without workflowId',
       { name: 'X', schedule: { kind: 'daily', hour: 9 }, kind: 'workflow' },
@@ -317,7 +311,11 @@ describe('create_scheduled_task execution', () => {
       'No scheduled task with id',
     ],
   ])('rejects %s without persisting anything', async (_label, args, errorPart) => {
-    const output = await executeTool('create_scheduled_task', args as Record<string, unknown>, baseCtx)
+    const output = await executeTool(
+      'create_scheduled_task',
+      args as Record<string, unknown>,
+      baseCtx,
+    )
     const parsed = JSON.parse(output) as { ok: boolean; error: string }
     expect(parsed.ok).toBe(false)
     expect(parsed.error).toContain(errorPart)
@@ -386,7 +384,10 @@ describe('workflow turns mount the workflow-generator skill', () => {
 
   it('mounts the built-in operator guide into the system prompt in workflow mode', async () => {
     streamMock.mockResolvedValueOnce({ content: 'done', toolCalls: [] } as never)
-    await runAgentTurn([{ role: 'user', content: 'build a workflow' }] as never, deps('workflow') as never)
+    await runAgentTurn(
+      [{ role: 'user', content: 'build a workflow' }] as never,
+      deps('workflow') as never,
+    )
 
     const system = systemMessage(0)
     expect(system).toContain('MODE SKILL — workflow-generator (ACTIVE)')

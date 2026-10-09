@@ -45,10 +45,7 @@ export default function EditUploadFile({ data, onChange }: EditFormProps) {
               ['workflow-file', 'Workflow file variable'],
             ] as const
           ).map(([value, label]) => (
-            <label
-              key={value}
-              className="flex cursor-pointer items-center gap-2 text-sm text-ink"
-            >
+            <label key={value} className="flex cursor-pointer items-center gap-2 text-sm text-ink">
               <input
                 type="radio"
                 name="upload-source-mode"

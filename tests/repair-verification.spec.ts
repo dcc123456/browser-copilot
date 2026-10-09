@@ -67,7 +67,8 @@ function navigatingWorkflow(url: string): Workflow {
   return workflow
 }
 
-const goalless = {  id: 'w0',
+const goalless = {
+  id: 'w0',
   name: 'Read',
   createdAt: 0,
   updatedAt: 0,
@@ -242,10 +243,7 @@ describe('S0 terminal-state short-circuit', () => {
     // without a model call. An absence would prove something; this proves nothing.
     const vacuous: WorkflowCondition = { kind: 'elementExists', target: { selector: 'body' } }
     const deps = answering(true)
-    const already = await checkGoalAlreadySatisfied(
-      workflowWithGoal([vacuous], [vacuous]),
-      deps,
-    )
+    const already = await checkGoalAlreadySatisfied(workflowWithGoal([vacuous], [vacuous]), deps)
     expect(already.satisfied).toBe(false)
     expect(already.evaluated).toEqual([])
     expect(deps.asked).toHaveLength(0)
@@ -303,8 +301,8 @@ describe('provesLandedEffect', () => {
     // The document root is present before, during and after a failed step.
     expect(provesLandedEffect({ kind: 'elementExists', target: { selector: 'body' } })).toBe(false)
     expect(provesLandedEffect({ kind: 'elementVisible', target: { selector: 'HTML' } })).toBe(false)
-    expect(
-      provesLandedEffect({ kind: 'elementExists', target: { selector: '.save-draft' } }),
-    ).toBe(true)
+    expect(provesLandedEffect({ kind: 'elementExists', target: { selector: '.save-draft' } })).toBe(
+      true,
+    )
   })
 })

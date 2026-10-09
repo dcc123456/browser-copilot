@@ -73,10 +73,7 @@ describe('runtime input generalization', () => {
   })
 
   it('reuses one declaration for repeated identical values', () => {
-    const draft = draftWith(
-      [formsNode('iPhone'), formsNode('iPhone')],
-      'Search for iPhone twice',
-    )
+    const draft = draftWith([formsNode('iPhone'), formsNode('iPhone')], 'Search for iPhone twice')
     const result = generalizeInputs(draft)
     expect(result.declarations).toHaveLength(1)
     expect(result.draft.nodes.filter((n) => n.data['value'] === '{{keyword}}')).toHaveLength(2)

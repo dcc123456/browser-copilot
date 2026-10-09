@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { newGenerationMetrics, recordMetric, summarizeMetrics } from '../src/lib/workflow/generation-metrics'
+import {
+  newGenerationMetrics,
+  recordMetric,
+  summarizeMetrics,
+} from '../src/lib/workflow/generation-metrics'
 describe('generation metrics', () => {
   it('records a discovery + candidate count', () => {
     const m = newGenerationMetrics(0)

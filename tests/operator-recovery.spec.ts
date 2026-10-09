@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
-  advanceRecovery, reportOperatorFailure, startRecovery,
+  advanceRecovery,
+  reportOperatorFailure,
+  startRecovery,
   type OperatorFailureReport,
 } from '../src/lib/workflow/recovery'
-function failed(blockId: string, message: string, phase?: OperatorFailureReport['phase']): OperatorFailureReport {
+function failed(
+  blockId: string,
+  message: string,
+  phase?: OperatorFailureReport['phase'],
+): OperatorFailureReport {
   return reportOperatorFailure({ operator: blockId, message, ...(phase ? { phase } : {}) })
 }
 describe('29.2 all top-3 fail: classify then repair then expand', () => {
@@ -27,7 +33,10 @@ describe('29.2 all top-3 fail: classify then repair then expand', () => {
     let sawJs = false
     let step = step1
     while (guard < 8) {
-      if (step.action.kind === 'capability-gap-js') { sawJs = true; break }
+      if (step.action.kind === 'capability-gap-js') {
+        sawJs = true
+        break
+      }
       step = advanceRecovery(session)
       guard++
     }
@@ -49,7 +58,10 @@ describe('29.3 recovery candidates', () => {
     let step = advanceRecovery(session)
     let expanded: string[] | undefined
     for (let i = 0; i < 6; i++) {
-      if (step.nextCandidates) { expanded = step.nextCandidates.candidateBlockIds; break }
+      if (step.nextCandidates) {
+        expanded = step.nextCandidates.candidateBlockIds
+        break
+      }
       step = advanceRecovery(session)
     }
     expect(expanded).toBeDefined()

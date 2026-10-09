@@ -169,10 +169,7 @@ describe('workflow generation normalization', () => {
 
   it('rewires edges around removed linear nodes (graph stays connected)', () => {
     const result = normalizeWorkflowDraft(
-      draftOf([
-        node('delay', { time: 200 }),
-        node('event-click', { selector: '.go' }),
-      ]),
+      draftOf([node('delay', { time: 200 }), node('event-click', { selector: '.go' })]),
     )
     // trigger directly edges into the click after the delay is removed.
     const edge = result.draft.edges.find((e) => e.source === 't')

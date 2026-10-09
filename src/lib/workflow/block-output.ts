@@ -55,11 +55,17 @@ export function pickTabIndex(
   const findBy = String(data['findTabBy'] ?? 'match-patterns')
   if (findBy === 'match-patterns') {
     const pattern = resolved.matchPattern ?? ''
-    return { index: pattern ? tabs.findIndex((tab) => globMatch(pattern, tab.url)) : -1, byIndex: false }
+    return {
+      index: pattern ? tabs.findIndex((tab) => globMatch(pattern, tab.url)) : -1,
+      byIndex: false,
+    }
   }
   if (findBy === 'tab-title') {
     const title = resolved.tabTitle ?? ''
-    return { index: title ? tabs.findIndex((tab) => tab.title.includes(title)) : -1, byIndex: false }
+    return {
+      index: title ? tabs.findIndex((tab) => tab.title.includes(title)) : -1,
+      byIndex: false,
+    }
   }
   if (findBy === 'next-tab' || findBy === 'prev-tab') {
     const at = tabs.findIndex((tab) => tab.id === currentId)
@@ -111,9 +117,10 @@ export function readRecordList(value: unknown): unknown[] {
  * `value` cannot select them; `value`/label matching is the kernel's default and
  * needs no fields back. Lives here because both hosts run the same four options.
  */
-export function selectOptionFields(
-  data: Record<string, unknown>,
-): { selectBy?: 'first' | 'last' | 'index'; index?: number } {
+export function selectOptionFields(data: Record<string, unknown>): {
+  selectBy?: 'first' | 'last' | 'index'
+  index?: number
+} {
   const by = String(data['selectOptionBy'] ?? 'value')
   if (by === 'first-option') return { selectBy: 'first' }
   if (by === 'last-option') return { selectBy: 'last' }
@@ -190,10 +197,7 @@ function readField(value: unknown, field: string): unknown {
  * saying "scroll to 1500" scrolled 1500 further on every replay.
  */
 export function scrollSpecFrom(data: Record<string, unknown>): ScrollSpec {
-  const axis = (
-    inc: unknown,
-    offset: number,
-  ): { value: number; incremental: boolean } =>
+  const axis = (inc: unknown, offset: number): { value: number; incremental: boolean } =>
     typeof inc === 'number'
       ? { value: inc, incremental: true }
       : { value: offset, incremental: inc === true }
@@ -288,4 +292,3 @@ export async function webhookRecord(
     data: pickDataPath(parseResponseBody(body, responseType), dataPath),
   }
 }
-

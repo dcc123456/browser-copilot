@@ -41,7 +41,10 @@ describe('V23 native-first ordering', () => {
     expect(jsIdx).toBe(-1)
   })
   it('ranks native forms above ai-agent for a deterministic fill', () => {
-    const result = findWorkflowOperators({ stepIntent: 'fill the email field with a fixed value', limit: 8 })
+    const result = findWorkflowOperators({
+      stepIntent: 'fill the email field with a fixed value',
+      limit: 8,
+    })
     const ids = result.candidateBlockIds
     expect(ids[0]).toBe('forms')
     expect(ids).not.toContain('ai-agent')

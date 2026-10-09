@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { newGenerationMetrics, recordMetric, summarizeMetrics } from '../src/lib/workflow/generation-metrics'
+import {
+  newGenerationMetrics,
+  recordMetric,
+  summarizeMetrics,
+} from '../src/lib/workflow/generation-metrics'
 describe('V71 tool round accounting', () => {
   it('records llm turns, operator calls and discovery calls for a simple task', () => {
     const m = newGenerationMetrics(1000)

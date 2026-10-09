@@ -5,14 +5,29 @@ import { verifyWorkflowGoal } from '../src/background/workflow-engine/goal-verif
 import type { ConditionPageProbe } from '../src/background/workflow-engine/condition-runtime'
 import { withNodeGoalContract } from '../src/lib/workflow/node-goal-contract'
 import type { Workflow } from '../src/lib/workflow/types'
-const probe: ConditionPageProbe = { exists: async () => true, visible: async () => true, enabled: async () => true, text: async () => 'ok', attribute: async () => 'v', count: async () => 1, url: async () => 'https://t.test' }
+const probe: ConditionPageProbe = {
+  exists: async () => true,
+  visible: async () => true,
+  enabled: async () => true,
+  text: async () => 'ok',
+  attribute: async () => 'v',
+  count: async () => 1,
+  url: async () => 'https://t.test',
+}
 describe('V95 full failure recovery chain', () => {
   it('follows the recovery state machine from failure through expansion', () => {
     const nodeGoal = 'click submit'
     const criteria = [{ kind: 'elementExists', target: { testId: 'submit' } }] as never
     const session = startRecovery({
       stepIntent: 'click submit',
-      failed: [reportOperatorFailure({ operator: 'event-click', message: 'not found', nodeGoal, nodeSuccessCriteria: criteria })],
+      failed: [
+        reportOperatorFailure({
+          operator: 'event-click',
+          message: 'not found',
+          nodeGoal,
+          nodeSuccessCriteria: criteria,
+        }),
+      ],
     })
     const seen: string[] = []
     for (let i = 0; i < 4; i++) seen.push(advanceRecovery(session).action.kind)
@@ -24,13 +39,22 @@ describe('V95 full failure recovery chain', () => {
 })
 describe('V96 full repair chain', () => {
   it('analyzes node goal/criteria, patches, replays, reverifies and certifies', async () => {
-    const data = withNodeGoalContract({ blockId: 'forms' }, {
-      version: 1, goal: 'fill the result field', successCriteria: [{ kind: 'variableExists', name: 'result' }],
-    })
+    const data = withNodeGoalContract(
+      { blockId: 'forms' },
+      {
+        version: 1,
+        goal: 'fill the result field',
+        successCriteria: [{ kind: 'variableExists', name: 'result' }],
+      },
+    )
     const workflow = {
-      id: 'w', name: 'w', trigger: { type:'manual', enabled:true },
-      settings: { goalSpec: { summary: 'G', successConditions: [{ kind:'variableExists', name:'result' }] } },
-      drawflow: { nodes: [{ id:'n', label:'forms', position:{x:0,y:0}, data }], edges: [] },
+      id: 'w',
+      name: 'w',
+      trigger: { type: 'manual', enabled: true },
+      settings: {
+        goalSpec: { summary: 'G', successConditions: [{ kind: 'variableExists', name: 'result' }] },
+      },
+      drawflow: { nodes: [{ id: 'n', label: 'forms', position: { x: 0, y: 0 }, data }], edges: [] },
     } as unknown as Workflow
     const failedNode = workflow.drawflow.nodes[0]!
     const repairContext = buildGoalRepairContext(workflow, failedNode)

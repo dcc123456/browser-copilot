@@ -139,8 +139,7 @@ function ConditionRow({
           />
         )}
 
-        {(condition.kind === 'variableExists' ||
-          condition.kind === 'variableEquals') && (
+        {(condition.kind === 'variableExists' || condition.kind === 'variableEquals') && (
           <input
             className={inputClass}
             type="text"
@@ -155,12 +154,8 @@ function ConditionRow({
             className={inputClass}
             type="text"
             placeholder={t('nodeConditionExpectedValue')}
-            value={
-              typeof condition.expected === 'string' ? condition.expected : ''
-            }
-            onChange={(e) =>
-              onPatch({ ...condition, expected: e.target.value })
-            }
+            value={typeof condition.expected === 'string' ? condition.expected : ''}
+            onChange={(e) => onPatch({ ...condition, expected: e.target.value })}
           />
         )}
       </div>
@@ -174,11 +169,7 @@ export interface ConditionEditorProps {
   t: TranslateFn
 }
 
-export default function ConditionEditor({
-  conditions,
-  onChange,
-  t,
-}: ConditionEditorProps) {
+export default function ConditionEditor({ conditions, onChange, t }: ConditionEditorProps) {
   const patchAt = (index: number, next: WorkflowCondition) => {
     const updated = conditions.slice()
     updated[index] = next
@@ -187,11 +178,9 @@ export default function ConditionEditor({
     onChange(updated)
   }
 
-  const removeAt = (index: number) =>
-    onChange(conditions.filter((_, i) => i !== index))
+  const removeAt = (index: number) => onChange(conditions.filter((_, i) => i !== index))
 
-  const add = () =>
-    onChange([...conditions, blankCondition('elementVisible')])
+  const add = () => onChange([...conditions, blankCondition('elementVisible')])
 
   return (
     <div className="flex flex-col gap-1.5">

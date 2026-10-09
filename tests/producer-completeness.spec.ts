@@ -30,7 +30,11 @@ function workflow(nodes: Workflow['drawflow']['nodes']): Workflow {
   }
 }
 
-function node(id: string, blockId: string, data: NodeData = {}): Workflow['drawflow']['nodes'][number] {
+function node(
+  id: string,
+  blockId: string,
+  data: NodeData = {},
+): Workflow['drawflow']['nodes'][number] {
   return { id, label: blockId, position: { x: 0, y: 0 }, data: { blockId, ...data } }
 }
 
@@ -67,10 +71,7 @@ describe('checkProducerCompleteness', () => {
   })
 
   it('flags export-data without a saveData table producer', () => {
-    const wf = workflow([
-      node('t', 'trigger'),
-      node('exp', 'export-data', { name: 'out.csv' }),
-    ])
+    const wf = workflow([node('t', 'trigger'), node('exp', 'export-data', { name: 'out.csv' })])
     const issues = checkProducerCompleteness(wf)
     expect(issues).toHaveLength(1)
     expect(issues[0]!.code).toBe('MISSING_TABLE_PRODUCER')

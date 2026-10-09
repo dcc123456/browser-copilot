@@ -295,7 +295,7 @@ describe('condition probe → kernel payload contract', () => {
   })
 })
 
-describe('a condition recorded as the node\'s own Target is still observable', () => {
+describe("a condition recorded as the node's own Target is still observable", () => {
   // Generation writes `condition.target` as the rich `{ primary, fallbacks }` the
   // snapshot produced, not as a semantic locator. Read as a locator it carries no
   // identity fields at all, so `elementExists` answered false forever — an
@@ -324,7 +324,13 @@ describe('a condition recorded as the node\'s own Target is still observable', (
     const captured: Op[] = []
     harness.fn = async (op) => {
       captured.push(op)
-      return { ok: true, found: true, data: 1, frameUrl: 'https://example.test/page', isTopFrame: true }
+      return {
+        ok: true,
+        found: true,
+        data: 1,
+        frameUrl: 'https://example.test/page',
+        isTopFrame: true,
+      }
     }
     const closedShadowTarget: Target = {
       label: '暂存离开',
@@ -349,7 +355,13 @@ describe('a condition recorded as the node\'s own Target is still observable', (
     const captured: Op[] = []
     harness.fn = async (op) => {
       captured.push(op)
-      return { ok: true, found: true, data: 9, frameUrl: 'https://example.test/page', isTopFrame: true }
+      return {
+        ok: true,
+        found: true,
+        data: 9,
+        frameUrl: 'https://example.test/page',
+        isTopFrame: true,
+      }
     }
     const empty: Target = { primary: { how: 'role', value: '' }, fallbacks: [] }
     await expect(conditionProbe().exists(empty)).resolves.toBe(false)

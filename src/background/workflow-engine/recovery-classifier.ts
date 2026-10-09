@@ -46,10 +46,7 @@ import type {
   VerificationFailureType,
 } from '../../lib/workflow/repair/types'
 import type { FailureCode } from '../../lib/workflow/failure-code'
-import type {
-  ResumeDecision,
-  RunCheckpoint,
-} from '../../lib/workflow/checkpoints'
+import type { ResumeDecision, RunCheckpoint } from '../../lib/workflow/checkpoints'
 import type { Workflow } from '../../lib/workflow/types'
 
 /** External (model-provided) observation at failure time — weakest source. */
@@ -221,7 +218,8 @@ export function classifyRunFailure(input: ClassifyRunFailureInput): FailureAnaly
     recoverability = 'RESUME'
   }
   // Weak-evidence guard: with NO structured source, never claim AUTO.
-  const hasStrong = Boolean(traceFailure || input.failureCode) || sideEffectUnknown || fingerprintMismatch
+  const hasStrong =
+    Boolean(traceFailure || input.failureCode) || sideEffectUnknown || fingerprintMismatch
   if (!hasStrong && recoverability === 'AUTO') recoverability = 'SUGGEST'
 
   // --- Confidence: the strongest source present -----------------------------

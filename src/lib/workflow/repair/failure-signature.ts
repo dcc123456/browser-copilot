@@ -23,18 +23,11 @@
  * @module lib/workflow/repair/failure-signature
  */
 
-import type {
-  FailureAnalysis,
-  VerificationFailureType,
-} from './types'
+import type { FailureAnalysis, VerificationFailureType } from './types'
 
 /** Normalize raw error text the same way the legacy signature does. */
 export function normalizeFailureError(error: string): string {
-  return error
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 160)
+  return error.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 160)
 }
 
 export interface FailureSignatureInput {

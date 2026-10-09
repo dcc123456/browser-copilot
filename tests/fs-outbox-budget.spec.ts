@@ -73,8 +73,7 @@ function makeChromeMock(sizeInBytes?: number): void {
   })
 }
 
-const parkedKeys = async (): Promise<string[]> =>
-  Object.keys(await readOutboxMap()).sort()
+const parkedKeys = async (): Promise<string[]> => Object.keys(await readOutboxMap()).sort()
 
 beforeEach(() => {
   makeChromeMock()

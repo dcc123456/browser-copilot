@@ -24,24 +24,11 @@
  */
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import {
-  CheckCircle2,
-  CircleDashed,
-  Loader2,
-  TriangleAlert,
-  X,
-} from 'lucide-react'
+import { CheckCircle2, CircleDashed, Loader2, TriangleAlert, X } from 'lucide-react'
 import { useT } from '../i18n'
 
 export type WorkflowGenerationViewState =
-  | 'GENERATING'
-  | 'RECOVERING'
-  | 'COMPILING'
-  | 'VALIDATING'
-  | 'READY'
-  | 'SAVING'
-  | 'SAVED'
-  | 'ERROR'
+  'GENERATING' | 'RECOVERING' | 'COMPILING' | 'VALIDATING' | 'READY' | 'SAVING' | 'SAVED' | 'ERROR'
 
 export interface WorkflowGenerationProgress {
   state: WorkflowGenerationViewState
@@ -76,7 +63,8 @@ export interface WorkflowGenerationDialogProps {
 function StageGlyph({ status }: { status: 'running' | 'done' | 'pending' | 'warn' }): ReactNode {
   if (status === 'done') return <CheckCircle2 className="h-4 w-4 text-ok" aria-hidden />
   if (status === 'warn') return <TriangleAlert className="h-4 w-4 text-warn" aria-hidden />
-  if (status === 'running') return <Loader2 className="h-4 w-4 animate-spin text-accent" aria-hidden />
+  if (status === 'running')
+    return <Loader2 className="h-4 w-4 animate-spin text-accent" aria-hidden />
   return <CircleDashed className="h-4 w-4 text-muted" aria-hidden />
 }
 
@@ -102,13 +90,14 @@ function titleForState(t: ReturnType<typeof useT>, state: WorkflowGenerationView
 }
 
 /** Whether the background is still doing work (close = background, not cancel). */
-const RUNNING_STATES: ReadonlySet<WorkflowGenerationViewState> = new Set<WorkflowGenerationViewState>([
-  'GENERATING',
-  'RECOVERING',
-  'COMPILING',
-  'VALIDATING',
-  'SAVING',
-])
+const RUNNING_STATES: ReadonlySet<WorkflowGenerationViewState> =
+  new Set<WorkflowGenerationViewState>([
+    'GENERATING',
+    'RECOVERING',
+    'COMPILING',
+    'VALIDATING',
+    'SAVING',
+  ])
 
 export function WorkflowGenerationDialog(props: WorkflowGenerationDialogProps): ReactNode {
   const { open } = props
@@ -187,7 +176,9 @@ export function WorkflowGenerationDialog(props: WorkflowGenerationDialogProps): 
                   <StageGlyph status={stage.status} />
                 </span>
                 <div className="flex min-w-0 flex-col">
-                  <span className="text-[13px] text-ink">{t[stage.labelKey as keyof typeof t] as string}</span>
+                  <span className="text-[13px] text-ink">
+                    {t[stage.labelKey as keyof typeof t] as string}
+                  </span>
                   {stage.detail ? (
                     <span className="text-xs text-muted break-words">{stage.detail}</span>
                   ) : null}
@@ -204,7 +195,10 @@ export function WorkflowGenerationDialog(props: WorkflowGenerationDialogProps): 
               </summary>
               <ul className="m-0 max-h-44 flex-col gap-0.5 overflow-y-auto px-2.5 pb-2">
                 {props.progress.logs.map((line, index) => (
-                  <li key={`${index}-${line.slice(0, 12)}`} className="break-words font-mono text-[11px] leading-snug text-muted">
+                  <li
+                    key={`${index}-${line.slice(0, 12)}`}
+                    className="break-words font-mono text-[11px] leading-snug text-muted"
+                  >
                     {line}
                   </li>
                 ))}
@@ -216,7 +210,9 @@ export function WorkflowGenerationDialog(props: WorkflowGenerationDialogProps): 
           <div className="flex items-center gap-4 text-[11.5px] text-muted">
             <span>{t.workflowGenerationActionCount({ count: props.progress.actionCount })}</span>
             {props.progress.recoveredCount > 0 ? (
-              <span>{t.workflowGenerationRecoveredCount({ count: props.progress.recoveredCount })}</span>
+              <span>
+                {t.workflowGenerationRecoveredCount({ count: props.progress.recoveredCount })}
+              </span>
             ) : null}
           </div>
 

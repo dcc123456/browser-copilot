@@ -44,10 +44,7 @@ import type { WorkflowNode } from './types'
 export type LocatorProbe = (selector: string) => number | Promise<number>
 
 export type ResolutionStatus =
-  | 'RESOLVED_PRIMARY'
-  | 'RESOLVED_FALLBACK'
-  | 'UNRESOLVED'
-  | 'REJECTED_POSITIONAL'
+  'RESOLVED_PRIMARY' | 'RESOLVED_FALLBACK' | 'UNRESOLVED' | 'REJECTED_POSITIONAL'
 
 export interface ResolvedTarget {
   status: ResolutionStatus
@@ -66,9 +63,7 @@ export interface ResolvedTarget {
 }
 
 /** Positional-only shapes: no identity, only position. */
-const POSITIONAL_ONLY = [
-  /^[#a-z0-9_[\]="'~^*:.\s>-]*:nth-(child|of-type)\(/i,
-]
+const POSITIONAL_ONLY = [/^[#a-z0-9_[\]="'~^*:.\s>-]*:nth-(child|of-type)\(/i]
 
 /** Whether a raw selector is purely positional (a single nth/index path). */
 function isPositionalOnlySelector(selector: string): boolean {
@@ -141,7 +136,7 @@ export async function resolveWorkflowTarget(
 
   const primarySelector = (locator.selector ?? '').trim()
   const finalSelector = chosen.selector
-  const matchCount = finalSelector ? probeCounts.get(finalSelector) ?? 0 : 0
+  const matchCount = finalSelector ? (probeCounts.get(finalSelector) ?? 0) : 0
   const usedFallback = Boolean(finalSelector) && finalSelector !== primarySelector
 
   if (!finalSelector || matchCount !== 1) {

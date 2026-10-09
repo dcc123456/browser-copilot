@@ -54,7 +54,11 @@ export function declareMissingInputs(nodes: LikeNode[]): string[] {
       const params = data['parameters']
       if (Array.isArray(params)) {
         for (const p of params as unknown[]) {
-          if (p && typeof p === 'object' && typeof (p as Record<string, unknown>)['name'] === 'string')
+          if (
+            p &&
+            typeof p === 'object' &&
+            typeof (p as Record<string, unknown>)['name'] === 'string'
+          )
             produced.add((p as Record<string, unknown>)['name'] as string)
         }
       }

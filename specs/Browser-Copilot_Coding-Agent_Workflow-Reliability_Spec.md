@@ -294,19 +294,11 @@ src/lib/workflow/reliability.ts
 建议最小类型：
 
 ```ts
-export type WorkflowReliabilityMode =
-  | 'compat'
-  | 'generated-strict'
+export type WorkflowReliabilityMode = 'compat' | 'generated-strict'
 
-export type IdempotencyLevel =
-  | 'safe'
-  | 'conditional'
-  | 'unsafe'
+export type IdempotencyLevel = 'safe' | 'conditional' | 'unsafe'
 
-export type AmbiguityPolicy =
-  | 'error'
-  | 'score'
-  | 'first-visible'
+export type AmbiguityPolicy = 'error' | 'score' | 'first-visible'
 
 export interface WorkflowGoalSpec {
   summary: string
@@ -1752,23 +1744,29 @@ Step I 再进入下一 Phase
 ## Phase X Completion
 
 ### Changed
+
 - path/to/file.ts: ...
 
 ### Behavior
+
 - ...
 
 ### Tests
+
 - pnpm test -- ...
 - pnpm typecheck
 
 ### Acceptance
+
 - [x] ...
 - [ ] ...
 
 ### Known limitations
+
 - ...
 
 ### Regression risk
+
 - low / medium / high
 ```
 
@@ -1875,21 +1873,26 @@ Coding Agent 完成后，只能按以下结构汇报：
 # Workflow Reliability Implementation Report
 
 ## 1. Result
+
 - generated-strict implemented: yes/no
 - current main compatibility: pass/fail
 
 ## 2. Implemented phases
+
 - Phase 0: ...
 - Phase 1: ...
 - ...
 
 ## 3. Key files changed
+
 - ...
 
 ## 4. Runtime behavior changes
+
 - ...
 
 ## 5. Reliability metrics
+
 - baseline first-run goal success: ...
 - current first-run goal success: ...
 - locator ambiguity rate: ...
@@ -1897,6 +1900,7 @@ Coding Agent 完成后，只能按以下结构汇报：
 - takeover-free verification rate: ...
 
 ## 6. Tests
+
 - pnpm typecheck: PASS/FAIL
 - pnpm test: PASS/FAIL
 - pnpm build: PASS/FAIL
@@ -1904,9 +1908,11 @@ Coding Agent 完成后，只能按以下结构汇报：
 - pnpm bench:debug: PASS/FAIL
 
 ## 7. Known limitations
+
 - ...
 
 ## 8. Remaining unchecked acceptance items
+
 - ...
 ```
 

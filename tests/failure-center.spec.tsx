@@ -69,8 +69,6 @@ describe('FailureCenter single-entry AI repair', () => {
     act(() => root?.unmount())
   })
 
-
-
   const mount = async (): Promise<void> => {
     container = document.createElement('div')
     document.body.appendChild(container)
@@ -99,9 +97,7 @@ describe('FailureCenter single-entry AI repair', () => {
   }
 
   it('sends START on open and pauses at repair confirmation', async () => {
-    mockRecovery([
-      recoveryResult('AWAIT_REPAIR_CONFIRM', 'waiting', 'proposal ready', 'r1'),
-    ])
+    mockRecovery([recoveryResult('AWAIT_REPAIR_CONFIRM', 'waiting', 'proposal ready', 'r1')])
     await mount()
 
     const recoveryCalls = sendCommandMock.mock.calls
@@ -157,9 +153,7 @@ describe('FailureCenter single-entry AI repair', () => {
   })
 
   it('reports human takeover when no patch is available', async () => {
-    mockRecovery([
-      recoveryResult('HUMAN_TAKEOVER', 'failed', 'no patch proposed', 'r1'),
-    ])
+    mockRecovery([recoveryResult('HUMAN_TAKEOVER', 'failed', 'no patch proposed', 'r1')])
     await mount()
     expect(container.textContent).toContain('Manual takeover needed')
   })

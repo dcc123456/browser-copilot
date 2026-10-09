@@ -60,7 +60,12 @@ describe('replay first-run metric', () => {
 
   it('records the first run of a revision and reads it back', async () => {
     await expect(
-      recordReplayFirstRun({ workflowId: 'wf1', revision: 1, outcome: 'failed', failureCode: 'LOCATOR_NOT_FOUND' }),
+      recordReplayFirstRun({
+        workflowId: 'wf1',
+        revision: 1,
+        outcome: 'failed',
+        failureCode: 'LOCATOR_NOT_FOUND',
+      }),
     ).resolves.toBeDefined()
     const summary = await summarizeReplayFirstRuns()
     expect(summary.total).toBe(1)
@@ -95,7 +100,9 @@ describe('replay first-run metric', () => {
   })
 
   it('drops records without an identity', () => {
-    expect(normalizeFirstRunRecord({ workflowId: '', revision: 1, at: 1, outcome: 'ok' })).toBeUndefined()
+    expect(
+      normalizeFirstRunRecord({ workflowId: '', revision: 1, at: 1, outcome: 'ok' }),
+    ).toBeUndefined()
     expect(normalizeFirstRunRecord({ workflowId: 'w', at: 1, outcome: 'ok' })).toBeUndefined()
     expect(normalizeFirstRunRecord({ workflowId: 'w', revision: 1, outcome: 'ok' })).toBeUndefined()
     expect(

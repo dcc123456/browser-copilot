@@ -111,7 +111,9 @@ export function createChromeCheckpointStore(
       // ones are skipped instead of awaited-and-thrown.
       const kept = fitCheckpointsToBytes(list, maxPersistedBytes)
       if (!kept) {
-        console.warn(`[checkpoints] ${runId}: newest checkpoint exceeds the persist budget, skipped`)
+        console.warn(
+          `[checkpoints] ${runId}: newest checkpoint exceeds the persist budget, skipped`,
+        )
         continue
       }
       void area.set({ [checkpointKey(runId)]: kept }).catch(() => undefined)

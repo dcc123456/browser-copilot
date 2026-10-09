@@ -105,10 +105,16 @@ const LOCATOR_MESSAGE =
 const REFERENCE_MESSAGE_SUFFIX = '（必须写成 {{引用}}，不能是字面量）'
 
 /** First matching entry of `values`, else null. */
-function oneOfEnum(data: Record<string, unknown>, key: string, values: readonly string[]): string | null {
+function oneOfEnum(
+  data: Record<string, unknown>,
+  key: string,
+  values: readonly string[],
+): string | null {
   const raw = data[key]
   if (raw === undefined || raw === null || raw === '') return null
-  return values.includes(String(raw)) ? null : `${key} 必须是 ${values.map((v) => `'${v}'`).join(' | ')} 之一`
+  return values.includes(String(raw))
+    ? null
+    : `${key} 必须是 ${values.map((v) => `'${v}'`).join(' | ')} 之一`
 }
 
 /** Non-empty array (or a JSON string parsing to one) — used by data-list blocks. */
@@ -213,9 +219,7 @@ const REQUIREMENTS: Readonly<Record<string, RequirementSet>> = {
     // workflow the user already saved (that refusal used to block the whole
     // run, which costs far more than the no-op does).
     check: (data) =>
-      hasLocator(data) ||
-      Number(data['scrollX'] ?? 0) !== 0 ||
-      Number(data['scrollY'] ?? 0) !== 0
+      hasLocator(data) || Number(data['scrollX'] ?? 0) !== 0 || Number(data['scrollY'] ?? 0) !== 0
         ? null
         : {
             key: 'parameters',
@@ -237,14 +241,18 @@ const REQUIREMENTS: Readonly<Record<string, RequirementSet>> = {
   },
   'attribute-value': {
     locator: LOCATOR_MESSAGE,
-    params: [{ key: 'attribute', message: '必须填写 attribute（要读取/设置的属性名，如 href、value）' }],
+    params: [
+      { key: 'attribute', message: '必须填写 attribute（要读取/设置的属性名，如 href、value）' },
+    ],
   },
   forms: {
     locator: LOCATOR_MESSAGE,
     params: [
       {
         key: 'value',
-        when: (data) => data['getValue'] !== true && !['checkbox', 'radio'].includes(String(data['type'] ?? 'text-field')),
+        when: (data) =>
+          data['getValue'] !== true &&
+          !['checkbox', 'radio'].includes(String(data['type'] ?? 'text-field')),
         message: '填写表单必须给 value（要输入/选择的内容；复选框模式除外）',
       },
       {
@@ -265,7 +273,9 @@ const REQUIREMENTS: Readonly<Record<string, RequirementSet>> = {
   },
   'trigger-event': {
     locator: LOCATOR_MESSAGE,
-    params: [{ key: 'event', message: '必须填写 event（要派发的事件名，如 click / input / submit）' }],
+    params: [
+      { key: 'event', message: '必须填写 event（要派发的事件名，如 click / input / submit）' },
+    ],
   },
   'upload-file': {
     locator: LOCATOR_MESSAGE,
@@ -279,7 +289,7 @@ const REQUIREMENTS: Readonly<Record<string, RequirementSet>> = {
         !String(data['fileVariable'] ?? '').trim() &&
         data['fileData'] === undefined
       ) {
-        return "workflow-file 模式必须给出 fileVariable（存放文件的变量名）"
+        return 'workflow-file 模式必须给出 fileVariable（存放文件的变量名）'
       }
       return null
     },
@@ -440,13 +450,12 @@ const REQUIREMENTS: Readonly<Record<string, RequirementSet>> = {
   },
   'insert-data': {
     check: (data) =>
-      filledList(data, 'dataList', 'data')
-        ? null
-        : '必须给 dataList（要插入的行，非空数组）',
+      filledList(data, 'dataList', 'data') ? null : '必须给 dataList（要插入的行，非空数组）',
   },
   'delete-data': {
     check: (data) =>
-      data['clearAll'] === true || (Number.isFinite(Number(data['key'])) && Number(data['key']) >= 0)
+      data['clearAll'] === true ||
+      (Number.isFinite(Number(data['key'])) && Number(data['key']) >= 0)
         ? null
         : '必须指明删除目标：clearAll:true 或要删除的行号 key',
   },
@@ -592,9 +601,7 @@ export function schemaRequiredArgs(blockId: string): string[] {
   if (blockId === 'trigger') return []
   const requirements = REQUIREMENTS[blockId]
   if (!requirements) return []
-  return (requirements.params ?? [])
-    .filter((param) => !param.when)
-    .map((param) => param.key)
+  return (requirements.params ?? []).filter((param) => !param.when).map((param) => param.key)
 }
 
 /**
@@ -602,7 +609,10 @@ export function schemaRequiredArgs(blockId: string): string[] {
  * `SCRIPT_REFUSAL`: the English lead-in names the failure class, the Chinese
  * body carries the per-parameter fixes.
  */
-export function formatRequirementRefusal(blockName: string, problems: readonly RequirementProblem[]): string {
+export function formatRequirementRefusal(
+  blockName: string,
+  problems: readonly RequirementProblem[],
+): string {
   const body = problems.map((problem) => `· ${problem.key}: ${problem.message}`).join('\n')
   return (
     `Refused: ${blockName} is missing required parameters, so NOTHING was executed or recorded. ` +

@@ -118,75 +118,75 @@ node tmp/operator-matrix/matrix.mjs --only data # 单子集
 
 由最后一轮全量 `report.json` 与 `KNOWN_INERT` 联接生成（`cd server && npx tsx ../tmp/operator-matrix/block-table.mjs`）。用例列是 `P/F/B` 计数。两条判读约束：**「正常」是矩阵判据下的正常**——`save-assets`、`browser-event` 这类占位/拒绝实现块的用例只证明「不崩」或「按设计报错」，真实结论在 §6 与 §6.1；**「不生效字段」列是静态守卫的机器清单**（广告给模型但 executor 不读），不是矩阵跑出来的结论。
 
-| 算子 | 用例 | 判定 | 不生效的已广告字段 |
-| --- | --- | --- | --- |
-| `trigger` | 4: 4P/0F/0B | 正常 | — |
-| `ai-workflow` | 0 | 不可测（cloud-only 块） | — |
-| `execute-workflow` | 1: 1P/0F/0B | 正常 | — |
-| `active-tab` | 1: 1P/0F/0B | 正常 | — |
-| `new-tab` | 3: 3P/0F/0B | 正常 | — |
-| `switch-tab` | 3: 3P/0F/0B | 正常 | — |
-| `new-window` | 1: 1P/0F/0B | 正常 | — |
-| `proxy` | 1: 0P/0F/1B | 环境阻塞（整块未实现，按设计抛错） | — |
-| `go-back` | 1: 1P/0F/0B | 正常 | — |
-| `forward-page` | 1: 1P/0F/0B | 正常 | — |
-| `close-tab` | 1: 1P/0F/0B | 正常 | — |
-| `take-screenshot` | 2: 2P/0F/0B | 正常 | — |
-| `read-page` | 4: 4P/0F/0B | 正常 | — |
-| `browser-event` | 1: 1P/0F/0B | 正常（端口按设计拒绝） | timeout, eventName, setAsActiveTab, activeTabLoaded, tabLoadedUrl, tabUrl, fileQuery |
-| `event-click` | 4: 4P/0F/0B | 正常 | — |
-| `delay` | 1: 1P/0F/0B | 正常 | — |
-| `get-text` | 7: 7P/0F/0B | 正常 | findBy, regex, regexExp, addExtraRow, extraRowValue, extraRowDataColumn |
-| `export-data` | 3: 3P/0F/0B | 正常 | — |
-| `element-scroll` | 3: 3P/0F/0B | 正常 | — |
-| `link` | 2: 2P/0F/0B | 正常 | — |
-| `attribute-value` | 2: 2P/0F/0B | 正常 | addExtraRow, extraRowValue, extraRowDataColumn |
-| `forms` | 12: 11P/1F/0B | 端口侧那 1 条不通过 = 端口缺受信任按键重试；扩展宿主实测通过（§6.3 第 1 条） | — |
-| `repeat-task` | 1: 1P/0F/0B | 正常 | — |
-| `javascript-code` | 3: 3P/0F/0B | 正常 | context, preloadScripts, everyNewTab, runBeforeLoad |
-| `trigger-event` | 1: 1P/0F/0B | 正常 | waitForSelector, waitSelectorTimeout |
-| `google-sheets` | 0 | 不可测（需真实授权凭据） | — |
-| `google-sheets-drive` | 0 | 不可测（cloud-only 块） | — |
-| `google-drive` | 0 | 不可测（需真实授权凭据） | — |
-| `conditions` | 15: 15P/0F/0B | 正常 | — |
-| `element-exists` | 4: 4P/0F/0B | 正常 | findBy, tryCount, timeout, throwError |
-| `webhook` | 5: 5P/0F/0B | 正常 | — |
-| `while-loop` | 2: 2P/0F/0B | 正常 | — |
-| `loop-data` | 5: 5P/0F/0B | 正常 | — |
-| `loop-elements` | 1: 1P/0F/0B | 正常 | — |
-| `loop-breakpoint` | 3: 3P/0F/0B | 正常 | — |
-| `blocks-group` | 1: 1P/0F/0B | 正常 | — |
-| `clipboard` | 2: 2P/0F/0B | 正常 | — |
-| `insert-data` | 3: 3P/0F/0B | 正常 | — |
-| `switch-to` | 1: 0P/1F/0B | 不通过（两宿主都只打印日志，不改作用域；真扩展里 `get-text` 读 iframe 同样失败，§6.3 第 3 条） | — |
-| `upload-file` | 1: 0P/0F/1B | 环境阻塞（headless 无 OS 文件选择器） | — |
-| `hover-element` | 1: 1P/0F/0B | 正常 | — |
-| `save-assets` | 1: 1P/0F/0B | 正常（仅「不崩」；两宿主都是占位实现） | findBy, waitForSelector, waitSelectorTimeout, selector, type, url, filename, saveDownloadIds, variableName, saveToGDrive |
-| `press-key` | 2: 2P/0F/0B | 正常 | pressTime, action |
-| `handle-dialog` | 3: 3P/0F/0B | 正常 | — |
-| `handle-download` | 1: 1P/0F/0B | 正常 | downloadId |
-| `save-local` | 1: 1P/0F/0B | 正常 | — |
-| `reload-tab` | 1: 1P/0F/0B | 正常 | — |
-| `delete-data` | 3: 3P/0F/0B | 正常 | — |
-| `wait-connections` | 2: 1P/1F/0B | 部分不通过（汇合语义单路径引擎无法实现） | specificFlow, flowBlockId |
-| `notification` | 1: 1P/0F/0B | 正常 | — |
-| `log-data` | 1: 1P/0F/0B | 正常 | — |
-| `tab-url` | 2: 2P/0F/0B | 正常 | — |
-| `slice-variable` | 2: 2P/0F/0B | 正常 | — |
-| `increase-variable` | 2: 2P/0F/0B | 正常 | — |
-| `regex-variable` | 2: 2P/0F/0B | 正常 | — |
-| `data-mapping` | 1: 1P/0F/0B | 正常 | — |
-| `sort-data` | 3: 3P/0F/0B | 正常 | — |
-| `create-element` | 2: 2P/0F/0B | 正常 | preloadScripts, findBy, insertAt, runBeforeLoad, waitForSelector, waitSelectorTimeout, selector |
-| `cookie` | 2: 2P/0F/0B | 正常 | — |
-| `block-package` | 0 | 不可测（cloud-only 块） | — |
-| `note` | 1: 1P/0F/0B | 正常 | — |
-| `workflow-state` | 2: 2P/0F/0B | 正常 | exceptCurrent, workflowsToStop |
-| `parameter-prompt` | 1: 1P/0F/0B | 正常 | timeout |
-| `ai-agent` | 1: 0P/0F/1B | 环境阻塞（无 `BC_LLM_*` 模型配置） | — |
-| `ocr` | 1: 1P/0F/0B | 正常 | — |
-| `set-variable` | 2: 2P/0F/0B | 正常 | — |
-| `get-secret` | 1: 1P/0F/0B | 正常 | — |
+| 算子                  | 用例          | 判定                                                                                           | 不生效的已广告字段                                                                                                       |
+| --------------------- | ------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `trigger`             | 4: 4P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `ai-workflow`         | 0             | 不可测（cloud-only 块）                                                                        | —                                                                                                                        |
+| `execute-workflow`    | 1: 1P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `active-tab`          | 1: 1P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `new-tab`             | 3: 3P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `switch-tab`          | 3: 3P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `new-window`          | 1: 1P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `proxy`               | 1: 0P/0F/1B   | 环境阻塞（整块未实现，按设计抛错）                                                             | —                                                                                                                        |
+| `go-back`             | 1: 1P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `forward-page`        | 1: 1P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `close-tab`           | 1: 1P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `take-screenshot`     | 2: 2P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `read-page`           | 4: 4P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `browser-event`       | 1: 1P/0F/0B   | 正常（端口按设计拒绝）                                                                         | timeout, eventName, setAsActiveTab, activeTabLoaded, tabLoadedUrl, tabUrl, fileQuery                                     |
+| `event-click`         | 4: 4P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `delay`               | 1: 1P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `get-text`            | 7: 7P/0F/0B   | 正常                                                                                           | findBy, regex, regexExp, addExtraRow, extraRowValue, extraRowDataColumn                                                  |
+| `export-data`         | 3: 3P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `element-scroll`      | 3: 3P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `link`                | 2: 2P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `attribute-value`     | 2: 2P/0F/0B   | 正常                                                                                           | addExtraRow, extraRowValue, extraRowDataColumn                                                                           |
+| `forms`               | 12: 11P/1F/0B | 端口侧那 1 条不通过 = 端口缺受信任按键重试；扩展宿主实测通过（§6.3 第 1 条）                   | —                                                                                                                        |
+| `repeat-task`         | 1: 1P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `javascript-code`     | 3: 3P/0F/0B   | 正常                                                                                           | context, preloadScripts, everyNewTab, runBeforeLoad                                                                      |
+| `trigger-event`       | 1: 1P/0F/0B   | 正常                                                                                           | waitForSelector, waitSelectorTimeout                                                                                     |
+| `google-sheets`       | 0             | 不可测（需真实授权凭据）                                                                       | —                                                                                                                        |
+| `google-sheets-drive` | 0             | 不可测（cloud-only 块）                                                                        | —                                                                                                                        |
+| `google-drive`        | 0             | 不可测（需真实授权凭据）                                                                       | —                                                                                                                        |
+| `conditions`          | 15: 15P/0F/0B | 正常                                                                                           | —                                                                                                                        |
+| `element-exists`      | 4: 4P/0F/0B   | 正常                                                                                           | findBy, tryCount, timeout, throwError                                                                                    |
+| `webhook`             | 5: 5P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `while-loop`          | 2: 2P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `loop-data`           | 5: 5P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `loop-elements`       | 1: 1P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `loop-breakpoint`     | 3: 3P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `blocks-group`        | 1: 1P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `clipboard`           | 2: 2P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `insert-data`         | 3: 3P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `switch-to`           | 1: 0P/1F/0B   | 不通过（两宿主都只打印日志，不改作用域；真扩展里 `get-text` 读 iframe 同样失败，§6.3 第 3 条） | —                                                                                                                        |
+| `upload-file`         | 1: 0P/0F/1B   | 环境阻塞（headless 无 OS 文件选择器）                                                          | —                                                                                                                        |
+| `hover-element`       | 1: 1P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `save-assets`         | 1: 1P/0F/0B   | 正常（仅「不崩」；两宿主都是占位实现）                                                         | findBy, waitForSelector, waitSelectorTimeout, selector, type, url, filename, saveDownloadIds, variableName, saveToGDrive |
+| `press-key`           | 2: 2P/0F/0B   | 正常                                                                                           | pressTime, action                                                                                                        |
+| `handle-dialog`       | 3: 3P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `handle-download`     | 1: 1P/0F/0B   | 正常                                                                                           | downloadId                                                                                                               |
+| `save-local`          | 1: 1P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `reload-tab`          | 1: 1P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `delete-data`         | 3: 3P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `wait-connections`    | 2: 1P/1F/0B   | 部分不通过（汇合语义单路径引擎无法实现）                                                       | specificFlow, flowBlockId                                                                                                |
+| `notification`        | 1: 1P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `log-data`            | 1: 1P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `tab-url`             | 2: 2P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `slice-variable`      | 2: 2P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `increase-variable`   | 2: 2P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `regex-variable`      | 2: 2P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `data-mapping`        | 1: 1P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `sort-data`           | 3: 3P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `create-element`      | 2: 2P/0F/0B   | 正常                                                                                           | preloadScripts, findBy, insertAt, runBeforeLoad, waitForSelector, waitSelectorTimeout, selector                          |
+| `cookie`              | 2: 2P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `block-package`       | 0             | 不可测（cloud-only 块）                                                                        | —                                                                                                                        |
+| `note`                | 1: 1P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `workflow-state`      | 2: 2P/0F/0B   | 正常                                                                                           | exceptCurrent, workflowsToStop                                                                                           |
+| `parameter-prompt`    | 1: 1P/0F/0B   | 正常                                                                                           | timeout                                                                                                                  |
+| `ai-agent`            | 1: 0P/0F/1B   | 环境阻塞（无 `BC_LLM_*` 模型配置）                                                             | —                                                                                                                        |
+| `ocr`                 | 1: 1P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `set-variable`        | 2: 2P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
+| `get-secret`          | 1: 1P/0F/0B   | 正常                                                                                           | —                                                                                                                        |
 
 ### 6.3 扩展宿主复验（真扩展，非端口）
 

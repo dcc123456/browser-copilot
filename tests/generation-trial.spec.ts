@@ -232,7 +232,10 @@ describe('trial cutoff', () => {
   })
 
   it('still refuses the click that names 发布', () => {
-    const wf = chain([readStep(), node('event-click', { selector: '#p', description: '点击发布按钮' })])
+    const wf = chain([
+      readStep(),
+      node('event-click', { selector: '#p', description: '点击发布按钮' }),
+    ])
     expect(trialCutoffNodeId(wf)).toBeDefined()
   })
 
@@ -424,7 +427,8 @@ describe('commit cutoff (the run-to-draft policy)', () => {
     // page is judged by the words the step carries, like every other block.
     const tabSwitch = node('javascript-code', {
       code: "const t = hits.find((h) => h.textContent.trim() === '上传图文');t.click();return 'clicked ' + t.tagName;",
-      description: '点击小红书发布页上的「上传图文」标签页（文本被拆成多个嵌套节点，选择器命中不到）',
+      description:
+        '点击小红书发布页上的「上传图文」标签页（文本被拆成多个嵌套节点，选择器命中不到）',
     })
     expect(isCommitNode(tabSwitch)).toBe(false)
     expect(commitCutoffNodeId(chain([uploadStep(), tabSwitch, fillBodyStep()]))).toBeUndefined()
@@ -477,9 +481,7 @@ describe('commit cutoff (the run-to-draft policy)', () => {
         '诊断小红书发布页标签页的真实 DOM 结构：前几次点击没有生效，需要读取候选元素的标签名、类名、可见性与位置，才能决定用哪个声明算子和什么选择器',
     })
     expect(isCommitNode(diagnostic)).toBe(false)
-    expect(
-      commitCutoffNodeId(chain([uploadStep(), diagnostic, fillBodyStep()])),
-    ).toBeUndefined()
+    expect(commitCutoffNodeId(chain([uploadStep(), diagnostic, fillBodyStep()]))).toBeUndefined()
     // A read-shaped body that ends in the site's own outward handler is still the
     // commit — the exemption needs the absence of a write, not the presence of a
     // querySelector.
@@ -578,9 +580,7 @@ describe('commit cutoff (the run-to-draft policy)', () => {
     // Stopping AT the publish still ran the save: a draft is in the account.
     expect(draftSaveExecuted(chain([fillBodyStep(), save, publish]), publish.id)).toBe(true)
     // Stopping before it wrote nothing.
-    expect(
-      draftSaveExecuted(chain([fillBodyStep(), save, publish]), fillBodyStep().id),
-    ).toBe(false)
+    expect(draftSaveExecuted(chain([fillBodyStep(), save, publish]), fillBodyStep().id)).toBe(false)
     // No cutoff at all: the graph ran to its end, save included.
     expect(draftSaveExecuted(chain([fillBodyStep(), save]), null)).toBe(true)
     // A cutoff this graph does not contain is silence, not a pass.
@@ -889,7 +889,13 @@ describe('runGenerationTrial', () => {
     const execute = vi.fn(async () =>
       resultOf({
         outcome: 'ok',
-        completedNodeIds: [wf.drawflow.nodes[0]!.id, wf.drawflow.nodes[1]!.id, loopId, loopId, loopId],
+        completedNodeIds: [
+          wf.drawflow.nodes[0]!.id,
+          wf.drawflow.nodes[1]!.id,
+          loopId,
+          loopId,
+          loopId,
+        ],
       }),
     )
     const out = await runGenerationTrial(wf, { execute })
@@ -901,7 +907,11 @@ describe('runGenerationTrial', () => {
     // the per-node completion the L1/L2/L3 certification is built from.
     const wf = chain([readStep()])
     const execute = vi.fn(async () =>
-      resultOf({ outcome: 'ok', completedNodeIds: [wf.drawflow.nodes[1]!.id], variables: { hit: '1' } }),
+      resultOf({
+        outcome: 'ok',
+        completedNodeIds: [wf.drawflow.nodes[1]!.id],
+        variables: { hit: '1' },
+      }),
     )
     const out = await runGenerationTrial(wf, { execute })
     expect(out.result).toMatchObject({ outcome: 'ok', variables: { hit: '1' } })

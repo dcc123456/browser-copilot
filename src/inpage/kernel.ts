@@ -870,8 +870,7 @@ export function runOp(op: Op): OpResult {
     }
     if (union.size === 1) {
       const element = union.values().next().value as Element | undefined
-      const hit =
-        element !== undefined ? matched.find((m) => m.all.includes(element)) : undefined
+      const hit = element !== undefined ? matched.find((m) => m.all.includes(element)) : undefined
       if (element && hit) {
         return {
           element,
@@ -902,7 +901,11 @@ export function runOp(op: Op): OpResult {
      * nothing; 2 waives the margin, 3 waives the score floor, 4 is the legacy
      * first-visible guess.
      */
-    const take = (hit: { spec: TargetSpec; all: Element[]; index: number }, rung: 1 | 2 | 3 | 4, element?: Element): Resolution => {
+    const take = (
+      hit: { spec: TargetSpec; all: Element[]; index: number },
+      rung: 1 | 2 | 3 | 4,
+      element?: Element,
+    ): Resolution => {
       const chosen = element ?? hit.all[0]
       const usedSpec = serializeSpec(hit.spec)
       return {
@@ -912,7 +915,15 @@ export function runOp(op: Op): OpResult {
         usedFallback: hit.index > 0,
         ...(rung === 1
           ? {}
-          : { degrade: { rung, from: authored, to: usedSpec, matchCount: union.size, candidates: evidence } }),
+          : {
+              degrade: {
+                rung,
+                from: authored,
+                to: usedSpec,
+                matchCount: union.size,
+                candidates: evidence,
+              },
+            }),
       }
     }
     const eligible = matched
@@ -932,9 +943,7 @@ export function runOp(op: Op): OpResult {
       // rung 3 — any candidate that provably points at ONE element, in the
       // order it was recorded: the caller's chain order is intent we can honour
       // even when our own score table dislikes the locator.
-      const unique = matched
-        .filter((m) => m.all.length === 1)
-        .sort((a, b) => a.index - b.index)[0]
+      const unique = matched.filter((m) => m.all.length === 1).sort((a, b) => a.index - b.index)[0]
       if (unique) return take(unique, 3)
       // rung 4 — the legacy resolver: the first visible match of the first spec
       // that matched anything. This is the rung that can pick the WRONG row, so
@@ -1164,7 +1173,8 @@ export function runOp(op: Op): OpResult {
     }
     let main = (parts[parts.length - 1] ?? key).trim()
     // A real keydown reports a bare letter lowercase unless Shift is held.
-    if (/^[a-z]$/i.test(main)) main = modifiers.shift === true ? main.toUpperCase() : main.toLowerCase()
+    if (/^[a-z]$/i.test(main))
+      main = modifiers.shift === true ? main.toUpperCase() : main.toLowerCase()
     return { key: main, modifiers }
   }
 
@@ -1173,7 +1183,8 @@ export function runOp(op: Op): OpResult {
     type: string,
     key: string,
     modifiers: { ctrl?: boolean; meta?: boolean; shift?: boolean; alt?: boolean } = {},
-  ): void {    const keyCode = keyCodeForKey(key)
+  ): void {
+    const keyCode = keyCodeForKey(key)
     const init: KeyboardEventInit = {
       key,
       code: codeForKey(key),
@@ -2107,7 +2118,11 @@ export function runOp(op: Op): OpResult {
             ...result,
             found: refusal?.code === 'LOCATOR_AMBIGUOUS' ? true : result.found,
             ...(refusal
-              ? { code: refusal.code, matchCount: refusal.matchCount, candidates: refusal.candidates }
+              ? {
+                  code: refusal.code,
+                  matchCount: refusal.matchCount,
+                  candidates: refusal.candidates,
+                }
               : {}),
           }
         }
@@ -2226,9 +2241,7 @@ export function runOp(op: Op): OpResult {
       } catch (error) {
         return withMeta(
           fail(
-            `Failed to decode file data: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
+            `Failed to decode file data: ${error instanceof Error ? error.message : String(error)}`,
           ),
         )
       }
@@ -2297,11 +2310,7 @@ export function runOp(op: Op): OpResult {
         return matching ?? candidates[0] ?? null
       }
 
-      const dispatchDrag = (
-        target: Element,
-        type: string,
-        dataTransfer: DataTransfer,
-      ): void => {
+      const dispatchDrag = (target: Element, type: string, dataTransfer: DataTransfer): void => {
         target.dispatchEvent(
           new DragEvent(type, {
             bubbles: true,
@@ -2323,20 +2332,15 @@ export function runOp(op: Op): OpResult {
       // Decide the strategy. A drop_files op always drops. upload_files with
       // fileTarget 'dropzone' drops too; 'auto' (default) injects when the
       // target is a file input, otherwise drops.
-      const wantsDrop =
-        op.action === 'drop_files' || op.fileTarget === 'dropzone'
+      const wantsDrop = op.action === 'drop_files' || op.fileTarget === 'dropzone'
 
       if (!wantsDrop && element instanceof HTMLInputElement) {
         if (element.type !== 'file') {
-          return withMeta(
-            fail('Upload target is an input but not input[type=file].'),
-          )
+          return withMeta(fail('Upload target is an input but not input[type=file].'))
         }
         if (!element.multiple && fileList.length > 1) {
           return withMeta(
-            fail(
-              `Target does not support multiple files (${fileList.length} provided).`,
-            ),
+            fail(`Target does not support multiple files (${fileList.length} provided).`),
           )
         }
         const injected = injectIntoInput(element, 'target')
@@ -2344,9 +2348,7 @@ export function runOp(op: Op): OpResult {
       }
 
       if (op.fileTarget === 'input') {
-        return withMeta(
-          fail('Upload target is not an input[type=file] element.'),
-        )
+        return withMeta(fail('Upload target is not an input[type=file] element.'))
       }
 
       // Upload trigger / dropzone path. Prefer the page's real file input even
@@ -2463,7 +2465,8 @@ export function runOp(op: Op): OpResult {
       // "Select an option by" also offers positions (first / last / custom), not
       // just the value, and nothing used to read that choice — every positional
       // mode fell through to the value match and failed on a blank value box.
-      const byPosition = op.selectBy === 'first' || op.selectBy === 'last' || op.selectBy === 'index'
+      const byPosition =
+        op.selectBy === 'first' || op.selectBy === 'last' || op.selectBy === 'index'
       const position =
         op.selectBy === 'last'
           ? element.options.length - 1
@@ -2933,8 +2936,7 @@ export function runWorkflowJs(input: {
       // result without requiring `return`. Falls back to the plain body (a
       // `return`/automaNextBlock step) whenever the expression wrap does not
       // compile.
-      const statementWord =
-        /\b(return|const|let|var|if|for|while|function|switch|try|throw)\b/
+      const statementWord = /\b(return|const|let|var|if|for|while|function|switch|try|throw)\b/
       const looksLikeExpression = !statementWord.test(code)
 
       const buildFn = (wrap?: (src: string) => string) =>

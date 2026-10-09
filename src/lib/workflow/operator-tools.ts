@@ -443,8 +443,7 @@ const SCHEMA_OVERRIDES: Readonly<Record<string, Record<string, unknown>>> = {
     },
     capabilityGap: {
       type: 'object',
-      description:
-        'Documented gap; alternative to justification (all four fields required).',
+      description: 'Documented gap; alternative to justification (all four fields required).',
       properties: {
         missingCapability: { type: 'string' },
         triedOperators: { type: 'array', items: { type: 'string' } },
@@ -620,7 +619,10 @@ const SCHEMA_OVERRIDES: Readonly<Record<string, Record<string, unknown>>> = {
     newTab: { type: 'boolean', description: 'Open in a new tab (default true).' },
   },
   'switch-to': {
-    frameSelector: { type: 'string', description: 'CSS selector of the iframe; empty = main window.' },
+    frameSelector: {
+      type: 'string',
+      description: 'CSS selector of the iframe; empty = main window.',
+    },
   },
   'take-screenshot': {
     type: {

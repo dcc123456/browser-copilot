@@ -135,9 +135,7 @@ async function runScenario(scenario: Scenario, index: number): Promise<ScenarioR
     session = recordActionFinished(session, {
       passed: true,
       nodeId: `n-${index}-${action.intent.replace(/\W/g, '')}`,
-      ...(action.goal
-        ? { verification: { kind: 'goal' as const, passed: true } }
-        : {}),
+      ...(action.goal ? { verification: { kind: 'goal' as const, passed: true } } : {}),
     }).session
   }
 

@@ -78,7 +78,7 @@ export const BUILT_IN_AGENTS: readonly Agent[] = [
     instructions: [
       'You are the supervisor agent for this Browser Copilot session.',
       '',
-      '- You own the user\'s whole request and are accountable for the final answer.',
+      "- You own the user's whole request and are accountable for the final answer.",
       '- Small, single-domain requests: just execute them with your own tools.',
       '- Big, multi-part requests: hand scoped sub-tasks to the specialist agents,',
       '  strictly following the delegation rules below.',
@@ -88,7 +88,7 @@ export const BUILT_IN_AGENTS: readonly Agent[] = [
       '  material you verify, not an answer you forward verbatim.',
       '- Integrate the accepted reports into ONE coherent answer yourself. The user',
       '  should not have to read the sub-results or know how the work was split.',
-      '- Page actions still require the user\'s approval through the panel; delegating',
+      "- Page actions still require the user's approval through the panel; delegating",
       '  a task never bypasses that.',
     ].join('\n'),
     tools: [],

@@ -14,7 +14,10 @@ import type { Workflow } from '../src/lib/workflow/types'
  * that failed get re-read inside a bounded window, the rows that held do not, and
  * a row that never holds still bars certification.
  */
-const drawerRow = { kind: 'elementExists' as const, target: { selector: '.d-drawer .draft-box-title' } }
+const drawerRow = {
+  kind: 'elementExists' as const,
+  target: { selector: '.d-drawer .draft-box-title' },
+}
 const titleRow = { kind: 'variableExists' as const, name: 'noteTitle' }
 
 const workflowOf = (successConditions: unknown[]): Workflow =>
@@ -32,10 +35,25 @@ const workflowOf = (successConditions: unknown[]): Workflow =>
       reuseLastState: false,
       goalSpec: { summary: '草稿箱 已列出新草稿', successConditions },
     },
-    drawflow: { nodes: [{ id: 'n1', label: 'event-click', position: { x: 0, y: 0 }, data: { blockId: 'event-click' } }], edges: [] },
+    drawflow: {
+      nodes: [
+        {
+          id: 'n1',
+          label: 'event-click',
+          position: { x: 0, y: 0 },
+          data: { blockId: 'event-click' },
+        },
+      ],
+      edges: [],
+    },
   }) as unknown as Workflow
 
-const run: ExecuteWorkflowResult = { runId: 'r1', outcome: 'ok', completedNodeIds: ['n1'], variables: { noteTitle: '这个开源AI插件会替你点网页' } }
+const run: ExecuteWorkflowResult = {
+  runId: 'r1',
+  outcome: 'ok',
+  completedNodeIds: ['n1'],
+  variables: { noteTitle: '这个开源AI插件会替你点网页' },
+}
 
 /** `exists` answers false for the first `absentReads` reads, then true forever. */
 const probeOf = (absentReads: number): { probe: ConditionPageProbe; existsCalls: () => number } => {
@@ -59,14 +77,23 @@ const probeOf = (absentReads: number): { probe: ConditionPageProbe; existsCalls:
 
 const sleeps: () => { delays: number[]; sleep: (ms: number) => Promise<void> } = () => {
   const delays: number[] = []
-  return { delays, sleep: async (ms: number) => { delays.push(ms) } }
+  return {
+    delays,
+    sleep: async (ms: number) => {
+      delays.push(ms)
+    },
+  }
 }
 
 describe('L3 re-reads an unsettled page instead of calling it a failed goal', () => {
   it('a row that fails on read 1 and holds on read 2 certifies, and says it waited', async () => {
     const { probe } = probeOf(1)
     const { delays, sleep } = sleeps()
-    const report = await verifyWorkflowGoal(workflowOf([titleRow, drawerRow]), run, probe, { settleMs: 3000, pollMs: 1000, sleep })
+    const report = await verifyWorkflowGoal(workflowOf([titleRow, drawerRow]), run, probe, {
+      settleMs: 3000,
+      pollMs: 1000,
+      sleep,
+    })
     expect(report.l3.conditions.map((c) => c.satisfied)).toEqual([true, true])
     expect(report.l3.allHeld).toBe(true)
     expect(report.certified).toBe(true)
@@ -77,7 +104,11 @@ describe('L3 re-reads an unsettled page instead of calling it a failed goal', ()
   it('the row order and its prose survive the re-read', async () => {
     const { probe } = probeOf(1)
     const { sleep } = sleeps()
-    const report = await verifyWorkflowGoal(workflowOf([drawerRow, titleRow]), run, probe, { settleMs: 3000, pollMs: 1000, sleep })
+    const report = await verifyWorkflowGoal(workflowOf([drawerRow, titleRow]), run, probe, {
+      settleMs: 3000,
+      pollMs: 1000,
+      sleep,
+    })
     expect(report.l3.conditions.map((c) => c.description)).toEqual([
       expect.stringContaining('.draft-box-title'),
       expect.stringContaining('noteTitle'),
@@ -88,7 +119,11 @@ describe('L3 re-reads an unsettled page instead of calling it a failed goal', ()
   it('a row that never appears still bars certification once the window is spent', async () => {
     const { probe, existsCalls } = probeOf(999)
     const { delays, sleep } = sleeps()
-    const report = await verifyWorkflowGoal(workflowOf([titleRow, drawerRow]), run, probe, { settleMs: 3000, pollMs: 1000, sleep })
+    const report = await verifyWorkflowGoal(workflowOf([titleRow, drawerRow]), run, probe, {
+      settleMs: 3000,
+      pollMs: 1000,
+      sleep,
+    })
     expect(report.l3.allHeld).toBe(false)
     expect(report.certified).toBe(false)
     expect(report.settledAfterMs).toBeUndefined()
@@ -109,12 +144,11 @@ describe('L3 re-reads an unsettled page instead of calling it a failed goal', ()
       },
     }
     const { sleep } = sleeps()
-    const report = await verifyWorkflowGoal(
-      workflowOf([steady, drawerRow]),
-      run,
-      countingProbe,
-      { settleMs: 3000, pollMs: 1000, sleep },
-    )
+    const report = await verifyWorkflowGoal(workflowOf([steady, drawerRow]), run, countingProbe, {
+      settleMs: 3000,
+      pollMs: 1000,
+      sleep,
+    })
     expect(report.certified).toBe(true)
     expect(visibleReads).toBe(1)
     expect(existsCalls()).toBe(2)
@@ -123,7 +157,11 @@ describe('L3 re-reads an unsettled page instead of calling it a failed goal', ()
   it('a clean run pays nothing: no sleep, no second read', async () => {
     const { probe, existsCalls } = probeOf(0)
     const { delays, sleep } = sleeps()
-    const report = await verifyWorkflowGoal(workflowOf([titleRow, drawerRow]), run, probe, { settleMs: 3000, pollMs: 1000, sleep })
+    const report = await verifyWorkflowGoal(workflowOf([titleRow, drawerRow]), run, probe, {
+      settleMs: 3000,
+      pollMs: 1000,
+      sleep,
+    })
     expect(report.certified).toBe(true)
     expect(report.settledAfterMs).toBeUndefined()
     expect(delays).toEqual([])
@@ -141,7 +179,11 @@ describe('L3 re-reads an unsettled page instead of calling it a failed goal', ()
   it('a partial last slice never overshoots the window', async () => {
     const { probe, existsCalls } = probeOf(2)
     const { delays, sleep } = sleeps()
-    const report = await verifyWorkflowGoal(workflowOf([drawerRow]), run, probe, { settleMs: 1500, pollMs: 1000, sleep })
+    const report = await verifyWorkflowGoal(workflowOf([drawerRow]), run, probe, {
+      settleMs: 1500,
+      pollMs: 1000,
+      sleep,
+    })
     expect(delays).toEqual([1000, 500])
     expect(existsCalls()).toBe(3)
     expect(report.certified).toBe(true)

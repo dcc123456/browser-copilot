@@ -365,10 +365,7 @@ describe('resolveBridgeTarget (local-agent per-connection windows)', () => {
   })
 
   it('scopes a connection to its assigned panel window', async () => {
-    stubChrome(
-      { localAgentBindings: { 'claude@proj': 7 } },
-      { 7: { id: 7, type: 'normal' } },
-    )
+    stubChrome({ localAgentBindings: { 'claude@proj': 7 } }, { 7: { id: 7, type: 'normal' } })
     const scope = await import('../src/background/automation-scope')
     const port = { name: 'x' } as unknown as chrome.runtime.Port
     scope.registerPanelWindow(7, port)
@@ -379,10 +376,7 @@ describe('resolveBridgeTarget (local-agent per-connection windows)', () => {
   })
 
   it('accepts an assigned minimized (plugin) window too', async () => {
-    stubChrome(
-      { localAgentBindings: { 'claude@proj': 2 } },
-      { 2: { id: 2, type: 'normal' } },
-    )
+    stubChrome({ localAgentBindings: { 'claude@proj': 2 } }, { 2: { id: 2, type: 'normal' } })
     const minimize = await import('../src/background/panel-minimize')
     minimize.minimizeWindow(2)
 
@@ -394,10 +388,7 @@ describe('resolveBridgeTarget (local-agent per-connection windows)', () => {
   it('survives a worker restart: the name binding resolves with an empty session map', async () => {
     // A fresh module (resetModules) has no agentId memory; the persisted name
     // binding alone must be enough.
-    stubChrome(
-      { localAgentBindings: { 'claude@proj': 7 } },
-      { 7: { id: 7, type: 'normal' } },
-    )
+    stubChrome({ localAgentBindings: { 'claude@proj': 7 } }, { 7: { id: 7, type: 'normal' } })
     const scope = await import('../src/background/automation-scope')
     scope.registerPanelWindow(7, { name: 'x' } as unknown as chrome.runtime.Port)
 

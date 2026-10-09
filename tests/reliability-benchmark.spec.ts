@@ -4,7 +4,10 @@
  * (L1/L2/L3), with the certification state machine folded over the run.
  */
 import { describe, expect, it } from 'vitest'
-import { RELIABILITY_SCENARIOS as scenarios, runScenario } from '../specs/reliability-fixtures/scenarios'
+import {
+  RELIABILITY_SCENARIOS as scenarios,
+  runScenario,
+} from '../specs/reliability-fixtures/scenarios'
 import type { ReliabilityScenario as Scenario } from '../specs/reliability-fixtures/scenarios'
 import {
   computeBenchmarkMetrics,
@@ -37,9 +40,20 @@ function strictGraphFor(scenario: Scenario): import('../src/lib/workflow/types')
     name: scenario.id,
     description: '',
     trigger: { type: 'manual', enabled: true },
-    settings: { saveLog: false, debugMode: false, notification: false, reuseLastState: false, provenance: 'chat-generate' },
+    settings: {
+      saveLog: false,
+      debugMode: false,
+      notification: false,
+      reuseLastState: false,
+      provenance: 'chat-generate',
+    },
     table: [],
-    drawflow: { nodes, edges: [{ id: 'e1', source: 't', target: 'a1', sourceHandle: 'next', targetHandle: 'input-1' }] },
+    drawflow: {
+      nodes,
+      edges: [
+        { id: 'e1', source: 't', target: 'a1', sourceHandle: 'next', targetHandle: 'input-1' },
+      ],
+    },
     createdAt: 0,
     updatedAt: 0,
   }
@@ -105,7 +119,9 @@ describe('layered metrics + certification', () => {
 
     expect(certifyThrough(['validate-ok', 'benchmark-passed', 'certify'])).toBe('Certified')
     expect(certifyThrough(['benchmark-passed'])).toBe('Draft')
-    expect(certifyThrough(['validate-ok', 'benchmark-passed', 'certify', 'graph-changed'])).toBe('Stale')
+    expect(certifyThrough(['validate-ok', 'benchmark-passed', 'certify', 'graph-changed'])).toBe(
+      'Stale',
+    )
     expect(certifyThrough(['validate-ok', 'benchmark-failed'])).toBe('Stale')
     expect(transitionCertification('Draft', 'certify')).toBe('Draft')
 

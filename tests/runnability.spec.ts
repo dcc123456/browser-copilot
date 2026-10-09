@@ -168,7 +168,9 @@ describe('ensureNavigationAnchor', () => {
     const noOrigin = anchored([node('event-click', { selector: '#go' })])
     expect(ensureNavigationAnchor(noOrigin)).toBe(noOrigin)
 
-    const anchoredOnce = ensureNavigationAnchor(anchored([node('event-click', {})], 'https://x.test/'))
+    const anchoredOnce = ensureNavigationAnchor(
+      anchored([node('event-click', {})], 'https://x.test/'),
+    )
     expect(ensureNavigationAnchor(anchoredOnce)).toBe(anchoredOnce)
   })
 
@@ -177,8 +179,12 @@ describe('ensureNavigationAnchor', () => {
     const trigger = wf.drawflow.nodes[0]!
     const head = wf.drawflow.nodes[1]!
     const out = ensureNavigationAnchor(wf)
-    expect(out.drawflow.edges.some((e) => e.source === trigger.id && e.target === 'page-anchor')).toBe(true)
-    expect(out.drawflow.edges.some((e) => e.source === 'page-anchor' && e.target === head.id)).toBe(true)
+    expect(
+      out.drawflow.edges.some((e) => e.source === trigger.id && e.target === 'page-anchor'),
+    ).toBe(true)
+    expect(out.drawflow.edges.some((e) => e.source === 'page-anchor' && e.target === head.id)).toBe(
+      true,
+    )
   })
 
   it('takes the URL from the argument, and refuses a non-http origin', () => {
@@ -225,7 +231,9 @@ describe('persistDefaultRetries', () => {
     ])
     const out = persistDefaultRetries(wf)
     for (const blockId of ['forms', 'event-click', 'webhook']) {
-      expect(out.drawflow.nodes.find((n) => n.data['blockId'] === blockId)!.data['onError']).toBeUndefined()
+      expect(
+        out.drawflow.nodes.find((n) => n.data['blockId'] === blockId)!.data['onError'],
+      ).toBeUndefined()
     }
   })
 

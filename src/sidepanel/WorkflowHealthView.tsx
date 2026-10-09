@@ -29,10 +29,7 @@ const STATUS_CLASS: Record<WorkflowHealthSummary['status'], string> = {
   'no-data': 'text-muted',
 }
 
-function statusLabel(
-  status: WorkflowHealthSummary['status'],
-  t: ReturnType<typeof useT>,
-): string {
+function statusLabel(status: WorkflowHealthSummary['status'], t: ReturnType<typeof useT>): string {
   switch (status) {
     case 'stable':
       return t.healthStatusStable
@@ -94,10 +91,7 @@ function firstRunLabel(
 }
 
 /** Compact, explainable health summary for one workflow card. */
-export function WorkflowHealthView({
-  health,
-  firstRun,
-}: WorkflowHealthViewProps): ReactNode {
+export function WorkflowHealthView({ health, firstRun }: WorkflowHealthViewProps): ReactNode {
   const t = useT()
   const firstRunBadge = firstRun ? firstRunLabel(firstRun, t) : undefined
   return (
@@ -116,7 +110,9 @@ export function WorkflowHealthView({
         )}
       </span>
 
-      {firstRunBadge && <span className={FIRST_RUN_CLASS[firstRunBadge.tone]}>{firstRunBadge.text}</span>}
+      {firstRunBadge && (
+        <span className={FIRST_RUN_CLASS[firstRunBadge.tone]}>{firstRunBadge.text}</span>
+      )}
 
       {health.lastVerifiedAt !== undefined && (
         <span className="text-muted">

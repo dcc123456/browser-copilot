@@ -9,7 +9,10 @@
  *
  * @module background/workflow-engine/auto-repair/failure-snapshot
  */
-import { classifyFailure, type WorkflowFailureType } from '../../../lib/workflow/failure-classification'
+import {
+  classifyFailure,
+  type WorkflowFailureType,
+} from '../../../lib/workflow/failure-classification'
 import { fromVerificationFailure } from '../../../lib/workflow/failure-classification'
 import { getCheckpointStore } from '../run-workflow'
 import type { RunCheckpoint } from '../../../lib/workflow/checkpoints'
@@ -28,11 +31,7 @@ interface FailedRunRecord {
 const lastFailed = new Map<string, FailedRunRecord>()
 
 /** Remember a run's failure evidence (called by the run path / auto trigger). */
-export function rememberFailedRun(
-  workflowId: string,
-  runId: string,
-  trace: ExecutionTrace,
-): void {
+export function rememberFailedRun(workflowId: string, runId: string, trace: ExecutionTrace): void {
   lastFailed.set(workflowId, { runId, trace, failedAt: Date.now() })
 }
 
@@ -61,10 +60,7 @@ function locatorOf(node: WorkflowNode | undefined): unknown {
   return undefined
 }
 
-function previousNodeOf(
-  workflow: Workflow,
-  failedNodeId: string,
-): FailureSnapshot['previousNode'] {
+function previousNodeOf(workflow: Workflow, failedNodeId: string): FailureSnapshot['previousNode'] {
   const index = workflow.drawflow.nodes.findIndex((node) => node.id === failedNodeId)
   if (index <= 0) return undefined
   const node = workflow.drawflow.nodes[index - 1]
@@ -97,11 +93,11 @@ export function buildFailureSnapshot(input: BuildSnapshotInput): FailureSnapshot
   }
 
   const page: FailureSnapshot['page'] = {
-    url: trace.events.find((event) => event.nodeId === failedNodeId)?.text
-      ? undefined
-      : undefined,
+    url: trace.events.find((event) => event.nodeId === failedNodeId)?.text ? undefined : undefined,
   }
-  const currentPageEvent = [...trace.events].reverse().find((event) => /https?:\/\//.test(event.text))
+  const currentPageEvent = [...trace.events]
+    .reverse()
+    .find((event) => /https?:\/\//.test(event.text))
   if (currentPageEvent) {
     const match = currentPageEvent.text.match(/https?:\/\/\S+/)
     if (match) page.url = match[0]

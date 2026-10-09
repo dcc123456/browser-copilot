@@ -61,9 +61,7 @@
 ### 4.1 配置模型
 
 ```ts
-type UploadFileSourceMode =
-  | 'user-select'
-  | 'workflow-file'
+type UploadFileSourceMode = 'user-select' | 'workflow-file'
 
 interface UploadFileConfig {
   sourceMode: UploadFileSourceMode
@@ -79,16 +77,16 @@ interface UploadFileConfig {
 
 字段要求：
 
-| 字段 | 必填 | 说明 |
-|---|---:|---|
-| `sourceMode` | 是 | `user-select` / `workflow-file` |
-| `selector` | 是 | 文件 input 或上传目标选择器 |
-| `fileVariable` | workflow-file 时 | Workflow 文件变量 |
-| `accept` | 否 | 文件类型过滤 |
-| `multiple` | 否 | 是否支持多文件 |
-| `waitForSelector` | 否 | 上传前等待目标 |
-| `waitSelectorTimeout` | 否 | 等待超时 |
-| `verifyAfterUpload` | 否 | 是否做节点级验证 |
+| 字段                  |             必填 | 说明                            |
+| --------------------- | ---------------: | ------------------------------- |
+| `sourceMode`          |               是 | `user-select` / `workflow-file` |
+| `selector`            |               是 | 文件 input 或上传目标选择器     |
+| `fileVariable`        | workflow-file 时 | Workflow 文件变量               |
+| `accept`              |               否 | 文件类型过滤                    |
+| `multiple`            |               否 | 是否支持多文件                  |
+| `waitForSelector`     |               否 | 上传前等待目标                  |
+| `waitSelectorTimeout` |               否 | 等待超时                        |
+| `verifyAfterUpload`   |               否 | 是否做节点级验证                |
 
 默认：
 
@@ -116,13 +114,7 @@ interface WorkflowFileArtifact {
   dataUrl: string
   width?: number
   height?: number
-  source:
-    | 'user'
-    | 'screenshot'
-    | 'javascript'
-    | 'download'
-    | 'generated-image'
-    | 'other'
+  source: 'user' | 'screenshot' | 'javascript' | 'download' | 'generated-image' | 'other'
 }
 ```
 
@@ -186,12 +178,7 @@ Workflow → 键盘输入本地路径 → OS dialog
 在 SidePanel / Workflow Runner 提供隐藏 file input：
 
 ```html
-<input
-  type="file"
-  hidden
-  accept="..."
-  multiple
-/>
+<input type="file" hidden accept="..." multiple />
 ```
 
 用户点击“选择文件”时，在该用户 gesture 中执行 `input.click()`。
@@ -297,10 +284,7 @@ change event
 推荐核心实现：
 
 ```ts
-async function uploadFilesToInput(
-  selector: string,
-  files: WorkflowFileArtifact[]
-) {
+async function uploadFilesToInput(selector: string, files: WorkflowFileArtifact[]) {
   const input = document.querySelector(selector)
 
   if (!(input instanceof HTMLInputElement)) {
@@ -324,17 +308,10 @@ async function uploadFilesToInput(
     }
 
     const blob = await response.blob()
-    const file = new File(
-      [blob],
-      fileData.name,
-      {
-        type:
-          fileData.mimeType ||
-          blob.type ||
-          'application/octet-stream',
-        lastModified: Date.now()
-      }
-    )
+    const file = new File([blob], fileData.name, {
+      type: fileData.mimeType || blob.type || 'application/octet-stream',
+      lastModified: Date.now(),
+    })
 
     dataTransfer.items.add(file)
   }
@@ -346,11 +323,11 @@ async function uploadFilesToInput(
 
   return {
     count: input.files.length,
-    files: Array.from(input.files).map(file => ({
+    files: Array.from(input.files).map((file) => ({
       name: file.name,
       type: file.type,
-      size: file.size
-    }))
+      size: file.size,
+    })),
   }
 }
 ```
@@ -389,7 +366,7 @@ dropFiles(selector, files)
 uploadFilesToPage({
   selector,
   files,
-  ctx
+  ctx,
 })
 ```
 

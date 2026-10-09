@@ -187,15 +187,12 @@ function locatorOf(data: Record<string, unknown>): {
   fallbacks?: FakeTargetSpec[]
 } | null {
   const selector = typeof data['selector'] === 'string' ? data['selector'].trim() : ''
-  const raw = data['target'] as { primary?: FakeTargetSpec; fallbacks?: FakeTargetSpec[] } | undefined
+  const raw = data['target'] as
+    { primary?: FakeTargetSpec; fallbacks?: FakeTargetSpec[] } | undefined
   const richSpecs: FakeTargetSpec[] =
-    raw && typeof raw === 'object' && raw.primary
-      ? [raw.primary, ...(raw.fallbacks ?? [])]
-      : []
+    raw && typeof raw === 'object' && raw.primary ? [raw.primary, ...(raw.fallbacks ?? [])] : []
   if (selector) {
-    const fallbacks = richSpecs.filter(
-      (spec) => !(spec.how === 'css' && spec.value === selector),
-    )
+    const fallbacks = richSpecs.filter((spec) => !(spec.how === 'css' && spec.value === selector))
     return { primary: { how: 'css', value: selector }, ...(fallbacks.length ? { fallbacks } : {}) }
   }
   if (raw && typeof raw === 'object' && raw.primary) {
@@ -221,7 +218,9 @@ type Ctx = Parameters<import('../../src/background/workflow-engine/executors').B
  * block ids the ten scenarios use. Behavior contracts follow the production
  * executors (see module docblock); the fake page is the single source of state.
  */
-export function buildFixtureExecutors(page: FakePageState): Record<string, import('../../src/background/workflow-engine/executors').BlockExecutor> {
+export function buildFixtureExecutors(
+  page: FakePageState,
+): Record<string, import('../../src/background/workflow-engine/executors').BlockExecutor> {
   const resolveOrFail = (
     data: Record<string, unknown>,
     message = '元素未找到',
@@ -237,14 +236,22 @@ export function buildFixtureExecutors(page: FakePageState): Record<string, impor
   // Spec scores mirroring lib/workflow/locator-score (compat keeps first-hit).
   const scoreSpec = (spec: { how: string; value: string }): number => {
     switch (spec.how) {
-      case 'testid': return 100
-      case 'role': return 95
-      case 'id': return /[a-z-]*\d{3,}/i.test(spec.value) ? 78 : 90
-      case 'name': return 85
-      case 'data-attr': return 75
-      case 'text': return 70
-      case 'xpath': return 25
-      default: return 35 // css / positional
+      case 'testid':
+        return 100
+      case 'role':
+        return 95
+      case 'id':
+        return /[a-z-]*\d{3,}/i.test(spec.value) ? 78 : 90
+      case 'name':
+        return 85
+      case 'data-attr':
+        return 75
+      case 'text':
+        return 70
+      case 'xpath':
+        return 25
+      default:
+        return 35 // css / positional
     }
   }
   // STRICT resolution (emulates the kernel's policy-aware resolver): poll the
@@ -260,7 +267,11 @@ export function buildFixtureExecutors(page: FakePageState): Record<string, impor
     const specs = [locator.primary, ...(locator.fallbacks ?? [])]
     const maxAttempts = opts.poll ? 8 : 1
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const all = specs.map((spec) => ({ spec, score: scoreSpec(spec), found: resolveFakeTarget(page, { primary: spec }) }))
+      const all = specs.map((spec) => ({
+        spec,
+        score: scoreSpec(spec),
+        found: resolveFakeTarget(page, { primary: spec }),
+      }))
       const matchedAny = all.filter((r) => r.found.matched > 0)
       if (matchedAny.length === 0) {
         if (attempt < maxAttempts) continue
@@ -283,7 +294,9 @@ export function buildFixtureExecutors(page: FakePageState): Record<string, impor
       // identity score and a real margin over the runner-up.
       const eligible = matchedAny.filter((r) => r.found.matched === 1 && r.score >= 70)
       if (eligible.length === 0) {
-        throw new Error(`元素未找到: ${describeLocator(data)} 定位不确定（LOCATOR_AMBIGUOUS，命中 ${unionIds.size} 个）`)
+        throw new Error(
+          `元素未找到: ${describeLocator(data)} 定位不确定（LOCATOR_AMBIGUOUS，命中 ${unionIds.size} 个）`,
+        )
       }
       eligible.sort((a, b) => b.score - a.score)
       const top = eligible[0]!
@@ -291,7 +304,9 @@ export function buildFixtureExecutors(page: FakePageState): Record<string, impor
       if (top.score - runnerUp >= 12) {
         return { element: top.found.element, matched: 1, usedSpec: top.found.usedSpec }
       }
-      throw new Error(`元素未找到: ${describeLocator(data)} 定位不确定（LOCATOR_AMBIGUOUS，命中 ${unionIds.size} 个）`)
+      throw new Error(
+        `元素未找到: ${describeLocator(data)} 定位不确定（LOCATOR_AMBIGUOUS，命中 ${unionIds.size} 个）`,
+      )
     }
     throw new Error(`${message}: ${describeLocator(data)}`)
   }
@@ -299,10 +314,12 @@ export function buildFixtureExecutors(page: FakePageState): Record<string, impor
   // The strict path activates ONLY through the engine's reliability contract
   // (ctx.reliability set by a generated-strict run) — compat executors are
   // untouched bit for bit.
-  const resolveFor = (ctx: Ctx, data: Record<string, unknown>, message = '元素未找到', opts?: { poll?: boolean }) =>
-    ctx.reliability
-      ? strictResolveOrFail(data, message, opts)
-      : resolveOrFail(data, message)
+  const resolveFor = (
+    ctx: Ctx,
+    data: Record<string, unknown>,
+    message = '元素未找到',
+    opts?: { poll?: boolean },
+  ) => (ctx.reliability ? strictResolveOrFail(data, message, opts) : resolveOrFail(data, message))
 
   return {
     // The engine starts at the trigger node; it does nothing.
@@ -339,7 +356,11 @@ export function buildFixtureExecutors(page: FakePageState): Record<string, impor
         const found = resolveFor(ctx, data)
         const id = found.element?.id ?? ''
         page.submitCalls += 1
-        page.actions.push({ action: 'submit', selector: describeLocator(data), usedSpec: found.usedSpec })
+        page.actions.push({
+          action: 'submit',
+          selector: describeLocator(data),
+          usedSpec: found.usedSpec,
+        })
         page.elements = page.elements.filter((el) => el.id !== id)
         ctx.emit('result', '已提交')
         return null
@@ -355,7 +376,12 @@ export function buildFixtureExecutors(page: FakePageState): Record<string, impor
       const found = resolveFor(ctx, data)
       const value = String(data['value'] ?? '')
       if (found.element) found.element.value = value
-      page.actions.push({ action: 'fill', selector: describeLocator(data), value, usedSpec: found.usedSpec })
+      page.actions.push({
+        action: 'fill',
+        selector: describeLocator(data),
+        value,
+        usedSpec: found.usedSpec,
+      })
       ctx.emit('result', `已填写 ${describeLocator(data)}`)
       return null
     },
@@ -367,7 +393,11 @@ export function buildFixtureExecutors(page: FakePageState): Record<string, impor
       const text = found.element?.text ?? ''
       const variable = String(data['variableName'] ?? '')
       if (variable) ctx.variables[variable] = text
-      page.actions.push({ action: 'get-text', selector: describeLocator(data), usedSpec: found.usedSpec })
+      page.actions.push({
+        action: 'get-text',
+        selector: describeLocator(data),
+        usedSpec: found.usedSpec,
+      })
       ctx.emit('result', `已读取 ${describeLocator(data)}`)
       return null
     },
@@ -403,7 +433,11 @@ export function buildFixtureExecutors(page: FakePageState): Record<string, impor
 // --- Workflow construction ----------------------------------------------------
 
 /** Minimal node builder: id + blockId + params directly on `data`. */
-export function node(id: string, blockId: string, data: Record<string, unknown> = {}): WorkflowNode {
+export function node(
+  id: string,
+  blockId: string,
+  data: Record<string, unknown> = {},
+): WorkflowNode {
   return { id, label: blockId, position: { x: 0, y: 0 }, data: { blockId, ...data } }
 }
 

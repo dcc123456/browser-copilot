@@ -158,7 +158,7 @@ describe('normalizeStoredSettings', () => {
         localAgentUrl: 'ws://127.0.0.1:8765',
         localAgentActiveAgent: '',
         localAgentAdapterPath: '',
-      localAgentAllowReload: false,
+        localAgentAllowReload: false,
         localAgentBindings: {},
         unattendedWindowPolicy: 'latest',
         imageModel: { providerId: '', model: '' },

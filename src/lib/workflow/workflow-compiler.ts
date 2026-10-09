@@ -22,17 +22,10 @@
  *
  * @module lib/workflow/workflow-compiler
  */
-import type {
-  GenerationActionTrace,
-  WorkflowGenerationSession,
-} from './generation-session'
+import type { GenerationActionTrace, WorkflowGenerationSession } from './generation-session'
 import { successfulTraces } from './generation-session'
 import { TRIGGER_BLOCK_ID } from './draft-types'
-import type {
-  Workflow,
-  WorkflowEdge,
-  WorkflowNode,
-} from './types'
+import type { Workflow, WorkflowEdge, WorkflowNode } from './types'
 
 let compilerCounter = 0
 function newId(prefix: string): string {
@@ -111,8 +104,7 @@ export function compileWorkflowFromTrace(input: CompileTraceInput): CompileTrace
   const nodes: WorkflowNode[] = [triggerHead(), ...traces.map(nodeFromTrace)]
   const edges = chainEdges(nodes)
 
-  const originUrl =
-    session.originUrl ?? traces[0]?.page.url ?? undefined
+  const originUrl = session.originUrl ?? traces[0]?.page.url ?? undefined
 
   const workflow: Workflow = {
     id: input.workflowId ?? newId('workflow'),

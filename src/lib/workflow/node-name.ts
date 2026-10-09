@@ -32,9 +32,8 @@ export function nodeDisplayNameOf(node: WorkflowNode | undefined): string {
   if (!node) return ''
   const blockId = blockIdOfNode(node)
   const name = BLOCK_BY_ID.get(blockId)?.name ?? blockId
-  const description = typeof node.data?.['description'] === 'string'
-    ? node.data['description'].trim()
-    : ''
+  const description =
+    typeof node.data?.['description'] === 'string' ? node.data['description'].trim() : ''
   return description ? `${name}: ${description}` : name
 }
 

@@ -14,7 +14,10 @@
  */
 
 import { PatchEngine } from '../../../lib/workflow/repair/patch-engine'
-import { buildGoalRepairContext, renderGoalRepairContext } from '../../../lib/workflow/goal-repair-context'
+import {
+  buildGoalRepairContext,
+  renderGoalRepairContext,
+} from '../../../lib/workflow/goal-repair-context'
 import { allowedParamPathsOf } from '../../../lib/workflow/repair/patch-policy'
 import { inspectPage } from '../page-inspect'
 import type { PageEvidence } from '../../../lib/workflow/repair/types'
@@ -67,9 +70,7 @@ export function buildRepairContext(
     })(),
     recentTrace: trace.events.slice(-20),
     repairHistory: history,
-    ...(failedNode
-      ? { goalRepairContext: buildGoalRepairContext(workflow, failedNode) }
-      : {}),
+    ...(failedNode ? { goalRepairContext: buildGoalRepairContext(workflow, failedNode) } : {}),
   }
 }
 
@@ -132,11 +133,16 @@ export function buildRepairMessages(context: RepairContext): RepairChatMessage[]
       content: [
         context.goalRepairContext ? renderGoalRepairContext(context.goalRepairContext) : '',
         `Repair context (redacted):\n${JSON.stringify(
-          { ...context, ...(context.goalRepairContext ? { goalRepairContext: '[rendered above]' } : {}) },
+          {
+            ...context,
+            ...(context.goalRepairContext ? { goalRepairContext: '[rendered above]' } : {}),
+          },
           null,
           2,
         )}`,
-      ].filter(Boolean).join('\n\n'),
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
     },
   ]
 }

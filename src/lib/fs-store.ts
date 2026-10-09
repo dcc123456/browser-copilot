@@ -432,12 +432,8 @@ export function createFileArea(handle: FileSystemDirectoryHandle): StorageArea {
         if (entry.value === null) delete out[key]
         else out[key] = entry.value
       }
-      const tombstoned = new Set(
-        wanted.filter((key) => pending[key]?.value === null),
-      )
-      const unresolved = wanted.filter(
-        (key) => !(key in out) && !tombstoned.has(key),
-      )
+      const tombstoned = new Set(wanted.filter((key) => pending[key]?.value === null))
+      const unresolved = wanted.filter((key) => !(key in out) && !tombstoned.has(key))
       if (unresolved.length === 0) return out
       // Read cache: the last value that reached a file, served when the file
       // cannot be read (handle down, or the file was removed externally).

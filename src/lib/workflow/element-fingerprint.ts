@@ -236,7 +236,11 @@ export function conditionTargetName(target: unknown): string {
   } & SemanticLocator
   const specs = [raw.primary]
   for (const spec of specs) {
-    if (spec && typeof spec === 'object' && (spec.how === 'role' || spec.how === 'text' || spec.how === 'cdp-shadow')) {
+    if (
+      spec &&
+      typeof spec === 'object' &&
+      (spec.how === 'role' || spec.how === 'text' || spec.how === 'cdp-shadow')
+    ) {
       if (typeof spec.value === 'string' && spec.value.trim()) return spec.value.trim()
     }
   }
@@ -249,14 +253,12 @@ export function conditionTargetName(target: unknown): string {
  * field writes. A rich chain keeps its other specs: an editor changes the name,
  * it does not re-derive the whole locator.
  */
-export function withConditionTargetName(
-  target: ConditionTarget,
-  name: string,
-): ConditionTarget {
+export function withConditionTargetName(target: ConditionTarget, name: string): ConditionTarget {
   const primary = (target as { primary?: import('../ops').TargetSpec }).primary
   if (primary && typeof primary === 'object' && typeof primary.how === 'string') {
     const named = primary.how === 'role' || primary.how === 'text' || primary.how === 'cdp-shadow'
-    if (named) return { ...(target as import('../ops').Target), primary: { ...primary, value: name } }
+    if (named)
+      return { ...(target as import('../ops').Target), primary: { ...primary, value: name } }
     return { ...(target as import('../ops').Target), label: name }
   }
   return { ...target, accessibleName: name }
@@ -376,9 +378,7 @@ export function targetSpecFromSemantic(
  * DOM drift. Specs with an empty value are dropped: `{how:'role', value:''}` is
  * the shape the kernel resolves to EVERY element on the page.
  */
-export function targetSpecsFromSemantic(
-  locator: SemanticLocator,
-): import('../ops').TargetSpec[] {
+export function targetSpecsFromSemantic(locator: SemanticLocator): import('../ops').TargetSpec[] {
   const out: import('../ops').TargetSpec[] = []
   const push = (spec: import('../ops').TargetSpec | undefined): void => {
     if (!spec || !spec.value.trim()) return

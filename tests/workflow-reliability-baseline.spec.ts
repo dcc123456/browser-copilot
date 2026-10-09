@@ -18,7 +18,11 @@
  * The fixtures live in `specs/reliability-fixtures/` next to the spec document.
  */
 import { describe, expect, it } from 'vitest'
-import { RELIABILITY_SCENARIOS, runScenario, type ExpectedOutcome } from '../specs/reliability-fixtures/scenarios'
+import {
+  RELIABILITY_SCENARIOS,
+  runScenario,
+  type ExpectedOutcome,
+} from '../specs/reliability-fixtures/scenarios'
 import type { FixturePass } from '../specs/reliability-fixtures/harness'
 
 /** Assert one scenario's observed pass sequence against its expected outcome. */

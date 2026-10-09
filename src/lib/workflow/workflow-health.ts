@@ -70,9 +70,7 @@ export function summarizeWorkflowHealth(
   runs: readonly TaskRunLog[],
   workflowId: string,
 ): WorkflowHealthSummary {
-  const own = runs
-    .filter((run) => isRunOf(workflowId, run))
-    .sort((a, b) => runTime(b) - runTime(a))
+  const own = runs.filter((run) => isRunOf(workflowId, run)).sort((a, b) => runTime(b) - runTime(a))
 
   const windowRuns = own.slice(0, HEALTH_WINDOW)
   const counted = windowRuns.filter(isCounted)
@@ -95,17 +93,14 @@ export function summarizeWorkflowHealth(
     }
   }
 
-  const status: WorkflowHealthStatus =
-    passedRuns === counted.length ? 'stable' : 'needs-attention'
+  const status: WorkflowHealthStatus = passedRuns === counted.length ? 'stable' : 'needs-attention'
 
   return {
     status,
     totalRuns: counted.length,
     passedRuns,
     ...(newestPassed ? { lastVerifiedAt: runTime(newestPassed) } : {}),
-    ...(newestFailed?.failureCategory
-      ? { lastFailureCategory: newestFailed.failureCategory }
-      : {}),
+    ...(newestFailed?.failureCategory ? { lastFailureCategory: newestFailed.failureCategory } : {}),
     repairedRuns,
     resumedRuns,
   }

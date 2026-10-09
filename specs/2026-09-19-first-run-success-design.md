@@ -10,13 +10,13 @@
 生成期每一步都真实执行成功过（算子桥接只在执行成功后记录节点），失败发生在**重放环境与
 生成环境的差异**上。诊断结论（每条都已对照代码确认）：
 
-| # | 根因 | 证据（实施前） |
-| - | ------ | ---------------- |
-| 1 | **读取类块完全没有元素等待**：`get-text` / `attribute-value` / `read-page` 只做一次 `querySelectorAll`，0 命中直接抛错。`applyDefaultWaits` 只覆盖交互块。生成期靠 LLM 节奏天然间隔几秒，重放是背靠背执行——点击触发跳转后紧跟一个读取节点必挂 | `executors.ts` getText、`debug-session.ts` WAIT_BLOCKS |
-| 2 | **CSS 选择器优先压制富定位**：录制 `selector` 取"最能转成 CSS 的 spec"（常是 `:nth-child` 位置长链），role/text 富定位降为 fallback；内核 `resolve()` 取**第一个命中任意元素**的 spec——位置 CSS 漂移后命中多个错误元素时照样选它，静默点错 | `target-to-selector.ts`、`kernel.ts` resolve |
-| 3 | **没有导航锚点**：图以"直接操作当前页元素"开头（无 new-tab），trigger 默认 manual，重放驱动"当前活动标签页"——不在生成时的页面就从第一步失败，且报错只说"element not found" | `run-workflow.ts` |
-| 4 | **首跑没有安全网**：`workflows.run` 的 AI 接管默认关；强大的验证-修复循环（`workflows.debug`）只能从工作流列表手动触发，不在交付链路上 | `index.ts` |
-| 5 | 保存卡片的 AI 审查只做节点取舍；选择器探测只展示、无修复 | `workflow-review.ts`、`selector-probe.ts` |
+| #   | 根因                                                                                                                                                                                                                                          | 证据（实施前）                                         |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| 1   | **读取类块完全没有元素等待**：`get-text` / `attribute-value` / `read-page` 只做一次 `querySelectorAll`，0 命中直接抛错。`applyDefaultWaits` 只覆盖交互块。生成期靠 LLM 节奏天然间隔几秒，重放是背靠背执行——点击触发跳转后紧跟一个读取节点必挂 | `executors.ts` getText、`debug-session.ts` WAIT_BLOCKS |
+| 2   | **CSS 选择器优先压制富定位**：录制 `selector` 取"最能转成 CSS 的 spec"（常是 `:nth-child` 位置长链），role/text 富定位降为 fallback；内核 `resolve()` 取**第一个命中任意元素**的 spec——位置 CSS 漂移后命中多个错误元素时照样选它，静默点错    | `target-to-selector.ts`、`kernel.ts` resolve           |
+| 3   | **没有导航锚点**：图以"直接操作当前页元素"开头（无 new-tab），trigger 默认 manual，重放驱动"当前活动标签页"——不在生成时的页面就从第一步失败，且报错只说"element not found"                                                                    | `run-workflow.ts`                                      |
+| 4   | **首跑没有安全网**：`workflows.run` 的 AI 接管默认关；强大的验证-修复循环（`workflows.debug`）只能从工作流列表手动触发，不在交付链路上                                                                                                        | `index.ts`                                             |
+| 5   | 保存卡片的 AI 审查只做节点取舍；选择器探测只展示、无修复                                                                                                                                                                                      | `workflow-review.ts`、`selector-probe.ts`              |
 
 ## 2. 用户拍板的两个默认行为
 
@@ -54,19 +54,20 @@
 ### B. 录制保真
 
 **B1 已验证选择器**（`lib/workflow/target-to-selector.ts` + `background/selector-probe.ts`
-+ `background/operator-tool-run.ts`）
 
-- `selectorCandidatesOf(locator)`：显式 selector + 富定位各 spec 的 CSS 映射，去重、按
+- `background/operator-tool-run.ts`）
+
+* `selectorCandidatesOf(locator)`：显式 selector + 富定位各 spec 的 CSS 映射，去重、按
   优先序、上限 8 个。
-- `chooseRecordedSelector(locator, countOf)`：第一个**命中恰为 1** 的候选胜出并标记
+* `chooseRecordedSelector(locator, countOf)`：第一个**命中恰为 1** 的候选胜出并标记
   verified；全不恰一时退而保留"至少有命中"的候选（verified=false）；连命中都没有时
   **录空 selector**——回放以富定位（role/text）为主定位，这正是位置 CSS 只会误导的场景。
-- 录制路径：`runOperatorToolWithExecution` 在执行前用 `verifyRecordedSelector` 一次性
+* 录制路径：`runOperatorToolWithExecution` 在执行前用 `verifyRecordedSelector` 一次性
   注入数出候选命中数（复用 `countMatchesInPage`），选中者写入节点；`selectorVerified`
   随节点落盘。**无法探测时保持原 locator 不变**——"未验证"绝不能静默降级一个能用的定位。
-- 历史编译路径：保存时（`workflows.save` 且 `fromGeneration`）用 `hardenWorkflowSelectors`
+* 历史编译路径：保存时（`workflows.save` 且 `fromGeneration`）用 `hardenWorkflowSelectors`
   一次性批量为整图重选 selector（上限 200 个 selector，超出部分不动）。
-- 编辑器/导入的保存**不做**硬化——手调的选择器绝不能在用户背后被改写。
+* 编辑器/导入的保存**不做**硬化——手调的选择器绝不能在用户背后被改写。
 
 **B2 生成期页面来源**（`operator-tool-run.ts`、`draft-types.ts`、`types.ts`）
 
@@ -104,18 +105,18 @@
 
 ## 4. 测试
 
-| 文件 | 覆盖 |
-| --- | --- |
-| `tests/executors-read-wait.spec.ts`（新） | 轮询重试、退出开关、窗口到期仍按原文报错、`op.waitFor` 传递 |
-| `tests/kernel-resolve-exact.spec.ts`（新） | 恰一命中压过多命中、全多命中回落旧行为 |
-| `tests/target-to-selector.spec.ts`（扩展） | `chooseRecordedSelector` 全决策树 + `selectorCandidatesOf` 顺序 |
-| `tests/runnability.spec.ts`（新） | 等待固化幂等不改结构、锚点判定正反例、保存期硬化与不可探测回退 |
-| `tests/workflow-run-validation.spec.ts`（扩展） | 锚点警告正/反例 |
-| `tests/chat-save-dialog.spec.tsx`（扩展） | 生成保存带 `fromGeneration`、验证运行默认不发、勾选后发一次 `workflows.debug` 且 id 正确 |
-| `tests/visible-failure.spec.ts` / `read-page.spec.ts` | 空读失败契约测试补小窗口（轮询后语义不变，只是更晚失败） |
-| `tests/operator-param-coverage.spec.ts` | 分析器正则补 `async function`（`pollRead` 曾对它不可见）；`attribute-value`/`get-text` 的 `waitForSelector` 出惰性清单 |
-| `tests/workflow-from-history.spec.ts`（扩展，§7） | 四种 scroll mode 的编译产物：top/bottom 为大增量、滚窗写 `html`、元素滚动保留 selector+target |
-| `tests/workflow-run-validation.spec.ts`（扩展，§7） | 空操作滚动只 warning 不阻塞；`press-key` 缺键仍是 error（分级未泛化） |
+| 文件                                                  | 覆盖                                                                                                                   |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `tests/executors-read-wait.spec.ts`（新）             | 轮询重试、退出开关、窗口到期仍按原文报错、`op.waitFor` 传递                                                            |
+| `tests/kernel-resolve-exact.spec.ts`（新）            | 恰一命中压过多命中、全多命中回落旧行为                                                                                 |
+| `tests/target-to-selector.spec.ts`（扩展）            | `chooseRecordedSelector` 全决策树 + `selectorCandidatesOf` 顺序                                                        |
+| `tests/runnability.spec.ts`（新）                     | 等待固化幂等不改结构、锚点判定正反例、保存期硬化与不可探测回退                                                         |
+| `tests/workflow-run-validation.spec.ts`（扩展）       | 锚点警告正/反例                                                                                                        |
+| `tests/chat-save-dialog.spec.tsx`（扩展）             | 生成保存带 `fromGeneration`、验证运行默认不发、勾选后发一次 `workflows.debug` 且 id 正确                               |
+| `tests/visible-failure.spec.ts` / `read-page.spec.ts` | 空读失败契约测试补小窗口（轮询后语义不变，只是更晚失败）                                                               |
+| `tests/operator-param-coverage.spec.ts`               | 分析器正则补 `async function`（`pollRead` 曾对它不可见）；`attribute-value`/`get-text` 的 `waitForSelector` 出惰性清单 |
+| `tests/workflow-from-history.spec.ts`（扩展，§7）     | 四种 scroll mode 的编译产物：top/bottom 为大增量、滚窗写 `html`、元素滚动保留 selector+target                          |
+| `tests/workflow-run-validation.spec.ts`（扩展，§7）   | 空操作滚动只 warning 不阻塞；`press-key` 缺键仍是 error（分级未泛化）                                                  |
 
 ## 5. 明确不做
 

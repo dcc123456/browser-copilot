@@ -17,11 +17,7 @@
  */
 
 import { semanticLocatorFromTarget, type SemanticLocator } from './element-fingerprint'
-import {
-  candidateFromSelectorString,
-  scoreCandidate,
-  type LocatorCandidate,
-} from './locator-score'
+import { candidateFromSelectorString, scoreCandidate, type LocatorCandidate } from './locator-score'
 import type { NodeLocatorSpec } from './reliability'
 import type { Target, TargetSpec } from '../ops'
 
@@ -170,7 +166,7 @@ export function sameSpec(a: TargetSpec, b: TargetSpec): boolean {
  * re-expressed into CSS, and when it does not map (the agent usually targets
  * elements by role/text) the `fallbacks` are tried in order — the replayable
  * workflow needs that fallback to carry a usable selector.
- */export function selectorFromTarget(target: unknown): string {
+ */ export function selectorFromTarget(target: unknown): string {
   if (!target || typeof target !== 'object') return ''
   const raw = target as RawTarget
   const primary = selectorFromSpec(raw.primary)
@@ -391,7 +387,13 @@ export function parseSerializedSpec(text: string): {
     }
     rest = rest.slice(0, match.index)
   }
-  return { how, value: rest, ...(role ? { role } : {}), ...(tag ? { tag } : {}), ...(typeof nth === 'number' ? { nth } : {}) }
+  return {
+    how,
+    value: rest,
+    ...(role ? { role } : {}),
+    ...(tag ? { tag } : {}),
+    ...(typeof nth === 'number' ? { nth } : {}),
+  }
 }
 
 /**
@@ -435,15 +437,11 @@ export function selectorAfterExecution(input: {
       // evidence exists and says otherwise.
       if (count === 1) return { selector: direct, verified: true }
       if (count > 1) return { selector: direct, verified: false }
-      const noEvidence =
-        selectorCandidatesOf(input.locator).every((s) => input.countOf(s) === 0)
+      const noEvidence = selectorCandidatesOf(input.locator).every((s) => input.countOf(s) === 0)
       if (noEvidence) {
         return {
           selector: direct,
-          verified:
-            typeof input.locator.verified === 'boolean'
-              ? input.locator.verified
-              : true,
+          verified: typeof input.locator.verified === 'boolean' ? input.locator.verified : true,
         }
       }
       return { selector: direct, verified: false }

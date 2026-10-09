@@ -345,7 +345,9 @@ async function waitForActionable(
   while (Date.now() < deadline) {
     if (signal?.aborted) return
     const result = await execOnActiveTab(
-      resolvePolicy ? { action: 'actionability', target, resolvePolicy } : { action: 'actionability', target },
+      resolvePolicy
+        ? { action: 'actionability', target, resolvePolicy }
+        : { action: 'actionability', target },
       signal,
       tabId,
     ).catch(() => undefined)
@@ -469,7 +471,11 @@ export async function execOnActiveTab(
     if (op.action === 'click' || op.action === 'hover') {
       return runClosedShadowAction(tab.id, tab.url ?? '', op)
     }
-    if (op.action === 'element_exists' || op.action === 'count_elements' || op.action === 'actionability') {
+    if (
+      op.action === 'element_exists' ||
+      op.action === 'count_elements' ||
+      op.action === 'actionability'
+    ) {
       return runClosedShadowProbe(tab.id, tab.url ?? '', op)
     }
     return {
@@ -684,7 +690,8 @@ async function runClosedShadowProbe(tabId: number, frameUrl: string, op: Op): Pr
   if (!chrome.debugger) {
     return {
       ...base,
-      error: '该元素位于封闭 Shadow DOM 中，读取其状态需要调试器（chrome.debugger）权限；当前环境不可用。',
+      error:
+        '该元素位于封闭 Shadow DOM 中，读取其状态需要调试器（chrome.debugger）权限；当前环境不可用。',
     }
   }
   let probe: ShadowProbe

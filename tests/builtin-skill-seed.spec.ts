@@ -18,8 +18,7 @@ function makeChromeMock() {
   const store = new Map<string, unknown>()
   const local = {
     get: vi.fn(async (keys: string | string[] | null) => {
-      const wanted =
-        keys === null ? [...store.keys()] : typeof keys === 'string' ? [keys] : keys
+      const wanted = keys === null ? [...store.keys()] : typeof keys === 'string' ? [keys] : keys
       const out: Record<string, unknown> = {}
       for (const key of wanted) {
         if (store.has(key)) out[key] = store.get(key)
@@ -30,8 +29,7 @@ function makeChromeMock() {
       for (const [key, value] of Object.entries(items)) store.set(key, value)
     }),
     remove: vi.fn(async (keys: string | string[] | null) => {
-      const wanted =
-        keys === null ? [...store.keys()] : typeof keys === 'string' ? [keys] : keys
+      const wanted = keys === null ? [...store.keys()] : typeof keys === 'string' ? [keys] : keys
       for (const key of wanted) store.delete(key)
     }),
   }
@@ -74,8 +72,6 @@ describe('built-in skill seeding on a current install', () => {
     await ensureSchema()
     const second = await listSkills()
 
-    expect(second.map((skill) => skill.id).sort()).toEqual(
-      first.map((skill) => skill.id).sort(),
-    )
+    expect(second.map((skill) => skill.id).sort()).toEqual(first.map((skill) => skill.id).sort())
   })
 })

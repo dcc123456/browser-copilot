@@ -53,9 +53,7 @@ describe('V-node-fix: per-block AI fix dialog', () => {
   })
 
   it('shows the missing-contract warning and disables confirm when no contract', () => {
-    const html = renderToStaticMarkup(
-      createElement(NodeFixBody, bodyProps({ hasContract: false })),
-    )
+    const html = renderToStaticMarkup(createElement(NodeFixBody, bodyProps({ hasContract: false })))
     expect(html).toContain('nodeFixMissingContract')
     const footer = renderToStaticMarkup(
       createElement(NodeFixFooter, footerProps({ hasContract: false })),

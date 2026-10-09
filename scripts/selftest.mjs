@@ -72,7 +72,12 @@ import {
   waitForBuild,
   waitForPlugin,
 } from './bridge-client.mjs'
-import { readBuiltStamp, sourceFingerprintSync, writeBuiltStamp, writeLoadedStamp } from './build-stamp.mjs'
+import {
+  readBuiltStamp,
+  sourceFingerprintSync,
+  writeBuiltStamp,
+  writeLoadedStamp,
+} from './build-stamp.mjs'
 
 const USAGE =
   'usage: node scripts/selftest.mjs [--goal <text>] [--workflow <id>] [--from build|reload|generate|verify]' +
@@ -149,8 +154,7 @@ while (argv.length > 0) {
     // The draft commit is a commit, so the run is already in commit-cutoff mode;
     // requiring both flags would only let a caller ask for one and get silence.
     options.runToDraft = true
-  }
-  else if (arg === '--input') {
+  } else if (arg === '--input') {
     const pair = String(argv.shift() ?? '')
     const eq = pair.indexOf('=')
     if (eq <= 0) die(3, `--input wants name=value, got ${pair || '(nothing)'}`)
@@ -426,7 +430,10 @@ async function main() {
         log(
           '  graph tail: ' +
             graphTail
-              .map((n) => `${n.blockId}${n.words ? ` «${n.words}»` : ''} · ${String(n.intent ?? '').slice(0, 46)}`)
+              .map(
+                (n) =>
+                  `${n.blockId}${n.words ? ` «${n.words}»` : ''} · ${String(n.intent ?? '').slice(0, 46)}`,
+              )
               .join(' | '),
         )
       }
@@ -633,11 +640,13 @@ async function main() {
                 // once — round 80 failed L3 on 「元素存在 "保存草稿"」 while its own
                 // save step had recorded the button as 「暂存离开」, and finding that
                 // out took a storage read, not the report.
-                `  words the steps really recorded: ${((result.workflow?.nodes ?? [])
-                  .slice(-4)
-                  .map((node) => node.words)
-                  .filter(Boolean)
-                  .join(' | ') || '(none)').slice(0, 300)}`,
+                `  words the steps really recorded: ${(
+                  (result.workflow?.nodes ?? [])
+                    .slice(-4)
+                    .map((node) => node.words)
+                    .filter(Boolean)
+                    .join(' | ') || '(none)'
+                ).slice(0, 300)}`,
               ]
             : stoppedShort
               ? [
@@ -650,9 +659,7 @@ async function main() {
                 : result.workflow?.verified
                   ? ['PASS — the generated graph replays end to end and its goal held']
                   : options.allowDraftCommit
-                    ? [
-                        'RAN TO THE END OF ITS GRAPH — every step executed; nothing published',
-                      ]
+                    ? ['RAN TO THE END OF ITS GRAPH — every step executed; nothing published']
                     : options.runToDraft
                       ? [
                           'RAN TO THE COMMIT POINT — steps before it executed for real; the draft is written only if the graph reached its own save step',

@@ -6,7 +6,7 @@ const gap = {
   missingCapability: 'shadow DOM canvas extraction',
   triedOperators: ['get-text', 'attribute-value'],
   whyInsufficient: 'Native blocks cannot reach the closed shadow root.',
-  expectedResult: 'The extracted value is available in a variable.'
+  expectedResult: 'The extracted value is available in a variable.',
 }
 describe('29.9 javascript fallback', () => {
   it('rejects JS when a native operator exists', () => {
@@ -14,16 +14,22 @@ describe('29.9 javascript fallback', () => {
     expect(decision.allowed).toBe(false)
     if (!decision.allowed) expect(decision.nativeBlockIds).toContain('event-click')
   })
-  it.each(['click the button', '填写邮箱', 'read text from heading'])('detects native coverage for: %s', (intent) => {
-    expect(hasNativeOperator(intent)).toBe(true)
-  })
+  it.each(['click the button', '填写邮箱', 'read text from heading'])(
+    'detects native coverage for: %s',
+    (intent) => {
+      expect(hasNativeOperator(intent)).toBe(true)
+    },
+  )
   it('rejects JS for a real gap when the record is missing', () => {
-    const decision = evaluateCapabilityGap({ stepIntent: 'extract data from a closed web component' })
+    const decision = evaluateCapabilityGap({
+      stepIntent: 'extract data from a closed web component',
+    })
     expect(decision.allowed).toBe(false)
   })
   it('allows JS only after a complete documented capability gap', () => {
     const decision = evaluateCapabilityGap({
-      stepIntent: 'extract data from a closed web component', gap,
+      stepIntent: 'extract data from a closed web component',
+      gap,
     })
     expect(decision.allowed).toBe(true)
     if (decision.allowed) expect(decision.capabilityGap.missingCapability).toContain('shadow')

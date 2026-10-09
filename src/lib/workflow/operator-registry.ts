@@ -91,8 +91,16 @@ const OVERRIDES: Record<string, OperatorOverride> = {
     sideEffect: 'none',
     allowGeneration: true,
     semanticPhrases: [
-      'ai', 'generate text', 'draft', 'summarize', 'semantic generation',
-      'ai 生成', '生成文案', '撰写', '总结', '个性化',
+      'ai',
+      'generate text',
+      'draft',
+      'summarize',
+      'semantic generation',
+      'ai 生成',
+      '生成文案',
+      '撰写',
+      '总结',
+      '个性化',
     ],
   },
   'save-assets': {
@@ -104,7 +112,19 @@ const OVERRIDES: Record<string, OperatorOverride> = {
   },
   'new-tab': {
     aiExposure: 'core',
-    semanticPhrases: ['open website', 'open url', 'navigate to', 'go to', 'open the website', 'open', '打开网站', '打开网址', '打开指定网站', '导航到', '访问'],
+    semanticPhrases: [
+      'open website',
+      'open url',
+      'navigate to',
+      'go to',
+      'open the website',
+      'open',
+      '打开网站',
+      '打开网址',
+      '打开指定网站',
+      '导航到',
+      '访问',
+    ],
   },
   'read-page': { aiExposure: 'core' },
   'event-click': {
@@ -118,17 +138,48 @@ const OVERRIDES: Record<string, OperatorOverride> = {
   'get-text': { aiExposure: 'core' },
   'element-exists': {
     aiExposure: 'core',
-    semanticPhrases: ['element exists', 'wait', 'wait for', 'await', 'until', 'exists', '等待', '等候', '直到', '存在'],
+    semanticPhrases: [
+      'element exists',
+      'wait',
+      'wait for',
+      'await',
+      'until',
+      'exists',
+      '等待',
+      '等候',
+      '直到',
+      '存在',
+    ],
   },
   'save-local': { aiExposure: 'hidden' },
   note: { aiExposure: 'hidden' },
   'blocks-group': { aiExposure: 'hidden' },
   'workflow-state': { aiExposure: 'hidden' },
   'switch-tab': {
-    semanticPhrases: ['switch tab', 'switch to tab', 'change tab', 'next tab', 'browser tab', '切换标签', '切换标签页', '切换', '标签页'],
+    semanticPhrases: [
+      'switch tab',
+      'switch to tab',
+      'change tab',
+      'next tab',
+      'browser tab',
+      '切换标签',
+      '切换标签页',
+      '切换',
+      '标签页',
+    ],
   },
   'insert-data': {
-    semanticPhrases: ['save data', 'insert data', 'store data', 'update data', 'save', 'insert', '保存数据', '插入数据', '存储数据'],
+    semanticPhrases: [
+      'save data',
+      'insert data',
+      'store data',
+      'update data',
+      'save',
+      'insert',
+      '保存数据',
+      '插入数据',
+      '存储数据',
+    ],
   },
   'upload-file': {
     semanticPhrases: [
@@ -152,8 +203,7 @@ const OVERRIDES: Record<string, OperatorOverride> = {
     // Structured node contract (spec §12): node success means the files are
     // in the page upload control — NOT that the site finished processing.
     buildGoalContract: (args) => {
-      const selector =
-        typeof args['selector'] === 'string' ? args['selector'].trim() : ''
+      const selector = typeof args['selector'] === 'string' ? args['selector'].trim() : ''
       if (!selector) return undefined
       const mode = args['sourceMode'] === 'workflow-file' ? 'workflow-file' : 'user-select'
       const fileVariable = variableNameOf(
@@ -162,7 +212,8 @@ const OVERRIDES: Record<string, OperatorOverride> = {
       // A content literal pasted in place of a name is not a variable, so it
       // cannot be a precondition either — and it must never reach the goal
       // string, which would carry hundreds of KB of base64 into every prompt.
-      const namesVariable = mode === 'workflow-file' && fileVariable !== '' && !isFileContentLiteral(fileVariable)
+      const namesVariable =
+        mode === 'workflow-file' && fileVariable !== '' && !isFileContentLiteral(fileVariable)
       const target = { stableAttributes: { 'data-css': selector } }
       const successCriteria = [
         { kind: 'elementExists' as const, target },
@@ -182,10 +233,15 @@ const OVERRIDES: Record<string, OperatorOverride> = {
         ],
         evidence: [
           { kind: 'element', ref: selector, note: 'upload target' },
-          ...(namesVariable ? [{ kind: 'variable' as const, ref: fileVariable, note: 'file source' }] : []),
+          ...(namesVariable
+            ? [{ kind: 'variable' as const, ref: fileVariable, note: 'file source' }]
+            : []),
         ],
         repairHints: [
-          { target: 'locator', action: 'Re-locate the real input[type=file], including hidden inputs.' },
+          {
+            target: 'locator',
+            action: 'Re-locate the real input[type=file], including hidden inputs.',
+          },
           { target: 'locator', action: 'Check for a custom drop zone and target it.' },
           { target: 'parameter', action: 'Fix the multiple flag to match the control.' },
           { target: 'parameter', action: 'Fix the file variable / file data.' },
@@ -209,7 +265,8 @@ function deriveEntry(id: string): OperatorRegistryEntry {
   const aiExposure: AiExposure =
     override?.aiExposure ?? (id === JAVASCRIPT_BLOCK_ID ? 'fallback' : 'on-demand')
   const sideEffect: SideEffectLevel =
-    override?.sideEffect ?? (isExternalSideEffect ? 'external' : capability?.hasSideEffect ? 'page' : 'none')
+    override?.sideEffect ??
+    (isExternalSideEffect ? 'external' : capability?.hasSideEffect ? 'page' : 'none')
   const hasExecutor: boolean =
     override?.hasExecutor ?? (!placeholder && !engineInterpreted && block.id !== 'trigger')
   const allowGeneration: boolean =

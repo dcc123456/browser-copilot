@@ -19,7 +19,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { OUTBOX_KEY, enqueueOutbox, readOutboxMap } from '../src/lib/fs-outbox'
-import { createChromeCheckpointStore, readPersistedCheckpoints } from '../src/background/checkpoint-store'
+import {
+  createChromeCheckpointStore,
+  readPersistedCheckpoints,
+} from '../src/background/checkpoint-store'
 import { recordFinishedRun } from '../src/lib/task-store'
 import { loadDraft, saveDraft } from '../src/lib/workflow/draft-storage'
 import { getWorkflow, saveWorkflow } from '../src/lib/workflow/storage'
@@ -33,7 +36,8 @@ const IMAGE_CHARS = 1_400_000
 /** `OUTBOX_DISCARD_LIMIT` in fs-outbox — past this the next boot throws the buffer away. */
 const DISCARD_LIMIT = 24 * 1024 * 1024
 
-const dataUrl = (tag: string): string => `data:image/png;base64,${tag.repeat(IMAGE_CHARS / 2)}`.slice(0, IMAGE_CHARS)
+const dataUrl = (tag: string): string =>
+  `data:image/png;base64,${tag.repeat(IMAGE_CHARS / 2)}`.slice(0, IMAGE_CHARS)
 
 const store = new Map<string, unknown>()
 /** Every durable write, as the storage layer actually saw it. */
@@ -118,7 +122,10 @@ function transcript(): WireMessage[] {
         {
           id: `call-${step}`,
           type: 'function',
-          function: { name: 'run_javascript', arguments: JSON.stringify({ code: `draw(${image})` }) },
+          function: {
+            name: 'run_javascript',
+            arguments: JSON.stringify({ code: `draw(${image})` }),
+          },
         },
       ],
     } as WireMessage)
@@ -129,7 +136,15 @@ function transcript(): WireMessage[] {
   messages.push({
     role: 'user',
     content: '封面用这张',
-    attachments: [{ id: 'a1', name: 'cover.png', mimeType: 'image/png', size: IMAGE_CHARS, dataUrl: dataUrl('cd') }],
+    attachments: [
+      {
+        id: 'a1',
+        name: 'cover.png',
+        mimeType: 'image/png',
+        size: IMAGE_CHARS,
+        dataUrl: dataUrl('cd'),
+      },
+    ],
   } as WireMessage)
   return messages
 }
@@ -208,9 +223,8 @@ describe('the goal scenario leaves no buffer the next boot cannot read', () => {
 
     expect(biggest('workflow-drafts')).toBeLessThanOrEqual(1_600_000)
     const sealed = await loadDraft('c-1')
-    const code = (sealed?.nodes as { data?: { code?: string } }[]).find(
-      (node) => node?.data?.code,
-    )!.data!.code!
+    const code = (sealed?.nodes as { data?: { code?: string } }[]).find((node) => node?.data?.code)!
+      .data!.code!
     expect(code).toBe(script)
     expect(JSON.stringify(sealed)).not.toContain('base64,klkl')
   })
@@ -270,7 +284,14 @@ describe('the goal scenario leaves no buffer the next boot cannot read', () => {
     await saveDraft({
       conversationId: 'c-1',
       name: '小红书图文推广',
-      nodes: [{ id: 't', label: 'trigger', position: { x: 0, y: 0 }, data: { blockId: 'trigger', type: 'manual' } }],
+      nodes: [
+        {
+          id: 't',
+          label: 'trigger',
+          position: { x: 0, y: 0 },
+          data: { blockId: 'trigger', type: 'manual' },
+        },
+      ],
       edges: [],
       tail: 't',
       source: 'chat-generate',

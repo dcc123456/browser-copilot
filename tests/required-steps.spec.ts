@@ -14,7 +14,8 @@ function workflowWithVarDependency(): Workflow {
     name: 'req-workflow',
     description: '',
     trigger: { type: 'manual' },
-    createdAt: 1, updatedAt: 1,
+    createdAt: 1,
+    updatedAt: 1,
     settings: { saveLog: false, debugMode: false, notification: false, reuseLastState: false },
     table: [],
     drawflow: {

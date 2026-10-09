@@ -22,7 +22,10 @@ vi.mock('../src/background/driver', () => ({
 vi.mock('../src/background/automation-scope', () => ({
   normalScopeFromWindowId: vi.fn(async () => undefined),
 }))
-vi.mock('../src/lib/workflow/blocks/palette', () => ({ BLOCK_BY_ID: new Map(), PALETTE_BLOCKS: [] }))
+vi.mock('../src/lib/workflow/blocks/palette', () => ({
+  BLOCK_BY_ID: new Map(),
+  PALETTE_BLOCKS: [],
+}))
 
 import { executeWorkflow } from '../src/background/workflow-engine/run-workflow'
 import { getRun, listRunning, startRun } from '../src/background/running-tasks'
@@ -34,7 +37,12 @@ const workflow = {
   updatedAt: 1,
   drawflow: {
     nodes: [
-      { id: 'n1', label: 'click', position: { x: 0, y: 0 }, data: { blockId: 'click', description: '点击签到' } },
+      {
+        id: 'n1',
+        label: 'click',
+        position: { x: 0, y: 0 },
+        data: { blockId: 'click', description: '点击签到' },
+      },
     ],
     edges: [],
   },

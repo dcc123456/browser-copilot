@@ -1,11 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import { newGenerationMetrics, recordMetric, summarizeMetrics } from '../src/lib/workflow/generation-metrics'
+import {
+  newGenerationMetrics,
+  recordMetric,
+  summarizeMetrics,
+} from '../src/lib/workflow/generation-metrics'
 // Goal-completion rates (V89) are derived per run from the verification
 // reports; here we compute them over a simulated multi-run sample using the
 // same metrics primitive plus explicit verified counts.
-function rate(part: number, whole: number): number { return whole ? Number((part / whole).toFixed(3)) : 0 }
+function rate(part: number, whole: number): number {
+  return whole ? Number((part / whole).toFixed(3)) : 0
+}
 describe('V89 goal metrics', () => {
-  const sample = { workflows: 10, goalsVerified: 9, nodes: 24, nodeGoalsVerified: 22, criteriaCovered: 23 }
+  const sample = {
+    workflows: 10,
+    goalsVerified: 9,
+    nodes: 24,
+    nodeGoalsVerified: 22,
+    criteriaCovered: 23,
+  }
   it('measures workflow/node goal completion, criteria coverage, verification rate', () => {
     const workflowGoalCompletionRate = rate(sample.goalsVerified, sample.workflows)
     const nodeGoalCompletionRate = rate(sample.nodeGoalsVerified, sample.nodes)
@@ -18,7 +30,19 @@ describe('V89 goal metrics', () => {
   })
 })
 describe('V90 operator selection metrics', () => {
-  const sample = { tasks: 10, top1: 8, top3: 9, recovered: 6, recoverable: 8, targetRecovered: 4, targetCases: 5, paramRecovered: 2, paramCases: 2, unsupportedDetected: 3, unsupportedActual: 3 }
+  const sample = {
+    tasks: 10,
+    top1: 8,
+    top3: 9,
+    recovered: 6,
+    recoverable: 8,
+    targetRecovered: 4,
+    targetCases: 5,
+    paramRecovered: 2,
+    paramCases: 2,
+    unsupportedDetected: 3,
+    unsupportedActual: 3,
+  }
   it('measures top1 accuracy, top3 recall and recovery rates', () => {
     expect(rate(sample.top1, sample.tasks)).toBe(0.8)
     expect(rate(sample.top3, sample.tasks)).toBe(0.9)

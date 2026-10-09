@@ -28,7 +28,11 @@ const generated = (id: string, goal: string): WorkflowNode => ({
     blockId: 'event-click',
     selector: `#${id}`,
     __workflowAi: {
-      goalContract: { version: 1, goal, successCriteria: [{ kind: 'variableExists', name: `done:${id}` }] },
+      goalContract: {
+        version: 1,
+        goal,
+        successCriteria: [{ kind: 'variableExists', name: `done:${id}` }],
+      },
     },
   },
 })
@@ -63,7 +67,14 @@ describe('intentOf reads a generated node’s own goal contract', () => {
   })
 
   it('stays empty for a node with no prose at all', () => {
-    expect(intentOf({ id: 'x', label: 'event-click', position: { x: 0, y: 0 }, data: { blockId: 'event-click' } } as WorkflowNode)).toBe('')
+    expect(
+      intentOf({
+        id: 'x',
+        label: 'event-click',
+        position: { x: 0, y: 0 },
+        data: { blockId: 'event-click' },
+      } as WorkflowNode),
+    ).toBe('')
   })
 })
 
@@ -86,7 +97,9 @@ describe('the commit policy judges a generated click by what it said it does', (
   it('does not mistake the page a step stands on for the act it performs', () => {
     const onPublishPage = generated('upload', '在图文发布页点击上传入口，选择本地封面图')
     expect(isCommitNode(onPublishPage)).toBe(false)
-    expect(commitCutoffNodeId(graphOf(generated('n1', '打开笔记编辑器'), onPublishPage))).toBeUndefined()
+    expect(
+      commitCutoffNodeId(graphOf(generated('n1', '打开笔记编辑器'), onPublishPage)),
+    ).toBeUndefined()
   })
 
   it('refuses a step that names the publish even to decline it, and admits it only on the opt-in', () => {
@@ -108,7 +121,12 @@ describe('the commit policy judges a generated click by what it said it does', (
   })
 
   it('lets a prose-less graph through exactly as it always was', () => {
-    const blank = { id: 'b', label: 'event-click', position: { x: 0, y: 0 }, data: { blockId: 'event-click' } } as WorkflowNode
+    const blank = {
+      id: 'b',
+      label: 'event-click',
+      position: { x: 0, y: 0 },
+      data: { blockId: 'event-click' },
+    } as WorkflowNode
     expect(isCommitNode(blank)).toBe(false)
     expect(isDraftSaveNode(blank)).toBe(false)
   })
@@ -164,8 +182,16 @@ describe('the draft-commit opt-in walks to the draft and stops at the publish', 
       position: { x: 0, y: 0 },
       data: { blockId: 'forms', action: 'fill', selector: '#title', value: '{{aiTitle}}' },
     } as WorkflowNode
-    const submits = { ...fills, id: 'submit', data: { ...fills.data, action: 'submit' } } as WorkflowNode
-    const graph = graphOf(generated('save', '点击「暂存草稿」按钮，把笔记保存为草稿'), fills, submits)
+    const submits = {
+      ...fills,
+      id: 'submit',
+      data: { ...fills.data, action: 'submit' },
+    } as WorkflowNode
+    const graph = graphOf(
+      generated('save', '点击「暂存草稿」按钮，把笔记保存为草稿'),
+      fills,
+      submits,
+    )
     expect(draftCommitCutoffNodeId(graph)).toBe('submit')
   })
 })
@@ -182,7 +208,9 @@ describe('a prohibition still declines the publish when it is worded in full', (
   const declined = (goal: string) => generated('save', goal)
 
   it('recognizes the round-30 sentence as the draft save it is', () => {
-    const node = declined('点击「暂存离开」把已填好标题、正文并配好3张图的图文笔记保存为草稿，不执行正式发布')
+    const node = declined(
+      '点击「暂存离开」把已填好标题、正文并配好3张图的图文笔记保存为草稿，不执行正式发布',
+    )
     expect(isDraftSaveNode(node)).toBe(true)
     const graph = graphOf(generated('title', '在标题输入框里填写 {{noteTitle}}'), node)
     expect(draftCommitCutoffNodeId(graph)).toBeUndefined()
@@ -228,7 +256,8 @@ describe('the draft commit a real generation session wrote', () => {
         },
       },
       blockId: 'event-click',
-      description: '点击「暂存离开」把已填好标题、正文并配好3张图的图文笔记保存为草稿，不执行正式发布',
+      description:
+        '点击「暂存离开」把已填好标题、正文并配好3张图的图文笔记保存为草稿，不执行正式发布',
       label: '暂存离开（保存草稿）按钮',
       target: {
         fallbacks: [],
@@ -264,7 +293,8 @@ describe('the draft commit a real generation session wrote', () => {
 })
 
 describe('the recording tool tells the model its terminal step is still missing', () => {
-  const goal = '结合这个项目的readme文档，去小红书上生成推广文章，要求使用图文模式，使用脚本生成3张图片，保存成草稿'
+  const goal =
+    '结合这个项目的readme文档，去小红书上生成推广文章，要求使用图文模式，使用脚本生成3张图片，保存成草稿'
 
   it('fires while no step saves the draft', () => {
     // Round 37's real graph: 21 recorded steps ending on a focus click, and the
@@ -320,19 +350,25 @@ describe('the recording tool tells the model its terminal step is still missing'
       position: { x: 0, y: 0 },
       data: { blockId: 'trigger', goalText: '去小红书生成推广文章，保存成草稿' },
     } as unknown as WorkflowNode
-    expect(unfiredDraftSaveNotice({ nodes: [head, generated('focus', '点击正文编辑区')] })).toContain('草稿')
+    expect(
+      unfiredDraftSaveNotice({ nodes: [head, generated('focus', '点击正文编辑区')] }),
+    ).toContain('草稿')
   })
 })
 
 describe('a saved draft still needs a step that looks at it', () => {
-  const goal = '结合这个项目的readme文档，去小红书上生成推广文章，要求使用图文模式，使用脚本生成3张图片，保存成草稿'
+  const goal =
+    '结合这个项目的readme文档，去小红书上生成推广文章，要求使用图文模式，使用脚本生成3张图片，保存成草稿'
   const save = () => generated('save', '点击「暂存离开」按钮，把笔记保存为草稿，不执行正式发布')
 
   it('fires once the save is recorded and nothing visits the draft list', () => {
     // Round 80's graph exactly: 18/18, a real draft, and the only success row the
     // sealed goal had quoted the publish page's own 「保存草稿」 — furniture. The
     // certification layer is right to refuse it; what was missing was a step.
-    const notice = unvisitedDraftListNotice({ nodes: [generated('focus', '点击正文编辑区'), save()], goalText: goal })
+    const notice = unvisitedDraftListNotice({
+      nodes: [generated('focus', '点击正文编辑区'), save()],
+      goalText: goal,
+    })
     expect(notice).toContain('草稿箱')
     expect(notice).toContain('补两步')
     // The visit alone is not the fix: a 草稿箱 that was already in the page's own
@@ -353,7 +389,11 @@ describe('a saved draft still needs a step that looks at it', () => {
 
   it('a visit BEFORE the save proves nothing about the draft it has not written yet', () => {
     const notice = unvisitedDraftListNotice({
-      nodes: [generated('drafts', '点击「草稿箱」查看草稿列表'), generated('focus', '点击正文编辑区'), save()],
+      nodes: [
+        generated('drafts', '点击「草稿箱」查看草稿列表'),
+        generated('focus', '点击正文编辑区'),
+        save(),
+      ],
       goalText: goal,
     })
     expect(notice).toContain('草稿箱')
@@ -366,7 +406,9 @@ describe('a saved draft still needs a step that looks at it', () => {
     expect(unvisitedDraftListNotice({ nodes: noSave, goalText: goal })).toBe('')
     expect(draftGoalGapNotice({ nodes: noSave, goalText: goal })).toContain('最后一步')
     expect(draftGoalGapNotice({ nodes: [save()], goalText: goal })).toContain('草稿箱')
-    expect(draftGoalGapNotice({ nodes: [save(), generated('drafts', '打开草稿列表')], goalText: goal })).toBe('')
+    expect(
+      draftGoalGapNotice({ nodes: [save(), generated('drafts', '打开草稿列表')], goalText: goal }),
+    ).toBe('')
   })
 })
 
@@ -423,7 +465,9 @@ describe('the words on the pressed element speak for a prose-less click', () => 
     ]
     expect(unfiredDraftSaveNotice({ nodes, goalText: '去小红书生成推广文章，保存成草稿' })).toBe('')
     // The same draft one step earlier — the save not yet pressed — still asks.
-    expect(unfiredDraftSaveNotice({ nodes: nodes.slice(0, 1), goalText: '保存成草稿' })).toContain('草稿')
+    expect(unfiredDraftSaveNotice({ nodes: nodes.slice(0, 1), goalText: '保存成草稿' })).toContain(
+      '草稿',
+    )
   })
 
   it('does not take the block boilerplate for a declaration', () => {
@@ -437,7 +481,9 @@ describe('the words on the pressed element speak for a prose-less click', () => 
       data: { ...save.data, ...generated('save', 'Click the target element').data },
     }
     expect(isDraftSaveNode(node)).toBe(true)
-    expect(unfiredDraftSaveNotice({ nodes: [node], goalText: '去小红书生成推广文章，保存成草稿' })).toBe('')
+    expect(
+      unfiredDraftSaveNotice({ nodes: [node], goalText: '去小红书生成推广文章，保存成草稿' }),
+    ).toBe('')
   })
 
   it('still needs a step that ACTS: a fill that mentions the draft saves nothing', () => {

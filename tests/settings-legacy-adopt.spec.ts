@@ -20,8 +20,7 @@ function makeChromeMock() {
   const store = new Map<string, unknown>()
   const local = {
     get: vi.fn(async (keys: string | string[] | null) => {
-      const wanted =
-        keys === null ? [...store.keys()] : typeof keys === 'string' ? [keys] : keys
+      const wanted = keys === null ? [...store.keys()] : typeof keys === 'string' ? [keys] : keys
       const out: Record<string, unknown> = {}
       for (const key of wanted) {
         if (store.has(key)) out[key] = store.get(key)

@@ -14,18 +14,17 @@
  * @module tests/target-chain-record
  */
 import { describe, expect, it } from 'vitest'
-import {
-  recordedTargetChainOf,
-  type RecordedLocator,
-} from '../src/lib/workflow/target-to-selector'
+import { recordedTargetChainOf, type RecordedLocator } from '../src/lib/workflow/target-to-selector'
 import { targetSpecsFromSemantic } from '../src/lib/workflow/element-fingerprint'
 import { autoCompleteReliability } from '../src/lib/workflow/auto-contract'
 import { nodeReliabilityOf } from '../src/lib/workflow/reliability'
 import type { Target, TargetSpec } from '../src/lib/ops'
 
 /** A counts table: every selector not listed matched nothing. */
-const counts = (table: Record<string, number>) => (selector: string): number =>
-  table[selector] ?? 0
+const counts =
+  (table: Record<string, number>) =>
+  (selector: string): number =>
+    table[selector] ?? 0
 
 function targetOf(
   primary: TargetSpec,
@@ -44,10 +43,7 @@ function locator(
 describe('recordedTargetChainOf', () => {
   it('puts the spec the kernel really clicked first', () => {
     const chain = recordedTargetChainOf({
-      locator: locator(
-        targetOf({ how: 'role', value: '提交', role: 'button' }),
-        '.card button',
-      ),
+      locator: locator(targetOf({ how: 'role', value: '提交', role: 'button' }), '.card button'),
       usedSpec: 'css|#submit',
       countOf: counts({ '.card button': 1 }),
     }) as Target
@@ -58,15 +54,12 @@ describe('recordedTargetChainOf', () => {
   it('orders the proven-unique candidates by strength, identity over position', () => {
     const chain = recordedTargetChainOf({
       locator: locator(
-        targetOf(
-          { how: 'role', value: 'Buy', role: 'button' },
-          [
-            { how: 'css', value: '.card > button:nth-of-type(2)' },
-            { how: 'name', value: 'buy' },
-            { how: 'id', value: 'buy-btn' },
-            { how: 'testid', value: 'buy' },
-          ],
-        ),
+        targetOf({ how: 'role', value: 'Buy', role: 'button' }, [
+          { how: 'css', value: '.card > button:nth-of-type(2)' },
+          { how: 'name', value: 'buy' },
+          { how: 'id', value: 'buy-btn' },
+          { how: 'testid', value: 'buy' },
+        ]),
       ),
       countOf: counts({
         '[data-testid="buy"]': 1,
@@ -93,9 +86,7 @@ describe('recordedTargetChainOf', () => {
     // deletes what replay already had.
     const chain = recordedTargetChainOf({
       locator: locator(
-        targetOf({ how: 'role', value: 'Buy', role: 'button' }, [
-          { how: 'testid', value: 'buy' },
-        ]),
+        targetOf({ how: 'role', value: 'Buy', role: 'button' }, [{ how: 'testid', value: 'buy' }]),
         '[data-testid="buy"]',
       ),
       usedSpec: 'role|Buy|role=button',
@@ -119,7 +110,10 @@ describe('recordedTargetChainOf', () => {
     }) as Target
     expect(chain).toEqual({
       primary: { how: 'css', value: '#go' },
-      fallbacks: [{ how: 'text', value: 'Continue' }, { how: 'role', value: 'Continue', role: 'button' }],
+      fallbacks: [
+        { how: 'text', value: 'Continue' },
+        { how: 'role', value: 'Continue', role: 'button' },
+      ],
     })
   })
 

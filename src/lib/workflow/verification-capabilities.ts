@@ -74,7 +74,6 @@ export function describeVerificationCapability(id: VerificationCapabilityId): st
 /** Type guard for untrusted verification-capability strings. */
 export function isVerificationCapabilityId(value: unknown): value is VerificationCapabilityId {
   return (
-    typeof value === 'string' &&
-    (VERIFICATION_CAPABILITY_IDS as readonly string[]).includes(value)
+    typeof value === 'string' && (VERIFICATION_CAPABILITY_IDS as readonly string[]).includes(value)
   )
 }

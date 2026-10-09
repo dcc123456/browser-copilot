@@ -349,7 +349,15 @@ describe('wf_op_trigger edits the trigger head in place', () => {
  */
 describe('blockTouchesPage', () => {
   it('counts navigation, element ops and page reads', () => {
-    for (const blockId of ['new-tab', 'open-url', 'event-click', 'forms', 'read-page', 'get-text', 'upload-file']) {
+    for (const blockId of [
+      'new-tab',
+      'open-url',
+      'event-click',
+      'forms',
+      'read-page',
+      'get-text',
+      'upload-file',
+    ]) {
       expect(blockTouchesPage(blockId)).toBe(true)
     }
   })

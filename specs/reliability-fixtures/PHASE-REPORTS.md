@@ -2,13 +2,14 @@
 
 Per `docs/Browser-Copilot_Coding-Agent_Workflow-Reliability_Spec.md` §18, every
 phase records a completion report here before the next phase starts. A phase
-with any unchecked acceptance item is recorded as *partially complete*.
+with any unchecked acceptance item is recorded as _partially complete_.
 
 ---
 
 ## Phase 0 Completion
 
 ### Changed
+
 - `specs/reliability-fixtures/harness.ts` (new): deterministic fake page + stub
   executor set mirroring the production behavior contracts that matter for
   reliability (resolve semantics, read errors, submit side effects), plus the
@@ -20,9 +21,11 @@ with any unchecked acceptance item is recorded as *partially complete*.
   baseline outcome; doubles as the compat regression guard for all later phases.
 
 ### Behavior
+
 - No production code changed in this phase. Baseline only.
 
 ### Tests
+
 - `pnpm typecheck` — PASS
 - `pnpm test` — 2234 passed (176 files + the new baseline spec), 0 failed
 - `pnpm build` — PASS
@@ -30,10 +33,12 @@ with any unchecked acceptance item is recorded as *partially complete*.
 - `pnpm bench:debug` — PASS (8 benchmark tests)
 
 ### Recorded baseline (before any reliability work)
+
 - branch `develop` @ `293be42`, working tree clean.
 - All five gates green — no historical failures to keep distinguishable.
 
 ### Fixture baseline outcomes (compat mode, all deterministic)
+
 - R01 slow render → run FAILS (read throws, no wait). Target: readiness waits → ok.
 - R02 0 matches → FAILS `元素未找到`. Target: same failure, structured code.
 - R03 many matches → run "SUCCEEDS" clicking the FIRST of many (the dangerous
@@ -54,6 +59,7 @@ with any unchecked acceptance item is recorded as *partially complete*.
   before acting.
 
 ### Acceptance
+
 - [x] git status 已记录
 - [x] AGENTS.md 已阅读
 - [x] 基线测试结果已记录
@@ -62,11 +68,13 @@ with any unchecked acceptance item is recorded as *partially complete*.
 - [x] 没有修改旧 Workflow 行为
 
 ### Known limitations
+
 - Fixtures run the pure engine with stub executors: they exercise engine-level
   contracts, not the real driver/injection chain. Kernel-level locator behavior
   keeps its own jsdom tests.
 
 ### Regression risk
+
 - low (no production change)
 
 ---
@@ -74,6 +82,7 @@ with any unchecked acceptance item is recorded as *partially complete*.
 ## Phase 1 Completion
 
 ### Changed
+
 - `src/lib/workflow/reliability.ts` (new): the contract core — mode resolution
   (explicit > provenance > compat), goal-spec access + strict goal gate,
   node `__reliability` accessor (untrusted-input safe), block+intent
@@ -94,6 +103,7 @@ with any unchecked acceptance item is recorded as *partially complete*.
   compat never gated).
 
 ### Behavior
+
 - No runtime behavior change for compat workflows. Generated workflows
   (`provenance` present) resolve to `generated-strict` and are now blocked at
   the run gate until they carry a goal spec — they all already do via the
@@ -104,10 +114,12 @@ with any unchecked acceptance item is recorded as *partially complete*.
   goal. The generation path gains goalSpec writing in Phase 5/12.
 
 ### Tests
+
 - `tests/workflow-reliability-contract.spec.ts` (new): 41 unit tests.
 - `pnpm typecheck` PASS, `pnpm test` 2275 PASS, `pnpm build` PASS.
 
 ### Acceptance
+
 - [x] 新旧 Workflow 均能成功反序列化
 - [x] 旧 Workflow 默认进入 compat
 - [x] AI 生成 Workflow 默认进入 generated-strict
@@ -116,10 +128,12 @@ with any unchecked acceptance item is recorded as *partially complete*.
 - [x] goalSpec 缺失时 strict Workflow 会被 validator 拦截
 
 ### Known limitations
+
 - `generated-strict` metadata is not yet WRITTEN by the generation paths
   (Phases 5/12 wire the writers); the contract layer only reads.
 
 ### Regression risk
+
 - low (additive; the only behavior change is the strict goal gate, covered by
   tests proving compat workflows are never gated)
 
@@ -128,6 +142,7 @@ with any unchecked acceptance item is recorded as *partially complete*.
 ## Phase 2 Completion
 
 ### Changed
+
 - `src/lib/workflow/locator-score.ts` (new): the §5.4 weight table (single
   source, overridable), candidate scorer with positional/unstable caps, CSS
   unstable-class demotion, selector-string shape classification, the §6.3
@@ -144,6 +159,7 @@ with any unchecked acceptance item is recorded as *partially complete*.
   (additive — flat `selector`/`target`/`selectorVerified` untouched).
 
 ### Behavior
+
 - Record time (operator bridge): element nodes now carry a semantic identity
   when the snapshot observed one (role/accessible name/test id/stable
   attributes). A role-only target still records NO selector — but now also
@@ -151,12 +167,14 @@ with any unchecked acceptance item is recorded as *partially complete*.
 - Record time: among exact-one selector candidates, identity beats position.
 
 ### Tests
+
 - `tests/locator-score.spec.ts` (new): 26 scoring/decision tests (≥15 required).
 - `tests/semantic-locator.spec.ts` (new): 10 record-path tests.
 - `pnpm typecheck` PASS · `pnpm test` 2311 PASS · `pnpm verify:injected` PASS.
 - target-to-selector old tests: ALL PASS unchanged.
 
 ### Acceptance
+
 - [x] role/name locator 可独立保存
 - [x] selector 不再是唯一身份（`__reliability.locator.semantic` 并存）
 - [x] 录制/生成至少保存一种 semantic identity
@@ -167,10 +185,12 @@ with any unchecked acceptance item is recorded as *partially complete*.
 - [x] target-to-selector 旧测试全部通过
 
 ### Known limitations
+
 - The in-page kernel still resolves with its own (legacy) scorer; the strict
   in-page decision lands in Phase 3 and mirrors this table.
 
 ### Regression risk
+
 - low-medium: `chooseRecordedSelector` order changed for cases where a
   positional CSS candidate uniquely matched while an identity candidate ALSO
   uniquely matched — the recorded selector improves; all old tests pass.
@@ -180,6 +200,7 @@ with any unchecked acceptance item is recorded as *partially complete*.
 ## Phase 3 Completion
 
 ### Changed
+
 - `src/lib/ops.ts`: `ResolvePolicy` type; `Op.resolvePolicy`;
   `OpResult.code / matchCount / candidates` (structured refusal evidence).
 - `src/inpage/kernel.ts`: `resolve()` is now policy-aware. Compat keeps the
@@ -199,12 +220,14 @@ with any unchecked acceptance item is recorded as *partially complete*.
   resolve policy through.
 
 ### Behavior
+
 - Generated-strict runs: a target matching several elements without a clearly
   best identity spec FAILS with `LOCATOR_AMBIGUOUS` (found=true, ok=false,
   evidence attached) instead of clicking the first one. Exactly-one unions
   still act. Compat runs: unchanged (fixture baseline R03 pins this).
 
 ### Tests
+
 - `tests/kernel-resolve-strict.spec.ts` (new): 11 tests (refusal evidence,
   winner resolution, minMargin, unstable-id, ambiguity=error, custom
   thresholds, compat preservation, fill/wait_for coverage).
@@ -212,18 +235,21 @@ with any unchecked acceptance item is recorded as *partially complete*.
   (kernel still self-contained) · `pnpm build` PASS.
 
 ### Acceptance
+
 - [x] strict locator 多命中不会误点
 - [x] strict locator 找不到时不会静默执行其他元素
 - [x] compat 行为不变（基线夹具 + 旧 kernel 测试全绿）
 - [x] 结构化证据（code/matchCount/candidates）可供 Phase 7 分类器消费
 
 ### Known limitations
+
 - Reads (`get-text`/`attribute-value`/`read-page`) resolve by plain CSS
   selector (not the kernel resolver); their strict-locator guarantees come
   from record-time verification + the generated validator (Phase 6), not from
   the runtime resolver.
 
 ### Regression risk
+
 - low: strict paths only activate when `op.resolvePolicy.mode === 'strict'`,
   which only generated-strict runs set.
 
@@ -232,6 +258,7 @@ with any unchecked acceptance item is recorded as *partially complete*.
 ## Phase 4 Completion
 
 ### Changed
+
 - `src/background/workflow-engine/readiness-engine.ts` (new): the readiness
   runtime — `awaitReadiness` (poll fresh observations, hit-and-return,
   per-requirement timeout, abort-aware), `effectiveReadinessSpec` (node
@@ -249,12 +276,14 @@ with any unchecked acceptance item is recorded as *partially complete*.
   locator → kernel-expressible spec).
 
 ### Tests
+
 - `tests/readiness-engine.spec.ts` (new): 13 tests (hit-and-return, timeout
   evidence, probe-failure tolerance, per-requirement windows, abort, spec
   resolution, default-table wiring for click/fill/navigation).
 - `pnpm typecheck` PASS · `pnpm test` 2335 PASS · `pnpm build` PASS.
 
 ### Acceptance
+
 - [x] 统一就绪等待就位（strict 运行：click/fill/select/reads/navigation）
 - [x] 命中即返回（first fully-ready observation ends the wait）
 - [x] 每次轮询重新解析（probe is re-invoked; no cached answers）
@@ -262,11 +291,13 @@ with any unchecked acceptance item is recorded as *partially complete*.
 - [x] compat 行为不变（reliability undefined → 零改动路径）
 
 ### Known limitations
+
 - `stable` / `data-ready` states have no page probe yet and resolve satisfied.
 - Reads' strict-locator guarantees still come from record-time verification
   (see Phase 3 limitation).
 
 ### Regression risk
+
 - low: only generated-strict runs with a wired probe change behavior.
 
 ---
@@ -274,6 +305,7 @@ with any unchecked acceptance item is recorded as *partially complete*.
 ## Phase 5 Completion
 
 ### Changed
+
 - `src/lib/workflow/goal.ts` (new): `normalizeGoalSpec` (untrusted goal shapes;
   garbage in → undefined, the strict gate then reports it) and
   `deriveGoalSpecFromNodes` (goal GROUNDED in node postconditions; an unsafe
@@ -305,12 +337,14 @@ with any unchecked acceptance item is recorded as *partially complete*.
   goal; now it normalizes to the stricter interpretation).
 
 ### Tests
+
 - `tests/goal-condition-runtime.spec.ts` (new): 12 tests (normalization,
   grounded derivation, all condition kinds, short-circuit, goal achieved /
   alreadySatisfied / fail-closed with and without an LLM judge).
 - `pnpm typecheck` PASS · `pnpm test` 2347 PASS · `pnpm build` PASS.
 
 ### Acceptance
+
 - [x] Workflow 有结构化 goal（生成时从节点后置条件派生，可被 L2/L3 验证）
 - [x] 成功条件优先用确定性判断（页面/URL/变量观察）
 - [x] LLM goal judge 仅作 fallback 且不能伪造成功（fail closed）
@@ -318,12 +352,14 @@ with any unchecked acceptance item is recorded as *partially complete*.
 - [x] strict Workflow 没有 goalSpec 时无法运行（Phase 1 gate + Phase 6 save gate）
 
 ### Known limitations
+
 - The LLM judge hook exists but no caller wires an actual model judge yet;
   until then goal verification is purely deterministic (the strictest mode).
 - `text` conditions observe only CSS-expressible locators (testid/id/name);
   role/text locators report "not observable" instead of guessing.
 
 ### Regression risk
+
 - low: goal/postcondition gates activate only on generated-strict workflows
   that carry the contract.
 
@@ -332,6 +368,7 @@ with any unchecked acceptance item is recorded as *partially complete*.
 ## Phase 6 Completion
 
 ### Changed
+
 - `src/lib/workflow/generated-validation.ts` (new): six-layer static validator
   — A graph (empty/unreachable/unknown-block, legacy ids resolve via
   `LEGACY_ID_TO_AUTOMA`), B data flow ({{var}} references need a writer/declared
@@ -353,12 +390,14 @@ with any unchecked acceptance item is recorded as *partially complete*.
   landed here because the gate depends on the model knowing the contract.
 
 ### Tests
+
 - `tests/generated-validation.spec.ts` (new): 27 tests across all six layers
-  + gating semantics (≥25 required). `tests/operator-draft-durability.spec.ts`
-  updated to the new save contract (its draft now carries a valid contract).
+  - gating semantics (≥25 required). `tests/operator-draft-durability.spec.ts`
+    updated to the new save contract (its draft now carries a valid contract).
 - `pnpm typecheck` PASS · `pnpm test` 2374 PASS · `pnpm build` PASS.
 
 ### Acceptance
+
 - [x] 生成器输出在保存/运行前被六层静态校验
 - [x] error 级问题阻断保存与运行；warning 不阻断
 - [x] compat 工作流永不被门禁（降级为报告）
@@ -366,10 +405,12 @@ with any unchecked acceptance item is recorded as *partially complete*.
 - [x] 保存门禁 / 手动运行 / 定时运行 / debug verify（经 executeWorkflow）全覆盖
 
 ### Known limitations
+
 - Editor import path not gated (editor-authored workflows are compat by
   provenance; a manual strict marking there is out of scope for this phase).
 
 ### Regression risk
+
 - medium-but-intended: chat generation now FAILS to save until the model
   writes postconditions; the prompt requires it and the error message carries
   the fix, so the generation loop self-corrects.
@@ -379,6 +420,7 @@ with any unchecked acceptance item is recorded as *partially complete*.
 ## Phase 7 Completion
 
 ### Changed
+
 - `src/lib/workflow/failure-code.ts` (new): the failure vocabulary —
   `FailureCode` (locator/readiness/contract/goal/safety/environment/…),
   priority-ordered `FAILURE_TABLE`, `classifyFailureMessage` (text→code with
@@ -395,17 +437,20 @@ with any unchecked acceptance item is recorded as *partially complete*.
   the classified verdict + redacted evidence (selector/variables/step tail).
 
 ### Tests
+
 - `tests/failure-classifier.spec.ts` (new): 14 tests (priority, legacy codes,
   redaction patterns, caps, takeover enrichment).
 - `pnpm typecheck` PASS · `pnpm test` 2388 PASS.
 
 ### Acceptance
+
 - [x] 失败有稳定 code + category（单一来源，供日志/分类器/修复循环/基准共用）
 - [x] 证据包脱敏 + 截断后才离开模块
 - [x] AiTakeoverRequest 携带分类结果与证据
 - [x] 不可恢复/不可自动修复的类别明确标出（safety、goal）
 
 ### Regression risk
+
 - low: additive vocabulary + takeover enrichment; no behavior change otherwise.
 
 ---
@@ -413,6 +458,7 @@ with any unchecked acceptance item is recorded as *partially complete*.
 ## Phase 8 Completion
 
 ### Changed
+
 - `src/lib/workflow/reliability-patch.ts` (new): the ReliabilityPatch contract
   — schema + policy validation (single node, forbidden keys blockId/disableBlock/
   id/position, confidence 0..1, reason required, idempotency may only TIGHTEN,
@@ -424,12 +470,14 @@ with any unchecked acceptance item is recorded as *partially complete*.
   resets it).
 
 ### Tests
+
 - `tests/reliability-patch.spec.ts` (new): 13 tests (validation matrix,
   confidence gate boundaries, single-node application without input mutation,
   fingerprint identity, breaker open/clear semantics).
 - `pnpm typecheck` PASS · `pnpm test` 2401 PASS.
 
 ### Acceptance
+
 - [x] ReliabilityPatch schema 校验（禁止图谱级改动/禁改 disableBlock）
 - [x] confidence 门槛（<0.75 拒绝；0.75–0.9 内存应用+验证；>0.9 验证链）
 - [x] 单节点限制（patch 只能改一个节点；blockId 永不可改）
@@ -437,12 +485,14 @@ with any unchecked acceptance item is recorded as *partially complete*.
 - [x] debug-session 既有 REPEAT_FAILURE_LIMIT 保持不变（补丁级熔断叠加其上）
 
 ### Integration note
+
 - `applyTakeoverFixes` (debug-session) remains the takeover apply path; the
   patch module is the stricter contract the repair loop consumes — takeover
   verdict patches route through `applyReliabilityPatch` when they carry
   confidence/reason (Phase 8 + Phase 7 verdicts compose).
 
 ### Regression risk
+
 - low: new module + additive gates; existing takeover path unchanged.
 
 ---
@@ -450,6 +500,7 @@ with any unchecked acceptance item is recorded as *partially complete*.
 ## Phase 9 Completion
 
 ### Changed
+
 - `src/lib/workflow/checkpoints.ts`: `CheckpointPhase`
   (nodeStarted/sideEffectStarted/sideEffectObserved/nodeCommitted) +
   `workflowFingerprintOf` (deterministic FNV-1a graph hash; params in, canvas
@@ -470,22 +521,26 @@ with any unchecked acceptance item is recorded as *partially complete*.
   clean `ok` decisions.
 
 ### Tests
+
 - `tests/checkpoints.spec.ts` extended: +8 tests (fingerprint stability/
   sensitivity, phase semantics for each decision, guard compatibility).
 - `pnpm typecheck` PASS · `pnpm test` 2409 PASS · `pnpm build` PASS.
 
 ### Acceptance
+
 - [x] 检查点细分阶段（unsafe 节点四级相位落盘）
 - [x] Resume Guard 校验工作流指纹（图变了拒绝恢复）
 - [x] SIDE_EFFECT_UNKNOWN 不盲目重放（结构化失败 + 人工确认要求）
 - [x] 终态检查跳过非幂等重执行（strict + postconditions 已满足 → skip）
 
 ### Known limitations
+
 - Origin/tab-level resume guard is covered by the generation-origin warning +
   Phase 10 page-context guard; the fingerprint guard here is the
   deterministic graph-level check.
 
 ### Regression risk
+
 - low: phases only emit for unsafe nodes; resume decisions degrade
   compatibly for legacy checkpoints.
 
@@ -494,6 +549,7 @@ with any unchecked acceptance item is recorded as *partially complete*.
 ## Phase 10 Completion
 
 ### Changed
+
 - `src/lib/workflow/page-context.ts` (new): `PageContextFingerprint` (origin +
   optional pathnamePattern/titleHint), `pageContextOf` (derives from
   `settings.generationOriginUrl` or an explicit `settings.pageContext`;
@@ -508,17 +564,20 @@ with any unchecked acceptance item is recorded as *partially complete*.
   `resolveAutomationTab` (url only — cheap).
 
 ### Tests
+
 - `tests/page-context.spec.ts` (new): 9 tests (derivation, normalization,
   origin-over-path priority, case-insensitive title, no-invented-failures).
 - `pnpm typecheck` PASS · `pnpm test` 2418 PASS.
 
 ### Acceptance
+
 - [x] strict 首个动作前 Origin/Page 校验（错站直接 WRONG_ORIGIN 拒绝执行）
 - [x] tab 变化后刷新检查（pageContextCheckedForTab 按目标 tab 记忆）
 - [x] 无依据不设防（没有 generation origin 的工作流行为不变）
 - [x] 结构化 code 进 Phase 7 分类器（environment 类，不可自动修复）
 
 ### Regression risk
+
 - low: guard only fires on generated-strict workflows that carry a grounding.
 
 ---
@@ -526,6 +585,7 @@ with any unchecked acceptance item is recorded as *partially complete*.
 ## Phase 11 Completion
 
 ### Changed
+
 - `src/lib/workflow/reliability-certification.ts` (new): layered metrics —
   L1 executionSuccess / L2 verificationSuccess (conditional on L1) /
   L3 goalAchieved (conditional on L2; an unverified run can NEVER count as
@@ -554,10 +614,12 @@ with any unchecked acceptance item is recorded as *partially complete*.
   set (fixture graphs + legacy graphs route through the page-context guard).
 
 ### Gates
+
 - `pnpm typecheck` PASS · `pnpm test` 2431 PASS · `pnpm build` PASS ·
   `pnpm verify:injected` PASS · `pnpm bench:reliability` PASS (13 tests).
 
 ### Acceptance
+
 - [x] 基准脚本可复跑（bench:reliability = 确定性 vitest 套件）
 - [x] 分层指标 L1/L2/L3（条件化：未验证不计目标达成）
 - [x] certification 状态机（不可跳级；回归/图变更 → Stale）
@@ -568,6 +630,7 @@ with any unchecked acceptance item is recorded as *partially complete*.
 ## Phase 12 Completion
 
 ### Changed
+
 - `src/lib/workflow/operator-guide.ts`: the generation prompt REQUIRES
   `__reliability` contracts (intent/idempotency/postconditions) on key
   actions and teaches the postcondition shape — landed with Phase 6 because
@@ -583,10 +646,12 @@ with any unchecked acceptance item is recorded as *partially complete*.
   evidence the rules refer to.
 
 ### Gates
+
 - `pnpm typecheck` PASS · `pnpm test` 2431 PASS · `pnpm build` PASS ·
   `pnpm verify:injected` PASS.
 
 ### Acceptance
+
 - [x] 契约式生成 Prompt（operator-guide：契约必填 + postconditions 形状）
 - [x] operator-tools 透传 `__reliability`（additionalProperties 直达 node.data）
 - [x] ai-takeover 提示词加固（只做失败步 / 禁盲重放 / 局部补丁 / 不安全即停）
@@ -600,6 +665,7 @@ with any unchecked acceptance item is recorded as *partially complete*.
 **Gates**: `pnpm typecheck` PASS · `pnpm test` 2431 PASS (baseline 2222 → +209) · `pnpm build` PASS · `pnpm verify:injected` PASS · `pnpm bench:reliability` PASS · `pnpm lint` unchanged-baseline.
 
 **What exists now (one paragraph per layer)**:
+
 1. **契约** (`reliability.ts`, `conditions.ts`, `readiness.ts`, `goal.ts`): per-node `__reliability` + workflow goal/origin grounding; strict mode resolved from provenance/explicit setting; strict without goal cannot run.
 2. **定位** (`locator-score.ts`, `element-fingerprint.ts`, `kernel.ts`): identity-beats-position scoring recorded into locators; the kernel's strict resolver refuses ambiguity (`LOCATOR_AMBIGUOUS`/`LOCATOR_NOT_FOUND` + evidence) instead of clicking the first of many.
 3. **就绪** (`readiness-engine.ts`): unified pre/post readiness waits with fresh per-poll observation, hit-and-return, per-attempt re-check on retry.
@@ -620,12 +686,14 @@ with any unchecked acceptance item is recorded as *partially complete*.
 ## Follow-up Fix: 保存面板"generated-strict 工作流缺少目标说明"误阻断
 
 ### Problem
+
 生成模式下保存面板出现"必须修复：generated-strict 工作流缺少目标说明"并禁用保存按钮。
 根因：Phase 1 的 goal 门禁把"无 goalSpec"对**所有** generated-strict 工作流一律视为
 阻断错误——包括纯读取类（读页面/导出/导航）工作流，而生成模型并非总能写出
 postconditions，用户在面板里没有任何自救路径。
 
 ### Fix（对规范的诚实收紧：goal 硬门禁收窄到真正危险面）
+
 - `reliability.ts`: `goalGateProblems` 只在图里**确实存在 unsafe（非幂等）动作**
   （提交/登录/发送/支付/删除）时才强制要求可验证 goal——那才是"假成功"的危险面。
   纯读取工作流不再阻断；L3 验证在无 goalSpec 时诚实跳过（不是静默通过）。
@@ -637,6 +705,7 @@ postconditions，用户在面板里没有任何自救路径。
 - `operator-guide.ts`: 生成提示词要求 trigger 调用携带 `goalText:'<用户需求原文>'`。
 
 ### Tests
+
 - `workflow-reliability-contract.spec.ts` / `generated-validation.spec.ts`: 门禁测试
   更新为含 unsafe 动作的图断言阻断 + 新增"只读工作流不受 goal 门禁"用例。
 - `operator-draft-graph.spec.ts`: 新增"trigger goalText + 节点 postconditions →
@@ -645,6 +714,7 @@ postconditions，用户在面板里没有任何自救路径。
   `pnpm verify:injected` PASS · `pnpm bench:reliability` PASS.
 
 ### Spec deviation note
+
 规范 §8.4/§9 原文为"generated-strict 无 goalSpec 一律不可保存/运行"。本次按用户反馈
 将其收窄为"含 unsafe 动作的 generated-strict 无 goalSpec 不可保存/运行"。依据：goal
 门禁的存在理由是阻止副作用动作的假成功；对无副作用图谱强制要求不可验证的目标只会
@@ -655,11 +725,13 @@ postconditions，用户在面板里没有任何自救路径。
 ## Follow-up Fix: 保存卡片只弹"通过可运行检查"的工作流
 
 ### Problem
+
 保存卡片的工作流来自 `workflows.draft.get` → `composeWorkflowFromDraft(save:false)`，
 而可靠性/可运行性门禁只在 `save !== false` 时执行——预览路径完全跳过校验，用户会
 看到一张带"必须修复"错误、保存按钮被禁用的卡片。
 
 ### Fix
+
 - `operator-tool-handler.ts` `composeWorkflowFromDraft`：门禁移出 save 分支，**保存与
   预览两条路径都先过** `validateWorkflowForRun`（可运行性）+ strict 的
   `validateGeneratedWorkflow`（六层）。失败返回 `{error, issues}`——模型据此本地修复图，
@@ -674,10 +746,12 @@ postconditions，用户在面板里没有任何自救路径。
   修复了组合工作流被误报 `DATA_UNWRITTEN_VARIABLE` 的假阳性。
 
 ### Gates
+
 `pnpm typecheck` PASS · `pnpm test` 2434 PASS · `pnpm build` PASS ·
 `pnpm verify:injected` PASS。
 
 ### Acceptance
+
 - [x] 弹出的保存卡片工作流必先通过可运行检查（+ strict 六层校验）
 - [x] 未通过时不弹卡：模型收到结构化 issues 自行修复；面板得到一行双语原因
 - [x] 组合路径的 declared-inputs 假阳性修复（trigger 声明的输入计为已写入）
@@ -687,10 +761,12 @@ postconditions，用户在面板里没有任何自救路径。
 ## Follow-up Fix: 生成必然成功 + 校验必然通过（组装期自动补全契约）
 
 ### Principle
+
 门禁的职责是保证产出质量，不是让生成失败。模型对 `__reliability` 元数据不稳定，
 因此改为在**组装期确定性地补全**——任何正常生成的图都能通过六层校验，工作流必然产出。
 
 ### New modules
+
 - `src/lib/workflow/auto-contract.ts` `autoCompleteReliability`：
   - 按动作语义推断 idempotency（submit/login/pay/delete/send/create/order/webhook
     → unsafe；普通 click → safe）；
@@ -703,6 +779,7 @@ postconditions，用户在面板里没有任何自救路径。
   上填值），而非报 DATA_UNWRITTEN_VARIABLE。
 
 ### Wiring
+
 - `composeWorkflowFromDraft`：构建 workflow 前依次
   autoCompleteReliability → declareMissingInputs（draft 与 history 两条来源都经过）。
 - 校验链因此对正常图全部通过：goalSpec 从补全后的 postconditions 自动派生
@@ -711,10 +788,12 @@ postconditions，用户在面板里没有任何自救路径。
   未定义变量，仍然生成出"可运行检查 errors=[] + 有可验证 goal"的工作流）。
 
 ### Gates
+
 `pnpm typecheck` PASS · `pnpm test` 2438 PASS · `pnpm build` PASS ·
 `pnpm verify:injected` PASS。
 
 ### Guarantee
+
 - [x] 工作流必然生成：任何含 ≥1 个动作节点的草稿都能组装出 workflow
 - [x] 校验必然通过：组装期补全 idempotency/postconditions/inputs，六层无 error
 - [x] 不牺牲诚实性：只补缺省元数据，不编造业务结果、不放松契约、不把危险动作标安全

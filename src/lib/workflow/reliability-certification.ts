@@ -21,7 +21,13 @@
  * @module lib/workflow/reliability-certification
  */
 
-export const CERTIFICATION_STATES = ['Draft', 'Validated', 'Verified', 'Certified', 'Stale'] as const
+export const CERTIFICATION_STATES = [
+  'Draft',
+  'Validated',
+  'Verified',
+  'Certified',
+  'Stale',
+] as const
 export type CertificationState = (typeof CERTIFICATION_STATES)[number]
 
 export type CertificationEvent =
@@ -107,5 +113,8 @@ export function transitionCertification(
 
 /** Fold a sequence of events (the benchmark's run log) into a final state. */
 export function certifyThrough(events: CertificationEvent[]): CertificationState {
-  return events.reduce<CertificationState>((state, event) => transitionCertification(state, event), 'Draft')
+  return events.reduce<CertificationState>(
+    (state, event) => transitionCertification(state, event),
+    'Draft',
+  )
 }

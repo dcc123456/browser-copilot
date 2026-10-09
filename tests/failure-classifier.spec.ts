@@ -4,25 +4,29 @@
  * and takeover-request enrichment.
  */
 import { describe, expect, it } from 'vitest'
-import {
-  classifyFailureMessage,
-  FAILURE_TABLE,
-} from '../src/lib/workflow/failure-code'
+import { classifyFailureMessage, FAILURE_TABLE } from '../src/lib/workflow/failure-code'
 import {
   buildExecutionEvidence,
   redactText,
   redactVariables,
   EVIDENCE_READBACK_CAP,
 } from '../src/lib/workflow/execution-evidence'
-import { classifyFailure, withFailureVerdict } from '../src/background/workflow-engine/failure-classifier'
+import {
+  classifyFailure,
+  withFailureVerdict,
+} from '../src/background/workflow-engine/failure-classifier'
 import type { ExecutionEvidence } from '../src/lib/workflow/execution-evidence'
 import type { AiTakeoverRequest } from '../src/background/workflow-engine/engine'
 
 describe('classifyFailureMessage — priority', () => {
   it('runtime codes classify with category and repairability', () => {
     expect(classifyFailureMessage('LOCATOR_AMBIGUOUS: 定位不确定').code).toBe('LOCATOR_AMBIGUOUS')
-    expect(classifyFailureMessage('READINESS_TIMEOUT(visible): 页面未就绪').code).toBe('READINESS_TIMEOUT')
-    expect(classifyFailureMessage('POSTCONDITION_FAILED: URL 包含 "/dashboard"').category).toBe('contract')
+    expect(classifyFailureMessage('READINESS_TIMEOUT(visible): 页面未就绪').code).toBe(
+      'READINESS_TIMEOUT',
+    )
+    expect(classifyFailureMessage('POSTCONDITION_FAILED: URL 包含 "/dashboard"').category).toBe(
+      'contract',
+    )
     expect(classifyFailureMessage('GOAL_NOT_ACHIEVED: 目标未达成').category).toBe('goal')
   })
 
@@ -94,7 +98,11 @@ describe('classifyFailure — verdict shape', () => {
       error: 'LOCATOR_AMBIGUOUS: 定位不确定',
       url: 'https://shop.test/cart',
       selector: '.card',
-      locator: { code: 'LOCATOR_AMBIGUOUS', matchCount: 3, candidates: [{ strategy: 'css', score: 35 }] },
+      locator: {
+        code: 'LOCATOR_AMBIGUOUS',
+        matchCount: 3,
+        candidates: [{ strategy: 'css', score: 35 }],
+      },
       variables: { password: 'x', qty: '2' },
       stepLines: ['a', 'b'],
     })
@@ -128,9 +136,11 @@ describe('withFailureVerdict — takeover enrichment', () => {
       url: 'https://x.test/page',
       variables: { password: 'secret' },
     })
-    const failure = (enriched as AiTakeoverRequest & {
-      failure?: { code: string; evidence: ExecutionEvidence }
-    })['failure']
+    const failure = (
+      enriched as AiTakeoverRequest & {
+        failure?: { code: string; evidence: ExecutionEvidence }
+      }
+    )['failure']
     expect(failure?.code).toBe('LOCATOR_NOT_FOUND')
     expect(failure?.evidence.variables?.['password']).toBe('***')
     expect(failure?.evidence.url).toContain('x.test')

@@ -8,10 +8,21 @@ import type { ConditionPageProbe } from '../src/background/workflow-engine/condi
 
 function chromeMock() {
   const store = new Map<string, unknown>()
-  return { storage: { local: {
-    get: vi.fn(async (keys: string | string[]) => { const wanted = typeof keys === 'string' ? [keys] : keys; const out: Record<string, unknown> = {}; for (const k of wanted) if (store.has(k)) out[k] = store.get(k); return out }),
-    set: vi.fn(async (items: Record<string, unknown>) => { for (const [k,v] of Object.entries(items)) store.set(k,v) }),
-  } } }
+  return {
+    storage: {
+      local: {
+        get: vi.fn(async (keys: string | string[]) => {
+          const wanted = typeof keys === 'string' ? [keys] : keys
+          const out: Record<string, unknown> = {}
+          for (const k of wanted) if (store.has(k)) out[k] = store.get(k)
+          return out
+        }),
+        set: vi.fn(async (items: Record<string, unknown>) => {
+          for (const [k, v] of Object.entries(items)) store.set(k, v)
+        }),
+      },
+    },
+  }
 }
 
 beforeEach(() => {
@@ -19,8 +30,13 @@ beforeEach(() => {
 })
 
 const probe: ConditionPageProbe = {
-  exists: async () => true, visible: async () => true, enabled: async () => true,
-  text: async () => 'ok', attribute: async () => 'v', count: async () => 1, url: async () => 'https://t.test',
+  exists: async () => true,
+  visible: async () => true,
+  enabled: async () => true,
+  text: async () => 'ok',
+  attribute: async () => 'v',
+  count: async () => 1,
+  url: async () => 'https://t.test',
 }
 
 describe('V94 full normal task chain', () => {
@@ -28,25 +44,44 @@ describe('V94 full normal task chain', () => {
     const conversationId = 'conv-e2e'
     // 1. prepare goal
     const contract = {
-      version: 1 as const, name: 'Submit the form',
-      goalSpec: { summary: 'The success banner appears after submit.', successConditions: [{ kind: 'elementExists', target: { testId: 'banner' } }] as never[] },
-      requiredCapabilities: ['click','element-exists'],
+      version: 1 as const,
+      name: 'Submit the form',
+      goalSpec: {
+        summary: 'The success banner appears after submit.',
+        successConditions: [{ kind: 'elementExists', target: { testId: 'banner' } }] as never[],
+      },
+      requiredCapabilities: ['click', 'element-exists'],
     }
     await saveGenerationGoal(conversationId, contract)
     const loaded = await loadGenerationGoal(conversationId)
     expect(loaded).toBeDefined()
     expect(loaded?.goalSpec.summary).toContain('success banner')
     // 2. capability inference + discovery
-    const discovery = findWorkflowOperators({ stepIntent: 'click the submit button', workflowGoal: loaded!.goalSpec.summary })
+    const discovery = findWorkflowOperators({
+      stepIntent: 'click the submit button',
+      workflowGoal: loaded!.goalSpec.summary,
+    })
     expect(discovery.candidateBlockIds).toContain('event-click')
     // 3. node goal resolution (on execution success)
     const nodeGoal = resolveNodeGoalContract('event-click', { variableName: 'submitted' })
     expect(nodeGoal?.successCriteria.length).toBeGreaterThan(0)
     // 4. IR → compile → static validation → goal verification
     const ir: WorkflowIR = {
-      version: 1, goal: { ...loaded!.goalSpec }, inputs: [],
-      steps: [{ id: 's1', intent: 'Click submit', action: { kind: 'click' }, target: { kind:'element', semantic:{testId:'submit'} } as never, preconditions: [], postconditions: loaded!.goalSpec.successConditions } as never],
-      edges: [], metadata: {},
+      version: 1,
+      goal: { ...loaded!.goalSpec },
+      inputs: [],
+      steps: [
+        {
+          id: 's1',
+          intent: 'Click submit',
+          action: { kind: 'click' },
+          target: { kind: 'element', semantic: { testId: 'submit' } } as never,
+          preconditions: [],
+          postconditions: loaded!.goalSpec.successConditions,
+        } as never,
+      ],
+      edges: [],
+      metadata: {},
     }
     const workflow = compileIR(ir)
     const run = { runId: 'r', outcome: 'ok' as const, variables: { banner: true } }

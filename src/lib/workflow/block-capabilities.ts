@@ -26,12 +26,7 @@ import type { SemanticAction } from './ir'
 export type SemanticActionName = SemanticAction['kind']
 
 /** High-level capability classification. */
-export type BlockCapabilityKind =
-  | 'interaction'
-  | 'navigation'
-  | 'data'
-  | 'control'
-  | 'general'
+export type BlockCapabilityKind = 'interaction' | 'navigation' | 'data' | 'control' | 'general'
 
 /** One block's semantic capabilities. */
 export interface BlockCapability {
@@ -65,8 +60,7 @@ export interface CatalogLikeEntry {
 
 // --- Explicit overrides ---------------------------------------------------------
 
-type Override = Partial<Omit<BlockCapability, 'blockId' | 'kind'>> &
-  Pick<BlockCapability, 'kind'>
+type Override = Partial<Omit<BlockCapability, 'blockId' | 'kind'>> & Pick<BlockCapability, 'kind'>
 
 const OVERRIDES: Record<string, Override> = {
   'event-click': {
@@ -203,9 +197,7 @@ const OVERRIDES: Record<string, Override> = {
 
 // --- Inference ------------------------------------------------------------------
 
-const ELEMENT_CATEGORY: ReadonlySet<BlockCategory> = new Set<BlockCategory>([
-  'interaction',
-])
+const ELEMENT_CATEGORY: ReadonlySet<BlockCategory> = new Set<BlockCategory>(['interaction'])
 
 function kindFromCategory(category: BlockCategory): BlockCapabilityKind {
   switch (category) {

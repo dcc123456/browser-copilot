@@ -102,7 +102,11 @@ export function buildNodeFixPrompt(input: NodeFixPromptInput): string {
   })
   lines.push('')
   if (input.userSuggestion.trim()) {
-    lines.push('## User repair guidance (follow when consistent with the goal)', input.userSuggestion, '')
+    lines.push(
+      '## User repair guidance (follow when consistent with the goal)',
+      input.userSuggestion,
+      '',
+    )
   }
   lines.push('## Current node parameters', `params: ${truncateStrings(input.currentData)}`, '')
   if (input.execError && input.execError.trim()) {

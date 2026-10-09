@@ -1,31 +1,65 @@
 import { describe, expect, it } from 'vitest'
 import { verifyWorkflowGoal } from '../src/background/workflow-engine/goal-verification'
-import type { ConditionBaseline, ConditionPageProbe } from '../src/background/workflow-engine/condition-runtime'
+import type {
+  ConditionBaseline,
+  ConditionPageProbe,
+} from '../src/background/workflow-engine/condition-runtime'
 import { conditionLocatorKey, describeCondition } from '../src/lib/workflow/conditions'
 import type { ExecuteWorkflowResult } from '../src/background/workflow-engine/run-workflow'
 import type { Workflow } from '../src/lib/workflow/types'
 import { withNodeGoalContract } from '../src/lib/workflow/node-goal-contract'
 const probe: ConditionPageProbe = {
-  exists: async () => true, visible: async () => true, enabled: async () => true,
-  text: async () => 'Done', attribute: async () => 'value', count: async () => 1, url: async () => 'https://example.com/done',
+  exists: async () => true,
+  visible: async () => true,
+  enabled: async () => true,
+  text: async () => 'Done',
+  attribute: async () => 'value',
+  count: async () => 1,
+  url: async () => 'https://example.com/done',
 }
 function workflowWith(nodeData: Record<string, unknown>): Workflow {
   return {
-    id: 'w1', name: 'Task', description: '', createdAt: 0, updatedAt: 0,
+    id: 'w1',
+    name: 'Task',
+    description: '',
+    createdAt: 0,
+    updatedAt: 0,
     trigger: { type: 'manual', enabled: true },
     settings: {
-      saveLog: false, debugMode: false, notification: false, reuseLastState: false, provenance: 'chat-generate',
-      goalSpec: { summary: 'The done banner exists.', successConditions: [{ kind: 'variableExists', name: 'result' }] },
+      saveLog: false,
+      debugMode: false,
+      notification: false,
+      reuseLastState: false,
+      provenance: 'chat-generate',
+      goalSpec: {
+        summary: 'The done banner exists.',
+        successConditions: [{ kind: 'variableExists', name: 'result' }],
+      },
     },
-    drawflow: { nodes: [{ id: 'n1', label: 'forms', position: { x: 0, y: 0 }, data: { blockId: 'forms', ...nodeData } }], edges: [] },
+    drawflow: {
+      nodes: [
+        {
+          id: 'n1',
+          label: 'forms',
+          position: { x: 0, y: 0 },
+          data: { blockId: 'forms', ...nodeData },
+        },
+      ],
+      edges: [],
+    },
   } as unknown as Workflow
 }
 const okRun: ExecuteWorkflowResult = { runId: 'r1', outcome: 'ok', variables: { result: 'done' } }
 describe('goal verification engine', () => {
   it('certifies when L1/L2/L3 all pass', async () => {
-    const data = withNodeGoalContract({ blockId: 'forms' }, {
-      version: 1, goal: 'fill the result', successCriteria: [{ kind: 'variableExists', name: 'result' }],
-    })
+    const data = withNodeGoalContract(
+      { blockId: 'forms' },
+      {
+        version: 1,
+        goal: 'fill the result',
+        successCriteria: [{ kind: 'variableExists', name: 'result' }],
+      },
+    )
     const report = await verifyWorkflowGoal(workflowWith(data), okRun, probe)
     expect(report.l1.every((c) => c.satisfied)).toBe(true)
     expect(report.l2.allHeld).toBe(true)
@@ -33,15 +67,25 @@ describe('goal verification engine', () => {
     expect(report.certified).toBe(true)
   })
   it('fails L1 when execution failed', async () => {
-    const failedRun: ExecuteWorkflowResult = { runId: 'r2', outcome: 'failed', error: 'boom', variables: {} }
+    const failedRun: ExecuteWorkflowResult = {
+      runId: 'r2',
+      outcome: 'failed',
+      error: 'boom',
+      variables: {},
+    }
     const report = await verifyWorkflowGoal(workflowWith({}), failedRun, probe)
     expect(report.level).toBe('L1')
     expect(report.certified).toBe(false)
   })
   it('fails L2 when a node contract does not hold', async () => {
-    const data = withNodeGoalContract({ blockId: 'forms' }, {
-      version: 1, goal: 'need missing var', successCriteria: [{ kind: 'variableExists', name: 'missing' }],
-    })
+    const data = withNodeGoalContract(
+      { blockId: 'forms' },
+      {
+        version: 1,
+        goal: 'need missing var',
+        successCriteria: [{ kind: 'variableExists', name: 'missing' }],
+      },
+    )
     const report = await verifyWorkflowGoal(workflowWith(data), okRun, probe)
     expect(report.level).toBe('L2')
     expect(report.certified).toBe(false)
@@ -54,7 +98,10 @@ describe('goal verification engine', () => {
   })
   it('last node succeeds but goal fails: L3 fail, not certified', async () => {
     const workflow = workflowWith({})
-    workflow.settings!.goalSpec = { summary: 'need goalVar', successConditions: [{ kind: 'variableExists', name: 'goalVar' }] }
+    workflow.settings!.goalSpec = {
+      summary: 'need goalVar',
+      successConditions: [{ kind: 'variableExists', name: 'goalVar' }],
+    }
     const report = await verifyWorkflowGoal(workflow, okRun, probe)
     expect(report.l3.allHeld).toBe(false)
     expect(report.level).toBe('L3')
@@ -75,9 +122,14 @@ describe('goal verification engine', () => {
     expect(report.reason).toContain('L1')
   })
   it('an unconfirmed declared outcome withholds the badge without failing the run', async () => {
-    const data = withNodeGoalContract({ blockId: 'forms' }, {
-      version: 1, goal: 'fill the result', successCriteria: [{ kind: 'variableExists', name: 'result' }],
-    })
+    const data = withNodeGoalContract(
+      { blockId: 'forms' },
+      {
+        version: 1,
+        goal: 'fill the result',
+        successCriteria: [{ kind: 'variableExists', name: 'result' }],
+      },
+    )
     const softRun: ExecuteWorkflowResult = {
       ...okRun,
       completedNodeIds: ['n1'],
@@ -164,10 +216,7 @@ describe('goal verification engine', () => {
     const workflow = workflowWith({})
     workflow.settings!.goalSpec = {
       summary: 'The page changed and the banner is up.',
-      successConditions: [
-        { kind: 'urlChanged' },
-        { kind: 'variableExists', name: 'result' },
-      ],
+      successConditions: [{ kind: 'urlChanged' }, { kind: 'variableExists', name: 'result' }],
     }
     const report = await verifyWorkflowGoal(workflow, { ...okRun, completedNodeIds: ['n1'] }, probe)
     expect(report.l3.conditions.map((c) => c.satisfied)).toEqual([true])
@@ -178,7 +227,10 @@ describe('goal verification engine', () => {
     const workflow = workflowWith({})
     workflow.settings!.goalSpec = {
       summary: 'The URL changed.',
-      successConditions: [{ kind: 'urlChanged' }, { kind: 'elementAppeared', target: { text: '草稿箱' } }],
+      successConditions: [
+        { kind: 'urlChanged' },
+        { kind: 'elementAppeared', target: { text: '草稿箱' } },
+      ],
     }
     const report = await verifyWorkflowGoal(workflow, { ...okRun, completedNodeIds: ['n1'] }, probe)
     expect(report.l3.conditions).toEqual([])
@@ -187,15 +239,22 @@ describe('goal verification engine', () => {
     expect(report.reason).toContain('before its step')
   })
   it('a node contract row needing a baseline leaves the L2 ballot unevaluated', async () => {
-    const data = withNodeGoalContract({ blockId: 'forms' }, {
-      version: 1,
-      goal: 'the page moved',
-      successCriteria: [
-        { kind: 'elementGone', target: { text: '加载中' } },
-        { kind: 'variableExists', name: 'result' },
-      ],
-    })
-    const report = await verifyWorkflowGoal(workflowWith(data), { ...okRun, completedNodeIds: ['n1'] }, probe)
+    const data = withNodeGoalContract(
+      { blockId: 'forms' },
+      {
+        version: 1,
+        goal: 'the page moved',
+        successCriteria: [
+          { kind: 'elementGone', target: { text: '加载中' } },
+          { kind: 'variableExists', name: 'result' },
+        ],
+      },
+    )
+    const report = await verifyWorkflowGoal(
+      workflowWith(data),
+      { ...okRun, completedNodeIds: ['n1'] },
+      probe,
+    )
     expect(report.l2.nodes[0]?.criteria.map((c) => c.satisfied)).toEqual([true])
     expect(report.l2.nodes[0]?.unevaluated).toHaveLength(1)
     expect(report.l2.unevaluated).toHaveLength(1)
@@ -244,7 +303,10 @@ describe('goal verification against the pre-run baseline the run carries', () =>
         { kind: 'elementAppeared', target: draftBox },
       ],
     }
-    const baseline: ConditionBaseline = { counts: {}, exists: { [conditionLocatorKey(draftBox)]: true } }
+    const baseline: ConditionBaseline = {
+      counts: {},
+      exists: { [conditionLocatorKey(draftBox)]: true },
+    }
     const report = await verifyWorkflowGoal(workflow, runWithBaseline(baseline), probe)
     expect(report.l3.conditions.map((c) => c.satisfied)).toEqual([true, false])
     expect(report.l3.allHeld).toBe(false)
@@ -295,12 +357,18 @@ describe('goal verification against the pre-run baseline the run carries', () =>
       id: 'n2',
       label: 'event-click',
       position: { x: 0, y: 0 },
-      data: { blockId: 'event-click', selector: '#draft', __reliability: { intent: '把已填好标题与正文的图文笔记保存为草稿，不发布' } },
+      data: {
+        blockId: 'event-click',
+        selector: '#draft',
+        __reliability: { intent: '把已填好标题与正文的图文笔记保存为草稿，不发布' },
+      },
     } as never)
     workflow.drawflow.edges.push({ source: 'n1', target: 'n2' } as never)
     workflow.settings!.goalSpec = {
       summary: 'The draft list shows the saved draft.',
-      successConditions: [{ kind: 'elementText', target: draftBox, match: 'contains', expected: '草稿' }],
+      successConditions: [
+        { kind: 'elementText', target: draftBox, match: 'contains', expected: '草稿' },
+      ],
     }
     const showsDraft = conditionLocatorKey({ text: '草稿' })
     const baseline: ConditionBaseline = {
@@ -313,7 +381,10 @@ describe('goal verification against the pre-run baseline the run carries', () =>
       completedNodeIds: ['n1', 'n2'],
       goalBaseline: baseline,
     }
-    const report = await verifyWorkflowGoal(workflow, run, { ...probe, text: async () => '草稿箱(100)' })
+    const report = await verifyWorkflowGoal(workflow, run, {
+      ...probe,
+      text: async () => '草稿箱(100)',
+    })
     expect(report.certified).toBe(false)
     expect(report.reason).toContain('a draft was written')
     expect(report.reason).toContain('草稿箱')
@@ -361,16 +432,25 @@ describe('goal verification against the pre-run baseline the run carries', () =>
 describe('L2 votes with the observation taken at the step', () => {
   // The page the LAST step left is not the page an earlier step promised.
   const goneNow: ConditionPageProbe = {
-    exists: async () => false, visible: async () => false, enabled: async () => false,
-    text: async () => '', attribute: async () => '', count: async () => 0,
+    exists: async () => false,
+    visible: async () => false,
+    enabled: async () => false,
+    text: async () => '',
+    attribute: async () => '',
+    count: async () => 0,
     url: async () => 'https://creator.xiaohongshu.com/new/home',
   }
   const titleInput = { selector: 'input[placeholder*="标题"]' }
   const formsWorkflow = (): Workflow => {
     const workflow = workflowWith(
-      withNodeGoalContract({ blockId: 'forms' }, {
-        version: 1, goal: 'fill the title', successCriteria: [{ kind: 'elementExists', target: titleInput }],
-      }),
+      withNodeGoalContract(
+        { blockId: 'forms' },
+        {
+          version: 1,
+          goal: 'fill the title',
+          successCriteria: [{ kind: 'elementExists', target: titleInput }],
+        },
+      ),
     )
     workflow.settings!.goalSpec = {
       summary: 'A variable was produced.',
@@ -386,11 +466,20 @@ describe('L2 votes with the observation taken at the step', () => {
     const run: ExecuteWorkflowResult = {
       ...okRun,
       completedNodeIds: ['n1'],
-      nodeConditions: [{ nodeId: 'n1', description: describeCondition({ kind: 'elementExists', target: titleInput }), satisfied: true }],
+      nodeConditions: [
+        {
+          nodeId: 'n1',
+          description: describeCondition({ kind: 'elementExists', target: titleInput }),
+          satisfied: true,
+        },
+      ],
     }
     const report = await verifyWorkflowGoal(formsWorkflow(), run, goneNow)
     expect(report.l2.nodes[0]?.criteria).toEqual([
-      { description: describeCondition({ kind: 'elementExists', target: titleInput }), satisfied: true },
+      {
+        description: describeCondition({ kind: 'elementExists', target: titleInput }),
+        satisfied: true,
+      },
     ])
     expect(report.certified).toBe(true)
   })
@@ -399,7 +488,13 @@ describe('L2 votes with the observation taken at the step', () => {
     const run: ExecuteWorkflowResult = {
       ...okRun,
       completedNodeIds: ['n1'],
-      nodeConditions: [{ nodeId: 'n1', description: describeCondition({ kind: 'elementExists', target: titleInput }), satisfied: false }],
+      nodeConditions: [
+        {
+          nodeId: 'n1',
+          description: describeCondition({ kind: 'elementExists', target: titleInput }),
+          satisfied: false,
+        },
+      ],
     }
     const report = await verifyWorkflowGoal(formsWorkflow(), run, probe)
     expect(report.l2.nodes[0]?.criteria[0]?.satisfied).toBe(false)
@@ -408,7 +503,11 @@ describe('L2 votes with the observation taken at the step', () => {
   })
 
   it('re-reads a row the run never observed', async () => {
-    const report = await verifyWorkflowGoal(formsWorkflow(), { ...okRun, completedNodeIds: ['n1'] }, goneNow)
+    const report = await verifyWorkflowGoal(
+      formsWorkflow(),
+      { ...okRun, completedNodeIds: ['n1'] },
+      goneNow,
+    )
     expect(report.l2.nodes[0]?.criteria[0]?.satisfied).toBe(false)
   })
 })

@@ -413,11 +413,7 @@ export async function runOperatorTool({
   // Attach the Node Goal Contract to the recorded data on this composed path
   // too, so every recorded node carries a structured goal (same as the real
   // execution path in `operator-tool-run`).
-  const goalContract = resolveNodeGoalContract(
-    blockId,
-    rewrite.data,
-    args['goalContract'],
-  )
+  const goalContract = resolveNodeGoalContract(blockId, rewrite.data, args['goalContract'])
   const dataWithGoal = goalContract
     ? withNodeGoalContract(rewrite.data, goalContract)
     : rewrite.data
@@ -583,9 +579,7 @@ export function insertAiPrefillNode(draft: WorkflowDraft, plan: AiPrefillPlan): 
     withNodeGoalContract(prefillData, {
       version: 1,
       goal: `Generate the composed text for "${plan.fieldLabel}"`,
-      successCriteria: [
-        { kind: 'variableExists', name: plan.variableName },
-      ],
+      successCriteria: [{ kind: 'variableExists', name: plan.variableName }],
     }),
   )
 }
@@ -721,7 +715,8 @@ export async function composeWorkflowFromDraft(
     )
   }
   const goalSpec = grounded?.goalSpec ?? preparedContract?.goalSpec
-  const settingsGoalSpec = goalSpec ?? deriveGoalSpecFromNodes({ name, nodes: draft.nodes }, goalText)
+  const settingsGoalSpec =
+    goalSpec ?? deriveGoalSpecFromNodes({ name, nodes: draft.nodes }, goalText)
   if (goalSpec && triggerHead) {
     const conditionsText = goalSpec.successConditions.map((c) => describeCondition(c)).join('; ')
     const description = `${goalSpec.summary}${conditionsText ? ` | Success: ${conditionsText}` : ''}`
@@ -810,9 +805,7 @@ export async function composeWorkflowFromDraft(
     const draftBlocks = new Set(actionNodesOf(draft).map(blockIdOfNode))
     const coverage = coverageWarningLines({
       failedBlockIds: failedBlockIdsOf(conversationId).filter((id) => !draftBlocks.has(id)),
-      recordOnlyBlockIds: actionNodesOf(draft)
-        .map(blockIdOfNode)
-        .filter(isRecordOnlyBlock),
+      recordOnlyBlockIds: actionNodesOf(draft).map(blockIdOfNode).filter(isRecordOnlyBlock),
       fromHistory: draft.source === 'chat-history',
     })
     for (const warning of coverage) {

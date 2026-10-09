@@ -1,6 +1,7 @@
 WORKFLOW_GENERATION_SPEC_STATUS: DONE
 
 Evidence (recorded):
+
 - pnpm typecheck: PASS (tsc --noEmit + tsconfig.tests.json)
 - pnpm test: PASS — Test Files 279 passed (279), Tests 3087 passed (3087), Duration ~8.9s
 - pnpm build: PASS — Vite production build completed (dist assets emitted)
@@ -91,8 +92,8 @@ V81: PASS — tests/acceptance-failure-scenarios.spec.ts
 V82: PASS — tests/acceptance-failure-scenarios.spec.ts
 V83: PASS — tests/acceptance-failure-scenarios.spec.ts
 V84: PASS — full suite: tests/ 3087 tests (workflow-generation coverage includes agent, draft, compiler suites)
-V85: PASS — full suite: tests/ (unified repair/replay suites incl. tests/auto-repair*, tests/acceptance/repair-*)
-V86: PASS — full suite: tests/ (wf_op_*: operator-tool*, auto-contract, js-fallback, payload-size)
+V85: PASS — full suite: tests/ (unified repair/replay suites incl. tests/auto-repair*, tests/acceptance/repair-_)
+V86: PASS — full suite: tests/ (wf_op__: operator-tool*, auto-contract, js-fallback, payload-size)
 V87: PASS — full suite: tests/ (ir, compiler, generated-validation, validation)
 V88: PASS — tests/acceptance-node-card.spec.tsx, acceptance-cert-modal.spec.tsx, acceptance-legacy-ui.spec.ts + full suite
 V89: PASS — tests/acceptance-metrics.spec.ts
@@ -109,6 +110,7 @@ V99: PASS — tests/acceptance-no-fake-success.spec.ts + tests/acceptance-repair
 V100: PASS — this aggregate verification run
 
 Summary:
+
 - Total: 100
 - Passed: 100
 - Failed: 0

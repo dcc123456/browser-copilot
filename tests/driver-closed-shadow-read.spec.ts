@@ -82,7 +82,11 @@ function installChrome(opts: { debuggerAvailable?: boolean; sendFails?: boolean 
   executeScript = vi.fn(async () => [{ result: { ok: true, found: false, data: 0 } }])
   const on = () => ({ addListener: vi.fn(), removeListener: vi.fn() })
   ;(globalThis as unknown as { chrome: unknown }).chrome = {
-    runtime: { id: 'test', getURL: (p: string) => `chrome-extension://test/${p}`, lastError: undefined },
+    runtime: {
+      id: 'test',
+      getURL: (p: string) => `chrome-extension://test/${p}`,
+      lastError: undefined,
+    },
     tabs: {
       get: vi.fn(async (id: number) => (id === TAB.id ? TAB : undefined)),
       query: vi.fn(async () => [TAB]),
@@ -100,13 +104,16 @@ function installChrome(opts: { debuggerAvailable?: boolean; sendFails?: boolean 
       local: { get: vi.fn(async () => ({})), set: vi.fn(async () => {}) },
       session: { get: vi.fn(async () => ({})), set: vi.fn(async () => {}) },
     },
-    debugger: opts.debuggerAvailable === false ? undefined : {
-      attach: vi.fn(async () => {}),
-      detach: vi.fn(async () => {}),
-      sendCommand,
-      onDetach: on(),
-      onEvent: on(),
-    },
+    debugger:
+      opts.debuggerAvailable === false
+        ? undefined
+        : {
+            attach: vi.fn(async () => {}),
+            detach: vi.fn(async () => {}),
+            sendCommand,
+            onDetach: on(),
+            onEvent: on(),
+          },
   }
 }
 
@@ -128,7 +135,11 @@ describe('execOnActiveTab reads closed-shadow targets over CDP', () => {
   it('answers element_exists from the debugger, without injecting the kernel', async () => {
     const { execOnActiveTab } = await driver()
 
-    const out = await execOnActiveTab({ action: 'element_exists', target: shadowTarget }, undefined, TAB.id)
+    const out = await execOnActiveTab(
+      { action: 'element_exists', target: shadowTarget },
+      undefined,
+      TAB.id,
+    )
 
     expect(out.ok).toBe(true)
     expect(out.found).toBe(true)
@@ -140,7 +151,11 @@ describe('execOnActiveTab reads closed-shadow targets over CDP', () => {
   it('answers actionability with the three facts a readiness wait asks for', async () => {
     const { execOnActiveTab } = await driver()
 
-    const out = await execOnActiveTab({ action: 'actionability', target: shadowTarget }, undefined, TAB.id)
+    const out = await execOnActiveTab(
+      { action: 'actionability', target: shadowTarget },
+      undefined,
+      TAB.id,
+    )
 
     expect(out.data).toMatchObject({
       state: 'ready',
@@ -159,7 +174,10 @@ describe('execOnActiveTab reads closed-shadow targets over CDP', () => {
     const { execOnActiveTab } = await driver()
 
     const out = await execOnActiveTab(
-      { action: 'actionability', target: { ...shadowTarget, primary: { ...shadowTarget.primary, value: '不存在' } } },
+      {
+        action: 'actionability',
+        target: { ...shadowTarget, primary: { ...shadowTarget.primary, value: '不存在' } },
+      },
       undefined,
       TAB.id,
     )
@@ -172,7 +190,11 @@ describe('execOnActiveTab reads closed-shadow targets over CDP', () => {
     installChrome({ debuggerAvailable: false })
     const { execOnActiveTab } = await driver()
 
-    const out = await execOnActiveTab({ action: 'element_exists', target: shadowTarget }, undefined, TAB.id)
+    const out = await execOnActiveTab(
+      { action: 'element_exists', target: shadowTarget },
+      undefined,
+      TAB.id,
+    )
 
     expect(out.ok).toBe(false)
     expect(out.error).toContain('封闭 Shadow DOM')
@@ -182,7 +204,11 @@ describe('execOnActiveTab reads closed-shadow targets over CDP', () => {
     installChrome({ sendFails: true })
     const { execOnActiveTab } = await driver()
 
-    const out = await execOnActiveTab({ action: 'element_exists', target: shadowTarget }, undefined, TAB.id)
+    const out = await execOnActiveTab(
+      { action: 'element_exists', target: shadowTarget },
+      undefined,
+      TAB.id,
+    )
 
     expect(out.ok).toBe(false)
     expect(out.error).toContain('封闭 Shadow DOM 状态读取失败')

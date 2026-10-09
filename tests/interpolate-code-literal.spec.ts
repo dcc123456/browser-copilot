@@ -49,7 +49,7 @@ describe('interpolateParams in a javascript-code body', () => {
     )
     const code = String(params['code'])
 
-    expect(code).not.toContain("{{noteContent}}")
+    expect(code).not.toContain('{{noteContent}}')
     expect(() => runCode(code, 'text')).not.toThrow()
     expect(runCode(code, 'text')).toBe(hostile)
   })

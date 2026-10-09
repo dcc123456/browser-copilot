@@ -209,7 +209,9 @@ describe('workflow fingerprint', () => {
       updatedAt: 0,
       drawflow: {
         nodes: nodeIds.map((id) => ({ id, label: id, position: { x: 0, y: 0 }, data: {} })),
-        edges: nodeIds.slice(0, -1).map((source, i) => ({ id: `e${i}`, source, target: nodeIds[i + 1]! })),
+        edges: nodeIds
+          .slice(0, -1)
+          .map((source, i) => ({ id: `e${i}`, source, target: nodeIds[i + 1]! })),
       },
       settings: { saveLog: false, debugMode: false, notification: false, reuseLastState: false },
     })
@@ -254,8 +256,21 @@ describe('phase-aware resume (spec §14)', () => {
   })
   const wf = makeWorkflow(['a', 'login', 'dashboard'])
 
-  function cp(step: number, node: string, status: RunCheckpoint['status'], phase?: RunCheckpoint['phase']): RunCheckpoint {
-    return { runId: 'r', stepIndex: step, nodeId: node, status, variables: {}, at: 0, ...(phase ? { phase } : {}) }
+  function cp(
+    step: number,
+    node: string,
+    status: RunCheckpoint['status'],
+    phase?: RunCheckpoint['phase'],
+  ): RunCheckpoint {
+    return {
+      runId: 'r',
+      stepIndex: step,
+      nodeId: node,
+      status,
+      variables: {},
+      at: 0,
+      ...(phase ? { phase } : {}),
+    }
   }
 
   it('sideEffectStarted without observation → SIDE_EFFECT_UNKNOWN, never a replay point', () => {

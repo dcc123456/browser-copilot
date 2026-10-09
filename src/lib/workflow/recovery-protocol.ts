@@ -54,10 +54,7 @@ export function newRecoveryRequestId(workflowId: string): string {
  * Whether an action may proceed for a request. The FIRST occurrence of an
  * action is accepted; an identical repeat (a double-click) is refused.
  */
-export function shouldAcceptRecoveryAction(
-  record: RecoveryRequestRecord,
-  action: string,
-): boolean {
+export function shouldAcceptRecoveryAction(record: RecoveryRequestRecord, action: string): boolean {
   if (record.acceptedActions.includes(action)) return false
   record.acceptedActions.push(action)
   return true

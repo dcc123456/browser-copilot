@@ -116,9 +116,7 @@ export function normalizeFirstRunRecord(raw: unknown): ReplayFirstRunRecord | un
     degradeRungs: rungsOf(value['degradeRungs']),
     autoRepaired: value['autoRepaired'] === true,
     ...(isTrialOutcome(trialOutcome) ? { trialOutcome } : {}),
-    ...(typeof trialSkippedReason === 'string' && trialSkippedReason
-      ? { trialSkippedReason }
-      : {}),
+    ...(typeof trialSkippedReason === 'string' && trialSkippedReason ? { trialSkippedReason } : {}),
   }
 }
 
@@ -205,10 +203,7 @@ export interface FirstRunEvidence {
  * a measurement that could break a run is not worth having, which is why the
  * callers do not await this and cannot see it fail.
  */
-export function observeFirstRunOfRevision(
-  workflow: Workflow,
-  evidence: FirstRunEvidence,
-): void {
+export function observeFirstRunOfRevision(workflow: Workflow, evidence: FirstRunEvidence): void {
   if (!isGeneratedStrict(workflow)) return
   const trial = workflow.settings?.trialRun
   const record = trial && typeof trial === 'object' ? trial : undefined

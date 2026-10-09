@@ -197,9 +197,7 @@ const CATEGORY_DEFAULT: Record<WorkflowFailureCategory, CategoryDefault> = {
 }
 
 /** Deterministic default recoverability for a category. */
-export function defaultRecoverabilityOf(
-  category: WorkflowFailureCategory,
-): FailureRecoverability {
+export function defaultRecoverabilityOf(category: WorkflowFailureCategory): FailureRecoverability {
   return CATEGORY_DEFAULT[category].recoverability
 }
 

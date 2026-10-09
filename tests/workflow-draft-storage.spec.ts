@@ -222,9 +222,10 @@ describe('draft persistence', () => {
       await saveDraft(draft({ conversationId: `c-${i}`, variables: wideBag(`i${i}`) }))
     }
 
-    const stored = (await chrome.storage.local.get('workflow-drafts'))[
-      'workflow-drafts'
-    ] as Record<string, unknown>
+    const stored = (await chrome.storage.local.get('workflow-drafts'))['workflow-drafts'] as Record<
+      string,
+      unknown
+    >
     expect(Object.keys(stored).length).toBeLessThan(32)
     expect(Object.keys(stored)).toContain('c-31')
     expect(JSON.stringify(stored).length).toBeLessThanOrEqual(1_500_000)

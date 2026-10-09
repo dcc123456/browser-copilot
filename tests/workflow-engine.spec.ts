@@ -192,11 +192,7 @@ describe('workflow engine', () => {
     // back to `retry`, which flips the condition until the element appears.
     const order: string[] = []
     const wf = makeWorkflow(
-      [
-        node('retry', 'retry-step'),
-        node('exists', 'element-exists'),
-        node('done', 'finish'),
-      ],
+      [node('retry', 'retry-step'), node('exists', 'element-exists'), node('done', 'finish')],
       [
         edge('retry', 'exists'),
         edge('exists', 'done', 'exists-output-1'),
@@ -219,15 +215,7 @@ describe('workflow engine', () => {
         finish: trace('done', order),
       },
     })
-    expect(order).toEqual([
-      'retry',
-      'not-exists',
-      'retry',
-      'not-exists',
-      'retry',
-      'exists',
-      'done',
-    ])
+    expect(order).toEqual(['retry', 'not-exists', 'retry', 'not-exists', 'retry', 'exists', 'done'])
     expect(result.outcome).toBe('ok')
   })
 

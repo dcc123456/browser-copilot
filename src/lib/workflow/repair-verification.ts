@@ -141,8 +141,7 @@ export function urlHoldsByConstruction(workflow: Workflow, condition: WorkflowCo
     haystacks.push(settings['generationOriginUrl'] as string)
   }
   const context = settings?.['pageContext'] as
-    | { origin?: string; additionalOrigins?: string[] }
-    | undefined
+    { origin?: string; additionalOrigins?: string[] } | undefined
   if (typeof context?.origin === 'string') haystacks.push(context.origin)
   haystacks.push(...(context?.additionalOrigins ?? []))
   return haystacks.some((text) => text.toLowerCase().includes(needle))

@@ -24,8 +24,16 @@ describe('estimateInputTokens', () => {
       { role: 'user', content: '提交订单' },
       { role: 'assistant', content: 'ok' },
     ]
-    const call: WireToolCall = { id: 'c1', type: 'function', function: { name: 'click', arguments: '{"x":1}' } }
-    const withCall: WireMessage = { role: 'assistant', content: null, tool_calls: [call] } as WireMessage
+    const call: WireToolCall = {
+      id: 'c1',
+      type: 'function',
+      function: { name: 'click', arguments: '{"x":1}' },
+    }
+    const withCall: WireMessage = {
+      role: 'assistant',
+      content: null,
+      tool_calls: [call],
+    } as WireMessage
     expect(estimateMessageTokens(withCall)).toBeGreaterThan(estimateTextTokens('click'))
     const total = estimateInputTokens(messages, { text: '{"tools":1}', messages: [withCall] })
     expect(total).toBeGreaterThan(estimateTextTokens('提交订单'))

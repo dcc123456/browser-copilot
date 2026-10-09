@@ -68,13 +68,13 @@ const FAILURES: string[] = []
 const BUILD_FLAGS: Record<string, unknown> = { __OCR__: false }
 
 interface Modules {
-  runWorkflow: typeof import('../../src/background/workflow-engine/engine')['runWorkflow']
+  runWorkflow: (typeof import('../../src/background/workflow-engine/engine'))['runWorkflow']
   applyDefaultWaits: typeof applyDefaultWaits
   DEFAULT_WAIT_MS: typeof DEFAULT_WAIT_MS
-  createExecutors: typeof import('../src/executors')['createExecutors']
-  RunDriver: typeof import('../src/driver')['RunDriver']
-  BrowserPool: typeof import('../src/browser-pool')['BrowserPool']
-  loadConfig: typeof import('../src/config')['loadConfig']
+  createExecutors: (typeof import('../src/executors'))['createExecutors']
+  RunDriver: (typeof import('../src/driver'))['RunDriver']
+  BrowserPool: (typeof import('../src/browser-pool'))['BrowserPool']
+  loadConfig: (typeof import('../src/config'))['loadConfig']
 }
 
 let mods: Modules
@@ -311,11 +311,7 @@ async function ladderChecks(): Promise<void> {
 
     const margin = await driver.execOp({
       action: 'click',
-      target: chain(
-        spec('css', flat),
-        spec('testid', 'pay-invoice-3'),
-        spec('id', 'pay-btn-3'),
-      ),
+      target: chain(spec('css', flat), spec('testid', 'pay-invoice-3'), spec('id', 'pay-btn-3')),
       resolvePolicy: RANK,
     })
     const rung2 = margin.degrade
@@ -386,11 +382,7 @@ async function replayChecks(): Promise<void> {
     error: result.error ?? '',
   }))
   check('candidate chain: replay reaches the last step', paid.outcome === 'ok', paid.error)
-  check(
-    'candidate chain: the flagged invoice was the one paid',
-    paid.text === 'paid:A3',
-    paid.text,
-  )
+  check('candidate chain: the flagged invoice was the one paid', paid.text === 'paid:A3', paid.text)
 
   const noChain = await withReplay(
     'invoice-chain.workflow.json',
@@ -414,11 +406,10 @@ async function replayChecks(): Promise<void> {
     `${waited.outcome} / ${waited.text} ${waited.error}`,
   )
 
-  const rushed = await withReplay(
-    'slow-render-form.workflow.json',
-    withoutWaits,
-    (result) => ({ outcome: result.outcome, error: result.error ?? '' }),
-  )
+  const rushed = await withReplay('slow-render-form.workflow.json', withoutWaits, (result) => ({
+    outcome: result.outcome,
+    error: result.error ?? '',
+  }))
   check(
     'counterfactual: the same graph without the wait fails on the late field',
     rushed.outcome === 'failed' && /No element matched/i.test(rushed.error),

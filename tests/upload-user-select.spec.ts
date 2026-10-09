@@ -119,10 +119,7 @@ describe('upload-file user-select mode', () => {
   it('U026: accept filter is forwarded to the picker request', async () => {
     const files = [artifact('doc.pdf', 'application/pdf', 'data:application/pdf;base64,JVBERg==')]
     execMock.mockImplementation(async () => injectionResult(files))
-    const run = EXECUTORS['upload-file']!(
-      nodeData({ accept: 'application/pdf' }),
-      ctx(),
-    )
+    const run = EXECUTORS['upload-file']!(nodeData({ accept: 'application/pdf' }), ctx())
     expect(requestMock.mock.calls[0]?.[0]).toMatchObject({ accept: 'application/pdf' })
     pickerResolve(files)
     await run
@@ -147,7 +144,10 @@ describe('upload-file workflow-file mode', () => {
       found: true,
       frameUrl: '',
       isTopFrame: true,
-      data: { count: 1, files: [{ name: (op.files?.[0]?.name as string), type: 'image/png', size: 1 }] },
+      data: {
+        count: 1,
+        files: [{ name: op.files?.[0]?.name as string, type: 'image/png', size: 1 }],
+      },
     }))
     const c = ctx()
     c.variables['lastScreenshot'] = PNG_URL

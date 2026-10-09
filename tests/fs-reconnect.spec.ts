@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { autoReconnectStorage, reconnectStorageFolder, STORAGE_RECONNECTED_EVENT } from '../src/lib/fs-reconnect'
+import {
+  autoReconnectStorage,
+  reconnectStorageFolder,
+  STORAGE_RECONNECTED_EVENT,
+} from '../src/lib/fs-reconnect'
 
 /**
  * The fs-store surface this module consumes, mocked so each test decides

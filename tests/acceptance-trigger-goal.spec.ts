@@ -3,7 +3,9 @@ import { describeCondition, type WorkflowCondition } from '../src/lib/workflow/c
 describe('V09 trigger goal contract', () => {
   const goalSpec = {
     summary: 'The form is submitted and the success banner appears.',
-    successConditions: [{ kind: 'elementExists', target: { testId: 'success-banner' } }] as WorkflowCondition[],
+    successConditions: [
+      { kind: 'elementExists', target: { testId: 'success-banner' } },
+    ] as WorkflowCondition[],
   }
   it('the trigger description includes the goal summary', () => {
     // operator-tool-handler.compose builds this description:

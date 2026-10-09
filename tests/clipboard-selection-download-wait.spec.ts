@@ -57,10 +57,7 @@ beforeEach(() => {
 describe('clipboard.copySelectedText', () => {
   it('reads the page selection instead of the system clipboard', async () => {
     const ctx = makeCtx()
-    await EXECUTORS['clipboard']!(
-      { op: 'get', copySelectedText: true, variableName: 'sel' },
-      ctx,
-    )
+    await EXECUTORS['clipboard']!({ op: 'get', copySelectedText: true, variableName: 'sel' }, ctx)
 
     expect(ctx.variables['sel']).toBe('text selected on the page')
     expect(clipboardGet).not.toHaveBeenCalled()

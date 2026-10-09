@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { resolveNodeGoalContract } from '../src/lib/workflow/node-goal-instantiation'
 import {
-  normalizeNodeGoalContract, nodeGoalContractOf, withNodeGoalContract,
+  normalizeNodeGoalContract,
+  nodeGoalContractOf,
+  withNodeGoalContract,
 } from '../src/lib/workflow/node-goal-contract'
 describe('V10 every generated action node type has a goal', () => {
   const cases: Array<[string, Record<string, unknown>]> = [
@@ -39,7 +41,10 @@ describe('V11 contract field completeness', () => {
   })
   it('drops empty-string field values', () => {
     const contract = normalizeNodeGoalContract({
-      version: 1, goal: 'g', successCriteria: [{ kind: 'variableExists', name: 'x' }], evidence: [''],
+      version: 1,
+      goal: 'g',
+      successCriteria: [{ kind: 'variableExists', name: 'x' }],
+      evidence: [''],
     })!
     expect(contract.evidence).toBeUndefined()
   })
@@ -47,18 +52,26 @@ describe('V11 contract field completeness', () => {
 describe('V12 node goal matches local execution semantics', () => {
   it('instantiates an operator-local goal, not the workflow goal', () => {
     const contract = resolveNodeGoalContract('event-click', {
-      target: { testId: 'create' }, description: 'click create',
+      target: { testId: 'create' },
+      description: 'click create',
     })!
     expect(contract.goal.toLowerCase()).not.toContain('customer created')
   })
 })
 describe('V14 editing the contract invalidates prior verification', () => {
   it('a changed goal produces a distinct contract', () => {
-    const original = withNodeGoalContract({ blockId: 'forms' }, {
-      version: 1, goal: 'old goal', successCriteria: [{ kind: 'variableExists', name: 'x' }],
-    })
+    const original = withNodeGoalContract(
+      { blockId: 'forms' },
+      {
+        version: 1,
+        goal: 'old goal',
+        successCriteria: [{ kind: 'variableExists', name: 'x' }],
+      },
+    )
     const edited = withNodeGoalContract(original, {
-      version: 1, goal: 'new goal', successCriteria: [{ kind: 'variableExists', name: 'y' }],
+      version: 1,
+      goal: 'new goal',
+      successCriteria: [{ kind: 'variableExists', name: 'y' }],
     })
     expect(nodeGoalContractOf(edited)?.goal).toBe('new goal')
     // The editor observes this change and resets certification to unverified (see App.tsx).

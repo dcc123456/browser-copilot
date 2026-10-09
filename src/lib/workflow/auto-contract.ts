@@ -69,7 +69,9 @@ export function inferIdempotency(
 /** Extract a usable locator from EVERY home the tools accept. */
 function locatorOf(
   data: Record<string, unknown>,
-): { css?: string; testId?: string; id?: string; name?: string; text?: string; role?: string } | undefined {
+):
+  | { css?: string; testId?: string; id?: string; name?: string; text?: string; role?: string }
+  | undefined {
   if (typeof data['testId'] === 'string' && data['testId']) return { testId: data['testId'] }
   if (typeof data['selector'] === 'string' && data['selector']) return { css: data['selector'] }
   if (typeof data['css'] === 'string' && data['css']) return { css: data['css'] }
@@ -77,8 +79,7 @@ function locatorOf(
   if (typeof data['id'] === 'string' && data['id']) return { id: data['id'] }
   if (typeof data['name'] === 'string' && data['name']) return { name: data['name'] }
   if (typeof data['text'] === 'string' && data['text']) return { text: data['text'] }
-  if (typeof data['role'] === 'string' && data['role'])
-    return { role: data['role'] }
+  if (typeof data['role'] === 'string' && data['role']) return { role: data['role'] }
   // Rich target object {primary:{how, value}} (+ fallbacks).
   const target = data['target']
   if (target && typeof target === 'object') {
@@ -122,8 +123,7 @@ function defaultPostcondition(
   else if (found.role) {
     target['role'] = found.role
     if (found.name) target['accessibleName'] = found.name
-  }
-  else if (found.id) target['stableAttributes'] = { id: found.id }
+  } else if (found.id) target['stableAttributes'] = { id: found.id }
   else if (found.name) target['stableAttributes'] = { name: found.name }
   else if (found.text) target['text'] = found.text
   else if (found.css) target['stableAttributes'] = { 'data-css': found.css }
@@ -168,8 +168,7 @@ export function autoCompleteReliability(nodes: LikeNode[]): number {
     const needsPost = unsafe && (!existing?.postconditions || existing.postconditions.length === 0)
     // Attach a block-default readiness only when the contract carries no
     // explicit readiness yet (model-written readiness always wins).
-    const needsReadiness =
-      !existing?.readiness && defaultReadinessFor(blockId, data) !== undefined
+    const needsReadiness = !existing?.readiness && defaultReadinessFor(blockId, data) !== undefined
     if (!needsIdempotency && !needsPost && !needsReadiness) continue
 
     const base: Record<string, unknown> = isRecord(data[NODE_RELIABILITY_KEY])

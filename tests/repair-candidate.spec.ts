@@ -54,9 +54,7 @@ describe('repair response parser', () => {
       JSON.stringify({
         strategy: 'locator-repair',
         reason: 'selector changed',
-        nodePatches: [
-          { op: 'update-node', nodeId: 'n2', changes: { selector: '#new' } },
-        ],
+        nodePatches: [{ op: 'update-node', nodeId: 'n2', changes: { selector: '#new' } }],
         edgePatches: [],
       }),
       '```',

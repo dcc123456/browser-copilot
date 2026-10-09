@@ -219,7 +219,9 @@ describe('applyConnection (canvas edge bookkeeping)', () => {
         targetHandle: 't-input-1',
       }),
     )
-    const loopBacks = out.filter((e) => e.source === 'b' && e.sourceHandle === 'element-exists-output-2')
+    const loopBacks = out.filter(
+      (e) => e.source === 'b' && e.sourceHandle === 'element-exists-output-2',
+    )
     expect(loopBacks).toHaveLength(1)
     expect(loopBacks[0]!.target).toBe('t')
     // The earlier chain edges are untouched.

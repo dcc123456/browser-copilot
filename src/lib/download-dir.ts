@@ -135,7 +135,7 @@ export async function getUnattendedDownloadDir(): Promise<FileSystemDirectoryHan
  * 将一个文件写到下载目录。`create: true` 时若同名文件已存在会被覆盖。
  * `data` 可以是文本或二进制（截图等），底层 `createWritable().write` 两者都收。
  * 返回是否写入成功（如目录句柄无效或权限丢失时返回 `false`）。
- */export async function writeFileToDownloadDir(
+ */ export async function writeFileToDownloadDir(
   dir: FileSystemDirectoryHandle,
   filename: string,
   data: string | BufferSource,

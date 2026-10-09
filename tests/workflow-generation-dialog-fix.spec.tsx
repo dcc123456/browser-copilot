@@ -21,7 +21,10 @@ beforeAll(() => {
   for (const method of ['scrollTo', 'scrollBy'] as const) {
     Object.defineProperty(Element.prototype, method, { value: () => {}, configurable: true })
   }
-  Object.defineProperty(Element.prototype, 'scrollIntoView', { value: () => {}, configurable: true })
+  Object.defineProperty(Element.prototype, 'scrollIntoView', {
+    value: () => {},
+    configurable: true,
+  })
 })
 
 import { act } from 'react'
@@ -39,7 +42,8 @@ const fakePort = {
   onMessage: {
     addListener: (fn: (message: unknown) => void) => listeners.push(fn),
     removeListener: (fn: (message: unknown) => void) => {
-      const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1)
+      const i = listeners.indexOf(fn)
+      if (i >= 0) listeners.splice(i, 1)
     },
   },
   onDisconnect: { addListener: () => {}, removeListener: () => {} },
@@ -47,28 +51,49 @@ const fakePort = {
 
 function workflowPayload(): unknown {
   return {
-    id: 'w1', name: 'demo-submit', description: '', trigger: { type: 'manual' },
-    settings: {}, table: [],
-    drawflow: { nodes: [
-      { id: 'n0', label: 'trigger', position: { x: 0, y: 0 }, data: { blockId: 'trigger' } },
-      { id: 'n1', label: 'click', position: { x: 0, y: 0 }, data: { blockId: 'event-click', selector: '.btn' } },
-    ], edges: [{ id: 'e0', source: 'n0', target: 'n1' }] },
-    createdAt: 1, updatedAt: 1,
+    id: 'w1',
+    name: 'demo-submit',
+    description: '',
+    trigger: { type: 'manual' },
+    settings: {},
+    table: [],
+    drawflow: {
+      nodes: [
+        { id: 'n0', label: 'trigger', position: { x: 0, y: 0 }, data: { blockId: 'trigger' } },
+        {
+          id: 'n1',
+          label: 'click',
+          position: { x: 0, y: 0 },
+          data: { blockId: 'event-click', selector: '.btn' },
+        },
+      ],
+      edges: [{ id: 'e0', source: 'n0', target: 'n1' }],
+    },
+    createdAt: 1,
+    updatedAt: 1,
   }
 }
 
 beforeEach(() => {
-  listeners.length = 0; posted.length = 0
+  listeners.length = 0
+  posted.length = 0
   mocks.sendCommand.mockReset()
   mocks.sendCommand.mockImplementation(async (command: { type: string }) => {
     switch (command.type) {
-      case 'history.list': return { type: 'history.list', entries: [] }
-      case 'conversations.list': return { type: 'conversations.list', conversations: [] }
-      case 'settings.get': return { type: 'settings', settings: { mode: 'workflow' } }
-      case 'settings.set': return { type: 'settings', settings: { mode: 'workflow' } }
-      case 'workflows.draft.get': return { type: 'workflows.draft', workflow: workflowPayload() }
-      case 'workflows.probe': return { type: 'workflows.probe', probes: null }
-      default: throw new Error(`unexpected: ${command.type}`)
+      case 'history.list':
+        return { type: 'history.list', entries: [] }
+      case 'conversations.list':
+        return { type: 'conversations.list', conversations: [] }
+      case 'settings.get':
+        return { type: 'settings', settings: { mode: 'workflow' } }
+      case 'settings.set':
+        return { type: 'settings', settings: { mode: 'workflow' } }
+      case 'workflows.draft.get':
+        return { type: 'workflows.draft', workflow: workflowPayload() }
+      case 'workflows.probe':
+        return { type: 'workflows.probe', probes: null }
+      default:
+        throw new Error(`unexpected: ${command.type}`)
     }
   })
   vi.stubGlobal('chrome', {
@@ -87,17 +112,29 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 async function flush(): Promise<void> {
-  await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 0))
+  })
 }
 
 async function sendMessage(container: HTMLElement, text: string): Promise<void> {
   const textarea = container.querySelector('textarea')!
-  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!
-  await act(async () => { setter.call(textarea, text); textarea.dispatchEvent(new Event('input', { bubbles: true })) })
-  const sendButtons = [...container.querySelectorAll('button')].filter((b) => b.getAttribute('aria-label') === 'Send' || b.textContent?.includes('Send'))
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLTextAreaElement.prototype,
+    'value',
+  )!.set!
+  await act(async () => {
+    setter.call(textarea, text)
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  const sendButtons = [...container.querySelectorAll('button')].filter(
+    (b) => b.getAttribute('aria-label') === 'Send' || b.textContent?.includes('Send'),
+  )
   // Prefer the composer send button (not 'Save as workflow').
   const send = container.querySelector('button[aria-label="Send"]') ?? sendButtons[0]!
-  await act(async () => { send.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+  await act(async () => {
+    send.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
   await flush()
   // Workflow generation confirms the workflow NAME before dispatching the
   // turn: accept the suggested name so the task actually posts.
@@ -105,30 +142,44 @@ async function sendMessage(container: HTMLElement, text: string): Promise<void> 
     (b) => b.textContent?.trim() === 'Start task',
   )
   if (start) {
-    await act(async () => { start.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    await act(async () => {
+      start.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
     await flush()
   }
 }
 
 describe('workflow generation inline progress and save card popup', () => {
   it('keeps progress inline while running, pops the save card popup on done', async () => {
-    const container = document.createElement('div'); document.body.appendChild(container)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
     const root = createRoot(container)
     try {
-      await act(async () => { root.render(createElement(ChatTab, { skills: [], activeSkillId: null, onSelectSkill: () => {} })) })
+      await act(async () => {
+        root.render(
+          createElement(ChatTab, { skills: [], activeSkillId: null, onSelectSkill: () => {} }),
+        )
+      })
       await flush()
       await sendMessage(container, 'click submit and confirm success')
       // Task running: NO loading dialog pops up — progress stays inline.
       expect(document.body.querySelector('[role="dialog"]')).toBeNull()
       // Simulate a tool start/result as the background streams the task.
-      await act(async () => { for (const l of listeners) l({ type: 'tool.start', name: 'wf_op_event-click' }) })
-      await act(async () => { for (const l of listeners) l({ type: 'tool.result', name: 'wf_op_event-click', summary: 'node recorded' }) })
+      await act(async () => {
+        for (const l of listeners) l({ type: 'tool.start', name: 'wf_op_event-click' })
+      })
+      await act(async () => {
+        for (const l of listeners)
+          l({ type: 'tool.result', name: 'wf_op_event-click', summary: 'node recorded' })
+      })
       expect(document.body.textContent ?? '').toContain('wf_op_event-click')
       expect(document.body.textContent ?? '').toContain('node recorded')
       // Still no popup mid-run.
       expect(document.body.querySelector('[role="dialog"]')).toBeNull()
       // Turn ends: the save card popup replaces the loading dialog.
-      await act(async () => { for (const l of listeners) l({ type: 'done' }) })
+      await act(async () => {
+        for (const l of listeners) l({ type: 'done' })
+      })
       await flush()
       const dialog = document.body.querySelector('[role="dialog"]')
       expect(dialog).not.toBeNull()
@@ -138,15 +189,21 @@ describe('workflow generation inline progress and save card popup', () => {
       expect(text).toContain('Save as workflow')
       expect(text).not.toContain('Generation log')
       // Closing the popup moves the card inline above the composer.
-      const closeButton = document.body.querySelector<HTMLButtonElement>('button[aria-label="Run in background"]')
+      const closeButton = document.body.querySelector<HTMLButtonElement>(
+        'button[aria-label="Run in background"]',
+      )
       expect(closeButton).not.toBeNull()
-      await act(async () => { closeButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+      await act(async () => {
+        closeButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
       await flush()
       expect(document.body.querySelector('[role="dialog"]')).toBeNull()
       expect(container.textContent).toContain('demo-submit')
       expect(container.textContent).toContain('Save as workflow')
     } finally {
-      await act(async () => { root.unmount() })
+      await act(async () => {
+        root.unmount()
+      })
       container.remove()
     }
   })
@@ -158,19 +215,35 @@ describe('immediate stop of background work', () => {
     const slow: BlockExecutor = async (_data, ctx) => {
       await new Promise<void>((resolve, reject) => {
         const t = setTimeout(resolve, 5000)
-        ctx.signal.addEventListener('abort', () => { clearTimeout(t); reject(new DOMException('Aborted', 'AbortError')) }, { once: true })
+        ctx.signal.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(t)
+            reject(new DOMException('Aborted', 'AbortError'))
+          },
+          { once: true },
+        )
       })
       return null
     }
-    const run = executeOperatorNode('event-click', { selector: '.x' }, { signal: controller.signal, executors: { 'event-click': slow } })
+    const run = executeOperatorNode(
+      'event-click',
+      { selector: '.x' },
+      { signal: controller.signal, executors: { 'event-click': slow } },
+    )
     controller.abort()
     await expect(run).rejects.toMatchObject({ name: 'AbortError' })
   })
   it('aborting before execution throws AbortError', async () => {
-    const controller = new AbortController(); controller.abort()
+    const controller = new AbortController()
+    controller.abort()
     const executor: BlockExecutor = async () => null
     await expect(
-      executeOperatorNode('event-click', { selector: '.x' }, { signal: controller.signal, executors: { 'event-click': executor } }),
+      executeOperatorNode(
+        'event-click',
+        { selector: '.x' },
+        { signal: controller.signal, executors: { 'event-click': executor } },
+      ),
     ).rejects.toMatchObject({ name: 'AbortError' })
   })
 })

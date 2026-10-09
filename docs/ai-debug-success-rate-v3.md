@@ -166,6 +166,7 @@
 ### 待实施（下一步）
 
 - **M4（部分）**：已落地共享模块 `src/lib/workflow/checkpoints.ts`（`RunCheckpoint` + `CheckpointStore` 注入式存储 + `rollbackToLastValid` / `restoreVariables` / `checkpointFileName`）与 `failure-memory.ts`（`rememberFailure` + `buildFailureMemoryHint`）；失败记忆已接入接管循环（attempt 2+ 注入 `failureMemory` 提示）。待补：按步持久化检查点到 `checkpoints/<runId>.json`（扩展用 `chrome.storage`、服务端用 fs）+ `sessionId` 全链路传播（并入 §可观测）。
+
 ### 企业级加固（已完成）
 
 > 说明：鉴权（timing-safe Bearer、无 `?token=`、无 token 拒绝启动）、CORS、限流、zod 校验、pino 结构化日志、`config.json` `0600` **在本轮之前已在仓库中落地**；本轮补齐的是剩余部分，并让所有门禁真正可跑通。

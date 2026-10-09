@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { advertiseTools, BRIDGE_ONLY_TOOLS, buildSystemPrompt, TOOLS } from '../src/background/agent'
+import {
+  advertiseTools,
+  BRIDGE_ONLY_TOOLS,
+  buildSystemPrompt,
+  TOOLS,
+} from '../src/background/agent'
 import { DEFAULT_SYSTEM_PROMPT } from '../src/lib/system-prompt'
 import { TOOL_META, TOOL_META_BY_NAME_MERGED } from '../src/lib/tool-catalog'
 

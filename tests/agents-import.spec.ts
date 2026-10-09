@@ -69,14 +69,9 @@ describe('agent markdown round trip', () => {
   })
 
   it('derives a stable slug id for a hand-authored file without id', () => {
-    const md = [
-      '---',
-      'name: My Agent',
-      'delegationHint: helps',
-      '---',
-      '',
-      'Do the work.',
-    ].join('\n')
+    const md = ['---', 'name: My Agent', 'delegationHint: helps', '---', '', 'Do the work.'].join(
+      '\n',
+    )
     const parsed = agentFromMarkdown(md)
     expect(parsed?.id).toBe('agent-My_Agent')
     expect(agentSlug('My Agent')).toBe('My_Agent')
@@ -161,25 +156,22 @@ describe('exportAgentsJson', () => {
 describe('seedBuiltInAgents (storage integration)', () => {
   beforeEach(() => {
     const store = new Map<string, unknown>()
-    vi.stubGlobal(
-      'chrome',
-      {
-        storage: {
-          local: {
-            get: vi.fn(async (keys: string | string[]) => {
-              const wanted = typeof keys === 'string' ? [keys] : keys
-              const out: Record<string, unknown> = {}
-              for (const key of wanted) if (store.has(key)) out[key] = store.get(key)
-              return out
-            }),
-            set: vi.fn(async (items: Record<string, unknown>) => {
-              for (const [key, value] of Object.entries(items)) store.set(key, value)
-            }),
-            remove: vi.fn(async () => {}),
-          },
+    vi.stubGlobal('chrome', {
+      storage: {
+        local: {
+          get: vi.fn(async (keys: string | string[]) => {
+            const wanted = typeof keys === 'string' ? [keys] : keys
+            const out: Record<string, unknown> = {}
+            for (const key of wanted) if (store.has(key)) out[key] = store.get(key)
+            return out
+          }),
+          set: vi.fn(async (items: Record<string, unknown>) => {
+            for (const [key, value] of Object.entries(items)) store.set(key, value)
+          }),
+          remove: vi.fn(async () => {}),
         },
       },
-    )
+    })
   })
 
   afterEach(() => {

@@ -107,10 +107,12 @@ const DEFAULT_CODES: Record<OperatorFailurePhase, string> = {
 /** Infer the failure phase from a raw error message/code (best effort). */
 export function inferPhase(message: string, code?: string): OperatorFailurePhase {
   const text = `${code ?? ''} ${message}`.toLowerCase()
-  if (/not found|no element|target|selector|resolve|找不到|不存在/.test(text)) return 'target-resolution'
+  if (/not found|no element|target|selector|resolve|找不到|不存在/.test(text))
+    return 'target-resolution'
   if (/precondition|前置|前提/.test(text)) return 'precondition'
   if (/param|required|invalid|argument|参数|必填/.test(text)) return 'parameter'
-  if (/postcondition|后置|not (?:the expected|observed)|未出现预期/.test(text)) return 'postcondition'
+  if (/postcondition|后置|not (?:the expected|observed)|未出现预期/.test(text))
+    return 'postcondition'
   if (/unsupported|cannot|capability|不支持|无法/.test(text)) return 'unsupported'
   if (/timeout|error|failed|错误|失败/.test(text)) return 'execution'
   return 'unknown'
@@ -300,7 +302,11 @@ export function advanceRecovery(session: RecoverySession): RecoveryStep {
       return {
         state: session.state,
         action: { kind: 'expand-search', note: 'Next candidates after failure analysis.' },
-        nextCandidates: { ...result, candidates: fresh, candidateBlockIds: fresh.map((c) => c.blockId) },
+        nextCandidates: {
+          ...result,
+          candidates: fresh,
+          candidateBlockIds: fresh.map((c) => c.blockId),
+        },
       }
     }
   }

@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
-  allVerificationCapabilitiesResolvable, describeVerificationCapability,
-  isVerificationCapabilityId, verificationBlock, VERIFICATION_CAPABILITY_IDS,
+  allVerificationCapabilitiesResolvable,
+  describeVerificationCapability,
+  isVerificationCapabilityId,
+  verificationBlock,
+  VERIFICATION_CAPABILITY_IDS,
 } from '../src/lib/workflow/verification-capabilities'
-import { compileExtractRecord, normalizeExtractRecordSpec } from '../src/lib/workflow/extract-record'
+import {
+  compileExtractRecord,
+  normalizeExtractRecordSpec,
+} from '../src/lib/workflow/extract-record'
 describe('verification capabilities', () => {
   it('maps every verify intent to an implementing block', () => {
     for (const id of VERIFICATION_CAPABILITY_IDS) {

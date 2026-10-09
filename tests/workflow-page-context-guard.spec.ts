@@ -10,10 +10,7 @@ import { EXECUTORS, type BlockExecutor } from '../src/background/workflow-engine
 import { edge, linearChain, makeWorkflow } from './repair/helpers'
 import type { Workflow } from '../src/lib/workflow/types'
 
-function strictGraph(
-  navUrl: string,
-  grounding: Record<string, unknown>,
-): Workflow {
+function strictGraph(navUrl: string, grounding: Record<string, unknown>): Workflow {
   const chain = linearChain(['t', 'nav', 'click'], (id) =>
     id === 't' ? 'trigger' : id === 'nav' ? 'new-tab' : 'event-click',
   )
@@ -51,7 +48,10 @@ describe('page-context guard at the engine', () => {
       generationOriginUrl: 'https://github.com',
     })
     const { ran, executors } = recorder()
-    const getPageContext = vi.fn(async () => ({ url: 'https://creator.xiaohongshu.com', title: '创作中心' }))
+    const getPageContext = vi.fn(async () => ({
+      url: 'https://creator.xiaohongshu.com',
+      title: '创作中心',
+    }))
 
     const result = await runWorkflow(workflow, { executors, getPageContext })
 

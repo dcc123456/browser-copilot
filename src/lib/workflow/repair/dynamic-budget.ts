@@ -23,10 +23,7 @@
  * @module lib/workflow/repair/dynamic-budget
  */
 
-import type {
-  FailureAnalysisV2,
-  WorkflowFailureCategory,
-} from './recovery-model'
+import type { FailureAnalysisV2, WorkflowFailureCategory } from './recovery-model'
 
 export interface CategoryBudget {
   /** Bounded plain retries before any patch. */
@@ -193,5 +190,9 @@ export function failureSignatureOf(input: {
   code?: string
   message?: string
 }): string {
-  return [input.failedNodeId ?? '', input.code ?? '', (input.message ?? '').trim().slice(0, 120)].join('|')
+  return [
+    input.failedNodeId ?? '',
+    input.code ?? '',
+    (input.message ?? '').trim().slice(0, 120),
+  ].join('|')
 }

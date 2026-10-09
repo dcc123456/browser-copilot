@@ -722,7 +722,10 @@ async function runCore(
    * could otherwise have used: an end-of-run re-read of a gone element is not
    * evidence, it is an artifact.
    */
-  const observeNodeContract = async (node: WorkflowNode, baseline?: ConditionBaseline): Promise<void> => {
+  const observeNodeContract = async (
+    node: WorkflowNode,
+    baseline?: ConditionBaseline,
+  ): Promise<void> => {
     if (!evaluateCondition) return
     const contract = nodeGoalContractOf(node.data ?? {})
     if (!contract) return
@@ -898,9 +901,7 @@ async function runCore(
       // not on the stale current tab — otherwise the first step of a workflow
       // that opens the grounded site is rejected as "wrong origin".
       const destination = navigationDestinationOf(blockId, params)
-      const current = destination
-        ? { url: destination }
-        : ((await getPageContext()) ?? {})
+      const current = destination ? { url: destination } : ((await getPageContext()) ?? {})
       const verdict = checkPageContext(
         expectedPageContext,
         current,
@@ -1028,7 +1029,10 @@ async function runCore(
             // A cleanup step that finds nothing to clean up did its job: the
             // drawer it was closing is not on the page. Skip it instead of
             // failing the run (see `isDismissStep`).
-            if (isDismissStep(current) && (before.state === 'present' || before.state === 'visible')) {
+            if (
+              isDismissStep(current) &&
+              (before.state === 'present' || before.state === 'visible')
+            ) {
               emit('status', nodeId, '页面上没有该浮层，无需关闭，跳过该节点')
               completedNodeIds.push(nodeId)
               emitCheckpoint(nodeId, 'ok', unsafe ? 'nodeCommitted' : undefined)
@@ -1299,9 +1303,7 @@ async function runCore(
           for (let n = from; from <= to ? n <= to : n >= to; n += from <= to ? 1 : -1) items.push(n)
         }
       } else if (through === 'data-columns') {
-        items = Array.isArray(variables['dataTable'])
-          ? (variables['dataTable'] as unknown[])
-          : []
+        items = Array.isArray(variables['dataTable']) ? (variables['dataTable'] as unknown[]) : []
       } else if (through === 'variable') {
         const name = String(params['variableName'] ?? '').trim()
         const value = name === '' ? undefined : variables[name]
@@ -1389,7 +1391,8 @@ async function runCore(
         }
       }
       const test = async (): Promise<boolean> => {
-        if (hasConditionGroups(tree)) return conditionGroupsMatch(tree, { vars: variables, runCode: runConditionCode })
+        if (hasConditionGroups(tree))
+          return conditionGroupsMatch(tree, { vars: variables, runCode: runConditionCode })
         if (code !== '') return evalCondition(code, variables, evaluateExpression)
         emit('error', loopNode.id, 'while-loop: 没有配置条件，循环不会执行')
         return false

@@ -117,7 +117,12 @@ describe('operator record path saves __reliability.locator', () => {
     expect(node['selector']).toBeUndefined() // role targets have no CSS
     expect(node['target']).toBeDefined()
     const reliability = node['__reliability'] as
-      | { locator?: { semantic?: { role?: string; accessibleName?: string }; selectorVerified?: boolean } }
+      | {
+          locator?: {
+            semantic?: { role?: string; accessibleName?: string }
+            selectorVerified?: boolean
+          }
+        }
       | undefined
     expect(reliability?.locator?.semantic?.role).toBe('button')
     expect(reliability?.locator?.semantic?.accessibleName).toBe('发货')

@@ -15,12 +15,7 @@
 
 /** Where a Workflow file came from. */
 export type WorkflowFileSource =
-  | 'user'
-  | 'screenshot'
-  | 'javascript'
-  | 'download'
-  | 'generated-image'
-  | 'other'
+  'user' | 'screenshot' | 'javascript' | 'download' | 'generated-image' | 'other'
 
 /** A file carried inside a Workflow. */
 export interface WorkflowFileArtifact {
@@ -155,10 +150,7 @@ export function base64ByteLength(base64: string): number {
 
 /** A reasonably conservative MIME-type check (`type/subtype`). */
 export function isValidMimeType(value: unknown): value is string {
-  return (
-    typeof value === 'string' &&
-    /^[\w!#$&^+.|-]+\/[\w!#$&^+.|-]+$/i.test(value.trim())
-  )
+  return typeof value === 'string' && /^[\w!#$&^+.|-]+\/[\w!#$&^+.|-]+$/i.test(value.trim())
 }
 
 const EXT_BY_MIME: Record<string, string> = {
@@ -302,17 +294,11 @@ function normalizeOne(value: unknown): WorkflowFileArtifact {
  */
 export function normalizeWorkflowFiles(value: unknown): WorkflowFileArtifact[] {
   if (value === undefined || value === null) {
-    throw new UploadFileError(
-      'UPLOAD_FILE_DATA_INVALID',
-      'No file data was provided to upload.',
-    )
+    throw new UploadFileError('UPLOAD_FILE_DATA_INVALID', 'No file data was provided to upload.')
   }
   const list = Array.isArray(value) ? value : [value]
   if (list.length === 0) {
-    throw new UploadFileError(
-      'UPLOAD_FILE_DATA_INVALID',
-      'File artifact array is empty.',
-    )
+    throw new UploadFileError('UPLOAD_FILE_DATA_INVALID', 'File artifact array is empty.')
   }
   return list.map(normalizeOne)
 }

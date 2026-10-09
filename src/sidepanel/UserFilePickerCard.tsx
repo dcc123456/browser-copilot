@@ -26,10 +26,7 @@ interface PendingRequest {
 }
 
 /** One card for a single pending picker request. */
-function PickerCard({
-  request,
-  sendResponse,
-}: PendingRequest): ReactElement {
+function PickerCard({ request, sendResponse }: PendingRequest): ReactElement {
   const t = useT()
   const inputRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)

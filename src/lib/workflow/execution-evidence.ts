@@ -71,10 +71,13 @@ export function redactText(value: string, cap = EVIDENCE_FIELD_CAP): string {
 }
 
 /** Redact a variables bag: secret-named keys mask the value entirely. */
-export function redactVariables(variables: Record<string, unknown>, cap = 20): Record<string, string> {
+export function redactVariables(
+  variables: Record<string, unknown>,
+  cap = 20,
+): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [key, value] of Object.entries(variables).slice(0, cap)) {
-    const raw = typeof value === 'string' ? value : JSON.stringify(value) ?? String(value)
+    const raw = typeof value === 'string' ? value : (JSON.stringify(value) ?? String(value))
     out[key] = SECRET_KEY_PATTERN.test(key) ? MASK : redactText(raw, EVIDENCE_FIELD_CAP)
   }
   return out

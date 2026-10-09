@@ -23,12 +23,7 @@ import type { VerificationFailureType } from './repair/types'
 export type RepairEntry = 'GENERATION' | 'DEBUG'
 
 /** How the repair round ended. */
-export type RepairRoundResult =
-  | 'VERIFIED'
-  | 'TRANSIENT_RECOVERY'
-  | 'FAILED'
-  | 'DRAFT'
-  | 'CANCELLED'
+export type RepairRoundResult = 'VERIFIED' | 'TRANSIENT_RECOVERY' | 'FAILED' | 'DRAFT' | 'CANCELLED'
 
 /** One logged repair round (spec §14 RepairRoundLog). */
 export interface RepairRoundLog {

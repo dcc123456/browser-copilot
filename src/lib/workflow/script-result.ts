@@ -27,9 +27,7 @@
  */
 
 /** Outcome of interpreting one script result value. */
-export type ScriptResultVerdict =
-  | { ok: true }
-  | { ok: false; reason: string }
+export type ScriptResultVerdict = { ok: true } | { ok: false; reason: string }
 
 /** Object shapes inspected as failure envelopes. */
 interface FailureEnvelope {
@@ -66,8 +64,7 @@ export function interpretScriptResult(value: unknown): ScriptResultVerdict {
   if (!envelope) return { ok: true }
 
   const explicitFailure = envelope.success === false || envelope.ok === false
-  const message =
-    reasonFromField(envelope.message) ?? reasonFromField(envelope.error)
+  const message = reasonFromField(envelope.message) ?? reasonFromField(envelope.error)
 
   if (explicitFailure) {
     return { ok: false, reason: message ?? 'script reported failure' }
@@ -75,7 +72,12 @@ export function interpretScriptResult(value: unknown): ScriptResultVerdict {
 
   // An error field with no positive marker is an error result, not a success.
   const positive = envelope.success === true || envelope.ok === true
-  if (!positive && envelope.error !== undefined && envelope.error !== null && envelope.error !== '') {
+  if (
+    !positive &&
+    envelope.error !== undefined &&
+    envelope.error !== null &&
+    envelope.error !== ''
+  ) {
     return { ok: false, reason: message ?? 'script reported an error' }
   }
 

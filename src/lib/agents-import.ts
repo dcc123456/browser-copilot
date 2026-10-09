@@ -98,7 +98,11 @@ function pickList(raw: Record<string, unknown>, aliases: readonly string[]): str
     if (!(key in raw)) continue
     const v = raw[key]
     if (Array.isArray(v)) return v.filter((item): item is string => typeof item === 'string')
-    if (typeof v === 'string') return v.split(',').map((item) => item.trim()).filter(Boolean)
+    if (typeof v === 'string')
+      return v
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
   }
   return []
 }
@@ -148,7 +152,9 @@ export function mapAliasedToAgent(raw: unknown): Agent | null {
     return null
   }
   const roleRaw = pickString(obj, ROLE_ALIASES).trim().toLowerCase()
-  const role: AgentRole = ROLES.includes(roleRaw as AgentRole) ? (roleRaw as AgentRole) : 'specialist'
+  const role: AgentRole = ROLES.includes(roleRaw as AgentRole)
+    ? (roleRaw as AgentRole)
+    : 'specialist'
   const domainRaw = pickString(obj, DOMAIN_ALIASES).trim().toLowerCase()
   const domain: AgentDomain = DOMAINS.includes(domainRaw as AgentDomain)
     ? (domainRaw as AgentDomain)
@@ -193,7 +199,10 @@ export interface AgentImportBatchResult {
  * Maps, normalizes and validates a parsed raw list. The accumulating scratch
  * list makes a single import unable to create duplicate names against itself.
  */
-export function importAgentsBatch(raws: unknown[], existing: readonly Agent[]): AgentImportBatchResult {
+export function importAgentsBatch(
+  raws: unknown[],
+  existing: readonly Agent[],
+): AgentImportBatchResult {
   const saved: Agent[] = []
   const problems: AgentImportProblem[] = []
   const accumulated: Agent[] = existing.slice()

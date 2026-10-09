@@ -253,7 +253,7 @@ function queryPermissionOf(handle: unknown): ReturnType<typeof vi.fn> {
 }
 
 describe('an unattended replay with nobody to answer the picker', () => {
-  it('writes into the extension\'s own directory rather than failing the graph', async () => {
+  it("writes into the extension's own directory rather than failing the graph", async () => {
     // Round 71 stopped at 16/44 on «无法打开保存对话框»: a bridge/harness/scheduled
     // run has no side panel open and no hand to click, so the step whose whole
     // purpose is the file could only ever kill the workflow.
@@ -261,10 +261,7 @@ describe('an unattended replay with nobody to answer the picker', () => {
     vi.mocked(askSaveViaSidePanel).mockResolvedValueOnce({ ok: false, canceled: false })
     vi.mocked(getUnattendedDownloadDir).mockResolvedValueOnce(configuredDir)
     const { ctx, emit } = makeCtx()
-    await saveLocal(
-      { value: 'PNGDATA', filename: 'promo_image_1.png', saveMode: 'auto' },
-      ctx,
-    )
+    await saveLocal({ value: 'PNGDATA', filename: 'promo_image_1.png', saveMode: 'auto' }, ctx)
     expect(writeFileToDownloadDir).toHaveBeenCalledWith(
       configuredDir,
       'promo_image_1.png',

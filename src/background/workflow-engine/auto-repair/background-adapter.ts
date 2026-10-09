@@ -23,15 +23,9 @@
  */
 import { streamCompletion } from '../../../lib/llm'
 import { normalScopeFromWindowId } from '../../automation-scope'
-import {
-  createDriverConditionProbe,
-  evaluateAllConditions,
-} from '../condition-runtime'
+import { createDriverConditionProbe, evaluateAllConditions } from '../condition-runtime'
 import { createDriverReadinessProbe, executeWorkflow } from '../run-workflow'
-import {
-  effectiveReadinessSpec,
-  prepareNodeExecution,
-} from '../readiness-engine'
+import { effectiveReadinessSpec, prepareNodeExecution } from '../readiness-engine'
 import { targetFrom } from '../executors'
 import { nodeReliabilityOf } from '../../../lib/workflow/reliability'
 import { commitWorkflowRevision } from '../../../lib/workflow/workflow-revision'
@@ -109,13 +103,13 @@ function systemPromptFor(strategy: string): string {
           node: '{ id, label, position, data } (insert)',
         },
       ],
-      edgePatches: [
-        { op: 'connect | disconnect', source: 'node id', target: 'node id' },
-      ],
+      edgePatches: [{ op: 'connect | disconnect', source: 'node id', target: 'node id' }],
       expectedPostconditions: [{ kind: 'urlContains', value: '/done' }],
       confidence: 0.8,
     }),
-    'Only reference facts present in the failure evidence. When the strategy cannot produce a change, return {"strategy":"' + strategy + '","reason":"no viable change"} with empty nodePatches and edgePatches.',
+    'Only reference facts present in the failure evidence. When the strategy cannot produce a change, return {"strategy":"' +
+      strategy +
+      '","reason":"no viable change"} with empty nodePatches and edgePatches.',
   ].join('\n')
 }
 
@@ -156,7 +150,9 @@ function makeCandidateProducer(
                   locator: context.failure.locator,
                   page: context.failure.page,
                 },
-                ...(context.previousIssues ? { previousInvalidIssues: context.previousIssues } : {}),
+                ...(context.previousIssues
+                  ? { previousInvalidIssues: context.previousIssues }
+                  : {}),
               },
               null,
               2,

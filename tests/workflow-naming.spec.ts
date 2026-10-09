@@ -10,10 +10,7 @@ import {
   saveGenerationGoal,
 } from '../src/lib/workflow/generation-goal-storage'
 import { normalizeGenerationGoalContract } from '../src/lib/workflow/generation-goal'
-import {
-  composeWorkflowFromDraft,
-  runOperatorTool,
-} from '../src/background/operator-tool-handler'
+import { composeWorkflowFromDraft, runOperatorTool } from '../src/background/operator-tool-handler'
 
 vi.mock('../src/lib/llm', async (importActual) => {
   const actual = await importActual<typeof import('../src/lib/llm')>()
@@ -115,9 +112,7 @@ describe('prepare_workflow_goal name precedence', () => {
         toolCalls: [toolCall('prepare_workflow_goal', goalArgs)],
       } as never)
       .mockResolvedValueOnce({ content: 'done', toolCalls: [] } as never)
-    const history: { role: string; content?: string }[] = [
-      { role: 'user', content: 'build it' },
-    ]
+    const history: { role: string; content?: string }[] = [{ role: 'user', content: 'build it' }]
     await runAgentTurn(history as never, deps(conversationId) as never)
     const contract = await loadGenerationGoal(conversationId)
     expect(contract?.name).toBe('提交报销单')
@@ -131,9 +126,7 @@ describe('prepare_workflow_goal name precedence', () => {
         toolCalls: [toolCall('prepare_workflow_goal', goalArgs)],
       } as never)
       .mockResolvedValueOnce({ content: 'done', toolCalls: [] } as never)
-    const history: { role: string; content?: string }[] = [
-      { role: 'user', content: 'build it' },
-    ]
+    const history: { role: string; content?: string }[] = [{ role: 'user', content: 'build it' }]
     await runAgentTurn(history as never, deps(conversationId) as never)
     const contract = await loadGenerationGoal(conversationId)
     expect(contract?.name).toBe('Model Suggested Name')

@@ -104,9 +104,10 @@ Diagnose → Strategy → Candidate → Apply → Resume → Verify
 - `readiness`
 - `locator`
 
-并且 workflow-level `goalSpec` 可表达成功条件和 terminal state。这个设计应直接成为新的 Generator / Repair contract，而不是另起一套 metadata。 
+并且 workflow-level `goalSpec` 可表达成功条件和 terminal state。这个设计应直接成为新的 Generator / Repair contract，而不是另起一套 metadata。
 
 参考：
+
 - `src/lib/workflow/reliability.ts`
 - `src/lib/workflow/conditions.ts`
 - `src/lib/workflow/readiness.ts`
@@ -411,12 +412,7 @@ export interface WorkflowGenerationSession {
 
 ```ts
 export interface GenerationProgress {
-  stage:
-    | 'understanding'
-    | 'working'
-    | 'verifying'
-    | 'building'
-    | 'finishing'
+  stage: 'understanding' | 'working' | 'verifying' | 'building' | 'finishing'
   messageKey: string
   detailKey?: string
   current?: number
@@ -3219,4 +3215,3 @@ Workflow Self-Healing System
 ✓ injected 改动 pnpm verify:injected
 ✓ benchmark 全部通过
 ```
-

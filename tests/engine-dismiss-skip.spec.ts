@@ -23,10 +23,7 @@ import type { Workflow, WorkflowNode } from '../src/lib/workflow/types'
 const DRAWER_CLOSE_SELECTOR =
   '.creator-drawer-close, .note-drawer-close, [class*="drawer"] [class*="close"], [class*="close"]'
 
-function clickNode(
-  id: string,
-  data: Record<string, unknown>,
-): WorkflowNode {
+function clickNode(id: string, data: Record<string, unknown>): WorkflowNode {
   return {
     id,
     label: 'event-click',
@@ -128,11 +125,7 @@ describe('the dismissal skip', () => {
   it('refuses to excuse a click that also names an outward act', async () => {
     // 「关闭弹窗并提交」 is not pure cleanup, and a step that submits is never
     // skipped by inferring its preconditions were already true.
-    expect(
-      isDismissStep(
-        clickNode('a', { description: '关闭提示弹窗并提交笔记' }),
-      ),
-    ).toBe(false)
+    expect(isDismissStep(clickNode('a', { description: '关闭提示弹窗并提交笔记' }))).toBe(false)
   })
 })
 

@@ -19,7 +19,11 @@
  * @module background/workflow-engine/repair/proposal-verification
  */
 
-import type { RepairContext, WorkflowPatchSet, PageEvidence } from '../../../lib/workflow/repair/types'
+import type {
+  RepairContext,
+  WorkflowPatchSet,
+  PageEvidence,
+} from '../../../lib/workflow/repair/types'
 import {
   filterBySelectorUniqueness,
   selectorSetTargetsOf,

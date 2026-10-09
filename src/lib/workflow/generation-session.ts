@@ -205,9 +205,10 @@ export interface StartGenerationInput {
 }
 
 /** Create a session in the `starting` phase and emit `started`. */
-export function startGenerationSession(
-  input: StartGenerationInput,
-): { session: WorkflowGenerationSession; event: WorkflowGenerationEvent } {
+export function startGenerationSession(input: StartGenerationInput): {
+  session: WorkflowGenerationSession
+  event: WorkflowGenerationEvent
+} {
   const now = input.startedAt ?? Date.now()
   const id = input.id ?? newSessionId()
   const session: WorkflowGenerationSession = {
@@ -231,13 +232,14 @@ export function startGenerationSession(
   return { session, event: { type: 'started', sessionId: id } }
 }
 
-function assertTransition(
-  session: WorkflowGenerationSession,
-  next: WorkflowGenerationPhase,
-): void {
+function assertTransition(session: WorkflowGenerationSession, next: WorkflowGenerationPhase): void {
   // `failed` / `cancelled` are reachable from any active phase.
   if (next === 'failed' || next === 'cancelled') {
-    if (!ACTIVE_PHASES.has(session.phase) && session.phase !== 'ready-to-save' && session.phase !== 'saving') {
+    if (
+      !ACTIVE_PHASES.has(session.phase) &&
+      session.phase !== 'ready-to-save' &&
+      session.phase !== 'saving'
+    ) {
       throw new Error(`cannot move a ${session.phase} session to ${next}`)
     }
     return
@@ -428,26 +430,23 @@ export function recordActionFinished(
     ...(input.verification ? { verification: input.verification } : {}),
   }
   const trace = [...session.actionTrace.slice(0, -1), finishedTrace]
-  const failures =
-    input.passed
-      ? session.failures
-      : [
-          ...session.failures,
-          {
-            at: completedAt,
-            actionIndex: last.index,
-            category: 'action',
-            message: input.verification?.evidence ?? last.intent,
-            recovered: false,
-          },
-        ]
+  const failures = input.passed
+    ? session.failures
+    : [
+        ...session.failures,
+        {
+          at: completedAt,
+          actionIndex: last.index,
+          category: 'action',
+          message: input.verification?.evidence ?? last.intent,
+          recovered: false,
+        },
+      ]
   const moved: WorkflowGenerationSession = {
     ...session,
     actionTrace: trace,
     failures,
-    ...(input.passed
-      ? { successfulActionCount: session.successfulActionCount + 1 }
-      : {}),
+    ...(input.passed ? { successfulActionCount: session.successfulActionCount + 1 } : {}),
     updatedAt: completedAt,
   }
   return {
@@ -527,12 +526,8 @@ export function generationIsActive(session: WorkflowGenerationSession): boolean 
 }
 
 /** The successful action traces (what the compiler may consume). */
-export function successfulTraces(
-  session: WorkflowGenerationSession,
-): GenerationActionTrace[] {
-  return session.actionTrace.filter(
-    (trace) => trace.result === 'success' && trace.nodeId,
-  )
+export function successfulTraces(session: WorkflowGenerationSession): GenerationActionTrace[] {
+  return session.actionTrace.filter((trace) => trace.result === 'success' && trace.nodeId)
 }
 
 /**

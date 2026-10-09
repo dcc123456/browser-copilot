@@ -109,9 +109,7 @@ describe('normalizeWorkflowFiles', () => {
   })
 
   it('rejects an artifact with an invalid data URL', () => {
-    expect(() => normalizeWorkflowFiles(artifact({ dataUrl: 'nope' }))).toThrow(
-      /data URL/,
-    )
+    expect(() => normalizeWorkflowFiles(artifact({ dataUrl: 'nope' }))).toThrow(/data URL/)
   })
 
   it('coerces unknown source to other', () => {

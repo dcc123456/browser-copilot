@@ -20,9 +20,7 @@ describe('a dotted path into a JSON string', () => {
   })
 
   it('reads through a fenced answer, which is what a model actually returns', () => {
-    expect(interpolate('{{a.body}}', { a: '```json\n' + doc + '\n```' })).toBe(
-      '装上就能自动干活',
-    )
+    expect(interpolate('{{a.body}}', { a: '```json\n' + doc + '\n```' })).toBe('装上就能自动干活')
   })
 
   it('walks arrays and deeper objects', () => {
@@ -34,7 +32,9 @@ describe('a dotted path into a JSON string', () => {
   })
 
   it('still refuses a field on prose that was never JSON', () => {
-    expect(interpolate('{{note.title}}', { note: '正文写好了，标题在图里。' })).toBe('{{note.title}}')
+    expect(interpolate('{{note.title}}', { note: '正文写好了，标题在图里。' })).toBe(
+      '{{note.title}}',
+    )
   })
 
   it('does not treat a JSON scalar as a document', () => {

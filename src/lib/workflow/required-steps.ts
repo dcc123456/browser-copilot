@@ -23,9 +23,7 @@ function blockerSetOf(workflow: Workflow): Set<string> {
   const integrity = checkWorkflowIntegrity(workflow)
   return new Set<string>([
     ...run.errors,
-    ...integrity.danglingVars.map(
-      (ref) => `dangling:${ref.nodeId}.${ref.param}:${ref.reference}`,
-    ),
+    ...integrity.danglingVars.map((ref) => `dangling:${ref.nodeId}.${ref.param}:${ref.reference}`),
     ...integrity.orphanNodes.map((id) => `orphan:${id}`),
     ...integrity.unreachable.map((id) => `unreachable:${id}`),
   ])

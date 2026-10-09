@@ -9,12 +9,7 @@
  */
 
 import type { ReactNode } from 'react'
-import {
-  CheckCircle2,
-  CircleDashed,
-  MinusCircle,
-  AlertTriangle,
-} from 'lucide-react'
+import { CheckCircle2, CircleDashed, MinusCircle, AlertTriangle } from 'lucide-react'
 import type { useT } from './i18n'
 import type {
   GenerationStageId,

@@ -84,7 +84,10 @@ export async function validateGeneratedWorkflowForSave(
   // 6. Strict-mode check (do this early; later gates read the same decision).
   const strict = isGeneratedStrict(workflow)
   if (strict) {
-    if (workflow.settings.provenance !== 'chat-generate' && workflow.settings.provenance !== 'chat-history') {
+    if (
+      workflow.settings.provenance !== 'chat-generate' &&
+      workflow.settings.provenance !== 'chat-history'
+    ) {
       warnings.push({
         code: 'PROVENANCE_MISMATCH',
         message: 'strict mode without a generation provenance',
@@ -111,7 +114,11 @@ export async function validateGeneratedWorkflowForSave(
 
   const integrity = checkWorkflowIntegrity(workflow)
   for (const id of integrity.orphanNodes) {
-    blockers.push({ code: 'ORPHAN_NODE', message: `node is not reachable from trigger: ${id}`, nodeId: id })
+    blockers.push({
+      code: 'ORPHAN_NODE',
+      message: `node is not reachable from trigger: ${id}`,
+      nodeId: id,
+    })
   }
   for (const dangling of integrity.danglingVars) {
     blockers.push({
@@ -125,7 +132,10 @@ export async function validateGeneratedWorkflowForSave(
   if (strict) {
     const goal = goalSpecOf(workflow)
     if (!goal) {
-      blockers.push({ code: 'GOAL_MISSING', message: 'a generated-strict workflow must state a verifiable goal' })
+      blockers.push({
+        code: 'GOAL_MISSING',
+        message: 'a generated-strict workflow must state a verifiable goal',
+      })
     } else if (goal.successConditions.length === 0) {
       blockers.push({ code: 'GOAL_EMPTY', message: 'the goal spec has no success conditions' })
     }
@@ -137,13 +147,21 @@ export async function validateGeneratedWorkflowForSave(
     if (!blockIdOf(node) || blockIdOf(node) === 'trigger') continue
     const reliability = nodeReliabilityOf(node)
     if (!reliability?.intent) {
-      warnings.push({ code: 'INTENT_MISSING', message: `node has no recorded intent: ${node.id}`, nodeId: node.id })
+      warnings.push({
+        code: 'INTENT_MISSING',
+        message: `node has no recorded intent: ${node.id}`,
+        nodeId: node.id,
+      })
     }
     const elementBlock = report.issues.some(
       (issue) => issue.nodeId === node.id && issue.code.startsWith('LOCATOR'),
     )
     if (elementBlock && !hasLocator(node)) {
-      blockers.push({ code: 'LOCATOR_MISSING', message: `element node has no locator: ${node.id}`, nodeId: node.id })
+      blockers.push({
+        code: 'LOCATOR_MISSING',
+        message: `element node has no locator: ${node.id}`,
+        nodeId: node.id,
+      })
     }
   }
 
@@ -151,7 +169,9 @@ export async function validateGeneratedWorkflowForSave(
   //    with no navigation before it should carry the generation origin.
   const firstAction = workflow.drawflow.nodes.find((node) => blockIdOf(node) !== 'trigger')
   if (firstAction && !workflow.settings.generationOriginUrl) {
-    const navigates = firstAction ? blockIdOf(firstAction) === 'open-url' || blockIdOf(firstAction) === 'navigate' : true
+    const navigates = firstAction
+      ? blockIdOf(firstAction) === 'open-url' || blockIdOf(firstAction) === 'navigate'
+      : true
     if (!navigates) {
       warnings.push({
         code: 'ORIGIN_MISSING',
@@ -175,7 +195,10 @@ export async function validateGeneratedWorkflowForSave(
       })
     }
   } else {
-    warnings.push({ code: 'SELECTOR_PROBE_SKIPPED', message: 'selector hardening skipped: no live page available' })
+    warnings.push({
+      code: 'SELECTOR_PROBE_SKIPPED',
+      message: 'selector hardening skipped: no live page available',
+    })
   }
 
   // 5. Wait persistence (pure structural transform).

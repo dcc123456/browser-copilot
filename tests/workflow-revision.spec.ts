@@ -8,7 +8,10 @@ import {
 } from '../src/lib/workflow/workflow-revision'
 import type { Workflow } from '../src/lib/workflow/types'
 
-function workflowWith(revision: number | undefined, historyLength = 0): Pick<Workflow, 'revision' | 'revisionHistory'> {
+function workflowWith(
+  revision: number | undefined,
+  historyLength = 0,
+): Pick<Workflow, 'revision' | 'revisionHistory'> {
   return {
     ...(revision !== undefined ? { revision } : {}),
     revisionHistory: Array.from({ length: historyLength }, (_, i) => ({
@@ -55,9 +58,12 @@ describe('workflow revision management', () => {
   })
 
   it('caps history at the configured limit, keeping the newest entries', () => {
-    const next = commitWorkflowRevision(workflowWith(REVISION_HISTORY_LIMIT, REVISION_HISTORY_LIMIT), {
-      source: 'manual-edit',
-    })
+    const next = commitWorkflowRevision(
+      workflowWith(REVISION_HISTORY_LIMIT, REVISION_HISTORY_LIMIT),
+      {
+        source: 'manual-edit',
+      },
+    )
     expect(next.revision).toBe(REVISION_HISTORY_LIMIT + 1)
     expect(next.revisionHistory).toHaveLength(REVISION_HISTORY_LIMIT)
     expect(next.revisionHistory[0]!.revision).toBe(2)

@@ -228,18 +228,15 @@ describe('probeClosedShadow', () => {
   it('answers missing, without touching the node, when the root holds no match', async () => {
     const { session, methods } = makeSession()
 
-    const out = await probeClosedShadow(
-      session,
-      {
-        primary: {
-          how: 'cdp-shadow',
-          value: '不存在的按钮',
-          role: 'button',
-          closedShadow: true,
-        },
-        fallbacks: [],
+    const out = await probeClosedShadow(session, {
+      primary: {
+        how: 'cdp-shadow',
+        value: '不存在的按钮',
+        role: 'button',
+        closedShadow: true,
       },
-    )
+      fallbacks: [],
+    })
 
     expect(out).toMatchObject({ matchCount: 0, state: 'missing', visible: false })
     expect(methods).toEqual(['DOM.getDocument'])

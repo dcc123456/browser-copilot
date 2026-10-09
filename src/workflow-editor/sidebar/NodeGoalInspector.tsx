@@ -30,9 +30,7 @@ export interface NodeGoalInspectorProps {
 }
 
 function Label({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="text-[11px] font-semibold text-strong">{children}</span>
-  )
+  return <span className="text-[11px] font-semibold text-strong">{children}</span>
 }
 
 export default function NodeGoalInspector({ data, onChange, t }: NodeGoalInspectorProps) {

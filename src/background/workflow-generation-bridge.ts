@@ -163,9 +163,9 @@ export interface GenerationWorkflowSummary {
    * to completion (a cutoff prefix or a failed step has no goal to judge).
    */
   goal?: {
-    certified: boolean;
-    level: string;
-    reason: string;
+    certified: boolean
+    level: string
+    reason: string
     /**
      * The conditions the certification actually looked at and did not hold, in
      * their own words. `reason` says WHICH layer failed; this says WHICH ROW on
@@ -676,9 +676,11 @@ async function certifyReplayGoal(
       ...report.l3.conditions
         .filter((condition) => !condition.satisfied)
         .map((condition) =>
-          condition.detail ? `${condition.description} — ${condition.detail}` : condition.description,
+          condition.detail
+            ? `${condition.description} — ${condition.detail}`
+            : condition.description,
         ),
-      ...report.softUnconfirmed ?? [],
+      ...(report.softUnconfirmed ?? []),
     ]
     return {
       certified: report.certified,
@@ -819,22 +821,24 @@ function summarize(workflow: Workflow, saved: boolean): GenerationWorkflowSummar
     saved,
     ...(workflow.revision !== undefined ? { revision: workflow.revision } : {}),
     nodeCount: workflow.drawflow.nodes.length,
-    nodes: executionPath(workflow).slice(0, 120).map((node) => {
-      const data = node.data ?? {}
-      const stringOf = (key: string): string | undefined =>
-        typeof data[key] === 'string' ? (data[key] as string) : undefined
-      const intent = intentOf(node) || node.label || ''
-      const words = elementWordsOf(node).slice(0, 80)
-      return {
-        id: node.id,
-        blockId: stringOf('blockId') ?? node.label,
-        intent: intent.slice(0, 220),
-        ...(stringOf('action') ? { action: stringOf('action') } : {}),
-        ...(stringOf('sourceMode') ? { sourceMode: stringOf('sourceMode') } : {}),
-        ...(stringOf('selector') ? { selector: stringOf('selector')!.slice(0, 200) } : {}),
-        ...(words ? { words } : {}),
-      }
-    }),
+    nodes: executionPath(workflow)
+      .slice(0, 120)
+      .map((node) => {
+        const data = node.data ?? {}
+        const stringOf = (key: string): string | undefined =>
+          typeof data[key] === 'string' ? (data[key] as string) : undefined
+        const intent = intentOf(node) || node.label || ''
+        const words = elementWordsOf(node).slice(0, 80)
+        return {
+          id: node.id,
+          blockId: stringOf('blockId') ?? node.label,
+          intent: intent.slice(0, 220),
+          ...(stringOf('action') ? { action: stringOf('action') } : {}),
+          ...(stringOf('sourceMode') ? { sourceMode: stringOf('sourceMode') } : {}),
+          ...(stringOf('selector') ? { selector: stringOf('selector')!.slice(0, 200) } : {}),
+          ...(words ? { words } : {}),
+        }
+      }),
     // Derived, not read: a generated graph usually saves WITHOUT an explicit
     // mode and the engine then treats its provenance as generated-strict
     // (reliability.ts). Reporting the raw field would claim `compat` for exactly

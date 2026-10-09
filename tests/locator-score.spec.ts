@@ -66,9 +66,7 @@ describe('locator candidate scoring', () => {
     expect(scoreCandidate({ kind: 'id', value: 'ember-1234', verified: true })).toBe(10)
     expect(scoreCandidate({ kind: 'id', value: 'css-1x2y3z' })).toBe(10)
     // …and an explicit unstable flag caps any kind, even a "verified" one.
-    expect(
-      scoreCandidate({ kind: 'id', value: 'x', verified: true, unstable: true }),
-    ).toBe(10)
+    expect(scoreCandidate({ kind: 'id', value: 'x', verified: true, unstable: true })).toBe(10)
   })
 
   it('a random hash class demotes the whole css candidate', () => {
@@ -82,7 +80,12 @@ describe('locator candidate scoring', () => {
     const shallow = scoreCandidate({ kind: 'css', value: '.a' })
     const deep = scoreCandidate({ kind: 'css', value: 'div > ul > li > a > span' })
     expect(deep).toBeLessThan(shallow)
-    expect(scoreCandidate({ kind: 'css', value: 'a > b > c > d > e > f > g > h > i > j > k > l > m > n > o > p' })).toBeGreaterThanOrEqual(1)
+    expect(
+      scoreCandidate({
+        kind: 'css',
+        value: 'a > b > c > d > e > f > g > h > i > j > k > l > m > n > o > p',
+      }),
+    ).toBeGreaterThanOrEqual(1)
   })
 
   it('sorting puts identity first and position last', () => {
@@ -92,12 +95,7 @@ describe('locator candidate scoring', () => {
       { kind: 'positional', value: 'x:nth-child(1)' },
       { kind: 'testid', value: 'submit-order', verified: true },
     ])
-    expect(sorted.map((s) => s.candidate.kind)).toEqual([
-      'testid',
-      'role',
-      'css',
-      'positional',
-    ])
+    expect(sorted.map((s) => s.candidate.kind)).toEqual(['testid', 'role', 'css', 'positional'])
   })
 
   it('weights are overridable', () => {
@@ -162,10 +160,10 @@ describe('ambiguity decision (§6.3 core)', () => {
   })
 
   it('honors custom thresholds', () => {
-    const outcome = pickLocatorWinner(
-      [{ kind: 'name', value: 'email' }],
-      { minScore: 90, minMargin: 12 },
-    )
+    const outcome = pickLocatorWinner([{ kind: 'name', value: 'email' }], {
+      minScore: 90,
+      minMargin: 12,
+    })
     expect(outcome.ambiguous).toBe(true)
     expect(outcome.reason).toBe('below-min-score')
   })
@@ -195,9 +193,7 @@ describe('semantic locator scoring', () => {
   })
 
   it('role + nearText relation scores 82', () => {
-    expect(
-      semanticLocatorScore({ role: 'button', relation: { nearText: '订单 10001' } }),
-    ).toBe(82)
+    expect(semanticLocatorScore({ role: 'button', relation: { nearText: '订单 10001' } })).toBe(82)
   })
 
   it('an empty locator scores 0 (no identity)', () => {

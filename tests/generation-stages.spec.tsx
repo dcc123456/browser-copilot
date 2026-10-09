@@ -3,9 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { createElement } from 'react'
 import { GenerationStagesView } from '../src/sidepanel/GenerationStages'
 import type { useT } from '../src/sidepanel/i18n'
-import type {
-  GenerationStageReport,
-} from '../src/lib/workflow/generation-report'
+import type { GenerationStageReport } from '../src/lib/workflow/generation-report'
 
 type TFn = ReturnType<typeof useT>
 
@@ -37,9 +35,7 @@ describe('GenerationStagesView', () => {
       { stage: 'STATIC_VALIDATE', status: 'ok', summary: 'static validation passed' },
       { stage: 'INDEPENDENT_VERIFY', status: 'pending', summary: 'pending first run' },
     ]
-    const html = renderToStaticMarkup(
-      createElement(GenerationStagesView, { t: makeT(), stages }),
-    )
+    const html = renderToStaticMarkup(createElement(GenerationStagesView, { t: makeT(), stages }))
     expect(html).toContain('Generation stages')
     expect(html).toContain('Normalize')
     expect(html).toContain('removed 2 redundant node(s)')
@@ -59,9 +55,7 @@ describe('GenerationStagesView', () => {
       { stage: 'HARDEN_TARGETS', status: 'warn', summary: '1/3 actions lack a locator' },
       { stage: 'GENERALIZE_INPUTS', status: 'skipped', summary: 'no inputs' },
     ]
-    const html = renderToStaticMarkup(
-      createElement(GenerationStagesView, { t: makeT(), stages }),
-    )
+    const html = renderToStaticMarkup(createElement(GenerationStagesView, { t: makeT(), stages }))
     expect(html).toContain('1/3 actions lack a locator')
     expect(html).toContain('no inputs')
   })

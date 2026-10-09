@@ -159,14 +159,14 @@ append WorkflowDraft
 
 目前已经存在六层静态验证：
 
-| 层级 | 检查内容 |
-|---|---|
-| A | Graph：连通性、可达性、孤儿子图 |
-| B | Data：变量 / 表达式引用的数据流 |
-| C | Locator：元素操作必须有可靠定位，拒绝仅位置定位 |
-| D | Readiness：前后状态契约、timeout 合法性 |
-| E | Side Effect：不可逆动作需要幂等信息 + postconditions |
-| F | Goal：严格生成模式必须有可验证目标 |
+| 层级 | 检查内容                                             |
+| ---- | ---------------------------------------------------- |
+| A    | Graph：连通性、可达性、孤儿子图                      |
+| B    | Data：变量 / 表达式引用的数据流                      |
+| C    | Locator：元素操作必须有可靠定位，拒绝仅位置定位      |
+| D    | Readiness：前后状态契约、timeout 合法性              |
+| E    | Side Effect：不可逆动作需要幂等信息 + postconditions |
+| F    | Goal：严格生成模式必须有可验证目标                   |
 
 目标：保留现有六层模型，并把它从“检查器”升级为“生成 pipeline 的正式 gate”。
 
@@ -451,22 +451,22 @@ stateDiagram-v2
 
 ## 5.3 状态定义
 
-| 状态 | 用户看到的文案 | 用户操作 |
-|---|---|---|
-| `READY` | 准备运行 | 运行 |
-| `RUNNING` | 正在运行 | 暂停 / 停止 |
-| `SUCCEEDED` | 已完成 | 查看结果 / 再次运行 |
-| `FAILED` | 运行失败 | **AI 修复** |
-| `REPAIR_ANALYZING` | AI 正在分析问题 | 无，等待 |
-| `REPAIR_PROPOSING` | AI 正在生成修复方案 | 无，等待 |
-| `REPAIR_CONFIRMATION_REQUIRED` | 已找到修复方案 | **确认修复 / 取消** |
-| `REPAIR_APPLYING` | 正在应用修复 | 无，等待 |
-| `REPAIR_VERIFYING` | 正在验证修复 | 无，等待 |
-| `REPAIR_VERIFIED` | 修复已验证通过 | **覆盖工作流 / 暂不覆盖** |
-| `REPAIR_FAILED` | 修复未通过验证 | **重新 AI 修复 / 编辑 Workflow** |
-| `SIDE_EFFECT_UNKNOWN` | 操作结果未知，无法安全自动处理 | 人工检查 |
-| `REVISION_CONFLICT` | Workflow 已发生变化 | 重新 AI 修复（重新分析） |
-| `BLOCKED` | 无法安全自动修复 | 编辑 Workflow / 人工处理 |
+| 状态                           | 用户看到的文案                 | 用户操作                         |
+| ------------------------------ | ------------------------------ | -------------------------------- |
+| `READY`                        | 准备运行                       | 运行                             |
+| `RUNNING`                      | 正在运行                       | 暂停 / 停止                      |
+| `SUCCEEDED`                    | 已完成                         | 查看结果 / 再次运行              |
+| `FAILED`                       | 运行失败                       | **AI 修复**                      |
+| `REPAIR_ANALYZING`             | AI 正在分析问题                | 无，等待                         |
+| `REPAIR_PROPOSING`             | AI 正在生成修复方案            | 无，等待                         |
+| `REPAIR_CONFIRMATION_REQUIRED` | 已找到修复方案                 | **确认修复 / 取消**              |
+| `REPAIR_APPLYING`              | 正在应用修复                   | 无，等待                         |
+| `REPAIR_VERIFYING`             | 正在验证修复                   | 无，等待                         |
+| `REPAIR_VERIFIED`              | 修复已验证通过                 | **覆盖工作流 / 暂不覆盖**        |
+| `REPAIR_FAILED`                | 修复未通过验证                 | **重新 AI 修复 / 编辑 Workflow** |
+| `SIDE_EFFECT_UNKNOWN`          | 操作结果未知，无法安全自动处理 | 人工检查                         |
+| `REVISION_CONFLICT`            | Workflow 已发生变化            | 重新 AI 修复（重新分析）         |
+| `BLOCKED`                      | 无法安全自动修复               | 编辑 Workflow / 人工处理         |
 
 > 关键约束：除正常 Workflow 运行控制之外，AI 能力在 Workflow 面板中只提供一个一级入口 `AI 修复`。`诊断`、`建议`、`takeover`、`resume` 不再以独立 AI 按钮暴露。
 
@@ -871,12 +871,7 @@ interface FailureAnalysisV2 extends FailureAnalysis {
     | 'STRUCTURAL'
     | 'UNKNOWN'
 
-  recoverability:
-    | 'AUTO'
-    | 'SUGGEST'
-    | 'RESUME'
-    | 'HUMAN'
-    | 'BLOCKED'
+  recoverability: 'AUTO' | 'SUGGEST' | 'RESUME' | 'HUMAN' | 'BLOCKED'
 
   confidence: number
 
@@ -915,20 +910,20 @@ interface RecoveryAction {
 
 ## 8.1 必须统一 Failure Class
 
-| Class | 典型问题 | 默认处理 |
-|---|---|---|
-| `TIMING` | 元素晚出现 | readiness / retry |
-| `LOCATOR` | selector stale | AI patch / resolver |
-| `PAGE_STATE` | 页面状态不对 | diagnose / recover |
-| `NAVIGATION` | 未完成导航 | wait / resume |
-| `DATA` | 变量为空 / 类型错误 | patch / input fix |
-| `AUTH` | 登录过期 | 人工 / re-auth |
-| `CAPTCHA` | CAPTCHA 阻塞 | 人工 |
-| `SIDE_EFFECT` | 结果未知 | 人工确认 |
-| `NETWORK` | 请求失败 | transient retry |
-| `PROVIDER` | AI/model/provider 错误 | fallback / retry |
-| `STRUCTURAL` | graph 错误 | workflow edit / repair |
-| `UNKNOWN` | 无法确定 | diagnose + human |
+| Class         | 典型问题               | 默认处理               |
+| ------------- | ---------------------- | ---------------------- |
+| `TIMING`      | 元素晚出现             | readiness / retry      |
+| `LOCATOR`     | selector stale         | AI patch / resolver    |
+| `PAGE_STATE`  | 页面状态不对           | diagnose / recover     |
+| `NAVIGATION`  | 未完成导航             | wait / resume          |
+| `DATA`        | 变量为空 / 类型错误    | patch / input fix      |
+| `AUTH`        | 登录过期               | 人工 / re-auth         |
+| `CAPTCHA`     | CAPTCHA 阻塞           | 人工                   |
+| `SIDE_EFFECT` | 结果未知               | 人工确认               |
+| `NETWORK`     | 请求失败               | transient retry        |
+| `PROVIDER`    | AI/model/provider 错误 | fallback / retry       |
+| `STRUCTURAL`  | graph 错误             | workflow edit / repair |
+| `UNKNOWN`     | 无法确定               | diagnose + human       |
 
 ## 8.2 Classification 原则
 
@@ -1179,10 +1174,7 @@ UI 不直接显示模型原始推理，只允许显示结构化结果：
 ```json
 {
   "summary": "原按钮定位器已失效",
-  "evidence": [
-    "原 selector matchCount=0",
-    "页面存在 aria-label=Confirm and submit 的按钮"
-  ],
+  "evidence": ["原 selector matchCount=0", "页面存在 aria-label=Confirm and submit 的按钮"],
   "changes": [
     {
       "nodeId": "node-8",
@@ -1191,11 +1183,7 @@ UI 不直接显示模型原始推理，只允许显示结构化结果：
     }
   ],
   "risk": "LOW",
-  "verificationPlan": [
-    "replay from node-8",
-    "verify button action result",
-    "verify workflow goal"
-  ]
+  "verificationPlan": ["replay from node-8", "verify button action result", "verify workflow goal"]
 }
 ```
 
@@ -1207,19 +1195,19 @@ UI 不直接显示模型原始推理，只允许显示结构化结果：
 
 ## 11.1 建议默认策略
 
-| Failure | transient retry | patch rounds | takeover | human |
-|---|---:|---:|---|---|
-| TIMING | 2 | 0 | no | no |
-| NAVIGATION | 2 | 1 | optional | no |
-| LOCATOR | 1 | 2 | optional | no |
-| PAGE_STATE | 1 | 2 | optional | maybe |
-| DATA | 0 | 2 | no | maybe |
-| AUTH | 0 | 0 | no | yes |
-| CAPTCHA | 0 | 0 | no | yes |
-| SIDE_EFFECT | 0 | 0 | no | yes |
-| NETWORK | 2 | 0 | no | no |
-| STRUCTURAL | 0 | 3 | no | maybe |
-| UNKNOWN | 1 | 1 | optional | yes |
+| Failure     | transient retry | patch rounds | takeover | human |
+| ----------- | --------------: | -----------: | -------- | ----- |
+| TIMING      |               2 |            0 | no       | no    |
+| NAVIGATION  |               2 |            1 | optional | no    |
+| LOCATOR     |               1 |            2 | optional | no    |
+| PAGE_STATE  |               1 |            2 | optional | maybe |
+| DATA        |               0 |            2 | no       | maybe |
+| AUTH        |               0 |            0 | no       | yes   |
+| CAPTCHA     |               0 |            0 | no       | yes   |
+| SIDE_EFFECT |               0 |            0 | no       | yes   |
+| NETWORK     |               2 |            0 | no       | no    |
+| STRUCTURAL  |               0 |            3 | no       | maybe |
+| UNKNOWN     |               1 |            1 | optional | yes   |
 
 > 这些数字是实现起始值，不是成功率保证。Coding Agent 应把策略做成可配置并以测试/运行数据调参。
 
@@ -1552,14 +1540,7 @@ commit-repair
 
 ```ts
 {
-  requestId,
-  runId,
-  workflowId,
-  action,
-  phase,
-  ok,
-  status,
-  timestamp
+  ;(requestId, runId, workflowId, action, phase, ok, status, timestamp)
 }
 ```
 
@@ -1604,11 +1585,7 @@ interface WorkflowPatchSet {
 
 interface WorkflowPatch {
   nodeId: string
-  op:
-    | 'replace'
-    | 'merge'
-    | 'add'
-    | 'remove'
+  op: 'replace' | 'merge' | 'add' | 'remove'
   path: string
   before?: unknown
   after?: unknown
@@ -1663,10 +1640,7 @@ Workflow 增加：
 interface WorkflowRevisionMetadata {
   revision: number
   updatedAt: number
-  source:
-    | 'manual-edit'
-    | 'ai-repair'
-    | 'generation'
+  source: 'manual-edit' | 'ai-repair' | 'generation'
   parentRevision?: number
   repairSessionId?: string
 }
@@ -1781,22 +1755,22 @@ checkpoint 失效或 side-effect outcome unknown 时，必须停。
 
 只有一个：
 
-| 用户入口 | UI | 内部 orchestration | 说明 |
-|---|---|---|---|
+| 用户入口      | UI          | 内部 orchestration                                                   | 说明             |
+| ------------- | ----------- | -------------------------------------------------------------------- | ---------------- |
 | Workflow 失败 | **AI 修复** | Diagnose → Proposal → Confirm → Apply → Verify → Commit Confirmation | 唯一一级 AI 入口 |
 
 ### 21.2 用户确认操作
 
 这些不是 AI 功能，而是对 AI 结果做明确授权：
 
-| 阶段 | 操作 | 作用 |
-|---|---|---|
-| `REPAIR_CONFIRMATION_REQUIRED` | **确认修复** | 允许修改 working copy 并执行 replay/verification |
-| `REPAIR_CONFIRMATION_REQUIRED` | **取消** | 放弃本次 repair，不修改 Workflow |
-| `REPAIR_VERIFIED` / `COMMIT_CONFIRMATION_REQUIRED` | **覆盖工作流** | 提交新 revision |
-| `REPAIR_VERIFIED` / `COMMIT_CONFIRMATION_REQUIRED` | **暂不覆盖** | 保留正式 Workflow，丢弃 working copy |
-| `REPAIR_FAILED` | **重新 AI 修复** | 重新进行 Diagnose → Proposal |
-| `REPAIR_FAILED` | **打开 Workflow 编辑器** | 普通人工编辑 |
+| 阶段                                               | 操作                     | 作用                                             |
+| -------------------------------------------------- | ------------------------ | ------------------------------------------------ |
+| `REPAIR_CONFIRMATION_REQUIRED`                     | **确认修复**             | 允许修改 working copy 并执行 replay/verification |
+| `REPAIR_CONFIRMATION_REQUIRED`                     | **取消**                 | 放弃本次 repair，不修改 Workflow                 |
+| `REPAIR_VERIFIED` / `COMMIT_CONFIRMATION_REQUIRED` | **覆盖工作流**           | 提交新 revision                                  |
+| `REPAIR_VERIFIED` / `COMMIT_CONFIRMATION_REQUIRED` | **暂不覆盖**             | 保留正式 Workflow，丢弃 working copy             |
+| `REPAIR_FAILED`                                    | **重新 AI 修复**         | 重新进行 Diagnose → Proposal                     |
+| `REPAIR_FAILED`                                    | **打开 Workflow 编辑器** | 普通人工编辑                                     |
 
 ### 21.3 明确禁止的一级 UI
 
@@ -1817,21 +1791,21 @@ AUTO_REPAIR
 
 # 22. UX 交互状态表
 
-| 状态 | 用户看到什么 | 可执行操作 |
-|---|---|---|
-| `READY` | 工作流已准备好 | 运行 |
-| `RUNNING` | 正在运行 | 暂停 / 停止 |
-| `FAILED` | 运行失败 + 结构化原因 | **AI 修复** |
-| `REPAIR_ANALYZING` | AI 正在分析问题 | 无 |
-| `REPAIR_PROPOSING` | AI 正在生成方案 | 无 |
-| `REPAIR_CONFIRMATION_REQUIRED` | 展示 patch / evidence / risk | **确认修复 / 取消** |
-| `REPAIR_APPLYING` | 正在应用修复 | 无 |
-| `REPAIR_VERIFYING` | 正在验证修复 | 无 |
-| `REPAIR_VERIFIED` | 修复已验证 | **覆盖工作流 / 暂不覆盖** |
-| `REPAIR_FAILED` | 修复验证失败 | **重新 AI 修复 / 编辑** |
-| `SIDE_EFFECT_UNKNOWN` | 检测到不可安全重放 | 人工检查 / 返回 |
-| `REVISION_CONFLICT` | Workflow 已变更 | **重新 AI 修复** |
-| `BLOCKED` | AI 无法安全修复 | 编辑 / 人工处理 |
+| 状态                           | 用户看到什么                 | 可执行操作                |
+| ------------------------------ | ---------------------------- | ------------------------- |
+| `READY`                        | 工作流已准备好               | 运行                      |
+| `RUNNING`                      | 正在运行                     | 暂停 / 停止               |
+| `FAILED`                       | 运行失败 + 结构化原因        | **AI 修复**               |
+| `REPAIR_ANALYZING`             | AI 正在分析问题              | 无                        |
+| `REPAIR_PROPOSING`             | AI 正在生成方案              | 无                        |
+| `REPAIR_CONFIRMATION_REQUIRED` | 展示 patch / evidence / risk | **确认修复 / 取消**       |
+| `REPAIR_APPLYING`              | 正在应用修复                 | 无                        |
+| `REPAIR_VERIFYING`             | 正在验证修复                 | 无                        |
+| `REPAIR_VERIFIED`              | 修复已验证                   | **覆盖工作流 / 暂不覆盖** |
+| `REPAIR_FAILED`                | 修复验证失败                 | **重新 AI 修复 / 编辑**   |
+| `SIDE_EFFECT_UNKNOWN`          | 检测到不可安全重放           | 人工检查 / 返回           |
+| `REVISION_CONFLICT`            | Workflow 已变更              | **重新 AI 修复**          |
+| `BLOCKED`                      | AI 无法安全修复              | 编辑 / 人工处理           |
 
 ### 22.1 单一主路径
 

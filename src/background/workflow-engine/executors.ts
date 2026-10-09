@@ -624,10 +624,7 @@ const click: BlockExecutor = async (data, ctx) => {
 const fill: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const value = String(data['value'] ?? '')
-  return runRaw(
-    withWait({ action: 'fill', target: targetFrom(data), value }, data),
-    ctx,
-  )
+  return runRaw(withWait({ action: 'fill', target: targetFrom(data), value }, data), ctx)
 }
 
 const selectOption: BlockExecutor = async (data, ctx) => {
@@ -2003,16 +2000,15 @@ async function evalLocalWorkflowJs(
         v: Record<string, unknown>,
       ) => unknown
 
-    const fn =
-      !statementWord.test(code)
-        ? (() => {
-            try {
-              return buildFn((src) => `"use strict";\nreturn (async () => (\n${src}\n))();`)
-            } catch {
-              return buildFn()
-            }
-          })()
-        : buildFn()
+    const fn = !statementWord.test(code)
+      ? (() => {
+          try {
+            return buildFn((src) => `"use strict";\nreturn (async () => (\n${src}\n))();`)
+          } catch {
+            return buildFn()
+          }
+        })()
+      : buildFn()
 
     const awaited = await Promise.race([
       Promise.resolve(
@@ -2455,19 +2451,15 @@ const uploadFileExec: BlockExecutor = async (data, ctx) => {
       files = normalizeWorkflowFiles(raw)
     } catch (error) {
       if (error instanceof UploadFileError) throw error
-      throw new UploadFileError(
-        'UPLOAD_FILE_VARIABLE_INVALID',
-        `upload-file: ${message(error)}`,
-        { selector },
-      )
+      throw new UploadFileError('UPLOAD_FILE_VARIABLE_INVALID', `upload-file: ${message(error)}`, {
+        selector,
+      })
     }
   }
 
   // Unified page-upload entry. The kernel resolves input vs drop zone.
   const waitFor =
-    data['waitForSelector'] === true
-      ? Math.max(0, Number(data['waitSelectorTimeout'] ?? 10000))
-      : 0
+    data['waitForSelector'] === true ? Math.max(0, Number(data['waitSelectorTimeout'] ?? 10000)) : 0
   const op: Op = {
     action: 'upload_files',
     target: targetFrom(data),
@@ -2491,8 +2483,7 @@ const uploadFileExec: BlockExecutor = async (data, ctx) => {
 
   // Node-level verification: the kernel reports what actually landed.
   const evidence = result.data as
-    | { count?: number; files?: { name: string; type: string; size: number }[] }
-    | undefined
+    { count?: number; files?: { name: string; type: string; size: number }[] } | undefined
   if (data['verifyAfterUpload'] !== false) {
     const injected = evidence?.files ?? []
     if (injected.length !== files.length) {
@@ -2529,9 +2520,7 @@ const uploadFileExec: BlockExecutor = async (data, ctx) => {
   }
   ctx.emit(
     'result',
-    `${evidence?.count ?? files.length} file(s) in the upload control: ${(
-      evidence?.files ?? []
-    )
+    `${evidence?.count ?? files.length} file(s) in the upload control: ${(evidence?.files ?? [])
       .map((f) => f.name)
       .join(', ')}`,
   )
@@ -2714,9 +2703,7 @@ const sortDataExec: BlockExecutor = async (data, ctx) => {
   })
   // `sortByProperty: false` (or an empty list) orders by the item itself.
   const criteria =
-    data['sortByProperty'] === true && keys.length > 0
-      ? keys
-      : [{ field: '', direction: 1 }]
+    data['sortByProperty'] === true && keys.length > 0 ? keys : [{ field: '', direction: 1 }]
   const rows = [...target]
   rows.sort((left, right) => compareDataItems(left, right, criteria))
   if (fromVariable && sourceName !== '') ctx.variables[sourceName] = rows
@@ -2734,9 +2721,9 @@ const dataMapping: BlockExecutor = async (data, ctx) => {
   // mapping returned the rows untouched and reported the count as mapped.
   const fromVariable = String(data['dataSource'] ?? 'table') === 'variable'
   const sourceName = String(data['varSourceName'] ?? '').trim()
-  const rows = (
-    fromVariable ? readRecordList(ctx.variables[sourceName]) : tableOf(ctx)
-  ).filter((row): row is Record<string, unknown> => !!row && typeof row === 'object')
+  const rows = (fromVariable ? readRecordList(ctx.variables[sourceName]) : tableOf(ctx)).filter(
+    (row): row is Record<string, unknown> => !!row && typeof row === 'object',
+  )
   const renames = readRecordList(data['sources']).flatMap((source) => {
     const record = (source ?? {}) as Record<string, unknown>
     const from = String(record['name'] ?? '').trim()
@@ -2906,7 +2893,8 @@ const handleDownload: BlockExecutor = async (data, ctx) => {
   // `waitForDownload` + `timeout` are this block's own fields. The download a
   // previous click started is rarely already on disk when the node runs, and
   // searching once reported 未找到匹配下载 for a file that landed a moment later.
-  const waitMs = data['waitForDownload'] === false ? 0 : Math.max(0, Number(data['timeout'] ?? 20000))
+  const waitMs =
+    data['waitForDownload'] === false ? 0 : Math.max(0, Number(data['timeout'] ?? 20000))
   const deadline = Date.now() + waitMs
   try {
     let match: chrome.downloads.DownloadItem | undefined

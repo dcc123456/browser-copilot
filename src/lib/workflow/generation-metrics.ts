@@ -134,8 +134,7 @@ export function summarizeMetrics(metrics: GenerationMetrics): MetricsSummary {
     failureRate: metrics.operatorAttempts
       ? Number((metrics.operatorFailures / metrics.operatorAttempts).toFixed(3))
       : 0,
-    jsOnlyViaGap:
-      metrics.jsAllowedCapabilityGap + metrics.jsRejectedNative >= metrics.jsCalls,
+    jsOnlyViaGap: metrics.jsAllowedCapabilityGap + metrics.jsRejectedNative >= metrics.jsCalls,
     totalTokens: metrics.promptTokens + metrics.completionTokens,
     durationMs,
   }

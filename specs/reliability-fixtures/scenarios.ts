@@ -95,10 +95,7 @@ const R02: ReliabilityScenario = {
   description:
     'click 指向 #gone，页面上不存在。必须以明确的“元素未找到”失败，不得静默执行其他元素。',
   graph: {
-    nodes: [
-      node('t', 'trigger'),
-      node('click', 'click', { selector: '#gone' }),
-    ],
+    nodes: [node('t', 'trigger'), node('click', 'click', { selector: '#gone' })],
     edges: [edge('t', 'click')],
   },
   buildPage: () =>
@@ -118,10 +115,7 @@ const R03: ReliabilityScenario = {
     '.card 匹配 3 张卡片。compat 取第一个（记录 firstOfMany）；generated-strict 必须' +
     '以 LOCATOR_AMBIGUOUS 失败，宁可不确定也不误点。',
   graph: {
-    nodes: [
-      node('t', 'trigger'),
-      node('click', 'click', { selector: '.card' }),
-    ],
+    nodes: [node('t', 'trigger'), node('click', 'click', { selector: '.card' })],
     edges: [edge('t', 'click')],
   },
   buildPage: () =>
@@ -310,10 +304,7 @@ const R10: ReliabilityScenario = {
     '工作流生成于 admin.example，却在 shop.example 的页面上运行。compat 只会报' +
     '“元素未找到”（误导）；generated-strict 必须在执行任何动作前报 WRONG_ORIGIN。',
   graph: {
-    nodes: [
-      node('t', 'trigger'),
-      node('click', 'click', { selector: '#admin-menu' }),
-    ],
+    nodes: [node('t', 'trigger'), node('click', 'click', { selector: '#admin-menu' })],
     edges: [edge('t', 'click')],
     settings: { generationOriginUrl: 'https://admin.example/console' },
   },

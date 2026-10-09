@@ -29,10 +29,7 @@ beforeEach(() => {
   vi.stubGlobal('chrome', makeChromeMock())
 })
 
-import {
-  parseSerializedSpec,
-  selectorAfterExecution,
-} from '../src/lib/workflow/target-to-selector'
+import { parseSerializedSpec, selectorAfterExecution } from '../src/lib/workflow/target-to-selector'
 import type { RecordedLocator } from '../src/lib/workflow/target-to-selector'
 import {
   resetSelectorTraces,

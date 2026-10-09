@@ -154,8 +154,7 @@ describe('the escape hatch is gated at the call site', () => {
       capabilityGap: {
         missingCapability: 'generate a canvas PNG via toDataURL',
         triedOperators: ['get-text', 'forms', 'event-click'],
-        whyInsufficient:
-          'No declarative operator can draw on a canvas or produce a binary image.',
+        whyInsufficient: 'No declarative operator can draw on a canvas or produce a binary image.',
         expectedResult: 'A data URL string is stored as the generatedImage variable.',
       },
     })

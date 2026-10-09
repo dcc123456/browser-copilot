@@ -34,7 +34,13 @@ function patch(): WorkflowPatchSet {
     patchSetId: 'p1',
     analysisId: 'a1',
     operations: [
-      { operationId: 'o1', nodeId: 'n5', kind: 'REPLACE_TARGET', reason: 'stale selector', evidenceIds: [] },
+      {
+        operationId: 'o1',
+        nodeId: 'n5',
+        kind: 'REPLACE_TARGET',
+        reason: 'stale selector',
+        evidenceIds: [],
+      },
     ],
     reason: 'fix selector',
     confidence: 0.9,
@@ -65,7 +71,10 @@ function makeActions(flags: StubFlags = {}): RecoveryActions & {
   const commits: Workflow[] = []
   return {
     commits,
-    diagnose: vi.fn(async () => ({ analysis: analysis(), verified: flags.diagnoseVerified ?? false })),
+    diagnose: vi.fn(async () => ({
+      analysis: analysis(),
+      verified: flags.diagnoseVerified ?? false,
+    })),
     propose: vi.fn(async () =>
       flags.noPatch ? { reason: 'provider unavailable' } : { patch: patch() },
     ),

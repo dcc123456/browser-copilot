@@ -11,14 +11,14 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { Workflow, WorkflowNode } from '../src/lib/workflow/types'
-import { applySelfHeal, lastResolutionOf, type NodeDegradation } from '../src/lib/workflow/self-heal'
+import {
+  applySelfHeal,
+  lastResolutionOf,
+  type NodeDegradation,
+} from '../src/lib/workflow/self-heal'
 import type { Target, TargetSpec } from '../src/lib/ops'
 
-function node(
-  id: string,
-  data: Record<string, unknown>,
-  label = '点击按钮',
-): WorkflowNode {
+function node(id: string, data: Record<string, unknown>, label = '点击按钮'): WorkflowNode {
   return { id, label, position: { x: 0, y: 0 }, data }
 }
 
@@ -51,9 +51,13 @@ describe('applySelfHeal', () => {
       }),
     ])
 
-    const healed = applySelfHeal(source, [degradation('n1', 'css|.old-list button', 'css|#buy', 3)], {
-      runId: 'run-1',
-    })
+    const healed = applySelfHeal(
+      source,
+      [degradation('n1', 'css|.old-list button', 'css|#buy', 3)],
+      {
+        runId: 'run-1',
+      },
+    )
 
     expect(healed.changes).toHaveLength(1)
     const data = healed.workflow.drawflow.nodes[0]!.data as Record<string, unknown>

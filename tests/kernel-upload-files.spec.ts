@@ -11,7 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runOp } from '../src/inpage/kernel'
 import type { Op, Target } from '../src/lib/ops'
 
-const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+const PNG_B64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
 const PNG_URL = `data:image/png;base64,${PNG_B64}`
 const TXT_URL = 'data:text/plain;base64,aGVsbG8='
 
@@ -24,10 +25,7 @@ function uploadOp(selector: string, extra: Partial<Op> = {}): Op {
   return {
     action: 'upload_files',
     target: cssTarget(selector),
-    files: [
-      { name: 'pic.png', mimeType: 'image/png', dataUrl: PNG_URL },
-      ...(extraFiles ?? []),
-    ],
+    files: [{ name: 'pic.png', mimeType: 'image/png', dataUrl: PNG_URL }, ...(extraFiles ?? [])],
     ...rest,
   }
 }
@@ -54,7 +52,10 @@ class FakeDataTransfer {
 class FakeDragEvent extends Event {
   dataTransfer: unknown
 
-  constructor(type: string, init: { dataTransfer?: unknown; bubbles?: boolean; cancelable?: boolean }) {
+  constructor(
+    type: string,
+    init: { dataTransfer?: unknown; bubbles?: boolean; cancelable?: boolean },
+  ) {
     super(type, init)
     this.dataTransfer = init.dataTransfer
   }
@@ -119,8 +120,7 @@ describe('upload_files: input injection', () => {
   it('U015/U016/U017: filename, mime and size are reported', () => {
     document.body.innerHTML = '<input id="f" type="file" />'
     const result = runOp(uploadOp('#f'))
-    const f = (result.data as { files: { name: string; type: string; size: number }[] })
-      .files[0]!
+    const f = (result.data as { files: { name: string; type: string; size: number }[] }).files[0]!
     expect(f.name).toBe('pic.png')
     expect(f.type).toBe('image/png')
     expect(f.size).toBeGreaterThan(0)
@@ -186,8 +186,7 @@ describe('drop_files / drop zone', () => {
   })
 
   it('U030: prefers a file input inside the drop zone', () => {
-    document.body.innerHTML =
-      '<div id="zone"><input type="file" class="hidden" /></div>'
+    document.body.innerHTML = '<div id="zone"><input type="file" class="hidden" /></div>'
     const result = runOp(uploadOp('#zone'))
     expect(result.ok).toBe(true)
     expect(result.note).toMatch(/associated input/i)

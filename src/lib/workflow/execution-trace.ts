@@ -272,9 +272,7 @@ export class TraceCollector {
       stepIndex,
       ...(nodeId ? { nodeId } : {}),
       status,
-      variableSummaries: snapshotAvailable
-        ? summarizeVariables(variables)
-        : {},
+      variableSummaries: snapshotAvailable ? summarizeVariables(variables) : {},
       snapshotAvailable,
       ...(pageState !== undefined ? { pageState } : {}),
       at: Date.now(),

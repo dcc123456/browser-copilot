@@ -22,10 +22,7 @@ export type CheckpointStatus = 'running' | 'ok' | 'failed' | 'cancelled'
 /** One recorded step of a run — the shared extension/server format. */
 /** Fine-grained checkpoint phases for SIDE-EFFECT safety (spec §14). */
 export type CheckpointPhase =
-  | 'nodeStarted'
-  | 'sideEffectStarted'
-  | 'sideEffectObserved'
-  | 'nodeCommitted'
+  'nodeStarted' | 'sideEffectStarted' | 'sideEffectObserved' | 'nodeCommitted'
 
 export interface RunCheckpoint {
   runId: string
@@ -217,21 +214,18 @@ export function resumePointOf(workflow: Workflow, checkpoints: RunCheckpoint[]):
     // The variable snapshot failed (spec §5.1): resuming would seed an empty
     // bag mislabeled as this point. Skip it rather than pretending to restore.
     if (cp.snapshotAvailable === false) continue
-    if (
-      cp.workflowFingerprint &&
-      cp.workflowFingerprint !== currentFingerprint
-    ) {
-      return { kind: 'fingerprint-mismatch', ...(cp.nodeId ? { nodeId: cp.nodeId } : {}), stepIndex: cp.stepIndex }
+    if (cp.workflowFingerprint && cp.workflowFingerprint !== currentFingerprint) {
+      return {
+        kind: 'fingerprint-mismatch',
+        ...(cp.nodeId ? { nodeId: cp.nodeId } : {}),
+        stepIndex: cp.stepIndex,
+      }
     }
-    const node = cp.nodeId
-      ? workflow.drawflow.nodes.find((n) => n.id === cp.nodeId)
-      : undefined
+    const node = cp.nodeId ? workflow.drawflow.nodes.find((n) => n.id === cp.nodeId) : undefined
     if (node && cp.status === 'ok') {
       // Phase-aware: observed side effects count as committed.
       const committed =
-        cp.phase === undefined ||
-        cp.phase === 'nodeCommitted' ||
-        cp.phase === 'sideEffectObserved'
+        cp.phase === undefined || cp.phase === 'nodeCommitted' || cp.phase === 'sideEffectObserved'
       if (committed) {
         const out = workflow.drawflow.edges.filter((edge) => edge.source === node.id)
         if (out.length === 0) return undefined as unknown as ResumeDecision
@@ -239,7 +233,12 @@ export function resumePointOf(workflow: Workflow, checkpoints: RunCheckpoint[]):
         // branch handle (fallback / condition outputs).
         const next =
           out.find((edge) => !edge.sourceHandle || edge.sourceHandle === 'next') ?? out[0]!
-        return { kind: 'ok', nodeId: next.target, variables: restoreVariables(cp), fromStepIndex: cp.stepIndex }
+        return {
+          kind: 'ok',
+          nodeId: next.target,
+          variables: restoreVariables(cp),
+          fromStepIndex: cp.stepIndex,
+        }
       }
       if (cp.phase === 'sideEffectStarted') {
         // The unsafe action FIRED; its outcome is unknown. Never blind-replay.

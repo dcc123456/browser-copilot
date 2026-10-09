@@ -54,8 +54,7 @@ export interface CurrentPageContext {
 }
 
 export type PageContextVerdict =
-  | { ok: true }
-  | { ok: false; code: 'WRONG_ORIGIN' | 'WRONG_PAGE'; message: string }
+  { ok: true } | { ok: false; code: 'WRONG_ORIGIN' | 'WRONG_PAGE'; message: string }
 
 /** Origin of a URL string, '' when unparseable. */
 export function originOfUrl(url: string): string {
@@ -132,10 +131,7 @@ export function pageContextOf(workflow: {
     explicit.origin.trim()
   ) {
     const origin = explicit.origin.trim()
-    const additionalOrigins = normalizeAdditionalOrigins(
-      explicit.additionalOrigins,
-      origin,
-    )
+    const additionalOrigins = normalizeAdditionalOrigins(explicit.additionalOrigins, origin)
     return {
       origin,
       ...(additionalOrigins.length ? { additionalOrigins } : {}),
@@ -178,7 +174,10 @@ export function recordedPageContext(
   return { origin, additionalOrigins }
 }
 
-/** Pattern match with a leading/trailing-glob shortcut (`/docs/*`). */function pathnameMatches(pathname: string, pattern: string): boolean {
+/** Pattern match with a leading/trailing-glob shortcut (`/docs/*`). */ function pathnameMatches(
+  pathname: string,
+  pattern: string,
+): boolean {
   if (pattern.endsWith('*')) {
     return pathname.startsWith(pattern.slice(0, -1))
   }
@@ -229,7 +228,11 @@ export function checkPageContext(
       }
     }
   }
-  if (expected.titleHint && current.title && !current.title.toLowerCase().includes(expected.titleHint.toLowerCase())) {
+  if (
+    expected.titleHint &&
+    current.title &&
+    !current.title.toLowerCase().includes(expected.titleHint.toLowerCase())
+  ) {
     return {
       ok: false,
       code: 'WRONG_PAGE',

@@ -5,16 +5,25 @@ import { validateWorkflowForRun } from '../src/lib/workflow/validation'
 function validIR(): WorkflowIR {
   return {
     version: 1,
-    goal: { summary: 'G', successConditions: [{ kind: 'elementExists', target: { testId: 'x' } }] as never[] },
+    goal: {
+      summary: 'G',
+      successConditions: [{ kind: 'elementExists', target: { testId: 'x' } }] as never[],
+    },
     inputs: [],
-    steps: [{
-      id: 's1', intent: 'Click', action: { kind: 'click' },
-      target: { kind: 'element', semantic: { testId: 'x' } } as never,
-      preconditions: [],
-      postconditions: [{ kind: 'elementExists', target: { testId: 'x' } }] as never[],
-      idempotency: 'conditional', sourceTraceIds: [],
-    } as never],
-    edges: [], metadata: {},
+    steps: [
+      {
+        id: 's1',
+        intent: 'Click',
+        action: { kind: 'click' },
+        target: { kind: 'element', semantic: { testId: 'x' } } as never,
+        preconditions: [],
+        postconditions: [{ kind: 'elementExists', target: { testId: 'x' } }] as never[],
+        idempotency: 'conditional',
+        sourceTraceIds: [],
+      } as never,
+    ],
+    edges: [],
+    metadata: {},
   }
 }
 describe('V64 static validation after compile', () => {

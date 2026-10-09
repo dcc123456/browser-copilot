@@ -63,9 +63,7 @@ describe('panel UI never writes content keys directly', () => {
     for (const dir of UI_DIRS) {
       for (const file of collectSources(dir)) {
         const source = readFileSync(file, 'utf8')
-        for (const match of source.matchAll(
-          /import\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"]/g,
-        )) {
+        for (const match of source.matchAll(/import\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"]/g)) {
           const module = match[2] ?? ''
           const forbidden = FORBIDDEN_IMPORTS[module]
           if (!forbidden) continue

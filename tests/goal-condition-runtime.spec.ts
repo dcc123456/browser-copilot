@@ -5,7 +5,11 @@
  * success. The derived goal spec is grounded in node postconditions only.
  */
 import { describe, expect, it } from 'vitest'
-import { deriveGoalSpecFromNodes, groundGoalSpecToGraph, normalizeGoalSpec } from '../src/lib/workflow/goal'
+import {
+  deriveGoalSpecFromNodes,
+  groundGoalSpecToGraph,
+  normalizeGoalSpec,
+} from '../src/lib/workflow/goal'
 import {
   evaluateAllConditions,
   evaluateCondition,
@@ -96,7 +100,10 @@ describe('deriveGoalSpecFromNodes', () => {
 
 describe('groundGoalSpecToGraph', () => {
   const invented = { kind: 'variableExists', name: 'xiaohongshuTitle' } as WorkflowCondition
-  const inventedContent = { kind: 'variableExists', name: 'xiaohongshuContent' } as WorkflowCondition
+  const inventedContent = {
+    kind: 'variableExists',
+    name: 'xiaohongshuContent',
+  } as WorkflowCondition
 
   it('drops the goal rows that name a variable this graph never writes', () => {
     // The round-22 graph: 26/26 clean, and an L3 that could never hold because
@@ -117,12 +124,19 @@ describe('groundGoalSpecToGraph', () => {
     const out = groundGoalSpecToGraph(
       {
         summary: '生成图文草稿',
-        successConditions: [invented, inventedContent, { kind: 'urlContains', value: 'xiaohongshu.com' }],
+        successConditions: [
+          invented,
+          inventedContent,
+          { kind: 'urlContains', value: 'xiaohongshu.com' },
+        ],
       },
       { name: 'xhs', nodes },
     )
     expect(out.dropped).toEqual([invented, inventedContent])
-    expect(out.goalSpec.successConditions.map((c) => c.kind)).toEqual(['urlContains', 'elementVisible'])
+    expect(out.goalSpec.successConditions.map((c) => c.kind)).toEqual([
+      'urlContains',
+      'elementVisible',
+    ])
     expect(out.goalSpec.summary).toBe('生成图文草稿')
   })
 
@@ -159,7 +173,9 @@ describe('groundGoalSpecToGraph', () => {
           node('c', 'event-click', {
             __reliability: {
               intent: '保存草稿',
-              postconditions: [{ kind: 'elementVisible', target: { role: 'button', name: '草稿箱' } }],
+              postconditions: [
+                { kind: 'elementVisible', target: { role: 'button', name: '草稿箱' } },
+              ],
             },
           }),
         ],
@@ -189,7 +205,9 @@ describe('groundGoalSpecToGraph', () => {
         node('b', 'event-click', {
           __reliability: {
             intent: '保存草稿',
-            postconditions: [{ kind: 'elementVisible', target: { role: 'button', name: '草稿箱' } }],
+            postconditions: [
+              { kind: 'elementVisible', target: { role: 'button', name: '草稿箱' } },
+            ],
           },
         }),
         node('c', 'event-click', {
@@ -201,7 +219,7 @@ describe('groundGoalSpecToGraph', () => {
     expect(out.goalSpec.successConditions.map((c) => c.kind)).toEqual(['urlContains', 'urlChanged'])
   })
 
-  it('counts a declared run input as grounding, and the trigger\'s own goal copy as not', () => {
+  it("counts a declared run input as grounding, and the trigger's own goal copy as not", () => {
     const grounded = groundGoalSpecToGraph(
       { summary: 's', successConditions: [{ kind: 'variableExists', name: 'apiKey' }] },
       {
@@ -250,7 +268,7 @@ describe('groundGoalSpecToGraph', () => {
       {
         summary: 's',
         successConditions: [
-          { kind: 'elementExists', target: { text: '保存草稿' }},
+          { kind: 'elementExists', target: { text: '保存草稿' } },
           { kind: 'elementExists', target: { text: '暂存离开' } },
         ],
       },
@@ -260,7 +278,10 @@ describe('groundGoalSpecToGraph', () => {
       '暂存离开',
     )
     // A row the page already answers is left exactly as it was.
-    expect(out.goalSpec.successConditions[1]).toEqual({ kind: 'elementExists', target: { text: '暂存离开' } })
+    expect(out.goalSpec.successConditions[1]).toEqual({
+      kind: 'elementExists',
+      target: { text: '暂存离开' },
+    })
   })
 
   it('does not re-word a row that aims at state no step ever spoke about', () => {
@@ -269,7 +290,10 @@ describe('groundGoalSpecToGraph', () => {
     // what 「保存成功」 should become, so guessing would be the fabrication this file
     // removes — the row stays, and it fails loudly if it never lands.
     const out = groundGoalSpecToGraph(
-      { summary: 's', successConditions: [{ kind: 'elementExists', target: { text: '保存成功' } }] },
+      {
+        summary: 's',
+        successConditions: [{ kind: 'elementExists', target: { text: '保存成功' } }],
+      },
       {
         name: 'x',
         nodes: [
@@ -302,8 +326,12 @@ describe('evaluateCondition', () => {
   it('urlContains / urlMatches read the live URL', async () => {
     const probe = fakeProbe({ url: 'https://x.test/dashboard?ok=1' })
     expect(
-      (await evaluateCondition({ kind: 'urlContains', value: '/dashboard' }, { variables: {}, probe }))
-        .satisfied,
+      (
+        await evaluateCondition(
+          { kind: 'urlContains', value: '/dashboard' },
+          { variables: {}, probe },
+        )
+      ).satisfied,
     ).toBe(true)
     expect(
       (
@@ -372,12 +400,20 @@ describe('evaluateCondition', () => {
     const target = { role: 'button' }
     const probe = fakeProbe({ count: 2 })
     expect(
-      (await evaluateCondition({ kind: 'count', target, op: 'gte', value: 2 }, { variables: {}, probe }))
-        .satisfied,
+      (
+        await evaluateCondition(
+          { kind: 'count', target, op: 'gte', value: 2 },
+          { variables: {}, probe },
+        )
+      ).satisfied,
     ).toBe(true)
     expect(
-      (await evaluateCondition({ kind: 'count', target, op: 'eq', value: 1 }, { variables: {}, probe }))
-        .satisfied,
+      (
+        await evaluateCondition(
+          { kind: 'count', target, op: 'eq', value: 1 },
+          { variables: {}, probe },
+        )
+      ).satisfied,
     ).toBe(false)
   })
 
@@ -515,12 +551,11 @@ describe("the goal gate's settle window", () => {
       reads.n += 1
       return original.call(probe)
     }
-    const verdict = await verifyGoalSpec(
-      goal,
-      { variables: {}, probe },
-      undefined,
-      { settleMs: 3000, pollMs: 1500, sleep: async () => {} },
-    )
+    const verdict = await verifyGoalSpec(goal, { variables: {}, probe }, undefined, {
+      settleMs: 3000,
+      pollMs: 1500,
+      sleep: async () => {},
+    })
     expect(verdict.achieved).toBe(false)
     // first pass + two re-reads — the window is bounded, not a spin
     expect(reads.n).toBe(3)
@@ -528,10 +563,10 @@ describe("the goal gate's settle window", () => {
   })
 
   it('defaults to the pure single read (no test pays a timer)', async () => {
-    const verdict = await verifyGoalSpec(
-      goal,
-      { variables: {}, probe: fakeProbe({ url: 'https://x.test/publish' }) },
-    )
+    const verdict = await verifyGoalSpec(goal, {
+      variables: {},
+      probe: fakeProbe({ url: 'https://x.test/publish' }),
+    })
     expect(verdict.achieved).toBe(false)
   })
 
@@ -556,7 +591,7 @@ describe("the goal gate's settle window", () => {
   })
 })
 
-describe('a condition recorded as the node\'s own rich Target', () => {
+describe("a condition recorded as the node's own rich Target", () => {
   // Generation writes `condition.target` as the `{ primary, fallbacks }` chain its
   // snapshot produced. That shape is what a replay can actually click, so neither
   // the guard, the log line, nor the observation may treat it as noise.
@@ -578,12 +613,20 @@ describe('a condition recorded as the node\'s own rich Target', () => {
     fallbacks: [{ how: 'css', value: 'div > div:nth-of-type(2) > input' }],
   }
 
-  it('the guard keeps a positional-only target: dropping it deleted the step\'s whole claim', () => {
-    const cssOnly = { kind: 'elementExists', target: { fallbacks: [], primary: { how: 'css', value: 'body > div' } } }
+  it("the guard keeps a positional-only target: dropping it deleted the step's whole claim", () => {
+    const cssOnly = {
+      kind: 'elementExists',
+      target: { fallbacks: [], primary: { how: 'css', value: 'body > div' } },
+    }
     expect(isWorkflowCondition(cssOnly)).toBe(true)
     expect(workflowConditionsOf([cssOnly])).toHaveLength(1)
     // Counterfactual guard: an EMPTY chain matches everything, so it stays refused.
-    expect(isWorkflowCondition({ kind: 'elementExists', target: { fallbacks: [], primary: { how: 'css', value: '  ' } } })).toBe(false)
+    expect(
+      isWorkflowCondition({
+        kind: 'elementExists',
+        target: { fallbacks: [], primary: { how: 'css', value: '  ' } },
+      }),
+    ).toBe(false)
     expect(isWorkflowCondition({ kind: 'elementExists', target: {} })).toBe(false)
   })
 
@@ -600,7 +643,10 @@ describe('a condition recorded as the node\'s own rich Target', () => {
   })
 
   it('names the element in the run log instead of rendering "元素存在 "', () => {
-    const condition = { kind: 'elementExists', target: closedShadow } as unknown as WorkflowCondition
+    const condition = {
+      kind: 'elementExists',
+      target: closedShadow,
+    } as unknown as WorkflowCondition
     expect(describeCondition(condition)).toBe('元素存在 button "暂存离开"')
     expect(conditionTargetName(closedShadow)).toBe('暂存离开')
     expect(conditionTargetName({ role: 'button', accessibleName: '发货' })).toBe('发货')

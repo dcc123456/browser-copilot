@@ -109,8 +109,12 @@ describe('WorkflowHealthView', () => {
   })
 
   it('localizes the first-replay line', () => {
-    expect(renderHealth(stable, firstRun({ outcome: 'failed', failureCode: 'LOCATOR_NOT_FOUND' }), 'zh-CN')).toContain(
-      '首次回放失败（LOCATOR_NOT_FOUND）',
-    )
+    expect(
+      renderHealth(
+        stable,
+        firstRun({ outcome: 'failed', failureCode: 'LOCATOR_NOT_FOUND' }),
+        'zh-CN',
+      ),
+    ).toContain('首次回放失败（LOCATOR_NOT_FOUND）')
   })
 })

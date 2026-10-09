@@ -38,9 +38,7 @@ function sessionWithActions(count: number) {
     session = recordActionFinished(session, {
       passed: true,
       nodeId: `n-gen-${index}`,
-      ...(index === count - 1
-        ? { verification: { kind: 'goal', passed: true } }
-        : {}),
+      ...(index === count - 1 ? { verification: { kind: 'goal', passed: true } } : {}),
       at: 210 + index * 10,
     }).session
   }

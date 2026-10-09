@@ -200,7 +200,9 @@ export async function explainSilence(client, conversationId = '') {
       'A worker that dies mid-run in this project has historically been outgrown by a storage key ' +
       '(see the [fs-outbox] warn in chrome://extensions → Inspect views). Quit and restart the browser: ' +
       'an unpacked extension is re-read from disk, so the restart installs the current build too.' +
-      (String(probe?.error ?? '').includes('未连接') ? '' : ` It refused with: ${String(probe?.error ?? 'unknown')}`)
+      (String(probe?.error ?? '').includes('未连接')
+        ? ''
+        : ` It refused with: ${String(probe?.error ?? 'unknown')}`)
     )
   return `the worker answers, but does not know run ${conversationId || '(none)'} — it restarted during the run (build ${probe.data?.build || 'unreported'}); the work it was doing is gone from memory, so re-generate rather than reattach`
 }

@@ -89,7 +89,7 @@ JavaScript Escape Hatch
   1. 没有现有原生 Operator 能表达目标；或
   2. 原生 Operator 组合也无法表达目标；或
   3. 经过明确能力缺口判定后，确实需要自定义 DOM/计算逻辑；
-  才可以进入候选。
+     才可以进入候选。
 - JS 使用必须记录结构化 justification：
   - `missingCapability`
   - `triedOperators[]`
@@ -372,11 +372,7 @@ node.data.__workflowAi.goalContract
         "target": "create-customer-button"
       }
     ],
-    "failureMeaning": [
-      "创建按钮不存在",
-      "创建按钮不可点击",
-      "点击后未进入创建表单"
-    ]
+    "failureMeaning": ["创建按钮不存在", "创建按钮不可点击", "点击后未进入创建表单"]
   }
 }
 ```
@@ -1546,9 +1542,9 @@ conditions
 {
   "target": ".product-card",
   "fields": {
-    "name": {"type": "text"},
-    "price": {"type": "text"},
-    "url": {"type": "attribute", "name": "href"}
+    "name": { "type": "text" },
+    "price": { "type": "text" },
+    "url": { "type": "attribute", "name": "href" }
   }
 }
 ```

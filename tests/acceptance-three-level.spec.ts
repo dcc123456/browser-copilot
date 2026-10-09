@@ -4,24 +4,40 @@ import type { ConditionPageProbe } from '../src/background/workflow-engine/condi
 import { withNodeGoalContract } from '../src/lib/workflow/node-goal-contract'
 import type { Workflow } from '../src/lib/workflow/types'
 const passingProbe: ConditionPageProbe = {
-  exists: async () => true, visible: async () => true, enabled: async () => true,
-  text: async () => 'ok', attribute: async () => 'v', count: async () => 1, url: async () => 'https://t.test',
+  exists: async () => true,
+  visible: async () => true,
+  enabled: async () => true,
+  text: async () => 'ok',
+  attribute: async () => 'v',
+  count: async () => 1,
+  url: async () => 'https://t.test',
 }
 function makeWorkflow(opts: {
-  runOk: boolean; criteriaHeld?: boolean; goalHeld?: boolean; includeGoal?: boolean
+  runOk: boolean
+  criteriaHeld?: boolean
+  goalHeld?: boolean
+  includeGoal?: boolean
 }): { workflow: Workflow; run: never } {
   // Node contract is verified against the produced variable so L2 is
   // independent of the page probe; this isolates L3 goal failures.
-  const nodeData = withNodeGoalContract({ blockId: 'event-click' }, {
-    version: 1, goal: 'click submit',
-    successCriteria: [
-      opts.criteriaHeld === false
-        ? ({ kind: 'variableExists', name: 'missing' } as never)
-        : ({ kind: 'variableExists', name: 'clicked' } as never)
-    ],
-  })
+  const nodeData = withNodeGoalContract(
+    { blockId: 'event-click' },
+    {
+      version: 1,
+      goal: 'click submit',
+      successCriteria: [
+        opts.criteriaHeld === false
+          ? ({ kind: 'variableExists', name: 'missing' } as never)
+          : ({ kind: 'variableExists', name: 'clicked' } as never),
+      ],
+    },
+  )
   const settings: Record<string, unknown> = {
-    saveLog:false, debugMode:false, notification:false, reuseLastState:false, provenance:'chat-generate',
+    saveLog: false,
+    debugMode: false,
+    notification: false,
+    reuseLastState: false,
+    provenance: 'chat-generate',
   }
   if (opts.includeGoal !== false) {
     settings['goalSpec'] = {
@@ -29,19 +45,35 @@ function makeWorkflow(opts: {
       successConditions: [
         opts.goalHeld === false
           ? ({ kind: 'elementExists', target: { testId: 'business-result-absent' } } as never)
-          : ({ kind: 'elementExists', target: { testId: 'business-result' } } as never)
+          : ({ kind: 'elementExists', target: { testId: 'business-result' } } as never),
       ],
     }
   }
   const workflow = {
-    id: 'w', name: 'w', description: '', createdAt: 0, updatedAt: 0,
-    trigger: { type: 'manual', enabled: true }, settings,
-    drawflow: { nodes: [{ id: 'n', label: 'event-click', position:{x:0,y:0}, data: nodeData }], edges: [] },
+    id: 'w',
+    name: 'w',
+    description: '',
+    createdAt: 0,
+    updatedAt: 0,
+    trigger: { type: 'manual', enabled: true },
+    settings,
+    drawflow: {
+      nodes: [{ id: 'n', label: 'event-click', position: { x: 0, y: 0 }, data: nodeData }],
+      edges: [],
+    },
   } as unknown as Workflow
-  return { workflow, run: { runId: 'r', outcome: opts.runOk ? 'ok' : 'failed', variables: { clicked: true } } as never }
+  return {
+    workflow,
+    run: {
+      runId: 'r',
+      outcome: opts.runOk ? 'ok' : 'failed',
+      variables: { clicked: true },
+    } as never,
+  }
 }
 const failingProbe: ConditionPageProbe = {
-  ...passingProbe, exists: async () => false,
+  ...passingProbe,
+  exists: async () => false,
 }
 describe('V49 L1 execution verification', () => {
   it('marks every node executed only on a successful run', async () => {

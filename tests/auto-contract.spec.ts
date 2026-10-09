@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  autoCompleteReliability,
-  inferIdempotency,
-} from '../src/lib/workflow/auto-contract'
+import { autoCompleteReliability, inferIdempotency } from '../src/lib/workflow/auto-contract'
 import { runOperatorTool, composeWorkflowFromDraft } from '../src/background/operator-tool-handler'
 import { goalSpecOf } from '../src/lib/workflow/reliability'
 import { validateWorkflowForRun } from '../src/lib/workflow/validation'
@@ -101,17 +98,25 @@ describe('auto reliability completion (generation must always succeed)', () => {
   })
 
   it('fills both idempotency and postcondition when the model omits everything', () => {
-    const nodes: Array<{ data: Record<string, unknown> }> = [{ data: { blockId: 'forms', action: 'submit', selector: '#pay' } }]
+    const nodes: Array<{ data: Record<string, unknown> }> = [
+      { data: { blockId: 'forms', action: 'submit', selector: '#pay' } },
+    ]
     expect(autoCompleteReliability(nodes)).toBe(1)
     expect(nodes[0]!.data!['__reliability']).toMatchObject({
       idempotency: 'unsafe',
-      postconditions: [{ kind: 'elementExists', target: { stableAttributes: { 'data-css': '#pay' } } }],
+      postconditions: [
+        { kind: 'elementExists', target: { stableAttributes: { 'data-css': '#pay' } } },
+      ],
     })
   })
 
   it('end-to-end: a model that writes NO contract still produces a validated workflow', async () => {
     const conversation = 'c-auto'
-    await runOperatorTool({ name: 'wf_op_trigger', args: { goalText: '提交订单' }, conversationId: conversation })
+    await runOperatorTool({
+      name: 'wf_op_trigger',
+      args: { goalText: '提交订单' },
+      conversationId: conversation,
+    })
     // Minimal submit node — no __reliability at all (the failure case the user hit).
     await runOperatorTool({
       name: 'wf_op_forms',
@@ -127,7 +132,11 @@ describe('auto reliability completion (generation must always succeed)', () => {
 
   it('end-to-end: key element actions carry readiness and generated-strict validation passes', async () => {
     const conversation = 'c-ready'
-    await runOperatorTool({ name: 'wf_op_trigger', args: { goalText: '提交订单' }, conversationId: conversation })
+    await runOperatorTool({
+      name: 'wf_op_trigger',
+      args: { goalText: '提交订单' },
+      conversationId: conversation,
+    })
     await runOperatorTool({
       name: 'wf_op_event-click',
       args: { selector: '.checkout' },
@@ -142,8 +151,9 @@ describe('auto reliability completion (generation must always succeed)', () => {
     if ('error' in out) throw new Error(`generation failed: ${out.error}`)
 
     const reliability = out.workflow.drawflow.nodes
-      .map((n): NodeReliabilitySpec | undefined =>
-        (n.data?.['__reliability'] as NodeReliabilitySpec | undefined),
+      .map(
+        (n): NodeReliabilitySpec | undefined =>
+          n.data?.['__reliability'] as NodeReliabilitySpec | undefined,
       )
       .filter((spec): spec is NodeReliabilitySpec => Boolean(spec))
     expect(reliability.some((spec) => spec.readiness)).toBe(true)

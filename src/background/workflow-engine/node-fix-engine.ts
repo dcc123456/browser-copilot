@@ -27,10 +27,7 @@ import {
 import { describeCondition, type WorkflowCondition } from '../../lib/workflow/conditions'
 import { nodeGoalContractOf } from '../../lib/workflow/node-goal-contract'
 import { operatorExecClass } from '../../lib/workflow/operator-class'
-import {
-  createDriverConditionProbe,
-  evaluateConditionWithProbe,
-} from './condition-runtime'
+import { createDriverConditionProbe, evaluateConditionWithProbe } from './condition-runtime'
 import { executeOperatorNode } from './operator-exec'
 import type { ScopeWindow } from '../automation-scope'
 import { normalScopeFromWindowId } from '../automation-scope'
@@ -117,9 +114,7 @@ function defaultEvaluateCriteria(scope: ScopeWindow | undefined, signal: AbortSi
 }
 
 /** Default callModel over the active provider. Returns null when no provider. */
-function defaultCallModel(
-  signal: AbortSignal,
-): NonNullable<NodeFixDeps['callModel']> {
+function defaultCallModel(signal: AbortSignal): NonNullable<NodeFixDeps['callModel']> {
   return async (prompt, onProgress) => {
     const settings = await getSettings()
     const provider = settings.providers.find((p) => p.id === settings.activeProviderId)
@@ -236,7 +231,7 @@ export async function runNodeFix(
       const preconditionOutcomes = await evaluateCriteria(preconditions || [], variables)
       throwIfAborted(signal)
       const unmetPreconditions = preconditionOutcomes.filter((o) => !o.satisfied)
-      
+
       // Preconditions not met — need to diagnose why
       const prompt = buildNodeFixPrompt({
         blockId: input.blockId,
@@ -269,12 +264,17 @@ export async function runNodeFix(
         return {
           success: false,
           rounds: round + 1,
-          reason: 'No AI provider is configured (or its API key is empty). Configure a provider to use AI fix.',
+          reason:
+            'No AI provider is configured (or its API key is empty). Configure a provider to use AI fix.',
         }
       }
       const candidate = sanitizeNodeData(reply.data)
       if (!candidate) {
-        return { success: false, rounds: round + 1, reason: 'The model returned unusable node parameters.' }
+        return {
+          success: false,
+          rounds: round + 1,
+          reason: 'The model returned unusable node parameters.',
+        }
       }
 
       push(round, 'applying', reply.rationale, 'done')
@@ -347,12 +347,17 @@ export async function runNodeFix(
       return {
         success: false,
         rounds: round + 1,
-        reason: 'No AI provider is configured (or its API key is empty). Configure a provider to use AI fix.',
+        reason:
+          'No AI provider is configured (or its API key is empty). Configure a provider to use AI fix.',
       }
     }
     const candidate = sanitizeNodeData(reply.data)
     if (!candidate) {
-      return { success: false, rounds: round + 1, reason: 'The model returned unusable node parameters.' }
+      return {
+        success: false,
+        rounds: round + 1,
+        reason: 'The model returned unusable node parameters.',
+      }
     }
 
     // 7. adopt candidate and re-verify next round.

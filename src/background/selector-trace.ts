@@ -32,12 +32,7 @@ export interface SelectorProbeEntry {
 }
 
 /** One stage of the locator pipeline, in execution order. */
-export type SelectorTraceStage =
-  | 'raw'
-  | 'resolved'
-  | 'probed'
-  | 'chosen'
-  | 'executed'
+export type SelectorTraceStage = 'raw' | 'resolved' | 'probed' | 'chosen' | 'executed'
 
 /** The trace recorded for one element-taking operator call. */
 export interface SelectorTrace {
@@ -111,38 +106,29 @@ export function beginSelectorTrace(input: {
   const raw = input.rawArgs
   const target = raw['target']
   const primary =
-    target && typeof target === 'object'
-      ? (target as { primary?: unknown }).primary
+    target && typeof target === 'object' ? (target as { primary?: unknown }).primary : undefined
+  const primaryText =
+    primary && typeof primary === 'object'
+      ? String((primary as { how?: unknown }).how ?? '') +
+        '|' +
+        String((primary as { value?: unknown }).value ?? '')
       : undefined
-  const primaryText = primary && typeof primary === 'object'
-    ? String(
-        (primary as { how?: unknown }).how ?? '',
-      ) +
-      '|' +
-      String((primary as { value?: unknown }).value ?? '')
-    : undefined
   const trace: SelectorTrace = {
     conversationId: input.conversationId,
     toolName: input.toolName,
     blockId: input.blockId,
     at: Date.now(),
     raw: {
-      ...(typeof raw['ref'] === 'string' && raw['ref'].trim()
-        ? { ref: raw['ref'].trim() }
-        : {}),
+      ...(typeof raw['ref'] === 'string' && raw['ref'].trim() ? { ref: raw['ref'].trim() } : {}),
       ...(typeof raw['selector'] === 'string' && raw['selector'].trim()
         ? { selector: raw['selector'].trim() }
         : {}),
-      ...(primaryText
-        ? { targetPrimary: primaryText.slice(0, 200) }
-        : {}),
+      ...(primaryText ? { targetPrimary: primaryText.slice(0, 200) } : {}),
       ...(target &&
       typeof target === 'object' &&
       Array.isArray((target as { fallbacks?: unknown }).fallbacks)
         ? {
-            fallbackCount: (
-              (target as { fallbacks: unknown[] }).fallbacks
-            ).length,
+            fallbackCount: (target as { fallbacks: unknown[] }).fallbacks.length,
           }
         : {}),
     },
@@ -236,9 +222,7 @@ export function commitSelectorTrace(
     `${SELECTOR_TRACE_PREFIX} ${trace.toolName} ${outcome.ok ? 'OK' : 'FAIL'} raw ${raw} → recorded ${chosen} → executed ${executed}`,
   )
   if (trace.probes && trace.probes.length > 0) {
-    const detail = trace.probes
-      .map((probe) => `${probe.count}× ${probe.selector}`)
-      .join(' · ')
+    const detail = trace.probes.map((probe) => `${probe.count}× ${probe.selector}`).join(' · ')
     console.info(`${SELECTOR_TRACE_PREFIX}   probes: ${detail}`)
   }
   if (trace.error) {
@@ -256,9 +240,7 @@ export function selectorTraces(): readonly SelectorTrace[] {
 }
 
 /** Traces for one conversation, oldest first. */
-export function selectorTracesOf(
-  conversationId: string,
-): readonly SelectorTrace[] {
+export function selectorTracesOf(conversationId: string): readonly SelectorTrace[] {
   return ring.filter((trace) => trace.conversationId === conversationId)
 }
 

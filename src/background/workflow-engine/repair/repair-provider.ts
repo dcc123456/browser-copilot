@@ -10,14 +10,8 @@
  */
 
 import { streamCompletion } from '../../../lib/llm'
-import {
-  buildRepairMessages,
-  parseRepairProposal,
-} from './repair-agent'
-import type {
-  RepairContext,
-  WorkflowPatchSet,
-} from '../../../lib/workflow/repair/types'
+import { buildRepairMessages, parseRepairProposal } from './repair-agent'
+import type { RepairContext, WorkflowPatchSet } from '../../../lib/workflow/repair/types'
 
 export interface RepairModelConfig {
   apiKey: string

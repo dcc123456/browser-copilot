@@ -5,7 +5,10 @@
  * anchor moves) before the replay proves it.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { runAutoRepair, type AutoRepairDeps } from '../src/background/workflow-engine/auto-repair/orchestrator'
+import {
+  runAutoRepair,
+  type AutoRepairDeps,
+} from '../src/background/workflow-engine/auto-repair/orchestrator'
 import type { WorkflowCondition } from '../src/lib/workflow/conditions'
 import { PatchEngine } from '../src/lib/workflow/repair/patch-engine'
 import { applyRepairCandidate } from '../src/lib/workflow/repair-candidate'
@@ -29,10 +32,7 @@ function graphWithNavigationFirst(url = 'https://creator.example.com/publish'): 
   )
   const nav = chain.nodes[1]!
   nav.data = { ...nav.data, url }
-  return makeWorkflow(
-    chain.nodes,
-    [edge('t', 'nav'), edge('nav', 'click')],
-  )
+  return makeWorkflow(chain.nodes, [edge('t', 'nav'), edge('nav', 'click')])
 }
 
 function groundedWith(expectedOrigin: string, workflow: Workflow): Workflow {
@@ -61,7 +61,7 @@ function analysisFor(): FailureAnalysis {
 }
 
 describe('navigationAnchorOf', () => {
-  it('reads the destination of the graph\'s own first navigation', () => {
+  it("reads the destination of the graph's own first navigation", () => {
     const anchor = navigationAnchorOf(graphWithNavigationFirst())
     expect(anchor).toEqual({
       nodeId: 'nav',
@@ -72,13 +72,21 @@ describe('navigationAnchorOf', () => {
 
   it('refuses to anchor past a page action or past a dynamic destination', () => {
     const actsFirst = makeWorkflow(
-      [node('t', 'trigger'), node('click', 'event-click', { selector: '.x' }), node('nav', 'new-tab', { url: 'https://a.test/' })],
+      [
+        node('t', 'trigger'),
+        node('click', 'event-click', { selector: '.x' }),
+        node('nav', 'new-tab', { url: 'https://a.test/' }),
+      ],
       [edge('t', 'click'), edge('click', 'nav')],
     )
     expect(navigationAnchorOf(actsFirst)).toBeUndefined()
 
     expect(navigationAnchorOf(graphWithNavigationFirst('{{targetUrl}}'))).toBeUndefined()
-    expect(navigationAnchorOf(groundedWith('https://github.com', makeWorkflow([node('t', 'trigger')], [])))).toBeUndefined()
+    expect(
+      navigationAnchorOf(
+        groundedWith('https://github.com', makeWorkflow([node('t', 'trigger')], [])),
+      ),
+    ).toBeUndefined()
   })
 })
 
@@ -87,7 +95,9 @@ describe('pageContextReanchorCandidate', () => {
     const workflow = groundedWith('https://github.com', graphWithNavigationFirst())
     const candidate = pageContextReanchorCandidate(workflow)!
     expect(candidate.strategy).toBe('page-context-reanchor')
-    expect(candidate.settingsPatch).toEqual({ pageContext: { origin: 'https://creator.example.com' } })
+    expect(candidate.settingsPatch).toEqual({
+      pageContext: { origin: 'https://creator.example.com' },
+    })
     expect(candidate.nodePatches).toEqual([])
     expect(candidate.edgePatches).toEqual([])
     expect(candidate.reason).toContain('https://creator.example.com')
@@ -103,11 +113,19 @@ describe('pageContextReanchorCandidate', () => {
   it('finds nothing to re-anchor when there is no grounding or no contradiction', () => {
     expect(pageContextReanchorCandidate(graphWithNavigationFirst())).toBeUndefined()
     expect(
-      pageContextReanchorCandidate(groundedWith('https://creator.example.com', graphWithNavigationFirst())),
+      pageContextReanchorCandidate(
+        groundedWith('https://creator.example.com', graphWithNavigationFirst()),
+      ),
     ).toBeUndefined()
     expect(
       pageContextReanchorCandidate(
-        groundedWith('https://github.com', makeWorkflow([node('t', 'trigger'), node('click', 'event-click', { selector: '.x' })], [edge('t', 'click')])),
+        groundedWith(
+          'https://github.com',
+          makeWorkflow(
+            [node('t', 'trigger'), node('click', 'event-click', { selector: '.x' })],
+            [edge('t', 'click')],
+          ),
+        ),
       ),
     ).toBeUndefined()
   })
@@ -135,12 +153,18 @@ describe('pageContextReanchorPatchSet (v1 patch vocabulary)', () => {
     const analysis = analysisFor()
     const patch = pageContextReanchorPatchSet(workflow, 'a1')!
 
-    const stale = { ...patch, operations: [{ ...patch.operations[0]!, before: 'https://other.test' }] }
+    const stale = {
+      ...patch,
+      operations: [{ ...patch.operations[0]!, before: 'https://other.test' }],
+    }
     const staleResult = engine.validatePatch(workflow, analysis, stale)
     expect(staleResult.ok).toBe(false)
     expect(staleResult.issues[0]?.message).toContain('stale')
 
-    const junk = { ...patch, operations: [{ ...patch.operations[0]!, after: 'creator.example.com/publish' }] }
+    const junk = {
+      ...patch,
+      operations: [{ ...patch.operations[0]!, after: 'creator.example.com/publish' }],
+    }
     const junkResult = engine.validatePatch(workflow, analysis, junk)
     expect(junkResult.ok).toBe(false)
     expect(junkResult.issues[0]?.message).toContain('canonical')
@@ -156,9 +180,8 @@ describe('auto-repair: the reanchor closes the WRONG_ORIGIN loop without a model
       attemptReadinessRecovery: vi.fn(async () => ({ ok: false })),
       resumeRun: vi.fn(async () => ({ outcome: 'passed' as const })),
       verification: {
-        evaluateConditions: vi.fn(
-          async (conditions: WorkflowCondition[]) =>
-            conditions.map((condition) => ({ condition, satisfied: true })),
+        evaluateConditions: vi.fn(async (conditions: WorkflowCondition[]) =>
+          conditions.map((condition) => ({ condition, satisfied: true })),
         ),
       },
       commit: vi.fn(async () => 7),
@@ -183,10 +206,18 @@ describe('auto-repair: the reanchor closes the WRONG_ORIGIN loop without a model
       deps: d,
     })
 
-    expect(session.final).toMatchObject({ status: 'success', strategy: 'page-context-reanchor', committed: true })
+    expect(session.final).toMatchObject({
+      status: 'success',
+      strategy: 'page-context-reanchor',
+      committed: true,
+    })
     const strategies = session.attempts.map((attempt) => attempt.strategy)
     expect(strategies[strategies.length - 1]).toBe('page-context-reanchor')
-    expect(strategies.filter((strategy) => strategy !== 'terminal-state-check' && strategy !== 'page-context-reanchor')).toEqual([])
+    expect(
+      strategies.filter(
+        (strategy) => strategy !== 'terminal-state-check' && strategy !== 'page-context-reanchor',
+      ),
+    ).toEqual([])
     expect(d.produceCandidate).not.toHaveBeenCalled()
     expect(d.attemptReadinessRecovery).not.toHaveBeenCalled()
     expect(session.modelCalls).toBe(0)
@@ -198,10 +229,13 @@ describe('auto-repair: the reanchor closes the WRONG_ORIGIN loop without a model
   })
 
   it('advances past the reanchor when the graph gives no anchor, still without a human gate', async () => {
-    const workflow = groundedWith('https://github.com', makeWorkflow(
-      [node('t', 'trigger'), node('click', 'event-click', { selector: '.x' })],
-      [edge('t', 'click')],
-    ))
+    const workflow = groundedWith(
+      'https://github.com',
+      makeWorkflow(
+        [node('t', 'trigger'), node('click', 'event-click', { selector: '.x' })],
+        [edge('t', 'click')],
+      ),
+    )
     const d = deps({ produceCandidate: vi.fn(async () => null) })
     const session = await runAutoRepair({
       workflow,
@@ -216,7 +250,9 @@ describe('auto-repair: the reanchor closes the WRONG_ORIGIN loop without a model
       deps: d,
     })
 
-    const reanchorAttempt = session.attempts.find((attempt) => attempt.strategy === 'page-context-reanchor')
+    const reanchorAttempt = session.attempts.find(
+      (attempt) => attempt.strategy === 'page-context-reanchor',
+    )
     expect(reanchorAttempt?.outcome).toBe('no-candidate')
     expect(session.final?.status).not.toBe('blocked')
     expect(session.final?.reason ?? '').not.toMatch(/human/i)

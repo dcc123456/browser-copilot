@@ -41,7 +41,8 @@ function mapPersistedStrings(
   depth = 0,
 ): unknown {
   if (typeof value === 'string') return onString(value)
-  if (Array.isArray(value)) return value.map((item) => mapPersistedStrings(item, onString, depth + 1))
+  if (Array.isArray(value))
+    return value.map((item) => mapPersistedStrings(item, onString, depth + 1))
   if (depth < MAX_DEPTH && value && typeof value === 'object') {
     const out: Record<string, unknown> = {}
     for (const [key, item] of Object.entries(value))

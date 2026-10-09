@@ -13,10 +13,7 @@
  */
 import type { ConditionTarget } from '../../lib/workflow/element-fingerprint'
 import type { WorkflowCondition } from '../../lib/workflow/conditions'
-import {
-  conditionLocatorKey,
-  describeCondition,
-} from '../../lib/workflow/conditions'
+import { conditionLocatorKey, describeCondition } from '../../lib/workflow/conditions'
 import { interpolate } from '../../lib/workflow/interpolate'
 
 /**
@@ -352,7 +349,8 @@ export async function evaluateCondition(
           : unsatisfied(`变量 ${condition.name} = ${JSON.stringify(value) ?? 'undefined'}`)
       }
       case 'variableExists': {
-        const present = condition.name in deps.variables && deps.variables[condition.name] !== undefined
+        const present =
+          condition.name in deps.variables && deps.variables[condition.name] !== undefined
         return present
           ? { satisfied: true, description }
           : unsatisfied(`变量 ${condition.name} 不存在`)
@@ -365,9 +363,7 @@ export async function evaluateCondition(
             : condition.op === 'gte'
               ? n >= condition.value
               : n <= condition.value
-        return ok
-          ? { satisfied: true, description }
-          : unsatisfied(`实际数量 ${n}`)
+        return ok ? { satisfied: true, description } : unsatisfied(`实际数量 ${n}`)
       }
       case 'urlChanged': {
         const before = deps.baseline?.url

@@ -67,7 +67,9 @@ describe('kernel strict resolver', () => {
         clicked += 1
       }),
     )
-    const result = runOp(clickOp({ primary: { how: 'css', value: '.card' }, fallbacks: [] }, SCORE_POLICY))
+    const result = runOp(
+      clickOp({ primary: { how: 'css', value: '.card' }, fallbacks: [] }, SCORE_POLICY),
+    )
     expect(result.ok).toBe(false)
     expect(result.found).toBe(true) // the elements ARE there — the identity is not
     expect(result.code).toBe('LOCATOR_AMBIGUOUS')
@@ -170,7 +172,9 @@ describe('kernel strict resolver', () => {
   })
 
   it('compat mode keeps the legacy first-visible behavior (no policy)', () => {
-    const result = runOp(clickOp({ primary: { how: 'css', value: '.card' }, fallbacks: [] })) as OpResult
+    const result = runOp(
+      clickOp({ primary: { how: 'css', value: '.card' }, fallbacks: [] }),
+    ) as OpResult
     expect(result.ok).toBe(true)
     expect(result.matched).toBe(3)
   })

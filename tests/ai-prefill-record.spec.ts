@@ -42,10 +42,7 @@ import {
 } from '../src/background/operator-tool-handler'
 import { runOperatorToolWithExecution } from '../src/background/operator-tool-run'
 import { aiPrefillSteps, applyAiPrefillOptions } from '../src/lib/storage'
-import {
-  isAiComposedFill,
-  looksAiComposed,
-} from '../src/lib/workflow/ai-prefill'
+import { isAiComposedFill, looksAiComposed } from '../src/lib/workflow/ai-prefill'
 import type { BlockExecutor } from '../src/background/workflow-engine/executors'
 import type { WorkflowDraft } from '../src/lib/workflow/draft-types'
 import type { Workflow, WorkflowNode } from '../src/lib/workflow/types'
@@ -53,7 +50,8 @@ import type { Workflow, WorkflowNode } from '../src/lib/workflow/types'
 const signal = new AbortController().signal
 
 /** A comment the model wrote itself in conversation — long enough to look composed. */
-const COMPOSED_COPY = '这款保温杯采用316不锈钢内胆，保温长达12小时，通勤出差都很合适，现在下单还有专属优惠哦！'
+const COMPOSED_COPY =
+  '这款保温杯采用316不锈钢内胆，保温长达12小时，通勤出差都很合适，现在下单还有专属优惠哦！'
 
 function isAiAgent(node: WorkflowNode): boolean {
   return node.data?.['blockId'] === 'ai-agent'
@@ -142,11 +140,16 @@ describe('isAiComposedFill', () => {
 
   it('honours the model self-report over the heuristic', () => {
     const data = { selector: '#reply', value: 'iPhone 15' }
-    expect(isAiComposedFill({ blockId: 'forms', data, generated: true, variableIndex: noVariables })).toBe(
-      'iPhone 15',
-    )
     expect(
-      isAiComposedFill({ blockId: 'forms', data: { ...data, value: COMPOSED_COPY }, generated: false, variableIndex: noVariables }),
+      isAiComposedFill({ blockId: 'forms', data, generated: true, variableIndex: noVariables }),
+    ).toBe('iPhone 15')
+    expect(
+      isAiComposedFill({
+        blockId: 'forms',
+        data: { ...data, value: COMPOSED_COPY },
+        generated: false,
+        variableIndex: noVariables,
+      }),
     ).toBeNull()
   })
 
@@ -250,9 +253,10 @@ describe('the executing record path inserts the producer', () => {
   })
 
   it('a long composed copy with generated:true skips the bulk refusal too', async () => {
-    const longCopy = `${COMPOSED_COPY}这是模型继续撰写的第二段内容，用来把整段文案推过 bulk 门限，验证 generated 标记的豁免。`.repeat(
-      5,
-    )
+    const longCopy =
+      `${COMPOSED_COPY}这是模型继续撰写的第二段内容，用来把整段文案推过 bulk 门限，验证 generated 标记的豁免。`.repeat(
+        5,
+      )
     expect(longCopy.length).toBeGreaterThan(400)
     const { executors } = okExecutors()
     const result = await run(
@@ -307,7 +311,12 @@ describe('the executing record path inserts the producer', () => {
     // passed the composed text as a literal. The tail producer is referenced
     // instead of inserting a second one.
     const conv = 'prefill-model-literal'
-    await run(conv, 'wf_op_ai-agent', { prompt: 'p', variableName: 'aiFill1', actOnPage: false }, executors)
+    await run(
+      conv,
+      'wf_op_ai-agent',
+      { prompt: 'p', variableName: 'aiFill1', actOnPage: false },
+      executors,
+    )
     const literal = await run(
       conv,
       'wf_op_forms',

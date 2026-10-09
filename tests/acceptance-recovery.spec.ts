@@ -1,23 +1,33 @@
 import { describe, expect, it } from 'vitest'
 import {
-  advanceRecovery, reportOperatorFailure, startRecovery,
+  advanceRecovery,
+  reportOperatorFailure,
+  startRecovery,
   type OperatorFailureReport,
 } from '../src/lib/workflow/recovery'
-function failure(overrides: Partial<OperatorFailureReport> & Pick<OperatorFailureReport,'operator'|'message'>): OperatorFailureReport {
+function failure(
+  overrides: Partial<OperatorFailureReport> & Pick<OperatorFailureReport, 'operator' | 'message'>,
+): OperatorFailureReport {
   return reportOperatorFailure({
-    operator: overrides.operator, message: overrides.message,
+    operator: overrides.operator,
+    message: overrides.message,
     ...(overrides.phase ? { phase: overrides.phase } : {}),
     ...(overrides.targetState ? { targetState: overrides.targetState } : {}),
     ...(overrides.nodeGoal ? { nodeGoal: overrides.nodeGoal } : {}),
-    ...(overrides.nodeSuccessCriteria ? { nodeSuccessCriteria: overrides.nodeSuccessCriteria } : {}),
+    ...(overrides.nodeSuccessCriteria
+      ? { nodeSuccessCriteria: overrides.nodeSuccessCriteria }
+      : {}),
   })
 }
 const criteria = [{ kind: 'elementExists', target: { testId: 'x' } }] as never
 describe('V24 structured single-operator failure', () => {
   it('records phase, code, target state, retryability, recovery and node goal', () => {
     const report = failure({
-      operator: 'event-click', message: 'element not found',
-      targetState: { found: false }, nodeGoal: 'click submit', nodeSuccessCriteria: criteria,
+      operator: 'event-click',
+      message: 'element not found',
+      targetState: { found: false },
+      nodeGoal: 'click submit',
+      nodeSuccessCriteria: criteria,
     })
     expect(report.phase).toBe('target-resolution')
     expect(report.code).toBe('TARGET_NOT_FOUND')
@@ -42,7 +52,13 @@ describe('V26 preconditions failure recovery', () => {
   it('waits for state then retries without expanding search', () => {
     const session = startRecovery({
       stepIntent: 'click submit',
-      failed: [failure({ operator: 'event-click', message: 'precondition not met', phase: 'precondition' })],
+      failed: [
+        failure({
+          operator: 'event-click',
+          message: 'precondition not met',
+          phase: 'precondition',
+        }),
+      ],
     })
     expect(advanceRecovery(session).action.kind).toBe('await-state')
   })
@@ -63,17 +79,19 @@ describe('V28 transient execution failure recovery', () => {
       failed: [failure({ operator: 'get-text', message: 'timeout', phase: 'execution' })],
     })
     const first = advanceRecovery(session).action.kind
-    expect(['retry-same','expand-search']).toContain(first)
+    expect(['retry-same', 'expand-search']).toContain(first)
   })
 })
 describe('V29 unsupported-capability failure', () => {
   it('marks unsupported and moves toward expansion', () => {
     const session = startRecovery({
       stepIntent: 'extract the row price and save it somewhere',
-      failed: [failure({ operator: 'forms', message: 'unsupported capability', phase: 'unsupported' })],
+      failed: [
+        failure({ operator: 'forms', message: 'unsupported capability', phase: 'unsupported' }),
+      ],
     })
     const step = advanceRecovery(session)
-    expect(['expand-search','capability-gap-js']).toContain(step.action.kind)
+    expect(['expand-search', 'capability-gap-js']).toContain(step.action.kind)
   })
 })
 describe('V30 candidate expansion after top-3 failure', () => {
@@ -89,7 +107,7 @@ describe('V30 candidate expansion after top-3 failure', () => {
     const step = advanceRecovery(session)
     expect(step.action.kind).toBe('expand-search')
     expect(step.nextCandidates).toBeDefined()
-    const known = ['get-text','attribute-value','read-page']
+    const known = ['get-text', 'attribute-value', 'read-page']
     expect(step.nextCandidates!.candidateBlockIds.some((id) => !known.includes(id))).toBe(true)
   })
 })
@@ -122,7 +140,8 @@ describe('V31 expansion exhausted follows controlled-failure ladder', () => {
 
 describe('V32 recovery budget', () => {
   it('bounds expansions and total candidates', async () => {
-    const { MAX_SEARCH_EXPANSIONS, MAX_TOTAL_CANDIDATES } = await import('../src/lib/workflow/recovery')
+    const { MAX_SEARCH_EXPANSIONS, MAX_TOTAL_CANDIDATES } =
+      await import('../src/lib/workflow/recovery')
     expect(MAX_SEARCH_EXPANSIONS).toBeGreaterThan(0)
     expect(MAX_TOTAL_CANDIDATES).toBeLessThan(20)
   })

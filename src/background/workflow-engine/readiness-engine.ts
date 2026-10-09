@@ -16,7 +16,11 @@
  *
  * @module background/workflow-engine/readiness-engine
  */
-import type { ReadinessRequirement, ReadinessSpec, ReadinessState } from '../../lib/workflow/readiness'
+import type {
+  ReadinessRequirement,
+  ReadinessSpec,
+  ReadinessState,
+} from '../../lib/workflow/readiness'
 import {
   DEFAULT_READINESS_POLL_MS,
   DEFAULT_READINESS_TIMEOUT_MS,
@@ -105,11 +109,12 @@ export async function awaitReadiness(options: ReadinessWaitOptions): Promise<Rea
   if (requirements.length === 0) return { ok: true, waitedMs: 0 }
   const startedAt = Date.now()
   const deadlineFor = (requirement: ReadinessRequirement): number => {
-    const per = typeof requirement.timeoutMs === 'number' && requirement.timeoutMs > 0
-      ? requirement.timeoutMs
-      : options.timeoutMs && options.timeoutMs > 0
-        ? options.timeoutMs
-        : DEFAULT_READINESS_TIMEOUT_MS
+    const per =
+      typeof requirement.timeoutMs === 'number' && requirement.timeoutMs > 0
+        ? requirement.timeoutMs
+        : options.timeoutMs && options.timeoutMs > 0
+          ? options.timeoutMs
+          : DEFAULT_READINESS_TIMEOUT_MS
     return startedAt + per
   }
   const pending = new Map(requirements.map((r) => [r, deadlineFor(r)]))

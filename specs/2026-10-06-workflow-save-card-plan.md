@@ -34,7 +34,7 @@ Three reports about workflow-generation mode, all confirmed in code before touch
 - **Carry the flag, don't reuse `settings.trialRun`.** `settings.trialRun` is persisted on
   the workflow, so writing `false` there would keep future regenerations of the same
   workflow silent even after the user opts back in. A transient `verifyRun` on the command
-  states exactly one thing: *this* save was not asked to be verified. When it is absent, no
+  states exactly one thing: _this_ save was not asked to be verified. When it is absent, no
   record is written at all, and the health card reports the workflow as unverified — the
   truth, rather than a stored "skipped by settings" verdict.
 - **Group headers must not hide severity.** A folded group is a collapsed `<details>`, not
@@ -50,7 +50,7 @@ Three reports about workflow-generation mode, all confirmed in code before touch
 
 ## upload-file is never foldable
 
-A fold rewrites the body's *selector* per iteration (`{{loopElementSelector}}`); it never
+A fold rewrites the body's _selector_ per iteration (`{{loopElementSelector}}`); it never
 rewrites the payload. For `upload-file` the payload IS the point — `files` / `fileVariable`
 / a file the user picks — so folding N recorded uploads replays one file N times. In
 `user-select` mode it would additionally demand N modal picker interactions from a loop

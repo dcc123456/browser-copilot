@@ -23,19 +23,11 @@
 import type { WorkflowDraft } from '../../../lib/workflow/draft-types'
 import { normalizeWorkflowDraft } from './normalize'
 import { generalizeInputs } from '../../../lib/workflow/input-generalization'
-import {
-  autoCompleteReliability,
-} from '../../../lib/workflow/auto-contract'
-import {
-  mergeTriggerInputs,
-  type DeclaredInput,
-} from '../../../lib/workflow/dynamic-data'
+import { autoCompleteReliability } from '../../../lib/workflow/auto-contract'
+import { mergeTriggerInputs, type DeclaredInput } from '../../../lib/workflow/dynamic-data'
 import { defaultReadinessFor } from '../../../lib/workflow/readiness'
 import type { TrialRunRecord } from '../../../lib/workflow/trial-run'
-import {
-  stageReport,
-  type GenerationStageReport,
-} from '../../../lib/workflow/generation-report'
+import { stageReport, type GenerationStageReport } from '../../../lib/workflow/generation-report'
 import type { WorkflowNode } from '../../../lib/workflow/types'
 
 /** The canonical trigger block id used on the draft's head node. */
@@ -67,7 +59,11 @@ function declaredInputNames(draft: WorkflowDraft): Set<string> {
   if (!Array.isArray(params)) return new Set()
   const names = new Set<string>()
   for (const param of params) {
-    if (param && typeof param === 'object' && typeof (param as { name?: unknown }).name === 'string') {
+    if (
+      param &&
+      typeof param === 'object' &&
+      typeof (param as { name?: unknown }).name === 'string'
+    ) {
       names.add((param as { name: string }).name)
     }
   }
@@ -121,7 +117,9 @@ function hardenTargets(draft: WorkflowDraft): GenerationStageReport {
   return stageReport(
     'HARDEN_TARGETS',
     weak > 0 ? 'warn' : 'ok',
-    weak > 0 ? `${weak}/${elementActions} element actions lack a recorded locator` : 'all element actions carry a locator',
+    weak > 0
+      ? `${weak}/${elementActions} element actions lack a recorded locator`
+      : 'all element actions carry a locator',
     { elementActions, weak },
   )
 }
@@ -144,7 +142,10 @@ export function runDraftPipeline(input: WorkflowDraft): GenerationPipelineState 
       normalized.removedNodeIds.length > 0
         ? `removed ${normalized.removedNodeIds.length} redundant node(s)`
         : 'no redundant actions',
-      { removed: normalized.removedNodeIds.length, inputCandidates: normalized.inputCandidates.length },
+      {
+        removed: normalized.removedNodeIds.length,
+        inputCandidates: normalized.inputCandidates.length,
+      },
     ),
   )
 
@@ -162,7 +163,10 @@ export function runDraftPipeline(input: WorkflowDraft): GenerationPipelineState 
       generalized.declarations.length > 0
         ? `declared ${generalized.declarations.length} runtime input(s)`
         : 'no business inputs to generalize',
-      { declared: generalized.declarations.length, blockedSensitive: generalized.blockedSensitive.length },
+      {
+        declared: generalized.declarations.length,
+        blockedSensitive: generalized.blockedSensitive.length,
+      },
     ),
   )
 

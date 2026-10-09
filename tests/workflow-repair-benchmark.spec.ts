@@ -8,11 +8,7 @@
  * orchestration logic (ladder advance, exhaustion, blocking) itself.
  */
 import { describe, expect, it } from 'vitest'
-import {
-  beginAttempt,
-  finishAttempt,
-  startRepairSession,
-} from '../src/lib/workflow/repair-session'
+import { beginAttempt, finishAttempt, startRepairSession } from '../src/lib/workflow/repair-session'
 import type {
   FailureSnapshot,
   RepairAttempt,

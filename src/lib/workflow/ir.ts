@@ -74,10 +74,7 @@ export const SEMANTIC_ACTION_KINDS: readonly SemanticAction['kind'][] = [
 ]
 
 /** A reference to a value: a variable, an IR input, or a literal. */
-export type ValueRef =
-  | { ref: string }
-  | { input: string }
-  | { literal: unknown }
+export type ValueRef = { ref: string } | { input: string } | { literal: unknown }
 
 /** The semantic target of an element-acting step. */
 export interface SemanticTarget {
@@ -271,9 +268,12 @@ function cssFromTargetSpec(spec: { how?: string; value?: string }): string {
   const value = typeof spec.value === 'string' ? spec.value : ''
   if (!value) return ''
   switch (spec.how) {
-    case 'id': return `#${value}`
-    case 'testid': return `[data-testid="${value}"]`
-    case 'name': return `[name="${value}"]`
+    case 'id':
+      return `#${value}`
+    case 'testid':
+      return `[data-testid="${value}"]`
+    case 'name':
+      return `[name="${value}"]`
     case 'text':
     case 'role':
     default:
@@ -352,7 +352,11 @@ export function compileIR(ir: WorkflowIR): Workflow {
 
   ir.steps.forEach((step, index) => {
     const blockId = blockIdForAction(step.action)
-    const stepData: Record<string, unknown> = { blockId, description: step.intent, ...paramsForStep(step) }
+    const stepData: Record<string, unknown> = {
+      blockId,
+      description: step.intent,
+      ...paramsForStep(step),
+    }
     // Preserve the Node Goal Contract across compilation: the step intent is
     // the node goal and its post/preconditions are the checkable contract.
     const criteria = step.postconditions ?? []

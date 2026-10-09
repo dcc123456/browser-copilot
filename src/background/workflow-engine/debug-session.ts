@@ -278,10 +278,7 @@ export async function runDebugSession(
    * misread as the same dead end. The threshold comes from the shared policy.
    */
   const repeatCounter = createRepeatCounter()
-  const signatureThreshold = Math.max(
-    1,
-    deps.maxSameFailureSignature ?? REPEAT_FAILURE_LIMIT,
-  )
+  const signatureThreshold = Math.max(1, deps.maxSameFailureSignature ?? REPEAT_FAILURE_LIMIT)
 
   /**
    * Record a failure; returns true when the same node+root-cause signature has

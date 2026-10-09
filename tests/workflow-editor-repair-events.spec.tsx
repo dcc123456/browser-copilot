@@ -41,7 +41,11 @@ vi.mock('../src/lib/messages', async (importOriginal) => {
 
 type HookResult = ReturnType<typeof useRepairEvents>
 
-function mount(workflowId?: string): { status: EditorRepairStatus; cancel: () => void; unmount: () => void } {
+function mount(workflowId?: string): {
+  status: EditorRepairStatus
+  cancel: () => void
+  unmount: () => void
+} {
   let latest: HookResult = { status: { state: 'idle' }, cancel: () => undefined }
   function Probe(): null {
     latest = useRepairEvents(workflowId)

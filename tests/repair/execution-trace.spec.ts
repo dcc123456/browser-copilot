@@ -140,7 +140,9 @@ describe('ExecutionTrace collector (Phase 1)', () => {
     expect(checkpoint.variableSummaries).toEqual({})
     // An explicit, non-silent error event is recorded.
     expect(
-      trace.events.some((event) => event.kind === 'error' && /snapshot unavailable/.test(event.text)),
+      trace.events.some(
+        (event) => event.kind === 'error' && /snapshot unavailable/.test(event.text),
+      ),
     ).toBe(true)
   })
 })

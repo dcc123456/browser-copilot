@@ -37,7 +37,12 @@ describe('V47 capability gap gate', () => {
   it('rejects a gap record missing required fields', () => {
     const result = evaluateCapabilityGap({
       stepIntent: 'read encrypted payload inside a closed canvas widget',
-      gap: { missingCapability: 'read canvas internals', triedOperators: [], whyInsufficient: '', expectedResult: '' },
+      gap: {
+        missingCapability: 'read canvas internals',
+        triedOperators: [],
+        whyInsufficient: '',
+        expectedResult: '',
+      },
     })
     expect(result.allowed).toBe(false)
   })

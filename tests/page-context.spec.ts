@@ -15,7 +15,9 @@ import { ELEMENT_OP_BLOCKS } from '../src/lib/workflow/generated-validation'
 
 describe('pageContextOf', () => {
   it('derives the origin from generationOriginUrl', () => {
-    expect(pageContextOf({ settings: { generationOriginUrl: 'https://shop.test/cart?x=1' } })).toEqual({
+    expect(
+      pageContextOf({ settings: { generationOriginUrl: 'https://shop.test/cart?x=1' } }),
+    ).toEqual({
       origin: 'https://shop.test',
     })
   })
@@ -25,7 +27,11 @@ describe('pageContextOf', () => {
       pageContextOf({
         settings: {
           generationOriginUrl: 'https://a.test',
-          pageContext: { origin: ' https://b.test ', pathnamePattern: ' /docs/* ', titleHint: ' Docs ' },
+          pageContext: {
+            origin: ' https://b.test ',
+            pathnamePattern: ' /docs/* ',
+            titleHint: ' Docs ',
+          },
         },
       }),
     ).toEqual({ origin: 'https://b.test', pathnamePattern: '/docs/*', titleHint: 'Docs' })
@@ -41,7 +47,10 @@ describe('checkPageContext', () => {
   const expected = { origin: 'https://shop.test', pathnamePattern: '/docs/*', titleHint: '帮助' }
 
   it('refuses a different origin with WRONG_ORIGIN — even with a matching path', () => {
-    const verdict = checkPageContext(expected, { url: 'https://evil.test/docs/start', title: '帮助中心' })
+    const verdict = checkPageContext(expected, {
+      url: 'https://evil.test/docs/start',
+      title: '帮助中心',
+    })
     expect(verdict.ok).toBe(false)
     expect(!verdict.ok && verdict.code).toBe('WRONG_ORIGIN')
   })
@@ -53,7 +62,9 @@ describe('checkPageContext', () => {
   })
 
   it('passes on the right origin, matching path and title', () => {
-    expect(checkPageContext(expected, { url: 'https://shop.test/docs/start', title: '帮助中心' })).toEqual({ ok: true })
+    expect(
+      checkPageContext(expected, { url: 'https://shop.test/docs/start', title: '帮助中心' }),
+    ).toEqual({ ok: true })
   })
 
   it('an unobservable page does not fail the guard (no invented failures)', () => {
@@ -61,8 +72,16 @@ describe('checkPageContext', () => {
   })
 
   it('title check is case-insensitive and skipped when no title is observable', () => {
-    expect(checkPageContext({ origin: 'https://x.test', titleHint: 'ADMIN' }, { url: 'https://x.test/', title: 'admin panel' }).ok).toBe(true)
-    expect(checkPageContext({ origin: 'https://x.test', titleHint: 'ADMIN' }, { url: 'https://x.test/' }).ok).toBe(true)
+    expect(
+      checkPageContext(
+        { origin: 'https://x.test', titleHint: 'ADMIN' },
+        { url: 'https://x.test/', title: 'admin panel' },
+      ).ok,
+    ).toBe(true)
+    expect(
+      checkPageContext({ origin: 'https://x.test', titleHint: 'ADMIN' }, { url: 'https://x.test/' })
+        .ok,
+    ).toBe(true)
   })
 
   it('names the compared subject so a destination is never reported as the current page', () => {
@@ -122,7 +141,9 @@ describe('cross-site workflows', () => {
 
   it('accepts every origin the session really acted on', () => {
     expect(checkPageContext(crossSite, { url: 'https://github.com/o/r' })).toEqual({ ok: true })
-    expect(checkPageContext(crossSite, { url: 'https://creator.xiaohongshu.com/new/home' })).toEqual({
+    expect(
+      checkPageContext(crossSite, { url: 'https://creator.xiaohongshu.com/new/home' }),
+    ).toEqual({
       ok: true,
     })
   })
@@ -136,7 +157,9 @@ describe('cross-site workflows', () => {
 
   it("does not enforce the primary site's path pattern on a secondary origin", () => {
     // The pattern describes the anchor site's page; github has no recorded path.
-    expect(checkPageContext(crossSite, { url: 'https://github.com/anything' })).toEqual({ ok: true })
+    expect(checkPageContext(crossSite, { url: 'https://github.com/anything' })).toEqual({
+      ok: true,
+    })
     expect(
       checkPageContext(crossSite, { url: 'https://creator.xiaohongshu.com/settings' }).ok,
     ).toBe(false)

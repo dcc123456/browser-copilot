@@ -105,7 +105,9 @@ describe('a goal row is only as checkable as the evidence behind its locator', (
     expect(
       ungroundedGoalConditions(
         graphWith([], {
-          success: [{ kind: 'elementVisible', target: { role: 'button', accessibleName: '暂存离开' } }],
+          success: [
+            { kind: 'elementVisible', target: { role: 'button', accessibleName: '暂存离开' } },
+          ],
         }),
       ),
     ).toEqual([])
@@ -134,7 +136,12 @@ describe('a goal row is only as checkable as the evidence behind its locator', (
       ungroundedGoalConditions(
         graphWith([], {
           success: [
-            { kind: 'elementText', target: { testId: 'draft-saved' }, expected: '草稿', match: 'contains' },
+            {
+              kind: 'elementText',
+              target: { testId: 'draft-saved' },
+              expected: '草稿',
+              match: 'contains',
+            },
           ],
         }),
       ),
@@ -146,7 +153,12 @@ describe('a goal row is only as checkable as the evidence behind its locator', (
       ungroundedGoalConditions(
         graphWith(['[data-testid="draft-saved"]'], {
           success: [
-            { kind: 'elementText', target: { testId: 'draft-saved' }, expected: '草稿', match: 'contains' },
+            {
+              kind: 'elementText',
+              target: { testId: 'draft-saved' },
+              expected: '草稿',
+              match: 'contains',
+            },
           ],
         }),
       ),
@@ -165,7 +177,10 @@ describe('a goal row must name its element in the words on the page', () => {
   it('accepts visible words, and the shapes an observation produced', () => {
     expect(conditionTargetIsNamed({ kind: 'elementExists', target: { text: '草稿箱' } })).toBe(true)
     expect(
-      conditionTargetIsNamed({ kind: 'elementVisible', target: { selector: '.btn', accessibleName: '暂存离开' } }),
+      conditionTargetIsNamed({
+        kind: 'elementVisible',
+        target: { selector: '.btn', accessibleName: '暂存离开' },
+      }),
     ).toBe(true)
     expect(
       conditionTargetIsNamed({
@@ -177,9 +192,9 @@ describe('a goal row must name its element in the words on the page', () => {
   })
 
   it('refuses a row that identifies its element only by source code', () => {
-    expect(conditionTargetIsNamed({ kind: 'elementExists', target: { selector: '.publish-container' } })).toBe(
-      false,
-    )
+    expect(
+      conditionTargetIsNamed({ kind: 'elementExists', target: { selector: '.publish-container' } }),
+    ).toBe(false)
     expect(
       conditionTargetIsNamed({
         kind: 'elementText',

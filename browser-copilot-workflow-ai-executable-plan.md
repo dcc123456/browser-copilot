@@ -146,21 +146,21 @@ Wait 2s
 
 必须同时观测以下指标：
 
-| 指标 | 定义 |
-|---|---|
-| Generation Parse Rate | 原始 Trace 是否成功转换为合法 Workflow IR |
-| Generation Compile Rate | Workflow IR 是否成功编译为合法 Workflow |
-| First Run Success | 生成后第一次执行是否完成 |
-| First Run Goal Success | 第一次执行后业务目标是否真正达成 |
-| Verification Success | 是否存在可机器验证的成功证据 |
-| Debug Recovery Rate | 无人工介入情况下是否修复并验证成功 |
-| Repair Precision | 修复是否只修改故障相关节点 |
-| Replay Stability | 重复运行成功率 |
-| Unsafe Duplicate Rate | submit/create/send/pay/delete 等副作用是否被重复执行 |
-| Human Takeover Rate | 需要人工接管的比例 |
-| Avg Repair Rounds | 一次失败平均需要多少修复轮次 |
-| Avg LLM Calls | 一个 Workflow 生成/修复平均调用模型次数 |
-| Generation Latency | 生成 Workflow 所需时间 |
+| 指标                    | 定义                                                 |
+| ----------------------- | ---------------------------------------------------- |
+| Generation Parse Rate   | 原始 Trace 是否成功转换为合法 Workflow IR            |
+| Generation Compile Rate | Workflow IR 是否成功编译为合法 Workflow              |
+| First Run Success       | 生成后第一次执行是否完成                             |
+| First Run Goal Success  | 第一次执行后业务目标是否真正达成                     |
+| Verification Success    | 是否存在可机器验证的成功证据                         |
+| Debug Recovery Rate     | 无人工介入情况下是否修复并验证成功                   |
+| Repair Precision        | 修复是否只修改故障相关节点                           |
+| Replay Stability        | 重复运行成功率                                       |
+| Unsafe Duplicate Rate   | submit/create/send/pay/delete 等副作用是否被重复执行 |
+| Human Takeover Rate     | 需要人工接管的比例                                   |
+| Avg Repair Rounds       | 一次失败平均需要多少修复轮次                         |
+| Avg LLM Calls           | 一个 Workflow 生成/修复平均调用模型次数              |
+| Generation Latency      | 生成 Workflow 所需时间                               |
 
 ### 重要要求
 
@@ -2015,17 +2015,17 @@ AI classification
 
 ### 第一版规则
 
-| Failure | Repair |
-|---|---|
-| not found | re-ground locator |
-| ambiguous | request stronger relation / semantic constraint |
-| unstable | replace locator |
-| readiness timeout | adjust readiness based on observed state |
-| wrong origin | add/repair navigation |
-| unwritten variable | add writer or turn input into parameter |
-| missing verification | add deterministic condition |
-| unsafe retry | terminal-state guard |
-| navigation unsettled | add navigation readiness |
+| Failure              | Repair                                          |
+| -------------------- | ----------------------------------------------- |
+| not found            | re-ground locator                               |
+| ambiguous            | request stronger relation / semantic constraint |
+| unstable             | replace locator                                 |
+| readiness timeout    | adjust readiness based on observed state        |
+| wrong origin         | add/repair navigation                           |
+| unwritten variable   | add writer or turn input into parameter         |
+| missing verification | add deterministic condition                     |
+| unsafe retry         | terminal-state guard                            |
+| navigation unsettled | add navigation readiness                        |
 
 ### 验收
 
@@ -2639,34 +2639,34 @@ test(workflow): enforce ai reliability regression gates
 
 # 8. 推荐 Commit 顺序总表
 
-| 顺序 | Task | Commit |
-|---:|---|---|
-| 1 | T00.1-T00.4 | docs(workflow): document ai workflow architecture |
-| 2 | T00.5 | test(workflow): add reliability baseline |
-| 3 | T00.6 | feat(workflow): add unified failure taxonomy |
-| 4 | T01.1 | feat(workflow): add workflow intermediate representation |
-| 5 | T01.2 | feat(workflow): add block capability catalog |
-| 6 | T01.3-T01.5 | feat(workflow): compile action traces into workflow ir |
-| 7 | T02.1-T02.3 | feat(workflow): normalize workflow action traces |
-| 8 | T02.4-T02.6 | feat(workflow): derive goal evidence from execution trace |
-| 9 | T03.1-T03.2 | feat(workflow): add live semantic grounding |
-| 10 | T03.3-T03.5 | feat(workflow): verify actionable locator stability |
-| 11 | T03.6 | feat(workflow): learn stable selectors from verified runs |
-| 12 | T04.1 | fix(workflow): make generated dataflow validation control-flow aware |
-| 13 | T04.2-T04.3 | fix(workflow): validate workflow control flow and definite assignment |
-| 14 | T04.4-T04.6 | fix(workflow): strengthen generated safety validation |
-| 15 | T04.7 | feat(workflow): add generated workflow preflight report |
-| 16 | T05.1-T05.3 | feat(workflow): guard unsafe actions with execution ledger |
-| 17 | T05.4-T05.6 | feat(workflow): capture runtime evidence and verification |
-| 18 | T06.1-T06.2 | feat(workflow): add deterministic workflow repair rules |
-| 19 | T06.3-T06.4 | feat(workflow): define minimal workflow patches |
-| 20 | T06.5-T06.7 | feat(workflow): repair failures with verified minimal patches |
-| 21 | T07.1-T07.3 | feat(workflow): add replay stability benchmarks |
-| 22 | T07.4-T07.6 | feat(workflow): add workflow learning and version history |
-| 23 | T08.1-T08.3 | feat(workflow): add evidence based reliability gating |
-| 24 | T08.4-T08.6 | feat(workflow): connect reliability certification to run metrics |
-| 25 | T09.1-T09.5 | test(workflow): expand ai workflow reliability benchmarks |
-| 26 | T09.6 | test(workflow): enforce ai reliability regression gates |
+| 顺序 | Task        | Commit                                                                |
+| ---: | ----------- | --------------------------------------------------------------------- |
+|    1 | T00.1-T00.4 | docs(workflow): document ai workflow architecture                     |
+|    2 | T00.5       | test(workflow): add reliability baseline                              |
+|    3 | T00.6       | feat(workflow): add unified failure taxonomy                          |
+|    4 | T01.1       | feat(workflow): add workflow intermediate representation              |
+|    5 | T01.2       | feat(workflow): add block capability catalog                          |
+|    6 | T01.3-T01.5 | feat(workflow): compile action traces into workflow ir                |
+|    7 | T02.1-T02.3 | feat(workflow): normalize workflow action traces                      |
+|    8 | T02.4-T02.6 | feat(workflow): derive goal evidence from execution trace             |
+|    9 | T03.1-T03.2 | feat(workflow): add live semantic grounding                           |
+|   10 | T03.3-T03.5 | feat(workflow): verify actionable locator stability                   |
+|   11 | T03.6       | feat(workflow): learn stable selectors from verified runs             |
+|   12 | T04.1       | fix(workflow): make generated dataflow validation control-flow aware  |
+|   13 | T04.2-T04.3 | fix(workflow): validate workflow control flow and definite assignment |
+|   14 | T04.4-T04.6 | fix(workflow): strengthen generated safety validation                 |
+|   15 | T04.7       | feat(workflow): add generated workflow preflight report               |
+|   16 | T05.1-T05.3 | feat(workflow): guard unsafe actions with execution ledger            |
+|   17 | T05.4-T05.6 | feat(workflow): capture runtime evidence and verification             |
+|   18 | T06.1-T06.2 | feat(workflow): add deterministic workflow repair rules               |
+|   19 | T06.3-T06.4 | feat(workflow): define minimal workflow patches                       |
+|   20 | T06.5-T06.7 | feat(workflow): repair failures with verified minimal patches         |
+|   21 | T07.1-T07.3 | feat(workflow): add replay stability benchmarks                       |
+|   22 | T07.4-T07.6 | feat(workflow): add workflow learning and version history             |
+|   23 | T08.1-T08.3 | feat(workflow): add evidence based reliability gating                 |
+|   24 | T08.4-T08.6 | feat(workflow): connect reliability certification to run metrics      |
+|   25 | T09.1-T09.5 | test(workflow): expand ai workflow reliability benchmarks             |
+|   26 | T09.6       | test(workflow): enforce ai reliability regression gates               |
 
 ---
 
@@ -3027,35 +3027,35 @@ workflow benchmark result
 
 # 12. Benchmark 场景矩阵
 
-| 类别 | Case | 主要目标 |
-|---|---|---|
-| Basic | click unique button | 基础 grounding |
-| Basic | read text | readiness |
-| Form | fill input | data flow |
-| Form | select option | actionability |
-| Form | submit | unsafe guard |
-| Navigation | SPA route | page state |
-| Navigation | cross page | origin |
-| Async | delayed element | readiness |
-| Async | delayed modal | post-click readiness |
-| Locator | 0 match | fail precise |
-| Locator | 1 match | normal |
-| Locator | many match | ambiguity |
-| Locator | CSS drift | semantic fallback |
-| Locator | unstable id | stability |
-| Data | use before set | CFG dataflow |
-| Data | branch-only set | branch dataflow |
-| Data | loop set | loop dataflow |
-| Goal | missing result | goal validation |
-| Safety | submit then fail | duplicate prevention |
-| Safety | already completed | terminal-state guard |
-| Debug | locator failure | minimal patch |
-| Debug | readiness failure | minimal patch |
-| Debug | wrong origin | repair navigation |
-| Debug | regression patch | reject patch |
-| Stability | DOM reorder | replay |
-| Stability | extra decoy | grounding |
-| Stability | delayed render | readiness |
+| 类别       | Case                | 主要目标             |
+| ---------- | ------------------- | -------------------- |
+| Basic      | click unique button | 基础 grounding       |
+| Basic      | read text           | readiness            |
+| Form       | fill input          | data flow            |
+| Form       | select option       | actionability        |
+| Form       | submit              | unsafe guard         |
+| Navigation | SPA route           | page state           |
+| Navigation | cross page          | origin               |
+| Async      | delayed element     | readiness            |
+| Async      | delayed modal       | post-click readiness |
+| Locator    | 0 match             | fail precise         |
+| Locator    | 1 match             | normal               |
+| Locator    | many match          | ambiguity            |
+| Locator    | CSS drift           | semantic fallback    |
+| Locator    | unstable id         | stability            |
+| Data       | use before set      | CFG dataflow         |
+| Data       | branch-only set     | branch dataflow      |
+| Data       | loop set            | loop dataflow        |
+| Goal       | missing result      | goal validation      |
+| Safety     | submit then fail    | duplicate prevention |
+| Safety     | already completed   | terminal-state guard |
+| Debug      | locator failure     | minimal patch        |
+| Debug      | readiness failure   | minimal patch        |
+| Debug      | wrong origin        | repair navigation    |
+| Debug      | regression patch    | reject patch         |
+| Stability  | DOM reorder         | replay               |
+| Stability  | extra decoy         | grounding            |
+| Stability  | delayed render      | readiness            |
 
 ---
 

@@ -158,8 +158,7 @@ export function renderSkillCatalogue(skills: readonly Skill[]): string {
   // agent. Excluded here (not just via autoMatch) so a user-edited copy with
   // autoMatch re-enabled cannot hand the model a self-invoked plan gate.
   const usable = skills.filter(
-    (skill) =>
-      skill.autoMatch && skill.description.trim() !== '' && skill.name !== PLAN_SKILL_NAME,
+    (skill) => skill.autoMatch && skill.description.trim() !== '' && skill.name !== PLAN_SKILL_NAME,
   )
   if (usable.length === 0) return ''
 
@@ -174,7 +173,7 @@ export function renderSkillCatalogue(skills: readonly Skill[]): string {
     '',
     'How to use a skill:',
     '1. If one clearly matches what the user is asking — including a step you are',
-    "   about to execute under an approved plan — call the `use_skill` tool with",
+    '   about to execute under an approved plan — call the `use_skill` tool with',
     "   that skill's exact name BEFORE acting on it or writing your answer.",
     '   (The skills tools load on demand: if `use_skill` is not advertised, call',
     '   `load_tools` with groups: ["skills"] first.)',

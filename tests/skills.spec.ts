@@ -134,9 +134,7 @@ describe('renderSkillCatalogue', () => {
     // user-edited copy with autoMatch flipped back on cannot hand the model a
     // self-invoked plan gate.
     expect(
-      renderSkillCatalogue([
-        skill({ name: 'plan', description: 'plan first, act later' }),
-      ]),
+      renderSkillCatalogue([skill({ name: 'plan', description: 'plan first, act later' })]),
     ).toBe('')
   })
 

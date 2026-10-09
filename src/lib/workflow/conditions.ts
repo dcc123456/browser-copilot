@@ -122,7 +122,11 @@ export function isWorkflowCondition(value: unknown): value is WorkflowCondition 
   }
   if (kind === 'elementText') {
     if (typeof value['expected'] !== 'string') return false
-    if (value['match'] !== undefined && value['match'] !== 'exact' && value['match'] !== 'contains') {
+    if (
+      value['match'] !== undefined &&
+      value['match'] !== 'exact' &&
+      value['match'] !== 'contains'
+    ) {
       return false
     }
   }
@@ -190,7 +194,8 @@ export function conditionTargetIsNamed(condition: WorkflowCondition): boolean {
   if (isRecord(stable) && Object.keys(stable).length > 0) return true
   if (hasResolvableSpec(target['primary'])) return true
   return (
-    Array.isArray(target['fallbacks']) && target['fallbacks'].some((spec) => hasResolvableSpec(spec))
+    Array.isArray(target['fallbacks']) &&
+    target['fallbacks'].some((spec) => hasResolvableSpec(spec))
   )
 }
 

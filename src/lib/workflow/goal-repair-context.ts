@@ -57,9 +57,10 @@ export function buildGoalRepairContext(
   failedNode: WorkflowNode,
 ): GoalRepairContext {
   const contract = nodeGoalContractOf(failedNode.data)
-  const blockId = typeof failedNode.data['blockId'] === 'string'
-    ? (failedNode.data['blockId'] as string)
-    : undefined
+  const blockId =
+    typeof failedNode.data['blockId'] === 'string'
+      ? (failedNode.data['blockId'] as string)
+      : undefined
   return {
     failedNodeId: failedNode.id,
     blockId,

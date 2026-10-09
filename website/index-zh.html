@@ -115,7 +115,11 @@
         box-shadow: 0 0 30px rgba(110, 163, 255, 0.08);
       }
       .hero-glow {
-        background: radial-gradient(ellipse 60% 50% at 50% 0%, rgba(110, 163, 255, 0.12) 0%, transparent 70%);
+        background: radial-gradient(
+          ellipse 60% 50% at 50% 0%,
+          rgba(110, 163, 255, 0.12) 0%,
+          transparent 70%
+        );
       }
     </style>
   </head>
@@ -129,8 +133,12 @@
         </a>
         <div class="flex items-center gap-6">
           <a href="#features" class="text-sm text-muted transition-colors hover:text-ink">功能</a>
-          <a href="#how-it-works" class="text-sm text-muted transition-colors hover:text-ink">快速上手</a>
-          <a href="#integrations" class="text-sm text-muted transition-colors hover:text-ink">生态集成</a>
+          <a href="#how-it-works" class="text-sm text-muted transition-colors hover:text-ink"
+            >快速上手</a
+          >
+          <a href="#integrations" class="text-sm text-muted transition-colors hover:text-ink"
+            >生态集成</a
+          >
           <!-- Language switcher -->
           <a href="./index.html" class="text-sm text-muted transition-colors hover:text-ink">EN</a>
           <a
@@ -155,7 +163,9 @@
     <!-- Hero -->
     <section class="hero-glow relative pt-32 pb-20">
       <div class="mx-auto max-w-4xl px-6 text-center">
-        <div class="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-panel px-4 py-1.5">
+        <div
+          class="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-panel px-4 py-1.5"
+        >
           <span class="h-2 w-2 rounded-full bg-ok"></span>
           <span class="text-sm text-muted">v0.6.3 — 开源</span>
         </div>
@@ -165,7 +175,8 @@
         </h1>
         <p class="mx-auto mb-10 max-w-2xl text-lg leading-relaxed text-muted">
           打开侧边栏，用大白话说出需求，Browser Copilot 读取你正在看的页面并采取行动 —
-          点击按钮、填写表单、滚动页面、切换标签页、走完整个流程 — 你可以在一旁观看，也可以完全放手。
+          点击按钮、填写表单、滚动页面、切换标签页、走完整个流程 —
+          你可以在一旁观看，也可以完全放手。
         </p>
         <div class="flex flex-wrap items-center justify-center gap-4">
           <a
@@ -214,20 +225,41 @@
           <!-- Feature 1 -->
           <div class="card-glow rounded-xl border border-border bg-panel p-6 transition-all">
             <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
-              <svg class="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              <svg
+                class="h-5 w-5 text-accent"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+                />
               </svg>
             </div>
             <h3 class="mb-2 text-lg font-semibold">自带模型</h3>
             <p class="text-sm leading-relaxed text-muted">
-              支持 DeepSeek、火山方舟 Ark、OpenAI、OpenRouter、Moonshot、DashScope，或本地 Ollama / LM Studio。任何 OpenAI 兼容端点均可。
+              支持 DeepSeek、火山方舟 Ark、OpenAI、OpenRouter、Moonshot、DashScope，或本地 Ollama /
+              LM Studio。任何 OpenAI 兼容端点均可。
             </p>
           </div>
           <!-- Feature 2 -->
           <div class="card-glow rounded-xl border border-border bg-panel p-6 transition-all">
             <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
-              <svg class="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+              <svg
+                class="h-5 w-5 text-accent"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"
+                />
               </svg>
             </div>
             <h3 class="mb-2 text-lg font-semibold">自主程度由你掌控</h3>
@@ -238,32 +270,64 @@
           <!-- Feature 3 -->
           <div class="card-glow rounded-xl border border-border bg-panel p-6 transition-all">
             <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
-              <svg class="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+              <svg
+                class="h-5 w-5 text-accent"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"
+                />
               </svg>
             </div>
             <h3 class="mb-2 text-lg font-semibold">可视化工作流编辑器</h3>
             <p class="text-sm leading-relaxed text-muted">
-              录屏式记录一次操作，或在画布上用 56 种组件拼接工作流——点击、填写、循环、条件分支、AI 代理步骤，应有尽有。
+              录屏式记录一次操作，或在画布上用 56 种组件拼接工作流——点击、填写、循环、条件分支、AI
+              代理步骤，应有尽有。
             </p>
           </div>
           <!-- Feature 4 -->
           <div class="card-glow rounded-xl border border-border bg-panel p-6 transition-all">
             <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
-              <svg class="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <svg
+                class="h-5 w-5 text-accent"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
               </svg>
             </div>
             <h3 class="mb-2 text-lg font-semibold">定时自动化</h3>
             <p class="text-sm leading-relaxed text-muted">
-              设置定时任务——每隔几分钟、每天、或工作日。自动运行提示词或总结 GitHub 代码审查队列，睡一觉起来就看结果。
+              设置定时任务——每隔几分钟、每天、或工作日。自动运行提示词或总结 GitHub
+              代码审查队列，睡一觉起来就看结果。
             </p>
           </div>
           <!-- Feature 5 -->
           <div class="card-glow rounded-xl border border-border bg-panel p-6 transition-all">
             <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
-              <svg class="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+              <svg
+                class="h-5 w-5 text-accent"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"
+                />
               </svg>
             </div>
             <h3 class="mb-2 text-lg font-semibold">技能系统</h3>
@@ -274,8 +338,18 @@
           <!-- Feature 6 -->
           <div class="card-glow rounded-xl border border-border bg-panel p-6 transition-all">
             <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
-              <svg class="h-5 w-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              <svg
+                class="h-5 w-5 text-accent"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                />
               </svg>
             </div>
             <h3 class="mb-2 text-lg font-semibold">隐私优先</h3>
@@ -297,32 +371,43 @@
         <div class="grid gap-8 md:grid-cols-3">
           <!-- Step 1 -->
           <div class="relative text-center">
-            <div class="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-panel">
+            <div
+              class="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-panel"
+            >
               <span class="text-2xl font-bold text-accent">1</span>
             </div>
             <h3 class="mb-3 text-xl font-semibold">下载并安装</h3>
             <p class="text-sm leading-relaxed text-muted">
-              从 GitHub Releases 下载最新 ZIP 包，解压后打开 <code class="rounded bg-panel-2 px-1.5 py-0.5 text-xs text-accent">chrome://extensions</code>，开启开发者模式，点击"加载已解压的扩展程序"。
+              从 GitHub Releases 下载最新 ZIP 包，解压后打开
+              <code class="rounded bg-panel-2 px-1.5 py-0.5 text-xs text-accent"
+                >chrome://extensions</code
+              >，开启开发者模式，点击"加载已解压的扩展程序"。
             </p>
           </div>
           <!-- Step 2 -->
           <div class="relative text-center">
-            <div class="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-panel">
+            <div
+              class="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-panel"
+            >
               <span class="text-2xl font-bold text-accent">2</span>
             </div>
             <h3 class="mb-3 text-xl font-semibold">配置你的模型</h3>
             <p class="text-sm leading-relaxed text-muted">
-              在侧边栏中打开设置，输入你偏好的模型提供商的 API 地址和密钥——DeepSeek、OpenAI、OpenRouter，或本地 Ollama 实例。
+              在侧边栏中打开设置，输入你偏好的模型提供商的 API
+              地址和密钥——DeepSeek、OpenAI、OpenRouter，或本地 Ollama 实例。
             </p>
           </div>
           <!-- Step 3 -->
           <div class="relative text-center">
-            <div class="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-panel">
+            <div
+              class="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-panel"
+            >
               <span class="text-2xl font-bold text-accent">3</span>
             </div>
             <h3 class="mb-3 text-xl font-semibold">开始提问</h3>
             <p class="text-sm leading-relaxed text-muted">
-              在任意页面打开侧边栏，用自然语言提问。Browser Copilot 会读取页面并采取行动——也可以构建工作流来自动化整个流程。
+              在任意页面打开侧边栏，用自然语言提问。Browser Copilot
+              会读取页面并采取行动——也可以构建工作流来自动化整个流程。
             </p>
           </div>
         </div>
@@ -353,7 +438,8 @@
                 <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>OpenRouter
               </li>
               <li class="flex items-center gap-3 text-sm text-muted">
-                <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>Moonshot / DashScope / SiliconFlow
+                <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>Moonshot / DashScope /
+                SiliconFlow
               </li>
               <li class="flex items-center gap-3 text-sm text-muted">
                 <span class="h-1.5 w-1.5 rounded-full bg-ok"></span>Ollama / LM Studio（本地）
@@ -433,7 +519,9 @@
 
     <!-- Footer -->
     <footer class="border-t border-border py-10">
-      <div class="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 md:flex-row">
+      <div
+        class="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 md:flex-row"
+      >
         <div class="flex items-center gap-3">
           <img src="./icons/icon-16.png" alt="" class="h-4 w-4" />
           <span class="text-sm text-muted">Browser Copilot</span>

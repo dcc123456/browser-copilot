@@ -466,7 +466,8 @@ export function requiresTerminalStateCheck(
 // --- Cleanup steps ---------------------------------------------------------------
 
 /** 「关闭 / 收起 / dismiss / close」 — an act of making something go away. */
-const DISMISS_VERB = /关闭|关掉|收起|取消|退出|隐藏|撤掉|移除|\bdismiss\b|\bclose\b|\bcancel\b|\bhide\b/i
+const DISMISS_VERB =
+  /关闭|关掉|收起|取消|退出|隐藏|撤掉|移除|\bdismiss\b|\bclose\b|\bcancel\b|\bhide\b/i
 
 /** The thing dismissed: an overlay the page shows CONDITIONALLY. */
 const OVERLAY_NOUN =
@@ -490,9 +491,7 @@ const OVERLAY_NOUN =
 export function isDismissStep(node: WorkflowNode): boolean {
   const blockId = String(node.data?.['blockId'] ?? node.label ?? '')
   if (blockId !== 'click' && blockId !== 'event-click') return false
-  const prose = [intentOf(node), String(node.data?.['label'] ?? '')]
-    .join(' ')
-    .trim()
+  const prose = [intentOf(node), String(node.data?.['label'] ?? '')].join(' ').trim()
   if (!prose || hasUnsafeIntent(prose)) return false
   return DISMISS_VERB.test(prose) && OVERLAY_NOUN.test(prose)
 }

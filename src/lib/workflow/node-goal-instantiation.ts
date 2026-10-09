@@ -14,10 +14,7 @@
  */
 
 import { operatorEntry } from './operator-registry'
-import {
-  normalizeNodeGoalContract,
-  type WorkflowNodeGoalContract,
-} from './node-goal-contract'
+import { normalizeNodeGoalContract, type WorkflowNodeGoalContract } from './node-goal-contract'
 import type { WorkflowCondition } from './conditions'
 import { conditionListValue } from './conditions'
 import type { SemanticLocator } from './element-fingerprint'
@@ -151,10 +148,7 @@ export function resolveNodeGoalContract(
   }
 }
 
-function fallbackCriteria(
-  args: Record<string, unknown>,
-  blockId: string,
-): WorkflowCondition[] {
+function fallbackCriteria(args: Record<string, unknown>, blockId: string): WorkflowCondition[] {
   const variableName = args['variableName']
   if (typeof variableName === 'string' && variableName.trim()) {
     return [{ kind: 'variableExists', name: variableName }]

@@ -21,10 +21,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle2, CircleDashed, Loader2, TriangleAlert, Wand2, XCircle } from 'lucide-react'
 import { sendCommand } from '../../lib/messages'
 import { nodeGoalContractOf } from '../../lib/workflow/node-goal-contract'
-import type {
-  NodeFixEvent,
-  NodeFixPhase,
-} from '../../lib/workflow/node-fix'
+import type { NodeFixEvent, NodeFixPhase } from '../../lib/workflow/node-fix'
 import Modal from '../ui/Modal'
 import type { TranslateFn } from '../i18n'
 
@@ -133,9 +130,7 @@ export function NodeFixBody({
             </p>
           )}
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-semibold text-strong">
-              {t('nodeFixSuggestionLabel')}
-            </span>
+            <span className="text-xs font-semibold text-strong">{t('nodeFixSuggestionLabel')}</span>
             <textarea
               className="block w-full resize-y rounded-md border border-border bg-panel px-2 py-1.5 text-xs text-ink outline-none focus:border-accent"
               rows={3}
@@ -204,10 +199,7 @@ export interface NodeFixFooterProps {
   t: TranslateFn
 }
 
-function secondaryButton(
-  label: string,
-  onClick: () => void,
-): React.ReactElement {
+function secondaryButton(label: string, onClick: () => void): React.ReactElement {
   return (
     <button
       type="button"

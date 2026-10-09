@@ -222,7 +222,9 @@ describe('composeWorkflowFromDraft', () => {
     expect(JSON.stringify(goalSpec)).not.toContain('xiaohongshuTitle')
     // The goal keeps its effect-proving rows, so grounding never weakens it to
     // a URL the workflow satisfies by opening the page.
-    expect(goalSpec.successConditions.some((c) => c.kind !== 'urlContains' && c.kind !== 'urlMatches')).toBe(true)
+    expect(
+      goalSpec.successConditions.some((c) => c.kind !== 'urlContains' && c.kind !== 'urlMatches'),
+    ).toBe(true)
     const trigger = out.workflow.drawflow.nodes.find((n) => n.data.blockId === 'trigger')
     expect(JSON.stringify(trigger?.data?.['goalSpec'])).not.toContain('xiaohongshuTitle')
   })
@@ -284,7 +286,8 @@ describe('composeWorkflowFromDraft', () => {
     expect(out.workflow.settings.saveWarnings?.join('\n')).toContain('WRONG_ORIGIN')
   })
 
-  it('derives the top-level trigger mirror from the graph trigger node', async () => {    const conversation = 'c-compose'
+  it('derives the top-level trigger mirror from the graph trigger node', async () => {
+    const conversation = 'c-compose'
     const draft = await append(conversation, 'wf_op_event-click', { selector: '#x' })
     // Simulate the user picking a schedule in the save card.
     const triggerNode = draft.nodes.find((n) => n.data.blockId === 'trigger')!

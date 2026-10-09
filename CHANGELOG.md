@@ -32,7 +32,7 @@ they are now closed on both sides (see
   hardens the whole graph in one batched pass — editor/import saves are never
   rewritten.
 - **Element waits are persisted on the graph at save time** (`lib/workflow/
-  runnability`), idempotent and structure-preserving, so server/scheduler
+runnability`), idempotent and structure-preserving, so server/scheduler
   runners and the editor see the same waits the run path force-enables.
 - **Missing page anchor is reported instead of failing silently.** A generated
   graph whose first element action has no `new-tab` before it can only replay

@@ -132,7 +132,9 @@ export function normalizeNodeGoalContract(value: unknown): WorkflowNodeGoalContr
 }
 
 /** Read the goal contract off a node's `data`, or undefined when absent/invalid. */
-export function nodeGoalContractOf(data: Record<string, unknown>): WorkflowNodeGoalContract | undefined {
+export function nodeGoalContractOf(
+  data: Record<string, unknown>,
+): WorkflowNodeGoalContract | undefined {
   const namespace = data[WORKFLOW_AI_NAMESPACE]
   if (!isRecord(namespace)) return undefined
   return normalizeNodeGoalContract(namespace['goalContract'])

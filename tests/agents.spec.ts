@@ -87,15 +87,15 @@ describe('normalizeAgent', () => {
   })
 
   it('dedupes referenced skill names', () => {
-    const result = normalizeAgent(agent({ skillNames: ['workflow-generator', 'Workflow-Generator'] }))
+    const result = normalizeAgent(
+      agent({ skillNames: ['workflow-generator', 'Workflow-Generator'] }),
+    )
     expect(result.skillNames).toEqual(['workflow-generator'])
   })
 
   it('never lets a specialist keep delegation power', () => {
     expect(normalizeAgent(agent({ delegatable: true })).delegatable).toBe(false)
-    expect(
-      normalizeAgent(agent({ role: 'supervisor', delegatable: true })).delegatable,
-    ).toBe(true)
+    expect(normalizeAgent(agent({ role: 'supervisor', delegatable: true })).delegatable).toBe(true)
   })
 
   it('coerces unknown roles/domains and clamps maxRounds', () => {
@@ -153,11 +153,10 @@ describe('renderSupervisorGuide', () => {
 
 describe('renderDelegationPrompt', () => {
   it('carries task, context, deliverable and the report contract', () => {
-    const prompt = renderDelegationPrompt(
-      agent(),
-      'Find three vendors',
-      { context: 'The user builds bikes.', expects: 'A markdown table.' },
-    )
+    const prompt = renderDelegationPrompt(agent(), 'Find three vendors', {
+      context: 'The user builds bikes.',
+      expects: 'A markdown table.',
+    })
     expect(prompt).toContain('Find three vendors')
     expect(prompt).toContain('The user builds bikes.')
     expect(prompt).toContain('A markdown table.')
@@ -179,10 +178,17 @@ describe('renderSubAgentSection', () => {
   })
 
   it('expands referenced skills that exist', () => {
-    const section = renderSubAgentSection(
-      agent({ skillNames: ['wf'] }),
-      [{ name: 'wf', instructions: 'WF-BODY', description: '', autoMatch: true, id: 's', createdAt: 0, updatedAt: 0 }],
-    )
+    const section = renderSubAgentSection(agent({ skillNames: ['wf'] }), [
+      {
+        name: 'wf',
+        instructions: 'WF-BODY',
+        description: '',
+        autoMatch: true,
+        id: 's',
+        createdAt: 0,
+        updatedAt: 0,
+      },
+    ])
     expect(section).toContain('WF-BODY')
   })
 

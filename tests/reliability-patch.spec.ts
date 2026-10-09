@@ -40,7 +40,9 @@ function tinyWorkflow(): Workflow {
           },
         },
       ],
-      edges: [{ id: 'e1', source: 'a', target: 'b', sourceHandle: 'next', targetHandle: 'input-1' }],
+      edges: [
+        { id: 'e1', source: 'a', target: 'b', sourceHandle: 'next', targetHandle: 'input-1' },
+      ],
     },
     createdAt: 0,
     updatedAt: 0,
@@ -73,7 +75,10 @@ describe('validateReliabilityPatch', () => {
 
   it('refuses graph-structure mutations (blockId/disableBlock/id/position)', () => {
     for (const key of ['blockId', 'disableBlock', 'id', 'position']) {
-      const result = validateReliabilityPatch(patch({ paramsPatch: { [key]: 'x' } }), tinyWorkflow())
+      const result = validateReliabilityPatch(
+        patch({ paramsPatch: { [key]: 'x' } }),
+        tinyWorkflow(),
+      )
       expect(result.ok).toBe(false)
       expect(result.problems.join()).toContain(key)
     }
@@ -148,7 +153,10 @@ describe('applyReliabilityPatch', () => {
   })
 
   it('refuses invalid patches without touching the graph', () => {
-    const result = applyReliabilityPatch(tinyWorkflow(), patch({ paramsPatch: { blockId: 'forms' } }))
+    const result = applyReliabilityPatch(
+      tinyWorkflow(),
+      patch({ paramsPatch: { blockId: 'forms' } }),
+    )
     expect(result.applied).toBe(false)
     expect(result.problems?.join()).toContain('blockId')
     expect(result.workflow.drawflow.nodes[1]?.data?.['selector']).toBe('.stale')

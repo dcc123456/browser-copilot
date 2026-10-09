@@ -414,10 +414,7 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
   const selectOption: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const value = String(data['value'] ?? '')
-    return runRaw(
-      withWait({ action: 'select_option', target: targetFrom(data), value }, data),
-      ctx,
-    )
+    return runRaw(withWait({ action: 'select_option', target: targetFrom(data), value }, data), ctx)
   }
 
   const scroll: BlockExecutor = async (data, ctx) => {
@@ -468,7 +465,10 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     const selector = sel(data)
     ctx.emit('status', `按下按键: ${key}${selector ? ` → ${selector}` : ''}`)
     if (!selector) return runRaw({ action: 'press_key', value: key }, ctx)
-    return runRaw(withWait({ action: 'press_key', value: key, target: targetFrom(data) }, data), ctx)
+    return runRaw(
+      withWait({ action: 'press_key', value: key, target: targetFrom(data) }, data),
+      ctx,
+    )
   }
 
   const hover: BlockExecutor = async (data, ctx) => {
@@ -588,10 +588,7 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
       if (!column) {
         ctx.emit('info', '未指定数据列名（dataColumn），本次读取未写入数据表')
       } else {
-        ctx.emit(
-          'info',
-          `已写入数据表列「${column}」${collectReadColumn(ctx, column, kept)} 行`,
-        )
+        ctx.emit('info', `已写入数据表列「${column}」${collectReadColumn(ctx, column, kept)} 行`)
       }
     }
     ctx.emit('result', Array.isArray(value) ? value.join('\n') : String(value))
@@ -619,11 +616,7 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
   }
 
   /** Run an in-page read, polling while it comes back empty (a replay races the page). */
-  async function readValues(
-    code: string,
-    ctx: WorkflowExecCtx,
-    waitMs: number,
-  ): Promise<string[]> {
+  async function readValues(code: string, ctx: WorkflowExecCtx, waitMs: number): Promise<string[]> {
     const deadline = Date.now() + Math.max(0, waitMs)
     for (;;) {
       const result = await driver.execJs(code, {}, ctx.tabId)
@@ -812,7 +805,11 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
       tabs = await Promise.all(
         driver.listTabs().map(async (tab) => ({
           ...tab,
-          title: (await driver.pageById(tab.id)?.title().catch(() => tab.title)) ?? tab.title,
+          title:
+            (await driver
+              .pageById(tab.id)
+              ?.title()
+              .catch(() => tab.title)) ?? tab.title,
         })),
       )
       picked = pickTabIndex(data, tabs, current, { matchPattern: pattern, tabTitle: title })
@@ -914,9 +911,7 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
         const value = interpolate(String(record['value'] ?? ''), ctx.variables, ctx.refData)
         if (kind === 'variable') {
           ctx.variables[name] =
-            record['action'] === 'append'
-              ? `${ctx.variables[name] ?? ''}${value}`
-              : value
+            record['action'] === 'append' ? `${ctx.variables[name] ?? ''}${value}` : value
         } else {
           if (table.length === 0) table.push({})
           for (const row of table) row[name] = value
@@ -979,7 +974,9 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
         ctx.variables,
         ctx.refData,
       ).trim()
-      const fileName = rawName.includes('.') ? rawName : `${rawName || `export-${Date.now()}`}.${ext}`
+      const fileName = rawName.includes('.')
+        ? rawName
+        : `${rawName || `export-${Date.now()}`}.${ext}`
       const body = format === 'csv' && data['addBOMHeader'] === true ? `﻿${text}` : text
       const path = writeArtifact(artifactsDir, fileName, body)
       ctx.emit('info', `已写出文件: ${path}`)
@@ -1487,9 +1484,7 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
 
     const page = driver.pageForUpload(ctx.tabId)
     const locator = page.locator(selector).first()
-    await locator.setInputFiles(
-      payloads as unknown as Parameters<typeof locator.setInputFiles>[0],
-    )
+    await locator.setInputFiles(payloads as unknown as Parameters<typeof locator.setInputFiles>[0])
     ctx.emit('result', `Uploaded ${payloads.length} file(s)`)
     return null
   }
@@ -1653,17 +1648,16 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     // fields; the page-evaluated `mapping` expression read no editor key.
     const fromVariable = String(data['dataSource'] ?? 'table') === 'variable'
     const sourceName = String(data['varSourceName'] ?? '').trim()
-    const rows = (
-      fromVariable ? readRecordList(ctx.variables[sourceName]) : tableOf(ctx)
-    ).filter((row): row is Record<string, unknown> => !!row && typeof row === 'object')
+    const rows = (fromVariable ? readRecordList(ctx.variables[sourceName]) : tableOf(ctx)).filter(
+      (row): row is Record<string, unknown> => !!row && typeof row === 'object',
+    )
     const renames = readRecordList(data['sources']).flatMap((source) => {
       const record = (source ?? {}) as Record<string, unknown>
       const from = String(record['name'] ?? '').trim()
       if (from === '') return []
       return readRecordList(record['destinations'])
-        .map(
-          (destination) =>
-            String((destination as Record<string, unknown>)?.['name'] ?? '').trim(),
+        .map((destination) =>
+          String((destination as Record<string, unknown>)?.['name'] ?? '').trim(),
         )
         .filter((to) => to !== '' && to !== from)
         .map((to) => ({ from, to }))
@@ -1794,7 +1788,8 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     const variable = String(data['variableName'] ?? 'lastDownload')
     // The block's own `timeout` field, like the extension: the port waited a
     // hardcoded 30s, so a node asking for 2s held the run for half a minute.
-    const waitMs = data['waitForDownload'] === false ? 0 : Math.max(0, Number(data['timeout'] ?? 20000))
+    const waitMs =
+      data['waitForDownload'] === false ? 0 : Math.max(0, Number(data['timeout'] ?? 20000))
     try {
       const match = await driver.waitForDownload(filename || undefined, waitMs)
       ctx.variables[variable] = match

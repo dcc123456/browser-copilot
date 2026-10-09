@@ -7,22 +7,35 @@ import { EditorLocaleContext, makeEditorLocale } from '../src/workflow-editor/lo
 import { EDITOR_STRINGS } from '../src/workflow-editor/i18n'
 import { withNodeGoalContract } from '../src/lib/workflow/node-goal-contract'
 import type { BlockCatalogEntry } from '../src/lib/workflow/blocks/types'
-const block = { id: 'event-click', name: 'Click element', category: 'interaction', icon: 'ri-cursor-line' } as unknown as BlockCatalogEntry
+const block = {
+  id: 'event-click',
+  name: 'Click element',
+  category: 'interaction',
+  icon: 'ri-cursor-line',
+} as unknown as BlockCatalogEntry
 function data(hasGoal: boolean) {
   const base: Record<string, unknown> = { selector: '.btn' }
   const blockData = hasGoal
-    ? withNodeGoalContract(base, { version: 1, goal: 'Click the submit button', successCriteria: [{ kind: 'elementExists', target: { testId: 'btn' } }] })
+    ? withNodeGoalContract(base, {
+        version: 1,
+        goal: 'Click the submit button',
+        successCriteria: [{ kind: 'elementExists', target: { testId: 'btn' } }],
+      })
     : base
   return { block, blockData, label: 'Click element' }
 }
 function render(nodeData: unknown): string {
-  const value = makeEditorLocale('en', (key) => (EDITOR_STRINGS.en as Record<string, string>)[key] ?? key)
+  const value = makeEditorLocale(
+    'en',
+    (key) => (EDITOR_STRINGS.en as Record<string, string>)[key] ?? key,
+  )
   return renderToStaticMarkup(
-    createElement(EditorLocaleContext.Provider, { value },
-      createElement(
-        ReactFlowProvider,
-        { children: createElement(BlockNode, { id: 'n1', data: nodeData, selected: false } as never) },
-      ),
+    createElement(
+      EditorLocaleContext.Provider,
+      { value },
+      createElement(ReactFlowProvider, {
+        children: createElement(BlockNode, { id: 'n1', data: nodeData, selected: false } as never),
+      }),
     ),
   )
 }

@@ -8,9 +8,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../src/background/workflow-engine/auto-repair/orchestrator', async (importOriginal) => {
-  const actual = await importOriginal<
-    typeof import('../src/background/workflow-engine/auto-repair/orchestrator')
-  >()
+  const actual =
+    await importOriginal<
+      typeof import('../src/background/workflow-engine/auto-repair/orchestrator')
+    >()
   return { ...actual, runAutoRepair: vi.fn() }
 })
 
@@ -58,7 +59,7 @@ const emitOf = (args: unknown): Emit => (args as { deps: { emit: Emit } }).deps.
 
 type RunResult = Awaited<ReturnType<typeof runAutoRepair>>
 /** A session result the adapter only reads `final` from. */
-const finished = (final: unknown): RunResult => ({ final } as unknown as RunResult)
+const finished = (final: unknown): RunResult => ({ final }) as unknown as RunResult
 
 describe('startBackgroundAutoRepair · settle guarantees', () => {
   it('broadcasts a terminal event and frees the registry on an unexpected error', async () => {

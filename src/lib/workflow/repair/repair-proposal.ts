@@ -25,10 +25,7 @@
  * @module lib/workflow/repair/repair-proposal
  */
 
-import type {
-  WorkflowPatchOperation,
-  WorkflowPatchSet,
-} from './types'
+import type { WorkflowPatchOperation, WorkflowPatchSet } from './types'
 
 export type ProposalRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH'
 

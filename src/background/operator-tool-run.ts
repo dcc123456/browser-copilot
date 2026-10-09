@@ -410,19 +410,16 @@ function rewriteForRecording(
   // post-execution pick (see `selectorAfterExecution`), so the node records
   // what the kernel really clicked with rather than a pre-execution guess.
   // A locator with no CSS candidates (role/text only) is left untouched.
-  const probeCandidates = resolved
-    ? selectorCandidatesOf(resolved)
-    : []
-  const probeCounts = probeCandidates.length > 0
-    ? await countSelectorMatches(probeCandidates, {
-        ...(pinnedTab.has(conversationId) ? { tabId: pinnedTab.get(conversationId) } : {}),
-        ...(scope ? { scope } : {}),
-      })
-    : null
+  const probeCandidates = resolved ? selectorCandidatesOf(resolved) : []
+  const probeCounts =
+    probeCandidates.length > 0
+      ? await countSelectorMatches(probeCandidates, {
+          ...(pinnedTab.has(conversationId) ? { tabId: pinnedTab.get(conversationId) } : {}),
+          ...(scope ? { scope } : {}),
+        })
+      : null
   const locator: RecordedLocator | undefined =
-    resolved && probeCounts
-      ? { ...resolved, verified: undefined }
-      : resolved
+    resolved && probeCounts ? { ...resolved, verified: undefined } : resolved
   if (probeCounts && locator) {
     markProbed(trace, probeCandidates, probeCounts)
   }
@@ -458,7 +455,13 @@ function rewriteForRecording(
   // exists to stop page-read content, and `generated:true` is the model
   // asserting the opposite provenance for the one param (`forms.value`) this
   // decision covers.
-  const plan = aiPrefillPlanOf(draft, blockId, data, generated, buildVariableIndex(draft.variables ?? {}, bag.keys))
+  const plan = aiPrefillPlanOf(
+    draft,
+    blockId,
+    data,
+    generated,
+    buildVariableIndex(draft.variables ?? {}, bag.keys),
+  )
 
   // A data literal this big, with nothing in the graph producing it, is content
   // the model read with its own tools and pasted in. Refused BEFORE the page is
@@ -612,7 +615,9 @@ function rewriteForRecording(
   // REPLAY plan, which regenerates the copy per run (the same semantics the
   // history compiler applies).
   const recordingData =
-    plan.kind === 'none' ? locatedRedactedData : { ...locatedRedactedData, value: `{{${plan.variableName}}}` }
+    plan.kind === 'none'
+      ? locatedRedactedData
+      : { ...locatedRedactedData, value: `{{${plan.variableName}}}` }
 
   // Business data must not be frozen at record time. Redaction runs FIRST so a
   // credential literal is already a `{{secret}}` reference by now and the

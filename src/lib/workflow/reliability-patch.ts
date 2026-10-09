@@ -79,13 +79,22 @@ export function validateReliabilityPatch(
   ) {
     const contract = patch.paramsPatch['__reliability'] as Record<string, unknown>
     const original = (node?.data?.['__reliability'] ?? {}) as Record<string, unknown>
-    const nextIdem = typeof contract['idempotency'] === 'string' ? contract['idempotency'] : undefined
-    const prevIdem = typeof original['idempotency'] === 'string' ? original['idempotency'] : undefined
-    if (nextIdem && prevIdem && (IDEMPOTENCY_RANK[nextIdem] ?? 0) < (IDEMPOTENCY_RANK[prevIdem] ?? 0)) {
+    const nextIdem =
+      typeof contract['idempotency'] === 'string' ? contract['idempotency'] : undefined
+    const prevIdem =
+      typeof original['idempotency'] === 'string' ? original['idempotency'] : undefined
+    if (
+      nextIdem &&
+      prevIdem &&
+      (IDEMPOTENCY_RANK[nextIdem] ?? 0) < (IDEMPOTENCY_RANK[prevIdem] ?? 0)
+    ) {
       problems.push('禁止放宽幂等性（idempotency 只能收紧）')
     }
     if (Array.isArray(original['postconditions']) && Array.isArray(contract['postconditions'])) {
-      if ((contract['postconditions'] as unknown[]).length < (original['postconditions'] as unknown[]).length) {
+      if (
+        (contract['postconditions'] as unknown[]).length <
+        (original['postconditions'] as unknown[]).length
+      ) {
         problems.push('禁止删除后置条件（postconditions 只能新增）')
       }
     }

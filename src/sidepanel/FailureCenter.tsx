@@ -19,19 +19,10 @@
  */
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import {
-  CheckCircle2,
-  Loader2,
-  TriangleAlert,
-  X,
-  UserRound,
-} from 'lucide-react'
+import { CheckCircle2, Loader2, TriangleAlert, X, UserRound } from 'lucide-react'
 import { sendCommand } from '../lib/messages'
 import type { CommandResult } from '../lib/messages'
-import type {
-  RecoveryPhaseState,
-  RecoveryProtocolStatus,
-} from '../lib/workflow/recovery-protocol'
+import type { RecoveryPhaseState, RecoveryProtocolStatus } from '../lib/workflow/recovery-protocol'
 import { newRecoveryRequestId } from '../lib/workflow/recovery-protocol'
 import { useT } from './i18n'
 import { buildRepairProposal, evidenceOfProposal } from '../lib/workflow/repair/repair-proposal'
@@ -75,11 +66,18 @@ function sendRecovery(
   }) as Promise<RecoveryResult>
 }
 
-function PhaseGlyph({ phase, status }: { phase: RecoveryPhaseState; status: RecoveryProtocolStatus }): ReactNode {
+function PhaseGlyph({
+  phase,
+  status,
+}: {
+  phase: RecoveryPhaseState
+  status: RecoveryProtocolStatus
+}): ReactNode {
   if (phase === 'DONE') return <CheckCircle2 className="h-5 w-5 text-ok" aria-hidden />
   if (phase === 'FAILED') return <TriangleAlert className="h-5 w-5 text-err" aria-hidden />
   if (phase === 'HUMAN_TAKEOVER') return <UserRound className="h-5 w-5 text-warn" aria-hidden />
-  if (status === 'running') return <Loader2 className="h-5 w-5 animate-spin text-accent" aria-hidden />
+  if (status === 'running')
+    return <Loader2 className="h-5 w-5 animate-spin text-accent" aria-hidden />
   return <Loader2 className="h-5 w-5 text-muted" aria-hidden />
 }
 
@@ -100,10 +98,7 @@ const RISK_CLASS: Record<RepairProposalView['risk'], string> = {
 }
 
 /** Map internal recovery phases to human-readable, localized labels. */
-function phaseLabel(
-  phase: RecoveryPhaseState,
-  t: ReturnType<typeof useT>,
-): string {
+function phaseLabel(phase: RecoveryPhaseState, t: ReturnType<typeof useT>): string {
   switch (phase) {
     case 'DIAGNOSING':
       return t.failureCenterPhaseDiagnosing
@@ -243,8 +238,7 @@ export function FailureCenterDialog({
   }, [workflowId])
 
   const nameOf = useCallback(
-    (nodeId: string): string =>
-      workflow ? displayNameOfNodeId(workflow, nodeId) : nodeId,
+    (nodeId: string): string => (workflow ? displayNameOfNodeId(workflow, nodeId) : nodeId),
     [workflow],
   )
 

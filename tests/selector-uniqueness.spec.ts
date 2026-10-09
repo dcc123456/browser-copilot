@@ -87,9 +87,7 @@ describe('filterBySelectorUniqueness', () => {
       op('o2', 'n2', 'SET_PARAM', 'value', 'hello'),
       op('o3', 'n3', 'SET_PARAM', 'selector', '#one'),
     ])
-    const { kept, rejected } = filterBySelectorUniqueness(patch, (sel) =>
-      sel === '.many' ? 3 : 1,
-    )
+    const { kept, rejected } = filterBySelectorUniqueness(patch, (sel) => (sel === '.many' ? 3 : 1))
     expect(kept.operations.map((o) => o.operationId)).toEqual(['o2', 'o3'])
     expect(rejected.map((r) => r.operationId)).toEqual(['o1'])
   })

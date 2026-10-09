@@ -10,11 +10,7 @@ import type {
   WorkflowPatchSet,
 } from '../src/lib/workflow/repair/types'
 
-function op(
-  operationId: string,
-  nodeId: string,
-  selector: string,
-): WorkflowPatchOperation {
+function op(operationId: string, nodeId: string, selector: string): WorkflowPatchOperation {
   return {
     operationId,
     nodeId,
@@ -63,7 +59,12 @@ function probe(over: Partial<SelectorProbe> = {}): SelectorProbe {
 describe('proposeWithSelectorVerification', () => {
   it('returns a unique proposal immediately without re-proposing', async () => {
     const propose = vi.fn(async () => patch(['#only']))
-    const result = await proposeWithSelectorVerification(propose, probe({ count: async () => 1 }), makeContext(), 3)
+    const result = await proposeWithSelectorVerification(
+      propose,
+      probe({ count: async () => 1 }),
+      makeContext(),
+      3,
+    )
 
     expect(result.patch?.operations).toHaveLength(1)
     expect(result.rounds).toBe(1)
@@ -72,13 +73,16 @@ describe('proposeWithSelectorVerification', () => {
   })
 
   it('rejects an ambiguous selector and feeds candidate evidence back into the context', async () => {
-    const evidence: PageEvidence = { evidenceId: 'page-cand-0', kind: 'DOM', detail: '#submit <button> "Save"' }
-    const propose = vi
-      .fn(async (context: RepairContext) => {
-        // First round proposes the ambiguous selector; subsequent rounds give up.
-        if (context.pageEvidence.length === 0) return patch(['.many'])
-        return null
-      })
+    const evidence: PageEvidence = {
+      evidenceId: 'page-cand-0',
+      kind: 'DOM',
+      detail: '#submit <button> "Save"',
+    }
+    const propose = vi.fn(async (context: RepairContext) => {
+      // First round proposes the ambiguous selector; subsequent rounds give up.
+      if (context.pageEvidence.length === 0) return patch(['.many'])
+      return null
+    })
     const candidates = vi.fn(async () => [evidence])
     const context = makeContext()
     const result = await proposeWithSelectorVerification(
@@ -89,7 +93,9 @@ describe('proposeWithSelectorVerification', () => {
     )
 
     expect(result.patch).toBeNull()
-    expect(result.rejected).toEqual([{ operationId: 'o0', nodeId: 'n1', selector: '.many', matches: 4 }])
+    expect(result.rejected).toEqual([
+      { operationId: 'o0', nodeId: 'n1', selector: '.many', matches: 4 },
+    ])
     // The live candidate was pushed in place so the next propose sees it.
     expect(context.pageEvidence).toContainEqual(evidence)
     expect(candidates).toHaveBeenCalledWith('.many')
@@ -97,7 +103,12 @@ describe('proposeWithSelectorVerification', () => {
 
   it('keeps an unverifiable selector instead of regressing an offline repair', async () => {
     const propose = vi.fn(async () => patch(['#maybe']))
-    const result = await proposeWithSelectorVerification(propose, probe({ count: async () => null }), makeContext(), 3)
+    const result = await proposeWithSelectorVerification(
+      propose,
+      probe({ count: async () => null }),
+      makeContext(),
+      3,
+    )
 
     expect(result.patch?.operations).toHaveLength(1)
     expect(result.rejected).toEqual([])

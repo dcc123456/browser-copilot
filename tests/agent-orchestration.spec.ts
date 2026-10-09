@@ -130,8 +130,7 @@ afterEach(() => {
 
 describe('supervisor prompt wiring', () => {
   it('appends the specialist catalogue when delegation is enabled', async () => {
-    streamMock
-      .mockResolvedValueOnce({ content: 'done', toolCalls: [] } as never)
+    streamMock.mockResolvedValueOnce({ content: 'done', toolCalls: [] } as never)
     await runAgentTurn([{ role: 'user', content: 'hi' }], deps() as never)
     const messages = streamMock.mock.calls[0]![0].messages as { role: string; content: string }[]
     const system = messages[0]!.content
@@ -155,9 +154,7 @@ describe('gate 2 — small-task refusal costs no sub-agent LLM call', () => {
     streamMock
       .mockResolvedValueOnce({
         content: '',
-        toolCalls: [
-          toolCall('c1', 'delegate_to_agent', delegateArgs(specialist(), 'tiny task')),
-        ],
+        toolCalls: [toolCall('c1', 'delegate_to_agent', delegateArgs(specialist(), 'tiny task'))],
       } as never)
       .mockResolvedValueOnce({ content: 'ok', toolCalls: [] } as never)
 
@@ -215,9 +212,7 @@ describe('sub-agent execution', () => {
       // 0: supervisor delegates
       .mockResolvedValueOnce({
         content: '',
-        toolCalls: [
-          toolCall('c1', 'delegate_to_agent', delegateArgs(specialist(), longTask)),
-        ],
+        toolCalls: [toolCall('c1', 'delegate_to_agent', delegateArgs(specialist(), longTask))],
       } as never)
       // 1: the sub-agent's own turn — whitelisted tools only
       .mockResolvedValueOnce({ content: 'report', toolCalls: [] } as never)
@@ -253,7 +248,11 @@ describe('sub-agent execution', () => {
       .mockResolvedValueOnce({
         content: '',
         toolCalls: [
-          toolCall('c1', 'delegate_to_agent', delegateArgs(specialist({ tools: ['save_local'], name: 'copywriter' }), 'write it')),
+          toolCall(
+            'c1',
+            'delegate_to_agent',
+            delegateArgs(specialist({ tools: ['save_local'], name: 'copywriter' }), 'write it'),
+          ),
         ],
       } as never)
       .mockResolvedValueOnce({ content: longReport, toolCalls: [] } as never)
@@ -263,10 +262,7 @@ describe('sub-agent execution', () => {
       { role: 'user', content: 'write something long' },
     ]
     const sent: AgentServerMessage[] = []
-    await runAgentTurn(
-      history as never,
-      deps({ send: (m) => sent.push(m) }) as never,
-    )
+    await runAgentTurn(history as never, deps({ send: (m) => sent.push(m) }) as never)
 
     const [result] = delegateResults(history)
     expect(result!.status).toBe('completed')
@@ -308,9 +304,7 @@ describe('sub-agent execution', () => {
     streamMock
       .mockResolvedValueOnce({
         content: '',
-        toolCalls: [
-          toolCall('c1', 'delegate_to_agent', { agent: 'ghost', task: longTask }),
-        ],
+        toolCalls: [toolCall('c1', 'delegate_to_agent', { agent: 'ghost', task: longTask })],
       } as never)
       .mockResolvedValueOnce({ content: 'ok', toolCalls: [] } as never)
 
@@ -332,19 +326,14 @@ describe('unattended runs', () => {
     streamMock
       .mockResolvedValueOnce({
         content: '',
-        toolCalls: [
-          toolCall('c1', 'delegate_to_agent', delegateArgs(specialist(), LONG_TASK)),
-        ],
+        toolCalls: [toolCall('c1', 'delegate_to_agent', delegateArgs(specialist(), LONG_TASK))],
       } as never)
       .mockResolvedValueOnce({ content: 'ok', toolCalls: [] } as never)
 
     const history: { role: string; name?: string; content?: string }[] = [
       { role: 'user', content: 'scheduled task' },
     ]
-    await runAgentTurn(
-      history as never,
-      deps({ enableDelegation: false }) as never,
-    )
+    await runAgentTurn(history as never, deps({ enableDelegation: false }) as never)
 
     const [result] = delegateResults(history)
     expect(result!.status).toBe('failed')

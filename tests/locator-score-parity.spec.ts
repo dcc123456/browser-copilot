@@ -55,9 +55,9 @@ describe('kernel strictScoreOf ↔ LOCATOR_WEIGHTS', () => {
     expect(kernelScoreOf(/case 'testid':\s*base = (\d+)/, 'testid')).toBe(
       LOCATOR_WEIGHTS.verifiedTestid,
     )
-    expect(kernelScoreOf(/case 'role':[\s\S]{0,120}?base = value \? (\d+) : \d+/, 'role + name')).toBe(
-      LOCATOR_WEIGHTS.roleAccessibleName,
-    )
+    expect(
+      kernelScoreOf(/case 'role':[\s\S]{0,120}?base = value \? (\d+) : \d+/, 'role + name'),
+    ).toBe(LOCATOR_WEIGHTS.roleAccessibleName)
     expect(
       kernelScoreOf(/case 'id':\s*base = looksUnstable\(value\) \? POSITIONAL : (\d+)/, 'id'),
     ).toBe(LOCATOR_WEIGHTS.verifiedStableId)
@@ -67,15 +67,18 @@ describe('kernel strictScoreOf ↔ LOCATOR_WEIGHTS', () => {
     expect(kernelScoreOf(/case 'text':\s*base = (\d+)/, 'text')).toBe(
       LOCATOR_WEIGHTS.exactVisibleText,
     )
-    expect(
-      kernelScoreOf(/base = Math\.max\(1, (\d+) - Math\.min\(15, steps\)/, 'css'),
-    ).toBe(LOCATOR_WEIGHTS.css)
+    expect(kernelScoreOf(/base = Math\.max\(1, (\d+) - Math\.min\(15, steps\)/, 'css')).toBe(
+      LOCATOR_WEIGHTS.css,
+    )
   })
 
   it('scores a nameless role below the strict floor, so it can never win rung 1', () => {
     // `role` without an accessible name matched everything on the old page; it
     // must stay a last resort in the ladder too.
-    const nameless = kernelScoreOf(/case 'role':[\s\S]{0,120}?base = value \? \d+ : (\d+)/, 'role alone')
+    const nameless = kernelScoreOf(
+      /case 'role':[\s\S]{0,120}?base = value \? \d+ : (\d+)/,
+      'role alone',
+    )
     expect(nameless).toBeLessThan(STRICT_MIN_SCORE)
   })
 

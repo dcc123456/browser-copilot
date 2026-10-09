@@ -24,37 +24,37 @@
 
 ## 2. 真实入口文件
 
-| 角色 | 文件 | 说明 |
-|---|---|---|
-| Service Worker 总入口 | `src/background/index.ts` | 所有 `workflows.*` / `record.*` 消息集中分发；workflow 命令 `:1289` 起 |
-| Agent / 对话编排 | `src/background/agent.ts`、`src/background/orchestrator.ts`、`src/background/task-runner.ts` | 聊天回合、工具循环；operator 工具分发在 `agent.ts:3607` |
-| Operator 工具执行（路径 A） | `src/background/workflow-engine/operator-exec.ts` | `executeOperatorNode`（`:124`） |
-| Operator 桥（路径 A） | `src/background/operator-tool-run.ts` | `runOperatorToolWithExecution`（`:285`）、`resolveOperatorLocator`（`:135`）、`forgetGenerationSecrets`（`:110`） |
-| Draft 图与组装（路径 A） | `src/background/operator-tool-handler.ts` | append 原语、trigger head、`composeWorkflowFromDraft`（`:593`）、`declareWorkflowInputs`（`:566`） |
-| Draft 持久化 | `src/lib/workflow/draft-storage.ts` | `saveDraft/loadDraft/deleteDraft`；key `workflow-drafts` |
-| Draft 数据模型 | `src/lib/workflow/draft-types.ts` | `WorkflowDraft`（`:41`）、`PendingBranch`（`:24`）、`TRIGGER_BLOCK_ID`（`:14`） |
-| History 编译（路径 B） | `src/background/history-compile.ts` | `resolveWorkflowForSave`（`:147`）、`compileConversationHistory` |
-| History→Workflow | `src/lib/storage.ts:1900` | `workflowFromHistory`；fill 去重 `:1254` |
-| 录制（第三条记录源） | `src/background/record-controller.ts`、`src/lib/workflow/record-convert.ts` | `record.start/stop`；`flowsToWorkflow`（`record-convert.ts:40`） |
-| Runner / 恢复 / 副作用安全 | `src/background/workflow-engine/run-workflow.ts` | `executeWorkflow`（`:316`）、checkpoint 写入（`:579-604`）、SIDE_EFFECT_UNKNOWN 拦截（`:419-440`） |
-| 纯图解释器 | `src/background/workflow-engine/engine.ts` | `runWorkflow` |
-| 检查点纯逻辑 | `src/lib/workflow/checkpoints.ts` | `recordCheckpoint`、`resumePointOf`（`:212`）、`workflowFingerprintOf`（`:162`） |
-| 检查点持久化 | `src/background/checkpoint-store.ts` | `createChromeCheckpointStore`（`:53`）；文件 `checkpoints/<runId>.json` |
-| 生成静态校验（六层） | `src/lib/workflow/generated-validation.ts` | `validateGeneratedWorkflow`（`:420`） |
-| 运行校验 | `src/lib/workflow/validation.ts`、`src/lib/workflow/integrity.ts` | `validateWorkflowForRun`、`checkWorkflowIntegrity` |
-| Reliability 契约 | `src/lib/workflow/reliability.ts` | mode 解析、`NodeReliabilitySpec`、`WorkflowGoalSpec`、`nodeReliabilityOf` |
-| 契约确定性补全 | `src/lib/workflow/auto-contract.ts` | `autoCompleteReliability`（`:135`）、`inferIdempotency`（`:43`） |
-| Goal 派生 | `src/lib/workflow/goal.ts` | `deriveGoalSpecFromNodes`（`:56`） |
-| Readiness | `src/lib/workflow/readiness.ts`、`src/background/workflow-engine/readiness-engine.ts` | spec 规范化 + 运行等待 |
-| 选择器硬化 / 探测 | `src/background/selector-probe.ts` | `verifyRecordedSelector`（`:128`）、`probeWorkflowSelectors`（`:61`）、`hardenWorkflowSelectors`（`:170`） |
-| 定位评分 / 指纹 | `src/lib/workflow/locator-score.ts`、`src/lib/workflow/element-fingerprint.ts`、`src/lib/workflow/target-to-selector.ts` | 候选评分、语义指纹、Target→selector |
-| 凭据隔离 | `src/lib/workflow/secret-guard.ts` | `redactRecordedParams`（`:137`）、密码字段识别 |
-| 缺失输入提升 | `src/lib/workflow/declare-missing-inputs.ts` | `declareMissingInputs`（`:46`） |
-| 动态数据 / 输入泛化 | `src/lib/workflow/dynamic-data.ts` | `rewriteDataParams`、`buildVariableIndex`、`declareWorkflowInputs` 支撑、`mergeTriggerInputs` |
-| Workflow 持久化 | `src/lib/workflow/storage.ts` | `saveWorkflow`（`:135`），含 migrate+validate |
-| 触发器重排 | `src/background/workflow-triggers.ts` | `rescheduleAllWorkflowTriggers`（`:358`） |
-| 修复引擎目录 | `src/background/workflow-engine/repair/` | 见 §6 |
-| 修复纯原语目录 | `src/lib/workflow/repair/` | 见 §6 |
+| 角色                        | 文件                                                                                                                     | 说明                                                                                                              |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| Service Worker 总入口       | `src/background/index.ts`                                                                                                | 所有 `workflows.*` / `record.*` 消息集中分发；workflow 命令 `:1289` 起                                            |
+| Agent / 对话编排            | `src/background/agent.ts`、`src/background/orchestrator.ts`、`src/background/task-runner.ts`                             | 聊天回合、工具循环；operator 工具分发在 `agent.ts:3607`                                                           |
+| Operator 工具执行（路径 A） | `src/background/workflow-engine/operator-exec.ts`                                                                        | `executeOperatorNode`（`:124`）                                                                                   |
+| Operator 桥（路径 A）       | `src/background/operator-tool-run.ts`                                                                                    | `runOperatorToolWithExecution`（`:285`）、`resolveOperatorLocator`（`:135`）、`forgetGenerationSecrets`（`:110`） |
+| Draft 图与组装（路径 A）    | `src/background/operator-tool-handler.ts`                                                                                | append 原语、trigger head、`composeWorkflowFromDraft`（`:593`）、`declareWorkflowInputs`（`:566`）                |
+| Draft 持久化                | `src/lib/workflow/draft-storage.ts`                                                                                      | `saveDraft/loadDraft/deleteDraft`；key `workflow-drafts`                                                          |
+| Draft 数据模型              | `src/lib/workflow/draft-types.ts`                                                                                        | `WorkflowDraft`（`:41`）、`PendingBranch`（`:24`）、`TRIGGER_BLOCK_ID`（`:14`）                                   |
+| History 编译（路径 B）      | `src/background/history-compile.ts`                                                                                      | `resolveWorkflowForSave`（`:147`）、`compileConversationHistory`                                                  |
+| History→Workflow            | `src/lib/storage.ts:1900`                                                                                                | `workflowFromHistory`；fill 去重 `:1254`                                                                          |
+| 录制（第三条记录源）        | `src/background/record-controller.ts`、`src/lib/workflow/record-convert.ts`                                              | `record.start/stop`；`flowsToWorkflow`（`record-convert.ts:40`）                                                  |
+| Runner / 恢复 / 副作用安全  | `src/background/workflow-engine/run-workflow.ts`                                                                         | `executeWorkflow`（`:316`）、checkpoint 写入（`:579-604`）、SIDE_EFFECT_UNKNOWN 拦截（`:419-440`）                |
+| 纯图解释器                  | `src/background/workflow-engine/engine.ts`                                                                               | `runWorkflow`                                                                                                     |
+| 检查点纯逻辑                | `src/lib/workflow/checkpoints.ts`                                                                                        | `recordCheckpoint`、`resumePointOf`（`:212`）、`workflowFingerprintOf`（`:162`）                                  |
+| 检查点持久化                | `src/background/checkpoint-store.ts`                                                                                     | `createChromeCheckpointStore`（`:53`）；文件 `checkpoints/<runId>.json`                                           |
+| 生成静态校验（六层）        | `src/lib/workflow/generated-validation.ts`                                                                               | `validateGeneratedWorkflow`（`:420`）                                                                             |
+| 运行校验                    | `src/lib/workflow/validation.ts`、`src/lib/workflow/integrity.ts`                                                        | `validateWorkflowForRun`、`checkWorkflowIntegrity`                                                                |
+| Reliability 契约            | `src/lib/workflow/reliability.ts`                                                                                        | mode 解析、`NodeReliabilitySpec`、`WorkflowGoalSpec`、`nodeReliabilityOf`                                         |
+| 契约确定性补全              | `src/lib/workflow/auto-contract.ts`                                                                                      | `autoCompleteReliability`（`:135`）、`inferIdempotency`（`:43`）                                                  |
+| Goal 派生                   | `src/lib/workflow/goal.ts`                                                                                               | `deriveGoalSpecFromNodes`（`:56`）                                                                                |
+| Readiness                   | `src/lib/workflow/readiness.ts`、`src/background/workflow-engine/readiness-engine.ts`                                    | spec 规范化 + 运行等待                                                                                            |
+| 选择器硬化 / 探测           | `src/background/selector-probe.ts`                                                                                       | `verifyRecordedSelector`（`:128`）、`probeWorkflowSelectors`（`:61`）、`hardenWorkflowSelectors`（`:170`）        |
+| 定位评分 / 指纹             | `src/lib/workflow/locator-score.ts`、`src/lib/workflow/element-fingerprint.ts`、`src/lib/workflow/target-to-selector.ts` | 候选评分、语义指纹、Target→selector                                                                               |
+| 凭据隔离                    | `src/lib/workflow/secret-guard.ts`                                                                                       | `redactRecordedParams`（`:137`）、密码字段识别                                                                    |
+| 缺失输入提升                | `src/lib/workflow/declare-missing-inputs.ts`                                                                             | `declareMissingInputs`（`:46`）                                                                                   |
+| 动态数据 / 输入泛化         | `src/lib/workflow/dynamic-data.ts`                                                                                       | `rewriteDataParams`、`buildVariableIndex`、`declareWorkflowInputs` 支撑、`mergeTriggerInputs`                     |
+| Workflow 持久化             | `src/lib/workflow/storage.ts`                                                                                            | `saveWorkflow`（`:135`），含 migrate+validate                                                                     |
+| 触发器重排                  | `src/background/workflow-triggers.ts`                                                                                    | `rescheduleAllWorkflowTriggers`（`:358`）                                                                         |
+| 修复引擎目录                | `src/background/workflow-engine/repair/`                                                                                 | 见 §6                                                                                                             |
+| 修复纯原语目录              | `src/lib/workflow/repair/`                                                                                               | 见 §6                                                                                                             |
 
 ---
 
@@ -141,40 +141,40 @@ flowchart TD
 
 ### 6.1 背景修复引擎目录 `src/background/workflow-engine/repair/`
 
-| 文件 | 职责 |
-|---|---|
-| `unified-debug.ts` | `runUnifiedDebug(wf, mode, deps)`（`:83`）；`UnifiedDebugMode`（`:40`）；transient retry → propose → validate → confidence gate → apply → replay |
-| `repair-engine.ts` | `WorkflowRepairEngine`：verify/diagnose/propose/validatePatch/apply/replay |
-| `failure-analyzer.ts` | `analyzeFailure`；TRANSIENT/HUMAN 类型表 |
-| `root-cause-analyzer.ts` | `canonicalizeAnalysis / rankCandidates / sameAnalysis` |
-| `repair-agent.ts` | `buildRepairContext`、`buildRepairMessages`、`parseRepairProposal`、`REPAIR_SYSTEM_PROMPT` |
-| `repair-provider.ts` | `createAiRepairProposer`（OpenAI 兼容） |
-| `repair-session-store.ts` | 内存 `Map<workflowId, PendingRepairSession>`（`:45`）；put/take/discard；锁基线 `baseUpdatedAt/baseHash` |
-| `replay-engine.ts` | `planReplay / executeReplay`；replay 安全分类 |
-| `verification-runner.ts` | `buildVerificationResult / verifyThroughRunner`；`WorkflowRunner`（`:41`）、`RunnerOutcome`（`:32`） |
-| `generation-repair.ts` | `finalizeGeneratedWorkflow`（`:77`）；生成期修复循环 |
-| `background-runner.ts` | `createBackgroundRunner / createBackgroundCheckpointAdapter`（真实 executeWorkflow 适配） |
-| `index.ts` | barrel |
+| 文件                      | 职责                                                                                                                                             |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `unified-debug.ts`        | `runUnifiedDebug(wf, mode, deps)`（`:83`）；`UnifiedDebugMode`（`:40`）；transient retry → propose → validate → confidence gate → apply → replay |
+| `repair-engine.ts`        | `WorkflowRepairEngine`：verify/diagnose/propose/validatePatch/apply/replay                                                                       |
+| `failure-analyzer.ts`     | `analyzeFailure`；TRANSIENT/HUMAN 类型表                                                                                                         |
+| `root-cause-analyzer.ts`  | `canonicalizeAnalysis / rankCandidates / sameAnalysis`                                                                                           |
+| `repair-agent.ts`         | `buildRepairContext`、`buildRepairMessages`、`parseRepairProposal`、`REPAIR_SYSTEM_PROMPT`                                                       |
+| `repair-provider.ts`      | `createAiRepairProposer`（OpenAI 兼容）                                                                                                          |
+| `repair-session-store.ts` | 内存 `Map<workflowId, PendingRepairSession>`（`:45`）；put/take/discard；锁基线 `baseUpdatedAt/baseHash`                                         |
+| `replay-engine.ts`        | `planReplay / executeReplay`；replay 安全分类                                                                                                    |
+| `verification-runner.ts`  | `buildVerificationResult / verifyThroughRunner`；`WorkflowRunner`（`:41`）、`RunnerOutcome`（`:32`）                                             |
+| `generation-repair.ts`    | `finalizeGeneratedWorkflow`（`:77`）；生成期修复循环                                                                                             |
+| `background-runner.ts`    | `createBackgroundRunner / createBackgroundCheckpointAdapter`（真实 executeWorkflow 适配）                                                        |
+| `index.ts`                | barrel                                                                                                                                           |
 
 ### 6.2 纯修复原语目录 `src/lib/workflow/repair/`
 
-| 文件 | 职责 |
-|---|---|
-| `types.ts` | `VerificationFailureType`（`:22`，22 类）、`ExecutionTrace`、`FailureAnalysis`（`:245`）、`WorkflowPatchSet`（`:313`）、`RepairPolicy/DEFAULT_REPAIR_POLICY`（`:343/361`）、`WorkflowRepairSession`（`:408`） |
-| `failure-classifier.ts` | `classifyVerificationFailure`（`:162`）、`traceFailureFrom`（`:172`）——**运行/修复链路实际使用的规范分类器** |
-| `patch-engine.ts` | 补丁应用纯逻辑 |
-| `patch-policy.ts` | replay 安全表（block → safety） |
-| `confirmation-gate.ts` | `decideConfidence`（阈值 `autoApplyConfidenceThreshold`） |
-| `transient-retry.ts` | `isTransientFailure / nextTransientRetry / transientPolicyOf / waitForTransientRetry`；退避 500/1500ms |
-| `repair-response.ts` | `RepairResponseData`（`:36`）、`toRepairResponse`（`:73`）——面板线协议投影 |
-| `dataflow-analyzer.ts` / `dataflow-cache.ts` | 数据流分析与缓存 |
-| `failure-signature.ts` | 失败签名 |
-| `failure-corpus.ts` | 离线标注语料 |
-| `trace-codec.ts` | trace 版本化编解码 |
-| `variable-provenance.ts` | 变量出处 |
-| `redaction.ts` | 脱敏 |
-| `policy-tuner.ts` | 策略调参 |
-| `subworkflow-trace.ts` | 子工作流 trace |
+| 文件                                         | 职责                                                                                                                                                                                                          |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `types.ts`                                   | `VerificationFailureType`（`:22`，22 类）、`ExecutionTrace`、`FailureAnalysis`（`:245`）、`WorkflowPatchSet`（`:313`）、`RepairPolicy/DEFAULT_REPAIR_POLICY`（`:343/361`）、`WorkflowRepairSession`（`:408`） |
+| `failure-classifier.ts`                      | `classifyVerificationFailure`（`:162`）、`traceFailureFrom`（`:172`）——**运行/修复链路实际使用的规范分类器**                                                                                                  |
+| `patch-engine.ts`                            | 补丁应用纯逻辑                                                                                                                                                                                                |
+| `patch-policy.ts`                            | replay 安全表（block → safety）                                                                                                                                                                               |
+| `confirmation-gate.ts`                       | `decideConfidence`（阈值 `autoApplyConfidenceThreshold`）                                                                                                                                                     |
+| `transient-retry.ts`                         | `isTransientFailure / nextTransientRetry / transientPolicyOf / waitForTransientRetry`；退避 500/1500ms                                                                                                        |
+| `repair-response.ts`                         | `RepairResponseData`（`:36`）、`toRepairResponse`（`:73`）——面板线协议投影                                                                                                                                    |
+| `dataflow-analyzer.ts` / `dataflow-cache.ts` | 数据流分析与缓存                                                                                                                                                                                              |
+| `failure-signature.ts`                       | 失败签名                                                                                                                                                                                                      |
+| `failure-corpus.ts`                          | 离线标注语料                                                                                                                                                                                                  |
+| `trace-codec.ts`                             | trace 版本化编解码                                                                                                                                                                                            |
+| `variable-provenance.ts`                     | 变量出处                                                                                                                                                                                                      |
+| `redaction.ts`                               | 脱敏                                                                                                                                                                                                          |
+| `policy-tuner.ts`                            | 策略调参                                                                                                                                                                                                      |
+| `subworkflow-trace.ts`                       | 子工作流 trace                                                                                                                                                                                                |
 
 ### 6.3 第三套（背景 enriched verdict）与死代码 taxonomy
 
@@ -190,31 +190,31 @@ flowchart TD
 
 所有命令在 `src/lib/messages.ts` 定义、`src/background/index.ts` 处理：
 
-| 命令 | 定义 | Handler | 结果类型 |
-|---|---|---|---|
-| `workflows.list` | — | `index.ts:1289` | `workflows.list {workflows}` |
-| `workflows.get` | — | `:1292` | `workflows.get {workflow?}` |
-| `workflows.save` | `messages.ts:191` | `:1295` | `workflows.save` |
-| `workflows.delete` | — | `:1315` | `workflows.delete` |
-| `workflows.draft.get` | `:199` | `:1320` | `workflows.draft`（`:421`；empty/detail/source/repair/probes/suggestions） |
-| `workflows.probe` | — | `:1369` | `workflows.probe {probes}` |
-| `workflows.draft.fold` | `:215` | `:1391` | `workflows.draft.fold` |
-| `workflows.draft.clear` | — | `:1419` | `workflows.draft.clear` |
-| `workflows.review` | `:234` | `:1430` | `workflows.review {review,error?}`（+ pushed `workflows.reviewLog`） |
-| `workflows.run` | `:235` | `:1450` | `workflows.run {outcome}` |
-| `workflows.resumePoint` | `:315` | `:1513` | `workflows.resumePoint {resumable,runId?,fromStepIndex?}` |
-| `workflows.resume` | `:303` | `:1541` | `workflows.resume {outcome}` |
-| `workflows.debug` | `:254` | `:1566` | `workflows.debug {result: WorkflowDebugResult}` |
-| `workflows.repair` | `:262` | `:1920` | `workflows.repair {data: RepairResponseData}` |
-| `workflows.repairCommit` | `:274` | `:1991` | `workflows.repairCommit` |
-| `workflows.repairDiscard` | `:276` | `:2026` | `workflows.repairDiscard` |
-| `workflows.takeoverPending` | `:278` | `:2035` | `workflows.takeoverPending {items}` |
-| `workflows.takeoverStats` | `:280` | `:2038` | `workflows.takeoverStats {summary}` |
-| `workflows.debugStats` | `:282` | `:2041` | `workflows.debugStats {summary}` |
-| `workflows.takeoverApply` | `:284` | `:2044` | `workflows.takeoverApply`（`:511`） |
-| `workflows.takeoverDiscard` | `:296` | `:2137` | `workflows.takeoverDiscard` |
-| `workflows.running` | `:316` | `:2142` | — |
-| `record.start` / `record.stop` / `record.status` | `:323/325/327` | `:2147/2152/2158` | — |
+| 命令                                             | 定义              | Handler           | 结果类型                                                                   |
+| ------------------------------------------------ | ----------------- | ----------------- | -------------------------------------------------------------------------- |
+| `workflows.list`                                 | —                 | `index.ts:1289`   | `workflows.list {workflows}`                                               |
+| `workflows.get`                                  | —                 | `:1292`           | `workflows.get {workflow?}`                                                |
+| `workflows.save`                                 | `messages.ts:191` | `:1295`           | `workflows.save`                                                           |
+| `workflows.delete`                               | —                 | `:1315`           | `workflows.delete`                                                         |
+| `workflows.draft.get`                            | `:199`            | `:1320`           | `workflows.draft`（`:421`；empty/detail/source/repair/probes/suggestions） |
+| `workflows.probe`                                | —                 | `:1369`           | `workflows.probe {probes}`                                                 |
+| `workflows.draft.fold`                           | `:215`            | `:1391`           | `workflows.draft.fold`                                                     |
+| `workflows.draft.clear`                          | —                 | `:1419`           | `workflows.draft.clear`                                                    |
+| `workflows.review`                               | `:234`            | `:1430`           | `workflows.review {review,error?}`（+ pushed `workflows.reviewLog`）       |
+| `workflows.run`                                  | `:235`            | `:1450`           | `workflows.run {outcome}`                                                  |
+| `workflows.resumePoint`                          | `:315`            | `:1513`           | `workflows.resumePoint {resumable,runId?,fromStepIndex?}`                  |
+| `workflows.resume`                               | `:303`            | `:1541`           | `workflows.resume {outcome}`                                               |
+| `workflows.debug`                                | `:254`            | `:1566`           | `workflows.debug {result: WorkflowDebugResult}`                            |
+| `workflows.repair`                               | `:262`            | `:1920`           | `workflows.repair {data: RepairResponseData}`                              |
+| `workflows.repairCommit`                         | `:274`            | `:1991`           | `workflows.repairCommit`                                                   |
+| `workflows.repairDiscard`                        | `:276`            | `:2026`           | `workflows.repairDiscard`                                                  |
+| `workflows.takeoverPending`                      | `:278`            | `:2035`           | `workflows.takeoverPending {items}`                                        |
+| `workflows.takeoverStats`                        | `:280`            | `:2038`           | `workflows.takeoverStats {summary}`                                        |
+| `workflows.debugStats`                           | `:282`            | `:2041`           | `workflows.debugStats {summary}`                                           |
+| `workflows.takeoverApply`                        | `:284`            | `:2044`           | `workflows.takeoverApply`（`:511`）                                        |
+| `workflows.takeoverDiscard`                      | `:296`            | `:2137`           | `workflows.takeoverDiscard`                                                |
+| `workflows.running`                              | `:316`            | `:2142`           | —                                                                          |
+| `record.start` / `record.stop` / `record.status` | `:323/325/327`    | `:2147/2152/2158` | —                                                                          |
 
 ### 7.1 协议现状缺口（后续 commit 处理）
 
@@ -226,14 +226,14 @@ flowchart TD
 
 ## 8. UI 入口现状
 
-| Surface | 文件 | 现状 |
-|---|---|---|
-| Workflows 列表/卡片 | `src/sidepanel/WorkflowsTab.tsx` | 每卡片 actions（`:1170-1257`）：Run、Resume（条件）、**AI 调试**（`:1195`）、**AI 分析**（`:1216`）、**AI 建议修复**（`:1225`）、**AUTO_REPAIR**（`:1234`）、Edit、Export、Delete；另有 debug 日志 modal（`:1304`）、RepairDialog（`:1293`） |
-| 运行动态板 | `src/sidepanel/RunningBoard.tsx` | running + finished 列表，仅 cancel/delete/clear，无 AI 按钮 |
-| 历史（workflow runs） | `src/sidepanel/HistoryTab.tsx` | `RunsSection`（`:516`）展示 run/error/steps；OperationsSection（`:738`）有 history→workflow review |
-| 修复结果弹窗 | `src/sidepanel/RepairDialog.tsx` | failed/root-cause/variable rows/patch before→after/verified 状态/commit+discard |
-| Chat 保存卡 | `src/sidepanel/ChatTab.tsx` | `maybePromptSaveWorkflow`（`:1765`）、probe（`:1838`）、integrity、save（`:2671`） |
-| Workflow review 列表 | `src/sidepanel/WorkflowReviewList.tsx` | history review 列表 |
+| Surface               | 文件                                   | 现状                                                                                                                                                                                                                                         |
+| --------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Workflows 列表/卡片   | `src/sidepanel/WorkflowsTab.tsx`       | 每卡片 actions（`:1170-1257`）：Run、Resume（条件）、**AI 调试**（`:1195`）、**AI 分析**（`:1216`）、**AI 建议修复**（`:1225`）、**AUTO_REPAIR**（`:1234`）、Edit、Export、Delete；另有 debug 日志 modal（`:1304`）、RepairDialog（`:1293`） |
+| 运行动态板            | `src/sidepanel/RunningBoard.tsx`       | running + finished 列表，仅 cancel/delete/clear，无 AI 按钮                                                                                                                                                                                  |
+| 历史（workflow runs） | `src/sidepanel/HistoryTab.tsx`         | `RunsSection`（`:516`）展示 run/error/steps；OperationsSection（`:738`）有 history→workflow review                                                                                                                                           |
+| 修复结果弹窗          | `src/sidepanel/RepairDialog.tsx`       | failed/root-cause/variable rows/patch before→after/verified 状态/commit+discard                                                                                                                                                              |
+| Chat 保存卡           | `src/sidepanel/ChatTab.tsx`            | `maybePromptSaveWorkflow`（`:1765`）、probe（`:1838`）、integrity、save（`:2671`）                                                                                                                                                           |
+| Workflow review 列表  | `src/sidepanel/WorkflowReviewList.tsx` | history review 列表                                                                                                                                                                                                                          |
 
 > **待收敛**：失败面板当前存在五个语义重叠的 AI 平级按钮；Commit 11/13 收敛为单一 `AI 修复` + 两个用户确认点。
 

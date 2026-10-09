@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { GENERATION_STAGE_ORDER, type GenerationStageId } from '../src/lib/workflow/generation-report'
+import {
+  GENERATION_STAGE_ORDER,
+  type GenerationStageId,
+} from '../src/lib/workflow/generation-report'
 // The user-visible phase model (spec V65). The static pipeline stages plus
 // the agent-loop phases together cover the full lifecycle.
-const AGENT_PHASES = ['PREPARING_GOAL', 'FINDING_OPERATORS', 'EXECUTING', 'VERIFYING', 'REPAIRING'] as const
+const AGENT_PHASES = [
+  'PREPARING_GOAL',
+  'FINDING_OPERATORS',
+  'EXECUTING',
+  'VERIFYING',
+  'REPAIRING',
+] as const
 const TERMINAL = ['CERTIFIED', 'FAILED'] as const
 describe('V65 generation process state is understandable', () => {
   it('the pipeline reports every static stage in a stable order', () => {

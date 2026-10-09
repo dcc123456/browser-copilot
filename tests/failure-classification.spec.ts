@@ -26,8 +26,12 @@ describe('failure classification', () => {
   })
 
   it('classifies stale / ambiguous / not visible states', () => {
-    expect(classifyFailure({ message: 'stale element reference: node detached' }).type).toBe('SELECTOR_STALE')
-    expect(classifyFailure({ message: 'ambiguous: 3 elements matched' }).type).toBe('ELEMENT_AMBIGUOUS')
+    expect(classifyFailure({ message: 'stale element reference: node detached' }).type).toBe(
+      'SELECTOR_STALE',
+    )
+    expect(classifyFailure({ message: 'ambiguous: 3 elements matched' }).type).toBe(
+      'ELEMENT_AMBIGUOUS',
+    )
     expect(classifyFailure({ message: 'element not visible' }).type).toBe('ELEMENT_NOT_VISIBLE')
   })
 
@@ -85,9 +89,9 @@ describe('failure classification', () => {
     const result = classifyFailure({ message: guardMessage })
     expect(result.type).toBe('PAGE_CONTEXT_MISMATCH')
     expect(result.basis).toBe('message-pattern')
-    expect(classifyFailure({ message: 'WRONG_PAGE: 页面路径（/settings）不符合预期（/docs/*）' }).type).toBe(
-      'PAGE_CONTEXT_MISMATCH',
-    )
+    expect(
+      classifyFailure({ message: 'WRONG_PAGE: 页面路径（/settings）不符合预期（/docs/*）' }).type,
+    ).toBe('PAGE_CONTEXT_MISMATCH')
     // A structured legacy code beats message guessing.
     const structured = classifyFailure({ message: 'something else', code: 'WRONG_ORIGIN' })
     expect(structured.type).toBe('PAGE_CONTEXT_MISMATCH')

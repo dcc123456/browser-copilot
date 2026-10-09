@@ -276,7 +276,10 @@ describe('generateWorkflowUnattended', () => {
     hydrateDraft.mockResolvedValue({
       nodes: [
         ...draftNodes,
-        { id: 'n2', data: { blockId: 'event-click', description: '点击「草稿箱」，查看刚保存的草稿笔记' } },
+        {
+          id: 'n2',
+          data: { blockId: 'event-click', description: '点击「草稿箱」，查看刚保存的草稿笔记' },
+        },
       ],
     })
     const visited = await generateWorkflowUnattended(
@@ -552,12 +555,17 @@ describe('verifySavedWorkflowUnattended', () => {
       level: 'L3',
       certified: true,
       reason: 'L3 passed: the workflow achieved its goal.',
-      l3: { goalSummary: '生成图文草稿', conditions: [{ description: 'URL 命中', satisfied: true }], allHeld: true },
+      l3: {
+        goalSummary: '生成图文草稿',
+        conditions: [{ description: 'URL 命中', satisfied: true }],
+        allHeld: true,
+      },
     })
 
-    expect((await verifySavedWorkflowUnattended({ workflowId: 'wf-1' }, 'external-verify:11')).workflow?.terminalStepMissing).toBe(
-      true,
-    )
+    expect(
+      (await verifySavedWorkflowUnattended({ workflowId: 'wf-1' }, 'external-verify:11')).workflow
+        ?.terminalStepMissing,
+    ).toBe(true)
 
     // The same goal on a graph that DOES contain its terminal action says nothing.
     const withSave = savedWorkflow({

@@ -2,31 +2,62 @@
  * Goal Verification — the three-level (L1/L2/L3) certification engine.
  */
 import { goalSpecOf } from '../../lib/workflow/reliability'
-import { conditionRequiresBaseline, describeCondition, type WorkflowCondition } from '../../lib/workflow/conditions'
+import {
+  conditionRequiresBaseline,
+  describeCondition,
+  type WorkflowCondition,
+} from '../../lib/workflow/conditions'
 import { provesLandedEffect } from '../../lib/workflow/repair-verification'
-import { nodeGoalContractOf, type WorkflowNodeGoalContract } from '../../lib/workflow/node-goal-contract'
+import {
+  nodeGoalContractOf,
+  type WorkflowNodeGoalContract,
+} from '../../lib/workflow/node-goal-contract'
 import { draftSaveExecuted } from '../../lib/workflow/trial-run'
 import type { Workflow, WorkflowNode } from '../../lib/workflow/types'
-import { evaluateCondition, didHoldBeforeTheRun, type ConditionPageProbe } from './condition-runtime'
+import {
+  evaluateCondition,
+  didHoldBeforeTheRun,
+  type ConditionPageProbe,
+} from './condition-runtime'
 import type { ExecuteWorkflowResult } from './run-workflow'
 export type VerificationLevel = 'L1' | 'L2' | 'L3'
-export interface ConditionEvidence { description: string; satisfied: boolean; detail?: string }
+export interface ConditionEvidence {
+  description: string
+  satisfied: boolean
+  detail?: string
+}
 export interface NodeVerification {
-  nodeId: string; blockId: string; executed: boolean; contract?: WorkflowNodeGoalContract;
-  criteria: ConditionEvidence[]; preconditions: ConditionEvidence[]
+  nodeId: string
+  blockId: string
+  executed: boolean
+  contract?: WorkflowNodeGoalContract
+  criteria: ConditionEvidence[]
+  preconditions: ConditionEvidence[]
   /** Contract rows that compare against a before-the-step observation: the engine checked them, this verifier cannot re-observe them. */
   unevaluated?: string[]
 }
 export interface VerificationReport {
-  level: VerificationLevel; passed: boolean;
-  l1: ConditionEvidence[];
-  l2: { nodes: NodeVerification[]; allHeld: boolean; /** False when NO node declared a contract: nothing was verified here. */ evaluated?: boolean; unevaluated?: string[] };
-  l3: { goalSummary: string; conditions: ConditionEvidence[]; allHeld: boolean; unevaluated?: string[] };
+  level: VerificationLevel
+  passed: boolean
+  l1: ConditionEvidence[]
+  l2: {
+    nodes: NodeVerification[]
+    allHeld: boolean
+    /** False when NO node declared a contract: nothing was verified here. */ evaluated?: boolean
+    unevaluated?: string[]
+  }
+  l3: {
+    goalSummary: string
+    conditions: ConditionEvidence[]
+    allHeld: boolean
+    unevaluated?: string[]
+  }
   /** Soft postconditions the run reported — they never fail a step, but they bar certification. */
-  softUnconfirmed?: string[];
+  softUnconfirmed?: string[]
   /** Goal rows that only held on a later read inside `settleMs`; evidence that the verdict waited, not guessed. */
-  settledAfterMs?: number;
-  certified: boolean; reason: string
+  settledAfterMs?: number
+  certified: boolean
+  reason: string
 }
 export interface GoalVerificationOptions {
   /**
@@ -96,7 +127,8 @@ function reObservableAfterTheRun(condition: WorkflowCondition): boolean {
 function blockIdOf(node: WorkflowNode): string {
   return typeof node.data?.blockId === 'string' ? node.data.blockId : 'unknown'
 }
-const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+const defaultSleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms))
 export async function verifyWorkflowGoal(
   workflow: Workflow,
   run: ExecuteWorkflowResult,
@@ -125,7 +157,11 @@ export async function verifyWorkflowGoal(
       description: blockIdOf(node) + ' executed',
       satisfied: executed,
       ...(!executed
-        ? { detail: run.error ?? (completed ? 'The step never ran.' : 'The run did not finish successfully.') }
+        ? {
+            detail:
+              run.error ??
+              (completed ? 'The step never ran.' : 'The run did not finish successfully.'),
+          }
         : {}),
     }
   })
@@ -154,7 +190,11 @@ export async function verifyWorkflowGoal(
           continue
         }
         const outcome = await evaluateCondition(condition, { variables, probe })
-        criteria.push({ description: outcome.description, satisfied: outcome.satisfied, ...(outcome.detail ? { detail: outcome.detail } : {}) })
+        criteria.push({
+          description: outcome.description,
+          satisfied: outcome.satisfied,
+          ...(outcome.detail ? { detail: outcome.detail } : {}),
+        })
       }
       for (const condition of contract.preconditions ?? []) {
         const seen = liveFor(node.id, condition)
@@ -167,16 +207,33 @@ export async function verifyWorkflowGoal(
           continue
         }
         const outcome = await evaluateCondition(condition, { variables, probe })
-        preconditions.push({ description: outcome.description, satisfied: outcome.satisfied, ...(outcome.detail ? { detail: outcome.detail } : {}) })
+        preconditions.push({
+          description: outcome.description,
+          satisfied: outcome.satisfied,
+          ...(outcome.detail ? { detail: outcome.detail } : {}),
+        })
       }
     }
-    nodeReports.push({ nodeId: node.id, blockId: blockIdOf(node), executed: completed ? completed.has(node.id) : l1Pass, ...(contract ? { contract } : {}), criteria, preconditions, ...(unevaluated.length > 0 ? { unevaluated } : {}) })
+    nodeReports.push({
+      nodeId: node.id,
+      blockId: blockIdOf(node),
+      executed: completed ? completed.has(node.id) : l1Pass,
+      ...(contract ? { contract } : {}),
+      criteria,
+      preconditions,
+      ...(unevaluated.length > 0 ? { unevaluated } : {}),
+    })
   }
   // `every` over nodes with nothing to check is vacuously true — that is not
   // verification, it is the absence of evidence. Report whether L2 was
   // evaluated at all so no consumer reads an empty ballot as a pass.
-  const l2Evaluated = nodeReports.some((report) => report.criteria.length > 0 || report.preconditions.length > 0)
-  const l2AllHeld = nodeReports.every((report) => report.criteria.every((c) => c.satisfied) && report.preconditions.every((c) => c.satisfied))
+  const l2Evaluated = nodeReports.some(
+    (report) => report.criteria.length > 0 || report.preconditions.length > 0,
+  )
+  const l2AllHeld = nodeReports.every(
+    (report) =>
+      report.criteria.every((c) => c.satisfied) && report.preconditions.every((c) => c.satisfied),
+  )
   const goalSpec = goalSpecOf(workflow)
   const goalBaseline = run.goalBaseline
   const l3Conditions: ConditionEvidence[] = []
@@ -207,10 +264,15 @@ export async function verifyWorkflowGoal(
         ...(goalBaseline ? { baseline: goalBaseline } : {}),
       })
       const detail =
-        !outcome.satisfied && (condition.kind === 'variableExists' || condition.kind === 'variableEquals')
+        !outcome.satisfied &&
+        (condition.kind === 'variableExists' || condition.kind === 'variableEquals')
           ? withBag(outcome.detail)
           : outcome.detail
-      return { description: outcome.description, satisfied: outcome.satisfied, ...(detail ? { detail } : {}) }
+      return {
+        description: outcome.description,
+        satisfied: outcome.satisfied,
+        ...(detail ? { detail } : {}),
+      }
     }
     const rows: { condition: WorkflowCondition; evidence: ConditionEvidence }[] = []
     for (const condition of goalSpec.successConditions) {
@@ -264,7 +326,11 @@ export async function verifyWorkflowGoal(
       l3Conditions.push(row.evidence)
     }
   }
-  const l3AllHeld = !!goalSpec && l3Conditions.length > 0 && l3Conditions.every((c) => c.satisfied) && l3EffectProven
+  const l3AllHeld =
+    !!goalSpec &&
+    l3Conditions.length > 0 &&
+    l3Conditions.every((c) => c.satisfied) &&
+    l3EffectProven
   // Soft postconditions (business-outcome predictions the generator wrote): a
   // miss never failed the step, but a run whose declared outcomes were not
   // observed cannot be certified. This is D3 — signal, not gate.
@@ -288,7 +354,7 @@ export async function verifyWorkflowGoal(
   const noLandingProof = (diagnosis: string): string =>
     `L3 failed: ${diagnosis}` +
     (draftSaveLanded
-      ? ' This run did execute the graph\'s draft-save step, so a draft was written — what it lacks is a row that could see it: add a step that opens 草稿箱 and state 「草稿列表数量增加」.'
+      ? " This run did execute the graph's draft-save step, so a draft was written — what it lacks is a row that could see it: add a step that opens 草稿箱 and state 「草稿列表数量增加」."
       : '')
   const reason = !l1Pass
     ? 'L1 failed: one or more nodes did not execute.'
@@ -299,15 +365,41 @@ export async function verifyWorkflowGoal(
           ? 'L3 failed: every success condition compares against an observation from before its step, which cannot be re-checked after the run — the goal states nothing observable now.'
           : l3Evaluated && l3Conditions.every((c) => c.satisfied)
             ? furnitureRows.length > 0
-              ? noLandingProof(`the success rows that could prove the goal (${furnitureRows.slice(0, 3).join('、')}) were already true on the page before the run — they describe the site, not what this run did. State a row that can only be true afterwards: the list grew, the dialog vanished, or the produced artifact found by a name the graph wrote into a variable.`)
-              : noLandingProof('every success condition holds from the page the workflow opens (a URL row), so none of them proves the goal landed.')
+              ? noLandingProof(
+                  `the success rows that could prove the goal (${furnitureRows.slice(0, 3).join('、')}) were already true on the page before the run — they describe the site, not what this run did. State a row that can only be true afterwards: the list grew, the dialog vanished, or the produced artifact found by a name the graph wrote into a variable.`,
+                )
+              : noLandingProof(
+                  'every success condition holds from the page the workflow opens (a URL row), so none of them proves the goal landed.',
+                )
             : `L3 failed: the workflow goal success conditions did not all hold${
-                settleWaitedMs > 0 ? ` (the page was re-read for ${settleWaitedMs} ms after the run and they still did not).` : '.'
+                settleWaitedMs > 0
+                  ? ` (the page was re-read for ${settleWaitedMs} ms after the run and they still did not).`
+                  : '.'
               }`
       : !l2AllHeld
         ? l2FailureReason(nodeReports)
         : softUnconfirmed.length > 0
           ? `Goal conditions held, but ${softUnconfirmed.length} declared outcome(s) were not confirmed on the page.`
           : 'L3 passed: the workflow achieved its goal.'
-  return { level, passed, l1, l2: { nodes: nodeReports, allHeld: l2AllHeld, evaluated: l2Evaluated, ...(l2Unevaluated.length > 0 ? { unevaluated: l2Unevaluated } : {}) }, l3: { goalSummary: goalSpec?.summary ?? '', conditions: l3Conditions, allHeld: l3AllHeld, ...(l3Unevaluated.length > 0 ? { unevaluated: l3Unevaluated } : {}) }, softUnconfirmed, ...(settledAfterMs !== undefined ? { settledAfterMs } : {}), certified: passed, reason }
+  return {
+    level,
+    passed,
+    l1,
+    l2: {
+      nodes: nodeReports,
+      allHeld: l2AllHeld,
+      evaluated: l2Evaluated,
+      ...(l2Unevaluated.length > 0 ? { unevaluated: l2Unevaluated } : {}),
+    },
+    l3: {
+      goalSummary: goalSpec?.summary ?? '',
+      conditions: l3Conditions,
+      allHeld: l3AllHeld,
+      ...(l3Unevaluated.length > 0 ? { unevaluated: l3Unevaluated } : {}),
+    },
+    softUnconfirmed,
+    ...(settledAfterMs !== undefined ? { settledAfterMs } : {}),
+    certified: passed,
+    reason,
+  }
 }

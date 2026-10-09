@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  DEFAULT_REPAIR_BUDGET,
-} from '../src/lib/workflow/repair-session'
+import { DEFAULT_REPAIR_BUDGET } from '../src/lib/workflow/repair-session'
 import type { RepairAttempt } from '../src/lib/workflow/repair-session'
 import {
   isEscalation,
@@ -13,7 +11,9 @@ import {
 
 const startedAt = 1_000_000
 
-function attempt(partial: Partial<RepairAttempt> & { strategy: RepairAttempt['strategy'] }): RepairAttempt {
+function attempt(
+  partial: Partial<RepairAttempt> & { strategy: RepairAttempt['strategy'] },
+): RepairAttempt {
   return {
     attempt: 1,
     outcome: 'no-candidate',
@@ -92,9 +92,7 @@ describe('repair policy ladder', () => {
 
   it('never treats an empty ladder as a human takeover — it is exhausted', () => {
     const ladder = ladderForFailure('ELEMENT_NOT_FOUND')
-    const attempts = ladder.map((strategy, index) =>
-      attempt({ attempt: index + 1, strategy }),
-    )
+    const attempts = ladder.map((strategy, index) => attempt({ attempt: index + 1, strategy }))
     const result = nextStrategyOf({
       failureType: 'ELEMENT_NOT_FOUND',
       attempts,

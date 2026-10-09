@@ -378,17 +378,15 @@ export default function EditorApp() {
   const [revertibleIds, setRevertibleIds] = useState<ReadonlySet<string>>(new Set())
 
   const syncRevertible = useCallback(() => {
-    setRevertibleIds(
-      (prev) => {
-        const next = new Set<string>()
-        for (const [id, stack] of fixSnapshotsRef.current) {
-          if (stack.length > 0) next.add(id)
-        }
-        // Keep reference equality when unchanged to avoid extra renders.
-        if (prev.size === next.size && [...prev].every((id) => next.has(id))) return prev
-        return next
-      },
-    )
+    setRevertibleIds((prev) => {
+      const next = new Set<string>()
+      for (const [id, stack] of fixSnapshotsRef.current) {
+        if (stack.length > 0) next.add(id)
+      }
+      // Keep reference equality when unchanged to avoid extra renders.
+      if (prev.size === next.size && [...prev].every((id) => next.has(id))) return prev
+      return next
+    })
   }, [])
 
   const applyNodeFix = useCallback(
@@ -779,7 +777,10 @@ export default function EditorApp() {
               patchNode(editNode.id, patch)
               // Editing node data (including the Goal Contract) invalidates a
               // prior certification until L3 is re-run.
-              setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
+              setMeta((m) => ({
+                ...m,
+                settings: { ...m.settings, certificationStatus: 'unverified' },
+              }))
             }}
             t={t}
             onBack={() => {

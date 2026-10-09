@@ -38,7 +38,11 @@ describe('locator requirement (the empty-selector class)', () => {
     // so the action "succeeded" against an arbitrary element.
     expect(hasLocator({ target: VALID_TARGET })).toBe(true)
     expect(hasLocator({ target: { primary: { how: 'role', value: '  ' } } })).toBe(false)
-    expect(missingRequirements('element-exists', { target: { primary: { how: 'role', value: '' } } }).map((p) => p.key)).toContain('selector')
+    expect(
+      missingRequirements('element-exists', {
+        target: { primary: { how: 'role', value: '' } },
+      }).map((p) => p.key),
+    ).toContain('selector')
   })
 
   it('accepts every locator form: selector, target, or a resolved ref', () => {
@@ -50,7 +54,13 @@ describe('locator requirement (the empty-selector class)', () => {
   })
 
   it('covers every element-acting interaction block', () => {
-    for (const blockId of ['event-click', 'hover-element', 'link', 'element-exists', 'loop-elements']) {
+    for (const blockId of [
+      'event-click',
+      'hover-element',
+      'link',
+      'element-exists',
+      'loop-elements',
+    ]) {
       expect(missingRequirements(blockId, {}), blockId).toEqual([
         expect.objectContaining({ key: 'selector' }),
       ])
@@ -81,7 +91,9 @@ describe('per-block required parameters', () => {
   })
 
   it('webhook headers must be a JSON object string when present', () => {
-    expect(missingRequirements('webhook', { url: 'https://x', headers: 'not json' })).toHaveLength(1)
+    expect(missingRequirements('webhook', { url: 'https://x', headers: 'not json' })).toHaveLength(
+      1,
+    )
     expect(missingRequirements('webhook', { url: 'https://x', headers: '[1,2]' })).toHaveLength(1)
     expect(missingRequirements('webhook', { url: 'https://x', headers: '{"A":"b"}' })).toEqual([])
   })
@@ -101,10 +113,17 @@ describe('per-block required parameters', () => {
   })
 
   it('save-local refuses a literal value and a missing filename', () => {
-    const problems = missingRequirements('save-local', { value: 'frozen literal', filename: 'a.md' })
+    const problems = missingRequirements('save-local', {
+      value: 'frozen literal',
+      filename: 'a.md',
+    })
     expect(problems.map((p) => p.key)).toContain('value')
-    expect(missingRequirements('save-local', { value: '{{hotList}}' }).map((p) => p.key)).toContain('filename')
-    expect(missingRequirements('save-local', { value: '{{hotList}}', filename: 'a.md' })).toEqual([])
+    expect(missingRequirements('save-local', { value: '{{hotList}}' }).map((p) => p.key)).toContain(
+      'filename',
+    )
+    expect(missingRequirements('save-local', { value: '{{hotList}}', filename: 'a.md' })).toEqual(
+      [],
+    )
   })
 
   it('set-variable / get-secret demand their names', () => {
@@ -116,12 +135,18 @@ describe('per-block required parameters', () => {
       'credential',
       'variableName',
     ])
-    expect(missingRequirements('get-secret', { credential: 'a::b', variableName: 'pw' })).toEqual([])
+    expect(missingRequirements('get-secret', { credential: 'a::b', variableName: 'pw' })).toEqual(
+      [],
+    )
   })
 
   it('get-text only demands dataColumn when it claims to collect', () => {
-    expect(missingRequirements('get-text', { selector: '.a', saveData: true }).map((p) => p.key)).toContain('dataColumn')
-    expect(missingRequirements('get-text', { selector: '.a', saveData: true, dataColumn: '热搜' })).toEqual([])
+    expect(
+      missingRequirements('get-text', { selector: '.a', saveData: true }).map((p) => p.key),
+    ).toContain('dataColumn')
+    expect(
+      missingRequirements('get-text', { selector: '.a', saveData: true, dataColumn: '热搜' }),
+    ).toEqual([])
     expect(missingRequirements('get-text', { selector: '.a' })).toEqual([])
   })
 
@@ -129,12 +154,16 @@ describe('per-block required parameters', () => {
     expect(missingRequirements('forms', { selector: '#q' }).map((p) => p.key)).toContain('value')
     // Checkbox / radio flip without a value; getValue mode reads instead.
     expect(missingRequirements('forms', { selector: '#q', type: 'checkbox' })).toEqual([])
-    expect(missingRequirements('forms', { selector: '#q', getValue: true }).map((p) => p.key)).toContain('variableName')
+    expect(
+      missingRequirements('forms', { selector: '#q', getValue: true }).map((p) => p.key),
+    ).toContain('variableName')
     expect(
       missingRequirements('forms', { selector: '#q', getValue: true, variableName: 'v' }),
     ).toEqual([])
     // A bad type enum is refused too.
-    expect(missingRequirements('forms', { selector: '#q', value: 'x', type: 'textarea' })).toHaveLength(1)
+    expect(
+      missingRequirements('forms', { selector: '#q', value: 'x', type: 'textarea' }),
+    ).toHaveLength(1)
   })
 
   it('loop / branch blocks demand something to drive on', () => {
@@ -148,8 +177,13 @@ describe('per-block required parameters', () => {
   })
 
   it('ai-agent demands prompt and variableName', () => {
-    expect(missingRequirements('ai-agent', {}).map((p) => p.key)).toEqual(['prompt', 'variableName'])
-    expect(missingRequirements('ai-agent', { prompt: '总结页面', variableName: 'summary' })).toEqual([])
+    expect(missingRequirements('ai-agent', {}).map((p) => p.key)).toEqual([
+      'prompt',
+      'variableName',
+    ])
+    expect(
+      missingRequirements('ai-agent', { prompt: '总结页面', variableName: 'summary' }),
+    ).toEqual([])
   })
 
   it('record-only side-effect blocks are validated even though they never run', () => {
@@ -157,7 +191,9 @@ describe('per-block required parameters', () => {
     // execute during generation, so only this gate stands between the model
     // and a webhook node that fetches nothing.
     expect(missingRequirements('webhook', {}).map((p) => p.key)).toContain('url')
-    expect(missingRequirements('execute-workflow', {}).map((p) => p.key)).toContain('workflowId|executeId')
+    expect(missingRequirements('execute-workflow', {}).map((p) => p.key)).toContain(
+      'workflowId|executeId',
+    )
   })
 
   it('the trigger validates per kind', () => {
@@ -166,7 +202,9 @@ describe('per-block required parameters', () => {
     expect(missingRequirements('trigger', { type: 'manual' })).toEqual([])
     expect(missingTriggerParam('interval', { interval: 0 })).toBe('interval')
     expect(missingTriggerParam('interval', { interval: 30 })).toBeNull()
-    expect(missingTriggerParam('element-change', { observeElement: { selector: '#feed' } })).toBeNull()
+    expect(
+      missingTriggerParam('element-change', { observeElement: { selector: '#feed' } }),
+    ).toBeNull()
     expect(missingTriggerParam('element-change', {})).toBe('observeElement.selector')
   })
 })

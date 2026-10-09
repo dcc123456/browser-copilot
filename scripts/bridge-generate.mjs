@@ -125,7 +125,9 @@ async function run(client) {
     } catch {
       // A refused poll means the reporter is gone, which is not the same failure
       // as a run that stopped reporting. Name the difference before dying.
-      die(`${tool} run ${started.conversationId} went silent: ${await explainSilence(client, started.conversationId)}`)
+      die(
+        `${tool} run ${started.conversationId} went silent: ${await explainSilence(client, started.conversationId)}`,
+      )
     }
     if (status?.status === 'unknown')
       die(

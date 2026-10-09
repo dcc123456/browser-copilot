@@ -76,7 +76,10 @@ describe('validateWorkflowForRun', () => {
       workflow({
         trigger: { type: 'visit-web', urlPattern: 'https://mirror.test/*' },
         drawflow: {
-          nodes: [node('t', 'trigger', { type: 'visit-web' }), node('a', 'event-click', { selector: '#x' })],
+          nodes: [
+            node('t', 'trigger', { type: 'visit-web' }),
+            node('a', 'event-click', { selector: '#x' }),
+          ],
           edges: [],
         },
       }),
@@ -161,7 +164,10 @@ describe('validateWorkflowForRun', () => {
       workflow({
         trigger: { type: 'scheduled', enabled: true },
         drawflow: {
-          nodes: [node('t', 'trigger', { type: 'scheduled' }), node('a', 'event-click', { selector: '#x' })],
+          nodes: [
+            node('t', 'trigger', { type: 'scheduled' }),
+            node('a', 'event-click', { selector: '#x' }),
+          ],
           edges: [{ id: 'e1', source: 't', target: 'a' }],
         },
       }),

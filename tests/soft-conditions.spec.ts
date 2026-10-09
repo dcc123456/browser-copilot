@@ -18,7 +18,11 @@ import { describe, expect, it } from 'vitest'
 import { runWorkflow } from '../src/background/workflow-engine/engine'
 import type { Workflow, WorkflowNode } from '../src/lib/workflow/types'
 import type { WorkflowCondition } from '../src/lib/workflow/conditions'
-import { conditionLocatorKey, describeCondition, isHardCondition } from '../src/lib/workflow/conditions'
+import {
+  conditionLocatorKey,
+  describeCondition,
+  isHardCondition,
+} from '../src/lib/workflow/conditions'
 import { withNodeGoalContract } from '../src/lib/workflow/node-goal-contract'
 import {
   captureConditionBaseline,
@@ -130,7 +134,14 @@ describe('engine hard / soft condition semantics', () => {
     const result = await runWorkflow(
       strictWorkflow(
         withReliability({
-          preconditions: [{ kind: 'attributeEquals', target: { role: 'textbox' }, name: 'disabled', expected: 'false' }],
+          preconditions: [
+            {
+              kind: 'attributeEquals',
+              target: { role: 'textbox' },
+              name: 'disabled',
+              expected: 'false',
+            },
+          ],
         }),
       ),
       {
@@ -152,7 +163,9 @@ describe('engine hard / soft condition semantics', () => {
   it('never checks conditions for a hand-made (compat) workflow', async () => {
     let checked = false
     const wf = strictWorkflow(
-      withReliability({ postconditions: [{ kind: 'elementVisible', target: { role: 'heading' } }] }),
+      withReliability({
+        postconditions: [{ kind: 'elementVisible', target: { role: 'heading' } }],
+      }),
     )
     const result = await runWorkflow(
       { ...wf, settings: { ...wf.settings, reliabilityMode: 'compat' } },
@@ -203,7 +216,9 @@ describe('engine baseline capture', () => {
     let captured = false
     await runWorkflow(
       strictWorkflow(
-        withReliability({ postconditions: [{ kind: 'elementVisible', target: { role: 'heading' } }] }),
+        withReliability({
+          postconditions: [{ kind: 'elementVisible', target: { role: 'heading' } }],
+        }),
       ),
       {
         executors: { 'event-click': async () => null },
@@ -251,11 +266,7 @@ describe('engine baseline capture', () => {
 
 // --- Condition runtime --------------------------------------------------------
 
-function probe(state: {
-  exists?: boolean
-  count?: number
-  url?: string
-}): ConditionPageProbe {
+function probe(state: { exists?: boolean; count?: number; url?: string }): ConditionPageProbe {
   return {
     exists: async () => state.exists ?? false,
     visible: async () => false,
@@ -275,8 +286,12 @@ describe('change conditions', () => {
       baseline,
     })
     expect(
-      (await evaluateCondition({ kind: 'urlChanged' }, deps({ counts: {}, exists: {}, url: 'https://x.test/cart' })))
-        .satisfied,
+      (
+        await evaluateCondition(
+          { kind: 'urlChanged' },
+          deps({ counts: {}, exists: {}, url: 'https://x.test/cart' }),
+        )
+      ).satisfied,
     ).toBe(true)
     const same = await evaluateCondition(
       { kind: 'urlChanged' },
@@ -438,11 +453,19 @@ describe('condition vocabulary', () => {
 })
 
 describe('the run records what each step observed on its own page', () => {
-  const titleRow = { kind: 'elementExists', target: { selector: 'input[placeholder*="标题"]' } } as const
+  const titleRow = {
+    kind: 'elementExists',
+    target: { selector: 'input[placeholder*="标题"]' },
+  } as const
   const nodeData = (): Record<string, unknown> =>
-    withNodeGoalContract({}, {
-      version: 1, goal: 'fill the title', successCriteria: [titleRow],
-    })
+    withNodeGoalContract(
+      {},
+      {
+        version: 1,
+        goal: 'fill the title',
+        successCriteria: [titleRow],
+      },
+    )
 
   it('writes the step-page answer into the run result', async () => {
     const result = await runWorkflow(strictWorkflow(nodeData()), {
@@ -455,7 +478,7 @@ describe('the run records what each step observed on its own page', () => {
     ])
   })
 
-  it('records a miss without failing the step — the badge is the certification layer\'s to withhold', async () => {
+  it("records a miss without failing the step — the badge is the certification layer's to withhold", async () => {
     const result = await runWorkflow(strictWorkflow(nodeData()), {
       executors: { 'event-click': async () => null },
       evaluateCondition: async () => false,
@@ -480,16 +503,27 @@ const pageText = (text: string, url = 'https://x.test/publish'): ConditionPagePr
 describe('a row quotes the words this run produced', () => {
   const draft = { selector: '.draft' }
 
-  it('fills {{variable}} inside a text comparison from the run\'s variables', async () => {
-    const row = { kind: 'elementText', target: draft, match: 'contains', expected: '{{title}}' } as const
+  it("fills {{variable}} inside a text comparison from the run's variables", async () => {
+    const row = {
+      kind: 'elementText',
+      target: draft,
+      match: 'contains',
+      expected: '{{title}}',
+    } as const
     expect(
-      (await evaluateCondition(row, { variables: { title: '图文笔记' }, probe: pageText('已保存：图文笔记') })).satisfied,
+      (
+        await evaluateCondition(row, {
+          variables: { title: '图文笔记' },
+          probe: pageText('已保存：图文笔记'),
+        })
+      ).satisfied,
     ).toBe(true)
     // The unfilled template is not a pass: a row naming a variable the graph
     // never wrote reads false, which is the whole point of letting rows name
     // artifacts.
     expect(
-      (await evaluateCondition(row, { variables: {}, probe: pageText('已保存：图文笔记') })).satisfied,
+      (await evaluateCondition(row, { variables: {}, probe: pageText('已保存：图文笔记') }))
+        .satisfied,
     ).toBe(false)
   })
 
@@ -527,9 +561,16 @@ describe('the goal snapshot and what it can prove', () => {
   })
 
   it('reads a furniture row as already true and a changed page as new', async () => {
-    const baseline: ConditionBaseline = { counts: {}, exists: { [key]: true }, texts: { [key]: '草稿箱(100)' } }
+    const baseline: ConditionBaseline = {
+      counts: {},
+      exists: { [key]: true },
+      texts: { [key]: '草稿箱(100)' },
+    }
     expect(
-      await didHoldBeforeTheRun({ kind: 'elementText', target: box, match: 'contains', expected: '草稿' }, baseline),
+      await didHoldBeforeTheRun(
+        { kind: 'elementText', target: box, match: 'contains', expected: '草稿' },
+        baseline,
+      ),
     ).toBe(true)
     expect(
       await didHoldBeforeTheRun(
@@ -558,7 +599,9 @@ describe('the goal snapshot and what it can prove', () => {
     const workflow = strictWorkflow({})
     ;(workflow.settings as unknown as Record<string, unknown>).goalSpec = {
       summary: 'the draft box shows the saved word',
-      successConditions: [{ kind: 'elementText', target: box, match: 'contains', expected: '草稿' }],
+      successConditions: [
+        { kind: 'elementText', target: box, match: 'contains', expected: '草稿' },
+      ],
     }
     const captured: number[] = []
     const withQuoted = await runWorkflow(workflow, {

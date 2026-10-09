@@ -85,10 +85,7 @@ export function estimateInputTokens(
   extra?: { text?: string; messages?: WireMessage[] },
 ): number {
   const body = messages.reduce((sum, m) => sum + estimateMessageTokens(m), 0)
-  const addedMessages = extra?.messages?.reduce(
-    (sum, m) => sum + estimateMessageTokens(m),
-    0,
-  ) ?? 0
+  const addedMessages = extra?.messages?.reduce((sum, m) => sum + estimateMessageTokens(m), 0) ?? 0
   const addedText = extra?.text ? estimateTextTokens(extra.text) : 0
   return body + addedMessages + addedText + 2
 }
@@ -101,10 +98,7 @@ export function estimateInputTokens(
  * other message is gone and the budget still does not fit. Returns the number
  * of characters removed.
  */
-export function hardCapHistory(
-  history: WireMessage[],
-  tokenBudget: number,
-): number {
+export function hardCapHistory(history: WireMessage[], tokenBudget: number): number {
   if (estimateInputTokens(history) <= tokenBudget) return 0
   let removed = 0
   const truncate = (message: WireMessage): boolean => {
@@ -161,9 +155,7 @@ export interface CompactOptions {
 /** One labelled line per removed message for the summarizer's input. */
 function renderForSummary(message: WireMessage): string {
   const cap = (text: string): string =>
-    text.length > SUMMARY_PER_MESSAGE_CHARS
-      ? `${text.slice(0, SUMMARY_PER_MESSAGE_CHARS)}…`
-      : text
+    text.length > SUMMARY_PER_MESSAGE_CHARS ? `${text.slice(0, SUMMARY_PER_MESSAGE_CHARS)}…` : text
   if (message.role === 'user') return `user: ${cap(message.content)}`
   if (message.role === 'tool') {
     const name = message.name ? `(${message.name})` : ''

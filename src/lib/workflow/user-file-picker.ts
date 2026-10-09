@@ -15,10 +15,7 @@
  * @module lib/workflow/user-file-picker
  */
 
-import {
-  UploadFileError,
-  type WorkflowFileArtifact,
-} from './file-artifact'
+import { UploadFileError, type WorkflowFileArtifact } from './file-artifact'
 
 /** Message type for the file-picker request (background → panel). */
 export const USER_FILE_PICKER_REQUEST = 'workflow:user-file-required'
@@ -33,8 +30,7 @@ export interface UserFilePickerRequest {
 }
 
 export type UserFilePickerReply =
-  | { ok: true; files: WorkflowFileArtifact[] }
-  | { ok: false; canceled: boolean; error?: string }
+  { ok: true; files: WorkflowFileArtifact[] } | { ok: false; canceled: boolean; error?: string }
 
 /**
  * Ask the side panel to run the native file picker. Resolves when the user
@@ -42,9 +38,11 @@ export type UserFilePickerReply =
  * cancels the chooser. If no panel answers within `timeoutMs`, rejects with
  * `UPLOAD_USER_SELECTION_TIMEOUT`.
  */
-export function requestUserFiles(
-  options: { accept?: string; multiple?: boolean; timeoutMs?: number },
-): Promise<WorkflowFileArtifact[]> {
+export function requestUserFiles(options: {
+  accept?: string
+  multiple?: boolean
+  timeoutMs?: number
+}): Promise<WorkflowFileArtifact[]> {
   const accept = options.accept ?? ''
   const multiple = options.multiple === true
   const timeoutMs = options.timeoutMs ?? 300000

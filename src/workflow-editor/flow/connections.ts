@@ -46,11 +46,7 @@ export function isFallbackHandle(handle: string | null | undefined): boolean {
  * links here would misclassify draws on graphs that already carry one. An edge
  * from a node back to ITSELF is a cycle too (rejected earlier by the caller).
  */
-export function edgeClosesCycle(
-  edges: Edge[],
-  source: string,
-  target: string,
-): boolean {
+export function edgeClosesCycle(edges: Edge[], source: string, target: string): boolean {
   if (source === target) return true
   const outgoing = new Map<string, string[]>()
   for (const edge of edges) {

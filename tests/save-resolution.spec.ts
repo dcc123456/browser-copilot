@@ -111,9 +111,7 @@ describe('resolveWorkflowForSave — source order', () => {
     // never appeared.
     composeMock.mockResolvedValue(NO_DRAFT)
     listHistoryMock.mockResolvedValue([historyEntry()])
-    fromHistoryMock.mockReturnValue(
-      makeWorkflow([triggerNodeWithInput, actionNode('h')]),
-    )
+    fromHistoryMock.mockReturnValue(makeWorkflow([triggerNodeWithInput, actionNode('h')]))
 
     const out = await resolveWorkflowForSave('c1', 'My flow')
 
@@ -126,9 +124,7 @@ describe('resolveWorkflowForSave — source order', () => {
     // "did compose return something".
     composeMock.mockResolvedValue({ workflow: makeWorkflow([triggerNode]) })
     listHistoryMock.mockResolvedValue([historyEntry()])
-    fromHistoryMock.mockReturnValue(
-      makeWorkflow([triggerNodeWithInput, actionNode('h')]),
-    )
+    fromHistoryMock.mockReturnValue(makeWorkflow([triggerNodeWithInput, actionNode('h')]))
 
     const out = await resolveWorkflowForSave('c1', 'My flow')
     expect(out).toMatchObject({ source: 'history' })

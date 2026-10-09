@@ -5,10 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { runNodeFix } from '../src/background/workflow-engine/node-fix-engine'
-import {
-  NODE_FIX_MAX_ROUNDS,
-  type NodeFixEvent,
-} from '../src/lib/workflow/node-fix'
+import { NODE_FIX_MAX_ROUNDS, type NodeFixEvent } from '../src/lib/workflow/node-fix'
 import { WORKFLOW_AI_NAMESPACE } from '../src/lib/workflow/node-goal-contract'
 import type { WorkflowCondition } from '../src/lib/workflow/conditions'
 
@@ -45,8 +42,7 @@ describe('runNodeFix', () => {
         signal: new AbortController().signal,
         emit: collector.emit,
         executeNode: async () => ({ ok: true }),
-        evaluateCriteria: async () =>
-          criteria.map((condition) => ({ condition, satisfied: true })),
+        evaluateCriteria: async () => criteria.map((condition) => ({ condition, satisfied: true })),
       },
     )
     expect(result.success).toBe(true)
@@ -88,8 +84,7 @@ describe('runNodeFix', () => {
         signal: new AbortController().signal,
         emit: eventCollector().emit,
         executeNode: async () => ({ ok: true }),
-        evaluateCriteria: async (cs) =>
-          cs.map((condition) => ({ condition, satisfied: false })),
+        evaluateCriteria: async (cs) => cs.map((condition) => ({ condition, satisfied: false })),
         callModel: async () => ({
           rationale: 'try again',
           data: { selector: '#candidate' },
@@ -121,8 +116,7 @@ describe('runNodeFix', () => {
         signal: new AbortController().signal,
         emit: eventCollector().emit,
         executeNode: async () => ({ ok: true }),
-        evaluateCriteria: async (cs) =>
-          cs.map((condition) => ({ condition, satisfied: false })),
+        evaluateCriteria: async (cs) => cs.map((condition) => ({ condition, satisfied: false })),
         callModel: async () => null,
       },
     )
@@ -142,8 +136,7 @@ describe('runNodeFix', () => {
           executeCalled = true
           return { ok: true }
         },
-        evaluateCriteria: async (cs) =>
-          cs.map((condition) => ({ condition, satisfied: true })),
+        evaluateCriteria: async (cs) => cs.map((condition) => ({ condition, satisfied: true })),
       },
     )
     expect(result.success).toBe(true)
@@ -165,15 +158,14 @@ describe('runNodeFix', () => {
         goalContract: contractWithPreconditions,
       },
     }
-    
+
     const result = await runNodeFix(
       { sessionId: 's8', blockId: 'event-click', blockData: blockDataWithPreconditions },
       {
         signal: new AbortController().signal,
         emit: eventCollector().emit,
         executeNode: async () => ({ ok: true }),
-        evaluateCriteria: async (cs) =>
-          cs.map((condition) => ({ condition, satisfied: true })),
+        evaluateCriteria: async (cs) => cs.map((condition) => ({ condition, satisfied: true })),
       },
     )
     expect(result.success).toBe(true)

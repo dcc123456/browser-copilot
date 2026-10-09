@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  evaluateCapabilityGap,
-  evaluateJsPermission,
-} from '../src/lib/workflow/capability-gap'
+import { evaluateCapabilityGap, evaluateJsPermission } from '../src/lib/workflow/capability-gap'
 
 describe('evaluateJsPermission (unified javascript-code gate)', () => {
   const fullGap = {
@@ -83,7 +80,7 @@ describe('evaluateJsPermission (unified javascript-code gate)', () => {
 })
 
 describe('sanctioned capability gaps (image / canvas artifacts)', () => {
-  const noArguments = { code: "automaNextBlock()" }
+  const noArguments = { code: 'automaNextBlock()' }
 
   it.each([
     '生成图片并上传到附件控件',
