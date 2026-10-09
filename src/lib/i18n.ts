@@ -118,6 +118,11 @@ export interface Messages {
   taskSchedWeekdays: string
   taskSchedWeekly: string
   taskSchedInterval: string
+  taskSchedOnce: string
+  taskOnceHint: string
+  taskFollows: string
+  taskChain: string
+  taskOutputs: string
   taskSchedManual: string
   taskManualHint: string
   taskManualChip: string
@@ -142,6 +147,7 @@ export interface Messages {
   taskSave: string
   taskSaved: string
   taskDeleteConfirm: string
+  taskDeleteChained: (params: { names: string }) => string
   taskRuns: string
   taskRunsEmpty: string
   taskRunsClear: string
@@ -1358,6 +1364,12 @@ const en: Messages = {
   taskSchedWeekdays: 'Weekdays (Mon–Fri) at',
   taskSchedWeekly: 'On weekdays',
   taskSchedInterval: 'Every',
+  taskSchedOnce: 'Once',
+  taskOnceHint:
+    'Runs one time at this instant, then switches itself off. Edit the time to run it again.',
+  taskFollows: 'Follows',
+  taskChain: 'Chain',
+  taskOutputs: 'Hands on',
   taskSchedManual: 'Manual',
   taskManualHint:
     'No automatic schedule — run it yourself with "Run now" or trigger it from Feishu.',
@@ -1384,6 +1396,8 @@ const en: Messages = {
   taskSave: 'Save task',
   taskSaved: 'Task saved.',
   taskDeleteConfirm: 'Delete this task? Its run history is removed too.',
+  taskDeleteChained: ({ names }) =>
+    `Tasks that follow this one (${names}) will never receive its outputs.`,
   taskRuns: 'Recent runs',
   taskRunsEmpty: 'No runs yet.',
   taskRunsClear: 'Clear',
@@ -2543,6 +2557,11 @@ const zhCN: Messages = {
   taskSchedWeekdays: '工作日（周一至周五）',
   taskSchedWeekly: '每周指定日',
   taskSchedInterval: '每隔',
+  taskSchedOnce: '一次性',
+  taskOnceHint: '只在该时刻运行一次，运行后自动停用；要再跑请改时间。',
+  taskFollows: '依赖',
+  taskChain: '链条',
+  taskOutputs: '交接字段',
   taskSchedManual: '手动',
   taskManualHint: '不自动运行，通过「立即运行」按钮或飞书指令手动触发。',
   taskManualChip: '手动任务',
@@ -2567,6 +2586,7 @@ const zhCN: Messages = {
   taskSave: '保存任务',
   taskSaved: '任务已保存。',
   taskDeleteConfirm: '删除这个任务？相关的运行记录也会一并删除。',
+  taskDeleteChained: ({ names }) => `下游任务（${names}）将再也取不到它的产出。`,
   taskRuns: '最近运行',
   taskRunsEmpty: '还没有运行记录。',
   taskRunsClear: '清空',

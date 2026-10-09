@@ -119,9 +119,14 @@ export default function TasksTab() {
   }
 
   const removeTask = async (id: string): Promise<void> => {
+    // Deleting a chain parent also clears its run log, so every child silently
+    // loses its input forever — say so before the click, not after.
+    const followers = tasks.filter((entry) => entry.followsTaskId === id).map((entry) => entry.name)
     const ok = await confirmDialog({
       title: t.dialogDeleteTitle,
-      message: t.taskDeleteConfirm,
+      message: followers.length
+        ? `${t.taskDeleteConfirm}\n${t.taskDeleteChained({ names: followers.join(', ') })}`
+        : t.taskDeleteConfirm,
       confirmText: t.delete,
       cancelText: t.cancel,
       danger: true,
@@ -273,7 +278,7 @@ export default function TasksTab() {
                 </div>
                 <div className="task-meta">
                   <span className={`task-chip${manual ? ' task-chip-manual' : ''}`}>
-                    {describeSchedule(task.schedule, zh ? 'zh' : 'en')}
+                    {describeSchedule(task.schedule, zh ? 'zh' : 'en', Date.now())}
                   </span>
                   <span className="task-chip">
                     {task.kind === 'github-review-requests'
@@ -282,6 +287,23 @@ export default function TasksTab() {
                         ? t.taskKindWorkflow
                         : t.taskKindPrompt}
                   </span>
+                  {task.followsTaskId && (
+                    <span className="task-chip">
+                      {t.taskFollows}:{' '}
+                      {tasks.find((entry) => entry.id === task.followsTaskId)?.name ??
+                        task.followsTaskId}
+                    </span>
+                  )}
+                  {!!task.outputs?.length && (
+                    <span className="task-chip">
+                      {t.taskOutputs}: {task.outputs.join(', ')}
+                    </span>
+                  )}
+                  {!!task.chainId && (
+                    <span className="task-chip">
+                      {t.taskChain}: {task.chainId}
+                    </span>
+                  )}
                   {task.notifyFeishu && <span className="task-chip task-chip-feishu">Feishu</span>}
                 </div>
                 {task.lastRunAt && (
@@ -422,6 +444,23 @@ function TaskEditor({
     )
   }
 
+  // A one-shot is stored as an epoch but edited as the wall-clock instant the
+  // user means, which is exactly what `datetime-local` holds (no zone suffix):
+  // reading it back with `new Date()` therefore parses as local time.
+  const toLocalStamp = (ms: number): string => {
+    const when = new Date(ms)
+    return (
+      `${when.getFullYear()}-${pad2(when.getMonth() + 1)}-${pad2(when.getDate())}` +
+      `T${pad2(when.getHours())}:${pad2(when.getMinutes())}`
+    )
+  }
+  const onceValue = sched.kind === 'once' ? toLocalStamp(sched.at) : ''
+  const setOnce = (value: string): void => {
+    const at = new Date(value).getTime()
+    if (!Number.isFinite(at)) return
+    onChange({ ...draft, schedule: { kind: 'once', at } })
+  }
+
   const setDays = (days: number[]): void => {
     if (sched.kind !== 'weekly') return
     const sorted = Array.from(new Set(days)).sort((a, b) => a - b)
@@ -507,6 +546,7 @@ function TaskEditor({
             [
               { kind: 'none', label: t.taskSchedManual },
               { kind: 'weekly', label: t.taskSchedWeekly },
+              { kind: 'once', label: t.taskSchedOnce },
               { kind: 'interval', label: t.taskSchedInterval },
             ] as const
           ).map((opt) => (
@@ -526,6 +566,16 @@ function TaskEditor({
                   }
                   if (opt.kind === 'interval') {
                     update('schedule', { kind: 'interval', minutes: 60 })
+                    return
+                  }
+                  if (opt.kind === 'once') {
+                    // Defaults to the next full hour so the task is armable the
+                    // moment it is switched; the instant the picker holds is what
+                    // actually fires.
+                    const when = new Date()
+                    when.setMinutes(0, 0, 0)
+                    when.setHours(when.getHours() + 1)
+                    update('schedule', { kind: 'once', at: when.getTime() })
                     return
                   }
                   const hour =
@@ -584,9 +634,23 @@ function TaskEditor({
           </div>
         )}
 
+        {sched.kind === 'once' && (
+          <div className="schedule-config">
+            <label className="time-input">
+              <input
+                disabled={disabled}
+                onChange={(event) => setOnce(event.target.value)}
+                type="datetime-local"
+                value={onceValue}
+              />
+            </label>
+            <p className="hint">{t.taskOnceHint}</p>
+          </div>
+        )}
+
         {(sched.kind === 'weekly' || sched.kind === 'interval') && (
           <div className="schedule-config">
-            {isTimeBased ? (
+            {sched.kind === 'weekly' ? (
               <label className="time-input">
                 <input
                   disabled={disabled}
@@ -611,7 +675,7 @@ function TaskEditor({
 
         {sched.kind !== 'none' && (
           <div className="schedule-preview" aria-live="polite">
-            {describeSchedule(sched, zh ? 'zh' : 'en')}
+            {describeSchedule(sched, zh ? 'zh' : 'en', Date.now())}
           </div>
         )}
       </fieldset>
