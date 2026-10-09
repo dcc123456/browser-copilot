@@ -39,8 +39,14 @@ export const EMPTY_INTERP_KEY = '__bcEmptyInterp'
  */
 export const UNRESOLVED_INTERP_KEY = '__bcUnresolvedInterp'
 
-/** The `{{expr}}` tokens still present in a string, in order, deduplicated. */
-function leftoverTokens(text: string): string[] {
+/**
+ * The `{{expr}}` tokens still present in a string, in order, deduplicated.
+ *
+ * Also the way callers decide whether a substitution actually landed: an
+ * unresolved token survives `interpolate` verbatim, so re-scanning the result
+ * names exactly what the data bag was missing.
+ */
+export function leftoverTokens(text: string): string[] {
   const found: string[] = []
   for (const match of text.matchAll(TOKEN)) {
     const expr = (match[1] ?? '').trim()

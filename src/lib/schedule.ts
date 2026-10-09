@@ -38,6 +38,26 @@ function coerceMinute(value: unknown): number {
 }
 
 /**
+ * A one-shot instant, as epoch ms.
+ *
+ * Accepts a number or a numeric/ISO string, because a model asked for
+ * "publish at the golden hour" writes `2026-11-02T20:30` far more reliably than
+ * a 13-digit integer. Returns `undefined` for anything unparseable — the caller
+ * decides what garbage means, and for a schedule that fires once it must never
+ * be a guess.
+ */
+export function coerceOnceAt(value: unknown): number | undefined {
+  if (typeof value === 'number') return Number.isFinite(value) ? Math.round(value) : undefined
+  if (typeof value !== 'string' || value.trim() === '') return undefined
+  const asNumber = Number(value)
+  if (Number.isFinite(asNumber)) return Math.round(asNumber)
+  // No trailing `Z` means local time, which is what "8:30pm tonight" means to a
+  // user; an explicit UTC marker is honored by the parser as written.
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+/**
  * Normalizes stored schedule data, because a half-written or hand-edited record
  * must not be able to make the scheduler construct an invalid alarm.
  */
@@ -46,6 +66,15 @@ export function normalizeSchedule(raw: unknown): Schedule {
   const value = raw as Partial<Schedule>
   if (value.kind === 'none') {
     return { kind: 'none' }
+  }
+  if (value.kind === 'once') {
+    const at = coerceOnceAt((value as { at?: unknown }).at)
+    // An unparseable instant degrades to "manual only", NOT to the daily
+    // fallback below. A one-shot task that silently becomes "daily 09:00" would
+    // re-publish its draft every day; a task that renders as manual does
+    // nothing and says so.
+    if (at === undefined) return { kind: 'none' }
+    return { kind: 'once', at }
   }
   if (value.kind === 'interval') {
     return {
@@ -88,9 +117,10 @@ export function isManualSchedule(schedule: Schedule): boolean {
 }
 
 /**
- * Returns the ms-epoch of the next firing at or after `from`, or null when the
- * task never fires automatically (a manual `none` schedule), so the caller can
- * skip arming an alarm.
+ * Returns the ms-epoch of the next firing at or after `from`, or null when
+ * nothing should be armed: a manual `none` schedule, or a `once` instant that
+ * has already passed. The caller arms nothing (and clears any stale alarm) on
+ * null.
  *
  * For daily/weekdays, the time-of-day is interpreted in the *local* timezone —
  * "10am" means 10am on this machine, which is what a user scheduling a reminder
@@ -99,6 +129,11 @@ export function isManualSchedule(schedule: Schedule): boolean {
 export function nextRunAt(schedule: Schedule, from: number): number | null {
   if (schedule.kind === 'none') {
     return null
+  }
+  if (schedule.kind === 'once') {
+    // An instant already gone never comes back: null, rather than clamping to
+    // "now", so the caller disarms instead of firing a stale one-shot again.
+    return schedule.at > from ? schedule.at : null
   }
   if (schedule.kind === 'interval') {
     return from + coerceIntervalMinutes(schedule.minutes) * 60_000
@@ -123,11 +158,23 @@ export function nextRunAt(schedule: Schedule, from: number): number | null {
 }
 
 /** Human-readable description, used in the task list and Feishu messages. */
-export function describeSchedule(schedule: Schedule, locale: string = 'en'): string {
+export function describeSchedule(schedule: Schedule, locale: string = 'en', now?: number): string {
   const zh = locale.toLowerCase().startsWith('zh')
   const pad = (n: number): string => n.toString().padStart(2, '0')
   if (schedule.kind === 'none') {
     return zh ? '手动运行' : 'Manual run'
+  }
+  if (schedule.kind === 'once') {
+    // Rendered from explicit local fields rather than `toLocaleString`, whose
+    // output varies by engine and locale data — this string is shown on the
+    // approval card, where the user reads the time they are agreeing to.
+    const when = new Date(schedule.at)
+    const stamp = zh
+      ? `${when.getFullYear()}/${pad(when.getMonth() + 1)}/${pad(when.getDate())} ${pad(when.getHours())}:${pad(when.getMinutes())}`
+      : `${pad(when.getMonth() + 1)}/${pad(when.getDate())}/${when.getFullYear()} ${pad(when.getHours())}:${pad(when.getMinutes())}`
+    const passed = now !== undefined && schedule.at <= now
+    if (zh) return passed ? `单次（已过期）${stamp}` : `单次 ${stamp}`
+    return passed ? `One-time (passed) ${stamp}` : `One-time ${stamp}`
   }
   if (schedule.kind === 'interval') {
     const m = coerceIntervalMinutes(schedule.minutes)

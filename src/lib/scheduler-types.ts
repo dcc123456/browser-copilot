@@ -11,6 +11,16 @@ export type Schedule =
    * in the UI, or a Feishu command). It never gets an alarm.
    */
   | { kind: 'none' }
+  /**
+   * Fires exactly once at an absolute instant, then disarms (the task is
+   * persisted as disabled — see `background/scheduler`).
+   *
+   * `at` is epoch ms. The local-time intent ("19:30 on this machine") is
+   * carried by whoever computes it, the same way the workflow `date` trigger
+   * builds its epoch: a `new Date()` parsed from a date+time string with no
+   * trailing `Z`.
+   */
+  | { kind: 'once'; at: number }
   | { kind: 'daily'; hour: number; minute: number }
   | { kind: 'weekdays'; hour: number; minute: number }
   /**
@@ -52,6 +62,37 @@ export interface ScheduledTask {
   prompt?: string
   /** Used when `kind === 'workflow'`: the stored workflow to execute. */
   workflowId?: string
+  /**
+   * Seeded into the run's variable bag (`kind === 'workflow'`) or interpolated
+   * into the prompt (`kind === 'agent-prompt'`).
+   *
+   * This is how a run is told WHICH draft, WHICH note URL, WHICH keyword to act
+   * on — without baking the value into the graph or the prompt prose. A stored
+   * value may hold `{{upstream.*}}` references, resolved at this task's own run
+   * time from the parent's last successful output (see `lib/task-chain`).
+   */
+  variables?: Record<string, unknown>
+  /**
+   * Names from the run's final variable bag this task hands to its children.
+   *
+   * Declaring them keeps the handoff a contract: the run records exactly these
+   * keys, and a declared name the run never produced is reported on the run
+   * rather than silently resolving to nothing in a later task.
+   */
+  outputs?: string[]
+  /**
+   * The task whose last successful run feeds this task's `{{upstream.*}}`.
+   *
+   * Must point at a `workflow`-kind task: only a workflow run has a named
+   * variable bag — an agent-prompt run has nothing but its summary text, and a
+   * URL buried in prose is not a contract.
+   */
+  followsTaskId?: string
+  /**
+   * Free-form grouping label so the panel can list one pipeline's members.
+   * Nothing in the engine keys off it; `followsTaskId` is what carries meaning.
+   */
+  chainId?: string
   /**
    * Per-task cap on model↔tool round trips for agent-prompt tasks. Scheduled
    * tasks run unattended in full-auto and can need more steps than an
@@ -128,6 +169,17 @@ export interface TaskRunLog {
   /** True when the run was intentionally skipped (e.g. not logged in). */
   skipped: boolean
   summary: string
+  /**
+   * The variable names this run handed on, as declared by its task's `outputs`.
+   *
+   * This is the cross-task handoff: a child task resolves `{{upstream.<key>}}`
+   * against it at its own run time, which is what lets a chain be created
+   * before the value exists (a comment task is written before the note it
+   * comments on is published). Deliberately small and redacted — see
+   * `MAX_RUN_OUTPUTS_BYTES` in `lib/task-store`; bulk content never rides the
+   * handoff.
+   */
+  outputs?: Record<string, unknown>
   /** True when a Feishu notification was attempted for this run. */
   notified?: boolean
   error?: string

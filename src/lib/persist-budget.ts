@@ -58,12 +58,16 @@ function mapPersistedStrings(
  * The truncation is deliberate rather than a drop: a variable NAME is what the
  * draft timeline and the debug inspector show, and an honest
  * "(N chars, not persisted)" beats a value that silently vanished.
+ *
+ * `limit` is lowered by callers persisting a *narrow* budget — the cross-task
+ * handoff bag, where a whole article body is not the payload — so the same
+ * walker and depth rules apply instead of a second truncation implementation.
  */
-export function capPersistedStrings(value: unknown): unknown {
+export function capPersistedStrings(value: unknown, limit: number = MAX_PERSISTED_STRING): unknown {
   return mapPersistedStrings(value, (text) =>
-    text.length <= MAX_PERSISTED_STRING
+    text.length <= limit
       ? text
-      : `${text.slice(0, PREFIX_CHARS)}… (${text.length} chars, not persisted)`,
+      : `${text.slice(0, Math.min(PREFIX_CHARS, limit))}… (${text.length} chars, not persisted)`,
   )
 }
 

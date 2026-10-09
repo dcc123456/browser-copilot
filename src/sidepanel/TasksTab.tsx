@@ -584,7 +584,7 @@ function TaskEditor({
           </div>
         )}
 
-        {sched.kind !== 'none' && (
+        {(sched.kind === 'weekly' || sched.kind === 'interval') && (
           <div className="schedule-config">
             {isTimeBased ? (
               <label className="time-input">
