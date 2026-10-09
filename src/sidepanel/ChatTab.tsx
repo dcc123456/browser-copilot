@@ -58,6 +58,7 @@ import { GenerationStagesView } from './GenerationStages'
 import { WorkflowGenerationDialog } from './components/WorkflowGenerationDialog'
 import type { WorkflowGenerationViewState } from './components/WorkflowGenerationDialog'
 import { RepairProgressDialog } from './components/RepairProgressDialog'
+import { CardSection, type CardSectionTone } from './components/CardSection'
 import { useRepairEvents } from './hooks/useWorkflowRuntimeEvents'
 import SkillEditDialog from './SkillEditDialog'
 import type { Workflow } from '../lib/workflow/types'
@@ -2977,7 +2978,14 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       // page (verified selectors + persisted element waits) before persisting.
       // Editor/import saves must NOT get this — hand-tuned selectors are
       // never rewritten behind the user's back.
-      await sendCommand({ type: 'workflows.save', workflow, fromGeneration: true })
+      // `verifyRun` travels with it so the background replays the workflow ONLY
+      // when the user opted in: unchecked means the save touches no page.
+      await sendCommand({
+        type: 'workflows.save',
+        workflow,
+        fromGeneration: true,
+        verifyRun: prompt.verifyRun,
+      })
       // In draft mode the background still holds the operator-tool draft; drop
       // it so a later turn in the same conversation starts with a clean slate
       // rather than appending to the just-saved workflow. Fire-and-forget:
@@ -3346,6 +3354,55 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
    */
   // The popup title is the generated workflow's name (not a fixed phrase).
   const saveCardTitle = workflowPrompt?.workflow.name ?? ''
+  /**
+   * The rows the card's three collapsed groups hide, computed ONCE: a group
+   * header counts them while the group itself renders them. The count and the
+   * severity icon are what the user reads without opening anything, so a folded
+   * group must never hide the fact that it holds a blocking problem.
+   */
+  const cardStages = workflowPrompt?.workflow.settings.generationStages ?? []
+  const cardSaveWarnings = workflowPrompt?.workflow.settings.saveWarnings ?? []
+  const cardInputs = workflowPrompt ? declaredInputsOf(workflowPrompt.workflow) : []
+  const cardCodeNodes = workflowPrompt ? codeNodesOf(workflowPrompt.workflow) : []
+  const cardAiSteps = workflowPrompt
+    ? workflowPrompt.aiSteps.filter((step) =>
+        workflowPrompt.workflow.drawflow.nodes.some((node) => node.id === step.nodeId),
+      )
+    : []
+  const cardProbeFailing =
+    workflowPrompt && workflowPrompt.probes && !workflowPrompt.probesChecking
+      ? failingProbes(workflowPrompt.probes).length
+      : 0
+  // The probe rows the checks group can actually render: a result line exists
+  // even when every selector matched ("all ok"), the "unverified" notice counts
+  // as one, and nothing counts while the probe is still running.
+  const cardProbeRows =
+    !workflowPrompt || workflowPrompt.probesChecking
+      ? 0
+      : workflowPrompt.probes === null
+        ? 1
+        : workflowPrompt.probes.length === 0
+          ? 0
+          : cardProbeFailing || 1
+  const cardIntegrityRows = workflowPrompt
+    ? workflowPrompt.integrity.danglingVars.length +
+      (workflowPrompt.integrity.unreachable.length > 0 ? 1 : 0)
+    : 0
+  const cardChecksRows =
+    cardProbeRows +
+    cardSaveWarnings.length +
+    (workflowPrompt?.repair ? 1 : 0) +
+    cardIntegrityRows +
+    (runIssues ? runIssues.errors.length + runIssues.warnings.length : 0)
+  const cardChecksTone: CardSectionTone =
+    cardIntegrityRows > 0 || (runIssues?.errors.length ?? 0) > 0
+      ? 'err'
+      : cardProbeFailing > 0 ||
+          cardSaveWarnings.length > 0 ||
+          workflowPrompt?.repair?.verified === false ||
+          (runIssues?.warnings.length ?? 0) > 0
+        ? 'warn'
+        : 'plain'
   const saveCard = workflowPrompt ? (
     <div className="confirm-card" data-kind="workflow">
       <strong>
@@ -3366,201 +3423,196 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         onChange={changeTrigger}
         selection={workflowPrompt.trigger}
       />
-      {workflowPrompt.workflow.settings.generationStages &&
-        workflowPrompt.workflow.settings.generationStages.length > 0 && (
-          <GenerationStagesView
-            t={t}
-            stages={workflowPrompt.workflow.settings.generationStages}
-          />
-        )}
-      {workflowPrompt.workflow.settings.saveWarnings &&
-        workflowPrompt.workflow.settings.saveWarnings.length > 0 && (
-          <div className="ai-prefill-list" role="group" aria-label={t.chatSaveWorkflowWarningsTitle}>
+      {/* Live page work stays visible: it is the reason the card is still open. */}
+      {workflowPrompt.probesChecking && (
+        <p className="hint" style={{ margin: '4px 0' }} role="status">
+          {t.chatWorkflowProbeChecking}
+        </p>
+      )}
+      <CardSection
+        count={cardChecksRows}
+        tone={cardChecksTone}
+        title={t.chatWorkflowCardChecksTitle}
+      >
+        {cardSaveWarnings.length > 0 && (
+          <div
+            className="ai-prefill-list"
+            role="group"
+            aria-label={t.chatSaveWorkflowWarningsTitle}
+          >
             <p className="hint text-warn">{t.chatSaveWorkflowWarningsTitle}</p>
-            {workflowPrompt.workflow.settings.saveWarnings.map((warning, index) => (
+            {cardSaveWarnings.map((warning, index) => (
               <div className="ai-prefill-item" key={index}>
                 <span className="wf-input-default">{warning}</span>
               </div>
             ))}
           </div>
         )}
-      {workflowPrompt.probesChecking && (
-        <p className="hint" style={{ margin: '4px 0' }} role="status">
-          {t.chatWorkflowProbeChecking}
-        </p>
-      )}
-      {!workflowPrompt.probesChecking &&
-        workflowPrompt.probes !== null &&
-        workflowPrompt.probes.length > 0 && (
-          <div className="ai-prefill-list" role="group" aria-label={t.chatWorkflowProbeTitle}>
-            <p className="hint">{t.chatWorkflowProbeTitle}</p>
-            {failingProbes(workflowPrompt.probes).length === 0 ? (
-              <p className="hint" style={{ margin: '4px 0' }}>
-                {t.chatWorkflowProbeAllOk({ count: workflowPrompt.probes.length })}
-              </p>
-            ) : (
-              failingProbes(workflowPrompt.probes).map((probe) => (
-                <div className="ai-prefill-item" key={probe.nodeId}>
-                  <span className="wf-input-name">{probe.blockId}</span>
-                  <span className="wf-input-default">
-                    {probe.status === 'ambiguous'
-                      ? t.chatWorkflowProbeAmbiguous({ count: probe.matches })
-                      : t.chatWorkflowProbeMissing}
-                    {` · ${probe.selector}`}
-                  </span>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-      {!workflowPrompt.probesChecking && workflowPrompt.probes === null && (
-        <p className="hint" style={{ margin: '4px 0' }}>
-          {t.chatWorkflowProbeUnverified}
-        </p>
-      )}
-      {workflowPrompt.repair && (
-        <div className="ai-prefill-list" role="group" aria-label={t.chatWorkflowRepairTitle}>
-          <p className={`hint ${workflowPrompt.repair.verified ? 'text-ok' : 'text-warn'}`}>
-            {t.chatWorkflowRepairTitle}
-          </p>
-          <div className="ai-prefill-item">
-            {workflowPrompt.repair.verified ? (
-              <span className="wf-input-default">{t.chatWorkflowRepairVerified}</span>
-            ) : (
-              <span className="wf-input-default">{t.chatWorkflowRepairNotVerified}</span>
-            )}
-          </div>
-          {!workflowPrompt.repair.verified && workflowPrompt.repair.failedNodeId && (
-            <div className="ai-prefill-item">
-              <span className="wf-input-name">
-                {t.chatWorkflowRepairFailedNode({
-                  nodeId: displayNameOfNodeId(
-                    workflowPrompt.workflow,
-                    workflowPrompt.repair.failedNodeId,
-                  ),
-                })}
-              </span>
+        {!workflowPrompt.probesChecking &&
+          workflowPrompt.probes !== null &&
+          workflowPrompt.probes.length > 0 && (
+            <div className="ai-prefill-list" role="group" aria-label={t.chatWorkflowProbeTitle}>
+              <p className="hint">{t.chatWorkflowProbeTitle}</p>
+              {failingProbes(workflowPrompt.probes).length === 0 ? (
+                <p className="hint" style={{ margin: '4px 0' }}>
+                  {t.chatWorkflowProbeAllOk({ count: workflowPrompt.probes.length })}
+                </p>
+              ) : (
+                failingProbes(workflowPrompt.probes).map((probe) => (
+                  <div className="ai-prefill-item" key={probe.nodeId}>
+                    <span className="wf-input-name">{probe.blockId}</span>
+                    <span className="wf-input-default">
+                      {probe.status === 'ambiguous'
+                        ? t.chatWorkflowProbeAmbiguous({ count: probe.matches })
+                        : t.chatWorkflowProbeMissing}
+                      {` · ${probe.selector}`}
+                    </span>
+                  </div>
+                ))
+              )}
             </div>
           )}
-          {!workflowPrompt.repair.verified &&
-            workflowPrompt.repair.rootCauseNodeIds.length > 0 && (
+        {!workflowPrompt.probesChecking && workflowPrompt.probes === null && (
+          <p className="hint" style={{ margin: '4px 0' }}>
+            {t.chatWorkflowProbeUnverified}
+          </p>
+        )}
+        {workflowPrompt.repair && (
+          <div className="ai-prefill-list" role="group" aria-label={t.chatWorkflowRepairTitle}>
+            <p className={`hint ${workflowPrompt.repair.verified ? 'text-ok' : 'text-warn'}`}>
+              {t.chatWorkflowRepairTitle}
+            </p>
+            <div className="ai-prefill-item">
+              {workflowPrompt.repair.verified ? (
+                <span className="wf-input-default">{t.chatWorkflowRepairVerified}</span>
+              ) : (
+                <span className="wf-input-default">{t.chatWorkflowRepairNotVerified}</span>
+              )}
+            </div>
+            {!workflowPrompt.repair.verified && workflowPrompt.repair.failedNodeId && (
               <div className="ai-prefill-item">
                 <span className="wf-input-name">
-                  {t.chatWorkflowRepairRootCauses({
-                    nodes: workflowPrompt.repair.rootCauseNodeIds
-                      .map((id) => displayNameOfNodeId(workflowPrompt.workflow, id))
-                      .join(', '),
+                  {t.chatWorkflowRepairFailedNode({
+                    nodeId: displayNameOfNodeId(
+                      workflowPrompt.workflow,
+                      workflowPrompt.repair.failedNodeId,
+                    ),
                   })}
                 </span>
               </div>
             )}
-          {!workflowPrompt.repair.verified && workflowPrompt.repair.explanation && (
-            <div className="ai-prefill-item">
-              <span className="wf-input-default">{workflowPrompt.repair.explanation}</span>
-            </div>
-          )}
-        </div>
-      )}
-      {(workflowPrompt.integrity.danglingVars.length > 0 ||
-        workflowPrompt.integrity.unreachable.length > 0) && (
-        <div
-          className="ai-prefill-list"
-          role="group"
-          aria-label={t.chatWorkflowIntegrityTitle}
-        >
-          <p className="hint text-err">{t.chatWorkflowIntegrityTitle}</p>
-          {workflowPrompt.integrity.danglingVars.map((dangling) => (
-            <div
-              className="ai-prefill-item"
-              key={`${dangling.nodeId}:${dangling.param}:${dangling.reference}`}
-            >
-              <span className="wf-input-name">{`{{${dangling.reference}}}`}</span>
-              <span className="wf-input-default">
-                {t.chatWorkflowIntegrityDangling({ blockId: dangling.blockId })}
-              </span>
-            </div>
-          ))}
-          {workflowPrompt.integrity.unreachable.length > 0 && (
-            <div className="ai-prefill-item">
-              <span className="wf-input-name">
-                {t.chatWorkflowIntegrityUnreachable({
-                  count: workflowPrompt.integrity.unreachable.length,
-                })}
-              </span>
-              <span className="wf-input-default">
-                {workflowPrompt.integrity.unreachable.join(', ')}
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-      {runIssues && (runIssues.errors.length > 0 || runIssues.warnings.length > 0) && (
-        <div
-          className="ai-prefill-list"
-          role="group"
-          aria-label={t.chatWorkflowRunIssuesTitle}
-        >
-          <p className={`hint ${runIssues.errors.length > 0 ? 'text-err' : ''}`}>
-            {t.chatWorkflowRunIssuesTitle}
-          </p>
-          {runIssues.errors.map((error, index) => (
-            <div className="ai-prefill-item" key={`run-error-${index}`}>
-              <span className="wf-input-name text-err">{t.chatWorkflowRunIssuesError}</span>
-              <span className="wf-input-default">{error}</span>
-            </div>
-          ))}
-          {runIssues.warnings.map((warning, index) => (
-            <div className="ai-prefill-item" key={`run-warning-${index}`}>
-              <span className="wf-input-name">{t.chatWorkflowRunIssuesWarning}</span>
-              <span className="wf-input-default">{warning}</span>
-            </div>
-          ))}
-          {runIssues.errors.length > 0 && (
-            <p className="hint text-warn mt-1">{t.chatWorkflowRunIssuesNonBlocking}</p>
-          )}
-        </div>
-      )}
-      {declaredInputsOf(workflowPrompt.workflow).length > 0 && (
-        <div className="ai-prefill-list" role="group" aria-label={t.chatWorkflowInputsTitle}>
-          <p className="hint">{t.chatWorkflowInputsTitle}</p>
-          {declaredInputsOf(workflowPrompt.workflow).map((input) => (
-            <label className="ai-prefill-item" key={input.name}>
-              <span className="wf-input-name">{`{{${input.name}}}`}</span>
-              <span className="wf-input-default">{input.defaultValue || '—'}</span>
-            </label>
-          ))}
-          <p className="hint" style={{ margin: '4px 0 0' }}>
-            {t.chatWorkflowInputsHint}
-          </p>
-        </div>
-      )}
-      {codeNodesOf(workflowPrompt.workflow).length > 0 && (
-        <div
-          className="ai-prefill-list"
-          role="group"
-          aria-label={t.chatWorkflowCodeNodesTitle}
-        >
-          <p className="hint">{t.chatWorkflowCodeNodesTitle}</p>
-          {codeNodesOf(workflowPrompt.workflow).map((node) => (
-            <div className="ai-prefill-item" key={node.id}>
-              <span>{node.reason || t.chatWorkflowCodeNodesNoReason}</span>
-            </div>
-          ))}
-          <p className="hint" style={{ margin: '4px 0 0' }}>
-            {t.chatWorkflowCodeNodesHint}
-          </p>
-        </div>
-      )}
-      {workflowPrompt.aiSteps.filter((step) =>
-        workflowPrompt.workflow.drawflow.nodes.some((node) => node.id === step.nodeId),
-      ).length > 0 && (
-        <div className="ai-prefill-list" role="group" aria-label={t.chatSaveWorkflowAiTitle}>
-          <p className="hint">{t.chatSaveWorkflowAiTitle}</p>
-          {workflowPrompt.aiSteps
-            .filter((step) =>
-              workflowPrompt.workflow.drawflow.nodes.some((node) => node.id === step.nodeId),
-            )
-            .map((step) => (
+            {!workflowPrompt.repair.verified &&
+              workflowPrompt.repair.rootCauseNodeIds.length > 0 && (
+                <div className="ai-prefill-item">
+                  <span className="wf-input-name">
+                    {t.chatWorkflowRepairRootCauses({
+                      nodes: workflowPrompt.repair.rootCauseNodeIds
+                        .map((id) => displayNameOfNodeId(workflowPrompt.workflow, id))
+                        .join(', '),
+                    })}
+                  </span>
+                </div>
+              )}
+            {!workflowPrompt.repair.verified && workflowPrompt.repair.explanation && (
+              <div className="ai-prefill-item">
+                <span className="wf-input-default">{workflowPrompt.repair.explanation}</span>
+              </div>
+            )}
+          </div>
+        )}
+        {(workflowPrompt.integrity.danglingVars.length > 0 ||
+          workflowPrompt.integrity.unreachable.length > 0) && (
+          <div className="ai-prefill-list" role="group" aria-label={t.chatWorkflowIntegrityTitle}>
+            <p className="hint text-err">{t.chatWorkflowIntegrityTitle}</p>
+            {workflowPrompt.integrity.danglingVars.map((dangling) => (
+              <div
+                className="ai-prefill-item"
+                key={`${dangling.nodeId}:${dangling.param}:${dangling.reference}`}
+              >
+                <span className="wf-input-name">{`{{${dangling.reference}}}`}</span>
+                <span className="wf-input-default">
+                  {t.chatWorkflowIntegrityDangling({ blockId: dangling.blockId })}
+                </span>
+              </div>
+            ))}
+            {workflowPrompt.integrity.unreachable.length > 0 && (
+              <div className="ai-prefill-item">
+                <span className="wf-input-name">
+                  {t.chatWorkflowIntegrityUnreachable({
+                    count: workflowPrompt.integrity.unreachable.length,
+                  })}
+                </span>
+                <span className="wf-input-default">
+                  {workflowPrompt.integrity.unreachable.join(', ')}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+        {runIssues && (runIssues.errors.length > 0 || runIssues.warnings.length > 0) && (
+          <div className="ai-prefill-list" role="group" aria-label={t.chatWorkflowRunIssuesTitle}>
+            <p className={`hint ${runIssues.errors.length > 0 ? 'text-err' : ''}`}>
+              {t.chatWorkflowRunIssuesTitle}
+            </p>
+            {runIssues.errors.map((error, index) => (
+              <div className="ai-prefill-item" key={`run-error-${index}`}>
+                <span className="wf-input-name text-err">{t.chatWorkflowRunIssuesError}</span>
+                <span className="wf-input-default">{error}</span>
+              </div>
+            ))}
+            {runIssues.warnings.map((warning, index) => (
+              <div className="ai-prefill-item" key={`run-warning-${index}`}>
+                <span className="wf-input-name">{t.chatWorkflowRunIssuesWarning}</span>
+                <span className="wf-input-default">{warning}</span>
+              </div>
+            ))}
+            {runIssues.errors.length > 0 && (
+              <p className="hint text-warn mt-1">{t.chatWorkflowRunIssuesNonBlocking}</p>
+            )}
+          </div>
+        )}
+      </CardSection>
+      <CardSection
+        count={cardStages.length + cardInputs.length + cardCodeNodes.length}
+        title={t.chatWorkflowCardContentTitle}
+      >
+        {cardStages.length > 0 && <GenerationStagesView stages={cardStages} t={t} />}
+        {cardInputs.length > 0 && (
+          <div className="ai-prefill-list" role="group" aria-label={t.chatWorkflowInputsTitle}>
+            <p className="hint">{t.chatWorkflowInputsTitle}</p>
+            {cardInputs.map((input) => (
+              <label className="ai-prefill-item" key={input.name}>
+                <span className="wf-input-name">{`{{${input.name}}}`}</span>
+                <span className="wf-input-default">{input.defaultValue || '—'}</span>
+              </label>
+            ))}
+            <p className="hint" style={{ margin: '4px 0 0' }}>
+              {t.chatWorkflowInputsHint}
+            </p>
+          </div>
+        )}
+        {cardCodeNodes.length > 0 && (
+          <div className="ai-prefill-list" role="group" aria-label={t.chatWorkflowCodeNodesTitle}>
+            <p className="hint">{t.chatWorkflowCodeNodesTitle}</p>
+            {cardCodeNodes.map((node) => (
+              <div className="ai-prefill-item" key={node.id}>
+                <span>{node.reason || t.chatWorkflowCodeNodesNoReason}</span>
+              </div>
+            ))}
+            <p className="hint" style={{ margin: '4px 0 0' }}>
+              {t.chatWorkflowCodeNodesHint}
+            </p>
+          </div>
+        )}
+      </CardSection>
+      <CardSection
+        count={cardAiSteps.length + workflowPrompt.suggestions.length}
+        title={t.chatWorkflowCardAdjustTitle}
+      >
+        {cardAiSteps.length > 0 && (
+          <div className="ai-prefill-list" role="group" aria-label={t.chatSaveWorkflowAiTitle}>
+            <p className="hint">{t.chatSaveWorkflowAiTitle}</p>
+            {cardAiSteps.map((step) => (
               <label key={step.nodeId} className="ai-prefill-item">
                 <input
                   checked={workflowPrompt.aiSelections[step.nodeId] !== false}
@@ -3570,31 +3622,31 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                 <span>{step.label}</span>
               </label>
             ))}
-        </div>
-      )}
-      {workflowPrompt.suggestions.length > 0 && (
-        <div className="ai-prefill-list" role="group" aria-label={t.chatFoldTitle}>
-          <p className="hint">{t.chatFoldTitle}</p>
-          {workflowPrompt.suggestions.map((suggestion, index) => (
-            <div
-              className="ai-prefill-item"
-              key={`${suggestion.kind}-${suggestion.runIds[0]}`}
-            >
-              <button
-                disabled={workflowPrompt.folding !== null || workflowPrompt.saving}
-                onClick={() => void foldRun(index)}
-                type="button"
-              >
-                {workflowPrompt.folding === index ? t.chatFoldBusy : t.chatFoldApply}
-              </button>
-              <span>{suggestion.reason}</span>
-            </div>
-          ))}
-          <p className="hint" style={{ margin: '4px 0 0' }}>
-            {workflowPrompt.foldNote ?? t.chatFoldHint}
-          </p>
-        </div>
-      )}
+          </div>
+        )}
+        {workflowPrompt.suggestions.length > 0 && (
+          <div className="ai-prefill-list" role="group" aria-label={t.chatFoldTitle}>
+            <p className="hint">{t.chatFoldTitle}</p>
+            {workflowPrompt.suggestions.map((suggestion, index) => (
+              <div className="ai-prefill-item" key={`${suggestion.kind}-${suggestion.runIds[0]}`}>
+                <button
+                  disabled={workflowPrompt.folding !== null || workflowPrompt.saving}
+                  onClick={() => void foldRun(index)}
+                  type="button"
+                >
+                  {workflowPrompt.folding === index ? t.chatFoldBusy : t.chatFoldApply}
+                </button>
+                <span>{suggestion.reason}</span>
+              </div>
+            ))}
+            <p className="hint" style={{ margin: '4px 0 0' }}>
+              {workflowPrompt.foldNote ?? t.chatFoldHint}
+            </p>
+          </div>
+        )}
+      </CardSection>
+      {/* The opt-in that decides whether saving touches the page at all stays
+          outside every group: it is the card's one consequential choice. */}
       <label className="ai-prefill-item" style={{ marginTop: '4px' }}>
         <input
           checked={workflowPrompt.verifyRun}
@@ -3645,15 +3697,12 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             {t.chatSaveWorkflowAiReview}
           </button>
         )}
-        <button
-          disabled={workflowPrompt.saving}
-          onClick={dismissPromptWorkflow}
-          type="button"
-        >
+        <button disabled={workflowPrompt.saving} onClick={dismissPromptWorkflow} type="button">
           {t.chatSaveWorkflowSkip}
         </button>
       </div>
     </div>
+
   ) : null
 
   return (

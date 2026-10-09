@@ -188,8 +188,17 @@ export type Command =
    * page (verified selectors, persisted element waits) before writing it.
    * Editor/import saves skip that — hand-tuned selectors are never rewritten
    * behind the user's back.
+   *
+   * `verifyRun` is the card's opt-in checkbox: it alone decides whether the
+   * saved workflow gets replayed for real right after the save. Hardening is a
+   * read-only page probe and is NOT covered by it.
    */
-  | { type: 'workflows.save'; workflow: Workflow; fromGeneration?: boolean }
+  | {
+      type: 'workflows.save'
+      workflow: Workflow
+      fromGeneration?: boolean
+      verifyRun?: boolean
+    }
   | { type: 'workflows.delete'; id: string }
   /**
    * Materialises the current conversation's operator-tool draft into a

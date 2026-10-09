@@ -315,6 +315,23 @@ describe('detectRepeatRuns', () => {
     expect(detectRepeatRuns(wf)).toEqual([])
   })
 
+  // --- upload blocks never fold ----------------------------------------------
+  it('never folds upload-file nodes, identical or varying', () => {
+    // A fold rewrites the selector per iteration but never the file, so folding
+    // uploads would replay one file N times.
+    const identical = workflow([
+      node('u1', 'upload-file', { selector: '#file', files: 'a.png' }),
+      node('u2', 'upload-file', { selector: '#file', files: 'a.png' }),
+    ])
+    expect(detectRepeatRuns(identical)).toEqual([])
+
+    const varying = workflow([
+      node('u1', 'upload-file', { selector: '#file-1', files: 'a.png' }),
+      node('u2', 'upload-file', { selector: '#file-2', files: 'b.png' }),
+    ])
+    expect(detectRepeatRuns(varying)).toEqual([])
+  })
+
   // --- AI blocks require identical prompt ------------------------------------
   it('folds ai-agent nodes only when prompts are identical', () => {
     const wf = workflow([
@@ -497,12 +514,20 @@ describe('compound period detection (list → detail → back)', () => {
     const nodes: WorkflowNode[] = []
     for (let i = 0; i < items; i += 1) {
       nodes.push(click(`card-${i}`, `.job-list > li:nth-child(${i + 1}) .job-name`))
-      nodes.push(node(`title-${i}`, 'get-text', {
-        selector: '.job-detail .name', saveData: true, dataColumn: 'name',
-      }))
-      nodes.push(node(`req-${i}`, 'get-text', {
-        selector: '.job-detail .req', saveData: true, dataColumn: 'requirement',
-      }))
+      nodes.push(
+        node(`title-${i}`, 'get-text', {
+          selector: '.job-detail .name',
+          saveData: true,
+          dataColumn: 'name',
+        }),
+      )
+      nodes.push(
+        node(`req-${i}`, 'get-text', {
+          selector: '.job-detail .req',
+          saveData: true,
+          dataColumn: 'requirement',
+        }),
+      )
       nodes.push(node(`back-${i}`, 'go-back', {}))
     }
     return workflow([...nodes, ...extra])

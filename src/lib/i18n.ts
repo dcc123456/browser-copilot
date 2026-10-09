@@ -542,6 +542,14 @@ export interface Messages {
   chatWorkflowProbeMissing: string
   /** One probed selector matched several elements — the executor may pick the wrong one. */
   chatWorkflowProbeAmbiguous: (params: { count: number }) => string
+  /** Collapsible group on the save card: page checks, repair verdict, integrity and run issues. */
+  chatWorkflowCardChecksTitle: string
+  /** Collapsible group on the save card: generation stages, declared inputs, code nodes. */
+  chatWorkflowCardContentTitle: string
+  /** Collapsible group on the save card: AI step selection and loop-fold suggestions. */
+  chatWorkflowCardAdjustTitle: string
+  /** Count badge on a collapsed group header: how many rows it hides. */
+  chatWorkflowCardItemCount: (params: { count: number }) => string
   /** Checkbox on the save card: run the workflow once (with AI repair) right after saving. */
   chatWorkflowVerifyRun: string
   /** Hint under that checkbox: what it really does (side effects + model call). */
@@ -1694,6 +1702,10 @@ const en: Messages = {
   chatWorkflowProbeMissing: 'matches nothing — this step will do nothing',
   chatWorkflowProbeAmbiguous: ({ count }) =>
     `matches ${count} elements — the workflow may act on the wrong one`,
+  chatWorkflowCardChecksTitle: 'Checks & risks',
+  chatWorkflowCardContentTitle: 'Recorded details',
+  chatWorkflowCardAdjustTitle: 'Adjustments',
+  chatWorkflowCardItemCount: ({ count }) => `${count} item${count > 1 ? 's' : ''}`,
   chatWorkflowVerifyRun: 'Verify run after save',
   chatWorkflowVerifyRunHint:
     'Runs the workflow once for real and lets the AI repair failed steps (up to one repair round). Real side effects can happen (orders, posts, sends), and it costs one model call.',
@@ -2848,6 +2860,10 @@ const zhCN: Messages = {
   chatWorkflowProbeUnverified: '当前页面无法检查，这些选择器未经验证。',
   chatWorkflowProbeMissing: '没有匹配到任何元素——这一步重放时什么都不会发生',
   chatWorkflowProbeAmbiguous: ({ count }) => `匹配到 ${count} 个元素——工作流可能操作到错误的元素`,
+  chatWorkflowCardChecksTitle: '检查与风险',
+  chatWorkflowCardContentTitle: '记录详情',
+  chatWorkflowCardAdjustTitle: '调整与优化',
+  chatWorkflowCardItemCount: ({ count }) => `${count} 项`,
   chatWorkflowVerifyRun: '保存后验证运行',
   chatWorkflowVerifyRunHint:
     '保存后立即真实执行一次，失败步骤由 AI 自动修复（最多一轮）。会产生真实副作用（下单、发帖、发送等），并消耗一次模型调用。',

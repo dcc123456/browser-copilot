@@ -309,6 +309,14 @@ const MAX_STEPS = 2000
 /** Guards a `while-loop` whose body never progresses toward a false condition. */
 const MAX_WHILE_ITERATIONS = 1000
 
+/**
+ * Branch blocks whose two ports are mutually exclusive paths. Their out-edges are
+ * port-labelled, so the first out-edge is NOT a safe continuation — see the
+ * `defaultNext` rule in `runNode`. Loop blocks are deliberately absent: their
+ * `output-1` is the body and the loop interpreter resolves the continuation.
+ */
+const EXCLUSIVE_BRANCH_BLOCKS = new Set(['conditions', 'element-exists'])
+
 /** Block ids that represent launch triggers; used to pick a start node. */
 const TRIGGER_BLOCK_IDS = new Set([
   'trigger',
@@ -767,6 +775,17 @@ async function runCore(
       'while-loop': ['loop', 'end'],
       'repeat-task': ['loop', 'end'],
     }
+    const blockId = blockIdOf(current)
+    const pair = BRANCH_KEYS[blockId]
+    // Which port of the pair a handle names: `output-1` / `output-2`, bare or
+    // `<blockId>-`prefixed — the two shapes the editor and the migration write.
+    const branchSlot = (handle: string): 0 | 1 | null => {
+      if (!pair) return null
+      const slot = /(?:^|-)output-([12])$/.exec(handle)
+      if (!slot) return null
+      return Number(slot[1]) === 2 ? 1 : 0
+    }
+    let portEdges = 0
     for (const edge of outEdges) {
       const handle = edge.sourceHandle ?? 'next'
       outputs[handle] = edge.target
@@ -774,17 +793,24 @@ async function runCore(
       // cover handles migration normalized from imported bare semantic keys.
       const m = /-(output-\d+|fallback|loop|end)$/.exec(handle)
       if (m) outputs[m[1]!] = edge.target
-      // Index semantic keys for this block's branch handles.
-      const pair = BRANCH_KEYS[blockIdOf(current)]
-      if (pair) {
-        if (handle.endsWith('-output-1')) outputs[pair[0]] = edge.target
-        if (handle.endsWith('-output-2')) outputs[pair[1]] = edge.target
+      // Index this block's semantic branch keys (`exists` / `notExists` / …).
+      const slot = branchSlot(handle)
+      if (slot !== null && pair) {
+        outputs[pair[slot]] = edge.target
+        portEdges += 1
       }
       if (handle.endsWith('-output-fallback')) outputs['fallback'] = edge.target
     }
-    const defaultNext = outEdges[0]?.target ?? null
-
-    const blockId = blockIdOf(current)
+    // For an exclusive-branch block every out-edge names a port, so `outEdges[0]`
+    // may well be the branch the verdict did NOT take. Falling back to it is how
+    // a gate with only the "exists" port wired ran that port when the element was
+    // absent — both `outputs[taken] ?? ctx.defaultNext` in the executor and
+    // `resolver ?? defaultNext` below resolve to it. An unlabelled edge names no
+    // port, so the older pass-through shape keeps continuing either way.
+    const defaultNext =
+      EXCLUSIVE_BRANCH_BLOCKS.has(blockId) && portEdges === outEdges.length && portEdges > 0
+        ? null
+        : (outEdges[0]?.target ?? null)
     // One interpolation pass over the whole bag, before anything reads it: the
     // executors' shared locator helpers (`sel` / `targetFrom`) resolve
     // `{{token}}` out of `data`, so a node carrying
