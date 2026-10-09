@@ -21,6 +21,7 @@ import {
   CirclePlay,
   Flag,
   Info,
+  Locate,
   Square,
   TriangleAlert,
   type LucideIcon,
@@ -125,9 +126,11 @@ export function buildTrace(run: RunView): TraceEntry[] {
       current.lines.push({ kind: step.kind, text: step.text })
       if (step.kind === 'error') current.type = 'error'
     } else {
-      // Pre-block line (run status etc.): surface as a standalone entry.
+      // Pre-block line (run status, a node the run gate stopped on): surface as
+      // a standalone entry, keeping its node id so the row can locate it.
       entries.push({
         type: step.kind === 'error' ? 'error' : 'info',
+        nodeId: step.nodeId,
         label: '',
         description: step.text,
         at: step.at,
@@ -237,14 +240,18 @@ export function TraceRow({
   entry,
   debug,
   onInspect,
+  onLocate,
 }: {
   entry: TraceEntry
   debug: boolean
   onInspect: (vars: Record<string, unknown>) => void
+  /** Center the canvas on this row's node; absent outside the editor. */
+  onLocate?: (nodeId: string) => void
 }) {
   const style = TYPE_STYLE[entry.type]
-  const { bt } = useEditorLocale()
+  const { bt, t } = useEditorLocale()
   const hasVars = debug && entry.vars && Object.keys(entry.vars).length > 0
+  const locateId = entry.nodeId
   const errorLines = entry.lines.filter((l) => l.kind === 'error')
   const otherLines = entry.lines.filter((l) => l.kind !== 'error')
   const [openError, setOpenError] = useState(false)
@@ -295,6 +302,20 @@ export function TraceRow({
         <span title={bt('Inspect variables')} style={{ display: 'inline-flex' }}>
           <Braces size={13} className="wf-console-vars" />
         </span>
+      )}
+      {locateId !== undefined && onLocate !== undefined && (
+        <button
+          type="button"
+          className="ml-2 inline-flex shrink-0 items-center gap-1 rounded border border-border bg-accent-soft px-1.5 py-px text-[10px] leading-tight text-accent"
+          title={t('locateNode')}
+          onClick={(e) => {
+            e.stopPropagation()
+            onLocate(locateId)
+          }}
+        >
+          <Locate size={11} />
+          {t('locateNode')}
+        </button>
       )}
     </div>
   )

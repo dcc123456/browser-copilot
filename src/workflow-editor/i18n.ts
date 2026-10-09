@@ -33,8 +33,7 @@ export const EDITOR_STRINGS = {
     autoLayout: 'Auto-layout (beautify)',
     autoLayoutDone: 'Layout tidy applied',
     edgeDeleted: 'Connection removed',
-    loopBackConnected:
-      'Loop-back connected: this branch will re-run from the earlier block.',
+    loopBackConnected: 'Loop-back connected: this branch will re-run from the earlier block.',
     loopBackHint:
       'A branch routed back to an earlier block repeats it. Make sure the condition eventually changes, or the run stops at the step limit.',
     searchNodes: 'Search nodes',
@@ -48,6 +47,9 @@ export const EDITOR_STRINGS = {
     saveFailed: 'Save failed',
     runFailed: 'Run failed',
     runFinished: 'Run finished',
+    runBlockedNodes:
+      'Run started, but {count} block(s) are missing a required parameter. It will stop at the first one — the run log names each block, click a row to find it on the canvas.',
+    locateNode: 'Locate',
     recordingStarted: 'Recording started — switch to a page and perform actions',
     recordingStopped: 'Recording stopped',
     recordStartFailed: 'Could not start recording',
@@ -83,7 +85,8 @@ export const EDITOR_STRINGS = {
     nodeInspectorPreconditions: 'Preconditions',
     nodeInspectorFailureMeaning: 'Failure meaning',
     nodeInspectorRepairHints: 'Repair hints',
-    nodeInspectorEditInvalidates: 'Editing the goal marks the workflow unverified until it is re-certified.',
+    nodeInspectorEditInvalidates:
+      'Editing the goal marks the workflow unverified until it is re-certified.',
     nodeConditionAdd: 'Add condition',
     nodeConditionRemove: 'Remove condition',
     nodeConditionKind: 'Condition type',
@@ -110,8 +113,7 @@ export const EDITOR_STRINGS = {
     noteEdit: 'Edit note',
     workflowName: 'Workflow name',
     unsavedChanges: 'Unsaved changes',
-    unsavedChangesClosePrompt:
-      'You have unsaved changes. Save before closing?',
+    unsavedChangesClosePrompt: 'You have unsaved changes. Save before closing?',
     dontSave: "Don't save",
     selectBlockHint:
       'Select a block on the canvas to edit it.\nWorkflow name, trigger and run settings live on the Trigger block.',
@@ -158,8 +160,7 @@ export const EDITOR_STRINGS = {
     nodeFixButton: 'AI Fix',
     nodeFixTitle: 'AI Fix this block',
     nodeFixSuggestionLabel: 'Repair guidance (optional)',
-    nodeFixSuggestionPlaceholder:
-      'Describe what is wrong or how the block should be repaired…',
+    nodeFixSuggestionPlaceholder: 'Describe what is wrong or how the block should be repaired…',
     nodeFixConfirm: 'Confirm fix',
     nodeFixCancelRun: 'Cancel fix',
     nodeFixMissingContract:
@@ -213,6 +214,8 @@ export const EDITOR_STRINGS = {
     saveFailed: '保存失败',
     runFailed: '运行失败',
     runFinished: '运行完成',
+    runBlockedNodes: '运行已启动，但有 {count} 个算子缺少必填参数，会在它之前停止。详见运行日志。',
+    locateNode: '定位算子',
     recordingStarted: '已开始录制 — 请切换到页面执行操作',
     recordingStopped: '录制已停止',
     recordStartFailed: '无法开始录制',
@@ -405,8 +408,10 @@ const BLOCK_FORM_STRINGS = {
     // — get-secret form —
     Credential: '凭证',
     'Loading credentials…': '正在加载凭证…',
-    'No credentials configured yet. Add one in Settings → Secrets.': '尚未配置凭证。请前往 设置 → 密钥 中添加。',
-    'The secret value is fetched at runtime and never stored in the workflow. Downstream blocks can reference it via {{variable name}}.': '凭证值在运行时获取，绝不会保存到工作流中。下游算子可通过 {{variable name}} 引用。',
+    'No credentials configured yet. Add one in Settings → Secrets.':
+      '尚未配置凭证。请前往 设置 → 密钥 中添加。',
+    'The secret value is fetched at runtime and never stored in the workflow. Downstream blocks can reference it via {{variable name}}.':
+      '凭证值在运行时获取，绝不会保存到工作流中。下游算子可通过 {{variable name}} 引用。',
     'Variable the secret value is stored under': '存储该凭证值的变量名',
     Type: '类型',
     Action: '操作',

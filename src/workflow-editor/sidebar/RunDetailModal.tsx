@@ -20,11 +20,14 @@ export default function RunDetailModal({
   run,
   debug,
   onClose,
+  onLocateNode,
   t,
 }: {
   run: RunView | null
   debug: boolean
   onClose: () => void
+  /** Center the canvas on a row's node (editor only). */
+  onLocateNode?: (nodeId: string) => void
   t: TranslateFn
 }) {
   const [inspectVars, setInspectVars] = useState<Record<string, unknown> | null>(null)
@@ -131,7 +134,13 @@ export default function RunDetailModal({
               {filtered.length === 0 && <p className="wf-console-empty">{t('logsEmpty')}</p>}
               <div className="wf-console-trace">
                 {filtered.map((e, i) => (
-                  <TraceRow key={i} entry={e} debug={debug} onInspect={setInspectVars} />
+                  <TraceRow
+                    key={i}
+                    entry={e}
+                    debug={debug}
+                    onInspect={setInspectVars}
+                    onLocate={onLocateNode}
+                  />
                 ))}
               </div>
             </div>
