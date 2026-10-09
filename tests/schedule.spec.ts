@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   coerceIntervalMinutes,
+  coerceOnceAt,
   describeSchedule,
   isWeekend,
   nextRunAt,
@@ -174,5 +175,103 @@ describe('describeSchedule', () => {
     expect(describeSchedule({ kind: 'weekly', days: [1, 3, 5], hour: 9, minute: 0 }, 'zh-CN')).toBe(
       '每周一、周三、周五 09:00',
     )
+  })
+})
+
+describe('coerceOnceAt', () => {
+  it('accepts a number and a numeric string', () => {
+    expect(coerceOnceAt(1_700_000_000_000)).toBe(1_700_000_000_000)
+    expect(coerceOnceAt('1700000000000')).toBe(1_700_000_000_000)
+  })
+
+  it('reads a bare local stamp as local time, not UTC', () => {
+    const at = coerceOnceAt('2026-11-02T20:30')
+    expect(at).toBeDefined()
+    const when = new Date(at as number)
+    expect(when.getFullYear()).toBe(2026)
+    expect(when.getMonth()).toBe(10)
+    expect(when.getDate()).toBe(2)
+    expect(when.getHours()).toBe(20)
+    expect(when.getMinutes()).toBe(30)
+  })
+
+  it('honors an explicit UTC marker as written', () => {
+    const local = coerceOnceAt('2026-11-02T20:30')
+    const utc = coerceOnceAt('2026-11-02T20:30:00Z')
+    expect(local).toBeDefined()
+    expect(utc).toBeDefined()
+    // The two differ by exactly this machine's offset at that instant, which is
+    // why the tool tells the model never to send a trailing "Z".
+    const offsetMs = -new Date('2026-11-02T20:30:00Z').getTimezoneOffset() * 60_000
+    expect(utc! - local!).toBe(offsetMs)
+  })
+
+  it('rejects garbage rather than guessing an instant', () => {
+    expect(coerceOnceAt(undefined)).toBeUndefined()
+    expect(coerceOnceAt('')).toBeUndefined()
+    expect(coerceOnceAt('tonight')).toBeUndefined()
+    expect(coerceOnceAt(Number.NaN)).toBeUndefined()
+    expect(coerceOnceAt({})).toBeUndefined()
+  })
+})
+
+describe('nextRunAt · once', () => {
+  it('fires at the exact instant when it is still ahead', () => {
+    const from = Date.now()
+    const at = from + 3_600_000
+    expect(nextRunAt({ kind: 'once', at }, from)).toBe(at)
+  })
+
+  it('returns null once the instant has passed', () => {
+    const from = Date.now()
+    expect(nextRunAt({ kind: 'once', at: from - 1 }, from)).toBeNull()
+    // Exactly now counts as gone: the next fire must not repeat a one-shot.
+    expect(nextRunAt({ kind: 'once', at: from }, from)).toBeNull()
+  })
+})
+
+describe('normalizeSchedule · once', () => {
+  it('keeps a one-shot instant instead of folding it into the daily fallback', () => {
+    const normalized = normalizeSchedule({ kind: 'once', at: '2026-11-02T20:30' })
+    expect(normalized.kind).toBe('once')
+    // The highest-risk regression in this feature: a garbage or dropped instant
+    // becoming "Daily 09:00" would re-publish the draft every single day.
+    expect(normalized).not.toEqual({ kind: 'daily', hour: 9, minute: 0 })
+    const at = (normalized as { kind: 'once'; at: number }).at
+    expect(new Date(at).getHours()).toBe(20)
+  })
+
+  it('accepts a numeric string instant', () => {
+    expect(normalizeSchedule({ kind: 'once', at: '1700000000000' })).toEqual({
+      kind: 'once',
+      at: 1_700_000_000_000,
+    })
+  })
+
+  it('degrades an unparseable instant to manual, never to a recurring schedule', () => {
+    for (const raw of [
+      { kind: 'once' },
+      { kind: 'once', at: 'soon' },
+      { kind: 'once', at: null },
+    ]) {
+      expect(normalizeSchedule(raw)).toEqual({ kind: 'none' })
+    }
+  })
+})
+
+describe('describeSchedule · once', () => {
+  const at = new Date(2026, 10, 2, 20, 30).getTime()
+
+  it('shows the local date and time in both languages', () => {
+    expect(describeSchedule({ kind: 'once', at }, 'en')).toContain('One-time')
+    expect(describeSchedule({ kind: 'once', at }, 'en')).toContain('11/02/2026 20:30')
+    expect(describeSchedule({ kind: 'once', at }, 'zh-CN')).toContain('单次')
+    expect(describeSchedule({ kind: 'once', at }, 'zh-CN')).toContain('2026/11/02 20:30')
+  })
+
+  it('flags a passed instant only when the caller supplies "now"', () => {
+    expect(describeSchedule({ kind: 'once', at }, 'en', at + 1)).toContain('(passed)')
+    expect(describeSchedule({ kind: 'once', at }, 'zh-CN', at + 1)).toContain('已过期')
+    expect(describeSchedule({ kind: 'once', at }, 'en', at - 1)).not.toContain('passed')
   })
 })

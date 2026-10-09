@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ScheduledTask } from '../src/lib/scheduler-types'
-import { rescheduleAll, scheduleTask, taskIdFromAlarmName } from '../src/background/scheduler'
+import {
+  onAlarm,
+  rescheduleAll,
+  scheduleTask,
+  taskIdFromAlarmName,
+} from '../src/background/scheduler'
+import { runTask } from '../src/background/task-runner'
 
 /**
  * Shared mutable task store, seeded via `setTasks`. Exposed through
@@ -28,6 +34,12 @@ vi.mock('../src/lib/task-store', async (importOriginal) => {
     ...actual,
     getTask: vi.fn(async (id: string) => store.tasks.find((t) => t.id === id)),
     listTasks: vi.fn(async () => [...store.tasks]),
+    // The one-shot lifecycle writes through this locked op, not `saveTask`:
+    // flipping the shared record is exactly what the test must observe.
+    disableTask: vi.fn(async (id: string) => {
+      const task = store.tasks.find((t) => t.id === id)
+      if (task) task.enabled = false
+    }),
   }
 })
 
@@ -112,5 +124,83 @@ describe('workflow scheduler alarm prefixes', () => {
     expect(alarmsByName.has('workflow:gone')).toBe(false)
     expect(alarmsByName.has('task:gone')).toBe(false)
     expect(createdCalls).toContain('workflow:wf-task')
+  })
+
+  describe('one-shot tasks', () => {
+    // The module mock is created once per file, so call counts accumulate
+    // across tests unless cleared here.
+    beforeEach(() => {
+      vi.mocked(runTask).mockClear()
+    })
+
+    it('arms the alarm at the requested instant', async () => {
+      const at = Date.now() + 30 * 60_000
+      store.setTasks([makeTask({ id: 'once', schedule: { kind: 'once', at } })])
+
+      await scheduleTask('once')
+
+      expect(createdCalls).toEqual(['task:once'])
+      expect(alarmsByName.get('task:once')?.when).toBe(at)
+    })
+
+    it('clamps an imminent instant up to the alarm floor instead of dropping it', async () => {
+      const before = Date.now()
+      store.setTasks([makeTask({ id: 'near', schedule: { kind: 'once', at: before + 10_000 } })])
+
+      await scheduleTask('near')
+
+      expect(alarmsByName.get('task:near')?.when).toBeGreaterThanOrEqual(before + 60_000)
+    })
+
+    it('clears rather than re-arms a one-shot whose instant is gone', async () => {
+      store.setTasks([makeTask({ id: 'gone', schedule: { kind: 'once', at: Date.now() - 1_000 } })])
+      alarmsByName.set('task:gone', { name: 'task:gone' })
+
+      await scheduleTask('gone')
+
+      expect(clearedCalls).toContain('task:gone')
+      expect(createdCalls).toEqual([])
+    })
+
+    it('fires once, switches itself off, and stays off through a reconcile', async () => {
+      store.setTasks([
+        makeTask({ id: 'shot', schedule: { kind: 'once', at: Date.now() + 30 * 60_000 } }),
+      ])
+      await scheduleTask('shot')
+      createdCalls.length = 0
+      clearedCalls.length = 0
+
+      onAlarm({ name: 'task:shot' } as Parameters<typeof onAlarm>[0])
+      await vi.waitFor(() => expect(runTask).toHaveBeenCalledTimes(1))
+
+      expect(store.tasks.find((task) => task.id === 'shot')?.enabled).toBe(false)
+      // Disarmed BEFORE the run, so neither a throwing run nor a worker evicted
+      // mid-run can leave a second firing behind.
+      expect(clearedCalls).toEqual(['task:shot'])
+      expect(createdCalls).toEqual([])
+
+      await rescheduleAll()
+      expect(createdCalls).not.toContain('task:shot')
+      expect(alarmsByName.has('task:shot')).toBe(false)
+    })
+
+    it('keeps re-arming a recurring task before it runs', async () => {
+      store.setTasks([makeTask({ id: 'daily', schedule: { kind: 'daily', hour: 9, minute: 0 } })])
+      let rearmedBeforeRun = false
+      vi.mocked(runTask).mockImplementation(async () => {
+        rearmedBeforeRun = createdCalls.includes('task:daily')
+        return { ok: true, skipped: false, summary: '' }
+      })
+
+      onAlarm({ name: 'task:daily' } as Parameters<typeof onAlarm>[0])
+      await vi.waitFor(() => expect(runTask).toHaveBeenCalled())
+
+      expect(rearmedBeforeRun).toBe(true)
+      vi.mocked(runTask).mockImplementation(async () => ({
+        ok: true,
+        skipped: false,
+        summary: '',
+      }))
+    })
   })
 })

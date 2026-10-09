@@ -34,7 +34,14 @@ beforeAll(() => {
   })
 })
 
-import { addRun, listRuns, listTasks, recordFinishedRun, saveTask } from '../src/lib/task-store'
+import {
+  addRun,
+  disableTask,
+  listRuns,
+  listTasks,
+  recordFinishedRun,
+  saveTask,
+} from '../src/lib/task-store'
 import type { ScheduledTask } from '../src/lib/scheduler-types'
 
 function task(id: string): ScheduledTask {
@@ -99,5 +106,74 @@ describe('run log persistence', () => {
     const ids = (await listTasks()).map((entry) => entry.id)
     expect(ids).toContain('task-a')
     expect(ids).toContain('task-b')
+  })
+})
+
+/**
+ * `asTask` rebuilds every stored record from a whitelist of fields, so a chain
+ * field added to the type but not to the rebuilder is invisible until the worker
+ * restarts — the feature appears to work and then evaporates.
+ */
+describe('chained task fields survive the store round trip', () => {
+  it('persists the one-shot schedule and every chain field', async () => {
+    const at = Date.now() + 3_600_000
+    await saveTask({
+      ...task('chain-child'),
+      schedule: { kind: 'once', at },
+      kind: 'workflow',
+      workflowId: 'wf-publish',
+      followsTaskId: 'chain-parent',
+      chainId: 'chain-parent',
+      variables: { note: '{{upstream.noteUrl}}', count: 2, tags: ['a', 'b'] },
+      outputs: ['noteUrl'],
+    })
+
+    const [loaded] = (await listTasks()).filter((entry) => entry.id === 'chain-child')
+    expect(loaded?.schedule).toEqual({ kind: 'once', at })
+    expect(loaded?.followsTaskId).toBe('chain-parent')
+    expect(loaded?.chainId).toBe('chain-parent')
+    expect(loaded?.variables).toEqual({ note: '{{upstream.noteUrl}}', count: 2, tags: ['a', 'b'] })
+    expect(loaded?.outputs).toEqual(['noteUrl'])
+  })
+
+  it('repairs a broken one-shot instant into manual rather than into a daily publish', async () => {
+    await saveTask({ ...task('broken-once'), schedule: { kind: 'once', at: 'soon' } as never })
+    const [loaded] = (await listTasks()).filter((entry) => entry.id === 'broken-once')
+    expect(loaded?.schedule).toEqual({ kind: 'none' })
+  })
+
+  it('drops names the reference layer owns and values that are not handoff-sized', async () => {
+    await saveTask({
+      ...task('dirty-bag'),
+      variables: {
+        upstream: 'shadow',
+        refData: 'shadow',
+        nested: { a: 1 },
+        keep: 'ok',
+      } as never,
+      outputs: ['noteUrl', '1bad', 'ok_name'],
+    })
+    const [loaded] = (await listTasks()).filter((entry) => entry.id === 'dirty-bag')
+    expect(loaded?.variables).toEqual({ keep: 'ok' })
+    expect(loaded?.outputs).toEqual(['noteUrl', 'ok_name'])
+  })
+
+  it('still reads a record written before the chain fields existed', async () => {
+    await saveTask(task('legacy-task'))
+    const [loaded] = (await listTasks()).filter((entry) => entry.id === 'legacy-task')
+    expect(loaded?.followsTaskId).toBeUndefined()
+    expect(loaded?.outputs).toBeUndefined()
+    expect(loaded?.variables).toBeUndefined()
+  })
+
+  it('disables a fired one-shot without dropping a task saved at the same moment', async () => {
+    // The one-shot lifecycle writes through this locked op, not a bare saveTask:
+    // racing an unlocked read-modify-write is how the run log used to lose rows.
+    await saveTask(task('parent'))
+    await Promise.all([disableTask('parent'), saveTask(task('sibling'))])
+
+    const tasks = await listTasks()
+    expect(tasks.map((entry) => entry.id)).toContain('sibling')
+    expect(tasks.find((entry) => entry.id === 'parent')?.enabled).toBe(false)
   })
 })

@@ -18,6 +18,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { listRuns, recordFinishedRun } from '../src/lib/task-store'
+import { MAX_OUTPUT_STRING, MAX_RUN_OUTPUTS_BYTES } from '../src/lib/task-chain'
 import type { TaskRunStep } from '../src/lib/scheduler-types'
 
 /** The storage key `lib/task-store` keeps its run log under. */
@@ -213,5 +214,84 @@ describe('run log size bound', () => {
     expect(stored[0]!.id).toBe('run-7')
     expect(stored.length).toBeLessThan(8)
     expect(stored.length).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * The handoff: what a run publishes for the task that follows it. Every value
+ * here is read back by a later run, possibly after the worker that wrote it is
+ * gone, so the store boundary is where the caps have to bite.
+ */
+describe('run log handoff outputs', () => {
+  it('round-trips the declared outputs to the next reader', async () => {
+    await recordFinishedRun({
+      runId: 'run-handoff',
+      taskId: 'parent',
+      source: 'schedule',
+      outcome: 'ok',
+      summary: 'Published.',
+      outputs: { noteUrl: 'https://xhs/1', title: 'Note' },
+    })
+
+    const [run] = await listRuns('parent')
+    expect(run?.outputs).toEqual({ noteUrl: 'https://xhs/1', title: 'Note' })
+  })
+
+  it('never persists a credential that rode in the variable bag', async () => {
+    await recordFinishedRun({
+      runId: 'run-secret',
+      taskId: 'parent',
+      source: 'schedule',
+      outcome: 'ok',
+      outputs: { cookie: 'session-value', noteUrl: 'https://xhs/1' },
+    })
+
+    expect(JSON.stringify(data.get(KEY_RUNS))).not.toContain('session-value')
+    const [run] = await listRuns('parent')
+    expect(run?.outputs).toEqual({ noteUrl: 'https://xhs/1' })
+  })
+
+  it('caps each value and the whole bag instead of trusting the producer', async () => {
+    await recordFinishedRun({
+      runId: 'run-fat',
+      taskId: 'parent',
+      source: 'schedule',
+      outcome: 'ok',
+      outputs: {
+        body: 'x'.repeat(40_000),
+        wide: 'y'.repeat(MAX_OUTPUT_STRING),
+        wide2: 'z'.repeat(MAX_OUTPUT_STRING),
+      },
+    })
+
+    const stored = data.get(KEY_RUNS) as { id: string; outputs?: Record<string, string> }[]
+    const record = stored.find((run) => run.id === 'run-fat')!
+    expect(record.outputs?.['body']).toContain('not persisted')
+    expect(JSON.stringify(record.outputs).length).toBeLessThanOrEqual(MAX_RUN_OUTPUTS_BYTES + 256)
+    // The reader re-caps what it reads (an older record may predate the cap), so
+    // a bulk value arrives short and self-describing rather than identical.
+    const [run] = await listRuns('parent')
+    expect(run?.outputs?.['body']).toContain('not persisted')
+    expect((run?.outputs?.['body'] as string).length).toBeLessThan(MAX_OUTPUT_STRING + 120)
+    expect(run?.outputs?.['wide']).toBe('y'.repeat(MAX_OUTPUT_STRING))
+  })
+
+  it('leaves an older record without outputs readable', async () => {
+    data.set(KEY_RUNS, [
+      {
+        id: 'legacy-outputs',
+        taskId: 'parent',
+        trigger: 'manual',
+        source: 'manual',
+        at: 1,
+        ok: true,
+        skipped: false,
+        outcome: 'ok',
+        summary: '',
+      },
+    ])
+    const [run] = await listRuns('parent')
+    expect(run?.id).toBe('legacy-outputs')
+    expect(run?.outputs).toBeUndefined()
   })
 })
