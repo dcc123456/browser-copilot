@@ -65,8 +65,14 @@ const MAX_ADVERTISED_PAYLOAD_CHARS = 20_000
  * discovery.
  * The delegate schema stays OUT of the advertised budget above because the
  * group is only loaded via `load_tools({groups:['delegate']})`.
+ * Scheduled-task chaining then grew both ops tools (~1.5k chars together):
+ * `create_scheduled_task` gained `schedule.at` plus `variables` / `outputs` /
+ * `followsTaskId` / `chainId`, and `list_scheduled_tasks` had to describe the
+ * chain fields it now returns. Measured 31_284 → 31_400. Both ride in the `ops`
+ * group, which is never advertised at round 1, so — as with the bridge-only
+ * entries above — only this catalog cap pays for them.
  */
-const MAX_CATALOG_CHARS = 29_800
+const MAX_CATALOG_CHARS = 31_400
 /**
  * Round 1 of a workflow conversation: the core tool set, EVERY operator
  * category (the round-1 default — see the file header), `use_operators`, the

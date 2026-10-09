@@ -145,9 +145,18 @@ import {
 import { activeTab, readActivePage } from './page'
 import { captureVisiblePage } from './capture'
 import { captureElementRobust } from './element-capture'
-import { listTasks, createDraft, getTask, saveTask, coerceMaxToolRounds } from '../lib/task-store'
-import { describeSchedule, nextRunAt, normalizeSchedule } from '../lib/schedule'
-import type { Schedule, ScheduledTask } from '../lib/scheduler-types'
+import {
+  listTasks,
+  createDraft,
+  getTask,
+  saveTask,
+  coerceMaxToolRounds,
+  listRuns,
+} from '../lib/task-store'
+import { coerceOnceAt, describeSchedule, nextRunAt, normalizeSchedule } from '../lib/schedule'
+import type { Schedule, ScheduledTask, TaskKind } from '../lib/scheduler-types'
+import { OUTPUT_NAME, RESERVED_VARIABLE_NAMES } from '../lib/task-chain'
+import { MAX_BULK_LITERAL_CHARS } from '../lib/workflow/dynamic-data'
 import { getWorkflow, listWorkflows } from '../lib/workflow/storage'
 import { scheduleTask } from './scheduler'
 import { BUILT_IN_SKILLS } from '../lib/builtin-skills'
@@ -1012,7 +1021,9 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'list_scheduled_tasks',
       description:
-        'List enabled scheduled tasks (id, name, schedule, kind, prompt, latest status). Read-only.',
+        'List every scheduled task, disabled ones included (a one-shot switches itself off after firing and ' +
+        'children still chain to it): id, name, schedule, kind, enabled, prompt, latest status, ' +
+        'followsTaskId/chainId/outputs, and lastOutputKeys = what its latest successful run actually handed on. Read-only.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -1024,6 +1035,7 @@ export const TOOLS: WireTool[] = [
         'Create (or, with an existing id, update) a scheduled task that runs unattended on a clock. ' +
         'kind "agent-prompt" runs `prompt` through the agent in full auto; kind "workflow" runs a saved workflow by id. ' +
         'Use when the user asks to do something regularly / every day / on weekdays / on a schedule ("每天早上…", "每周一…", "每隔30分钟…"). ' +
+        'Also: schedule {kind:"once",at} fires at one instant then switches itself off (a deadline, a posting hour); followsTaskId + {{upstream.<key>}} chains a child onto the parent run\'s declared `outputs`, resolved at the CHILD\'s run time, so it can be created before that value exists. ' +
         'Requires approval / 需要用户确认。',
       parameters: {
         type: 'object',
@@ -1039,12 +1051,17 @@ export const TOOLS: WireTool[] = [
             properties: {
               kind: {
                 type: 'string',
-                enum: ['daily', 'weekdays', 'weekly', 'interval', 'none'],
+                enum: ['daily', 'weekdays', 'weekly', 'once', 'interval', 'none'],
                 description:
-                  '"daily" = every day at hour:minute; "weekdays" = Mon-Fri at hour:minute; "weekly" = the listed days at hour:minute; "interval" = every N minutes; "none" = manual only (no alarm).',
+                  '"daily" = every day at hour:minute; "weekdays" = Mon-Fri at hour:minute; "weekly" = the listed days at hour:minute; "once" = one time at an absolute instant, then switched off; "interval" = every N minutes; "none" = manual only (no alarm).',
               },
               hour: { type: 'number', description: '0-23, for daily/weekdays/weekly.' },
               minute: { type: 'number', description: '0-59, for daily/weekdays/weekly.' },
+              at: {
+                type: ['number', 'string'],
+                description:
+                  'kind "once" only: instant to fire. Prefer a local stamp "2026-11-02T20:30" — NEVER a trailing "Z", which would shift the time out of the user\'s timezone. Epoch ms also accepted.',
+              },
               days: {
                 type: 'array',
                 items: { type: 'number' },
@@ -1067,6 +1084,27 @@ export const TOOLS: WireTool[] = [
           workflowId: {
             type: 'string',
             description: 'Required for kind "workflow": the saved workflow id to execute.',
+          },
+          variables: {
+            type: 'object',
+            description:
+              'Short values seeded into the run (reachable as {{name}}); a value may be "{{upstream.<key>}}", resolved when THIS task runs. Pointers and ids, never bulk text.',
+          },
+          outputs: {
+            type: 'array',
+            items: { type: 'string' },
+            description:
+              'workflow kind: variable names this run hands to the task that follows it, e.g. ["noteUrl"]. Undeclared means nothing is handed on.',
+          },
+          followsTaskId: {
+            type: 'string',
+            description:
+              'Chain parent: its last successful run supplies {{upstream.*}} here. Must be a workflow-kind task.',
+          },
+          chainId: {
+            type: 'string',
+            description:
+              'Optional label grouping tasks into one pipeline (display only; inherited from the parent when omitted).',
           },
           id: {
             type: 'string',
@@ -2937,6 +2975,19 @@ function parseScheduleArg(raw: unknown): { schedule?: Schedule; error?: string }
   }
   const kind = value['kind']
   if (kind === 'none') return { schedule: { kind: 'none' } }
+  if (kind === 'once') {
+    const at = coerceOnceAt(value['at'])
+    // Rejected rather than coerced: `normalizeSchedule` would fold a garbage
+    // instant into "manual", and guessing a time here would post content at a
+    // minute nobody asked for.
+    if (at === undefined) {
+      return {
+        error:
+          'schedule.kind "once" needs "at": a local stamp like "2026-11-02T20:30" (never a trailing "Z") or epoch milliseconds.',
+      }
+    }
+    return { schedule: { kind: 'once', at } }
+  }
   if (kind === 'interval') {
     const minutes = num(value['minutes'])
     if (minutes === null || minutes <= 0) {
@@ -2975,9 +3026,82 @@ function parseScheduleArg(raw: unknown): { schedule?: Schedule; error?: string }
   }
   return {
     error:
-      'schedule.kind must be one of: "daily", "weekdays", "weekly", "interval", "none". ' +
-      'Examples: {"kind":"weekdays","hour":9} · {"kind":"weekly","days":[1],"hour":10,"minute":30} · {"kind":"interval","minutes":30}.',
+      'schedule.kind must be one of: "daily", "weekdays", "weekly", "once", "interval", "none". ' +
+      'Examples: {"kind":"weekdays","hour":9} · {"kind":"weekly","days":[1],"hour":10,"minute":30} · {"kind":"once","at":"2026-11-02T20:30"} · {"kind":"interval","minutes":30}.',
   }
+}
+
+/**
+ * Validates the `variables` argument: a flat bag of short scalars.
+ *
+ * Storage already clamps what it is handed, but a model call is a system
+ * boundary — the mistake must be reported, not quietly trimmed. The size line is
+ * the one the graph-freezer already draws (`MAX_BULK_LITERAL_CHARS`: long text is
+ * bulk content, and an article body must not ride a handoff), and the reserved
+ * names would shadow the roots the resolver itself publishes.
+ */
+function parseVariablesArg(raw: unknown): {
+  variables?: Record<string, unknown>
+  error?: string
+} {
+  if (raw === undefined) return {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return {
+      error:
+        '"variables" must be an object mapping names to short values (string / number / boolean, or an array of those).',
+    }
+  }
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (RESERVED_VARIABLE_NAMES.includes(key)) {
+      return {
+        error: `"variables" may not define "${key}": that name belongs to the reference layer.`,
+      }
+    }
+    if (!OUTPUT_NAME.test(key)) {
+      return {
+        error: `"variables" key "${key}" must be a plain identifier, so a {{${key}}} token can name it.`,
+      }
+    }
+    for (const leaf of Array.isArray(value) ? value : [value]) {
+      if (leaf !== null && typeof leaf === 'object') {
+        return {
+          error: `"variables.${key}" holds an object; keep the bag flat — scalars, or an array of scalars.`,
+        }
+      }
+      if (typeof leaf === 'string' && leaf.length > MAX_BULK_LITERAL_CHARS) {
+        return {
+          error: `"variables.${key}" is ${leaf.length} chars, which is bulk content rather than a handoff value. Point at it instead (a draft id, a URL): text this long never travels between tasks.`,
+        }
+      }
+    }
+    out[key] = value
+  }
+  return { variables: out }
+}
+
+/** Validates `outputs`: the variable names a workflow run promises to hand on. */
+function parseOutputsArg(raw: unknown, kind: TaskKind): { outputs?: string[]; error?: string } {
+  if (raw === undefined) return {}
+  if (!Array.isArray(raw)) {
+    return { error: '"outputs" must be an array of variable names, e.g. ["noteUrl"].' }
+  }
+  if (kind !== 'workflow') {
+    return {
+      error:
+        '"outputs" records named values for a following task, and only a workflow-kind run produces them — an agent-prompt run has nothing but its summary text. Use kind "workflow".',
+    }
+  }
+  const names: string[] = []
+  for (const name of raw) {
+    if (typeof name !== 'string' || !OUTPUT_NAME.test(name)) {
+      return {
+        error: `"outputs" entries must be plain identifiers (got ${JSON.stringify(name)}), so a {{upstream.<name>}} token can name them.`,
+      }
+    }
+    names.push(name)
+  }
+  return { outputs: [...new Set(names)] }
 }
 
 /**
@@ -3036,15 +3160,13 @@ export async function createScheduledTaskFromArgs(args: Record<string, unknown>)
   const notifyFeishu = args.notifyFeishu === true
   const maxToolRounds = typeof args.maxToolRounds === 'number' ? args.maxToolRounds : undefined
 
-  const base: Partial<ScheduledTask> = {
-    name,
-    schedule,
-    kind,
-    prompt: kind === 'agent-prompt' ? prompt : undefined,
-    workflowId: kind === 'workflow' ? workflowId : undefined,
-    enabled,
-    notifyFeishu,
-    ...(maxToolRounds !== undefined ? { maxToolRounds: coerceMaxToolRounds(maxToolRounds) } : {}),
+  const parsedVariables = parseVariablesArg(args.variables)
+  if (parsedVariables.error) {
+    return JSON.stringify({ ok: false, error: parsedVariables.error })
+  }
+  const parsedOutputs = parseOutputsArg(args.outputs, kind)
+  if (parsedOutputs.error) {
+    return JSON.stringify({ ok: false, error: parsedOutputs.error })
   }
 
   // Update path: an explicit id must exist. Create path: refuse a silent
@@ -3067,6 +3189,76 @@ export async function createScheduledTaskFromArgs(args: Record<string, unknown>)
     }
   }
 
+  // Chain parent: the task whose run outputs this one reads as {{upstream.*}}.
+  // Validated at creation because a typo here produces a child that cannot fail
+  // informatively — it just never receives its input.
+  const followsTaskId = typeof args.followsTaskId === 'string' ? args.followsTaskId.trim() : ''
+  const requestedChainId = typeof args.chainId === 'string' ? args.chainId.trim() : ''
+  let inheritedChainId = ''
+  let followsName = ''
+  if (followsTaskId) {
+    const parent = await getTask(followsTaskId)
+    if (!parent) {
+      const others = (await listTasks())
+        .filter((task) => task.kind === 'workflow')
+        .slice(0, 5)
+        .map((task) => ({ id: task.id, name: task.name }))
+      return JSON.stringify({
+        ok: false,
+        error: `No scheduled task with id "${followsTaskId}" to follow.`,
+        ...(others.length > 0 ? { workflowTasks: others } : {}),
+        ...(others.length === 0
+          ? {
+              hint: 'A chain parent must already exist: create the publish task first, then pass its id here.',
+            }
+          : {}),
+      })
+    }
+    if (parent.kind !== 'workflow') {
+      return JSON.stringify({
+        ok: false,
+        error: `"${parent.name}" is kind "${parent.kind}", so it produces no named outputs to hand on. A chain parent must be a workflow-kind task.`,
+      })
+    }
+    // Cycle guards only where an id already exists to collide with; a brand new
+    // task cannot be referenced by anything yet.
+    if (existing && existing.id === followsTaskId) {
+      return JSON.stringify({
+        ok: false,
+        error: 'A task cannot follow itself. Create the downstream task instead.',
+      })
+    }
+    if (existing && parent.followsTaskId === existing.id) {
+      return JSON.stringify({
+        ok: false,
+        error: `"${parent.name}" already follows "${existing.name}", so linking the other way would close a loop.`,
+      })
+    }
+    followsName = parent.name
+    // Grouping inherits the parent's chain, so the head of a chain names it and
+    // the model does not have to invent the same id twice in a row.
+    inheritedChainId = parent.chainId ?? parent.id
+  }
+
+  const base: Partial<ScheduledTask> = {
+    name,
+    schedule,
+    kind,
+    prompt: kind === 'agent-prompt' ? prompt : undefined,
+    workflowId: kind === 'workflow' ? workflowId : undefined,
+    enabled,
+    notifyFeishu,
+    ...(maxToolRounds !== undefined ? { maxToolRounds: coerceMaxToolRounds(maxToolRounds) } : {}),
+    // Omitted chain arguments read as "unchanged", not "cleared": an update that
+    // only moves the time must not silently drop the handoff the child depends on.
+    ...(parsedVariables.variables ? { variables: parsedVariables.variables } : {}),
+    ...(parsedOutputs.outputs ? { outputs: parsedOutputs.outputs } : {}),
+    ...(followsTaskId
+      ? { followsTaskId, chainId: requestedChainId || inheritedChainId || undefined }
+      : {}),
+    ...(requestedChainId && !followsTaskId ? { chainId: requestedChainId } : {}),
+  }
+
   // createDraft is an allowlist constructor (it never copies `workflowId` and
   // defaults `prompt` to ''), so the validated base is spread over it: the
   // draft contributes id/createdAt/updatedAt and the maxToolRounds default,
@@ -3087,10 +3279,19 @@ export async function createScheduledTaskFromArgs(args: Record<string, unknown>)
     id: task.id,
     name: task.name,
     kind: task.kind,
-    schedule: describeSchedule(schedule, 'en'),
+    schedule: describeSchedule(schedule, 'en', Date.now()),
     ...(next !== null ? { nextRunAt: new Date(next).toISOString() } : { nextRunAt: null }),
+    ...(followsTaskId ? { follows: followsName, chainId: task.chainId } : {}),
+    ...(task.outputs && task.outputs.length > 0 ? { outputs: task.outputs } : {}),
     updated: !!match,
-    note: 'Saved and armed. The user can manage it in the Tasks tab; each run executes unattended in full auto.',
+    note:
+      'Saved and armed. The user can manage it in the Tasks tab; each run executes unattended in full auto.' +
+      (schedule.kind === 'once'
+        ? ' A one-shot task disables itself after this run; to run it again, move its time forward.'
+        : '') +
+      (task.outputs && task.outputs.length > 0
+        ? ` A later task can read these as {{upstream.<name>}} by passing followsTaskId "${task.id}".`
+        : ''),
   })
 }
 
@@ -3933,21 +4134,37 @@ export async function executeTool(
 
     case 'list_scheduled_tasks': {
       const all = await listTasks()
-      const tasks = all
-        .filter((task) => task.enabled)
-        .map((task) => ({
-          id: task.id,
-          name: task.name,
-          kind: task.kind,
-          schedule: describeSchedule(task.schedule, 'en'),
-          ...(task.kind === 'agent-prompt' && task.prompt
-            ? { prompt: task.prompt.slice(0, 500) }
-            : {}),
-          ...(task.lastRunAt ? { lastRunAt: task.lastRunAt } : {}),
-          ...(task.lastStatus ? { lastStatus: task.lastStatus } : {}),
-          ...(task.lastSummary ? { lastSummary: task.lastSummary } : {}),
-          ...(task.notifyFeishu ? { notifyFeishu: true } : {}),
-        }))
+      // Disabled tasks are listed too. A one-shot parent disarms itself the
+      // moment it fires, and the children chained to it still have to find it by
+      // id — hiding it would make the chain unreferenceable exactly when the
+      // value it produced becomes available.
+      const runs = await listRuns()
+      const outputKeysByTask = new Map<string, string[]>()
+      for (const run of runs) {
+        // Newest run first, so the first ok entry is the one a child will read.
+        if (!run.taskId || run.outcome !== 'ok' || !run.outputs) continue
+        if (outputKeysByTask.has(run.taskId)) continue
+        outputKeysByTask.set(run.taskId, Object.keys(run.outputs))
+      }
+      const tasks = all.map((task) => ({
+        id: task.id,
+        name: task.name,
+        kind: task.kind,
+        enabled: task.enabled,
+        schedule: describeSchedule(task.schedule, 'en', Date.now()),
+        ...(task.kind === 'agent-prompt' && task.prompt
+          ? { prompt: task.prompt.slice(0, 500) }
+          : {}),
+        ...(task.lastRunAt ? { lastRunAt: task.lastRunAt } : {}),
+        ...(task.lastStatus ? { lastStatus: task.lastStatus } : {}),
+        ...(task.lastSummary ? { lastSummary: task.lastSummary } : {}),
+        ...(task.notifyFeishu ? { notifyFeishu: true } : {}),
+        ...(task.followsTaskId ? { followsTaskId: task.followsTaskId } : {}),
+        ...(task.chainId ? { chainId: task.chainId } : {}),
+        ...(task.outputs && task.outputs.length > 0 ? { outputs: task.outputs } : {}),
+        ...(task.variables ? { variables: task.variables } : {}),
+        ...(outputKeysByTask.has(task.id) ? { lastOutputKeys: outputKeysByTask.get(task.id) } : {}),
+      }))
       return JSON.stringify({ count: tasks.length, tasks })
     }
 

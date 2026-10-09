@@ -20,10 +20,21 @@ import type { ScheduledTask } from '../src/lib/scheduler-types'
 // --- Shared in-memory task store, wired into both agent and scheduler --------
 const store = vi.hoisted(() => {
   const tasks: unknown[] = []
+  const runs: unknown[] = []
   return {
     tasks: tasks as ScheduledTask[],
+    runs: runs as {
+      id: string
+      taskId: string
+      at: number
+      outcome: string
+      outputs?: Record<string, unknown>
+    }[],
     setTasks: (next: ScheduledTask[]): void => {
       tasks.splice(0, tasks.length, ...next)
+    },
+    setRuns: (next: typeof runs): void => {
+      runs.splice(0, runs.length, ...next)
     },
   }
 })
@@ -34,6 +45,9 @@ vi.mock('../src/lib/task-store', async (importOriginal) => {
     ...actual,
     listTasks: vi.fn(async () => [...store.tasks]),
     getTask: vi.fn(async (id: string) => store.tasks.find((task) => task.id === id)),
+    // The list tool now reports what each task's latest successful run actually
+    // handed on, so the run log is part of this surface too.
+    listRuns: vi.fn(async () => [...store.runs]),
     saveTask: vi.fn(async (task: ScheduledTask) => {
       const index = store.tasks.findIndex((entry) => entry.id === task.id)
       if (index >= 0) store.tasks[index] = task
@@ -89,6 +103,7 @@ const baseCtx = {
 
 beforeEach(() => {
   store.setTasks([])
+  store.setRuns([])
   alarmsByName.clear()
   vi.stubGlobal('chrome', {
     alarms: {
@@ -310,6 +325,60 @@ describe('create_scheduled_task execution', () => {
       { id: 'ghost', name: 'X', schedule: { kind: 'daily', hour: 9 }, prompt: 'x' },
       'No scheduled task with id',
     ],
+    [
+      'once without a parseable instant',
+      { name: 'X', prompt: 'x', schedule: { kind: 'once', at: 'tonight' } },
+      'needs "at"',
+    ],
+    [
+      'outputs on a task that cannot produce them',
+      { name: 'X', prompt: 'x', schedule: { kind: 'daily', hour: 9 }, outputs: ['noteUrl'] },
+      'only a workflow-kind run produces',
+    ],
+    [
+      'an output name no token can express',
+      {
+        name: 'X',
+        schedule: { kind: 'daily', hour: 9 },
+        kind: 'workflow',
+        workflowId: 'wf-1',
+        outputs: ['note-url'],
+      },
+      'plain identifiers',
+    ],
+    [
+      'a bulk article body passed as a handoff value',
+      {
+        name: 'X',
+        schedule: { kind: 'daily', hour: 9 },
+        kind: 'workflow',
+        workflowId: 'wf-1',
+        variables: { body: 'x'.repeat(5000) },
+      },
+      'bulk content',
+    ],
+    [
+      'a variable that would shadow the reference layer',
+      {
+        name: 'X',
+        schedule: { kind: 'daily', hour: 9 },
+        kind: 'workflow',
+        workflowId: 'wf-1',
+        variables: { upstream: 'x' },
+      },
+      'belongs to the reference layer',
+    ],
+    [
+      'a chain parent that does not exist',
+      {
+        name: 'X',
+        schedule: { kind: 'daily', hour: 9 },
+        kind: 'workflow',
+        workflowId: 'wf-1',
+        followsTaskId: 'ghost-parent',
+      },
+      'No scheduled task with id "ghost-parent"',
+    ],
   ])('rejects %s without persisting anything', async (_label, args, errorPart) => {
     const output = await executeTool(
       'create_scheduled_task',
@@ -355,6 +424,165 @@ describe('create_scheduled_task execution', () => {
     const output = await executeTool('list_scheduled_tasks', {}, baseCtx)
     const parsed = JSON.parse(output) as { tasks: { id?: string }[] }
     expect(parsed.tasks[0]?.id).toBe('existing-1')
+  })
+
+  describe('one-shot and chained tasks', () => {
+    it('creates a one-shot task and arms it at the requested instant', async () => {
+      const at = new Date(2026, 10, 2, 20, 30).getTime()
+      const output = await executeTool(
+        'create_scheduled_task',
+        {
+          name: 'Publish at golden hour',
+          kind: 'workflow',
+          workflowId: 'wf-1',
+          schedule: { kind: 'once', at },
+          outputs: ['noteUrl'],
+        },
+        baseCtx,
+      )
+      const parsed = JSON.parse(output) as {
+        ok: boolean
+        id: string
+        schedule: string
+        outputs: string[]
+      }
+      expect(parsed.ok).toBe(true)
+      // What the user reads on the approval card: a one-shot, not "Daily 09:00".
+      expect(parsed.schedule).toContain('One-time')
+      expect(parsed.outputs).toEqual(['noteUrl'])
+      expect(store.tasks[0]?.schedule).toEqual({ kind: 'once', at })
+      expect(alarmsByName.get(`workflow:${parsed.id}`)?.when).toBe(at)
+    })
+
+    it('refuses a chain parent that produces nothing to hand on', async () => {
+      store.setTasks([makeTask({ id: 'prompt-parent', name: 'Prompt parent' })])
+      const output = await executeTool(
+        'create_scheduled_task',
+        {
+          name: 'Child',
+          kind: 'workflow',
+          workflowId: 'wf-1',
+          schedule: { kind: 'interval', minutes: 30 },
+          followsTaskId: 'prompt-parent',
+        },
+        baseCtx,
+      )
+      const parsed = JSON.parse(output) as { ok: boolean; error: string }
+      expect(parsed.ok).toBe(false)
+      expect(parsed.error).toContain('must be a workflow-kind task')
+      expect(store.tasks).toHaveLength(1)
+    })
+
+    it('links a child to a workflow parent and inherits its chain id', async () => {
+      const parentOut = await executeTool(
+        'create_scheduled_task',
+        {
+          name: 'Publish',
+          kind: 'workflow',
+          workflowId: 'wf-1',
+          schedule: { kind: 'once', at: Date.now() + 3_600_000 },
+          outputs: ['noteUrl'],
+        },
+        baseCtx,
+      )
+      const parent = JSON.parse(parentOut) as { id: string }
+
+      const childOut = await executeTool(
+        'create_scheduled_task',
+        {
+          name: 'Comment',
+          kind: 'workflow',
+          workflowId: 'wf-1',
+          schedule: { kind: 'interval', minutes: 30 },
+          followsTaskId: parent.id,
+          variables: { note: '{{upstream.noteUrl}}' },
+        },
+        baseCtx,
+      )
+      const child = JSON.parse(childOut) as { ok: boolean; follows: string; chainId: string }
+      expect(child.ok).toBe(true)
+      expect(child.follows).toBe('Publish')
+
+      const stored = store.tasks.find((task) => task.name === 'Comment')
+      expect(stored?.followsTaskId).toBe(parent.id)
+      // The head of the chain names it, so the model never has to invent the id
+      // twice in a row for the two calls to group together.
+      expect(stored?.chainId).toBe(parent.id)
+      expect(stored?.variables).toEqual({ note: '{{upstream.noteUrl}}' })
+    })
+
+    it('refuses to close a loop through an existing task', async () => {
+      store.setTasks([
+        makeTask({ id: 'a', name: 'A', kind: 'workflow', workflowId: 'wf-1' }),
+        makeTask({ id: 'b', name: 'B', kind: 'workflow', workflowId: 'wf-1', followsTaskId: 'a' }),
+      ])
+
+      // B is already A's child: making A follow B would be a cycle.
+      const output = await executeTool(
+        'create_scheduled_task',
+        {
+          id: 'a',
+          name: 'A',
+          kind: 'workflow',
+          workflowId: 'wf-1',
+          schedule: { kind: 'daily', hour: 9 },
+          followsTaskId: 'b',
+        },
+        baseCtx,
+      )
+      const parsed = JSON.parse(output) as { ok: boolean; error: string }
+      expect(parsed.ok).toBe(false)
+      expect(parsed.error).toContain('loop')
+
+      const self = await executeTool(
+        'create_scheduled_task',
+        {
+          id: 'a',
+          name: 'A',
+          kind: 'workflow',
+          workflowId: 'wf-1',
+          schedule: { kind: 'daily', hour: 9 },
+          followsTaskId: 'a',
+        },
+        baseCtx,
+      )
+      expect(JSON.parse(self).ok).toBe(false)
+    })
+
+    it('lists a fired (disabled) one-shot parent with the keys it handed on', async () => {
+      // The exact state after a golden-hour publish: the task switched itself off.
+      store.setTasks([
+        makeTask({
+          id: 'parent',
+          name: 'Publish',
+          kind: 'workflow',
+          workflowId: 'wf-1',
+          enabled: false,
+          schedule: { kind: 'once', at: Date.now() - 60_000 },
+          outputs: ['noteUrl'],
+        }),
+      ])
+      store.setRuns([
+        { id: 'r2', taskId: 'parent', at: 20, outcome: 'failed', outputs: { error: 'x' } },
+        { id: 'r1', taskId: 'parent', at: 10, outcome: 'ok', outputs: { noteUrl: 'https://x/1' } },
+      ])
+
+      const output = await executeTool('list_scheduled_tasks', {}, baseCtx)
+      const parsed = JSON.parse(output) as {
+        tasks: {
+          id: string
+          enabled: boolean
+          outputs?: string[]
+          lastOutputKeys?: string[]
+        }[]
+      }
+      const listed = parsed.tasks.find((task) => task.id === 'parent')
+      // Hiding it would make the chain unreferenceable precisely when its value
+      // becomes available.
+      expect(listed?.enabled).toBe(false)
+      expect(listed?.outputs).toEqual(['noteUrl'])
+      expect(listed?.lastOutputKeys).toEqual(['noteUrl'])
+    })
   })
 })
 

@@ -177,4 +177,78 @@ Tell the user the skill is saved and what it does in one line. After they use it
     createdAt: 0,
     updatedAt: 0,
   },
+  {
+    id: 'builtin-xiaohongshu-pipeline',
+    name: 'xiaohongshu-pipeline',
+    description:
+      '把小红书推广排成定时链条：草稿写好→建「黄金时间发布」一次性任务→发布交接 noteUrl→挂「发布后定时评论」子任务，含黄金时段决策规则与跨任务取值写法。Use when the user asks to 小红书定时发布/黄金时间发帖/把草稿安排到某个时间发/发布后自动评论/笔记互动回复, or wants a Xiaohongshu draft chained into publish then scheduled commenting.',
+    instructions: `# 小红书推广流水线（草稿 → 黄金时间发布 → 定时评论）
+
+目标：随机时间写好的草稿，在黄金时间自动发布；发布之后按节奏自动去评论区互动。三步分别落在「当前对话」「一次性任务」「链条子任务」上。
+
+## 前置
+
+1. 先 \`load_tools({groups:["ops"]})\`：\`create_scheduled_task\` / \`list_scheduled_tasks\` 在 ops 组，不在常驻工具列表。
+2. 发布与评论都必须是**已保存的工作流**（kind:'workflow'）。只有工作流运行才有命名变量袋，链条才取到值；\`outputs\` 也只在 workflow 上被接受。当前对话里的零散操作先按 workflow-generator 技能存成工作流，拿到工作流 id 再回来编排——**拿不到 id 就不要建任务**。
+
+## 黄金时间（自己算时刻，引擎不内置时段表）
+
+- 工作日（周一至周五）：18:00–21:00；周末（周六、周日）：10:00–12:00。
+- 取整点或半点，选窗口内尚未过去的最近一档；今天的窗口已过 → 顺延到下一个可用窗口（工作日已过 21:00 就排明天 18:00，明天是周末则排明天 10:00）。
+- 算成**本地墙钟串** \`YYYY-MM-DDTHH:mm\` 交给 \`schedule.at\`：不要手算 epoch 毫秒，**禁止结尾 \`Z\`**（那会按 UTC 解释，把时间整个挪出用户时区）。
+- 闹钟有 60 秒下限：距现在不足一分钟的一次性任务会晚约一分钟触发，别把"马上发"当承诺告诉用户。
+
+## 交接规则（哪一层能带什么值）
+
+- 草稿 id、标题这类**当前对话才知道**的值：只能在**创建任务时写成字面量**放进 \`variables\`。对话回合刻意不写运行记录，\`{{upstream.*}}\` 取不到它们。
+- \`noteUrl\` 这类**发布运行之后才存在**的值：只能由子任务在**自己运行时**解析 \`{{upstream.noteUrl}}\`。所以评论任务现在就能建，不用等发布成功。
+- 正文永远不走交接：\`variables\` / \`outputs\` 只装短指针（id、URL）。几百字符以上的长文本会被工具层直接拒绝——让发布工作流自己重读草稿，或用 \`save_local\` 落盘后传路径。
+
+## 建两个任务（照抄形状，替换尖括号里的值）
+
+发布（一次性，跑完自动停用）：
+
+\`\`\`json
+{
+  "name": "小红书发布：<草稿标题>",
+  "kind": "workflow",
+  "workflowId": "<发布工作流 id>",
+  "schedule": { "kind": "once", "at": "2026-11-02T20:30" },
+  "variables": { "draftId": "<对话里看到的草稿 id>", "title": "<标题>" },
+  "outputs": ["noteUrl"]
+}
+\`\`\`
+
+发布工作流里取笔记链接的那一步要勾「赋值给变量」并命名 \`noteUrl\`（\`assignVariable: true\` + \`variableName: "noteUrl"\`）。不声明就没有交接：运行结束的变量袋里没有它，子任务运行时会响亮报缺字段。
+
+评论（链条子任务，把上一步返回的 id 填进 \`followsTaskId\`）：
+
+\`\`\`json
+{
+  "name": "小红书评论：<草稿标题>",
+  "kind": "workflow",
+  "workflowId": "<评论工作流 id>",
+  "schedule": { "kind": "interval", "minutes": 30 },
+  "followsTaskId": "<发布任务 id>",
+  "variables": { "noteUrl": "{{upstream.noteUrl}}" }
+}
+\`\`\`
+
+评论工作流内部直接用 \`{{noteUrl}}\` 导航到那条笔记。子任务的 \`chainId\` 默认继承父任务，不用另编。
+
+## 运行期实际会发生什么（照实告诉用户）
+
+- 发布任务跑完立刻自动停用；要再发一次必须先把时间往后改，光打开开关不会跑（时刻已过期，闹钟会被清掉）。
+- 评论任务在发布任务**还没有成功运行**之前，每次到点只记 \`skipped\`（不碰页面）；上游一旦成功，它才开始真评论。
+- 上游被删除，或上游运行成功却没交出声明的字段 → 子任务响亮失败，错误里点名缺的 token 和上游实际产出的键名。这类不会自己变好，要按错误提示改工作流。
+- \`interval\` 的首个 tick 按创建后的间隔计，不是"发布后 N 分钟"。要紧贴发布时间，就把首个时刻交给一个 \`once\` 子任务，或者直接把首个触发时间告诉用户。
+- 用户手动跑一次发布任务同样会覆盖 \`noteUrl\`，子任务下次按新值走——合法，但要说清楚。
+
+## 边界
+
+看不到草稿 id，或者发布/评论没能存成工作流，就**不要建任务**，直接说明缺哪一环。删除链条父任务会连带清掉它的运行记录，子任务从此永久取不到值——删之前先 \`list_scheduled_tasks\` 看有没有子任务 \`followsTaskId\` 指向它。`,
+    autoMatch: true,
+    createdAt: 0,
+    updatedAt: 0,
+  },
 ]
