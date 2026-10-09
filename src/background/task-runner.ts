@@ -13,8 +13,14 @@
 import { effectiveLocale } from '../lib/i18n'
 import { NotLoggedIn, fetchReviewRequests, formatReviewSummary } from '../lib/github'
 import { sendWebhookText } from '../lib/feishu'
-import type { ScheduledTask } from '../lib/scheduler-types'
-import { addRun, getFeishuConfig, recordTaskRun } from '../lib/task-store'
+import type { ScheduledTask, TaskRunLog } from '../lib/scheduler-types'
+import { addRun, getFeishuConfig, getTask, listRuns, recordTaskRun } from '../lib/task-store'
+import {
+  buildUpstream,
+  clampHandoffBag,
+  describeUnresolved,
+  resolveTaskInputs,
+} from '../lib/task-chain'
 import { runUnattendedPrompt } from './agent-unattended'
 import { resolveUnattendedScope } from './window-policy'
 import { retain, release } from './keepalive'
@@ -37,6 +43,86 @@ export interface RunOutcome {
   summary: string
   error?: string
   cancelled?: boolean
+  /**
+   * Named values this run hands to the task that follows it, already clamped to
+   * the handoff budget. Persisted onto the run record so the child can resolve
+   * `{{upstream.*}}` in a later worker.
+   */
+  outputs?: Record<string, unknown>
+}
+
+/**
+ * A task's stored inputs after `{{upstream.*}}` has been answered — what to run
+ * now that the chain has been read.
+ */
+interface ResolvedInputs {
+  prompt?: string
+  variables?: Record<string, unknown>
+}
+
+/**
+ * Reads the chain a task sits on: resolve its references against the parent's
+ * last successful run, or explain why it must not run yet.
+ *
+ * Two shapes of "cannot run", deliberately different. A parent that has not
+ * produced a successful run is a TIMING gap — the chain is merely early (a
+ * comment task armed before the note was published), so this run is skipped and
+ * the schedule gets another chance, touching no page. A parent that no longer
+ * exists, or that ran fine but never carried the key being read, can never fix
+ * itself: that fails loudly and names what the parent DID produce.
+ */
+async function resolveChain(
+  task: ScheduledTask,
+  lang: string,
+): Promise<{ inputs: ResolvedInputs; blocked?: RunOutcome }> {
+  const zh = lang.toLowerCase().startsWith('zh')
+  const parentId = task.followsTaskId
+  let parentName = ''
+  let parentRun: TaskRunLog | undefined
+
+  if (parentId) {
+    const parent = await getTask(parentId)
+    if (!parent) {
+      const error = zh
+        ? `本任务依赖的定时任务已不存在（${parentId}）。请重建链条，或清除该依赖。`
+        : `The scheduled task this one follows no longer exists (${parentId}). Re-create the chain, or clear the dependency.`
+      return { inputs: {}, blocked: { ok: false, skipped: false, summary: '', error } }
+    }
+    parentName = parent.name
+    parentRun = (await listRuns(parentId)).find((run) => run.outcome === 'ok')
+  }
+
+  const upstream = buildUpstream(parentRun)
+  const resolved = resolveTaskInputs(task, upstream)
+  if (resolved.unresolved.tokens.length === 0) {
+    // The parent's bag is also seeded INTO the run, so a graph node can read
+    // `{{upstream.noteUrl}}` for itself instead of depending on the task's own
+    // `variables` to have copied each value out.
+    const variables =
+      parentId && Object.keys(upstream).length > 0
+        ? { ...(resolved.variables ?? {}), upstream }
+        : resolved.variables
+    return {
+      inputs: {
+        prompt: resolved.prompt,
+        ...(variables ? { variables } : {}),
+      },
+    }
+  }
+
+  if (!parentRun) {
+    const waiting = parentName
+      ? zh
+        ? `⏸ 等待上游：本任务需要「${parentName}」成功运行后产出的值，但它还没有产出。本次已跳过。`
+        : `⏸ Waiting upstream: this task needs values from a successful run of 「${parentName}」, which has produced none. Skipped.`
+      : zh
+        ? `⏸ 本任务引用了 {{upstream.*}}，但没有关联任何上游任务，无法取值。本次已跳过。`
+        : `⏸ This task references {{upstream.*}} but follows no scheduled task, so there is nothing to read. Skipped.`
+    return { inputs: {}, blocked: { ok: false, skipped: true, summary: waiting } }
+  }
+
+  const error = describeUnresolved(resolved.unresolved, parentName, parentRun)
+  return { inputs: {}, blocked: { ok: false, skipped: false, summary: '', error } }
 }
 
 /**
@@ -69,7 +155,16 @@ export async function runTask(
 
   let outcome: RunOutcome = { ok: false, skipped: false, summary: '' }
   try {
-    outcome = await executeTask(task, lang, tracked)
+    const chain = await resolveChain(task, lang)
+    if (chain.blocked) {
+      // The chain never started: no tab opened, no prompt sent. The reason is a
+      // step on the run, so the history shows why this entry is empty.
+      const reason = chain.blocked.error ?? chain.blocked.summary
+      if (reason) addStep(tracked.runId, chain.blocked.skipped ? 'status' : 'error', reason)
+      outcome = chain.blocked
+    } else {
+      outcome = await executeTask(task, lang, tracked, chain.inputs)
+    }
   } catch (error) {
     outcome = {
       ok: false,
@@ -90,6 +185,7 @@ export async function runTask(
       outcome: boardOutcome,
       summary: outcome.summary?.split('\n')[0] || outcome.error,
       ...(outcome.error ? { error: outcome.error } : {}),
+      ...(outcome.outputs ? { outputs: outcome.outputs } : {}),
     })
   }
 
@@ -134,15 +230,16 @@ async function executeTask(
   task: ScheduledTask,
   lang: string,
   tracked: RunningTask,
+  inputs: ResolvedInputs,
 ): Promise<RunOutcome> {
   addStep(tracked.runId, 'info', taskStartLine(task))
   switch (task.kind) {
     case 'github-review-requests':
       return runReviewRequests(lang, tracked)
     case 'agent-prompt':
-      return runAgentPrompt(task, lang, tracked)
+      return runAgentPrompt(task, inputs, lang, tracked)
     case 'workflow':
-      return runWorkflowTask(task, tracked)
+      return runWorkflowTask(task, inputs, lang, tracked)
     default: {
       // Exhaustiveness guard: a future task kind that isn't wired up fails
       // loudly rather than silently doing nothing. Cast through string so this
@@ -194,10 +291,13 @@ async function runReviewRequests(lang: string, tracked: RunningTask): Promise<Ru
  */
 async function runAgentPrompt(
   task: ScheduledTask,
+  inputs: ResolvedInputs,
   _lang: string,
   tracked: RunningTask,
 ): Promise<RunOutcome> {
-  const prompt = task.prompt?.trim()
+  // `inputs.prompt` is the task's own prompt with any `{{upstream.*}}` answered;
+  // an unchained task keeps its text untouched.
+  const prompt = (inputs.prompt ?? task.prompt)?.trim()
   if (!prompt) {
     return { ok: false, skipped: false, summary: '', error: 'This task has no prompt.' }
   }
@@ -220,8 +320,19 @@ async function runAgentPrompt(
  * Runs a scheduled workflow-kind task through the workflow engine. The engine
  * records its steps on the run this task already opened (`reuseRun`), so the
  * task's run log shows the whole workflow — one entry, not two.
+ *
+ * This is also where the chain is read and written: the task's resolved inputs
+ * seed the run's variable bag (the engine lets a payload override the trigger's
+ * defaults), and the run's final bag is filtered down to the names this task
+ * declared as its outputs.
  */
-async function runWorkflowTask(task: ScheduledTask, tracked: RunningTask): Promise<RunOutcome> {
+async function runWorkflowTask(
+  task: ScheduledTask,
+  inputs: ResolvedInputs,
+  lang: string,
+  tracked: RunningTask,
+): Promise<RunOutcome> {
+  const zh = lang.toLowerCase().startsWith('zh')
   const workflow = task.workflowId ? await getWorkflow(task.workflowId) : undefined
   if (!workflow) {
     return { ok: false, skipped: false, summary: '', error: 'This task has no workflow.' }
@@ -239,8 +350,28 @@ async function runWorkflowTask(task: ScheduledTask, tracked: RunningTask): Promi
     taskId: task.id,
     feishuChatId: tracked.feishuChatId,
     reuseRun: tracked,
+    ...(inputs.variables ? { variables: inputs.variables } : {}),
     ...(scope ? { scopeWindowId: scope.windowId } : {}),
   })
+  // A successful run publishes exactly what it declared. An undeclared name is
+  // reported on THIS run rather than failing it: the run did its job, and the
+  // dependency only bites in the child that comes to read it — which fails
+  // there, loudly, with this run's key list in the message.
+  const declared = task.outputs ?? []
+  for (const name of declared) {
+    if (outcome.outcome === 'ok' && outcome.variables?.[name] === undefined) {
+      const produced = Object.keys(outcome.variables ?? {})
+        .slice(0, 8)
+        .join(', ')
+      addStep(
+        tracked.runId,
+        'error',
+        zh
+          ? `声明要交接的变量「${name}」在这次运行里没有产生${produced ? `（实际产生：${produced}）` : ''}，下游任务将无法取值。`
+          : `Declared output "${name}" was never produced by this run${produced ? ` (it produced: ${produced})` : ''}; tasks following this one cannot read it.`,
+      )
+    }
+  }
   // An unattended run is as much an exam for a generated graph as the panel's
   // Run button: without this, a workflow whose first replay came from a
   // schedule would be graded by whichever later run happened to be clicked.
@@ -251,12 +382,15 @@ async function runWorkflowTask(task: ScheduledTask, tracked: RunningTask): Promi
     trace: outcome.trace,
     degradations: outcome.degradations,
   })
+  const outputs =
+    outcome.outcome === 'ok' ? clampHandoffBag(outcome.variables, declared) : undefined
   return {
     ok: outcome.outcome === 'ok',
     skipped: false,
     summary: outcome.summary ?? '',
     error: outcome.outcome === 'failed' ? (outcome.error ?? outcome.summary) : undefined,
     cancelled: outcome.outcome === 'cancelled',
+    ...(outputs ? { outputs } : {}),
   }
 }
 

@@ -12,6 +12,7 @@ import { newId } from './storage'
 import { fileStorageArea } from './fs-store'
 import { withKeyLock } from './key-lock'
 import { capPersistedStrings, jsonBytes } from './persist-budget'
+import { OUTPUT_NAME, RESERVED_VARIABLE_NAMES, clampHandoffBag } from './task-chain'
 import {
   DEFAULT_TASK_MAX_TOOL_ROUNDS,
   EMPTY_FEISHU_CONFIG,
@@ -66,6 +67,40 @@ const MAX_STORED_RUN_BYTES = 1_500_000
  * instead — the shared implementation lives in `lib/key-lock.ts`.
  */
 
+/**
+ * A task's stored input bag, reduced to what a run can actually resolve.
+ *
+ * Scalars and string arrays only: a nested object would need a graph-side
+ * `{{a.b.c}}` producer to mean anything, and keeping it would let a half-written
+ * record masquerade as data. Names the interpolation layer owns are dropped so
+ * a hand-edited record cannot shadow `{{upstream}}` / `{{refData}}`.
+ */
+function asTaskVariables(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (RESERVED_VARIABLE_NAMES.includes(key)) continue
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      out[key] = typeof value === 'string' ? capPersistedStrings(value) : value
+    } else if (
+      Array.isArray(value) &&
+      value.every((item) => typeof item === 'string' || typeof item === 'number')
+    ) {
+      out[key] = capPersistedStrings(value)
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
+/** Declared handoff names, filtered to the ones a `{{name}}` token can express. */
+function asOutputNames(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const names = raw.filter(
+    (name): name is string => typeof name === 'string' && OUTPUT_NAME.test(name),
+  )
+  return names.length > 0 ? [...new Set(names)] : undefined
+}
+
 function asTask(value: unknown): ScheduledTask | null {
   if (!value || typeof value !== 'object') return null
   const v = value as Partial<ScheduledTask>
@@ -76,6 +111,8 @@ function asTask(value: unknown): ScheduledTask | null {
       : v.kind === 'github-review-requests' || v.kind === 'agent-prompt'
         ? v.kind
         : 'agent-prompt'
+  const variables = asTaskVariables(v.variables)
+  const outputs = asOutputNames(v.outputs)
   return {
     id: v.id,
     name: v.name || 'Task',
@@ -84,6 +121,12 @@ function asTask(value: unknown): ScheduledTask | null {
     kind,
     prompt: typeof v.prompt === 'string' ? v.prompt : undefined,
     workflowId: typeof v.workflowId === 'string' ? v.workflowId : undefined,
+    ...(variables ? { variables } : {}),
+    ...(outputs ? { outputs } : {}),
+    ...(typeof v.followsTaskId === 'string' && v.followsTaskId
+      ? { followsTaskId: v.followsTaskId }
+      : {}),
+    ...(typeof v.chainId === 'string' && v.chainId ? { chainId: v.chainId } : {}),
     maxToolRounds: coerceMaxToolRounds(v.maxToolRounds),
     notifyFeishu: v.notifyFeishu === true,
     createdAt: typeof v.createdAt === 'number' ? v.createdAt : Date.now(),
@@ -132,6 +175,10 @@ export function createDraft(partial?: Partial<ScheduledTask>): ScheduledTask {
     schedule: partial?.schedule ?? { kind: 'daily', hour: 9, minute: 0 },
     kind: partial?.kind ?? 'agent-prompt',
     prompt: partial?.prompt ?? '',
+    ...(partial?.variables ? { variables: partial.variables } : {}),
+    ...(partial?.outputs ? { outputs: partial.outputs } : {}),
+    ...(partial?.followsTaskId ? { followsTaskId: partial.followsTaskId } : {}),
+    ...(partial?.chainId ? { chainId: partial.chainId } : {}),
     maxToolRounds:
       partial && typeof partial.maxToolRounds === 'number'
         ? coerceMaxToolRounds(partial.maxToolRounds)
@@ -169,12 +216,34 @@ export async function recordTaskRun(
   })
 }
 
+/**
+ * Turns one task off, leaving every other field alone.
+ *
+ * The scheduler has to disarm a one-shot BEFORE running it, and the run that
+ * follows writes `lastStatus` / `lastSummary` onto the same record through this
+ * same lock. Doing the disable with a plain read-modify-write outside the lock
+ * is the race documented above: the two writers share one base list and the
+ * later write silently drops the other's change — here, a re-armed finished
+ * one-shot.
+ */
+export async function disableTask(id: string): Promise<void> {
+  await withKeyLock(KEY_TASKS, async () => {
+    const list = await listTasks()
+    const task = list.find((entry) => entry.id === id)
+    if (!task || !task.enabled) return
+    task.enabled = false
+    task.updatedAt = Date.now()
+    await area.set({ [KEY_TASKS]: list })
+  })
+}
+
 // --- Run logs ----------------------------------------------------------------
 
 function asRun(value: unknown): TaskRunLog | null {
   if (!value || typeof value !== 'object') return null
   const v = value as Partial<TaskRunLog>
   if (v.taskId !== undefined && typeof v.taskId !== 'string') return null
+  const outputs = clampHandoffBag(v.outputs)
   return {
     id: v.id as string,
     ...(typeof v.taskId === 'string' ? { taskId: v.taskId } : {}),
@@ -199,6 +268,10 @@ function asRun(value: unknown): TaskRunLog | null {
     ok: v.ok === true,
     skipped: v.skipped === true,
     summary: typeof v.summary === 'string' ? v.summary : '',
+    // The cross-task handoff bag. Re-clamped rather than trusted: whatever
+    // produced this entry may have been generous, and this key's byte budget is
+    // shared by the whole run log (see `MAX_STORED_RUN_BYTES`).
+    ...(outputs ? { outputs } : {}),
     notified: v.notified === true,
     error: typeof v.error === 'string' ? v.error : undefined,
     // How the run recovered. The health summary counts these, so they must
@@ -309,6 +382,8 @@ export interface FinishedRunInput {
   finishedAt?: number
   outcome: TaskRunOutcome
   summary?: string
+  /** Declared handoff values from a workflow run's final variable bag. */
+  outputs?: Record<string, unknown>
   error?: string
   steps?: TaskRunStep[]
   /** How the run recovered, forwarded from the in-memory board (see TaskRunLog). */
@@ -326,6 +401,9 @@ export async function recordFinishedRun(input: FinishedRunInput): Promise<TaskRu
     const list = await listRuns()
     const trigger: TaskRunLog['trigger'] =
       input.source === 'feishu' ? 'feishu' : input.source === 'manual' ? 'manual' : 'schedule'
+    // Named values this run hands to any task that follows it, clamped before it
+    // lands so storage never holds a bag larger than a reader may see.
+    const outputs = clampHandoffBag(input.outputs)
     const entry: TaskRunLog = {
       id: input.runId,
       ...(input.taskId ? { taskId: input.taskId } : {}),
@@ -340,6 +418,7 @@ export async function recordFinishedRun(input: FinishedRunInput): Promise<TaskRu
       ok: input.outcome === 'ok',
       skipped: input.outcome === 'skipped',
       summary: input.summary ?? '',
+      ...(outputs ? { outputs } : {}),
       ...(input.error ? { error: input.error } : {}),
       ...(input.failureCategory ? { failureCategory: input.failureCategory } : {}),
       ...(input.resumed ? { resumed: true } : {}),

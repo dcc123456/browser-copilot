@@ -287,6 +287,9 @@ setFinishedPersister((run: FinishedTask) => {
     finishedAt: run.finishedAt,
     outcome: run.outcome,
     summary: run.summary,
+    // The cross-task handoff bag, so a chained task can read what this run
+    // produced after the worker that ran it is gone.
+    outputs: run.outputs,
     ...(run.error ? { error: run.error } : {}),
     // How the run recovered: the health summary counts repaired/resumed runs and
     // shows the newest failure's category, so these have to be durable too.

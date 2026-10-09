@@ -111,6 +111,8 @@ export interface FinishedTask {
   resumed?: boolean
   repaired?: boolean
   takeover?: boolean
+  /** Named values handed to the task that follows this run (see FinishOptions). */
+  outputs?: Record<string, unknown>
 }
 
 const runs = new Map<string, RunningTask>()
@@ -257,6 +259,12 @@ export interface FinishOptions {
   repaired?: boolean
   /** Whether an AI takeover step ran during the execution. */
   takeover?: boolean
+  /**
+   * Named values this run hands to any task that follows it (see
+   * `lib/task-chain`). The task runner lifts them out of the workflow engine's
+   * final variable bag; this board only carries them to the persister.
+   */
+  outputs?: Record<string, unknown>
 }
 
 /**
@@ -284,6 +292,7 @@ export function finishRun(runId: string, options?: FinishOptions): void {
     ...(options?.resumed ? { resumed: true } : {}),
     ...(options?.repaired ? { repaired: true } : {}),
     ...(options?.takeover ? { takeover: true } : {}),
+    ...(options?.outputs ? { outputs: options.outputs } : {}),
     ...(task.snapshots && task.snapshots.length ? { snapshots: task.snapshots } : {}),
   }
   finished.unshift(entry)
