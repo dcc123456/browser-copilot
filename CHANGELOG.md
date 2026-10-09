@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+_To be released._
+
+## [0.6.4] - 2026-10-09
+
 ### Added — First-run success for generated workflows
 
 Generated workflows used to fail their first manual run almost every time. The
@@ -96,6 +100,124 @@ runnability`), idempotent and structure-preserving, so server/scheduler
   first read.
 - Settings → storage shows how many changes are waiting to be written to
   the folder.
+
+### Added — One pipeline from generation to repair to verification
+
+The AI path used to be several disconnected surfaces (generate, debug, repair,
+recover) with their own vocabulary. It is now one engine and one flow, mapped in
+`docs/workflow-ai-architecture-audit.md` and specified across `specs/2026-09-*`
+and `specs/2026-10-*`:
+
+- **Workflow IR** (`lib/workflow/ir.ts`) and a trace compiler, so a graph can be
+  analysed, rewritten and re-verified without string-parsing editor JSON.
+- **A single failure taxonomy**: deterministic classification plus a stable
+  failure signature, which is what makes retries, budgets and repair strategies
+  comparable across runs.
+- **Unified repair engine**: repair candidate contract / parser / apply,
+  revisioned repair commits (a fix becomes a revision, not an in-place
+  overwrite), a bounded strategy ladder (`lib/workflow/repair-policy.ts`), a
+  dynamic repair budget, and goal-aware three-layer verification
+  (`lib/workflow/repair-verification.ts`) that asks whether the GOAL landed
+  rather than whether each call returned.
+- **Autonomous orchestration**: a background repair orchestrator behind a runtime
+  adapter, a recovery protocol with phases / resume envelopes, auto-trigger on run
+  failure, and a workflow health summary.
+- **One entry point in the UI**: the single-entry AI repair flow absorbed the
+  secondary recovery dialogs; per-node AI fix can be applied or reverted; the
+  proposal shows a diff and a risk preview.
+- **Benchmarks as gates**: `pnpm bench:reliability`, `bench:workflow-generation`,
+  `bench:workflow-repair`, `bench:debug` against a committed baseline, plus
+  acceptance suites for generation, recovery, goals and file upload.
+
+### Changed — A missing parameter no longer blocks the run
+
+Clicking Run used to refuse the whole graph with a toast that vanished in
+seconds: one under-filled node and twenty steps executed nothing, and the run log
+had no entry for the attempt at all.
+
+- `validateWorkflowForRun` now returns node-attributable findings
+  (`WorkflowRunIssue`: severity / nodeId / blockId / nodeName / param / message);
+  the `errors` / `warnings` string lists are derived projections of it.
+- Findings are written into the run log — one line per graph-level problem, one
+  line per blocked node — and the engine stops _before_ the blocked node without
+  touching the page, so every step that can work still runs and a step with no
+  locator cannot be mis-reported as "element not found" by a readiness poll.
+- The editor red-flags the same nodes while you type (one shared rule function),
+  and each blocked log row carries a Locate action that closes the panels,
+  selects the node and centres it.
+- Design, rejected options and the browser-verification steps that are still
+  pending: `specs/2026-10-06-run-preflight-log-design.md`.
+
+### Changed — Every operator was real-tested one by one
+
+All 67 operators (63 catalog + 4 custom) were driven in a real browser against a
+purpose-built fixture site through the Runner, with evidence shaped so that only
+the feature under test could produce it: **148 cases, 142 PASS / 3 FAIL /
+3 BLOCKED**, covering 62 operators (5 recorded untestable — cloud-only or needing
+real Google credentials). Per-block verdicts, root causes and environment limits:
+`specs/2026-10-06-operator-realtest-design.md`. Four questions the port cannot
+answer (trusted key events on contenteditable, `await` statement bodies, iframe
+scope, variable reads) were re-checked against the loaded extension.
+
+Two user-visible defects came out of it:
+
+- **Advertised options that were never read** now take effect.
+- **Exclusive branch gates fell through to the unwired port.** With only the
+  "exists" port wired, an absent element still ran that branch, because routing
+  fell back to the first outgoing edge. `conditions` and `element-exists` now
+  stop when the port the verdict took has no wiring
+  (`tests/branch-fallthrough.spec.ts`).
+
+### Added — Files, user input and goal inspection
+
+- **`upload-file` block + file artifacts + a user file picker card**: a run can
+  ask for a file at execution time instead of baking one in, and the block names
+  the variable it fills rather than carrying the file.
+- **Page-side workflow JS expressions and file upload** in the injected kernel;
+  injected function bodies are now statically checked to be self-contained
+  (`pnpm verify:injected`).
+- **Node goal contracts, a goal inspector and a certification modal**, plus
+  generation metrics and a recorded scored-locator chain per node — the chain
+  that produced a match is now rotated into the node instead of discarded.
+- **`ask_user` tool** with structured suggestions, dynamic agent tool groups, and
+  loop-back edges in the editor graph.
+
+### Fixed — Goal certification reads the page, not the plan
+
+A long run of real-browser rounds (see `specs/`) turned "the steps ran" into
+"the goal is provably true":
+
+- The goal gate now reads the **pre-run** snapshot, so page furniture like a
+  `草稿箱(100)` counter can no longer certify a goal by coincidence.
+- Only goal rows the run actually made true are certified; a presence row is
+  aimed at the words the page really shows, and a step's promise is graded on the
+  page that step stood on.
+- Replay observes the page and **degrades with evidence** instead of failing
+  silently; `pnpm selftest` prints the words the steps really recorded when a goal
+  fails.
+- Misreads fixed: a popup dismissal is no longer read as a login, and a composer
+  mode name is no longer read as a publish act.
+
+### Fixed — Further user-visible repairs
+
+- A `javascript` block now fails when the script returns a failure envelope
+  instead of reporting success.
+- A generated workflow keeps its identity through save; a draft save stays behind
+  the opt-in that names it.
+- An unattended replay always gets a directory it can write to.
+- Operator parameters aligned across catalog, edit forms, guide and executors;
+  operator failures are visible instead of swallowed, and files land where the
+  settings say.
+- Recovery-phase labels localized in the failure center; the save-card collapse
+  button uses the minimize glyph.
+
+### Changed — CI and repository hygiene
+
+- **CI installs pnpm through corepack** instead of `pnpm/action-setup`, and the
+  whole tracked tree was brought to the repo's Prettier config; `pnpm lint` /
+  `pnpm format:check` are now blocking-green on `main`.
+- `AGENTS.md` gained enforcement tags (`[机检]` / `[验收]` / `[纪律]`), reuse rules
+  and an evidence-based closing checklist.
 
 ## [0.6.3] - 2026-09-16
 
