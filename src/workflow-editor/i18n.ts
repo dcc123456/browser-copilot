@@ -47,6 +47,9 @@ export const EDITOR_STRINGS = {
     saveFailed: 'Save failed',
     runFailed: 'Run failed',
     runFinished: 'Run finished',
+    runBlockedNodes:
+      'Run started, but {count} block(s) are missing a required parameter. It will stop at the first one — the run log names each block, click a row to find it on the canvas.',
+    locateNode: 'Locate',
     recordingStarted: 'Recording started — switch to a page and perform actions',
     recordingStopped: 'Recording stopped',
     recordStartFailed: 'Could not start recording',
@@ -211,6 +214,8 @@ export const EDITOR_STRINGS = {
     saveFailed: '保存失败',
     runFailed: '运行失败',
     runFinished: '运行完成',
+    runBlockedNodes: '运行已启动，但有 {count} 个算子缺少必填参数，会在它之前停止。详见运行日志。',
+    locateNode: '定位算子',
     recordingStarted: '已开始录制 — 请切换到页面执行操作',
     recordingStopped: '录制已停止',
     recordStartFailed: '无法开始录制',

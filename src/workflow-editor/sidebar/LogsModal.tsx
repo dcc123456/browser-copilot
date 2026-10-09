@@ -72,12 +72,15 @@ export default function LogsModal({
   onClose,
   workflowId,
   debugMode,
+  onLocateNode,
   t,
 }: {
   open: boolean
   onClose: () => void
   workflowId: string | null
   debugMode: boolean
+  /** Center the canvas on a log row's node (editor only). */
+  onLocateNode?: (nodeId: string) => void
   t: TranslateFn
 }) {
   const [boards, setBoards] = useState<{ runs: RunView[]; finished: RunView[] }>({
@@ -144,7 +147,22 @@ export default function LogsModal({
         </div>
       </Modal>
 
-      <RunDetailModal run={openRun} debug={debugMode} onClose={() => setOpenRunId(null)} t={t} />
+      <RunDetailModal
+        run={openRun}
+        debug={debugMode}
+        onClose={() => setOpenRunId(null)}
+        // Locate means looking at the canvas, so both stacked modals have to
+        // uncover it first.
+        onLocateNode={
+          onLocateNode
+            ? (nodeId) => {
+                setOpenRunId(null)
+                onLocateNode(nodeId)
+              }
+            : undefined
+        }
+        t={t}
+      />
     </>
   )
 }

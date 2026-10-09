@@ -241,6 +241,20 @@ export interface WorkflowRunOptions {
    */
   aiTakeover?: AiTakeoverHook
   /**
+   * Nodes the run gate already proved cannot do their job, keyed by node id,
+   * with the log line that says why (`lib/workflow/validation`'s `error`
+   * findings). Reaching one FAILS the run at that node — after its block header
+   * was emitted, before its executor, its readiness wait or its retry budget
+   * touches anything.
+   *
+   * This is the non-blocking half of the run gate: the user gets the steps that
+   * CAN work executed, the node that cannot is named in the run log instead of
+   * refusing the whole run, and the page is never driven by a step with no
+   * locator — which is exactly the case a readiness poll would otherwise report
+   * as a bogus "element not found" root cause.
+   */
+  preflightBlockers?: Record<string, string>
+  /**
    * Sub-workflow nesting notifications (P3, spec §15 Phase 8): called with
    * 'enter' before an `execute-workflow` runs its child and 'exit' after it
    * returns. The integration layer uses this to keep one trace spanning the
@@ -521,6 +535,7 @@ async function runCore(
     onSnapshot,
     onCheckpoint,
     aiTakeover,
+    preflightBlockers,
     readinessProbe,
     evaluateCondition,
     captureConditionBaseline,
@@ -836,6 +851,20 @@ async function runCore(
     if (params['disableBlock'] === true) {
       completedNodeIds.push(nodeId)
       return defaultNext
+    }
+
+    // The run gate proved this step cannot do its job (no locator, no key, no
+    // url…). Running it anyway buys a bogus root cause: with nothing to locate,
+    // generated-strict readiness polls the page until it TIMES OUT and reports
+    // 「元素不存在」 for a step that never had a selector to exist. So the run
+    // stops HERE, naming the step, and the page is left untouched — while every
+    // node before it has already done its work (see `validation.nodeRunIssuesOf`).
+    const blocker = preflightBlockers?.[nodeId]
+    if (blocker !== undefined) {
+      emit('error', nodeId, blocker)
+      outcome = 'failed'
+      error = blocker
+      return null
     }
 
     // Loop and sub-workflow blocks are handled by the engine itself, not by an

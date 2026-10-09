@@ -1536,18 +1536,19 @@ async function handleCommand(
     case 'workflows.run': {
       const workflow = await getWorkflow(command.id)
       if (!workflow) throw new Error('Workflow not found.')
-      // Refuse to start a workflow that cannot work. This gate is ONLY on the
-      // user-initiated run path: `executeWorkflow` itself must stay permissive,
-      // because the alarm / context-menu / shortcut triggers reach it with
-      // graphs that are already known-good, and a newly added rule must not be
-      // able to break them. Warnings are surfaced to the run log instead of
-      // blocking — an unarmed trigger kind still runs perfectly well when the
-      // user starts it by hand.
+      // The run gate NEVER refuses to start the workflow: its findings are
+      // handed to the run, which writes them into the run log beside the steps
+      // that did execute and stops the engine at the first node that cannot
+      // work. Refusing over the whole graph with a thrown wall of prose left the
+      // user with no run log, no node to find on the canvas, and every working
+      // step undone by one unfilled locator
+      // (specs/2026-10-06-run-preflight-log-design.md).
+      //
+      // This gate is ONLY on the user-initiated run path: `executeWorkflow`
+      // itself stays permissive, because the alarm / context-menu / shortcut
+      // triggers reach it with graphs that are already known-good, and a newly
+      // added rule must not be able to break them.
       const gate = validateWorkflowForRun(workflow)
-      if (gate.errors.length > 0) {
-        throw new Error(`无法运行该工作流：\n${gate.errors.map((e) => `· ${e}`).join('\n')}`)
-      }
-      for (const warning of gate.warnings) console.warn(`[workflows.run] ${warning}`)
       // Optional AI takeover on plain runs (settings.takeoverOnRun, default
       // off): a failed node gets one agent episode, its fix lands as pending
       // for user confirmation — same closure as the debug session, without
@@ -1577,6 +1578,9 @@ async function handleCommand(
       }
       const r = await executeWorkflow(workflow, {
         source: 'manual',
+        // The gate's findings ride ON THE RUN: they land in the run log and
+        // stop the engine at the first node that cannot work.
+        preflight: gate.issues,
         startAt: (command as { startAt?: string }).startAt,
         debug: workflow.settings?.debugMode === true,
         ...(takeover ? { aiTakeover: takeover } : {}),

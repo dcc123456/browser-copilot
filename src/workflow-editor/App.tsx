@@ -41,6 +41,7 @@ import type {
   WorkflowSettings,
 } from '../lib/workflow/types'
 import { migrateWorkflow, triggerFromNodes } from '../lib/workflow/migrate'
+import { nodeRunIssuesOf } from '../lib/workflow/validation'
 import { sendCommand } from '../lib/messages'
 import { editorUrl, hostWindowId } from './host-window'
 import { getSettings } from '../lib/storage'
@@ -110,6 +111,16 @@ function newFlowNode(block: BlockCatalogEntry, position: { x: number; y: number 
       block,
       blockData: { ...structuredClone(block.data), description: '' },
     },
+  }
+}
+
+/** A canvas node in the shape the workflow file (and the run gate) uses. */
+function toWorkflowNode(n: FlowNode): WorkflowNode {
+  return {
+    id: n.id,
+    label: n.data.block?.name ?? n.id,
+    position: n.position,
+    data: { ...n.data.blockData, blockId: n.data.block?.id ?? 'unknown' },
   }
 }
 
@@ -472,15 +483,26 @@ export default function EditorApp() {
     )
   }, [])
 
+  // Nodes the run gate proves cannot do their job (no locator, no key, no
+  // url…). Recomputed from the live canvas on every edit, so a red badge never
+  // lies and never lingers after the parameter is filled in. Same rule the
+  // engine stops on — `validation.nodeRunIssuesOf` — so the badge and the run
+  // log can never disagree about which step is at fault. Disabled blocks are
+  // skipped by the engine before that check, so they stay unmarked here too.
+  const blockedNodes = useMemo(() => {
+    const out: Record<string, string> = {}
+    for (const n of nodes) {
+      if (!n.data.block || n.data.blockData['disableBlock'] === true) continue
+      const first = nodeRunIssuesOf(toWorkflowNode(n)).find((issue) => issue.severity === 'error')
+      if (first) out[n.id] = first.message
+    }
+    return out
+  }, [nodes])
+
   const buildWorkflow = useCallback(async (): Promise<Workflow | null> => {
     if (!workflowId) return null
     const { x, y, zoom } = reactFlow.getViewport()
-    const wfNodes: WorkflowNode[] = nodes.map((n) => ({
-      id: n.id,
-      label: n.data.block?.name ?? n.id,
-      position: n.position,
-      data: { ...n.data.blockData, blockId: n.data.block?.id ?? 'unknown' },
-    }))
+    const wfNodes: WorkflowNode[] = nodes.map(toWorkflowNode)
     const wfEdges: WorkflowEdge[] = edges.map((e) => ({
       id: e.id,
       source: e.source,
@@ -540,7 +562,16 @@ export default function EditorApp() {
           if (cert) setCertReport(cert)
           if (r.outcome.ok)
             toast.show(startNodeId ? t('runFromHereFinished') : t('runFinished'), 'ok')
-          else {
+          else if (Object.keys(blockedNodes).length > 0) {
+            // The run stopped in front of a block that cannot work. Which block
+            // is on the run log (one row per node) and red on the canvas — the
+            // wall of contract prose this used to paste into a toast named no
+            // node the user could find (specs/2026-10-06-run-preflight-log-design.md).
+            toast.show(
+              t('runBlockedNodes').replace('{count}', String(Object.keys(blockedNodes).length)),
+              'error',
+            )
+          } else {
             const msg = r.outcome.error ?? r.outcome.summary
             setError(msg)
             toast.show(`${t('runFailed')}: ${msg}`, 'error')
@@ -554,7 +585,23 @@ export default function EditorApp() {
         setRunning(false)
       }
     },
-    [workflowId, handleSave, toast, t],
+    [workflowId, handleSave, blockedNodes, toast, t],
+  )
+
+  /** Select a node and scroll the canvas to it (the run log's locate action). */
+  const locateNode = useCallback(
+    (id: string) => {
+      setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === id })))
+      const node = reactFlow.getNode(id)
+      if (!node) return
+      const width = node.measured?.width ?? 200
+      const height = node.measured?.height ?? 60
+      reactFlow.setCenter(node.position.x + width / 2, node.position.y + height / 2, {
+        zoom: Math.max(reactFlow.getZoom(), 1),
+        duration: 400,
+      })
+    },
+    [reactFlow],
   )
 
   // Stable callbacks injected into every node's hover toolbar.
@@ -570,10 +617,22 @@ export default function EditorApp() {
     [deleteNode, duplicateNode, openNodeSettings, openNodeEditor, toggleNodeDisabled, handleRun],
   )
 
-  // Nodes as rendered: state nodes plus the injected toolbar callbacks.
+  // Nodes as rendered: state nodes plus the injected toolbar callbacks and the
+  // run gate's red badge for a step that cannot work yet.
   const flowNodes = useMemo(
-    () => nodes.map((n) => ({ ...n, data: { ...n.data, actions: nodeActions } })),
-    [nodes, nodeActions],
+    () =>
+      nodes.map((n) => {
+        const reason = blockedNodes[n.id]
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            actions: nodeActions,
+            ...(reason === undefined ? {} : { runState: 'error' as const, blockedReason: reason }),
+          },
+        }
+      }),
+    [nodes, nodeActions, blockedNodes],
   )
 
   const toggleRecording = useCallback(async () => {
@@ -920,6 +979,12 @@ export default function EditorApp() {
           onClose={() => setLogsOpen(false)}
           workflowId={workflowId}
           debugMode={meta.settings.debugMode}
+          // The log modal stacks on top of the canvas, so locating a node has to
+          // uncover it first.
+          onLocateNode={(nodeId) => {
+            setLogsOpen(false)
+            locateNode(nodeId)
+          }}
           t={t}
         />
       </div>

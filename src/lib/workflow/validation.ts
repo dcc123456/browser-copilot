@@ -115,12 +115,44 @@ export function isWorkflowValid(value: unknown): value is Workflow {
   return validateWorkflow(value).length === 0
 }
 
+/** Severity of a pre-run finding; `error` means the blamed step cannot work. */
+export type WorkflowRunSeverity = 'error' | 'warning'
+
+/**
+ * One pre-run finding, attributed to whatever in the graph it blames.
+ *
+ * The strings in {@link WorkflowRunValidation.errors} are this record rendered
+ * for a human, which is why the run gate used to be unable to say WHERE the
+ * problem was: a caller that wanted to highlight the node had to parse prose
+ * back into an id. `nodeId` is the handle; `message` reads on its own so the
+ * run log can print it under the node's own header without repeating its name.
+ */
+export interface WorkflowRunIssue {
+  severity: WorkflowRunSeverity
+  /** Blamed node; absent for workflow-level findings (no trigger, bad edge). */
+  nodeId?: string
+  blockId?: string
+  /** Node display name, so a persisted log line stays readable without the graph. */
+  nodeName: string
+  /** The parameter at fault (`selector`, `url`, …) when the finding names one. */
+  param?: string
+  /** The finding itself, phrased so it reads standalone under a node header. */
+  message: string
+}
+
 /** Result of {@link validateWorkflowForRun}: hard blockers vs. soft advice. */
 export interface WorkflowRunValidation {
-  /** The workflow cannot run until these are fixed. */
+  /** Rendered {@link WorkflowRunIssue} list; `error` findings stop the run at their node. */
   errors: string[]
   /** The workflow will run, but probably not the way the user expects. */
   warnings: string[]
+  /** Every finding in the machine-readable form the run log and the canvas use. */
+  issues: WorkflowRunIssue[]
+}
+
+/** Render one finding for a reader who has the message but not the graph. */
+export function formatRunIssue(issue: WorkflowRunIssue): string {
+  return issue.nodeId ? `节点 "${issue.nodeName}" ${issue.message}` : issue.message
 }
 
 /** The trigger block's node, when the graph has one. */
@@ -185,6 +217,71 @@ function producesTableRows(blockId: string, data: Record<string, unknown>): bool
 }
 
 /**
+ * The per-node half of the run gate: this step's block contract (§ required
+ * parameters, locator) plus any frozen business literal it still carries.
+ *
+ * Exported because TWO callers must never disagree about what "this node cannot
+ * work" means: the run gate below, which stops the run at such a node, and the
+ * editor's live step inspector, which has to mark the very same nodes red
+ * before the user presses run. Keep the rule here, not in either caller.
+ */
+export function nodeRunIssuesOf(node: WorkflowNode): WorkflowRunIssue[] {
+  const blockId = blockIdOfNode(node)
+  const data = node.data ?? {}
+  const nodeName = nodeDisplayNameOf(node)
+  const issues: WorkflowRunIssue[] = []
+  const blame = (
+    severity: WorkflowRunSeverity,
+    message: string,
+    param?: string,
+  ): WorkflowRunIssue => ({
+    severity,
+    nodeId: node.id,
+    blockId,
+    nodeName,
+    message,
+    ...(param ? { param } : {}),
+  })
+
+  // Residual dead data. Generation rewrites business literals into references
+  // (see `dynamic-data`), but a workflow can still arrive here holding one: it
+  // was hand-edited, imported, or saved by a path that predates the rewrite.
+  // A warning rather than an error — the step still runs, it just runs with a
+  // frozen value, and only the user can say whether that is what they want.
+  for (const site of dataValueSites(blockId, data)) {
+    // Instruction text (the ai-agent prompt) is a legitimate literal: it is
+    // addressed to the step, not data the replay must re-obtain.
+    if (site.instruction || hasReference(site.value)) continue
+    issues.push(
+      blame(
+        'warning',
+        `${site.path.join('.')} 是固定值 "${site.value}"：` +
+          '重放时不会变化，如果它本该随数据改变，请改用 {{变量}} 引用或声明成工作流输入',
+        site.path.join('.'),
+      ),
+    )
+  }
+
+  // Required parameters — the same contract the generation-time record gate
+  // enforces (see `block-requirements`), applied to EVERY workflow no matter
+  // which path produced it. The empty-locator `element-exists`, the key-less
+  // `press-key` and the url-less `webhook` all die HERE now instead of failing
+  // (or silently doing nothing) mid-run. `'error'` findings stop the run at
+  // that node: the step cannot work. `'warning'` findings are reported and run
+  // anyway — a step that merely does nothing (a scroll with no delta) is worth
+  // far less to the user than the run it would block.
+  for (const problem of missingRequirements(blockId, data)) {
+    if (problem.severity === 'warning') {
+      issues.push(blame('warning', `参数可能无效 ${problem.key}：${problem.message}`, problem.key))
+      continue
+    }
+    issues.push(blame('error', `缺少必填参数 ${problem.key}：${problem.message}`, problem.key))
+  }
+
+  return issues
+}
+
+/**
  * Semantic pre-run checks: is this workflow actually launchable?
  *
  * Deliberately separate from {@link validateWorkflow} (which only checks the
@@ -192,13 +289,19 @@ function producesTableRows(blockId: string, data: Record<string, unknown>): bool
  * graph and is called on the *run* path only — never from `saveWorkflow`, so
  * existing workflows with an odd shape stay editable.
  *
- * `errors` block the run; `warnings` do not. A trigger kind this build never
- * arms (`scheduled`, ...) is a warning rather than an error because the graph
- * is still runnable by hand.
+ * `errors` are findings a step cannot work with: the manual run records them on
+ * the run log and stops at the first such node instead of refusing to start
+ * (see `background/workflow-engine/engine.ts`'s `preflightBlockers`). `warnings`
+ * are reported and run through. A trigger kind this build never arms
+ * (`scheduled`, ...) is a warning rather than an error because the graph is
+ * still runnable by hand.
  */
 export function validateWorkflowForRun(workflow: Workflow): WorkflowRunValidation {
-  const errors: string[] = []
-  const warnings: string[] = []
+  const issues: WorkflowRunIssue[] = []
+  /** A finding with no node to blame: it belongs to the workflow as a whole. */
+  const blameGraph = (severity: WorkflowRunSeverity, message: string): void => {
+    issues.push({ severity, nodeName: '', message })
+  }
 
   // NOTE: the goal-spec requirement is NOT a runnability blocker. A graph can
   // run perfectly well without a verifiable business goal — the L3 layer just
@@ -211,18 +314,19 @@ export function validateWorkflowForRun(workflow: Workflow): WorkflowRunValidatio
 
   const triggerNode = triggerNodeOf(workflow)
   if (!triggerNode && !workflow.trigger) {
-    errors.push('工作流缺少触发器：请添加一个 trigger 节点，否则无法运行')
+    blameGraph('error', '工作流缺少触发器：请添加一个 trigger 节点，否则无法运行')
   }
 
   const triggerType =
     (triggerNode?.data?.['type'] as string | undefined) ?? workflow.trigger?.type ?? 'manual'
 
   if (workflow.trigger?.enabled === false) {
-    errors.push('触发器已被禁用：请先启用触发器再运行')
+    blameGraph('error', '触发器已被禁用：请先启用触发器再运行')
   }
 
   if (!isOfferedTriggerType(triggerType)) {
-    warnings.push(
+    blameGraph(
+      'warning',
       `触发器类型 "${triggerType}" 在当前版本不会自动触发，只能手动运行；请在编辑器里改用其他类型`,
     )
   }
@@ -232,13 +336,13 @@ export function validateWorkflowForRun(workflow: Workflow): WorkflowRunValidatio
   if (isOfferedTriggerType(triggerType)) {
     const missing = missingTriggerParam(triggerType, triggerParamsOf(workflow, triggerNode))
     if (missing) {
-      errors.push(`触发器缺少必填参数 "${missing}"，无法运行`)
+      blameGraph('error', `触发器缺少必填参数 "${missing}"，无法运行`)
     }
   }
 
   const actionNodes = workflow.drawflow.nodes.filter((n) => n !== triggerNode)
   if (actionNodes.length === 0) {
-    errors.push('工作流没有可执行的节点：请在触发器之后至少添加一个算子')
+    blameGraph('error', '工作流没有可执行的节点：请在触发器之后至少添加一个算子')
   }
 
   // Generated-workflow page anchor. A manual trigger drives whatever tab is
@@ -253,53 +357,14 @@ export function validateWorkflowForRun(workflow: Workflow): WorkflowRunValidatio
     generationOriginUrl.trim() !== '' &&
     unanchoredElementStart(workflow)
   ) {
-    warnings.push(
+    blameGraph(
+      'warning',
       `该工作流没有导航节点，直接操作生成时的页面（${generationOriginUrl}）。` +
         '手动运行时它操作的是当前活动标签页——请先打开该页面再运行，或在图前加一个 new-tab 节点',
     )
   }
 
-  // Residual dead data. Generation rewrites business literals into references
-  // (see `dynamic-data`), but a workflow can still arrive here holding one: it
-  // was hand-edited, imported, or saved by a path that predates the rewrite.
-  // A warning rather than an error — the step still runs, it just runs with a
-  // frozen value, and only the user can say whether that is what they want.
-  for (const node of actionNodes) {
-    const data = node.data ?? {}
-    for (const site of dataValueSites(blockIdOfNode(node), data)) {
-      // Instruction text (the ai-agent prompt) is a legitimate literal: it is
-      // addressed to the step, not data the replay must re-obtain.
-      if (site.instruction) continue
-      if (hasReference(site.value)) continue
-      warnings.push(
-        `节点 "${nodeDisplayNameOf(node)}" 的 ${site.path.join('.')} 是固定值 "${site.value}"：` +
-          '重放时不会变化，如果它本该随数据改变，请改用 {{变量}} 引用或声明成工作流输入',
-      )
-    }
-  }
-
-  // Required parameters per node — the same contract the generation-time
-  // record gate enforces (see `block-requirements`), applied to EVERY workflow
-  // no matter which path produced it. The empty-locator `element-exists`, the
-  // key-less `press-key` and the url-less `webhook` all die HERE now instead
-  // of failing (or silently doing nothing) mid-run. `'error'` findings block:
-  // the step cannot work, so running it can only surprise. `'warning'` findings
-  // are reported and run anyway — a step that merely does nothing (a scroll
-  // with no delta) is worth far less to the user than the run it would block.
-  for (const node of actionNodes) {
-    const blockId = blockIdOfNode(node)
-    for (const problem of missingRequirements(blockId, node.data ?? {})) {
-      if (problem.severity === 'warning') {
-        warnings.push(
-          `节点 "${nodeDisplayNameOf(node)}" 的参数可能无效 ${problem.key}：${problem.message}`,
-        )
-        continue
-      }
-      errors.push(
-        `节点 "${nodeDisplayNameOf(node)}" 缺少必填参数 ${problem.key}：${problem.message}`,
-      )
-    }
-  }
+  for (const node of actionNodes) issues.push(...nodeRunIssuesOf(node))
 
   // A branch block whose OTHER port has no continuation: generation records
   // only the branch that was taken, so the untaken port often dangles. Replay
@@ -313,10 +378,13 @@ export function validateWorkflowForRun(workflow: Workflow): WorkflowRunValidatio
     const portConnected = (suffix: string): boolean =>
       handles.some((handle) => handle.endsWith(`-${suffix}`))
     if (!portConnected('output-1') || !portConnected('output-2')) {
-      warnings.push(
-        `节点 "${nodeDisplayNameOf(node)}" 是分支节点，` +
-          '但有一条分支没有连接后续节点：重放走到该分支时会直接结束',
-      )
+      issues.push({
+        severity: 'warning',
+        nodeId: node.id,
+        blockId: blockIdOfNode(node),
+        nodeName: nodeDisplayNameOf(node),
+        message: `是分支节点，但有一条分支没有连接后续节点：` + '重放走到该分支时会直接结束',
+      })
     }
   }
 
@@ -332,22 +400,34 @@ export function validateWorkflowForRun(workflow: Workflow): WorkflowRunValidatio
       .slice(0, index === -1 ? undefined : index)
       .some((earlier) => producesTableRows(blockIdOfNode(earlier), earlier.data ?? {}))
     if (!produced) {
-      warnings.push(
-        `节点 "${nodeDisplayNameOf(node)}" 导出的是数据表，` +
+      issues.push({
+        severity: 'warning',
+        nodeId: node.id,
+        blockId: 'export-data',
+        nodeName: nodeDisplayNameOf(node),
+        message:
+          `导出的是数据表，` +
           '但它之前没有任何采集节点（get-text / read-page 开 saveData 并填 dataColumn）——重放时会因数据表为空而报错',
-      )
+      })
     }
   }
 
   const nodeIds = new Set(workflow.drawflow.nodes.map((n) => n.id))
   for (const edge of workflow.drawflow.edges) {
     if (!nodeIds.has(edge.source)) {
-      errors.push(`存在无效连线：源节点 "${edge.source}" 不存在`)
+      blameGraph('error', `存在无效连线：源节点 "${edge.source}" 不存在`)
     }
     if (!nodeIds.has(edge.target)) {
-      errors.push(`存在无效连线：目标节点 "${edge.target}" 不存在`)
+      blameGraph('error', `存在无效连线：目标节点 "${edge.target}" 不存在`)
     }
   }
 
-  return { errors, warnings }
+  const errors = issues
+    .filter((issue) => issue.severity === 'error')
+    .map((issue) => formatRunIssue(issue))
+  const warnings = issues
+    .filter((issue) => issue.severity === 'warning')
+    .map((issue) => formatRunIssue(issue))
+
+  return { errors, warnings, issues }
 }

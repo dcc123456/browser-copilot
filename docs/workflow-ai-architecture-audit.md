@@ -180,17 +180,17 @@ export interface HistoryEntry {
 
 ### 4.2 Run 入口
 
-| 入口            | 位置                                                                                          | 备注                                                                                                              |
-| --------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| 手动运行        | 消息 `workflows.run`，`index.ts:1309-1370`                                                    | 先 `validateWorkflowForRun`（errors 阻断，warnings 仅 console）；可选 `settings.takeoverOnRun` 挂单次 AI takeover |
-| Resume          | `workflows.resumePoint`（`index.ts:1372`）/ `workflows.resume`（`:1400`）                     | 基于 checkpoint 恢复                                                                                              |
-| 定时调度        | `src/background/scheduler.ts` → `executeWorkflow`                                             | 经过 alarm                                                                                                        |
-| 页面触发        | `src/background/workflow-triggers.ts`（visit-web / element-change / context-menu / shortcut） | `index.ts:369` 等处                                                                                               |
-| AI Debug / 修复 | `debug-session.ts`、`repair/*` 经 `background-runner.ts` 调用同一 `executeWorkflow`           |                                                                                                                   |
+| 入口            | 位置                                                                                          | 备注                                                                                                                                                                                                                                           |
+| --------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 手动运行        | 消息 `workflows.run`，`index.ts:1537-1729`                                                    | `validateWorkflowForRun`（`index.ts:1552`）的 findings **不再阻断**：随运行写进 run log（每个缺参算子一行，带 nodeId），引擎走到第一个这样的算子前停住（`engine.ts` 的 `preflightBlockers`）；可选 `settings.takeoverOnRun` 挂单次 AI takeover |
+| Resume          | `workflows.resumePoint`（`index.ts:1372`）/ `workflows.resume`（`:1400`）                     | 基于 checkpoint 恢复                                                                                                                                                                                                                           |
+| 定时调度        | `src/background/scheduler.ts` → `executeWorkflow`                                             | 经过 alarm                                                                                                                                                                                                                                     |
+| 页面触发        | `src/background/workflow-triggers.ts`（visit-web / element-change / context-menu / shortcut） | `index.ts:369` 等处                                                                                                                                                                                                                            |
+| AI Debug / 修复 | `debug-session.ts`、`repair/*` 经 `background-runner.ts` 调用同一 `executeWorkflow`           |                                                                                                                                                                                                                                                |
 
 ### 4.3 Preflight / selector / readiness / postcondition / goal
 
-- **Preflight**：手动运行走 `validateWorkflowForRun`（`index.ts:1319`；实现在 `src/lib/workflow/runnability.ts`）；`executeWorkflow` 内对 strict 工作流再跑 `validateGeneratedWorkflow`（`run-workflow.ts:467`）。两者均**非阻断**于引擎层（手动入口的 runnability errors 阻断）。
+- **Preflight**：手动运行走 `validateWorkflowForRun`（`index.ts:1552`；实现在 `src/lib/workflow/validation.ts`，返回结构化 `issues`，每条带 `nodeId`/`blockId`/`param`）；`executeWorkflow` 内对 strict 工作流再跑 `validateGeneratedWorkflow`（`run-workflow.ts:636`）。两者均**非阻断**：error 级发现逐条写进 run log（每行带 nodeId，供日志「定位」跳回画布），并由 `engine.ts` 的 `preflightBlockers` 让运行停在缺参算子之前——不触碰页面，也不会把「没填定位」误报成 `READINESS_TIMEOUT`（见 `specs/2026-10-06-run-preflight-log-design.md`）。
 - **Selector resolve**：节点参数经 `interpolateParams`（`engine.ts:574`）；executor 内部通过 target/sel 辅助把 selector 转成 kernel target（另见 `src/lib/workflow/target-to-selector.ts`、`src/background/selector-probe.ts`）。
 - **Readiness**：`prepareNodeExecution` / `verifyPostActionReadiness`（`engine.ts:725,744`）→ `readiness-engine.ts`，每次 poll 由 `createDriverReadinessProbe`（`run-workflow.ts:217`）做**新鲜观测**。支持状态：`present / visible / enabled / stable / navigation-settled / value-committed / data-ready`（`readiness.ts:20`）。默认窗口 8000ms、间隔 150ms（`readiness.ts:53-56`）。
 - **Postcondition**：`engine.ts:761-768`，通过 `evaluateCondition`（`run-workflow.ts:539` → `condition-runtime.ts`）对 `nodeSpec.postconditions` 逐条求值。
@@ -281,36 +281,36 @@ Reliability bench（`tests/reliability-benchmark.spec.ts`，fixtures `specs/reli
 
 ## 6. 已有模块 ↔ 计划能力映射
 
-| 计划能力                     | 状态            | 现有落点                                                                                                                                                  |
-| ---------------------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Workflow IR                  | MISSING         | 无（draft 是最接近物：`operator-tool-handler.ts WorkflowDraft`，但仍直接等于节点 JSON）                                                                   |
-| Block Capability Catalog     | PARTIAL         | `src/lib/workflow/blocks/catalog.ts:91 BLOCK_CATALOG`（56 块，含 data 默认值/handle 数），但无 actions/inputVars/outputVars/sideEffect 语义字段           |
-| 变量 Def-Use                 | PARTIAL         | `src/lib/workflow/dynamic-data.ts`（字面量→ref、引用提取 `referencesIn`）、`repair/dataflow-analyzer.ts`（producer/consumer 图）；无 IR 级 def/use/mutate |
-| Trace Event Schema           | PARTIAL         | `HistoryEntry`（types.ts:407）、`repair/types.ts ExecutionTrace/NodeExecutionTrace`；缺计划要求的统一 `WorkflowTraceEvent`（page/target/result/retryOf）  |
-| Trace Normalizer             | PARTIAL         | `history-compile.ts` 过滤失败/按 at 排序；无 exploration/重试噪声分离与 evidence 保留                                                                     |
-| Live Locator Probe           | PARTIAL         | `workflows.probe`（index.ts:1228）、`selector-probe.ts`、保存时 `hardenWorkflowSelectors`（index.ts:1179）；非五层证据、非生成时强制                      |
-| Semantic Locator Ranking     | PARTIAL         | `src/lib/workflow/locator-score.ts`、`reliability.ts STRICT_MIN_SCORE/MARGIN`；缺带 reasons/matchedSignals 的评分结构                                     |
-| Actionability                | PARTIAL         | kernel `actionability` op（`run-workflow.ts:254`）；无独立 actionability 结果结构（obscured/frame/shadow）                                                |
-| Ambiguity Handling           | PARTIAL         | strict 歧义策略 `score` + margin（`reliability.ts:348-353`）、R03 基准；无“margin 不足→fail/escalate”完整产品流                                           |
-| Selector Memory              | MISSING         | 无（`failure-memory.ts` 是失败记忆，非 selector 成功记忆）                                                                                                |
-| CFG-aware Dataflow           | MISSING         | 当前 `validateDataFlow`（`generated-validation.ts:212`）用全局 `written` Set，**非控制流感知**（计划 P0 缺陷，已确认）                                    |
-| Preflight Report             | PARTIAL         | `runnability.ts validateWorkflowForRun`；无统一 `WorkflowPreflightReport`（blockers/warnings/evidence/recommendedActions）                                |
-| Action Ledger                | PARTIAL         | checkpoint 带 side-effect phase（engine.ts:739/769、checkpoints.ts CheckpointPhase）；无独立账本与 run 内 at-most-once 查询                               |
-| At-most-once Guard           | PARTIAL         | 终态跳过（engine.ts:661-679）、resume 的 SIDE_EFFECT_UNKNOWN 拒绝（run-workflow.ts:419-440）、R09；无 run 内 ledger check 的统一前置守卫                  |
-| Terminal State Guard         | EXISTS          | `goalSpec.terminalStateConditions`（reliability.ts:66）、终态跳过逻辑、S9                                                                                 |
-| Pre/Post Evidence Capture    | PARTIAL         | `execution-evidence.ts`、TraceCollector 的 before/after 变量、checkpoint phase；无受控的高风险节点 evidence 清单（URL/text/attr）                         |
-| Resume Safety                | EXISTS/PARTIAL  | `run-workflow.ts:414-460` + checkpoints 指纹校验；依赖 checkpoints 开启                                                                                   |
-| Failure Taxonomy Runtime     | PARTIAL         | 三套并行词表（见 §5.1），缺统一 `WorkflowFailure` 对象                                                                                                    |
-| Deterministic Repair Library | PARTIAL         | Path B 有确定性 diagnose；Path A 无确定性 repair，分类 hint 未被消费                                                                                      |
-| Patch Schema                 | PARTIAL         | `repair/types.ts WorkflowPatchSet`（在用）+ `reliability-patch.ts`（未接线）；无统一 patch 的 preview/rollback 元数据                                     |
-| Patch Scope Guard            | PARTIAL         | `patch-policy.ts` allowedNodeIds/allowedParamPaths、PROTECTED_PARAMS；Path A 的 `patchNodeParams` 无 scope guard                                          |
-| Regression Detection         | PARTIAL         | R01–R10 / debug bench 回归；补丁后自动跑 certified 子集的产品机制缺失                                                                                     |
-| Replay Compiler              | PARTIAL         | `repair/replay-engine.ts`；`startAt` 被生产适配器丢弃                                                                                                     |
-| DOM Perturbation Fixtures    | MISSING/PARTIAL | R 系列覆盖部分漂移；无计划列举的 10 类 mutation fixture                                                                                                   |
-| Workflow Version Diff        | MISSING         | 无 patch history 版本链                                                                                                                                   |
-| Reliability Report           | PARTIAL         | `saveWarnings` / 验证报告；无 evidence+blockers+recommendedAction 的结构化报告                                                                            |
-| Certification Gates          | PARTIAL         | 状态机 `reliability-certification.ts:24-109` 完整；未接入 schedule/trigger 产品门槛                                                                       |
-| Run Metrics                  | PARTIAL         | takeover-stats、benchmark metrics；无统一 `WorkflowRunMetrics`（l1/l2/l3/aiCalls/…）                                                                      |
+| 计划能力                     | 状态            | 现有落点                                                                                                                                                                                       |
+| ---------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Workflow IR                  | MISSING         | 无（draft 是最接近物：`operator-tool-handler.ts WorkflowDraft`，但仍直接等于节点 JSON）                                                                                                        |
+| Block Capability Catalog     | PARTIAL         | `src/lib/workflow/blocks/catalog.ts:91 BLOCK_CATALOG`（56 块，含 data 默认值/handle 数），但无 actions/inputVars/outputVars/sideEffect 语义字段                                                |
+| 变量 Def-Use                 | PARTIAL         | `src/lib/workflow/dynamic-data.ts`（字面量→ref、引用提取 `referencesIn`）、`repair/dataflow-analyzer.ts`（producer/consumer 图）；无 IR 级 def/use/mutate                                      |
+| Trace Event Schema           | PARTIAL         | `HistoryEntry`（types.ts:407）、`repair/types.ts ExecutionTrace/NodeExecutionTrace`；缺计划要求的统一 `WorkflowTraceEvent`（page/target/result/retryOf）                                       |
+| Trace Normalizer             | PARTIAL         | `history-compile.ts` 过滤失败/按 at 排序；无 exploration/重试噪声分离与 evidence 保留                                                                                                          |
+| Live Locator Probe           | PARTIAL         | `workflows.probe`（index.ts:1228）、`selector-probe.ts`、保存时 `hardenWorkflowSelectors`（index.ts:1179）；非五层证据、非生成时强制                                                           |
+| Semantic Locator Ranking     | PARTIAL         | `src/lib/workflow/locator-score.ts`、`reliability.ts STRICT_MIN_SCORE/MARGIN`；缺带 reasons/matchedSignals 的评分结构                                                                          |
+| Actionability                | PARTIAL         | kernel `actionability` op（`run-workflow.ts:254`）；无独立 actionability 结果结构（obscured/frame/shadow）                                                                                     |
+| Ambiguity Handling           | PARTIAL         | strict 歧义策略 `score` + margin（`reliability.ts:348-353`）、R03 基准；无“margin 不足→fail/escalate”完整产品流                                                                                |
+| Selector Memory              | MISSING         | 无（`failure-memory.ts` 是失败记忆，非 selector 成功记忆）                                                                                                                                     |
+| CFG-aware Dataflow           | MISSING         | 当前 `validateDataFlow`（`generated-validation.ts:212`）用全局 `written` Set，**非控制流感知**（计划 P0 缺陷，已确认）                                                                         |
+| Preflight Report             | PARTIAL         | `validation.ts validateWorkflowForRun` 已返回结构化 `WorkflowRunIssue`（severity / nodeId / blockId / param / message），运行日志逐行归责到算子；仍无统一的 evidence / recommendedActions 字段 |
+| Action Ledger                | PARTIAL         | checkpoint 带 side-effect phase（engine.ts:739/769、checkpoints.ts CheckpointPhase）；无独立账本与 run 内 at-most-once 查询                                                                    |
+| At-most-once Guard           | PARTIAL         | 终态跳过（engine.ts:661-679）、resume 的 SIDE_EFFECT_UNKNOWN 拒绝（run-workflow.ts:419-440）、R09；无 run 内 ledger check 的统一前置守卫                                                       |
+| Terminal State Guard         | EXISTS          | `goalSpec.terminalStateConditions`（reliability.ts:66）、终态跳过逻辑、S9                                                                                                                      |
+| Pre/Post Evidence Capture    | PARTIAL         | `execution-evidence.ts`、TraceCollector 的 before/after 变量、checkpoint phase；无受控的高风险节点 evidence 清单（URL/text/attr）                                                              |
+| Resume Safety                | EXISTS/PARTIAL  | `run-workflow.ts:414-460` + checkpoints 指纹校验；依赖 checkpoints 开启                                                                                                                        |
+| Failure Taxonomy Runtime     | PARTIAL         | 三套并行词表（见 §5.1），缺统一 `WorkflowFailure` 对象                                                                                                                                         |
+| Deterministic Repair Library | PARTIAL         | Path B 有确定性 diagnose；Path A 无确定性 repair，分类 hint 未被消费                                                                                                                           |
+| Patch Schema                 | PARTIAL         | `repair/types.ts WorkflowPatchSet`（在用）+ `reliability-patch.ts`（未接线）；无统一 patch 的 preview/rollback 元数据                                                                          |
+| Patch Scope Guard            | PARTIAL         | `patch-policy.ts` allowedNodeIds/allowedParamPaths、PROTECTED_PARAMS；Path A 的 `patchNodeParams` 无 scope guard                                                                               |
+| Regression Detection         | PARTIAL         | R01–R10 / debug bench 回归；补丁后自动跑 certified 子集的产品机制缺失                                                                                                                          |
+| Replay Compiler              | PARTIAL         | `repair/replay-engine.ts`；`startAt` 被生产适配器丢弃                                                                                                                                          |
+| DOM Perturbation Fixtures    | MISSING/PARTIAL | R 系列覆盖部分漂移；无计划列举的 10 类 mutation fixture                                                                                                                                        |
+| Workflow Version Diff        | MISSING         | 无 patch history 版本链                                                                                                                                                                        |
+| Reliability Report           | PARTIAL         | `saveWarnings` / 验证报告；无 evidence+blockers+recommendedAction 的结构化报告                                                                                                                 |
+| Certification Gates          | PARTIAL         | 状态机 `reliability-certification.ts:24-109` 完整；未接入 schedule/trigger 产品门槛                                                                                                            |
+| Run Metrics                  | PARTIAL         | takeover-stats、benchmark metrics；无统一 `WorkflowRunMetrics`（l1/l2/l3/aiCalls/…）                                                                                                           |
 
 ---
 

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { validateWorkflowForRun } from '../src/lib/workflow/validation'
+import {
+  formatRunIssue,
+  nodeRunIssuesOf,
+  validateWorkflowForRun,
+} from '../src/lib/workflow/validation'
 import { OFFERED_TRIGGER_TYPES, isOfferedTriggerType } from '../src/lib/workflow/trigger-options'
 import type { Workflow, WorkflowNode } from '../src/lib/workflow/types'
 
@@ -315,6 +319,76 @@ describe('validateWorkflowForRun', () => {
       }),
     )
     expect(out.errors.some((e) => e.includes('要按的键'))).toBe(true)
+  })
+})
+
+describe('the run gate’s findings are structured, not just prose', () => {
+  // The strings stay (the save card and the callers read them), but a caller
+  // that wants to highlight the offending node must not parse a sentence back
+  // into an id — `issues` carries the handles.
+  const broken = workflow({
+    drawflow: {
+      nodes: [
+        node('t', 'trigger', { type: 'manual' }),
+        node('g', 'get-text', { description: '读取草稿标题', selector: '' }),
+      ],
+      edges: [{ id: 'e1', source: 't', target: 'g' }],
+    },
+  })
+
+  it('blames the node, its block and the parameter at fault', () => {
+    const issue = validateWorkflowForRun(broken).issues.find((i) => i.param === 'selector')
+    expect(issue).toMatchObject({
+      severity: 'error',
+      nodeId: 'g',
+      blockId: 'get-text',
+      nodeName: 'Get text: 读取草稿标题',
+    })
+    expect(issue?.message).toContain('缺少必填参数 selector')
+  })
+
+  it('renders the same findings as the strings callers already read', () => {
+    const out = validateWorkflowForRun(broken)
+    expect(out.errors).toEqual(out.issues.filter((i) => i.severity === 'error').map(formatRunIssue))
+    expect(out.warnings).toEqual(
+      out.issues.filter((i) => i.severity === 'warning').map(formatRunIssue),
+    )
+  })
+
+  it('leaves a workflow-level finding without a node to blame', () => {
+    const out = validateWorkflowForRun(
+      workflow({
+        trigger: undefined,
+        drawflow: { nodes: [node('a', 'event-click', { selector: '#x' })], edges: [] },
+      }),
+    )
+    const missingTrigger = out.issues.find((i) => i.message.includes('缺少触发器'))
+    expect(missingTrigger?.nodeId).toBeUndefined()
+    expect(missingTrigger?.nodeName).toBe('')
+    // No node prefix when there is no node to prefix.
+    expect(formatRunIssue(out.issues[0]!)).toBe(out.issues[0]!.message)
+  })
+
+  it('gives the editor the very rule the gate used, per node', () => {
+    // The canvas marks a node red as the user types, before any run. Same
+    // helper, so the badge and the run log can never disagree.
+    const perNode = nodeRunIssuesOf(node('g', 'get-text', { description: 'x', selector: '' }))
+    const graphGate = validateWorkflowForRun(
+      workflow({
+        drawflow: {
+          nodes: [
+            node('t', 'trigger', { type: 'manual' }),
+            node('g', 'get-text', { description: 'x', selector: '' }),
+          ],
+          edges: [],
+        },
+      }),
+    )
+    expect(perNode.filter((i) => i.severity === 'error').map((i) => i.message)).toEqual(
+      graphGate.issues
+        .filter((i) => i.severity === 'error' && i.nodeId === 'g')
+        .map((i) => i.message),
+    )
   })
 })
 

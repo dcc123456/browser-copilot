@@ -53,6 +53,8 @@ export interface BlockNodeData extends Record<string, unknown> {
   running?: boolean
   /** Outcome from the last run, for the node border tint. */
   runState?: 'done' | 'error'
+  /** Why the run gate says this node cannot work; shown as the alert tooltip. */
+  blockedReason?: string
   /** Hover-toolbar callbacks, injected by the editor (see App.tsx). */
   actions?: BlockNodeActions
 }
@@ -153,7 +155,7 @@ function BlockNodeComponent({ id, data, selected }: NodeProps) {
     (typeof bd.selector === 'string' && bd.selector) ||
     (typeof bd.url === 'string' && bd.url) ||
     ''
-  const hasError = false // validation wired in P4 once forms land
+  const hasError = node.runState === 'error'
   const branches = BRANCH_HANDLES[block.id]
   const branchHandles =
     branches ??
@@ -195,7 +197,13 @@ function BlockNodeComponent({ id, data, selected }: NodeProps) {
           <BlockIcon icon={block.icon} size={16} />
         </span>
         <div className="wf-node-text">
-          {hasError && <TriangleAlert size={13} className="wf-node-alert" />}
+          {hasError && (
+            // The run gate's own sentence, so the badge answers "which
+            // parameter is missing" without the user opening the block.
+            <span className="wf-node-alert" title={node.blockedReason}>
+              <TriangleAlert size={13} />
+            </span>
+          )}
           <p className="wf-node-name">{node.label || displayName}</p>
           {summary && <p className="wf-node-desc">{summary}</p>}
           {nodeGoal && (
