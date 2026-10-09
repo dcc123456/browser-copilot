@@ -435,8 +435,7 @@ function readShadowActionability(this: ProbeNode): {
   occluded: boolean
   rect: { x: number; y: number; w: number; h: number } | null
 } {
-  const self = this
-  const measured = self.getBoundingClientRect?.()
+  const measured = this.getBoundingClientRect?.()
   const rect = measured
     ? { x: measured.x, y: measured.y, w: measured.width, h: measured.height }
     : null
@@ -449,16 +448,25 @@ function readShadowActionability(this: ProbeNode): {
     const root = node.getRootNode ? node.getRootNode() : null
     return root?.host ?? null
   }
+  // The composed path from this node up to the document root, bounded so a
+  // detached or cyclic tree can never spin the injected function. Starting from
+  // a parameter rather than `this` keeps the walk reusable for both reads below.
+  const composedAncestors = (start: ProbeNode): ProbeNode[] => {
+    const chain: ProbeNode[] = []
+    let node: ProbeNode | null = start
+    for (let depth = 0; node && depth < 64; depth += 1) {
+      chain.push(node)
+      node = composedParent(node)
+    }
+    return chain
+  }
 
   let visible =
-    self.isConnected !== false && !!measured && measured.width > 0 && measured.height > 0
-  // A function handed to `Runtime.callFunctionOn` runs in strict mode, where
-  // reading a property of `null` throws instead of yielding undefined: the
-  // parent walk must stop on the condition, not in the call.
-  let node: ProbeNode | null | undefined = self
-  for (let depth = 0; visible && node && depth < 64; depth += 1) {
-    if (node.nodeType === 1) {
-      const style = getComputedStyle(node as unknown as Element)
+    this.isConnected !== false && !!measured && measured.width > 0 && measured.height > 0
+  if (visible) {
+    for (const ancestor of composedAncestors(this)) {
+      if (ancestor.nodeType !== 1) continue
+      const style = getComputedStyle(ancestor as unknown as Element)
       if (
         style.display === 'none' ||
         style.visibility === 'hidden' ||
@@ -466,12 +474,12 @@ function readShadowActionability(this: ProbeNode): {
         Number(style.opacity) === 0
       ) {
         visible = false
+        break
       }
     }
-    node = node ? composedParent(node) : null
   }
 
-  let enabled = self.disabled !== true && self.getAttribute?.('aria-disabled') !== 'true'
+  const enabled = this.disabled !== true && this.getAttribute?.('aria-disabled') !== 'true'
 
   // `elementFromPoint` retargets through the shadow boundary and reports the
   // light-DOM HOST, so "occluded" is decided by whether the hit lands anywhere
@@ -482,17 +490,8 @@ function readShadowActionability(this: ProbeNode): {
       measured.left + measured.width / 2,
       measured.top + measured.height / 2,
     ) as ProbeNode | null
-    if (hit && hit !== self && self.contains?.(hit) !== true) {
-      let onOwnPath = false
-      let up: ProbeNode | null = self
-      for (let depth = 0; up && depth < 64; depth += 1) {
-        if (up === hit) {
-          onOwnPath = true
-          break
-        }
-        up = composedParent(up)
-      }
-      occluded = !onOwnPath
+    if (hit && hit !== this && this.contains?.(hit) !== true) {
+      occluded = !composedAncestors(this).includes(hit)
     }
   }
 
@@ -521,7 +520,9 @@ async function readRenderedState(
       functionDeclaration: readShadowActionability.toString(),
       returnByValue: true,
     })) as {
-      result?: { value?: { visible?: unknown; enabled?: unknown; occluded?: unknown; rect?: unknown } }
+      result?: {
+        value?: { visible?: unknown; enabled?: unknown; occluded?: unknown; rect?: unknown }
+      }
     }
     const value = call.result?.value
     if (!value || typeof value.visible !== 'boolean') throw new Error('unreadable value')
@@ -561,10 +562,7 @@ async function readRenderedState(
  * condition otherwise get an empty kernel result for such a target and time out
  * on a button the driver can click all day.
  */
-export async function probeClosedShadow(
-  session: CdpSession,
-  target: Target,
-): Promise<ShadowProbe> {
+export async function probeClosedShadow(session: CdpSession, target: Target): Promise<ShadowProbe> {
   const doc = (await session.send('DOM.getDocument', {
     depth: -1,
     pierce: true,
