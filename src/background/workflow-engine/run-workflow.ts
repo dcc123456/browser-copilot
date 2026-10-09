@@ -56,6 +56,8 @@ import { DEFAULT_GOAL_VERIFY_SETTLE_MS, verifyGoalSpec } from './goal-verifier'
 import { workflowFingerprintOf } from '../../lib/workflow/checkpoints'
 import { goalSpecOf, isGeneratedStrict } from '../../lib/workflow/reliability'
 import { validateGeneratedWorkflow } from '../../lib/workflow/generated-validation'
+import { formatRunIssue } from '../../lib/workflow/validation'
+import type { WorkflowRunIssue } from '../../lib/workflow/validation'
 import { TraceCollector } from '../../lib/workflow/execution-trace'
 import { traceFailureFrom } from '../../lib/workflow/repair/failure-classifier'
 import type { TraceEntry } from '../../lib/workflow/repair/types'
@@ -195,6 +197,18 @@ export interface ExecuteWorkflowOptions {
    * The run keeps honoring `tasks.cancel` regardless.
    */
   signal?: AbortSignal
+  /**
+   * The manual run gate's findings (`lib/workflow/validation`'s
+   * `validateWorkflowForRun`), recorded ON THE RUN instead of refusing it.
+   *
+   * Only the user-initiated path passes this: alarm / context-menu / shortcut
+   * triggers reach a graph that is already known-good, and `executeWorkflow`
+   * itself must stay permissive. The findings are written to the run log — the
+   * node-scoped `error` ones also stop the engine at that node, which is what
+   * makes them worth reporting rather than swallowing: a step with no locator
+   * would otherwise burn its readiness timeout and blame the page.
+   */
+  preflight?: WorkflowRunIssue[]
 }
 
 export interface ExecuteWorkflowResult {
@@ -341,8 +355,7 @@ export function createDriverReadinessProbe(
           scope,
         ).catch(() => undefined)
         const data = result?.data as
-          | { state?: string; visible?: boolean; enabled?: boolean; fileInput?: boolean }
-          | undefined
+          { state?: string; visible?: boolean; enabled?: boolean; fileInput?: boolean } | undefined
         if (!data?.state) return { satisfied: false, detail: '元素尚未出现' }
         if (data.state === 'missing') return { satisfied: false, detail: '元素尚未出现' }
         // `state: 'ready'` is visible ∧ enabled ∧ unoccluded — using it for a
@@ -632,6 +645,74 @@ export async function executeWorkflow(
         )
       }
     }
+    // The manual run gate's findings, RECORDED rather than thrown: the user
+    // reads them on the run log beside the steps that did run, and the engine
+    // stops at the first node that cannot work. `throw`ing here used to mean no
+    // run, no log, and a toast of prose pointing at no node the canvas could
+    // scroll to (see specs/2026-10-06-run-preflight-log-design.md).
+    const preflight = opts.preflight ?? []
+    const preflightErrors = preflight.filter((issue) => issue.severity === 'error')
+    const preflightWarnings = preflight.filter((issue) => issue.severity === 'warning')
+    // One row per blameable node: the run log groups by node and the editor can
+    // jump to the node the row names. Findings with no node to blame (a missing
+    // trigger, a dangling edge) share one row, because nothing can be scrolled
+    // to for them.
+    const nodeBlockers: { nodeId: string; issue: WorkflowRunIssue }[] = []
+    const graphBlockers: WorkflowRunIssue[] = []
+    for (const issue of preflightErrors) {
+      if (issue.nodeId) nodeBlockers.push({ nodeId: issue.nodeId, issue })
+      else graphBlockers.push(issue)
+    }
+    if (graphBlockers.length > 0) {
+      addStep(
+        runId,
+        'error',
+        `工作流级问题 ${graphBlockers.length} 处（没有对应的算子可定位）：\n` +
+          graphBlockers.map((issue) => issue.message).join('\n'),
+      )
+    }
+    if (nodeBlockers.length > 0) {
+      addStep(
+        runId,
+        'error',
+        `运行前检查：${nodeBlockers.length} 个算子缺少必填参数，无法执行。` +
+          '运行已照常启动，并会在第一个这样的算子前停止（不触碰页面）。',
+      )
+      // The row keeps the node id so the editor can mark it red and scroll to
+      // it; the text still names the node, because a persisted log is read by
+      // someone who has no graph in front of them.
+      for (const blocker of nodeBlockers.slice(0, 20)) {
+        addStep(runId, 'error', formatRunIssue(blocker.issue), {
+          nodeId: blocker.nodeId,
+          label: blocker.issue.nodeName,
+        })
+      }
+      if (nodeBlockers.length > 20) {
+        addStep(runId, 'error', `……另有 ${nodeBlockers.length - 20} 个算子同样缺参`)
+      }
+    }
+    if (preflightWarnings.length > 0) {
+      addStep(
+        runId,
+        'status',
+        `运行前检查：${preflightWarnings.length} 条提示（不阻止运行）：\n` +
+          preflightWarnings
+            .slice(0, 20)
+            .map((issue) => `- ${formatRunIssue(issue)}`)
+            .join('\n') +
+          (preflightWarnings.length > 20 ? `\n- …另有 ${preflightWarnings.length - 20} 条` : ''),
+      )
+    }
+    // nodeId → what the engine reports when it stops in front of that node. The
+    // engine emits it UNDER that node's own log header, so unlike the rows
+    // above it must not repeat the node's name.
+    const preflightBlockers: Record<string, string> = {}
+    for (const blocker of nodeBlockers) {
+      const seen = preflightBlockers[blocker.nodeId]
+      preflightBlockers[blocker.nodeId] = seen
+        ? `${seen}\n${blocker.issue.message}`
+        : blocker.issue.message
+    }
     // --- Trace node state machine ----------------------------------------
     // The engine reports 'tool' (node entered), 'info' (retrying),
     // 'result'/'error' (settled via a block emit) and 'checkpoint' (durable
@@ -686,6 +767,7 @@ export async function executeWorkflow(
       ...(opts.stopBefore ? { stopBefore: opts.stopBefore } : {}),
       ...(scope ? { scope } : {}),
       ...(opts.aiTakeover ? { aiTakeover: opts.aiTakeover } : {}),
+      ...(Object.keys(preflightBlockers).length > 0 ? { preflightBlockers } : {}),
       // Generated-strict readiness: the real probe reads live page state per
       // poll (element presence/visibility, committed values, tab settle).
       readinessProbe: createDriverReadinessProbe(runSignal, scope),

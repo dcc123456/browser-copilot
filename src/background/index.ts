@@ -169,10 +169,7 @@ import { createAiTakeover } from './workflow-engine/ai-takeover'
 import { runDebugSession, DEFAULT_MAX_ROUNDS } from './workflow-engine/debug-session'
 import { runUnifiedDebug } from './workflow-engine/repair/unified-debug'
 import { runNodeFix } from './workflow-engine/node-fix-engine'
-import type {
-  RecoveryPhaseState,
-  RecoveryProtocolStatus,
-} from '../lib/workflow/recovery-protocol'
+import type { RecoveryPhaseState, RecoveryProtocolStatus } from '../lib/workflow/recovery-protocol'
 import {
   commitWorkflowRevision,
   currentRevisionOf,
@@ -209,7 +206,11 @@ import type {
 import { isGeneratedStrict } from '../lib/workflow/reliability'
 // Static imports — same SW dynamic-import crash fix as above.
 import { applySelfHeal } from '../lib/workflow/self-heal'
-import { DEFAULT_GOAL_SETTLE_MS, verifyWorkflowGoal, type VerificationReport } from './workflow-engine/goal-verification'
+import {
+  DEFAULT_GOAL_SETTLE_MS,
+  verifyWorkflowGoal,
+  type VerificationReport,
+} from './workflow-engine/goal-verification'
 import { latestFirstRuns, observeFirstRunOfRevision } from '../lib/workflow/replay-metrics'
 import { runUnattendedPrompt } from './agent-unattended'
 import { streamCompletion } from '../lib/llm'
@@ -547,9 +548,7 @@ async function applyAndVerifyConfirmedPatch(
     analysis: input.analysis,
     workingCopy,
     verification,
-    ...(verification.verified
-      ? {}
-      : { reason: replayOutcome.error ?? 'replay did not verify' }),
+    ...(verification.verified ? {} : { reason: replayOutcome.error ?? 'replay did not verify' }),
   }
 }
 
@@ -1537,18 +1536,19 @@ async function handleCommand(
     case 'workflows.run': {
       const workflow = await getWorkflow(command.id)
       if (!workflow) throw new Error('Workflow not found.')
-      // Refuse to start a workflow that cannot work. This gate is ONLY on the
-      // user-initiated run path: `executeWorkflow` itself must stay permissive,
-      // because the alarm / context-menu / shortcut triggers reach it with
-      // graphs that are already known-good, and a newly added rule must not be
-      // able to break them. Warnings are surfaced to the run log instead of
-      // blocking — an unarmed trigger kind still runs perfectly well when the
-      // user starts it by hand.
+      // The run gate NEVER refuses to start the workflow: its findings are
+      // handed to the run, which writes them into the run log beside the steps
+      // that did execute and stops the engine at the first node that cannot
+      // work. Refusing over the whole graph with a thrown wall of prose left the
+      // user with no run log, no node to find on the canvas, and every working
+      // step undone by one unfilled locator
+      // (specs/2026-10-06-run-preflight-log-design.md).
+      //
+      // This gate is ONLY on the user-initiated run path: `executeWorkflow`
+      // itself stays permissive, because the alarm / context-menu / shortcut
+      // triggers reach it with graphs that are already known-good, and a newly
+      // added rule must not be able to break them.
       const gate = validateWorkflowForRun(workflow)
-      if (gate.errors.length > 0) {
-        throw new Error(`无法运行该工作流：\n${gate.errors.map((e) => `· ${e}`).join('\n')}`)
-      }
-      for (const warning of gate.warnings) console.warn(`[workflows.run] ${warning}`)
       // Optional AI takeover on plain runs (settings.takeoverOnRun, default
       // off): a failed node gets one agent episode, its fix lands as pending
       // for user confirmation — same closure as the debug session, without
@@ -1578,6 +1578,9 @@ async function handleCommand(
       }
       const r = await executeWorkflow(workflow, {
         source: 'manual',
+        // The gate's findings ride ON THE RUN: they land in the run log and
+        // stop the engine at the first node that cannot work.
+        preflight: gate.issues,
         startAt: (command as { startAt?: string }).startAt,
         debug: workflow.settings?.debugMode === true,
         ...(takeover ? { aiTakeover: takeover } : {}),
@@ -1656,11 +1659,14 @@ async function handleCommand(
       let certification: VerificationReport | undefined
       if (runOk && healed.settings?.goalSpec) {
         try {
-          const scopeWindow = scopeWindowId === undefined
-            ? undefined
-            : await normalScopeFromWindowId(scopeWindowId).catch(() => undefined)
+          const scopeWindow =
+            scopeWindowId === undefined
+              ? undefined
+              : await normalScopeFromWindowId(scopeWindowId).catch(() => undefined)
           const probe = createDriverConditionProbe(new AbortController().signal, scopeWindow)
-          certification = await verifyWorkflowGoal(healed, r, probe, { settleMs: DEFAULT_GOAL_SETTLE_MS })
+          certification = await verifyWorkflowGoal(healed, r, probe, {
+            settleMs: DEFAULT_GOAL_SETTLE_MS,
+          })
           healed = {
             ...healed,
             settings: {
@@ -2428,8 +2434,12 @@ async function handleCommand(
       // CANCEL discards. De-dupe identical in-flight actions (double click).
       const key = `${command.requestId}:${command.action}`
       if (recoveryActionSeen.has(key)) {
-        return recoveryEnvelopeResult(command, recoveryOutcomeFor(command.requestId),
-          'duplicate action ignored', command.timestamp)
+        return recoveryEnvelopeResult(
+          command,
+          recoveryOutcomeFor(command.requestId),
+          'duplicate action ignored',
+          command.timestamp,
+        )
       }
       recoveryActionSeen.add(key)
 
@@ -2439,10 +2449,15 @@ async function handleCommand(
       if (command.action === 'CANCEL') {
         discardRepairSession(command.workflowId)
         rememberRecoveryOutcome(command.requestId, {
-          phase: 'CANCELLED', status: 'done',
+          phase: 'CANCELLED',
+          status: 'done',
         })
-        return recoveryEnvelopeResult(command,
-          { phase: 'CANCELLED', status: 'done' }, 'recovery cancelled', command.timestamp)
+        return recoveryEnvelopeResult(
+          command,
+          { phase: 'CANCELLED', status: 'done' },
+          'recovery cancelled',
+          command.timestamp,
+        )
       }
 
       // Engine dependencies (same construction as workflows.repair).
@@ -2469,7 +2484,12 @@ async function handleCommand(
           if (analysis.ok) {
             const outcome = { phase: 'DONE', status: 'done' } as const
             rememberRecoveryOutcome(command.requestId, outcome)
-            return recoveryEnvelopeResult(command, outcome, 'workflow already healthy', command.timestamp)
+            return recoveryEnvelopeResult(
+              command,
+              outcome,
+              'workflow already healthy',
+              command.timestamp,
+            )
           }
           const suggestion = await runUnifiedDebug(targetWorkflow, 'SUGGEST', {
             runner: recoveryRunner,
@@ -2486,8 +2506,9 @@ async function handleCommand(
             const failedRunId =
               (suggestion as { lastRunId?: string }).lastRunId ??
               command.runId ??
-              listFinished().find((run) => run.workflowId === targetWorkflow.id && run.outcome === 'failed')
-                ?.runId ??
+              listFinished().find(
+                (run) => run.workflowId === targetWorkflow.id && run.outcome === 'failed',
+              )?.runId ??
               ''
             if (failedRunId) {
               try {
@@ -2525,17 +2546,24 @@ async function handleCommand(
                 })
                 const outcome = { phase: 'DIAGNOSING', status: 'running' } as const
                 rememberRecoveryOutcome(command.requestId, outcome)
-                return recoveryEnvelopeResult(command, outcome,
+                return recoveryEnvelopeResult(
+                  command,
+                  outcome,
                   suggestion.reason ?? 'continuing with additional repair strategies',
-                  command.timestamp)
+                  command.timestamp,
+                )
               } catch (error) {
                 console.warn('[workflows.recovery] could not start autonomous repair', error)
               }
             }
             const outcome = { phase: 'HUMAN_TAKEOVER', status: 'failed' } as const
             rememberRecoveryOutcome(command.requestId, outcome)
-            return recoveryEnvelopeResult(command, outcome,
-              suggestion.reason ?? 'no patch proposed', command.timestamp)
+            return recoveryEnvelopeResult(
+              command,
+              outcome,
+              suggestion.reason ?? 'no patch proposed',
+              command.timestamp,
+            )
           }
           // Keep the patch for CONFIRM_REPAIR (no working copy applied yet).
           putRepairSession({
@@ -2554,8 +2582,13 @@ async function handleCommand(
           const summary = `proposal ready: ${suggestion.patch.operations.length} operation(s)`
           const outcome = { phase: 'AWAIT_REPAIR_CONFIRM', status: 'waiting' } as const
           rememberRecoveryOutcome(command.requestId, outcome)
-          return recoveryEnvelopeResult(command, outcome, summary, command.timestamp,
-            suggestion.patch.operations)
+          return recoveryEnvelopeResult(
+            command,
+            outcome,
+            summary,
+            command.timestamp,
+            suggestion.patch.operations,
+          )
         }
 
         if (command.action === 'CONFIRM_REPAIR') {
@@ -2574,8 +2607,12 @@ async function handleCommand(
           if (!applied.ok || !applied.workingCopy || !applied.verification?.verified) {
             const outcome = { phase: 'FAILED', status: 'failed' } as const
             rememberRecoveryOutcome(command.requestId, outcome)
-            return recoveryEnvelopeResult(command, outcome,
-              applied.reason ?? 'the patched workflow did not verify on replay', command.timestamp)
+            return recoveryEnvelopeResult(
+              command,
+              outcome,
+              applied.reason ?? 'the patched workflow did not verify on replay',
+              command.timestamp,
+            )
           }
           putRepairSession({
             workflowId: targetWorkflow.id,
@@ -2592,8 +2629,12 @@ async function handleCommand(
           })
           const outcome = { phase: 'AWAIT_OVERWRITE_CONFIRM', status: 'waiting' } as const
           rememberRecoveryOutcome(command.requestId, outcome)
-          return recoveryEnvelopeResult(command, outcome,
-            'repair verified; awaiting overwrite confirmation', command.timestamp)
+          return recoveryEnvelopeResult(
+            command,
+            outcome,
+            'repair verified; awaiting overwrite confirmation',
+            command.timestamp,
+          )
         }
 
         // CONFIRM_OVERWRITE — commit the verified working copy.
@@ -2611,11 +2652,15 @@ async function handleCommand(
           }
           if (current.updatedAt !== pending.baseUpdatedAt) {
             discardRepairSession(command.workflowId)
-            throw new Error('The workflow changed since this repair was proposed; the patch is stale.')
+            throw new Error(
+              'The workflow changed since this repair was proposed; the patch is stale.',
+            )
           }
           if (workflowFingerprintOf(current) !== pending.baseHash) {
             discardRepairSession(command.workflowId)
-            throw new Error('The workflow content changed since this repair was proposed; the patch is stale.')
+            throw new Error(
+              'The workflow content changed since this repair was proposed; the patch is stale.',
+            )
           }
         }
         const next = commitWorkflowRevision(pending.workingCopy, {
@@ -2633,8 +2678,12 @@ async function handleCommand(
         {
           const outcome = { phase: 'DONE', status: 'done' } as const
           rememberRecoveryOutcome(command.requestId, outcome)
-          return recoveryEnvelopeResult(command, outcome,
-            `workflow updated to revision ${next.revision}`, command.timestamp)
+          return recoveryEnvelopeResult(
+            command,
+            outcome,
+            `workflow updated to revision ${next.revision}`,
+            command.timestamp,
+          )
         }
       } finally {
         release()
@@ -2804,8 +2853,7 @@ function recoveryEnvelopeResult(
   }
 }
 
-type RecoveryResultOperations =
-  Extract<CommandResult, { type: 'workflows.recovery' }>['operations']
+type RecoveryResultOperations = Extract<CommandResult, { type: 'workflows.recovery' }>['operations']
 
 /**
  * Live in-memory transcripts of currently running turns, keyed by

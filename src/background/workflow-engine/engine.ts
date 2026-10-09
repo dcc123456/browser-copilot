@@ -241,6 +241,20 @@ export interface WorkflowRunOptions {
    */
   aiTakeover?: AiTakeoverHook
   /**
+   * Nodes the run gate already proved cannot do their job, keyed by node id,
+   * with the log line that says why (`lib/workflow/validation`'s `error`
+   * findings). Reaching one FAILS the run at that node — after its block header
+   * was emitted, before its executor, its readiness wait or its retry budget
+   * touches anything.
+   *
+   * This is the non-blocking half of the run gate: the user gets the steps that
+   * CAN work executed, the node that cannot is named in the run log instead of
+   * refusing the whole run, and the page is never driven by a step with no
+   * locator — which is exactly the case a readiness poll would otherwise report
+   * as a bogus "element not found" root cause.
+   */
+  preflightBlockers?: Record<string, string>
+  /**
    * Sub-workflow nesting notifications (P3, spec §15 Phase 8): called with
    * 'enter' before an `execute-workflow` runs its child and 'exit' after it
    * returns. The integration layer uses this to keep one trace spanning the
@@ -521,6 +535,7 @@ async function runCore(
     onSnapshot,
     onCheckpoint,
     aiTakeover,
+    preflightBlockers,
     readinessProbe,
     evaluateCondition,
     captureConditionBaseline,
@@ -722,7 +737,10 @@ async function runCore(
    * could otherwise have used: an end-of-run re-read of a gone element is not
    * evidence, it is an artifact.
    */
-  const observeNodeContract = async (node: WorkflowNode, baseline?: ConditionBaseline): Promise<void> => {
+  const observeNodeContract = async (
+    node: WorkflowNode,
+    baseline?: ConditionBaseline,
+  ): Promise<void> => {
     if (!evaluateCondition) return
     const contract = nodeGoalContractOf(node.data ?? {})
     if (!contract) return
@@ -835,6 +853,20 @@ async function runCore(
       return defaultNext
     }
 
+    // The run gate proved this step cannot do its job (no locator, no key, no
+    // url…). Running it anyway buys a bogus root cause: with nothing to locate,
+    // generated-strict readiness polls the page until it TIMES OUT and reports
+    // 「元素不存在」 for a step that never had a selector to exist. So the run
+    // stops HERE, naming the step, and the page is left untouched — while every
+    // node before it has already done its work (see `validation.nodeRunIssuesOf`).
+    const blocker = preflightBlockers?.[nodeId]
+    if (blocker !== undefined) {
+      emit('error', nodeId, blocker)
+      outcome = 'failed'
+      error = blocker
+      return null
+    }
+
     // Loop and sub-workflow blocks are handled by the engine itself, not by an
     // executor in the registry, so sub-runs and loop bodies recurse here too.
     // Body entry / after-loop exit resolve by handle semantics, not edge
@@ -898,9 +930,7 @@ async function runCore(
       // not on the stale current tab — otherwise the first step of a workflow
       // that opens the grounded site is rejected as "wrong origin".
       const destination = navigationDestinationOf(blockId, params)
-      const current = destination
-        ? { url: destination }
-        : ((await getPageContext()) ?? {})
+      const current = destination ? { url: destination } : ((await getPageContext()) ?? {})
       const verdict = checkPageContext(
         expectedPageContext,
         current,
@@ -1028,7 +1058,10 @@ async function runCore(
             // A cleanup step that finds nothing to clean up did its job: the
             // drawer it was closing is not on the page. Skip it instead of
             // failing the run (see `isDismissStep`).
-            if (isDismissStep(current) && (before.state === 'present' || before.state === 'visible')) {
+            if (
+              isDismissStep(current) &&
+              (before.state === 'present' || before.state === 'visible')
+            ) {
               emit('status', nodeId, '页面上没有该浮层，无需关闭，跳过该节点')
               completedNodeIds.push(nodeId)
               emitCheckpoint(nodeId, 'ok', unsafe ? 'nodeCommitted' : undefined)
@@ -1299,9 +1332,7 @@ async function runCore(
           for (let n = from; from <= to ? n <= to : n >= to; n += from <= to ? 1 : -1) items.push(n)
         }
       } else if (through === 'data-columns') {
-        items = Array.isArray(variables['dataTable'])
-          ? (variables['dataTable'] as unknown[])
-          : []
+        items = Array.isArray(variables['dataTable']) ? (variables['dataTable'] as unknown[]) : []
       } else if (through === 'variable') {
         const name = String(params['variableName'] ?? '').trim()
         const value = name === '' ? undefined : variables[name]
@@ -1389,7 +1420,8 @@ async function runCore(
         }
       }
       const test = async (): Promise<boolean> => {
-        if (hasConditionGroups(tree)) return conditionGroupsMatch(tree, { vars: variables, runCode: runConditionCode })
+        if (hasConditionGroups(tree))
+          return conditionGroupsMatch(tree, { vars: variables, runCode: runConditionCode })
         if (code !== '') return evalCondition(code, variables, evaluateExpression)
         emit('error', loopNode.id, 'while-loop: 没有配置条件，循环不会执行')
         return false
