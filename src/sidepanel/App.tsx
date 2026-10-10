@@ -314,12 +314,7 @@ export default function App() {
           skills={skills}
           activeSkillId={activeSkillId}
           onChanged={refreshSkills}
-          onUseInChat={(id) => {
-            setActiveSkillId(id)
-            // Only jump to Chat when a skill was chosen; clearing should leave the
-            // user where they are.
-            if (id) setActive('chat')
-          }}
+          onStopUsing={() => setActiveSkillId(null)}
         />
       </div>
       <div style={{ display: active === 'agents' ? 'contents' : 'none' }}>

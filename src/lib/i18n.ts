@@ -740,7 +740,6 @@ export interface Messages {
   skillsNameRequired: string
   skillsInstructionsRequired: string
   skillsNameTaken: string
-  skillsUse: string
   skillsInUse: string
   skillsStopUsing: string
   skillsBuiltinNote: string
@@ -1182,6 +1181,8 @@ export interface Messages {
   skillsImportResultFail: (params: { ok: number; failed: number }) => string
   /** Skills tab "Export all" button label. */
   skillsExportAll: string
+  /** Skills tab per-skill "Export" button label (one skill as JSON). */
+  skillsExport: string
   /** Imported-skills banner detail: name already taken. */
   skillsImportNameTaken: (params: { name: string }) => string
 
@@ -1855,7 +1856,6 @@ const en: Messages = {
   skillsNameRequired: 'Give the skill a name.',
   skillsInstructionsRequired: 'Instructions cannot be empty.',
   skillsNameTaken: 'A skill with that name already exists.',
-  skillsUse: 'Use in chat',
   skillsInUse: 'In use',
   skillsStopUsing: 'Stop using',
   skillsBuiltinNote:
@@ -2279,6 +2279,7 @@ const en: Messages = {
   skillsImportResultFail: ({ ok, failed }) =>
     `Import finished: ${ok} succeeded, ${failed} failed. Review problems above.`,
   skillsExportAll: 'Export all',
+  skillsExport: 'Export',
   skillsImportNameTaken: ({ name }) => `Skipped “${name}”: a skill with this name already exists.`,
 
   agentsTitle: 'Agents',
@@ -3009,7 +3010,6 @@ const zhCN: Messages = {
   skillsNameRequired: '请填写技能名称。',
   skillsInstructionsRequired: '指令内容不能为空。',
   skillsNameTaken: '已存在同名技能。',
-  skillsUse: '在对话中使用',
   skillsInUse: '使用中',
   skillsStopUsing: '停止使用',
   skillsBuiltinNote: '技能仅保存在本浏览器本地，除作为提示词的一部分外不会发送到任何地方。',
@@ -3403,6 +3403,7 @@ const zhCN: Messages = {
   skillsImportResultFail: ({ ok, failed }) =>
     `导入完成：成功 ${ok} 个，失败 ${failed} 个，详情见上方提示。`,
   skillsExportAll: '全部导出',
+  skillsExport: '导出',
   skillsImportNameTaken: ({ name }) => `已跳过 “${name}”：同名技能已存在。`,
 
   agentsTitle: '智能体',

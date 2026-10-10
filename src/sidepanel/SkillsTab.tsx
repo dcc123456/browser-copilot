@@ -1,5 +1,5 @@
 /**
- * Skills tab: create, edit, and delete reusable instruction packs.
+ * Skills tab: create, edit, export, and delete reusable instruction packs.
  *
  * The list is owned by `App` because Chat needs it too; this tab only edits and
  * reports changes upward.
@@ -13,6 +13,7 @@ import {
   exportSkillsJson,
   importSkillsBatch,
   parseSkillsFiles,
+  skillSlug,
   type ImportBatchProblem,
 } from '../lib/skills-import'
 import { downloadBlob } from '../lib/export-answer'
@@ -24,8 +25,8 @@ interface Props {
   skills: Skill[]
   activeSkillId: string | null
   onChanged: () => void
-  /** `null` clears the selection; an id selects that skill and jumps to Chat. */
-  onUseInChat: (id: string | null) => void
+  /** Clears the skill pinned in Chat; choosing one happens in the Chat tab. */
+  onStopUsing: () => void
 }
 
 /** Editable form state; separate from `Skill` so a draft need not be valid yet. */
@@ -63,7 +64,7 @@ function emptyDraft(): Draft {
   }
 }
 
-export default function SkillsTab({ skills, activeSkillId, onChanged, onUseInChat }: Props) {
+export default function SkillsTab({ skills, activeSkillId, onChanged, onStopUsing }: Props) {
   const t = useT()
   // Non-null while the create/edit DIALOG is open; the dialog owns the fields,
   // this only carries identity (id/createdAt) and the open/closed switch.
@@ -237,6 +238,12 @@ export default function SkillsTab({ skills, activeSkillId, onChanged, onUseInCha
     await downloadBlob(json, 'application/json', `skills-${stamp}.json`)
   }
 
+  /** Exports one skill as a JSON file the Import button reads back unchanged. */
+  const exportOne = async (skill: Skill): Promise<void> => {
+    const json = exportSkillsJson([skill])
+    await downloadBlob(json, 'application/json', `${skillSlug(skill.name)}.json`)
+  }
+
   return (
     <div
       className="pane"
@@ -327,15 +334,18 @@ export default function SkillsTab({ skills, activeSkillId, onChanged, onUseInCha
           </div>
           {skill.description && <p className="hint">{skill.description}</p>}
           <div className="actions">
-            {skill.id === activeSkillId ? (
-              <button onClick={() => onUseInChat(null)} type="button">
+            {skill.id === activeSkillId && (
+              <button onClick={onStopUsing} type="button">
                 {t.skillsStopUsing}
               </button>
-            ) : (
-              <button className="primary" onClick={() => onUseInChat(skill.id)} type="button">
-                {t.skillsUse}
-              </button>
             )}
+            <button
+              className="skills-export-btn"
+              onClick={() => void exportOne(skill)}
+              type="button"
+            >
+              {t.skillsExport}
+            </button>
             <button onClick={() => setDraft(toDraft(skill))} type="button">
               {t.edit}
             </button>
