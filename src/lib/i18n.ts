@@ -2588,7 +2588,7 @@ const zhCN: Messages = {
   tabData: '数据',
   tabSettings: '设置',
   tabHistory: '历史',
-  tabTokens: '令牌用量',
+  tabTokens: 'token 用量',
   tabMore: '更多',
   panelMinimize: '最小化为悬浮按钮',
   uploadFileWaiting: '工作流正在等待你选择文件。',
