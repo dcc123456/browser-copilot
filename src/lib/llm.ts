@@ -18,6 +18,7 @@
 import { isImageAttachment, isTextAttachment } from './attachments'
 import type { AttachmentDescriptor } from './attachments'
 import { normalizeBaseUrl } from './providers'
+import type { TokenAttribution } from './token-ledger'
 
 export interface WireTool {
   type: 'function'
@@ -165,6 +166,99 @@ export interface StreamHandlers {
 }
 
 /**
+ * Extracts usage from a payload in either the OpenAI shape
+ * (`usage.prompt_tokens` / `completion_tokens` / `total_tokens`, with
+ * `prompt_tokens_details.cached_tokens`) or common variants used by
+ * OpenAI-compatible gateways. Returns null when absent.
+ *
+ * Exported because non-streaming calls (the vision model) read the same object
+ * off a plain JSON body — one parse rule for the whole project, so streaming
+ * and one-shot usage can never be accounted with different semantics.
+ */
+export function extractUsage(parsed: unknown): TokenUsage | null {
+  if (!parsed || typeof parsed !== 'object') return null
+  const u = (parsed as { usage?: Record<string, unknown> }).usage
+  if (!u || typeof u !== 'object') return null
+  const num = (key: string): number | undefined => {
+    const v = (u as Record<string, unknown>)[key]
+    return typeof v === 'number' && Number.isFinite(v) ? v : undefined
+  }
+  const inputTokens =
+    num('prompt_tokens') ?? num('input_tokens') ?? num('inputTokens') ?? num('promptTokens')
+  const outputTokens =
+    num('completion_tokens') ??
+    num('output_tokens') ??
+    num('outputTokens') ??
+    num('completionTokens')
+  if (inputTokens === undefined && outputTokens === undefined) return null
+  // cached_tokens lives under prompt_tokens_details (OpenAI) or
+  // cache_read_input_tokens (Anthropic-style gateways).
+  const details = u.prompt_tokens_details as Record<string, unknown> | undefined
+  const cachedInputTokens =
+    (details && typeof details.cached_tokens === 'number' ? details.cached_tokens : undefined) ??
+    num('cached_tokens') ??
+    num('cachedTokens') ??
+    num('cache_read_input_tokens') ??
+    num('cacheReadInputTokens')
+  const reasoningTokens =
+    (details && typeof details.reasoning_tokens === 'number'
+      ? details.reasoning_tokens
+      : undefined) ??
+    num('reasoning_tokens') ??
+    num('reasoningTokens')
+  const totalTokens =
+    num('total_tokens') ?? num('totalTokens') ?? (inputTokens ?? 0) + (outputTokens ?? 0)
+  return {
+    inputTokens: inputTokens ?? 0,
+    outputTokens: outputTokens ?? 0,
+    ...(cachedInputTokens ? { cachedInputTokens } : {}),
+    ...(reasoningTokens ? { reasoningTokens } : {}),
+    totalTokens,
+  }
+}
+
+/** One observed completion's worth of usage, with the attribution it carries. */
+export interface UsageEvent {
+  attribution: TokenAttribution
+  model: string
+  usage: TokenUsage
+}
+
+/**
+ * Host-installed sink for {@link UsageEvent}s. The transport layer stays
+ * chrome-free and knows nothing about storage: the service worker installs a
+ * sink that writes the token ledger, the runner installs one that writes its
+ * own file. Setting it to `null` disables accounting.
+ */
+export type UsageObserver = (event: UsageEvent) => void
+
+let usageObserver: UsageObserver | null = null
+
+export function setUsageObserver(observer: UsageObserver | null): void {
+  usageObserver = observer
+}
+
+/**
+ * Reports one request's usage. Only attributed requests are observed — an
+ * omitted attribution means the caller has not been wired up yet, which is
+ * exactly the gap the token dashboard was built to close, so it stays loud in
+ * the code rather than silently defaulting to some other bucket.
+ */
+export function observeUsage(
+  request: { attribution?: TokenAttribution; model: string },
+  usage: TokenUsage,
+): void {
+  if (!usageObserver || !request.attribution) return
+  try {
+    usageObserver({ attribution: request.attribution, model: request.model, usage })
+  } catch (error) {
+    // Accounting is a side channel: a broken sink must never fail a model call
+    // the user is waiting on.
+    console.warn('[llm] usage observer failed', error)
+  }
+}
+
+/**
  * Accumulates SSE frames into a {@link StreamResult}.
  *
  * Kept separate from `fetch` so the chunk-splitting rules (frames arbitrarily
@@ -223,54 +317,6 @@ export class SseAccumulator {
     }
   }
 
-  /**
-   * Extracts usage from a payload in either the OpenAI shape
-   * (`usage.prompt_tokens` / `completion_tokens` / `total_tokens`, with
-   * `prompt_tokens_details.cached_tokens`) or common variants used by
-   * OpenAI-compatible gateways. Returns null when absent.
-   */
-  private extractUsage(parsed: unknown): TokenUsage | null {
-    if (!parsed || typeof parsed !== 'object') return null
-    const u = (parsed as { usage?: Record<string, unknown> }).usage
-    if (!u || typeof u !== 'object') return null
-    const num = (key: string): number | undefined => {
-      const v = (u as Record<string, unknown>)[key]
-      return typeof v === 'number' && Number.isFinite(v) ? v : undefined
-    }
-    const inputTokens =
-      num('prompt_tokens') ?? num('input_tokens') ?? num('inputTokens') ?? num('promptTokens')
-    const outputTokens =
-      num('completion_tokens') ??
-      num('output_tokens') ??
-      num('outputTokens') ??
-      num('completionTokens')
-    if (inputTokens === undefined && outputTokens === undefined) return null
-    // cached_tokens lives under prompt_tokens_details (OpenAI) or
-    // cache_read_input_tokens (Anthropic-style gateways).
-    const details = u.prompt_tokens_details as Record<string, unknown> | undefined
-    const cachedInputTokens =
-      (details && typeof details.cached_tokens === 'number' ? details.cached_tokens : undefined) ??
-      num('cached_tokens') ??
-      num('cachedTokens') ??
-      num('cache_read_input_tokens') ??
-      num('cacheReadInputTokens')
-    const reasoningTokens =
-      (details && typeof details.reasoning_tokens === 'number'
-        ? details.reasoning_tokens
-        : undefined) ??
-      num('reasoning_tokens') ??
-      num('reasoningTokens')
-    const totalTokens =
-      num('total_tokens') ?? num('totalTokens') ?? (inputTokens ?? 0) + (outputTokens ?? 0)
-    return {
-      inputTokens: inputTokens ?? 0,
-      outputTokens: outputTokens ?? 0,
-      ...(cachedInputTokens ? { cachedInputTokens } : {}),
-      ...(reasoningTokens ? { reasoningTokens } : {}),
-      totalTokens,
-    }
-  }
-
   private consumeFrame(frame: string): void {
     for (const rawLine of frame.split('\n')) {
       const line = rawLine.trim()
@@ -295,7 +341,7 @@ export class SseAccumulator {
     }
 
     // The trailing chunk often carries only usage with no choices.
-    const extracted = this.extractUsage(parsed)
+    const extracted = extractUsage(parsed)
     if (extracted) {
       this.usage = extracted
       this.handlers.onUsage?.(extracted)
@@ -352,6 +398,12 @@ export interface StreamRequest {
   signal?: AbortSignal
   /** Provider name, used only to make error messages legible. */
   providerLabel?: string
+  /**
+   * What this request's tokens should be charged to. Optional so a caller can
+   * be wired up incrementally, but every feature that reaches the dashboard
+   * must supply it — the ledger's completeness claim is exactly this field.
+   */
+  attribution?: TokenAttribution
 }
 
 /**
@@ -524,7 +576,15 @@ export async function streamCompletion(
   const response = await attemptFetch()
   if (!response.body) throw new LlmError(`${who} returned an empty response body.`)
 
-  const accumulator = new SseAccumulator(handlers)
+  // Every completion's usage passes through one hook, so attribution cannot
+  // drift between features (see `observeUsage`).
+  const accumulator = new SseAccumulator({
+    ...handlers,
+    onUsage: (usage) => {
+      observeUsage(request, usage)
+      handlers.onUsage?.(usage)
+    },
+  })
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
   try {
     for (;;) {

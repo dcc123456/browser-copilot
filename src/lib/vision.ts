@@ -18,6 +18,8 @@
  */
 
 import { computeUpscaleFactor, enhancePixels } from './image-preprocess'
+import { extractUsage, observeUsage } from './llm'
+import type { TokenAttribution } from './token-ledger'
 import { normalizeBaseUrl, type ProviderProfile } from './providers'
 
 export interface VisionConfig {
@@ -141,6 +143,7 @@ async function callVisionModel(
   dataUrl: string,
   prompt: string,
   signal?: AbortSignal,
+  attribution?: TokenAttribution,
 ): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const url = `${target.baseUrl}/chat/completions`
   const body = buildVisionRequestBody(target, dataUrl, prompt)
@@ -202,6 +205,11 @@ async function callVisionModel(
   } catch {
     return { ok: false, error: 'The image model returned an unreadable response.' }
   }
+  // A non-streaming completion reports its usage only in this body. Recorded
+  // before the content check: a call that produced no readable text still cost
+  // the user money, so it belongs on the ledger.
+  const usage = extractUsage(payload)
+  if (usage) observeUsage({ attribution, model: target.model }, usage)
   const content = (payload as { choices?: { message?: { content?: unknown } }[] })?.choices?.[0]
     ?.message?.content
   if (typeof content === 'string' && content.trim().length > 0) {
@@ -218,9 +226,15 @@ async function callVisionModel(
 export async function recognizeImage(
   target: ResolvedVisionTarget,
   dataUrl: string,
-  opts: { prompt?: string; signal?: AbortSignal } = {},
+  opts: { prompt?: string; signal?: AbortSignal; attribution?: TokenAttribution } = {},
 ): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
-  return callVisionModel(target, dataUrl, defaultRecognitionPrompt(opts.prompt), opts.signal)
+  return callVisionModel(
+    target,
+    dataUrl,
+    defaultRecognitionPrompt(opts.prompt),
+    opts.signal,
+    opts.attribution,
+  )
 }
 
 /**
@@ -231,13 +245,13 @@ export async function recognizeImage(
 export async function inspectImage(
   target: ResolvedVisionTarget,
   dataUrl: string,
-  opts: { prompt?: string; signal?: AbortSignal } = {},
+  opts: { prompt?: string; signal?: AbortSignal; attribution?: TokenAttribution } = {},
 ): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const custom = opts.prompt?.trim()
   const prompt = custom
     ? `Inspect this screenshot of a page element. ${custom}`
     : 'Inspect this screenshot of a page element. Read any visible text or CAPTCHA exactly as it appears, then briefly describe what the element is and its current on-screen state.'
-  return callVisionModel(target, dataUrl, prompt, opts.signal)
+  return callVisionModel(target, dataUrl, prompt, opts.signal, opts.attribution)
 }
 
 /**

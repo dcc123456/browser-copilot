@@ -46,6 +46,14 @@ import { DEFAULT_LOCAL_AGENT_URL, normalizeLocalAgentUrl, entryFields } from './
 import { richTargetFromArgs, selectorFromArgs, withRichTarget } from './workflow/target-to-selector'
 import { aiPrefillNodeData, looksAiComposed } from './workflow/ai-prefill'
 import type { Workflow, WorkflowEdge, WorkflowNode, WorkflowSettings } from './workflow/types'
+import {
+  applyRecordToDaily,
+  coerceDailyStore,
+  coerceTokenRecord,
+  MAX_TOKEN_RECORDS,
+  type TokenLedger,
+  type TokenUsageRecord,
+} from './token-ledger'
 
 /**
  * The active storage area: files when a directory is configured and granted,
@@ -2350,4 +2358,57 @@ export function applyAiPrefillOptions(
     return { ...node, data: { ...node.data, disableBlock: !desired } }
   })
   return { ...workflow, drawflow: { ...workflow.drawflow, nodes: finalNodes } }
+}
+
+// --- Token ledger -----------------------------------------------------------
+
+/**
+ * Token spend is kept in two shapes on purpose (design §4.3): a capped detail
+ * array for recent events and sub-day chart buckets, and an uncapped per-day
+ * rollup so the "since first use" range stays truthful after the detail is
+ * truncated. Both are derived from the same records by
+ * `lib/token-ledger.ts` functions, so the two views cannot disagree.
+ */
+const KEY_TOKEN_USAGE = 'tokenUsage'
+const KEY_TOKEN_USAGE_DAILY = 'tokenUsageDaily'
+
+/** The whole ledger: newest detail records first, plus the day rollup. */
+export async function readTokenUsage(): Promise<TokenLedger> {
+  const stored = await area.get([KEY_TOKEN_USAGE, KEY_TOKEN_USAGE_DAILY])
+  const rawRecords = stored[KEY_TOKEN_USAGE]
+  const records = Array.isArray(rawRecords)
+    ? rawRecords
+        .map(coerceTokenRecord)
+        .filter((record): record is TokenUsageRecord => record !== null)
+    : []
+  return { records, daily: coerceDailyStore(stored[KEY_TOKEN_USAGE_DAILY]) }
+}
+
+/**
+ * Appends finished requests to the ledger.
+ *
+ * One locked read-modify-write for both keys: two concurrent turns appending
+ * outside the queue would lose one turn's records — and, worse, lose the same
+ * records' contribution to the day rollup, which no later read can repair.
+ * Detail records are capped; the rollup is never capped, so history totals keep
+ * growing while the detail keeps only what is recent enough to chart hourly.
+ */
+export async function recordTokenUsage(incoming: readonly TokenUsageRecord[]): Promise<void> {
+  if (incoming.length === 0) return
+  await withKeyLock(KEY_TOKEN_USAGE, async () => {
+    const { records, daily } = await readTokenUsage()
+    const merged = [...incoming, ...records].sort((a, b) => b.at - a.at)
+    for (const record of incoming) applyRecordToDaily(daily, record)
+    await area.set({
+      [KEY_TOKEN_USAGE]: merged.slice(0, MAX_TOKEN_RECORDS),
+      [KEY_TOKEN_USAGE_DAILY]: daily,
+    })
+  })
+}
+
+/** Wipes the ledger. Deliberately does not touch conversations or runs. */
+export async function clearTokenUsage(): Promise<void> {
+  await withKeyLock(KEY_TOKEN_USAGE, async () => {
+    await area.set({ [KEY_TOKEN_USAGE]: [], [KEY_TOKEN_USAGE_DAILY]: {} })
+  })
 }
