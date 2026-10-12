@@ -6,7 +6,90 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
-_To be released._
+### Added — Where the tokens go
+
+Model spend was invisible: nothing told you what a chat turn, a generated
+workflow, or a nightly task cost. Every provider response is now read for usage
+(`prompt_tokens` and `input_tokens` shapes alike, including cached-input counts)
+and folded into a ledger that keeps a capped array of detail records for sub-day
+buckets plus uncapped per-day rollups for long windows.
+
+- **Tokens tab** under **More**: range chips (today / 7 days / 30 days / since
+  first use), a smooth trend line or tables, one headline figure for the window,
+  then a breakdown **by feature** — chat, workflow generation, workflow run, AI
+  debugging, automatic repair, scheduled tasks, context compaction, vision,
+  external API — and **by conversation, task or workflow**. Rows past the
+  retention cap fold into an explicit "Other" instead of quietly vanishing. The
+  panel is ~400px wide, so each row shows its share of the window as a gauge
+  under its name rather than a sixth column.
+- Aggregation happens in the service worker (`tokens.stats`), so the panel never
+  receives every raw record to add up, and **Clear usage** empties both shapes
+  behind a confirmation. Records flush per request rather than batched: an MV3
+  worker can be evicted between any two events, and silently losing the spend of
+  a turn that already cost the user money is the one failure this board must not
+  have.
+- **The Runner keeps its own ledger** — same observer hook, same pure
+  aggregation functions, so a token counted headless and a token counted in the
+  extension are counted identically — in `<dataDir>/token-usage.json`, exposed
+  read-only as `GET /api/tokens/stats?range=today|7d|30d|all` (see
+  `docs/server.md`). Headless spend stays out of the extension's panel by design.
+- Context compaction gets its own consumer row rather than hiding inside "chat":
+  it is a real cost the user pays to keep a long turn running.
+
+### Added — One-shot and chained scheduled tasks
+
+- **Run once at a date and time** (`{ kind: 'once', at }`). The alarm disarms
+  itself immediately after firing, so "publish at the golden hour" no longer has
+  to be faked as a daily task. Times are local; Chrome's 1-minute alarm floor
+  means a moment less than a minute away fires about a minute late.
+- **Task chains**: a task declares the `outputs` it hands off and which task it
+  `followsTaskId`, then references `{{upstream.<key>}}` in its prompt or
+  workflow variables. References resolve at the child's own **run** time against
+  the parent's last successful output, so a follow-up can be created before its
+  input exists (write the comment task while the note is still a draft).
+  `chainId` only groups rows in the UI; it carries no engine behavior.
+- **Run outputs are persisted** (`TaskRunLog.outputs`) as the cross-task
+  handoff. `{{upstream.summary}}` is deliberately capped at 512 characters —
+  bulk content belongs in a file artifact or a re-read of the page, because an
+  oversized handoff is what used to lose whole run logs.
+
+### Changed — Turn progress survives a closed panel
+
+Minimizing or closing the side panel disconnects its port while the worker keeps
+the turn running. The reopened panel sat on a frozen snapshot until the round
+ended — and a confirm / ask-user / plan raised while it was away had no listener
+left, so the turn hung on a card the user never saw.
+
+- A turn writes to a per-conversation **channel** whose sink is whichever port is
+  currently watching, swapped when a panel resumes the conversation; the
+  interactive request resolvers live on the channel too.
+- Display events emitted since the last transcript change are buffered and
+  replayed on reattach, and the reattach notice is a transient phase line rather
+  than a permanent entry that split the reply in two.
+- **Stop** now names a conversation: a panel can be watching turns from several,
+  and Stop must only ever mean the one on screen.
+
+### Changed — The task list is live, and editing is a dialog
+
+- Tasks created from the chat appear immediately. Every tab stays mounted (the
+  chat holds a live port and streaming transcript that must survive editing a
+  skill mid-answer), so the list used to load exactly once per panel document;
+  it now subscribes to storage changes on its own key. The write path already
+  notifies, so there is no new broadcast message type and no polling timer, and
+  the last-run badge refreshes the same way.
+- **Edit** opens a dialog on the shared form-dialog shell instead of pushing an
+  inline editor above the list, matching the skill and agent editors.
+- Each skill row exports that one skill as JSON that Import reads back
+  unchanged; the redundant _Use in chat_ button is gone — pinning a skill happens
+  in the chat composer.
+
+### Fixed
+
+- **A malformed skill or agent YAML entry could take down the worker.** A list
+  item that is not `key: value` (a bare `- plain text`) made the parser re-read
+  the same line forever and grow the array until the isolate ran out of heap —
+  and every skills and agents read funnels through it. An unmappable item is now
+  skipped, and each item advances at least one line.
 
 ## [0.6.4] - 2026-10-09
 
@@ -308,7 +391,7 @@ A long run of real-browser rounds (see `specs/`) turned "the steps ran" into
 
 ### Fixed
 
-- **Scheduled workflows no longer "look unstarted"**: `executeWorkflow`
+- **Workflow-kind scheduled tasks no longer "look unstarted"**: `executeWorkflow`
   now accepts `reuseRun` so a task-runner-opened run is the one its
   steps land on. Per-storage-key write serialisation in `task-store`
   prevents `recordFinishedRun` / `addRun` / `saveTask` from losing

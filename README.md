@@ -24,9 +24,18 @@ through a whole checkout or setup flow — while you watch or stay hands-off.
   filling, loops, condition branches, even an AI-agent step — then launch it by
   hand, on a schedule, at startup, with a keyboard shortcut, from a context
   menu, or when a matching page is opened.
-- ⏰ **Runs on a schedule while you sleep.** Set recurring tasks — every few
-  minutes, daily, or on weekdays — to run an unattended prompt or summarize
-  your GitHub review queue, with a full run history.
+- ⏰ **Runs on a schedule while you sleep.** Set a task to fire once at a date
+  and time, every few minutes, daily, or on weekdays — an unattended prompt or a
+  saved workflow, with a full run history and outputs you can hand to the next
+  task in a chain.
+- 📊 **You see what it costs.** The **Tokens** board totals spend over today /
+  7 days / 30 days / since first use, broken down by feature and by conversation,
+  task or workflow.
+- 🔄 **Mid-turn, the panel is not a pet.** Minimizing it used to leave the
+  running turn streaming into a dead port: reopening showed a frozen snapshot
+  until the round ended, and a confirmation asked for in the meantime had nobody
+  to answer it. Output now goes through a per-conversation channel that a
+  reopened panel reattaches to.
 - 💬 **Picks up work from Feishu/Lark.** Get notified in a group chat when a
   task finishes, or DM the bot a request from your phone and watch it execute
   in the browser on your machine and reply with the result.
@@ -165,7 +174,9 @@ Korean IME, the first Enter confirms the candidate and the second sends).
   skill to your input or selection.
 
 Replies render as Markdown. You can close the panel at any time; the answer
-keeps running in the background and reappears when you reopen it.
+keeps running in the background, and reopening it catches you up — the steps run
+while the panel was gone stream in, and a confirmation the agent asked for in the
+meantime is still answerable.
 
 ---
 
@@ -260,6 +271,12 @@ that's unacceptable.
   exactly what is sent.
 - **Markdown.** Replies render headings, lists, tables, and code blocks (with a
   copy button); your own text stays as typed.
+- **Token usage.** **More → Tokens** is the spend board: today / 7 days /
+  30 days / since first use, a trend line or tables, and a breakdown by feature
+  (chat, workflow generation, workflow run, AI debugging, automatic repair,
+  scheduled tasks, context compaction, vision, external API) and by conversation,
+  task or workflow. The Runner's own spend is not on this board — read it from
+  its [HTTP API](docs/server.md).
 - **Language & theme.** Settings → Language (English / 简体中文 / Auto); the
   panel follows the OS light/dark theme live.
 - **Storage location.** Settings → Storage location lets you choose a folder on
@@ -395,18 +412,45 @@ the browser is running.
   you had sent it from the chat, including reading or acting on pages (subject to
   the mode you've set). Use it for recurring checks, daily digests, or
   fill-and-submit flows.
+- **Run a saved workflow** — the same replay the Workflows tab does, on a
+  schedule, and it can hand its outputs to another task.
 - **Count PRs waiting for your review on GitHub** — the built-in task.
+- **Chain tasks.** A task can declare the outputs it hands off and which task it
+  follows, then reference `{{upstream.<key>}}` in its prompt. The reference is
+  resolved when the child runs, from the parent's last successful run — so the
+  follow-up can be written before its input exists, like a comment task scheduled
+  against a note that hasn't been published yet.
 
 **When it runs** (Chrome's `chrome.alarms`, 1-minute minimum):
 
+- Once at a specific date and time (the schedule disarms after it fires),
 - Every N minutes,
-- Daily at a set time, or
-- Weekdays (Mon–Fri) at a set time.
+- Daily at a set time,
+- Weekdays (Mon–Fri) at a set time, or
+- Weekly on chosen days.
+
+**There is one parameter surface: the task's `variables` bag.** The chat's agent writes it
+(the `create_scheduled_task` tool), and a chained task can fill an entry from
+`{{upstream.<key>}}`.
+
+- **Workflow task** — the bag is handed to the engine as the run's variables, and it wins
+  over the defaults the workflow's trigger node declares, so `{{name}}` references recorded
+  on the canvas resolve against it.
+- **Prompt task** — only the instruction text is interpolated, and the interpolation table
+  holds `{{upstream.*}}` (the parent's last successful run). The task's own `variables` are
+  not injected into the conversation.
+
+The panel's task dialog has no parameter field: it neither lists nor edits `variables`. It
+does save the whole task record, so what the agent wrote survives a rename or a schedule
+change. A workflow launched by its own trigger rather than by a task gets only its declared
+defaults — the schedule itself carries no parameters.
 
 Each run is recorded in **Recent runs** with its start time, outcome, steps, and a
 short summary — and can be terminated mid-flight. Tasks only fire while the
 browser is open (the service worker is woken by the alarm); they don't run when
 Chrome is closed. Turn on **Notify via Feishu when done** to push the result out.
+A task created from the chat shows up in the list right away, and **Edit** opens
+it in a dialog.
 
 ---
 

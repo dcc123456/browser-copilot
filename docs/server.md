@@ -164,9 +164,13 @@ curl -s http://127.0.0.1:8787/api/runs/<runId> -H "Authorization: Bearer $BC_TOK
 
 # 取消
 curl -X DELETE http://127.0.0.1:8787/api/runs/<runId> -H "Authorization: Bearer $BC_TOKEN"
+
+# 本机 token 花费（只读，range = today|7d|30d|all，缺省为 all）
+curl -s "http://127.0.0.1:8787/api/tokens/stats?range=7d" -H "Authorization: Bearer $BC_TOKEN"
+# → {"stats":{…}}，与扩展面板「token 用量」用同一套聚合函数，但只统计无头跑的这部分
 ```
 
-完整路由：`GET /healthz`、`GET/PUT /api/workflows[/:id]`、`POST /api/workflows/import`、`POST /api/workflows/reload`、`GET /api/workflows/:id/references`、`GET/POST /api/runs`、`GET/DELETE /api/runs/:id`、`POST /api/hooks/:workflowId`。
+完整路由：`GET /healthz`、`GET/PUT /api/workflows[/:id]`、`POST /api/workflows/import`、`POST /api/workflows/reload`、`GET /api/workflows/:id/references`、`GET/POST /api/runs`、`GET/DELETE /api/runs/:id`、`GET /api/tokens/stats`、`POST /api/hooks/:workflowId`。
 
 ### 5.2 Webhook 触发
 
@@ -373,6 +377,7 @@ data/
 ├── workflows.json          # 工作流库（主文件，扩展同格式）
 ├── runs/<runId>.jsonl      # 每次运行的逐步日志（JSON Lines）
 ├── runs/<runId>.final.json # 终态记录（status/summary/error）
+├── token-usage.json        # 本 Runner 自己的 token 台账（读法见 §5.1）
 └── artifacts/<runId>/      # export-data 导出、截图、下载文件、AI 截图
 ```
 
