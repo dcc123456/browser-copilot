@@ -13,6 +13,22 @@ import { LlmError, listModels, testConnection } from '../lib/llm'
 import type { AttachmentDescriptor } from '../lib/attachments'
 import { rejectionMessage, sanitizeAttachments, toAttachmentSummaries } from '../lib/attachments'
 import { getUserDisplayText, toRestoreMessages } from './restore'
+import {
+  answerAskUser,
+  answerConfirmation,
+  answerPlan,
+  attachTranscript,
+  channelFor,
+  closeTurnChannel,
+  declineInteractions,
+  detachOwner,
+  emitToPanel,
+  handOff,
+  openTurnChannel,
+  requestAskUser,
+  requestConfirmation,
+  requestPlan,
+} from './agent-channel'
 import { retain, release } from './keepalive'
 import {
   AGENT_PORT,
@@ -2827,14 +2843,9 @@ async function handleCommand(
 
 // --- Agent port --------------------------------------------------------------
 
-/**
- * Guards against overlapping turns for one conversation.
- *
- * Module scope is safe here precisely because it is disposable: if the worker is
- * evicted, no turn can still be running, so an empty set is the correct state.
- * Durable data (the transcript) lives in session storage instead.
- */
-const activeTurns = new Set<string>()
+// A conversation has a live turn exactly while it has a channel in
+// `background/agent-channel`: that registry holds the running-turn guard, the
+// live transcript and the output sink a reopened panel can be re-attached to.
 
 /**
  * Recovery action de-dupe keys (`requestId:ACTION`) for the in-flight recovery
@@ -2896,17 +2907,6 @@ function recoveryEnvelopeResult(
 
 type RecoveryResultOperations = Extract<CommandResult, { type: 'workflows.recovery' }>['operations']
 
-/**
- * Live in-memory transcripts of currently running turns, keyed by
- * conversation id (the same array object the turn mutates).
- *
- * The persisted transcript only updates when the turn finishes, so a panel
- * that reconnects mid-turn must replay THIS instead of storage to show what
- * the turn has produced so far. Disposable like `activeTurns`: worker
- * eviction ends every turn, so an empty map is the correct state.
- */
-const liveHistories = new Map<string, WireMessage[]>()
-
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== AGENT_PORT) return
 
@@ -2918,25 +2918,12 @@ chrome.runtime.onConnect.addListener((port) => {
   let panelWindowId: number | undefined = port.sender?.tab?.windowId
   if (typeof panelWindowId === 'number') registerPanelWindow(panelWindowId, port)
 
-  /** Pending confirmation resolvers, keyed by request id. */
-  const pending = new Map<string, (approved: boolean) => void>()
   /**
-   * Pending `ask_user` resolvers, keyed by request id. Resolves with the
-   * user's typed/picked answer, or `cancelled: true` when the question can no
-   * longer be answered (turn cancelled, panel closed).
+   * This connection's half of a turn channel: it posts to THIS port and is
+   * handed to a running turn on `resume`, replacing whatever connection the turn
+   * was streaming to before. The turn's own output goes through the channel, so
+   * closing this panel never orphans the stream.
    */
-  const pendingAskUser = new Map<string, (answer: { answer: string; cancelled: boolean }) => void>()
-  /**
-   * Pending `present_plan` resolvers, keyed by request id. Resolves with the
-   * user's approve/reject decision (rejection carries revision feedback), or
-   * a rejected decision when the card can no longer be answered.
-   */
-  const pendingPlan = new Map<
-    string,
-    (decision: { approved: boolean; feedback?: string }) => void
-  >()
-  let controller: AbortController | null = null
-
   const send = (message: AgentServerMessage): void => {
     try {
       port.postMessage(message)
@@ -2972,26 +2959,20 @@ chrome.runtime.onConnect.addListener((port) => {
     }
 
     if (message.type === 'confirm') {
-      pending.get(message.requestId)?.(message.approved)
-      pending.delete(message.requestId)
+      answerConfirmation(message.requestId, message.approved)
       return
     }
 
     if (message.type === 'ask_user.answer') {
-      pendingAskUser.get(message.requestId)?.({
-        answer: message.answer,
-        cancelled: message.cancelled,
-      })
-      pendingAskUser.delete(message.requestId)
+      answerAskUser(message.requestId, { answer: message.answer, cancelled: message.cancelled })
       return
     }
 
     if (message.type === 'plan.decision') {
-      pendingPlan.get(message.requestId)?.({
+      answerPlan(message.requestId, {
         approved: message.approved,
         ...(message.feedback ? { feedback: message.feedback } : {}),
       })
-      pendingPlan.delete(message.requestId)
       return
     }
 
@@ -3007,10 +2988,11 @@ chrome.runtime.onConnect.addListener((port) => {
           loadConversation(conversationId),
           getTurnState(conversationId),
         ])
+        const channel = channelFor(conversationId)
         // While a turn is still running, prefer its live in-memory transcript:
         // the persisted copy only updates when the turn finishes, so replaying
         // storage would show a stale conversation without the in-flight work.
-        const history = liveHistories.get(conversationId) ?? persisted
+        const history = channel?.transcript ?? persisted
         // Replay every visible turn: user text, assistant text (including the
         // empty-content tool-call turns, which carry no text), and tool chips.
         // This is the full conversation the user saw, not a redacted summary,
@@ -3020,11 +3002,15 @@ chrome.runtime.onConnect.addListener((port) => {
         send({
           type: 'restore',
           messages,
-          // Trust the live set over stored state: if the worker was evicted and
-          // respawned, no turn can actually still be running.
-          running: activeTurns.has(conversationId),
+          // Trust the live registry over stored state: if the worker was evicted
+          // and respawned, no turn can actually still be running.
+          running: channel !== undefined,
         })
-        if (state?.error && !activeTurns.has(conversationId)) {
+        // Then take over the stream: this connection becomes the turn's sink and
+        // gets the lines emitted after the transcript snapshot above, so a panel
+        // reopened mid-turn keeps updating instead of freezing.
+        if (channel) handOff(channel, send, port)
+        if (state?.error && !channel) {
           send({ type: 'error', message: state.error })
         }
       })()
@@ -3032,31 +3018,36 @@ chrome.runtime.onConnect.addListener((port) => {
     }
 
     if (message.type === 'cancel') {
-      controller?.abort()
-      // Unblock anything waiting on a confirmation.
-      for (const resolve of pending.values()) resolve(false)
-      pending.clear()
-      // …and on a pending clarifying question: nobody will answer it now.
-      for (const resolve of pendingAskUser.values()) resolve({ answer: '', cancelled: true })
-      pendingAskUser.clear()
-      // …and on a pending plan card: rejected, so the model stops instead of
-      // executing an unapproved plan.
-      for (const resolve of pendingPlan.values()) resolve({ approved: false })
-      pendingPlan.clear()
+      // Stop the turn of the conversation the panel is showing, and unblock
+      // whatever it was waiting on from the user. Not scoped to this connection:
+      // a panel that started the turn keeps that right even after another panel
+      // resumed the stream.
+      const channel = channelFor(message.conversationId)
+      if (channel) {
+        channel.controller.abort()
+        declineInteractions(channel)
+      }
       return
     }
 
     if (message.type !== 'chat') return
 
     const conversationId = message.conversationId
-    if (activeTurns.has(conversationId)) {
+    const turnController = new AbortController()
+    // The turn outlives the connection that started it, so its output goes
+    // through a channel whose sink is re-attached when a panel resumes this
+    // conversation. Opening the channel is also the one-turn-per-conversation
+    // guard.
+    const turnChannel = openTurnChannel({
+      conversationId,
+      controller: turnController,
+      sink: send,
+      owner: port,
+    })
+    if (!turnChannel) {
       send({ type: 'error', message: 'Still working on the previous message.' })
       return
     }
-
-    activeTurns.add(conversationId)
-    const turnController = new AbortController()
-    controller = turnController
     // Re-validate panel-supplied attachments up front: drop malformed or
     // over-limit entries rather than failing the whole turn, and derive a
     // label so files-only messages are still identifiable on the tasks board.
@@ -3071,7 +3062,7 @@ chrome.runtime.onConnect.addListener((port) => {
       controller: turnController,
     })
     const sendWithTracking = (msg: AgentServerMessage): void => {
-      send(msg)
+      emitToPanel(turnChannel, msg)
       if (msg.type === 'tool.start') recordStep('tool', `→ ${msg.name}`, trackedRun.runId)
       else if (msg.type === 'tool.result')
         recordStep('result', `← ${msg.summary}`, trackedRun.runId)
@@ -3097,10 +3088,11 @@ chrome.runtime.onConnect.addListener((port) => {
           await saveConfirmedWorkflowName(conversationId, confirmedWorkflowName)
         }
         history = await loadConversation(conversationId)
-        // Register the live transcript so a panel that reconnects mid-turn
-        // (minimize/expand, crash, worker recycle) resumes the CURRENT state,
-        // not the last persisted snapshot. Deregistered in `finally` below.
-        liveHistories.set(conversationId, history)
+        // Register the live transcript on the channel so a panel that
+        // reconnects mid-turn (minimize/expand, crash, worker recycle) resumes
+        // the CURRENT state, not the last persisted snapshot. Cleared with the
+        // channel in `finally` below.
+        attachTranscript(turnChannel, history)
 
         // Scope the whole turn to the panel's own window, resolved once up
         // front: selection reading, /run workflows and every agent tool call
@@ -3231,39 +3223,16 @@ chrome.runtime.onConnect.addListener((port) => {
           getMode,
           getMaxToolRounds,
           getToolConfig,
-          confirm: (name, argsPreview) =>
-            new Promise<boolean>((resolve) => {
-              const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-              pending.set(requestId, resolve)
-              send({ type: 'confirm.request', requestId, name, argsPreview })
-            }),
-          // ask_user uses the port-level `send` (not sendWithTracking), like
-          // `confirm`, so delegated sub-agents inherit a working question
-          // channel: their muted `deps.send` drops progress messages, but the
-          // question card must still reach the panel.
-          askUser: ({ question, options }) =>
-            new Promise<{ answer: string; cancelled: boolean }>((resolve) => {
-              const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-              pendingAskUser.set(requestId, resolve)
-              send({ type: 'ask_user.request', requestId, question, options })
-            }),
-          // present_plan rides the same port-level `send` as ask_user so
-          // delegated sub-agents inherit a working approval channel; the plan
-          // card must reach the panel even when the specialist's progress
-          // stream is muted.
+          confirm: (name, argsPreview) => requestConfirmation(turnChannel, name, argsPreview),
+          // ask_user and present_plan ride the channel, not this connection:
+          // the card must reach whichever panel is watching now (the one that
+          // started the turn may have been minimized), and the answer comes back
+          // on that connection, so the resolver lives on the channel too. They
+          // also bypass a delegated sub-agent's muted progress stream, which
+          // drops `send` messages but must never swallow a question.
+          askUser: ({ question, options }) => requestAskUser(turnChannel, question, options),
           planDecision: ({ goal, steps, risks, split }) =>
-            new Promise<{ approved: boolean; feedback?: string }>((resolve) => {
-              const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-              pendingPlan.set(requestId, resolve)
-              send({
-                type: 'plan.request',
-                requestId,
-                goal,
-                steps,
-                ...(risks ? { risks } : {}),
-                ...(split ? { split } : {}),
-              })
-            }),
+            requestPlan(turnChannel, goal, steps, risks, split),
         })
         sendWithTracking({ type: 'done', ...(turnUsage ? { usage: turnUsage } : {}) })
       } catch (error) {
@@ -3297,13 +3266,11 @@ chrome.runtime.onConnect.addListener((port) => {
           at: Date.now(),
           ...(failure ? { error: failure } : {}),
         }).catch(() => {})
-        activeTurns.delete(conversationId)
-        liveHistories.delete(conversationId)
-        // The turn's stream went to the port that existed when it started; a
-        // panel reopened mid-turn is watching a different (or no) port and
-        // would otherwise sit on a stale snapshot with a busy spinner forever.
-        // Broadcast the end so any panel showing this conversation re-pulls
-        // the final transcript (including the answer produced after reopen).
+        closeTurnChannel(conversationId)
+        // The turn's stream now follows whichever panel is watching, so a panel
+        // that stayed open already saw `done`. This broadcast still lands the
+        // final transcript for a panel that was showing this conversation
+        // without owning the turn (e.g. switched away and back).
         void chrome.runtime
           .sendMessage({ type: 'conversation.ended', conversationId })
           .catch(() => {})
@@ -3311,7 +3278,6 @@ chrome.runtime.onConnect.addListener((port) => {
           outcome: turnController.signal.aborted ? 'cancelled' : failure ? 'failed' : 'ok',
           summary: failure,
         })
-        if (controller === turnController) controller = null
         release()
       }
     })()
@@ -3323,16 +3289,12 @@ chrome.runtime.onConnect.addListener((port) => {
     // case the right behaviour is to let the stream finish and persist, so the
     // answer is waiting in the transcript afterwards.
     //
-    // Confirmations are the exception: nobody can answer them once the panel is
+    // The turn keeps running, it just stops streaming here: its channel's sink
+    // goes dumb and further lines are buffered until the next `resume`.
+    // Confirmations are the exception — nobody can answer them once the panel is
     // gone, so they resolve as declined instead of hanging until the turn caps.
-    for (const resolve of pending.values()) resolve(false)
-    pending.clear()
-    // Same for pending clarifying questions: nobody can answer them now.
-    for (const resolve of pendingAskUser.values()) resolve({ answer: '', cancelled: true })
-    pendingAskUser.clear()
-    // Same for pending plan cards: nobody can approve them now.
-    for (const resolve of pendingPlan.values()) resolve({ approved: false })
-    pendingPlan.clear()
+    // So do clarifying questions and plan cards.
+    detachOwner(port)
     // The window keeps hosting a panel only while at least one of its ports is
     // connected; dropping ours may retire it from the trigger guard.
     unregisterPort(port)

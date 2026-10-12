@@ -123,8 +123,9 @@ const STORED_CONV_KEY = 'browser-copilot:active-conversation'
  *
  * `localStorage` is shared by every panel instance (one extension origin), so
  * a single key made two windows' panels open onto the same thread — and the
- * worker serializes turns within a conversation (`activeTurns`), so two
- * windows could not work in parallel by default. Keying by windowId gives
+ * worker allows one turn per conversation (its channel in
+ * `background/agent-channel`, watched by whichever panel resumed it last), so
+ * two windows could not work in parallel. Keying by windowId gives
  * each window its own pointer; before the window id resolves (and in tests)
  * the legacy global key applies.
  */
@@ -209,6 +210,16 @@ function parseRestoredTool(text: string): { name: string; summary: string } {
   // a completed call and must never render as a still-running spinner.
   if (!match) return { name: 'tool', summary: trimmed.replace(/^←\s*/, '') }
   return { name: match[1]!.trim(), summary: match[2]! }
+}
+
+/**
+ * Adds a card that asks something of the user unless it is already on screen. A
+ * turn re-sends the requests it is still blocked on every time a panel resumes
+ * it, so one card can legitimately arrive more than once — and two copies of one
+ * question would mean two answers for one request.
+ */
+function addPendingCard<Card extends { requestId: string }>(cards: Card[], card: Card): Card[] {
+  return cards.some((existing) => existing.requestId === card.requestId) ? cards : [...cards, card]
 }
 
 /**
@@ -2120,22 +2131,20 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             setEntries(restored)
             // A fresh conversation view always opens pinned to the bottom.
             setAtBottom(true)
-            // While a turn is still running, continue its stream into the last
-            // restored assistant entry. Starting a fresh bubble here would
-            // split the reply's tail (often its final line) into a second
-            // paragraph after every reconnect.
-            const lastAssistant = [...restored].reverse().find((e) => e.role === 'assistant')
-            streamingRef.current = message.running && lastAssistant ? lastAssistant.id : null
+            // The replayed transcript only carries finished rounds, so anything
+            // arriving now belongs to the next one: leave `streamingRef` clear
+            // and let the first delta open its own segment. `groupEntries` still
+            // folds that segment into the same agent-turn bubble, so the reply
+            // neither splits in two nor gets glued onto a completed paragraph.
+            streamingRef.current = null
             setBusy(message.running)
             if (message.running) {
-              setEntries((prev) => [
-                ...prev,
-                {
-                  id: nextId(),
-                  role: 'status',
-                  text: tRef.current.chatReattached,
-                },
-              ])
+              // Shown as the transient phase line, not a permanent entry: the
+              // worker replays whatever the turn streamed while this panel was
+              // closed right after the snapshot, and the first replayed line
+              // removes this one (a plain status entry would sit between the
+              // snapshot and the replay and break the turn into two bubbles).
+              showPhase(tRef.current.chatReattached)
               // Reattached mid-turn in workflow mode: restore the dialog
               // state (so the save card can reopen its log later), but keep
               // it hidden — progress continues inline in the chat stream.
@@ -2227,13 +2236,13 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             })
             break
           case 'confirm.request':
-            setConfirms((prev) => [...prev, message])
+            setConfirms((prev) => addPendingCard(prev, message))
             break
           case 'ask_user.request':
-            setAskUsers((prev) => [...prev, message])
+            setAskUsers((prev) => addPendingCard(prev, message))
             break
           case 'plan.request':
-            setPlans((prev) => [...prev, message])
+            setPlans((prev) => addPendingCard(prev, message))
             break
           case 'status':
             // Free-form statuses (selection read results, etc.) replace the
@@ -2380,11 +2389,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     showPhase,
   ])
 
-  // A turn that was still running when this panel (re)connected streams into
-  // the port it was born with — which is gone. It broadcasts
-  // `conversation.ended` when it finishes; re-pull the final transcript then,
-  // otherwise the panel would keep showing the mid-turn snapshot with a busy
-  // spinner until manual reload.
+  // A turn that finished while this panel was showing the conversation re-pulls
+  // the saved transcript. Mid-turn reconnects already follow the live stream
+  // (the worker re-attaches it on `resume`), so this is the tidy-up pass: it
+  // swaps the replayed lines for the persisted ones, which carry the full final
+  // answer including anything streamed while the panel was closed.
   useEffect(() => {
     // Guarded: some test stubs provide a partial `chrome.runtime` without
     // `onMessage`; the broadcast is an optimization, not a hard dependency.
@@ -4169,7 +4178,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               </button>
             )}
             {busy && (
-              <button onClick={() => post({ type: 'cancel' })} type="button">
+              <button onClick={() => post({ type: 'cancel', conversationId })} type="button">
                 {t.chatStop}
               </button>
             )}
@@ -4207,7 +4216,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             setGenerationDialog((prev) => (prev ? { ...prev, open: false } : prev))
           }
           onCancel={() => {
-            post({ type: 'cancel' })
+            post({ type: 'cancel', conversationId })
             setGenerationDialog(null)
           }}
           errorMessage={

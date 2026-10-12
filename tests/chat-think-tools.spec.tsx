@@ -8,7 +8,10 @@
  *    assistant bubble, instead of as loose chips between split bubbles;
  * 3. text streamed after a tool round stays in the SAME bubble, so one reply
  *    no longer breaks into two disconnected paragraphs;
- * 4. the restored transcript (`restore` message) renders the same structure.
+ * 4. the restored transcript (`restore` message) renders the same structure;
+ * 5. a panel reopened while a turn is still running keeps updating: the
+ *    snapshot first, then the lines buffered while it was closed, then the live
+ *    stream — and a re-sent approval card does not stack.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -206,6 +209,72 @@ describe('assistant turn · reasoning, tools and split replies', () => {
       expect(toolCard.dataset.state).toBe('done')
       expect(toolCard.textContent).toContain('click')
       expect(toolCard.textContent).toContain('clicked #go')
+    } finally {
+      await act(async () => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+})
+
+describe('panel reopened while a turn is still running', () => {
+  it('keeps showing live progress after the restored snapshot', async () => {
+    const { container, root } = await renderChat()
+    try {
+      // What a reopened panel gets first: the transcript as the worker has it,
+      // plus the notice that the turn carried on without it.
+      await push({
+        type: 'restore',
+        running: true,
+        messages: [
+          { role: 'user', text: 'read the top stories' },
+          { role: 'assistant', text: 'I will open the page.' },
+          { role: 'tool', text: '← open_url: opened news' },
+        ],
+      })
+      const buttonLabels = [...container.querySelectorAll('button')].map((button) =>
+        button.textContent?.trim(),
+      )
+      expect(buttonLabels).toContain('Stop')
+      expect(container.textContent).toContain('Still working — reattached to the run.')
+
+      // Then the lines the worker buffered while this panel was closed, and the
+      // ones still streaming in.
+      await push({ type: 'delta', text: 'The page is open. ' })
+      await push({ type: 'tool.start', name: 'read_current_page' })
+      await push({ type: 'tool.result', name: 'read_current_page', summary: '10 titles' })
+      await push({ type: 'delta', text: 'Top story: one' })
+      await push({
+        type: 'confirm.request',
+        requestId: 'r-1',
+        name: 'fill',
+        argsPreview: '{ css: ".q" }',
+      })
+
+      // One agent turn, so the continuation reads as the same reply.
+      const turns = container.querySelectorAll('[data-role="assistant-turn"]')
+      expect(turns).toHaveLength(1)
+      const text = turns[0]?.textContent ?? ''
+      // Progress continues AFTER the snapshot instead of being frozen by it, and
+      // is not glued onto the last completed paragraph.
+      expect(text.indexOf('The page is open.')).toBeGreaterThan(text.indexOf('opened news'))
+      expect(text).toContain('10 titles')
+      expect(text).toContain('Top story: one')
+      expect(container.querySelectorAll('[data-kind="tool"]')).toHaveLength(2)
+      // The placeholder made way for real progress.
+      expect(text).not.toContain('reattached')
+      // A question the turn raised while no panel was watching reaches this one.
+      expect(container.querySelectorAll('.confirm-card')).toHaveLength(1)
+
+      // Reconnecting again re-sends the same card; it must not stack two of them.
+      await push({
+        type: 'confirm.request',
+        requestId: 'r-1',
+        name: 'fill',
+        argsPreview: '{ css: ".q" }',
+      })
+      expect(container.querySelectorAll('.confirm-card')).toHaveLength(1)
     } finally {
       await act(async () => {
         root.unmount()

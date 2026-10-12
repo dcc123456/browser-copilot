@@ -754,7 +754,12 @@ export type AgentClientMessage =
    * resolve independently.
    */
   | { type: 'ask_user.answer'; requestId: string; answer: string; cancelled: boolean }
-  | { type: 'cancel' }
+  /**
+   * Stop the running turn. Scoped to one conversation: a panel may be watching
+   * turns from several conversations (it takes over a stream on `resume`) and
+   * Stop only ever refers to the conversation on screen.
+   */
+  | { type: 'cancel'; conversationId: string }
   | { type: 'reset'; conversationId: string }
   /**
    * Sent right after connecting: asks the worker for the stored transcript and
