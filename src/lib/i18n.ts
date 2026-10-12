@@ -52,6 +52,7 @@ export interface Messages {
   tabData: string
   tabSettings: string
   tabHistory: string
+  tabTokens: string
   tabMore: string
 
   // Panel minimize (floating page button)
@@ -1296,6 +1297,52 @@ export interface Messages {
   workflowRepairAutoTitle: string
   workflowRepairVerifiedDetail: string
   workflowRepairRevisionCommitted: ({ revision }: { revision: number }) => string
+
+  // Token usage dashboard (Tokens tab)
+  /** Statistical window chips. */
+  tokensRangeToday: string
+  tokensRange7d: string
+  tokensRange30d: string
+  tokensRangeAll: string
+  /** View toggle: smooth line chart vs. tables. */
+  tokensViewChart: string
+  tokensViewTable: string
+  /** Headline totals, one KPI each. */
+  tokensTotal: string
+  tokensInput: string
+  tokensOutput: string
+  tokensCached: string
+  tokensRequests: string
+  tokensSince: string
+  /** Accessible name of the chart. */
+  tokensTrend: string
+  /** Breakdown tables: which feature spent, and on which conversation or task. */
+  tokensByConsumer: string
+  tokensByEntity: string
+  tokensColName: string
+  tokensColInput: string
+  tokensColOutput: string
+  tokensColRequests: string
+  tokensColTotal: string
+  tokensEmpty: string
+  tokensNoRecords: string
+  /** The entity table folds its tail into one row; say how many rows survive. */
+  tokensTruncated: ({ count }: { count: number }) => string
+  /** Display name for the ledger's `__other__` sentinel group key. */
+  tokensOther: string
+  tokensLoadFailed: ({ error }: { error: string }) => string
+  tokensClear: string
+  tokensClearConfirm: string
+  /** One display name per ledger consumer id. */
+  tokensConsumerChat: string
+  tokensConsumerWorkflowGeneration: string
+  tokensConsumerWorkflowRun: string
+  tokensConsumerAiDebug: string
+  tokensConsumerAutoRepair: string
+  tokensConsumerScheduledTask: string
+  tokensConsumerContextCompaction: string
+  tokensConsumerVision: string
+  tokensConsumerExternalApi: string
 }
 
 const en: Messages = {
@@ -1307,6 +1354,7 @@ const en: Messages = {
   tabData: 'Data',
   tabSettings: 'Settings',
   tabHistory: 'History',
+  tabTokens: 'Tokens',
   tabMore: 'More',
   panelMinimize: 'Minimize to a floating button',
   uploadFileWaiting: 'The workflow is waiting for you to choose a file.',
@@ -2485,6 +2533,44 @@ Keep the whole report dense and within the message size cap.`,
   workflowRepairAutoTitle: 'AI is auto-repairing…',
   workflowRepairVerifiedDetail: 'Verification passed: the workflow runs independently.',
   workflowRepairRevisionCommitted: ({ revision }) => `Committed as revision ${revision}.`,
+  tokensRangeToday: 'Today',
+  tokensRange7d: '7 days',
+  tokensRange30d: '30 days',
+  tokensRangeAll: 'All time',
+  tokensViewChart: 'Chart',
+  tokensViewTable: 'Table',
+  tokensTotal: 'Total tokens',
+  tokensInput: 'Input',
+  tokensOutput: 'Output',
+  tokensCached: 'Cached input',
+  tokensRequests: 'Requests',
+  tokensSince: 'First recorded',
+  tokensTrend: 'Tokens over time',
+  tokensByConsumer: 'By feature',
+  tokensByEntity: 'By chat, task and workflow',
+  tokensColName: 'Name',
+  tokensColInput: 'Input',
+  tokensColOutput: 'Output',
+  tokensColRequests: 'Requests',
+  tokensColTotal: 'Total',
+  tokensEmpty: 'No token usage recorded in this period.',
+  tokensNoRecords: 'None',
+  tokensTruncated: ({ count }) =>
+    `Only the ${count} busiest entries are listed; the rest are grouped under "Other".`,
+  tokensOther: 'Other',
+  tokensLoadFailed: ({ error }) => `Could not load token usage: ${error}`,
+  tokensClear: 'Clear usage',
+  tokensClearConfirm:
+    'This deletes every recorded token usage entry, including the daily rollups. It cannot be undone.',
+  tokensConsumerChat: 'Chat',
+  tokensConsumerWorkflowGeneration: 'Workflow generation',
+  tokensConsumerWorkflowRun: 'Workflow run',
+  tokensConsumerAiDebug: 'AI debugging',
+  tokensConsumerAutoRepair: 'Automatic repair',
+  tokensConsumerScheduledTask: 'Scheduled tasks',
+  tokensConsumerContextCompaction: 'Context compaction',
+  tokensConsumerVision: 'Vision',
+  tokensConsumerExternalApi: 'External API',
 }
 
 const zhCN: Messages = {
@@ -2502,6 +2588,7 @@ const zhCN: Messages = {
   tabData: '数据',
   tabSettings: '设置',
   tabHistory: '历史',
+  tabTokens: '令牌用量',
   tabMore: '更多',
   panelMinimize: '最小化为悬浮按钮',
   uploadFileWaiting: '工作流正在等待你选择文件。',
@@ -3571,6 +3658,42 @@ const zhCN: Messages = {
   workflowRepairAutoTitle: 'AI 正在自动修复…',
   workflowRepairVerifiedDetail: '验证通过：工作流可独立运行。',
   workflowRepairRevisionCommitted: ({ revision }) => `已提交为第 ${revision} 个修订版本。`,
+  tokensRangeToday: '今日',
+  tokensRange7d: '近 7 天',
+  tokensRange30d: '近 30 天',
+  tokensRangeAll: '使用以来',
+  tokensViewChart: '折线图',
+  tokensViewTable: '表格',
+  tokensTotal: '总 token',
+  tokensInput: '输入',
+  tokensOutput: '输出',
+  tokensCached: '缓存输入',
+  tokensRequests: '请求数',
+  tokensSince: '首次记录',
+  tokensTrend: 'token 消耗趋势',
+  tokensByConsumer: '按功能',
+  tokensByEntity: '按聊天、任务与工作流',
+  tokensColName: '名称',
+  tokensColInput: '输入',
+  tokensColOutput: '输出',
+  tokensColRequests: '请求数',
+  tokensColTotal: '合计',
+  tokensEmpty: '该统计范围内没有 token 消耗记录。',
+  tokensNoRecords: '暂无',
+  tokensTruncated: ({ count }) => `仅展示用量最高的 ${count} 条，其余已合并到「其他」。`,
+  tokensOther: '其他',
+  tokensLoadFailed: ({ error }) => `token 用量加载失败：${error}`,
+  tokensClear: '清空用量记录',
+  tokensClearConfirm: '将删除所有已记录的 token 用量，包含每日汇总，且无法恢复。',
+  tokensConsumerChat: '聊天',
+  tokensConsumerWorkflowGeneration: '工作流生成',
+  tokensConsumerWorkflowRun: '工作流运行',
+  tokensConsumerAiDebug: 'AI 调试',
+  tokensConsumerAutoRepair: '自动修复',
+  tokensConsumerScheduledTask: '定时任务',
+  tokensConsumerContextCompaction: '上下文压缩',
+  tokensConsumerVision: '视觉识别',
+  tokensConsumerExternalApi: '外部 API',
 }
 
 const DICTIONARIES: Record<Locale, Messages> = { en, 'zh-CN': zhCN }
