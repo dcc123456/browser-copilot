@@ -66,6 +66,31 @@ export function entityKeyFor(kind: TokenEntityKind, id: string): string {
   return `${kind}:${trimmed || 'unknown'}`
 }
 
+const TOKEN_ENTITY_KINDS: readonly TokenEntityKind[] = [
+  'chat',
+  'task',
+  'workflow',
+  'run',
+  'session',
+  'external',
+]
+
+/**
+ * Split an `entityKey` back into its kind and id.
+ *
+ * The dashboard needs both: the kind names the row when no display label was
+ * stored, the id decides whether the row can link to a live task, workflow or
+ * conversation. An unrecognised key yields `undefined` so callers fall back to
+ * showing it verbatim rather than guessing a target.
+ */
+export function entityKindOf(key: string): { kind: TokenEntityKind; id: string } | undefined {
+  const separator = key.indexOf(':')
+  if (separator <= 0) return undefined
+  const kind = key.slice(0, separator)
+  if (!TOKEN_ENTITY_KINDS.includes(kind as TokenEntityKind)) return undefined
+  return { kind: kind as TokenEntityKind, id: key.slice(separator + 1) }
+}
+
 /** Order the dashboard lists consumers in; also the validation set. */
 export const TOKEN_CONSUMERS: readonly TokenConsumer[] = [
   'chat',

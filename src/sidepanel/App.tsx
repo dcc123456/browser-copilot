@@ -160,6 +160,20 @@ export default function App() {
     return () => window.removeEventListener('bc:open-conversation', handler)
   }, [])
 
+  // The tokens board deep-links into the Tasks and Workflows tabs the same way:
+  // App only flips the active tab, the target tab listens for the id and
+  // highlights the row (HistoryTab's `bc:open-history` is the sibling).
+  useEffect(() => {
+    const openTask = (): void => setActive('tasks')
+    const openWorkflow = (): void => setActive('workflows')
+    window.addEventListener('bc:open-task', openTask)
+    window.addEventListener('bc:open-workflow', openWorkflow)
+    return () => {
+      window.removeEventListener('bc:open-task', openTask)
+      window.removeEventListener('bc:open-workflow', openWorkflow)
+    }
+  }, [])
+
   /**
    * Minimize: collapse this panel into a floating page button.
    *

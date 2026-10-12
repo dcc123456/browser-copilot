@@ -27,6 +27,8 @@ import {
   dailyGroupRows,
   dayKeyOf,
   emptyTally,
+  entityKindOf,
+  entityKeyFor,
   hourlySeries,
   rangeWindow,
   recordOf,
@@ -415,5 +417,27 @@ describe('dashboard assembly', () => {
     const daily = dailyFrom([record({ at: now, consumer: 'chat' as TokenConsumer })])
     const stats = buildTokenDashboard([], daily, 'today', now)
     expect(stats.byConsumer.map((row) => row.key)).toEqual(['chat'])
+  })
+})
+
+describe('entityKindOf — what a dashboard row can be named after and linked to', () => {
+  it('splits every ledger kind back into kind and id', () => {
+    for (const kind of ['chat', 'task', 'workflow', 'run', 'session', 'external'] as const) {
+      expect(entityKindOf(entityKeyFor(kind, 'abc123'))).toEqual({ kind, id: 'abc123' })
+    }
+  })
+
+  it('keeps a nested id intact — only the first colon is the separator', () => {
+    expect(entityKindOf('chat:external-gen:r7Kx')).toEqual({
+      kind: 'chat',
+      id: 'external-gen:r7Kx',
+    })
+  })
+
+  it('returns nothing for a key it does not own, so callers show it verbatim', () => {
+    expect(entityKindOf(OTHER_ENTITY_KEY)).toBeUndefined()
+    expect(entityKindOf('')).toBeUndefined()
+    expect(entityKindOf('nonsense:abc')).toBeUndefined()
+    expect(entityKindOf(':abc')).toBeUndefined()
   })
 })

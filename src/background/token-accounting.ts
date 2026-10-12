@@ -17,24 +17,32 @@
 import { setUsageObserver, type UsageEvent } from '../lib/llm'
 import {
   entityKeyFor,
+  entityKindOf,
   recordOf,
   type TokenAttribution,
   type TokenConsumer,
+  type TokenEntityKind,
   type TokenUsageRecord,
 } from '../lib/token-ledger'
 import { getConversationMeta, newId, recordTokenUsage } from '../lib/storage'
+import { getTask } from '../lib/task-store'
 import type { AgentMode } from '../lib/types'
+import { getWorkflow } from '../lib/workflow/storage'
 
 /** Conversation-id prefixes that identify who started an unattended turn. */
 const TURN_CONSUMERS: {
   prefix: string
   consumer: TokenConsumer
-  entity: 'task' | 'workflow' | 'external' | 'chat'
+  entity: TokenEntityKind
 }[] = [
   { prefix: 'task:', consumer: 'scheduled-task', entity: 'task' },
   { prefix: 'workflow-replay:', consumer: 'workflow-run', entity: 'workflow' },
   { prefix: 'workflow-ai-agent:', consumer: 'workflow-run', entity: 'workflow' },
   { prefix: 'workflow-generation:', consumer: 'workflow-generation', entity: 'workflow' },
+  // A generation started over the MCP bridge is keyed by its run handle, not by
+  // a conversation: without this row it would fall through and be attributed as
+  // a chat that does not exist.
+  { prefix: 'external-gen:', consumer: 'workflow-generation', entity: 'run' },
   { prefix: 'external:', consumer: 'external-api', entity: 'external' },
   { prefix: 'feishu:', consumer: 'external-api', entity: 'external' },
 ]
@@ -72,21 +80,22 @@ const labelCache = new Map<string, { label: string; at: number }>()
 
 /**
  * Display name for an attribution: the caller's snapshot when it has one
- * (workflows and tasks hold their own name), else the conversation title.
- * Falls back to the entity key so an unresolvable id still yields a readable row.
+ * (workflows and tasks hold their own name), else the name the id already has
+ * in its own store — conversation title, task name, workflow name. Falls back
+ * to the entity key so an unresolvable id still yields a readable row.
  */
 async function resolveLabel(attribution: TokenAttribution): Promise<string> {
   if (attribution.entityLabel?.trim()) return attribution.entityLabel.trim()
   const cached = labelCache.get(attribution.entityKey)
   if (cached && Date.now() - cached.at < LABEL_TTL_MS) return cached.label
   let label = attribution.entityKey
-  if (attribution.entityKey.startsWith('chat:')) {
-    const id = attribution.entityKey.slice('chat:'.length)
-    try {
-      label = (await getConversationMeta(id))?.title ?? label
-    } catch {
-      // A storage read that fails must not drop the spend — keep the raw key.
-    }
+  const entity = entityKindOf(attribution.entityKey)
+  try {
+    if (entity?.kind === 'chat') label = (await getConversationMeta(entity.id))?.title ?? label
+    else if (entity?.kind === 'task') label = (await getTask(entity.id))?.name ?? label
+    else if (entity?.kind === 'workflow') label = (await getWorkflow(entity.id))?.name ?? label
+  } catch {
+    // A storage read that fails must not drop the spend — keep the raw key.
   }
   labelCache.set(attribution.entityKey, { label, at: Date.now() })
   return label

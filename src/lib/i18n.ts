@@ -1330,6 +1330,14 @@ export interface Messages {
   tokensTruncated: ({ count }: { count: number }) => string
   /** Display name for the ledger's `__other__` sentinel group key. */
   tokensOther: string
+  /** A row whose id resolves to nothing anymore: name it by kind plus short id. */
+  tokensEntityUnnamed: ({ kind, id }: { kind: string; id: string }) => string
+  /** Tooltip on an entity row that links to its task, workflow or conversation. */
+  tokensJump: ({ kind }: { kind: string }) => string
+  /** Singular entity-kind nouns, used by both rows and the jump tooltip. */
+  tokensKindChat: string
+  tokensKindTask: string
+  tokensKindWorkflow: string
   tokensLoadFailed: ({ error }: { error: string }) => string
   tokensClear: string
   tokensClearConfirm: string
@@ -2558,6 +2566,11 @@ Keep the whole report dense and within the message size cap.`,
   tokensTruncated: ({ count }) =>
     `Only the ${count} busiest entries are listed; the rest are grouped under "Other".`,
   tokensOther: 'Other',
+  tokensEntityUnnamed: ({ kind, id }) => `${kind} ${id}`,
+  tokensJump: ({ kind }) => `Jump to this ${kind}`,
+  tokensKindChat: 'chat',
+  tokensKindTask: 'task',
+  tokensKindWorkflow: 'workflow',
   tokensLoadFailed: ({ error }) => `Could not load token usage: ${error}`,
   tokensClear: 'Clear usage',
   tokensClearConfirm:
@@ -3682,6 +3695,11 @@ const zhCN: Messages = {
   tokensNoRecords: '暂无',
   tokensTruncated: ({ count }) => `仅展示用量最高的 ${count} 条，其余已合并到「其他」。`,
   tokensOther: '其他',
+  tokensEntityUnnamed: ({ kind, id }) => `${kind} ${id}`,
+  tokensJump: ({ kind }) => `跳转到该${kind}`,
+  tokensKindChat: '会话',
+  tokensKindTask: '定时任务',
+  tokensKindWorkflow: '工作流',
   tokensLoadFailed: ({ error }) => `token 用量加载失败：${error}`,
   tokensClear: '清空用量记录',
   tokensClearConfirm: '将删除所有已记录的 token 用量，包含每日汇总，且无法恢复。',

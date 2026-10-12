@@ -21,12 +21,15 @@ import { useCallback, useEffect, useMemo, useState, type PointerEvent } from 're
 import { sendCommand } from '../lib/messages'
 import { smoothAreaPath, smoothLinePath, type ChartPoint } from '../lib/token-chart'
 import {
+  entityKeyFor,
+  entityKindOf,
   MAX_GROUP_ROWS,
   OTHER_ENTITY_KEY,
   TOKEN_RANGES,
   type TokenBucketUnit,
   type TokenConsumer,
   type TokenDashboard,
+  type TokenEntityKind,
   type TokenGroupRow,
   type TokenRange,
   type TokenSeriesPoint,
@@ -55,6 +58,51 @@ const CONSUMER_LABEL: Record<TokenConsumer, keyof Messages> = {
   'context-compaction': 'tokensConsumerContextCompaction',
   vision: 'tokensConsumerVision',
   'external-api': 'tokensConsumerExternalApi',
+}
+
+/** Entity kinds whose ledger id still addresses something the panel can open. */
+type LinkableKind = 'chat' | 'task' | 'workflow'
+
+/** A live entity the row can name itself after and link to. */
+export interface EntityTarget {
+  kind: LinkableKind
+  id: string
+  name: string
+}
+
+/** Deep links the panel already uses: the event name carries `{ id }`. */
+const KIND_EVENT: Record<LinkableKind, string> = {
+  chat: 'bc:open-conversation',
+  task: 'bc:open-task',
+  workflow: 'bc:open-workflow',
+}
+
+/**
+ * Caption for an entity kind. `run` / `session` / `external` ids point at
+ * nothing the panel can reopen, so they borrow the consumer caption that
+ * describes what the spend actually was.
+ */
+const KIND_LABEL: Record<TokenEntityKind, keyof Messages> = {
+  chat: 'tokensKindChat',
+  task: 'tokensKindTask',
+  workflow: 'tokensKindWorkflow',
+  run: 'tokensConsumerWorkflowGeneration',
+  session: 'tokensConsumerAiDebug',
+  external: 'tokensConsumerExternalApi',
+}
+
+/** Tail slice of an id, enough to tell two unnamed entities apart. */
+function shortIdOf(id: string): string {
+  return id.length > 6 ? `…${id.slice(-6)}` : id
+}
+
+/**
+ * Hand an entity row to the tab that owns it. App flips the active tab on the
+ * same event; the target tab listens for the id and highlights the row
+ * (`bc:open-history` / `bc:open-conversation` are the existing siblings).
+ */
+function openEntity(target: EntityTarget): void {
+  window.dispatchEvent(new CustomEvent(KIND_EVENT[target.kind], { detail: { id: target.id } }))
 }
 
 /** Chart geometry in SVG user units; the element scales to the panel width. */
@@ -396,19 +444,63 @@ function TrendChart({
   )
 }
 
+/** How one entity row reads: a name the user recognises, plus where it links. */
+export interface EntityRowView {
+  name: string
+  /** Tooltip: the jump hint when the row can be opened, the raw key when not. */
+  hint: string
+  /** Present only when the ledger id still addresses a live object. */
+  target?: EntityTarget
+}
+
+/** Dictionary strings a row name needs, resolved once per render by the tab. */
+export interface EntityRowTexts {
+  kindName: (kind: TokenEntityKind) => string
+  unnamed: (kind: string, id: string) => string
+  jumpHint: (kind: string) => string
+  otherLabel: string
+  truncatedHint: string
+}
+
+/**
+ * Name an entity row and decide whether it can be opened: the store's current
+ * name first (so a renamed task reads as it is called today), then the ledger's
+ * write-time snapshot, then a localized kind plus a short id. Only a row whose
+ * id still addresses a live object gets a jump target.
+ */
+export function entityRowView(
+  row: TokenGroupRow,
+  entities: Readonly<Record<string, EntityTarget>>,
+  texts: EntityRowTexts,
+): EntityRowView {
+  if (row.key === OTHER_ENTITY_KEY) return { name: texts.otherLabel, hint: texts.truncatedHint }
+  const target = entities[row.key]
+  const entity = entityKindOf(row.key)
+  const kindName = entity ? texts.kindName(entity.kind) : row.key
+  const snapshot = row.label && row.label !== row.key ? row.label : ''
+  return {
+    name:
+      target?.name?.trim() ||
+      snapshot ||
+      texts.unnamed(kindName, entity ? shortIdOf(entity.id) : row.key),
+    hint: target ? texts.jumpHint(kindName) : row.key,
+    ...(target ? { target } : {}),
+  }
+}
+
 /**
  * Breakdown table — one per half of the ledger's grouping: which feature spent
  * (consumer rows) and which conversation / task / workflow it was spent on
  * (entity rows).
  */
-function GroupTable({
+export function GroupTable({
   title,
   rows,
   locale,
   headers,
   emptyLabel,
-  otherLabel,
   consumerNames,
+  entityView,
   windowTotal,
 }: {
   title: string
@@ -416,10 +508,10 @@ function GroupTable({
   locale: string
   headers: { name: string; input: string; output: string; requests: string; total: string }
   emptyLabel: string
-  /** Display name for the ledger's folded-tail sentinel key. */
-  otherLabel: string
   /** When set, a row's `key` is a consumer id and is shown by its localized name. */
   consumerNames?: Record<TokenConsumer, string>
+  /** When set, a row's `key` is an entity id: name it from the live index, link it. */
+  entityView?: (row: TokenGroupRow) => EntityRowView
   /** Denominator for the row share underlay; the window total, never a group sum. */
   windowTotal: number
 }) {
@@ -457,43 +549,58 @@ function GroupTable({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr
-              key={row.key}
-              className="border-t border-border/70 transition-colors duration-150 hover:bg-hover"
-            >
-              {/* The row's share of the window is drawn as a gauge under the
+          {rows.map((row) => {
+            const view = entityView?.(row)
+            const target = view?.target
+            const name =
+              view?.name ?? consumerNames?.[row.key as TokenConsumer] ?? (row.label || row.key)
+            return (
+              <tr
+                key={row.key}
+                className="border-t border-border/70 transition-colors duration-150 hover:bg-hover"
+              >
+                {/* The row's share of the window is drawn as a gauge under the
                   name: a sixth column would not fit, and length reads faster
                   than a percentage. */}
-              <td className="px-3 py-1.5 align-top">
-                <div className="truncate text-ink" title={row.key}>
-                  {row.key === OTHER_ENTITY_KEY
-                    ? otherLabel
-                    : (consumerNames?.[row.key as TokenConsumer] ?? (row.label || row.key))}
-                </div>
-                <div aria-hidden className="mt-1 h-[2px] w-full bg-border/60">
-                  <div
-                    className="h-full rounded-r-full bg-accent/70"
-                    style={{
-                      width: `${windowTotal > 0 ? Math.min(100, (row.totals.totalTokens / windowTotal) * 100) : 0}%`,
-                    }}
-                  />
-                </div>
-              </td>
-              <td className="px-1 py-1.5 text-right font-mono text-muted tabular-nums">
-                {formatNumber(locale, row.totals.inputTokens)}
-              </td>
-              <td className="px-1 py-1.5 text-right font-mono text-muted tabular-nums">
-                {formatNumber(locale, row.totals.outputTokens)}
-              </td>
-              <td className="px-1 py-1.5 text-right font-mono text-muted tabular-nums">
-                {formatNumber(locale, row.totals.requests)}
-              </td>
-              <td className="px-2 py-1.5 text-right font-mono font-semibold text-ink tabular-nums">
-                {formatNumber(locale, row.totals.totalTokens)}
-              </td>
-            </tr>
-          ))}
+                <td className="px-3 py-1.5 align-top">
+                  {target ? (
+                    <button
+                      className="block w-full truncate text-left text-ink transition-colors duration-150 hover:text-accent focus-visible:text-accent"
+                      onClick={() => openEntity(target)}
+                      title={view?.hint}
+                      type="button"
+                    >
+                      {name}
+                    </button>
+                  ) : (
+                    <div className="truncate text-ink" title={view?.hint ?? row.key}>
+                      {name}
+                    </div>
+                  )}
+                  <div aria-hidden className="mt-1 h-[2px] w-full bg-border/60">
+                    <div
+                      className="h-full rounded-r-full bg-accent/70"
+                      style={{
+                        width: `${windowTotal > 0 ? Math.min(100, (row.totals.totalTokens / windowTotal) * 100) : 0}%`,
+                      }}
+                    />
+                  </div>
+                </td>
+                <td className="px-1 py-1.5 text-right font-mono text-muted tabular-nums">
+                  {formatNumber(locale, row.totals.inputTokens)}
+                </td>
+                <td className="px-1 py-1.5 text-right font-mono text-muted tabular-nums">
+                  {formatNumber(locale, row.totals.outputTokens)}
+                </td>
+                <td className="px-1 py-1.5 text-right font-mono text-muted tabular-nums">
+                  {formatNumber(locale, row.totals.requests)}
+                </td>
+                <td className="px-2 py-1.5 text-right font-mono font-semibold text-ink tabular-nums">
+                  {formatNumber(locale, row.totals.totalTokens)}
+                </td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
@@ -507,6 +614,45 @@ export default function TokensTab() {
   const [stats, setStats] = useState<TokenDashboard | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  /**
+   * Live entities, keyed by their ledger `entityKey`. Names are read from the
+   * stores rather than taken from the ledger's write-time snapshot, so a row
+   * shows what the task or workflow is called today — and only turns into a
+   * link when its target still exists.
+   */
+  const [entities, setEntities] = useState<Record<string, EntityTarget>>({})
+
+  const loadEntities = useCallback(async (): Promise<void> => {
+    try {
+      const [taskResult, workflowResult, conversationResult] = await Promise.all([
+        sendCommand({ type: 'tasks.list' }),
+        sendCommand({ type: 'workflows.list' }),
+        sendCommand({ type: 'conversations.list' }),
+      ])
+      const next: Record<string, EntityTarget> = {}
+      if (taskResult.type === 'tasks.list')
+        for (const task of taskResult.tasks)
+          next[entityKeyFor('task', task.id)] = { kind: 'task', id: task.id, name: task.name }
+      if (workflowResult.type === 'workflows.list')
+        for (const workflow of workflowResult.workflows)
+          next[entityKeyFor('workflow', workflow.id)] = {
+            kind: 'workflow',
+            id: workflow.id,
+            name: workflow.name,
+          }
+      if (conversationResult.type === 'conversations.list')
+        for (const conversation of conversationResult.conversations)
+          next[entityKeyFor('chat', conversation.id)] = {
+            kind: 'chat',
+            id: conversation.id,
+            name: conversation.title,
+          }
+      setEntities(next)
+    } catch {
+      // A missing name index costs a link, never the figures: rows fall back to
+      // the snapshot label the ledger already stored.
+    }
+  }, [])
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -522,7 +668,10 @@ export default function TokensTab() {
 
   useEffect(() => {
     void load()
-  }, [load])
+    // Alongside the figures: a task created after this panel opened becomes
+    // linkable on the next range switch instead of waiting for a restart.
+    void loadEntities()
+  }, [load, loadEntities])
 
   // The ledger writes on every attributed request. Re-read on change, but
   // coalesce a burst: one refresh per half-second of streaming, not one per
@@ -542,10 +691,29 @@ export default function TokensTab() {
   // A storage directory that re-grants after the panel opened holds the real
   // ledger; re-read once the connection lands (same contract as the other tabs).
   useEffect(() => {
-    const listener = (): void => void load()
+    const listener = (): void => {
+      void load()
+      void loadEntities()
+    }
     window.addEventListener(STORAGE_RECONNECTED_EVENT, listener)
     return () => window.removeEventListener(STORAGE_RECONNECTED_EVENT, listener)
-  }, [load])
+  }, [load, loadEntities])
+
+  const rowTexts = useMemo<EntityRowTexts>(
+    () => ({
+      kindName: (kind) => t[KIND_LABEL[kind]] as string,
+      unnamed: (kind, id) => t.tokensEntityUnnamed({ kind, id }),
+      jumpHint: (kind) => t.tokensJump({ kind }),
+      otherLabel: t.tokensOther,
+      truncatedHint: t.tokensTruncated({ count: MAX_GROUP_ROWS }),
+    }),
+    [t],
+  )
+
+  const entityView = useCallback(
+    (row: TokenGroupRow): EntityRowView => entityRowView(row, entities, rowTexts),
+    [entities, rowTexts],
+  )
 
   const consumerNames = useMemo(
     () =>
@@ -671,7 +839,6 @@ export default function TokensTab() {
             locale={locale}
             headers={tableHeaders}
             emptyLabel={t.tokensEmpty}
-            otherLabel={t.tokensOther}
             consumerNames={consumerNames}
             windowTotal={stats?.totals.totalTokens ?? 0}
           />
@@ -682,7 +849,7 @@ export default function TokensTab() {
               locale={locale}
               headers={tableHeaders}
               emptyLabel={t.tokensEmpty}
-              otherLabel={t.tokensOther}
+              entityView={entityView}
               windowTotal={stats?.totals.totalTokens ?? 0}
             />
           </div>

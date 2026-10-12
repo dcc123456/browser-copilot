@@ -23,6 +23,11 @@ vi.mock('../src/lib/messages', async (importOriginal) => {
 
 beforeAll(() => {
   ;(globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true
+  // jsdom has no scrolling API; saving a task flashes the row, which scrolls it into view.
+  Object.defineProperty(Element.prototype, 'scrollIntoView', {
+    value: () => {},
+    configurable: true,
+  })
 })
 
 import { act, createElement } from 'react'

@@ -20,6 +20,7 @@ import {
   turnAttribution,
 } from '../src/background/token-accounting'
 import { readTokenUsage, touchConversation } from '../src/lib/storage'
+import { createDraft } from '../src/lib/task-store'
 
 const usage = (inputTokens: number, outputTokens: number): TokenUsage => ({
   inputTokens,
@@ -48,6 +49,12 @@ describe('turnAttribution', () => {
     expect(turnAttribution('external:k-1')).toEqual({
       consumer: 'external-api',
       entityKey: 'external:k-1',
+    })
+    // A bridge-started generation run is keyed by its handle: `chat:` would
+    // promise a conversation the panel can never open.
+    expect(turnAttribution('external-gen:r7Kx')).toEqual({
+      consumer: 'workflow-generation',
+      entityKey: 'run:r7Kx',
     })
     expect(turnAttribution('feishu:u-1')).toEqual({
       consumer: 'external-api',
@@ -159,6 +166,25 @@ describe('buildRecord', () => {
       1,
     )
     expect(unknown.entityLabel).toBe('task:gone')
+  })
+
+  it('names an unlabelled task or workflow row from its own store', async () => {
+    data.set('scheduledTasks', [{ ...createDraft({ name: 'Nightly PR digest' }), id: 't-9' }])
+    data.set('workflows', [{ id: 'wf-9', name: 'Crawl the shop' }])
+    const task = await buildRecord(
+      { attribution: turnAttribution('task:t-9'), model: 'gpt-test', usage: usage(1, 1) },
+      1,
+    )
+    expect(task.entityLabel).toBe('Nightly PR digest')
+    const workflow = await buildRecord(
+      {
+        attribution: turnAttribution('workflow-replay:wf-9'),
+        model: 'gpt-test',
+        usage: usage(1, 1),
+      },
+      1,
+    )
+    expect(workflow.entityLabel).toBe('Crawl the shop')
   })
 
   it('writes one record per observed request through the installed sink', async () => {

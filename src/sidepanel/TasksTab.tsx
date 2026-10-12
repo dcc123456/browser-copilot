@@ -20,6 +20,7 @@ import { describeSchedule, isManualSchedule } from '../lib/schedule'
 import type { FeishuConfig, ScheduledTask } from '../lib/scheduler-types'
 import type { Workflow } from '../lib/workflow/types'
 import TaskEditDialog from './TaskEditDialog'
+import { useRowHighlight } from './hooks/useRowHighlight'
 import { useT } from './i18n'
 import { confirmDialog } from '../ui/confirm'
 
@@ -47,15 +48,8 @@ export default function TasksTab() {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [banner, setBanner] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
-  /** Id of the task just saved, so its card can briefly highlight. */
-  const [justSavedId, setJustSavedId] = useState<string | null>(null)
-
-  // Clear the highlight a short time after it appears, without re-running load.
-  useEffect(() => {
-    if (!justSavedId) return
-    const timer = setTimeout(() => setJustSavedId(null), 1800)
-    return () => clearTimeout(timer)
-  }, [justSavedId])
+  /** Flash the row just saved, or the one the tokens board deep-linked to. */
+  const { highlightedId, flash } = useRowHighlight('bc:open-task', 'data-task-id')
 
   const load = useCallback(async () => {
     try {
@@ -104,7 +98,7 @@ export default function TasksTab() {
     // failure; optimistically marking the id highlights the card on success.
     const savedId = task.id
     setDraft(null)
-    setJustSavedId(savedId)
+    flash(savedId)
     try {
       await sendCommand({ type: 'tasks.save', task })
       setBanner({ kind: 'ok', text: t.taskSaved })
@@ -241,9 +235,10 @@ export default function TasksTab() {
             const manual = isManualSchedule(task.schedule)
             return (
               <li
-                className={`task-item${justSavedId === task.id ? ' task-item-saved' : ''}${
+                className={`task-item${highlightedId === task.id ? ' task-item-saved' : ''}${
                   !task.enabled && !manual ? ' task-item-disabled' : ''
                 }`}
+                data-task-id={task.id}
                 key={task.id}
               >
                 <div className="task-item-head">

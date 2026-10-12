@@ -21,6 +21,7 @@ import { newId } from '../lib/storage'
 import { onStoreChanged } from '../lib/store-events'
 import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
 import { useT } from './i18n'
+import { useRowHighlight } from './hooks/useRowHighlight'
 import { confirmDialog } from '../ui/confirm'
 import { FailureCenterDialog } from './FailureCenter'
 import { WorkflowHealthView } from './WorkflowHealthView'
@@ -174,6 +175,9 @@ export default function WorkflowsTab() {
   const t = useT()
   const [workflows, setWorkflows] = useState<Workflow[]>([])
   const [runs, setRuns] = useState<TaskRunLog[]>([])
+  // A token row on the spend board can point here; only the flash is needed,
+  // this tab never links to one of its own rows.
+  const { highlightedId } = useRowHighlight('bc:open-workflow', 'data-workflow-id')
   // A failed-run banner carries its run id so clicking it deep-links into the
   // History tab with that run's detail expanded. Plain info/error banners
   // (import results, failed deletes…) leave `runId` undefined and stay
@@ -852,7 +856,11 @@ export default function WorkflowsTab() {
             const last = lastRunFor(wf)
             const health = summarizeWorkflowHealth(runs, wf.id)
             return (
-              <li className="task-item" key={wf.id}>
+              <li
+                className={`task-item${highlightedId === wf.id ? ' task-item-saved' : ''}`}
+                data-workflow-id={wf.id}
+                key={wf.id}
+              >
                 <div className="task-item-head">
                   {/* Checkbox + name in one LEFT group: .task-item-head is
                       space-between, so a bare third child would push the name
