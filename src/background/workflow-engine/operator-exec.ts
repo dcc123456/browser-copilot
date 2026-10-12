@@ -25,6 +25,7 @@ import { interpolateParams } from '../../lib/workflow/interpolate'
 import { OPERATOR_BLOCK_IDS } from '../../lib/workflow/operator-tools'
 import { operatorExecClass, recordOnlyReason } from '../../lib/workflow/operator-class'
 import type { ScopeWindow } from '../automation-scope'
+import type { TokenAttribution } from '../../lib/token-ledger'
 import { EXECUTORS, type BlockExecutor, type WorkflowExecCtx } from './executors'
 
 export { OPERATOR_BLOCK_IDS }
@@ -80,6 +81,11 @@ export interface OperatorExecDeps {
   setTab?: (tabId: number) => void
   /** Executor registry override, for tests. Defaults to the real registry. */
   executors?: Record<string, BlockExecutor>
+  /**
+   * Token attribution for model calls a block makes while running (`ai-prompt`).
+   * Unset → that block's spend is not recorded.
+   */
+  attribution?: TokenAttribution
 }
 
 export interface OperatorExecResult {
@@ -122,6 +128,7 @@ function buildCtx(
   if (typeof deps.tabId === 'number') ctx.tabId = deps.tabId
   if (deps.scope) ctx.scope = deps.scope
   if (deps.setTab) ctx.setTab = deps.setTab
+  if (deps.attribution) ctx.attribution = deps.attribution
   return ctx
 }
 

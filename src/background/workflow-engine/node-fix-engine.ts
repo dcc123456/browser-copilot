@@ -27,6 +27,7 @@ import {
 import { describeCondition, type WorkflowCondition } from '../../lib/workflow/conditions'
 import { nodeGoalContractOf } from '../../lib/workflow/node-goal-contract'
 import { operatorExecClass } from '../../lib/workflow/operator-class'
+import { entityKeyFor, type TokenAttribution } from '../../lib/token-ledger'
 import { createDriverConditionProbe, evaluateConditionWithProbe } from './condition-runtime'
 import { executeOperatorNode } from './operator-exec'
 import type { ScopeWindow } from '../automation-scope'
@@ -65,6 +66,8 @@ export interface NodeFixDeps {
     prompt: string,
     onProgress: (message: string) => void,
   ) => Promise<{ rationale: string; data: Record<string, unknown> } | null>
+  /** Which workflow these fix attempts belong to in the token ledger. */
+  attribution?: TokenAttribution
 }
 
 function throwIfAborted(signal: AbortSignal): void {
@@ -80,7 +83,11 @@ async function resolveScope(windowId: number | undefined): Promise<ScopeWindow |
 }
 
 /** Build the default executeNode over the real single-node executor. */
-function defaultExecuteNode(scope: ScopeWindow | undefined, signal: AbortSignal) {
+function defaultExecuteNode(
+  scope: ScopeWindow | undefined,
+  signal: AbortSignal,
+  attribution: TokenAttribution,
+) {
   return async (
     blockId: string,
     data: Record<string, unknown>,
@@ -90,7 +97,12 @@ function defaultExecuteNode(scope: ScopeWindow | undefined, signal: AbortSignal)
     if (operatorExecClass(blockId) === 'record-only') {
       return { ok: true }
     }
-    const result = await executeOperatorNode(blockId, data, { signal, scope, variables: {} })
+    const result = await executeOperatorNode(blockId, data, {
+      signal,
+      scope,
+      variables: {},
+      attribution,
+    })
     if (result.status === 'record-only') return { ok: true }
     if (result.status === 'failed') return { ok: false, error: result.error }
     return { ok: true }
@@ -114,7 +126,10 @@ function defaultEvaluateCriteria(scope: ScopeWindow | undefined, signal: AbortSi
 }
 
 /** Default callModel over the active provider. Returns null when no provider. */
-function defaultCallModel(signal: AbortSignal): NonNullable<NodeFixDeps['callModel']> {
+function defaultCallModel(
+  signal: AbortSignal,
+  attribution: TokenAttribution,
+): NonNullable<NodeFixDeps['callModel']> {
   return async (prompt, onProgress) => {
     const settings = await getSettings()
     const provider = settings.providers.find((p) => p.id === settings.activeProviderId)
@@ -126,6 +141,7 @@ function defaultCallModel(signal: AbortSignal): NonNullable<NodeFixDeps['callMod
         apiKey: provider.apiKey,
         baseUrl: provider.baseUrl,
         model: provider.model,
+        attribution,
         headers: provider.headers,
         messages: [{ role: 'user', content: prompt }],
         signal: AbortSignal.any([signal, AbortSignal.timeout(NODE_FIX_TIMEOUT_MS)]),
@@ -183,10 +199,16 @@ export async function runNodeFix(
 
   const { signal, emit } = deps
   const scope = await resolveScope(input.windowId)
-  const executeNode = deps.executeNode ?? defaultExecuteNode(scope, signal)
+  // Node Fix is driven from the editor over one node, so the ledger keys the
+  // spend by the fix session when the caller does not name a workflow.
+  const usageAttribution: TokenAttribution = deps.attribution ?? {
+    consumer: 'ai-debug',
+    entityKey: entityKeyFor('session', input.sessionId),
+  }
+  const executeNode = deps.executeNode ?? defaultExecuteNode(scope, signal, usageAttribution)
   const evaluateCriteria = deps.evaluateCriteria ?? defaultEvaluateCriteria(scope, signal)
   const callModel: NonNullable<NodeFixDeps['callModel']> =
-    deps.callModel ?? defaultCallModel(signal)
+    deps.callModel ?? defaultCallModel(signal, usageAttribution)
 
   let working = { ...input.blockData }
   const variables: Record<string, unknown> = {}

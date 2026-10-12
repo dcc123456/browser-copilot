@@ -16,6 +16,7 @@
  * @module background/workflow-engine/workflow-review
  */
 import { streamCompletion } from '../../lib/llm'
+import { entityKeyFor } from '../../lib/token-ledger'
 import { stripThinkBlocks } from '../../lib/model-output'
 import { getSettings } from '../../lib/storage'
 import { OPERATOR_GUIDE } from '../../lib/workflow/operator-guide'
@@ -184,6 +185,11 @@ export async function reviewWorkflow(
         apiKey: provider.apiKey,
         baseUrl: provider.baseUrl,
         model: provider.model,
+        attribution: {
+          consumer: 'ai-debug',
+          entityKey: entityKeyFor('workflow', workflow.id),
+          entityLabel: workflow.name,
+        },
         messages: [{ role: 'user', content: buildReviewPrompt(workflow) }],
         headers: provider.headers,
         // No hard max_tokens cap (unlike the old 1500): a thinking model spends

@@ -43,6 +43,7 @@ import { ELEMENT_OP_BLOCKS } from '../../lib/workflow/generated-validation'
 import type { DebugStepLine } from '../../lib/workflow/auto-debug-patch'
 import type { ScopeWindow } from '../automation-scope'
 import type { BlockExecutor, WorkflowExecCtx } from './executors'
+import { entityKeyFor, type TokenAttribution } from '../../lib/token-ledger'
 import { EXECUTORS, targetFrom } from './executors'
 import { LoopBreakpointError } from './loop-breakpoint'
 import {
@@ -478,6 +479,7 @@ function buildExecCtx(
   scope: ScopeWindow | undefined,
   reliability: WorkflowExecCtx['reliability'],
   getRunLog: () => string[],
+  attribution: TokenAttribution | undefined,
 ): WorkflowExecCtx {
   return {
     variables,
@@ -490,6 +492,7 @@ function buildExecCtx(
     getRunLog,
     ...(scope ? { scope } : {}),
     ...(reliability ? { reliability } : {}),
+    ...(attribution ? { attribution } : {}),
     emit: (kind, text) => onStep(kind, currentId, text),
   }
 }
@@ -572,6 +575,14 @@ async function runCore(
         minMargin: STRICT_MIN_MARGIN,
       }
     : undefined
+
+  // Model calls made by `ai-prompt` blocks are this workflow's spend, so the
+  // run's attribution is derived once here and threaded onto every block ctx.
+  const runAttribution: TokenAttribution = {
+    consumer: 'workflow-run',
+    entityKey: entityKeyFor('workflow', workflow.id),
+    entityLabel: workflow.name,
+  }
 
   const nodes = workflow.drawflow.nodes
   const edges = workflow.drawflow.edges
@@ -908,6 +919,7 @@ async function runCore(
       scope,
       reliability,
       () => stepLines.map((line) => line.text),
+      runAttribution,
     )
     const policy = onErrorPolicy(params)
 

@@ -37,6 +37,7 @@
 import { isInjectablePage } from '../../lib/pages'
 import { truncate } from '../../lib/extract'
 import { streamCompletion, type WireMessage } from '../../lib/llm'
+import type { TokenAttribution } from '../../lib/token-ledger'
 import { getSettings, listPasswords } from '../../lib/storage'
 import { entryFields, findField } from '../../lib/types'
 import { OCR_SUPPORTED } from '../../lib/ocr-support'
@@ -142,6 +143,12 @@ export interface WorkflowExecCtx {
    * threads it through.
    */
   scope?: ScopeWindow
+  /**
+   * What this run's model calls are for, for the token ledger (see
+   * `background/token-accounting`). The engine builds it from the workflow
+   * being run; a host that leaves it unset records nothing for that block.
+   */
+  attribution?: TokenAttribution
   /** Pin the target tab (called by new-tab / link / switch-tab executors). */
   setTab?: (tabId: number) => void
   /**
@@ -2087,6 +2094,7 @@ const aiPrompt: BlockExecutor = async (data, ctx) => {
       model: provider.model,
       messages,
       headers: provider.headers,
+      attribution: ctx.attribution,
       signal: ctx.signal,
     })
     // `lastAIResponse` is consumed verbatim by later steps (`{{lastAIResponse}}`

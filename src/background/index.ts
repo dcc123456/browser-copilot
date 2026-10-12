@@ -32,6 +32,8 @@ import {
   setWindowPickRequester,
 } from './window-policy'
 import { isInjectablePage } from '../lib/pages'
+import { buildTokenDashboard, entityKeyFor } from '../lib/token-ledger'
+import { installTokenAccounting } from './token-accounting'
 import {
   hasPluginWindows,
   initScopeWindowCleanup,
@@ -109,6 +111,8 @@ import {
   setSettings,
   getSkill,
   touchConversation,
+  clearTokenUsage,
+  readTokenUsage,
 } from '../lib/storage'
 import { runAgentTurn } from './agent'
 import {
@@ -659,6 +663,9 @@ void rescheduleAllWorkflowTriggers().catch((error: unknown) =>
 void feishuBot.reconcile()
 // Start/stop the outbound local-agent WebSocket on every worker wake.
 void agentClient.sync()
+// Every model call's usage lands in the token ledger (see the dashboard spec):
+// installed at module load because a worker can start cold on any event.
+installTokenAccounting()
 
 /**
  * The toolbar icon is handled manually rather than via `openPanelOnActionClick`,
@@ -1240,6 +1247,17 @@ async function handleCommand(
     case 'history.clear':
       await clearHistory()
       return { type: 'history.clear' }
+
+    case 'tokens.stats': {
+      // Totals, chart buckets and both breakdown tables are computed here so
+      // the panel receives one small object instead of the record array.
+      const { records, daily } = await readTokenUsage()
+      return { type: 'tokens.stats', stats: buildTokenDashboard(records, daily, command.range) }
+    }
+
+    case 'tokens.clear':
+      await clearTokenUsage()
+      return { type: 'tokens.clear' }
 
     case 'conversations.list':
       return { type: 'conversations.list', conversations: await listConversations() }
@@ -1890,6 +1908,11 @@ async function handleCommand(
                     apiKey: provider.apiKey,
                     baseUrl: provider.baseUrl,
                     model: provider.model,
+                    attribution: {
+                      consumer: 'ai-debug',
+                      entityKey: entityKeyFor('workflow', wf.id),
+                      entityLabel: wf.name,
+                    },
                     messages: [
                       {
                         role: 'user',
@@ -2078,6 +2101,11 @@ async function handleCommand(
                       apiKey: provider.apiKey,
                       baseUrl: provider.baseUrl,
                       model: provider.model,
+                      attribution: {
+                        consumer: 'ai-debug',
+                        entityKey: entityKeyFor('workflow', wf.id),
+                        entityLabel: wf.name,
+                      },
                       messages: [
                         {
                           role: 'user',
@@ -2159,6 +2187,11 @@ async function handleCommand(
             baseUrl: modelConfig.baseUrl,
             model: modelConfig.model,
             headers: modelConfig.headers,
+            attribution: {
+              consumer: 'auto-repair',
+              entityKey: entityKeyFor('workflow', repairWorkflow.id),
+              entityLabel: repairWorkflow.name,
+            },
           })
         : undefined
 
@@ -2473,6 +2506,11 @@ async function handleCommand(
             baseUrl: recoveryModel.baseUrl,
             model: recoveryModel.model,
             headers: recoveryModel.headers,
+            attribution: {
+              consumer: 'auto-repair',
+              entityKey: entityKeyFor('workflow', targetWorkflow.id),
+              entityLabel: targetWorkflow.name,
+            },
           })
         : undefined
 

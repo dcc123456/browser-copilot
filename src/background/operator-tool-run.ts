@@ -64,6 +64,7 @@ import {
 import type { WorkflowDraft } from '../lib/workflow/draft-types'
 import { isNavigationBlock, originOfUrl } from '../lib/workflow/page-context'
 import type { ScopeWindow } from './automation-scope'
+import { turnAttribution } from './token-accounting'
 import {
   aiPrefillPlanOf,
   appendOperatorNode,
@@ -497,6 +498,7 @@ function rewriteForRecording(
 
   const outcome = await executeOperatorNode(blockId, data, {
     signal,
+    attribution: turnAttribution(conversationId),
     ...(scope ? { scope } : {}),
     ...(pinnedTab.has(conversationId) ? { tabId: pinnedTab.get(conversationId) } : {}),
     variables,

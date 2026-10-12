@@ -23,6 +23,7 @@ import type {
   UserProfile,
 } from './types'
 import type { FeishuConfig, ScheduledTask, TaskRunLog } from './scheduler-types'
+import type { TokenDashboard, TokenRange } from './token-ledger'
 import type { RunOutcomeKind, RunSource, RunStep } from '../background/running-tasks'
 import type { Workflow } from './workflow/types'
 import type { WorkflowDebugResult } from './workflow/auto-debug-patch'
@@ -432,6 +433,16 @@ export type Command =
    */
   | { type: 'agent.bindings.set'; agentId?: string; agentName: string; windowId: number | null }
 
+  // --- Token usage dashboard ---
+  /**
+   * One dashboard read for a statistical window. Computed in the worker because
+   * the ledger lives there (files or `storage.local`), and the panel must not
+   * receive every raw record to add up a total.
+   */
+  | { type: 'tokens.stats'; range: TokenRange }
+  /** Empties the ledger: both the capped detail records and the day rollup. */
+  | { type: 'tokens.clear' }
+
 /** Replies, discriminated by the command that produced them. */
 export type CommandResult =
   | { type: 'settings'; settings: Settings }
@@ -655,6 +666,10 @@ export type CommandResult =
   // --- Local agent bridge ---
   | { type: 'agent.status'; status: AgentStatus }
   | { type: 'agent.windows'; windows: WindowChoice[] }
+
+  // --- Token usage dashboard ---
+  | { type: 'tokens.stats'; stats: TokenDashboard }
+  | { type: 'tokens.clear' }
 
 /** Envelope so a failed command never looks like a successful one. */
 export type CommandResponse = { ok: true; data: CommandResult } | { ok: false; error: string }

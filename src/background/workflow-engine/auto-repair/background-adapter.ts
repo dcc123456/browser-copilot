@@ -28,6 +28,7 @@ import { createDriverReadinessProbe, executeWorkflow } from '../run-workflow'
 import { effectiveReadinessSpec, prepareNodeExecution } from '../readiness-engine'
 import { targetFrom } from '../executors'
 import { nodeReliabilityOf } from '../../../lib/workflow/reliability'
+import { entityKeyFor } from '../../../lib/token-ledger'
 import { commitWorkflowRevision } from '../../../lib/workflow/workflow-revision'
 import {
   runAutoRepair,
@@ -131,6 +132,11 @@ function makeCandidateProducer(
         apiKey: config.apiKey,
         baseUrl: config.baseUrl,
         model: config.model,
+        attribution: {
+          consumer: 'auto-repair',
+          entityKey: entityKeyFor('workflow', context.workflow.id),
+          entityLabel: context.workflow.name,
+        },
         headers: config.headers,
         signal: AbortSignal.timeout(CANDIDATE_TIMEOUT_MS),
         messages: [

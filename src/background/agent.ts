@@ -39,6 +39,8 @@ import {
   hardCapHistory,
   shouldCompact,
 } from '../lib/context-compact'
+import type { TokenAttribution } from '../lib/token-ledger'
+import { turnAttribution } from './token-accounting'
 import {
   isOperatorTool,
   operatorToolFromEntry,
@@ -3530,7 +3532,11 @@ export async function executeTool(
 
       if (target && processed) {
         const visionStart = performance.now()
-        const result = await recognizeImage(target, processed, { prompt, signal })
+        const result = await recognizeImage(target, processed, {
+          prompt,
+          signal,
+          attribution: { ...turnAttribution(ctx.conversationId), consumer: 'vision' },
+        })
         timing.ocrMs = ocrMs
         timing.visionMs = Math.round(performance.now() - visionStart)
         timing.totalMs = Math.round(performance.now() - totalStart)
@@ -3592,7 +3598,11 @@ export async function executeTool(
         })
       }
 
-      const result = await inspectImage(vision, processed, { prompt, signal })
+      const result = await inspectImage(vision, processed, {
+        prompt,
+        signal,
+        attribution: { ...turnAttribution(ctx.conversationId), consumer: 'vision' },
+      })
       if (!result.ok) return JSON.stringify({ ok: false, error: result.error })
       return JSON.stringify({ ok: true, text: result.text, model: vision.model })
     }
@@ -4728,7 +4738,13 @@ function shortSummary(name: string, result: string): string {
  * `compactHistory`, which falls back to a mechanical digest.
  */
 async function summarizeTranscript(
-  config: { apiKey: string; baseUrl: string; model: string; headers?: Record<string, string> },
+  config: {
+    apiKey: string
+    baseUrl: string
+    model: string
+    headers?: Record<string, string>
+    attribution?: TokenAttribution
+  },
   transcript: string,
 ): Promise<string> {
   const result = await streamCompletion(
@@ -4778,6 +4794,19 @@ export async function runAgentTurn(
   ])
   const provider = preferredProvider ?? (await getActiveProvider())
   const activeSkill = deps.skillId ? await getSkill(deps.skillId) : undefined
+
+  // What every completion in this turn is for, as one pair of attributions
+  // (see `background/token-accounting`): the turn's own requests, and the
+  // compaction summarizer's — the latter is a real cost the user pays to keep
+  // the former running, so it gets its own row instead of hiding in "chat".
+  const turnUsageAttribution = turnAttribution(deps.conversationId, initialMode)
+  const summarizerConfig = {
+    apiKey: provider.apiKey,
+    baseUrl: provider.baseUrl,
+    model: provider.model,
+    ...(provider.headers ? { headers: provider.headers } : {}),
+    attribution: { ...turnUsageAttribution, consumer: 'context-compaction' as const },
+  }
 
   // Plan-first gate (see `planGateBlocks`): arm when the plan skill governs
   // this turn — pinned explicitly, or mounted earlier in the conversation via
@@ -4972,16 +5001,7 @@ export async function runAgentTurn(
       deps.send({ type: 'status', text: compactionText.status })
       await compactHistory(history, {
         marker: compactionText.marker,
-        summarize: (transcript) =>
-          summarizeTranscript(
-            {
-              apiKey: provider.apiKey,
-              baseUrl: provider.baseUrl,
-              model: provider.model,
-              ...(provider.headers ? { headers: provider.headers } : {}),
-            },
-            transcript,
-          ),
+        summarize: (transcript) => summarizeTranscript(summarizerConfig, transcript),
       })
     }
 
@@ -5026,16 +5046,7 @@ export async function runAgentTurn(
         deps.send({ type: 'status', text: compactionText.status })
         await compactHistory(history, {
           marker: compactionText.marker,
-          summarize: (transcript) =>
-            summarizeTranscript(
-              {
-                apiKey: provider.apiKey,
-                baseUrl: provider.baseUrl,
-                model: provider.model,
-                ...(provider.headers ? { headers: provider.headers } : {}),
-              },
-              transcript,
-            ),
+          summarize: (transcript) => summarizeTranscript(summarizerConfig, transcript),
         })
       }
       // Final backstop regardless of the turn flag: if the estimate still
@@ -5060,6 +5071,7 @@ export async function runAgentTurn(
           baseUrl: provider.baseUrl,
           model: provider.model,
           providerLabel: provider.label,
+          attribution: turnUsageAttribution,
           messages,
           tools,
           ...(provider.headers ? { headers: provider.headers } : {}),
@@ -5111,16 +5123,7 @@ export async function runAgentTurn(
         const outcome = await compactHistory(history, {
           marker: compactionText.marker,
           keepRecentTurns: 1,
-          summarize: (transcript) =>
-            summarizeTranscript(
-              {
-                apiKey: provider.apiKey,
-                baseUrl: provider.baseUrl,
-                model: provider.model,
-                ...(provider.headers ? { headers: provider.headers } : {}),
-              },
-              transcript,
-            ),
+          summarize: (transcript) => summarizeTranscript(summarizerConfig, transcript),
         })
         // Leave headroom (80%) for the system prompt, schemas and the answer.
         const budget = Math.floor(providerLimit * 0.8)

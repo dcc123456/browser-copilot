@@ -10,6 +10,7 @@
  */
 
 import { streamCompletion } from '../../../lib/llm'
+import type { TokenAttribution } from '../../../lib/token-ledger'
 import { buildRepairMessages, parseRepairProposal } from './repair-agent'
 import type { RepairContext, WorkflowPatchSet } from '../../../lib/workflow/repair/types'
 
@@ -18,6 +19,8 @@ export interface RepairModelConfig {
   baseUrl: string
   model: string
   headers?: Record<string, string>
+  /** Which workflow this proposal is for; unset → the spend is not recorded. */
+  attribution?: TokenAttribution
 }
 
 const REPAIR_TIMEOUT_MS = 45_000
@@ -34,6 +37,7 @@ export function createAiRepairProposer(config: RepairModelConfig): {
           apiKey: config.apiKey,
           baseUrl: config.baseUrl,
           model: config.model,
+          attribution: config.attribution,
           messages: messages as unknown as Parameters<typeof streamCompletion>[0]['messages'],
           headers: config.headers,
           signal: AbortSignal.timeout(REPAIR_TIMEOUT_MS),
