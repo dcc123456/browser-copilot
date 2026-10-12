@@ -33,6 +33,7 @@ import { z } from 'zod'
 import type { Workflow } from '../../src/lib/workflow/types'
 import { sendWebhookText } from '../../src/lib/feishu'
 import { streamCompletion, type WireMessage } from '../../src/lib/llm'
+import { isTokenRange } from '../../src/lib/token-ledger'
 import type { RunnerConfig } from './config'
 import { loadConfig } from './config'
 import { envOverrides, maskSecret, RESTART_REQUIRED_FIELDS, writeConfigPatch } from './config-store'
@@ -40,6 +41,7 @@ import { logger } from './observability'
 import type { RunService } from './run-service'
 import { MissingWorkflowError } from './run-service'
 import type { ScheduleEntry } from './scheduler'
+import { readTokenDashboard, tokenLedgerFile } from './token-accounting'
 import type { WorkflowLibrary } from './workflow-library'
 
 // --- Request schemas ----------------------------------------------------------
@@ -427,6 +429,17 @@ export function buildHttpApi(opts: {
       },
     }
   }
+
+  /**
+   * Read-only view of this Runner's token ledger (`<dataDir>/token-usage.json`),
+   * aggregated by the same `lib/token-ledger` functions the extension's dashboard
+   * uses. `range` is `today | 7d | 30d | all` and defaults to the whole history.
+   */
+  app.get('/api/tokens/stats', async (request) => {
+    const query = request.query as { range?: unknown }
+    const range = isTokenRange(query['range']) ? query['range'] : 'all'
+    return { stats: await readTokenDashboard(tokenLedgerFile(config.dataDir), range) }
+  })
 
   app.get('/api/config', async () => {
     return {

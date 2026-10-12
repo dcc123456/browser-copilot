@@ -18,6 +18,7 @@
 
 import { sanitizeModelAnswer } from '../../../src/lib/model-output'
 import { streamCompletion, type WireMessage } from '../../../src/lib/llm'
+import type { TokenAttribution } from '../../../src/lib/token-ledger'
 import { interpolate } from '../../../src/lib/workflow/interpolate'
 import type { WorkflowExecCtx } from '../../../src/background/workflow-engine/executors'
 import type { ExecutorDeps } from '../executors'
@@ -94,6 +95,8 @@ export async function runAgentLoop(opts: {
   signal: AbortSignal
   driver: import('../driver').RunDriver
   artifactsDir: string
+  /** Whose spend this turn is; without it the turn is not recorded at all. */
+  attribution?: TokenAttribution
   onStep?: (kind: 'tool' | 'status' | 'result' | 'error' | 'info', text: string) => void
 }): Promise<AgentTurnResult> {
   const { provider, signal } = opts
@@ -118,6 +121,7 @@ export async function runAgentLoop(opts: {
         messages,
         tools: toolSet.tools,
         signal,
+        ...(opts.attribution ? { attribution: opts.attribution } : {}),
       })
     } catch (error) {
       if ((error as Error)?.name === 'AbortError') {
@@ -260,6 +264,7 @@ export async function runAgentTurnForBlock(
     signal: ctx.signal,
     driver: deps.driver,
     artifactsDir: deps.artifactsDir,
+    attribution: ctx.attribution,
     onStep: (kind, text) => {
       if (kind === 'error') ctx.emit('error', text)
       else if (kind === 'result') ctx.emit('result', text)

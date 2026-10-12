@@ -1165,6 +1165,9 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
         messages,
         headers: provider.headers,
         signal: ctx.signal,
+        // The engine derives one attribution per run and threads it onto every
+        // block ctx, so an `ai-prompt` block's call is this workflow's spend.
+        ...(ctx.attribution ? { attribution: ctx.attribution } : {}),
       })
       const clean = sanitizeModelAnswer(result.content)
       ctx.variables['lastAIResponse'] = clean

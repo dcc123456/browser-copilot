@@ -20,6 +20,7 @@ import { Scheduler } from './scheduler'
 import { startFeishuBot, type FeishuBot } from './feishu-bot'
 import { mountConsole } from './web-console'
 import { logger } from './observability'
+import { installTokenAccounting, tokenLedgerFile } from './token-accounting'
 
 /** True when the operator explicitly opted out of authentication. */
 function allowUnauthenticated(): boolean {
@@ -28,6 +29,9 @@ function allowUnauthenticated(): boolean {
 
 async function main(): Promise<void> {
   const config = loadConfig()
+  // Before anything can call a model: every attributed completion of this
+  // process is written to the Runner's own token ledger.
+  installTokenAccounting(tokenLedgerFile(config.dataDir))
 
   if (!config.token && !allowUnauthenticated()) {
     throw new Error(

@@ -29,6 +29,7 @@ import {
 import { detectPreflightHints, observerPreflightEnabled } from '../../../src/lib/workflow/observer'
 import { interpolate } from '../../../src/lib/workflow/interpolate'
 import { patchNodeParams } from '../../../src/lib/workflow/auto-debug-patch'
+import { entityKeyFor, type TokenAttribution } from '../../../src/lib/token-ledger'
 import type {
   AiTakeoverHook,
   AiTakeoverRequest,
@@ -116,6 +117,13 @@ export function createServerTakeoverHook(deps: TakeoverDeps): AiTakeoverHook {
     let lastNote: string | undefined
     let lastTrace: string[] = []
     const signatures: string[] = []
+    // A takeover repairs one workflow, so its model rounds are that workflow's
+    // debugging spend — the same attribution the extension's reviewer uses.
+    const attribution: TokenAttribution = {
+      consumer: 'ai-debug',
+      entityKey: entityKeyFor('workflow', request.workflow.id),
+      entityLabel: request.workflow.name,
+    }
     const MAX_ATTEMPTS = takeoverMaxAttempts()
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       if (request.signal.aborted) return fail('运行已取消')
@@ -145,6 +153,7 @@ export function createServerTakeoverHook(deps: TakeoverDeps): AiTakeoverHook {
         signal: request.signal ?? signal,
         driver: deps.driver,
         artifactsDir: deps.artifactsDir,
+        attribution,
         onStep: (kind, text) => {
           if (kind === 'tool' || kind === 'error' || kind === 'result')
             trace.push(`[${kind}] ${text}`)
