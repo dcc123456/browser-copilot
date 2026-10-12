@@ -25,6 +25,11 @@ test-results/
 .coderabbit-cfg/
 .homedir/
 
+# OCR language data tesseract.js fetches into the runner's cwd on first use. The
+# committed assets are the `.gz` copies under public/tesseract/ (see
+# scripts/copy-tesseract.mjs); an uncompressed one in server/ is runtime debris.
+server/*.traineddata
+
 # Local scratch: scripts & data produced during manual testing (never commit)
 tmp/
 
