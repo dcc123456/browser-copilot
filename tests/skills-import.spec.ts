@@ -99,6 +99,27 @@ describe('parseYamlSkillsText', () => {
   it('fails on nothing parseable', () => {
     expect(parseYamlSkillsText('just words\n').ok).toBe(false)
   })
+
+  // Regression: a list item that is not `key: value` used to leave the item
+  // index unmoved, so the parse loop re-read the same line forever and the
+  // isolate died with a JavaScript heap OOM (whole extension, no console error).
+  it('terminates on a list item without a colon, keeping the parseable items', () => {
+    const { ok, raws } = parseYamlSkillsText('- foo\n- name: B\n  instructions: iB\n')
+    expect(ok).toBe(true)
+    expect(raws).toHaveLength(1)
+    expect(mapAliasedToSkill(raws[0]!)?.name).toBe('B')
+  })
+
+  it('terminates on a colon-free continuation line inside a list', () => {
+    const { ok, raws } = parseYamlSkillsText('- name: A\n  description: dA\n  plain text\n')
+    expect(ok).toBe(true)
+    expect(raws).toHaveLength(1)
+    expect(mapAliasedToSkill(raws[0]!)?.name).toBe('A')
+  })
+
+  it('reports no skills for a list of bare strings', () => {
+    expect(parseYamlSkillsText('- just words\n- more words\n').ok).toBe(false)
+  })
 })
 
 describe('parseSkillsFileText', () => {

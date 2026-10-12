@@ -300,8 +300,19 @@ export function parseYamlDoc(doc: string): YamlDoc | null {
     return { obj, next: i }
   }
 
+  const items: YamlObject[] = []
+  // List items are consumed by `readObject`, which stops at the first line it
+  // cannot read as `key: value` and reports that line back as `next`. Without
+  // the floor below, an item like `- plain text` (no colon) yields `next === i`:
+  // the loop re-reads the same line forever and `items` grows until the isolate
+  // runs out of heap — a whole-worker OOM, since every skills/agents read
+  // funnels through here. An unmappable item is skipped instead.
+  const advance = (from: number, next: number, obj: YamlObject): number => {
+    if (Object.keys(obj).length > 0) items.push(obj)
+    return Math.max(next, from + 1)
+  }
+
   if (isList) {
-    const items: YamlObject[] = []
     let i = 0
     while (i < lines.length) {
       const line = lines[i]!
@@ -315,6 +326,10 @@ export function parseYamlDoc(doc: string): YamlDoc | null {
         // previous item exists and this line is indented 2+ spaces under "- ".
         if (items.length > 0 && line.startsWith('  ') && !line.trimStart().startsWith('#')) {
           const { obj, next } = readObject(i, 2)
+          if (next <= i) {
+            i += 1
+            continue
+          }
           items[items.length - 1] = { ...items[items.length - 1]!, ...obj }
           i = next
           continue
@@ -325,8 +340,7 @@ export function parseYamlDoc(doc: string): YamlDoc | null {
       // "- " alone (next lines are indented key:value pairs).
       if (firstPart.trim().length === 0) {
         const { obj, next } = readObject(i + 1, 2)
-        items.push(obj)
-        i = next
+        i = advance(i, next, obj)
         continue
       }
       // "- key: value" possibly followed by continuation lines at indent 2+.
@@ -336,8 +350,7 @@ export function parseYamlDoc(doc: string): YamlDoc | null {
       const { obj, next } = readObject(i, 2)
       // Restore line for safety; the parse has already consumed it.
       lines[i] = line
-      items.push(obj)
-      i = next
+      i = advance(i, next, obj)
     }
     return items.length > 0 ? items : null
   }
