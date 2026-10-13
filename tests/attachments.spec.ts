@@ -31,6 +31,14 @@ describe('toApiMessages', () => {
       { role: 'system', content: 'sys' },
       { role: 'user', content: 'hello' },
       { role: 'assistant', content: null },
+      // A round that is already answered must survive untouched, by reference.
+      {
+        role: 'assistant',
+        content: 'calling',
+        tool_calls: [
+          { id: 't1', type: 'function', function: { name: 'pin_tab', arguments: '{}' } },
+        ],
+      },
       { role: 'tool', tool_call_id: 't1', content: 'result' },
     ]
     const out = toApiMessages(messages)
@@ -42,6 +50,7 @@ describe('toApiMessages', () => {
     expect(out[1]).toEqual({ role: 'user', content: 'hello' })
     expect(out[2]).toBe(messages[2])
     expect(out[3]).toBe(messages[3])
+    expect(out[4]).toBe(messages[4])
     expect(JSON.stringify(out)).not.toContain('attachments')
     expect(JSON.stringify(out)).not.toContain('displayContent')
   })

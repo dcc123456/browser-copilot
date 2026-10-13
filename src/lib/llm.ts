@@ -77,16 +77,120 @@ export type WireMessage =
   | { role: 'tool'; tool_call_id: string; content: string; name?: string }
 
 /**
+ * Result content for a tool call that never ran: the user pressed Stop between
+ * the assistant turn and its execution (see `runAgentTurn`'s abort guards), or
+ * the stream died mid-call. Model-facing only — the synthetic turn is built
+ * here, at request time, so the persisted transcript keeps the real
+ * interrupted state the panel showed the user.
+ */
+const INTERRUPTED_TOOL_RESULT =
+  '[No result: this call was interrupted before it ran. Do not assume it happened.]'
+
+/** A truncated stream can hand back half a JSON object; providers re-parse it. */
+function isParsableArguments(value: string): boolean {
+  if (value.trim() === '') return true
+  try {
+    JSON.parse(value)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Make every `tool_calls` turn in a transcript self-contained.
+ *
+ * The transcript is one mutable array whose turn persists whatever it holds
+ * (the `finally` around `saveConversation`), so an interrupted full-auto run
+ * can leave an assistant `tool_calls` turn with no matching `role: 'tool'`
+ * result — or with results for only the first k calls. Providers reject that
+ * shape outright, and because the broken turn stays stored, every later request
+ * in the conversation fails the same way. Called by {@link toApiMessages}, the
+ * one place requests are built, so all hosts (extension, runner, unattended,
+ * delegation) are covered and an already-poisoned transcript heals on the next
+ * send.
+ *
+ * Exported for direct testing.
+ */
+export function closeInterruptedToolRounds(messages: readonly WireMessage[]): WireMessage[] {
+  type ToolTurn = Extract<WireMessage, { role: 'tool' }>
+  const closed: WireMessage[] = []
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index]
+    if (!message || message.role !== 'assistant' || !message.tool_calls?.length) {
+      // A `tool` result sitting here has no owning assistant turn — its
+      // `tool_calls` turn was dropped by trimming, or it never existed.
+      if (message && message.role !== 'tool') closed.push(message)
+      continue
+    }
+    const advertised = message.tool_calls
+    // `SseAccumulator` can emit a call with an empty id; such a call can never
+    // be paired, so it goes rather than poisoning the request.
+    const calls = advertised
+      .filter((call) => call.id !== '')
+      .map((call) =>
+        isParsableArguments(call.function.arguments)
+          ? call
+          : { ...call, function: { ...call.function, arguments: '{}' } },
+      )
+    // Results for one turn are always contiguous — the agent loop pushes them
+    // right after the assistant turn — so consume the whole run and re-emit it
+    // in call order, dropping duplicates and results for calls that were cut.
+    const run: ToolTurn[] = []
+    const resultsById = new Map<string, ToolTurn>()
+    let cursor = index + 1
+    while (cursor < messages.length) {
+      const following = messages[cursor]
+      if (!following || following.role !== 'tool') break
+      run.push(following)
+      if (!resultsById.has(following.tool_call_id))
+        resultsById.set(following.tool_call_id, following)
+      cursor += 1
+    }
+    index = cursor - 1
+    // Repair only what is broken: an intact round keeps its own objects by
+    // reference, so a healthy transcript is sent exactly as it was stored.
+    const intact =
+      calls.length === advertised.length &&
+      calls.every((repairedCall, position) => repairedCall === advertised[position]) &&
+      message.content !== null &&
+      run.length === calls.length &&
+      run.every((answered, position) => answered.tool_call_id === calls[position]?.id)
+    if (intact) {
+      closed.push(message, ...run)
+      continue
+    }
+    if (calls.length === 0) {
+      closed.push({ role: 'assistant', content: message.content ?? '' })
+      continue
+    }
+    closed.push({ ...message, content: message.content ?? '', tool_calls: calls })
+    for (const call of calls) {
+      closed.push(
+        resultsById.get(call.id) ?? {
+          role: 'tool',
+          tool_call_id: call.id,
+          content: INTERRUPTED_TOOL_RESULT,
+          name: call.function.name,
+        },
+      )
+    }
+  }
+  return closed
+}
+
+/**
  * Maps stored transcript messages to the request body's `messages` array.
  *
  * User turns with attachments become multimodal content parts: the typed text
  * first (when non-empty), then each image as an `image_url` data URL and each
- * text file inlined as a labelled fenced block. Everything else passes through
- * unchanged. Extension-internal fields (`attachments`, `displayContent`) are
- * always stripped so providers never see fields they did not ask for.
+ * text file inlined as a labelled fenced block. Extension-internal fields
+ * (`attachments`, `displayContent`) are always stripped so providers never see
+ * fields they did not ask for. Tool-call pairing is repaired first by
+ * {@link closeInterruptedToolRounds}.
  */
 export function toApiMessages(messages: readonly WireMessage[]): unknown[] {
-  return messages.map((message) => {
+  return closeInterruptedToolRounds(messages).map((message) => {
     if (message.role !== 'user') return message
     if (!message.attachments || message.attachments.length === 0) {
       // Rebuild the plain pair: displayContent must never reach the provider.
