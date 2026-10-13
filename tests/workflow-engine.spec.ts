@@ -84,6 +84,25 @@ describe('workflow engine', () => {
     expect(seen).toEqual([undefined, undefined])
   })
 
+  it('carries a re-pointed window onto the blocks that follow', async () => {
+    const seen: unknown[] = []
+    const wf = makeWorkflow([node('a', 'step-a'), node('b', 'step-b')], [edge('a', 'b')])
+    const executors = {
+      'step-a': async (_data: Record<string, unknown>, ctx: { scope?: unknown }) => {
+        // What `new-window` does: hand the opened window back to the engine.
+        ;(ctx as { setScope?: (s: { windowId: number }) => void }).setScope?.({ windowId: 42 })
+        seen.push(ctx.scope)
+        return null
+      },
+      'step-b': async (_data: Record<string, unknown>, ctx: { scope?: unknown }) => {
+        seen.push(ctx.scope)
+        return null
+      },
+    }
+    await runWorkflow(wf, { executors, scope: { windowId: 7 } })
+    expect(seen).toEqual([{ windowId: 7 }, { windowId: 42 }])
+  })
+
   it('routes through a branch executor to the edge it returns', async () => {
     const order: string[] = []
     // picks outputs['true'] when flag is set, else outputs['false']

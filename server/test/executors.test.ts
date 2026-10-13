@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { RunDriver } from '../src/driver'
@@ -99,6 +99,37 @@ describe('server executors', () => {
     const ctx = makeCtx({ name: '世界' })
     await registry['set-variable']!({ variableName: 'greeting', value: '你好 {{name}}' }, ctx)
     expect(ctx.variables['greeting']).toBe('你好 世界')
+  })
+
+  /**
+   * Mirror of the extension's `new-window` test: headless has no windows, so
+   * the contract "the steps after me run in the window I opened" is carried by
+   * the page pin. A block that forgot it would leave later steps on the old
+   * page while still reporting success.
+   */
+  it('new-window re-points the run at the page it opened', async () => {
+    const driver = makeDriverStub() as unknown as Record<string, unknown>
+    const newTab = vi.fn(async (url?: string) => ({ id: 12, url: url ?? '', title: 'New' }))
+    const execOp = vi.fn(async (_op: unknown, _tabId?: number) => ({
+      ...OP_BASE,
+      ok: true,
+      note: 'ok',
+    }))
+    driver['newTab'] = newTab
+    driver['execOp'] = execOp
+    const registry = createExecutors(makeDeps(driver as unknown as RunDriver))
+
+    const ctx = makeCtx({ path: 'x' })
+    const pinned: number[] = []
+    ctx.setTab = (tabId) => pinned.push(tabId)
+    await registry['new-window']!({ url: 'https://example.com/{{path}}' }, ctx)
+    expect(newTab).toHaveBeenCalledWith('https://example.com/x')
+    expect(pinned).toEqual([12])
+    expect(ctx.tabId).toBe(12)
+
+    // And the step that follows acts on that page, not the one before it.
+    await registry['click']!({ cssSelector: '#btn' }, ctx)
+    expect(execOp.mock.lastCall?.[1]).toBe(12)
   })
 
   it('javascript-code falls back to local evaluation with Automa helpers', async () => {

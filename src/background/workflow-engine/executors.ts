@@ -139,8 +139,8 @@ export interface WorkflowExecCtx {
   /**
    * Panel-window scope for this run: every tab resolution, tab op and page
    * action stays inside this window (undefined = legacy global resolution for
-   * unattended runs). Validated once by the run layer; the engine only
-   * threads it through.
+   * unattended runs). Validated once by the run layer; the engine threads it
+   * through and `new-window` re-points it via `setScope`.
    */
   scope?: ScopeWindow
   /**
@@ -151,6 +151,12 @@ export interface WorkflowExecCtx {
   attribution?: TokenAttribution
   /** Pin the target tab (called by new-tab / link / switch-tab executors). */
   setTab?: (tabId: number) => void
+  /**
+   * Re-point the run's window (called by `new-window`). Without it the block
+   * opens a window and every later step still acts in the one that launched
+   * the run.
+   */
+  setScope?: (scope: ScopeWindow) => void
   /**
    * Snapshot the current variables for a block (debug mode). Called by the
    * engine after each block; the run layer collects them so the logs viewer can
@@ -2360,7 +2366,20 @@ const newWindowExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const url = data['url'] ? interpolate(String(data['url']), ctx.variables, ctx.refData) : undefined
   try {
-    await driverNewWindow(url)
+    const win = await driverNewWindow(url)
+    // The block promises "later steps run in the new window", so the run must
+    // follow it: re-point the window AND the tab, or every following step acts
+    // back in the window that launched the run.
+    if (typeof win.id === 'number') {
+      const opened = { windowId: win.id }
+      ctx.scope = opened
+      ctx.setScope?.(opened)
+      const [active] = await chrome.tabs.query({ active: true, windowId: win.id })
+      if (typeof active?.id === 'number') {
+        ctx.tabId = active.id
+        ctx.setTab?.(active.id)
+      }
+    }
     ctx.emit('result', '已打开新窗口')
   } catch (error) {
     throw error

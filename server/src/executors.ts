@@ -1413,11 +1413,15 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
   const newWindowExec: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     // Headless "windows" are pages; a new window is a new page in the session.
+    // The mirror of the extension's `setScope` is therefore `setTab`: the
+    // driver makes the new page active, and pinning it is what keeps the
+    // promise that the steps after this block act in the window it opened.
     const url = data['url']
       ? interpolate(String(data['url']), ctx.variables, ctx.refData)
       : undefined
     try {
       const tab = await driver.newTab(url)
+      ctx.tabId = tab.id
       ctx.setTab?.(tab.id)
       ctx.emit('result', `已打开新窗口 (${url ?? '空白页'})`)
     } catch (error) {

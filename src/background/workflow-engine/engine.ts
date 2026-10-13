@@ -477,6 +477,7 @@ function buildExecCtx(
   tabId: number | undefined,
   setTab: (id: number) => void,
   scope: ScopeWindow | undefined,
+  setScope: (scope: ScopeWindow) => void,
   reliability: WorkflowExecCtx['reliability'],
   getRunLog: () => string[],
   attribution: TokenAttribution | undefined,
@@ -489,6 +490,7 @@ function buildExecCtx(
     defaultNext,
     tabId,
     setTab,
+    setScope,
     getRunLog,
     ...(scope ? { scope } : {}),
     ...(reliability ? { reliability } : {}),
@@ -652,6 +654,10 @@ async function runCore(
   // navigation blocks pin it so steps follow the opened/navigated page rather
   // than the extension popup that launched the run.
   let targetTabId: number | undefined
+  // The window this run acts in. Same idea as `targetTabId`, one level up: a
+  // `new-window` block re-points it, so the steps after it run in the window
+  // the workflow opened instead of the one that started the run.
+  let runScope = scope
 
   /**
    * M4 checkpoints: 0-based index of the step being recorded, incremented for
@@ -916,7 +922,10 @@ async function runCore(
       (id) => {
         targetTabId = id
       },
-      scope,
+      runScope,
+      (next) => {
+        runScope = next
+      },
       reliability,
       () => stepLines.map((line) => line.text),
       runAttribution,
@@ -1207,7 +1216,7 @@ async function runCore(
                 steps: stepLines.slice(-25),
                 variables,
                 signal: signalToUse,
-                ...(scope ? { scope } : {}),
+                ...(runScope ? { scope: runScope } : {}),
                 ...(targetTabId !== undefined ? { tabId: targetTabId } : {}),
               },
               {
@@ -1522,7 +1531,7 @@ async function runCore(
     await runCore(child, {
       variables,
       signal: signalToUse,
-      scope,
+      scope: runScope,
       executors: executorsMap,
       ...(resolveWorkflow ? { resolveWorkflow } : {}),
       parentWorkflowIds: childStack,
