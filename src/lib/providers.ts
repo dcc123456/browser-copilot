@@ -16,7 +16,7 @@
 
 import { LOCALES, type LocaleSetting } from './i18n'
 import { normalizeLocalAgentBindings } from './storage'
-import { normalizeLocalAgentUrl } from './types'
+import { normalizeLocalAgentUrl, normalizeRunWindowLimit } from './types'
 import type { AgentMode, UnattendedWindowPolicy } from './types'
 
 /** A configured endpoint the agent can talk to. */
@@ -382,6 +382,7 @@ export function normalizeSettingsPayload(raw: unknown): {
   localAgentBindings: Record<string, number>
   unattendedWindowPolicy: UnattendedWindowPolicy
   unattendedWindowId?: number
+  maxConcurrentRunWindows: number
   imageModel: { providerId: string; model: string }
   ocrLanguage: string
   takeoverModel: { providerId: string; model: string }
@@ -432,6 +433,7 @@ export function normalizeSettingsPayload(raw: unknown): {
       : 'latest'
   const unattendedWindowId =
     typeof value.unattendedWindowId === 'number' ? value.unattendedWindowId : undefined
+  const maxConcurrentRunWindows = normalizeRunWindowLimit(value.maxConcurrentRunWindows)
   const rawImage = value.imageModel as { providerId?: unknown; model?: unknown }
   const imageModel = {
     providerId: typeof rawImage?.providerId === 'string' ? rawImage.providerId : '',
@@ -474,6 +476,7 @@ export function normalizeSettingsPayload(raw: unknown): {
     localAgentBindings,
     unattendedWindowPolicy,
     unattendedWindowId,
+    maxConcurrentRunWindows,
     imageModel,
     ocrLanguage,
     takeoverModel,

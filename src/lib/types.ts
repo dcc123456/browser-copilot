@@ -218,6 +218,18 @@ export interface Settings {
   /** `unattendedWindowPolicy = 'fixed'` 时锁定的窗口 id；其余策略忽略。 */
   unattendedWindowId?: number
   /**
+   * Cap on dedicated run windows. An unattended run that finds another run
+   * already working opens a browser window of its own, runs there and closes it
+   * afterwards, so colliding runs never share one tab. Runs past this cap queue
+   * for a free window; if the wait exceeds the cap in `window-policy` the whole
+   * run fails loudly — it is never silently skipped.
+   *
+   * 1..6, default 3. Deliberately far below the Runner's `browser.maxConcurrent`:
+   * these are real windows on the user's desktop that overlap each other, not
+   * headless contexts.
+   */
+  maxConcurrentRunWindows: number
+  /**
    * AI 调试接管（失败节点交给 AI 代理完成）专用的模型配置。
    * 接管是“看页面 + 多轮工具调用”的硬任务，可以单独指定更强的模型而不影响
    * 日常聊天成本。providerId/model 任一为空时回退到当前激活的会话模型。
@@ -238,6 +250,19 @@ export interface Settings {
 
 /** 无人值守运行的窗口选择策略（见 {@link Settings.unattendedWindowPolicy}）。 */
 export type UnattendedWindowPolicy = 'latest' | 'ask' | 'fixed'
+
+/**
+ * Bounds for the dedicated run-window cap (see {@link Settings.maxConcurrentRunWindows}):
+ * the storage sanitizers clamp stored values with it and the Settings UI renders
+ * its input from it.
+ */
+export const RUN_WINDOW_LIMITS = { default: 3, min: 1, max: 6 } as const
+
+/** Clamps any stored value into a legal parallel-window cap; non-numbers fall back. */
+export function normalizeRunWindowLimit(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return RUN_WINDOW_LIMITS.default
+  return Math.min(RUN_WINDOW_LIMITS.max, Math.max(RUN_WINDOW_LIMITS.min, Math.round(value)))
+}
 
 /** 本地 Agent 接入默认连接地址。 */
 export const DEFAULT_LOCAL_AGENT_URL = 'ws://127.0.0.1:8765'

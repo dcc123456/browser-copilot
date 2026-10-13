@@ -31,6 +31,8 @@ const deps = vi.hoisted(() => ({
   getWorkflow: vi.fn(),
   executeWorkflow: vi.fn(),
   resolveUnattendedScope: vi.fn(async () => undefined),
+  leaseRunWindow: vi.fn(async () => ({ windowId: undefined, dedicated: false })),
+  releaseRunWindow: vi.fn(async () => {}),
   recordTaskRun: vi.fn(async () => {}),
   getFeishuConfig: vi.fn(async () => ({ webhookUrl: '', webhookSecret: '' })),
   getTask: vi.fn(async () => undefined as unknown),
@@ -42,6 +44,10 @@ vi.mock('../src/background/workflow-engine/run-workflow', () => ({
 }))
 vi.mock('../src/background/window-policy', () => ({
   resolveUnattendedScope: deps.resolveUnattendedScope,
+  leaseRunWindow: deps.leaseRunWindow,
+  releaseRunWindow: deps.releaseRunWindow,
+  runWindowFailureText: vi.fn(() => 'no run window'),
+  RunWindowUnavailableError: class RunWindowUnavailableError extends Error {},
 }))
 vi.mock('../src/lib/task-store', () => ({
   recordTaskRun: deps.recordTaskRun,

@@ -42,7 +42,13 @@ import type {
   Skill,
   UserProfile,
 } from './types'
-import { DEFAULT_LOCAL_AGENT_URL, normalizeLocalAgentUrl, entryFields } from './types'
+import {
+  DEFAULT_LOCAL_AGENT_URL,
+  RUN_WINDOW_LIMITS,
+  normalizeLocalAgentUrl,
+  normalizeRunWindowLimit,
+  entryFields,
+} from './types'
 import { richTargetFromArgs, selectorFromArgs, withRichTarget } from './workflow/target-to-selector'
 import { aiPrefillNodeData, looksAiComposed } from './workflow/ai-prefill'
 import type { Workflow, WorkflowEdge, WorkflowNode, WorkflowSettings } from './workflow/types'
@@ -107,6 +113,7 @@ export const DEFAULT_SETTINGS: Settings = {
   localAgentAllowReload: false,
   localAgentBindings: {},
   unattendedWindowPolicy: 'latest',
+  maxConcurrentRunWindows: RUN_WINDOW_LIMITS.default,
   takeoverModel: { providerId: '', model: '' },
   takeoverOnRun: false,
   autoRepairOnRun: false,
@@ -254,6 +261,7 @@ export function normalizeStoredSettings(raw: unknown): Settings {
         : 'latest',
     unattendedWindowId:
       typeof value.unattendedWindowId === 'number' ? value.unattendedWindowId : undefined,
+    maxConcurrentRunWindows: normalizeRunWindowLimit(value.maxConcurrentRunWindows),
     takeoverModel,
     takeoverOnRun: typeof value.takeoverOnRun === 'boolean' ? value.takeoverOnRun : false,
     autoRepairOnRun: typeof value.autoRepairOnRun === 'boolean' ? value.autoRepairOnRun : false,

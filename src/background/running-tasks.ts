@@ -41,6 +41,14 @@ export type RunStepKind = 'tool' | 'status' | 'result' | 'error' | 'info'
 /** How a run ended. */
 export type RunOutcomeKind = 'ok' | 'failed' | 'cancelled' | 'skipped'
 
+/**
+ * Which window a run acts in. `shared` is the plugin window every run uses
+ * while nothing else is running; `dedicated` is a window this run created for
+ * itself because the board was already busy, and which it closes on settle
+ * (see `window-policy.leaseRunWindow`).
+ */
+export type RunWindowKind = 'shared' | 'dedicated'
+
 /** A tracked in-flight run. */
 export interface RunningTask {
   /** Stable id for this specific execution (distinct from the configured task id). */
@@ -65,6 +73,14 @@ export interface RunningTask {
   sessionId?: string
   startedAt: number
   steps: RunStep[]
+  /**
+   * Browser window this run drives, once a window has been decided. The Tasks
+   * board shows it as a badge and focuses the window on click, which is how the
+   * user tells parallel runs apart when several fire at once.
+   */
+  windowId?: number
+  /** Whether that window is the shared plugin window or this run's own. */
+  runWindowKind?: RunWindowKind
   /**
    * Debug-mode per-block variable snapshots, in execution order: node id →
    * { label, at, variables }. Populated only when a workflow runs with debug
@@ -99,6 +115,10 @@ export interface FinishedTask {
    */
   error?: string
   steps: RunStep[]
+  /** Browser window the run drove (see RunningTask.windowId). */
+  windowId?: number
+  /** Whether that window was shared or the run's own dedicated one. */
+  runWindowKind?: RunWindowKind
   /** Debug-mode per-block variable snapshots (see RunningTask.snapshots). */
   snapshots?: { nodeId: string; label: string; at: number; variables: Record<string, unknown> }[]
   /**
@@ -236,6 +256,18 @@ export function setRunWorkflow(runId: string, workflowId: string): void {
 }
 
 /**
+ * Records which browser window a run drives, once that is known. A run opens
+ * before its window is decided (the lease may have to create one), so this is
+ * filled in afterwards rather than through {@link StartRunOptions}.
+ */
+export function setRunWindow(runId: string, windowId: number, kind: RunWindowKind): void {
+  const task = runs.get(runId)
+  if (!task) return
+  task.windowId = windowId
+  task.runWindowKind = kind
+}
+
+/**
  * Attaches (or replaces) the cancellation callback for a run. The Feishu bot
  * uses this to post a "terminated" notice when a task started from chat is
  * stopped from the board — task-runner creates the run without knowing how to
@@ -284,6 +316,8 @@ export function finishRun(runId: string, options?: FinishOptions): void {
     sessionId: task.sessionId,
     startedAt: task.startedAt,
     finishedAt: Date.now(),
+    ...(typeof task.windowId === 'number' ? { windowId: task.windowId } : {}),
+    ...(task.runWindowKind ? { runWindowKind: task.runWindowKind } : {}),
     outcome: options?.outcome ?? (task.controller.signal.aborted ? 'cancelled' : 'ok'),
     summary: options?.summary,
     ...(options?.error ? { error: options.error } : {}),

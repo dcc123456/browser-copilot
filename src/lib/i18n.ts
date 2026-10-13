@@ -176,6 +176,23 @@ export interface Messages {
   taskSourceSchedule: string
   taskSourceManual: string
   taskSourceFeishu: string
+  /** Badge on a running row: which browser window the run drives. */
+  taskRunWindow: (params: { id: number }) => string
+  /** The run created (and will close) that window because another run was busy. */
+  taskRunWindowDedicated: string
+  /** Tooltip for the badge, which focuses the run's window. */
+  taskRunWindowFocus: string
+  /** Shown when the badge is clicked after the window already closed. */
+  taskRunWindowGone: string
+  /** Progress line for a run queued behind the parallel-window cap. */
+  taskRunQueued: string
+  /** A run gave up waiting for a free parallel window. */
+  taskRunWindowCapReached: (params: { max: number }) => string
+  /** A run was terminated while it waited for a free parallel window. */
+  taskRunCancelledWhileQueued: string
+  /** Settings: cap on simultaneously open dedicated run windows. */
+  settingsMaxRunWindows: string
+  settingsMaxRunWindowsHelp: string
   tasksFeishuTitle: string
   tasksFeishuWebhook: string
   tasksFeishuWebhookSecret: string
@@ -1482,6 +1499,17 @@ const en: Messages = {
   taskSourceSchedule: 'schedule',
   taskSourceManual: 'manual',
   taskSourceFeishu: 'Feishu',
+  taskRunWindow: ({ id }) => `Window ${id}`,
+  taskRunWindowDedicated: 'Dedicated window',
+  taskRunWindowFocus: 'Show this run\u2019s window',
+  taskRunWindowGone: 'The run window has already closed',
+  taskRunQueued: 'Waiting for a free run window\u2026',
+  taskRunWindowCapReached: ({ max }) =>
+    `Every parallel run window was busy (cap ${max}); gave up after waiting.`,
+  taskRunCancelledWhileQueued: 'Cancelled while waiting for a run window.',
+  settingsMaxRunWindows: 'Parallel run window cap',
+  settingsMaxRunWindowsHelp:
+    'When scheduled runs overlap, each later one works in a browser window of its own and closes it when done. This is how many of those windows may be open at once; past the cap, runs wait for a free window instead of colliding.',
   tasksFeishuTitle: 'Feishu',
   tasksFeishuWebhook: 'Custom-bot webhook URL',
   tasksFeishuWebhookSecret: 'Webhook signing secret (if enabled)',
@@ -2715,6 +2743,16 @@ const zhCN: Messages = {
   taskSourceSchedule: '定时',
   taskSourceManual: '手动',
   taskSourceFeishu: '飞书',
+  taskRunWindow: ({ id }) => `窗口 ${id}`,
+  taskRunWindowDedicated: '专属窗口',
+  taskRunWindowFocus: '查看该运行的窗口',
+  taskRunWindowGone: '运行窗口已关闭',
+  taskRunQueued: '等待空闲的运行窗口…',
+  taskRunWindowCapReached: ({ max }) => `并行运行已达专属窗口上限（${max}），等待超时后放弃。`,
+  taskRunCancelledWhileQueued: '排队等待运行窗口时被终止。',
+  settingsMaxRunWindows: '并行运行窗口上限',
+  settingsMaxRunWindowsHelp:
+    '定时任务撞车时，后启动的运行会在自己的浏览器窗口里执行，跑完自动关闭。这里设置同时最多开几个这样的窗口；超出上限的运行会排队等空闲窗口，而不是挤进同一个页面。',
   tasksFeishuTitle: '飞书',
   tasksFeishuWebhook: '自定义机器人 Webhook 地址',
   tasksFeishuWebhookSecret: 'Webhook 签名校验密钥（如启用）',

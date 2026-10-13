@@ -12,6 +12,7 @@ import {
   type ProviderProfile,
 } from '../lib/providers'
 import type { AgentStatus, Settings, UnattendedWindowPolicy } from '../lib/types'
+import { RUN_WINDOW_LIMITS, normalizeRunWindowLimit } from '../lib/types'
 import { TOOL_META } from '../lib/tool-catalog'
 import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
@@ -1607,6 +1608,24 @@ export default function SettingsTab({ onLocaleChange }: Props) {
             </select>
           </div>
         )}
+
+        <label className="field">
+          <span>{t.settingsMaxRunWindows}</span>
+          <NumberInput
+            fallback={RUN_WINDOW_LIMITS.default}
+            max={RUN_WINDOW_LIMITS.max}
+            min={RUN_WINDOW_LIMITS.min}
+            onChange={(value) => {
+              void mutate({
+                type: 'settings.set',
+                patch: { maxConcurrentRunWindows: normalizeRunWindowLimit(value) },
+              })
+            }}
+            style={{ maxWidth: 96 }}
+            value={settings?.maxConcurrentRunWindows ?? RUN_WINDOW_LIMITS.default}
+          />
+        </label>
+        <p className="hint">{t.settingsMaxRunWindowsHelp}</p>
       </div>
 
       {/* --- Agent behaviour --- */}

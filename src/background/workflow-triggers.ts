@@ -20,7 +20,6 @@
 
 import { getWorkflow, listWorkflows } from '../lib/workflow/storage'
 import type { Workflow, WorkflowNode } from '../lib/workflow/types'
-import { latestPluginWindowId } from './automation-scope'
 import { coerceIntervalMinutes, nextRunAt } from '../lib/schedule'
 import type { Schedule } from '../lib/scheduler-types'
 
@@ -397,7 +396,9 @@ export async function handleWorkflowTriggerAlarm(alarmName: string): Promise<voi
     // One-shot `date` trigger (or a now-invalid trigger): fire once, then stop.
     await chrome.alarms.clear(alarmName)
   }
-  runWorkflowRef?.(workflowId, latestPluginWindowId())
+  // No window is passed: an alarm has no sender, so the runner leases one —
+  // several triggers firing on the same wake must not share a single tab.
+  runWorkflowRef?.(workflowId)
 }
 
 // --- Element-change workflow triggers ----------------------------------------

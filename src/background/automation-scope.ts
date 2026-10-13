@@ -23,6 +23,12 @@
  * {@link isPluginWindow} family below is the union of both states; the
  * panel-only predicates stay for code that must distinguish them.
  *
+ * Finally, this module owns the windows the extension creates for itself: when
+ * unattended runs overlap, the later ones execute in a window of their own
+ * ({@link createRunWindow}) and close it on settle ({@link closeRunWindow}).
+ * Those windows are never plugin windows, so no run can be resolved into one
+ * belonging to another run.
+ *
  * @module background/automation-scope
  */
 
@@ -212,6 +218,159 @@ export async function listNormalWindows(): Promise<
   return out
 }
 
+// --- Run-owned windows (parallel unattended execution) -----------------------
+
+/**
+ * A browser window the extension created for exactly one in-flight run.
+ *
+ * When several unattended runs overlap they cannot share one window: they would
+ * drive the same active tab step by step on top of each other. The second (and
+ * third…) run therefore gets a window of its own, which it closes when it
+ * settles. Those windows are deliberately NOT plugin windows — no panel is
+ * attached and none can be opened without a user gesture — so every
+ * plugin-window predicate above stays false for them, and no later run can
+ * resolve into a window that belongs to another run.
+ *
+ * The registry lives in module scope like the panel sets, mirrored into
+ * `chrome.storage.session`: that mirror survives a service-worker eviction (the
+ * run dies, the window does not) and clears when the browser exits (so a stale
+ * entry can never point at a window of the next session).
+ */
+export interface RunWindowRecord {
+  runId: string
+  /** Set once the window is gone — closed by the run or by the user. */
+  closed: boolean
+}
+
+const RUN_WINDOWS_KEY = 'bc:runOwnedWindows'
+
+/**
+ * Cascade geometry: each extra run window is offset so its title bar stays
+ * clickable and no window is fully covered. Full occlusion is what makes Chrome
+ * treat a window as hidden, and a hidden window is what this feature must avoid.
+ */
+const RUN_WINDOW_TILE = { left: 80, top: 60, width: 1280, height: 860, stepX: 56, stepY: 44 }
+
+const runOwnedWindows = new Map<number, RunWindowRecord>()
+
+/**
+ * Hook that drops per-window automation state (tab cache, `pin_tab` slot) when
+ * a run window closes. Injected from the background script because the driver
+ * owns that state and this module must not import it.
+ */
+let pruneRunWindowState: ((windowId: number) => void) | null = null
+
+/** Registers (or clears, with null) the run-window state pruner. */
+export function setRunWindowPruner(fn: ((windowId: number) => void) | null): void {
+  pruneRunWindowState = fn
+}
+
+/** Whether `windowId` is (or was, this run) a window the extension created. */
+export function isRunOwnedWindow(windowId: number | undefined): boolean {
+  return typeof windowId === 'number' && runOwnedWindows.has(windowId)
+}
+
+/** Current ownership records, for the lease layer and for tests. */
+export function listRunOwnedWindows(): { windowId: number; runId: string; closed: boolean }[] {
+  return [...runOwnedWindows].map(([windowId, record]) => ({ windowId, ...record }))
+}
+
+async function mirrorRunWindows(): Promise<void> {
+  const session = typeof chrome !== 'undefined' ? chrome.storage?.session : undefined
+  if (!session) return
+  await session
+    .set({ [RUN_WINDOWS_KEY]: listRunOwnedWindows() })
+    .catch(() => undefined /* the mirror is a reclaim aid, not a guarantee */)
+}
+
+/**
+ * Create the dedicated window for one run. `tier` is the cascade slot (0-based)
+ * so parallel windows fan out instead of stacking. Opens on the new-tab page: a
+ * run whose first step is a wait or a variable must not pay for a page load the
+ * workflow may never use. Returns undefined when the window could not be
+ * created, which the caller treats as "no dedicated window".
+ */
+export async function createRunWindow(runId: string, tier: number): Promise<number | undefined> {
+  if (typeof chrome === 'undefined' || !chrome.windows?.create) return undefined
+  const bounds = {
+    left: RUN_WINDOW_TILE.left + tier * RUN_WINDOW_TILE.stepX,
+    top: RUN_WINDOW_TILE.top + tier * RUN_WINDOW_TILE.stepY,
+    width: RUN_WINDOW_TILE.width,
+    height: RUN_WINDOW_TILE.height,
+  }
+  try {
+    // Unfocused on purpose: stealing the user's focus for a background task is
+    // worse than the throttling risk, which cascade placement keeps at bay.
+    const win = await chrome.windows.create({ ...bounds, focused: false })
+    const windowId = typeof win?.id === 'number' ? win.id : undefined
+    if (windowId === undefined) return undefined
+    runOwnedWindows.set(windowId, { runId, closed: false })
+    await mirrorRunWindows()
+    return windowId
+  } catch (error) {
+    console.warn('[automation-scope] run window create failed:', error)
+    return undefined
+  }
+}
+
+/**
+ * Close a run's window and forget it. Idempotent: the run's `finally` calls this
+ * whether or not the user already closed the window themselves. A window id this
+ * module has no record for is refused outright — this function must never be able
+ * to close one of the user's windows.
+ */
+export async function closeRunWindow(windowId: number): Promise<void> {
+  if (!runOwnedWindows.delete(windowId)) return
+  if (pruneRunWindowState) {
+    try {
+      pruneRunWindowState(windowId)
+    } catch {
+      /* pruning is best-effort */
+    }
+  }
+  if (typeof chrome !== 'undefined' && chrome.windows?.remove) {
+    await chrome.windows.remove(windowId).catch(() => undefined)
+  }
+  await mirrorRunWindows()
+}
+
+/**
+ * Close windows left behind by runs that are no longer alive — a worker
+ * eviction kills the run but not its window. `isLive` answers for the running
+ * board; every entry it rejects with a still-existing window is an orphan.
+ * Re-adopts the records it keeps so ownership survives the eviction too.
+ */
+export async function reclaimOrphanRunWindows(
+  isLive: (runId: string) => boolean,
+): Promise<number[]> {
+  if (typeof chrome === 'undefined' || !chrome.windows?.get) return []
+  const stored = (await chrome.storage?.session
+    ?.get(RUN_WINDOWS_KEY)
+    .then((all) => all?.[RUN_WINDOWS_KEY])
+    .catch(() => undefined)) as { windowId: number; runId: string; closed: boolean }[] | undefined
+  const kept: { windowId: number; runId: string; closed: boolean }[] = []
+  const closed: number[] = []
+  for (const entry of stored ?? []) {
+    if (typeof entry?.windowId !== 'number') continue
+    const exists = await chrome.windows
+      .get(entry.windowId)
+      .then(() => true)
+      .catch(() => false)
+    if (!exists) continue
+    if (isLive(entry.runId)) {
+      runOwnedWindows.set(entry.windowId, { runId: entry.runId, closed: false })
+      kept.push({ windowId: entry.windowId, runId: entry.runId, closed: false })
+      continue
+    }
+    await chrome.windows.remove(entry.windowId).catch(() => undefined)
+    closed.push(entry.windowId)
+  }
+  if (closed.length && chrome.storage?.session) {
+    await chrome.storage.session.set({ [RUN_WINDOWS_KEY]: kept }).catch(() => undefined)
+  }
+  return closed
+}
+
 /** A closed window cannot host a panel. Safe to call multiple times (guarded). */
 export function initScopeWindowCleanup(): void {
   if (typeof chrome === 'undefined' || !chrome.windows?.onRemoved) return
@@ -219,6 +378,14 @@ export function initScopeWindowCleanup(): void {
     portsByWindow.delete(closedWindowId)
     for (const [port, windowId] of windowByPort) {
       if (windowId === closedWindowId) windowByPort.delete(port)
+    }
+    // Keep the ownership record: a run whose window the user closed mid-turn
+    // must still be recognised as owning it, or the driver would fall back to
+    // the global tab chain and act inside the user's window.
+    const owned = runOwnedWindows.get(closedWindowId)
+    if (owned) {
+      owned.closed = true
+      void mirrorRunWindows()
     }
   })
 }

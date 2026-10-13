@@ -10,7 +10,7 @@
  * @module background/task-runner
  */
 
-import { effectiveLocale } from '../lib/i18n'
+import { effectiveLocale, messagesFor, type Locale } from '../lib/i18n'
 import { NotLoggedIn, fetchReviewRequests, formatReviewSummary } from '../lib/github'
 import { sendWebhookText } from '../lib/feishu'
 import type { ScheduledTask, TaskRunLog } from '../lib/scheduler-types'
@@ -22,7 +22,14 @@ import {
   resolveTaskInputs,
 } from '../lib/task-chain'
 import { runUnattendedPrompt } from './agent-unattended'
-import { resolveUnattendedScope } from './window-policy'
+import {
+  leaseRunWindow,
+  releaseRunWindow,
+  resolveUnattendedScope,
+  runWindowFailureText,
+  RunWindowUnavailableError,
+  type RunWindowLease,
+} from './window-policy'
 import { retain, release } from './keepalive'
 import { getWorkflow } from '../lib/workflow/storage'
 import { observeFirstRunOfRevision } from '../lib/workflow/replay-metrics'
@@ -153,6 +160,8 @@ export async function runTask(
     ...(feishuChatId ? { feishuChatId } : {}),
   })
 
+  /** Window this run drives; set only for the kinds that touch the browser. */
+  let lease: RunWindowLease | undefined
   let outcome: RunOutcome = { ok: false, skipped: false, summary: '' }
   try {
     const chain = await resolveChain(task, lang)
@@ -163,16 +172,39 @@ export async function runTask(
       if (reason) addStep(tracked.runId, chain.blocked.skipped ? 'status' : 'error', reason)
       outcome = chain.blocked
     } else {
-      outcome = await executeTask(task, lang, tracked, chain.inputs)
+      // Overlapping runs cannot share a window, so a colliding run gets one of
+      // its own and closes it below. Browser-free kinds (the GitHub fetch) never
+      // take a window at all.
+      if (task.kind === 'agent-prompt' || task.kind === 'workflow') {
+        lease = await leaseRunWindow(tracked.runId, tracked.controller.signal, () =>
+          addStep(tracked.runId, 'status', messagesFor(lang as Locale).taskRunQueued),
+        )
+      }
+      outcome = await executeTask(task, lang, tracked, chain.inputs, lease)
     }
   } catch (error) {
-    outcome = {
-      ok: false,
-      skipped: false,
-      summary: '',
-      error: error instanceof Error ? error.message : String(error),
+    if (error instanceof RunWindowUnavailableError) {
+      // Every parallel slot was taken for too long (or the run was terminated
+      // while queued): fail loudly with the number the user can act on.
+      outcome = {
+        ok: false,
+        skipped: false,
+        summary: '',
+        ...(error.reason === 'capped' ? {} : { cancelled: true }),
+        error: runWindowFailureText(error, lang as Locale),
+      }
+    } else {
+      outcome = {
+        ok: false,
+        skipped: false,
+        summary: '',
+        error: error instanceof Error ? error.message : String(error),
+      }
     }
   } finally {
+    // Release the window before the board entry is written, so the finished run
+    // still carries which window it drove (the badge the user clicked).
+    if (lease) await releaseRunWindow(lease)
     release()
     const boardOutcome: RunOutcomeKind = outcome.cancelled
       ? 'cancelled'
@@ -231,15 +263,16 @@ async function executeTask(
   lang: string,
   tracked: RunningTask,
   inputs: ResolvedInputs,
+  lease?: RunWindowLease,
 ): Promise<RunOutcome> {
   addStep(tracked.runId, 'info', taskStartLine(task))
   switch (task.kind) {
     case 'github-review-requests':
       return runReviewRequests(lang, tracked)
     case 'agent-prompt':
-      return runAgentPrompt(task, inputs, lang, tracked)
+      return runAgentPrompt(task, inputs, lang, tracked, lease)
     case 'workflow':
-      return runWorkflowTask(task, inputs, lang, tracked)
+      return runWorkflowTask(task, inputs, lang, tracked, lease)
     default: {
       // Exhaustiveness guard: a future task kind that isn't wired up fails
       // loudly rather than silently doing nothing. Cast through string so this
@@ -294,6 +327,7 @@ async function runAgentPrompt(
   inputs: ResolvedInputs,
   _lang: string,
   tracked: RunningTask,
+  lease?: RunWindowLease,
 ): Promise<RunOutcome> {
   // `inputs.prompt` is the task's own prompt with any `{{upstream.*}}` answered;
   // an unchained task keeps its text untouched.
@@ -306,6 +340,8 @@ async function runAgentPrompt(
     signal: tracked.controller.signal,
     maxToolRounds: task.maxToolRounds,
     onStep: (kind, text) => addStep(tracked.runId, kind, text),
+    // A dedicated window wins over the policy resolution: this run owns it.
+    ...(lease?.dedicated && lease.windowId !== undefined ? { scopeWindowId: lease.windowId } : {}),
   })
   return {
     ok: result.ok,
@@ -331,6 +367,7 @@ async function runWorkflowTask(
   inputs: ResolvedInputs,
   lang: string,
   tracked: RunningTask,
+  lease?: RunWindowLease,
 ): Promise<RunOutcome> {
   const zh = lang.toLowerCase().startsWith('zh')
   const workflow = task.workflowId ? await getWorkflow(task.workflowId) : undefined
@@ -341,7 +378,9 @@ async function runWorkflowTask(
   // A scheduled workflow run is unattended: while the plugin runs anywhere
   // (panel connected or minimized) it acts inside that plugin window; with
   // the plugin closed everywhere it falls back to the legacy global chain.
-  const scope = await resolveUnattendedScope()
+  const scopeWindowId = lease?.dedicated
+    ? lease.windowId
+    : (await resolveUnattendedScope())?.windowId
   const outcome = await executeWorkflow(workflow, {
     // The real trigger, not a hardcoded 'schedule': a manual "Run now" (or a
     // Feishu command) on a workflow task must be labelled — and filed in the
@@ -351,7 +390,7 @@ async function runWorkflowTask(
     feishuChatId: tracked.feishuChatId,
     reuseRun: tracked,
     ...(inputs.variables ? { variables: inputs.variables } : {}),
-    ...(scope ? { scopeWindowId: scope.windowId } : {}),
+    ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
   })
   // A successful run publishes exactly what it declared. An undeclared name is
   // reported on THIS run rather than failing it: the run did its job, and the

@@ -24,7 +24,7 @@ import type {
 } from './types'
 import type { FeishuConfig, ScheduledTask, TaskRunLog } from './scheduler-types'
 import type { TokenDashboard, TokenRange } from './token-ledger'
-import type { RunOutcomeKind, RunSource, RunStep } from '../background/running-tasks'
+import type { RunOutcomeKind, RunSource, RunStep, RunWindowKind } from '../background/running-tasks'
 import type { Workflow } from './workflow/types'
 import type { WorkflowDebugResult } from './workflow/auto-debug-patch'
 import type { PendingTakeoverInfo } from './workflow/takeover-pending'
@@ -96,16 +96,22 @@ export interface GeneratedWorkflowRepairInfo {
 export interface RunningTaskView {
   runId: string
   taskId?: string
+  workflowId?: string
   label: string
   source: RunSource
   startedAt: number
   steps: RunStep[]
+  /** Browser window the run drives, once decided (see `running-tasks`). */
+  windowId?: number
+  /** Whether that window is shared with other runs or this run's own. */
+  runWindowKind?: RunWindowKind
 }
 
 /** A recently completed task as shown on the Tasks tab board. */
 export interface FinishedTaskView {
   runId: string
   taskId?: string
+  workflowId?: string
   label: string
   source: RunSource
   startedAt: number
@@ -113,6 +119,9 @@ export interface FinishedTaskView {
   outcome: RunOutcomeKind
   summary?: string
   steps: RunStep[]
+  /** Browser window the run drove, kept so the badge survives settling. */
+  windowId?: number
+  runWindowKind?: RunWindowKind
 }
 
 /** Port name for the streaming agent channel. */
@@ -172,6 +181,8 @@ export type Command =
   | { type: 'tasks.runs.delete'; id: string }
   | { type: 'tasks.running' }
   | { type: 'tasks.cancel'; runId: string }
+  /** Focus the browser window a run is driving (the board's window badge). */
+  | { type: 'tasks.focusWindow'; runId: string }
   | { type: 'tasks.finished.delete'; runId: string }
   | { type: 'tasks.finished.clear' }
 
@@ -497,6 +508,8 @@ export type CommandResult =
   | { type: 'tasks.runs.delete' }
   | { type: 'tasks.running'; runs: RunningTaskView[]; finished: FinishedTaskView[] }
   | { type: 'tasks.cancel'; ok: boolean }
+  /** Focus failed because the run's window closed in the meantime. */
+  | { type: 'tasks.focusWindow'; ok: boolean; closed?: boolean }
   | { type: 'tasks.finished.delete' }
   | { type: 'tasks.finished.clear' }
   | { type: 'feishu.get'; config: FeishuConfig }

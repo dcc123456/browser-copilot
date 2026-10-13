@@ -24,6 +24,7 @@ interface FakeWindow {
 }
 
 let nextTabId = 100
+let nextWindowId = 500
 
 interface Browser {
   tabs: Map<number, FakeTab>
@@ -35,6 +36,8 @@ interface Browser {
     remove: unknown[]
     getAll: unknown[]
     getLastFocused: number
+    windowCreate: unknown[]
+    windowRemove: unknown[]
   }
   listeners: Record<string, ((...args: unknown[]) => void)[]>
 }
@@ -48,7 +51,15 @@ function makeBrowser(opts: {
     tabs: new Map(opts.tabs.map((t) => [t.id, { ...t }])),
     windows: new Map(opts.windows.map((w) => [w.id, { ...w }])),
     lastFocusedWindowId: opts.lastFocusedWindowId,
-    calls: { update: [], create: [], remove: [], getAll: [], getLastFocused: 0 },
+    calls: {
+      update: [],
+      create: [],
+      remove: [],
+      getAll: [],
+      getLastFocused: 0,
+      windowCreate: [],
+      windowRemove: [],
+    },
     listeners: {},
   }
   const on = (name: string) => ({
@@ -124,6 +135,17 @@ function makeBrowser(opts: {
         if (!w) throw new Error('No window with id: ' + id)
         return { id: w.id, type: w.type } as chrome.windows.Window
       }),
+      create: vi.fn(async (props: Record<string, unknown>) => {
+        b.calls.windowCreate.push(props)
+        const id = nextWindowId++
+        b.windows.set(id, { id, type: 'normal' })
+        return { id } as chrome.windows.Window
+      }),
+      remove: vi.fn(async (id: number) => {
+        b.calls.windowRemove.push(id)
+        b.windows.delete(id)
+        return undefined
+      }),
       getLastFocused: vi.fn(async (_opts?: unknown) => {
         b.calls.getLastFocused += 1
         const w = b.windows.get(b.lastFocusedWindowId)
@@ -168,6 +190,7 @@ describe('driver panel-window scope', () => {
   beforeEach(async () => {
     vi.resetModules()
     nextTabId = 100
+    nextWindowId = 500
     standardSetup()
     const mod = await Promise.all([
       import('../src/background/driver'),
@@ -257,6 +280,31 @@ describe('driver panel-window scope', () => {
   it('a scope window that no longer exists degrades to the legacy global chain', async () => {
     const tab = await driver.resolveAutomationTab(undefined, { windowId: 9 })
     expect(tab?.id).toBe(2) // legacy: focused window 2
+  })
+
+  it('a run-owned window that closed never falls into the user window', async () => {
+    const scopeMod = await import('../src/background/automation-scope')
+    const owned = await scopeMod.createRunWindow('run-a', 0)
+    expect(typeof owned).toBe('number')
+    // The run closed its own window (or the user closed it) mid-turn. The next
+    // action must report "nothing to act on": the legacy chain would resolve
+    // into the user's focused window and drive a page that is not ours.
+    browser().windows.delete(owned!)
+    expect(await driver.resolveAutomationTab(undefined, { windowId: owned! })).toBeUndefined()
+    // A window the extension does not own keeps the long-standing degrade above.
+    expect((await driver.resolveAutomationTab(undefined, { windowId: 9 }))?.id).toBe(2)
+  })
+
+  it('releaseWindowAutomationState clears only the closed window slot', async () => {
+    await driver.pinActiveTab(2) // the user window pins its own tab
+    await driver.resolveAutomationTab(undefined, scope) // caches window 1's tab
+
+    driver.releaseWindowAutomationState(1)
+
+    // The other window is untouched, and the released one re-resolves.
+    expect((await driver.resolveAutomationTab())?.id).toBe(2)
+    expect((await driver.resolveAutomationTab(undefined, scope))?.id).toBe(1)
+    driver.unpinTab()
   })
 
   it('a pin from another window never hijacks a scoped resolution', async () => {

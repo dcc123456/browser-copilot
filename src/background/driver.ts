@@ -18,6 +18,7 @@
 import { isInjectablePage } from '../lib/pages'
 import { KERNEL_VERSION } from '../inpage/kernel-version'
 import { ensureTabMonitor, isMonitorHolding } from './cdp-monitor'
+import { isRunOwnedWindow } from './automation-scope'
 import type { ScopeWindow } from './automation-scope'
 import type { Op, OpResult, PageSnapshot, SnapshotElement, Target } from '../lib/ops'
 import { runOp, runExecJs, runWorkflowJs } from '../inpage/kernel'
@@ -114,6 +115,19 @@ function setPinnedTab(
   }
 }
 
+/**
+ * Forget every per-window automation slot for a window that is going away.
+ *
+ * `pinnedTabs` otherwise only dies by TTL, so a run that pins a tab in its own
+ * window leaves the entry behind until five minutes after the window is gone.
+ * The tab cache is cleared wholesale by the `windows.onRemoved` listener, but
+ * release ordering must not depend on that listener's timing.
+ */
+export function releaseWindowAutomationState(windowId: number): void {
+  pinnedTabs.delete(windowId)
+  cachedAutomationTabs.delete(windowId)
+}
+
 export async function resolveAutomationTab(
   preferredTabId?: number,
   scope?: ScopeWindow,
@@ -172,6 +186,11 @@ export async function resolveAutomationTab(
  * scripted. In that case fall back to the active tab of the most recently
  * focused *normal* browser window that is on an ordinary http(s) page. When
  * the focused window already shows an injectable page it is used directly.
+ *
+ * Exception to the degrade: a scope window the extension created for this run
+ * (see `automation-scope.isRunOwnedWindow`) never falls back to the global
+ * chain. That window is the run's own; when it is gone the run has nowhere to
+ * act, and "somewhere else" would mean the user's window.
  */
 async function resolveAutomationTabUncached(
   scope?: ScopeWindow,
@@ -191,7 +210,12 @@ async function resolveAutomationTabUncached(
       // report "nothing to act on" rather than reaching into another window.
       return undefined
     }
-    // Window gone: fall through to the legacy global chain.
+    // Window gone. When the run OWNED that window, do not fall through: the
+    // window was closed by this run (or by the user), and the legacy chain
+    // below would resolve into the user's own focused window and act there.
+    if (isRunOwnedWindow(scope.windowId)) return undefined
+    // Otherwise the plugin window closed mid-turn with the panel; keep the
+    // long-standing degrade (see tests/driver-scope.spec.ts).
   }
 
   const focused = await activeTab()

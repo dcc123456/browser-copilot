@@ -148,6 +148,7 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     localAgentAllowReload: false,
     localAgentBindings: {},
     unattendedWindowPolicy: 'latest',
+    maxConcurrentRunWindows: 3,
     ...overrides,
   }
 }

@@ -32,16 +32,21 @@
  * @module background/window-policy
  */
 
+import { messagesFor, type Locale } from '../lib/i18n'
 import { getSettings, newId } from '../lib/storage'
 import type { UnattendedWindowPolicy } from '../lib/types'
 import type { WindowChoice, WindowPickRequest } from '../lib/messages'
+import { getRun, listRunning, setRunWindow } from './running-tasks'
 import {
+  closeRunWindow,
+  createRunWindow,
   currentPluginScope,
   hasPanelWindows,
   isPluginWindow,
   latestPluginWindowId,
   listNormalWindows,
   normalScopeFromWindowId,
+  reclaimOrphanRunWindows,
   type ScopeWindow,
 } from './automation-scope'
 
@@ -179,6 +184,233 @@ export async function resolveUnattendedScope(): Promise<ScopeWindow | undefined>
   if (typeof picked !== 'number') return currentPluginScope() // timeout / cancel
   const scope = await normalScopeFromWindowId(picked)
   return scope && isPluginWindow(scope.windowId) ? scope : currentPluginScope()
+}
+
+// --- Run windows: parallel execution for colliding unattended runs ------------
+
+/**
+ * The window one unattended run drives, and who has to clean it up.
+ *
+ * Two runs cannot share a window: they would resolve to the same active tab and
+ * step on each other's page. So a run that finds the board busy gets a window of
+ * its own ({@link createRunWindow}) and closes it when it settles
+ * ({@link releaseRunWindow}). A run that finds the board free behaves exactly as
+ * before — the shared plugin window, no window churn at all.
+ */
+export interface RunWindowLease {
+  /** Window to scope the run to; `undefined` = legacy global resolution. */
+  windowId?: number
+  /** True only when THIS run created that window and must release it. */
+  dedicated: boolean
+  /** Cascade slot held by a dedicated lease. */
+  tier?: number
+}
+
+/**
+ * How long a run may wait for a free dedicated window before its whole run
+ * fails. It must stay under the keepalive's `MAX_HOLD_MS` (10 min): a waiter
+ * that outlives the worker becomes exactly the zombie the running-tasks module
+ * doc warns about. Nine minutes leaves a minute of slack for the run itself to
+ * be recorded as failed.
+ */
+export const RUN_WINDOW_MAX_WAIT_MS = 9 * 60_000
+
+/** Why a dedicated window could not be had. The caller turns this into copy. */
+export type RunWindowFailureReason = 'capped' | 'cancelled'
+
+export class RunWindowUnavailableError extends Error {
+  constructor(
+    readonly reason: RunWindowFailureReason,
+    readonly max: number,
+  ) {
+    super(`run window unavailable (${reason}, cap ${max})`)
+    this.name = 'RunWindowUnavailableError'
+  }
+}
+
+/** Cascade slots in use: tier → window id (`undefined` = reserved, not created yet). */
+const occupiedRunWindows = new Map<number, number | undefined>()
+
+/** A run queued for a slot; the granter hands it the freed tier. */
+interface RunWindowWaiter {
+  grant: (tier: number) => void
+  decline: (error: Error) => void
+}
+
+const runWindowWaiters: RunWindowWaiter[] = []
+
+/** Lowest unused slot below `cap`, or undefined when every slot is taken. */
+function nextFreeRunWindowTier(cap: number): number | undefined {
+  for (let tier = 0; tier < cap; tier++) if (!occupiedRunWindows.has(tier)) return tier
+  return undefined
+}
+
+/**
+ * Take a slot now, or queue FIFO for one (mirroring the Runner's
+ * `RunService.enqueue`, `server/src/run-service.ts`). The queue is in-memory by
+ * design: a worker eviction drops it, and the alarm that woke the run re-arms
+ * itself anyway.
+ *
+ * Rejects with {@link RunWindowUnavailableError} when the caller's abort signal
+ * fires (terminate from the board) or after {@link RUN_WINDOW_MAX_WAIT_MS}.
+ */
+function acquireRunWindowTier(
+  cap: number,
+  signal?: AbortSignal,
+  onWait?: () => void,
+): Promise<number> {
+  const free = nextFreeRunWindowTier(cap)
+  if (free !== undefined) {
+    occupiedRunWindows.set(free, undefined)
+    return Promise.resolve(free)
+  }
+  return new Promise<number>((resolve, reject) => {
+    onWait?.()
+    const settle = () => {
+      clearTimeout(timeout)
+      if (signal) signal.removeEventListener('abort', onAbort)
+      const index = runWindowWaiters.indexOf(waiter)
+      if (index >= 0) runWindowWaiters.splice(index, 1)
+    }
+    const onAbort = () => waiter.decline(new RunWindowUnavailableError('cancelled', cap))
+    const waiter: RunWindowWaiter = {
+      grant: (tier) => {
+        settle()
+        occupiedRunWindows.set(tier, undefined)
+        resolve(tier)
+      },
+      decline: (error) => {
+        settle()
+        reject(error)
+      },
+    }
+    const timeout = setTimeout(
+      () => waiter.decline(new RunWindowUnavailableError('capped', cap)),
+      RUN_WINDOW_MAX_WAIT_MS,
+    )
+    if (signal) signal.addEventListener('abort', onAbort, { once: true })
+    runWindowWaiters.push(waiter)
+    if (signal?.aborted) onAbort()
+  })
+}
+
+/**
+ * Free a slot and hand it to the next queued run, if any. Called by
+ * {@link releaseRunWindow} and when window creation fails.
+ */
+function releaseRunWindowTier(tier: number): void {
+  occupiedRunWindows.delete(tier)
+  runWindowWaiters.shift()?.grant(tier)
+}
+
+/**
+ * The window for one unattended run. Callers that already know their window (a
+ * user gesture: the panel's Run button, a shortcut, the context menu) never come
+ * here — this is for the sender-less paths, which have no window of their own.
+ *
+ * `selfRunId` must be a run already on the board, and `signal` its abort
+ * controller: the run announces itself before leasing, which is what lets two
+ * alarms firing in the same instant both see each other as busy — and both take
+ * a window of their own instead of racing for the shared one.
+ */
+export async function leaseRunWindow(
+  selfRunId: string,
+  signal?: AbortSignal,
+  onWait?: () => void,
+): Promise<RunWindowLease> {
+  await reclaimRunWindowsOnce()
+  const settings = await getSettings()
+  const shared = await resolveUnattendedScope()
+  // A run with no recorded window is a chat turn or a run still deciding: either
+  // way it may be about to act in the shared window, so assume the worst and step
+  // aside. Runs that recorded a DIFFERENT window cannot collide with us.
+  const collides = listRunning().some(
+    (run) =>
+      run.runId !== selfRunId && (run.windowId === undefined || run.windowId === shared?.windowId),
+  )
+  const sharedLease: RunWindowLease = {
+    ...(shared ? { windowId: shared.windowId } : {}),
+    dedicated: false,
+  }
+  if (!collides) {
+    if (shared) setRunWindow(selfRunId, shared.windowId, 'shared')
+    return sharedLease
+  }
+
+  const tier = await acquireRunWindowTier(settings.maxConcurrentRunWindows, signal, onWait)
+  const windowId = await createRunWindow(selfRunId, tier)
+  if (windowId === undefined) {
+    // Chrome refused the window: fall back to the shared scope, i.e. the
+    // behaviour this run has always had, rather than failing the run over a
+    // window.
+    releaseRunWindowTier(tier)
+    return sharedLease
+  }
+  occupiedRunWindows.set(tier, windowId)
+  setRunWindow(selfRunId, windowId, 'dedicated')
+  return { windowId, dedicated: true, tier }
+}
+
+/**
+ * The run-visible wording for a failed lease. Lives next to the error it
+ * describes so every caller (task runner, alarm workflow runner) reports the
+ * same thing in the user's language.
+ */
+export function runWindowFailureText(error: RunWindowUnavailableError, locale: Locale): string {
+  const t = messagesFor(locale)
+  return error.reason === 'capped'
+    ? t.taskRunWindowCapReached({ max: error.max })
+    : t.taskRunCancelledWhileQueued
+}
+
+/**
+ * Close a run's own window and free its slot. Idempotent, and safe to call for a
+ * shared lease (it does nothing). Must run in the caller's `finally`: a leaked
+ * window would sit on the user's desktop holding a slot forever.
+ */
+export async function releaseRunWindow(lease: RunWindowLease): Promise<void> {
+  if (!lease.dedicated) return
+  if (typeof lease.windowId === 'number') await closeRunWindow(lease.windowId)
+  if (typeof lease.tier === 'number') releaseRunWindowTier(lease.tier)
+}
+
+/** Windows reclaimed since this worker woke; see {@link reclaimRunWindowsOnce}. */
+let runWindowsReclaimed = false
+
+/**
+ * Close dedicated windows left behind by runs that died with an earlier service
+ * worker: the window survives an eviction, the code that would have closed it
+ * does not.
+ */
+export async function reclaimRunWindows(): Promise<number[]> {
+  return reclaimOrphanRunWindows((runId) => !!getRun(runId))
+}
+
+/**
+ * Reclaim for a waking worker (called by the background entry point at boot).
+ * Marks the once-flag so {@link leaseRunWindow} does not repeat the sweep.
+ */
+export async function recallRunWindowsOnWake(): Promise<number[]> {
+  runWindowsReclaimed = true
+  return reclaimRunWindows()
+}
+
+/** Runs {@link reclaimRunWindows} at most once per worker lifetime. */
+async function reclaimRunWindowsOnce(): Promise<void> {
+  if (runWindowsReclaimed) return
+  runWindowsReclaimed = true
+  await reclaimRunWindows()
+}
+
+/**
+ * Everything the run-window layer holds, for tests and for the board's own
+ * diagnostics: live slots and queued runs.
+ */
+export function runWindowSlotState(): { occupied: number[]; queued: number } {
+  return {
+    occupied: [...occupiedRunWindows.keys()].sort((a, b) => a - b),
+    queued: runWindowWaiters.length,
+  }
 }
 
 // --- Local-agent bridge: per-connection window assignments (N:N) --------------
@@ -351,9 +583,13 @@ export async function resolveBridgeTarget(
   return { scope: await resolveUnattendedScope(), unbound: false }
 }
 
-/** Test helper: clears pending picks, the wired requester and session binds. */
+/** Test helper: clears pending picks, the wired requester, session binds and
+ * the run-window slots (module state a test must not inherit from the last one). */
 export function _resetWindowPolicyForTests(): void {
   pickRequester = null
   pendingPicks.clear()
   sessionAgentWindows.clear()
+  occupiedRunWindows.clear()
+  runWindowWaiters.splice(0)
+  runWindowsReclaimed = false
 }

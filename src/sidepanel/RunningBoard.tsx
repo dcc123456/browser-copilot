@@ -19,6 +19,7 @@ import { useCallback, useEffect, useRef, useState, type ReactElement } from 'rea
 import { sendCommand, type FinishedTaskView, type RunningTaskView } from '../lib/messages'
 import { useT } from './i18n'
 import { confirmDialog } from '../ui/confirm'
+import { toast } from '../ui/toast'
 
 interface RunningBoardProps {
   /**
@@ -162,6 +163,20 @@ export default function RunningBoard({ onSettled, busy }: RunningBoardProps): Re
     }
   }, [t, refresh])
 
+  // The window badge: overlapping runs work in a browser window of their own,
+  // and clicking the badge brings that window forward. Best-effort — the run may
+  // have closed the window between the poll and the click.
+  const focusRunWindow = useCallback(
+    async (runId: string): Promise<void> => {
+      const result = await sendCommand({ type: 'tasks.focusWindow', runId })
+      if (result.type === 'tasks.focusWindow' && !result.ok) toast(t.taskRunWindowGone, 'error')
+    },
+    [t],
+  )
+
+  const windowLabel = (kind: RunningTaskView['runWindowKind'], windowId: number): string =>
+    kind === 'dedicated' ? t.taskRunWindowDedicated : t.taskRunWindow({ id: windowId })
+
   const sourceLabel = (source: RunningTaskView['source']): string => {
     switch (source) {
       case 'feishu':
@@ -239,6 +254,16 @@ export default function RunningBoard({ onSettled, busy }: RunningBoardProps): Re
                     </div>
                     <div className="running-meta">
                       <span className="run-tag">{sourceLabel(run.source)}</span>
+                      {typeof run.windowId === 'number' && (
+                        <button
+                          className="run-tag bg-transparent hover:bg-hover"
+                          onClick={() => void focusRunWindow(run.runId)}
+                          title={t.taskRunWindowFocus}
+                          type="button"
+                        >
+                          {windowLabel(run.runWindowKind, run.windowId)}
+                        </button>
+                      )}
                       <span>
                         {t.taskStartedAt}:{' '}
                         {new Date(run.startedAt).toLocaleTimeString(navigator.language)}

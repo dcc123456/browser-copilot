@@ -7,6 +7,7 @@ import {
   getRun,
   listFinished,
   listRunning,
+  setRunWindow,
   startRun,
 } from '../src/background/running-tasks'
 
@@ -60,5 +61,26 @@ describe('running-tasks registry', () => {
     const controller = new AbortController()
     const run = startRun({ label: 'x', source: 'chat', controller })
     expect(run.controller).toBe(controller)
+  })
+
+  it('carries the run window onto the finished entry for the board badge', () => {
+    const run = startRun({ label: 'x', source: 'schedule' })
+    expect(getRun(run.runId)?.windowId).toBeUndefined()
+    expect(listFinished()[0]?.runWindowKind).toBeUndefined()
+
+    setRunWindow(run.runId, 500, 'dedicated')
+    expect(getRun(run.runId)).toMatchObject({ windowId: 500, runWindowKind: 'dedicated' })
+
+    finishRun(run.runId, { outcome: 'ok', summary: 'done' })
+    expect(listFinished()[0]).toMatchObject({ windowId: 500, runWindowKind: 'dedicated' })
+  })
+
+  it('ignores a window recorded for an unknown or finished run', () => {
+    setRunWindow('nope', 500, 'shared')
+    const run = startRun({ label: 'x', source: 'schedule' })
+    setRunWindow(run.runId, 501, 'shared')
+    finishRun(run.runId, { outcome: 'ok' })
+    setRunWindow(run.runId, 502, 'dedicated')
+    expect(listFinished()[0]).toMatchObject({ windowId: 501, runWindowKind: 'shared' })
   })
 })

@@ -1,3 +1,4 @@
+import { effectiveLocale, messagesFor } from '../lib/i18n'
 /**
  * Service worker entry point.
  *
@@ -44,8 +45,14 @@ import {
 import {
   forgetAgentWindow,
   handleWindowPickResponse,
+  leaseRunWindow,
+  recallRunWindowsOnWake,
   rememberAgentWindow,
+  releaseRunWindow,
+  runWindowFailureText,
   setWindowPickRequester,
+  RunWindowUnavailableError,
+  type RunWindowLease,
 } from './window-policy'
 import { isInjectablePage } from '../lib/pages'
 import { buildTokenDashboard, entityKeyFor } from '../lib/token-ledger'
@@ -53,9 +60,9 @@ import { installTokenAccounting } from './token-accounting'
 import {
   hasPluginWindows,
   initScopeWindowCleanup,
+  setRunWindowPruner,
   isPluginWindow,
   currentPluginScope,
-  latestPluginWindowId,
   listNormalWindows,
   normalScopeFromWindowId,
   registerPanelWindow,
@@ -72,7 +79,7 @@ import {
   setFloatingButtonPos,
   whenRestoreSettled,
 } from './panel-minimize'
-import { warmupOcr } from './driver'
+import { releaseWindowAutomationState, warmupOcr } from './driver'
 import { handlePickerMessage } from './picker-bridge'
 import {
   startRecording,
@@ -265,12 +272,14 @@ import {
   clearFinished,
   finishRun,
   forgetFinished,
+  getRun,
   hydrateFinished,
   listFinished,
   listRunning,
   setFinishedPersister,
   startRun,
   type FinishedTask,
+  type RunOutcomeKind,
   type RunStepKind,
 } from './running-tasks'
 
@@ -393,7 +402,7 @@ chrome.runtime.onStartup.addListener(() => {
   // window when one exists (usually none is at browser start).
   void startupWorkflows()
     .then((wfs) => {
-      for (const wf of wfs) void runWorkflowKeepalive(wf.id, latestPluginWindowId())
+      for (const wf of wfs) void runUnattendedWorkflowKeepalive(wf.id)
     })
     .catch((error: unknown) =>
       console.error('[Browser Copilot] on-startup workflows failed', error),
@@ -406,7 +415,7 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.runtime.onInstalled.addListener(() => {
   void startupWorkflows()
     .then((wfs) => {
-      for (const wf of wfs) void runWorkflowKeepalive(wf.id, latestPluginWindowId())
+      for (const wf of wfs) void runUnattendedWorkflowKeepalive(wf.id)
     })
     .catch(() => {})
 })
@@ -484,6 +493,55 @@ async function runWorkflowKeepalive(workflowId: string, scopeWindowId?: number):
       ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
     })
   } finally {
+    release()
+  }
+}
+
+/**
+ * Unattended sibling of {@link runWorkflowKeepalive}: on-startup workflows and
+ * timer-driven triggers have no window of their own, so they lease one exactly
+ * like a scheduled task does — the shared plugin window while nothing else runs,
+ * a dedicated window of its own when something already does.
+ *
+ * Keeping this separate is deliberate: a run the user started in THEIR window
+ * must never be diverted into a window they did not ask for.
+ */
+async function runUnattendedWorkflowKeepalive(workflowId: string): Promise<void> {
+  const wf = await getWorkflow(workflowId)
+  if (!wf) return
+  retain()
+  const settings = await getSettings()
+  const locale = effectiveLocale(settings.locale, navigator.language)
+  const t = messagesFor(locale)
+  const tracked = startRun({ label: wf.name, source: 'schedule', workflowId: wf.id })
+  let lease: RunWindowLease | undefined
+  let outcome: RunOutcomeKind = 'failed'
+  try {
+    lease = await leaseRunWindow(tracked.runId, tracked.controller.signal, () =>
+      addStep(tracked.runId, 'status', t.taskRunQueued),
+    )
+    const result = await executeWorkflow(wf, {
+      source: 'schedule',
+      reuseRun: tracked,
+      ...(lease.dedicated && lease.windowId !== undefined ? { scopeWindowId: lease.windowId } : {}),
+    })
+    outcome = result.outcome
+  } catch (error) {
+    const text =
+      error instanceof RunWindowUnavailableError
+        ? runWindowFailureText(error, locale)
+        : error instanceof Error
+          ? error.message
+          : String(error)
+    addStep(tracked.runId, 'error', text)
+    outcome =
+      error instanceof RunWindowUnavailableError && error.reason === 'cancelled'
+        ? 'cancelled'
+        : 'failed'
+    console.error('[Browser Copilot] unattended workflow run failed', workflowId, error)
+  } finally {
+    if (lease) await releaseRunWindow(lease)
+    finishRun(tracked.runId, { outcome })
     release()
   }
 }
@@ -578,7 +636,10 @@ async function applyAndVerifyConfirmedPatch(
 // Let the trigger module launch workflows (keyboard-shortcut triggers carry
 // the window they were pressed in; alarm-driven ones pass nothing).
 setWorkflowRunner((workflowId, scopeWindowId) => {
-  void runWorkflowKeepalive(workflowId, scopeWindowId)
+  // A trigger that knows which window it came from acts there; a sender-less one
+  // (the alarm tree) leases a window so parallel triggers cannot share one tab.
+  if (typeof scopeWindowId === 'number') void runWorkflowKeepalive(workflowId, scopeWindowId)
+  else void runUnattendedWorkflowKeepalive(workflowId)
 })
 
 // Right-click "run workflow" items. Guarded: the API is not present in tests and
@@ -668,6 +729,12 @@ void trimOutboxToBudget().catch(() => undefined)
 initLastTabTracker()
 // Drop closed windows from the panel registry so trigger guards stay honest.
 initScopeWindowCleanup()
+// A run window's per-window driver slots (pin, tab cache) must go when the
+// window does; and a previous worker may have died holding windows open.
+setRunWindowPruner(releaseWindowAutomationState)
+void recallRunWindowsOnWake().catch((error: unknown) =>
+  console.error('[Browser Copilot] could not reclaim run windows', error),
+)
 // Restore minimized-plugin marks (chrome.storage.session) after a worker restart.
 initPanelMinimize()
 void rescheduleAll().catch((error: unknown) =>
@@ -945,6 +1012,8 @@ function runningBoardsView(workflowIdFilter?: string): {
     source: ReturnType<typeof listRunning>[number]['source']
     startedAt: number
     steps: ReturnType<typeof listRunning>[number]['steps']
+    windowId?: number
+    runWindowKind?: ReturnType<typeof listRunning>[number]['runWindowKind']
   }[]
   finished: {
     runId: string
@@ -958,6 +1027,8 @@ function runningBoardsView(workflowIdFilter?: string): {
     summary?: string
     error?: string
     steps: ReturnType<typeof listFinished>[number]['steps']
+    windowId?: number
+    runWindowKind?: ReturnType<typeof listFinished>[number]['runWindowKind']
   }[]
 } {
   const mapFinished = (r: ReturnType<typeof listFinished>[number]) => ({
@@ -967,6 +1038,8 @@ function runningBoardsView(workflowIdFilter?: string): {
     label: r.label,
     source: r.source,
     startedAt: r.startedAt,
+    ...(typeof r.windowId === 'number' ? { windowId: r.windowId } : {}),
+    ...(r.runWindowKind ? { runWindowKind: r.runWindowKind } : {}),
     finishedAt: r.finishedAt,
     outcome: r.outcome,
     summary: r.summary,
@@ -987,6 +1060,8 @@ function runningBoardsView(workflowIdFilter?: string): {
         source: r.source,
         startedAt: r.startedAt,
         steps: r.steps,
+        ...(typeof r.windowId === 'number' ? { windowId: r.windowId } : {}),
+        ...(r.runWindowKind ? { runWindowKind: r.runWindowKind } : {}),
         ...(r.snapshots ? { snapshots: r.snapshots } : {}),
       })),
     finished: listFinished().filter(matches).map(mapFinished),
@@ -1349,6 +1424,20 @@ async function handleCommand(
       return { type: 'tasks.running', ...runningBoardsView() }
     case 'tasks.cancel':
       return { type: 'tasks.cancel', ok: cancelRun(command.runId) }
+    case 'tasks.focusWindow': {
+      // The board's window badge: show the user the window this run works in.
+      const run = getRun(command.runId) ?? listFinished().find((r) => r.runId === command.runId)
+      const windowId = run?.windowId
+      if (typeof windowId !== 'number') {
+        return { type: 'tasks.focusWindow', ok: false, closed: true }
+      }
+      try {
+        await chrome.windows.update(windowId, { focused: true })
+        return { type: 'tasks.focusWindow', ok: true }
+      } catch {
+        return { type: 'tasks.focusWindow', ok: false, closed: true }
+      }
+    }
     case 'tasks.finished.delete':
       // Remove from the board and its persisted run log entry.
       forgetFinished(command.runId)

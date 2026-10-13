@@ -10,6 +10,7 @@ import {
   type ProviderProfile,
 } from '../src/lib/providers'
 import { normalizeLocalAgentBindings, normalizeStoredSettings } from '../src/lib/storage'
+import { RUN_WINDOW_LIMITS } from '../src/lib/types'
 
 function profile(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
   return {
@@ -161,6 +162,7 @@ describe('normalizeStoredSettings', () => {
         localAgentAllowReload: false,
         localAgentBindings: {},
         unattendedWindowPolicy: 'latest',
+        maxConcurrentRunWindows: 3,
         imageModel: { providerId: '', model: '' },
         ocrLanguage: 'eng',
         takeoverModel: { providerId: '', model: '' },
@@ -188,6 +190,7 @@ describe('normalizeStoredSettings', () => {
       localAgentAllowReload: false,
       localAgentBindings: {},
       unattendedWindowPolicy: 'latest',
+      maxConcurrentRunWindows: 3,
       imageModel: { providerId: '', model: '' },
       ocrLanguage: 'chi_sim+eng',
       takeoverModel: { providerId: '', model: '' },
@@ -237,6 +240,7 @@ describe('normalizeStoredSettings', () => {
       localAgentAllowReload: false,
       localAgentBindings: {},
       unattendedWindowPolicy: 'latest',
+      maxConcurrentRunWindows: 3,
       imageModel: { providerId: '', model: '' },
       ocrLanguage: 'eng',
       takeoverModel: { providerId: '', model: '' },
@@ -382,6 +386,25 @@ describe('normalizeSettingsPayload · cross-version safety', () => {
     expect(normalizeSettingsPayload({}).ocrLanguage).toBe('eng')
     expect(normalizeSettingsPayload({ ocrLanguage: 'chi_sim+eng' }).ocrLanguage).toBe('chi_sim+eng')
     expect(normalizeSettingsPayload({ ocrLanguage: 42 }).ocrLanguage).toBe('eng')
+  })
+
+  it('clamps the parallel run-window cap into its legal range', () => {
+    // An old profile has no value at all, and the Settings field can be typed
+    // with anything; the lease layer reads this number without re-checking it.
+    expect(normalizeSettingsPayload({}).maxConcurrentRunWindows).toBe(3)
+    expect(normalizeSettingsPayload({ maxConcurrentRunWindows: 99 }).maxConcurrentRunWindows).toBe(
+      RUN_WINDOW_LIMITS.max,
+    )
+    expect(normalizeSettingsPayload({ maxConcurrentRunWindows: 0 }).maxConcurrentRunWindows).toBe(
+      RUN_WINDOW_LIMITS.min,
+    )
+    expect(normalizeSettingsPayload({ maxConcurrentRunWindows: 'x' }).maxConcurrentRunWindows).toBe(
+      3,
+    )
+    // The worker-side sanitizer is the one the lease actually reads.
+    expect(normalizeStoredSettings({ maxConcurrentRunWindows: 42 }).maxConcurrentRunWindows).toBe(
+      RUN_WINDOW_LIMITS.max,
+    )
   })
 
   it('repairs an active pointer that names no known profile', () => {
