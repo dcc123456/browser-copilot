@@ -17,6 +17,7 @@ function makeT(): TFn {
     generationStageBuildReliability: 'Build reliability',
     generationStageStaticValidate: 'Static validate',
     generationStageIndependentVerify: 'Independent verify',
+    generationStageSeedRecall: 'Seed recall',
   }
   return new Proxy(labels, {
     get(target, prop: string) {
@@ -58,5 +59,20 @@ describe('GenerationStagesView', () => {
     const html = renderToStaticMarkup(createElement(GenerationStagesView, { t: makeT(), stages }))
     expect(html).toContain('1/3 actions lack a locator')
     expect(html).toContain('no inputs')
+  })
+
+  it('localizes the seed recall stage like every other stage', () => {
+    // The panel is keyed off `STAGE_LABEL_KEY`, so a stage that grew into the
+    // pipeline without a label entry would render its raw enum id at the user.
+    const stages: GenerationStageReport[] = [
+      {
+        stage: 'SEED_RECALL',
+        status: 'ok',
+        summary: 'Offered recorded steps from 1 certified workflow(s) as seeds.',
+      },
+    ]
+    const html = renderToStaticMarkup(createElement(GenerationStagesView, { t: makeT(), stages }))
+    expect(html).toContain('Seed recall')
+    expect(html).not.toContain('SEED_RECALL')
   })
 })

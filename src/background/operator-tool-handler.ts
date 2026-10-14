@@ -71,6 +71,7 @@ import {
   runDraftPipeline,
   staticValidateStage,
 } from './workflow-engine/generation/generation-pipeline'
+import { stageReport } from '../lib/workflow/generation-report'
 import type { DraftSource, PendingBranch, WorkflowDraft } from '../lib/workflow/draft-types'
 import type { DeclaredInput } from '../lib/workflow/dynamic-data'
 import {
@@ -670,7 +671,22 @@ export async function composeWorkflowFromDraft(
   draft.nodes = pipeline.draft.nodes
   draft.edges = pipeline.draft.edges
   draft.tail = pipeline.draft.tail
-  const generationStages = [...pipeline.stages]
+  // Seed recall ran before the first step was executed (agent
+  // `prepare_workflow_goal`), and whether it offered anything is the one fact
+  // that makes the seeded-vs-unseeded certification numbers separable, so it
+  // reports as the pipeline's first stage rather than going unrecorded.
+  const seededFrom = draft.seededFrom?.length ? [...draft.seededFrom] : undefined
+  const generationStages = [
+    stageReport(
+      'SEED_RECALL',
+      seededFrom ? 'ok' : 'skipped',
+      seededFrom
+        ? `Offered recorded steps from ${seededFrom.length} certified workflow(s) as seeds.`
+        : 'No certified workflow matched this goal; generated unseeded.',
+      { candidates: seededFrom?.length ?? 0 },
+    ),
+    ...pipeline.stages,
+  ]
   // The user's request that started the generation, captured on the trigger
   // call (`goalText`) — becomes the derived goal's summary when present.
   const triggerHead = draft.nodes.find(isTriggerNode)
@@ -851,6 +867,7 @@ export async function composeWorkflowFromDraft(
   generationStages.push(staticValidateStage(runErrorCount, generatedErrorCount))
   generationStages.push(independentVerifyStage(trialRecord))
   workflow.settings.generationStages = generationStages
+  if (seededFrom) workflow.settings.seededFrom = seededFrom
   if (trialRecord) workflow = withTrialRecord(workflow, trialRecord)
   if (saveWarnings.length > 0) {
     workflow.settings.saveWarnings = saveWarnings

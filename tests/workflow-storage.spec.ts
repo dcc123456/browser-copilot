@@ -129,6 +129,7 @@ describe('workflow storage', () => {
           },
           saveWarnings: ['缺少导航锚点'],
           certificationStatus: 'unverified',
+          seededFrom: ['seed-a', 'seed-b'],
           takeoverOnRun: true,
           degradeReplay: false,
           trialRun: {
@@ -195,6 +196,9 @@ describe('workflow storage', () => {
           // "certified" claim: `passed` is exactly the word a health card keys on.
           trialRun: { outcome: 'passed' } as never,
           certificationStatus: 'gold-certified' as never,
+          // Seed attribution is a list of ids or nothing: a non-string entry
+          // would otherwise read as "seeded from a workflow named like this".
+          seededFrom: ['seed-a', 42 as never],
         },
       }),
     )
@@ -207,9 +211,30 @@ describe('workflow storage', () => {
     expect(settings.certificationStatus).toBeUndefined()
     expect(settings.trialRun).toBeUndefined()
     expect(settings.saveWarnings).toEqual(['ok'])
+    expect(settings.seededFrom).toEqual(['seed-a'])
     expect(stored.revision).toBeUndefined()
     // Nothing left to derive strictness from: this one runs as legacy compat.
     expect(isGeneratedStrict(stored)).toBe(false)
+  })
+
+  it('keeps seed attribution through a save and a reload', async () => {
+    // E5: the field is only useful if it survives the worker restart that
+    // happens between the seeded round and the report that reads it.
+    await saveWorkflow(
+      makeWorkflow({
+        id: 'seeded',
+        settings: {
+          saveLog: false,
+          debugMode: false,
+          notification: false,
+          reuseLastState: false,
+          certificationStatus: 'certified',
+          seededFrom: ['source-a'],
+        },
+      }),
+    )
+    const reloaded = await getWorkflow('seeded')
+    expect(reloaded!.settings.seededFrom).toEqual(['source-a'])
   })
 
   it('sorts saved workflows by updatedAt descending', async () => {

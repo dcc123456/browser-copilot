@@ -118,6 +118,22 @@ describe('asPersistedDraft', () => {
   it('normalises a non-string tail to null', () => {
     expect(asPersistedDraft({ conversationId: 'c', name: 'n', tail: 7 })!.tail).toBeNull()
   })
+
+  it('keeps seed attribution and filters a malformed id list', () => {
+    // The whitelist between a draft field and the void: `seededFrom` is the only
+    // record of which workflows a generation was offered, so a service-worker
+    // restart must not cost the round its attribution.
+    const seeded = asPersistedDraft({
+      conversationId: 'c',
+      name: 'n',
+      seededFrom: ['seed-a', 42, 'seed-b'],
+    })
+    expect(seeded!.seededFrom).toEqual(['seed-a', 'seed-b'])
+    const notAnArray = asPersistedDraft({ conversationId: 'c', name: 'n', seededFrom: 'seed-a' })
+    expect(notAnArray!.seededFrom).toBeUndefined()
+    const empty = asPersistedDraft({ conversationId: 'c', name: 'n', seededFrom: [] })
+    expect(empty!.seededFrom).toBeUndefined()
+  })
 })
 
 describe('draft persistence', () => {

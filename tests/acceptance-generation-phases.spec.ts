@@ -15,6 +15,11 @@ const AGENT_PHASES = [
 const TERMINAL = ['CERTIFIED', 'FAILED'] as const
 describe('V65 generation process state is understandable', () => {
   it('the pipeline reports every static stage in a stable order', () => {
+    // SEED_RECALL joined this list as its first entry (retrieval-seeded
+    // generation, specs/2026-10-14-workflow-seed-recall-design.md): recall runs
+    // before the first step is executed, so it is reported before the transforms
+    // that run after them. The six original stages are unchanged.
+    expect(GENERATION_STAGE_ORDER[0]).toBe('SEED_RECALL')
     expect(GENERATION_STAGE_ORDER).toContain('NORMALIZE')
     expect(GENERATION_STAGE_ORDER).toContain('HARDEN_TARGETS')
     expect(GENERATION_STAGE_ORDER).toContain('STATIC_VALIDATE')
