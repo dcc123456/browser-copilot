@@ -86,4 +86,13 @@ export interface WorkflowDraft {
    * node merely mentions.
    */
   actedOrigins?: string[]
+  /**
+   * Ids of the saved workflows whose recorded steps were offered as seeds when
+   * this generation started (`lib/workflow/seed-recall`).
+   *
+   * Attribution, not provenance of the graph: an offered step still had to be
+   * re-executed to land in `nodes`, so this says which workflows the model was
+   * shown, which is the join key the seeded-vs-unseeded L3 measurement reads.
+   */
+  seededFrom?: string[]
 }

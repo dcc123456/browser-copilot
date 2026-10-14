@@ -4,8 +4,8 @@
  * The generation path is a formal pipeline:
  *
  * ```text
- * Normalize → Generalize Inputs → Harden Targets → Build Reliability
- *          → Static Validate → Independent Verify
+ * Seed Recall → Normalize → Generalize Inputs → Harden Targets → Build Reliability
+ *             → Static Validate → Independent Verify
  * ```
  *
  * Every stage produces one {@link GenerationStageReport} describing what it
@@ -18,6 +18,7 @@
  */
 
 export type GenerationStageId =
+  | 'SEED_RECALL'
   | 'NORMALIZE'
   | 'GENERALIZE_INPUTS'
   | 'HARDEN_TARGETS'
@@ -38,6 +39,7 @@ export interface GenerationStageReport {
 
 /** Stable display order of the pipeline stages. */
 export const GENERATION_STAGE_ORDER: readonly GenerationStageId[] = [
+  'SEED_RECALL',
   'NORMALIZE',
   'GENERALIZE_INPUTS',
   'HARDEN_TARGETS',

@@ -230,6 +230,15 @@ export interface WorkflowSettings {
    */
   certificationStatus?: 'unverified' | 'certified'
   /**
+   * Which saved workflows were offered as generation seeds for this one
+   * (`lib/workflow/seed-recall`), newest join key first.
+   *
+   * Attribution only: a seeded step still had to execute successfully to reach
+   * the graph, so this answers "was this generation seeded, and from what" for
+   * the seeded-vs-unseeded certification-rate measurement. Absent = not seeded.
+   */
+  seededFrom?: string[]
+  /**
    * Ask before every run of this workflow, regardless of the global automation
    * scope. A generated workflow whose steps have side effects (submit, delete,
    * purchase) defaults this ON: replaying it unattended is the user's call, not

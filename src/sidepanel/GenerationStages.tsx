@@ -20,6 +20,7 @@ import type {
 type TFn = ReturnType<typeof useT>
 
 const STAGE_LABEL_KEY: Record<GenerationStageId, keyof TFn> = {
+  SEED_RECALL: 'generationStageSeedRecall',
   NORMALIZE: 'generationStageNormalize',
   GENERALIZE_INPUTS: 'generationStageGeneralizeInputs',
   HARDEN_TARGETS: 'generationStageHardenTargets',

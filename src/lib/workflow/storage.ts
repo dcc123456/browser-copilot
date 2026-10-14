@@ -154,6 +154,16 @@ export function asWorkflow(value: unknown): Workflow | null {
     rawSettings.certificationStatus === 'unverified'
       ? { certificationStatus: rawSettings.certificationStatus }
       : {}),
+    // Seed attribution: without this line the panel and the selftest report
+    // lose every record of a generation having been seeded, because the whitelist
+    // is the only reader of a persisted setting.
+    ...(Array.isArray(rawSettings.seededFrom)
+      ? {
+          seededFrom: rawSettings.seededFrom.filter(
+            (workflowId): workflowId is string => typeof workflowId === 'string',
+          ),
+        }
+      : {}),
     ...(typeof rawSettings.takeoverOnRun === 'boolean'
       ? { takeoverOnRun: rawSettings.takeoverOnRun }
       : {}),

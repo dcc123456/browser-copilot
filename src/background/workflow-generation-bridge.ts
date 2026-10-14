@@ -107,6 +107,14 @@ export interface GenerationWorkflowSummary {
   pageContext?: PageContextFingerprint
   certificationStatus?: WorkflowSettings['certificationStatus']
   goalSpec?: WorkflowGoalSpec
+  /**
+   * Which certified workflows were offered as seeds for this generation.
+   *
+   * The join key for the seeded/unseeded comparison: `certificationStatus` says
+   * whether a run reached its goal, this says whether it did so with recorded
+   * evidence reused from an earlier workflow. Absent when generation was unseeded.
+   */
+  seededFrom?: string[]
   saveWarnings: string[]
   trialRun?: TrialRunRecord
   /**
@@ -848,6 +856,7 @@ function summarize(workflow: Workflow, saved: boolean): GenerationWorkflowSummar
     ...(settings.generationOriginUrl ? { generationOriginUrl: settings.generationOriginUrl } : {}),
     ...(settings.pageContext ? { pageContext: settings.pageContext } : {}),
     ...(settings.certificationStatus ? { certificationStatus: settings.certificationStatus } : {}),
+    ...(settings.seededFrom ? { seededFrom: settings.seededFrom } : {}),
     ...(settings.goalSpec ? { goalSpec: settings.goalSpec } : {}),
     saveWarnings: settings.saveWarnings ?? [],
     ...(settings.trialRun ? { trialRun: settings.trialRun } : {}),

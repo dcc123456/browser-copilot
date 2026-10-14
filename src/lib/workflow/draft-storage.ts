@@ -105,6 +105,13 @@ export function asPersistedDraft(value: unknown): WorkflowDraft | null {
       : 'chat-generate'
   const pendingBranch = pendingBranchOf(value.pendingBranch)
   const variables = isRecord(value.variables) ? value.variables : undefined
+  // Attribution survives a service-worker restart or this field is lost with
+  // the round that was seeded — the whitelist here is the only thing between a
+  // draft field and the void, and `goalText`/`originUrl` are its cautionary
+  // tales.
+  const seededFrom = Array.isArray(value.seededFrom)
+    ? value.seededFrom.filter((id): id is string => typeof id === 'string')
+    : undefined
 
   return {
     conversationId,
@@ -115,6 +122,7 @@ export function asPersistedDraft(value: unknown): WorkflowDraft | null {
     source,
     ...(pendingBranch ? { pendingBranch } : {}),
     ...(variables ? { variables } : {}),
+    ...(seededFrom && seededFrom.length > 0 ? { seededFrom } : {}),
   }
 }
 

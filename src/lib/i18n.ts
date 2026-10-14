@@ -462,6 +462,8 @@ export interface Messages {
   generationStagesTitle: string
   /** Heading for the non-blocking save-time warnings on the save card. */
   chatSaveWorkflowWarningsTitle: string
+  /** Stage label: seed recall (certified workflows offered as step evidence). */
+  generationStageSeedRecall: string
   /** Stage label: normalize. */
   generationStageNormalize: string
   /** Stage label: generalize inputs. */
@@ -1734,6 +1736,7 @@ const en: Messages = {
   chatWorkflowInputsTitle: 'Workflow inputs',
   generationStagesTitle: 'Generation stages',
   chatSaveWorkflowWarningsTitle: 'Warnings',
+  generationStageSeedRecall: 'Seed recall',
   generationStageNormalize: 'Normalize',
   generationStageGeneralizeInputs: 'Generalize inputs',
   generationStageHardenTargets: 'Harden targets',
@@ -2958,6 +2961,7 @@ const zhCN: Messages = {
   chatWorkflowInputsTitle: '工作流输入',
   generationStagesTitle: '生成阶段',
   chatSaveWorkflowWarningsTitle: '警告',
+  generationStageSeedRecall: '种子召回',
   generationStageNormalize: '规范化',
   generationStageGeneralizeInputs: '泛化输入',
   generationStageHardenTargets: '加固目标',
