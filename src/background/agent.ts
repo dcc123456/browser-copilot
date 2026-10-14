@@ -63,7 +63,7 @@ import {
   isAdvertisableOperatorCategory,
 } from '../lib/workflow/operator-categories'
 import type { BlockCategory } from '../lib/workflow/blocks/types'
-import { composeWorkflowFromDraft } from './operator-tool-handler'
+import { composeWorkflowFromDraft, hydrateDraft, persistDraft } from './operator-tool-handler'
 import { executeWorkflow } from './workflow-engine/run-workflow'
 import { createTrialRunner } from './workflow-engine/repair/generation-trial'
 import { runOperatorToolWithExecution } from './operator-tool-run'
@@ -166,7 +166,9 @@ import {
   generateWorkflowName,
   isAcceptableWorkflowName,
   normalizeGenerationGoalContract,
+  type WorkflowGenerationGoalContract,
 } from '../lib/workflow/generation-goal'
+import { buildSeedOffer, rankWorkflowSeeds, type SeedOffer } from '../lib/workflow/seed-recall'
 // Static, not dynamic: a dynamic `await import()` in the MV3 service worker
 // throws `window is not defined` (see CHANGELOG 0.6.3 get-secret fix).
 import { normalizeGoalSpec } from '../lib/workflow/goal'
@@ -2153,6 +2155,70 @@ function prepareWorkflowGoalTool(): WireTool {
       },
     },
   } as WireTool
+}
+
+/**
+ * The site(s) the task is about, read off what the goal itself claims: a url in
+ * a success or terminal row, and the tab the user is looking at when the goal is
+ * prepared. Both are hints, not facts — a hint only ever NARROWS the offer (a
+ * workflow that records a different site is excluded from recall), so a stale
+ * tab costs a seed and can never smuggle a wrong one in.
+ */
+function seedSiteHints(
+  goalSpec: WorkflowGenerationGoalContract['goalSpec'],
+  tabUrl?: string,
+): string[] {
+  const hints: string[] = []
+  for (const condition of [
+    ...(goalSpec.successConditions ?? []),
+    ...(goalSpec.terminalStateConditions ?? []),
+  ]) {
+    if (
+      (condition.kind === 'urlContains' || condition.kind === 'urlMatches') &&
+      isHttpUrl(condition.value)
+    )
+      hints.push(condition.value)
+  }
+  if (tabUrl && isHttpUrl(tabUrl)) hints.push(tabUrl)
+  return hints
+}
+
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value.trim())
+}
+
+/**
+ * Recall proven step evidence for a freshly prepared goal.
+ *
+ * Reads only: no draft node is appended here, and the offer is advisory — the
+ * model still has to execute every step it reuses. Attribution (which workflows
+ * were shown) lands on the draft because `composeWorkflowFromDraft` is what
+ * turns it into the saved workflow's `settings.seededFrom`.
+ */
+async function collectSeedOffer(
+  conversationId: string,
+  contract: WorkflowGenerationGoalContract,
+): Promise<SeedOffer[] | undefined> {
+  const [workflows, runs, tab] = await Promise.all([
+    listWorkflows(),
+    listRuns(),
+    // The tab is a hint source, not a requirement: no active tab (or a worker
+    // without tab access) must not cost the whole recall.
+    activeTab().catch(() => undefined),
+  ])
+  const candidates = rankWorkflowSeeds({
+    workflows,
+    runs,
+    goalSummary: contract.goalSpec.summary,
+    requiredCapabilities: contract.requiredCapabilities,
+    siteHints: seedSiteHints(contract.goalSpec, tab?.url),
+  })
+  const offer = buildSeedOffer(candidates)
+  if (!offer) return undefined
+  const draft = await hydrateDraft(conversationId)
+  draft.seededFrom = offer.map((seed) => seed.workflowId)
+  await persistDraft(draft)
+  return offer
 }
 
 /**
@@ -4301,11 +4367,24 @@ export async function executeTool(
         return JSON.stringify({ error: 'The goal contract could not be validated.' })
       }
       await saveGenerationGoal(ctx.conversationId, contract)
+      // Seeds ride the goal's own tool result: this is the one seam every
+      // generation path passes through before its first page action, it is
+      // where the summary and required capabilities first exist together, and
+      // the system prompt has a byte budget this must not touch. Recall is
+      // allowed to fail and must never take the goal contract down with it —
+      // that contract is what gates everything downstream.
+      let seeds: SeedOffer[] | undefined
+      try {
+        seeds = await collectSeedOffer(ctx.conversationId, contract)
+      } catch (error) {
+        console.warn('[workflow-generation] seed recall failed; generating unseeded', error)
+      }
       return JSON.stringify({
         ok: true,
         name: contract.name,
         goalSpec: contract.goalSpec,
         requiredCapabilities: contract.requiredCapabilities,
+        ...(seeds ? { seeds } : {}),
         note:
           'Goal contract established. Operators may now execute; final success is judged against this goal.' +
           // The round-22 graph replayed 26/26 clean and saved nothing, because its
@@ -4317,6 +4396,10 @@ export async function executeTool(
               // was the EDITOR's 「暂存离开」 button, and after that click the page IS
               // the 草稿箱 list, so the row checked a page the run had already left.
               ' A success row is read on the page the run ENDS on, not on the page a mid-run step acted on: after 暂存离开 the page is the 草稿箱 list, so prove the draft landed THERE (e.g. {kind:"elementExists", target:{text:"草稿箱"}}) rather than by an editor control that is no longer on screen.'
+            : '') +
+          // Round-59 addition, only when a seed was actually offered.
+          (seeds
+            ? ' `seeds` are steps a saved workflow ALREADY PROVED on a page like this one — an offer, not a draft. Reuse one by calling that `wf_op_*` with its recorded selector / target and arguments, and only what executes successfully joins the graph. A seeded locator that fails on this page is a page that moved: fall back to `snapshot_page` and re-discover that step instead of retrying the seed.'
             : ''),
       })
     }

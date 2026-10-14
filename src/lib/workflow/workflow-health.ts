@@ -60,6 +60,34 @@ function runTime(run: TaskRunLog): number {
 }
 
 /**
+ * The health window for ONE workflow: its own runs, newest first, cut to
+ * {@link HEALTH_WINDOW}, with intentionally-skipped runs dropped. Shared by the
+ * summary below and by {@link newestCountedRunOf} so the two can never disagree
+ * about what a run counts as.
+ */
+function countedWindowOf(runs: readonly TaskRunLog[], workflowId: string): readonly TaskRunLog[] {
+  return runs
+    .filter((run) => isRunOf(workflowId, run))
+    .sort((a, b) => runTime(b) - runTime(a))
+    .slice(0, HEALTH_WINDOW)
+    .filter(isCounted)
+}
+
+/**
+ * The newest counted run of one workflow, when it has one.
+ *
+ * Exported for the seed recall, which uses it to check whether a `certified`
+ * badge is still current. A second copy of the sort-and-window rule would drift
+ * the moment one of the two changed its mind about `skipped`.
+ */
+export function newestCountedRunOf(
+  runs: readonly TaskRunLog[],
+  workflowId: string,
+): TaskRunLog | undefined {
+  return countedWindowOf(runs, workflowId)[0]
+}
+
+/**
  * Summarize the health of one workflow from its local run history.
  *
  * Runs are sorted newest-first, the window taken, then counted. A workflow with
@@ -70,10 +98,7 @@ export function summarizeWorkflowHealth(
   runs: readonly TaskRunLog[],
   workflowId: string,
 ): WorkflowHealthSummary {
-  const own = runs.filter((run) => isRunOf(workflowId, run)).sort((a, b) => runTime(b) - runTime(a))
-
-  const windowRuns = own.slice(0, HEALTH_WINDOW)
-  const counted = windowRuns.filter(isCounted)
+  const counted = countedWindowOf(runs, workflowId)
 
   const passedRuns = counted.filter((run) => run.ok).length
 
