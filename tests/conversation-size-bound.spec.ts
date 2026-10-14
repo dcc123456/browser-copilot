@@ -4,9 +4,13 @@
  *
  *  - a megabyte data URL in a turn (an attached image, or an image a step handed
  *    back) is shed, while the descriptor and every real text value survive;
- *  - the whole `conv:<id>` key stays inside the budget the storage fallback can
- *    carry, shrinking from the oldest turn and never opening on a tool result
- *    (a provider rejects a transcript whose first turn is an orphan result);
+ *  - the whole `conv:<id>` key shrinks toward the budget the storage fallback
+ *    can carry by dropping the oldest NON-user turns, whole tool rounds at a
+ *    time, never opening on a tool result (a provider rejects a transcript
+ *    whose first turn is an orphan result);
+ *  - user turns are the spine and survive both bounds — even when the spine
+ *    alone is over budget, which is the honest failure rather than deleting the
+ *    earliest things the user typed;
  *  - a turn whose attachment bytes are gone is sent as a note, not as an empty
  *    multimodal content array and not as a broken `image_url`.
  *
@@ -99,13 +103,55 @@ describe('transcript size bound', () => {
     expect(JSON.stringify(stored)).not.toContain('BBBB')
   })
 
-  it('shrinks from the oldest turn without opening on a tool result', async () => {
+  it('shrinks the tool bulk and keeps every user turn', async () => {
+    // The shape a long full-auto chat really has: short requests, enormous page
+    // dumps. The byte budget must spend itself on the dumps — dropping the
+    // oldest user turns instead is what made the earliest history disappear.
+    const dump = '页'.repeat(60_000)
+    const messages: WireMessage[] = []
+    for (let i = 0; i < 30; i++) {
+      messages.push({ role: 'user', content: `第${i}条指令` })
+      messages.push({
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { id: `call-${i}`, type: 'function', function: { name: 'read', arguments: '{}' } },
+        ],
+      } as WireMessage)
+      messages.push({ role: 'tool', tool_call_id: `call-${i}`, content: dump })
+    }
+
+    await saveConversation('c-1', messages)
+    const stored = data.get(KEY) as WireMessage[]
+    const users = stored.filter((message) => message.role === 'user')
+    expect(JSON.stringify(stored).length).toBeLessThan(1_600_000)
+    expect(stored.length).toBeLessThan(messages.length)
+    // Every instruction the user typed is still there, oldest first.
+    expect(users.map((message) => (message as { content: string }).content)).toEqual(
+      Array.from({ length: 30 }, (_, i) => `第${i}条指令`),
+    )
+    // Rounds still travel whole, and the newest exchange is never the victim.
+    expect(stored[0]!.role).toBe('user')
+    expect(stored[stored.length - 1]!.role).toBe('tool')
+    const calls = stored
+      .filter((message) => message.role === 'assistant')
+      .flatMap((message) => (message as { tool_calls?: { id: string }[] }).tool_calls ?? [])
+    const answered = new Set(
+      stored
+        .filter((message) => message.role === 'tool')
+        .map((message) => (message as { tool_call_id: string }).tool_call_id),
+    )
+    expect(calls.every((call) => answered.has(call.id))).toBe(true)
+  })
+
+  it('keeps an over-budget user spine rather than rewriting it', async () => {
+    // The spine is not a budget item: when user turns alone exceed it, the key
+    // goes over and the write surfaces "Could not save this conversation".
+    // Silent deletion of what the user typed is the worse failure.
     const filler = 'x'.repeat(120_000)
     const messages: WireMessage[] = []
     for (let i = 0; i < 20; i++) {
       messages.push({ role: 'user', content: `turn ${i} ${filler}` })
-      // An assistant turn that answered by calling a tool, and that tool's
-      // result: dropping the pair's first half must not strand the result.
       messages.push({
         role: 'assistant',
         content: '',
@@ -118,11 +164,8 @@ describe('transcript size bound', () => {
 
     await saveConversation('c-1', messages)
     const stored = data.get(KEY) as WireMessage[]
-    expect(JSON.stringify(stored).length).toBeLessThan(1_600_000)
-    expect(stored.length).toBeLessThan(messages.length)
-    expect(stored[0]!.role).not.toBe('tool')
-    // The newest turn is never the victim.
-    expect(stored[stored.length - 1]!.role).toBe('tool')
+    expect(stored.map((message) => message.role)).toEqual(Array.from({ length: 20 }, () => 'user'))
+    expect((stored[0] as { content: string }).content).toBe(messages[0]!.content)
   })
 
   it('sends a note for a turn whose attachment bytes are gone', () => {

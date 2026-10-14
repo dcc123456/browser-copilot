@@ -56,9 +56,14 @@ describe('hardCapHistory emergency bound', () => {
     expect(estimateInputTokens(history)).toBeLessThanOrEqual(2_000)
     expect(String((history[1] as { content: string }).content).endsWith('[truncated]')).toBe(true)
   })
-  it('touches user content only as the final pass', () => {
+  it('never rewrites user content, even when the budget cannot be met', () => {
+    // User turns are the transcript's spine: this bound runs on the same array
+    // that gets persisted, so cutting into user text would silently rewrite the
+    // user's own history. An unmet budget is the honest outcome instead (the
+    // provider's length error routes it to `compactHistory`, which keeps user
+    // turns too).
     const history: WireMessage[] = [{ role: 'user', content: '字'.repeat(5_000) }]
-    hardCapHistory(history, 1_000)
-    expect(estimateInputTokens(history)).toBeLessThanOrEqual(1_000)
+    expect(hardCapHistory(history, 1_000)).toBe(0)
+    expect(history[0]).toEqual({ role: 'user', content: '字'.repeat(5_000) })
   })
 })

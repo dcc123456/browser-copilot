@@ -91,12 +91,17 @@ export function estimateInputTokens(
 }
 
 /**
- * Last-resort emergency bound: shorten the CONTENT of the largest messages
- * (oldest non-user messages first) until the estimated size fits
- * tokenBudget. Messages are never deleted here (that would orphan tool-call
- * pairs); they are truncated in place. User messages are touched only if every
- * other message is gone and the budget still does not fit. Returns the number
- * of characters removed.
+ * Last-resort emergency bound: shorten the CONTENT of the largest non-user
+ * messages (oldest first) until the estimated size fits tokenBudget. Messages
+ * are never deleted here (that would orphan tool-call pairs); they are
+ * truncated in place.
+ *
+ * User turns are off-limits by design (see `specs/2026-10-14-user-turn-spine-design.md`):
+ * they are what the panel shows as message history, and this function runs on
+ * the same array that gets persisted. If a transcript cannot fit after every
+ * non-user message is cut, the over-long user input is left as it is and the
+ * provider's own length error routes it through `compactHistory`, which keeps
+ * user turns too. Returns the number of characters removed.
  */
 export function hardCapHistory(history: WireMessage[], tokenBudget: number): number {
   if (estimateInputTokens(history) <= tokenBudget) return 0
@@ -112,23 +117,14 @@ export function hardCapHistory(history: WireMessage[], tokenBudget: number): num
     removed += cut
     return true
   }
-  // Pass 1: keep truncating the oldest non-user messages that still hold
-  // content, iterating until the budget fits or none of them is cuttable.
+  // Keep truncating the oldest non-user messages that still hold content,
+  // iterating until the budget fits or none of them is cuttable.
   let progressed = true
   while (progressed && estimateInputTokens(history) > tokenBudget) {
     progressed = false
     for (const message of history) {
       if (estimateInputTokens(history) <= tokenBudget) return removed
       if (message.role !== 'user' && truncate(message)) progressed = true
-    }
-  }
-  // Pass 2: user content only as the final emergency.
-  progressed = true
-  while (progressed && estimateInputTokens(history) > tokenBudget) {
-    progressed = false
-    for (const message of history) {
-      if (estimateInputTokens(history) <= tokenBudget) return removed
-      if (truncate(message)) progressed = true
     }
   }
   return removed

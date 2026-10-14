@@ -754,7 +754,7 @@ export async function resetAgentToBuiltIn(id: string): Promise<Agent> {
   return restored
 }
 
-/** Caps stored turns so a long session cannot grow unbounded. */
+/** Caps stored turns so a long session cannot grow unbounded (user turns exempt). */
 export const MAX_STORED_MESSAGES = 200
 
 function conversationKey(conversationId: string): string {
@@ -762,20 +762,68 @@ function conversationKey(conversationId: string): string {
 }
 
 /**
+ * Groups a transcript into units that must survive or disappear together: a
+ * `tool_calls` assistant turn travels with the results that follow it; every
+ * other message is its own unit. Stray leading results (whose turn is already
+ * gone) form a unit of their own, so trimming can drop them too.
+ */
+function groupTranscriptRounds(messages: WireMessage[]): WireMessage[][] {
+  const rounds: WireMessage[][] = []
+  let openRound: WireMessage[] | null = null
+  for (const message of messages) {
+    if (message.role === 'tool' && openRound) {
+      openRound.push(message)
+      continue
+    }
+    if (message.role === 'assistant' && message.tool_calls && message.tool_calls.length > 0) {
+      openRound = [message]
+      rounds.push(openRound)
+      continue
+    }
+    openRound = null
+    rounds.push([message])
+  }
+  return rounds
+}
+
+/**
  * Trims a transcript to the newest {@link MAX_STORED_MESSAGES} turns.
  *
- * The retained window must never begin with a `tool` message: a tool result
- * whose originating `tool_calls` assistant turn was dropped makes providers
- * reject the entire request with a 400. Exported for direct testing.
+ * User turns are the transcript's spine and are never dropped: they are what
+ * the panel shows as message history, and a conversation whose earliest
+ * requests vanish is one the user cannot continue reading. Everything else
+ * (assistant answers, tool rounds) goes from the oldest end, whole round by
+ * whole round, so trimming can never strand a `tool` result from its
+ * `tool_calls` turn — providers reject the request outright on that shape (see
+ * `closeInterruptedToolRounds` in `lib/llm`). The retained total still respects
+ * `limit`: user turns take part of it and the newest non-user rounds take the
+ * rest. Exported for direct testing.
  */
 export function trimConversation(
   messages: WireMessage[],
   limit = MAX_STORED_MESSAGES,
 ): WireMessage[] {
   if (messages.length <= limit) return messages
-  let start = messages.length - limit
-  while (start < messages.length && messages[start]?.role === 'tool') start += 1
-  return messages.slice(start)
+  const rounds = groupTranscriptRounds(messages)
+  const userCount = messages.filter((message) => message.role === 'user').length
+  let room = Math.max(0, limit - userCount)
+  const kept: WireMessage[][] = []
+  for (let index = rounds.length - 1; index >= 0; index -= 1) {
+    const round = rounds[index]
+    if (!round) continue
+    if (round[0]?.role === 'user') {
+      kept.push(round)
+      continue
+    }
+    if (room <= 0) continue
+    kept.push(round)
+    room -= round.length
+  }
+  kept.reverse()
+  // Only an already-malformed input can start on a stranded result; drop it
+  // rather than send a window a provider rejects with a 400.
+  while (kept.length > 0 && kept[0]?.[0]?.role === 'tool') kept.shift()
+  return kept.flat()
 }
 
 /** Loads a conversation, returning an empty history when it is unknown. */
@@ -843,9 +891,15 @@ function withoutOversizePayloads(messages: WireMessage[]): WireMessage[] {
 function withinTranscriptBudget(messages: WireMessage[]): WireMessage[] {
   let list = messages
   while (list.length > 1 && jsonBytes(list) > MAX_STORED_CONVERSATION_BYTES) {
-    // `trimConversation` owns the invariant that a retained window may not start
-    // on a tool result, so the shrink goes through it rather than a raw slice.
-    list = trimConversation(list, Math.max(1, Math.floor(list.length * 0.8)))
+    // `trimConversation` owns the invariants — the user-turn spine and whole
+    // rounds — so the shrink goes through it rather than a raw slice.
+    const shrunk = trimConversation(list, Math.max(1, Math.floor(list.length * 0.8)))
+    // Nothing shed: what is left is the spine alone, and user turns are not a
+    // budget item. Persist it over budget — an unwritable key surfaces as
+    // "Could not save this conversation", which beats silently deleting the
+    // earliest things the user typed.
+    if (shrunk.length === list.length) break
+    list = shrunk
   }
   return list
 }
