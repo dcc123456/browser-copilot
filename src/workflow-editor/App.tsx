@@ -914,7 +914,13 @@ export default function EditorApp() {
             // becomes selected; selected nodes then move/delete as a group
             // (drag one selected node moves all; Delete/Backspace removes
             // them together with their edges). Wheel zoom is unchanged.
+            // React Flow only honours selectionOnDrag while panOnDrag !== true,
+            // and its own Space-pan-activation forces panOnDrag back to true, so
+            // holding Space must drop the left button from panOnDrag and
+            // panActivationKeyCode has to be disabled outright.
             selectionOnDrag={spaceDown}
+            panOnDrag={spaceDown ? [1, 2] : true}
+            panActivationKeyCode={null}
             selectionMode={SelectionMode.Partial}
             defaultEdgeOptions={{
               type: 'custom',
