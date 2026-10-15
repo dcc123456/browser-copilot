@@ -15,9 +15,11 @@ import {
   emitToPanel,
   handOff,
   openTurnChannel,
+  queueInterjection,
   requestAskUser,
   requestConfirmation,
   requestPlan,
+  takeInterjections,
 } from '../src/background/agent-channel'
 
 /**
@@ -329,7 +331,23 @@ describe('turn channel · end of turn', () => {
     await expect(asked).resolves.toEqual({ answer: '', cancelled: true })
     // A reopen after the turn ends finds nothing to re-attach to.
     expect(channelFor('c1')).toBeUndefined()
-    expect(panel.messages.map((message) => message.type)).toEqual(['ask_user.request', 'delta'])
+    // The panel is told as well: a card it still shows is dead, and leaving it
+    // clickable is how a turn ends up waiting on an answer that goes nowhere.
+    expect(panel.messages.map((message) => message.type)).toEqual([
+      'ask_user.request',
+      'delta',
+      'interactions.dismissed',
+    ])
+  })
+
+  it('announces nothing when there was no card to dismiss', () => {
+    const panel = fakeConnection()
+    const channel = open('c1', panel)
+    emitToPanel(channel, { type: 'delta', text: 'tail' })
+
+    closeTurnChannel('c1')
+
+    expect(panel.messages.map((message) => message.type)).toEqual(['delta'])
   })
 
   it('starts without a transcript so the resume path falls back to storage', () => {
@@ -340,6 +358,28 @@ describe('turn channel · end of turn', () => {
     expect(channel.transcript).toBeUndefined()
     emitToPanel(channel, { type: 'phase', phase: 'preparing' })
     expect(channel.replay).toEqual([])
+  })
+})
+
+describe('turn channel · supplement queue', () => {
+  it('takes the notes of the running turn in arrival order, exactly once', () => {
+    const panel = fakeConnection()
+    const channel = open('c1', panel)
+
+    expect(queueInterjection('c1', { id: 'n1', text: 'use the second account' })).toBe(true)
+    expect(queueInterjection('c1', { id: 'n2', text: 'skip the preview' })).toBe(true)
+
+    expect(channel.interjections.map((note) => note.id)).toEqual(['n1', 'n2'])
+    expect(takeInterjections(channel).map((note) => note.text)).toEqual([
+      'use the second account',
+      'skip the preview',
+    ])
+    // Draining empties it: a note cannot be injected into two requests.
+    expect(takeInterjections(channel)).toEqual([])
+  })
+
+  it('refuses a note when no turn is running, so the panel sends it for real', () => {
+    expect(queueInterjection('gone', { id: 'n1', text: 'hello' })).toBe(false)
   })
 })
 

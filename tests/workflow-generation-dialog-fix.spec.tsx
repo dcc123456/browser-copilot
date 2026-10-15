@@ -117,7 +117,8 @@ async function flush(): Promise<void> {
   })
 }
 
-async function sendMessage(container: HTMLElement, text: string): Promise<void> {
+/** Type into the composer textarea the way a real keystroke does. */
+async function typeInto(container: HTMLElement, text: string): Promise<void> {
   const textarea = container.querySelector('textarea')!
   const setter = Object.getOwnPropertyDescriptor(
     window.HTMLTextAreaElement.prototype,
@@ -127,6 +128,35 @@ async function sendMessage(container: HTMLElement, text: string): Promise<void> 
     setter.call(textarea, text)
     textarea.dispatchEvent(new Event('input', { bubbles: true }))
   })
+}
+
+/** Click a button by its visible label, in the panel or in a body portal. */
+async function clickButton(label: string, scope: ParentNode = document.body): Promise<boolean> {
+  const button = [...scope.querySelectorAll('button')].find((b) => b.textContent?.trim() === label)
+  if (!button) return false
+  await act(async () => {
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
+  await flush()
+  return true
+}
+
+/** Push one worker message to every panel listener. */
+async function emit(message: unknown): Promise<void> {
+  await act(async () => {
+    for (const l of listeners) l(message)
+  })
+  await flush()
+}
+
+const composerValue = (container: HTMLElement): string =>
+  container.querySelector('textarea')?.value ?? ''
+
+/** The panel's conversation, as the stubbed storage leaves it. */
+const CONV = 'default'
+
+async function sendMessage(container: HTMLElement, text: string): Promise<void> {
+  await typeInto(container, text)
   const sendButtons = [...container.querySelectorAll('button')].filter(
     (b) => b.getAttribute('aria-label') === 'Send' || b.textContent?.includes('Send'),
   )
@@ -138,15 +168,7 @@ async function sendMessage(container: HTMLElement, text: string): Promise<void> 
   await flush()
   // Workflow generation confirms the workflow NAME before dispatching the
   // turn: accept the suggested name so the task actually posts.
-  const start = [...document.body.querySelectorAll('button')].find(
-    (b) => b.textContent?.trim() === 'Start task',
-  )
-  if (start) {
-    await act(async () => {
-      start.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-    await flush()
-  }
+  await clickButton('Start task')
 }
 
 describe('workflow generation inline progress and save card popup', () => {
@@ -245,5 +267,166 @@ describe('immediate stop of background work', () => {
         { signal: controller.signal, executors: { 'event-click': executor } },
       ),
     ).rejects.toMatchObject({ name: 'AbortError' })
+  })
+})
+
+/**
+ * The composer while a turn is running: a typed instruction joins the task
+ * already in flight instead of starting a second one (the user should not have
+ * to Stop and re-send to add a constraint), and it is never silently dropped —
+ * a note the turn never read comes back to the input. Plus the card rule that
+ * goes with it: one question on screen, and no card left pending on a stopped
+ * turn.
+ */
+describe('supplements into the running turn', () => {
+  /** Mount the panel, run a task, and hand back what the port was given. */
+  async function mountBusy(): Promise<{
+    container: HTMLElement
+    unmount: () => Promise<void>
+    postedOfType: (type: string) => Record<string, unknown>[]
+  }> {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    await act(async () => {
+      root.render(
+        createElement(ChatTab, { skills: [], activeSkillId: null, onSelectSkill: () => {} }),
+      )
+    })
+    await flush()
+    await sendMessage(container, 'click submit and confirm success')
+    return {
+      container,
+      unmount: async () => {
+        await act(async () => {
+          root.unmount()
+        })
+        container.remove()
+      },
+      postedOfType: (type) =>
+        posted.filter((m) => (m as { type: string }).type === type) as Record<string, unknown>[],
+    }
+  }
+
+  it('queues onto the live turn instead of opening a second one', async () => {
+    const { container, unmount, postedOfType } = await mountBusy()
+    try {
+      await typeInto(container, 'use the second account')
+      expect(await clickButton('Supplement', container)).toBe(true)
+
+      const chats = postedOfType('chat')
+      expect(chats).toHaveLength(1)
+      const notes = postedOfType('chat.interject')
+      expect(notes).toHaveLength(1)
+      expect(notes[0]).toMatchObject({ text: 'use the second account', conversationId: CONV })
+      expect(typeof notes[0]!.noteId).toBe('string')
+      // The composer is free again, and the note shows as a user message.
+      expect(composerValue(container)).toBe('')
+      expect(container.textContent).toContain('use the second account')
+    } finally {
+      await unmount()
+    }
+  })
+
+  it('stops flagging the note once the turn says it applied it', async () => {
+    const { container, unmount, postedOfType } = await mountBusy()
+    try {
+      await typeInto(container, 'also collect the price')
+      await clickButton('Supplement', container)
+      expect(container.textContent).toContain('Queued for the running task')
+
+      const noteId = postedOfType('chat.interject')[0]!.noteId as string
+      await emit({ type: 'chat.interjection.applied', conversationId: CONV, noteIds: [noteId] })
+
+      // An applied note is just a user turn now: no flag, and the text is not
+      // handed back when the turn ends.
+      expect(container.textContent).not.toContain('Queued for the running task')
+      await emit({ type: 'done' })
+      expect(composerValue(container)).not.toContain('also collect the price')
+    } finally {
+      await unmount()
+    }
+  })
+
+  it('returns a note the turn never read to the composer', async () => {
+    const { container, unmount } = await mountBusy()
+    try {
+      await typeInto(container, 'skip the preview step')
+      await clickButton('Supplement', container)
+
+      // Stop, and the turn ends without ever reaching the note.
+      await clickButton('Stop', container)
+      await emit({ type: 'done' })
+
+      expect(container.textContent).toContain('Not applied')
+      expect(composerValue(container)).toContain('skip the preview step')
+    } finally {
+      await unmount()
+    }
+  })
+
+  it('sends for real when the turn finished before the note landed', async () => {
+    const { container, unmount, postedOfType } = await mountBusy()
+    try {
+      await typeInto(container, 'one more thing')
+      await clickButton('Supplement', container)
+      const noteId = postedOfType('chat.interject')[0]!.noteId as string
+
+      await emit({ type: 'chat.interject.ack', conversationId: CONV, noteId, queued: false })
+
+      // The same words go out as an ordinary message — once, not twice.
+      const chats = postedOfType('chat')
+      expect(chats).toHaveLength(2)
+      expect(String(chats[1]!.text)).toBe('one more thing')
+      const shown = [...container.querySelectorAll('.msg[data-role="user"]')].filter((node) =>
+        node.textContent?.includes('one more thing'),
+      )
+      expect(shown).toHaveLength(1)
+    } finally {
+      await unmount()
+    }
+  })
+})
+
+describe('one question card at a time', () => {
+  it('shows the oldest question alone, and drops it when the turn ends', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          createElement(ChatTab, { skills: [], activeSkillId: null, onSelectSkill: () => {} }),
+        )
+      })
+      await flush()
+
+      await emit({
+        type: 'ask_user.request',
+        requestId: 'q1',
+        question: 'Which account?',
+        options: [{ label: 'A', pros: 'fast', cons: 'risky' }],
+      })
+      await emit({
+        type: 'ask_user.request',
+        requestId: 'q2',
+        question: 'Overwrite the draft?',
+        options: [{ label: 'B', pros: 'safe', cons: 'slow' }],
+      })
+
+      const cards = container.querySelectorAll('[data-kind="ask"]')
+      expect(cards).toHaveLength(1)
+      expect(cards[0]!.textContent).toContain('Which account?')
+
+      // Stop takes the card with the turn: leaving it up means a click that
+      // answers nothing and a task stuck waiting on a settled promise.
+      await emit({ type: 'interactions.dismissed', conversationId: CONV })
+      expect(container.querySelectorAll('[data-kind="ask"]')).toHaveLength(0)
+    } finally {
+      await act(async () => {
+        root.unmount()
+      })
+      container.remove()
+    }
   })
 })

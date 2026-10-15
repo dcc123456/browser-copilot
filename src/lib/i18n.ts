@@ -372,6 +372,16 @@ export interface Messages {
   chatPlaceholder: string
   chatSend: string
   chatStop: string
+  /** Composer placeholder while a turn is running: Enter queues a supplement for it. */
+  chatInterjectPlaceholder: string
+  /** Send-button label while a turn is running. */
+  chatInterject: string
+  /** Status line when queued supplements enter the running turn's transcript. */
+  chatInterjectionApplied: string
+  /** Flag on a supplement the turn ended without ever reading (Stop, or a failure). */
+  chatInterjectionUnapplied: string
+  /** Composer hint when a question card is waiting while the supplement is queued. */
+  chatInterjectionQueued: string
   chatNewChat: string
   chatAttachSelection: string
   /** Composer 📎 button tooltip. */
@@ -1289,6 +1299,8 @@ export interface Messages {
   workflowGenerationBackground: string
   workflowGenerationClose: string
   workflowGenerationError: string
+  /** Terminal title when the user stopped the task (the popup must not freeze). */
+  workflowGenerationStopped: string
   workflowGenerationSave: string
   workflowGenerationEdit: string
   /** Dismiss the READY dialog without cancelling generation or saving. */
@@ -1661,6 +1673,11 @@ const en: Messages = {
   chatPlaceholder: 'Message… (Enter to send, Shift+Enter for a new line)',
   chatSend: 'Send',
   chatStop: 'Stop',
+  chatInterjectPlaceholder: 'Type a supplement… (Enter applies it to the running task)',
+  chatInterject: 'Supplement',
+  chatInterjectionApplied: 'Supplement applied to the running task.',
+  chatInterjectionUnapplied: 'Not applied (the task stopped) — returned to the input.',
+  chatInterjectionQueued: 'Queued for the running task',
   chatNewChat: 'New chat',
   chatAttachSelection: 'Attach selection',
   chatAttach: 'Attach files',
@@ -2549,6 +2566,7 @@ Keep the whole report dense and within the message size cap.`,
   workflowGenerationBackground: 'Run in background',
   workflowGenerationClose: 'Close',
   workflowGenerationError: 'Generation failed',
+  workflowGenerationStopped: 'Generation stopped',
   workflowGenerationSave: 'Save workflow',
   workflowGenerationEdit: 'Edit',
   workflowGenerationDismiss: 'Cancel',
@@ -2901,6 +2919,11 @@ const zhCN: Messages = {
   chatPlaceholder: '输入消息…（Enter 发送，Shift+Enter 换行）',
   chatSend: '发送',
   chatStop: '停止',
+  chatInterjectPlaceholder: '输入补充说明…（Enter 会应用到正在执行的任务）',
+  chatInterject: '补充',
+  chatInterjectionApplied: '补充说明已应用到正在执行的任务。',
+  chatInterjectionUnapplied: '未生效（任务已停止）——已退回输入框。',
+  chatInterjectionQueued: '已排队，等待当前任务读取',
   chatNewChat: '新对话',
   chatAttachSelection: '附带选中内容',
   chatAttach: '添加附件',
@@ -3690,6 +3713,7 @@ const zhCN: Messages = {
   workflowGenerationBackground: '后台运行',
   workflowGenerationClose: '关闭',
   workflowGenerationError: '生成失败',
+  workflowGenerationStopped: '生成已停止',
   workflowGenerationSave: '保存工作流',
   workflowGenerationEdit: '编辑',
   workflowGenerationDismiss: '取消',

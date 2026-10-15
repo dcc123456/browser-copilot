@@ -26,9 +26,11 @@ import {
   emitToPanel,
   handOff,
   openTurnChannel,
+  queueInterjection,
   requestAskUser,
   requestConfirmation,
   requestPlan,
+  takeInterjections,
 } from './agent-channel'
 import { retain, release } from './keepalive'
 import {
@@ -3119,6 +3121,25 @@ chrome.runtime.onConnect.addListener((port) => {
       return
     }
 
+    if (message.type === 'chat.interject') {
+      // A supplementary instruction for the turn already running in this
+      // conversation. `queued: false` is the race where the turn finished
+      // between the panel deciding to interject and this message landing: the
+      // panel then sends the same text as an ordinary message, so nothing the
+      // user typed is dropped.
+      const queued = queueInterjection(message.conversationId, {
+        id: message.noteId,
+        text: message.text,
+      })
+      send({
+        type: 'chat.interject.ack',
+        conversationId: message.conversationId,
+        noteId: message.noteId,
+        queued,
+      })
+      return
+    }
+
     if (message.type !== 'chat') return
 
     const conversationId = message.conversationId
@@ -3322,6 +3343,10 @@ chrome.runtime.onConnect.addListener((port) => {
           askUser: ({ question, options }) => requestAskUser(turnChannel, question, options),
           planDecision: ({ goal, steps, risks, split }) =>
             requestPlan(turnChannel, goal, steps, risks, split),
+          // Supplements typed while this turn runs are queued on the channel and
+          // drained here at the round boundary, so the SAME task bends towards
+          // them instead of the user having to Stop and re-send.
+          takeInterjections: () => takeInterjections(turnChannel),
         })
         sendWithTracking({ type: 'done', ...(turnUsage ? { usage: turnUsage } : {}) })
       } catch (error) {

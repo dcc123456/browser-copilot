@@ -38,7 +38,12 @@ export type PanelSink = (message: AgentServerMessage) => void
  */
 export type PanelOwner = object
 
-/** The answer an `ask_user` card resolves with. */
+/**
+ * The answer an `ask_user` card resolves with. A supplement the user typed while
+ * the card was up does NOT ride in here: it is queued as its own note and recorded
+ * as a `role:'user'` turn, because tool turns are not protected by the user-turn
+ * spine and can be retired or capped away.
+ */
 export type AskUserAnswer = { answer: string; cancelled: boolean }
 /** The answer a `present_plan` card resolves with. */
 export type PlanDecision = { approved: boolean; feedback?: string }
@@ -84,6 +89,25 @@ export interface ChatTurnChannel {
   replayLength: number
   /** Latest cumulative usage snapshot, so a reopen can restore the token bar. */
   latestUsage: TurnTokenUsage | undefined
+  /**
+   * Supplementary instructions the user typed while this turn was already
+   * running, in arrival order. Drained by the agent loop at a round boundary
+   * (every `tool_call` is paired with its result there), so the next request —
+   * and therefore the rest of this turn's work — sees them.
+   *
+   * Each note carries an id the panel can trace: the turn announces which ids it
+   * actually applied, so a note that never made it (the user pressed Stop, the
+   * turn failed) is something the panel can still hand back rather than a message
+   * that silently disappears. A turn that ends with a non-empty queue continues
+   * instead of finishing — see `applySupplements` in `agent.ts`.
+   */
+  interjections: Interjection[]
+}
+
+/** One queued supplement: the panel's id plus the user's own words. */
+export interface Interjection {
+  id: string
+  text: string
 }
 
 const channels = new Map<string, ChatTurnChannel>()
@@ -125,6 +149,7 @@ export function openTurnChannel(input: {
     replay: [],
     replayLength: 0,
     latestUsage: undefined,
+    interjections: [],
   }
   channels.set(input.conversationId, channel)
   return channel
@@ -133,6 +158,24 @@ export function openTurnChannel(input: {
 /** The running turn of this conversation, if any. */
 export function channelFor(conversationId: string): ChatTurnChannel | undefined {
   return channels.get(conversationId)
+}
+
+/**
+ * Queues a supplementary instruction for the turn that is already running in
+ * this conversation. Returns `false` when no turn is running — the caller must
+ * then send it as an ordinary message, because the panel's view of `busy` can
+ * race the turn finishing.
+ */
+export function queueInterjection(conversationId: string, note: Interjection): boolean {
+  const channel = channels.get(conversationId)
+  if (!channel) return false
+  channel.interjections.push(note)
+  return true
+}
+
+/** Takes every queued instruction, leaving the queue empty. */
+export function takeInterjections(channel: ChatTurnChannel): Interjection[] {
+  return channel.interjections.splice(0)
 }
 
 /** Ends the turn: nobody is waiting on it any more, so drop its state. */
@@ -223,14 +266,25 @@ export function detachOwner(owner: PanelOwner): void {
   }
 }
 
-/** Resolves every request waiting on the user as a negative answer. */
+/**
+ * Resolves every request waiting on the user as a negative answer, and tells the
+ * watching panel to take those cards off screen.
+ *
+ * The resolve alone left a dead card clickable: its answer then reached no
+ * pending request at all, while the card the turn was really waiting on stayed
+ * unanswered — the task hangs with no visible cause.
+ */
 export function declineInteractions(channel: ChatTurnChannel): void {
+  const hadPending = channel.confirmations.size + channel.askUsers.size + channel.plans.size > 0
   for (const entry of channel.confirmations.values()) entry.resolve(false)
   channel.confirmations.clear()
   for (const entry of channel.askUsers.values()) entry.resolve({ answer: '', cancelled: true })
   channel.askUsers.clear()
   for (const entry of channel.plans.values()) entry.resolve({ approved: false })
   channel.plans.clear()
+  if (hadPending) {
+    channel.sink({ type: 'interactions.dismissed', conversationId: channel.conversationId })
+  }
 }
 
 /**

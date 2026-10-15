@@ -166,6 +166,15 @@ interface Entry {
    * running; restored transcripts always carry it.
    */
   toolSummary?: string
+  /**
+   * Set on a supplement typed while a turn was running, whose entry id is the
+   * note id the worker's echoes refer to. `queued` until that turn announces it
+   * put the words into its transcript (the flag then clears, and the entry reads
+   * as an ordinary user message); `unapplied` when the turn ended without ever
+   * reading them — Stop or a failure — so the text comes back to the composer
+   * instead of disappearing with the closed channel.
+   */
+  interjection?: 'queued' | 'unapplied'
 }
 
 /**
@@ -234,11 +243,16 @@ function turnAnswerText(entries: readonly Entry[]): string {
     .join('\n\n')
 }
 
-/** A tool call awaiting the user's decision. */
+/**
+ * A tool call awaiting the user's decision. `seq` is the panel-wide arrival order
+ * shared by all three question-card kinds; only the lowest one is on screen
+ * (see `headPendingCard`).
+ */
 interface PendingConfirm {
   requestId: string
   name: string
   argsPreview: string
+  seq: number
 }
 
 /**
@@ -251,6 +265,7 @@ interface PendingAskUser {
   requestId: string
   question: string
   options: Array<{ label: string; pros: string; cons: string }>
+  seq: number
 }
 
 /**
@@ -264,6 +279,37 @@ interface PendingPlan {
   steps: { title: string; detail?: string }[]
   risks?: string
   split?: string
+  seq: number
+}
+
+/** Any card that asks something of the user, tagged with the kind it is. */
+type PendingCard =
+  | { kind: 'confirm'; card: PendingConfirm }
+  | { kind: 'ask_user'; card: PendingAskUser }
+  | { kind: 'plan'; card: PendingPlan }
+
+/**
+ * The one card to put on screen: of everything the turn is waiting on, the
+ * question that arrived first.
+ *
+ * The three kinds live in three separate lists, so rendered as-is a second
+ * question appears right under the first even though the agent asked them in
+ * sequence — the user gets a stack of cards while only the oldest one can move
+ * the task forward. Showing the head alone matches the one question the turn is
+ * actually blocked on; the rest surface as it is answered.
+ */
+export function headPendingCard(cards: {
+  confirms: readonly PendingConfirm[]
+  askUsers: readonly PendingAskUser[]
+  plans: readonly PendingPlan[]
+}): PendingCard | null {
+  const queue: PendingCard[] = [
+    ...cards.confirms.map((card): PendingCard => ({ kind: 'confirm', card })),
+    ...cards.askUsers.map((card): PendingCard => ({ kind: 'ask_user', card })),
+    ...cards.plans.map((card): PendingCard => ({ kind: 'plan', card })),
+  ]
+  queue.sort((left, right) => left.card.seq - right.card.seq)
+  return queue[0] ?? null
 }
 
 /**
@@ -1524,6 +1570,15 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const [askUsers, setAskUsers] = useState<PendingAskUser[]>([])
   /** Execution plans from the agent's `present_plan` tool, awaiting a decision. */
   const [plans, setPlans] = useState<PendingPlan[]>([])
+  /** Arrival order shared by the three question-card kinds; see `headPendingCard`. */
+  const cardSeqRef = useRef(0)
+  /**
+   * Supplements handed to the running turn that it has not yet announced as
+   * applied, keyed by the note id the echoes refer to. A turn that ends (Stop,
+   * failure, round cap) while one is still here hands the words back to the
+   * composer instead of letting them disappear with the closed channel.
+   */
+  const notesRef = useRef(new Map<string, string>())
   const [conversationId, setConversationId] = useState<string>(() => loadStoredConversationId())
   /**
    * This panel's browser window, resolved once after mount. Gates the
@@ -2024,6 +2079,42 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   }, [])
 
   /**
+   * Takes every question card off screen.
+   *
+   * Called when the turn ends or the user stops it: the worker has already
+   * resolved those requests negatively, so an answer clicked afterwards reaches
+   * no pending request at all — the card looks answerable but the task waits on
+   * a promise nobody can settle. Leaving it also buries the next real question.
+   */
+  const clearPendingCards = useCallback(() => {
+    setConfirms([])
+    setAskUsers([])
+    setPlans([])
+  }, [])
+
+  /**
+   * Hands back the supplements the finished turn never read.
+   *
+   * A note is only known to be applied by its echo; whatever is still unreconciled
+   * when the turn ends was queued behind a Stop, a failure or the round cap, and
+   * dies with the closed channel. So the words return to the composer, flagged in
+   * the transcript — the user's input is never silently dropped.
+   */
+  const reclaimUnappliedNotes = useCallback(() => {
+    const pending = [...notesRef.current.entries()]
+    if (pending.length === 0) return
+    notesRef.current.clear()
+    for (const [noteId, text] of pending) {
+      setEntries((prev) =>
+        prev.map((entry) =>
+          entry.id === noteId ? { ...entry, interjection: 'unapplied' as const } : entry,
+        ),
+      )
+      setDraft((prev) => (prev.trim() ? `${prev}\n${text}` : text))
+    }
+  }, [])
+
+  /**
    * Appends streamed text to the open assistant entry, opening one on the first
    * delta so an empty bubble never appears while tools run.
    */
@@ -2129,6 +2220,17 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               }
             })
             setEntries(restored)
+            // A supplement injected while this panel was away announced itself on
+            // the connection that had just closed, so reconcile against the
+            // transcript instead: the worker's copy contains the note only if it
+            // actually read it. Without this the note would be handed back to the
+            // composer on top of the user turn already standing in the list.
+            const restoredUserTexts = new Set(
+              restored.filter((entry) => entry.role === 'user').map((entry) => entry.text),
+            )
+            for (const [noteId, text] of notesRef.current) {
+              if (restoredUserTexts.has(text)) notesRef.current.delete(noteId)
+            }
             // A fresh conversation view always opens pinned to the bottom.
             setAtBottom(true)
             // The replayed transcript only carries finished rounds, so anything
@@ -2236,13 +2338,43 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             })
             break
           case 'confirm.request':
-            setConfirms((prev) => addPendingCard(prev, message))
+            setConfirms((prev) => addPendingCard(prev, { ...message, seq: cardSeqRef.current++ }))
             break
           case 'ask_user.request':
-            setAskUsers((prev) => addPendingCard(prev, message))
+            setAskUsers((prev) => addPendingCard(prev, { ...message, seq: cardSeqRef.current++ }))
             break
           case 'plan.request':
-            setPlans((prev) => addPendingCard(prev, message))
+            setPlans((prev) => addPendingCard(prev, { ...message, seq: cardSeqRef.current++ }))
+            break
+          case 'chat.interject.ack': {
+            // The turn refused the note only because it had already finished, so
+            // the same words go out as an ordinary message instead. Dropping the
+            // optimistic entry first keeps the send path's own copy single.
+            const text = notesRef.current.get(message.noteId)
+            if (!text) break
+            if (message.queued) break
+            notesRef.current.delete(message.noteId)
+            setEntries((prev) => prev.filter((entry) => entry.id !== message.noteId))
+            startTurn(text)
+            break
+          }
+          case 'chat.interjection.applied':
+            // The turn put these notes into its transcript as user turns, so they
+            // stop being candidates for the hand-back and read as ordinary
+            // messages from here on.
+            for (const noteId of message.noteIds) {
+              notesRef.current.delete(noteId)
+              setEntries((prev) =>
+                prev.map((entry) =>
+                  entry.id === noteId && entry.interjection
+                    ? { ...entry, interjection: undefined }
+                    : entry,
+                ),
+              )
+            }
+            break
+          case 'interactions.dismissed':
+            clearPendingCards()
             break
           case 'status':
             // Free-form statuses (selection read results, etc.) replace the
@@ -2287,6 +2419,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             const finishingId = streamingRef.current
             streamingRef.current = null
             setBusy(false)
+            // The turn is over: a card it was waiting on is now unanswerable, and
+            // a supplement it never read has to come back rather than vanish with
+            // the closed channel.
+            clearPendingCards()
+            reclaimUnappliedNotes()
             // Surface a preparing popup immediately in workflow mode: the save
             // card only appears after the background compiles/validates the
             // draft, which can take seconds.
@@ -2314,6 +2451,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             streamingRef.current = null
             append({ role: 'error', text: message.message })
             setBusy(false)
+            clearPendingCards()
+            reclaimUnappliedNotes()
             clearSavePreparing(conversationId)
             setGenerationDialog((prev) => (prev ? { ...prev, state: 'ERROR' } : prev))
             break
@@ -2699,25 +2838,19 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     setPendingAttachments(next)
   }
 
-  const send = (): void => {
-    if (busy) return
-    const text = draft.trim()
-    // An active skill or a staged attachment may be sent with no additional
-    // text — the skill's own instructions or the files themselves become the
-    // task. Otherwise a message is required.
-    if (!text && !activeSkillId && pendingAttachments.length === 0) return
-
-    // When the user just selected a skill and hit send, name the skill explicitly
-    // so the model ties the turn to the active-skill block in the system prompt
-    // (rather than receiving a vague "use the skill" nudge it may refuse). When
-    // "attach selection" is on, point the skill at the selected text.
-    let outgoing = text
-    if (!outgoing) {
-      const skill = activeSkillId ? skills.find((entry) => entry.id === activeSkillId) : undefined
-      const name = skill?.name ?? ''
-      outgoing = includeSelection ? t.chatSkillGoSelection({ name }) : t.chatSkillGo({ name })
-    }
-
+  /**
+   * Hand one message to the worker as a NEW turn and open the panel's view of
+   * it: the transcript entry, the busy state, the token baseline, and in
+   * workflow mode the generation dialog.
+   *
+   * Returns whether it got through. Two callers start a turn this way — the
+   * composer send and a supplement the turn refused because it had already
+   * finished — and they differ only in where the text came from, so both come
+   * through here. The draft is left alone: the fallback's text was already taken
+   * out of the composer, and clearing here would throw away whatever the user
+   * typed while it was in flight.
+   */
+  const startTurn = (outgoing: string, withSelection = includeSelection): boolean => {
     // Workflow generation mode: auto-generate name from task text without blocking.
     const workflowName = modeRef.current === 'workflow' ? generateWorkflowName(outgoing) : undefined
 
@@ -2725,7 +2858,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       type: 'chat',
       conversationId,
       text: outgoing,
-      includeSelection,
+      includeSelection: withSelection,
       ...(workflowName ? { workflowName } : {}),
       ...(activeSkillId ? { skillId: activeSkillId } : {}),
       ...(pendingAttachments.length ? { attachments: pendingAttachments } : {}),
@@ -2735,7 +2868,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         role: 'error',
         text: t.chatExtensionReloaded,
       })
-      return
+      return false
     }
 
     append({
@@ -2750,7 +2883,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     streamingRef.current = null
     turnUsageRef.current = null
     setBusy(true)
-    setDraft('')
     pendingAttachmentsRef.current = []
     setPendingAttachments([])
     setWorkflowPrompt(null)
@@ -2775,6 +2907,69 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         logs: [...generationLogsRef.current],
       })
     }
+    return true
+  }
+
+  /**
+   * The composer's send, when no turn is running: an ordinary new message.
+   *
+   * An active skill or a staged attachment may be sent with no additional text —
+   * the skill's own instructions or the files themselves become the task.
+   */
+  const send = (): void => {
+    const text = draft.trim()
+    if (!text && !activeSkillId && pendingAttachments.length === 0) return
+
+    // When the user just selected a skill and hit send, name the skill explicitly
+    // so the model ties the turn to the active-skill block in the system prompt
+    // (rather than receiving a vague "use the skill" nudge it may refuse). When
+    // "attach selection" is on, point the skill at the selected text.
+    let outgoing = text
+    if (!outgoing) {
+      const skill = activeSkillId ? skills.find((entry) => entry.id === activeSkillId) : undefined
+      const name = skill?.name ?? ''
+      outgoing = includeSelection ? t.chatSkillGoSelection({ name }) : t.chatSkillGo({ name })
+    }
+
+    if (!startTurn(outgoing)) return
+    setDraft('')
+  }
+
+  /**
+   * Hand the composer's text to the turn that is ALREADY running in this
+   * conversation, instead of starting another one.
+   *
+   * The worker queues it on the live turn, which reads it at its next round
+   * boundary — before the following tool call is decided — so the same task bends
+   * towards the supplement and a half-built workflow draft keeps being built
+   * towards it. Nothing is aborted: a Stop would discard the work in progress,
+   * which is exactly the detour this replaces.
+   *
+   * The entry id is the note id, so both the turn's `applied` echo and the
+   * hand-back of a note it never read can find their own line in the transcript.
+   */
+  const interject = (text: string): void => {
+    const noteId = nextId()
+    if (!post({ type: 'chat.interject', conversationId, text, noteId })) {
+      append({ role: 'error', text: t.chatExtensionReloaded })
+      return
+    }
+    notesRef.current.set(noteId, text)
+    setEntries((prev) => [...prev, { id: noteId, role: 'user', text, interjection: 'queued' }])
+    setDraft('')
+  }
+
+  /**
+   * The composer's Enter and primary button: a new turn while the conversation is
+   * idle, a supplement for the running one while it is busy.
+   */
+  const submitComposer = (): void => {
+    if (busy) {
+      const text = draft.trim()
+      if (text) interject(text)
+      return
+    }
+    send()
   }
 
   /**
@@ -3333,7 +3528,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         return
       }
       event.preventDefault()
-      send()
+      submitComposer()
       return
     }
 
@@ -3350,6 +3545,9 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   // Only the final assistant reply (the closing "overall analysis" of the
   // turn) carries the download action; earlier replies keep copy alone.
   const lastAssistantId = [...entries].reverse().find((e) => e.role === 'assistant')?.id
+
+  // One question card on screen at a time, oldest first (see `headPendingCard`).
+  const pendingCard = headPendingCard({ confirms, askUsers, plans })
 
   /**
    * The end-of-turn save card. Rendered inline in the message list, or —
@@ -3851,6 +4049,17 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                 */}
                 {entry.text}
                 <MessageAttachments attachments={entry.attachments} />
+                {entry.interjection && (
+                  <span
+                    className={`mt-1 block text-xs ${
+                      entry.interjection === 'unapplied' ? 'text-warn' : 'text-muted'
+                    }`}
+                  >
+                    {entry.interjection === 'unapplied'
+                      ? t.chatInterjectionUnapplied
+                      : t.chatInterjectionQueued}
+                  </span>
+                )}
                 <MsgActions
                   busy={busy}
                   entry={entry}
@@ -3880,35 +4089,48 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
           )
         })}
 
-        {confirms.map((confirm) => (
-          <div key={confirm.requestId} className="confirm-card">
-            <strong>{t.chatConfirmTitle({ name: confirm.name })}</strong>
-            <div className="confirm-action">{confirm.argsPreview}</div>
+        {pendingCard?.kind === 'confirm' && (
+          <div className="confirm-card" key={pendingCard.card.requestId}>
+            <strong>{t.chatConfirmTitle({ name: pendingCard.card.name })}</strong>
+            <div className="confirm-action">{pendingCard.card.argsPreview}</div>
             <p className="hint" style={{ margin: '6px 0' }}>
               {t.confirmActionHint}
             </p>
             <div className="actions">
               <button
                 className="primary"
-                onClick={() => answerConfirm(confirm.requestId, true)}
+                onClick={() => answerConfirm(pendingCard.card.requestId, true)}
                 type="button"
               >
                 {t.chatApprove}
               </button>
-              <button onClick={() => answerConfirm(confirm.requestId, false)} type="button">
+              <button
+                onClick={() => answerConfirm(pendingCard.card.requestId, false)}
+                type="button"
+              >
                 {t.chatDecline}
               </button>
             </div>
           </div>
-        ))}
+        )}
 
-        {askUsers.map((request) => (
-          <AskUserCard key={request.requestId} onAnswer={answerAskUser} request={request} t={t} />
-        ))}
+        {pendingCard?.kind === 'ask_user' && (
+          <AskUserCard
+            key={pendingCard.card.requestId}
+            onAnswer={answerAskUser}
+            request={pendingCard.card}
+            t={t}
+          />
+        )}
 
-        {plans.map((request) => (
-          <PlanCard key={request.requestId} onDecide={answerPlan} request={request} t={t} />
-        ))}
+        {pendingCard?.kind === 'plan' && (
+          <PlanCard
+            key={pendingCard.card.requestId}
+            onDecide={answerPlan}
+            request={pendingCard.card}
+            t={t}
+          />
+        )}
 
         {saveNotice && !workflowPrompt && (
           <div className="confirm-card" data-kind="workflow">
@@ -4093,7 +4315,13 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                 void addFiles(files)
               }
             }}
-            placeholder={skills.length > 0 ? t.chatPlaceholderWithSkills : t.chatPlaceholder}
+            placeholder={
+              busy
+                ? t.chatInterjectPlaceholder
+                : skills.length > 0
+                  ? t.chatPlaceholderWithSkills
+                  : t.chatPlaceholder
+            }
             ref={textareaRef}
             value={draft}
           />
@@ -4178,19 +4406,34 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               </button>
             )}
             {busy && (
-              <button onClick={() => post({ type: 'cancel', conversationId })} type="button">
+              <button
+                onClick={() => {
+                  // Stop means the user is not going to answer the card, so it
+                  // goes away with the turn instead of sitting there pending.
+                  post({ type: 'cancel', conversationId })
+                  clearPendingCards()
+                  // Land the generation popup on a terminal state too: left as
+                  // GENERATING it keeps showing progress that will never move.
+                  setGenerationDialog((prev) =>
+                    prev ? { ...prev, state: 'STOPPED' as const } : prev,
+                  )
+                }}
+                type="button"
+              >
                 {t.chatStop}
               </button>
             )}
             <button
               className="primary"
               disabled={
-                busy || (!draft.trim() && !activeSkillId && pendingAttachments.length === 0)
+                busy
+                  ? !draft.trim()
+                  : !draft.trim() && !activeSkillId && pendingAttachments.length === 0
               }
-              onClick={send}
+              onClick={submitComposer}
               type="button"
             >
-              {busy ? t.loading : t.chatSend}
+              {busy ? t.chatInterject : t.chatSend}
             </button>
           </div>
         </div>
@@ -4435,11 +4678,14 @@ function generationStages(state: WorkflowGenerationViewState): Array<{
     SAVED: 'workflowGenerationSaved',
   }
   const activeIndex = order.indexOf(state === 'SAVING' ? 'READY' : state)
+  // A stopped task ended on the stage it was on, with nothing left to compile:
+  // that stage is what the row flags, the same way a failure flags it.
+  const stopped = state === 'ERROR' || state === 'STOPPED'
   return order.map((stage, index) => ({
     key: stage,
     labelKey: labels[stage]!,
     status:
-      state === 'ERROR' && index === Math.max(activeIndex, 0)
+      stopped && index === Math.max(activeIndex, 0)
         ? ('warn' as const)
         : index < activeIndex
           ? ('done' as const)

@@ -28,7 +28,15 @@ import { CheckCircle2, CircleDashed, Loader2, TriangleAlert, X } from 'lucide-re
 import { useT } from '../i18n'
 
 export type WorkflowGenerationViewState =
-  'GENERATING' | 'RECOVERING' | 'COMPILING' | 'VALIDATING' | 'READY' | 'SAVING' | 'SAVED' | 'ERROR'
+  | 'GENERATING'
+  | 'RECOVERING'
+  | 'COMPILING'
+  | 'VALIDATING'
+  | 'READY'
+  | 'SAVING'
+  | 'SAVED'
+  | 'ERROR'
+  | 'STOPPED'
 
 export interface WorkflowGenerationProgress {
   state: WorkflowGenerationViewState
@@ -86,6 +94,8 @@ function titleForState(t: ReturnType<typeof useT>, state: WorkflowGenerationView
       return t.workflowGenerationSaved
     case 'ERROR':
       return t.workflowGenerationError
+    case 'STOPPED':
+      return t.workflowGenerationStopped
   }
 }
 
@@ -187,9 +197,10 @@ export function WorkflowGenerationDialog(props: WorkflowGenerationDialogProps): 
             ))}
           </ul>
 
-          {/* Generation log */}
+          {/* Generation log — collapsed: the dialog's job is the progress above
+              it, and an always-open action transcript buries it. */}
           {props.progress.logs && props.progress.logs.length > 0 ? (
-            <details className="group/log rounded-lg border border-border" open>
+            <details className="group/log rounded-lg border border-border">
               <summary className="cursor-pointer select-none px-2.5 py-1.5 text-[12px] font-medium text-ink">
                 {t.workflowGenerationLogTitle({ count: props.progress.logs.length })}
               </summary>

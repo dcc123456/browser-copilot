@@ -28,6 +28,7 @@
 import {
   LlmError,
   streamCompletion,
+  wrapInterjection,
   type WireMessage,
   type WireTool,
   type WireToolCall,
@@ -2267,6 +2268,14 @@ export interface AgentDeps {
    * turn states its plan and proceeds instead of blocking forever.
    */
   planDecision?: PlanDecisionFn
+  /**
+   * Drains the instructions the user typed WHILE this turn was running. Present
+   * only for panel turns, which have a live channel to queue them on: the loop
+   * appends them at the round boundary and keeps going, so a supplement adjusts
+   * the task in progress instead of starting a second one. Unattended runs and
+   * delegated sub-agents omit it — there is nobody to supplement them.
+   */
+  takeInterjections?: () => { id: string; text: string }[]
   signal?: AbortSignal
   skillId?: string | undefined
   grantedPageUrl?: string | undefined
@@ -5012,6 +5021,11 @@ export async function runAgentTurn(
     status: messages.contextCompacted,
     marker: messages.contextCompactedMarker,
   }
+  // Same aliasing rule as above: `messages` is the per-round request array inside
+  // the loop body, so the supplement's status line has to be read out here.
+  const interjectionText = {
+    applied: messages.chatInterjectionApplied,
+  }
 
   // Filter the advertised tools per round (see advertiseTools): the core set
   // plus any on-demand group the model has loaded so far this conversation.
@@ -5042,6 +5056,32 @@ export async function runAgentTurn(
       : {}),
   }
 
+  // Applies the supplements the user typed while this turn was running: each one
+  // becomes a `role:'user'` turn (user turns are the transcript's spine — tool
+  // turns can be retired or capped away), then the turn that read them is
+  // announced by id so the panel can stop flagging them. Returns how many were
+  // applied, which the loop uses to decide whether a finishing turn still has
+  // unread instructions and must keep going inside THIS task.
+  const applySupplements = (): number => {
+    const notes = deps.takeInterjections?.() ?? []
+    if (notes.length === 0) return 0
+    for (const note of notes) {
+      history.push({
+        role: 'user',
+        content: wrapInterjection(note.text),
+        // The panel shows and persists the user's own words, never the envelope.
+        displayContent: note.text,
+      })
+    }
+    deps.send({
+      type: 'chat.interjection.applied',
+      conversationId: deps.conversationId ?? '',
+      noteIds: notes.map((note) => note.id),
+    })
+    deps.send({ type: 'status', text: interjectionText.applied })
+    return notes.length
+  }
+
   // Sum usage across every LLM round in this turn (a turn may make several
   // tool-calling completions before it finally answers). Each round's usage is
   // reported in its own trailing SSE chunk.
@@ -5061,6 +5101,14 @@ export async function runAgentTurn(
       deps.send({ type: 'status', text: 'Cancelled.' })
       return null
     }
+
+    // Mid-turn supplement, drained at the round boundary — the one point where
+    // every `tool_calls` turn is paired with its results, so appending a user turn
+    // cannot break provider message ordering (the same reason compaction runs
+    // here). One round is one step: the action in flight finishes first, and the
+    // note then shapes the NEXT decision, before that next tool call is chosen.
+    // The task is not restarted — nothing is aborted.
+    applySupplements()
 
     // Bound page-context growth in long automated runs. Every prior tool result
     // is re-sent each round, so old reads/snapshots dominate token cost. If the
@@ -5240,7 +5288,13 @@ export async function runAgentTurn(
 
     if (result.toolCalls.length === 0) {
       history.push({ role: 'assistant', content: result.content })
-      return totalUsage.totalTokens > 0 ? totalUsage : null
+      // A supplement that arrived while this answer streamed still belongs to
+      // THIS task: apply it and keep the same turn going, so the model answers
+      // the supplement instead of the task ending with it unread. The round
+      // budget bounds the continuation; a note left over when the turn truly
+      // cannot go on is handed back to the panel, never dropped.
+      if (applySupplements() === 0) return totalUsage.totalTokens > 0 ? totalUsage : null
+      continue
     }
 
     history.push({

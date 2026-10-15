@@ -86,6 +86,22 @@ export type WireMessage =
 const INTERRUPTED_TOOL_RESULT =
   '[No result: this call was interrupted before it ran. Do not assume it happened.]'
 
+/**
+ * Model-facing envelope for a supplement the user typed while a turn ran.
+ *
+ * The user's own words are never rewritten — they stay the transcript's spine and
+ * what the panel shows back through `displayContent`. But a bare user turn
+ * landing mid-task reads to some models as a brand-new request, which would make
+ * it abandon the work in flight. The wrapper states which one it is: keep going,
+ * apply this to the task already running.
+ */
+export function wrapInterjection(note: string): string {
+  return [
+    '[Supplement to the task already in progress: keep going with the current plan and apply this to the work in flight. Do not restart the task, and do not treat this as a new request.]',
+    `User supplement: ${note}`,
+  ].join('\n')
+}
+
 /** A truncated stream can hand back half a JSON object; providers re-parse it. */
 function isParsableArguments(value: string): boolean {
   if (value.trim() === '') return true
