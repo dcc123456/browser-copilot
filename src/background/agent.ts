@@ -180,6 +180,7 @@ import {
   loadGenerationGoal,
   loadConfirmedWorkflowName,
 } from '../lib/workflow/generation-goal-storage'
+import { failedBlockIdsOf } from '../lib/workflow/generation-coverage'
 import { findWorkflowOperators } from '../lib/workflow/operator-discovery'
 import { evaluateJsPermission } from '../lib/workflow/capability-gap'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
@@ -4454,13 +4455,19 @@ export async function executeTool(
         // NATIVE-FIRST JS GATE: javascript-code may run only after a
         // documented capability gap or a justification. The unified gate
         // (evaluateJsPermission) accepts either shape; when a native operator
-        // covers the intent the call is rejected and points at native blocks.
+        // covers the intent the call is rejected and points at native blocks —
+        // unless this conversation's coverage record shows that operator ran
+        // and failed on the page, which is the evidence that lifts the refusal.
         if (blockIdFromOperatorName(name) === 'javascript-code') {
           const stepIntent =
             typeof args['description'] === 'string'
               ? (args['description'] as string)
               : establishedGoal.goalSpec.summary
-          const permission = evaluateJsPermission({ stepIntent, args })
+          const permission = evaluateJsPermission({
+            stepIntent,
+            args,
+            nativeAttemptFailedBlockIds: failedBlockIdsOf(ctx.conversationId),
+          })
           if (!permission.allowed) {
             return JSON.stringify({
               error: permission.error,

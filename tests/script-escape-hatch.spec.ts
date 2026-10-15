@@ -32,6 +32,7 @@ import {
   runOperatorTool,
 } from '../src/background/operator-tool-handler'
 import { runOperatorToolWithExecution } from '../src/background/operator-tool-run'
+import { forgetCoverage } from '../src/lib/workflow/generation-coverage'
 import type { BlockExecutor } from '../src/background/workflow-engine/executors'
 import {
   MIN_SCRIPT_JUSTIFICATION_CHARS,
@@ -202,6 +203,86 @@ describe('the escape hatch is gated at the call site', () => {
       conversationId: 'esc6',
     })
     expect(accepted.ok).toBe(true)
+  })
+})
+
+/**
+ * The refusal is lifted by what the page did, not by what the model claims:
+ * `event-click` really ran, the page refused it, and the coverage record still
+ * holds that failure. Only then may the same intent be written as a script —
+ * and a healthy session (where the click works) keeps the refusal, because a
+ * successful retry clears the record.
+ */
+describe('a native operator that failed on the page unlocks its own intent', () => {
+  const SCRIPT =
+    "document.querySelector('#publish').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))"
+  const clickArgs = { code: SCRIPT, description: '点击发布按钮' }
+
+  /** Leave `event-click` in the conversation's unrecovered-failure set. */
+  async function failTheNativeClick(conversationId: string) {
+    forgetCoverage(conversationId)
+    const { executors } = okExecutors({
+      'event-click': async () => {
+        throw new Error('no element matched "#publish"')
+      },
+    })
+    const refused = await runOperatorToolWithExecution({
+      name: 'wf_op_event-click',
+      args: { selector: '#publish' },
+      conversationId,
+      signal,
+      executors,
+    })
+    expect(refused.ok).toBe(false)
+  }
+
+  it('lets the script run on the executing path', async () => {
+    await failTheNativeClick('ev-click')
+    const { calls, executors } = okExecutors()
+    const out = await runOperatorToolWithExecution({
+      name: 'wf_op_javascript-code',
+      args: clickArgs,
+      conversationId: 'ev-click',
+      signal,
+      executors,
+    })
+
+    expect(out.ok).toBe(true)
+    if (!out.ok) return
+    expect(calls.map((call) => call.blockId)).toEqual(['javascript-code'])
+    // The reason names the operator that failed, so the audit trail is the
+    // page's own result rather than a sentence the model wrote.
+    expect(out.scriptJustification).toContain('event-click failed in this session')
+    const node = actionNodesOf(getDraftSnapshot('ev-click')!).at(-1)!
+    // The model's description still wins on the card (the existing precedence
+    // rule); the evidence travels in the tool result, not over the description.
+    expect(node.data.description).toBe('点击发布按钮')
+  })
+
+  it('lets the script run on the non-executing recording path', async () => {
+    await failTheNativeClick('ev-record')
+    const accepted = await runOperatorTool({
+      name: 'wf_op_javascript-code',
+      args: clickArgs,
+      conversationId: 'ev-record',
+    })
+    expect(accepted.ok).toBe(true)
+  })
+
+  it('refuses again once the native operator works', async () => {
+    forgetCoverage('ev-ok')
+    const { executors } = okExecutors()
+    const clicked = await runOperatorToolWithExecution({
+      name: 'wf_op_event-click',
+      args: { selector: '#publish' },
+      conversationId: 'ev-ok',
+      signal,
+      executors,
+    })
+    expect(clicked.ok).toBe(true)
+
+    const { out } = await run('ev-ok', 'wf_op_javascript-code', clickArgs)
+    expect(out.ok).toBe(false)
   })
 })
 

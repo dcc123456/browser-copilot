@@ -43,7 +43,11 @@ import {
   JAVASCRIPT_BLOCK_ID,
 } from '../lib/workflow/operator-tools'
 import { evaluateJsPermission } from '../lib/workflow/capability-gap'
-import { markOperatorFailure, markOperatorRecovery } from '../lib/workflow/generation-coverage'
+import {
+  failedBlockIdsOf,
+  markOperatorFailure,
+  markOperatorRecovery,
+} from '../lib/workflow/generation-coverage'
 import { operatorAuditCall } from '../lib/workflow/operator-history'
 import { resolveNodeGoalContract } from '../lib/workflow/node-goal-instantiation'
 import { draftGoalGapNotice } from '../lib/workflow/trial-run'
@@ -355,12 +359,18 @@ function rewriteForRecording(
   // The escape hatch is gated before anything else happens — no page touch, no
   // draft write, no partial node. The UNIFIED gate accepts either a documented
   // capabilityGap or a justification, so a valid gap can no longer be refused
-  // by the stricter single-argument check.
+  // by the stricter single-argument check. It also reads this conversation's
+  // coverage record: a native operator that really ran and failed here is the
+  // evidence that lifts the native-first refusal for a same-intent script.
   let justification: string | null = null
   if (blockId === JAVASCRIPT_BLOCK_ID) {
     const stepIntent =
       typeof args['description'] === 'string' ? (args['description'] as string) : ''
-    const permission = evaluateJsPermission({ stepIntent, args })
+    const permission = evaluateJsPermission({
+      stepIntent,
+      args,
+      nativeAttemptFailedBlockIds: failedBlockIdsOf(conversationId),
+    })
     if (!permission.allowed) return { ok: false, error: permission.error }
     justification = permission.justification
   }

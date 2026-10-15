@@ -179,3 +179,72 @@ describe('native intent keywords are word-bounded', () => {
     if (!result.allowed) expect(result.nativeBlockIds).toContain('forms')
   })
 })
+
+/**
+ * The native-first refusal is lifted by what the page did, not by what the
+ * model says: `generation-coverage` records an operator that really executed and
+ * failed without a later success, and that is the proof the rung is insufficient.
+ * Without the record the refusal stands exactly as before.
+ */
+describe('a recorded native failure unlocks the same intent', () => {
+  const script = {
+    code: "target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))",
+  }
+
+  it('allows a click-worded script once event-click ran and failed this session', () => {
+    const result = evaluateJsPermission({
+      stepIntent: '点击发布按钮',
+      args: script,
+      nativeAttemptFailedBlockIds: ['event-click'],
+    })
+    expect(result.allowed).toBe(true)
+    if (result.allowed) {
+      // The evidence names the operator, so the reason on the node is auditable.
+      expect(result.justification).toContain('event-click')
+      expect(result.justification).toContain('sanctioned capability gap')
+    }
+  })
+
+  it('takes the tried operators from the coverage record, not from the caller', () => {
+    const decision = evaluateCapabilityGap({
+      stepIntent: '点击发布按钮',
+      nativeAttemptFailedBlockIds: ['event-click'],
+    })
+    expect(decision.allowed).toBe(true)
+    if (decision.allowed) expect(decision.capabilityGap.triedOperators).toEqual(['event-click'])
+  })
+
+  it('does not unlock a different intent from the same failure', () => {
+    // A failed click says nothing about `forms`, so the fill intent stays refused.
+    const result = evaluateJsPermission({
+      stepIntent: '填写邮箱',
+      args: script,
+      nativeAttemptFailedBlockIds: ['event-click'],
+    })
+    expect(result.allowed).toBe(false)
+    if (!result.allowed) expect(result.nativeBlockIds).toEqual(['forms'])
+  })
+
+  it('stays refused when the native operator has no unrecovered failure', () => {
+    // A successful retry clears the id from the coverage set, and no evidence is
+    // not evidence — this is the pre-fix behavior, kept on purpose.
+    const result = evaluateJsPermission({
+      stepIntent: '点击发布按钮',
+      args: script,
+      nativeAttemptFailedBlockIds: ['get-text'],
+    })
+    expect(result.allowed).toBe(false)
+    if (!result.allowed) expect(result.nativeBlockIds).toEqual(['event-click'])
+  })
+
+  it('names the way out of the refusal', () => {
+    // The old text said only "use the native operator", which left a model that
+    // had already tried and lost no move but to give up.
+    const result = evaluateJsPermission({ stepIntent: '点击发布按钮', args: script })
+    expect(result.allowed).toBe(false)
+    if (!result.allowed) {
+      expect(result.error).toContain('event-click')
+      expect(result.error).toContain('unlocks this call')
+    }
+  })
+})

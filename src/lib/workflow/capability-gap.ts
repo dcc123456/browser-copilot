@@ -12,6 +12,14 @@
  * operator produces passes without an argument, because asking the model to
  * re-derive a standing policy each time only produced refused calls.
  *
+ * A native-first refusal is also lifted by evidence rather than prose: when the
+ * caller reports ({@link NativeAttemptEvidence}) that the native operator
+ * for that very intent ran in this generation session and the page refused it,
+ * the rung has been proven insufficient by the browser itself, so the gate
+ * synthesizes the gap record instead of refusing forever. The evidence comes
+ * from `generation-coverage`, is in-memory, and is absent after a service
+ * worker eviction — which simply restores the plain refusal.
+ *
  * This module owns the UNIFIED JS gate: a call carrying a valid documented
  * `gap` (or an equivalent `justification`) passes regardless of which of the
  * two argument shapes the model used, so the two cannot disagree. Earlier
@@ -78,6 +86,101 @@ export interface CapabilityGapRecord {
   triedOperators: string[]
   whyInsufficient: string
   expectedResult: string
+}
+
+/**
+ * What the caller knows about native attempts in this generation session.
+ *
+ * Optional by design: every call site that cannot see execution results simply
+ * keeps today's behavior, so the evidence never becomes a required argument the
+ * model has to fake.
+ */
+export interface NativeAttemptEvidence {
+  /**
+   * Block ids whose operator really ran and failed without a successful retry
+   * — `failedBlockIdsOf(conversationId)` from `generation-coverage`. A native
+   * intent is refused whatever the caller claims when this is absent or empty.
+   */
+  nativeAttemptFailedBlockIds?: readonly string[]
+}
+
+/** The native rung an intent maps to, with the operators that exist for it. */
+interface NativeRung {
+  label: string
+  blockIds: string[]
+}
+
+/**
+ * The one scan over {@link NATIVE_INTENT_MAP}. Both gates used to run their own
+ * copy, which is how the two could disagree; an intent keeps its native label
+ * even when the generation registry currently hides the operator, so the
+ * refusal still names what the caller should look for.
+ */
+function nativeRungFor(stepIntent: string): NativeRung | undefined {
+  const entry = NATIVE_INTENT_MAP.find((native) => native.test.test(stepIntent))
+  if (!entry) return undefined
+  const available = entry.nativeBlockIds.filter((blockId) =>
+    generationOperators().some((op) => op.id === blockId),
+  )
+  return { label: entry.label, blockIds: available.length ? available : entry.nativeBlockIds }
+}
+
+/**
+ * The native block ids this session really ran and lost, for one intent. Non-empty
+ * means the browser, not the model, proved that rung insufficient.
+ *
+ * Approximate on purpose: the coverage set is keyed by block id and not by
+ * element, so any unrecovered failure of this intent's operator counts. The cost
+ * is visible rather than hidden — a failed step records no node and shows up as a
+ * coverage warning on the save card.
+ */
+function nativeAttemptsProvenInsufficient(
+  rung: NativeRung,
+  failedBlockIds: readonly string[] | undefined,
+): string[] {
+  if (!failedBlockIds || failedBlockIds.length === 0) return []
+  return rung.blockIds.filter((blockId) => failedBlockIds.includes(blockId))
+}
+
+/**
+ * The gap record the evidence writes onto the node. `triedOperators` names the
+ * operators the session actually ran and lost, so the canvas card stays auditable
+ * instead of repeating the model's claim.
+ */
+function gapFromFailedNativeAttempt(
+  rung: NativeRung,
+  triedOperators: readonly string[],
+): CapabilityGapRecord {
+  return {
+    missingCapability: `reach the element the native "${rung.label}" operator could not (${triedOperators.join(
+      ', ',
+    )} failed in this session)`,
+    triedOperators: [...triedOperators],
+    whyInsufficient:
+      'sanctioned capability gap: the native operator ran on this page and the page refused it (generation coverage record)',
+    expectedResult:
+      'the same effect as the native step, produced by a script because no declarative rung reaches it',
+  }
+}
+
+/**
+ * The native-first refusal, which has to name the way out. An earlier build said
+ * only "use the native operator", and a model that had already tried it and lost
+ * had no move left but to give up or pick a worse operator.
+ */
+function nativeRefusalReason(rung: NativeRung): string {
+  return (
+    `A native operator exists for "${rung.label}" (${rung.blockIds.join(', ')}); use it instead of ` +
+    'JavaScript. If it genuinely cannot reach this element (React synthetic events, a shadow root, a ' +
+    'mousedown-only component), run it anyway: once it executes and fails, that recorded failure ' +
+    'unlocks this call. / 声明式算子覆盖该意图时禁止改用 JS。若原生算子确实够不到该元素（合成事件、shadow DOM、' +
+    '只监听 mousedown 的组件），先真实执行它一次，执行失败的覆盖记录会自动解锁本次 javascript-code 调用。'
+  )
+}
+
+/** The narrative that rides onto the node's `justification`. */
+function justificationOf(gap: CapabilityGapRecord): string {
+  return `${gap.missingCapability}: ${gap.whyInsufficient} (tried: ${gap.triedOperators.join(', ')})`
 }
 
 /**
@@ -174,31 +277,34 @@ export function sanctionedJsGap(
  * A sanctioned gap passes without an argument. Otherwise `gap` must be
  * supplied for any non-native intent, and is validated for completeness; when
  * the request matches an intent that has a native operator, the call is
- * rejected regardless of the supplied gap.
+ * rejected regardless of the supplied gap — unless the caller's evidence shows
+ * that operator really ran and failed in this session.
  */
-export function evaluateCapabilityGap(input: {
-  /** The natural-language intent of the step. */
-  stepIntent: string
-  /** The node's script body, when the caller has it. */
-  scriptCode?: string
-  /** Optional documented gap. */
-  gap?: Partial<CapabilityGapRecord>
-}): CapabilityGapDecision {
+export function evaluateCapabilityGap(
+  input: {
+    /** The natural-language intent of the step. */
+    stepIntent: string
+    /** The node's script body, when the caller has it. */
+    scriptCode?: string
+    /** Optional documented gap. */
+    gap?: Partial<CapabilityGapRecord>
+  } & NativeAttemptEvidence,
+): CapabilityGapDecision {
   const sanctioned = sanctionedJsGap(input.stepIntent, input.scriptCode)
   if (sanctioned) return { allowed: true, capabilityGap: sanctioned }
 
-  const native = NATIVE_INTENT_MAP.find((entry) => entry.test.test(input.stepIntent))
-  if (native) {
-    // Only consider operators that actually exist in the generation registry.
-    const available = native.nativeBlockIds.filter((id) =>
-      generationOperators().some((op) => op.id === id),
-    )
-    return {
-      allowed: false,
-      reason: `A native operator exists for "${native.label}"; use it instead of JavaScript.`,
-      nativeBlockIds: available.length ? available : native.nativeBlockIds,
-      intentLabel: native.label,
+  const rung = nativeRungFor(input.stepIntent)
+  if (rung) {
+    const tried = nativeAttemptsProvenInsufficient(rung, input.nativeAttemptFailedBlockIds)
+    if (tried.length === 0) {
+      return {
+        allowed: false,
+        reason: nativeRefusalReason(rung),
+        nativeBlockIds: rung.blockIds,
+        intentLabel: rung.label,
+      }
     }
+    return { allowed: true, capabilityGap: gapFromFailedNativeAttempt(rung, tried) }
   }
 
   const record = validateGapRecord(input.gap)
@@ -232,7 +338,7 @@ function validateGapRecord(
 
 /** Whether a step intent has a native operator (no JS permitted). */
 export function hasNativeOperator(stepIntent: string): boolean {
-  return NATIVE_INTENT_MAP.some((entry) => entry.test.test(stepIntent))
+  return nativeRungFor(stepIntent) !== undefined
 }
 
 /** Unified JS permission result for one wf_op_javascript-code call. */
@@ -253,17 +359,20 @@ export type JsPermission =
  * Both describe the same fact — "no declarative operator can do this step" —
  * and rejecting one while accepting the other is what trapped the model in a
  * retry loop. Native-first still holds: an intent with a native operator is
- * refused regardless of the supplied gap — except for a sanctioned gap
- * ({@link sanctionedJsGap}), which the policy has already documented and which
- * is judged FIRST, so a description that merely also mentions a form field
- * cannot be refused as a "fill" intent.
+ * refused regardless of the supplied gap, and lifted only by a sanctioned gap
+ * ({@link sanctionedJsGap}, judged FIRST so a description that merely also
+ * mentions a form field cannot be refused as a "fill" intent) or by this
+ * session's record that the native operator ran and the page refused it
+ * ({@link NativeAttemptEvidence}).
  */
-export function evaluateJsPermission(input: {
-  /** Natural-language intent of the step. */
-  stepIntent: string
-  /** Full tool-call arguments (carries capabilityGap and/or justification). */
-  args: Record<string, unknown>
-}): JsPermission {
+export function evaluateJsPermission(
+  input: {
+    /** Natural-language intent of the step. */
+    stepIntent: string
+    /** Full tool-call arguments (carries capabilityGap and/or justification). */
+    args: Record<string, unknown>
+  } & NativeAttemptEvidence,
+): JsPermission {
   // The script body is the second half of the sanctioned-gap test: a node that
   // encodes pixels is producing an image artifact even when its description
   // reads like a click ("点击图片上传入口"), which is how image steps used to be
@@ -276,35 +385,27 @@ export function evaluateJsPermission(input: {
     // it is what lands on the canvas card.
     const gap =
       validateGapRecord(input.args['capabilityGap'] as Partial<CapabilityGapRecord>) ?? sanctioned
-    return {
-      allowed: true,
-      justification: `${gap.missingCapability}: ${gap.whyInsufficient} (tried: ${gap.triedOperators.join(', ')})`,
-    }
+    return { allowed: true, justification: justificationOf(gap) }
   }
 
-  const native = NATIVE_INTENT_MAP.find((entry) => entry.test.test(input.stepIntent))
-  if (native) {
-    const available = native.nativeBlockIds.filter((id) =>
-      generationOperators().some((op) => op.id === id),
-    )
-    return {
-      allowed: false,
-      error: `A native operator exists for "${native.label}"; use it instead of JavaScript.`,
-      nativeBlockIds: available.length ? available : native.nativeBlockIds,
-    }
-  }
-
+  // The native-rung decision lives in one place ({@link evaluateCapabilityGap}),
+  // so this gate and the four-field contract can never disagree about whether a
+  // click intent is refused — the disagreement that used to fail generations.
   const decision = evaluateCapabilityGap({
     stepIntent: input.stepIntent,
     ...(scriptCode ? { scriptCode } : {}),
     gap: input.args['capabilityGap'] as Parameters<typeof evaluateCapabilityGap>[0]['gap'],
+    ...(input.nativeAttemptFailedBlockIds
+      ? { nativeAttemptFailedBlockIds: input.nativeAttemptFailedBlockIds }
+      : {}),
   })
   if (decision.allowed) {
-    const gap = decision.capabilityGap
-    return {
-      allowed: true,
-      justification: `${gap.missingCapability}: ${gap.whyInsufficient} (tried: ${gap.triedOperators.join(', ')})`,
-    }
+    return { allowed: true, justification: justificationOf(decision.capabilityGap) }
+  }
+  // A native intent stays refused whatever the caller attaches: the ladder rung
+  // has to be tried first, and only its recorded failure opens the escape hatch.
+  if (decision.nativeBlockIds.length > 0) {
+    return { allowed: false, error: decision.reason, nativeBlockIds: decision.nativeBlockIds }
   }
 
   // Fall back to the justification shape before refusing: the model may have

@@ -346,7 +346,11 @@ export async function runOperatorTool({
   if (blockId === JAVASCRIPT_BLOCK_ID) {
     const stepIntent =
       typeof args['description'] === 'string' ? (args['description'] as string) : ''
-    const permission = evaluateJsPermission({ stepIntent, args })
+    const permission = evaluateJsPermission({
+      stepIntent,
+      args,
+      nativeAttemptFailedBlockIds: failedBlockIdsOf(conversationId),
+    })
     if (!permission.allowed) return { ok: false, error: permission.error }
   }
 
