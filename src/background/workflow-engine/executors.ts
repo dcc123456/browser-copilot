@@ -39,6 +39,8 @@ import { truncate } from '../../lib/extract'
 import { streamCompletion, type WireMessage } from '../../lib/llm'
 import type { TokenAttribution } from '../../lib/token-ledger'
 import { getSettings, listPasswords } from '../../lib/storage'
+import { getFeishuConfig } from '../../lib/task-store'
+import { sendWebhookText } from '../../lib/feishu'
 import { entryFields, findField } from '../../lib/types'
 import { OCR_SUPPORTED } from '../../lib/ocr-support'
 import { interpolate, EMPTY_INTERP_KEY } from '../../lib/workflow/interpolate'
@@ -1845,8 +1847,30 @@ const notification: BlockExecutor = async (data, ctx) => {
   } else {
     ctx.emit('info', '通知不可用')
   }
+  if (data['notifyFeishu'] === true) await sendFeishuNotice(title, body, ctx)
   ctx.emit('result', '已通知')
   return null
+}
+
+/**
+ * The Feishu leg of a notification node. Delivery problems are logged, never
+ * thrown: the desktop notification already went out, and a webhook outage must
+ * not turn a finished run into a failed one — the same rule `notifyOutcome`
+ * applies to scheduled tasks (`background/task-runner.ts`).
+ */
+async function sendFeishuNotice(title: string, body: string, ctx: WorkflowExecCtx): Promise<void> {
+  const { webhookUrl, webhookSecret } = await getFeishuConfig()
+  if (!webhookUrl) {
+    ctx.emit('error', '飞书通知未发送：设置里未配置飞书 Webhook')
+    return
+  }
+  try {
+    await sendWebhookText(webhookUrl, `${title}\n${body}`, webhookSecret)
+    ctx.emit('info', '已发送飞书通知')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    ctx.emit('error', `飞书通知发送失败：${message}`)
+  }
 }
 
 const javascriptCode: BlockExecutor = async (data, ctx) => {

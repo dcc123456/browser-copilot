@@ -24,6 +24,7 @@ import { sanitizeModelAnswer } from '../../src/lib/model-output'
 import { streamCompletion, type WireMessage } from '../../src/lib/llm'
 import { preprocessImage } from '../../src/lib/vision'
 import { interpolate } from '../../src/lib/workflow/interpolate'
+import { sendWebhookText } from '../../src/lib/feishu'
 import { conditionGroupsMatch } from '../../src/lib/workflow/condition-tree'
 import {
   applyAssignVariable,
@@ -1089,6 +1090,22 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     const title = interpolate(String(data['title'] ?? '通知'), ctx.variables, ctx.refData)
     const body = interpolate(String(data['message'] ?? ''), ctx.variables, ctx.refData)
     ctx.emit('info', `[通知] ${title}: ${body}`)
+    // Mirrors the extension executor: a checked 飞书 sends through the runner's
+    // own webhook config, and a delivery problem is logged, never thrown.
+    if (data['notifyFeishu'] === true) {
+      const { webhookUrl, webhookSecret } = config.feishu
+      if (!webhookUrl) {
+        ctx.emit('error', '飞书通知未发送：Runner 配置里未设置飞书 Webhook')
+      } else {
+        try {
+          await sendWebhookText(webhookUrl, `${title}\n${body}`, webhookSecret)
+          ctx.emit('info', '已发送飞书通知')
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          ctx.emit('error', `飞书通知发送失败：${message}`)
+        }
+      }
+    }
     ctx.emit('result', '已通知（服务端记录为日志）')
     return null
   }

@@ -1,17 +1,17 @@
 /**
  * EditNotification — React port of Automa's EditNotification.vue.
  *
- * Displays a desktop notification with a title, message, and optional icon /
- * image URLs. Permission gating (the Vue form hides the fields until the
- * "notifications" permission is granted) is handled by the extension runtime,
- * so this form always renders the fields.
+ * Displays a desktop notification with a title, message, optional icon / image
+ * URLs, and a "Send to Feishu" switch. Permission gating (the Vue form hides the
+ * fields until the "notifications" permission is granted) is handled by the
+ * extension runtime, so this form always renders the fields.
  *
  * @module workflow-editor/blocks/batchD/EditNotification
  */
 
 import type { EditFormProps } from '../EditForms'
-import { Field, TextArea, TextInput } from '../shared/Field'
-import { str } from '../shared/InteractionBase'
+import { Checkbox, Field, TextArea, TextInput } from '../shared/Field'
+import { bool, str } from '../shared/InteractionBase'
 
 export default function EditNotification({ data, onChange }: EditFormProps) {
   return (
@@ -37,6 +37,13 @@ export default function EditNotification({ data, onChange }: EditFormProps) {
           onChange={(v) => onChange({ message: v })}
         />
       </Field>
+      {/* Uses the Feishu webhook from Settings; a delivery failure is logged as a
+          warning and the step still counts as done (same rule as scheduled tasks). */}
+      <Checkbox
+        checked={bool(data, 'notifyFeishu')}
+        label="Send to Feishu"
+        onChange={(v) => onChange({ notifyFeishu: v })}
+      />
       <Field label="Icon URL (optional)">
         <TextInput
           value={str(data, 'iconUrl')}

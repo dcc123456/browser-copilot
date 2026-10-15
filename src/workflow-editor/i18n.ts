@@ -563,6 +563,7 @@ const BLOCK_FORM_STRINGS = {
     Clipboard: '剪贴板',
     'Copy the selected text on page': '复制页面上选中的文本',
     Notification: '通知',
+    'Send to Feishu': '发送到飞书',
     'Icon URL (optional)': '图标地址（可选）',
     'Image URL (optional)': '图片地址（可选）',
     // — conditions / control flow —

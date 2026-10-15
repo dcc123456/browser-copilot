@@ -58,12 +58,13 @@ function makeCtx(variables: Record<string, unknown> = {}): WorkflowExecCtx & {
   }
 }
 
-function makeDeps(driver: RunDriver) {
+function makeDeps(driver: RunDriver, feishu?: { webhookUrl: string; webhookSecret: string }) {
   return {
     driver,
     config: {
       dataDir: join(tmpdir(), 'bc-exec-test'),
       browser: { mode: 'local', headless: true, maxConcurrent: 1, cdpEndpoint: '' },
+      feishu: feishu ?? { webhookUrl: '', webhookSecret: '' },
     } as unknown as RunnerConfig,
     artifactsDir: join(tmpdir(), 'bc-exec-artifacts'),
     signal: new AbortController().signal,
