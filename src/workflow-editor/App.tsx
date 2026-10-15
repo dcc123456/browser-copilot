@@ -247,9 +247,9 @@ export default function EditorApp() {
     if (loadedRef.current) setDirty(true)
   }, [nodes, edges, meta])
 
-  // Track Space-key state for drag-mode toggle:
-  //   - default: left-drag pans the canvas (React Flow default)
-  //   - hold Space: left-drag rubber-bands a selection box
+  // Track Space-key state purely for the cursor affordance: holding Space puts
+  // the canvas in box-select mode (see `selectionKeyCode` on the flow), so the
+  // pane must stop looking grabbable.
   // Space pressed inside a text input must NOT enter pan-mode (typing a space).
   const [spaceDown, setSpaceDown] = useState(false)
   useEffect(() => {
@@ -285,7 +285,7 @@ export default function EditorApp() {
 
   const onNodesChange = useCallback((changes: NodeChange<FlowNode>[]) => {
     // Selection itself lives on the nodes (`n.selected`, see selectedIds) —
-    // box-select / Ctrl+click / delete-key remove changes all flow through
+    // box-select / modifier+click / delete-key remove changes all flow through
     // applyNodeChanges.
     setNodes((nds) => applyNodeChanges<FlowNode>(changes, nds))
   }, [])
@@ -747,7 +747,7 @@ export default function EditorApp() {
   )
   const settingsBlock = settingsNode?.data.block ?? null
 
-  // Every currently selected node id (box-select / Ctrl+click / shift-range).
+  // Every currently selected node id (box-select / modifier+click / shift-range).
   // Drives edge highlighting for the WHOLE selection — `selectedId` alone only
   // ever tracks the last node picked.
   const selectedIds = useMemo(
@@ -907,19 +907,21 @@ export default function EditorApp() {
             }}
             fitView
             deleteKeyCode={['Delete', 'Backspace']}
-            multiSelectionKeyCode="Control"
-            // Default: LEFT-drag on empty canvas PANS the canvas (React Flow
-            // default). Hold Space to switch the same gesture into a
-            // rubber-band selection box — every node the box touches (Partial)
-            // becomes selected; selected nodes then move/delete as a group
-            // (drag one selected node moves all; Delete/Backspace removes
-            // them together with their edges). Wheel zoom is unchanged.
-            // React Flow only honours selectionOnDrag while panOnDrag !== true,
-            // and its own Space-pan-activation forces panOnDrag back to true, so
-            // holding Space must drop the left button from panOnDrag and
-            // panActivationKeyCode has to be disabled outright.
-            selectionOnDrag={spaceDown}
-            panOnDrag={spaceDown ? [1, 2] : true}
+            // Additive pick: React Flow's own default is Meta on macOS and
+            // Control elsewhere, and a hardcoded "Control" is unusable on macOS
+            // (Ctrl+click is the OS context menu, so no click ever reaches the
+            // node). Accept both so one prop works in every host.
+            multiSelectionKeyCode={['Meta', 'Control']}
+            // Space + left-drag rubber-bands a selection box; a plain left-drag
+            // pans the canvas. React Flow only honours `selectionOnDrag` when the
+            // drag starts on empty canvas, which silently turns a box that begins
+            // over a node into a group MOVE. Driving the built-in selection key
+            // instead lets the rubber band start anywhere (the pane drops panning
+            // while the key is held), and `panActivationKeyCode` is off so Space
+            // never means pan. Shift stays accepted — it is Automa's own box
+            // gesture. The marquee then behaves like Automa's: select the group,
+            // release the key, drag one node to move them all.
+            selectionKeyCode={['Space', 'Shift']}
             panActivationKeyCode={null}
             selectionMode={SelectionMode.Partial}
             defaultEdgeOptions={{
