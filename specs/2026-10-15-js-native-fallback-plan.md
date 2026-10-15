@@ -47,7 +47,7 @@
 - [x] G3 无 `ai-takeover.ts` / `workflow-engine/**` 改动 ⇒ `bench:debug` 不适用；无新 `executeScript({func})` 内联函数体 ⇒ `verify:injected` 不适用。
 - [ ] G4 真实浏览器证据（验收 ⑤）：BLOCKED 直到 dcc 跑 `pnpm selftest`。判定口径：生成含"原生 click 点不动"的步骤时，观察 `wf_op_event-click` 先真实失败、随后 `wf_op_javascript-code` 被放行且工具结果带 `sanctioned capability gap` 的 `scriptJustification`；保存卡上应同时出现"生成覆盖缺口"警告（设计 §6 的代价显示）。
 - [x] G5 死代码 / 命名 / 注释：无新增未调用导出（`NativeAttemptEvidence` 被两个入口消费，其余为内部函数）；注释写"为什么"（证据来源、近似性、降级等于今天）。
-- [ ] G6 提交英文 Conventional Commits；暂存区无 `tmp/` 产物。
+- [x] G6 提交英文 Conventional Commits；暂存区无 `tmp/` 产物。（`fab3865`）
 
 ## 5. 回滚
 
