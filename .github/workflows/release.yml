@@ -101,6 +101,22 @@ jobs:
           files: ${{ steps.artifact.outputs.path }}
           fail-on-unmatched-files: true
 
+      # The bundled action does not reliably refresh the body when it updates
+      # a release that already exists (v0.6.5's re-pointed tag kept the
+      # previous notes), so write the curated file again afterwards. The
+      # delete-asset is one-shot cleanup: builds from before the .xpi switch
+      # left a legacy firefox .zip behind, and the command is a no-op from
+      # v0.6.6 on.
+      - name: Sync release body
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          gh release edit "${GITHUB_REF_NAME}" --notes-file "release-notes/${version}.md"
+          gh release delete-asset "${GITHUB_REF_NAME}" \
+            "browser-copilot-${version}-firefox.zip" --yes || true
+
       - name: Attach to existing release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
