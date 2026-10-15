@@ -105,6 +105,14 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // Unmount while `document` still exists: the save-flash effect leaves a 60ms
+  // scroll timer behind, and one left pending fires into the torn-down jsdom
+  // as an unhandled error when the file's environment goes away.
+  for (const root of roots.splice(0)) {
+    act(() => {
+      root.unmount()
+    })
+  }
   vi.unstubAllGlobals()
   document.body.innerHTML = ''
 })
@@ -115,10 +123,13 @@ const flush = async (): Promise<void> => {
   })
 }
 
+const roots: Root[] = []
+
 const render = async (): Promise<{ container: HTMLElement; root: Root }> => {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
+  roots.push(root)
   await act(async () => {
     root.render(
       createElement(I18nProvider, { value: { locale: 'en' as const, t } }, createElement(TasksTab)),

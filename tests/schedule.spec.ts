@@ -201,9 +201,12 @@ describe('coerceOnceAt', () => {
     expect(local).toBeDefined()
     expect(utc).toBeDefined()
     // The two differ by exactly this machine's offset at that instant, which is
-    // why the tool tells the model never to send a trailing "Z".
-    const offsetMs = -new Date('2026-11-02T20:30:00Z').getTimezoneOffset() * 60_000
-    expect(utc! - local!).toBe(offsetMs)
+    // why the tool tells the model never to send a trailing "Z". Compare via
+    // two independent `Date` parses: a negated zero offset (running under UTC,
+    // as CI does) would otherwise compare -0 against 0 and fail on Object.is.
+    const naive = new Date('2026-11-02T20:30').getTime()
+    const absolute = new Date('2026-11-02T20:30:00Z').getTime()
+    expect(utc! - local!).toBe(absolute - naive)
   })
 
   it('rejects garbage rather than guessing an instant', () => {
