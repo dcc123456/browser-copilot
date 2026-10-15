@@ -1,31 +1,46 @@
 import { defineManifest } from '@crxjs/vite-plugin'
 import type { ConfigEnv } from 'vite'
-
-/** Release version — single source for both variant manifests. */
-const VERSION = '0.6.4'
+import {
+  AUTHOR,
+  COMMON_PERMISSIONS,
+  CONTENT_SCRIPT_MATCHES,
+  CONTENT_SCRIPT_SOURCES,
+  DESCRIPTION,
+  HOMEPAGE_URL,
+  ICONS,
+  NAME,
+  SHORT_NAME,
+  VERSION,
+  WEB_ACCESSIBLE_RESOURCES,
+} from './scripts/manifest-shared.ts'
 
 /** Flat typing of the crxjs manifest parameter (some fields below are wider than the typed union allows). */
 type ManifestParam = Parameters<typeof defineManifest>[0]
 
 /**
- * MV3 manifest.
+ * Chrome MV3 manifest. Fields both releases must agree on (name, icons, content
+ * scripts, common permissions, …) live in `scripts/manifest-shared.ts`; the
+ * Firefox assembler is `scripts/build-firefox.ts`. The deltas between the two —
+ * background.service_worker vs background.scripts, side_panel vs
+ * sidebar_action, the Chrome-only permissions below — are visible in the two
+ * assemblers, and tests/firefox-manifest.spec.ts guards the shared halves.
  *
- * Permission notes (each one is load-bearing):
- * - `scripting` + broad `host_permissions`: reading the current page works by
- *   injecting a one-off read-only script into the tab the user is looking at.
- *   There is no way to read page text without it.
- * - `tabs`: needed to learn the active tab's URL and title, both to decide
- *   whether it can be read at all and to name it in the approval prompt.
- * - `sidePanel`: the chat lives in a side panel so it survives focus changes and
- *   navigation, unlike a popup, which closes the moment the user clicks the page.
- * - `alarms`: powers scheduled tasks (daily/weekday/interval). An alarm is the
- *   only MV3 mechanism that can wake an idle service worker at a set time, which
- *   a daily 10:00 report fundamentally requires.
+ * Chrome-only permissions (each one load-bearing):
+ * - `sidePanel`: the chat lives in a side panel so it survives focus changes
+ *   and navigation, unlike a popup, which closes the moment the user clicks the
+ *   page. Firefox implements no sidePanel API; its build uses sidebar_action.
+ * - `offscreen`: the clipboard operator and the OCR worker need a DOM that
+ *   outlives the service worker. Firefox has no offscreen documents; its build
+ *   drives the clipboard from the event page directly.
+ * - `debugger`: the CDP channel behind trusted input, closed-shadow reads,
+ *   CSP-bypassing eval and the console/network monitor. Firefox does not
+ *   implement the debugger API; those features degrade on Firefox (see
+ *   specs/2026-10-15-firefox-support-design.md).
  *
  * One static content script IS declared (see `content_scripts` below): it only
  * parks the in-page kernel on each frame and is inert until an op arrives, so
  * the extension still reads and acts on a page only when the user asks it to.
- * (The scheduler and Feishu bot run entirely in the service worker and inject
+ * (The scheduler and Feishu bot run entirely in the background and inject
  * nothing into pages unless a task explicitly does.)
  *
  * `icons` and `action.default_icon` are both required. Without them Chrome shows
@@ -50,41 +65,17 @@ export default defineManifest(((env: ConfigEnv) => {
   const ocr = env.mode !== 'no-ocr'
   return {
     manifest_version: 3,
-    name: 'Browser Copilot',
-    short_name: 'BCopilot',
+    name: NAME,
+    short_name: SHORT_NAME,
     version: VERSION,
     // Marks the lite build in chrome://extensions (the numeric `version` stays
     // identical so both variants track the same release).
     ...(ocr ? {} : { version_name: `${VERSION} (no OCR)` }),
-    description:
-      'A side-panel assistant that can read and act on the page you are looking at. Works with any OpenAI-compatible model.',
-    author: 'Browser Copilot',
-    homepage_url: 'https://github.com/dcc123456/browser-copilot',
+    description: DESCRIPTION,
+    author: AUTHOR,
+    homepage_url: HOMEPAGE_URL,
     minimum_chrome_version: '116',
-    permissions: [
-      'storage',
-      // `chrome.storage.local` hard-rejects a write past QUOTA_BYTES (10 MB
-      // since Chrome 114) with "Resource::kQuotaBytes quota exceeded" — a
-      // string that names an internal constant and tells the user nothing.
-      // With a storage directory configured, user content lives in files and
-      // chrome.storage.local only holds extension config plus the narrow
-      // outbox/read-cache fallbacks (see lib/fs-store.ts); without one it
-      // holds everything. Either way ordinary use can reach the cap, where it
-      // surfaces as a failed save. This permission lifts the cap; without it
-      // that failure is a hard write error, not a degraded experience.
-      'unlimitedStorage',
-      'tabs',
-      'scripting',
-      'sidePanel',
-      'alarms',
-      'offscreen',
-      'contextMenus',
-      'webNavigation',
-      'cookies',
-      'downloads',
-      'clipboardRead',
-      'debugger',
-    ],
+    permissions: [...COMMON_PERMISSIONS, 'sidePanel', 'offscreen', 'debugger'],
     // '<all_urls>' is load-bearing for screenshots: chrome.tabs.captureVisibleTab
     // hard-requires it (or activeTab) and rejects equivalent-looking specific
     // patterns — 'http://*/*' + 'https://*/*' alone fail with "Either the
@@ -111,12 +102,7 @@ export default defineManifest(((env: ConfigEnv) => {
         ? "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
         : "script-src 'self'; object-src 'self'",
     },
-    icons: {
-      16: 'icons/icon-16.png',
-      32: 'icons/icon-32.png',
-      48: 'icons/icon-48.png',
-      128: 'icons/icon-128.png',
-    },
+    icons: ICONS,
     background: {
       service_worker: 'src/background/index.ts',
       type: 'module',
@@ -125,40 +111,19 @@ export default defineManifest(((env: ConfigEnv) => {
     // driver re-serialized the whole kernel into every op; now this script parks
     // it on each frame at document_idle and ops ship only their arguments. It
     // stays passive until the user triggers an action, so the privacy posture of
-    // the on-demand injection it replaces is unchanged.
-    content_scripts: [
-      {
-        matches: ['http://*/*', 'https://*/*'],
-        js: ['src/inpage/content-kernel.ts'],
-        all_frames: true,
-        run_at: 'document_idle',
-      },
-      {
-        // Floating "restore" button for the minimized plugin. Renders nothing
-        // unless the service worker reports this window minimized (see
-        // src/inpage/floating-button.ts). Main frame only: one button per page.
-        matches: ['http://*/*', 'https://*/*'],
-        js: ['src/inpage/floating-button.ts'],
-        all_frames: false,
-        run_at: 'document_idle',
-      },
-    ],
-    // The floating button loads the extension icon inside web pages; without
-    // this declaration Chrome blocks the chrome-extension:// fetch.
-    web_accessible_resources: [
-      {
-        resources: ['icons/icon-48.png'],
-        matches: ['http://*/*', 'https://*/*'],
-      },
-    ],
+    // the on-demand injection it replaces is unchanged. The second entry is the
+    // floating "restore" button for the minimized plugin (main frame only: one
+    // button per page, see src/inpage/floating-button.ts).
+    content_scripts: CONTENT_SCRIPT_SOURCES.map((script) => ({
+      matches: CONTENT_SCRIPT_MATCHES,
+      js: [script.source],
+      all_frames: script.all_frames,
+      run_at: script.run_at,
+    })),
+    web_accessible_resources: WEB_ACCESSIBLE_RESOURCES,
     action: {
       default_title: 'Open Browser Copilot',
-      default_icon: {
-        16: 'icons/icon-16.png',
-        32: 'icons/icon-32.png',
-        48: 'icons/icon-48.png',
-        128: 'icons/icon-128.png',
-      },
+      default_icon: ICONS,
     },
     side_panel: {
       default_path: 'src/sidepanel/index.html',

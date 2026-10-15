@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import type { ConfigEnv } from 'vite'
+import chromeManifestFactory from '../manifest.config'
 import {
   clearStorageDirectory,
   createFileArea,
@@ -633,15 +633,15 @@ describe('chrome.storage.local quota', () => {
 
   it('declares unlimitedStorage in the manifest', () => {
     // Dropping this permission silently reinstates the 10 MB cap and, with it,
-    // a save that fails for a reason the user cannot act on.
-    const source = readFileSync(
-      fileURLToPath(new URL('../manifest.config.ts', import.meta.url)),
-      'utf8',
-    )
-    const permissions = /permissions:\s*\[([\s\S]*?)\]/.exec(source)?.[1] ?? ''
-    // Comments are stripped so only a real entry satisfies the assertion.
-    const entries = permissions.replace(/\/\/.*$/gm, '')
-    expect(entries).toContain("'unlimitedStorage'")
+    // a save that fails for a reason the user cannot act on. Asserted on the
+    // resolved manifest, so the check survives the permission moving into a
+    // shared spread (COMMON_PERMISSIONS) instead of an inline literal.
+    const manifest = (
+      chromeManifestFactory as unknown as (env: ConfigEnv) => {
+        permissions?: string[]
+      }
+    )({ command: 'build', mode: 'build' })
+    expect(manifest.permissions).toContain('unlimitedStorage')
   })
 })
 

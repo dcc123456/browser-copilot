@@ -762,8 +762,33 @@ installTokenAccounting()
  * synchronous portion of the handler. Any `await` before it yields to the event
  * loop, after which Chrome treats the gesture as consumed and `open()` rejects
  * with "may only be called in response to a user gesture".
+ *
+ * ## Firefox has no sidePanel
+ *
+ * Firefox implements no `sidePanel` API; its panel surface is `sidebar_action`,
+ * opened via `sidebarAction.open()` — which likewise only works inside a
+ * user-action handler (the toolbar click is one). Firefox also has no
+ * `setPanelBehavior`, so the guard around it is load-bearing.
  */
-void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {})
+/** Chrome's sidePanel API, typed locally: Firefox reaches the same panel through sidebarAction instead. */
+interface SidePanelApi {
+  open(options: Parameters<typeof chrome.sidePanel.open>[0]): Promise<void>
+  setPanelBehavior(options: { openPanelOnActionClick: boolean }): Promise<void>
+}
+
+const sidePanelApi = (chrome as unknown as { sidePanel?: SidePanelApi }).sidePanel
+
+function openSidePanel(target: Parameters<typeof chrome.sidePanel.open>[0]): Promise<void> {
+  if (sidePanelApi?.open) return sidePanelApi.open(target)
+  const sidebarAction = (chrome as unknown as { sidebarAction?: { open(): Promise<void> } })
+    .sidebarAction
+  if (sidebarAction?.open) return sidebarAction.open()
+  return Promise.resolve()
+}
+
+if (sidePanelApi?.setPanelBehavior) {
+  void sidePanelApi.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {})
+}
 
 chrome.action.onClicked.addListener((tab) => {
   // Opening the panel from the toolbar also retires the minimized state and
@@ -775,9 +800,9 @@ chrome.action.onClicked.addListener((tab) => {
   // Nothing may be awaited before `open()`; see the note above.
   const opened =
     tab.windowId !== undefined
-      ? chrome.sidePanel.open({ windowId: tab.windowId })
+      ? openSidePanel({ windowId: tab.windowId })
       : tab.id !== undefined
-        ? chrome.sidePanel.open({ tabId: tab.id })
+        ? openSidePanel({ tabId: tab.id })
         : Promise.resolve()
 
   // Surface a failure instead of hiding it: a silent catch here is what made an
@@ -932,8 +957,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // the desync we want to self-heal.
       const opened =
         sender?.tab?.id !== undefined
-          ? chrome.sidePanel.open({ tabId: sender.tab.id })
-          : chrome.sidePanel.open({ windowId })
+          ? openSidePanel({ tabId: sender.tab.id })
+          : openSidePanel({ windowId })
       void opened
         .then(() => {
           expandWindow(windowId)

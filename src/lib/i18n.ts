@@ -990,6 +990,7 @@ export interface Messages {
   settingsDownloadDirNone: string
   settingsDownloadDirDone: (params: { name: string }) => string
   settingsDownloadDirFailed: string
+  settingsDownloadDirUnsupported: string
   settingsDownloadDirDisconnect: string
   settingsDownloadAutoSave: string
 
@@ -2201,6 +2202,8 @@ const en: Messages = {
   settingsDownloadDirNone: 'No download folder configured.',
   settingsDownloadDirDone: ({ name }) => `Download folder set: ${name}.`,
   settingsDownloadDirFailed: 'Could not set the download folder.',
+  settingsDownloadDirUnsupported:
+    'This browser has no folder picker; downloads use its default download location.',
   settingsDownloadDirDisconnect: 'Disconnect',
   settingsDownloadAutoSave: 'Automatically save exports to this folder',
 
@@ -3390,6 +3393,7 @@ const zhCN: Messages = {
   settingsDownloadDirNone: '暂未配置下载目录。',
   settingsDownloadDirDone: ({ name }) => `下载目录已设置：${name}。`,
   settingsDownloadDirFailed: '无法设置下载目录。',
+  settingsDownloadDirUnsupported: '此浏览器没有文件夹选择器，文件将保存到浏览器默认下载位置。',
   settingsDownloadDirDisconnect: '断开',
   settingsDownloadAutoSave: '自动将导出内容保存到该文件夹',
 

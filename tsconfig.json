@@ -16,7 +16,8 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["chrome", "vite/client"]
+    "types": ["chrome", "vite/client"],
+    "allowImportingTsExtensions": true
   },
-  "include": ["src", "vite.config.ts", "manifest.config.ts"]
+  "include": ["src", "vite.config.ts", "manifest.config.ts", "scripts/build-firefox.ts"]
 }

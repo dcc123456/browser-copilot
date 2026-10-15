@@ -25,6 +25,9 @@ jobs:
       - run: pnpm lint
       - run: pnpm format:check
       - run: pnpm build
+      # The Firefox variant is a separate build path (event page + IIFE content
+      # scripts); the release job packages it too, so guard it here.
+      - run: pnpm build:firefox
       # Offline AI-debug success-rate gate: no browser, no model, no network.
       - run: pnpm bench:debug
 

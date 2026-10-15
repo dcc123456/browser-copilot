@@ -12,13 +12,14 @@
 /**
  * URL schemes and hosts where no extension content script may run.
  *
- * These are enforced by Chrome, not by policy here: injecting into them fails
- * regardless of the permissions granted, so the only useful thing this project
- * can do is detect them early and say so.
+ * These are enforced by the browser, not by policy here: injecting into them
+ * fails regardless of the permissions granted, so the only useful thing this
+ * project can do is detect them early and say so.
  */
 const BLOCKED_PREFIXES = [
   'chrome://',
   'chrome-extension://',
+  'moz-extension://',
   'edge://',
   'extension://',
   'about:',

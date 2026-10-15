@@ -1566,9 +1566,43 @@ interface ClipReply {
   error?: string
 }
 
+/**
+ * Firefox has no offscreen documents, but its background is a real event page
+ * with a DOM, so the clipboard is served directly there. `execCommand('copy')`
+ * covers writeText when it refuses (a hidden page is not `document.hasFocus()`).
+ */
+async function clipboardInEventPage(
+  message: { type: 'clip-get' } | { type: 'clip-set'; text: string },
+): Promise<string> {
+  if (message.type === 'clip-set') {
+    try {
+      await navigator.clipboard.writeText(message.text)
+    } catch {
+      const textarea = document.createElement('textarea')
+      textarea.value = message.text
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      const copied = document.execCommand('copy')
+      textarea.remove()
+      if (!copied) throw new DriverError('clipboard: write refused by the browser')
+    }
+    return ''
+  }
+  try {
+    return await navigator.clipboard.readText()
+  } catch (error) {
+    throw new DriverError(
+      `clipboard: ${error instanceof Error ? error.message : 'read refused by the browser'}`,
+    )
+  }
+}
+
 async function clipboardCall(
   message: { type: 'clip-get' } | { type: 'clip-set'; text: string },
 ): Promise<string> {
+  if (!chrome.offscreen) return clipboardInEventPage(message)
   await ensureOffscreen()
   const reply = await chrome.runtime.sendMessage(message)
   const result = reply as ClipReply | undefined

@@ -551,6 +551,12 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   }, [])
 
   const chooseDownloadDir = async (): Promise<void> => {
+    // Firefox has no File System Access API: say so plainly instead of letting
+    // the missing function surface as a generic TypeError → "could not set".
+    if (typeof window.showDirectoryPicker !== 'function') {
+      setDownloadNotice({ kind: 'error', text: t.settingsDownloadDirUnsupported })
+      return
+    }
     setDownloadBusy(true)
     setDownloadNotice(null)
     try {
