@@ -1,12 +1,14 @@
 name: Release
 
-# Builds the extension and attaches a loadable zip to every GitHub Release.
+# Builds the extension and attaches loadable packages to every GitHub Release.
 #
 # Trigger it either by publishing a release in the GitHub UI, or by pushing a
-# tag like v0.1.0 (the workflow will create the release itself). The zip has
-# manifest.json at its root, so users can download it, unzip, and "Load
-# unpacked" the folder. The version in the artifact comes from
-# package.json/manifest, which should match the release tag.
+# tag like v0.1.0 (the workflow will create the release itself). Every package
+# has manifest.json at its root: Chrome users unzip the .zip and "Load
+# unpacked" the folder, while Firefox 128+ ships as .xpi — the same archive
+# under the name Firefox's install-from-file flow expects. The version in the
+# artifact comes from package.json/manifest, which should match the release
+# tag.
 on:
   release:
     types: [published]
@@ -64,9 +66,10 @@ jobs:
         id: artifact
         run: |
           version=$(node -p "require('./package.json').version")
-          # Two release variants (see vite.config.ts / scripts/build-zip.mjs):
-          # -ocr (full, local OCR included) and -no-ocr (lite, smaller).
-          echo "path=releases/browser-copilot-${version}-*.zip" >> "$GITHUB_OUTPUT"
+          # Three release variants (see scripts/build-zip.mjs): the -ocr (full)
+          # and -no-ocr (lite) Chrome zips plus the -firefox .xpi. The extension
+          # is left open on purpose so both forms match.
+          echo "path=releases/browser-copilot-${version}-*" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       # Curated release notes live in release-notes/<version>.md (committed per

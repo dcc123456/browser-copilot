@@ -120,9 +120,10 @@ left, so the turn hung on a card the user never saw.
 
 The extension now builds for Firefox from the same sources. `pnpm build:firefox`
 assembles `dist-firefox/`, and `pnpm package` ships it as
-`browser-copilot-<version>-firefox.zip` next to the two Chrome builds. The
-floor is Firefox 128: the user-JavaScript rung needs
-`scripting.executeScript({ world: 'MAIN' })`, which landed there.
+`browser-copilot-<version>-firefox.xpi` next to the two Chrome builds — the
+extension-package form Firefox's install flows expect. The floor is Firefox
+128: the user-JavaScript rung needs `scripting.executeScript({ world: 'MAIN' })`,
+which landed there.
 
 - **Event page, not service worker.** Firefox MV3 runs `background.scripts`
   with `type: module`; content scripts are classic scripts, so each one is

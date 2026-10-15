@@ -1,29 +1,33 @@
 #!/usr/bin/env node
 /**
- * Packages a built extension variant into a loadable zip.
+ * Packages a built extension variant into a loadable archive.
  *
  * Usage: node scripts/build-zip.mjs <ocr|no-ocr|firefox>   (run `pnpm build` /
  * `pnpm build:no-ocr` / `pnpm build:firefox` first — see the `package` script,
- * which builds and zips ALL release variants in one go.)
+ * which builds and packages ALL release variants in one go.)
  *
  *   ocr     full build from dist/             → releases/browser-copilot-<version>-ocr.zip
  *   no-ocr  lite build from dist-no-ocr/      → releases/browser-copilot-<version>-no-ocr.zip
- *   firefox Firefox 128+ from dist-firefox/   → releases/browser-copilot-<version>-firefox.zip
+ *   firefox Firefox 128+ from dist-firefox/   → releases/browser-copilot-<version>-firefox.xpi
  *
- * The zip has the built files at its root (manifest.json, icons/, assets/…),
- * not under a dist/ folder, because Chrome's "Load unpacked", Firefox's
- * "Load Temporary Add-on" and the resulting releases all expect manifest.json
- * at the archive root. Source maps are pruned here as a belt-and-braces
- * measure; the build itself is already minified and map-free (see
- * vite.config.ts) to keep the download small.
+ * The Chrome variants stay `.zip` (they are loaded from an unpacked folder),
+ * while Firefox ships as `.xpi` — the same archive bytes under the extension
+ * name Firefox's install flows expect (install-from-file on Developer
+ * Edition / Nightly / ESR, and any future AMO submission).
+ *
+ * The archive has the built files at its root (manifest.json, icons/,
+ * assets/…), not under a dist/ folder, because every install flow expects
+ * manifest.json at the archive root. Source maps are pruned here as a
+ * belt-and-braces measure; the build itself is already minified and map-free
+ * (see vite.config.ts) to keep the download small.
  *
  * Loud failures guard the wiring:
  * - no-ocr and firefox must not ship the vendored tesseract/ assets (both
  *   builds strip them — strip-ocr-assets in vite.config.ts, rmSync in
  *   build-firefox.ts), so finding them here means a build flag broke.
  * - the firefox manifest must carry browser_specific_settings.gecko.id;
- *   without it the packaged zip would be a Chrome manifest mislabelled as
- *   the Firefox package.
+ *   without it the package would be a Chrome manifest mislabelled as the
+ *   Firefox one.
  *
  * No third-party archiver is required: this uses the system `zip` on macOS/Linux
  * and PowerShell's Compress-Archive on Windows.
@@ -76,11 +80,11 @@ if (variant === 'firefox') {
 
 const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
 const version = pkg.version
-const zipName = `browser-copilot-${version}-${variant}.zip`
-const zipPath = join(releasesDir, zipName)
+const extension = variant === 'firefox' ? 'xpi' : 'zip'
+const archivePath = join(releasesDir, `browser-copilot-${version}-${variant}.${extension}`)
 
 mkdirSync(releasesDir, { recursive: true })
-rmSync(zipPath, { force: true })
+rmSync(archivePath, { force: true })
 
 // Stage a clean copy of dist without source maps, so the zip never depends on
 // archiver-specific exclude flags.
@@ -118,13 +122,13 @@ if (process.platform === 'win32') {
     [
       '-NoProfile',
       '-Command',
-      `Compress-Archive -Path '${join(stage, '*')}' -DestinationPath '${zipPath}' -Force`,
+      `Compress-Archive -Path '${join(stage, '*')}' -DestinationPath '${archivePath}' -Force`,
     ],
     { stdio: 'inherit' },
   )
 } else {
-  execFileSync('zip', ['-X', '-q', '-r', zipPath, '.'], { cwd: stage, stdio: 'inherit' })
+  execFileSync('zip', ['-X', '-q', '-r', archivePath, '.'], { cwd: stage, stdio: 'inherit' })
 }
 
 rmSync(stage, { recursive: true, force: true })
-console.log(`Wrote ${zipPath}`)
+console.log(`Wrote ${archivePath}`)
