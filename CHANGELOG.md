@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+_To be released._
+
+## [0.6.5] - 2026-10-15
+
 ### Added — Where the tokens go
 
 Model spend was invisible: nothing told you what a chat turn, a generated
@@ -90,6 +94,99 @@ left, so the turn hung on a card the user never saw.
   the same line forever and grow the array until the isolate ran out of heap —
   and every skills and agents read funnels through it. An unmappable item is now
   skipped, and each item advances at least one line.
+- **A stopped full-auto turn used to poison the whole conversation.** Stop
+  mid-tool-round persists an assistant `tool_calls` turn with missing results,
+  a shape providers reject outright — and because the broken turn stays
+  stored, every later message failed with the same 500. The pairing is repaired
+  where request bodies are built (`toApiMessages`), so it holds for every host
+  (extension, Runner, unattended, delegation) and an already-poisoned
+  transcript heals on the next send.
+- **Transcript trimming no longer deletes user messages.** The byte budget
+  dropped whole turns from the oldest end regardless of role, so the earliest
+  things the user typed quietly disappeared. User turns are now the
+  transcript's spine: rounds (a `tool_calls` turn and its results) travel
+  together, every user turn is kept, and a spine over budget is persisted over
+  budget rather than trimmed further.
+- **The native-first JS gate reads real evidence.** A step worded as a click
+  whose native operator demonstrably ran and failed may use the JavaScript
+  escape hatch; without a recorded failure the refusal stands, and it now
+  states its own unlock condition.
+- **Editor and block fixes**: box-select begins over a node instead of panning
+  the canvas (Space pans); the `new-window` block actually re-points the run —
+  and its active tab — at the window it opened, instead of reporting success
+  while later steps kept driving the launching window.
+
+### Added — Firefox 128+ support (a third install package)
+
+The extension now builds for Firefox from the same sources. `pnpm build:firefox`
+assembles `dist-firefox/`, and `pnpm package` ships it as
+`browser-copilot-<version>-firefox.zip` next to the two Chrome builds. The
+floor is Firefox 128: the user-JavaScript rung needs
+`scripting.executeScript({ world: 'MAIN' })`, which landed there.
+
+- **Event page, not service worker.** Firefox MV3 runs `background.scripts`
+  with `type: module`; content scripts are classic scripts, so each one is
+  bundled as a self-contained IIFE instead of an ES module.
+- **No polyfill: `chrome` is aliased to `browser` at compile time** (esbuild
+  `define`), because Firefox's `chrome.*` is callback-only while `browser.*`
+  returns the promises this codebase already awaits. No call site changed,
+  and `typeof chrome` guards read true on both browsers.
+- **No `sidePanel`**: the toolbar click opens the Firefox **sidebar**
+  (`sidebar_action`), and the in-page floating button's expand action does the
+  same. **No `debugger` API**: AI takeover is Chrome-only. **No offscreen
+  documents**: local OCR cannot run, so the Firefox package is OCR-free by
+  construction, like the lite Chrome build.
+- Small deltas: clipboard reads on the event page fall back to
+  `navigator.clipboard` / `execCommand`, and `moz-extension://` pages are
+  refused by the page reader alongside the other privileged schemes.
+- **One shared manifest source**: `scripts/manifest-shared.ts` feeds both the
+  Chrome and Firefox assemblers, and a lockstep test
+  (`tests/firefox-manifest.spec.ts`) fails if the two drift.
+- `web-ext lint` reports 0 errors; the remaining warnings name exactly the
+  knowingly-unsupported APIs above. Design, build steps and the verification
+  record live in `specs/2026-10-15-firefox-support-design.md` / `-plan.md`.
+
+### Added — Mid-turn supplements
+
+Typing while the model acts is no longer Stop-then-continue — a path that
+silently lost the save-as-workflow card and left question cards pending on dead
+request ids. A turn now owns a **supplement queue**: a note sent while it runs
+is drained at the next round boundary (every tool call already paired with its
+result) and recorded as a real `role:'user'` turn. A turn that reaches its
+final answer with notes still queued keeps working inside the same task
+instead of finishing; notes it never read come back to the composer flagged
+rather than dropped. Question cards no longer stack (only the oldest confirm /
+ask_user / plan is rendered), Stop announces the interactions it dismissed so
+no card outlives its turn, and the generation popup gains a STOPPED state.
+
+### Added — A window of its own for conflicting scheduled runs
+
+Two alarms firing in the same minute both resolved to the newest plugin window
+and its one automation tab, so the runs took turns acting on the same page. A
+run now **leases a window before it works**: the shared plugin window when
+free, otherwise a cascade-positioned unfocused window of its own, closed when
+the run settles — and a FIFO queue with a nine-minute budget when every slot
+is taken, failing loudly instead of silently skipping. `maxConcurrentRunWindows`
+(1..6, default 3) is a Settings number, the Tasks board badges which window
+each run drove, and window leases survive a worker eviction so orphaned
+windows get reclaimed.
+
+### Added — Generation recalls certified workflows as seeds
+
+Generation now ranks saved, certified workflows by site match, intent overlap
+and lexical coverage, and offers the top two to the model at the one seam
+every generation path passes before its first page action
+(`prepare_workflow_goal`) — advice, not automation: nothing appends a node,
+and the model still has to execute every step it reuses. A failing recall
+degrades to unseeded generation.
+
+### Added — Feishu delivery for the notification block
+
+The workflow notification block gains a send-to-Feishu checkbox that rides the
+same webhook configuration scheduled tasks already use, on both hosts. A
+missing webhook or a delivery error is surfaced as an error line in the run
+log, never thrown — the desktop notification has already gone out, so the step
+still counts as done.
 
 ## [0.6.4] - 2026-10-09
 
