@@ -67,6 +67,20 @@ export const INTERACTIVE_BLOCK_IDS: ReadonlySet<string> = new Set([
   'parameter-prompt',
 ])
 
+/**
+ * Blocks that leave no page state behind to verify.
+ *
+ * They act on the outside world (send, notify, write a file) and succeed by
+ * completing, so a goal + success-condition for them has nothing to check
+ * against: an invented row can only ever bar certification. Generation does not
+ * auto-invent one, and the editor offers no 「目标与成功条件」 section for them.
+ */
+export const NON_GOAL_BEARING_BLOCK_IDS: ReadonlySet<string> = new Set([
+  'notification',
+  'webhook',
+  'export-data',
+])
+
 /** Blocks whose executors are still placeholders — running them proves nothing. */
 export const PLACEHOLDER_BLOCK_IDS: ReadonlySet<string> = new Set([
   'browser-event',

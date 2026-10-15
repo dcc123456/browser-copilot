@@ -16,6 +16,7 @@ import { ArrowLeft, Cloud, Info, RotateCcw, Wand2 } from 'lucide-react'
 import { isCloudBlock } from '../../lib/workflow/blocks/cloud-blocks'
 import { isCustomBlock } from '../../lib/workflow/blocks/custom'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
+import { operatorCarriesGoal } from '../../lib/workflow/operator-registry'
 import NumberInput from '../../ui/NumberInput'
 import { EditForms } from '../blocks/EditForms'
 import { Expand } from '../blocks/shared/Field'
@@ -122,6 +123,9 @@ export default function BlockEditForm({
   const { blockName, bt } = useEditorLocale()
   const EditComponent = block.editComponent ? EditForms[block.editComponent] : undefined
   const cloud = isCloudBlock(block.id)
+  // Fire-and-done operators have nothing to verify, so they get neither the goal
+  // section nor AI fix (the fix engine refuses a node without a goal contract).
+  const goalBearing = operatorCarriesGoal(block.id)
   const [fixOpen, setFixOpen] = useState(false)
 
   return (
@@ -132,7 +136,7 @@ export default function BlockEditForm({
         </button>
         <p className="wf-edit-title">{nodeName || blockName(block.id, block.name)}</p>
         <span className="wf-edit-spacer" />
-        {!cloud && (
+        {!cloud && goalBearing && (
           <button
             type="button"
             onClick={() => setFixOpen(true)}
@@ -172,7 +176,7 @@ export default function BlockEditForm({
         {/* Goal + success criteria sit BELOW the block's own fields (and the
             description), collapsed by default; the user expands to edit. For
             upload-file the user only picks a selector and a file source. */}
-        {block.id !== 'upload-file' && (
+        {block.id !== 'upload-file' && goalBearing && (
           <Expand title={t('nodeGoalSection')} defaultOpen={false}>
             <NodeGoalInspector data={data} onChange={onChange} t={t} />
           </Expand>

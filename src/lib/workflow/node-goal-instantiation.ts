@@ -116,7 +116,10 @@ export function resolveNodeGoalContract(
   if (fromModel) return fromModel
 
   const entry = operatorEntry(blockId)
-  if (!entry || !entry.allowGeneration) return undefined
+  // A non-goal-bearing operator never gets an INVENTED contract — nothing on the
+  // page is left behind to verify. Its own words still win (step 1 above), so a
+  // criterion the model really recorded is not thrown away.
+  if (!entry || !entry.allowGeneration || !entry.goalBearing) return undefined
 
   // 2. The registry's own builder, if provided.
   if (entry.buildGoalContract) {

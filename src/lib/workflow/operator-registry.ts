@@ -24,6 +24,7 @@ import type { SemanticActionName } from './block-capabilities'
 import { capabilityOf } from './block-capabilities'
 import {
   ENGINE_INTERPRETED_BLOCK_IDS,
+  NON_GOAL_BEARING_BLOCK_IDS,
   PLACEHOLDER_BLOCK_IDS,
   SIDE_EFFECT_BLOCK_IDS,
   JAVASCRIPT_BLOCK_ID,
@@ -59,6 +60,13 @@ export interface OperatorRegistryEntry {
   engineInterpreted: boolean
   /** Whether the operator may be used by Workflow AI generation. */
   allowGeneration: boolean
+  /**
+   * Whether a node of this operator can carry a goal contract. False for the
+   * "fire it and it's done" operators (see `NON_GOAL_BEARING_BLOCK_IDS`): they
+   * leave no page state behind to verify, so an invented goal row can only ever
+   * bar certification. A contract the model wrote itself still wins.
+   */
+  goalBearing: boolean
   /** Semantic phrases (en + zh) discovery matches on, lowercase. */
   semanticPhrases: string[]
   /**
@@ -75,6 +83,7 @@ interface OperatorOverride {
   sideEffect?: SideEffectLevel
   hasExecutor?: boolean
   allowGeneration?: boolean
+  goalBearing?: boolean
   semanticPhrases?: string[]
   buildGoalContract?: OperatorRegistryEntry['buildGoalContract']
 }
@@ -271,6 +280,7 @@ function deriveEntry(id: string): OperatorRegistryEntry {
     override?.hasExecutor ?? (!placeholder && !engineInterpreted && block.id !== 'trigger')
   const allowGeneration: boolean =
     override?.allowGeneration ?? (!placeholder && aiExposure !== 'hidden')
+  const goalBearing: boolean = override?.goalBearing ?? !NON_GOAL_BEARING_BLOCK_IDS.has(id)
 
   return {
     id,
@@ -283,6 +293,7 @@ function deriveEntry(id: string): OperatorRegistryEntry {
     cloud: block.cloud === true,
     engineInterpreted,
     allowGeneration,
+    goalBearing,
     semanticPhrases: override?.semanticPhrases ?? defaultPhrases(block.name, block.description),
     ...(override?.buildGoalContract ? { buildGoalContract: override.buildGoalContract } : {}),
   }
@@ -313,6 +324,15 @@ export function allOperators(): OperatorRegistryEntry[] {
 /** Look up one operator by id. */
 export function operatorEntry(id: string): OperatorRegistryEntry | undefined {
   return REGISTRY.get(id)
+}
+
+/**
+ * Whether nodes of this block carry a per-node goal contract. Unknown ids are
+ * treated as goal-bearing so a new block keeps the existing behaviour until it
+ * is classified.
+ */
+export function operatorCarriesGoal(id: string): boolean {
+  return REGISTRY.get(id)?.goalBearing ?? true
 }
 
 /** Operators allowed in AI generation, optionally filtered by exposure. */
