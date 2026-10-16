@@ -812,7 +812,8 @@ export type AgentClientMessage =
 /** Messages the service worker pushes back over the agent port. */
 export type AgentServerMessage =
   | { type: 'delta'; text: string }
-  | { type: 'tool.start'; name: string }
+  | { type: 'thinking'; text: string }
+  | { type: 'tool.start'; name: string; summary?: string }
   | { type: 'tool.result'; name: string; summary: string }
   | {
       type: 'confirm.request'

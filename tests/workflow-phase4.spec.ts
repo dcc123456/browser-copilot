@@ -663,6 +663,7 @@ describe('workflow phase 4 — integration executors', () => {
     vi.mocked(streamCompletion).mockResolvedValue({
       content: 'hello ai',
       toolCalls: [],
+      reasoning: '',
       finishReason: 'stop',
       usage: null,
     } as Awaited<ReturnType<typeof streamCompletion>>)

@@ -153,7 +153,7 @@ function loadStoredConversationId(windowId?: number): string {
 /** One rendered transcript entry. */
 interface Entry {
   id: string
-  role: 'user' | 'assistant' | 'status' | 'error' | 'tool'
+  role: 'user' | 'assistant' | 'status' | 'error' | 'tool' | 'thinking'
   text: string
   /** Files carried by a user turn, as slimmed summaries (no inline text). */
   attachments?: AttachmentSummary[]
@@ -162,10 +162,19 @@ interface Entry {
   /** Tool name for `tool` entries (the chip text stays as a fallback). */
   toolName?: string
   /**
+   * What a tool call is about to do, shown while it runs. Absent for restored
+   * or already-finished calls.
+   */
+  toolIntent?: string
+  /**
    * Tool result summary for `tool` entries. Absent while the call is still
    * running; restored transcripts always carry it.
    */
   toolSummary?: string
+  /** Panel-side clock tick when this entry appeared, for the running elapsed. */
+  startedAt?: number
+  /** Reasoning (`role === 'thinking'`) finished streaming; set on first answer delta or tool.start. */
+  closed?: boolean
   /**
    * Set on a supplement typed while a turn was running, whose entry id is the
    * note id the worker's echoes refer to. `queued` until that turn announces it
@@ -193,7 +202,7 @@ export function groupEntries(entries: readonly Entry[]): RenderItem[] {
   const items: RenderItem[] = []
   let run: Entry[] | null = null
   for (const entry of entries) {
-    if (entry.role === 'assistant' || entry.role === 'tool') {
+    if (entry.role === 'assistant' || entry.role === 'tool' || entry.role === 'thinking') {
       if (!run) {
         run = []
         items.push({ kind: 'turn', entries: run })
@@ -749,10 +758,15 @@ function AssistantContent({ text, live }: { text: string; live: boolean }) {
  * loose chip floating between reply bubbles. Shows a spinner until the result
  * summary arrives; the completed card expands to reveal the full summary.
  */
-function ToolCallCard({ entry, t }: { entry: Entry; t: ChatT }) {
+function ToolCallCard({ entry, t, now }: { entry: Entry; t: ChatT; now: number }) {
   const name = entry.toolName ?? 'tool'
   const summary = entry.toolSummary
+  const intent = entry.toolIntent
   const running = summary === undefined
+  const elapsed =
+    running && entry.startedAt != null
+      ? Math.max(0, Math.floor((now - entry.startedAt) / 1000))
+      : null
   const baseClass = 'rounded-lg border border-border bg-sunken px-2.5 py-1.5'
 
   const icon = running ? (
@@ -766,9 +780,16 @@ function ToolCallCard({ entry, t }: { entry: Entry; t: ChatT }) {
       {icon}
       <span className="shrink-0 font-mono text-xs text-ink">{name}</span>
       {running ? (
-        <span className="text-xs text-muted">{t.chatToolRunning}</span>
+        intent ? (
+          <span className="min-w-0 truncate text-xs text-muted">· {intent}</span>
+        ) : (
+          <span className="text-xs text-muted">{t.chatToolRunning}</span>
+        )
       ) : (
         summary && <span className="min-w-0 truncate text-xs text-muted">· {summary}</span>
+      )}
+      {running && elapsed !== null && (
+        <span className="shrink-0 text-xs text-muted">{t.elapsedSeconds({ s: elapsed })}</span>
       )}
     </div>
   )
@@ -812,6 +833,7 @@ function AssistantTurn({
   live,
   isLast,
   busy,
+  now,
   t,
   title,
   onSkillSaved,
@@ -820,6 +842,7 @@ function AssistantTurn({
   live: boolean
   isLast: boolean
   busy: boolean
+  now: number
   t: ChatT
   title: string
   onSkillSaved: (statusText: string) => void
@@ -842,7 +865,14 @@ function AssistantTurn({
     >
       {entries.map((entry) =>
         entry.role === 'tool' ? (
-          <ToolCallCard entry={entry} key={entry.id} t={t} />
+          <ToolCallCard entry={entry} key={entry.id} now={now} t={t} />
+        ) : entry.role === 'thinking' ? (
+          <ThinkBlock
+            closed={entry.closed !== false}
+            key={entry.id}
+            live={live}
+            text={entry.text}
+          />
         ) : (
           <AssistantContent key={entry.id} live={live} text={entry.text} />
         ),
@@ -1565,6 +1595,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [includeSelection, setIncludeSelection] = useState(false)
   const [busy, setBusy] = useState(false)
+  /** Wall-clock tick driving the live elapsed chips while a turn runs. */
+  const [now, setNow] = useState(() => Date.now())
+  /** When the current turn started, for the elapsed chips. */
+  const turnStartedAtRef = useRef<number | null>(null)
   const [confirms, setConfirms] = useState<PendingConfirm[]>([])
   /** Clarifying questions from the agent's `ask_user` tool, awaiting an answer. */
   const [askUsers, setAskUsers] = useState<PendingAskUser[]>([])
@@ -1755,6 +1789,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const composingRef = useRef(false)
   /** Id of the assistant entry currently being streamed into. */
   const streamingRef = useRef<string | null>(null)
+  /** Id of the live reasoning entry currently being streamed into (ephemeral). */
+  const thinkingRef = useRef<string | null>(null)
   /** Id of the transient "phase" status entry (preparing/sending/…). */
   const phaseRef = useRef<string | null>(null)
   /** Set once the component unmounts, to stop reconnect attempts. */
@@ -1767,6 +1803,20 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
    */
   const busyRef = useRef(false)
   busyRef.current = busy
+
+  // Drive the live elapsed chips: bump `now` once a second while a turn runs so
+  // the phase line and running tool cards show progress instead of a dead wait.
+  // Elapsed is DERIVED at render (now - startedAt); the entries array is never
+  // rewritten per tick, so big transcripts don't re-diff every second.
+  useEffect(() => {
+    if (!busy) {
+      turnStartedAtRef.current = null
+      return
+    }
+    if (turnStartedAtRef.current === null) turnStartedAtRef.current = Date.now()
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [busy])
   /**
    * Mirrors the dictionary for the port listeners.
    *
@@ -2132,13 +2182,44 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     })
   }, [])
 
+  /** Streams a reasoning delta into the live `thinking` entry, opening one on the first. */
+  const appendThinking = useCallback((text: string) => {
+    setEntries((prev) => {
+      const thinkingId = thinkingRef.current
+      if (thinkingId) {
+        return prev.map((entry) =>
+          entry.id === thinkingId ? { ...entry, text: entry.text + text } : entry,
+        )
+      }
+      const id = nextId()
+      thinkingRef.current = id
+      return [...prev, { id, role: 'thinking', text, closed: false }]
+    })
+  }, [])
+
+  /** Marks the open reasoning entry finished; the answer (or a tool call) follows. */
+  const closeThinking = useCallback(() => {
+    const thinkingId = thinkingRef.current
+    thinkingRef.current = null
+    if (!thinkingId) return
+    setEntries((prev) =>
+      prev.map((entry) => (entry.id === thinkingId ? { ...entry, closed: true } : entry)),
+    )
+  }, [])
+
   /**
    * Shows (or replaces) the one-line progress phase between pressing send and
    * the first token. Reusing a single entry — rather than appending a new line
    * per phase — keeps the turn from looking like a pile of statuses. The entry
    * is removed once real text or a tool call starts.
+   *
+   * A phase line that appears when none is showing marks a new wait: the
+   * previous one was cleared by the model answering (text, reasoning, or a tool
+   * call). Reset the elapsed clock there so each round counts its own wait
+   * instead of the whole turn's accumulated time since send.
    */
   const showPhase = useCallback((label: string) => {
+    if (!phaseRef.current) turnStartedAtRef.current = Date.now()
     setEntries((prev) => {
       const existing = phaseRef.current
       if (existing) {
@@ -2239,6 +2320,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             // folds that segment into the same agent-turn bubble, so the reply
             // neither splits in two nor gets glued onto a completed paragraph.
             streamingRef.current = null
+            thinkingRef.current = null
             setBusy(message.running)
             if (message.running) {
               // Shown as the transient phase line, not a permanent entry: the
@@ -2269,12 +2351,23 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
           }
           case 'delta':
             clearPhase()
+            closeThinking()
             appendDelta(message.text)
+            break
+          case 'thinking':
+            appendThinking(message.text)
             break
           case 'tool.start':
             clearPhase()
+            closeThinking()
             streamingRef.current = null
-            append({ role: 'tool', text: '', toolName: message.name })
+            append({
+              role: 'tool',
+              text: '',
+              toolName: message.name,
+              ...(message.summary ? { toolIntent: message.summary } : {}),
+              startedAt: Date.now(),
+            })
             if (modeRef.current === 'workflow') {
               appendGenerationLog(`→ ${message.name}`)
             }
@@ -2416,6 +2509,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
           }
           case 'done': {
             clearPhase()
+            closeThinking()
             const finishingId = streamingRef.current
             streamingRef.current = null
             setBusy(false)
@@ -2448,6 +2542,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
           }
           case 'error':
             clearPhase()
+            closeThinking()
             streamingRef.current = null
             append({ role: 'error', text: message.message })
             setBusy(false)
@@ -2470,6 +2565,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         // reappears in context on the next message.
         if (busyRef.current) {
           streamingRef.current = null
+          thinkingRef.current = null
           setBusy(false)
           append({
             role: 'status',
@@ -2520,8 +2616,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   }, [
     append,
     appendDelta,
+    appendThinking,
     applyTurnUsage,
     clearPhase,
+    closeThinking,
     conversationId,
     maybePromptSaveWorkflow,
     resumeTick,
@@ -2679,6 +2777,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     // floats over the newly opened chat with a card that no longer exists.
     setSaveCardModalOpen(false)
     streamingRef.current = null
+    thinkingRef.current = null
     resetUsage()
     // The port's resume effect fires on conversationId change and restores.
   }
@@ -2710,6 +2809,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     // Close the previous conversation's save-card popup (see openConversation).
     setSaveCardModalOpen(false)
     streamingRef.current = null
+    thinkingRef.current = null
     resetUsage()
     void refreshConversations()
   }
@@ -2747,6 +2847,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       setWorkflowPrompt(null)
       setSaveCardModalOpen(false)
       streamingRef.current = null
+      thinkingRef.current = null
       setConversationId(DEFAULT_CONVERSATION_ID)
     }
     if (previewConv?.id === id) setPreviewConv(null)
@@ -2881,6 +2982,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         : {}),
     })
     streamingRef.current = null
+    thinkingRef.current = null
     turnUsageRef.current = null
     setBusy(true)
     pendingAttachmentsRef.current = []
@@ -2994,6 +3096,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     }
     append({ role: 'user', text: outgoing })
     streamingRef.current = null
+    thinkingRef.current = null
     turnUsageRef.current = null
     setBusy(true)
     setSaveNotice(null)
@@ -4048,6 +4151,22 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                   below.
                 */}
                 {entry.text}
+                {entry.id === phaseRef.current && busy && (
+                  <span
+                    className="ml-1.5 text-xs text-muted"
+                    data-elapsed-seconds={
+                      turnStartedAtRef.current
+                        ? Math.max(0, Math.floor((now - turnStartedAtRef.current) / 1000))
+                        : 0
+                    }
+                  >
+                    {t.elapsedSeconds({
+                      s: turnStartedAtRef.current
+                        ? Math.max(0, Math.floor((now - turnStartedAtRef.current) / 1000))
+                        : 0,
+                    })}
+                  </span>
+                )}
                 <MessageAttachments attachments={entry.attachments} />
                 {entry.interjection && (
                   <span
@@ -4082,6 +4201,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               isLast={containsLastAssistant}
               key={item.entries[0]!.id}
               live={busy && containsLastAssistant}
+              now={now}
               onSkillSaved={(text) => append({ role: 'status', text })}
               t={t}
               title={convTitle}

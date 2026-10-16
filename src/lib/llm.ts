@@ -272,6 +272,8 @@ export interface TokenUsage {
 /** Terminal result of one streamed completion. */
 export interface StreamResult {
   content: string
+  /** Chain-of-thought text the provider streamed separately from the answer. */
+  reasoning: string
   toolCalls: WireToolCall[]
   finishReason: string | null
   usage: TokenUsage | null
@@ -283,6 +285,13 @@ export interface StreamHandlers {
   onToolCallStart?: (name: string) => void
   /** Fired once with the final usage block when the provider reports it. */
   onUsage?: (usage: TokenUsage) => void
+  /**
+   * Chain-of-thought deltas from reasoning models (DeepSeek / Qwen / Ark
+   * `reasoning_content`). Kept separate from `onText` so a provider's
+   * thinking is never mistaken for the answer, and never folded into the
+   * persisted transcript.
+   */
+  onReasoning?: (delta: string) => void
 }
 
 /**
@@ -388,6 +397,7 @@ export function observeUsage(
 export class SseAccumulator {
   private buffer = ''
   private content = ''
+  private reasoning = ''
   private finishReason: string | null = null
   private usage: TokenUsage | null = null
   private readonly toolCalls = new Map<number, PartialToolCall>()
@@ -431,6 +441,7 @@ export class SseAccumulator {
       }))
     return {
       content: this.content,
+      reasoning: this.reasoning,
       toolCalls,
       finishReason: this.finishReason,
       usage: this.usage,
@@ -479,6 +490,15 @@ export class SseAccumulator {
     if (typeof delta.content === 'string' && delta.content.length > 0) {
       this.content += delta.content
       this.handlers.onText?.(delta.content)
+    }
+
+    // Reasoning models stream their thinking as `reasoning_content` alongside
+    // an empty `content`. Surfaced separately so it can render live without
+    // polluting the answer or the persisted transcript.
+    const reasoningDelta = (delta as Record<string, unknown>)['reasoning_content']
+    if (typeof reasoningDelta === 'string' && reasoningDelta.length > 0) {
+      this.reasoning += reasoningDelta
+      this.handlers.onReasoning?.(reasoningDelta)
     }
 
     const deltaToolCalls = delta.tool_calls

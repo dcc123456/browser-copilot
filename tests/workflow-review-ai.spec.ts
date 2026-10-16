@@ -185,6 +185,7 @@ describe('reviewWorkflow', () => {
     streamMock.mockResolvedValueOnce({
       content: `{"summary":"打开了页面并点击。","steps":[{"id":"${firstStep.id}","keep":false,"reason":"探索性点击"}]}`,
       toolCalls: [],
+      reasoning: '',
       finishReason: 'stop',
       usage: null,
     })
@@ -232,7 +233,13 @@ describe('reviewWorkflow', () => {
       ]) {
         handlers?.onText?.(chunk)
       }
-      return { content: verdictJson, toolCalls: [], finishReason: 'stop', usage: null }
+      return {
+        content: verdictJson,
+        toolCalls: [],
+        reasoning: '',
+        finishReason: 'stop',
+        usage: null,
+      }
     })
     const review = await reviewWorkflow(wf, (text) => logs.push(text))
     expect(review?.steps).toHaveLength(2)
@@ -247,6 +254,7 @@ describe('reviewWorkflow', () => {
     streamMock.mockResolvedValueOnce({
       content: '模型走神了，没有 JSON',
       toolCalls: [],
+      reasoning: '',
       finishReason: 'stop',
       usage: null,
     })

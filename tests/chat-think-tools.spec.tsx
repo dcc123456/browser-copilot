@@ -283,3 +283,76 @@ describe('panel reopened while a turn is still running', () => {
     }
   })
 })
+
+describe('phase elapsed clock · resets on each new wait', () => {
+  // Drive the ticking clock without real timers: freeze `Date.now` and capture
+  // the `window.setInterval` callbacks so the test fires them on demand. The
+  // heartbeat shares `setInterval`, but its callback only posts a ping, so
+  // invoking every captured callback is harmless.
+  let currentTime = 0
+  let intervalCallbacks: (() => void)[]
+
+  beforeEach(() => {
+    currentTime = 10_000
+    vi.spyOn(Date, 'now').mockImplementation(() => currentTime)
+    intervalCallbacks = []
+    vi.spyOn(window, 'setInterval').mockImplementation(((fn: () => void) => {
+      intervalCallbacks.push(fn)
+      return 1
+    }) as unknown as typeof window.setInterval)
+    vi.spyOn(window, 'clearInterval').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const elapsedOf = (container: HTMLElement): number => {
+    const chip = container.querySelector('[data-elapsed-seconds]') as HTMLElement
+    return Number(chip.dataset.elapsedSeconds)
+  }
+
+  const fireIntervals = async (): Promise<void> => {
+    await act(async () => {
+      for (const fn of intervalCallbacks) fn()
+    })
+  }
+
+  it('counts one continuous pre-response wait, then restarts for the next round', async () => {
+    const { container, root } = await renderChat()
+    try {
+      // A turn already running when the panel reattaches: the phase line opens
+      // at the current clock.
+      await push({
+        type: 'restore',
+        running: true,
+        messages: [{ role: 'user', text: 'read the page' }],
+      })
+
+      // Preparing → sending → thinking reuse the SAME phase line before any
+      // model output, so the wait keeps counting from the turn start — it must
+      // not reset per phase label.
+      currentTime = 18_000
+      await fireIntervals()
+      expect(elapsedOf(container)).toBe(8)
+
+      // The model responds with a tool call: the phase line clears, then the
+      // next round reopens it — a fresh wait whose clock restarts from here.
+      await push({ type: 'tool.start', name: 'open_url' })
+      await push({ type: 'tool.result', name: 'open_url', summary: 'opened' })
+      currentTime = 30_000
+      await push({ type: 'phase', phase: 'thinking' })
+
+      // Two seconds since the reset at t=30s: the chip reads 2, not the 20 it
+      // would show if it kept counting from the original turn start.
+      currentTime = 32_000
+      await fireIntervals()
+      expect(elapsedOf(container)).toBe(2)
+    } finally {
+      await act(async () => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+})

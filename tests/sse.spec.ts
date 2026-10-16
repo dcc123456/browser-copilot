@@ -154,6 +154,28 @@ describe('SseAccumulator · tool calls', () => {
   })
 })
 
+describe('SseAccumulator · reasoning', () => {
+  it('accumulates reasoning_content separately from the answer and fires onReasoning', () => {
+    const onReasoning = vi.fn()
+    const accumulator = new SseAccumulator({ onReasoning })
+    accumulator.push(frame({ choices: [{ delta: { reasoning_content: 'Let me think' } }] }))
+    accumulator.push(frame({ choices: [{ delta: { reasoning_content: ' about this.' } }] }))
+    accumulator.push(textChunk('Answer.'))
+    const result = accumulator.finish()
+    expect(result.reasoning).toBe('Let me think about this.')
+    expect(result.content).toBe('Answer.')
+    expect(onReasoning.mock.calls.map(([delta]) => delta)).toEqual(['Let me think', ' about this.'])
+  })
+
+  it('leaves content untouched when only reasoning_content is streamed', () => {
+    const accumulator = new SseAccumulator()
+    accumulator.push(frame({ choices: [{ delta: { reasoning_content: 'pondering' } }] }))
+    const result = accumulator.finish()
+    expect(result.reasoning).toBe('pondering')
+    expect(result.content).toBe('')
+  })
+})
+
 describe('SseAccumulator · usage', () => {
   it('captures a trailing usage-only chunk and fires onUsage', () => {
     let received: import('../src/lib/llm').TokenUsage | undefined

@@ -409,6 +409,8 @@ export interface Messages {
   chatThinking: string
   /** Inline label while a tool call in an assistant turn is still running. */
   chatToolRunning: string
+  /** Elapsed-seconds chip on the live progress phase and running tool cards. */
+  elapsedSeconds: (params: { s: number }) => string
   chatApprove: string
   chatDecline: string
   chatConfirmTitle: (params: { name: string }) => string
@@ -1699,6 +1701,7 @@ const en: Messages = {
   phaseResponding: 'Responding…',
   chatThinking: 'Thinking',
   chatToolRunning: 'running…',
+  elapsedSeconds: ({ s }) => `${s}s`,
   chatApprove: 'Approve',
   chatDecline: 'Decline',
   chatConfirmTitle: ({ name }) => `Allow ${name}?`,
@@ -2945,6 +2948,7 @@ const zhCN: Messages = {
   phaseResponding: '正在回复…',
   chatThinking: '思考过程',
   chatToolRunning: '执行中…',
+  elapsedSeconds: ({ s }) => `${s} 秒`,
   chatApprove: '允许',
   chatDecline: '拒绝',
   chatConfirmTitle: ({ name }) => `是否允许执行 ${name}？`,

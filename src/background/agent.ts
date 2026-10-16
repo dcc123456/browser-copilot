@@ -5249,7 +5249,10 @@ export async function runAgentTurn(
             }
             deps.send({ type: 'delta', text: delta })
           },
-          onToolCallStart: (name) => deps.send({ type: 'tool.start', name }),
+          // Chain-of-thought streamed separately: relay it so the panel can
+          // paint a live reasoning block, but never touch the phase — the
+          // model is still thinking, not responding.
+          onReasoning: (delta) => deps.send({ type: 'thinking', text: delta }),
           onUsage: (usage) => {
             totalUsage.inputTokens += usage.inputTokens
             totalUsage.outputTokens += usage.outputTokens
@@ -5492,6 +5495,15 @@ async function runOneToolCall(
   // selectorFromArgs) builds replayable selectors from `args.target`. Persist
   // the resolved durable target so a ref-only call does not lose the locator.
   args = hydrateRecordArgs(ctx, args)
+
+  // Emitted here, not at stream time: the arguments are only fully assembled
+  // (refs resolved) in this function, and a human-readable intent is what makes
+  // the wait between a call and its result legible in the panel.
+  deps.send({
+    type: 'tool.start',
+    name,
+    summary: describeAction(name, args, ctx.snapshotTargets),
+  })
 
   // Defence in depth: a disabled tool's schema is withheld, but a model may
   // still hallucinate a call to it. Refuse rather than execute.
