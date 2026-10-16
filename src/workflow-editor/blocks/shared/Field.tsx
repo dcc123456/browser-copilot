@@ -6,6 +6,10 @@
  * so they follow the browser light/dark theme. Every form component receives
  * `{ data, onChange }` and only renders labeled fields over those props.
  *
+ * The two free-text controls also carry the `/` variable menu, so inserting a
+ * `{{reference}}` is available in every block form at once — a form opts a field
+ * OUT with `noSlash` when that field DEFINES a name instead of referencing one.
+ *
  * @module workflow-editor/blocks/shared/Field
  */
 
@@ -13,6 +17,7 @@ import { ChevronLeft, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useEditorLocale } from '../../locale-context'
 import NumberInput from '../../../ui/NumberInput'
+import { useFieldSlashMenu } from './SlashVariableMenu'
 
 /** Merge a partial patch into the block data (Automa's updateData). */
 export type Patch = (patch: Record<string, unknown>) => void
@@ -48,6 +53,7 @@ export function TextInput({
   type = 'text',
   list,
   fallback,
+  noSlash,
 }: {
   value: string | number
   onChange: (v: string) => void
@@ -60,23 +66,37 @@ export function TextInput({
    * Never coerce on change: the field must stay clearable while typing.
    */
   fallback?: string
+  /** Opt out of the `/` variable menu for fields that DEFINE a name. */
+  noSlash?: boolean
 }) {
   const { bt } = useEditorLocale()
+  const ref = useRef<HTMLInputElement>(null)
+  const menu = useFieldSlashMenu({ inputRef: ref, onChange, disabled: noSlash })
+  // Only a free-text caret can host the menu: a native datalist already
+  // suggests there, and a color/range control has no text to anchor to.
+  const slashable = !noSlash && !list && type === 'text'
   return (
-    <input
-      type={type}
-      value={value ?? ''}
-      placeholder={placeholder ? bt(placeholder) : placeholder}
-      list={list}
-      onChange={(e) => onChange(e.target.value)}
-      onBlur={
-        fallback != null
-          ? () => {
-              if (String(value ?? '').trim() === '') onChange(fallback)
-            }
-          : undefined
-      }
-    />
+    <>
+      <input
+        ref={ref}
+        type={type}
+        value={value ?? ''}
+        placeholder={placeholder ? bt(placeholder) : placeholder}
+        list={list}
+        onChange={(e) => {
+          onChange(e.target.value)
+          if (slashable) menu.sync()
+        }}
+        onClick={slashable ? () => menu.sync() : undefined}
+        onKeyUp={slashable ? () => menu.sync() : undefined}
+        onKeyDown={slashable ? (e) => menu.onKeyDown(e) : undefined}
+        onBlur={() => {
+          menu.close()
+          if (fallback != null && String(value ?? '').trim() === '') onChange(fallback)
+        }}
+      />
+      {slashable ? menu.node : null}
+    </>
   )
 }
 
@@ -89,6 +109,7 @@ export function TextArea({
   mono,
   className,
   fallback,
+  noSlash,
 }: {
   value: string
   onChange: (v: string) => void
@@ -98,9 +119,12 @@ export function TextArea({
   className?: string
   /** Default written back on blur when the field was left empty (失焦校验). */
   fallback?: string
+  /** Opt out of the `/` variable menu for fields that DEFINE a name. */
+  noSlash?: boolean
 }) {
   const { bt } = useEditorLocale()
   const ref = useRef<HTMLTextAreaElement>(null)
+  const menu = useFieldSlashMenu({ inputRef: ref, onChange, disabled: noSlash })
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -108,21 +132,27 @@ export function TextArea({
     el.style.height = `${el.scrollHeight}px`
   }, [value])
   return (
-    <textarea
-      ref={ref}
-      rows={rows}
-      value={value ?? ''}
-      placeholder={placeholder ? bt(placeholder) : placeholder}
-      className={`${mono ? 'wf-mono' : ''} ${className ?? ''}`}
-      onChange={(e) => onChange(e.target.value)}
-      onBlur={
-        fallback != null
-          ? () => {
-              if (String(value ?? '').trim() === '') onChange(fallback)
-            }
-          : undefined
-      }
-    />
+    <>
+      <textarea
+        ref={ref}
+        rows={rows}
+        value={value ?? ''}
+        placeholder={placeholder ? bt(placeholder) : placeholder}
+        className={`${mono ? 'wf-mono' : ''} ${className ?? ''}`}
+        onChange={(e) => {
+          onChange(e.target.value)
+          if (!noSlash) menu.sync()
+        }}
+        onClick={noSlash ? undefined : () => menu.sync()}
+        onKeyUp={noSlash ? undefined : () => menu.sync()}
+        onKeyDown={noSlash ? undefined : (e) => menu.onKeyDown(e)}
+        onBlur={() => {
+          menu.close()
+          if (fallback != null && String(value ?? '').trim() === '') onChange(fallback)
+        }}
+      />
+      {noSlash ? null : menu.node}
+    </>
   )
 }
 

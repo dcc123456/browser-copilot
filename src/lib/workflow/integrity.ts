@@ -68,8 +68,12 @@ export interface WorkflowIntegrity {
  * `variableName` (see `workflow-engine/executors.ts`), or injected by the run
  * loop for loops. They are legitimate producers with no node to point at, so
  * without this list the check would cry wolf on graphs that run fine.
+ *
+ * This is also the whitelist the editor's `{{…}}` picker is allowed to offer:
+ * a name missing here must not be suggested, or the picker would hand the user a
+ * reference the save card then reports as dangling.
  */
-const ENGINE_PROVIDED_NAMES: ReadonlySet<string> = new Set([
+export const ENGINE_PROVIDED_NAMES: ReadonlySet<string> = new Set([
   'refData',
   'dataTable',
   'lastText',
@@ -96,6 +100,18 @@ function blockIdOf(node: WorkflowNode): string {
 }
 
 /**
+ * The variable name a single node publishes, or empty when it publishes none.
+ *
+ * Exported because the editor's variable picker needs the per-node answer for
+ * the nodes upstream of the one being edited, and must not invent a second
+ * definition of "what this block writes".
+ */
+export function producedNameOfNode(node: WorkflowNode): string {
+  const declared = node.data?.['variableName']
+  return typeof declared === 'string' ? declared.trim() : ''
+}
+
+/**
  * Variable names the graph can produce: every node's `variableName` (its own
  * value, or the catalog default the node carries in `data`) plus the engine's
  * fixed aliases.
@@ -103,8 +119,8 @@ function blockIdOf(node: WorkflowNode): string {
 function producedNames(workflow: Workflow): Set<string> {
   const names = new Set<string>(ENGINE_PROVIDED_NAMES)
   for (const node of workflow.drawflow.nodes) {
-    const declared = node.data?.['variableName']
-    if (typeof declared === 'string' && declared.trim()) names.add(declared.trim())
+    const declared = producedNameOfNode(node)
+    if (declared) names.add(declared)
   }
   return names
 }

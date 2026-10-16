@@ -109,6 +109,7 @@ export default function ParameterFields({
                     value={param.name}
                     placeholder={bt('Parameter name')}
                     onChange={(v) => update(index, { name: v.replace(/\s/g, '_') })}
+                    noSlash
                   />
                   <Select
                     value={param.type}

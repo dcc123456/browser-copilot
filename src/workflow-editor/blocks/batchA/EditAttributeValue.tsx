@@ -39,6 +39,7 @@ export default function EditAttributeValue({ data, onChange }: EditFormProps) {
           value={str(data, 'attributeName')}
           placeholder="name"
           onChange={(v) => onChange({ attributeName: v })}
+          noSlash
         />
       </Field>
 

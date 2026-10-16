@@ -93,6 +93,7 @@ export default function EditGetSecret({ data, onChange }: EditFormProps) {
           value={str(data, 'variableName')}
           placeholder="Required — e.g. apiKey"
           onChange={(v) => onChange({ variableName: v })}
+          noSlash
         />
       </Field>
 

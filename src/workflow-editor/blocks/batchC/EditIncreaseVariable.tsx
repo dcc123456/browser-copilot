@@ -27,6 +27,7 @@ export default function EditIncreaseVariable({ data, onChange }: EditFormProps) 
           value={str(data, 'variableName')}
           placeholder="abc123"
           onChange={(v) => onChange({ variableName: v })}
+          noSlash
         />
       </Field>
 

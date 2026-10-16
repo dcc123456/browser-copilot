@@ -200,6 +200,7 @@ export default function EditWebhook({ data, onChange }: EditFormProps) {
                 value={str(data, 'variableName')}
                 placeholder="Variable name"
                 onChange={(v) => onChange({ variableName: v })}
+                noSlash
               />
             </Field>
           )}
@@ -214,6 +215,7 @@ export default function EditWebhook({ data, onChange }: EditFormProps) {
                 value={str(data, 'dataColumn')}
                 placeholder="Column name"
                 onChange={(v) => onChange({ dataColumn: v })}
+                noSlash
               />
             </Field>
           )}

@@ -56,6 +56,7 @@ export function SaveToTable({ data, onChange }: Pick<EditFormProps, 'data' | 'on
             value={typeof data.dataColumn === 'string' ? data.dataColumn : ''}
             placeholder="Column id / name"
             onChange={(v) => onChange({ dataColumn: v })}
+            noSlash
           />
         </Field>
       )}

@@ -110,6 +110,7 @@ export default function EditTakeScreenshot({ data, onChange }: EditFormProps) {
             value={str(data, 'dataColumn')}
             placeholder="Select column"
             onChange={(v) => onChange({ dataColumn: v })}
+            noSlash
           />
         </Field>
       )}

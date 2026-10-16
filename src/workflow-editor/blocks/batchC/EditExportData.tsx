@@ -69,6 +69,7 @@ export default function EditExportData({ data, onChange }: EditFormProps) {
             value={str(data, 'variableName')}
             placeholder="abc123"
             onChange={(v) => onChange({ variableName: v })}
+            noSlash
           />
         </Field>
       )}

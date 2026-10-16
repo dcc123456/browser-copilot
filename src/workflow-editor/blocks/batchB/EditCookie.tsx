@@ -91,6 +91,7 @@ export default function EditCookie({ data, onChange }: EditFormProps) {
               value={str(data, 'name')}
               placeholder="site-cookie"
               onChange={(v) => onChange({ name: v })}
+              noSlash
             />
           </Field>
           {type === 'set' && (

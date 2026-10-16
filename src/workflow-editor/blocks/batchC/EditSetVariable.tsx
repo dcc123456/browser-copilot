@@ -29,6 +29,7 @@ export default function EditSetVariable({ data, onChange }: EditFormProps) {
           value={str(data, 'variableName')}
           placeholder="Variable the value is stored under"
           onChange={(v) => onChange({ variableName: v })}
+          noSlash
         />
       </Field>
 

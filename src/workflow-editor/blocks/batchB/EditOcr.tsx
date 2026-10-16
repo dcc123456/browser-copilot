@@ -79,6 +79,7 @@ export default function EditOcr({ data, onChange }: EditFormProps) {
           value={str(data, 'variableName')}
           placeholder="lastOcrText"
           onChange={(v) => onChange({ variableName: v })}
+          noSlash
         />
       </Field>
     </div>

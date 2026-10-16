@@ -13,7 +13,7 @@
 
 import { Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
-import { Field, IconButton, Select, TextArea } from '../shared/Field'
+import { Field, IconButton, Select, TextArea, TextInput } from '../shared/Field'
 import { str } from '../shared/InteractionBase'
 import { useEditorLocale } from '../../locale-context'
 import type { EditFormProps } from '../EditForms'
@@ -115,11 +115,11 @@ export default function EditInsertData({ data, onChange }: EditFormProps) {
                 </div>
                 <div style={{ flex: 1 }}>
                   <Field label={item.type === 'variable' ? 'Variable name' : 'Table column'}>
-                    <input
-                      type="text"
+                    <TextInput
                       value={item.name}
                       placeholder={item.type === 'variable' ? 'abc123' : 'Column id / name'}
-                      onChange={(e) => patchItem(index, { name: e.target.value })}
+                      onChange={(v) => patchItem(index, { name: v })}
+                      noSlash
                     />
                   </Field>
                 </div>

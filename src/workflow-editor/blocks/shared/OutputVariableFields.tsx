@@ -39,6 +39,7 @@ export default function OutputVariableFields({
             value={str(data, 'variableName')}
             placeholder={placeholder}
             onChange={(v) => onChange({ variableName: v })}
+            noSlash
           />
         </Field>
       )}

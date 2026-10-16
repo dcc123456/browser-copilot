@@ -47,7 +47,7 @@ function stringField(node: WorkflowNode, key: string): string {
 }
 
 /** Block id of a node: `data.blockId`, falling back to the label. */
-function blockIdOf(node: WorkflowNode): string {
+export function blockIdOf(node: WorkflowNode): string {
   const fromData = node.data?.['blockId']
   return typeof fromData === 'string' && fromData ? fromData : node.label
 }
@@ -97,7 +97,7 @@ function producesVariable(node: WorkflowNode, name: string): boolean {
 }
 
 /** Canonical fallback variable name for reader blocks with empty variableName. */
-function fallbackVariableOf(blockId: string): string {
+export function fallbackVariableOf(blockId: string): string {
   switch (blockId) {
     case 'get-text':
       return 'lastText'
@@ -117,7 +117,7 @@ function fallbackVariableOf(blockId: string): string {
  * (and a non-empty `dataColumn`). `export-data` only writes what these nodes
  * collected.
  */
-function feedsTable(node: WorkflowNode): boolean {
+export function feedsTable(node: WorkflowNode): boolean {
   const blockId = blockIdOf(node)
   if (blockId !== 'get-text' && blockId !== 'read-page') return false
   if (node.data?.['saveData'] !== true) return false

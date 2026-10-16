@@ -41,6 +41,11 @@ import type {
   WorkflowSettings,
 } from '../lib/workflow/types'
 import { migrateWorkflow, triggerFromNodes } from '../lib/workflow/migrate'
+import {
+  ensureSecretProducer,
+  type SecretFieldRef,
+  type SuggestionGraph,
+} from '../lib/workflow/var-suggestions'
 import { nodeRunIssuesOf } from '../lib/workflow/validation'
 import { sendCommand } from '../lib/messages'
 import { editorUrl, hostWindowId } from './host-window'
@@ -54,6 +59,7 @@ import Sidebar, { loadWidth } from './sidebar/Sidebar'
 import BlockPalette from './sidebar/BlockPalette'
 import BlockEditForm from './sidebar/BlockEditForm'
 import BlockSettingsModal from './blocks/shared/BlockSettingsModal'
+import { SlashMenuProvider } from './blocks/shared/SlashVariableMenu'
 import LogsModal from './sidebar/LogsModal'
 import { WorkflowMetaProvider } from './blocks/batchD/WorkflowInfoFields'
 import TopToolbar from './toolbar/TopToolbar'
@@ -808,50 +814,111 @@ export default function EditorApp() {
   const editNode = useMemo(() => nodes.find((n) => n.id === editingId), [nodes, editingId])
   const editBlock = editNode?.data.block ?? null
 
+  // — the `/` dynamic-variable menu (blocks/shared/SlashVariableMenu) —
+  // A thunk, not a snapshot: a field that was already open when something
+  // upstream changed must offer what exists at the moment of the pick.
+  const suggestionGraph = useCallback((): SuggestionGraph => {
+    const wfNodes = nodes.map(toWorkflowNode)
+    return {
+      nodes: wfNodes,
+      edges: edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle ?? undefined,
+        targetHandle: e.targetHandle ?? undefined,
+      })),
+      trigger: triggerFromNodes(wfNodes) ?? meta.trigger,
+    }
+  }, [nodes, edges, meta.trigger])
+
+  // Picking a credential secures its `get-secret` producer here; the pure patcher
+  // decided the graph surgery, this applies it the way every other canvas edit
+  // does — mutate, invalidate the certification, tell the user — and hands back
+  // the variable name the field references. The secret value never passes through
+  // any of it: only the credential id and field key.
+  const insertSecretProducer = useCallback(
+    (nodeId: string, ref: SecretFieldRef): Promise<string> => {
+      const patch = ensureSecretProducer(suggestionGraph(), nodeId, ref, newId)
+      if (patch.nodePatch) patchNode(patch.nodePatch.nodeId, patch.nodePatch.patch)
+      const { added, edges: nextEdges } = patch
+      if (added && nextEdges) {
+        setNodes((nds) => [...nds, toFlowNode(added)])
+        // Reconcile by id instead of swapping the list: React Flow keeps its own
+        // per-edge state (selected, hidden) that the workflow-shaped patch lacks.
+        setEdges((eds) => {
+          const previous = new Map(eds.map((e) => [e.id, e]))
+          return nextEdges.map((e) => {
+            const existing = previous.get(e.id)
+            if (!existing) return { ...e, type: 'custom' }
+            return {
+              ...existing,
+              source: e.source,
+              target: e.target,
+              sourceHandle: e.sourceHandle,
+              targetHandle: e.targetHandle,
+            }
+          })
+        })
+        setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
+      }
+      if (patch.detached) toast.show(t('varMenuSecretDetached'), 'error')
+      else if (added) toast.show(t('varMenuSecretAdded'), 'ok')
+      return Promise.resolve(patch.variableName)
+    },
+    [patchNode, suggestionGraph, toast, t],
+  )
+
   const editOverlay =
     editNode && editBlock ? (
       <div className="wf-edit-overlay">
-        <WorkflowMetaProvider
-          meta={{
-            // The id lets block forms exclude this workflow from their
-            // "execute workflow" pickers (self-execution is a loop).
-            ...(workflowId ? { id: workflowId } : {}),
-            name: meta.name,
-            description: meta.description,
-            settings: meta.settings,
-          }}
-          onMeta={(p) =>
-            patchMeta({
-              ...(p.name !== undefined ? { name: p.name } : {}),
-              ...(p.description !== undefined ? { description: p.description } : {}),
-              ...(p.settings ? { settings: p.settings as WorkflowSettings } : {}),
-            })
-          }
+        <SlashMenuProvider
+          nodeId={editNode.id}
+          graph={suggestionGraph}
+          insertSecret={insertSecretProducer}
         >
-          <BlockEditForm
-            block={editBlock}
-            nodeName={String(editNode.data.blockData?.description ?? editBlock.name)}
-            data={editNode.data.blockData}
-            onChange={(patch) => {
-              patchNode(editNode.id, patch)
-              // Editing node data (including the Goal Contract) invalidates a
-              // prior certification until L3 is re-run.
-              setMeta((m) => ({
-                ...m,
-                settings: { ...m.settings, certificationStatus: 'unverified' },
-              }))
+          <WorkflowMetaProvider
+            meta={{
+              // The id lets block forms exclude this workflow from their
+              // "execute workflow" pickers (self-execution is a loop).
+              ...(workflowId ? { id: workflowId } : {}),
+              name: meta.name,
+              description: meta.description,
+              settings: meta.settings,
             }}
-            t={t}
-            onBack={() => {
-              setEditingId(null)
-              setNodes((nds) => nds.map((n) => ({ ...n, selected: false })))
-            }}
-            onApplyFix={(next) => applyNodeFix(editNode.id, next)}
-            windowId={hostWindowId()}
-            canRevert={revertibleIds.has(editNode.id)}
-            onRevert={() => revertNodeFix(editNode.id)}
-          />
-        </WorkflowMetaProvider>
+            onMeta={(p) =>
+              patchMeta({
+                ...(p.name !== undefined ? { name: p.name } : {}),
+                ...(p.description !== undefined ? { description: p.description } : {}),
+                ...(p.settings ? { settings: p.settings as WorkflowSettings } : {}),
+              })
+            }
+          >
+            <BlockEditForm
+              block={editBlock}
+              nodeName={String(editNode.data.blockData?.description ?? editBlock.name)}
+              data={editNode.data.blockData}
+              onChange={(patch) => {
+                patchNode(editNode.id, patch)
+                // Editing node data (including the Goal Contract) invalidates a
+                // prior certification until L3 is re-run.
+                setMeta((m) => ({
+                  ...m,
+                  settings: { ...m.settings, certificationStatus: 'unverified' },
+                }))
+              }}
+              t={t}
+              onBack={() => {
+                setEditingId(null)
+                setNodes((nds) => nds.map((n) => ({ ...n, selected: false })))
+              }}
+              onApplyFix={(next) => applyNodeFix(editNode.id, next)}
+              windowId={hostWindowId()}
+              canRevert={revertibleIds.has(editNode.id)}
+              onRevert={() => revertNodeFix(editNode.id)}
+            />
+          </WorkflowMetaProvider>
+        </SlashMenuProvider>
       </div>
     ) : null
 
@@ -972,13 +1039,21 @@ export default function EditorApp() {
         <ConfirmHost />
 
         {/* Block settings + on-error modal (gear button in node hover toolbar). */}
-        <BlockSettingsModal
-          open={settingsForId !== null && !!settingsBlock}
-          onClose={() => setSettingsForId(null)}
-          block={settingsBlock}
-          data={settingsNode?.data.blockData ?? {}}
-          onChange={(patch) => settingsForId && patchNode(settingsForId, patch)}
-        />
+        {settingsForId && settingsBlock && (
+          <SlashMenuProvider
+            nodeId={settingsForId}
+            graph={suggestionGraph}
+            insertSecret={insertSecretProducer}
+          >
+            <BlockSettingsModal
+              open
+              onClose={() => setSettingsForId(null)}
+              block={settingsBlock}
+              data={settingsNode?.data.blockData ?? {}}
+              onChange={(patch) => patchNode(settingsForId, patch)}
+            />
+          </SlashMenuProvider>
+        )}
 
         {/* Run-logs / debug viewer modal. */}
         <CertificationModal report={certReport} onClose={() => setCertReport(null)} t={t} />

@@ -19,7 +19,7 @@ import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
 import { operatorCarriesGoal } from '../../lib/workflow/operator-registry'
 import NumberInput from '../../ui/NumberInput'
 import { EditForms } from '../blocks/EditForms'
-import { Expand } from '../blocks/shared/Field'
+import { Expand, TextArea, TextInput } from '../blocks/shared/Field'
 import NodeGoalInspector from './NodeGoalInspector'
 import NodeFixModal from './NodeFixModal'
 import type { TranslateFn } from '../i18n'
@@ -41,6 +41,14 @@ export interface BlockEditFormProps {
   /** Restore the node data captured before the last AI fix. */
   onRevert: () => void
 }
+
+/**
+ * Keys that DEFINE a name (a variable, a table column) instead of holding a
+ * value: a `{{reference}}` there would become the name itself. The generic form
+ * has no per-field knowledge, so the opt-out is by key.
+ */
+const isNameDefiningKey = (key: string): boolean =>
+  /^(variableName|dataColumn|columnName|name|attributeName|key)$/.test(key)
 
 function GenericForm({
   data,
@@ -89,16 +97,17 @@ function GenericForm({
               <code>{key}</code>
             </label>
             {long ? (
-              <textarea
+              <TextArea
                 rows={Math.min(8, str.split('\n').length + 1)}
                 value={str}
-                onChange={(e) => onChange({ [key]: e.target.value })}
+                onChange={(v) => onChange({ [key]: v })}
+                noSlash={isNameDefiningKey(key)}
               />
             ) : (
-              <input
-                type="text"
+              <TextInput
                 value={str}
-                onChange={(e) => onChange({ [key]: e.target.value })}
+                onChange={(v) => onChange({ [key]: v })}
+                noSlash={isNameDefiningKey(key)}
               />
             )}
           </div>

@@ -179,6 +179,17 @@ export const EDITOR_STRINGS = {
     nodeFixPhaseDiagnosing: 'AI is diagnosing the failure',
     nodeFixPhaseApplying: 'Adopting the proposed parameters',
     nodeFixPhaseVerifying: 'Checking the success criteria',
+    // — the `/` dynamic-variable menu in block parameter fields —
+    varMenuInputs: 'Workflow inputs',
+    varMenuVariables: 'Variables',
+    varMenuAliases: 'Engine values',
+    varMenuLoop: 'Loop context',
+    varMenuSecrets: 'Secrets',
+    varMenuEmpty: 'No matching variable',
+    varMenuInserting: 'Adding a Get secret block…',
+    varMenuSecretAdded: 'Added a Get secret block upstream; the field now references its variable.',
+    varMenuSecretDetached:
+      'Added a Get secret block, but nothing feeds this step yet — connect it before running.',
   },
   zh: {
     editor: '编辑',
@@ -342,6 +353,15 @@ export const EDITOR_STRINGS = {
     nodeFixPhaseDiagnosing: 'AI 正在诊断失败原因',
     nodeFixPhaseApplying: '正在采用建议的参数',
     nodeFixPhaseVerifying: '正在检查成功条件',
+    varMenuInputs: '工作流入参',
+    varMenuVariables: '变量',
+    varMenuAliases: '引擎值',
+    varMenuLoop: '循环上下文',
+    varMenuSecrets: '凭证',
+    varMenuEmpty: '没有匹配的变量',
+    varMenuInserting: '正在添加「获取凭证」算子…',
+    varMenuSecretAdded: '已在上游添加「获取凭证」算子，输入框现在引用它产出的变量。',
+    varMenuSecretDetached: '已添加「获取凭证」算子，但当前算子还没有上游连线，运行前请先接上。',
   },
 } as const satisfies Record<EditorLocale, Record<string, string>>
 

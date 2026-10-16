@@ -51,6 +51,7 @@ export default function EditRegexVariable({ data, onChange }: EditFormProps) {
           value={str(data, 'variableName')}
           placeholder="abc123"
           onChange={(v) => onChange({ variableName: v })}
+          noSlash
         />
       </Field>
 

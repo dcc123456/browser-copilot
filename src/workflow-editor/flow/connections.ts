@@ -29,13 +29,10 @@
 import type { Connection, Edge, Node } from '@xyflow/react'
 
 import { newId } from '../../lib/storage'
+import { closesCycle, isFallbackHandle, loopBackEdgeIds } from '../../lib/workflow/graph-edges'
 import { BRANCH_HANDLES } from './BlockNode'
 
-const FALLBACK_SUFFIX = '-output-fallback'
-
-export function isFallbackHandle(handle: string | null | undefined): boolean {
-  return typeof handle === 'string' && handle.endsWith(FALLBACK_SUFFIX)
-}
+export { isFallbackHandle }
 
 /**
  * True when adding `source → target` to `edges` would close a directed cycle:
@@ -45,28 +42,12 @@ export function isFallbackHandle(handle: string | null | undefined): boolean {
  * recovery rather than the normal control flow, and treating them as ordinary
  * links here would misclassify draws on graphs that already carry one. An edge
  * from a node back to ITSELF is a cycle too (rejected earlier by the caller).
+ *
+ * The rule itself lives in {@link closesCycle} so the edit-time graph patcher
+ * answers the same question the canvas does.
  */
 export function edgeClosesCycle(edges: Edge[], source: string, target: string): boolean {
-  if (source === target) return true
-  const outgoing = new Map<string, string[]>()
-  for (const edge of edges) {
-    if (isFallbackHandle(edge.sourceHandle)) continue
-    const list = outgoing.get(edge.source)
-    if (list) list.push(edge.target)
-    else outgoing.set(edge.source, [edge.target])
-  }
-  const seen = new Set<string>([target])
-  const queue = [target]
-  while (queue.length > 0) {
-    const current = queue.shift()!
-    for (const next of outgoing.get(current) ?? []) {
-      if (next === source) return true
-      if (seen.has(next)) continue
-      seen.add(next)
-      queue.push(next)
-    }
-  }
-  return false
+  return closesCycle(edges, source, target)
 }
 
 type NodeHandleInfo = { blockId: string; sources: Set<string>; hasTarget: boolean }
@@ -154,13 +135,7 @@ export function applyConnection(eds: Edge[], conn: Connection): Edge[] {
   // Normal connection: replace the edge occupying the input handle, keeping
   // fallback AND loop-back edges (they attach to the same handle visually but
   // never occupy it — they coexist with the node's regular incoming edge).
-  // Every existing edge is cycle-tested ONCE against a fixed graph, keyed by
-  // id; a recomputation per compared edge would re-walk the graph each time.
-  const loopBackIds = new Set<string>()
-  for (const e of eds) {
-    if (isFallbackHandle(e.sourceHandle)) continue
-    if (edgeClosesCycle(eds, e.source, e.target)) loopBackIds.add(e.id)
-  }
+  const loopBackIds = loopBackEdgeIds(eds)
   const occupiesInput = (e: Edge): boolean =>
     e.target === conn.target &&
     e.targetHandle === conn.targetHandle &&

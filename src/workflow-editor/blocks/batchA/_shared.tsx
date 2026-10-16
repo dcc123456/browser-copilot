@@ -58,6 +58,7 @@ export function TableFields({
             value={typeof data.dataColumn === 'string' ? data.dataColumn : ''}
             placeholder="Select column"
             onChange={(v) => onChange({ dataColumn: v })}
+            noSlash
           />
         </Field>
       )}

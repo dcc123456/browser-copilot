@@ -48,6 +48,7 @@ export default function EditLogData({ data, onChange }: EditFormProps) {
               value={typeof data.dataColumn === 'string' ? data.dataColumn : ''}
               placeholder="Select column"
               onChange={(v) => onChange({ dataColumn: v, saveData: true })}
+              noSlash
             />
           </Field>
         </>

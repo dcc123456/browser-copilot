@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { applySlashPick, filterSkills, findSlashQuery, moveSelection } from '../src/lib/slash'
+import {
+  applySlashInsert,
+  applySlashPick,
+  filterSkills,
+  findSlashQuery,
+  moveSelection,
+  rankByTerm,
+} from '../src/lib/slash'
 import type { Skill } from '../src/lib/types'
 
 function skill(name: string, description = '', id = name.toLowerCase()): Skill {
@@ -160,5 +167,80 @@ describe('moveSelection', () => {
   it('stays at zero for an empty list', () => {
     expect(moveSelection(0, 1, 0)).toBe(0)
     expect(moveSelection(0, -1, 0)).toBe(0)
+  })
+})
+
+describe('applySlashInsert', () => {
+  const insertAt = (text: string, insert: string): { text: string; caret: number } => {
+    const query = findSlashQuery(text, text.length)
+    if (!query) throw new Error(`no query in ${text}`)
+    return applySlashInsert(text, query, insert)
+  }
+
+  it('replaces the query with the insertion and parks the caret past it', () => {
+    expect(insertAt('search for /pro', '{{productName}}')).toEqual({
+      text: 'search for {{productName}}',
+      caret: 'search for {{productName}}'.length,
+    })
+  })
+
+  it('keeps text already typed after the caret', () => {
+    const query = { start: 0, end: 3, term: 'pr' }
+    expect(applySlashInsert('/pr, then send', query, '{{keyword}}')).toEqual({
+      text: '{{keyword}}, then send',
+      caret: '{{keyword}}'.length,
+    })
+  })
+
+  it('invents no trailing space — a block param would carry it', () => {
+    expect(insertAt('/tit', '{{title}}').text).toBe('{{title}}')
+  })
+
+  it('replaces a bare slash', () => {
+    expect(insertAt('/', '{{lastText}}').text).toBe('{{lastText}}')
+  })
+})
+
+describe('rankByTerm', () => {
+  interface Entry {
+    name: string
+    hint?: string
+  }
+  const entries: Entry[] = [
+    { name: 'productName' },
+    { name: 'sumProduct' },
+    { name: 'price' },
+    { name: 'Recap', hint: 'summary of the article' },
+  ]
+  const ranked = (term: string): string[] =>
+    rankByTerm(
+      entries,
+      term,
+      (e) => e.name,
+      (e) => e.hint ?? '',
+    ).map((e) => e.name)
+
+  it('prefers a prefix over a word-start over a mid-word match', () => {
+    expect(ranked('prod')).toEqual(['productName', 'sumProduct'])
+    expect(ranked('duct')).toEqual(['productName', 'sumProduct'])
+  })
+
+  it('falls back to the hint so a synonym still finds the row', () => {
+    expect(ranked('article')).toEqual(['Recap'])
+  })
+
+  it('lists everything for an empty term, order preserved', () => {
+    expect(ranked('')).toEqual(['productName', 'sumProduct', 'price', 'Recap'])
+  })
+
+  it('matches across the separators a credential label uses', () => {
+    const secrets: Entry[] = [{ name: 'GitHub · token' }, { name: 'gh · cookie' }]
+    expect(rankByTerm(secrets, 'token', (e) => e.name).map((e) => e.name)).toEqual([
+      'GitHub · token',
+    ])
+  })
+
+  it('is case-insensitive', () => {
+    expect(ranked('PROD')).toEqual(['productName', 'sumProduct'])
   })
 })

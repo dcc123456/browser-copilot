@@ -95,6 +95,7 @@ export default function EditAiAgent({ data, onChange }: EditFormProps) {
             placeholder="lastAIAgent"
             fallback="lastAIAgent"
             onChange={(v) => onChange({ variableName: v })}
+            noSlash
           />
         </Field>
         <Checkbox

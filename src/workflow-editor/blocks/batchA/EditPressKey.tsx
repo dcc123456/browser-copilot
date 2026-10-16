@@ -218,12 +218,11 @@ export default function EditPressKey({ data, onChange }: EditFormProps) {
         <Field label="Key">
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
             <div style={{ flex: 1 }}>
-              <input
-                type="text"
+              <TextInput
                 value={str(data, 'keys')}
                 placeholder="(Enter, Esc, a, b, ...)"
                 list="press-key-keys"
-                onChange={(e) => onChange({ keys: e.target.value })}
+                onChange={(v) => onChange({ keys: v })}
               />
               <datalist id="press-key-keys">
                 {KEYS_LIST.map((key) => (

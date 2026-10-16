@@ -202,8 +202,15 @@ export function buildVariableIndex(
   return byValue
 }
 
-/** Strip anything that cannot appear in a `{{name}}`, and avoid a leading digit. */
-function sanitizeName(raw: string): string {
+/**
+ * Strip anything that cannot appear in a `{{name}}`, and avoid a leading digit.
+ *
+ * Exported because every module that MINTS a variable name needs the same
+ * reference-safety rule — the editor's secret picker names the `get-secret`
+ * output it creates, and a name that breaks `{{…}}` would be a dangling
+ * reference the user cannot even see.
+ */
+export function sanitizeName(raw: string): string {
   let name = raw.replace(/[^A-Za-z0-9_]/g, '')
   if (name === '' || /^[0-9]/.test(name)) name = `input${name}`
   if (RESERVED_NAMES.has(name)) name = `${name}Value`

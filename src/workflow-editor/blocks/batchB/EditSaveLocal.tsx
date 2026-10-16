@@ -49,6 +49,7 @@ export default function EditSaveLocal({ data, onChange }: EditFormProps) {
           value={str(data, 'variableName')}
           fallback="lastSavedPath"
           onChange={(v) => onChange({ variableName: v })}
+          noSlash
         />
       </Field>
     </div>
