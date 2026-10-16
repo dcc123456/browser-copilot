@@ -346,6 +346,70 @@ export class DriverError extends Error {
 /** No scriptable http(s) tab is available to act on. */
 export const NO_INJECTABLE_TAB = 'NO_INJECTABLE_TAB'
 
+/**
+ * Upper bound for one injected op round trip. chrome.scripting normally settles
+ * within milliseconds, but a renderer parked on a native modal
+ * (alert/confirm/prompt) keeps the evaluation pending forever — it neither
+ * resolves nor rejects — and a workflow step would then hang with no error. The
+ * CDP monitor auto-dismisses such dialogs on the happy path; this is the
+ * backstop for tabs where chrome.debugger is unavailable or detached. Sized
+ * well above the kernel's own waits (waitForSelector budget, contenteditable
+ * typing), which complete in a few seconds.
+ */
+const OP_INJECTION_TIMEOUT_MS = 30_000
+
+/**
+ * Like {@link abortable}, but also rejects after `ms` when the Chrome call
+ * never settles. The underlying call may finish later; its result is ignored,
+ * exactly as on user abort. A timeout surfaces as a DriverError so the engine's
+ * onError machinery handles it instead of freezing the whole run.
+ */
+function abortableWithTimeout<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+  ms: number,
+): Promise<T> {
+  if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
+  return new Promise<T>((resolve, reject) => {
+    let settled = false
+    const onAbort = (): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      signal?.removeEventListener('abort', onAbort)
+      reject(
+        new DriverError(
+          `页面脚本在 ${Math.round(ms / 1000)} 秒内未返回（可能被页面的原生弹窗 alert/confirm 或脚本阻塞），已跳过该步骤。请在页面上关闭弹窗后重试，或在工作流中加入对弹窗的处理。`,
+          'OP_INJECTION_TIMEOUT',
+        ),
+      )
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        signal?.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        signal?.removeEventListener('abort', onAbort)
+        reject(error as Error)
+      },
+    )
+  })
+}
+
 /** Element actions that benefit from an actionability pre-check. */
 const PRECHECK_OPS = new Set(['click', 'fill', 'press_key', 'select_option', 'set_checkbox'])
 
@@ -520,16 +584,19 @@ export async function execOnActiveTab(
     // resident kernel return no result and get the full kernel injected below.
     // Both functions are serialized as bare functions: no module-scope
     // closures. See src/inpage/kernel.ts.
-    injections = await abortable(
+    injections = await abortableWithTimeout(
       chrome.scripting.executeScript({
         target: { tabId: tab.id, allFrames: true },
         func: runOpViaKernel as unknown as (...args: unknown[]) => unknown,
         args: [op as unknown as never, KERNEL_VERSION],
       }),
       signal,
+      OP_INJECTION_TIMEOUT_MS,
     )
   } catch (error) {
     if ((error as Error)?.name === 'AbortError') throw error
+    // Keep the timeout's actionable message/code instead of rewrapping it.
+    if (error instanceof DriverError) throw error
     const message = error instanceof Error ? error.message : String(error)
     if (isContextLost(message)) {
       return {
@@ -553,17 +620,19 @@ export async function execOnActiveTab(
   const warm = injections.filter((injection) => injection?.result != null)
   if (coldFrameIds.length > 0 && typeof tab.id === 'number') {
     try {
-      const primed = await abortable(
+      const primed = await abortableWithTimeout(
         chrome.scripting.executeScript({
           target: { tabId: tab.id, frameIds: coldFrameIds },
           func: runOp as unknown as (...args: unknown[]) => unknown,
           args: [op as unknown as never],
         }),
         signal,
+        OP_INJECTION_TIMEOUT_MS,
       )
       warm.push(...primed)
     } catch (error) {
       if ((error as Error)?.name === 'AbortError') throw error
+      if (error instanceof DriverError) throw error
       const message = error instanceof Error ? error.message : String(error)
       // A navigation during priming destroyed the context — treat like above.
       if (isContextLost(message)) {

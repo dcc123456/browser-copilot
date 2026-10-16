@@ -130,6 +130,10 @@ export async function ensureTabMonitor(tabId: number): Promise<void> {
     await releaseMonitor(tabId)
     return
   }
+  // Page domain exists only to auto-dismiss native dialogs (see
+  // Page.javascriptDialogOpening below). It backs nothing else here, so a
+  // failure must leave the console/network monitor alive.
+  await send(tabId, 'Page.enable').catch(() => {})
   const monitor: TabMonitor = {
     tabId,
     console: [],
@@ -155,6 +159,32 @@ if (typeof chrome !== 'undefined' && chrome.debugger?.onEvent) {
     const monitor = monitors.get(tabId)
     if (!monitor) return
     const p = params as Record<string, unknown> | undefined
+
+    if (method === 'Page.javascriptDialogOpening') {
+      // A native alert/confirm/prompt/beforeunload dialog parks the renderer's
+      // JS thread; without Page domain nobody owns the dialog, so the pending
+      // chrome.scripting call (e.g. a click whose handler alerted) never settles
+      // and the workflow step hangs forever with no error. Mirror the runner's
+      // Playwright policy (server/src/driver.ts): accept prompt()/confirm() and
+      // dismiss beforeunload so the page keeps moving unattended.
+      const type = String(p?.type ?? '')
+      const isBeforeUnload = type === 'beforeunload'
+      void chrome.debugger
+        .sendCommand(
+          { tabId },
+          'Page.handleJavaScriptDialog',
+          isBeforeUnload
+            ? { accept: false }
+            : {
+                accept: true,
+                ...(type === 'prompt' ? { promptText: String(p?.defaultPrompt ?? '') } : {}),
+              },
+        )
+        .catch(() => {
+          /* dialog may already have been closed by the user */
+        })
+      return
+    }
 
     if (method === 'Runtime.consoleAPICalled') {
       const type = String(p?.type ?? '')
