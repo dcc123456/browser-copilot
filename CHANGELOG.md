@@ -8,6 +8,61 @@ All notable changes to this project are documented here. The format is based on
 
 _To be released._
 
+## [0.6.6] - 2026-10-16
+
+### Added — One get-secret node, several credentials
+
+A node could name exactly one credential, which made a workflow with two APIs cost
+two nodes. It now holds a list: pick a credential, and its variable name defaults
+to that credential's key and stays editable. Rows stay reachable even when nothing
+is stored yet — the add button used to disappear behind an empty state, so the
+panel looked dead. A blank row never reaches the graph, and only the reference
+(`label · fieldKey`) is ever persisted: values are fetched at run time from
+`BC_SECRET_*` in the Runner, and the extension keeps no copy. Guidance now also
+tells the model when a plain input block is the better answer to a sensitive value.
+
+### Added — Branch paths in conditions
+
+Conditions can name each branch and the paths a value takes through the tree, so a
+`switch`-style graph no longer hides which path ran. A new `elementValue` kind
+compares against the text an element actually holds, with a picker on the operator
+panel. Older shapes migrate on read; the stored format keeps working.
+
+### Added — Live progress, prompts instead of logs, and duplication
+
+- **Live thinking in chat**: the panel streams the model's reasoning, labels each
+  tool call with a plain-language intent, and ticks an elapsed clock per step.
+- **AI fix from a prompt alone**: the node-fix dialog no longer requires a log to
+  paste — type the goal and it runs. Both repair dialogs then show the same
+  detailed fix log as it streams, from one shared event stream.
+- **Goal contract in view**: every operator panel can expand the explanation of
+  what per-step verification and AI fix actually run on, without expanding the
+  section by accident.
+- **Workflow duplication**: the Workflows tab copies a saved workflow under a
+  fresh id and an auto-generated `"(copy)"` name. The copy starts with no revision
+  history — it has earned none — and its trigger is rescheduled in the same step.
+
+### Added — `/` in string fields
+
+Every operator parameter that takes a string opens a variable menu when you type
+`/`. Suggestions are scoped to what the node can read at run time (upstream names,
+loop context, reader aliases); picking a credential reuses a reachable get-secret
+producer or splices a new node upstream, and never writes a secret value anywhere.
+
+### Fixed — Canvas box-select and the empty add button
+
+Holding Space on the canvas now rubber-band selects and, on release, hands the
+canvas back to dragging: React Flow never sees a trusted Space keydown in this app,
+so the gesture runs off the editor's own key state. And "Add credential" stopped
+being a no-op for an operator with no credential stored — that button did not exist.
+
+### Fixed — Attributing an ai-agent block's turn
+
+A workflow's `ai-agent` block bills its turn to a per-node nonce id, so the Tokens
+board could neither name nor open that spend. The run's attribution is now threaded
+into the nested turn; vision calls and context compaction inside the block ride
+along.
+
 ## [0.6.5] - 2026-10-15
 
 ### Added — Where the tokens go
