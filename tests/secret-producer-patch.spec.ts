@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import {
-  ensureSecretProducer,
-  secretVariableNameOf,
-  type SecretFieldRef,
-} from '../src/lib/workflow/var-suggestions'
-import type { SuggestionGraph } from '../src/lib/workflow/var-suggestions'
+import { ensureSecretProducer, type SuggestionGraph } from '../src/lib/workflow/var-suggestions'
+import { secretVariableNameOf, type SecretFieldRef } from '../src/lib/workflow/secret-params'
 import type { WorkflowEdge, WorkflowNode } from '../src/lib/workflow/types'
 import { incomingNormalEdges } from '../src/lib/workflow/graph-edges'
 
@@ -46,9 +42,19 @@ function apply(
   graphInput: SuggestionGraph,
   patch: ReturnType<typeof ensureSecretProducer>,
 ): SuggestionGraph {
+  const nodePatch = patch.nodePatch
+  const nodes = patch.added ? [...graphInput.nodes, patch.added] : graphInput.nodes
   return {
     trigger: graphInput.trigger,
-    nodes: patch.added ? [...graphInput.nodes, patch.added] : graphInput.nodes,
+    // `patchNode` in the editor merges the patch into the node's data, so the
+    // second pick reads the rows the first one wrote.
+    nodes: nodePatch
+      ? nodes.map((existing) =>
+          existing.id === nodePatch.nodeId
+            ? { ...existing, data: { ...existing.data, ...nodePatch.patch } }
+            : existing,
+        )
+      : nodes,
     edges: patch.edges ?? graphInput.edges,
   }
 }
@@ -74,9 +80,11 @@ describe('ensureSecretProducer — reuse', () => {
     const edges = [edge('t', 'fetch'), edge('fetch', 'post')]
     const patch = ensureSecretProducer(graph(nodes, edges), 'post', ref, newId)
     expect(patch.variableName).toBe(secretVariableNameOf(ref))
+    // The row writer re-emits the whole row set, so the patch names the
+    // credential too (unchanged here) and clears the pre-dropdown keys.
     expect(patch.nodePatch).toEqual({
       nodeId: 'fetch',
-      patch: { variableName: secretVariableNameOf(ref) },
+      patch: { credential: 'gh::token', variableName: secretVariableNameOf(ref) },
     })
   })
 
@@ -92,14 +100,48 @@ describe('ensureSecretProducer — reuse', () => {
     expect(patch.variableName).toBe(secretVariableNameOf(ref))
   })
 
-  it('does not reuse a producer fetching a different field', () => {
+  it('adds a second credential row to the reachable producer', () => {
     const nodes = [
       node('t', 'trigger'),
       node('fetch', 'get-secret', { credential: 'gh::other', variableName: 'otherToken' }),
       node('post', 'forms'),
     ]
     const edges = [edge('t', 'fetch'), edge('fetch', 'post')]
-    expect(ensureSecretProducer(graph(nodes, edges), 'post', ref, newId).reused).toBe(false)
+    const patch = ensureSecretProducer(graph(nodes, edges), 'post', ref, newId)
+    // Several credentials, ONE node: the picked field joins the producer that is
+    // already upstream instead of stacking a second node onto the canvas.
+    expect(patch.reused).toBe(true)
+    expect(patch.added).toBeUndefined()
+    expect(patch.variableName).toBe(secretVariableNameOf(ref))
+    expect(patch.nodePatch).toEqual({
+      nodeId: 'fetch',
+      patch: {
+        // Row 1 keeps mirroring into the flat pair; the new row is appended.
+        credential: 'gh::other',
+        variableName: 'otherToken',
+        credentials: [
+          { credential: 'gh::other', variableName: 'otherToken' },
+          { credential: 'gh::token', variableName: secretVariableNameOf(ref) },
+        ],
+      },
+    })
+  })
+
+  it('reuses the row it just appended when the same credential is picked again', () => {
+    // The editor applies the patch and re-derives the graph, so the second pick
+    // sees the appended row. Without that read-back the same credential would
+    // stack a third row (or a second node) onto the canvas.
+    const base = graph(
+      [
+        node('t', 'trigger'),
+        node('fetch', 'get-secret', { credential: 'gh::other', variableName: 'otherToken' }),
+        node('post', 'forms'),
+      ],
+      [edge('t', 'fetch'), edge('fetch', 'post')],
+    )
+    const afterFirst = apply(base, ensureSecretProducer(base, 'post', ref, newId))
+    const second = ensureSecretProducer(afterFirst, 'post', ref, newId)
+    expect(second).toEqual({ variableName: secretVariableNameOf(ref), reused: true })
   })
 })
 

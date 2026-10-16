@@ -4330,9 +4330,9 @@ export async function executeTool(
           error:
             'Every success condition is a URL check, so none of them can prove the goal landed — ' +
             'the page this workflow opens matches them before its first step. Give at least one ' +
-            'condition the page must satisfy AFTER the action (elementText / elementVisible / ' +
-            'elementExists / elementAppeared / countIncreased / count / attributeEquals / ' +
-            'variableExists) and move the URL row to terminalStateConditions.',
+            'condition the page must satisfy AFTER the action (elementText / elementValue / ' +
+            'elementVisible / elementExists / elementAppeared / countIncreased / count / ' +
+            'attributeEquals / variableExists) and move the URL row to terminalStateConditions.',
         })
       }
       // The same seam, one failure class later: a proof that names its element by

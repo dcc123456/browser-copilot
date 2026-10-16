@@ -83,9 +83,13 @@ const MAX_CATALOG_CHARS = 31_400
  * numbers coincide today) so a future round-1 trim does not have to move the
  * explicit-declaration ceiling and vice versa. Raised 58_000 → 59_500 when
  * prepare_workflow_goal and find_workflow_operators (the generation goal gate
- * and discovery engine) joined the round-1 core.
+ * and discovery engine) joined the round-1 core. Raised 59_500 → 59_600 for the
+ * guide's credential-scope rule (+43 chars: `get-secret` is only for values that
+ * must stay secret — see specs/2026-10-16-get-secret-plain-input-design.md); it
+ * replaced the duplicated chat-credential paragraph rather than adding a second
+ * one, and the guide is mounted in every workflow payload.
  */
-const MAX_WORKFLOW_ROUND1_CHARS = 59_500
+const MAX_WORKFLOW_ROUND1_CHARS = 59_600
 /**
  * The real per-round ceiling: one declared category on top of round 1. The
  * largest (`interaction`, 13 schemas) measures ~32.8k; the smallest (`data`)
@@ -93,8 +97,9 @@ const MAX_WORKFLOW_ROUND1_CHARS = 59_500
  * operator guide), after the mode paragraph's duplicated prose was deleted.
  * Raised 34_000 → 35_500 together with the round-1 budget (required args).
  * Raised 35_500 → 37_000 when the generation goal and discovery tools joined.
+ * Raised 37_000 → 37_100 with the round-1 budget (the guide's credential-scope rule).
  */
-const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 37_000
+const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 37_100
 /**
  * The ceiling for the worst case the model can actually reach: every category
  * declared at once, which is the same set as `operators_author` (~42.9k of tool
@@ -102,9 +107,10 @@ const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 37_000
  * either. Raised 46_700 → 56_000 together with the round-1 budget (the mounted
  * operator guide). Raised 56_000 → 58_000 together with the round-1 budget
  * (required args). Raised 58_000 → 59_500 when the generation goal and
- * discovery tools joined.
+ * discovery tools joined. Raised 59_500 → 59_600 with the round-1 budget (the
+ * guide's credential-scope rule).
  */
-const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 59_500
+const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 59_600
 /**
  * Absolute worst case: every category plus both escape hatches loaded. Stays
  * loaded for the rest of the conversation, so this is a per-round cost, not a

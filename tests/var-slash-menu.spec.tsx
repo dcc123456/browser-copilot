@@ -33,9 +33,10 @@ import { TextArea, TextInput } from '../src/workflow-editor/blocks/shared/Field'
 import { SlashMenuProvider } from '../src/workflow-editor/blocks/shared/SlashVariableMenu'
 import { EDITOR_STRINGS } from '../src/workflow-editor/i18n'
 import { EditorLocaleContext, makeEditorLocale } from '../src/workflow-editor/locale-context'
-import type { SecretFieldRef, SuggestionGraph } from '../src/lib/workflow/var-suggestions'
+import type { SuggestionGraph } from '../src/lib/workflow/var-suggestions'
+import type { SecretFieldRef } from '../src/lib/workflow/secret-params'
 
-/** trigger → get-text(`lastText`) → the node whose field is being edited. */
+/** trigger → get-text(`lastText`) → get-text(`pageUrl`) → the node being edited. */
 const GRAPH: SuggestionGraph = {
   nodes: [
     { id: 't', label: 'trigger', position: { x: 0, y: 0 }, data: { blockId: 'trigger' } },
@@ -45,11 +46,18 @@ const GRAPH: SuggestionGraph = {
       position: { x: 0, y: 0 },
       data: { blockId: 'get-text', variableName: 'lastText' },
     },
+    {
+      id: 'b',
+      label: 'get-text',
+      position: { x: 0, y: 0 },
+      data: { blockId: 'get-text', variableName: 'pageUrl' },
+    },
     { id: 'target', label: 'forms', position: { x: 0, y: 0 }, data: { blockId: 'forms' } },
   ],
   edges: [
     { id: 't->a', source: 't', target: 'a' },
-    { id: 'a->target', source: 'a', target: 'target' },
+    { id: 'a->b', source: 'a', target: 'b' },
+    { id: 'b->target', source: 'b', target: 'target' },
   ],
   trigger: { type: 'manual', parameters: [{ name: 'keyword', type: 'string' }] },
 }
@@ -162,9 +170,19 @@ function type(el: HTMLInputElement | HTMLTextAreaElement, next: string): void {
   })
 }
 
+/**
+ * A real key press is keydown THEN keyup: the field re-reads its own caret on the
+ * keyup, which is exactly where a highlight reset used to live. Firing only the
+ * keydown let the arrow bug ship.
+ */
 function press(el: Element, init: KeyboardEventInit): void {
   act(() => {
     el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }))
+  })
+  // The release lands in its own task, as it does in a browser: by then React has
+  // committed whatever the keydown wrote, so `sync` reads the real caret.
+  act(() => {
+    el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true, ...init }))
   })
 }
 
@@ -229,6 +247,22 @@ describe('picking a suggestion', () => {
     expect(rows()[1]?.getAttribute('aria-selected')).toBe('true')
     press(el, { key: 'Enter' })
     expect(el.value).toBe('{{lastText}}')
+  })
+
+  it('walks down past the first row instead of snapping back to it', async () => {
+    const { el, rows } = await mount()
+    type(el, '/')
+    press(el, { key: 'ArrowDown' })
+    press(el, { key: 'ArrowDown' })
+    // The caret re-read on keyup must not restart the highlight: two presses
+    // land two rows down, and only one row stays selected.
+    const selected = rows().filter((row) => row.getAttribute('aria-selected') === 'true')
+    expect(selected).toHaveLength(1)
+    expect(rows()[2]?.contains(selected[0]!)).toBe(true)
+    press(el, { key: 'ArrowUp' })
+    expect(
+      rows()[1]?.contains(document.querySelector('[role="option"][aria-selected="true"]')!),
+    ).toBe(true)
   })
 
   it('closes on Escape without touching the field', async () => {

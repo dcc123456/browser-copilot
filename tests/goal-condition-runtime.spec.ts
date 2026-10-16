@@ -45,6 +45,7 @@ function fakeProbe(state: {
     visible: async () => state.visible ?? false,
     enabled: async () => state.enabled ?? false,
     text: async () => state.text,
+    value: async () => undefined,
     attribute: async () => state.attr,
     count: async () => state.count ?? 0,
     url: async () => state.url,

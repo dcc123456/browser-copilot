@@ -302,6 +302,55 @@ export function conditionTargetSpecs(target: unknown): import('../ops').TargetSp
 }
 
 /**
+ * The CSS selector an observer would search for on this target, whichever shape
+ * it is in: the first `css` spec of the chain that actually wins
+ * ({@link conditionTargetSpecs}), so what the editor shows is what the run uses —
+ * including the `data-css` form `auto-contract` records on a bare locator.
+ */
+export function conditionTargetSelector(target: unknown): string {
+  for (const spec of conditionTargetSpecs(target)) {
+    if (spec.how === 'css') return spec.value
+  }
+  return ''
+}
+
+/**
+ * The same target with the element the operator PICKED on the page.
+ *
+ * The write must follow the shape the observer reads, or the pick silently does
+ * nothing: {@link conditionTargetSpecs} treats a recorded `primary`/`fallbacks` chain
+ * as the whole search and ignores the flat `selector`. So a rich target takes the
+ * picked selector as its NEW primary and keeps the recorded specs as fallbacks —
+ * the operator aimed this row at the element they selected, the old specs stay as
+ * the drift rescue — while a chain-less locator writes the flat `selector` field
+ * that `targetSpecsFromSemantic` already appends. Clearing writes nothing back.
+ */
+export function withConditionTargetSelector(
+  target: ConditionTarget,
+  selector: string,
+): ConditionTarget {
+  type OpsTarget = import('../ops').Target
+  type OpsTargetSpec = import('../ops').TargetSpec
+  const css = selector.trim()
+  const raw = target as { primary?: OpsTargetSpec; fallbacks?: OpsTargetSpec[] }
+  const recorded = [raw.primary, ...(Array.isArray(raw.fallbacks) ? raw.fallbacks : [])].filter(
+    (spec): spec is OpsTargetSpec =>
+      !!spec && typeof spec === 'object' && typeof spec.how === 'string' && !!spec.value?.trim(),
+  )
+  const rest = { ...(target as Record<string, unknown>) }
+  delete rest['primary']
+  delete rest['fallbacks']
+  delete rest['selector']
+  const identity = recorded.filter((spec) => spec.how !== 'css')
+  if (recorded.length > 0) {
+    const picked: OpsTargetSpec = { how: 'css', value: css }
+    const [primary, ...fallbacks] = css ? [picked, ...identity] : identity
+    if (primary) return { ...(rest as unknown as OpsTarget), primary, fallbacks }
+  }
+  return css ? { ...(rest as SemanticLocator), selector: css } : (rest as SemanticLocator)
+}
+
+/**
  * Human-readable identity of a condition target, in either shape. Falls back to
  * the spec vocabulary so a run log never renders `元素存在 ` with nothing in it.
  */

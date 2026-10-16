@@ -157,8 +157,11 @@ function normalizeHandle(
   // (leftmost alternative wins): the editor renders the fallback handle as
   // `<blockId>-output-fallback`, and rewriting it to `<blockId>-fallback`
   // detached every saved fallback edge on reopen (the line silently vanished).
+  // `output-<token>` accepts letters too so conditions-block path handles
+  // (`output-<pathId>`, e.g. `output-p1`) survive normalization instead of being
+  // clobbered to `output-1`.
   const match =
-    /-(output-fallback|input-fallback|output-\d+|input-\d+|fallback|true|false|loop|end)$/.exec(
+    /-(output-fallback|input-fallback|output-[A-Za-z0-9_]+|input-[A-Za-z0-9_]+|fallback|true|false|loop|end)$/.exec(
       handle,
     )
   const raw = match ? match[1] : kind === 'source' ? 'output-1' : 'input-1'
@@ -175,6 +178,9 @@ export function migrateWorkflow(wf: Workflow): Workflow {
   if (!wf?.drawflow?.nodes) return wf
   let changed = false
   const nodeBlockById = new Map<string, string>()
+  // conditions blocks that got a single auto-migrated path in this pass, so the
+  // old true/false edges below can be re-pointed at that path / the fallback.
+  const migratedConditionPath = new Map<string, string>()
   const nodes: WorkflowNode[] = wf.drawflow.nodes.map((node) => {
     const rawBlockId =
       (node.data?.blockId as string | undefined) ??
@@ -182,6 +188,29 @@ export function migrateWorkflow(wf: Workflow): Workflow {
       node.label
     const { blockId, data } = migrateNodeData(rawBlockId, node.data)
     nodeBlockById.set(node.id, blockId)
+
+    // Legacy `conditions` blocks carried one boolean (true/false) over a flat
+    // condition tree. Give them the N-path shape: one named path holding the
+    // legacy tree, plus the always-present fallback. Idempotent — the test is
+    // on the STORED data, because `migrateNodeData` has already merged the
+    // catalog's `paths: []` default in and that would read as "already done".
+    const stored = isRecord(node.data) ? node.data : {}
+    if (blockId === 'conditions' && stored['paths'] === undefined) {
+      data['paths'] = [
+        {
+          id: 'p1',
+          name: 'Path 1',
+          conditions: Array.isArray(stored['conditions']) ? stored['conditions'] : [],
+        },
+      ]
+      // `paths` is authoritative from here on, so the legacy single tree goes:
+      // leaving it behind would let a later read resurrect a branch the user
+      // has since deleted.
+      delete data['conditions']
+      migratedConditionPath.set(node.id, 'p1')
+      changed = true
+    }
+
     if (blockId !== rawBlockId || !isRecord(node.data) || node.data.values !== undefined) {
       changed = true
     }
@@ -196,12 +225,26 @@ export function migrateWorkflow(wf: Workflow): Workflow {
   const edges: WorkflowEdge[] = (wf.drawflow.edges ?? []).map((edge) => {
     const sourceBlock = nodeBlockById.get(edge.source)
     const targetBlock = nodeBlockById.get(edge.target)
-    const sourceHandle = sourceBlock
+    let sourceHandle = sourceBlock
       ? normalizeHandle(edge.sourceHandle, sourceBlock, 'source')
       : edge.sourceHandle
     const targetHandle = targetBlock
       ? normalizeHandle(edge.targetHandle, targetBlock, 'target')
       : edge.targetHandle
+
+    // Re-point a migrated conditions block's legacy true/false edges onto the
+    // single auto path and the "no path matched" port. `output-none` is its own
+    // handle id: `output-fallback` already means "route here when the block
+    // errors" (the onError policy) and a node must never render both.
+    const migratedPath = migratedConditionPath.get(edge.source)
+    if (sourceBlock === 'conditions' && migratedPath) {
+      if (sourceHandle === `${sourceBlock}-output-1`) {
+        sourceHandle = `${sourceBlock}-output-${migratedPath}`
+      } else if (sourceHandle === `${sourceBlock}-output-2`) {
+        sourceHandle = `${sourceBlock}-output-none`
+      }
+    }
+
     if (sourceHandle !== edge.sourceHandle || targetHandle !== edge.targetHandle) changed = true
     return { ...edge, sourceHandle, targetHandle }
   })

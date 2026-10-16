@@ -27,7 +27,9 @@ function conn(p: Partial<Connection>): Connection {
 }
 
 describe('applyConnection (canvas edge bookkeeping)', () => {
-  it('replaces the edge occupying a normal input handle', () => {
+  it('adds a second feed to an occupied input instead of evicting the first', () => {
+    // Two branches converging on one node — the merge the sign-in split needs.
+    // b keeps the feed it already had; the new one joins it.
     const eds = [
       edge({
         id: 'e1',
@@ -41,9 +43,26 @@ describe('applyConnection (canvas edge bookkeeping)', () => {
       eds,
       conn({ source: 'c', target: 'b', sourceHandle: 'c-output-1', targetHandle: 'b-input-1' }),
     )
+    expect(out.map((e) => e.target)).toEqual(['b', 'b'])
+    expect(out.map((e) => e.source)).toEqual(['a', 'c'])
+  })
+
+  it('moves a branch instead of stacking a second edge from the same handle', () => {
+    const eds = [
+      edge({
+        id: 'e1',
+        source: 'a',
+        target: 'b',
+        sourceHandle: 'a-output-1',
+        targetHandle: 'b-input-1',
+      }),
+    ]
+    const out = applyConnection(
+      eds,
+      conn({ source: 'a', target: 'z', sourceHandle: 'a-output-1', targetHandle: 'z-input-1' }),
+    )
     expect(out).toHaveLength(1)
-    expect(out[0]!.source).toBe('c')
-    expect(out[0]!.target).toBe('b')
+    expect(out[0]!.target).toBe('z')
   })
 
   it('treats an identical re-draw as a no-op', () => {
@@ -59,6 +78,30 @@ describe('applyConnection (canvas edge bookkeeping)', () => {
     const out = applyConnection(
       eds,
       conn({ source: 'a', target: 'b', sourceHandle: 'a-output-1', targetHandle: 'b-input-1' }),
+    )
+    expect(out).toBe(eds)
+  })
+
+  it('does not duplicate a merge edge when the second branch is redrawn', () => {
+    const eds = [
+      edge({
+        id: 'e1',
+        source: 'a',
+        target: 'b',
+        sourceHandle: 'a-output-1',
+        targetHandle: 'b-input-1',
+      }),
+      edge({
+        id: 'e2',
+        source: 'c',
+        target: 'b',
+        sourceHandle: 'c-output-1',
+        targetHandle: 'b-input-1',
+      }),
+    ]
+    const out = applyConnection(
+      eds,
+      conn({ source: 'c', target: 'b', sourceHandle: 'c-output-1', targetHandle: 'b-input-1' }),
     )
     expect(out).toBe(eds)
   })
@@ -230,8 +273,9 @@ describe('applyConnection (canvas edge bookkeeping)', () => {
   })
 
   it('does not treat a draw to a disconnected node as a loop-back', () => {
-    // A normal draw onto an occupied input still replaces it when the draw
-    // closes no cycle (the target merely sits left/upstream on the canvas).
+    // c sits left/upstream of b on the canvas but the graph has no path b → c,
+    // so the draw closes no cycle and takes the ordinary route: b keeps the feed
+    // it had and gains c's.
     const eds = [
       edge({
         id: 'e1',
@@ -245,8 +289,8 @@ describe('applyConnection (canvas edge bookkeeping)', () => {
       eds,
       conn({ source: 'c', target: 'b', sourceHandle: 'c-output-1', targetHandle: 'b-input-1' }),
     )
-    expect(out).toHaveLength(1)
-    expect(out[0]!.source).toBe('c')
+    expect(out.map((e) => e.id)).toEqual(['e1', expect.any(String)])
+    expect(out[1]!.source).toBe('c')
   })
 
   it('edgeClosesCycle detects only edges that close a directed cycle', () => {
@@ -264,7 +308,7 @@ describe('applyConnection (canvas edge bookkeeping)', () => {
     expect(edgeClosesCycle(eds, 'a', 'a')).toBe(true)
   })
 
-  it('keeps existing fallback edges when a normal edge redraws onto the same input', () => {
+  it('keeps existing fallback edges when a normal edge joins the same input', () => {
     const eds = [
       edge({
         id: 'e1',
@@ -285,9 +329,9 @@ describe('applyConnection (canvas edge bookkeeping)', () => {
       eds,
       conn({ source: 'x', target: 'a', sourceHandle: 'x-output-1', targetHandle: 'a-input-1' }),
     )
-    // The normal input is replaced (t → a becomes x → a)…
-    expect(out.map((e) => e.id)).not.toContain('e2')
-    // …but the fallback line into a survives.
-    expect(out.map((e) => e.id)).toContain('e1')
+    // The fallback line into a survives, and so does t → a: x joins a's feeds
+    // instead of replacing one of them.
+    expect(out.map((e) => e.id)).toEqual(['e1', 'e2', expect.any(String)])
+    expect(out[2]!.source).toBe('x')
   })
 })

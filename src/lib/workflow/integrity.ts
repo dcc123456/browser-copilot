@@ -30,6 +30,7 @@
 
 import { referenceRoot, referencesIn } from './dynamic-data'
 import { TRIGGER_BLOCK_ID } from './draft-types'
+import { producedVariableNames } from './producer-completeness'
 import type { Workflow, WorkflowNode } from './types'
 
 /** One `{{reference}}` no block in the graph produces and no input declares. */
@@ -100,27 +101,14 @@ function blockIdOf(node: WorkflowNode): string {
 }
 
 /**
- * The variable name a single node publishes, or empty when it publishes none.
- *
- * Exported because the editor's variable picker needs the per-node answer for
- * the nodes upstream of the one being edited, and must not invent a second
- * definition of "what this block writes".
- */
-export function producedNameOfNode(node: WorkflowNode): string {
-  const declared = node.data?.['variableName']
-  return typeof declared === 'string' ? declared.trim() : ''
-}
-
-/**
- * Variable names the graph can produce: every node's `variableName` (its own
- * value, or the catalog default the node carries in `data`) plus the engine's
- * fixed aliases.
+ * Variable names the graph can produce: every node's published names (see
+ * `producer-completeness.producedVariableNames` — one PER ROW for a
+ * multi-credential `get-secret` node) plus the engine's fixed aliases.
  */
 function producedNames(workflow: Workflow): Set<string> {
   const names = new Set<string>(ENGINE_PROVIDED_NAMES)
   for (const node of workflow.drawflow.nodes) {
-    const declared = producedNameOfNode(node)
-    if (declared) names.add(declared)
+    for (const declared of producedVariableNames(node)) names.add(declared)
   }
   return names
 }

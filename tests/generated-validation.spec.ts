@@ -188,6 +188,28 @@ describe('layer B — data flow', () => {
     )
   })
 
+  it('one get-secret node satisfies references to each of its rows', () => {
+    // A node fetched the password AND the token: row 1 is the mirrored
+    // `variableName`, row 2 only lives in `credentials`. Seeing just row 1 made
+    // the generated graph read a variable "nothing writes".
+    const wf = linearWorkflow(
+      triggerNode(),
+      makeNode('get-secret', {
+        credential: 'mail::password',
+        variableName: 'mailPassword',
+        credentials: [
+          { credential: 'mail::password', variableName: 'mailPassword' },
+          { credential: 'gh::token', variableName: 'githubToken' },
+        ],
+      }),
+      makeNode('forms', { action: 'fill', selector: '#t', value: '{{githubToken}}' }),
+      makeNode('forms', { action: 'fill', selector: '#p', value: '{{mailPassword}}' }),
+    )
+    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('DATA_'))).toHaveLength(
+      0,
+    )
+  })
+
   it('declared workflow inputs count as written', () => {
     const wf = linearWorkflow(
       triggerNode(),
@@ -277,6 +299,80 @@ describe('layer B — control-flow aware data flow', () => {
     expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('DATA_'))).toHaveLength(
       0,
     )
+  })
+})
+
+// --- layer B: a credential fetch nothing reads ------------------------------------------
+
+describe('layer B — a credential fetch nothing reads', () => {
+  const warningCodes = (wf: Workflow): string[] =>
+    validateGeneratedWorkflow(wf).warnings.map((i) => i.code)
+
+  it('a fetched credential no node uses warns without blocking the save', () => {
+    // The reported shape: generation routed the USERNAME through get-secret,
+    // then filled the field with a literal.
+    const wf = linearWorkflow(
+      triggerNode(),
+      makeNode('get-secret', { credential: 'mail::account', variableName: 'mailAccount' }),
+      makeNode('forms', { action: 'fill', selector: '#user', value: 'u1', fields: [] }),
+    )
+    const report = validateGeneratedWorkflow(wf)
+    expect(report.warnings.map((i) => i.code)).toEqual(['DATA_UNUSED_SECRET'])
+    expect(report.errors).toHaveLength(0)
+    expect(report.ok).toBe(true)
+    expect(report.warnings[0]?.message).toContain('{{mailAccount}}')
+    expect(report.warnings[0]?.suggestedFix).toContain('触发器参数')
+  })
+
+  it('the same fetch is clean once a node reads the variable', () => {
+    const wf = linearWorkflow(
+      triggerNode(),
+      makeNode('get-secret', { credential: 'mail::password', variableName: 'mailPassword' }),
+      makeNode('forms', { action: 'fill', selector: '#pass', value: '{{mailPassword}}' }),
+    )
+    expect(warningCodes(wf)).toEqual([])
+  })
+
+  it('checks every row of a multi-credential node — one warning per unread row', () => {
+    const wf = linearWorkflow(
+      triggerNode(),
+      makeNode('get-secret', {
+        credential: 'mail::password',
+        variableName: 'mailPassword',
+        credentials: [
+          { credential: 'mail::password', variableName: 'mailPassword' },
+          { credential: 'gh::token', variableName: 'githubToken' },
+        ],
+      }),
+      makeNode('forms', { action: 'fill', selector: '#pass', value: '{{mailPassword}}' }),
+    )
+    const unread = validateGeneratedWorkflow(wf).warnings.filter(
+      (i) => i.code === 'DATA_UNUSED_SECRET',
+    )
+    expect(unread).toHaveLength(1)
+    expect(unread[0]?.message).toContain('githubToken')
+  })
+
+  it('is scoped to credentials — an unread scratch variable stays silent', () => {
+    const wf = linearWorkflow(
+      triggerNode(),
+      makeNode('set-variable', { variableName: 'scratch', value: 'x' }),
+      makeNode('forms', { action: 'fill', selector: '#user', value: 'u1', fields: [] }),
+    )
+    expect(warningCodes(wf)).toEqual([])
+  })
+
+  it('an unreachable fetch belongs to layer A, not to the data warnings', () => {
+    const wf = linearWorkflow(
+      triggerNode(),
+      makeNode('forms', { action: 'fill', selector: '#user', value: 'u1', fields: [] }),
+    )
+    wf.drawflow.nodes.push(
+      makeNode('get-secret', { credential: 'mail::account', variableName: 'mailAccount' }),
+    )
+    const report = validateGeneratedWorkflow(wf)
+    expect(report.errors.map((i) => i.code)).toContain('GRAPH_UNREACHABLE_NODE')
+    expect(report.warnings.map((i) => i.code)).not.toContain('DATA_UNUSED_SECRET')
   })
 })
 

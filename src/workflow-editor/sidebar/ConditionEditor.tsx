@@ -2,9 +2,10 @@
  * Condition editor — editable rows for {@link WorkflowCondition}.
  *
  * Supports the condition kinds that map to a small form (URL, element,
- * variable); element targets use a semantic locator (role + accessible name).
- * Used by {@link NodeGoalInspector} so users can manually add and edit a node's
- * success criteria instead of only reading a rendered summary.
+ * variable); element targets name their element in words AND, optionally, pin it
+ * with the same CSS-selector control every block form uses (pick on the page /
+ * verify). Used by {@link NodeGoalInspector} so users can manually add and edit a
+ * node's success criteria instead of only reading a rendered summary.
  *
  * Pure presentation: every change is normalised through the condition guard
  * before it is reported, so the parent always receives a valid condition.
@@ -16,19 +17,35 @@ import { Plus, Trash2 } from 'lucide-react'
 import type { WorkflowCondition } from '../../lib/workflow/conditions'
 import {
   conditionTargetName,
+  conditionTargetSelector,
   withConditionTargetName,
+  withConditionTargetSelector,
 } from '../../lib/workflow/element-fingerprint'
 import type { TranslateFn } from '../i18n'
+import SelectorField from '../blocks/shared/SelectorField'
 
 /** Condition kinds offered in the manual editor. */
 export const EDITABLE_CONDITION_KINDS = [
   'elementVisible',
   'elementExists',
   'elementText',
+  'elementValue',
   'urlContains',
   'variableExists',
   'variableEquals',
 ] as const
+
+/**
+ * The offered kinds that point at an element on the page, so they get the name
+ * input and the selector picker. Kinds the editor does not offer can still arrive
+ * from a generated contract and keep their own rendering.
+ */
+const ELEMENT_ROW_KINDS: readonly WorkflowCondition['kind'][] = [
+  'elementVisible',
+  'elementExists',
+  'elementText',
+  'elementValue',
+]
 
 const inputClass =
   'min-w-0 flex-1 rounded-md border border-border bg-panel px-2 py-1 text-xs text-ink outline-none focus:border-accent'
@@ -49,6 +66,8 @@ function blankCondition(kind: string): WorkflowCondition {
         expected: '',
         match: 'contains',
       }
+    case 'elementValue':
+      return { kind: 'elementValue', target: { accessibleName: '' }, op: 'notEmpty' }
     case 'variableExists':
       return { kind: 'variableExists', name: '' }
     case 'variableEquals':
@@ -80,6 +99,16 @@ function ConditionRow({
     if (!('target' in condition)) return
     onPatch({ ...condition, target: withConditionTargetName(condition.target, accessibleName) })
   }
+  const setSelector = (selector: string) => {
+    if (!('target' in condition)) return
+    onPatch({
+      ...condition,
+      target: withConditionTargetSelector(condition.target, selector),
+    })
+  }
+  const isElementRow = ELEMENT_ROW_KINDS.includes(condition.kind)
+  const target = 'target' in condition ? condition.target : undefined
+  const selectorValue = isElementRow && target ? conditionTargetSelector(target) : ''
 
   return (
     <li className="flex flex-col gap-1 rounded-md border border-border bg-panel p-2">
@@ -107,9 +136,7 @@ function ConditionRow({
       </div>
 
       <div className="flex flex-col gap-1">
-        {(condition.kind === 'elementVisible' ||
-          condition.kind === 'elementExists' ||
-          condition.kind === 'elementText') && (
+        {isElementRow && (
           <input
             className={inputClass}
             type="text"
@@ -117,6 +144,12 @@ function ConditionRow({
             value={nameOf(condition)}
             onChange={(e) => setName(e.target.value)}
           />
+        )}
+
+        {/* The same control the block forms use: pick the element in the live tab
+            and the row aims at that one element, verify reports its match count. */}
+        {isElementRow && (
+          <SelectorField selector={selectorValue} onSelector={setSelector} inputVariant="input" />
         )}
 
         {condition.kind === 'elementText' && (
@@ -127,6 +160,34 @@ function ConditionRow({
             value={condition.expected}
             onChange={(e) => onPatch({ ...condition, expected: e.target.value })}
           />
+        )}
+
+        {condition.kind === 'elementValue' && (
+          <>
+            <select
+              className={selectClass}
+              value={condition.op}
+              onChange={(e) =>
+                onPatch({
+                  ...condition,
+                  op: e.target.value === 'equals' ? 'equals' : 'notEmpty',
+                })
+              }
+              aria-label={t('nodeConditionValueMode')}
+            >
+              <option value="notEmpty">{t('nodeConditionValueNotEmpty')}</option>
+              <option value="equals">{t('nodeConditionValueEquals')}</option>
+            </select>
+            {condition.op === 'equals' && (
+              <input
+                className={inputClass}
+                type="text"
+                placeholder={t('nodeConditionExpectedValue')}
+                value={condition.expected ?? ''}
+                onChange={(e) => onPatch({ ...condition, expected: e.target.value })}
+              />
+            )}
+          </>
         )}
 
         {condition.kind === 'urlContains' && (

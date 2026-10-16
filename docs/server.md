@@ -241,6 +241,7 @@ pnpm --dir server start
 | `BC_RUN_TIMEOUT_MS`               | 600000                | 单次运行硬超时                             |
 | `BC_LLM_BASE_URL/_API_KEY/_MODEL` | —                     | ai-agent / AI 接管用的 OpenAI 兼容模型     |
 | `BC_FEISHU_*`                     | —                     | 见 §5.4                                    |
+| `BC_SECRET_*`                     | —                     | `get-secret` 算子的凭证值，见 §7.2         |
 
 ### 7.1 敏感配置放哪、怎么配（LLM Key / 飞书 Secret 示例）
 
@@ -362,9 +363,33 @@ curl -s -X POST http://127.0.0.1:8787/api/runs \
 - 换 Key：改环境变量/文件 → 重启进程（容器则 `docker compose up -d` 重建），无需动仓库。
 - 一旦怀疑泄露：先在服务商后台吊销（DeepSeek 控制台 / 飞书开放平台重置 App Secret），再换新值重启；已提交进 git 历史的密钥视为已泄露，必须吊销而不是删除提交。
 
+### 7.2 工作流凭证（`get-secret` 算子）
+
+扩展里的「获取凭证」在运行时读浏览器本机的凭证库；Runner 进程没有这个库，所以同一个块在服务端**只从环境变量取值**。工作流 JSON 里依然只有 `<凭证ID>::<字段>` 这条引用和输出变量名，值不落盘、不进运行日志。
+
+变量名由引用推导（`src/lib/workflow/secret-params.ts` 的 `secretEnvNameOf`）：大写、非字母数字换成 `_`，加 `BC_SECRET_` 前缀。
+
+| 块里的引用         | 读取的环境变量              |
+| ------------------ | --------------------------- |
+| `github::token`    | `BC_SECRET_GITHUB_TOKEN`    |
+| `mail`（只写 ID）  | `BC_SECRET_MAIL`            |
+| `prod db::api.key` | `BC_SECRET_PROD_DB_API_KEY` |
+
+```bash
+export BC_SECRET_GITHUB_TOKEN="ghp_xxxxxxxx"
+export BC_SECRET_MAIL_PASSWORD="xxxxxxxx"
+pnpm --dir server start
+```
+
+同一个节点可以配多行凭证，每行写入自己的变量，所以三把钥匙是一个节点而不是三个节点；每行都必须有输出变量名。
+
+缺值时这个块**直接失败**（`环境变量 BC_SECRET_XXX 未设置或为空`），不会把空串写进变量——否则下游会拿着空密码"成功"填表。服务端无法枚举某个凭证有哪些字段，所以只写 ID 的引用只试 `BC_SECRET_<ID>` 一个名字（扩展侧则会先试 `password`，再取第一个字段）；两边名字对不上时，给引用补上字段名即可。
+
+命名只按上表规则做字符替换，因此 `a.b` 与 `a-b` 这类纯标点差异的 ID 会撞到同一个变量名——已知且可接受（扩展侧的 ID 是 slug，撞名后果是"取到同一个值"而非"取不到值"）。
+
 ## 8. 块支持矩阵（相对扩展）
 
-- **完全支持**：click/fill/scroll/hover/按键/勾选、open-url/new-tab/switch-tab/close-tab/reload、get-text/get-form/set-radio/attribute-value/tab-url、set/get-variable、insert/export-data、slice/regex/increase/delete/sort/data-mapping、log-data、condition/conditions/delay、loop-data/repeat-task/while-loop/loop-elements（引擎循环）、**execute-workflow（嵌套）**、cookie、clipboard、element-exists、link、create-element、upload-file、handle-dialog、wait-connections、trigger-event、webhook、javascript-code（页面优先、本地兜底）、handle-download、save-local、forms、event-click/hover-element/element-scroll、loop-breakpoint、workflow-state、parameter-prompt（从运行变量读取）。
+- **完全支持**：click/fill/scroll/hover/按键/勾选、open-url/new-tab/switch-tab/close-tab/reload、get-text/get-form/set-radio/attribute-value/tab-url、set/get-variable、get-secret（凭证值取自 `BC_SECRET_*`，见 §7.2）、insert/export-data、slice/regex/increase/delete/sort/data-mapping、log-data、condition/conditions/delay、loop-data/repeat-task/while-loop/loop-elements（引擎循环）、**execute-workflow（嵌套）**、cookie、clipboard、element-exists、link、create-element、upload-file、handle-dialog、wait-connections、trigger-event、webhook、javascript-code（页面优先、本地兜底）、handle-download、save-local、forms、event-click/hover-element/element-scroll、loop-breakpoint、workflow-state、parameter-prompt（从运行变量读取）。
 - **服务端降级**（记录日志后继续）：notification（→日志）、proxy/save-assets/switch-to/browser-event（占位说明）、parameter-prompt（无人值守无弹窗）。
 - **AI 块**：`ai-prompt`、`ai-agent`（可带 `actOnPage` 让模型真实操作页面）、失败节点 **AI 接管**（与扩展同一 prompt/判定协议，最多 3 次尝试，结果写入失败块的目标变量；参数修正建议只记录不自动应用）。
 - **OCR**：`ocr` 走 tesseract.js（Node 原生可用）。

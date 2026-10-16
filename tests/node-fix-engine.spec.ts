@@ -109,6 +109,87 @@ describe('runNodeFix', () => {
     expect(result.reason).toContain('goal contract')
   })
 
+  it('repairs from the prompt alone and checks the criterion it agreed', async () => {
+    const collector = eventCollector()
+    const checked: WorkflowCondition[][] = []
+    const result = await runNodeFix(
+      {
+        sessionId: 'p1',
+        blockId: 'forms',
+        blockData: { selector: '#old' },
+        userSuggestion: 'fill the username from the workflow input',
+        errorLog: 'ElementNotFound: input[name="user"]',
+      },
+      {
+        signal: new AbortController().signal,
+        emit: collector.emit,
+        executeNode: async () => ({ ok: true }),
+        evaluateCriteria: async (cs) => {
+          checked.push(cs)
+          return cs.map((condition) => ({ condition, satisfied: condition.kind === 'urlContains' }))
+        },
+        callModel: async (prompt) => {
+          expect(prompt).toContain('no stored contract')
+          expect(prompt).toContain('ElementNotFound')
+          return {
+            rationale: 'point at the real input',
+            data: { selector: 'input[name="user"]' },
+            verify: { kind: 'urlContains', value: '/login' },
+          }
+        },
+      },
+    )
+    expect(result.success).toBe(true)
+    expect(result.verifiedBy).toBe('criteria')
+    expect(result.proposedData!['selector']).toBe('input[name="user"]')
+    // The same round that agrees the check runs the adopted params and evaluates
+    // it — no round is spent on a precheck against the pre-run page.
+    expect(checked).toEqual([[{ kind: 'urlContains', value: '/login' }]])
+    expect(result.rounds).toBe(1)
+    expect(collector.events.some((e) => e.message.includes('check:'))).toBe(true)
+  })
+
+  it('never stores the temporary criterion on the node', async () => {
+    const result = await runNodeFix(
+      { sessionId: 'p2', blockId: 'forms', blockData: { selector: '#old' }, userSuggestion: 'x' },
+      {
+        signal: new AbortController().signal,
+        emit: eventCollector().emit,
+        executeNode: async () => ({ ok: true }),
+        evaluateCriteria: async (cs) => cs.map((condition) => ({ condition, satisfied: true })),
+        callModel: async () => ({
+          rationale: 'r',
+          data: { selector: '#new', [WORKFLOW_AI_NAMESPACE]: { goalContract: 'injected' } },
+          verify: { kind: 'urlContains', value: '/done' },
+        }),
+      },
+    )
+    expect(result.success).toBe(true)
+    // The reply cannot smuggle a contract into the node: the namespace is stripped,
+    // and the agreed check only ever lives in the loop.
+    expect(result.proposedData![WORKFLOW_AI_NAMESPACE]).toBeUndefined()
+  })
+
+  it('labels a checkless repair as exec-only', async () => {
+    const collector = eventCollector()
+    const result = await runNodeFix(
+      { sessionId: 'p3', blockId: 'forms', blockData: { selector: '#old' }, userSuggestion: 'x' },
+      {
+        signal: new AbortController().signal,
+        emit: collector.emit,
+        executeNode: async () => ({ ok: true }),
+        evaluateCriteria: async (cs) => cs.map((condition) => ({ condition, satisfied: true })),
+        // No `verify` in the reply: nothing on the page can be checked.
+        callModel: async () => ({ rationale: 'r', data: { selector: '#new' } }),
+      },
+    )
+    expect(result.success).toBe(true)
+    expect(result.verifiedBy).toBe('exec-only')
+    // Asked for a check exactly once — a model that never supplies one is not
+    // billed for three attempts.
+    expect(collector.events.filter((e) => e.message.includes('agreeing how'))).toHaveLength(1)
+  })
+
   it('reports a missing provider when callModel returns null', async () => {
     const result = await runNodeFix(
       { sessionId: 's5', blockId: 'event-click', blockData: blockData() },
@@ -198,5 +279,56 @@ describe('runNodeFix', () => {
       },
     )
     await expect(promise).rejects.toThrow('Aborted')
+  })
+})
+
+describe('runNodeFix — the live fix log', () => {
+  it('streams the parameters sent, the AI answer and the page verdicts', async () => {
+    const collector = eventCollector()
+    const result = await runNodeFix(
+      {
+        sessionId: 'log1',
+        blockId: 'event-click',
+        blockData: blockData(),
+        userSuggestion: 'the selector is stale',
+      },
+      {
+        signal: new AbortController().signal,
+        emit: collector.emit,
+        executeNode: async () => ({ ok: true }),
+        evaluateCriteria: async (cs) => cs.map((condition) => ({ condition, satisfied: false })),
+        callModel: async () => ({
+          rationale: 'use the test id',
+          data: { selector: '[data-testid=go]' },
+        }),
+      },
+    )
+    expect(result.success).toBe(false)
+    const sent = collector.events.filter((event) => event.payload?.request)
+    expect(sent.some((event) => event.payload!.request!.includes('#old'))).toBe(true)
+    const returned = collector.events.filter((event) => event.payload?.response)
+    expect(returned.some((event) => event.payload!.response!.includes('data-testid=go'))).toBe(true)
+    // The verdicts say what the page answered, not just that something failed.
+    expect(returned.some((event) => event.payload!.response!.includes('✗'))).toBe(true)
+  })
+
+  it('keeps the trial-run error in the log even though the loop swallows it', async () => {
+    const collector = eventCollector()
+    const result = await runNodeFix(
+      { sessionId: 'log2', blockId: 'event-click', blockData: blockData() },
+      {
+        signal: new AbortController().signal,
+        emit: collector.emit,
+        executeNode: async () => ({ ok: false, error: 'ElementNotFound: #old' }),
+        evaluateCriteria: async (cs) => cs.map((condition) => ({ condition, satisfied: false })),
+        callModel: async () => ({ rationale: 'r', data: { selector: '#new' } }),
+      },
+    )
+    expect(result.success).toBe(false)
+    expect(
+      collector.events.some(
+        (event) => event.phase === 'executing' && event.message.includes('ElementNotFound'),
+      ),
+    ).toBe(true)
   })
 })

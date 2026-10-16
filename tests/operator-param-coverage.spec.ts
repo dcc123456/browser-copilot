@@ -61,6 +61,9 @@ const SHARED_HELPER_SOURCES = [
   // Without it the guard sees an executor that reads nothing and reports the
   // block's entire parameter set as inert.
   'src/background/workflow-engine/ai-agent-executor.ts',
+  // `get-secret` reads its credential rows through the data model, so its
+  // `credential` / `variableName` reads live here rather than in the executor.
+  'src/lib/workflow/secret-params.ts',
 ]
 
 /**

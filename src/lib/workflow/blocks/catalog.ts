@@ -879,7 +879,8 @@ export const BLOCK_CATALOG: BlockCatalogEntry[] = [
     data: {
       description: '',
       disableBlock: false,
-      conditions: [],
+      // One output port per entry; the canvas always adds the fallback port.
+      paths: [],
       retryConditions: false,
       retryCount: 10,
       retryTimeout: 1000,

@@ -47,7 +47,12 @@ function stateOf(events: RepairProgressEvent[]): DerivedState {
   return 'running'
 }
 
-/** Collapse the event stream into a short step list for the UI. */
+/**
+ * Collapse the event stream into the log the user watches. Every field the
+ * background already sent shows up here — the strategy name, the attempt number,
+ * the nodes a patch touched, the reason an attempt failed — because a list of
+ * six canned labels tells the user nothing about what the repair is doing.
+ */
 function stepRowsOf(
   events: RepairProgressEvent[],
   t: ReturnType<typeof useT>,
@@ -59,13 +64,19 @@ function stepRowsOf(
       rows.push({
         key: `${event.type}-${event.sessionId}-${event.attempt}`,
         status: 'done',
-        text: t.workflowRepairDiagnosing,
+        text: `${t.workflowRepairDiagnosing} · ${event.strategy} · #${event.attempt}`,
       })
     } else if (event.type === 'repair.applying') {
       rows.push({
         key: `${event.type}-${event.sessionId}-${event.strategy}`,
         status: 'done',
-        text: t.workflowRepairApplying,
+        text: `${t.workflowRepairApplying} · ${event.strategy} · ${event.changedNodeIds.join(', ') || '—'}`,
+      })
+    } else if (event.type === 'repair.resuming') {
+      rows.push({
+        key: `${event.type}-${event.sessionId}-${event.nodeId}`,
+        status: 'running',
+        text: `${t.workflowRepairResuming} · ${event.nodeId}`,
       })
     } else if (event.type === 'repair.verifying') {
       rows.push({
@@ -77,7 +88,7 @@ function stepRowsOf(
       rows.push({
         key: `${event.type}-${event.sessionId}-${event.attempt}`,
         status: 'failed',
-        text: t.workflowRepairAttemptFailed,
+        text: `${t.workflowRepairAttemptFailed} · #${event.attempt} · ${event.reason}`,
       })
     }
   }
@@ -104,7 +115,9 @@ function stepRowsOf(
       if (row.status === 'running') row.status = state === 'success' ? 'done' : 'failed'
     }
   }
-  return rows.slice(-6)
+  // No row cap: the dialog body already scrolls, and a truncated log is exactly
+  // the "no real log" complaint this stream answers.
+  return rows
 }
 
 type RowStatus = 'done' | 'running' | 'pending' | 'failed'

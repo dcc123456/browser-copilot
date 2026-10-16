@@ -213,6 +213,12 @@ export type Command =
     }
   | { type: 'workflows.delete'; id: string }
   /**
+   * Creates an independent copy of a stored workflow under a fresh id. The copy
+   * keeps the graph, settings and trigger but starts with no revision history —
+   * it is a new record, not another revision of the source.
+   */
+  | { type: 'workflows.duplicate'; id: string }
+  /**
    * Materialises the current conversation's operator-tool draft into a
    * Workflow WITHOUT persisting it. Used by the chat panel to populate the
    * review card at end of a workflow-generation turn. `error` is set when
@@ -302,6 +308,8 @@ export type Command =
    * loop in the background; progress streams through `workflows.nodeFixEvent`
    * and the verified parameters come back for the user to apply manually. The
    * caller's node data is never mutated until the user applies the result.
+   * A node without a stored contract is repaired from `userSuggestion` and/or
+   * `errorLog`, judged by a criterion that exists only for that repair.
    */
   | {
       type: 'workflows.nodeFix'
@@ -309,6 +317,8 @@ export type Command =
       blockId: string
       blockData: Record<string, unknown>
       userSuggestion: string
+      /** The failure output the user pasted (optional, prompt-only repairs). */
+      errorLog?: string
       /** See workflows.run.windowId. */
       windowId?: number
     }
@@ -524,6 +534,7 @@ export type CommandResult =
   | { type: 'workflows.get'; workflow?: Workflow }
   | { type: 'workflows.save' }
   | { type: 'workflows.delete' }
+  | { type: 'workflows.duplicate'; workflow?: Workflow }
   | {
       type: 'workflows.draft'
       workflow?: Workflow

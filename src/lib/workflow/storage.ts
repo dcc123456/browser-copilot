@@ -282,6 +282,12 @@ export async function duplicateWorkflow(
     name: newName?.trim() || `${source.name} (copy)`,
     createdAt: now,
     updatedAt: now,
+    // The revision line belongs to the record that earned it: carrying the
+    // source's counter and history would claim the copy was edited and repaired
+    // by whatever touched the original. A copy has made no commits yet, which
+    // is exactly what a missing `revision` means (revision 0).
+    revision: undefined,
+    revisionHistory: undefined,
   })
   if (!copy) return undefined
   await saveWorkflow(copy)

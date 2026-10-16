@@ -68,6 +68,7 @@ const probeOf = (absentReads: number): { probe: ConditionPageProbe; existsCalls:
       visible: async () => true,
       enabled: async () => true,
       text: async () => '草稿箱',
+      value: async () => undefined,
       attribute: async () => '',
       count: async () => 1,
       url: async () => 'https://creator.xiaohongshu.com/publish/publish?target=image',

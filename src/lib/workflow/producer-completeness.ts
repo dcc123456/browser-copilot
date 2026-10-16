@@ -23,6 +23,7 @@
  */
 
 import type { Workflow, WorkflowNode } from './types'
+import { SECRET_PRODUCER_BLOCK, secretVariableNamesOf } from './secret-params'
 
 export type ProducerCompletenessCode = 'MISSING_PRODUCER' | 'MISSING_TABLE_PRODUCER'
 
@@ -76,6 +77,35 @@ export const VARIABLE_PRODUCER_FIELD: Readonly<Record<string, string>> = {
   'regex-variable': 'variableName',
   'increase-variable': 'variableName',
   webhook: 'responseVariable',
+  // Its `variableName` is only the FIRST credential row; {@link
+  // producedVariableNames} adds the rest through `secret-params`.
+  'get-secret': 'variableName',
+}
+
+/**
+ * Every variable name one node publishes, in the order a reader should offer
+ * them. This is the single definition of "what does this node write":
+ * `integrity`'s save-time reference check, the provenance index, the generator's
+ * data-flow analysis and the `/` menu all consult it instead of reading
+ * `data.variableName` themselves, because a `get-secret` node writes one name
+ * PER CREDENTIAL ROW while `variableName` only ever mirrors the first.
+ *
+ * The generic `variableName` read is kept for blocks the map above does not
+ * cover — it is what `integrity` has always treated as produced, and dropping it
+ * would turn live references into dangling ones.
+ */
+export function producedVariableNames(node: WorkflowNode): string[] {
+  const blockId = blockIdOf(node)
+  const names = new Set<string>()
+  const field = VARIABLE_PRODUCER_FIELD[blockId]
+  const declared = field ? stringField(node, field) : ''
+  if (declared) names.add(declared)
+  if (blockId === SECRET_PRODUCER_BLOCK) {
+    for (const name of secretVariableNamesOf(node.data)) names.add(name)
+  }
+  const written = stringField(node, 'variableName')
+  if (written) names.add(written)
+  return [...names]
 }
 
 /**
@@ -88,11 +118,10 @@ function producesVariable(node: WorkflowNode, name: string): boolean {
   const blockId = blockIdOf(node)
   const field = VARIABLE_PRODUCER_FIELD[blockId]
   if (!field) return false
-  const produced = stringField(node, field)
-  if (produced === name) return true
+  if (producedVariableNames(node).includes(name)) return true
   // Blocks with an empty variable name still publish their fallback; treat a
   // same-block reader as a producer for its own fallback name only.
-  if (!produced && name === fallbackVariableOf(blockId)) return true
+  if (!stringField(node, field) && name === fallbackVariableOf(blockId)) return true
   return false
 }
 

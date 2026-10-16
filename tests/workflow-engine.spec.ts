@@ -238,6 +238,44 @@ describe('workflow engine', () => {
     expect(result.outcome).toBe('ok')
   })
 
+  it('runs the shared downstream node from either side of a merge', async () => {
+    // The sign-in split: already registered → login, otherwise register first,
+    // then both paths converge on one node. Two edges into `session` must not
+    // cost it its run on either branch.
+    const run = async (registered: boolean): Promise<string[]> => {
+      const order: string[] = []
+      const wf = makeWorkflow(
+        [
+          node('gate', 'element-exists'),
+          node('signin', 'login-form'),
+          node('join', 'register-form'),
+          node('session', 'after-login'),
+        ],
+        [
+          edge('gate', 'signin', 'element-exists-output-1'),
+          edge('gate', 'join', 'element-exists-output-2'),
+          edge('signin', 'session'),
+          edge('join', 'session'),
+        ],
+      )
+      const result = await runWorkflow(wf, {
+        executors: {
+          'element-exists': async (_data, ctx) => {
+            order.push('gate')
+            return (registered ? ctx.outputs!['exists'] : ctx.outputs!['notExists']) ?? null
+          },
+          'login-form': trace('signin', order),
+          'register-form': trace('join', order),
+          'after-login': trace('session', order),
+        },
+      })
+      expect(result.outcome).toBe('ok')
+      return order
+    }
+    expect(await run(true)).toEqual(['gate', 'signin', 'session'])
+    expect(await run(false)).toEqual(['gate', 'join', 'session'])
+  })
+
   it('guards against dead loops once MAX_STEPS is exceeded', async () => {
     const order: string[] = []
     const wf = makeWorkflow(

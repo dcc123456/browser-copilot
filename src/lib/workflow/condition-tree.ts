@@ -113,6 +113,58 @@ export async function conditionGroupsMatch(groups: unknown, env: ConditionEnv): 
   return false
 }
 
+/**
+ * One named branch output of the `conditions` block: an OR-group condition
+ * tree plus a user-visible name rendered on the canvas handle.
+ */
+export interface ConditionPath {
+  /** Stable id (generated once) — the canvas handle is keyed on it, not on the name. */
+  id: string
+  name: string
+  conditions: ConditionGroup[]
+}
+
+/**
+ * Tolerant read of a block's `paths` field. Entries without a usable string id
+ * are skipped: the canvas keys every output handle on that id, so a path that
+ * cannot be named is a path that cannot be wired. Shared by the editor (which
+ * draws one handle per entry) and {@link matchConditionPath}, so the form and
+ * the executor can never disagree about which paths exist.
+ */
+export function conditionPathsOf(raw: unknown): ConditionPath[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter(
+      (entry): entry is ConditionPath =>
+        typeof entry === 'object' &&
+        entry !== null &&
+        typeof entry.id === 'string' &&
+        entry.id !== '',
+    )
+    .map((entry) => ({
+      ...entry,
+      name: typeof entry.name === 'string' ? entry.name : '',
+      conditions: Array.isArray(entry.conditions) ? entry.conditions : [],
+    }))
+}
+
+/**
+ * Ordered branch resolution: evaluate each path in order and return the FIRST
+ * whose condition tree holds, or `null` when none holds (caller takes the
+ * fallback). A path with an empty tree never holds — an unconfigured branch must
+ * not swallow the run.
+ */
+export async function matchConditionPath(
+  paths: unknown,
+  env: ConditionEnv,
+): Promise<ConditionPath | null> {
+  for (const path of conditionPathsOf(paths)) {
+    if (!hasConditionGroups(path.conditions)) continue
+    if (await conditionGroupsMatch(path.conditions, env)) return path
+  }
+  return null
+}
+
 /** Evaluate one row: the editor's item list, or the legacy flat `{name,compare,value}`. */
 async function conditionRowMatches(row: ConditionAndRow, env: ConditionEnv): Promise<boolean> {
   if (!row || typeof row !== 'object') return false

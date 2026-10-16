@@ -5,8 +5,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildNodeFixPrompt,
+  nodeFixLogLinesOf,
+  nodeFixParamsPayloadOf,
+  nodeFixReplyPayloadOf,
+  nodeFixRequestPayloadOf,
+  nodeFixVerdictPayloadOf,
   parseNodeFixReply,
   sanitizeNodeData,
+  temporaryCriterionOf,
 } from '../src/lib/workflow/node-fix'
 import type { WorkflowCondition } from '../src/lib/workflow/conditions'
 import { WORKFLOW_AI_NAMESPACE } from '../src/lib/workflow/node-goal-contract'
@@ -57,6 +63,45 @@ describe('buildNodeFixPrompt', () => {
   })
 })
 
+describe('buildNodeFixPrompt — without a stored contract', () => {
+  const promptOnly = (over: Partial<Parameters<typeof buildNodeFixPrompt>[0]> = {}) =>
+    buildNodeFixPrompt({
+      blockId: 'forms',
+      successCriteria: [],
+      userSuggestion: 'the username must come from the workflow input',
+      currentData,
+      unmetCriteria: [],
+      ...over,
+    })
+
+  it('makes the user prompt the goal and asks for a verify object', () => {
+    const prompt = promptOnly({ errorLog: 'ElementNotFound: input[name="user"]' })
+    expect(prompt).toContain('no stored contract')
+    expect(prompt).toContain('the username must come from the workflow input')
+    expect(prompt).not.toContain('## User repair guidance')
+    expect(prompt).toContain('return a "verify" object')
+    expect(prompt).toContain('"kind":"elementValue"')
+    expect(prompt).toContain('"verify"')
+  })
+
+  it('carries the pasted error log as its own section', () => {
+    const prompt = promptOnly({ errorLog: 'ElementNotFound: input[name="user"]' })
+    expect(prompt).toContain('## Error log from the failed run (pasted by the user)')
+    expect(prompt).toContain('ElementNotFound')
+    expect(promptOnly()).not.toContain('## Error log from the failed run')
+  })
+
+  it('states the agreed criterion once one exists', () => {
+    const prompt = promptOnly({
+      successCriteria: [{ kind: 'variableExists', name: 'username' }],
+    })
+    expect(prompt).toContain('Success criterion agreed for this repair')
+    // `describeCondition` is the repo-wide renderer and speaks Chinese.
+    expect(prompt).toContain('变量 username 存在')
+    expect(prompt).not.toContain('return a "verify" object')
+  })
+})
+
 describe('parseNodeFixReply', () => {
   it('parses a clean JSON object', () => {
     const reply = parseNodeFixReply(
@@ -100,6 +145,41 @@ describe('parseNodeFixReply', () => {
   it('defaults a missing rationale to a placeholder', () => {
     const reply = parseNodeFixReply('{"data":{}}')
     expect(reply!.rationale).toBe('(no rationale provided)')
+  })
+
+  it('reads the temporary criterion a prompt-only reply proposes', () => {
+    const reply = parseNodeFixReply(
+      JSON.stringify({
+        rationale: 'r',
+        data: { selector: '#new' },
+        verify: { kind: 'urlContains', value: '/home' },
+      }),
+    )
+    expect(reply!.verify).toEqual({ kind: 'urlContains', value: '/home' })
+  })
+
+  it('drops an unusable verify without losing the repair', () => {
+    for (const verify of [null, undefined, { kind: 'notACondition' }, 'url=/home', 7]) {
+      const reply = parseNodeFixReply(JSON.stringify({ rationale: 'r', data: {}, verify }))
+      expect(reply).not.toBeNull()
+      expect(reply!.data).toEqual({})
+      expect(reply!.verify).toBeUndefined()
+    }
+  })
+})
+
+describe('temporaryCriterionOf', () => {
+  it('lifts the flat locator shorthand the same way a stored contract does', () => {
+    expect(temporaryCriterionOf({ kind: 'elementExists', target: '#save' })).toEqual({
+      kind: 'elementExists',
+      target: { selector: '#save' },
+    })
+  })
+
+  it('yields undefined for anything that is not one well-formed row', () => {
+    expect(temporaryCriterionOf(undefined)).toBeUndefined()
+    expect(temporaryCriterionOf(null)).toBeUndefined()
+    expect(temporaryCriterionOf([{ kind: 'urlContains', value: '/a' }])).toBeUndefined()
   })
 })
 
@@ -146,5 +226,65 @@ describe('sanitizeNodeData', () => {
     expect(sanitizeNodeData([1, 2])).toBeNull()
     expect(sanitizeNodeData('x')).toBeNull()
     expect(sanitizeNodeData(null)).toBeNull()
+  })
+})
+
+describe('the live fix log payload', () => {
+  it('reports the model request from the same fields the prompt is built from', () => {
+    const text = nodeFixRequestPayloadOf({
+      blockId: 'event-click',
+      goal: 'Submit the login form',
+      successCriteria: criteria,
+      userSuggestion: 'the selector is stale',
+      currentData,
+      execError: 'ElementNotFound',
+      unmetCriteria: ['URL contains "/dashboard"'],
+    })
+    expect(text).toContain('block: event-click')
+    expect(text).toContain('#submit')
+    expect(text).toContain('goal: Submit the login form')
+    expect(text).toContain('ElementNotFound')
+    expect(text).toContain('the selector is stale')
+  })
+
+  it('reports what the AI returned: rationale, parameters and its agreed check', () => {
+    const text = nodeFixReplyPayloadOf({
+      rationale: 'the button moved behind a form id',
+      data: { selector: '#login-submit' },
+      verify: { kind: 'urlContains', value: '/home' },
+    })
+    expect(text).toContain('rationale: the button moved')
+    expect(text).toContain('#login-submit')
+    expect(text).toContain('check: ')
+  })
+
+  it('shows the node parameters a trial run used', () => {
+    expect(nodeFixParamsPayloadOf({ selector: '#a' })).toContain('"selector":"#a"')
+  })
+
+  it('shows each criterion and whether the page agreed', () => {
+    const text = nodeFixVerdictPayloadOf([
+      { condition: criteria[0]!, satisfied: true },
+      { condition: criteria[1]!, satisfied: false },
+    ])
+    expect(text).toContain('✓')
+    expect(text).toContain('✗')
+    expect(nodeFixVerdictPayloadOf([])).toContain('no criterion')
+  })
+
+  it('projects one event into plain log lines for a text-only consumer', () => {
+    const lines = nodeFixLogLinesOf(
+      {
+        sessionId: 's',
+        phase: 'diagnosing',
+        round: 1,
+        message: 'goal not held',
+        payload: { request: 'block: forms\nparams: {"selector":"#a"}' },
+      },
+      { round: (round) => `R${round + 1}` },
+    )
+    expect(lines[0]).toBe('R2 · goal not held')
+    // The payload's newline structure collapses so one step stays one line.
+    expect(lines[1]).toBe('R2 · block: forms | params: {"selector":"#a"}')
   })
 })

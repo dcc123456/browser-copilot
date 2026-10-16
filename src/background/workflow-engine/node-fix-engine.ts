@@ -19,9 +19,15 @@ import { getSettings } from '../../lib/storage'
 import {
   buildNodeFixPrompt,
   NODE_FIX_MAX_ROUNDS,
+  nodeFixParamsPayloadOf,
+  nodeFixReplyPayloadOf,
+  nodeFixRequestPayloadOf,
+  nodeFixVerdictPayloadOf,
   parseNodeFixReply,
   sanitizeNodeData,
   type NodeFixEvent,
+  type NodeFixPromptInput,
+  type NodeFixReply,
   type NodeFixResultData,
 } from '../../lib/workflow/node-fix'
 import { describeCondition, type WorkflowCondition } from '../../lib/workflow/conditions'
@@ -45,6 +51,8 @@ export interface NodeFixInput {
   blockId: string
   blockData: Record<string, unknown>
   userSuggestion?: string
+  /** The failure output the user pasted; enough on its own to start a repair. */
+  errorLog?: string
   windowId?: number
 }
 
@@ -65,7 +73,7 @@ export interface NodeFixDeps {
   callModel?: (
     prompt: string,
     onProgress: (message: string) => void,
-  ) => Promise<{ rationale: string; data: Record<string, unknown> } | null>
+  ) => Promise<NodeFixReply | null>
   /** Which workflow these fix attempts belong to in the token ledger. */
   attribution?: TokenAttribution
 }
@@ -180,22 +188,37 @@ async function checkPreconditions(
  * the current page state. If preconditions hold AND all success criteria are
  * already met, the node is considered fixed without re-execution. Otherwise,
  * execute the node and verify only the unmet criteria.
+ *
+ * A node WITHOUT a stored contract is repaired from the user's prompt and/or the
+ * error log they pasted. Its judgement is a temporary criterion the model states
+ * with its first reply and the page then checks — never stored on the node (see
+ * specs/2026-10-16-node-fix-from-prompt-only-design.md).
  */
 export async function runNodeFix(
   input: NodeFixInput,
   deps: NodeFixDeps,
 ): Promise<NodeFixResultData> {
   const contract = nodeGoalContractOf(input.blockData)
-  if (!contract) {
+  const hasEvidence = !!input.userSuggestion?.trim() || !!input.errorLog?.trim()
+  if (!contract && !hasEvidence) {
+    // Nothing to repair towards: no stored goal, no stated intent, no failure
+    // output. This is the one case a fix cannot honestly start.
     return {
       success: false,
       rounds: 0,
       reason:
-        'This node has no goal contract (goal and success criteria). Add them before running AI fix.',
+        'This node has no goal contract. Describe what is wrong or paste the error log to repair it without one.',
     }
   }
-  const criteria = contract.successCriteria
-  const preconditions = contract.preconditions
+  const storedCriteria = contract?.successCriteria ?? []
+  const preconditions = contract?.preconditions
+  // The criterion agreed for THIS repair. Replaced by every reply that carries
+  // one, and never written into `input.blockData`.
+  let temporaryCriteria: WorkflowCondition[] = []
+  // Whether the prompt-only "how will this be judged" question was already asked,
+  // so a model that returns no criterion does not get asked three times.
+  let checkAgreed = false
+  const criteriaOf = (): WorkflowCondition[] => (contract ? storedCriteria : temporaryCriteria)
 
   const { signal, emit } = deps
   const scope = await resolveScope(input.windowId)
@@ -218,108 +241,202 @@ export async function runNodeFix(
     phase: NodeFixEvent['phase'],
     message: string,
     status: NodeFixEvent['status'] = 'running',
-  ): void => emit({ sessionId: input.sessionId, phase, round, message, status })
+    payload?: NodeFixEvent['payload'],
+  ): void => emit({ sessionId: input.sessionId, phase, round, message, status, payload })
+
+  /** The model's answer, with its parameters already sanitised. */
+  interface FixAnswer {
+    rationale: string
+    data: Record<string, unknown>
+    verify?: WorkflowCondition
+    /** The same answer as log text: what the AI returned, not what it was told. */
+    responsePayload: string
+  }
+
+  /** Ask the model once, settling the common failures as a terminal result. */
+  const askForFix = async (
+    round: number,
+    promptInput: NodeFixPromptInput,
+    unmetDescription: string,
+  ): Promise<FixAnswer | { fail: NodeFixResultData }> => {
+    // The log reports the request from the SAME record the prompt is built from,
+    // so the displayed request and the sent one cannot drift apart.
+    push(round, 'diagnosing', unmetDescription, 'running', {
+      request: nodeFixRequestPayloadOf(promptInput),
+    })
+    let reply: NodeFixReply | null
+    try {
+      reply = await callModel(buildNodeFixPrompt(promptInput), (message) =>
+        push(round, 'diagnosing', message),
+      )
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      if (/timed?\s*out|abort/i.test(msg) && !signal.aborted) {
+        return {
+          fail: {
+            success: false,
+            rounds: round + 1,
+            reason: `AI fix request timed out or was interrupted (budget ${NODE_FIX_TIMEOUT_MS / 60_000} min).`,
+          },
+        }
+      }
+      if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
+      return { fail: { success: false, rounds: round + 1, reason: msg } }
+    }
+    throwIfAborted(signal)
+    if (!reply) {
+      return {
+        fail: {
+          success: false,
+          rounds: round + 1,
+          reason:
+            'No AI provider is configured (or its API key is empty). Configure a provider to use AI fix.',
+        },
+      }
+    }
+    const candidate = sanitizeNodeData(reply.data)
+    if (!candidate) {
+      return {
+        fail: {
+          success: false,
+          rounds: round + 1,
+          reason: 'The model returned unusable node parameters.',
+        },
+      }
+    }
+    const answer: FixAnswer = {
+      rationale: reply.rationale,
+      data: candidate,
+      ...(reply.verify ? { verify: reply.verify } : {}),
+      responsePayload: nodeFixReplyPayloadOf({
+        rationale: reply.rationale,
+        data: candidate,
+        ...(reply.verify ? { verify: reply.verify } : {}),
+      }),
+    }
+    return answer
+  }
 
   for (let round = 0; round < NODE_FIX_MAX_ROUNDS; round += 1) {
     throwIfAborted(signal)
+    const criteria = criteriaOf()
 
     // 1. observe
     push(round, 'observing', scope ? `window ${scope.windowId}` : 'active page')
 
     // 2. Check if goal is already achieved from current page state
-    // This handles cases where partial execution already satisfied the goal
-    push(round, 'verifying', 'checking if goal already achieved')
-    const precheckOutcomes = await evaluateCriteria(criteria, variables)
-    throwIfAborted(signal)
-    const precheckUnmet = precheckOutcomes.filter((o) => !o.satisfied)
+    // This handles cases where partial execution already satisfied the goal.
+    // Without a criterion to check there is nothing to pre-empt the run with.
+    if (criteria.length > 0) {
+      push(round, 'verifying', 'checking if goal already achieved', 'running', {
+        request: criteria.map(describeCondition).join(' / '),
+      })
+      const precheckOutcomes = await evaluateCriteria(criteria, variables)
+      throwIfAborted(signal)
+      const precheckUnmet = precheckOutcomes.filter((o) => !o.satisfied)
+      push(
+        round,
+        'verifying',
+        `${criteria.length - precheckUnmet.length}/${criteria.length} held`,
+        precheckUnmet.length === 0 ? 'done' : 'error',
+        {
+          response: nodeFixVerdictPayloadOf(precheckOutcomes),
+        },
+      )
 
-    if (precheckUnmet.length === 0) {
-      // All success criteria already hold — goal is achieved without execution
-      push(round, 'verifying', 'all criteria already satisfied', 'done')
-      return {
-        success: true,
-        rounds: round + 1,
-        proposedData: { ...input.blockData, ...working },
+      if (precheckUnmet.length === 0) {
+        // All success criteria already hold — goal is achieved without execution
+        push(round, 'verifying', 'all criteria already satisfied', 'done')
+        return {
+          success: true,
+          rounds: round + 1,
+          verifiedBy: 'criteria',
+          proposedData: { ...input.blockData, ...working },
+        }
       }
     }
 
-    // 3. Check preconditions before executing
+    // 3. A prompt-only repair needs a check before it can claim success: agree one
+    // with the model over the current parameters, then fall through and evaluate it
+    // against the page the run just produced. Asked once — if no usable criterion
+    // comes back, the run settles as `exec-only`.
+    if (!contract && !checkAgreed) {
+      checkAgreed = true
+      const answer = await askForFix(
+        round,
+        {
+          blockId: input.blockId,
+          successCriteria: [],
+          userSuggestion: input.userSuggestion ?? '',
+          currentData: working,
+          unmetCriteria: [],
+          ...(input.errorLog?.trim() ? { errorLog: input.errorLog } : {}),
+        },
+        'agreeing how this repair will be judged',
+      )
+      if ('fail' in answer) return answer.fail
+      working = answer.data
+      if (answer.verify) {
+        temporaryCriteria = [answer.verify]
+        push(round, 'applying', `check: ${describeCondition(answer.verify)}`, 'done')
+      }
+      push(round, 'applying', answer.rationale, 'done', { response: answer.responsePayload })
+    }
+
+    // 4. Check preconditions before executing
     const preconditionsMet = await checkPreconditions(preconditions, variables, evaluateCriteria)
     throwIfAborted(signal)
 
     if (!preconditionsMet) {
-      push(round, 'diagnosing', 'preconditions not met')
-      // Get which preconditions are unmet for diagnosis
+      // Preconditions not met — need to diagnose why
       const preconditionOutcomes = await evaluateCriteria(preconditions || [], variables)
       throwIfAborted(signal)
       const unmetPreconditions = preconditionOutcomes.filter((o) => !o.satisfied)
-
-      // Preconditions not met — need to diagnose why
-      const prompt = buildNodeFixPrompt({
-        blockId: input.blockId,
-        goal: contract.goal,
-        successCriteria: criteria,
-        userSuggestion: input.userSuggestion ?? '',
-        currentData: working,
-        execError: 'Preconditions not met — cannot execute node until preconditions are satisfied',
-        unmetCriteria: unmetPreconditions.map((o) => describeUnmet(o.condition)),
-      })
-
-      let reply: { rationale: string; data: Record<string, unknown> } | null
-      try {
-        reply = await callModel(prompt, (message) => push(round, 'diagnosing', message))
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error)
-        if (/timed?\s*out|abort/i.test(msg) && !signal.aborted) {
-          return {
-            success: false,
-            rounds: round + 1,
-            reason: `AI fix request timed out or was interrupted (budget ${NODE_FIX_TIMEOUT_MS / 60_000} min).`,
-          }
-        }
-        if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
-        return { success: false, rounds: round + 1, reason: msg }
-      }
-      throwIfAborted(signal)
-
-      if (!reply) {
-        return {
-          success: false,
-          rounds: round + 1,
-          reason:
-            'No AI provider is configured (or its API key is empty). Configure a provider to use AI fix.',
-        }
-      }
-      const candidate = sanitizeNodeData(reply.data)
-      if (!candidate) {
-        return {
-          success: false,
-          rounds: round + 1,
-          reason: 'The model returned unusable node parameters.',
-        }
-      }
-
-      push(round, 'applying', reply.rationale, 'done')
-      working = candidate
+      const answer = await askForFix(
+        round,
+        {
+          blockId: input.blockId,
+          goal: contract?.goal,
+          successCriteria: criteria,
+          userSuggestion: input.userSuggestion ?? '',
+          currentData: working,
+          execError:
+            'Preconditions not met — cannot execute node until preconditions are satisfied',
+          unmetCriteria: unmetPreconditions.map((o) => describeUnmet(o.condition)),
+          ...(input.errorLog?.trim() ? { errorLog: input.errorLog } : {}),
+        },
+        'preconditions not met',
+      )
+      if ('fail' in answer) return answer.fail
+      if (answer.verify) temporaryCriteria = [answer.verify]
+      push(round, 'applying', answer.rationale, 'done', { response: answer.responsePayload })
+      working = answer.data
       continue
     }
 
-    // 4. trial-run (only when preconditions are met but some success criteria aren't)
-    push(round, 'executing', input.blockId)
+    // 5. trial-run (only when preconditions are met but some success criteria aren't)
+    push(round, 'executing', input.blockId, 'running', {
+      request: nodeFixParamsPayloadOf(working),
+    })
     const exec = await executeNode(input.blockId, working)
     throwIfAborted(signal)
     const execError = exec.ok ? undefined : exec.error
+    if (execError) push(round, 'executing', execError, 'error')
 
-    // 5. verify success criteria after execution
-    push(round, 'verifying', `${criteria.length} criteria`)
-    const outcomes = await evaluateCriteria(criteria, variables)
+    // 6. verify success criteria after execution
+    const ranCriteria = criteriaOf()
+    push(round, 'verifying', `${ranCriteria.length} criteria`, 'running', {
+      request: ranCriteria.map(describeCondition).join(' / '),
+    })
+    const outcomes = await evaluateCriteria(ranCriteria, variables)
     throwIfAborted(signal)
     const unmet = outcomes.filter((o) => !o.satisfied)
     push(
       round,
       'verifying',
-      `${criteria.length - unmet.length}/${criteria.length} held`,
+      `${ranCriteria.length - unmet.length}/${ranCriteria.length} held`,
       unmet.length === 0 && !execError ? 'done' : 'error',
+      { response: nodeFixVerdictPayloadOf(outcomes) },
     )
 
     if (!execError && unmet.length === 0) {
@@ -329,6 +446,7 @@ export async function runNodeFix(
       return {
         success: true,
         rounds: round + 1,
+        verifiedBy: ranCriteria.length > 0 ? 'criteria' : 'exec-only',
         proposedData: { ...input.blockData, ...working },
       }
     }
@@ -336,55 +454,26 @@ export async function runNodeFix(
     // Last round: no point asking the model again.
     if (round === NODE_FIX_MAX_ROUNDS - 1) break
 
-    // 6. diagnose
-    push(round, 'diagnosing', contract.goal)
-    const prompt = buildNodeFixPrompt({
-      blockId: input.blockId,
-      goal: contract.goal,
-      successCriteria: criteria,
-      userSuggestion: input.userSuggestion ?? '',
-      currentData: working,
-      ...(execError ? { execError } : {}),
-      unmetCriteria: unmet.map((o) => describeUnmet(o.condition)),
-    })
-
-    let reply: { rationale: string; data: Record<string, unknown> } | null
-    try {
-      reply = await callModel(prompt, (message) => push(round, 'diagnosing', message))
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error)
-      if (/timed?\s*out|abort/i.test(msg) && !signal.aborted) {
-        return {
-          success: false,
-          rounds: round + 1,
-          reason: `AI fix request timed out or was interrupted (budget ${NODE_FIX_TIMEOUT_MS / 60_000} min).`,
-        }
-      }
-      if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
-      return { success: false, rounds: round + 1, reason: msg }
-    }
-    throwIfAborted(signal)
-
-    if (!reply) {
-      return {
-        success: false,
-        rounds: round + 1,
-        reason:
-          'No AI provider is configured (or its API key is empty). Configure a provider to use AI fix.',
-      }
-    }
-    const candidate = sanitizeNodeData(reply.data)
-    if (!candidate) {
-      return {
-        success: false,
-        rounds: round + 1,
-        reason: 'The model returned unusable node parameters.',
-      }
-    }
-
-    // 7. adopt candidate and re-verify next round.
-    push(round, 'applying', reply.rationale, 'done')
-    working = candidate
+    // 7. diagnose
+    const answer = await askForFix(
+      round,
+      {
+        blockId: input.blockId,
+        goal: contract?.goal,
+        successCriteria: ranCriteria,
+        userSuggestion: input.userSuggestion ?? '',
+        currentData: working,
+        ...(execError ? { execError } : {}),
+        unmetCriteria: unmet.map((o) => describeUnmet(o.condition)),
+        ...(input.errorLog?.trim() ? { errorLog: input.errorLog } : {}),
+      },
+      contract ? contract.goal : (input.userSuggestion ?? ''),
+    )
+    if ('fail' in answer) return answer.fail
+    if (answer.verify) temporaryCriteria = [answer.verify]
+    // 8. adopt candidate and re-verify next round.
+    push(round, 'applying', answer.rationale, 'done', { response: answer.responsePayload })
+    working = answer.data
   }
 
   return {

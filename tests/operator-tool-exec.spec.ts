@@ -374,6 +374,41 @@ describe('shared variable bag', () => {
     const forms = actionNodesOf(draft)[1]!
     expect(forms.data.value).toBe('{{password}}')
   })
+
+  /**
+   * A node edited to fetch SEVERAL credentials writes one variable per row. The
+   * flat `variableName` names only row 1, so harvesting just that one would leave
+   * row 2's secret inside `draft.variables` — which is persisted to storage and
+   * rendered in the review card.
+   */
+  it('keeps every credential row of a multi-credential node out of the draft', async () => {
+    const executors: Record<string, BlockExecutor> = {
+      'get-secret': async (_data, ctx) => {
+        ctx.variables['password'] = 's3cret'
+        ctx.variables['apiToken'] = 'tok-en'
+        return null
+      },
+    }
+    const out = await run(
+      'c-bag2',
+      'wf_op_get-secret',
+      {
+        credential: 'cred-1::password',
+        variableName: 'password',
+        credentials: [
+          { credential: 'cred-1::password', variableName: 'password' },
+          { credential: 'cred-2::token', variableName: 'apiToken' },
+        ],
+      },
+      { executors },
+    )
+    expect(out.ok).toBe(true)
+
+    const draft = getDraftSnapshot('c-bag2')!
+    expect(draft.variables).toEqual({})
+    expect(JSON.stringify(draft)).not.toContain('s3cret')
+    expect(JSON.stringify(draft)).not.toContain('tok-en')
+  })
 })
 
 describe('generation coverage tracking', () => {

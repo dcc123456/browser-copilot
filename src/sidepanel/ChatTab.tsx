@@ -59,7 +59,7 @@ import { WorkflowGenerationDialog } from './components/WorkflowGenerationDialog'
 import type { WorkflowGenerationViewState } from './components/WorkflowGenerationDialog'
 import { RepairProgressDialog } from './components/RepairProgressDialog'
 import { CardSection, type CardSectionTone } from './components/CardSection'
-import { useRepairEvents } from './hooks/useWorkflowRuntimeEvents'
+import { useNodeFixLog, useRepairEvents } from './hooks/useWorkflowRuntimeEvents'
 import SkillEditDialog from './SkillEditDialog'
 import type { Workflow } from '../lib/workflow/types'
 import type { AgentMode, ConversationMeta } from '../lib/types'
@@ -1922,6 +1922,12 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   // are global (per repair session); the dialog opens on the first event and
   // stays until the user dismisses a terminal state.
   const repairEvents = useRepairEvents()
+  // The per-node AI fix loop is ONE event stream: the editor's AI Fix dialog
+  // renders it as a timeline, and the workflow dialog mirrors the same events as
+  // log lines, so the fix is watchable from wherever the user asked for it.
+  const fixLog = useNodeFixLog({
+    round: (round) => t.workflowFixLogRound({ round: round + 1 }),
+  })
   const [repairDialogOpen, setRepairDialogOpen] = useState(false)
   const repairDialogSeenRef = useRef(0)
   useEffect(() => {
@@ -4299,6 +4305,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
           ? createPortal(
               <WorkflowReviewDialog
                 keep={workflowPrompt.keep}
+                fixLog={fixLog}
                 log={workflowPrompt.reviewLog}
                 review={workflowPrompt.review}
                 reviewing={workflowPrompt.reviewing}

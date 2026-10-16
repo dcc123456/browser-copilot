@@ -90,6 +90,25 @@ describe('checkProducerCompleteness', () => {
     expect(checkProducerCompleteness(wf)).toEqual([])
   })
 
+  it('accepts a reference to any credential row of a multi-credential node', () => {
+    // `VARIABLE_PRODUCER_FIELD` names the field holding ONE of the written
+    // variables; the row list is where the rest live. Reading only the field
+    // made every `{{mailPassword}}` a false MISSING_PRODUCER.
+    const wf = workflow([
+      node('t', 'trigger'),
+      node('fetch', 'get-secret', {
+        credential: 'gh::token',
+        variableName: 'githubToken',
+        credentials: [
+          { credential: 'gh::token', variableName: 'githubToken' },
+          { credential: 'mail::password', variableName: 'mailPassword' },
+        ],
+      }),
+      node('login', 'forms', { value: '{{mailPassword}}', selector: '#pw' }),
+    ])
+    expect(checkProducerCompleteness(wf)).toEqual([])
+  })
+
   it('deduplicates repeated references in one node', () => {
     const wf = workflow([
       node('t', 'trigger'),

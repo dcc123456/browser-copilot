@@ -34,6 +34,7 @@ const probe: ConditionPageProbe = {
   visible: async () => true,
   enabled: async () => true,
   text: async () => 'ok',
+  value: async () => undefined,
   attribute: async () => 'v',
   count: async () => 1,
   url: async () => 'https://t.test',

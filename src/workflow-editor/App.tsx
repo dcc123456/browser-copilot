@@ -41,11 +41,8 @@ import type {
   WorkflowSettings,
 } from '../lib/workflow/types'
 import { migrateWorkflow, triggerFromNodes } from '../lib/workflow/migrate'
-import {
-  ensureSecretProducer,
-  type SecretFieldRef,
-  type SuggestionGraph,
-} from '../lib/workflow/var-suggestions'
+import { ensureSecretProducer, type SuggestionGraph } from '../lib/workflow/var-suggestions'
+import type { SecretFieldRef } from '../lib/workflow/secret-params'
 import { nodeRunIssuesOf } from '../lib/workflow/validation'
 import { sendCommand } from '../lib/messages'
 import { editorUrl, hostWindowId } from './host-window'
@@ -54,11 +51,17 @@ import { newId } from '../lib/storage'
 
 import { nodeTypes, type BlockNodeData } from './flow/BlockNode'
 import { edgeTypes } from './flow/CustomEdge'
-import { applyConnection, edgeClosesCycle, healEdgeHandles } from './flow/connections'
+import {
+  applyConnection,
+  edgeClosesCycle,
+  healEdgeHandles,
+  pruneRemovedPortEdges,
+} from './flow/connections'
 import Sidebar, { loadWidth } from './sidebar/Sidebar'
 import BlockPalette from './sidebar/BlockPalette'
 import BlockEditForm from './sidebar/BlockEditForm'
 import BlockSettingsModal from './blocks/shared/BlockSettingsModal'
+import { useSpaceSelect } from './use-space-select'
 import { SlashMenuProvider } from './blocks/shared/SlashVariableMenu'
 import LogsModal from './sidebar/LogsModal'
 import { WorkflowMetaProvider } from './blocks/batchD/WorkflowInfoFields'
@@ -253,29 +256,12 @@ export default function EditorApp() {
     if (loadedRef.current) setDirty(true)
   }, [nodes, edges, meta])
 
-  // Track Space-key state purely for the cursor affordance: holding Space puts
-  // the canvas in box-select mode (see `selectionKeyCode` on the flow), so the
-  // pane must stop looking grabbable.
-  // Space pressed inside a text input must NOT enter pan-mode (typing a space).
-  const [spaceDown, setSpaceDown] = useState(false)
-  useEffect(() => {
-    const isEditable = (target: EventTarget | null): boolean => {
-      const el = target as HTMLElement | null
-      return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
-    }
-    const onDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !e.repeat && !isEditable(e.target)) setSpaceDown(true)
-    }
-    const onUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !isEditable(e.target)) setSpaceDown(false)
-    }
-    window.addEventListener('keydown', onDown)
-    window.addEventListener('keyup', onUp)
-    return () => {
-      window.removeEventListener('keydown', onDown)
-      window.removeEventListener('keyup', onUp)
-    }
-  }, [])
+  // Holding Space box-selects on the canvas. React Flow cannot be asked to watch
+  // the key itself here (a trusted Space never reaches its window-level handler,
+  // see specs/2026-10-16-canvas-box-select-design.md), so the gesture is driven
+  // from our own key state through `selectionOnDrag` below. Space inside a text
+  // field stays a typed space.
+  const spaceDown = useSpaceSelect()
 
   // Native beforeunload prompt: catches the browser's window-close button on
   // MV3 popup windows, which the in-app Ctrl+W interceptor can't reach.
@@ -302,9 +288,9 @@ export default function EditorApp() {
 
   const onConnect = useCallback(
     (conn: Connection) => {
-      // See flow/connections.ts: occupied inputs are replaced EXCEPT by fallback
-      // and loop-back connections, which must coexist with the target's
-      // incoming edge. A loop-back (branch routed to an earlier node) gets a
+      // See flow/connections.ts: a draw moves only the edge belonging to the
+      // handle it starts from, so a second branch can land on an already-wired
+      // node (a merge). A loop-back (branch routed to an earlier node) gets a
       // confirmation toast so the retry semantics are explicit.
       setEdges((eds) => {
         if (
@@ -895,11 +881,24 @@ export default function EditorApp() {
             }
           >
             <BlockEditForm
+              // One form per node: block forms keep draft state (the credential
+              // rows being filled in), which must not survive a switch to another
+              // node.
+              key={editNode.id}
               block={editBlock}
               nodeName={String(editNode.data.blockData?.description ?? editBlock.name)}
               data={editNode.data.blockData}
               onChange={(patch) => {
                 patchNode(editNode.id, patch)
+                // A deleted conditions path takes its wired edge with it.
+                setEdges((eds) =>
+                  pruneRemovedPortEdges(
+                    editBlock,
+                    { ...(editNode.data.blockData ?? {}), ...patch },
+                    editNode.id,
+                    eds,
+                  ),
+                )
                 // Editing node data (including the Goal Contract) invalidates a
                 // prior certification until L3 is re-run.
                 setMeta((m) => ({
@@ -952,7 +951,7 @@ export default function EditorApp() {
           t={t}
         />
 
-        <div className="wf-canvas-wrap" data-pan-mode={spaceDown ? 'false' : 'true'}>
+        <div className="wf-canvas-wrap">
           <ReactFlow
             nodes={flowNodes}
             edges={edgeWithHighlight}
@@ -979,16 +978,19 @@ export default function EditorApp() {
             // (Ctrl+click is the OS context menu, so no click ever reaches the
             // node). Accept both so one prop works in every host.
             multiSelectionKeyCode={['Meta', 'Control']}
-            // Space + left-drag rubber-bands a selection box; a plain left-drag
-            // pans the canvas. React Flow only honours `selectionOnDrag` when the
-            // drag starts on empty canvas, which silently turns a box that begins
-            // over a node into a group MOVE. Driving the built-in selection key
-            // instead lets the rubber band start anywhere (the pane drops panning
-            // while the key is held), and `panActivationKeyCode` is off so Space
-            // never means pan. Shift stays accepted — it is Automa's own box
-            // gesture. The marquee then behaves like Automa's: select the group,
-            // release the key, drag one node to move them all.
-            selectionKeyCode={['Space', 'Shift']}
+            // Shift + drag rubber-bands a selection box (Automa's own gesture, and
+            // the one key React Flow reliably matches here). Space is the key we
+            // advertise for box-select, but React Flow's selection-key handler does
+            // not see a trusted Space in this app, so the gesture is driven from
+            // our own key state instead: `selectionOnDrag` selects on a left-drag
+            // while Space is held, and `panOnDrag` drops the left button so the
+            // canvas stops panning under it. Node dragging is off for the same
+            // window, because a box that begins over a node must not silently move
+            // that node. Release the key, then drag one node to move the group.
+            selectionKeyCode="Shift"
+            selectionOnDrag={spaceDown}
+            panOnDrag={spaceDown ? [1, 2] : true}
+            nodesDraggable={spaceDown ? false : true}
             panActivationKeyCode={null}
             selectionMode={SelectionMode.Partial}
             defaultEdgeOptions={{
@@ -1046,6 +1048,9 @@ export default function EditorApp() {
             insertSecret={insertSecretProducer}
           >
             <BlockSettingsModal
+              // Same reason as the edit overlay: the modal hosts the very same
+              // block forms, and their draft rows belong to one node.
+              key={settingsForId}
               open
               onClose={() => setSettingsForId(null)}
               block={settingsBlock}

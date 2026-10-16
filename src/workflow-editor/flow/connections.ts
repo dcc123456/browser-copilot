@@ -1,27 +1,18 @@
 /**
  * Edge bookkeeping for newly drawn canvas connections (Automa semantics).
  *
- * Rules:
- * - An input handle holds a single NORMAL connection; re-drawing onto an
- *   occupied input replaces the old edge (otherwise occupied inputs — e.g. the
- *   generated set-variable → ocr link — could never be rewired). An identical
- *   re-draw is a no-op.
- * - Fallback connections are exempt on BOTH sides. A fallback edge lands on an
- *   earlier node's already-occupied input — that is the point (fall back to
- *   any previous block) — so the target's normal incoming edge must survive.
- *   A node has a single fallback branch (the engine indexes one `fallback`
- *   target per node), so re-drawing a node's fallback replaces its previous
- *   fallback edge instead of stacking a second one.
- * - LOOP-BACK connections are exempt just like fallbacks: a branch (conditions
- *   / element-exists / loop) routed back to an earlier, already-wired node
- *   closes a directed cycle — that edge must NOT replace the target's normal
- *   incoming edge, or the main chain breaks on the very draw meant to repeat
- *   it ("element not found → go back and retry"). The engine re-enters nodes
- *   freely (MAX_STEPS guards an infinite run), so the cycle is valid here.
- *   Whether an edge closes a cycle is decided structurally
- *   ({@link edgeClosesCycle}: the target already reaches the source), not from
- *   canvas coordinates, so disconnected/backward-placed redraws keep the
- *   ordinary replace-input behaviour.
+ * One rule covers every kind of draw: an OUTPUT handle owns its edge. Drawing
+ * again from the same handle MOVES that edge; drawing from any other handle
+ * ADDS one, even when the target's input is already fed. So a node can be
+ * reached from several branches at once — the merge two sign-in paths need
+ * before they share one "logged in" step — and a fallback can land on an
+ * earlier, already-wired node without severing the chain into it. Detaching a
+ * branch is an explicit edge delete (double-click, or select + Delete), the
+ * same as in any other flow editor.
+ *
+ * An identical re-draw is a no-op. Which lines render as a dashed "loop-back"
+ * is decided structurally ({@link edgeClosesCycle}: the target already reaches
+ * the source), not from canvas coordinates.
  *
  * @module workflow-editor/flow/connections
  */
@@ -29,8 +20,8 @@
 import type { Connection, Edge, Node } from '@xyflow/react'
 
 import { newId } from '../../lib/storage'
-import { closesCycle, isFallbackHandle, loopBackEdgeIds } from '../../lib/workflow/graph-edges'
-import { BRANCH_HANDLES } from './BlockNode'
+import { closesCycle, isFallbackHandle } from '../../lib/workflow/graph-edges'
+import { branchHandlesFor } from './BlockNode'
 
 export { isFallbackHandle }
 
@@ -50,7 +41,13 @@ export function edgeClosesCycle(edges: Edge[], source: string, target: string): 
   return closesCycle(edges, source, target)
 }
 
-type NodeHandleInfo = { blockId: string; sources: Set<string>; hasTarget: boolean }
+type NodeHandleInfo = {
+  blockId: string
+  sources: Set<string>
+  /** Where an edge with an unresolvable handle is re-anchored. */
+  firstSource: string
+  hasTarget: boolean
+}
 
 /**
  * Re-anchor edges whose stored handle ids no longer resolve to a rendered
@@ -66,13 +63,25 @@ type NodeHandleInfo = { blockId: string; sources: Set<string>; hasTarget: boolea
 export function healEdgeHandles(nodes: Node[], edges: Edge[]): Edge[] {
   const known = new Map<string, NodeHandleInfo>()
   for (const node of nodes) {
-    const block = node.data?.block as { id: string; inputs?: number } | undefined
+    const block = node.data?.block as { id: string; inputs?: number; outputs?: number } | undefined
     if (!block) continue
-    const sources = new Set<string>([`${block.id}-output-1`, `${block.id}-output-fallback`])
-    for (const handle of BRANCH_HANDLES[block.id] ?? []) {
-      sources.add(`${block.id}-${handle.idSuffix}`)
-    }
-    known.set(node.id, { blockId: block.id, sources, hasTarget: (block.inputs ?? 1) > 0 })
+    const branches = branchHandlesFor(
+      block,
+      node.data?.blockData as Record<string, unknown> | undefined,
+    )
+    const sources = new Set<string>([`${block.id}-output-fallback`])
+    // A branch block draws its own ports (a conditions block's are per-path, so
+    // they cannot be listed statically); every other block keeps the primary one.
+    if (branches) for (const handle of branches) sources.add(`${block.id}-${handle.idSuffix}`)
+    else sources.add(`${block.id}-output-1`)
+    known.set(node.id, {
+      blockId: block.id,
+      sources,
+      // An unresolvable handle lands on the topmost drawn port, so a legacy
+      // `conditions-output-1` re-anchors onto the block's first path.
+      firstSource: branches ? `${block.id}-${branches[0]!.idSuffix}` : `${block.id}-output-1`,
+      hasTarget: (block.inputs ?? 1) > 0,
+    })
   }
   return edges.map((edge) => {
     const source = known.get(edge.source)
@@ -81,11 +90,37 @@ export function healEdgeHandles(nodes: Node[], edges: Edge[]): Edge[] {
     const sourceHandle =
       edge.sourceHandle && source.sources.has(edge.sourceHandle)
         ? edge.sourceHandle
-        : `${source.blockId}-output-1`
+        : source.firstSource
     const targetHandle = target.hasTarget ? `${target.blockId}-input-1` : edge.targetHandle
     if (sourceHandle === edge.sourceHandle && targetHandle === edge.targetHandle) return edge
     return { ...edge, sourceHandle, targetHandle }
   })
+}
+
+/**
+ * Drop the edges of `nodeId` that connect through a port the node no longer
+ * draws — deleting a conditions path takes its connection with it. React Flow
+ * hides such an edge anyway, so this only keeps the saved workflow from carrying
+ * a handle id that names nothing. The error-fallback port is exempt: it is drawn
+ * independently of the paths.
+ */
+export function pruneRemovedPortEdges(
+  block: { id: string; outputs?: number },
+  nextBlockData: Record<string, unknown>,
+  nodeId: string,
+  edges: Edge[],
+): Edge[] {
+  const branches = branchHandlesFor(block, nextBlockData)
+  if (!branches) return edges
+  const live = new Set(branches.map((handle) => `${block.id}-${handle.idSuffix}`))
+  live.add(`${block.id}-output-fallback`)
+  return edges.filter(
+    (edge) =>
+      edge.source !== nodeId ||
+      !edge.sourceHandle ||
+      live.has(edge.sourceHandle) ||
+      isFallbackHandle(edge.sourceHandle),
+  )
 }
 
 function newEdge(conn: Connection): Edge {
@@ -108,38 +143,13 @@ export function applyConnection(eds: Edge[], conn: Connection): Edge[] {
     e.target === conn.target &&
     e.targetHandle === conn.targetHandle
 
-  // Identical re-draws stay a no-op for both connection kinds.
+  // Identical re-draws stay a no-op for every kind of connection.
   if (eds.some(sameEnds)) return eds
 
-  if (isFallbackHandle(conn.sourceHandle)) {
-    // Move the node's single fallback branch; never disturb the target's
-    // incoming edges (a fallback targets an earlier, already-wired node).
-    return [
-      ...eds.filter((e) => !(e.source === conn.source && e.sourceHandle === conn.sourceHandle)),
-      newEdge(conn),
-    ]
-  }
-
-  // Loop-back: the draw closes a directed cycle (a branch routes back to an
-  // earlier node to repeat it). Coexist with the target's normal incoming edge
-  // exactly like a fallback — replacing it would sever the main chain. Re-
-  // drawing from the SAME branch handle moves that branch's loop-back target.
-  const closesCycle = edgeClosesCycle(eds, conn.source, conn.target)
-  if (closesCycle) {
-    return [
-      ...eds.filter((e) => !(e.source === conn.source && e.sourceHandle === conn.sourceHandle)),
-      newEdge(conn),
-    ]
-  }
-
-  // Normal connection: replace the edge occupying the input handle, keeping
-  // fallback AND loop-back edges (they attach to the same handle visually but
-  // never occupy it — they coexist with the node's regular incoming edge).
-  const loopBackIds = loopBackEdgeIds(eds)
-  const occupiesInput = (e: Edge): boolean =>
-    e.target === conn.target &&
-    e.targetHandle === conn.targetHandle &&
-    !isFallbackHandle(e.sourceHandle) &&
-    !loopBackIds.has(e.id)
-  return [...eds.filter((e) => !occupiesInput(e)), newEdge(conn)]
+  // Only this handle's own edge moves; every other feed of the target survives,
+  // whether it is a sibling branch (a merge), a fallback, or a loop-back.
+  return [
+    ...eds.filter((e) => !(e.source === conn.source && e.sourceHandle === conn.sourceHandle)),
+    newEdge(conn),
+  ]
 }

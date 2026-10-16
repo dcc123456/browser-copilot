@@ -80,6 +80,7 @@ describe('server executors', () => {
       'click',
       'fill',
       'set-variable',
+      'get-secret',
       'increase-variable',
       'slice-variable',
       'regex-variable',
@@ -100,6 +101,89 @@ describe('server executors', () => {
     const ctx = makeCtx({ name: '世界' })
     await registry['set-variable']!({ variableName: 'greeting', value: '你好 {{name}}' }, ctx)
     expect(ctx.variables['greeting']).toBe('你好 世界')
+  })
+
+  /**
+   * `get-secret` on a headless host: no credential store, so each row reads the
+   * environment. The values must land in the row's own variable, must never reach
+   * the run log, and a missing one must fail the step rather than write `''` — a
+   * blank password that fills a form and reports success is the failure mode here.
+   */
+  describe('get-secret reads credentials from the environment', () => {
+    const ENV_NAMES = ['BC_SECRET_GITHUB_TOKEN', 'BC_SECRET_MAIL_PASSWORD']
+
+    function withEnv(values: Record<string, string | undefined>, run: () => Promise<void>) {
+      return async (): Promise<void> => {
+        const saved = ENV_NAMES.map((name) => [name, process.env[name]] as const)
+        for (const [name, value] of Object.entries(values)) {
+          if (value === undefined) delete process.env[name]
+          else process.env[name] = value
+        }
+        try {
+          await run()
+        } finally {
+          for (const [name, value] of saved) {
+            if (value === undefined) delete process.env[name]
+            else process.env[name] = value
+          }
+        }
+      }
+    }
+
+    it('fills one variable per credential row, value out of the log', async () => {
+      await withEnv(
+        { BC_SECRET_GITHUB_TOKEN: 'ghp-SECRET', BC_SECRET_MAIL_PASSWORD: 'mail-SECRET' },
+        async () => {
+          const registry = createExecutors(makeDeps(makeDriverStub()))
+          const ctx = makeCtx()
+          await registry['get-secret']!(
+            {
+              credential: 'github::token',
+              variableName: 'githubToken',
+              credentials: [
+                { credential: 'github::token', variableName: 'githubToken' },
+                { credential: 'mail::password', variableName: 'mailPassword' },
+              ],
+            },
+            ctx,
+          )
+          expect(ctx.variables).toEqual({
+            githubToken: 'ghp-SECRET',
+            mailPassword: 'mail-SECRET',
+          })
+          expect(JSON.stringify(ctx.events)).not.toContain('SECRET')
+        },
+      )
+    })
+
+    it('fails the step when the environment has no such credential', async () => {
+      await withEnv({ BC_SECRET_GITHUB_TOKEN: undefined }, async () => {
+        const registry = createExecutors(makeDeps(makeDriverStub()))
+        const ctx = makeCtx()
+        await expect(
+          registry['get-secret']!(
+            { credential: 'github::token', variableName: 'githubToken' },
+            ctx,
+          ),
+        ).rejects.toThrow('BC_SECRET_GITHUB_TOKEN')
+        // Not a green step that wrote an empty password.
+        expect(ctx.variables).toEqual({})
+      })
+    })
+
+    it('refuses a row with no output name', async () => {
+      await withEnv({ BC_SECRET_GITHUB_TOKEN: 'ghp-SECRET' }, async () => {
+        const registry = createExecutors(makeDeps(makeDriverStub()))
+        await expect(
+          registry['get-secret']!({ credential: 'github::token', variableName: '' }, makeCtx()),
+        ).rejects.toThrow('未指定输出变量名')
+      })
+    })
+
+    it('refuses a node with no credential at all', async () => {
+      const registry = createExecutors(makeDeps(makeDriverStub()))
+      await expect(registry['get-secret']!({}, makeCtx())).rejects.toThrow('未指定凭证')
+    })
   })
 
   /**

@@ -125,7 +125,7 @@ export const CUSTOM_BLOCKS: BlockCatalogEntry[] = [
     id: 'get-secret',
     name: 'Get secret',
     description:
-      'Fetch a stored credential field at runtime and store its value in a variable. The secret value is never embedded in the workflow — it is resolved fresh each run.',
+      'Fetches stored credential fields into variables each run. Only for values that must stay secret — a username belongs in the form value or a trigger parameter.',
     icon: 'lucide:KeyRound',
     category: 'data',
     component: 'Default',

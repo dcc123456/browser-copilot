@@ -13,6 +13,7 @@ import { Checkbox, Field, Select, TextArea, TextInput } from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
 
 const PROTOCOLS = [
+  { value: '', label: 'No protocol' },
   { value: 'https://', label: 'HTTPS' },
   { value: 'http://', label: 'HTTP' },
   { value: 'ftp://', label: 'FTP' },
@@ -24,20 +25,27 @@ function isTemplateVariable(value: string): boolean {
   return !!value && value.includes('{{')
 }
 
-/** Split a stored url into protocol + path (Automa's parseUrl). */
+/**
+ * Split a stored url into protocol + path (Automa's parseUrl).
+ *
+ * `url === protocol + path` holds for every value, so the dropdown always
+ * shows the prefix that is really there. A `{{variable}}` gets its scheme at
+ * run time and is reported as carrying none: claiming `https://` for it would
+ * put a prefix in the path box that the value never had, and every following
+ * keystroke would write it straight back. A bare domain still defaults to
+ * https, so typing `example.com` keeps working.
+ */
 function parseUrl(url: string): { protocol: string; path: string } {
   if (!url) return { protocol: 'https://', path: '' }
-  if (isTemplateVariable(url)) return { protocol: 'https://', path: url }
 
   const protocolMatch = url.match(/^(https?:|ftp:|file:|mailto:)(\/\/)?/i)
   if (protocolMatch) {
     const protocolBase = (protocolMatch[1] ?? '').toLowerCase()
     const protocol = protocolBase + (protocolBase === 'mailto:' ? '' : '//')
-    const path = url.slice(protocolMatch[0].length)
-    return { protocol, path }
+    return { protocol, path: url.slice(protocolMatch[0].length) }
   }
 
-  return { protocol: 'https://', path: url }
+  return { protocol: isTemplateVariable(url) ? '' : 'https://', path: url }
 }
 
 /** Strip a leading protocol the user typed into the path box. */
@@ -50,8 +58,14 @@ export default function EditNewTab({ data, onChange }: EditFormProps) {
   const parsed = parseUrl(str(data, 'url'))
 
   const setUrlParts = (protocol: string, path: string) => {
-    const cleanPath = cleanProtocol(path || '')
-    onChange({ url: cleanPath ? protocol + cleanPath : protocol })
+    const next = path || ''
+    if (!next.trim()) {
+      onChange({ url: protocol })
+      return
+    }
+    // Stripping guards against doubling the dropdown's scheme. With "No
+    // protocol" there is none to double, so a scheme typed here is kept.
+    onChange({ url: protocol ? protocol + cleanProtocol(next) : next })
   }
 
   const zoom = num(data, 'tabZoom', 1)

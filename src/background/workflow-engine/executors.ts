@@ -41,10 +41,15 @@ import type { TokenAttribution } from '../../lib/token-ledger'
 import { getSettings, listPasswords } from '../../lib/storage'
 import { getFeishuConfig } from '../../lib/task-store'
 import { sendWebhookText } from '../../lib/feishu'
-import { entryFields, findField } from '../../lib/types'
+import { entryFields, findField, type PasswordEntry } from '../../lib/types'
 import { OCR_SUPPORTED } from '../../lib/ocr-support'
 import { interpolate, EMPTY_INTERP_KEY } from '../../lib/workflow/interpolate'
-import { conditionGroupsMatch } from '../../lib/workflow/condition-tree'
+import { secretRequestsOf } from '../../lib/workflow/secret-params'
+import {
+  conditionGroupsMatch,
+  matchConditionPath,
+  type ConditionEnv,
+} from '../../lib/workflow/condition-tree'
 import {
   applyAssignVariable,
   compareDataItems,
@@ -1383,71 +1388,66 @@ const setVariable: BlockExecutor = async (data, ctx) => {
 }
 
 /**
- * `get-secret` block: fetch a stored credential field at runtime and store its
- * value in a variable. The secret value is never embedded in the workflow — it
- * is resolved fresh each run, so credential updates are picked up automatically.
+ * `get-secret` block: fetch stored credential fields at runtime and store each
+ * value in its own variable. The secret values are never embedded in the
+ * workflow — they are resolved fresh each run, so credential updates are picked
+ * up automatically, and ONE node can fill as many variables as it has rows.
  *
- * Both fields are REQUIRED — no silent defaults. A workflow auto-generated from
- * incomplete history (no `id`, no field) MUST surface that here instead of
- * falling back to `lastSecret`, otherwise downstream `{{lastSecret}}` literals
- * end up in form inputs.
+ * Both halves of every row are REQUIRED — no silent defaults. A workflow
+ * auto-generated from incomplete history (no `id`, no field) MUST surface that
+ * here instead of falling back to `lastSecret`, otherwise downstream
+ * `{{lastSecret}}` literals end up in form inputs.
  */
 const getSecret: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const variableName = String(data['variableName'] ?? '').trim()
-
-  // The form encodes the user's pick as "<secretId>::<fieldKey>". A workflow
-  // generated before the dropdown refactor may still carry separate
-  // `secretId` + `fieldName` fields; fall back to that shape so older saved
-  // workflows keep running.
-  let credential = String(data['credential'] ?? '')
-  if (!credential) {
-    const legacyId = String(data['secretId'] ?? '')
-    const legacyField = String(data['fieldName'] ?? '')
-    if (legacyId) credential = legacyField ? `${legacyId}::${legacyField}` : legacyId
+  const requests = secretRequestsOf(data)
+  if (requests.length === 0) {
+    throw new Error('get-secret: 未指定凭证')
   }
-  const sepIdx = credential.indexOf('::')
-  const secretId = sepIdx >= 0 ? credential.slice(0, sepIdx) : credential
-  const fieldName = sepIdx >= 0 ? credential.slice(sepIdx + 2) : ''
-
-  if (!secretId) {
-    throw new Error('get-secret: 未指定凭证 ID')
-  }
-  if (!variableName) {
-    throw new Error('get-secret: 未指定输出变量名')
+  const unnamed = requests.find((request) => !request.variableName)
+  if (unnamed) {
+    throw new Error(`get-secret: 凭证 "${unnamed.credentialId}" 未指定输出变量名`)
   }
 
-  let value = ''
-  // Every failure below throws rather than logging: the block's output is the
-  // credential, and writing `''` into `variableName` made a downstream
-  // `{{secret}}` resolve to an empty string — the step "succeeded" with a blank
-  // password.
+  // One store read for the whole node — resolving row by row would re-open the
+  // password store per credential.
+  let entries: PasswordEntry[]
   try {
-    const entries = await listPasswords()
-    const entry = entries.find((e) => e.id === secretId)
-    if (!entry) {
-      throw new Error(`get-secret: 未找到 ID 为 "${secretId}" 的凭证`)
-    }
-    const field =
-      (fieldName && findField(entry, fieldName)) ??
-      findField(entry, 'password') ??
-      entryFields(entry)[0]
-    if (!field) {
-      throw new Error(`get-secret: 凭证中未找到字段 "${fieldName}"`)
-    }
-    value = field.value
+    entries = await listPasswords()
   } catch (err) {
-    if (err instanceof Error && err.message.startsWith('get-secret:')) throw err
     throw new Error(
       `get-secret: 读取凭证失败 — ${err instanceof Error ? err.message : String(err)}`,
     )
   }
 
-  ctx.variables[variableName] = value
-  ctx.emit(
-    'result',
-    `已获取凭证字段 "${fieldName || 'password'}" → 变量 ${variableName} (值已隐藏)`,
-  )
+  for (const request of requests) {
+    const entry = entries.find((e) => e.id === request.credentialId)
+    if (!entry) {
+      throw new Error(`get-secret: 未找到 ID 为 "${request.credentialId}" 的凭证`)
+    }
+    // `fieldKey` is optional by design (a reference may name only the credential),
+    // so the fallback chain must test it rather than `&&` it into an empty string:
+    // `('' && findField(...)) ?? next` keeps `''`, and `??` is not a falsiness
+    // check — the chain would end here instead of reaching `password`.
+    const field =
+      (request.fieldKey ? findField(entry, request.fieldKey) : undefined) ??
+      findField(entry, 'password') ??
+      entryFields(entry)[0]
+    if (!field) {
+      throw new Error(
+        `get-secret: 凭证 "${request.credentialId}" 中未找到字段 "${request.fieldKey}"`,
+      )
+    }
+    // Every failure above throws rather than logging: writing `''` into the
+    // variable made a downstream `{{secret}}` resolve to an empty string — the
+    // step "succeeded" with a blank password.
+    ctx.variables[request.variableName] = field.value
+    ctx.emit(
+      'info',
+      `[凭证] "${request.fieldKey || 'password'}" → {{${request.variableName}}} (值已隐藏)`,
+    )
+  }
+  ctx.emit('result', `已获取 ${requests.length} 个凭证字段（值已隐藏）`)
   return null
 }
 
@@ -3325,37 +3325,48 @@ const elementScroll: BlockExecutor = async (data, ctx) => {
 }
 
 /**
- * Automa `conditions` block: named output groups each with AND-ed rows; the
- * groups are OR-ed. A truthy group routes to output-1 (true), otherwise
- * output-2 (false). Falls back to a `code` expression for the older shape.
+ * `conditions` block: a list of named paths, each with an OR-tree of AND rows.
+ * Routes by ORDER — the first path whose tree holds wins and the walk stops
+ * there; when none holds the run continues on the fallback output. Falls back
+ * to a single boolean (true/false) for blocks that predate the `paths` shape,
+ * and to a `code` expression when one is set.
  */
 const conditionsBlock: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
+  const pageArgs = { vars: ctx.variables, refData: ctx.refData }
+  const env: ConditionEnv = {
+    vars: ctx.variables,
+    refData: ctx.refData,
+    // Page lookups (element/text/code) go through the in-page evaluator.
+    runCode: async (source: string) => {
+      const evaluated = await evalInPage(`return (${source});`, pageArgs, ctx)
+      if (!evaluated.ok) throw new Error('conditions: 页面求值失败')
+      return evaluated.value
+    },
+  }
+
   const code = data['code'] as string | undefined
+  const paths = data['paths']
+  // `paths` is authoritative whenever the key exists — an empty array means
+  // "no branch configured", which routes straight to the fallback. A raw
+  // `code` expression still wins, so the Automa escape hatch keeps working.
+  if (!code && Array.isArray(paths)) {
+    const matched = await matchConditionPath(paths, env)
+    if (matched) {
+      ctx.emit('result', `条件成立：${matched.name}`)
+      return ctx.outputs?.[`output-${matched.id}`] ?? ctx.defaultNext ?? null
+    }
+    ctx.emit('result', '条件均不成立')
+    return ctx.outputs?.['output-none'] ?? ctx.defaultNext ?? null
+  }
+
+  // Legacy single-boolean shape (pre-`paths`, or a raw `code` expression).
   let matched = false
   if (code) {
-    const evaluated = await evalInPage(
-      `return (${code})`,
-      { vars: ctx.variables, refData: ctx.refData },
-      ctx,
-    )
+    const evaluated = await evalInPage(`return (${code})`, pageArgs, ctx)
     matched = evaluated.ok ? Boolean(evaluated.value) : false
   } else {
-    // The editor writes an OR-group tree of builder items; the shared evaluator
-    // also understands the flat `{ name, compare, value }` rows a generated
-    // graph writes. Page lookups (element/text/code) go through `execJs`.
-    matched = await conditionGroupsMatch(data['conditions'], {
-      vars: ctx.variables,
-      runCode: async (source) => {
-        const evaluated = await evalInPage(
-          `return (${source});`,
-          { vars: ctx.variables, refData: ctx.refData },
-          ctx,
-        )
-        if (!evaluated.ok) throw new Error('conditions: 页面求值失败')
-        return evaluated.value
-      },
-    })
+    matched = await conditionGroupsMatch(data['conditions'], env)
   }
   ctx.emit('result', matched ? '条件成立' : '条件不成立')
   return matched

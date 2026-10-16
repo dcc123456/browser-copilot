@@ -38,6 +38,7 @@ import {
   webhookRecord,
 } from '../../src/lib/workflow/block-output'
 import { normalizeWorkflowFiles } from '../../src/lib/workflow/file-artifact'
+import { secretEnvNameOf, secretRequestsOf } from '../../src/lib/workflow/secret-params'
 import {
   coerceInputValue,
   missingRequiredInputs,
@@ -890,6 +891,42 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     const value = ctx.variables[String(data['variableName'] ?? '')]
     ctx.variables['lastValue'] = value
     ctx.emit('result', String(value ?? ''))
+    return null
+  }
+
+  /**
+   * `get-secret`, mirrored for the headless host. The extension resolves rows
+   * against the user's stored credentials; a Runner process has no such store, so
+   * each row reads the environment variable derived from its reference
+   * (`BC_SECRET_<ID>[_<FIELD>]`, naming owned by `lib/workflow/secret-params`).
+   *
+   * Absent or empty fails the step instead of writing a blank variable —
+   * downstream `{{secret}}` would then "succeed" while filling forms with nothing.
+   */
+  const getSecret: BlockExecutor = async (data, ctx) => {
+    assertActive(ctx)
+    const requests = secretRequestsOf(data)
+    if (requests.length === 0) {
+      throw new Error('get-secret: 未指定凭证')
+    }
+    const unnamed = requests.find((request) => !request.variableName)
+    if (unnamed) {
+      throw new Error(`get-secret: 凭证 "${unnamed.credentialId}" 未指定输出变量名`)
+    }
+
+    for (const request of requests) {
+      const envName = secretEnvNameOf(request)
+      const value = process.env[envName]
+      if (!value) {
+        throw new Error(
+          `get-secret: 环境变量 ${envName} 未设置或为空 —— 服务端没有凭证库，凭证只从 Runner 进程的环境读取`,
+        )
+      }
+      ctx.variables[request.variableName] = value
+      // The env NAME is metadata; the value never reaches the run log.
+      ctx.emit('info', `[凭证] ${envName} → {{${request.variableName}}} (值已隐藏)`)
+    }
+    ctx.emit('result', `已获取 ${requests.length} 个凭证字段（值已隐藏）`)
     return null
   }
 
@@ -2127,6 +2164,7 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     // data
     'set-variable': setVariable,
     'get-variable': getVariable,
+    'get-secret': getSecret,
     'insert-data': insertData,
     'export-data': exportData,
     'increase-variable': increaseVariable,

@@ -19,9 +19,23 @@
 import type { WorkflowEdge, WorkflowNode, WorkflowTrigger } from './types'
 import { incomingNormalEdges, reverseReachable } from './graph-edges'
 import { triggerInputs } from './workflow-inputs'
-import { ENGINE_PROVIDED_NAMES, producedNameOfNode } from './integrity'
-import { blockIdOf, fallbackVariableOf, feedsTable } from './producer-completeness'
-import { sanitizeName } from './dynamic-data'
+import { ENGINE_PROVIDED_NAMES } from './integrity'
+import {
+  blockIdOf,
+  fallbackVariableOf,
+  feedsTable,
+  producedVariableNames,
+} from './producer-completeness'
+import {
+  credentialRefOf,
+  secretRequestsOf,
+  secretRowsOf,
+  secretRowsPatch,
+  secretVariableNameOf,
+  SECRET_PRODUCER_BLOCK,
+  type SecretFieldRef,
+  type SecretRow,
+} from './secret-params'
 import { rankByTerm } from '../slash'
 
 /** Where a suggested name comes from — drives the menu's grouping. */
@@ -44,12 +58,6 @@ export interface VariableSuggestion {
   secret?: SecretFieldRef
 }
 
-/** One half-pair of a stored credential: which credential, which field. */
-export interface SecretFieldRef {
-  credentialId: string
-  fieldKey: string
-}
-
 /** A credential field the user may reference — METADATA ONLY, never a value. */
 export interface SecretOption extends SecretFieldRef {
   /** Human credential name, e.g. `GitHub PAT`. */
@@ -63,52 +71,19 @@ export interface SuggestionGraph {
   trigger?: WorkflowTrigger
 }
 
-/** Separator the `get-secret` block uses to encode a credential reference. */
-export const CREDENTIAL_SEPARATOR = '::'
-
-/** `get-secret` stores `<credentialId>::<fieldKey>` in its `credential` param. */
-export function credentialRefOf(ref: SecretFieldRef): string {
-  return `${ref.credentialId}${CREDENTIAL_SEPARATOR}${ref.fieldKey}`
-}
-
-/** Parse a `credential` param back, or `null` when it is not a credential ref. */
-export function parseCredentialRef(value: unknown): SecretFieldRef | null {
-  if (typeof value !== 'string') return null
-  const at = value.indexOf(CREDENTIAL_SEPARATOR)
-  if (at <= 0 || at === value.length - CREDENTIAL_SEPARATOR.length) return null
-  const credentialId = value.slice(0, at)
-  const fieldKey = value.slice(at + CREDENTIAL_SEPARATOR.length)
-  return credentialId && fieldKey ? { credentialId, fieldKey } : null
-}
-
-/**
- * The variable name given to a freshly created `get-secret` producer.
- *
- * Matches the name the history→workflow conversion already mints
- * (`lib/storage`, `secret_<id>_<field>`) so a secret referenced from the picker
- * and one recorded from a live run look the same downstream. Both halves go
- * through {@link sanitizeName}: a credential id is user-supplied text, and a
- * name containing `.` or braces would silently become a path — or no token at all.
- */
-export function secretVariableNameOf(ref: SecretFieldRef): string {
-  return `secret_${sanitizeName(ref.credentialId)}_${sanitizeName(ref.fieldKey)}`
-}
-
 /** Loop producers and the names the run loop publishes for their body. */
 const LOOP_ALIASES: Readonly<Record<string, readonly string[]>> = {
   'loop-data': ['loopIndex', 'loopItem'],
   'loop-elements': ['loopIndex', 'loopItem', 'loopElementSelector'],
 }
 
-/** Block that writes a credential into a variable, and the param carrying the ref. */
-const SECRET_PRODUCER_BLOCK = 'get-secret'
-
 /**
  * Build the suggestion list for one node: only what can genuinely hold a value
  * by the time this node runs.
  *
  * - declared inputs (the trigger's `parameters`), flagged when they are secrets;
- * - every reachable upstream node's `variableName`;
+ * - every reachable upstream node's published names (all of them: a
+ *   multi-credential `get-secret` node feeds several references);
  * - engine aliases, but ONLY the ones `integrity`'s whitelist already sanctions —
  *   a name missing there is reported dangling at save time, so offering it would
  *   hand the user a reference the save card rejects;
@@ -127,8 +102,13 @@ export function collectSuggestions(
   const seen = new Set<string>()
 
   const push = (suggestion: VariableSuggestion): void => {
-    if (seen.has(suggestion.id)) return
-    seen.add(suggestion.id)
+    // Dedupe on what gets WRITTEN, not on the row's own id: a node's explicit
+    // variable name and another node's fallback alias can be the same name, and
+    // two rows inserting `{{lastText}}` is just noise. Collection order makes
+    // the surviving row the more specific one (inputs, then variables, then
+    // aliases, then loop context, then credentials).
+    if (seen.has(suggestion.insert)) return
+    seen.add(suggestion.insert)
     out.push(suggestion)
   }
 
@@ -144,15 +124,15 @@ export function collectSuggestions(
   }
 
   for (const node of upstream) {
-    const name = producedNameOfNode(node)
-    if (!name) continue
-    push({
-      id: `variable:${node.id}:${name}`,
-      origin: 'variable',
-      name,
-      insert: `{{${name}}}`,
-      hint: blockIdOf(node),
-    })
+    for (const name of producedVariableNames(node)) {
+      push({
+        id: `variable:${node.id}:${name}`,
+        origin: 'variable',
+        name,
+        insert: `{{${name}}}`,
+        hint: blockIdOf(node),
+      })
+    }
   }
 
   if (upstream.length > 0) {
@@ -164,7 +144,7 @@ export function collectSuggestions(
   for (const node of upstream) {
     const alias = fallbackVariableOf(blockIdOf(node))
     if (!alias || !ENGINE_PROVIDED_NAMES.has(alias)) continue
-    if (producedNameOfNode(node) === alias) continue
+    if (producedVariableNames(node).includes(alias)) continue
     push({
       id: `alias:${node.id}:${alias}`,
       origin: 'alias',
@@ -183,15 +163,19 @@ export function collectSuggestions(
   }
 
   // A credential already fetched by a reachable `get-secret` node is offered
-  // under that node's real name; one without a producer is still offered, and
-  // picking it secures the producer (see `ensureSecretProducer`).
+  // under that ROW's real name (one node can feed several references); one
+  // without a producer is still offered, and picking it secures the producer
+  // (see `ensureSecretProducer`).
   const producers = new Map<string, string>()
   for (const node of upstream) {
     if (blockIdOf(node) !== SECRET_PRODUCER_BLOCK) continue
-    const ref = parseCredentialRef(node.data?.['credential'])
-    if (!ref) continue
-    const name = producedNameOfNode(node) || secretVariableNameOf(ref)
-    producers.set(credentialRefOf(ref), name)
+    for (const request of secretRequestsOf(node.data)) {
+      // A row that names only the credential cannot be matched to a specific
+      // field: its run-time fallback (`password`, then the first field) may well
+      // resolve to another field than the one offered here.
+      if (!request.fieldKey) continue
+      producers.set(credentialRefOf(request), request.variableName || secretVariableNameOf(request))
+    }
   }
   for (const secret of options.secrets ?? []) {
     const ref = credentialRefOf(secret)
@@ -227,13 +211,17 @@ export function filterSuggestions(
 export interface SecretProducerPatch {
   /** The variable name to reference; the field text becomes `{{variableName}}`. */
   variableName: string
-  /** True when an existing reachable producer was reused (graph untouched). */
+  /** True when a reachable producer already covers the credential (graph untouched). */
   reused: boolean
   /** The node to add. Present only when one had to be created. */
   added?: WorkflowNode
   /** Full replacement edge list, present only when a node was inserted. */
   edges?: WorkflowEdge[]
-  /** Producer found with a blank variable name; patch it so the ref resolves. */
+  /**
+   * An upstream producer was reused and had to change: a row that carried no
+   * name got one, or this credential joined the node as an extra row (one node,
+   * several credentials — see the multi-credential design record).
+   */
   nodePatch?: { nodeId: string; patch: Record<string, unknown> }
   /** A node was added but the target had nothing to splice it into. */
   detached?: boolean
@@ -255,10 +243,13 @@ function overlaps(x: number, y: number, nodes: readonly WorkflowNode[]): boolean
  *
  * Reuse wins when a reachable producer already fetches the same
  * `<id>::<field>`; a producer elsewhere in the graph is NOT reused, because a
- * reference must be fed by something that runs before this node. Otherwise the
- * new node is spliced into the target's normal incoming edge — fallback
- * branches and loop-backs are left alone on purpose, rewiring one would move an
- * error path or a retry rather than the step being edited.
+ * reference must be fed by something that runs before this node. When a
+ * reachable producer exists but does not fetch THIS field, the field is added as
+ * another row of that node — several credentials, one node — rather than
+ * stacking a second node onto the canvas. Otherwise the new node is spliced into
+ * the target's normal incoming edge — fallback branches and loop-backs are left
+ * alone on purpose, rewiring one would move an error path or a retry rather than
+ * the step being edited.
  *
  * Idempotent: after the first pick the new node is immediately upstream, so a
  * second pick of the same credential hits the reuse branch.
@@ -271,18 +262,36 @@ export function ensureSecretProducer(
 ): SecretProducerPatch {
   const credential = credentialRefOf(ref)
   const ancestors = reverseReachable(graph.edges, targetNodeId)
+  const fallbackName = secretVariableNameOf(ref)
+  let appendable: { node: WorkflowNode; rows: SecretRow[] } | undefined
   for (const node of graph.nodes) {
     if (!ancestors.has(node.id)) continue
     if (blockIdOf(node) !== SECRET_PRODUCER_BLOCK) continue
-    if (parseCredentialRef(node.data?.['credential']) === null) continue
-    if (node.data?.['credential'] !== credential) continue
-    const named = producedNameOfNode(node)
-    if (named) return { variableName: named, reused: true }
-    const fallback = secretVariableNameOf(ref)
+    const rows = secretRowsOf(node.data)
+    if (rows.length === 0) continue
+    const match = rows.find((row) => row.credential === credential)
+    if (match) {
+      if (match.variableName) return { variableName: match.variableName, reused: true }
+      // The row is there but unnamed: name it, leaving the other rows alone.
+      const named = rows.map((row) =>
+        row.credential === credential ? { ...row, variableName: fallbackName } : row,
+      )
+      return {
+        variableName: fallbackName,
+        reused: true,
+        nodePatch: { nodeId: node.id, patch: secretRowsPatch(named) },
+      }
+    }
+    appendable ??= { node, rows }
+  }
+  // One node, several credentials: the picked field joins the producer that is
+  // already upstream rather than stacking a second node for it.
+  if (appendable) {
+    const patch = secretRowsPatch([...appendable.rows, { credential, variableName: fallbackName }])
     return {
-      variableName: fallback,
+      variableName: fallbackName,
       reused: true,
-      nodePatch: { nodeId: node.id, patch: { variableName: fallback } },
+      nodePatch: { nodeId: appendable.node.id, patch },
     }
   }
 

@@ -26,6 +26,12 @@ export interface ConditionPageProbe {
   enabled(target: ConditionTarget): Promise<boolean>
   /** The element's text, or undefined when it does not exist. */
   text(target: ConditionTarget): Promise<string | undefined>
+  /**
+   * The live value of a form control (the DOM property, not the `value`
+   * attribute and not the element's text), or undefined when the target is not
+   * something a value can be read from.
+   */
+  value(target: ConditionTarget): Promise<string | undefined>
   /** One attribute value, or undefined when absent (element or attribute). */
   attribute(target: ConditionTarget, name: string): Promise<string | undefined>
   /** How many elements the locator matches. */
@@ -53,6 +59,8 @@ export interface ConditionBaseline {
   exists: Record<string, boolean>
   /** The words each targeted element showed, for the rows that quote text. */
   texts?: Record<string, string>
+  /** The value each targeted control held, for the rows that quote a value. */
+  values?: Record<string, string>
   /** Whether each targeted element was showing, for the rows that claim it was. */
   visible?: Record<string, boolean>
 }
@@ -123,6 +131,7 @@ async function captureQuotedObservations(
   const exists: Record<string, boolean> = {}
   const visible: Record<string, boolean> = {}
   const texts: Record<string, string> = {}
+  const values: Record<string, string> = {}
   let url: string | undefined
   let observed = false
   for (const condition of conditions) {
@@ -163,6 +172,20 @@ async function captureQuotedObservations(
       }
       continue
     }
+    if (condition.kind === 'elementValue') {
+      // A control can arrive filled in — draft restore, autofill, a page that
+      // prefills its own search box — so 「控件有值」 proves nothing unless the run
+      // put the value there, and the only moment to learn that is before the
+      // first step.
+      if (!(key in values)) {
+        const value = await probe.value(condition.target)
+        if (value !== undefined) {
+          values[key] = value
+          observed = true
+        }
+      }
+      continue
+    }
     if (condition.kind === 'count') {
       if (!(key in counts)) {
         counts[key] = await probe.count(condition.target)
@@ -177,6 +200,7 @@ async function captureQuotedObservations(
     exists,
     ...(Object.keys(visible).length > 0 ? { visible } : {}),
     ...(Object.keys(texts).length > 0 ? { texts } : {}),
+    ...(Object.keys(values).length > 0 ? { values } : {}),
   }
 }
 
@@ -199,7 +223,7 @@ export async function captureGoalBaseline(
   }
   const url = changed?.url ?? quoted?.url
   if (url !== undefined) merged.url = url
-  for (const field of ['visible', 'texts'] as const) {
+  for (const field of ['visible', 'texts', 'values'] as const) {
     const values = { ...changed?.[field], ...quoted?.[field] }
     if (Object.keys(values).length > 0) merged[field] = values
   }
@@ -225,6 +249,10 @@ function probeFromBaseline(baseline: ConditionBaseline): ConditionPageProbe {
     text: async (target) => {
       const value = read(baseline.texts, target)
       return typeof value === 'string' ? value : undefined
+    },
+    value: async (target) => {
+      const held = read(baseline.values, target)
+      return typeof held === 'string' ? held : undefined
     },
     attribute: async () => undefined,
     count: async (target) => {
@@ -335,6 +363,16 @@ export async function evaluateCondition(
           ? { satisfied: true, description }
           : unsatisfied(`文本为 "${text.trim().slice(0, 80)}"`)
       }
+      case 'elementValue': {
+        const value = await deps.probe.value(condition.target)
+        if (value === undefined) return unsatisfied('不是可读值的控件')
+        const held = value.trim()
+        if (condition.op === 'notEmpty')
+          return held ? { satisfied: true, description } : unsatisfied('控件为空')
+        return held === fill(condition.expected ?? '')
+          ? { satisfied: true, description }
+          : unsatisfied(`控件值为 "${held.slice(0, 80)}"`)
+      }
       case 'attributeEquals': {
         const value = await deps.probe.attribute(condition.target, condition.name)
         if (value === undefined) return unsatisfied(`属性 ${condition.name} 不存在`)
@@ -439,6 +477,19 @@ function targetFor(target: ConditionTarget): Target | undefined {
 }
 
 /**
+ * The kernel's `get_value` payload as the one thing a value row compares: text.
+ * A checkbox answers with a boolean and a file input with null, and neither is a
+ * value a 「有值」 claim can honestly read — coercing `false` to `'false'` would
+ * pass an unchecked box — so they report no value, which reads as "not a control
+ * you can read a value from" rather than as an empty one.
+ */
+export function controlValueAsText(data: unknown): string | undefined {
+  if (typeof data === 'string') return data
+  if (Array.isArray(data)) return data.map((item) => String(item)).join(', ')
+  return undefined
+}
+
+/**
  * The REAL condition probe over the driver. Every call is a fresh observation
  * through a kernel op on the automation tab; failures read as "no answer"
  * (undefined / false), never as throws — the evaluator turns them into
@@ -493,6 +544,15 @@ export function createDriverConditionProbe(
       // name", which reads as "condition not met".
       const result = await op({ action: 'get_attribute', target: t, attribute: name })
       return typeof result?.data === 'string' ? result.data : undefined
+    },
+    value: async (target) => {
+      const t = targetFor(target)
+      if (!t) return undefined
+      // The control's live property, which is what typing changes: `getAttribute
+      // ('value')` keeps the markup default and `innerText` of an input is always
+      // empty, so neither can answer 「输入框有值」.
+      const result = await op({ action: 'get_value', target: t })
+      return controlValueAsText(result?.data)
     },
     url: async () => {
       const tab = await resolveAutomationTab(undefined, scope).catch(() => undefined)

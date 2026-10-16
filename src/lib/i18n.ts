@@ -229,6 +229,9 @@ export interface Messages {
   workflowsRunHistory: string
   workflowsRunStatusNever: string
   workflowsExport: string
+  workflowsDuplicate: string
+  workflowsDuplicated: (params: { name: string }) => string
+  workflowsDuplicateFailed: string
   workflowsImport: string
   workflowsImportInvalid: string
   workflowsImported: (params: { count: number }) => string
@@ -685,6 +688,12 @@ export interface Messages {
   workflowReviewLogStart: (params: { steps: number }) => string
   /** Review-log line for a failed attempt (timeout / endpoint / parse). */
   workflowReviewLogFailed: string
+  /**
+   * Per-node AI fix log mirrored into the workflow dialog: the same event stream
+   * the editor's AI Fix dialog renders, so the wait is visible from either side.
+   */
+  workflowFixLogTitle: string
+  workflowFixLogRound: (params: { round: number }) => string
 
   // Agent mode
   modeLabel: string
@@ -1319,6 +1328,8 @@ export interface Messages {
   workflowRepairStarting: string
   workflowRepairDiagnosing: string
   workflowRepairApplying: string
+  /** Resuming the run from the failed node after a patch was applied. */
+  workflowRepairResuming: string
   workflowRepairVerifying: string
   /** One repair round that did not fix the step. */
   workflowRepairAttemptFailed: string
@@ -1564,6 +1575,9 @@ const en: Messages = {
   workflowsRunHistory: 'Run history',
   workflowsRunStatusNever: 'Never',
   workflowsExport: 'Export',
+  workflowsDuplicate: 'Duplicate',
+  workflowsDuplicated: ({ name }) => `Duplicated as "${name}".`,
+  workflowsDuplicateFailed: 'Could not duplicate this workflow.',
   workflowsImport: 'Import',
   workflowsImportInvalid: 'Invalid workflow file(s): at least one export could not be read.',
   workflowsImported: ({ count }) => `Imported ${count} workflow(s).`,
@@ -1890,6 +1904,8 @@ const en: Messages = {
   workflowReviewLogStart: ({ steps }) =>
     `Sent ${steps} step${steps > 1 ? 's' : ''} to the AI reviewer…`,
   workflowReviewLogFailed: 'Review failed — keeping every step. Click “Retry review” to try again.',
+  workflowFixLogTitle: 'AI fix log',
+  workflowFixLogRound: ({ round }) => `R${round}`,
 
   modeLabel: 'Mode',
   modeChat: 'Chat',
@@ -2586,6 +2602,7 @@ Keep the whole report dense and within the message size cap.`,
   workflowRepairStarting: 'Starting automatic repair…',
   workflowRepairDiagnosing: 'Analyzing the failed step…',
   workflowRepairApplying: 'Applying the repair…',
+  workflowRepairResuming: 'Resuming the run…',
   workflowRepairVerifying: 'Verifying the repair…',
   workflowRepairAttemptFailed: 'This repair attempt failed',
   workflowRepairCancel: 'Cancel repair',
@@ -2817,6 +2834,9 @@ const zhCN: Messages = {
   workflowsRunHistory: '运行历史',
   workflowsRunStatusNever: '未运行',
   workflowsExport: '导出',
+  workflowsDuplicate: '复制',
+  workflowsDuplicated: ({ name }) => `已复制为「${name}」。`,
+  workflowsDuplicateFailed: '无法复制该工作流。',
   workflowsImport: '导入',
   workflowsImportInvalid: '无效的工作流文件：至少一个导出无法读取。',
   workflowsImported: ({ count }) => `已导入 ${count} 个工作流。`,
@@ -3114,6 +3134,8 @@ const zhCN: Messages = {
   workflowReviewLogExpand: '展开',
   workflowReviewLogStart: ({ steps }) => `已发送 ${steps} 个步骤给 AI 审查…`,
   workflowReviewLogFailed: '审查失败，已保留全部步骤。可点击「重试审查」再试一次。',
+  workflowFixLogTitle: 'AI 修复日志',
+  workflowFixLogRound: ({ round }) => `第 ${round} 轮`,
 
   modeLabel: '模式',
   modeChat: '聊天',
@@ -3735,6 +3757,7 @@ const zhCN: Messages = {
   workflowRepairStarting: '正在启动自动修复…',
   workflowRepairDiagnosing: '正在分析失败步骤…',
   workflowRepairApplying: '正在应用修复…',
+  workflowRepairResuming: '正在从断点继续运行…',
   workflowRepairVerifying: '正在验证修复…',
   workflowRepairAttemptFailed: '本轮修复尝试未成功',
   workflowRepairCancel: '取消修复',

@@ -44,6 +44,10 @@ interface TimelineRow {
   phase: NodeFixPhase
   detail: string
   status: 'running' | 'done' | 'error'
+  /** What this step sent (model request, trial-run parameters, page state). */
+  request?: string
+  /** What came back (the AI's returned parameters, criterion verdicts). */
+  response?: string
 }
 
 const PHASE_LABEL_KEY: Record<NodeFixPhase, Parameters<TranslateFn>[0]> = {
@@ -79,11 +83,16 @@ export function timelineRowsOf(events: readonly NodeFixEvent[]): TimelineRow[] {
   const map = new Map<string, TimelineRow>()
   for (const event of events) {
     const key = `${event.round}:${event.phase}`
+    const previous = map.get(key)
     map.set(key, {
       key,
       phase: event.phase,
       detail: event.message,
       status: event.status ?? 'running',
+      // A phase reports its request and its result as separate events; one row
+      // shows both, otherwise the newest line would erase the older payload.
+      request: event.payload?.request ?? previous?.request,
+      response: event.payload?.response ?? previous?.response,
     })
   }
   const list = [...map.values()]
@@ -102,9 +111,13 @@ export interface NodeFixBodyProps {
   state: NodeFixUiState
   hasContract: boolean
   suggestion: string
+  errorLog: string
   events: readonly NodeFixEvent[]
   resultReason?: string
+  /** What the success claim rests on, once the run settled successfully. */
+  verifiedBy?: 'criteria' | 'exec-only'
   onSuggestionChange: (next: string) => void
+  onErrorLogChange: (next: string) => void
   t: TranslateFn
 }
 
@@ -113,9 +126,12 @@ export function NodeFixBody({
   state,
   hasContract,
   suggestion,
+  errorLog,
   events,
   resultReason,
+  verifiedBy,
   onSuggestionChange,
+  onErrorLogChange,
   t,
 }: NodeFixBodyProps) {
   const rows = useMemo(() => timelineRowsOf(events), [events])
@@ -139,6 +155,18 @@ export function NodeFixBody({
               onChange={(e) => onSuggestionChange(e.target.value)}
             />
           </label>
+          {!hasContract && (
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-semibold text-strong">{t('nodeFixErrorLogLabel')}</span>
+              <textarea
+                className="block w-full resize-y rounded-md border border-border bg-panel px-2 py-1.5 font-mono text-[11px] text-ink outline-none focus:border-accent"
+                rows={4}
+                value={errorLog}
+                placeholder={t('nodeFixErrorLogPlaceholder')}
+                onChange={(e) => onErrorLogChange(e.target.value)}
+              />
+            </label>
+          )}
         </>
       )}
 
@@ -151,21 +179,40 @@ export function NodeFixBody({
             </li>
           ) : (
             rows.map((row) => (
-              <li key={row.key} className="flex items-start gap-2">
-                <Glyph
-                  status={
-                    state === 'running'
-                      ? row.status
-                      : row.status === 'running'
-                        ? 'done'
-                        : row.status
-                  }
-                />
-                <span className="text-xs text-ink">{phaseLabel(t, row.phase)}</span>
-                {row.detail && (
-                  <code className="ml-auto max-w-[55%] truncate text-[10px] text-muted">
-                    {row.detail}
-                  </code>
+              <li key={row.key} className="flex flex-col gap-1">
+                <div className="flex items-start gap-2">
+                  <Glyph
+                    status={
+                      state === 'running'
+                        ? row.status
+                        : row.status === 'running'
+                          ? 'done'
+                          : row.status
+                    }
+                  />
+                  <span className="text-xs text-ink">{phaseLabel(t, row.phase)}</span>
+                  {row.detail && (
+                    <code className="ml-auto max-w-[55%] truncate text-[10px] text-muted">
+                      {row.detail}
+                    </code>
+                  )}
+                </div>
+                {(row.request || row.response) && (
+                  <details className="ml-5">
+                    <summary className="cursor-pointer text-[10px] text-muted hover:text-ink">
+                      {t('nodeFixLogPayload')}
+                    </summary>
+                    {row.request && (
+                      <pre className="m-0 mt-1 whitespace-pre-wrap break-all rounded-md border border-border bg-panel p-1.5 text-[10px] leading-relaxed text-muted">
+                        {`${t('nodeFixLogRequest')}\n${row.request}`}
+                      </pre>
+                    )}
+                    {row.response && (
+                      <pre className="m-0 mt-1 whitespace-pre-wrap break-all rounded-md border border-border bg-panel p-1.5 text-[10px] leading-relaxed text-muted">
+                        {`${t('nodeFixLogResponse')}\n${row.response}`}
+                      </pre>
+                    )}
+                  </details>
                 )}
               </li>
             ))
@@ -176,7 +223,7 @@ export function NodeFixBody({
       {state === 'success' && (
         <p className="m-0 rounded-lg border border-border bg-accent-soft p-2 text-xs text-accent">
           <Wand2 size={13} className="mr-1 inline" />
-          {t('nodeFixNoChangeNeeded')}
+          {verifiedBy === 'exec-only' ? t('nodeFixSuccessExecOnly') : t('nodeFixNoChangeNeeded')}
         </p>
       )}
 
@@ -191,7 +238,8 @@ export function NodeFixBody({
 
 export interface NodeFixFooterProps {
   state: NodeFixUiState
-  hasContract: boolean
+  /** Whether a fix can honestly start (a contract, or a prompt / error log). */
+  canRun: boolean
   onClose: () => void
   onConfirm: () => void
   onCancel: () => void
@@ -214,7 +262,7 @@ function secondaryButton(label: string, onClick: () => void): React.ReactElement
 /** Presentational footer actions for each UI state. */
 export function NodeFixFooter({
   state,
-  hasContract,
+  canRun,
   onClose,
   onConfirm,
   onCancel,
@@ -229,7 +277,7 @@ export function NodeFixFooter({
           <button
             type="button"
             onClick={onConfirm}
-            disabled={!hasContract}
+            disabled={!canRun}
             className="h-8 rounded-lg bg-accent px-3.5 text-xs font-semibold text-on-accent transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t('nodeFixConfirm')}
@@ -265,20 +313,27 @@ export default function NodeFixModal({
 }: NodeFixModalProps) {
   const [state, setState] = useState<NodeFixUiState>('input')
   const [suggestion, setSuggestion] = useState('')
+  const [errorLog, setErrorLog] = useState('')
   const [events, setEvents] = useState<NodeFixEvent[]>([])
   const [resultReason, setResultReason] = useState<string | undefined>(undefined)
+  const [verifiedBy, setVerifiedBy] = useState<'criteria' | 'exec-only' | undefined>(undefined)
   const [proposed, setProposed] = useState<Record<string, unknown> | undefined>(undefined)
   const sessionIdRef = useRef<string>('')
 
   const hasContract = !!nodeGoalContractOf(data)
+  // Without a stored contract the user's own words are the target, so a prompt or
+  // a pasted error log is enough to start; with one, the fix needs nothing.
+  const canRun = hasContract || !!suggestion.trim() || !!errorLog.trim()
 
   // Reset to the input screen every time the dialog is (re)opened.
   useEffect(() => {
     if (open) {
       setState('input')
       setSuggestion('')
+      setErrorLog('')
       setEvents([])
       setResultReason(undefined)
+      setVerifiedBy(undefined)
       setProposed(undefined)
       sessionIdRef.current = ''
     }
@@ -298,7 +353,7 @@ export default function NodeFixModal({
   }, [open, state])
 
   const startFix = async () => {
-    if (!hasContract) return
+    if (!canRun) return
     const sessionId = makeSessionId()
     sessionIdRef.current = sessionId
     setEvents([])
@@ -309,11 +364,13 @@ export default function NodeFixModal({
       blockId,
       blockData: data,
       userSuggestion: suggestion,
+      ...(errorLog.trim() ? { errorLog } : {}),
       ...(windowId !== undefined ? { windowId } : {}),
     })
     if (result.type !== 'workflows.nodeFix') return
     if (result.data.success && result.data.proposedData) {
       setProposed(result.data.proposedData)
+      setVerifiedBy(result.data.verifiedBy)
       setState('success')
     } else {
       setResultReason(result.data.reason)
@@ -350,14 +407,17 @@ export default function NodeFixModal({
         state={state}
         hasContract={hasContract}
         suggestion={suggestion}
+        errorLog={errorLog}
         events={events}
         resultReason={resultReason}
+        verifiedBy={verifiedBy}
         onSuggestionChange={setSuggestion}
+        onErrorLogChange={setErrorLog}
         t={t}
       />
       <NodeFixFooter
         state={state}
-        hasContract={hasContract}
+        canRun={canRun}
         onClose={onClose}
         onConfirm={() => void startFix()}
         onCancel={() => void cancelFix()}

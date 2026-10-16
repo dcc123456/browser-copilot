@@ -29,6 +29,8 @@
  */
 
 import { richTargetFromAny } from './target-to-selector'
+import { secretRequestsOf } from './secret-params'
+import { conditionPathsOf, hasConditionGroups } from './condition-tree'
 
 /** One missing-parameter finding. `key` is the parameter to blame. */
 export interface RequirementProblem {
@@ -138,6 +140,11 @@ function filledList(data: Record<string, unknown>, ...keys: string[]): boolean {
 function hasConditionsContent(data: Record<string, unknown>): boolean {
   const code = data['code']
   if (typeof code === 'string' && code.trim() !== '') return true
+  // `paths` is the per-branch shape and wins whenever present (an empty array
+  // means no branch is configured); only a legacy node falls through to rows.
+  if (Array.isArray(data['paths'])) {
+    return conditionPathsOf(data['paths']).some((path) => hasConditionGroups(path.conditions))
+  }
   const groups = data['conditions']
   if (!Array.isArray(groups)) return false
   return groups.some(
@@ -200,6 +207,32 @@ function clickOnFileInputProblem(data: Record<string, unknown>): RequirementProb
       '请改用 Upload file 算子（wf_op_upload-file，sourceMode:"workflow-file"，fileVariable 指向脚本生成的图片变量）。',
     severity: 'warning',
   }
+}
+
+/**
+ * A `get-secret` node can fetch several credentials, one per row, and the params
+ * above only cover the row mirrored into `credential` / `variableName`. So this
+ * reports on the row set as a whole and stays quiet for a one-row node — which
+ * the params already check — instead of listing one defect twice.
+ */
+function secretRowsProblem(data: Record<string, unknown>): RequirementProblem | null {
+  const requests = secretRequestsOf(data)
+  if (requests.length < 2) return null
+  const names = new Set<string>()
+  for (const [index, request] of requests.entries()) {
+    const key = `credentials[${index}].variableName`
+    if (!request.variableName) {
+      return { key, message: '每个凭证行都要写输出变量名（该凭证值存入哪个变量）' }
+    }
+    if (names.has(request.variableName)) {
+      return {
+        key,
+        message: `变量名 "${request.variableName}" 被两个凭证行同时使用：后取到的值会覆盖先取到的`,
+      }
+    }
+    names.add(request.variableName)
+  }
+  return null
 }
 
 /**
@@ -425,6 +458,9 @@ const REQUIREMENTS: Readonly<Record<string, RequirementSet>> = {
       { key: 'credential', message: '必须给 credential（"<凭证ID>::<字段>"，见设置里的凭证）' },
       { key: 'variableName', message: '必须给 variableName（凭证值存入哪个变量）' },
     ],
+    // One node can fetch several credentials, and only row 1 is covered by the
+    // `credential` / `variableName` params above.
+    check: (data) => secretRowsProblem(data),
   },
   'increase-variable': {
     params: [{ key: 'variableName', message: '必须给 variableName（要增加的变量）' }],

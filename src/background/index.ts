@@ -165,7 +165,13 @@ import {
   saveFeishuConfig,
   saveTask,
 } from '../lib/task-store'
-import { listWorkflows, getWorkflow, saveWorkflow, deleteWorkflow } from '../lib/workflow/storage'
+import {
+  listWorkflows,
+  getWorkflow,
+  saveWorkflow,
+  deleteWorkflow,
+  duplicateWorkflow,
+} from '../lib/workflow/storage'
 import {
   describeNodeParams,
   patchNodeParams,
@@ -890,18 +896,36 @@ setWindowPickRequester(async (request: WindowPickRequest) => {
 })
 
 /**
+ * What the worker pushes to every page on its own: the chat server messages plus
+ * the repair progress stream (which the command result type already declares).
+ */
+type PageBroadcast =
+  | AgentServerMessage
+  | Extract<import('../lib/messages').CommandResult, { type: 'workflows.repairEvent' }>
+
+/**
+ * Push an unsolicited message to EVERY extension page. `chrome.runtime.sendMessage`
+ * is the transport that reaches pages which never opened a panel port — the
+ * workflow editor tab listens on `chrome.runtime.onMessage`, so the live fix
+ * logs have to ride this one. No receiver is fine: the settled command result
+ * still carries the final status.
+ */
+async function broadcastToPages(message: PageBroadcast): Promise<void> {
+  try {
+    await chrome.runtime.sendMessage(message)
+  } catch {
+    // No page subscribed.
+  }
+}
+
+/**
  * Push an unsolicited repair progress event to every open panel. No receiver
  * is fine: the settled command result still carries the final status.
  */
 async function broadcastRepairEvent(
   event: import('../lib/workflow/repair-events').RepairProgressEvent,
 ): Promise<void> {
-  const message = { type: 'workflows.repairEvent', event }
-  try {
-    await chrome.runtime.sendMessage(message)
-  } catch {
-    // No panel subscribed.
-  }
+  await broadcastToPages({ type: 'workflows.repairEvent', event })
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -1563,6 +1587,14 @@ async function handleCommand(
       await deleteWorkflow(command.id)
       await rescheduleAllWorkflowTriggers()
       return { type: 'workflows.delete' }
+
+    case 'workflows.duplicate': {
+      const copy = await duplicateWorkflow(command.id)
+      // The copy inherits the trigger, so the alarm set has to be recomputed or
+      // its scheduled runs would never fire.
+      if (copy) await rescheduleAllWorkflowTriggers()
+      return { type: 'workflows.duplicate', workflow: copy }
+    }
 
     case 'workflows.draft.get': {
       // Materialise the workflow for the panel's review card without persisting
@@ -2441,11 +2473,12 @@ async function handleCommand(
             blockId: command.blockId,
             blockData: command.blockData,
             userSuggestion: command.userSuggestion,
+            ...(command.errorLog !== undefined ? { errorLog: command.errorLog } : {}),
             ...(command.windowId !== undefined ? { windowId: command.windowId } : {}),
           },
           {
             signal: controller.signal,
-            emit: (event) => broadcastPanels({ type: 'workflows.nodeFixEvent', event }),
+            emit: (event) => void broadcastToPages({ type: 'workflows.nodeFixEvent', event }),
           },
         )
         return { type: 'workflows.nodeFix', data }

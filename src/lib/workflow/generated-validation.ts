@@ -28,6 +28,7 @@ import {
 } from './reliability'
 import { deriveGoalSpecFromNodes } from './goal'
 import { VARIABLE_PRODUCER_FIELD } from './producer-completeness'
+import { SECRET_PRODUCER_BLOCK, secretVariableNamesOf } from './secret-params'
 import { nodeGoalContractOf } from './node-goal-contract'
 import { resolveNodeGoalContract } from './node-goal-instantiation'
 import { richTargetFromAny, selectorFromTarget } from './target-to-selector'
@@ -228,6 +229,11 @@ function variableWritesOf(node: WorkflowNode): Set<string> {
   const producerField = VARIABLE_PRODUCER_FIELD[blockId]
   const produced = producerField ? p[producerField] : undefined
   if (typeof produced === 'string' && produced) written.add(produced)
+  // A multi-credential `get-secret` node writes one variable PER ROW, and its
+  // flat `variableName` only mirrors the first one.
+  if (blockId === SECRET_PRODUCER_BLOCK) {
+    for (const name of secretVariableNamesOf(p)) written.add(name)
+  }
   if (!VARIABLE_WRITER_BLOCKS.has(blockId)) return written
   if (typeof p['variableName'] === 'string' && p['variableName']) written.add(p['variableName'])
   // forms fill writes its declared field variables at run time.
@@ -378,6 +384,38 @@ function validateDataFlow(workflow: Workflow, ctx: ValidateCtx): GeneratedValida
           suggestedFix: `先添加 set-variable 写入 ${v}（需在同一可达分支上），或改为字面量。`,
         })
       }
+    }
+  }
+
+  // The mirror case: a credential FETCH nothing reads. Generation routes an
+  // ordinary input (a username, a search term) through get-secret, then fills
+  // the field with a literal — the fetch costs a stored credential and changes
+  // nothing. Unreachable nodes are excluded for the same reason as above.
+  const readers = new Map<string, string[]>()
+  for (const n of nodes) {
+    if (!reachable.has(n.id)) continue
+    for (const v of refsOf(n).vars) {
+      const owners = readers.get(v)
+      if (owners) owners.push(n.id)
+      else readers.set(v, [n.id])
+    }
+  }
+  for (const n of nodes) {
+    if (!reachable.has(n.id) || blockIdOf(n) !== SECRET_PRODUCER_BLOCK) continue
+    for (const name of writes.get(n.id) ?? []) {
+      if (!name) continue
+      // A node naming its own variable in a description is not a consumer.
+      if (readers.get(name)?.some((id) => id !== n.id)) continue
+      issues.push({
+        code: 'DATA_UNUSED_SECRET',
+        severity: 'warning',
+        nodeId: n.id,
+        path: `drawflow.nodes[id=${n.id}]`,
+        message: `获取凭证写入的 {{${name}}} 没有任何节点使用：这次取回的凭证值不会影响运行。`,
+        suggestedFix:
+          `若 "${name}" 装的本就是不敏感的值（用户名 / 搜索词等），删掉本节点，` +
+          `把值写成字面量或声明为触发器参数；确实需要凭证时，让使用它的算子引用 {{${name}}}。`,
+      })
     }
   }
   void ctx

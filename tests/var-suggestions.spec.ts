@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
   collectSuggestions,
-  credentialRefOf,
   filterSuggestions,
-  parseCredentialRef,
-  secretVariableNameOf,
   type SecretOption,
   type SuggestionGraph,
 } from '../src/lib/workflow/var-suggestions'
+import {
+  credentialRefOf,
+  parseCredentialRef,
+  secretVariableNameOf,
+} from '../src/lib/workflow/secret-params'
 import { LOOP_CONTEXT_NAMES } from '../src/lib/workflow/repair/variable-provenance'
 import { ENGINE_PROVIDED_NAMES } from '../src/lib/workflow/integrity'
 import type { WorkflowEdge, WorkflowNode, WorkflowTrigger } from '../src/lib/workflow/types'
@@ -206,7 +208,7 @@ describe('collectSuggestions — secrets', () => {
     expect(JSON.stringify(row)).not.toContain('super-secret')
   })
 
-  it('reuses an existing reachable producer and its real variable name', () => {
+  it('reuses an existing reachable producer and offers its name once', () => {
     const producer = node('fetch', 'get-secret', {
       credential: 'gh::token',
       variableName: 'githubToken',
@@ -217,9 +219,13 @@ describe('collectSuggestions — secrets', () => {
       'post',
       { secrets: [secret] },
     )
-    const row = items.find((item) => item.origin === 'secret')
-    expect(row?.insert).toBe('{{githubToken}}')
-    expect(row?.needsProducer).toBe(false)
+    // The credential IS an upstream variable by then, so it shows as that
+    // variable and not a second row that writes the same token.
+    const same = items.filter((item) => item.insert === '{{githubToken}}')
+    expect(same).toHaveLength(1)
+    expect(same[0]?.origin).toBe('variable')
+    expect(same[0]?.hint).toBe('get-secret')
+    expect(items.some((item) => item.origin === 'secret')).toBe(false)
   })
 
   it('does not reuse a producer that cannot reach this node', () => {
@@ -231,6 +237,33 @@ describe('collectSuggestions — secrets', () => {
       secrets: [secret],
     })
     expect(items.find((item) => item.origin === 'secret')?.needsProducer).toBe(true)
+  })
+
+  it('offers every name a reachable multi-credential producer publishes', () => {
+    const producer = node('fetch', 'get-secret', {
+      credential: 'gh::token',
+      variableName: 'githubToken',
+      credentials: [
+        { credential: 'gh::token', variableName: 'githubToken' },
+        { credential: 'mail::password', variableName: 'mailPassword' },
+      ],
+    })
+    const items = collectSuggestions(
+      graph(
+        [nodes[0] as WorkflowNode, producer, nodes[1] as WorkflowNode],
+        [edge('t', 'fetch'), edge('fetch', 'post')],
+      ),
+      'post',
+      {
+        secrets: [secret, { ...secret, credentialId: 'mail', fieldKey: 'password', label: 'Mail' }],
+      },
+    )
+    // Both rows are upstream variables already, so neither shows as a credential
+    // that still needs a producer.
+    expect(items.filter((item) => item.origin === 'variable').map((item) => item.name)).toEqual(
+      expect.arrayContaining(['githubToken', 'mailPassword']),
+    )
+    expect(items.filter((item) => item.origin === 'secret')).toEqual([])
   })
 })
 

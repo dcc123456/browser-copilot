@@ -799,7 +799,7 @@ async function runCore(
     const outEdges = outBySource.get(nodeId) ?? []
     const outputs: Record<string, string> = {}
     // Semantic branch keys by block, mapped to positional output handles:
-    //   conditions   -> output-1 true / output-2 false
+    //   conditions   -> output-1 true / output-2 false (legacy pre-`paths` shape)
     //   element-exists -> output-1 exists / output-2 not exists
     //   loop blocks  -> output-1 loop body / output-2 after-loop
     const BRANCH_KEYS: Record<string, [string, string]> = {
@@ -825,16 +825,22 @@ async function runCore(
       const handle = edge.sourceHandle ?? 'next'
       outputs[handle] = edge.target
       // Index by bare suffix: `${blockId}-output-1` -> `output-1`. `loop`/`end`
-      // cover handles migration normalized from imported bare semantic keys.
-      const m = /-(output-\d+|fallback|loop|end)$/.exec(handle)
+      // cover handles migration normalized from imported bare semantic keys. The
+      // token class accepts letters too so conditions-block path handles
+      // (`output-<pathId>`, e.g. `output-p1`) get indexed for the executor.
+      const m = /-(output-[A-Za-z0-9_]+|fallback|loop|end)$/.exec(handle)
       if (m) outputs[m[1]!] = edge.target
       // Index this block's semantic branch keys (`exists` / `notExists` / …).
       const slot = branchSlot(handle)
-      if (slot !== null && pair) {
-        outputs[pair[slot]] = edge.target
+      if (slot !== null && pair) outputs[pair[slot]] = edge.target
+      if (handle.endsWith('-output-fallback')) outputs['fallback'] = edge.target
+      // Any handle that names an output port counts, not just the two-slot
+      // shapes above: a conditions block's ports are `output-<pathId>` per
+      // path plus its no-match port (`output-none`). An unlabelled edge names
+      // no port, so it keeps the pass-through shape.
+      if (EXCLUSIVE_BRANCH_BLOCKS.has(blockId) && /(?:^|-)output-[A-Za-z0-9_]+$/.test(handle)) {
         portEdges += 1
       }
-      if (handle.endsWith('-output-fallback')) outputs['fallback'] = edge.target
     }
     // For an exclusive-branch block every out-edge names a port, so `outEdges[0]`
     // may well be the branch the verdict did NOT take. Falling back to it is how

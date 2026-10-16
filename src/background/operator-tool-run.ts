@@ -58,6 +58,7 @@ import {
   redactRecordedParams,
   credentialFillPath,
 } from '../lib/workflow/secret-guard'
+import { secretRequestsOf, SECRET_PRODUCER_BLOCK } from '../lib/workflow/secret-params'
 import {
   buildVariableIndex,
   rewriteDataParams,
@@ -556,11 +557,16 @@ function rewriteForRecording(
   }
 
   // Harvest the executor's writes. `get-secret` is the only block that pulls a
-  // credential in, so its output variable is the only key that must stay out
-  // of the persisted draft.
-  if (blockId === 'get-secret') {
-    const variableName = typeof data['variableName'] === 'string' ? data['variableName'].trim() : ''
-    if (variableName && variableName in variables) bag.keys.add(variableName)
+  // credential in, so EVERY row's output variable must stay out of the
+  // persisted draft — the flat `variableName` is only row 1 of a
+  // multi-credential node, and a name missed here gets its secret written into
+  // the workflow definition in plaintext.
+  if (blockId === SECRET_PRODUCER_BLOCK) {
+    for (const request of secretRequestsOf(data)) {
+      if (request.variableName && request.variableName in variables) {
+        bag.keys.add(request.variableName)
+      }
+    }
   }
   for (const key of bag.keys) {
     if (key in variables) bag.values[key] = variables[key]

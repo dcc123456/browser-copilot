@@ -34,6 +34,19 @@ export type WorkflowCondition =
       /** Default `exact`: a goal condition must not pass on a substring. */
       match?: 'exact' | 'contains'
     }
+  /**
+   * The VALUE of a form control — the DOM property, not its text (an input's
+   * `innerText` is always empty) and not its `value` attribute (which keeps the
+   * markup default while the user types). This is the row that says "the step
+   * actually entered something", which nothing above can express.
+   */
+  | {
+      kind: 'elementValue'
+      target: ConditionTarget
+      op: 'notEmpty' | 'equals'
+      /** Required by `equals`; ignored by `notEmpty`. */
+      expected?: string
+    }
   | { kind: 'attributeEquals'; target: ConditionTarget; name: string; expected: string }
   | { kind: 'variableEquals'; name: string; expected: unknown }
   | { kind: 'variableExists'; name: string }
@@ -60,6 +73,7 @@ const CONDITION_KINDS: readonly string[] = [
   'elementVisible',
   'elementEnabled',
   'elementText',
+  'elementValue',
   'attributeEquals',
   'variableEquals',
   'variableExists',
@@ -93,6 +107,7 @@ export function isWorkflowCondition(value: unknown): value is WorkflowCondition 
     kind === 'elementVisible' ||
     kind === 'elementEnabled' ||
     kind === 'elementText' ||
+    kind === 'elementValue' ||
     kind === 'attributeEquals' ||
     kind === 'elementGone' ||
     kind === 'elementAppeared' ||
@@ -130,6 +145,12 @@ export function isWorkflowCondition(value: unknown): value is WorkflowCondition 
       return false
     }
   }
+  if (kind === 'elementValue') {
+    if (value['op'] !== 'notEmpty' && value['op'] !== 'equals') return false
+    // `equals ''` is a real claim (the control was cleared), so only the type is
+    // checked here; `notEmpty` ignores the field entirely.
+    if (value['expected'] !== undefined && typeof value['expected'] !== 'string') return false
+  }
   if (kind === 'attributeEquals') {
     if (typeof value['name'] !== 'string' || typeof value['expected'] !== 'string') return false
   }
@@ -155,6 +176,7 @@ const ELEMENT_TARGET_KINDS: readonly WorkflowCondition['kind'][] = [
   'elementVisible',
   'elementEnabled',
   'elementText',
+  'elementValue',
   'attributeEquals',
   'elementGone',
   'elementAppeared',
@@ -326,6 +348,10 @@ export function describeCondition(condition: WorkflowCondition): string {
       return `文本${
         condition.match === 'exact' ? '等于' : '包含'
       } "${condition.expected}"（${describeConditionTarget(condition.target)}）`
+    case 'elementValue':
+      return condition.op === 'equals'
+        ? `控件值等于 "${condition.expected ?? ''}"（${describeConditionTarget(condition.target)}）`
+        : `控件有值（${describeConditionTarget(condition.target)}）`
     case 'attributeEquals':
       return `属性 ${condition.name}="${condition.expected}"（${describeConditionTarget(
         condition.target,
@@ -373,12 +399,15 @@ export function isVariableOnlyCondition(condition: WorkflowCondition): boolean {
  * `attributeEquals` is hard because it is a fact about a control the step just
  * touched (a checkbox that did not check, an option that did not select) — the
  * executor's own success claim, not a guess about business outcomes.
+ * `elementValue` is the same class of fact one level deeper: the control the step
+ * filled either holds what it was told to, or it does not.
  */
 export function isHardCondition(condition: WorkflowCondition): boolean {
   return (
     condition.kind === 'variableExists' ||
     condition.kind === 'variableEquals' ||
-    condition.kind === 'attributeEquals'
+    condition.kind === 'attributeEquals' ||
+    condition.kind === 'elementValue'
   )
 }
 

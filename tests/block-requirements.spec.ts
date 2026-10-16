@@ -140,6 +140,39 @@ describe('per-block required parameters', () => {
     )
   })
 
+  /**
+   * The two params above only ever describe row 1 of a multi-credential node, so
+   * the rows are checked as a set: each needs its own output name, and two rows
+   * may not write the same one (the later fetch would silently overwrite).
+   */
+  it('checks every credential row of a multi-credential node', () => {
+    const twoRows = {
+      credential: 'a::b',
+      variableName: 'pw',
+      credentials: [
+        { credential: 'a::b', variableName: 'pw' },
+        { credential: 'c::d', variableName: 'token' },
+      ],
+    }
+    expect(missingRequirements('get-secret', twoRows)).toEqual([])
+
+    const unNamed = {
+      ...twoRows,
+      credentials: [twoRows.credentials![0], { credential: 'c::d', variableName: '' }],
+    }
+    expect(missingRequirements('get-secret', unNamed).map((p) => p.key)).toEqual([
+      'credentials[1].variableName',
+    ])
+
+    const doubled = {
+      ...twoRows,
+      credentials: [twoRows.credentials![0], { credential: 'c::d', variableName: 'pw' }],
+    }
+    expect(missingRequirements('get-secret', doubled).map((p) => p.key)).toEqual([
+      'credentials[1].variableName',
+    ])
+  })
+
   it('get-text only demands dataColumn when it claims to collect', () => {
     expect(
       missingRequirements('get-text', { selector: '.a', saveData: true }).map((p) => p.key),

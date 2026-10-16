@@ -22,6 +22,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
   type RefObject,
@@ -37,12 +38,12 @@ import { listPasswords } from '../../../lib/storage'
 import {
   collectSuggestions,
   filterSuggestions,
-  type SecretFieldRef,
   type SecretOption,
   type SuggestionGraph,
   type SuggestionOrigin,
   type VariableSuggestion,
 } from '../../../lib/workflow/var-suggestions'
+import type { SecretFieldRef } from '../../../lib/workflow/secret-params'
 import { useEditorLocale } from '../../locale-context'
 import type { EditorStringKey } from '../../i18n'
 
@@ -181,9 +182,18 @@ export function useFieldSlashMenu({ inputRef, onChange, disabled }: FieldMenuOpt
     )
   }, [inputRef])
 
+  // Only a changed term re-filters the list. An arrow key also reaches `sync`
+  // (through `onKeyUp`), and resetting the highlight there would snap the
+  // selection back to the first row on every ArrowDown.
+  const lastTerm = useRef<string | null>(null)
+  /** The query Escape dismissed; the same query must not reopen on keyup. */
+  const dismissed = useRef<SlashQuery | null>(null)
+
   const close = useCallback(() => {
     setQuery(null)
     setAnchor(null)
+    lastTerm.current = null
+    dismissed.current = null
   }, [])
 
   const sync = useCallback(() => {
@@ -197,10 +207,28 @@ export function useFieldSlashMenu({ inputRef, onChange, disabled }: FieldMenuOpt
       close()
       return
     }
+    const stale = dismissed.current
+    if (
+      stale &&
+      stale.term === found.term &&
+      stale.start === found.start &&
+      stale.end === found.end
+    ) {
+      return
+    }
+    dismissed.current = null
+    if (found.term !== lastTerm.current) setHighlight(0)
+    lastTerm.current = found.term
     setQuery(found)
-    setHighlight(0)
     reposition()
   }, [disabled, inputRef, reposition, close])
+
+  const dismiss = useCallback(() => {
+    const el = inputRef.current
+    const found = el ? findSlashQuery(el.value, el.selectionStart ?? el.value.length) : null
+    close()
+    dismissed.current = found
+  }, [close, inputRef])
 
   // Follow the field while the menu is open: the sidebar scrolls, the canvas
   // pans, and an auto-growing textarea moves the caret's box under the menu.
@@ -222,6 +250,15 @@ export function useFieldSlashMenu({ inputRef, onChange, disabled }: FieldMenuOpt
       query.term,
     )
   }, [host, query])
+
+  // A list longer than the window must keep the highlighted row on screen;
+  // jsdom has no `scrollIntoView`, hence the capability check.
+  const listBoxRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const active = listBoxRef.current?.querySelector('[data-active]')
+    if (active && typeof active.scrollIntoView === 'function')
+      active.scrollIntoView({ block: 'nearest' })
+  }, [highlight, items])
 
   const pick = useCallback(
     async (item: VariableSuggestion) => {
@@ -273,16 +310,17 @@ export function useFieldSlashMenu({ inputRef, onChange, disabled }: FieldMenuOpt
       }
       if (event.key === 'Escape') {
         event.preventDefault()
-        close()
+        dismiss()
       }
     },
-    [close, highlight, items, pick, query],
+    [dismiss, highlight, items, pick, query],
   )
 
   const node =
     host && query && anchor
       ? createPortal(
           <div
+            ref={listBoxRef}
             className="fixed z-[9000] overflow-y-auto rounded-lg border border-border bg-panel py-1 text-xs shadow-lg"
             role="listbox"
             aria-label={t('varMenuVariables')}

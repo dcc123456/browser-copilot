@@ -17,6 +17,7 @@
  */
 
 import type { ExecutionTrace, VariableProvenance } from './types'
+import { SECRET_PRODUCER_BLOCK, secretVariableNamesOf } from '../secret-params'
 import type { Workflow, WorkflowNode } from '../types'
 
 /** Fixed variable names the engine itself provides (mirrors integrity.ts). */
@@ -125,19 +126,28 @@ export function buildProvenanceIndex(workflow: Workflow): Map<string, VariablePr
 
   for (const node of workflow.drawflow.nodes) {
     if (isTrigger(node)) continue
-    const variableName = node.data?.['variableName']
-    if (typeof variableName !== 'string' || !variableName.trim()) continue
-    const output = variableName.trim()
+    const declared = node.data?.['variableName']
+    const variableName = typeof declared === 'string' ? declared.trim() : ''
     const blockId = typeof node.data['blockId'] === 'string' ? (node.data['blockId'] as string) : ''
-    if (TRANSFORM_BLOCK_IDS.has(blockId)) {
-      add({
-        variable: output,
-        producerNodeId: node.id,
-        producerKind: 'TRANSFORM',
-        sourceVariable: transformSourceOf(node),
-      })
-    } else {
-      add({ variable: output, producerNodeId: node.id, producerKind: 'NODE_OUTPUT' })
+    // A multi-credential `get-secret` node publishes one variable PER ROW, so its
+    // provenance rows are per row — the flat name only mirrors the first.
+    const outputs =
+      blockId === SECRET_PRODUCER_BLOCK
+        ? secretVariableNamesOf(node.data)
+        : variableName
+          ? [variableName]
+          : []
+    for (const output of outputs) {
+      if (TRANSFORM_BLOCK_IDS.has(blockId)) {
+        add({
+          variable: output,
+          producerNodeId: node.id,
+          producerKind: 'TRANSFORM',
+          sourceVariable: transformSourceOf(node),
+        })
+      } else {
+        add({ variable: output, producerNodeId: node.id, producerKind: 'NODE_OUTPUT' })
+      }
     }
   }
 

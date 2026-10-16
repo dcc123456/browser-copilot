@@ -319,6 +319,26 @@ describe('workflow storage', () => {
   it('returns undefined when duplicating an unknown id', async () => {
     expect(await duplicateWorkflow('nope')).toBeUndefined()
   })
+
+  it('gives the copy its own revision history instead of inheriting the source', async () => {
+    // The revision line records who edited/repaired THAT record. Carrying it
+    // over would claim the copy was repaired by whatever touched the original.
+    await saveWorkflow(
+      makeWorkflow({
+        id: 'a',
+        name: 'Original',
+        revision: 7,
+        revisionHistory: [{ revision: 7, updatedAt: 10, source: 'ai-repair', parentRevision: 6 }],
+      }),
+    )
+
+    const copy = await duplicateWorkflow('a')
+
+    expect(copy!.revision).toBeUndefined()
+    expect(copy!.revisionHistory).toBeUndefined()
+    // The source keeps its own line untouched.
+    expect((await getWorkflow('a'))!.revision).toBe(7)
+  })
 })
 
 describe('validateWorkflow', () => {

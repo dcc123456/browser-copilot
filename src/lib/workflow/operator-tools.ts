@@ -715,6 +715,10 @@ const SCHEMA_OMIT: Readonly<Record<string, readonly string[]>> = {
   'sort-data': ['sortByProperty', 'itemProperties', 'dataSource', 'varSourceName', 'variableName'],
   'log-data': ['workflowId', 'variableName'],
   'tab-url': ['type', 'qTitle', 'qMatchPatterns'],
+  // `paths` is the per-branch shape the editor's path list writes; the
+  // derivation would advertise it as a plain string list. The model writes
+  // `code` / `conditions` instead — migration lifts that into a single path.
+  conditions: ['paths'],
 }
 
 /**

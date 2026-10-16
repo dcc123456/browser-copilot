@@ -60,6 +60,7 @@ describe('V03 legacy workflow compatibility', () => {
       visible: async () => true,
       enabled: async () => true,
       text: async () => '',
+      value: async () => undefined,
       attribute: async () => '',
       count: async () => 0,
       url: async () => '',

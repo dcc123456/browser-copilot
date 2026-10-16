@@ -518,6 +518,26 @@ export default function WorkflowsTab() {
     }
   }
 
+  const duplicateWorkflow = async (id: string): Promise<void> => {
+    setBusy(true)
+    try {
+      const result = await sendCommand({ type: 'workflows.duplicate', id })
+      // An unknown id resolves with no copy rather than throwing, so the empty
+      // reply is the failure case and must not be reported as a success.
+      const copy = result.type === 'workflows.duplicate' ? result.workflow : undefined
+      if (!copy) {
+        setBanner({ kind: 'error', text: t.workflowsDuplicateFailed })
+        return
+      }
+      setBanner({ kind: 'ok', text: t.workflowsDuplicated({ name: copy.name }) })
+      await load()
+    } catch (error) {
+      setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   // --- Batch delete -----------------------------------------------------------
   // Checked workflow ids. The set may briefly hold ids that no longer exist
   // (deleted elsewhere); every consumer intersects it with the live list, so
@@ -940,6 +960,13 @@ export default function WorkflowsTab() {
                   </button>
                   <button disabled={busy} onClick={() => exportWorkflow(wf)} type="button">
                     {t.workflowsExport}
+                  </button>
+                  <button
+                    disabled={busy}
+                    onClick={() => void duplicateWorkflow(wf.id)}
+                    type="button"
+                  >
+                    {t.workflowsDuplicate}
                   </button>
                   <button
                     className="danger"

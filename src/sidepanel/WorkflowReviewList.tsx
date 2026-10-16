@@ -152,6 +152,11 @@ export interface WorkflowReviewDialogProps extends WorkflowReviewListProps {
    * small log above the checklist so the wait is visible while it happens.
    */
   log?: string[]
+  /**
+   * Live per-node AI-fix lines — the same event stream the editor's AI Fix dialog
+   * renders, projected to text so this dialog can show the fix as it happens.
+   */
+  fixLog?: string[]
   /** Failure reason of the last SAVE attempt; the dialog stays open for a retry. */
   saveError?: string
   onConfirm: () => void
@@ -175,10 +180,55 @@ export interface WorkflowReviewDialogProps extends WorkflowReviewListProps {
  * (capped to the viewport, checklist has no inner cap), so long step lists
  * never clip.
  */
+/**
+ * One collapsible live-log section: a header with the line count and a tail that
+ * follows the newest line while the log grows. Used for both the review log and
+ * the per-node AI-fix log the same dialog mirrors.
+ */
+function LogSection({ title, lines }: { title: string; lines: string[] }): ReactElement {
+  const { t } = useI18n()
+  const [open, setOpen] = useState(true)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (open && scrollRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight })
+    }
+  }, [lines.length, open])
+
+  return (
+    <div className="mt-2">
+      <button
+        aria-expanded={open}
+        className="flex w-full cursor-pointer items-center justify-between border-0 bg-transparent p-0 text-left"
+        onClick={() => setOpen((collapsed) => !collapsed)}
+        type="button"
+      >
+        <span className="text-[12px] font-medium text-muted">
+          {title}（{lines.length}）
+        </span>
+        <span className="text-[11px] text-muted transition-colors duration-150 hover:text-ink">
+          {open ? t.workflowReviewLogCollapse : t.workflowReviewLogExpand}
+        </span>
+      </button>
+      {open && (
+        <div className="review-log" ref={scrollRef} role="log">
+          {lines.map((line, index) => (
+            <p className="m-0 text-[11.5px] leading-relaxed break-words text-muted" key={index}>
+              {line}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function WorkflowReviewDialog({
   title,
   subtitle,
   log,
+  fixLog,
   saveError,
   onConfirm,
   onCancel,
@@ -187,16 +237,6 @@ export function WorkflowReviewDialog({
   ...list
 }: WorkflowReviewDialogProps): ReactElement {
   const { t } = useI18n()
-  /** Collapsed state of the live review log (open by default). */
-  const [logOpen, setLogOpen] = useState(true)
-  const logRef = useRef<HTMLDivElement>(null)
-
-  // Live tail: keep the newest log line visible while the review streams.
-  useEffect(() => {
-    if (logOpen && logRef.current) {
-      logRef.current.scrollTo({ top: logRef.current.scrollHeight })
-    }
-  }, [log?.length, logOpen])
 
   return (
     <div
@@ -220,35 +260,8 @@ export function WorkflowReviewDialog({
         {subtitle && (
           <p className="m-0 mt-1 text-[12px] leading-relaxed text-muted break-words">{subtitle}</p>
         )}
-        {log && log.length > 0 && (
-          <div className="mt-2">
-            <button
-              aria-expanded={logOpen}
-              className="flex w-full cursor-pointer items-center justify-between border-0 bg-transparent p-0 text-left"
-              onClick={() => setLogOpen((open) => !open)}
-              type="button"
-            >
-              <span className="text-[12px] font-medium text-muted">
-                {t.workflowReviewLogTitle}（{log.length}）
-              </span>
-              <span className="text-[11px] text-muted transition-colors duration-150 hover:text-ink">
-                {logOpen ? t.workflowReviewLogCollapse : t.workflowReviewLogExpand}
-              </span>
-            </button>
-            {logOpen && (
-              <div className="review-log" ref={logRef} role="log">
-                {log.map((line, index) => (
-                  <p
-                    className="m-0 text-[11.5px] leading-relaxed break-words text-muted"
-                    key={index}
-                  >
-                    {line}
-                  </p>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+        {log && log.length > 0 && <LogSection lines={log} title={t.workflowReviewLogTitle} />}
+        {fixLog && fixLog.length > 0 && <LogSection lines={fixLog} title={t.workflowFixLogTitle} />}
         <WorkflowReviewList {...list} requiredStepIds={requiredStepIds} />
         {saveError && (
           <p className="m-0 mt-1.5 text-[11.5px] leading-relaxed break-words text-err" role="alert">

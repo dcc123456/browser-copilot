@@ -155,7 +155,8 @@ export const BLOCK_DESCRIPTIONS_ZH: Record<string, string> = {
   'regex-variable': '用正则表达式匹配或变换变量值',
   'sort-data': '对数据集合排序',
   'set-variable': '把值存入工作流变量，供后续算子读取（支持 {{variables}}）',
-  'get-secret': '运行时从已保存的凭证中获取字段值，存入变量供后续算子使用（凭证值不会写入工作流）',
+  'get-secret':
+    '运行时从已保存的凭证中取字段值存入变量。只用于绝不能写进工作流的敏感值（密码 / token / 验证码）；用户名等普通输入填在表单 value 里，或声明为触发器参数。',
   'data-mapping': '重排数据表或变量的字段',
   'log-data': '读取工作流最近的日志数据',
   // Conditions / control flow

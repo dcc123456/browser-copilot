@@ -114,9 +114,13 @@ get-text/read-page 开 saveData 时 dataColumn 必填。trigger-event 用 event�
 \`sourceMode:'workflow-file'\`、\`fileVariable:'<名>'\`、\`selector\` 指向控件。
 例：\`automaSetVariable('generatedImage', document.querySelector('#chart').toDataURL()); automaNextBlock()\`
 
-## 聊天里给出的账号密码（直接存进触发器变量集）
+## 凭证：只有必须保密的值才走 get-secret
 
-用户在对话里直接给出的账号 / 密码照常填进表单即可——value 写字面量。生成引擎会把它作为密文触发输入存进触发器变量集，节点自动改成引用，重放时自动填入；无需改用 get-secret，也不会写成死数据。建议用 inputName:'account' / 'password' 起清晰名字，后续直接复用。
+get-secret 的代价是每次运行都要用户存着那条凭证。只对密码 / token / 验证码 / API key 用它；
+用户名、邮箱、搜索词、URL 这类不敏感输入直接写 value，或声明为触发器参数（\`inputName\`）。
+登录时：用户名当普通输入，只有密码用 get-secret。
+
+对话里给的账号 / 密码也照常写 value：生成引擎把它收成触发器里的密文输入，重放时自动填入。
 
 ## upload-file
 

@@ -2,9 +2,9 @@
  * Workflow runtime event subscription hooks.
  *
  * One place the sidepanel subscribes to the unsolicited background events:
- * autonomous repair progress (`workflows.repairEvent`). The hook keeps the
- * accumulated event stream per workflow and exposes it to the repair
- * progress dialog / running board.
+ * autonomous repair progress (`workflows.repairEvent`) and the per-node AI fix
+ * stream (`workflows.nodeFixEvent`). The hooks keep the accumulated event stream
+ * and expose it to the repair progress dialog / running board / workflow dialog.
  *
  * Pure React: transport is `chrome.runtime.onMessage`.
  *
@@ -12,6 +12,11 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RepairProgressEvent } from '../../lib/workflow/repair-events'
+import {
+  nodeFixLogLinesOf,
+  type NodeFixEvent,
+  type NodeFixLogLabels,
+} from '../../lib/workflow/node-fix'
 
 export interface RepairEventState {
   events: RepairProgressEvent[]
@@ -83,4 +88,37 @@ export function useRepairEvents(workflowId?: string): {
     state: { events, running, workflowId: workflowId ?? sessionWorkflowId },
     reset,
   }
+}
+
+/** How many fix events one panel keeps for its live log (a fix makes ~20). */
+const NODE_FIX_LOG_CAP = 120
+
+interface NodeFixEventMessage {
+  type: 'workflows.nodeFixEvent'
+  event: NodeFixEvent
+}
+
+/** Accumulates the per-node AI fix stream for this panel (transport: runtime messages). */
+function useNodeFixEvents(): NodeFixEvent[] {
+  const [events, setEvents] = useState<NodeFixEvent[]>([])
+
+  useEffect(() => {
+    const listener = (message: unknown): void => {
+      const payload = message as NodeFixEventMessage | undefined
+      if (!payload || payload.type !== 'workflows.nodeFixEvent' || !payload.event) return
+      setEvents((previous) => [...previous, payload.event].slice(-NODE_FIX_LOG_CAP))
+    }
+    chrome.runtime.onMessage.addListener(listener)
+    return () => chrome.runtime.onMessage.removeListener(listener)
+  }, [])
+
+  return events
+}
+
+/**
+ * The AI fix stream as log lines — the same projection the editor's AI Fix
+ * dialog shows, so both dialogs read one event stream in one wording.
+ */
+export function useNodeFixLog(labels: NodeFixLogLabels): string[] {
+  return useNodeFixEvents().flatMap((event) => nodeFixLogLinesOf(event, labels))
 }

@@ -100,6 +100,28 @@ describe('checkWorkflowIntegrity — dangling references', () => {
     expect(checkWorkflowIntegrity(wf).danglingVars).toEqual([])
   })
 
+  it('accepts every credential row of a multi-credential producer', () => {
+    // Row 1 rides the mirrored `variableName`; row 2 exists only in the list.
+    // Calling `{{mailPassword}}` dangling would block the save of a workflow
+    // that runs perfectly.
+    const wf = workflow(
+      [
+        trigger(),
+        node('fetch', 'get-secret', {
+          credential: 'gh::token',
+          variableName: 'githubToken',
+          credentials: [
+            { credential: 'gh::token', variableName: 'githubToken' },
+            { credential: 'mail::password', variableName: 'mailPassword' },
+          ],
+        }),
+        node('login', 'forms', { selector: '#pw', value: '{{mailPassword}}' }),
+      ],
+      [edge('t', 'fetch'), edge('fetch', 'login')],
+    )
+    expect(checkWorkflowIntegrity(wf).danglingVars).toEqual([])
+  })
+
   it('accepts the engine-provided aliases that have no producing node', () => {
     // Written by the executors as fixed aliases (`refData`, `dataTable`, …), so
     // a producer search alone would report them missing on graphs that run.

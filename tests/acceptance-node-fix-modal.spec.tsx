@@ -1,7 +1,8 @@
 /**
  * Acceptance tests for the per-node AI Fix modal presentational pieces
- * (server-rendered): suggestion input + confirm on the input screen, the
- * missing-contract warning, and the apply button + step timeline on success.
+ * (server-rendered): suggestion + error-log inputs and confirm on the input
+ * screen, the no-contract notice, the step timeline, and the two success
+ * wordings (`criteria` vs `exec-only`).
  */
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -21,8 +22,10 @@ function bodyProps(over: Partial<NodeFixBodyProps> = {}): NodeFixBodyProps {
     state: 'input',
     hasContract: true,
     suggestion: '',
+    errorLog: '',
     events: [],
     onSuggestionChange: () => {},
+    onErrorLogChange: () => {},
     t,
     ...over,
   }
@@ -31,7 +34,7 @@ function bodyProps(over: Partial<NodeFixBodyProps> = {}): NodeFixBodyProps {
 function footerProps(over: Partial<NodeFixFooterProps> = {}): NodeFixFooterProps {
   return {
     state: 'input',
-    hasContract: true,
+    canRun: true,
     onClose: () => {},
     onConfirm: () => {},
     onCancel: () => {},
@@ -46,19 +49,32 @@ describe('V-node-fix: per-block AI fix dialog', () => {
     const html = renderToStaticMarkup(createElement(NodeFixBody, bodyProps()))
     expect(html).toContain('nodeFixSuggestionLabel')
     expect(html).toContain('nodeFixSuggestionPlaceholder')
+    // A node that DOES have a contract is not asked for an error log.
+    expect(html).not.toContain('nodeFixErrorLogLabel')
     const footer = renderToStaticMarkup(
       createElement(NodeFixFooter, footerProps({ state: 'input' })),
     )
     expect(footer).toContain('nodeFixConfirm')
   })
 
-  it('shows the missing-contract warning and disables confirm when no contract', () => {
+  it('offers the error log and the temporary-judgement notice without a contract', () => {
     const html = renderToStaticMarkup(createElement(NodeFixBody, bodyProps({ hasContract: false })))
     expect(html).toContain('nodeFixMissingContract')
-    const footer = renderToStaticMarkup(
-      createElement(NodeFixFooter, footerProps({ hasContract: false })),
+    expect(html).toContain('nodeFixErrorLogLabel')
+    expect(html).toContain('nodeFixErrorLogPlaceholder')
+  })
+
+  it('disables confirm only when there is neither a contract nor anything typed', () => {
+    // `disabled:` Tailwind variants are always in the class string, so assert on
+    // the attribute React emits for a disabled button.
+    const blocked = renderToStaticMarkup(
+      createElement(NodeFixFooter, footerProps({ canRun: false })),
     )
-    expect(footer).toContain('disabled')
+    expect(blocked).toContain('disabled=""')
+    const allowed = renderToStaticMarkup(
+      createElement(NodeFixFooter, footerProps({ canRun: true })),
+    )
+    expect(allowed).not.toContain('disabled=""')
   })
 
   it('renders the step timeline and apply button on success', () => {
@@ -68,7 +84,7 @@ describe('V-node-fix: per-block AI fix dialog', () => {
       { sessionId: 's', phase: 'verifying', round: 0, message: '1/1 held', status: 'done' },
     ]
     const html = renderToStaticMarkup(
-      createElement(NodeFixBody, bodyProps({ state: 'success', events })),
+      createElement(NodeFixBody, bodyProps({ state: 'success', events, verifiedBy: 'criteria' })),
     )
     expect(html).toContain('nodeFixPhaseObserving')
     expect(html).toContain('nodeFixPhaseVerifying')
@@ -77,6 +93,14 @@ describe('V-node-fix: per-block AI fix dialog', () => {
       createElement(NodeFixFooter, footerProps({ state: 'success' })),
     )
     expect(footer).toContain('nodeFixApply')
+  })
+
+  it('says so when only the trial run proved anything', () => {
+    const html = renderToStaticMarkup(
+      createElement(NodeFixBody, bodyProps({ state: 'success', verifiedBy: 'exec-only' })),
+    )
+    expect(html).toContain('nodeFixSuccessExecOnly')
+    expect(html).not.toContain('nodeFixNoChangeNeeded')
   })
 
   it('renders the failure reason and close button on failure', () => {

@@ -4,7 +4,8 @@
  * Automa lays blocks out left-to-right: a target handle on the left, the node
  * body (category-colored icon chip + bold name + dim description) and a source
  * handle on the right. Branch blocks render multiple labeled source handles
- * (conditions/element-exists/loops); blocks with on-error fallback get an extra
+ * (the conditions block one per configured path plus its fallback,
+ * element-exists/loops a fixed pair); blocks with on-error fallback get an extra
  * low-right handle. Disabled blocks gray out; blocks with validation errors
  * show a red alert.
  *
@@ -27,6 +28,7 @@ import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { BlockIcon } from '../../lib/workflow/blocks/icons'
 import { Target } from 'lucide-react'
 import { nodeGoalContractOf } from '../../lib/workflow/node-goal-contract'
+import { conditionPathsOf } from '../../lib/workflow/condition-tree'
 import { OCR_SUPPORTED } from '../../lib/ocr-support'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
 import { useEditorLocale } from '../locale-context'
@@ -109,14 +111,16 @@ function NodeToolbar({
   )
 }
 
-/** Branch handle labels for multi-output blocks (English, matching Automa). */
-/** Blocks whose outputs are BRANCH handles (true/false, exists/not, loop/end):
- *  exported so `healEdgeHandles` can validate stored edge handle ids. */
-export const BRANCH_HANDLES: Record<string, { idSuffix: string; label: string }[]> = {
-  conditions: [
-    { idSuffix: 'output-1', label: 'true' },
-    { idSuffix: 'output-2', label: 'false' },
-  ],
+/** Handle suffix a conditions block's "no path matched" output uses. It is
+ *  deliberately NOT `output-fallback`: that id already means "route here when
+ *  the block errors" (the onError policy), and a node must never render two
+ *  handles under one id. */
+const CONDITIONS_NONE_SUFFIX = 'output-none'
+
+/** Fixed branch ports (exists/not, loop/end), English labels matching Automa.
+ *  The conditions block is absent on purpose — its ports are per-path, derived
+ *  from its data by {@link branchHandlesFor}. */
+const BRANCH_HANDLES: Record<string, { idSuffix: string; label: string }[]> = {
   'element-exists': [
     { idSuffix: 'output-1', label: 'exists' },
     { idSuffix: 'output-2', label: 'not exists' },
@@ -135,6 +139,37 @@ export const BRANCH_HANDLES: Record<string, { idSuffix: string; label: string }[
   ],
 }
 
+/**
+ * The branch ports a block renders, in draw order, or `null` when it has the
+ * single default output. The conditions block is data-driven: one port per
+ * configured path, named by the path, plus the always-present "no path matched"
+ * port. Exported so `healEdgeHandles` validates stored handle ids against the
+ * very same list the canvas draws.
+ */
+export function branchHandlesFor(
+  block: { id: string; outputs?: number },
+  blockData: Record<string, unknown> | undefined,
+): { idSuffix: string; label: string }[] | null {
+  if (block.id === 'conditions') {
+    const paths = conditionPathsOf(blockData?.['paths'])
+    return [
+      ...paths.map((path, index) => ({
+        idSuffix: `output-${path.id}`,
+        label: path.name || `Path ${index + 1}`,
+      })),
+      { idSuffix: CONDITIONS_NONE_SUFFIX, label: 'fallback' },
+    ]
+  }
+  const branches = BRANCH_HANDLES[block.id]
+  if (branches) return branches
+  return block.id === 'repeat-task' && block.outputs === 2
+    ? [
+        { idSuffix: 'output-1', label: 'loop' },
+        { idSuffix: 'output-2', label: 'end' },
+      ]
+    : null
+}
+
 function BlockNodeComponent({ id, data, selected }: NodeProps) {
   const { blockName, bt, t } = useEditorLocale()
   const node = data as unknown as BlockNodeData
@@ -149,22 +184,17 @@ function BlockNodeComponent({ id, data, selected }: NodeProps) {
   const hasFallback = onError?.enable === true && onError?.toDo === 'fallback'
   const displayName = blockName(block.id, block.name)
   const description = typeof bd.description === 'string' ? bd.description : ''
+  // A conditions block's shape IS its branch count, so say it on the node.
+  const pathCount = block.id === 'conditions' ? conditionPathsOf(bd['paths']).length : 0
   // Selector/URL summary for blocks without a custom description.
   const summary =
     description ||
+    (pathCount > 0 ? t('nodePathsSummary').replace('{count}', String(pathCount)) : '') ||
     (typeof bd.selector === 'string' && bd.selector) ||
     (typeof bd.url === 'string' && bd.url) ||
     ''
   const hasError = node.runState === 'error'
-  const branches = BRANCH_HANDLES[block.id]
-  const branchHandles =
-    branches ??
-    (block.outputs === 2 && block.id === 'repeat-task'
-      ? [
-          { idSuffix: 'output-1', label: 'loop' },
-          { idSuffix: 'output-2', label: 'end' },
-        ]
-      : null)
+  const branchHandles = branchHandlesFor(block, bd)
 
   return (
     <div
