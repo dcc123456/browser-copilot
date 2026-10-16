@@ -13,7 +13,7 @@
  * @module workflow-editor/blocks/shared/Field
  */
 
-import { ChevronLeft, type LucideIcon } from 'lucide-react'
+import { ChevronLeft, Info, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useEditorLocale } from '../../locale-context'
 import NumberInput from '../../../ui/NumberInput'
@@ -244,22 +244,49 @@ export function Expand({
   title,
   children,
   defaultOpen = false,
+  help,
+  helpLabel,
 }: {
   title: ReactNode
   children: ReactNode
   defaultOpen?: boolean
+  /** Explainer revealed by the header's info toggle; omit the prop for no toggle. */
+  help?: ReactNode
+  /** Localizable label for the toggle itself. */
+  helpLabel?: string
 }) {
   const { bt } = useEditorLocale()
   const [open, setOpen] = useState(defaultOpen)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const helpText = helpLabel ? bt(helpLabel) : undefined
   return (
     <div className="wf-expand">
-      <button type="button" className="wf-expand-header" onClick={() => setOpen(!open)}>
-        <ChevronLeft
-          size={14}
-          style={{ transform: `rotate(${open ? 90 : -90}deg)`, transition: 'transform .2s' }}
-        />
-        <span>{typeof title === 'string' ? bt(title) : title}</span>
-      </button>
+      <div className="flex items-center">
+        <button type="button" className="wf-expand-header flex-1" onClick={() => setOpen(!open)}>
+          <ChevronLeft
+            size={14}
+            style={{ transform: `rotate(${open ? 90 : -90}deg)`, transition: 'transform .2s' }}
+          />
+          <span>{typeof title === 'string' ? bt(title) : title}</span>
+        </button>
+        {help && (
+          <button
+            type="button"
+            className="shrink-0 rounded-md p-1 text-muted hover:bg-hover hover:text-ink"
+            title={helpText}
+            aria-label={helpText}
+            aria-expanded={helpOpen}
+            onClick={() => setHelpOpen(!helpOpen)}
+          >
+            <Info size={14} />
+          </button>
+        )}
+      </div>
+      {help && helpOpen && (
+        <div className="mb-1 rounded-lg border border-border bg-sunken px-2.5 py-2 text-[11px] leading-relaxed text-muted">
+          {help}
+        </div>
+      )}
       {open && <div className="wf-expand-body">{children}</div>}
     </div>
   )

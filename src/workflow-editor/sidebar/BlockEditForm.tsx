@@ -186,7 +186,20 @@ export default function BlockEditForm({
             description), collapsed by default; the user expands to edit. For
             upload-file the user only picks a selector and a file source. */}
         {block.id !== 'upload-file' && goalBearing && (
-          <Expand title={t('nodeGoalSection')} defaultOpen={false}>
+          <Expand
+            title={t('nodeGoalSection')}
+            defaultOpen={false}
+            helpLabel={t('goalHelpTrigger')}
+            help={
+              <div className="flex flex-col gap-1.5">
+                <p>{t('goalHelpIntro')}</p>
+                <p>{t('goalHelpGoal')}</p>
+                <p>{t('goalHelpCriteria')}</p>
+                <p>{t('goalHelpPreconditions')}</p>
+                <p className="text-faint">{t('goalHelpEmpty')}</p>
+              </div>
+            }
+          >
             <NodeGoalInspector data={data} onChange={onChange} t={t} />
           </Expand>
         )}

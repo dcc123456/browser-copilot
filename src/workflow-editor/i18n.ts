@@ -87,6 +87,17 @@ export const EDITOR_STRINGS = {
     nodeInspectorRepairHints: 'Repair hints',
     nodeInspectorEditInvalidates:
       'Editing the goal marks the workflow unverified until it is re-certified.',
+    goalHelpTrigger: 'What is this section?',
+    goalHelpIntro:
+      'The contract this step is judged against: what it must achieve, and which observable facts prove it did. Generated workflows fill it in — edit it when the reality differs.',
+    goalHelpGoal:
+      'Goal: one sentence about the outcome this step must produce, not the operator documentation. AI fix takes it as the only definition of success.',
+    goalHelpCriteria:
+      'Success criteria: facts that must hold once the step has run (element exists, text equals, variable not empty, URL matches). Each row is recorded while the step runs and re-checked after it; one row failing fails the step.',
+    goalHelpPreconditions:
+      'Preconditions tell "this step broke" apart from "the previous step never landed"; they appear here only once the contract already carries some.',
+    goalHelpEmpty:
+      'No criteria means nothing to check: the run can only prove the steps executed, per-step verification is skipped, and AI fix refuses a node with no goal contract.',
     nodeConditionAdd: 'Add condition',
     nodeConditionRemove: 'Remove condition',
     nodeConditionKind: 'Condition type',
@@ -263,6 +274,17 @@ export const EDITOR_STRINGS = {
     nodeInspectorFailureMeaning: '失败含义',
     nodeInspectorRepairHints: '修复提示',
     nodeInspectorEditInvalidates: '编辑目标后，工作流将标记为未验证，直到重新认证。',
+    goalHelpTrigger: '这个区块是做什么的？',
+    goalHelpIntro:
+      '这一步的验收契约：它必须达成什么，以及凭哪些可观测事实判定它达成了。生成的工作流会自动填好；和实际不符时在这里改。',
+    goalHelpGoal:
+      '目标：一句话说清这一步要产出的结果，而不是抄算子说明。AI 修复把它当作唯一的成功定义。',
+    goalHelpCriteria:
+      '成功条件：这一步跑完后必须成立的事实（元素存在、文本等于、变量非空、URL 命中）。每条在运行时打点、跑完复核，有一条不成立就判这一步失败。',
+    goalHelpPreconditions:
+      '前置条件用来区分「这一步出了问题」和「上一步根本没做成」；契约里已有记录时，它才会显示在这里。',
+    goalHelpEmpty:
+      '不写成功条件就没有可核对的判据：运行只能证明步骤跑过，逐节点核验会被跳过，AI 修复也会拒绝没有任何目标契约的节点。',
     nodeConditionAdd: '添加条件',
     nodeConditionRemove: '删除条件',
     nodeConditionKind: '条件类型',
