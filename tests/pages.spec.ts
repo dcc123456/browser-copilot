@@ -1,5 +1,59 @@
 import { describe, expect, it } from 'vitest'
-import { isInjectablePage, isSamePage } from '../src/lib/pages'
+import { collapseDoubledScheme, isInjectablePage, isSamePage } from '../src/lib/pages'
+
+/**
+ * A `new-tab` URL assembled as `dropdown protocol` + `{{variable}}` interpolates
+ * to `http://http://192.168.1.51//login` when the variable holds a FULL URL, and
+ * the browser parses that as host `http` with an empty port — the tab lands on
+ * `http://http//192.168.1.51//login` and nothing loads. Collapsing the doubled
+ * scheme keeps the full-URL variable working while a host-only variable still
+ * gets the dropdown's prefix. Over-collapsing would rewrite genuine URLs that
+ * merely contain `://` further along, so the negative cases matter as much.
+ */
+describe('collapseDoubledScheme', () => {
+  it('drops the outer scheme when another follows immediately', () => {
+    expect(collapseDoubledScheme('http://http://192.168.1.51:18080//login')).toBe(
+      'http://192.168.1.51:18080//login',
+    )
+    expect(collapseDoubledScheme('https://http://example.com/x')).toBe('http://example.com/x')
+    expect(collapseDoubledScheme('http://https://example.com')).toBe('https://example.com')
+  })
+
+  it('collapses tripled schemes all the way down', () => {
+    expect(collapseDoubledScheme('http://http://http://example.com')).toBe('http://example.com')
+  })
+
+  it('keeps a host-only variable behind the prefix untouched', () => {
+    expect(collapseDoubledScheme('http://192.168.1.51:18080/login')).toBe(
+      'http://192.168.1.51:18080/login',
+    )
+    expect(collapseDoubledScheme('https://example.com')).toBe('https://example.com')
+  })
+
+  it('leaves a `://` that is not at the start of the authority alone', () => {
+    // The second scheme sits in the PATH — a genuine (if odd) URL.
+    expect(collapseDoubledScheme('http://example.com/http://foo')).toBe(
+      'http://example.com/http://foo',
+    )
+    // Credentials before the host are not a doubled scheme either.
+    expect(collapseDoubledScheme('https://user:pass@example.com')).toBe(
+      'https://user:pass@example.com',
+    )
+    expect(collapseDoubledScheme('http://localhost:8080/http://x')).toBe(
+      'http://localhost:8080/http://x',
+    )
+  })
+
+  it('leaves values with no scheme prefix alone', () => {
+    expect(collapseDoubledScheme('192.168.1.51:18080/login')).toBe('192.168.1.51:18080/login')
+    expect(collapseDoubledScheme('')).toBe('')
+    expect(collapseDoubledScheme('mailto:a@b.c')).toBe('mailto:a@b.c')
+  })
+
+  it('matches schemes case-insensitively', () => {
+    expect(collapseDoubledScheme('HTTP://HTTP://example.com')).toBe('HTTP://example.com')
+  })
+})
 
 /**
  * This predicate decides whether the assistant may read a tab at all, so a

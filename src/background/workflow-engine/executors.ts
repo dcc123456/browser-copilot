@@ -34,7 +34,7 @@
  * @module background/workflow-engine/executors
  */
 
-import { isInjectablePage } from '../../lib/pages'
+import { collapseDoubledScheme, isInjectablePage } from '../../lib/pages'
 import { truncate } from '../../lib/extract'
 import { streamCompletion, type WireMessage } from '../../lib/llm'
 import type { TokenAttribution } from '../../lib/token-ledger'
@@ -1249,7 +1249,9 @@ const ocrBlock: BlockExecutor = async (data, ctx) => {
 
 const openUrl: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const url = String(data['url'] ?? '')
+  // A `{{variable}}` holding a full URL lands behind the editor's protocol
+  // prefix; collapse the doubled scheme before the browser mangles it.
+  const url = collapseDoubledScheme(String(data['url'] ?? ''))
   if (!isInjectablePage(url)) {
     throw new Error(`仅允许打开 http(s) 页面: ${url}`)
   }

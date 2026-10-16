@@ -63,6 +63,27 @@ export function isSamePage(a: string | undefined, b: string | undefined): boolea
   }
 }
 
+/**
+ * Undo a scheme that ended up in front of a URL which already carried one.
+ *
+ * A `new-tab` URL assembled as `dropdown protocol` + `{{variable}}` interpolates
+ * to `http://http://192.168.1.51:18080//login` when the variable's VALUE is
+ * itself a full URL, and the browser parses that into the useless
+ * `http://http//192.168.1.51:18080//login` (host `http`, empty port). A variable
+ * holding just a host still needs the dropdown's prefix, so neither editor shape
+ * is wrong — the doubled scheme is collapsed here instead: the outer prefix is
+ * dropped only when another `scheme://` follows it IMMEDIATELY, leaving genuine
+ * URLs that merely contain `://` further along (a path, credentials) untouched.
+ */
+export function collapseDoubledScheme(url: string): string {
+  let out = url
+  for (;;) {
+    const next = out.replace(/^[a-z][a-z0-9+.-]*:\/\/(?=[a-z][a-z0-9+.-]*:\/\/)/i, '')
+    if (next === out) return out
+    out = next
+  }
+}
+
 /** True when this URL is an ordinary http(s) page the assistant can read. */
 export function isInjectablePage(url: string | undefined): boolean {
   if (!url) return false

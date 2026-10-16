@@ -15,7 +15,7 @@
  * @module background/driver
  */
 
-import { isInjectablePage } from '../lib/pages'
+import { collapseDoubledScheme, isInjectablePage } from '../lib/pages'
 import { KERNEL_VERSION } from '../inpage/kernel-version'
 import { ensureTabMonitor, isMonitorHolding } from './cdp-monitor'
 import { isRunOwnedWindow } from './automation-scope'
@@ -1327,13 +1327,16 @@ export async function switchTab(index: number, scope?: ScopeWindow): Promise<Dri
 }
 
 export async function newTab(url?: string, scope?: ScopeWindow): Promise<DriverTab> {
-  if (url && !isInjectablePage(url)) {
-    throw new DriverError(`Cannot open "${url}": only http(s) pages can be automated.`)
+  // A `{{variable}}` holding a full URL lands behind the editor's protocol
+  // dropdown; collapse the doubled scheme before the browser mangles it.
+  const target = url === undefined ? undefined : collapseDoubledScheme(url)
+  if (target && !isInjectablePage(target)) {
+    throw new DriverError(`Cannot open "${target}": only http(s) pages can be automated.`)
   }
   // Scoped runs create the tab IN the panel window; unscoped keeps the legacy
   // "create in the current window" behaviour.
   const created = await chrome.tabs.create({
-    url,
+    url: target,
     active: true,
     ...(scope ? { windowId: scope.windowId } : {}),
   })
@@ -1422,15 +1425,16 @@ export async function listAllTabUrls(
  * "update the focused window's active tab" behaviour.
  */
 export async function updateActiveTabUrl(url: string, scope?: ScopeWindow): Promise<void> {
+  const target = collapseDoubledScheme(url)
   if (!scope) {
-    await chrome.tabs.update({ url })
+    await chrome.tabs.update({ url: target })
     return
   }
   const [tab] = await chrome.tabs.query({ active: true, windowId: scope.windowId }).catch(() => [])
   if (!tab || typeof tab.id !== 'number') {
     throw new DriverError('插件窗口内没有可导航的标签页。')
   }
-  await chrome.tabs.update(tab.id, { url })
+  await chrome.tabs.update(tab.id, { url: target })
 }
 
 export async function newWindow(url?: string): Promise<chrome.windows.Window> {
