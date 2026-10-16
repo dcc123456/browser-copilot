@@ -282,6 +282,9 @@ export const aiAgent: BlockExecutor = async (data, ctx) => {
   const conversationId = `workflow-ai-agent:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
   const result = await runUnattendedPrompt(prompt, conversationId, mode, {
+    // This node's model calls are the workflow's spend: the conversation id is
+    // a per-run nonce, so the run's attribution has to ride along explicitly.
+    ...(ctx.attribution ? { attribution: ctx.attribution } : {}),
     signal: ctx.signal,
     maxToolRounds: rounds,
     // Pin the nested turn to THIS workflow's window: without it the nested

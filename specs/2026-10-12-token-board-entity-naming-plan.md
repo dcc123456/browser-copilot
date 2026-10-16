@@ -125,3 +125,33 @@
 - ⑧ 文案双语（`Messages` 机检）；样式只用既有语义 token 工具类。
 - ⑨ 探针与截图只留 `tmp/`。
 - ⑩ 英文 Conventional Commits；不打 tag，不涉及 `website/` 版本同步。
+
+## 6. 追加（2026-10-16）：AI 智能体块的花费归到所属工作流
+
+用户复述需求：“工作流的 token 消耗要展示具体工作流名称，并能定位到具体工作流”。
+重放 / `ai-prompt` 块在 §4 之后已满足（`workflow-replay:<workflowId>` + `runAttribution`），
+但看板里还会冒出 `workflow:1763…-ab12c` 这类**既读不出、也点不动**的行。
+
+- 取证：`ai-agent` 块调
+  `runUnattendedPrompt(prompt, \`workflow-ai-agent:${Date.now()}-${rand}\`)`
+（`src/background/workflow-engine/ai-agent-executor.ts:282`）。`TURN_CONSUMERS`按前缀把
+entity 记成`workflow`（`token-accounting.ts:40`），可后缀是一次性 nonce，**不是工作流 id**，
+于是 `entityKindOf`解析出的 id 在`workflows.list`里永远查不到。
+而引擎早就为整次运行派生了`runAttribution`
+（`engine.ts:582-587`：`entityKey = entityKeyFor('workflow', workflow.id)`+`entityLabel = workflow.name`）并挂到每个块 ctx（`operator-exec.ts:131`）；
+`ai-prompt`块直接吃`ctx.attribution`（`executors.ts:2127`），只有走嵌套 turn 的
+`ai-agent` 块把它丢了。
+- 决策：**保留 nonce 会话 id，另把 run attribution 作为显式覆盖传进嵌套 turn**。
+  链路 `UnattendedOptions.attribution` → `AgentDeps.attribution` → `ToolContext.attribution`；
+  取用点统一成 `deps.attribution ?? turnAttribution(conversationId, mode)`，由新增的
+  `usageAttributionOf()` 收口（turn 本体、vision 两处 `agent.ts:3614,3680`、
+  compaction 摘要共用），consumer 仍由各自调用覆盖为 `vision` / `context-compaction`。
+  - 否决：id 改成 `workflow-ai-agent:<workflowId>`——conversationId 还承担 history 与
+    动作录制的隔离，同一工作流的多个智能体块（及多次运行）会写进同一条会话记录。
+  - 否决：在 `entityKindOf` 里拆 `<workflowId>-<nonce>` 复合 id——等于再造一套 id 约定。
+- 效果：一次重放里 `ai-agent` 块的每一笔花费都落到它所属工作流那一行，行名取工作流现名，
+  点击跳到工作流标签并高亮；不再产生指向不存在对象的行。
+- 验收：① 门禁全绿；`tests/ai-agent-block.spec.ts` 断言块执行时把 `ctx.attribution`
+  透传成 `options.attribution`（无 attribution 的 ctx 不新增字段）；
+  `tests/agent-unattended-answer.spec.ts` 断言 `runUnattendedPrompt` 把它接到
+  `runAgentTurn` 的 deps 上；`tests/token-board-naming.spec.tsx` 不变（读侧逻辑未动）。

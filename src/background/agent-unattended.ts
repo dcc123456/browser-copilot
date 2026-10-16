@@ -24,6 +24,7 @@ import { resolveUnattendedScope } from './window-policy'
 import { getSettings } from '../lib/storage'
 import { sanitizeModelAnswer } from '../lib/model-output'
 import type { AgentMode, ProviderProfile } from '../lib/types'
+import type { TokenAttribution } from '../lib/token-ledger'
 import { retain, release } from './keepalive'
 
 export interface UnattendedResult {
@@ -63,6 +64,13 @@ export interface UnattendedOptions {
    * pointing at `settings.takeoverModel`). Undefined = the active chat model.
    */
   provider?: ProviderProfile
+  /**
+   * Token-ledger attribution for this turn. Callers whose `conversationId` is
+   * a run-scoped nonce rather than an addressable entity — the workflow
+   * `ai-agent` block, whose id is a per-node nonce — pass the entity the spend
+   * really belongs to, so the dashboard can name and open it.
+   */
+  attribution?: TokenAttribution
 }
 
 /**
@@ -126,6 +134,7 @@ export async function runUnattendedPrompt(
 
     await runAgentTurn(history as never, {
       conversationId,
+      ...(options.attribution ? { attribution: options.attribution } : {}),
       signal: options.signal,
       ...(scope ? { scopeWindowId: scope.windowId } : {}),
       send: (message) => {

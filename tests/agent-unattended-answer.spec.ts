@@ -170,4 +170,20 @@ describe('runUnattendedPrompt answer assembly', () => {
     expect(result.ok).toBe(false)
     expect(result.error).toMatch(/snapshot_page/)
   })
+
+  it('forwards an explicit attribution to the agent loop, and omits it otherwise', async () => {
+    scriptTurn([{ type: 'delta', text: 'done' }])
+    const attribution = {
+      consumer: 'workflow-run' as const,
+      entityKey: 'workflow:wf-1',
+      entityLabel: 'Crawl the shop',
+    }
+    await runUnattendedPrompt('do it', 'workflow-ai-agent:1763-ab12', 'readonly', { attribution })
+    let deps = runAgentTurn.mock.calls[0]![1] as Record<string, unknown>
+    expect(deps.attribution).toBe(attribution)
+
+    await runUnattendedPrompt('do it', 'task:t-1', 'readonly')
+    deps = runAgentTurn.mock.calls[1]![1] as Record<string, unknown>
+    expect('attribution' in deps).toBe(false)
+  })
 })

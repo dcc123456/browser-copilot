@@ -249,6 +249,42 @@ describe('ai-agent executor', () => {
     expect(emit).toHaveBeenCalledWith('result', expect.stringContaining('all done'))
   })
 
+  // The block's conversation id is a per-node nonce, so the ledger cannot read
+  // the paying entity off it; the engine's run attribution has to ride along,
+  // exactly as the `ai-prompt` block already passes `ctx.attribution`.
+  it('attributes the nested turn to the workflow the block belongs to', async () => {
+    configuredSettings()
+    runUnattended.mockResolvedValue({ ok: true, answer: 'done' })
+    const { ctx } = makeCtx()
+    const attribution = {
+      consumer: 'workflow-run' as const,
+      entityKey: 'workflow:wf-1',
+      entityLabel: 'Crawl the shop',
+    }
+    ctx.attribution = attribution
+
+    await EXECUTORS['ai-agent']!({ prompt: 'summarize', variableName: 'r' }, ctx)
+
+    const [, , , options] = runUnattended.mock.calls[0] as [
+      string,
+      string,
+      string,
+      Record<string, unknown>,
+    ]
+    expect(options.attribution).toBe(attribution)
+  })
+
+  it('sends no attribution when the host left the run attribution unset', async () => {
+    configuredSettings()
+    runUnattended.mockResolvedValue({ ok: true, answer: 'done' })
+    const { ctx } = makeCtx()
+
+    await EXECUTORS['ai-agent']!({ prompt: 'summarize', variableName: 'r' }, ctx)
+
+    const [, , , options] = runUnattended.mock.calls[0] as [string, string, string, object]
+    expect('attribution' in options).toBe(false)
+  })
+
   it('runs in full mode and passes the per-node round budget when actOnPage is set', async () => {
     configuredSettings()
     runUnattended.mockResolvedValue({ ok: true, answer: 'clicked' })

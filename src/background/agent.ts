@@ -2282,6 +2282,13 @@ export interface AgentDeps {
   /** Bounding id for history records. */
   conversationId: string
   /**
+   * Attribution override for the token ledger. A turn whose `conversationId`
+   * is only a run-scoped nonce — the workflow `ai-agent` block's nested turn —
+   * still spends on behalf of something the dashboard can name and open, so
+   * its host passes that entity here instead of letting the id prefix decide.
+   */
+  attribution?: TokenAttribution
+  /**
    * Returns the current autonomy mode. The agent calls this before every
    * tool action, so switching from semi to full (or back) in the panel takes
    * effect on the next action within the same turn — without waiting for a
@@ -2524,6 +2531,8 @@ async function recordAction(
 
 export interface ToolContext {
   conversationId: string
+  /** Attribution override; see `AgentDeps.attribution`. */
+  attribution?: TokenAttribution
   /**
    * On-demand tool groups loaded so far in this conversation (live view — the
    * `load_tools` tool mutates it mid-turn). Undefined = none loaded.
@@ -3611,7 +3620,7 @@ export async function executeTool(
         const result = await recognizeImage(target, processed, {
           prompt,
           signal,
-          attribution: { ...turnAttribution(ctx.conversationId), consumer: 'vision' },
+          attribution: { ...usageAttributionOf(ctx), consumer: 'vision' },
         })
         timing.ocrMs = ocrMs
         timing.visionMs = Math.round(performance.now() - visionStart)
@@ -3677,7 +3686,7 @@ export async function executeTool(
       const result = await inspectImage(vision, processed, {
         prompt,
         signal,
-        attribution: { ...turnAttribution(ctx.conversationId), consumer: 'vision' },
+        attribution: { ...usageAttributionOf(ctx), consumer: 'vision' },
       })
       if (!result.ok) return JSON.stringify({ ok: false, error: result.error })
       return JSON.stringify({ ok: true, text: result.text, model: vision.model })
@@ -4831,6 +4840,18 @@ function shortSummary(name: string, result: string): string {
 }
 
 /**
+ * Which entity a completion in this turn is spent on: the host's explicit
+ * attribution when it passed one, else whatever the conversation id's prefix
+ * says (see `background/token-accounting`).
+ */
+function usageAttributionOf(
+  source: { conversationId: string; attribution?: TokenAttribution },
+  mode?: AgentMode,
+): TokenAttribution {
+  return source.attribution ?? turnAttribution(source.conversationId, mode)
+}
+
+/**
  * LLM summarizer for context compaction: turns the removed-messages transcript
  * into one compact paragraph the next request can stand on. No tools, no
  * streaming relay — a plain one-shot completion. Errors propagate to
@@ -4898,7 +4919,7 @@ export async function runAgentTurn(
   // (see `background/token-accounting`): the turn's own requests, and the
   // compaction summarizer's — the latter is a real cost the user pays to keep
   // the former running, so it gets its own row instead of hiding in "chat".
-  const turnUsageAttribution = turnAttribution(deps.conversationId, initialMode)
+  const turnUsageAttribution = usageAttributionOf(deps, initialMode)
   const summarizerConfig = {
     apiKey: provider.apiKey,
     baseUrl: provider.baseUrl,
@@ -5039,6 +5060,7 @@ export async function runAgentTurn(
 
   const ctx: ToolContext = {
     conversationId: deps.conversationId,
+    ...(deps.attribution ? { attribution: deps.attribution } : {}),
     loadedGroups,
     navigated: false,
     disabled,
