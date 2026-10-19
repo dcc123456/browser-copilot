@@ -79,6 +79,13 @@
   border-color: var(--we-border-strong);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
 }
+/* Provenance ring on a node the AI assistant added. Deliberately placed BEFORE
+   the selection / run / error states below: those are transient and more
+   urgent, so they read over the violet ring instead of losing it. */
+.wf-node-aiadded {
+  border-color: var(--we-node-ai);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--we-node-ai) 30%, transparent);
+}
 .wf-node-selected {
   border-color: var(--we-node-selected);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--we-node-selected) 35%, transparent);

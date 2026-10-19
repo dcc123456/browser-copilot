@@ -46,6 +46,7 @@
   --color-warn-surface: var(--bc-warn-surface);
   --color-user-bubble: var(--bc-user-bubble);
   --color-hover: var(--bc-hover);
+  --color-node-ai: var(--bc-node-ai);
 
   /* Workflow-block category hues (icon accents; identical in both themes). */
   --color-cat-general: var(--cat-general);
@@ -100,6 +101,11 @@
   /* Chat: the user's own bubble. */
   --bc-user-bubble: #2b3a5f;
 
+  /* Provenance ring on a canvas node the AI assistant added. Violet is kept
+     clear of the status colours above so "AI put this here" never reads as
+     "this step passed / failed". */
+  --bc-node-ai: #a78bfa;
+
   /* Elevation. */
   --bc-shadow: 0 10px 28px rgb(0 0 0 / 52%);
   --bc-shadow-sm: 0 2px 8px rgb(0 0 0 / 35%);
@@ -139,6 +145,9 @@
     --bc-warn-surface: rgb(154 101 0 / 12%);
 
     --bc-user-bubble: #d6e4ff;
+
+    /* Darker than the dark theme's, to hold contrast against the light canvas. */
+    --bc-node-ai: #6d28d9;
 
     /* Tighter & softer: a heavy black shadow reads as dirt on white. */
     --bc-shadow: 0 8px 24px rgb(15 23 42 / 14%);

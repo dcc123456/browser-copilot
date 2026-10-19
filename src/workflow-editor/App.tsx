@@ -42,6 +42,14 @@ import type {
 } from '../lib/workflow/types'
 import { migrateWorkflow, triggerFromNodes } from '../lib/workflow/migrate'
 import { ensureSecretProducer, type SuggestionGraph } from '../lib/workflow/var-suggestions'
+import {
+  appendOperatorChain,
+  edgesAfterBatchRemoved,
+  operatorBatchOf,
+  operatorDigestOf,
+  type OperatorBatch,
+  type OperatorProposal,
+} from '../lib/workflow/operator-advise'
 import type { SecretFieldRef } from '../lib/workflow/secret-params'
 import { nodeRunIssuesOf } from '../lib/workflow/validation'
 import { sendCommand } from '../lib/messages'
@@ -70,6 +78,10 @@ import { useRepairEvents as useEditorRepairEvents } from './use-repair-events'
 import CertificationModal from './sidebar/CertificationModal'
 import type { VerificationReport } from '../background/workflow-engine/goal-verification'
 import CanvasControls from './toolbar/CanvasControls'
+import OperatorChatDock, {
+  type OperatorChatContext,
+  type OperatorLanding,
+} from './ai/OperatorChatDock'
 import { useToast } from './toast'
 import { ToastHost } from '../ui/toast'
 import { ConfirmHost, confirmDialog } from '../ui/confirm'
@@ -818,6 +830,27 @@ export default function EditorApp() {
     }
   }, [nodes, edges, meta.trigger])
 
+  /**
+   * Install a whole workflow-shaped edge list without losing what React Flow
+   * tracks per edge: reconcile by id instead of swapping the array.
+   */
+  const applyEdgeList = useCallback((next: readonly WorkflowEdge[]) => {
+    setEdges((eds) => {
+      const previous = new Map(eds.map((e) => [e.id, e]))
+      return next.map((e) => {
+        const existing = previous.get(e.id)
+        if (!existing) return { ...e, type: 'custom' }
+        return {
+          ...existing,
+          source: e.source,
+          target: e.target,
+          sourceHandle: e.sourceHandle,
+          targetHandle: e.targetHandle,
+        }
+      })
+    })
+  }, [])
+
   // Picking a credential secures its `get-secret` producer here; the pure patcher
   // decided the graph surgery, this applies it the way every other canvas edit
   // does — mutate, invalidate the certification, tell the user — and hands back
@@ -830,30 +863,86 @@ export default function EditorApp() {
       const { added, edges: nextEdges } = patch
       if (added && nextEdges) {
         setNodes((nds) => [...nds, toFlowNode(added)])
-        // Reconcile by id instead of swapping the list: React Flow keeps its own
-        // per-edge state (selected, hidden) that the workflow-shaped patch lacks.
-        setEdges((eds) => {
-          const previous = new Map(eds.map((e) => [e.id, e]))
-          return nextEdges.map((e) => {
-            const existing = previous.get(e.id)
-            if (!existing) return { ...e, type: 'custom' }
-            return {
-              ...existing,
-              source: e.source,
-              target: e.target,
-              sourceHandle: e.sourceHandle,
-              targetHandle: e.targetHandle,
-            }
-          })
-        })
+        applyEdgeList(nextEdges)
         setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
       }
       if (patch.detached) toast.show(t('varMenuSecretDetached'), 'error')
       else if (added) toast.show(t('varMenuSecretAdded'), 'ok')
       return Promise.resolve(patch.variableName)
     },
-    [patchNode, suggestionGraph, toast, t],
+    [applyEdgeList, patchNode, suggestionGraph, toast, t],
   )
+
+  // — the floating AI operator assistant —
+  // A reply lands only after the model call, and the user can keep editing the
+  // canvas while it thinks. Both the context and the landing therefore read the
+  // graph through this ref, never the snapshot the request went out with.
+  const suggestionGraphRef = useRef(suggestionGraph)
+  useEffect(() => {
+    suggestionGraphRef.current = suggestionGraph
+  }, [suggestionGraph])
+
+  /** What the last landed batch owns: its nodes and the edge it borrowed. */
+  const aiBatchRef = useRef<OperatorBatch | null>(null)
+
+  const operatorChatContext = useCallback((): OperatorChatContext => {
+    // Only a single selection anchors a chain: with several picked there is no
+    // unambiguous "after this", so the flow's end takes it.
+    const picked = reactFlow
+      .getNodes()
+      .filter((node) => node.selected)
+      .map((node) => node.id)
+    const anchorNodeId = picked.length === 1 ? picked[0] : undefined
+    const graph = suggestionGraphRef.current()
+    return {
+      graphDigest: operatorDigestOf(graph, anchorNodeId),
+      ...(anchorNodeId ? { anchorNodeId } : {}),
+      ...(meta.description ? { workflowGoal: meta.description } : {}),
+      ...(workflowId ? { workflowId } : {}),
+    }
+  }, [meta.description, reactFlow, workflowId])
+
+  const addOperatorsFromAi = useCallback(
+    (proposals: OperatorProposal[], anchorNodeId?: string): OperatorLanding => {
+      const patch = appendOperatorChain(suggestionGraphRef.current(), proposals, {
+        ...(anchorNodeId ? { anchorNodeId } : {}),
+        newId,
+      })
+      const landing: OperatorLanding = {
+        added: patch.added.length,
+        skipped: patch.skipped,
+        missing: patch.missing,
+        ...(patch.problem ? { problem: patch.problem } : {}),
+      }
+      if (patch.added.length === 0) return landing
+      setNodes((nds) => [...nds, ...patch.added.map(toFlowNode)])
+      applyEdgeList(patch.edges)
+      aiBatchRef.current = operatorBatchOf(patch)
+      setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
+      const last = patch.added[patch.added.length - 1]
+      // Center once React Flow has the node in its own store: same-tick it is
+      // still unknown, and the jump would silently do nothing.
+      if (last) requestAnimationFrame(() => locateNode(last.id))
+      toast.show(t('operatorAiAdded').replace('{count}', String(patch.added.length)), 'ok')
+      return landing
+    },
+    [applyEdgeList, locateNode, toast, t],
+  )
+
+  const undoAiBatch = useCallback(() => {
+    const batch = aiBatchRef.current
+    aiBatchRef.current = null
+    if (!batch || batch.nodeIds.length === 0) return
+    const ids = new Set(batch.nodeIds)
+    // Same semantics as deleting a node by hand: its edges go with it — except the
+    // continuation the batch borrowed, which has to go back to the anchor.
+    setNodes((nds) => nds.filter((n) => !ids.has(n.id)))
+    setEdges((eds) => edgesAfterBatchRemoved(eds, batch))
+    setEditingId((cur) => (cur && ids.has(cur) ? null : cur))
+    setSettingsForId((cur) => (cur && ids.has(cur) ? null : cur))
+    setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
+    toast.show(t('operatorAiUndone'), 'info')
+  }, [toast, t])
 
   const editOverlay =
     editNode && editBlock ? (
@@ -1029,6 +1118,14 @@ export default function EditorApp() {
             <BlockPalette />
             {editOverlay}
           </Sidebar>
+
+          {/* Bottom-right: the AI operator assistant, above the zoom row. */}
+          <OperatorChatDock
+            getContext={operatorChatContext}
+            onAppend={addOperatorsFromAi}
+            onUndo={undoAiBatch}
+            t={t}
+          />
         </div>
 
         {error && (

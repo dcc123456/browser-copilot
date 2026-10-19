@@ -37,6 +37,7 @@
   --we-node-bg: var(--bc-panel);
   --we-node-border: var(--bc-border);
   --we-node-selected: var(--bc-accent);
+  --we-node-ai: var(--bc-node-ai);
   --we-edge: #8a94a6;
   --we-edge-selected: var(--bc-accent);
 

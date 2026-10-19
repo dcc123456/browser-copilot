@@ -23,6 +23,7 @@
  */
 
 import { stripThinkBlocks } from '../model-output'
+import { capModelPayload, DEFAULT_VALUE_CAP } from '../extract'
 import { describeCondition, workflowConditionsOf, type WorkflowCondition } from './conditions'
 import { WORKFLOW_AI_NAMESPACE } from './node-goal-contract'
 
@@ -92,21 +93,11 @@ export interface NodeFixPromptInput {
   pageSummary?: string
 }
 
-/** Cap per string value shipped to the model so one node can't blow context. */
-const VALUE_CAP = 400
-
 /** Keys the model is never allowed to author. */
 export const NODE_FIX_RESERVED_KEYS: ReadonlySet<string> = new Set([
   'blockId',
   WORKFLOW_AI_NAMESPACE,
 ])
-
-/** JSON.stringify replacer that truncates long strings (applies recursively). */
-function truncateStrings(value: unknown): string {
-  return JSON.stringify(value, (_key, val: unknown) =>
-    typeof val === 'string' && val.length > VALUE_CAP ? `${val.slice(0, VALUE_CAP)}…` : val,
-  )
-}
 
 /**
  * Builds the node-fix prompt. English scaffolding (models follow it reliably).
@@ -165,14 +156,14 @@ export function buildNodeFixPrompt(input: NodeFixPromptInput): string {
       '',
     )
   }
-  lines.push('## Current node parameters', `params: ${truncateStrings(input.currentData)}`, '')
+  lines.push('## Current node parameters', `params: ${capModelPayload(input.currentData)}`, '')
   if (input.execError && input.execError.trim()) {
-    lines.push('## Last execution error', truncateStrings(input.execError), '')
+    lines.push('## Last execution error', capModelPayload(input.execError), '')
   }
   if (input.errorLog && input.errorLog.trim()) {
     lines.push(
       '## Error log from the failed run (pasted by the user)',
-      truncateStrings(input.errorLog),
+      capModelPayload(input.errorLog),
       '',
     )
   }
@@ -184,7 +175,7 @@ export function buildNodeFixPrompt(input: NodeFixPromptInput): string {
     )
   }
   if (input.pageSummary && input.pageSummary.trim()) {
-    lines.push('## Live page summary', truncateStrings(input.pageSummary), '')
+    lines.push('## Live page summary', capModelPayload(input.pageSummary), '')
   }
   lines.push(
     '## Rules',
@@ -314,7 +305,7 @@ function cleanValue(value: unknown): unknown {
 
 /** Cap one prose value the way the prompt caps parameter strings. */
 function capText(text: string): string {
-  return text.length > VALUE_CAP ? `${text.slice(0, VALUE_CAP)}…` : text
+  return text.length > DEFAULT_VALUE_CAP ? `${text.slice(0, DEFAULT_VALUE_CAP)}…` : text
 }
 
 /**
@@ -325,7 +316,7 @@ function capText(text: string): string {
 export function nodeFixRequestPayloadOf(input: NodeFixPromptInput): string {
   const lines: string[] = [
     `block: ${input.blockId}`,
-    `params: ${truncateStrings(input.currentData)}`,
+    `params: ${capModelPayload(input.currentData)}`,
   ]
   if (input.goal) lines.push(`goal: ${capText(input.goal)}`)
   if (input.successCriteria.length > 0) {
@@ -341,12 +332,12 @@ export function nodeFixRequestPayloadOf(input: NodeFixPromptInput): string {
 
 /** The node parameters one step ran with, as log text. */
 export function nodeFixParamsPayloadOf(data: Record<string, unknown>): string {
-  return truncateStrings(data)
+  return capModelPayload(data)
 }
 
 /** What the model answered: its rationale, the parameters it returned, its check. */
 export function nodeFixReplyPayloadOf(reply: NodeFixReply): string {
-  const lines = [`rationale: ${capText(reply.rationale)}`, `params: ${truncateStrings(reply.data)}`]
+  const lines = [`rationale: ${capText(reply.rationale)}`, `params: ${capModelPayload(reply.data)}`]
   if (reply.verify) lines.push(`check: ${describeCondition(reply.verify)}`)
   return lines.join('\n')
 }

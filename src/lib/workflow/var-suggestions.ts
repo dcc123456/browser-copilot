@@ -230,12 +230,30 @@ export interface SecretProducerPatch {
 /** Canvas box size used to keep an inserted node from landing on another. */
 const NODE_WIDTH = 200
 const NODE_HEIGHT = 70
+/** Row pitch used when walking a new node clear of an occupied spot. */
+const NODE_ROW_PITCH = 90
+/** Column gap between an inserted node and the one it was placed beside. */
+export const NODE_INSERT_GAP = 240
 
 function overlaps(x: number, y: number, nodes: readonly WorkflowNode[]): boolean {
   return nodes.some(
     (node) =>
       Math.abs(node.position.x - x) < NODE_WIDTH && Math.abs(node.position.y - y) < NODE_HEIGHT,
   )
+}
+
+/**
+ * Nudge `position` down until nothing already on the canvas occupies it. Shared
+ * with the AI assistant's chain append (guidelines §5.2 — the same placement
+ * rule must not exist twice).
+ */
+export function placeClearOfNodes(
+  position: { x: number; y: number },
+  nodes: readonly WorkflowNode[],
+): { x: number; y: number } {
+  const placed = { ...position }
+  while (overlaps(placed.x, placed.y, nodes)) placed.y += NODE_ROW_PITCH
+  return placed
 }
 
 /**
@@ -300,7 +318,11 @@ export function ensureSecretProducer(
   const added: WorkflowNode = {
     id: newId(),
     label: 'Get secret',
-    position: { x: (target?.position.x ?? 0) - 240, y: target?.position.y ?? 0 },
+    // Walk clear of anything already sitting where the new node would land.
+    position: placeClearOfNodes(
+      { x: (target?.position.x ?? 0) - NODE_INSERT_GAP, y: target?.position.y ?? 0 },
+      graph.nodes,
+    ),
     data: {
       blockId: SECRET_PRODUCER_BLOCK,
       credential,
@@ -308,10 +330,6 @@ export function ensureSecretProducer(
       description: '',
       disableBlock: false,
     },
-  }
-  // Walk clear of anything already sitting where the new node would land.
-  while (overlaps(added.position.x, added.position.y, graph.nodes)) {
-    added.position.y += 90
   }
 
   const incoming = target ? incomingNormalEdges(graph.edges, targetNodeId) : []

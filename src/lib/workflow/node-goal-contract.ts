@@ -156,3 +156,26 @@ export function withNodeGoalContract(
 export function hasNodeGoalContract(data: Record<string, unknown>): boolean {
   return nodeGoalContractOf(data) !== undefined
 }
+
+/** `addedBy` value the editor's AI assistant writes onto nodes it created. */
+export const AI_ADDED_BY = 'ai'
+
+/** The namespace field carrying a node's provenance. */
+const AI_PROVENANCE_FIELD = 'addedBy'
+
+/**
+ * Record AI provenance on a node's `data`, returning the updated copy. Only the
+ * patcher writes it: `sanitizeNodeData` strips this namespace from every model
+ * reply, so a model cannot mark its own output as user-authored (or vice versa).
+ */
+export function withNodeAddedByAi(data: Record<string, unknown>): Record<string, unknown> {
+  const existing = isRecord(data[WORKFLOW_AI_NAMESPACE]) ? data[WORKFLOW_AI_NAMESPACE] : {}
+  return { ...data, [WORKFLOW_AI_NAMESPACE]: { ...existing, addedBy: AI_ADDED_BY } }
+}
+
+/** Whether the editor's AI assistant — not the user — put this node on the canvas. */
+export function nodeAddedByAi(data: Record<string, unknown> | undefined): boolean {
+  if (!data) return false
+  const namespace = data[WORKFLOW_AI_NAMESPACE]
+  return isRecord(namespace) && namespace[AI_PROVENANCE_FIELD] === AI_ADDED_BY
+}

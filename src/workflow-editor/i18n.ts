@@ -232,6 +232,28 @@ export const EDITOR_STRINGS = {
     varMenuSecretAdded: 'Added a Get secret block upstream; the field now references its variable.',
     varMenuSecretDetached:
       'Added a Get secret block, but nothing feeds this step yet — connect it before running.',
+    // — the floating AI operator assistant —
+    operatorAiFabLabel: 'AI',
+    operatorAiTitle: 'AI operator assistant',
+    operatorAiHint:
+      'Each reply is added to the end of the flow. Undo removes exactly what this reply added.',
+    operatorAiEmptyState:
+      'Describe the step you need, for example "open https://www.baidu.com and search for X".',
+    operatorAiPlaceholder: 'Describe the next step…',
+    operatorAiSend: 'Send',
+    operatorAiStop: 'Stop',
+    operatorAiThinking: 'Choosing operators…',
+    operatorAiAdded: 'Added {count} operator(s) to the flow',
+    operatorAiUndo: 'Undo',
+    operatorAiUndone: 'Removed the operators the assistant had just added.',
+    operatorAiMissingParams: 'Added, but required parameters are missing: {keys}',
+    operatorAiRejected: 'Skipped, this workflow cannot use them: {names}',
+    operatorAiFailed: 'The assistant could not answer',
+    operatorAiBranchAnchor:
+      'The selected step branches into several paths. Select one of them and ask again — the assistant will not guess which branch to continue.',
+    operatorAiEmptyGraph: 'Add a trigger or a first step before asking the assistant.',
+    operatorAiAnchorGone:
+      'The step the chain was going to follow is no longer on the canvas, so nothing was added.',
   },
   zh: {
     editor: '编辑',
@@ -446,6 +468,25 @@ export const EDITOR_STRINGS = {
     varMenuInserting: '正在添加「获取凭证」算子…',
     varMenuSecretAdded: '已在上游添加「获取凭证」算子，输入框现在引用它产出的变量。',
     varMenuSecretDetached: '已添加「获取凭证」算子，但当前算子还没有上游连线，运行前请先接上。',
+    // — 右下角悬浮的 AI 算子助手 —
+    operatorAiFabLabel: 'AI',
+    operatorAiTitle: 'AI 算子助手',
+    operatorAiHint: '每次回复都会追加到流程末尾，「撤销」只移除这一次回复新增的算子。',
+    operatorAiEmptyState: '描述你需要的步骤，例如「打开 https://www.baidu.com 并搜索 X」。',
+    operatorAiPlaceholder: '描述下一步…',
+    operatorAiSend: '发送',
+    operatorAiStop: '停止',
+    operatorAiThinking: '正在挑选算子…',
+    operatorAiAdded: '已向流程添加 {count} 个算子',
+    operatorAiUndo: '撤销',
+    operatorAiUndone: '已撤销助手刚添加的算子。',
+    operatorAiMissingParams: '已添加，但缺少必填参数：{keys}',
+    operatorAiRejected: '已跳过当前工作流无法使用的算子：{names}',
+    operatorAiFailed: 'AI 助手未能给出结果',
+    operatorAiBranchAnchor:
+      '所选算子分出了多条分支，请选择其中一个分支上的步骤后再问，助手不会替你猜走哪条。',
+    operatorAiEmptyGraph: '请先添加触发器或第一个步骤，再让助手补充算子。',
+    operatorAiAnchorGone: '要跟随的那个算子已不在画布上，本次没有添加任何算子。',
   },
 } as const satisfies Record<EditorLocale, Record<string, string>>
 

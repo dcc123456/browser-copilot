@@ -35,3 +35,17 @@ export function truncate(
   const text = lastBreak > maxChars * 0.8 ? hardCut.slice(0, lastBreak) : hardCut
   return { text: text.trimEnd(), truncated: true }
 }
+
+/** Default per-string budget for a value serialized into a model prompt. */
+export const DEFAULT_VALUE_CAP = 400
+
+/**
+ * Serialize anything a prompt carries (params, page state, an error object) with
+ * every string capped, so one long field cannot blow the context. Applies
+ * recursively, `JSON.stringify` replacer semantics.
+ */
+export function capModelPayload(value: unknown, maxChars: number = DEFAULT_VALUE_CAP): string {
+  return JSON.stringify(value, (_key, val: unknown) =>
+    typeof val === 'string' && val.length > maxChars ? `${val.slice(0, maxChars)}…` : val,
+  )
+}

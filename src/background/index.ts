@@ -204,6 +204,7 @@ import { createAiTakeover } from './workflow-engine/ai-takeover'
 import { runDebugSession, DEFAULT_MAX_ROUNDS } from './workflow-engine/debug-session'
 import { runUnifiedDebug } from './workflow-engine/repair/unified-debug'
 import { runNodeFix } from './workflow-engine/node-fix-engine'
+import { runOperatorAdvise } from './operator-advise-engine'
 import type { RecoveryPhaseState, RecoveryProtocolStatus } from '../lib/workflow/recovery-protocol'
 import {
   commitWorkflowRevision,
@@ -2507,6 +2508,51 @@ async function handleCommand(
       return { type: 'workflows.nodeFixCancel' }
     }
 
+    case 'workflows.operatorAdvise': {
+      // The editor's floating assistant: one model call, no execution. Failures
+      // settle as a result so the chat can say WHY; a cancel aborts the request
+      // and reads back as the same kind of readable failure.
+      const controller = new AbortController()
+      operatorAdviseAborts.set(command.sessionId, controller)
+      try {
+        const data = await runOperatorAdvise(
+          {
+            sessionId: command.sessionId,
+            messages: command.messages,
+            graphDigest: command.graphDigest,
+            ...(command.workflowGoal ? { workflowGoal: command.workflowGoal } : {}),
+            ...(command.workflowId ? { workflowId: command.workflowId } : {}),
+          },
+          { signal: controller.signal },
+        )
+        return { type: 'workflows.operatorAdvise', data }
+      } catch (error) {
+        const aborted = (error as Error)?.name === 'AbortError' || controller.signal.aborted
+        return {
+          type: 'workflows.operatorAdvise',
+          data: {
+            ok: false,
+            reason: aborted
+              ? 'The assistant request was cancelled.'
+              : error instanceof Error
+                ? error.message
+                : String(error),
+            reply: '',
+            proposals: [],
+            rejected: [],
+          },
+        }
+      } finally {
+        operatorAdviseAborts.delete(command.sessionId)
+      }
+    }
+
+    case 'workflows.operatorAdviseCancel': {
+      operatorAdviseAborts.get(command.sessionId)?.abort()
+      operatorAdviseAborts.delete(command.sessionId)
+      return { type: 'workflows.operatorAdviseCancel' }
+    }
+
     case 'workflows.takeoverPending':
       return { type: 'workflows.takeoverPending', items: await listPendingTakeovers() }
 
@@ -3009,6 +3055,13 @@ const recoveryActionSeen = new Set<string>()
  * entries are removed in the command's `finally`.
  */
 const nodeFixAborts = new Map<string, AbortController>()
+
+/**
+ * Active editor assistant requests keyed by session id: the abort controller
+ * lets `workflows.operatorAdviseCancel` interrupt the model call, and entries
+ * are removed in the command's `finally`.
+ */
+const operatorAdviseAborts = new Map<string, AbortController>()
 
 /** Outcome last observed for a recovery request, for a duplicate-action echo. */
 const recoveryOutcomes = new Map<

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   collectSuggestions,
   filterSuggestions,
+  placeClearOfNodes,
   type SecretOption,
   type SuggestionGraph,
 } from '../src/lib/workflow/var-suggestions'
@@ -277,3 +278,24 @@ describe('filterSuggestions', () =>
     expect(names(filterSuggestions(items, 'duct'))).toEqual(['productName', 'sumProduct'])
     expect(filterSuggestions(items, 'zzz')).toEqual([])
   }))
+
+describe('placeClearOfNodes', () => {
+  // The rule the credential producer and the AI assistant's chain append share
+  // (guidelines §5.2): an inserted node never lands on top of an existing one.
+  const at = (id: string, x: number, y: number): WorkflowNode => ({
+    id,
+    label: 'new-tab',
+    position: { x, y },
+    data: { blockId: 'new-tab' },
+  })
+
+  it('leaves a free position untouched', () => {
+    expect(placeClearOfNodes({ x: 500, y: 0 }, [at('a', 0, 0)])).toEqual({ x: 500, y: 0 })
+    expect(placeClearOfNodes({ x: 0, y: 0 }, [])).toEqual({ x: 0, y: 0 })
+  })
+
+  it('walks down rows, never sideways, until the spot is clear', () => {
+    const occupied = [at('a', 240, 0), at('b', 240, 90)]
+    expect(placeClearOfNodes({ x: 240, y: 0 }, occupied)).toEqual({ x: 240, y: 180 })
+  })
+})

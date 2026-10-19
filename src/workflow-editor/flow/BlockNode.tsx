@@ -27,7 +27,7 @@ import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { BlockIcon } from '../../lib/workflow/blocks/icons'
 import { Target } from 'lucide-react'
-import { nodeGoalContractOf } from '../../lib/workflow/node-goal-contract'
+import { nodeAddedByAi, nodeGoalContractOf } from '../../lib/workflow/node-goal-contract'
 import { conditionPathsOf } from '../../lib/workflow/condition-tree'
 import { OCR_SUPPORTED } from '../../lib/ocr-support'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
@@ -177,6 +177,7 @@ function BlockNodeComponent({ id, data, selected }: NodeProps) {
   if (!block) return null
   const bd = node.blockData ?? {}
   const nodeGoal = nodeGoalContractOf(bd)
+  const addedByAi = nodeAddedByAi(bd)
   // Grayed out when the user disabled the block — or in the no-ocr build for
   // OCR-only operators (requiresOcr; execution refuses with an explicit error).
   const disabled = bd.disableBlock === true || (block.requiresOcr === true && !OCR_SUPPORTED)
@@ -198,9 +199,9 @@ function BlockNodeComponent({ id, data, selected }: NodeProps) {
 
   return (
     <div
-      className={`wf-node ${selected ? 'wf-node-selected' : ''} ${disabled ? 'wf-node-disabled' : ''} ${
-        node.running ? 'wf-node-running' : ''
-      } ${node.runState ? `wf-node-${node.runState}` : ''}`}
+      className={`wf-node ${addedByAi ? 'wf-node-aiadded' : ''} ${selected ? 'wf-node-selected' : ''} ${
+        disabled ? 'wf-node-disabled' : ''
+      } ${node.running ? 'wf-node-running' : ''} ${node.runState ? `wf-node-${node.runState}` : ''}`}
       onDoubleClick={(e) => {
         e.stopPropagation()
         node.actions?.onEdit(id)
@@ -236,6 +237,14 @@ function BlockNodeComponent({ id, data, selected }: NodeProps) {
           )}
           <p className="wf-node-name">{node.label || displayName}</p>
           {summary && <p className="wf-node-desc">{summary}</p>}
+          {addedByAi && (
+            <span
+              className="nodrag mt-0.5 inline-flex items-center rounded-full border border-node-ai px-1.5 py-px text-[10px] leading-tight font-medium text-node-ai"
+              title={t('operatorAiTitle')}
+            >
+              {t('operatorAiFabLabel')}
+            </span>
+          )}
           {nodeGoal && (
             <span
               className="nodrag mt-0.5 inline-flex items-center gap-1 rounded-full border border-border bg-accent-soft px-1.5 py-px text-[10px] leading-tight text-accent"

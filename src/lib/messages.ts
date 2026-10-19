@@ -324,6 +324,28 @@ export type Command =
     }
   /** Cancel an in-flight per-node AI fix (aborts execution and the LLM call). */
   | { type: 'workflows.nodeFixCancel'; sessionId: string }
+  /**
+   * Editor AI operator assistant: choose operator(s) for one utterance and fill
+   * their parameters, against the canvas graph the editor already holds. One
+   * model call in the background — it executes nothing and touches no workflow
+   * draft, because the canvas is the source of truth and may carry unsaved
+   * edits (specs/2026-10-19-editor-operator-ai-chat-design.md). The answer comes
+   * back for the editor to append.
+   */
+  | {
+      type: 'workflows.operatorAdvise'
+      sessionId: string
+      /** Conversation so far, oldest first; the newest user row is the ask. */
+      messages: import('./workflow/operator-advise').OperatorAdviseMessage[]
+      /** The current canvas as text, from `operatorDigestOf`. */
+      graphDigest: string
+      /** What the workflow is for — operator discovery's goal-alignment signal. */
+      workflowGoal?: string
+      /** Only used to attribute the token spend. */
+      workflowId?: string
+    }
+  /** Cancel an in-flight assistant request (aborts the LLM call). */
+  | { type: 'workflows.operatorAdviseCancel'; sessionId: string }
   /** Workflows with pending AI-takeover fixes awaiting user confirmation. */
   | { type: 'workflows.takeoverPending' }
   /** Aggregate AI-takeover success-rate stats (debug埋点). */
@@ -609,6 +631,11 @@ export type CommandResult =
       data: import('./workflow/node-fix').NodeFixResultData
     }
   | { type: 'workflows.nodeFixCancel' }
+  | {
+      type: 'workflows.operatorAdvise'
+      data: import('./workflow/operator-advise').OperatorAdviseResult
+    }
+  | { type: 'workflows.operatorAdviseCancel' }
   | {
       type: 'workflows.recovery'
       /** Mirrors the request id; a client drops it when it no longer matches. */
