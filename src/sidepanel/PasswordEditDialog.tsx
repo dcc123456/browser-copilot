@@ -54,8 +54,7 @@ export default function PasswordEditDialog({
     setDraft((prev) => ({ ...prev, fields: prev.fields.filter((_, i) => i !== index) }))
   }
 
-  const canSave =
-    draft.label.trim().length > 0 && draft.fields.some((f) => f.key.trim() && f.value)
+  const canSave = draft.label.trim().length > 0 && draft.fields.some((f) => f.key.trim() && f.value)
 
   return (
     <FormDialog

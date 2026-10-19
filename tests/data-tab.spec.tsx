@@ -143,7 +143,10 @@ const click = async (root: ParentNode, label: string): Promise<void> => {
 }
 
 /** Type into an input the way React sees it (the tracked setter). */
-const type = async (input: HTMLInputElement | HTMLTextAreaElement, value: string): Promise<void> => {
+const type = async (
+  input: HTMLInputElement | HTMLTextAreaElement,
+  value: string,
+): Promise<void> => {
   const proto = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement : HTMLInputElement
   await act(async () => {
     Object.getOwnPropertyDescriptor(proto.prototype, 'value')?.set?.call(input, value)
