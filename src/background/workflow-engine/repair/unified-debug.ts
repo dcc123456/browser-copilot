@@ -156,6 +156,9 @@ export async function runUnifiedDebug(
     }
   }
 
+  // The history the proposer reads. A debug session is single-shot, so it holds
+  // at most the rounds this run itself finished; an empty array on the first
+  // proposal is the correct "nothing failed yet" signal, not a dead field.
   const history: RepairRoundSummary[] = []
   // Deterministic first: when the guard's recorded grounding contradicts the
   // graph's own static navigation, re-anchoring IS the fix — no model needed,

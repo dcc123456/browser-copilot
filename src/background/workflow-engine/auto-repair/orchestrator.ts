@@ -21,6 +21,9 @@
  *     verified result commits;
  *   - resume starts from the clean checkpoint so finished dangerous actions
  *     are not re-driven;
+ *   - a round that ran and still failed is REFLECTED on (page-grounded) before
+ *     the next one starts; a reflection may reroute the ladder but never
+ *     overrides the policy gate;
  *   - only an L3 (goal) pass commits; everything else rolls the clone back.
  *
  * Every phase emits a {@link RepairProgressEvent}. Engine primitives are
@@ -35,6 +38,7 @@ import {
 } from '../../../lib/workflow/repair-candidate'
 import {
   nextStrategyOf,
+  strategyAdmissible,
   strategyUsesModel,
   type NextStrategyResult,
 } from '../../../lib/workflow/repair-policy'
@@ -49,11 +53,16 @@ import {
   type FailureSnapshot,
   type RepairAttempt,
   type RepairSession,
+  type RepairStrategy,
   type VerificationResult as SessionVerificationResult,
 } from '../../../lib/workflow/repair-session'
 import { startRepairSession } from '../../../lib/workflow/repair-session'
 import { verifyRepair, type VerificationDeps } from '../../../lib/workflow/repair-verification'
 import type { RepairVerificationResult } from '../../../lib/workflow/repair-verification'
+import {
+  strategySuggestionOf,
+  type RepairReflection,
+} from '../../../lib/workflow/repair-reflection'
 import { workflowFingerprintOf } from '../../../lib/workflow/checkpoints'
 import type { RepairProgressEvent } from '../../../lib/workflow/repair-events'
 import type { Workflow } from '../../../lib/workflow/types'
@@ -70,6 +79,14 @@ export interface CandidateContext {
   /** Prior model output when this is a corrective re-ask. */
   previousOutput?: unknown
   previousIssues?: string[]
+  /**
+   * What the reflection concluded about the round that just failed. Present
+   * from the second model-driven attempt onward — without it the model has no
+   * way to know its previous candidate was already tried.
+   */
+  reflection?: RepairReflection
+  /** Every reflection so far, oldest first. */
+  reflections?: RepairReflection[]
 }
 
 export interface ResumeResult {
@@ -78,12 +95,39 @@ export interface ResumeResult {
   failedNodeId?: string
 }
 
+/**
+ * What a reflection is asked about: the round that just ran and the failure it
+ * produced. The page is NOT attached here — the adapter inspects the live tab
+ * itself, which is the whole point of grounding the reflection in the failure
+ * scene rather than in the pre-repair page.
+ */
+export interface ReflectionContext {
+  workflow: Workflow
+  failure: FailureSnapshot
+  /** The strategy the failed round used. */
+  attemptedStrategy: string
+  /** The failed round's own claim about what it fixed. */
+  attemptedReason?: string
+  /** Why the replay did not verify. */
+  outcome: string
+  /** Reflections from earlier rounds, oldest first. */
+  reflections: RepairReflection[]
+  /** Strategies already tried and abandoned, so the model does not re-propose them. */
+  exhaustedStrategies: string[]
+}
+
 export interface AutoRepairDeps {
   /**
    * Ask the model for a candidate under the given strategy. The raw return is
    * parsed by the orchestrator.
    */
   produceCandidate: (context: CandidateContext) => Promise<unknown>
+  /**
+   * Reflect on a round that ran and still failed. Returns `null` whenever the
+   * reflection is unavailable, unparsable or not worth acting on — the caller
+   * then advances exactly as it did before this hook existed.
+   */
+  reflect: (context: ReflectionContext) => Promise<RepairReflection | null>
   /** Deterministic readiness recovery (S1): wait / scroll / focus / retry. */
   attemptReadinessRecovery: (
     workflow: Workflow,
@@ -152,6 +196,10 @@ export async function runAutoRepair(input: StartAutoRepairInput): Promise<Repair
   // The workflow currently under test. Starts as the original; candidate
   // applications replace it (a clone), and a failed verify discards it.
   let candidateWorkflow: Workflow = workflow
+  // Conclusions drawn from the rounds that ran and failed. Grows by one per
+  // verification failure and is handed to every later candidate call — it is
+  // the only way a strategy-less retry learns what its predecessors tried.
+  const reflections: RepairReflection[] = []
 
   try {
     // S0 precheck: is the goal already satisfied? Runs before any candidate.
@@ -279,10 +327,12 @@ export async function runAutoRepair(input: StartAutoRepairInput): Promise<Repair
         }
       } else {
         // Model-driven strategy (S2–S7).
+        const memory = reflectionMemory(reflections)
         const raw = await deps.produceCandidate({
           workflow: candidateWorkflow,
           failure,
           strategy,
+          ...memory,
         })
         if (strategyUsesModel(strategy)) session = bumpModelCalls(session)
 
@@ -297,6 +347,7 @@ export async function runAutoRepair(input: StartAutoRepairInput): Promise<Repair
             strategy,
             previousOutput: raw,
             previousIssues: parsed.issues,
+            ...memory,
           })
           if (strategyUsesModel(strategy)) session = bumpModelCalls(session)
           parsed = parseRepairResponse(corrected)
@@ -447,7 +498,7 @@ export async function runAutoRepair(input: StartAutoRepairInput): Promise<Repair
         })
       }
 
-      // Verification failed — discard the clone (rollback) and advance.
+      // Verification failed — discard the clone (rollback) and reflect.
       candidateWorkflow = workflow
       session = finishAttempt(
         session,
@@ -460,7 +511,20 @@ export async function runAutoRepair(input: StartAutoRepairInput): Promise<Repair
         attempt: attemptNumber,
         reason: verification.note ?? 'verification failed',
       })
-      next = advance(session, failure)
+      // This is the one outcome worth reflecting on: the round produced a real
+      // change, it was applied, and the replay still did not verify. The other
+      // dead ends (no candidate / invalid output / static rejection) never got
+      // far enough for the page to say anything, so they cost no call.
+      const reflection = await reflectOnFailure(session, deps, {
+        workflow,
+        failure,
+        attemptedStrategy: strategy,
+        ...(typeof candidate.reason === 'string' ? { attemptedReason: candidate.reason } : {}),
+        outcome: verification.note ?? 'the replay did not verify',
+        reflections,
+      })
+      if (reflection) reflections.push(reflection)
+      next = advance(session, failure, reflection)
     }
 
     // next.kind exhausted/blocked after the walk.
@@ -504,9 +568,31 @@ function bumpModelCalls(session: RepairSession): RepairSession {
   return { ...session, modelCalls: session.modelCalls + 1, updatedAt: Date.now() }
 }
 
-function advance(session: RepairSession, failure: FailureSnapshot): NextStrategyResult {
+function advance(
+  session: RepairSession,
+  failure: FailureSnapshot,
+  reflection?: RepairReflection | null,
+): NextStrategyResult {
   if (durationBudgetExceeded(session)) {
     return { kind: 'exhausted', reason: 'total duration budget exceeded' }
+  }
+  // The reflection PROPOSES a strategy; `strategyAdmissible` decides. A
+  // proposal that is blocked by safety, over budget or already a proven dead
+  // end is refused here, and the ladder simply picks the next rung as before —
+  // the reflection reroutes the ladder, it never overrides the policy gate.
+  const suggested = strategySuggestionOf(reflection)
+  if (suggested) {
+    const verdict = strategyAdmissible(suggested as RepairStrategy, {
+      failureType: failure.errorType,
+      attempts: session.attempts,
+      budget: session.budget,
+      modelCalls: session.modelCalls,
+      startedAt: session.startedAt,
+    })
+    // A hard block (safety / budget exhausted) is the gate speaking; anything
+    // else falls through to the normal walk.
+    if (verdict?.kind === 'next') return verdict
+    if (verdict) return verdict
   }
   return nextStrategyOf({
     failureType: failure.errorType,
@@ -515,6 +601,57 @@ function advance(session: RepairSession, failure: FailureSnapshot): NextStrategy
     modelCalls: session.modelCalls,
     startedAt: session.startedAt,
   })
+}
+
+/** The reflection fields a candidate call needs, omitted while empty. */
+function reflectionMemory(reflections: RepairReflection[]): {
+  reflection?: RepairReflection
+  reflections?: RepairReflection[]
+} {
+  if (reflections.length === 0) return {}
+  return {
+    reflection: reflections[reflections.length - 1],
+    reflections: [...reflections],
+  }
+}
+
+/**
+ * Run one reflection, absorbing every failure mode. A reflection that cannot
+ * be produced — no model, no page, a timeout, a mangled reply — must leave the
+ * repair behaving exactly as it did before reflections existed, so nothing here
+ * is allowed to throw and a reflection is skipped when no attempt can follow
+ * it (spending the last call on a conclusion nobody will read is waste).
+ */
+async function reflectOnFailure(
+  session: RepairSession,
+  deps: AutoRepairDeps,
+  context: Pick<
+    ReflectionContext,
+    'workflow' | 'failure' | 'attemptedStrategy' | 'attemptedReason' | 'outcome' | 'reflections'
+  >,
+): Promise<RepairReflection | null> {
+  if (session.attempts.length >= session.budget.maxAttempts) return null
+  if (session.modelCalls >= session.budget.maxModelCalls) return null
+  try {
+    return await deps.reflect({
+      ...context,
+      reflections: [...context.reflections],
+      exhaustedStrategies: abandonedStrategies(session),
+    })
+  } catch {
+    return null
+  }
+}
+
+/** Strategies that ran and did not verify, for the model to stay away from. */
+function abandonedStrategies(session: RepairSession): string[] {
+  return [
+    ...new Set(
+      session.attempts
+        .filter((attempt) => attempt.outcome !== 'verified')
+        .map((attempt) => attempt.strategy),
+    ),
+  ]
 }
 
 function toSessionVerification(result: RepairVerificationResult): SessionVerificationResult {

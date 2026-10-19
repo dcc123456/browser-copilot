@@ -391,6 +391,11 @@ export interface RepairRoundSummary {
   failureType?: VerificationFailureType
   patchSetId?: string
   result: 'VERIFIED' | 'TRANSIENT_RECOVERY' | 'FAILED' | 'DRAFT' | 'CANCELLED'
+  /**
+   * What the previous round concluded about why it failed (shared reflection
+   * layer). Absent on round 1 and whenever reflection was unavailable.
+   */
+  reflection?: import('../repair-reflection').RepairReflection
 }
 
 export interface RepairContext {
@@ -404,6 +409,12 @@ export interface RepairContext {
   allowedParamPaths: Record<string, string[]>
   recentTrace: TraceEvent[]
   repairHistory: RepairRoundSummary[]
+  /**
+   * The shared reflection conclusion for the round that just failed. Set from
+   * `repairHistory`'s last entry when that entry carries one; the proposer
+   * reads it as "this is what already failed, change approach".
+   */
+  reflection?: import('../repair-reflection').RepairReflection
   /** Goal-driven repair context (spec §19): keeps the repair anchored to the workflow goal. */
   goalRepairContext?: import('../goal-repair-context').GoalRepairContext
   /**

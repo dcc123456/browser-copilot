@@ -33,6 +33,7 @@ import {
   type TakeoverReport,
 } from '../../lib/workflow/ai-takeover'
 import { detectPreflightHints, observerPreflightEnabled } from '../../lib/workflow/observer'
+import type { RepairReflection } from '../../lib/workflow/repair-reflection'
 import {
   buildFailureMemoryHint,
   createMemoryFailureStore,
@@ -127,6 +128,23 @@ function interpolateParams(
 function preview(value: unknown): string {
   const text = typeof value === 'string' ? value : (JSON.stringify(value) ?? '')
   return text.length > 60 ? `${text.slice(0, 60)}…` : text
+}
+
+/**
+ * Wrap a failed attempt into the shared reflection shape.
+ *
+ * The takeover agent does not get a separate reflection call — it IS the
+ * thing that looked at the page — so its verdict and tool trace are the
+ * evidence. Normalising here keeps one vocabulary across all three loops
+ * instead of each rendering its own dead-end list.
+ */
+function reflectionFromAttempt(note: string, trace: string[]): RepairReflection {
+  return {
+    rootCause: note,
+    evidence: trace.length > 0 ? trace.slice(-5).join(' | ') : '(no tool trace recorded)',
+    nextApproach: 'change the approach — different element, different page area, different method',
+    confidence: 0.5,
+  }
 }
 
 /**
@@ -271,9 +289,10 @@ export function createAiTakeover(deps: AiTakeoverDeps = {}): AiTakeoverHook {
     let lastAttemptTrace: string[] | undefined
     let lastReasonKind: TakeoverReasonKind | undefined
     let lastAnswer = ''
-    // One line per failed attempt, fed forward to later attempts (each attempt
-    // is a fresh conversation, so this is its only memory of earlier dead ends).
-    const attemptNotes: string[] = []
+    // One structured conclusion per failed attempt, fed forward to later
+    // attempts (each attempt is a fresh conversation, so this is its only
+    // memory of earlier dead ends). Same shape the repair ladders use.
+    const previousAttempts: RepairReflection[] = []
     const signatures: string[] = []
     const MAX_ATTEMPTS = takeoverMaxAttempts()
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -319,7 +338,7 @@ export function createAiTakeover(deps: AiTakeoverDeps = {}): AiTakeoverHook {
         maxAttempts: MAX_ATTEMPTS,
         ...(lastAttemptNote ? { lastAttemptNote } : {}),
         ...(lastAttemptTrace && lastAttemptTrace.length > 0 ? { lastAttemptTrace } : {}),
-        ...(attemptNotes.length > 0 ? { previousAttemptNotes: attemptNotes } : {}),
+        ...(previousAttempts.length > 0 ? { previousAttempts: [...previousAttempts] } : {}),
         ...(failureHint ? { failureMemory: failureHint } : {}),
       })
       // Compact tool trace of THIS attempt — fed to the next attempt so it
@@ -354,7 +373,7 @@ export function createAiTakeover(deps: AiTakeoverDeps = {}): AiTakeoverHook {
         lastAttemptNote = error instanceof Error ? error.message : String(error)
         lastAttemptTrace = [...trace]
         lastReasonKind ??= classifyReason(lastAttemptNote)
-        attemptNotes.push(lastAttemptNote)
+        previousAttempts.push(reflectionFromAttempt(lastAttemptNote, lastAttemptTrace))
         // M4 item 22: remember transport/agent errors too (same dead end).
         rememberFailure(failureStore, {
           workflowId: request.workflow.id,
@@ -417,7 +436,7 @@ export function createAiTakeover(deps: AiTakeoverDeps = {}): AiTakeoverHook {
       lastAttemptNote = verdict.summary || result.error || lastAnswer.slice(0, 200) || '（无说明）'
       lastAttemptTrace = [...trace]
       lastReasonKind = verdict.reasonKind ?? classifyReason(`${verdict.summary} ${lastAnswer}`)
-      attemptNotes.push(lastAttemptNote)
+      previousAttempts.push(reflectionFromAttempt(lastAttemptNote, lastAttemptTrace))
       // M4 item 22: remember this failure so the NEXT attempt is primed with
       // its root cause instead of rediscovering it.
       rememberFailure(failureStore, {

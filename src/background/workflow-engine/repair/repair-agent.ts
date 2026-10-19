@@ -53,6 +53,7 @@ export function buildRepairContext(
   const patchEngine = new PatchEngine()
   const allowedNodeIds = patchEngine.allowedNodeIds(analysis)
   const failedNode = workflow.drawflow.nodes.find((node) => node.id === analysis.failedNodeId)
+  const lastReflection = [...history].reverse().find((round) => round.reflection)?.reflection
   return {
     failedNodeId: analysis.failedNodeId,
     rootCauseNodeIds: analysis.rootCauseNodeIds,
@@ -70,6 +71,7 @@ export function buildRepairContext(
     })(),
     recentTrace: trace.events.slice(-20),
     repairHistory: history,
+    ...(lastReflection ? { reflection: lastReflection } : {}),
     ...(failedNode ? { goalRepairContext: buildGoalRepairContext(workflow, failedNode) } : {}),
   }
 }
@@ -111,6 +113,7 @@ Rules:
 - Modify ONLY nodes in allowedNodeIds and param paths in allowedParamPaths.
 - allowedParamPaths may include a parameter key the node does NOT currently carry (e.g. a missing "selector"): SET_PARAM with that path CREATES it. For such a path omit "before" (it is undefined).
 - When the error is a missing required parameter (e.g. 'get-text: missing selector'), you MUST inspect the live page and fill it: snapshot_page first, then set the stable locator of the real target (#id, [data-testid=…], unique tag.class, or an nth-child path) as "selector".
+- Earlier repair rounds already ran and still failed. When "reflection" or "repairHistory" is present, read them: that approach is PROVEN not to work, so change approach rather than re-proposing it.
 - Every other operation must cite evidence ids and include the current value in "before".
 - Do not change blockId, disableBlock, onError, goal/trigger, or conditions that define success.
 - Do not introduce static bulk page content; keep {{variable}} references.

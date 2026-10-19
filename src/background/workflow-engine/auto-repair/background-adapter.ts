@@ -6,6 +6,10 @@
  *
  *   - `produceCandidate`     a strategy-specific completion call returning a
  *                            JSON {@link RepairCandidate};
+ *   - `reflect`              a separate completion call run after a round that
+ *                            ran and still failed: it reads the live page and
+ *                            states why that round failed, so the next attempt
+ *                            changes approach instead of re-guessing;
  *   - `attemptReadinessRecovery` deterministic wait / scroll / focus, then
  *                            re-observe;
  *   - `resumeRun`            executeWorkflow from the checkpoint node with
@@ -27,13 +31,21 @@ import { createDriverConditionProbe, evaluateAllConditions } from '../condition-
 import { createDriverReadinessProbe, executeWorkflow } from '../run-workflow'
 import { effectiveReadinessSpec, prepareNodeExecution } from '../readiness-engine'
 import { targetFrom } from '../executors'
+import { inspectPage } from '../page-inspect'
 import { nodeReliabilityOf } from '../../../lib/workflow/reliability'
 import { entityKeyFor } from '../../../lib/token-ledger'
 import { commitWorkflowRevision } from '../../../lib/workflow/workflow-revision'
 import {
+  buildReflectionMessages,
+  parseRepairReflection,
+  renderReflectionHistory,
+  type RepairReflection,
+} from '../../../lib/workflow/repair-reflection'
+import {
   runAutoRepair,
   type CandidateContext,
   type RepairProgressEvent,
+  type ReflectionContext,
   type ResumeResult,
 } from './orchestrator'
 import type { AutoRepairDeps } from './orchestrator'
@@ -92,6 +104,7 @@ function systemPromptFor(strategy: string): string {
   return [
     'You are the workflow repair component of a browser-automation extension.',
     'You receive a failed workflow step, its intent, the live failure and the strategy to apply.',
+    'When "earlierRounds" is present, those rounds ALREADY ran and still failed — do not repeat their approaches; the "reflection" says what must change this time.',
     `Apply the "${strategy}" strategy and return ONE JSON object — no prose, no markdown fence — with this shape:`,
     JSON.stringify({
       strategy,
@@ -156,6 +169,10 @@ function makeCandidateProducer(
                   locator: context.failure.locator,
                   page: context.failure.page,
                 },
+                ...(context.reflection ? { reflection: context.reflection } : {}),
+                ...(context.reflections && context.reflections.length > 1
+                  ? { earlierRounds: renderReflectionHistory(context.reflections) }
+                  : {}),
                 ...(context.previousIssues
                   ? { previousInvalidIssues: context.previousIssues }
                   : {}),
@@ -174,6 +191,72 @@ function makeCandidateProducer(
     } catch {
       return text
     }
+  }
+}
+
+// --- Reflection (why the last round failed) -----------------------------------
+
+const REFLECTION_TIMEOUT_MS = 30_000
+
+/**
+ * Build the real reflection hook.
+ *
+ * The page inspection is the reason this is worth its own model call: it runs
+ * AFTER the failed round was applied and replayed, so it sees the page as it
+ * still is — the failure scene. The candidate prompt has no page evidence at
+ * all; without this the model re-guesses a selector it already guessed wrong.
+ */
+function makeReflect(
+  config: RepairRuntimeModelConfig | undefined,
+  scopeWindowId: number | undefined,
+): AutoRepairDeps['reflect'] {
+  return async (context: ReflectionContext): Promise<RepairReflection | null> => {
+    if (!config) return null
+    const failedNode = context.workflow.drawflow.nodes.find(
+      (node) => node.id === context.failure.nodeId,
+    )
+    const selector =
+      typeof failedNode?.data?.['selector'] === 'string' ? failedNode.data['selector'] : ''
+    const scope =
+      scopeWindowId !== undefined
+        ? await normalScopeFromWindowId(scopeWindowId).catch(() => undefined)
+        : undefined
+    // Best effort: an uninjectable tab leaves the reflection ungrounded, not
+    // cancelled — the model still sees the attempt and the outcome.
+    const pageInspection = await inspectPage(selector, scope).catch(() => null)
+
+    const result = await streamCompletion(
+      {
+        apiKey: config.apiKey,
+        baseUrl: config.baseUrl,
+        model: config.model,
+        attribution: {
+          consumer: 'auto-repair',
+          entityKey: entityKeyFor('workflow', context.workflow.id),
+          entityLabel: context.workflow.name,
+        },
+        headers: config.headers,
+        signal: AbortSignal.timeout(REFLECTION_TIMEOUT_MS),
+        messages: buildReflectionMessages({
+          workflowName: context.workflow.name,
+          failedNode: {
+            nodeId: context.failure.nodeId,
+            blockId: context.failure.blockId,
+            ...(context.failure.intent ? { intent: context.failure.intent } : {}),
+            ...(context.failure.locator !== undefined ? { locator: context.failure.locator } : {}),
+          },
+          originalFailure: `${context.failure.errorType}: ${context.failure.errorMessage}`,
+          attemptedStrategy: context.attemptedStrategy,
+          ...(context.attemptedReason ? { attemptedReason: context.attemptedReason } : {}),
+          outcome: context.outcome,
+          ...(pageInspection ? { pageInspection } : {}),
+          history: context.reflections,
+          exhaustedStrategies: context.exhaustedStrategies,
+        }),
+      },
+      {},
+    )
+    return parseRepairReflection(result.content)
   }
 }
 
@@ -363,6 +446,7 @@ export async function startBackgroundAutoRepair(
 
   const deps: AutoRepairDeps = {
     produceCandidate: makeCandidateProducer(input.model),
+    reflect: makeReflect(input.model, input.scopeWindowId),
     attemptReadinessRecovery: makeReadinessRecovery(controller.signal, input.scopeWindowId),
     resumeRun: makeResumeRun(input.scopeWindowId),
     verification: makeVerification(controller.signal, input.scopeWindowId),

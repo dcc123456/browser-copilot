@@ -177,6 +177,7 @@ describe('auto-repair: the reanchor closes the WRONG_ORIGIN loop without a model
       produceCandidate: vi.fn(async () => {
         throw new Error('the deterministic reanchor must not ask the model')
       }),
+      reflect: vi.fn(async () => null),
       attemptReadinessRecovery: vi.fn(async () => ({ ok: false })),
       resumeRun: vi.fn(async () => ({ outcome: 'passed' as const })),
       verification: {

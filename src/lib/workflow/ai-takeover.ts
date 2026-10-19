@@ -18,6 +18,7 @@
  * @module lib/workflow/ai-takeover
  */
 import type { ProviderProfile, Settings } from '../types'
+import { renderReflectionHistory } from './repair-reflection'
 
 /** Total takeover attempts per failed node before the run fails (重试 3 次). */
 export const TAKEOVER_MAX_ATTEMPTS = 3
@@ -260,10 +261,11 @@ export interface TakeoverPromptParts {
   /** Compact tool trace of the previous attempt (tool/result/error lines). */
   lastAttemptTrace?: string[]
   /**
-   * One-line outcome of EVERY earlier attempt, oldest first. Fed forward so a
-   * fresh conversation does not re-walk dead ends it cannot otherwise remember.
+   * Structured conclusions from EVERY earlier attempt, oldest first, in the
+   * same shape the repair ladders use — so all three loops render "what already
+   * failed" identically instead of each inventing a format.
    */
-  previousAttemptNotes?: string[]
+  previousAttempts?: import('./repair-reflection').RepairReflection[]
   failing: {
     blockId: string
     blockName?: string
@@ -404,11 +406,11 @@ export function buildTakeoverPrompt(parts: TakeoverPromptParts): string {
     '5. Verify your action took effect (a fresh snapshot / element check) before finishing.',
     '6. If the step should PRODUCE a value (element text, HTTP response body, OCR result…), put that value in "output" — it is stored into the step\'s output variable.',
   )
-  if (parts.previousAttemptNotes && parts.previousAttemptNotes.length > 1) {
+  if (parts.previousAttempts && parts.previousAttempts.length > 0) {
     lines.push(
       '',
       '## Outcome of your EARLIER attempts (oldest first — do NOT repeat these dead ends)',
-      ...parts.previousAttemptNotes.map((note, index) => `- attempt ${index + 1}: ${note}`),
+      renderReflectionHistory(parts.previousAttempts),
     )
   }
   if (parts.lastAttemptNote) {

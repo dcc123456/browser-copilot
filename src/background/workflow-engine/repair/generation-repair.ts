@@ -21,6 +21,7 @@
 
 import { WorkflowRepairEngine } from './repair-engine'
 import { buildRepairContext, enrichContextWithLivePage } from './repair-agent'
+import { reflectOnFailedRound, recordRound, type ReflectionRunner } from './reflection-step'
 import { liveSelectorProbe, proposeWithSelectorVerification } from './proposal-verification'
 import { decideConfidence } from '../../../lib/workflow/repair/confirmation-gate'
 import { pageContextReanchorPatchSet } from '../../../lib/workflow/page-context-reanchor'
@@ -34,6 +35,7 @@ import type {
   FailureAnalysis,
   RepairContext,
   RepairPolicy,
+  RepairRoundSummary,
   VerificationResult,
   WorkflowPatchSet,
 } from '../../../lib/workflow/repair/types'
@@ -66,6 +68,12 @@ export interface GenerationRepairDeps {
   propose?: (context: RepairContext) => Promise<WorkflowPatchSet | null>
   policy?: Partial<RepairPolicy>
   onStep?: (kind: 'info' | 'status' | 'error' | 'result', text: string) => void
+  /**
+   * Reflect on a round that ran and still failed, so the next proposal changes
+   * approach instead of re-proposing a proven dead end. Optional: without it
+   * the loop behaves exactly as it did before reflections existed.
+   */
+  reflect?: ReflectionRunner
 }
 
 /**
@@ -94,9 +102,13 @@ export async function finalizeGeneratedWorkflow(
   const deadline = Date.now() + policy.maxTotalDurationMs
   let transientRetries = 0
   let recoveredFromTransient = false
+  // Rounds that ran and failed, each carrying its reflection when one was
+  // produced. This is what the next proposal reads instead of a blank history.
+  let rounds: RepairRoundSummary[] = []
 
   for (let round = 0; round < policy.maxRepairRounds; round += 1) {
-    if (Date.now() > deadline) break
+    const expired = Date.now() > deadline
+    if (expired) break
 
     const verification = await engine.verify(workingCopy, { entry: 'GENERATION' })
     if (verification.verified) {
@@ -175,7 +187,7 @@ export async function finalizeGeneratedWorkflow(
       if (patch) log('status', `Deterministic page-context reanchor: ${patch.reason}`)
     }
     if (!patch) {
-      const context = buildRepairContext(workingCopy, verification.trace, analysis, [])
+      const context = buildRepairContext(workingCopy, verification.trace, analysis, rounds)
       // Same live-page grounding as the debug path (selector fixes).
       await enrichContextWithLivePage(context, workingCopy, verification.trace.currentTabId)
       // D1 — closed loop: reject dead/ambiguous selector fixes, re-propose with the
@@ -234,6 +246,38 @@ export async function finalizeGeneratedWorkflow(
         recoveredFromTransient,
       }
     }
+
+    // The patch landed and the replay still failed — the one outcome worth a
+    // reflection. The next round's proposal reads it instead of re-deriving the
+    // same patch from the same evidence.
+    const reflection = await reflectOnFailedRound(
+      deps.reflect,
+      {
+        workflow: workingCopy,
+        failedNodeId: analysis.failedNodeId,
+        failureType: analysis.failureType,
+        originalFailure: analysis.explanation,
+        // This loop has no strategy ladder — every round is the same minimal
+        // patch proposal — so what the round "tried" is the patch itself.
+        attemptedStrategy: 'minimal patch proposal',
+        ...(patch.reason ? { attemptedReason: patch.reason } : {}),
+        outcome: replay.error ?? 'the replay did not verify',
+        history: rounds,
+      },
+      {
+        hasRoundLeft: round + 1 < policy.maxRepairRounds,
+        expired: Date.now() > deadline,
+      },
+    )
+    if (reflection) log('info', `Reflection: ${reflection.rootCause} → ${reflection.nextApproach}`)
+    rounds = recordRound(rounds, {
+      failedNodeId: analysis.failedNodeId,
+      rootCauseNodeIds: analysis.rootCauseNodeIds,
+      ...(analysis.failureType ? { failureType: analysis.failureType } : {}),
+      patchSetId: patch.patchSetId,
+      result: 'FAILED',
+      ...(reflection ? { reflection } : {}),
+    })
   }
 
   // Budget exhausted on a non-structural failure: preserve the draft.

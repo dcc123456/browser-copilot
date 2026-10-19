@@ -139,55 +139,63 @@ function sameSignature(a: RepairAttempt, b: RepairAttempt): boolean {
  *   3. never exceed maxAttempts / maxModelCalls / maxTotalDurationMs;
  *   4. return the first ladder strategy that remains; otherwise `exhausted`.
  */
-export function nextStrategyOf(input: PolicyInput): NextStrategyResult {
+/**
+ * Whether ONE named strategy is currently legal and affordable to attempt.
+ *
+ * Split out of {@link nextStrategyOf} so a reflection can propose a strategy
+ * and be held to exactly the same gate: safety blocks and budget limits first,
+ * then the per-strategy dead-end and repeat rules. A reflection therefore
+ * reroutes the ladder but can never talk it past a rule.
+ */
+export function strategyAdmissible(
+  strategy: RepairStrategy,
+  input: PolicyInput,
+): NextStrategyResult | undefined {
   const { failureType, attempts, budget } = input
-  const now = input.now ?? Date.now()
   const policy = failureTypePolicy(failureType)
 
-  // 1. Safety / external gates block immediately. These are the sanctioned
-  //    HUMAN_TAKEOVER cases (spec §21.1) — not an ordinary repair failure.
-  if (policy.humanGate) {
-    return { kind: 'blocked', reason: `external gate: ${failureType}` }
-  }
+  if (policy.humanGate) return { kind: 'blocked', reason: `external gate: ${failureType}` }
   if (failureType === 'SIDE_EFFECT_UNKNOWN') {
     return {
       kind: 'blocked',
       reason: 'unsafe side effect already fired with an unknown result; blind replay refused',
     }
   }
-
-  // Duration budget.
-  if (now - input.startedAt >= budget.maxTotalDurationMs) {
+  if ((input.now ?? Date.now()) - input.startedAt >= budget.maxTotalDurationMs) {
     return { kind: 'exhausted', reason: 'total duration budget exceeded' }
   }
-  // Attempt budget.
   if (attempts.length >= budget.maxAttempts) {
     return { kind: 'exhausted', reason: 'attempt budget exhausted' }
   }
+  // Only a rung of this failure's own ladder is ever a candidate.
+  if (!(ladderForFailure(failureType) as readonly string[]).includes(strategy)) return undefined
 
-  // Build the candidate ladder.
-  const ladder = ladderForFailure(failureType)
-  const attempted = attempts
+  const sameStrategy = attempts.filter((attempt) => attempt.strategy === strategy)
+  if (sameStrategy.length > budget.maxStrategyRepeats + 1) return undefined
 
-  for (const strategy of ladder) {
-    const sameStrategy = attempted.filter((attempt) => attempt.strategy === strategy)
-    if (sameStrategy.length > budget.maxStrategyRepeats + 1) continue
+  const deadEnds = sameStrategy.filter((attempt) => DEAD_END_OUTCOMES.has(attempt.outcome))
+  const duplicates = deadEnds.filter((deadEnd) =>
+    deadEnds.some((other) => other !== deadEnd && sameSignature(deadEnd, other)),
+  )
+  if (duplicates.length >= budget.maxSameFailureSignature) return undefined
+  if (deadEnds.length > 0 && sameStrategy.length > budget.maxStrategyRepeats + 1) return undefined
 
-    // A strategy already dead-ended with the same evidence is skipped.
-    const deadEnds = sameStrategy.filter((attempt) => DEAD_END_OUTCOMES.has(attempt.outcome))
-    const duplicates = deadEnds.filter((deadEnd) =>
-      deadEnds.some((other) => other !== deadEnd && sameSignature(deadEnd, other)),
-    )
-    if (duplicates.length >= budget.maxSameFailureSignature) continue
-    // Any prior dead-end at all with this strategy means move on unless the
-    // repeat allowance still holds (maxStrategyRepeats+1 covers one retry).
-    if (deadEnds.length > 0 && sameStrategy.length > budget.maxStrategyRepeats + 1) continue
+  if (strategyUsesModel(strategy) && input.modelCalls >= budget.maxModelCalls) return undefined
 
-    // Model-call budget.
-    if (strategyUsesModel(strategy)) {
-      if (input.modelCalls >= budget.maxModelCalls) continue
-    }
-    return { kind: 'next', strategy }
+  return { kind: 'next', strategy }
+}
+
+export function nextStrategyOf(input: PolicyInput): NextStrategyResult {
+  const { failureType } = input
+
+  // Safety gates and the global budgets reject EVERY strategy at once, so they
+  // are answered before the walk rather than per-rung.
+  const gate = strategyAdmissible(ladderForFailure(failureType)[0]!, input)
+  if (gate && gate.kind !== 'next') return gate
+
+  for (const strategy of ladderForFailure(failureType)) {
+    const verdict = strategyAdmissible(strategy, input)
+    if (verdict?.kind === 'next') return verdict
   }
 
   return { kind: 'exhausted', reason: 'all repair strategies exhausted' }
