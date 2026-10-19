@@ -119,7 +119,7 @@ export const BLOCK_DESCRIPTIONS_ZH: Record<string, string> = {
   'close-tab': '关闭当前标签页或浏览器窗口',
   'go-back': '回到浏览历史的上一页',
   'forward-page': '前往浏览历史的下一页',
-  'reload-tab': '刷新当前标签页',
+  'reload-tab': '刷新当前标签页；填了网址则改为在当前标签页打开该网址',
   'tab-url': '读取当前或匹配标签页的网址',
   'active-tab': '将当前标签页视为正在操作的标签页',
   'take-screenshot': '截取当前可见页面的图像',

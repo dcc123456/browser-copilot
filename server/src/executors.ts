@@ -776,12 +776,20 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
       data['customUserAgent'] === true
         ? interpolate(String(data['userAgent'] ?? ''), ctx.variables, ctx.refData).trim()
         : ''
-    const tab = await driver.newTab(url, ua === '' ? undefined : ua)
+    // Mirror of the extension's two modes: reuse the tab the last `new-tab`
+    // block made, or create one. Headless has no tab bar, so "reuse" is the same
+    // `goto` the extension issues through `tabs.update`, and a page closed since
+    // then falls back to creating instead of failing the step.
+    const prevTabId = data['updatePrevTab'] === true ? ctx.tabMemory?.prevNewTabId : undefined
+    const reused = prevTabId === undefined ? null : await driver.reuseTab(prevTabId, url)
+    const tab = reused ?? (await driver.newTab(url, ua === '' ? undefined : ua))
+    // Whichever tab this block landed on becomes the one the next reuse follows.
+    if (ctx.tabMemory) ctx.tabMemory.prevNewTabId = tab.id
     ctx.setTab?.(tab.id)
     if (url && data['waitTabLoaded'] !== false) {
       await driver.waitForLoaded(tab.id)
     }
-    ctx.emit('result', `已打开 ${url ?? '新标签页'} (tab #${tab.id})`)
+    ctx.emit('result', `${reused ? '已复用' : '已打开'} ${url ?? '新标签页'} (tab #${tab.id})`)
     return null
   }
 
@@ -854,10 +862,17 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     return null
   }
 
-  const reloadTabExec: BlockExecutor = async (_data, ctx) => {
+  const reloadTabExec: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    await driver.reloadTab()
-    ctx.emit('result', '已刷新当前标签页')
+    // Empty url = plain reload; a filled one replaces the page's address first.
+    const requested = interpolate(String(data['url'] ?? ''), ctx.variables, ctx.refData).trim()
+    if (!requested) {
+      await driver.reloadTab()
+      ctx.emit('result', '已刷新当前标签页')
+      return null
+    }
+    await driver.reloadTab(requested)
+    ctx.emit('result', `已刷新当前标签页 → ${requested}`)
     return null
   }
 

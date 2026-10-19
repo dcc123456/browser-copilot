@@ -103,6 +103,37 @@ describe('workflow engine', () => {
     expect(seen).toEqual([{ windowId: 7 }, { windowId: 42 }])
   })
 
+  /**
+   * The `new-tab` reuse mode rests on one thing only the engine can give it: a
+   * box that survives from one block to the next. The ctx is rebuilt per block,
+   * so a fresh box each time would leave the second `new-tab` finding nothing to
+   * reuse — quietly opening a second tab, which is the exact bug the field exists
+   * to fix. Identity here is the whole contract.
+   */
+  it('shares one tab-memory box across the blocks of a run', async () => {
+    type TabMemory = { prevNewTabId?: number }
+    const boxes: Array<TabMemory | undefined> = []
+    const wf = makeWorkflow([node('a', 'step-a'), node('b', 'step-b')], [edge('a', 'b')])
+    const executors = {
+      'step-a': async (_data: Record<string, unknown>, ctx: { tabMemory?: TabMemory }) => {
+        boxes.push(ctx.tabMemory)
+        // What `new-tab` does with it: record the tab this block landed on.
+        if (ctx.tabMemory) ctx.tabMemory.prevNewTabId = 11
+        return null
+      },
+      'step-b': async (_data: Record<string, unknown>, ctx: { tabMemory?: TabMemory }) => {
+        boxes.push(ctx.tabMemory)
+        return null
+      },
+    }
+
+    await runWorkflow(wf, { executors })
+
+    expect(boxes[0], 'the engine must hand every block a tab memory box').toBeDefined()
+    expect(boxes[1]).toBe(boxes[0])
+    expect(boxes[1]?.prevNewTabId).toBe(11)
+  })
+
   it('routes through a branch executor to the edge it returns', async () => {
     const order: string[] = []
     // picks outputs['true'] when flag is set, else outputs['false']

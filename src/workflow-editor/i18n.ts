@@ -1004,7 +1004,8 @@ const BLOCK_FORM_STRINGS = {
     'Proxy is not supported in Manifest V3 (the chrome.proxy API is unavailable); this block is a placeholder and its settings have no effect.':
       'Manifest V3 不支持代理（chrome.proxy API 不可用）；此算子仅为占位，设置不会生效。',
     'Use commas (,) to separate URL': '多个地址用英文逗号分隔',
-    'This block reloads the active tab.': '此算子会刷新当前标签页。',
+    'Leave the URL empty to reload the page as it is; fill it in to load that URL in the current tab instead.':
+      'URL 留空则原地刷新当前页面；填入地址则改为在当前标签页打开该网址。',
     'This block navigates browser history (go back one page).': '此算子会在浏览器历史中后退一页。',
     'This block navigates browser history (go forward one page).':
       '此算子会在浏览器历史中前进一页。',

@@ -481,6 +481,7 @@ function buildExecCtx(
   reliability: WorkflowExecCtx['reliability'],
   getRunLog: () => string[],
   attribution: TokenAttribution | undefined,
+  tabMemory: WorkflowExecCtx['tabMemory'],
 ): WorkflowExecCtx {
   return {
     variables,
@@ -492,6 +493,7 @@ function buildExecCtx(
     setTab,
     setScope,
     getRunLog,
+    tabMemory,
     ...(scope ? { scope } : {}),
     ...(reliability ? { reliability } : {}),
     ...(attribution ? { attribution } : {}),
@@ -658,6 +660,12 @@ async function runCore(
   // `new-window` block re-points it, so the steps after it run in the window
   // the workflow opened instead of the one that started the run.
   let runScope = scope
+  // Which tab the last `new-tab` block opened, for a later one that asks to
+  // reuse it. A box, not a `let`: the ctx is rebuilt for every block, so only a
+  // shared object survives from one block to the next. A sub-workflow recurses
+  // through runCore and gets its own box — the parent's tab is not the child's
+  // "previously opened" one.
+  const tabMemory: { prevNewTabId?: number } = {}
 
   /**
    * M4 checkpoints: 0-based index of the step being recorded, incremented for
@@ -935,6 +943,7 @@ async function runCore(
       reliability,
       () => stepLines.map((line) => line.text),
       runAttribution,
+      tabMemory,
     )
     const policy = onErrorPolicy(params)
 

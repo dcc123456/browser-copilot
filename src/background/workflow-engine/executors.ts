@@ -108,6 +108,7 @@ import {
   goForward,
   listAllTabUrls,
   newTab as driverNewTab,
+  reuseTab as driverReuseTab,
   ocrImage,
   resolveAutomationTab,
   newWindow as driverNewWindow,
@@ -158,6 +159,15 @@ export interface WorkflowExecCtx {
   attribution?: TokenAttribution
   /** Pin the target tab (called by new-tab / link / switch-tab executors). */
   setTab?: (tabId: number) => void
+  /**
+   * The tab the last `new-tab` block created or reused, so a later one with
+   * `updatePrevTab` can go back to it instead of stacking another tab. Lives in
+   * a box the run allocates once and shares with every block's ctx — the ctx
+   * itself is rebuilt per block, so a plain field on it would be forgotten at
+   * once. Unset for hosts that never allocate one (the single-node operator
+   * bridge), where the reuse mode simply falls back to creating.
+   */
+  tabMemory?: { prevNewTabId?: number }
   /**
    * Re-point the run's window (called by `new-window`). Without it the block
    * opens a window and every later step still acts in the one that launched
@@ -1247,21 +1257,35 @@ const ocrBlock: BlockExecutor = async (data, ctx) => {
 
 // --- Navigation executors ----------------------------------------------------
 
-const openUrl: BlockExecutor = async (data, ctx) => {
-  assertActive(ctx)
+/**
+ * Point the run's tab at `url` and wait for the new document. Shared by the two
+ * blocks that NAVIGATE the tab they already drive (`open-url`, and `reload-tab`
+ * once it carries a URL) so the scheme guard and the load wait cannot drift.
+ *
+ * `chrome.tabs.update({url})` IS "replace the address and load it" — adding a
+ * `tabs.reload` after it would fetch every page twice, which breaks pages whose
+ * load has side effects.
+ */
+async function navigateRunTab(url: string, ctx: WorkflowExecCtx): Promise<string> {
   // A `{{variable}}` holding a full URL lands behind the editor's protocol
   // prefix; collapse the doubled scheme before the browser mangles it.
-  const url = collapseDoubledScheme(String(data['url'] ?? ''))
-  if (!isInjectablePage(url)) {
-    throw new Error(`仅允许打开 http(s) 页面: ${url}`)
+  const target = collapseDoubledScheme(url.trim())
+  if (!isInjectablePage(target)) {
+    throw new Error(`仅允许打开 http(s) 页面: ${target}`)
   }
   const tab = await resolveAutomationTab(ctx.tabId, ctx.scope)
   if (!tab || typeof tab.id !== 'number') {
     throw new Error('没有可操作的网页标签页')
   }
-  await chrome.tabs.update(tab.id, { url })
+  await chrome.tabs.update(tab.id, { url: target })
   ctx.setTab?.(tab.id)
   await waitForTabLoaded(tab.id, ctx.signal)
+  return target
+}
+
+const openUrl: BlockExecutor = async (data, ctx) => {
+  assertActive(ctx)
+  const url = await navigateRunTab(String(data['url'] ?? ''), ctx)
   ctx.emit('result', `已打开 ${url}`)
   return null
 }
@@ -1269,16 +1293,23 @@ const openUrl: BlockExecutor = async (data, ctx) => {
 const newTabExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const url = data['url'] ? String(data['url']) : undefined
-  try {
-    const tab = await driverNewTab(url, ctx.scope)
-    ctx.setTab?.(tab.id)
-    if (url && data['waitTabLoaded'] !== false) {
-      await waitForTabLoaded(tab.id, ctx.signal)
-    }
-    ctx.emit('result', `已新建标签页 #${tab.id}`)
-  } catch (error) {
-    throw error
+  // "Update previously opened tab": go back to the tab the last `new-tab` block
+  // made instead of stacking another one. Only this block's own memory counts,
+  // not `ctx.tabId` — a `switch-tab` in between has moved the run elsewhere, and
+  // following that would reopen the wrong page. A tab closed since then reports
+  // null and simply falls through to creating, which is what the step wanted.
+  const prevTabId = data['updatePrevTab'] === true ? ctx.tabMemory?.prevNewTabId : undefined
+  const reused = prevTabId === undefined ? null : await driverReuseTab(prevTabId, url)
+
+  const tab = reused ?? (await driverNewTab(url, ctx.scope))
+  // Record whichever tab this block landed on so the NEXT reuse request follows
+  // the chain rather than a tab this one already replaced.
+  if (ctx.tabMemory) ctx.tabMemory.prevNewTabId = tab.id
+  ctx.setTab?.(tab.id)
+  if (url && data['waitTabLoaded'] !== false) {
+    await waitForTabLoaded(tab.id, ctx.signal)
   }
+  ctx.emit('result', reused ? `已复用标签页 #${tab.id}` : `已新建标签页 #${tab.id}`)
   return null
 }
 
@@ -1347,15 +1378,22 @@ const closeTabExec: BlockExecutor = async (_data, ctx) => {
   return null
 }
 
-const reloadTabExec: BlockExecutor = async (_data, ctx) => {
+const reloadTabExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  // Reload the tab the RUN is driving, not whichever tab happens to be active.
-  const tab = await resolveTargetTab(ctx.tabId, ctx.scope)
-  if (!tab || typeof tab.id !== 'number') {
-    throw new Error('没有活动标签页')
+  // An empty url keeps the block's original meaning: reload what is there.
+  const requested = String(data['url'] ?? '').trim()
+  if (!requested) {
+    // Reload the tab the RUN is driving, not whichever tab happens to be active.
+    const tab = await resolveTargetTab(ctx.tabId, ctx.scope)
+    if (!tab || typeof tab.id !== 'number') {
+      throw new Error('没有活动标签页')
+    }
+    await chrome.tabs.reload(tab.id)
+    ctx.emit('result', '已刷新当前标签页')
+    return null
   }
-  await chrome.tabs.reload(tab.id)
-  ctx.emit('result', '已刷新当前标签页')
+  const url = await navigateRunTab(requested, ctx)
+  ctx.emit('result', `已刷新当前标签页 → ${url}`)
   return null
 }
 

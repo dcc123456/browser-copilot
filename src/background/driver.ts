@@ -1326,13 +1326,26 @@ export async function switchTab(index: number, scope?: ScopeWindow): Promise<Dri
   return target
 }
 
-export async function newTab(url?: string, scope?: ScopeWindow): Promise<DriverTab> {
+/**
+ * The url rule every tab-opening primitive shares: collapse a doubled scheme,
+ * then refuse anything that is not an automatable page. Lives in the driver so
+ * `new-tab`'s create path and its reuse path cannot drift to different guards —
+ * a `file://` step must fail on both, not navigate on one and report success.
+ */
+function resolveTabUrl(url: string): string {
   // A `{{variable}}` holding a full URL lands behind the editor's protocol
   // dropdown; collapse the doubled scheme before the browser mangles it.
-  const target = url === undefined ? undefined : collapseDoubledScheme(url)
+  const target = collapseDoubledScheme(url)
+  // An empty url is the block's "no address" case — create a blank tab, or just
+  // bring the old one forward — not an address worth rejecting.
   if (target && !isInjectablePage(target)) {
     throw new DriverError(`Cannot open "${target}": only http(s) pages can be automated.`)
   }
+  return target
+}
+
+export async function newTab(url?: string, scope?: ScopeWindow): Promise<DriverTab> {
+  const target = url === undefined ? undefined : resolveTabUrl(url)
   // Scoped runs create the tab IN the panel window; unscoped keeps the legacy
   // "create in the current window" behaviour.
   const created = await chrome.tabs.create({
@@ -1341,6 +1354,29 @@ export async function newTab(url?: string, scope?: ScopeWindow): Promise<DriverT
     ...(scope ? { windowId: scope.windowId } : {}),
   })
   return toDriverTab(created)
+}
+
+/**
+ * Reuse a tab the run opened earlier instead of creating another one —
+ * `new-tab`'s "update previously opened tab" mode.
+ *
+ * Returns null when that tab is GONE (closed by hand, by the page, or along
+ * with its window). Not an error: the block asked for a tab to work in, and
+ * failing an entire run because one tab was closed mid-way would be a far worse
+ * outcome than opening the second tab the user did not want.
+ *
+ * No `url` means bring it forward as it is — writing back the address a page
+ * already has reloads it for no reason.
+ */
+export async function reuseTab(tabId: number, url?: string): Promise<DriverTab | null> {
+  const existing = await chrome.tabs.get(tabId).catch(() => undefined)
+  if (!existing || typeof existing.id !== 'number') return null
+  const target = url === undefined ? undefined : resolveTabUrl(url)
+  const updated = await chrome.tabs.update(existing.id, {
+    active: true,
+    ...(target ? { url: target } : {}),
+  })
+  return updated && typeof updated.id === 'number' ? toDriverTab(updated) : null
 }
 
 /**

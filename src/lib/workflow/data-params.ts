@@ -83,6 +83,7 @@ const DATA_PARAMS: Readonly<Record<string, readonly DataParamSpec[]>> = {
   'new-window': [{ key: 'url' }],
   'switch-tab': [{ key: 'url' }, { key: 'tabTitle' }, { key: 'matchPattern' }],
   'close-tab': [{ key: 'url' }],
+  'reload-tab': [{ key: 'url' }],
   'tab-url': [{ key: 'qTitle' }, { key: 'qMatchPatterns' }],
   'save-assets': [{ key: 'url' }, { key: 'filename' }],
   'handle-download': [{ key: 'filename' }],

@@ -217,6 +217,120 @@ describe('server executors', () => {
     expect(execOp.mock.lastCall?.[1]).toBe(12)
   })
 
+  /**
+   * Mirror of the extension's `reload-tab` tests. Headless has no "set the
+   * address bar" primitive, so a filled url is a single `goto` — mirroring the
+   * extension's `tabs.update({url})`, which already loads the document. Calling
+   * `reload` as well would fetch the page twice.
+   */
+  describe('reload-tab', () => {
+    function makeReloadDriver() {
+      const driver = makeDriverStub() as unknown as Record<string, unknown>
+      const reloadTab = vi.fn(async (_url?: string): Promise<void> => {})
+      driver['reloadTab'] = reloadTab
+      return { reloadTab, registry: createExecutors(makeDeps(driver as unknown as RunDriver)) }
+    }
+
+    it('reloads the driven page when no url is set', async () => {
+      const { reloadTab, registry } = makeReloadDriver()
+      const ctx = makeCtx()
+      await registry['reload-tab']!({}, ctx)
+      expect(reloadTab).toHaveBeenCalledWith()
+      expect(ctx.events).toContainEqual({ kind: 'result', text: '已刷新当前标签页' })
+    })
+
+    it('navigates to the url instead of reloading in place', async () => {
+      const { reloadTab, registry } = makeReloadDriver()
+      const ctx = makeCtx({ path: 'next' })
+      await registry['reload-tab']!({ url: 'https://example.com/{{path}}' }, ctx)
+      expect(reloadTab).toHaveBeenCalledWith('https://example.com/next')
+      expect(ctx.events).toContainEqual({
+        kind: 'result',
+        text: '已刷新当前标签页 → https://example.com/next',
+      })
+    })
+
+    it('treats a blank url as no url at all', async () => {
+      const { reloadTab, registry } = makeReloadDriver()
+      await registry['reload-tab']!({ url: '   ' }, makeCtx())
+      expect(reloadTab).toHaveBeenCalledWith()
+    })
+  })
+
+  /**
+   * Mirror of the extension's `new-tab` reuse tests. Headless has no tab bar, so
+   * "update previously opened tab" is a `goto` on the page the last new-tab block
+   * made — and a page closed since then falls back to creating instead of
+   * failing the run.
+   */
+  describe('new-tab reuses the page it opened before', () => {
+    function makeNewTabDriver(closed = false) {
+      const driver = makeDriverStub() as unknown as Record<string, unknown>
+      const newTab = vi.fn(async (url?: string) => ({ id: 7, url: url ?? '', title: 'New' }))
+      const reuseTab = vi.fn(async (tabId: number, url?: string) =>
+        closed ? null : { id: tabId, url: url ?? '', title: 'Reused' },
+      )
+      const waitForLoaded = vi.fn(async (): Promise<void> => {})
+      driver['newTab'] = newTab
+      driver['reuseTab'] = reuseTab
+      driver['waitForLoaded'] = waitForLoaded
+      return {
+        newTab,
+        reuseTab,
+        registry: createExecutors(makeDeps(driver as unknown as RunDriver)),
+      }
+    }
+
+    it('records the page it created, for the next block to reuse', async () => {
+      const { newTab, registry } = makeNewTabDriver()
+      const ctx = makeCtx()
+      const tabMemory: { prevNewTabId?: number } = {}
+      ctx.tabMemory = tabMemory
+
+      await registry['new-tab']!({ url: 'https://example.com/a' }, ctx)
+      expect(newTab).toHaveBeenCalledTimes(1)
+      expect(tabMemory.prevNewTabId).toBe(7)
+    })
+
+    it('reuses that page instead of opening another', async () => {
+      const { newTab, reuseTab, registry } = makeNewTabDriver()
+      const ctx = makeCtx()
+      const tabMemory: { prevNewTabId?: number } = { prevNewTabId: 7 }
+      ctx.tabMemory = tabMemory
+
+      await registry['new-tab']!({ url: 'https://example.com/b', updatePrevTab: true }, ctx)
+      expect(reuseTab).toHaveBeenCalledWith(7, 'https://example.com/b')
+      expect(newTab).not.toHaveBeenCalled()
+      expect(ctx.events).toContainEqual({
+        kind: 'result',
+        text: '已复用 https://example.com/b (tab #7)',
+      })
+    })
+
+    it('falls back to creating when that page has been closed', async () => {
+      const { newTab, reuseTab, registry } = makeNewTabDriver(true)
+      const ctx = makeCtx()
+      const tabMemory: { prevNewTabId?: number } = { prevNewTabId: 7 }
+      ctx.tabMemory = tabMemory
+
+      await registry['new-tab']!({ url: 'https://example.com/b', updatePrevTab: true }, ctx)
+      expect(reuseTab).toHaveBeenCalledWith(7, 'https://example.com/b')
+      expect(newTab).toHaveBeenCalledTimes(1)
+      // And the fresh page becomes the one the next reuse follows.
+      expect(tabMemory.prevNewTabId).toBe(7)
+    })
+
+    it('creates on the first block, since there is nothing to reuse yet', async () => {
+      const { reuseTab, newTab, registry } = makeNewTabDriver()
+      const ctx = makeCtx()
+      ctx.tabMemory = {}
+
+      await registry['new-tab']!({ url: 'https://example.com/a', updatePrevTab: true }, ctx)
+      expect(reuseTab).not.toHaveBeenCalled()
+      expect(newTab).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it('javascript-code falls back to local evaluation with Automa helpers', async () => {
     const registry = createExecutors(makeDeps(makeDriverStub()))
     const ctx = makeCtx({ seed: 2 })

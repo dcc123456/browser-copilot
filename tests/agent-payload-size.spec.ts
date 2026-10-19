@@ -71,6 +71,10 @@ const MAX_ADVERTISED_PAYLOAD_CHARS = 20_000
  * chain fields it now returns. Measured 31_284 → 31_400. Both ride in the `ops`
  * group, which is never advertised at round 1, so — as with the bridge-only
  * entries above — only this catalog cap pays for them.
+ * `reload-tab` then became an operator (~255 chars): it gained an edit form for
+ * its optional `url`, and the operator set is derived purely from `disableEdit`,
+ * so an editable block is a block the model can call. Measured 31_029 → 31_284,
+ * still inside this cap.
  */
 const MAX_CATALOG_CHARS = 31_400
 /**
@@ -87,9 +91,15 @@ const MAX_CATALOG_CHARS = 31_400
  * guide's credential-scope rule (+43 chars: `get-secret` is only for values that
  * must stay secret — see specs/2026-10-16-get-secret-plain-input-design.md); it
  * replaced the duplicated chat-credential paragraph rather than adding a second
- * one, and the guide is mounted in every workflow payload.
+ * one, and the guide is mounted in every workflow payload. Raised 59_600 → 59_900
+ * when `reload-tab` became an operator (~255 chars: the block gained an edit form
+ * for its optional `url`, and the operator set is derived purely from `disableEdit`,
+ * so an editable block is a block the model can call — see
+ * specs/2026-10-19-reload-tab-url-design.md). Measured 59_855 → 59_835, after
+ * shortening its catalog sentence to name the second mode ("or open a URL in it
+ * instead") instead of restating the plain refresh.
  */
-const MAX_WORKFLOW_ROUND1_CHARS = 59_600
+const MAX_WORKFLOW_ROUND1_CHARS = 59_900
 /**
  * The real per-round ceiling: one declared category on top of round 1. The
  * largest (`interaction`, 13 schemas) measures ~32.8k; the smallest (`data`)
@@ -108,18 +118,20 @@ const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 37_100
  * operator guide). Raised 56_000 → 58_000 together with the round-1 budget
  * (required args). Raised 58_000 → 59_500 when the generation goal and
  * discovery tools joined. Raised 59_500 → 59_600 with the round-1 budget (the
- * guide's credential-scope rule).
+ * guide's credential-scope rule). Raised 59_600 → 59_900 with the round-1 budget
+ * (`reload-tab` becoming an operator — see MAX_WORKFLOW_ROUND1_CHARS).
  */
-const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 59_600
+const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 59_900
 /**
  * Absolute worst case: every category plus both escape hatches loaded. Stays
  * loaded for the rest of the conversation, so this is a per-round cost, not a
  * one-off. Raised 48_000 → 57_500 together with the round-1 budget (the
  * mounted operator guide). Raised 57_500 → 59_500 together with the round-1
  * budget (required args). Raised 59_500 → 60_800 when the generation goal and
- * discovery tools joined.
+ * discovery tools joined. Raised 60_800 → 61_000 with the round-1 budget
+ * (`reload-tab` becoming an operator — see MAX_WORKFLOW_ROUND1_CHARS).
  */
-const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 60_800
+const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 61_000
 /**
  * The guardrails that matter, expressed as ratios against full auto. Round 1
  * now deliberately carries EVERY operator schema, so workflow runs ~2.8× full

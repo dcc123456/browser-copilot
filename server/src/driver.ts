@@ -203,6 +203,34 @@ export class RunDriver {
     return { ...this.tabOf(page), title: await page.title().catch(() => '') }
   }
 
+  /**
+   * Reuse a page the run opened earlier instead of creating another one —
+   * `new-tab`'s "update previously opened tab" mode, the extension's
+   * `chrome.tabs.update` port.
+   *
+   * Returns null when that page is GONE (closed by the script, by the user, or
+   * with its window). Not an error: the step wants a page to work in, and one
+   * closed tab is no reason to fail the whole run — the caller falls back to
+   * `newTab`.
+   *
+   * No `url` means make it the active page as it is; navigating a page to the
+   * address it already holds would reload it for no reason. A `userAgent` here is
+   * a NO-OP by design: the rewrite is installed on a fresh page before its first
+   * navigation, and a reused page keeps whatever it was created with — the same
+   * as the extension, which has no per-tab UA at all.
+   */
+  async reuseTab(tabId: number, url?: string): Promise<DriverTab | null> {
+    const page = this.pageById(tabId)
+    if (!page || page.isClosed()) return null
+    if (url) {
+      await page.goto(url, { waitUntil: 'load', timeout: 30_000 }).catch(() => {
+        /* best-effort, like the extension's waitForTabLoaded */
+      })
+    }
+    this.active = page
+    return { ...this.tabOf(page), title: await page.title().catch(() => '') }
+  }
+
   async switchTab(index: number): Promise<DriverTab> {
     const wanted = Math.max(0, Math.floor(index))
     // Runner-only race: the extension's `switch-tab` queries `chrome.tabs`, which
@@ -226,10 +254,20 @@ export class RunDriver {
     await page.close().catch(() => {})
   }
 
-  async reloadTab(): Promise<void> {
-    await this.pageOf()
-      .reload({ timeout: 30_000 })
-      .catch(() => {})
+  /**
+   * Reload the driven page, or point it at `url` first.
+   *
+   * The `reload-tab` block's second mode. Playwright has no "set the address"
+   * primitive, so a filled url is a navigation — the same single load the
+   * extension's `chrome.tabs.update({url})` performs, not a goto plus a reload.
+   */
+  async reloadTab(url?: string): Promise<void> {
+    const page = this.pageOf()
+    if (url) {
+      await page.goto(url, { waitUntil: 'load', timeout: 30_000 }).catch(() => {})
+      return
+    }
+    await page.reload({ timeout: 30_000 }).catch(() => {})
   }
 
   async goBack(): Promise<void> {

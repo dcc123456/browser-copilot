@@ -185,6 +185,132 @@ describe('workflow executors (browser class)', () => {
     expect(chromeRefs.update).not.toHaveBeenCalled()
   })
 
+  it('reload-tab with no url reloads the tab it is driving', async () => {
+    const { ctx, emit } = makeCtx()
+    await EXECUTORS['reload-tab']!({}, ctx)
+
+    expect(chromeRefs.reload).toHaveBeenCalledWith(1)
+    expect(chromeRefs.update).not.toHaveBeenCalled()
+    expect(emit).toHaveBeenCalledWith('result', '已刷新当前标签页')
+  })
+
+  it('reload-tab with a url replaces the address instead of reloading', async () => {
+    const { ctx, emit } = makeCtx()
+    await EXECUTORS['reload-tab']!({ url: 'https://example.com/next' }, ctx)
+
+    expect(chromeRefs.update).toHaveBeenCalledWith(1, { url: 'https://example.com/next' })
+    // Navigating already loads the page; a second reload would fetch it twice.
+    expect(chromeRefs.reload).not.toHaveBeenCalled()
+    expect(emit).toHaveBeenCalledWith('result', expect.stringContaining('https://example.com/next'))
+
+    chromeRefs.update.mockClear()
+    const { ctx: ctx2 } = makeCtx()
+    // Same scheme guard as `open-url`: a URL the extension cannot drive must
+    // fail the node, not navigate somewhere and report success.
+    await expect(EXECUTORS['reload-tab']!({ url: 'file:///C:/x.html' }, ctx2)).rejects.toThrow(
+      /http/,
+    )
+    expect(chromeRefs.update).not.toHaveBeenCalled()
+  })
+
+  it('reload-tab treats a blank url as no url at all', async () => {
+    const { ctx } = makeCtx()
+    await EXECUTORS['reload-tab']!({ url: '   ' }, ctx)
+
+    expect(chromeRefs.reload).toHaveBeenCalledWith(1)
+    expect(chromeRefs.update).not.toHaveBeenCalled()
+  })
+
+  /**
+   * `new-tab`'s "update previously opened tab" mode. The memory is the tab the
+   * LAST new-tab block made, not the tab the run happens to be on (`switch-tab`
+   * moves that about), so these drive the block twice through one shared box —
+   * the same object the engine hands every block of a run.
+   */
+  describe('new-tab reuses the tab it opened before', () => {
+    function makeRunCtx() {
+      const { ctx, emit } = makeCtx()
+      const tabMemory: { prevNewTabId?: number } = {}
+      const pinned: number[] = []
+      ctx.tabMemory = tabMemory
+      ctx.setTab = (tabId) => pinned.push(tabId)
+      return { ctx, emit, tabMemory, pinned }
+    }
+
+    it('records the tab it created, for the next block to reuse', async () => {
+      const { ctx, tabMemory, pinned } = makeRunCtx()
+      await EXECUTORS['new-tab']!({ url: 'https://example.com/a' }, ctx)
+
+      expect(chromeRefs.create).toHaveBeenCalledTimes(1)
+      expect(tabMemory.prevNewTabId).toBe(1)
+      expect(pinned).toEqual([1])
+    })
+
+    it('updates that tab instead of creating another', async () => {
+      const { ctx, emit } = makeRunCtx()
+      await EXECUTORS['new-tab']!({ url: 'https://example.com/a' }, ctx)
+
+      chromeRefs.create.mockClear()
+      await EXECUTORS['new-tab']!({ url: 'https://example.com/b', updatePrevTab: true }, ctx)
+
+      expect(chromeRefs.create).not.toHaveBeenCalled()
+      expect(chromeRefs.update).toHaveBeenCalledWith(1, {
+        active: true,
+        url: 'https://example.com/b',
+      })
+      expect(emit).toHaveBeenCalledWith('result', expect.stringContaining('已复用'))
+    })
+
+    it('falls back to creating when that tab has been closed', async () => {
+      const { ctx, tabMemory } = makeRunCtx()
+      await EXECUTORS['new-tab']!({ url: 'https://example.com/a' }, ctx)
+
+      chromeRefs.create.mockClear()
+      chromeRefs.get.mockRejectedValueOnce(new Error('No tab with id: 1'))
+      await EXECUTORS['new-tab']!({ url: 'https://example.com/b', updatePrevTab: true }, ctx)
+
+      // Someone closing the tab mid-run is not a reason to fail the whole thing:
+      // the step wants a tab to work in, so it gets a fresh one.
+      expect(chromeRefs.update).not.toHaveBeenCalled()
+      expect(chromeRefs.create).toHaveBeenCalledTimes(1)
+      expect(tabMemory.prevNewTabId).toBe(1)
+    })
+
+    it('brings the tab forward without reloading it when no url is set', async () => {
+      const { ctx } = makeRunCtx()
+      await EXECUTORS['new-tab']!({ url: 'https://example.com/a' }, ctx)
+
+      chromeRefs.update.mockClear()
+      chromeRefs.create.mockClear()
+      await EXECUTORS['new-tab']!({ updatePrevTab: true }, ctx)
+
+      // Writing back the address a page already holds would reload it for nothing.
+      expect(chromeRefs.update).toHaveBeenCalledWith(1, { active: true })
+      expect(chromeRefs.create).not.toHaveBeenCalled()
+    })
+
+    it('creates on the first block, since there is nothing to reuse yet', async () => {
+      const { ctx } = makeRunCtx()
+      await EXECUTORS['new-tab']!({ url: 'https://example.com/a', updatePrevTab: true }, ctx)
+
+      expect(chromeRefs.update).not.toHaveBeenCalled()
+      expect(chromeRefs.create).toHaveBeenCalledTimes(1)
+    })
+
+    it('applies the same http(s) guard on the reuse path', async () => {
+      const { ctx, tabMemory } = makeRunCtx()
+      tabMemory.prevNewTabId = 1
+      chromeRefs.update.mockClear()
+
+      await expect(
+        EXECUTORS['new-tab']!({ url: 'file:///C:/x.html', updatePrevTab: true }, ctx),
+      ).rejects.toThrow(/http/)
+      // Neither path taken: the node fails rather than silently creating a tab.
+      expect(chromeRefs.update).not.toHaveBeenCalled()
+      expect(chromeRefs.create).not.toHaveBeenCalled()
+    })
+  })
+
   it('take-screenshot stores its data url in variables.lastScreenshot', async () => {
     const { ctx, emit } = makeCtx()
     chromeRefs.captureVisibleTab.mockResolvedValue('data:image/png;base64,XYZ')
