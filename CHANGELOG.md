@@ -8,6 +8,72 @@ All notable changes to this project are documented here. The format is based on
 
 _To be released._
 
+## [0.6.7] - 2026-10-19
+
+### Added — An AI assistant on the workflow canvas
+
+The canvas offered two ways to grow a workflow: drag an operator from the palette,
+or generate the whole flow from the side panel — and nothing for "add the next
+step and fill in its parameters". A round AI button on the canvas now opens a chat
+dock that sends the transcript plus a digest of the current graph, and lands the
+operators the model picks straight onto the canvas: spliced after the selected
+step, or after the end of the main line, chained in the proposed order. A landed
+batch is one click from removal, and every AI-authored node keeps a violet
+provenance ring and badge so it stays distinguishable from what you wired yourself.
+It neither trials a run nor stores a transcript — execution and page evidence stay
+with Run / AI Fix.
+
+### Added — Repair reflects on why a round failed
+
+A repair round that ran and still failed used to start the next attempt with
+nothing to show for it: the ladder advanced a strategy while dropping everything
+the failed candidate had learned, and its prompt carried no page evidence at all,
+so the model re-guessed selectors it had already guessed wrong. Reflection is now
+a separate model call whose evidence is a live inspection of the page **as it
+stands after the failed replay** — the failure scene itself. A reflection may
+propose a different strategy, but only as a proposal: the same safety, budget and
+dead-end rules the ladder obeys apply to it, so it can reroute the ladder without
+becoming a way past the policy gate. An unavailable or mangled reflection degrades
+to nothing and the loop behaves exactly as before.
+
+### Added — Two tab-driving blocks do what their labels promise
+
+- **`reload-tab` takes a URL**: filled in, it replaces the tab's address and loads
+  that; empty, it keeps reloading the page where it is. The field shares its
+  implementation with `open-url`, so the scheme guard and the "one navigation,
+  never goto plus reload" rule stay one behaviour.
+- **`new-tab` can reuse a tab it opened earlier**: the "update previously opened
+  tab" checkbox existed with its label but no executor read it, which is why it was
+  left out of the model schema. Each `new-tab` now records the tab it landed on
+  and a later one that asks to reuse goes back there instead of stacking another.
+  A tab closed since then falls back to creating one.
+
+### Fixed — A native dialog no longer hangs the run forever
+
+A page's native `alert`/`confirm`/`prompt` parks the renderer's JS thread, so a
+workflow step whose click handler alerted never settled and the run hung with no
+error at all. The CDP monitor now answers `javascriptDialogOpening` (accepting
+alert/confirm/prompt, dismissing beforeunload), and every injected operation is
+backstopped by a 30-second injection timeout for tabs without a debugger.
+
+### Fixed — A doubled URL scheme after variable interpolation
+
+A `new-tab` URL assembled as protocol dropdown + `{{variable}}` interpolated to
+`http://http://host//path` whenever the variable held a full URL, and the browser
+parsed that as host `http` with an empty port. The doubled scheme is now collapsed
+before navigation, so full-URL and host-only variables both work.
+
+### Changed — Data-tab profiles and credentials edit in dialogs
+
+The inline editor cards pushed the list around while you typed. Create and edit
+now happen in the shared FormDialog — the same split as the skill and task
+editors — with required-field gating on the save button and save failures
+reported inside the dialog where the backdrop cannot hide them.
+
+### Chore
+
+`@pnpm/exe` is no longer offered among the managed package managers.
+
 ## [0.6.6] - 2026-10-16
 
 ### Added — One get-secret node, several credentials
