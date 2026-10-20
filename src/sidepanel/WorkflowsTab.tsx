@@ -9,15 +9,33 @@
  *
  * @module sidepanel/WorkflowsTab
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Circle, Download, Plus, Square, Trash2, Upload } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  Download,
+  FolderPlus,
+  Pencil,
+  Plus,
+  Square,
+  Trash2,
+  Upload,
+} from 'lucide-react'
 import { sendCommand } from '../lib/messages'
 import type { CommandResult } from '../lib/messages'
 import type { TaskRunLog } from '../lib/scheduler-types'
 import type { Workflow } from '../lib/workflow/types'
+import type { WorkflowGroup } from '../lib/workflow/groups'
+import {
+  buildWorkflowGroupExport,
+  groupWorkflows,
+  isWorkflowGroupExport,
+} from '../lib/workflow/groups'
 import type { PendingTakeoverInfo } from '../lib/workflow/takeover-pending'
 import type { ReplayFirstRunRecord } from '../lib/workflow/replay-metrics'
 import { newId } from '../lib/storage'
+import { downloadJSONFile } from '../lib/download-json'
 import { onStoreChanged } from '../lib/store-events'
 import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
 import { useT } from './i18n'
@@ -61,6 +79,17 @@ function lastRunOf(runs: TaskRunLog[], wf: Workflow): TaskRunLog | null {
   }
   return best
 }
+
+/**
+ * Menu entry styling shared by the hover bubbles in this tab.
+ *
+ * The `!` utilities are REQUIRED: sidepanel/styles.css styles bare `button`
+ * elements with UNLAYERED rules that beat Tailwind's layered utilities in the
+ * cascade (same note as ChatTab's ToolbarIconButton).
+ */
+const MENU_ITEM_CLASS =
+  'flex w-full cursor-pointer items-center gap-2 rounded-md! border-0! bg-transparent! px-2.5! py-1.5! ' +
+  'text-left text-[12.5px] text-ink! hover:bg-hover!'
 
 /**
  * The primary "new" action with its sibling Import entry folded into a hover
@@ -110,10 +139,6 @@ function NewWorkflowMenu({
     }
   }, [open])
 
-  const itemClass =
-    'flex w-full cursor-pointer items-center gap-2 rounded-md! border-0! bg-transparent! px-2.5! py-1.5! ' +
-    'text-left text-[12.5px] text-ink! hover:bg-hover!'
-
   return (
     <div
       ref={wrapRef}
@@ -141,7 +166,7 @@ function NewWorkflowMenu({
         <div className="absolute right-0 top-full z-50 min-w-[128px] pt-1.5" role="menu">
           <div className="flex flex-col rounded-lg border border-border bg-panel p-1 shadow-[var(--bc-shadow)]">
             <button
-              className={itemClass}
+              className={MENU_ITEM_CLASS}
               onClick={() => {
                 setOpen(false)
                 onNew()
@@ -153,7 +178,7 @@ function NewWorkflowMenu({
               {t.workflowsNew}
             </button>
             <button
-              className={itemClass}
+              className={MENU_ITEM_CLASS}
               onClick={() => {
                 setOpen(false)
                 onImport()
@@ -188,6 +213,15 @@ export default function WorkflowsTab() {
     runId?: string
   } | null>(null)
   const [busy, setBusy] = useState(false)
+  /** The workflow groups the user created (see lib/workflow/groups). */
+  const [groups, setGroups] = useState<WorkflowGroup[]>([])
+  /** Collapsed group sections. Purely visual, so it stays in component state. */
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  /** The group whose name is being edited inline, plus the draft name. */
+  const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null)
+  const [groupNameDraft, setGroupNameDraft] = useState('')
+  /** Whether the "move to group" menu is open. */
+  const [moveMenuOpen, setMoveMenuOpen] = useState(false)
   // Workflows with pending AI-takeover fixes (apply / discard chip).
   const [pending, setPending] = useState<PendingTakeoverInfo[]>([])
   // M4 resume: workflow id -> the run whose checkpoints a resume would pick up
@@ -253,17 +287,22 @@ export default function WorkflowsTab() {
 
   const load = useCallback(async () => {
     try {
-      const [workflowResult, runsResult, pendingResult, firstRunResult] = await Promise.all([
-        sendCommand({ type: 'workflows.list' }),
-        sendCommand({ type: 'tasks.runs' }),
-        sendCommand({ type: 'workflows.takeoverPending' }),
-        // One read for the whole list; a failed metric read costs the card its
-        // first-replay line and nothing else.
-        sendCommand({ type: 'workflows.firstRuns' }).catch(() => undefined),
-      ])
+      const [workflowResult, runsResult, pendingResult, firstRunResult, groupResult] =
+        await Promise.all([
+          sendCommand({ type: 'workflows.list' }),
+          sendCommand({ type: 'tasks.runs' }),
+          sendCommand({ type: 'workflows.takeoverPending' }),
+          // One read for the whole list; a failed metric read costs the card its
+          // first-replay line and nothing else.
+          sendCommand({ type: 'workflows.firstRuns' }).catch(() => undefined),
+          // The group table is a separate key: a failed read costs the group
+          // sections, never the workflow list itself.
+          sendCommand({ type: 'workflowGroups.list' }).catch(() => undefined),
+        ])
       if (workflowResult.type === 'workflows.list') setWorkflows(workflowResult.workflows)
       if (runsResult.type === 'tasks.runs') setRuns(runsResult.runs)
       if (pendingResult.type === 'workflows.takeoverPending') setPending(pendingResult.items)
+      if (groupResult?.type === 'workflowGroups.list') setGroups(groupResult.groups)
       if (firstRunResult?.type === 'workflows.firstRuns') {
         const byWorkflow: Record<string, ReplayFirstRunRecord> = {}
         for (const record of firstRunResult.records) byWorkflow[record.workflowId] = record
@@ -299,6 +338,9 @@ export default function WorkflowsTab() {
   // (see lib/store-events) — including for a save made in this same frame, which
   // a runtime message alone could not deliver.
   useEffect(() => onStoreChanged('workflows', () => void load()), [load])
+
+  // The group table is its own storage key, so it announces its own writes.
+  useEffect(() => onStoreChanged('workflowGroups', () => void load()), [load])
 
   // Lightweight refresh so a workflow run launched elsewhere updates the
   // last-run status chip without the user having to re-open the tab. Live
@@ -592,11 +634,110 @@ export default function WorkflowsTab() {
     }
   }
 
+  // --- Groups -----------------------------------------------------------------
+  const sections = useMemo(() => groupWorkflows(workflows, groups), [workflows, groups])
+
+  const toggleGroupCollapsed = (groupId: string | null): void => {
+    if (!groupId) return
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(groupId)) next.delete(groupId)
+      else next.add(groupId)
+      return next
+    })
+  }
+
+  const createGroup = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      const result = await sendCommand({
+        type: 'workflowGroups.save',
+        name: t.workflowsGroupDefaultName({ index: groups.length + 1 }),
+      })
+      if (result.type !== 'workflowGroups.save') return
+      // Straight into rename mode: the placeholder name is a placeholder, and
+      // the user is already looking at the new group header.
+      setRenamingGroupId(result.group.id)
+      setGroupNameDraft(result.group.name)
+      await load()
+    } catch (error) {
+      setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const commitGroupRename = async (groupId: string): Promise<void> => {
+    const name = groupNameDraft.trim()
+    setRenamingGroupId(null)
+    if (!name) return
+    setBusy(true)
+    try {
+      await sendCommand({ type: 'workflowGroups.save', id: groupId, name })
+      await load()
+    } catch (error) {
+      setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const removeGroup = async (group: WorkflowGroup): Promise<void> => {
+    const ok = await confirmDialog({
+      title: t.dialogDeleteTitle,
+      message: t.workflowsGroupDeleteConfirm({ name: group.name }),
+      confirmText: t.delete,
+      cancelText: t.cancel,
+      danger: true,
+    })
+    if (!ok) return
+    setBusy(true)
+    try {
+      await sendCommand({ type: 'workflowGroups.delete', id: group.id })
+      await load()
+    } catch (error) {
+      setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const moveSelected = async (groupId: string | null): Promise<void> => {
+    const ids = effectiveSelection
+    setMoveMenuOpen(false)
+    if (ids.length === 0) return
+    setBusy(true)
+    try {
+      await sendCommand({ type: 'workflows.assignGroup', ids, groupId })
+      setBanner({ kind: 'ok', text: t.workflowsGroupMoveDone({ count: ids.length }) })
+      setSelectedIds(new Set())
+      await load()
+    } catch (error) {
+      setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Close the move menu on an outside click; the menu has no focus trap, so a
+  // stray click must not leave it hanging over the list.
+  useEffect(() => {
+    if (!moveMenuOpen) return
+    const onPointerDown = (event: MouseEvent): void => {
+      const target = event.target as HTMLElement
+      if (!target.closest('[data-move-menu]')) setMoveMenuOpen(false)
+    }
+    const id = window.setTimeout(() => document.addEventListener('mousedown', onPointerDown), 0)
+    return () => {
+      window.clearTimeout(id)
+      document.removeEventListener('mousedown', onPointerDown)
+    }
+  }, [moveMenuOpen])
+
   const editorUrl = (id?: string): string =>
     chrome.runtime.getURL(
       'src/workflow-editor/index.html' + (id ? `?edit=${encodeURIComponent(id)}` : ''),
     )
-
   /**
    * The workflow editor opens in a standalone popup window (no address bar /
    * browser chrome), matching Automa's separate editor window. A regular tab is
@@ -661,22 +802,30 @@ export default function WorkflowsTab() {
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const downloadJSON = (filename: string, data: unknown): void => {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = filename
-    anchor.click()
-    URL.revokeObjectURL(url)
-  }
-
   const exportWorkflow = (wf: Workflow): void => {
-    downloadJSON(`${(wf.name || 'workflow').replace(/[\\/:*?"<>|]/g, '-')}.json`, wf)
+    downloadJSONFile(`${(wf.name || 'workflow').replace(/[\\/:*?"<>|]/g, '-')}.json`, wf)
   }
 
   const exportAll = (): void => {
-    downloadJSON('workflows.json', workflows)
+    downloadJSONFile('workflows.json', workflows)
+  }
+
+  /** The checked workflows, in list order. */
+  const selectedWorkflows = workflows.filter((wf) => selectedIds.has(wf.id))
+
+  const exportSelected = (): void => {
+    downloadJSONFile('workflows-selected.json', selectedWorkflows)
+  }
+
+  /**
+   * A group export carries the group name next to its members, so re-importing
+   * the file rebuilds the group instead of scattering its workflows.
+   */
+  const exportGroup = (group: WorkflowGroup, members: Workflow[]): void => {
+    downloadJSONFile(
+      `${(group.name || 'group').replace(/[\\/:*?"<>|]/g, '-')}.json`,
+      buildWorkflowGroupExport(group.name, members),
+    )
   }
 
   const importFiles = async (files: FileList | null): Promise<void> => {
@@ -689,6 +838,26 @@ export default function WorkflowsTab() {
         try {
           const text = await file.text()
           const parsed: unknown = JSON.parse(text)
+          if (isWorkflowGroupExport(parsed)) {
+            // A group file rebuilds the group under a fresh id and files its
+            // members into it.
+            const groupResult = await sendCommand({
+              type: 'workflowGroups.save',
+              name: parsed.name,
+            })
+            const groupId = groupResult.type === 'workflowGroups.save' ? groupResult.group.id : null
+            for (const raw of parsed.workflows) {
+              const wf = coerceImportedWorkflow(raw)
+              if (!wf) {
+                invalid = true
+                continue
+              }
+              if (groupId) wf.folderId = groupId
+              await sendCommand({ type: 'workflows.save', workflow: wf })
+              imported += 1
+            }
+            continue
+          }
           const batch: unknown[] = Array.isArray(parsed) ? parsed : [parsed]
           for (const raw of batch) {
             const wf = coerceImportedWorkflow(raw)
@@ -793,7 +962,7 @@ export default function WorkflowsTab() {
       )}
 
       <div className="section-head">
-        <h3>{t.tabWorkflows}</h3>
+        <h3 className="shrink-0 whitespace-nowrap">{t.tabWorkflows}</h3>
         <div className="section-actions">
           {workflows.length > 0 && (
             <label className="wf-select-all" title={t.workflowsSelectAll}>
@@ -817,6 +986,69 @@ export default function WorkflowsTab() {
               <Trash2 size={14} aria-hidden="true" />
             </button>
           )}
+          {effectiveSelection.length > 0 && (
+            <button
+              className="section-action wf-icon-action"
+              disabled={busy}
+              onClick={exportSelected}
+              type="button"
+              title={t.workflowsBatchExport}
+              aria-label={t.workflowsBatchExport}
+            >
+              <Download size={14} aria-hidden="true" />
+            </button>
+          )}
+          {effectiveSelection.length > 0 && (
+            <div className="relative flex" data-move-menu>
+              <button
+                aria-expanded={moveMenuOpen}
+                aria-haspopup="menu"
+                className="section-action wf-icon-action"
+                disabled={busy}
+                onClick={() => setMoveMenuOpen((open) => !open)}
+                type="button"
+                title={t.workflowsMoveToGroup}
+                aria-label={t.workflowsMoveToGroup}
+              >
+                <FolderPlus size={14} aria-hidden="true" />
+              </button>
+              {moveMenuOpen && (
+                <div className="absolute right-0 top-full z-50 min-w-[160px] pt-1.5" role="menu">
+                  <div className="flex flex-col rounded-lg border border-border bg-panel p-1 shadow-[var(--bc-shadow)]">
+                    {groups.map((group) => (
+                      <button
+                        className={MENU_ITEM_CLASS}
+                        key={group.id}
+                        onClick={() => void moveSelected(group.id)}
+                        role="menuitem"
+                        type="button"
+                      >
+                        {group.name}
+                      </button>
+                    ))}
+                    <button
+                      className={MENU_ITEM_CLASS}
+                      onClick={() => void moveSelected(null)}
+                      role="menuitem"
+                      type="button"
+                    >
+                      {t.workflowsMoveToUngrouped}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <button
+            className="section-action wf-icon-action"
+            disabled={busy}
+            onClick={() => void createGroup()}
+            type="button"
+            title={t.workflowsGroupNew}
+            aria-label={t.workflowsGroupNew}
+          >
+            <Plus size={14} aria-hidden="true" />
+          </button>
           {workflows.length > 0 && (
             <button
               className="section-action wf-icon-action"
@@ -871,145 +1103,244 @@ export default function WorkflowsTab() {
           <p>{t.workflowsEmpty}</p>
         </div>
       ) : (
-        <ul className="task-list">
-          {workflows.map((wf) => {
-            const last = lastRunFor(wf)
-            const health = summarizeWorkflowHealth(runs, wf.id)
-            return (
-              <li
-                className={`task-item${highlightedId === wf.id ? ' task-item-saved' : ''}`}
-                data-workflow-id={wf.id}
-                key={wf.id}
-              >
-                <div className="task-item-head">
-                  {/* Checkbox + name in one LEFT group: .task-item-head is
-                      space-between, so a bare third child would push the name
-                      to the middle. The status chip stays on the right. */}
-                  <div className="task-item-lead">
-                    <label className="wf-item-check" title={t.workflowsSelectAll}>
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(wf.id)}
-                        onChange={() => toggleSelected(wf.id)}
-                      />
-                    </label>
-                    <strong className="task-item-name">{wf.name}</strong>
-                  </div>
-                  <span
-                    className={`task-status task-status-${!last ? 'none' : last.skipped ? 'skipped' : last.ok ? 'ok' : 'failed'}`}
-                  >
-                    {lastRunLabel(wf)}
-                  </span>
-                </div>
-                <div className="task-meta">
-                  <span className="task-chip">{triggerLabel(effectiveTriggerType(wf))}</span>
-                  {wf.description && <span className="task-lastrun">{wf.description}</span>}
-                </div>
-                {last && (
-                  <div className="task-lastrun">
-                    {t.workflowsLastRun}: {new Date(last.time).toLocaleString(navigator.language)}
-                  </div>
-                )}
-                <WorkflowHealthView health={health} firstRun={firstRuns[wf.id]} />
-                <div className="actions task-actions">
+        sections.map((section) => {
+          const group = section.group
+          const collapsed = group ? collapsedGroups.has(group.id) : false
+          const isRenaming = group ? renamingGroupId === group.id : false
+          return (
+            <section className="mt-1" key={group?.id ?? 'ungrouped'}>
+              <div className="flex items-center justify-between gap-2 px-1 py-1">
+                <div className="flex min-w-0 items-center gap-1.5">
                   <button
-                    className="task-action-run"
-                    disabled={busy}
-                    onClick={() => void runNow(wf.id)}
+                    aria-expanded={!collapsed}
+                    className="flex! items-center! justify-center! rounded! border-0! bg-transparent! p-1! text-muted! hover:bg-hover!"
+                    onClick={() => toggleGroupCollapsed(group?.id ?? null)}
                     type="button"
                   >
-                    {t.workflowsRunNow}
+                    {collapsed ? (
+                      <ChevronRight size={13} aria-hidden="true" />
+                    ) : (
+                      <ChevronDown size={13} aria-hidden="true" />
+                    )}
                   </button>
-                  {/* Only offered when the last run left a clean step to pick
+                  {group && isRenaming ? (
+                    <input
+                      autoFocus
+                      className="w-40! text-[12.5px]!"
+                      onBlur={() => void commitGroupRename(group.id)}
+                      onChange={(event) => setGroupNameDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') void commitGroupRename(group.id)
+                        if (event.key === 'Escape') setRenamingGroupId(null)
+                      }}
+                      value={groupNameDraft}
+                    />
+                  ) : group ? (
+                    <button
+                      className="truncate! rounded! border-0! bg-transparent! p-0! text-left! text-[12.5px]! font-medium! text-ink! hover:bg-transparent!"
+                      onClick={() => {
+                        setRenamingGroupId(group.id)
+                        setGroupNameDraft(group.name)
+                      }}
+                      title={t.workflowsGroupRename}
+                      type="button"
+                    >
+                      {group.name}
+                    </button>
+                  ) : (
+                    <span className="truncate text-[12.5px] font-medium text-ink">
+                      {t.workflowsUngrouped}
+                    </span>
+                  )}
+                  <span className="task-chip">{section.workflows.length}</span>
+                </div>
+                {group && !isRenaming && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      aria-label={t.workflowsGroupExport}
+                      className="flex! h-6! w-6! items-center! justify-center! rounded-md! border! border-border! bg-transparent! p-0! text-muted! hover:bg-hover! hover:text-ink!"
+                      disabled={busy}
+                      onClick={() => exportGroup(group, section.workflows)}
+                      title={t.workflowsGroupExport}
+                      type="button"
+                    >
+                      <Download size={13} aria-hidden="true" />
+                    </button>
+                    <button
+                      aria-label={t.workflowsGroupRename}
+                      className="flex! h-6! w-6! items-center! justify-center! rounded-md! border! border-border! bg-transparent! p-0! text-muted! hover:bg-hover! hover:text-ink!"
+                      disabled={busy}
+                      onClick={() => {
+                        setRenamingGroupId(group.id)
+                        setGroupNameDraft(group.name)
+                      }}
+                      title={t.workflowsGroupRename}
+                      type="button"
+                    >
+                      <Pencil size={13} aria-hidden="true" />
+                    </button>
+                    <button
+                      aria-label={t.workflowsGroupDelete}
+                      className="flex! h-6! w-6! items-center! justify-center! rounded-md! border! border-border! bg-transparent! p-0! text-muted! hover:bg-hover! hover:text-ink! danger"
+                      disabled={busy}
+                      onClick={() => void removeGroup(group)}
+                      title={t.workflowsGroupDelete}
+                      type="button"
+                    >
+                      <Trash2 size={13} aria-hidden="true" />
+                    </button>
+                  </div>
+                )}
+              </div>
+              {!collapsed && (
+                <ul className="task-list">
+                  {section.workflows.map((wf) => {
+                    const last = lastRunFor(wf)
+                    const health = summarizeWorkflowHealth(runs, wf.id)
+                    return (
+                      <li
+                        className={`task-item${highlightedId === wf.id ? ' task-item-saved' : ''}`}
+                        data-workflow-id={wf.id}
+                        key={wf.id}
+                      >
+                        <div className="task-item-head">
+                          {/* Checkbox + name in one LEFT group: .task-item-head is
+                      space-between, so a bare third child would push the name
+                      to the middle. The status chip stays on the right. */}
+                          <div className="task-item-lead">
+                            <label className="wf-item-check" title={t.workflowsSelectAll}>
+                              <input
+                                type="checkbox"
+                                checked={selectedIds.has(wf.id)}
+                                onChange={() => toggleSelected(wf.id)}
+                              />
+                            </label>
+                            <strong className="task-item-name">{wf.name}</strong>
+                          </div>
+                          <span
+                            className={`task-status task-status-${!last ? 'none' : last.skipped ? 'skipped' : last.ok ? 'ok' : 'failed'}`}
+                          >
+                            {lastRunLabel(wf)}
+                          </span>
+                        </div>
+                        <div className="task-meta">
+                          <span className="task-chip">
+                            {triggerLabel(effectiveTriggerType(wf))}
+                          </span>
+                          {wf.description && <span className="task-lastrun">{wf.description}</span>}
+                        </div>
+                        {last && (
+                          <div className="task-lastrun">
+                            {t.workflowsLastRun}:{' '}
+                            {new Date(last.time).toLocaleString(navigator.language)}
+                          </div>
+                        )}
+                        <WorkflowHealthView health={health} firstRun={firstRuns[wf.id]} />
+                        <div className="actions task-actions">
+                          <button
+                            className="task-action-run"
+                            disabled={busy}
+                            onClick={() => void runNow(wf.id)}
+                            type="button"
+                          >
+                            {t.workflowsRunNow}
+                          </button>
+                          {/* Only offered when the last run left a clean step to pick
                       up from — a Resume that silently re-runs everything would
                       be worse than no button at all. The `!` is required: the
                       unlayered `button` rules in sidepanel/styles.css beat
                       Tailwind's layered utilities (same note as NewWorkflowMenu). */}
-                  {resumePoints[wf.id] && (
-                    <button
-                      className="text-ok! border-ok!"
-                      disabled={busy}
-                      onClick={() => void resumeNow(wf.id)}
-                      title={t.workflowsResumeTitle}
-                      type="button"
-                    >
-                      {t.workflowsResume}
-                    </button>
-                  )}
-                  {/* Single-entry AI repair (spec §11): opens the Failure
+                          {resumePoints[wf.id] && (
+                            <button
+                              className="text-ok! border-ok!"
+                              disabled={busy}
+                              onClick={() => void resumeNow(wf.id)}
+                              title={t.workflowsResumeTitle}
+                              type="button"
+                            >
+                              {t.workflowsResume}
+                            </button>
+                          )}
+                          {/* Single-entry AI repair (spec §11): opens the Failure
                       Center, which runs diagnose → proposal automatically and
                       pauses at the two human confirmation points. Shown only
                       when the last run failed. */}
-                  {last && !last.ok && !last.skipped && (
-                    <button
-                      className="text-accent! border-accent!"
-                      disabled={busy}
-                      onClick={() =>
-                        setFailureCenter({
-                          workflowId: wf.id,
-                          runId: last.runId,
-                        })
-                      }
-                      type="button"
-                    >
-                      {t.failureCenterAiRepair}
-                    </button>
-                  )}
-                  <button disabled={busy} onClick={() => openEditor(wf.id)} type="button">
-                    {t.workflowsEdit}
-                  </button>
-                  <button disabled={busy} onClick={() => exportWorkflow(wf)} type="button">
-                    {t.workflowsExport}
-                  </button>
-                  <button
-                    disabled={busy}
-                    onClick={() => void duplicateWorkflow(wf.id)}
-                    type="button"
-                  >
-                    {t.workflowsDuplicate}
-                  </button>
-                  <button
-                    className="danger"
-                    disabled={busy}
-                    onClick={() => void removeWorkflow(wf.id)}
-                    type="button"
-                  >
-                    {t.delete}
-                  </button>
-                </div>
-                {(() => {
-                  const pendingInfo = pending.find((entry) => entry.workflowId === wf.id)
-                  if (!pendingInfo) return null
-                  return (
-                    <div className="ai-debug-backup">
-                      <span>
-                        {t.workflowsDebugTakeoverPendingHint({
-                          time: new Date(pendingInfo.createdAt).toLocaleString(navigator.language),
-                          changes: pendingInfo.fixes.length,
-                        })}
-                      </span>
-                      <button
-                        disabled={busy}
-                        onClick={() => void applyPendingFixes(wf.id)}
-                        type="button"
-                      >
-                        {t.workflowsDebugTakeoverApply}
-                      </button>
-                      <button
-                        className="danger"
-                        disabled={busy}
-                        onClick={() => void discardPendingFixes(wf.id)}
-                        type="button"
-                      >
-                        {t.workflowsDebugTakeoverDiscard}
-                      </button>
-                    </div>
-                  )
-                })()}
-              </li>
-            )
-          })}
-        </ul>
+                          {last && !last.ok && !last.skipped && (
+                            <button
+                              className="text-accent! border-accent!"
+                              disabled={busy}
+                              onClick={() =>
+                                setFailureCenter({
+                                  workflowId: wf.id,
+                                  runId: last.runId,
+                                })
+                              }
+                              type="button"
+                            >
+                              {t.failureCenterAiRepair}
+                            </button>
+                          )}
+                          <button disabled={busy} onClick={() => openEditor(wf.id)} type="button">
+                            {t.workflowsEdit}
+                          </button>
+                          <button disabled={busy} onClick={() => exportWorkflow(wf)} type="button">
+                            {t.workflowsExport}
+                          </button>
+                          <button
+                            disabled={busy}
+                            onClick={() => void duplicateWorkflow(wf.id)}
+                            type="button"
+                          >
+                            {t.workflowsDuplicate}
+                          </button>
+                          <button
+                            className="danger"
+                            disabled={busy}
+                            onClick={() => void removeWorkflow(wf.id)}
+                            type="button"
+                          >
+                            {t.delete}
+                          </button>
+                        </div>
+                        {(() => {
+                          const pendingInfo = pending.find((entry) => entry.workflowId === wf.id)
+                          if (!pendingInfo) return null
+                          return (
+                            <div className="ai-debug-backup">
+                              <span>
+                                {t.workflowsDebugTakeoverPendingHint({
+                                  time: new Date(pendingInfo.createdAt).toLocaleString(
+                                    navigator.language,
+                                  ),
+                                  changes: pendingInfo.fixes.length,
+                                })}
+                              </span>
+                              <button
+                                disabled={busy}
+                                onClick={() => void applyPendingFixes(wf.id)}
+                                type="button"
+                              >
+                                {t.workflowsDebugTakeoverApply}
+                              </button>
+                              <button
+                                className="danger"
+                                disabled={busy}
+                                onClick={() => void discardPendingFixes(wf.id)}
+                                type="button"
+                              >
+                                {t.workflowsDebugTakeoverDiscard}
+                              </button>
+                            </div>
+                          )
+                        })()}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </section>
+          )
+        })
       )}
 
       {failureCenter && (
@@ -1032,6 +1363,10 @@ export default function WorkflowsTab() {
  * fresh id and timestamps so it never collides with an existing workflow.
  * Returns `null` when the record lacks the name + drawflow graph every workflow
  * needs.
+ *
+ * The group pointer is dropped: it names a group in the machine the file came
+ * from, which does not exist here. A group import re-attaches the workflow to
+ * the group it just rebuilt.
  */
 function coerceImportedWorkflow(raw: unknown): Workflow | null {
   if (!raw || typeof raw !== 'object') return null
@@ -1045,11 +1380,7 @@ function coerceImportedWorkflow(raw: unknown): Workflow | null {
     return null
   }
   const now = Date.now()
-  return {
-    ...(w as Workflow),
-    id: newId(),
-    name: w.name.trim() || 'Imported workflow',
-    createdAt: now,
-    updatedAt: now,
-  }
+  const imported = { ...(w as Workflow), id: newId(), createdAt: now, updatedAt: now }
+  delete imported.folderId
+  return { ...imported, name: w.name.trim() || 'Imported workflow' }
 }

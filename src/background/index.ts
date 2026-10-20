@@ -172,7 +172,9 @@ import {
   saveWorkflow,
   deleteWorkflow,
   duplicateWorkflow,
+  setWorkflowGroup,
 } from '../lib/workflow/storage'
+import { deleteWorkflowGroup, listWorkflowGroups, saveWorkflowGroup } from '../lib/workflow/groups'
 import {
   describeNodeParams,
   patchNodeParams,
@@ -1632,6 +1634,27 @@ async function handleCommand(
       // its scheduled runs would never fire.
       if (copy) await rescheduleAllWorkflowTriggers()
       return { type: 'workflows.duplicate', workflow: copy }
+    }
+
+    case 'workflows.assignGroup':
+      await setWorkflowGroup(command.ids, command.groupId)
+      return { type: 'workflows.assignGroup' }
+
+    case 'workflowGroups.list':
+      return { type: 'workflowGroups.list', groups: await listWorkflowGroups() }
+
+    case 'workflowGroups.save':
+      return { type: 'workflowGroups.save', group: await saveWorkflowGroup(command) }
+
+    case 'workflowGroups.delete': {
+      await deleteWorkflowGroup(command.id)
+      // The workflows that pointed at the group keep their records; they only
+      // lose the pointer, so they fall back to the ungrouped section.
+      const orphans = (await listWorkflows())
+        .filter((workflow) => workflow.folderId === command.id)
+        .map((workflow) => workflow.id)
+      await setWorkflowGroup(orphans, null)
+      return { type: 'workflowGroups.delete' }
     }
 
     case 'workflows.draft.get': {

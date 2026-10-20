@@ -26,6 +26,7 @@ import type { FeishuConfig, ScheduledTask, TaskRunLog } from './scheduler-types'
 import type { TokenDashboard, TokenRange } from './token-ledger'
 import type { RunOutcomeKind, RunSource, RunStep, RunWindowKind } from '../background/running-tasks'
 import type { Workflow } from './workflow/types'
+import type { WorkflowGroup } from './workflow/groups'
 import type { WorkflowDebugResult } from './workflow/auto-debug-patch'
 import type { PendingTakeoverInfo } from './workflow/takeover-pending'
 import type { DebugSessionStatsSummary, TakeoverStatsSummary } from './workflow/takeover-stats'
@@ -218,6 +219,18 @@ export type Command =
    * it is a new record, not another revision of the source.
    */
   | { type: 'workflows.duplicate'; id: string }
+  /**
+   * Files workflows into a group, or out of every group when `groupId` is null.
+   * A move rewrites `folderId` only — it is not an edit, so it commits no
+   * revision and does not reorder the list.
+   */
+  | { type: 'workflows.assignGroup'; ids: string[]; groupId: string | null }
+  /** The workflow groups the user has created. */
+  | { type: 'workflowGroups.list' }
+  /** Creates a group (no `id`) or renames one (with `id`). */
+  | { type: 'workflowGroups.save'; id?: string; name: string }
+  /** Removes a group; its workflows fall back to the ungrouped section. */
+  | { type: 'workflowGroups.delete'; id: string }
   /**
    * Materialises the current conversation's operator-tool draft into a
    * Workflow WITHOUT persisting it. Used by the chat panel to populate the
@@ -592,6 +605,10 @@ export type CommandResult =
   | { type: 'workflows.save' }
   | { type: 'workflows.delete' }
   | { type: 'workflows.duplicate'; workflow?: Workflow }
+  | { type: 'workflows.assignGroup' }
+  | { type: 'workflowGroups.list'; groups: WorkflowGroup[] }
+  | { type: 'workflowGroups.save'; group: WorkflowGroup }
+  | { type: 'workflowGroups.delete' }
   | {
       type: 'workflows.draft'
       workflow?: Workflow

@@ -243,6 +243,28 @@ export interface Messages {
   workflowsBatchDeleteConfirm: (params: { count: number }) => string
   /** Success banner after a batch delete. */
   workflowsBatchDeleteDone: (params: { count: number }) => string
+  /** Icon-only batch-export button in the Workflows tab toolbar (needs a selection). */
+  workflowsBatchExport: string
+  /** Icon-only "move to group" button in the Workflows tab toolbar (needs a selection). */
+  workflowsMoveToGroup: string
+  /** Menu entry that files the selected workflows outside any group. */
+  workflowsMoveToUngrouped: string
+  /** Header of the section holding the workflows that belong to no group. */
+  workflowsUngrouped: string
+  /** Icon-only button that creates a workflow group. */
+  workflowsGroupNew: string
+  /** Per-group action: export the group together with its workflows. */
+  workflowsGroupExport: string
+  /** Per-group action: rename the group in place. */
+  workflowsGroupRename: string
+  /** Per-group action: delete the group (its workflows fall back to ungrouped). */
+  workflowsGroupDelete: string
+  /** Confirm dialog body for deleting a group (its workflows are kept). */
+  workflowsGroupDeleteConfirm: (params: { name: string }) => string
+  /** Success banner after moving workflows into a group. */
+  workflowsGroupMoveDone: (params: { count: number }) => string
+  /** Placeholder name of a freshly created group. */
+  workflowsGroupDefaultName: (params: { index: number }) => string
   /** Shown on a failed-run banner in the Workflows tab; the banner is clickable and jumps to the run's history entry. */
   workflowsRunFailedHint: string
   /**
@@ -1139,6 +1161,26 @@ export interface Messages {
   dataDeclined: string
   dataUsed: (params: { count: number }) => string
 
+  // Data tab: batch export / import of profiles and secrets
+  /** Checkbox that selects every record of the section. */
+  dataSelectAll: string
+  /** Per-record checkbox, labelled with the record it selects. */
+  dataSelectItem: (params: { label: string }) => string
+  /** Exports the checked records of the section as a JSON file. */
+  dataExportSelected: string
+  /** Imports records from a previously exported file. */
+  dataImport: string
+  /** Banner after an export. */
+  dataExportDone: (params: { count: number }) => string
+  /** Banner after an import. */
+  dataImportDone: (params: { profiles: number; secrets: number }) => string
+  /** Banner after a failed import. */
+  dataImportFailed: (params: { reason: string }) => string
+  /** Reason shown when the picked file is not one of our export files. */
+  dataImportInvalid: string
+  /** Warns that an exported secrets file holds plain-text values. */
+  dataExportPlaintext: string
+
   // Conversations
   convTitle: string
   convNew: string
@@ -1611,6 +1653,18 @@ const en: Messages = {
   workflowsBatchDeleteConfirm: ({ count }) =>
     `Delete ${count} selected workflow(s)? This cannot be undone.`,
   workflowsBatchDeleteDone: ({ count }) => `Deleted ${count} workflow(s).`,
+  workflowsBatchExport: 'Export selected workflows',
+  workflowsMoveToGroup: 'Move selected workflows to a group',
+  workflowsMoveToUngrouped: 'Remove from group',
+  workflowsUngrouped: 'Ungrouped',
+  workflowsGroupNew: 'New group',
+  workflowsGroupExport: 'Export group',
+  workflowsGroupRename: 'Rename group',
+  workflowsGroupDelete: 'Delete group',
+  workflowsGroupDeleteConfirm: ({ name }) =>
+    `Delete the group "${name}"? Its workflows are kept and move back to the ungrouped list.`,
+  workflowsGroupMoveDone: ({ count }) => `Moved ${count} workflow(s).`,
+  workflowsGroupDefaultName: ({ index }) => `Group ${index}`,
   workflowsRunFailedHint: 'Run failed — click to view details in history',
   /** M4: re-run a workflow from its last clean checkpoint instead of its trigger. */
   workflowsResume: 'Resume',
@@ -2385,6 +2439,16 @@ const en: Messages = {
   dataConversation: 'Conversation',
   dataDeclined: 'declined',
   dataUsed: ({ count }) => `used ${count}×`,
+  dataSelectAll: 'Select all',
+  dataSelectItem: ({ label }) => `Select ${label}`,
+  dataExportSelected: 'Export selected',
+  dataImport: 'Import',
+  dataExportDone: ({ count }) => `Exported ${count} record(s).`,
+  dataImportDone: ({ profiles, secrets }) =>
+    `Imported ${profiles} profile(s) and ${secrets} secret(s).`,
+  dataImportFailed: ({ reason }) => `Import failed: ${reason}`,
+  dataImportInvalid: 'Not a Browser Copilot export file.',
+  dataExportPlaintext: 'The exported file contains secret values in plain text.',
 
   convTitle: 'Conversations',
   convNew: 'New chat',
@@ -2898,6 +2962,18 @@ const zhCN: Messages = {
   workflowsBatchDelete: '删除选中的工作流',
   workflowsBatchDeleteConfirm: ({ count }) => `确定删除选中的 ${count} 个工作流？此操作不可恢复。`,
   workflowsBatchDeleteDone: ({ count }) => `已删除 ${count} 个工作流。`,
+  workflowsBatchExport: '导出选中的工作流',
+  workflowsMoveToGroup: '把选中的工作流移动到分组',
+  workflowsMoveToUngrouped: '移出分组',
+  workflowsUngrouped: '未分组',
+  workflowsGroupNew: '新建分组',
+  workflowsGroupExport: '导出分组',
+  workflowsGroupRename: '重命名分组',
+  workflowsGroupDelete: '删除分组',
+  workflowsGroupDeleteConfirm: ({ name }) =>
+    `确定删除分组「${name}」？组内的工作流会保留并回到未分组列表。`,
+  workflowsGroupMoveDone: ({ count }) => `已移动 ${count} 个工作流。`,
+  workflowsGroupDefaultName: ({ index }) => `分组 ${index}`,
   workflowsRunFailedHint: '运行失败 — 点击查看历史详情',
   // M4：从最后一个干净完成的步骤之后重跑，跳过已完成的步骤（登录/提交不会重复执行）。
   workflowsResume: '继续运行',
@@ -3606,6 +3682,15 @@ const zhCN: Messages = {
   dataConversation: '会话',
   dataDeclined: '已拒绝',
   dataUsed: ({ count }) => `已使用 ${count} 次`,
+  dataSelectAll: '全选',
+  dataSelectItem: ({ label }) => `选择 ${label}`,
+  dataExportSelected: '导出选中',
+  dataImport: '导入',
+  dataExportDone: ({ count }) => `已导出 ${count} 项。`,
+  dataImportDone: ({ profiles, secrets }) => `已导入 ${profiles} 个个人资料、${secrets} 条密钥。`,
+  dataImportFailed: ({ reason }) => `导入失败：${reason}`,
+  dataImportInvalid: '不是 Browser Copilot 的导出文件。',
+  dataExportPlaintext: '导出文件中的密钥值为明文，请妥善保管。',
 
   convTitle: '会话',
   convNew: '新对话',

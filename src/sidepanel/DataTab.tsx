@@ -7,10 +7,17 @@
  *
  * @module sidepanel/DataTab
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { sendCommand } from '../lib/messages'
 import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
 import { newId } from '../lib/storage'
+import { downloadJSONFile } from '../lib/download-json'
+import {
+  buildDataExport,
+  coerceImportedProfile,
+  coerceImportedSecret,
+  isDataExport,
+} from '../lib/data-export'
 import type { PasswordEntry, UserProfile } from '../lib/types'
 import { entryFields } from '../lib/types'
 import { useT } from './i18n'
@@ -59,6 +66,10 @@ export default function DataTab() {
   const [saving, setSaving] = useState(false)
   const [dialogError, setDialogError] = useState<string | null>(null)
   const [reveal, setReveal] = useState<Record<string, boolean>>({})
+  // Checked ids per section; the export buttons act on these sets.
+  const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(new Set())
+  const [selectedSecretIds, setSelectedSecretIds] = useState<Set<string>>(new Set())
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const flash = (kind: 'ok' | 'error', text: string): void => {
     setBanner({ kind, text })
@@ -170,6 +181,68 @@ export default function DataTab() {
     await loadPasswords()
   }
 
+  const toggleProfile = (id: string): void => {
+    setSelectedProfileIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  const toggleSecret = (id: string): void => {
+    setSelectedSecretIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const exportSelectedProfiles = (): void => {
+    const selected = (profiles ?? []).filter((profile) => selectedProfileIds.has(profile.id))
+    if (selected.length === 0) return
+    void downloadJSONFile('profiles-selected.json', buildDataExport({ profiles: selected }))
+    flash('ok', t.dataExportDone({ count: selected.length }))
+  }
+  const exportSelectedSecrets = (): void => {
+    const selected = (passwords ?? []).filter((entry) => selectedSecretIds.has(entry.id))
+    if (selected.length === 0) return
+    void downloadJSONFile('secrets-selected.json', buildDataExport({ secrets: selected }))
+    flash('ok', t.dataExportDone({ count: selected.length }))
+  }
+
+  /**
+   * Imports every record the file carries. Imported records are always new
+   * entries: an import never overwrites what this machine already holds.
+   */
+  const importFromFile = async (file: File | null): Promise<void> => {
+    if (!file) return
+    try {
+      const parsed: unknown = JSON.parse(await file.text())
+      if (!isDataExport(parsed)) throw new Error(t.dataImportInvalid)
+      const now = Date.now()
+      let importedProfiles = 0
+      for (const raw of parsed.profiles) {
+        const profile = coerceImportedProfile(raw, now)
+        if (!profile) continue
+        await sendCommand({ type: 'profiles.save', profile })
+        importedProfiles += 1
+      }
+      let importedSecrets = 0
+      for (const raw of parsed.secrets) {
+        const entry = coerceImportedSecret(raw, now)
+        if (!entry) continue
+        await sendCommand({ type: 'passwords.save', entry })
+        importedSecrets += 1
+      }
+      await loadProfiles()
+      await loadPasswords()
+      flash('ok', t.dataImportDone({ profiles: importedProfiles, secrets: importedSecrets }))
+    } catch (error) {
+      flash('error', t.dataImportFailed({ reason: (error as Error).message }))
+    }
+  }
+
   return (
     <div className="pane">
       {banner && (
@@ -200,6 +273,15 @@ export default function DataTab() {
         <ProfilesSection
           t={t}
           profiles={profiles}
+          selectedIds={selectedProfileIds}
+          onToggleSelected={toggleProfile}
+          onToggleAll={(checked) =>
+            setSelectedProfileIds(
+              checked ? new Set((profiles ?? []).map((profile) => profile.id)) : new Set(),
+            )
+          }
+          onExportSelected={exportSelectedProfiles}
+          onImport={() => fileInputRef.current?.click()}
           onStart={() => startProfile()}
           onEdit={startProfile}
           onDelete={removeProfile}
@@ -211,6 +293,15 @@ export default function DataTab() {
           t={t}
           passwords={passwords}
           reveal={reveal}
+          selectedIds={selectedSecretIds}
+          onToggleSelected={toggleSecret}
+          onToggleAll={(checked) =>
+            setSelectedSecretIds(
+              checked ? new Set((passwords ?? []).map((entry) => entry.id)) : new Set(),
+            )
+          }
+          onExportSelected={exportSelectedSecrets}
+          onImport={() => fileInputRef.current?.click()}
           onToggleReveal={(id) => setReveal((prev) => ({ ...prev, [id]: !prev[id] }))}
           onStart={() => {
             setDialogError(null)
@@ -223,6 +314,21 @@ export default function DataTab() {
           onDelete={removePassword}
         />
       )}
+
+      {/* One hidden file input serves both sections: the file says what it
+          carries, so the import button only has to open the picker. */}
+      <input
+        accept="application/json,.json"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0] ?? null
+          // Reset so picking the same file again still fires a change.
+          event.target.value = ''
+          void importFromFile(file)
+        }}
+        ref={fileInputRef}
+        type="file"
+      />
 
       {/* Create/edit happens in a dialog, never inline on the page. */}
       {profileDraft && (
@@ -254,12 +360,29 @@ export default function DataTab() {
 interface ProfilesProps {
   t: ReturnType<typeof useT>
   profiles: UserProfile[] | null
+  selectedIds: Set<string>
+  onToggleSelected: (id: string) => void
+  onToggleAll: (checked: boolean) => void
+  onExportSelected: () => void
+  onImport: () => void
   onStart: () => void
   onEdit: (profile: UserProfile) => void
   onDelete: (id: string) => void
 }
 
-function ProfilesSection({ t, profiles, onStart, onEdit, onDelete }: ProfilesProps) {
+function ProfilesSection({
+  t,
+  profiles,
+  selectedIds,
+  onToggleSelected,
+  onToggleAll,
+  onExportSelected,
+  onImport,
+  onStart,
+  onEdit,
+  onDelete,
+}: ProfilesProps) {
+  const allSelected = (profiles?.length ?? 0) > 0 && selectedIds.size === profiles?.length
   return (
     <>
       <div className="card">
@@ -269,13 +392,41 @@ function ProfilesSection({ t, profiles, onStart, onEdit, onDelete }: ProfilesPro
           <button className="primary" onClick={onStart} type="button">
             {t.dataAddProfile}
           </button>
+          <button onClick={onImport} type="button">
+            {t.dataImport}
+          </button>
+          <button disabled={selectedIds.size === 0} onClick={onExportSelected} type="button">
+            {t.dataExportSelected}
+          </button>
         </div>
       </div>
 
       {profiles && profiles.length === 0 && <div className="empty">{t.dataProfilesEmpty}</div>}
+      {profiles && profiles.length > 0 && (
+        <label className="wf-select-all">
+          <input
+            checked={allSelected}
+            onChange={(event) => onToggleAll(event.target.checked)}
+            type="checkbox"
+          />
+          {t.dataSelectAll}
+        </label>
+      )}
       {profiles?.map((profile) => (
         <div className="card" key={profile.id}>
-          <div className="card-title">{profile.label}</div>
+          <div className="card-head">
+            <span className="card-title">
+              <label className="wf-item-check">
+                <input
+                  aria-label={t.dataSelectItem({ label: profile.label })}
+                  checked={selectedIds.has(profile.id)}
+                  onChange={() => onToggleSelected(profile.id)}
+                  type="checkbox"
+                />
+              </label>{' '}
+              {profile.label}
+            </span>
+          </div>
           <div className="meta">
             {[profile.fullName, profile.email, profile.phone, profile.company]
               .filter(Boolean)
@@ -301,6 +452,11 @@ interface PasswordsProps {
   t: ReturnType<typeof useT>
   passwords: PasswordEntry[] | null
   reveal: Record<string, boolean>
+  selectedIds: Set<string>
+  onToggleSelected: (id: string) => void
+  onToggleAll: (checked: boolean) => void
+  onExportSelected: () => void
+  onImport: () => void
   onToggleReveal: (id: string) => void
   onStart: () => void
   onEdit: (entry: PasswordEntry) => void
@@ -311,11 +467,17 @@ function PasswordsSection({
   t,
   passwords,
   reveal,
+  selectedIds,
+  onToggleSelected,
+  onToggleAll,
+  onExportSelected,
+  onImport,
   onToggleReveal,
   onStart,
   onEdit,
   onDelete,
 }: PasswordsProps) {
+  const allSelected = (passwords?.length ?? 0) > 0 && selectedIds.size === passwords?.length
   return (
     <>
       <div className="card">
@@ -325,17 +487,46 @@ function PasswordsSection({
           <button className="primary" onClick={onStart} type="button">
             {t.dataAddSecret}
           </button>
+          <button onClick={onImport} type="button">
+            {t.dataImport}
+          </button>
+          <button disabled={selectedIds.size === 0} onClick={onExportSelected} type="button">
+            {t.dataExportSelected}
+          </button>
         </div>
         <p className="hint" style={{ marginBottom: 0 }}>
           {t.dataPasswordStorageNote}
         </p>
+        <p className="hint" style={{ marginBottom: 0 }}>
+          {t.dataExportPlaintext}
+        </p>
       </div>
 
       {passwords && passwords.length === 0 && <div className="empty">{t.dataSecretsEmpty}</div>}
+      {passwords && passwords.length > 0 && (
+        <label className="wf-select-all">
+          <input
+            checked={allSelected}
+            onChange={(event) => onToggleAll(event.target.checked)}
+            type="checkbox"
+          />
+          {t.dataSelectAll}
+        </label>
+      )}
       {passwords?.map((entry) => (
         <div className="card" key={entry.id}>
           <div className="card-head">
-            <span className="card-title">{entry.label}</span>
+            <span className="card-title">
+              <label className="wf-item-check">
+                <input
+                  aria-label={t.dataSelectItem({ label: entry.label })}
+                  checked={selectedIds.has(entry.id)}
+                  onChange={() => onToggleSelected(entry.id)}
+                  type="checkbox"
+                />
+              </label>{' '}
+              {entry.label}
+            </span>
             {entry.useCount > 0 && (
               <span className="meta">{t.dataUsed({ count: entry.useCount })}</span>
             )}

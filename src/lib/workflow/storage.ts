@@ -264,6 +264,33 @@ export async function deleteWorkflow(id: string): Promise<void> {
 }
 
 /**
+ * Moves workflows into a group, or out of every group when `groupId` is null.
+ *
+ * Only `folderId` changes: filing a workflow is not an edit, so it must not
+ * bump `updatedAt` (which would reorder the list the user is looking at) nor
+ * write a revision — the revision line records content changes.
+ */
+export async function setWorkflowGroup(ids: string[], groupId: string | null): Promise<void> {
+  if (ids.length === 0) return
+  await withKeyLock(KEY_WORKFLOWS, async () => {
+    const list = await listWorkflows()
+    const wanted = new Set(ids)
+    let changed = false
+    const next = list.map((workflow) => {
+      if (!wanted.has(workflow.id)) return workflow
+      const moved = { ...workflow }
+      if (groupId) moved.folderId = groupId
+      else delete moved.folderId
+      if (moved.folderId === workflow.folderId) return workflow
+      changed = true
+      return moved
+    })
+    if (!changed) return
+    await area.set({ [KEY_WORKFLOWS]: next })
+  })
+}
+
+/**
  * Creates a detached copy of an existing workflow under a fresh id.
  *
  * `newName` overrides the display name; otherwise `"<name> (copy)"` is used.
