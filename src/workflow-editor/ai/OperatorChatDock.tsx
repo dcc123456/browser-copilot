@@ -3,11 +3,14 @@
  * canvas and the chat it opens.
  *
  * One turn is one model call (`workflows.operatorAdvise`): the assistant answers
- * with a spoken reply plus a chain of operators, and the editor lands that chain
- * on the canvas immediately (the dock itself never mutates the graph — the canvas
- * holds unsaved edits and stays the source of truth). Undo removes exactly the
- * last landed batch. Nothing is verified by running, and the transcript lives
- * only in this component's state (specs/2026-10-19-editor-operator-ai-chat-design.md).
+ * with a spoken reply plus an action — append a chain of operators, or change the
+ * step the user has selected in place — and the editor lands it immediately (the
+ * dock itself never mutates the graph; the canvas holds unsaved edits and stays
+ * the source of truth). Undo removes exactly the last landed batch or restores
+ * exactly the snapshot the last in-place change took. Nothing is verified by
+ * running, and the transcript lives only in this component's state
+ * (specs/2026-10-19-editor-operator-ai-chat-design.md,
+ * specs/2026-10-19-operator-ai-observe-and-edit-design.md §4).
  *
  * Tailwind semantic tokens only; all copy through the editor translator.
  *
@@ -15,33 +18,63 @@
  */
 
 import { useRef, useState } from 'react'
-import { Loader2, RotateCcw, Send, Square, X } from 'lucide-react'
+import { Eye, EyeOff, Loader2, MousePointerClick, RotateCcw, Send, Square, X } from 'lucide-react'
 import { sendCommand } from '../../lib/messages'
 import { isNearBottom } from '../../lib/scroll'
+import {
+  isObservableBlock,
+  operatorBlockName,
+  proposalsNeedingPage,
+} from '../../lib/workflow/operator-advise'
 import type {
+  OperatorAction,
   OperatorAdviseMessage,
-  OperatorChainPatch,
   OperatorChainProblem,
+  OperatorMissingParams,
+  OperatorPageRef,
+  OperatorPrunedPort,
   OperatorProposal,
+  OperatorTargetProblem,
 } from '../../lib/workflow/operator-advise'
 import type { EditorStringKey, TranslateFn } from '../i18n'
 
+/** Why a reply landed as nothing at all. */
+export type OperatorLandingProblem = OperatorChainProblem | OperatorTargetProblem | 'no-selection'
+
 /** What the canvas did with one reply. */
 export interface OperatorLanding {
-  /** Nodes actually placed. */
+  /** Which of the two shapes the reply took. */
+  kind: 'append' | 'node'
+  /** Nodes actually placed (an in-place change never places any). */
   added: number
+  /** The change actually reached the canvas. */
+  applied: boolean
   /** Names of operators the editor refused to add. */
   skipped: string[]
-  /** Operators added with a required parameter left empty. */
-  missing: OperatorChainPatch['missing']
-  /** Why nothing was added, when the canvas refused the whole batch. */
-  problem?: OperatorChainProblem
+  /** Output ports an in-place change had to cut, labelled — a swapped operator
+   *  does not draw every port the old one did. */
+  pruned: OperatorPrunedPort[]
+  /** Operators landed with a required parameter left empty. */
+  missing: OperatorMissingParams[]
+  problem?: OperatorLandingProblem
+}
+
+/** One answer, ready for the canvas. The target is the editor's own selection,
+ *  captured when the request went out and re-checked when the answer lands. */
+export interface OperatorApplyRequest {
+  action: OperatorAction
+  proposals: OperatorProposal[]
+  targetNodeId?: string
 }
 
 export interface OperatorChatContext {
   graphDigest: string
-  /** The step the chain follows: the single selected node, else the flow's end. */
-  anchorNodeId?: string
+  /** The single selected step, when there is exactly one. */
+  selectedNodeId?: string
+  /** That step's parameters, already redacted — only sent with a selection. */
+  selectedSpec?: string
+  /** The window to read a page from; without one nothing is read. */
+  windowId?: number
   workflowGoal?: string
   workflowId?: string
 }
@@ -50,9 +83,9 @@ export interface OperatorChatDockProps {
   t: TranslateFn
   /** Read at send time: the canvas may have moved on since the dock rendered. */
   getContext: () => OperatorChatContext
-  /** Land the chain on the canvas and report what happened. */
-  onAppend: (proposals: OperatorProposal[], anchorNodeId?: string) => OperatorLanding
-  /** Drop the batch the last landing added. */
+  /** Land the answer on the canvas and report what happened. */
+  onApply: (request: OperatorApplyRequest) => OperatorLanding
+  /** Undo the last landing — the batch it added, or the node it changed. */
   onUndo: () => void
 }
 
@@ -60,8 +93,25 @@ interface Turn {
   role: 'user' | 'assistant'
   content: string
   landing?: OperatorLanding
+  /** The page this answer's parameters were read from; `null` when none was. */
+  page?: OperatorPageRef | null
   /** An assistant row that reports a failure rather than a landed chain. */
   failed?: boolean
+  /** The answer is waiting to be landed: the steps need a parameter only the page
+   *  can supply, so the user picks between acting on it once first and landing the
+   *  guess. Nothing is on the canvas while this is set. */
+  offer?: PendingOffer
+  /** What acting once on the page reported, kept as its own row under the answer. */
+  observed?: string
+}
+
+/** A batch held back from the canvas, and what it still lacks. */
+interface PendingOffer {
+  proposals: OperatorProposal[]
+  missing: OperatorMissingParams[]
+  /** Operators in the batch the assistant will not act with, named up front —
+   *  the user decides knowing which steps a page run would not touch. */
+  unavailable: string[]
 }
 
 function makeSessionId(): string {
@@ -69,10 +119,18 @@ function makeSessionId(): string {
   return `operator-advise-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
-const PROBLEM_KEY: Record<OperatorChainProblem, EditorStringKey> = {
+const PROBLEM_KEY: Record<OperatorLandingProblem, EditorStringKey> = {
   'branch-anchor': 'operatorAiBranchAnchor',
   'empty-graph': 'operatorAiEmptyGraph',
   'unknown-anchor': 'operatorAiAnchorGone',
+  'no-selection': 'operatorAiNoSelection',
+  'unknown-target': 'operatorAiTargetGone',
+  'no-proposal': 'operatorAiOneProposalOnly',
+  'many-proposals': 'operatorAiOneProposalOnly',
+  'edit-other-block': 'operatorAiEditOtherBlock',
+  'replace-same-block': 'operatorAiReplaceSameBlock',
+  'replace-unofferable': 'operatorAiReplaceUnofferable',
+  'replace-entry-point': 'operatorAiReplaceEntry',
 }
 
 function Landing({
@@ -90,15 +148,18 @@ function Landing({
     return (
       <p className="mt-1 text-[11px] leading-snug text-warn">{t(PROBLEM_KEY[landing.problem])}</p>
     )
-  if (landing.added === 0) return null
+  if (!landing.applied) return null
   const missing = landing.missing
     .map((entry) => `${entry.name}: ${entry.keys.join(', ')}`)
     .join(' | ')
+  const pruned = landing.pruned.map((port) => port.label).join(', ')
   return (
     <div className="mt-1.5 flex flex-col gap-1 border-t border-border pt-1.5">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="text-[11px] leading-snug text-muted">
-          {t('operatorAiAdded').replace('{count}', String(landing.added))}
+          {landing.kind === 'append'
+            ? t('operatorAiAdded').replace('{count}', String(landing.added))
+            : t('operatorAiChangedInPlace')}
         </span>
         {showUndo && (
           <button
@@ -117,6 +178,11 @@ function Landing({
           {t('operatorAiRejected').replace('{names}', landing.skipped.join(', '))}
         </p>
       )}
+      {pruned && (
+        <p className="text-[11px] leading-snug text-warn">
+          {t('operatorAiPrunedPorts').replace('{ports}', pruned)}
+        </p>
+      )}
       {missing && (
         <p className="text-[11px] leading-snug text-warn">
           {t('operatorAiMissingParams').replace('{keys}', missing)}
@@ -126,10 +192,66 @@ function Landing({
   )
 }
 
+/** The ask before the assistant touches the page: act once to get the real
+ *  locator, or land the guess. Choosing 执行 runs the steps against the user's own
+ *  page, which 撤销 cannot take back — the row says so. */
+function Offer({
+  offer,
+  busy,
+  onAct,
+  onLand,
+  t,
+}: {
+  offer: PendingOffer
+  busy: boolean
+  onAct: () => void
+  onLand: () => void
+  t: TranslateFn
+}) {
+  return (
+    <div className="mt-1.5 flex flex-col gap-1 border-t border-border pt-1.5">
+      <p className="text-[11px] leading-snug text-warn">
+        {t('operatorAiOfferQuestion').replace(
+          '{keys}',
+          offer.missing.map((entry) => `${entry.name}: ${entry.keys.join(', ')}`).join(' | '),
+        )}
+      </p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          className="flex items-center gap-1 rounded-lg bg-accent px-2 py-1 text-[11px] font-medium text-on-accent hover:bg-accent-strong disabled:opacity-50"
+          disabled={busy}
+          onClick={onAct}
+          title={t('operatorAiOfferActHint')}
+          type="button"
+        >
+          <MousePointerClick size={11} aria-hidden="true" />
+          {t('operatorAiOfferAct')}
+        </button>
+        <button
+          className="flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[11px] text-ink hover:bg-hover disabled:opacity-50"
+          disabled={busy}
+          onClick={onLand}
+          type="button"
+        >
+          {t('operatorAiOfferLand')}
+        </button>
+      </div>
+      <p className="text-[11px] leading-snug text-faint">
+        {t('operatorAiOfferNoUndo')}
+        {offer.unavailable.length > 0 && (
+          <span className="mt-0.5 block">
+            {t('operatorAiOfferRefused').replace('{names}', offer.unavailable.join(', '))}
+          </span>
+        )}
+      </p>
+    </div>
+  )
+}
+
 export default function OperatorChatDock({
   t,
   getContext,
-  onAppend,
+  onApply,
   onUndo,
 }: OperatorChatDockProps) {
   const [open, setOpen] = useState(false)
@@ -137,8 +259,17 @@ export default function OperatorChatDock({
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [atBottom, setAtBottom] = useState(true)
+  // Grounding is on by default — reading a page has no side effects, and a
+  // parameter taken from the page is the whole point of asking in the editor.
+  const [readPage, setReadPage] = useState(true)
   const composingRef = useRef(false)
-  const sessionIdRef = useRef('')
+  /** Which cancel reaches the request in flight: the model call, or the run that
+   *  acts on the page. One facility, one in-flight request at a time. */
+  const inFlightRef = useRef<
+    | { type: 'workflows.operatorAdviseCancel'; sessionId: string }
+    | { type: 'workflows.operatorObserveCancel'; sessionId: string }
+    | null
+  >(null)
   const logRef = useRef<HTMLDivElement>(null)
 
   function scrollToEnd() {
@@ -153,25 +284,49 @@ export default function OperatorChatDock({
     requestAnimationFrame(scrollToEnd)
   }
 
+  /** Answer one outstanding row in place: its offer is consumed by a landing. */
+  function resolveTurn(index: number, patch: Partial<Turn>): void {
+    setTurns((current) =>
+      current.map((row, i) => (i === index ? { ...row, ...patch, offer: undefined } : row)),
+    )
+    requestAnimationFrame(scrollToEnd)
+  }
+
+  /** Land a batch, optionally with the parameters the page just supplied. */
+  function landProposals(
+    proposals: OperatorProposal[],
+    context: OperatorChatContext,
+  ): OperatorLanding {
+    return onApply({
+      action: 'append',
+      proposals,
+      ...(context.selectedNodeId ? { targetNodeId: context.selectedNodeId } : {}),
+    })
+  }
+
   async function send(): Promise<void> {
     const text = input.trim()
-    if (!text || busy) return
+    if (!text || busy || turns.some((turn) => turn.offer)) return
     const history: OperatorAdviseMessage[] = [
       ...turns.map((turn) => ({ role: turn.role, content: turn.content })),
       { role: 'user', content: text },
     ]
     const context = getContext()
     const sessionId = makeSessionId()
-    sessionIdRef.current = sessionId
+    inFlightRef.current = { type: 'workflows.operatorAdviseCancel', sessionId }
     setInput('')
     setBusy(true)
     pushTurn({ role: 'user', content: text })
+    let landing: OperatorLanding | undefined
     try {
       const result = await sendCommand({
         type: 'workflows.operatorAdvise',
         sessionId,
         messages: history,
         graphDigest: context.graphDigest,
+        ...(context.selectedSpec ? { selectedSpec: context.selectedSpec } : {}),
+        ...(context.windowId !== undefined ? { windowId: context.windowId } : {}),
+        ...(readPage ? {} : { skipPageRead: true }),
         ...(context.workflowGoal ? { workflowGoal: context.workflowGoal } : {}),
         ...(context.workflowId ? { workflowId: context.workflowId } : {}),
       })
@@ -181,9 +336,44 @@ export default function OperatorChatDock({
         pushTurn({ role: 'assistant', content: data.reason ?? data.reply, failed: true })
         return
       }
-      const landing =
-        data.proposals.length > 0 ? onAppend(data.proposals, context.anchorNodeId) : undefined
-      pushTurn({ role: 'assistant', content: data.reply, ...(landing ? { landing } : {}) })
+      const action = data.action ?? 'append'
+      // A chain whose steps read an element, and whose parameters the page read
+      // could not complete, is a guess about a page we could actually act on. Hold
+      // it and ask once: acting has a side effect, so it is never automatic.
+      const missing =
+        action === 'append' && data.page && context.windowId !== undefined
+          ? proposalsNeedingPage(data.proposals)
+          : []
+      if (missing.length > 0) {
+        pushTurn({
+          role: 'assistant',
+          content: data.reply,
+          page: data.page,
+          offer: {
+            proposals: data.proposals,
+            missing,
+            unavailable: data.proposals
+              .filter((proposal) => !isObservableBlock(proposal.blockId))
+              .map((proposal) => operatorBlockName(proposal.blockId)),
+          },
+        })
+        return
+      }
+      // An in-place answer always goes to the editor — even with no proposals,
+      // so the refusal reads as "your step was not changed because …".
+      if (action !== 'append' || data.proposals.length > 0) {
+        landing = onApply({
+          action,
+          proposals: data.proposals,
+          ...(context.selectedNodeId ? { targetNodeId: context.selectedNodeId } : {}),
+        })
+      }
+      pushTurn({
+        role: 'assistant',
+        content: data.reply,
+        page: data.page ?? null,
+        ...(landing ? { landing } : {}),
+      })
     } catch (error) {
       pushTurn({
         role: 'assistant',
@@ -192,15 +382,79 @@ export default function OperatorChatDock({
       })
     } finally {
       setBusy(false)
+      inFlightRef.current = null
+    }
+  }
+
+  /** Land the held batch as the model wrote it. */
+  function landAsIs(index: number): void {
+    const offer = turns[index]?.offer
+    if (!offer || busy) return
+    resolveTurn(index, { landing: landProposals(offer.proposals, getContext()) })
+  }
+
+  /**
+   * Perform the held batch once on the page, then land it with what the page
+   * really used — no second model call, so the node carries the locator the site
+   * answered with. A step that failed keeps its proposed parameters and says why;
+   * a cancelled run lands nothing and leaves the choice open.
+   */
+  async function actOnce(index: number): Promise<void> {
+    const offer = turns[index]?.offer
+    if (!offer || busy) return
+    const context = getContext()
+    const sessionId = makeSessionId()
+    inFlightRef.current = { type: 'workflows.operatorObserveCancel', sessionId }
+    setBusy(true)
+    try {
+      const result = await sendCommand({
+        type: 'workflows.operatorObserve',
+        sessionId,
+        steps: offer.proposals.map((proposal) => ({
+          blockId: proposal.blockId,
+          data: proposal.data,
+        })),
+        ...(context.windowId !== undefined ? { windowId: context.windowId } : {}),
+        ...(context.workflowId ? { workflowId: context.workflowId } : {}),
+      })
+      if (result.type !== 'workflows.operatorObserve') return
+      const data = result.data
+      if (!data.ok) {
+        setTurns((current) =>
+          current.map((row, i) => (i === index ? { ...row, observed: data.reason ?? '' } : row)),
+        )
+        return
+      }
+      const refined: OperatorProposal[] = data.steps.map((step) => ({
+        blockId: step.blockId,
+        data: step.data,
+        rationale: '',
+      }))
+      const observed = [
+        ...data.steps.map((step) =>
+          step.ran
+            ? `${step.name}: ${step.report.join(' ') || t('operatorAiOfferRan')}`
+            : `${step.name}: ${step.error ?? t('operatorAiOfferFailed')}`,
+        ),
+        ...(data.refused.length > 0
+          ? [t('operatorAiOfferSkipped').replace('{names}', data.refused.join(', '))]
+          : []),
+      ].join('\n')
+      resolveTurn(index, { landing: landProposals(refined, context), observed })
+    } catch (error) {
+      resolveTurn(index, {
+        observed: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setBusy(false)
+      inFlightRef.current = null
     }
   }
 
   function stop(): void {
-    if (!sessionIdRef.current) return
-    void sendCommand({
-      type: 'workflows.operatorAdviseCancel',
-      sessionId: sessionIdRef.current,
-    }).catch(() => {
+    const flight = inFlightRef.current
+    if (!flight) return
+    void sendCommand({ type: flight.type, sessionId: flight.sessionId }).catch(() => {
       /* the in-flight command already settles with the cancellation reason */
     })
   }
@@ -221,7 +475,9 @@ export default function OperatorChatDock({
 
   let lastLanded = -1
   turns.forEach((turn, index) => {
-    if (turn.landing && turn.landing.added > 0) lastLanded = index
+    // Only the most recent landing has an undo to offer: the editor keeps one
+    // snapshot level, so an older row can no longer be restored.
+    if (turn.landing?.applied) lastLanded = index
   })
 
   return (
@@ -266,6 +522,31 @@ export default function OperatorChatDock({
             key={index}
           >
             <p className="whitespace-pre-wrap">{turn.content}</p>
+            {turn.page && (
+              <p className="mt-1 flex items-start gap-1 text-[11px] leading-snug text-faint">
+                <Eye size={11} className="mt-0.5 shrink-0" aria-hidden="true" />
+                <span className="truncate">
+                  {t('operatorAiPageUsed').replace('{title}', turn.page.title || turn.page.url)}
+                </span>
+              </p>
+            )}
+            {turn.page === null && !turn.failed && (
+              <p className="mt-1 text-[11px] leading-snug text-faint">{t('operatorAiPageNone')}</p>
+            )}
+            {turn.observed && (
+              <p className="mt-1 whitespace-pre-wrap text-[11px] leading-snug text-muted">
+                {turn.observed}
+              </p>
+            )}
+            {turn.offer && (
+              <Offer
+                busy={busy}
+                offer={turn.offer}
+                onAct={() => void actOnce(index)}
+                onLand={() => landAsIs(index)}
+                t={t}
+              />
+            )}
             {turn.landing && (
               <Landing
                 landing={turn.landing}
@@ -317,7 +598,24 @@ export default function OperatorChatDock({
           rows={2}
           value={input}
         />
-        <div className="mt-1.5 flex items-center justify-end gap-1.5">
+        <div className="mt-1.5 flex items-center gap-1.5">
+          <button
+            aria-label={readPage ? t('operatorAiPageOn') : t('operatorAiPageOff')}
+            aria-pressed={readPage}
+            className="mr-auto flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] hover:bg-hover"
+            onClick={() => setReadPage((current) => !current)}
+            title={readPage ? t('operatorAiPageOn') : t('operatorAiPageOff')}
+            type="button"
+          >
+            {readPage ? (
+              <Eye size={12} aria-hidden="true" className="text-accent" />
+            ) : (
+              <EyeOff size={12} aria-hidden="true" className="text-faint" />
+            )}
+            <span className={readPage ? 'text-muted' : 'text-faint'}>
+              {readPage ? t('operatorAiPageToggleOn') : t('operatorAiPageToggleOff')}
+            </span>
+          </button>
           {busy ? (
             <button
               className="flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-xs text-ink hover:bg-hover"
@@ -331,9 +629,11 @@ export default function OperatorChatDock({
           ) : (
             <button
               className="flex items-center gap-1 rounded-lg bg-accent px-2.5 py-1 text-xs font-medium text-on-accent hover:bg-accent-strong disabled:opacity-50"
-              disabled={!input.trim()}
+              disabled={!input.trim() || turns.some((turn) => turn.offer)}
               onClick={() => void send()}
-              title={t('operatorAiSend')}
+              title={
+                turns.some((turn) => turn.offer) ? t('operatorAiOfferWaiting') : t('operatorAiSend')
+              }
               type="button"
             >
               <Send size={11} aria-hidden="true" />

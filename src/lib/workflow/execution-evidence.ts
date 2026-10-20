@@ -36,7 +36,7 @@ export interface ExecutionEvidence {
 }
 
 /** Redaction mask applied over secret-looking values. */
-const MASK = '***'
+export const MASK = '***'
 
 /** Keys whose VALUES are always secrets when they appear in a bag. */
 const SECRET_KEY_PATTERN =
@@ -49,6 +49,12 @@ const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
   /\b\d{13,19}\b/, // card-ish numbers
   /(?:^|;\s*)(?:session|token|auth)=[^;\s]+/i, // cookie fragments
 ]
+
+/** Does this key name a secret? Used by anything that quotes node parameters to a
+ *  model: the value must be masked, not trusted to be innocuous. */
+export function isSecretKey(key: string): boolean {
+  return SECRET_KEY_PATTERN.test(key)
+}
 
 /** Cap for any single string field. */
 export const EVIDENCE_FIELD_CAP = 300

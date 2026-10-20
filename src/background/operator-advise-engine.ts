@@ -4,11 +4,17 @@
  *
  * It decides WHICH operators the model may choose (deterministic discovery plus
  * the core operators as a floor), asks for the parameters, and reads the answer
- * back through the same defensive gate the reply parser defines. It never
- * executes an operator, never opens a tab, never reads a page and never touches
- * a workflow draft: the editor's canvas is the source of truth and can hold
- * unsaved edits, so the answer is returned for the canvas to land
- * (specs/2026-10-19-editor-operator-ai-chat-design.md §2).
+ * back through the same defensive gate the reply parser defines. The answer also
+ * carries its action — append a new chain, or change the selected step in place —
+ * which the engine only relays. It executes no operator, opens no tab and never
+ * touches a workflow draft: the editor's canvas is the source of truth and can
+ * hold unsaved edits, so the answer is returned for the canvas to land
+ * (specs/2026-10-19-editor-operator-ai-chat-design.md §2,
+ * specs/2026-10-19-operator-ai-observe-and-edit-design.md §4). The one thing it
+ * does take from the browser is a read-only snapshot of the page the editor is
+ * hosted in, because a parameter copied from the page is a parameter that exists
+ * (§6) — reading has no side effect, and acting on the page is a separate,
+ * confirmed step this engine does not perform.
  *
  * The model call is injectable so the loop is testable without a network.
  *
@@ -18,21 +24,51 @@
 import { streamCompletion } from '../lib/llm'
 import { getSettings } from '../lib/storage'
 import { entityKeyFor, type TokenAttribution } from '../lib/token-ledger'
+import { summarizeSnapshot } from '../lib/ops'
+import { normalScopeFromWindowId, type ScopeWindow } from './automation-scope'
+import { snapshotActiveTab } from './driver'
+import { resolveOperatorLocator, withLocator } from './operator-tool-run'
+import { countSelectorMatches } from './selector-probe'
+import {
+  executeOperatorNode,
+  type OperatorExecDeps,
+  type OperatorExecResult,
+} from './workflow-engine/operator-exec'
+import {
+  recordedTargetChainOf,
+  selectorAfterExecution,
+  selectorCandidatesOf,
+  type RecordedLocator,
+} from '../lib/workflow/target-to-selector'
+import type { Target } from '../lib/ops'
 import {
   adviseCandidates,
   buildOperatorAdvisePrompt,
   OPERATOR_ADVISE_MAX_OPERATORS,
+  operatorBlockName,
   parseOperatorAdviseReply,
+  isObservableBlock,
   type OperatorAdviseMessage,
   type OperatorAdviseResult,
+  type OperatorObserveResult,
+  type OperatorObserveStep,
+  type OperatorObservedStep,
+  type OperatorPageRead,
 } from '../lib/workflow/operator-advise'
 
 /**
  * One-shot budget for picking operators. Deliberately far below AI Fix's five
- * minutes: this answers "which step comes next", with no page to observe and no
- * trial run to wait for.
+ * minutes: this answers "which step comes next", with no trial run to wait for.
  */
 const OPERATOR_ADVISE_TIMEOUT_MS = 60_000
+
+/**
+ * How many interactive elements a grounding read keeps. Lean on purpose: the
+ * assistant needs the controls around the thing the user named (a dropdown and
+ * its options, a field and its label), not the whole page — and a page read is
+ * sent to the provider on every turn of the chat.
+ */
+const OPERATOR_PAGE_ELEMENT_LIMIT = 40
 
 export interface OperatorAdviseInput {
   /** Cancels the in-flight request through `workflows.operatorAdviseCancel`. */
@@ -41,6 +77,15 @@ export interface OperatorAdviseInput {
   messages: OperatorAdviseMessage[]
   /** The current canvas as text, from `operatorDigestOf`. */
   graphDigest: string
+  /** The selected step with its current parameters, from `selectedOperatorSpecOf`.
+   *  Present only when the editor has exactly one node selected — it is what
+   *  makes an `edit`/`replace` answer possible at all. */
+  selectedSpec?: string
+  /** The editor's host window: the page to read lives there, and a read is
+   *  never allowed to reach into another window. */
+  windowId?: number
+  /** The user's "不读页面" override. Reading is automatic otherwise. */
+  skipPageRead?: boolean
   /** What the workflow is for — discovery's goal-alignment signal. */
   workflowGoal?: string
   /** Only used to attribute the token spend. */
@@ -52,6 +97,8 @@ export interface OperatorAdviseDeps {
   signal: AbortSignal
   /** Ask the model; returns its raw reply text. Defaults to the real LLM call. */
   callModel?: (prompt: string) => Promise<string>
+  /** Read the scoped page, side-effect free. Defaults to a real snapshot. */
+  readPage?: (windowId?: number) => Promise<OperatorPageRead | null>
   /** Which workflow to charge the tokens to; defaults to this request's entity. */
   attribution?: TokenAttribution
 }
@@ -92,6 +139,33 @@ function defaultCallModel(signal: AbortSignal, attribution: TokenAttribution) {
   }
 }
 
+/**
+ * Read the page the editor is pointing at, for grounding. Side-effect free and
+ * best-effort: no window, a page that cannot be injected (a chrome:// or store
+ * page), or a read that throws all mean "no grounding", which the caller reports
+ * as `page: null` rather than as a failure — the assistant still answers, the
+ * user just has to trust the guess more.
+ */
+async function defaultReadPage(windowId?: number): Promise<OperatorPageRead | null> {
+  try {
+    const scope = await normalScopeFromWindowId(windowId)
+    const snapshot = await snapshotActiveTab(4000, OPERATOR_PAGE_ELEMENT_LIMIT, scope)
+    const summary = summarizeSnapshot(snapshot, {
+      elementLimit: OPERATOR_PAGE_ELEMENT_LIMIT,
+      // The model's parameters come from controls and labels, never from prose.
+      textCap: 0,
+    })
+    return {
+      url: summary.url,
+      title: summary.title,
+      elements: summary.elements,
+      forms: summary.forms,
+    }
+  } catch {
+    return null
+  }
+}
+
 export async function runOperatorAdvise(
   input: OperatorAdviseInput,
   deps: OperatorAdviseDeps,
@@ -117,10 +191,16 @@ export async function runOperatorAdvise(
       rejected: [],
     }
   }
+  // Read first, ask second: the page is what turns "fill in the search box" into
+  // a selector that exists. Skipped only by the user's explicit override.
+  const readPage = deps.readPage ?? defaultReadPage
+  const page = input.skipPageRead ? null : await readPage(input.windowId)
   const prompt = buildOperatorAdvisePrompt({
     history: input.messages,
     graphDigest: input.graphDigest,
     candidates,
+    ...(page ? { page } : {}),
+    ...(input.selectedSpec ? { selectedSpec: input.selectedSpec } : {}),
     maxOperators,
   })
   // The ledger keys this spend by the workflow being edited when the caller
@@ -142,6 +222,7 @@ export async function runOperatorAdvise(
       reply: '',
       proposals: [],
       rejected: [],
+      page: page ? { url: page.url, title: page.title } : null,
     }
   }
   if (deps.signal.aborted) throw new DOMException('Aborted', 'AbortError')
@@ -158,7 +239,206 @@ export async function runOperatorAdvise(
       reply: '',
       proposals: [],
       rejected: [],
+      page: page ? { url: page.url, title: page.title } : null,
     }
   }
-  return { ok: true, ...parsed }
+  return { ok: true, ...parsed, page: page ? { url: page.url, title: page.title } : null }
+}
+
+/**
+ * The parameters an observation owns: where the element is, and nothing else.
+ *
+ * What was TYPED into the page stays with the page. A credential the user let the
+ * assistant type into a password field must never ride back onto the canvas, where
+ * it would be saved into the workflow as a literal — so the refined data is the
+ * proposal with only these keys replaced. (`withLocator` is what writes them, and
+ * it writes all of them from the live page.)
+ */
+const OBSERVED_PARAM_KEYS: readonly string[] = [
+  'selector',
+  'findBy',
+  'target',
+  'selectorVerified',
+  '__reliability',
+  'label',
+]
+
+/** The proposal, with the located element substituted for the model's guess. */
+function withObservedParams(
+  proposed: Record<string, unknown>,
+  observed: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...proposed }
+  for (const key of OBSERVED_PARAM_KEYS) {
+    if (key in observed) out[key] = observed[key]
+    else delete out[key]
+  }
+  delete out.ref
+  return out
+}
+
+export interface OperatorObserveInput {
+  /** Cancels the run through `workflows.operatorObserveCancel`. */
+  sessionId: string
+  /** The batch about to land, in chain order. */
+  steps: OperatorObserveStep[]
+  /** The editor's host window: the assistant acts there and nowhere else. */
+  windowId?: number
+  /** Only used to attribute the token spend of a block that calls a model. */
+  workflowId?: string
+}
+
+export interface OperatorObserveDeps {
+  signal: AbortSignal
+  /** Run one block against the live page. Defaults to the real executor. */
+  execute?: (
+    blockId: string,
+    data: Record<string, unknown>,
+    deps: OperatorExecDeps,
+  ) => Promise<OperatorExecResult>
+  /** Count live matches for a locator's CSS candidates. Defaults to the real probe. */
+  probe?: (
+    selectors: readonly string[],
+    opts: { tabId?: number; scope?: ScopeWindow },
+  ) => Promise<number[] | null>
+  /** Scope override, for tests; otherwise resolved from `windowId`. */
+  scope?: ScopeWindow
+  attribution?: TokenAttribution
+}
+
+/**
+ * Perform the assistant's batch ONCE on the page, to land what the page really
+ * uses instead of what the model guessed.
+ *
+ * The per-step order is the one the generation bridge already proved out
+ * (`operator-tool-run`): resolve the locator → probe the candidates → merge →
+ * execute → re-locate from what the kernel actually clicked. Nothing here is new
+ * policy, and nothing is recorded: the canvas stays the place the nodes land, the
+ * caller decides that, and this returns the refined parameters plus what the page
+ * said. Cancellation aborts the loop (the caller lands nothing); a step that
+ * fails is reported and keeps its proposed data, because a half-observed batch is
+ * still worth more than a refused one. A block the assistant may not act with is
+ * skipped and NAMED before anything runs — the user sees what will not happen.
+ *
+ * This is the only path in the assistant that touches the page, and it is
+ * confirmation-gated: the dock asks first, and says that acting is not undone by
+ * 撤销 (specs/2026-10-19-operator-ai-observe-and-edit-design.md §7).
+ */
+export async function runOperatorObserve(
+  input: OperatorObserveInput,
+  deps: OperatorObserveDeps,
+): Promise<OperatorObserveResult> {
+  if (input.steps.length === 0) {
+    return { ok: false, reason: 'There is nothing to observe.', steps: [], refused: [] }
+  }
+  if (deps.signal.aborted) throw new DOMException('Aborted', 'AbortError')
+
+  const scope = deps.scope ?? (await normalScopeFromWindowId(input.windowId))
+  const execute = deps.execute ?? executeOperatorNode
+  const probe = deps.probe ?? countSelectorMatches
+  const attribution: TokenAttribution = deps.attribution ?? {
+    consumer: 'workflow-generation',
+    entityKey: entityKeyFor('workflow', input.workflowId ?? input.sessionId),
+  }
+
+  const steps: OperatorObservedStep[] = []
+  const refused: string[] = []
+  // The tab the batch is now on: a navigation step moves it, and the following
+  // steps must act on the new page rather than the one the user started on.
+  let tabId: number | undefined
+
+  for (const step of input.steps) {
+    const name = operatorBlockName(step.blockId)
+    if (!isObservableBlock(step.blockId)) {
+      refused.push(name)
+      steps.push({
+        blockId: step.blockId,
+        name,
+        ran: false,
+        data: step.data,
+        report: [],
+        error: 'The assistant does not run this operator.',
+      })
+      continue
+    }
+
+    const resolved = resolveOperatorLocator(step.blockId, step.data)
+    const candidates = resolved ? selectorCandidatesOf(resolved) : []
+    const counts =
+      candidates.length > 0
+        ? await probe(candidates, {
+            ...(tabId !== undefined ? { tabId } : {}),
+            ...(scope ? { scope } : {}),
+          })
+        : null
+    const locator: RecordedLocator | undefined =
+      resolved && counts ? { ...resolved, verified: undefined } : resolved
+    const data = withLocator(step.data, locator)
+
+    if (deps.signal.aborted) throw new DOMException('Aborted', 'AbortError')
+    const outcome = await execute(step.blockId, data, {
+      signal: deps.signal,
+      attribution,
+      ...(scope ? { scope } : {}),
+      ...(tabId !== undefined ? { tabId } : {}),
+      variables: {},
+      setTab: (next) => {
+        tabId = next
+      },
+    })
+
+    if (outcome.status === 'failed') {
+      steps.push({
+        blockId: step.blockId,
+        name,
+        ran: false,
+        data: step.data,
+        report: outcome.lines,
+        error: outcome.error ?? `${step.blockId} failed`,
+      })
+      continue
+    }
+    if (outcome.status === 'record-only') {
+      steps.push({
+        blockId: step.blockId,
+        name,
+        ran: false,
+        data: step.data,
+        report: outcome.lines,
+        error: outcome.note ?? 'Nothing ran on the page.',
+      })
+      continue
+    }
+
+    // Re-locate from what the kernel really clicked, exactly as the record path
+    // does: the node lands with the locator that worked, or the chain of specs
+    // that replays when no CSS selector could express the element.
+    let observed = data
+    if (locator && outcome.resolution) {
+      const countOf = (selector: string): number => {
+        const idx = candidates.indexOf(selector)
+        return idx >= 0 ? (counts?.[idx] ?? 0) : 0
+      }
+      const recordedSelector = selectorAfterExecution({
+        usedSpec: outcome.resolution.usedSpec,
+        locator,
+        countOf,
+      })
+      const chain: Target | undefined = recordedTargetChainOf({
+        locator,
+        usedSpec: outcome.resolution.usedSpec,
+        countOf,
+      })
+      observed = withLocator(data, locator, recordedSelector, chain)
+    }
+    steps.push({
+      blockId: step.blockId,
+      name,
+      ran: true,
+      data: withObservedParams(step.data, observed),
+      report: outcome.lines,
+    })
+  }
+
+  return { ok: true, steps, refused }
 }

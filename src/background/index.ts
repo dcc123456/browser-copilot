@@ -204,7 +204,7 @@ import { createAiTakeover } from './workflow-engine/ai-takeover'
 import { runDebugSession, DEFAULT_MAX_ROUNDS } from './workflow-engine/debug-session'
 import { runUnifiedDebug } from './workflow-engine/repair/unified-debug'
 import { runNodeFix } from './workflow-engine/node-fix-engine'
-import { runOperatorAdvise } from './operator-advise-engine'
+import { runOperatorAdvise, runOperatorObserve } from './operator-advise-engine'
 import type { RecoveryPhaseState, RecoveryProtocolStatus } from '../lib/workflow/recovery-protocol'
 import {
   commitWorkflowRevision,
@@ -2513,13 +2513,16 @@ async function handleCommand(
       // settle as a result so the chat can say WHY; a cancel aborts the request
       // and reads back as the same kind of readable failure.
       const controller = new AbortController()
-      operatorAdviseAborts.set(command.sessionId, controller)
+      assistantAborts.set(command.sessionId, controller)
       try {
         const data = await runOperatorAdvise(
           {
             sessionId: command.sessionId,
             messages: command.messages,
             graphDigest: command.graphDigest,
+            ...(command.selectedSpec ? { selectedSpec: command.selectedSpec } : {}),
+            ...(command.windowId !== undefined ? { windowId: command.windowId } : {}),
+            ...(command.skipPageRead ? { skipPageRead: true } : {}),
             ...(command.workflowGoal ? { workflowGoal: command.workflowGoal } : {}),
             ...(command.workflowId ? { workflowId: command.workflowId } : {}),
           },
@@ -2543,14 +2546,58 @@ async function handleCommand(
           },
         }
       } finally {
-        operatorAdviseAborts.delete(command.sessionId)
+        assistantAborts.delete(command.sessionId)
       }
     }
 
     case 'workflows.operatorAdviseCancel': {
-      operatorAdviseAborts.get(command.sessionId)?.abort()
-      operatorAdviseAborts.delete(command.sessionId)
+      assistantAborts.get(command.sessionId)?.abort()
+      assistantAborts.delete(command.sessionId)
       return { type: 'workflows.operatorAdviseCancel' }
+    }
+
+    case 'workflows.operatorObserve': {
+      // The assistant's act-once half, which the user has already confirmed: run
+      // the batch against the page once and hand back what the page really used.
+      // A step that fails keeps its proposed parameters, so the batch still lands;
+      // a cancel lands nothing at all.
+      const controller = new AbortController()
+      assistantAborts.set(command.sessionId, controller)
+      try {
+        const data = await runOperatorObserve(
+          {
+            sessionId: command.sessionId,
+            steps: command.steps,
+            ...(command.windowId !== undefined ? { windowId: command.windowId } : {}),
+            ...(command.workflowId ? { workflowId: command.workflowId } : {}),
+          },
+          { signal: controller.signal },
+        )
+        return { type: 'workflows.operatorObserve', data }
+      } catch (error) {
+        const aborted = (error as Error)?.name === 'AbortError' || controller.signal.aborted
+        return {
+          type: 'workflows.operatorObserve',
+          data: {
+            ok: false,
+            reason: aborted
+              ? 'The assistant stopped before the page was acted on.'
+              : error instanceof Error
+                ? error.message
+                : String(error),
+            steps: [],
+            refused: [],
+          },
+        }
+      } finally {
+        assistantAborts.delete(command.sessionId)
+      }
+    }
+
+    case 'workflows.operatorObserveCancel': {
+      assistantAborts.get(command.sessionId)?.abort()
+      assistantAborts.delete(command.sessionId)
+      return { type: 'workflows.operatorObserveCancel' }
     }
 
     case 'workflows.takeoverPending':
@@ -3057,11 +3104,12 @@ const recoveryActionSeen = new Set<string>()
 const nodeFixAborts = new Map<string, AbortController>()
 
 /**
- * Active editor assistant requests keyed by session id: the abort controller
- * lets `workflows.operatorAdviseCancel` interrupt the model call, and entries
- * are removed in the command's `finally`.
+ * Active editor-assistant runs keyed by session id — the model call and the
+ * act-once observation are one facility, and each request owns its own id. The
+ * abort controller lets `…Cancel` interrupt whichever is in flight; entries are
+ * removed in the command's `finally`.
  */
-const operatorAdviseAborts = new Map<string, AbortController>()
+const assistantAborts = new Map<string, AbortController>()
 
 /** Outcome last observed for a recovery request, for a duplicate-action echo. */
 const recoveryOutcomes = new Map<

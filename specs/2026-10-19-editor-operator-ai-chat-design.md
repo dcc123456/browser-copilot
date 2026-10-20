@@ -17,6 +17,8 @@ Rulings (dialog):
 - **一次可提议多个算子组成的子链** — one turn may hand back several operators, chained in order.
 - **不验证、不存历史** — no trial run, no transcript persistence. Whether the chain works stays
   with Run / AI Fix, which already own execution and page evidence.
+  _Amended 2026-10-19:_ read-first page grounding and a confirmed one-off page action were added
+  later; see `2026-10-19-operator-ai-observe-and-edit-design.md` §2 for what "不验证" still covers.
 
 ## 2. Why not the existing agent loop (选型与证据)
 

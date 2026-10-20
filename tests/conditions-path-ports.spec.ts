@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Edge, Node } from '@xyflow/react'
 
-import { branchHandlesFor } from '../src/workflow-editor/flow/BlockNode'
+import { branchHandlesFor } from '../src/lib/workflow/block-ports'
 import { healEdgeHandles, pruneRemovedPortEdges } from '../src/workflow-editor/flow/connections'
 
 const CONDITIONS = { id: 'conditions', inputs: 1, outputs: 2 }

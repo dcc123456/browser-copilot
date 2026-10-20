@@ -20,8 +20,8 @@
 import type { Connection, Edge, Node } from '@xyflow/react'
 
 import { newId } from '../../lib/storage'
+import { branchHandlesFor, fallbackHandleOf, outputPortsOf } from '../../lib/workflow/block-ports'
 import { closesCycle, isFallbackHandle } from '../../lib/workflow/graph-edges'
-import { branchHandlesFor } from './BlockNode'
 
 export { isFallbackHandle }
 
@@ -65,21 +65,15 @@ export function healEdgeHandles(nodes: Node[], edges: Edge[]): Edge[] {
   for (const node of nodes) {
     const block = node.data?.block as { id: string; inputs?: number; outputs?: number } | undefined
     if (!block) continue
-    const branches = branchHandlesFor(
-      block,
-      node.data?.blockData as Record<string, unknown> | undefined,
-    )
-    const sources = new Set<string>([`${block.id}-output-fallback`])
-    // A branch block draws its own ports (a conditions block's are per-path, so
-    // they cannot be listed statically); every other block keeps the primary one.
-    if (branches) for (const handle of branches) sources.add(`${block.id}-${handle.idSuffix}`)
-    else sources.add(`${block.id}-output-1`)
+    // One derivation of the drawn ports for the whole editor: a branch block's
+    // are per-path (conditions), every other block keeps the primary one. The
+    // primary is also where an unresolvable handle lands, so a legacy
+    // `conditions-output-1` re-anchors onto the block's first path.
+    const ports = outputPortsOf(block, node.data?.blockData as Record<string, unknown> | undefined)
     known.set(node.id, {
       blockId: block.id,
-      sources,
-      // An unresolvable handle lands on the topmost drawn port, so a legacy
-      // `conditions-output-1` re-anchors onto the block's first path.
-      firstSource: branches ? `${block.id}-${branches[0]!.idSuffix}` : `${block.id}-output-1`,
+      sources: ports.handles,
+      firstSource: ports.primary,
       hasTarget: (block.inputs ?? 1) > 0,
     })
   }
@@ -113,7 +107,7 @@ export function pruneRemovedPortEdges(
   const branches = branchHandlesFor(block, nextBlockData)
   if (!branches) return edges
   const live = new Set(branches.map((handle) => `${block.id}-${handle.idSuffix}`))
-  live.add(`${block.id}-output-fallback`)
+  live.add(fallbackHandleOf(block.id))
   return edges.filter(
     (edge) =>
       edge.source !== nodeId ||
@@ -123,7 +117,8 @@ export function pruneRemovedPortEdges(
   )
 }
 
-function newEdge(conn: Connection): Edge {
+/** The one shape a canvas edge has — also what the group planner re-anchors onto. */
+export function newEdge(conn: Connection): Edge {
   return {
     id: newId(),
     source: conn.source,

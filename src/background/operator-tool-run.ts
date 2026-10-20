@@ -33,6 +33,7 @@ import {
 } from './selector-trace'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
 import {
+  blockTakesElement,
   formatRequirementRefusal,
   missingRequirements,
   requiresLocator,
@@ -136,13 +137,6 @@ function secretBagOf(conversationId: string): SecretBag {
  */
 export function forgetGenerationSecrets(conversationId: string): void {
   secretBags.delete(conversationId)
-}
-
-/** Does this block read an element from the page? */
-export function blockTakesElement(blockId: string): boolean {
-  const entry = BLOCK_BY_ID.get(blockId)
-  if (!entry) return false
-  return (entry.refDataKeys ?? []).includes('selector')
 }
 
 /** Categories whose executors run against a tab rather than in the worker. */
@@ -257,8 +251,13 @@ export type OperatorRunResult =
  * under `__reliability.locator` (spec §5.5): role/accessible name/test id —
  * meaning that survives DOM drift, not a positional path. The flat fields
  * stay untouched; the metadata is additive.
+ *
+ * Exported for the editor assistant's act-once observation: it runs the same
+ * resolve → probe → execute → re-locate loop on a step it is about to land, and
+ * the node must therefore be merged the same way (§5.2) — a second copy of this
+ * merge would be a second, drifting definition of what a recorded locator is.
  */
-function withLocator(
+export function withLocator(
   args: Record<string, unknown>,
   locator: RecordedLocator | undefined,
   recorded?: { selector: string; verified: boolean },

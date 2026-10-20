@@ -1,17 +1,25 @@
 import { describe, expect, it } from 'vitest'
+import { BLOCK_BY_ID } from '../src/lib/workflow/blocks/palette'
 import {
   appendOperatorChain,
+  applyOperatorAction,
   adviseCandidates,
   buildOperatorAdvisePrompt,
   chainOrderOf,
   edgesAfterBatchRemoved,
+  isObservableBlock,
   operatorBatchOf,
+  operatorDataOfProposal,
   operatorDigestOf,
   OPERATOR_ADVISE_MAX_OPERATORS,
   parseOperatorAdviseReply,
+  proposalsNeedingPage,
+  selectedOperatorSpecOf,
   tailNodeOf,
   type OperatorAdviseMessage,
   type OperatorCandidate,
+  type OperatorPageRead,
+  type OperatorProposal,
 } from '../src/lib/workflow/operator-advise'
 import type { WorkflowEdge, WorkflowNode, WorkflowTrigger } from '../src/lib/workflow/types'
 
@@ -102,6 +110,31 @@ describe('buildOperatorAdvisePrompt', () => {
     })
     expect(prompt).toContain('At most 2 operators')
   })
+
+  it('grounds the parameters in the page it was shown', () => {
+    const page: OperatorPageRead = {
+      url: 'https://example.com/form',
+      title: 'Sign up',
+      elements: [{ ref: 'e3', role: 'combobox', name: 'City', loc: '#city' }],
+      forms: [{ selector: 'form#signup', fields: [] }],
+    }
+    const prompt = buildOperatorAdvisePrompt({ history, graphDigest: '', candidates, page })
+    expect(prompt).toContain('## The page the user is looking at — Sign up')
+    expect(prompt).toContain('#city')
+    expect(prompt).toContain('form#signup')
+    expect(prompt).toContain('Never invent a selector')
+    // A page read goes before the offer, so the model copies from the page rather
+    // than inventing something for the offer to fit.
+    expect(prompt.indexOf('## The page')).toBeLessThan(prompt.indexOf('## Operators you may use'))
+
+    const untitled = buildOperatorAdvisePrompt({
+      history,
+      graphDigest: '',
+      candidates,
+      page: { ...page, title: '' },
+    })
+    expect(untitled).toContain('https://example.com/form (read just now, read-only)')
+  })
 })
 
 describe('parseOperatorAdviseReply', () => {
@@ -114,6 +147,7 @@ describe('parseOperatorAdviseReply', () => {
     )
     expect(parsed).toEqual({
       reply: '已添加',
+      action: 'append',
       proposals: [{ blockId: 'new-tab', data: { url: 'https://b' }, rationale: 'opens it' }],
       rejected: [],
     })
@@ -432,5 +466,352 @@ describe('edgesAfterBatchRemoved', () => {
     // Undo must not leave the user's own wiring cut — that is the whole point of
     // remembering the edge the batch borrowed.
     expect(edgesAfterBatchRemoved(patch.edges, operatorBatchOf(patch))).toEqual(base.edges)
+  })
+})
+
+describe('parseOperatorAdviseReply action', () => {
+  const offered = ['new-tab', 'forms']
+
+  it('treats a missing action as append, so the original path cannot regress', () => {
+    expect(parseOperatorAdviseReply('{"reply":"ok","proposals":[]}', offered)?.action).toBe(
+      'append',
+    )
+  })
+
+  it('keeps an in-place action', () => {
+    const parsed = parseOperatorAdviseReply(
+      '{"reply":"ok","action":"replace","proposals":[{"blockId":"forms","data":{"selector":"#x"}}]}',
+      offered,
+    )
+    expect(parsed?.action).toBe('replace')
+  })
+
+  it('refuses the whole turn when the action names nothing', () => {
+    // Guessing would put a replace answer onto the canvas as new steps.
+    expect(parseOperatorAdviseReply('{"reply":"ok","action":"delete"}', offered)).toBeNull()
+    expect(parseOperatorAdviseReply('{"reply":"ok","action":7}', offered)).toBeNull()
+  })
+})
+
+describe('selectedOperatorSpecOf', () => {
+  const canvas = graph(
+    [
+      node('t', 'trigger'),
+      node('b', 'forms', { selector: '#login', password: 'hunter2', events: { click: true } }),
+    ],
+    [],
+  )
+
+  it('quotes every parameter, nested ones included, and masks a secret-named value', () => {
+    const spec = selectedOperatorSpecOf(canvas, 'b')
+    expect(spec).toContain('forms')
+    expect(spec).toContain('"selector":"#login"')
+    expect(spec).toContain('"click":true')
+    expect(spec).toContain('"password":"***"')
+    expect(spec).not.toContain('hunter2')
+  })
+
+  it('says nothing when nothing is selected or the step is gone', () => {
+    expect(selectedOperatorSpecOf(canvas, undefined)).toBe('')
+    expect(selectedOperatorSpecOf(canvas, 'zz')).toBe('')
+  })
+})
+
+describe('buildOperatorAdvisePrompt actions', () => {
+  const history: OperatorAdviseMessage[] = [{ role: 'user', content: '改成点击' }]
+  const candidates = adviseCandidates('打开百度')
+
+  it('offers the in-place actions only against a selected step', () => {
+    const prompt = buildOperatorAdvisePrompt({
+      history,
+      graphDigest: '1. new-tab << selected',
+      candidates,
+      selectedSpec: 'new-tab {"url":"https://a"}',
+    })
+    expect(prompt).toContain('## The step the user selected')
+    expect(prompt).toContain('new-tab {"url":"https://a"}')
+    expect(prompt).toContain('- "edit"')
+    expect(prompt).toContain('- "replace"')
+    expect(prompt).toContain('Never name a node id')
+    expect(prompt).toContain('"action":"append|edit|replace"')
+  })
+
+  it('offers append alone when nothing is selected', () => {
+    const prompt = buildOperatorAdvisePrompt({ history, graphDigest: '', candidates })
+    expect(prompt).not.toContain('## The step the user selected')
+    expect(prompt).not.toContain('- "edit"')
+    expect(prompt).toContain('Only "append" is possible')
+  })
+})
+
+describe('applyOperatorAction edit', () => {
+  const base = () =>
+    graph(
+      [node('t', 'trigger'), node('b', 'new-tab', { url: 'https://a', active: false })],
+      [edge('t', 'b', 'trigger-output-1')],
+    )
+
+  it('merges over the node instead of re-authoring it', () => {
+    const canvas = base()
+    const patch = applyOperatorAction(canvas, 'b', 'edit', [
+      { blockId: 'new-tab', data: { url: 'https://b' }, rationale: '' },
+    ])
+    expect(patch.problem).toBeUndefined()
+    expect(patch.nodes.find((n) => n.id === 'b')?.data).toEqual({
+      blockId: 'new-tab',
+      url: 'https://b',
+      active: false,
+    })
+    expect(patch.edges).toEqual(canvas.edges)
+    expect(patch.pruned).toEqual([])
+  })
+
+  it('records the node and its lines, deep-copied, for undo', () => {
+    const canvas = base()
+    const patch = applyOperatorAction(canvas, 'b', 'edit', [
+      { blockId: 'new-tab', data: { url: 'https://b' }, rationale: '' },
+    ])
+    const before = patch.before!
+    expect(before.node).toEqual(structuredClone(canvas.nodes[1]))
+    expect(before.edges).toEqual([structuredClone(canvas.edges[0]!)])
+    // Mutating the patched node must not reach through into the snapshot.
+    ;(patch.nodes.find((n) => n.id === 'b') as WorkflowNode).data['url'] = 'https://c'
+    expect(before.node.data['url']).toBe('https://a')
+  })
+
+  it('reports a required parameter the edit left empty', () => {
+    const patch = applyOperatorAction(
+      graph([node('b', 'new-tab', { url: 'https://a' })], []),
+      'b',
+      'edit',
+      [{ blockId: 'new-tab', data: { url: '' }, rationale: '' }],
+    )
+    expect(patch.missing).toEqual([{ blockId: 'new-tab', name: 'New tab', keys: ['url'] }])
+  })
+
+  it('refuses a gone node, an empty answer, a multi-operator answer and another block', () => {
+    const canvas = base()
+    const one = [{ blockId: 'new-tab', data: { url: 'https://b' }, rationale: '' }]
+    expect(applyOperatorAction(canvas, 'zz', 'edit', one).problem).toBe('unknown-target')
+    expect(applyOperatorAction(canvas, 'b', 'edit', []).problem).toBe('no-proposal')
+    expect(applyOperatorAction(canvas, 'b', 'edit', [one[0]!, one[0]!]).problem).toBe(
+      'many-proposals',
+    )
+    expect(
+      applyOperatorAction(canvas, 'b', 'edit', [{ blockId: 'forms', data: {}, rationale: '' }])
+        .problem,
+    ).toBe('edit-other-block')
+    // A refusal never touches the canvas.
+    expect(applyOperatorAction(canvas, 'zz', 'edit', one).nodes).toEqual(canvas.nodes)
+  })
+})
+
+describe('applyOperatorAction replace', () => {
+  const toEventClick = (data: Record<string, unknown> = {}): OperatorProposal[] => [
+    { blockId: 'event-click', data, rationale: '' },
+  ]
+
+  it('keeps the node identity, follows the new block, and migrates by key', () => {
+    const canvas = graph(
+      [
+        node('t', 'trigger'),
+        node('b', 'new-tab', { url: 'https://a', disableBlock: true }, { x: 240, y: 60 }),
+      ],
+      [edge('t', 'b', 'trigger-output-1')],
+    )
+    const patch = applyOperatorAction(canvas, 'b', 'replace', toEventClick({ selector: '#x' }))
+    const replaced = patch.nodes.find((n) => n.id === 'b')!
+    expect(patch.problem).toBeUndefined()
+    expect(replaced.data['blockId']).toBe('event-click')
+    expect(replaced.position).toEqual({ x: 240, y: 60 })
+    expect(replaced.label).toBe(BLOCK_BY_ID.get('event-click')?.name)
+    expect(replaced.data['selector']).toBe('#x')
+    // A parameter the new operator has no field for does not ride along, and the
+    // node's own policy does.
+    expect(replaced.data['url']).toBeUndefined()
+    expect(replaced.data['disableBlock']).toBe(true)
+    expect(replaced.data['__workflowAi']).toBeUndefined()
+    expect(patch.edges.find((e) => e.target === 'b')?.targetHandle).toBe('event-click-input-1')
+    expect(patch.edges).toHaveLength(1)
+  })
+
+  it('does not stamp the swap as an AI-added node', () => {
+    const canvas = graph([node('b', 'new-tab', { __workflowAi: { addedBy: 'ai' } })], [])
+    const patch = applyOperatorAction(canvas, 'b', 'replace', toEventClick())
+    expect(patch.nodes.find((n) => n.id === 'b')?.data['__workflowAi']).toBeUndefined()
+  })
+
+  it('carries the error policy over, so the fallback line survives under the new port', () => {
+    const canvas = graph(
+      [
+        node('t', 'trigger'),
+        node('b', 'new-tab', { onError: { enable: true, toDo: 'fallback' } }),
+        node('f', 'delay'),
+      ],
+      [edge('t', 'b', 'trigger-output-1'), edge('b', 'f', 'new-tab-output-fallback')],
+    )
+    const patch = applyOperatorAction(canvas, 'b', 'replace', toEventClick())
+    expect(patch.edges.find((e) => e.id === 'b->f')?.sourceHandle).toBe(
+      'event-click-output-fallback',
+    )
+    expect(patch.pruned).toEqual([])
+  })
+
+  it("moves the block's own continuation and names every branch it had to cut", () => {
+    const canvas = graph(
+      [
+        node('t', 'trigger'),
+        node('c', 'conditions', {
+          paths: [
+            { id: 'p1', name: 'First', conditions: [] },
+            { id: 'p2', name: 'Second', conditions: [] },
+          ],
+        }),
+        node('a', 'delay'),
+        node('b', 'delay'),
+        node('n', 'delay'),
+      ],
+      [
+        edge('t', 'c', 'trigger-output-1'),
+        edge('c', 'a', 'conditions-output-p1'),
+        edge('c', 'b', 'conditions-output-p2'),
+        edge('c', 'n', 'conditions-output-none'),
+      ],
+    )
+    const patch = applyOperatorAction(canvas, 'c', 'replace', toEventClick({ selector: '#x' }))
+    expect(patch.edges.find((e) => e.id === 'c->a')?.sourceHandle).toBe('event-click-output-1')
+    expect(patch.edges.filter((e) => e.source === 'c')).toHaveLength(1)
+    // Naming is the point: React Flow would otherwise drop these lines silently.
+    expect(patch.pruned).toEqual([
+      { handle: 'conditions-output-p2', label: 'Second' },
+      { handle: 'conditions-output-none', label: 'fallback' },
+    ])
+  })
+
+  it('re-hangs a legacy edge that names no handle', () => {
+    const canvas = graph(
+      [node('b', 'new-tab'), node('c', 'delay')],
+      [{ id: 'b->c', source: 'b', target: 'c' } as WorkflowEdge],
+    )
+    const patch = applyOperatorAction(canvas, 'b', 'replace', toEventClick())
+    expect(patch.edges.find((e) => e.id === 'b->c')?.sourceHandle).toBe('event-click-output-1')
+  })
+
+  it('reports a required parameter the swap left empty', () => {
+    const patch = applyOperatorAction(
+      graph([node('b', 'new-tab')], []),
+      'b',
+      'replace',
+      toEventClick(),
+    )
+    expect(patch.missing[0]?.blockId).toBe('event-click')
+    expect(patch.missing[0]?.keys.length).toBeGreaterThan(0)
+  })
+
+  it('refuses the entry point, the same operator and an id it was not offered', () => {
+    const canvas = graph([node('t', 'trigger'), node('b', 'new-tab')], [edge('t', 'b')])
+    expect(applyOperatorAction(canvas, 't', 'replace', toEventClick()).problem).toBe(
+      'replace-entry-point',
+    )
+    expect(
+      applyOperatorAction(canvas, 'b', 'replace', [{ blockId: 'new-tab', data: {}, rationale: '' }])
+        .problem,
+    ).toBe('replace-same-block')
+    expect(
+      applyOperatorAction(canvas, 'b', 'replace', [{ blockId: 'trigger', data: {}, rationale: '' }])
+        .problem,
+    ).toBe('replace-unofferable')
+    expect(
+      applyOperatorAction(canvas, 'b', 'replace', [
+        { blockId: 'google-sheets', data: {}, rationale: '' },
+      ]).problem,
+    ).toBe('replace-unofferable')
+  })
+
+  it('undoes a swap back to the exact node and lines that were there', () => {
+    const canvas = graph(
+      [node('t', 'trigger'), node('b', 'new-tab', { url: 'https://a' }), node('c', 'delay')],
+      [edge('t', 'b', 'trigger-output-1'), edge('b', 'c', 'new-tab-output-1')],
+    )
+    const patch = applyOperatorAction(canvas, 'b', 'replace', toEventClick({ selector: '#x' }))
+    const before = patch.before!
+    const others = new Set(before.edges.map((e) => e.id))
+    const nodes = patch.nodes.map((n) => (n.id === before.node.id ? before.node : n))
+    const edges = [...patch.edges.filter((e) => !others.has(e.id)), ...before.edges].sort((x, y) =>
+      x.id.localeCompare(y.id),
+    )
+    expect(nodes).toEqual(canvas.nodes)
+    expect(edges).toEqual([...canvas.edges].sort((x, y) => x.id.localeCompare(y.id)))
+  })
+})
+
+describe('isObservableBlock', () => {
+  it('acts only with operators that really run against a page', () => {
+    expect(isObservableBlock('event-click')).toBe(true)
+    expect(isObservableBlock('new-tab')).toBe(true)
+    expect(isObservableBlock('forms')).toBe(true)
+  })
+
+  it('never acts with the escape hatch, the browser state, or a recorded-only block', () => {
+    // The JS gate is not the assistant's to open, and one chat turn must not
+    // grant permissions, open or destroy windows, or take a file handle.
+    expect(isObservableBlock('javascript-code')).toBe(false)
+    expect(isObservableBlock('cookie')).toBe(false)
+    expect(isObservableBlock('new-window')).toBe(false)
+    expect(isObservableBlock('close-tab')).toBe(false)
+    expect(isObservableBlock('upload-file')).toBe(false)
+    expect(isObservableBlock('handle-download')).toBe(false)
+    // Nothing to observe: these never touch the page when they run.
+    expect(isObservableBlock('webhook')).toBe(false)
+    expect(isObservableBlock('save-local')).toBe(false)
+    expect(isObservableBlock('blocks-group')).toBe(false)
+    // And nothing the canvas could not land anyway.
+    expect(isObservableBlock('trigger')).toBe(false)
+    expect(isObservableBlock('no-such-block')).toBe(false)
+  })
+})
+
+describe('proposalsNeedingPage', () => {
+  it('asks for a page only where the element is still unresolved', () => {
+    expect(proposalsNeedingPage([{ blockId: 'event-click', data: {}, rationale: '' }])).toEqual([
+      { blockId: 'event-click', name: 'Click element', keys: ['selector'] },
+    ])
+    expect(
+      proposalsNeedingPage([
+        { blockId: 'event-click', data: { selector: '#save' }, rationale: '' },
+      ]),
+    ).toEqual([])
+    // A rich target is a locator too — the page has nothing left to teach it.
+    expect(
+      proposalsNeedingPage([
+        {
+          blockId: 'event-click',
+          data: { target: { primary: { how: 'text', value: 'Save' } } },
+          rationale: '',
+        },
+      ]),
+    ).toEqual([])
+  })
+
+  it('does not offer to act for a parameter no action can produce', () => {
+    // `webhook` cannot run without a URL, and acting would supply no URL: the
+    // step reads no element, so there is nothing on the page to learn from it.
+    expect(proposalsNeedingPage([{ blockId: 'webhook', data: {}, rationale: '' }])).toEqual([])
+  })
+
+  it('judges the data that will land, not the model’s bare parameters', () => {
+    const landed = operatorDataOfProposal('new-tab', { url: 'https://b' })
+    expect(landed['url']).toBe('https://b')
+    expect(landed['blockId']).toBe('new-tab')
+    expect(landed['__workflowAi']).toEqual({ addedBy: 'ai' })
+    // The catalog defaults the chain patcher would write still show through, so a
+    // requirement they satisfy never asks the user to act.
+    expect(landed['active']).toBe(true)
+    const block = BLOCK_BY_ID.get('event-click')!
+    const merged = operatorDataOfProposal('event-click', { selector: '#a' })
+    for (const [key, value] of Object.entries(block.data)) {
+      if (key === 'description' || key === 'selector') continue
+      expect(merged[key]).toEqual(value)
+    }
   })
 })

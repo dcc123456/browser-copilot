@@ -30,6 +30,7 @@
 
 import { referenceRoot, referencesIn } from './dynamic-data'
 import { TRIGGER_BLOCK_ID } from './draft-types'
+import { groupChildNodes, isGroupNode } from './group'
 import { producedVariableNames } from './producer-completeness'
 import type { Workflow, WorkflowNode } from './types'
 
@@ -108,7 +109,11 @@ function blockIdOf(node: WorkflowNode): string {
 function producedNames(workflow: Workflow): Set<string> {
   const names = new Set<string>(ENGINE_PROVIDED_NAMES)
   for (const node of workflow.drawflow.nodes) {
-    for (const declared of producedVariableNames(node)) names.add(declared)
+    // The group itself produces nothing; the steps folded inside it write the same
+    // shared variable bag the rest of the graph reads, so they are the producers.
+    for (const producer of isGroupNode(node) ? groupChildNodes(node) : [node]) {
+      for (const declared of producedVariableNames(producer)) names.add(declared)
+    }
   }
   return names
 }

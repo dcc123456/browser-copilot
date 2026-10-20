@@ -330,7 +330,9 @@ export type Command =
    * model call in the background — it executes nothing and touches no workflow
    * draft, because the canvas is the source of truth and may carry unsaved
    * edits (specs/2026-10-19-editor-operator-ai-chat-design.md). The answer comes
-   * back for the editor to append.
+   * back with an action — append a chain, or change the selected step in place —
+   * for the editor to land (specs/2026-10-19-operator-ai-observe-and-edit-design.md
+   * §4).
    */
   | {
       type: 'workflows.operatorAdvise'
@@ -339,6 +341,15 @@ export type Command =
       messages: import('./workflow/operator-advise').OperatorAdviseMessage[]
       /** The current canvas as text, from `operatorDigestOf`. */
       graphDigest: string
+      /** The selected step with its parameters, from `selectedOperatorSpecOf` —
+       *  sent only when exactly one node is selected, and what lets the answer be
+       *  an in-place `edit`/`replace` instead of an appended chain. */
+      selectedSpec?: string
+      /** See workflows.run.windowId — the page may only be read in that window. */
+      windowId?: number
+      /** The user's "don't read the page" override. Reading is on otherwise: a
+       *  page read has no side effects, and it is what grounds the parameters. */
+      skipPageRead?: boolean
       /** What the workflow is for — operator discovery's goal-alignment signal. */
       workflowGoal?: string
       /** Only used to attribute the token spend. */
@@ -346,6 +357,30 @@ export type Command =
     }
   /** Cancel an in-flight assistant request (aborts the LLM call). */
   | { type: 'workflows.operatorAdviseCancel'; sessionId: string }
+  /**
+   * Editor AI operator assistant, the act-once half: perform the batch it just
+   * picked ONCE against the page, so the node lands with the locator the site
+   * really uses instead of the model's best guess. NO second model call — this is
+   * the same resolve → probe → execute → re-locate sequence the generation bridge
+   * runs on the record path, and it returns refined parameters plus what the page
+   * reported (specs/2026-10-19-operator-ai-observe-and-edit-design.md §7).
+   *
+   * It touches the page, so it is never automatic: the editor asks the user first,
+   * and the row says that acting is not undone by 撤销. Operators the assistant is
+   * not allowed to run are skipped and named, not executed.
+   */
+  | {
+      type: 'workflows.operatorObserve'
+      sessionId: string
+      /** The batch about to land, in chain order. */
+      steps: import('./workflow/operator-advise').OperatorObserveStep[]
+      /** See workflows.run.windowId — the assistant acts in that window only. */
+      windowId?: number
+      /** Only used to attribute the token spend of a block that calls a model. */
+      workflowId?: string
+    }
+  /** Cancel an in-flight observation (aborts between steps; nothing lands). */
+  | { type: 'workflows.operatorObserveCancel'; sessionId: string }
   /** Workflows with pending AI-takeover fixes awaiting user confirmation. */
   | { type: 'workflows.takeoverPending' }
   /** Aggregate AI-takeover success-rate stats (debug埋点). */
@@ -636,6 +671,11 @@ export type CommandResult =
       data: import('./workflow/operator-advise').OperatorAdviseResult
     }
   | { type: 'workflows.operatorAdviseCancel' }
+  | {
+      type: 'workflows.operatorObserve'
+      data: import('./workflow/operator-advise').OperatorObserveResult
+    }
+  | { type: 'workflows.operatorObserveCancel' }
   | {
       type: 'workflows.recovery'
       /** Mirrors the request id; a client drops it when it no longer matches. */

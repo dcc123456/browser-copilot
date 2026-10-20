@@ -40,6 +40,12 @@ export interface BlockEditFormProps {
   canRevert: boolean
   /** Restore the node data captured before the last AI fix. */
   onRevert: () => void
+  /**
+   * Hide the goal/success-criteria section and the AI Fix entry. A child of a
+   * group is not a graph node: the engine never reads a contract for it, so
+   * offering one would promise a verification that cannot happen.
+   */
+  hideGoal?: boolean
 }
 
 /**
@@ -128,13 +134,14 @@ export default function BlockEditForm({
   windowId,
   canRevert,
   onRevert,
+  hideGoal = false,
 }: BlockEditFormProps) {
   const { blockName, bt } = useEditorLocale()
   const EditComponent = block.editComponent ? EditForms[block.editComponent] : undefined
   const cloud = isCloudBlock(block.id)
   // Fire-and-done operators have nothing to verify, so they get neither the goal
   // section nor AI fix (the fix engine refuses a node without a goal contract).
-  const goalBearing = operatorCarriesGoal(block.id)
+  const goalBearing = !hideGoal && operatorCarriesGoal(block.id)
   const [fixOpen, setFixOpen] = useState(false)
 
   return (

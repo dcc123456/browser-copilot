@@ -12,6 +12,14 @@
 import type { Workflow, WorkflowEdge, WorkflowNode } from '../../lib/workflow/types'
 import { getWorkflow } from '../../lib/workflow/storage'
 import { interpolateParams, UNRESOLVED_INTERP_KEY } from '../../lib/workflow/interpolate'
+import {
+  GROUP_BLOCK_ID,
+  groupChildrenOf,
+  groupChildProblemText,
+  groupChildProblems,
+  groupChildKey,
+  groupChildNodes,
+} from '../../lib/workflow/group'
 import { conditionGroupsMatch, hasConditionGroups } from '../../lib/workflow/condition-tree'
 import {
   ambiguityPolicyOf,
@@ -627,6 +635,22 @@ async function runCore(
 
   const completedNodeIds: string[] = []
   /**
+   * Transient ids of the children of the group that is running right now.
+   *
+   * A group's children live in its own `data.blocks`, so they are NOT graph
+   * nodes. Anything keyed by node id has to stay free of them — checkpoints are
+   * resolved against `drawflow.nodes` on resume (an unknown id would restart the
+   * run at a node that does not exist and finish having done nothing), the
+   * self-heal write-back patches a node by id, and the takeover context reads
+   * the completed list to name the step before. The children still get their own
+   * run-log lines; they just do not enter the node-id ledgers.
+   */
+  const groupChildIds = new Set<string>()
+  const markCompleted = (id: string): void => {
+    if (groupChildIds.has(id)) return
+    completedNodeIds.push(id)
+  }
+  /**
    * Nodes that had to fall down the locator ladder to act at all. Reported to
    * the caller so the same node does not degrade on every future replay —
    * see `lib/workflow/self-heal`.
@@ -684,6 +708,7 @@ async function runCore(
     status: 'ok' | 'failed' | 'cancelled',
     phase?: import('../../lib/workflow/checkpoints').CheckpointPhase,
   ): void => {
+    if (groupChildIds.has(nodeId)) return
     if (!onCheckpoint) return
     let snapshot: Record<string, unknown> = {}
     let snapshotAvailable = true
@@ -880,7 +905,7 @@ async function runCore(
     // A disabled block is skipped (Automa's disableBlock) but the flow
     // continues along its default out-edge.
     if (params['disableBlock'] === true) {
-      completedNodeIds.push(nodeId)
+      markCompleted(nodeId)
       return defaultNext
     }
 
@@ -905,15 +930,22 @@ async function runCore(
     // after the loop finishes. A bare unlabeled edge still works as the body
     // (legacy / programmatic graphs), but only when no end edge exists.
     if (LOOP_BLOCK_IDS.has(blockId)) {
-      completedNodeIds.push(nodeId)
+      markCompleted(nodeId)
       const endId = outputs['end'] ?? outputs['output-2'] ?? null
       const bodyStart =
         outputs['loop'] ?? outputs['output-1'] ?? (endId === null ? defaultNext : null)
       return runLoop(current, params, bodyStart, endId)
     }
     if (blockId === 'execute-workflow') {
-      completedNodeIds.push(nodeId)
+      markCompleted(nodeId)
       return runSubWorkflow(current, params, defaultNext)
+    }
+    // A group holds its children in its own `data.blocks`, so an executor that
+    // returns one next-node id cannot express them: the children are registered
+    // as transient nodes and walked by this same path.
+    if (blockId === GROUP_BLOCK_ID) {
+      markCompleted(nodeId)
+      return runGroupChildren(current, defaultNext)
     }
 
     const executor = executorsMap[blockId]
@@ -1004,7 +1036,7 @@ async function runCore(
       }
       if (terminalStateHolds) {
         emit('status', nodeId, `终态已满足（${blockId} 动作早已生效），跳过该节点`)
-        completedNodeIds.push(nodeId)
+        markCompleted(nodeId)
         emitCheckpoint(nodeId, 'ok', 'nodeCommitted')
         return defaultNext
       }
@@ -1099,7 +1131,7 @@ async function runCore(
               (before.state === 'present' || before.state === 'visible')
             ) {
               emit('status', nodeId, '页面上没有该浮层，无需关闭，跳过该节点')
-              completedNodeIds.push(nodeId)
+              markCompleted(nodeId)
               emitCheckpoint(nodeId, 'ok', unsafe ? 'nodeCommitted' : undefined)
               return defaultNext
             }
@@ -1148,14 +1180,17 @@ async function runCore(
         const degrade = ctx.lastResolution?.degrade
         if (degrade) {
           // The per-candidate score table stays in the run log: the write-back
-          // needs the decision, not the whole ballot.
-          degradations.push({
-            nodeId,
-            rung: degrade.rung,
-            from: degrade.from,
-            to: degrade.to,
-            matchCount: degrade.matchCount,
-          })
+          // needs the decision, not the whole ballot. A group child cannot be
+          // written back at all (it is not a node), so only the log line tells it.
+          if (!groupChildIds.has(nodeId)) {
+            degradations.push({
+              nodeId,
+              rung: degrade.rung,
+              from: degrade.from,
+              to: degrade.to,
+              matchCount: degrade.matchCount,
+            })
+          }
           emit(
             'status',
             nodeId,
@@ -1197,12 +1232,12 @@ async function runCore(
       // normal (non-fallback) edge instead of failing the whole run.
       if (policy?.enable && policy.toDo === 'continue') {
         emit('info', nodeId, `Continuing despite error: ${text}`)
-        completedNodeIds.push(nodeId)
+        markCompleted(nodeId)
         return defaultNext
       }
       // Fallback routing: follow the edge from the `fallback` handle.
       if (policy?.enable && policy.toDo === 'fallback' && outputs['fallback']) {
-        completedNodeIds.push(nodeId)
+        markCompleted(nodeId)
         return outputs['fallback']
       }
       // Custom error message for toDo='error'.
@@ -1245,7 +1280,7 @@ async function runCore(
           outcome = { completed: false, reason: message(takeoverError) }
         }
         if (outcome?.completed) {
-          completedNodeIds.push(nodeId)
+          markCompleted(nodeId)
           emit(
             'result',
             nodeId,
@@ -1270,7 +1305,7 @@ async function runCore(
     }
 
     const nextResult = resolver ?? defaultNext
-    completedNodeIds.push(nodeId)
+    markCompleted(nodeId)
     if (onSnapshot) {
       try {
         // A structural clone strips non-serializable values for the viewer.
@@ -1296,6 +1331,77 @@ async function runCore(
       currentId = next
     }
     return null
+  }
+
+  /**
+   * Run one group node's children as a linear sub-chain, then leave through the
+   * group's own out-edge.
+   *
+   * The children are registered under `<groupId>#<position>` with synthesized
+   * single out-edges, so every step of the ordinary node path applies to them
+   * (interpolation, retry policy, readiness, run-log lines) without a second
+   * execution channel. The registration is torn down afterwards: the maps only
+   * ever hold real graph nodes. An empty group is a pass-through, as upstream.
+   */
+  async function runGroupChildren(
+    group: WorkflowNode,
+    defaultNext: string | null,
+  ): Promise<string | null> {
+    const children = groupChildrenOf(group)
+    if (children.length === 0) return defaultNext
+
+    // A bad group fails out loud. Stepping over a child silently is exactly how
+    // an imported group used to lose every step inside it.
+    const fail = (text: string): null => {
+      emit('error', group.id, text)
+      outcome = 'failed'
+      error = text
+      return null
+    }
+
+    const [problem] = groupChildProblems(children)
+    if (problem) return fail(groupChildProblemText(problem))
+
+    // Same transient nodes the run gate inspects, same keys it blames them with.
+    const childNodes = groupChildNodes(group)
+    const keys = childNodes.map((_child, index) => groupChildKey(group, index))
+    // Nodes are looked up by id, so a synthetic child id that matched a real
+    // canvas node would reroute the graph instead of merely adding a step.
+    const clash = keys.find((key) => nodeById.has(key))
+    if (clash) {
+      return fail(`分组步骤的临时节点 id「${clash}」与画布上的节点冲突，请给该节点换个 id`)
+    }
+    for (const key of keys) groupChildIds.add(key)
+    childNodes.forEach((child, index) => {
+      const key = keys[index]!
+      nodeById.set(key, child)
+      const nextId = keys[index + 1] ?? defaultNext
+      outBySource.set(
+        key,
+        nextId ? [{ id: `group-child-${key}`, source: key, target: nextId }] : [],
+      )
+    })
+
+    try {
+      // Walk the chain HERE: the registrants have to stay in the maps until the
+      // last child has been run, so handing `keys[0]` back to the caller's
+      // segment loop would tear the group down before its second step ran.
+      let currentId: string | null = keys[0]!
+      while (currentId) {
+        const next = await runNode(currentId)
+        if (next === null) return null
+        // Anything that is not a sibling is the group's own out-edge.
+        if (!groupChildIds.has(next)) return next
+        currentId = next
+      }
+      return null
+    } finally {
+      for (const key of keys) {
+        nodeById.delete(key)
+        outBySource.delete(key)
+        groupChildIds.delete(key)
+      }
+    }
   }
 
   /**

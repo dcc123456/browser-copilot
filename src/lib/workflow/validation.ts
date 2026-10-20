@@ -15,6 +15,7 @@ import { hasReference } from './dynamic-data'
 import { unanchoredElementStart } from './runnability'
 import { missingRequirements, missingTriggerParam } from './block-requirements'
 import { goalGateProblems } from './reliability'
+import { groupChildProblemText, groupChildProblems, groupChildrenOf, isGroupNode } from './group'
 import { nodeDisplayNameOf } from './node-name'
 import type { Workflow, WorkflowNode } from './types'
 
@@ -276,6 +277,15 @@ export function nodeRunIssuesOf(node: WorkflowNode): WorkflowRunIssue[] {
       continue
     }
     issues.push(blame('error', `缺少必填参数 ${problem.key}：${problem.message}`, problem.key))
+  }
+
+  // A group answers for its children: the gate only visits graph nodes, and a
+  // child that cannot run must stop the run AT the group instead of mid-chain —
+  // the engine refuses it too, but only once the run is already under way.
+  if (isGroupNode(node)) {
+    for (const problem of groupChildProblems(groupChildrenOf(node))) {
+      issues.push(blame('error', groupChildProblemText(problem), 'blocks'))
+    }
   }
 
   return issues

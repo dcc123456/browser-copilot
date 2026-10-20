@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   CircleDot,
   CircleStop,
+  Group,
   LoaderCircle,
   PanelLeftClose,
   PanelLeftOpen,
@@ -48,6 +49,8 @@ export default function TopToolbar({
   onOpenLogs,
   onToggleRecording,
   onAutoLayout,
+  selectedCount,
+  onPackSelection,
   repair,
   onCancelRepair,
   t,
@@ -70,6 +73,10 @@ export default function TopToolbar({
   onOpenLogs: () => void
   onToggleRecording: () => void
   onAutoLayout: () => void
+  /** How many canvas nodes are selected right now. */
+  selectedCount: number
+  /** Fold the selected chain into one group node. */
+  onPackSelection: () => void
   /** Background AI repair status for the workflow in this editor. */
   repair?: EditorRepairStatus
   onCancelRepair?: () => void
@@ -120,6 +127,18 @@ export default function TopToolbar({
         >
           <WandSparkles size={14} />
         </button>
+        {/* Packing only ever makes sense for a chain, so the button waits for a
+            real selection instead of turning a single click into a surprise. */}
+        {selectedCount >= 2 && (
+          <button
+            type="button"
+            className="wf-icon-btn"
+            title={t('groupPack')}
+            onClick={onPackSelection}
+          >
+            <Group size={14} />
+          </button>
+        )}
       </div>
 
       <div className="wf-toolbar-group wf-toolbar-tabs">

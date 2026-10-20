@@ -44,11 +44,17 @@ import { migrateWorkflow, triggerFromNodes } from '../lib/workflow/migrate'
 import { ensureSecretProducer, type SuggestionGraph } from '../lib/workflow/var-suggestions'
 import {
   appendOperatorChain,
+  applyOperatorAction,
   edgesAfterBatchRemoved,
   operatorBatchOf,
   operatorDigestOf,
+  selectedOperatorSpecOf,
   type OperatorBatch,
+  type OperatorMissingParams,
+  type OperatorNodeAction,
+  type OperatorNodeSnapshot,
   type OperatorProposal,
+  type OperatorPrunedPort,
 } from '../lib/workflow/operator-advise'
 import type { SecretFieldRef } from '../lib/workflow/secret-params'
 import { nodeRunIssuesOf } from '../lib/workflow/validation'
@@ -57,17 +63,33 @@ import { editorUrl, hostWindowId } from './host-window'
 import { getSettings } from '../lib/storage'
 import { newId } from '../lib/storage'
 
-import { nodeTypes, type BlockNodeData } from './flow/BlockNode'
+import { nodeTypes as blockNodeTypes, type BlockNodeData } from './flow/BlockNode'
+import { GroupNode, type GroupNodeActions } from './flow/GroupNode'
+import {
+  GROUP_BLOCK_ID,
+  groupChildFromBlock,
+  groupChildrenOf,
+  groupChildProblemText,
+  groupChildProblems,
+  moveGroupChild,
+  planGroupPack,
+  removeGroupChild,
+  unpackGroupNode,
+  type GroupPackFailure,
+  type WorkflowGroupChild,
+} from '../lib/workflow/group'
 import { edgeTypes } from './flow/CustomEdge'
 import {
   applyConnection,
   edgeClosesCycle,
   healEdgeHandles,
+  newEdge,
   pruneRemovedPortEdges,
 } from './flow/connections'
 import Sidebar, { loadWidth } from './sidebar/Sidebar'
 import BlockPalette from './sidebar/BlockPalette'
 import BlockEditForm from './sidebar/BlockEditForm'
+import Modal from './ui/Modal'
 import BlockSettingsModal from './blocks/shared/BlockSettingsModal'
 import { useSpaceSelect } from './use-space-select'
 import { SlashMenuProvider } from './blocks/shared/SlashVariableMenu'
@@ -79,6 +101,7 @@ import CertificationModal from './sidebar/CertificationModal'
 import type { VerificationReport } from '../background/workflow-engine/goal-verification'
 import CanvasControls from './toolbar/CanvasControls'
 import OperatorChatDock, {
+  type OperatorApplyRequest,
   type OperatorChatContext,
   type OperatorLanding,
 } from './ai/OperatorChatDock'
@@ -103,6 +126,19 @@ const DEFAULT_SETTINGS: WorkflowSettings = {
 
 type FlowNode = Node<BlockNodeData>
 
+/**
+ * Which canvas renderer draws a block. A group is the one block that hosts its
+ * own editor on the node (its children live in `data.blocks`, not on the canvas),
+ * so it gets a renderer of its own instead of the generic block shell.
+ */
+function flowTypeOf(block: BlockCatalogEntry | undefined, blockId: string): string {
+  if (block?.component === 'Group') return 'GroupNode'
+  return blockId === 'note' ? 'NoteNode' : 'BlockNode'
+}
+
+/** The canvas' node renderer map: the block shells plus the group container. */
+const nodeTypes = { ...blockNodeTypes, GroupNode }
+
 function toFlowNode(n: WorkflowNode): FlowNode {
   const blockId = (n.data.blockId as string) ?? n.label
   // Fall back to the FULL catalog (cloud blocks included): a miss here makes
@@ -113,7 +149,7 @@ function toFlowNode(n: WorkflowNode): FlowNode {
   const { blockId: _, ...blockData } = n.data as Record<string, unknown>
   return {
     id: n.id,
-    type: blockId === 'note' ? 'NoteNode' : 'BlockNode',
+    type: flowTypeOf(block, blockId),
     position: n.position,
     data: {
       block: block as BlockCatalogEntry,
@@ -126,7 +162,7 @@ function toFlowNode(n: WorkflowNode): FlowNode {
 function newFlowNode(block: BlockCatalogEntry, position: { x: number; y: number }): FlowNode {
   return {
     id: newId(),
-    type: block.id === 'note' ? 'NoteNode' : 'BlockNode',
+    type: flowTypeOf(block, block.id),
     position,
     data: {
       block,
@@ -145,12 +181,42 @@ function toWorkflowNode(n: FlowNode): WorkflowNode {
   }
 }
 
+/** The workflow file's handle fields: React Flow allows `null`, the file does not. */
+function edgeHandlesOf(e: Edge): Pick<WorkflowEdge, 'sourceHandle' | 'targetHandle'> {
+  return { sourceHandle: e.sourceHandle ?? undefined, targetHandle: e.targetHandle ?? undefined }
+}
+
+/** A canvas edge in the shape the workflow file uses. */
+function toWorkflowEdge(e: Edge): WorkflowEdge {
+  return { id: e.id, source: e.source, target: e.target, ...edgeHandlesOf(e) }
+}
+
+/**
+ * Re-draw an edge the group planner re-anchored. connections.ts owns what a
+ * canvas edge looks like, so a folded or unfolded chain renders like a drawn one.
+ */
+function toCanvasEdge(e: WorkflowEdge): Edge {
+  return newEdge({
+    source: e.source,
+    target: e.target,
+    sourceHandle: e.sourceHandle ?? null,
+    targetHandle: e.targetHandle ?? null,
+  })
+}
+
+/** What the assistant's last landing did, in the form 撤销 can put back: either
+ *  the batch of nodes it added, or the one node it changed in place. */
+type AiUndoRecord =
+  { kind: 'append'; batch: OperatorBatch } | { kind: 'node'; before: OperatorNodeSnapshot }
+
 export default function EditorApp() {
   const [workflowId, setWorkflowId] = useState<string | null>(null)
   const [nodes, setNodes] = useState<FlowNode[]>([])
   const [edges, setEdges] = useState<Edge[]>([])
   /** Node id whose block-settings modal is open (gear button in hover toolbar). */
   const [settingsForId, setSettingsForId] = useState<string | null>(null)
+  /** Group child whose block-settings modal is open (pencil in the group node). */
+  const [childEditFor, setChildEditFor] = useState<{ nodeId: string; index: number } | null>(null)
   /** Whether the run-logs / debug viewer modal is open. */
   const [logsOpen, setLogsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(true)
@@ -330,6 +396,30 @@ export default function EditorApp() {
     [toast, t],
   )
 
+  /**
+   * Rewrite one group node's child list from its current children. Children are
+   * not canvas nodes, so the list in `data.blocks` is the only place their order
+   * exists — which is also the order the engine runs them in.
+   */
+  const setGroupChildren = useCallback(
+    (nodeId: string, mutate: (children: WorkflowGroupChild[]) => WorkflowGroupChild[]) => {
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id !== nodeId || n.data.block?.id !== GROUP_BLOCK_ID) return n
+          const groupNode = toWorkflowNode(n)
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              blockData: { ...n.data.blockData, blocks: mutate(groupChildrenOf(groupNode)) },
+            },
+          }
+        }),
+      )
+    },
+    [setNodes],
+  )
+
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault()
@@ -344,9 +434,31 @@ export default function EditorApp() {
         return
       }
       const position = reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      // A drop landing inside a group adds the block to that group: its children
+      // live in its own list, not on the canvas.
+      const host = reactFlow
+        .getNodes()
+        .find(
+          (n) =>
+            n.type === 'GroupNode' &&
+            position.x >= n.position.x &&
+            position.x <= n.position.x + (n.measured?.width ?? 0) &&
+            position.y >= n.position.y &&
+            position.y <= n.position.y + (n.measured?.height ?? 0),
+        )
+      if (host) {
+        const child = groupChildFromBlock(block, newId())
+        const [problem] = groupChildProblems([child])
+        if (problem) {
+          toast.show(groupChildProblemText(problem), 'error')
+          return
+        }
+        setGroupChildren(host.id, (children) => [...children, child])
+        return
+      }
       setNodes((nds) => [...nds, newFlowNode(block, position)])
     },
-    [reactFlow, toast, t],
+    [reactFlow, toast, t, setGroupChildren, setNodes],
   )
 
   // --- node hover-toolbar actions (Automa block-menu) ------------------------
@@ -507,13 +619,7 @@ export default function EditorApp() {
     if (!workflowId) return null
     const { x, y, zoom } = reactFlow.getViewport()
     const wfNodes: WorkflowNode[] = nodes.map(toWorkflowNode)
-    const wfEdges: WorkflowEdge[] = edges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      sourceHandle: e.sourceHandle ?? undefined,
-      targetHandle: e.targetHandle ?? undefined,
-    }))
+    const wfEdges: WorkflowEdge[] = edges.map(toWorkflowEdge)
     return {
       id: workflowId,
       name: meta.name || t('untitled'),
@@ -621,6 +727,115 @@ export default function EditorApp() {
     [deleteNode, duplicateNode, openNodeSettings, openNodeEditor, toggleNodeDisabled, handleRun],
   )
 
+  /** Why a selection cannot become a group, in the user's language. */
+  const packFailureText = useCallback(
+    (failure: GroupPackFailure): string => {
+      if (failure.reason === 'too_few') {
+        return t('groupPackTooFew').replace('{count}', String(failure.count))
+      }
+      if (failure.reason === 'forbidden_child') {
+        return t('groupPackForbiddenChild').replace('{blockId}', failure.blockId)
+      }
+      return failure.reason === 'stray_connection'
+        ? t('groupPackStrayConnection')
+        : t('groupPackNotAChain')
+    },
+    [t],
+  )
+
+  /**
+   * Turn a selected chain of nodes into one group node. The plan refuses anything
+   * a linear child list cannot express, and the refusal is the message: folding
+   * a fork away silently is how a step disappears.
+   */
+  const packSelection = useCallback(() => {
+    const selectedIds = reactFlow
+      .getNodes()
+      .filter((n) => n.selected)
+      .map((n) => n.id)
+    const result = planGroupPack(
+      nodes.map(toWorkflowNode),
+      edges.map(toWorkflowEdge),
+      selectedIds,
+      newId(),
+      t('groupDefaultName'),
+    )
+    if ('failure' in result) {
+      toast.show(packFailureText(result.failure), 'error')
+      return
+    }
+    const { plan } = result
+    const removed = new Set(plan.removedIds)
+    const dropped = new Set(plan.droppedEdgeIds)
+    setNodes((nds) => [
+      ...nds.filter((n) => !removed.has(n.id)),
+      { ...toFlowNode(plan.group), selected: false },
+    ])
+    setEdges((eds) => [
+      ...eds.filter((e) => !dropped.has(e.id) && !removed.has(e.source) && !removed.has(e.target)),
+      ...plan.keptEdges.map(toCanvasEdge),
+    ])
+  }, [reactFlow, nodes, edges, t, toast, packFailureText, setNodes, setEdges])
+
+  /** Spread a group's children back onto the canvas, re-threading the edges. */
+  const unpackGroup = useCallback(
+    (nodeId: string) => {
+      const node = nodes.find((n) => n.id === nodeId)
+      if (!node) return
+      const { nodes: restored, edges: rewired } = unpackGroupNode(
+        toWorkflowNode(node),
+        edges.map(toWorkflowEdge),
+        { idFactory: newId, takenIds: new Set(nodes.map((n) => n.id)) },
+      )
+      setNodes((nds) => [...nds.filter((n) => n.id !== nodeId), ...restored.map(toFlowNode)])
+      setEdges((eds) => [
+        ...eds.filter((e) => e.source !== nodeId && e.target !== nodeId),
+        ...rewired.map(toCanvasEdge),
+      ])
+      toast.show(t('groupUnpacked'), 'info')
+    },
+    [nodes, edges, setNodes, setEdges, toast, t],
+  )
+
+  // The group node edits its children in place: the name, the order, one child's
+  // block form, and the way back out.
+  const groupActions = useMemo<GroupNodeActions>(
+    () => ({
+      onGroupName: (nodeId, name) => patchNode(nodeId, { name }),
+      onChildMove: (nodeId, index, delta) =>
+        setGroupChildren(nodeId, (children) => moveGroupChild(children, index, delta)),
+      onChildDelete: (nodeId, index) =>
+        setGroupChildren(nodeId, (children) => removeGroupChild(children, index)),
+      onChildEdit: (nodeId, index) => setChildEditFor({ nodeId, index }),
+      onUnpack: unpackGroup,
+    }),
+    [patchNode, setGroupChildren, unpackGroup],
+  )
+
+  /** Write one child's parameters back into its group's list. */
+  const patchGroupChild = useCallback(
+    (nodeId: string, index: number, patch: Record<string, unknown>) => {
+      setGroupChildren(nodeId, (children) =>
+        children.map((child, position) =>
+          position === index ? { ...child, data: { ...child.data, ...patch } } : child,
+        ),
+      )
+    },
+    [setGroupChildren],
+  )
+
+  // The open child form reads the LIVE list: editing must not freeze a snapshot
+  // of the child the moment the pencil was clicked.
+  const childEdit = useMemo(() => {
+    if (!childEditFor) return null
+    const node = nodes.find((n) => n.id === childEditFor.nodeId)
+    if (!node) return null
+    const child = groupChildrenOf(toWorkflowNode(node))[childEditFor.index]
+    const block = child ? CATALOG_BY_ID.get(child.id) : undefined
+    if (!child || !block) return null
+    return { ...childEditFor, child, block }
+  }, [childEditFor, nodes])
+
   // Nodes as rendered: state nodes plus the injected toolbar callbacks and the
   // run gate's red badge for a step that cannot work yet.
   const flowNodes = useMemo(
@@ -632,11 +847,14 @@ export default function EditorApp() {
           data: {
             ...n.data,
             actions: nodeActions,
+            // Only the group container edits a child list, so only it gets those
+            // callbacks — every other node's data keeps its identity per render.
+            ...(n.data.block?.id === GROUP_BLOCK_ID ? { groupActions } : {}),
             ...(reason === undefined ? {} : { runState: 'error' as const, blockedReason: reason }),
           },
         }
       }),
-    [nodes, nodeActions, blockedNodes],
+    [nodes, nodeActions, groupActions, blockedNodes],
   )
 
   const toggleRecording = useCallback(async () => {
@@ -882,42 +1100,111 @@ export default function EditorApp() {
     suggestionGraphRef.current = suggestionGraph
   }, [suggestionGraph])
 
-  /** What the last landed batch owns: its nodes and the edge it borrowed. */
-  const aiBatchRef = useRef<OperatorBatch | null>(null)
+  /** What the last landing changed: a batch of new nodes, or one node in place. */
+  const aiUndoRef = useRef<AiUndoRecord | null>(null)
 
   const operatorChatContext = useCallback((): OperatorChatContext => {
-    // Only a single selection anchors a chain: with several picked there is no
-    // unambiguous "after this", so the flow's end takes it.
+    // Only a single selection is a target: with several picked there is no
+    // unambiguous "this step", so a chain falls back to the flow's end and an
+    // in-place answer has nothing to change.
     const picked = reactFlow
       .getNodes()
       .filter((node) => node.selected)
       .map((node) => node.id)
-    const anchorNodeId = picked.length === 1 ? picked[0] : undefined
+    const selectedNodeId = picked.length === 1 ? picked[0] : undefined
     const graph = suggestionGraphRef.current()
+    const selectedSpec = selectedNodeId ? selectedOperatorSpecOf(graph, selectedNodeId) : ''
+    // The window this editor was opened from: the assistant may only read a page
+    // in it, never in some other window the user did not open it from.
+    const hostWindow = hostWindowId()
     return {
-      graphDigest: operatorDigestOf(graph, anchorNodeId),
-      ...(anchorNodeId ? { anchorNodeId } : {}),
+      graphDigest: operatorDigestOf(graph, selectedNodeId),
+      ...(selectedNodeId ? { selectedNodeId } : {}),
+      ...(selectedSpec ? { selectedSpec } : {}),
+      ...(hostWindow !== undefined ? { windowId: hostWindow } : {}),
       ...(meta.description ? { workflowGoal: meta.description } : {}),
       ...(workflowId ? { workflowId } : {}),
     }
   }, [meta.description, reactFlow, workflowId])
 
-  const addOperatorsFromAi = useCallback(
-    (proposals: OperatorProposal[], anchorNodeId?: string): OperatorLanding => {
-      const patch = appendOperatorChain(suggestionGraphRef.current(), proposals, {
-        ...(anchorNodeId ? { anchorNodeId } : {}),
+  /**
+   * Put one patched node back onto the canvas without disturbing what React Flow
+   * owns per node (selection, measurement). `toFlowNode` resolves the catalog
+   * entry, the node type and the label from the new `blockId`, which is what
+   * makes a swapped operator render as the operator it became.
+   */
+  const installPatchedNode = useCallback((node: WorkflowNode) => {
+    setNodes((nds) =>
+      nds.map((current) => {
+        if (current.id !== node.id) return current
+        const next = toFlowNode(node)
+        return { ...current, type: next.type, data: next.data }
+      }),
+    )
+  }, [])
+
+  /** Apply an `edit`/`replace` answer to the step the user had selected. */
+  const applyNodeActionFromAi = useCallback(
+    (
+      graph: SuggestionGraph,
+      action: OperatorNodeAction,
+      targetNodeId: string | undefined,
+      proposals: OperatorProposal[],
+    ): OperatorLanding => {
+      const landing = {
+        kind: 'node' as const,
+        added: 0,
+        applied: false,
+        skipped: [] as string[],
+        pruned: [] as OperatorPrunedPort[],
+        missing: [] as OperatorMissingParams[],
+      }
+      // The target is always the editor's own selection. Without one there is
+      // nothing to change in place, and the assistant must not guess.
+      if (!targetNodeId) return { ...landing, problem: 'no-selection' }
+      const patch = applyOperatorAction(graph, targetNodeId, action, proposals)
+      const patched = patch.nodes.find((node) => node.id === targetNodeId)
+      if (patch.problem || !patched || !patch.before) {
+        return { ...landing, ...(patch.problem ? { problem: patch.problem } : {}) }
+      }
+      installPatchedNode(patched)
+      applyEdgeList(patch.edges)
+      aiUndoRef.current = { kind: 'node', before: patch.before }
+      setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
+      requestAnimationFrame(() => locateNode(targetNodeId))
+      toast.show(
+        action === 'replace'
+          ? t('operatorAiReplaced').replace('{name}', patched.label)
+          : t('operatorAiEdited'),
+        'ok',
+      )
+      return { ...landing, applied: true, pruned: patch.pruned, missing: patch.missing }
+    },
+    [applyEdgeList, installPatchedNode, locateNode, toast, t],
+  )
+
+  const applyOperatorsFromAi = useCallback(
+    (request: OperatorApplyRequest): OperatorLanding => {
+      const graph = suggestionGraphRef.current()
+      if (request.action !== 'append')
+        return applyNodeActionFromAi(graph, request.action, request.targetNodeId, request.proposals)
+      const patch = appendOperatorChain(graph, request.proposals, {
+        ...(request.targetNodeId ? { anchorNodeId: request.targetNodeId } : {}),
         newId,
       })
       const landing: OperatorLanding = {
+        kind: 'append',
         added: patch.added.length,
+        applied: patch.added.length > 0,
         skipped: patch.skipped,
+        pruned: [],
         missing: patch.missing,
         ...(patch.problem ? { problem: patch.problem } : {}),
       }
       if (patch.added.length === 0) return landing
       setNodes((nds) => [...nds, ...patch.added.map(toFlowNode)])
       applyEdgeList(patch.edges)
-      aiBatchRef.current = operatorBatchOf(patch)
+      aiUndoRef.current = { kind: 'append', batch: operatorBatchOf(patch) }
       setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
       const last = patch.added[patch.added.length - 1]
       // Center once React Flow has the node in its own store: same-tick it is
@@ -926,23 +1213,49 @@ export default function EditorApp() {
       toast.show(t('operatorAiAdded').replace('{count}', String(patch.added.length)), 'ok')
       return landing
     },
-    [applyEdgeList, locateNode, toast, t],
+    [applyEdgeList, applyNodeActionFromAi, locateNode, toast, t],
   )
 
   const undoAiBatch = useCallback(() => {
-    const batch = aiBatchRef.current
-    aiBatchRef.current = null
-    if (!batch || batch.nodeIds.length === 0) return
-    const ids = new Set(batch.nodeIds)
-    // Same semantics as deleting a node by hand: its edges go with it — except the
-    // continuation the batch borrowed, which has to go back to the anchor.
-    setNodes((nds) => nds.filter((n) => !ids.has(n.id)))
-    setEdges((eds) => edgesAfterBatchRemoved(eds, batch))
-    setEditingId((cur) => (cur && ids.has(cur) ? null : cur))
-    setSettingsForId((cur) => (cur && ids.has(cur) ? null : cur))
+    const record = aiUndoRef.current
+    aiUndoRef.current = null
+    if (!record) return
+    if (record.kind === 'append') {
+      const { batch } = record
+      if (batch.nodeIds.length === 0) return
+      const ids = new Set(batch.nodeIds)
+      // Same semantics as deleting a node by hand: its edges go with it — except the
+      // continuation the batch borrowed, which has to go back to the anchor.
+      setNodes((nds) => nds.filter((n) => !ids.has(n.id)))
+      setEdges((eds) => edgesAfterBatchRemoved(eds, batch))
+      setEditingId((cur) => (cur && ids.has(cur) ? null : cur))
+      setSettingsForId((cur) => (cur && ids.has(cur) ? null : cur))
+    } else {
+      // The node as it was, plus every line that touched it: a swap re-hangs and
+      // sometimes cuts edges, so restoring the data alone would not restore the flow.
+      const { node, edges: incident } = record.before
+      installPatchedNode(node)
+      setEdges((eds) => {
+        const owned = new Set(incident.map((edge) => edge.id))
+        const restored = incident.map((edge) => {
+          const existing = eds.find((candidate) => candidate.id === edge.id)
+          if (!existing) return { ...edge, type: 'custom' }
+          return {
+            ...existing,
+            source: edge.source,
+            target: edge.target,
+            sourceHandle: edge.sourceHandle,
+            targetHandle: edge.targetHandle,
+          }
+        })
+        // Pruned lines come back too: a swap cut them, and React Flow would have
+        // hidden them anyway, so the only trace left is this snapshot.
+        return [...eds.filter((edge) => !owned.has(edge.id)), ...restored]
+      })
+    }
     setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
-    toast.show(t('operatorAiUndone'), 'info')
-  }, [toast, t])
+    toast.show(record.kind === 'append' ? t('operatorAiUndone') : t('operatorAiNodeUndone'), 'info')
+  }, [installPatchedNode, toast, t])
 
   const editOverlay =
     editNode && editBlock ? (
@@ -1035,6 +1348,8 @@ export default function EditorApp() {
           onOpenLogs={() => setLogsOpen(true)}
           onToggleRecording={() => void toggleRecording()}
           onAutoLayout={handleAutoLayout}
+          selectedCount={selectedIds.size}
+          onPackSelection={packSelection}
           repair={repairStatus}
           onCancelRepair={cancelRepair}
           t={t}
@@ -1122,7 +1437,7 @@ export default function EditorApp() {
           {/* Bottom-right: the AI operator assistant, above the zoom row. */}
           <OperatorChatDock
             getContext={operatorChatContext}
-            onAppend={addOperatorsFromAi}
+            onApply={applyOperatorsFromAi}
             onUndo={undoAiBatch}
             t={t}
           />
@@ -1154,6 +1469,41 @@ export default function EditorApp() {
               data={settingsNode?.data.blockData ?? {}}
               onChange={(patch) => patchNode(settingsForId, patch)}
             />
+          </SlashMenuProvider>
+        )}
+
+        {/* One child of a group (pencil in the group node): the same block form,
+            minus the goal section — the engine never reads a contract for a step
+            that is not a graph node. Variable suggestions still resolve against
+            the graph, so a child can reference what runs before it. */}
+        {childEdit && (
+          <SlashMenuProvider
+            nodeId={childEdit.nodeId}
+            graph={suggestionGraph}
+            insertSecret={insertSecretProducer}
+          >
+            <Modal
+              open
+              onClose={() => setChildEditFor(null)}
+              icon={childEdit.block.icon}
+              accent={`var(--cat-${childEdit.block.category})`}
+              title={editorLocale.blockName(childEdit.block.id, childEdit.block.name)}
+              size="md"
+            >
+              <BlockEditForm
+                key={`${childEdit.nodeId}-${childEdit.index}`}
+                block={childEdit.block}
+                nodeName={String(childEdit.child.data['description'] ?? childEdit.block.name)}
+                data={childEdit.child.data}
+                onChange={(patch) => patchGroupChild(childEdit.nodeId, childEdit.index, patch)}
+                onBack={() => setChildEditFor(null)}
+                t={t}
+                onApplyFix={() => {}}
+                canRevert={false}
+                onRevert={() => {}}
+                hideGoal
+              />
+            </Modal>
           </SlashMenuProvider>
         )}
 

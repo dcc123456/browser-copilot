@@ -28,8 +28,9 @@ export type OperatorExecClass = 'execute' | 'record-only'
 
 /**
  * Blocks the engine interprets itself, so a single-node call cannot express
- * them. A loop body only exists relative to the loop node, and a sub-workflow
- * needs a saved child to reference.
+ * them. A loop body only exists relative to the loop node, a sub-workflow needs
+ * a saved child to reference, and a group's children only exist inside the group
+ * node's own `data.blocks`.
  */
 export const ENGINE_INTERPRETED_BLOCK_IDS: ReadonlySet<string> = new Set([
   'trigger',
@@ -39,6 +40,7 @@ export const ENGINE_INTERPRETED_BLOCK_IDS: ReadonlySet<string> = new Set([
   'repeat-task',
   'while-loop',
   'loop-breakpoint',
+  'blocks-group',
 ])
 
 /**
@@ -70,15 +72,19 @@ export const INTERACTIVE_BLOCK_IDS: ReadonlySet<string> = new Set([
 /**
  * Blocks that leave no page state behind to verify.
  *
- * They act on the outside world (send, notify, write a file) and succeed by
- * completing, so a goal + success-condition for them has nothing to check
- * against: an invented row can only ever bar certification. Generation does not
- * auto-invent one, and the editor offers no 「目标与成功条件」 section for them.
+ * Two kinds qualify. Fire-and-done operators act on the outside world (send,
+ * notify, write a file) and succeed by completing; structural operators (a group
+ * container, a free-form note) are not an action at all. Either way a goal +
+ * success-condition for them has nothing to check against: an invented row can
+ * only ever bar certification. Generation does not auto-invent one, and the
+ * editor offers no 「目标与成功条件」 section for them.
  */
 export const NON_GOAL_BEARING_BLOCK_IDS: ReadonlySet<string> = new Set([
   'notification',
   'webhook',
   'export-data',
+  'blocks-group',
+  'note',
 ])
 
 /** Blocks whose executors are still placeholders — running them proves nothing. */
@@ -86,7 +92,34 @@ export const PLACEHOLDER_BLOCK_IDS: ReadonlySet<string> = new Set([
   'browser-event',
   'proxy',
   'note',
+])
+
+/**
+ * Blocks that cannot be a child of a `blocks-group`.
+ *
+ * A group runs its children as one linear chain, so a child must be a single
+ * action with exactly one way forward. Branch blocks (`conditions`,
+ * `element-exists`) would need a second successor that the chain cannot name;
+ * the loop family and `loop-breakpoint` are matched across the graph by
+ * `loopId`, which does not exist inside a node; `trigger` is the entry point;
+ * `blocks-group` would mean nested groups; `block-package` is cloud-only.
+ *
+ * Mirrors the upstream `excludeGroupBlocks` list (Automa `src/utils/shared.js`)
+ * minus `webhook` — whose executor is a plain linear action here — plus
+ * `loop-elements`, which upstream forgot. Editor creation and the run-time check
+ * both read this list so they cannot disagree.
+ */
+export const GROUP_CHILD_EXCLUDED_BLOCK_IDS: ReadonlySet<string> = new Set([
+  'trigger',
+  'conditions',
+  'element-exists',
+  'loop-data',
+  'loop-elements',
+  'repeat-task',
+  'while-loop',
+  'loop-breakpoint',
   'blocks-group',
+  'block-package',
 ])
 
 /**
@@ -137,7 +170,7 @@ export const RECORD_ONLY_REASONS: Readonly<Record<string, string>> = {
   'browser-event': 'executor is still a placeholder; recorded only',
   proxy: 'executor is still a placeholder; recorded only',
   note: 'a note is documentation, not an action',
-  'blocks-group': 'a group is a canvas container, not an action',
+  'blocks-group': 'a group is expanded and run by the engine, not by a single node call',
 }
 
 /**

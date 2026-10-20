@@ -231,3 +231,42 @@ describe('checkWorkflowIntegrity — structure', () => {
     expect(integrityIsClean(checkWorkflowIntegrity(wf))).toBe(true)
   })
 })
+
+describe('checkWorkflowIntegrity — variables produced inside a group', () => {
+  const groupNode = (id: string, blocks: unknown[]): WorkflowNode =>
+    node(id, 'blocks-group', { name: '采集', blocks })
+
+  const child = (blockId: string, itemId: string, data: Record<string, unknown>) => ({
+    id: blockId,
+    itemId,
+    data,
+  })
+
+  it('counts a producer folded into a group as a producer', () => {
+    // The group is a container, not a step: the `get-text` inside it writes the
+    // same shared variable bag the rest of the graph reads. Ignoring it made
+    // every reference to that variable look dangling.
+    const wf = workflow(
+      [
+        trigger(),
+        groupNode('g', [child('get-text', 'gt1', { selector: '.price', variableName: 'price' })]),
+        node('use', 'forms', { selector: '#x', value: '{{price}}' }),
+      ],
+      [edge('t', 'g'), edge('g', 'use')],
+    )
+    expect(integrityIsClean(checkWorkflowIntegrity(wf))).toBe(true)
+  })
+
+  it('still reports a reference no group child produces', () => {
+    const wf = workflow(
+      [
+        trigger(),
+        groupNode('g', [child('get-text', 'gt1', { selector: '.price', variableName: 'price' })]),
+        node('use', 'forms', { selector: '#x', value: '{{missing}}' }),
+      ],
+      [edge('t', 'g'), edge('g', 'use')],
+    )
+    const dangling = checkWorkflowIntegrity(wf).danglingVars
+    expect(dangling.map((d) => d.reference)).toEqual(['missing'])
+  })
+})

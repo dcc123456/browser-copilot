@@ -417,3 +417,40 @@ describe('OFFERED_TRIGGER_TYPES', () => {
     expect(OFFERED_TRIGGER_TYPES).not.toContain('feishu')
   })
 })
+
+describe('nodeRunIssuesOf — a group answers for its children', () => {
+  const group = (id: string, blocks: unknown[]): WorkflowNode =>
+    node(id, 'blocks-group', { name: '收集列表', blocks })
+
+  const child = (blockId: string, itemId: string, data: Record<string, unknown> = {}) => ({
+    id: blockId,
+    itemId,
+    data,
+  })
+
+  it('leaves a well-formed group alone', () => {
+    const issues = nodeRunIssuesOf(
+      group('g', [child('event-click', 'c1', { selector: '#x' }), child('delay', 'c2')]),
+    )
+    expect(issues).toEqual([])
+  })
+
+  it('blocks the run at the group for a child a linear chain cannot hold', () => {
+    // Children are not graph nodes, so the gate cannot visit them: the group is
+    // blamed with the same wording the engine refuses them with, which turns a
+    // mid-run death into a pre-run red step.
+    const issues = nodeRunIssuesOf(
+      group('g', [child('event-click', 'c1', { selector: '#x' }), child('conditions', 'c2')]),
+    )
+    expect(issues.map((issue) => issue.severity)).toEqual(['error'])
+    expect(issues[0]).toMatchObject({ nodeId: 'g', blockId: 'blocks-group', param: 'blocks' })
+    expect(issues[0]!.message).toContain('不能放进分组')
+  })
+
+  it('blocks the run at the group for a child whose block does not exist', () => {
+    const issues = nodeRunIssuesOf(group('g', [child('not-a-block', 'c1')]))
+    expect(issues.map((issue) => issue.message)).toEqual([
+      '分组里的步骤「c1」指向未知算子「not-a-block」',
+    ])
+  })
+})

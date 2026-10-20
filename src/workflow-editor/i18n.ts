@@ -236,7 +236,7 @@ export const EDITOR_STRINGS = {
     operatorAiFabLabel: 'AI',
     operatorAiTitle: 'AI operator assistant',
     operatorAiHint:
-      'Each reply is added to the end of the flow. Undo removes exactly what this reply added.',
+      'Each reply lands on the canvas: without a selection it is added to the end of the flow, and a selected step can be edited or replaced in place. Undo restores exactly what the last reply changed.',
     operatorAiEmptyState:
       'Describe the step you need, for example "open https://www.baidu.com and search for X".',
     operatorAiPlaceholder: 'Describe the next step…',
@@ -244,16 +244,71 @@ export const EDITOR_STRINGS = {
     operatorAiStop: 'Stop',
     operatorAiThinking: 'Choosing operators…',
     operatorAiAdded: 'Added {count} operator(s) to the flow',
+    operatorAiChangedInPlace: 'Updated the selected step',
+    operatorAiEdited: 'The assistant updated the selected step.',
+    operatorAiReplaced: 'The assistant turned the selected step into {name}.',
     operatorAiUndo: 'Undo',
     operatorAiUndone: 'Removed the operators the assistant had just added.',
+    operatorAiNodeUndone: 'Restored the step the assistant had just changed.',
     operatorAiMissingParams: 'Added, but required parameters are missing: {keys}',
     operatorAiRejected: 'Skipped, this workflow cannot use them: {names}',
+    operatorAiPrunedPorts:
+      'Connections the new operator cannot draw were removed: {ports}. Check the flow after this step.',
     operatorAiFailed: 'The assistant could not answer',
     operatorAiBranchAnchor:
       'The selected step branches into several paths. Select one of them and ask again — the assistant will not guess which branch to continue.',
     operatorAiEmptyGraph: 'Add a trigger or a first step before asking the assistant.',
     operatorAiAnchorGone:
       'The step the chain was going to follow is no longer on the canvas, so nothing was added.',
+    operatorAiNoSelection:
+      'The assistant answered as a change to one step, but nothing was selected. Select the step and ask again.',
+    operatorAiTargetGone: 'The step to change is no longer on the canvas, so nothing was changed.',
+    operatorAiOneProposalOnly:
+      'Changing a step needs exactly one operator in the answer, so nothing was changed.',
+    operatorAiEditOtherBlock:
+      'Editing a step must keep its operator — the answer named a different one, so nothing was changed. Ask to replace it instead.',
+    operatorAiReplaceSameBlock:
+      'The answer named the operator the step already is, so there was nothing to replace.',
+    operatorAiReplaceUnofferable:
+      'The assistant cannot turn a step into the trigger or a cloud operator, so nothing was replaced.',
+    operatorAiReplaceEntry:
+      'The first step of the flow is its entry point, and the assistant will not replace it.',
+    operatorAiPageUsed: 'Parameters filled from "{title}"',
+    operatorAiPageNone: 'No page was read — the parameters come from your description.',
+    operatorAiPageOn: 'Reading the current page for parameters — click to stop reading it.',
+    operatorAiPageOff: 'Not reading the page — click to let the assistant read it again.',
+    operatorAiPageToggleOn: 'Read page',
+    operatorAiPageToggleOff: 'No page read',
+    operatorAiOfferQuestion:
+      'These steps still need the page: {keys}. Act on the page once first, then add them with the locators it really uses?',
+    operatorAiOfferAct: 'Act once, then add',
+    operatorAiOfferActHint:
+      'Runs every step once against the page in this window — it can click, type and navigate.',
+    operatorAiOfferLand: 'Add as-is',
+    operatorAiOfferNoUndo:
+      '撤销 only removes these steps — what the assistant already did on the page stays done.',
+    operatorAiOfferRefused: 'It would not act with: {names}',
+    operatorAiOfferSkipped: 'Not acted on: {names}',
+    operatorAiOfferWaiting: 'Answer the choice above first',
+    operatorAiOfferRan: 'ran on the page',
+    operatorAiOfferFailed: 'did not run',
+    // Group block (blocks-group) — the in-node child list and pack/unpack.
+    groupNamePlaceholder: 'Group name',
+    groupChildrenEmpty: 'No steps yet. Drag a block onto this node to add one.',
+    groupChildMoveUp: 'Move up',
+    groupChildMoveDown: 'Move down',
+    groupChildEdit: 'Edit step',
+    groupChildDelete: 'Remove step',
+    groupUnpack: 'Ungroup',
+    groupUnpacked: 'Group dissolved — its steps are back on the canvas.',
+    groupPack: 'Group selected steps',
+    groupDefaultName: 'Group',
+    groupPackTooFew: 'Select at least two steps to group. {count} selected.',
+    groupPackNotAChain:
+      'The selected steps are not one continuous chain, so they cannot fold into a single group.',
+    groupPackStrayConnection:
+      'The selection still connects to blocks outside it. Remove those connections first.',
+    groupPackForbiddenChild: '"{blockId}" cannot be a step inside a group.',
   },
   zh: {
     editor: '编辑',
@@ -471,22 +526,69 @@ export const EDITOR_STRINGS = {
     // — 右下角悬浮的 AI 算子助手 —
     operatorAiFabLabel: 'AI',
     operatorAiTitle: 'AI 算子助手',
-    operatorAiHint: '每次回复都会追加到流程末尾，「撤销」只移除这一次回复新增的算子。',
+    operatorAiHint:
+      '未选中算子时，回复会追加到流程末尾；选中某个步骤时，助手可以就地修改或替换它。「撤销」只回退上一次落地的改动。',
     operatorAiEmptyState: '描述你需要的步骤，例如「打开 https://www.baidu.com 并搜索 X」。',
     operatorAiPlaceholder: '描述下一步…',
     operatorAiSend: '发送',
     operatorAiStop: '停止',
     operatorAiThinking: '正在挑选算子…',
     operatorAiAdded: '已向流程添加 {count} 个算子',
+    operatorAiChangedInPlace: '已更新所选步骤',
+    operatorAiEdited: '助手已更新所选步骤。',
+    operatorAiReplaced: '助手已把所选步骤替换为 {name}。',
     operatorAiUndo: '撤销',
     operatorAiUndone: '已撤销助手刚添加的算子。',
+    operatorAiNodeUndone: '已恢复助手刚修改的步骤。',
     operatorAiMissingParams: '已添加，但缺少必填参数：{keys}',
     operatorAiRejected: '已跳过当前工作流无法使用的算子：{names}',
+    operatorAiPrunedPorts:
+      '新算子没有这些输出端口，相关连线已删除：{ports}，请检查该步骤之后的流程。',
     operatorAiFailed: 'AI 助手未能给出结果',
     operatorAiBranchAnchor:
       '所选算子分出了多条分支，请选择其中一个分支上的步骤后再问，助手不会替你猜走哪条。',
     operatorAiEmptyGraph: '请先添加触发器或第一个步骤，再让助手补充算子。',
     operatorAiAnchorGone: '要跟随的那个算子已不在画布上，本次没有添加任何算子。',
+    operatorAiNoSelection: '助手按「修改某个步骤」回答了，但当前没有选中任何算子，请先选中再问。',
+    operatorAiTargetGone: '要修改的算子已不在画布上，本次没有做任何改动。',
+    operatorAiOneProposalOnly: '就地修改需要一个算子的回答，本次回答不符合要求，没有做任何改动。',
+    operatorAiEditOtherBlock:
+      '修改步骤必须保持原算子，但回答指定了别的算子，因此没有改动；请改为要求替换该步骤。',
+    operatorAiReplaceSameBlock: '回答指定的算子与该步骤相同，无需替换。',
+    operatorAiReplaceUnofferable: '助手不能把步骤替换成触发器或云端算子，本次没有替换。',
+    operatorAiReplaceEntry: '流程的第一个步骤是入口，助手不会替换它。',
+    operatorAiPageUsed: '参数按〈{title}〉页面填写',
+    operatorAiPageNone: '本次未读取页面，参数完全依据你的描述填写。',
+    operatorAiPageOn: '正在读取当前页面以获取参数，点击可停止读取。',
+    operatorAiPageOff: '未读取页面，点击后助手会重新读取。',
+    operatorAiPageToggleOn: '读取页面',
+    operatorAiPageToggleOff: '不读页面',
+    operatorAiOfferQuestion:
+      '这些步骤还缺少页面参数：{keys}。要不要先在页面上做一次，再按页面真实的定位添加？',
+    operatorAiOfferAct: '先做一次再添加',
+    operatorAiOfferActHint: '会在当前窗口对页面把这些步骤各执行一次——可能点击、输入或跳转。',
+    operatorAiOfferLand: '直接添加',
+    operatorAiOfferNoUndo: '撤销只会移除这些步骤——助手在页面上已经做的操作不会被撤回。',
+    operatorAiOfferRefused: '这些操作它不会执行：{names}',
+    operatorAiOfferSkipped: '未执行：{names}',
+    operatorAiOfferWaiting: '请先回答上方的选择',
+    operatorAiOfferRan: '已在页面执行',
+    operatorAiOfferFailed: '未执行',
+    // 分组算子（blocks-group）——节点内子块列表与打包 / 解组。
+    groupNamePlaceholder: '分组名称',
+    groupChildrenEmpty: '还没有步骤。把算子拖到这个节点上即可添加。',
+    groupChildMoveUp: '上移',
+    groupChildMoveDown: '下移',
+    groupChildEdit: '编辑步骤',
+    groupChildDelete: '移除步骤',
+    groupUnpack: '解组',
+    groupUnpacked: '分组已解散，其中的步骤已回到画布。',
+    groupPack: '将选中步骤打包成组',
+    groupDefaultName: '分组',
+    groupPackTooFew: '至少选中两个步骤才能成组，当前选中 {count} 个。',
+    groupPackNotAChain: '选中的步骤不是一条连续的链路，无法折叠成一个分组。',
+    groupPackStrayConnection: '选中范围仍与外部的算子相连，请先删除这些连线。',
+    groupPackForbiddenChild: '「{blockId}」不能作为分组的内部步骤。',
   },
 } as const satisfies Record<EditorLocale, Record<string, string>>
 

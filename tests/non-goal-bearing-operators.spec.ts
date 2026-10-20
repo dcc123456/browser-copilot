@@ -4,8 +4,9 @@
  *
  * `notification` / `webhook` / `export-data` act on the outside world and leave
  * no page state behind, so nothing may be INVENTED for them — an invented row
- * can only ever bar certification. A contract the model recorded itself still
- * wins, so real evidence is never thrown away.
+ * can only ever bar certification. `blocks-group` and `note` are structural
+ * (a container / documentation), for the same reason. A contract the model
+ * recorded itself still wins, so real evidence is never thrown away.
  */
 import { describe, expect, it } from 'vitest'
 import { NON_GOAL_BEARING_BLOCK_IDS } from '../src/lib/workflow/operator-class'
@@ -20,9 +21,11 @@ const contract = {
 }
 
 describe('operators that bear no goal', () => {
-  it('classifies exactly the fire-and-done operators', () => {
+  it('classifies exactly the fire-and-done and structural operators', () => {
     expect([...NON_GOAL_BEARING_BLOCK_IDS].sort()).toEqual([
+      'blocks-group',
       'export-data',
+      'note',
       'notification',
       'webhook',
     ])
@@ -47,6 +50,10 @@ describe('operators that bear no goal', () => {
     // `variableName` used to be enough for a 「变量存在」 row.
     expect(
       resolveNodeGoalContract('export-data', { dataToExport: 'variable', variableName: 'csv' }),
+    ).toBeUndefined()
+    // A container is not an action: naming it is not a goal to verify.
+    expect(
+      resolveNodeGoalContract('blocks-group', { name: '收集列表', blocks: [] }),
     ).toBeUndefined()
   })
 
@@ -85,6 +92,12 @@ describe('operators that bear no goal', () => {
             label: 'export-data',
             position: { x: 0, y: 0 },
             data: { blockId: 'export-data', name: 'x.csv' },
+          },
+          {
+            id: 'd',
+            label: 'blocks-group',
+            position: { x: 0, y: 0 },
+            data: { blockId: 'blocks-group', name: '收集列表', blocks: [] },
           },
         ],
         edges: [],

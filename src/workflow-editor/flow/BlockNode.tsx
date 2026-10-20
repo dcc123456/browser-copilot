@@ -23,11 +23,12 @@ import {
   Trash2,
   TriangleAlert,
 } from 'lucide-react'
-import { memo } from 'react'
+import { memo, type ReactNode } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { BlockIcon } from '../../lib/workflow/blocks/icons'
 import { Target } from 'lucide-react'
 import { nodeAddedByAi, nodeGoalContractOf } from '../../lib/workflow/node-goal-contract'
+import { branchHandlesFor, errorFallbackDrawn } from '../../lib/workflow/block-ports'
 import { conditionPathsOf } from '../../lib/workflow/condition-tree'
 import { OCR_SUPPORTED } from '../../lib/ocr-support'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
@@ -66,15 +67,21 @@ export interface BlockNodeData extends Record<string, unknown> {
  * Revealed on node hover; buttons carry the `nodrag` class so React Flow never
  * starts a canvas drag from a toolbar click, and every click stops propagation
  * so the node isn't selected/dragged as a side effect.
+ *
+ * Exported because the group container renders the same menu with one extra
+ * action (see GroupNode) rather than a second copy of it.
  */
-function NodeToolbar({
+export function NodeToolbar({
   id,
   disabled,
   actions,
+  extra,
 }: {
   id: string
   disabled: boolean
   actions?: BlockNodeActions
+  /** Node-specific action shown after the standard ones. */
+  extra?: ReactNode
 }) {
   const { t } = useEditorLocale()
   if (!actions) return null
@@ -107,67 +114,9 @@ function NodeToolbar({
       <button type="button" title={t('nodeEdit')} onClick={stop(actions.onEdit)}>
         <Pencil size={14} />
       </button>
+      {extra}
     </div>
   )
-}
-
-/** Handle suffix a conditions block's "no path matched" output uses. It is
- *  deliberately NOT `output-fallback`: that id already means "route here when
- *  the block errors" (the onError policy), and a node must never render two
- *  handles under one id. */
-const CONDITIONS_NONE_SUFFIX = 'output-none'
-
-/** Fixed branch ports (exists/not, loop/end), English labels matching Automa.
- *  The conditions block is absent on purpose — its ports are per-path, derived
- *  from its data by {@link branchHandlesFor}. */
-const BRANCH_HANDLES: Record<string, { idSuffix: string; label: string }[]> = {
-  'element-exists': [
-    { idSuffix: 'output-1', label: 'exists' },
-    { idSuffix: 'output-2', label: 'not exists' },
-  ],
-  'loop-data': [
-    { idSuffix: 'output-1', label: 'loop' },
-    { idSuffix: 'output-2', label: 'end' },
-  ],
-  'loop-elements': [
-    { idSuffix: 'output-1', label: 'loop' },
-    { idSuffix: 'output-2', label: 'end' },
-  ],
-  'while-loop': [
-    { idSuffix: 'output-1', label: 'loop' },
-    { idSuffix: 'output-2', label: 'end' },
-  ],
-}
-
-/**
- * The branch ports a block renders, in draw order, or `null` when it has the
- * single default output. The conditions block is data-driven: one port per
- * configured path, named by the path, plus the always-present "no path matched"
- * port. Exported so `healEdgeHandles` validates stored handle ids against the
- * very same list the canvas draws.
- */
-export function branchHandlesFor(
-  block: { id: string; outputs?: number },
-  blockData: Record<string, unknown> | undefined,
-): { idSuffix: string; label: string }[] | null {
-  if (block.id === 'conditions') {
-    const paths = conditionPathsOf(blockData?.['paths'])
-    return [
-      ...paths.map((path, index) => ({
-        idSuffix: `output-${path.id}`,
-        label: path.name || `Path ${index + 1}`,
-      })),
-      { idSuffix: CONDITIONS_NONE_SUFFIX, label: 'fallback' },
-    ]
-  }
-  const branches = BRANCH_HANDLES[block.id]
-  if (branches) return branches
-  return block.id === 'repeat-task' && block.outputs === 2
-    ? [
-        { idSuffix: 'output-1', label: 'loop' },
-        { idSuffix: 'output-2', label: 'end' },
-      ]
-    : null
 }
 
 function BlockNodeComponent({ id, data, selected }: NodeProps) {
@@ -181,8 +130,7 @@ function BlockNodeComponent({ id, data, selected }: NodeProps) {
   // Grayed out when the user disabled the block — or in the no-ocr build for
   // OCR-only operators (requiresOcr; execution refuses with an explicit error).
   const disabled = bd.disableBlock === true || (block.requiresOcr === true && !OCR_SUPPORTED)
-  const onError = bd.onError as { enable?: boolean; toDo?: string } | undefined
-  const hasFallback = onError?.enable === true && onError?.toDo === 'fallback'
+  const hasFallback = errorFallbackDrawn(bd)
   const displayName = blockName(block.id, block.name)
   const description = typeof bd.description === 'string' ? bd.description : ''
   // A conditions block's shape IS its branch count, so say it on the node.

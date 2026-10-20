@@ -3118,11 +3118,6 @@ const note: BlockExecutor = async (data, ctx) => {
   return null
 }
 
-const blocksGroup: BlockExecutor = async (_data) => {
-  // A group is a structural container — its body routes via its outgoing edge.
-  return null
-}
-
 // --- Phase 1: form reading / radio ------------------------------------------
 
 const getForm: BlockExecutor = async (data, ctx) => {
@@ -3516,7 +3511,6 @@ export const EXECUTORS: Record<string, BlockExecutor> = {
   'google-drive': googleDrive,
   'wait-connections': waitConnections,
   note: note,
-  'blocks-group': blocksGroup,
   // Automa-catalog ids produced by the editor / recorder.
   trigger: noop,
   'event-click': eventClick,

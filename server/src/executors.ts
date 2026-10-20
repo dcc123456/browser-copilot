@@ -1948,8 +1948,6 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     return null
   }
 
-  const blocksGroup: BlockExecutor = async () => null
-
   const getForm: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const variable = String(data['variableName'] ?? 'lastForm')
@@ -2231,7 +2229,6 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     'google-drive': unsupportedCloud('google-drive'),
     'wait-connections': waitConnections,
     note: note,
-    'blocks-group': blocksGroup,
     // Automa-catalog ids produced by the editor / recorder.
     trigger: noop,
     'event-click': eventClick,

@@ -118,8 +118,8 @@ import {
   type Skill,
   type UserProfile,
 } from '../lib/types'
-import { locatorHintOf } from '../lib/ops'
-import type { Op, OpResult, Target } from '../lib/ops'
+import { SNAPSHOT_ELEMENT_HARD_CAP, SNAPSHOT_ELEMENT_LIMIT, summarizeSnapshot } from '../lib/ops'
+import type { Op, OpResult, PageSnapshot, Target } from '../lib/ops'
 import {
   DriverError,
   closeActiveTab,
@@ -2363,91 +2363,6 @@ function hostOf(url: string | undefined): string | undefined {
 }
 
 /**
- * Default element budget for a snapshot sent to the model. Kept lean because a
- * snapshot is re-sent on every later round.
- */
-const SNAPSHOT_ELEMENT_LIMIT = 80
-
-/**
- * Hard ceiling on elements returned even when the caller asks for more. A
- * takeover agent may raise `maxElements` (long pages, target below the fold);
- * without this the old 80-element cap silently discarded the extra elements
- * the agent explicitly requested.
- */
-const SNAPSHOT_ELEMENT_HARD_CAP = 250
-
-/** Redacts a snapshot to a model-friendly size: targets + labels, no giant text. */
-function summarizeSnapshot(
-  snapshot: {
-    url: string
-    title: string
-    elements: Array<{
-      ref: string
-      role: string
-      name: string
-      tag: string
-      type?: string
-      value?: string
-      placeholder?: string
-      disabled?: boolean
-      checked?: boolean
-      required?: boolean
-      inViewport: boolean
-      target?: unknown
-    }>
-    forms: unknown
-    scrollY: number
-    scrollHeight: number
-    viewportHeight: number
-    text: string
-    truncated: boolean
-    elementsTruncated: boolean
-  },
-  elementLimit = SNAPSHOT_ELEMENT_LIMIT,
-): unknown {
-  const limit = Math.max(1, Math.min(SNAPSHOT_ELEMENT_HARD_CAP, Math.floor(elementLimit) || 1))
-  const elements = snapshot.elements.slice(0, limit).map((el) => {
-    // Compact locator hint (#id / [data-testid] / [name]): the ONLY stable
-    // handle the model can copy into a block's `selector` param when it
-    // proposes a fix. Few tokens, only for genuinely stable specs.
-    const loc = locatorHintOf(el.target)
-    return {
-      ref: el.ref,
-      role: el.role,
-      name: el.name,
-      tag: el.tag,
-      ...(el.type ? { type: el.type } : {}),
-      ...(el.value !== undefined ? { value: el.value } : {}),
-      ...(el.placeholder ? { placeholder: el.placeholder } : {}),
-      ...(el.disabled ? { disabled: true } : {}),
-      ...(el.checked !== undefined ? { checked: el.checked } : {}),
-      ...(el.required ? { required: true } : {}),
-      inViewport: el.inViewport,
-      ...(loc ? { loc } : {}),
-    }
-  })
-  // Keep the text but cap it hard: a snapshot is re-sent on every later round
-  // and the model's locators come from the elements, not the prose.
-  const text =
-    snapshot.text.length > 3000 ? `${snapshot.text.slice(0, 3000)}…[truncated]` : snapshot.text
-  return {
-    url: snapshot.url,
-    title: snapshot.title,
-    text,
-    truncated: snapshot.truncated,
-    elementsTruncated: snapshot.elementsTruncated || snapshot.elements.length > limit,
-    elements,
-    forms: snapshot.forms,
-    scroll: {
-      y: snapshot.scrollY,
-      total: snapshot.scrollHeight,
-      viewport: snapshot.viewportHeight,
-      remaining: Math.max(0, snapshot.scrollHeight - snapshot.scrollY - snapshot.viewportHeight),
-    },
-  }
-}
-
-/**
  * Cap on the page/snapshot text kept in a single tool result that lands in the
  * transcript. The raw read can be up to ~12k chars; once it is in history every
  * later round re-sends it, so we keep a tighter budget here. Element refs/labels
@@ -2476,20 +2391,8 @@ function compactPageRead(page: {
   }
 }
 
-function compactSnapshot(
-  snapshot: Parameters<typeof summarizeSnapshot>[0],
-  elementLimit = SNAPSHOT_ELEMENT_LIMIT,
-): unknown {
-  const summarized = summarizeSnapshot(snapshot, elementLimit) as {
-    url: string
-    title: string
-    text: string
-    truncated: boolean
-    elementsTruncated: boolean
-    elements: unknown[]
-    forms: unknown
-    scroll: unknown
-  }
+function compactSnapshot(snapshot: PageSnapshot, elementLimit = SNAPSHOT_ELEMENT_LIMIT): unknown {
+  const summarized = summarizeSnapshot(snapshot, { elementLimit })
   const text =
     summarized.text.length > TRANSCRIPT_TEXT_CAP
       ? `${summarized.text.slice(0, TRANSCRIPT_TEXT_CAP)}…[truncated]`

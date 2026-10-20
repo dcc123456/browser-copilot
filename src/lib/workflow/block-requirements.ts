@@ -31,6 +31,7 @@
 import { richTargetFromAny } from './target-to-selector'
 import { secretRequestsOf } from './secret-params'
 import { conditionPathsOf, hasConditionGroups } from './condition-tree'
+import { BLOCK_BY_ID } from './blocks/palette'
 
 /** One missing-parameter finding. `key` is the parameter to blame. */
 export interface RequirementProblem {
@@ -91,13 +92,24 @@ export function hasLocator(data: Record<string, unknown>): boolean {
 
 /**
  * Whether this block REQUIRES an element locator. Distinct from "can take one"
- * (`blockTakesElement`, which reflects `refDataKeys`): `press-key` and
+ * ({@link blockTakesElement}, which reflects `refDataKeys`): `press-key` and
  * `element-scroll` accept an optional `selector` but work without one, so only
  * the blocks carrying a `locator` requirement in the table must be refused when
  * their locator resolves to nothing.
  */
 export function requiresLocator(blockId: string): boolean {
   return REQUIREMENTS[blockId]?.locator !== undefined
+}
+
+/**
+ * Whether this block reads an ELEMENT of the page — its catalogue entry lists a
+ * `selector` among `refDataKeys`. The record gate uses it to decide whether a
+ * `ref`/`target` argument means anything at all; the editor's assistant uses it
+ * to decide whether acting on the page once could supply a parameter it cannot
+ * invent (a locator, an option label), so both read ONE predicate (§5.2).
+ */
+export function blockTakesElement(blockId: string): boolean {
+  return (BLOCK_BY_ID.get(blockId)?.refDataKeys ?? []).includes('selector')
 }
 
 const LOCATOR_MESSAGE =
