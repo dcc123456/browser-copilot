@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Switch } from '../../../../src/ui/Switch'
 import {
   api,
   ApiError,
@@ -611,14 +612,14 @@ function ScheduleModal({
         )}
 
         {form.kind !== 'manual' && (
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
+          <div className="flex items-center gap-2 text-sm">
+            <Switch
+              ariaLabel="启用定时触发"
               checked={form.enabled}
-              onChange={(event) => setForm({ ...form, enabled: event.target.checked })}
+              onChange={(enabled) => setForm({ ...form, enabled })}
             />
             启用定时触发
-          </label>
+          </div>
         )}
 
         {error && <Notice>{error}</Notice>}

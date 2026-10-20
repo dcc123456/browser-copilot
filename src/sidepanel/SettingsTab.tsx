@@ -48,6 +48,7 @@ import { ADAPTER_ASSET_PATH, ADAPTER_EXPORT_FILENAME, buildMcpSnippet } from '..
 import { OCR_SUPPORTED } from '../lib/ocr-support'
 import NumberInput from '../ui/NumberInput'
 import FormDialog, { FormDialogCancelButton, FormDialogPrimaryButton } from '../ui/FormDialog'
+import { Switch } from '../ui/Switch'
 import { useI18n, useT } from './i18n'
 
 /** Editable form state; numbers stay strings so partial input is allowed. */
@@ -1636,34 +1637,28 @@ export default function SettingsTab({ onLocaleChange }: Props) {
           })}
         </p>
 
-        <label className="checkbox">
-          <input
-            checked={settings.takeoverOnRun}
-            onChange={(event) =>
-              void mutate({
-                type: 'settings.set',
-                patch: { takeoverOnRun: event.target.checked },
-              })
-            }
-            type="checkbox"
-          />
-          {t.settingsTakeoverOnRun}
-        </label>
+        <Switch
+          checked={settings.takeoverOnRun}
+          label={t.settingsTakeoverOnRun}
+          onChange={(takeoverOnRun) =>
+            void mutate({
+              type: 'settings.set',
+              patch: { takeoverOnRun },
+            })
+          }
+        />
         <p className="hint">{t.settingsTakeoverOnRunIntro}</p>
 
-        <label className="checkbox">
-          <input
-            checked={settings.autoRepairOnRun}
-            onChange={(event) =>
-              void mutate({
-                type: 'settings.set',
-                patch: { autoRepairOnRun: event.target.checked },
-              })
-            }
-            type="checkbox"
-          />
-          {t.settingsAutoRepairOnRun}
-        </label>
+        <Switch
+          checked={settings.autoRepairOnRun}
+          label={t.settingsAutoRepairOnRun}
+          onChange={(autoRepairOnRun) =>
+            void mutate({
+              type: 'settings.set',
+              patch: { autoRepairOnRun },
+            })
+          }
+        />
         <p className="hint">{t.settingsAutoRepairOnRunIntro}</p>
 
         <div className="actions">
@@ -1930,9 +1925,16 @@ export default function SettingsTab({ onLocaleChange }: Props) {
               {TOOL_META.map((meta) => {
                 const disabled = settings.disabledTools.includes(meta.name)
                 return (
-                  <label className="checkbox tool-toggle" key={meta.name}>
-                    <input
+                  <div className="flex items-start gap-2" key={meta.name}>
+                    <Switch
                       checked={!disabled}
+                      label={
+                        <span className="flex flex-col gap-0.5">
+                          <b>{t[meta.labelKey]}</b>
+                          <code className="tool-name">{meta.name}</code>
+                          <span className="tool-warn">{t[meta.warningKey]}</span>
+                        </span>
+                      }
                       onChange={() => {
                         const next = disabled
                           ? settings.disabledTools.filter((n) => n !== meta.name)
@@ -1942,14 +1944,8 @@ export default function SettingsTab({ onLocaleChange }: Props) {
                           patch: { disabledTools: next },
                         })
                       }}
-                      type="checkbox"
                     />
-                    <span>
-                      <b>{t[meta.labelKey]}</b>
-                      <code className="tool-name">{meta.name}</code>
-                      <span className="tool-warn">{t[meta.warningKey]}</span>
-                    </span>
-                  </label>
+                  </div>
                 )
               })}
             </div>
@@ -2168,19 +2164,16 @@ export default function SettingsTab({ onLocaleChange }: Props) {
       <div className="card">
         <div className="card-title">{t.settingsLocalAgent}</div>
         <p className="hint">{t.settingsLocalAgentIntro}</p>
-        <label className="checkbox">
-          <input
-            checked={settings.localAgentEnabled}
-            onChange={(event) =>
-              void mutate({
-                type: 'settings.set',
-                patch: { localAgentEnabled: event.target.checked },
-              })
-            }
-            type="checkbox"
-          />
-          {t.settingsLocalAgentEnable}
-        </label>
+        <Switch
+          checked={settings.localAgentEnabled}
+          label={t.settingsLocalAgentEnable}
+          onChange={(localAgentEnabled) =>
+            void mutate({
+              type: 'settings.set',
+              patch: { localAgentEnabled },
+            })
+          }
+        />
         {settings.localAgentEnabled && (
           <>
             {/* Compact status badge; errors surface as a red dot + short hint. */}
@@ -2318,19 +2311,16 @@ export default function SettingsTab({ onLocaleChange }: Props) {
           </label>
           <p className="hint error">{t.settingsLocalAgentWarning}</p>
 
-          <label className="checkbox">
-            <input
-              checked={settings.localAgentAllowReload}
-              onChange={(event) =>
-                void mutate({
-                  type: 'settings.set',
-                  patch: { localAgentAllowReload: event.target.checked },
-                })
-              }
-              type="checkbox"
-            />
-            {t.settingsLocalAgentAllowReload}
-          </label>
+          <Switch
+            checked={settings.localAgentAllowReload}
+            label={t.settingsLocalAgentAllowReload}
+            onChange={(localAgentAllowReload) =>
+              void mutate({
+                type: 'settings.set',
+                patch: { localAgentAllowReload },
+              })
+            }
+          />
           <p className="hint">{t.settingsLocalAgentAllowReloadHint}</p>
 
           <div className="mt-3 rounded-lg border border-border bg-panel-2 p-3">

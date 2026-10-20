@@ -16,6 +16,7 @@ import type { ScheduledTask } from '../lib/scheduler-types'
 import type { Workflow } from '../lib/workflow/types'
 import { useT } from './i18n'
 import NumberInput from '../ui/NumberInput'
+import { Switch } from '../ui/Switch'
 
 /** Editable form state. */
 type Draft = ScheduledTask
@@ -389,14 +390,11 @@ export default function TaskEditDialog({
             {t.taskNotifyFeishu}
           </label>
           {!isManual && (
-            <label className="inline-check">
-              <input
-                checked={task.enabled}
-                onChange={(event) => update('enabled', event.target.checked)}
-                type="checkbox"
-              />
-              {t.taskEnabled}
-            </label>
+            <Switch
+              checked={task.enabled}
+              label={t.taskEnabled}
+              onChange={(enabled) => update('enabled', enabled)}
+            />
           )}
         </div>
         <p className="hint option-hint">{t.taskMaxRoundsHint}</p>

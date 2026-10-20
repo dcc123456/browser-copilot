@@ -25,6 +25,7 @@
     "../src/background/workflow-engine/loop-breakpoint.ts",
     "../src/inpage/kernel.ts",
     "../src/inpage/kernel-version.ts",
+    "../src/ui/Switch.tsx",
     "../src/lib/**/*.ts"
   ]
 }

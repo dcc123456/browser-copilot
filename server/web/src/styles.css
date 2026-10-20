@@ -7,6 +7,11 @@
 */
 @import 'tailwindcss';
 
+/* The shared switch lives in the extension's source tree, outside this app's
+   root, so Tailwind's automatic source detection never sees its utility
+   classes — without this the control renders unstyled here. */
+@source '../../../src/ui/Switch.tsx';
+
 @theme inline {
   --color-bg: var(--bc-bg);
   --color-panel: var(--bc-panel);

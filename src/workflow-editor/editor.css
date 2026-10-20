@@ -924,65 +924,6 @@
   font-size: 12px;
 }
 
-/* switch — Automa UiSwitch: h-6 w-12 track (bg-input), accent layer slides in
-   from the left when checked, 16px ball 6px → calc(100% - 21px), press-scale */
-.wf-switch {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 48px;
-  height: 24px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--we-text) 5%, transparent);
-  position: relative;
-  cursor: pointer;
-  overflow: hidden;
-  transition: transform 0.25s ease;
-  flex: none;
-  margin: 0;
-}
-.wf-switch::before {
-  /* checked background layer (ui-switch__background) sliding in */
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 100%;
-  height: 100%;
-  border-radius: 999px;
-  background: var(--we-accent);
-  margin-left: -100%;
-  transition: margin-left 0.25s ease;
-}
-.wf-switch::after {
-  content: '';
-  position: absolute;
-  top: 4px;
-  left: 6px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-  transition:
-    left 0.25s ease,
-    transform 0.25s ease,
-    background 0.25s ease;
-  z-index: 1;
-}
-.wf-switch:hover::after {
-  transform: scale(1.1);
-}
-.wf-switch:active {
-  transform: scale(0.93);
-}
-.wf-switch:checked::before {
-  margin-left: 0;
-}
-.wf-switch:checked::after {
-  left: 27px;
-  background: var(--we-bg);
-}
-
 /* expand (collapsible section) — Automa ui-expand: bare header, no card */
 .wf-expand {
   margin: 8px 0;
@@ -2029,11 +1970,6 @@
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-}
-
-/* Switch rows: text vertically centred against the 24px track */
-.wf-field-check:has(.wf-switch) {
-  align-items: center;
 }
 
 /* Selector options fold-out — multiple + markEl share one row (Automa mr-6) */

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Switch } from '../../../../src/ui/Switch'
 import { api, setToken, type ConfigResponse, type ConfigView } from '../api'
 import { Badge, Btn, Card, Field, Notice, inputClass } from '../ui'
 
@@ -227,14 +228,14 @@ export function SettingsPage({ onTokenChanged }: { onTokenChanged: () => void })
         }
       >
         <div className="grid gap-3 md:grid-cols-2">
-          <label className="flex items-center gap-2 text-sm md:col-span-2">
-            <input
-              type="checkbox"
+          <div className="flex items-center gap-2 text-sm md:col-span-2">
+            <Switch
+              ariaLabel="启用飞书长连接机器人"
               checked={feishuBotEnabled}
-              onChange={(event) => setFeishuBotEnabled(event.target.checked)}
+              onChange={setFeishuBotEnabled}
             />
             启用飞书长连接机器人（私聊 /workflow 运行、/runs 查看）
-          </label>
+          </div>
           <Field label="App ID" hint={<EnvWarn field="feishu.appId" overrides={overrides} />}>
             <input
               className={inputClass}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Switch } from '../../../../src/ui/Switch'
 import { api, type ScheduleEntry } from '../api'
 import { Badge, Btn, Card, Empty, Notice, formatTime } from '../ui'
 
@@ -94,13 +95,13 @@ export function SchedulesPage({ go }: { go: (page: 'workflows') => void }) {
                     </Badge>
                   </td>
                   <td className="py-2">
-                    <div className="flex gap-1.5">
-                      <Btn
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        ariaLabel={entry.enabled ? '停用' : '启用'}
+                        checked={entry.enabled}
                         disabled={busyId === entry.workflowId}
-                        onClick={() => void toggle(entry)}
-                      >
-                        {entry.enabled ? '停用' : '启用'}
-                      </Btn>
+                        onChange={() => void toggle(entry)}
+                      />
                       <Btn onClick={() => go('workflows')}>去工作流 →</Btn>
                     </div>
                   </td>

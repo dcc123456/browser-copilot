@@ -23,6 +23,7 @@ import TaskEditDialog from './TaskEditDialog'
 import { useRowHighlight } from './hooks/useRowHighlight'
 import { useT } from './i18n'
 import { confirmDialog } from '../ui/confirm'
+import { Switch } from '../ui/Switch'
 
 /** Editable form state. */
 type Draft = ScheduledTask
@@ -244,20 +245,15 @@ export default function TasksTab() {
                 <div className="task-item-head">
                   {manual ? (
                     // A manual task has no schedule to enable/disable; show its
-                    // name plainly instead of an enable checkbox.
+                    // name plainly instead of an enable switch.
                     <strong className="task-item-name">{task.name}</strong>
                   ) : (
-                    <label className="inline-check">
-                      <input
-                        checked={task.enabled}
-                        disabled={busy || draft?.id === task.id}
-                        onChange={(event) =>
-                          void persistTask({ ...task, enabled: event.target.checked })
-                        }
-                        type="checkbox"
-                      />
-                      <strong className="task-item-name">{task.name}</strong>
-                    </label>
+                    <Switch
+                      checked={task.enabled}
+                      disabled={busy || draft?.id === task.id}
+                      label={<strong className="task-item-name">{task.name}</strong>}
+                      onChange={(enabled) => void persistTask({ ...task, enabled })}
+                    />
                   )}
                   <span className={`task-status task-status-${task.lastStatus ?? 'none'}`}>
                     {task.lastStatus === 'ok'
@@ -405,14 +401,12 @@ function FeishuSection({
 
       <hr />
 
-      <label className="inline-check">
-        <input
-          checked={config.botEnabled}
-          onChange={(event) => onChange({ ...config, botEnabled: event.target.checked })}
-          type="checkbox"
-        />
-        <strong>{t.tasksFeishuBot}</strong>
-      </label>
+      <Switch
+        checked={config.botEnabled}
+        disabled={disabled}
+        label={<strong>{t.tasksFeishuBot}</strong>}
+        onChange={(botEnabled) => onChange({ ...config, botEnabled })}
+      />
       {config.botEnabled && (
         <>
           <label className="field">

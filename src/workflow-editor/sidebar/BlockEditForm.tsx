@@ -19,7 +19,7 @@ import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
 import { operatorCarriesGoal } from '../../lib/workflow/operator-registry'
 import NumberInput from '../../ui/NumberInput'
 import { EditForms } from '../blocks/EditForms'
-import { Expand, TextArea, TextInput } from '../blocks/shared/Field'
+import { Expand, Switch, TextArea, TextInput } from '../blocks/shared/Field'
 import NodeGoalInspector from './NodeGoalInspector'
 import NodeFixModal from './NodeFixModal'
 import type { TranslateFn } from '../i18n'
@@ -74,14 +74,12 @@ function GenericForm({
         const value = data[key]
         if (typeof value === 'boolean') {
           return (
-            <label key={key} className="wf-field wf-field-check">
-              <input
-                type="checkbox"
-                checked={value}
-                onChange={(e) => onChange({ [key]: e.target.checked })}
-              />
-              <code>{key}</code>
-            </label>
+            <Switch
+              key={key}
+              checked={value}
+              label={<code>{key}</code>}
+              onChange={(next) => onChange({ [key]: next })}
+            />
           )
         }
         if (typeof value === 'number') {

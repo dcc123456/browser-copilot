@@ -17,6 +17,7 @@ import { ChevronLeft, Info, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useEditorLocale } from '../../locale-context'
 import NumberInput from '../../../ui/NumberInput'
+import { Switch as SharedSwitch } from '../../../ui/Switch'
 import { useFieldSlashMenu } from './SlashVariableMenu'
 
 /** Merge a partial patch into the block data (Automa's updateData). */
@@ -223,19 +224,13 @@ export function Switch({
   label?: ReactNode
 }) {
   return (
-    <label className="wf-field wf-field-check">
-      <input
-        type="checkbox"
-        className="wf-switch"
+    <span className="wf-field wf-field-check">
+      <SharedSwitch
         checked={!!checked}
-        onChange={(e) => onChange(e.target.checked)}
+        onChange={onChange}
+        label={label != null ? <LocalizedLabel label={label} /> : undefined}
       />
-      {label != null && (
-        <span>
-          <LocalizedLabel label={label} />
-        </span>
-      )}
-    </label>
+    </span>
   )
 }
 
