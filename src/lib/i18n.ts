@@ -831,12 +831,30 @@ export interface Messages {
   settingsShowKey: string
   settingsModel: string
   settingsModelsAvailable: (params: { count: number }) => string
+  settingsModelsAvailableToAdd: (params: { count: number }) => string
+  settingsModelAdd: string
+  settingsModelAddPlaceholder: (params: { model: string }) => string
+  settingsModelRemove: string
+  settingsModelActive: string
+  settingsModelActiveHint: string
+  settingsModelEmpty: string
+  settingsModelsAdded: (params: { count: number }) => string
   settingsImageModelSelectHint: string
   settingsShowAdvanced: string
   settingsHideAdvanced: string
   settingsTemperature: string
   settingsMaxTokens: string
   settingsProviderDefault: string
+  settingsThinkingEffort: string
+  settingsThinkingEffortDefault: string
+  settingsThinkingLevelOff: string
+  settingsThinkingLevelLow: string
+  settingsThinkingLevelMedium: string
+  settingsThinkingLevelHigh: string
+  settingsThinkingParamNote: (params: { param: string }) => string
+  settingsThinkingModelUnsupported: (params: { model: string }) => string
+  settingsThinkingUnverified: string
+  settingsThinkingUnsupportedError: (params: { detail: string }) => string
   settingsExtraHeaders: string
   settingsTest: string
   settingsTesting: string
@@ -1145,6 +1163,13 @@ export interface Messages {
   errorMaxTokensInteger: string
   errorHeadersJson: string
   errorHeadersObject: string
+  errorProviderLabel: string
+  errorProviderBaseUrlRequired: string
+  errorProviderBaseUrlScheme: string
+  errorProviderBaseUrlInvalid: string
+  errorProviderApiKey: string
+  errorProviderModelRequired: string
+  errorProviderModelNotAdded: string
 
   // --- New: chat message actions (copy / download) ---
   /** Generic copy button on a user/assistant message bubble. */
@@ -2035,6 +2060,15 @@ const en: Messages = {
   settingsModel: 'Model',
   settingsModelsAvailable: ({ count }) =>
     `${count} model(s) available — pick one from the dropdown.`,
+  settingsModelsAvailableToAdd: ({ count }) =>
+    `${count} model(s) available — add the ones you need.`,
+  settingsModelAdd: 'Add model',
+  settingsModelAddPlaceholder: ({ model }) => `Add a model, e.g. ${model}`,
+  settingsModelRemove: 'Remove',
+  settingsModelActive: 'In use',
+  settingsModelActiveHint: 'The model marked “in use” is the one requests are sent with.',
+  settingsModelEmpty: 'No model added yet.',
+  settingsModelsAdded: ({ count }) => `${count} model(s) added.`,
   settingsImageModelSelectHint:
     'Pick a model from the dropdown, or keep the provider default. Fetch the list first if it is empty.',
   settingsShowAdvanced: 'Show advanced',
@@ -2042,6 +2076,19 @@ const en: Messages = {
   settingsTemperature: 'Temperature',
   settingsMaxTokens: 'Max tokens',
   settingsProviderDefault: 'provider default',
+  settingsThinkingEffort: 'Thinking effort',
+  settingsThinkingEffortDefault: 'Provider default (nothing sent)',
+  settingsThinkingLevelOff: 'Off',
+  settingsThinkingLevelLow: 'Low',
+  settingsThinkingLevelMedium: 'Medium',
+  settingsThinkingLevelHigh: 'High',
+  settingsThinkingParamNote: ({ param }) => `Will send: ${param}`,
+  settingsThinkingModelUnsupported: ({ model }) =>
+    `Model ${model} does not support thinking effort; the saved setting will not take effect.`,
+  settingsThinkingUnverified:
+    'This endpoint carries no vendor information, so whether the model supports thinking effort cannot be confirmed. If a request fails, switch back to "Provider default".',
+  settingsThinkingUnsupportedError: ({ detail }) =>
+    `The model does not support thinking effort. Switch it back to "Provider default" or use a different model. Provider said: ${detail}`,
   settingsExtraHeaders: 'Extra headers JSON',
   settingsTest: 'Test connection',
   settingsTesting: 'Testing…',
@@ -2361,6 +2408,13 @@ const en: Messages = {
   errorMaxTokensInteger: 'Max tokens must be a positive whole number.',
   errorHeadersJson: 'Extra headers must be valid JSON.',
   errorHeadersObject: 'Extra headers must be a JSON object.',
+  errorProviderLabel: 'Give this provider a name.',
+  errorProviderBaseUrlRequired: 'Base URL is required.',
+  errorProviderBaseUrlScheme: 'Base URL must start with http:// or https://.',
+  errorProviderBaseUrlInvalid: 'Base URL is not a valid URL.',
+  errorProviderApiKey: 'API key is required.',
+  errorProviderModelRequired: 'Add at least one model.',
+  errorProviderModelNotAdded: 'The model in use must be one of the added models.',
 
   // --- New: chat message actions (en) ---
   msgCopy: 'Copy',
@@ -3254,6 +3308,14 @@ const zhCN: Messages = {
   settingsShowKey: '显示密钥',
   settingsModel: '模型',
   settingsModelsAvailable: ({ count }) => `共 ${count} 个可用模型，请从下拉列表中选择。`,
+  settingsModelsAvailableToAdd: ({ count }) => `共 ${count} 个可用模型，请添加需要的模型。`,
+  settingsModelAdd: '添加模型',
+  settingsModelAddPlaceholder: ({ model }) => `添加模型，例如 ${model}`,
+  settingsModelRemove: '移除',
+  settingsModelActive: '使用中',
+  settingsModelActiveHint: '标记为“使用中”的模型才是实际发起请求所用的模型。',
+  settingsModelEmpty: '尚未添加模型。',
+  settingsModelsAdded: ({ count }) => `已添加 ${count} 个模型。`,
   settingsImageModelSelectHint:
     '从下拉列表中选择模型；若列表为空请先点击“获取模型列表”。留空使用该 provider 的默认模型。',
   settingsShowAdvanced: '显示高级选项',
@@ -3261,6 +3323,19 @@ const zhCN: Messages = {
   settingsTemperature: '温度',
   settingsMaxTokens: '最大 token 数',
   settingsProviderDefault: '使用服务默认值',
+  settingsThinkingEffort: '思考强度',
+  settingsThinkingEffortDefault: '使用服务默认值（不下发参数）',
+  settingsThinkingLevelOff: '关闭',
+  settingsThinkingLevelLow: '低',
+  settingsThinkingLevelMedium: '中',
+  settingsThinkingLevelHigh: '高',
+  settingsThinkingParamNote: ({ param }) => `将下发：${param}`,
+  settingsThinkingModelUnsupported: ({ model }) =>
+    `模型 ${model} 不支持思考强度，保存的配置不会生效。`,
+  settingsThinkingUnverified:
+    '该端点没有厂商信息，无法确认模型是否支持思考强度；若请求失败，请改回「使用服务默认值」。',
+  settingsThinkingUnsupportedError: ({ detail }) =>
+    `模型不支持思考强度配置。请把思考强度改回「使用服务默认值」或更换模型。厂商返回：${detail}`,
   settingsExtraHeaders: '额外请求头（JSON）',
   settingsTest: '测试连接',
   settingsTesting: '测试中…',
@@ -3554,6 +3629,13 @@ const zhCN: Messages = {
   errorMaxTokensInteger: '最大 token 数必须是正整数。',
   errorHeadersJson: '额外请求头必须是合法的 JSON。',
   errorHeadersObject: '额外请求头必须是 JSON 对象。',
+  errorProviderLabel: '请填写该供应商的名称。',
+  errorProviderBaseUrlRequired: '必须填写接口地址。',
+  errorProviderBaseUrlScheme: '接口地址必须以 http:// 或 https:// 开头。',
+  errorProviderBaseUrlInvalid: '接口地址不是合法 URL。',
+  errorProviderApiKey: '必须填写 API 密钥。',
+  errorProviderModelRequired: '请至少添加一个模型。',
+  errorProviderModelNotAdded: '使用中的模型必须来自已添加的模型。',
 
   // --- New: chat message actions (zh-CN) ---
   msgCopy: '复制',

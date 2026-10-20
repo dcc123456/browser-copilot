@@ -127,6 +127,7 @@ function defaultCallModel(signal: AbortSignal, attribution: TokenAttribution) {
         model: provider.model,
         attribution,
         headers: provider.headers,
+        ...(provider.thinkingEffort ? { thinking: provider.thinkingEffort } : {}),
         // One request carries everything: the digest, the offer and the
         // conversation. Same shape as the AI Fix call, so a follow-up message
         // reads as a continuation of the transcript the prompt already holds.

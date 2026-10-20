@@ -5142,6 +5142,7 @@ export async function runAgentTurn(
             ? { temperature: provider.temperature }
             : {}),
           ...(typeof provider.maxTokens === 'number' ? { maxTokens: provider.maxTokens } : {}),
+          ...(provider.thinkingEffort ? { thinking: provider.thinkingEffort } : {}),
           ...(deps.signal ? { signal: deps.signal } : {}),
         },
         {

@@ -34,6 +34,7 @@ import { targetFrom } from '../executors'
 import { inspectPage } from '../page-inspect'
 import { nodeReliabilityOf } from '../../../lib/workflow/reliability'
 import { entityKeyFor } from '../../../lib/token-ledger'
+import type { ThinkingLevel } from '../../../lib/thinking'
 import { commitWorkflowRevision } from '../../../lib/workflow/workflow-revision'
 import {
   buildReflectionMessages,
@@ -94,6 +95,8 @@ export interface RepairRuntimeModelConfig {
   baseUrl: string
   model: string
   headers?: Record<string, string>
+  /** Thinking effort of the profile this config came from. */
+  thinking?: ThinkingLevel
 }
 
 // --- Candidate production -----------------------------------------------------
@@ -151,6 +154,7 @@ function makeCandidateProducer(
           entityLabel: context.workflow.name,
         },
         headers: config.headers,
+        ...(config.thinking ? { thinking: config.thinking } : {}),
         signal: AbortSignal.timeout(CANDIDATE_TIMEOUT_MS),
         messages: [
           { role: 'system', content: systemPromptFor(context.strategy) },
@@ -236,6 +240,7 @@ function makeReflect(
           entityLabel: context.workflow.name,
         },
         headers: config.headers,
+        ...(config.thinking ? { thinking: config.thinking } : {}),
         signal: AbortSignal.timeout(REFLECTION_TIMEOUT_MS),
         messages: buildReflectionMessages({
           workflowName: context.workflow.name,

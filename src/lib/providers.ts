@@ -14,9 +14,10 @@
  * @module lib/providers
  */
 
-import { LOCALES, type LocaleSetting } from './i18n'
+import { LOCALES, type LocaleSetting, type Messages } from './i18n'
 import { normalizeLocalAgentBindings } from './storage'
-import { normalizeLocalAgentUrl, normalizeRunWindowLimit } from './types'
+import { normalizeThinkingProfile, type ThinkingLevel } from './thinking'
+import { normalizeLocalAgentUrl, normalizeProviderModels, normalizeRunWindowLimit } from './types'
 import type { AgentMode, UnattendedWindowPolicy } from './types'
 
 /** A configured endpoint the agent can talk to. */
@@ -30,16 +31,27 @@ export interface ProviderProfile {
   baseUrl: string
   apiKey: string
   /**
-   * Model or, on Ark, an endpoint ID (`ep-…`) when using a dedicated endpoint
-   * rather than a shared model name.
+   * The model in use, or on Ark an endpoint ID (`ep-…`) when using a dedicated
+   * endpoint rather than a shared model name. Always one of {@link models}.
    */
   model: string
+  /**
+   * Every model added to this provider. `model` points at the one in use; the
+   * rest are alternates the user can switch to without a new profile.
+   */
+  models?: string[]
   /** Extra headers some gateways require (e.g. OpenRouter attribution). */
   headers?: Record<string, string>
   /** Sampling temperature; omitted from the request when undefined. */
   temperature?: number
   /** Response cap; omitted when undefined so the server default applies. */
   maxTokens?: number
+  /**
+   * Thinking effort; omitted when undefined so the provider's own default
+   * applies. Which levels a provider can express depends on the vendor — see
+   * `src/lib/thinking.ts`.
+   */
+  thinkingEffort?: ThinkingLevel
 }
 
 /** A starting point for a new profile. */
@@ -47,8 +59,12 @@ export interface ProviderPreset {
   id: string
   label: string
   baseUrl: string
-  /** Suggested model, prefilled but always editable. */
-  defaultModel: string
+  /**
+   * A model worth suggesting when the user adds one. Never written into a
+   * profile: a prefilled value makes the fetched-model suggestions filter
+   * down to that one entry.
+   */
+  suggestedModel: string
   /** Where to get a key, and any vendor-specific gotcha. */
   hint: string
   /** Docs URL for keys/models. */
@@ -73,7 +89,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'deepseek',
     label: 'DeepSeek',
     baseUrl: 'https://api.deepseek.com/v1',
-    defaultModel: 'deepseek-chat',
+    suggestedModel: 'deepseek-chat',
     hint: 'Create a key at platform.deepseek.com. Models: deepseek-chat, deepseek-reasoner.',
     docsUrl: 'https://platform.deepseek.com/api_keys',
   },
@@ -81,7 +97,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'ark',
     label: '火山方舟 Volcengine Ark',
     baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-    defaultModel: 'doubao-seed-code',
+    suggestedModel: 'doubao-seed-code',
     hint: 'Use an Ark API key. For "model", use a model ID such as doubao-seed-code, or your dedicated endpoint ID (ep-…). A coding-plan subscription is billed against the model it covers.',
     docsUrl: 'https://console.volcengine.com/ark',
     endpoints: [
@@ -101,7 +117,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'openai',
     label: 'OpenAI',
     baseUrl: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-4o-mini',
+    suggestedModel: 'gpt-4o-mini',
     hint: 'Create a key at platform.openai.com.',
     docsUrl: 'https://platform.openai.com/api-keys',
   },
@@ -109,7 +125,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'openrouter',
     label: 'OpenRouter',
     baseUrl: 'https://openrouter.ai/api/v1',
-    defaultModel: 'deepseek/deepseek-chat',
+    suggestedModel: 'deepseek/deepseek-chat',
     hint: 'One key for many vendors. Model IDs are namespaced, e.g. deepseek/deepseek-chat.',
     docsUrl: 'https://openrouter.ai/keys',
   },
@@ -117,7 +133,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'moonshot',
     label: 'Moonshot / Kimi',
     baseUrl: 'https://api.moonshot.cn/v1',
-    defaultModel: 'kimi-k2-0905-preview',
+    suggestedModel: 'kimi-k2-0905-preview',
     hint: 'Create a key at platform.moonshot.cn.',
     docsUrl: 'https://platform.moonshot.cn/console/api-keys',
     endpoints: [
@@ -133,7 +149,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'dashscope',
     label: '阿里云百炼 DashScope',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    defaultModel: 'qwen-plus',
+    suggestedModel: 'qwen-plus',
     hint: 'Use the OpenAI-compatible base shown above, not the native DashScope path.',
     docsUrl: 'https://bailian.console.aliyun.com/',
     endpoints: [
@@ -153,7 +169,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'siliconflow',
     label: '硅基流动 SiliconFlow',
     baseUrl: 'https://api.siliconflow.cn/v1',
-    defaultModel: 'deepseek-ai/DeepSeek-V3',
+    suggestedModel: 'deepseek-ai/DeepSeek-V3',
     hint: 'Model IDs are namespaced, e.g. deepseek-ai/DeepSeek-V3.',
     docsUrl: 'https://cloud.siliconflow.cn/account/ak',
   },
@@ -161,7 +177,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'ollama',
     label: 'Ollama (local)',
     baseUrl: 'http://localhost:11434/v1',
-    defaultModel: 'qwen3:8b',
+    suggestedModel: 'qwen3:8b',
     hint: 'Runs locally; any non-empty key works. The model must already be pulled. Tool calling needs a model that supports it.',
     docsUrl: 'https://ollama.com/',
   },
@@ -169,21 +185,21 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'lmstudio',
     label: 'LM Studio (local)',
     baseUrl: 'http://localhost:1234/v1',
-    defaultModel: 'local-model',
+    suggestedModel: 'local-model',
     hint: 'Start the local server in LM Studio first; any non-empty key works.',
   },
   {
     id: 'custom',
     label: 'Custom OpenAI-compatible',
     baseUrl: '',
-    defaultModel: '',
+    suggestedModel: '',
     hint: 'Any endpoint exposing POST {baseUrl}/chat/completions with Bearer auth. Enter the base URL up to but not including /chat/completions.',
   },
   {
     id: 'zhipu',
     label: '智谱 GLM',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-    defaultModel: 'glm-4-flash',
+    suggestedModel: 'glm-4-flash',
     hint: 'Create a key at open.bigmodel.cn. Models such as glm-4-flash, glm-4-plus.',
     docsUrl: 'https://open.bigmodel.cn/',
     endpoints: [
@@ -204,7 +220,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'minimax',
     label: 'MiniMax',
     baseUrl: 'https://api.minimaxi.com/v1',
-    defaultModel: 'MiniMax-Text-01',
+    suggestedModel: 'MiniMax-Text-01',
     hint: 'Create a key at platform.minimaxi.com. Mainland endpoint vs the international one below.',
     docsUrl: 'https://platform.minimaxi.com/',
     endpoints: [
@@ -216,7 +232,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'stepfun',
     label: '阶跃星辰 StepFun',
     baseUrl: 'https://api.stepfun.com/v1',
-    defaultModel: 'step-2-mini',
+    suggestedModel: 'step-2-mini',
     hint: 'Create a key at platform.stepfun.com. Models such as step-2-mini.',
     docsUrl: 'https://platform.stepfun.com/',
   },
@@ -224,7 +240,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'qianfan',
     label: '百度千帆 Baidu Qianfan',
     baseUrl: 'https://qianfan.baidubce.com/v2',
-    defaultModel: 'ernie-4.0-turbo-8k',
+    suggestedModel: 'ernie-4.0-turbo-8k',
     hint: 'Create a key in the Qianfan console. Models such as ernie-4.0-turbo-8k.',
     docsUrl: 'https://console.bce.baidu.com/qianfan/',
   },
@@ -232,7 +248,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'githubmodels',
     label: 'GitHub Models',
     baseUrl: 'https://models.github.ai/inference',
-    defaultModel: 'gpt-4.1',
+    suggestedModel: 'gpt-4.1',
     hint: 'Free models via your GitHub account. Models such as gpt-4.1.',
     docsUrl: 'https://github.com/marketplace/models',
   },
@@ -240,7 +256,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'groq',
     label: 'Groq',
     baseUrl: 'https://api.groq.com/openai/v1',
-    defaultModel: 'llama-3.3-70b-versatile',
+    suggestedModel: 'llama-3.3-70b-versatile',
     hint: 'Create a key at console.groq.com. Models such as llama-3.3-70b-versatile.',
     docsUrl: 'https://console.groq.com/keys',
   },
@@ -248,7 +264,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'mistral',
     label: 'Mistral',
     baseUrl: 'https://api.mistral.ai/v1',
-    defaultModel: 'mistral-small-latest',
+    suggestedModel: 'mistral-small-latest',
     hint: 'Create a key at console.mistral.ai. Models such as mistral-small-latest.',
     docsUrl: 'https://www.mistral.ai/',
   },
@@ -256,7 +272,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'xai',
     label: 'xAI (Grok)',
     baseUrl: 'https://api.x.ai/v1',
-    defaultModel: 'grok-2-latest',
+    suggestedModel: 'grok-2-latest',
     hint: 'Create a key at console.x.ai. Models such as grok-2-latest.',
     docsUrl: 'https://console.x.ai/',
   },
@@ -264,7 +280,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'nvidia',
     label: 'NVIDIA NIM',
     baseUrl: 'https://integrate.api.nvidia.com/v1',
-    defaultModel: 'meta/llama-3.1-8b-instruct',
+    suggestedModel: 'meta/llama-3.1-8b-instruct',
     hint: 'Model IDs are namespaced, e.g. meta/llama-3.1-8b-instruct.',
     docsUrl: 'https://integrate.api.nvidia.com/',
   },
@@ -293,31 +309,33 @@ export interface ProfileProblem {
 }
 
 /** Returns every problem with a profile, so a form can report them at once. */
-export function validateProfile(profile: ProviderProfile): ProfileProblem[] {
+export function validateProfile(profile: ProviderProfile, t: Messages): ProfileProblem[] {
   const problems: ProfileProblem[] = []
 
   if (!profile.label.trim()) {
-    problems.push({ field: 'label', message: 'Give this provider a name.' })
+    problems.push({ field: 'label', message: t.errorProviderLabel })
   }
 
   const baseUrl = normalizeBaseUrl(profile.baseUrl)
   if (!baseUrl) {
-    problems.push({ field: 'baseUrl', message: 'Base URL is required.' })
+    problems.push({ field: 'baseUrl', message: t.errorProviderBaseUrlRequired })
   } else if (!/^https?:\/\//i.test(baseUrl)) {
-    problems.push({ field: 'baseUrl', message: 'Base URL must start with http:// or https://.' })
+    problems.push({ field: 'baseUrl', message: t.errorProviderBaseUrlScheme })
   } else {
     try {
       new URL(baseUrl)
     } catch {
-      problems.push({ field: 'baseUrl', message: 'Base URL is not a valid URL.' })
+      problems.push({ field: 'baseUrl', message: t.errorProviderBaseUrlInvalid })
     }
   }
 
   if (!profile.apiKey.trim()) {
-    problems.push({ field: 'apiKey', message: 'API key is required.' })
+    problems.push({ field: 'apiKey', message: t.errorProviderApiKey })
   }
   if (!profile.model.trim()) {
-    problems.push({ field: 'model', message: 'Model is required.' })
+    problems.push({ field: 'model', message: t.errorProviderModelRequired })
+  } else if (profile.models?.length && !profile.models.includes(profile.model)) {
+    problems.push({ field: 'model', message: t.errorProviderModelNotAdded })
   }
   return problems
 }
@@ -330,7 +348,10 @@ export function profileFromPreset(preset: ProviderPreset, id: string): ProviderP
     presetId: preset.id,
     baseUrl: preset.baseUrl,
     apiKey: '',
-    model: preset.defaultModel,
+    // No model: the user adds the ones they want. A prefilled model would
+    // filter the fetched-model suggestions down to that single entry.
+    model: '',
+    models: [],
   }
 }
 
@@ -391,12 +412,15 @@ export function normalizeSettingsPayload(raw: unknown): {
 } {
   const value = (raw ?? {}) as Record<string, unknown>
   const providers = Array.isArray(value.providers)
-    ? (value.providers as unknown[]).filter(
-        (profile): profile is ProviderProfile =>
-          !!profile &&
-          typeof profile === 'object' &&
-          typeof (profile as ProviderProfile).id === 'string',
-      )
+    ? (value.providers as unknown[])
+        .filter(
+          (profile): profile is ProviderProfile =>
+            !!profile &&
+            typeof profile === 'object' &&
+            typeof (profile as ProviderProfile).id === 'string',
+        )
+        .map(normalizeThinkingProfile)
+        .map(normalizeProviderModels)
     : []
   const activeRaw = value.activeProviderId
   const activeProviderId = typeof activeRaw === 'string' ? activeRaw : ''

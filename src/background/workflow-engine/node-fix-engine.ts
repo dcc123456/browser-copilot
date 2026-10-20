@@ -151,6 +151,7 @@ function defaultCallModel(
         model: provider.model,
         attribution,
         headers: provider.headers,
+        ...(provider.thinkingEffort ? { thinking: provider.thinkingEffort } : {}),
         messages: [{ role: 'user', content: prompt }],
         signal: AbortSignal.any([signal, AbortSignal.timeout(NODE_FIX_TIMEOUT_MS)]),
       },

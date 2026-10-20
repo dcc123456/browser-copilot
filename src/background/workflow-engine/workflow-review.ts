@@ -192,6 +192,7 @@ export async function reviewWorkflow(
         },
         messages: [{ role: 'user', content: buildReviewPrompt(workflow) }],
         headers: provider.headers,
+        ...(provider.thinkingEffort ? { thinking: provider.thinkingEffort } : {}),
         // No hard max_tokens cap (unlike the old 1500): a thinking model spends
         // that budget on reasoning before emitting any content, truncating
         // the verdict JSON into unparseable noise — the "review always

@@ -11,6 +11,7 @@
 
 import { streamCompletion } from '../../../lib/llm'
 import type { TokenAttribution } from '../../../lib/token-ledger'
+import type { ThinkingLevel } from '../../../lib/thinking'
 import { buildRepairMessages, parseRepairProposal } from './repair-agent'
 import type { RepairContext, WorkflowPatchSet } from '../../../lib/workflow/repair/types'
 
@@ -19,6 +20,8 @@ export interface RepairModelConfig {
   baseUrl: string
   model: string
   headers?: Record<string, string>
+  /** Thinking effort of the profile this config came from. */
+  thinking?: ThinkingLevel
   /** Which workflow this proposal is for; unset → the spend is not recorded. */
   attribution?: TokenAttribution
 }
@@ -40,6 +43,7 @@ export function createAiRepairProposer(config: RepairModelConfig): {
           attribution: config.attribution,
           messages: messages as unknown as Parameters<typeof streamCompletion>[0]['messages'],
           headers: config.headers,
+          ...(config.thinking ? { thinking: config.thinking } : {}),
           signal: AbortSignal.timeout(REPAIR_TIMEOUT_MS),
         },
         {},

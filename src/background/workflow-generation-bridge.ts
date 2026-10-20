@@ -493,6 +493,7 @@ async function repairModelFromSettings(): Promise<RepairRuntimeModelConfig | und
       baseUrl: provider.baseUrl,
       model: provider.model,
       ...(provider.headers ? { headers: provider.headers } : {}),
+      ...(provider.thinkingEffort ? { thinking: provider.thinkingEffort } : {}),
     }
   } catch {
     return undefined

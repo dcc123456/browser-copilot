@@ -264,6 +264,32 @@ export function normalizeRunWindowLimit(value: unknown): number {
   return Math.min(RUN_WINDOW_LIMITS.max, Math.max(RUN_WINDOW_LIMITS.min, Math.round(value)))
 }
 
+/**
+ * Keeps a provider's model list and its model in use consistent.
+ *
+ * A profile written by an older build carries only `model`; a hand-edited
+ * record can carry a `model` that is not in `models`, or neither. The
+ * invariant every reader relies on: `model` is empty exactly when `models` is
+ * empty, and otherwise names one of the added models.
+ */
+export function normalizeProviderModels<T extends { model?: string; models?: unknown }>(
+  profile: T,
+): T {
+  const listed = Array.isArray(profile.models)
+    ? profile.models
+        .filter((entry): entry is string => typeof entry === 'string')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0)
+    : []
+  const models: string[] = []
+  for (const entry of listed) {
+    if (!models.includes(entry)) models.push(entry)
+  }
+  const active = typeof profile.model === 'string' ? profile.model.trim() : ''
+  if (active && !models.includes(active)) models.unshift(active)
+  return { ...profile, model: models.includes(active) ? active : (models[0] ?? ''), models }
+}
+
 /** 本地 Agent 接入默认连接地址。 */
 export const DEFAULT_LOCAL_AGENT_URL = 'ws://127.0.0.1:8765'
 

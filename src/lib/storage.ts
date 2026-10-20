@@ -27,6 +27,7 @@ import { withKeyLock } from './key-lock'
 import { jsonBytes } from './persist-budget'
 import { skillFromMarkdown, skillSlug, skillToMarkdown } from './skills-import'
 import { agentFromMarkdown, agentSlug, agentToMarkdown } from './agents-import'
+import { normalizeThinkingProfile } from './thinking'
 import { BUILT_IN_SKILLS } from './builtin-skills'
 import { BUILT_IN_AGENTS } from './builtin-agents'
 import { LOCALES, type LocaleSetting } from './i18n'
@@ -46,6 +47,7 @@ import {
   DEFAULT_LOCAL_AGENT_URL,
   RUN_WINDOW_LIMITS,
   normalizeLocalAgentUrl,
+  normalizeProviderModels,
   normalizeRunWindowLimit,
   entryFields,
 } from './types'
@@ -186,10 +188,13 @@ export function normalizeStoredSettings(raw: unknown): Settings {
   const value = raw as Partial<Settings>
 
   const providers = Array.isArray(value.providers)
-    ? value.providers.filter(
-        (profile): profile is ProviderProfile =>
-          !!profile && typeof profile === 'object' && typeof profile.id === 'string',
-      )
+    ? value.providers
+        .filter(
+          (profile): profile is ProviderProfile =>
+            !!profile && typeof profile === 'object' && typeof profile.id === 'string',
+        )
+        .map(normalizeThinkingProfile)
+        .map(normalizeProviderModels)
     : []
 
   // Never leave the pointer dangling: an unknown id would open the editor blank

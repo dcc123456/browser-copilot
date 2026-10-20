@@ -18,6 +18,7 @@
 import { isImageAttachment, isTextAttachment } from './attachments'
 import type { AttachmentDescriptor } from './attachments'
 import { normalizeBaseUrl } from './providers'
+import { isUnsupportedThinkingDetail, thinkingBodyFor, type ThinkingLevel } from './thinking'
 import type { TokenAttribution } from './token-ledger'
 
 export interface WireTool {
@@ -535,6 +536,11 @@ export interface StreamRequest {
   headers?: Record<string, string>
   temperature?: number
   maxTokens?: number
+  /**
+   * Thinking effort. Omitted → the provider's own default applies; the vendor
+   * decides which parameters carry it (see `src/lib/thinking.ts`).
+   */
+  thinking?: ThinkingLevel
   signal?: AbortSignal
   /** Provider name, used only to make error messages legible. */
   providerLabel?: string
@@ -562,6 +568,12 @@ const RETRY_BASE_MS = 500
 /** Upper bound on a single backoff wait. */
 const RETRY_MAX_MS = 8000
 
+/** A failed HTTP response, described in a way the caller can act on. */
+interface HttpFailure {
+  message: string
+  code?: 'unsupported-thinking'
+}
+
 /**
  * Raised with a human-readable message for any non-2xx or transport failure.
  *
@@ -573,12 +585,22 @@ const RETRY_MAX_MS = 8000
 export class LlmError extends Error {
   readonly status?: number
   readonly transient: boolean
-  constructor(message: string, options: { status?: number; transient?: boolean } = {}) {
+  /**
+   * Machine-readable failure kind, for callers that localize the message
+   * themselves. The message stays English because this module is shared with
+   * the Runner, which has no locale.
+   */
+  readonly code?: 'unsupported-thinking'
+  constructor(
+    message: string,
+    options: { status?: number; transient?: boolean; code?: 'unsupported-thinking' } = {},
+  ) {
     super(message)
     this.name = 'LlmError'
     this.status = options.status
     this.transient =
       options.transient ?? (options.status !== undefined && RETRYABLE_STATUS.has(options.status))
+    this.code = options.code
   }
 }
 
@@ -658,6 +680,10 @@ export async function streamCompletion(
   // Omitted rather than defaulted, so the provider's own default applies.
   if (typeof request.temperature === 'number') body.temperature = request.temperature
   if (typeof request.maxTokens === 'number') body.max_tokens = request.maxTokens
+  // Which parameters carry the effort depends on the vendor, and a model
+  // documented to reject thinking control gets nothing sent at all.
+  const thinking = thinkingBodyFor(request.baseUrl, request.model, request.thinking)
+  if (thinking) Object.assign(body, thinking)
 
   const doFetch = (payload: Record<string, unknown>): Promise<Response> =>
     fetch(url, {
@@ -690,9 +716,11 @@ export async function streamCompletion(
           response = await doFetch(withoutUsage)
         }
         if (response.ok) return response
-        throw new LlmError(await describeHttpFailure(response, who), {
+        const failure = await describeHttpFailure(response, who)
+        throw new LlmError(failure.message, {
           status: response.status,
           transient: RETRYABLE_STATUS.has(response.status),
+          ...(failure.code ? { code: failure.code } : {}),
         })
       } catch (error) {
         // Cancellation is never retried — callers distinguish it by name.
@@ -763,7 +791,13 @@ export async function listModels(request: {
     if ((error as Error)?.name === 'AbortError') throw error
     throw new LlmError(`Cannot reach ${url}: ${describeError(error)}`)
   }
-  if (!response.ok) throw new LlmError(await describeHttpFailure(response, 'The provider'))
+  if (!response.ok) {
+    const failure = await describeHttpFailure(response, 'The provider')
+    throw new LlmError(failure.message, {
+      status: response.status,
+      ...(failure.code ? { code: failure.code } : {}),
+    })
+  }
 
   const payload = (await response.json()) as { data?: { id?: unknown }[] }
   if (!Array.isArray(payload.data)) {
@@ -787,30 +821,50 @@ export async function testConnection(request: {
   baseUrl: string
   model: string
   headers?: Record<string, string>
+  /** Thinking effort to exercise, so the probe can prove the model accepts it. */
+  thinking?: ThinkingLevel
+  /** Response cap; only used when a thinking effort is exercised. */
+  maxTokens?: number
   signal?: AbortSignal
 }): Promise<void> {
   const base = normalizeBaseUrl(request.baseUrl)
   if (!base) throw new LlmError('No base URL configured.')
   const url = `${base}/chat/completions`
 
+  const body: Record<string, unknown> = {
+    model: request.model,
+    messages: [{ role: 'user', content: 'ping' }],
+    stream: false,
+  }
+  const thinking = thinkingBodyFor(request.baseUrl, request.model, request.thinking)
+  if (thinking) {
+    Object.assign(body, thinking)
+    // A reasoning model spends its cap on reasoning tokens, so a cap of 1 fails
+    // for a reason that has nothing to do with the profile under test.
+    if (typeof request.maxTokens === 'number') body.max_tokens = request.maxTokens
+  } else {
+    body.max_tokens = 1
+  }
+
   let response: Response
   try {
     response = await fetch(url, {
       method: 'POST',
       headers: buildHeaders(request),
-      body: JSON.stringify({
-        model: request.model,
-        messages: [{ role: 'user', content: 'ping' }],
-        max_tokens: 1,
-        stream: false,
-      }),
+      body: JSON.stringify(body),
       signal: request.signal,
     })
   } catch (error) {
     if ((error as Error)?.name === 'AbortError') throw error
     throw new LlmError(`Cannot reach ${url}: ${describeError(error)}`)
   }
-  if (!response.ok) throw new LlmError(await describeHttpFailure(response, 'The provider'))
+  if (!response.ok) {
+    const failure = await describeHttpFailure(response, 'The provider')
+    throw new LlmError(failure.message, {
+      status: response.status,
+      ...(failure.code ? { code: failure.code } : {}),
+    })
+  }
 }
 
 /**
@@ -818,9 +872,11 @@ export async function testConnection(request: {
  *
  * Status codes carry consistent meaning across OpenAI-compatible vendors, so
  * they are mapped generically and the vendor's own `error.message` is appended
- * for the specifics.
+ * for the specifics. A vendor that rejects a parameter the model does not
+ * accept also gets a code, so the caller can explain the failure in the
+ * user's language instead of showing the vendor's raw English.
  */
-async function describeHttpFailure(response: Response, who: string): Promise<string> {
+async function describeHttpFailure(response: Response, who: string): Promise<HttpFailure> {
   let detail = ''
   try {
     const text = await response.text()
@@ -838,19 +894,34 @@ async function describeHttpFailure(response: Response, who: string): Promise<str
     detail = ''
   }
   const suffix = detail ? `: ${detail}` : ''
+  const code: HttpFailure['code'] =
+    (response.status === 400 || response.status === 422) && isUnsupportedThinkingDetail(detail)
+      ? 'unsupported-thinking'
+      : undefined
+
+  if (code === 'unsupported-thinking') {
+    return {
+      message: `${who} rejected a request parameter this model does not support (${response.status})${suffix}`,
+      code,
+    }
+  }
 
   switch (response.status) {
     case 401:
     case 403:
-      return `${who} rejected the API key (${response.status})${suffix}`
+      return { message: `${who} rejected the API key (${response.status})${suffix}` }
     case 402:
-      return `${who} reports insufficient balance or an inactive plan (402)${suffix}`
+      return { message: `${who} reports insufficient balance or an inactive plan (402)${suffix}` }
     case 404:
-      return `${who} has no such endpoint or model (404). Check the base URL and the model name${suffix}`
+      return {
+        message: `${who} has no such endpoint or model (404). Check the base URL and the model name${suffix}`,
+      }
     case 429:
-      return `${who} rate limit or quota reached (429)${suffix}`
+      return { message: `${who} rate limit or quota reached (429)${suffix}` }
     default:
-      return `${who} request failed (${response.status} ${response.statusText})${suffix}`
+      return {
+        message: `${who} request failed (${response.status} ${response.statusText})${suffix}`,
+      }
   }
 }
 

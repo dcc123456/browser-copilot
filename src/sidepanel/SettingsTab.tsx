@@ -14,6 +14,15 @@ import {
 import type { AgentStatus, Settings, UnattendedWindowPolicy } from '../lib/types'
 import { RUN_WINDOW_LIMITS, normalizeRunWindowLimit } from '../lib/types'
 import { TOOL_META } from '../lib/tool-catalog'
+import {
+  THINKING_LEVELS,
+  normalizeThinkingLevel,
+  thinkingLevelsFor,
+  thinkingModelSupport,
+  thinkingParamSummary,
+  thinkingShapeVerified,
+  type ThinkingLevel,
+} from '../lib/thinking'
 import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
 import {
@@ -42,10 +51,26 @@ import FormDialog, { FormDialogCancelButton, FormDialogPrimaryButton } from '../
 import { useI18n, useT } from './i18n'
 
 /** Editable form state; numbers stay strings so partial input is allowed. */
-interface Draft extends Omit<ProviderProfile, 'temperature' | 'maxTokens' | 'headers'> {
+interface Draft extends Omit<
+  ProviderProfile,
+  'temperature' | 'maxTokens' | 'headers' | 'thinkingEffort'
+> {
   temperature: string
   maxTokens: string
   headersJson: string
+  /** Empty string = the provider's own default applies. */
+  thinkingEffort: string
+  /** The model names added to this provider; `model` is the one in use. */
+  models: string[]
+  /** The add-model field. Always empty between adds, so the fetched-model
+   *  suggestions are never filtered down to a prefilled value. */
+  modelInput: string
+}
+
+/** The models a provider holds; a profile written before providers held
+ *  several models names exactly one. */
+function providerModels(profile: ProviderProfile): string[] {
+  return profile.models?.length ? profile.models : profile.model ? [profile.model] : []
 }
 
 function toDraft(profile: ProviderProfile): Draft {
@@ -57,6 +82,9 @@ function toDraft(profile: ProviderProfile): Draft {
       profile.headers && Object.keys(profile.headers).length > 0
         ? JSON.stringify(profile.headers, null, 2)
         : '',
+    thinkingEffort: profile.thinkingEffort ?? '',
+    models: providerModels(profile),
+    modelInput: '',
   }
 }
 
@@ -70,13 +98,17 @@ function toDraft(profile: ProviderProfile): Draft {
  *   input is rejected here rather than becoming a confusing API error later.
  */
 function fromDraft(draft: Draft, t: Messages): ProviderProfile {
+  const models = draft.models.map((entry) => entry.trim()).filter((entry) => entry.length > 0)
   const profile: ProviderProfile = {
     id: draft.id,
     label: draft.label.trim(),
     presetId: draft.presetId,
     baseUrl: normalizeBaseUrl(draft.baseUrl),
     apiKey: draft.apiKey.trim(),
-    model: draft.model.trim(),
+    // The model in use must name one of the added models; fall back to the
+    // first added one so a half-finished list still saves.
+    model: models.includes(draft.model.trim()) ? draft.model.trim() : (models[0] ?? ''),
+    models,
   }
 
   if (draft.temperature.trim()) {
@@ -91,6 +123,8 @@ function fromDraft(draft: Draft, t: Messages): ProviderProfile {
     }
     profile.maxTokens = value
   }
+  const thinking = normalizeThinkingLevel(draft.thinkingEffort)
+  if (thinking) profile.thinkingEffort = thinking
   if (draft.headersJson.trim()) {
     let parsed: unknown
     try {
@@ -712,6 +746,31 @@ export default function SettingsTab({ onLocaleChange }: Props) {
     setOpenDialog('provider')
   }
 
+  /** Adds the typed model to the provider's list; the first one becomes the
+   *  model in use. */
+  const addModel = (): void => {
+    if (!draft) return
+    const name = draft.modelInput.trim()
+    if (!name || draft.models.includes(name)) return
+    setDraft({
+      ...draft,
+      models: [...draft.models, name],
+      model: draft.model || name,
+      modelInput: '',
+    })
+  }
+
+  /** Removes a model; when it was the one in use, the next one takes over. */
+  const removeModel = (name: string): void => {
+    if (!draft) return
+    const models = draft.models.filter((entry) => entry !== name)
+    setDraft({
+      ...draft,
+      models,
+      model: draft.model === name ? (models[0] ?? '') : draft.model,
+    })
+  }
+
   const applySettings = (next: Settings): void => {
     const normalized = normalizeSettings(next)
     setSettings(normalized)
@@ -739,7 +798,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
     setProviderNotice(null)
     try {
       const profile = fromDraft(draft, t)
-      const problems = validateProfile(profile)
+      const problems = validateProfile(profile, t)
       if (problems.length > 0) throw new Error(problems.map((p) => p.message).join(' '))
 
       const result = await sendCommand({ type: 'provider.save', profile })
@@ -761,7 +820,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
     setProviderNotice(null)
     try {
       const profile = fromDraft(draft, t)
-      const problems = validateProfile(profile)
+      const problems = validateProfile(profile, t)
       if (problems.length > 0) throw new Error(problems.map((p) => p.message).join(' '))
       await sendCommand({ type: 'provider.test', profile })
       setProviderNotice({ kind: 'ok', text: t.settingsTestOk({ name: profile.label }) })
@@ -1024,6 +1083,26 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   // never took effect.
   const selectedEndpoint = presetEndpoints.find((option) => option.baseUrl === draft?.baseUrl)
 
+  // What the current draft's endpoint and model can actually express. The
+  // levels a vendor cannot express are shown but not selectable, so a saved
+  // value stays visible instead of silently disappearing.
+  const thinkingLevels = draft ? thinkingLevelsFor(draft.baseUrl) : []
+  const thinkingSupport = draft ? thinkingModelSupport(draft.baseUrl, draft.model) : 'unknown'
+  const thinkingVerified = draft ? thinkingShapeVerified(draft.baseUrl) : false
+  const draftThinking = draft ? normalizeThinkingLevel(draft.thinkingEffort) : undefined
+  const thinkingLabel = (level: ThinkingLevel): string => {
+    switch (level) {
+      case 'off':
+        return t.settingsThinkingLevelOff
+      case 'low':
+        return t.settingsThinkingLevelLow
+      case 'medium':
+        return t.settingsThinkingLevelMedium
+      case 'high':
+        return t.settingsThinkingLevelHigh
+    }
+  }
+
   return (
     <div className="pane">
       {banner && (
@@ -1061,7 +1140,18 @@ export default function SettingsTab({ onLocaleChange }: Props) {
               <div className="provider-meta">
                 <div className="meta">
                   <span className="meta-label">{t.settingsModel}</span>
-                  <span>{profile.model}</span>
+                  <span>
+                    {providerModels(profile).length === 0
+                      ? t.settingsModelEmpty
+                      : providerModels(profile).map((name, index) => (
+                          <span key={name}>
+                            {index > 0 && ' · '}
+                            <span className={name === profile.model ? 'text-accent' : undefined}>
+                              {name}
+                            </span>
+                          </span>
+                        ))}
+                  </span>
                 </div>
                 <div className="meta">
                   <span className="meta-label">{t.settingsBaseUrl}</span>
@@ -1077,6 +1167,12 @@ export default function SettingsTab({ onLocaleChange }: Props) {
                     )}
                   </span>
                 </div>
+                {profile.thinkingEffort && (
+                  <div className="meta">
+                    <span className="meta-label">{t.settingsThinkingEffort}</span>
+                    <span>{thinkingLabel(profile.thinkingEffort)}</span>
+                  </div>
+                )}
               </div>
               <div className="actions">
                 <button
@@ -1086,6 +1182,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
                     setShowAdvanced(
                       profile.temperature !== undefined ||
                         profile.maxTokens !== undefined ||
+                        profile.thinkingEffort !== undefined ||
                         !!profile.headers,
                     )
                     setProviderNotice(null)
@@ -1247,13 +1344,32 @@ export default function SettingsTab({ onLocaleChange }: Props) {
 
           <div className="field" style={{ marginTop: 10 }}>
             <label htmlFor="p-model">{t.settingsModel}</label>
-            <input
-              id="p-model"
-              list="model-options"
-              onChange={(event) => setDraft({ ...draft, model: event.target.value })}
-              placeholder="doubao-seed-code, deepseek-chat, ep-…"
-              value={draft.model}
-            />
+            <div className="flex items-center gap-2">
+              <input
+                className="min-w-0 flex-1"
+                id="p-model"
+                list="model-options"
+                onChange={(event) => setDraft({ ...draft, modelInput: event.target.value })}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    addModel()
+                  }
+                }}
+                placeholder={t.settingsModelAddPlaceholder({
+                  model: preset?.suggestedModel || 'doubao-seed-code / ep-…',
+                })}
+                value={draft.modelInput}
+              />
+              <button
+                className="shrink-0"
+                disabled={!draft.modelInput.trim()}
+                onClick={addModel}
+                type="button"
+              >
+                {t.settingsModelAdd}
+              </button>
+            </div>
             {models && (
               <datalist id="model-options">
                 {models.map((model) => (
@@ -1263,9 +1379,47 @@ export default function SettingsTab({ onLocaleChange }: Props) {
             )}
             {models && (
               <p className="hint" style={{ marginBottom: 0 }}>
-                {t.settingsModelsAvailable({ count: models.length })}
+                {t.settingsModelsAvailableToAdd({ count: models.length })}
               </p>
             )}
+            {draft.models.length === 0 ? (
+              <p className="hint" style={{ marginBottom: 0 }}>
+                {t.settingsModelEmpty}
+              </p>
+            ) : (
+              <>
+                <p className="hint" style={{ marginBottom: 4 }}>
+                  {t.settingsModelsAdded({ count: draft.models.length })}
+                </p>
+                <ul className="flex flex-col gap-1">
+                  {draft.models.map((name) => (
+                    <li
+                      className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1"
+                      key={name}
+                    >
+                      <label className="checkbox min-w-0 flex-1">
+                        <input
+                          checked={draft.model === name}
+                          name="p-model-in-use"
+                          onChange={() => setDraft({ ...draft, model: name })}
+                          type="radio"
+                        />
+                        <span className="min-w-0 truncate">{name}</span>
+                        {draft.model === name && (
+                          <span className="shrink-0 text-faint">{t.settingsModelActive}</span>
+                        )}
+                      </label>
+                      <button className="shrink-0" onClick={() => removeModel(name)} type="button">
+                        {t.settingsModelRemove}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            <p className="hint" style={{ marginBottom: 0 }}>
+              {t.settingsModelActiveHint}
+            </p>
           </div>
 
           <button onClick={() => setShowAdvanced(!showAdvanced)} type="button">
@@ -1294,6 +1448,38 @@ export default function SettingsTab({ onLocaleChange }: Props) {
                   />
                 </div>
               </div>
+              <div className="field">
+                <label htmlFor="p-thinking">{t.settingsThinkingEffort}</label>
+                <select
+                  id="p-thinking"
+                  onChange={(event) => setDraft({ ...draft, thinkingEffort: event.target.value })}
+                  value={draft.thinkingEffort}
+                >
+                  <option value="">{t.settingsThinkingEffortDefault}</option>
+                  {THINKING_LEVELS.map((level) => (
+                    <option disabled={!thinkingLevels.includes(level)} key={level} value={level}>
+                      {thinkingLabel(level)}
+                    </option>
+                  ))}
+                </select>
+                {draftThinking && (
+                  <p className="hint" style={{ marginBottom: 0 }}>
+                    {t.settingsThinkingParamNote({
+                      param: thinkingParamSummary(draft.baseUrl, draftThinking),
+                    })}
+                  </p>
+                )}
+              </div>
+              {thinkingSupport === 'unsupported' && (
+                <div className="mb-3 rounded-lg border border-err bg-err-surface px-3 py-2 text-[12.5px] text-err">
+                  {t.settingsThinkingModelUnsupported({ model: draft.model })}
+                </div>
+              )}
+              {!thinkingVerified && (
+                <div className="mb-3 rounded-lg border border-warn/30 bg-warn-surface px-3 py-2 text-[12.5px] text-warn">
+                  {t.settingsThinkingUnverified}
+                </div>
+              )}
               <div className="field">
                 <label htmlFor="p-headers">{t.settingsExtraHeaders}</label>
                 <textarea

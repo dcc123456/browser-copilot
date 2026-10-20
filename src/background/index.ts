@@ -1,4 +1,5 @@
 import { effectiveLocale, messagesFor } from '../lib/i18n'
+import type { Messages } from '../lib/i18n'
 /**
  * Service worker entry point.
  *
@@ -1167,6 +1168,32 @@ function newDebugSessionId(): string {
     : `dbg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 }
 
+/**
+ * The worker's own localized strings.
+ *
+ * The worker has no UI, but it owns the messages it hands to the panel — and
+ * some of them have to be in the panel's language, not the vendor's English.
+ */
+async function workerMessages(): Promise<Messages> {
+  const settings = await getSettings()
+  return messagesFor(effectiveLocale(settings.locale, navigator.language))
+}
+
+/**
+ * Restates a provider failure in the panel's language.
+ *
+ * Only the thinking-control failure is rewritten: the vendor's own wording is
+ * kept as the detail, because the actionable part — which parameter was
+ * rejected — lives there.
+ */
+async function localizeLlmFailure(error: unknown): Promise<Error> {
+  if (!(error instanceof LlmError) || error.code !== 'unsupported-thinking') {
+    return error instanceof Error ? error : new Error(String(error))
+  }
+  const t = await workerMessages()
+  return new Error(t.settingsThinkingUnsupportedError({ detail: error.message }))
+}
+
 async function handleCommand(
   command: Command,
   sender?: chrome.runtime.MessageSender,
@@ -1293,7 +1320,7 @@ async function handleCommand(
     }
 
     case 'provider.save': {
-      const problems = validateProfile(command.profile)
+      const problems = validateProfile(command.profile, await workerMessages())
       if (problems.length > 0) {
         throw new Error(problems.map((problem) => problem.message).join(' '))
       }
@@ -1307,16 +1334,26 @@ async function handleCommand(
       return { type: 'settings', settings: await setSettings({ activeProviderId: command.id }) }
 
     case 'provider.test': {
-      const problems = validateProfile(command.profile)
+      const problems = validateProfile(command.profile, await workerMessages())
       if (problems.length > 0) {
         throw new Error(problems.map((problem) => problem.message).join(' '))
       }
-      await testConnection({
-        apiKey: command.profile.apiKey,
-        baseUrl: command.profile.baseUrl,
-        model: command.profile.model,
-        ...(command.profile.headers ? { headers: command.profile.headers } : {}),
-      })
+      try {
+        await testConnection({
+          apiKey: command.profile.apiKey,
+          baseUrl: command.profile.baseUrl,
+          model: command.profile.model,
+          ...(command.profile.headers ? { headers: command.profile.headers } : {}),
+          // The probe exercises the thinking setting too, so it can tell the
+          // user that THIS model rejects it.
+          ...(command.profile.thinkingEffort ? { thinking: command.profile.thinkingEffort } : {}),
+          ...(typeof command.profile.maxTokens === 'number'
+            ? { maxTokens: command.profile.maxTokens }
+            : {}),
+        })
+      } catch (error) {
+        throw await localizeLlmFailure(error)
+      }
       return { type: 'provider.test' }
     }
 
@@ -1799,6 +1836,9 @@ async function handleCommand(
                   baseUrl: repairModelConfig.baseUrl,
                   model: repairModelConfig.model,
                   headers: repairModelConfig.headers,
+                  ...(repairModelConfig.thinkingEffort
+                    ? { thinking: repairModelConfig.thinkingEffort }
+                    : {}),
                 },
               }
             : {}),
@@ -2073,6 +2113,7 @@ async function handleCommand(
                     apiKey: provider.apiKey,
                     baseUrl: provider.baseUrl,
                     model: provider.model,
+                    ...(provider.thinkingEffort ? { thinking: provider.thinkingEffort } : {}),
                     attribution: {
                       consumer: 'ai-debug',
                       entityKey: entityKeyFor('workflow', wf.id),
@@ -2266,6 +2307,7 @@ async function handleCommand(
                       apiKey: provider.apiKey,
                       baseUrl: provider.baseUrl,
                       model: provider.model,
+                      ...(provider.thinkingEffort ? { thinking: provider.thinkingEffort } : {}),
                       attribution: {
                         consumer: 'ai-debug',
                         entityKey: entityKeyFor('workflow', wf.id),
@@ -2352,6 +2394,7 @@ async function handleCommand(
             baseUrl: modelConfig.baseUrl,
             model: modelConfig.model,
             headers: modelConfig.headers,
+            ...(modelConfig.thinkingEffort ? { thinking: modelConfig.thinkingEffort } : {}),
             attribution: {
               consumer: 'auto-repair',
               entityKey: entityKeyFor('workflow', repairWorkflow.id),
@@ -2764,6 +2807,7 @@ async function handleCommand(
             baseUrl: recoveryModel.baseUrl,
             model: recoveryModel.model,
             headers: recoveryModel.headers,
+            ...(recoveryModel.thinkingEffort ? { thinking: recoveryModel.thinkingEffort } : {}),
             attribution: {
               consumer: 'auto-repair',
               entityKey: entityKeyFor('workflow', targetWorkflow.id),
@@ -2833,6 +2877,9 @@ async function handleCommand(
                           baseUrl: recoveryModel.baseUrl,
                           model: recoveryModel.model,
                           headers: recoveryModel.headers,
+                          ...(recoveryModel.thinkingEffort
+                            ? { thinking: recoveryModel.thinkingEffort }
+                            : {}),
                         },
                       }
                     : {}),
@@ -3023,6 +3070,7 @@ async function handleCommand(
                   baseUrl: modelConfig.baseUrl,
                   model: modelConfig.model,
                   headers: modelConfig.headers,
+                  ...(modelConfig.thinkingEffort ? { thinking: modelConfig.thinkingEffort } : {}),
                 },
               }
             : {}),
@@ -3509,12 +3557,7 @@ chrome.runtime.onConnect.addListener((port) => {
         })
         sendWithTracking({ type: 'done', ...(turnUsage ? { usage: turnUsage } : {}) })
       } catch (error) {
-        failure =
-          error instanceof LlmError
-            ? error.message
-            : error instanceof Error
-              ? error.message
-              : String(error)
+        failure = (await localizeLlmFailure(error)).message
         sendWithTracking({ type: 'error', message: failure })
       } finally {
         // Persist whatever was accumulated, including partial tool exchanges, so

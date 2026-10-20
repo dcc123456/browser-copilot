@@ -2164,6 +2164,7 @@ const aiPrompt: BlockExecutor = async (data, ctx) => {
       model: provider.model,
       messages,
       headers: provider.headers,
+      ...(provider.thinkingEffort ? { thinking: provider.thinkingEffort } : {}),
       attribution: ctx.attribution,
       signal: ctx.signal,
     })

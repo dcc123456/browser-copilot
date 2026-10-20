@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { messagesFor } from '../src/lib/i18n'
 import {
   PROVIDER_PRESETS,
   findPreset,
@@ -11,6 +12,8 @@ import {
 } from '../src/lib/providers'
 import { normalizeLocalAgentBindings, normalizeStoredSettings } from '../src/lib/storage'
 import { RUN_WINDOW_LIMITS } from '../src/lib/types'
+
+const en = messagesFor('en')
 
 function profile(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
   return {
@@ -59,11 +62,14 @@ describe('presets', () => {
     expect(ids).toContain('custom')
   })
 
-  it('builds an editable profile with no key prefilled', () => {
+  it('builds an editable profile with no key and no model prefilled', () => {
     const preset = findPreset('ark')!
     const built = profileFromPreset(preset, 'x1')
     expect(built).toMatchObject({ id: 'x1', presetId: 'ark', apiKey: '' })
-    expect(built.model).toBe(preset.defaultModel)
+    // A prefilled model filters the fetched-model suggestions down to it.
+    expect(built.model).toBe('')
+    expect(built.models).toEqual([])
+    expect(preset.suggestedModel).toBe('doubao-seed-code')
   })
 })
 
@@ -102,11 +108,11 @@ describe('preset endpoints', () => {
 
 describe('validateProfile', () => {
   it('accepts a complete profile', () => {
-    expect(validateProfile(profile())).toEqual([])
+    expect(validateProfile(profile(), en)).toEqual([])
   })
 
   it('reports each missing field', () => {
-    const problems = validateProfile(profile({ label: '', baseUrl: '', apiKey: '', model: '' }))
+    const problems = validateProfile(profile({ label: '', baseUrl: '', apiKey: '', model: '' }), en)
     expect(problems.map((problem) => problem.field).sort()).toEqual([
       'apiKey',
       'baseUrl',
@@ -116,13 +122,23 @@ describe('validateProfile', () => {
   })
 
   it('rejects a base URL without an http scheme', () => {
-    const problems = validateProfile(profile({ baseUrl: 'ark.cn-beijing.volces.com/api/v3' }))
+    const problems = validateProfile(profile({ baseUrl: 'ark.cn-beijing.volces.com/api/v3' }), en)
     expect(problems).toHaveLength(1)
     expect(problems[0]!.field).toBe('baseUrl')
   })
 
   it('accepts a local http endpoint', () => {
-    expect(validateProfile(profile({ baseUrl: 'http://localhost:11434/v1' }))).toEqual([])
+    expect(validateProfile(profile({ baseUrl: 'http://localhost:11434/v1' }), en)).toEqual([])
+  })
+
+  it('rejects a model in use that is not one of the added models', () => {
+    const problems = validateProfile(profile({ model: 'other', models: ['a', 'b'] }), en)
+    expect(problems.map((problem) => problem.field)).toEqual(['model'])
+    expect(problems[0]!.message).toBe(en.errorProviderModelNotAdded)
+  })
+
+  it('accepts a profile whose model in use is one of the added models', () => {
+    expect(validateProfile(profile({ model: 'b', models: ['a', 'b'] }), en)).toEqual([])
   })
 })
 
@@ -174,7 +190,7 @@ describe('normalizeStoredSettings', () => {
 
   it('passes a valid record through unchanged', () => {
     const settings = {
-      providers: [profile()],
+      providers: [profile({ models: ['doubao-seed-code'] })],
       activeProviderId: 'p1',
       locale: 'auto' as const,
       mode: 'full' as const,
@@ -380,6 +396,63 @@ describe('normalizeSettingsPayload · cross-version safety', () => {
     })
     expect(result.providers).toHaveLength(1)
     expect(result.activeProviderId).toBe('p1')
+  })
+
+  it('keeps a thinking effort and drops one this build does not know', () => {
+    expect(
+      normalizeSettingsPayload({ providers: [profile({ thinkingEffort: 'high' })] }).providers[0]
+        ?.thinkingEffort,
+    ).toBe('high')
+    // A hand-edited record must not reach the request builder.
+    expect(
+      normalizeSettingsPayload({
+        providers: [profile({ thinkingEffort: 'extreme' as never })],
+      }).providers[0]?.thinkingEffort,
+    ).toBeUndefined()
+    expect(
+      normalizeStoredSettings({ providers: [profile({ thinkingEffort: 'extreme' as never })] })
+        .providers[0]?.thinkingEffort,
+    ).toBeUndefined()
+  })
+
+  it('turns a single-model profile into a one-entry model list', () => {
+    // A profile written before providers held several models names one model.
+    const normalized = normalizeSettingsPayload({ providers: [profile()] }).providers[0]
+    expect(normalized?.models).toEqual(['doubao-seed-code'])
+    expect(normalized?.model).toBe('doubao-seed-code')
+    expect(normalizeStoredSettings({ providers: [profile()] }).providers[0]?.models).toEqual([
+      'doubao-seed-code',
+    ])
+  })
+
+  it('keeps the model in use inside the model list', () => {
+    const normalized = normalizeSettingsPayload({
+      providers: [profile({ model: 'b', models: ['a', 'b'] })],
+    }).providers[0]
+    expect(normalized?.models).toEqual(['a', 'b'])
+    expect(normalized?.model).toBe('b')
+  })
+
+  it('repairs a model in use that is not in the list', () => {
+    const normalized = normalizeSettingsPayload({
+      providers: [profile({ model: 'c', models: ['a', 'b'] })],
+    }).providers[0]
+    expect(normalized?.models).toEqual(['c', 'a', 'b'])
+    expect(normalized?.model).toBe('c')
+  })
+
+  it('picks the first added model when none is in use', () => {
+    const normalized = normalizeSettingsPayload({
+      providers: [profile({ model: '', models: ['a', 'b'] })],
+    }).providers[0]
+    expect(normalized?.model).toBe('a')
+  })
+
+  it('drops duplicate and malformed model entries', () => {
+    const normalized = normalizeSettingsPayload({
+      providers: [profile({ model: 'a', models: ['a', ' a ', '', 42, 'b'] as never })],
+    }).providers[0]
+    expect(normalized?.models).toEqual(['a', 'b'])
   })
 
   it('defaults ocrLanguage to eng and passes a custom value through', () => {
