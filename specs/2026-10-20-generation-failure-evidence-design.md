@@ -126,38 +126,46 @@
 export interface OperatorFailureEvidence {
   /** 复用 lib/workflow/failure-code.ts 的失败码；无法归类时为 'UNKNOWN'。 */
   failureCode: string
-  /** 粗分类，复用 lib/tool-error.ts 的 ToolErrorType。 */
-  errorType: ToolErrorType
+  /** 粗分类：locator / readiness / contract / goal / safety / environment / workflow。 */
+  category: FailureCategory
+  /** 该类失败通常意味着什么（来自同一张 FAILURE_TABLE）。 */
+  failureHint: string
+  /** 有限次重试 / 重新观察是否可能解决。 */
+  recoverable: boolean
+  /** AI 修复环是否可以对它改参数。 */
+  aiRepairable: boolean
   errorMessage: string
-  /** 执行器回报的实际命中 spec（usedSpec / matched / degraded），原样透传。 */
-  locatorResolution?: unknown
+  /** 执行器回报的实际命中 spec（usedSpec / usedFallback / matched），白名单三字段。 */
+  locatorResolution?: { usedSpec: string; usedFallback: boolean; matched: number }
   /** 录制前在真实页面上 probe 出的 CSS 候选命中数，截断到前 8 条。 */
   candidateCounts?: { selector: string; count: number }[]
   /** 失败时的页面状态：URL + 标题。 */
   pageState?: { url: string; title?: string }
   /** 链中最后一个可安全重跑点。 */
-  safeRerunBoundary?: { nodeId: string; label: string }
-  /** 固定建议动作（复用 tool-error.ts 的 RECOVERY）。 */
-  suggestedRecovery: string[]
+  safeRerunBoundary?: RerunBoundary
 }
 ```
 
+**`errorType` / `suggestedRecovery` 不在证据包里**：那两���字段由工具结果信封统一提供
+（`src/background/agent.ts:5288` `enrichToolError` → `src/lib/tool-error.ts`），与所有其他
+工具失败保持同一形状。证据包只补充**领域分类**（失败码 + 该类失败的通常含义），
+同一条事实不出现两份。
+
 **改动点**
 
-| 文件                                                  | 改动                                                                                                                                  |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/lib/workflow/operator-failure.ts`                | 新增。纯函数：把 `outcome` + `probeCounts` + `draft` 折叠成证据包                                                                     |
-| `src/background/operator-tool-run.ts:519-527`         | 失败分支改为 `return { ok: false, error, evidence }`。`outcome.resolution` 与 `probeCounts` 从"只消费"改为"消费并回传"                |
-| `src/background/operator-tool-run.ts`（其他拒绝分支） | `:374`、`:416`、`:492`、`:506`、`:670` 五处前置拒绝同样带上证据（`failureCode` 用各自的语义码），保证"拒绝"与"执行失败"对模型是同构的 |
-| `src/background/agent.ts:4411`                        | `JSON.stringify({ error: out.error, evidence: out.evidence })`                                                                        |
-| `src/lib/tool-error.ts`                               | 不改。`buildToolErrorContext` / `classifyToolError` 被证据包复用                                                                      |
+| 文件                                                  | 改动                                                                                                                                   |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/lib/workflow/operator-failure.ts`                | 新增。纯函数：把 `outcome` + `probeCounts` + `draft` 折叠成证据包                                                                      |
+| `src/background/operator-tool-run.ts`（失败分支）     | 失败分支改为 `return { ok: false, error, evidence }`。`outcome.resolution` 与 `probeCounts` 从"只消费"改为"消费并回传"                 |
+| `src/background/operator-tool-run.ts`（其他拒绝分支） | JS 权限拒绝 / 定位解析为空 / 未产出的大块数据 / 必填参数缺失（前后两道）五处前置拒绝同样带上证据，保证"拒绝"与"执行失败"对模型是同构的 |
+| `src/background/agent.ts`                             | `JSON.stringify({ error: out.error, evidence: out.evidence })`                                                                         |
+| `src/lib/tool-error.ts`                               | 不改。`buildToolErrorContext` / `classifyToolError` 由工具结果信封继续提供 `errorType` / `suggestedRecovery`                           |
 
 **体积约束**：证据包会进模型上下文。必须硬约束：
 
 - `errorMessage` 截断 200 字符（与 `recentFailedAttempts` 一致，`src/lib/tool-error.ts:122`）
 - `candidateCounts` 最多 8 条
 - `locatorResolution` 只保留白名单字段，不透传整个对象
-- `suggestedRecovery` 最多 3 条
 
 `tests/agent-payload-size.spec.ts` 现有 byte 预算**不得**因此超限；若超，优先缩短
 `suggestedRecovery` 的文案，而不是砍证据字段。
@@ -174,19 +182,28 @@ export interface OperatorFailureEvidence {
  * committed something the site cannot take back — that is the `idempotencyOf`
  * line the trial already uses.
  */
-export function safeRerunBoundaryOf(
-  nodes: WorkflowNode[],
-): { nodeId: string; label: string } | undefined
+export function safeRerunBoundaryOf(nodes: readonly WorkflowNode[]): RerunBoundary | undefined
+
+export interface RerunBoundary {
+  nodeId: string
+  label: string
+  intent?: string
+  firstCommitNodeId?: string
+  firstCommitLabel?: string
+}
 ```
 
 **规则**
 
-1. 沿 chain 的执行路径顺序遍历，记住**最后一个**满足以下全部条件的节点：
-   - `idempotencyOf(...) !== 'unsafe'`（复用 `src/lib/workflow/trial-run.ts:207` 的判定）
-   - 不是 `COMMIT_BLOCK_IDS` 成员（`src/lib/workflow/trial-run.ts:221-230`）
-   - 不是 draft-save 类动作（`isDraftSaveNode`，`src/lib/workflow/trial-run.ts:201` 在用）
-2. 该节点即"可安全重跑点"。它**之后**的步骤在重跑时必须被视为已发生，不得重放。
-3. 链为空时返回 `undefined`（无从重跑）。
+1. 沿 chain 的执行顺序遍历（draft 的 `nodes` 即 append 顺序，**不需要**图遍历），找出
+   **第一个"提交类"节点**：`isUnsafeNode(node) || isDraftSaveNode(node)`。
+   这与试跑自己的截断判据 `trialCutoffNodeId`（`src/lib/workflow/trial-run.ts:199`）
+   同源——"试跑愿意跑到的最后一步"就是"可安全重跑点"。
+2. 边界 = **该提交节点之前的那一个**。边界之后的步骤在重跑时必须被视为已发生，不得重放。
+3. 链中没有提交类节点时，边界 = 最后一个动作节点。
+4. 第一个动作本身就是提交类 → 返回 `undefined`（无任何可重放的步骤）。
+5. 链为空 / 只有 trigger → 返回 `undefined`。
+6. 附带回报 `firstCommitNodeId` / `firstCommitLabel`：模型据此知道"要重录的是哪一步"。
 
 **交付形态**：本轮**只计算并回传**，不强制（强制需要回改能力，属 Round B）。
 但 prompt 必须同步给出规则（`src/background/agent.ts:406-456` 的 workflow-mode 段落）：
@@ -285,3 +302,63 @@ Round A 是 Round B 的**前置**，不实现 Round B 的任何能力。
 | `settings.goalVerification` | 目标门控的判定来源（Round B 不新建第二套判定）            |
 
 Round B 见 `specs/2026-10-20-generation-chain-edit-loop-design.md`。
+
+---
+
+## 10. Round A 的实测记录 · Measured record
+
+### 10.1 Before 基线（Step 0，84 轮真实生成）
+
+`node scripts/selftest-corpus-stats.mjs`（corpus = `tmp/selftest-round*.json`，gitignored）：
+
+| 指标                  | 值            |
+| --------------------- | ------------- |
+| `verdict.pass`        | 9/84 (10.7%)  |
+| `goalCertified`（L3） | 3/84 (3.6%)   |
+| `verified && proven`  | 19/84 (22.6%) |
+
+失败阶段分布：`verify` 29（34.5%）· `goal` 15（17.9%）· `generate` 14（16.7%）· `cutoff` 12（14.3%）·
+`ok` 9（10.7%）· `harness` 5（6.0%）。
+
+失败原因 Top-10：目标未达成 14 · replay stopped at cutoff 12 · L3 failed 11 · missing terminal save action 9 ·
+replay ran clean 9 · READINESS_TIMEOUT(visible) 5 · L2 failed 4 · network error 3 · reload refused 3 ·
+save-local failed 3。
+
+### 10.2 A3 的真实浏览器证据
+
+`settings.goalVerification` 在真实 Chrome 的扩展存储里出现（`Local Extension Settings/<ext-id>/021682.log`），
+说明**白名单持久化在真实扩展里成立**（坑 1 的直接防线）：
+
+```json
+{"certified":false,"level":"NONE","reason":"The trial stopped before the last step, so the goal is unproven.","unmet":[]}
+{"certified":false,"level":"NONE","reason":"The pre-save trial failed at step 2/8.","unmet":["AI : MiniMax rate limit or quota reached (429) …"]}
+```
+
+两条 reason 不同（"试跑停在最后一步之前" vs "试跑在第 2/8 步失败"），对应设计里"试跑失败"与"目标未达成"
+两种可区分的读法；`unmet` 在有具体原因时带上那一条。
+
+### 10.3 After（Step 6，n ≥ 10 轮）
+
+**尚无数据，因此本节不做任何成功率结论。** 已就绪的是对照协议（详见
+`specs/2026-10-20-generation-failure-evidence-plan.md` §Step 6）：
+
+| 臂       | 代码                         | 轮次    | 源码指纹           |
+| -------- | ---------------------------- | ------- | ------------------ |
+| `arm-a2` | `4fd3ae1` + Round A 改动     | 120–129 | `74168001377b003f` |
+| `arm-b2` | `4fd3ae1`（无 Round A 改动） | 130–139 | `71bd364678147554` |
+
+两臂都在 `4fd3ae1` 上重新构建（此前的 `62f571f` 两臂作废），补丁已 typecheck，
+每轮开始前把该臂的 `dist/` 覆盖到扩展的 unpacked 路径，再用该臂自己的 worktree 跑
+`--skip-build`。
+
+2026-10-20 18:38 的第一次尝试（round 120，arm-a2）在生成前 10 秒被 MiniMax 429
+拒绝——配额未恢复，A/B 在换到可用 provider 之前无法产生可归因的数据。两臂必须使用
+**同一个** provider，否则对照里混入 provider 变量。
+
+### 10.4 过程中的外部阻塞 · External blockers met on the way
+
+| 阻塞                                                                                                 | 性质                                                                                                                                                                                |
+| ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 另一个 agent 在同一工作区并发改 `src/`（源码指纹每分钟变化，某一刻共享树甚至构建不过）               | 环境：任何"build → reload → 比对指纹"的闭环都无法收敛，轮次会测到别人在途的代码                                                                                                     |
+| 扩展 service worker 在 reload 后长时间不回连适配器（"插件未连接"），`chrome://extensions` 不可脚本化 | 环境：需要人在浏览器里点一次 reload                                                                                                                                                 |
+| MiniMax 429「已达到 Token Plan 用量上限」                                                            | 外部账号配额：连续 11 轮秒挂在生成前（rounds 84–94），加 150s 退避后恢复（rounds 95+ 正常生成）；2026-10-20 18:38 配额再次耗尽，A/B 第一轮即被拒，需先在 Settings 换到可用 provider |
