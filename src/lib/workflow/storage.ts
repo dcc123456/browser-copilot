@@ -16,6 +16,7 @@ import { fileStorageArea } from '../fs-store'
 import { withKeyLock } from '../key-lock'
 import { shedBulkDataUrls } from '../persist-budget'
 import { migrateWorkflow } from './migrate'
+import { normalizeGoalVerification } from './goal-verification-record'
 import { normalizeTrialRun } from './trial-run'
 import { pageContextOf } from './page-context'
 import type {
@@ -109,6 +110,11 @@ export function asWorkflow(value: unknown): Workflow | null {
     rawPageContext && typeof rawPageContext === 'object'
       ? pageContextOf({ settings: { pageContext: rawPageContext } })
       : undefined
+  // The goal verdict the generation measured. It was missing from this
+  // whitelist, so the compose path could write it and the next save would drop
+  // it — the same silent loss the page-context anchor suffered. The guard
+  // drops a malformed record instead of storing half of it.
+  const goalVerification = normalizeGoalVerification(rawSettings.goalVerification)
   const settings: WorkflowSettings = {
     ...DEFAULT_SETTINGS,
     saveLog: rawSettings.saveLog === true,
@@ -154,6 +160,7 @@ export function asWorkflow(value: unknown): Workflow | null {
     rawSettings.certificationStatus === 'unverified'
       ? { certificationStatus: rawSettings.certificationStatus }
       : {}),
+    ...(goalVerification ? { goalVerification } : {}),
     // Seed attribution: without this line the panel and the selftest report
     // lose every record of a generation having been seeded, because the whitelist
     // is the only reader of a persisted setting.

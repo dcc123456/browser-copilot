@@ -84,10 +84,16 @@ import {
 import { isAiComposedFill } from '../lib/workflow/ai-prefill'
 import type { Workflow, WorkflowNode } from '../lib/workflow/types'
 import type { TrialRunRecord } from '../lib/workflow/trial-run'
-import { trialFailed, draftGoalGapNotice } from '../lib/workflow/trial-run'
+import { trialCertifies, trialFailed, draftGoalGapNotice } from '../lib/workflow/trial-run'
+import type { WorkflowGoalVerification } from '../lib/workflow/goal-verification-record'
 import { recordedPageContext } from '../lib/workflow/page-context'
 import { withTrialRecord } from './workflow-engine/repair/generation-trial'
 import type { TrialRunner } from './workflow-engine/repair/generation-trial'
+import { DEFAULT_GOAL_SETTLE_MS, verifyWorkflowGoal } from './workflow-engine/goal-verification'
+import { unmetGoalRows } from '../lib/workflow/goal-rows'
+import { createDriverConditionProbe } from './workflow-engine/condition-runtime'
+import type { ExecuteWorkflowResult } from './workflow-engine/run-workflow'
+import type { ScopeWindow } from './automation-scope'
 
 export { TRIGGER_BLOCK_ID }
 export type { DraftSource, PendingBranch, WorkflowDraft }
@@ -661,6 +667,12 @@ export async function composeWorkflowFromDraft(
     description?: string
     save?: boolean
     trial?: TrialRunner
+    /**
+     * The window the generation ran in. The goal verdict is read off the live
+     * page, so it must be the page the workflow acted on — not whatever tab
+     * happens to be active when the save happens.
+     */
+    scope?: ScopeWindow
   } = {},
 ): Promise<{ workflow: Workflow; saved: boolean } | { error: string; issues?: string[] }> {
   const draft = draftStore.get(conversationId) ?? (await hydrateDraft(conversationId))
@@ -852,6 +864,7 @@ export async function composeWorkflowFromDraft(
   // must never move the user's page. Every outcome, including a failure, still
   // saves: the trial buys evidence and a self-heal write-back, not a gate.
   let trialRecord: TrialRunRecord | undefined
+  let goalVerification: WorkflowGoalVerification | undefined
   if (opts.save !== false && opts.trial) {
     const trial = await opts.trial(workflow)
     workflow = trial.workflow
@@ -860,12 +873,13 @@ export async function composeWorkflowFromDraft(
     // verification replay failed is still saved (a trial never gates), but it
     // must not reach the user looking like a workflow that runs.
     if (trialFailed(trialRecord)) {
-      const code = trialRecord.failureCode ? `[${trialRecord.failureCode}] ` : ''
-      const why = trialRecord.reason ? `：${trialRecord.reason}` : ''
-      saveWarnings.push(
-        `验证未通过 · 保存前的试重放在第 ${trialRecord.coveredSteps}/${trialRecord.totalSteps} 步失败 ${code}${why}`.trimEnd(),
-      )
+      saveWarnings.push(trialFailedWarning(trialRecord))
     }
+    goalVerification = await composeGoalVerification(workflow, trial, opts.scope)
+    // A trial that ran clean but did not reach the goal is a different finding
+    // from a broken graph, and the card must be able to say which one it is.
+    const unmetWarning = goalVerification ? goalUnmetWarning(goalVerification) : undefined
+    if (unmetWarning) saveWarnings.push(unmetWarning)
   }
   // Finish the stage reports: static validation + independent verification.
   generationStages.push(staticValidateStage(runErrorCount, generatedErrorCount))
@@ -873,6 +887,7 @@ export async function composeWorkflowFromDraft(
   workflow.settings.generationStages = generationStages
   if (seededFrom) workflow.settings.seededFrom = seededFrom
   if (trialRecord) workflow = withTrialRecord(workflow, trialRecord)
+  if (goalVerification) workflow.settings.goalVerification = goalVerification
   if (saveWarnings.length > 0) {
     workflow.settings.saveWarnings = saveWarnings
   }
@@ -890,6 +905,85 @@ export async function composeWorkflowFromDraft(
     }
   }
   return { workflow, saved }
+}
+
+/**
+ * The card's line for a trial that broke.
+ *
+ * Its own wording, because a broken graph and an unmet goal are different
+ * findings and the user acts on them differently: one needs a fixed step, the
+ * other a different goal.
+ */
+export function trialFailedWarning(record: TrialRunRecord): string {
+  const code = record.failureCode ? `[${record.failureCode}] ` : ''
+  const why = record.reason ? `：${record.reason}` : ''
+  return `验证未通过 · 保存前的试重放在第 ${record.coveredSteps}/${record.totalSteps} 步失败 ${code}${why}`.trimEnd()
+}
+
+/**
+ * The card's line for a trial that ran clean but did not reach the goal.
+ *
+ * Returns nothing when there is no verdict to report: an unproven goal (the
+ * trial stopped before the last step) is silence, not a finding.
+ */
+export function goalUnmetWarning(verification: WorkflowGoalVerification): string | undefined {
+  if (verification.certified || verification.level === 'NONE') return undefined
+  const rows = verification.unmet.length ? verification.unmet.join('；') : verification.reason
+  return `目标未达成 · 试跑通过，但目标条件未满足：${rows}`
+}
+
+/**
+ * The goal verdict the pre-save trial can support.
+ *
+ * A goal is a claim about the page AFTER the last step, so only a replay that
+ * really ran the whole graph can judge it: a trial that stopped in front of a
+ * commit left the last steps unexecuted, and calling that "unverified" would
+ * punish the safety rule that stopped it.
+ *
+ * A failed trial is a DIFFERENT fact from an unmet goal — the graph is broken
+ * versus the graph ran and the goal did not follow — so the two are recorded
+ * apart, and the save card says which one happened.
+ */
+async function composeGoalVerification(
+  workflow: Workflow,
+  trial: { record: TrialRunRecord; result?: ExecuteWorkflowResult },
+  scope?: ScopeWindow,
+): Promise<WorkflowGoalVerification | undefined> {
+  if (!workflow.settings?.goalSpec) return undefined
+  const record = trial.record
+  if (trialFailed(record)) {
+    return {
+      level: 'NONE',
+      certified: false,
+      reason: `The pre-save trial failed at step ${record.coveredSteps}/${record.totalSteps}.`,
+      unmet: record.reason ? [record.reason] : [],
+    }
+  }
+  if (!trialCertifies(record) || !trial.result) {
+    return {
+      level: 'NONE',
+      certified: false,
+      reason: 'The trial stopped before the last step, so the goal is unproven.',
+      unmet: [],
+    }
+  }
+  try {
+    const report = await verifyWorkflowGoal(
+      workflow,
+      trial.result,
+      createDriverConditionProbe(new AbortController().signal, scope),
+      { settleMs: DEFAULT_GOAL_SETTLE_MS },
+    )
+    return {
+      level: report.level,
+      certified: report.certified,
+      reason: report.reason,
+      unmet: unmetGoalRows(report),
+    }
+  } catch (error) {
+    console.warn('[compose] goal verification failed', error)
+    return undefined
+  }
 }
 
 /**

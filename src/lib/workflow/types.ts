@@ -230,6 +230,17 @@ export interface WorkflowSettings {
    */
   certificationStatus?: 'unverified' | 'certified'
   /**
+   * The goal verdict the generation measured on this graph
+   * (`lib/workflow/goal-verification-record`).
+   *
+   * A separate fact from {@link certificationStatus}: the certification status
+   * says "a replay certified this", the verdict says "here is what the goal
+   * check actually found, and which rows did not hold". Absent = never judged
+   * (hand-built graphs, and generations whose trial stopped before the last
+   * step, which by design prove nothing about the goal).
+   */
+  goalVerification?: import('./goal-verification-record').WorkflowGoalVerification
+  /**
    * Which saved workflows were offered as generation seeds for this one
    * (`lib/workflow/seed-recall`), newest join key first.
    *

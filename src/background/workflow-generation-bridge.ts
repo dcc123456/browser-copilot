@@ -43,6 +43,7 @@ import { actionNodesOf, composeWorkflowFromDraft, hydrateDraft } from './operato
 import { executeWorkflow, type ExecuteWorkflowResult } from './workflow-engine/run-workflow'
 import { createDriverConditionProbe } from './workflow-engine/condition-runtime'
 import { DEFAULT_GOAL_SETTLE_MS, verifyWorkflowGoal } from './workflow-engine/goal-verification'
+import { unmetGoalRows } from '../lib/workflow/goal-rows'
 import { normalScopeFromWindowId } from './automation-scope'
 import {
   autoRepairEvents,
@@ -321,6 +322,11 @@ async function runGenerationTurn(
       executeWorkflow,
       ...(req.scopeWindowId !== undefined ? { scopeWindowId: req.scopeWindowId } : {}),
     }),
+    // The goal verdict is read off the live page, so it has to be read from the
+    // page the generation ran in.
+    ...(req.scopeWindowId !== undefined
+      ? { scope: await normalScopeFromWindowId(req.scopeWindowId) }
+      : {}),
   })
 
   if ('error' in composed) {
@@ -681,16 +687,7 @@ async function certifyReplayGoal(
       createDriverConditionProbe(new AbortController().signal, scope),
       { settleMs: DEFAULT_GOAL_SETTLE_MS },
     )
-    const unmet = [
-      ...report.l3.conditions
-        .filter((condition) => !condition.satisfied)
-        .map((condition) =>
-          condition.detail
-            ? `${condition.description} — ${condition.detail}`
-            : condition.description,
-        ),
-      ...(report.softUnconfirmed ?? []),
-    ]
+    const unmet = unmetGoalRows(report)
     return {
       certified: report.certified,
       level: report.level,
