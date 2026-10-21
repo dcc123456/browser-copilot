@@ -56,7 +56,8 @@
     "bench:workflow-generation": "node scripts/bench-workflow-generation.mjs",
     "bench:workflow-repair": "node scripts/bench-workflow-repair.mjs",
     "gen:bridge": "node scripts/bridge-generate.mjs",
-    "selftest": "node scripts/selftest.mjs"
+    "selftest": "node scripts/selftest.mjs",
+    "selftest:stats": "node scripts/selftest-corpus-stats.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
