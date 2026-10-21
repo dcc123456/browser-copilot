@@ -91,6 +91,9 @@ const MENU_ITEM_CLASS =
   'flex w-full cursor-pointer items-center gap-2 rounded-md! border-0! bg-transparent! px-2.5! py-1.5! ' +
   'text-left text-[12.5px] text-ink! hover:bg-hover!'
 
+/** Collapse-state key for the ungrouped bucket, which has no group id. */
+const UNGROUPED_SECTION_KEY = '__ungrouped__'
+
 /**
  * The primary "new" action with its sibling Import entry folded into a hover
  * bubble. Hover/focus opens it for mouse/keyboard users; tapping the button
@@ -637,8 +640,7 @@ export default function WorkflowsTab() {
   // --- Groups -----------------------------------------------------------------
   const sections = useMemo(() => groupWorkflows(workflows, groups), [workflows, groups])
 
-  const toggleGroupCollapsed = (groupId: string | null): void => {
-    if (!groupId) return
+  const toggleGroupCollapsed = (groupId: string): void => {
     setCollapsedGroups((prev) => {
       const next = new Set(prev)
       if (next.has(groupId)) next.delete(groupId)
@@ -1105,7 +1107,7 @@ export default function WorkflowsTab() {
       ) : (
         sections.map((section) => {
           const group = section.group
-          const collapsed = group ? collapsedGroups.has(group.id) : false
+          const collapsed = collapsedGroups.has(group?.id ?? UNGROUPED_SECTION_KEY)
           const isRenaming = group ? renamingGroupId === group.id : false
           return (
             <section className="mt-1" key={group?.id ?? 'ungrouped'}>
@@ -1114,7 +1116,7 @@ export default function WorkflowsTab() {
                   <button
                     aria-expanded={!collapsed}
                     className="flex! items-center! justify-center! rounded! border-0! bg-transparent! p-1! text-muted! hover:bg-hover!"
-                    onClick={() => toggleGroupCollapsed(group?.id ?? null)}
+                    onClick={() => toggleGroupCollapsed(group?.id ?? UNGROUPED_SECTION_KEY)}
                     type="button"
                   >
                     {collapsed ? (

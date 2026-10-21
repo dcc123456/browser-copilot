@@ -132,6 +132,25 @@ describe('workflow groups', () => {
     expect(container.textContent).toContain('Send report')
   })
 
+  it('folds the ungrouped bucket without touching the groups above it', async () => {
+    const container = await render()
+    // Sections render groups first, then the ungrouped bucket.
+    const toggles = [...container.querySelectorAll<HTMLElement>('section button[aria-expanded]')]
+    const ungroupedToggle = toggles.at(-1)
+    expect(ungroupedToggle?.getAttribute('aria-expanded')).toBe('true')
+
+    await act(async () => ungroupedToggle?.click())
+    await flush()
+    expect(container.textContent).not.toContain('Send report')
+    expect(container.textContent).toContain('Scrape leads')
+    expect(ungroupedToggle?.getAttribute('aria-expanded')).toBe('false')
+    expect(toggles[0]?.getAttribute('aria-expanded')).toBe('true')
+
+    await act(async () => ungroupedToggle?.click())
+    await flush()
+    expect(container.textContent).toContain('Send report')
+  })
+
   it('exports exactly the checked workflows', async () => {
     const container = await render()
     const boxes = checkboxes(container)
