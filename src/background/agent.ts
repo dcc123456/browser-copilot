@@ -41,6 +41,7 @@ import {
   shouldCompact,
 } from '../lib/context-compact'
 import type { TokenAttribution } from '../lib/token-ledger'
+import { createSessionSummaryFilter } from '../lib/chat-output'
 import { turnAttribution } from './token-accounting'
 import {
   isOperatorTool,
@@ -4969,6 +4970,8 @@ export async function runAgentTurn(
   const interjectionText = {
     applied: messages.chatInterjectionApplied,
   }
+  // And the reconnect status line, for the same reason.
+  const reconnectingText = messages.chatReconnecting
 
   // Filter the advertised tools per round (see advertiseTools): the core set
   // plus any on-demand group the model has loaded so far this conversation.
@@ -5145,6 +5148,12 @@ export async function runAgentTurn(
     deps.send({ type: 'phase', phase: 'thinking' })
     let announced = false
 
+    // A model occasionally appends a session-summary `<details>` block to its
+    // answer. It must not reach the panel, and — because this same text becomes
+    // history — it must not teach the next round to imitate it either.
+    const summaryFilter = createSessionSummaryFilter()
+    let replyText = ''
+
     let result
     try {
       result = await streamCompletion(
@@ -5156,6 +5165,9 @@ export async function runAgentTurn(
           attribution: turnUsageAttribution,
           messages,
           tools,
+          // A mid-reply connection loss reconnects instead of ending the turn;
+          // an already-started answer is continued, never replayed.
+          retry: { retries: 10, delayMs: 5_000 },
           ...(provider.headers ? { headers: provider.headers } : {}),
           ...(typeof provider.temperature === 'number'
             ? { temperature: provider.temperature }
@@ -5170,7 +5182,21 @@ export async function runAgentTurn(
               announced = true
               deps.send({ type: 'phase', phase: 'responding' })
             }
-            deps.send({ type: 'delta', text: delta })
+            const visible = summaryFilter.push(delta)
+            if (visible.length === 0) return
+            replyText += visible
+            deps.send({ type: 'delta', text: visible })
+          },
+          onRetry: (info) => {
+            deps.send({
+              type: 'status',
+              text: reconnectingText({
+                retry: info.retry,
+                retries: info.retries,
+                seconds: Math.round(info.delayMs / 1000),
+                continuing: info.continuing,
+              }),
+            })
           },
           // Chain-of-thought streamed separately: relay it so the panel can
           // paint a live reasoning block, but never touch the phase — the
@@ -5226,6 +5252,24 @@ export async function runAgentTurn(
       throw error
     }
 
+    // A transport that produced no deltas (an embedded/non-streaming caller or
+    // a mocked one) still has an answer in `result.content`; derive the reply
+    // from it so the transcript is not silently emptied. Real streams always
+    // arrive through `onText`, and only those are streamed to the panel.
+    if (!announced && result.content.length > 0) {
+      replyText += summaryFilter.push(result.content)
+    }
+
+    // Release any tail the filter held back while it watched for the start of
+    // a `<details>` block (e.g. an answer that simply ends with a lone `<`).
+    const heldTail = summaryFilter.end()
+    if (heldTail.length > 0) {
+      replyText += heldTail
+      // A transport that never streamed a delta showed the panel nothing, so
+      // there is nothing to release there either.
+      if (announced) deps.send({ type: 'delta', text: heldTail })
+    }
+
     // Track the ACTUAL context size: this request's prompt_tokens. Read from
     // the resolved result (not onUsage) so mocked streams in tests can drive
     // compaction the same way real ones do.
@@ -5235,7 +5279,7 @@ export async function runAgentTurn(
     }
 
     if (result.toolCalls.length === 0) {
-      history.push({ role: 'assistant', content: result.content })
+      history.push({ role: 'assistant', content: replyText })
       // A supplement that arrived while this answer streamed still belongs to
       // THIS task: apply it and keep the same turn going, so the model answers
       // the supplement instead of the task ending with it unread. The round
@@ -5247,7 +5291,7 @@ export async function runAgentTurn(
 
     history.push({
       role: 'assistant',
-      content: result.content.length > 0 ? result.content : '',
+      content: replyText,
       tool_calls: result.toolCalls,
     })
 

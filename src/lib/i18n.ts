@@ -423,6 +423,17 @@ export interface Messages {
   chatAttachmentTotalTooLarge: string
   chatReattached: string
   chatConnectionDropped: string
+  /**
+   * Status line while a dropped stream is being retried. `retry`/`retries`
+   * count attempts after the failure; `seconds` is the wait before the next;
+   * `continuing` says the reply resumes from what was already written.
+   */
+  chatReconnecting: (params: {
+    retry: number
+    retries: number
+    seconds: number
+    continuing: boolean
+  }) => string
   chatExtensionReloaded: string
   /** Progress phases shown between send and the first token. */
   phasePreparing: string
@@ -711,8 +722,8 @@ export interface Messages {
   /** Review-log line for a failed attempt (timeout / endpoint / parse). */
   workflowReviewLogFailed: string
   /**
-   * Per-node AI fix log mirrored into the workflow dialog: the same event stream
-   * the editor's AI Fix dialog renders, so the wait is visible from either side.
+   * Per-node AI optimization log mirrored into the workflow dialog: the same stream
+   * the editor's AI Optimize dialog renders, so the wait is visible from either side.
    */
   workflowFixLogTitle: string
   workflowFixLogRound: (params: { round: number }) => string
@@ -1785,6 +1796,10 @@ const en: Messages = {
   chatReattached: 'Still working — reattached to the run.',
   chatConnectionDropped:
     'The connection dropped mid-reply. Any answer was saved to this conversation — send another message to continue.',
+  chatReconnecting: ({ retry, retries, seconds, continuing }) =>
+    continuing
+      ? `Connection lost. Reconnecting in ${seconds}s (${retry}/${retries}) — continuing the reply where it stopped…`
+      : `Connection lost. Reconnecting in ${seconds}s (${retry}/${retries})…`,
   chatExtensionReloaded:
     'The extension was reloaded. Reload it in chrome://extensions, then reopen this panel.',
   phasePreparing: 'Preparing your request…',
@@ -1983,7 +1998,7 @@ const en: Messages = {
   workflowReviewLogStart: ({ steps }) =>
     `Sent ${steps} step${steps > 1 ? 's' : ''} to the AI reviewer…`,
   workflowReviewLogFailed: 'Review failed — keeping every step. Click “Retry review” to try again.',
-  workflowFixLogTitle: 'AI fix log',
+  workflowFixLogTitle: 'AI optimization log',
   workflowFixLogRound: ({ round }) => `R${round}`,
 
   modeLabel: 'Mode',
@@ -3090,6 +3105,10 @@ const zhCN: Messages = {
   chatAttachmentTotalTooLarge: '附件总大小超出限制（8 MB）',
   chatReattached: '任务仍在进行，已重新接入。',
   chatConnectionDropped: '回复过程中连接中断。已生成的内容已保存到本次对话——再发一条消息即可继续。',
+  chatReconnecting: ({ retry, retries, seconds, continuing }) =>
+    continuing
+      ? `连接中断，${seconds}s 后自动重连（第 ${retry}/${retries} 次）——从已输出的内容继续…`
+      : `连接中断，${seconds}s 后自动重连（第 ${retry}/${retries} 次）…`,
   chatExtensionReloaded: '扩展已重新加载。请在 chrome://extensions 中重载，然后重新打开此面板。',
   phasePreparing: '正在准备请求…',
   phaseReadingPage: '正在读取页面…',
@@ -3264,7 +3283,7 @@ const zhCN: Messages = {
   workflowReviewLogExpand: '展开',
   workflowReviewLogStart: ({ steps }) => `已发送 ${steps} 个步骤给 AI 审查…`,
   workflowReviewLogFailed: '审查失败，已保留全部步骤。可点击「重试审查」再试一次。',
-  workflowFixLogTitle: 'AI 修复日志',
+  workflowFixLogTitle: 'AI 优化日志',
   workflowFixLogRound: ({ round }) => `第 ${round} 轮`,
 
   modeLabel: '模式',

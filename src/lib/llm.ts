@@ -270,6 +270,37 @@ export interface TokenUsage {
   totalTokens: number
 }
 
+/**
+ * Who is being retried, and whether the next attempt continues the reply that
+ * already started streaming.
+ */
+export interface StreamRetryInfo {
+  /** 1-based retry number about to be waited for (the retry, not the failure). */
+  retry: number
+  /** Total retries the caller allowed. */
+  retries: number
+  /** How long the client will wait before the next attempt. */
+  delayMs: number
+  /** True when the next request asks the model to continue where it stopped. */
+  continuing: boolean
+  /** The failure that triggered the retry, for logging and UI copy. */
+  message: string
+}
+
+/**
+ * Caller-owned retry budget.
+ *
+ * Omitted → the provider-wide default (3 attempts, exponential backoff) and a
+ * stream that dies AFTER text has been delivered stays terminal. Set → the
+ * wait between attempts is fixed, and a partial reply is resumed by
+ * continuation (see {@link streamCompletion}).
+ */
+export interface StreamRetryPolicy {
+  /** Additional requests after the first one fails (10 = 1 initial + 10). */
+  retries: number
+  delayMs: number
+}
+
 /** Terminal result of one streamed completion. */
 export interface StreamResult {
   content: string
@@ -286,6 +317,12 @@ export interface StreamHandlers {
   onToolCallStart?: (name: string) => void
   /** Fired once with the final usage block when the provider reports it. */
   onUsage?: (usage: TokenUsage) => void
+  /**
+   * Fired before every automatic retry. `continuing` says the next attempt
+   * resumes the partial reply instead of restarting it, so a host can tell the
+   * user "reconnecting, picking up where it stopped" rather than "retrying".
+   */
+  onRetry?: (info: StreamRetryInfo) => void
   /**
    * Chain-of-thought deltas from reasoning models (DeepSeek / Qwen / Ark
    * `reasoning_content`). Kept separate from `onText` so a provider's
@@ -432,6 +469,14 @@ export class SseAccumulator {
     return this.done
   }
 
+  /**
+   * How many tool calls this stream announced. A failed attempt with any call
+   * in flight cannot be continued — half a JSON argument list is not a call.
+   */
+  get toolCallCount(): number {
+    return this.toolCalls.size
+  }
+
   result(): StreamResult {
     const toolCalls = [...this.toolCalls.values()]
       .sort((a, b) => a.index - b.index)
@@ -470,6 +515,21 @@ export class SseAccumulator {
     } catch {
       // A malformed frame must not abort an otherwise good stream.
       return
+    }
+
+    // A provider that fails mid-reply reports it as a frame, not as an HTTP
+    // status. Ignoring it turned "the model errored" into "the answer simply
+    // stopped" — no error, no retry, half a reply. Surfacing it as transient
+    // lets the caller reconnect and continue.
+    const providerError = (parsed as { error?: unknown }).error
+    if (providerError) {
+      const message =
+        typeof providerError === 'string'
+          ? providerError
+          : typeof (providerError as { message?: unknown }).message === 'string'
+            ? (providerError as { message: string }).message
+            : JSON.stringify(providerError)
+      throw new LlmError(`Provider error mid-stream: ${message}`, { transient: true })
     }
 
     // The trailing chunk often carries only usage with no choices.
@@ -550,6 +610,11 @@ export interface StreamRequest {
    * must supply it — the ledger's completeness claim is exactly this field.
    */
   attribution?: TokenAttribution
+  /**
+   * Caller-owned retry budget. Chat turns pass 10 retries at a fixed 5s so a
+   * dropped stream reconnects and continues instead of ending the turn.
+   */
+  retry?: StreamRetryPolicy
 }
 
 /**
@@ -647,6 +712,14 @@ function buildHeaders(request: {
 }
 
 /**
+ * Appended as a user turn when a reply was cut mid-transmission. The partial
+ * answer rides in the preceding assistant message, so the instruction only has
+ * to stop the model from restarting or repeating it.
+ */
+const STREAM_CONTINUE_PROMPT =
+  '[The reply above was interrupted mid-transmission. Continue from exactly where it stopped: do not repeat any text already written, do not restart the answer, and do not mention the interruption.]'
+
+/**
  * Streams one completion.
  *
  * @throws {LlmError} on a missing key, an unreachable endpoint, a non-2xx
@@ -668,9 +741,10 @@ export async function streamCompletion(
   }
 
   const url = `${base}/chat/completions`
+  const baseMessages = toApiMessages(request.messages)
   const body: Record<string, unknown> = {
     model: request.model,
-    messages: toApiMessages(request.messages),
+    messages: baseMessages,
     stream: true,
     // Providers omit per-chunk usage unless the client asks for it; without
     // this the panel's token statistics stay at zero for the whole stream.
@@ -694,77 +768,152 @@ export async function streamCompletion(
     })
 
   /**
-   * Fetches the completion, retrying TRANSIENT failures (429 / 5xx / network)
-   * with exponential backoff + jitter, up to {@link LLM_MAX_ATTEMPTS}.
-   *
-   * Retries happen only BEFORE the response body is consumed, so a partially
-   * read stream is never replayed (that would duplicate a completion). The
-   * 400-without-`stream_options` fallback is a format negotiation, not a
-   * transient retry, so it does not consume an attempt.
+   * Sends one request, negotiating away `stream_options` once when a strict
+   * gateway rejects it with 400 — losing usage stats beats losing the reply.
+   * This is format negotiation, not a retry: it does not consume an attempt.
    */
-  const attemptFetch = async (): Promise<Response> => {
-    let lastError: LlmError | undefined
-    for (let attempt = 1; attempt <= LLM_MAX_ATTEMPTS; attempt++) {
-      if (request.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-      try {
-        let response = await doFetch(body)
-        // A strict gateway may reject the unknown `stream_options` param
-        // outright; retry once without it — losing usage stats beats losing
-        // the reply.
-        if (!response.ok && response.status === 400) {
-          const { stream_options: _dropped, ...withoutUsage } = body
-          response = await doFetch(withoutUsage)
+  const sendRequest = async (payload: Record<string, unknown>): Promise<Response> => {
+    let response = await doFetch(payload)
+    if (!response.ok && response.status === 400 && 'stream_options' in payload) {
+      const { stream_options: _dropped, ...withoutUsage } = payload
+      response = await doFetch(withoutUsage)
+    }
+    return response
+  }
+
+  const policy = request.retry
+  // Without a policy this function keeps its historical contract: up to 3
+  // attempts for transient failures with exponential backoff, and a failure
+  // AFTER the body started streaming is terminal (there is nowhere to resume).
+  const maxRetries = policy ? Math.max(0, Math.floor(policy.retries)) : LLM_MAX_ATTEMPTS - 1
+  const attempts = maxRetries + 1
+
+  // Text already streamed to the caller across attempts. A retry with this
+  // non-empty resumes from it; the final content is this plus the last
+  // attempt's own output.
+  let delivered = ''
+  let reasoning = ''
+  let lastUsage: TokenUsage | null = null
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    if (request.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+    const continuing = delivered.length > 0
+    // A reply that already started is continued, never replayed: resending the
+    // original request would make the model answer the same question twice and
+    // duplicate what the user already sees.
+    const payload = continuing
+      ? {
+          ...body,
+          messages: [
+            ...baseMessages,
+            { role: 'assistant', content: delivered },
+            { role: 'user', content: STREAM_CONTINUE_PROMPT },
+          ],
         }
-        if (response.ok) return response
+      : body
+
+    let accumulator: SseAccumulator | undefined
+    let streaming = false
+    try {
+      const response = await sendRequest(payload)
+      if (!response.ok) {
         const failure = await describeHttpFailure(response, who)
         throw new LlmError(failure.message, {
           status: response.status,
           transient: RETRYABLE_STATUS.has(response.status),
           ...(failure.code ? { code: failure.code } : {}),
         })
-      } catch (error) {
-        // Cancellation is never retried — callers distinguish it by name.
-        if ((error as Error)?.name === 'AbortError') throw error
-        const failure =
-          error instanceof LlmError
-            ? error
-            : new LlmError(
-                `Cannot reach ${url}: ${describeError(error)}. Check the base URL, your network, and whether the endpoint allows browser-extension requests.`,
-                { transient: true },
-              )
-        // Permanent failure, or attempts exhausted: surface it.
-        if (!failure.transient || attempt === LLM_MAX_ATTEMPTS) throw failure
-        lastError = failure
       }
-      await sleepWithSignal(retryBackoffMs(attempt), request.signal)
-    }
-    throw lastError ?? new LlmError(`${who} request failed.`)
-  }
+      if (!response.body) throw new LlmError(`${who} returned an empty response body.`)
+      streaming = true
 
-  const response = await attemptFetch()
-  if (!response.body) throw new LlmError(`${who} returned an empty response body.`)
+      // Every completion's usage passes through one hook, so attribution cannot
+      // drift between features (see `observeUsage`). Each attempt reports its
+      // own usage: a retried request was really billed.
+      accumulator = new SseAccumulator({
+        ...handlers,
+        onUsage: (usage) => {
+          lastUsage = usage
+          observeUsage(request, usage)
+          handlers.onUsage?.(usage)
+        },
+      })
+      const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
+      try {
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          if (value) accumulator.push(value)
+          if (accumulator.isDone) break
+        }
+      } finally {
+        reader.cancel().catch(() => {})
+      }
+      const result = accumulator.finish()
 
-  // Every completion's usage passes through one hook, so attribution cannot
-  // drift between features (see `observeUsage`).
-  const accumulator = new SseAccumulator({
-    ...handlers,
-    onUsage: (usage) => {
-      observeUsage(request, usage)
-      handlers.onUsage?.(usage)
-    },
-  })
-  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
-  try {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      if (value) accumulator.push(value)
-      if (accumulator.isDone) break
+      // A clean close carrying neither `[DONE]` nor `finish_reason` is a cut
+      // connection dressed up as a completed reply. Only callers that opted
+      // into retrying get the heuristic; for everyone else partial content is
+      // historically returned as-is.
+      if (
+        policy !== undefined &&
+        !accumulator.isDone &&
+        result.finishReason === null &&
+        result.toolCalls.length === 0 &&
+        (result.content.length > 0 || delivered.length > 0)
+      ) {
+        throw new LlmError('The model stream ended before the reply completed.', {
+          transient: true,
+        })
+      }
+
+      return {
+        content: delivered + result.content,
+        reasoning: reasoning + result.reasoning,
+        toolCalls: result.toolCalls,
+        finishReason: result.finishReason,
+        // The last request is the one that measures the live context; summing
+        // attempts would make the next turn believe the prompt is several
+        // times larger and compact history it does not need to.
+        usage: lastUsage,
+      }
+    } catch (error) {
+      // Cancellation is never retried — callers distinguish it by name.
+      if ((error as Error)?.name === 'AbortError') throw error
+      const failure =
+        error instanceof LlmError
+          ? error
+          : new LlmError(
+              `Cannot reach ${url}: ${describeError(error)}. Check the base URL, your network, and whether the endpoint allows browser-extension requests.`,
+              { transient: true },
+            )
+      // Whatever this attempt managed to stream is already visible to the
+      // user; carry it forward so the next request continues from it.
+      const partial = accumulator?.result()
+      delivered += partial?.content ?? ''
+      reasoning += partial?.reasoning ?? ''
+      // A half-announced tool call can never be resumed (its JSON arguments
+      // may be cut mid-token), and a permanent failure will not heal.
+      const resumable =
+        (partial?.toolCalls.length ?? 0) === 0 &&
+        failure.transient &&
+        (policy !== undefined || !streaming)
+      if (!resumable || attempt === attempts) throw failure
+
+      const delayMs = policy ? policy.delayMs : retryBackoffMs(attempt)
+      handlers.onRetry?.({
+        retry: attempt,
+        retries: maxRetries,
+        delayMs,
+        continuing: delivered.length > 0,
+        message: failure.message,
+      })
+      await sleepWithSignal(delayMs, request.signal)
     }
-  } finally {
-    reader.cancel().catch(() => {})
   }
-  return accumulator.finish()
+  // The loop either returns or throws on its last attempt; this only satisfies
+  // the compiler.
+  throw new LlmError(`${who} request failed.`)
 }
 
 /**
