@@ -240,6 +240,84 @@ describe('element picker: committing without pressing', () => {
   })
 })
 
+const GROUP_PAGE = `
+  <div id="list">
+    <div class="row"><button class="pick">One</button></div>
+    <div class="row"><button class="pick">Two</button></div>
+    <div class="row"><button class="pick">Three</button></div>
+  </div>
+`
+const groupButtons = () => Array.from(document.querySelectorAll<HTMLButtonElement>('button.pick'))
+const matchNav = () => field('[data-role="matchnav"]')
+const matchLabel = () => field('[data-role="matchlabel"]').textContent
+
+describe('element picker: choosing which match', () => {
+  beforeEach(() => {
+    document.body.innerHTML = GROUP_PAGE
+  })
+
+  it('pins the aimed match when the short selector matches several', async () => {
+    await mount()
+    const buttons = groupButtons()
+
+    dispatchMouse(buttons[1]!, 'mousemove')
+
+    const pinned = selectorText()!
+    const found = document.querySelectorAll(pinned)
+    expect(found).toHaveLength(1)
+    expect(found[0]).toBe(buttons[1])
+    expect(matchNav().style.display).toBe('flex')
+    expect(matchLabel()).toBe('Match 2 of 3')
+    expect(field('[data-role="count"]').textContent).toContain('Matches 3 elements')
+  })
+
+  it('steps to another match and commits the pinned selector', async () => {
+    await mount()
+    const buttons = groupButtons()
+    dispatchMouse(buttons[0]!, 'mousemove')
+    expect(matchLabel()).toBe('Match 1 of 3')
+
+    dispatchMouse(field('[data-act="next-match"]'), 'click')
+    expect(matchLabel()).toBe('Match 2 of 3')
+    const pinned = selectorText()!
+    expect(document.querySelectorAll(pinned)[0]).toBe(buttons[1])
+
+    dispatchMouse(field('[data-act="prev-match"]'), 'click')
+    dispatchMouse(field('[data-act="prev-match"]'), 'click')
+    expect(matchLabel()).toBe('Match 3 of 3') // wraps backwards
+
+    dispatchMouse(field('[data-act="next-match"]'), 'click') // back to 1
+    const committed = selectorText()!
+    dispatchKey('Enter')
+
+    const [result] = results()
+    expect(result!.selector).toBe(committed)
+    expect(document.querySelectorAll(committed)[0]).toBe(buttons[0])
+  })
+
+  it('keeps the broad selector when the block acts on every match', async () => {
+    await mount({ multiple: true })
+    const buttons = groupButtons()
+
+    dispatchMouse(buttons[1]!, 'mousemove')
+
+    expect(matchNav().style.display).toBe('none')
+    const broad = selectorText()!
+    expect(document.querySelectorAll(broad)).toHaveLength(3)
+    expect(field('[data-role="count"]').textContent).toContain('Matches 3 elements')
+  })
+
+  it('renders the stepper in the editor locale', async () => {
+    await mount({ locale: 'zh' })
+
+    dispatchMouse(groupButtons()[1]!, 'mousemove')
+
+    expect(matchLabel()).toBe('第 2 / 3 个匹配')
+    expect(field('[data-role="count"]').textContent).toContain('匹配 3 个元素')
+    expect(field('[data-act="next-match"]').title).toBe('下一个匹配')
+  })
+})
+
 describe('element picker: the click-free hint', () => {
   it('appears with the first element aimed at', async () => {
     await mount()

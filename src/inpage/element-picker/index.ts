@@ -11,7 +11,11 @@
  * The picker highlights the element under the cursor, locks it on the FIRST
  * PRESS (the page never sees that press, so a popover that closes on
  * click-outside stays open), lets the user switch CSS/XPath, toggle selector
- * options, walk parent/child, and confirm with the card button or Enter. The
+ * options, walk parent/child, and confirm with the card button or Enter. When
+ * the built selector still matches several elements, it is pinned to the
+ * chosen match (a stepper walks the match set) so the committed selector
+ * resolves to exactly one element — unless the caller passed `multiple`, which
+ * means the block acts on every match and keeps the broad selector. The
  * chosen selector is reported back through
  * chrome.runtime.sendMessage({ type: 'picker:result', pickerId, selector }).
  *
@@ -30,6 +34,11 @@ export interface PickerArgs {
   mode: 'select' | 'verify'
   findBy?: 'cssSelector' | 'xpath'
   selector?: string
+  /**
+   * True when the block acts on EVERY match (loop-elements, get-text with
+   * `multiple`): the picker then keeps the broad selector instead of pinning
+   * one match.
+   */
   multiple?: boolean
   /**
    * Editor UI locale, so the copy this module adds reads the same way as the
@@ -87,6 +96,8 @@ export const startPicker: PickerStart = async (args) => {
 .pick-primary:disabled { opacity: 0.5; cursor: default; }
 .pick-count { margin-top: 8px; font-size: 12px; color: #6b7280; }
 .pick-count b { color: #6366f1; }
+.pick-match { display: none; align-items: center; gap: 6px; margin-top: 6px; }
+.pick-match-label { flex: 1; text-align: center; font-size: 12px; color: #374151; }
 .pick-hint { margin-top: 6px; font-size: 12px; color: #6b7280; }
 .pick-settings { margin-top: 10px; border-top: 1px solid #f3f4f6; padding-top: 8px; }
 .pick-settings summary { cursor: pointer; color: #6b7280; font-size: 12px; }
@@ -106,6 +117,8 @@ export const startPicker: PickerStart = async (args) => {
     up: lucideSvg('<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>'),
     down: lucideSvg('<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>'),
     check: lucideSvg('<path d="M20 6 9 17l-5-5"/>'),
+    left: lucideSvg('<path d="m15 18-6-6 6-6"/>'),
+    right: lucideSvg('<path d="m9 18 6-6-6-6"/>'),
   }
 
   // Idempotency guard (Automa's elementSelectorInstance): a previous picker
@@ -120,6 +133,14 @@ export const startPicker: PickerStart = async (args) => {
       locale === 'zh'
         ? '按 Enter 选中高亮的元素（无需点击）'
         : 'Press Enter to select the highlighted element (no click needed)',
+    matchNav: (index: number, total: number): string =>
+      locale === 'zh' ? `第 ${index} / ${total} 个匹配` : `Match ${index} of ${total}`,
+    prevMatch: locale === 'zh' ? '上一个匹配' : 'Previous match',
+    nextMatch: locale === 'zh' ? '下一个匹配' : 'Next match',
+    groupCount: (total: number, index: number): string =>
+      locale === 'zh'
+        ? `匹配 <b>${total}</b> 个元素 · 使用第 <b>${index}</b> 个`
+        : `Matches <b>${total}</b> elements · using <b>#${index}</b>`,
   }
 
   // --- selector builder (mirrors build-selector.ts; inlined for injection) ---
@@ -143,7 +164,7 @@ export const startPicker: PickerStart = async (args) => {
     typeof CSS !== 'undefined' && CSS.escape
       ? CSS.escape(v)
       : v.replace(/([^a-zA-Z0-9_-])/g, '\\$1')
-  function part(el: Element): string {
+  function part(el: Element, forceNth = false): string {
     const tag = el.tagName.toLowerCase()
     if (opts.idName && el.id) return `#${esc(el.id)}`
     let q = ''
@@ -162,7 +183,7 @@ export const startPicker: PickerStart = async (args) => {
           break
         }
       }
-    if (!q || opts.nthChild) {
+    if (!q || opts.nthChild || forceNth) {
       const parentEl = el.parentElement
       if (parentEl) {
         const sib = Array.from(parentEl.children).filter(
@@ -173,38 +194,99 @@ export const startPicker: PickerStart = async (args) => {
     }
     return (opts.tagName ? tag : '') + q
   }
-  // Count matches of a CSS selector across all open roots, and whether `el`
-  // is the (only) match — shadow elements never appear in document queries.
-  const matchesInRoots = (sel: string): Element[] => {
+  // Matches of a CSS selector or XPath across all open roots, in root order —
+  // shadow elements never appear in document queries, so every count and
+  // uniqueness check walks the same root list.
+  const matchesOf = (sel: string, xp = false): Element[] => {
+    if (!sel) return []
     const out: Element[] = []
     for (const root of openRoots()) {
-      try {
-        root.querySelectorAll(sel).forEach((m) => out.push(m))
-      } catch {
-        /* bad selector */
+      if (xp) {
+        try {
+          const doc = root.nodeType === 9 ? (root as Document) : (root as ShadowRoot).ownerDocument
+          if (!doc) continue
+          const result = doc.evaluate(sel, root, null, 7, null)
+          for (let i = 0; i < result.snapshotLength; i += 1) {
+            const node = result.snapshotItem(i)
+            if (node && node.nodeType === 1) out.push(node as Element)
+          }
+        } catch {
+          /* bad expression in this root */
+        }
+      } else {
+        try {
+          root.querySelectorAll(sel).forEach((m) => out.push(m))
+        } catch {
+          /* bad selector */
+        }
       }
     }
     return out
   }
-  function build(el: Element): string {
-    const direct = part(el)
-    if (direct.startsWith('#') && matchesInRoots(direct).length === 1) return direct
+  const isExact = (sel: string, el: Element, xp = false): boolean => {
+    const ms = matchesOf(sel, xp)
+    return ms.length === 1 && ms[0] === el
+  }
+  function build(el: Element, forceNth = false): string {
+    const direct = part(el, forceNth)
+    if (direct.startsWith('#') && matchesOf(direct).length === 1) return direct
     const chain = [direct]
     let node: Element | null = el.parentElement
     let depth = 0
     while (node && depth < 6) {
       const cand = chain.slice().reverse().join(' > ')
-      const ms = matchesInRoots(cand)
+      const ms = matchesOf(cand)
       if (ms.length === 1 && ms[0] === el) return cand
       if (opts.idName && node.id) {
         const withId = `#${esc(node.id)} > ${chain.slice().reverse().join(' > ')}`
-        if (matchesInRoots(withId).length === 1) return withId
+        if (matchesOf(withId).length === 1) return withId
       }
-      chain.push(part(node))
+      chain.push(part(node, forceNth))
       node = node.parentElement
       depth++
     }
     return chain.slice().reverse().join(' > ')
+  }
+  /** Absolute :nth-child path from body/html; null when a shadow boundary blocks it. */
+  function positionalPath(el: Element): string | null {
+    const parts: string[] = []
+    let node: Element | null = el
+    while (node && node.nodeType === 1) {
+      const tag = node.tagName.toLowerCase()
+      if (tag === 'html' || tag === 'body') {
+        parts.unshift(tag)
+        break
+      }
+      const parent: Element | null = node.parentElement
+      if (!parent) return null
+      let position = 1
+      let sibling = node.previousElementSibling
+      while (sibling) {
+        position += 1
+        sibling = sibling.previousElementSibling
+      }
+      parts.unshift(`${tag}:nth-child(${position})`)
+      node = parent
+    }
+    return parts.length > 0 ? parts.join(' > ') : ''
+  }
+  /**
+   * A selector resolving to exactly `el`. Repeated rows share every ancestor
+   * and class, so the short build stays broad; retry with :nth-of-type on the
+   * repeated level, then fall back to the absolute :nth-child path. '' when no
+   * CSS form is provably unique (the caller must keep the broad selector
+   * rather than claim a target).
+   */
+  function pinnedSelectorFor(el: Element, base: string, index: number, xp: boolean): string {
+    if (xp) {
+      const wrapped = `(${base})[${index + 1}]`
+      return isExact(wrapped, el, true) ? wrapped : ''
+    }
+    if (isExact(base, el)) return base
+    const positional = build(el, true)
+    if (isExact(positional, el)) return positional
+    const absolute = positionalPath(el)
+    return absolute && isExact(absolute, el) ? absolute : ''
   }
   function buildXp(el: Element): string {
     if (el.id) return `//*[@id="${el.id}"]`
@@ -254,23 +336,7 @@ export const startPicker: PickerStart = async (args) => {
     visit(document)
     return roots
   }
-  const count = (sel: string, xp: boolean): number => {
-    if (!sel) return 0
-    let n = 0
-    try {
-      for (const root of openRoots()) {
-        if (xp) {
-          const doc = root.nodeType === 9 ? (root as Document) : (root as ShadowRoot).ownerDocument
-          if (doc) n += doc.evaluate(sel, root, null, 7, null).snapshotLength
-        } else {
-          n += root.querySelectorAll(sel).length
-        }
-      }
-    } catch {
-      return 0
-    }
-    return n
-  }
+  const count = (sel: string, xp: boolean): number => matchesOf(sel, xp).length
 
   // --- DOM scaffold (Shadow DOM) ---
   const host = document.createElement('div')
@@ -314,6 +380,11 @@ export const startPicker: PickerStart = async (args) => {
         <button class="pick-btn" data-act="verify" title="Verify">${ICON.check}</button>
       </div>
       <div class="pick-count" data-role="count"></div>
+      <div class="pick-match" data-role="matchnav">
+        <button class="pick-btn" data-act="prev-match" title="${STRINGS.prevMatch}">${ICON.left}</button>
+        <span class="pick-match-label" data-role="matchlabel"></span>
+        <button class="pick-btn" data-act="next-match" title="${STRINGS.nextMatch}">${ICON.right}</button>
+      </div>
       <details class="pick-settings">
         <summary>Selector settings</summary>
         <label class="pick-opt"><input type="checkbox" data-opt="idName" checked> Include id</label>
@@ -334,6 +405,8 @@ export const startPicker: PickerStart = async (args) => {
   const findBySel = $<HTMLSelectElement>('[data-role="findby"]')
   const selectorEl = $('[data-role="selector"]')
   const countEl = $('[data-role="count"]')
+  const matchNavEl = $('[data-role="matchnav"]')
+  const matchLabelEl = $('[data-role="matchlabel"]')
   const hintEl = $('[data-role="hint"]')
   const noteEl = $('[data-role="note"]')
   const confirmBtn = $<HTMLButtonElement>('[data-act="confirm"]')
@@ -342,6 +415,12 @@ export const startPicker: PickerStart = async (args) => {
   let locked: Element | null = null
   let hovered: Element | null = null
   let curSelector = initial
+  /**
+   * The broad selector and match set the current pin was chosen from. Present
+   * only when the short build matched several elements and pinning produced a
+   * unique selector; drives the match stepper.
+   */
+  let matchGroup: { base: string; members: Element[]; index: number } | null = null
 
   const target = () => locked ?? hovered
 
@@ -364,16 +443,65 @@ export const startPicker: PickerStart = async (args) => {
     highlight.style.height = `${r.height}px`
   }
 
+  function renderMatchNav() {
+    const visible = matchGroup !== null && matchGroup.members.length > 1
+    matchNavEl.style.display = visible ? 'flex' : 'none'
+    if (!matchGroup) return
+    matchLabelEl.textContent = STRINGS.matchNav(matchGroup.index + 1, matchGroup.members.length)
+  }
   function refresh() {
     const el = target()
     if (!el) return
     const xp = findBySel.value === 'xpath'
-    curSelector = xp ? buildXp(el) : build(el)
+    const base = xp ? buildXp(el) : build(el)
+    const baseMatches = matchesOf(base, xp)
+    // A `multiple` caller wants the broad selector (every match). Otherwise
+    // the aim is ONE element, so pin the committed selector to the match the
+    // user actually pointed at — a broad selector would act on the first
+    // visible match and silently pick a different row.
+    matchGroup = null
+    let nextSelector = base
+    const index = baseMatches.indexOf(el)
+    if (!multiple && baseMatches.length > 1 && index >= 0) {
+      const pinned = pinnedSelectorFor(baseMatches[index] as Element, base, index, xp)
+      if (pinned) {
+        matchGroup = { base, members: baseMatches, index }
+        nextSelector = pinned
+      }
+    }
+    curSelector = nextSelector
     selectorEl.textContent = curSelector
     const n = count(curSelector, xp)
-    countEl.innerHTML = n === 1 ? 'Matches <b>1</b> element' : `Matches <b>${n}</b> elements`
+    countEl.innerHTML = matchGroup
+      ? STRINGS.groupCount(matchGroup.members.length, matchGroup.index + 1)
+      : n === 1
+        ? 'Matches <b>1</b> element'
+        : `Matches <b>${n}</b> elements`
     confirmBtn.disabled = !curSelector || n < 1
+    renderMatchNav()
     highlightEl(el)
+    updateHint()
+  }
+  /** Move the pin within the current broad match set (wrapping). */
+  function stepMatch(delta: number) {
+    if (!matchGroup) return
+    const xp = findBySel.value === 'xpath'
+    const total = matchGroup.members.length
+    const nextIndex = (matchGroup.index + delta + total) % total
+    const nextEl = matchGroup.members[nextIndex]
+    if (!nextEl) return
+    const pinned = pinnedSelectorFor(nextEl, matchGroup.base, nextIndex, xp)
+    // No unique form for that member: keep the broad selector and stay put
+    // rather than showing a selector that means something else.
+    if (!pinned) return
+    matchGroup.index = nextIndex
+    locked = nextEl
+    curSelector = pinned
+    selectorEl.textContent = curSelector
+    countEl.innerHTML = STRINGS.groupCount(total, nextIndex + 1)
+    confirmBtn.disabled = false
+    renderMatchNav()
+    highlightEl(nextEl)
     updateHint()
   }
 
@@ -524,6 +652,10 @@ export const startPicker: PickerStart = async (args) => {
         locked = kid
         refresh()
       }
+    }
+    if (act === 'prev-match' || act === 'next-match') {
+      stepMatch(act === 'prev-match' ? -1 : 1)
+      return
     }
     if (act === 'verify') {
       const xp = findBySel.value === 'xpath'

@@ -119,6 +119,77 @@ export function buildSelector(
   return chain.slice().reverse().join(' > ')
 }
 
+/** Whether `selector` resolves to exactly `el` under `root`. */
+function isExactSelector(selector: string, el: Element, root: Document | Element): boolean {
+  if (!selector) return false
+  try {
+    const matches = root.querySelectorAll(selector)
+    return matches.length === 1 && matches[0] === el
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Absolute `:nth-child` path from `body`/`html` to `el`.
+ *
+ * Unique by construction (every step pins a child index), used only when the
+ * short ancestor walk cannot separate repeated rows. Null when the element
+ * lives in a shadow root, because a document-level path cannot cross that
+ * boundary.
+ */
+export function positionalSelectorPath(el: Element): string | null {
+  if (el.nodeType !== 1) return null
+  const parts: string[] = []
+  let node: Element | null = el
+  while (node && node.nodeType === 1) {
+    const tag = node.tagName.toLowerCase()
+    if (tag === 'html' || tag === 'body') {
+      parts.unshift(tag)
+      break
+    }
+    const parent: Element | null = node.parentElement
+    if (!parent) return null
+    let position = 1
+    let sibling = node.previousElementSibling
+    while (sibling) {
+      position += 1
+      sibling = sibling.previousElementSibling
+    }
+    parts.unshift(`${tag}:nth-child(${position})`)
+    node = parent
+  }
+  return parts.length > 0 ? parts.join(' > ') : null
+}
+
+/**
+ * A selector resolving to exactly `el`.
+ *
+ * `buildSelector` stops at the first *unique* chain, but repeated rows share
+ * every ancestor and class, so it returns a broad selector for them. This
+ * retries the same walk with `:nth-of-type` positional qualifications (which
+ * separate the repeated sibling), then falls back to the absolute
+ * `:nth-child` path. Returns `''` when no CSS form is provably unique — the
+ * caller must not pretend a broad selector targets one element.
+ */
+export function buildPinnedSelector(
+  el: Element,
+  root: Document | Element = document,
+  opts: SelectorOptions = DEFAULT_SELECTOR_OPTIONS,
+): string {
+  const plain = buildSelector(el, root, opts)
+  if (isExactSelector(plain, el, root)) return plain
+  const positional = buildSelector(el, root, { ...opts, nthChild: true })
+  if (isExactSelector(positional, el, root)) return positional
+  const absolute = positionalSelectorPath(el)
+  return absolute && isExactSelector(absolute, el, root) ? absolute : ''
+}
+
+/** Address the `index`-th (0-based) match of an XPath expression. */
+export function buildIndexedXPath(xpath: string, index: number): string {
+  return `(${xpath})[${Math.max(0, Math.floor(index)) + 1}]`
+}
+
 /** Build an XPath for the element. */
 export function buildXPath(el: Element): string {
   if (el.nodeType !== 1) return ''

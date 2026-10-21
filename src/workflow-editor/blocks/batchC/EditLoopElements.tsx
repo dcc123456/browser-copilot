@@ -41,6 +41,7 @@ export default function EditLoopElements({ data, onChange }: EditFormProps) {
       onChange={onChange}
       hideMultiple
       hideMarkEl
+      pickAllMatches
       header={
         <Field label="Loop ID">
           <TextInput

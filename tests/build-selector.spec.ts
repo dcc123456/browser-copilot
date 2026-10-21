@@ -5,6 +5,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { JSDOM } from 'jsdom'
 import {
+  buildIndexedXPath,
+  buildPinnedSelector,
   buildSelector,
   buildXPath,
   countMatches,
@@ -92,6 +94,66 @@ describe('buildSelector', () => {
     const found = doc.querySelectorAll(sel)
     expect(found).toHaveLength(1)
     expect(found[0]).toBe(el)
+  })
+})
+
+describe('buildPinnedSelector', () => {
+  let rowsDoc: Document
+
+  beforeEach(() => {
+    const dom = new JSDOM(
+      `<!DOCTYPE html><body>
+        <div id="list">
+          <div class="row"><button class="pick">One</button></div>
+          <div class="row"><button class="pick">Two</button></div>
+          <div class="row"><button class="pick">Three</button></div>
+        </div>
+      </body>`,
+      { url: 'https://example.test/' },
+    )
+    rowsDoc = dom.window.document
+    ;(globalThis as { CSS?: unknown }).CSS = (dom.window as unknown as { CSS: typeof CSS }).CSS
+  })
+
+  it('pins the exact row that the short builder leaves ambiguous', () => {
+    const el = rowsDoc.querySelectorAll('button.pick')[1]!
+    // Premise: the short form is broad — this is the reported problem.
+    expect(rowsDoc.querySelectorAll(buildSelector(el, rowsDoc))).toHaveLength(3)
+
+    const pinned = buildPinnedSelector(el, rowsDoc)
+
+    expect(pinned).not.toBe('')
+    const found = rowsDoc.querySelectorAll(pinned)
+    expect(found).toHaveLength(1)
+    expect(found[0]).toBe(el)
+  })
+
+  it('keeps the short selector when it is already unique', () => {
+    const el = rowsDoc.getElementById('list')!
+    expect(buildPinnedSelector(el, rowsDoc)).toBe('#list')
+  })
+
+  it('returns no selector when the short one cannot be narrowed', () => {
+    // A detached element has no document path; the caller must not be handed
+    // a broad selector dressed up as a pin.
+    expect(buildPinnedSelector(rowsDoc.createElement('div'), rowsDoc)).toBe('')
+  })
+})
+
+describe('buildIndexedXPath', () => {
+  it('addresses the requested 0-based match with a 1-based XPath index', () => {
+    const indexed = buildIndexedXPath('//li', 1)
+    expect(indexed).toBe('(//li)[2]')
+    const result = doc.evaluate(
+      indexed,
+      doc,
+      null,
+      (win as unknown as { XPathResult: typeof XPathResult }).XPathResult
+        .ORDERED_NODE_SNAPSHOT_TYPE,
+      null,
+    )
+    expect(result.snapshotLength).toBe(1)
+    expect((result.snapshotItem(0) as Element).textContent).toBe('two')
   })
 })
 

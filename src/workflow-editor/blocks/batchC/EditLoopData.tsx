@@ -101,6 +101,7 @@ export default function EditLoopData({ data, onChange }: EditFormProps) {
             label="Element selector"
             selector={str(data, 'elementSelector')}
             onSelector={(v) => patch({ elementSelector: v })}
+            multiple
           />
           <Checkbox
             checked={bool(data, 'waitForSelector')}

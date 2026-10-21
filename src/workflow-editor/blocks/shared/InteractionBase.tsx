@@ -26,6 +26,12 @@ export interface InteractionBaseProps {
   hideMultiple?: boolean
   hideMarkEl?: boolean
   hideDescription?: boolean
+  /**
+   * The selector means EVERY match (loop blocks) even though the generic
+   * `multiple` option is hidden: the picker must keep the broad selector
+   * instead of pinning one match.
+   */
+  pickAllMatches?: boolean
 }
 
 export function str(data: Record<string, unknown>, key: string): string {
@@ -80,6 +86,7 @@ export default function InteractionBase({
   hideMultiple,
   hideMarkEl,
   hideDescription,
+  pickAllMatches = false,
 }: InteractionBaseProps) {
   const findBy = str(data, 'findBy') || 'cssSelector'
   const selector = str(data, 'selector')
@@ -106,7 +113,7 @@ export default function InteractionBase({
             onSelector={(sel) => onChange({ selector: sel })}
             findBy={findBy}
             onFindBy={(v) => onChange({ findBy: v })}
-            multiple={bool(data, 'multiple')}
+            multiple={bool(data, 'multiple') || pickAllMatches}
           />
 
           <Expand title="Selector options">
