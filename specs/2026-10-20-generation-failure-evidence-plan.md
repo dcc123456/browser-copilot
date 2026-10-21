@@ -338,14 +338,14 @@ Generation coverage gap: N operator step(s) failed during generation and were no
 
 按 `agents.md` §1，提交信息用英文 Conventional Commits。
 
-| #   | 提交                                                               | 包含                                                              |
-| --- | ------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| 1   | `chore(workflow): add selftest corpus stats script`                | Step 0                                                            |
-| 2   | `feat(workflow): compute safe rerun boundary for generation`       | Step 2（先于 Step 1：证据包 type-only 引用它，反序过不了 tsc）    |
-| 3   | `feat(workflow): add operator failure evidence bundle`             | Step 1                                                            |
-| 4   | `feat(workflow): return failure evidence to the generating model`  | Step 3 + Step 4                                                   |
-| 5   | `feat(workflow): persist goal verification on generated workflows` | Step 5                                                            |
-| 6   | `docs(workflow): record round A baseline and A/B protocol`         | Step 6 的文档（after 数据仍 BLOCKED，只有协议与阻塞记录）         |
+| #   | 提交                                                               | 包含                                                           |
+| --- | ------------------------------------------------------------------ | -------------------------------------------------------------- |
+| 1   | `chore(workflow): add selftest corpus stats script`                | Step 0                                                         |
+| 2   | `feat(workflow): compute safe rerun boundary for generation`       | Step 2（先于 Step 1：证据包 type-only 引用它，反序过不了 tsc） |
+| 3   | `feat(workflow): add operator failure evidence bundle`             | Step 1                                                         |
+| 4   | `feat(workflow): return failure evidence to the generating model`  | Step 3 + Step 4                                                |
+| 5   | `feat(workflow): persist goal verification on generated workflows` | Step 5                                                         |
+| 6   | `docs(workflow): record round A baseline and A/B protocol`         | Step 6 的文档（after 数据仍 BLOCKED，只有协议与阻塞记录）      |
 
 **每次提交前跑全绿**（见 §4），且**在临时 worktree 里验证提交树**
 （`agents.md` 收尾自检 ⑨；本仓库是共享工作区，可能有并发改动）。
