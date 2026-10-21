@@ -18,24 +18,43 @@
  */
 
 import { useRef, useState } from 'react'
-import { Eye, EyeOff, Loader2, MousePointerClick, RotateCcw, Send, Square, X } from 'lucide-react'
+import {
+  Camera,
+  Eye,
+  EyeOff,
+  Focus,
+  Loader2,
+  MousePointerClick,
+  RotateCcw,
+  Send,
+  Square,
+  X,
+} from 'lucide-react'
 import { sendCommand } from '../../lib/messages'
 import { isNearBottom } from '../../lib/scroll'
+import { toast } from '../../ui/toast'
 import {
   isObservableBlock,
+  isOperatorChainAction,
   operatorBlockName,
+  proposalIndexesNeedingPage,
   proposalsNeedingPage,
 } from '../../lib/workflow/operator-advise'
 import type {
   OperatorAction,
   OperatorAdviseMessage,
+  OperatorChainAction,
   OperatorChainProblem,
   OperatorMissingParams,
   OperatorPageRef,
   OperatorPrunedPort,
   OperatorProposal,
+  OperatorScreenshotReport,
   OperatorTargetProblem,
+  PickedElement,
 } from '../../lib/workflow/operator-advise'
+import { useEditorLocale } from '../locale-context'
+import { describePickFailure, requestElementPick } from '../blocks/shared/element-pick'
 import type { EditorStringKey, TranslateFn } from '../i18n'
 
 /** Why a reply landed as nothing at all. */
@@ -43,8 +62,9 @@ export type OperatorLandingProblem = OperatorChainProblem | OperatorTargetProble
 
 /** What the canvas did with one reply. */
 export interface OperatorLanding {
-  /** Which of the two shapes the reply took. */
-  kind: 'append' | 'node'
+  /** Which of the two shapes the reply took: a chain spliced into the flow, or
+   *  one step changed where it stands. */
+  kind: 'chain' | 'node'
   /** Nodes actually placed (an in-place change never places any). */
   added: number
   /** The change actually reached the canvas. */
@@ -103,10 +123,17 @@ interface Turn {
   offer?: PendingOffer
   /** What acting once on the page reported, kept as its own row under the answer. */
   observed?: string
+  /** The automatic screenshot this answer cost — or tried to. Screen pixels leave
+   *  the machine on this path, so it is reported, never silent. */
+  screenshot?: OperatorScreenshotReport
 }
 
 /** A batch held back from the canvas, and what it still lacks. */
 interface PendingOffer {
+  /** Where it goes when the user lands it: after the anchor or in front of it. The
+   *  offer only ever holds a chain, because a step missing a parameter is a NEW
+   *  step — an in-place answer is landed straight away. */
+  action: OperatorChainAction
   proposals: OperatorProposal[]
   missing: OperatorMissingParams[]
   /** Operators in the batch the assistant will not act with, named up front —
@@ -123,6 +150,9 @@ const PROBLEM_KEY: Record<OperatorLandingProblem, EditorStringKey> = {
   'branch-anchor': 'operatorAiBranchAnchor',
   'empty-graph': 'operatorAiEmptyGraph',
   'unknown-anchor': 'operatorAiAnchorGone',
+  'prepend-entry-point': 'operatorAiPrependEntry',
+  'prepend-no-incoming': 'operatorAiPrependUnwired',
+  'join-anchor': 'operatorAiJoinAnchor',
   'no-selection': 'operatorAiNoSelection',
   'unknown-target': 'operatorAiTargetGone',
   'no-proposal': 'operatorAiOneProposalOnly',
@@ -157,7 +187,7 @@ function Landing({
     <div className="mt-1.5 flex flex-col gap-1 border-t border-border pt-1.5">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="text-[11px] leading-snug text-muted">
-          {landing.kind === 'append'
+          {landing.kind === 'chain'
             ? t('operatorAiAdded').replace('{count}', String(landing.added))
             : t('operatorAiChangedInPlace')}
         </span>
@@ -189,6 +219,32 @@ function Landing({
         </p>
       )}
     </div>
+  )
+}
+
+/** The screenshot the assistant took for itself, reported either way: screen
+ *  pixels leave the machine on this path, and the user is the one who owns them. */
+function ScreenshotLine({
+  screenshot,
+  t,
+}: {
+  screenshot: OperatorScreenshotReport
+  t: TranslateFn
+}) {
+  const text = !screenshot.taken
+    ? t('operatorAiShotSkipped').replace('{error}', screenshot.error ?? '')
+    : screenshot.error
+      ? t('operatorAiShotSentFailed').replace('{error}', screenshot.error)
+      : t('operatorAiShotSent')
+  return (
+    <p
+      className={`mt-1 flex items-start gap-1 text-[11px] leading-snug ${
+        screenshot.taken && screenshot.error ? 'text-warn' : 'text-faint'
+      }`}
+    >
+      <Camera size={11} className="mt-0.5 shrink-0" aria-hidden="true" />
+      <span>{text}</span>
+    </p>
   )
 }
 
@@ -262,6 +318,10 @@ export default function OperatorChatDock({
   // Grounding is on by default — reading a page has no side effects, and a
   // parameter taken from the page is the whole point of asking in the editor.
   const [readPage, setReadPage] = useState(true)
+  // Elements the user pointed at by hand since the last message. They outrank
+  // any page read, so they ride along with the next send and are consumed there.
+  const [picked, setPicked] = useState<PickedElement[]>([])
+  const { bt, locale } = useEditorLocale()
   const composingRef = useRef(false)
   /** Which cancel reaches the request in flight: the model call, or the run that
    *  acts on the page. One facility, one in-flight request at a time. */
@@ -294,14 +354,67 @@ export default function OperatorChatDock({
 
   /** Land a batch, optionally with the parameters the page just supplied. */
   function landProposals(
+    action: OperatorChainAction,
     proposals: OperatorProposal[],
     context: OperatorChatContext,
   ): OperatorLanding {
     return onApply({
-      action: 'append',
+      action,
       proposals,
       ...(context.selectedNodeId ? { targetNodeId: context.selectedNodeId } : {}),
     })
+  }
+
+  /**
+   * Write a hand-picked locator into the step still missing one, and stop holding
+   * the batch once nothing is missing: the user just answered the question the
+   * offer was asking, so nothing has to run on the page to land it. With a gap
+   * left (an option label, a second step) the offer stays and shows what remains.
+   */
+  function fillOfferWith(element: PickedElement): void {
+    const index = turns.findIndex((turn) => turn.offer)
+    const offer = index >= 0 ? turns[index]?.offer : undefined
+    if (!offer) return
+    const gap = proposalIndexesNeedingPage(offer.proposals)[0]
+    if (gap === undefined) return
+    const filled = offer.proposals.map((proposal, position) =>
+      position === gap
+        ? {
+            ...proposal,
+            data: { ...proposal.data, selector: element.selector, findBy: element.findBy },
+          }
+        : proposal,
+    )
+    const missing = proposalsNeedingPage(filled)
+    if (missing.length > 0) {
+      setTurns((current) =>
+        current.map((row, i) =>
+          i === index && row.offer
+            ? { ...row, offer: { ...row.offer, proposals: filled, missing } }
+            : row,
+        ),
+      )
+      return
+    }
+    resolveTurn(index, { landing: landProposals(offer.action, filled, getContext()) })
+  }
+
+  /** Point at the element by hand — the assistant gets the locator the user chose. */
+  async function pickElement(): Promise<void> {
+    if (busy) return
+    const result = await requestElementPick({ locale })
+    if (!result.ok) {
+      const problem = describePickFailure(result.failure, result.error)
+      if (problem) toast(bt(problem), 'error')
+      return
+    }
+    const element: PickedElement = { selector: result.selector, findBy: result.findBy }
+    setPicked((current) => [...current, element])
+    pushTurn({
+      role: 'user',
+      content: t('operatorAiPicked').replace('{selector}', element.selector),
+    })
+    fillOfferWith(element)
   }
 
   async function send(): Promise<void> {
@@ -313,8 +426,12 @@ export default function OperatorChatDock({
     ]
     const context = getContext()
     const sessionId = makeSessionId()
+    // The picks go with this message and are spent by it; the 已拾取 rows stay in
+    // the transcript, so the model still reads them on a follow-up turn.
+    const picks = picked
     inFlightRef.current = { type: 'workflows.operatorAdviseCancel', sessionId }
     setInput('')
+    setPicked([])
     setBusy(true)
     pushTurn({ role: 'user', content: text })
     let landing: OperatorLanding | undefined
@@ -327,6 +444,7 @@ export default function OperatorChatDock({
         ...(context.selectedSpec ? { selectedSpec: context.selectedSpec } : {}),
         ...(context.windowId !== undefined ? { windowId: context.windowId } : {}),
         ...(readPage ? {} : { skipPageRead: true }),
+        ...(picks.length > 0 ? { pickedElements: picks } : {}),
         ...(context.workflowGoal ? { workflowGoal: context.workflowGoal } : {}),
         ...(context.workflowId ? { workflowId: context.workflowId } : {}),
       })
@@ -340,16 +458,19 @@ export default function OperatorChatDock({
       // A chain whose steps read an element, and whose parameters the page read
       // could not complete, is a guess about a page we could actually act on. Hold
       // it and ask once: acting has a side effect, so it is never automatic.
+      const chain = isOperatorChainAction(action) ? action : undefined
       const missing =
-        action === 'append' && data.page && context.windowId !== undefined
+        chain && data.page && context.windowId !== undefined
           ? proposalsNeedingPage(data.proposals)
           : []
-      if (missing.length > 0) {
+      if (chain && missing.length > 0) {
         pushTurn({
           role: 'assistant',
           content: data.reply,
           page: data.page,
+          ...(data.screenshot ? { screenshot: data.screenshot } : {}),
           offer: {
+            action: chain,
             proposals: data.proposals,
             missing,
             unavailable: data.proposals
@@ -359,9 +480,10 @@ export default function OperatorChatDock({
         })
         return
       }
-      // An in-place answer always goes to the editor — even with no proposals,
-      // so the refusal reads as "your step was not changed because …".
-      if (action !== 'append' || data.proposals.length > 0) {
+      // Anything but an empty chain goes to the editor — an in-place answer even
+      // with no proposals, so the refusal reads as "your step was not changed
+      // because …".
+      if (!chain || data.proposals.length > 0) {
         landing = onApply({
           action,
           proposals: data.proposals,
@@ -372,6 +494,7 @@ export default function OperatorChatDock({
         role: 'assistant',
         content: data.reply,
         page: data.page ?? null,
+        ...(data.screenshot ? { screenshot: data.screenshot } : {}),
         ...(landing ? { landing } : {}),
       })
     } catch (error) {
@@ -390,7 +513,7 @@ export default function OperatorChatDock({
   function landAsIs(index: number): void {
     const offer = turns[index]?.offer
     if (!offer || busy) return
-    resolveTurn(index, { landing: landProposals(offer.proposals, getContext()) })
+    resolveTurn(index, { landing: landProposals(offer.action, offer.proposals, getContext()) })
   }
 
   /**
@@ -440,7 +563,10 @@ export default function OperatorChatDock({
           ? [t('operatorAiOfferSkipped').replace('{names}', data.refused.join(', '))]
           : []),
       ].join('\n')
-      resolveTurn(index, { landing: landProposals(refined, context), observed })
+      resolveTurn(index, {
+        landing: landProposals(offer.action, refined, context),
+        observed,
+      })
     } catch (error) {
       resolveTurn(index, {
         observed: error instanceof Error ? error.message : String(error),
@@ -533,6 +659,7 @@ export default function OperatorChatDock({
             {turn.page === null && !turn.failed && (
               <p className="mt-1 text-[11px] leading-snug text-faint">{t('operatorAiPageNone')}</p>
             )}
+            {turn.screenshot && <ScreenshotLine screenshot={turn.screenshot} t={t} />}
             {turn.observed && (
               <p className="mt-1 whitespace-pre-wrap text-[11px] leading-snug text-muted">
                 {turn.observed}
@@ -615,6 +742,22 @@ export default function OperatorChatDock({
             <span className={readPage ? 'text-muted' : 'text-faint'}>
               {readPage ? t('operatorAiPageToggleOn') : t('operatorAiPageToggleOff')}
             </span>
+          </button>
+          <button
+            aria-label={t('operatorAiPickShort')}
+            className="flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] hover:bg-hover disabled:opacity-50"
+            disabled={busy}
+            onClick={() => void pickElement()}
+            title={t('operatorAiPick')}
+            type="button"
+          >
+            <Focus size={12} aria-hidden="true" className="text-accent" />
+            <span className="text-muted">{t('operatorAiPickShort')}</span>
+            {picked.length > 0 && (
+              <span className="rounded bg-accent-soft px-1 text-[10px] text-accent">
+                {picked.length}
+              </span>
+            )}
           </button>
           {busy ? (
             <button

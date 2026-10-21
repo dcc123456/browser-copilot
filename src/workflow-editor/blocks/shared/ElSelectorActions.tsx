@@ -2,56 +2,23 @@
  * Element selector actions — React port of Automa's SharedElSelectorActions.
  *
  * The pick button injects the element picker into the user's active browser
- * tab; when the user picks an element, the resulting selector is broadcast by
- * the background and returned here via a `picker:result` message. The verify
- * button injects the picker in verify mode and reports how many elements the
- * current selector matches.
+ * tab and writes back the selector it reports; the verify button asks the same
+ * picker how many elements the current selector matches. The round trip itself
+ * lives in `./element-pick`, which the AI operator chat dock uses too.
  *
  * @module workflow-editor/blocks/shared/ElSelectorActions
  */
 
 import { CheckCheck, Focus, LoaderCircle } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { hostWindowId } from '../../host-window'
+import { useCallback, useState } from 'react'
 import { toast } from '../../../ui/toast'
 import { useEditorLocale } from '../../locale-context'
-
-let counter = 0
-function newPickerId(): string {
-  counter += 1
-  return `picker-${Date.now()}-${counter}`
-}
-
-/**
- * Bring the standalone editor window back to the foreground. Picking switches
- * focus to the tab being automated; once the user finishes (or cancels) we
- * return them to the editor, mirroring Automa's makeDashboardFocus().
- */
-function focusEditorWindow(): void {
-  try {
-    void chrome.windows
-      .getCurrent()
-      .then((win) => {
-        if (win?.id !== undefined) return chrome.windows.update(win.id, { focused: true })
-      })
-      .catch(() => {})
-  } catch {
-    /* older Chrome without windows.getCurrent in this context; best-effort */
-  }
-}
-
-interface PickerResult {
-  type: 'picker:result'
-  pickerId: string
-  selector?: string
-  count?: number
-  verified?: boolean
-  findBy?: string
-}
-interface PickerCancel {
-  type: 'picker:cancel'
-  pickerId: string
-}
+import {
+  describePickFailure,
+  requestElementPick,
+  verifyElementSelector,
+  type ElementPickFailure,
+} from './element-pick'
 
 export default function ElSelectorActions({
   selector,
@@ -68,96 +35,44 @@ export default function ElSelectorActions({
   onMessage?: (text: string, kind: 'ok' | 'error') => void
 }) {
   const [busy, setBusy] = useState<null | 'pick' | 'verify'>(null)
-  const pendingPicker = useRef<{ id: string; mode: 'select' | 'verify' } | null>(null)
-  // Safety timeout: if the picker never reports back (page closed, SW restarted,
-  // response lost), release the spinner instead of spinning forever.
-  const safetyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const { bt } = useEditorLocale()
+  const { bt, locale } = useEditorLocale()
 
-  const clearBusy = useCallback(() => {
-    if (safetyTimer.current) {
-      clearTimeout(safetyTimer.current)
-      safetyTimer.current = null
-    }
-    pendingPicker.current = null
-    setBusy(null)
-  }, [])
-
-  const listen = useCallback(
-    (message: unknown) => {
-      const msg = message as PickerResult | PickerCancel
-      const pending = pendingPicker.current
-      if (!pending) return
-      if (msg.type === 'picker:cancel' && msg.pickerId === pending.id) {
-        clearBusy()
-        focusEditorWindow()
-        return
-      }
-      if (msg.type !== 'picker:result' || msg.pickerId !== pending.id) return
-      clearBusy()
-      // Return focus to the editor popup now that picking is done.
-      focusEditorWindow()
-      if (pending.mode === 'select' && msg.selector) {
-        onSelector(msg.selector)
-      } else if (pending.mode === 'verify') {
-        const n = msg.count ?? 0
-        if (n > 0)
-          onMessage?.(bt('Verified: {count} element(s) match').replace('{count}', String(n)), 'ok')
-        else {
-          onMessage?.(bt('Element not found'), 'error')
-          toast(bt('Element not found'), 'error')
-        }
-      }
+  /** Escape is the user's own choice, so only a real failure has anything to say. */
+  const reportFailure = useCallback(
+    (result: { failure: ElementPickFailure; error?: string }) => {
+      const problem = describePickFailure(result.failure, result.error)
+      if (problem) toast(bt(problem), 'error')
     },
-    [clearBusy, onMessage, onSelector, bt],
+    [bt],
   )
-
-  useEffect(() => {
-    chrome.runtime.onMessage.addListener(listen)
-    return () => {
-      chrome.runtime.onMessage.removeListener(listen)
-      if (safetyTimer.current) clearTimeout(safetyTimer.current)
-    }
-  }, [listen])
 
   const start = useCallback(
     async (mode: 'select' | 'verify') => {
-      const pickerId = newPickerId()
-      pendingPicker.current = { id: pickerId, mode }
       setBusy(mode === 'select' ? 'pick' : 'verify')
-      // Picking usually takes as long as the user needs; keep a long safety net
-      // for select, but verify should answer quickly.
-      const safetyMs = mode === 'verify' ? 15000 : 120000
-      if (safetyTimer.current) clearTimeout(safetyTimer.current)
-      safetyTimer.current = setTimeout(() => {
-        if (pendingPicker.current?.id === pickerId) {
-          clearBusy()
-          toast(bt('The element picker did not respond.'), 'error')
-        }
-      }, safetyMs)
-      try {
-        // Picking targets the window that opened this editor (host-window);
-        // without it the worker falls back to the legacy global resolution.
-        const windowId = hostWindowId()
-        const resp = (await chrome.runtime.sendMessage({
-          type: mode === 'select' ? 'picker:start' : 'picker:verify',
-          pickerId,
-          findBy,
-          multiple,
-          ...(windowId !== undefined ? { windowId } : {}),
-          ...(mode === 'verify' ? { selector } : {}),
-        })) as { ok?: boolean; error?: string } | undefined
-        // No response (SW restarted) or an explicit failure: stop spinning.
-        if (!resp || resp.ok === false) {
-          clearBusy()
-          toast(resp?.error ?? bt('Could not start the element picker.'), 'error')
-        }
-      } catch (error) {
-        clearBusy()
-        toast(error instanceof Error ? error.message : String(error), 'error')
+      if (mode === 'select') {
+        const result = await requestElementPick({ findBy, multiple, locale })
+        setBusy(null)
+        if (result.ok) onSelector(result.selector)
+        else reportFailure(result)
+        return
       }
+      const result = await verifyElementSelector({ selector, findBy, locale })
+      setBusy(null)
+      if (result.ok) {
+        if (result.count > 0) {
+          onMessage?.(
+            bt('Verified: {count} element(s) match').replace('{count}', String(result.count)),
+            'ok',
+          )
+          return
+        }
+        onMessage?.(bt('Element not found'), 'error')
+        toast(bt('Element not found'), 'error')
+        return
+      }
+      reportFailure(result)
     },
-    [findBy, multiple, selector, clearBusy, bt],
+    [findBy, multiple, selector, locale, onSelector, onMessage, bt, reportFailure],
   )
 
   return (

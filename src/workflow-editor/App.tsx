@@ -46,8 +46,12 @@ import {
   appendOperatorChain,
   applyOperatorAction,
   edgesAfterBatchRemoved,
+  incidentEdgeSnapshot,
+  isOperatorChainAction,
   operatorBatchOf,
+  operatorBlockName,
   operatorDigestOf,
+  prependOperatorChain,
   selectedOperatorSpecOf,
   type OperatorBatch,
   type OperatorMissingParams,
@@ -91,7 +95,13 @@ import BlockPalette from './sidebar/BlockPalette'
 import BlockEditForm from './sidebar/BlockEditForm'
 import Modal from './ui/Modal'
 import BlockSettingsModal from './blocks/shared/BlockSettingsModal'
-import { useSpaceSelect } from './use-space-select'
+import { isEditableTarget, useSpaceSelect } from './use-space-select'
+import {
+  nodeDragStep,
+  pushCanvasSnapshot,
+  removesAnything,
+  type CanvasSnapshot,
+} from './graph-history'
 import { SlashMenuProvider } from './blocks/shared/SlashVariableMenu'
 import LogsModal from './sidebar/LogsModal'
 import { WorkflowMetaProvider } from './blocks/batchD/WorkflowInfoFields'
@@ -207,7 +217,10 @@ function toCanvasEdge(e: WorkflowEdge): Edge {
 /** What the assistant's last landing did, in the form 撤销 can put back: either
  *  the batch of nodes it added, or the one node it changed in place. */
 type AiUndoRecord =
-  { kind: 'append'; batch: OperatorBatch } | { kind: 'node'; before: OperatorNodeSnapshot }
+  { kind: 'chain'; batch: OperatorBatch } | { kind: 'node'; before: OperatorNodeSnapshot }
+
+/** How many AI-optimized steps one node can hand back with "restore previous". */
+const NODE_FIX_SNAPSHOT_LIMIT = 10
 
 export default function EditorApp() {
   const [workflowId, setWorkflowId] = useState<string | null>(null)
@@ -259,6 +272,111 @@ export default function EditorApp() {
   const reactFlow = useReactFlow()
   const loadedRef = useRef(false)
 
+  // --- undo -------------------------------------------------------------------
+  // Ctrl+Z walks back the canvas STRUCTURE (design §D8): a mutation that adds,
+  // removes, moves or rewires a node records the graph as it was first. Parameter
+  // typing is deliberately not on the stack — it has no discrete boundary (one
+  // record per keystroke would bury the structural steps), and a focused field
+  // already owns its own undo, which the keydown guard hands back to it.
+  const canvasRef = useRef({ nodes, edges })
+  canvasRef.current = { nodes, edges }
+  const historyRef = useRef<CanvasSnapshot[]>([])
+  /** One node drag is one step, not one step per animation frame. */
+  const dragStepOpen = useRef(false)
+
+  const pushHistory = useCallback(() => {
+    const { nodes: drawn, edges: wired } = canvasRef.current
+    pushCanvasSnapshot(historyRef.current, {
+      nodes: structuredClone(drawn.map(toWorkflowNode)),
+      edges: structuredClone(wired.map(toWorkflowEdge)),
+      selectedIds: drawn.filter((node) => node.selected).map((node) => node.id),
+    })
+  }, [])
+
+  /**
+   * Put one patched node back onto the canvas without disturbing what React Flow
+   * owns per node (selection, measurement). `toFlowNode` resolves the catalog
+   * entry, the node type and the label from the new `blockId`, which is what
+   * makes a swapped operator render as the operator it became.
+   */
+  const installPatchedNode = useCallback((node: WorkflowNode) => {
+    setNodes((nds) =>
+      nds.map((current) => {
+        if (current.id !== node.id) return current
+        const next = toFlowNode(node)
+        return { ...current, type: next.type, data: next.data }
+      }),
+    )
+  }, [])
+
+  /**
+   * Put one node back exactly as a snapshot held it: its own renderer (a swapped
+   * operator has to draw as the operator it became) plus every line that touched
+   * it. This is the shared tail of the two ways a step is undone — the assistant's
+   * undo button and AI Optimize's restore — and it has to be one implementation,
+   * because what a swap left behind (re-hung and cut edges) exists nowhere else.
+   */
+  const restoreNodeSnapshot = useCallback(
+    (snapshot: OperatorNodeSnapshot) => {
+      installPatchedNode(snapshot.node)
+      setEdges((eds) => {
+        const owned = new Set(snapshot.edges.map((edge) => edge.id))
+        const restored = snapshot.edges.map((edge) => {
+          const existing = eds.find((candidate) => candidate.id === edge.id)
+          if (!existing) return { ...edge, type: 'custom' }
+          return {
+            ...existing,
+            source: edge.source,
+            target: edge.target,
+            sourceHandle: edge.sourceHandle,
+            targetHandle: edge.targetHandle,
+          }
+        })
+        // Cut lines come back too: a swap removed them, and React Flow would have
+        // hidden them anyway, so the only trace left is this snapshot.
+        return [...eds.filter((edge) => !owned.has(edge.id)), ...restored]
+      })
+      setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
+    },
+    [installPatchedNode],
+  )
+
+  const undoCanvasChange = useCallback(() => {
+    const snapshot = historyRef.current.pop()
+    if (!snapshot) {
+      toast.show(t('editorUndoEmpty'), 'info')
+      return
+    }
+    const selected = new Set(snapshot.selectedIds)
+    setNodes(
+      snapshot.nodes.map((node) => ({ ...toFlowNode(node), selected: selected.has(node.id) })),
+    )
+    setEdges(snapshot.edges.map((edge) => ({ ...edge, type: 'custom' })))
+    // A step that removed the node being edited or inspected would otherwise leave
+    // those panels open on a node that no longer exists.
+    const keepPanelFor = (id: string | null) =>
+      id && !snapshot.nodes.some((node) => node.id === id) ? null : id
+    setEditingId(keepPanelFor)
+    setSettingsForId(keepPanelFor)
+    setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
+    toast.show(t('editorUndone'), 'info')
+  }, [setNodes, setEdges, toast, t])
+
+  /**
+   * The canvas as an undo snapshot records it: the node in the workflow shape plus
+   * every edge touching it. Captured BEFORE a change to the step, by the assistant
+   * (in its patch) and by AI 优化 (here), so both restore the same record.
+   */
+  const nodeSnapshotOf = useCallback((nodeId: string): OperatorNodeSnapshot | null => {
+    const { nodes: drawn, edges: wired } = canvasRef.current
+    const node = drawn.find((candidate) => candidate.id === nodeId)
+    if (!node) return null
+    return {
+      node: structuredClone(toWorkflowNode(node)),
+      edges: incidentEdgeSnapshot(wired.map(toWorkflowEdge), nodeId),
+    }
+  }, [])
+
   // Resolve language from the stored locale.
   useEffect(() => {
     void getSettings()
@@ -271,6 +389,9 @@ export default function EditorApp() {
 
   // --- load -----------------------------------------------------------------
   useEffect(() => {
+    // Undo is per-workflow, and the stack holds nothing but unsaved canvas steps:
+    // loading a graph starts it empty.
+    historyRef.current = []
     const params = new URLSearchParams(window.location.search)
     const editId = params.get('edit')
     if (editId) {
@@ -353,16 +474,29 @@ export default function EditorApp() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
   }, [dirty])
 
-  const onNodesChange = useCallback((changes: NodeChange<FlowNode>[]) => {
-    // Selection itself lives on the nodes (`n.selected`, see selectedIds) —
-    // box-select / modifier+click / delete-key remove changes all flow through
-    // applyNodeChanges.
-    setNodes((nds) => applyNodeChanges<FlowNode>(changes, nds))
-  }, [])
+  const onNodesChange = useCallback(
+    (changes: NodeChange<FlowNode>[]) => {
+      // Selection itself lives on the nodes (`n.selected`, see selectedIds) —
+      // box-select / modifier+click / delete-key remove changes all flow through
+      // applyNodeChanges.
+      // Undo records one step per GESTURE: pressing Delete arrives here as a
+      // `remove` change (it never goes through deleteNode), and a drag emits one
+      // position change per frame — the first of the drag opens the step.
+      const drag = nodeDragStep(changes, dragStepOpen.current)
+      dragStepOpen.current = drag.dragStepOpen
+      if (drag.push || removesAnything(changes)) pushHistory()
+      setNodes((nds) => applyNodeChanges<FlowNode>(changes, nds))
+    },
+    [pushHistory],
+  )
 
-  const onEdgesChange = useCallback((changes: EdgeChange[]) => {
-    setEdges((eds) => applyEdgeChanges(changes, eds))
-  }, [])
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
+      if (removesAnything(changes)) pushHistory()
+      setEdges((eds) => applyEdgeChanges(changes, eds))
+    },
+    [pushHistory],
+  )
 
   const onConnect = useCallback(
     (conn: Connection) => {
@@ -370,6 +504,7 @@ export default function EditorApp() {
       // handle it starts from, so a second branch can land on an already-wired
       // node (a merge). A loop-back (branch routed to an earlier node) gets a
       // confirmation toast so the retry semantics are explicit.
+      pushHistory()
       setEdges((eds) => {
         if (
           conn.source &&
@@ -382,7 +517,7 @@ export default function EditorApp() {
         return applyConnection(eds, conn)
       })
     },
-    [toast, t],
+    [pushHistory, toast, t],
   )
 
   // Double-clicking a connection removes it (matches Automa's edge behaviour).
@@ -390,10 +525,11 @@ export default function EditorApp() {
   // delete-key handling.
   const onEdgeDoubleClick = useCallback(
     (_event: React.MouseEvent, edge: Edge) => {
+      pushHistory()
       setEdges((eds) => eds.filter((e) => e.id !== edge.id))
       toast.show(t('edgeDeleted'), 'info')
     },
-    [toast, t],
+    [pushHistory, toast, t],
   )
 
   /**
@@ -403,6 +539,9 @@ export default function EditorApp() {
    */
   const setGroupChildren = useCallback(
     (nodeId: string, mutate: (children: WorkflowGroupChild[]) => WorkflowGroupChild[]) => {
+      // The child list IS the group's flow, so adding, reordering or dropping a
+      // child is a structural change and gets recorded like one.
+      pushHistory()
       setNodes((nds) =>
         nds.map((n) => {
           if (n.id !== nodeId || n.data.block?.id !== GROUP_BLOCK_ID) return n
@@ -417,7 +556,7 @@ export default function EditorApp() {
         }),
       )
     },
-    [setNodes],
+    [pushHistory, setNodes],
   )
 
   const onDrop = useCallback(
@@ -456,9 +595,10 @@ export default function EditorApp() {
         setGroupChildren(host.id, (children) => [...children, child])
         return
       }
+      pushHistory()
       setNodes((nds) => [...nds, newFlowNode(block, position)])
     },
-    [reactFlow, toast, t, setGroupChildren, setNodes],
+    [pushHistory, reactFlow, toast, t, setGroupChildren, setNodes],
   )
 
   // --- node hover-toolbar actions (Automa block-menu) ------------------------
@@ -499,8 +639,10 @@ export default function EditorApp() {
   }, [])
 
   // Per-node pre-fix snapshots for manual restore (in-memory, session only).
-  // Keyed by node id; each stack holds the blockData captured before a fix.
-  const fixSnapshotsRef = useRef<Map<string, Record<string, unknown>[]>>(new Map())
+  // Keyed by node id; each stack holds the step as it was before a fix — the node
+  // AND the lines touching it, because an optimization may swap the operator, and
+  // a swap re-hangs and cuts edges that no data-only snapshot could put back.
+  const fixSnapshotsRef = useRef<Map<string, OperatorNodeSnapshot[]>>(new Map())
   // Node ids that currently have at least one snapshot; drives canRevert.
   const [revertibleIds, setRevertibleIds] = useState<ReadonlySet<string>>(new Set())
 
@@ -516,22 +658,14 @@ export default function EditorApp() {
     })
   }, [])
 
-  const applyNodeFix = useCallback(
-    (id: string, next: Record<string, unknown>) => {
-      const target = nodes.find((n) => n.id === id)
-      if (!target) return
-      const stack = fixSnapshotsRef.current.get(id) ?? []
-      stack.push(structuredClone(target.data.blockData))
-      // Bound the undo history.
-      if (stack.length > 10) stack.shift()
-      fixSnapshotsRef.current.set(id, stack)
-      replaceNodeData(id, structuredClone(next))
-      // Applying a fix invalidates a prior certification until re-run.
-      setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
-      syncRevertible()
-    },
-    [nodes, replaceNodeData, syncRevertible],
-  )
+  /** Remember the step as it was, one entry deeper, for the dialog's Restore button. */
+  const recordFixSnapshot = useCallback((id: string, snapshot: OperatorNodeSnapshot) => {
+    const stack = fixSnapshotsRef.current.get(id) ?? []
+    stack.push(snapshot)
+    // Bound the undo history.
+    if (stack.length > NODE_FIX_SNAPSHOT_LIMIT) stack.shift()
+    fixSnapshotsRef.current.set(id, stack)
+  }, [])
 
   const revertNodeFix = useCallback(
     (id: string) => {
@@ -539,27 +673,31 @@ export default function EditorApp() {
       const snapshot = stack?.pop()
       if (!snapshot || !stack) return
       if (stack.length === 0) fixSnapshotsRef.current.delete(id)
-      replaceNodeData(id, snapshot)
-      setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
+      // Restore is the same operation the assistant's undo runs, so a step the AI
+      // turned into another operator comes back as the operator it was.
+      pushHistory()
+      restoreNodeSnapshot(snapshot)
       syncRevertible()
       toast.show(t('nodeFixRevertDone'), 'ok')
     },
-    [replaceNodeData, syncRevertible, toast, t],
+    [pushHistory, restoreNodeSnapshot, syncRevertible, toast, t],
   )
 
   const deleteNode = useCallback(
     (id: string) => {
+      pushHistory()
       setNodes((nds) => nds.filter((n) => n.id !== id))
       // Remove edges that were attached to the deleted node.
       setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id))
       setEditingId((cur) => (cur === id ? null : cur))
       toast.show(t('nodeDeleted'), 'info')
     },
-    [toast, t],
+    [pushHistory, toast, t],
   )
 
   const duplicateNode = useCallback(
     (id: string) => {
+      pushHistory()
       setNodes((nds) => {
         const src = nds.find((n) => n.id === id)
         if (!src) return nds
@@ -577,27 +715,31 @@ export default function EditorApp() {
         return [...nds, copy]
       })
     },
-    [toast, t],
+    [pushHistory, toast, t],
   )
 
-  const toggleNodeDisabled = useCallback((id: string) => {
-    setNodes((nds) =>
-      nds.map((n) =>
-        n.id === id
-          ? {
-              ...n,
-              data: {
-                ...n.data,
-                blockData: {
-                  ...n.data.blockData,
-                  disableBlock: n.data.blockData.disableBlock !== true,
+  const toggleNodeDisabled = useCallback(
+    (id: string) => {
+      pushHistory()
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === id
+            ? {
+                ...n,
+                data: {
+                  ...n.data,
+                  blockData: {
+                    ...n.data.blockData,
+                    disableBlock: n.data.blockData.disableBlock !== true,
+                  },
                 },
-              },
-            }
-          : n,
-      ),
-    )
-  }, [])
+              }
+            : n,
+        ),
+      )
+    },
+    [pushHistory],
+  )
 
   // Nodes the run gate proves cannot do their job (no locator, no key, no
   // url…). Recomputed from the live canvas on every edit, so a red badge never
@@ -765,6 +907,7 @@ export default function EditorApp() {
       return
     }
     const { plan } = result
+    pushHistory()
     const removed = new Set(plan.removedIds)
     const dropped = new Set(plan.droppedEdgeIds)
     setNodes((nds) => [
@@ -775,7 +918,7 @@ export default function EditorApp() {
       ...eds.filter((e) => !dropped.has(e.id) && !removed.has(e.source) && !removed.has(e.target)),
       ...plan.keptEdges.map(toCanvasEdge),
     ])
-  }, [reactFlow, nodes, edges, t, toast, packFailureText, setNodes, setEdges])
+  }, [pushHistory, reactFlow, nodes, edges, t, toast, packFailureText, setNodes, setEdges])
 
   /** Spread a group's children back onto the canvas, re-threading the edges. */
   const unpackGroup = useCallback(
@@ -787,6 +930,7 @@ export default function EditorApp() {
         edges.map(toWorkflowEdge),
         { idFactory: newId, takenIds: new Set(nodes.map((n) => n.id)) },
       )
+      pushHistory()
       setNodes((nds) => [...nds.filter((n) => n.id !== nodeId), ...restored.map(toFlowNode)])
       setEdges((eds) => [
         ...eds.filter((e) => e.source !== nodeId && e.target !== nodeId),
@@ -794,7 +938,7 @@ export default function EditorApp() {
       ])
       toast.show(t('groupUnpacked'), 'info')
     },
-    [nodes, edges, setNodes, setEdges, toast, t],
+    [nodes, edges, pushHistory, setNodes, setEdges, toast, t],
   )
 
   // The group node edits its children in place: the name, the order, one child's
@@ -889,6 +1033,7 @@ export default function EditorApp() {
     // fits the view, every node stays inside the viewport at a readable zoom.
     const rect = document.querySelector('.react-flow')?.getBoundingClientRect()
     const maxRowWidth = rect && rect.width > 320 ? rect.width - 24 : undefined
+    pushHistory()
     setNodes((nds) => {
       const layoutNodes = nds.map((n) => ({
         id: n.id,
@@ -913,7 +1058,7 @@ export default function EditorApp() {
       }),
     )
     toast.show(t('autoLayoutDone'), 'ok')
-  }, [edges, reactFlow, toast, t])
+  }, [edges, pushHistory, reactFlow, toast, t])
 
   // --- keyboard shortcuts ----------------------------------------------------
   useEffect(() => {
@@ -928,6 +1073,13 @@ export default function EditorApp() {
       } else if (mod && e.shiftKey && e.key.toLowerCase() === 'f') {
         e.preventDefault()
         document.querySelector<HTMLButtonElement>('.wf-search .wf-icon-btn')?.click()
+      } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        // Ctrl+Z / Cmd+Z: walk the canvas back one step. While the user is typing
+        // IN a field the key belongs to that field (its own undo history), so the
+        // guard gives it back untouched rather than swallowing it.
+        if (isEditableTarget(e.target)) return
+        e.preventDefault()
+        undoCanvasChange()
       } else if (mod && e.key.toLowerCase() === 'b') {
         e.preventDefault()
         setPaletteOpen((o) => !o)
@@ -941,7 +1093,7 @@ export default function EditorApp() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [handleSave, handleRun, dirty])
+  }, [handleSave, handleRun, dirty, undoCanvasChange])
 
   // Save / Don't save / Cancel prompt for closing the popup window with
   // unsaved changes. Resolves the user's choice, then either saves and
@@ -1080,6 +1232,7 @@ export default function EditorApp() {
       if (patch.nodePatch) patchNode(patch.nodePatch.nodeId, patch.nodePatch.patch)
       const { added, edges: nextEdges } = patch
       if (added && nextEdges) {
+        pushHistory()
         setNodes((nds) => [...nds, toFlowNode(added)])
         applyEdgeList(nextEdges)
         setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
@@ -1088,7 +1241,7 @@ export default function EditorApp() {
       else if (added) toast.show(t('varMenuSecretAdded'), 'ok')
       return Promise.resolve(patch.variableName)
     },
-    [applyEdgeList, patchNode, suggestionGraph, toast, t],
+    [applyEdgeList, patchNode, pushHistory, suggestionGraph, toast, t],
   )
 
   // — the floating AI operator assistant —
@@ -1127,22 +1280,6 @@ export default function EditorApp() {
     }
   }, [meta.description, reactFlow, workflowId])
 
-  /**
-   * Put one patched node back onto the canvas without disturbing what React Flow
-   * owns per node (selection, measurement). `toFlowNode` resolves the catalog
-   * entry, the node type and the label from the new `blockId`, which is what
-   * makes a swapped operator render as the operator it became.
-   */
-  const installPatchedNode = useCallback((node: WorkflowNode) => {
-    setNodes((nds) =>
-      nds.map((current) => {
-        if (current.id !== node.id) return current
-        const next = toFlowNode(node)
-        return { ...current, type: next.type, data: next.data }
-      }),
-    )
-  }, [])
-
   /** Apply an `edit`/`replace` answer to the step the user had selected. */
   const applyNodeActionFromAi = useCallback(
     (
@@ -1167,6 +1304,7 @@ export default function EditorApp() {
       if (patch.problem || !patched || !patch.before) {
         return { ...landing, ...(patch.problem ? { problem: patch.problem } : {}) }
       }
+      pushHistory()
       installPatchedNode(patched)
       applyEdgeList(patch.edges)
       aiUndoRef.current = { kind: 'node', before: patch.before }
@@ -1180,20 +1318,83 @@ export default function EditorApp() {
       )
       return { ...landing, applied: true, pruned: patch.pruned, missing: patch.missing }
     },
-    [applyEdgeList, installPatchedNode, locateNode, toast, t],
+    [applyEdgeList, installPatchedNode, locateNode, pushHistory, toast, t],
   )
 
+  /**
+   * Apply a verified AI Optimize result to the step. Two landings, one snapshot:
+   * parameters alone go back as the node's whole data (the loop re-authored them),
+   * while an operator swap runs through the assistant's replace patcher — the one
+   * place that knows how to re-hang a node's edges on a different block's ports
+   * and to NAME the connections it had to cut. Nothing is half-applied: a swap the
+   * patcher refuses leaves the canvas exactly as it was.
+   */
+  const applyNodeFix = useCallback(
+    (id: string, next: Record<string, unknown>, swapTo?: string) => {
+      if (swapTo) {
+        const patch = applyOperatorAction(suggestionGraphRef.current(), id, 'replace', [
+          { blockId: swapTo, data: next, rationale: '' },
+        ])
+        const patched = patch.nodes.find((node) => node.id === id)
+        if (patch.problem || !patched || !patch.before) {
+          toast.show(t('nodeFixSwapRefused').replace('{name}', operatorBlockName(swapTo)), 'error')
+          return
+        }
+        pushHistory()
+        recordFixSnapshot(id, patch.before)
+        installPatchedNode(patched)
+        applyEdgeList(patch.edges)
+        setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
+        syncRevertible()
+        toast.show(t('operatorAiReplaced').replace('{name}', patched.label), 'ok')
+        if (patch.pruned.length > 0) {
+          toast.show(
+            t('operatorAiPrunedPorts').replace(
+              '{ports}',
+              patch.pruned.map((port) => port.label).join(', '),
+            ),
+            'info',
+          )
+        }
+        requestAnimationFrame(() => locateNode(id))
+        return
+      }
+      const snapshot = nodeSnapshotOf(id)
+      if (!snapshot) return
+      recordFixSnapshot(id, snapshot)
+      pushHistory()
+      replaceNodeData(id, structuredClone(next))
+      // Applying an optimization invalidates a prior certification until re-run.
+      setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
+      syncRevertible()
+    },
+    [
+      installPatchedNode,
+      locateNode,
+      nodeSnapshotOf,
+      pushHistory,
+      recordFixSnapshot,
+      replaceNodeData,
+      applyEdgeList,
+      syncRevertible,
+      toast,
+      t,
+    ],
+  )
   const applyOperatorsFromAi = useCallback(
     (request: OperatorApplyRequest): OperatorLanding => {
       const graph = suggestionGraphRef.current()
-      if (request.action !== 'append')
+      if (!isOperatorChainAction(request.action))
         return applyNodeActionFromAi(graph, request.action, request.targetNodeId, request.proposals)
-      const patch = appendOperatorChain(graph, request.proposals, {
+      // Both splice next to the anchor; appending with no anchor falls back to the
+      // end of the flow, while prepending has none — only a picked step has a front.
+      const placeChain = request.action === 'prepend' ? prependOperatorChain : appendOperatorChain
+      const patch = placeChain(graph, request.proposals, {
         ...(request.targetNodeId ? { anchorNodeId: request.targetNodeId } : {}),
         newId,
       })
       const landing: OperatorLanding = {
-        kind: 'append',
+        kind: 'chain',
         added: patch.added.length,
         applied: patch.added.length > 0,
         skipped: patch.skipped,
@@ -1202,9 +1403,10 @@ export default function EditorApp() {
         ...(patch.problem ? { problem: patch.problem } : {}),
       }
       if (patch.added.length === 0) return landing
+      pushHistory()
       setNodes((nds) => [...nds, ...patch.added.map(toFlowNode)])
       applyEdgeList(patch.edges)
-      aiUndoRef.current = { kind: 'append', batch: operatorBatchOf(patch) }
+      aiUndoRef.current = { kind: 'chain', batch: operatorBatchOf(patch) }
       setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
       const last = patch.added[patch.added.length - 1]
       // Center once React Flow has the node in its own store: same-tick it is
@@ -1213,49 +1415,35 @@ export default function EditorApp() {
       toast.show(t('operatorAiAdded').replace('{count}', String(patch.added.length)), 'ok')
       return landing
     },
-    [applyEdgeList, applyNodeActionFromAi, locateNode, toast, t],
+    [applyEdgeList, applyNodeActionFromAi, locateNode, pushHistory, toast, t],
   )
 
   const undoAiBatch = useCallback(() => {
     const record = aiUndoRef.current
     aiUndoRef.current = null
     if (!record) return
-    if (record.kind === 'append') {
+    if (record.kind === 'chain') {
       const { batch } = record
       if (batch.nodeIds.length === 0) return
       const ids = new Set(batch.nodeIds)
+      // The landing itself was a canvas step, so undoing it is one too: Ctrl+Z
+      // after this button brings the batch back.
+      pushHistory()
       // Same semantics as deleting a node by hand: its edges go with it — except the
       // continuation the batch borrowed, which has to go back to the anchor.
       setNodes((nds) => nds.filter((n) => !ids.has(n.id)))
       setEdges((eds) => edgesAfterBatchRemoved(eds, batch))
       setEditingId((cur) => (cur && ids.has(cur) ? null : cur))
       setSettingsForId((cur) => (cur && ids.has(cur) ? null : cur))
+      setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
     } else {
       // The node as it was, plus every line that touched it: a swap re-hangs and
       // sometimes cuts edges, so restoring the data alone would not restore the flow.
-      const { node, edges: incident } = record.before
-      installPatchedNode(node)
-      setEdges((eds) => {
-        const owned = new Set(incident.map((edge) => edge.id))
-        const restored = incident.map((edge) => {
-          const existing = eds.find((candidate) => candidate.id === edge.id)
-          if (!existing) return { ...edge, type: 'custom' }
-          return {
-            ...existing,
-            source: edge.source,
-            target: edge.target,
-            sourceHandle: edge.sourceHandle,
-            targetHandle: edge.targetHandle,
-          }
-        })
-        // Pruned lines come back too: a swap cut them, and React Flow would have
-        // hidden them anyway, so the only trace left is this snapshot.
-        return [...eds.filter((edge) => !owned.has(edge.id)), ...restored]
-      })
+      pushHistory()
+      restoreNodeSnapshot(record.before)
     }
-    setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
-    toast.show(record.kind === 'append' ? t('operatorAiUndone') : t('operatorAiNodeUndone'), 'info')
-  }, [installPatchedNode, toast, t])
+    toast.show(record.kind === 'chain' ? t('operatorAiUndone') : t('operatorAiNodeUndone'), 'info')
+  }, [pushHistory, restoreNodeSnapshot, setEdges, setNodes, toast, t])
 
   const editOverlay =
     editNode && editBlock ? (
@@ -1313,7 +1501,7 @@ export default function EditorApp() {
                 setEditingId(null)
                 setNodes((nds) => nds.map((n) => ({ ...n, selected: false })))
               }}
-              onApplyFix={(next) => applyNodeFix(editNode.id, next)}
+              onApplyFix={(next, swapTo) => applyNodeFix(editNode.id, next, swapTo)}
               windowId={hostWindowId()}
               canRevert={revertibleIds.has(editNode.id)}
               onRevert={() => revertNodeFix(editNode.id)}

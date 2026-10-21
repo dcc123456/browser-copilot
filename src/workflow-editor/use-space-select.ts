@@ -14,9 +14,16 @@
  */
 import { useEffect, useState } from 'react'
 
-function isEditable(target: EventTarget | null): boolean {
+/**
+ * Whether a keyboard event landed in something the user is TYPING into. Both
+ * consumers ask the same question for the same reason: a gesture owned by a text
+ * field (a typed space, that field's own Ctrl+Z) must never reach the canvas.
+ */
+export function isEditableTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null
-  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+  return (
+    !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true)
+  )
 }
 
 /** True while the user holds Space outside a text field. */
@@ -25,7 +32,7 @@ export function useSpaceSelect(): boolean {
 
   useEffect(() => {
     const onDown = (event: KeyboardEvent) => {
-      if (event.code === 'Space' && !event.repeat && !isEditable(event.target)) setHeld(true)
+      if (event.code === 'Space' && !event.repeat && !isEditableTarget(event.target)) setHeld(true)
     }
     const onUp = (event: KeyboardEvent) => {
       if (event.code === 'Space') setHeld(false)

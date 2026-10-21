@@ -102,6 +102,46 @@ describe('buildNodeFixPrompt — without a stored contract', () => {
   })
 })
 
+describe('buildNodeFixPrompt — the operator swap', () => {
+  const swapTargets = [
+    { id: 'forms', name: 'Fill form' },
+    { id: 'get-text', name: 'Get text' },
+  ]
+
+  it('offers the listed ids as the only blockId the reply may name', () => {
+    const prompt = buildNodeFixPrompt({
+      blockId: 'event-click',
+      goal: 'Submit the login form',
+      successCriteria: criteria,
+      userSuggestion: 'this operator cannot type into both fields',
+      currentData,
+      unmetCriteria: [],
+      swapTargets,
+    })
+    expect(prompt).toContain('## Operators this step may be switched to')
+    expect(prompt).toContain('- forms — Fill form')
+    expect(prompt).toContain('"blockId":"<an operator id above, or leave it out>"')
+    // The escape hatch stays the exception, in the rules as well as the format.
+    expect(prompt).toContain('Keep this operator unless it cannot do the job at all')
+    expect(prompt).not.toContain('- Do NOT change the block id.')
+  })
+
+  it('stays parameters-only when there is nothing to switch to', () => {
+    const prompt = buildNodeFixPrompt({
+      blockId: 'event-click',
+      goal: 'g',
+      successCriteria: criteria,
+      userSuggestion: '',
+      currentData,
+      unmetCriteria: [],
+      swapTargets: [],
+    })
+    expect(prompt).not.toContain('Operators this step may be switched to')
+    expect(prompt).not.toContain('"blockId"')
+    expect(prompt).toContain('- Do NOT change the block id.')
+  })
+})
+
 describe('parseNodeFixReply', () => {
   it('parses a clean JSON object', () => {
     const reply = parseNodeFixReply(
@@ -164,6 +204,25 @@ describe('parseNodeFixReply', () => {
       expect(reply).not.toBeNull()
       expect(reply!.data).toEqual({})
       expect(reply!.verify).toBeUndefined()
+    }
+  })
+
+  it('reads a proposed operator from the top level, never from the parameters', () => {
+    const reply = parseNodeFixReply(
+      JSON.stringify({ rationale: 'r', data: { selector: '#new' }, blockId: 'forms' }),
+    )
+    expect(reply!.blockId).toBe('forms')
+    // `data` stays the reserved-key-free parameter object it always was: the swap
+    // rides its own field, so the sanitizer's gate does not move.
+    expect(reply!.data['blockId']).toBeUndefined()
+    expect(sanitizeNodeData(reply!.data)!['blockId']).toBeUndefined()
+  })
+
+  it('ignores a blockId that is not a usable string', () => {
+    for (const blockId of [null, undefined, 7, '   ', {}]) {
+      const reply = parseNodeFixReply(JSON.stringify({ rationale: 'r', data: {}, blockId }))
+      expect(reply).not.toBeNull()
+      expect(reply!.blockId).toBeUndefined()
     }
   })
 })
@@ -256,6 +315,29 @@ describe('the live fix log payload', () => {
     expect(text).toContain('rationale: the button moved')
     expect(text).toContain('#login-submit')
     expect(text).toContain('check: ')
+  })
+
+  it('shows the operator it answered with, even one the loop will reject', () => {
+    const text = nodeFixReplyPayloadOf({
+      rationale: 'this operator cannot upload at all',
+      data: { filePath: '/x' },
+      blockId: 'not-a-real-operator',
+    })
+    expect(text).toContain('switch to: not-a-real-operator')
+    expect(nodeFixReplyPayloadOf({ rationale: 'r', data: {} })).not.toContain('switch to')
+  })
+
+  it('reports the operator switch the request offered', () => {
+    const text = nodeFixRequestPayloadOf({
+      blockId: 'event-click',
+      goal: 'g',
+      successCriteria: criteria,
+      userSuggestion: '',
+      currentData,
+      unmetCriteria: [],
+      swapTargets: [{ id: 'forms', name: 'Fill form' }],
+    })
+    expect(text).toContain('may switch to: forms')
   })
 
   it('shows the node parameters a trial run used', () => {

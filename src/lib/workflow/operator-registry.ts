@@ -19,7 +19,8 @@
  * @module lib/workflow/operator-registry
  */
 
-import { PALETTE_BLOCKS } from './blocks/palette'
+import { BLOCK_BY_ID, PALETTE_BLOCKS } from './blocks/palette'
+import { isCloudBlock } from './blocks/cloud-blocks'
 import type { SemanticActionName } from './block-capabilities'
 import { capabilityOf } from './block-capabilities'
 import {
@@ -29,6 +30,8 @@ import {
   SIDE_EFFECT_BLOCK_IDS,
   JAVASCRIPT_BLOCK_ID,
 } from './operator-class'
+import { TRIGGER_BLOCK_ID } from './draft-types'
+import { OCR_SUPPORTED } from '../ocr-support'
 import type { WorkflowNodeGoalContract } from './node-goal-contract'
 import { isFileContentLiteral, variableNameOf } from './file-artifact'
 
@@ -340,6 +343,25 @@ export function generationOperators(exposure?: AiExposure): OperatorRegistryEntr
   return allOperators().filter(
     (entry) => entry.allowGeneration && (!exposure || entry.aiExposure === exposure),
   )
+}
+
+/**
+ * Whether the AI may put this operator on the canvas in THIS build.
+ *
+ * Four exclusions, and the registry alone cannot answer two of them: the trigger
+ * is the flow's entry rather than a step, cloud-only blocks are classified in the
+ * palette, and an OCR-only operator does not exist in the no-OCR build. This is
+ * the single landing authority — the assistant's chain placement, its in-place
+ * replace and the node optimizer's operator-swap check all read it, and none of
+ * them keeps a private copy.
+ */
+export function aiLandingAllowed(id: string): boolean {
+  if (id === TRIGGER_BLOCK_ID || isCloudBlock(id)) return false
+  const entry = REGISTRY.get(id)
+  if (!entry || !entry.allowGeneration || entry.aiExposure === 'hidden' || entry.cloud) return false
+  const block = BLOCK_BY_ID.get(id)
+  if (!block) return false
+  return !(block.requiresOcr === true && !OCR_SUPPORTED)
 }
 
 /**

@@ -1,12 +1,20 @@
 /**
- * Per-node AI Fix — pure vocabulary, prompt builder, reply parser and data
- * sanitizer for repairing ONE workflow operator node.
+ * Per-node AI Optimize — pure vocabulary, prompt builder, reply parser and data
+ * sanitizer for repairing ONE workflow operator node. (The button the user sees
+ * says AI Optimize; the module keeps its `node-fix` name because the loop, the
+ * wire command and the copy keys are one facility, not a second one.)
  *
  * The repair is bounded by the node's own Goal Contract: the model may only
  * re-author this node's block parameters so that the operator executes without
  * error AND every one of its `successCriteria` (see node-goal-contract) holds
- * against the live page. It must NOT change the block identity, the goal
- * contract, or the workflow graph — those are stripped from any model reply.
+ * against the live page. It must NOT change the goal contract or the workflow
+ * graph — those are stripped from any model reply.
+ *
+ * Changing the OPERATOR is allowed, as an escape hatch and on its own field: one
+ * top-level `blockId` naming an offer from `swapTargets`. The parameter object
+ * keeps its reservations, so the block identity can still never travel inside
+ * `data`; whether the named operator can land and run on the page is the loop's
+ * judgement, not this module's.
  *
  * A node with no contract can still be repaired from the user's prompt plus the
  * failure output (specs/2026-10-16-node-fix-from-prompt-only-design.md). Then the
@@ -73,6 +81,21 @@ export interface NodeFixResultData {
    * pattern the acceptance suite forbids.
    */
   verifiedBy?: 'criteria' | 'exec-only'
+  /**
+   * On success WITH an operator swap: the operator the verified `proposedData` was
+   * trial-run as, which is not the one the node currently holds. Turning that into
+   * a graph change is the editor's job, and it uses the assistant's one replace
+   * patcher (`applyOperatorAction`) rather than a second implementation — this
+   * field only names the operator, it never touches the canvas.
+   */
+  proposedBlockId?: string
+}
+
+/** One operator the optimizer may switch the repaired node to. */
+export interface OperatorSwapTarget {
+  id: string
+  /** The name the canvas shows for it. */
+  name: string
 }
 
 /** Inputs to the prompt builder. */
@@ -91,6 +114,11 @@ export interface NodeFixPromptInput {
   unmetCriteria: string[]
   /** Best-effort summary of the live page, when available. */
   pageSummary?: string
+  /**
+   * Operators a top-level `blockId` may name. Absent or empty ⇒ the repair is
+   * parameters-only, exactly as before, and the prompt says so.
+   */
+  swapTargets?: readonly OperatorSwapTarget[]
 }
 
 /** Keys the model is never allowed to author. */
@@ -108,6 +136,9 @@ export const NODE_FIX_RESERVED_KEYS: ReadonlySet<string> = new Set([
  * own and fixed. Without one (§3 of the 2026-10-16 prompt-only design) the user's
  * prompt IS the goal, and the model must also hand back the one machine-checkable
  * criterion it believes proves success — the page, not the model, then decides.
+ *
+ * A third axis is orthogonal to both: `swapTargets` opens the escape hatch of
+ * changing the operator, so the rules and the asked-for reply shape change with it.
  */
 export function buildNodeFixPrompt(input: NodeFixPromptInput): string {
   const lines: string[] = []
@@ -177,19 +208,41 @@ export function buildNodeFixPrompt(input: NodeFixPromptInput): string {
   if (input.pageSummary && input.pageSummary.trim()) {
     lines.push('## Live page summary', capModelPayload(input.pageSummary), '')
   }
+  const swapTargets = input.swapTargets ?? []
+  if (swapTargets.length > 0) {
+    lines.push(
+      '## Operators this step may be switched to',
+      'The ids below are the ONLY accepted values of a top-level "blockId", and switching is the',
+      'last resort: take it only when this operator cannot achieve the goal on this page at all.',
+      'If you do switch, author "data" as the parameters of THAT operator.',
+      ...swapTargets.map((target) => `- ${target.id} — ${target.name}`),
+      '',
+    )
+  }
   lines.push(
     '## Rules',
     '- Edit the parameters so the operator achieves the Goal and every success criterion holds on the real page.',
     '- Prefer stable locators (#id, [data-testid], [name]) and waits after navigation; avoid brittle nth-child chains and generated classes.',
     '- Preserve variable references like {{variableName}} and every parameter unrelated to the failure.',
-    '- Do NOT change the block id, the goal, the success criteria, or any workflow connections/structure.',
+    swapTargets.length > 0
+      ? '- Keep this operator unless it cannot do the job at all; only then return the top-level "blockId".'
+      : '- Do NOT change the block id.',
+    '- Do NOT change the goal, the success criteria, or any workflow connections/structure.',
     '- If the goal is impossible with this block on this page, still return the closest correct parameters and explain in the rationale.',
     '',
     '## Response format',
     'Respond with ONLY a JSON object — no markdown fence, no commentary:',
-    input.goal
-      ? '{"rationale":"<what was wrong and what you changed>","data":{ ...the COMPLETE node parameters } }'
-      : '{"rationale":"<what was wrong and what you changed>","data":{ ...the COMPLETE node parameters },"verify":{ ...ONE page-checkable criterion, or null } }',
+  )
+  // One shape assembled from the parts this repair actually has, so the displayed
+  // request and the asked-for reply cannot drift apart by a field.
+  const shape = [
+    '{"rationale":"<what was wrong and what you changed>"',
+    '"data":{ ...the COMPLETE node parameters }',
+  ]
+  if (!input.goal) shape.push('"verify":{ ...ONE page-checkable criterion, or null }')
+  if (swapTargets.length > 0) shape.push('"blockId":"<an operator id above, or leave it out>"')
+  lines.push(`${shape.join(',')} }`)
+  lines.push(
     '"data" must be the full parameter object (start from the current parameters), not only the changed keys.',
   )
   return lines.join('\n')
@@ -204,6 +257,13 @@ export interface NodeFixReply {
    * usable one. Never stored on the node — see `temporaryCriterionOf`.
    */
   verify?: WorkflowCondition
+  /**
+   * The operator the model asked to switch to, read verbatim from the top level of
+   * the reply. Raw and therefore untrusted: it is only an id string here, and the
+   * loop is what decides whether this build can land and trial-run it. A `blockId`
+   * inside `data` is NOT this field — the parameter object stays reserved-key-free.
+   */
+  blockId?: string
 }
 
 /**
@@ -245,10 +305,12 @@ export function parseNodeFixReply(text: string): NodeFixReply | null {
   if (!isPlainRecord(parsed['data'])) return null
   const rationale = typeof parsed['rationale'] === 'string' ? parsed['rationale'].trim() : ''
   const verify = temporaryCriterionOf(parsed['verify'])
+  const blockId = typeof parsed['blockId'] === 'string' ? parsed['blockId'].trim() : ''
   return {
     rationale: rationale || '(no rationale provided)',
     data: parsed['data'],
     ...(verify ? { verify } : {}),
+    ...(blockId === '' ? {} : { blockId }),
   }
 }
 
@@ -327,6 +389,9 @@ export function nodeFixRequestPayloadOf(input: NodeFixPromptInput): string {
   if (input.errorLog?.trim()) lines.push(`error log: ${capText(input.errorLog.trim())}`)
   if (input.userSuggestion.trim()) lines.push(`prompt: ${capText(input.userSuggestion.trim())}`)
   if (input.pageSummary?.trim()) lines.push(`page: ${capText(input.pageSummary.trim())}`)
+  if (input.swapTargets && input.swapTargets.length > 0) {
+    lines.push(`may switch to: ${input.swapTargets.map((target) => target.id).join(', ')}`)
+  }
   return lines.join('\n')
 }
 
@@ -339,6 +404,8 @@ export function nodeFixParamsPayloadOf(data: Record<string, unknown>): string {
 export function nodeFixReplyPayloadOf(reply: NodeFixReply): string {
   const lines = [`rationale: ${capText(reply.rationale)}`, `params: ${capModelPayload(reply.data)}`]
   if (reply.verify) lines.push(`check: ${describeCondition(reply.verify)}`)
+  // Shown even when the loop will reject it: the log reports what the AI said.
+  if (reply.blockId) lines.push(`switch to: ${reply.blockId}`)
   return lines.join('\n')
 }
 

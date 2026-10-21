@@ -1,8 +1,9 @@
 /**
- * Acceptance tests for the per-node AI Fix modal presentational pieces
+ * Acceptance tests for the per-node AI Optimize modal presentational pieces
  * (server-rendered): suggestion + error-log inputs and confirm on the input
- * screen, the no-contract notice, the step timeline, and the two success
- * wordings (`criteria` vs `exec-only`).
+ * screen, the no-contract notice, the step timeline, the two success wordings
+ * (`criteria` vs `exec-only`), and the operator swap the verified result may
+ * carry.
  */
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -44,7 +45,7 @@ function footerProps(over: Partial<NodeFixFooterProps> = {}): NodeFixFooterProps
   }
 }
 
-describe('V-node-fix: per-block AI fix dialog', () => {
+describe('V-node-fix: per-block AI optimize dialog', () => {
   it('renders the suggestion field and confirm button on the input screen', () => {
     const html = renderToStaticMarkup(createElement(NodeFixBody, bodyProps()))
     expect(html).toContain('nodeFixSuggestionLabel')
@@ -101,6 +102,36 @@ describe('V-node-fix: per-block AI fix dialog', () => {
     )
     expect(html).toContain('nodeFixSuccessExecOnly')
     expect(html).not.toContain('nodeFixNoChangeNeeded')
+  })
+
+  it('names the operator the verified result switches the step to', () => {
+    // This row needs a translator that interpolates, because the fixture `t` is
+    // the identity and the swap notice carries the operator's name as a parameter.
+    // It still prefixes the key, so the row below proves WHICH notice rendered.
+    const tNamed = (key: string) => (key === 'nodeFixSwapProposed' ? `${key} as {name}` : key)
+    const html = renderToStaticMarkup(
+      createElement(
+        NodeFixBody,
+        bodyProps({
+          state: 'success',
+          verifiedBy: 'criteria',
+          swapName: 'Fill form',
+          t: tNamed,
+        }),
+      ),
+    )
+    // The user has to see the swap BEFORE applying: applying changes the operator,
+    // not only its parameters.
+    expect(html).toContain('nodeFixSwapProposed')
+    expect(html).toContain('as Fill form')
+    expect(html).toContain('nodeFixNoChangeNeeded')
+  })
+
+  it('stays quiet about a swap when the answer kept the operator', () => {
+    const html = renderToStaticMarkup(
+      createElement(NodeFixBody, bodyProps({ state: 'success', verifiedBy: 'criteria' })),
+    )
+    expect(html).not.toContain('nodeFixSwapProposed')
   })
 
   it('renders the failure reason and close button on failure', () => {

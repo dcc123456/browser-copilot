@@ -1,11 +1,16 @@
 /**
  * Tests for the node-fix engine loop, driven entirely with injected deps (no
  * real page or network): first-pass success, model-driven recovery, round
- * exhaustion, missing contract and cancellation.
+ * exhaustion, missing contract, an operator swap the loop can or cannot verify,
+ * and cancellation.
  */
 import { describe, expect, it } from 'vitest'
 import { runNodeFix } from '../src/background/workflow-engine/node-fix-engine'
-import { NODE_FIX_MAX_ROUNDS, type NodeFixEvent } from '../src/lib/workflow/node-fix'
+import {
+  NODE_FIX_MAX_ROUNDS,
+  type NodeFixEvent,
+  type NodeFixReply,
+} from '../src/lib/workflow/node-fix'
 import { WORKFLOW_AI_NAMESPACE } from '../src/lib/workflow/node-goal-contract'
 import type { WorkflowCondition } from '../src/lib/workflow/conditions'
 
@@ -279,6 +284,104 @@ describe('runNodeFix', () => {
       },
     )
     await expect(promise).rejects.toThrow('Aborted')
+  })
+})
+
+describe('runNodeFix — switching the step to another operator', () => {
+  /** The model answer that asks for a different operator. */
+  const swapTo =
+    (blockId: string) =>
+    async (prompt: string): Promise<NodeFixReply> => {
+      // The vocabulary is part of every request: the model is never told it may
+      // switch and then handed a list that is missing from the log.
+      expect(prompt).toContain('Operators this step may be switched to')
+      return { rationale: 'this operator cannot do it', data: { selector: '#new' }, blockId }
+    }
+
+  it('trial-runs the operator it asks for and reports it as the verified result', async () => {
+    const executed: string[] = []
+    let checks = 0
+    const result = await runNodeFix(
+      {
+        sessionId: 'swap1',
+        blockId: 'event-click',
+        blockData: blockData(),
+        userSuggestion: 'this step should fill the form instead',
+      },
+      {
+        signal: new AbortController().signal,
+        emit: eventCollector().emit,
+        executeNode: async (blockId) => {
+          executed.push(blockId)
+          return { ok: true }
+        },
+        // Round 0 fails everywhere, so the swap arrives with round 1; round 1 only
+        // holds AFTER the new operator has run.
+        evaluateCriteria: async (cs) => {
+          checks += 1
+          const satisfied = checks > 3
+          return cs.map((condition) => ({ condition, satisfied }))
+        },
+        callModel: swapTo('forms'),
+      },
+    )
+    expect(result.success).toBe(true)
+    expect(result.proposedBlockId).toBe('forms')
+    expect(executed).toEqual(['event-click', 'forms'])
+    // The swap's payload is the new operator's parameters alone — what the node
+    // already holds is the landing patcher's job, and its goal contract must not
+    // be smuggled through the parameters.
+    expect(result.proposedData).toEqual({ selector: '#new' })
+    expect(result.proposedData![WORKFLOW_AI_NAMESPACE]).toBeUndefined()
+  })
+
+  it('keeps a repair parameters-only when the named operator cannot land', async () => {
+    const executed: string[] = []
+    const result = await runNodeFix(
+      { sessionId: 'swap2', blockId: 'event-click', blockData: blockData() },
+      {
+        signal: new AbortController().signal,
+        emit: eventCollector().emit,
+        executeNode: async (blockId) => {
+          executed.push(blockId)
+          return { ok: true }
+        },
+        // Nothing ever holds, so every round asks the model and gets the same
+        // unlandable answer.
+        evaluateCriteria: async (cs) => cs.map((condition) => ({ condition, satisfied: false })),
+        callModel: swapTo('trigger'),
+      },
+    )
+    // The entry point is not a step to optimize: the trial run never leaves the
+    // operator the node actually holds.
+    expect(result.success).toBe(false)
+    expect(result.proposedBlockId).toBeUndefined()
+    expect(executed).toEqual(['event-click', 'event-click', 'event-click'])
+  })
+
+  it('refuses a swap it cannot run against the page', async () => {
+    const executed: string[] = []
+    let checks = 0
+    const result = await runNodeFix(
+      { sessionId: 'swap3', blockId: 'event-click', blockData: blockData() },
+      {
+        signal: new AbortController().signal,
+        emit: eventCollector().emit,
+        executeNode: async (blockId) => {
+          executed.push(blockId)
+          return { ok: true }
+        },
+        evaluateCriteria: async (cs) => {
+          checks += 1
+          return cs.map((condition) => ({ condition, satisfied: checks > 3 }))
+        },
+        // An operator the assistant is never allowed to act on the page with: a
+        // swap here could not be verified, so it is not offered back as a result.
+        callModel: swapTo('upload-file'),
+      },
+    )
+    expect(result.proposedBlockId).toBeUndefined()
+    expect(executed).toEqual(['event-click', 'event-click'])
   })
 })
 

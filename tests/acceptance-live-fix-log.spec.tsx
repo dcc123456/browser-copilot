@@ -131,7 +131,7 @@ describe('V-live-fix-log: one stream, both dialogs', () => {
     const html = markup()
     // Both streams keep their own section: the fix log does not replace the
     // review log the same dialog already shows.
-    expect(html).toContain('AI fix log')
+    expect(html).toContain('AI optimization log')
     expect(html).toContain('#old')
     expect(html).toContain('Review log')
     expect(html).toContain('review line')
@@ -182,7 +182,7 @@ describe('V-live-fix-log: one stream, both dialogs', () => {
     })
 
     mountPanel(createElement(WorkflowDialogWithFixStream))
-    expect(markup()).not.toContain('AI fix log')
+    expect(markup()).not.toContain('AI optimization log')
 
     await act(async () => {
       for (const listener of listeners) {
@@ -191,7 +191,7 @@ describe('V-live-fix-log: one stream, both dialogs', () => {
     })
 
     const html = markup()
-    expect(html).toContain('AI fix log')
+    expect(html).toContain('AI optimization log')
     expect(html).toContain('R1 · land on the home page')
     expect(html).toContain('#old')
     expect(html).toContain('data-testid=go')

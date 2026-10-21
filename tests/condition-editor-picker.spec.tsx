@@ -127,7 +127,7 @@ describe('the element row', () => {
     expect(byTitle(container, 'Verify selector')).not.toBeNull()
   })
 
-  it('writes the picked element into the row through the observer’s own accessor', () => {
+  it('writes the picked element into the row through the observer’s own accessor', async () => {
     const received: WorkflowCondition[][] = []
     const container = mount([visibleRow], (next) => received.push(next))
     const pick = byTitle(container, 'Pick element on page')!
@@ -136,7 +136,9 @@ describe('the element row', () => {
     })
     const started = sendMessage.mock.calls[0]?.[0] as { pickerId: string; type: string }
     expect(started.type).toBe('picker:start')
-    act(() => {
+    // The reply crosses one await on its way back to the row (`element-pick`
+    // resolves the round trip), so act() has to flush microtasks.
+    await act(async () => {
       for (const fn of listeners)
         fn({ type: 'picker:result', pickerId: started.pickerId, selector: '#title' })
     })

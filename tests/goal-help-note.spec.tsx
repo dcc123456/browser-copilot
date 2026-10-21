@@ -3,7 +3,7 @@
  * The explainer next to 「目标与成功条件」 in every operator property panel.
  *
  * The section is collapsed by default and its contract is what per-step
- * verification and AI fix run on, so the panel needs a way to say so without
+ * verification and AI Optimize run on, so the panel needs a way to say so without
  * shipping the user to a doc. The toggle has to reveal the copy in place and
  * must not disturb the section it sits in — clicking the icon opening the
  * collapse (or the collapse hiding the note) would make the two controls fight.
@@ -86,7 +86,7 @@ describe('the goal section explainer', () => {
     click(button!)
     expect(note()).toBe(true)
     // The contract's consequence is the part the user cannot guess.
-    expect(document.body.textContent).toContain('AI fix refuses a node with no goal contract')
+    expect(document.body.textContent).toContain('AI Optimize then has to work from your own words')
     click(trigger()!)
     expect(note()).toBe(false)
   })

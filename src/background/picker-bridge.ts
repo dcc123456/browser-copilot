@@ -24,6 +24,8 @@ export interface PickerStartMessage {
   pickerId: string
   findBy?: 'cssSelector' | 'xpath'
   multiple?: boolean
+  /** Editor UI locale, so the picker's own copy matches the panel that opened it. */
+  locale?: 'en' | 'zh'
   /**
    * Explicit target window (the editor's host window). When present, the
    * picker resolves its tab INSIDE that window instead of the global chain.
@@ -50,6 +52,7 @@ async function injectPicker(args: {
   findBy?: 'cssSelector' | 'xpath'
   selector?: string
   multiple?: boolean
+  locale?: 'en' | 'zh'
   windowId?: number
 }): Promise<{ ok: boolean; error?: string }> {
   // Resolve the tab the user is actually automating, not the focused window's
@@ -116,6 +119,7 @@ export async function handlePickerMessage(message: unknown): Promise<PickerHandl
       mode: 'select',
       findBy: msg.findBy,
       multiple: msg.multiple,
+      locale: msg.locale,
       windowId: msg.windowId,
     })
     return { handled: true, response }

@@ -11,12 +11,20 @@
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ sendCommand: vi.fn() }))
+const mocks = vi.hoisted(() => ({ sendCommand: vi.fn(), requestElementPick: vi.fn() }))
 
 vi.mock('../src/lib/messages', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/lib/messages')>()
   return { ...actual, sendCommand: mocks.sendCommand }
 })
+
+// The picker's browser round trip is its own subject (see the element-picker and
+// condition-editor specs); here only what the dock DOES with the answer matters.
+vi.mock('../src/workflow-editor/blocks/shared/element-pick', () => ({
+  describePickFailure: (failure: string, error?: string) =>
+    failure === 'cancelled' ? null : (error ?? 'The element picker did not respond.'),
+  requestElementPick: mocks.requestElementPick,
+}))
 
 beforeAll(() => {
   ;(globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true
@@ -30,7 +38,11 @@ import OperatorChatDock, {
   type OperatorLanding,
 } from '../src/workflow-editor/ai/OperatorChatDock'
 import type { Command, CommandResult } from '../src/lib/messages'
-import type { OperatorAction, OperatorProposal } from '../src/lib/workflow/operator-advise'
+import type {
+  OperatorAction,
+  OperatorProposal,
+  OperatorScreenshotReport,
+} from '../src/lib/workflow/operator-advise'
 
 beforeAll(() => {
   // jsdom implements neither scrolling API; the transcript tail needs one.
@@ -60,12 +72,15 @@ const okReply = (
 })
 
 /** An answer whose parameters came from a page the assistant actually read. */
-const groundedReply = (proposals: OperatorProposal[]): AdviseReply => ({
+const groundedReply = (
+  proposals: OperatorProposal[],
+  action: OperatorAction = 'append',
+): AdviseReply => ({
   type: 'workflows.operatorAdvise',
   data: {
     ok: true,
     reply: '从城市下拉里选择杭州',
-    action: 'append',
+    action,
     proposals,
     rejected: [],
     page: { url: 'https://example.com/form', title: 'Sign up' },
@@ -108,7 +123,7 @@ const context: OperatorChatContext = {
 
 let requests: OperatorApplyRequest[] = []
 let landing: OperatorLanding = {
-  kind: 'append',
+  kind: 'chain',
   added: 1,
   applied: true,
   skipped: [],
@@ -140,9 +155,11 @@ beforeEach(() => {
   }
   requests = []
   undos = 0
-  landing = { kind: 'append', added: 1, applied: true, skipped: [], pruned: [], missing: [] }
+  landing = { kind: 'chain', added: 1, applied: true, skipped: [], pruned: [], missing: [] }
   seen.length = 0
   mocks.sendCommand.mockReset()
+  mocks.requestElementPick.mockReset()
+  mocks.requestElementPick.mockResolvedValue({ ok: false, failure: 'cancelled' })
   mocks.sendCommand.mockImplementation(async (command: Command): Promise<unknown> => {
     seen.push(command)
     if (command.type === 'workflows.operatorAdvise') return reply
@@ -226,6 +243,15 @@ const ask = async (text: string): Promise<void> => {
 const click = async (label: string): Promise<void> => {
   await act(async () => {
     buttonByText(label)?.click()
+  })
+  await flush()
+}
+
+/** The pick button is looked up by title: its text carries the pending-count
+ *  badge, which grows with every pick. */
+const pickElement = async (): Promise<void> => {
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>('button[title="operatorAiPick"]')?.click()
   })
   await flush()
 }
@@ -370,6 +396,23 @@ describe('V-operator-dock: the floating assistant', () => {
       expect(buttonByText('operatorAiOfferLand')).toBeUndefined()
     })
 
+    it('keeps the chosen placement while the batch is held', async () => {
+      // The offer is consumed later than the answer was written: landing must use
+      // the placement the assistant asked for, not the one the dock assumed.
+      reply = groundedReply([{ blockId: 'event-click', data: {}, rationale: '' }], 'prepend')
+      await render()
+      await ask('在点击之前先等下拉框出现')
+      await click('operatorAiOfferLand')
+
+      expect(requests).toEqual([
+        {
+          action: 'prepend',
+          proposals: [{ blockId: 'event-click', data: {}, rationale: '' }],
+          targetNodeId: 'n2',
+        },
+      ])
+    })
+
     it('acts once and lands the locator the page really used', async () => {
       reply = groundedReply([{ blockId: 'event-click', data: {}, rationale: '' }])
       await render()
@@ -436,6 +479,22 @@ describe('V-operator-dock: the floating assistant', () => {
     ])
     expect(container.textContent).toContain('已添加两个算子')
     expect(container.textContent).toContain('operatorAiAdded')
+  })
+
+  it('lands a prepend answer in front of the step the user selected', async () => {
+    // The assistant chose where the steps belong; the dock only relays it, so the
+    // request the canvas acts on has to carry the action it was given.
+    reply = okReply([{ blockId: 'delay', data: {}, rationale: '' }], '先等待页面加载', 'prepend')
+    await render()
+    await ask('在打开标签页之前先等两秒')
+
+    expect(requests).toEqual([
+      {
+        action: 'prepend',
+        proposals: [{ blockId: 'delay', data: {}, rationale: '' }],
+        targetNodeId: 'n2',
+      },
+    ])
   })
 
   it('lands an in-place answer as a change to the selected step', async () => {
@@ -536,7 +595,7 @@ describe('V-operator-dock: the floating assistant', () => {
 
   it('says what the canvas refused to place', async () => {
     landing = {
-      kind: 'append',
+      kind: 'chain',
       added: 0,
       applied: false,
       skipped: [],
@@ -585,5 +644,152 @@ describe('V-operator-dock: the floating assistant', () => {
       resolveCommand?.(okReply([]))
     })
     await flush()
+  })
+})
+
+describe('V-operator-dock: a locator the user pointed at by hand', () => {
+  const picked = (selector: string, findBy: 'cssSelector' | 'xpath' = 'cssSelector') =>
+    mocks.requestElementPick.mockResolvedValue({ ok: true, selector, findBy })
+
+  it('goes with the next message and is spent by it', async () => {
+    picked('#city')
+    await render()
+    await act(async () => {
+      buttonByText('operatorAiFabLabel')?.click()
+    })
+    await pickElement()
+    expect(mocks.requestElementPick).toHaveBeenCalledTimes(1)
+    // The transcript shows what the user handed over, in their own words.
+    expect(container.textContent).toContain('operatorAiPicked')
+
+    await typeInto('从城市下拉里选杭州')
+    await send()
+    expect(adviseCommands()[0]!.pickedElements).toEqual([
+      { selector: '#city', findBy: 'cssSelector' },
+    ])
+
+    // Spent: the follow-up turn carries no hand facts of its own.
+    await typeInto('再选杭州')
+    await send()
+    expect(adviseCommands()[1]!.pickedElements).toBeUndefined()
+  })
+
+  it('settles a held batch without ever acting on the page', async () => {
+    reply = groundedReply([{ blockId: 'event-click', data: {}, rationale: '' }])
+    picked('#city')
+    await render()
+    await ask('从城市下拉里选择杭州')
+    expect(requests).toEqual([])
+    expect(observeCommands()).toHaveLength(0)
+
+    await pickElement()
+
+    // The pick answered the question, so the batch lands filled — and nothing ran.
+    expect(observeCommands()).toEqual([])
+    expect(requests).toHaveLength(1)
+    expect(requests[0]!.proposals[0]!.data).toEqual({ selector: '#city', findBy: 'cssSelector' })
+    expect(buttonByText('operatorAiOfferAct')).toBeUndefined()
+  })
+
+  it('fills one step per pick, in step order, and only lands when none is left', async () => {
+    reply = groundedReply([
+      { blockId: 'event-click', data: {}, rationale: '' },
+      { blockId: 'event-click', data: {}, rationale: '' },
+    ])
+    mocks.requestElementPick
+      .mockResolvedValueOnce({ ok: true, selector: '#city', findBy: 'cssSelector' })
+      .mockResolvedValue({ ok: true, selector: '#ok', findBy: 'cssSelector' })
+    await render()
+    await ask('先点城市，再点确定')
+
+    // One pick answers one step, so the batch stays held while the other has no element.
+    await pickElement()
+    expect(requests).toEqual([])
+    expect(buttonByText('operatorAiOfferAct')).toBeDefined()
+
+    // The second pick closes the last gap: each locator went into its own step.
+    await pickElement()
+    expect(mocks.requestElementPick).toHaveBeenCalledTimes(2)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]!.proposals.map((proposal) => proposal.data.selector)).toEqual([
+      '#city',
+      '#ok',
+    ])
+  })
+
+  it('says nothing when the user cancelled the pick', async () => {
+    reply = groundedReply([{ blockId: 'event-click', data: {}, rationale: '' }])
+    await render()
+    await ask('从城市下拉里选择杭州')
+
+    await pickElement()
+
+    expect(container.textContent).not.toContain('operatorAiPicked')
+    expect(requests).toEqual([])
+    // The choice the assistant asked is still the choice it is asking.
+    expect(buttonByText('operatorAiOfferAct')).toBeDefined()
+  })
+})
+
+/**
+ * The automatic screenshot is the one path where the user's screen leaves the
+ * machine, so the dock reports it in all three states — sent, sent and then
+ * failed, or could not be taken — and says nothing when it was not needed.
+ */
+describe('V-operator-dock: the screenshot the assistant took for itself', () => {
+  const answeredWith = (screenshot: OperatorScreenshotReport): void => {
+    const base = okReply([{ blockId: 'new-tab', data: { url: 'https://b' }, rationale: '' }])
+    reply = { ...base, data: { ...base.data, screenshot } }
+  }
+  /** Which report line the transcript shows. The three keys share a prefix and
+   *  jsdom concatenates neighbouring text nodes, so the longest key is tested
+   *  first; the reason text cannot be matched at all, because this harness's
+   *  translator passes the key through without interpolating. */
+  const shotLine = (): string | undefined => {
+    const text = container.textContent ?? ''
+    for (const key of ['operatorAiShotSentFailed', 'operatorAiShotSkipped', 'operatorAiShotSent'])
+      if (text.includes(key)) return key
+    return undefined
+  }
+
+  it('says the screen went out, because it did', async () => {
+    answeredWith({ route: 'inline', taken: true })
+    await render()
+    await ask('打开百度')
+    expect(shotLine()).toBe('operatorAiShotSent')
+  })
+
+  it('says the round failed after the screen had already gone out', async () => {
+    answeredWith({ route: 'described', taken: true, error: 'The provider timed out.' })
+    await render()
+    await ask('打开百度')
+    expect(shotLine()).toBe('operatorAiShotSentFailed')
+  })
+
+  it('says nothing was captured, so the page read is all the answer has', async () => {
+    answeredWith({ route: 'inline', taken: false, error: 'This page type is not capturable.' })
+    await render()
+    await ask('打开百度')
+    expect(shotLine()).toBe('operatorAiShotSkipped')
+  })
+
+  it('stays silent when no screenshot was needed', async () => {
+    await render()
+    await ask('打开百度')
+    expect(shotLine()).toBeUndefined()
+  })
+
+  it('reports it under a batch the assistant is still holding', async () => {
+    reply = (() => {
+      const base = groundedReply([{ blockId: 'event-click', data: {}, rationale: '' }])
+      return { ...base, data: { ...base.data, screenshot: { route: 'inline', taken: true } } }
+    })()
+    await render()
+    await ask('从城市下拉里选择杭州')
+    // The offer and the disclosure are both on the row: the screen went out, and
+    // the batch still has not landed.
+    expect(shotLine()).toBe('operatorAiShotSent')
+    expect(buttonByText('operatorAiOfferAct')).toBeDefined()
+    expect(requests).toEqual([])
   })
 })

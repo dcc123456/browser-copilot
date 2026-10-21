@@ -2589,6 +2589,7 @@ async function handleCommand(
             ...(command.selectedSpec ? { selectedSpec: command.selectedSpec } : {}),
             ...(command.windowId !== undefined ? { windowId: command.windowId } : {}),
             ...(command.skipPageRead ? { skipPageRead: true } : {}),
+            ...(command.pickedElements?.length ? { pickedElements: command.pickedElements } : {}),
             ...(command.workflowGoal ? { workflowGoal: command.workflowGoal } : {}),
             ...(command.workflowId ? { workflowId: command.workflowId } : {}),
           },

@@ -8,9 +8,11 @@
  * into a Shadow DOM, and icons are inline SVG strings carrying lucide's
  * official path data (no React and no webfont exist in the page world).
  *
- * The picker highlights the element under the cursor, locks it on click, lets
- * the user switch CSS/XPath, toggle selector options, walk parent/child, and
- * confirm. The chosen selector is reported back through
+ * The picker highlights the element under the cursor, locks it on the FIRST
+ * PRESS (the page never sees that press, so a popover that closes on
+ * click-outside stays open), lets the user switch CSS/XPath, toggle selector
+ * options, walk parent/child, and confirm with the card button or Enter. The
+ * chosen selector is reported back through
  * chrome.runtime.sendMessage({ type: 'picker:result', pickerId, selector }).
  *
  * IMPORTANT: this function is serialized via `func.toString()` and run in the
@@ -29,13 +31,26 @@ export interface PickerArgs {
   findBy?: 'cssSelector' | 'xpath'
   selector?: string
   multiple?: boolean
+  /**
+   * Editor UI locale, so the copy this module adds reads the same way as the
+   * panel that launched it. The card's pre-existing strings are English-only
+   * debt; only new strings are localized.
+   */
+  locale?: 'en' | 'zh'
 }
 
 /** Entry signature used by chrome.scripting.executeScript({ func }). */
 type PickerStart = (args: PickerArgs) => Promise<void>
 
 export const startPicker: PickerStart = async (args) => {
-  const { pickerId, mode, findBy = 'cssSelector', selector: initial = '', multiple = false } = args
+  const {
+    pickerId,
+    mode,
+    findBy = 'cssSelector',
+    selector: initial = '',
+    multiple = false,
+    locale = 'en',
+  } = args
 
   // --- styles (inlined so the serialized function is self-contained) --------
   const PICKER_STYLES = `
@@ -72,6 +87,7 @@ export const startPicker: PickerStart = async (args) => {
 .pick-primary:disabled { opacity: 0.5; cursor: default; }
 .pick-count { margin-top: 8px; font-size: 12px; color: #6b7280; }
 .pick-count b { color: #6366f1; }
+.pick-hint { margin-top: 6px; font-size: 12px; color: #6b7280; }
 .pick-settings { margin-top: 10px; border-top: 1px solid #f3f4f6; padding-top: 8px; }
 .pick-settings summary { cursor: pointer; color: #6b7280; font-size: 12px; }
 .pick-opt { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 12px; }
@@ -96,6 +112,15 @@ export const startPicker: PickerStart = async (args) => {
   // mount (e.g. re-injection, or a re-trigger while one is open) is removed
   // first so cards never stack and listeners never double-bind.
   document.getElementById('bc-element-picker')?.remove()
+
+  // The new copy is bilingual (§3); a table keyed by locale, because the page
+  // world has no i18n module to import.
+  const STRINGS = {
+    hint:
+      locale === 'zh'
+        ? '按 Enter 选中高亮的元素（无需点击）'
+        : 'Press Enter to select the highlighted element (no click needed)',
+  }
 
   // --- selector builder (mirrors build-selector.ts; inlined for injection) ---
   interface Opts {
@@ -298,6 +323,7 @@ export const startPicker: PickerStart = async (args) => {
         <label class="pick-opt"><input type="checkbox" data-opt="nthChild"> Use nth-child</label>
       </details>
       <button class="pick-primary" data-act="confirm" disabled>Select Element</button>
+      <div class="pick-hint" data-role="hint" style="display:none">${STRINGS.hint}</div>
       <div class="pick-note" data-role="note" style="display:none"></div>
     </div>`
   rootEl.append(overlay, highlight, card)
@@ -308,6 +334,7 @@ export const startPicker: PickerStart = async (args) => {
   const findBySel = $<HTMLSelectElement>('[data-role="findby"]')
   const selectorEl = $('[data-role="selector"]')
   const countEl = $('[data-role="count"]')
+  const hintEl = $('[data-role="hint"]')
   const noteEl = $('[data-role="note"]')
   const confirmBtn = $<HTMLButtonElement>('[data-act="confirm"]')
   findBySel.value = findBy
@@ -317,6 +344,12 @@ export const startPicker: PickerStart = async (args) => {
   let curSelector = initial
 
   const target = () => locked ?? hovered
+
+  /** The Enter hint is an instruction for a target that exists, so it appears
+   *  with the first hover and stays while one is aimed at. */
+  function updateHint() {
+    hintEl.style.display = target() ? 'block' : 'none'
+  }
 
   function highlightEl(el: Element | null) {
     if (!el || el === host || host.contains(el)) {
@@ -341,6 +374,7 @@ export const startPicker: PickerStart = async (args) => {
     countEl.innerHTML = n === 1 ? 'Matches <b>1</b> element' : `Matches <b>${n}</b> elements`
     confirmBtn.disabled = !curSelector || n < 1
     highlightEl(el)
+    updateHint()
   }
 
   // Verify mode: count an existing selector and report immediately.
@@ -367,8 +401,9 @@ export const startPicker: PickerStart = async (args) => {
     return (first as Element) ?? document.elementFromPoint(e.clientX, e.clientY)
   }
   // Our own UI (the picker card lives in `host`'s open shadow root): any event
-  // whose path passes through `host` is a click inside the card.
-  const isOurUi = (e: MouseEvent): boolean => {
+  // whose path passes through `host` belongs to the card. Takes `Event` because
+  // the keyboard commit asks the same question.
+  const isOurUi = (e: Event): boolean => {
     const path = e.composedPath?.()
     if (path && path.indexOf(host) !== -1) return true
     const t = e.target as Node | null
@@ -376,41 +411,90 @@ export const startPicker: PickerStart = async (args) => {
   }
   const onMove = (e: MouseEvent) => {
     if (locked) return
-    hovered = eventTarget(e)
-    if (hovered && (hovered === card || card.contains(hovered) || host.contains(hovered))) {
-      hovered = null
+    const aimed = eventTarget(e)
+    hovered =
+      aimed && (aimed === card || card.contains(aimed) || host.contains(aimed)) ? null : aimed
+    // A hover aims the pick exactly like a lock does, so it goes through the
+    // same refresh — the Enter commit needs `confirmBtn` to be truthful about
+    // what is currently selectable.
+    if (hovered) refresh()
+    else {
       highlightEl(null)
-      return
-    }
-    highlightEl(hovered)
-    if (hovered) {
-      const xp = findBySel.value === 'xpath'
-      curSelector = xp ? buildXp(hovered) : build(hovered)
-      selectorEl.textContent = curSelector
-      countEl.innerHTML = `Matches <b>${count(curSelector, xp)}</b> elements`
+      updateHint()
     }
   }
-  const onClick = (e: MouseEvent) => {
-    // Clicks inside the picker card are retargeted to the shadow host when
-    // observed from the document (composed events cross the shadow boundary
-    // retargeted), so `closest('.pick-card')` can NEVER match at this level.
-    // The old guard fell through and the stopPropagation below killed the
-    // event before it descended into the shadow tree — the card's own
-    // confirm/cancel buttons never fired, `picker:result` was never sent, and
-    // the editor spinner spun forever. Return BEFORE preventDefault /
-    // stopPropagation so card clicks reach their shadow listeners (and
-    // checkbox/select defaults inside the card keep working).
-    if (isOurUi(e)) return
+  // Locking happens on the FIRST press, and the page must never learn about
+  // that press: the popovers users need to pick inside close on their own
+  // click-outside handler, which runs on pointerdown/mousedown — before any
+  // click-level interceptor. `window` capture is the first station of the
+  // capture path, so swallowing there beats every document-level directive;
+  // stopImmediatePropagation (not stopPropagation) also silences listeners
+  // already bound to this node, and preventDefault suppresses the focus shift
+  // that focusout-based dismissals key on. Page timers closing a popover are
+  // still page timers — this only promises the page never sees THIS press.
+  const swallowPress = (e: Event) => {
     e.preventDefault()
-    e.stopPropagation()
-    locked = eventTarget(e)
-    if (locked && locked !== host && !host.contains(locked)) refresh()
+    e.stopImmediatePropagation()
+  }
+  const lockTo = (e: MouseEvent) => {
+    const el = eventTarget(e)
+    if (!el || el === host || host.contains(el)) return
+    locked = el
+    refresh()
+  }
+  // The trailing mousedown/click of a press we already locked on must not
+  // re-lock: by then the page may have moved the DOM under the cursor.
+  let sawPointerPress = false
+  let sawMousePress = false
+  const onPointerDown = (e: MouseEvent) => {
+    sawPointerPress = true
+    // Card presses are let through before anything else — the old guard order
+    // killed the card's own confirm/cancel handlers and stranded the spinner.
+    if (isOurUi(e)) return
+    swallowPress(e)
+    lockTo(e)
+  }
+  const onMouseDown = (e: MouseEvent) => {
+    sawMousePress = true
+    if (isOurUi(e)) return
+    swallowPress(e)
+    if (!sawPointerPress) lockTo(e)
+  }
+  const onClick = (e: MouseEvent) => {
+    const pressed = sawPointerPress || sawMousePress
+    sawPointerPress = false
+    sawMousePress = false
+    if (isOurUi(e)) return
+    swallowPress(e)
+    // A click with no press at all (a synthetic `el.click()`) still picks.
+    if (!pressed) lockTo(e)
+  }
+  /** The one commit path: shared by the card button and the Enter key. */
+  function confirmPick() {
+    // The button's disabled state is the single authority on what is pickable
+    // (an empty selector, or one matching nothing, must not be committed).
+    if (confirmBtn.disabled) return
+    void chrome.runtime.sendMessage({
+      type: 'picker:result',
+      pickerId,
+      selector: curSelector,
+      findBy: findBySel.value,
+      multiple,
+    })
+    cleanup()
   }
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
       cleanup()
       void chrome.runtime.sendMessage({ type: 'picker:cancel', pickerId })
+      return
     }
+    // Enter commits without ever pressing the page — the click-free path for a
+    // popover that any press would disturb. Inside the card a focused button
+    // keeps its native activation, so committing here too would double-send.
+    if (e.key !== 'Enter' || isOurUi(e)) return
+    swallowPress(e)
+    confirmPick()
   }
 
   card.addEventListener('click', (e) => {
@@ -422,15 +506,8 @@ export const startPicker: PickerStart = async (args) => {
       void chrome.runtime.sendMessage({ type: 'picker:cancel', pickerId })
       return
     }
-    if (act === 'confirm' && curSelector) {
-      void chrome.runtime.sendMessage({
-        type: 'picker:result',
-        pickerId,
-        selector: curSelector,
-        findBy: findBySel.value,
-        multiple,
-      })
-      cleanup()
+    if (act === 'confirm') {
+      confirmPick()
       return
     }
     if (act === 'parent') {
@@ -498,11 +575,18 @@ export const startPicker: PickerStart = async (args) => {
 
   function cleanup() {
     document.removeEventListener('mousemove', onMove, true)
-    document.removeEventListener('click', onClick, true)
-    document.removeEventListener('keydown', onKey, true)
+    window.removeEventListener('pointerdown', onPointerDown, true)
+    window.removeEventListener('mousedown', onMouseDown, true)
+    window.removeEventListener('click', onClick, true)
+    window.removeEventListener('keydown', onKey, true)
     host.remove()
   }
+  // Hover stays on document (mousemove must reach the page to highlight, and a
+  // hover cannot close a click-outside popover); only the press is intercepted,
+  // and keys are intercepted at window capture for the same reason.
   document.addEventListener('mousemove', onMove, true)
-  document.addEventListener('click', onClick, true)
-  document.addEventListener('keydown', onKey, true)
+  window.addEventListener('pointerdown', onPointerDown, true)
+  window.addEventListener('mousedown', onMouseDown, true)
+  window.addEventListener('click', onClick, true)
+  window.addEventListener('keydown', onKey, true)
 }

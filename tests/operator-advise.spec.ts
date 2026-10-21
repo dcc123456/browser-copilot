@@ -11,8 +11,13 @@ import {
   operatorBatchOf,
   operatorDataOfProposal,
   operatorDigestOf,
+  operatorScreenshotRoute,
   OPERATOR_ADVISE_MAX_OPERATORS,
+  OPERATOR_SCREENSHOT_NOTE_CAP,
+  OPERATOR_SCREENSHOT_QUESTION,
   parseOperatorAdviseReply,
+  prependOperatorChain,
+  proposalIndexesNeedingPage,
   proposalsNeedingPage,
   selectedOperatorSpecOf,
   tailNodeOf,
@@ -28,8 +33,9 @@ import type { WorkflowEdge, WorkflowNode, WorkflowTrigger } from '../src/lib/wor
  * design: the model may only ever name an operator from the offer it was given
  * (so a hallucinated id can't reach the canvas), the provenance marker is added
  * by the patcher and stripped from anything the model wrote, and the chain is
- * SPLICED into the flow — an anchor that already continues somewhere keeps its
- * continuation, and an anchor that branches is refused rather than guessed.
+ * SPLICED into the flow — whichever side of the anchor it lands on, the one path
+ * the batch takes over is remembered and handed back on undo, and an anchor that
+ * branches (or joins) is refused rather than guessed.
  */
 
 const node = (
@@ -39,12 +45,12 @@ const node = (
   position = { x: 0, y: 0 },
 ): WorkflowNode => ({ id, label: blockId, position, data: { blockId, ...data } })
 
-const edge = (source: string, target: string, sourceHandle?: string): WorkflowEdge => ({
-  id: `${source}->${target}`,
-  source,
-  target,
-  sourceHandle,
-})
+const edge = (
+  source: string,
+  target: string,
+  sourceHandle?: string,
+  targetHandle?: string,
+): WorkflowEdge => ({ id: `${source}->${target}`, source, target, sourceHandle, targetHandle })
 
 const graph = (nodes: WorkflowNode[], edges: WorkflowEdge[]) => ({
   nodes,
@@ -134,6 +140,163 @@ describe('buildOperatorAdvisePrompt', () => {
       page: { ...page, title: '' },
     })
     expect(untitled).toContain('https://example.com/form (read just now, read-only)')
+  })
+
+  it('carries the elements the user picked by hand, verbatim and above the offer', () => {
+    const prompt = buildOperatorAdvisePrompt({
+      history,
+      graphDigest: '',
+      candidates,
+      pickedElements: [
+        { selector: '#city', findBy: 'cssSelector' },
+        { selector: '//span[text="杭州"]', findBy: 'xpath' },
+      ],
+    })
+    expect(prompt).toContain('## Elements the user picked by hand')
+    expect(prompt).toContain('CSS: #city')
+    expect(prompt).toContain('XPath: //span[text="杭州"]')
+    expect(prompt).toContain('use one VERBATIM')
+    // The precedence rule, which is the whole reason a hand pick outranks a read.
+    expect(prompt).toContain('this section wins')
+    expect(prompt.indexOf('## Elements the user picked')).toBeLessThan(
+      prompt.indexOf('## Operators you may use'),
+    )
+  })
+
+  it('puts the picks after the page read, and skips an empty selector', () => {
+    const page: OperatorPageRead = {
+      url: 'https://example.com/form',
+      title: 'Sign up',
+      elements: [{ ref: 'e3', role: 'combobox', name: 'City', loc: '#other' }],
+      forms: [],
+    }
+    const prompt = buildOperatorAdvisePrompt({
+      history,
+      graphDigest: '',
+      candidates,
+      page,
+      pickedElements: [
+        { selector: '', findBy: 'cssSelector' },
+        { selector: '#city', findBy: 'cssSelector' },
+      ],
+    })
+    expect(prompt.match(/## Elements the user picked by hand/g)).toHaveLength(1)
+    expect(prompt).not.toMatch(/^CSS: $/m)
+    // The page still grounds everything else; the pick only overrides what it says.
+    expect(prompt.indexOf('## The page')).toBeLessThan(
+      prompt.indexOf('## Elements the user picked'),
+    )
+  })
+
+  it('says nothing about picks when there were none', () => {
+    const prompt = buildOperatorAdvisePrompt({
+      history,
+      graphDigest: '',
+      candidates,
+      pickedElements: [],
+    })
+    expect(prompt).not.toContain('## Elements the user picked by hand')
+  })
+
+  it('tells the model the screenshot is attached, on the inline route', () => {
+    const prompt = buildOperatorAdvisePrompt({
+      history,
+      graphDigest: '',
+      candidates,
+      screenshot: { route: 'inline' },
+    })
+    expect(prompt).toContain('## A screenshot of the page is attached to this request')
+    expect(prompt).not.toContain('## What a screenshot of the page shows')
+    // Why it is here, and what must not be copied out of it.
+    expect(prompt).toContain('missing a parameter only the page can give')
+    expect(prompt).toContain('password, token, cookie, phone number')
+
+    const plain = buildOperatorAdvisePrompt({ history, graphDigest: '', candidates })
+    expect(plain).not.toContain('screenshot')
+  })
+
+  it('quotes the image model, capped, on the described route', () => {
+    const note = 'x'.repeat(OPERATOR_SCREENSHOT_NOTE_CAP + 400)
+    const prompt = buildOperatorAdvisePrompt({
+      history,
+      graphDigest: '',
+      candidates,
+      screenshot: { route: 'described', note },
+    })
+    expect(prompt).toContain('## What a screenshot of the page shows (read by the image model)')
+    expect(prompt).not.toContain('is attached to this request')
+    expect(prompt).toContain('x'.repeat(OPERATOR_SCREENSHOT_NOTE_CAP))
+    expect(prompt).not.toContain('x'.repeat(OPERATOR_SCREENSHOT_NOTE_CAP + 1))
+  })
+
+  it('keeps the screenshot section after the page read and the hand picks', () => {
+    const page: OperatorPageRead = {
+      url: 'https://example.com/form',
+      title: 'Sign up',
+      elements: [{ ref: 'e3', role: 'combobox', name: 'City', loc: '#city' }],
+      forms: [],
+    }
+    const prompt = buildOperatorAdvisePrompt({
+      history,
+      graphDigest: '',
+      candidates,
+      page,
+      pickedElements: [{ selector: '#city', findBy: 'cssSelector' }],
+      screenshot: { route: 'described', note: 'A dropdown lists 杭州 and 苏州.' },
+    })
+    expect(prompt.indexOf('## The page')).toBeLessThan(
+      prompt.indexOf('## What a screenshot of the page shows'),
+    )
+    expect(prompt.indexOf('## Elements the user picked')).toBeLessThan(
+      prompt.indexOf('## What a screenshot of the page shows'),
+    )
+    expect(prompt.indexOf('## What a screenshot of the page shows')).toBeLessThan(
+      prompt.indexOf('## Operators you may use'),
+    )
+    // The DOM read and the screen both speak; nothing is dropped for the image.
+    expect(prompt).toContain('#city')
+    expect(prompt).toContain('苏州')
+  })
+})
+
+/**
+ * The route is decided from what the user configured, never from a capability
+ * probe: no provider record says whether its model reads images. A screenshot may
+ * only ride the chat call when the image target IS that call's provider and model
+ * — which `resolveVisionTarget`'s fallback makes true of an unset image model.
+ */
+describe('operatorScreenshotRoute', () => {
+  const active = { providerId: 'openai', model: 'gpt-4o' }
+
+  it('sends the image to the chat model when nothing else is configured', () => {
+    expect(operatorScreenshotRoute(active, undefined)).toBe('inline')
+    expect(operatorScreenshotRoute(active, { providerId: '', model: '' })).toBe('inline')
+    // A model with no provider is ignored by the resolver, so it is still the
+    // chat model that sees the image.
+    expect(operatorScreenshotRoute(active, { providerId: '', model: 'qwen-vl' })).toBe('inline')
+  })
+
+  it('sends it inline when the same model was picked for both', () => {
+    expect(operatorScreenshotRoute(active, { providerId: 'openai', model: '' })).toBe('inline')
+    expect(operatorScreenshotRoute(active, active)).toBe('inline')
+  })
+
+  it('routes through the image model when the picture comes from elsewhere', () => {
+    expect(operatorScreenshotRoute(active, { providerId: 'qwen', model: 'qwen-vl' })).toBe(
+      'described',
+    )
+    expect(operatorScreenshotRoute(active, { providerId: 'openai', model: 'gpt-4o-mini' })).toBe(
+      'described',
+    )
+    expect(operatorScreenshotRoute(undefined, { providerId: 'qwen', model: 'qwen-vl' })).toBe(
+      'described',
+    )
+  })
+
+  it('asks the image model for the screen, and for nothing that looks like a credential', () => {
+    expect(OPERATOR_SCREENSHOT_QUESTION).toContain('dropdown')
+    expect(OPERATOR_SCREENSHOT_QUESTION).toContain('password')
+    expect(OPERATOR_SCREENSHOT_QUESTION).toContain('Do NOT transcribe')
   })
 })
 
@@ -283,7 +446,10 @@ describe('appendOperatorChain', () => {
     const patch = appendOperatorChain(
       graph(
         [node('t', 'trigger'), node('b', 'new-tab'), node('c', 'event-click')],
-        [edge('t', 'b', 'trigger-output-1'), edge('b', 'c', 'new-tab-output-1')],
+        [
+          edge('t', 'b', 'trigger-output-1'),
+          edge('b', 'c', 'new-tab-output-1', 'event-click-input-1'),
+        ],
       ),
       [{ blockId: 'delay', data: {}, rationale: '' }],
       { anchorNodeId: 'b', newId },
@@ -299,6 +465,8 @@ describe('appendOperatorChain', () => {
       id: 'b->c',
       source: 'b',
       sourceHandle: 'new-tab-output-1',
+      target: 'c',
+      targetHandle: 'event-click-input-1',
     })
   })
 
@@ -438,6 +606,123 @@ describe('appendOperatorChain', () => {
   })
 })
 
+/**
+ * The same splice from the other side: the chain takes the place of the ONE path
+ * that arrives at the anchor, and the refusals mirror the append's — the anchor
+ * is never guessed, and a step several paths arrive at is not ours to rewrite.
+ */
+describe('prependOperatorChain', () => {
+  const line = () =>
+    graph(
+      [node('t', 'trigger'), node('b', 'new-tab')],
+      [edge('t', 'b', 'trigger-output-1', 'new-tab-input-1')],
+    )
+
+  it('takes the place of the path that fed the anchor', () => {
+    const patch = prependOperatorChain(line(), [{ blockId: 'delay', data: {}, rationale: '' }], {
+      anchorNodeId: 'b',
+      newId,
+    })
+    expect(patch.problem).toBeUndefined()
+    const inserted = patch.added[0]!.id
+    const byId = new Map(patch.edges.map((e) => [e.id, e]))
+    expect(byId.get('t->b')?.target).toBe(inserted)
+    expect(byId.get('t->b')?.targetHandle).toBe('delay-input-1')
+    const arrival = patch.edges.find((e) => e.target === 'b')
+    expect(arrival?.source).toBe(inserted)
+    expect(arrival?.sourceHandle).toBe('delay-output-1')
+    expect(arrival?.targetHandle).toBe('new-tab-input-1')
+    expect(patch.splicedEdge).toEqual({
+      id: 't->b',
+      source: 't',
+      sourceHandle: 'trigger-output-1',
+      target: 'b',
+      targetHandle: 'new-tab-input-1',
+    })
+  })
+
+  it('wires the FIRST new step to the feed and the LAST to the anchor', () => {
+    const patch = prependOperatorChain(
+      line(),
+      [
+        { blockId: 'delay', data: {}, rationale: '' },
+        { blockId: 'event-click', data: { selector: '#x' }, rationale: '' },
+      ],
+      { anchorNodeId: 'b', newId },
+    )
+    const [first, last] = patch.added
+    const byId = new Map(patch.edges.map((e) => [e.id, e]))
+    expect(byId.get('t->b')?.target).toBe(first!.id)
+    expect(patch.edges.filter((e) => e.target === last!.id)).toHaveLength(1)
+    const arrival = patch.edges.find((e) => e.target === 'b')
+    expect(arrival?.source).toBe(last!.id)
+    expect(arrival?.sourceHandle).toBe('event-click-output-1')
+  })
+
+  it('grows the chain to the LEFT of the anchor', () => {
+    const patch = prependOperatorChain(
+      graph(
+        [node('t', 'trigger', {}, { x: -480, y: 0 }), node('b', 'new-tab', {}, { x: 0, y: 0 })],
+        [edge('t', 'b')],
+      ),
+      [{ blockId: 'delay', data: {}, rationale: '' }],
+      { anchorNodeId: 'b', newId },
+    )
+    expect(patch.added[0]?.position).toEqual({ x: -240, y: 0 })
+  })
+
+  it('refuses the entry point, an unwired step and a join', () => {
+    expect(
+      prependOperatorChain(line(), [{ blockId: 'delay', data: {}, rationale: '' }], {
+        anchorNodeId: 't',
+        newId,
+      }).problem,
+    ).toBe('prepend-entry-point')
+    expect(
+      prependOperatorChain(
+        graph([node('t', 'trigger'), node('b', 'new-tab')], []),
+        [{ blockId: 'delay', data: {}, rationale: '' }],
+        { anchorNodeId: 'b', newId },
+      ).problem,
+    ).toBe('prepend-no-incoming')
+    const joined = graph(
+      [node('t', 'trigger'), node('s', 'forms'), node('b', 'new-tab')],
+      [edge('t', 'b', 'trigger-output-1'), edge('s', 'b', 'forms-output-1')],
+    )
+    const patch = prependOperatorChain(joined, [{ blockId: 'delay', data: {}, rationale: '' }], {
+      anchorNodeId: 'b',
+      newId,
+    })
+    expect(patch.problem).toBe('join-anchor')
+    expect(patch.added).toEqual([])
+    expect(patch.edges).toEqual(joined.edges)
+  })
+
+  it('will not insert into an error path', () => {
+    // Only the fallback branch arrives at the step, so its front belongs to the
+    // error handling the user wired, not to the main line.
+    const patch = prependOperatorChain(
+      graph(
+        [node('t', 'trigger'), node('b', 'new-tab')],
+        [edge('t', 'b', 'trigger-output-fallback')],
+      ),
+      [{ blockId: 'delay', data: {}, rationale: '' }],
+      { anchorNodeId: 'b', newId },
+    )
+    expect(patch.problem).toBe('prepend-no-incoming')
+  })
+
+  it('never falls back to a guessed anchor', () => {
+    // Appending without an anchor means the end of the flow; "in front of" has no
+    // such reading, so an answer that lost its selection lands nothing.
+    const patch = prependOperatorChain(line(), [{ blockId: 'delay', data: {}, rationale: '' }], {
+      newId,
+    })
+    expect(patch.problem).toBe('unknown-anchor')
+    expect(patch.added).toEqual([])
+  })
+})
+
 describe('edgesAfterBatchRemoved', () => {
   it('puts a tail append back exactly as it was', () => {
     const base = graph(
@@ -467,6 +752,20 @@ describe('edgesAfterBatchRemoved', () => {
     // remembering the edge the batch borrowed.
     expect(edgesAfterBatchRemoved(patch.edges, operatorBatchOf(patch))).toEqual(base.edges)
   })
+
+  it('hands a spliced feed back to the step it used to feed', () => {
+    const base = graph(
+      [node('t', 'trigger'), node('b', 'new-tab')],
+      [edge('t', 'b', 'trigger-output-1', 'new-tab-input-1')],
+    )
+    const patch = prependOperatorChain(base, [{ blockId: 'delay', data: {}, rationale: '' }], {
+      anchorNodeId: 'b',
+      newId,
+    })
+    // Inserting in front moved the TARGET of the user's line, so restoring only its
+    // source would leave it pointing at a node that no longer exists.
+    expect(edgesAfterBatchRemoved(patch.edges, operatorBatchOf(patch))).toEqual(base.edges)
+  })
 })
 
 describe('parseOperatorAdviseReply action', () => {
@@ -484,6 +783,14 @@ describe('parseOperatorAdviseReply action', () => {
       offered,
     )
     expect(parsed?.action).toBe('replace')
+  })
+
+  it('keeps a prepend action, so a chain is not stapled on the wrong side', () => {
+    const parsed = parseOperatorAdviseReply(
+      '{"reply":"ok","action":"prepend","proposals":[{"blockId":"forms","data":{"selector":"#x"}}]}',
+      offered,
+    )
+    expect(parsed?.action).toBe('prepend')
   })
 
   it('refuses the whole turn when the action names nothing', () => {
@@ -532,14 +839,16 @@ describe('buildOperatorAdvisePrompt actions', () => {
     expect(prompt).toContain('new-tab {"url":"https://a"}')
     expect(prompt).toContain('- "edit"')
     expect(prompt).toContain('- "replace"')
+    expect(prompt).toContain('- "prepend"')
     expect(prompt).toContain('Never name a node id')
-    expect(prompt).toContain('"action":"append|edit|replace"')
+    expect(prompt).toContain('"action":"append|prepend|edit|replace"')
   })
 
   it('offers append alone when nothing is selected', () => {
     const prompt = buildOperatorAdvisePrompt({ history, graphDigest: '', candidates })
     expect(prompt).not.toContain('## The step the user selected')
     expect(prompt).not.toContain('- "edit"')
+    expect(prompt).not.toContain('- "prepend"')
     expect(prompt).toContain('Only "append" is possible')
   })
 })
@@ -633,6 +942,41 @@ describe('applyOperatorAction replace', () => {
     expect(replaced.data['__workflowAi']).toBeUndefined()
     expect(patch.edges.find((e) => e.target === 'b')?.targetHandle).toBe('event-click-input-1')
     expect(patch.edges).toHaveLength(1)
+  })
+
+  it('carries the goal contract across the swap, but not the provenance stamp', () => {
+    const canvas = graph(
+      [
+        node('t', 'trigger'),
+        node('b', 'new-tab', {
+          url: 'https://a',
+          __workflowAi: {
+            addedBy: 'ai',
+            goalContract: {
+              version: 1,
+              goal: 'reach the dashboard',
+              successCriteria: [{ kind: 'urlContains', value: '/dashboard' }],
+            },
+          },
+        }),
+      ],
+      [edge('t', 'b', 'trigger-output-1')],
+    )
+    const patch = applyOperatorAction(canvas, 'b', 'replace', toEventClick({ selector: '#x' }))
+    const namespace = patch.nodes.find((n) => n.id === 'b')!.data['__workflowAi'] as Record<
+      string,
+      unknown
+    >
+    // The goal says what the STEP must achieve and its criteria are page checks, so
+    // changing the operator must not delete the user's own target — that is what an
+    // optimization that swaps the block is judged against.
+    expect(namespace['goalContract']).toEqual({
+      version: 1,
+      goal: 'reach the dashboard',
+      successCriteria: [{ kind: 'urlContains', value: '/dashboard' }],
+    })
+    // Provenance is about how the NODE got here, and a swap is not a new AI node.
+    expect(namespace['addedBy']).toBeUndefined()
   })
 
   it('does not stamp the swap as an AI-added node', () => {
@@ -797,6 +1141,24 @@ describe('proposalsNeedingPage', () => {
     // `webhook` cannot run without a URL, and acting would supply no URL: the
     // step reads no element, so there is nothing on the page to learn from it.
     expect(proposalsNeedingPage([{ blockId: 'webhook', data: {}, rationale: '' }])).toEqual([])
+  })
+
+  it('names the position of the gap, so a hand pick writes into the right step', () => {
+    const batch: OperatorProposal[] = [
+      { blockId: 'event-click', data: { selector: '#save' }, rationale: '' },
+      { blockId: 'event-click', data: {}, rationale: '' },
+      { blockId: 'webhook', data: {}, rationale: '' },
+    ]
+    // Two steps of the same operator: only the second one is missing its element,
+    // and the id alone could not tell the dock where to put the picked selector.
+    expect(proposalIndexesNeedingPage(batch)).toEqual([1])
+    expect(
+      proposalIndexesNeedingPage([
+        { blockId: 'event-click', data: { selector: '#a' }, rationale: '' },
+      ]),
+    ).toEqual([])
+    // The two views of the same gate never disagree.
+    expect(proposalIndexesNeedingPage(batch).length).toBe(proposalsNeedingPage(batch).length)
   })
 
   it('judges the data that will land, not the model’s bare parameters', () => {

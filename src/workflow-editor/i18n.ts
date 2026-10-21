@@ -34,6 +34,8 @@ export const EDITOR_STRINGS = {
     autoLayout: 'Auto-layout (beautify)',
     autoLayoutDone: 'Layout tidy applied',
     edgeDeleted: 'Connection removed',
+    editorUndone: 'Undid the last canvas change',
+    editorUndoEmpty: 'Nothing to undo on the canvas yet',
     loopBackConnected: 'Loop-back connected: this branch will re-run from the earlier block.',
     loopBackHint:
       'A branch routed back to an earlier block repeats it. Make sure the condition eventually changes, or the run stops at the step limit.',
@@ -92,13 +94,13 @@ export const EDITOR_STRINGS = {
     goalHelpIntro:
       'The contract this step is judged against: what it must achieve, and which observable facts prove it did. Generated workflows fill it in — edit it when the reality differs.',
     goalHelpGoal:
-      'Goal: one sentence about the outcome this step must produce, not the operator documentation. AI fix takes it as the only definition of success.',
+      'Goal: one sentence about the outcome this step must produce, not the operator documentation. AI Optimize takes it as the only definition of success.',
     goalHelpCriteria:
       'Success criteria: facts that must hold once the step has run (element exists, text equals, an input holds a value, variable not empty, URL matches). Each row is recorded while the step runs and re-checked after it; one row failing fails the step.',
     goalHelpPreconditions:
       'Preconditions tell "this step broke" apart from "the previous step never landed"; they appear here only once the contract already carries some.',
     goalHelpEmpty:
-      'No criteria means nothing to check: the run can only prove the steps executed, per-step verification is skipped, and AI fix refuses a node with no goal contract.',
+      'No criteria means nothing to check: the run can only prove the steps executed, per-step verification is skipped, and AI Optimize then has to work from your own words or the error log you paste.',
     nodeConditionAdd: 'Add condition',
     nodeConditionRemove: 'Remove condition',
     nodeConditionKind: 'Condition type',
@@ -191,36 +193,41 @@ export const EDITOR_STRINGS = {
     repairSuccess: 'Repaired',
     repairFailed: 'Repair failed',
     repairCancel: 'Cancel repair',
-    // — per-node AI fix —
-    nodeFixButton: 'AI Fix',
-    nodeFixTitle: 'AI Fix this block',
-    nodeFixSuggestionLabel: 'Repair guidance (optional)',
-    nodeFixSuggestionPlaceholder: 'Describe what is wrong or how the block should be repaired…',
-    nodeFixConfirm: 'Confirm fix',
-    nodeFixCancelRun: 'Cancel fix',
+    // — per-node AI optimize —
+    nodeFixButton: 'AI Optimize',
+    nodeFixTitle: 'AI Optimize this block',
+    nodeFixSuggestionLabel: 'What to change (optional)',
+    nodeFixSuggestionPlaceholder:
+      'Say what is wrong, what this step should achieve, or how to repair it…',
+    nodeFixConfirm: 'Start optimizing',
+    nodeFixCancelRun: 'Stop optimizing',
     nodeFixMissingContract:
-      'This block has no goal contract, so the repair works from what you write here. The success check agreed for this repair is not saved to the block.',
+      'This block has no goal contract, so the optimization works from what you write here. The success check agreed for this run is not saved to the block.',
     nodeFixErrorLogLabel: 'Error log from the failed run (optional)',
     nodeFixErrorLogPlaceholder: 'Paste the run output or the error message…',
-    nodeFixSuccess: 'Fix ready',
+    nodeFixSuccess: 'Optimization ready',
     nodeFixNoChangeNeeded:
       'Verified: the block executes and all success criteria hold. Review, then apply.',
     nodeFixSuccessExecOnly:
       'The block ran without error, but there was no page check to verify, so confirm the result yourself.',
-    nodeFixFailed: 'AI fix failed',
+    nodeFixFailed: 'AI optimization failed',
     nodeFixApply: 'Apply to block',
     nodeFixClose: 'Close',
     nodeFixRevert: 'Restore previous version',
-    nodeFixRevertDone: 'Restored the previous block data.',
-    nodeFixApplying: 'Applying the proposed parameters…',
+    nodeFixRevertDone: 'Restored the step as it was before the optimization.',
+    nodeFixApplying: 'Optimizing the block…',
     nodeFixPhaseObserving: 'Observing the current page',
     nodeFixPhaseExecuting: 'Trial-running the block',
     nodeFixPhaseDiagnosing: 'AI is diagnosing the failure',
-    nodeFixPhaseApplying: 'Adopting the proposed parameters',
+    nodeFixPhaseApplying: 'Adopting the proposal',
     nodeFixPhaseVerifying: 'Checking the success criteria',
     nodeFixLogPayload: 'Request / AI output',
     nodeFixLogRequest: 'Sent to the AI',
     nodeFixLogResponse: 'Returned by the AI',
+    nodeFixSwapProposed:
+      'The verified result runs this step as {name}, which is what the success was checked against. Applying changes the operator too.',
+    nodeFixSwapRefused:
+      'The canvas could not land {name} in place of this step, so nothing was applied.',
     // — the `/` dynamic-variable menu in block parameter fields —
     varMenuInputs: 'Workflow inputs',
     varMenuVariables: 'Variables',
@@ -236,7 +243,7 @@ export const EDITOR_STRINGS = {
     operatorAiFabLabel: 'AI',
     operatorAiTitle: 'AI operator assistant',
     operatorAiHint:
-      'Each reply lands on the canvas: without a selection it is added to the end of the flow, and a selected step can be edited or replaced in place. Undo restores exactly what the last reply changed.',
+      'Each reply lands on the canvas: without a selection it is added to the end of the flow; a selected step can have operators added before or after it, or be edited or replaced in place. Undo restores exactly what the last reply changed.',
     operatorAiEmptyState:
       'Describe the step you need, for example "open https://www.baidu.com and search for X".',
     operatorAiPlaceholder: 'Describe the next step…',
@@ -246,7 +253,7 @@ export const EDITOR_STRINGS = {
     operatorAiAdded: 'Added {count} operator(s) to the flow',
     operatorAiChangedInPlace: 'Updated the selected step',
     operatorAiEdited: 'The assistant updated the selected step.',
-    operatorAiReplaced: 'The assistant turned the selected step into {name}.',
+    operatorAiReplaced: 'The selected step is now {name}.',
     operatorAiUndo: 'Undo',
     operatorAiUndone: 'Removed the operators the assistant had just added.',
     operatorAiNodeUndone: 'Restored the step the assistant had just changed.',
@@ -260,6 +267,12 @@ export const EDITOR_STRINGS = {
     operatorAiEmptyGraph: 'Add a trigger or a first step before asking the assistant.',
     operatorAiAnchorGone:
       'The step the chain was going to follow is no longer on the canvas, so nothing was added.',
+    operatorAiPrependEntry:
+      'Nothing runs before the trigger, so there is no place in front of it. Select the step the new work should come before.',
+    operatorAiPrependUnwired:
+      'Nothing is wired in front of the selected step, so there is no place to insert into. Ask to add after it instead.',
+    operatorAiJoinAnchor:
+      'Several paths arrive at the selected step, and the assistant will not guess which one to insert into. Select a path and ask to add after it.',
     operatorAiNoSelection:
       'The assistant answered as a change to one step, but nothing was selected. Select the step and ask again.',
     operatorAiTargetGone: 'The step to change is no longer on the canvas, so nothing was changed.',
@@ -292,6 +305,15 @@ export const EDITOR_STRINGS = {
     operatorAiOfferWaiting: 'Answer the choice above first',
     operatorAiOfferRan: 'ran on the page',
     operatorAiOfferFailed: 'did not run',
+    operatorAiPick:
+      'Point at the element on the page yourself — its locator goes with your next message',
+    operatorAiPickShort: 'Pick element',
+    operatorAiPicked: 'Picked: {selector}',
+    operatorAiShotSent:
+      'A screenshot of the page went to the model with this answer (automatic, only when a step was missing a page parameter).',
+    operatorAiShotSentFailed: 'The screenshot was sent, but the round that used it failed: {error}',
+    operatorAiShotSkipped:
+      'No screenshot could be taken, so the page read is all this answer has: {error}',
     // Group block (blocks-group) — the in-node child list and pack/unpack.
     groupNamePlaceholder: 'Group name',
     groupChildrenEmpty: 'No steps yet. Drag a block onto this node to add one.',
@@ -331,6 +353,8 @@ export const EDITOR_STRINGS = {
     autoLayout: '一键美化排版',
     autoLayoutDone: '已自动排版',
     edgeDeleted: '连接线已删除',
+    editorUndone: '已撤销上一步画布改动',
+    editorUndoEmpty: '画布上还没有可撤销的操作',
     loopBackConnected: '已连接回跳：该分支将从之前的算子重新执行。',
     loopBackHint:
       '分支回连到之前的算子会重复执行它。请确保条件最终会发生变化，否则运行会在达到步骤上限后停止。',
@@ -387,13 +411,13 @@ export const EDITOR_STRINGS = {
     goalHelpIntro:
       '这一步的验收契约：它必须达成什么，以及凭哪些可观测事实判定它达成了。生成的工作流会自动填好；和实际不符时在这里改。',
     goalHelpGoal:
-      '目标：一句话说清这一步要产出的结果，而不是抄算子说明。AI 修复把它当作唯一的成功定义。',
+      '目标：一句话说清这一步要产出的结果，而不是抄算子说明。AI 优化把它当作唯一的成功定义。',
     goalHelpCriteria:
       '成功条件：这一步跑完后必须成立的事实（元素存在、文本等于、控件有值、变量非空、URL 命中）。每条在运行时打点、跑完复核，有一条不成立就判这一步失败。',
     goalHelpPreconditions:
       '前置条件用来区分「这一步出了问题」和「上一步根本没做成」；契约里已有记录时，它才会显示在这里。',
     goalHelpEmpty:
-      '不写成功条件就没有可核对的判据：运行只能证明步骤跑过，逐节点核验会被跳过，AI 修复也会拒绝没有任何目标契约的节点。',
+      '不写成功条件就没有可核对的判据：运行只能证明步骤跑过，逐节点核验会被跳过，AI 优化也只能依据你的描述或粘贴的报错日志开始。',
     nodeConditionAdd: '添加条件',
     nodeConditionRemove: '删除条件',
     nodeConditionKind: '条件类型',
@@ -486,34 +510,37 @@ export const EDITOR_STRINGS = {
     repairSuccess: '已修复',
     repairFailed: '修复失败',
     repairCancel: '取消修复',
-    // — per-node AI fix —
-    nodeFixButton: 'AI 修复',
-    nodeFixTitle: 'AI 修复此算子',
-    nodeFixSuggestionLabel: '修复建议（可选）',
-    nodeFixSuggestionPlaceholder: '描述哪里有问题，或希望如何修复这个算子…',
-    nodeFixConfirm: '确认修复',
-    nodeFixCancelRun: '取消修复',
+    // — 单算子 AI 优化 —
+    nodeFixButton: 'AI 优化',
+    nodeFixTitle: 'AI 优化此算子',
+    nodeFixSuggestionLabel: '优化要求（可选）',
+    nodeFixSuggestionPlaceholder: '说明哪里有问题、这一步要实现什么，或希望怎么修复…',
+    nodeFixConfirm: '开始优化',
+    nodeFixCancelRun: '停止优化',
     nodeFixMissingContract:
-      '该算子没有目标契约，本次修复依据你在这里填写的内容进行；为本次修复约定的成功判据不会写入算子。',
+      '该算子没有目标契约，本次优化依据你在这里填写的内容进行；为本次优化约定的成功判据不会写入算子。',
     nodeFixErrorLogLabel: '报错日志（可选）',
     nodeFixErrorLogPlaceholder: '粘贴运行输出或报错信息…',
-    nodeFixSuccess: '修复已就绪',
+    nodeFixSuccess: '优化已就绪',
     nodeFixNoChangeNeeded: '已验证：算子可正常执行且全部成功条件均满足。确认后可应用。',
     nodeFixSuccessExecOnly: '算子试跑没有报错，但没有可验证的页面判据，请自行确认效果。',
-    nodeFixFailed: 'AI 修复失败',
+    nodeFixFailed: 'AI 优化失败',
     nodeFixApply: '应用到算子',
     nodeFixClose: '关闭',
     nodeFixRevert: '恢复上一版本',
-    nodeFixRevertDone: '已恢复到之前的算子数据。',
-    nodeFixApplying: '正在应用建议的参数…',
+    nodeFixRevertDone: '已恢复该算子优化前的状态。',
+    nodeFixApplying: '正在优化算子…',
     nodeFixPhaseObserving: '正在观测当前页面',
     nodeFixPhaseExecuting: '正在试执行算子',
     nodeFixPhaseDiagnosing: 'AI 正在诊断失败原因',
-    nodeFixPhaseApplying: '正在采用建议的参数',
+    nodeFixPhaseApplying: '正在采用建议',
     nodeFixPhaseVerifying: '正在检查成功条件',
     nodeFixLogPayload: '请求参数 / AI 输出',
     nodeFixLogRequest: '发给 AI 的内容',
     nodeFixLogResponse: 'AI 返回的内容',
+    nodeFixSwapProposed:
+      '已验证的结果是把这一步按 {name} 跑通的，成功判据也针对它检查过；应用后算子类型会一并更换。',
+    nodeFixSwapRefused: '画布无法用 {name} 替换这一步，因此没有做任何改动。',
     varMenuInputs: '工作流入参',
     varMenuVariables: '变量',
     varMenuAliases: '引擎值',
@@ -527,7 +554,7 @@ export const EDITOR_STRINGS = {
     operatorAiFabLabel: 'AI',
     operatorAiTitle: 'AI 算子助手',
     operatorAiHint:
-      '未选中算子时，回复会追加到流程末尾；选中某个步骤时，助手可以就地修改或替换它。「撤销」只回退上一次落地的改动。',
+      '未选中算子时，回复会追加到流程末尾；选中某个步骤时，助手可以在它前面或后面插入算子，也可以就地修改或替换它。「撤销」只回退上一次落地的改动。',
     operatorAiEmptyState: '描述你需要的步骤，例如「打开 https://www.baidu.com 并搜索 X」。',
     operatorAiPlaceholder: '描述下一步…',
     operatorAiSend: '发送',
@@ -536,7 +563,7 @@ export const EDITOR_STRINGS = {
     operatorAiAdded: '已向流程添加 {count} 个算子',
     operatorAiChangedInPlace: '已更新所选步骤',
     operatorAiEdited: '助手已更新所选步骤。',
-    operatorAiReplaced: '助手已把所选步骤替换为 {name}。',
+    operatorAiReplaced: '所选步骤已替换为 {name}。',
     operatorAiUndo: '撤销',
     operatorAiUndone: '已撤销助手刚添加的算子。',
     operatorAiNodeUndone: '已恢复助手刚修改的步骤。',
@@ -549,6 +576,11 @@ export const EDITOR_STRINGS = {
       '所选算子分出了多条分支，请选择其中一个分支上的步骤后再问，助手不会替你猜走哪条。',
     operatorAiEmptyGraph: '请先添加触发器或第一个步骤，再让助手补充算子。',
     operatorAiAnchorGone: '要跟随的那个算子已不在画布上，本次没有添加任何算子。',
+    operatorAiPrependEntry:
+      '触发器前面没有步骤，因此无法在它前面插入；请选中要让新工作排在它前面的那个步骤。',
+    operatorAiPrependUnwired: '所选算子前面没有任何连线，没有可插入的位置；请改为在它后面添加。',
+    operatorAiJoinAnchor:
+      '有多条路径汇入所选算子，助手不会替你猜插入到哪一条；请选中其中一条路径上的步骤，再改为在它后面添加。',
     operatorAiNoSelection: '助手按「修改某个步骤」回答了，但当前没有选中任何算子，请先选中再问。',
     operatorAiTargetGone: '要修改的算子已不在画布上，本次没有做任何改动。',
     operatorAiOneProposalOnly: '就地修改需要一个算子的回答，本次回答不符合要求，没有做任何改动。',
@@ -574,6 +606,12 @@ export const EDITOR_STRINGS = {
     operatorAiOfferWaiting: '请先回答上方的选择',
     operatorAiOfferRan: '已在页面执行',
     operatorAiOfferFailed: '未执行',
+    operatorAiPick: '自己在页面上点一下目标元素，它的选择器会随下一条消息一起发出',
+    operatorAiPickShort: '拾取元素',
+    operatorAiPicked: '已拾取：{selector}',
+    operatorAiShotSent: '本次回答已把当前页面截图发给模型（仅在缺少页面参数时自动附带）。',
+    operatorAiShotSentFailed: '截图已发送，但用它补参数的那一轮失败了：{error}',
+    operatorAiShotSkipped: '未能截图，本次回答只依据页面读取：{error}',
     // 分组算子（blocks-group）——节点内子块列表与打包 / 解组。
     groupNamePlaceholder: '分组名称',
     groupChildrenEmpty: '还没有步骤。把算子拖到这个节点上即可添加。',

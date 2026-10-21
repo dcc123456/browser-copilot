@@ -5,8 +5,9 @@
  * It decides WHICH operators the model may choose (deterministic discovery plus
  * the core operators as a floor), asks for the parameters, and reads the answer
  * back through the same defensive gate the reply parser defines. The answer also
- * carries its action — append a new chain, or change the selected step in place —
- * which the engine only relays. It executes no operator, opens no tab and never
+ * carries its action — add a new chain after a step, in front of it, or change the
+ * selected step in place — which the engine only relays. It executes no operator,
+ * opens no tab and never
  * touches a workflow draft: the editor's canvas is the source of truth and can
  * hold unsaved edits, so the answer is returned for the canvas to land
  * (specs/2026-10-19-editor-operator-ai-chat-design.md §2,
@@ -25,6 +26,8 @@ import { streamCompletion } from '../lib/llm'
 import { getSettings } from '../lib/storage'
 import { entityKeyFor, type TokenAttribution } from '../lib/token-ledger'
 import { summarizeSnapshot } from '../lib/ops'
+import { inspectImage, resolveVisionTarget } from '../lib/vision'
+import { captureVisiblePage } from './capture'
 import { normalScopeFromWindowId, type ScopeWindow } from './automation-scope'
 import { snapshotActiveTab } from './driver'
 import { resolveOperatorLocator, withLocator } from './operator-tool-run'
@@ -45,8 +48,11 @@ import {
   adviseCandidates,
   buildOperatorAdvisePrompt,
   OPERATOR_ADVISE_MAX_OPERATORS,
+  OPERATOR_SCREENSHOT_QUESTION,
   operatorBlockName,
+  operatorScreenshotRoute,
   parseOperatorAdviseReply,
+  proposalsNeedingPage,
   isObservableBlock,
   type OperatorAdviseMessage,
   type OperatorAdviseResult,
@@ -54,6 +60,9 @@ import {
   type OperatorObserveStep,
   type OperatorObservedStep,
   type OperatorPageRead,
+  type OperatorScreenshotReport,
+  type OperatorScreenshotRoute,
+  type PickedElement,
 } from '../lib/workflow/operator-advise'
 
 /**
@@ -86,6 +95,10 @@ export interface OperatorAdviseInput {
   windowId?: number
   /** The user's "不读页面" override. Reading is automatic otherwise. */
   skipPageRead?: boolean
+  /** Locators the user picked by hand for this turn — stronger than any page
+   *  read, because the user answered "which element" instead of leaving it to
+   *  be guessed. */
+  pickedElements?: readonly PickedElement[]
   /** What the workflow is for — discovery's goal-alignment signal. */
   workflowGoal?: string
   /** Only used to attribute the token spend. */
@@ -93,12 +106,28 @@ export interface OperatorAdviseInput {
   maxOperators?: number
 }
 
+/** A page capture offered to the assistant, in whichever route it will be used. */
+export type OperatorScreenshotCapture =
+  { ok: true; dataUrl: string; mimeType: string } | { ok: false; error: string }
+
+/** What the image model made of a screenshot. */
+export type OperatorScreenshotNote = { ok: true; note: string } | { ok: false; error: string }
+
 export interface OperatorAdviseDeps {
   signal: AbortSignal
-  /** Ask the model; returns its raw reply text. Defaults to the real LLM call. */
-  callModel?: (prompt: string) => Promise<string>
+  /** Ask the model; returns its raw reply text. `image` rides the call as a
+   *  multimodal attachment — the inline screenshot route. */
+  callModel?: (prompt: string, image?: { dataUrl: string; mimeType: string }) => Promise<string>
   /** Read the scoped page, side-effect free. Defaults to a real snapshot. */
   readPage?: (windowId?: number) => Promise<OperatorPageRead | null>
+  /** Capture the scoped page. Defaults to a real visible-tab JPEG. */
+  captureScreenshot?: (windowId?: number) => Promise<OperatorScreenshotCapture>
+  /** Turn a screenshot into text with the configured image model — the described
+   *  route, for when the chat model is not the one that reads images. */
+  describeScreenshot?: (dataUrl: string) => Promise<OperatorScreenshotNote>
+  /** Which route the user's two model settings give. Defaults to reading Settings;
+   *  injectable so the routes are testable apart from each other. */
+  screenshotRoute?: () => Promise<OperatorScreenshotRoute>
   /** Which workflow to charge the tokens to; defaults to this request's entity. */
   attribution?: TokenAttribution
 }
@@ -112,9 +141,15 @@ function latestIntent(messages: readonly OperatorAdviseMessage[]): string {
   return ''
 }
 
+/** Base64 payload length to raw bytes; only metadata on a transient attachment. */
+function dataUrlBytes(dataUrl: string): number {
+  const comma = dataUrl.indexOf(',')
+  return Math.floor(((comma >= 0 ? dataUrl.length - comma - 1 : dataUrl.length) * 3) / 4)
+}
+
 /** Build the default model call over the active provider. */
 function defaultCallModel(signal: AbortSignal, attribution: TokenAttribution) {
-  return async (prompt: string): Promise<string> => {
+  return async (prompt: string, image?: { dataUrl: string; mimeType: string }): Promise<string> => {
     const settings = await getSettings()
     const provider = settings.providers.find((profile) => profile.id === settings.activeProviderId)
     if (!provider || !provider.apiKey.trim()) {
@@ -131,7 +166,27 @@ function defaultCallModel(signal: AbortSignal, attribution: TokenAttribution) {
         // One request carries everything: the digest, the offer and the
         // conversation. Same shape as the AI Fix call, so a follow-up message
         // reads as a continuation of the transcript the prompt already holds.
-        messages: [{ role: 'user', content: prompt }],
+        messages: [
+          {
+            role: 'user',
+            content: prompt,
+            // The inline screenshot route: `toApiMessages` folds this into the
+            // OpenAI-shaped `image_url` part, so the chat model sees the page.
+            ...(image
+              ? {
+                  attachments: [
+                    {
+                      id: 'operator-screenshot',
+                      name: 'page-screenshot',
+                      mimeType: image.mimeType,
+                      size: dataUrlBytes(image.dataUrl),
+                      dataUrl: image.dataUrl,
+                    },
+                  ],
+                }
+              : {}),
+          },
+        ],
         signal: AbortSignal.any([signal, AbortSignal.timeout(OPERATOR_ADVISE_TIMEOUT_MS)]),
       },
       {},
@@ -167,6 +222,54 @@ async function defaultReadPage(windowId?: number): Promise<OperatorPageRead | nu
   }
 }
 
+/**
+ * Which screenshot route the user's settings give. The judgement is theirs, not
+ * ours: nothing in the provider list says whether a model reads images, so the
+ * only honest test is whether the image target resolves to the very provider and
+ * model the chat already uses.
+ */
+async function defaultScreenshotRoute(): Promise<OperatorScreenshotRoute> {
+  const settings = await getSettings()
+  const active = settings.providers.find((profile) => profile.id === settings.activeProviderId)
+  return operatorScreenshotRoute(
+    active ? { providerId: active.id, model: active.model } : undefined,
+    settings.imageModel,
+  )
+}
+
+/** Capture the editor's own window, and nothing else. */
+async function defaultCaptureScreenshot(windowId?: number): Promise<OperatorScreenshotCapture> {
+  try {
+    const scope = await normalScopeFromWindowId(windowId)
+    const shot = await captureVisiblePage(scope, { format: 'jpeg', quality: 60 })
+    if (!shot.ok) return { ok: false, error: shot.error }
+    return { ok: true, dataUrl: shot.dataUrl, mimeType: 'image/jpeg' }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/** Read the screenshot with the configured image model, as text. */
+function defaultDescribeScreenshot(signal: AbortSignal, attribution: TokenAttribution) {
+  return async (dataUrl: string): Promise<OperatorScreenshotNote> => {
+    const settings = await getSettings()
+    const provider = settings.providers.find((profile) => profile.id === settings.activeProviderId)
+    const target = resolveVisionTarget(settings.imageModel, settings.providers, provider)
+    if (!target) {
+      return {
+        ok: false,
+        error: 'No image model is configured, and the chat provider took the screenshot instead.',
+      }
+    }
+    const result = await inspectImage(target, dataUrl, {
+      prompt: OPERATOR_SCREENSHOT_QUESTION,
+      signal,
+      attribution,
+    })
+    return result.ok ? { ok: true, note: result.text } : result
+  }
+}
+
 export async function runOperatorAdvise(
   input: OperatorAdviseInput,
   deps: OperatorAdviseDeps,
@@ -196,14 +299,17 @@ export async function runOperatorAdvise(
   // a selector that exists. Skipped only by the user's explicit override.
   const readPage = deps.readPage ?? defaultReadPage
   const page = input.skipPageRead ? null : await readPage(input.windowId)
-  const prompt = buildOperatorAdvisePrompt({
+  const pageRef = page ? { url: page.url, title: page.title } : null
+  const promptInput = {
     history: input.messages,
     graphDigest: input.graphDigest,
     candidates,
     ...(page ? { page } : {}),
+    ...(input.pickedElements?.length ? { pickedElements: input.pickedElements } : {}),
     ...(input.selectedSpec ? { selectedSpec: input.selectedSpec } : {}),
     maxOperators,
-  })
+  }
+  const prompt = buildOperatorAdvisePrompt(promptInput)
   // The ledger keys this spend by the workflow being edited when the caller
   // names one, and by the request otherwise.
   const attribution: TokenAttribution = deps.attribution ?? {
@@ -211,6 +317,7 @@ export async function runOperatorAdvise(
     entityKey: entityKeyFor('workflow', input.workflowId ?? input.sessionId),
   }
   const callModel = deps.callModel ?? defaultCallModel(deps.signal, attribution)
+  const offeredIds = candidates.map((candidate) => candidate.blockId)
 
   let text: string
   try {
@@ -223,16 +330,12 @@ export async function runOperatorAdvise(
       reply: '',
       proposals: [],
       rejected: [],
-      page: page ? { url: page.url, title: page.title } : null,
+      page: pageRef,
     }
   }
   if (deps.signal.aborted) throw new DOMException('Aborted', 'AbortError')
 
-  const parsed = parseOperatorAdviseReply(
-    text,
-    candidates.map((candidate) => candidate.blockId),
-    maxOperators,
-  )
+  const parsed = parseOperatorAdviseReply(text, offeredIds, maxOperators)
   if (!parsed) {
     return {
       ok: false,
@@ -240,10 +343,66 @@ export async function runOperatorAdvise(
       reply: '',
       proposals: [],
       rejected: [],
-      page: page ? { url: page.url, title: page.title } : null,
+      page: pageRef,
     }
   }
-  return { ok: true, ...parsed, page: page ? { url: page.url, title: page.title } : null }
+  // One automatic screenshot, at most, and only for what the DOM read could not
+  // supply: a step whose element parameter is still empty. A vision call costs,
+  // and screen pixels leave the machine — so a round that runs after this one
+  // does not exist, and a retry that fails keeps the first answer.
+  if (!page || proposalsNeedingPage(parsed.proposals).length === 0) {
+    return { ok: true, ...parsed, page: pageRef }
+  }
+  if (deps.signal.aborted) throw new DOMException('Aborted', 'AbortError')
+
+  const route = await (deps.screenshotRoute ?? defaultScreenshotRoute)()
+  const keep = (screenshot: OperatorScreenshotReport): OperatorAdviseResult => ({
+    ok: true,
+    ...parsed,
+    page: pageRef,
+    screenshot,
+  })
+  const capture = deps.captureScreenshot ?? defaultCaptureScreenshot
+  const shot = await capture(input.windowId)
+  if (!shot.ok) return keep({ route, taken: false, error: shot.error })
+
+  const used = (error?: string): OperatorScreenshotReport => ({
+    route,
+    taken: true,
+    ...(error ? { error } : {}),
+  })
+  // `inline` puts the image in front of the chat model itself; `described` spends
+  // a second model to turn it into text the chat model can read.
+  let note: string | undefined
+  if (route === 'described') {
+    const describe = deps.describeScreenshot ?? defaultDescribeScreenshot(deps.signal, attribution)
+    const described = await describe(shot.dataUrl)
+    if (!described.ok) return keep(used(described.error))
+    note = described.note
+  }
+  const screenshotPrompt = buildOperatorAdvisePrompt(
+    note === undefined
+      ? { ...promptInput, screenshot: { route: 'inline' } }
+      : { ...promptInput, screenshot: { route: 'described', note } },
+  )
+  const image = route === 'inline' ? { dataUrl: shot.dataUrl, mimeType: shot.mimeType } : undefined
+
+  let retryText: string
+  try {
+    retryText = await callModel(screenshotPrompt, image)
+  } catch (error) {
+    if (deps.signal.aborted) throw new DOMException('Aborted', 'AbortError')
+    return keep(used(error instanceof Error ? error.message : String(error)))
+  }
+  if (deps.signal.aborted) throw new DOMException('Aborted', 'AbortError')
+
+  const retried = parseOperatorAdviseReply(retryText, offeredIds, maxOperators)
+  if (!retried) {
+    return keep(
+      used('The answer after the screenshot was not readable, so the first answer was kept.'),
+    )
+  }
+  return { ok: true, ...retried, page: pageRef, screenshot: used() }
 }
 
 /**

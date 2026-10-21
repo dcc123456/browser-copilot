@@ -8,6 +8,13 @@
  * success criterion holds. Nothing here mutates the caller's node data: the
  * verified parameters are returned for the user to apply manually.
  *
+ * The AI may also ask for a different OPERATOR, and this loop is the one that
+ * decides whether to take it: the id has to name a block the editor could land
+ * AND that can actually run against the page (`isObservableBlock`), because a
+ * swap nobody can trial-run would leave the success claim unverifiable. While a
+ * swap is in force the trial run uses it, and the verified result reports it as
+ * `proposedBlockId` for the editor to put on the canvas.
+ *
  * The real driver functions are used by default but every external action can
  * be injected (tests drive the loop without a page or a network).
  *
@@ -29,9 +36,12 @@ import {
   type NodeFixPromptInput,
   type NodeFixReply,
   type NodeFixResultData,
+  type OperatorSwapTarget,
 } from '../../lib/workflow/node-fix'
 import { describeCondition, type WorkflowCondition } from '../../lib/workflow/conditions'
 import { nodeGoalContractOf } from '../../lib/workflow/node-goal-contract'
+import { isObservableBlock } from '../../lib/workflow/operator-advise'
+import { generationOperators } from '../../lib/workflow/operator-registry'
 import { operatorExecClass } from '../../lib/workflow/operator-class'
 import { entityKeyFor, type TokenAttribution } from '../../lib/token-ledger'
 import { createDriverConditionProbe, evaluateConditionWithProbe } from './condition-runtime'
@@ -167,6 +177,18 @@ function defaultCallModel(
 }
 
 /**
+ * The operators this repair may switch to: every one the editor could land AND
+ * that can run against the page, minus the block already on the node. The list is
+ * the model's only vocabulary for a top-level `blockId`, so a name outside it is
+ * never a swap — it is dropped and the repair stays parameters-only.
+ */
+function swapTargetsOf(currentBlockId: string): OperatorSwapTarget[] {
+  return generationOperators()
+    .filter((entry) => entry.id !== currentBlockId && isObservableBlock(entry.id))
+    .map((entry) => ({ id: entry.id, name: entry.name }))
+}
+
+/**
  * Check if preconditions are satisfied before executing the node.
  * Returns true when all preconditions hold or when there are none.
  */
@@ -235,7 +257,20 @@ export async function runNodeFix(
     deps.callModel ?? defaultCallModel(signal, usageAttribution)
 
   let working = { ...input.blockData }
+  // The operator the trial run currently drives. It leaves `input.blockId` only
+  // when the model names an operator this build can land and run; every round
+  // executes and verifies against it, so a reported swap is always a trial-run one.
+  let runningBlockId = input.blockId
+  const swapTargets = swapTargetsOf(input.blockId)
   const variables: Record<string, unknown> = {}
+
+  /** The verified payload: the node's own data with the repair merged over it, or
+   *  the model's parameters alone once the step is a different operator (the
+   *  landing patcher re-derives what the new block carries). */
+  const proposedOf = (): Pick<NodeFixResultData, 'proposedData' | 'proposedBlockId'> =>
+    runningBlockId === input.blockId
+      ? { proposedData: { ...input.blockData, ...working } }
+      : { proposedData: working, proposedBlockId: runningBlockId }
 
   const push = (
     round: number,
@@ -260,14 +295,17 @@ export async function runNodeFix(
     promptInput: NodeFixPromptInput,
     unmetDescription: string,
   ): Promise<FixAnswer | { fail: NodeFixResultData }> => {
+    // The swap vocabulary is part of what is sent, so it belongs to the single
+    // record the prompt and the logged request are both built from.
+    const request: NodeFixPromptInput = { ...promptInput, swapTargets }
     // The log reports the request from the SAME record the prompt is built from,
     // so the displayed request and the sent one cannot drift apart.
     push(round, 'diagnosing', unmetDescription, 'running', {
-      request: nodeFixRequestPayloadOf(promptInput),
+      request: nodeFixRequestPayloadOf(request),
     })
     let reply: NodeFixReply | null
     try {
-      reply = await callModel(buildNodeFixPrompt(promptInput), (message) =>
+      reply = await callModel(buildNodeFixPrompt(request), (message) =>
         push(round, 'diagnosing', message),
       )
     } catch (error) {
@@ -277,7 +315,7 @@ export async function runNodeFix(
           fail: {
             success: false,
             rounds: round + 1,
-            reason: `AI fix request timed out or was interrupted (budget ${NODE_FIX_TIMEOUT_MS / 60_000} min).`,
+            reason: `The optimization request timed out or was interrupted (budget ${NODE_FIX_TIMEOUT_MS / 60_000} min).`,
           },
         }
       }
@@ -291,7 +329,7 @@ export async function runNodeFix(
           success: false,
           rounds: round + 1,
           reason:
-            'No AI provider is configured (or its API key is empty). Configure a provider to use AI fix.',
+            'No AI provider is configured (or its API key is empty). Configure a provider to use AI optimization.',
         },
       }
     }
@@ -305,6 +343,14 @@ export async function runNodeFix(
         },
       }
     }
+    // A named operator is taken only when this build could land it AND run it on
+    // the page: a swap nothing can trial-run would leave the success claim
+    // unverified, which is the one outcome this loop is not allowed to report.
+    const swap =
+      reply.blockId && reply.blockId !== runningBlockId && isObservableBlock(reply.blockId)
+        ? reply.blockId
+        : undefined
+    if (swap) runningBlockId = swap
     const answer: FixAnswer = {
       rationale: reply.rationale,
       data: candidate,
@@ -313,6 +359,7 @@ export async function runNodeFix(
         rationale: reply.rationale,
         data: candidate,
         ...(reply.verify ? { verify: reply.verify } : {}),
+        ...(reply.blockId ? { blockId: reply.blockId } : {}),
       }),
     }
     return answer
@@ -352,7 +399,7 @@ export async function runNodeFix(
           success: true,
           rounds: round + 1,
           verifiedBy: 'criteria',
-          proposedData: { ...input.blockData, ...working },
+          ...proposedOf(),
         }
       }
     }
@@ -416,10 +463,10 @@ export async function runNodeFix(
     }
 
     // 5. trial-run (only when preconditions are met but some success criteria aren't)
-    push(round, 'executing', input.blockId, 'running', {
+    push(round, 'executing', runningBlockId, 'running', {
       request: nodeFixParamsPayloadOf(working),
     })
-    const exec = await executeNode(input.blockId, working)
+    const exec = await executeNode(runningBlockId, working)
     throwIfAborted(signal)
     const execError = exec.ok ? undefined : exec.error
     if (execError) push(round, 'executing', execError, 'error')
@@ -442,13 +489,13 @@ export async function runNodeFix(
 
     if (!execError && unmet.length === 0) {
       // Keep the goal contract and any engine-only keys the model must not
-      // author: the success payload is the working parameters merged back over
-      // the base so reserved keys are preserved.
+      // author: without a swap the success payload is the working parameters
+      // merged back over the base so reserved keys are preserved.
       return {
         success: true,
         rounds: round + 1,
         verifiedBy: ranCriteria.length > 0 ? 'criteria' : 'exec-only',
-        proposedData: { ...input.blockData, ...working },
+        ...proposedOf(),
       }
     }
 

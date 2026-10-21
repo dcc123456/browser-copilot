@@ -32,8 +32,9 @@ export interface BlockEditFormProps {
   onChange: (patch: Record<string, unknown>) => void
   onBack: () => void
   t: TranslateFn
-  /** Apply verified AI-fix parameters (whole replacement). */
-  onApplyFix: (next: Record<string, unknown>) => void
+  /** Apply a verified AI-optimization result (whole replacement), as another
+   *  operator too when the loop verified the step as one. */
+  onApplyFix: (next: Record<string, unknown>, swapTo?: string) => void
   /** Editor host window the fix trial run / verification are scoped to. */
   windowId?: number
   /** Whether a pre-fix snapshot exists to restore. */
@@ -138,7 +139,8 @@ export default function BlockEditForm({
   const EditComponent = block.editComponent ? EditForms[block.editComponent] : undefined
   const cloud = isCloudBlock(block.id)
   // Fire-and-done operators have nothing to verify, so they get neither the goal
-  // section nor AI fix (the fix engine refuses a node without a goal contract).
+  // section nor AI Optimize (the loop refuses a node it has nothing to work
+  // towards — no contract, no user words, no error log).
   const goalBearing = !hideGoal && operatorCarriesGoal(block.id)
   const [fixOpen, setFixOpen] = useState(false)
 
@@ -154,7 +156,7 @@ export default function BlockEditForm({
           <button
             type="button"
             onClick={() => setFixOpen(true)}
-            title={bt('AI Fix')}
+            title={t('nodeFixButton')}
             className="wf-icon-btn text-accent"
           >
             <Wand2 size={14} />

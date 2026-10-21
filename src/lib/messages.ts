@@ -363,6 +363,9 @@ export type Command =
       /** The user's "don't read the page" override. Reading is on otherwise: a
        *  page read has no side effects, and it is what grounds the parameters. */
       skipPageRead?: boolean
+      /** Locators the user picked by hand with the page picker for this turn.
+       *  They outrank the page read: the user pointed at the element themselves. */
+      pickedElements?: import('./workflow/operator-advise').PickedElement[]
       /** What the workflow is for — operator discovery's goal-alignment signal. */
       workflowGoal?: string
       /** Only used to attribute the token spend. */

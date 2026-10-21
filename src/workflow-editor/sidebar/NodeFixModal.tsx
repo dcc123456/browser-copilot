@@ -1,12 +1,17 @@
 /**
- * Node Fix modal — the dialog behind the per-block "AI Fix" button.
+ * Node Fix modal — the dialog behind the per-block "AI Optimize" button.
  *
- * Flow: the user types optional repair guidance and confirms → the background
- * runs the bounded observe → execute → diagnose → verify loop, streaming
- * progress events which render as a step timeline → on success the user applies
- * the verified parameters to the block (the block is never changed before
- * that); on failure the reason is shown. Events are filtered by session id, so
- * concurrent fixes never cross.
+ * Flow: the user says what is wrong, what the step should achieve, or pastes the
+ * failure output and confirms → the background runs the bounded observe → execute
+ * → diagnose → verify loop, streaming progress events which render as a step
+ * timeline → on success the user applies the verified result to the block (the
+ * block is never changed before that); on failure the reason is shown. Events are
+ * filtered by session id, so concurrent runs never cross.
+ *
+ * A verified result may also name a DIFFERENT operator (the loop only offers one
+ * it could actually trial-run). The dialog says so before the user applies it, and
+ * applying hands both the parameters and the operator id to `onApply` — the graph
+ * change is the editor's, and undoable.
  *
  * The presentational {@link NodeFixBody} and {@link NodeFixFooter} are exported
  * pure components (server-renderable for tests); the default export owns the
@@ -21,6 +26,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle2, CircleDashed, Loader2, TriangleAlert, Wand2, XCircle } from 'lucide-react'
 import { sendCommand } from '../../lib/messages'
 import { nodeGoalContractOf } from '../../lib/workflow/node-goal-contract'
+import { operatorBlockName } from '../../lib/workflow/operator-advise'
 import type { NodeFixEvent, NodeFixPhase } from '../../lib/workflow/node-fix'
 import Modal from '../ui/Modal'
 import type { TranslateFn } from '../i18n'
@@ -30,8 +36,11 @@ export interface NodeFixModalProps {
   onClose: () => void
   blockId: string
   data: Record<string, unknown>
-  /** Apply the verified parameters (whole replacement). */
-  onApply: (next: Record<string, unknown>) => void
+  /**
+   * Apply the verified result (whole parameter replacement), optionally as a
+   * different operator — `swapTo` is the id the loop trial-ran and verified.
+   */
+  onApply: (next: Record<string, unknown>, swapTo?: string) => void
   /** Editor host window the trial run / verification are scoped to. */
   windowId?: number
   t: TranslateFn
@@ -116,6 +125,8 @@ export interface NodeFixBodyProps {
   resultReason?: string
   /** What the success claim rests on, once the run settled successfully. */
   verifiedBy?: 'criteria' | 'exec-only'
+  /** The operator the verified result switches this step to, by display name. */
+  swapName?: string
   onSuggestionChange: (next: string) => void
   onErrorLogChange: (next: string) => void
   t: TranslateFn
@@ -130,6 +141,7 @@ export function NodeFixBody({
   events,
   resultReason,
   verifiedBy,
+  swapName,
   onSuggestionChange,
   onErrorLogChange,
   t,
@@ -221,10 +233,18 @@ export function NodeFixBody({
       )}
 
       {state === 'success' && (
-        <p className="m-0 rounded-lg border border-border bg-accent-soft p-2 text-xs text-accent">
-          <Wand2 size={13} className="mr-1 inline" />
-          {verifiedBy === 'exec-only' ? t('nodeFixSuccessExecOnly') : t('nodeFixNoChangeNeeded')}
-        </p>
+        <>
+          <p className="m-0 rounded-lg border border-border bg-accent-soft p-2 text-xs text-accent">
+            <Wand2 size={13} className="mr-1 inline" />
+            {verifiedBy === 'exec-only' ? t('nodeFixSuccessExecOnly') : t('nodeFixNoChangeNeeded')}
+          </p>
+          {swapName && (
+            <p className="m-0 flex items-start gap-1.5 rounded-lg border border-border bg-panel p-2 text-xs text-warn">
+              <TriangleAlert size={13} className="mt-px flex-none" />
+              {t('nodeFixSwapProposed').replace('{name}', swapName)}
+            </p>
+          )}
+        </>
       )}
 
       {state === 'failed' && (
@@ -318,6 +338,9 @@ export default function NodeFixModal({
   const [resultReason, setResultReason] = useState<string | undefined>(undefined)
   const [verifiedBy, setVerifiedBy] = useState<'criteria' | 'exec-only' | undefined>(undefined)
   const [proposed, setProposed] = useState<Record<string, unknown> | undefined>(undefined)
+  // The operator the verified parameters were trial-run as, when it is not the one
+  // the node holds. Applying is then a swap as well as a data change.
+  const [proposedBlockId, setProposedBlockId] = useState<string | undefined>(undefined)
   const sessionIdRef = useRef<string>('')
 
   const hasContract = !!nodeGoalContractOf(data)
@@ -335,6 +358,7 @@ export default function NodeFixModal({
       setResultReason(undefined)
       setVerifiedBy(undefined)
       setProposed(undefined)
+      setProposedBlockId(undefined)
       sessionIdRef.current = ''
     }
   }, [open])
@@ -370,6 +394,7 @@ export default function NodeFixModal({
     if (result.type !== 'workflows.nodeFix') return
     if (result.data.success && result.data.proposedData) {
       setProposed(result.data.proposedData)
+      setProposedBlockId(result.data.proposedBlockId)
       setVerifiedBy(result.data.verifiedBy)
       setState('success')
     } else {
@@ -411,6 +436,7 @@ export default function NodeFixModal({
         events={events}
         resultReason={resultReason}
         verifiedBy={verifiedBy}
+        swapName={proposedBlockId ? operatorBlockName(proposedBlockId) : undefined}
         onSuggestionChange={setSuggestion}
         onErrorLogChange={setErrorLog}
         t={t}
@@ -422,7 +448,7 @@ export default function NodeFixModal({
         onConfirm={() => void startFix()}
         onCancel={() => void cancelFix()}
         onApply={() => {
-          if (proposed) onApply(proposed)
+          if (proposed) onApply(proposed, proposedBlockId)
           onClose()
         }}
         t={t}
