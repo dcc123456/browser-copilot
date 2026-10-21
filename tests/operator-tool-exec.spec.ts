@@ -107,7 +107,11 @@ describe('operator calls really operate the page', () => {
     }
     const out = await run('c2', 'wf_op_event-click', { selector: '#gone' }, { executors })
 
-    expect(out).toEqual({ ok: false, error: 'no element matched "#gone"' })
+    expect(out.ok).toBe(false)
+    if (out.ok) return
+    expect(out.error).toBe('no element matched "#gone"')
+    // The failure now carries the evidence bundle on top of the same text.
+    expect(out.evidence?.failureCode).toBe('UNKNOWN')
     // The draft keeps only its trigger head — a failed step leaves no trace.
     const draft = getDraftSnapshot('c2')!
     expect(actionNodesOf(draft)).toHaveLength(0)

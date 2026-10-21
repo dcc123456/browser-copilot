@@ -335,7 +335,11 @@ describe('V93d E6 a stale seeded locator is an ordinary failure', () => {
 
     // The page moved: the seed is wrong, exactly as a freshly invented selector
     // would be. The offer adds no new failure mode and no new error shape.
-    expect(out).toEqual({ ok: false, error: `no element matched "${offered}"` })
+    expect(out.ok).toBe(false)
+    if (out.ok) return
+    expect(out.error).toBe(`no element matched "${offered}"`)
+    // The failure now carries the evidence bundle on top of the same text.
+    expect(out.evidence?.failureCode).toBe('UNKNOWN')
     const draft = getDraftSnapshot(conversationId)!
     expect(actionNodesOf(draft)).toHaveLength(0)
     // Attribution survives: the generation was seeded, whether or not the model

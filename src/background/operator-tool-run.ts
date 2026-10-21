@@ -53,6 +53,13 @@ import { operatorAuditCall } from '../lib/workflow/operator-history'
 import { resolveNodeGoalContract } from '../lib/workflow/node-goal-instantiation'
 import { draftGoalGapNotice } from '../lib/workflow/trial-run'
 import { withNodeGoalContract } from '../lib/workflow/node-goal-contract'
+import {
+  buildOperatorFailureEvidence,
+  type OperatorFailureCode,
+  type OperatorFailureEvidence,
+  type OperatorLocatorResolution,
+} from '../lib/workflow/operator-failure'
+import { safeRerunBoundaryOf } from '../lib/workflow/rerun-policy'
 
 import {
   buildSecretIndex,
@@ -77,6 +84,7 @@ import {
   declareWorkflowInputs,
   declaredInputs,
   generatedFlagOf,
+  getDraftSnapshot,
   hydrateDraft,
   insertAiPrefillNode,
   outputSuffixOf,
@@ -233,7 +241,64 @@ export type OperatorRunResult =
        */
       audit: { action: string; args: Record<string, unknown> }
     }
-  | { ok: false; error: string }
+  | { ok: false; error: string; evidence?: OperatorFailureEvidence }
+
+/**
+ * The evidence bundle for a failed call.
+ *
+ * Every refusal and every execution failure reports the same way, so the model
+ * never has to guess which shape it is looking at. The re-run boundary is
+ * read from the draft as it stands — the chain recorded SO FAR — because that
+ * is the chain a re-run would have to respect.
+ */
+async function failureEvidence(
+  draft: WorkflowDraft | undefined,
+  conversationId: string,
+  errorMessage: string,
+  opts: {
+    code?: OperatorFailureCode
+    resolution?: OperatorLocatorResolution
+    candidateSelectors?: readonly string[]
+    candidateCounts?: readonly number[] | null
+  } = {},
+): Promise<OperatorFailureEvidence> {
+  const tab = await resolveAutomationTab(
+    pinnedTab.has(conversationId) ? pinnedTab.get(conversationId) : undefined,
+  ).catch(() => undefined)
+  const url = typeof tab?.url === 'string' ? tab.url : ''
+  const boundary = safeRerunBoundaryOf(draft?.nodes ?? [])
+  return buildOperatorFailureEvidence({
+    errorMessage,
+    ...(opts.code ? { code: opts.code } : {}),
+    ...(opts.resolution ? { resolution: opts.resolution } : {}),
+    ...(opts.candidateSelectors ? { candidateSelectors: opts.candidateSelectors } : {}),
+    ...(opts.candidateCounts ? { candidateCounts: opts.candidateCounts } : {}),
+    ...(url ? { pageState: { url, ...(tab?.title ? { title: tab.title } : {}) } } : {}),
+    ...(boundary ? { safeRerunBoundary: boundary } : {}),
+  })
+}
+
+/**
+ * The one failure path every refusal and execution error takes.
+ *
+ * The evidence is worth nothing if some failures carry it and others do not:
+ * the model would have to guess which shape it is looking at, which is the
+ * very problem the bundle exists to remove.
+ */
+async function failWithEvidence(
+  draft: WorkflowDraft | undefined,
+  conversationId: string,
+  errorMessage: string,
+  opts: {
+    code?: OperatorFailureCode
+    resolution?: OperatorLocatorResolution
+    candidateSelectors?: readonly string[]
+    candidateCounts?: readonly number[] | null
+  } = {},
+): Promise<OperatorRunResult> {
+  const evidence = await failureEvidence(draft, conversationId, errorMessage, opts)
+  return { ok: false, error: errorMessage, evidence }
+}
 
 /**
  * Merge the resolved element locator into the node's parameters. The canonical
@@ -371,7 +436,11 @@ function rewriteForRecording(
       args,
       nativeAttemptFailedBlockIds: failedBlockIdsOf(conversationId),
     })
-    if (!permission.allowed) return { ok: false, error: permission.error }
+    if (!permission.allowed) {
+      return failWithEvidence(getDraftSnapshot(conversationId), conversationId, permission.error, {
+        code: 'PERMISSION_DENIED',
+      })
+    }
     justification = permission.justification
   }
 
@@ -413,7 +482,7 @@ function rewriteForRecording(
       '已拒绝：该元素步骤未能解析出任何定位（ref 已失效，或 target/selector 为空）。本次未执行、未记录节点。' +
       '请重新调用 snapshot_page 获取新的 ref，或提供非空的 target / selector（如 data-testid）。'
     commitSelectorTrace(trace, { ok: false, error })
-    return { ok: false, error }
+    return failWithEvidence(draft, conversationId, error, { code: 'LOCATOR_NOT_FOUND' })
   }
 
   // Probe the locator's CSS candidates against the live page BEFORE acting.
@@ -489,7 +558,11 @@ function rewriteForRecording(
   if (unproduced) {
     const error = unproducedDataRefusal(blockId, unproduced)
     commitSelectorTrace(trace, { ok: false, error })
-    return { ok: false, error }
+    return failWithEvidence(draft, conversationId, error, {
+      code: 'VALIDATION_FAILED',
+      candidateSelectors: probeCandidates,
+      candidateCounts: probeCounts,
+    })
   }
 
   // Required-parameter gate (see `lib/workflow/block-requirements`): a call a
@@ -503,7 +576,11 @@ function rewriteForRecording(
   if (requirementProblems.length > 0) {
     const error = formatRequirementRefusal(blockName(blockId), requirementProblems)
     commitSelectorTrace(trace, { ok: false, error })
-    return { ok: false, error }
+    return failWithEvidence(draft, conversationId, error, {
+      code: 'VALIDATION_FAILED',
+      candidateSelectors: probeCandidates,
+      candidateCounts: probeCounts,
+    })
   }
 
   const outcome = await executeOperatorNode(blockId, data, {
@@ -523,7 +600,11 @@ function rewriteForRecording(
     const error = outcome.error ?? `${blockId} failed`
     markOperatorFailure(conversationId, blockId)
     commitSelectorTrace(trace, { ok: false, error })
-    return { ok: false, error }
+    return failWithEvidence(draft, conversationId, error, {
+      ...(outcome.resolution ? { resolution: outcome.resolution } : {}),
+      candidateSelectors: probeCandidates,
+      candidateCounts: probeCounts,
+    })
   }
   // Record-only (side-effect blocks during drafting): no live resolution.
   if (outcome.resolution) {
@@ -667,7 +748,11 @@ function rewriteForRecording(
   if (finalProblems.length > 0) {
     const error = formatRequirementRefusal(blockName(blockId), finalProblems)
     commitSelectorTrace(trace, { ok: false, error })
-    return { ok: false, error }
+    return failWithEvidence(draft, conversationId, error, {
+      code: 'VALIDATION_FAILED',
+      candidateSelectors: probeCandidates,
+      candidateCounts: probeCounts,
+    })
   }
 
   // The producer joins the chain first, so the forms node below wires from it.

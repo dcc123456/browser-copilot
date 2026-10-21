@@ -407,9 +407,16 @@ export function buildSystemPrompt(options: {
     parts.push(
       [
         'OPERATING MODE: WORKFLOW GENERATE / 工作流生成.',
-        'Every step is a WORKFLOW OPERATOR call (`wf_op_*`). Each successful call really operates the page AND records the node, so the draft you build IS the workflow — the native action tools (`click` / `fill` / `open_url` / …) are not offered here because they would record nothing.',
-        `ALL OPERATORS ARE AVAILABLE / 全部算子已可见: every \`wf_op_*\` category schema is advertised from the first round — pick the operator that fits the step, no declaration needed. ${CORE_OPERATOR_TOOL_NAMES.join(', ')} are the usual starters (navigate, click, fill-or-read a field, read text). \`use_operators\` REPLACES the current selection if the payload must be slimmed mid-task.`,
-        'EVERY STEP IS REPLAYED: no detours — going back, retrying another element or re-opening a view all become nodes.',
+        'Every step is a WORKFLOW OPERATOR call (`wf_op_*`): each successful call really operates the page AND records the node, so the draft IS the workflow — native action tools (`click` / `fill` / `open_url` / …) are not offered because they record nothing.',
+        `ALL OPERATORS ARE AVAILABLE / 全部算子已可见: every \`wf_op_*\` category schema is advertised from round one — pick the operator that fits the step, no declaration needed. ${CORE_OPERATOR_TOOL_NAMES.join(', ')} are the usual starters (navigate, click, fill-or-read a field, read text). \`use_operators\` REPLACES the current selection if the payload must be slimmed mid-task.`,
+        'EVERY STEP IS REPLAYED: no detours — going back, retrying another element or re-opening a view become nodes.',
+        // A failure is diagnosable only if the model is told what it may do with
+        // the diagnosis: the recorded chain already happened once, so the step
+        // that committed something must not run again, and a step that failed
+        // because an EARLIER one was wrong must be named, not repeated. The
+        // evidence bundle hands both over (`safeRerunBoundary` /
+        // `firstCommitNodeId`); this sentence tells the model what they mean.
+        'NEVER RE-RUN A COMMITTED STEP (submit / publish / save draft): if an earlier step was wrong, name it, do not repeat that call.',
         // Round 22 replayed 26/26 steps clean and had saved nothing: its last three
         // nodes were `诊断：…` probes and a length check, and the step the user named
         // was never in the graph. `prepare_workflow_goal` says the draft version of
@@ -437,8 +444,8 @@ export function buildSystemPrompt(options: {
         // characters of their caps; each keeps its rule and loses only rationale
         // that the tool schema or this comment already carries.
         'Target elements by `ref` from `snapshot_page`; never hand-write CSS.',
-        'SCRIPTS ARE A LAST RESORT: exhaust the operators first; when none can express the step, `load_tools({groups:["operators_escape"]})` → `wf_op_javascript-code`, which runs AND records the script. Carry a `justification` naming what you tried, else it is refused',
-        'Operators are pre-approved: batch independent calls. `wf_op_wait-connections` waits — use it when a step needs the page to settle.',
+        'SCRIPTS ARE A LAST RESORT: exhaust the operators first; if none can express the step, `load_tools({groups:["operators_escape"]})` → `wf_op_javascript-code` (it runs AND records). Carry a `justification` naming what you tried, else refused',
+        'Operators are pre-approved: batch independent calls. `wf_op_wait-connections` waits when the page must settle.',
         'When done, END YOUR TURN — the panel shows the review card; never call `compose_workflow` or a save tool.',
         // The mode paragraph carries the MECHANICS only. The domain knowledge —
         // which operator maps to which conversational action, the data rules,
@@ -4186,6 +4193,9 @@ export async function executeTool(
           ...(ctx.scope ? { scopeWindowId: ctx.scope.windowId } : {}),
           ...(signal ? { signal } : {}),
         }),
+        // The goal verdict is read off the live page, so it has to be read from
+        // the page the generation ran in.
+        ...(ctx.scope ? { scope: ctx.scope } : {}),
       })
       if ('error' in out) return JSON.stringify({ error: out.error })
       return JSON.stringify({
@@ -4408,7 +4418,16 @@ export async function executeTool(
           // `executeTool`'s signal is optional; block executors require one.
           signal: signal ?? new AbortController().signal,
         })
-        if (!out.ok) return JSON.stringify({ error: out.error })
+        if (!out.ok) {
+          return JSON.stringify({
+            error: out.error,
+            // The failure evidence names the class of failure, what it usually
+            // means, what the kernel actually hit, and the last chain node a
+            // re-run may start from — so the model can act on the diagnosis
+            // instead of re-deriving it from the error text.
+            ...(out.evidence ? { evidence: out.evidence } : {}),
+          })
+        }
         // Hand the audit record to `runOneToolCall`: the action history stores
         // the browser action the operator really performed, with the resolved
         // parameters, so the History tab reads naturally and the
