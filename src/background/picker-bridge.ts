@@ -22,7 +22,7 @@ import { normalScopeFromWindowId, type ScopeWindow } from './automation-scope'
 export interface PickerStartMessage {
   type: 'picker:start'
   pickerId: string
-  findBy?: 'cssSelector' | 'xpath'
+  findBy?: 'cssSelector' | 'xpath' | 'text'
   multiple?: boolean
   /** Editor UI locale, so the picker's own copy matches the panel that opened it. */
   locale?: 'en' | 'zh'
@@ -36,7 +36,8 @@ export interface PickerVerifyMessage {
   type: 'picker:verify'
   pickerId: string
   selector: string
-  findBy?: 'cssSelector' | 'xpath'
+  findBy?: 'cssSelector' | 'xpath' | 'text'
+  locale?: 'en' | 'zh'
   /** See PickerStartMessage.windowId. */
   windowId?: number
 }
@@ -49,7 +50,7 @@ export type PickerHandleResult =
 async function injectPicker(args: {
   pickerId: string
   mode: 'select' | 'verify'
-  findBy?: 'cssSelector' | 'xpath'
+  findBy?: 'cssSelector' | 'xpath' | 'text'
   selector?: string
   multiple?: boolean
   locale?: 'en' | 'zh'
@@ -131,6 +132,7 @@ export async function handlePickerMessage(message: unknown): Promise<PickerHandl
       mode: 'verify',
       selector: msg.selector,
       findBy: msg.findBy ?? 'cssSelector',
+      locale: msg.locale,
       windowId: msg.windowId,
     })
     return { handled: true, response }

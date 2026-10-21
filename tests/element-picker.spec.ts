@@ -15,7 +15,7 @@
  *
  * @module tests/element-picker
  */
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { startPicker, type PickerArgs } from '../src/inpage/element-picker'
 
 const PAGE = `
@@ -318,6 +318,66 @@ describe('element picker: choosing which match', () => {
   })
 })
 
+describe('element picker: text find-by', () => {
+  const findby = () => field('[data-role="findby"]') as HTMLSelectElement
+
+  it('fills the field with the aimed element text and commits findBy text', async () => {
+    await mount({ findBy: 'text' })
+
+    dispatchMouse(document.getElementById('buy')!, 'mousemove')
+
+    expect(selectorText()).toBe('Buy')
+    expect(field('[data-role="count"]').textContent).toContain('Matches 1 element')
+    expect(confirmBtn().disabled).toBe(false)
+
+    dispatchKey('Enter')
+
+    expect(results()).toEqual([
+      {
+        type: 'picker:result',
+        pickerId: 'p1',
+        selector: 'Buy',
+        findBy: 'text',
+        multiple: false,
+      },
+    ])
+  })
+
+  it('counts every element rendering the same text', async () => {
+    document.body.innerHTML = `
+      <ul><li><button class="pick">Buy</button></li><li><button class="pick">Buy</button></li></ul>
+    `
+    await mount({ findBy: 'text' })
+
+    dispatchMouse(document.querySelectorAll('button.pick')[1]!, 'mousemove')
+
+    expect(selectorText()).toBe('Buy')
+    expect(field('[data-role="count"]').textContent).toContain('Matches 2 elements')
+  })
+
+  it('rewrites the field when the card switches to text', async () => {
+    await mount()
+    dispatchMouse(document.getElementById('buy')!, 'mousemove')
+    expect(selectorText()).toBe('#buy')
+
+    findby().value = 'text'
+    findby().dispatchEvent(new Event('change'))
+
+    expect(selectorText()).toBe('Buy')
+    expect(confirmBtn().disabled).toBe(false)
+  })
+
+  it('shows the no-text placeholder and refuses to commit', async () => {
+    document.body.innerHTML = '<button id="empty"></button>'
+    await mount({ findBy: 'text' })
+
+    dispatchMouse(document.getElementById('empty')!, 'mousemove')
+
+    expect(selectorText()).toBe('(no visible text)')
+    expect(confirmBtn().disabled).toBe(true)
+  })
+})
+
 describe('element picker: the click-free hint', () => {
   it('appears with the first element aimed at', async () => {
     await mount()
@@ -338,5 +398,97 @@ describe('element picker: the click-free hint', () => {
     await mount()
     dispatchMouse(document.getElementById('buy')!, 'mousemove')
     expect(hintText()).toContain('Press Enter')
+  })
+})
+
+describe('element picker: verify outlines the matches', () => {
+  const boxes = () => card()!.querySelectorAll('.pick-verify-box')
+  const toast = () => card()!.querySelector('.pick-verify-toast') as HTMLElement
+  const mountVerify = (args: Partial<PickerArgs> = {}) =>
+    startPicker({ pickerId: 'v1', mode: 'verify', selector: '.pick', ...args })
+  /** Past the picker's hold; the exact constant is private to the injected fn. */
+  const HOLD_MS = 5000
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    document.body.innerHTML = GROUP_PAGE
+  })
+
+  afterEach(() => {
+    // Settle a still-open verify overlay before the faked clock is restored,
+    // so its key listener and timer do not leak into the next row.
+    dispatchKey('Escape')
+    vi.useRealTimers()
+  })
+
+  it('outlines every match and answers only after the hold', async () => {
+    await mountVerify()
+
+    expect(boxes()).toHaveLength(3)
+    expect(toast().textContent).toContain('3 elements match')
+    expect(toast().classList.contains('is-error')).toBe(false)
+    expect(results()).toEqual([])
+
+    await vi.advanceTimersByTimeAsync(HOLD_MS)
+
+    expect(results()).toEqual([
+      {
+        type: 'picker:result',
+        pickerId: 'v1',
+        selector: '.pick',
+        count: 3,
+        verified: true,
+      },
+    ])
+    expect(document.getElementById('bc-element-picker')).toBeNull()
+  })
+
+  it('lets Escape answer early with the count', async () => {
+    await mountVerify({ locale: 'zh' })
+
+    expect(toast().textContent).toContain('匹配到 3 个元素')
+    expect(toast().textContent).toContain('按 Esc 关闭')
+
+    dispatchKey('Escape')
+
+    expect(results()).toHaveLength(1)
+    expect(results()[0]!.count).toBe(3)
+    expect(document.getElementById('bc-element-picker')).toBeNull()
+  })
+
+  it('shows the miss state and answers zero', async () => {
+    await mountVerify({ selector: '.nope' })
+
+    expect(boxes()).toHaveLength(0)
+    expect(toast().classList.contains('is-error')).toBe(true)
+    expect(toast().textContent).toContain('Element not found')
+
+    await vi.advanceTimersByTimeAsync(HOLD_MS)
+
+    expect(results()).toEqual([
+      { type: 'picker:result', pickerId: 'v1', selector: '.nope', count: 0, verified: true },
+    ])
+  })
+
+  it('counts XPath through the same root walk', async () => {
+    await mountVerify({ selector: '//button[@class="pick"]', findBy: 'xpath' })
+
+    expect(boxes()).toHaveLength(3)
+
+    await vi.advanceTimersByTimeAsync(HOLD_MS)
+
+    expect(results()[0]!.count).toBe(3)
+  })
+
+  it('counts text through the tightest holder, not its containers', async () => {
+    await mountVerify({ selector: 'Two', findBy: 'text' })
+
+    // The row and the list also *contain* "Two"; only the button holds it
+    // without a deeper holder, so exactly one box is drawn.
+    expect(boxes()).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(HOLD_MS)
+
+    expect(results()[0]!.count).toBe(1)
   })
 })

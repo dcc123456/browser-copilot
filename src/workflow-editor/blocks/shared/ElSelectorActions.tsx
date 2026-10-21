@@ -2,8 +2,10 @@
  * Element selector actions — React port of Automa's SharedElSelectorActions.
  *
  * The pick button injects the element picker into the user's active browser
- * tab and writes back the selector it reports; the verify button asks the same
- * picker how many elements the current selector matches. The round trip itself
+ * tab and writes back the locator it reports — the selector, or the element's
+ * text when the picker is in Text mode — along with the dialect, so the field
+ * and the block's `findBy` never disagree; the verify button asks the same
+ * picker how many elements the current locator matches. The round trip itself
  * lives in `./element-pick`, which the AI operator chat dock uses too.
  *
  * @module workflow-editor/blocks/shared/ElSelectorActions
@@ -25,12 +27,15 @@ export default function ElSelectorActions({
   findBy = 'cssSelector',
   multiple = false,
   onSelector,
+  onFindBy,
   onMessage,
 }: {
   selector: string
-  findBy?: 'cssSelector' | 'xpath'
+  findBy?: 'cssSelector' | 'xpath' | 'text'
   multiple?: boolean
   onSelector: (selector: string) => void
+  /** The picker's dialect may differ from the field's (its card switches mode). */
+  onFindBy?: (findBy: 'cssSelector' | 'xpath' | 'text') => void
   /** Optional toast-style callback for verify results. */
   onMessage?: (text: string, kind: 'ok' | 'error') => void
 }) {
@@ -52,8 +57,12 @@ export default function ElSelectorActions({
       if (mode === 'select') {
         const result = await requestElementPick({ findBy, multiple, locale })
         setBusy(null)
-        if (result.ok) onSelector(result.selector)
-        else reportFailure(result)
+        if (result.ok) {
+          // The card can switch dialect while it is open; land it in the same
+          // update as the value it describes.
+          if (result.findBy !== findBy) onFindBy?.(result.findBy)
+          onSelector(result.selector)
+        } else reportFailure(result)
         return
       }
       const result = await verifyElementSelector({ selector, findBy, locale })
@@ -72,7 +81,7 @@ export default function ElSelectorActions({
       }
       reportFailure(result)
     },
-    [findBy, multiple, selector, locale, onSelector, onMessage, bt, reportFailure],
+    [findBy, multiple, selector, locale, onSelector, onFindBy, onMessage, bt, reportFailure],
   )
 
   return (

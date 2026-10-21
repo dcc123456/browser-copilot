@@ -118,8 +118,8 @@ async function runPicker(
 }
 
 /** The dialect the picker reported, defaulting the way its card does. */
-const findByOf = (reply: PickerReply): 'cssSelector' | 'xpath' =>
-  reply.findBy === 'xpath' ? 'xpath' : 'cssSelector'
+const findByOf = (reply: PickerReply): PickedElement['findBy'] =>
+  reply.findBy === 'xpath' ? 'xpath' : reply.findBy === 'text' ? 'text' : 'cssSelector'
 
 /**
  * The line to show for a pick that produced nothing, or `null` when the user
@@ -137,7 +137,11 @@ export function describePickFailure(failure: ElementPickFailure, error?: string)
  * `locale` is what the picker's own card copy is rendered in.
  */
 export async function requestElementPick(
-  opts: { findBy?: 'cssSelector' | 'xpath'; multiple?: boolean; locale?: 'en' | 'zh' } = {},
+  opts: {
+    findBy?: 'cssSelector' | 'xpath' | 'text'
+    multiple?: boolean
+    locale?: 'en' | 'zh'
+  } = {},
 ): Promise<ElementPickResult> {
   const outcome = await runPicker(
     (pickerId) => ({
@@ -161,7 +165,7 @@ export async function requestElementPick(
 /** Count how many elements a selector matches on the page right now. */
 export async function verifyElementSelector(opts: {
   selector: string
-  findBy?: 'cssSelector' | 'xpath'
+  findBy?: 'cssSelector' | 'xpath' | 'text'
   locale?: 'en' | 'zh'
 }): Promise<SelectorVerifyResult> {
   const outcome = await runPicker(

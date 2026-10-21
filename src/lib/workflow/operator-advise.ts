@@ -138,11 +138,11 @@ export interface OperatorPageRead extends OperatorPageRef {
  * the picker built for it. The strongest grounding the assistant can get: a
  * machine read only guesses which element the user meant, this is the user
  * answering that question. `findBy` rides along because the picker may have been
- * switched to XPath.
+ * switched to XPath or to Text (then `selector` holds the element's text).
  */
 export interface PickedElement {
   selector: string
-  findBy: 'cssSelector' | 'xpath'
+  findBy: 'cssSelector' | 'xpath' | 'text'
 }
 
 /**
@@ -788,11 +788,15 @@ export function buildOperatorAdvisePrompt(input: OperatorAdvisePromptInput): str
           '',
           '## Elements the user picked by hand',
           ...picked.map(
-            (element) => `${element.findBy === 'xpath' ? 'XPath' : 'CSS'}: ${element.selector}`,
+            (element) =>
+              `${
+                element.findBy === 'xpath' ? 'XPath' : element.findBy === 'text' ? 'Text' : 'CSS'
+              }: ${element.selector}`,
           ),
           'The user pointed at these on the page themselves: use one VERBATIM as the element',
           'parameter of the step it belongs to, and never invent another selector for the same',
-          'element. Where this disagrees with the page read above, this section wins.',
+          'element. A Text pick also needs findBy "text". Where this disagrees with the page read',
+          'above, this section wins.',
         ]),
     ...shot,
     '',

@@ -7,9 +7,8 @@
  *
  * Value-driven (`selector`/`onSelector` instead of `data`/`onChange`) so it
  * edits both top-level block data and nested records (e.g. the trigger's
- * observeElement). The capture path behind the picker is CSS-only, so forms
- * without a find-by dropdown omit `findBy`/`onFindBy` and get the static
- * "CSS Selector" label.
+ * observeElement). Forms without a find-by dropdown omit `findBy`/`onFindBy`
+ * and get the static "CSS Selector" label (the picker's default dialect).
  *
  * @module workflow-editor/blocks/shared/SelectorField
  */
@@ -103,15 +102,14 @@ export default function SelectorField({
             <span style={{ fontSize: 12, opacity: 0.75 }}>{bt('CSS Selector')}</span>
           </div>
         )}
-        {findBy !== 'text' && (
-          <ElSelectorActions
-            selector={selector}
-            findBy={findBy === 'xpath' ? 'xpath' : 'cssSelector'}
-            multiple={multiple}
-            onSelector={onSelector}
-            onMessage={reportVerify}
-          />
-        )}
+        <ElSelectorActions
+          selector={selector}
+          findBy={findBy === 'xpath' || findBy === 'text' ? findBy : 'cssSelector'}
+          multiple={multiple}
+          onSelector={onSelector}
+          onFindBy={onFindBy}
+          onMessage={reportVerify}
+        />
       </div>
       {verifyStatus && (
         <p className={`wf-form-note wf-verify-${verifyStatus.kind}`}>{verifyStatus.text}</p>

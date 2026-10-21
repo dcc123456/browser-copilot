@@ -19,6 +19,10 @@
  * chosen selector is reported back through
  * chrome.runtime.sendMessage({ type: 'picker:result', pickerId, selector }).
  *
+ * In `verify` mode the picker outlines every match on the page and holds that
+ * view for a short beat before replying with the count — the reply raises the
+ * editor window, so answering instantly would hide what was verified.
+ *
  * IMPORTANT: this function is serialized via `func.toString()` and run in the
  * page world by chrome.scripting.executeScript. EVERYTHING it uses — styles,
  * icons, helpers — MUST be declared INSIDE the function body. Module-level
@@ -32,7 +36,11 @@
 export interface PickerArgs {
   pickerId: string
   mode: 'select' | 'verify'
-  findBy?: 'cssSelector' | 'xpath'
+  /**
+   * `text` captures the aimed element's visible text instead of a selector:
+   * the workflow engine resolves it through the kernel's text strategy.
+   */
+  findBy?: 'cssSelector' | 'xpath' | 'text'
   selector?: string
   /**
    * True when the block acts on EVERY match (loop-elements, get-text with
@@ -104,6 +112,17 @@ export const startPicker: PickerStart = async (args) => {
 .pick-opt { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 12px; }
 .pick-note { margin-top: 8px; font-size: 12px; color: #059669; }
 .pick-err { margin-top: 8px; font-size: 12px; color: #dc2626; }
+.pick-verify-layer { position: fixed; inset: 0; z-index: 2147483647; pointer-events: none; }
+.pick-verify-box { position: fixed; pointer-events: none; border-radius: 2px;
+  outline: 2px solid #10b981; outline-offset: 1px; background: rgba(16,185,129,0.14); }
+.pick-verify-toast { position: fixed; left: 50%; top: 16px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; background: #111827; color: #fff;
+  font-size: 13px; padding: 10px 14px; border-radius: 10px; pointer-events: none;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+.pick-verify-toast.is-error { background: #dc2626; }
+.pick-verify-toast b { color: #a7f3d0; }
+.pick-verify-toast.is-error b { color: #fff; }
+.pick-verify-esc { color: #9ca3af; font-size: 12px; }
 `
 
   // --- inline SVG icons (lucide glyphs, stroke markup inlined as strings:
@@ -141,6 +160,14 @@ export const startPicker: PickerStart = async (args) => {
       locale === 'zh'
         ? `匹配 <b>${total}</b> 个元素 · 使用第 <b>${index}</b> 个`
         : `Matches <b>${total}</b> elements · using <b>#${index}</b>`,
+    verifyFound: (total: number): string =>
+      locale === 'zh'
+        ? `匹配到 <b>${total}</b> 个元素`
+        : `<b>${total}</b> element${total === 1 ? '' : 's'} match`,
+    verifyMiss: locale === 'zh' ? '未找到匹配元素' : 'Element not found',
+    verifyEsc: locale === 'zh' ? '按 Esc 关闭' : 'Press Esc to close',
+    textOption: locale === 'zh' ? '文本' : 'Text',
+    noText: locale === 'zh' ? '（无可读文本）' : '(no visible text)',
   }
 
   // --- selector builder (mirrors build-selector.ts; inlined for injection) ---
@@ -338,6 +365,53 @@ export const startPicker: PickerStart = async (args) => {
   }
   const count = (sel: string, xp: boolean): number => matchesOf(sel, xp).length
 
+  // --- text strategy (mirrors the kernel's, inlined for injection) -----------
+  // Text mode reads the aimed element's rendered text and counts how many
+  // elements the kernel would resolve for it. The two must AGREE: the picker's
+  // count is the operator's only warning that a text is not unique, and the
+  // click replays the same strategy. So the whitespace rule and the "tightest
+  // holder wins" rule are copied verbatim, not approximated.
+  const collapseText = (text: string): string => text.replace(/[\s\u00a0]+/g, ' ').trim()
+  const visibleTextOf = (el: Element): string => {
+    const html = el as HTMLElement
+    if (typeof html.innerText === 'string' && html.innerText.length > 0) {
+      return collapseText(html.innerText)
+    }
+    const clone = el.cloneNode(true) as HTMLElement
+    clone
+      .querySelectorAll('script, style, noscript, template, svg, canvas, iframe, object, embed')
+      .forEach((node) => node.remove())
+    return collapseText(clone.textContent ?? '')
+  }
+  let textMatchCache: { wanted: string; matches: Element[] } | null = null
+  const matchesByText = (wanted: string): Element[] => {
+    if (!wanted) return []
+    if (textMatchCache && textMatchCache.wanted === wanted) return textMatchCache.matches
+    const all: Element[] = []
+    for (const root of openRoots()) {
+      try {
+        root.querySelectorAll('*').forEach((el) => {
+          if (el !== host) all.push(el)
+        })
+      } catch {
+        /* the root vanished mid-walk */
+      }
+    }
+    const texts = new Map<Element, string>()
+    all.forEach((el) => texts.set(el, visibleTextOf(el)))
+    // An element qualifies only when none of its descendants does, so a word
+    // never counts the page container that merely holds it.
+    const tightest = (holds: (text: string) => boolean): Element[] => {
+      const hits = all.filter((el) => holds(texts.get(el) ?? ''))
+      return hits.filter((el) => !hits.some((other) => other !== el && el.contains(other)))
+    }
+    let found = tightest((text) => text === wanted)
+    // The kernel only loosens to "includes" when the exact pass found nothing.
+    if (found.length === 0) found = tightest((text) => text.includes(wanted))
+    textMatchCache = { wanted, matches: found }
+    return found
+  }
+
   // --- DOM scaffold (Shadow DOM) ---
   const host = document.createElement('div')
   host.id = 'bc-element-picker'
@@ -371,6 +445,7 @@ export const startPicker: PickerStart = async (args) => {
         <select class="pick-select" data-role="findby">
           <option value="cssSelector">CSS</option>
           <option value="xpath">XPath</option>
+          <option value="text">${STRINGS.textOption}</option>
         </select>
         <button class="pick-btn" data-act="parent" title="Select parent">${ICON.up}</button>
         <button class="pick-btn" data-act="child" title="Select child">${ICON.down}</button>
@@ -452,17 +527,21 @@ export const startPicker: PickerStart = async (args) => {
   function refresh() {
     const el = target()
     if (!el) return
-    const xp = findBySel.value === 'xpath'
-    const base = xp ? buildXp(el) : build(el)
-    const baseMatches = matchesOf(base, xp)
+    const dialect = findBySel.value
+    const textMode = dialect === 'text'
+    const xp = dialect === 'xpath'
+    const base = textMode ? visibleTextOf(el) : xp ? buildXp(el) : build(el)
+    const baseMatches = textMode ? matchesByText(base) : matchesOf(base, xp)
     // A `multiple` caller wants the broad selector (every match). Otherwise
     // the aim is ONE element, so pin the committed selector to the match the
     // user actually pointed at — a broad selector would act on the first
-    // visible match and silently pick a different row.
+    // visible match and silently pick a different row. Text has no positional
+    // form: the field holds the text itself, and the count warns when several
+    // elements share it.
     matchGroup = null
     let nextSelector = base
     const index = baseMatches.indexOf(el)
-    if (!multiple && baseMatches.length > 1 && index >= 0) {
+    if (!textMode && !multiple && baseMatches.length > 1 && index >= 0) {
       const pinned = pinnedSelectorFor(baseMatches[index] as Element, base, index, xp)
       if (pinned) {
         matchGroup = { base, members: baseMatches, index }
@@ -470,8 +549,8 @@ export const startPicker: PickerStart = async (args) => {
       }
     }
     curSelector = nextSelector
-    selectorEl.textContent = curSelector
-    const n = count(curSelector, xp)
+    selectorEl.textContent = curSelector || (textMode ? STRINGS.noText : '')
+    const n = textMode ? matchesByText(curSelector).length : count(curSelector, xp)
     countEl.innerHTML = matchGroup
       ? STRINGS.groupCount(matchGroup.members.length, matchGroup.index + 1)
       : n === 1
@@ -505,18 +584,66 @@ export const startPicker: PickerStart = async (args) => {
     updateHint()
   }
 
-  // Verify mode: count an existing selector and report immediately.
+  // Verify mode: outline every match on the page, hold that view for a beat,
+  // then answer. The editor raises its own window the moment the reply lands
+  // (element-pick.ts focusEditorWindow), so answering immediately would hide
+  // the page before the operator could see what matched.
   if (mode === 'verify' && initial) {
-    const xp = findBy === 'xpath'
-    const n = count(initial, xp)
-    void chrome.runtime.sendMessage({
-      type: 'picker:result',
-      pickerId,
-      selector: initial,
-      count: n,
-      verified: true,
+    const VERIFY_HOLD_MS = 3000
+    // A pathological selector must not paint thousands of boxes; the reply
+    // still carries the full count.
+    const MAX_VERIFY_BOXES = 50
+    const matched =
+      findBy === 'text' ? matchesByText(initial) : matchesOf(initial, findBy === 'xpath')
+    // The select-mode scaffold (dark overlay, card, single highlight) has no
+    // role here; only the match boxes and the result toast should show.
+    rootEl.remove()
+
+    const layer = document.createElement('div')
+    layer.className = 'pick-verify-layer'
+    matched.slice(0, MAX_VERIFY_BOXES).forEach((el) => {
+      const r = el.getBoundingClientRect()
+      const box = document.createElement('div')
+      box.className = 'pick-verify-box'
+      box.style.top = `${r.top}px`
+      box.style.left = `${r.left}px`
+      box.style.width = `${r.width}px`
+      box.style.height = `${r.height}px`
+      layer.appendChild(box)
     })
-    host.remove()
+    const toast = document.createElement('div')
+    toast.className = `pick-verify-toast${matched.length > 0 ? '' : ' is-error'}`
+    toast.innerHTML = `<span>${
+      matched.length > 0 ? STRINGS.verifyFound(matched.length) : STRINGS.verifyMiss
+    }</span><span class="pick-verify-esc">${STRINGS.verifyEsc}</span>`
+    layer.appendChild(toast)
+    root.appendChild(layer)
+
+    let answered = false
+    function answer(): void {
+      if (answered) return
+      answered = true
+      clearTimeout(timer)
+      window.removeEventListener('keydown', onVerifyKey, true)
+      void chrome.runtime.sendMessage({
+        type: 'picker:result',
+        pickerId,
+        selector: initial,
+        count: matched.length,
+        verified: true,
+      })
+      host.remove()
+    }
+    // Escape dismisses the preview without waiting out the hold; the count is
+    // already known, so it answers rather than cancels.
+    function onVerifyKey(e: KeyboardEvent): void {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      answer()
+    }
+    const timer = setTimeout(answer, VERIFY_HOLD_MS)
+    window.addEventListener('keydown', onVerifyKey, true)
     return
   }
 
@@ -658,8 +785,11 @@ export const startPicker: PickerStart = async (args) => {
       return
     }
     if (act === 'verify') {
-      const xp = findBySel.value === 'xpath'
-      const n = count(curSelector, xp)
+      const dialect = findBySel.value
+      const n =
+        dialect === 'text'
+          ? matchesByText(curSelector).length
+          : count(curSelector, dialect === 'xpath')
       noteEl.style.display = 'block'
       noteEl.style.color = n > 0 ? '#059669' : '#dc2626'
       noteEl.textContent = n > 0 ? `Verified: ${n} element(s) match` : 'Element not found'
