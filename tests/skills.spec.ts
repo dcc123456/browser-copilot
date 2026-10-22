@@ -203,7 +203,7 @@ describe('built-in skill instruction budget', () => {
     // Not just under the cap: close enough to it that the next paragraph would
     // silently truncate. Keep a working margin. (Lowered 200 → 100 when the
     // generator's operator paragraph grew for the every-category default;
-    // measured headroom is ~117.)
+    // measured headroom is ~119.)
     const generator = BUILT_IN_SKILLS.find((s) => s.id === 'builtin-workflow-generator')!
     expect(MAX_INSTRUCTIONS_LENGTH - generator.instructions.length).toBeGreaterThanOrEqual(100)
   })

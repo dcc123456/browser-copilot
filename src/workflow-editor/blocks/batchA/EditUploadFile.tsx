@@ -1,7 +1,7 @@
 /**
  * EditUploadFile — "Upload file" block form.
  *
- * Two source modes share one node (spec §4, §14):
+ * Three source modes share one node (spec §4, §14):
  *
  *   - `user-select`: the user picks local files at run time from a Browser
  *     Copilot "Choose file" card (real user gesture); the Workflow then
@@ -9,8 +9,11 @@
  *   - `workflow-file`: files already in a Workflow variable (screenshot,
  *     JavaScript-generated image, file artifact or array) are injected
  *     without opening the OS chooser.
+ *   - `latest-download`: at run time the newest file matching `accept` /
+ *     `filePattern` is read from the configured download folder (or the
+ *     extension's internal download folder) and injected unattended.
  *
- * The selector field, multiple flag and wait-for-selector options are shared.
+ * The selector field, wait-for-selector and verification options are shared.
  * Styled with Tailwind semantic tokens; form labels pass through `bt()`.
  *
  * @module workflow-editor/blocks/batchA/EditUploadFile
@@ -22,7 +25,12 @@ import type { EditFormProps } from '../EditForms'
 
 export default function EditUploadFile({ data, onChange }: EditFormProps) {
   const { bt } = useEditorLocale()
-  const sourceMode = data.sourceMode === 'workflow-file' ? 'workflow-file' : 'user-select'
+  const sourceMode =
+    data.sourceMode === 'workflow-file'
+      ? 'workflow-file'
+      : data.sourceMode === 'latest-download'
+        ? 'latest-download'
+        : 'user-select'
   const selector = typeof data.selector === 'string' ? data.selector : ''
 
   // Common file-producing variables suggested for the variable field
@@ -43,6 +51,7 @@ export default function EditUploadFile({ data, onChange }: EditFormProps) {
             [
               ['user-select', 'User picks files'],
               ['workflow-file', 'Workflow file variable'],
+              ['latest-download', 'Latest download file'],
             ] as const
           ).map(([value, label]) => (
             <label key={value} className="flex cursor-pointer items-center gap-2 text-sm text-ink">
@@ -71,7 +80,7 @@ export default function EditUploadFile({ data, onChange }: EditFormProps) {
             onChange={(v) => onChange({ accept: v })}
           />
         </Field>
-      ) : (
+      ) : sourceMode === 'workflow-file' ? (
         <Field
           label="File variable"
           title="Variable holding a data URL, a file artifact, or an array of artifacts"
@@ -88,6 +97,35 @@ export default function EditUploadFile({ data, onChange }: EditFormProps) {
             ))}
           </datalist>
         </Field>
+      ) : (
+        <>
+          <Field
+            label="Accepted file types"
+            title="Optional accept filter, e.g. .xlsx,image/png,application/pdf"
+          >
+            <TextInput
+              value={typeof data.accept === 'string' ? data.accept : ''}
+              placeholder=".xlsx,.pdf (optional)"
+              onChange={(v) => onChange({ accept: v })}
+            />
+          </Field>
+          <Field
+            label="File name pattern"
+            title="Glob matched against the downloaded file name, e.g. report-*.xlsx"
+          >
+            <TextInput
+              value={typeof data.filePattern === 'string' ? data.filePattern : ''}
+              placeholder="report-*.xlsx (optional)"
+              onChange={(v) => onChange({ filePattern: v })}
+            />
+          </Field>
+          <Checkbox
+            checked={data.fallbackToPicker === true}
+            onChange={(v) => onChange({ fallbackToPicker: v })}
+            label="Ask me to pick a file when nothing matches"
+            title="Open the normal Choose file card when no downloaded file matches the filters"
+          />
+        </>
       )}
 
       <SelectorField
@@ -99,12 +137,14 @@ export default function EditUploadFile({ data, onChange }: EditFormProps) {
         multiple={false}
       />
 
-      <Checkbox
-        checked={data.multiple === true}
-        onChange={(v) => onChange({ multiple: v })}
-        label="Allow multiple files"
-        title="Upload several files at once (the page input must accept multiple)"
-      />
+      {sourceMode !== 'latest-download' && (
+        <Checkbox
+          checked={data.multiple === true}
+          onChange={(v) => onChange({ multiple: v })}
+          label="Allow multiple files"
+          title="Upload several files at once (the page input must accept multiple)"
+        />
+      )}
 
       <Checkbox
         checked={data.waitForSelector === true}

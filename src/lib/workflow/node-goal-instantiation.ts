@@ -40,6 +40,7 @@ export const DEFAULT_GOAL_TEMPLATES: Record<string, string> = {
   'wait-connections': 'Wait for the page connections to settle',
   delay: 'Wait for {{time}} ms',
   'save-local': 'Save a value to local disk',
+  'parse-excel': 'Parse the spreadsheet into JSON rows',
   'export-data': 'Export the collected data table',
   notification: 'Show a desktop notification',
   webhook: 'Send an HTTP request',

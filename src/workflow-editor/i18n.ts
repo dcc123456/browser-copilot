@@ -674,13 +674,43 @@ const BLOCK_FORM_STRINGS = {
     'Upload source': '上传方式',
     'User picks files': '用户选择文件',
     'Workflow file variable': '自动上传 Workflow 文件',
+    'Latest download file': '自动上传最新下载文件',
     'Accepted file types': '文件类型',
     'image/*,.pdf (optional)': 'image/*,.pdf（可选）',
+    '.xlsx,.pdf (optional)': '.xlsx,.pdf（可选）',
+    'File name pattern': '文件名模式',
+    'report-*.xlsx (optional)': 'report-*.xlsx（可选）',
+    'Glob matched against the downloaded file name, e.g. report-*.xlsx':
+      '按文件名匹配的通配符，例如 report-*.xlsx',
+    'Ask me to pick a file when nothing matches': '没有匹配文件时让我手动选择',
+    'Open the normal Choose file card when no downloaded file matches the filters':
+      '下载目录中没有匹配文件时，打开常规的“选择文件”卡片',
     'File variable': '文件变量',
     'e.g. lastScreenshot': '例如 lastScreenshot',
     'Allow multiple files': '允许多文件',
     'Wait for selector before uploading': '上传前等待目标选择器',
     'Verify files reached the upload control': '验证文件已进入上传控件',
+    // — parse-excel form —
+    'Spreadsheet source': '表格来源',
+    'User picks a file': '用户选择文件',
+    'Variable holding exactly one spreadsheet file artifact or data URL':
+      '存放单个表格文件（文件产物或 data URL）的变量',
+    'e.g. lastFile': '例如 lastFile',
+    'Worksheet name': '工作表名称',
+    'Exact worksheet name; empty = the first sheet. Applies to .xlsx only.':
+      '精确的工作表名称；留空表示第一张工作表。仅对 .xlsx 生效。',
+    'Sheet1 (optional)': 'Sheet1（可选）',
+    'First row is the header': '首行作为表头',
+    'Use the first row as object keys; the raw array keeps that row either way':
+      '把首行作为对象键；原始数组无论是否勾选都会保留该行',
+    'Object rows variable': '对象数组变量',
+    'Receives an array of objects, one per data row, keyed by the header row':
+      '接收对象数组：每个数据行一个对象，键来自表头行',
+    'Raw rows variable': '原始数组变量',
+    'Receives the 2-D array of typed cells, including the header row':
+      '接收二维数组：已转换类型的单元格，包含表头行',
+    'Supports .xlsx and .csv. Legacy .xls must be saved as .xlsx or .csv first.':
+      '支持 .xlsx 与 .csv；旧版 .xls 请先另存为 .xlsx 或 .csv。',
     // — get-secret form —
     'Credentials this node fetches': '本节点获取的凭证',
     'Pick a credential…': '选择凭证…',

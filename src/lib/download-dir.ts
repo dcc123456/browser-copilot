@@ -120,15 +120,104 @@ export function resolveTransferMode(
  * is hidden; it is only ever reached AFTER the configured download dir and AFTER the
  * side panel failed to answer, so an attended run still behaves exactly as before.
  */
-export async function getUnattendedDownloadDir(): Promise<FileSystemDirectoryHandle | null> {
+export async function getUnattendedDownloadDir(
+  create = true,
+): Promise<FileSystemDirectoryHandle | null> {
   try {
     const storage = navigator.storage as { getDirectory?: () => Promise<FileSystemDirectoryHandle> }
     const root = await storage?.getDirectory?.()
     if (!root) return null
-    return await root.getDirectoryHandle('browser-copilot-downloads', { create: true })
+    return await root.getDirectoryHandle('browser-copilot-downloads', { create })
   } catch {
     return null
   }
+}
+
+/** One file found while scanning the download locations. */
+export interface DownloadedFileCandidate {
+  name: string
+  mimeType: string
+  size: number
+  lastModified: number
+  /** Which location it came from (never an absolute path). */
+  source: 'configured-download-dir' | 'internal-download-dir'
+  getFile(): Promise<File>
+}
+
+export interface DownloadedFileScan {
+  candidates: DownloadedFileCandidate[]
+  /** Locations that were readable and scanned (for error messages). */
+  scanned: string[]
+  /** Locations that were skipped, with the reason. */
+  skipped: string[]
+}
+
+const CONFIGURED_DIR_LABEL = 'configured download folder'
+const INTERNAL_DIR_LABEL = 'internal downloads folder'
+
+async function canReadDirectory(handle: FileSystemDirectoryHandle): Promise<boolean> {
+  try {
+    return (await handle.queryPermission({ mode: 'read' })) === 'granted'
+  } catch {
+    // Permission API unavailable — let enumeration itself decide.
+    return true
+  }
+}
+
+/**
+ * Enumerate the files a `latest-download` upload may choose from: the folder
+ * configured in Settings plus the extension's own unattended download folder.
+ * Read-only: the internal folder is not created, and no permission prompt is
+ * raised (a worker has no user gesture), the folder is reported as skipped.
+ */
+export async function listDownloadedFileCandidates(): Promise<DownloadedFileScan> {
+  const candidates: DownloadedFileCandidate[] = []
+  const scanned: string[] = []
+  const skipped: string[] = []
+
+  const collect = async (
+    dir: FileSystemDirectoryHandle,
+    source: DownloadedFileCandidate['source'],
+    label: string,
+  ): Promise<void> => {
+    try {
+      for await (const entry of dir.values()) {
+        if (entry.kind !== 'file') continue
+        try {
+          const file = await (entry as FileSystemFileHandle).getFile()
+          candidates.push({
+            name: entry.name,
+            mimeType: file.type,
+            size: file.size,
+            lastModified: file.lastModified,
+            source,
+            getFile: () => (entry as FileSystemFileHandle).getFile(),
+          })
+        } catch {
+          // A single unreadable file must not hide the rest of the folder.
+        }
+      }
+      scanned.push(label)
+    } catch {
+      skipped.push(`${label} (could not be read)`)
+    }
+  }
+
+  const configured = await getDownloadDir()
+  if (configured) {
+    if (await canReadDirectory(configured)) {
+      await collect(configured, 'configured-download-dir', CONFIGURED_DIR_LABEL)
+    } else {
+      skipped.push(
+        `${CONFIGURED_DIR_LABEL} (read permission not granted; reconnect it in Settings)`,
+      )
+    }
+  }
+
+  const internal = await getUnattendedDownloadDir(false)
+  if (internal) await collect(internal, 'internal-download-dir', INTERNAL_DIR_LABEL)
+
+  return { candidates, scanned, skipped }
 }
 
 /**

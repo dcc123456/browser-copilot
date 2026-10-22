@@ -326,8 +326,8 @@ const REQUIREMENTS: Readonly<Record<string, RequirementSet>> = {
     locator: LOCATOR_MESSAGE,
     check: (data) => {
       const mode = data['sourceMode']
-      if (mode !== 'user-select' && mode !== 'workflow-file') {
-        return "必须给出 sourceMode：'user-select' 或 'workflow-file'"
+      if (mode !== 'user-select' && mode !== 'workflow-file' && mode !== 'latest-download') {
+        return "必须给出 sourceMode：'user-select'、'workflow-file' 或 'latest-download'"
       }
       if (
         mode === 'workflow-file' &&
@@ -473,6 +473,23 @@ const REQUIREMENTS: Readonly<Record<string, RequirementSet>> = {
     // One node can fetch several credentials, and only row 1 is covered by the
     // `credential` / `variableName` params above.
     check: (data) => secretRowsProblem(data),
+  },
+  'parse-excel': {
+    check: (data) => {
+      const enumProblem = oneOfEnum(data, 'sourceMode', ['user-select', 'workflow-file'])
+      if (enumProblem) return enumProblem
+      if (data['sourceMode'] === 'workflow-file' && !isFilled(data['fileVariable'])) {
+        return 'workflow-file 模式必须给出 fileVariable（存放 Excel/CSV 文件的变量名）'
+      }
+      const variableName = String(data['variableName'] ?? '').trim()
+      const rawVariableName = String(data['rawVariableName'] ?? '').trim()
+      if (!variableName || !rawVariableName) {
+        return '必须给出两个输出变量名：variableName（对象数组）与 rawVariableName（原始二维数组）'
+      }
+      return variableName === rawVariableName
+        ? 'variableName 与 rawVariableName 不能相同：后写入的会覆盖先写入的'
+        : null
+    },
   },
   'increase-variable': {
     params: [{ key: 'variableName', message: '必须给 variableName（要增加的变量）' }],

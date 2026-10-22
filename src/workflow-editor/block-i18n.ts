@@ -70,6 +70,7 @@ export const BLOCK_NAMES_ZH: Record<string, string> = {
   'sort-data': '排序数据',
   'set-variable': '设置变量',
   'get-secret': '获取凭证',
+  'parse-excel': '解析表格',
   'data-mapping': '数据映射',
   'log-data': '日志数据',
   // Conditions / control flow
@@ -157,6 +158,8 @@ export const BLOCK_DESCRIPTIONS_ZH: Record<string, string> = {
   'set-variable': '把值存入工作流变量，供后续算子读取（支持 {{variables}}）',
   'get-secret':
     '运行时从已保存的凭证中取字段值存入变量。只用于绝不能写进工作流的敏感值（密码 / token / 验证码）；用户名等普通输入填在表单 value 里，或声明为触发器参数。',
+  'parse-excel':
+    '解析 .xlsx 或 .csv 文件：对象数组（首行作表头）与原始二维数组分别写入两个变量，供后续节点使用',
   'data-mapping': '重排数据表或变量的字段',
   'log-data': '读取工作流最近的日志数据',
   // Conditions / control flow

@@ -269,6 +269,7 @@ const SAFE_BLOCK_IDS: ReadonlySet<string> = new Set([
   'slice-variable',
   'regex-variable',
   'data-mapping',
+  'parse-excel',
   'log-data',
   'loop-breakpoint',
 ])

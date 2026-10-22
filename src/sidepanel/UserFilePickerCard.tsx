@@ -42,7 +42,7 @@ function PickerCard({ request, sendResponse }: PendingRequest): ReactElement {
     }
     setBusy(true)
     try {
-      const files = await Promise.all(picked.map(artifactFromFile))
+      const files = await Promise.all(picked.map((file) => artifactFromFile(file)))
       sendResponse({ ok: true, files })
     } catch (error) {
       sendResponse({

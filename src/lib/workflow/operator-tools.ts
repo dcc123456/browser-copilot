@@ -607,12 +607,55 @@ const SCHEMA_OVERRIDES: Readonly<Record<string, Record<string, unknown>>> = {
   'upload-file': {
     sourceMode: {
       type: 'string',
-      enum: ['user-select', 'workflow-file'],
-      description: 'user-select (pick) | workflow-file (variable).',
+      enum: ['user-select', 'workflow-file', 'latest-download'],
+      description:
+        'user-select (pick at run time) | workflow-file (variable) | latest-download (newest matching file in the download folder).',
     },
     fileVariable: {
       type: 'string',
       description: 'Variable NAME holding the file, not the data URL.',
+    },
+    accept: {
+      type: 'string',
+      description:
+        'Comma-separated accept list for user-select / latest-download, e.g. `.xlsx,image/*`.',
+    },
+    filePattern: {
+      type: 'string',
+      description: 'latest-download only: filename glob, e.g. `report-*.xlsx`. Empty = any name.',
+    },
+    fallbackToPicker: {
+      type: 'boolean',
+      description:
+        'latest-download only: ask the user to pick when no download matches (default false).',
+    },
+  },
+  'parse-excel': {
+    sourceMode: {
+      type: 'string',
+      enum: ['user-select', 'workflow-file'],
+      description:
+        'user-select (ask for one .xlsx/.csv at run time) | workflow-file (upstream file variable).',
+    },
+    fileVariable: {
+      type: 'string',
+      description: 'workflow-file only: variable NAME holding exactly one spreadsheet artifact.',
+    },
+    sheetName: {
+      type: 'string',
+      description: 'Exact worksheet name; empty = the first sheet (.xlsx only).',
+    },
+    hasHeader: {
+      type: 'boolean',
+      description: 'Treat the first row as object keys (default true).',
+    },
+    variableName: {
+      type: 'string',
+      description: 'OUTPUT: object rows keyed by the header row (default `lastExcelRows`).',
+    },
+    rawVariableName: {
+      type: 'string',
+      description: 'OUTPUT: raw 2-D array including the header row (default `lastExcelRawRows`).',
     },
   },
   link: {
@@ -700,14 +743,7 @@ const SCHEMA_OMIT: Readonly<Record<string, readonly string[]>> = {
     'session',
     'expirationDate',
   ],
-  'upload-file': [
-    'findBy',
-    'filePaths',
-    'waitSelectorTimeout',
-    'accept',
-    'multiple',
-    'waitForSelector',
-  ],
+  'upload-file': ['findBy', 'filePaths', 'waitSelectorTimeout', 'multiple', 'waitForSelector'],
   'handle-dialog': ['accept', 'promptText'],
   'switch-to': ['findBy', 'selector', 'windowType'],
   'delete-data': ['deleteList'],

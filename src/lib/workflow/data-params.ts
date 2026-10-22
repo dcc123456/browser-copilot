@@ -117,6 +117,9 @@ const DATA_PARAMS: Readonly<Record<string, readonly DataParamSpec[]>> = {
 
   // --- data plumbing: values the workflow carries --------------------------
   'set-variable': [{ key: 'value' }],
+  // Both output names are structural, and the file comes from a runtime picker
+  // or an upstream artifact — no business value is frozen into the node.
+  'parse-excel': [],
   'insert-data': [{ key: 'dataList', deep: true }],
   'delete-data': [],
   'data-mapping': [{ key: 'sources', deep: true }],

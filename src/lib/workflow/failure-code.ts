@@ -32,6 +32,11 @@ export type FailureCode =
   | 'VALIDATION_FAILED'
   // file upload (spec §16)
   | 'UPLOAD_FILE_FAILED'
+  | 'UPLOAD_NO_MATCHING_FILE'
+  // spreadsheet parsing
+  | 'EXCEL_PARSE_FAILED'
+  | 'EXCEL_SHEET_NOT_FOUND'
+  | 'EXCEL_LEGACY_FORMAT_UNSUPPORTED'
   // legacy / unclassified
   | 'ELEMENT_NOT_FOUND'
   | 'TIMEOUT'
@@ -199,6 +204,38 @@ export const FAILURE_TABLE: ReadonlyArray<FailureClassification & { prefixes: re
       hint: '文件未能真正进入页面上传控件，检查目标控件与拖拽区。',
     },
     {
+      prefixes: ['UPLOAD_NO_MATCHING_FILE'],
+      code: 'UPLOAD_NO_MATCHING_FILE',
+      category: 'environment',
+      recoverable: true,
+      aiRepairable: true,
+      hint: '下载目录中没有符合 accept / 文件名模式的文件，调整过滤条件、放入文件，或开启手动选择兜底。',
+    },
+    {
+      prefixes: ['EXCEL_SHEET_NOT_FOUND'],
+      code: 'EXCEL_SHEET_NOT_FOUND',
+      category: 'workflow',
+      recoverable: true,
+      aiRepairable: true,
+      hint: '指定的工作表不存在，按错误信息里的可用表名修正 sheetName（或留空取第一张表）。',
+    },
+    {
+      prefixes: ['EXCEL_LEGACY_FORMAT_UNSUPPORTED'],
+      code: 'EXCEL_LEGACY_FORMAT_UNSUPPORTED',
+      category: 'workflow',
+      recoverable: true,
+      aiRepairable: true,
+      hint: '不支持 .xls / 加密工作簿，请另存为 .xlsx 或 .csv 后重试。',
+    },
+    {
+      prefixes: ['EXCEL_PARSE_FAILED'],
+      code: 'EXCEL_PARSE_FAILED',
+      category: 'workflow',
+      recoverable: true,
+      aiRepairable: true,
+      hint: '表格文件无法解析（损坏、格式不符或缺少工作簿结构），检查文件来源与 fileVariable。',
+    },
+    {
       prefixes: ['AbortError', 'aborted', '已取消'],
       code: 'ABORTED',
       category: 'cancelled',
@@ -254,6 +291,10 @@ export const FAILURE_CODES: readonly FailureCode[] = [
   'WRONG_PAGE',
   'VALIDATION_FAILED',
   'UPLOAD_FILE_FAILED',
+  'UPLOAD_NO_MATCHING_FILE',
+  'EXCEL_PARSE_FAILED',
+  'EXCEL_SHEET_NOT_FOUND',
+  'EXCEL_LEGACY_FORMAT_UNSUPPORTED',
   'ELEMENT_NOT_FOUND',
   'TIMEOUT',
   'ABORTED',

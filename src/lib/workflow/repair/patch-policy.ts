@@ -61,6 +61,7 @@ const REPLAY_SAFETY: Readonly<Record<string, ReplaySafety>> = {
   'increase-variable': 'SAFE',
   'data-mapping': 'SAFE',
   'sort-data': 'SAFE',
+  'parse-excel': 'SAFE',
   'export-data': 'SAFE',
   'save-local': 'IDEMPOTENT',
   clipboard: 'SAFE',

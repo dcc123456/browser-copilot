@@ -164,6 +164,22 @@ const OVERRIDES: Record<string, OperatorOverride> = {
     ],
   },
   'save-local': { aiExposure: 'hidden' },
+  'parse-excel': {
+    semanticPhrases: [
+      'parse excel',
+      'excel',
+      'xlsx',
+      'csv',
+      'spreadsheet',
+      'parse spreadsheet',
+      'excel to json',
+      '解析 excel',
+      '解析表格',
+      '读取表格',
+      '表格转 json',
+      'excel 转 json',
+    ],
+  },
   note: { aiExposure: 'hidden' },
   'blocks-group': { aiExposure: 'hidden' },
   'workflow-state': { aiExposure: 'hidden' },
@@ -202,6 +218,8 @@ const OVERRIDES: Record<string, OperatorOverride> = {
       'upload attachment',
       'upload the screenshot',
       'upload the generated image',
+      'upload the latest download',
+      'upload a downloaded file',
       'file input',
       'attach file',
       '上传',
@@ -211,13 +229,19 @@ const OVERRIDES: Record<string, OperatorOverride> = {
       '上传截图',
       '上传生成的图片',
       '上传附件',
+      '上传最新下载的文件',
     ],
     // Structured node contract (spec §12): node success means the files are
     // in the page upload control — NOT that the site finished processing.
     buildGoalContract: (args) => {
       const selector = typeof args['selector'] === 'string' ? args['selector'].trim() : ''
       if (!selector) return undefined
-      const mode = args['sourceMode'] === 'workflow-file' ? 'workflow-file' : 'user-select'
+      const mode =
+        args['sourceMode'] === 'workflow-file'
+          ? 'workflow-file'
+          : args['sourceMode'] === 'latest-download'
+            ? 'latest-download'
+            : 'user-select'
       const fileVariable = variableNameOf(
         typeof args['fileVariable'] === 'string' ? args['fileVariable'] : '',
       )
@@ -231,16 +255,30 @@ const OVERRIDES: Record<string, OperatorOverride> = {
         { kind: 'elementExists' as const, target },
         ...(namesVariable ? [{ kind: 'variableExists' as const, name: fileVariable }] : []),
       ]
+      const accept = typeof args['accept'] === 'string' ? args['accept'].trim() : ''
+      const filePattern = typeof args['filePattern'] === 'string' ? args['filePattern'].trim() : ''
+      const latestFilters = [
+        accept ? `accept "${accept}"` : '',
+        filePattern ? `name pattern "${filePattern}"` : '',
+      ]
+        .filter(Boolean)
+        .join(' and ')
       return {
         version: 1 as const,
         goal:
           mode === 'workflow-file'
             ? `Put file(s) from variable "${namesVariable ? fileVariable : '?'}" into the upload control (${selector})`
-            : `Put the user-selected file(s) into the upload control (${selector})`,
+            : mode === 'latest-download'
+              ? `Put the newest downloaded file${latestFilters ? ` matching ${latestFilters}` : ''} into the upload control (${selector})`
+              : `Put the user-selected file(s) into the upload control (${selector})`,
         successCriteria,
         failureMeaning: [
           'The target element is missing or is not a file input / drop zone.',
-          'The file variable is missing or holds invalid file data.',
+          ...(mode === 'workflow-file'
+            ? ['The file variable is missing or holds invalid file data.']
+            : mode === 'latest-download'
+              ? ['No downloaded file matches the accept / file-pattern filters.']
+              : []),
           'The control does not accept the number of files provided.',
         ],
         evidence: [
@@ -256,7 +294,15 @@ const OVERRIDES: Record<string, OperatorOverride> = {
           },
           { target: 'locator', action: 'Check for a custom drop zone and target it.' },
           { target: 'parameter', action: 'Fix the multiple flag to match the control.' },
-          { target: 'parameter', action: 'Fix the file variable / file data.' },
+          ...(mode === 'latest-download'
+            ? [
+                {
+                  target: 'parameter' as const,
+                  action:
+                    'Adjust accept / file pattern, or enable fallbackToPicker for a manual pick.',
+                },
+              ]
+            : [{ target: 'parameter' as const, action: 'Fix the file variable / file data.' }]),
         ],
       }
     },

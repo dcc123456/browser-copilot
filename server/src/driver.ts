@@ -24,7 +24,7 @@
  * @module server/driver
  */
 
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import type { BrowserContext, Download, Frame, Page } from 'playwright'
@@ -45,6 +45,17 @@ interface RecordedDownload {
   filename: string
   path: string | null
   url: string
+  lastModified: number
+  size?: number
+}
+
+/** A download the driver can offer to `upload-file`'s latest-download source. */
+export interface RecordedDownloadInfo {
+  filename: string
+  path: string | null
+  url: string
+  lastModified: number
+  size?: number
 }
 
 /** Matches the extension's `isContextLost` family of navigation races. */
@@ -112,11 +123,31 @@ export class RunDriver {
       const safe = filename.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
       const path = join(dir, safe)
       await download.saveAs(path)
-      this.downloads.push({ filename, path, url: download.url() })
+      let lastModified = Date.now()
+      let size: number | undefined
+      try {
+        const stat = statSync(path)
+        lastModified = stat.mtimeMs
+        size = stat.size
+      } catch {
+        // Ordering only needs a monotonic stamp; the save already succeeded.
+      }
+      this.downloads.push({
+        filename,
+        path,
+        url: download.url(),
+        lastModified,
+        ...(size !== undefined ? { size } : {}),
+      })
     } catch (error) {
-      this.downloads.push({ filename, path: null, url: download.url() })
+      this.downloads.push({ filename, path: null, url: download.url(), lastModified: Date.now() })
       logger.warn(`[runner] download save failed: ${(error as Error).message}`)
     }
+  }
+
+  /** Snapshot of this run's downloads for `upload-file`'s latest-download mode. */
+  listDownloads(): RecordedDownloadInfo[] {
+    return this.downloads.map((download) => ({ ...download }))
   }
 
   // --- Tab registry -----------------------------------------------------------

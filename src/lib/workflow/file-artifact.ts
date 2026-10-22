@@ -43,6 +43,7 @@ export type UploadFileErrorCode =
   | 'UPLOAD_FILE_VARIABLE_INVALID'
   | 'UPLOAD_FILE_DATA_INVALID'
   | 'UPLOAD_MULTIPLE_NOT_SUPPORTED'
+  | 'UPLOAD_NO_MATCHING_FILE'
   | 'UPLOAD_USER_SELECTION_CANCELLED'
   | 'UPLOAD_USER_SELECTION_TIMEOUT'
   | 'UPLOAD_FILE_INJECTION_FAILED'
@@ -165,6 +166,8 @@ const EXT_BY_MIME: Record<string, string> = {
   'text/csv': 'csv',
   'application/json': 'json',
   'application/zip': 'zip',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  'application/vnd.ms-excel': 'xls',
 }
 
 /** Infer a filename extension from a MIME type (undefined when unknown). */
@@ -335,7 +338,10 @@ export function artifactFromBytes(
 }
 
 /** Read a browser `File` into a Workflow artifact. */
-export async function artifactFromFile(file: File): Promise<WorkflowFileArtifact> {
+export async function artifactFromFile(
+  file: File,
+  source: WorkflowFileSource = 'user',
+): Promise<WorkflowFileArtifact> {
   const buffer = await file.arrayBuffer()
-  return artifactFromBytes(file.name, file.type, new Uint8Array(buffer), 'user')
+  return artifactFromBytes(file.name, file.type, new Uint8Array(buffer), source)
 }

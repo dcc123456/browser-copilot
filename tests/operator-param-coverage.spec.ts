@@ -64,6 +64,8 @@ const SHARED_HELPER_SOURCES = [
   // `get-secret` reads its credential rows through the data model, so its
   // `credential` / `variableName` reads live here rather than in the executor.
   'src/lib/workflow/secret-params.ts',
+  // `parse-excel` delegates sheet / header / output-name reads to this module.
+  'src/lib/workflow/excel-node.ts',
 ]
 
 /**

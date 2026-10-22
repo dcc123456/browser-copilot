@@ -17,6 +17,7 @@
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { BlockExecutor, WorkflowExecCtx } from '../../src/background/workflow-engine/executors'
 import { LoopBreakpointError } from '../../src/background/workflow-engine/loop-breakpoint'
@@ -37,7 +38,17 @@ import {
   webhookContentTypeOf,
   webhookRecord,
 } from '../../src/lib/workflow/block-output'
-import { normalizeWorkflowFiles } from '../../src/lib/workflow/file-artifact'
+import {
+  artifactFromBytes,
+  mimeTypeForFilename,
+  normalizeWorkflowFiles,
+  UploadFileError,
+  variableNameOf,
+  type WorkflowFileArtifact,
+} from '../../src/lib/workflow/file-artifact'
+import { pickLatestFile } from '../../src/lib/workflow/latest-file'
+import { parseSpreadsheetFile, storeSpreadsheetOutput } from '../../src/lib/workflow/excel-node'
+import { SpreadsheetParseError, type ParsedSpreadsheet } from '../../src/lib/workflow/excel-parse'
 import { secretEnvNameOf, secretRequestsOf } from '../../src/lib/workflow/secret-params'
 import {
   coerceInputValue,
@@ -1512,42 +1523,99 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     return runRaw(op, ctx)
   }
 
+  /**
+   * Mirrors the extension's latest-download source: pick the newest saved
+   * download matching accept/filePattern. There is no picker to fall back to
+   * headless, so an empty match is a hard failure.
+   */
+  const newestDownloadedFile = async (
+    data: Record<string, unknown>,
+    selector: string,
+  ): Promise<WorkflowFileArtifact> => {
+    const accept = String(data['accept'] ?? '').trim()
+    const filePattern = String(data['filePattern'] ?? '').trim()
+    const recorded = driver.listDownloads()
+    const candidates = recorded
+      .filter((entry): entry is typeof entry & { path: string } => entry.path !== null)
+      .map((entry) => ({
+        name: entry.filename,
+        mimeType: mimeTypeForFilename(entry.filename),
+        lastModified: entry.lastModified,
+        size: entry.size,
+        path: entry.path,
+      }))
+    const latest = pickLatestFile(candidates, { accept, filePattern })
+    if (!latest) {
+      const filters = [
+        accept ? `accept "${accept}"` : '',
+        filePattern ? `name pattern "${filePattern}"` : '',
+      ]
+        .filter(Boolean)
+        .join(' and ')
+      throw new UploadFileError(
+        'UPLOAD_NO_MATCHING_FILE',
+        `upload-file: no downloaded file matched${filters ? ` ${filters}` : ''}. ` +
+          `This run recorded ${recorded.length} download(s); ` +
+          'fallbackToPicker is unavailable in the headless server.',
+        { selector },
+      )
+    }
+    try {
+      const bytes = await readFile(latest.path)
+      return artifactFromBytes(latest.name, latest.mimeType ?? '', bytes, 'download')
+    } catch (error) {
+      throw new UploadFileError(
+        'UPLOAD_FILE_DATA_INVALID',
+        `upload-file: the newest matching download "${latest.name}" could not be read: ${message(error)}`,
+        { selector },
+      )
+    }
+  }
+
   const uploadFileExec: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const selector = sel(data)
     if (!selector) throw new Error('upload-file: missing selector')
 
     const rawMode = String(data['sourceMode'] ?? '').trim()
-    const sourceMode: 'user-select' | 'workflow-file' =
+    const sourceMode: 'user-select' | 'workflow-file' | 'latest-download' =
       rawMode === 'workflow-file'
         ? 'workflow-file'
-        : rawMode === 'user-select'
-          ? 'user-select'
-          : data['fileData'] !== undefined
-            ? 'workflow-file'
-            : 'user-select'
+        : rawMode === 'latest-download'
+          ? 'latest-download'
+          : rawMode === 'user-select'
+            ? 'user-select'
+            : data['fileData'] !== undefined
+              ? 'workflow-file'
+              : 'user-select'
 
+    let files: WorkflowFileArtifact[]
     if (sourceMode === 'user-select') {
       // The headless server has no UI to pick a local file.
-      throw new Error(
-        'upload-file: user-select mode is unavailable in the headless server; use workflow-file mode.',
+      throw new UploadFileError(
+        'UPLOAD_USER_SELECTION_CANCELLED',
+        'upload-file: user-select mode is unavailable in the headless server; use workflow-file or latest-download mode.',
+        { selector },
       )
-    }
-
-    const fileVariable = String(data['fileVariable'] ?? '').trim()
-    let raw: unknown
-    if (fileVariable) {
-      if (!(fileVariable in ctx.variables)) {
-        throw new Error(`upload-file: variable "${fileVariable}" is not set.`)
-      }
-      raw = ctx.variables[fileVariable]
-    } else if (data['fileData'] !== undefined) {
-      raw = interpolate(String(data['fileData'] ?? ''), ctx.variables, ctx.refData)
+    } else if (sourceMode === 'latest-download') {
+      const latest = await newestDownloadedFile(data, selector)
+      ctx.emit('status', `Using the newest matching download: ${latest.name}`)
+      files = [latest]
     } else {
-      throw new Error('upload-file: workflow-file mode requires a fileVariable.')
+      const fileVariable = String(data['fileVariable'] ?? '').trim()
+      let raw: unknown
+      if (fileVariable) {
+        if (!(fileVariable in ctx.variables)) {
+          throw new Error(`upload-file: variable "${fileVariable}" is not set.`)
+        }
+        raw = ctx.variables[fileVariable]
+      } else if (data['fileData'] !== undefined) {
+        raw = interpolate(String(data['fileData'] ?? ''), ctx.variables, ctx.refData)
+      } else {
+        throw new Error('upload-file: workflow-file mode requires a fileVariable.')
+      }
+      files = normalizeWorkflowFiles(raw)
     }
-
-    const files = normalizeWorkflowFiles(raw)
     const payloads = files.map((f) => {
       const payload = dataUrlToFilePayload(f.dataUrl)
       if (!payload) throw new Error(`upload-file: invalid data URL for "${f.name}"`)
@@ -1562,6 +1630,57 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     const locator = page.locator(selector).first()
     await locator.setInputFiles(payloads as unknown as Parameters<typeof locator.setInputFiles>[0])
     ctx.emit('result', `Uploaded ${payloads.length} file(s)`)
+    return null
+  }
+
+  const parseExcelExec: BlockExecutor = async (data, ctx) => {
+    assertActive(ctx)
+    if (data['sourceMode'] !== 'workflow-file') {
+      // The headless server has no UI to pick a local file.
+      throw new UploadFileError(
+        'UPLOAD_USER_SELECTION_CANCELLED',
+        'parse-excel: user-select mode is unavailable in the headless server; use workflow-file mode.',
+      )
+    }
+
+    const fileVariable = variableNameOf(String(data['fileVariable'] ?? ''))
+    if (!fileVariable) {
+      throw new UploadFileError(
+        'UPLOAD_FILE_VARIABLE_NOT_FOUND',
+        'parse-excel: workflow-file mode requires fileVariable (the variable holding the file).',
+      )
+    }
+    if (!(fileVariable in ctx.variables)) {
+      throw new UploadFileError(
+        'UPLOAD_FILE_VARIABLE_NOT_FOUND',
+        `parse-excel: variable "${fileVariable}" is not set. It must be produced by an earlier node.`,
+      )
+    }
+    const files = normalizeWorkflowFiles(ctx.variables[fileVariable])
+    if (files.length !== 1) {
+      throw new SpreadsheetParseError(
+        'EXCEL_PARSE_FAILED',
+        `parse-excel expects exactly one file in "${fileVariable}", got ${files.length}.`,
+      )
+    }
+
+    let parsed: ParsedSpreadsheet
+    try {
+      parsed = await parseSpreadsheetFile(files[0]!, data)
+    } catch (error) {
+      if (error instanceof SpreadsheetParseError || error instanceof UploadFileError) throw error
+      throw new SpreadsheetParseError(
+        'EXCEL_PARSE_FAILED',
+        `parse-excel: "${files[0]!.name}" could not be parsed: ${message(error)}`,
+      )
+    }
+
+    const names = storeSpreadsheetOutput(ctx.variables, data, parsed)
+    ctx.emit(
+      'result',
+      `Parsed ${parsed.rows.length} row(s) from ${files[0]!.name} into {{${names.variableName}}} ` +
+        `(raw rows in {{${names.rawVariableName}}}, sheet "${parsed.sheetName}")`,
+    )
     return null
   }
 
@@ -2209,6 +2328,7 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     'new-window': newWindowExec,
     'create-element': createElementExec,
     'upload-file': uploadFileExec,
+    'parse-excel': parseExcelExec,
     'handle-dialog': handleDialogExec,
     // integration
     webhook: webhook,

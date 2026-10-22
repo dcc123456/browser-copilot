@@ -31,6 +31,7 @@ import EditDataMapping from './EditDataMapping'
 import EditSortData from './EditSortData'
 import EditSetVariable from './EditSetVariable'
 import EditGetSecret from './EditGetSecret'
+import EditParseExcel from './EditParseExcel'
 
 export const BatchCForms: Record<string, ComponentType<EditFormProps>> = {
   // Control flow (conditions category)
@@ -53,4 +54,5 @@ export const BatchCForms: Record<string, ComponentType<EditFormProps>> = {
   EditSetVariable,
   // Browser-Copilot extension block (not from Automa's catalog).
   EditGetSecret,
+  EditParseExcel,
 }

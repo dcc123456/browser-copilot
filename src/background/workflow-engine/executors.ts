@@ -64,11 +64,15 @@ import {
 import { interpretScriptResult } from '../../lib/workflow/script-result'
 import {
   UploadFileError,
+  artifactFromFile,
   normalizeWorkflowFiles,
   type WorkflowFileArtifact,
   isFileContentLiteral,
   variableNameOf,
 } from '../../lib/workflow/file-artifact'
+import { pickLatestFile } from '../../lib/workflow/latest-file'
+import { parseSpreadsheetFile, storeSpreadsheetOutput } from '../../lib/workflow/excel-node'
+import { SpreadsheetParseError, type ParsedSpreadsheet } from '../../lib/workflow/excel-parse'
 import { requestUserFiles } from '../../lib/workflow/user-file-picker'
 import {
   coerceInputValue,
@@ -82,6 +86,7 @@ import {
   askSaveViaSidePanel,
   getDownloadDir,
   getUnattendedDownloadDir,
+  listDownloadedFileCandidates,
   writeFileToDownloadDir,
   type SavePickerPayload,
 } from '../../lib/download-dir'
@@ -2479,15 +2484,17 @@ const uploadFileExec: BlockExecutor = async (data, ctx) => {
   // URL string) or `filePaths` (array); read them but new workflows never
   // write those fields.
   const rawMode = String(data['sourceMode'] ?? '').trim()
-  const sourceMode: 'user-select' | 'workflow-file' =
+  const sourceMode: 'user-select' | 'workflow-file' | 'latest-download' =
     rawMode === 'workflow-file'
       ? 'workflow-file'
       : rawMode === 'user-select'
         ? 'user-select'
-        : data['fileData'] !== undefined ||
-            (Array.isArray(data['filePaths']) && (data['filePaths'] as unknown[]).length > 0)
-          ? 'workflow-file'
-          : 'user-select'
+        : rawMode === 'latest-download'
+          ? 'latest-download'
+          : data['fileData'] !== undefined ||
+              (Array.isArray(data['filePaths']) && (data['filePaths'] as unknown[]).length > 0)
+            ? 'workflow-file'
+            : 'user-select'
 
   let files: WorkflowFileArtifact[]
   if (sourceMode === 'user-select') {
@@ -2496,6 +2503,45 @@ const uploadFileExec: BlockExecutor = async (data, ctx) => {
       accept: String(data['accept'] ?? ''),
       multiple: data['multiple'] === true,
     })
+  } else if (sourceMode === 'latest-download') {
+    const accept = String(data['accept'] ?? '').trim()
+    const filePattern = String(data['filePattern'] ?? '').trim()
+    const scan = await listDownloadedFileCandidates()
+    const latest = pickLatestFile(scan.candidates, { accept, filePattern })
+
+    if (!latest) {
+      if (data['fallbackToPicker'] === true) {
+        ctx.emit('status', 'No matching download — waiting for the user to choose a file…')
+        files = await requestUserFiles({ accept, multiple: false })
+      } else {
+        const filters = [
+          accept ? `accept "${accept}"` : '',
+          filePattern ? `name pattern "${filePattern}"` : '',
+        ]
+          .filter(Boolean)
+          .join(' and ')
+        const scanned = scan.scanned.length > 0 ? scan.scanned.join(', ') : 'none'
+        const skipped = scan.skipped.length > 0 ? ` Skipped: ${scan.skipped.join('; ')}.` : ''
+        throw new UploadFileError(
+          'UPLOAD_NO_MATCHING_FILE',
+          `upload-file: no downloaded file matched${filters ? ` ${filters}` : ''}. ` +
+            `Scanned: ${scanned}.${skipped} ` +
+            'Add the file to the download folder, adjust accept / file pattern, or turn on fallbackToPicker.',
+          { selector },
+        )
+      }
+    } else {
+      try {
+        files = [await artifactFromFile(await latest.getFile(), 'download')]
+      } catch (error) {
+        throw new UploadFileError(
+          'UPLOAD_FILE_DATA_INVALID',
+          `upload-file: the newest matching download "${latest.name}" could not be read: ${message(error)}`,
+          { selector },
+        )
+      }
+      ctx.emit('status', `Using the newest matching download: ${latest.name}`)
+    }
   } else {
     const fileVariable = variableNameOf(String(data['fileVariable'] ?? ''))
     let raw: unknown
@@ -2615,6 +2661,62 @@ const uploadFileExec: BlockExecutor = async (data, ctx) => {
     `${evidence?.count ?? files.length} file(s) in the upload control: ${(evidence?.files ?? [])
       .map((f) => f.name)
       .join(', ')}`,
+  )
+  return null
+}
+
+const EXCEL_PICKER_ACCEPT =
+  '.xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv'
+
+const parseExcelExec: BlockExecutor = async (data, ctx) => {
+  assertActive(ctx)
+  const sourceMode = data['sourceMode'] === 'workflow-file' ? 'workflow-file' : 'user-select'
+
+  let file: WorkflowFileArtifact
+  if (sourceMode === 'user-select') {
+    ctx.emit('status', 'Waiting for the user to choose a spreadsheet…')
+    const picked = await requestUserFiles({ accept: EXCEL_PICKER_ACCEPT, multiple: false })
+    file = picked[0]!
+  } else {
+    const fileVariable = variableNameOf(String(data['fileVariable'] ?? ''))
+    if (!fileVariable) {
+      throw new UploadFileError(
+        'UPLOAD_FILE_VARIABLE_NOT_FOUND',
+        'parse-excel: workflow-file mode requires fileVariable (the variable holding the file).',
+      )
+    }
+    if (!(fileVariable in ctx.variables)) {
+      throw new UploadFileError(
+        'UPLOAD_FILE_VARIABLE_NOT_FOUND',
+        `parse-excel: variable "${fileVariable}" is not set. It must be produced by an earlier node.`,
+      )
+    }
+    const files = normalizeWorkflowFiles(ctx.variables[fileVariable])
+    if (files.length !== 1) {
+      throw new SpreadsheetParseError(
+        'EXCEL_PARSE_FAILED',
+        `parse-excel expects exactly one file in "${fileVariable}", got ${files.length}.`,
+      )
+    }
+    file = files[0]!
+  }
+
+  let parsed: ParsedSpreadsheet
+  try {
+    parsed = await parseSpreadsheetFile(file, data)
+  } catch (error) {
+    if (error instanceof SpreadsheetParseError || error instanceof UploadFileError) throw error
+    throw new SpreadsheetParseError(
+      'EXCEL_PARSE_FAILED',
+      `parse-excel: "${file.name}" could not be parsed: ${message(error)}`,
+    )
+  }
+
+  const names = storeSpreadsheetOutput(ctx.variables, data, parsed)
+  ctx.emit(
+    'result',
+    `Parsed ${parsed.rows.length} row(s) from ${file.name} into {{${names.variableName}}} ` +
+      `(raw rows in {{${names.rawVariableName}}}, sheet "${parsed.sheetName}")`,
   )
   return null
 }
@@ -3492,6 +3594,7 @@ export const EXECUTORS: Record<string, BlockExecutor> = {
   'new-window': newWindowExec,
   'create-element': createElementExec,
   'upload-file': uploadFileExec,
+  'parse-excel': parseExcelExec,
   'handle-dialog': handleDialogExec,
   // integration
   webhook: webhook,

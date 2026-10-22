@@ -38,8 +38,7 @@ export const OPERATOR_GUIDE = `# 工作流算子指南（Browser Copilot）
   遍历当次列表的全部条目——只录一条或手动展开 N 条都会失效。
 - 需求里有站点能力做不到的（如按通勤时间过滤），不要硬造步骤：改用站点自带
   筛选（城市/区域/薪资/经验）近似，并说明哪部分做不到、用了什么近似。
-- 可有可无的步骤用 element-exists 分支跳过；写 always-fail 的节点靠 AI 调试兜底
-  是下策。
+- 写 always-fail 的节点靠 AI 调试兜底是下策。
 - 生成首个 trigger 调用时带上 goalText:'<用户这次的需求原文>'；关键动作(forms 提交、
   业务 event-click、webhook)必须带契约否则保存被拒:
   data.__reliability={intent:'意图',idempotency:'unsafe',postconditions:[{kind:'urlContains',
@@ -52,7 +51,7 @@ export const OPERATOR_GUIDE = `# 工作流算子指南（Browser Copilot）
 element-exists 没有 locator 不是"返回不存在"，而是整个调用被拒绝。
 其余必填以工具 schema 的 required 为准（press-key 的 keys、new-tab/webhook 的 url、
 forms 的 value、save-local 的 {{引用}} value 加 filename、export-data 的 name 等）；
-get-text/read-page 开 saveData 时 dataColumn 必填。trigger-event 用 event（非 eventName）。
+trigger-event 用 event（非 eventName）。
 
 ## 数据必须是动态的（禁止死数据）
 
@@ -72,8 +71,8 @@ get-text/read-page 开 saveData 时 dataColumn 必填。trigger-event 用 event�
 **结构性参数保持字面量**：\`selector\` / \`findBy\` / \`target\`、\`variableName\`、\`attributeName\`、
 枚举与时间配置、\`workflowId\`。选择器写成 \`{{x}}\` 会让节点读不懂、重放不了。
 
-**页面内容必须有"生产者"节点**：清单、排名、正文来自页面时，图里必须有节点**读取它**，
-再用 \`{{变量}}\` 引用。声明成工作流输入等于把快照当默认值，重放永远是旧数据。
+**页面内容必须有"生产者"节点**：清单、正文来自页面时，图里必须有节点**读取它**，再用 \`{{变量}}\` 引用；
+声明成工作流输入等于拿快照当默认值。
 
 采集清单（热搜、搜索结果、表格行）的固定写法：
 
@@ -104,10 +103,10 @@ get-text/read-page 开 saveData 时 dataColumn 必填。trigger-event 用 event�
    **例外**：图片/canvas 产物（图表、海报、二维码）属已认定缺口，**无需论证**；截图走 \`take-screenshot\`。
 4. 理由会成为节点 description；收尾时告诉用户"有 1 个代码节点，原因是……"。
 
-上面映射表的算子都试过仍不行，才用代码节点——**只把那一步**放进代码。
+上面映射表的算子都试过仍不行，才用代码节点，只把那一步放进代码。
 
-代码体两种写法等价：直接写裸表达式（\`document.title\`、\`await fetch('/api').then(r=>r.json())\`）
-会自动把结果作为节点返回值；也可以写语句体，用 \`return ...\` 或 \`automaNextBlock(...)\` 给出结果。
+代码体可写裸表达式（\`document.title\`、\`await fetch('/api').then(r=>r.json())\`，自动作为节点返回值）
+或语句体（\`return ...\` / \`automaNextBlock(...)\`）。
 
 **脚本产物交给后续算子（生成 canvas 图片再上传）**：代码里用
 \`automaSetVariable('<名>', 值)\` 暴露 data URL，再接 \`wf_op_upload-file\`：
@@ -122,22 +121,24 @@ get-secret 的代价是每次运行都要用户存着那条凭证。只对密码
 
 对话里给的账号 / 密码也照常写 value：生成引擎把它收成触发器里的密文输入，重放时自动填入。
 
-## upload-file
+## 文件类算子：upload-file / parse-excel
 
-\`user-select\` 选择后注入；\`workflow-file\` 填 \`fileVariable\`（变量名，非内容）。
-\`selector\` 指向控件/拖拽区，禁fill。
+- upload-file：\`user-select\` 选择后注入；\`workflow-file\` 填 \`fileVariable\`（变量名，非内容）；
+  \`latest-download\` 取下载目录里**最新**匹配文件（\`accept\`+\`filePattern\` 过滤，无匹配报错，
+  \`fallbackToPicker:true\` 转手动）。\`selector\` 指向控件/拖拽区，禁 fill。
+- parse-excel：\`user-select\` 运行时选 .xlsx/.csv，\`workflow-file\` 读 \`fileVariable\`；
+  \`variableName\` 收对象数组（首行表头），\`rawVariableName\` 收二维数组；.xls 需先另存。
+
 ## 工具分发：算子按分类发送
 
-工作流模式**不会一次给你全部算子工具**。常驻只有 4 个：\`new-tab\`、\`event-click\`、
-\`forms\`、\`get-text\`；其余按 5 类**按需发送**，你要先用 \`use_operators({categories:[…]})\`
-声明本轮要哪几类。声明是**替换**语义，按当前阶段声明即可；调用未声明分类下的算子会自动
-激活该分类并让你重试，但白花一轮，不如先声明。
+工作流模式首回合发送**全部算子**，直接选用。要收缩载荷才用 \`use_operators({categories:[…]})\`——
+它是**替换**语义，会关掉未列出的类别，列全仍需要的；调用未声明类别下的算子会自动激活并要你重试，白花一轮。
 
 | 分类 | 覆盖 |
 |---|---|
 | \`interaction\` | 点击、填写、悬停、上传、读文本/属性 |
 | \`browser\` | 标签页、导航、Cookie、弹窗、下载、截图、OCR、读页面、写文件 |
-| \`data\` | 变量、映射、正则、排序、切片、数据表、密钥 |
+| \`data\` | 变量、映射、正则、排序、切片、数据表、密钥、表格解析 |
 | \`conditions\` | if/exists 分支、各类循环 |
 | \`general\` | 等待、子工作流、webhook、通知、剪贴板、嵌套 AI |
 
@@ -161,6 +162,7 @@ get-secret 的代价是每次运行都要用户存着那条凭证。只对密码
 | 判断元素在不在、按条件分支 | element-exists / conditions | conditions | selector / 表达式 |
 | 等待（导航后、等页面稳定） | delay / wait-connections | general | time / timeout（毫秒） |
 | 存变量、拼接、正则、累加 | set-variable / data-mapping / slice-variable / regex-variable / increase-variable | data | variableName, value；读变量不用算子，直接写 \`{{变量名}}\` |
+| 解析 Excel/CSV 为数据 | parse-excel | data | sourceMode, fileVariable 或运行时选择；variableName, rawVariableName |
 | 排序 / 重排数据 | sort-data | data | — |
 | 遍历数据/元素、重复 N 次、条件循环 | loop-data / loop-elements / repeat-task / while-loop | conditions | — |
 | 抓接口数据 | webhook | general | url, method, headers, body, responseVariable |
@@ -187,17 +189,16 @@ get-secret 的代价是每次运行都要用户存着那条凭证。只对密码
    \`{{lastOcrText}}\` 提取到新变量；最后 forms 的 value 写 \`{{lastOcrText}}\` 或提取变量。
 4. 采集并导出页面清单：new-tab → get-text(multiple:true, saveData:true, dataColumn:'内容')
    →（可选）再调一次 get-text **只换 dataColumn**（如 '热度'）补上新列
-   → export-data(name:'xxx.csv', type:'csv')。**先采、再导**：读取没采到、或读取节点没设
-   \`saveData\` / \`dataColumn\`，导出会**直接报错**，不会再写一个空文件。
+   → export-data(name:'xxx.csv', type:'csv')。**先采、再导**：读取没采到或没设
+   \`saveData\`/\`dataColumn\`，导出直接报错。
 
 ## 补充说明
 
-- forms 读表单控件的**当前值**用同一个算子：\`getValue:true\` + \`variableName\`
-  （复选框得 true/false，多选下拉得数组，单选得选中值）。**不要为了读一个输入框去写代码。**
+- forms 读当前值的返回形态：复选框 true/false，多选下拉数组，单选选中值。**不要为了读一个输入框去写代码。**
 - element-exists 有 exists / notExists 两路输出——可有可无的步骤用它跳过，而不是靠报错。
 - ai-agent：prompt, selector(可选), actOnPage, maxToolRounds, variableName。
-- **save-local / export-data 都写入「设置 → 下载目录」配置的位置**；没配置才弹另存为。
-  读取读不到、表为空、保存没内容都**直接报错**，照报错改，别默认它写成功了。
+- **save-local / export-data 写入「设置 → 下载目录」**，没配置才弹另存为；读不到/表为空/没内容
+  都**直接报错**，照报错改。
 
 ## 节点取舍：什么是有效步骤
 
@@ -215,10 +216,4 @@ get-secret 的代价是每次运行都要用户存着那条凭证。只对密码
 保留：
 - 完成用户目标的必经动作（导航、点击、填表、提交、下载）；
 - 支撑它们的机制节点（等待、变量、OCR、AI 预填——与主步骤成组同去留）；
-- 结果被后续步骤引用的读取。
-
-## 整理/生成工作流的输出要求
-
-先列步骤清单：每步一行——算子名 + 一句话说明 + 保留/剔除及剔除理由；节点与连边由
-\`wf_op_*\` 调用**自动记录**，不要手写 JSON。保存确认卡片上会再做一次 AI 审查，判定标准
-与本指南一致。`
+- 结果被后续步骤引用的读取。`

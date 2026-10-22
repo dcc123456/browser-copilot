@@ -21,7 +21,7 @@ import type { BlockCategory } from '../src/lib/workflow/blocks/types'
  * use_operators detour or the activate-and-retry penalty — so the mode now
  * advertises EVERY operator category from round one (the model may still narrow
  * the surface consciously via `use_operators`). The price is accepted
- * deliberately: round 1 measures ~59k chars (~17.9k tokens), roughly 3× full
+ * deliberately: round 1 measures ~61k chars (~18.6k tokens), roughly 3× full
  * auto, and only in this mode.
  *
  * Raised 18_000 → 20_000 when `present_plan` (the plan skill's approval
@@ -97,19 +97,22 @@ const MAX_CATALOG_CHARS = 31_400
  * so an editable block is a block the model can call — see
  * specs/2026-10-19-reload-tab-url-design.md). Measured 59_855 → 59_835, after
  * shortening its catalog sentence to name the second mode ("or open a URL in it
- * instead") instead of restating the plain refresh.
+ * instead") instead of restating the plain refresh. Raised 59_900 → 61_500 for
+ * `parse-excel` (~1.6k: a full operator schema plus its guide section, itself
+ * compacted by merging the upload-file/parse-excel prose — measured 61_445).
  */
-const MAX_WORKFLOW_ROUND1_CHARS = 59_900
+const MAX_WORKFLOW_ROUND1_CHARS = 61_500
 /**
  * The real per-round ceiling: one declared category on top of round 1. The
- * largest (`interaction`, 13 schemas) measures ~32.8k; the smallest (`data`)
- * ~28.3k. Raised 25_100 → 34_000 together with the round-1 budget (the mounted
+ * largest (`interaction`, 13 schemas) measures ~37.6k; the smallest (`general`)
+ * ~33.5k. Raised 25_100 → 34_000 together with the round-1 budget (the mounted
  * operator guide), after the mode paragraph's duplicated prose was deleted.
  * Raised 34_000 → 35_500 together with the round-1 budget (required args).
  * Raised 35_500 → 37_000 when the generation goal and discovery tools joined.
  * Raised 37_000 → 37_100 with the round-1 budget (the guide's credential-scope rule).
+ * Raised 37_100 → 37_650 with the round-1 budget (`parse-excel` — measured 37_566).
  */
-const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 37_100
+const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 37_650
 /**
  * The ceiling for the worst case the model can actually reach: every category
  * declared at once, which is the same set as `operators_author` (~42.9k of tool
@@ -119,9 +122,10 @@ const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 37_100
  * (required args). Raised 58_000 → 59_500 when the generation goal and
  * discovery tools joined. Raised 59_500 → 59_600 with the round-1 budget (the
  * guide's credential-scope rule). Raised 59_600 → 59_900 with the round-1 budget
- * (`reload-tab` becoming an operator — see MAX_WORKFLOW_ROUND1_CHARS).
+ * (`reload-tab` becoming an operator — see MAX_WORKFLOW_ROUND1_CHARS). Raised
+ * 59_900 → 61_500 with the round-1 budget (`parse-excel` — measured 61_445).
  */
-const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 59_900
+const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 61_500
 /**
  * Absolute worst case: every category plus both escape hatches loaded. Stays
  * loaded for the rest of the conversation, so this is a per-round cost, not a
@@ -129,17 +133,18 @@ const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 59_900
  * mounted operator guide). Raised 57_500 → 59_500 together with the round-1
  * budget (required args). Raised 59_500 → 60_800 when the generation goal and
  * discovery tools joined. Raised 60_800 → 61_000 with the round-1 budget
- * (`reload-tab` becoming an operator — see MAX_WORKFLOW_ROUND1_CHARS).
+ * (`reload-tab` becoming an operator — see MAX_WORKFLOW_ROUND1_CHARS). Raised
+ * 61_000 → 62_550 with the round-1 budget (`parse-excel` — measured 62_492).
  */
-const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 61_000
+const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 62_550
 /**
  * The guardrails that matter, expressed as ratios against full auto. Round 1
- * now deliberately carries EVERY operator schema, so workflow runs ~2.8× full
- * auto's tool surface and ~2.9× its total payload — the accepted price of not
+ * now deliberately carries EVERY operator schema, so workflow runs ~3× full
+ * auto's tool surface and ~3.2× its total payload — the accepted price of not
  * losing runs to undeclared categories (see the file header). These ceilings
- * (measured 2.79 / 2.95) keep that price from silently creeping further.
+ * (measured 3.03 / 3.16) keep that price from silently creeping further.
  */
-const MAX_WORKFLOW_TOOLS_RATIO = 3
+const MAX_WORKFLOW_TOOLS_RATIO = 3.05
 const MAX_WORKFLOW_OVER_FULL_AUTO_RATIO = 3.2
 
 /**

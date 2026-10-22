@@ -80,6 +80,14 @@ export const VARIABLE_PRODUCER_FIELD: Readonly<Record<string, string>> = {
   // Its `variableName` is only the FIRST credential row; {@link
   // producedVariableNames} adds the rest through `secret-params`.
   'get-secret': 'variableName',
+  // The object rows go to `variableName`; the raw 2-D array is a second,
+  // independently nameable output added in `producedVariableNames`.
+  'parse-excel': 'variableName',
+}
+
+/** Additional, independently named outputs a block writes besides its main one. */
+const EXTRA_OUTPUT_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  'parse-excel': ['rawVariableName'],
 }
 
 /**
@@ -100,6 +108,10 @@ export function producedVariableNames(node: WorkflowNode): string[] {
   const field = VARIABLE_PRODUCER_FIELD[blockId]
   const declared = field ? stringField(node, field) : ''
   if (declared) names.add(declared)
+  for (const extraField of EXTRA_OUTPUT_FIELDS[blockId] ?? []) {
+    const extra = stringField(node, extraField)
+    if (extra) names.add(extra)
+  }
   if (blockId === SECRET_PRODUCER_BLOCK) {
     for (const name of secretVariableNamesOf(node.data)) names.add(name)
   }

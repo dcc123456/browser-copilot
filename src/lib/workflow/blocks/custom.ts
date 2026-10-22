@@ -149,6 +149,35 @@ export const CUSTOM_BLOCKS: BlockCatalogEntry[] = [
     },
     cloud: false,
   },
+  {
+    id: 'parse-excel',
+    name: 'Parse Excel',
+    description:
+      'Parse an .xlsx or .csv file into JSON rows: objects keyed by the header row plus the raw 2-D array.',
+    icon: 'lucide:Table',
+    category: 'data',
+    component: 'Default',
+    editComponent: 'EditParseExcel',
+    inputs: 1,
+    outputs: 1,
+    allowedInputs: true,
+    maxConnection: 1,
+    data: {
+      disableBlock: false,
+      description: '',
+      // `user-select` asks for one spreadsheet at run time; `workflow-file`
+      // reads a file artifact already held by an earlier node.
+      sourceMode: 'user-select',
+      fileVariable: '',
+      // Empty = the workbook's first sheet. Exact match otherwise (xlsx only).
+      sheetName: '',
+      // First row becomes the object keys; the raw array always keeps it.
+      hasHeader: true,
+      variableName: 'lastExcelRows',
+      rawVariableName: 'lastExcelRawRows',
+    },
+    cloud: false,
+  },
 ]
 
 /** Ids of every local extension block. */
