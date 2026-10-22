@@ -8,6 +8,137 @@ All notable changes to this project are documented here. The format is based on
 
 _To be released._
 
+## [0.6.8] - 2026-10-22
+
+### Added — In-place self-update from GitHub Releases
+
+Unpacked Chrome installs can update themselves without a server. The panel checks
+GitHub's `/releases/latest` every 12 hours and on install/startup, verifies the
+package's SHA-256 digest, downloads and extracts the ZIP with path and size
+validation, then overwrites the folder the extension was originally loaded from.
+That folder is requested once and reused on later updates. Before anything is
+replaced, every affected file is copied into a timestamped
+`browser-copilot-backup-<version>-<time>` folder inside the install directory —
+the old root manifest is stored as `manifest.json.bak`, so the backup cannot be
+loaded as a second extension — and `manifest.json` itself is written last, so a
+failed write leaves the running version intact. A banner offers the update; the
+dialog confirms and ends with a reload action, and the new version takes effect
+after `chrome.runtime.reload()`. Firefox and store installs get a release-page
+link instead. No remote code is fetched into the running extension: the new
+package only runs after Chrome reloads it.
+
+### Added — Multi-model provider profiles and thinking effort
+
+A provider profile now stores every model the user added plus the one in use, and
+can send a thinking-effort parameter when the vendor supports it. Presets only
+suggest a model, so a prefilled value no longer filters fetched suggestions down
+to one entry. The vendor table resolves levels per model family: Qwen3.8 takes
+`reasoning_effort` and refuses a token budget in the same request, older Qwen3
+keeps the token budget across its documented range, MiniMax accepts a level only
+on M3.1-Flash (which always thinks), M3 can be turned off but takes no depth, and
+the M2 series always thinks and receives no control at all. Levels a model cannot
+express are disabled in the editor, and a rejected request is restated in the
+panel's language.
+
+### Added — Workflow groups and batch import/export
+
+The Workflows tab gains collapsible group sections backed by the existing
+`folderId`, so grouping only rewrites membership and does not bump revisions or
+`updatedAt`. Groups can be renamed, deleted (orphaned members fall back to
+ungrouped), and exported as an envelope that carries its member workflows and can
+be imported again. Checkbox selection drives batch export of checked workflows,
+and the Data tab uses the same selection model for secrets and profiles with a
+`browser-copilot-data` envelope. Imports always create new records with fresh ids
+and never overwrite local entries.
+
+### Added — Canvas groups, structural undo, and page-grounded AI edits
+
+- A `blocks-group` group block lands on the canvas; its children live in the
+  group's own data rather than in the drawflow graph, and the engine, integrity
+  checks, run validation, operator classification and edge plumbing all account
+  for that. Groups fold by clicking their name, reorder by dragging the header,
+  and every card has its own move-to-group menu. Editing a workflow now merges
+  the save over the stored record, so its group, plan, table, `createdAt` and
+  revision line survive.
+- `Ctrl+Z` walks the canvas's structural history back: connections, deletions,
+  palette drops, drags (one entry per gesture), auto layout and every landing the
+  assistant produced. There is no redo. The handler leaves the key to the field
+  whenever focus is in a text input or CodeMirror.
+- The floating assistant grounds its answer in a live page snapshot, accepts
+  locators the user picked on the page (they outrank the DOM read), can chain
+  operators in front of the selected step, and gained edit/replace actions for a
+  selected node. When a required parameter cannot be derived from the DOM, the
+  automatic retry rides with a screenshot — inline when the vision model is
+  answering, otherwise as a description.
+
+### Added — Element picker pins the Nth match and picks by text
+
+A broad selector that matched several repeated rows used to be committed as-is,
+so executors silently acted on the first visible match. When the picker finds
+more than one match and the consuming block is not an all-matches consumer, the
+committed selector is now pinned to the aimed element: the plain selector when it
+is unique, otherwise a forced `:nth-of-type` path, then an absolute `:nth-child`
+path (XPath wrapped as `(expr)[n]`). A match stepper switches matches and Enter
+commits the pinned selector; loop blocks and `multiple` consumers opt out. Text
+mode fills the selector with the element's visible text and counts matches with
+the kernel's tightest-holder strategy, and verify mode outlines every match
+before replying. The picker now swallows `pointerdown`, `mousedown` and `click`
+at the window capture phase and can submit on hover plus Enter, so an overlay
+that closes on any click no longer defeats it.
+
+### Added — Latest-download uploads, Excel parsing, and specified-path sources
+
+- **`upload-file`** can take the newest matching file from the configured or
+  internal download folders (extension) or from the run's recorded downloads
+  (Runner), with an optional manual fallback.
+- **`parse-excel`** turns `.xlsx`/`.csv` into object rows plus the raw 2-D array,
+  through a dependency-free parser shared by both hosts.
+- Both operators can target one concrete file stored as a download-relative path
+  and picked through a recursive editor list. The extension resolves nested OPFS
+  paths; the Runner falls back to the recorded flat file name because headless
+  downloads do not preserve directories.
+
+### Added — Failure evidence and goal certification for generation
+
+A failed operator call now carries an evidence bundle: the failure classified
+through the shared code table, the kernel's message kept bounded, locator
+resolution, candidate counts, and the safe re-run boundary. That boundary is the
+last step that committed nothing — re-entering before a submit or publish would
+commit it twice — and it is derived from the draft's own nodes. The generation
+prompt states both rules: a committed step is never re-run, and a failure caused
+by an earlier step is named rather than repeated. The pre-save trial also records
+what the goal check actually found (level, unmet rows, reason) and carries it
+across a save/load round trip; the save card distinguishes a broken graph from a
+graph that ran and left the goal unmet, while a trial that stopped before the
+last step still proves nothing and stays silent.
+
+### Changed — One switch for capability toggles
+
+The task panel's per-task enable, the Feishu bot and per-tool toggles, the
+editor's boolean block fields, and the Runner console's schedule and trigger
+controls now render through one hand-written switch (`role="switch"` with
+`aria-checked`) instead of a checkbox. Multi-select and preference checkboxes
+remain checkboxes.
+
+### Changed — Saving a workflow no longer offers an AI review
+
+The optional AI review on the chat save-as-workflow card is gone; saving always
+persists the captured steps directly. The history review dialog is untouched.
+
+### Fixed — A dropped stream resumes; the ungrouped section collapses
+
+Chat streaming now allows ten fixed-interval reconnects and treats one full
+request as the retry unit: a reply that already emitted text resumes from that
+point instead of restarting, a stream ending with neither `[DONE]` nor a
+`finish_reason` is recognised as the same transient break, and an in-stream error
+frame is no longer swallowed. A tool call that was already announced is never
+resumed, because half-formed arguments cannot be safely continued. Summary blocks
+echoed by full-auto mode are filtered out of the visible reply.
+
+The chevron on the Workflows tab's ungrouped bucket did nothing because the
+toggle handler returned early without a group id; it now has its own
+collapse-state key and folds without disturbing the groups above it.
+
 ## [0.6.7] - 2026-10-19
 
 ### Added — An AI assistant on the workflow canvas
