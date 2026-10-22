@@ -214,7 +214,57 @@ Runner 侧修改 `server/src/driver.ts` / `server/src/executors.ts`，不新增�
 - 系统文件选择器仍只由真实用户点击触发；`latest-download` 不打开系统对话框。
 - Excel 内容进入工作流变量，上游可能来自用户本地文件；不写回磁盘、不发网络。
 
-## 7. 非目标
+## 7. 追加需求：`file-path` 指定下载目录内的文件
+
+用户要求：选择“自动上传文件”时，应让用户选择**具体文件路径**而不是文件名/模式，运行时按该路径
+自动上传。已确认的两个选项：
+
+- 路径来源于**下载目录内**（设置里配置的下载目录 + 扩展内部 `browser-copilot-downloads`）；
+- **新增并保留**：`latest-download` 原样保留，两个算子各多一个 `file-path` 来源。
+
+### 7.1 配置模型
+
+```ts
+interface UploadFileData {
+  sourceMode: 'user-select' | 'workflow-file' | 'latest-download' | 'file-path'
+  filePath?: string // 相对下载目录的路径，如 reports/2026-10/sales.xlsx
+}
+interface ParseExcelData {
+  sourceMode: 'user-select' | 'workflow-file' | 'file-path'
+  filePath?: string
+}
+```
+
+工作流只保存**相对路径**；绝不保存宿主机绝对路径。前端选择器列出两个下载根目录下的文件
+（递归、最多 4 层 / 500 个文件），选中即写入 `filePath`。
+
+### 7.2 路径规则（`src/lib/workflow/download-file-path.ts`）
+
+- 统一 `/` 分隔；接受 `\` 并转换。拒绝：空值、前导 `/`、UNC `\\`、盘符 `C:`、`.`、`..`、
+  空段、Windows 非法字符与控制字符。
+- `findDownloadedFileByPath(candidates, path)`：精确相对路径匹配；同一路径多份记录取最新。
+- Runner 的下载按建议文件名平铺保存，因此 Runner 允许**文件名回退**：`reports/a.csv`
+  可命中本次 run 的 `a.csv`；精确匹配优先。扩展侧只做精确匹配（有真实目录结构）。
+
+### 7.3 读取与执行
+
+- 扩展：`readDownloadedFileAtPath(path)` 逐段 `getDirectoryHandle` + `getFileHandle`
+  （`create:false`），先配置目录（需 read 权限）后内部目录；无文件抛 `UPLOAD_NO_MATCHING_FILE`，
+  非法路径抛 `UPLOAD_FILE_DATA_INVALID`。不打开任何系统对话框。
+- Runner：在本 run 的 `listDownloads()` 记录中匹配，`readFile` 读取；找不到时错误说明
+  「本次 run 没有下载该文件，headless 无法读取扩展下载目录」。
+- 两个算子共用同样的路径规则与错误码；`filePath` 支持 `{{变量}}` 插值（选择器写入的是具体值）。
+
+### 7.4 UI
+
+共享组件 `workflow-editor/blocks/shared/DownloadFilePicker.tsx`：
+
+- 路径输入框（禁用 `/` 变量菜单，避免与路径分隔符冲突）+「浏览下载目录」；
+- 展开后懒加载递归列表：相对路径、来源（设置目录 / 内部目录）、大小、修改时间；
+- `upload-file` 的 `accept` 仅用于筛选列表；`parse-excel` 固定只列 `.xlsx/.csv`；
+- 复用 `listDownloadedFileCandidates({ recursive: true })`，不新建扫描实现。
+
+## 8. 非目标
 
 - 不支持 `.xls`、加密 xlsx、多工作表一次性合并；
 - 不在编辑时把文件内容嵌入工作流；

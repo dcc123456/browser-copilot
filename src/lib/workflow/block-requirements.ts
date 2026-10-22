@@ -31,6 +31,7 @@
 import { richTargetFromAny } from './target-to-selector'
 import { secretRequestsOf } from './secret-params'
 import { conditionPathsOf, hasConditionGroups } from './condition-tree'
+import { normalizeDownloadFilePath } from './download-file-path'
 import { BLOCK_BY_ID } from './blocks/palette'
 
 /** One missing-parameter finding. `key` is the parameter to blame. */
@@ -326,8 +327,13 @@ const REQUIREMENTS: Readonly<Record<string, RequirementSet>> = {
     locator: LOCATOR_MESSAGE,
     check: (data) => {
       const mode = data['sourceMode']
-      if (mode !== 'user-select' && mode !== 'workflow-file' && mode !== 'latest-download') {
-        return "必须给出 sourceMode：'user-select'、'workflow-file' 或 'latest-download'"
+      if (
+        mode !== 'user-select' &&
+        mode !== 'workflow-file' &&
+        mode !== 'latest-download' &&
+        mode !== 'file-path'
+      ) {
+        return "必须给出 sourceMode：'user-select'、'workflow-file'、'latest-download' 或 'file-path'"
       }
       if (
         mode === 'workflow-file' &&
@@ -335,6 +341,9 @@ const REQUIREMENTS: Readonly<Record<string, RequirementSet>> = {
         data['fileData'] === undefined
       ) {
         return 'workflow-file 模式必须给出 fileVariable（存放文件的变量名）'
+      }
+      if (mode === 'file-path' && !normalizeDownloadFilePath(String(data['filePath'] ?? ''))) {
+        return 'file-path 模式必须给出 filePath（下载目录内的相对路径，如 reports/2026-10/sales.xlsx；不能是绝对路径或包含 ..）'
       }
       return null
     },
@@ -476,10 +485,20 @@ const REQUIREMENTS: Readonly<Record<string, RequirementSet>> = {
   },
   'parse-excel': {
     check: (data) => {
-      const enumProblem = oneOfEnum(data, 'sourceMode', ['user-select', 'workflow-file'])
+      const enumProblem = oneOfEnum(data, 'sourceMode', [
+        'user-select',
+        'workflow-file',
+        'file-path',
+      ])
       if (enumProblem) return enumProblem
       if (data['sourceMode'] === 'workflow-file' && !isFilled(data['fileVariable'])) {
         return 'workflow-file 模式必须给出 fileVariable（存放 Excel/CSV 文件的变量名）'
+      }
+      if (
+        data['sourceMode'] === 'file-path' &&
+        !normalizeDownloadFilePath(String(data['filePath'] ?? ''))
+      ) {
+        return 'file-path 模式必须给出 filePath（下载目录内的相对路径，如 reports/2026-10/sales.xlsx；不能是绝对路径或包含 ..）'
       }
       const variableName = String(data['variableName'] ?? '').trim()
       const rawVariableName = String(data['rawVariableName'] ?? '').trim()

@@ -675,6 +675,23 @@ const BLOCK_FORM_STRINGS = {
     'User picks files': '用户选择文件',
     'Workflow file variable': '自动上传 Workflow 文件',
     'Latest download file': '自动上传最新下载文件',
+    'Specific file path': '指定文件路径',
+    'File path in the download folder': '下载目录内的文件路径',
+    'Pick a file inside the download folder; its path is stored relative to that folder':
+      '在下载目录内选择具体文件；只保存相对该目录的路径',
+    'Browse downloads': '浏览下载目录',
+    'Pick a downloaded file': '选择下载目录中的文件',
+    Refresh: '刷新',
+    'Loading files…': '正在读取文件…',
+    'Could not read the download folders.': '无法读取下载目录。',
+    'No files in the download folders. Download one first or put a file there.':
+      '下载目录中没有文件。请先下载，或把文件放入目录。',
+    'No files match the accepted types.': '没有符合文件类型的文件。',
+    'Configured downloads': '设置的下载目录',
+    'Internal downloads': '扩展内部下载目录',
+    'Some folders could not be read (permission or access).':
+      '部分目录无法读取（权限或访问限制）。',
+    'Showing only the first files found.': '仅显示最先找到的部分文件。',
     'Accepted file types': '文件类型',
     'image/*,.pdf (optional)': 'image/*,.pdf（可选）',
     '.xlsx,.pdf (optional)': '.xlsx,.pdf（可选）',
@@ -688,6 +705,8 @@ const BLOCK_FORM_STRINGS = {
     'File variable': '文件变量',
     'e.g. lastScreenshot': '例如 lastScreenshot',
     'Allow multiple files': '允许多文件',
+    'Optional filter for the file list; the picked file is uploaded as-is':
+      '可选的列表过滤条件；选中的文件按原样上传',
     'Wait for selector before uploading': '上传前等待目标选择器',
     'Verify files reached the upload control': '验证文件已进入上传控件',
     // — parse-excel form —

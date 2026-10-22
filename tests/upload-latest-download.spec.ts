@@ -41,6 +41,7 @@ function candidate(
 ): DownloadedFileCandidate {
   return {
     name,
+    relativePath: name,
     mimeType,
     size: body.length,
     lastModified,

@@ -607,9 +607,14 @@ const SCHEMA_OVERRIDES: Readonly<Record<string, Record<string, unknown>>> = {
   'upload-file': {
     sourceMode: {
       type: 'string',
-      enum: ['user-select', 'workflow-file', 'latest-download'],
+      enum: ['user-select', 'workflow-file', 'latest-download', 'file-path'],
       description:
-        'user-select (pick at run time) | workflow-file (variable) | latest-download (newest matching file in the download folder).',
+        'user-select (pick at run time) | workflow-file (variable) | latest-download (newest match) | file-path (one relative path in the download folder).',
+    },
+    filePath: {
+      type: 'string',
+      description:
+        'file-path only: download-relative path, e.g. `reports/sales.xlsx`; never absolute or "..".',
     },
     fileVariable: {
       type: 'string',
@@ -633,13 +638,18 @@ const SCHEMA_OVERRIDES: Readonly<Record<string, Record<string, unknown>>> = {
   'parse-excel': {
     sourceMode: {
       type: 'string',
-      enum: ['user-select', 'workflow-file'],
+      enum: ['user-select', 'workflow-file', 'file-path'],
       description:
-        'user-select (ask for one .xlsx/.csv at run time) | workflow-file (upstream file variable).',
+        'user-select (pick one .xlsx/.csv at run time) | workflow-file (variable) | file-path (one relative path in the download folder).',
     },
     fileVariable: {
       type: 'string',
       description: 'workflow-file only: variable NAME holding exactly one spreadsheet artifact.',
+    },
+    filePath: {
+      type: 'string',
+      description:
+        'file-path only: download-relative path, e.g. `reports/sales.xlsx`; never absolute or "..".',
     },
     sheetName: {
       type: 'string',

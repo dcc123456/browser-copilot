@@ -71,6 +71,7 @@ import {
   variableNameOf,
 } from '../../lib/workflow/file-artifact'
 import { pickLatestFile } from '../../lib/workflow/latest-file'
+import { normalizeDownloadFilePath } from '../../lib/workflow/download-file-path'
 import { parseSpreadsheetFile, storeSpreadsheetOutput } from '../../lib/workflow/excel-node'
 import { SpreadsheetParseError, type ParsedSpreadsheet } from '../../lib/workflow/excel-parse'
 import { requestUserFiles } from '../../lib/workflow/user-file-picker'
@@ -87,6 +88,7 @@ import {
   getDownloadDir,
   getUnattendedDownloadDir,
   listDownloadedFileCandidates,
+  readDownloadedFileAtPath,
   writeFileToDownloadDir,
   type SavePickerPayload,
 } from '../../lib/download-dir'
@@ -2470,6 +2472,47 @@ const createElementExec: BlockExecutor = async (data, ctx) => {
   return runRaw(op, ctx)
 }
 
+/**
+ * Reads the exact file a `file-path` mode names, from the download folders.
+ * The path is interpolated first so a variable can build it, then validated:
+ * only relative paths inside the authorised roots are accepted.
+ */
+async function downloadPathFile(
+  rawPath: string,
+  ctx: WorkflowExecCtx,
+  blockLabel: string,
+  selector?: string,
+): Promise<WorkflowFileArtifact> {
+  const wanted = normalizeDownloadFilePath(interpolate(rawPath, ctx.variables, ctx.refData))
+  if (!wanted) {
+    throw new UploadFileError(
+      'UPLOAD_FILE_DATA_INVALID',
+      `${blockLabel}: filePath must be a relative path inside the download folder ` +
+        '(no leading slash, drive letter, or ".."). Example: reports/2026-10/sales.xlsx.',
+      selector ? { selector } : undefined,
+    )
+  }
+  ctx.emit('status', `${blockLabel}: reading ${wanted} from the download folder…`)
+  const found = await readDownloadedFileAtPath(wanted)
+  if (!found) {
+    throw new UploadFileError(
+      'UPLOAD_NO_MATCHING_FILE',
+      `${blockLabel}: "${wanted}" was not found in the configured download folder or the ` +
+        'internal downloads folder. Pick the file again in the block form, or put it there.',
+      selector ? { selector } : undefined,
+    )
+  }
+  try {
+    return await artifactFromFile(found.file, 'download')
+  } catch (error) {
+    throw new UploadFileError(
+      'UPLOAD_FILE_DATA_INVALID',
+      `${blockLabel}: "${wanted}" could not be read: ${message(error)}`,
+      selector ? { selector } : undefined,
+    )
+  }
+}
+
 const uploadFileExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
   const selector = sel(data)
@@ -2484,17 +2527,19 @@ const uploadFileExec: BlockExecutor = async (data, ctx) => {
   // URL string) or `filePaths` (array); read them but new workflows never
   // write those fields.
   const rawMode = String(data['sourceMode'] ?? '').trim()
-  const sourceMode: 'user-select' | 'workflow-file' | 'latest-download' =
+  const sourceMode: 'user-select' | 'workflow-file' | 'latest-download' | 'file-path' =
     rawMode === 'workflow-file'
       ? 'workflow-file'
       : rawMode === 'user-select'
         ? 'user-select'
         : rawMode === 'latest-download'
           ? 'latest-download'
-          : data['fileData'] !== undefined ||
-              (Array.isArray(data['filePaths']) && (data['filePaths'] as unknown[]).length > 0)
-            ? 'workflow-file'
-            : 'user-select'
+          : rawMode === 'file-path'
+            ? 'file-path'
+            : data['fileData'] !== undefined ||
+                (Array.isArray(data['filePaths']) && (data['filePaths'] as unknown[]).length > 0)
+              ? 'workflow-file'
+              : 'user-select'
 
   let files: WorkflowFileArtifact[]
   if (sourceMode === 'user-select') {
@@ -2542,6 +2587,8 @@ const uploadFileExec: BlockExecutor = async (data, ctx) => {
       }
       ctx.emit('status', `Using the newest matching download: ${latest.name}`)
     }
+  } else if (sourceMode === 'file-path') {
+    files = [await downloadPathFile(String(data['filePath'] ?? ''), ctx, 'upload-file', selector)]
   } else {
     const fileVariable = variableNameOf(String(data['fileVariable'] ?? ''))
     let raw: unknown
@@ -2670,13 +2717,20 @@ const EXCEL_PICKER_ACCEPT =
 
 const parseExcelExec: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const sourceMode = data['sourceMode'] === 'workflow-file' ? 'workflow-file' : 'user-select'
+  const sourceMode =
+    data['sourceMode'] === 'workflow-file'
+      ? 'workflow-file'
+      : data['sourceMode'] === 'file-path'
+        ? 'file-path'
+        : 'user-select'
 
   let file: WorkflowFileArtifact
   if (sourceMode === 'user-select') {
     ctx.emit('status', 'Waiting for the user to choose a spreadsheet…')
     const picked = await requestUserFiles({ accept: EXCEL_PICKER_ACCEPT, multiple: false })
     file = picked[0]!
+  } else if (sourceMode === 'file-path') {
+    file = await downloadPathFile(String(data['filePath'] ?? ''), ctx, 'parse-excel')
   } else {
     const fileVariable = variableNameOf(String(data['fileVariable'] ?? ''))
     if (!fileVariable) {

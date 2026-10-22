@@ -12,6 +12,8 @@
  *   - `latest-download`: at run time the newest file matching `accept` /
  *     `filePattern` is read from the configured download folder (or the
  *     extension's internal download folder) and injected unattended.
+ *   - `file-path`: one concrete file inside those download folders, named by
+ *     a relative path (`reports/sales.xlsx`). No host absolute paths.
  *
  * The selector field, wait-for-selector and verification options are shared.
  * Styled with Tailwind semantic tokens; form labels pass through `bt()`.
@@ -20,6 +22,7 @@
  */
 import { useEditorLocale } from '../../locale-context'
 import { Checkbox, Field, TextInput } from '../shared/Field'
+import DownloadFilePicker from '../shared/DownloadFilePicker'
 import SelectorField from '../shared/SelectorField'
 import type { EditFormProps } from '../EditForms'
 
@@ -30,7 +33,9 @@ export default function EditUploadFile({ data, onChange }: EditFormProps) {
       ? 'workflow-file'
       : data.sourceMode === 'latest-download'
         ? 'latest-download'
-        : 'user-select'
+        : data.sourceMode === 'file-path'
+          ? 'file-path'
+          : 'user-select'
   const selector = typeof data.selector === 'string' ? data.selector : ''
 
   // Common file-producing variables suggested for the variable field
@@ -52,6 +57,7 @@ export default function EditUploadFile({ data, onChange }: EditFormProps) {
               ['user-select', 'User picks files'],
               ['workflow-file', 'Workflow file variable'],
               ['latest-download', 'Latest download file'],
+              ['file-path', 'Specific file path'],
             ] as const
           ).map(([value, label]) => (
             <label key={value} className="flex cursor-pointer items-center gap-2 text-sm text-ink">
@@ -97,6 +103,24 @@ export default function EditUploadFile({ data, onChange }: EditFormProps) {
             ))}
           </datalist>
         </Field>
+      ) : sourceMode === 'file-path' ? (
+        <>
+          <Field
+            label="Accepted file types"
+            title="Optional filter for the file list; the picked file is uploaded as-is"
+          >
+            <TextInput
+              value={typeof data.accept === 'string' ? data.accept : ''}
+              placeholder=".xlsx,.pdf (optional)"
+              onChange={(v) => onChange({ accept: v })}
+            />
+          </Field>
+          <DownloadFilePicker
+            value={typeof data.filePath === 'string' ? data.filePath : ''}
+            onChange={(v) => onChange({ filePath: v })}
+            accept={typeof data.accept === 'string' ? data.accept : ''}
+          />
+        </>
       ) : (
         <>
           <Field
@@ -137,7 +161,7 @@ export default function EditUploadFile({ data, onChange }: EditFormProps) {
         multiple={false}
       />
 
-      {sourceMode !== 'latest-download' && (
+      {sourceMode !== 'latest-download' && sourceMode !== 'file-path' && (
         <Checkbox
           checked={data.multiple === true}
           onChange={(v) => onChange({ multiple: v })}

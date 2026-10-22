@@ -125,9 +125,11 @@ get-secret 的代价是每次运行都要用户存着那条凭证。只对密码
 
 - upload-file：\`user-select\` 选择后注入；\`workflow-file\` 填 \`fileVariable\`（变量名，非内容）；
   \`latest-download\` 取下载目录里**最新**匹配文件（\`accept\`+\`filePattern\` 过滤，无匹配报错，
-  \`fallbackToPicker:true\` 转手动）。\`selector\` 指向控件/拖拽区，禁 fill。
-- parse-excel：\`user-select\` 运行时选 .xlsx/.csv，\`workflow-file\` 读 \`fileVariable\`；
-  \`variableName\` 收对象数组（首行表头），\`rawVariableName\` 收二维数组；.xls 需先另存。
+  \`fallbackToPicker:true\` 转手动）；\`file-path\` 按 \`filePath\` 读下载目录内的相对路径。
+  \`selector\` 指向控件/拖拽区，禁 fill。
+- parse-excel：\`user-select\` 运行时选 .xlsx/.csv，\`workflow-file\` 读 \`fileVariable\`，
+  \`file-path\` 读 \`filePath\`；\`variableName\` 收对象数组（首行表头），\`rawVariableName\` 收二维数组；
+  .xls 需先另存。
 
 ## 工具分发：算子按分类发送
 

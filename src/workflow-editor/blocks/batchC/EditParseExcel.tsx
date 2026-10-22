@@ -10,13 +10,19 @@
  */
 import { useEditorLocale } from '../../locale-context'
 import { Checkbox, Field, Select, TextInput } from '../shared/Field'
+import DownloadFilePicker from '../shared/DownloadFilePicker'
 import type { EditFormProps } from '../EditForms'
 
 const SUGGESTED_VARIABLES = ['lastFile', 'fileArtifact', 'lastScreenshot', 'generatedImage']
 
 export default function EditParseExcel({ data, onChange }: EditFormProps) {
   const { bt } = useEditorLocale()
-  const sourceMode = data.sourceMode === 'workflow-file' ? 'workflow-file' : 'user-select'
+  const sourceMode =
+    data.sourceMode === 'workflow-file'
+      ? 'workflow-file'
+      : data.sourceMode === 'file-path'
+        ? 'file-path'
+        : 'user-select'
 
   return (
     <div className="wf-form flex flex-col gap-3">
@@ -27,9 +33,18 @@ export default function EditParseExcel({ data, onChange }: EditFormProps) {
           options={[
             { value: 'user-select', label: 'User picks a file' },
             { value: 'workflow-file', label: 'Workflow file variable' },
+            { value: 'file-path', label: 'Specific file path' },
           ]}
         />
       </Field>
+
+      {sourceMode === 'file-path' && (
+        <DownloadFilePicker
+          value={typeof data.filePath === 'string' ? data.filePath : ''}
+          onChange={(v) => onChange({ filePath: v })}
+          accept=".xlsx,.csv"
+        />
+      )}
 
       {sourceMode === 'workflow-file' && (
         <Field

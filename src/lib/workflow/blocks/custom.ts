@@ -166,9 +166,11 @@ export const CUSTOM_BLOCKS: BlockCatalogEntry[] = [
       disableBlock: false,
       description: '',
       // `user-select` asks for one spreadsheet at run time; `workflow-file`
-      // reads a file artifact already held by an earlier node.
+      // reads a file artifact already held by an earlier node; `file-path`
+      // names one file relative to the download folder.
       sourceMode: 'user-select',
       fileVariable: '',
+      filePath: '',
       // Empty = the workbook's first sheet. Exact match otherwise (xlsx only).
       sheetName: '',
       // First row becomes the object keys; the raw array always keeps it.

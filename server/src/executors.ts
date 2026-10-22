@@ -47,6 +47,10 @@ import {
   type WorkflowFileArtifact,
 } from '../../src/lib/workflow/file-artifact'
 import { pickLatestFile } from '../../src/lib/workflow/latest-file'
+import {
+  findDownloadedFileByPath,
+  normalizeDownloadFilePath,
+} from '../../src/lib/workflow/download-file-path'
 import { parseSpreadsheetFile, storeSpreadsheetOutput } from '../../src/lib/workflow/excel-node'
 import { SpreadsheetParseError, type ParsedSpreadsheet } from '../../src/lib/workflow/excel-parse'
 import { secretEnvNameOf, secretRequestsOf } from '../../src/lib/workflow/secret-params'
@@ -1528,6 +1532,20 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
    * download matching accept/filePattern. There is no picker to fall back to
    * headless, so an empty match is a hard failure.
    */
+  const savedDownloadCandidates = () =>
+    driver
+      .listDownloads()
+      .filter((entry): entry is typeof entry & { path: string } => entry.path !== null)
+      .map((entry) => ({
+        name: entry.filename,
+        // Headless saves every download flat under its suggested file name.
+        relativePath: entry.filename,
+        mimeType: mimeTypeForFilename(entry.filename),
+        lastModified: entry.lastModified,
+        size: entry.size,
+        path: entry.path,
+      }))
+
   const newestDownloadedFile = async (
     data: Record<string, unknown>,
     selector: string,
@@ -1535,15 +1553,7 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     const accept = String(data['accept'] ?? '').trim()
     const filePattern = String(data['filePattern'] ?? '').trim()
     const recorded = driver.listDownloads()
-    const candidates = recorded
-      .filter((entry): entry is typeof entry & { path: string } => entry.path !== null)
-      .map((entry) => ({
-        name: entry.filename,
-        mimeType: mimeTypeForFilename(entry.filename),
-        lastModified: entry.lastModified,
-        size: entry.size,
-        path: entry.path,
-      }))
+    const candidates = savedDownloadCandidates()
     const latest = pickLatestFile(candidates, { accept, filePattern })
     if (!latest) {
       const filters = [
@@ -1572,22 +1582,70 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     }
   }
 
+  /**
+   * The `file-path` source headless: the path names a file this run downloaded.
+   * A nested path falls back to the flat saved file name — the Runner keeps no
+   * directory structure of the user's browser download folder.
+   */
+  const downloadPathFile = async (
+    data: Record<string, unknown>,
+    ctx: WorkflowExecCtx,
+    blockLabel: string,
+    selector?: string,
+  ): Promise<WorkflowFileArtifact> => {
+    const wanted = normalizeDownloadFilePath(
+      interpolate(String(data['filePath'] ?? ''), ctx.variables, ctx.refData),
+    )
+    if (!wanted) {
+      throw new UploadFileError(
+        'UPLOAD_FILE_DATA_INVALID',
+        `${blockLabel}: filePath must be a relative path inside the download folder ` +
+          '(no leading slash, drive letter, or ".."). Example: reports/2026-10/sales.xlsx.',
+        selector ? { selector } : undefined,
+      )
+    }
+    const found = findDownloadedFileByPath(savedDownloadCandidates(), wanted, {
+      flatBasenameFallback: true,
+    })
+    if (!found) {
+      throw new UploadFileError(
+        'UPLOAD_NO_MATCHING_FILE',
+        `${blockLabel}: "${wanted}" was not downloaded in this run ` +
+          `(${driver.listDownloads().length} download(s) recorded). The headless server cannot ` +
+          "read the extension's download folder; download the file in this run or use workflow-file.",
+        selector ? { selector } : undefined,
+      )
+    }
+    try {
+      const bytes = await readFile(found.path)
+      return artifactFromBytes(found.name, found.mimeType ?? '', bytes, 'download')
+    } catch (error) {
+      throw new UploadFileError(
+        'UPLOAD_FILE_DATA_INVALID',
+        `${blockLabel}: "${wanted}" could not be read: ${message(error)}`,
+        selector ? { selector } : undefined,
+      )
+    }
+  }
+
   const uploadFileExec: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
     const selector = sel(data)
     if (!selector) throw new Error('upload-file: missing selector')
 
     const rawMode = String(data['sourceMode'] ?? '').trim()
-    const sourceMode: 'user-select' | 'workflow-file' | 'latest-download' =
+    const sourceMode: 'user-select' | 'workflow-file' | 'latest-download' | 'file-path' =
       rawMode === 'workflow-file'
         ? 'workflow-file'
         : rawMode === 'latest-download'
           ? 'latest-download'
           : rawMode === 'user-select'
             ? 'user-select'
-            : data['fileData'] !== undefined
-              ? 'workflow-file'
-              : 'user-select'
+            : rawMode === 'file-path'
+              ? 'file-path'
+              : data['fileData'] !== undefined
+                ? 'workflow-file'
+                : 'user-select'
 
     let files: WorkflowFileArtifact[]
     if (sourceMode === 'user-select') {
@@ -1601,6 +1659,8 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
       const latest = await newestDownloadedFile(data, selector)
       ctx.emit('status', `Using the newest matching download: ${latest.name}`)
       files = [latest]
+    } else if (sourceMode === 'file-path') {
+      files = [await downloadPathFile(data, ctx, 'upload-file', selector)]
     } else {
       const fileVariable = String(data['fileVariable'] ?? '').trim()
       let raw: unknown
@@ -1633,13 +1693,47 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
     return null
   }
 
+  const parseAndStoreSpreadsheet = async (
+    file: WorkflowFileArtifact,
+    data: Record<string, unknown>,
+    ctx: WorkflowExecCtx,
+  ): Promise<null> => {
+    let parsed: ParsedSpreadsheet
+    try {
+      parsed = await parseSpreadsheetFile(file, data)
+    } catch (error) {
+      if (error instanceof SpreadsheetParseError || error instanceof UploadFileError) throw error
+      throw new SpreadsheetParseError(
+        'EXCEL_PARSE_FAILED',
+        `parse-excel: "${file.name}" could not be parsed: ${message(error)}`,
+      )
+    }
+
+    const names = storeSpreadsheetOutput(ctx.variables, data, parsed)
+    ctx.emit(
+      'result',
+      `Parsed ${parsed.rows.length} row(s) from ${file.name} into {{${names.variableName}}} ` +
+        `(raw rows in {{${names.rawVariableName}}}, sheet "${parsed.sheetName}")`,
+    )
+    return null
+  }
+
   const parseExcelExec: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    if (data['sourceMode'] !== 'workflow-file') {
+    const sourceMode =
+      data['sourceMode'] === 'workflow-file'
+        ? 'workflow-file'
+        : data['sourceMode'] === 'file-path'
+          ? 'file-path'
+          : 'user-select'
+    if (sourceMode === 'file-path') {
+      return parseAndStoreSpreadsheet(await downloadPathFile(data, ctx, 'parse-excel'), data, ctx)
+    }
+    if (sourceMode !== 'workflow-file') {
       // The headless server has no UI to pick a local file.
       throw new UploadFileError(
         'UPLOAD_USER_SELECTION_CANCELLED',
-        'parse-excel: user-select mode is unavailable in the headless server; use workflow-file mode.',
+        'parse-excel: user-select mode is unavailable in the headless server; use workflow-file or file-path mode.',
       )
     }
 
@@ -1664,24 +1758,7 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
       )
     }
 
-    let parsed: ParsedSpreadsheet
-    try {
-      parsed = await parseSpreadsheetFile(files[0]!, data)
-    } catch (error) {
-      if (error instanceof SpreadsheetParseError || error instanceof UploadFileError) throw error
-      throw new SpreadsheetParseError(
-        'EXCEL_PARSE_FAILED',
-        `parse-excel: "${files[0]!.name}" could not be parsed: ${message(error)}`,
-      )
-    }
-
-    const names = storeSpreadsheetOutput(ctx.variables, data, parsed)
-    ctx.emit(
-      'result',
-      `Parsed ${parsed.rows.length} row(s) from ${files[0]!.name} into {{${names.variableName}}} ` +
-        `(raw rows in {{${names.rawVariableName}}}, sheet "${parsed.sheetName}")`,
-    )
-    return null
+    return parseAndStoreSpreadsheet(files[0]!, data, ctx)
   }
 
   const handleDialogExec: BlockExecutor = async (data, ctx) => {

@@ -16,6 +16,8 @@
  * @module lib/download-dir
  */
 
+import { normalizeDownloadFilePath } from './workflow/download-file-path'
+
 const IDB_DB = 'browser-copilot-fs'
 const IDB_STORE = 'directory'
 const IDB_KEY = 'download'
@@ -135,7 +137,10 @@ export async function getUnattendedDownloadDir(
 
 /** One file found while scanning the download locations. */
 export interface DownloadedFileCandidate {
+  /** File name only (`entry.name`). */
   name: string
+  /** Path relative to its download root, `/`-separated. */
+  relativePath: string
   mimeType: string
   size: number
   lastModified: number
@@ -150,6 +155,17 @@ export interface DownloadedFileScan {
   scanned: string[]
   /** Locations that were skipped, with the reason. */
   skipped: string[]
+  /** True when the entry limit stopped a recursive scan early. */
+  truncated?: boolean
+}
+
+export interface DownloadScanOptions {
+  /** Walk subdirectories (the editor's file-path picker). Default false. */
+  recursive?: boolean
+  /** Directory levels below each root. Default 4. */
+  maxDepth?: number
+  /** Stop after this many files. Default 500. */
+  maxEntries?: number
 }
 
 const CONFIGURED_DIR_LABEL = 'configured download folder'
@@ -164,39 +180,84 @@ async function canReadDirectory(handle: FileSystemDirectoryHandle): Promise<bool
   }
 }
 
+interface ScanAccumulator {
+  candidates: DownloadedFileCandidate[]
+  truncated: boolean
+}
+
+async function collectFiles(
+  dir: FileSystemDirectoryHandle,
+  source: DownloadedFileCandidate['source'],
+  prefix: string,
+  depth: number,
+  options: Required<DownloadScanOptions>,
+  accumulator: ScanAccumulator,
+): Promise<void> {
+  for await (const entry of dir.values()) {
+    if (accumulator.candidates.length >= options.maxEntries) {
+      accumulator.truncated = true
+      return
+    }
+    if (entry.kind === 'file') {
+      try {
+        const file = await (entry as FileSystemFileHandle).getFile()
+        accumulator.candidates.push({
+          name: entry.name,
+          relativePath: `${prefix}${entry.name}`,
+          mimeType: file.type,
+          size: file.size,
+          lastModified: file.lastModified,
+          source,
+          getFile: () => (entry as FileSystemFileHandle).getFile(),
+        })
+      } catch {
+        // A single unreadable file must not hide the rest of the folder.
+      }
+    } else if (options.recursive && depth < options.maxDepth) {
+      try {
+        await collectFiles(
+          entry as FileSystemDirectoryHandle,
+          source,
+          `${prefix}${entry.name}/`,
+          depth + 1,
+          options,
+          accumulator,
+        )
+      } catch {
+        // An unreadable subdirectory must not hide its siblings.
+      }
+    }
+  }
+}
+
 /**
- * Enumerate the files a `latest-download` upload may choose from: the folder
- * configured in Settings plus the extension's own unattended download folder.
- * Read-only: the internal folder is not created, and no permission prompt is
- * raised (a worker has no user gesture), the folder is reported as skipped.
+ * Enumerate the files uploads may choose from: the folder configured in
+ * Settings plus the extension's own unattended download folder. Read-only: the
+ * internal folder is not created, and no permission prompt is raised (a worker
+ * has no user gesture), the folder is reported as skipped.
+ *
+ * Root-only by default (`latest-download`); the editor's path picker opts into
+ * recursion so files the user keeps in subfolders are reachable.
  */
-export async function listDownloadedFileCandidates(): Promise<DownloadedFileScan> {
-  const candidates: DownloadedFileCandidate[] = []
+export async function listDownloadedFileCandidates(
+  scanOptions: DownloadScanOptions = {},
+): Promise<DownloadedFileScan> {
+  const options: Required<DownloadScanOptions> = {
+    recursive: scanOptions.recursive === true,
+    maxDepth: Math.max(0, scanOptions.maxDepth ?? 4),
+    maxEntries: Math.max(1, scanOptions.maxEntries ?? 500),
+  }
+  const accumulator: ScanAccumulator = { candidates: [], truncated: false }
   const scanned: string[] = []
   const skipped: string[] = []
 
-  const collect = async (
+  const collectRoot = async (
     dir: FileSystemDirectoryHandle,
     source: DownloadedFileCandidate['source'],
     label: string,
   ): Promise<void> => {
     try {
-      for await (const entry of dir.values()) {
-        if (entry.kind !== 'file') continue
-        try {
-          const file = await (entry as FileSystemFileHandle).getFile()
-          candidates.push({
-            name: entry.name,
-            mimeType: file.type,
-            size: file.size,
-            lastModified: file.lastModified,
-            source,
-            getFile: () => (entry as FileSystemFileHandle).getFile(),
-          })
-        } catch {
-          // A single unreadable file must not hide the rest of the folder.
-        }
-      }
+      await collectFiles(dir, source, '', 0, options, accumulator)
       scanned.push(label)
     } catch {
       skipped.push(`${label} (could not be read)`)
@@ -206,7 +267,7 @@ export async function listDownloadedFileCandidates(): Promise<DownloadedFileScan
   const configured = await getDownloadDir()
   if (configured) {
     if (await canReadDirectory(configured)) {
-      await collect(configured, 'configured-download-dir', CONFIGURED_DIR_LABEL)
+      await collectRoot(configured, 'configured-download-dir', CONFIGURED_DIR_LABEL)
     } else {
       skipped.push(
         `${CONFIGURED_DIR_LABEL} (read permission not granted; reconnect it in Settings)`,
@@ -215,9 +276,61 @@ export async function listDownloadedFileCandidates(): Promise<DownloadedFileScan
   }
 
   const internal = await getUnattendedDownloadDir(false)
-  if (internal) await collect(internal, 'internal-download-dir', INTERNAL_DIR_LABEL)
+  if (internal) await collectRoot(internal, 'internal-download-dir', INTERNAL_DIR_LABEL)
 
-  return { candidates, scanned, skipped }
+  return {
+    candidates: accumulator.candidates,
+    scanned,
+    skipped,
+    ...(accumulator.truncated ? { truncated: true } : {}),
+  }
+}
+
+/** A file resolved from a download-relative path. */
+export interface DownloadedPathFile {
+  file: File
+  source: DownloadedFileCandidate['source']
+  relativePath: string
+}
+
+/**
+ * Read one file by its download-relative path. The configured folder wins over
+ * the internal one, mirroring the latest-download scan order. Returns null for
+ * an invalid path or when neither root holds it.
+ */
+export async function readDownloadedFileAtPath(
+  rawPath: string,
+): Promise<DownloadedPathFile | null> {
+  const relativePath = normalizeDownloadFilePath(rawPath)
+  if (!relativePath) return null
+  const segments = relativePath.split('/')
+  const filename = segments[segments.length - 1]!
+
+  const resolveIn = async (
+    root: FileSystemDirectoryHandle,
+    source: DownloadedPathFile['source'],
+  ): Promise<DownloadedPathFile | null> => {
+    try {
+      let directory = root
+      for (const segment of segments.slice(0, -1)) {
+        directory = await directory.getDirectoryHandle(segment, { create: false })
+      }
+      const handle = await directory.getFileHandle(filename, { create: false })
+      return { file: await handle.getFile(), source, relativePath }
+    } catch {
+      return null
+    }
+  }
+
+  const configured = await getDownloadDir()
+  if (configured && (await canReadDirectory(configured))) {
+    const found = await resolveIn(configured, 'configured-download-dir')
+    if (found) return found
+  }
+
+  const internal = await getUnattendedDownloadDir(false)
+  if (internal) return resolveIn(internal, 'internal-download-dir')
+  return null
 }
 
 /**

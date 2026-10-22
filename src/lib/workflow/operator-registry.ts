@@ -34,6 +34,7 @@ import { TRIGGER_BLOCK_ID } from './draft-types'
 import { OCR_SUPPORTED } from '../ocr-support'
 import type { WorkflowNodeGoalContract } from './node-goal-contract'
 import { isFileContentLiteral, variableNameOf } from './file-artifact'
+import { normalizeDownloadFilePath } from './download-file-path'
 
 /** How visible an operator is during generation. */
 export type AiExposure = 'core' | 'on-demand' | 'fallback' | 'hidden'
@@ -241,7 +242,9 @@ const OVERRIDES: Record<string, OperatorOverride> = {
           ? 'workflow-file'
           : args['sourceMode'] === 'latest-download'
             ? 'latest-download'
-            : 'user-select'
+            : args['sourceMode'] === 'file-path'
+              ? 'file-path'
+              : 'user-select'
       const fileVariable = variableNameOf(
         typeof args['fileVariable'] === 'string' ? args['fileVariable'] : '',
       )
@@ -263,6 +266,11 @@ const OVERRIDES: Record<string, OperatorOverride> = {
       ]
         .filter(Boolean)
         .join(' and ')
+      // Only a validated relative path may reach the goal string; an absolute
+      // or escaping value would expose the user's folder layout to the model.
+      const filePath = normalizeDownloadFilePath(
+        typeof args['filePath'] === 'string' ? args['filePath'] : '',
+      )
       return {
         version: 1 as const,
         goal:
@@ -270,7 +278,9 @@ const OVERRIDES: Record<string, OperatorOverride> = {
             ? `Put file(s) from variable "${namesVariable ? fileVariable : '?'}" into the upload control (${selector})`
             : mode === 'latest-download'
               ? `Put the newest downloaded file${latestFilters ? ` matching ${latestFilters}` : ''} into the upload control (${selector})`
-              : `Put the user-selected file(s) into the upload control (${selector})`,
+              : mode === 'file-path'
+                ? `Put the file at "${filePath ?? '?'}" (relative to the download folder) into the upload control (${selector})`
+                : `Put the user-selected file(s) into the upload control (${selector})`,
         successCriteria,
         failureMeaning: [
           'The target element is missing or is not a file input / drop zone.',
@@ -278,7 +288,9 @@ const OVERRIDES: Record<string, OperatorOverride> = {
             ? ['The file variable is missing or holds invalid file data.']
             : mode === 'latest-download'
               ? ['No downloaded file matches the accept / file-pattern filters.']
-              : []),
+              : mode === 'file-path'
+                ? ['The named file is not in the download folder.']
+                : []),
           'The control does not accept the number of files provided.',
         ],
         evidence: [
@@ -302,7 +314,15 @@ const OVERRIDES: Record<string, OperatorOverride> = {
                     'Adjust accept / file pattern, or enable fallbackToPicker for a manual pick.',
                 },
               ]
-            : [{ target: 'parameter' as const, action: 'Fix the file variable / file data.' }]),
+            : mode === 'file-path'
+              ? [
+                  {
+                    target: 'parameter' as const,
+                    action:
+                      'Pick the file again in the form, or fix filePath to an existing relative path.',
+                  },
+                ]
+              : [{ target: 'parameter' as const, action: 'Fix the file variable / file data.' }]),
         ],
       }
     },

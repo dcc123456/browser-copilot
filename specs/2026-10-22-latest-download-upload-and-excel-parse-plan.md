@@ -94,6 +94,28 @@
   - 缺失变量 / 多文件 → 明确错误
 - `tests/operator-class.spec.ts` / `tests/operator-tools.spec.ts` 等既有测试按新块更新。
 
+## Step 3b · `file-path` 来源（追加需求）
+
+新增：
+
+- `src/lib/workflow/download-file-path.ts`：相对路径规范化 + 按路径匹配（含 Runner 平铺回退）
+- `src/workflow-editor/blocks/shared/DownloadFilePicker.tsx`：路径输入 + 下载目录浏览
+
+修改：
+
+- `src/lib/download-dir.ts`：扫描支持 `recursive/maxDepth/maxEntries`，候选增加 `relativePath`；
+  新增 `readDownloadedFileAtPath`
+- `src/background/workflow-engine/executors.ts`：两个算子的 `file-path` 分支（插值 → 规范化 → 读取）
+- `server/src/executors.ts`：按本次 run 下载记录匹配并读取
+- 目录默认值（`blocks/catalog.ts` / `blocks/custom.ts`）、`block-requirements`、`operator-tools`、
+  `operator-registry`、`operator-guide`、`workflow-editor/i18n.ts`、两个编辑表单
+
+测试：
+
+- `tests/download-file-path.spec.ts`：绝对路径/盘符/`..`/UNC/空段拒绝，精确匹配与平铺回退
+- `tests/file-path-source.spec.ts`：两个算子的插值、命中、缺失、非法路径
+- `server/test/file-path-source.test.ts`：Runner 命中（平铺回退）、缺失、非法路径、解析
+
 ## Step 4 · 门禁与证据
 
 ```bash
