@@ -16,81 +16,37 @@
  * @module lib/download-dir
  */
 
+import {
+  deleteDirectoryHandle,
+  readDirectoryHandle,
+  writeDirectoryHandle,
+} from './directory-handle-store'
 import { normalizeDownloadFilePath } from './workflow/download-file-path'
 
-const IDB_DB = 'browser-copilot-fs'
-const IDB_STORE = 'directory'
-const IDB_KEY = 'download'
+const DIRECTORY_KEY = 'download'
 
 /** 导出保存策略：'auto' 跟随全局开关 + 是否配置目录，'force' 强推自动保存，'manual' 始终由用户确认。 */
 export type SaveMode = 'auto' | 'force' | 'manual'
 
 /**
- * 打开共享的 IndexedDB。与 fs-store 相同：不存在 store 时按需创建。
- * 在无 IndexedDB 的环境（如部分 Node 测试环境）中会 reject。
- */
-function openIdb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (typeof indexedDB === 'undefined') {
-      reject(new Error('IndexedDB is not available'))
-      return
-    }
-    const request = indexedDB.open(IDB_DB, 1)
-    request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(IDB_STORE)) {
-        request.result.createObjectStore(IDB_STORE)
-      }
-    }
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error ?? new Error('IndexedDB open failed'))
-  })
-}
-
-/**
  * 读取已配置的下载目录句柄；未配置或读取失败时返回 `null`。
  */
-export async function getDownloadDir(): Promise<FileSystemDirectoryHandle | null> {
-  try {
-    const db = await openIdb()
-    return await new Promise((resolve) => {
-      const tx = db.transaction(IDB_STORE, 'readonly')
-      const req = tx.objectStore(IDB_STORE).get(IDB_KEY)
-      req.onsuccess = () => resolve((req.result as FileSystemDirectoryHandle | undefined) ?? null)
-      req.onerror = () => resolve(null)
-    })
-  } catch {
-    return null
-  }
+export function getDownloadDir(): Promise<FileSystemDirectoryHandle | null> {
+  return readDirectoryHandle(DIRECTORY_KEY)
 }
 
 /**
- * 保存下载目录句柄到 IndexedDB（key 'download'）。之后 worker 即可直接使用该句柄写文件。
+ * 保存下载目录句柄（key 'download'）。之后 worker 即可直接使用该句柄写文件。
  */
-export async function setDownloadDir(handle: FileSystemDirectoryHandle): Promise<void> {
-  const db = await openIdb()
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE, 'readwrite')
-    tx.objectStore(IDB_STORE).put(handle, IDB_KEY)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error ?? new Error('IndexedDB write failed'))
-  })
+export function setDownloadDir(handle: FileSystemDirectoryHandle): Promise<void> {
+  return writeDirectoryHandle(DIRECTORY_KEY, handle)
 }
 
 /**
  * 清除下载目录句柄（用户在设置中取消配置下载目录时调用）。已写入的文件不受影响。
  */
-export async function clearDownloadDir(): Promise<void> {
-  try {
-    const db = await openIdb()
-    await new Promise<void>((resolve) => {
-      const tx = db.transaction(IDB_STORE, 'readwrite')
-      tx.objectStore(IDB_STORE).delete(IDB_KEY)
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => resolve()
-    })
-  } catch {
-    // 未配置
-  }
+export function clearDownloadDir(): Promise<void> {
+  return deleteDirectoryHandle(DIRECTORY_KEY)
 }
 
 /**

@@ -12,6 +12,8 @@
  * @module lib/workflow/excel-parse
  */
 
+import { ZipArchive, ZipError } from '../zip/zip-archive'
+
 export type SpreadsheetErrorCode =
   'EXCEL_PARSE_FAILED' | 'EXCEL_SHEET_NOT_FOUND' | 'EXCEL_LEGACY_FORMAT_UNSUPPORTED'
 
@@ -45,13 +47,7 @@ export interface ParsedSpreadsheet {
   rawRows: SpreadsheetCell[][]
 }
 
-const MAX_ENTRY_BYTES = 64 * 1024 * 1024
-const MAX_TOTAL_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
 const UTF8 = new TextDecoder('utf-8')
-
-const EOCD_SIGNATURE = 0x06054b50
-const CENTRAL_SIGNATURE = 0x02014b50
-const LOCAL_SIGNATURE = 0x04034b50
 
 /**
  * Parse an `.xlsx` / `.csv` byte payload.
@@ -100,225 +96,6 @@ function isZip(bytes: Uint8Array): boolean {
     bytes[1] === 0x4b &&
     (bytes[2] === 0x03 || bytes[2] === 0x05 || bytes[2] === 0x07)
   )
-}
-
-// --- ZIP ---------------------------------------------------------------------
-
-interface ZipEntry {
-  name: string
-  method: number
-  compressedSize: number
-  uncompressedSize: number
-  dataOffset: number
-  encrypted: boolean
-}
-
-function readU16(bytes: Uint8Array, offset: number): number {
-  return bytes[offset]! | (bytes[offset + 1]! << 8)
-}
-
-function readU32(bytes: Uint8Array, offset: number): number {
-  return (
-    (bytes[offset]! |
-      (bytes[offset + 1]! << 8) |
-      (bytes[offset + 2]! << 16) |
-      (bytes[offset + 3]! << 24)) >>>
-    0
-  )
-}
-
-class ZipArchive {
-  private readBytes = 0
-
-  private constructor(
-    private readonly bytes: Uint8Array,
-    private readonly entries: Map<string, ZipEntry>,
-  ) {}
-
-  static open(bytes: Uint8Array): ZipArchive {
-    const eocd = findEndOfCentralDirectory(bytes)
-    if (eocd < 0) {
-      throw new SpreadsheetParseError(
-        'EXCEL_PARSE_FAILED',
-        'The .xlsx zip container is truncated or malformed.',
-      )
-    }
-    const entryCount = readU16(bytes, eocd + 10)
-    const centralSize = readU32(bytes, eocd + 12)
-    const centralOffset = readU32(bytes, eocd + 16)
-    if (entryCount === 0xffff || centralSize === 0xffffffff || centralOffset === 0xffffffff) {
-      throw new SpreadsheetParseError(
-        'EXCEL_PARSE_FAILED',
-        'Zip64 workbooks are not supported; re-save the file as a regular .xlsx.',
-      )
-    }
-    if (centralOffset + centralSize > bytes.length) {
-      throw new SpreadsheetParseError(
-        'EXCEL_PARSE_FAILED',
-        'The .xlsx central directory is out of bounds.',
-      )
-    }
-
-    const entries = new Map<string, ZipEntry>()
-    let cursor = centralOffset
-    for (let index = 0; index < entryCount; index += 1) {
-      if (cursor + 46 > bytes.length || readU32(bytes, cursor) !== CENTRAL_SIGNATURE) {
-        throw new SpreadsheetParseError(
-          'EXCEL_PARSE_FAILED',
-          'The .xlsx central directory is malformed.',
-        )
-      }
-      const flags = readU16(bytes, cursor + 8)
-      const method = readU16(bytes, cursor + 10)
-      const compressedSize = readU32(bytes, cursor + 20)
-      const uncompressedSize = readU32(bytes, cursor + 24)
-      const nameLength = readU16(bytes, cursor + 28)
-      const extraLength = readU16(bytes, cursor + 30)
-      const commentLength = readU16(bytes, cursor + 32)
-      const localOffset = readU32(bytes, cursor + 42)
-      const nameStart = cursor + 46
-      if (nameStart + nameLength > bytes.length) {
-        throw new SpreadsheetParseError('EXCEL_PARSE_FAILED', 'The .xlsx entry name is truncated.')
-      }
-      const name = UTF8.decode(bytes.subarray(nameStart, nameStart + nameLength))
-      cursor = nameStart + nameLength + extraLength + commentLength
-
-      if (localOffset + 30 > bytes.length || readU32(bytes, localOffset) !== LOCAL_SIGNATURE) {
-        throw new SpreadsheetParseError(
-          'EXCEL_PARSE_FAILED',
-          `The .xlsx entry "${name}" has an invalid local header.`,
-        )
-      }
-      const localNameLength = readU16(bytes, localOffset + 26)
-      const localExtraLength = readU16(bytes, localOffset + 28)
-      const dataOffset = localOffset + 30 + localNameLength + localExtraLength
-      if (dataOffset + compressedSize > bytes.length) {
-        throw new SpreadsheetParseError(
-          'EXCEL_PARSE_FAILED',
-          `The .xlsx entry "${name}" is truncated.`,
-        )
-      }
-
-      entries.set(name.toLowerCase(), {
-        name,
-        method,
-        compressedSize,
-        uncompressedSize,
-        dataOffset,
-        encrypted: (flags & 1) === 1,
-      })
-    }
-    return new ZipArchive(bytes, entries)
-  }
-
-  has(name: string): boolean {
-    return this.entries.has(name.toLowerCase())
-  }
-
-  async read(name: string): Promise<Uint8Array> {
-    const entry = this.entries.get(name.toLowerCase())
-    if (!entry) {
-      throw new SpreadsheetParseError('EXCEL_PARSE_FAILED', `The workbook is missing "${name}".`)
-    }
-    if (entry.encrypted) {
-      throw new SpreadsheetParseError(
-        'EXCEL_PARSE_FAILED',
-        'Encrypted workbooks are not supported; remove the password and try again.',
-      )
-    }
-    if (entry.uncompressedSize > MAX_ENTRY_BYTES) {
-      throw new SpreadsheetParseError(
-        'EXCEL_PARSE_FAILED',
-        `The workbook entry "${entry.name}" is too large to parse.`,
-      )
-    }
-    this.readBytes += entry.uncompressedSize
-    if (this.readBytes > MAX_TOTAL_UNCOMPRESSED_BYTES) {
-      throw new SpreadsheetParseError(
-        'EXCEL_PARSE_FAILED',
-        'The workbook is too large to parse safely.',
-      )
-    }
-
-    const compressed = this.bytes.subarray(
-      entry.dataOffset,
-      entry.dataOffset + entry.compressedSize,
-    )
-    if (entry.method === 0) return compressed.slice()
-    if (entry.method !== 8) {
-      throw new SpreadsheetParseError(
-        'EXCEL_PARSE_FAILED',
-        `The workbook uses unsupported compression method ${entry.method}.`,
-      )
-    }
-    try {
-      return await inflateRaw(compressed)
-    } catch (error) {
-      if (error instanceof SpreadsheetParseError) throw error
-      throw new SpreadsheetParseError(
-        'EXCEL_PARSE_FAILED',
-        `The workbook entry "${entry.name}" could not be decompressed.`,
-      )
-    }
-  }
-
-  async readText(name: string): Promise<string> {
-    return UTF8.decode(await this.read(name))
-  }
-}
-
-function findEndOfCentralDirectory(bytes: Uint8Array): number {
-  if (bytes.length < 22) return -1
-  const earliest = Math.max(0, bytes.length - 0xffff - 22)
-  for (let offset = bytes.length - 22; offset >= earliest; offset -= 1) {
-    if (readU32(bytes, offset) === EOCD_SIGNATURE) return offset
-  }
-  return -1
-}
-
-async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
-  if (typeof DecompressionStream === 'undefined') {
-    throw new SpreadsheetParseError(
-      'EXCEL_PARSE_FAILED',
-      'This environment cannot decompress .xlsx files (DecompressionStream is unavailable).',
-    )
-  }
-  const source = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(data)
-      controller.close()
-    },
-  })
-  // TS's DOM lib types DecompressionStream against BufferSource while
-  // ReadableStream defaults to Uint8Array; the pair is compatible at runtime.
-  const decompressor = new DecompressionStream('deflate-raw') as unknown as ReadableWritablePair<
-    Uint8Array,
-    Uint8Array
-  >
-  const reader = source.pipeThrough(decompressor).getReader()
-  const chunks: Uint8Array[] = []
-  let total = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    if (!value) continue
-    total += value.length
-    if (total > MAX_ENTRY_BYTES) {
-      await reader.cancel()
-      throw new SpreadsheetParseError(
-        'EXCEL_PARSE_FAILED',
-        'A workbook entry decompressed beyond the size limit.',
-      )
-    }
-    chunks.push(value)
-  }
-  const output = new Uint8Array(total)
-  let offset = 0
-  for (const chunk of chunks) {
-    output.set(chunk, offset)
-    offset += chunk.length
-  }
-  return output
 }
 
 // --- XML helpers -------------------------------------------------------------
@@ -624,7 +401,104 @@ function isBlankCell(value: SpreadsheetCell | undefined): boolean {
 
 // --- XLSX --------------------------------------------------------------------
 
+/**
+ * Maps generic ZIP failures to the spreadsheet parser's established messages.
+ * The codes are shared, but workbook-specific wording is what existing callers
+ * and tests expect.
+ */
+function workbookZipError(error: ZipError): SpreadsheetParseError {
+  const entry = error.entryName === undefined ? '' : `"${error.entryName}"`
+  switch (error.code) {
+    case 'ZIP_TRUNCATED':
+      return new SpreadsheetParseError(
+        'EXCEL_PARSE_FAILED',
+        'The .xlsx zip container is truncated or malformed.',
+      )
+    case 'ZIP_ZIP64_UNSUPPORTED':
+      return new SpreadsheetParseError(
+        'EXCEL_PARSE_FAILED',
+        'Zip64 workbooks are not supported; re-save the file as a regular .xlsx.',
+      )
+    case 'ZIP_CENTRAL_DIRECTORY_OUT_OF_BOUNDS':
+      return new SpreadsheetParseError(
+        'EXCEL_PARSE_FAILED',
+        'The .xlsx central directory is out of bounds.',
+      )
+    case 'ZIP_CENTRAL_DIRECTORY_MALFORMED':
+    case 'ZIP_TOO_MANY_ENTRIES':
+      return new SpreadsheetParseError(
+        'EXCEL_PARSE_FAILED',
+        'The .xlsx central directory is malformed.',
+      )
+    case 'ZIP_ENTRY_NAME_TRUNCATED':
+      return new SpreadsheetParseError('EXCEL_PARSE_FAILED', 'The .xlsx entry name is truncated.')
+    case 'ZIP_ENTRY_LOCAL_HEADER_INVALID':
+      return new SpreadsheetParseError(
+        'EXCEL_PARSE_FAILED',
+        `The .xlsx entry ${entry} has an invalid local header.`,
+      )
+    case 'ZIP_ENTRY_TRUNCATED':
+      return new SpreadsheetParseError(
+        'EXCEL_PARSE_FAILED',
+        `The .xlsx entry ${entry} is truncated.`,
+      )
+    case 'ZIP_ENTRY_MISSING':
+      return new SpreadsheetParseError('EXCEL_PARSE_FAILED', `The workbook is missing ${entry}.`)
+    case 'ZIP_ENCRYPTED_UNSUPPORTED':
+      return new SpreadsheetParseError(
+        'EXCEL_PARSE_FAILED',
+        'Encrypted workbooks are not supported; remove the password and try again.',
+      )
+    case 'ZIP_ENTRY_TOO_LARGE':
+      return new SpreadsheetParseError(
+        'EXCEL_PARSE_FAILED',
+        `The workbook entry ${entry} is too large to parse.`,
+      )
+    case 'ZIP_TOTAL_TOO_LARGE':
+      return new SpreadsheetParseError(
+        'EXCEL_PARSE_FAILED',
+        'The workbook is too large to parse safely.',
+      )
+    case 'ZIP_METHOD_UNSUPPORTED':
+      return new SpreadsheetParseError(
+        'EXCEL_PARSE_FAILED',
+        `The workbook uses unsupported compression method ${error.method ?? 'unknown'}.`,
+      )
+    case 'ZIP_DECOMPRESS_FAILED':
+      return new SpreadsheetParseError(
+        'EXCEL_PARSE_FAILED',
+        `The workbook entry ${entry} could not be decompressed.`,
+      )
+    case 'ZIP_DECOMPRESSED_TOO_LARGE':
+      return new SpreadsheetParseError(
+        'EXCEL_PARSE_FAILED',
+        'A workbook entry decompressed beyond the size limit.',
+      )
+    case 'ZIP_DECOMPRESSION_UNAVAILABLE':
+      return new SpreadsheetParseError(
+        'EXCEL_PARSE_FAILED',
+        'This environment cannot decompress .xlsx files (DecompressionStream is unavailable).',
+      )
+    default:
+      return new SpreadsheetParseError('EXCEL_PARSE_FAILED', error.message)
+  }
+}
+
 async function parseXlsx(
+  bytes: Uint8Array,
+  requestedSheet: string | undefined,
+  hasHeader: boolean,
+): Promise<ParsedSpreadsheet> {
+  try {
+    return await parseXlsxArchive(bytes, requestedSheet, hasHeader)
+  } catch (error) {
+    if (error instanceof SpreadsheetParseError) throw error
+    if (error instanceof ZipError) throw workbookZipError(error)
+    throw error
+  }
+}
+
+async function parseXlsxArchive(
   bytes: Uint8Array,
   requestedSheet: string | undefined,
   hasHeader: boolean,

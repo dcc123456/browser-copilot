@@ -42,6 +42,11 @@
  */
 import { skillFromMarkdown, skillSlug, skillToMarkdown } from './skills-import'
 import { agentFromMarkdown, agentSlug, agentToMarkdown } from './agents-import'
+import {
+  deleteDirectoryHandle,
+  readDirectoryHandle,
+  writeDirectoryHandle,
+} from './directory-handle-store'
 import { notifyStoreChanged } from './store-events'
 import {
   CACHE_INDEX_KEY,
@@ -77,9 +82,7 @@ const CONVERSATION_PREFIX = 'conv:'
  */
 export const CHECKPOINT_PREFIX = 'cp:'
 
-const IDB_DB = 'browser-copilot-fs'
-const IDB_STORE = 'directory'
-const IDB_KEY = 'root'
+const DIRECTORY_KEY = 'root'
 
 /** Whether a directory is configured and usable, or storage is in the browser. */
 export type StorageMode = 'file' | 'browser'
@@ -169,63 +172,6 @@ const AGENT_FILE = 'AGENT.md'
 
 export function agentPath(slug: string): string[] {
   return [AGENTS_DIR, sanitizeFileSegment(slug), AGENT_FILE]
-}
-
-// --- IndexedDB: directory-handle persistence ---------------------------------
-
-function openIdb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (typeof indexedDB === 'undefined') {
-      reject(new Error('IndexedDB is not available'))
-      return
-    }
-    const request = indexedDB.open(IDB_DB, 1)
-    request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(IDB_STORE)) {
-        request.result.createObjectStore(IDB_STORE)
-      }
-    }
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error ?? new Error('IndexedDB open failed'))
-  })
-}
-
-async function idbGet(): Promise<FileSystemDirectoryHandle | null> {
-  try {
-    const db = await openIdb()
-    return await new Promise((resolve) => {
-      const tx = db.transaction(IDB_STORE, 'readonly')
-      const req = tx.objectStore(IDB_STORE).get(IDB_KEY)
-      req.onsuccess = () => resolve((req.result as FileSystemDirectoryHandle | undefined) ?? null)
-      req.onerror = () => resolve(null)
-    })
-  } catch {
-    return null
-  }
-}
-
-async function idbPut(handle: FileSystemDirectoryHandle): Promise<void> {
-  const db = await openIdb()
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE, 'readwrite')
-    tx.objectStore(IDB_STORE).put(handle, IDB_KEY)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error ?? new Error('IndexedDB write failed'))
-  })
-}
-
-async function idbDelete(): Promise<void> {
-  try {
-    const db = await openIdb()
-    await new Promise<void>((resolve) => {
-      const tx = db.transaction(IDB_STORE, 'readwrite')
-      tx.objectStore(IDB_STORE).delete(IDB_KEY)
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => resolve()
-    })
-  } catch {
-    // Nothing stored — nothing to clear.
-  }
 }
 
 // --- File I/O ----------------------------------------------------------------
@@ -533,7 +479,7 @@ async function resolveHandle(request = false): Promise<FileSystemDirectoryHandle
   if (!resolving) {
     resolving = (async () => {
       try {
-        const handle = await idbGet()
+        const handle = await readDirectoryHandle(DIRECTORY_KEY)
         if (!handle) return null
         let state: PermissionState
         try {
@@ -561,7 +507,7 @@ async function resolveHandle(request = false): Promise<FileSystemDirectoryHandle
 
 /** Whether a directory is configured at all (even if its permission is down). */
 async function isDirectoryConfigured(): Promise<boolean> {
-  return (await idbGet()) !== null
+  return (await readDirectoryHandle(DIRECTORY_KEY)) !== null
 }
 
 /** Exported for the schema bootstrap: see `ensureSchema` in `lib/storage.ts`. */
@@ -816,7 +762,7 @@ export async function getStorageMode(): Promise<StorageMode> {
 /** The picked folder's name, for display; `null` when nothing is configured. */
 export async function getStorageDirectoryName(): Promise<string | null> {
   try {
-    const handle = await idbGet()
+    const handle = await readDirectoryHandle(DIRECTORY_KEY)
     return handle?.name ?? null
   } catch {
     return null
@@ -848,7 +794,7 @@ export async function pickStorageDirectory(): Promise<StorageMode> {
     throw new Error('File System Access API is not available in this browser.')
   }
   const handle = await window.showDirectoryPicker({ mode: 'readwrite' })
-  await idbPut(handle)
+  await writeDirectoryHandle(DIRECTORY_KEY, handle)
   resetStorageCache()
   cachedHandle = handle
   await syncToFiles()
@@ -868,7 +814,7 @@ export async function pickStorageDirectory(): Promise<StorageMode> {
 export async function clearStorageDirectory(): Promise<void> {
   await syncFilesToBrowser()
   await clearFallbacks()
-  await idbDelete()
+  await deleteDirectoryHandle(DIRECTORY_KEY)
   resetStorageCache()
 }
 
