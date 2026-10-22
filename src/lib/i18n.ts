@@ -1475,6 +1475,71 @@ export interface Messages {
   tokensConsumerContextCompaction: string
   tokensConsumerVision: string
   tokensConsumerExternalApi: string
+  /** Self-updater: GitHub Releases into the folder of an unpacked install. */
+  updateBannerAvailable: ({ version }: { version: string }) => string
+  updateBannerPending: ({ version }: { version: string }) => string
+  updateBannerOpen: string
+  updateBannerReload: string
+  updateBannerDismiss: string
+  updateDialogTitle: string
+  updateCurrentVersion: ({ version }: { version: string }) => string
+  updateTargetVersion: ({ version }: { version: string }) => string
+  updateReleaseNotes: string
+  updateNotesUnavailable: string
+  updateOverwriteWarning: string
+  updateInstallFolder: string
+  updateFolderFirstTime: string
+  updateFolderSaved: ({ name }: { name: string }) => string
+  updateChangeFolder: string
+  updateStart: string
+  updateCancel: string
+  updateClose: string
+  updateTryAgain: string
+  updateReloadNow: string
+  updateReloadLater: string
+  updateOpenRelease: string
+  updateDoneTitle: string
+  updateDoneBody: ({ version }: { version: string }) => string
+  updateBackupNote: ({ folder }: { folder: string }) => string
+  updateManualHint: string
+  updateProgressDownloading: ({ percent }: { percent: number }) => string
+  updateProgressVerifying: string
+  updateProgressExtracting: string
+  updateProgressBackingUp: string
+  updateProgressWriting: ({ done, total }: { done: number; total: number }) => string
+  updateProgressDone: string
+  updateErrorTitle: string
+  updateErrorNetwork: string
+  updateErrorRateLimited: string
+  updateErrorHttp: string
+  updateErrorInvalidRelease: string
+  updateErrorAssetMissing: string
+  updateErrorNotDevelopment: string
+  updateErrorPicker: string
+  updateErrorPermission: string
+  updateErrorFolder: string
+  updateErrorDownload: string
+  updateErrorDigest: string
+  updateErrorArchive: string
+  updateErrorPath: string
+  updateErrorDuplicate: string
+  updateErrorVariant: string
+  updateErrorBackup: string
+  updateErrorWrite: string
+  updateErrorAborted: string
+  updateErrorGeneric: ({ detail }: { detail: string }) => string
+  updateSettingsTitle: string
+  updateSettingsHint: string
+  updateCheckNow: string
+  updateChecking: string
+  updateUpToDate: string
+  updateNeverChecked: string
+  updateLastChecked: ({ time }: { time: string }) => string
+  updateCheckFailed: ({ detail }: { detail: string }) => string
+  updateSettingsAvailable: ({ version }: { version: string }) => string
+  updateSettingsApply: string
+  updateSettingsPending: ({ version }: { version: string }) => string
+  updateSettingsReload: string
 }
 
 const en: Messages = {
@@ -2790,6 +2855,80 @@ Keep the whole report dense and within the message size cap.`,
   tokensConsumerContextCompaction: 'Context compaction',
   tokensConsumerVision: 'Vision',
   tokensConsumerExternalApi: 'External API',
+  updateBannerAvailable: ({ version }) => `Version ${version} is available.`,
+  updateBannerPending: ({ version }) =>
+    `Version ${version} is ready — reload the extension to finish.`,
+  updateBannerOpen: 'Update',
+  updateBannerReload: 'Reload',
+  updateBannerDismiss: 'Dismiss',
+  updateDialogTitle: 'Software update',
+  updateCurrentVersion: ({ version }) => `Installed version: ${version}`,
+  updateTargetVersion: ({ version }) => `New version: ${version}`,
+  updateReleaseNotes: 'Release notes',
+  updateNotesUnavailable: 'This release has no notes.',
+  updateOverwriteWarning:
+    'The release files will be written directly into the install folder after its current files are backed up. Keep this panel open until it finishes; Chrome keeps running the current version until you reload.',
+  updateInstallFolder: 'Install folder',
+  updateFolderFirstTime:
+    'The first update asks for the folder you originally loaded; later updates reuse it automatically.',
+  updateFolderSaved: ({ name }) => `Install folder: ${name}. Future updates write here directly.`,
+  updateChangeFolder: 'Change',
+  updateStart: 'Download and install',
+  updateCancel: 'Cancel',
+  updateClose: 'Close',
+  updateTryAgain: 'Try again',
+  updateReloadNow: 'Reload now',
+  updateReloadLater: 'Later',
+  updateOpenRelease: 'Open release page',
+  updateDoneTitle: 'Update written',
+  updateDoneBody: ({ version }) =>
+    `Version ${version} is on disk. Reload the extension to start using it.`,
+  updateBackupNote: ({ folder }) =>
+    `The replaced files were backed up to "${folder}" inside the install folder. You can delete it once the update works.`,
+  updateManualHint:
+    'This installation cannot update itself in place. Download the release from GitHub and load it manually.',
+  updateProgressDownloading: ({ percent }) => `Downloading… ${percent}%`,
+  updateProgressVerifying: 'Verifying the SHA-256 digest…',
+  updateProgressExtracting: 'Checking the archive…',
+  updateProgressBackingUp: 'Backing up the current version…',
+  updateProgressWriting: ({ done, total }) => `Writing files… ${done}/${total}`,
+  updateProgressDone: 'Done',
+  updateErrorTitle: 'Update failed',
+  updateErrorNetwork: 'Could not reach GitHub. Check your network and try again.',
+  updateErrorRateLimited: 'GitHub is rate-limiting update checks. Try again later.',
+  updateErrorHttp: 'GitHub returned an unexpected response. Try again later.',
+  updateErrorInvalidRelease: 'The latest release could not be read.',
+  updateErrorAssetMissing: 'The release has no package for this build.',
+  updateErrorNotDevelopment: 'In-place updates only work for an unpacked install.',
+  updateErrorPicker: 'The folder picker could not be opened.',
+  updateErrorPermission: 'Permission to write to that folder was not granted.',
+  updateErrorFolder: 'That folder does not contain this extension at the installed version.',
+  updateErrorDownload: 'The release download failed. Check your network and try again.',
+  updateErrorDigest:
+    'The download did not match the SHA-256 digest published by GitHub. Nothing was written.',
+  updateErrorArchive: 'The downloaded package is not a valid extension archive.',
+  updateErrorPath: 'The package contains an unsafe file path.',
+  updateErrorDuplicate: 'The package contains duplicate file paths.',
+  updateErrorVariant: 'The package is for a different build of this extension.',
+  updateErrorBackup:
+    'The current version could not be backed up, so nothing was overwritten. Check the folder permissions and try again.',
+  updateErrorWrite:
+    'Writing the release files failed. The previous version remains installed; try again.',
+  updateErrorAborted: 'The update was canceled.',
+  updateErrorGeneric: ({ detail }) => `Something went wrong: ${detail}`,
+  updateSettingsTitle: 'Updates',
+  updateSettingsHint:
+    'Checks GitHub Releases every 12 hours. An in-place update writes the release into the unpacked install folder; reload the extension to switch versions.',
+  updateCheckNow: 'Check for updates',
+  updateChecking: 'Checking…',
+  updateUpToDate: 'You are on the latest version.',
+  updateNeverChecked: 'Not checked yet.',
+  updateLastChecked: ({ time }) => `Last checked ${time}`,
+  updateCheckFailed: ({ detail }) => `Update check failed: ${detail}`,
+  updateSettingsAvailable: ({ version }) => `Version ${version} is ready to install.`,
+  updateSettingsApply: 'Update now',
+  updateSettingsPending: ({ version }) => `Version ${version} is waiting for a reload.`,
+  updateSettingsReload: 'Reload extension',
 }
 
 const zhCN: Messages = {
@@ -3996,6 +4135,73 @@ const zhCN: Messages = {
   tokensConsumerContextCompaction: '上下文压缩',
   tokensConsumerVision: '视觉识别',
   tokensConsumerExternalApi: '外部 API',
+  updateBannerAvailable: ({ version }) => `新版本 ${version} 可用。`,
+  updateBannerPending: ({ version }) => `版本 ${version} 已写入，重新加载扩展后生效。`,
+  updateBannerOpen: '更新',
+  updateBannerReload: '重新加载',
+  updateBannerDismiss: '忽略',
+  updateDialogTitle: '软件更新',
+  updateCurrentVersion: ({ version }) => `当前版本：${version}`,
+  updateTargetVersion: ({ version }) => `新版本：${version}`,
+  updateReleaseNotes: '更新说明',
+  updateNotesUnavailable: '该版本没有更新说明。',
+  updateOverwriteWarning:
+    '更新文件会直接写入安装目录，覆盖前会先备份当前文件。写入期间请保持面板打开；在重新加载之前，Chrome 会继续运行当前版本。',
+  updateInstallFolder: '安装目录',
+  updateFolderFirstTime: '首次更新请选择当初「加载已解压的扩展程序」时使用的目录；之后会自动复用。',
+  updateFolderSaved: ({ name }) => `安装目录：${name}，之后将直接覆盖。`,
+  updateChangeFolder: '更换',
+  updateStart: '下载并安装',
+  updateCancel: '取消',
+  updateClose: '关闭',
+  updateTryAgain: '重试',
+  updateReloadNow: '立即重新加载',
+  updateReloadLater: '稍后',
+  updateOpenRelease: '打开发布页面',
+  updateDoneTitle: '更新已写入',
+  updateDoneBody: ({ version }) => `版本 ${version} 已写入磁盘。重新加载扩展后即可使用。`,
+  updateBackupNote: ({ folder }) =>
+    `被替换的文件已备份到安装目录内的「${folder}」，确认更新正常后可手动删除。`,
+  updateManualHint: '当前安装方式无法直接更新。请从 GitHub 下载新版本并手动加载。',
+  updateProgressDownloading: ({ percent }) => `正在下载…… ${percent}%`,
+  updateProgressVerifying: '正在校验 SHA-256 摘要……',
+  updateProgressExtracting: '正在检查安装包……',
+  updateProgressBackingUp: '正在备份当前版本……',
+  updateProgressWriting: ({ done, total }) => `正在写入文件…… ${done}/${total}`,
+  updateProgressDone: '完成',
+  updateErrorTitle: '更新失败',
+  updateErrorNetwork: '无法连接 GitHub，请检查网络后重试。',
+  updateErrorRateLimited: 'GitHub 正在限制更新检查频率，请稍后重试。',
+  updateErrorHttp: 'GitHub 返回了异常响应，请稍后重试。',
+  updateErrorInvalidRelease: '无法读取最新版本信息。',
+  updateErrorAssetMissing: '该版本没有适用于当前构建的安装包。',
+  updateErrorNotDevelopment: '只有未打包安装的扩展才能直接更新。',
+  updateErrorPicker: '无法打开目录选择器。',
+  updateErrorPermission: '未获得该目录的写入权限。',
+  updateErrorFolder: '该目录不是当前版本的扩展安装目录。',
+  updateErrorDownload: '安装包下载失败，请检查网络后重试。',
+  updateErrorDigest: '下载内容与 GitHub 公布的 SHA-256 摘要不一致，未写入任何文件。',
+  updateErrorArchive: '下载的安装包不是有效的扩展压缩包。',
+  updateErrorPath: '安装包中包含不安全的文件路径。',
+  updateErrorDuplicate: '安装包中包含重复的文件路径。',
+  updateErrorVariant: '安装包适用于另一种构建版本。',
+  updateErrorBackup: '无法备份当前版本，未覆盖任何文件。请检查目录权限后重试。',
+  updateErrorWrite: '写入更新文件失败。当前版本仍然可用，请重试。',
+  updateErrorAborted: '更新已取消。',
+  updateErrorGeneric: ({ detail }) => `出现错误：${detail}`,
+  updateSettingsTitle: '更新',
+  updateSettingsHint:
+    '每 12 小时检查一次 GitHub Releases。直接更新会把发布文件写入未打包扩展的安装目录；重新加载扩展后切换版本。',
+  updateCheckNow: '检查更新',
+  updateChecking: '正在检查……',
+  updateUpToDate: '当前已是最新版本。',
+  updateNeverChecked: '尚未检查。',
+  updateLastChecked: ({ time }) => `上次检查：${time}`,
+  updateCheckFailed: ({ detail }) => `检查更新失败：${detail}`,
+  updateSettingsAvailable: ({ version }) => `版本 ${version} 可以安装。`,
+  updateSettingsApply: '立即更新',
+  updateSettingsPending: ({ version }) => `版本 ${version} 等待重新加载。`,
+  updateSettingsReload: '重新加载扩展',
 }
 
 const DICTIONARIES: Record<Locale, Messages> = { en, 'zh-CN': zhCN }

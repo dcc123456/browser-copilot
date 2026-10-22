@@ -17,6 +17,7 @@ import TokensTab from './TokensTab'
 import WorkflowsTab from './WorkflowsTab'
 import WindowPicker from './WindowPicker'
 import UserFilePickerCardHost from './UserFilePickerCard'
+import UpdateCenter from './update/UpdateCenter'
 import { ConfirmHost } from '../ui/confirm'
 
 type TabId =
@@ -319,6 +320,9 @@ export default function App() {
           <Minimize2 size={14} aria-hidden="true" />
         </button>
       </nav>
+      {/* Releases / reload prompt; sits between the tab bar and the active tab
+          so an available update is visible from every panel. */}
+      <UpdateCenter />
       {/*
         Every tab stays mounted: the chat holds a live port and streaming
         transcript that must survive the user editing a skill mid-answer.

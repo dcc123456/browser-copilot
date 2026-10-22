@@ -49,6 +49,7 @@ import { OCR_SUPPORTED } from '../lib/ocr-support'
 import NumberInput from '../ui/NumberInput'
 import FormDialog, { FormDialogCancelButton, FormDialogPrimaryButton } from '../ui/FormDialog'
 import { Switch } from '../ui/Switch'
+import UpdateSettingsCard from './update/UpdateSettingsCard'
 import { useI18n, useT } from './i18n'
 
 /** Editable form state; numbers stay strings so partial input is allowed. */
@@ -2259,6 +2260,8 @@ export default function SettingsTab({ onLocaleChange }: Props) {
           </>
         )}
       </div>
+
+      <UpdateSettingsCard />
 
       {openDialog === 'agent' && (
         <FormDialog
