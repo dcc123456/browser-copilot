@@ -6,18 +6,21 @@
  * with a spoken reply plus an action — append a chain of operators, or change the
  * step the user has selected in place — and the editor lands it immediately (the
  * dock itself never mutates the graph; the canvas holds unsaved edits and stays
- * the source of truth). Undo removes exactly the last landed batch or restores
- * exactly the snapshot the last in-place change took. Nothing is verified by
- * running, and the transcript lives only in this component's state
+ * the source of truth). The model's own output streams in over
+ * `workflows.operatorAdviseEvent` while it writes and is kept behind a disclosure
+ * afterwards. Undo removes exactly the last landed batch or restores exactly the
+ * snapshot the last in-place change took. Nothing is verified by running, and the
+ * transcript lives only in this component's state
  * (specs/2026-10-19-editor-operator-ai-chat-design.md,
- * specs/2026-10-19-operator-ai-observe-and-edit-design.md §4).
+ * specs/2026-10-19-operator-ai-observe-and-edit-design.md §4,
+ * specs/2026-10-22-operator-assistant-thinking-output-vocabulary-and-pending-picks-design.md §3).
  *
  * Tailwind semantic tokens only; all copy through the editor translator.
  *
  * @module workflow-editor/ai/OperatorChatDock
  */
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Camera,
   Eye,
@@ -113,6 +116,12 @@ interface Turn {
   role: 'user' | 'assistant'
   content: string
   landing?: OperatorLanding
+  /** The proposals the answer carried, with the model's reason for each — shown
+   *  so the user can judge the choice without opening the raw output. */
+  proposals?: OperatorProposal[]
+  /** The answer exactly as the model wrote it. Streamed live, then kept behind a
+   *  disclosure, because a refused or half-read answer is what the user needs. */
+  raw?: string
   /** The page this answer's parameters were read from; `null` when none was. */
   page?: OperatorPageRef | null
   /** An assistant row that reports a failure rather than a landed chain. */
@@ -126,6 +135,14 @@ interface Turn {
   /** The automatic screenshot this answer cost — or tried to. Screen pixels leave
    *  the machine on this path, so it is reported, never silent. */
   screenshot?: OperatorScreenshotReport
+}
+
+/** The model's answer while it is still arriving, fed by the background's
+ *  `workflows.operatorAdviseEvent` broadcasts. */
+interface StreamingAnswer {
+  sessionId: string
+  reasoning: string
+  text: string
 }
 
 /** A batch held back from the canvas, and what it still lacks. */
@@ -321,8 +338,12 @@ export default function OperatorChatDock({
   // Elements the user pointed at by hand since the last message. They outrank
   // any page read, so they ride along with the next send and are consumed there.
   const [picked, setPicked] = useState<PickedElement[]>([])
+  const [stream, setStream] = useState<StreamingAnswer | null>(null)
   const { bt, locale } = useEditorLocale()
   const composingRef = useRef(false)
+  /** The advise request whose deltas this dock accepts. Deltas for any other
+   *  request (another editor page, a cancelled turn) are dropped. */
+  const activeSessionRef = useRef<string | null>(null)
   /** Which cancel reaches the request in flight: the model call, or the run that
    *  acts on the page. One facility, one in-flight request at a time. */
   const inFlightRef = useRef<
@@ -331,6 +352,38 @@ export default function OperatorChatDock({
     | null
   >(null)
   const logRef = useRef<HTMLDivElement>(null)
+
+  // The model's own output, live. The background batches deltas (~80 ms), so this
+  // appends a chunk at a time rather than per token; the final answer arrives
+  // again in the command result and is kept behind a disclosure.
+  useEffect(() => {
+    const listener = (message: unknown): void => {
+      const event = message as {
+        type?: string
+        sessionId?: string
+        channel?: 'text' | 'reasoning'
+        delta?: string
+      }
+      if (event?.type !== 'workflows.operatorAdviseEvent') return
+      const sessionId = event.sessionId
+      if (!sessionId || sessionId !== activeSessionRef.current) return
+      const delta = event.delta
+      if (typeof delta !== 'string' || delta === '') return
+      const channel = event.channel === 'reasoning' ? 'reasoning' : 'text'
+      setStream((current) => {
+        const base = current ?? { sessionId, reasoning: '', text: '' }
+        return { ...base, [channel]: base[channel] + delta }
+      })
+      if (atBottom) {
+        requestAnimationFrame(() => {
+          const el = logRef.current
+          if (el) el.scrollTo({ top: el.scrollHeight })
+        })
+      }
+    }
+    chrome.runtime.onMessage.addListener(listener)
+    return () => chrome.runtime.onMessage.removeListener(listener)
+  }, [atBottom])
 
   function scrollToEnd() {
     const el = logRef.current
@@ -365,26 +418,42 @@ export default function OperatorChatDock({
     })
   }
 
-  /**
-   * Write a hand-picked locator into the step still missing one, and stop holding
-   * the batch once nothing is missing: the user just answered the question the
-   * offer was asking, so nothing has to run on the page to land it. With a gap
-   * left (an option label, a second step) the offer stays and shows what remains.
-   */
-  function fillOfferWith(element: PickedElement): void {
-    const index = turns.findIndex((turn) => turn.offer)
-    const offer = index >= 0 ? turns[index]?.offer : undefined
-    if (!offer) return
-    const gap = proposalIndexesNeedingPage(offer.proposals)[0]
-    if (gap === undefined) return
-    const filled = offer.proposals.map((proposal, position) =>
-      position === gap
-        ? {
-            ...proposal,
-            data: { ...proposal.data, selector: element.selector, findBy: element.findBy },
-          }
-        : proposal,
+  /** Change one pending attachment in place — nothing on the canvas moves. */
+  function updatePick(index: number, patch: Partial<PickedElement>): void {
+    setPicked((current) =>
+      current.map((element, position) => (position === index ? { ...element, ...patch } : element)),
     )
+  }
+
+  function removePick(index: number): void {
+    setPicked((current) => current.filter((_element, position) => position !== index))
+  }
+
+  /**
+   * Write the pending picks into the held batch, and land it once nothing is
+   * missing. A pick is only an attachment until the user presses send: editing or
+   * removing one never touches the canvas, and the send click is the consent.
+   * Picks beyond what the batch can use stay pending for the next message.
+   */
+  function applyPicksToOffer(index: number): void {
+    const offer = turns[index]?.offer
+    if (!offer || busy) return
+    const gaps = proposalIndexesNeedingPage(offer.proposals)
+    const available = picked.filter((element) => element.selector.trim() !== '')
+    if (gaps.length === 0 || available.length === 0) return
+    let cursor = 0
+    const filled = offer.proposals.map((proposal, position) => {
+      if (!gaps.includes(position) || cursor >= available.length) return proposal
+      const element = available[cursor]
+      if (!element) return proposal
+      cursor += 1
+      return {
+        ...proposal,
+        data: { ...proposal.data, selector: element.selector.trim(), findBy: element.findBy },
+      }
+    })
+    const used = new Set(available.slice(0, cursor))
+    setPicked((current) => current.filter((element) => !used.has(element)))
     const missing = proposalsNeedingPage(filled)
     if (missing.length > 0) {
       setTurns((current) =>
@@ -399,7 +468,9 @@ export default function OperatorChatDock({
     resolveTurn(index, { landing: landProposals(offer.action, filled, getContext()) })
   }
 
-  /** Point at the element by hand — the assistant gets the locator the user chose. */
+  /** Point at the element by hand — the assistant gets the locator the user chose.
+   *  The pick becomes a pending attachment; it is sent (and landed) only when the
+   *  user sends, so it can still be edited or removed here. */
   async function pickElement(): Promise<void> {
     if (busy) return
     const result = await requestElementPick({ locale })
@@ -414,12 +485,20 @@ export default function OperatorChatDock({
       role: 'user',
       content: t('operatorAiPicked').replace('{selector}', element.selector),
     })
-    fillOfferWith(element)
   }
 
   async function send(): Promise<void> {
+    if (busy) return
+    // A held batch owns the next send: the picks the user just collected answer
+    // the question the offer asked, so the click fills and lands it instead of
+    // starting another model turn.
+    const offerIndex = turns.findIndex((turn) => turn.offer)
+    if (offerIndex >= 0) {
+      applyPicksToOffer(offerIndex)
+      return
+    }
     const text = input.trim()
-    if (!text || busy || turns.some((turn) => turn.offer)) return
+    if (!text) return
     const history: OperatorAdviseMessage[] = [
       ...turns.map((turn) => ({ role: turn.role, content: turn.content })),
       { role: 'user', content: text },
@@ -428,8 +507,10 @@ export default function OperatorChatDock({
     const sessionId = makeSessionId()
     // The picks go with this message and are spent by it; the 已拾取 rows stay in
     // the transcript, so the model still reads them on a follow-up turn.
-    const picks = picked
+    const picks = picked.filter((element) => element.selector.trim() !== '')
     inFlightRef.current = { type: 'workflows.operatorAdviseCancel', sessionId }
+    activeSessionRef.current = sessionId
+    setStream({ sessionId, reasoning: '', text: '' })
     setInput('')
     setPicked([])
     setBusy(true)
@@ -451,7 +532,12 @@ export default function OperatorChatDock({
       if (result.type !== 'workflows.operatorAdvise') return
       const data = result.data
       if (!data.ok) {
-        pushTurn({ role: 'assistant', content: data.reason ?? data.reply, failed: true })
+        pushTurn({
+          role: 'assistant',
+          content: data.reason ?? data.reply,
+          ...(data.raw ? { raw: data.raw } : {}),
+          failed: true,
+        })
         return
       }
       const action = data.action ?? 'append'
@@ -467,6 +553,8 @@ export default function OperatorChatDock({
         pushTurn({
           role: 'assistant',
           content: data.reply,
+          proposals: data.proposals,
+          ...(data.raw ? { raw: data.raw } : {}),
           page: data.page,
           ...(data.screenshot ? { screenshot: data.screenshot } : {}),
           offer: {
@@ -493,6 +581,8 @@ export default function OperatorChatDock({
       pushTurn({
         role: 'assistant',
         content: data.reply,
+        proposals: data.proposals,
+        ...(data.raw ? { raw: data.raw } : {}),
         page: data.page ?? null,
         ...(data.screenshot ? { screenshot: data.screenshot } : {}),
         ...(landing ? { landing } : {}),
@@ -504,6 +594,8 @@ export default function OperatorChatDock({
         failed: true,
       })
     } finally {
+      activeSessionRef.current = null
+      setStream(null)
       setBusy(false)
       inFlightRef.current = null
     }
@@ -605,6 +697,9 @@ export default function OperatorChatDock({
     // snapshot level, so an older row can no longer be restored.
     if (turn.landing?.applied) lastLanded = index
   })
+  const offerIndex = turns.findIndex((turn) => turn.offer)
+  const canApplyPicks = offerIndex >= 0 && picked.some((element) => element.selector.trim() !== '')
+  const sendBlockedByOffer = offerIndex >= 0 && !canApplyPicks
 
   return (
     <section
@@ -648,6 +743,29 @@ export default function OperatorChatDock({
             key={index}
           >
             <p className="whitespace-pre-wrap">{turn.content}</p>
+            {turn.proposals && turn.proposals.length > 0 && (
+              <ul className="mt-1 space-y-0.5">
+                {turn.proposals.map((proposal, position) => (
+                  <li
+                    className="text-[11px] leading-snug text-muted"
+                    key={`${proposal.blockId}-${position}`}
+                  >
+                    <span className="text-ink">{operatorBlockName(proposal.blockId)}</span>
+                    {proposal.rationale ? ` — ${proposal.rationale}` : ''}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {turn.raw && (
+              <details className="mt-1">
+                <summary className="cursor-pointer select-none text-[11px] leading-snug text-faint">
+                  {t('operatorAiRaw')}
+                </summary>
+                <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-panel px-1.5 py-1 text-[11px] leading-snug text-muted">
+                  {turn.raw}
+                </pre>
+              </details>
+            )}
             {turn.page && (
               <p className="mt-1 flex items-start gap-1 text-[11px] leading-snug text-faint">
                 <Eye size={11} className="mt-0.5 shrink-0" aria-hidden="true" />
@@ -693,14 +811,67 @@ export default function OperatorChatDock({
           </div>
         ))}
         {busy && (
-          <div className="mr-2 flex items-center gap-1.5 rounded-lg bg-panel-2 px-2 py-1.5 text-xs text-muted">
-            <Loader2 size={12} className="animate-spin" aria-hidden="true" />
-            {t('operatorAiThinking')}
+          <div className="mr-2 flex flex-col gap-1 rounded-lg bg-panel-2 px-2 py-1.5 text-xs text-muted">
+            <div className="flex items-center gap-1.5">
+              <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+              {t('operatorAiThinking')}
+            </div>
+            {stream?.reasoning && (
+              <p className="whitespace-pre-wrap break-words text-[11px] leading-snug text-faint">
+                {stream.reasoning}
+              </p>
+            )}
+            {stream?.text && (
+              <p className="whitespace-pre-wrap break-words text-[11px] leading-snug text-ink">
+                {stream.text}
+              </p>
+            )}
           </div>
         )}
       </div>
 
       <footer className="border-t border-border p-2">
+        {picked.length > 0 && (
+          <div className="mb-1.5 rounded-lg border border-border bg-panel-2 px-2 py-1.5">
+            <p className="mb-1 text-[10px] font-medium text-faint">{t('operatorAiPicksTitle')}</p>
+            <ul className="space-y-1">
+              {picked.map((element, index) => (
+                <li className="flex items-center gap-1" key={index}>
+                  <select
+                    aria-label={t('operatorAiPickShort')}
+                    className="shrink-0 rounded border border-border bg-panel px-1 py-0.5 text-[11px] text-ink focus:border-border-strong focus:outline-none"
+                    onChange={(event) =>
+                      updatePick(index, {
+                        findBy: event.target.value as PickedElement['findBy'],
+                      })
+                    }
+                    value={element.findBy}
+                  >
+                    <option value="cssSelector">{t('operatorAiPickByCss')}</option>
+                    <option value="xpath">{t('operatorAiPickByXpath')}</option>
+                    <option value="text">{t('operatorAiPickByText')}</option>
+                  </select>
+                  <input
+                    aria-label={t('operatorAiPickShort')}
+                    className="min-w-0 flex-1 rounded border border-border bg-panel px-1 py-0.5 text-[11px] text-ink focus:border-border-strong focus:outline-none"
+                    onChange={(event) => updatePick(index, { selector: event.target.value })}
+                    spellCheck={false}
+                    value={element.selector}
+                  />
+                  <button
+                    aria-label={t('operatorAiPickRemove')}
+                    className="shrink-0 rounded p-0.5 text-faint hover:bg-hover hover:text-ink"
+                    onClick={() => removePick(index)}
+                    title={t('operatorAiPickRemove')}
+                    type="button"
+                  >
+                    <X size={11} aria-hidden="true" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <textarea
           className="max-h-28 min-h-[52px] w-full resize-y rounded-lg border border-border bg-panel-2 px-2 py-1.5 text-xs text-ink placeholder:text-faint focus:border-border-strong focus:outline-none"
           onCompositionEnd={() => {
@@ -772,15 +943,23 @@ export default function OperatorChatDock({
           ) : (
             <button
               className="flex items-center gap-1 rounded-lg bg-accent px-2.5 py-1 text-xs font-medium text-on-accent hover:bg-accent-strong disabled:opacity-50"
-              disabled={!input.trim() || turns.some((turn) => turn.offer)}
+              disabled={!canApplyPicks && (!input.trim() || sendBlockedByOffer)}
               onClick={() => void send()}
               title={
-                turns.some((turn) => turn.offer) ? t('operatorAiOfferWaiting') : t('operatorAiSend')
+                sendBlockedByOffer
+                  ? t('operatorAiOfferWaiting')
+                  : canApplyPicks
+                    ? t('operatorAiPickApply')
+                    : t('operatorAiSend')
               }
               type="button"
             >
-              <Send size={11} aria-hidden="true" />
-              {t('operatorAiSend')}
+              {canApplyPicks ? (
+                <MousePointerClick size={11} aria-hidden="true" />
+              ) : (
+                <Send size={11} aria-hidden="true" />
+              )}
+              {canApplyPicks ? t('operatorAiPickApply') : t('operatorAiSend')}
             </button>
           )}
         </div>
