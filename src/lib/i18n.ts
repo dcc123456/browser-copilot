@@ -249,6 +249,8 @@ export interface Messages {
   workflowsMoveToGroup: string
   /** Menu entry that files the selected workflows outside any group. */
   workflowsMoveToUngrouped: string
+  /** Per-workflow action: file this one workflow into a group. */
+  workflowsMoveToGroupSingle: string
   /** Header of the section holding the workflows that belong to no group. */
   workflowsUngrouped: string
   /** Icon-only button that creates a workflow group. */
@@ -259,6 +261,8 @@ export interface Messages {
   workflowsGroupRename: string
   /** Per-group action: delete the group (its workflows fall back to ungrouped). */
   workflowsGroupDelete: string
+  /** Drag handle on a group header that reorders groups top-to-bottom. */
+  workflowsGroupReorder: string
   /** Confirm dialog body for deleting a group (its workflows are kept). */
   workflowsGroupDeleteConfirm: (params: { name: string }) => string
   /** Success banner after moving workflows into a group. */
@@ -1667,11 +1671,13 @@ const en: Messages = {
   workflowsBatchExport: 'Export selected workflows',
   workflowsMoveToGroup: 'Move selected workflows to a group',
   workflowsMoveToUngrouped: 'Remove from group',
+  workflowsMoveToGroupSingle: 'Move to group',
   workflowsUngrouped: 'Ungrouped',
   workflowsGroupNew: 'New group',
   workflowsGroupExport: 'Export group',
   workflowsGroupRename: 'Rename group',
   workflowsGroupDelete: 'Delete group',
+  workflowsGroupReorder: 'Drag to reorder groups',
   workflowsGroupDeleteConfirm: ({ name }) =>
     `Delete the group "${name}"? Its workflows are kept and move back to the ungrouped list.`,
   workflowsGroupMoveDone: ({ count }) => `Moved ${count} workflow(s).`,
@@ -2980,11 +2986,13 @@ const zhCN: Messages = {
   workflowsBatchExport: '导出选中的工作流',
   workflowsMoveToGroup: '把选中的工作流移动到分组',
   workflowsMoveToUngrouped: '移出分组',
+  workflowsMoveToGroupSingle: '移动到分组',
   workflowsUngrouped: '未分组',
   workflowsGroupNew: '新建分组',
   workflowsGroupExport: '导出分组',
   workflowsGroupRename: '重命名分组',
   workflowsGroupDelete: '删除分组',
+  workflowsGroupReorder: '拖动可调整分组顺序',
   workflowsGroupDeleteConfirm: ({ name }) =>
     `确定删除分组「${name}」？组内的工作流会保留并回到未分组列表。`,
   workflowsGroupMoveDone: ({ count }) => `已移动 ${count} 个工作流。`,

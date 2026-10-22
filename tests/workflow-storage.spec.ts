@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  carryStoredWorkflowFields,
   deleteWorkflow,
   duplicateWorkflow,
   getWorkflow,
@@ -13,6 +14,7 @@ import {
   degradeReplayOf,
   isGeneratedStrict,
 } from '../src/lib/workflow/reliability'
+import { commitWorkflowRevision } from '../src/lib/workflow/workflow-revision'
 
 /**
  * In-memory `chrome.storage.local` double. Only `get`/`set` are needed here
@@ -296,6 +298,41 @@ describe('workflow storage', () => {
     expect(ids.sort()).toEqual(['a', 'b', 'c'])
   })
 
+  it('keeps an edited workflow in its group across the save pipeline', async () => {
+    // What `workflows.save` does for an existing record: merge over the stored
+    // copy, commit the next revision, write. Before the merge, reopening a
+    // grouped workflow in the editor and saving moved it to "Ungrouped".
+    await saveWorkflow(
+      makeWorkflow({
+        id: 'wf-1',
+        name: 'Before',
+        folderId: 'g1',
+        plan: 'Submit the cart',
+        createdAt: 100,
+        revision: 4,
+        revisionHistory: [{ revision: 4, updatedAt: 99, source: 'manual-edit' }],
+      }),
+    )
+
+    const stored = (await getWorkflow('wf-1'))!
+    const editorSave = makeWorkflow({ id: 'wf-1', name: 'After', createdAt: 5000 })
+    const merged = carryStoredWorkflowFields(editorSave, stored)
+    const committed = commitWorkflowRevision(merged, { source: 'manual-edit' })
+    await saveWorkflow({
+      ...merged,
+      revision: committed.revision,
+      revisionHistory: committed.revisionHistory,
+    })
+
+    const got = (await getWorkflow('wf-1'))!
+    expect(got.folderId).toBe('g1')
+    expect(got.plan).toBe('Submit the cart')
+    expect(got.name).toBe('After')
+    expect(got.createdAt).toBe(100)
+    expect(got.revision).toBe(5)
+    expect(got.revisionHistory?.map((entry) => entry.revision)).toEqual([4, 5])
+  })
+
   it('duplicates a workflow under a new id with the given name', async () => {
     await saveWorkflow(makeWorkflow({ id: 'a', name: 'Original', table: 'tbl-1' }))
 
@@ -338,6 +375,58 @@ describe('workflow storage', () => {
     expect(copy!.revisionHistory).toBeUndefined()
     // The source keeps its own line untouched.
     expect((await getWorkflow('a'))!.revision).toBe(7)
+  })
+})
+
+describe('carryStoredWorkflowFields', () => {
+  it('keeps filing, plan, table and the revision line an editor save omits', () => {
+    // The editor rebuilds the record from the canvas: its save carries the
+    // graph, name, description, trigger, settings and a fresh createdAt — and
+    // nothing else. Replacing the stored record wholesale moved the edited
+    // workflow out of its group and restarted its revision history at 1.
+    const stored = makeWorkflow({
+      folderId: 'g1',
+      plan: 'Open the cart and submit it',
+      table: 'tbl-1',
+      createdAt: 100,
+      revision: 4,
+      revisionHistory: [
+        { revision: 3, updatedAt: 90, source: 'generation' },
+        { revision: 4, updatedAt: 99, source: 'manual-edit', parentRevision: 3 },
+      ],
+    })
+    const editorSave = makeWorkflow({
+      name: 'Edited',
+      createdAt: 5000,
+      updatedAt: 5000,
+    })
+
+    const merged = carryStoredWorkflowFields(editorSave, stored)
+
+    expect(merged.folderId).toBe('g1')
+    expect(merged.plan).toBe('Open the cart and submit it')
+    expect(merged.table).toBe('tbl-1')
+    expect(merged.createdAt).toBe(100)
+    expect(merged.revision).toBe(4)
+    expect(merged.revisionHistory?.map((entry) => entry.revision)).toEqual([3, 4])
+    // Everything the save did carry still wins.
+    expect(merged.name).toBe('Edited')
+    expect(merged.updatedAt).toBe(5000)
+  })
+
+  it('lets the update change the group or carry its own revision', () => {
+    const stored = makeWorkflow({ folderId: 'g1', revision: 4 })
+    const update = makeWorkflow({
+      folderId: 'g2',
+      revision: 5,
+      revisionHistory: [{ revision: 5, updatedAt: 10, source: 'ai-repair' }],
+    })
+
+    const merged = carryStoredWorkflowFields(update, stored)
+
+    expect(merged.folderId).toBe('g2')
+    expect(merged.revision).toBe(5)
+    expect(merged.revisionHistory?.map((entry) => entry.revision)).toEqual([5])
   })
 })
 

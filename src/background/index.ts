@@ -170,11 +170,17 @@ import {
   listWorkflows,
   getWorkflow,
   saveWorkflow,
+  carryStoredWorkflowFields,
   deleteWorkflow,
   duplicateWorkflow,
   setWorkflowGroup,
 } from '../lib/workflow/storage'
-import { deleteWorkflowGroup, listWorkflowGroups, saveWorkflowGroup } from '../lib/workflow/groups'
+import {
+  deleteWorkflowGroup,
+  listWorkflowGroups,
+  reorderWorkflowGroups,
+  saveWorkflowGroup,
+} from '../lib/workflow/groups'
 import {
   describeNodeParams,
   patchNodeParams,
@@ -1576,6 +1582,11 @@ async function handleCommand(
 
     case 'workflows.save': {
       let workflow = command.workflow
+      // A save from the editor only carries the fields the canvas owns; merge
+      // over the stored record so filing, plan, table and the revision line
+      // survive an edit (see `carryStoredWorkflowFields`).
+      const stored = await getWorkflow(workflow.id)
+      if (stored) workflow = carryStoredWorkflowFields(workflow, stored)
       let generationScope: { windowId: number } | undefined
       if (command.fromGeneration) {
         // A save from the generation card gets the two hardening passes (see
@@ -1645,6 +1656,9 @@ async function handleCommand(
 
     case 'workflowGroups.save':
       return { type: 'workflowGroups.save', group: await saveWorkflowGroup(command) }
+
+    case 'workflowGroups.reorder':
+      return { type: 'workflowGroups.reorder', groups: await reorderWorkflowGroups(command.ids) }
 
     case 'workflowGroups.delete': {
       await deleteWorkflowGroup(command.id)

@@ -47,15 +47,17 @@ export function asWorkflowGroup(value: unknown): WorkflowGroup | null {
   }
 }
 
-/** All groups, oldest first so the list order is stable across reloads. */
+/**
+ * All groups in their user-chosen order.
+ *
+ * The stored array IS the order: a drag reorder rewrites the array, and this
+ * reader must not re-sort by `createdAt` or the next reload would undo it.
+ */
 export async function listWorkflowGroups(): Promise<WorkflowGroup[]> {
   const stored = await area.get(KEY_WORKFLOW_GROUPS)
   const list = stored[KEY_WORKFLOW_GROUPS]
   if (!Array.isArray(list)) return []
-  return list
-    .map(asWorkflowGroup)
-    .filter((group): group is WorkflowGroup => group !== null)
-    .sort((a, b) => a.createdAt - b.createdAt)
+  return list.map(asWorkflowGroup).filter((group): group is WorkflowGroup => group !== null)
 }
 
 /**
@@ -92,6 +94,35 @@ export async function deleteWorkflowGroup(id: string): Promise<void> {
     await area.set({
       [KEY_WORKFLOW_GROUPS]: list.filter((group) => group.id !== id),
     })
+  })
+}
+
+/**
+ * Puts groups in the order named by `ids`. Unmentioned groups keep their
+ * relative order after the listed ones, and unknown ids are ignored — a stale
+ * drag must not drop a group from the table.
+ *
+ * Pure so the panel can show the new order before the write lands.
+ */
+export function orderWorkflowGroups(groups: WorkflowGroup[], ids: string[]): WorkflowGroup[] {
+  const remaining = new Map(groups.map((group) => [group.id, group]))
+  const ordered: WorkflowGroup[] = []
+  for (const id of ids) {
+    const group = remaining.get(id)
+    if (!group) continue
+    ordered.push(group)
+    remaining.delete(id)
+  }
+  for (const group of groups) if (remaining.has(group.id)) ordered.push(group)
+  return ordered
+}
+
+/** Persists a drag reorder; returns the table as written. */
+export async function reorderWorkflowGroups(ids: string[]): Promise<WorkflowGroup[]> {
+  return withKeyLock(KEY_WORKFLOW_GROUPS, async () => {
+    const ordered = orderWorkflowGroups(await listWorkflowGroups(), ids)
+    await area.set({ [KEY_WORKFLOW_GROUPS]: ordered })
+    return ordered
   })
 }
 

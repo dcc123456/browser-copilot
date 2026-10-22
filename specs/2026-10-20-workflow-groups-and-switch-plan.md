@@ -53,3 +53,31 @@
 - 不做跨端（扩展 ↔ Runner）分组同步：Runner 读 `workflows.json`，`folderId` 对它无害。
 - 不动多选、偏好类复选框。
 - 不重命名 `folderId`：它是既有字段，复用比新增 `groupId` 更省事（白名单已就位）。
+
+---
+
+## 2026-10-21 增量 · 分组交互修正
+
+设计见配套文档 §6。只改侧边栏工作流库的交互与分组顺序持久化。
+
+### Step A — 排序数据通路
+
+1. `src/lib/workflow/groups.ts`：`listWorkflowGroups` 去掉按 `createdAt` 排序（数组顺序即顺序）；
+   新增纯函数 `orderWorkflowGroups` 与落盘函数 `reorderWorkflowGroups`（`withKeyLock`）。
+2. `src/lib/messages.ts`：新增 `workflowGroups.reorder`（ids → groups）命令与结果。
+3. `src/background/index.ts`：实现该命令，委托 `reorderWorkflowGroups`。
+
+### Step B — 侧边栏交互
+
+1. `WorkflowsTab.tsx`：默认只展开第一个区块（首次 load 应用一次，轮询不重置）。
+2. 分组名称按钮改为折叠/展开；铅笔保留改名。
+3. 抽出 `GroupMoveMenu`，批量工具栏与每张工作流卡片共用。
+4. 分组头部加 `GripVertical` 拖动把手；section 作为 drop 目标，乐观重排 + 失败回滚。
+5. i18n：`workflowsMoveToGroupSingle`、`workflowsGroupReorder` 双侧补齐。
+
+### Step C — 测试与门禁
+
+1. `tests/workflow-groups.spec.ts`：`orderWorkflowGroups` 三种情形。
+2. `tests/workflows-tab-groups.spec.tsx`：默认展开、未分组开合、名称/铅笔语义、卡片移动、
+   拖动排序；测试结束卸载 root 以清掉 5s 轮询定时器。
+3. 门禁同 Step 4；浏览器可见行为拿不到证据则标 BLOCKED。

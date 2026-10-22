@@ -16,6 +16,7 @@ import {
   Circle,
   Download,
   FolderPlus,
+  GripVertical,
   Pencil,
   Plus,
   Square,
@@ -31,6 +32,7 @@ import {
   buildWorkflowGroupExport,
   groupWorkflows,
   isWorkflowGroupExport,
+  orderWorkflowGroups,
 } from '../lib/workflow/groups'
 import type { PendingTakeoverInfo } from '../lib/workflow/takeover-pending'
 import type { ReplayFirstRunRecord } from '../lib/workflow/replay-metrics'
@@ -93,6 +95,9 @@ const MENU_ITEM_CLASS =
 
 /** Collapse-state key for the ungrouped bucket, which has no group id. */
 const UNGROUPED_SECTION_KEY = '__ungrouped__'
+
+/** `moveMenuFor` value for the batch toolbar menu (workflow ids fill the rest). */
+const BATCH_MOVE_MENU_KEY = '__batch__'
 
 /**
  * The primary "new" action with its sibling Import entry folded into a hover
@@ -199,6 +204,46 @@ function NewWorkflowMenu({
   )
 }
 
+/**
+ * The group picker shared by the batch toolbar and each workflow card. Both
+ * triggers live inside a `relative` wrapper and anchor this menu below it.
+ */
+function GroupMoveMenu({
+  groups,
+  t,
+  onMove,
+}: {
+  groups: WorkflowGroup[]
+  t: ReturnType<typeof useT>
+  onMove: (groupId: string | null) => void
+}) {
+  return (
+    <div className="absolute right-0 top-full z-50 min-w-[160px] pt-1.5" data-move-menu role="menu">
+      <div className="flex flex-col rounded-lg border border-border bg-panel p-1 shadow-[var(--bc-shadow)]">
+        {groups.map((group) => (
+          <button
+            className={MENU_ITEM_CLASS}
+            key={group.id}
+            onClick={() => onMove(group.id)}
+            role="menuitem"
+            type="button"
+          >
+            {group.name}
+          </button>
+        ))}
+        <button
+          className={MENU_ITEM_CLASS}
+          onClick={() => onMove(null)}
+          role="menuitem"
+          type="button"
+        >
+          {t.workflowsMoveToUngrouped}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function WorkflowsTab() {
   const t = useT()
   const [workflows, setWorkflows] = useState<Workflow[]>([])
@@ -220,11 +265,16 @@ export default function WorkflowsTab() {
   const [groups, setGroups] = useState<WorkflowGroup[]>([])
   /** Collapsed group sections. Purely visual, so it stays in component state. */
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  /** Applies the "expand only the first section" default exactly once. */
+  const collapsedInitializedRef = useRef(false)
   /** The group whose name is being edited inline, plus the draft name. */
   const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null)
   const [groupNameDraft, setGroupNameDraft] = useState('')
-  /** Whether the "move to group" menu is open. */
-  const [moveMenuOpen, setMoveMenuOpen] = useState(false)
+  /** Which "move to group" menu is open: the batch toolbar or a workflow id. */
+  const [moveMenuFor, setMoveMenuFor] = useState<string | null>(null)
+  /** Group being dragged, and the group header it is hovering over. */
+  const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null)
+  const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null)
   // Workflows with pending AI-takeover fixes (apply / discard chip).
   const [pending, setPending] = useState<PendingTakeoverInfo[]>([])
   // M4 resume: workflow id -> the run whose checkpoints a resume would pick up
@@ -306,6 +356,20 @@ export default function WorkflowsTab() {
       if (runsResult.type === 'tasks.runs') setRuns(runsResult.runs)
       if (pendingResult.type === 'workflows.takeoverPending') setPending(pendingResult.items)
       if (groupResult?.type === 'workflowGroups.list') setGroups(groupResult.groups)
+      if (workflowResult.type === 'workflows.list' && groupResult?.type === 'workflowGroups.list') {
+        // Default view: only the first section is expanded. Applied once, so the
+        // tab's refresh never re-collapses what the user just opened.
+        if (!collapsedInitializedRef.current) {
+          collapsedInitializedRef.current = true
+          setCollapsedGroups(
+            new Set(
+              groupWorkflows(workflowResult.workflows, groupResult.groups)
+                .slice(1)
+                .map((section) => section.group?.id ?? UNGROUPED_SECTION_KEY),
+            ),
+          )
+        }
+      }
       if (firstRunResult?.type === 'workflows.firstRuns') {
         const byWorkflow: Record<string, ReplayFirstRunRecord> = {}
         for (const record of firstRunResult.records) byWorkflow[record.workflowId] = record
@@ -704,15 +768,18 @@ export default function WorkflowsTab() {
     }
   }
 
-  const moveSelected = async (groupId: string | null): Promise<void> => {
-    const ids = effectiveSelection
-    setMoveMenuOpen(false)
+  const moveToGroup = async (
+    groupId: string | null,
+    ids: string[],
+    clearSelection = false,
+  ): Promise<void> => {
+    setMoveMenuFor(null)
     if (ids.length === 0) return
     setBusy(true)
     try {
       await sendCommand({ type: 'workflows.assignGroup', ids, groupId })
       setBanner({ kind: 'ok', text: t.workflowsGroupMoveDone({ count: ids.length }) })
-      setSelectedIds(new Set())
+      if (clearSelection) setSelectedIds(new Set())
       await load()
     } catch (error) {
       setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
@@ -721,20 +788,44 @@ export default function WorkflowsTab() {
     }
   }
 
+  /**
+   * Drops `draggedId` at `targetId`'s slot. The list is reordered on screen
+   * before the write lands, then replaced by the table the worker wrote back;
+   * a failed write restores the previous order instead of leaving the UI and
+   * storage disagreeing.
+   */
+  const reorderGroups = async (draggedId: string, targetId: string): Promise<void> => {
+    if (draggedId === targetId) return
+    const ids = groups.map((group) => group.id)
+    const targetIndex = ids.indexOf(targetId)
+    if (targetIndex < 0 || !ids.includes(draggedId)) return
+    const nextIds = ids.filter((id) => id !== draggedId)
+    nextIds.splice(targetIndex, 0, draggedId)
+    const previous = groups
+    setGroups(orderWorkflowGroups(groups, nextIds))
+    try {
+      const result = await sendCommand({ type: 'workflowGroups.reorder', ids: nextIds })
+      if (result.type === 'workflowGroups.reorder') setGroups(result.groups)
+    } catch (error) {
+      setGroups(previous)
+      setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
   // Close the move menu on an outside click; the menu has no focus trap, so a
   // stray click must not leave it hanging over the list.
   useEffect(() => {
-    if (!moveMenuOpen) return
+    if (moveMenuFor === null) return
     const onPointerDown = (event: MouseEvent): void => {
       const target = event.target as HTMLElement
-      if (!target.closest('[data-move-menu]')) setMoveMenuOpen(false)
+      if (!target.closest('[data-move-menu]')) setMoveMenuFor(null)
     }
     const id = window.setTimeout(() => document.addEventListener('mousedown', onPointerDown), 0)
     return () => {
       window.clearTimeout(id)
       document.removeEventListener('mousedown', onPointerDown)
     }
-  }, [moveMenuOpen])
+  }, [moveMenuFor])
 
   const editorUrl = (id?: string): string =>
     chrome.runtime.getURL(
@@ -1003,41 +1094,27 @@ export default function WorkflowsTab() {
           {effectiveSelection.length > 0 && (
             <div className="relative flex" data-move-menu>
               <button
-                aria-expanded={moveMenuOpen}
+                aria-expanded={moveMenuFor === BATCH_MOVE_MENU_KEY}
                 aria-haspopup="menu"
                 className="section-action wf-icon-action"
                 disabled={busy}
-                onClick={() => setMoveMenuOpen((open) => !open)}
+                onClick={() =>
+                  setMoveMenuFor((open) =>
+                    open === BATCH_MOVE_MENU_KEY ? null : BATCH_MOVE_MENU_KEY,
+                  )
+                }
                 type="button"
                 title={t.workflowsMoveToGroup}
                 aria-label={t.workflowsMoveToGroup}
               >
                 <FolderPlus size={14} aria-hidden="true" />
               </button>
-              {moveMenuOpen && (
-                <div className="absolute right-0 top-full z-50 min-w-[160px] pt-1.5" role="menu">
-                  <div className="flex flex-col rounded-lg border border-border bg-panel p-1 shadow-[var(--bc-shadow)]">
-                    {groups.map((group) => (
-                      <button
-                        className={MENU_ITEM_CLASS}
-                        key={group.id}
-                        onClick={() => void moveSelected(group.id)}
-                        role="menuitem"
-                        type="button"
-                      >
-                        {group.name}
-                      </button>
-                    ))}
-                    <button
-                      className={MENU_ITEM_CLASS}
-                      onClick={() => void moveSelected(null)}
-                      role="menuitem"
-                      type="button"
-                    >
-                      {t.workflowsMoveToUngrouped}
-                    </button>
-                  </div>
-                </div>
+              {moveMenuFor === BATCH_MOVE_MENU_KEY && (
+                <GroupMoveMenu
+                  groups={groups}
+                  t={t}
+                  onMove={(groupId) => void moveToGroup(groupId, effectiveSelection, true)}
+                />
               )}
             </div>
           )}
@@ -1110,9 +1187,68 @@ export default function WorkflowsTab() {
           const collapsed = collapsedGroups.has(group?.id ?? UNGROUPED_SECTION_KEY)
           const isRenaming = group ? renamingGroupId === group.id : false
           return (
-            <section className="mt-1" key={group?.id ?? 'ungrouped'}>
-              <div className="flex items-center justify-between gap-2 px-1 py-1">
+            <section
+              className="mt-1"
+              key={group?.id ?? 'ungrouped'}
+              onDragLeave={
+                group
+                  ? (event) => {
+                      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                        setDragOverGroupId(null)
+                      }
+                    }
+                  : undefined
+              }
+              onDragOver={
+                group
+                  ? (event) => {
+                      if (!draggingGroupId || draggingGroupId === group.id) return
+                      event.preventDefault()
+                      setDragOverGroupId(group.id)
+                    }
+                  : undefined
+              }
+              onDrop={
+                group
+                  ? (event) => {
+                      event.preventDefault()
+                      const draggedId =
+                        draggingGroupId ?? event.dataTransfer?.getData('text/plain') ?? ''
+                      setDraggingGroupId(null)
+                      setDragOverGroupId(null)
+                      if (draggedId) void reorderGroups(draggedId, group.id)
+                    }
+                  : undefined
+              }
+            >
+              <div
+                className={`flex items-center justify-between gap-2 rounded-md px-1 py-1${
+                  dragOverGroupId === group?.id ? ' bg-accent-soft' : ''
+                }`}
+              >
                 <div className="flex min-w-0 items-center gap-1.5">
+                  {group && (
+                    <button
+                      aria-label={t.workflowsGroupReorder}
+                      className="flex! cursor-grab! items-center! justify-center! rounded! border-0! bg-transparent! p-1! text-muted! hover:bg-hover!"
+                      disabled={busy}
+                      draggable={!busy}
+                      onDragEnd={() => {
+                        setDraggingGroupId(null)
+                        setDragOverGroupId(null)
+                      }}
+                      onDragStart={(event) => {
+                        // Firefox refuses to start a drag without payload.
+                        event.dataTransfer?.setData('text/plain', group.id)
+                        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+                        setDraggingGroupId(group.id)
+                      }}
+                      title={t.workflowsGroupReorder}
+                      type="button"
+                    >
+                      <GripVertical size={13} aria-hidden="true" />
+                    </button>
+                  )}
                   <button
                     aria-expanded={!collapsed}
                     className="flex! items-center! justify-center! rounded! border-0! bg-transparent! p-1! text-muted! hover:bg-hover!"
@@ -1140,11 +1276,7 @@ export default function WorkflowsTab() {
                   ) : group ? (
                     <button
                       className="truncate! rounded! border-0! bg-transparent! p-0! text-left! text-[12.5px]! font-medium! text-ink! hover:bg-transparent!"
-                      onClick={() => {
-                        setRenamingGroupId(group.id)
-                        setGroupNameDraft(group.name)
-                      }}
-                      title={t.workflowsGroupRename}
+                      onClick={() => toggleGroupCollapsed(group.id)}
                       type="button"
                     >
                       {group.name}
@@ -1295,6 +1427,26 @@ export default function WorkflowsTab() {
                           >
                             {t.workflowsDuplicate}
                           </button>
+                          <div className="relative flex" data-move-menu>
+                            <button
+                              aria-expanded={moveMenuFor === wf.id}
+                              aria-haspopup="menu"
+                              disabled={busy}
+                              onClick={() =>
+                                setMoveMenuFor((open) => (open === wf.id ? null : wf.id))
+                              }
+                              type="button"
+                            >
+                              {t.workflowsMoveToGroupSingle}
+                            </button>
+                            {moveMenuFor === wf.id && (
+                              <GroupMoveMenu
+                                groups={groups}
+                                t={t}
+                                onMove={(groupId) => void moveToGroup(groupId, [wf.id])}
+                              />
+                            )}
+                          </div>
                           <button
                             className="danger"
                             disabled={busy}

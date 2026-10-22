@@ -261,6 +261,25 @@ export async function saveWorkflow(workflow: Workflow): Promise<void> {
   })
 }
 
+/**
+ * Composes an update over the stored record before it is written.
+ *
+ * The editor rebuilds a workflow from the canvas, so its save carries only the
+ * fields the canvas owns. Replacing the record wholesale dropped everything
+ * else — filing (`folderId`), `plan`, `table`, `createdAt` and the revision
+ * line — which moved every edited workflow out of its group and restarted its
+ * revision history at 1. Fields the update omits keep their stored value.
+ */
+export function carryStoredWorkflowFields(update: Workflow, stored: Workflow): Workflow {
+  return {
+    ...stored,
+    ...update,
+    createdAt: stored.createdAt,
+    revision: update.revision ?? stored.revision,
+    revisionHistory: update.revisionHistory ?? stored.revisionHistory,
+  }
+}
+
 export async function deleteWorkflow(id: string): Promise<void> {
   await withKeyLock(KEY_WORKFLOWS, async () => {
     const list = await listWorkflows()

@@ -231,6 +231,8 @@ export type Command =
   | { type: 'workflowGroups.save'; id?: string; name: string }
   /** Removes a group; its workflows fall back to the ungrouped section. */
   | { type: 'workflowGroups.delete'; id: string }
+  /** Drag reorder: the group ids in their new top-to-bottom order. */
+  | { type: 'workflowGroups.reorder'; ids: string[] }
   /**
    * Materialises the current conversation's operator-tool draft into a
    * Workflow WITHOUT persisting it. Used by the chat panel to populate the
@@ -612,6 +614,7 @@ export type CommandResult =
   | { type: 'workflowGroups.list'; groups: WorkflowGroup[] }
   | { type: 'workflowGroups.save'; group: WorkflowGroup }
   | { type: 'workflowGroups.delete' }
+  | { type: 'workflowGroups.reorder'; groups: WorkflowGroup[] }
   | {
       type: 'workflows.draft'
       workflow?: Workflow

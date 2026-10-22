@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 /**
- * The Workflows tab's group sections and batch export.
+ * The Workflows tab's group sections: folding, per-card filing, drag order and
+ * batch export.
  *
- * Two behaviors are worth pinning down, because both are easy to break
- * without noticing: the checked workflows are the ones that get exported, and
- * "move to group" files exactly the checked workflows (and nothing else).
+ * The checks worth pinning down are the ones that break silently: which
+ * workflows a batch action touches, what the first render leaves expanded, and
+ * which control renames a group versus folding it.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -43,14 +44,18 @@ function workflow(id: string, name: string, folderId?: string): Workflow {
 }
 
 const group: WorkflowGroup = { id: 'g1', name: 'Daily', createdAt: 1, updatedAt: 1 }
+const secondGroup: WorkflowGroup = { id: 'g2', name: 'Weekly', createdAt: 2, updatedAt: 2 }
 
 let workflows: Workflow[] = []
+let groups: WorkflowGroup[] = []
 const seen: Command[] = []
 /** The JSON handed to the download helper, captured from the created blob. */
 let downloaded: unknown = null
+const mountedRoots: Root[] = []
 
 beforeEach(() => {
   workflows = [workflow('wf-1', 'Scrape leads', 'g1'), workflow('wf-2', 'Send report')]
+  groups = [group]
   seen.length = 0
   downloaded = null
   mocks.sendCommand.mockReset()
@@ -64,7 +69,14 @@ beforeEach(() => {
       case 'workflows.takeoverPending':
         return { type: 'workflows.takeoverPending', items: [] }
       case 'workflowGroups.list':
-        return { type: 'workflowGroups.list', groups: [group] }
+        return { type: 'workflowGroups.list', groups }
+      case 'workflowGroups.reorder':
+        return {
+          type: 'workflowGroups.reorder',
+          groups: command.ids
+            .map((id) => groups.find((entry) => entry.id === id))
+            .filter((entry): entry is WorkflowGroup => !!entry),
+        }
       case 'workflows.assignGroup':
         return { type: 'workflows.assignGroup' }
       case 'record.status':
@@ -91,7 +103,10 @@ beforeEach(() => {
   })
 })
 
-afterEach(() => {
+afterEach(async () => {
+  await act(async () => {
+    for (const root of mountedRoots.splice(0)) root.unmount()
+  })
   vi.unstubAllGlobals()
   document.body.innerHTML = ''
 })
@@ -106,6 +121,7 @@ const render = async (): Promise<HTMLElement> => {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root: Root = createRoot(container)
+  mountedRoots.push(root)
   await act(async () => {
     root.render(
       createElement(
@@ -123,44 +139,156 @@ function checkboxes(container: HTMLElement): HTMLInputElement[] {
   return [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
 }
 
+function sections(container: HTMLElement): HTMLElement[] {
+  return [...container.querySelectorAll<HTMLElement>('section')]
+}
+
+/** The chevron is the first `aria-expanded` control in each section header. */
+function foldButtons(container: HTMLElement): HTMLElement[] {
+  return sections(container).map(
+    (section) => section.querySelector<HTMLElement>('button[aria-expanded]') as HTMLElement,
+  )
+}
+
+function sectionTitled(container: HTMLElement, title: string): HTMLElement {
+  const section = sections(container).find((node) => node.textContent?.includes(title))
+  if (!section) throw new Error(`no section titled ${title}`)
+  return section
+}
+
+function click(node: Element | null | undefined): Promise<void> {
+  if (!node) throw new Error('nothing to click')
+  return act(async () => {
+    ;(node as HTMLElement).click()
+  })
+}
+
+function dispatch(target: Element, type: string): Promise<void> {
+  return act(async () => {
+    target.dispatchEvent(new Event(type, { bubbles: true, cancelable: true }))
+  })
+}
+
 describe('workflow groups', () => {
-  it('lists the group and the ungrouped workflows separately', async () => {
+  it('renders every group section, expanding only the first one', async () => {
+    workflows = [...workflows, workflow('wf-3', 'Weekly digest', 'g2')]
+    groups = [group, secondGroup]
     const container = await render()
+
     expect(container.textContent).toContain('Daily')
+    expect(container.textContent).toContain('Weekly')
     expect(container.textContent).toContain(t.workflowsUngrouped)
     expect(container.textContent).toContain('Scrape leads')
-    expect(container.textContent).toContain('Send report')
+    expect(container.textContent).not.toContain('Weekly digest')
+    expect(container.textContent).not.toContain('Send report')
+    expect(foldButtons(container).map((node) => node.getAttribute('aria-expanded'))).toEqual([
+      'true',
+      'false',
+      'false',
+    ])
   })
 
-  it('folds the ungrouped bucket without touching the groups above it', async () => {
+  it('folds and unfolds the ungrouped bucket without touching the groups above it', async () => {
     const container = await render()
     // Sections render groups first, then the ungrouped bucket.
-    const toggles = [...container.querySelectorAll<HTMLElement>('section button[aria-expanded]')]
+    const toggles = foldButtons(container)
     const ungroupedToggle = toggles.at(-1)
-    expect(ungroupedToggle?.getAttribute('aria-expanded')).toBe('true')
-
-    await act(async () => ungroupedToggle?.click())
-    await flush()
-    expect(container.textContent).not.toContain('Send report')
-    expect(container.textContent).toContain('Scrape leads')
     expect(ungroupedToggle?.getAttribute('aria-expanded')).toBe('false')
-    expect(toggles[0]?.getAttribute('aria-expanded')).toBe('true')
 
-    await act(async () => ungroupedToggle?.click())
+    await click(ungroupedToggle)
     await flush()
     expect(container.textContent).toContain('Send report')
+    expect(ungroupedToggle?.getAttribute('aria-expanded')).toBe('true')
+    expect(toggles[0]?.getAttribute('aria-expanded')).toBe('true')
+
+    await click(ungroupedToggle)
+    await flush()
+    expect(container.textContent).not.toContain('Send report')
+    expect(toggles[0]?.getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('folds a group when its name is clicked and renames only from the pencil', async () => {
+    const container = await render()
+    const daily = sectionTitled(container, 'Daily')
+    const toggle = daily.querySelector<HTMLElement>('button[aria-expanded]')
+
+    await click([...daily.querySelectorAll('button')].find((node) => node.textContent === 'Daily'))
+    await flush()
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false')
+    expect(container.textContent).not.toContain('Scrape leads')
+    expect(daily.querySelector('input')).toBeNull()
+
+    await click([...daily.querySelectorAll('button')].find((node) => node.textContent === 'Daily'))
+    await flush()
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true')
+    expect(container.textContent).toContain('Scrape leads')
+
+    await click(daily.querySelector(`[aria-label="${t.workflowsGroupRename}"]`))
+    await flush()
+    const input = daily.querySelector<HTMLInputElement>('input')
+    expect(input?.value).toBe('Daily')
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('files a single workflow through its own card menu', async () => {
+    const container = await render()
+    const card = container.querySelector('[data-workflow-id="wf-1"]')
+    expect(card).not.toBeNull()
+    const trigger = [...(card as HTMLElement).querySelectorAll('button')].find(
+      (node) => node.textContent === t.workflowsMoveToGroupSingle,
+    )
+    await click(trigger)
+    await flush()
+
+    const menu = (card as HTMLElement).querySelector('[role="menu"]')
+    expect(menu).not.toBeNull()
+    const ungroupedItem = [...(menu as HTMLElement).querySelectorAll('[role="menuitem"]')].find(
+      (node) => node.textContent === t.workflowsMoveToUngrouped,
+    )
+    await click(ungroupedItem)
+    await flush()
+
+    const assign = seen.find(
+      (command): command is Extract<Command, { type: 'workflows.assignGroup' }> =>
+        command.type === 'workflows.assignGroup',
+    )
+    expect(assign?.ids).toEqual(['wf-1'])
+    expect(assign?.groupId).toBeNull()
+  })
+
+  it('reorders groups when one is dragged onto another', async () => {
+    groups = [group, secondGroup]
+    const container = await render()
+    const [daily, weekly] = sections(container)
+    const handles = [daily, weekly].map((section) =>
+      section?.querySelector('button[draggable="true"]'),
+    )
+    expect(handles[1]).toBeTruthy()
+
+    await dispatch(handles[1] as Element, 'dragstart')
+    await dispatch(daily as HTMLElement, 'dragover')
+    await dispatch(daily as HTMLElement, 'drop')
+    await flush()
+
+    const reorder = seen.find(
+      (command): command is Extract<Command, { type: 'workflowGroups.reorder' }> =>
+        command.type === 'workflowGroups.reorder',
+    )
+    expect(reorder?.ids).toEqual(['g2', 'g1'])
+    expect(sections(container)[0]?.textContent).toContain('Weekly')
+    expect(sections(container)[1]?.textContent).toContain('Daily')
   })
 
   it('exports exactly the checked workflows', async () => {
     const container = await render()
     const boxes = checkboxes(container)
     // The first box is "select all"; the second belongs to the first workflow.
-    await act(async () => boxes[1]?.click())
+    await click(boxes[1])
     await flush()
 
     const exportButton = container.querySelector(`[aria-label="${t.workflowsBatchExport}"]`)
     expect(exportButton).not.toBeNull()
-    await act(async () => (exportButton as HTMLElement).click())
+    await click(exportButton)
     await flush()
 
     const exported = downloaded as { id: string }[]
@@ -170,19 +298,19 @@ describe('workflow groups', () => {
   it('files the checked workflows into the chosen group', async () => {
     const container = await render()
     const boxes = checkboxes(container)
-    await act(async () => boxes[1]?.click())
+    await click(boxes[1])
     await flush()
 
     const moveButton = container.querySelector(`[aria-label="${t.workflowsMoveToGroup}"]`)
     expect(moveButton).not.toBeNull()
-    await act(async () => (moveButton as HTMLElement).click())
+    await click(moveButton)
     await flush()
 
     const menuItem = [...container.querySelectorAll('[role="menuitem"]')].find((node) =>
       node.textContent?.includes('Daily'),
     )
     expect(menuItem).toBeDefined()
-    await act(async () => (menuItem as HTMLElement).click())
+    await click(menuItem)
     await flush()
 
     const assign = seen.find(

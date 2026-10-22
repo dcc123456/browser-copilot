@@ -139,22 +139,30 @@ interface WorkflowGroup {
 
 ```
 ┌ 我的工作流 ─────────────────────────── [全选] [🗑] [⬇] [⊞] [＋] ┐
-│ ▾ 分组 A (3)                                     [⬇] [✎] [🗑]      │
-│    ☐ 工作流 1   ...                                                  │
-│    ☐ 工作流 2   ...                                                  │
-│ ▸ 分组 B (1)                                     [⬇] [✎] [🗑]      │
-│ ▾ 未分组 (2)                                                     │
-│    ☐ 工作流 3   ...                                                  │
+│ ⠿ ▾ 分组 A (3)                                   [⬇] [✎] [🗑]      │
+│    ☐ 工作流 1   ...  [移动到分组]                                    │
+│    ☐ 工作流 2   ...  [移动到分组]                                    │
+│ ⠿ ▸ 分组 B (1)                                   [⬇] [✎] [🗑]      │
+│   ▸ 未分组 (2)                                                     │
+│    ☐ 工作流 3   ...  （展开后）                                      │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-- 分组区块可折叠（默认展开），折叠状态只存在组件 state，不落盘。
+- 分组与「未分组」都可折叠；**首次加载只展开第一个区块**，其余默认收起（2026-10-21 修正，
+  原为全部展开）。折叠态只存在组件 state，不落盘。
+- 分组名点击 = **折叠 / 展开**；改名只由右侧铅笔进入（输入框 Enter 提交，Esc 取消）。
+  （2026-10-21 修正，原为点名称直接改名。）
+- 分组头部最左是拖动把手（`GripVertical`），拖动可调整分组顺序；顺序即分组表数组顺序，
+  经 `workflowGroups.reorder` 写回（2026-10-21 新增）。
+- 每个工作流卡片自带「移动到分组」菜单，与批量版共用 `GroupMoveMenu`，无需先勾选
+  （2026-10-21 新增）。
 - 分组头部动作是三个图标按钮（导出 / 改名 / 删除，带 aria-label 与 tooltip）——侧栏宽度只有 ~360px，
   三个文字按钮会换行成三行。
 - 勾选后，区块头部出现 **批量导出** 与 **移动到分组** 两个批操作。
 - 「移动到分组」弹出分组清单（含「移出分组 / 移到未分组」）。
-- 分组名可直接在头部就地改名（点名称变输入框，Enter 提交，Esc 取消）。
 - 「＋」新建分组（默认名 `分组 N`，新建后立即进入改名态）。
+
+> 上述 2026-10-21 修正的动机与实现见 §6。
 
 ---
 
@@ -179,3 +187,58 @@ interface WorkflowGroup {
 - [ ] 任务面板启用/禁用是 switch；设置页能力项、编辑器块开关、Runner 定时启停都是同一个 switch。
 - [ ] 门禁：`pnpm typecheck` / `pnpm test` / `pnpm lint`（git ls-files）/ `pnpm format:check` / `pnpm build` /
       `pnpm server:typecheck` / `pnpm server:test`。
+
+---
+
+## 6. 2026-10-21 增量 · Group interaction follow-up
+
+用户在使用后提出的四条修正（只动侧边栏工作流库，不碰数据模型与其它 surface）：
+
+1. 每个工作流卡片都要有「移动到分组」入口，不必先勾选。
+2. 点分组名称应折叠 / 展开，只有右侧铅笔才进入改名。
+3. 分组可手动拖动上下排序。
+4. 首次加载只展开第一个分组，其余默认收起。
+
+### 6.1 默认展开策略
+
+`WorkflowsTab` 在 `load()` 里用 `groupWorkflows(workflows, groups).slice(1)` 算出「除第一个以外」
+的区块 key（含 `UNGROUPED_SECTION_KEY`）一次性写进 `collapsedGroups`。用一个
+`collapsedInitializedRef` 把这段限制在首次成功读取之后：该 tab 每 5s 轮询一次，若每次 load 都
+重算，用户刚展开的区块会被反复收回。
+
+### 6.2 名称点击 vs 改名
+
+分组名原本是一个直接进入 rename 的按钮。现在名称按钮只做 `toggleGroupCollapsed`，铅笔按钮
+（既有 `aria-label`）才 `setRenamingGroupId`。折叠按钮（箭头）与名称按钮保持同一折叠语义，
+拖动把手放在最左，避免与点击目标互相抢事件。
+
+### 6.3 每卡片移动菜单
+
+`GroupMoveMenu` 从批量工具栏里抽出来，改成接收 `groups` / `onMove` 的组件。每张卡片的动作行
+加一个 `relative` 包装 + 触发器（文案 `workflowsMoveToGroupSingle`），菜单与批量版完全同形：
+列出现有分组 + 「移出分组」。两处共用一个 `moveMenuFor`（工作流 id 或 `__batch__`），
+点击菜单外的逻辑只检查祖先 `[data-move-menu]`，所以同一套关闭行为对两种触发方式都成立。
+
+### 6.4 拖动排序
+
+- **事实源 = 分组表数组顺序**：`listWorkflowGroups` 原先按 `createdAt` 排序，本轮删掉排序——
+  否则拖动写回的数组顺序会在下一次读取时被重新排掉。
+- `orderWorkflowGroups(groups, ids)`：按 `ids` 重排；未提到的分组保持原相对顺序跟在后面；
+  未知 id 忽略（过期拖动不能把分组从表里丢掉）。纯函数，供 UI 乐观更新与落盘共用。
+- `reorderWorkflowGroups(ids)`：在 `withKeyLock('workflowGroups')` 内读改写并返回写后的表。
+- 命令协议新增 `workflowGroups.reorder`（`ids: string[]` → `groups: WorkflowGroup[]`）；
+  `src/background/index.ts` 直接委托给 `reorderWorkflowGroups`。
+- UI：分组头部最左的 `GripVertical` 是 `draggable` 把手（显式把手，避免和箭头/名称的点击冲突）；
+  section 作为 drop 目标，`dragover` 高亮 `bg-accent-soft`。放下时先本地重排、再以 worker
+  返回的数组为准；写入失败恢复旧顺序并弹错误 banner。
+- 折叠态 key 是分组 id（拖动的只有分组），「未分组」不参与排序。
+
+### 6.5 i18n 与测试
+
+新增 key（`src/lib/i18n.ts` 双侧）：`workflowsMoveToGroupSingle`、`workflowsGroupReorder`。
+
+- `tests/workflow-groups.spec.ts`：`orderWorkflowGroups` 的三种情形（按 ids、未提到的靠后、
+  未知 id 忽略）。
+- `tests/workflows-tab-groups.spec.tsx`：首屏只展开第一个区块；未分组初始收起且可独立开合；
+  点名称折叠且不出输入框、铅笔才出改名框；卡片自身菜单移动单个工作流；拖 g2 到 g1 发出
+  `workflowGroups.reorder`（`['g2','g1']`）并重排 DOM。

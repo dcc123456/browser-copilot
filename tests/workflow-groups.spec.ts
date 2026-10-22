@@ -12,6 +12,7 @@ import {
   buildWorkflowGroupExport,
   groupWorkflows,
   isWorkflowGroupExport,
+  orderWorkflowGroups,
 } from '../src/lib/workflow/groups'
 import type { Workflow } from '../src/lib/workflow/types'
 
@@ -77,6 +78,34 @@ describe('groupWorkflows', () => {
     const sections = groupWorkflows([], [])
     expect(sections).toHaveLength(1)
     expect(sections[0]?.group).toBeNull()
+  })
+})
+
+describe('orderWorkflowGroups', () => {
+  const groups = [
+    { id: 'g1', name: 'A', createdAt: 1, updatedAt: 1 },
+    { id: 'g2', name: 'B', createdAt: 2, updatedAt: 2 },
+    { id: 'g3', name: 'C', createdAt: 3, updatedAt: 3 },
+  ]
+
+  it('puts the groups in the order the ids name', () => {
+    expect(orderWorkflowGroups(groups, ['g3', 'g1', 'g2']).map((group) => group.id)).toEqual([
+      'g3',
+      'g1',
+      'g2',
+    ])
+  })
+
+  it('keeps unmentioned groups after the listed ones in their old order', () => {
+    expect(orderWorkflowGroups(groups, ['g3']).map((group) => group.id)).toEqual(['g3', 'g1', 'g2'])
+  })
+
+  it('ignores unknown ids instead of dropping groups', () => {
+    expect(orderWorkflowGroups(groups, ['gone', 'g2']).map((group) => group.id)).toEqual([
+      'g2',
+      'g1',
+      'g3',
+    ])
   })
 })
 
