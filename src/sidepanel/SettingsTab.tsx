@@ -1087,9 +1087,9 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   // What the current draft's endpoint and model can actually express. The
   // levels a vendor cannot express are shown but not selectable, so a saved
   // value stays visible instead of silently disappearing.
-  const thinkingLevels = draft ? thinkingLevelsFor(draft.baseUrl) : []
+  const thinkingLevels = draft ? thinkingLevelsFor(draft.baseUrl, draft.model) : []
   const thinkingSupport = draft ? thinkingModelSupport(draft.baseUrl, draft.model) : 'unknown'
-  const thinkingVerified = draft ? thinkingShapeVerified(draft.baseUrl) : false
+  const thinkingVerified = draft ? thinkingShapeVerified(draft.baseUrl, draft.model) : false
   const draftThinking = draft ? normalizeThinkingLevel(draft.thinkingEffort) : undefined
   const thinkingLabel = (level: ThinkingLevel): string => {
     switch (level) {
@@ -1466,7 +1466,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
                 {draftThinking && (
                   <p className="hint" style={{ marginBottom: 0 }}>
                     {t.settingsThinkingParamNote({
-                      param: thinkingParamSummary(draft.baseUrl, draftThinking),
+                      param: thinkingParamSummary(draft.baseUrl, draft.model, draftThinking),
                     })}
                   </p>
                 )}

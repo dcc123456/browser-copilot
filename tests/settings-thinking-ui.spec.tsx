@@ -188,4 +188,40 @@ describe('the thinking-effort control', () => {
 
     expect(container.textContent).toContain('no vendor information')
   })
+
+  it('follows the model when a vendor documents a different shape per model', async () => {
+    const container = await openProviderEditor(
+      settingsWith('MiniMax-M3.1-Flash', 'https://api.minimaxi.com/v1'),
+    )
+    await openAdvanced(container)
+
+    const select = container.querySelector('#p-thinking') as HTMLSelectElement | null
+    expect(select).not.toBeNull()
+    const options = [...(select?.options ?? [])]
+    // M3.1-Flash always thinks, so "off" is not a choice it can be given.
+    expect(options.find((option) => option.value === 'off')?.disabled).toBe(true)
+    expect(options.find((option) => option.value === 'high')?.disabled).toBe(false)
+
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
+      setter?.call(select, 'high')
+      select?.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(container.textContent).toContain('reasoning_effort=xhigh')
+  })
+
+  it('offers no level for a model that always thinks', async () => {
+    const container = await openProviderEditor(
+      settingsWith('MiniMax-M2.5', 'https://api.minimaxi.com/v1'),
+    )
+    await openAdvanced(container)
+
+    const select = container.querySelector('#p-thinking') as HTMLSelectElement | null
+    expect(select).not.toBeNull()
+    for (const option of [...(select?.options ?? [])]) {
+      if (option.value === '') continue
+      expect(option.disabled).toBe(true)
+    }
+    expect(container.textContent).toContain('Model MiniMax-M2.5 does not support thinking effort')
+  })
 })

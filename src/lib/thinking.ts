@@ -15,6 +15,12 @@
  * claiming support. Model-level support stays unknowable from here — a
  * provider's 400 is the ground truth (see {@link isUnsupportedThinkingDetail}).
  *
+ * A vendor is not always one shape: Qwen3.8 takes `reasoning_effort` while
+ * the older Qwen3 takes a token budget, and MiniMax only lets M3.1-Flash
+ * pick a depth. Those are entries ({@link ThinkingFamily}) inside the vendor,
+ * matched by model name, so a model always gets the shape its own
+ * documentation describes.
+ *
  * @module lib/thinking
  */
 
@@ -63,6 +69,27 @@ export interface VendorThinking {
    * sensible; an empty object means "this vendor cannot express it, send
    * nothing".
    */
+  body: Record<ThinkingLevel, Record<string, unknown>>
+  /** Whether the shape comes from the vendor's own documentation. */
+  verified: boolean
+  /**
+   * Shapes that apply to some models only.
+   *
+   * A vendor whose models disagree cannot be described by one row: Qwen3.8
+   * takes `reasoning_effort` and refuses `thinking_budget` in the same
+   * request, and MiniMax accepts `reasoning_effort` on M3.1-Flash only. The
+   * first family whose pattern matches the model wins.
+   */
+  families?: readonly ThinkingFamily[]
+}
+
+/** One shape inside a vendor, for the models it applies to. */
+export interface ThinkingFamily {
+  /** Model names this shape applies to; matched against the lowercased name. */
+  models: readonly RegExp[]
+  /** Levels these models can express. */
+  levels: readonly ThinkingLevel[]
+  /** Level → request-body fragment for these models. */
   body: Record<ThinkingLevel, Record<string, unknown>>
   /** Whether the shape comes from the vendor's own documentation. */
   verified: boolean
@@ -123,9 +150,26 @@ const VENDOR_THINKING: Record<ThinkingVendor, VendorThinking> = {
     body: {
       off: { enable_thinking: false },
       low: { enable_thinking: true, thinking_budget: 1024 },
-      medium: { enable_thinking: true, thinking_budget: 4096 },
-      high: { enable_thinking: true, thinking_budget: 16384 },
+      medium: { enable_thinking: true, thinking_budget: 8192 },
+      high: { enable_thinking: true, thinking_budget: 32768 },
     },
+    families: [
+      {
+        // Qwen3.8 documents reasoning_effort, and documents that it refuses
+        // thinking_budget in the same request. Its own mapping is
+        // low=4096, medium=16384, xhigh=262144 — but the levels are named
+        // here instead, because the levels are what the endpoint accepts.
+        models: [/^qwen3\.8/],
+        levels: ['off', 'low', 'medium', 'high'],
+        verified: true,
+        body: {
+          off: { enable_thinking: false },
+          low: { reasoning_effort: 'low' },
+          medium: { reasoning_effort: 'medium' },
+          high: { reasoning_effort: 'xhigh' },
+        },
+      },
+    ],
   },
   zhipu: {
     levels: ['off', 'high'],
@@ -149,14 +193,45 @@ const VENDOR_THINKING: Record<ThinkingVendor, VendorThinking> = {
     },
   },
   minimax: {
-    levels: ['off', 'low', 'medium', 'high'],
+    // The default shape is M3: thinking can be turned off, but no depth
+    // levels are documented for it.
+    levels: ['off'],
     verified: true,
     body: {
       off: { thinking: { type: 'disabled' } },
-      low: { reasoning_effort: 'low' },
-      medium: { reasoning_effort: 'medium' },
-      high: { reasoning_effort: 'high' },
+      low: {},
+      medium: {},
+      high: {},
     },
+    families: [
+      {
+        // M3.1-Flash is the only MiniMax model that takes a depth, and its
+        // thinking is mandatory: `disabled` is answered with a 400. Its
+        // `max` is the default, so `xhigh` is the strongest level that
+        // actually changes the default behaviour.
+        models: [/^minimax-m3\.1/],
+        levels: ['low', 'medium', 'high'],
+        verified: true,
+        body: {
+          off: {},
+          low: { reasoning_effort: 'low' },
+          medium: { reasoning_effort: 'medium' },
+          high: { reasoning_effort: 'xhigh' },
+        },
+      },
+      {
+        // M3 takes no depth levels, but its thinking can be turned off.
+        models: [/^minimax-m3/],
+        levels: ['off'],
+        verified: true,
+        body: {
+          off: { thinking: { type: 'disabled' } },
+          low: {},
+          medium: {},
+          high: {},
+        },
+      },
+    ],
   },
   siliconflow: {
     levels: ['off', 'low', 'medium', 'high'],
@@ -213,6 +288,9 @@ const UNSUPPORTED_MODELS: Partial<Record<ThinkingVendor, RegExp[]>> = {
   openai: [/^gpt-4o/, /^chatgpt-4o/, /^gpt-4\.1/, /^gpt-4-turbo/, /^gpt-3\.5/],
   // DeepSeek documents thinking for deepseek-reasoner only.
   deepseek: [/^deepseek-chat/],
+  // MiniMax documents that the M2 series always thinks: turning thinking off
+  // is accepted but has no effect, and no depth level is accepted either.
+  minimax: [/^minimax-m2/],
 }
 
 /** Models documented to support thinking control. */
@@ -271,14 +349,31 @@ export function thinkingVendorOf(baseUrl: string): ThinkingVendor {
   return 'unknown'
 }
 
-/** The levels a vendor can express, in display order. */
-export function thinkingLevelsFor(baseUrl: string): readonly ThinkingLevel[] {
-  return VENDOR_THINKING[thinkingVendorOf(baseUrl)].levels
+/**
+ * The shape that applies to one model of one vendor.
+ *
+ * A vendor's own row is the fallback; a model family overrides it when the
+ * vendor documents the two differently.
+ */
+function thinkingShapeFor(baseUrl: string, model: string): ThinkingFamily {
+  const vendor = VENDOR_THINKING[thinkingVendorOf(baseUrl)]
+  const name = model.trim().toLowerCase()
+  const family = vendor.families?.find((entry) =>
+    entry.models.some((pattern) => pattern.test(name)),
+  )
+  if (family) return family
+  return { models: [], levels: vendor.levels, body: vendor.body, verified: vendor.verified }
 }
 
-/** Whether the vendor's shape is backed by its own documentation. */
-export function thinkingShapeVerified(baseUrl: string): boolean {
-  return VENDOR_THINKING[thinkingVendorOf(baseUrl)].verified
+/** The levels a vendor can express for one model, in display order. */
+export function thinkingLevelsFor(baseUrl: string, model: string): readonly ThinkingLevel[] {
+  if (thinkingModelSupport(baseUrl, model) === 'unsupported') return []
+  return thinkingShapeFor(baseUrl, model).levels
+}
+
+/** Whether the shape that applies to this model is backed by documentation. */
+export function thinkingShapeVerified(baseUrl: string, model: string): boolean {
+  return thinkingShapeFor(baseUrl, model).verified
 }
 
 /**
@@ -312,7 +407,7 @@ export function thinkingBodyFor(
 ): Record<string, unknown> | undefined {
   if (!level) return undefined
   if (thinkingModelSupport(baseUrl, model) === 'unsupported') return undefined
-  const fragment = VENDOR_THINKING[thinkingVendorOf(baseUrl)].body[level]
+  const fragment = thinkingShapeFor(baseUrl, model).body[level]
   if (!fragment || Object.keys(fragment).length === 0) return undefined
   return fragment
 }
@@ -322,8 +417,8 @@ export function thinkingBodyFor(
  * `thinking.reasoning_effort=high` — so the user can check it against the
  * vendor's documentation.
  */
-export function thinkingParamSummary(baseUrl: string, level: ThinkingLevel): string {
-  const fragment = VENDOR_THINKING[thinkingVendorOf(baseUrl)].body[level]
+export function thinkingParamSummary(baseUrl: string, model: string, level: ThinkingLevel): string {
+  const fragment = thinkingShapeFor(baseUrl, model).body[level]
   const parts: string[] = []
   for (const [key, value] of Object.entries(fragment ?? {})) {
     if (value && typeof value === 'object' && !Array.isArray(value)) {

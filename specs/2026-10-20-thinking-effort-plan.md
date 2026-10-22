@@ -43,8 +43,9 @@
 
 - `ThinkingLevel`、`THINKING_LEVELS`、`THINKING_PARAM_NAMES`。
 - `VENDOR_THINKING`（设计 §3.3 全表）+ `resolveVendor(baseUrl)`（按 host+port，**不看 presetId**）。
-- `thinkingBodyFor(baseUrl, level)`、`thinkingLevelsFor(baseUrl)`。
-- `thinkingModelSupport(baseUrl, model)`：`'supported' | 'unsupported' | 'unknown'`，只含设计 §3.4 那两条已证实的静态结论。
+- `thinkingShapeFor(baseUrl, model)`：厂商行 ＋ 按模型名匹配的 `families`（Qwen3.8、MiniMax M3/M3.1-Flash 各是一种形态）。
+- `thinkingBodyFor(baseUrl, model, level)`、`thinkingLevelsFor(baseUrl, model)`、`thinkingShapeVerified(baseUrl, model)`、`thinkingParamSummary(baseUrl, model, level)`。
+- `thinkingModelSupport(baseUrl, model)`：`'supported' | 'unsupported' | 'unknown'`，只含设计 §3.4 那几条已证实的静态结论。
 - 测试：`tests/thinking.spec.ts` —— 每家厂商的档位集合与请求体片段、host 判定（含 `custom` 档案仍能按 host 认出厂商）、未知厂商的通用兜底、静态不支持的模型前缀。
 
 ### Step 2 — 数据契约与文案
