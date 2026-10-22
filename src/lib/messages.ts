@@ -35,6 +35,7 @@ import type { WorkflowReview } from './workflow/review-patch'
 import type { RepeatSuggestion } from './workflow/loop-collapse'
 import type { SelectorProbeResult } from './workflow/selector-probe'
 import type { AttachmentDescriptor, AttachmentSummary } from './attachments'
+import type { UpdateState } from './update/types'
 
 /** Aggregated token usage for one agent turn (summed across all tool rounds). */
 export interface TurnTokenUsage {
@@ -132,6 +133,8 @@ export const AGENT_PORT = 'agent'
 export type Command =
   | { type: 'settings.get' }
   | { type: 'settings.set'; patch: Partial<Settings> }
+  /** Asks the background to re-check GitHub Releases; `force` skips the 5-min guard. */
+  | { type: 'update.check'; force?: boolean }
   | { type: 'skills.list' }
   | { type: 'skills.save'; skill: Skill }
   | { type: 'skills.delete'; id: string }
@@ -542,6 +545,7 @@ export type Command =
 /** Replies, discriminated by the command that produced them. */
 export type CommandResult =
   | { type: 'settings'; settings: Settings }
+  | { type: 'update.state'; state: UpdateState }
   | { type: 'skills.list'; skills: Skill[] }
   | { type: 'skills.save'; skill: Skill }
   | { type: 'skills.delete' }

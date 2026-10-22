@@ -281,6 +281,8 @@ import { reviewWorkflow } from './workflow-engine/workflow-review'
 import { initLastTabTracker } from './last-tab'
 import { rescheduleAll, scheduleTask, triggerNow, onAlarm } from './scheduler'
 import { FeishuBot, FEISHU_WATCHDOG_ALARM } from './feishu-bot'
+import { checkForUpdates, ensureUpdateAlarm } from './update-checker'
+import { UPDATE_CHECK_ALARM } from '../lib/update/types'
 import { isWebhookUrl, sendWebhookText } from '../lib/feishu'
 import { agentClient } from './agent-client'
 import { trimOutboxToBudget } from '../lib/fs-outbox'
@@ -385,6 +387,12 @@ void listRuns()
 
 chrome.runtime.onInstalled.addListener(() => {
   void ensureSchema()
+  ensureUpdateAlarm()
+  // Force: a reload may have changed the installed version, which the 5-minute
+  // freshness guard would otherwise mask with the previous state.
+  void checkForUpdates({ force: true }).catch((error: unknown) =>
+    console.error('[Browser Copilot] update check failed', error),
+  )
   // Pre-compile the OCR WASM + language model in the offscreen document so the
   // first captcha read doesn't pay a multi-second cold start. Best effort.
   void getSettings()
@@ -406,6 +414,10 @@ chrome.runtime.onInstalled.addListener(() => {
 // A worker update/startup must also reconcile alarms: chrome.alarms persist across
 // restarts, but code may have changed and a stale enabled flag needs correcting.
 chrome.runtime.onStartup.addListener(() => {
+  ensureUpdateAlarm()
+  void checkForUpdates().catch((error: unknown) =>
+    console.error('[Browser Copilot] update check failed', error),
+  )
   void getSettings()
     .then((s) => warmupOcr(s.ocrLanguage))
     .catch(() => {})
@@ -447,6 +459,12 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   try {
     if (alarm.name === FEISHU_WATCHDOG_ALARM) {
       feishuBot.onWatchdog()
+      return
+    }
+    if (alarm.name === UPDATE_CHECK_ALARM) {
+      void checkForUpdates().catch((error: unknown) =>
+        console.error('[Browser Copilot] update check failed', error),
+      )
       return
     }
     if (isWorkflowTriggerAlarm(alarm.name)) {
@@ -1231,6 +1249,12 @@ async function handleCommand(
       void agentClient.sync()
       return { type: 'settings', settings }
     }
+
+    case 'update.check':
+      return {
+        type: 'update.state',
+        state: await checkForUpdates({ force: command.force === true }),
+      }
 
     case 'agent.status.get':
       return { type: 'agent.status', status: agentClient.getStatus() }
