@@ -412,9 +412,25 @@ export function generationOperators(exposure?: AiExposure): OperatorRegistryEntr
 }
 
 /**
+ * Operators the assistant may never land, whatever the palette says.
+ *
+ * The trigger is the flow's entry rather than a step, and `proxy` /
+ * `browser-event` are placeholder executors — landing one would hand the user a
+ * step that cannot run. Everything else in the registry is writable, including
+ * the operators the generation palette keeps hidden (`save-local`, `note`,
+ * `blocks-group`, `workflow-state`): the editor assistant is driven by the user
+ * one answer at a time, not the unattended generator that hides them.
+ */
+const AI_LANDING_REFUSED: ReadonlySet<string> = new Set([
+  TRIGGER_BLOCK_ID,
+  'proxy',
+  'browser-event',
+])
+
+/**
  * Whether the AI may put this operator on the canvas in THIS build.
  *
- * Four exclusions, and the registry alone cannot answer two of them: the trigger
+ * Three exclusions, and the registry alone cannot answer two of them: the trigger
  * is the flow's entry rather than a step, cloud-only blocks are classified in the
  * palette, and an OCR-only operator does not exist in the no-OCR build. This is
  * the single landing authority — the assistant's chain placement, its in-place
@@ -422,9 +438,9 @@ export function generationOperators(exposure?: AiExposure): OperatorRegistryEntr
  * them keeps a private copy.
  */
 export function aiLandingAllowed(id: string): boolean {
-  if (id === TRIGGER_BLOCK_ID || isCloudBlock(id)) return false
+  if (AI_LANDING_REFUSED.has(id) || isCloudBlock(id)) return false
   const entry = REGISTRY.get(id)
-  if (!entry || !entry.allowGeneration || entry.aiExposure === 'hidden' || entry.cloud) return false
+  if (!entry || entry.cloud) return false
   const block = BLOCK_BY_ID.get(id)
   if (!block) return false
   return !(block.requiresOcr === true && !OCR_SUPPORTED)

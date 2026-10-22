@@ -1021,6 +1021,18 @@ export type AgentServerMessage =
       event: import('./workflow/node-fix').NodeFixEvent
     }
   /**
+   * The operator assistant's own model output, streamed while it answers:
+   * `reasoning` is chain-of-thought, `text` the answer. The editor shows it live
+   * and keeps the final text behind a disclosure.
+   */
+  | {
+      type: 'workflows.operatorAdviseEvent'
+      /** The request these deltas belong to; the dock filters on it. */
+      sessionId: string
+      channel: 'text' | 'reasoning'
+      delta: string
+    }
+  /**
    * The stored transcript replayed after `resume`. `running` tells the panel
    * whether to show itself as busy because a turn continued without it.
    */
