@@ -46,10 +46,8 @@ import {
   appendOperatorChain,
   applyOperatorAction,
   edgesAfterBatchRemoved,
-  incidentEdgeSnapshot,
   isOperatorChainAction,
   operatorBatchOf,
-  operatorBlockName,
   operatorDigestOf,
   prependOperatorChain,
   selectedOperatorSpecOf,
@@ -219,9 +217,6 @@ function toCanvasEdge(e: WorkflowEdge): Edge {
 type AiUndoRecord =
   { kind: 'chain'; batch: OperatorBatch } | { kind: 'node'; before: OperatorNodeSnapshot }
 
-/** How many AI-optimized steps one node can hand back with "restore previous". */
-const NODE_FIX_SNAPSHOT_LIMIT = 10
-
 export default function EditorApp() {
   const [workflowId, setWorkflowId] = useState<string | null>(null)
   const [nodes, setNodes] = useState<FlowNode[]>([])
@@ -312,9 +307,7 @@ export default function EditorApp() {
   /**
    * Put one node back exactly as a snapshot held it: its own renderer (a swapped
    * operator has to draw as the operator it became) plus every line that touched
-   * it. This is the shared tail of the two ways a step is undone — the assistant's
-   * undo button and AI Optimize's restore — and it has to be one implementation,
-   * because what a swap left behind (re-hung and cut edges) exists nowhere else.
+   * it. What a swap left behind (re-hung and cut edges) exists nowhere else.
    */
   const restoreNodeSnapshot = useCallback(
     (snapshot: OperatorNodeSnapshot) => {
@@ -361,21 +354,6 @@ export default function EditorApp() {
     setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
     toast.show(t('editorUndone'), 'info')
   }, [setNodes, setEdges, toast, t])
-
-  /**
-   * The canvas as an undo snapshot records it: the node in the workflow shape plus
-   * every edge touching it. Captured BEFORE a change to the step, by the assistant
-   * (in its patch) and by AI 优化 (here), so both restore the same record.
-   */
-  const nodeSnapshotOf = useCallback((nodeId: string): OperatorNodeSnapshot | null => {
-    const { nodes: drawn, edges: wired } = canvasRef.current
-    const node = drawn.find((candidate) => candidate.id === nodeId)
-    if (!node) return null
-    return {
-      node: structuredClone(toWorkflowNode(node)),
-      edges: incidentEdgeSnapshot(wired.map(toWorkflowEdge), nodeId),
-    }
-  }, [])
 
   // Resolve language from the stored locale.
   useEffect(() => {
@@ -628,60 +606,6 @@ export default function EditorApp() {
       ),
     )
   }, [])
-
-  // Replace a node's ENTIRE block data (used when applying an AI-fix result or
-  // reverting it). Unlike patchNode this does not merge, so parameters the fix
-  // removed do not linger in the node.
-  const replaceNodeData = useCallback((id: string, next: Record<string, unknown>) => {
-    setNodes((nds) =>
-      nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, blockData: next } } : n)),
-    )
-  }, [])
-
-  // Per-node pre-fix snapshots for manual restore (in-memory, session only).
-  // Keyed by node id; each stack holds the step as it was before a fix — the node
-  // AND the lines touching it, because an optimization may swap the operator, and
-  // a swap re-hangs and cuts edges that no data-only snapshot could put back.
-  const fixSnapshotsRef = useRef<Map<string, OperatorNodeSnapshot[]>>(new Map())
-  // Node ids that currently have at least one snapshot; drives canRevert.
-  const [revertibleIds, setRevertibleIds] = useState<ReadonlySet<string>>(new Set())
-
-  const syncRevertible = useCallback(() => {
-    setRevertibleIds((prev) => {
-      const next = new Set<string>()
-      for (const [id, stack] of fixSnapshotsRef.current) {
-        if (stack.length > 0) next.add(id)
-      }
-      // Keep reference equality when unchanged to avoid extra renders.
-      if (prev.size === next.size && [...prev].every((id) => next.has(id))) return prev
-      return next
-    })
-  }, [])
-
-  /** Remember the step as it was, one entry deeper, for the dialog's Restore button. */
-  const recordFixSnapshot = useCallback((id: string, snapshot: OperatorNodeSnapshot) => {
-    const stack = fixSnapshotsRef.current.get(id) ?? []
-    stack.push(snapshot)
-    // Bound the undo history.
-    if (stack.length > NODE_FIX_SNAPSHOT_LIMIT) stack.shift()
-    fixSnapshotsRef.current.set(id, stack)
-  }, [])
-
-  const revertNodeFix = useCallback(
-    (id: string) => {
-      const stack = fixSnapshotsRef.current.get(id)
-      const snapshot = stack?.pop()
-      if (!snapshot || !stack) return
-      if (stack.length === 0) fixSnapshotsRef.current.delete(id)
-      // Restore is the same operation the assistant's undo runs, so a step the AI
-      // turned into another operator comes back as the operator it was.
-      pushHistory()
-      restoreNodeSnapshot(snapshot)
-      syncRevertible()
-      toast.show(t('nodeFixRevertDone'), 'ok')
-    },
-    [pushHistory, restoreNodeSnapshot, syncRevertible, toast, t],
-  )
 
   const deleteNode = useCallback(
     (id: string) => {
@@ -1321,66 +1245,6 @@ export default function EditorApp() {
     [applyEdgeList, installPatchedNode, locateNode, pushHistory, toast, t],
   )
 
-  /**
-   * Apply a verified AI Optimize result to the step. Two landings, one snapshot:
-   * parameters alone go back as the node's whole data (the loop re-authored them),
-   * while an operator swap runs through the assistant's replace patcher — the one
-   * place that knows how to re-hang a node's edges on a different block's ports
-   * and to NAME the connections it had to cut. Nothing is half-applied: a swap the
-   * patcher refuses leaves the canvas exactly as it was.
-   */
-  const applyNodeFix = useCallback(
-    (id: string, next: Record<string, unknown>, swapTo?: string) => {
-      if (swapTo) {
-        const patch = applyOperatorAction(suggestionGraphRef.current(), id, 'replace', [
-          { blockId: swapTo, data: next, rationale: '' },
-        ])
-        const patched = patch.nodes.find((node) => node.id === id)
-        if (patch.problem || !patched || !patch.before) {
-          toast.show(t('nodeFixSwapRefused').replace('{name}', operatorBlockName(swapTo)), 'error')
-          return
-        }
-        pushHistory()
-        recordFixSnapshot(id, patch.before)
-        installPatchedNode(patched)
-        applyEdgeList(patch.edges)
-        setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
-        syncRevertible()
-        toast.show(t('operatorAiReplaced').replace('{name}', patched.label), 'ok')
-        if (patch.pruned.length > 0) {
-          toast.show(
-            t('operatorAiPrunedPorts').replace(
-              '{ports}',
-              patch.pruned.map((port) => port.label).join(', '),
-            ),
-            'info',
-          )
-        }
-        requestAnimationFrame(() => locateNode(id))
-        return
-      }
-      const snapshot = nodeSnapshotOf(id)
-      if (!snapshot) return
-      recordFixSnapshot(id, snapshot)
-      pushHistory()
-      replaceNodeData(id, structuredClone(next))
-      // Applying an optimization invalidates a prior certification until re-run.
-      setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
-      syncRevertible()
-    },
-    [
-      installPatchedNode,
-      locateNode,
-      nodeSnapshotOf,
-      pushHistory,
-      recordFixSnapshot,
-      replaceNodeData,
-      applyEdgeList,
-      syncRevertible,
-      toast,
-      t,
-    ],
-  )
   const applyOperatorsFromAi = useCallback(
     (request: OperatorApplyRequest): OperatorLanding => {
       const graph = suggestionGraphRef.current()
@@ -1501,10 +1365,6 @@ export default function EditorApp() {
                 setEditingId(null)
                 setNodes((nds) => nds.map((n) => ({ ...n, selected: false })))
               }}
-              onApplyFix={(next, swapTo) => applyNodeFix(editNode.id, next, swapTo)}
-              windowId={hostWindowId()}
-              canRevert={revertibleIds.has(editNode.id)}
-              onRevert={() => revertNodeFix(editNode.id)}
             />
           </WorkflowMetaProvider>
         </SlashMenuProvider>
@@ -1686,9 +1546,6 @@ export default function EditorApp() {
                 onChange={(patch) => patchGroupChild(childEdit.nodeId, childEdit.index, patch)}
                 onBack={() => setChildEditFor(null)}
                 t={t}
-                onApplyFix={() => {}}
-                canRevert={false}
-                onRevert={() => {}}
                 hideGoal
               />
             </Modal>

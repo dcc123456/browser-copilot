@@ -11,8 +11,7 @@
  * @module workflow-editor/sidebar/BlockEditForm
  */
 
-import { useState } from 'react'
-import { ArrowLeft, Cloud, Info, RotateCcw, Wand2 } from 'lucide-react'
+import { ArrowLeft, Cloud, Info } from 'lucide-react'
 import { isCloudBlock } from '../../lib/workflow/blocks/cloud-blocks'
 import { isCustomBlock } from '../../lib/workflow/blocks/custom'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
@@ -21,7 +20,6 @@ import NumberInput from '../../ui/NumberInput'
 import { EditForms } from '../blocks/EditForms'
 import { Expand, Switch, TextArea, TextInput } from '../blocks/shared/Field'
 import NodeGoalInspector from './NodeGoalInspector'
-import NodeFixModal from './NodeFixModal'
 import type { TranslateFn } from '../i18n'
 import { useEditorLocale } from '../locale-context'
 
@@ -32,19 +30,10 @@ export interface BlockEditFormProps {
   onChange: (patch: Record<string, unknown>) => void
   onBack: () => void
   t: TranslateFn
-  /** Apply a verified AI-optimization result (whole replacement), as another
-   *  operator too when the loop verified the step as one. */
-  onApplyFix: (next: Record<string, unknown>, swapTo?: string) => void
-  /** Editor host window the fix trial run / verification are scoped to. */
-  windowId?: number
-  /** Whether a pre-fix snapshot exists to restore. */
-  canRevert: boolean
-  /** Restore the node data captured before the last AI fix. */
-  onRevert: () => void
   /**
-   * Hide the goal/success-criteria section and the AI Fix entry. A child of a
-   * group is not a graph node: the engine never reads a contract for it, so
-   * offering one would promise a verification that cannot happen.
+   * Hide the goal/success-criteria section. A child of a group is not a graph
+   * node: the engine never reads a contract for it, so offering one would
+   * promise a verification that cannot happen.
    */
   hideGoal?: boolean
 }
@@ -129,20 +118,14 @@ export default function BlockEditForm({
   onChange,
   onBack,
   t,
-  onApplyFix,
-  windowId,
-  canRevert,
-  onRevert,
   hideGoal = false,
 }: BlockEditFormProps) {
   const { blockName, bt } = useEditorLocale()
   const EditComponent = block.editComponent ? EditForms[block.editComponent] : undefined
   const cloud = isCloudBlock(block.id)
-  // Fire-and-done operators have nothing to verify, so they get neither the goal
-  // section nor AI Optimize (the loop refuses a node it has nothing to work
-  // towards — no contract, no user words, no error log).
+  // Fire-and-done operators have nothing to verify, so they get no goal section
+  // (no contract, no user words, no error log to work towards).
   const goalBearing = !hideGoal && operatorCarriesGoal(block.id)
-  const [fixOpen, setFixOpen] = useState(false)
 
   return (
     <div className="wf-edit-block">
@@ -152,16 +135,6 @@ export default function BlockEditForm({
         </button>
         <p className="wf-edit-title">{nodeName || blockName(block.id, block.name)}</p>
         <span className="wf-edit-spacer" />
-        {!cloud && goalBearing && (
-          <button
-            type="button"
-            onClick={() => setFixOpen(true)}
-            title={t('nodeFixButton')}
-            className="wf-icon-btn text-accent"
-          >
-            <Wand2 size={14} />
-          </button>
-        )}
         {!isCustomBlock(block.id) && (
           <a
             href={`https://docs.extension.automa.site/blocks/${block.id}.html`}
@@ -210,28 +183,7 @@ export default function BlockEditForm({
             <NodeGoalInspector data={data} onChange={onChange} t={t} />
           </Expand>
         )}
-
-        {canRevert && (
-          <button
-            type="button"
-            onClick={onRevert}
-            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-panel text-xs font-medium text-muted transition-colors hover:bg-hover hover:text-ink"
-          >
-            <RotateCcw size={13} />
-            {t('nodeFixRevert')}
-          </button>
-        )}
       </div>
-
-      <NodeFixModal
-        open={fixOpen}
-        onClose={() => setFixOpen(false)}
-        blockId={block.id}
-        data={data}
-        onApply={onApplyFix}
-        windowId={windowId}
-        t={t}
-      />
     </div>
   )
 }

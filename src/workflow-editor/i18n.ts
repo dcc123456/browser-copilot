@@ -194,7 +194,6 @@ export const EDITOR_STRINGS = {
     repairFailed: 'Repair failed',
     repairCancel: 'Cancel repair',
     // — per-node AI optimize —
-    nodeFixButton: 'AI Optimize',
     nodeFixTitle: 'AI Optimize this block',
     nodeFixSuggestionLabel: 'What to change (optional)',
     nodeFixSuggestionPlaceholder:
@@ -213,8 +212,6 @@ export const EDITOR_STRINGS = {
     nodeFixFailed: 'AI optimization failed',
     nodeFixApply: 'Apply to block',
     nodeFixClose: 'Close',
-    nodeFixRevert: 'Restore previous version',
-    nodeFixRevertDone: 'Restored the step as it was before the optimization.',
     nodeFixApplying: 'Optimizing the block…',
     nodeFixPhaseObserving: 'Observing the current page',
     nodeFixPhaseExecuting: 'Trial-running the block',
@@ -226,8 +223,6 @@ export const EDITOR_STRINGS = {
     nodeFixLogResponse: 'Returned by the AI',
     nodeFixSwapProposed:
       'The verified result runs this step as {name}, which is what the success was checked against. Applying changes the operator too.',
-    nodeFixSwapRefused:
-      'The canvas could not land {name} in place of this step, so nothing was applied.',
     // — the `/` dynamic-variable menu in block parameter fields —
     varMenuInputs: 'Workflow inputs',
     varMenuVariables: 'Variables',
@@ -511,7 +506,6 @@ export const EDITOR_STRINGS = {
     repairFailed: '修复失败',
     repairCancel: '取消修复',
     // — 单算子 AI 优化 —
-    nodeFixButton: 'AI 优化',
     nodeFixTitle: 'AI 优化此算子',
     nodeFixSuggestionLabel: '优化要求（可选）',
     nodeFixSuggestionPlaceholder: '说明哪里有问题、这一步要实现什么，或希望怎么修复…',
@@ -527,8 +521,6 @@ export const EDITOR_STRINGS = {
     nodeFixFailed: 'AI 优化失败',
     nodeFixApply: '应用到算子',
     nodeFixClose: '关闭',
-    nodeFixRevert: '恢复上一版本',
-    nodeFixRevertDone: '已恢复该算子优化前的状态。',
     nodeFixApplying: '正在优化算子…',
     nodeFixPhaseObserving: '正在观测当前页面',
     nodeFixPhaseExecuting: '正在试执行算子',
@@ -540,7 +532,6 @@ export const EDITOR_STRINGS = {
     nodeFixLogResponse: 'AI 返回的内容',
     nodeFixSwapProposed:
       '已验证的结果是把这一步按 {name} 跑通的，成功判据也针对它检查过；应用后算子类型会一并更换。',
-    nodeFixSwapRefused: '画布无法用 {name} 替换这一步，因此没有做任何改动。',
     varMenuInputs: '工作流入参',
     varMenuVariables: '变量',
     varMenuAliases: '引擎值',

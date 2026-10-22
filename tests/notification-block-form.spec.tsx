@@ -1,10 +1,9 @@
 /**
  * The editor half of the no-goal ruling (spec
  * `specs/2026-10-15-notification-feishu-and-goal-free-design.md` §3.1): a
- * fire-and-done operator gets neither the 「目标与成功条件」 section nor the AI
- * Optimize entry — such an operator leaves no page state to verify, so the loop
- * would have nothing to judge its own work against. Plus the notification form's
- * Feishu switch.
+ * fire-and-done operator gets no 「目标与成功条件」 section — it leaves no page
+ * state to verify, so a contract would promise a check that cannot happen.
+ * Plus the notification form's Feishu switch.
  */
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
@@ -27,29 +26,21 @@ function render(blockId: string, data: Record<string, unknown> = {}): string {
       onChange: noop,
       onBack: noop,
       t,
-      onApplyFix: noop,
-      canRevert: false,
-      onRevert: noop,
     }),
   )
 }
 
-describe('block edit form: goal section and AI optimize entry', () => {
-  // The title goes through the editor dictionary, so the identity translator
-  // leaves the KEY in the markup — that is what these rows look for.
-  const OPTIMIZE_TITLE = 'nodeFixButton'
-  it('hides both from the fire-and-done operators', () => {
+describe('block edit form: goal section', () => {
+  it('hides it from the fire-and-done operators', () => {
     for (const blockId of NON_GOAL_BEARING_BLOCK_IDS) {
       const markup = render(blockId)
       expect(markup, blockId).not.toContain('nodeGoalSection')
-      expect(markup, blockId).not.toContain(OPTIMIZE_TITLE)
     }
   })
 
-  it('keeps both for a goal-bearing operator', () => {
+  it('keeps it for a goal-bearing operator', () => {
     const markup = render('forms', { blockId: 'forms', selector: '.title' })
     expect(markup).toContain('nodeGoalSection')
-    expect(markup).toContain(OPTIMIZE_TITLE)
   })
 
   it('renders the Feishu switch on the notification block', () => {

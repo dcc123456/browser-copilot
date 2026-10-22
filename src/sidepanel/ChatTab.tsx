@@ -23,7 +23,6 @@ import {
   type GeneratedWorkflowRepairInfo,
   type TurnTokenUsage,
   emitReviewLog,
-  onReviewLog,
   sendCommand,
 } from '../lib/messages'
 import {
@@ -45,21 +44,13 @@ import type { RepeatSuggestion } from '../lib/workflow/loop-collapse'
 import { failingProbes, type SelectorProbeResult } from '../lib/workflow/selector-probe'
 import { checkWorkflowIntegrity, type WorkflowIntegrity } from '../lib/workflow/integrity'
 import { validateWorkflowForRun } from '../lib/workflow/validation'
-import {
-  applyNodeKeepSelection,
-  reviewStepsOf,
-  type ReviewStep,
-  type WorkflowReview,
-} from '../lib/workflow/review-patch'
-import { requiredStepIdsOf } from '../lib/workflow/required-steps'
 import { displayNameOfNodeId } from '../lib/workflow/node-name'
-import { WorkflowReviewDialog } from './WorkflowReviewList'
 import { GenerationStagesView } from './GenerationStages'
 import { WorkflowGenerationDialog } from './components/WorkflowGenerationDialog'
 import type { WorkflowGenerationViewState } from './components/WorkflowGenerationDialog'
 import { RepairProgressDialog } from './components/RepairProgressDialog'
 import { CardSection, type CardSectionTone } from './components/CardSection'
-import { useNodeFixLog, useRepairEvents } from './hooks/useWorkflowRuntimeEvents'
+import { useRepairEvents } from './hooks/useWorkflowRuntimeEvents'
 import SkillEditDialog from './SkillEditDialog'
 import type { Workflow } from '../lib/workflow/types'
 import type { AgentMode, ConversationMeta } from '../lib/types'
@@ -322,13 +313,7 @@ export function headPendingCard(cards: {
 }
 
 /**
- * State of the "save this session as a workflow?" card plus its save-time AI
- * node review. `reviewing` while the background verdict is in flight;
- * `review: null` after it settled means unavailable — every step stays.
- * `keep` (stepId → keep) is `null` until the review lands; the absent case
- * keeps everything. `reviewOpen` is true only while the review dialog the
- * "Save as workflow" click opened is showing. `reviewLog` accumulates the
- * dialog's progress lines (sent → verdict / failure) across retries.
+ * State of the "save this session as a workflow?" card.
  */
 interface WorkflowPromptState {
   conversationId: string
@@ -353,24 +338,13 @@ interface WorkflowPromptState {
    * `chatSaveWorkflowPrompt` ("This session performed N steps…"); the
    * workflow-draft path uses `chatSaveWorkflowDraftPrompt` ("Generated a
    * workflow draft with N steps…"). Tracked separately because both reuse
-   * the same review/save machinery.
+   * the same save machinery.
    */
   source: 'history' | 'draft'
-  reviewing: boolean
-  review: WorkflowReview | null
-  /** Failure reason of the last review attempt (timeout / endpoint / parse). */
-  reviewError: string | null
-  /** True while the save-time review dialog is open. */
-  reviewOpen: boolean
-  /** Ordered review progress lines shown in the dialog. */
-  reviewLog: string[]
   /** True while the persist command is in flight (blocks double clicks). */
   saving: boolean
-  /** Failure reason of the last save attempt; the dialog stays open for a retry. */
+  /** Failure reason of the last save attempt; the card stays open for a retry. */
   saveError: string | null
-  keep: Record<string, boolean> | null
-  /** Reviewable steps of the base workflow, in chain order (stable). */
-  stepList: ReviewStep[]
   /**
    * Repeat runs the draft contains, offered as folds. A generated workflow
    * records one node per real interaction, so five identical clicks become five
@@ -1838,11 +1812,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
    * "Save this session as a workflow?" call-to-action, shown right after a turn
    * that actually performed page operations in workflow mode. `conversationId`
    * guards against saving another conversation's flow by mistake.
-   *
-   * The AI node review does NOT run while the card is open — it starts only
-   * when the user clicks "Save as workflow", which opens the review dialog
-   * (`reviewOpen`). A failed attempt (`reviewError`) can be retried by
-   * clicking save again; a landed verdict is reused.
    */
   const [workflowPrompt, setWorkflowPrompt] = useState<WorkflowPromptState | null>(null)
   /**
@@ -1922,12 +1891,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   // are global (per repair session); the dialog opens on the first event and
   // stays until the user dismisses a terminal state.
   const repairEvents = useRepairEvents()
-  // The per-node AI fix loop is ONE event stream: the editor's AI Fix dialog
-  // renders it as a timeline, and the workflow dialog mirrors the same events as
-  // log lines, so the fix is watchable from wherever the user asked for it.
-  const fixLog = useNodeFixLog({
-    round: (round) => t.workflowFixLogRound({ round: round + 1 }),
-  })
   const [repairDialogOpen, setRepairDialogOpen] = useState(false)
   const repairDialogSeenRef = useRef(0)
   useEffect(() => {
@@ -1939,22 +1902,12 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   }, [repairEvents.state])
   /**
    * Runnability of the graph on the open save card, recomputed whenever the
-   * card's workflow changes (trigger selection, review edits, folding). The
+   * card's workflow changes (trigger selection, folding). The
    * same checks the run gate applies (`validateWorkflowForRun`) — shown BEFORE
    * saving so "must fix" problems block the save button instead of the run.
    */
   const runIssues = useMemo(
     () => (workflowPrompt ? validateWorkflowForRun(workflowPrompt.workflow) : null),
-    [workflowPrompt],
-  )
-  /**
-   * Review steps that cannot be dropped: dropping them would introduce a new
-   * hard run error (a later node would lose its only variable producer, …).
-   * Computed on the CURRENT preview graph, so it covers the original card and
-   * every state reached while the refine dialog is open.
-   */
-  const requiredStepIds = useMemo(
-    () => (workflowPrompt ? requiredStepIdsOf(workflowPrompt.workflow) : []),
     [workflowPrompt],
   )
   /** Last reuseable-step count we already asked about per conversation. */
@@ -1985,23 +1938,13 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     // this card was already opened before (later updates must not leave it up).
     clearSavePreparing(workflowPrompt.conversationId)
     // The popup is opened only ONCE per save card. After the user closes it,
-    // later card updates (probe results, review retry) must not force it open.
+    // later card updates (probe results, folding) must not force it open.
     if (modalOpenedForRef.current === workflowPrompt.conversationId) return
     modalOpenedForRef.current = workflowPrompt.conversationId
     appendGenerationLog(`✓ ${workflowPrompt.workflow.name}`)
     closeGenerationLoading(workflowPrompt.conversationId)
     setSaveCardModalOpen(true)
   }, [workflowPrompt, appendGenerationLog, closeGenerationLoading, clearSavePreparing])
-
-  // Live AI review log: the port forwards pushed lines via emitReviewLog;
-  // this subscription renders them in the open review dialog as they arrive.
-  useEffect(() => {
-    return onReviewLog((text) => {
-      setWorkflowPrompt((prev) =>
-        prev && prev.reviewOpen ? { ...prev, reviewLog: [...prev.reviewLog, text] } : prev,
-      )
-    })
-  }, [])
 
   /**
    * After a turn, offer to persist the result as a reusable workflow.
@@ -2088,15 +2031,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         trigger,
         steps,
         source,
-        reviewing: false,
-        review: null,
-        reviewError: null,
-        reviewOpen: false,
-        reviewLog: [],
         saving: false,
         saveError: null,
-        keep: null,
-        stepList: reviewStepsOf(workflow),
         suggestions: result.suggestions ?? [],
         probes: null,
         probesChecking: true,
@@ -2483,7 +2419,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             break
           case 'workflows.reviewLog':
             // Live AI review progress: forward into the shared fan-out so the
-            // open review dialog (here or in the history tab) renders it.
+            // history tab's open review dialog renders it.
             emitReviewLog(message.text)
             break
           case 'phase': {
@@ -3153,77 +3089,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   }
 
   /**
-   * Fires the AI node review for the card's base workflow (once — an
-   * in-flight or landed verdict is reused). Used by BOTH the save click and
-   * the dialog's retry button: a failed attempt may be re-run arbitrarily.
-   */
-  const runSaveReview = (prompt: WorkflowPromptState): void => {
-    if (prompt.reviewing || prompt.review) return
-    setWorkflowPrompt((prev) =>
-      prev
-        ? {
-            ...prev,
-            reviewing: true,
-            reviewError: null,
-            reviewLog: [
-              ...prev.reviewLog,
-              tRef.current.workflowReviewLogStart({ steps: prev.stepList.length }),
-            ],
-          }
-        : prev,
-    )
-    sendCommand({ type: 'workflows.review', workflow: prompt.base })
-      .then((result) => {
-        if (result.type !== 'workflows.review') return
-        setWorkflowPrompt((prev) => {
-          if (!prev || prev.conversationId !== prompt.conversationId) return prev
-          // Materialize the verdicts into the keep set so the checkboxes AND
-          // the saved result both reflect the AI judgment; steps the model
-          // never mentioned stay keep=true.
-          const keep: Record<string, boolean> = { ...prev.keep }
-          if (result.review) {
-            for (const verdict of result.review.steps) keep[verdict.id] = verdict.keep
-          }
-          // Required steps override the model: dropping one would break
-          // runnability, so force it back on.
-          const baseRequired = requiredStepIdsOf(prompt.base)
-          for (const requiredId of baseRequired) {
-            if (keep[requiredId] === false) keep[requiredId] = true
-          }
-          const dropped = result.review?.steps.filter((verdict) => !verdict.keep).length ?? 0
-          const logLine = result.review
-            ? dropped > 0
-              ? tRef.current.chatWorkflowReviewDropped({ count: dropped })
-              : tRef.current.chatWorkflowReviewAllKept
-            : tRef.current.workflowReviewLogFailed
-          return {
-            ...prev,
-            reviewing: false,
-            review: result.review,
-            reviewError: result.error ?? null,
-            reviewLog: [...prev.reviewLog, logLine],
-            keep,
-          }
-        })
-      })
-      .catch((error) => {
-        setWorkflowPrompt((prev) =>
-          prev && prev.conversationId === prompt.conversationId
-            ? {
-                ...prev,
-                reviewing: false,
-                reviewError: (error as Error).message,
-                reviewLog: [...prev.reviewLog, tRef.current.workflowReviewLogFailed],
-              }
-            : prev,
-        )
-      })
-  }
-
-  /**
-   * Primary "保存为工作流" click: persists DIRECTLY with the captured steps —
-   * no model call, zero tokens. The AI node review is opt-in via the separate
-   * "AI refine" button, so the default path never spends tokens.
+   * "保存为工作流" click: persists DIRECTLY with the captured steps — no model
+   * call, zero tokens.
    */
   const savePromptWorkflowDirect = (): void => {
     const prompt = workflowPrompt
@@ -3232,56 +3099,16 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   }
 
   /**
-   * "AI refine" click: opens the AI review dialog and runs the node review
-   * (one model call, only when the user asks for it). With nothing to review
-   * it saves straight away instead — a review of zero steps is pointless.
-   */
-  const refinePromptWorkflow = (): void => {
-    const prompt = workflowPrompt
-    if (!prompt || prompt.saving || prompt.reviewing) return
-    if (prompt.stepList.length === 0) {
-      void persistPromptWorkflow(prompt)
-      return
-    }
-    setWorkflowPrompt((prev) => (prev ? { ...prev, reviewOpen: true } : prev))
-    runSaveReview(prompt)
-  }
-
-  /** Review dialog retry: re-runs a failed/unavailable review on the spot. */
-  const retrySaveReview = (): void => {
-    const prompt = workflowPrompt
-    if (!prompt || prompt.saving || prompt.reviewing) return
-    runSaveReview(prompt)
-  }
-
-  /**
-   * Applies the keep selection + AI prefill toggles and persists the workflow.
-   * The card/dialog closes ONLY on success — a failed save keeps it open with
-   * the reason shown, so "nothing seemed to happen" can never hide a failure.
+   * Applies the AI prefill toggles and persists the workflow. The card closes
+   * ONLY on success — a failed save keeps it open with the reason shown, so
+   * "nothing seemed to happen" can never hide a failure.
    */
   const persistPromptWorkflow = async (prompt: WorkflowPromptState): Promise<void> => {
     setWorkflowPrompt((prev) =>
       prev && prev.conversationId === prompt.conversationId ? { ...prev, saving: true } : prev,
     )
     try {
-      // Required steps are judged against the untouched base: if a required
-      // step is marked dropped in `keep`, re-derive with it forced back on, so
-      // the saved workflow can never lose a node it needs to run.
-      const baseRequired = requiredStepIdsOf(prompt.base)
-      const correctedKeep = { ...prompt.keep }
-      let forced = false
-      for (const requiredId of baseRequired) {
-        if (correctedKeep[requiredId] === false) {
-          correctedKeep[requiredId] = true
-          forced = true
-        }
-      }
-      const workflow = derivePreview(
-        prompt.base,
-        forced ? correctedKeep : prompt.keep,
-        prompt.aiSelections,
-        prompt.trigger,
-      )
+      const workflow = derivePreview(prompt.base, prompt.aiSelections, prompt.trigger)
       // `fromGeneration` lets the background harden the graph against the live
       // page (verified selectors + persisted element waits) before persisting.
       // Editor/import saves must NOT get this — hand-tuned selectors are
@@ -3409,18 +3236,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     }
   }
 
-  /** Review dialog confirm: save with the (possibly AI-adjusted) keep set. */
-  const confirmSaveReview = (): void => {
-    const prompt = workflowPrompt
-    if (!prompt) return
-    void persistPromptWorkflow(prompt)
-  }
-
-  /** Review dialog cancel: back to the card, the verdict stays cached. */
-  const cancelSaveReview = (): void => {
-    setWorkflowPrompt((prev) => (prev ? { ...prev, reviewOpen: false } : prev))
-  }
-
   const dismissPromptWorkflow = (): void => {
     const prompt = workflowPrompt
     setWorkflowPrompt(null)
@@ -3435,21 +3250,15 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   }
 
   /**
-   * Re-derives the preview workflow from the untouched base: first the AI
-   * node-review keep set (dropping whole steps), then the AI-prefill toggles,
-   * then the trigger selection.
-   * Layering all three from the base keeps every toggle idempotent.
+   * Re-derives the preview workflow from the untouched base: first the
+   * AI-prefill toggles, then the trigger selection. Layering both from the
+   * base keeps every toggle idempotent.
    */
   const derivePreview = (
     base: Workflow,
-    keep: Record<string, boolean> | null,
     aiSelections: Record<string, boolean>,
     trigger: TriggerSelection,
-  ): Workflow =>
-    applyTriggerSelection(
-      applyAiPrefillOptions(applyNodeKeepSelection(base, keep ?? {}), aiSelections),
-      trigger,
-    )
+  ): Workflow => applyTriggerSelection(applyAiPrefillOptions(base, aiSelections), trigger)
 
   /**
    * Toggle one AI-prefill checkbox and rebuild the preview workflow from the
@@ -3462,23 +3271,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       return {
         ...prev,
         aiSelections,
-        workflow: derivePreview(prev.base, prev.keep, aiSelections, prev.trigger),
-      }
-    })
-  }
-
-  /** Keep/drop one reviewed step (primary + its satellites) on the card. */
-  const toggleStepKeep = (stepId: string, kept: boolean): void => {
-    setWorkflowPrompt((prev) => {
-      if (!prev) return prev
-      // Defensive guard: a required step (its loss would introduce a run
-      // blocker) can never be dropped, even if a non-locked UI reached here.
-      if (!kept && requiredStepIds.includes(stepId)) return prev
-      const keep = { ...prev.keep, [stepId]: kept }
-      return {
-        ...prev,
-        keep,
-        workflow: derivePreview(prev.base, keep, prev.aiSelections, prev.trigger),
+        workflow: derivePreview(prev.base, aiSelections, prev.trigger),
       }
     })
   }
@@ -3494,7 +3287,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       return {
         ...prev,
         trigger,
-        workflow: derivePreview(prev.base, prev.keep, prev.aiSelections, trigger),
+        workflow: derivePreview(prev.base, prev.aiSelections, trigger),
       }
     })
   }
@@ -3509,8 +3302,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
    *
    * The background rewrites the DRAFT and re-materialises the workflow, so the
    * whole card is replaced from the response rather than patched locally —
-   * folding changes the node ids the review and AI-prefill state point at, and
-   * merging that by hand would be the easiest way to show a stale step list.
+   * folding changes the node ids the AI-prefill state points at, and merging
+   * that by hand would be the easiest way to show a stale step list.
    */
   const foldRun = async (index: number): Promise<void> => {
     const prompt = workflowPrompt
@@ -3544,7 +3337,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       workflow: applyTriggerSelection(workflow, trigger),
       trigger,
       steps: workflow.drawflow.nodes.filter((n) => !isTriggerNode(n)).length,
-      stepList: reviewStepsOf(workflow),
       suggestions: result.suggestions ?? [],
       folding: null,
       foldNote: result.folded ? t.chatFoldApplied : (result.reason ?? t.chatFoldRefused),
@@ -3990,22 +3782,12 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         </button>
         {runIssues !== null && runIssues.errors.length > 0 && (
           <button
-            disabled={workflowPrompt.saving || workflowPrompt.reviewing}
+            disabled={workflowPrompt.saving}
             onClick={() => void saveThenDebug(workflowPrompt.workflow)}
             title={t.chatWorkflowSaveThenDebugHint}
             type="button"
           >
             {t.chatWorkflowSaveThenDebug}
-          </button>
-        )}
-        {workflowPrompt.stepList.length > 0 && (
-          <button
-            disabled={workflowPrompt.saving || workflowPrompt.reviewing}
-            onClick={refinePromptWorkflow}
-            title={t.chatWorkflowReviewing}
-            type="button"
-          >
-            {t.chatSaveWorkflowAiReview}
           </button>
         )}
         <button disabled={workflowPrompt.saving} onClick={dismissPromptWorkflow} type="button">
@@ -4297,32 +4079,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         {/* The save card pops up as a modal the moment the task completes;
             closing it moves the card back inline above the composer. */}
         {!saveCardModalOpen && saveCard}
-
-        {/* The AI-refine dialog is a body portal (not inline in the log): it
-            opens ON TOP of the save-card popup, which itself is a z-[9999]
-            body portal; an inline render was covered by the save card. */}
-        {workflowPrompt?.reviewOpen
-          ? createPortal(
-              <WorkflowReviewDialog
-                keep={workflowPrompt.keep}
-                fixLog={fixLog}
-                log={workflowPrompt.reviewLog}
-                review={workflowPrompt.review}
-                reviewing={workflowPrompt.reviewing}
-                requiredStepIds={requiredStepIds}
-                saveError={workflowPrompt.saveError ?? undefined}
-                steps={workflowPrompt.stepList}
-                subtitle={workflowPrompt.workflow.name}
-                title={t.workflowReviewDialogTitle}
-                unavailableReason={workflowPrompt.reviewError ?? undefined}
-                onCancel={cancelSaveReview}
-                onConfirm={confirmSaveReview}
-                onRetry={retrySaveReview}
-                onToggle={toggleStepKeep}
-              />,
-              document.body,
-            )
-          : null}
       </div>
 
       <div

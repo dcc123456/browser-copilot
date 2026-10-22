@@ -654,8 +654,6 @@ export interface Messages {
   chatWorkflowRepairRootCauses: (params: { nodes: string }) => string
   /** Hint that verification did not block saving; AI debug can continue repair. */
   chatWorkflowRepairHint: string
-  /** Optional button on the save card that runs the (token-costly) AI review. */
-  chatSaveWorkflowAiReview: string
   /** Heading of the trigger picker on the save-as-workflow card. */
   chatSaveWorkflowTriggerTitle: string
   /** Shown when the chosen trigger never fires on its own. */
@@ -730,7 +728,6 @@ export interface Messages {
    * the editor's AI Optimize dialog renders, so the wait is visible from either side.
    */
   workflowFixLogTitle: string
-  workflowFixLogRound: (params: { round: number }) => string
 
   // Agent mode
   modeLabel: string
@@ -1951,7 +1948,6 @@ const en: Messages = {
   chatWorkflowVerifyFailed: ({ reason }) => `Verify run failed: ${reason}`,
   chatWorkflowVerifyPending: ({ count }) =>
     `Verify run passed with ${count} AI-repair change${count > 1 ? 's' : ''} awaiting your confirmation.`,
-  chatSaveWorkflowAiReview: 'AI refine…',
   chatSaveWorkflowTriggerTitle: 'Trigger',
   chatSaveWorkflowTriggerHintManual: 'This workflow runs only when you start it.',
   chatSaveWorkflowTriggerHintAuto:
@@ -2005,7 +2001,6 @@ const en: Messages = {
     `Sent ${steps} step${steps > 1 ? 's' : ''} to the AI reviewer…`,
   workflowReviewLogFailed: 'Review failed — keeping every step. Click “Retry review” to try again.',
   workflowFixLogTitle: 'AI optimization log',
-  workflowFixLogRound: ({ round }) => `R${round}`,
 
   modeLabel: 'Mode',
   modeChat: 'Chat',
@@ -3242,7 +3237,6 @@ const zhCN: Messages = {
   chatWorkflowVerifyFailed: ({ reason }) => `验证运行失败：${reason}`,
   chatWorkflowVerifyPending: ({ count }) =>
     `验证运行通过，但 AI 修复产生了 ${count} 处待你确认的修改。`,
-  chatSaveWorkflowAiReview: 'AI 提炼…',
   chatSaveWorkflowTriggerTitle: '触发器',
   chatSaveWorkflowTriggerHintManual: '该工作流只会在你手动启动时运行。',
   chatSaveWorkflowTriggerHintAuto: '该触发器会自动触发——保存后工作流立即进入待触发状态。',
@@ -3292,7 +3286,6 @@ const zhCN: Messages = {
   workflowReviewLogStart: ({ steps }) => `已发送 ${steps} 个步骤给 AI 审查…`,
   workflowReviewLogFailed: '审查失败，已保留全部步骤。可点击「重试审查」再试一次。',
   workflowFixLogTitle: 'AI 优化日志',
-  workflowFixLogRound: ({ round }) => `第 ${round} 轮`,
 
   modeLabel: '模式',
   modeChat: '聊天',

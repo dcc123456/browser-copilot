@@ -6,11 +6,8 @@
  *
  * 1. clicking "Save as workflow" on the card saves DIRECTLY — exactly one
  *    `workflows.save` and ZERO `workflows.review` commands (no model tokens);
- * 2. the AI node review is opt-in via "AI refine…": it opens the review
- *    dialog, starts immediately, shows no confirm while in flight, and the
- *    landed verdict prunes the saved workflow;
- * 3. a failed review still ends with a confirm button (keep everything);
- * 4. cancel closes the dialog and keeps the card.
+ * 2. the save card offers no AI-refine entry, so the AI review dialog cannot
+ *    be opened from it.
  */
 import { beforeAll, afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 
@@ -41,7 +38,6 @@ import { createRoot, type Root } from 'react-dom/client'
 import { AGENT_PORT, type Command } from '../src/lib/messages'
 import type { HistoryEntry } from '../src/lib/types'
 import type { Workflow } from '../src/lib/workflow/types'
-import { reviewStepsOf } from '../src/lib/workflow/review-patch'
 import ChatTab from '../src/sidepanel/ChatTab'
 
 type Args = Record<string, unknown>
@@ -66,13 +62,8 @@ const historyEntries = (): HistoryEntry[] => [
   entry('click', { target: { primary: { how: 'css', value: '.go' } } }),
 ]
 
-/**
- * The draft the operator-tool flow hands to the card in workflow mode: a
- * trigger + open-url + page-load wait + click. `reviewStepsOf` groups the
- * wait onto the open-url so the AI review sees exactly 2 steps
- * (open-url, click) — clicking `click` in a verdict drops only that node,
- * leaving the trigger + open-url + wait behind (3 nodes).
- */
+/** The draft the operator-tool flow hands to the card in workflow mode: a
+ *  trigger + open-url + page-load wait + click. */
 function baseWorkflow(): Workflow {
   return {
     id: 'wf-base',
@@ -114,11 +105,6 @@ function baseWorkflow(): Workflow {
   }
 }
 
-/** The command channel: a verdict drop of the second step, like a real review. */
-let reviewBehavior: 'ok' | 'fail' = 'ok'
-/** When true the review reply parks until the test releases it. */
-let holdReview = false
-let releaseReview: (() => void) | null = null
 const saveCommands: Extract<Command, { type: 'workflows.save' }>[] = []
 const debugCommands: Extract<Command, { type: 'workflows.debug' }>[] = []
 /** Settings payload served by the `settings.get` mock; tests may override. */
@@ -152,9 +138,6 @@ const fakePort = {
 }
 
 beforeEach(() => {
-  reviewBehavior = 'ok'
-  holdReview = false
-  releaseReview = null
   saveCommands.length = 0
   debugCommands.length = 0
   holdDraft = false
@@ -187,28 +170,6 @@ beforeEach(() => {
         return { type: 'workflows.probe', probes: probeReply }
       case 'workflows.draft.clear':
         return { type: 'workflows.draft.clear' }
-      case 'workflows.review': {
-        if (reviewBehavior === 'fail') throw new Error('AI review timed out after 60s.')
-        const workflow = (command as { workflow: Workflow }).workflow
-        const steps = reviewStepsOf(workflow)
-        const reply = {
-          type: 'workflows.review',
-          review: {
-            summary: '打开了页面并点击。',
-            steps: steps.map((step, index) => ({
-              id: step.id,
-              keep: index !== 1,
-              ...(index === 1 ? { reason: '探索性点击' } : {}),
-            })),
-          },
-        }
-        if (holdReview) {
-          return new Promise((resolve) => {
-            releaseReview = () => resolve(reply)
-          })
-        }
-        return reply
-      }
       case 'workflows.save':
         saveCommands.push(command)
         if (saveBehavior === 'fail') throw new Error('save failed: disk full')
@@ -306,18 +267,6 @@ describe('chat save-as-workflow flow', () => {
     expect(button).toBeDefined()
     await act(async () => {
       button!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-    await flush()
-  }
-
-  /** Click a button by a UNIQUE SUBSTRING (composite labels like the log toggle). */
-  const clickButtonContaining = async (_container: HTMLElement, label: string): Promise<void> => {
-    const matches = [...document.body.querySelectorAll('button')].filter((candidate) =>
-      candidate.textContent?.includes(label),
-    )
-    expect(matches).toHaveLength(1)
-    await act(async () => {
-      matches[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
     await flush()
   }
@@ -459,81 +408,22 @@ describe('chat save-as-workflow flow', () => {
     }
   })
 
-  it('runs the opt-in AI review from "AI refine…" and saves the pruned workflow', async () => {
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
-    try {
-      holdReview = true
-      await openCard(container, root)
-
-      // "AI refine…" opens the review dialog and the review STARTS at once.
-      await clickButton(container, 'AI refine…')
-      expect(surfaceText(container)).toContain('Sent 2 steps to the AI reviewer…')
-      expect(surfaceText(container)).toContain('AI is reviewing which nodes are worth keeping…')
-      // No confirm button while the review is in flight.
-      expect(surfaceButtonTexts(container)).not.toContain('Save workflow')
-      // Exactly one review command, for the base workflow.
-      expect(reviewCommandCount()).toBe(1)
-
-      // The verdict lands: the save button appears; clicking saves once.
-      await act(async () => {
-        releaseReview?.()
-      })
-      await flush()
-      expect(surfaceText(container)).toContain('AI dropped 1 ineffective step')
-      expect(surfaceButtonTexts(container)).toContain('Save workflow')
-      await clickButton(container, 'Save workflow')
-      expect(saveCommands).toHaveLength(1)
-      const saved = saveCommands[0]!.workflow
-      // Trigger + new-tab + its page-load wait; the AI-dropped click is gone.
-      expect(saved.drawflow.nodes).toHaveLength(3)
-      const blockIds = saved.drawflow.nodes.map((node) => node.data?.blockId)
-      expect(blockIds).not.toContain('event-click')
-    } finally {
-      await act(async () => {
-        root.unmount()
-      })
-      container.remove()
-    }
-  })
-
-  it('keeps every step and still offers the save after a failed review', async () => {
-    reviewBehavior = 'fail'
+  it('offers no AI-refine entry, so the review dialog cannot be opened', async () => {
     const container = document.createElement('div')
     document.body.appendChild(container)
     const root = createRoot(container)
     try {
       await openCard(container, root)
-      await clickButton(container, 'AI refine…')
-      await flush()
-      expect(surfaceText(container)).toContain('Review failed')
-      // A settled (failed) review still ends with a confirm button.
-      expect(surfaceButtonTexts(container)).toContain('Save workflow')
-      await clickButton(container, 'Save workflow')
-      expect(saveCommands).toHaveLength(1)
-      // Unavailable review keeps EVERYTHING (4 nodes incl. the click + wait).
-      expect(saveCommands[0]!.workflow.drawflow.nodes).toHaveLength(4)
-    } finally {
-      await act(async () => {
-        root.unmount()
-      })
-      container.remove()
-    }
-  })
 
-  it('cancel closes the review dialog and keeps the save card', async () => {
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
-    try {
-      await openCard(container, root)
-      await clickButton(container, 'AI refine…')
-      expect(surfaceText(container)).toContain('Review steps before saving')
-      await clickButton(container, 'Cancel')
+      const labels = surfaceButtonTexts(container)
+      expect(labels.some((label) => label.includes('AI refine'))).toBe(false)
+      expect(labels.some((label) => label.includes('AI 提炼'))).toBe(false)
       expect(surfaceText(container)).not.toContain('Review steps before saving')
-      expect(container.textContent).toContain('Save as workflow')
-      expect(saveCommands).toHaveLength(0)
+      expect(reviewCommandCount()).toBe(0)
+      // The zero-token save path stays: the card is still actionable.
+      await clickButton(container, 'Save as workflow')
+      expect(saveCommands).toHaveLength(1)
+      expect(reviewCommandCount()).toBe(0)
     } finally {
       await act(async () => {
         root.unmount()
@@ -549,92 +439,6 @@ describe('chat save-as-workflow flow', () => {
     try {
       await openCard(container, root)
       expect(vi.mocked(chrome.runtime.connect)).toHaveBeenCalledWith({ name: AGENT_PORT })
-    } finally {
-      await act(async () => {
-        root.unmount()
-      })
-      container.remove()
-    }
-  })
-
-  it('shows live pushed review-log lines and can collapse the log', async () => {
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
-    try {
-      // Hold the review so the dialog stays in-flight while lines are pushed.
-      holdReview = true
-      await openCard(container, root)
-      await clickButton(container, 'AI refine…')
-      // The collapsible log section is visible with the local start line.
-      expect(surfaceText(container)).toContain('Review log')
-      expect(surfaceText(container)).toContain('Sent 2 steps to the AI reviewer…')
-
-      // The worker pushes live lines over the agent port mid-review.
-      await act(async () => {
-        for (const listener of [...portMessageListeners]) {
-          listener({ type: 'workflows.reviewLog', text: 'Model: test-model · reviewing 2 steps…' })
-        }
-      })
-      await flush()
-      expect(surfaceText(container)).toContain('Model: test-model · reviewing 2 steps…')
-
-      // Collapse hides the lines but keeps the header; expand restores them.
-      await clickButtonContaining(container, 'Collapse')
-      expect(surfaceText(container)).not.toContain('Model: test-model · reviewing 2 steps…')
-      expect(surfaceText(container)).toContain('Review log')
-      expect(surfaceText(container)).toContain('Expand')
-      await clickButtonContaining(container, 'Expand')
-      expect(surfaceText(container)).toContain('Model: test-model · reviewing 2 steps…')
-
-      // The verdict lands and its outcome line joins the log.
-      await act(async () => {
-        releaseReview?.()
-      })
-      await flush()
-      expect(surfaceText(container)).toContain('AI dropped 1 ineffective step')
-    } finally {
-      await act(async () => {
-        root.unmount()
-      })
-      container.remove()
-    }
-  })
-
-  it('retries a failed review from the dialog and saves the new verdict', async () => {
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    const root = createRoot(container)
-    try {
-      // First attempt fails (e.g. the MV3 mid-stream abort the user reported).
-      reviewBehavior = 'fail'
-      await openCard(container, root)
-      await clickButton(container, 'AI refine…')
-      await flush()
-      expect(surfaceText(container)).toContain('Retry review')
-
-      // Retry: hold the second attempt, assert the in-flight state again.
-      reviewBehavior = 'ok'
-      holdReview = true
-      await clickButton(container, 'Retry review')
-      // The retry button is gone while the second attempt is in flight (the
-      // failed log LINE still mentions retrying, so assert on the button).
-      expect(surfaceButtonTexts(container)).not.toContain('Retry review')
-      expect(surfaceText(container)).toContain('AI is reviewing which nodes are worth keeping…')
-      expect(surfaceButtonTexts(container)).not.toContain('Save workflow')
-      // Two review commands now, and a second "sent" log line.
-      expect(reviewCommandCount()).toBe(2)
-      expect(surfaceText(container).match(/Sent 2 steps to the AI reviewer…/g)).toHaveLength(2)
-
-      // The retried verdict lands and saves with its keep set.
-      await act(async () => {
-        releaseReview?.()
-      })
-      await flush()
-      expect(surfaceButtonTexts(container)).toContain('Save workflow')
-      await clickButton(container, 'Save workflow')
-      expect(saveCommands).toHaveLength(1)
-      expect(saveCommands[0]!.workflow.drawflow.nodes).toHaveLength(3)
     } finally {
       await act(async () => {
         root.unmount()
