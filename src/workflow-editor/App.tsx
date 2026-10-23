@@ -1415,7 +1415,14 @@ export default function EditorApp() {
           : t('operatorAiEdited'),
         'ok',
       )
-      return { ...landing, applied: true, pruned: patch.pruned, missing: patch.missing }
+      return {
+        ...landing,
+        applied: true,
+        pruned: patch.pruned,
+        missing: patch.missing,
+        changed: patch.changed,
+        ...(patch.swapped ? { swapped: patch.swapped } : {}),
+      }
     },
     [applyEdgeList, installPatchedNode, locateNode, pushHistory, toast, t],
   )

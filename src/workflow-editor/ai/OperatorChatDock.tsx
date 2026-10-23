@@ -50,9 +50,11 @@ import type {
   OperatorChainProblem,
   OperatorMissingParams,
   OperatorPageRef,
+  OperatorParamChange,
   OperatorPrunedPort,
   OperatorProposal,
   OperatorScreenshotReport,
+  OperatorSwap,
   OperatorTargetProblem,
   PickedElement,
 } from '../../lib/workflow/operator-advise'
@@ -79,6 +81,12 @@ export interface OperatorLanding {
   pruned: OperatorPrunedPort[]
   /** Operators landed with a required parameter left empty. */
   missing: OperatorMissingParams[]
+  /** Parameters an in-place edit really changed, old value against new — the
+   *  evidence that the canvas did something, since most parameters never show
+   *  on the node card at all. */
+  changed?: OperatorParamChange[]
+  /** The operator a swap moved the step from and to, by display name. */
+  swapped?: OperatorSwap
   problem?: OperatorLandingProblem
 }
 
@@ -178,6 +186,25 @@ const PROBLEM_KEY: Record<OperatorLandingProblem, EditorStringKey> = {
   'replace-same-block': 'operatorAiReplaceSameBlock',
   'replace-unofferable': 'operatorAiReplaceUnofferable',
   'replace-entry-point': 'operatorAiReplaceEntry',
+  'no-change': 'operatorAiNoChange',
+}
+
+/** One parameter value as the row shows it: JSON-quoted so an empty string stays
+ *  visible, capped so one long value cannot flood the transcript. */
+function displayParamValue(value: unknown): string {
+  if (value === undefined || value === null) return '—'
+  const text = JSON.stringify(value) ?? String(value)
+  return text.length > 60 ? `${text.slice(0, 59)}…` : text
+}
+
+/** The in-place edit's evidence: exactly the keys that changed, old → new. */
+function changesLine(changes: readonly OperatorParamChange[]): string {
+  return changes
+    .map(
+      (change) =>
+        `${change.key}: ${displayParamValue(change.before)} → ${displayParamValue(change.after)}`,
+    )
+    .join(' · ')
 }
 
 function Landing({
@@ -193,9 +220,23 @@ function Landing({
 }) {
   if (landing.problem)
     return (
-      <p className="mt-1 text-[11px] leading-snug text-warn">{t(PROBLEM_KEY[landing.problem])}</p>
+      <p className="mt-1 text-[11px] leading-snug text-warn">
+        {t('operatorAiNotApplied')} <span>{t(PROBLEM_KEY[landing.problem])}</span>
+      </p>
     )
-  if (!landing.applied) return null
+  // Not applied for a reason the patch could not name (every operator refused):
+  // still say so — a reply claiming a change must never stand unopposed.
+  if (!landing.applied)
+    return (
+      <div className="mt-1 flex flex-col gap-1">
+        <p className="text-[11px] leading-snug text-faint">{t('operatorAiNoSteps')}</p>
+        {landing.skipped.length > 0 && (
+          <p className="text-[11px] leading-snug text-warn">
+            {t('operatorAiRejected').replace('{names}', landing.skipped.join(', '))}
+          </p>
+        )}
+      </div>
+    )
   const missing = landing.missing
     .map((entry) => `${entry.name}: ${entry.keys.join(', ')}`)
     .join(' | ')
@@ -204,9 +245,15 @@ function Landing({
     <div className="mt-1.5 flex flex-col gap-1 border-t border-border pt-1.5">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="text-[11px] leading-snug text-muted">
-          {landing.kind === 'chain'
-            ? t('operatorAiAdded').replace('{count}', String(landing.added))
-            : t('operatorAiChangedInPlace')}
+          {landing.kind === 'chain' ? (
+            t('operatorAiAdded').replace('{count}', String(landing.added))
+          ) : landing.swapped ? (
+            <>
+              {t('operatorAiSwappedStep')} {landing.swapped.from} → {landing.swapped.to}
+            </>
+          ) : (
+            t('operatorAiChangedInPlace')
+          )}
         </span>
         {showUndo && (
           <button
@@ -220,6 +267,11 @@ function Landing({
           </button>
         )}
       </div>
+      {landing.changed && landing.changed.length > 0 && (
+        <p className="text-[11px] leading-snug text-muted">
+          {t('operatorAiChangedParams')} <span>{changesLine(landing.changed)}</span>
+        </p>
+      )}
       {landing.skipped.length > 0 && (
         <p className="text-[11px] leading-snug text-warn">
           {t('operatorAiRejected').replace('{names}', landing.skipped.join(', '))}
@@ -570,14 +622,16 @@ export default function OperatorChatDock({
       }
       // Anything but an empty chain goes to the editor — an in-place answer even
       // with no proposals, so the refusal reads as "your step was not changed
-      // because …".
-      if (!chain || data.proposals.length > 0) {
-        landing = onApply({
-          action,
-          proposals: data.proposals,
-          ...(context.selectedNodeId ? { targetNodeId: context.selectedNodeId } : {}),
-        })
-      }
+      // because …". An empty chain has nothing to land, but it still gets a
+      // landing row: a reply claiming a change must never be the only sign.
+      landing =
+        chain && data.proposals.length === 0
+          ? { kind: 'chain', added: 0, applied: false, skipped: [], pruned: [], missing: [] }
+          : onApply({
+              action,
+              proposals: data.proposals,
+              ...(context.selectedNodeId ? { targetNodeId: context.selectedNodeId } : {}),
+            })
       pushTurn({
         role: 'assistant',
         content: data.reply,

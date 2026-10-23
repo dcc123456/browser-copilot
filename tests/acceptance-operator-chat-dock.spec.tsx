@@ -574,6 +574,75 @@ describe('V-operator-dock: the floating assistant', () => {
     expect(buttonByText('operatorAiUndo')).toBeUndefined()
   })
 
+  it('reports an in-place answer that changed nothing as not applied', async () => {
+    reply = okReply([], '已修改', 'edit')
+    landing = {
+      kind: 'node',
+      added: 0,
+      applied: false,
+      skipped: [],
+      pruned: [],
+      missing: [],
+      problem: 'no-change',
+    }
+    await render()
+    await ask('把链接改成 https://a')
+
+    expect(container.textContent).toContain('operatorAiNotApplied')
+    expect(container.textContent).toContain('operatorAiNoChange')
+    expect(container.textContent).not.toContain('operatorAiChangedInPlace')
+    expect(buttonByText('operatorAiUndo')).toBeUndefined()
+  })
+
+  it('says which parameters an in-place answer really changed', async () => {
+    reply = okReply(
+      [{ blockId: 'new-tab', data: { url: 'https://b' }, rationale: '' }],
+      '已把链接改成 b',
+      'edit',
+    )
+    landing = {
+      kind: 'node',
+      added: 0,
+      applied: true,
+      skipped: [],
+      pruned: [],
+      missing: [],
+      changed: [{ key: 'url', before: 'https://a', after: 'https://b' }],
+    }
+    await render()
+    await ask('把链接改成 https://b')
+
+    expect(container.textContent).toContain('operatorAiChangedParams')
+    expect(container.textContent).toContain('url: "https://a" → "https://b"')
+  })
+
+  it('names both operators when the answer swaps the selected step', async () => {
+    reply = okReply([{ blockId: 'event-click', data: {}, rationale: '' }], '换个算子', 'replace')
+    landing = {
+      kind: 'node',
+      added: 0,
+      applied: true,
+      skipped: [],
+      pruned: [],
+      missing: [],
+      swapped: { from: 'New tab', to: 'Event click' },
+    }
+    await render()
+    await ask('换成点击元素')
+
+    expect(container.textContent).toContain('operatorAiSwappedStep')
+    expect(container.textContent).toContain('New tab → Event click')
+  })
+
+  it('says so when an append answer carries no steps at all', async () => {
+    reply = okReply([], '已添加')
+    await render()
+    await ask('修改第二步')
+
+    expect(requests).toEqual([])
+    expect(container.textContent).toContain('operatorAiNoSteps')
+  })
+
   it('offers undo for the batch it just landed, and only for that batch', async () => {
     await render()
     await act(async () => {

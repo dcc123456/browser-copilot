@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BLOCK_BY_ID } from '../src/lib/workflow/blocks/palette'
+import { MASK } from '../src/lib/workflow/execution-evidence'
 import {
   appendOperatorChain,
   applyOperatorAction,
@@ -928,6 +929,41 @@ describe('applyOperatorAction edit', () => {
     expect(before.node.data['url']).toBe('https://a')
   })
 
+  it('refuses an edit that would change nothing, with no undo record', () => {
+    const canvas = base()
+    for (const data of [{}, { url: 'https://a' }, { url: 'https://a', active: false }]) {
+      const patch = applyOperatorAction(canvas, 'b', 'edit', [
+        { blockId: 'new-tab', data, rationale: '' },
+      ])
+      expect(patch.problem).toBe('no-change')
+      expect(patch.before).toBeUndefined()
+    }
+    // An absent parameter and an empty one are the same non-change.
+    const missingActive = graph([node('b', 'new-tab', { url: 'https://a' })], [])
+    expect(
+      applyOperatorAction(missingActive, 'b', 'edit', [
+        { blockId: 'new-tab', data: { active: '' }, rationale: '' },
+      ]).problem,
+    ).toBe('no-change')
+  })
+
+  it('reports only the parameters whose value really changed', () => {
+    const patch = applyOperatorAction(base(), 'b', 'edit', [
+      { blockId: 'new-tab', data: { url: 'https://b', active: false }, rationale: '' },
+    ])
+    expect(patch.problem).toBeUndefined()
+    expect(patch.changed).toEqual([{ key: 'url', before: 'https://a', after: 'https://b' }])
+  })
+
+  it('masks a secret value in the change it reports', () => {
+    const canvas = graph([node('b', 'new-tab', { url: 'https://a', password: 'old-secret' })], [])
+    const patch = applyOperatorAction(canvas, 'b', 'edit', [
+      { blockId: 'new-tab', data: { password: 'new-secret' }, rationale: '' },
+    ])
+    expect(patch.changed).toEqual([{ key: 'password', before: MASK, after: MASK }])
+    expect(JSON.stringify(patch.changed)).not.toContain('secret')
+  })
+
   it('reports a required parameter the edit left empty', () => {
     const patch = applyOperatorAction(
       graph([node('b', 'new-tab', { url: 'https://a' })], []),
@@ -982,6 +1018,12 @@ describe('applyOperatorAction replace', () => {
     expect(replaced.data['__workflowAi']).toBeUndefined()
     expect(patch.edges.find((e) => e.target === 'b')?.targetHandle).toBe('event-click-input-1')
     expect(patch.edges).toHaveLength(1)
+    // The row can name the swap instead of only saying "updated".
+    expect(patch.changed).toEqual([])
+    expect(patch.swapped).toEqual({
+      from: BLOCK_BY_ID.get('new-tab')?.name,
+      to: BLOCK_BY_ID.get('event-click')?.name,
+    })
   })
 
   it('carries the goal contract across the swap, but not the provenance stamp', () => {

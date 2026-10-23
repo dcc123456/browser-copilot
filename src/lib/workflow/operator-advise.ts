@@ -35,6 +35,7 @@ import {
   type BlockPortSource,
 } from './block-ports'
 import { blockTakesElement, schemaRequiredArgs, missingRequirements } from './block-requirements'
+import { deepEqual } from './equality'
 import { isSecretKey, MASK, redactText } from './execution-evidence'
 import { isFallbackHandle, loopBackEdgeIds } from './graph-edges'
 import { NODE_INSERT_GAP, placeClearOfNodes, type SuggestionGraph } from './var-suggestions'
@@ -308,6 +309,24 @@ export type OperatorTargetProblem =
   | 'replace-same-block'
   | 'replace-unofferable'
   | 'replace-entry-point'
+  /** The answer landed on the step but would not change a single parameter. */
+  | 'no-change'
+
+/** One parameter an in-place edit really changed: the row's evidence that the
+ *  canvas did something, even when the node card does not draw that parameter. */
+export interface OperatorParamChange {
+  key: string
+  /** The value before the edit. Secret-named keys hold `MASK` on both ends, so a
+   *  password never reaches the row (nor anything that later renders it). */
+  before: unknown
+  after: unknown
+}
+
+/** The operator a swap moved the step from and to, by display name. */
+export interface OperatorSwap {
+  from: string
+  to: string
+}
 
 /** One node and every edge that touched it — the undo record for an in-place
  *  change, so undoing it hands back exactly what was there. */
@@ -330,6 +349,10 @@ export interface OperatorNodePatch {
   /** The COMPLETE next edge list (re-anchored, pruned). */
   edges: WorkflowEdge[]
   problem?: OperatorTargetProblem
+  /** Parameters whose value really changed; empty for a swap. */
+  changed: OperatorParamChange[]
+  /** Operator the step became, when an action replaced it. */
+  swapped?: OperatorSwap
   /** Ports the change dropped, named — React Flow would only have hidden them. */
   pruned: OperatorPrunedPort[]
   missing: OperatorMissingParams[]
@@ -357,6 +380,7 @@ function unchangedNodePatch(
     nodes: graph.nodes.map((node) => ({ ...node })),
     edges: graph.edges.map((edge) => ({ ...edge })),
     problem,
+    changed: [],
     pruned: [],
     missing: [],
   }
@@ -393,11 +417,49 @@ export function applyOperatorAction(
     : replaceNodeOperator(graph, target, proposal!)
 }
 
+/** Values that all mean "this parameter has no value" — an edit moving between
+ *  them changed nothing a user could see. */
+function isEmptyParamValue(value: unknown): boolean {
+  return value === undefined || value === null || value === ''
+}
+
+/** Which of the proposal's keys really change the step, old value against new.
+ *  Secret-named values are masked at the source so they never reach the row. */
+function changedParamsOf(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+  keys: readonly string[],
+): OperatorParamChange[] {
+  const changed: OperatorParamChange[] = []
+  for (const key of keys) {
+    if (key === 'blockId') continue
+    const prevValue = before[key]
+    const nextValue = after[key]
+    const unchanged =
+      (isEmptyParamValue(prevValue) && isEmptyParamValue(nextValue)) ||
+      (!isEmptyParamValue(prevValue) &&
+        !isEmptyParamValue(nextValue) &&
+        deepEqual(prevValue, nextValue))
+    if (unchanged) continue
+    const secret = isSecretKey(key)
+    changed.push({
+      key,
+      before: secret ? MASK : prevValue,
+      after: secret ? MASK : nextValue,
+    })
+  }
+  return changed
+}
+
 /**
  * Change one node's parameters in place. Values are MERGED over what the node
  * holds, deliberately unlike AI Fix's complete re-authoring: a chat edit is one
  * thing ("把 url 改成 x"), and re-writing every key from that one line would drop
  * parameters the model was never asked about.
+ *
+ * An answer that changes nothing is refused (`no-change`) rather than landed:
+ * otherwise "已更新所选步骤" would be shown, and undo history written, for a
+ * canvas that only ever looked identical.
  */
 function editNodeParams(
   graph: SuggestionGraph,
@@ -407,10 +469,13 @@ function editNodeParams(
   const blockId = blockIdOf(target)
   if (proposal.blockId !== blockId) return unchangedNodePatch(graph, 'edit-other-block')
   const data = { ...target.data, ...proposal.data, blockId }
+  const changed = changedParamsOf(target.data, data, Object.keys(proposal.data))
+  if (changed.length === 0) return unchangedNodePatch(graph, 'no-change')
   const node: WorkflowNode = { ...structuredClone(target), data }
   return {
     nodes: graph.nodes.map((candidate) => (candidate.id === target.id ? node : { ...candidate })),
     edges: graph.edges.map((edge) => ({ ...edge })),
+    changed,
     pruned: [],
     missing: missingParameterProblems(blockId, data),
     before: { node: structuredClone(target), edges: incidentEdgeSnapshot(graph.edges, target.id) },
@@ -501,6 +566,8 @@ function replaceNodeOperator(
   return {
     nodes: graph.nodes.map((candidate) => (candidate.id === target.id ? node : { ...candidate })),
     edges,
+    changed: [],
+    swapped: { from: operatorBlockName(oldBlockId), to: operatorBlockName(newBlock.id) },
     pruned,
     missing: missingParameterProblems(newBlock.id, nextData),
     before: { node: structuredClone(target), edges: incidentEdgeSnapshot(graph.edges, target.id) },
@@ -884,6 +951,7 @@ export function buildOperatorAdvisePrompt(input: OperatorAdvisePromptInput): str
     '- Where a value should come from an earlier step, reference it as {{variableName}} using a name the digest shows that step produces.',
     '- Prefer stable locators (#id, [data-testid], [name]) over generated classes or nth-child chains.',
     `- At most ${maxOperators} operators (one for "edit"/"replace"). Return an empty "proposals" array when nothing on the list fits or the user is only asking a question — then "reply" must say why.`,
+    '- For "edit", if the step already holds every value the user asked for, return no proposals and say it is unchanged — never report a change your answer does not contain.',
     '- "reply" is shown to the user, in the language they wrote in, and must match what you actually did.',
     '',
     '## Response format',

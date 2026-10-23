@@ -30,6 +30,7 @@
  * @module lib/workflow/repair/patch-engine
  */
 
+import { deepEqual } from '../equality'
 import { checkWorkflowIntegrity, integrityIsClean } from '../integrity'
 import { validateWorkflowForRun } from '../validation'
 import { pageContextOf } from '../page-context'
@@ -403,25 +404,6 @@ export class PatchRejectedError extends Error {
     this.name = 'PatchRejectedError'
     this.issues = issues
   }
-}
-
-function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true
-  if (typeof a !== typeof b) return false
-  if (a === null || b === null) return false
-  if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
-    return a.every((item, index) => deepEqual(item, b[index]))
-  }
-  if (typeof a === 'object' && typeof b === 'object') {
-    const aKeys = Object.keys(a)
-    const bKeys = Object.keys(b)
-    if (aKeys.length !== bKeys.length) return false
-    return aKeys.every((key) =>
-      deepEqual((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]),
-    )
-  }
-  return false
 }
 
 function deepEdgeEqual(a: Workflow, b: Workflow): boolean {
