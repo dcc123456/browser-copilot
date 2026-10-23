@@ -181,8 +181,8 @@ function makeSessionId(): string {
 
 /** How tall the user may drag the composer: tall enough for a long ask, short
  *  enough that the transcript keeps most of the panel. */
-export const COMPOSER_MIN_HEIGHT = 52
-export const COMPOSER_MAX_HEIGHT = 240
+const COMPOSER_MIN_HEIGHT = 52
+const COMPOSER_MAX_HEIGHT = 240
 
 function clampComposerHeight(value: number): number {
   return Math.min(COMPOSER_MAX_HEIGHT, Math.max(COMPOSER_MIN_HEIGHT, value))
