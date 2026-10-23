@@ -221,6 +221,17 @@ describe('layer B — data flow', () => {
     )
   })
 
+  it('bracket references resolve to their root in data flow', () => {
+    const wf = linearWorkflow(
+      triggerNode(),
+      makeNode('get-text', { selector: '#x', variableName: 'rows' }),
+      makeNode('save-local', { filename: 'a.txt', value: '{{rows[0].title}}' }),
+    )
+    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('DATA_'))).toHaveLength(
+      0,
+    )
+  })
+
   it('table references do not need a variable writer', () => {
     const wf = linearWorkflow(
       triggerNode(),

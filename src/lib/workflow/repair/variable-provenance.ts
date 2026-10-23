@@ -18,6 +18,7 @@
 
 import type { ExecutionTrace, VariableProvenance } from './types'
 import { producedVariableNames } from '../producer-completeness'
+import { referenceRoot, referencesIn } from '../dynamic-data'
 import type { Workflow, WorkflowNode } from '../types'
 
 /** Fixed variable names the engine itself provides (mirrors integrity.ts). */
@@ -78,15 +79,15 @@ export function transformSourceOf(node: WorkflowNode): string | undefined {
     for (const row of data['variables']) {
       const value = (row as Record<string, unknown> | null)?.['value']
       if (typeof value !== 'string') continue
-      const match = /\{\{\s*([A-Za-z0-9_.]+)\s*\}\}/.exec(value)
-      if (match) return match[1]!.split('.')[0]
+      const [reference] = referencesIn(value)
+      if (reference) return referenceRoot(reference)
     }
   }
   for (const key of TRANSFORM_SOURCE_KEYS) {
     const raw = data[key]
     if (typeof raw === 'string') {
-      const match = /\{\{\s*([A-Za-z0-9_.]+)\s*\}\}/.exec(raw)
-      if (match) return match[1]!.split('.')[0]
+      const [reference] = referencesIn(raw)
+      if (reference) return referenceRoot(reference)
       if (raw.trim() !== '' && key !== 'value') return raw.trim()
     }
   }

@@ -103,6 +103,17 @@ describe('resolveTaskInputs', () => {
     expect(resolved.unresolved.tokens).toEqual([])
   })
 
+  it('resolves bracket access into a handed-off array or object', () => {
+    const resolved = resolveTaskInputs(
+      {
+        prompt: '{{upstream.items[0].id}} / {{upstream["meta"].title}}',
+      },
+      { items: [{ id: 'a1' }], meta: { title: 'T' } },
+    )
+    expect(resolved.prompt).toBe('a1 / T')
+    expect(resolved.unresolved.tokens).toEqual([])
+  })
+
   it('counts ONLY unresolved upstream tokens as missing', () => {
     const resolved = resolveTaskInputs(
       {

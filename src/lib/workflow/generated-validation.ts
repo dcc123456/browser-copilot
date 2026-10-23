@@ -28,6 +28,7 @@ import {
 } from './reliability'
 import { deriveGoalSpecFromNodes } from './goal'
 import { VARIABLE_PRODUCER_FIELD } from './producer-completeness'
+import { referenceRoot } from './dynamic-data'
 import { SECRET_PRODUCER_BLOCK, secretVariableNamesOf } from './secret-params'
 import { nodeGoalContractOf } from './node-goal-contract'
 import { resolveNodeGoalContract } from './node-goal-instantiation'
@@ -128,7 +129,7 @@ function refsOf(node: WorkflowNode): { vars: string[]; table: boolean } {
       for (const m of value.matchAll(/\{\{\s*([^}\s][^}]*?)\s*\}\}/g)) {
         const raw = m[1]!
         if (raw.startsWith('table')) table = true
-        else vars.add(raw.split('.')[0]!.trim())
+        else vars.add(referenceRoot(raw))
       }
       return
     }

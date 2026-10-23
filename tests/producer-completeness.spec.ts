@@ -48,6 +48,15 @@ describe('checkProducerCompleteness', () => {
     expect(checkProducerCompleteness(wf)).toEqual([])
   })
 
+  it('keys bracket and dot paths on the root variable', () => {
+    const wf = workflow([
+      node('t', 'trigger'),
+      node('read', 'get-text', { variableName: 'rows' }),
+      node('save', 'save-local', { value: '{{rows[0].title}}', filename: 'a.txt' }),
+    ])
+    expect(checkProducerCompleteness(wf)).toEqual([])
+  })
+
   it('flags a referenced variable with no producer node', () => {
     const wf = workflow([
       node('t', 'trigger'),

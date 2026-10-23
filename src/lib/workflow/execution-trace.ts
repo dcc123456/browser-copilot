@@ -14,7 +14,7 @@
  * @module lib/workflow/execution-trace
  */
 
-import { referencesIn } from './dynamic-data'
+import { referenceRoot, referencesIn } from './dynamic-data'
 import { summarizeValue, summarizeVariables } from './repair/redaction'
 import { contractOfNode } from './variable-contract'
 import { evaluateContract } from './variable-contract'
@@ -58,7 +58,7 @@ export function inputRefsOf(
     if (typeof value === 'string') {
       if (!value.includes('{{')) return
       for (const reference of referencesIn(value)) {
-        const root = reference.split('.')[0] ?? reference
+        const root = referenceRoot(reference)
         const resolved = Object.prototype.hasOwnProperty.call(variables, root)
         out.push({
           variable: root,

@@ -24,6 +24,7 @@
 
 import type { Workflow, WorkflowNode } from './types'
 import { variableAssignmentsOf } from './block-output'
+import { referenceRoot } from './dynamic-data'
 import { SECRET_PRODUCER_BLOCK, secretVariableNamesOf } from './secret-params'
 
 export type ProducerCompletenessCode = 'MISSING_PRODUCER' | 'MISSING_TABLE_PRODUCER'
@@ -193,9 +194,8 @@ function referencesInValue(value: unknown): string[] {
       for (const match of item.matchAll(TOKEN)) {
         const expression = (match[1] ?? '').trim()
         if (!expression) continue
-        // Only top-level names are session variables; `x.y` still keys on x.
-        const dot = expression.indexOf('.')
-        out.add(dot === -1 ? expression : expression.slice(0, dot))
+        // Only the root is a session variable; `x.y` and `x[0]` both key on x.
+        out.add(referenceRoot(expression))
       }
     } else if (Array.isArray(item)) {
       for (const child of item) walk(child)

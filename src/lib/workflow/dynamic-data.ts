@@ -41,6 +41,7 @@
  */
 
 import { dataValueSites, type DataValueSite } from './data-params'
+import { parseReference } from './interpolate'
 
 /** Matches a `{{token}}` reference anywhere in a string. */
 const REFERENCE = /\{\{[^{}]*\}\}/
@@ -85,14 +86,14 @@ export function literalResidue(value: string): string {
 }
 
 /**
- * The variable a reference names: everything before the first dot.
+ * The variable a reference names: its root, before any property/index accessor.
  *
- * `{{formsValue.foo}}` reads a property of `formsValue`, so the thing that must
- * exist is `formsValue` — comparing whole paths would report a producer as
- * missing for every property access.
+ * `{{formsValue.foo}}` and `{{formsValue[0]}}` read a property of `formsValue`,
+ * so the thing that must exist is `formsValue` — comparing whole paths would
+ * report a producer as missing for every property access.
  */
 export function referenceRoot(reference: string): string {
-  return reference.split('.')[0] ?? reference
+  return parseReference(reference)?.name ?? reference.split('.')[0] ?? reference
 }
 
 /**
@@ -220,9 +221,9 @@ export function sanitizeName(raw: string): string {
 /**
  * Turn a block id + param key into a readable, reference-safe variable name.
  *
- * The result must survive being embedded in `{{...}}`: `getByPath` splits on
- * `.`, so a dot would silently turn a name into a path, and braces would break
- * the token regex outright. Everything outside `[A-Za-z0-9_]` is dropped.
+ * The result must survive being embedded in `{{...}}`: a dot or bracket would
+ * silently turn a name into a path, and braces would break the token regex
+ * outright. Everything outside `[A-Za-z0-9_]` is dropped.
  */
 export function inputNameFor(blockId: string, key: string): string {
   const camel = blockId.replace(/[^A-Za-z0-9]+(.)?/g, (_match, char: string) =>

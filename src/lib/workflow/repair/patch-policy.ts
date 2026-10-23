@@ -19,6 +19,7 @@
  */
 
 import { isDataParam } from '../data-params'
+import { referenceRoot, referencesIn } from '../dynamic-data'
 import { missingRequirements } from '../block-requirements'
 import type { FailureAnalysis, ReplaySafety } from './types'
 import type { Workflow, WorkflowNode } from '../types'
@@ -177,9 +178,7 @@ export function allowedParamPathsOf(
       const value = node.data?.[path]
       if (
         typeof value === 'string' &&
-        [...value.matchAll(/\{\{\s*([A-Za-z0-9_.]+)\s*\}\}/g)].some((match) =>
-          abnormal.has(match[1]!.split('.')[0]!),
-        )
+        referencesIn(value).some((reference) => abnormal.has(referenceRoot(reference)))
       ) {
         permitted.add(path)
       }

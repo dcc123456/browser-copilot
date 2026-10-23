@@ -14,7 +14,7 @@
  * @module lib/workflow/repair/dataflow-analyzer
  */
 
-import { referencesIn } from '../dynamic-data'
+import { referenceRoot, referencesIn } from '../dynamic-data'
 import {
   buildProvenanceIndex,
   provenanceOf,
@@ -41,7 +41,7 @@ export function consumersOfNode(
     if (typeof value === 'string') {
       if (value.includes('{{')) {
         for (const reference of referencesIn(value)) {
-          const root = reference.split('.')[0] ?? reference
+          const root = referenceRoot(reference)
           out.push({
             variable: root,
             consumerNodeId: node.id,

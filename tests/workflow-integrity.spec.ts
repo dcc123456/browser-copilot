@@ -144,6 +144,15 @@ describe('checkWorkflowIntegrity — dangling references', () => {
     expect(checkWorkflowIntegrity(wf).danglingVars).toEqual([])
   })
 
+  it('compares only the root of a bracket path too', () => {
+    const wf = workflow([
+      trigger(),
+      node('read', 'read-page', { variableName: 'rows' }),
+      node('use', 'save-local', { value: '{{rows[0].title}} {{rows["meta"].url}}' }),
+    ])
+    expect(checkWorkflowIntegrity(wf).danglingVars).toEqual([])
+  })
+
   it('reports each dangling reference with the param that carries it', () => {
     const wf = workflow([
       trigger(),

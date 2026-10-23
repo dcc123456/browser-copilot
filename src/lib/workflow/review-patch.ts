@@ -21,6 +21,7 @@
  *
  * @module lib/workflow/review-patch
  */
+import { referenceRoot } from './dynamic-data'
 import type { Workflow, WorkflowEdge, WorkflowNode } from './types'
 
 /** The AI's overall verdict on one generated workflow. */
@@ -88,7 +89,7 @@ function readsOf(node: WorkflowNode): Set<string> {
   while (stack.length > 0) {
     const value = stack.pop()
     if (typeof value === 'string') {
-      for (const match of value.matchAll(VAR_TOKEN)) reads.add(match[1]!)
+      for (const match of value.matchAll(VAR_TOKEN)) reads.add(referenceRoot(match[1]!))
       continue
     }
     if (value && typeof value === 'object') {

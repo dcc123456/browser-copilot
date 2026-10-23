@@ -121,6 +121,16 @@ describe('ExecutionTrace collector (Phase 1)', () => {
     expect(refs.find((ref) => ref.variable === 'missing')!.resolved).toBe(false)
   })
 
+  it('inputRefsOf extracts bracket roots and resolves them against the bag', () => {
+    const wfNode = node('a', 'event-click', {
+      selector: '{{items[0].sku}} and {{missing[1]}}',
+    })
+    const refs = inputRefsOf(wfNode, { items: [{ sku: 's1' }] })
+    expect(refs.map((ref) => ref.variable).sort()).toEqual(['items', 'missing'])
+    expect(refs.find((ref) => ref.variable === 'items')!.resolved).toBe(true)
+    expect(refs.find((ref) => ref.variable === 'missing')!.resolved).toBe(false)
+  })
+
   it('records checkpoints independently of node executions', () => {
     const collector = new TraceCollector({ workflowId: 'wf', runId: 'r', entry: 'REPLAY' })
     collector.recordCheckpoint(0, 'a', 'ok', { v: 1 })

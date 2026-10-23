@@ -18,6 +18,7 @@
 import { capPersistedStrings, jsonBytes, shedBulkDataUrls } from './persist-budget'
 import type { TaskRunLog } from './scheduler-types'
 import { isSensitiveName, summarizeValue } from './workflow/repair/redaction'
+import { referenceRoot } from './workflow/dynamic-data'
 import { interpolate, leftoverTokens } from './workflow/interpolate'
 
 /** Reference root a chained task reads its parent's output through. */
@@ -112,7 +113,7 @@ export function resolveTaskInputs(
   const tokens: string[] = []
   const note = (text: string): string => {
     for (const token of leftoverTokens(text)) {
-      if (token.split('.')[0] === UPSTREAM_ROOT) tokens.push(token)
+      if (referenceRoot(token) === UPSTREAM_ROOT) tokens.push(token)
     }
     return text
   }

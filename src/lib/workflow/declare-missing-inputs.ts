@@ -8,12 +8,8 @@
  * (a declared input is provided by the launcher, so the data-flow layer counts
  * it as written).
  */
+import { referenceRoot } from './dynamic-data'
 import { isTriggerNode } from './migrate'
-
-/** Everything before the first dot — `{{a.b}}` reads a property of `a`. */
-function referenceRoot(reference: string): string {
-  return reference.split('.')[0] ?? reference
-}
 
 /** Variable references inside a node's data (best-effort, no graph dependency). */
 function referencesOf(data: Record<string, unknown>): Set<string> {

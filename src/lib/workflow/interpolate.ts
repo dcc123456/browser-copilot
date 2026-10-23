@@ -2,9 +2,9 @@
  * Template interpolation for workflow blocks.
  *
  * Blocks can reference live values in their parameter text using `{{name}}`
- * tokens, e.g. `{{userName}}` or `{{row.email}}`, so the same workflow can
- * adapt to the data it runs against. Kept as pure string logic (no chrome /
- * storage dependency) so it is trivially testable.
+ * tokens, e.g. `{{userName}}`, `{{row.email}}` or `{{rows[0].email}}`, so the
+ * same workflow can adapt to the data it runs against. Kept as pure string
+ * logic (no chrome / storage dependency) so it is trivially testable.
  *
  * @module lib/workflow/interpolate
  */
@@ -82,13 +82,134 @@ function parseJsonDocument(text: string): unknown {
   }
 }
 
+/** A parsed template reference: root variable name plus ordered accessors. */
+export interface VariableReference {
+  /** `rows` in `{{rows[0].name}}`. */
+  name: string
+  /** Property names / array indices, in access order. */
+  path: string[]
+}
+
+/** Read a quoted key starting at `start`; `undefined` when it never closes. */
+function readQuotedKey(path: string, start: number): { key: string; next: number } | undefined {
+  const quote = path[start]!
+  let index = start + 1
+  let raw = ''
+  while (index < path.length) {
+    const char = path[index]!
+    if (char === '\\') {
+      if (index + 1 >= path.length) return undefined
+      raw += char + path[index + 1]!
+      index += 2
+      continue
+    }
+    if (char === quote) {
+      if (quote === '"') {
+        try {
+          const key: unknown = JSON.parse(`"${raw}"`)
+          return typeof key === 'string' ? { key, next: index + 1 } : undefined
+        } catch {
+          return undefined
+        }
+      }
+      return { key: raw.replace(/\\([\s\S])/g, '$1'), next: index + 1 }
+    }
+    raw += char
+    index += 1
+  }
+  return undefined
+}
+
+/** Read `[0]` / `["key"]` / `['key']` starting at `start`. */
+function readBracketSegment(
+  path: string,
+  start: number,
+): { key: string; next: number } | undefined {
+  let index = start + 1
+  while (index < path.length && /\s/.test(path[index]!)) index += 1
+  const first = path[index]
+  let key: string
+  if (first === '"' || first === "'") {
+    const quoted = readQuotedKey(path, index)
+    if (!quoted) return undefined
+    key = quoted.key
+    index = quoted.next
+  } else {
+    const digitsStart = index
+    while (index < path.length && path[index]! >= '0' && path[index]! <= '9') index += 1
+    if (index === digitsStart) return undefined
+    key = path.slice(digitsStart, index)
+  }
+  while (index < path.length && /\s/.test(path[index]!)) index += 1
+  if (path[index] !== ']') return undefined
+  return { key, next: index + 1 }
+}
+
 /**
- * Walk a dot-separated `path` (e.g. `a.b.0`) across nested objects / arrays.
- * Returns `undefined` for any missing segment or a non-object step.
+ * Split `a.b[0]["c.d"]` into its accessors. A leading separator is ignored so
+ * the tail handed over by {@link parseReference} parses with the same code.
  */
-export function getByPath(root: unknown, path: string): unknown {
+function parsePath(path: string): string[] | undefined {
+  const segments: string[] = []
+  let index = 0
+  if (path[index] === '.') index += 1
+  let expectSeparator = false
+  while (index < path.length) {
+    while (index < path.length && /\s/.test(path[index]!)) index += 1
+    if (index >= path.length) break
+    if (expectSeparator) {
+      if (path[index] === '.') {
+        index += 1
+        expectSeparator = false
+        continue
+      }
+      // A bracket accessor is a separator and a segment in one.
+      if (path[index] === '[') {
+        expectSeparator = false
+        continue
+      }
+      return undefined
+    }
+    if (path[index] === '[') {
+      const bracket = readBracketSegment(path, index)
+      if (!bracket) return undefined
+      segments.push(bracket.key)
+      index = bracket.next
+      expectSeparator = true
+      continue
+    }
+    const segmentStart = index
+    while (index < path.length && path[index] !== '.' && path[index] !== '[') index += 1
+    const key = path.slice(segmentStart, index)
+    if (key === '') return undefined
+    segments.push(key)
+    expectSeparator = true
+  }
+  return segments
+}
+
+/**
+ * Parse a `{{...}}` body into its root variable and property/index accessors.
+ * Returns `undefined` for a malformed expression, leaving the token verbatim —
+ * the same contract as an unknown variable.
+ */
+export function parseReference(expression: string): VariableReference | undefined {
+  const trimmed = expression.trim()
+  if (trimmed === '') return undefined
+  let rootEnd = 0
+  while (rootEnd < trimmed.length && trimmed[rootEnd] !== '.' && trimmed[rootEnd] !== '[') {
+    rootEnd += 1
+  }
+  const name = trimmed.slice(0, rootEnd).trim()
+  if (name === '') return undefined
+  const path = parsePath(trimmed.slice(rootEnd).trim())
+  if (path === undefined) return undefined
+  return { name, path }
+}
+
+function walkPath(root: unknown, segments: readonly string[]): unknown {
   let cursor = root
-  for (const segment of path.split('.')) {
+  for (const segment of segments) {
     if (typeof cursor === 'string') {
       const parsed = parseJsonDocument(cursor)
       if (parsed === undefined) return undefined
@@ -100,6 +221,17 @@ export function getByPath(root: unknown, path: string): unknown {
     cursor = (cursor as Record<string, unknown>)[segment]
   }
   return cursor
+}
+
+/**
+ * Walk a reference path (`a.b.0`, `rows[0].name`, `obj["key"]`) across nested
+ * objects / arrays. Returns `undefined` for any missing segment, a non-object
+ * step, or a malformed path.
+ */
+export function getByPath(root: unknown, path: string): unknown {
+  if (path.trim() === '') return undefined
+  const segments = parsePath(path)
+  return segments === undefined ? undefined : walkPath(root, segments)
 }
 
 /**
@@ -129,7 +261,7 @@ export function escapeForJsLiteral(value: string): string {
 }
 
 /**
- * Replace every `{{name}}` / `{{name.key}}` token in `text`.
+ * Replace every `{{name}}` / `{{name.key}}` / `{{name[0]}}` token in `text`.
  *
  * - `name` is resolved against `vars`, except the special key `refData` which
  *   resolves to the `refData` value itself (its nested keys work too).
@@ -146,14 +278,10 @@ export function interpolate(
   escape?: (value: string) => string,
 ): string {
   return text.replace(TOKEN, (whole, expression: string) => {
-    const expr = expression.trim()
-    if (expr === '') return whole
-    const dot = expr.indexOf('.')
-    const name = dot === -1 ? expr : expr.slice(0, dot)
-    const rest = dot === -1 ? '' : expr.slice(dot + 1)
-
-    const root = name === 'refData' ? refData : vars[name]
-    const value = rest === '' ? root : getByPath(root, rest)
+    const reference = parseReference(expression)
+    if (!reference) return whole
+    const root = reference.name === 'refData' ? refData : vars[reference.name]
+    const value = walkPath(root, reference.path)
     if (value === undefined) return whole
     const rendered = typeof value === 'function' ? value.toString() : String(value)
     return escape ? escape(rendered) : rendered
