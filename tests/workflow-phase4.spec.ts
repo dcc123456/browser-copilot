@@ -355,6 +355,147 @@ describe('workflow phase 4 — loop-data', () => {
     ])
   })
 
+  it('runs its body once per item and leaves through the loop-breakpoint', async () => {
+    const seen: unknown[] = []
+    const calls: string[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('loop', 'loop-data', { data: '[10,20,30]' }),
+        node('body', 'body'),
+        node('bp', 'loop-breakpoint'),
+        node('after', 'after'),
+      ],
+      [
+        edge('t', 'loop'),
+        edge('loop', 'body', 'loop-data-output-1'),
+        edge('body', 'bp'),
+        edge('bp', 'after'),
+      ],
+    )
+    const result = await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        body: async (_d, ctx) => {
+          seen.push(ctx.variables['loopItem'])
+          return null
+        },
+        after: async () => {
+          calls.push('after')
+          return null
+        },
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual([10, 20, 30])
+    // The after-loop path is the breakpoint's own output, followed ONCE.
+    expect(calls).toEqual(['after'])
+  })
+
+  it('stops the loop at a clearLoop breakpoint and follows its output', async () => {
+    const seen: unknown[] = []
+    const calls: string[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('loop', 'loop-data', { data: '[1,2,3]' }),
+        node('body', 'body'),
+        node('bp', 'loop-breakpoint', { clearLoop: true }),
+        node('after', 'after'),
+      ],
+      [
+        edge('t', 'loop'),
+        edge('loop', 'body', 'loop-data-output-1'),
+        edge('body', 'bp'),
+        edge('bp', 'after'),
+      ],
+    )
+    const result = await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        body: async (_d, ctx) => {
+          seen.push(ctx.variables['loopItem'])
+          return null
+        },
+        after: async () => {
+          calls.push('after')
+          return null
+        },
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual([1])
+    expect(calls).toEqual(['after'])
+  })
+
+  it('an empty source still leaves through the breakpoint', async () => {
+    const calls: string[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('loop', 'loop-data', { data: '[]' }),
+        node('body', 'body'),
+        node('bp', 'loop-breakpoint'),
+        node('after', 'after'),
+      ],
+      [
+        edge('t', 'loop'),
+        edge('loop', 'body', 'loop-data-output-1'),
+        edge('body', 'bp'),
+        edge('bp', 'after'),
+      ],
+    )
+    const result = await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        body: async () => {
+          calls.push('body')
+          return null
+        },
+        after: async () => {
+          calls.push('after')
+          return null
+        },
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(calls).toEqual(['after'])
+  })
+
+  it('still honours a legacy output-2 after-loop edge', async () => {
+    const seen: unknown[] = []
+    const calls: string[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('loop', 'loop-data', { data: '[1,2]' }),
+        node('body', 'body'),
+        node('after', 'after'),
+      ],
+      [
+        edge('t', 'loop'),
+        edge('loop', 'body', 'loop-data-output-1'),
+        edge('loop', 'after', 'loop-data-output-2'),
+      ],
+    )
+    const result = await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        body: async (_d, ctx) => {
+          seen.push(ctx.variables['loopItem'])
+          return null
+        },
+        after: async () => {
+          calls.push('after')
+          return null
+        },
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual([1, 2])
+    expect(calls).toEqual(['after'])
+  })
+
   it('numbers mode walks from → to in both directions', async () => {
     const runNumbers = async (fromNumber: number, toNumber: number): Promise<unknown[]> => {
       const seen: unknown[] = []

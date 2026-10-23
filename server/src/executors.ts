@@ -2349,10 +2349,10 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
   const hoverElement: BlockExecutor = async (data, ctx) =>
     runRaw(withWait({ action: 'hover', target: targetFrom(data) }, data), ctx)
 
-  const loopBreakpointExec: BlockExecutor = async (data) => {
+  const loopBreakpointExec: BlockExecutor = async (data, ctx) => {
     const raw = data['loopId']
     const loopId = typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : undefined
-    throw new LoopBreakpointError(loopId, data['clearLoop'] === true)
+    throw new LoopBreakpointError(loopId, data['clearLoop'] === true, ctx.nodeId)
   }
 
   /** Launch triggers act as pass-through entry points. */

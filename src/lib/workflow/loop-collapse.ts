@@ -21,13 +21,20 @@
  * @module lib/workflow/loop-collapse
  */
 
+import { normalOutputHandleOf } from './block-ports'
+import { CATALOG_BY_ID } from './blocks/palette'
 import type { Workflow, WorkflowEdge, WorkflowNode } from './types'
 
 /** The block id of the loop block a fold introduces. */
 const REPEAT_TASK = 'repeat-task'
 const LOOP_ELEMENTS = 'loop-elements'
+const LOOP_BREAKPOINT = 'loop-breakpoint'
 
-/** A loop block's body port (output-1) and after-loop port (output-2). */
+/**
+ * A repeat-task's body port (output-1) and after-loop port (output-2). Loop
+ * Elements has ONE output: its after-loop path leaves through the
+ * `loop-breakpoint` parked at the body tail.
+ */
 const LOOP_PORT = 'output-1'
 const END_PORT = 'output-2'
 
@@ -147,14 +154,17 @@ function nodeShape(node: WorkflowNode): string {
 }
 
 /**
- * Blocks that introduce a loop cycle in an already-folded graph. A fold rewrites
- * a run into one of these, and the result is NOT a simple chain any more: the
- * loop node has a body edge (`output-1`) plus an after-loop edge (`output-2`),
- * and the body's tail points back at the loop. `chainOf` walks that shape
- * linearly instead of bailing on it — otherwise ONE fold would make every
- * remaining suggestion disappear from the review card.
+ * Blocks that introduce a loop in an already-folded graph, so `chainOf` must
+ * treat them as one transparent step instead of a fork:
+ * - `repeat-task` keeps Automa's two ports; the body tail points back at the
+ *   loop and the after-loop path is parked until the cycle closes.
+ * - `loop-elements` has ONE output: it enters its body, and the body tail runs
+ *   into a `loop-breakpoint` whose own output is the after-loop path.
  */
 const LOOP_BLOCKS: ReadonlySet<string> = new Set([REPEAT_TASK, LOOP_ELEMENTS])
+
+/** Loops whose after-loop path belongs to a following `loop-breakpoint`. */
+const SINGLE_OUTPUT_LOOPS: ReadonlySet<string> = new Set([LOOP_ELEMENTS, 'loop-data'])
 
 /** What `chainOf` reports: the linear chain plus the nodes inside loop bodies. */
 interface ChainWalk {
@@ -174,9 +184,13 @@ interface ChainWalk {
  * unfolded graph's chain is simply that order with the trigger removed. A
  * FOLDED graph is walked the same way by treating each loop block as one
  * transparent step: enter through its body edge, and when the body's tail
- * closes the cycle back at the loop, resume through the after-loop edge that
- * was parked when the loop was entered (a stack, so nested loops unwind
- * innermost-first).
+ * closes the cycle back at the loop (repeat-task), resume through the after-loop
+ * edge that was parked when the loop was entered (a stack, so nested loops
+ * unwind innermost-first).
+ *
+ * A loop-elements body is linear — loop → … → loop-breakpoint → after-loop — so
+ * walking it is just following edges; the open-loop depth only marks the nodes
+ * up to the breakpoint as body so the detectors never fold inside it.
  *
  * Returns null when the graph is not a straight sequence even under that
  * reading — a real branch or merge means folding it would need genuine
@@ -203,8 +217,10 @@ function chainOf(graph: CollapsibleGraph): ChainWalk | null {
   const loopBodyClaimed = new Set<string>()
   /** After-loop targets of loops whose body is being walked (innermost last). */
   const pendingEnds: string[] = []
-  /** Body-nesting depth: > 0 while walking inside some loop's body. */
+  /** Body-nesting depth of the cyclic (repeat-task) shape. */
   let bodyDepth = 0
+  /** Single-output loops entered but whose breakpoint has not been reached. */
+  let openLoops = 0
   let cursor: string | undefined = start
   while (cursor) {
     if (seen.has(cursor)) {
@@ -222,12 +238,17 @@ function chainOf(graph: CollapsibleGraph): ChainWalk | null {
     const node = byId.get(cursor)
     if (!node) return null
     chain.push(node)
-    if (bodyDepth > 0) loopBodyClaimed.add(cursor)
+    if (bodyDepth > 0 || openLoops > 0) loopBodyClaimed.add(cursor)
+    const blockId = blockIdOf(node)
     const next: WorkflowEdge[] = outgoing.get(cursor) ?? []
-    if (LOOP_BLOCKS.has(blockIdOf(node)) && next.length > 1) {
-      // A loop block: exactly a body edge and an after-loop edge. Walk the
+    if (blockId === LOOP_BREAKPOINT) {
+      if (openLoops > 0) openLoops -= 1
+    } else if (SINGLE_OUTPUT_LOOPS.has(blockId) && next.length <= 1) {
+      openLoops += 1
+    }
+    if (LOOP_BLOCKS.has(blockId) && next.length > 1) {
+      // A repeat-task: exactly a body edge and an after-loop edge. Walk the
       // body now; the after-loop continuation resumes on cycle close.
-      const blockId = blockIdOf(node)
       const bodyEdge = next.find((edge) => edge.sourceHandle === `${blockId}-${LOOP_PORT}`)
       const endEdge = next.find((edge) => edge.sourceHandle === `${blockId}-${END_PORT}`)
       if (!bodyEdge || !endEdge) return null
@@ -681,15 +702,55 @@ function loopNode(blockId: string, run: WorkflowNode, data: Record<string, unkno
   }
 }
 
+/** Spacing used when placing an inserted breakpoint beside its body tail. */
+const PLACEMENT_DX = 260
+const PLACEMENT_DY = 180
+/** A node this close to a candidate spot means the spot is taken. */
+const OCCUPIED_DX = 240
+const OCCUPIED_DY = 80
+
+/**
+ * Where an inserted loop-breakpoint goes: one cell right of the body tail,
+ * falling back to the row below when a node already sits there. Both the fold
+ * and the save-time migration insert a breakpoint between existing nodes, and
+ * dropping it on top of one hides both.
+ */
+export function loopBreakpointPosition(
+  nodes: readonly WorkflowNode[],
+  anchor: { x: number; y: number },
+): { x: number; y: number } {
+  const candidates = [
+    { x: anchor.x + PLACEMENT_DX, y: anchor.y },
+    { x: anchor.x, y: anchor.y + PLACEMENT_DY },
+    { x: anchor.x + PLACEMENT_DX, y: anchor.y + PLACEMENT_DY },
+  ]
+  const occupied = (spot: { x: number; y: number }): boolean =>
+    nodes.some(
+      (node) =>
+        Math.abs(node.position.x - spot.x) < OCCUPIED_DX &&
+        Math.abs(node.position.y - spot.y) < OCCUPIED_DY,
+    )
+  return candidates.find((spot) => !occupied(spot)) ?? candidates[2]!
+}
+
 /**
  * Rewrite a run into a loop: the loop node takes the run's place in the chain,
  * one iteration survives as its body, and the remaining iterations are removed.
  *
- * Handle wiring follows the engine's loop contract — `output-1` is the body
- * port and `output-2` the after-loop port, and the body's LAST node points back
- * at the loop node so one pass around the cycle is one iteration.
+ * `exit` picks the after-loop wiring:
+ * - `'back-edge'` (repeat-task): `output-1` is the body port, `output-2` the
+ *   after-loop port, and the body's LAST node points back at the loop so one
+ *   pass around the cycle is one iteration.
+ * - `'breakpoint'` (loop-elements): the loop has one output. The body tail runs
+ *   into a `loop-breakpoint`, whose own output carries the after-loop path —
+ *   the same shape Automa draws, with no back-edge.
  */
-function foldRun(workflow: Workflow, suggestion: RepeatSuggestion, loop: WorkflowNode): Workflow {
+function foldRun(
+  workflow: Workflow,
+  suggestion: RepeatSuggestion,
+  loop: WorkflowNode,
+  exit: 'back-edge' | 'breakpoint',
+): Workflow {
   const bodyIds = new Set(suggestion.bodyIds)
   const runIds = new Set(suggestion.runIds)
   const dropped = new Set(suggestion.runIds.filter((id) => !bodyIds.has(id)))
@@ -730,27 +791,63 @@ function foldRun(workflow: Workflow, suggestion: RepeatSuggestion, loop: Workflo
     sourceHandle: `${loop.label}-${LOOP_PORT}`,
     targetHandle: `${blockIdOf(bodyHead)}-input-1`,
   })
-  edges.push({
-    id: `${bodyTail.id}-loop`,
-    source: bodyTail.id,
-    target: loop.id,
-    sourceHandle: `${blockIdOf(bodyTail)}-${LOOP_PORT}`,
-    targetHandle: `${loop.label}-input-1`,
-  })
-  if (successor) {
+
+  if (exit === 'back-edge') {
     edges.push({
-      id: `${loop.id}-end`,
-      source: loop.id,
-      target: successor.target,
-      sourceHandle: `${loop.label}-${END_PORT}`,
-      targetHandle: successor.targetHandle ?? `${blockOf(successor.target)}-input-1`,
+      id: `${bodyTail.id}-loop`,
+      source: bodyTail.id,
+      target: loop.id,
+      sourceHandle: `${blockIdOf(bodyTail)}-${LOOP_PORT}`,
+      targetHandle: `${loop.label}-input-1`,
     })
+    if (successor) {
+      edges.push({
+        id: `${loop.id}-end`,
+        source: loop.id,
+        target: successor.target,
+        sourceHandle: `${loop.label}-${END_PORT}`,
+        targetHandle: successor.targetHandle ?? `${blockOf(successor.target)}-input-1`,
+      })
+    }
+  }
+
+  const breakpoint =
+    exit === 'breakpoint'
+      ? loopNode(LOOP_BREAKPOINT, bodyTail, { loopId: '', clearLoop: false, description: '' })
+      : null
+  if (breakpoint) {
+    breakpoint.label = CATALOG_BY_ID.get(LOOP_BREAKPOINT)?.name ?? LOOP_BREAKPOINT
+    breakpoint.position = loopBreakpointPosition(nodes, bodyTail.position)
+    edges.push({
+      id: `${bodyTail.id}-breakpoint`,
+      source: bodyTail.id,
+      target: breakpoint.id,
+      sourceHandle: normalOutputHandleOf({ id: blockIdOf(bodyTail) }, bodyTail.data),
+      targetHandle: 'loop-breakpoint-input-1',
+    })
+    if (successor) {
+      edges.push({
+        id: `${loop.id}-end`,
+        source: breakpoint.id,
+        target: successor.target,
+        sourceHandle: 'loop-breakpoint-output-1',
+        targetHandle: successor.targetHandle ?? `${blockOf(successor.target)}-input-1`,
+      })
+    }
   }
 
   // Put the loop where the run started, so the node array stays in flow order
-  // (the editor lays nodes out in array order).
+  // (the editor lays nodes out in array order). The breakpoint follows the body
+  // tail for the same reason.
   const at = nodes.findIndex((node) => node.id === suggestion.runIds[0])
-  const ordered = at < 0 ? [...nodes, loop] : [...nodes.slice(0, at), loop, ...nodes.slice(at)]
+  let ordered = at < 0 ? [...nodes, loop] : [...nodes.slice(0, at), loop, ...nodes.slice(at)]
+  if (breakpoint) {
+    const tailAt = ordered.findIndex((node) => node.id === bodyTail.id)
+    ordered =
+      tailAt < 0
+        ? [...ordered, breakpoint]
+        : [...ordered.slice(0, tailAt + 1), breakpoint, ...ordered.slice(tailAt + 1)]
+  }
   return { ...workflow, drawflow: { nodes: ordered, edges } }
 }
 
@@ -771,12 +868,14 @@ export function applyRepeatTaskFold(workflow: Workflow, suggestion: RepeatSugges
     // Say where the count came from: a bare "5" in the editor is unreadable.
     description: `重复 ${suggestion.repeat} 次（折叠自录制的连续步骤）`,
   })
-  return foldRun(workflow, suggestion, loop)
+  return foldRun(workflow, suggestion, loop, 'back-edge')
 }
 
 /**
  * Fold a varying run into `loop-elements`.
  *
+ * The result is Automa's linear loop: the loop has a single output into the
+ * body, and a `loop-breakpoint` at the body tail carries the after-loop path.
  * Refuses (returns the workflow unchanged) unless a loop selector is supplied:
  * it must come from a page-verified probe, because the whole fold rests on that
  * one selector matching the recorded elements and nothing else.
@@ -803,7 +902,7 @@ export function applyLoopElementsFold(
     // iteration count, and the editor label should say so.
     description: `遍历「${selector}」匹配的元素（折叠自 ${suggestion.runIds.length} 个录制步骤，${suggestion.repeat} 次迭代）`,
   })
-  const folded = foldRun(workflow, suggestion, loop)
+  const folded = foldRun(workflow, suggestion, loop, 'breakpoint')
   return {
     ...folded,
     drawflow: {

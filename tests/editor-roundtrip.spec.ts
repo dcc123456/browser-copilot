@@ -18,14 +18,7 @@ import type { Workflow, WorkflowEdge, WorkflowNode } from '../src/lib/workflow/t
  *   branch blocks) and the fallback source `<blockId>-output-fallback`.
  */
 function renderableHandles(blockId: string): { source: string[]; target: string[] } {
-  const branch2 = [
-    'conditions',
-    'element-exists',
-    'loop-data',
-    'loop-elements',
-    'while-loop',
-    'repeat-task',
-  ]
+  const branch2 = ['conditions', 'element-exists', 'while-loop', 'repeat-task']
   const source = [`${blockId}-output-1`]
   if (branch2.includes(blockId)) source.push(`${blockId}-output-2`)
   // The fallback handle renders when the block's onError settings enable it.

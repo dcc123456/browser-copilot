@@ -28,19 +28,13 @@ export interface BlockPort {
 
 /** Fixed branch ports (exists/not, loop/end), English labels matching Automa.
  *  The conditions block is absent on purpose — its ports are per-path, derived
- *  from its data by {@link branchHandlesFor}. */
+ *  from its data by {@link branchHandlesFor}. Loop Data / Loop Elements are
+ *  absent too: Automa gives them one output, and the after-loop path lives on
+ *  the `loop-breakpoint` block. */
 const BRANCH_HANDLES: Record<string, BlockPort[]> = {
   'element-exists': [
     { idSuffix: 'output-1', label: 'exists' },
     { idSuffix: 'output-2', label: 'not exists' },
-  ],
-  'loop-data': [
-    { idSuffix: 'output-1', label: 'loop' },
-    { idSuffix: 'output-2', label: 'end' },
-  ],
-  'loop-elements': [
-    { idSuffix: 'output-1', label: 'loop' },
-    { idSuffix: 'output-2', label: 'end' },
   ],
   'while-loop': [
     { idSuffix: 'output-1', label: 'loop' },

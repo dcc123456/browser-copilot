@@ -254,6 +254,21 @@ describe('detectRepeatRuns', () => {
     expect(rest[0]!.runIds).toEqual(['tail1', 'tail2'])
   })
 
+  it('walks a folded loop-elements transparently and keeps its body off-limits', () => {
+    const wf = workflow([
+      click('a', '#row-1'),
+      click('b', '#row-2'),
+      click('c', '#row-3'),
+      fill('tail1', '#note', 'x'),
+      fill('tail2', '#note', 'x'),
+    ])
+    const [first] = detectRepeatRuns(wf)
+    const folded = applyLoopElementsFold(wf, first!, '.row')
+    const rest = detectRepeatRuns(folded)
+    // The after-loop tail is still on the chain; the body is claimed.
+    expect(rest.map((run) => run.runIds)).toEqual([['tail1', 'tail2']])
+  })
+
   it('never offers a fold inside an existing loop body', () => {
     // A nested loop is not a rewrite this module can stand behind; nodes
     // inside the body are on the chain for coverage but off-limits for runs.
@@ -477,16 +492,54 @@ describe('applyLoopElementsFold', () => {
     expect(body?.data['target']).toBeUndefined()
   })
 
-  it('wires the loop body and the after-loop port', () => {
+  it('wires the single output through a breakpoint instead of a back-edge', () => {
     const wf = run()
     const [suggestion] = detectRepeatRuns(wf)
     const out = applyLoopElementsFold(wf, suggestion!, '.row')
     const loop = loopNodeOf(out, 'loop-elements')!
+    const breakpoint = loopNodeOf(out, 'loop-breakpoint')!
 
     expect(hasEdge(out, loop.id, 'a', 'loop-elements-output-1')).toBe(true)
-    expect(hasEdge(out, 'a', loop.id)).toBe(true)
-    // Nothing follows the run, so there is no after-loop edge to add.
+    // The body tail feeds the breakpoint; nothing points back at the loop.
+    expect(hasEdge(out, 'a', breakpoint.id)).toBe(true)
+    expect(hasEdge(out, 'a', loop.id)).toBe(false)
+    expect(breakpoint.data['loopId']).toBe('')
+    expect(breakpoint.data['clearLoop']).toBe(false)
+    // Nothing follows the run, so the breakpoint has no outward edge.
+    expect(out.drawflow.edges.some((e) => e.source === breakpoint.id)).toBe(false)
     expect(out.drawflow.edges.some((e) => e.sourceHandle === 'loop-elements-output-2')).toBe(false)
+    // The breakpoint sits right after the body in array order.
+    const ids = out.drawflow.nodes.map((n) => n.id)
+    expect(ids.indexOf(breakpoint.id)).toBe(ids.indexOf('a') + 1)
+  })
+
+  it('places the breakpoint clear of the existing nodes', () => {
+    const wf = workflow([
+      click('a', '#row-1'),
+      click('b', '#row-2'),
+      click('c', '#row-3'),
+      node('tail', 'delay', { delay: 1 }),
+    ])
+    const coords: Record<string, [number, number]> = {
+      t: [0, 0],
+      a: [220, 0],
+      b: [440, 0],
+      c: [660, 0],
+      tail: [880, 0],
+    }
+    for (const node of wf.drawflow.nodes) {
+      node.position = { x: coords[node.id]![0], y: coords[node.id]![1] }
+    }
+    const [suggestion] = detectRepeatRuns(wf)
+    const out = applyLoopElementsFold(wf, suggestion!, '.row')
+    const breakpoint = loopNodeOf(out, 'loop-breakpoint')!
+    for (const other of out.drawflow.nodes) {
+      if (other.id === breakpoint.id) continue
+      const overlaps =
+        Math.abs(other.position.x - breakpoint.position.x) < 240 &&
+        Math.abs(other.position.y - breakpoint.position.y) < 80
+      expect(overlaps, `${other.id} overlaps the breakpoint`).toBe(false)
+    }
   })
 
   it('refuses without a verified selector', () => {
@@ -557,9 +610,11 @@ describe('compound period detection (list → detail → back)', () => {
     expect(out.drawflow.nodes.find((n) => n.id === 'title-0')!.data['selector']).toBe(
       '.job-detail .name',
     )
-    // Body cycle: head … body tail back into the loop; iterations 2-3 dropped.
+    // Body runs into the breakpoint; iterations 2-3 dropped.
+    const breakpoint = loopNodeOf(out, 'loop-breakpoint')!
     expect(hasEdge(out, loop.id, 'card-0', 'loop-elements-output-1')).toBe(true)
-    expect(hasEdge(out, 'back-0', loop.id)).toBe(true)
+    expect(hasEdge(out, 'back-0', breakpoint.id)).toBe(true)
+    expect(hasEdge(out, 'back-0', loop.id)).toBe(false)
     const ids = new Set(out.drawflow.nodes.map((n) => n.id))
     expect(ids.has('card-1')).toBe(false)
     expect(ids.has('back-2')).toBe(false)
@@ -574,9 +629,9 @@ describe('compound period detection (list → detail → back)', () => {
     const out = applyLoopElementsFold(wf, suggestion!, '.job-list > li')
     const ids = new Set(out.drawflow.nodes.map((n) => n.id))
     expect(ids.has('card-2')).toBe(true)
-    // The tail hangs off the loop's after-loop port.
-    const loop = loopNodeOf(out, 'loop-elements')!
-    expect(hasEdge(out, loop.id, 'card-2', 'loop-elements-output-2')).toBe(true)
+    // The tail hangs off the breakpoint's after-loop output.
+    const breakpoint = loopNodeOf(out, 'loop-breakpoint')!
+    expect(hasEdge(out, breakpoint.id, 'card-2', 'loop-breakpoint-output-1')).toBe(true)
   })
 
   it('does not fold when the head varies by value, not by target', () => {

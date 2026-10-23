@@ -131,6 +131,8 @@ import {
 export interface WorkflowExecCtx {
   /** Mutable variable storage, keyed by variable name. */
   variables: Record<string, unknown>
+  /** The node being executed — lets a block name itself in its own error. */
+  nodeId?: string
   /** The data-table current row (if table-backed). */
   refData: unknown
   signal: AbortSignal
@@ -3590,10 +3592,10 @@ const hoverElement: BlockExecutor = async (data, ctx) =>
  * handles it. runNode rethrows the sentinel before any onError handling, so
  * this block is never retried, fallback-routed or failed.
  */
-const loopBreakpointExec: BlockExecutor = async (data) => {
+const loopBreakpointExec: BlockExecutor = async (data, ctx) => {
   const raw = data['loopId']
   const loopId = typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : undefined
-  throw new LoopBreakpointError(loopId, data['clearLoop'] === true)
+  throw new LoopBreakpointError(loopId, data['clearLoop'] === true, ctx.nodeId)
 }
 
 /**

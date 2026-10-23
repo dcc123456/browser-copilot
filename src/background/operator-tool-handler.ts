@@ -1095,15 +1095,20 @@ export async function foldDraftRun(
   draft.nodes = after.drawflow.nodes
   draft.edges = after.drawflow.edges
   // The tail anchors the next appended node. If it was one of the collapsed
-  // iterations it no longer exists, so the loop that absorbed the run takes its
-  // place; without this the next operator call would chain off a dead node.
+  // iterations it no longer exists, so the loop takes its place. For
+  // loop-elements that is the inserted loop-breakpoint — the loop's own output
+  // is the BODY port, and chaining there would append into the loop body.
   const ids = new Set(draft.nodes.map((node) => node.id))
   if (draft.tail && !ids.has(draft.tail)) {
+    const beforeIds = new Set(before.drawflow.nodes.map((node) => node.id))
+    const insertedBreakpoint = draft.nodes.find(
+      (node) => !beforeIds.has(node.id) && node.data?.['blockId'] === 'loop-breakpoint',
+    )
     const loop = draft.nodes.find((node) => {
       const blockId = node.data?.['blockId']
       return blockId === 'loop-elements' || blockId === 'repeat-task'
     })
-    draft.tail = loop?.id ?? draft.nodes.at(-1)?.id ?? null
+    draft.tail = insertedBreakpoint?.id ?? loop?.id ?? draft.nodes.at(-1)?.id ?? null
   }
   if (draft.pendingBranch && !ids.has(draft.pendingBranch.source)) draft.pendingBranch = undefined
   remember(draft)

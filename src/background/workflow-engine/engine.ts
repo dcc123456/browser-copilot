@@ -582,6 +582,7 @@ function buildExecCtx(
 ): WorkflowExecCtx {
   return {
     variables,
+    nodeId: currentId,
     refData: undefined,
     signal,
     outputs,
@@ -925,7 +926,9 @@ async function runCore(
     // Semantic branch keys by block, mapped to positional output handles:
     //   conditions   -> output-1 true / output-2 false (legacy pre-`paths` shape)
     //   element-exists -> output-1 exists / output-2 not exists
-    //   loop blocks  -> output-1 loop body / output-2 after-loop
+    //   while/repeat -> output-1 loop body / output-2 after-loop
+    // Loop Data / Loop Elements are single-output now; their `output-2` (when
+    // an old graph still carries one) is only a legacy after-loop fallback.
     const BRANCH_KEYS: Record<string, [string, string]> = {
       conditions: ['true', 'false'],
       'element-exists': ['exists', 'notExists'],
@@ -1035,7 +1038,10 @@ async function runCore(
     // executor in the registry, so sub-runs and loop bodies recurse here too.
     // Body entry / after-loop exit resolve by handle semantics, not edge
     // order: `loop` (output-1) starts the body, `end` (output-2) runs once
-    // after the loop finishes. A bare unlabeled edge still works as the body
+    // after the loop finishes. That `end` edge is the after-loop path for
+    // while/repeat; Loop Data / Loop Elements exit through their
+    // `loop-breakpoint` instead (an old stored `end` edge survives as the
+    // legacy fallback). A bare unlabeled edge still works as the body
     // (legacy / programmatic graphs), but only when no end edge exists.
     if (LOOP_BLOCK_IDS.has(blockId)) {
       markCompleted(nodeId)
@@ -1513,21 +1519,97 @@ async function runCore(
     }
   }
 
+  /** The loop exit a breakpoint owns: its single out-edge's target. */
+  const breakpointExitOf = (nodeId: string | undefined): string | null => {
+    if (!nodeId) return null
+    return (outBySource.get(nodeId) ?? [])[0]?.target ?? null
+  }
+
+  /** The `loopId`s a breakpoint may use to name `loopNode`. */
+  const loopOwnerKeysOf = (loopNode: WorkflowNode): Set<string> => {
+    const raw = loopNode.data?.['loopId']
+    const key = raw === undefined || raw === null ? '' : String(raw).trim()
+    const owners = new Set<string>([loopNode.id])
+    if (key !== '') owners.add(key)
+    return owners
+  }
+
+  /**
+   * The after-loop target of a single-output loop when no breakpoint has fired
+   * (empty source, or a body path that skipped it). Walks the body from its
+   * only output; a nested loop is one step from its entry to its own exit, so
+   * its breakpoints never decide THIS loop's exit.
+   */
+  const staticLoopExitOf = (
+    loopNode: WorkflowNode,
+    bodyStart: string | null,
+    resolving: Set<string> = new Set(),
+  ): string | null => {
+    if (bodyStart === null) return null
+    const owners = loopOwnerKeysOf(loopNode)
+    const seen = new Set<string>([loopNode.id])
+    const queue: string[] = [bodyStart]
+    while (queue.length > 0) {
+      const id = queue.shift() as string
+      if (seen.has(id)) continue
+      seen.add(id)
+      const node = nodeById.get(id)
+      if (!node) continue
+      const blockId = blockIdOf(node)
+      const outEdges = outBySource.get(id) ?? []
+      if (blockId === 'loop-breakpoint') {
+        const raw = node.data?.['loopId']
+        const key = raw === undefined || raw === null ? '' : String(raw).trim()
+        if (key === '' || owners.has(key)) return outEdges[0]?.target ?? null
+        // A breakpoint naming an outer loop leaves this loop's body.
+        continue
+      }
+      const legacyEnd =
+        outEdges.find((edge) => /(?:^|-)output-2$|(?:^|-)end$/.test(edge.sourceHandle ?? ''))
+          ?.target ?? null
+      if (LOOP_BLOCK_IDS.has(blockId)) {
+        if (resolving.has(id)) continue
+        resolving.add(id)
+        const entry =
+          outEdges.find((edge) => /(?:^|-)output-1$|(?:^|-)loop$/.test(edge.sourceHandle ?? 'next'))
+            ?.target ?? null
+        const exit =
+          (blockId === 'loop-data' || blockId === 'loop-elements'
+            ? staticLoopExitOf(node, entry, resolving)
+            : legacyEnd) ?? legacyEnd
+        resolving.delete(id)
+        if (exit !== null) queue.push(exit)
+        continue
+      }
+      for (const edge of outEdges) {
+        if (edge.target === loopNode.id) continue
+        // Fallback edges are error recovery, not the normal body path.
+        if ((edge.sourceHandle ?? '').endsWith('-output-fallback')) continue
+        queue.push(edge.target)
+      }
+    }
+    return null
+  }
+
   /**
    * Runs one loop-body segment, translating a `LoopBreakpointError` from the
    * body into a signal when THIS loop owns it (no loopId = the innermost loop;
    * a loopId must match the loop node's values/data `loopId` or the node id),
    * rethrowing otherwise so an outer loop can claim it.
    * `'continue'` = skip the rest of this item (Automa's default breakpoint);
-   * `'end'` = "Stop loop" (`clearLoop`), follow `endId`.
+   * `'end'` = "Stop loop" (`clearLoop`), leave via the breakpoint's own output.
    * `'ok'` = the body finished with the run still ok; `'failed'` = the run
    * outcome flipped to failed/cancelled (the loop stops without following
    * `endId`; the run result reports the outcome unchanged).
+   *
+   * `exitId` is present whenever a breakpoint fired: the target of its single
+   * out-edge, or null when it has none (the run then ends there). Undefined
+   * means no breakpoint was reached, so the caller keeps its previous anchor.
    */
   async function runLoopBody(
     loopNode: WorkflowNode,
     startId: string,
-  ): Promise<'ok' | 'continue' | 'end' | 'failed'> {
+  ): Promise<{ status: 'ok' | 'continue' | 'end' | 'failed'; exitId?: string | null }> {
     try {
       await runSegment(startId, loopNode.id)
     } catch (e) {
@@ -1539,12 +1621,15 @@ async function runCore(
         if (wanted === '' || owners.includes(wanted)) {
           // Automa's breakpoint skips the REST of this item; only "Stop loop"
           // (`clearLoop`) leaves the loop.
-          return e.clearLoop ? 'end' : 'continue'
+          return {
+            status: e.clearLoop ? 'end' : 'continue',
+            exitId: breakpointExitOf(e.nodeId),
+          }
         }
       }
       throw e
     }
-    return outcome === 'ok' ? 'ok' : 'failed'
+    return { status: outcome === 'ok' ? 'ok' : 'failed' }
   }
 
   /**
@@ -1562,6 +1647,22 @@ async function runCore(
     endId: string | null,
   ): Promise<string | null> {
     const label = blockIdOf(loopNode)
+    // Loop Data / Loop Elements have one output: the after-loop path belongs to
+    // the loop-breakpoint that ends the iteration. `endId` stays as the legacy
+    // fallback for a graph saved before that model existed.
+    const singleOutput = label === 'loop-data' || label === 'loop-elements'
+    const staticExit = singleOutput ? staticLoopExitOf(loopNode, startId) : null
+    /** The exit reached by the last fired breakpoint (null = it had no output). */
+    let lastBreakpointExit: string | null | undefined
+    const exitAfterLoop = (): string | null =>
+      lastBreakpointExit !== undefined ? lastBreakpointExit : (staticExit ?? endId)
+    const exitAfterSegment = (segment: {
+      status: 'ok' | 'continue' | 'end' | 'failed'
+      exitId?: string | null
+    }): string | null => {
+      if (segment.exitId !== undefined) lastBreakpointExit = segment.exitId
+      return exitAfterLoop()
+    }
 
     if (label === 'loop-data') {
       const through = String(params['loopThrough'] ?? '').trim()
@@ -1621,7 +1722,7 @@ async function runCore(
         emit('status', loopNode.id, `遍历 ${iterations} 个元素`)
         if (startId === null) {
           await forgetIndex()
-          return endId
+          return exitAfterLoop()
         }
         for (let i = 0; i < iterations; i++) {
           const absolute = startIndex + i
@@ -1633,14 +1734,14 @@ async function runCore(
             ? ((await loopElementSelector(selector, absolute, signalToUse)) ?? '')
             : ''
           const seg = await runLoopBody(loopNode, startId)
-          if (seg === 'failed') return null
-          if (seg === 'end') {
+          if (seg.status === 'failed') return null
+          if (seg.status === 'end') {
             await forgetIndex()
-            return endId
+            return exitAfterSegment(seg)
           }
         }
         await forgetIndex()
-        return endId
+        return exitAfterLoop()
       }
 
       let items: unknown[] = []
@@ -1720,7 +1821,7 @@ async function runCore(
       emit('status', loopNode.id, `开始循环，共 ${items.length} 项`)
       if (startId === null) {
         await forgetIndex()
-        return endId
+        return exitAfterLoop()
       }
       for (let i = 0; i < items.length; i++) {
         const absolute = startIndex + i
@@ -1729,14 +1830,14 @@ async function runCore(
         variables['loopIndex'] = absolute
         variables['loopItem'] = items[i]
         const seg = await runLoopBody(loopNode, startId)
-        if (seg === 'failed') return null
-        if (seg === 'end') {
+        if (seg.status === 'failed') return null
+        if (seg.status === 'end') {
           await forgetIndex()
-          return endId
+          return exitAfterSegment(seg)
         }
       }
       await forgetIndex()
-      return endId
+      return exitAfterLoop()
     }
 
     if (label === 'repeat-task') {
@@ -1749,8 +1850,8 @@ async function runCore(
         if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
         variables['loopIndex'] = i
         const seg = await runLoopBody(loopNode, startId)
-        if (seg === 'failed') return null
-        if (seg === 'end') return endId
+        if (seg.status === 'failed') return null
+        if (seg.status === 'end') return endId
         // `'continue'` skips the rest of this repetition only.
       }
       return endId
@@ -1783,11 +1884,11 @@ async function runCore(
         if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
         variables['loopIndex'] = iterations
         const seg = await runLoopBody(loopNode, startId)
-        if (seg === 'failed') return null
+        if (seg.status === 'failed') return null
         // A breakpoint `continue` still consumed one iteration — otherwise a
         // body that always breaks would bypass the dead-loop guard.
         iterations += 1
-        if (seg === 'end') return endId
+        if (seg.status === 'end') return endId
         if (iterations > MAX_WHILE_ITERATIONS) {
           const text = 'while-loop: 迭代超限，疑似死循环'
           emit('error', loopNode.id, text)
@@ -1809,7 +1910,7 @@ async function runCore(
       count = Math.max(0, Number(params['count'] ?? 0))
     }
     emit('status', loopNode.id, `遍历 ${count} 个元素`)
-    if (startId === null) return endId
+    if (startId === null) return exitAfterLoop()
     for (let i = 0; i < count; i++) {
       if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
       variables['loopIndex'] = i
@@ -1831,10 +1932,10 @@ async function runCore(
         variables['loopElementSelector'] = current ?? ''
       }
       const seg = await runLoopBody(loopNode, startId)
-      if (seg === 'failed') return null
-      if (seg === 'end') return endId
+      if (seg.status === 'failed') return null
+      if (seg.status === 'end') return exitAfterSegment(seg)
     }
-    return endId
+    return exitAfterLoop()
   }
 
   /**

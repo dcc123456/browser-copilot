@@ -13,11 +13,14 @@ export class LoopBreakpointError extends Error {
   loopId?: string
   /** Automa's `clearLoop`: finish the loop now instead of skipping one item. */
   clearLoop: boolean
+  /** The breakpoint node that threw, so its out-edge can carry the loop exit. */
+  nodeId?: string
 
-  constructor(loopId?: string, clearLoop = false) {
+  constructor(loopId?: string, clearLoop = false, nodeId?: string) {
     super('loop-breakpoint')
     this.name = 'LoopBreakpointError'
     if (loopId !== undefined) this.loopId = loopId
     this.clearLoop = clearLoop
+    if (nodeId !== undefined) this.nodeId = nodeId
   }
 }

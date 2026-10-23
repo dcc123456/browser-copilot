@@ -23,6 +23,8 @@
 import { BLOCK_CATALOG } from './blocks/catalog'
 import { CUSTOM_BLOCKS } from './blocks/custom'
 import { CATALOG_BY_ID } from './blocks/palette'
+import { normalOutputHandleOf } from './block-ports'
+import { loopBreakpointPosition } from './loop-collapse'
 import { isTriggerNode, normalizeTriggers, primaryTrigger } from './triggers'
 import type { Workflow, WorkflowEdge, WorkflowNode, WorkflowTrigger } from './types'
 
@@ -177,6 +179,177 @@ function normalizeHandle(
   return `${blockId}-${raw}`
 }
 
+/**
+ * Blocks whose after-loop path lives on a `loop-breakpoint`, not on a second
+ * output (Automa: both declare `outputs: 1`).
+ */
+const SINGLE_OUTPUT_LOOP_BLOCKS: ReadonlySet<string> = new Set(['loop-data', 'loop-elements'])
+
+const blockIdOfNode = (node: WorkflowNode | undefined): string =>
+  typeof node?.data?.['blockId'] === 'string' ? (node.data['blockId'] as string) : ''
+
+/**
+ * Move a legacy Loop Data / Loop Elements `output-2` edge onto a
+ * `loop-breakpoint` at the end of the body.
+ *
+ * The loop handle no longer renders, so React Flow would silently drop the
+ * edge. Rewiring instead preserves the after-loop path: every body tail feeds
+ * one breakpoint, the breakpoint's own output carries the old after-loop
+ * target, and the old folded back-edge into the loop is removed. Idempotent —
+ * after the rewrite the loop has no `output-2` edge left to act on.
+ */
+function normalizeLoopExits(
+  nodes: readonly WorkflowNode[],
+  edges: readonly WorkflowEdge[],
+): { nodes: WorkflowNode[]; edges: WorkflowEdge[]; changed: boolean } {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]))
+  const nextNodes = [...nodes]
+  let nextEdges = [...edges]
+  let changed = false
+  const usedNodeIds = new Set(nodes.map((node) => node.id))
+  const usedEdgeIds = new Set(edges.map((edge) => edge.id))
+  const freshEdgeId = (base: string): string => {
+    let id = base
+    let suffix = 2
+    while (usedEdgeIds.has(id)) id = `${base}-${suffix++}`
+    usedEdgeIds.add(id)
+    return id
+  }
+
+  for (const loop of nodes) {
+    const loopBlock = blockIdOfNode(loop)
+    if (!SINGLE_OUTPUT_LOOP_BLOCKS.has(loopBlock)) continue
+    const isExitEdge = (edge: WorkflowEdge): boolean =>
+      edge.source === loop.id &&
+      (edge.sourceHandle === `${loopBlock}-output-2` || edge.sourceHandle === `${loopBlock}-end`)
+    const exitEdges = nextEdges.filter(isExitEdge)
+    if (exitEdges.length === 0) continue
+    changed = true
+
+    // Normal control-flow edges of this loop's body, excluding the old exit and
+    // error fallbacks; an edge back into the loop closes a folded cycle.
+    const outgoing = new Map<string, WorkflowEdge[]>()
+    for (const edge of nextEdges) {
+      if (isExitEdge(edge) || edge.target === loop.id) continue
+      if ((edge.sourceHandle ?? '').endsWith('-output-fallback')) continue
+      const list = outgoing.get(edge.source) ?? []
+      list.push(edge)
+      outgoing.set(edge.source, list)
+    }
+    const bodyEdges = nextEdges.filter(
+      (edge) =>
+        edge.source === loop.id &&
+        !isExitEdge(edge) &&
+        !(edge.sourceHandle ?? '').endsWith('-output-fallback'),
+    )
+    const reachable = new Set<string>()
+    const queue = bodyEdges.map((edge) => edge.target)
+    while (queue.length > 0) {
+      const id = queue.shift() as string
+      if (id === loop.id || reachable.has(id)) continue
+      reachable.add(id)
+      // A breakpoint ends the body; its own out-edge is the after-loop path, so
+      // walking through it would misread the rest of the workflow as body flow.
+      const node = nodeById.get(id)
+      if (node && blockIdOfNode(node) === 'loop-breakpoint') continue
+      for (const edge of outgoing.get(id) ?? []) queue.push(edge.target)
+    }
+    const tails = [...reachable].filter((id) => {
+      const node = nodeById.get(id)
+      return (
+        (node && blockIdOfNode(node) === 'loop-breakpoint') || (outgoing.get(id) ?? []).length === 0
+      )
+    })
+
+    // The old cycle is replaced by loop → … → breakpoint → after-loop.
+    nextEdges = nextEdges.filter((edge) => !(reachable.has(edge.source) && edge.target === loop.id))
+
+    const loopRawId = loop.data?.['loopId']
+    const loopId = loopRawId === undefined || loopRawId === null ? '' : String(loopRawId).trim()
+    const fits = (node: WorkflowNode): boolean => {
+      const raw = node.data?.['loopId']
+      const key = raw === undefined || raw === null ? '' : String(raw).trim()
+      return key === '' || key === loopId || key === loop.id
+    }
+    let exitBlock = tails
+      .map((id) => nodeById.get(id))
+      .find((node) => node && blockIdOfNode(node) === 'loop-breakpoint' && fits(node))
+    if (!exitBlock) {
+      const anchorId = tails[tails.length - 1]
+      const anchor = anchorId ? nodeById.get(anchorId) : loop
+      const baseId = `${loop.id}-loop-breakpoint`
+      let id = baseId
+      let suffix = 2
+      while (usedNodeIds.has(id)) id = `${baseId}-${suffix++}`
+      usedNodeIds.add(id)
+      exitBlock = {
+        id,
+        label: CATALOG_BY_ID.get('loop-breakpoint')?.name ?? 'Loop breakpoint',
+        position: loopBreakpointPosition(nextNodes, anchor?.position ?? { x: 0, y: 0 }),
+        data: {
+          ...structuredClone(CATALOG_DEFAULTS.get('loop-breakpoint') ?? {}),
+          blockId: 'loop-breakpoint',
+          loopId,
+          clearLoop: false,
+          description: '',
+        },
+      }
+      const lastBodyIndex = [...reachable, loop.id].reduce(
+        (last, id) =>
+          Math.max(
+            last,
+            nextNodes.findIndex((node) => node.id === id),
+          ),
+        -1,
+      )
+      nextNodes.splice(lastBodyIndex + 1, 0, exitBlock)
+    }
+    const exitId = exitBlock.id
+
+    // No usable body path: the breakpoint itself is the body, so the loop still
+    // walks its source before continuing at the breakpoint's output.
+    if (tails.length === 0) {
+      nextEdges.push({
+        id: freshEdgeId(`${loop.id}-exit-body`),
+        source: loop.id,
+        target: exitId,
+        sourceHandle: `${loopBlock}-output-1`,
+        targetHandle: 'loop-breakpoint-input-1',
+      })
+    }
+    for (const tailId of tails) {
+      if (tailId === exitId) continue
+      const tail = nodeById.get(tailId)
+      if (!tail) continue
+      const tailBlock = blockIdOfNode(tail)
+      nextEdges.push({
+        id: freshEdgeId(`${tailId}-to-${exitId}`),
+        source: tailId,
+        target: exitId,
+        sourceHandle: normalOutputHandleOf(
+          CATALOG_BY_ID.get(tailBlock) ?? { id: tailBlock, inputs: 1, outputs: 1 },
+          tail.data,
+        ),
+        targetHandle: 'loop-breakpoint-input-1',
+      })
+    }
+
+    const breakpointAlreadyContinues = nextEdges.some((edge) => edge.source === exitId)
+    if (breakpointAlreadyContinues) {
+      // An explicit edge out of the breakpoint wins over the old loop output.
+      nextEdges = nextEdges.filter((edge) => !exitEdges.includes(edge))
+    } else {
+      nextEdges = nextEdges.map((edge) =>
+        exitEdges.includes(edge)
+          ? { ...edge, source: exitId, sourceHandle: 'loop-breakpoint-output-1' }
+          : edge,
+      )
+    }
+  }
+
+  return { nodes: nextNodes, edges: nextEdges, changed }
+}
+
 export function migrateWorkflow(wf: Workflow): Workflow {
   if (!wf?.drawflow?.nodes) return wf
   let changed = false
@@ -252,8 +425,11 @@ export function migrateWorkflow(wf: Workflow): Workflow {
     return { ...edge, sourceHandle, targetHandle }
   })
 
+  const loopExits = normalizeLoopExits(nodes, edges)
+  if (loopExits.changed) changed = true
+
   if (!changed) return wf
-  return { ...wf, drawflow: { ...wf.drawflow, nodes, edges } }
+  return { ...wf, drawflow: { ...wf.drawflow, nodes: loopExits.nodes, edges: loopExits.edges } }
 }
 
 /** Trigger kinds the editor's trigger block can emit. */
