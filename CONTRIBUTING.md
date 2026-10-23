@@ -32,6 +32,9 @@ tolerated but should not grow.
 
 - **Commit messages in English**, Conventional Commits format
   (`feat(scope): …`, `fix(scope): …`). See `AGENTS.md`.
+- **AI assistants commit and push to `main` themselves** once the gates above
+  are green — one feature per commit — and report what changed plus how to
+  test it by hand. See `AGENTS.md` §8.
 - **Styling is Tailwind-only** with the semantic design tokens
   (`bg-panel`, `text-muted`, …). No hardcoded hex colours, no CSS-in-JS, no new
   CSS classes for one-off styles. See `AGENTS.md`.
