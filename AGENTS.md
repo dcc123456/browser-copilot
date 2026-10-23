@@ -134,6 +134,23 @@
 - 7.4 takeover / debug 成功率口径以 `docs/ai-debug-success-rate-v3.md` 为唯一事实源
   （"verified = takeover-free verification run 通过且 goal 达成"），禁止在别处另造口径。`[验收]`
 
+## 8. 改完即推 + 交付说明 · Commit, push, and hand off
+
+本项目**长期授权** AI 助手：每完成一个功能改动就自动提交并推送到 `main`，不再等用户逐次口头
+指示；用户已明确要求「每次修改一个功能都自动提交推送到 main 分支」。`[纪律]`
+
+- 8.1 **时机**：收尾自检（§收尾自检 ①–⑩）全绿之后立刻 `git commit` + `git push origin main`，
+  并在回复里贴出 commit hash。门禁没绿不提交。`[纪律]`
+- 8.2 **粒度**：一个功能一次提交；不把无关改动、无关主题的他人改动混进同一次提交
+  （共享工作树里先 `git status` 确认，只 `git add` 自己这次动的文件）。`[纪律]`
+- 8.3 **提交信息**按 §1（英文 Conventional Commits）。`[纪律]`
+- 8.4 **推送前**确认暂存区没有 `tmp/` 产物（收尾自检 ⑨）与临时脚本（§7.3）。`[纪律]`
+- 8.5 **仍然要先问**的操作（授权不覆盖它们）：删分支/删文件、`git reset --hard`/`--force-push`、
+  改 CI 配置、动发布流程、打 tag（§4）、改共享基础设施或权限。`[纪律]`
+- 8.6 **交付说明**：每次推送后的回复必须包含两段——「**这次改了什么**」（用户可见的行为变化，
+  不是文件清单）与「**人工怎么测**」（可复制的步骤 + 每一步的预期现象，含在哪个界面点哪里）。
+  拿不到浏览器实证的条目写明 BLOCKED 与原因，不要用「应该可以」代替。`[纪律]`
+
 ## 收尾自检 · Before you finish
 
 **禁止"脚本绿了就宣称做完"。** `pnpm test` 只证明纯逻辑层没坏，**证明不了扩展真的能用**。
@@ -158,6 +175,9 @@
 - ⑧ UI 与文案满足 §2（Tailwind + token 双侧同步）与 §3（en + zh-CN；核心字典由封闭 `Messages` 类型机检）。`[验收]`
 - ⑨ 暂存区没有测试临时产物：截图、探针输出、一次性素材只能留在 `tmp/`，禁止 `git add -f` 绕过。`[纪律]`
 - ⑩ 提交符合 §1（英文 Conventional Commits）；要打 tag 时按 §4 先同步 `website/` 版本号。`[纪律]`
+- ⑪ 已按 §8 自动提交并推送到 `main`，回复里贴出 commit hash。`[纪律]`
+- ⑫ 已按 §8.6 给出「这次改了什么」与「人工怎么测」（步骤 + 预期现象）；无浏览器实证的条目写明
+  BLOCKED 与原因。`[纪律]`
 
 ## 机检落地状态 · What is actually tool-enforced
 
@@ -177,7 +197,7 @@
 **未落地（只能标 `[纪律]`，不得声称有工具兜底）：**
 
 - **仓库没有自带任何 git hook**（无 `.githooks/`、`core.hooksPath` 未设置、无 commit-msg / pre-commit
-  校验；`.git/hooks` 里只有 IDE 装的遥测钩子）→ §1 英文提交、收尾自检 ⑨⑩ 纯靠纪律。
+  校验；`.git/hooks` 里只有 IDE 装的遥测钩子）→ §1 英文提交、收尾自检 ⑨⑩⑪⑫ 纯靠纪律。
 - eslint 刻意最小：`no-console` / `no-explicit-any` / `no-empty-object-type` 关闭、`no-unused-vars` 仅
   warn、没有 naming-convention 规则，并且 ignore 掉 `server/web/**`、`public/**`、`website/**`
   → 死代码、命名、以及 Runner 控制台前端的文案都不被工具检查。
