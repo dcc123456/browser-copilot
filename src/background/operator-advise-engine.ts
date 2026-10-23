@@ -67,10 +67,15 @@ import {
 } from '../lib/workflow/operator-advise'
 
 /**
- * One-shot budget for picking operators. Deliberately far below AI Fix's five
- * minutes: this answers "which step comes next", with no trial run to wait for.
+ * Idle budget for picking operators. A total cap punishes a thinking model that
+ * is legitimately slow (the visible failure was "Cannot reach … signal timed
+ * out" after 60s of a working call), so only silence is bounded: 120s with no
+ * text or reasoning delta. A real cut is retried 10 times at 10s intervals,
+ * each attempt continuing the partial answer rather than replaying it.
  */
-const OPERATOR_ADVISE_TIMEOUT_MS = 60_000
+const OPERATOR_ADVISE_IDLE_TIMEOUT_MS = 120_000
+const OPERATOR_ADVISE_RETRIES = 10
+const OPERATOR_ADVISE_RETRY_DELAY_MS = 10_000
 
 /**
  * How many interactive elements a grounding read keeps. Lean on purpose: the
@@ -200,7 +205,12 @@ function defaultCallModel(
               : {}),
           },
         ],
-        signal: AbortSignal.any([signal, AbortSignal.timeout(OPERATOR_ADVISE_TIMEOUT_MS)]),
+        signal,
+        idleTimeoutMs: OPERATOR_ADVISE_IDLE_TIMEOUT_MS,
+        retry: {
+          retries: OPERATOR_ADVISE_RETRIES,
+          delayMs: OPERATOR_ADVISE_RETRY_DELAY_MS,
+        },
       },
       {
         // The editor shows the answer as it is written; reasoning stays on its own

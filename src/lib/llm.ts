@@ -615,6 +615,14 @@ export interface StreamRequest {
    * dropped stream reconnects and continues instead of ending the turn.
    */
   retry?: StreamRetryPolicy
+  /**
+   * Abort an attempt after this long with no text/reasoning delta. A silent
+   * connection is indistinguishable from a slow first token, so a total cap
+   * punishes thinking models; only the gap between deltas is bounded here. Each
+   * attempt gets its own watchdog, and the abort reads as a transient failure
+   * (TimeoutError, not AbortError), so the retry policy sees it as a cut.
+   */
+  idleTimeoutMs?: number
 }
 
 /**
@@ -699,6 +707,39 @@ function sleepWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
   })
 }
 
+/**
+ * Aborts after `ms` without a {@link touch}, and restarts the clock on each
+ * touch. The reason is a TimeoutError rather than an AbortError so the retry
+ * path treats a silent connection as transient, while a user cancel still ends
+ * the call immediately.
+ */
+function createIdleWatchdog(ms: number): {
+  signal: AbortSignal
+  touch: () => void
+  dispose: () => void
+} {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const touch = (): void => {
+    if (timer !== undefined) clearTimeout(timer)
+    timer = setTimeout(() => {
+      timer = undefined
+      controller.abort(
+        new DOMException(`No output for ${Math.round(ms / 1000)} seconds.`, 'TimeoutError'),
+      )
+    }, ms)
+  }
+  touch()
+  return {
+    signal: controller.signal,
+    touch,
+    dispose: () => {
+      if (timer !== undefined) clearTimeout(timer)
+      timer = undefined
+    },
+  }
+}
+
 /** Builds the request headers, letting profile headers override nothing critical. */
 function buildHeaders(request: {
   apiKey: string
@@ -759,12 +800,15 @@ export async function streamCompletion(
   const thinking = thinkingBodyFor(request.baseUrl, request.model, request.thinking)
   if (thinking) Object.assign(body, thinking)
 
-  const doFetch = (payload: Record<string, unknown>): Promise<Response> =>
+  const doFetch = (
+    payload: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+  ): Promise<Response> =>
     fetch(url, {
       method: 'POST',
       headers: buildHeaders(request),
       body: JSON.stringify(payload),
-      signal: request.signal,
+      signal,
     })
 
   /**
@@ -772,11 +816,14 @@ export async function streamCompletion(
    * gateway rejects it with 400 — losing usage stats beats losing the reply.
    * This is format negotiation, not a retry: it does not consume an attempt.
    */
-  const sendRequest = async (payload: Record<string, unknown>): Promise<Response> => {
-    let response = await doFetch(payload)
+  const sendRequest = async (
+    payload: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+  ): Promise<Response> => {
+    let response = await doFetch(payload, signal)
     if (!response.ok && response.status === 400 && 'stream_options' in payload) {
       const { stream_options: _dropped, ...withoutUsage } = payload
-      response = await doFetch(withoutUsage)
+      response = await doFetch(withoutUsage, signal)
     }
     return response
   }
@@ -814,8 +861,35 @@ export async function streamCompletion(
 
     let accumulator: SseAccumulator | undefined
     let streaming = false
+    // Every attempt gets its own watchdog: one aborted signal would poison all
+    // later attempts, and a reply that already started deserves a full fresh
+    // window. Only the gap between deltas is bounded, never the total call.
+    const idle =
+      typeof request.idleTimeoutMs === 'number' && request.idleTimeoutMs > 0
+        ? createIdleWatchdog(request.idleTimeoutMs)
+        : undefined
+    const attemptSignal = idle
+      ? request.signal
+        ? AbortSignal.any([request.signal, idle.signal])
+        : idle.signal
+      : request.signal
+    // Any visible output proves the connection is alive; reasoning counts, since
+    // a thinking model may legitimately write no answer text for minutes.
+    const attemptHandlers: StreamHandlers = idle
+      ? {
+          ...handlers,
+          onText: (delta) => {
+            idle.touch()
+            handlers.onText?.(delta)
+          },
+          onReasoning: (delta) => {
+            idle.touch()
+            handlers.onReasoning?.(delta)
+          },
+        }
+      : handlers
     try {
-      const response = await sendRequest(payload)
+      const response = await sendRequest(payload, attemptSignal)
       if (!response.ok) {
         const failure = await describeHttpFailure(response, who)
         throw new LlmError(failure.message, {
@@ -831,7 +905,7 @@ export async function streamCompletion(
       // drift between features (see `observeUsage`). Each attempt reports its
       // own usage: a retried request was really billed.
       accumulator = new SseAccumulator({
-        ...handlers,
+        ...attemptHandlers,
         onUsage: (usage) => {
           lastUsage = usage
           observeUsage(request, usage)
@@ -867,6 +941,8 @@ export async function streamCompletion(
         })
       }
 
+      // The reply completed; silence after this point is not this request's.
+      idle?.dispose()
       return {
         content: delivered + result.content,
         reasoning: reasoning + result.reasoning,
@@ -878,13 +954,18 @@ export async function streamCompletion(
         usage: lastUsage,
       }
     } catch (error) {
+      // Disarmed before anything else: this attempt's connection is gone, and
+      // only the next attempt's own watchdog may cut it short.
+      idle?.dispose()
       // Cancellation is never retried — callers distinguish it by name.
       if ((error as Error)?.name === 'AbortError') throw error
       const failure =
         error instanceof LlmError
           ? error
           : new LlmError(
-              `Cannot reach ${url}: ${describeError(error)}. Check the base URL, your network, and whether the endpoint allows browser-extension requests.`,
+              (error as Error)?.name === 'TimeoutError'
+                ? `${who} stopped sending output: ${describeError(error)}`
+                : `Cannot reach ${url}: ${describeError(error)}. Check the base URL, your network, and whether the endpoint allows browser-extension requests.`,
               { transient: true },
             )
       // Whatever this attempt managed to stream is already visible to the
