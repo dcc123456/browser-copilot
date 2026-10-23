@@ -102,6 +102,19 @@ export const EDITOR_STRINGS = {
     nodeInspectorRepairHints: 'Repair hints',
     nodeInspectorEditInvalidates:
       'Editing the goal marks the workflow unverified until it is re-certified.',
+    workflowGoalTab: 'Goal',
+    workflowGoalTitle: 'Workflow goal',
+    workflowGoalHint:
+      'After the last step, every condition below is checked. If any of them does not hold, the run is reported as 「目标未达成」 and the unmet rows are listed in the message.',
+    workflowGoalSummary: 'Goal summary',
+    workflowGoalSummaryPlaceholder: 'e.g. Publish a note with the chosen images',
+    workflowGoalConditions: 'Success conditions (all must hold)',
+    workflowGoalIncomplete: 'Add a goal summary and at least one complete condition before saving.',
+    workflowGoalTerminalKept: 'Terminal-state conditions already on this goal are kept unchanged.',
+    workflowGoalDelete: 'Remove goal',
+    workflowGoalDeleteWarning:
+      'Runs will no longer be checked against a goal. Click the button again to confirm.',
+    workflowGoalDeleteConfirm: 'Confirm removal',
     goalHelpTrigger: 'What is this section?',
     goalHelpIntro:
       'The contract this step is judged against: what it must achieve, and which observable facts prove it did. Generated workflows fill it in — edit it when the reality differs.',
@@ -457,6 +470,18 @@ export const EDITOR_STRINGS = {
     nodeInspectorFailureMeaning: '失败含义',
     nodeInspectorRepairHints: '修复提示',
     nodeInspectorEditInvalidates: '编辑目标后，工作流将标记为未验证，直到重新认证。',
+    workflowGoalTab: '目标',
+    workflowGoalTitle: '工作流目标',
+    workflowGoalHint:
+      '最后一步执行结束后会逐条校验下面的条件。任一条件不满足，运行会被判定为「目标未达成」，提示中会列出未满足的条件。',
+    workflowGoalSummary: '目标说明',
+    workflowGoalSummaryPlaceholder: '例如：发布一篇带所选图片的笔记',
+    workflowGoalConditions: '成功条件（必须全部满足）',
+    workflowGoalIncomplete: '填写目标说明，并至少添加一条填写完整的条件后才能保存。',
+    workflowGoalTerminalKept: '目标中已有的「终态已满足」条件会原样保留。',
+    workflowGoalDelete: '删除目标',
+    workflowGoalDeleteWarning: '删除后运行将不再校验目标。再次点击按钮以确认。',
+    workflowGoalDeleteConfirm: '确认删除',
     goalHelpTrigger: '这个区块是做什么的？',
     goalHelpIntro:
       '这一步的验收契约：它必须达成什么，以及凭哪些可观测事实判定它达成了。生成的工作流会自动填好；和实际不符时在这里改。',

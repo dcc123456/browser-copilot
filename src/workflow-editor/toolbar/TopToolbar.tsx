@@ -21,6 +21,7 @@ import {
   Play,
   Save,
   SquareTerminal,
+  Target,
   TriangleAlert,
   WandSparkles,
   X,
@@ -41,6 +42,7 @@ export default function TopToolbar({
   onSave,
   onRun,
   onOpenLogs,
+  onOpenGoal,
   onToggleRecording,
   onAutoLayout,
   selectedCount,
@@ -64,6 +66,8 @@ export default function TopToolbar({
   onRun: () => void
   /** Open the run-logs modal. */
   onOpenLogs: () => void
+  /** Open the workflow-goal modal. */
+  onOpenGoal: () => void
   onToggleRecording: () => void
   onAutoLayout: () => void
   /** How many canvas nodes are selected right now. */
@@ -97,6 +101,15 @@ export default function TopToolbar({
         >
           <SquareTerminal size={14} />
           {t('logs')}
+        </button>
+        <button
+          type="button"
+          className="wf-tab inline-flex items-center gap-1.5"
+          onClick={onOpenGoal}
+          title={t('workflowGoalTitle')}
+        >
+          <Target size={14} />
+          {t('workflowGoalTab')}
         </button>
       </div>
 

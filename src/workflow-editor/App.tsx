@@ -110,7 +110,9 @@ import TopToolbar from './toolbar/TopToolbar'
 import DebugBar, { type DebugPause } from './debug/DebugBar'
 import { useRepairEvents as useEditorRepairEvents } from './use-repair-events'
 import CertificationModal from './sidebar/CertificationModal'
+import WorkflowGoalModal from './sidebar/WorkflowGoalModal'
 import type { VerificationReport } from '../background/workflow-engine/goal-verification'
+import type { WorkflowGoalSpec } from '../lib/workflow/reliability'
 import CanvasControls from './toolbar/CanvasControls'
 import OperatorChatDock, {
   type OperatorApplyRequest,
@@ -221,6 +223,8 @@ export default function EditorApp() {
   const [childEditFor, setChildEditFor] = useState<{ nodeId: string; index: number } | null>(null)
   /** Whether the run-logs / debug viewer modal is open. */
   const [logsOpen, setLogsOpen] = useState(false)
+  /** Whether the workflow-goal modal is open. */
+  const [goalOpen, setGoalOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(true)
   const [paletteWidth, setPaletteWidth] = useState(() => loadWidth('left'))
   /** Node id being edited in the LEFT overlay (Automa: double-click opens the
@@ -1286,6 +1290,23 @@ export default function EditorApp() {
     [],
   )
 
+  // The goal needs a real key removal to be deleted (`patchMeta` only merges),
+  // and any change invalidates the certification measured against the old goal.
+  const applyGoalSpec = useCallback((next: WorkflowGoalSpec | null) => {
+    setMeta((m) => {
+      const settings = { ...m.settings }
+      delete settings.goalSpec
+      return {
+        ...m,
+        settings: {
+          ...settings,
+          ...(next ? { goalSpec: next } : {}),
+          certificationStatus: 'unverified',
+        },
+      }
+    })
+  }, [])
+
   const editNode = useMemo(() => nodes.find((n) => n.id === editingId), [nodes, editingId])
   const editBlock = editNode?.data.block ?? null
 
@@ -1582,6 +1603,7 @@ export default function EditorApp() {
           onSave={() => void handleSave()}
           onRun={() => void handleRun()}
           onOpenLogs={() => setLogsOpen(true)}
+          onOpenGoal={() => setGoalOpen(true)}
           onToggleRecording={() => void toggleRecording()}
           onAutoLayout={handleAutoLayout}
           selectedCount={selectedIds.size}
@@ -1760,6 +1782,15 @@ export default function EditorApp() {
 
         {/* Run-logs / debug viewer modal. */}
         <CertificationModal report={certReport} onClose={() => setCertReport(null)} t={t} />
+        {/* Mounted per open so the draft always starts from the saved goal. */}
+        {goalOpen && (
+          <WorkflowGoalModal
+            settings={meta.settings}
+            onClose={() => setGoalOpen(false)}
+            onSave={applyGoalSpec}
+            t={t}
+          />
+        )}
         <LogsModal
           open={logsOpen}
           onClose={() => setLogsOpen(false)}
