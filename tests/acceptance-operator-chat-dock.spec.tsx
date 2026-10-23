@@ -1053,3 +1053,91 @@ describe('V-operator-dock: the screenshot the assistant took for itself', () => 
     expect(requests).toEqual([])
   })
 })
+
+describe('V-operator-dock: the conversation and the composer', () => {
+  const buttonByTitle = (title: string): HTMLButtonElement | undefined =>
+    container.querySelector<HTMLButtonElement>(`button[title="${title}"]`) ?? undefined
+
+  const openDock = async (): Promise<void> => {
+    await act(async () => {
+      buttonByText('operatorAiFabLabel')?.click()
+    })
+  }
+
+  it('starts over on a new chat and leaves the canvas alone', async () => {
+    await render()
+    await openDock()
+    const fresh = buttonByTitle('operatorAiNewSession')
+    expect(fresh?.disabled).toBe(true)
+    await typeInto('加一步')
+    await send()
+    expect(container.textContent).toContain('已添加两个算子')
+    expect(fresh?.disabled).toBe(false)
+    await act(async () => {
+      fresh?.click()
+    })
+    expect(container.textContent).toContain('operatorAiEmptyState')
+    expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('')
+    // The conversation is not the canvas: nothing was applied or undone again.
+    expect(requests).toHaveLength(1)
+    expect(undos).toBe(0)
+  })
+
+  it('drops a reply that was still on the wire when the new chat started', async () => {
+    let settle: ((value: unknown) => void) | undefined
+    mocks.sendCommand.mockImplementation((command: Command) => {
+      seen.push(command)
+      if (command.type === 'workflows.operatorAdvise') {
+        return new Promise((resolve) => {
+          settle = resolve
+        })
+      }
+      return Promise.resolve({ type: command.type })
+    })
+    await render()
+    await openDock()
+    await typeInto('加一步')
+    await act(async () => {
+      buttonByText('operatorAiSend')?.click()
+    })
+    // Abandon the turn while it is still generating.
+    await act(async () => {
+      buttonByTitle('operatorAiNewSession')?.click()
+    })
+    expect(seen.some((command) => command.type === 'workflows.operatorAdviseCancel')).toBe(true)
+    const answer = settle as ((value: unknown) => void) | undefined
+    await act(async () => {
+      answer?.(okReply([{ blockId: 'new-tab', data: { url: 'https://b' }, rationale: '' }]))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await flush()
+    expect(container.textContent).toContain('operatorAiEmptyState')
+    expect(requests).toHaveLength(0)
+  })
+
+  it('resizes the composer by dragging its top edge, clamped both ways', async () => {
+    await render()
+    await openDock()
+    const grip = container.querySelector('[role="separator"]') as HTMLElement
+    const field = container.querySelector('textarea') as HTMLTextAreaElement
+    expect(field.style.height).toBe('52px')
+    // Up 60px from a 400px start: the composer follows one-for-one.
+    await act(async () => {
+      grip.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientY: 400 }))
+      window.dispatchEvent(new MouseEvent('mousemove', { clientY: 340 }))
+    })
+    expect(field.style.height).toBe('112px')
+    // Past the ceiling and past the floor, the height stops at the limit.
+    await act(async () => {
+      window.dispatchEvent(new MouseEvent('mousemove', { clientY: 0 }))
+      window.dispatchEvent(new MouseEvent('mouseup'))
+    })
+    expect(field.style.height).toBe('240px')
+    await act(async () => {
+      grip.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientY: 100 }))
+      window.dispatchEvent(new MouseEvent('mousemove', { clientY: 500 }))
+      window.dispatchEvent(new MouseEvent('mouseup'))
+    })
+    expect(field.style.height).toBe('52px')
+  })
+})

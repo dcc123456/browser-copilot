@@ -20,17 +20,19 @@
  * @module workflow-editor/ai/OperatorChatDock
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import {
   Camera,
   Eye,
   EyeOff,
   Focus,
+  GripHorizontal,
   Loader2,
   MousePointerClick,
   RotateCcw,
   Send,
   Square,
+  SquarePen,
   X,
 } from 'lucide-react'
 import { sendCommand } from '../../lib/messages'
@@ -175,6 +177,15 @@ interface PendingOffer {
 function makeSessionId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
   return `operator-advise-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+/** How tall the user may drag the composer: tall enough for a long ask, short
+ *  enough that the transcript keeps most of the panel. */
+export const COMPOSER_MIN_HEIGHT = 52
+export const COMPOSER_MAX_HEIGHT = 240
+
+function clampComposerHeight(value: number): number {
+  return Math.min(COMPOSER_MAX_HEIGHT, Math.max(COMPOSER_MIN_HEIGHT, value))
 }
 
 const PROBLEM_KEY: Record<OperatorLandingProblem, EditorStringKey> = {
@@ -397,8 +408,12 @@ export default function OperatorChatDock({
   // any page read, so they ride along with the next send and are consumed there.
   const [picked, setPicked] = useState<PickedElement[]>([])
   const [stream, setStream] = useState<StreamingAnswer | null>(null)
+  const [composerHeight, setComposerHeight] = useState(COMPOSER_MIN_HEIGHT)
   const { bt, locale } = useEditorLocale()
   const composingRef = useRef(false)
+  /** Which conversation a request belongs to. A new conversation bumps it, so a
+   *  reply that was still on the wire cannot land in the fresh transcript. */
+  const sessionGenerationRef = useRef(0)
   /** The advise request whose deltas this dock accepts. Deltas for any other
    *  request (another editor page, a cancelled turn) are dropped. */
   const activeSessionRef = useRef<string | null>(null)
@@ -487,6 +502,42 @@ export default function OperatorChatDock({
     setPicked((current) => current.filter((_element, position) => position !== index))
   }
 
+  /** Clear the transcript and abandon anything still in flight. The canvas is
+   *  left exactly as it is: the conversation and the flow are separate. */
+  function startNewSession(): void {
+    if (busy) stop()
+    sessionGenerationRef.current += 1
+    activeSessionRef.current = null
+    inFlightRef.current = null
+    setTurns([])
+    setInput('')
+    setPicked([])
+    setStream(null)
+    setBusy(false)
+    setAtBottom(true)
+  }
+
+  /** Drag the composer taller by its top edge; the footer grows and the
+   *  transcript above it shrinks. */
+  function resizeComposer(event: ReactMouseEvent): void {
+    event.preventDefault()
+    const startY = event.clientY
+    const startHeight = composerHeight
+    const move = (moveEvent: MouseEvent): void => {
+      setComposerHeight(clampComposerHeight(startHeight + startY - moveEvent.clientY))
+    }
+    const release = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', release)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', release)
+  }
+
+  function nudgeComposer(delta: number): void {
+    setComposerHeight((current) => clampComposerHeight(current + delta))
+  }
+
   /**
    * Write the pending picks into the held batch, and land it once nothing is
    * missing. A pick is only an attachment until the user presses send: editing or
@@ -531,7 +582,10 @@ export default function OperatorChatDock({
    *  user sends, so it can still be edited or removed here. */
   async function pickElement(): Promise<void> {
     if (busy) return
+    const generation = sessionGenerationRef.current
     const result = await requestElementPick({ locale })
+    // A pick made for the previous conversation must not open the new one.
+    if (generation !== sessionGenerationRef.current) return
     if (!result.ok) {
       const problem = describePickFailure(result.failure, result.error)
       if (problem) toast(bt(problem), 'error')
@@ -566,6 +620,7 @@ export default function OperatorChatDock({
     // The picks go with this message and are spent by it; the 已拾取 rows stay in
     // the transcript, so the model still reads them on a follow-up turn.
     const picks = picked.filter((element) => element.selector.trim() !== '')
+    const generation = sessionGenerationRef.current
     inFlightRef.current = { type: 'workflows.operatorAdviseCancel', sessionId }
     activeSessionRef.current = sessionId
     setStream({ sessionId, reasoning: '', text: '' })
@@ -588,6 +643,7 @@ export default function OperatorChatDock({
         ...(context.workflowId ? { workflowId: context.workflowId } : {}),
       })
       if (result.type !== 'workflows.operatorAdvise') return
+      if (generation !== sessionGenerationRef.current) return
       const data = result.data
       if (!data.ok) {
         pushTurn({
@@ -654,16 +710,19 @@ export default function OperatorChatDock({
         ...(landing ? { landing } : {}),
       })
     } catch (error) {
+      if (generation !== sessionGenerationRef.current) return
       pushTurn({
         role: 'assistant',
         content: error instanceof Error ? error.message : String(error),
         failed: true,
       })
     } finally {
-      activeSessionRef.current = null
-      setStream(null)
-      setBusy(false)
-      inFlightRef.current = null
+      if (generation === sessionGenerationRef.current) {
+        activeSessionRef.current = null
+        setStream(null)
+        setBusy(false)
+        inFlightRef.current = null
+      }
     }
   }
 
@@ -685,6 +744,7 @@ export default function OperatorChatDock({
     if (!offer || busy) return
     const context = getContext()
     const sessionId = makeSessionId()
+    const generation = sessionGenerationRef.current
     inFlightRef.current = { type: 'workflows.operatorObserveCancel', sessionId }
     setBusy(true)
     try {
@@ -699,6 +759,7 @@ export default function OperatorChatDock({
         ...(context.workflowId ? { workflowId: context.workflowId } : {}),
       })
       if (result.type !== 'workflows.operatorObserve') return
+      if (generation !== sessionGenerationRef.current) return
       const data = result.data
       if (!data.ok) {
         setTurns((current) =>
@@ -726,12 +787,15 @@ export default function OperatorChatDock({
         observed,
       })
     } catch (error) {
+      if (generation !== sessionGenerationRef.current) return
       resolveTurn(index, {
         observed: error instanceof Error ? error.message : String(error),
       })
     } finally {
-      setBusy(false)
-      inFlightRef.current = null
+      if (generation === sessionGenerationRef.current) {
+        setBusy(false)
+        inFlightRef.current = null
+      }
     }
   }
 
@@ -774,6 +838,16 @@ export default function OperatorChatDock({
     >
       <header className="flex items-center gap-2 border-b border-border px-3 py-2">
         <h2 className="flex-1 text-[13px] font-semibold text-ink">{t('operatorAiTitle')}</h2>
+        <button
+          aria-label={t('operatorAiNewSession')}
+          className="wf-icon-btn"
+          disabled={turns.length === 0 && !busy}
+          onClick={startNewSession}
+          title={t('operatorAiNewSession')}
+          type="button"
+        >
+          <SquarePen size={14} aria-hidden="true" />
+        </button>
         <button
           className="wf-icon-btn"
           onClick={() => setOpen(false)}
@@ -953,8 +1027,32 @@ export default function OperatorChatDock({
             </ul>
           </div>
         )}
+        <div
+          aria-label={t('operatorAiResizeInput')}
+          aria-orientation="horizontal"
+          aria-valuemax={COMPOSER_MAX_HEIGHT}
+          aria-valuemin={COMPOSER_MIN_HEIGHT}
+          aria-valuenow={composerHeight}
+          className="group -mx-2 mb-1 flex h-2.5 cursor-ns-resize items-center justify-center focus-visible:bg-hover focus-visible:outline-none"
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+            event.preventDefault()
+            nudgeComposer(event.key === 'ArrowUp' ? 16 : -16)
+          }}
+          onMouseDown={resizeComposer}
+          role="separator"
+          tabIndex={0}
+          title={t('operatorAiResizeInput')}
+        >
+          <GripHorizontal
+            aria-hidden="true"
+            className="text-faint group-hover:text-muted"
+            size={12}
+          />
+        </div>
         <textarea
-          className="max-h-28 min-h-[52px] w-full resize-y rounded-lg border border-border bg-panel-2 px-2 py-1.5 text-xs text-ink placeholder:text-faint focus:border-border-strong focus:outline-none"
+          className="w-full resize-none rounded-lg border border-border bg-panel-2 px-2 py-1.5 text-xs text-ink placeholder:text-faint focus:border-border-strong focus:outline-none"
+          style={{ height: composerHeight }}
           onCompositionEnd={() => {
             composingRef.current = false
           }}

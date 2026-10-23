@@ -263,6 +263,8 @@ export const EDITOR_STRINGS = {
     // — the floating AI operator assistant —
     operatorAiFabLabel: 'AI',
     operatorAiTitle: 'AI operator assistant',
+    operatorAiNewSession: 'New chat',
+    operatorAiResizeInput: 'Drag to resize the message box',
     operatorAiHint:
       'Each reply lands on the canvas: without a selection it is added to the end of the flow; a selected step can have operators added before or after it, or be edited or replaced in place. Undo restores exactly what the last reply changed.',
     operatorAiEmptyState:
@@ -610,6 +612,8 @@ export const EDITOR_STRINGS = {
     // — 右下角悬浮的 AI 算子助手 —
     operatorAiFabLabel: 'AI',
     operatorAiTitle: 'AI 算子助手',
+    operatorAiNewSession: '新建会话',
+    operatorAiResizeInput: '拖动调整输入框高度',
     operatorAiHint:
       '未选中算子时，回复会追加到流程末尾；选中某个步骤时，助手可以在它前面或后面插入算子，也可以就地修改或替换它。「撤销」只回退上一次落地的改动。',
     operatorAiEmptyState: '描述你需要的步骤，例如「打开 https://www.baidu.com 并搜索 X」。',
