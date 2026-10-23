@@ -6,6 +6,7 @@ import type { RunnerConfig } from '../src/config'
 import { createExecutors } from '../src/executors'
 import type { WorkflowExecCtx } from '../../src/background/workflow-engine/executors'
 import type { OpResult } from '../../src/lib/ops'
+import { CODE_NODE_HELPERS } from '../../src/lib/workflow/code-node-helpers'
 
 const OP_BASE = { found: false, frameUrl: '', isTopFrame: true }
 
@@ -364,6 +365,23 @@ describe('server executors', () => {
     )
     expect(ctx.variables['doubled']).toBe(4)
     expect(ctx.variables['lastResult']).toEqual({ ok: true })
+  })
+
+  it('javascript-code local evaluation defines every advertised helper', async () => {
+    const registry = createExecutors(makeDeps(makeDriverStub()))
+    const ctx = makeCtx({ dataTable: [{ name: 'row-1' }] })
+    const code = [
+      "automaSetVariable('helped', 7)",
+      "const fromRef = automaRefData('table', '0.name')",
+      'automaResetTimeout()',
+      'variables.answer = 42',
+      'automaNextBlock({ helped: variables.helped, fromRef, answer: variables.answer })',
+    ].join('\n')
+    for (const helper of CODE_NODE_HELPERS) {
+      expect(code, helper.name).toContain(helper.name)
+    }
+    await registry['javascript-code']!({ code }, ctx)
+    expect(ctx.variables['lastResult']).toEqual({ helped: 7, fromRef: 'row-1', answer: 42 })
   })
 
   it('conditions route through outputs handles (row semantics)', async () => {

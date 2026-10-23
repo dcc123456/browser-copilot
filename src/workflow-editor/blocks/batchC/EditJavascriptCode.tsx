@@ -26,6 +26,8 @@ import { bool, num, str } from '../shared/InteractionBase'
 import type { EditFormProps } from '../EditForms'
 import { arr, id } from './shared'
 import { useEditorLocale } from '../../locale-context'
+import { CODE_NODE_HELPERS } from '../../../lib/workflow/code-node-helpers'
+import HelperTip from '../../ui/HelperTip'
 import Modal from '../../ui/Modal'
 import CodeEditor from '../../ui/CodeEditor'
 
@@ -33,14 +35,6 @@ interface PreloadScript {
   src: string
   removeAfterExec?: boolean
 }
-
-const HELPER_FUNCS = [
-  { name: 'automaNextBlock(data, insert?)', anchor: 'automanextblock-data' },
-  { name: 'automaRefData(keyword, path?)', anchor: 'automarefdata-keyword-path' },
-  { name: 'automaSetVariable(name, value)', anchor: 'automasetvariable-name-value' },
-  { name: 'automaFetch(type, resource)', anchor: 'automasetvariable-type-resource' },
-  { name: 'automaResetTimeout()', anchor: 'automaresettimeout' },
-]
 
 export default function EditJavascriptCode({ data, onChange }: EditFormProps) {
   const { bt, t } = useEditorLocale()
@@ -184,17 +178,14 @@ export default function EditJavascriptCode({ data, onChange }: EditFormProps) {
                   {t('wrapLine')}
                 </button>
               </p>
-              <div className="wf-code-chips">
-                {HELPER_FUNCS.map((f) => (
-                  <a
-                    key={f.anchor}
-                    href={`https://docs.extension.automa.site/blocks/javascript-code.html#${f.anchor}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="wf-code-chip"
-                  >
-                    {f.name}
-                  </a>
+              <div className="flex flex-wrap gap-1.5">
+                {CODE_NODE_HELPERS.map((helper) => (
+                  <HelperTip
+                    key={helper.name}
+                    signature={helper.signature}
+                    what={helper.what}
+                    when={helper.when}
+                  />
                 ))}
               </div>
             </div>

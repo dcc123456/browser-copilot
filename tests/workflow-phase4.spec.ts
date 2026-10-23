@@ -5,6 +5,8 @@ import { streamCompletion } from '../src/lib/llm'
 import { getSettings } from '../src/lib/storage'
 import { getWorkflow } from '../src/lib/workflow/storage'
 import type { Workflow, WorkflowEdge, WorkflowNode } from '../src/lib/workflow/types'
+import { CODE_NODE_HELPERS } from '../src/lib/workflow/code-node-helpers'
+import { CODE_NODE_HELPER_PROBES } from './code-node-helper-probes'
 
 /**
  * Phase 4: non-browser executors plus the engine's `loop-data` /
@@ -1630,4 +1632,24 @@ describe('workflow loops — loop-breakpoint', () => {
     expect(seen).toEqual([])
     expect(steps.some((s) => s.kind === 'info' && s.text.includes('不在循环内'))).toBe(true)
   })
+})
+
+describe('javascript-code helper contract — local fallback', () => {
+  it('has a probe for every advertised helper', () => {
+    expect(Object.keys(CODE_NODE_HELPER_PROBES).sort()).toEqual(
+      CODE_NODE_HELPERS.map((helper) => helper.name).sort(),
+    )
+  })
+
+  for (const [name, probe] of Object.entries(CODE_NODE_HELPER_PROBES)) {
+    it(`defines and runs ${name}`, async () => {
+      const { ctx } = makeCtx()
+      Object.assign(ctx.variables, probe.variables)
+      await EXECUTORS['javascript-code']!({ code: probe.code }, ctx)
+      expect(ctx.variables['lastResult']).toEqual(probe.expectedResult)
+      if (probe.expectedVariables) {
+        expect(ctx.variables).toMatchObject(probe.expectedVariables)
+      }
+    })
+  }
 })

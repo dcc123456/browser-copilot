@@ -33,37 +33,10 @@ import { autocompletion, completionKeymap } from '@codemirror/autocomplete'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { javascript } from '@codemirror/lang-javascript'
 import { json } from '@codemirror/lang-json'
+import { CODE_NODE_HELPERS } from '../../lib/workflow/code-node-helpers'
+import { useEditorLocale } from '../locale-context'
 
-/** Automa helper snippets surfaced in the JS editor's autocomplete. */
-const AUTOMA_COMPLETIONS: { label: string; detail: string; insert: string }[] = [
-  {
-    label: 'automaNextBlock',
-    detail: 'pass data to the next block',
-    insert: 'automaNextBlock(${1:data});',
-  },
-  {
-    label: 'automaSetVariable',
-    detail: 'set a workflow variable',
-    insert: 'automaSetVariable("${1:name}", ${2:value});',
-  },
-  {
-    label: 'automaRefData',
-    detail: 'read variables / table / loopData',
-    insert: 'automaRefData("${1:variables}", "${2:path}")',
-  },
-  {
-    label: 'automaResetTimeout',
-    detail: 're-arm the execution timeout',
-    insert: 'automaResetTimeout();',
-  },
-  {
-    label: 'variables',
-    detail: 'current workflow variables (read/write)',
-    insert: 'variables',
-  },
-]
-
-function automaAutocomplete() {
+function automaAutocomplete(translate: (english: string) => string) {
   return autocompletion({
     override: [
       (context) => {
@@ -71,10 +44,10 @@ function automaAutocomplete() {
         if (!word || (word.from === word.to && !context.explicit)) return null
         return {
           from: word.from,
-          options: AUTOMA_COMPLETIONS.map((c) => ({
-            label: c.label,
-            detail: c.detail,
-            type: 'function',
+          options: CODE_NODE_HELPERS.map((helper) => ({
+            label: helper.name,
+            detail: translate(helper.hint),
+            type: helper.kind === 'object' ? 'variable' : 'function',
           })),
           validFor: /^[\w$]*$/,
         }
@@ -101,9 +74,12 @@ export default function CodeEditor({
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
+  const { bt } = useEditorLocale()
   // Keep the latest onChange without recreating the editor on every render.
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
+  const btRef = useRef(bt)
+  btRef.current = bt
 
   useEffect(() => {
     if (!hostRef.current) return
@@ -135,7 +111,9 @@ export default function CodeEditor({
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         highlightActiveLine(),
         langExt,
-        ...(lang === 'javascript' && !readOnly ? [automaAutocomplete()] : []),
+        ...(lang === 'javascript' && !readOnly
+          ? [automaAutocomplete((text) => btRef.current(text))]
+          : []),
         updateListener,
         oneDark,
         EditorState.tabSize.of(2),

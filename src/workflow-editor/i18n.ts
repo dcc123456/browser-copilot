@@ -192,7 +192,7 @@ export const EDITOR_STRINGS = {
     jsCode: 'JavaScript code',
     clickToEdit: 'Click to edit',
     codeTab: 'Code',
-    availableFuncs: 'Available functions:',
+    availableFuncs: 'Available functions & variables:',
     wrapLine: 'wrap line',
     noPreload: 'No preload scripts.',
     theseErrorRules: 'These rules apply when this block throws an error.',
@@ -559,7 +559,7 @@ export const EDITOR_STRINGS = {
     jsCode: 'JavaScript 代码',
     clickToEdit: '点击编辑',
     codeTab: '代码',
-    availableFuncs: '可用函数：',
+    availableFuncs: '可用函数与变量：',
     wrapLine: '自动换行',
     noPreload: '暂无预加载脚本。',
     theseErrorRules: '当该算子执行出错时，应用以下规则。',
@@ -1432,6 +1432,34 @@ const BLOCK_FORM_STRINGS = {
     'Seconds to wait between each try': '每次重试的间隔（秒）',
     'JavaScript code execution timeout': 'JavaScript 代码执行超时',
     'Supports {{variables}}': '支持 {{variables}} 变量',
+    // — code-node helper help —
+    'What it does': '作用',
+    'When to use it': '使用场景',
+    'Pass a result to the next block': '把结果传给下一个算子',
+    'Set a workflow variable': '设置工作流变量',
+    'Read variables, table or loop data': '读取变量、数据表或循环数据',
+    'Restart the execution timeout': '重置执行超时计时',
+    'Workflow variables (read/write)': '工作流变量（可读可写）',
+    'Stops the script and sends a value to the next block. That block reads it as lastResult (also available as {{lastResult}}), and it overrides the value the script returns.':
+      '结束脚本并把一个值传给下一个算子。下一个算子会把它当作 lastResult（也可以通过 {{lastResult}} 读取），它会覆盖脚本的返回值。',
+    'Use it when a later block needs a specific value from this script, or to finish early after an await.':
+      '当后续算子需要本脚本的特定值，或想在 await 之后提前结束时使用。',
+    'Writes value into the workflow variable name. The value is merged into the run, so later blocks can read it with {{name}} or through automaRefData("variables").':
+      '把值写入名为 name 的工作流变量。该值会合并进本次运行，后续算子可以用 {{name}} 或 automaRefData("variables") 读取。',
+    'Use it to expose fetched data, an extracted value or a flag that later blocks must read.':
+      '用于把抓取到的数据、提取出的值或标记暴露给后续算子。',
+    'Reads runtime data by keyword: variables, table, loopData, prevBlockData or globalData. An optional dot path such as "user.name" returns a nested value.':
+      '按关键字读取运行时数据：variables、table、loopData、prevBlockData 或 globalData。可选的点路径（如 "user.name"）可返回嵌套值。',
+    'Use it inside loops or after a previous block when you need the current row or the previous result without hardcoding variable names.':
+      '在循环中需要当前行，或需要上一个算子的结果但不想写死变量名时使用。',
+    'Restarts the execution timeout from zero. A slow script keeps a full timeout window instead of being killed by the total elapsed time.':
+      '把执行超时从零重新计时。执行较慢的脚本仍拥有完整的超时窗口，不会因为累计耗时而被终止。',
+    'Use it in long polls, downloads or multi-step waits so a script that is still making progress is not terminated.':
+      '用于长时间轮询、下载或多步等待，避免仍在推进的脚本被超时终止。',
+    "The run's variable object. Read variables.name and assign variables.name = value; assignments are merged after the script just like automaSetVariable.":
+      '本次运行的变量对象。读取 variables.name，赋值 variables.name = value；脚本结束后赋值会像 automaSetVariable 一样合并。',
+    'Use it when a variable name is computed at runtime, or when plain JavaScript reads more clearly than automaRefData.':
+      '当变量名在运行时才确定，或用普通 JavaScript 读取比 automaRefData 更清晰时使用。',
     "Execute shortcut even when you're in an input element": '即使在输入框内也执行快捷键',
     // — parameters —
     'Input (string)': '输入（字符串）',
