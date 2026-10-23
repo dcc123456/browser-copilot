@@ -127,10 +127,14 @@ describe('per-block required parameters', () => {
   })
 
   it('set-variable / get-secret demand their names', () => {
-    expect(missingRequirements('set-variable', {}).map((p) => p.key)).toEqual([
-      'variableName',
-      'value',
-    ])
+    expect(missingRequirements('set-variable', {}).map((p) => p.key)).toEqual(['variables'])
+    // The single-variable shape saved before rows existed still runs.
+    expect(missingRequirements('set-variable', { variableName: 'token', value: 'x' })).toEqual([])
+    expect(
+      missingRequirements('set-variable', { variables: [{ name: '', value: 'x' }] }).map(
+        (p) => p.key,
+      ),
+    ).toEqual(['variables'])
     expect(missingRequirements('get-secret', {}).map((p) => p.key)).toEqual([
       'credential',
       'variableName',
@@ -201,9 +205,24 @@ describe('per-block required parameters', () => {
 
   it('loop / branch blocks demand something to drive on', () => {
     expect(missingRequirements('repeat-task', {}).map((p) => p.key)).toContain('repeatFor')
-    expect(missingRequirements('while-loop', {}).map((p) => p.key)).toContain('code')
-    expect(missingRequirements('loop-data', {})).toHaveLength(1)
-    expect(missingRequirements('loop-data', { loopData: '[1,2]' })).toEqual([])
+    expect(missingRequirements('while-loop', {})).toHaveLength(1)
+    // The editor stores a condition tree instead of `code`; both satisfy the gate.
+    expect(missingRequirements('while-loop', { conditions: [{ conditions: [{}] }] })).toEqual([])
+    expect(missingRequirements('loop-data', { loopThrough: 'custom-data' })).toHaveLength(1)
+    expect(
+      missingRequirements('loop-data', { loopThrough: 'custom-data', loopData: '[1,2]' }),
+    ).toEqual([])
+    expect(missingRequirements('loop-data', { loopThrough: 'elements' })).toHaveLength(1)
+    expect(
+      missingRequirements('loop-data', { loopThrough: 'elements', elementSelector: '//li' }),
+    ).toEqual([])
+    expect(missingRequirements('loop-data', { loopThrough: 'variable' })).toHaveLength(1)
+    expect(
+      missingRequirements('loop-data', { loopThrough: 'variable', variableName: 'rows' }),
+    ).toEqual([])
+    // Table / numbers sources read runtime or catalog-default values.
+    expect(missingRequirements('loop-data', { loopThrough: 'data-columns' })).toEqual([])
+    expect(missingRequirements('loop-data', { loopThrough: 'numbers' })).toEqual([])
     expect(missingRequirements('conditions', {})).toHaveLength(1)
     expect(missingRequirements('conditions', { code: 'true' })).toEqual([])
     expect(missingRequirements('conditions', { conditions: [{ conditions: [{}] }] })).toEqual([])

@@ -2,20 +2,25 @@
  * EditLoopData — React port of Automa's EditLoopData.vue.
  *
  * Iterates over a table (data columns), a number range, a Google Sheet ref,
- * a variable, custom JSON data, or page elements. File import / CSV parsing
- * (Papa) are out of scope; custom data is edited as a mono JSON textarea and
- * elements use the shared SelectorField (pick/verify on page).
+ * a variable, custom JSON data, or page elements. Custom data accepts JSON or
+ * a CSV/XLSX import (Automa's data modal); elements use the shared
+ * SelectorField and accept CSS or XPath.
  *
  * @module workflow-editor/blocks/batchC/EditLoopData
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { EditFormProps } from '../EditForms'
 import { useEditorLocale } from '../../locale-context'
 import { Checkbox, Expand, Field, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
+import PopupField from '../shared/PopupField'
 import { bool, num, str } from '../shared/InteractionBase'
 import SelectorField from '../shared/SelectorField'
+import { parseSpreadsheet } from '../../../lib/workflow/excel-parse'
 import { id } from './shared'
+
+/** Automa's cap on imported/pasted custom data. */
+const MAX_LOOP_DATA_BYTES = 1024 * 1024
 
 const LOOP_TYPES = [
   { value: 'data-columns', label: 'Table' },
@@ -28,11 +33,36 @@ const LOOP_TYPES = [
 
 export default function EditLoopData({ data, onChange }: EditFormProps) {
   const { bt } = useEditorLocale()
-  const [showData, setShowData] = useState(false)
+  const [hasHeader, setHasHeader] = useState(true)
+  const [importError, setImportError] = useState('')
+  const fileInput = useRef<HTMLInputElement>(null)
   const loopThrough = str(data, 'loopThrough') || 'data-columns'
   const resume = bool(data, 'resumeLastWorkflow')
 
   const patch = (p: Record<string, unknown>) => onChange(p)
+
+  const importFile = async (file: File): Promise<void> => {
+    setImportError('')
+    if (file.size > MAX_LOOP_DATA_BYTES) {
+      setImportError(bt('The file is larger than 1 MB.'))
+      return
+    }
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      let imported: unknown[]
+      if (file.type === 'application/json' || /\.json$/i.test(file.name)) {
+        const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes))
+        // Automa wraps a single object so every iteration has one item.
+        imported = Array.isArray(parsed) ? parsed : [parsed]
+      } else {
+        const spreadsheet = await parseSpreadsheet(bytes, file.name, { hasHeader })
+        imported = hasHeader ? spreadsheet.rows : spreadsheet.rawRows
+      }
+      patch({ loopData: JSON.stringify(imported, null, 2).slice(0, MAX_LOOP_DATA_BYTES) })
+    } catch {
+      setImportError(bt('Could not read that file. Expected JSON or a .csv/.xlsx spreadsheet.'))
+    }
+  }
   // Automa seeds a short nanoid loop id on mount.
   useEffect(() => {
     if (!str(data, 'loopId')) onChange({ loopId: id(6) })
@@ -122,33 +152,52 @@ export default function EditLoopData({ data, onChange }: EditFormProps) {
       )}
 
       {loopThrough === 'custom-data' && (
-        <>
-          <button
-            type="button"
-            className="wf-btn-accent w-full"
-            onClick={() => setShowData(!showData)}
-          >
-            {showData ? bt('Close data') : bt('Insert data')}
-          </button>
+        <PopupField
+          title="Custom data"
+          summary={
+            str(data, 'loopData').trim()
+              ? `${str(data, 'loopData').length} ${bt('chars')}`
+              : bt('None')
+          }
+          editLabel="Insert data"
+          icon="lucide:Brackets"
+          size="lg"
+        >
           <p className="wf-form-note">
-            {bt('Max file/data size is 1MB. Import a JSON/CSV file or paste JSON below.')}
+            {bt('Max file/data size is 1MB. Import a JSON/CSV/XLSX file or paste JSON below.')}
           </p>
-          {showData && (
-            <Field label="Custom data (JSON array)">
-              <TextArea
-                mono
-                rows={10}
-                value={str(data, 'loopData')}
-                placeholder={'[\n  { "name": "Alice" },\n  { "name": "Bob" }\n]'}
-                onChange={(v) => patch({ loopData: v.slice(0, 1024 * 1024) })}
-              />
-            </Field>
-          )}
-        </>
+          <div className="flex items-center gap-2">
+            <button type="button" className="wf-btn" onClick={() => fileInput.current?.click()}>
+              {bt('Import file')}
+            </button>
+            <Checkbox checked={hasHeader} onChange={setHasHeader} label="First row is the header" />
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".json,.csv,.xlsx,application/json,text/csv"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                event.target.value = ''
+                if (file) void importFile(file)
+              }}
+            />
+          </div>
+          {importError !== '' && <p className="text-xs text-err">{importError}</p>}
+          <Field label="Custom data (JSON array)">
+            <TextArea
+              mono
+              rows={16}
+              value={str(data, 'loopData')}
+              placeholder={'[\n  { "name": "Alice" },\n  { "name": "Bob" }\n]'}
+              onChange={(v) => patch({ loopData: v.slice(0, MAX_LOOP_DATA_BYTES) })}
+            />
+          </Field>
+        </PopupField>
       )}
 
       {loopThrough === 'numbers' && (
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="flex gap-2">
           <Field label="From number">
             <NumberInput value={num(data, 'fromNumber', 1)} fallback={1} onChange={setFromNumber} />
           </Field>
@@ -201,7 +250,7 @@ export default function EditLoopData({ data, onChange }: EditFormProps) {
       <Expand title="Notes">
         <p className="wf-form-note">
           {bt(
-            'Google Sheets, file import (CSV/JSON), and the on-page element picker are not wired up in this build — use the reference key / selector text fields directly.',
+            'Elements accept a CSS selector or an XPath expression. Google Sheets is not available: import a .xlsx/.csv file as custom data instead.',
           )}
         </p>
       </Expand>

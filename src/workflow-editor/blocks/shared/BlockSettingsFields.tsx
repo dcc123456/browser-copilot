@@ -8,16 +8,16 @@
  *                      (inline Times / Interval + "seconds") → behaviour
  *                      select → custom error message for "throw".
  *
- * Automa also exposes connection-line settings and an insert-data table here;
- * our engine does not implement either, so those rows are intentionally
- * omitted rather than shown as non-functional UI.
+ * Automa's connection-line settings live in a separate Lines tab
+ * (`BlockSettingsModal`); the insert-data table stays inside the block's own
+ * form, so it is intentionally not duplicated here.
  *
  * @module workflow-editor/blocks/shared/BlockSettingsFields
  */
 
 import { Info } from 'lucide-react'
 import type { EditFormProps } from '../EditForms'
-import { NumberInput, Select, Switch, TextInput } from './Field'
+import { Checkbox, Field, NumberInput, Select, Switch, TextInput } from './Field'
 import { bool, num, str } from './InteractionBase'
 import { useEditorLocale } from '../../locale-context'
 
@@ -55,6 +55,81 @@ export function GeneralFields({ data, onChange }: EditFormProps) {
           onChange={(v) => onChange({ disableBlock: v })}
         />
       </div>
+      <div className="wf-general-row">
+        <div className="wf-general-text">
+          <p>{t('settingsBlockTimeout')}</p>
+          <p className="wf-general-desc">{t('settingsBlockTimeoutHint')}</p>
+        </div>
+        <div className="wf-inline-input">
+          <NumberInput
+            value={num(data, 'blockTimeout', 0)}
+            min={0}
+            fallback={0}
+            onChange={(n) => onChange({ blockTimeout: n })}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** One outgoing connection and its editable styling. */
+export interface LineSetting {
+  id: string
+  targetLabel: string
+  label: string
+  animated: boolean
+  color: string
+}
+
+/** Lines tab (Automa BlockSettingLines): per-connection label / animation / color. */
+export function LinesFields({
+  lines,
+  onChange,
+}: {
+  lines: LineSetting[]
+  onChange: (edgeId: string, patch: { label?: string; animated?: boolean; color?: string }) => void
+}) {
+  const { t, bt } = useEditorLocale()
+  if (lines.length === 0) return <p className="wf-form-note">{t('linesEmpty')}</p>
+  return (
+    <div className="flex flex-col gap-3">
+      {lines.map((line) => (
+        <div key={line.id} className="rounded-lg border border-border p-2.5">
+          <p className="mb-2 text-xs font-semibold text-ink">{line.targetLabel}</p>
+          <Field label={t('linesLineLabel')}>
+            <TextInput
+              value={line.label}
+              placeholder="Label"
+              onChange={(value) => onChange(line.id, { label: value })}
+              noSlash
+            />
+          </Field>
+          <Checkbox
+            checked={line.animated}
+            onChange={(value) => onChange(line.id, { animated: value })}
+            label={t('linesAnimated')}
+          />
+          <Field label={t('linesColor')}>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={line.color || '#64748b'}
+                aria-label={t('linesColor')}
+                onChange={(event) => onChange(line.id, { color: event.target.value })}
+                className="h-8 w-12 cursor-pointer rounded border border-border bg-transparent p-0.5"
+              />
+              <button
+                type="button"
+                className="rounded-md border border-border bg-panel px-2 py-1 text-xs text-ink hover:bg-hover"
+                onClick={() => onChange(line.id, { color: '' })}
+              >
+                {bt('Clear')}
+              </button>
+            </div>
+          </Field>
+        </div>
+      ))}
     </div>
   )
 }

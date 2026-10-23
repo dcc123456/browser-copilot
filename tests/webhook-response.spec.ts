@@ -11,13 +11,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { EXECUTORS, type WorkflowExecCtx } from '../src/background/workflow-engine/executors'
 
-function makeCtx(vars: Record<string, unknown> = {}) {
+function makeCtx(vars: Record<string, unknown> = {}, outputs?: Record<string, string>) {
   const emit = vi.fn((_kind: 'status' | 'result' | 'error' | 'info', _text: string) => {})
   const ctx: WorkflowExecCtx = {
     variables: vars,
     refData: undefined,
     signal: new AbortController().signal,
     emit: emit as unknown as WorkflowExecCtx['emit'],
+    ...(outputs ? { outputs } : {}),
   }
   return { ctx, emit }
 }
@@ -147,18 +148,150 @@ describe('webhook response handling', () => {
   })
 })
 
+describe('webhook request contract (Automa parity)', () => {
+  it('interpolates header rows and skips unnamed ones', async () => {
+    const fetchMock = installFetch('{}')
+    const { ctx } = makeCtx({ token: 'T' })
+    await EXECUTORS['webhook']!(
+      {
+        url: 'https://api.test/x',
+        method: 'POST',
+        headers: [
+          { name: 'Authorization', value: 'Bearer {{token}}' },
+          { name: '', value: 'ignored' },
+        ],
+      },
+      ctx,
+    )
+    const call = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect((call[1].headers as Record<string, string>)['Authorization']).toBe('Bearer T')
+    expect(Object.keys(call[1].headers as Record<string, string>)).not.toContain('')
+  })
+
+  it('refuses a non-http URL before any request is made', async () => {
+    const fetchMock = installFetch('{}')
+    const { ctx } = makeCtx()
+    await expect(
+      EXECUTORS['webhook']!({ url: 'ftp://api.test/x', method: 'GET' }, ctx),
+    ).rejects.toThrow('http://')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('GET and HEAD send no body even when one is configured', async () => {
+    for (const method of ['GET', 'HEAD']) {
+      const fetchMock = installFetch('{}')
+      const { ctx } = makeCtx()
+      await EXECUTORS['webhook']!({ url: 'https://api.test/x', method, body: '{"a":1}' }, ctx)
+      const call = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+      expect(call[1].body).toBeUndefined()
+    }
+  })
+
+  it('refuses a JSON body that does not parse', async () => {
+    const fetchMock = installFetch('{}')
+    const { ctx } = makeCtx()
+    await expect(
+      EXECUTORS['webhook']!(
+        { url: 'https://api.test/x', method: 'POST', contentType: 'json', body: '{oops' },
+        ctx,
+      ),
+    ).rejects.toThrow('body 不是合法 JSON')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('routes a non-2xx response to the fallback edge when one is wired', async () => {
+    installFetch('{"error":"nope"}', { ok: false, status: 422 })
+    const { ctx } = makeCtx({}, { fallback: 'fb-node' })
+    const next = await EXECUTORS['webhook']!(
+      { url: 'https://api.test/x', method: 'POST', body: '{}' },
+      ctx,
+    )
+    expect(next).toBe('fb-node')
+  })
+
+  it('throws on a non-2xx response without a fallback', async () => {
+    installFetch('{"error":"nope"}', { ok: false, status: 422 })
+    const { ctx } = makeCtx()
+    await expect(
+      EXECUTORS['webhook']!({ url: 'https://api.test/x', method: 'POST', body: '{}' }, ctx),
+    ).rejects.toThrow('HTTP 422')
+  })
+
+  it('routes a transport failure to the fallback edge', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('Failed to fetch')
+      }),
+    )
+    const { ctx } = makeCtx({}, { fallback: 'fb-node' })
+    const next = await EXECUTORS['webhook']!({ url: 'https://api.test/x', method: 'GET' }, ctx)
+    expect(next).toBe('fb-node')
+  })
+
+  it('$response dataPath exposes status/url and assigns the narrowed value', async () => {
+    installFetch('{"items":[{"id":7}]}')
+    const { ctx } = makeCtx({})
+    await EXECUTORS['webhook']!(
+      {
+        url: 'https://api.test/x',
+        method: 'GET',
+        responseType: 'json',
+        dataPath: '$response.data.items.0.id',
+        assignVariable: true,
+        variableName: 'firstId',
+      },
+      ctx,
+    )
+    expect(ctx.variables['firstId']).toBe(7)
+  })
+
+  it('saveData spreads $assignColumns rows into the data table', async () => {
+    installFetch('[{"id":1},{"id":2}]')
+    const { ctx } = makeCtx({})
+    await EXECUTORS['webhook']!(
+      {
+        url: 'https://api.test/x',
+        method: 'GET',
+        responseType: 'json',
+        saveData: true,
+        dataColumn: '$assignColumns',
+      },
+      ctx,
+    )
+    expect(ctx.variables['dataTable']).toEqual([{ id: 1 }, { id: 2 }])
+  })
+
+  it('saveData under a named column appends one row per array item', async () => {
+    installFetch('[1,2,3]')
+    const { ctx } = makeCtx({})
+    await EXECUTORS['webhook']!(
+      {
+        url: 'https://api.test/x',
+        method: 'GET',
+        responseType: 'json',
+        saveData: true,
+        dataColumn: 'score',
+      },
+      ctx,
+    )
+    expect(ctx.variables['dataTable']).toEqual([{ score: 1 }, { score: 2 }, { score: 3 }])
+  })
+})
+
 describe('webhook content type', () => {
   it('uses the content type the form selected', async () => {
     const fetchMock = installFetch('{}')
     const { ctx } = makeCtx()
     await EXECUTORS['webhook']!(
-      { url: 'https://api.test/x', method: 'POST', contentType: 'form', body: 'a=1' },
+      { url: 'https://api.test/x', method: 'POST', contentType: 'form', body: '{"a":"1"}' },
       ctx,
     )
     const call = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
-    expect((call[1].headers as Record<string, string>)['content-type']).toBe(
+    expect((call[1].headers as Record<string, string>)['Content-Type']).toBe(
       'application/x-www-form-urlencoded',
     )
+    expect(String(call[1].body)).toBe('a=1')
   })
 
   it('defaults to JSON and lets an explicit header win', async () => {

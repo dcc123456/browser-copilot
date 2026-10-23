@@ -13,6 +13,7 @@
  */
 
 import {
+  Circle,
   Copy,
   Info,
   Pencil,
@@ -41,6 +42,8 @@ export interface BlockNodeActions extends Record<string, unknown> {
   onSettings: (id: string) => void
   onEdit: (id: string) => void
   onToggleDisable: (id: string) => void
+  /** Toggles `data.$breakpoint` — pauses a testing run before this block. */
+  onToggleBreakpoint: (id: string) => void
   onRunFromHere: (id: string) => void
 }
 
@@ -74,11 +77,14 @@ export interface BlockNodeData extends Record<string, unknown> {
 export function NodeToolbar({
   id,
   disabled,
+  breakpoint,
   actions,
   extra,
 }: {
   id: string
   disabled: boolean
+  /** Whether the block carries a testing-mode breakpoint. */
+  breakpoint?: boolean
   actions?: BlockNodeActions
   /** Node-specific action shown after the standard ones. */
   extra?: ReactNode
@@ -107,6 +113,18 @@ export function NodeToolbar({
         onClick={stop(actions.onToggleDisable)}
       >
         {disabled ? <ToggleLeft size={14} /> : <ToggleRight size={14} />}
+      </button>
+      <button
+        type="button"
+        title={t('nodeBreakpoint')}
+        aria-pressed={breakpoint === true}
+        onClick={stop(actions.onToggleBreakpoint)}
+      >
+        <Circle
+          size={14}
+          fill={breakpoint ? 'currentColor' : 'none'}
+          className={breakpoint ? 'text-err' : undefined}
+        />
       </button>
       <button type="button" title={t('nodeRunFromHere')} onClick={stop(actions.onRunFromHere)}>
         <Play size={14} />
@@ -156,7 +174,12 @@ function BlockNodeComponent({ id, data, selected }: NodeProps) {
       }}
     >
       {/* Hover action toolbar (Automa block-menu) */}
-      <NodeToolbar id={id} disabled={disabled} actions={node.actions} />
+      <NodeToolbar
+        id={id}
+        disabled={disabled}
+        breakpoint={bd['$breakpoint'] === true}
+        actions={node.actions}
+      />
       {block.inputs > 0 && (
         <Handle
           id={`${block.id}-input-1`}

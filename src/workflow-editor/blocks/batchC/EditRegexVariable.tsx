@@ -9,9 +9,10 @@
  * @module workflow-editor/blocks/batchC/EditRegexVariable
  */
 
-import { useState } from 'react'
-import { Checkbox, Expand, Field, Select, TextArea, TextInput } from '../shared/Field'
+import { Checkbox, Field, Select, TextArea, TextInput } from '../shared/Field'
+import PopupField from '../shared/PopupField'
 import { str } from '../shared/InteractionBase'
+import { useEditorLocale } from '../../locale-context'
 import type { EditFormProps } from '../EditForms'
 
 const METHODS = [
@@ -26,7 +27,7 @@ const FLAGS = [
 ]
 
 export default function EditRegexVariable({ data, onChange }: EditFormProps) {
-  const [showFlags, setShowFlags] = useState(false)
+  const { bt } = useEditorLocale()
   const flags = Array.isArray(data.flag)
     ? (data.flag as unknown[]).filter((f): f is string => typeof f === 'string')
     : []
@@ -95,32 +96,28 @@ export default function EditRegexVariable({ data, onChange }: EditFormProps) {
                 style={{ flex: 1, background: 'transparent', border: 'none' }}
               />
               <span>/</span>
+              <span className="shrink-0 text-xs text-muted">{flags.join('')}</span>
             </div>
           </Field>
         </div>
-        <button
-          type="button"
-          className="wf-icon-btn"
-          title="Flags"
-          onClick={() => setShowFlags(!showFlags)}
-          style={{ minWidth: 64 }}
-        >
-          {flags.length === 0 ? 'flags' : flags.join('')}
-        </button>
       </div>
 
-      {showFlags && (
-        <Expand title="Flags" defaultOpen>
-          {FLAGS.map((flag) => (
-            <Checkbox
-              key={flag.id}
-              checked={flags.includes(flag.id)}
-              onChange={(v) => toggleFlag(flag.id, v)}
-              label={flag.name}
-            />
-          ))}
-        </Expand>
-      )}
+      <PopupField
+        title="Expression flags"
+        summary={flags.length ? flags.join('') : bt('None')}
+        editLabel="Expression flags"
+        icon="lucide:ScanText"
+        size="sm"
+      >
+        {FLAGS.map((flag) => (
+          <Checkbox
+            key={flag.id}
+            checked={flags.includes(flag.id)}
+            onChange={(v) => toggleFlag(flag.id, v)}
+            label={flag.name}
+          />
+        ))}
+      </PopupField>
     </div>
   )
 }

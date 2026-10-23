@@ -2,18 +2,22 @@
  * EditParameterPrompt — React port of Automa's EditParameterPrompt.vue.
  *
  * Prompts the user for parameters before the workflow runs. Holds a timeout
- * and a `parameters` list edited inline (Automa opens a modal; the React editor
- * uses a fold-out).
+ * and a `parameters` list edited in a modal (Automa's max-w-4xl dialog).
  *
  * @module workflow-editor/blocks/batchD/EditParameterPrompt
  */
 
 import type { EditFormProps } from '../EditForms'
-import { Expand, Field, NumberInput, TextArea } from '../shared/Field'
+import { Field, NumberInput, TextArea } from '../shared/Field'
+import PopupField from '../shared/PopupField'
 import { num, str } from '../shared/InteractionBase'
+import { useEditorLocale } from '../../locale-context'
 import ParameterFields, { type WorkflowParameter } from './ParameterFields'
 
 export default function EditParameterPrompt({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
+  const parameterCount = Array.isArray(data.parameters) ? data.parameters.length : 0
+
   return (
     <div className="wf-form">
       <Field label="Description">
@@ -32,12 +36,18 @@ export default function EditParameterPrompt({ data, onChange }: EditFormProps) {
         />
       </Field>
 
-      <Expand title="Insert parameters" defaultOpen>
+      <PopupField
+        title="Parameters"
+        summary={`${parameterCount} ${bt('parameters')}`}
+        editLabel="Insert parameters"
+        icon="lucide:ListChecks"
+        size="xl"
+      >
         <ParameterFields
           value={data.parameters}
           onChange={(parameters: WorkflowParameter[]) => onChange({ parameters })}
         />
-      </Expand>
+      </PopupField>
     </div>
   )
 }

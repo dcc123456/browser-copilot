@@ -18,6 +18,8 @@ import EditConditions from './EditConditions'
 import EditWhileLoop from './EditWhileLoop'
 import EditLoopData from './EditLoopData'
 import EditLoopElements from './EditLoopElements'
+import EditLoopBreakpoint from './EditLoopBreakpoint'
+import EditRepeatTask from './EditRepeatTask'
 import EditJavascriptCode from './EditJavascriptCode'
 import EditExecuteWorkflow from './EditExecuteWorkflow'
 import EditExportData from './EditExportData'
@@ -39,6 +41,8 @@ export const BatchCForms: Record<string, ComponentType<EditFormProps>> = {
   EditWhileLoop,
   EditLoopData,
   EditLoopElements,
+  EditLoopBreakpoint,
+  EditRepeatTask,
   EditJavascriptCode,
   EditExecuteWorkflow,
   // Data

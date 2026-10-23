@@ -17,7 +17,8 @@
  * - With no saved workflows at all, the select stays but a hint points at the
  *   Workflows tab instead of leaving an empty dropdown to guess at.
  *
- * Global data is a mono JSON textarea instead of the CodeMirror modal.
+ * Global data is a mono JSON textarea inside a modal, matching Automa's
+ * dedicated global-data popup.
  *
  * Fields: workflowId, executeId, globalData, insertAllGlobalData,
  * insertAllVars (+ insertVars comma list).
@@ -32,6 +33,7 @@ import type { Workflow } from '../../../lib/workflow/types'
 import { useEditorLocale } from '../../locale-context'
 import { useWorkflowMeta } from '../batchD/WorkflowInfoFields'
 import { Checkbox, Field, IconButton, Select, TextArea, TextInput } from '../shared/Field'
+import PopupField from '../shared/PopupField'
 import { bool, str } from '../shared/InteractionBase'
 import type { EditFormProps } from '../EditForms'
 
@@ -110,18 +112,30 @@ export default function EditExecuteWorkflow({ data, onChange }: EditFormProps) {
         label="Use all current workflow globalData"
       />
 
-      <Field label="Global data (JSON)">
-        <TextArea
-          mono
-          rows={6}
-          value={str(data, 'globalData')}
-          placeholder={'{\n  "key": "value"\n}'}
-          onChange={(v) => onChange({ globalData: v })}
-        />
-      </Field>
-      <p className="wf-form-note">
-        {bt('This will overwrite the global data of the selected workflow.')}
-      </p>
+      <PopupField
+        title="Global data (JSON)"
+        summary={
+          str(data, 'globalData').trim()
+            ? `${str(data, 'globalData').length} ${bt('chars')}`
+            : bt('None')
+        }
+        editLabel="Edit global data"
+        icon="lucide:Brackets"
+        size="md"
+      >
+        <Field label="Global data (JSON)">
+          <TextArea
+            mono
+            rows={12}
+            value={str(data, 'globalData')}
+            placeholder={'{\n  "key": "value"\n}'}
+            onChange={(v) => onChange({ globalData: v })}
+          />
+        </Field>
+        <p className="wf-form-note">
+          {bt('This will overwrite the global data of the selected workflow.')}
+        </p>
+      </PopupField>
 
       <Checkbox
         checked={insertAllVars}

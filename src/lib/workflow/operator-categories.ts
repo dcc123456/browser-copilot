@@ -24,7 +24,11 @@
 import { CATEGORY_META } from './blocks/catalog'
 import { PALETTE_BLOCKS } from './blocks/palette'
 import type { BlockCatalogEntry, BlockCategory } from './blocks/types'
-import { EDIT_LESS_OPERATOR_IDS, JAVASCRIPT_BLOCK_ID } from './operator-class'
+import {
+  EDIT_LESS_OPERATOR_IDS,
+  JAVASCRIPT_BLOCK_ID,
+  NON_OPERATOR_BLOCK_IDS,
+} from './operator-class'
 
 /**
  * Every block an operator tool can name — the same predicate
@@ -35,7 +39,9 @@ import { EDIT_LESS_OPERATOR_IDS, JAVASCRIPT_BLOCK_ID } from './operator-class'
  * they cannot drift apart silently.
  */
 const OPERATOR_ENTRIES: readonly BlockCatalogEntry[] = PALETTE_BLOCKS.filter(
-  (entry) => !entry.disableEdit || EDIT_LESS_OPERATOR_IDS.has(entry.id),
+  (entry) =>
+    !NON_OPERATOR_BLOCK_IDS.has(entry.id) &&
+    (!entry.disableEdit || EDIT_LESS_OPERATOR_IDS.has(entry.id)),
 )
 
 /**

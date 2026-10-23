@@ -32,7 +32,7 @@ export default function EditParseExcel({ data, onChange }: EditFormProps) {
           onChange={(v) => onChange({ sourceMode: v })}
           options={[
             { value: 'user-select', label: 'User picks a file' },
-            { value: 'workflow-file', label: 'Workflow file variable' },
+            { value: 'workflow-file', label: 'File from an earlier step' },
             { value: 'file-path', label: 'Specific file path' },
           ]}
         />
@@ -47,22 +47,29 @@ export default function EditParseExcel({ data, onChange }: EditFormProps) {
       )}
 
       {sourceMode === 'workflow-file' && (
-        <Field
-          label="File variable"
-          title="Variable holding exactly one spreadsheet file artifact or data URL"
-        >
-          <TextInput
-            value={typeof data.fileVariable === 'string' ? data.fileVariable : ''}
-            placeholder="e.g. lastFile"
-            list="parse-excel-variables"
-            onChange={(v) => onChange({ fileVariable: v })}
-          />
-          <datalist id="parse-excel-variables">
-            {SUGGESTED_VARIABLES.map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
-        </Field>
+        <>
+          <Field
+            label="Variable holding the file"
+            title="Name of the workflow variable that contains exactly one spreadsheet artifact or data URL"
+          >
+            <TextInput
+              value={typeof data.fileVariable === 'string' ? data.fileVariable : ''}
+              placeholder="e.g. lastFile"
+              list="parse-excel-variables"
+              onChange={(v) => onChange({ fileVariable: v })}
+            />
+            <datalist id="parse-excel-variables">
+              {SUGGESTED_VARIABLES.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+          </Field>
+          <p className="wf-form-note">
+            {bt(
+              'Reads one spreadsheet that an earlier block produced and saved in a variable — for example a downloaded or generated .xlsx/.csv. Enter the variable name, not the workflow JSON and not a local path.',
+            )}
+          </p>
+        </>
       )}
 
       <Field

@@ -10,8 +10,8 @@
  *
  * @module workflow-editor/blocks/batchA/EditGetText
  */
-import { useState } from 'react'
 import { Checkbox, Field, TextInput } from '../shared/Field'
+import PopupField from '../shared/PopupField'
 import { useEditorLocale } from '../../locale-context'
 import type { EditFormProps } from '../EditForms'
 import InteractionBase, { bool, str } from '../shared/InteractionBase'
@@ -33,7 +33,6 @@ function readRegexExp(data: Record<string, unknown>): string[] {
 
 export default function EditGetText({ data, onChange }: EditFormProps) {
   const { bt } = useEditorLocale()
-  const [showFlags, setShowFlags] = useState(false)
   const regexExp = readRegexExp(data)
 
   const toggleFlag = (id: string, on: boolean) => {
@@ -53,30 +52,25 @@ export default function EditGetText({ data, onChange }: EditFormProps) {
             placeholder="Regex"
             onChange={(v) => onChange({ regex: v })}
           />
-          <button
-            type="button"
-            className="wf-icon-btn"
-            style={{ whiteSpace: 'nowrap' }}
-            onClick={() => setShowFlags((s) => !s)}
-            title={bt('Expression flags')}
-          >
-            /{regexExp.join('') || 'flags'}
-          </button>
+          <span className="shrink-0 text-xs text-muted">/{regexExp.join('') || bt('None')}</span>
         </div>
       </Field>
-      {showFlags && (
-        <div style={{ marginBottom: 8 }}>
-          <p style={{ margin: '4px 0', fontSize: 12, opacity: 0.75 }}>{bt('Expression flags')}</p>
-          {REGEX_FLAGS.map((item) => (
-            <Checkbox
-              key={item.id}
-              checked={regexExp.includes(item.id)}
-              onChange={(v) => toggleFlag(item.id, v)}
-              label={item.name}
-            />
-          ))}
-        </div>
-      )}
+      <PopupField
+        title="Expression flags"
+        summary={regexExp.length ? regexExp.join('') : bt('None')}
+        editLabel="Expression flags"
+        icon="lucide:ScanText"
+        size="sm"
+      >
+        {REGEX_FLAGS.map((item) => (
+          <Checkbox
+            key={item.id}
+            checked={regexExp.includes(item.id)}
+            onChange={(v) => toggleFlag(item.id, v)}
+            label={item.name}
+          />
+        ))}
+      </PopupField>
 
       <div style={{ display: 'flex', gap: 8 }}>
         <Field label="Text prefix">

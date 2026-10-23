@@ -12,8 +12,11 @@
  *    kernel from build 3 still resident in a frame — an extension reload with
  *    no navigation since — has no branch for it, so without this bump the op
  *    would fall through to whatever the old kernel does with an unknown action.
+ * 5: element selectors given to `count_elements` / `element_selector_at` resolve
+ *    XPath as well as CSS (Automa element loops). A kernel from build 4 would
+ *    report 0 matches for an XPath selector and the loop would run 0 times.
  *
  * @module inpage/kernel-version
  */
 
-export const KERNEL_VERSION = 4
+export const KERNEL_VERSION = 5

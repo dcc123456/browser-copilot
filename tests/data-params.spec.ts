@@ -82,6 +82,19 @@ describe('dataValueSites', () => {
     expect(sites.map((s) => s.path)).toEqual([['conditions', 0, 'right']])
   })
 
+  it('treats only the value of each set-variable row as data', () => {
+    const sites = dataValueSites('set-variable', {
+      variables: [
+        { name: 'token', value: 'abc' },
+        { name: 'header', value: 'Bearer {{token}}' },
+      ],
+    })
+    expect(sites).toEqual([
+      { path: ['variables', 0, 'value'], value: 'abc' },
+      { path: ['variables', 1, 'value'], value: 'Bearer {{token}}' },
+    ])
+  })
+
   it('walks a deep subtree', () => {
     const sites = dataValueSites('webhook', {
       method: 'POST',

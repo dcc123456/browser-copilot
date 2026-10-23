@@ -60,3 +60,34 @@ describe('a text spec whose word is a fragment of what the page says', () => {
     expect(countTarget('草稿')).toBe(1)
   })
 })
+
+describe('flat element selectors (Automa loop-data elements)', () => {
+  beforeEach(() => {
+    makePage('<ul><li id="a">one</li><li id="b">two</li><li id="c">three</li></ul>')
+  })
+
+  const count = (value: string): number =>
+    Number(runOp({ action: 'count_elements', value } as unknown as Op).data)
+
+  it('counts a bare XPath expression', () => {
+    expect(count('//li')).toBe(3)
+  })
+
+  it('counts an explicitly prefixed XPath expression', () => {
+    expect(count('xpath://li[2]')).toBe(1)
+  })
+
+  it('still counts a CSS selector', () => {
+    expect(count('li#b')).toBe(1)
+  })
+
+  it('returns a CSS selector for the n-th XPath match', () => {
+    const result = runOp({
+      action: 'element_selector_at',
+      value: '//li',
+      index: 2,
+    } as unknown as Op)
+    expect(result.ok).toBe(true)
+    expect(result.data).toBe('li[id="c"]')
+  })
+})

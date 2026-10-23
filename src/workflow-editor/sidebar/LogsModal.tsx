@@ -125,7 +125,7 @@ export default function LogsModal({
         onClose={onClose}
         icon="lucide:SquareTerminal"
         title={t('logsTitle')}
-        size="md"
+        size="xl"
         actions={
           debugMode ? (
             <span className="wf-logs-debug-badge">
@@ -134,7 +134,7 @@ export default function LogsModal({
           ) : undefined
         }
       >
-        <div className="wf-runs-list">
+        <div className="wf-runs-list min-h-[50vh]">
           {all.length === 0 && <p className="wf-form-note">{t('logsEmpty')}</p>}
           {all.map((run) => (
             <RunRow key={run.runId} run={run} onOpen={(r) => setOpenRunId(r.runId)} />

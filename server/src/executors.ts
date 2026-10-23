@@ -35,9 +35,13 @@ import {
   selectOptionFields,
   pickTabIndex,
   scrollSpecFrom,
-  webhookContentTypeOf,
-  webhookRecord,
+  variableAssignmentsOf,
 } from '../../src/lib/workflow/block-output'
+import {
+  appendWebhookRows,
+  buildWebhookRequest,
+  decodeWebhookResponse,
+} from '../../src/lib/workflow/webhook'
 import {
   artifactFromBytes,
   mimeTypeForFilename,
@@ -909,10 +913,19 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
 
   const setVariable: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    const name = String(data['variableName'] ?? '')
-    const value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
-    ctx.variables[name] = value
-    ctx.emit('result', `已设置变量 ${name} = ${logPreview(value) || '(空)'}`)
+    const assignments = variableAssignmentsOf(data)
+    if (assignments.length === 0) {
+      throw new Error('set-variable: 没有填写变量名，未设置任何变量')
+    }
+    for (const assignment of assignments) {
+      ctx.variables[assignment.name] = interpolate(
+        String(assignment.value ?? ''),
+        ctx.variables,
+        ctx.refData,
+      )
+    }
+    const names = assignments.map((assignment) => assignment.name).join(', ')
+    ctx.emit('result', `已设置 ${assignments.length} 个变量：${names}`)
     return null
   }
 
@@ -1084,71 +1097,68 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
 
   const webhook: BlockExecutor = async (data, ctx) => {
     assertActive(ctx)
-    const url = interpolate(String(data['url'] ?? ''), ctx.variables, ctx.refData)
-    const method = String(data['method'] ?? 'POST').toUpperCase()
+    const fallback = ctx.outputs?.['fallback'] ?? null
+    const request = await buildWebhookRequest(data, ctx.variables, ctx.refData, interpolate)
     const timeout = Math.max(0, Number(data['timeout'] ?? 30000))
-    // `variableName` is the catalog + edit-form key; `responseVariable` is the
-    // legacy name. The extension accepts both; reading only the latter meant a
-    // user- or model-chosen name never existed downstream.
-    const responseVariable = String(
-      data['variableName'] || data['responseVariable'] || 'lastHttpResponse',
-    )
-    // `responseType` decides how the body is decoded and `dataPath` narrows it —
-    // both are edit-form fields the port used to ignore, so the stored record had
-    // no `data` key and `{{resp.data.total}}` dangled there.
     const responseType = String(data['responseType'] ?? 'json')
     const dataPath = String(data['dataPath'] ?? '')
 
-    let headers: Record<string, string> = { 'content-type': webhookContentTypeOf(data) }
-    const headersRaw = interpolate(String(data['headers'] ?? ''), ctx.variables, ctx.refData)
-    if (headersRaw.trim()) {
-      try {
-        const parsed = JSON.parse(headersRaw)
-        if (parsed && typeof parsed === 'object')
-          headers = { ...headers, ...parsed } as Record<string, string>
-      } catch {
-        ctx.emit('error', 'webhook: headers 不是合法 JSON，使用默认头')
-      }
-    }
-
-    let bodyText: string | undefined
-    const rawBody = interpolate(String(data['body'] ?? ''), ctx.variables, ctx.refData)
-    if (method !== 'GET' && method !== 'HEAD' && rawBody !== '') {
-      let parsed: unknown = rawBody
-      try {
-        parsed = JSON.parse(rawBody)
-      } catch {
-        /* fall back to the raw string */
-      }
-      bodyText = typeof parsed === 'string' ? parsed : JSON.stringify(parsed)
-    }
-
+    const controller = new AbortController()
+    const onAbort = (): void => controller.abort()
+    ctx.signal.addEventListener('abort', onAbort, { once: true })
+    const timer = timeout > 0 ? setTimeout(() => controller.abort(), timeout) : undefined
+    let response: Response
     try {
-      const controller = new AbortController()
-      const onAbort = (): void => controller.abort()
-      ctx.signal.addEventListener('abort', onAbort, { once: true })
-      const timer = timeout > 0 ? setTimeout(() => controller.abort(), timeout) : undefined
-      try {
-        const response = await fetch(url, {
-          method,
-          headers,
-          body: bodyText,
-          signal: controller.signal,
-        })
-        const record = await webhookRecord(response, responseType, dataPath)
-        ctx.variables[responseVariable] = record
-        ctx.emit('result', `${method} ${response.status} ${record.body.slice(0, 80)}`)
-      } finally {
-        if (timer !== undefined) clearTimeout(timer)
-        ctx.signal.removeEventListener('abort', onAbort)
-      }
+      response = await fetch(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body,
+        signal: controller.signal,
+      })
     } catch (error) {
-      // A request that never landed must fail the step, like it does on the
-      // extension: logging it and returning let a workflow continue as though
-      // the webhook had been delivered.
-      if ((error as Error)?.name === 'AbortError') throw new Error(`${method} 请求超时或已取消`)
-      throw error
+      if (ctx.signal.aborted) throw error
+      const reason = controller.signal.aborted
+        ? `${request.method} 请求超时（${timeout}ms）`
+        : `${request.method} 请求失败：${error instanceof Error ? error.message : String(error)}`
+      if (fallback) {
+        ctx.emit('info', `webhook: ${reason}，改走 fallback 分支`)
+        return fallback
+      }
+      throw new Error(`webhook: ${reason}：${request.url}`)
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+      ctx.signal.removeEventListener('abort', onAbort)
     }
+
+    if (!response.ok) {
+      const status = `HTTP ${response.status} ${response.statusText}`.trim()
+      if (fallback) {
+        ctx.emit('info', `webhook: ${status}，改走 fallback 分支`)
+        return fallback
+      }
+      throw new Error(`webhook: ${status}（${request.method} ${request.url}）`)
+    }
+
+    const { record, value } = await decodeWebhookResponse(response, responseType, dataPath)
+    const responseVariable = String(
+      data['variableName'] || data['responseVariable'] || 'lastHttpResponse',
+    ).trim()
+    if (responseVariable !== '') ctx.variables[responseVariable] = record
+    if (data['assignVariable'] === true) {
+      const name = String(data['variableName'] ?? '').trim()
+      if (name !== '') ctx.variables[name] = value
+    }
+    if (data['saveData'] === true) {
+      const rows = appendWebhookRows(ctx.variables, String(data['dataColumn'] ?? ''), value)
+      ctx.emit(
+        'info',
+        rows > 0
+          ? `webhook: 已向数据表写入 ${rows} 行`
+          : 'webhook: 未指定数据列（dataColumn），响应未写入数据表',
+      )
+    }
+    const preview = typeof value === 'string' ? value : JSON.stringify(value ?? '')
+    ctx.emit('result', `${request.method} ${response.status} ${preview.slice(0, 80)}`)
     return null
   }
 
@@ -2342,7 +2352,7 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
   const loopBreakpointExec: BlockExecutor = async (data) => {
     const raw = data['loopId']
     const loopId = typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : undefined
-    throw new LoopBreakpointError(loopId)
+    throw new LoopBreakpointError(loopId, data['clearLoop'] === true)
   }
 
   /** Launch triggers act as pass-through entry points. */

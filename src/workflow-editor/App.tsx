@@ -41,6 +41,7 @@ import type {
   WorkflowSettings,
 } from '../lib/workflow/types'
 import { migrateWorkflow, triggerFromNodes } from '../lib/workflow/migrate'
+import { readEdgeStyle, workflowEdgeOf } from '../lib/workflow/edge-data'
 import { ensureSecretProducer, type SuggestionGraph } from '../lib/workflow/var-suggestions'
 import {
   appendOperatorChain,
@@ -90,6 +91,7 @@ import {
 } from './flow/connections'
 import Sidebar, { loadWidth } from './sidebar/Sidebar'
 import BlockPalette from './sidebar/BlockPalette'
+import WorkflowSidebarHeader from './sidebar/WorkflowSidebarHeader'
 import BlockEditForm from './sidebar/BlockEditForm'
 import Modal from './ui/Modal'
 import BlockSettingsModal from './blocks/shared/BlockSettingsModal'
@@ -104,6 +106,7 @@ import { SlashMenuProvider } from './blocks/shared/SlashVariableMenu'
 import LogsModal from './sidebar/LogsModal'
 import { WorkflowMetaProvider } from './blocks/batchD/WorkflowInfoFields'
 import TopToolbar from './toolbar/TopToolbar'
+import DebugBar, { type DebugPause } from './debug/DebugBar'
 import { useRepairEvents as useEditorRepairEvents } from './use-repair-events'
 import CertificationModal from './sidebar/CertificationModal'
 import type { VerificationReport } from '../background/workflow-engine/goal-verification'
@@ -189,16 +192,6 @@ function toWorkflowNode(n: FlowNode): WorkflowNode {
   }
 }
 
-/** The workflow file's handle fields: React Flow allows `null`, the file does not. */
-function edgeHandlesOf(e: Edge): Pick<WorkflowEdge, 'sourceHandle' | 'targetHandle'> {
-  return { sourceHandle: e.sourceHandle ?? undefined, targetHandle: e.targetHandle ?? undefined }
-}
-
-/** A canvas edge in the shape the workflow file uses. */
-function toWorkflowEdge(e: Edge): WorkflowEdge {
-  return { id: e.id, source: e.source, target: e.target, ...edgeHandlesOf(e) }
-}
-
 /**
  * Re-draw an edge the group planner re-anchored. connections.ts owns what a
  * canvas edge looks like, so a folded or unfolded chain renders like a drawn one.
@@ -234,6 +227,17 @@ export default function EditorApp() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
+  /** Testing mode: run with breakpoint pauses (Automa's testingMode). */
+  const [testingMode, setTestingMode] = useState(false)
+  /** True while this editor's testing run is in flight (drives the poll). */
+  const [testingRunActive, setTestingRunActive] = useState(false)
+  const [debugPause, setDebugPause] = useState<
+    | (DebugPause & {
+        runId: string
+        variables?: Record<string, unknown>
+      })
+    | null
+  >(null)
   const [certReport, setCertReport] = useState<VerificationReport | null>(null)
   const [recording, setRecording] = useState(false)
   const [dirty, setDirty] = useState(false)
@@ -283,7 +287,7 @@ export default function EditorApp() {
     const { nodes: drawn, edges: wired } = canvasRef.current
     pushCanvasSnapshot(historyRef.current, {
       nodes: structuredClone(drawn.map(toWorkflowNode)),
-      edges: structuredClone(wired.map(toWorkflowEdge)),
+      edges: structuredClone(wired.map(workflowEdgeOf)),
       selectedIds: drawn.filter((node) => node.selected).map((node) => node.id),
     })
   }, [])
@@ -393,14 +397,18 @@ export default function EditorApp() {
         setEdges(
           healEdgeHandles(
             flowNodes,
-            wf.drawflow.edges.map((e) => ({
-              id: e.id,
-              source: e.source,
-              target: e.target,
-              sourceHandle: e.sourceHandle,
-              targetHandle: e.targetHandle,
-              type: 'custom',
-            })),
+            wf.drawflow.edges.map((e) => {
+              const style = readEdgeStyle(e)
+              return {
+                id: e.id,
+                source: e.source,
+                target: e.target,
+                sourceHandle: e.sourceHandle,
+                targetHandle: e.targetHandle,
+                type: 'custom',
+                ...(Object.keys(style).length > 0 ? { data: style } : {}),
+              }
+            }),
           ),
         )
         if (wf.drawflow.position && typeof wf.drawflow.zoom === 'number') {
@@ -665,6 +673,31 @@ export default function EditorApp() {
     [pushHistory],
   )
 
+  // Automa's block-menu breakpoint dot: `$breakpoint` lives in block data, so
+  // it saves, exports and undo like any other property.
+  const toggleNodeBreakpoint = useCallback(
+    (id: string) => {
+      pushHistory()
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === id
+            ? {
+                ...n,
+                data: {
+                  ...n.data,
+                  blockData: {
+                    ...n.data.blockData,
+                    $breakpoint: n.data.blockData['$breakpoint'] !== true,
+                  },
+                },
+              }
+            : n,
+        ),
+      )
+    },
+    [pushHistory],
+  )
+
   // Nodes the run gate proves cannot do their job (no locator, no key, no
   // url…). Recomputed from the live canvas on every edit, so a red badge never
   // lies and never lingers after the parameter is filled in. Same rule the
@@ -685,7 +718,7 @@ export default function EditorApp() {
     if (!workflowId) return null
     const { x, y, zoom } = reactFlow.getViewport()
     const wfNodes: WorkflowNode[] = nodes.map(toWorkflowNode)
-    const wfEdges: WorkflowEdge[] = edges.map(toWorkflowEdge)
+    const wfEdges: WorkflowEdge[] = edges.map(workflowEdgeOf)
     return {
       id: workflowId,
       name: meta.name || t('untitled'),
@@ -701,19 +734,21 @@ export default function EditorApp() {
     }
   }, [workflowId, nodes, edges, meta, reactFlow, t])
 
-  const handleSave = useCallback(async (): Promise<void> => {
+  const handleSave = useCallback(async (): Promise<boolean> => {
     const wf = await buildWorkflow()
-    if (!wf) return
+    if (!wf) return false
     setSaving(true)
     setError(null)
     try {
       await sendCommand({ type: 'workflows.save', workflow: wf })
       setDirty(false)
       toast.show(t('saved'), 'ok')
+      return true
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setError(msg)
       toast.show(`${t('saveFailed')}: ${msg}`, 'error')
+      return false
     } finally {
       setSaving(false)
     }
@@ -722,8 +757,21 @@ export default function EditorApp() {
   const handleRun = useCallback(
     async (startNodeId?: string) => {
       if (!workflowId) return
-      await handleSave()
+      // Automa refuses a second testing run: two paused runs would compete for
+      // one debug bar, and only one of them could be driven.
+      if (testingMode) {
+        const board = await sendCommand({ type: 'workflows.running', workflowId }).catch(() => null)
+        if (board?.type === 'workflows.running' && board.runs.some((run) => run.testing === true)) {
+          toast.show(t('testingAlreadyRunning'), 'error')
+          return
+        }
+      }
+      // Testing mode steps through the SAVED graph the background will load;
+      // running on unsaved data would step a graph nobody can see.
+      if (!(await handleSave())) return
       setRunning(true)
+      const testing = testingMode
+      if (testing) setTestingRunActive(true)
       try {
         // Run scoped to the window that opened this editor (see host-window).
         const windowId = hostWindowId()
@@ -732,6 +780,7 @@ export default function EditorApp() {
           id: workflowId,
           startAt: startNodeId,
           ...(windowId !== undefined ? { windowId } : {}),
+          ...(testing ? { testing: true } : {}),
         })
         if (r.type === 'workflows.run') {
           const cert = (r.outcome as { certification?: VerificationReport }).certification
@@ -759,9 +808,95 @@ export default function EditorApp() {
         toast.show(`${t('runFailed')}: ${msg}`, 'error')
       } finally {
         setRunning(false)
+        if (testing) setTestingRunActive(false)
       }
     },
-    [workflowId, handleSave, blockedNodes, toast, t],
+    [workflowId, handleSave, blockedNodes, toast, t, testingMode],
+  )
+
+  // While a testing run is alive, poll its pause. A run that vanishes from
+  // `runs` but is absent from `finished` was lost with its worker — the run
+  // request's own catch reports the failure; this only clears the debug bar
+  // and says why, never silently resuming.
+  useEffect(() => {
+    if (!testingRunActive || !workflowId) return
+    let disposed = false
+    let observedRunId: string | null = null
+    const poll = async (): Promise<void> => {
+      try {
+        const result = await sendCommand({ type: 'workflows.running', workflowId })
+        if (disposed || result.type !== 'workflows.running') return
+        const active = result.runs.find((run) => run.testing === true)
+        if (!active) {
+          setDebugPause((current) => (current === null ? current : null))
+          if (
+            observedRunId !== null &&
+            !result.finished.some((run) => run.runId === observedRunId)
+          ) {
+            toast.show(t('debugRunLost'), 'error')
+            setTestingRunActive(false)
+          }
+          return
+        }
+        observedRunId = active.runId
+        const paused = active.debug?.paused
+        if (!paused) {
+          setDebugPause((current) => (current === null ? current : null))
+          return
+        }
+        const snapshot = active.snapshots
+          ? [...active.snapshots].reverse().find((entry) => entry.nodeId === paused.nodeId)
+          : undefined
+        setDebugPause((current) => {
+          if (
+            current &&
+            current.runId === active.runId &&
+            current.nodeId === paused.nodeId &&
+            current.at === paused.at &&
+            (current.variables !== undefined || snapshot === undefined)
+          ) {
+            return current
+          }
+          return {
+            runId: active.runId,
+            nodeId: paused.nodeId,
+            label: paused.label,
+            at: paused.at,
+            ...(snapshot ? { variables: snapshot.variables } : {}),
+          }
+        })
+      } catch {
+        // The run request reports its own transport failure; keep polling so
+        // the bar still follows a run that outlives one failed poll.
+      }
+    }
+    void poll()
+    const timer = setInterval(() => void poll(), 800)
+    return () => {
+      disposed = true
+      clearInterval(timer)
+    }
+  }, [testingRunActive, workflowId, toast, t])
+
+  /** Answers a held pause. Stop is the ordinary cancel path in the background. */
+  const controlDebug = useCallback(
+    async (action: 'resume' | 'next' | 'stop'): Promise<void> => {
+      const runId = debugPause?.runId
+      if (!runId) return
+      // Clear immediately: the next poll re-fills it only if the run pauses
+      // again, so a stale bar can never issue a second resume.
+      setDebugPause(null)
+      try {
+        const result = await sendCommand({ type: 'debug.control', runId, action })
+        if (result.type === 'debug.control' && !result.ok && action !== 'stop') {
+          toast.show(t('debugRunLost'), 'error')
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        toast.show(`${t('runFailed')}: ${msg}`, 'error')
+      }
+    },
+    [debugPause?.runId, toast, t],
   )
 
   /** Select a node and scroll the canvas to it (the run log's locate action). */
@@ -788,9 +923,18 @@ export default function EditorApp() {
       onSettings: openNodeSettings,
       onEdit: openNodeEditor,
       onToggleDisable: toggleNodeDisabled,
+      onToggleBreakpoint: toggleNodeBreakpoint,
       onRunFromHere: (id: string) => void handleRun(id),
     }),
-    [deleteNode, duplicateNode, openNodeSettings, openNodeEditor, toggleNodeDisabled, handleRun],
+    [
+      deleteNode,
+      duplicateNode,
+      openNodeSettings,
+      openNodeEditor,
+      toggleNodeDisabled,
+      toggleNodeBreakpoint,
+      handleRun,
+    ],
   )
 
   /** Why a selection cannot become a group, in the user's language. */
@@ -821,7 +965,7 @@ export default function EditorApp() {
       .map((n) => n.id)
     const result = planGroupPack(
       nodes.map(toWorkflowNode),
-      edges.map(toWorkflowEdge),
+      edges.map(workflowEdgeOf),
       selectedIds,
       newId(),
       t('groupDefaultName'),
@@ -851,7 +995,7 @@ export default function EditorApp() {
       if (!node) return
       const { nodes: restored, edges: rewired } = unpackGroupNode(
         toWorkflowNode(node),
-        edges.map(toWorkflowEdge),
+        edges.map(workflowEdgeOf),
         { idFactory: newId, takenIds: new Set(nodes.map((n) => n.id)) },
       )
       pushHistory()
@@ -919,10 +1063,13 @@ export default function EditorApp() {
             // callbacks — every other node's data keeps its identity per render.
             ...(n.data.block?.id === GROUP_BLOCK_ID ? { groupActions } : {}),
             ...(reason === undefined ? {} : { runState: 'error' as const, blockedReason: reason }),
+            // A paused testing run highlights its node with the same ring a
+            // running node uses.
+            ...(debugPause?.nodeId === n.id ? { running: true } : {}),
           },
         }
       }),
-    [nodes, nodeActions, groupActions, blockedNodes],
+    [nodes, nodeActions, groupActions, blockedNodes, debugPause?.nodeId],
   )
 
   const toggleRecording = useCallback(async () => {
@@ -1044,6 +1191,34 @@ export default function EditorApp() {
     [nodes, settingsForId],
   )
   const settingsBlock = settingsNode?.data.block ?? null
+
+  const settingsLines = useMemo(() => {
+    if (!settingsForId) return []
+    return edges
+      .filter((edge) => edge.source === settingsForId)
+      .map((edge) => {
+        const style = readEdgeStyle(edge.data)
+        const target = nodes.find((node) => node.id === edge.target)
+        return {
+          id: edge.id,
+          targetLabel: target?.data.block?.name ?? edge.target,
+          label: style.label ?? '',
+          animated: style.animated === true,
+          color: style.color ?? '',
+        }
+      })
+  }, [edges, nodes, settingsForId])
+
+  const changeLineStyle = useCallback(
+    (edgeId: string, patch: { label?: string; animated?: boolean; color?: string }): void => {
+      setEdges((current) =>
+        current.map((edge) =>
+          edge.id === edgeId ? { ...edge, data: { ...(edge.data ?? {}), ...patch } } : edge,
+        ),
+      )
+    },
+    [],
+  )
 
   // Every currently selected node id (box-select / modifier+click / shift-range).
   // Drives edge highlighting for the WHOLE selection — `selectedId` alone only
@@ -1375,11 +1550,8 @@ export default function EditorApp() {
     <EditorLocaleContext.Provider value={editorLocale}>
       <div className="wf-editor">
         <TopToolbar
-          workflowName={meta.name}
-          workflowIcon={meta.icon}
           paletteOpen={paletteOpen}
           onTogglePalette={() => setPaletteOpen((o) => !o)}
-          onRename={(name) => setMeta((m) => ({ ...m, name }))}
           debugMode={meta.settings.debugMode}
           onToggleDebug={() =>
             setMeta((m) => ({
@@ -1387,7 +1559,8 @@ export default function EditorApp() {
               settings: { ...m.settings, debugMode: !m.settings.debugMode },
             }))
           }
-          dirty={dirty}
+          testingMode={testingMode}
+          onToggleTesting={() => setTestingMode((on) => !on)}
           saving={saving}
           running={running}
           recording={recording}
@@ -1478,7 +1651,15 @@ export default function EditorApp() {
             onWidthChange={setPaletteWidth}
             side="left"
           >
-            <BlockPalette />
+            <div className="flex h-full min-h-0 flex-col">
+              <WorkflowSidebarHeader
+                workflowName={meta.name}
+                workflowIcon={meta.icon}
+                dirty={dirty}
+                onRename={(name) => setMeta((m) => ({ ...m, name }))}
+              />
+              <BlockPalette />
+            </div>
             {editOverlay}
           </Sidebar>
 
@@ -1489,6 +1670,14 @@ export default function EditorApp() {
             onUndo={undoAiBatch}
             t={t}
           />
+
+          {debugPause && (
+            <DebugBar
+              pause={debugPause}
+              {...(debugPause.variables ? { variables: debugPause.variables } : {})}
+              onControl={(action) => void controlDebug(action)}
+            />
+          )}
         </div>
 
         {error && (
@@ -1516,6 +1705,8 @@ export default function EditorApp() {
               block={settingsBlock}
               data={settingsNode?.data.blockData ?? {}}
               onChange={(patch) => patchNode(settingsForId, patch)}
+              lines={settingsLines}
+              onLineChange={changeLineStyle}
             />
           </SlashMenuProvider>
         )}

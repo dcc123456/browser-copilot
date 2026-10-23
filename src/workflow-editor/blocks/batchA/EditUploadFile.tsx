@@ -21,7 +21,7 @@
  * @module workflow-editor/blocks/batchA/EditUploadFile
  */
 import { useEditorLocale } from '../../locale-context'
-import { Checkbox, Field, TextInput } from '../shared/Field'
+import { Checkbox, Field, Select, TextInput } from '../shared/Field'
 import DownloadFilePicker from '../shared/DownloadFilePicker'
 import SelectorField from '../shared/SelectorField'
 import type { EditFormProps } from '../EditForms'
@@ -51,28 +51,16 @@ export default function EditUploadFile({ data, onChange }: EditFormProps) {
   return (
     <div className="wf-form flex flex-col gap-3">
       <Field label="Upload source">
-        <div className="flex flex-col gap-1.5">
-          {(
-            [
-              ['user-select', 'User picks files'],
-              ['workflow-file', 'Workflow file variable'],
-              ['latest-download', 'Latest download file'],
-              ['file-path', 'Specific file path'],
-            ] as const
-          ).map(([value, label]) => (
-            <label key={value} className="flex cursor-pointer items-center gap-2 text-sm text-ink">
-              <input
-                type="radio"
-                name="upload-source-mode"
-                value={value}
-                checked={sourceMode === value}
-                onChange={() => onChange({ sourceMode: value })}
-                className="accent-accent"
-              />
-              <span>{bt(label)}</span>
-            </label>
-          ))}
-        </div>
+        <Select
+          value={sourceMode}
+          onChange={(v) => onChange({ sourceMode: v })}
+          options={[
+            { value: 'user-select', label: 'User picks files' },
+            { value: 'workflow-file', label: 'File from an earlier step' },
+            { value: 'latest-download', label: 'Latest download file' },
+            { value: 'file-path', label: 'Specific file path' },
+          ]}
+        />
       </Field>
 
       {sourceMode === 'user-select' ? (
@@ -87,22 +75,29 @@ export default function EditUploadFile({ data, onChange }: EditFormProps) {
           />
         </Field>
       ) : sourceMode === 'workflow-file' ? (
-        <Field
-          label="File variable"
-          title="Variable holding a data URL, a file artifact, or an array of artifacts"
-        >
-          <TextInput
-            value={typeof data.fileVariable === 'string' ? data.fileVariable : ''}
-            placeholder="e.g. lastScreenshot"
-            list="upload-file-variables"
-            onChange={(v) => onChange({ fileVariable: v })}
-          />
-          <datalist id="upload-file-variables">
-            {SUGGESTED_VARIABLES.map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
-        </Field>
+        <>
+          <Field
+            label="Variable holding the file"
+            title="Name of the workflow variable that contains a data URL, a file artifact, or an array of artifacts"
+          >
+            <TextInput
+              value={typeof data.fileVariable === 'string' ? data.fileVariable : ''}
+              placeholder="e.g. lastScreenshot"
+              list="upload-file-variables"
+              onChange={(v) => onChange({ fileVariable: v })}
+            />
+            <datalist id="upload-file-variables">
+              {SUGGESTED_VARIABLES.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+          </Field>
+          <p className="wf-form-note">
+            {bt(
+              'Reads a file that an earlier block produced and saved in a variable — for example a screenshot, a generated image, or an uploaded artifact. Enter the variable name, not the workflow JSON and not a local path.',
+            )}
+          </p>
+        </>
       ) : sourceMode === 'file-path' ? (
         <>
           <Field

@@ -3,7 +3,9 @@ import {
   applyTriggerSelection,
   triggerSelectionOf,
   TRIGGER_KIND_FIELDS,
+  withTriggerSpecs,
 } from '../src/lib/workflow/trigger-patch'
+import { newTriggerSpec } from '../src/lib/workflow/triggers'
 import type { Workflow, WorkflowEdge, WorkflowNode } from '../src/lib/workflow/types'
 
 function node(id: string, blockId: string, data: Record<string, unknown> = {}): WorkflowNode {
@@ -220,5 +222,87 @@ describe('triggerSelectionOf', () => {
   it('round-trips through applyTriggerSelection', () => {
     const sel = { type: 'interval' as const, params: { interval: 45 } }
     expect(triggerSelectionOf(applyTriggerSelection(withTrigger(), sel))).toEqual(sel)
+  })
+})
+
+describe('multi-trigger workflows', () => {
+  const multi = () =>
+    withTriggerSpecs(withTrigger(), [
+      { ...newTriggerSpec('interval'), data: { interval: 15 } },
+      { ...newTriggerSpec('visit-web'), data: { url: 'https://x.test/*' } },
+    ])
+
+  const triggerData = (wf: Workflow): Record<string, unknown> =>
+    wf.drawflow.nodes.find((n) => n.id === 't')!.data
+
+  const specsOf = (wf: Workflow): Record<string, unknown>[] =>
+    triggerData(wf)['triggers'] as Record<string, unknown>[]
+
+  it('mirrors the first spec onto the flat fields and keeps the rest in the list', () => {
+    const wf = multi()
+    const data = triggerData(wf)
+    expect(data['type']).toBe('interval')
+    expect(data['interval']).toBe(15)
+    // The secondary visit-web URL must not leak onto the flat fields.
+    expect(data['url']).toBeUndefined()
+    expect(specsOf(wf)).toHaveLength(2)
+    expect(wf.trigger?.type).toBe('interval')
+    expect(wf.trigger?.urlPattern).toBeUndefined()
+  })
+
+  it('replaces only the primary and leaves the other specs intact', () => {
+    const wf = multi()
+    const before = specsOf(wf)
+    const out = applyTriggerSelection(wf, {
+      type: 'context-menu',
+      params: { contextMenuName: 'Go' },
+    })
+    const data = triggerData(out)
+    const after = specsOf(out)
+
+    expect(after).toHaveLength(2)
+    expect(after[0]).toMatchObject({
+      id: before[0]!['id'],
+      type: 'context-menu',
+      data: { contextMenuName: 'Go' },
+    })
+    expect(after[1]).toEqual(before[1])
+    expect(data['type']).toBe('context-menu')
+    expect(data['contextMenuName']).toBe('Go')
+    expect(data['interval']).toBeUndefined()
+    expect(out.trigger).toMatchObject({ type: 'context-menu', menuItemId: 'Go' })
+  })
+
+  it('re-mirrors the top-level trigger when the primary becomes visit-web', () => {
+    const out = applyTriggerSelection(multi(), {
+      type: 'visit-web',
+      params: { url: 'https://primary.test/*' },
+    })
+    expect(out.trigger?.urlPattern).toBe('https://primary.test/*')
+    // The now-secondary visit-web spec keeps its own URL in the list.
+    expect(specsOf(out)[1]).toMatchObject({ data: { url: 'https://x.test/*' } })
+  })
+
+  it('reads the primary from the list even when the flat field is stale', () => {
+    const wf = workflow(
+      [
+        node('t', 'trigger', {
+          type: 'manual',
+          triggers: [{ id: 'a', type: 'interval', data: { interval: 9 } }],
+        }),
+        node('c', 'event-click', { selector: '#a' }),
+      ],
+      [edge('t', 'c')],
+    )
+    expect(triggerSelectionOf(wf)).toEqual({ type: 'interval', params: { interval: 9 } })
+  })
+
+  it('keeps a disabled secondary trigger disabled through a write', () => {
+    const out = withTriggerSpecs(withTrigger(), [
+      newTriggerSpec('manual'),
+      { ...newTriggerSpec('interval'), enabled: false, data: { interval: 30 } },
+    ])
+    expect(specsOf(out)[1]).toMatchObject({ enabled: false, type: 'interval' })
+    expect(out.trigger?.enabled).toBe(true)
   })
 })

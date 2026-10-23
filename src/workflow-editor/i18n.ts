@@ -23,6 +23,7 @@ export const EDITOR_STRINGS = {
     stopRecord: 'Stop recording',
     addBlocks: 'Add blocks',
     hidePalette: 'Hide blocks',
+    searchBlocks: 'Search blocks',
     // no-ocr build: title/toast for the disabled local-OCR operator.
     ocrUnavailable:
       'Local OCR is not included in this build (no-OCR variant). Download the full (OCR) release to use it.',
@@ -65,6 +66,16 @@ export const EDITOR_STRINGS = {
     triggerEnabled: 'Trigger enabled',
     settings: 'Settings',
     debugMode: 'Debug mode',
+    testingMode: 'Testing mode',
+    testingModeHint:
+      'Testing mode: pause before every block marked with a breakpoint and step through the run.',
+    testingAlreadyRunning: 'A testing run is already active for this workflow.',
+    debugPausedAt: 'Paused at',
+    debugResume: 'Resume',
+    debugNext: 'Next',
+    debugStop: 'Stop',
+    debugData: 'Variables',
+    debugRunLost: 'The testing run was lost (the background worker restarted). Run again.',
     saveLog: 'Save execution logs',
     notifyOnFinish: 'Notify when finished',
     manual: 'Manual',
@@ -80,6 +91,7 @@ export const EDITOR_STRINGS = {
     nodeEdit: 'Edit block',
     nodeDisable: 'Disable block',
     nodeEnable: 'Enable block',
+    nodeBreakpoint: 'Toggle breakpoint',
     nodeRunFromHere: 'Run workflow from here',
     nodeGoal: 'Goal',
     nodeGoalSection: 'Goal & success criteria',
@@ -177,6 +189,20 @@ export const EDITOR_STRINGS = {
     seconds: 'seconds',
     disableBlock: 'Disable block',
     disableBlockDesc: 'Skip this block when the workflow runs',
+    settingsBlockTimeout: 'Block timeout',
+    settingsBlockTimeoutHint:
+      'Fail this block when it runs longer than this. 0 disables the limit.',
+    settingsLines: 'Lines',
+    linesLineLabel: 'Label',
+    linesAnimated: 'Animated line',
+    linesColor: 'Line color',
+    linesEmpty: 'No outgoing connections.',
+    triggersTitle: 'Workflow triggers',
+    triggersAdd: 'Add trigger',
+    triggersEmpty: 'No triggers yet.',
+    triggersRemove: 'Remove trigger',
+    triggersSelectHint: 'Select a trigger to edit its settings.',
+    triggersPrimary: 'Primary',
     onErrorDo: 'On error, do',
     fallbackHint: 'Connect a block to the extra “fallback” handle on this node.',
     enable: 'Enable',
@@ -338,6 +364,7 @@ export const EDITOR_STRINGS = {
     stopRecord: '停止录制',
     addBlocks: '添加算子',
     hidePalette: '收起算子栏',
+    searchBlocks: '搜索算子',
     // no-ocr 精简版：置灰的本地 OCR 算子的提示。
     ocrUnavailable: '本地 OCR 未包含在此构建中（无 OCR 精简版），请下载完整版（含 OCR）使用。',
     renameWorkflow: '重命名工作流',
@@ -378,6 +405,15 @@ export const EDITOR_STRINGS = {
     triggerEnabled: '启用触发器',
     settings: '设置',
     debugMode: '调试模式',
+    testingMode: '测试模式',
+    testingModeHint: '测试模式：在标记了断点的算子前暂停，逐步执行整个工作流。',
+    testingAlreadyRunning: '该工作流已有正在进行的测试运行。',
+    debugPausedAt: '已暂停在',
+    debugResume: '继续',
+    debugNext: '下一步',
+    debugStop: '停止',
+    debugData: '变量',
+    debugRunLost: '测试运行已丢失（后台工作进程重启）。请重新运行。',
     saveLog: '保存执行日志',
     notifyOnFinish: '完成时通知',
     manual: '手动',
@@ -393,6 +429,7 @@ export const EDITOR_STRINGS = {
     nodeEdit: '编辑算子',
     nodeDisable: '禁用算子',
     nodeEnable: '启用算子',
+    nodeBreakpoint: '切换断点',
     nodeRunFromHere: '从此处运行',
     nodeGoal: '目标',
     nodeGoalSection: '目标与成功条件',
@@ -489,6 +526,19 @@ export const EDITOR_STRINGS = {
     seconds: '秒',
     disableBlock: '禁用算子',
     disableBlockDesc: '运行工作流时跳过此算子',
+    settingsBlockTimeout: '算子超时',
+    settingsBlockTimeoutHint: '算子运行超过该时长即失败，0 表示不限制。',
+    settingsLines: '连线',
+    linesLineLabel: '标签',
+    linesAnimated: '动态连线',
+    linesColor: '连线颜色',
+    linesEmpty: '没有输出连线。',
+    triggersTitle: '工作流触发器',
+    triggersAdd: '添加触发器',
+    triggersEmpty: '还没有触发器。',
+    triggersRemove: '删除触发器',
+    triggersSelectHint: '选择一个触发器以编辑其设置。',
+    triggersPrimary: '主触发器',
     onErrorDo: '出错时执行',
     fallbackHint: '请把另一个算子连接到该节点的「fallback（回退）」输出口。',
     enable: '启用',
@@ -670,10 +720,33 @@ const BLOCK_FORM_STRINGS = {
     Variable: '变量',
     'Variable name': '变量名',
     'Output variable name': '输出变量名',
+    // — set-variable form —
+    'Variable name — e.g. accessToken': '变量名，例如 accessToken',
+    'Value — supports {{variables}}': '值，支持 {{variables}} 变量',
+    'Add variable': '添加变量',
+    'Remove variable': '删除变量',
+    'Each row sets one workflow variable for later blocks. Rows run top to bottom, so a later value can reference a variable set above it.':
+      '每一行设置一个工作流变量，供后续算子读取。各行自上而下执行，后面的值可以引用上面刚设置的变量。',
+    // — repeat-task / loop-breakpoint forms —
+    'Repeat count': '重复次数',
+    'How many times the branch runs': '分支执行的次数',
+    'Zero runs the branch zero times and continues from the end output.':
+      '填 0 时分支一次也不执行，直接从结束输出继续。',
+    'The branch repeats this many times; after the last run the workflow continues from the end output.':
+      '分支重复执行这么多次；最后一次结束后，工作流从结束输出继续。',
+    'Leave empty to target the innermost enclosing loop': '留空表示作用于最内层循环',
+    'Leave empty for the innermost loop': '留空则作用于最内层循环',
+    'Stop loop': '结束循环',
+    'Stops the loop entirely and continues from its end output.':
+      '直接结束整个循环，从循环的结束输出继续。',
+    'Skips the rest of this item and continues with the next item.':
+      '跳过当前这一项剩余的步骤，继续处理下一项。',
     // — upload-file form —
     'Upload source': '上传方式',
     'User picks files': '用户选择文件',
-    'Workflow file variable': '自动上传 Workflow 文件',
+    'File from an earlier step': '上游步骤产出的文件',
+    'Reads a file that an earlier block produced and saved in a variable — for example a screenshot, a generated image, or an uploaded artifact. Enter the variable name, not the workflow JSON and not a local path.':
+      '读取之前步骤产出并存入变量的文件（例如截图、生成的图片或上传产物）。填写保存该文件的变量名，不是工作流 JSON，也不是本地路径。',
     'Latest download file': '自动上传最新下载文件',
     'Specific file path': '指定文件路径',
     'File path in the download folder': '下载目录内的文件路径',
@@ -702,7 +775,11 @@ const BLOCK_FORM_STRINGS = {
     'Ask me to pick a file when nothing matches': '没有匹配文件时让我手动选择',
     'Open the normal Choose file card when no downloaded file matches the filters':
       '下载目录中没有匹配文件时，打开常规的“选择文件”卡片',
-    'File variable': '文件变量',
+    'Variable holding the file': '存放文件的变量',
+    'Name of the workflow variable that contains a data URL, a file artifact, or an array of artifacts':
+      '变量名：该变量存放一个 data URL、一个文件产物，或文件产物数组',
+    'Name of the workflow variable that contains exactly one spreadsheet artifact or data URL':
+      '变量名：该变量存放且仅存放一个表格文件产物或 data URL',
     'e.g. lastScreenshot': '例如 lastScreenshot',
     'Allow multiple files': '允许多文件',
     'Optional filter for the file list; the picked file is uploaded as-is':
@@ -712,8 +789,8 @@ const BLOCK_FORM_STRINGS = {
     // — parse-excel form —
     'Spreadsheet source': '表格来源',
     'User picks a file': '用户选择文件',
-    'Variable holding exactly one spreadsheet file artifact or data URL':
-      '存放单个表格文件（文件产物或 data URL）的变量',
+    'Reads one spreadsheet that an earlier block produced and saved in a variable — for example a downloaded or generated .xlsx/.csv. Enter the variable name, not the workflow JSON and not a local path.':
+      '读取之前步骤产出并存入变量的一个表格文件（例如下载或生成的 .xlsx/.csv）。填写保存该文件的变量名，不是工作流 JSON，也不是本地路径。',
     'e.g. lastFile': '例如 lastFile',
     'Worksheet name': '工作表名称',
     'Exact worksheet name; empty = the first sheet. Applies to .xlsx only.':
@@ -1092,13 +1169,17 @@ const BLOCK_FORM_STRINGS = {
     'Google Sheets': 'Google 表格',
     'Custom data': '自定义数据',
     Elements: '页面元素',
-    'Max file/data size is 1MB. Import a JSON/CSV file or paste JSON below.':
-      '文件/数据上限 1MB。可导入 JSON/CSV 文件，或在下方粘贴 JSON。',
+    'Max file/data size is 1MB. Import a JSON/CSV/XLSX file or paste JSON below.':
+      '文件/数据上限 1MB。可导入 JSON/CSV/XLSX 文件，或在下方粘贴 JSON。',
     'Close data': '收起数据',
     'Insert data': '插入数据',
+    'Import file': '导入文件',
+    'The file is larger than 1 MB.': '文件超过 1MB 上限。',
+    'Could not read that file. Expected JSON or a .csv/.xlsx spreadsheet.':
+      '无法读取该文件。请选择 JSON 或 .csv/.xlsx 表格。',
     Notes: '备注',
-    'Google Sheets, file import (CSV/JSON), and the on-page element picker are not wired up in this build — use the reference key / selector text fields directly.':
-      '此版本尚未接入 Google 表格、文件导入（CSV/JSON）与页面元素拾取 — 请直接填写引用键 / 选择器。',
+    'Elements accept a CSS selector or an XPath expression. Google Sheets is not available: import a .xlsx/.csv file as custom data instead.':
+      '页面元素支持 CSS 选择器或 XPath 表达式。Google 表格不可用：请把 .xlsx/.csv 作为自定义数据导入。',
     // — data mapping / export / sort / insert —
     Source: '源',
     Destination: '目标',
@@ -1107,6 +1188,26 @@ const BLOCK_FORM_STRINGS = {
     'Remove source': '删除源',
     'Remove destination': '删除目标',
     'Remove item': '删除条目',
+    // — popup summaries / modal titles (Automa popup parity) —
+    Edit: '编辑',
+    rows: '行',
+    sources: '个源',
+    destinations: '个目标',
+    parameters: '个参数',
+    chars: '个字符',
+    'OR groups': '个 OR 组',
+    conditions: '个条件',
+    'While loop condition': 'While 循环条件',
+    'Data mapping': '数据映射',
+    'Edit data map': '编辑数据映射',
+    'Edit global data': '编辑全局数据',
+    'Request body': '请求体',
+    'Edit body': '编辑请求体',
+    'Table column': '数据表列',
+    'Source property': '源属性',
+    'Destination property': '目标属性',
+    Label: '标签',
+    Clear: '清除',
     'Remove property': '删除属性',
     'Remove file': '删除文件',
     Uniquify: '重名自动重命名',

@@ -30,7 +30,11 @@ import {
   OPERATOR_CATEGORY_TOOL_NAMES,
   operatorCategoryGroup,
 } from './operator-categories'
-import { EDIT_LESS_OPERATOR_IDS, JAVASCRIPT_BLOCK_ID } from './operator-class'
+import {
+  EDIT_LESS_OPERATOR_IDS,
+  JAVASCRIPT_BLOCK_ID,
+  NON_OPERATOR_BLOCK_IDS,
+} from './operator-class'
 
 /** Tool name prefix shared by every operator-derived tool. */
 export const WF_OP_PREFIX = 'wf_op_'
@@ -56,8 +60,10 @@ export function blockIdFromOperatorName(toolName: string): string | undefined {
  * Operator block ids: every palette entry that exposes a real edit form, plus
  * the edit-less exceptions (`go-back` — see `EDIT_LESS_OPERATOR_IDS`).
  * Placeholder / no-edit routing primitives (`active-tab`, `forward-page`,
- * `loop-breakpoint`, `blocks-group`) stay excluded because they are
- * runtime-only navigation the LLM has no business steering directly.
+ * `blocks-group`) stay excluded because they are runtime-only navigation the
+ * LLM has no business steering directly. `loop-breakpoint` also stays out even
+ * though it now has an edit form for the human editor — see
+ * `NON_OPERATOR_BLOCK_IDS`.
  *
  * Built from {@link PALETTE_BLOCKS} — not the raw catalog — so Browser
  * Copilot's own blocks (`ai-agent`, `ocr`, `set-variable`, `get-secret`) are
@@ -65,7 +71,9 @@ export function blockIdFromOperatorName(toolName: string): string | undefined {
  * image, then fill the code in") cannot be expressed at all.
  */
 const PALETTE_OPERATOR_ENTRIES: readonly BlockCatalogEntry[] = PALETTE_BLOCKS.filter(
-  (entry) => !entry.disableEdit || EDIT_LESS_OPERATOR_IDS.has(entry.id),
+  (entry) =>
+    !NON_OPERATOR_BLOCK_IDS.has(entry.id) &&
+    (!entry.disableEdit || EDIT_LESS_OPERATOR_IDS.has(entry.id)),
 )
 
 const PALETTE_OPERATOR_IDS: readonly string[] = PALETTE_OPERATOR_ENTRIES.map((entry) => entry.id)
@@ -496,6 +504,22 @@ const SCHEMA_OVERRIDES: Readonly<Record<string, Record<string, unknown>>> = {
     },
     ...COLLECT_PROPERTIES,
   },
+  'set-variable': {
+    variables: {
+      type: 'array',
+      description:
+        'One row per variable, applied top to bottom; later values may use `{{earlier}}`.',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          value: { type: 'string' },
+        },
+        required: ['name', 'value'],
+        additionalProperties: false,
+      },
+    },
+  },
   'save-local': {
     value: {
       type: 'string',
@@ -609,7 +633,7 @@ const SCHEMA_OVERRIDES: Readonly<Record<string, Record<string, unknown>>> = {
       type: 'string',
       enum: ['user-select', 'workflow-file', 'latest-download', 'file-path'],
       description:
-        'user-select (pick at run time) | workflow-file (variable) | latest-download (newest match) | file-path (one relative path in the download folder).',
+        'user-select (pick at run time) | workflow-file (a file produced by an earlier step) | latest-download (newest match) | file-path (relative path in the download folder).',
     },
     filePath: {
       type: 'string',
@@ -618,7 +642,8 @@ const SCHEMA_OVERRIDES: Readonly<Record<string, Record<string, unknown>>> = {
     },
     fileVariable: {
       type: 'string',
-      description: 'Variable NAME holding the file, not the data URL.',
+      description:
+        'workflow-file only: NAME of the variable holding a file an earlier step produced, not its content or a path.',
     },
     accept: {
       type: 'string',
@@ -640,11 +665,12 @@ const SCHEMA_OVERRIDES: Readonly<Record<string, Record<string, unknown>>> = {
       type: 'string',
       enum: ['user-select', 'workflow-file', 'file-path'],
       description:
-        'user-select (pick one .xlsx/.csv at run time) | workflow-file (variable) | file-path (one relative path in the download folder).',
+        'user-select (pick one .xlsx/.csv at run time) | workflow-file (a spreadsheet produced by an earlier step) | file-path (relative path in the download folder).',
     },
     fileVariable: {
       type: 'string',
-      description: 'workflow-file only: variable NAME holding exactly one spreadsheet artifact.',
+      description:
+        'workflow-file only: NAME of the variable holding one spreadsheet an earlier step produced.',
     },
     filePath: {
       type: 'string',
@@ -757,6 +783,10 @@ const SCHEMA_OMIT: Readonly<Record<string, readonly string[]>> = {
   'handle-dialog': ['accept', 'promptText'],
   'switch-to': ['findBy', 'selector', 'windowType'],
   'delete-data': ['deleteList'],
+  // The legacy single-variable pair is still executed, but the model writes the
+  // `variables` rows (see SCHEMA_OVERRIDES); advertising both shapes invites a
+  // node that sets only one of the two.
+  'set-variable': ['variableName', 'value'],
   'data-mapping': ['dataSource', 'sources', 'varSourceName'],
   'sort-data': ['sortByProperty', 'itemProperties', 'dataSource', 'varSourceName', 'variableName'],
   'log-data': ['workflowId', 'variableName'],

@@ -103,6 +103,30 @@ describe('server executors', () => {
     expect(ctx.variables['greeting']).toBe('你好 世界')
   })
 
+  it('set-variable writes every row in order, later rows seeing earlier ones', async () => {
+    const registry = createExecutors(makeDeps(makeDriverStub()))
+    const ctx = makeCtx()
+    await registry['set-variable']!(
+      {
+        variables: [
+          { name: 'token', value: 'abc' },
+          { name: 'authHeader', value: 'Bearer {{token}}' },
+        ],
+      },
+      ctx,
+    )
+    expect(ctx.variables['token']).toBe('abc')
+    expect(ctx.variables['authHeader']).toBe('Bearer abc')
+  })
+
+  it('set-variable fails a node with no variable name', async () => {
+    const registry = createExecutors(makeDeps(makeDriverStub()))
+    const ctx = makeCtx()
+    await expect(
+      registry['set-variable']!({ variables: [{ name: '', value: 'x' }] }, ctx),
+    ).rejects.toThrow()
+  })
+
   /**
    * `get-secret` on a headless host: no credential store, so each row reads the
    * environment. The values must land in the row's own variable, must never reach

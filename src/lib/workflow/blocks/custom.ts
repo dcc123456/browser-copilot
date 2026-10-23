@@ -103,7 +103,7 @@ export const CUSTOM_BLOCKS: BlockCatalogEntry[] = [
     id: 'set-variable',
     name: 'Set variable',
     description:
-      'Store a value into a workflow variable for later blocks to read (supports {{variables}}).',
+      'Store one or more values into workflow variables for later blocks to read (supports {{variables}}).',
     icon: 'lucide:Bookmark',
     category: 'data',
     component: 'Default',
@@ -116,6 +116,10 @@ export const CUSTOM_BLOCKS: BlockCatalogEntry[] = [
     data: {
       disableBlock: false,
       description: '',
+      // Current shape: one node writes every row, in order. `variableName` /
+      // `value` stay as the legacy single-variable shape so saved workflows
+      // keep running; the executor uses them only when `variables` is empty.
+      variables: [] as { name: string; value: string }[],
       variableName: '',
       value: '',
     },

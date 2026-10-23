@@ -65,6 +65,12 @@ export interface WorkflowEdge {
   target: string
   sourceHandle?: string
   targetHandle?: string
+  /** Optional text drawn on the connection (Automa's Lines tab). */
+  label?: string
+  /** Dashes move along the connection. */
+  animated?: boolean
+  /** User-picked stroke color; unset keeps the theme default. */
+  color?: string
 }
 
 /**

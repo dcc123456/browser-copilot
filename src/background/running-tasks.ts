@@ -71,6 +71,16 @@ export interface RunningTask {
    * the session's runs, checkpoints and takeover stats can be joined.
    */
   sessionId?: string
+  /**
+   * Breakpoint step debugging: true while this run was started from the
+   * editor's Testing mode, which is what pauses at `$breakpoint` nodes.
+   */
+  testing?: boolean
+  /**
+   * Current pause of a testing run, when one is suspended at a breakpoint.
+   * Absent while the run is executing; cleared when it resumes or settles.
+   */
+  debug?: { paused: { nodeId: string; label: string; at: number } }
   startedAt: number
   steps: RunStep[]
   /**
@@ -170,6 +180,8 @@ export interface StartRunOptions {
   feishuChatId?: string
   /** M4: the AI-debug session this run belongs to. */
   sessionId?: string
+  /** Breakpoint step debugging (see RunningTask.testing). */
+  testing?: boolean
   controller?: AbortController
   onCancel?: () => void
 }
@@ -189,6 +201,7 @@ export function startRun(options: StartRunOptions): RunningTask {
     source: options.source,
     feishuChatId: options.feishuChatId,
     sessionId: options.sessionId,
+    ...(options.testing ? { testing: true } : {}),
     startedAt: Date.now(),
     steps: [],
     controller,
@@ -265,6 +278,20 @@ export function setRunWindow(runId: string, windowId: number, kind: RunWindowKin
   if (!task) return
   task.windowId = windowId
   task.runWindowKind = kind
+}
+
+/**
+ * Sets or clears the breakpoint pause shown on the run board. `label` is the
+ * human block name resolved by the caller; null clears the pause on resume.
+ */
+export function updateRunDebug(
+  runId: string,
+  paused: { nodeId: string; label: string; at: number } | null,
+): void {
+  const task = runs.get(runId)
+  if (!task) return
+  if (paused) task.debug = { paused }
+  else delete task.debug
 }
 
 /**

@@ -109,6 +109,23 @@ describe('checkProducerCompleteness', () => {
     expect(checkProducerCompleteness(wf)).toEqual([])
   })
 
+  it('accepts a reference to any row of a multi-variable set-variable node', () => {
+    const wf = workflow([
+      node('t', 'trigger'),
+      node('vars', 'set-variable', {
+        variables: [
+          { name: 'token', value: 'abc' },
+          { name: 'authHeader', value: 'Bearer {{token}}' },
+        ],
+      }),
+      node('call', 'webhook', {
+        url: 'https://x.test',
+        headers: [{ name: 'a', value: '{{authHeader}}' }],
+      }),
+    ])
+    expect(checkProducerCompleteness(wf)).toEqual([])
+  })
+
   it('deduplicates repeated references in one node', () => {
     const wf = workflow([
       node('t', 'trigger'),

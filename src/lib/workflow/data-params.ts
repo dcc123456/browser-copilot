@@ -116,7 +116,9 @@ const DATA_PARAMS: Readonly<Record<string, readonly DataParamSpec[]>> = {
   'create-element': [],
 
   // --- data plumbing: values the workflow carries --------------------------
-  'set-variable': [{ key: 'value' }],
+  // Each row's value is data; its name is structural (choosing the variable is
+  // part of the step's identity). `value` stays for the legacy single shape.
+  'set-variable': [{ key: 'variables', itemKey: 'value' }, { key: 'value' }],
   // Both output names are structural, and the file comes from a runtime picker
   // or an upstream artifact — no business value is frozen into the node.
   'parse-excel': [],

@@ -23,7 +23,10 @@
 import { BLOCK_CATALOG } from './blocks/catalog'
 import { CUSTOM_BLOCKS } from './blocks/custom'
 import { CATALOG_BY_ID } from './blocks/palette'
+import { isTriggerNode, normalizeTriggers, primaryTrigger } from './triggers'
 import type { Workflow, WorkflowEdge, WorkflowNode, WorkflowTrigger } from './types'
+
+export { isTriggerNode }
 
 /**
  * Runtime interoperability alias map: legacy Browser Copilot block ids (the MVP
@@ -267,21 +270,14 @@ const TRIGGER_NODE_KINDS: ReadonlySet<string> = new Set([
 ])
 
 /**
- * Whether this node is the graph's launch trigger. The block id is authoritative
- * (`data.blockId`) with `label` as the legacy fallback — the same resolution the
- * engine and the trigger readers use, kept in one place so the panel and the
- * background never disagree about what counts as the trigger.
- */
-export function isTriggerNode(node: WorkflowNode): boolean {
-  return (node.data?.['blockId'] as string) === 'trigger' || node.label === 'trigger'
-}
-
-/**
  * Denormalize the trigger block into the workflow's top-level `trigger`
  * field. The graph's trigger node is the Automa-style source of truth (edited
  * in `EditTrigger`), while listeners (`background/index.ts`) and the
  * workflows list chip read the top-level field — saving without syncing them
  * leaves the chip and context-menu/visit-web registration stale.
+ *
+ * A multi-trigger block mirrors its PRIMARY (first) trigger only; the full list
+ * stays on the node and runtime readers go through `effectiveTriggers`.
  *
  * Returns `undefined` when the graph has no trigger node (callers then keep
  * the workflow's previous top-level trigger). Unknown `data.type` values fall
@@ -290,16 +286,14 @@ export function isTriggerNode(node: WorkflowNode): boolean {
 export function triggerFromNodes(nodes: WorkflowNode[]): WorkflowTrigger | undefined {
   const node = nodes.find(isTriggerNode)
   if (!node) return undefined
-  const rawType = node.data?.['type']
-  const type = TRIGGER_NODE_KINDS.has(rawType as string)
-    ? (rawType as WorkflowTrigger['type'])
-    : 'manual'
-  const trigger: WorkflowTrigger = { type, enabled: true }
-  const url = node.data?.['url']
+  const spec = primaryTrigger(normalizeTriggers(node.data))
+  const type = TRIGGER_NODE_KINDS.has(spec.type) ? (spec.type as WorkflowTrigger['type']) : 'manual'
+  const trigger: WorkflowTrigger = { type, enabled: spec.enabled !== false }
+  const url = spec.data['url']
   if (type === 'visit-web' && typeof url === 'string' && url) {
     trigger.urlPattern = url
   }
-  const contextMenuName = node.data?.['contextMenuName']
+  const contextMenuName = spec.data['contextMenuName']
   if (type === 'context-menu' && typeof contextMenuName === 'string' && contextMenuName) {
     trigger.menuItemId = contextMenuName
   }

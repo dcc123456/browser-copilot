@@ -314,56 +314,6 @@
 .wf-toolbar > * {
   pointer-events: auto;
 }
-.wf-toolbar-mini {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 150px;
-  padding: 0 4px;
-}
-/* The name is a BUTTON (click opens the rename dialog): reset the button
-   chrome so it reads as the workflow title with a pencil affordance. */
-.wf-toolbar-name-btn {
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  border-radius: 8px;
-  padding: 4px 6px;
-  transition: background 0.14s ease;
-}
-.wf-toolbar-name-btn:hover {
-  background: var(--we-bg-active);
-}
-.wf-name-pencil {
-  color: var(--we-text-dim);
-  flex-shrink: 0;
-}
-.wf-toolbar-name {
-  font-weight: 600;
-  font-size: 13px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.wf-toolbar-tabs {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  /* The debug/logs toggles must stay on ONE line each: never let the group
-     shrink or wrap its labels, even when the toolbar gets narrow. */
-  flex-wrap: nowrap;
-  flex-shrink: 0;
-}
-.wf-toolbar-tabs > * {
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-@media (max-width: 760px) {
-  .wf-toolbar-tabs {
-    position: static;
-    transform: none;
-  }
-}
 .wf-btn-record.wf-rec-active {
   color: var(--we-danger);
 }
@@ -423,15 +373,6 @@
 }
 .wf-rec-active {
   color: var(--we-danger);
-}
-.wf-dirty-dot {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--we-danger);
 }
 .wf-tabs {
   display: flex;
@@ -605,12 +546,6 @@
   height: 100%;
   overflow: hidden;
 }
-.wf-sidebar-scroll {
-  height: 100%;
-  overflow-y: auto;
-  padding: 18px 16px 28px;
-}
-
 /* Edit overlay (Automa [id].vue): while a node is being edited, the edit form
    covers the block palette inside the LEFT panel (absolute, z-50). */
 .wf-edit-overlay {
@@ -1153,28 +1088,6 @@
   font-size: 13px;
   max-width: 60%;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-}
-
-/* ---- inline-editable workflow name in the top toolbar ---- */
-.wf-toolbar-name-input {
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  color: var(--we-text);
-  font-weight: 600;
-  font-size: 13px;
-  width: 110px;
-  min-width: 0;
-  padding: 2px 6px;
-  outline: none;
-  font-family: inherit;
-}
-.wf-toolbar-name-input:hover {
-  border-color: var(--we-border);
-}
-.wf-toolbar-name-input:focus {
-  border-color: var(--we-accent);
-  background: var(--we-bg-input);
 }
 
 /* ---- empty right-panel hint ---- */

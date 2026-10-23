@@ -13,7 +13,6 @@
  * @module lib/workflow/block-output
  */
 import type { ScrollSpec } from '../ops'
-import { getByPath } from './interpolate'
 
 /**
  * Match a tab URL against an Automa-style match pattern (`https://*.example.com/*`).
@@ -75,6 +74,38 @@ export function pickTabIndex(
   }
   const wanted = Number(data['tabIndex'] ?? data['index'] ?? 0)
   return { index: Number.isFinite(wanted) ? Math.trunc(wanted) : 0, byIndex: true }
+}
+
+/** One variable a `set-variable` node writes. */
+export interface VariableAssignment {
+  name: string
+  value: unknown
+}
+
+/**
+ * The rows a `set-variable` node writes, in order.
+ *
+ * `variables: [{name, value}]` is the current shape (one node sets many
+ * variables); a node saved before that shape carries `variableName` + `value`.
+ * Rows with an empty name are skipped — they are blank editor placeholders, not
+ * an instruction to write the `''` variable. An empty value is legal: it clears
+ * the variable.
+ */
+export function variableAssignmentsOf(data: Record<string, unknown>): VariableAssignment[] {
+  const rows = Array.isArray(data['variables']) ? data['variables'] : []
+  const fromRows: VariableAssignment[] = []
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue
+    const record = row as Record<string, unknown>
+    const name = typeof record['name'] === 'string' ? record['name'].trim() : ''
+    if (name === '') continue
+    fromRows.push({ name, value: record['value'] ?? '' })
+  }
+  if (fromRows.length > 0) return fromRows
+
+  const legacyName = typeof data['variableName'] === 'string' ? data['variableName'].trim() : ''
+  if (legacyName === '') return []
+  return [{ name: legacyName, value: data['value'] ?? '' }]
 }
 
 /** Write a block result where the editor's "Assign to a variable" strip says. */
@@ -210,85 +241,5 @@ export function scrollSpecFrom(data: Record<string, unknown>): ScrollSpec {
     smooth: data['smooth'] === true,
     xIncremental: x.incremental,
     yIncremental: y.incremental,
-  }
-}
-
-/**
- * The webhook block's response contract, shared by both hosts.
- *
- * The form offers a "Content type" select, a "Response type" select
- * (json/text/base64) and a "Data path" field, and "Assign response to a variable"
- * stores the whole response record under the chosen name. The port implemented
- * none of this: it always sent JSON and stored `{status, ok, headers, body}`
- * without the decoded `data`, so `{{resp.data.total}}` resolved in the extension
- * and dangled on the server.
- */
-
-/** Default request `content-type` per the form's "Content type" select. */
-const WEBHOOK_CONTENT_TYPES: Readonly<Record<string, string>> = {
-  json: 'application/json',
-  text: 'text/plain',
-  'form-data': 'multipart/form-data',
-  form: 'application/x-www-form-urlencoded',
-}
-
-export function webhookContentTypeOf(data: Record<string, unknown>): string {
-  return WEBHOOK_CONTENT_TYPES[String(data['contentType'] ?? 'json')] ?? 'application/json'
-}
-
-/** Parse a response body according to the block's `responseType`. */
-function parseResponseBody(text: string, responseType: string): unknown {
-  if (responseType !== 'json') return text
-  try {
-    return JSON.parse(text)
-  } catch {
-    return text
-  }
-}
-
-/** Narrow a parsed body to the block's `dataPath` (`data.items.0.id`). */
-function pickDataPath(value: unknown, path: string): unknown {
-  const segments = path.split('.').filter((segment) => segment.trim() !== '')
-  if (segments.length === 0) return value
-  return getByPath(value, segments.join('.'))
-}
-
-/** Base64 of a response body, for `responseType: 'base64'`. */
-function toBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer)
-  let binary = ''
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary)
-}
-
-/** What "Assign response to a variable" stores: the record later `{{var.key}}` reads. */
-export interface WebhookResponseRecord {
-  status: number
-  ok: boolean
-  headers: Record<string, string>
-  body: string
-  data: unknown
-}
-
-/**
- * Read a fetch response the way the webhook block documents it. `base64` consumes
- * the body as bytes, every other type as text; `data` is that text decoded per
- * `responseType` and narrowed by `dataPath`.
- */
-export async function webhookRecord(
-  response: Response,
-  responseType: string,
-  dataPath: string,
-): Promise<WebhookResponseRecord> {
-  const body =
-    responseType === 'base64' ? toBase64(await response.arrayBuffer()) : await response.text()
-  return {
-    status: response.status,
-    ok: response.ok,
-    headers: Object.fromEntries(response.headers.entries()),
-    body,
-    // Additive on purpose: `{{var.body}}` keeps working exactly as before, and
-    // `{{var}}` was already `[object Object]`, so nothing that worked stops working.
-    data: pickDataPath(parseResponseBody(body, responseType), dataPath),
   }
 }

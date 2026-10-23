@@ -187,6 +187,7 @@ import {
   type WorkflowDebugResult,
 } from '../lib/workflow/auto-debug-patch'
 import type { Workflow } from '../lib/workflow/types'
+import { enabledTriggers, type WorkflowTriggerSpec } from '../lib/workflow/triggers'
 import {
   clearPendingTakeover,
   getPendingTakeover,
@@ -200,7 +201,12 @@ import {
   takeoverProviderOf,
   type TakeoverReasonKind,
 } from '../lib/workflow/ai-takeover'
-import { executeWorkflow, findRunIdFor, getCheckpointStore } from './workflow-engine/run-workflow'
+import {
+  controlDebugRun,
+  executeWorkflow,
+  findRunIdFor,
+  getCheckpointStore,
+} from './workflow-engine/run-workflow'
 import {
   createTrialExecute,
   runGenerationTrial,
@@ -482,30 +488,61 @@ const feishuBot = new FeishuBot()
 
 // --- Workflow trigger listeners ------------------------------------------------
 
+/** One context-menu item's id: unique per trigger, not just per workflow. */
+function contextMenuId(workflowId: string, triggerId: string): string {
+  return `${workflowId}:${triggerId}`
+}
+
+const CONTEXT_MENU_CONTEXTS = new Set([
+  'audio',
+  'editable',
+  'frame',
+  'image',
+  'link',
+  'page',
+  'password',
+  'selection',
+  'video',
+])
+
+/** The menu label: the trigger's own name, falling back to the workflow name. */
+function contextMenuTitleOf(wf: Workflow, spec: WorkflowTriggerSpec): string {
+  const name = typeof spec.data['contextMenuName'] === 'string' ? spec.data['contextMenuName'] : ''
+  return name.trim() || wf.name
+}
+
+/** The trigger's `contextTypes`, restricted to the values Chrome accepts. */
+function contextMenuContextsOf(spec: WorkflowTriggerSpec): chrome.contextMenus.ContextType[] {
+  const raw = Array.isArray(spec.data['contextTypes']) ? spec.data['contextTypes'] : []
+  const contexts = raw.map(String).filter((value) => CONTEXT_MENU_CONTEXTS.has(value))
+  return contexts.length > 0 ? (contexts as chrome.contextMenus.ContextType[]) : ['page']
+}
+
 /**
- * (Re)creates a right-click context-menu item for every enabled workflow whose
- * trigger is `context-menu`. Rebuilding from scratch keeps the menu in sync with
- * storage: deleted workflows vanish, renames update the label, re-enabled ones
- * reappear.
+ * (Re)creates a right-click context-menu item for every enabled context-menu
+ * trigger (a workflow may have several). Rebuilding from scratch keeps the menu
+ * in sync with storage: deleted workflows vanish, renames update the label,
+ * re-enabled ones reappear.
  */
 async function registerContextMenuWorkflows(): Promise<void> {
-  const workflows = (await listWorkflows()).filter(
-    (wf) => wf.trigger?.type === 'context-menu' && wf.trigger.enabled !== false,
-  )
+  const workflows = await listWorkflows()
   try {
     chrome.contextMenus.removeAll()
   } catch {
     /* may already be cleared */
   }
   for (const wf of workflows) {
-    try {
-      chrome.contextMenus.create({
-        id: wf.trigger?.menuItemId ?? wf.id,
-        title: wf.name,
-        contexts: ['page'],
-      })
-    } catch (error) {
-      console.error('[Browser Copilot] could not create context menu item', wf.id, error)
+    for (const spec of enabledTriggers(wf)) {
+      if (spec.type !== 'context-menu') continue
+      try {
+        chrome.contextMenus.create({
+          id: contextMenuId(wf.id, spec.id),
+          title: contextMenuTitleOf(wf, spec),
+          contexts: contextMenuContextsOf(spec),
+        })
+      } catch (error) {
+        console.error('[Browser Copilot] could not create context menu item', wf.id, error)
+      }
     }
   }
 }
@@ -685,18 +722,22 @@ if (chrome.contextMenus?.onClicked) {
     void (async () => {
       try {
         const workflows = await listWorkflows()
-        const wf = workflows.find(
-          (w) =>
-            w.trigger?.type === 'context-menu' &&
-            (w.trigger.menuItemId !== undefined
-              ? w.trigger.menuItemId === info.menuItemId
-              : w.id === info.menuItemId),
-        )
+        let matchedWorkflowId: string | undefined
+        for (const w of workflows) {
+          const hit = enabledTriggers(w).some(
+            (spec) =>
+              spec.type === 'context-menu' && contextMenuId(w.id, spec.id) === info.menuItemId,
+          )
+          if (hit) {
+            matchedWorkflowId = w.id
+            break
+          }
+        }
         // The user clicked the menu item on a specific tab: run scoped to THAT
         // window (an explicit gesture acts where it happened). `tab` is present
         // at runtime but missing from this @types/chrome version's OnClickData.
         const menuTab = (info as { tab?: chrome.tabs.Tab }).tab
-        if (wf) await runWorkflowKeepalive(wf.id, menuTab?.windowId)
+        if (matchedWorkflowId) await runWorkflowKeepalive(matchedWorkflowId, menuTab?.windowId)
       } catch (error) {
         console.error('[Browser Copilot] context-menu workflow failed', error)
       }
@@ -725,14 +766,18 @@ if (chrome.webNavigation?.onCommitted) {
         if (!shouldTriggerVisitWeb(hasPluginWindows(), isPluginWindow(navWindowId))) return
         const href = new URL(url).href
         const workflows = await listWorkflows()
-        const wf = workflows.find((w) => {
-          if (w.trigger?.type !== 'visit-web' || !w.trigger.urlPattern) return false
-          try {
-            return new RegExp(w.trigger.urlPattern).test(href)
-          } catch {
-            return href.includes(w.trigger.urlPattern)
-          }
-        })
+        const wf = workflows.find((w) =>
+          enabledTriggers(w).some((spec) => {
+            if (spec.type !== 'visit-web') return false
+            const pattern = typeof spec.data['url'] === 'string' ? spec.data['url'] : ''
+            if (!pattern) return false
+            try {
+              return new RegExp(pattern).test(href)
+            } catch {
+              return href.includes(pattern)
+            }
+          }),
+        )
         // Run scoped to the window the matching page opened in (a plugin
         // window — connected or minimized — by the guard above); undefined
         // when the plugin is closed everywhere.
@@ -1142,6 +1187,8 @@ function runningBoardsView(workflowIdFilter?: string): {
         ...(typeof r.windowId === 'number' ? { windowId: r.windowId } : {}),
         ...(r.runWindowKind ? { runWindowKind: r.runWindowKind } : {}),
         ...(r.snapshots ? { snapshots: r.snapshots } : {}),
+        ...(r.testing ? { testing: true } : {}),
+        ...(r.debug ? { debug: r.debug } : {}),
       })),
     finished: listFinished().filter(matches).map(mapFinished),
   }
@@ -1867,6 +1914,7 @@ async function handleCommand(
         preflight: gate.issues,
         startAt: (command as { startAt?: string }).startAt,
         debug: workflow.settings?.debugMode === true,
+        ...(command.testing ? { testing: true } : {}),
         ...(takeover ? { aiTakeover: takeover } : {}),
         // Panel run button: act inside the panel's window (undefined for the
         // editor popup, which is not a normal window).
@@ -2824,6 +2872,18 @@ async function handleCommand(
     case 'workflows.running': {
       const boards = runningBoardsView((command as { workflowId?: string }).workflowId)
       return { type: 'workflows.running', ...boards }
+    }
+
+    case 'debug.control': {
+      // Resume / next answer a held pause; stop is the ordinary cancel path.
+      // The editor maps a false `ok` to its own localized "run lost" notice,
+      // so the error code stays machine-readable.
+      const ok = controlDebugRun(command.runId, command.action)
+      return {
+        type: 'debug.control',
+        ok,
+        ...(ok ? {} : { error: command.action === 'stop' ? 'run_not_found' : 'not_paused' }),
+      }
     }
 
     case 'workflows.recovery': {

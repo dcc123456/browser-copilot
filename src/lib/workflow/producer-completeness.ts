@@ -23,6 +23,7 @@
  */
 
 import type { Workflow, WorkflowNode } from './types'
+import { variableAssignmentsOf } from './block-output'
 import { SECRET_PRODUCER_BLOCK, secretVariableNamesOf } from './secret-params'
 
 export type ProducerCompletenessCode = 'MISSING_PRODUCER' | 'MISSING_TABLE_PRODUCER'
@@ -115,6 +116,11 @@ export function producedVariableNames(node: WorkflowNode): string[] {
   if (blockId === SECRET_PRODUCER_BLOCK) {
     for (const name of secretVariableNamesOf(node.data)) names.add(name)
   }
+  // `set-variable` writes one variable per row; the flat `variableName` field
+  // only mirrors the single-variable shape saved before rows existed.
+  for (const assignment of variableAssignmentsOf((node.data ?? {}) as Record<string, unknown>)) {
+    names.add(assignment.name)
+  }
   const written = stringField(node, 'variableName')
   if (written) names.add(written)
   return [...names]
@@ -179,26 +185,31 @@ function triggerInputs(nodes: readonly WorkflowNode[]): Set<string> {
   return out
 }
 
-/** Collect every `{{reference}}` token anywhere in a node's data. */
-function referencesIn(node: WorkflowNode): string[] {
+/** Collect every `{{reference}}` token in one value (recursing into containers). */
+function referencesInValue(value: unknown): string[] {
   const out = new Set<string>()
-  const walk = (value: unknown): void => {
-    if (typeof value === 'string') {
-      for (const match of value.matchAll(TOKEN)) {
+  const walk = (item: unknown): void => {
+    if (typeof item === 'string') {
+      for (const match of item.matchAll(TOKEN)) {
         const expression = (match[1] ?? '').trim()
         if (!expression) continue
         // Only top-level names are session variables; `x.y` still keys on x.
         const dot = expression.indexOf('.')
         out.add(dot === -1 ? expression : expression.slice(0, dot))
       }
-    } else if (Array.isArray(value)) {
-      for (const item of value) walk(item)
-    } else if (value && typeof value === 'object') {
-      for (const item of Object.values(value as Record<string, unknown>)) walk(item)
+    } else if (Array.isArray(item)) {
+      for (const child of item) walk(child)
+    } else if (item && typeof item === 'object') {
+      for (const child of Object.values(item as Record<string, unknown>)) walk(child)
     }
   }
-  walk(node.data ?? {})
+  walk(value)
   return [...out]
+}
+
+/** Collect every `{{reference}}` token anywhere in a node's data. */
+function referencesIn(node: WorkflowNode): string[] {
+  return referencesInValue(node.data ?? {})
 }
 
 /**
@@ -223,13 +234,10 @@ export function checkProducerCompleteness(workflow: Workflow): ProducerCompleten
     const blockId = blockIdOf(node)
     if (blockId === 'trigger') continue
 
-    // 1. Every {{reference}} this node consumes must be declared or produced.
-    for (const reference of referencesIn(node)) {
-      if (declared.has(reference)) continue
-      const producer = nodes.some(
-        (candidate) => candidate.id !== node.id && producesVariable(candidate, reference),
-      )
-      if (producer) continue
+    const hasProducer = (reference: string): boolean =>
+      declared.has(reference) ||
+      nodes.some((candidate) => candidate.id !== node.id && producesVariable(candidate, reference))
+    const reportMissing = (reference: string): void =>
       add({
         code: 'MISSING_PRODUCER',
         nodeId: node.id,
@@ -237,6 +245,22 @@ export function checkProducerCompleteness(workflow: Workflow): ProducerCompleten
         reference,
         message: `Node "${blockId}" references "{{${reference}}}", but no upstream node produces it and it is not declared on the trigger.`,
       })
+
+    // 1. Every {{reference}} this node consumes must be declared or produced.
+    if (blockId === 'set-variable') {
+      // Rows run top to bottom, so a later row may consume a variable an
+      // earlier row just wrote — that is not a missing producer.
+      const writtenEarlier = new Set<string>()
+      for (const assignment of variableAssignmentsOf(node.data ?? {})) {
+        for (const reference of referencesInValue(assignment.value)) {
+          if (!writtenEarlier.has(reference) && !hasProducer(reference)) reportMissing(reference)
+        }
+        writtenEarlier.add(assignment.name)
+      }
+    } else {
+      for (const reference of referencesIn(node)) {
+        if (!hasProducer(reference)) reportMissing(reference)
+      }
     }
 
     // 2. export-data needs a saveData read feeding the table.

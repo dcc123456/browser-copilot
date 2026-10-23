@@ -220,7 +220,7 @@ describe('operator category partition', () => {
       )?.required ?? []
     expect(requiredOf('wf_op_new-tab')).toEqual(['url'])
     expect(requiredOf('wf_op_webhook')).toEqual(['url'])
-    expect(requiredOf('wf_op_set-variable')).toEqual(['variableName', 'value'])
+    expect(requiredOf('wf_op_set-variable')).toEqual(['variables'])
     expect(requiredOf('wf_op_get-secret')).toEqual(['credential', 'variableName'])
   })
 

@@ -2,9 +2,10 @@
  * Block settings modal — opened from a node's hover-toolbar gear button.
  *
  * React port of Automa's EditBlockSettings: a dialog over the canvas with
- * TABS — General / On error — instead of stacked sections. The block's
- * dedicated edit form stays in the edit sidebar; this modal is the settings
- * surface Automa exposes from the node toolbar.
+ * TABS — General / On error / Lines. The Lines tab appears only for nodes with
+ * outgoing connections. The block's dedicated edit form stays in the edit
+ * sidebar; this modal is the settings surface Automa exposes from the node
+ * toolbar.
  *
  * @module workflow-editor/blocks/shared/BlockSettingsModal
  */
@@ -13,10 +14,10 @@ import { useState } from 'react'
 import Modal from '../../ui/Modal'
 import type { BlockCatalogEntry } from '../../../lib/workflow/blocks/types'
 import { useEditorLocale } from '../../locale-context'
-import { GeneralFields, OnErrorFields } from './BlockSettingsFields'
+import { GeneralFields, LinesFields, OnErrorFields, type LineSetting } from './BlockSettingsFields'
 import type { EditFormProps } from '../EditForms'
 
-type SettingsTab = 'general' | 'on-error'
+type SettingsTab = 'general' | 'on-error' | 'lines'
 
 export default function BlockSettingsModal({
   open,
@@ -24,12 +25,20 @@ export default function BlockSettingsModal({
   block,
   data,
   onChange,
+  lines = [],
+  onLineChange,
 }: {
   open: boolean
   onClose: () => void
   block: BlockCatalogEntry | null
   data: Record<string, unknown>
   onChange: EditFormProps['onChange']
+  /** Outgoing connections; the Lines tab appears only when there are any. */
+  lines?: LineSetting[]
+  onLineChange?: (
+    edgeId: string,
+    patch: { label?: string; animated?: boolean; color?: string },
+  ) => void
 }) {
   const { blockName, t } = useEditorLocale()
   // Resets to "General" whenever the modal closes (children unmount), the
@@ -66,13 +75,24 @@ export default function BlockSettingsModal({
         >
           {t('settingsOnError')}
         </button>
+        {lines.length > 0 && (
+          <button
+            type="button"
+            className={`wf-settings-tab${tab === 'lines' ? ' wf-settings-tab-active' : ''}`}
+            onClick={() => setTab('lines')}
+          >
+            {t('settingsLines')}
+          </button>
+        )}
       </div>
       <div className="wf-settings-panel">
         {tab === 'general' ? (
           <GeneralFields data={data} onChange={onChange} blockId={block.id} />
-        ) : (
+        ) : tab === 'on-error' ? (
           <OnErrorFields data={data} onChange={onChange} blockId={block.id} />
-        )}
+        ) : onLineChange ? (
+          <LinesFields lines={lines} onChange={onLineChange} />
+        ) : null}
       </div>
     </Modal>
   )

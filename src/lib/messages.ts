@@ -107,6 +107,12 @@ export interface RunningTaskView {
   windowId?: number
   /** Whether that window is shared with other runs or this run's own. */
   runWindowKind?: RunWindowKind
+  /** Breakpoint step debugging: started from the editor's Testing mode. */
+  testing?: boolean
+  /** Breakpoint pause of a testing run; absent while it executes. */
+  debug?: { paused: { nodeId: string; label: string; at: number } }
+  /** Debug-mode per-block variable snapshots (the pause's Data view reads one). */
+  snapshots?: { nodeId: string; label: string; at: number; variables: Record<string, unknown> }[]
 }
 
 /** A recently completed task as shown on the Tasks tab board. */
@@ -288,6 +294,21 @@ export type Command =
        * scoped by its own window instead.
        */
       windowId?: number
+      /**
+       * Breakpoint step debugging (Automa's testingMode): the run pauses before
+       * every `$breakpoint` node and is driven with `debug.control`. Testing
+       * runs are refused while one is already active.
+       */
+      testing?: boolean
+    }
+  /**
+   * Answers a paused testing run. `stop` cancels the run; `resume` continues to
+   * the next breakpoint; `next` pauses before the following node.
+   */
+  | {
+      type: 'debug.control'
+      runId: string
+      action: 'resume' | 'next' | 'stop'
     }
   /**
    * AI takeover debug (AI 调试): run the workflow once; when a node fails, the
@@ -681,6 +702,7 @@ export type CommandResult =
       type: 'workflows.run'
       outcome: { ok: boolean; skipped: boolean; summary: string; error?: string; runId?: string }
     }
+  | { type: 'debug.control'; ok: boolean; error?: string }
   | { type: 'workflows.debug'; result: WorkflowDebugResult }
   | {
       type: 'workflows.repair'

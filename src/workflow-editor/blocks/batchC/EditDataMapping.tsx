@@ -14,9 +14,10 @@
  */
 
 import { Plus, Trash2 } from 'lucide-react'
-import { useState } from 'react'
 import { Field, IconButton, Select, TextArea, TextInput } from '../shared/Field'
+import PopupField from '../shared/PopupField'
 import { str } from '../shared/InteractionBase'
+import { useEditorLocale } from '../../locale-context'
 import type { EditFormProps } from '../EditForms'
 import { AssignVariable, SaveToTable, id } from './shared'
 
@@ -49,9 +50,10 @@ function readSources(raw: unknown): MapSource[] {
 }
 
 export default function EditDataMapping({ data, onChange }: EditFormProps) {
-  const [editing, setEditing] = useState(false)
+  const { bt } = useEditorLocale()
   const dataSource = str(data, 'dataSource') || 'table'
   const sources = readSources(data.sources)
+  const destinationCount = sources.reduce((total, source) => total + source.destinations.length, 0)
 
   const commitSources = (next: MapSource[]) => onChange({ sources: next })
 
@@ -127,27 +129,21 @@ export default function EditDataMapping({ data, onChange }: EditFormProps) {
         </Field>
       )}
 
-      <button type="button" className="wf-btn-accent w-full" onClick={() => setEditing(!editing)}>
-        {editing ? 'Close data map' : 'Edit data map'}
-      </button>
-
-      {editing && (
-        <div style={{ marginTop: 8 }}>
-          <div style={{ display: 'flex', fontWeight: 600, gap: 8 }}>
-            <div style={{ flex: 1 }}>Source</div>
-            <div style={{ flex: 1 }}>Destination</div>
+      <PopupField
+        title="Data mapping"
+        summary={`${sources.length} ${bt('sources')} · ${destinationCount} ${bt('destinations')}`}
+        editLabel="Edit data map"
+        icon="lucide:ArrowLeftRight"
+        size="md"
+      >
+        <div>
+          <div className="flex gap-2 font-semibold">
+            <div className="flex-1">{bt('Source')}</div>
+            <div className="flex-1">{bt('Destination')}</div>
           </div>
           {sources.map((source, sIndex) => (
-            <div
-              key={source.id}
-              style={{
-                borderTop: '1px solid var(--bc-border, #ccc)',
-                padding: '8px 0',
-                display: 'flex',
-                gap: 8,
-              }}
-            >
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <div key={source.id} className="flex gap-2 border-t border-border py-2">
+              <div className="flex flex-1 items-center gap-1">
                 <TextInput
                   value={source.name}
                   placeholder="Source property"
@@ -159,12 +155,9 @@ export default function EditDataMapping({ data, onChange }: EditFormProps) {
                   onClick={() => removeSource(sIndex)}
                 />
               </div>
-              <div style={{ flex: 1 }}>
+              <div className="flex-1">
                 {source.destinations.map((dest, dIndex) => (
-                  <div
-                    key={dest.id}
-                    style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}
-                  >
+                  <div key={dest.id} className="mb-1 flex items-center gap-1">
                     <TextInput
                       value={dest.name}
                       placeholder="Destination property"
@@ -182,16 +175,16 @@ export default function EditDataMapping({ data, onChange }: EditFormProps) {
                   className="wf-btn-accent"
                   onClick={() => addDestination(sIndex)}
                 >
-                  <Plus size={14} /> Add destination
+                  <Plus size={14} /> {bt('Add destination')}
                 </button>
               </div>
             </div>
           ))}
           <button type="button" className="wf-btn-accent" onClick={addSource}>
-            <Plus size={14} /> Add source
+            <Plus size={14} /> {bt('Add source')}
           </button>
         </div>
-      )}
+      </PopupField>
 
       <div style={{ marginTop: 12 }}>
         <SaveToTable data={data} onChange={onChange} />

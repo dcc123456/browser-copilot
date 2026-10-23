@@ -374,8 +374,21 @@ export function runOp(op: Op): OpResult {
     return out
   }
 
+  /**
+   * Automa's `isXPath` rule (`/^([(/@]|id\()/`), plus our explicit `xpath:`
+   * prefix. Bare XPath reaches here from Automa-style block fields such as
+   * `loop-data.elementSelector`; CSS selectors never start with these tokens.
+   */
+  function xpathExpressionOf(selector: string): string | null {
+    const trimmed = selector.trim()
+    if (trimmed.startsWith('xpath:')) return trimmed.slice('xpath:'.length)
+    return /^([(/@]|id\()/.test(trimmed) ? trimmed : null
+  }
+
   /** Query every open root (document + open shadow roots). */
   function safeQuery(selector: string): Element[] {
+    const xpath = xpathExpressionOf(selector)
+    if (xpath !== null) return xpathInRoots(openRoots(), xpath)
     return querySelectorIn(openRoots(), selector)
   }
 

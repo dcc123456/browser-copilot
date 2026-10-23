@@ -58,6 +58,7 @@ function GroupNodeComponent({ id, data, selected }: NodeProps) {
       <NodeToolbar
         id={id}
         disabled={disabled}
+        breakpoint={bd['$breakpoint'] === true}
         actions={node.actions}
         extra={
           actions && (

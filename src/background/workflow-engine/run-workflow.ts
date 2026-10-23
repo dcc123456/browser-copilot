@@ -21,13 +21,21 @@ import {
 } from '../checkpoint-store'
 import {
   addStep,
+  cancelRun,
   finishRun,
   recordSnapshot,
   setRunWorkflow,
   startRun,
+  updateRunDebug,
   type RunSource,
   type RunningTask,
 } from '../running-tasks'
+import { retain, release } from '../keepalive'
+import {
+  createDebugSession,
+  type DebugControlAction,
+  type DebugSession,
+} from '../workflow-debugger'
 import {
   countElements,
   elementSelectorAt,
@@ -40,7 +48,7 @@ import { BLOCK_BY_ID } from '../../lib/workflow/blocks/palette'
 import { valueCommittedMatches } from '../../lib/workflow/readiness'
 import { unanchoredElementStart } from '../../lib/workflow/runnability'
 import { runWorkflow } from './engine'
-import type { AiTakeoverHook } from './engine'
+import type { AiTakeoverHook, LoopProgressStore } from './engine'
 import { DEFAULT_WAIT_MS, applyDefaultWaits } from './debug-session'
 import type { ReadinessProbe } from './readiness-engine'
 import { targetSpecsFromSemantic } from '../../lib/workflow/element-fingerprint'
@@ -64,6 +72,27 @@ import type { TraceEntry } from '../../lib/workflow/repair/types'
 import { classifyRunFailure } from './recovery-classifier'
 
 /**
+ * `resumeLastWorkflow` progress, mirroring Automa's localStorage index: it
+ * must survive a run (so an interrupted loop can replay its unfinished item),
+ * so it lives in extension storage rather than in memory.
+ */
+const LOOP_PROGRESS_PREFIX = 'loopProgress:'
+const loopProgressStore: LoopProgressStore = {
+  async get(key) {
+    const storageKey = LOOP_PROGRESS_PREFIX + key
+    const stored = await chrome.storage.local.get(storageKey)
+    const index = stored[storageKey]
+    return typeof index === 'number' ? index : undefined
+  },
+  async set(key, index) {
+    await chrome.storage.local.set({ [LOOP_PROGRESS_PREFIX + key]: index })
+  },
+  async clear(key) {
+    await chrome.storage.local.remove(LOOP_PROGRESS_PREFIX + key)
+  },
+}
+
+/**
  * One store for the whole background script: checkpoints are per-run, and the
  * in-memory half is what the rollback path reads synchronously.
  */
@@ -85,6 +114,18 @@ export function setCheckpointStore(next: ReturnType<typeof createChromeCheckpoin
  * filled from the persisted index by {@link findRunIdFor}.
  */
 const lastRunByWorkflow = new Map<string, string>()
+
+/** Paused testing runs by run id; only debug.control reads this map. */
+const debugSessions = new Map<string, DebugSession>()
+
+/**
+ * Answers a paused testing run. Resume / next only make sense while a pause is
+ * held; stop is the ordinary cancellation path, so it works for any run.
+ */
+export function controlDebugRun(runId: string, action: DebugControlAction): boolean {
+  if (action === 'stop') return cancelRun(runId)
+  return debugSessions.get(runId)?.control(action) ?? false
+}
 
 /**
  * The most recent run id of `workflowId`, consulting the persisted index when
@@ -141,6 +182,12 @@ export interface ExecuteWorkflowOptions {
   stopBefore?: string
   /** Capture per-block variable snapshots for the logs viewer (debug mode). */
   debug?: boolean
+  /**
+   * Breakpoint step debugging (Automa's testingMode): pause before every node
+   * carrying `$breakpoint` and answer `debug.control`. Only the editor's
+   * Testing mode sets it; every unattended caller leaves it unset.
+   */
+  testing?: boolean
   /**
    * AI takeover hook (AI 调试): handed to the engine so a failed node is
    * completed by the AI agent on the live page instead of failing the run.
@@ -488,6 +535,7 @@ export async function executeWorkflow(
       workflowId: workflow.id,
       feishuChatId: opts.feishuChatId,
       ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+      ...(opts.testing ? { testing: true } : {}),
     })
   const runId = run.runId
   // The signal this run obeys: its own cancellation controller (the panel's
@@ -496,6 +544,38 @@ export async function executeWorkflow(
   const runSignal = opts.signal
     ? AbortSignal.any([run.controller.signal, opts.signal])
     : run.controller.signal
+  // Breakpoint session (Testing mode only). The paused run still needs the
+  // worker alive to observe the resume command, hence the keepalive retain;
+  // both are settled in the outer finally.
+  const debugSession = opts.testing
+    ? createDebugSession({
+        signal: runSignal,
+        onPause: (pause) => {
+          const label = nodeLabel(workflow, pause.nodeId)
+          updateRunDebug(runId, { nodeId: pause.nodeId, label, at: pause.at })
+          recordSnapshot(runId, pause.nodeId, label, pause.variables)
+          addStep(runId, 'status', `已暂停在「${label}」/ Paused at "${label}"`, {
+            nodeId: pause.nodeId,
+            label,
+          })
+        },
+        onResume: () => {
+          updateRunDebug(runId, null)
+          addStep(runId, 'info', '已继续运行 / Resumed')
+        },
+        onStop: (reason) => {
+          updateRunDebug(runId, null)
+          addStep(
+            runId,
+            'status',
+            reason === 'timeout'
+              ? '暂停超时（8 分钟），运行已取消 / Pause expired after 8 minutes; run cancelled'
+              : '调试已停止 / Debugging stopped',
+          )
+          if (!run.controller.signal.aborted) run.controller.abort()
+        },
+      })
+    : undefined
   lastRunByWorkflow.set(workflow.id, runId)
   // The reused run was opened by the task runner, which knows the task but not
   // the workflow: back-fill the id so the editor's run logs still match it.
@@ -519,6 +599,10 @@ export async function executeWorkflow(
   })
 
   try {
+    if (debugSession) {
+      debugSessions.set(runId, debugSession)
+      retain()
+    }
     // Validate the panel scope once for the whole run; every block then reads
     // the same ScopeWindow (no per-block window lookups).
     const scope =
@@ -799,6 +883,7 @@ export async function executeWorkflow(
       // body references it as `{{loopElementSelector}}`.
       loopElementSelector: (selector, index, signal) =>
         elementSelectorAt(selector, index, signal, scope),
+      loopProgress: loopProgressStore,
       // JS conditions run in the page: the service worker CSP forbids eval.
       evaluateExpression: async (code, vars) => {
         const result = await execJsOnActiveTab(
@@ -918,6 +1003,7 @@ export async function executeWorkflow(
         // Surface to the caller (e.g. Feishu streaming) alongside the run log.
         opts.onStep?.(kind, nodeId, text)
       },
+      ...(debugSession ? { onBeforeNode: debugSession.hook } : {}),
     })
     // L3 gate (spec §8.4): a strict run that "succeeded" must still prove the
     // GOAL. Deterministic conditions decide; the terminal-state path marks
@@ -1030,6 +1116,13 @@ export async function executeWorkflow(
       error: text,
       trace,
       ...(resumedFrom !== undefined ? { resumedFrom } : {}),
+    }
+  } finally {
+    if (debugSession) {
+      debugSessions.delete(runId)
+      debugSession.dispose()
+      updateRunDebug(runId, null)
+      release()
     }
   }
 }

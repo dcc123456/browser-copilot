@@ -3,16 +3,17 @@
  *
  * While-loop stores its condition tree directly on `data.conditions`
  * (OrGroup[]); the catalog default is `null`, meaning "not configured yet".
- * Automa seeds it with one OR group of two AND rows on mount. Editing happens
- * in a fold-out here instead of a modal (same data, simpler shell).
+ * Automa seeds it with one OR group of two AND rows on mount. The condition
+ * tree is edited in a modal, as in Automa, while the form keeps a one-line
+ * summary.
  *
  * @module workflow-editor/blocks/batchC/EditWhileLoop
  */
 
-import { useState } from 'react'
 import type { EditFormProps } from '../EditForms'
 import { useEditorLocale } from '../../locale-context'
 import { Field, TextArea } from '../shared/Field'
+import PopupField from '../shared/PopupField'
 import { str } from '../shared/InteractionBase'
 import ConditionBuilder, {
   defaultWhileConditions,
@@ -22,13 +23,13 @@ import ConditionBuilder, {
 
 export default function EditWhileLoop({ data, onChange }: EditFormProps) {
   const { bt } = useEditorLocale()
-  const [editing, setEditing] = useState(false)
 
   // Catalog default is `null`; initialize with Automa's default tree.
   const groups: OrGroup[] =
     data.conditions === null || data.conditions === undefined
       ? defaultWhileConditions()
       : readGroups(data.conditions)
+  const conditionCount = groups.reduce((total, group) => total + group.conditions.length, 0)
 
   return (
     <div className="wf-form">
@@ -40,15 +41,15 @@ export default function EditWhileLoop({ data, onChange }: EditFormProps) {
         />
       </Field>
 
-      <button type="button" className="wf-btn-accent w-full" onClick={() => setEditing(!editing)}>
-        {editing ? 'Close condition' : 'Edit condition'}
-      </button>
-
-      {editing && (
-        <div style={{ marginTop: 8 }}>
-          <ConditionBuilder value={groups} onChange={(g) => onChange({ conditions: g })} />
-        </div>
-      )}
+      <PopupField
+        title="While loop condition"
+        summary={`${groups.length} ${bt('OR groups')} · ${conditionCount} ${bt('conditions')}`}
+        editLabel="Edit condition"
+        icon="lucide:GitBranch"
+        size="lg"
+      >
+        <ConditionBuilder value={groups} onChange={(g) => onChange({ conditions: g })} />
+      </PopupField>
 
       <p className="wf-form-note" style={{ marginTop: 8 }}>
         {bt('Blocks connected to the fallback handle run when the condition is false.')}

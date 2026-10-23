@@ -27,6 +27,7 @@ import { sendCommand } from '../lib/messages'
 import type { CommandResult } from '../lib/messages'
 import type { TaskRunLog } from '../lib/scheduler-types'
 import type { Workflow } from '../lib/workflow/types'
+import { normalizeTriggers, primaryTrigger } from '../lib/workflow/triggers'
 import type { WorkflowGroup } from '../lib/workflow/groups'
 import {
   buildWorkflowGroupExport,
@@ -57,8 +58,7 @@ function effectiveTriggerType(wf: Workflow): string {
   const node = wf.drawflow.nodes.find(
     (n) => (n.data?.['blockId'] as string) === 'trigger' || n.label === 'trigger',
   )
-  const fromBlock = node?.data?.['type']
-  return (typeof fromBlock === 'string' && fromBlock) || wf.trigger?.type || 'manual'
+  return primaryTrigger(normalizeTriggers(node?.data, wf.trigger)).type || 'manual'
 }
 
 /**

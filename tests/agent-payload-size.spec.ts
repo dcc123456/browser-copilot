@@ -103,8 +103,13 @@ const MAX_CATALOG_CHARS = 31_400
  * Raised 61_500 → 62_000 for the `file-path` source (~430: two `filePath`
  * schema entries, the widened sourceMode enums and their guide clauses;
  * descriptions were compacted first — measured 61_875).
+ * Raised 62_000 → 62_300 when `set-variable` gained its multi-row `variables`
+ * schema (~340: the required array-of-`{name,value}` schema plus the
+ * `workflow-file` file-field descriptions; `loop-breakpoint` stays out of the
+ * operator set even though it gained an edit form, and the new prose was
+ * compacted first — measured 62_201).
  */
-const MAX_WORKFLOW_ROUND1_CHARS = 62_000
+const MAX_WORKFLOW_ROUND1_CHARS = 62_300
 /**
  * The real per-round ceiling: one declared category on top of round 1. The
  * largest (`interaction`, 13 schemas) measures ~37.6k; the smallest (`general`)
@@ -115,6 +120,8 @@ const MAX_WORKFLOW_ROUND1_CHARS = 62_000
  * Raised 37_000 → 37_100 with the round-1 budget (the guide's credential-scope rule).
  * Raised 37_100 → 37_650 with the round-1 budget (`parse-excel` — measured 37_566).
  * Raised 37_650 → 37_900 with the round-1 budget (`file-path` — measured 37_808).
+ * Kept at 37_900 for the `set-variable` schema (the largest category,
+ * `interaction`, moved 37_808 → 37_875 because `upload-file` is in it).
  */
 const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 37_900
 /**
@@ -129,8 +136,9 @@ const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 37_900
  * (`reload-tab` becoming an operator — see MAX_WORKFLOW_ROUND1_CHARS). Raised
  * 59_900 → 61_500 with the round-1 budget (`parse-excel` — measured 61_445).
  * Raised 61_500 → 62_000 with the round-1 budget (`file-path` — measured 61_875).
+ * Raised 62_000 → 62_300 with the round-1 budget (`set-variable` — measured 62_201).
  */
-const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 62_000
+const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 62_300
 /**
  * Absolute worst case: every category plus both escape hatches loaded. Stays
  * loaded for the rest of the conversation, so this is a per-round cost, not a
@@ -141,18 +149,21 @@ const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 62_000
  * (`reload-tab` becoming an operator — see MAX_WORKFLOW_ROUND1_CHARS). Raised
  * 61_000 → 62_550 with the round-1 budget (`parse-excel` — measured 62_492).
  * Raised 62_550 → 63_000 with the round-1 budget (`file-path` — measured 62_922).
+ * Raised 63_000 → 63_300 with the round-1 budget (`set-variable` — measured 63_248).
  */
-const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 63_000
+const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 63_300
 /**
  * The guardrails that matter, expressed as ratios against full auto. Round 1
  * now deliberately carries EVERY operator schema, so workflow runs ~3× full
  * auto's tool surface and ~3.2× its total payload — the accepted price of not
  * losing runs to undeclared categories (see the file header). These ceilings
  * (measured 3.053 / 3.184 after `file-path` was added) keep that price from
- * silently creeping further; the tools ratio was raised 3.05 → 3.06 with it.
+ * silently creeping further; the tools ratio was raised 3.05 → 3.06 with it,
+ * then → 3.08 for the `set-variable` schema (measured 3.075), and the total
+ * ratio → 3.21 (measured 3.201).
  */
-const MAX_WORKFLOW_TOOLS_RATIO = 3.06
-const MAX_WORKFLOW_OVER_FULL_AUTO_RATIO = 3.2
+const MAX_WORKFLOW_TOOLS_RATIO = 3.08
+const MAX_WORKFLOW_OVER_FULL_AUTO_RATIO = 3.21
 
 /**
  * Workflow-generation turns mount the built-in `workflow-generator` skill into

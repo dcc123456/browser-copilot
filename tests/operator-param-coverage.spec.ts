@@ -66,6 +66,9 @@ const SHARED_HELPER_SOURCES = [
   'src/lib/workflow/secret-params.ts',
   // `parse-excel` delegates sheet / header / output-name reads to this module.
   'src/lib/workflow/excel-node.ts',
+  // `webhook` moved request building and response decoding here so both hosts
+  // share one parser; every advertised parameter is read inside this module.
+  'src/lib/workflow/webhook.ts',
 ]
 
 /**

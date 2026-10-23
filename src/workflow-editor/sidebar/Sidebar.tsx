@@ -11,12 +11,14 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
-const DEFAULT_WIDTH = 320
+const DEFAULT_WIDTH = 360
 const MIN_WIDTH = 220
 const MAX_WIDTH = 620
 
 function widthKey(side: 'left' | 'right'): string {
-  return side === 'left' ? 'bc.editor.paletteWidth' : 'bc.editor.sidebarWidth'
+  // The old key carries the previous 320px default; bumping it once lets
+  // existing installs see the new layout instead of silently keeping 320.
+  return side === 'left' ? 'bc.editor.paletteWidth.v2' : 'bc.editor.sidebarWidth'
 }
 
 function loadWidth(side: 'left' | 'right'): number {

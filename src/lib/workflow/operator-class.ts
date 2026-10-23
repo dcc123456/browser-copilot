@@ -148,6 +148,17 @@ export const JAVASCRIPT_BLOCK_ID = 'javascript-code'
  */
 export const EDIT_LESS_OPERATOR_IDS: ReadonlySet<string> = new Set(['go-back'])
 
+/**
+ * Editable blocks that are still NOT operator tools.
+ *
+ * A real edit form exists for the human editor, but that does not make the
+ * block something the model should emit. `loop-breakpoint` is engine-
+ * interpreted routing: it only means something inside a running loop, and the
+ * operator guide teaches loop folding rather than breakpoint nodes. Both
+ * derivations apply this set so they cannot disagree.
+ */
+export const NON_OPERATOR_BLOCK_IDS: ReadonlySet<string> = new Set(['loop-breakpoint'])
+
 /** Human explanation for why a block was recorded without running. */
 export const RECORD_ONLY_REASONS: Readonly<Record<string, string>> = {
   trigger: 'trigger is the graph entry point; it is recorded, not run',

@@ -155,7 +155,7 @@ export const BLOCK_DESCRIPTIONS_ZH: Record<string, string> = {
   'slice-variable': '截取字符串或数组变量的片段',
   'regex-variable': '用正则表达式匹配或变换变量值',
   'sort-data': '对数据集合排序',
-  'set-variable': '把值存入工作流变量，供后续算子读取（支持 {{variables}}）',
+  'set-variable': '一次把一个或多个值存入工作流变量，供后续算子读取（支持 {{variables}}）',
   'get-secret':
     '运行时从已保存的凭证中取字段值存入变量。只用于绝不能写进工作流的敏感值（密码 / token / 验证码）；用户名等普通输入填在表单 value 里，或声明为触发器参数。',
   'parse-excel':
@@ -167,7 +167,7 @@ export const BLOCK_DESCRIPTIONS_ZH: Record<string, string> = {
   'loop-data': '遍历数据表行或变量值',
   'repeat-task': '按设定次数运行所连接的分支',
   'while-loop': '在条件成立期间持续运行分支',
-  'loop-breakpoint': '在此处停止外层循环',
+  'loop-breakpoint': '跳过本次循环的剩余步骤，或停止整个循环',
   // Cloud (Automa service) blocks
   'ai-workflow': '运行由 AI 助手生成的工作流',
   'google-sheets': '读写 Google 表格',

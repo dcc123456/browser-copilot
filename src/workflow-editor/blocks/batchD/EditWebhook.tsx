@@ -13,7 +13,9 @@ import { CircleX } from 'lucide-react'
 import { useState } from 'react'
 import type { EditFormProps } from '../EditForms'
 import { Checkbox, Field, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
+import PopupField from '../shared/PopupField'
 import { bool, num, str } from '../shared/InteractionBase'
+import { useEditorLocale } from '../../locale-context'
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD']
 const NO_BODY = ['GET', 'HEAD']
@@ -34,6 +36,7 @@ function asHeaders(value: unknown): Header[] {
 }
 
 export default function EditWebhook({ data, onChange }: EditFormProps) {
+  const { bt } = useEditorLocale()
   const method = str(data, 'method') || 'POST'
   const contentType = str(data, 'contentType') || 'json'
   const responseType = str(data, 'responseType') || 'json'
@@ -155,15 +158,25 @@ export default function EditWebhook({ data, onChange }: EditFormProps) {
       )}
 
       {tab === 'body' && hasBody && (
-        <Field label="Body">
-          <TextArea
-            mono
-            rows={8}
-            value={str(data, 'body')}
-            placeholder={'{\n  "key": "value"\n}'}
-            onChange={(v) => onChange({ body: v })}
-          />
-        </Field>
+        <PopupField
+          title="Request body"
+          summary={
+            str(data, 'body').trim() ? `${str(data, 'body').length} ${bt('chars')}` : bt('None')
+          }
+          editLabel="Edit body"
+          icon="lucide:FileText"
+          size="lg"
+        >
+          <Field label="Body">
+            <TextArea
+              mono
+              rows={14}
+              value={str(data, 'body')}
+              placeholder={'{\n  "key": "value"\n}'}
+              onChange={(v) => onChange({ body: v })}
+            />
+          </Field>
+        </PopupField>
       )}
 
       {tab === 'response' && (

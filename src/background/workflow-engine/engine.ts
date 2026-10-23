@@ -11,7 +11,7 @@
 
 import type { Workflow, WorkflowEdge, WorkflowNode } from '../../lib/workflow/types'
 import { getWorkflow } from '../../lib/workflow/storage'
-import { interpolateParams, UNRESOLVED_INTERP_KEY } from '../../lib/workflow/interpolate'
+import { getByPath, interpolateParams, UNRESOLVED_INTERP_KEY } from '../../lib/workflow/interpolate'
 import {
   GROUP_BLOCK_ID,
   groupChildrenOf,
@@ -98,6 +98,13 @@ export interface AiTakeoverOutcome {
 
 /** Engine-side hook: run the AI takeover for one failed node. */
 export type AiTakeoverHook = (request: AiTakeoverRequest) => Promise<AiTakeoverOutcome | null>
+
+/** Durable store for `loop-data` resume indices (see `resumeLastWorkflow`). */
+export interface LoopProgressStore {
+  get(key: string): number | undefined | Promise<number | undefined>
+  set(key: string, index: number): void | Promise<void>
+  clear(key: string): void | Promise<void>
+}
 
 export interface WorkflowRunOptions {
   /** Node id to start from. Defaults to the first trigger or, failing that, the first node. */
@@ -204,6 +211,12 @@ export interface WorkflowRunOptions {
     signal: AbortSignal,
   ) => string | null | Promise<string | null>
   /**
+   * Persists `loop-data` progress for `resumeLastWorkflow`. The engine stays
+   * storage-free: the extension backs this with `chrome.storage.local` and the
+   * Runner with an in-memory map. Key = workflow id + loop id/node id.
+   */
+  loopProgress?: LoopProgressStore
+  /**
    * Evaluates a JS condition/expression against the run's variables. Injected
    * by the integration layer so the pure engine stays chrome-free; in the real
    * MV3 build it runs the code in the page (the service worker CSP forbids
@@ -240,6 +253,21 @@ export interface WorkflowRunOptions {
     /** Fine-grained phase (spec §14) — set on side-effect-safety entries. */
     phase?: import('../../lib/workflow/checkpoints').CheckpointPhase
   }) => void
+  /**
+   * Step debugging: awaited once per executable node — after the disabled and
+   * preflight gates, before loop / sub-workflow / group routing and before any
+   * attempt. A debugger holds the returned promise open to pause the run; an
+   * abort while it is held rejects with the ordinary AbortError, so a paused
+   * run cancels like any other. Omitted ⇒ no pause machinery (the Runner and
+   * every pre-existing caller), so behavior is unchanged.
+   */
+  onBeforeNode?: (info: {
+    nodeId: string
+    blockId: string
+    variables: Record<string, unknown>
+    breakpoint: boolean
+    signal: AbortSignal
+  }) => void | Promise<void>
   /**
    * AI takeover (AI 接管): when a block fails, the engine hands that ONE node
    * to the injected hook before failing the run. The hook completes the node's
@@ -397,6 +425,67 @@ function onErrorPolicy(params: Record<string, unknown>): OnErrorPolicy | null {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
+ * Run one executor attempt under the block's timeout.
+ *
+ * The timeout aborts the context signal as well as racing the promise, so an
+ * executor that observes `ctx.signal` stops driving the page immediately; one
+ * that ignores it still cannot hold the run past the deadline. Retry and
+ * onError see an ordinary node failure (`BLOCK_TIMEOUT(...)`).
+ */
+async function runExecutorWithTimeout(
+  executor: BlockExecutor,
+  params: Record<string, unknown>,
+  ctx: WorkflowExecCtx,
+  timeoutMs: number,
+): Promise<string | null> {
+  if (!(timeoutMs > 0)) return executor(params, ctx)
+  const timeoutController = new AbortController()
+  const attemptCtx: WorkflowExecCtx = {
+    ...ctx,
+    signal: AbortSignal.any([ctx.signal, timeoutController.signal]),
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      timeoutController.abort()
+      reject(new Error(`BLOCK_TIMEOUT(${timeoutMs}ms)`))
+    }, timeoutMs)
+  })
+  try {
+    return await Promise.race([executor(params, attemptCtx), timeout])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/**
+ * Await a possibly-async hook while honoring `signal`.
+ *
+ * The debug pause holds this promise open indefinitely; without the listener a
+ * cancelled run would wait for a resume that never comes. An abort settles the
+ * wait at once with the ordinary AbortError, which unwinds through the same
+ * path as any other cancellation.
+ */
+async function awaitWhileAbortable<T>(value: T | Promise<T>, signal: AbortSignal): Promise<T> {
+  if (!value || typeof (value as PromiseLike<T>).then !== 'function') return value as T
+  if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
+  return await new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(new DOMException('Aborted', 'AbortError'))
+    signal.addEventListener('abort', onAbort, { once: true })
+    ;(value as Promise<T>).then(
+      (result) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(result)
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      },
+    )
+  })
+}
+
+/**
  * Resolve the canonical block id for a node. Newer workflows store it under
  * `data.blockId`; legacy nodes only have `label` (which was once the English
  * block id and later became the localized display name). Fall back in that
@@ -546,9 +635,11 @@ async function runCore(
     parentWorkflowIds = new Set<string>(),
     loopElementCounter,
     loopElementSelector,
+    loopProgress,
     evaluateExpression,
     onSnapshot,
     onCheckpoint,
+    onBeforeNode,
     aiTakeover,
     preflightBlockers,
     readinessProbe,
@@ -923,6 +1014,23 @@ async function runCore(
       return null
     }
 
+    // Step debugging. Placed after the disabled / preflight gates (a step that
+    // will not run never pauses) and before loop, sub-workflow and group
+    // routing, so every executable node type can be stopped. Outside the retry
+    // loop: a pause belongs to entering the step, not to each attempt.
+    if (onBeforeNode) {
+      await awaitWhileAbortable(
+        onBeforeNode({
+          nodeId,
+          blockId,
+          variables,
+          breakpoint: current.data?.['$breakpoint'] === true,
+          signal: signalToUse,
+        }),
+        signalToUse,
+      )
+    }
+
     // Loop and sub-workflow blocks are handled by the engine itself, not by an
     // executor in the registry, so sub-runs and loop bodies recurse here too.
     // Body entry / after-loop exit resolve by handle semantics, not edge
@@ -1066,6 +1174,7 @@ async function runCore(
         beforeNode = undefined
       }
     }
+    const blockTimeoutMs = Math.max(0, Number(current.data['blockTimeout'] ?? 0))
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         // An unresolved `{{token}}` must never reach the page. Generation put
@@ -1139,7 +1248,7 @@ async function runCore(
           }
         }
         if (unsafe) emitCheckpoint(nodeId, 'ok', 'sideEffectStarted')
-        resolver = await executor(params, ctx)
+        resolver = await runExecutorWithTimeout(executor, params, ctx, blockTimeoutMs)
         // Generated-strict post-action readiness (value committed, navigation
         // settled): verified BEFORE the node can count as succeeded.
         if (reliability && readinessProbe) {
@@ -1406,9 +1515,11 @@ async function runCore(
 
   /**
    * Runs one loop-body segment, translating a `LoopBreakpointError` from the
-   * body into a `'break'` signal when THIS loop owns it (no loopId = the
-   * innermost loop; a loopId must match the loop node's values/data `loopId`
-   * or the node id), rethrowing otherwise so an outer loop can claim it.
+   * body into a signal when THIS loop owns it (no loopId = the innermost loop;
+   * a loopId must match the loop node's values/data `loopId` or the node id),
+   * rethrowing otherwise so an outer loop can claim it.
+   * `'continue'` = skip the rest of this item (Automa's default breakpoint);
+   * `'end'` = "Stop loop" (`clearLoop`), follow `endId`.
    * `'ok'` = the body finished with the run still ok; `'failed'` = the run
    * outcome flipped to failed/cancelled (the loop stops without following
    * `endId`; the run result reports the outcome unchanged).
@@ -1416,7 +1527,7 @@ async function runCore(
   async function runLoopBody(
     loopNode: WorkflowNode,
     startId: string,
-  ): Promise<'ok' | 'break' | 'failed'> {
+  ): Promise<'ok' | 'continue' | 'end' | 'failed'> {
     try {
       await runSegment(startId, loopNode.id)
     } catch (e) {
@@ -1425,7 +1536,11 @@ async function runCore(
         const owners = [paramsOf(loopNode)['loopId'], loopNode.data?.['loopId'], loopNode.id].map(
           (v) => (v === undefined || v === null ? '' : String(v)),
         )
-        if (wanted === '' || owners.includes(wanted)) return 'break'
+        if (wanted === '' || owners.includes(wanted)) {
+          // Automa's breakpoint skips the REST of this item; only "Stop loop"
+          // (`clearLoop`) leaves the loop.
+          return e.clearLoop ? 'end' : 'continue'
+        }
       }
       throw e
     }
@@ -1449,85 +1564,178 @@ async function runCore(
     const label = blockIdOf(loopNode)
 
     if (label === 'loop-data') {
-      // The editor's "Loop through" select offers Table / Numbers / Variable /
-      // Elements / Custom data / Google Sheets, but this path only ever parsed
-      // `loopData` — so every mode except custom JSON iterated zero items and
-      // the run reported 成功 with an empty loop. The legacy shape (a JSON array
-      // in `data`/`loopData` with no mode chosen) still wins, so graphs saved
-      // before this keep working.
-      const legacy = String(params['data'] ?? params['loopData'] ?? '').trim()
       const through = String(params['loopThrough'] ?? '').trim()
-      let items: unknown[] = []
-      let unsupported = ''
-      if (legacy !== '' && legacy !== '[]' && through !== 'elements') {
-        try {
-          const parsed = JSON.parse(legacy)
-          if (Array.isArray(parsed)) items = parsed
-        } catch {
-          emit('error', loopNode.id, 'loop-data: 数据解析失败')
-          return null
-        }
-      } else if (through === 'numbers') {
-        const from = Math.floor(Number(params['fromNumber'] ?? 1))
-        const to = Math.floor(Number(params['toNumber'] ?? 10))
-        if (Number.isFinite(from) && Number.isFinite(to)) {
-          for (let n = from; from <= to ? n <= to : n >= to; n += from <= to ? 1 : -1) items.push(n)
-        }
-      } else if (through === 'data-columns') {
-        items = Array.isArray(variables['dataTable']) ? (variables['dataTable'] as unknown[]) : []
-      } else if (through === 'variable') {
-        const name = String(params['variableName'] ?? '').trim()
-        const value = name === '' ? undefined : variables[name]
-        if (Array.isArray(value)) items = value
-        else if (typeof value === 'string' && value.trim() !== '') {
-          try {
-            const parsed = JSON.parse(value)
-            items = Array.isArray(parsed) ? parsed : [parsed]
-          } catch {
-            items = [value]
-          }
-        } else if (value !== undefined && value !== null) items = [value]
-        if (name === '') unsupported = `loop-data: 循环来源是「变量」但没有填 variableName`
-      } else if (through === 'google-sheets') {
-        unsupported = 'loop-data: Google Sheets 循环需要 OAuth 凭据，尚未配置'
-      }
-      if (unsupported !== '') {
-        emit('error', loopNode.id, unsupported)
+      const legacy = String(params['data'] ?? params['loopData'] ?? '').trim()
+      const failLoop = (text: string): null => {
+        emit('error', loopNode.id, text)
+        outcome = 'failed'
+        error = text
         return null
       }
-      if (params['reverseLoop'] === true) items = items.slice().reverse()
-      const cap = Math.floor(Number(params['maxLoop'] ?? 0))
-      if (Number.isFinite(cap) && cap > 0 && items.length > cap) items = items.slice(0, cap)
+
+      // `resumeLastWorkflow` mirrors Automa: the CURRENT item index is saved
+      // before its body runs, so an interrupted run replays the unfinished item.
+      // Natural completion and "Stop loop" clear the entry.
+      const loopKey = String(params['loopId'] ?? loopNode.data?.['loopId'] ?? '').trim()
+      const progressKey = `${workflow.id}:${loopKey === '' ? loopNode.id : loopKey}`
+      // Automa's resume/start/reverse options live outside its numbers branch:
+      // a numbers loop always starts at `fromNumber` and ignores stale flags.
+      const resumeEnabled =
+        through !== 'numbers' && params['resumeLastWorkflow'] === true && loopProgress !== undefined
+      const resumeIndex = async (): Promise<number> => {
+        if (resumeEnabled) {
+          const saved = Number(await loopProgress!.get(progressKey))
+          if (Number.isFinite(saved) && saved > 0) return Math.floor(saved)
+        }
+        const requested = Math.floor(Number(params['startIndex'] ?? 0))
+        return Number.isFinite(requested) && requested > 0 ? requested : 0
+      }
+      const rememberIndex = async (index: number): Promise<void> => {
+        if (resumeEnabled) await loopProgress!.set(progressKey, index)
+      }
+      const forgetIndex = async (): Promise<void> => {
+        if (resumeEnabled) await loopProgress!.clear(progressKey)
+      }
 
       if (through === 'elements') {
-        const selector = String(params['elementSelector'] ?? params['selector'] ?? '')
-        const count = loopElementCounter ? await loopElementCounter(selector, signalToUse) : 0
-        emit('status', loopNode.id, `遍历 ${count} 个元素`)
-        if (startId === null) return endId
-        for (let i = 0; i < count; i++) {
+        const selector = String(params['elementSelector'] ?? params['selector'] ?? '').trim()
+        if (selector === '') return failLoop('loop-data: 元素循环没有填写选择器')
+        let count = 0
+        if (loopElementCounter) {
+          const waitTimeout = Math.max(0, Number(params['waitSelectorTimeout'] ?? 5000))
+          const deadline = Date.now() + waitTimeout
+          count = await loopElementCounter(selector, signalToUse)
+          while (params['waitForSelector'] === true && count === 0 && Date.now() < deadline) {
+            if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
+            await sleep(Math.min(200, Math.max(0, deadline - Date.now())))
+            count = await loopElementCounter(selector, signalToUse)
+          }
+        } else {
+          // Non-browser contexts (pure engine tests) fall back to a literal count.
+          count = Math.max(0, Number(params['count'] ?? 0))
+        }
+        const startIndex = Math.min(await resumeIndex(), count)
+        let iterations = count - startIndex
+        const cap = Math.floor(Number(params['maxLoop'] ?? 0))
+        if (Number.isFinite(cap) && cap > 0 && iterations > cap) iterations = cap
+        emit('status', loopNode.id, `遍历 ${iterations} 个元素`)
+        if (startId === null) {
+          await forgetIndex()
+          return endId
+        }
+        for (let i = 0; i < iterations; i++) {
+          const absolute = startIndex + i
+          await rememberIndex(absolute)
           if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
-          variables['loopIndex'] = i
+          variables['loopIndex'] = absolute
           variables['loopItem'] = null
           variables['loopElementSelector'] = loopElementSelector
-            ? ((await loopElementSelector(selector, i, signalToUse)) ?? '')
+            ? ((await loopElementSelector(selector, absolute, signalToUse)) ?? '')
             : ''
           const seg = await runLoopBody(loopNode, startId)
           if (seg === 'failed') return null
-          if (seg === 'break') return endId
+          if (seg === 'end') {
+            await forgetIndex()
+            return endId
+          }
         }
+        await forgetIndex()
         return endId
       }
 
+      let items: unknown[] = []
+      // `loopData` belongs to no-mode (legacy) and custom-data nodes only. A
+      // node switched to another source must not keep looping the old JSON it
+      // happened to leave in that field.
+      const legacyApplies = through === '' || through === 'custom-data'
+      if (legacyApplies && legacy !== '' && legacy !== '[]') {
+        let parsed: unknown
+        try {
+          parsed = JSON.parse(legacy)
+        } catch {
+          return failLoop('loop-data: 自定义数据不是合法 JSON')
+        }
+        if (!Array.isArray(parsed)) return failLoop('loop-data: 自定义数据必须是 JSON 数组')
+        items = parsed
+      } else if (through === 'numbers') {
+        const from = Math.floor(Number(params['fromNumber'] ?? 1))
+        const to = Math.floor(Number(params['toNumber'] ?? 10))
+        if (!Number.isFinite(from) || !Number.isFinite(to)) {
+          return failLoop('loop-data: 数字范围的起止值无效')
+        }
+        for (let n = from; from <= to ? n <= to : n >= to; n += from <= to ? 1 : -1) {
+          items.push(n)
+        }
+      } else if (through === 'variable') {
+        const name = String(params['variableName'] ?? '').trim()
+        if (name === '') return failLoop('loop-data: 循环来源是变量但没有填写变量名')
+        // Nested paths (`order.items`) are read the same way `{{a.b}}` is.
+        const value = getByPath(variables, name)
+        if (Array.isArray(value)) {
+          items = value
+        } else {
+          // Automa: JSON text parses first; a string loops its characters and a
+          // number loops 1..N. Anything else is invalid loop data.
+          let coerced: unknown = value
+          if (typeof coerced === 'string') {
+            try {
+              coerced = JSON.parse(coerced)
+            } catch {
+              /* not JSON — stays a string */
+            }
+          }
+          if (Array.isArray(coerced)) items = coerced
+          else if (typeof coerced === 'string') items = coerced.split('')
+          else if (typeof coerced === 'number' && Number.isFinite(coerced)) {
+            items = Array.from({ length: Math.max(0, Math.floor(coerced)) }, (_, i) => i + 1)
+          } else {
+            return failLoop(`loop-data: 变量「${name}」的内容不是可循环的数组、字符串或数字`)
+          }
+        }
+      } else if (through === 'data-columns' || through === 'table' || through === '') {
+        items = Array.isArray(variables['dataTable']) ? (variables['dataTable'] as unknown[]) : []
+        if (items.length === 0) emit('info', loopNode.id, 'loop-data: 数据表为空，循环执行 0 次')
+      } else if (through === 'custom-data') {
+        return failLoop('loop-data: 自定义数据为空，请粘贴 JSON 数组或导入文件')
+      } else if (through === 'google-sheets') {
+        return failLoop('loop-data: Google Sheets 循环需要 OAuth 凭据，尚未配置')
+      } else {
+        return failLoop(`loop-data: 未知的循环来源「${through}」`)
+      }
+
+      // Numbers ignore every option outside the range (Automa: a numbers loop
+      // starts at `fromNumber`, never reverse/resume/startIndex).
+      const startIndex = through === 'numbers' ? 0 : Math.min(await resumeIndex(), items.length)
+      // Predictable order (documented deviation): reverse the source first, then
+      // skip `startIndex`, then apply `maxLoop`.
+      if (through !== 'numbers' && params['reverseLoop'] === true) {
+        items = items.slice().reverse()
+      }
+      items = items.slice(startIndex)
+      const cap = Math.floor(Number(params['maxLoop'] ?? 0))
+      if (through !== 'numbers' && Number.isFinite(cap) && cap > 0 && items.length > cap) {
+        items = items.slice(0, cap)
+      }
+
       emit('status', loopNode.id, `开始循环，共 ${items.length} 项`)
-      if (startId === null) return endId
+      if (startId === null) {
+        await forgetIndex()
+        return endId
+      }
       for (let i = 0; i < items.length; i++) {
+        const absolute = startIndex + i
+        await rememberIndex(absolute)
         if (signalToUse.aborted) throw new DOMException('Aborted', 'AbortError')
-        variables['loopIndex'] = i
+        variables['loopIndex'] = absolute
         variables['loopItem'] = items[i]
         const seg = await runLoopBody(loopNode, startId)
         if (seg === 'failed') return null
-        if (seg === 'break') return endId
+        if (seg === 'end') {
+          await forgetIndex()
+          return endId
+        }
       }
+      await forgetIndex()
       return endId
     }
 
@@ -1542,7 +1750,8 @@ async function runCore(
         variables['loopIndex'] = i
         const seg = await runLoopBody(loopNode, startId)
         if (seg === 'failed') return null
-        if (seg === 'break') return endId
+        if (seg === 'end') return endId
+        // `'continue'` skips the rest of this repetition only.
       }
       return endId
     }
@@ -1575,8 +1784,11 @@ async function runCore(
         variables['loopIndex'] = iterations
         const seg = await runLoopBody(loopNode, startId)
         if (seg === 'failed') return null
-        if (seg === 'break') return endId
-        if (++iterations > MAX_WHILE_ITERATIONS) {
+        // A breakpoint `continue` still consumed one iteration — otherwise a
+        // body that always breaks would bypass the dead-loop guard.
+        iterations += 1
+        if (seg === 'end') return endId
+        if (iterations > MAX_WHILE_ITERATIONS) {
           const text = 'while-loop: 迭代超限，疑似死循环'
           emit('error', loopNode.id, text)
           outcome = 'failed'
@@ -1620,7 +1832,7 @@ async function runCore(
       }
       const seg = await runLoopBody(loopNode, startId)
       if (seg === 'failed') return null
-      if (seg === 'break') return endId
+      if (seg === 'end') return endId
     }
     return endId
   }
@@ -1659,10 +1871,15 @@ async function runCore(
       loopElementCounter,
       loopElementSelector,
       evaluateExpression,
+      // Child loops resume against the same keys (`<childId>:<loopId>`), so a
+      // resumed sub-workflow does not restart its loops from item 0.
+      ...(loopProgress ? { loopProgress } : {}),
       onSnapshot,
       // A child run shares the parent's checkpoint sink: it is the same
       // logical run, and the parent's integration layer owns the run id.
       onCheckpoint,
+      // Breakpoints inside a sub-workflow pause the parent run (same run id).
+      ...(onBeforeNode ? { onBeforeNode } : {}),
       // Keep one trace spanning the full parent→child nesting (P3).
       onSubWorkflow,
       onStep: onStep ? (kind, nodeId, text) => onStep(kind, nodeId, `[子] ${text}`) : undefined,

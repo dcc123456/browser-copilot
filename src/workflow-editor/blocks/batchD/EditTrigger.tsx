@@ -1,9 +1,9 @@
 /**
  * EditTrigger — React port of Automa's EditTrigger + Trigger/* sub-forms.
  *
- * The "Trigger" block decides how a workflow starts. The catalog stores a flat
- * trigger payload (`type` plus the shared fields used by every trigger type),
- * so this form renders one field set per `type`:
+ * The "Trigger" block decides how a workflow starts. A workflow may have
+ * SEVERAL triggers (Automa's `data.triggers` list); the main form edits the
+ * selected one:
  *
  *   manual             — no options
  *   interval           — interval + delay (minutes)
@@ -16,14 +16,15 @@
  *   element-change     — observe a target element (SelectorField pick/verify +
  *                        MutationObserver options) and an optional base element
  *
- * Automa's newer build wraps these in a multi-trigger modal, but the flat
- * catalog shape (src/lib/workflow/blocks/catalog.ts) maps 1:1 to this form.
- * The "Parameters" fold-out edits `data.parameters`.
+ * The "Workflow Triggers" button opens Automa's list modal: add, select and
+ * remove specs; creation order defines the primary (the one mirrored onto the
+ * legacy flat fields and `workflow.trigger`). The "Parameters" fold-out edits
+ * `data.parameters`, which is workflow-level, not per trigger.
  *
  * @module workflow-editor/blocks/batchD/EditTrigger
  */
 
-import { CircleDot, Square, SquareTerminal } from 'lucide-react'
+import { CircleDot, ListTree, Square, SquareTerminal, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { EditFormProps } from '../EditForms'
 import {
@@ -40,6 +41,12 @@ import { bool, num, str } from '../shared/InteractionBase'
 import SelectorField from '../shared/SelectorField'
 import Modal from '../../ui/Modal'
 import { useEditorLocale } from '../../locale-context'
+import {
+  newTriggerSpec,
+  normalizeTriggers,
+  writeTriggers,
+  type WorkflowTriggerSpec,
+} from '../../../lib/workflow/triggers'
 import ParameterFields, { type WorkflowParameter } from './ParameterFields'
 import WorkflowInfoFields from './WorkflowInfoFields'
 
@@ -89,18 +96,103 @@ function asStringList(value: unknown): string[] {
   return value.filter((v): v is string => typeof v === 'string')
 }
 
+function typeLabelOf(type: string): string {
+  return TRIGGER_TYPES.find((entry) => entry.value === type)?.label ?? type
+}
+
+function stringFieldOf(spec: WorkflowTriggerSpec, key: string): string {
+  const value = spec.data[key]
+  return typeof value === 'string' ? value : ''
+}
+
+/** One-line preview shown in the Workflow Triggers list. */
+function triggerSummaryOf(spec: WorkflowTriggerSpec): string {
+  switch (spec.type) {
+    case 'interval':
+      return `${Number(spec.data['interval'] ?? 60)}m`
+    case 'date':
+      return [stringFieldOf(spec, 'date'), stringFieldOf(spec, 'time')].filter(Boolean).join(' ')
+    case 'specific-day': {
+      const days = asStringList(spec.data['days']).join(',')
+      return [days, stringFieldOf(spec, 'time')].filter(Boolean).join(' ')
+    }
+    case 'visit-web':
+      return stringFieldOf(spec, 'url') || '—'
+    case 'keyboard-shortcut':
+      return stringFieldOf(spec, 'shortcut') || '—'
+    case 'context-menu':
+      return stringFieldOf(spec, 'contextMenuName') || '—'
+    case 'element-change': {
+      const observe = spec.data['observeElement']
+      const selector =
+        typeof observe === 'object' && observe !== null
+          ? String((observe as Record<string, unknown>)['selector'] ?? '')
+          : ''
+      return selector || '—'
+    }
+    default:
+      return typeLabelOf(spec.type)
+  }
+}
+
 export default function EditTrigger({ data, onChange }: EditFormProps) {
   const { bt } = useEditorLocale()
   const [paramsOpen, setParamsOpen] = useState(false)
-  const type = str(data, 'type') || 'manual'
+  const [triggersOpen, setTriggersOpen] = useState(false)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
 
-  const days = asStringList(data.days).map((d) => String(d))
-  const contextTypes = asStringList(data.contextTypes)
+  const specs = normalizeTriggers(data)
+  const selected = specs.find((spec) => spec.id === selectedId) ?? specs[0]!
+  const selectedIndex = Math.max(
+    0,
+    specs.findIndex((spec) => spec.id === selected.id),
+  )
+  const type = TRIGGER_TYPES.some((entry) => entry.value === selected.type)
+    ? selected.type
+    : 'manual'
+
+  const days = asStringList(selected.data['days']).map((d) => String(d))
+  const contextTypes = asStringList(selected.data['contextTypes'])
+
+  const writeSpecs = (next: WorkflowTriggerSpec[]) => onChange(writeTriggers(data, next))
+
+  const patchSelected = (patch: Record<string, unknown>) =>
+    writeSpecs(
+      specs.map((spec, index) =>
+        index === selectedIndex ? { ...spec, data: { ...spec.data, ...patch } } : spec,
+      ),
+    )
+
+  const changeType = (nextType: string) => {
+    // Switching kinds starts from that kind's defaults: keeping the previous
+    // kind's fields would leave the trigger describing two things at once.
+    const template = newTriggerSpec(nextType)
+    writeSpecs(
+      specs.map((spec, index) =>
+        index === selectedIndex ? { ...spec, type: nextType, data: template.data } : spec,
+      ),
+    )
+  }
+
+  const addTrigger = (nextType: string) => {
+    if (!nextType) return
+    const spec = newTriggerSpec(nextType)
+    setSelectedId(spec.id)
+    writeSpecs([...specs, spec])
+  }
+
+  const removeTrigger = (id: string) => {
+    if (specs.length <= 1) return
+    const index = specs.findIndex((spec) => spec.id === id)
+    const next = specs.filter((spec) => spec.id !== id)
+    setSelectedId(next[Math.min(index, next.length - 1)]!.id)
+    writeSpecs(next)
+  }
 
   const toggleListValue = (key: 'days' | 'contextTypes', value: string, checked: boolean) => {
     const current = key === 'days' ? days : contextTypes
     const next = checked ? [...current, value] : current.filter((v) => v !== value)
-    onChange({ [key]: next })
+    patchSelected({ [key]: next })
   }
 
   return (
@@ -118,28 +210,32 @@ export default function EditTrigger({ data, onChange }: EditFormProps) {
         />
       </Field>
 
+      {specs.length > 1 && (
+        <p className="wf-hint">{bt('Select a trigger to edit its settings.')}</p>
+      )}
+
       <Field label="Trigger workflow">
-        <Select value={type} onChange={(v) => onChange({ type: v })} options={TRIGGER_TYPES} />
+        <Select value={type} onChange={changeType} options={TRIGGER_TYPES} />
       </Field>
 
       {type === 'interval' && (
         <>
           <Field label="Interval (minutes)">
             <NumberInput
-              value={num(data, 'interval', 60)}
+              value={num(selected.data, 'interval', 60)}
               min={1}
               max={360}
               fallback={60}
-              onChange={(n) => onChange({ interval: n })}
+              onChange={(n) => patchSelected({ interval: n })}
             />
           </Field>
           <Field label="Delay (minutes)">
             <NumberInput
-              value={num(data, 'delay', 5)}
+              value={num(selected.data, 'delay', 5)}
               min={0}
               max={20}
               fallback={5}
-              onChange={(n) => onChange({ delay: n })}
+              onChange={(n) => patchSelected({ delay: n })}
             />
           </Field>
         </>
@@ -150,16 +246,16 @@ export default function EditTrigger({ data, onChange }: EditFormProps) {
           <Field label="Date">
             <TextInput
               type="date"
-              value={str(data, 'date')}
-              onChange={(v) => onChange({ date: v })}
+              value={stringFieldOf(selected, 'date')}
+              onChange={(v) => patchSelected({ date: v })}
             />
           </Field>
           <Field label="Time">
             <TextInput
               type="time"
-              value={str(data, 'time')}
+              value={stringFieldOf(selected, 'time')}
               fallback="00:00"
-              onChange={(v) => onChange({ time: v })}
+              onChange={(v) => patchSelected({ time: v })}
             />
           </Field>
         </>
@@ -182,9 +278,9 @@ export default function EditTrigger({ data, onChange }: EditFormProps) {
           <Field label="Time">
             <TextInput
               type="time"
-              value={str(data, 'time')}
+              value={stringFieldOf(selected, 'time')}
               fallback="00:00"
-              onChange={(v) => onChange({ time: v })}
+              onChange={(v) => patchSelected({ time: v })}
             />
           </Field>
         </>
@@ -194,28 +290,30 @@ export default function EditTrigger({ data, onChange }: EditFormProps) {
         <>
           <Field label="URL or Regex">
             <TextInput
-              value={str(data, 'url')}
+              value={stringFieldOf(selected, 'url')}
               placeholder="https://example.com/*"
-              onChange={(v) => onChange({ url: v })}
+              onChange={(v) => patchSelected({ url: v })}
             />
           </Field>
           <Checkbox
-            checked={bool(data, 'isUrlRegex')}
-            onChange={(v) => onChange({ isUrlRegex: v })}
+            checked={bool(selected.data, 'isUrlRegex')}
+            onChange={(v) => patchSelected({ isUrlRegex: v })}
             label="Use regex"
           />
         </>
       )}
 
-      {type === 'keyboard-shortcut' && <ShortcutFields data={data} onChange={onChange} />}
+      {type === 'keyboard-shortcut' && (
+        <ShortcutFields data={selected.data} onChange={patchSelected} />
+      )}
 
       {type === 'context-menu' && (
         <>
           <Field label="Workflow name in the context menu">
             <TextInput
-              value={str(data, 'contextMenuName')}
+              value={stringFieldOf(selected, 'contextMenuName')}
               placeholder="Context menu item name"
-              onChange={(v) => onChange({ contextMenuName: v })}
+              onChange={(v) => patchSelected({ contextMenuName: v })}
             />
           </Field>
           <Field label="Will appear in">
@@ -233,7 +331,9 @@ export default function EditTrigger({ data, onChange }: EditFormProps) {
         </>
       )}
 
-      {type === 'element-change' && <ElementChangeFields data={data} onChange={onChange} />}
+      {type === 'element-change' && (
+        <ElementChangeFields data={selected.data} onChange={patchSelected} />
+      )}
 
       {type === 'on-startup' && (
         <p className="wf-hint">{bt('The workflow runs when the browser starts.')}</p>
@@ -242,12 +342,74 @@ export default function EditTrigger({ data, onChange }: EditFormProps) {
         <p className="wf-hint">{bt('The workflow runs only when started manually.')}</p>
       )}
 
+      <button type="button" className="wf-params-btn" onClick={() => setTriggersOpen(true)}>
+        <ListTree size={14} />
+        <span>{bt('Workflow triggers')}</span>
+      </button>
+
       {/* Automa EditTrigger: a "Parameters" button opens the parameters modal
           (EditWorkflowParameters) instead of an inline fold-out. */}
       <button type="button" className="wf-params-btn" onClick={() => setParamsOpen(true)}>
         <SquareTerminal size={14} />
         <span>{bt('Parameters')}</span>
       </button>
+
+      <Modal
+        open={triggersOpen}
+        onClose={() => setTriggersOpen(false)}
+        title={bt('Workflow triggers')}
+        size="lg"
+      >
+        <div className="flex flex-col gap-2">
+          {specs.map((spec, index) => {
+            const isSelected = spec.id === selected.id
+            return (
+              <div
+                key={spec.id}
+                className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 ${
+                  isSelected ? 'border-accent bg-accent-soft' : 'border-border bg-sunken'
+                }`}
+              >
+                <button
+                  type="button"
+                  className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left"
+                  onClick={() => setSelectedId(spec.id)}
+                >
+                  <span className="flex items-center gap-2 text-xs font-medium text-ink">
+                    <span>{bt(typeLabelOf(spec.type))}</span>
+                    {index === 0 && (
+                      <span className="rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] font-normal text-accent">
+                        {bt('Primary')}
+                      </span>
+                    )}
+                  </span>
+                  <span className="w-full truncate text-[11px] text-muted">
+                    {triggerSummaryOf(spec)}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="shrink-0 rounded p-1 text-muted transition-colors hover:text-err disabled:cursor-not-allowed disabled:opacity-40"
+                  title={bt('Remove trigger')}
+                  disabled={specs.length <= 1}
+                  onClick={() => removeTrigger(spec.id)}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            )
+          })}
+
+          <Select
+            value=""
+            onChange={addTrigger}
+            options={[
+              { value: '', label: 'Add trigger' },
+              ...TRIGGER_TYPES.map((entry) => ({ value: entry.value, label: entry.label })),
+            ]}
+          />
+        </div>
+      </Modal>
 
       <Modal
         open={paramsOpen}

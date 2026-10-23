@@ -40,6 +40,7 @@ describe('editor i18n', () => {
     expect(tEn('run')).toBe('Run')
     expect(tEn('editor')).toBe('Editor')
     expect(tZh('logs')).toBe('日志')
+    expect(tZh('searchBlocks')).toBe('搜索算子')
   })
 })
 

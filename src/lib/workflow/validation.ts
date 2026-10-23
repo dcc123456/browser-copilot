@@ -10,6 +10,7 @@
  */
 
 import { isOfferedTriggerType } from './trigger-options'
+import { effectiveTriggers } from './triggers'
 import { dataValueSites } from './data-params'
 import { hasReference } from './dynamic-data'
 import { unanchoredElementStart } from './runnability'
@@ -163,32 +164,6 @@ function triggerNodeOf(workflow: Workflow): WorkflowNode | undefined {
   )
 }
 
-/**
- * The trigger's parameters, read from the graph node and filled in from the
- * denormalized top-level mirror.
- *
- * The mirror is not a formality for the two kinds that carry a field there:
- * `visit-web` matches on `workflow.trigger.urlPattern` and the context menu
- * registers `workflow.trigger.menuItemId` — both are read from the MIRROR at
- * run time, not from the node. A workflow created by another path (an older
- * import, a `github` / `feishu` integration) may therefore carry only
- * `workflow.trigger`, and reading the node alone would report a missing
- * parameter and block a perfectly well-configured run.
- */
-function triggerParamsOf(
-  workflow: Workflow,
-  triggerNode: WorkflowNode | undefined,
-): Record<string, unknown> {
-  const data: Record<string, unknown> = { ...(triggerNode?.data ?? {}) }
-  if (data['url'] === undefined && workflow.trigger?.urlPattern) {
-    data['url'] = workflow.trigger.urlPattern
-  }
-  if (data['contextMenuName'] === undefined && workflow.trigger?.menuItemId) {
-    data['contextMenuName'] = workflow.trigger.menuItemId
-  }
-  return data
-}
-
 function isNonEmptyString(value: unknown): boolean {
   return typeof value === 'string' && value.trim() !== ''
 }
@@ -327,29 +302,36 @@ export function validateWorkflowForRun(workflow: Workflow): WorkflowRunValidatio
     blameGraph('error', '工作流缺少触发器：请添加一个 trigger 节点，否则无法运行')
   }
 
-  const triggerType =
-    (triggerNode?.data?.['type'] as string | undefined) ?? workflow.trigger?.type ?? 'manual'
-
-  if (workflow.trigger?.enabled === false) {
+  // A workflow may carry several triggers now; every ENABLED one is validated,
+  // because any of them can launch the run. Disabled specs are saved but never
+  // armed, so they cannot be the reason a run is refused.
+  //
+  // The spec's data already folds in the top-level mirror for the two kinds
+  // whose runtime is mirror-driven (`visit-web` urlPattern / context-menu
+  // menuItemId), so a workflow created by an older path still validates.
+  const triggerSpecs = effectiveTriggers(workflow)
+  const enabledSpecs = triggerSpecs.filter((spec) => spec.enabled !== false)
+  if (enabledSpecs.length === 0) {
     blameGraph('error', '触发器已被禁用：请先启用触发器再运行')
   }
 
-  if (!isOfferedTriggerType(triggerType)) {
-    blameGraph(
-      'warning',
-      `触发器类型 "${triggerType}" 在当前版本不会自动触发，只能手动运行；请在编辑器里改用其他类型`,
-    )
-  }
-
-  // Only enforce the kind's own parameters when the kind is one we arm — for an
-  // unarmed kind the field names may belong to another creation path.
-  if (isOfferedTriggerType(triggerType)) {
-    const missing = missingTriggerParam(triggerType, triggerParamsOf(workflow, triggerNode))
+  for (const spec of enabledSpecs) {
+    if (!isOfferedTriggerType(spec.type)) {
+      blameGraph(
+        'warning',
+        `触发器类型 "${spec.type}" 在当前版本不会自动触发，只能手动运行；请在编辑器里改用其他类型`,
+      )
+      continue
+    }
+    // Only enforce the kind's own parameters when the kind is one we arm — for
+    // an unarmed kind the field names may belong to another creation path.
+    const missing = missingTriggerParam(spec.type, spec.data)
     if (missing) {
-      blameGraph('error', `触发器缺少必填参数 "${missing}"，无法运行`)
+      blameGraph('error', `触发器类型 '${spec.type}' 缺少必填参数 "${missing}"，无法运行`)
     }
   }
 
+  const triggerType = enabledSpecs[0]?.type ?? triggerSpecs[0]?.type ?? 'manual'
   const actionNodes = workflow.drawflow.nodes.filter((n) => n !== triggerNode)
   if (actionNodes.length === 0) {
     blameGraph('error', '工作流没有可执行的节点：请在触发器之后至少添加一个算子')

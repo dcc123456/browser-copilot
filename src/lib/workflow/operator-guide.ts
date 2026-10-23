@@ -21,7 +21,7 @@ export const OPERATOR_GUIDE = `# 工作流算子指南（Browser Copilot）
 工作流是以 trigger 为起点的算子节点有向图。节点形如
 \`{ id, label: '<算子id>', position: {x,y}, data: { blockId: '<算子id>', ...参数 } }\`；
 连边形如 \`{ source, target, sourceHandle: '<来源算子id>-output-1', targetHandle: '<目标算子id>-input-1' }\`。
-对话生成的工作流是单链：trigger → 步骤1 → 步骤2 → …（只有分支算子才有多个输出口）。
+对话生成的工作流是单链：trigger（manual）→ 步骤1 → 步骤2 → …（只有分支算子才有多个输出口）。
 参数里引用变量用 \`{{变量名}}\`；元素定位用扁平字段 \`selector\` + \`findBy: 'cssSelector'\`。
 每个节点的 data.description 写一句中文，说明这一步做什么（显示在画布卡片上）。
 
@@ -57,7 +57,7 @@ trigger-event 用 event（非 eventName）。
 
 工作流是给"以后每一次运行"用的，不是这一轮的录像。凡是**业务数据**——填进输入框的内容、
 要打开的网址、请求体、通知文案、比较的值——都不能记录成字面量，
-必须记成 \`{{引用}}\`。字面量会把生成那一刻的值冻进节点，重放时永远只重复那一次，工作流就没有意义。
+必须记成 \`{{引用}}\`。字面量会把生成时的值冻进节点，重放永远只重复那一次。
 
 唯一的例外：\`ai-agent\` 的 **prompt 是指令文本**，写给 AI 而不是从页面取得的数据——
 它保留字面量原样记录，不要改写成 \`{{引用}}\`；你在 prompt 里自己写的 \`{{引用}}\` 照常生效。
@@ -82,7 +82,7 @@ trigger-event 用 event（非 eventName）。
 - 用 \`export-data\` 导出数据表；\`save-local\` 只存单个值，其 \`value\` 必须是 \`{{引用}}\`
   （上游产出或导出表），\`filename\` 可声明为输入；大段字面量会被拒绝。
 
-代码节点的 \`code\` 是程序文本（结构性），其中业务数据走 \`vars.xxx\` / \`refData\`。
+代码里的业务数据走 \`vars.xxx\` / \`refData\`。
 
 ## 代码节点是最后手段（默认禁止）
 
@@ -103,8 +103,6 @@ trigger-event 用 event（非 eventName）。
    **例外**：图片/canvas 产物（图表、海报、二维码）属已认定缺口，**无需论证**；截图走 \`take-screenshot\`。
 4. 理由会成为节点 description；收尾时告诉用户"有 1 个代码节点，原因是……"。
 
-上面映射表的算子都试过仍不行，才用代码节点，只把那一步放进代码。
-
 代码体可写裸表达式（\`document.title\`、\`await fetch('/api').then(r=>r.json())\`，自动作为节点返回值）
 或语句体（\`return ...\` / \`automaNextBlock(...)\`）。
 
@@ -123,11 +121,11 @@ get-secret 的代价是每次运行都要用户存着那条凭证。只对密码
 
 ## 文件类算子：upload-file / parse-excel
 
-- upload-file：\`user-select\` 选择后注入；\`workflow-file\` 填 \`fileVariable\`（变量名，非内容）；
+- upload-file：\`user-select\` 选择后注入；\`workflow-file\` 填 \`fileVariable\`（**上游步骤产出并存入变量**的文件名，非内容、非工作流 JSON）；
   \`latest-download\` 取下载目录里**最新**匹配文件（\`accept\`+\`filePattern\` 过滤，无匹配报错，
   \`fallbackToPicker:true\` 转手动）；\`file-path\` 按 \`filePath\` 读下载目录内的相对路径。
   \`selector\` 指向控件/拖拽区，禁 fill。
-- parse-excel：\`user-select\` 运行时选 .xlsx/.csv，\`workflow-file\` 读 \`fileVariable\`，
+- parse-excel：\`user-select\` 运行时选 .xlsx/.csv，\`workflow-file\` 读 \`fileVariable\`（上游步骤产出的表格变量），
   \`file-path\` 读 \`filePath\`；\`variableName\` 收对象数组（首行表头），\`rawVariableName\` 收二维数组；
   .xls 需先另存。
 
@@ -163,7 +161,7 @@ get-secret 的代价是每次运行都要用户存着那条凭证。只对密码
 | 滚动 / 悬停 / 上传 | element-scroll / hover-element / upload-file | interaction | selector+scrollIntoView 或 scrollX/scrollY |
 | 判断元素在不在、按条件分支 | element-exists / conditions | conditions | selector / 表达式 |
 | 等待（导航后、等页面稳定） | delay / wait-connections | general | time / timeout（毫秒） |
-| 存变量、拼接、正则、累加 | set-variable / data-mapping / slice-variable / regex-variable / increase-variable | data | variableName, value；读变量不用算子，直接写 \`{{变量名}}\` |
+| 存变量、拼接、正则、累加 | set-variable / data-mapping / slice-variable / regex-variable / increase-variable | data | set-variable 用 variables:[{name,value}] 一次写多个（自上而下，可引用前一条）；其余 variableName, value；读变量直接写 \`{{变量名}}\` |
 | 解析 Excel/CSV 为数据 | parse-excel | data | sourceMode, fileVariable 或运行时选择；variableName, rawVariableName |
 | 排序 / 重排数据 | sort-data | data | — |
 | 遍历数据/元素、重复 N 次、条件循环 | loop-data / loop-elements / repeat-task / while-loop | conditions | — |
@@ -174,8 +172,6 @@ get-secret 的代价是每次运行都要用户存着那条凭证。只对密码
 | 导出数据表 | export-data | general | name, type:'csv'\|'json'\|'plain-text' |
 | 桌面通知 / 执行子工作流 | notification / execute-workflow | general | title+body / workflowId |
 | 运行 JavaScript（**最后手段**，见上） | javascript-code | escape | code, timeout, justification 或 capabilityGap |
-
-\`trigger\` 是起点（\`data.type:'manual'\`），固定开头，永不被剔除。
 
 ## 三种固定搭配
 

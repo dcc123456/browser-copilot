@@ -17,7 +17,7 @@
  */
 
 import type { ExecutionTrace, VariableProvenance } from './types'
-import { SECRET_PRODUCER_BLOCK, secretVariableNamesOf } from '../secret-params'
+import { producedVariableNames } from '../producer-completeness'
 import type { Workflow, WorkflowNode } from '../types'
 
 /** Fixed variable names the engine itself provides (mirrors integrity.ts). */
@@ -73,6 +73,15 @@ const TRANSFORM_SOURCE_KEYS: readonly string[] = [
 /** Read a transform node's source variable name from its params, if any. */
 export function transformSourceOf(node: WorkflowNode): string | undefined {
   const data = node.data ?? {}
+  // `set-variable` stores its sources per row; use the first row that reads one.
+  if (Array.isArray(data['variables'])) {
+    for (const row of data['variables']) {
+      const value = (row as Record<string, unknown> | null)?.['value']
+      if (typeof value !== 'string') continue
+      const match = /\{\{\s*([A-Za-z0-9_.]+)\s*\}\}/.exec(value)
+      if (match) return match[1]!.split('.')[0]
+    }
+  }
   for (const key of TRANSFORM_SOURCE_KEYS) {
     const raw = data[key]
     if (typeof raw === 'string') {
@@ -126,17 +135,10 @@ export function buildProvenanceIndex(workflow: Workflow): Map<string, VariablePr
 
   for (const node of workflow.drawflow.nodes) {
     if (isTrigger(node)) continue
-    const declared = node.data?.['variableName']
-    const variableName = typeof declared === 'string' ? declared.trim() : ''
     const blockId = typeof node.data['blockId'] === 'string' ? (node.data['blockId'] as string) : ''
-    // A multi-credential `get-secret` node publishes one variable PER ROW, so its
-    // provenance rows are per row — the flat name only mirrors the first.
-    const outputs =
-      blockId === SECRET_PRODUCER_BLOCK
-        ? secretVariableNamesOf(node.data)
-        : variableName
-          ? [variableName]
-          : []
+    // A multi-row `get-secret` / `set-variable` node publishes one variable PER
+    // ROW; `producedVariableNames` is the single source for that list.
+    const outputs = producedVariableNames(node)
     for (const output of outputs) {
       if (TRANSFORM_BLOCK_IDS.has(blockId)) {
         add({

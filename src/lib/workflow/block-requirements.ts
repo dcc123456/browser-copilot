@@ -29,10 +29,12 @@
  */
 
 import { richTargetFromAny } from './target-to-selector'
+import { variableAssignmentsOf } from './block-output'
 import { secretRequestsOf } from './secret-params'
 import { conditionPathsOf, hasConditionGroups } from './condition-tree'
 import { normalizeDownloadFilePath } from './download-file-path'
 import { BLOCK_BY_ID } from './blocks/palette'
+import { normalizeTriggers } from './triggers'
 
 /** One missing-parameter finding. `key` is the parameter to blame. */
 export interface RequirementProblem {
@@ -71,6 +73,12 @@ interface RequirementSet {
   locator?: string
   /** Bespoke checks (enums, cross-parameter rules) — return a finding when unmet. */
   check?: (data: Record<string, unknown>) => string | RequirementProblem | null
+  /**
+   * Keys advertised as JSON-Schema `required` without an unconditional
+   * `params` entry — for a required container whose contents are validated by
+   * `check` (e.g. `set-variable.variables`).
+   */
+  schemaRequired?: readonly string[]
 }
 
 /** Is `value` something the step can work with? */
@@ -469,10 +477,16 @@ const REQUIREMENTS: Readonly<Record<string, RequirementSet>> = {
 
   // --- data ----------------------------------------------------------------
   'set-variable': {
-    params: [
-      { key: 'variableName', message: '必须给 variableName（存入哪个变量）' },
-      { key: 'value', message: '必须给 value（要存的值）' },
-    ],
+    // One node writes every `variables` row; a node saved before that shape
+    // still carries `variableName` + `value` and must keep running.
+    check: (data) =>
+      variableAssignmentsOf(data).length > 0
+        ? null
+        : {
+            key: 'variables',
+            message: '必须给 variables（至少一行非空变量名）；旧版 variableName + value 也接受',
+          },
+    schemaRequired: ['variables'],
   },
   'get-secret': {
     params: [
@@ -555,13 +569,36 @@ const REQUIREMENTS: Readonly<Record<string, RequirementSet>> = {
         : 'conditions 没有可判断的内容：请给 code（页面内求值的 JS 表达式）或非空的 conditions 行',
   },
   'while-loop': {
-    params: [{ key: 'code', message: '必须给 code（循环条件，页面内求值的 JS 表达式）' }],
+    // The editor builds a condition tree; generated graphs give `code`.
+    check: (data) =>
+      hasConditionsContent(data)
+        ? null
+        : 'while-loop 没有可判断的条件：请给 code（页面内求值的 JS 表达式）或非空的 conditions 行',
   },
   'loop-data': {
-    check: (data) =>
-      filledList(data, 'data', 'loopData')
-        ? null
-        : '必须给 loopData（要遍历的数据，非空数组或 JSON 字符串）',
+    // Each source needs a different field; demanding `loopData` unconditionally
+    // refused a correctly built elements/variable loop.
+    check: (data) => {
+      const through = String(data['loopThrough'] ?? '').trim()
+      if (through === 'elements') {
+        return isFilled(data['elementSelector'])
+          ? null
+          : '元素循环必须给 elementSelector（要遍历元素的选择器，支持 CSS 与 XPath）'
+      }
+      if (through === 'variable') {
+        return isFilled(data['variableName'])
+          ? null
+          : '变量循环必须给 variableName（要遍历的变量名）'
+      }
+      if (through === 'custom-data') {
+        return filledList(data, 'data', 'loopData')
+          ? null
+          : '必须给 loopData（要遍历的数据，非空数组或 JSON 字符串）'
+      }
+      // numbers has defaults (1..10), table sources read the runtime dataTable,
+      // and google-sheets fails at run time with its own "not configured" error.
+      return null
+    },
   },
   'loop-elements': { locator: LOCATOR_MESSAGE },
 }
@@ -625,9 +662,20 @@ export function missingRequirements(
   opts: { skipMustReference?: boolean } = {},
 ): RequirementProblem[] {
   if (blockId === 'trigger') {
-    const type = String(data['type'] ?? 'manual')
-    const missing = missingTriggerParam(type, data)
-    return missing ? [{ key: missing, message: `触发器类型 '${type}' 必须配置 ${missing}` }] : []
+    // A block may carry several triggers; a disabled spec can never fire, so it
+    // is not a requirement of the block.
+    const problems: RequirementProblem[] = []
+    for (const spec of normalizeTriggers(data)) {
+      if (spec.enabled === false) continue
+      const missing = missingTriggerParam(spec.type, spec.data)
+      if (missing) {
+        problems.push({
+          key: missing,
+          message: `触发器类型 '${spec.type}' 必须配置 ${missing}`,
+        })
+      }
+    }
+    return problems
   }
 
   const requirements = REQUIREMENTS[blockId]
@@ -685,7 +733,10 @@ export function schemaRequiredArgs(blockId: string): string[] {
   if (blockId === 'trigger') return []
   const requirements = REQUIREMENTS[blockId]
   if (!requirements) return []
-  return (requirements.params ?? []).filter((param) => !param.when).map((param) => param.key)
+  return [
+    ...(requirements.params ?? []).filter((param) => !param.when).map((param) => param.key),
+    ...(requirements.schemaRequired ?? []),
+  ]
 }
 
 /**

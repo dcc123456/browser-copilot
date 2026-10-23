@@ -106,6 +106,12 @@ export class RunService {
   }
   /** How many runs have settled since the last checkpoint prune. */
   private runsSincePrune = 0
+  /**
+   * `resumeLastWorkflow` progress per `<workflowId>:<loopId>`. Process-lifetime
+   * on purpose: a later run of the same workflow resumes the unfinished item,
+   * matching Automa's localStorage index (entries clear when the loop settles).
+   */
+  private loopProgress = new Map<string, number>()
 
   /** Subscribes to run settlement (used by the Feishu bot to report results). */
   onFinished(listener: (run: RunRecord) => void): () => void {
@@ -301,6 +307,15 @@ export class RunService {
         // Without this hook the engine publishes an empty `loopElementSelector`
         // and every folded element-loop body reads a blank selector.
         loopElementSelector: (selector, index) => driver.elementSelectorAt(selector, index),
+        loopProgress: {
+          get: (key) => this.loopProgress.get(key),
+          set: (key, index) => {
+            this.loopProgress.set(key, index)
+          },
+          clear: (key) => {
+            this.loopProgress.delete(key)
+          },
+        },
         evaluateExpression: async (code, vars) => {
           const evaluated = await driver.execJs(`return (${code});`, { vars })
           return evaluated.ok ? evaluated.data : undefined

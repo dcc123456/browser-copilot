@@ -64,6 +64,9 @@
 
   --radius-md: 8px;
   --radius-lg: 12px;
+
+  /* Animated connection line (workflow editor Lines tab). */
+  --animate-edge-dash: edge-dash 0.8s linear infinite;
 }
 
 /* --- Dark theme (default) --------------------------------------------------- */
@@ -184,6 +187,12 @@
 }
 
 /* --- Dialog motion --------------------------------------------------------- */
+@keyframes edge-dash {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+
 @keyframes dialog-fade {
   from {
     opacity: 0;

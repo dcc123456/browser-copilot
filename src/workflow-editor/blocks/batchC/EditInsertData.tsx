@@ -12,8 +12,8 @@
  */
 
 import { Plus, Trash2 } from 'lucide-react'
-import { useState } from 'react'
 import { Field, IconButton, Select, TextArea, TextInput } from '../shared/Field'
+import PopupField from '../shared/PopupField'
 import { str } from '../shared/InteractionBase'
 import { useEditorLocale } from '../../locale-context'
 import type { EditFormProps } from '../EditForms'
@@ -42,7 +42,6 @@ function readList(raw: unknown): InsertItem[] {
 
 export default function EditInsertData({ data, onChange }: EditFormProps) {
   const { bt } = useEditorLocale()
-  const [open, setOpen] = useState(false)
   const list = readList(data.dataList)
 
   const commit = (next: InsertItem[]) => onChange({ dataList: next })
@@ -86,24 +85,18 @@ export default function EditInsertData({ data, onChange }: EditFormProps) {
         />
       </Field>
 
-      <button type="button" className="wf-btn-accent w-full" onClick={() => setOpen(!open)}>
-        {open ? 'Close' : 'Insert data'} ({list.length})
-      </button>
-
-      {open && (
-        <div style={{ marginTop: 8 }}>
+      <PopupField
+        title="Insert data"
+        summary={`${list.length} ${bt('rows')}`}
+        editLabel="Insert data"
+        icon="lucide:Table"
+        size="lg"
+      >
+        <div>
           {list.map((item, index) => (
-            <div
-              key={index}
-              style={{
-                border: '1px solid var(--bc-border, #ccc)',
-                borderRadius: 8,
-                padding: 8,
-                marginBottom: 10,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ flex: '0 0 130px' }}>
+            <div key={index} className="mb-2.5 rounded-lg border border-border p-2">
+              <div className="flex items-center gap-2">
+                <div className="w-[130px] shrink-0">
                   <Select
                     value={item.type}
                     onChange={(v) => changeType(index, v === 'variable' ? 'variable' : 'table')}
@@ -113,7 +106,7 @@ export default function EditInsertData({ data, onChange }: EditFormProps) {
                     ]}
                   />
                 </div>
-                <div style={{ flex: 1 }}>
+                <div className="flex-1">
                   <Field label={item.type === 'variable' ? 'Variable name' : 'Table column'}>
                     <TextInput
                       value={item.name}
@@ -142,7 +135,7 @@ export default function EditInsertData({ data, onChange }: EditFormProps) {
             {bt('File import (path / CSV / Excel / base64) is not supported in this build.')}
           </p>
         </div>
-      )}
+      </PopupField>
     </div>
   )
 }

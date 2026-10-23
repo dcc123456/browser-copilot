@@ -2,11 +2,12 @@
  * Workflow trigger support (service worker).
  *
  * Automa stores the trigger INSIDE the graph as a `trigger` block whose
- * `data.type` selects how the workflow launches (manual / on-startup /
- * keyboard-shortcut / context-menu / visit-web / scheduled / date /
- * specific-day / element-change). Browser Copilot also keeps a top-level
- * `workflow.trigger` object; this module reads BOTH and reports the effective
- * launch type so a single source of truth drives the listeners.
+ * `data.triggers` lists how the workflow launches (manual / on-startup /
+ * keyboard-shortcut / context-menu / visit-web / date / specific-day /
+ * element-change). Browser Copilot also keeps the legacy flat `data.type` and a
+ * top-level `workflow.trigger` mirror; `lib/workflow/triggers` folds all three
+ * shapes into one spec list, and every listener here iterates the enabled specs
+ * so a workflow can launch from more than one trigger.
  *
  * Keyboard shortcuts are content-script free: Automa uses a page listener, but
  * the extension can fire on the global `chrome.commands` API for fixed
@@ -19,11 +20,23 @@
  */
 
 import { getWorkflow, listWorkflows } from '../lib/workflow/storage'
-import type { Workflow, WorkflowNode } from '../lib/workflow/types'
+import {
+  WORKFLOW_TRIGGER_ALARM_PREFIX,
+  effectiveTriggers,
+  enabledTriggers,
+  isWorkflowTriggerAlarm,
+  parseTriggerAlarmName,
+  primaryTrigger,
+  workflowTriggerAlarmName,
+  type WorkflowTriggerSpec,
+} from '../lib/workflow/triggers'
+import type { Workflow } from '../lib/workflow/types'
 import { coerceIntervalMinutes, nextRunAt } from '../lib/schedule'
 import type { Schedule } from '../lib/scheduler-types'
 
-/** The effective trigger type for a workflow. */
+export { WORKFLOW_TRIGGER_ALARM_PREFIX, isWorkflowTriggerAlarm, workflowTriggerAlarmName }
+
+/** The effective trigger type for a workflow (its primary trigger). */
 export type WorkflowTriggerKind =
   | 'manual'
   | 'on-startup'
@@ -31,54 +44,48 @@ export type WorkflowTriggerKind =
   | 'context-menu'
   | 'visit-web'
   | 'scheduled'
+  | 'interval'
   | 'date'
   | 'specific-day'
   | 'element-change'
 
-/** Read the trigger type from the Automa trigger block, falling back to the top-level field. */
+/** Read the primary trigger type from the trigger block, falling back to the top-level field. */
 export function effectiveTriggerKind(wf: Workflow): WorkflowTriggerKind {
-  const triggerNode = wf.drawflow.nodes.find(
-    (n: WorkflowNode) => (n.data?.['blockId'] as string) === 'trigger' || n.label === 'trigger',
-  )
-  const fromBlock = triggerNode?.data?.['type'] as WorkflowTriggerKind | undefined
-  const top = wf.trigger?.type
-  // Map top-level scheduled -> scheduled.
-  if (fromBlock) return fromBlock
-  if (top === 'scheduled') return 'scheduled'
-  if (top === 'context-menu') return 'context-menu'
-  if (top === 'visit-web') return 'visit-web'
-  return 'manual'
+  return primaryTrigger(effectiveTriggers(wf)).type as WorkflowTriggerKind
 }
 
-/** Whether the workflow's trigger is enabled. */
+/** Whether the workflow's primary trigger is enabled. */
 export function triggerEnabled(wf: Workflow): boolean {
+  // The top-level mirror is the legacy switch; keep honouring it even when the
+  // block itself carries no `enabled` flag.
   if (wf.trigger?.enabled === false) return false
-  const triggerNode = wf.drawflow.nodes.find(
-    (n: WorkflowNode) => (n.data?.['blockId'] as string) === 'trigger',
-  )
-  // Automa trigger blocks have no per-node disabled flag for launching.
-  void triggerNode
-  return true
+  return primaryTrigger(effectiveTriggers(wf)).enabled !== false
+}
+
+/** All workflows with at least one enabled trigger of `type`. */
+function workflowsWithTriggerType(workflows: Workflow[], type: string): Workflow[] {
+  return workflows.filter((wf) => enabledTriggers(wf).some((spec) => spec.type === type))
 }
 
 /** All workflows configured to launch at browser/extension startup. */
 export async function startupWorkflows(): Promise<Workflow[]> {
-  const all = await listWorkflows()
-  return all.filter((wf) => triggerEnabled(wf) && effectiveTriggerKind(wf) === 'on-startup')
+  return workflowsWithTriggerType(await listWorkflows(), 'on-startup')
 }
 
 /**
  * All keyboard-shortcut workflows with their shortcut string. Returns the
- * Automa `shortcut` (e.g. "Ctrl+Shift+E") from the trigger block.
+ * Automa `shortcut` (e.g. "Ctrl+Shift+E") from the trigger block. One workflow
+ * with several shortcut triggers yields one entry per shortcut.
  */
 export async function shortcutWorkflows(): Promise<{ wf: Workflow; shortcut: string }[]> {
   const all = await listWorkflows()
   const out: { wf: Workflow; shortcut: string }[] = []
   for (const wf of all) {
-    if (!triggerEnabled(wf) || effectiveTriggerKind(wf) !== 'keyboard-shortcut') continue
-    const node = wf.drawflow.nodes.find((n) => (n.data?.['blockId'] as string) === 'trigger')
-    const shortcut = (node?.data?.['shortcut'] as string) ?? ''
-    if (shortcut) out.push({ wf, shortcut })
+    for (const spec of enabledTriggers(wf)) {
+      if (spec.type !== 'keyboard-shortcut') continue
+      const shortcut = typeof spec.data['shortcut'] === 'string' ? spec.data['shortcut'] : ''
+      if (shortcut) out.push({ wf, shortcut })
+    }
   }
   return out
 }
@@ -250,26 +257,8 @@ export function setWorkflowRunner(fn: (workflowId: string, scopeWindowId?: numbe
 // `date` trigger fires exactly once and is then cleared. The `scheduled` (cron)
 // trigger is not auto-armed here.
 
-export const WORKFLOW_TRIGGER_ALARM_PREFIX = 'wftrigger:'
 /** `chrome.alarms` rejects delays under 1 minute. */
 const MIN_ALARM_DELAY_MS = 60_000
-
-export function workflowTriggerAlarmName(workflowId: string): string {
-  return `${WORKFLOW_TRIGGER_ALARM_PREFIX}${workflowId}`
-}
-
-/** True when an alarm name belongs to a scheduled workflow trigger. */
-export function isWorkflowTriggerAlarm(name: string): boolean {
-  return name.startsWith(WORKFLOW_TRIGGER_ALARM_PREFIX)
-}
-
-/** The trigger block's data payload, if present, read from the workflow graph. */
-function triggerNodeData(wf: Workflow): Record<string, unknown> | undefined {
-  const node = wf.drawflow.nodes.find(
-    (n: WorkflowNode) => (n.data?.['blockId'] as string) === 'trigger' || n.label === 'trigger',
-  )
-  return node?.data
-}
 
 function clampRange(value: number, min: number, max: number): number {
   if (Number.isNaN(value)) return min
@@ -287,39 +276,38 @@ function parseTime(value: unknown): { hour: number; minute: number } {
 }
 
 /**
- * Whether a workflow should be auto-armed from its trigger block.
+ * Whether one trigger spec should be auto-armed.
  *
  * - `interval` → a repeating `{ kind: 'interval' }` schedule;
  * - `specific-day` → `{ kind: 'weekly', days, hour, minute }`;
  * - `date` → a one-shot run at a specific epoch (`once`).
  *
- * Returns `null` when the workflow is off or its trigger is not time-based.
+ * Returns `null` when the spec is disabled or not time-based.
  */
-export function workflowAutoTrigger(
-  wf: Workflow,
+export function specAutoTrigger(
+  spec: WorkflowTriggerSpec,
 ): { kind: 'schedule'; schedule: Schedule } | { kind: 'once'; epoch: number } | null {
-  if (!triggerEnabled(wf)) return null
-  const data = triggerNodeData(wf)
-  const type = data?.['type']
-  if (type === 'interval') {
+  if (spec.enabled === false) return null
+  const data = spec.data
+  if (spec.type === 'interval') {
     return {
       kind: 'schedule',
-      schedule: { kind: 'interval', minutes: coerceIntervalMinutes(data?.['interval']) },
+      schedule: { kind: 'interval', minutes: coerceIntervalMinutes(data['interval']) },
     }
   }
-  if (type === 'specific-day') {
-    const rawDays = Array.isArray(data?.['days']) ? (data?.['days'] as unknown[]) : []
+  if (spec.type === 'specific-day') {
+    const rawDays = Array.isArray(data['days']) ? (data['days'] as unknown[]) : []
     const days = Array.from(
       new Set(rawDays.map((d) => Number(d)).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)),
     )
     if (days.length === 0) return null
-    const { hour, minute } = parseTime(data?.['time'])
+    const { hour, minute } = parseTime(data['time'])
     return { kind: 'schedule', schedule: { kind: 'weekly', days, hour, minute } }
   }
-  if (type === 'date') {
-    const dateStr = typeof data?.['date'] === 'string' ? (data?.['date'] as string) : ''
+  if (spec.type === 'date') {
+    const dateStr = typeof data['date'] === 'string' ? data['date'] : ''
     if (!dateStr) return null
-    const { hour, minute } = parseTime(data?.['time'])
+    const { hour, minute } = parseTime(data['time'])
     const epoch = new Date(
       `${dateStr}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`,
     ).getTime()
@@ -329,15 +317,28 @@ export function workflowAutoTrigger(
   return null
 }
 
-/** Arms (or clears) the auto-trigger alarm for a single workflow. */
-export async function scheduleWorkflowTrigger(workflowId: string): Promise<void> {
-  const name = workflowTriggerAlarmName(workflowId)
+/**
+ * Arms (or clears) the auto-trigger alarm for ONE spec. Without a `triggerId`
+ * the primary is armed under its own per-spec name; a pre-multi alarm
+ * (`wftrigger:<id>`) is left for `rescheduleAllWorkflowTriggers` to replace.
+ */
+export async function scheduleWorkflowTrigger(
+  workflowId: string,
+  triggerId?: string,
+): Promise<void> {
   const wf = await getWorkflow(workflowId)
   if (!wf) {
-    await chrome.alarms.clear(name)
+    await chrome.alarms.clear(workflowTriggerAlarmName(workflowId, triggerId))
     return
   }
-  const auto = workflowAutoTrigger(wf)
+  const specs = enabledTriggers(wf)
+  const spec = triggerId ? specs.find((s) => s.id === triggerId) : specs[0]
+  if (!spec) {
+    await chrome.alarms.clear(workflowTriggerAlarmName(workflowId, triggerId))
+    return
+  }
+  const name = workflowTriggerAlarmName(workflowId, spec.id)
+  const auto = specAutoTrigger(spec)
   if (!auto) {
     await chrome.alarms.clear(name)
     return
@@ -353,19 +354,24 @@ export async function scheduleWorkflowTrigger(workflowId: string): Promise<void>
   await chrome.alarms.create(name, { when: safeWhen })
 }
 
-/** Clears stale workflow-trigger alarms and re-arms every configured workflow. */
+/** Clears stale workflow-trigger alarms and re-arms every configured spec. */
 export async function rescheduleAllWorkflowTriggers(): Promise<void> {
   const [existing, workflows] = await Promise.all([chrome.alarms.getAll(), listWorkflows()])
-  const known = new Set(
-    workflows.filter((wf) => workflowAutoTrigger(wf)).map((wf) => workflowTriggerAlarmName(wf.id)),
-  )
+  const known = new Set<string>()
+  for (const wf of workflows) {
+    for (const spec of enabledTriggers(wf)) {
+      if (specAutoTrigger(spec)) known.add(workflowTriggerAlarmName(wf.id, spec.id))
+    }
+  }
   for (const alarm of existing) {
-    if (alarm.name.startsWith(WORKFLOW_TRIGGER_ALARM_PREFIX) && !known.has(alarm.name)) {
+    if (isWorkflowTriggerAlarm(alarm.name) && !known.has(alarm.name)) {
       await chrome.alarms.clear(alarm.name)
     }
   }
   for (const wf of workflows) {
-    await scheduleWorkflowTrigger(wf.id)
+    for (const spec of enabledTriggers(wf)) {
+      await scheduleWorkflowTrigger(wf.id, spec.id)
+    }
   }
   // The observer registry is the other half of the trigger state: re-injecting
   // is what both arms a newly added `element-change` trigger and drops one whose
@@ -374,24 +380,35 @@ export async function rescheduleAllWorkflowTriggers(): Promise<void> {
 }
 
 /**
- * Handles a workflow-trigger alarm firing: runs the workflow and re-arms if the
- * trigger recurs. A one-shot `date` trigger is cleared instead so it cannot
- * fire again.
+ * Handles a workflow-trigger alarm firing: runs the workflow and re-arms the
+ * spec if its trigger recurs. A one-shot `date` trigger is cleared instead so
+ * it cannot fire again.
+ *
+ * A pre-multi alarm name (`wftrigger:<workflowId>`) resolves to the primary
+ * spec; once re-armed under the per-spec name the old alarm is cleared, or it
+ * would fire the workflow a second time.
  *
  * Scoped like every other automation path: while a panel window is open the
  * run acts inside it; with no panel open the legacy global resolution applies.
  */
 export async function handleWorkflowTriggerAlarm(alarmName: string): Promise<void> {
-  const workflowId = alarmName.slice(WORKFLOW_TRIGGER_ALARM_PREFIX.length)
+  const parsed = parseTriggerAlarmName(alarmName)
+  if (!parsed) return
+  const workflowId = parsed.workflowId
   const wf = await getWorkflow(workflowId)
   if (!wf) {
     await chrome.alarms.clear(alarmName)
     return
   }
-  const auto = workflowAutoTrigger(wf)
-  if (auto && auto.kind === 'schedule') {
+  const specs = enabledTriggers(wf)
+  const spec = parsed.triggerId ? specs.find((s) => s.id === parsed.triggerId) : specs[0]
+  const auto = spec ? specAutoTrigger(spec) : null
+  if (spec && auto && auto.kind === 'schedule') {
     // Re-arm the next firing before running so a crash does not strand the schedule.
-    await scheduleWorkflowTrigger(workflowId)
+    await scheduleWorkflowTrigger(workflowId, spec.id)
+    if (workflowTriggerAlarmName(workflowId, spec.id) !== alarmName) {
+      await chrome.alarms.clear(alarmName)
+    }
   } else {
     // One-shot `date` trigger (or a now-invalid trigger): fire once, then stop.
     await chrome.alarms.clear(alarmName)
@@ -430,43 +447,44 @@ export interface ElementChangeSpec {
   }
 }
 
-/** The trigger block's `observeElement` payload, when the graph has one. */
-function observeElementOf(wf: Workflow): Record<string, unknown> | undefined {
-  const data = triggerNodeData(wf)
-  const observe = data?.['observeElement']
+/** The `observeElement` payload of one spec, when it carries one. */
+function observeElementOf(spec: WorkflowTriggerSpec): Record<string, unknown> | undefined {
+  const observe = spec.data['observeElement']
   return observe && typeof observe === 'object' ? (observe as Record<string, unknown>) : undefined
 }
 
-/** Every workflow configured to fire on an element change. */
+/** Every enabled `element-change` spec across all workflows. */
 export async function elementChangeWorkflows(): Promise<ElementChangeSpec[]> {
   const all = await listWorkflows()
   const out: ElementChangeSpec[] = []
   for (const wf of all) {
-    if (!triggerEnabled(wf) || effectiveTriggerKind(wf) !== 'element-change') continue
-    const observe = observeElementOf(wf)
-    const selector = typeof observe?.['selector'] === 'string' ? observe.selector.trim() : ''
-    // Without a selector there is nothing to watch; `validateWorkflowForRun`
-    // reports that separately.
-    if (!selector) continue
-    const raw = observe?.['targetOptions']
-    const target = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
-    const filter = Array.isArray(target['attributeFilter'])
-      ? (target['attributeFilter'] as unknown[]).map(String).filter(Boolean)
-      : []
-    out.push({
-      workflowId: wf.id,
-      selector,
-      matchPattern: typeof observe?.['matchPattern'] === 'string' ? observe.matchPattern : '',
-      options: {
-        // `childList` defaults on: watching an element for "it changed" without
-        // noticing its children change is almost never what the user meant.
-        subtree: target['subtree'] === true,
-        childList: target['childList'] !== false,
-        attributes: target['attributes'] === true,
-        characterData: target['characterData'] === true,
-        attributeFilter: filter,
-      },
-    })
+    for (const spec of enabledTriggers(wf)) {
+      if (spec.type !== 'element-change') continue
+      const observe = observeElementOf(spec)
+      const selector = typeof observe?.['selector'] === 'string' ? observe.selector.trim() : ''
+      // Without a selector there is nothing to watch; `validateWorkflowForRun`
+      // reports that separately.
+      if (!selector) continue
+      const raw = observe?.['targetOptions']
+      const target = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+      const filter = Array.isArray(target['attributeFilter'])
+        ? (target['attributeFilter'] as unknown[]).map(String).filter(Boolean)
+        : []
+      out.push({
+        workflowId: wf.id,
+        selector,
+        matchPattern: typeof observe?.['matchPattern'] === 'string' ? observe.matchPattern : '',
+        options: {
+          // `childList` defaults on: watching an element for "it changed" without
+          // noticing its children change is almost never what the user meant.
+          subtree: target['subtree'] === true,
+          childList: target['childList'] !== false,
+          attributes: target['attributes'] === true,
+          characterData: target['characterData'] === true,
+          attributeFilter: filter,
+        },
+      })
+    }
   }
   return out
 }
@@ -666,7 +684,7 @@ export async function handleElementChange(
   // Re-validate against storage: the observer may outlive a workflow that was
   // disabled or deleted since it was injected.
   const wf = await getWorkflow(workflowId)
-  if (!wf || !triggerEnabled(wf) || effectiveTriggerKind(wf) !== 'element-change') return true
+  if (!wf || !enabledTriggers(wf).some((spec) => spec.type === 'element-change')) return true
 
   elementChangeRunning.add(workflowId)
   try {

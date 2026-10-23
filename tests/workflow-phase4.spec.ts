@@ -174,6 +174,58 @@ describe('workflow phase 4 — data & control-flow blocks via runWorkflow', () =
     expect(captured['lastExportPath']).toBe('export.csv')
   })
 
+  it('set-variable writes every row in order, later rows seeing earlier ones', async () => {
+    let captured: Record<string, unknown> = {}
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('vars', 'set-variable', {
+          variables: [
+            { name: 'token', value: 'abc' },
+            { name: 'authHeader', value: 'Bearer {{token}}' },
+          ],
+        }),
+        node('p', 'probe'),
+      ],
+      [edge('t', 'vars'), edge('vars', 'p')],
+    )
+    const result = await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        probe: async (_d, ctx) => {
+          captured = { ...ctx.variables }
+          return null
+        },
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(captured['token']).toBe('abc')
+    expect(captured['authHeader']).toBe('Bearer abc')
+  })
+
+  it('set-variable still runs the legacy single-variable shape', async () => {
+    let captured: Record<string, unknown> = {}
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('vars', 'set-variable', { variableName: 'name', value: 'world' }),
+        node('p', 'probe'),
+      ],
+      [edge('t', 'vars'), edge('vars', 'p')],
+    )
+    const result = await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        probe: async (_d, ctx) => {
+          captured = { ...ctx.variables }
+          return null
+        },
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(captured['name']).toBe('world')
+  })
+
   it('javascript-code stores its return value in lastResult', async () => {
     let captured: unknown = null
     const wf = makeWorkflow(
@@ -301,6 +353,209 @@ describe('workflow phase 4 — loop-data', () => {
       { index: 1, item: 20 },
       { index: 2, item: 30 },
     ])
+  })
+
+  it('numbers mode walks from → to in both directions', async () => {
+    const runNumbers = async (fromNumber: number, toNumber: number): Promise<unknown[]> => {
+      const seen: unknown[] = []
+      const wf = makeWorkflow(
+        [
+          node('t', 'manual'),
+          node('loop', 'loop-data', { loopThrough: 'numbers', fromNumber, toNumber }),
+          node('body', 'body'),
+        ],
+        [edge('t', 'loop'), edge('loop', 'body')],
+      )
+      await runWorkflow(wf, {
+        executors: {
+          ...EXECUTORS,
+          body: async (_d, ctx) => {
+            seen.push(ctx.variables['loopItem'])
+            return null
+          },
+        },
+      })
+      return seen
+    }
+    expect(await runNumbers(1, 3)).toEqual([1, 2, 3])
+    expect(await runNumbers(3, 1)).toEqual([3, 2, 1])
+  })
+
+  it('variable mode accepts arrays, JSON text, strings and numbers (Automa coercions)', async () => {
+    const runVariable = async (value: unknown): Promise<unknown[]> => {
+      const seen: unknown[] = []
+      const wf = makeWorkflow(
+        [
+          node('t', 'manual'),
+          node('loop', 'loop-data', { loopThrough: 'variable', variableName: 'source' }),
+          node('body', 'body'),
+        ],
+        [edge('t', 'loop'), edge('loop', 'body')],
+      )
+      const result = await runWorkflow(wf, {
+        variables: { source: value },
+        executors: {
+          ...EXECUTORS,
+          body: async (_d, ctx) => {
+            seen.push(ctx.variables['loopItem'])
+            return null
+          },
+        },
+      })
+      expect(result.outcome).toBe('ok')
+      return seen
+    }
+    expect(await runVariable(['a', 'b'])).toEqual(['a', 'b'])
+    expect(await runVariable('["x","y"]')).toEqual(['x', 'y'])
+    expect(await runVariable('abc')).toEqual(['a', 'b', 'c'])
+    expect(await runVariable(3)).toEqual([1, 2, 3])
+  })
+
+  it('variable mode fails on a value with no items instead of reporting success', async () => {
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('loop', 'loop-data', { loopThrough: 'variable', variableName: 'source' }),
+        node('body', 'body'),
+      ],
+      [edge('t', 'loop'), edge('loop', 'body')],
+    )
+    const result = await runWorkflow(wf, {
+      variables: { source: { nope: true } },
+      executors: { ...EXECUTORS, body: async () => null },
+    })
+    expect(result.outcome).toBe('failed')
+    expect(result.error).toContain('不是可循环的数组、字符串或数字')
+  })
+
+  it('applies reverse, startIndex and maxLoop in that order', async () => {
+    const seen: unknown[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('loop', 'loop-data', {
+          data: '[1,2,3,4,5]',
+          reverseLoop: true,
+          startIndex: 1,
+          maxLoop: 2,
+        }),
+        node('body', 'body'),
+      ],
+      [edge('t', 'loop'), edge('loop', 'body')],
+    )
+    await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        body: async (_d, ctx) => {
+          seen.push({ index: ctx.variables['loopIndex'], item: ctx.variables['loopItem'] })
+          return null
+        },
+      },
+    })
+    // reversed [5,4,3,2,1] → skip 1 → [4,3,2,1] → take 2.
+    expect(seen).toEqual([
+      { index: 1, item: 4 },
+      { index: 2, item: 3 },
+    ])
+  })
+
+  it('resumeLastWorkflow replays the unfinished item and clears on completion', async () => {
+    const progress = new Map<string, number>()
+    const loopProgress = {
+      get: (key: string) => progress.get(key),
+      set: (key: string, index: number) => void progress.set(key, index),
+      clear: (key: string) => void progress.delete(key),
+    }
+    const loopNode = (): WorkflowNode =>
+      node('loop', 'loop-data', {
+        loopThrough: 'custom-data',
+        loopId: 'rows',
+        loopData: '[1,2,3,4]',
+        resumeLastWorkflow: true,
+      })
+    const run = async (failOn: unknown): Promise<{ outcome: string; seen: unknown[] }> => {
+      const seen: unknown[] = []
+      const wf = makeWorkflow(
+        [node('t', 'manual'), loopNode(), node('body', 'body')],
+        [edge('t', 'loop'), edge('loop', 'body')],
+      )
+      const result = await runWorkflow(wf, {
+        variables: {},
+        loopProgress,
+        executors: {
+          ...EXECUTORS,
+          body: async (_d, ctx) => {
+            if (ctx.variables['loopItem'] === failOn) throw new Error('boom')
+            seen.push(ctx.variables['loopItem'])
+            return null
+          },
+        },
+      })
+      return { outcome: result.outcome, seen }
+    }
+
+    const first = await run(2)
+    expect(first.outcome).toBe('failed')
+    // Index 1 (the item that failed) is the saved resume point.
+    expect(progress.get('wf:rows')).toBe(1)
+    const afterFailure = await run(undefined)
+    expect(afterFailure.seen).toEqual([2, 3, 4])
+    expect(progress.size).toBe(0)
+  })
+
+  it('elements mode iterates the live count and publishes absolute-index selectors', async () => {
+    const seen: Array<{ index: unknown; selector: unknown }> = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('loop', 'loop-data', {
+          loopThrough: 'elements',
+          elementSelector: '//li',
+          startIndex: 1,
+          maxLoop: 2,
+        }),
+        node('body', 'body'),
+      ],
+      [edge('t', 'loop'), edge('loop', 'body')],
+    )
+    const result = await runWorkflow(wf, {
+      loopElementCounter: async () => 4,
+      loopElementSelector: async (_selector, index) => `li:nth-of-type(${index + 1})`,
+      executors: {
+        ...EXECUTORS,
+        body: async (_d, ctx) => {
+          seen.push({
+            index: ctx.variables['loopIndex'],
+            selector: ctx.variables['loopElementSelector'],
+          })
+          return null
+        },
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual([
+      { index: 1, selector: 'li:nth-of-type(2)' },
+      { index: 2, selector: 'li:nth-of-type(3)' },
+    ])
+  })
+
+  it('repeat-task with repeatFor 0 runs zero times', async () => {
+    const seen: unknown[] = []
+    const wf = makeWorkflow(
+      [node('t', 'manual'), node('loop', 'repeat-task', { repeatFor: '0' }), node('body', 'body')],
+      [edge('t', 'loop'), edge('loop', 'body')],
+    )
+    const result = await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        body: async (_d, ctx) => {
+          seen.push(ctx.variables['loopIndex'])
+          return null
+        },
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual([])
   })
 
   it('repeat-task runs its body a fixed number of times', async () => {
@@ -984,9 +1239,24 @@ describe('workflow loops — loop-breakpoint', () => {
     return null
   }
 
-  it('breaks the loop early and continues from the end branch', async () => {
+  it('skips the rest of the current iteration by default (Automa)', async () => {
     const seen: string[] = []
     const result = await runWorkflow(singleLoopGraph(), {
+      executors: {
+        ...EXECUTORS,
+        a: pushTo(seen, 'a'),
+        after: pushTo(seen, 'after'),
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    // The breakpoint sits before the body's tail, so every repetition restarts
+    // at `a`; only "Stop loop" may leave the loop.
+    expect(seen).toEqual(['a', 'a', 'a', 'a', 'a', 'after'])
+  })
+
+  it('leaves the loop when Stop loop (clearLoop) is checked', async () => {
+    const seen: string[] = []
+    const result = await runWorkflow(singleLoopGraph({ clearLoop: true }), {
       executors: {
         ...EXECUTORS,
         a: pushTo(seen, 'a'),
@@ -1002,6 +1272,7 @@ describe('workflow loops — loop-breakpoint', () => {
     const steps: string[] = []
     const result = await runWorkflow(
       singleLoopGraph({
+        clearLoop: true,
         onError: { enable: true, toDo: 'retry', retryTimes: 3, retryInterval: 0 },
       }),
       {
@@ -1018,7 +1289,7 @@ describe('workflow loops — loop-breakpoint', () => {
     expect(steps.some((s) => s.includes('Retrying'))).toBe(false)
   })
 
-  it('breaks only the innermost loop by default; the outer loop continues', async () => {
+  it('a bare breakpoint only affects the innermost loop; the outer loop continues', async () => {
     const seen: string[] = []
     const wf = makeWorkflow(
       [
@@ -1049,10 +1320,12 @@ describe('workflow loops — loop-breakpoint', () => {
       },
     })
     expect(result.outcome).toBe('ok')
-    expect(seen).toEqual(['a', 'b', 'a', 'b', 'after'])
+    // Each inner iteration restarts at `a`; only the inner end branch (`b`)
+    // runs after the inner loop settles, once per outer iteration.
+    expect(seen).toEqual(['a', 'a', 'b', 'a', 'a', 'b', 'after'])
   })
 
-  it('breaks the outer loop when the breakpoint carries a matching loopId', async () => {
+  it('skips the outer iteration when the breakpoint carries a matching loopId', async () => {
     const seen: string[] = []
     const wf = makeWorkflow(
       [
@@ -1083,7 +1356,9 @@ describe('workflow loops — loop-breakpoint', () => {
       },
     })
     expect(result.outcome).toBe('ok')
-    expect(seen).toEqual(['a', 'after'])
+    // The sentinel unwinds the inner run, then skips the rest of the matching
+    // outer iteration — the inner end branch never runs.
+    expect(seen).toEqual(['a', 'a', 'after'])
   })
 
   it('matches a data.loopId on the loop node when breaking outward', async () => {
@@ -1095,6 +1370,40 @@ describe('workflow loops — loop-breakpoint', () => {
         node('inner', 'repeat-task', { count: 2 }),
         node('a', 'a'),
         node('bp', 'loop-breakpoint', { loopId: 'login' }),
+        node('b', 'b'),
+        node('after', 'after'),
+      ],
+      [
+        edge('t', 'outer'),
+        edge('outer', 'inner', 'repeat-task-output-1'),
+        edge('inner', 'a', 'repeat-task-output-1'),
+        edge('a', 'bp'),
+        edge('inner', 'b', 'repeat-task-output-2'),
+        edge('b', 'outer'),
+        edge('outer', 'after', 'repeat-task-output-2'),
+      ],
+    )
+    const result = await runWorkflow(wf, {
+      executors: {
+        ...EXECUTORS,
+        a: pushTo(seen, 'a'),
+        b: pushTo(seen, 'b'),
+        after: pushTo(seen, 'after'),
+      },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen).toEqual(['a', 'a', 'after'])
+  })
+
+  it('Stop loop with a matching outer loopId leaves the loop at once', async () => {
+    const seen: string[] = []
+    const wf = makeWorkflow(
+      [
+        node('t', 'manual'),
+        node('outer', 'repeat-task', { count: 2 }),
+        node('inner', 'repeat-task', { count: 2 }),
+        node('a', 'a'),
+        node('bp', 'loop-breakpoint', { loopId: 'outer', clearLoop: true }),
         node('b', 'b'),
         node('after', 'after'),
       ],

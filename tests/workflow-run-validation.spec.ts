@@ -322,6 +322,62 @@ describe('validateWorkflowForRun', () => {
   })
 })
 
+describe('validateWorkflowForRun — multiple triggers', () => {
+  // Every enabled spec can launch the run, so the gate has to check all of
+  // them — but an invalid spec the user switched off is not why a run fails.
+  function multi(triggers: unknown[]): Workflow {
+    return workflow({
+      drawflow: {
+        nodes: [
+          node('t', 'trigger', { type: 'manual', triggers }),
+          node('a', 'event-click', { selector: '#x' }),
+        ],
+        edges: [{ id: 'e1', source: 't', target: 'a' }],
+      },
+    })
+  }
+
+  it('fails on one invalid enabled spec among several and names its type', () => {
+    const out = validateWorkflowForRun(
+      multi([
+        { id: 'a', type: 'manual', data: {} },
+        { id: 'b', type: 'visit-web', data: {} },
+      ]),
+    )
+    expect(out.errors).toHaveLength(1)
+    expect(out.errors[0]).toContain("'visit-web'")
+    expect(out.errors[0]).toContain('"url"')
+  })
+
+  it('ignores an invalid disabled spec', () => {
+    const out = validateWorkflowForRun(
+      multi([
+        { id: 'a', type: 'manual', data: {} },
+        { id: 'b', type: 'visit-web', enabled: false, data: {} },
+      ]),
+    )
+    expect(out.errors).toEqual([])
+  })
+
+  it('blocks when every spec is disabled', () => {
+    const out = validateWorkflowForRun(
+      multi([{ id: 'a', type: 'manual', enabled: false, data: {} }]),
+    )
+    expect(out.errors.some((e) => e.includes('触发器已被禁用'))).toBe(true)
+  })
+
+  it('accepts several valid enabled specs', () => {
+    const out = validateWorkflowForRun(
+      multi([
+        { id: 'a', type: 'manual', data: {} },
+        { id: 'b', type: 'interval', data: { interval: 10 } },
+        { id: 'c', type: 'keyboard-shortcut', data: { shortcut: 'Ctrl+E' } },
+      ]),
+    )
+    expect(out.errors).toEqual([])
+  })
+})
+
 describe('the run gate’s findings are structured, not just prose', () => {
   // The strings stay (the save card and the callers read them), but a caller
   // that wants to highlight the offending node must not parse a sentence back

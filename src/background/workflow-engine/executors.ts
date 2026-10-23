@@ -58,9 +58,13 @@ import {
   selectOptionFields,
   pickTabIndex,
   scrollSpecFrom,
-  webhookContentTypeOf,
-  webhookRecord,
+  variableAssignmentsOf,
 } from '../../lib/workflow/block-output'
+import {
+  appendWebhookRows,
+  buildWebhookRequest,
+  decodeWebhookResponse,
+} from '../../lib/workflow/webhook'
 import { interpretScriptResult } from '../../lib/workflow/script-result'
 import {
   UploadFileError,
@@ -1427,10 +1431,21 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 
 const setVariable: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const name = String(data['variableName'] ?? '')
-  const value = interpolate(String(data['value'] ?? ''), ctx.variables, ctx.refData)
-  ctx.variables[name] = value
-  ctx.emit('result', `已设置变量 ${name} = ${logPreview(value) || '(空)'}`)
+  const assignments = variableAssignmentsOf(data)
+  if (assignments.length === 0) {
+    throw new Error('set-variable: 没有填写变量名，未设置任何变量')
+  }
+  // Ascending order matters: a later row may reference a variable an earlier
+  // row just wrote (`{{token}}` set on row 1, `Bearer {{token}}` on row 2).
+  for (const assignment of assignments) {
+    ctx.variables[assignment.name] = interpolate(
+      String(assignment.value ?? ''),
+      ctx.variables,
+      ctx.refData,
+    )
+  }
+  const names = assignments.map((assignment) => assignment.name).join(', ')
+  ctx.emit('result', `已设置 ${assignments.length} 个变量：${names}`)
   return null
 }
 
@@ -1798,87 +1813,81 @@ const breakpoint: BlockExecutor = async (_data, ctx) => {
 }
 
 /**
- * The webhook block's response contract lives in `lib/workflow/block-output`
- * (`webhookContentTypeOf` + `webhookRecord`) so the Runner port cannot drift
- * from it — it had dropped the `data` key and the content-type select there.
+ * The webhook block's whole contract lives in `lib/workflow/webhook`, shared
+ * with the Runner: URL/header/body building, content types, `$response`,
+ * `dataPath`, fallback on transport/non-2xx, assign-variable and save-to-table.
  */
 const webhook: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
-  const url = interpolate(String(data['url'] ?? ''), ctx.variables, ctx.refData)
-  const method = String(data['method'] ?? 'POST').toUpperCase()
+  const fallback = ctx.outputs?.['fallback'] ?? null
+  // Configuration errors (bad URL, headers or body) fail the step even when a
+  // fallback edge exists — only the request itself can fall back.
+  const request = await buildWebhookRequest(data, ctx.variables, ctx.refData, interpolate)
   const timeout = Math.max(0, Number(data['timeout'] ?? 30000))
-  // `variableName` is the catalog + edit-form key (the "Assign response to a
-  // variable" field); `responseVariable` is the legacy name. Reading only the
-  // latter meant a user- or model-chosen name never existed, so every
-  // downstream `{{thatName}}` reference dangled and resolved to nothing.
-  const responseVariable = String(
-    data['variableName'] || data['responseVariable'] || 'lastHttpResponse',
-  )
-  // `responseType` decides how the body is decoded and `dataPath` narrows it.
-  // Both are edit-form fields that nothing used to read.
   const responseType = String(data['responseType'] ?? 'json')
   const dataPath = String(data['dataPath'] ?? '')
 
-  // Headers: interpolated JSON string, e.g. `{"Authorization":"Bearer ..."}`.
-  // The default content type comes from the form's own select.
-  let headers: Record<string, string> = { 'content-type': webhookContentTypeOf(data) }
-  const headersRaw = interpolate(String(data['headers'] ?? ''), ctx.variables, ctx.refData)
-  if (headersRaw.trim()) {
-    try {
-      const parsed = JSON.parse(headersRaw)
-      if (parsed && typeof parsed === 'object')
-        headers = { ...headers, ...parsed } as Record<string, string>
-    } catch {
-      throw new Error(
-        `webhook: headers 不是合法 JSON，请求头无法确定，已中止本次请求。收到的值：${headersRaw.slice(0, 120)}`,
-      )
-    }
-  }
-
-  // Body: interpolated JSON (or raw text). GET/HEAD send no body.
-  let bodyText: string | undefined
-  const rawBody = interpolate(String(data['body'] ?? ''), ctx.variables, ctx.refData)
-  if (method !== 'GET' && method !== 'HEAD' && rawBody !== '') {
-    let parsed: unknown = rawBody
-    try {
-      parsed = JSON.parse(rawBody)
-    } catch {
-      /* fall back to the raw string */
-    }
-    bodyText = typeof parsed === 'string' ? parsed : JSON.stringify(parsed)
-  }
-
+  const controller = new AbortController()
+  const onAbort = (): void => controller.abort()
+  ctx.signal.addEventListener('abort', onAbort, { once: true })
+  const timer = timeout > 0 ? setTimeout(() => controller.abort(), timeout) : undefined
+  let response: Response
   try {
-    const controller = new AbortController()
-    const onAbort = (): void => controller.abort()
-    ctx.signal.addEventListener('abort', onAbort, { once: true })
-    const timer = timeout > 0 ? setTimeout(() => controller.abort(), timeout) : undefined
-    try {
-      const response = await fetch(url, {
-        method,
-        headers,
-        body: bodyText,
-        signal: controller.signal,
-      })
-      const record = await webhookRecord(response, responseType, dataPath)
-      ctx.variables[responseVariable] = record
-      ctx.emit('result', `${method} ${response.status} ${record.body.slice(0, 80)}`)
-    } finally {
-      if (timer !== undefined) clearTimeout(timer)
-      ctx.signal.removeEventListener('abort', onAbort)
-    }
+    response = await fetch(request.url, {
+      method: request.method,
+      headers: request.headers,
+      body: request.body,
+      signal: controller.signal,
+    })
   } catch (error) {
-    // A request that never completed is a failed step, not a note in the log.
-    // `AbortError` needs care here: this block aborts its own fetch on timeout,
-    // and the engine reads `AbortError` as "the user cancelled the run" — so a
-    // timeout is translated into a plain failure, while a genuine cancellation
-    // keeps propagating and the run still reports 已取消.
-    if ((error as Error)?.name === 'AbortError') {
-      if (ctx.signal.aborted) throw error
-      throw new Error(`${method} 请求超时（${timeout}ms）：${url}`)
+    // A genuine cancellation keeps propagating (the run reports 已取消); a
+    // timeout or transport failure is a failed request that may fall back.
+    if (ctx.signal.aborted) throw error
+    const reason = controller.signal.aborted
+      ? `${request.method} 请求超时（${timeout}ms）`
+      : `${request.method} 请求失败：${message(error)}`
+    if (fallback) {
+      ctx.emit('info', `webhook: ${reason}，改走 fallback 分支`)
+      return fallback
     }
-    throw error
+    throw new Error(`webhook: ${reason}：${request.url}`)
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+    ctx.signal.removeEventListener('abort', onAbort)
   }
+
+  if (!response.ok) {
+    const status = `HTTP ${response.status} ${response.statusText}`.trim()
+    if (fallback) {
+      ctx.emit('info', `webhook: ${status}，改走 fallback 分支`)
+      return fallback
+    }
+    throw new Error(`webhook: ${status}（${request.method} ${request.url}）`)
+  }
+
+  const { record, value } = await decodeWebhookResponse(response, responseType, dataPath)
+  // Compatibility: the record still lands where it always did (`lastHttpResponse`
+  // by default), while "Assign response to a variable" now receives the decoded,
+  // data-path-narrowed value the field promises.
+  const responseVariable = String(
+    data['variableName'] || data['responseVariable'] || 'lastHttpResponse',
+  ).trim()
+  if (responseVariable !== '') ctx.variables[responseVariable] = record
+  if (data['assignVariable'] === true) {
+    const name = String(data['variableName'] ?? '').trim()
+    if (name !== '') ctx.variables[name] = value
+  }
+  if (data['saveData'] === true) {
+    const rows = appendWebhookRows(ctx.variables, String(data['dataColumn'] ?? ''), value)
+    ctx.emit(
+      'info',
+      rows > 0
+        ? `webhook: 已向数据表写入 ${rows} 行`
+        : 'webhook: 未指定数据列（dataColumn），响应未写入数据表',
+    )
+  }
+  const preview = typeof value === 'string' ? value : JSON.stringify(value ?? '')
+  ctx.emit('result', `${request.method} ${response.status} ${preview.slice(0, 80)}`)
   return null
 }
 
@@ -3574,16 +3583,17 @@ const hoverElement: BlockExecutor = async (data, ctx) =>
 
 /**
  * Automa `loop-breakpoint` block: unwinds out of the enclosing loop by
- * throwing the sentinel the engine catches at the owning loop (which resumes
- * from that loop's "end" branch). A non-empty `loopId` targets a specific
- * outer loop; without one the innermost enclosing loop breaks. runNode
- * rethrows the sentinel before any onError handling, so this block is never
- * retried, fallback-routed or failed.
+ * throwing the sentinel the engine catches at the owning loop. By default the
+ * loop skips the REST of this item's body and continues with the next item;
+ * `clearLoop` ("Stop loop") leaves the loop entirely. A non-empty `loopId`
+ * targets a specific outer loop; without one the innermost enclosing loop
+ * handles it. runNode rethrows the sentinel before any onError handling, so
+ * this block is never retried, fallback-routed or failed.
  */
 const loopBreakpointExec: BlockExecutor = async (data) => {
   const raw = data['loopId']
   const loopId = typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : undefined
-  throw new LoopBreakpointError(loopId)
+  throw new LoopBreakpointError(loopId, data['clearLoop'] === true)
 }
 
 /**
