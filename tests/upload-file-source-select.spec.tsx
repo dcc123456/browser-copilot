@@ -88,4 +88,10 @@ describe('upload-file source picker', () => {
     expect(sourceSelectOf(container).value).toBe('file-path')
     expect(container.textContent).toContain('Browse downloads')
   })
+
+  it('offers variables in the file path and says subfolders are listed', async () => {
+    const container = await mount({ sourceMode: 'file-path' })
+    expect(container.querySelector('button[aria-label="Insert variable"]')).not.toBeNull()
+    expect(container.textContent).toContain('The path may contain a variable')
+  })
 })

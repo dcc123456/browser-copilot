@@ -171,7 +171,8 @@ export const CUSTOM_BLOCKS: BlockCatalogEntry[] = [
       description: '',
       // `user-select` asks for one spreadsheet at run time; `workflow-file`
       // reads a file artifact already held by an earlier node; `file-path`
-      // names one file relative to the download folder.
+      // names one file relative to the download folder (a `{{variable}}` in it
+      // is interpolated at run time).
       sourceMode: 'user-select',
       fileVariable: '',
       filePath: '',

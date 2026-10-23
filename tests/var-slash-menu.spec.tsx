@@ -96,6 +96,8 @@ afterEach(() => {
 
 interface MountOptions {
   noSlash?: boolean
+  /** The `{}` button used where a slash is ordinary text (file paths). */
+  variableMenu?: boolean
   multiline?: boolean
   graph?: SuggestionGraph
   insertSecret?: (nodeId: string, ref: SecretFieldRef) => Promise<string>
@@ -121,10 +123,19 @@ async function mount(options: MountOptions = {}): Promise<Mounted> {
 
   function FieldUnderTest() {
     const [value, setValue] = useState('')
-    const props = { value, onChange: setValue, noSlash: options.noSlash }
     return options.multiline
-      ? createElement(TextArea, { ...props, rows: 2 })
-      : createElement(TextInput, props)
+      ? createElement(TextArea, {
+          value,
+          onChange: setValue,
+          noSlash: options.noSlash,
+          rows: 2,
+        })
+      : createElement(TextInput, {
+          value,
+          onChange: setValue,
+          noSlash: options.noSlash,
+          variableMenu: options.variableMenu,
+        })
   }
 
   const container = document.createElement('div')
@@ -290,6 +301,32 @@ describe('picking a suggestion', () => {
     expect(el.value).toBe('/key')
     press(el, { key: 'Enter' })
     expect(el.value).toBe('{{keyword}}')
+  })
+})
+
+describe('the {} button on fields where a slash is ordinary text', () => {
+  it('keeps the slash trigger off but opens the full list on demand', async () => {
+    const { el, menu, rows } = await mount({ noSlash: true, variableMenu: true })
+    type(el, 'reports/')
+    expect(menu()).toBeNull()
+
+    const button = document.querySelector<HTMLButtonElement>('button[aria-label="Insert variable"]')
+    expect(button).not.toBeNull()
+    act(() => {
+      button?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+      button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(menu()).not.toBeNull()
+    expect(menu()?.textContent).toContain('keyword')
+
+    expect(mouseDownOn(rows()[0]!)).toBe(true)
+    expect(el.value).toBe('reports/{{keyword}}')
+    expect(menu()).toBeNull()
+  })
+
+  it('is absent unless the form asks for it', async () => {
+    await mount({ noSlash: true })
+    expect(document.querySelector('button[aria-label="Insert variable"]')).toBeNull()
   })
 })
 

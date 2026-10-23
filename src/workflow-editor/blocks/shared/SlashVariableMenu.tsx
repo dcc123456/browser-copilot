@@ -141,6 +141,11 @@ interface FieldMenuOptions {
 interface FieldMenu {
   /** Re-read the caret after a change or a caret move. */
   sync: () => void
+  /**
+   * Open the full list at the caret without a `/` trigger — the `{}` button on
+   * download-path fields, where a slash is ordinary text.
+   */
+  open: () => void
   /** Menu keys own Enter/arrows only while open. */
   onKeyDown: (event: React.KeyboardEvent) => void
   close: () => void
@@ -229,6 +234,27 @@ export function useFieldSlashMenu({ inputRef, onChange, disabled }: FieldMenuOpt
     close()
     dismissed.current = found
   }, [close, inputRef])
+
+  const open = useCallback(() => {
+    const el = inputRef.current
+    if (!el || disabled) return
+    // A button click must not append to a stale caret from another field; when
+    // the input did not own focus, append at the end.
+    if (document.activeElement !== el) {
+      el.focus()
+      const end = el.value.length
+      el.setSelectionRange(end, end)
+    }
+    const caret = el.selectionStart ?? el.value.length
+    const selectionEnd = el.selectionEnd ?? caret
+    dismissed.current = null
+    lastTerm.current = ''
+    setHighlight(0)
+    // An empty query over the caret (or the current selection) makes
+    // `applySlashInsert` a plain replacement.
+    setQuery({ start: caret, end: selectionEnd, term: '' })
+    reposition()
+  }, [disabled, inputRef, reposition])
 
   // Follow the field while the menu is open: the sidebar scrolls, the canvas
   // pans, and an auto-growing textarea moves the caret's box under the menu.
@@ -384,5 +410,5 @@ export function useFieldSlashMenu({ inputRef, onChange, disabled }: FieldMenuOpt
         )
       : null
 
-  return { sync, onKeyDown, close, node }
+  return { sync, open, onKeyDown, close, node }
 }

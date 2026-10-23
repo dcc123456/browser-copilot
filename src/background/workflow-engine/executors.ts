@@ -2562,7 +2562,10 @@ const uploadFileExec: BlockExecutor = async (data, ctx) => {
   } else if (sourceMode === 'latest-download') {
     const accept = String(data['accept'] ?? '').trim()
     const filePattern = String(data['filePattern'] ?? '').trim()
-    const scan = await listDownloadedFileCandidates()
+    // Users file downloads into subfolders (`reports/2026-10/…`); "the latest
+    // download" must mean the newest match anywhere under the authorised roots,
+    // not just at their top level.
+    const scan = await listDownloadedFileCandidates({ recursive: true })
     const latest = pickLatestFile(scan.candidates, { accept, filePattern })
 
     if (!latest) {

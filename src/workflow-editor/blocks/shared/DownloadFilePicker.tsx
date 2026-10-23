@@ -3,9 +3,13 @@
  * folders for the `file-path` source of `upload-file` / `parse-excel`.
  *
  * The value is a path relative to the download root (`reports/2026-10/sales.xlsx`),
- * never a host absolute path. Browsing is lazy: the folders are only scanned
- * when the list is opened, and the list is recursive (files the user keeps in
- * subfolders are reachable) with the same entry limit the runtime scan uses.
+ * never a host absolute path. A typed value may reference a workflow variable
+ * (`{{folder}}/sales.xlsx`): the executor interpolates it before reading, so the
+ * field offers the variable menu through its `{}` button rather than the usual
+ * `/` trigger, which is a path separator here. Browsing is lazy: the folders are
+ * only scanned when the list is opened, and the list is recursive (files the
+ * user keeps in subfolders are reachable) with the same entry limit the runtime
+ * scan uses.
  *
  * @module workflow-editor/blocks/shared/DownloadFilePicker
  */
@@ -91,12 +95,18 @@ export default function DownloadFilePicker({
             placeholder="reports/2026-10/sales.xlsx"
             onChange={onChange}
             noSlash
+            variableMenu
           />
         </div>
         <button type="button" className="wf-btn-accent shrink-0" onClick={toggle}>
           {bt(open ? 'Close' : 'Browse downloads')}
         </button>
       </div>
+      <p className="m-0 text-[11px] text-muted">
+        {bt(
+          'The path may contain a variable, e.g. {{folder}}/sales.xlsx. Files in subfolders are listed too.',
+        )}
+      </p>
 
       {open && (
         <div className="mt-2 flex flex-col gap-2 rounded-md border border-border bg-panel-2 p-2">

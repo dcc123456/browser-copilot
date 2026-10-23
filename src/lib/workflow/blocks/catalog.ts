@@ -1158,8 +1158,9 @@ export const BLOCK_CATALOG: BlockCatalogEntry[] = [
       findBy: 'cssSelector',
       // Source: 'user-select' (native picker in the Browser Copilot UI),
       // 'workflow-file' (a file already in a Workflow variable),
-      // 'latest-download' (newest matching file in the download folders) or
-      // 'file-path' (one concrete file, named relative to those folders).
+      // 'latest-download' (newest matching file anywhere under the download
+      // folders, subfolders included) or 'file-path' (one concrete file, named
+      // relative to those folders).
       sourceMode: 'user-select',
       selector: '',
       fileVariable: '',
@@ -1167,7 +1168,8 @@ export const BLOCK_CATALOG: BlockCatalogEntry[] = [
       filePattern: '',
       fallbackToPicker: false,
       // Relative to the download folder (`reports/2026-10/sales.xlsx`); never
-      // an absolute host path. Used by sourceMode 'file-path'.
+      // an absolute host path. May contain `{{variables}}`, interpolated at run
+      // time. Used by sourceMode 'file-path'.
       filePath: '',
       multiple: false,
       waitForSelector: false,

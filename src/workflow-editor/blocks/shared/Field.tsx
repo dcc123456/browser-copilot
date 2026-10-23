@@ -9,11 +9,13 @@
  * The two free-text controls also carry the `/` variable menu, so inserting a
  * `{{reference}}` is available in every block form at once — a form opts a field
  * OUT with `noSlash` when that field DEFINES a name instead of referencing one.
+ * A field where `/` is ordinary text (a download-relative path) keeps that
+ * trigger off and opts into the same menu through a `{}` button instead.
  *
  * @module workflow-editor/blocks/shared/Field
  */
 
-import { ChevronLeft, Info, type LucideIcon } from 'lucide-react'
+import { Braces, ChevronLeft, Info, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useEditorLocale } from '../../locale-context'
 import NumberInput from '../../../ui/NumberInput'
@@ -55,6 +57,7 @@ export function TextInput({
   list,
   fallback,
   noSlash,
+  variableMenu,
 }: {
   value: string | number
   onChange: (v: string) => void
@@ -69,35 +72,70 @@ export function TextInput({
   fallback?: string
   /** Opt out of the `/` variable menu for fields that DEFINE a name. */
   noSlash?: boolean
+  /**
+   * Offer the same menu through a `{}` button rather than a `/` trigger — for
+   * fields where a slash is ordinary text (download-relative file paths).
+   */
+  variableMenu?: boolean
 }) {
   const { bt } = useEditorLocale()
   const ref = useRef<HTMLInputElement>(null)
-  const menu = useFieldSlashMenu({ inputRef: ref, onChange, disabled: noSlash })
   // Only a free-text caret can host the menu: a native datalist already
   // suggests there, and a color/range control has no text to anchor to.
   const slashable = !noSlash && !list && type === 'text'
+  const menuButton = variableMenu === true && !list && type === 'text'
+  const menu = useFieldSlashMenu({
+    inputRef: ref,
+    onChange,
+    disabled: !slashable && !menuButton,
+  })
+  const input = (
+    <input
+      ref={ref}
+      type={type}
+      value={value ?? ''}
+      placeholder={placeholder ? bt(placeholder) : placeholder}
+      list={list}
+      onChange={(e) => {
+        onChange(e.target.value)
+        // The on-demand list has no query to follow; typing dismisses it.
+        if (slashable) menu.sync()
+        else if (menuButton) menu.close()
+      }}
+      onClick={slashable ? () => menu.sync() : undefined}
+      onKeyUp={slashable ? () => menu.sync() : undefined}
+      onKeyDown={slashable || menuButton ? (e) => menu.onKeyDown(e) : undefined}
+      onBlur={() => {
+        menu.close()
+        if (fallback != null && String(value ?? '').trim() === '') onChange(fallback)
+      }}
+    />
+  )
+  const menuNode = slashable || menuButton ? menu.node : null
+  if (!menuButton) {
+    return (
+      <>
+        {input}
+        {menuNode}
+      </>
+    )
+  }
   return (
-    <>
-      <input
-        ref={ref}
-        type={type}
-        value={value ?? ''}
-        placeholder={placeholder ? bt(placeholder) : placeholder}
-        list={list}
-        onChange={(e) => {
-          onChange(e.target.value)
-          if (slashable) menu.sync()
-        }}
-        onClick={slashable ? () => menu.sync() : undefined}
-        onKeyUp={slashable ? () => menu.sync() : undefined}
-        onKeyDown={slashable ? (e) => menu.onKeyDown(e) : undefined}
-        onBlur={() => {
-          menu.close()
-          if (fallback != null && String(value ?? '').trim() === '') onChange(fallback)
-        }}
-      />
-      {slashable ? menu.node : null}
-    </>
+    <div className="flex items-center gap-1">
+      <div className="min-w-0 flex-1">{input}</div>
+      <button
+        type="button"
+        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-panel-2 text-muted hover:bg-hover hover:text-ink"
+        title={bt('Insert variable')}
+        aria-label={bt('Insert variable')}
+        // Keep a caret the field already owns; `open()` focuses it otherwise.
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => menu.open()}
+      >
+        <Braces size={14} />
+      </button>
+      {menuNode}
+    </div>
   )
 }
 

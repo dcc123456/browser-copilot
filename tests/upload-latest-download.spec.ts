@@ -15,9 +15,9 @@ vi.mock('../src/background/driver', () => ({
   execOnActiveTab: (op: Op) => execMock(op),
 }))
 
-const scanMock = vi.fn<() => Promise<DownloadedFileScan>>()
+const scanMock = vi.fn<(options?: { recursive?: boolean }) => Promise<DownloadedFileScan>>()
 vi.mock('../src/lib/download-dir', () => ({
-  listDownloadedFileCandidates: () => scanMock(),
+  listDownloadedFileCandidates: (options?: { recursive?: boolean }) => scanMock(options),
 }))
 
 let pickerResolve!: (files: WorkflowFileArtifact[]) => void
@@ -124,6 +124,20 @@ describe('upload-file latest-download mode', () => {
     const op = execMock.mock.calls[0]?.[0] as Op
     expect(op.files?.[0]?.name).toBe('report-2026-02.csv')
     expect(requestMock).not.toHaveBeenCalled()
+  })
+
+  it('scans subfolders so a nested download can be the newest', async () => {
+    scanMock.mockResolvedValue(
+      scan([
+        candidate('root.pdf', 1_000),
+        { ...candidate('nested.pdf', 5_000), relativePath: 'reports/2026-10/nested.pdf' },
+      ]),
+    )
+    await EXECUTORS['upload-file']!(nodeData({ accept: '.pdf' }), ctx())
+
+    expect(scanMock).toHaveBeenCalledWith({ recursive: true })
+    const op = execMock.mock.calls[0]?.[0] as Op
+    expect(op.files?.[0]?.name).toBe('nested.pdf')
   })
 
   it('fails with UPLOAD_NO_MATCHING_FILE when no download matches', async () => {

@@ -116,7 +116,7 @@ export interface DownloadedFileScan {
 }
 
 export interface DownloadScanOptions {
-  /** Walk subdirectories (the editor's file-path picker). Default false. */
+  /** Walk subdirectories (the editor picker and `latest-download`). Default false. */
   recursive?: boolean
   /** Directory levels below each root. Default 4. */
   maxDepth?: number
@@ -192,7 +192,7 @@ async function collectFiles(
  * internal folder is not created, and no permission prompt is raised (a worker
  * has no user gesture), the folder is reported as skipped.
  *
- * Root-only by default (`latest-download`); the editor's path picker opts into
+ * Root-only by default; the editor's path picker and `latest-download` opt into
  * recursion so files the user keeps in subfolders are reachable.
  */
 export async function listDownloadedFileCandidates(

@@ -812,6 +812,9 @@ const BLOCK_FORM_STRINGS = {
     'File path in the download folder': '下载目录内的文件路径',
     'Pick a file inside the download folder; its path is stored relative to that folder':
       '在下载目录内选择具体文件；只保存相对该目录的路径',
+    'Insert variable': '插入变量',
+    'The path may contain a variable, e.g. {{folder}}/sales.xlsx. Files in subfolders are listed too.':
+      '路径可以包含变量，例如 {{folder}}/sales.xlsx；子文件夹中的文件也会列出。',
     'Browse downloads': '浏览下载目录',
     'Pick a downloaded file': '选择下载目录中的文件',
     Refresh: '刷新',
@@ -832,6 +835,8 @@ const BLOCK_FORM_STRINGS = {
     'report-*.xlsx (optional)': 'report-*.xlsx（可选）',
     'Glob matched against the downloaded file name, e.g. report-*.xlsx':
       '按文件名匹配的通配符，例如 report-*.xlsx',
+    'Searches the download folder and its subfolders; the newest matching file is uploaded.':
+      '会在下载目录及其子文件夹中查找，并上传最新的匹配文件。',
     'Ask me to pick a file when nothing matches': '没有匹配文件时让我手动选择',
     'Open the normal Choose file card when no downloaded file matches the filters':
       '下载目录中没有匹配文件时，打开常规的“选择文件”卡片',

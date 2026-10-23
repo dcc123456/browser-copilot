@@ -11,7 +11,8 @@
  *     without opening the OS chooser.
  *   - `latest-download`: at run time the newest file matching `accept` /
  *     `filePattern` is read from the configured download folder (or the
- *     extension's internal download folder) and injected unattended.
+ *     extension's internal download folder), subfolders included, and injected
+ *     unattended.
  *   - `file-path`: one concrete file inside those download folders, named by
  *     a relative path (`reports/sales.xlsx`). No host absolute paths.
  *
@@ -144,6 +145,11 @@ export default function EditUploadFile({ data, onChange }: EditFormProps) {
             label="Ask me to pick a file when nothing matches"
             title="Open the normal Choose file card when no downloaded file matches the filters"
           />
+          <p className="wf-form-note">
+            {bt(
+              'Searches the download folder and its subfolders; the newest matching file is uploaded.',
+            )}
+          </p>
         </>
       )}
 
