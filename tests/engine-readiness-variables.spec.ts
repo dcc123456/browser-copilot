@@ -103,4 +103,25 @@ describe('readiness gates see the run variables', () => {
     expect(result.error).toContain('UNRESOLVED_INPUT')
     expect(seen).toEqual([])
   })
+
+  it('re-anchors a stale generation-time expectation on the edited value', async () => {
+    // Generation baked the model's placeholder into the stored contract; the
+    // user later edited the field. The after-gate must verify what the step
+    // actually writes, not the snapshot — that mismatch failed a working fill
+    // with `READINESS_TIMEOUT(value-committed)`.
+    const EMAIL = '1414633563@qq.com'
+    const workflow = fillWorkflow({ after: [{ state: 'value-committed', value: '你好' }] })
+    workflow.drawflow.nodes[0]!.data = {
+      ...workflow.drawflow.nodes[0]!.data,
+      action: 'fill',
+      value: EMAIL,
+    }
+    const seen: ReadinessRequirement[] = []
+    const result = await runWorkflow(workflow, {
+      executors: executor,
+      readinessProbe: recordingProbe(seen),
+    })
+    expect(result.outcome).toBe('ok')
+    expect(seen.map((requirement) => requirement.value)).toEqual([EMAIL])
+  })
 })

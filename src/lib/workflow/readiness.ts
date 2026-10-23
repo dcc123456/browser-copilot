@@ -155,6 +155,66 @@ export function defaultReadinessFor(
   }
 }
 
+/**
+ * The value a step writes into its own control, as a readiness gate must
+ * compare it. `undefined` when the block has no single written value (a form
+ * submit) or is not a fill-type block.
+ */
+export function writtenValueOf(
+  blockId: string,
+  params: Record<string, unknown>,
+): string | undefined {
+  switch (blockId) {
+    case 'forms':
+    case 'fill':
+      return String(params['action'] ?? 'fill') === 'submit'
+        ? undefined
+        : String(params['value'] ?? '')
+    case 'select-option':
+      return String(params['value'] ?? '')
+    case 'set-checkbox':
+      return String(params['checked'] ?? true)
+    default:
+      return undefined
+  }
+}
+
+/**
+ * A stored readiness contract is a GENERATION-TIME SNAPSHOT: assembly copies
+ * the block default (`autoCompleteReliability` → `defaultReadinessFor`) into
+ * `__reliability.readiness`, and for fill-type blocks that default's AFTER gate
+ * embeds the literal value from `data.value`. Editing the field afterwards
+ * changes `data.value` but not that copy — and the properties panel never
+ * renders `__reliability` — so the gate keeps comparing the page against the
+ * value the model originally wrote while the executor fills the edited one. The
+ * step then "succeeds" and the after-gate times out on text that exists nowhere.
+ *
+ * An after-gate, own-target `value-committed` expectation without a `{{token}}`
+ * therefore follows the value the step currently writes. A `{{token}}` keeps
+ * the variable-resolution path, and a requirement that names its own target is
+ * about another control and stays as written. The before-gate is untouched: its
+ * only writer is a hand-authored contract, where a literal may legitimately
+ * describe the page's state BEFORE the step overwrites it.
+ */
+export function syncOwnValueExpectations(
+  spec: ReadinessSpec,
+  blockId: string,
+  params: Record<string, unknown>,
+): ReadinessSpec {
+  const written = writtenValueOf(blockId, params)
+  if (written === undefined || !spec.after?.length) return spec
+  return {
+    ...spec,
+    after: spec.after.map((requirement) =>
+      requirement.state === 'value-committed' &&
+      requirement.target === undefined &&
+      !(typeof requirement.value === 'string' && requirement.value.includes('{{'))
+        ? { ...requirement, value: written }
+        : requirement,
+    ),
+  }
+}
+
 /** Is `state` one of the vocabulary values? (Guard for untrusted specs.) */
 export function isReadinessState(value: unknown): value is ReadinessState {
   return (

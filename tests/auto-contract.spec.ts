@@ -5,6 +5,7 @@ import { goalSpecOf } from '../src/lib/workflow/reliability'
 import { validateWorkflowForRun } from '../src/lib/workflow/validation'
 import { validateGeneratedWorkflow } from '../src/lib/workflow/generated-validation'
 import type { NodeReliabilitySpec } from '../src/lib/workflow/reliability'
+import { effectiveReadinessSpec } from '../src/background/workflow-engine/readiness-engine'
 
 /** In-memory `chrome.storage.local` double. */
 function makeChromeMock() {
@@ -95,6 +96,22 @@ describe('auto reliability completion (generation must always succeed)', () => {
       { data: { blockId: 'delay', time: 500 } },
     ]
     expect(autoCompleteReliability(nodes)).toBe(0)
+  })
+
+  it('a baked value expectation follows the field after the user edits it', () => {
+    // Generation snapshots `data.value` into the readiness contract; the
+    // properties panel never renders it, so only re-anchoring at run time keeps
+    // an edited field and its verification gate in agreement.
+    const nodes: Array<{ data: Record<string, unknown> }> = [
+      { data: { blockId: 'forms', action: 'fill', selector: '#email', value: '你好' } },
+    ]
+    autoCompleteReliability(nodes)
+    const baked = (nodes[0]!.data['__reliability'] as NodeReliabilitySpec).readiness
+    expect(baked?.after?.[0]?.value).toBe('你好')
+    nodes[0]!.data['value'] = '1414633563@qq.com'
+    const node = { id: 'a', label: 'forms', position: { x: 0, y: 0 }, data: nodes[0]!.data }
+    const effective = effectiveReadinessSpec(node, 'forms', nodes[0]!.data)
+    expect(effective?.after?.[0]?.value).toBe('1414633563@qq.com')
   })
 
   it('fills both idempotency and postcondition when the model omits everything', () => {

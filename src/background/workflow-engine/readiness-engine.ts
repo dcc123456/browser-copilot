@@ -25,6 +25,7 @@ import {
   DEFAULT_READINESS_POLL_MS,
   DEFAULT_READINESS_TIMEOUT_MS,
   defaultReadinessFor,
+  syncOwnValueExpectations,
 } from '../../lib/workflow/readiness'
 import type { NodeReliabilitySpec } from '../../lib/workflow/reliability'
 import { nodeReliabilityOf } from '../../lib/workflow/reliability'
@@ -174,6 +175,11 @@ async function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
 /**
  * The effective readiness spec of a node: the explicit `__reliability.readiness`
  * contract when present, otherwise the block's default (§7.3), otherwise none.
+ *
+ * The explicit contract is a generation-time snapshot; its own-target
+ * `value-committed` expectations are re-anchored on the step's CURRENT value
+ * (`syncOwnValueExpectations`) so editing a field in the properties panel
+ * updates the gate that verifies it.
  */
 export function effectiveReadinessSpec(
   node: WorkflowNode,
@@ -181,7 +187,7 @@ export function effectiveReadinessSpec(
   params: Record<string, unknown>,
 ): ReadinessSpec | undefined {
   const spec: NodeReliabilitySpec | undefined = nodeReliabilityOf(node)
-  if (spec?.readiness) return spec.readiness
+  if (spec?.readiness) return syncOwnValueExpectations(spec.readiness, blockId, params)
   return defaultReadinessFor(blockId, params)
 }
 

@@ -145,6 +145,71 @@ describe('effectiveReadinessSpec', () => {
     const n = node('a', 'webhook', {})
     expect(effectiveReadinessSpec(n, 'webhook', {})).toBeUndefined()
   })
+
+  it('re-anchors a stored literal expectation on the step’s current value', () => {
+    // Generation baked the model's placeholder into the contract snapshot; the
+    // user edited the field afterwards. The stored copy must not shadow the
+    // edit — the gate verifies what the step actually writes.
+    const n = node('a', 'forms', {
+      __reliability: { readiness: { after: [{ state: 'value-committed', value: '你好' }] } },
+    })
+    const spec = effectiveReadinessSpec(n, 'forms', {
+      action: 'fill',
+      value: '1414633563@qq.com',
+    })
+    expect(spec?.after?.[0]?.value).toBe('1414633563@qq.com')
+  })
+
+  it('follows the checkbox state a step will set', () => {
+    const n = node('a', 'set-checkbox', {
+      __reliability: { readiness: { after: [{ state: 'value-committed', value: 'true' }] } },
+    })
+    const spec = effectiveReadinessSpec(n, 'set-checkbox', { checked: false })
+    expect(spec?.after?.[0]?.value).toBe('false')
+  })
+
+  it('keeps a {{token}} expectation for the variable resolver', () => {
+    const n = node('a', 'forms', {
+      __reliability: {
+        readiness: { after: [{ state: 'value-committed', value: '{{noteTitle}}' }] },
+      },
+    })
+    const spec = effectiveReadinessSpec(n, 'forms', { action: 'fill', value: 'edited' })
+    expect(spec?.after?.[0]?.value).toBe('{{noteTitle}}')
+  })
+
+  it('leaves an expectation that names its own target alone', () => {
+    const other = {
+      state: 'value-committed' as const,
+      target: { selector: '#confirm' },
+      value: 'OK',
+    }
+    const n = node('a', 'forms', {
+      __reliability: { readiness: { after: [other] } },
+    })
+    const spec = effectiveReadinessSpec(n, 'forms', { action: 'fill', value: 'edited' })
+    expect(spec?.after?.[0]).toEqual(other)
+  })
+
+  it('leaves a hand-authored before-gate expectation alone', () => {
+    // A pre-check may legitimately describe the page BEFORE the step overwrites
+    // the field; only the post-action snapshot mirrors the step's own write.
+    const n = node('a', 'forms', {
+      __reliability: {
+        readiness: { before: [{ state: 'value-committed', value: '预填内容' }] },
+      },
+    })
+    const spec = effectiveReadinessSpec(n, 'forms', { action: 'fill', value: 'edited' })
+    expect(spec?.before?.[0]?.value).toBe('预填内容')
+  })
+
+  it('does not invent an expectation for a submit', () => {
+    const n = node('a', 'forms', {
+      __reliability: { readiness: { after: [{ state: 'value-committed', value: '发送成功' }] } },
+    })
+    const spec = effectiveReadinessSpec(n, 'forms', { action: 'submit' })
+    expect(spec?.after?.[0]?.value).toBe('发送成功')
+  })
 })
 
 describe('prepareNodeExecution / verifyPostActionReadiness', () => {
