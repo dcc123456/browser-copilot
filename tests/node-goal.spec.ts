@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { resolveNodeGoalContract } from '../src/lib/workflow/node-goal-instantiation'
-import { nodeGoalContractOf, withNodeGoalContract } from '../src/lib/workflow/node-goal-contract'
+import {
+  nodeAddedByAi,
+  nodeGoalContractOf,
+  withNodeAddedByAi,
+  withNodeGoalContract,
+  withoutNodeAddedByAi,
+} from '../src/lib/workflow/node-goal-contract'
 import {
   generateWorkflowName,
   isAcceptableWorkflowName,
@@ -33,7 +39,33 @@ describe('29.7 node goal', () => {
     expect(contract!.successCriteria).toContainEqual({ kind: 'variableExists', name: 'title' })
   })
 })
-describe('29.8 workflow goal', () => {
+describe('29.8 AI provenance', () => {
+  const contract = {
+    version: 1 as const,
+    goal: 'fill the form',
+    successCriteria: [{ kind: 'variableExists' as const, name: 'emailValue' }],
+  }
+
+  it('drops the AI mark on a user edit but keeps the goal contract', () => {
+    const data = withNodeGoalContract(withNodeAddedByAi({ blockId: 'forms' }), contract)
+    expect(nodeAddedByAi(data)).toBe(true)
+    const edited = withoutNodeAddedByAi(data)
+    expect(nodeAddedByAi(edited)).toBe(false)
+    expect(nodeGoalContractOf(edited)?.goal).toBe('fill the form')
+  })
+
+  it('returns the same object when there is no mark to drop', () => {
+    const data = { blockId: 'forms' }
+    expect(withoutNodeAddedByAi(data)).toBe(data)
+  })
+
+  it('removes the namespace entirely when the mark was all it held', () => {
+    const edited = withoutNodeAddedByAi(withNodeAddedByAi({ blockId: 'forms' }))
+    expect(edited).toEqual({ blockId: 'forms' })
+  })
+})
+
+describe('29.9 workflow goal', () => {
   it('derives a meaningful bilingual workflow name', () => {
     const en = generateWorkflowName('scrape product prices from the search results')
     const zh = generateWorkflowName('抓取搜索结果中的商品价格')

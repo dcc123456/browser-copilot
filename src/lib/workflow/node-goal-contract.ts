@@ -179,3 +179,19 @@ export function nodeAddedByAi(data: Record<string, unknown> | undefined): boolea
   const namespace = data[WORKFLOW_AI_NAMESPACE]
   return isRecord(namespace) && namespace[AI_PROVENANCE_FIELD] === AI_ADDED_BY
 }
+
+/**
+ * Drop AI provenance once the user has edited the node, keeping the goal
+ * contract that rides in the same namespace. Returns the same object when there
+ * is no provenance to drop.
+ */
+export function withoutNodeAddedByAi(data: Record<string, unknown>): Record<string, unknown> {
+  const namespace = data[WORKFLOW_AI_NAMESPACE]
+  if (!isRecord(namespace) || !(AI_PROVENANCE_FIELD in namespace)) return data
+  const rest = { ...namespace }
+  delete rest[AI_PROVENANCE_FIELD]
+  if (Object.keys(rest).length > 0) return { ...data, [WORKFLOW_AI_NAMESPACE]: rest }
+  const withoutNamespace = { ...data }
+  delete withoutNamespace[WORKFLOW_AI_NAMESPACE]
+  return withoutNamespace
+}

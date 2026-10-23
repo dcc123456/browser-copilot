@@ -60,6 +60,7 @@ import {
   type OperatorPrunedPort,
 } from '../lib/workflow/operator-advise'
 import type { SecretFieldRef } from '../lib/workflow/secret-params'
+import { withoutNodeAddedByAi } from '../lib/workflow/node-goal-contract'
 import { nodeRunIssuesOf } from '../lib/workflow/validation'
 import { sendCommand } from '../lib/messages'
 import { editorUrl, hostWindowId } from './host-window'
@@ -604,12 +605,19 @@ export default function EditorApp() {
   }, [])
 
   // Patch an arbitrary node's block data (used by the settings modal, which may
-  // target a node that is not the current sidebar selection).
+  // target a node that is not the current sidebar selection). Every user edit
+  // lands here, so it is also where an AI-added node stops being the assistant's.
   const patchNode = useCallback((id: string, patch: Record<string, unknown>) => {
     setNodes((nds) =>
       nds.map((n) =>
         n.id === id
-          ? { ...n, data: { ...n.data, blockData: { ...n.data.blockData, ...patch } } }
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                blockData: withoutNodeAddedByAi({ ...n.data.blockData, ...patch }),
+              },
+            }
           : n,
       ),
     )
