@@ -271,6 +271,9 @@ export const EDITOR_STRINGS = {
     operatorAiSend: 'Send',
     operatorAiStop: 'Stop',
     operatorAiThinking: 'Thinking…',
+    operatorAiReasoning: 'Reasoning',
+    operatorAiThinkingSkipped:
+      'The thinking level was not sent: the model {model} does not accept one.',
     operatorAiRaw: 'Model output',
     operatorAiAdded: 'Added {count} operator(s) to the flow',
     operatorAiChangedInPlace: 'Updated the selected step',
@@ -614,6 +617,8 @@ export const EDITOR_STRINGS = {
     operatorAiSend: '发送',
     operatorAiStop: '停止',
     operatorAiThinking: '正在思考…',
+    operatorAiReasoning: '思考过程',
+    operatorAiThinkingSkipped: '未下发思考强度：模型 {model} 不接受该参数。',
     operatorAiRaw: '模型原文',
     operatorAiAdded: '已向流程添加 {count} 个算子',
     operatorAiChangedInPlace: '已更新所选步骤',

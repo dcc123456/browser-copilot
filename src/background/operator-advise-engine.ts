@@ -24,6 +24,8 @@
 
 import { streamCompletion } from '../lib/llm'
 import { getSettings } from '../lib/storage'
+import type { ProviderProfile } from '../lib/providers'
+import { thinkingBodyFor } from '../lib/thinking'
 import { entityKeyFor, type TokenAttribution } from '../lib/token-ledger'
 import { summarizeSnapshot } from '../lib/ops'
 import { inspectImage, resolveVisionTarget } from '../lib/vision'
@@ -161,18 +163,24 @@ function dataUrlBytes(dataUrl: string): number {
   return Math.floor(((comma >= 0 ? dataUrl.length - comma - 1 : dataUrl.length) * 3) / 4)
 }
 
+/** The provider the assistant answers with: the active one. */
+async function resolveActiveProvider(): Promise<ProviderProfile> {
+  const settings = await getSettings()
+  const provider = settings.providers.find((profile) => profile.id === settings.activeProviderId)
+  if (!provider || !provider.apiKey.trim()) {
+    throw new Error('No AI provider is configured with an API key.')
+  }
+  return provider
+}
+
 /** Build the default model call over the active provider. */
 function defaultCallModel(
   signal: AbortSignal,
   attribution: TokenAttribution,
+  provider: ProviderProfile,
   onDelta?: (delta: OperatorAdviseDelta) => void,
 ) {
   return async (prompt: string, image?: { dataUrl: string; mimeType: string }): Promise<string> => {
-    const settings = await getSettings()
-    const provider = settings.providers.find((profile) => profile.id === settings.activeProviderId)
-    if (!provider || !provider.apiKey.trim()) {
-      throw new Error('No AI provider is configured with an API key.')
-    }
     const result = await streamCompletion(
       {
         apiKey: provider.apiKey,
@@ -298,9 +306,39 @@ function defaultDescribeScreenshot(signal: AbortSignal, attribution: TokenAttrib
   }
 }
 
+/**
+ * What one advise turn produced besides the answer itself.
+ *
+ * The reasoning is collected here because it is only on screen while the
+ * request runs: the editor shows the model's thinking live, and drops it when
+ * the answer lands. Keeping it makes the thinking part of the turn.
+ */
+interface AdviseTrace {
+  /** The model's thinking, as it streamed. */
+  reasoning: string[]
+  /** The model whose thinking level could not be sent, when one was set. */
+  thinkingSkippedModel?: string
+}
+
 export async function runOperatorAdvise(
   input: OperatorAdviseInput,
   deps: OperatorAdviseDeps,
+): Promise<OperatorAdviseResult> {
+  const trace: AdviseTrace = { reasoning: [] }
+  const result = await advise(input, deps, trace)
+  const reasoning = trace.reasoning.join('').trim()
+  if (!reasoning && !trace.thinkingSkippedModel) return result
+  return {
+    ...result,
+    ...(reasoning ? { reasoning } : {}),
+    ...(trace.thinkingSkippedModel ? { thinkingSkippedModel: trace.thinkingSkippedModel } : {}),
+  }
+}
+
+async function advise(
+  input: OperatorAdviseInput,
+  deps: OperatorAdviseDeps,
+  trace: AdviseTrace,
 ): Promise<OperatorAdviseResult> {
   const intent = latestIntent(input.messages)
   if (!intent) {
@@ -344,12 +382,31 @@ export async function runOperatorAdvise(
     consumer: 'workflow-generation',
     entityKey: entityKeyFor('workflow', input.workflowId ?? input.sessionId),
   }
-  const callModel = deps.callModel ?? defaultCallModel(deps.signal, attribution, deps.stream)
+  // The model's thinking is kept as it streams, and the live broadcast still
+  // goes out — the editor shows the thinking while the answer is being written.
+  const onDelta = (delta: OperatorAdviseDelta): void => {
+    if (delta.channel === 'reasoning') trace.reasoning.push(delta.delta)
+    deps.stream?.(delta)
+  }
+  let callModel = deps.callModel
   const offeredIds = candidates.map((candidate) => candidate.blockId)
 
   let text: string
   try {
-    text = await callModel(prompt, undefined, deps.stream)
+    if (!callModel) {
+      const provider = await resolveActiveProvider()
+      // A level the model cannot express is dropped when the request is built.
+      // The editor has no settings surface, so the drop is reported here —
+      // otherwise the thinking level looks configured but does nothing.
+      if (
+        provider.thinkingEffort &&
+        !thinkingBodyFor(provider.baseUrl, provider.model, provider.thinkingEffort)
+      ) {
+        trace.thinkingSkippedModel = provider.model
+      }
+      callModel = defaultCallModel(deps.signal, attribution, provider, onDelta)
+    }
+    text = await callModel(prompt, undefined, onDelta)
   } catch (error) {
     if (deps.signal.aborted) throw new DOMException('Aborted', 'AbortError')
     return {
@@ -419,7 +476,7 @@ export async function runOperatorAdvise(
 
   let retryText: string
   try {
-    retryText = await callModel(screenshotPrompt, image, deps.stream)
+    retryText = await callModel(screenshotPrompt, image, onDelta)
   } catch (error) {
     if (deps.signal.aborted) throw new DOMException('Aborted', 'AbortError')
     return keep(used(error instanceof Error ? error.message : String(error)))

@@ -130,6 +130,12 @@ interface Turn {
   /** The answer exactly as the model wrote it. Streamed live, then kept behind a
    *  disclosure, because a refused or half-read answer is what the user needs. */
   raw?: string
+  /** The model's thinking, kept after the answer lands — during the request it
+   *  is only on screen, and a thinking level that shows nothing looks unset. */
+  reasoning?: string
+  /** The model whose thinking level could not be sent, so the user can see why
+   *  the configured level did nothing. */
+  thinkingSkippedModel?: string
   /** The page this answer's parameters were read from; `null` when none was. */
   page?: OperatorPageRef | null
   /** An assistant row that reports a failure rather than a landed chain. */
@@ -588,6 +594,8 @@ export default function OperatorChatDock({
           role: 'assistant',
           content: data.reason ?? data.reply,
           ...(data.raw ? { raw: data.raw } : {}),
+          ...(data.reasoning ? { reasoning: data.reasoning } : {}),
+          ...(data.thinkingSkippedModel ? { thinkingSkippedModel: data.thinkingSkippedModel } : {}),
           failed: true,
         })
         return
@@ -607,6 +615,8 @@ export default function OperatorChatDock({
           content: data.reply,
           proposals: data.proposals,
           ...(data.raw ? { raw: data.raw } : {}),
+          ...(data.reasoning ? { reasoning: data.reasoning } : {}),
+          ...(data.thinkingSkippedModel ? { thinkingSkippedModel: data.thinkingSkippedModel } : {}),
           page: data.page,
           ...(data.screenshot ? { screenshot: data.screenshot } : {}),
           offer: {
@@ -637,6 +647,8 @@ export default function OperatorChatDock({
         content: data.reply,
         proposals: data.proposals,
         ...(data.raw ? { raw: data.raw } : {}),
+        ...(data.reasoning ? { reasoning: data.reasoning } : {}),
+        ...(data.thinkingSkippedModel ? { thinkingSkippedModel: data.thinkingSkippedModel } : {}),
         page: data.page ?? null,
         ...(data.screenshot ? { screenshot: data.screenshot } : {}),
         ...(landing ? { landing } : {}),
@@ -809,6 +821,21 @@ export default function OperatorChatDock({
                   </li>
                 ))}
               </ul>
+            )}
+            {turn.reasoning && (
+              <details className="mt-1">
+                <summary className="cursor-pointer select-none text-[11px] leading-snug text-faint">
+                  {t('operatorAiReasoning')}
+                </summary>
+                <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-panel px-1.5 py-1 text-[11px] leading-snug text-muted">
+                  {turn.reasoning}
+                </pre>
+              </details>
+            )}
+            {turn.thinkingSkippedModel && (
+              <p className="mt-1 text-[11px] leading-snug text-warn">
+                {t('operatorAiThinkingSkipped').replace('{model}', turn.thinkingSkippedModel)}
+              </p>
             )}
             {turn.raw && (
               <details className="mt-1">

@@ -243,6 +243,12 @@ export interface OperatorAdviseResult {
    *  disclosure: streamed deltas can be missed, and a refused answer is exactly
    *  what the user needs to read. */
   raw?: string
+  /** The model's thinking, as it streamed. Kept so the editor can show it after
+   *  the answer lands — during the request it is only on screen. */
+  reasoning?: string
+  /** The model whose thinking level could not be sent, because the model does
+   *  not accept one. Set only when a level was configured. */
+  thinkingSkippedModel?: string
   /** Where the proposals belong; absent (or `append`) means add them to the flow. */
   action?: OperatorAction
   /** Operators the model asked for that this build can actually land. */

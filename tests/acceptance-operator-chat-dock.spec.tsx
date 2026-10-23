@@ -802,6 +802,47 @@ describe('V-operator-dock: the floating assistant', () => {
     expect(container.querySelector('details pre')?.textContent).toBe(raw)
   })
 
+  it('keeps the thinking after the answer lands, and reports a level that was not sent', async () => {
+    await render()
+    await act(async () => {
+      buttonByText('operatorAiFabLabel')?.click()
+    })
+    let resolveCommand: ((value: AdviseReply) => void) | null = null
+    mocks.sendCommand.mockImplementation(
+      (command: Command) =>
+        new Promise((resolve) => {
+          seen.push(command)
+          if (command.type === 'workflows.operatorAdviseCancel') resolve({ type: command.type })
+          else resolveCommand = resolve
+        }),
+    )
+    await typeInto('打开百度')
+    await act(async () => {
+      buttonByText('operatorAiSend')?.click()
+    })
+    await act(async () => {
+      resolveCommand?.({
+        type: 'workflows.operatorAdvise',
+        data: {
+          ok: true,
+          reply: '已添加',
+          proposals: [],
+          rejected: [],
+          reasoning: '先看画布再挑算子',
+          thinkingSkippedModel: 'gpt-4o-mini',
+        },
+      })
+    })
+    await flush()
+
+    const summaries = [...container.querySelectorAll('details summary')].map(
+      (element) => element.textContent,
+    )
+    expect(summaries).toContain('operatorAiReasoning')
+    expect(container.textContent).toContain('先看画布再挑算子')
+    expect(container.textContent).toContain('operatorAiThinkingSkipped')
+  })
+
   it('renders the reply and the reason for each proposed step', async () => {
     reply = okReply(
       [{ blockId: 'new-tab', data: { url: 'https://b' }, rationale: '用户要打开百度' }],
