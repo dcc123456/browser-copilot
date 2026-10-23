@@ -294,7 +294,9 @@ describe('runOperatorAdvise', () => {
     expect(windows).toEqual([7])
     expect(images[0]).toBeUndefined()
     expect(images[1]).toEqual({ dataUrl: shot.dataUrl, mimeType: shot.mimeType })
-    expect(prompts[0]).not.toContain('screenshot')
+    // The plain vocabulary mentions the screenshot operator; the section header
+    // is what says the image itself rode this call.
+    expect(prompts[0]).not.toContain('## A screenshot of the page')
     expect(prompts[1]).toContain('## A screenshot of the page is attached to this request')
     // The offer the user sees is the refined answer, not the guess.
     expect(result.proposals[0]?.data).toEqual({ selector: '#city' })
@@ -397,7 +399,8 @@ describe('runOperatorAdvise', () => {
       screenshotRoute: async () => 'inline' as const,
       captureScreenshot: async () => shot,
       callModel: async (prompt) => {
-        if (prompt.includes('screenshot')) throw new Error('The provider timed out.')
+        if (prompt.includes('## A screenshot of the page'))
+          throw new Error('The provider timed out.')
         return noElement
       },
     })

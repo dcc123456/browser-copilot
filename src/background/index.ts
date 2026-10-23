@@ -220,6 +220,10 @@ import { runDebugSession, DEFAULT_MAX_ROUNDS } from './workflow-engine/debug-ses
 import { runUnifiedDebug } from './workflow-engine/repair/unified-debug'
 import { runNodeFix } from './workflow-engine/node-fix-engine'
 import { runOperatorAdvise, runOperatorObserve } from './operator-advise-engine'
+import {
+  OPERATOR_ADVISE_STREAM_FLUSH_MS,
+  type OperatorAdviseDelta,
+} from '../lib/workflow/operator-advise'
 import type { RecoveryPhaseState, RecoveryProtocolStatus } from '../lib/workflow/recovery-protocol'
 import {
   commitWorkflowRevision,
@@ -974,7 +978,10 @@ setWindowPickRequester(async (request: WindowPickRequest) => {
  */
 type PageBroadcast =
   | AgentServerMessage
-  | Extract<import('../lib/messages').CommandResult, { type: 'workflows.repairEvent' }>
+  | Extract<
+      import('../lib/messages').CommandResult,
+      { type: 'workflows.repairEvent' | 'workflows.operatorAdviseEvent' }
+    >
 
 /**
  * Push an unsolicited message to EVERY extension page. `chrome.runtime.sendMessage`
@@ -989,6 +996,43 @@ async function broadcastToPages(message: PageBroadcast): Promise<void> {
   } catch {
     // No page subscribed.
   }
+}
+
+/**
+ * Batch one advise request's streamed deltas into page broadcasts. Providers
+ * emit per token; a broadcast is a `runtime.sendMessage` fan-out to every page,
+ * so the editor gets a paint's worth every ~80 ms instead of one per token.
+ */
+function adviseStreamToPages(sessionId: string): {
+  push: (delta: OperatorAdviseDelta) => void
+  flush: () => void
+} {
+  let pending: OperatorAdviseDelta[] = []
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const flush = (): void => {
+    if (timer !== undefined) {
+      clearTimeout(timer)
+      timer = undefined
+    }
+    const batch = pending
+    pending = []
+    for (const delta of batch) {
+      void broadcastToPages({
+        type: 'workflows.operatorAdviseEvent',
+        sessionId,
+        channel: delta.channel,
+        delta: delta.delta,
+      })
+    }
+  }
+  const push = (delta: OperatorAdviseDelta): void => {
+    const last = pending[pending.length - 1]
+    // Adjacent chunks of one channel coalesce; switching channels keeps order.
+    if (last && last.channel === delta.channel) last.delta += delta.delta
+    else pending.push({ ...delta })
+    timer ??= setTimeout(flush, OPERATOR_ADVISE_STREAM_FLUSH_MS)
+  }
+  return { push, flush }
 }
 
 /**
@@ -2663,9 +2707,11 @@ async function handleCommand(
     case 'workflows.operatorAdvise': {
       // The editor's floating assistant: one model call, no execution. Failures
       // settle as a result so the chat can say WHY; a cancel aborts the request
-      // and reads back as the same kind of readable failure.
+      // and reads back as the same kind of readable failure. Model output streams
+      // to the editor as it is written.
       const controller = new AbortController()
       assistantAborts.set(command.sessionId, controller)
+      const adviseStream = adviseStreamToPages(command.sessionId)
       try {
         const data = await runOperatorAdvise(
           {
@@ -2679,7 +2725,7 @@ async function handleCommand(
             ...(command.workflowGoal ? { workflowGoal: command.workflowGoal } : {}),
             ...(command.workflowId ? { workflowId: command.workflowId } : {}),
           },
-          { signal: controller.signal },
+          { signal: controller.signal, stream: adviseStream.push },
         )
         return { type: 'workflows.operatorAdvise', data }
       } catch (error) {
@@ -2699,6 +2745,7 @@ async function handleCommand(
           },
         }
       } finally {
+        adviseStream.flush()
         assistantAborts.delete(command.sessionId)
       }
     }

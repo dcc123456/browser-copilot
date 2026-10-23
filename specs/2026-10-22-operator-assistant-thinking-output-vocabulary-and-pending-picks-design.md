@@ -1,7 +1,7 @@
 # 算子助手：思考状态、模型原文可见、全量算子词汇与"拾取待发送"
 
 - 日期：2026-10-22
-- 状态：待实施（本文只做取证与决策；代码尚未改动）
+- 状态：已实施（2026-10-23；回填见 §7）
 - 范围：`src/workflow-editor/ai/OperatorChatDock.tsx`、`src/background/operator-advise-engine.ts`、
   `src/lib/workflow/operator-advise.ts`、`src/lib/workflow/operator-registry.ts`、
   `src/lib/messages.ts` / `src/background/index.ts` 的广播联合
@@ -145,7 +145,54 @@ Gemini 的图像形状加代码（既有红线，仓库只走 OpenAI 兼容 `ima
 
 ## 7. 实施回填
 
-未开始。
+**G1（文案与可见输出）。** `operatorAiThinking` 值改为 `Thinking…` / `正在思考…`（key 不变）。
+助手行新增两个渲染：`proposals` 以 `<ul>` 列出"算子名 — rationale"（解析了但从未显示的字段现在可见）；
+`raw` 放进 `<details><summary>{operatorAiRaw}</summary><pre>…</pre></details>`，会话结束后仍可展开。
+新增 key `operatorAiRaw`（`Model output` / `模型原文`）。顺带修正旧英文文案 `operatorAiNoUndo`
+（`撤销` → `Undo`）。
+
+**G2（流式）。** `OperatorAdviseResult` 增 `raw?: string`（模型原文逐字保留，是流丢失时的兜底）。
+engine 的 `callModel` 增第三参 `onDelta`，`streamCompletion` 的 `onText` / `onReasoning` 直接转成
+`{ channel, delta }`；`runOperatorAdvise` 通过 `deps.stream` 转出。background 侧新增
+`adviseStreamToPages(sessionId)`：合并相邻同 channel 的 delta，每 `OPERATOR_ADVISE_STREAM_FLUSH_MS = 80`
+经既有 `broadcastToPages` 推一次，`finally` 里强制 flush。dock 在 mount 时注册
+`runtime.onMessage`，按 `activeSessionRef`（即本次 `sessionId`）过滤，实时追加进"思考"区，
+结束后清空。
+
+**与 D2 的偏差（有意）。** 事件形状没有采用草案的 `{ requestId, phase, text }`，而是
+`{ type: 'workflows.operatorAdviseEvent', sessionId, channel: 'text' | 'reasoning', delta }`：
+`sessionId` 是请求里已经存在的关联键（`requestId` 会是一根新桩），`channel` 让"推理"与"正文"在 UI
+上分层显示，`delta` 表明载荷是增量而不是快照（合并端与消费端都不会误把它整段替换）。
+
+**G3（全量词汇）。** `aiLandingAllowed()` 改为显式拒绝清单（`trigger` / `proxy` / `browser-event`），
+保留 cloud 与本机缺 OCR 的排除，不再读 `allowGeneration` / `aiExposure`。按 dcc 的"再加回 4 个隐藏项"
+表态，`blocks-group` **予以放行**——§3 D4 的"待表态"自此关闭，实际可写 **60 / 63**（原 56）。
+`adviseCandidates()` = 发现短名单 + `generationOperators('core')`（这两部分 `detailed: true`，
+带完整 schema）+ 其余可写算子（`detailed: false`，prompt 只渲染 `[params: …; required: …]`），
+按 id 去重。实测（`tmp/` 探针，未入库）：全量 schema 合计 26,718 字符（均 467，最大 get-text 1,450）；
+改前 6 候选 prompt 7,495 字符，改后全量 prompt 13,077 字符（compact 尾巴），未触任何字符预算测试
+（`tests/agent-payload-size.spec.ts` 等全部原样通过，无预算上调）。
+`tests/acceptance-registry.spec.ts:64` 的 `allowGeneration ⇒ aiExposure ≠ hidden` 不变量**未反转**：
+本轮没有动这两个注册表标志，放开的只是"落地闸门"对它们的读取；该测试原样通过。
+
+**G4（拾取待发送）。** 删掉 `fillOfferWith()`（拾取即填、缺口填完即落地）。取而代之：拾取只追加
+一条 `PickedElement` 附件；页脚渲染附件条（`findBy` 下拉 + `selector` 输入框 + 逐条删除），
+编辑、删除都只改 state，不碰画布。存在被扣住批次时，发送按钮换成 `operatorAiPickApply`
+（`Add with picked elements` / `用已拾取元素添加`），点击才把当前 picks 按缺口顺序写入并落地；
+仍有缺口则留在 offer 里继续等，超出的 picks 不被消耗、留给下一条消息。无 offer 时行为不变：
+picks 随下一条消息作为 `pickedElements` 发出并被消耗。新增 key：`operatorAiPicksTitle`、
+`operatorAiPickRemove`、`operatorAiPickByCss` / `ByXpath` / `ByText`、`operatorAiPickApply`。
+
+**测试。** `tests/acceptance-operator-chat-dock.spec.tsx` 31 行全绿：新增流式（错误 sessionId 被丢弃、
+reasoning/text 实时显示、结束后 raw 折叠）、rationale 渲染、拾取"发送才落地"、附件可改/可删；
+`tests/operator-advise.spec.ts` 钉住 60 行全量词汇、4 个隐藏项在列、3 个拒绝项不在列、
+只有短名单 + core 是 `detailed`、compact 行只带参数名。全量 `TZ=UTC npx vitest run`：**425 文件 /
+4,949 测试通过**；`tsc --noEmit`（src + tests）、eslint、prettier、`vite build` 全绿。
+
+**未取得的证据（如实记）。** ⑤浏览器可见行为本轮 **BLOCKED**：没有加载 unpacked extension 手工
+走一遍流式显示与拾取附件；MCP 进不了 `chrome-extension://` 页，本轮也未用可加载真实构建的
+Playwright 通道。③未触发（未改 `workflow-engine/**` 或 `ai-takeover.ts`，不跑 `bench:debug`）。
+④未触发（未改 `executeScript({func})` 内联函数体）。
 
 **顺带记录（非本轮诉求）**：`cbfd565 refactor(editor): drop AI optimize and save-time AI review entries`
 （2026-10-22 09:38）删除了每节点"AI 优化"入口与它的还原栈，`specs/` 里没有对应的设计或计划文档，

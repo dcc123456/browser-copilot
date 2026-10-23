@@ -82,6 +82,33 @@ describe('adviseCandidates', () => {
     expect(newTab?.required).toContain('url')
     expect(JSON.stringify(newTab?.schema)).toContain('url')
   })
+
+  it('offers every writable operator, including the four the palette hides', () => {
+    const offered = candidateIds(adviseCandidates('打开 https://www.example.com'))
+    // Hidden from the palette is not the same as unwritable: the assistant may be
+    // asked to add a note, save a file, group steps or stop the run.
+    for (const id of ['note', 'save-local', 'blocks-group', 'workflow-state'])
+      expect(offered).toContain(id)
+    // Structure, and the two surfaces the assistant must never write.
+    for (const id of ['trigger', 'proxy', 'browser-event', 'google-sheets'])
+      expect(offered).not.toContain(id)
+    expect(new Set(offered).size).toBe(offered.length)
+  })
+
+  it('gives the full schema only to the shortlist and the core floor', () => {
+    const candidates = adviseCandidates('打开 https://www.example.com')
+    const detailed = candidates
+      .filter((candidate) => candidate.detailed)
+      .map((candidate) => candidate.blockId)
+    expect(detailed).toContain('new-tab')
+    expect(detailed).toContain('read-page')
+    expect(detailed.length).toBeLessThan(candidates.length)
+    // The tail is still offered with its schema object; only the prompt rendering
+    // is abridged, so the reply parser can read every id the same way.
+    const note = candidates.find((candidate) => candidate.blockId === 'note')!
+    expect(note.detailed).toBe(false)
+    expect(JSON.stringify(note.schema)).toContain('fontSize')
+  })
 })
 
 describe('buildOperatorAdvisePrompt', () => {
@@ -105,6 +132,18 @@ describe('buildOperatorAdvisePrompt', () => {
   it('marks an empty canvas instead of emitting a blank section', () => {
     const prompt = buildOperatorAdvisePrompt({ history, graphDigest: '   ', candidates })
     expect(prompt).toContain('(empty)')
+  })
+
+  it('lists the whole offered vocabulary, abridging only the tail', () => {
+    const prompt = buildOperatorAdvisePrompt({ history, graphDigest: '', candidates })
+    // Every offered id is named, so nothing can land that was never shown.
+    for (const candidate of candidates) expect(prompt).toContain(`- ${candidate.blockId} — `)
+    // A tail row is parameters only: no description, no JSON Schema.
+    expect(prompt).toContain(
+      '- note — Note [params: note, drawing, width, height, color, fontSize]',
+    )
+    expect(prompt).not.toContain('Attach a free-form note to the workflow')
+    expect(prompt).toContain('shows its parameter names in [brackets]')
   })
 
   it('states the cap it will enforce', () => {
@@ -212,7 +251,8 @@ describe('buildOperatorAdvisePrompt', () => {
     expect(prompt).toContain('password, token, cookie, phone number')
 
     const plain = buildOperatorAdvisePrompt({ history, graphDigest: '', candidates })
-    expect(plain).not.toContain('screenshot')
+    expect(plain).not.toContain('## A screenshot of the page')
+    expect(plain).not.toContain('## What a screenshot of the page shows')
   })
 
   it('quotes the image model, capped, on the described route', () => {

@@ -60,6 +60,7 @@ const okReply = (
   proposals: OperatorProposal[],
   reply = '已添加两个算子',
   action?: OperatorAction,
+  raw?: string,
 ): AdviseReply => ({
   type: 'workflows.operatorAdvise',
   data: {
@@ -68,6 +69,7 @@ const okReply = (
     action: action ?? 'append',
     proposals,
     rejected: [],
+    ...(raw ? { raw } : {}),
   },
 })
 
@@ -135,7 +137,24 @@ let undos = 0
 let container: HTMLElement
 const roots: Root[] = []
 
+/** Broadcast listeners the dock registered — the stream arrives unsolicited. */
+const broadcastListeners: ((message: unknown) => void)[] = []
+
 beforeEach(() => {
+  broadcastListeners.length = 0
+  vi.stubGlobal('chrome', {
+    runtime: {
+      onMessage: {
+        addListener: (listener: (message: unknown) => void) => {
+          broadcastListeners.push(listener)
+        },
+        removeListener: (listener: (message: unknown) => void) => {
+          const index = broadcastListeners.indexOf(listener)
+          if (index >= 0) broadcastListeners.splice(index, 1)
+        },
+      },
+    },
+  })
   reply = okReply([{ blockId: 'new-tab', data: { url: 'https://b' }, rationale: '' }])
   observe = {
     type: 'workflows.operatorObserve',
@@ -180,6 +199,7 @@ afterEach(() => {
     act(() => mounted.unmount())
   }
   document.body.innerHTML = ''
+  vi.unstubAllGlobals()
 })
 
 const flush = async (): Promise<void> => {
@@ -245,6 +265,13 @@ const click = async (label: string): Promise<void> => {
     buttonByText(label)?.click()
   })
   await flush()
+}
+
+/** Deliver one unsolicited broadcast to the dock, as the background would. */
+const broadcast = async (message: unknown): Promise<void> => {
+  await act(async () => {
+    for (const listener of [...broadcastListeners]) listener(message)
+  })
 }
 
 /** The pick button is looked up by title: its text carries the pending-count
@@ -645,6 +672,78 @@ describe('V-operator-dock: the floating assistant', () => {
     })
     await flush()
   })
+
+  it('shows the model writing as it happens, then keeps it behind a disclosure', async () => {
+    await render()
+    await act(async () => {
+      buttonByText('operatorAiFabLabel')?.click()
+    })
+    let resolveCommand: ((value: AdviseReply) => void) | null = null
+    mocks.sendCommand.mockImplementation(
+      (command: Command) =>
+        new Promise((resolve) => {
+          seen.push(command)
+          if (command.type === 'workflows.operatorAdviseCancel') resolve({ type: command.type })
+          else resolveCommand = resolve
+        }),
+    )
+    await typeInto('打开百度')
+    await act(async () => {
+      buttonByText('operatorAiSend')?.click()
+    })
+
+    const sessionId = adviseCommands()[0]!.sessionId
+    // Another editor page's deltas are not this answer.
+    await broadcast({
+      type: 'workflows.operatorAdviseEvent',
+      sessionId: 'not-my-turn',
+      channel: 'text',
+      delta: 'wrong turn',
+    })
+    await broadcast({
+      type: 'workflows.operatorAdviseEvent',
+      sessionId,
+      channel: 'reasoning',
+      delta: '先看画布',
+    })
+    await broadcast({
+      type: 'workflows.operatorAdviseEvent',
+      sessionId,
+      channel: 'text',
+      delta: '正在打开百度',
+    })
+
+    // The waiting row says it is thinking, and the model's own words are on it.
+    expect(container.textContent).toContain('operatorAiThinking')
+    expect(container.textContent).toContain('先看画布')
+    expect(container.textContent).toContain('正在打开百度')
+    expect(container.textContent).not.toContain('wrong turn')
+
+    const raw = '{"reply":"已添加","proposals":[]}'
+    await act(async () => {
+      resolveCommand?.(okReply([], '已添加', undefined, raw))
+    })
+    await flush()
+
+    // Settled: the live row is gone, the answer and its raw text stay readable.
+    expect(container.textContent).not.toContain('operatorAiThinking')
+    expect(container.textContent).toContain('已添加')
+    expect(container.querySelectorAll('details')).toHaveLength(1)
+    expect(container.querySelector('details summary')?.textContent).toBe('operatorAiRaw')
+    expect(container.querySelector('details pre')?.textContent).toBe(raw)
+  })
+
+  it('renders the reply and the reason for each proposed step', async () => {
+    reply = okReply(
+      [{ blockId: 'new-tab', data: { url: 'https://b' }, rationale: '用户要打开百度' }],
+      '先打开目标页面',
+    )
+    await render()
+    await ask('打开百度')
+
+    expect(container.textContent).toContain('先打开目标页面')
+    expect(container.textContent).toContain('用户要打开百度')
+  })
 })
 
 describe('V-operator-dock: a locator the user pointed at by hand', () => {
@@ -674,7 +773,7 @@ describe('V-operator-dock: a locator the user pointed at by hand', () => {
     expect(adviseCommands()[1]!.pickedElements).toBeUndefined()
   })
 
-  it('settles a held batch without ever acting on the page', async () => {
+  it('settles a held batch on send, never on the pick itself', async () => {
     reply = groundedReply([{ blockId: 'event-click', data: {}, rationale: '' }])
     picked('#city')
     await render()
@@ -684,14 +783,24 @@ describe('V-operator-dock: a locator the user pointed at by hand', () => {
 
     await pickElement()
 
-    // The pick answered the question, so the batch lands filled — and nothing ran.
+    // The pick is only an attachment: the question is still the question, and
+    // the send button now says what a click would do with it.
+    expect(requests).toEqual([])
+    expect(observeCommands()).toEqual([])
+    expect(container.textContent).toContain('operatorAiPicksTitle')
+    expect(buttonByText('operatorAiOfferAct')).toBeDefined()
+    expect(buttonByText('operatorAiPickApply')).toBeDefined()
+
+    await click('operatorAiPickApply')
+
+    // The click was the consent: the batch lands filled — and nothing ran.
     expect(observeCommands()).toEqual([])
     expect(requests).toHaveLength(1)
     expect(requests[0]!.proposals[0]!.data).toEqual({ selector: '#city', findBy: 'cssSelector' })
     expect(buttonByText('operatorAiOfferAct')).toBeUndefined()
   })
 
-  it('fills one step per pick, in step order, and only lands when none is left', async () => {
+  it('fills one step per pick, in step order, and only lands on send', async () => {
     reply = groundedReply([
       { blockId: 'event-click', data: {}, rationale: '' },
       { blockId: 'event-click', data: {}, rationale: '' },
@@ -702,19 +811,60 @@ describe('V-operator-dock: a locator the user pointed at by hand', () => {
     await render()
     await ask('先点城市，再点确定')
 
-    // One pick answers one step, so the batch stays held while the other has no element.
+    // Picks accumulate unanswered; nothing on the canvas moves yet.
     await pickElement()
     expect(requests).toEqual([])
     expect(buttonByText('operatorAiOfferAct')).toBeDefined()
-
-    // The second pick closes the last gap: each locator went into its own step.
     await pickElement()
+    expect(requests).toEqual([])
+
+    // The send click answers both gaps: each locator went into its own step.
+    await click('operatorAiPickApply')
     expect(mocks.requestElementPick).toHaveBeenCalledTimes(2)
     expect(requests).toHaveLength(1)
     expect(requests[0]!.proposals.map((proposal) => proposal.data.selector)).toEqual([
       '#city',
       '#ok',
     ])
+  })
+
+  it('lets the user correct or drop a pick before anything lands', async () => {
+    reply = groundedReply([{ blockId: 'event-click', data: {}, rationale: '' }])
+    picked('#city')
+    await render()
+    await ask('从城市下拉里选择杭州')
+    await pickElement()
+
+    const locator = container.querySelector<HTMLInputElement>(
+      'footer input[aria-label="operatorAiPickShort"]',
+    )!
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    await act(async () => {
+      setValue?.call(locator, '#city-select')
+      locator.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const strategy = container.querySelector<HTMLSelectElement>('footer select')!
+    await act(async () => {
+      strategy.value = 'text'
+      strategy.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(requests).toEqual([])
+
+    await click('operatorAiPickApply')
+    expect(requests[0]!.proposals[0]!.data).toEqual({
+      selector: '#city-select',
+      findBy: 'text',
+    })
+
+    // A removed pick is not sent at all: the next message carries no hand facts.
+    await pickElement()
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[title="operatorAiPickRemove"]')?.click()
+    })
+    expect(container.textContent).not.toContain('operatorAiPicksTitle')
+    await typeInto('再试一次')
+    await send()
+    expect(adviseCommands()[1]!.pickedElements).toBeUndefined()
   })
 
   it('says nothing when the user cancelled the pick', async () => {

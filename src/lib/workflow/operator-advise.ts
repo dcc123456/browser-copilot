@@ -5,9 +5,9 @@
  * The editor's floating `AI` chat lets the user say what the workflow should do
  * next ("我需要打开 https://www.baidu.com") and gets operators back. Following
  * the selection spec's Principle A (the model decides WHAT, the system decides
- * which implementation), the model never faces the whole catalog: it is offered
- * the deterministic discovery shortlist plus the core operators as a floor
- * ({@link adviseCandidates}), and only ids from that offer can land.
+ * which implementation), the model is offered every operator this build may
+ * land ({@link adviseCandidates}): the discovery shortlist and the core floor
+ * carry full parameter schemas, the tail carries parameter names.
  *
  * Nothing here executes a node, reads a page or calls a model. The canvas stays
  * the single source of truth — the patch is pure and the editor owns it — which
@@ -49,7 +49,7 @@ import {
 } from './node-goal-contract'
 import { findWorkflowOperators } from './operator-discovery'
 import { JAVASCRIPT_BLOCK_ID, operatorExecClass } from './operator-class'
-import { aiLandingAllowed, generationOperators } from './operator-registry'
+import { aiLandingAllowed, allOperators, generationOperators } from './operator-registry'
 import { dataSchemaFromEntry } from './operator-tools'
 import { PROTECTED_PARAMS } from './repair/patch-policy'
 import type { WorkflowEdge, WorkflowNode } from './types'
@@ -59,6 +59,21 @@ export const OPERATOR_ADVISE_MAX_OPERATORS = 6
 
 /** How many discovery hits ride along with the core operators. */
 const DISCOVERY_LIMIT = 12
+
+/** One chunk of the model's own output, streamed while the answer is arriving.
+ *  `reasoning` is chain-of-thought and `text` the answer itself — kept apart so
+ *  a provider's thinking is never mistaken for the reply. */
+export interface OperatorAdviseDelta {
+  channel: 'text' | 'reasoning'
+  delta: string
+}
+
+/**
+ * How often streamed deltas are batched into one broadcast. Providers emit per
+ * token; forwarding every token over `runtime.sendMessage` would flood the page
+ * for no visible gain at chat speed.
+ */
+export const OPERATOR_ADVISE_STREAM_FLUSH_MS = 80
 
 /** One turn of the assistant's conversation. */
 export interface OperatorAdviseMessage {
@@ -72,7 +87,12 @@ export interface OperatorCandidate {
   /** English catalog name (model-facing text, like the operator guide). */
   name: string
   description: string
-  /** OpenAI-shaped parameter schema — the model's only view of the params. */
+  /** Whether the prompt carries the full parameter schema. Only the discovery
+   *  shortlist and the core floor do: repeating ~460 characters of JSON Schema
+   *  for every operator would multiply the prompt for a tail the model rarely
+   *  reaches. The rest carry their parameter names instead. */
+  detailed: boolean
+  /** OpenAI-shaped parameter schema — the model's view of the params. */
   schema: Record<string, unknown>
   /** Params the block cannot run without. */
   required: string[]
@@ -218,6 +238,10 @@ export interface OperatorAdviseResult {
   reason?: string
   /** What to show the user, in their language. */
   reply: string
+  /** The model's answer as it came back, verbatim. The editor keeps it behind a
+   *  disclosure: streamed deltas can be missed, and a refused answer is exactly
+   *  what the user needs to read. */
+  raw?: string
   /** Where the proposals belong; absent (or `append`) means add them to the flow. */
   action?: OperatorAction
   /** Operators the model asked for that this build can actually land. */
@@ -672,21 +696,34 @@ function elementGapsOf(proposal: OperatorProposal): OperatorMissingParams[] {
   )
 }
 
-function candidateOf(block: BlockCatalogEntry): OperatorCandidate {
+function candidateOf(block: BlockCatalogEntry, detailed: boolean): OperatorCandidate {
   return {
     blockId: block.id,
     name: block.name,
     description: block.description,
+    detailed,
     schema: dataSchemaFromEntry(block),
     required: schemaRequiredArgs(block.id),
   }
 }
 
+/** The parameter names of one schema, for the compact (non-detailed) line. */
+function schemaPropertyNames(schema: Record<string, unknown>): string[] {
+  const properties = schema['properties']
+  if (!properties || typeof properties !== 'object') return []
+  return Object.keys(properties as Record<string, unknown>)
+}
+
 /**
  * The operator set offered to the model for this utterance: the deterministic
- * discovery shortlist, then every core operator as a floor, so a plain "打开某
- * 网站" never depends on the phrase tables alone. Ordered most-relevant first and
- * capped, because the whole offer is carried as JSON Schema in every request.
+ * discovery shortlist, then every core operator as a floor, then every other
+ * writable operator by id.
+ *
+ * The assistant may be asked for any step the editor can hold, so its vocabulary
+ * is the whole writable set — an id it was never offered can never land. Only the
+ * shortlist and the core floor carry a full schema; the tail carries parameter
+ * names, because ~460 characters of JSON Schema per operator would dominate a
+ * prompt that is sent on every turn.
  */
 export function adviseCandidates(stepIntent: string, workflowGoal?: string): OperatorCandidate[] {
   const { candidates } = findWorkflowOperators({
@@ -696,15 +733,16 @@ export function adviseCandidates(stepIntent: string, workflowGoal?: string): Ope
   })
   const offered: OperatorCandidate[] = []
   const seen = new Set<string>()
-  const push = (id: string): void => {
+  const push = (id: string, detailed: boolean): void => {
     if (seen.has(id) || !aiLandingAllowed(id)) return
     const block = BLOCK_BY_ID.get(id)
     if (!block) return
     seen.add(id)
-    offered.push(candidateOf(block))
+    offered.push(candidateOf(block, detailed))
   }
-  for (const candidate of candidates) push(candidate.blockId)
-  for (const entry of generationOperators('core')) push(entry.id)
+  for (const candidate of candidates) push(candidate.blockId, true)
+  for (const entry of generationOperators('core')) push(entry.id, true)
+  for (const entry of allOperators()) push(entry.id, false)
   return offered
 }
 
@@ -801,9 +839,19 @@ export function buildOperatorAdvisePrompt(input: OperatorAdvisePromptInput): str
     ...shot,
     '',
     '## Operators you may use — ONLY these ids',
-    'Each operator lists its id, what it does, and the JSON Schema of its parameters.',
+    'The shortlist at the top carries a description and the full JSON Schema of its parameters.',
+    'Every other operator shows its parameter names in [brackets]; fill them with sensible values',
+    'and omit what you are unsure of — the editor reports anything still missing after it lands.',
   )
   for (const candidate of input.candidates) {
+    if (!candidate.detailed) {
+      const names = schemaPropertyNames(candidate.schema)
+      const required =
+        candidate.required.length > 0 ? `; required: ${candidate.required.join(', ')}` : ''
+      const detail = names.length > 0 ? ` [params: ${names.join(', ')}${required}]` : ''
+      lines.push(`- ${candidate.blockId} — ${candidate.name}${detail}`)
+      continue
+    }
     lines.push(
       `- ${candidate.blockId} — ${candidate.name}${candidate.description ? `: ${candidate.description}` : ''}`,
       `  params: ${capModelPayload(candidate.schema)}`,

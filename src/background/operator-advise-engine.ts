@@ -54,6 +54,7 @@ import {
   parseOperatorAdviseReply,
   proposalsNeedingPage,
   isObservableBlock,
+  type OperatorAdviseDelta,
   type OperatorAdviseMessage,
   type OperatorAdviseResult,
   type OperatorObserveResult,
@@ -116,8 +117,16 @@ export type OperatorScreenshotNote = { ok: true; note: string } | { ok: false; e
 export interface OperatorAdviseDeps {
   signal: AbortSignal
   /** Ask the model; returns its raw reply text. `image` rides the call as a
-   *  multimodal attachment — the inline screenshot route. */
-  callModel?: (prompt: string, image?: { dataUrl: string; mimeType: string }) => Promise<string>
+   *  multimodal attachment — the inline screenshot route. An injected model call
+   *  may report its own streaming through `onDelta`. */
+  callModel?: (
+    prompt: string,
+    image?: { dataUrl: string; mimeType: string },
+    onDelta?: (delta: OperatorAdviseDelta) => void,
+  ) => Promise<string>
+  /** The model's output as it arrives, in order — forwarded to the caller so the
+   *  editor can show it live. */
+  stream?: (delta: OperatorAdviseDelta) => void
   /** Read the scoped page, side-effect free. Defaults to a real snapshot. */
   readPage?: (windowId?: number) => Promise<OperatorPageRead | null>
   /** Capture the scoped page. Defaults to a real visible-tab JPEG. */
@@ -148,7 +157,11 @@ function dataUrlBytes(dataUrl: string): number {
 }
 
 /** Build the default model call over the active provider. */
-function defaultCallModel(signal: AbortSignal, attribution: TokenAttribution) {
+function defaultCallModel(
+  signal: AbortSignal,
+  attribution: TokenAttribution,
+  onDelta?: (delta: OperatorAdviseDelta) => void,
+) {
   return async (prompt: string, image?: { dataUrl: string; mimeType: string }): Promise<string> => {
     const settings = await getSettings()
     const provider = settings.providers.find((profile) => profile.id === settings.activeProviderId)
@@ -189,7 +202,12 @@ function defaultCallModel(signal: AbortSignal, attribution: TokenAttribution) {
         ],
         signal: AbortSignal.any([signal, AbortSignal.timeout(OPERATOR_ADVISE_TIMEOUT_MS)]),
       },
-      {},
+      {
+        // The editor shows the answer as it is written; reasoning stays on its own
+        // channel so the provider's thinking is never read as the reply.
+        onText: (delta) => onDelta?.({ channel: 'text', delta }),
+        onReasoning: (delta) => onDelta?.({ channel: 'reasoning', delta }),
+      },
     )
     return result.content
   }
@@ -316,12 +334,12 @@ export async function runOperatorAdvise(
     consumer: 'workflow-generation',
     entityKey: entityKeyFor('workflow', input.workflowId ?? input.sessionId),
   }
-  const callModel = deps.callModel ?? defaultCallModel(deps.signal, attribution)
+  const callModel = deps.callModel ?? defaultCallModel(deps.signal, attribution, deps.stream)
   const offeredIds = candidates.map((candidate) => candidate.blockId)
 
   let text: string
   try {
-    text = await callModel(prompt)
+    text = await callModel(prompt, undefined, deps.stream)
   } catch (error) {
     if (deps.signal.aborted) throw new DOMException('Aborted', 'AbortError')
     return {
@@ -341,6 +359,7 @@ export async function runOperatorAdvise(
       ok: false,
       reason: 'The AI answer was not a readable JSON object, so nothing was added.',
       reply: '',
+      raw: text,
       proposals: [],
       rejected: [],
       page: pageRef,
@@ -351,7 +370,7 @@ export async function runOperatorAdvise(
   // and screen pixels leave the machine — so a round that runs after this one
   // does not exist, and a retry that fails keeps the first answer.
   if (!page || proposalsNeedingPage(parsed.proposals).length === 0) {
-    return { ok: true, ...parsed, page: pageRef }
+    return { ok: true, ...parsed, raw: text, page: pageRef }
   }
   if (deps.signal.aborted) throw new DOMException('Aborted', 'AbortError')
 
@@ -359,6 +378,7 @@ export async function runOperatorAdvise(
   const keep = (screenshot: OperatorScreenshotReport): OperatorAdviseResult => ({
     ok: true,
     ...parsed,
+    raw: text,
     page: pageRef,
     screenshot,
   })
@@ -389,7 +409,7 @@ export async function runOperatorAdvise(
 
   let retryText: string
   try {
-    retryText = await callModel(screenshotPrompt, image)
+    retryText = await callModel(screenshotPrompt, image, deps.stream)
   } catch (error) {
     if (deps.signal.aborted) throw new DOMException('Aborted', 'AbortError')
     return keep(used(error instanceof Error ? error.message : String(error)))
@@ -402,7 +422,7 @@ export async function runOperatorAdvise(
       used('The answer after the screenshot was not readable, so the first answer was kept.'),
     )
   }
-  return { ok: true, ...retried, page: pageRef, screenshot: used() }
+  return { ok: true, ...retried, raw: retryText, page: pageRef, screenshot: used() }
 }
 
 /**
