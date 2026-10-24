@@ -129,7 +129,61 @@ describe('fs-reconnect', () => {
     }
   })
 
-  it('teardown removes the gesture listeners', async () => {
+  it('retries when the panel becomes visible again, and skips hidden changes', async () => {
+    state.configured = true
+    state.ensureConnects = false
+    const { events, stop } = trackReconnected()
+    const teardown = autoReconnectStorage()
+    try {
+      await flush()
+      expect(state.ensureCalls).toBe(1)
+
+      // A change to hidden is not an opportunity to retry.
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'hidden',
+      })
+      document.dispatchEvent(new Event('visibilitychange'))
+      await flush()
+      expect(state.ensureCalls).toBe(1)
+
+      // Visible again: the user is looking at the panel, so retry.
+      Reflect.deleteProperty(document, 'visibilityState')
+      state.ensureConnects = true
+      document.dispatchEvent(new Event('visibilitychange'))
+      await flush()
+      expect(state.ensureCalls).toBe(2)
+      expect(state.mode).toBe('file')
+      expect(events).toHaveLength(1)
+    } finally {
+      Reflect.deleteProperty(document, 'visibilityState')
+      teardown()
+      stop()
+    }
+  })
+
+  it('retries when the window regains focus', async () => {
+    state.configured = true
+    state.ensureConnects = false
+    const { events, stop } = trackReconnected()
+    const teardown = autoReconnectStorage()
+    try {
+      await flush()
+      expect(state.ensureCalls).toBe(1)
+
+      state.ensureConnects = true
+      window.dispatchEvent(new Event('focus'))
+      await flush()
+      expect(state.ensureCalls).toBe(2)
+      expect(state.mode).toBe('file')
+      expect(events).toHaveLength(1)
+    } finally {
+      teardown()
+      stop()
+    }
+  })
+
+  it('teardown removes all reconnect listeners', async () => {
     state.configured = true
     state.ensureConnects = false
     const { events, stop } = trackReconnected()
@@ -138,6 +192,8 @@ describe('fs-reconnect', () => {
     expect(state.ensureCalls).toBe(1)
     teardown()
     gesture()
+    document.dispatchEvent(new Event('visibilitychange'))
+    window.dispatchEvent(new Event('focus'))
     await flush()
     expect(state.ensureCalls).toBe(1)
     expect(events).toHaveLength(0)

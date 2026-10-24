@@ -13,11 +13,14 @@
  *
  * This module makes the re-grant feel automatic: when the panel opens it
  * checks the configured folder, tries to connect immediately (covers the rare
- * case where activation is somehow available), and otherwise retries on the
- * panel's FIRST user interaction — any click or keypress provides the gesture
- * Chrome requires, so the folder reconnects without a trip to Settings. When
- * Chrome decides to show its native "allow access" bubble, confirming that
- * once is the part the platform mandates and cannot be skipped.
+ * case where activation is somehow available), and otherwise keeps retrying —
+ * on every user interaction (a click or keypress inside the panel provides the
+ * gesture Chrome requires), when the panel becomes visible again, and when the
+ * window regains focus. The last two matter when this panel never saw the
+ * gesture that re-granted the folder (another window granted it) or when the
+ * user returns to the browser to read rather than to click. When Chrome
+ * decides to show its native "allow access" bubble, confirming that once is
+ * the part the platform mandates and cannot be skipped.
  *
  * @module lib/fs-reconnect
  */
@@ -46,9 +49,10 @@ const GESTURE_EVENTS = ['pointerdown', 'keydown'] as const
 
 /**
  * Starts the auto-reconnect: one immediate attempt, then another on every
- * user interaction until the folder is connected. The listeners sit on the
- * window in the capture phase (before React's handlers) and are passive, so
- * they never interfere with the click that triggered them.
+ * user interaction, panel visibility change (to visible), and window focus
+ * until the folder is connected. The gesture listeners sit on the window in
+ * the capture phase (before React's handlers) and are passive, so they never
+ * interfere with the click that triggered them.
  *
  * Returns a teardown suitable for a React effect's cleanup. When no folder is
  * configured, or the folder is already connected (the normal restart case),
@@ -63,10 +67,22 @@ export function autoReconnectStorage(): () => void {
     void attempt()
   }
 
+  /** A side panel that was hidden (window switched, minimized) is back. */
+  const onVisibilityChange = (): void => {
+    if (document.visibilityState === 'visible') void attempt()
+  }
+
+  /** The window regained focus — e.g. the user returned from the browser UI. */
+  const onFocus = (): void => {
+    void attempt()
+  }
+
   const removeListeners = (): void => {
     for (const type of GESTURE_EVENTS) {
       window.removeEventListener(type, onGesture, true)
     }
+    document.removeEventListener('visibilitychange', onVisibilityChange)
+    window.removeEventListener('focus', onFocus)
   }
 
   /** The single disarm path: used by success, by no-op states, and by teardown. */
@@ -109,6 +125,8 @@ export function autoReconnectStorage(): () => void {
   for (const type of GESTURE_EVENTS) {
     window.addEventListener(type, onGesture, { capture: true, passive: true })
   }
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  window.addEventListener('focus', onFocus)
   void attempt()
 
   return () => {
