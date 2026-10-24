@@ -253,6 +253,22 @@ describe('parseSpreadsheet · csv', () => {
     expect(parsed.rows).toEqual([])
     expect(parsed.rawRows).toEqual([['a', 'b']])
   })
+
+  it('parses delimited text exported with an .xlsx name and strips repeated BOMs', async () => {
+    // Real export: a job board wrote UTF-8 CSV (with two BOMs) as 邮箱信息.xlsx.
+    const csv = '\ufeff\ufeff序号,职位名称\n1,前端\n2,后端\n'
+    const parsed = await parseSpreadsheet(encode(csv), '邮箱信息.xlsx')
+    expect(parsed.sheetName).toBe('邮箱信息')
+    expect(parsed.rawRows).toEqual([
+      ['序号', '职位名称'],
+      ['1', '前端'],
+      ['2', '后端'],
+    ])
+    expect(parsed.rows).toEqual([
+      { 序号: '1', 职位名称: '前端' },
+      { 序号: '2', 职位名称: '后端' },
+    ])
+  })
 })
 
 describe('parseSpreadsheet · errors', () => {
@@ -278,6 +294,13 @@ describe('parseSpreadsheet · errors', () => {
   it('rejects a zip without a workbook part', async () => {
     const bytes = buildZip({ 'xl/pictures/image.png': 'not a workbook' })
     await expect(parseSpreadsheet(bytes, 'fake.xlsx')).rejects.toThrow(/workbook\.xml/)
+  })
+
+  it('explains a non-zip, non-text .xlsx instead of blaming the zip container', async () => {
+    const binary = new Uint8Array([0x00, 0x01, 0x02, 0x03, 0x04])
+    await expect(parseSpreadsheet(binary, 'broken.xlsx')).rejects.toThrow(
+      /named \.xlsx but is neither a ZIP workbook nor readable text/,
+    )
   })
 
   it('rejects unsupported file types', async () => {

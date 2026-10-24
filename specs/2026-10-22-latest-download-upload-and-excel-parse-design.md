@@ -141,8 +141,13 @@ upload-file(latest-download)
 - 来源：
   - `user-select`：`requestUserFiles({ accept: '.xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv', multiple: false })`；
   - `workflow-file`：`variableNameOf` + `normalizeWorkflowFiles`，必须是单个文件。
-- 格式判定：文件名扩展名优先；随后按 MIME；未知时按 zip 魔数 `PK\x03\x04` 猜 xlsx。
-  `.xls` 直接拒绝（`EXCEL_LEGACY_FORMAT_UNSUPPORTED`）。
+- 格式判定：**内容优先**——OLE 魔数直接拒绝；ZIP 魔数按 xlsx 解析（不看扩展名）；
+  可解码的 UTF-8 分隔文本按 CSV 解析（包括被导出系统命名成 `.xlsx` 的文本文件）；
+  `.csv`/`.txt` 按 CSV；扩展名是 `.xlsx` 但既不是 ZIP 也不是文本时，明确报
+  「不是有效工作簿、下载可能不完整」，不再谎报 zip 损坏。`.xls` 直接拒绝
+  （`EXCEL_LEGACY_FORMAT_UNSUPPORTED`）。
+  真实案例：招聘站点把逗号分隔的结果导出为 `邮箱信息.xlsx`，按扩展名判定时报
+  “zip 容器损坏”，按内容判定后正常解析出全部行。
 - 数值：数字单元格 → `number`；布尔 → `boolean`；错误值 → 字符串；空 → `null`。
 - 日期：按样式判定——内置格式 14–22（日期/时间）、27–31、36、50–54、57–58（日期）、
   32–35、45–47、55–56（时间），以及自定义格式码中的 y/m/d/h/s；
@@ -177,7 +182,8 @@ upload-file(latest-download)
 - 不支持 `.xls`（BIFF 二进制）、Zip64、加密工作簿、宏与图表；
 - 公式读取缓存值；没有缓存值的公式单元格为 `null`；
 - 合并单元格只取左上角值；
-- CSV 统一按 UTF-8 解码（自动去 BOM），自动识别逗号/分号/Tab 分隔。
+- CSV 统一按 UTF-8 解码（自动去掉行首的**连续** BOM；部分导出会写两个），
+  自动识别逗号/分号/Tab 分隔；非 UTF-8（如 GBK）不做编码猜测。
 
 ### 4.4 错误模型
 

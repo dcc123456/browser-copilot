@@ -70,11 +70,24 @@ export async function parseSpreadsheet(
     )
   }
 
-  if (extension === 'xlsx' || isZip(bytes)) {
+  // Content wins over the extension: export systems routinely name a
+  // delimited text file `.xlsx`, and trusting the name turned a perfectly
+  // readable export into "zip container is truncated or malformed".
+  if (isZip(bytes)) {
     return parseXlsx(bytes, options.sheetName, hasHeader)
   }
   if (extension === 'csv' || extension === 'txt') {
     return parseCsv(bytes, fileName, hasHeader)
+  }
+  if (extension === 'xlsx' && looksLikeDelimitedText(bytes)) {
+    return parseCsv(bytes, fileName, hasHeader)
+  }
+  if (extension === 'xlsx') {
+    throw new SpreadsheetParseError(
+      'EXCEL_PARSE_FAILED',
+      `"${fileName}" is named .xlsx but is neither a ZIP workbook nor readable text. ` +
+        'The download may be incomplete, or the file is not a real .xlsx — re-export it as .xlsx or .csv.',
+    )
   }
   throw new SpreadsheetParseError(
     'EXCEL_PARSE_FAILED',
@@ -96,6 +109,23 @@ function isZip(bytes: Uint8Array): boolean {
     bytes[1] === 0x4b &&
     (bytes[2] === 0x03 || bytes[2] === 0x05 || bytes[2] === 0x07)
   )
+}
+
+/**
+ * Whether a misnamed `.xlsx` is really delimiter-separated UTF-8 text.
+ *
+ * The probe rejects NUL bytes and invalid UTF-8: a binary workbook fragment
+ * must keep failing loudly, and this parser does not guess a text encoding
+ * (GBK exports stay unsupported). A delimiter or line break distinguishes a
+ * table from arbitrary binary that happens to decode.
+ */
+function looksLikeDelimitedText(bytes: Uint8Array): boolean {
+  const probe = bytes.subarray(0, Math.min(bytes.length, 64 * 1024))
+  if (probe.length === 0) return false
+  for (const byte of probe) if (byte === 0) return false
+  const text = UTF8.decode(probe)
+  if (text.includes('\ufffd')) return false
+  return /[,\t;\r\n]/.test(text)
 }
 
 // --- XML helpers -------------------------------------------------------------
@@ -644,7 +674,9 @@ function sheetNameFromFileName(fileName: string): string {
 }
 
 function parseCsv(bytes: Uint8Array, fileName: string, hasHeader: boolean): ParsedSpreadsheet {
-  const text = UTF8.decode(bytes).replace(/^\ufeff/, '')
+  // Some exporters prepend more than one BOM; strip the whole run or the first
+  // header/cell keeps an invisible U+FEFF.
+  const text = UTF8.decode(bytes).replace(/^\ufeff+/, '')
   const delimiter = detectCsvDelimiter(text)
   const rawRows = parseCsvRows(text, delimiter)
   return buildTable(rawRows, hasHeader, sheetNameFromFileName(fileName))
