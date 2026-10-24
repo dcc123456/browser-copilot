@@ -54,11 +54,22 @@ documented exactly once. Anchors are language-independent.
 
 ## Automa links
 
-The property panel links to `https://docs.extension.automa.site/blocks/<id>.html`, which
-redirects to `https://www.goautoma.com/extension/docs/blocks/<id>.html`. Docs use the canonical
-target. curl checks on 2026-10-24 found no upstream page for `note`, `forward-page`,
+Docs prose links to the canonical upstream page
+`https://www.goautoma.com/extension/docs/blocks/<id>.html` (the extension's former
+`docs.extension.automa.site` address redirects there). curl checks on 2026-10-24 found no
+upstream page for `note`, `forward-page`,
 `save-local`, and `read-page`; the five custom blocks also have none. Those sections omit the
 link and say so. Prose is original; upstream pages are linked, not copied.
+
+## Editor deep links
+
+`src/lib/workflow/docs-links.ts` maps a palette block id to its category page and the
+language-independent `#operator-<id>` anchor, switching to the `-zh` page for the Chinese
+editor locale. Both the property-panel header and the palette card's info icon use it, so the
+editor opens this reference instead of an upstream page that lacks Browser Copilot-specific
+behavior. Cloud blocks return `undefined` and get no link; the five custom operators now link
+too, because the reference documents them. The coverage test asserts the URL for every palette
+block and rejects a reintroduced `docs.extension.automa.site` link.
 
 ## Coverage guard
 

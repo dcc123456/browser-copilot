@@ -14,6 +14,7 @@
 import { Info, Minus, Pin, Plus, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { blocksByCategory, CATEGORY_META } from '../../lib/workflow/blocks/palette'
+import { operatorDocsUrl } from '../../lib/workflow/docs-links'
 import { OCR_SUPPORTED } from '../../lib/ocr-support'
 import { BlockIcon } from '../../lib/workflow/blocks/icons'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
@@ -38,7 +39,8 @@ function BlockCard({
   pinned: boolean
   onTogglePin: () => void
 }) {
-  const { t, bt, blockName, blockDesc: btDesc } = useEditorLocale()
+  const { t, bt, blockName, blockDesc: btDesc, locale } = useEditorLocale()
+  const docsHref = operatorDocsUrl(block.id, locale)
   // no-ocr build: OCR-only operators are shown grayed out and cannot be
   // dragged onto the canvas (Tailwind utilities — see ui/design-system.css).
   const ocrUnavailable = block.requiresOcr === true && !OCR_SUPPORTED
@@ -64,15 +66,17 @@ function BlockCard({
       }}
     >
       <div className="wf-palette-card-hover">
-        <a
-          href={`https://docs.extension.automa.site/blocks/${block.id}.html`}
-          target="_blank"
-          rel="noreferrer"
-          title={bt('Docs')}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <Info size={14} />
-        </a>
+        {docsHref && (
+          <a
+            href={docsHref}
+            target="_blank"
+            rel="noreferrer"
+            title={bt('Docs')}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Info size={14} />
+          </a>
+        )}
         <span
           title={pinned ? bt('Unpin block') : bt('Pin block')}
           onClick={(e) => {

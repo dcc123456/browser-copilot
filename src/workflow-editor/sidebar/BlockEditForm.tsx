@@ -13,8 +13,8 @@
 
 import { ArrowLeft, Cloud, Info } from 'lucide-react'
 import { isCloudBlock } from '../../lib/workflow/blocks/cloud-blocks'
-import { isCustomBlock } from '../../lib/workflow/blocks/custom'
 import type { BlockCatalogEntry } from '../../lib/workflow/blocks/types'
+import { operatorDocsUrl } from '../../lib/workflow/docs-links'
 import { operatorCarriesGoal } from '../../lib/workflow/operator-registry'
 import NumberInput from '../../ui/NumberInput'
 import { EditForms } from '../blocks/EditForms'
@@ -120,9 +120,10 @@ export default function BlockEditForm({
   t,
   hideGoal = false,
 }: BlockEditFormProps) {
-  const { blockName, bt } = useEditorLocale()
+  const { blockName, bt, locale } = useEditorLocale()
   const EditComponent = block.editComponent ? EditForms[block.editComponent] : undefined
   const cloud = isCloudBlock(block.id)
+  const docsHref = operatorDocsUrl(block.id, locale)
   // Fire-and-done operators have nothing to verify, so they get no goal section
   // (no contract, no user words, no error log to work towards).
   const goalBearing = !hideGoal && operatorCarriesGoal(block.id)
@@ -135,9 +136,9 @@ export default function BlockEditForm({
         </button>
         <p className="wf-edit-title">{nodeName || blockName(block.id, block.name)}</p>
         <span className="wf-edit-spacer" />
-        {!isCustomBlock(block.id) && (
+        {docsHref && (
           <a
-            href={`https://docs.extension.automa.site/blocks/${block.id}.html`}
+            href={docsHref}
             target="_blank"
             rel="noreferrer"
             title={bt('Docs')}

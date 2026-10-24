@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import manifest from '../scripts/docs-manifest.json'
 import { isCustomBlock } from '../src/lib/workflow/blocks/custom'
 import { PALETTE_BLOCKS } from '../src/lib/workflow/blocks/palette'
+import { operatorDocsUrl } from '../src/lib/workflow/docs-links'
 import { BLOCK_NAMES_ZH } from '../src/workflow-editor/block-i18n'
 
 const ROOT = process.cwd()
@@ -165,6 +166,30 @@ describe('workflow docs coverage', () => {
         expect(pageHtml).toContain(`id="operator-${section.id}"`)
         expect(indexHtml).toContain(expectedHref(section))
       }
+    }
+  })
+
+  it('deep-links every palette operator from the editor to its published section', () => {
+    for (const block of PALETTE_BLOCKS) {
+      const page = categoryPage(block.category)
+      for (const lang of LANGS) {
+        const suffix = lang === 'zh' ? '-zh' : ''
+        expect(operatorDocsUrl(block.id, lang)).toBe(
+          `${manifest.siteUrl}/docs/${page.slug}${suffix}.html#operator-${block.id}`,
+        )
+      }
+    }
+    expect(operatorDocsUrl('ai-workflow', 'en')).toBeUndefined()
+  })
+
+  it('sends the editor to this reference instead of upstream Automa docs', () => {
+    for (const file of [
+      'src/workflow-editor/sidebar/BlockEditForm.tsx',
+      'src/workflow-editor/sidebar/BlockPalette.tsx',
+    ]) {
+      expect(fs.readFileSync(path.join(ROOT, file), 'utf8')).not.toContain(
+        'docs.extension.automa.site',
+      )
     }
   })
 })

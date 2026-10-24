@@ -63,6 +63,22 @@ describe('block palette search', () => {
     expect(container.querySelectorAll('.wf-palette-section').length).toBeGreaterThan(0)
   })
 
+  it('links every card to the local operator reference', async () => {
+    const container = await mount()
+    const hrefs = [...container.querySelectorAll<HTMLAnchorElement>('a[title="Docs"]')].map(
+      (link) => link.getAttribute('href'),
+    )
+    expect(hrefs).toHaveLength(63)
+    expect(
+      hrefs.every((href) =>
+        href?.startsWith('https://dcc123456.github.io/browser-copilot/docs/operators-'),
+      ),
+    ).toBe(true)
+    expect(hrefs).toContain(
+      'https://dcc123456.github.io/browser-copilot/docs/operators-general.html#operator-webhook',
+    )
+  })
+
   it('filters across block names and drops the category sections', async () => {
     const container = await mount()
     type(search(container), 'webhook')
