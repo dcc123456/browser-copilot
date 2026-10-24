@@ -206,8 +206,9 @@ No output. One main output port; errors follow the block's **On error** policy.
 
 ### Browser Copilot notes
 
-- This build ignores **Close**, the match pattern, and **Close all windows**: it always closes the active tab of the run's window.
-- After closing, the run is pinned to the tab the browser activates next, so later steps do not keep pointing at a dead tab id.
+- This build ignores **Close**, the match pattern, and **Close all windows**: it always closes the tab the run is driving — not the tab you have focused in the browser — so switching tabs mid-run cannot redirect it at your own page.
+- With no http(s) tab to close, the step fails and says so instead of reporting success.
+- After closing, the run is pinned to the tab the browser activates next (inside the run's window), so later steps do not keep pointing at a dead tab id.
 - Closing the last tab of a window closes that window as well.
 
 <!-- operator:take-screenshot -->

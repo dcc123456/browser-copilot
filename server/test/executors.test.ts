@@ -283,6 +283,45 @@ describe('server executors', () => {
   })
 
   /**
+   * Mirror of the extension's `close-tab` tests: the page the RUN drives closes
+   * (not whichever page a user might have focused), and the run follows the
+   * surviving page instead of keeping the closed tab id.
+   */
+  describe('close-tab', () => {
+    function makeCloseDriver(survivor: number | undefined) {
+      const driver = makeDriverStub() as unknown as Record<string, unknown>
+      const closeActiveTab = vi.fn(async (_tabId?: number) => survivor)
+      driver['closeActiveTab'] = closeActiveTab
+      return { closeActiveTab, registry: createExecutors(makeDeps(driver as unknown as RunDriver)) }
+    }
+
+    it('closes the driven page and re-points the run at the survivor', async () => {
+      const { closeActiveTab, registry } = makeCloseDriver(9)
+      const ctx = makeCtx()
+      ctx.tabId = 7
+      const pinned: number[] = []
+      ctx.setTab = (tabId) => pinned.push(tabId)
+
+      await registry['close-tab']!({ closeType: 'tab', activeTab: true }, ctx)
+
+      expect(closeActiveTab).toHaveBeenCalledWith(7)
+      expect(pinned).toEqual([9])
+      expect(ctx.events).toContainEqual({ kind: 'result', text: '已关闭当前标签页' })
+    })
+
+    it('leaves the tab pointer alone when no page survives', async () => {
+      const { registry } = makeCloseDriver(undefined)
+      const ctx = makeCtx()
+      const pinned: number[] = []
+      ctx.setTab = (tabId) => pinned.push(tabId)
+
+      await registry['close-tab']!({ closeType: 'tab', activeTab: true }, ctx)
+
+      expect(pinned).toEqual([])
+    })
+  })
+
+  /**
    * Mirror of the extension's `new-tab` reuse tests. Headless has no tab bar, so
    * "update previously opened tab" is a `goto` on the page the last new-tab block
    * made — and a page closed since then falls back to creating instead of

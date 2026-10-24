@@ -105,7 +105,6 @@ import type { ScopeWindow } from '../automation-scope'
 import {
   clipboardGet,
   clipboardInsert,
-  closeActiveTab,
   cookieGet,
   cookieGetAll,
   cookieRemove,
@@ -1378,16 +1377,28 @@ const switchTabExec: BlockExecutor = async (data, ctx) => {
 
 const closeTabExec: BlockExecutor = async (_data, ctx) => {
   assertActive(ctx)
-  try {
-    await closeActiveTab(ctx.scope)
-    // Follow the tab Chrome focused in the closed one's place. Leaving `tabId`
-    // on a dead id makes every later step drive a tab that no longer exists.
-    const [survivor] = await chrome.tabs.query({ active: true, currentWindow: true })
-    if (typeof survivor?.id === 'number') ctx.setTab?.(survivor.id)
-    ctx.emit('result', '已关闭当前标签页')
-  } catch (error) {
-    throw error
+  // Close the tab THIS RUN drives — resolved like every other page op — not the
+  // browser-focused tab. A user who switches tabs mid-run must not redirect a
+  // destructive step at their own page, and `switch-tab` with "set as active"
+  // off already leaves the run on a tab that is not focused.
+  const tab = await resolveAutomationTab(ctx.tabId, ctx.scope)
+  if (!tab || typeof tab.id !== 'number') {
+    throw new Error('close-tab: 没有可关闭的网页标签页')
   }
+  await chrome.tabs.remove(tab.id)
+  // Follow the tab Chrome activates in the closed one's place. Leaving `tabId`
+  // on a dead id makes every later step drive a tab that no longer exists.
+  // Stay inside the run's window: a survivor from another window would win the
+  // preferred-tab check in `resolveAutomationTab` and leak the run out of scope.
+  const [survivor] = await chrome.tabs
+    .query(
+      ctx.scope
+        ? { active: true, windowId: ctx.scope.windowId }
+        : { active: true, currentWindow: true },
+    )
+    .catch(() => [])
+  if (typeof survivor?.id === 'number') ctx.setTab?.(survivor.id)
+  ctx.emit('result', '已关闭当前标签页')
   return null
 }
 

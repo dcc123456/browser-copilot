@@ -280,9 +280,20 @@ export class RunDriver {
     return { ...this.tabOf(page), title: await page.title().catch(() => '') }
   }
 
-  async closeActiveTab(): Promise<void> {
-    const page = this.pageOf()
+  /**
+   * Close the page the run drives (an explicit tab id wins) and report which
+   * tab the driver acts on next, so the caller can re-point `ctx.tabId` at a
+   * live page instead of leaving it on a closed one.
+   */
+  async closeActiveTab(tabId?: number): Promise<number | undefined> {
+    const page = this.pageOf(tabId)
     await page.close().catch(() => {})
+    // Do not depend on the 'close' listener having run yet: `page.close()`
+    // resolves on a closed page either way, and `openPages()` filters those.
+    const open = this.openPages()
+    const survivor = open[open.length - 1] ?? null
+    this.active = survivor
+    return survivor ? this.pageIds.get(survivor) : undefined
   }
 
   /**

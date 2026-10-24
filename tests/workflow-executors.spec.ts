@@ -221,6 +221,86 @@ describe('workflow executors (browser class)', () => {
     expect(chromeRefs.update).not.toHaveBeenCalled()
   })
 
+  describe('close-tab closes the tab the run drives', () => {
+    function makeTab(id: number, windowId: number, url: string, active: boolean): chrome.tabs.Tab {
+      return { id, windowId, url, title: url, active } as chrome.tabs.Tab
+    }
+
+    /**
+     * `activeTabs` is what `chrome.tabs.query({active, windowId})` answers per
+     * window — the browser's focused tab, which is deliberately NOT the tab the
+     * run drives in the first case.
+     */
+    function stubTabs(
+      open: chrome.tabs.Tab[],
+      activeTabs: Partial<Record<number, chrome.tabs.Tab>>,
+    ) {
+      const remove = vi.fn(async () => {})
+      const query = vi.fn(async (info: chrome.tabs.QueryInfo) => {
+        if (typeof info.windowId === 'number') {
+          const active = activeTabs[info.windowId]
+          return active ? [active] : []
+        }
+        return []
+      })
+      const get = vi.fn(async (id: number) => open.find((tab) => tab.id === id))
+      vi.stubGlobal('chrome', {
+        tabs: { query, get, remove },
+        // resolveAutomationTab checks the scoped window exists before it
+        // refuses to look outside it.
+        windows: { get: vi.fn(async (id: number) => ({ id })) },
+        storage: { local: { get: async () => ({}), set: async () => {} } },
+      })
+      return { remove, query, get }
+    }
+
+    it('closes the run tab, not the tab the user has focused', async () => {
+      const runTab = makeTab(701, 71, 'https://run.example/', false)
+      const userTab = makeTab(702, 71, 'https://user.example/', true)
+      const refs = stubTabs([runTab, userTab], { 71: userTab })
+      const { ctx, emit } = makeCtx()
+      ctx.tabId = 701
+      ctx.scope = { windowId: 71 }
+      const setTab = vi.fn()
+      ctx.setTab = setTab
+
+      await EXECUTORS['close-tab']!({ closeType: 'tab', activeTab: true }, ctx)
+
+      expect(refs.remove).toHaveBeenCalledWith(701)
+      expect(refs.remove).not.toHaveBeenCalledWith(702)
+      expect(setTab).toHaveBeenCalledWith(702)
+      expect(emit).toHaveBeenCalledWith('result', '已关闭当前标签页')
+    })
+
+    it('does not adopt a survivor outside the run window', async () => {
+      const runTab = makeTab(711, 72, 'https://run.example/', true)
+      // Closing the last tab of the window closes it, so the scoped query has
+      // no survivor — the run must not re-point at whatever window is focused.
+      const refs = stubTabs([runTab], {})
+      const { ctx } = makeCtx()
+      ctx.tabId = 711
+      ctx.scope = { windowId: 72 }
+      const setTab = vi.fn()
+      ctx.setTab = setTab
+
+      await EXECUTORS['close-tab']!({ closeType: 'tab', activeTab: true }, ctx)
+
+      expect(refs.remove).toHaveBeenCalledWith(711)
+      expect(setTab).not.toHaveBeenCalled()
+    })
+
+    it('fails instead of reporting success when there is no page to close', async () => {
+      const refs = stubTabs([], {})
+      const { ctx } = makeCtx()
+      ctx.scope = { windowId: 73 }
+
+      await expect(
+        EXECUTORS['close-tab']!({ closeType: 'tab', activeTab: true }, ctx),
+      ).rejects.toThrow(/没有可关闭的网页标签页/)
+      expect(refs.remove).not.toHaveBeenCalled()
+    })
+  })
+
   /**
    * `new-tab`'s "update previously opened tab" mode. The memory is the tab the
    * LAST new-tab block made, not the tab the run happens to be on (`switch-tab`

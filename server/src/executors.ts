@@ -872,10 +872,11 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
 
   const closeTabExec: BlockExecutor = async (_data, ctx) => {
     assertActive(ctx)
-    await driver.closeActiveTab()
+    // Same target as every other page op: the page this run drives, not
+    // whichever page happens to be focused.
+    const survivor = await driver.closeActiveTab(ctx.tabId)
     // The driver hands activation to the last surviving page; the run's tab
     // pointer has to follow it, or every later step drives a closed page.
-    const survivor = driver.activeTabId()
     if (survivor !== undefined) ctx.setTab?.(survivor)
     ctx.emit('result', '已关闭当前标签页')
     return null
