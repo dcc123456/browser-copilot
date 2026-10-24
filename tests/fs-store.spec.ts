@@ -13,6 +13,8 @@ import {
   resetStorageCache,
   SKILLS_DIR,
   skillPath,
+  StorageFolderUnreachableError,
+  STORAGE_DIRECTORY_CHANGED,
   syncAgentsToFiles,
   syncEntriesToFiles,
   syncFilesToBrowser,
@@ -55,7 +57,13 @@ function makeChromeMock() {
       for (const key of wanted) store.delete(key)
     }),
   }
-  return { store, storage: { local: { get: local.get, set: local.set, remove: local.remove } } }
+  return {
+    store,
+    // The worker caches the resolved handle; a folder change must be announced
+    // so its copy is dropped. Only the presence of the call matters here.
+    runtime: { sendMessage: vi.fn(async () => undefined) },
+    storage: { local: { get: local.get, set: local.set, remove: local.remove } },
+  }
 }
 
 // --- Minimal File System Access API double ------------------------------------
@@ -1135,11 +1143,12 @@ describe('changing the storage directory', () => {
     expect(md).toContain('updatedAt: 2000')
   })
 
-  it('picks the new folder without carrying when the departing folder is unreachable', async () => {
-    // Permission pending (the post-update state): the files cannot be read,
-    // and re-granting would need the gesture the picker is about to consume.
-    // The pick itself must still go through — nothing readable, nothing
-    // carried; parked outbox writes reach the new folder through the sync.
+  it('refuses to switch away from an unreachable folder instead of losing its data', async () => {
+    // Permission pending (the post-update state): the departing files cannot be
+    // read. Re-granting needs a gesture, and the picker would consume the one
+    // this click provides, so the switch is refused with a sentinel the
+    // settings row turns into "reconnect first". Silently swapping here used to
+    // strand the only copy of everything.
     const departing = makeFakeRoot()
     const departingFs = new FsDirectory(departing.handle as FileSystemDirectoryHandle)
     await departingFs.writeText(['workflows.json'], JSON.stringify([{ id: 'w1', updatedAt: 1 }]))
@@ -1148,7 +1157,22 @@ describe('changing the storage directory', () => {
     const picked = makeFakeRoot()
     stubDirectoryPicker(picked.handle as FakeDir)
 
-    expect(await pickStorageDirectory()).toBe('file')
+    await expect(pickStorageDirectory()).rejects.toBeInstanceOf(StorageFolderUnreachableError)
+    // The picker was not even opened, the handle was not swapped, and the
+    // adopted folder was left untouched.
     expect(picked.node.children.has('browser-copilot')).toBe(false)
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith({ type: STORAGE_DIRECTORY_CHANGED })
+  })
+
+  it('tells every other context that the configured folder changed', async () => {
+    const departing = makeFakeRoot()
+    stubGrantedDirectory(departing.handle as FakeDir)
+    stubDirectoryPicker(makeFakeRoot().handle as FakeDir)
+
+    expect(await pickStorageDirectory()).toBe('file')
+
+    // Without this the service worker keeps its cached handle and writes into
+    // the folder the user just left.
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: STORAGE_DIRECTORY_CHANGED })
   })
 })

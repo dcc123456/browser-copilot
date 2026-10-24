@@ -38,6 +38,9 @@ import {
   getStorageDirectoryName,
   getStorageMode,
   pickStorageDirectory,
+  STORAGE_DISCONNECTED_EVENT,
+  StorageFolderPickRetryError,
+  StorageFolderUnreachableError,
   type StorageMode,
 } from '../lib/fs-store'
 import { outboxCount } from '../lib/fs-outbox'
@@ -514,8 +517,15 @@ export default function SettingsTab({ onLocaleChange }: Props) {
     const handler = (): void => {
       void refreshStorage()
     }
+    // A write that had to park in the outbox is the moment the folder really
+    // went away; the row must show the pending badge and the reconnect hint
+    // right then, not only after the next remount.
     window.addEventListener(STORAGE_RECONNECTED_EVENT, handler)
-    return () => window.removeEventListener(STORAGE_RECONNECTED_EVENT, handler)
+    window.addEventListener(STORAGE_DISCONNECTED_EVENT, handler)
+    return () => {
+      window.removeEventListener(STORAGE_RECONNECTED_EVENT, handler)
+      window.removeEventListener(STORAGE_DISCONNECTED_EVENT, handler)
+    }
   }, [refreshStorage])
 
   const chooseFolder = async (): Promise<void> => {
@@ -533,7 +543,17 @@ export default function SettingsTab({ onLocaleChange }: Props) {
       setStorageNotice({ kind: 'ok', text: t.settingsStorageSynced({ name }) })
       window.dispatchEvent(new Event(STORAGE_RECONNECTED_EVENT))
     } catch (error) {
-      setStorageNotice({ kind: 'error', text: (error as Error).message })
+      // A folder switch is refused while the departing folder is unreachable
+      // (its data could not be carried). Guide the user instead of showing the
+      // sentinel's developer message; after the reconnect the next click can
+      // go straight to the picker.
+      if (error instanceof StorageFolderUnreachableError) {
+        setStorageNotice({ kind: 'error', text: t.settingsStorageReconnectFirst })
+      } else if (error instanceof StorageFolderPickRetryError) {
+        setStorageNotice({ kind: 'ok', text: t.settingsStoragePickAgain })
+      } else {
+        setStorageNotice({ kind: 'error', text: (error as Error).message })
+      }
     } finally {
       setStorageBusy(false)
       // A carry that failed after the switch still moved the app onto the new

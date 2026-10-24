@@ -1045,6 +1045,8 @@ export interface Messages {
   settingsStorageSynced: (params: { name: string }) => string
   settingsStorageNeedReconnect: (params: { name: string }) => string
   settingsStoragePendingWrites: (params: { count: number }) => string
+  settingsStorageReconnectFirst: string
+  settingsStoragePickAgain: string
 
   // Settings · download directory
   settingsDownloadDir: string
@@ -2395,6 +2397,10 @@ const en: Messages = {
     `The folder "${name}" was chosen but access expired. Reconnect it to keep saving files.`,
   settingsStoragePendingWrites: ({ count }) =>
     `${count} change${count === 1 ? '' : 's'} waiting to be written to the folder — they flush automatically once it is reconnected.`,
+  settingsStorageReconnectFirst:
+    'The current storage folder is not connected, so its data cannot be moved yet. Reconnect it first, then change folders.',
+  settingsStoragePickAgain:
+    'The current folder is reconnected. Click "Change folder" again to pick the new one.',
 
   settingsDownloadDir: 'Download folder',
   settingsDownloadDirIntro:
@@ -3721,6 +3727,9 @@ const zhCN: Messages = {
     `已选择文件夹「${name}」，但访问权限已失效。重新连接后即可继续保存文件。`,
   settingsStoragePendingWrites: ({ count }) =>
     `${count} 条变更待写入文件夹——重新连接后会自动写入。`,
+  settingsStorageReconnectFirst:
+    '当前存储目录尚未连接，原目录里的数据暂时无法迁移。请先重新连接，再更换目录。',
+  settingsStoragePickAgain: '当前目录已重新连接，请再次点击「更换文件夹」选择新目录。',
 
   settingsDownloadDir: '下载目录',
   settingsDownloadDirIntro:

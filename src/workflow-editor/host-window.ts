@@ -37,3 +37,17 @@ export function editorUrl(existing: string, windowId?: number): string {
   if (typeof windowId !== 'number') return existing
   return `${existing}${existing.includes('?') ? '&' : '?'}hostWindow=${windowId}`
 }
+
+/**
+ * Records the workflow id in the address bar without navigating. Creating a
+ * workflow opens the editor without an `edit` parameter, yet the id exists from
+ * the moment the graph loads; the panel's Edit action finds an open editor by
+ * that parameter, so it has to appear before the first save or a second window
+ * would open onto the same workflow.
+ */
+export function rememberEditedWorkflow(id: string): void {
+  const params = new URLSearchParams(window.location.search)
+  if (params.get('edit') === id) return
+  params.set('edit', id)
+  window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`)
+}

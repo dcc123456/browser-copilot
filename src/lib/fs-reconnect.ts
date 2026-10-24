@@ -11,25 +11,34 @@
  * reads fall back to the cache, which is why the settings row asks for a
  * manual "reconnect folder" after every update.
  *
- * This module makes the re-grant feel automatic: when the panel opens it
- * checks the configured folder, tries to connect immediately (covers the rare
- * case where activation is somehow available), and otherwise keeps retrying —
- * on every user interaction (a click or keypress inside the panel provides the
- * gesture Chrome requires), when the panel becomes visible again, and when the
- * window regains focus. The last two matter when this panel never saw the
- * gesture that re-granted the folder (another window granted it) or when the
- * user returns to the browser to read rather than to click. When Chrome
- * decides to show its native "allow access" bubble, confirming that once is
- * the part the platform mandates and cannot be skipped.
+ * This module makes the re-grant feel automatic: it checks the configured
+ * folder when the panel opens, retries on every user interaction (a click or
+ * keypress inside the panel provides the gesture Chrome requires), when the
+ * panel becomes visible again, when the window regains focus, and whenever a
+ * write reports that the folder became unreachable. It stays armed for the
+ * whole page lifetime — a folder granted once can lose its permission again
+ * (Chrome ties a non-persistent grant to the document), so disarming after the
+ * first success is exactly the hole that made sessions go quietly stale.
+ *
+ * When Chrome decides to show its native "allow access" bubble, confirming
+ * that once is the part the platform mandates and cannot be skipped.
  *
  * @module lib/fs-reconnect
  */
-import { ensureFileAccess, getStorageMode, isStorageDirectoryConfigured } from './fs-store'
+import {
+  ensureFileAccess,
+  getStorageMode,
+  isStorageDirectoryConfigured,
+  resetStorageCache,
+  STORAGE_DIRECTORY_CHANGED,
+  STORAGE_DISCONNECTED_EVENT,
+  STORAGE_DISCONNECTED_MESSAGE,
+} from './fs-store'
 
 /**
  * Fired on `window` after the configured folder transitions from unreachable
- * back to connected. Lets open surfaces (the settings storage row) refresh
- * without a remount.
+ * back to connected (or after the configured folder itself changed). Lets open
+ * surfaces (the settings storage row, the data tabs) refresh without a remount.
  */
 export const STORAGE_RECONNECTED_EVENT = 'bc:storage-reconnected'
 
@@ -48,34 +57,30 @@ export async function reconnectStorageFolder(): Promise<'file' | 'browser'> {
 const GESTURE_EVENTS = ['pointerdown', 'keydown'] as const
 
 /**
+ * How often a click re-checks an already-connected folder. Permission loss is
+ * rare mid-document but cheap to notice ({@link getStorageMode} only queries
+ * the cached handle); the throttle keeps it off every keystroke and click.
+ */
+const CONNECTED_RECHECK_MS = 5_000
+
+/**
  * Starts the auto-reconnect: one immediate attempt, then another on every
- * user interaction, panel visibility change (to visible), and window focus
- * until the folder is connected. The gesture listeners sit on the window in
- * the capture phase (before React's handlers) and are passive, so they never
- * interfere with the click that triggered them.
+ * user interaction, panel visibility change (to visible), window focus, and
+ * storage-disconnect report until the page goes away. The gesture listeners
+ * sit on the window in the capture phase (before React's handlers) and are
+ * passive, so they never interfere with the click that triggered them.
  *
- * Returns a teardown suitable for a React effect's cleanup. When no folder is
- * configured, or the folder is already connected (the normal restart case),
- * the attempt disarms itself instead of listening forever.
+ * Returns a teardown suitable for a React effect's cleanup.
  */
 export function autoReconnectStorage(): () => void {
   if (typeof window === 'undefined') return () => undefined
   let disposed = false
   let inFlight = false
-
-  const onGesture = (): void => {
-    void attempt()
-  }
-
-  /** A side panel that was hidden (window switched, minimized) is back. */
-  const onVisibilityChange = (): void => {
-    if (document.visibilityState === 'visible') void attempt()
-  }
-
-  /** The window regained focus — e.g. the user returned from the browser UI. */
-  const onFocus = (): void => {
-    void attempt()
-  }
+  /** Configured but not connected as of the last observation. */
+  let wasDisconnected = false
+  /** A write reported the folder unreachable since the last successful check. */
+  let needsRetry = true
+  let lastCheck = 0
 
   const removeListeners = (): void => {
     for (const type of GESTURE_EVENTS) {
@@ -83,40 +88,99 @@ export function autoReconnectStorage(): () => void {
     }
     document.removeEventListener('visibilitychange', onVisibilityChange)
     window.removeEventListener('focus', onFocus)
+    window.removeEventListener(STORAGE_DISCONNECTED_EVENT, onLocalDisconnected)
+    try {
+      chrome?.runtime?.onMessage?.removeListener(onRuntimeMessage)
+    } catch {
+      // No runtime in this context.
+    }
   }
 
-  /** The single disarm path: used by success, by no-op states, and by teardown. */
   const dispose = (): void => {
     disposed = true
     removeListeners()
   }
 
-  const attempt = async (): Promise<void> => {
+  const onGesture = (): void => {
+    // While connected, a throttled re-check is enough; while not, every
+    // interaction is an opportunity to supply the activation Chrome needs.
+    if (!needsRetry && Date.now() - lastCheck < CONNECTED_RECHECK_MS) return
+    void attempt(false)
+  }
+
+  /** A side panel that was hidden (window switched, minimized) is back. */
+  const onVisibilityChange = (): void => {
+    if (document.visibilityState === 'visible') void attempt(true)
+  }
+
+  /** The window regained focus — e.g. the user returned from the browser UI. */
+  const onFocus = (): void => {
+    void attempt(true)
+  }
+
+  /** A write parked because the folder could not be reached. */
+  const onLocalDisconnected = (): void => {
+    needsRetry = true
+    lastCheck = 0
+  }
+
+  /**
+   * Cross-context report: another frame (usually the worker) parked a write, or
+   * the configured folder changed. The latter also invalidates this frame's
+   * handle cache — without it a second panel would keep reading the old folder.
+   */
+  const onRuntimeMessage = (message: unknown): void => {
+    const type = (message as { type?: unknown } | undefined)?.type
+    if (type === STORAGE_DISCONNECTED_MESSAGE) {
+      // Re-emit locally so the settings row / data tabs in THIS frame refresh.
+      onLocalDisconnected()
+      window.dispatchEvent(new Event(STORAGE_DISCONNECTED_EVENT))
+      void attempt(false)
+      return
+    }
+    if (type === STORAGE_DIRECTORY_CHANGED) {
+      resetStorageCache()
+      wasDisconnected = true
+      needsRetry = true
+      lastCheck = 0
+      void attempt(true)
+    }
+  }
+
+  const attempt = async (force: boolean): Promise<void> => {
     if (disposed || inFlight) return
+    if (!force && Date.now() - lastCheck < CONNECTED_RECHECK_MS && !needsRetry) return
     inFlight = true
+    lastCheck = Date.now()
     try {
       if (!(await isStorageDirectoryConfigured())) {
-        // Nothing to reconnect — the user has not picked a folder at all.
-        dispose()
+        // Nothing to reconnect (yet). Stay armed: the user may pick a folder
+        // later in this same document.
+        wasDisconnected = false
+        needsRetry = false
         return
       }
-      if ((await getStorageMode()) === 'file') {
-        // Already granted: the normal state after a browser restart. Nothing
-        // changed, so no event is needed either.
-        dispose()
-        return
+      let mode = await getStorageMode()
+      if (mode !== 'file') {
+        wasDisconnected = true
+        mode = await ensureFileAccess()
       }
-      const mode = await ensureFileAccess()
       if (mode === 'file') {
-        window.dispatchEvent(new CustomEvent(STORAGE_RECONNECTED_EVENT))
-        dispose()
+        needsRetry = false
+        if (wasDisconnected) {
+          wasDisconnected = false
+          window.dispatchEvent(new CustomEvent(STORAGE_RECONNECTED_EVENT))
+        }
+      } else {
+        // Still 'browser': the gesture was missing (background/visibility
+        // checks) or Chrome denied the prompt. Stay armed; the next real
+        // interaction retries.
+        needsRetry = true
       }
-      // Still 'browser': the gesture was missing (the immediate attempt) or
-      // Chrome denied the prompt. Listeners stay armed; the next interaction
-      // retries, and picking the folder again also disarms via 'file' mode.
     } catch {
       // Reconnection must never break the interaction that triggered it.
       // Stays parked; the next interaction retries.
+      needsRetry = true
     } finally {
       inFlight = false
     }
@@ -127,7 +191,13 @@ export function autoReconnectStorage(): () => void {
   }
   document.addEventListener('visibilitychange', onVisibilityChange)
   window.addEventListener('focus', onFocus)
-  void attempt()
+  window.addEventListener(STORAGE_DISCONNECTED_EVENT, onLocalDisconnected)
+  try {
+    chrome?.runtime?.onMessage?.addListener(onRuntimeMessage)
+  } catch {
+    // No runtime in this context.
+  }
+  void attempt(true)
 
   return () => {
     dispose()

@@ -63,7 +63,8 @@ import type { SecretFieldRef } from '../lib/workflow/secret-params'
 import { withoutNodeAddedByAi } from '../lib/workflow/node-goal-contract'
 import { nodeRunIssuesOf } from '../lib/workflow/validation'
 import { sendCommand } from '../lib/messages'
-import { editorUrl, hostWindowId } from './host-window'
+import { editorUrl, hostWindowId, rememberEditedWorkflow } from './host-window'
+import { autoReconnectStorage } from '../lib/fs-reconnect'
 import { getSettings } from '../lib/storage'
 import { newId } from '../lib/storage'
 
@@ -364,6 +365,12 @@ export default function EditorApp() {
     toast.show(t('editorUndone'), 'info')
   }, [setNodes, setEdges, toast, t])
 
+  // The editor is where workflow saves happen, so it must be able to re-grant
+  // the storage folder too: after an update, the first click here supplies the
+  // activation the permission request needs, and any save that was parked in
+  // the outbox flushes as soon as the folder is back.
+  useEffect(() => autoReconnectStorage(), [])
+
   // Resolve language from the stored locale.
   useEffect(() => {
     void getSettings()
@@ -441,6 +448,14 @@ export default function EditorApp() {
       loadedRef.current = true
     }
   }, [])
+
+  // Keep the URL naming the workflow this window edits. A new workflow gets its
+  // id at load but the popup opened without `edit`; the list's Edit action
+  // matches on that param, so without the rewrite it would open a second
+  // window onto the same workflow (last save silently wins).
+  useEffect(() => {
+    if (workflowId) rememberEditedWorkflow(workflowId)
+  }, [workflowId])
 
   useEffect(() => {
     if (loadedRef.current) setDirty(true)

@@ -35,6 +35,11 @@ import {
 } from './agent-channel'
 import { retain, release } from './keepalive'
 import {
+  resetStorageCache,
+  STORAGE_DIRECTORY_CHANGED,
+  STORAGE_DISCONNECTED_MESSAGE,
+} from '../lib/fs-store'
+import {
   AGENT_PORT,
   type AgentClientMessage,
   type AgentServerMessage,
@@ -1112,6 +1117,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           )
         })
     }
+    sendResponse({ ok: true })
+    return
+  }
+
+  // Storage folder switched/removed from a panel. Every context caches the
+  // resolved handle module-wide; without dropping it here the worker would
+  // keep writing into the folder the user just left.
+  if (message?.type === STORAGE_DIRECTORY_CHANGED) {
+    resetStorageCache()
+    sendResponse({ ok: true })
+    return
+  }
+  if (message?.type === STORAGE_DISCONNECTED_MESSAGE) {
+    // Peer panels broadcast this for their own UI; nothing to do in the worker.
     sendResponse({ ok: true })
     return
   }

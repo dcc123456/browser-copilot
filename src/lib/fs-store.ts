@@ -412,6 +412,7 @@ export function createFileArea(handle: FileSystemDirectoryHandle): StorageArea {
           // error; the replay's staleness guard drops it once a newer direct
           // write has landed.
           await enqueueOutbox(key, value).catch(() => undefined)
+          announceStorageDisconnected()
           throw new Error(
             `写入存储目录失败（${key}）：${error instanceof Error ? error.message : String(error)}。` +
               '请确认该目录仍然存在、且扩展仍有读写权限——在「设置 → 数据存储」里可以重新连接。',
@@ -607,6 +608,7 @@ export function fileStorageArea(): StorageArea {
           // from the full latest state.
           for (const [key, value] of contentEntries) await enqueueOutbox(key, value)
           for (const [key] of contentEntries) notifyStoreChanged(key)
+          announceStorageDisconnected()
           return
         }
         // Browser mode: chrome.storage.local IS the content store.
@@ -759,6 +761,52 @@ export async function getStorageMode(): Promise<StorageMode> {
   return (await resolveHandle()) ? 'file' : 'browser'
 }
 
+/**
+ * Runtime message announcing that the configured folder handle changed (or was
+ * removed). The service worker keeps its own handle cache and would otherwise
+ * keep reading and writing the previous folder until it is evicted.
+ */
+export const STORAGE_DIRECTORY_CHANGED = 'storage.directoryChanged'
+
+/**
+ * Window event and runtime message emitted when a content write cannot reach
+ * the configured folder. The panel uses it to refresh its storage row and to
+ * re-arm the gesture-driven reconnect without waiting for a remount.
+ */
+export const STORAGE_DISCONNECTED_EVENT = 'bc:storage-disconnected'
+export const STORAGE_DISCONNECTED_MESSAGE = 'storage.disconnected'
+
+/**
+ * Tells the other extension contexts that the current folder is different.
+ * Fire-and-forget: the sender already dropped its own cache, and a context
+ * that misses the message picks the new handle up on its next cold resolve.
+ */
+function announceDirectoryChanged(): void {
+  try {
+    void chrome?.runtime?.sendMessage({ type: STORAGE_DIRECTORY_CHANGED })?.catch?.(() => undefined)
+  } catch {
+    // No runtime (tests / plain page) — nothing to notify.
+  }
+}
+
+/** Announces that a write had to be parked because the folder is unreachable. */
+function announceStorageDisconnected(): void {
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    try {
+      window.dispatchEvent(new Event(STORAGE_DISCONNECTED_EVENT))
+    } catch {
+      // No DOM events on this host.
+    }
+  }
+  try {
+    void chrome?.runtime
+      ?.sendMessage({ type: STORAGE_DISCONNECTED_MESSAGE })
+      ?.catch?.(() => undefined)
+  } catch {
+    // No runtime (tests / plain page) — nothing to notify.
+  }
+}
+
 /** The picked folder's name, for display; `null` when nothing is configured. */
 export async function getStorageDirectoryName(): Promise<string | null> {
   try {
@@ -785,6 +833,30 @@ export async function ensureFileAccess(): Promise<StorageMode> {
 }
 
 /**
+ * Thrown instead of picking when a folder is configured but its permission is
+ * still pending/denied: switching now would abandon the only copy of the
+ * stored data, because the departing folder cannot be read.
+ */
+export class StorageFolderUnreachableError extends Error {
+  constructor() {
+    super('The current storage folder is not connected.')
+    this.name = 'StorageFolderUnreachableError'
+  }
+}
+
+/**
+ * Thrown when the departing folder was just re-granted (which consumes the
+ * click's transient activation before Chrome's picker opens). The folder is
+ * connected now, so a second click goes straight to the picker.
+ */
+export class StorageFolderPickRetryError extends Error {
+  constructor() {
+    super('The storage folder was reconnected; open the picker again.')
+    this.name = 'StorageFolderPickRetryError'
+  }
+}
+
+/**
  * Shows the directory picker (window + user gesture required), remembers the
  * handle, and carries the departing folder's data into the picked one before
  * it becomes current. Throws when the picker is unavailable or the user
@@ -792,17 +864,35 @@ export async function ensureFileAccess(): Promise<StorageMode> {
  *
  * The carry is what keeps a folder change non-destructive: in file mode the
  * departing folder's files are the only copy of the content, and switching
- * must not strand them. It is best-effort — a departing folder whose
- * permission is pending cannot be read (re-granting would need the gesture
- * the picker is about to consume), so nothing travels from that state; the
- * straight sync below still lands browser leftovers and parked outbox writes
- * in the new folder.
+ * must not strand them. A departing folder whose permission is pending (the
+ * post-update state) is re-granted first, in this same click; if that fails
+ * the switch is refused ({@link StorageFolderUnreachableError}) instead of
+ * silently dropping the data. Re-granting consumes the activation Chrome's
+ * picker needs, so the picker may reject; the caller is then told to click
+ * again ({@link StorageFolderPickRetryError}) — the folder stays connected.
  */
 export async function pickStorageDirectory(): Promise<StorageMode> {
   if (typeof window === 'undefined' || typeof window.showDirectoryPicker !== 'function') {
     throw new Error('File System Access API is not available in this browser.')
   }
-  const handle = await window.showDirectoryPicker({ mode: 'readwrite' })
+  // Never open the picker over an unreachable departing folder: the data has
+  // to be readable before it can follow the user to the new folder.
+  let wasDisconnected = false
+  if (await isStorageDirectoryConfigured()) {
+    wasDisconnected = (await getStorageMode()) !== 'file'
+    if (wasDisconnected && (await ensureFileAccess()) !== 'file') {
+      throw new StorageFolderUnreachableError()
+    }
+  }
+  let handle: FileSystemDirectoryHandle
+  try {
+    handle = await window.showDirectoryPicker({ mode: 'readwrite' })
+  } catch (error) {
+    // The re-grant prompt consumed the activation the picker needs. The folder
+    // is connected now, so the next click reaches the picker directly.
+    if (wasDisconnected) throw new StorageFolderPickRetryError()
+    throw error
+  }
   // Read the departing folder while it is still the configured one: after the
   // swap below, `resolveHandle` points at the new folder.
   let carried: Record<string, unknown> = {}
@@ -820,6 +910,9 @@ export async function pickStorageDirectory(): Promise<StorageMode> {
   cachedHandle = handle
   if (Object.keys(carried).length > 0) await carryEntriesIntoNewFolder(carried, handle)
   await syncToFiles()
+  // Writes happen in the service worker, whose handle cache still points at
+  // the departing folder; drop it there and in every other panel.
+  announceDirectoryChanged()
   return 'file'
 }
 
@@ -870,6 +963,9 @@ export async function clearStorageDirectory(): Promise<void> {
   await clearFallbacks()
   await deleteDirectoryHandle(DIRECTORY_KEY)
   resetStorageCache()
+  // The service worker and sibling panels still cache the deleted handle and
+  // would keep reading/writing the abandoned folder.
+  announceDirectoryChanged()
 }
 
 // --- Migration ---------------------------------------------------------------
