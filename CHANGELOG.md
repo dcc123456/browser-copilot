@@ -8,6 +8,78 @@ All notable changes to this project are documented here. The format is based on
 
 _To be released._
 
+## [0.6.9] - 2026-10-24
+
+### Added — Automa-aligned control flow and operators
+
+While loops, Repeat Task and Loop Elements join the loop family. Loop Data and
+Loop Elements now expose a single output: the after-loop path belongs to the
+loop breakpoint, and stored `output-2` graphs are migrated to the linear shape on
+load and save while legacy edges still run as a fallback. Webhook, multi-trigger
+workflows and breakpoint debugging arrive together — a `$breakpoint` node pauses
+only in Testing mode, and the pause point, variable snapshot, resume and stop all
+ride the existing debug bar. Set Variable writes several variables in one node,
+and the trigger and webhook helpers are shared by the extension and the Runner.
+The editor sidebar narrows to workflow identity and block search, the palette and
+logs modal widen, `upload-file` picks its source in a dropdown, block fields can
+be edited in a popup, and the operator-guide vocabulary is updated.
+
+### Added — An editor assistant that shows its thinking and writes every operator
+
+Model output streams back with reasoning and answer on separate channels and
+stays behind a "Model output" disclosure; thinking effort is sent with the
+request and a level the model cannot express is named in the editor. The
+assistant may write all 60 writable operators (triggers, proxy and browser
+events excluded), and the generation prompt grows from 7.5k to 13k characters
+instead of 34k. Hand-picked elements are now editable attachments in step order:
+they can be edited or deleted, carry their locator strategy and selector, and
+fill empty slots at send time; unused picks are kept for the next message. An
+edit that changes no parameter is refused as `no-change` (no undo entry, no
+success toast, no certification reset), while a landed edit lists every changed
+key old → new with secret values masked. A new-chat button clears the transcript
+and bumps a generation counter so an in-flight reply cannot land in it, and the
+composer has a drag/arrow height grip (52–240 px). A user edit clears the AI
+provenance badge, which answers whether the assistant placed the step.
+
+### Added — Goals, variable access and file paths
+
+A Goal tab edits `settings.goalSpec` summary and success conditions visually,
+preserves terminal-state rows, requires a complete row before saving, confirms
+deletion and disables L3 certification, and marks the workflow unverified on any
+change. Variable references resolve array and object access — `{{rows[0].name}}`,
+`{{obj["key"]}}` — through a root variable plus accessors, and the save-time
+scanner, provenance tracking, repair strategy and task chaining share that
+resolution. `upload-file` and `parse-excel` paths accept `{{variables}}` through
+a `{}` menu, and latest-download scans authorised download roots recursively so a
+newest file in a subfolder is still found. `parse-excel` detects content first,
+so a delimited text export named `.xlsx` parses instead of failing on a truncated
+ZIP container; OLE `.xls` magic is still rejected explicitly, unreadable files
+report the real cause, and repeated BOMs are stripped.
+
+### Added — A bilingual operator reference
+
+A bilingual reference covers all 63 operators with category pages and stable
+anchors, guarded by a coverage check that every palette operator is documented
+exactly once; the landing page navigation, footer and section link to it. Block
+info icons in the property panel and on palette cards now point at the operator
+manual, opening the `-zh` pages from the Chinese locale, and the five custom
+operators link there too. The JavaScript code block's helper chips explain each
+function's purpose and timing; the audit found `automaFetch` implemented in no
+harness and `automaNextBlock`'s `insert` argument unused, so they were removed or
+corrected, and a contract test verifies every helper against the page harness,
+the local fallback and the Runner.
+
+### Fixed — Close-tab targeted the focused tab
+
+The close-tab operator now closes the tab the run is driving rather than
+whatever the browser has focused, no longer reports success when there is nothing
+to close, and follows the surviving tab only inside the run's own window instead
+of carrying the run into another window. Stored readiness expectations now follow
+a value the user later edits, so fill-type blocks stop reporting
+`READINESS_TIMEOUT(value-committed)`. Debug mode and ordinary runs share one
+behaviour contract, and an idle-timeout failure no longer masquerades as "Cannot
+reach the base URL".
+
 ## [0.6.8] - 2026-10-22
 
 ### Added — In-place self-update from GitHub Releases
