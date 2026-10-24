@@ -832,9 +832,51 @@ export default function WorkflowsTab() {
       'src/workflow-editor/index.html' + (id ? `?edit=${encodeURIComponent(id)}` : ''),
     )
   /**
+   * Whether a tab URL is the editor page of the given workflow, matching the
+   * URL shape {@link openEditor} builds. The `edit` param distinguishes the
+   * workflows; comparing it never requires a URL parse (extension-page URLs
+   * from `getAll` carry their full origin, but the panel's own `getURL` value
+   * is stubbed in tests, so the check stays a plain prefix + query read).
+   */
+  const isEditorUrlFor = (tabUrl: string, id: string): boolean => {
+    if (!tabUrl.startsWith(chrome.runtime.getURL('src/workflow-editor/index.html'))) return false
+    const queryStart = tabUrl.indexOf('?')
+    if (queryStart === -1) return false
+    return new URLSearchParams(tabUrl.slice(queryStart + 1)).get('edit') === id
+  }
+
+  /**
+   * Brings an already-open editor for `id` back to the front.
+   *
+   * A workflow gets at most one editor: two windows onto the same graph are
+   * two independent copies, and whichever one saves last silently wins over
+   * the other's edits.
+   * @returns whether an open editor was found and focused
+   */
+  const focusOpenEditor = async (id: string): Promise<boolean> => {
+    try {
+      const openWindows = await chrome.windows?.getAll?.({ populate: true })
+      for (const win of openWindows ?? []) {
+        const tab = (win.tabs ?? []).find(
+          (candidate) => candidate.url && isEditorUrlFor(candidate.url, id),
+        )
+        if (!tab) continue
+        if (typeof tab.id === 'number') await chrome.tabs.update(tab.id, { active: true })
+        if (typeof win.id === 'number') await chrome.windows.update(win.id, { focused: true })
+        return true
+      }
+    } catch {
+      // Listing or focusing is best-effort: keep the safe default (open one).
+    }
+    return false
+  }
+
+  /**
    * The workflow editor opens in a standalone popup window (no address bar /
    * browser chrome), matching Automa's separate editor window. A regular tab is
-   * used as a fallback if popup creation is unavailable.
+   * used as a fallback if popup creation is unavailable. Re-clicking Edit for a
+   * workflow whose editor is already open focuses that window instead of
+   * stacking a second one (see {@link focusOpenEditor}).
    *
    * The opener's window id is appended as `hostWindow=<id>`: the editor popup
    * itself can never be a valid automation scope (it is a popup-type
@@ -843,6 +885,7 @@ export default function WorkflowsTab() {
    */
   const openEditor = (id?: string): void => {
     void (async () => {
+      if (id !== undefined && (await focusOpenEditor(id))) return
       const hostId = await chrome.windows
         .getCurrent()
         .then((win) => (typeof win?.id === 'number' ? win.id : undefined))
