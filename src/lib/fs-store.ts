@@ -786,19 +786,73 @@ export async function ensureFileAccess(): Promise<StorageMode> {
 
 /**
  * Shows the directory picker (window + user gesture required), remembers the
- * handle, and pushes any existing browser-stored data into the files so nothing
- * is lost. Throws when the picker is unavailable or the user cancels.
+ * handle, and carries the departing folder's data into the picked one before
+ * it becomes current. Throws when the picker is unavailable or the user
+ * cancels.
+ *
+ * The carry is what keeps a folder change non-destructive: in file mode the
+ * departing folder's files are the only copy of the content, and switching
+ * must not strand them. It is best-effort — a departing folder whose
+ * permission is pending cannot be read (re-granting would need the gesture
+ * the picker is about to consume), so nothing travels from that state; the
+ * straight sync below still lands browser leftovers and parked outbox writes
+ * in the new folder.
  */
 export async function pickStorageDirectory(): Promise<StorageMode> {
   if (typeof window === 'undefined' || typeof window.showDirectoryPicker !== 'function') {
     throw new Error('File System Access API is not available in this browser.')
   }
   const handle = await window.showDirectoryPicker({ mode: 'readwrite' })
+  // Read the departing folder while it is still the configured one: after the
+  // swap below, `resolveHandle` points at the new folder.
+  let carried: Record<string, unknown> = {}
+  const departing = await resolveHandle()
+  if (departing) {
+    try {
+      carried = await collectEntriesFrom(departing)
+    } catch {
+      // Unreadable mid-switch (revoked, deleted): carry nothing, but the pick
+      // itself must still go through.
+    }
+  }
   await writeDirectoryHandle(DIRECTORY_KEY, handle)
   resetStorageCache()
   cachedHandle = handle
+  if (Object.keys(carried).length > 0) await carryEntriesIntoNewFolder(carried, handle)
   await syncToFiles()
   return 'file'
+}
+
+/**
+ * Copies the departing folder's content into the adopted one. JSON keys merge
+ * per {@link pickCarriedWinner}; skills and agents are written per entity file
+ * — the adopted folder keeps an entity it already has unless the carried copy
+ * is strictly newer ({@link newerCarried}). Keys only the adopted folder has
+ * are left alone. Extension configuration never travels: it does not live in
+ * the folder in the current era, and a legacy config file in the departing
+ * folder must not become one in the adopted folder.
+ */
+async function carryEntriesIntoNewFolder(
+  carried: Record<string, unknown>,
+  handle: FileSystemDirectoryHandle,
+): Promise<void> {
+  const fs = new FsDirectory(handle)
+  const area = createFileArea(handle)
+  for (const [key, value] of Object.entries(carried)) {
+    if (key === SKILLS_DIR || key === AGENTS_DIR) continue
+    if (isConfigKey(key)) continue
+    await area.set({ [key]: pickCarriedWinner(await readEntryValue(fs, key), value) })
+  }
+  const skills = carried[SKILLS_DIR]
+  if (Array.isArray(skills)) {
+    const winners = newerCarried(skills as Skill[], await readSkillsFrom(fs))
+    if (winners.length > 0) await syncSkillsToFiles(winners, handle)
+  }
+  const agents = carried[AGENTS_DIR]
+  if (Array.isArray(agents)) {
+    const winners = newerCarried(agents as Agent[], await readAgentsFrom(fs))
+    if (winners.length > 0) await syncAgentsToFiles(winners, handle)
+  }
 }
 
 /**
@@ -820,6 +874,25 @@ export async function clearStorageDirectory(): Promise<void> {
 
 // --- Migration ---------------------------------------------------------------
 
+/** Narrows one persisted record to the collections that key entries by `id`. */
+function hasStringId(entry: unknown): entry is { id: string } {
+  return !!entry && typeof entry === 'object' && typeof (entry as { id?: unknown }).id === 'string'
+}
+
+/** Whether a persisted value is an array of `id`-keyed records. */
+function isIdKeyedCollection(value: unknown): value is { id: string }[] {
+  return Array.isArray(value) && value.every(hasStringId)
+}
+
+/** Merge ordering of one record: its `updatedAt`, else its `at` (0 if neither). */
+function recordStamp(entry: unknown): number {
+  if (!entry || typeof entry !== 'object') return 0
+  const record = entry as { updatedAt?: unknown; at?: unknown }
+  if (typeof record.updatedAt === 'number') return record.updatedAt
+  if (typeof record.at === 'number') return record.at
+  return 0
+}
+
 /**
  * Keeps the newest version of each record: per-id union of two collection
  * arrays, the record with the larger `updatedAt`/`at` stamp winning (ties go
@@ -831,24 +904,46 @@ export async function clearStorageDirectory(): Promise<void> {
 export function mergeCollection(fileValue: unknown, incoming: unknown): unknown {
   if (fileValue === undefined) return incoming
   if (fileValue === null) return incoming
-  if (!Array.isArray(fileValue) || !Array.isArray(incoming)) return fileValue
-  const hasId = (entry: unknown): entry is { id: string } =>
-    !!entry && typeof entry === 'object' && typeof (entry as { id?: unknown }).id === 'string'
-  if (!fileValue.every(hasId) || !incoming.every(hasId)) return fileValue
-  const stamp = (entry: unknown): number => {
-    if (!entry || typeof entry !== 'object') return 0
-    const record = entry as { updatedAt?: unknown; at?: unknown }
-    if (typeof record.updatedAt === 'number') return record.updatedAt
-    if (typeof record.at === 'number') return record.at
-    return 0
-  }
+  if (!isIdKeyedCollection(fileValue) || !isIdKeyedCollection(incoming)) return fileValue
   const byId = new Map<string, { id: string }>()
   for (const entry of fileValue) byId.set(entry.id, entry)
   for (const entry of incoming) {
     const previous = byId.get(entry.id)
-    if (!previous || stamp(entry) > stamp(previous)) byId.set(entry.id, entry)
+    if (!previous || recordStamp(entry) > recordStamp(previous)) byId.set(entry.id, entry)
   }
   return [...byId.values()]
+}
+
+/**
+ * Picks the winning copy of one content key when a folder change merges two
+ * folders. Id-keyed collections (workflows, history, learned profiles) merge
+ * per record by stamp ({@link mergeCollection}). A record type without ids of
+ * its own — a conversation transcript, a run's checkpoints — has nothing
+ * per-record to compare, so the departing folder's copy is taken whole: it is
+ * the one the user was working in, while the adopted folder was not being
+ * written to at all.
+ */
+function pickCarriedWinner(adoptedValue: unknown, carriedValue: unknown): unknown {
+  return isIdKeyedCollection(adoptedValue) && isIdKeyedCollection(carriedValue)
+    ? mergeCollection(adoptedValue, carriedValue)
+    : carriedValue
+}
+
+/**
+ * The carried records that should land in the adopted folder: those it does
+ * not have yet, plus carried copies strictly newer than its own — the per-id
+ * rule of {@link mergeCollection}, for the markdown-backed skills and agents
+ * whose file layout is one document per entity.
+ */
+function newerCarried<T extends { id: string }>(
+  carried: readonly T[],
+  existing: readonly T[],
+): T[] {
+  const byId = new Map(existing.map((entry) => [entry.id, entry]))
+  return carried.filter((entry) => {
+    const current = byId.get(entry.id)
+    return !current || recordStamp(entry) > recordStamp(current)
+  })
 }
 
 /**
@@ -887,6 +982,18 @@ export async function syncToFiles(): Promise<void> {
   }
 }
 
+/** Reads one content key's value from a data folder; `undefined` when the file
+ *  is absent or unparsable. */
+async function readEntryValue(fs: FsDirectory, key: string): Promise<unknown> {
+  const text = await fs.readText(keyToPath(key))
+  if (text === null) return undefined
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * Writes each provided entry to the file area under `handle`, MERGING with the
  * current file content (see {@link mergeCollection}) and dropping the legacy
@@ -904,16 +1011,7 @@ export async function syncEntriesToFiles(
     if (key === SKILLS_DIR || key === AGENTS_DIR) continue
     // Session-only state is never persisted as files, no matter the caller.
     if (key.startsWith('turn:')) continue
-    const text = await fs.readText(keyToPath(key))
-    let fileValue: unknown
-    if (text !== null) {
-      try {
-        fileValue = JSON.parse(text) as unknown
-      } catch {
-        fileValue = undefined
-      }
-    }
-    await area.set({ [key]: mergeCollection(fileValue, value) })
+    await area.set({ [key]: mergeCollection(await readEntryValue(fs, key), value) })
   }
 }
 
@@ -984,41 +1082,7 @@ export async function syncFilesToBrowser(): Promise<number> {
   const handle = await resolveHandle(true)
   if (!handle || !hasChromeStorage()) return 0
 
-  const fs = new FsDirectory(handle)
-  const entries: Record<string, unknown> = {}
-  const collect = async (segments: string[], toKey: (name: string) => string): Promise<void> => {
-    for (const name of await fs.listFiles(segments)) {
-      const text = await fs.readText([...segments, name])
-      if (text === null) continue
-      try {
-        entries[toKey(name)] = JSON.parse(text) as unknown
-      } catch {
-        // A corrupt file must not abort the move — everything else still lands.
-      }
-    }
-  }
-
-  await collect([], (name) => name.replace(/\.json$/, ''))
-  await collect(['conversations'], (name) => `${CONVERSATION_PREFIX}${name.replace(/\.json$/, '')}`)
-  await collect(['checkpoints'], (name) => `${CHECKPOINT_PREFIX}${name.replace(/\.json$/, '')}`)
-
-  // Skills and agents are folder-per-entity markdown, not `<key>.json`, so they
-  // are rebuilt from their folders instead of by the generic walk above.
-  const skills: Skill[] = []
-  for (const slug of (await fs.listSubdirectories(SKILLS_DIR)) ?? []) {
-    const text = await fs.readText(skillPath(slug))
-    const skill = text === null ? null : skillFromMarkdown(text)
-    if (skill) skills.push(skill)
-  }
-  if (skills.length > 0) entries[SKILLS_DIR] = skills
-
-  const agents: Agent[] = []
-  for (const slug of (await fs.listSubdirectories(AGENTS_DIR)) ?? []) {
-    const text = await fs.readText(agentPath(slug))
-    const agent = text === null ? null : agentFromMarkdown(text)
-    if (agent) agents.push(agent)
-  }
-  if (agents.length > 0) entries[AGENTS_DIR] = agents
+  const entries = await collectEntriesFrom(handle)
 
   // Fold pending outbox entries over the file state: a parked value is newer
   // than the file, a tombstone means the key was deleted meanwhile.
@@ -1032,6 +1096,67 @@ export async function syncFilesToBrowser(): Promise<number> {
   if (count === 0) return 0
   await chromeLocalArea.set(entries)
   return count
+}
+
+/**
+ * Reads every content key out of a data folder: root JSON files, the
+ * `conversations/` and `checkpoints/` subfolders, and the skills/agents entity
+ * folders (folder-per-entity markdown, rebuilt into their records). A corrupt
+ * file is skipped — one bad file must not abort reading the rest.
+ *
+ * Shared by the browser copy ({@link syncFilesToBrowser}) and the folder-change
+ * carry, so both see the same picture of a folder.
+ */
+async function collectEntriesFrom(
+  handle: FileSystemDirectoryHandle,
+): Promise<Record<string, unknown>> {
+  const fs = new FsDirectory(handle)
+  const entries: Record<string, unknown> = {}
+  const collect = async (segments: string[], toKey: (name: string) => string): Promise<void> => {
+    for (const name of await fs.listFiles(segments)) {
+      const text = await fs.readText([...segments, name])
+      if (text === null) continue
+      try {
+        entries[toKey(name)] = JSON.parse(text) as unknown
+      } catch {
+        // A corrupt file must not abort the walk — everything else still lands.
+      }
+    }
+  }
+
+  await collect([], (name) => name.replace(/\.json$/, ''))
+  await collect(['conversations'], (name) => `${CONVERSATION_PREFIX}${name.replace(/\.json$/, '')}`)
+  await collect(['checkpoints'], (name) => `${CHECKPOINT_PREFIX}${name.replace(/\.json$/, '')}`)
+
+  // Skills and agents are folder-per-entity markdown, not `<key>.json`, so they
+  // are rebuilt from their folders instead of by the generic walk above.
+  const skills = await readSkillsFrom(fs)
+  if (skills.length > 0) entries[SKILLS_DIR] = skills
+  const agents = await readAgentsFrom(fs)
+  if (agents.length > 0) entries[AGENTS_DIR] = agents
+  return entries
+}
+
+/** Reads every skills folder back into `Skill` records (markdown → object). */
+async function readSkillsFrom(fs: FsDirectory): Promise<Skill[]> {
+  const skills: Skill[] = []
+  for (const slug of (await fs.listSubdirectories(SKILLS_DIR)) ?? []) {
+    const text = await fs.readText(skillPath(slug))
+    const skill = text === null ? null : skillFromMarkdown(text)
+    if (skill) skills.push(skill)
+  }
+  return skills
+}
+
+/** Reads every agents folder back into `Agent` records (markdown → object). */
+async function readAgentsFrom(fs: FsDirectory): Promise<Agent[]> {
+  const agents: Agent[] = []
+  for (const slug of (await fs.listSubdirectories(AGENTS_DIR)) ?? []) {
+    const text = await fs.readText(agentPath(slug))
+    const agent = text === null ? null : agentFromMarkdown(text)
+    if (agent) agents.push(agent)
+  }
+  return agents
 }
 
 /**

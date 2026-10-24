@@ -522,15 +522,23 @@ export default function SettingsTab({ onLocaleChange }: Props) {
     setStorageBusy(true)
     setStorageNotice(null)
     try {
+      // Picking a folder carries the departing folder's data over (see
+      // `pickStorageDirectory`) and ends where a reconnect ends, so it
+      // announces the same event: every mounted tab re-reads, from the new
+      // folder this time.
       await pickStorageDirectory()
       const name = (await getStorageDirectoryName()) ?? ''
       setStorageMode('file')
       setStorageDirName(name)
       setStorageNotice({ kind: 'ok', text: t.settingsStorageSynced({ name }) })
+      window.dispatchEvent(new Event(STORAGE_RECONNECTED_EVENT))
     } catch (error) {
       setStorageNotice({ kind: 'error', text: (error as Error).message })
     } finally {
       setStorageBusy(false)
+      // A carry that failed after the switch still moved the app onto the new
+      // folder — re-read so the row shows where storage actually is.
+      void refreshStorage()
     }
   }
 

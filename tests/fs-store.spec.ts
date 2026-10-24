@@ -6,17 +6,20 @@ import {
   createFileArea,
   fileStorageArea,
   FsDirectory,
+  getStorageDirectoryName,
   getStorageMode,
   keyToPath,
+  pickStorageDirectory,
   resetStorageCache,
   SKILLS_DIR,
   skillPath,
+  syncAgentsToFiles,
   syncEntriesToFiles,
   syncFilesToBrowser,
   syncSkillsToFiles,
   syncToFiles,
 } from '../src/lib/fs-store'
-import type { Skill } from '../src/lib/types'
+import type { Agent, Skill } from '../src/lib/types'
 import { notifyStoreChanged } from '../src/lib/store-events'
 
 /**
@@ -117,13 +120,12 @@ function dataDir(node: Extract<Node, { kind: 'dir' }>): Extract<Node, { kind: 'd
 }
 
 /**
- * Points the module's IndexedDB lookup at `handle` with the given permission
- * state, so the file-backed area resolves without a real File System Access
- * API. The resolved handle is cached module-wide, so callers must
- * `resetStorageCache()` before and after.
+ * The handle surface the module resolves: the permission query plus the flat
+ * handle methods of a fake directory tree. Shared by the stored-handle stub
+ * and the directory-picker stub, so both stand for granted folders.
  */
-function stubStoredHandle(handle: FakeDir, permission: PermissionState): void {
-  const stored = {
+function wrapHandle(handle: FakeDir, permission: PermissionState): unknown {
+  return {
     name: 'picked',
     queryPermission: async (): Promise<PermissionState> => permission,
     getDirectoryHandle: (name: string, opts: { create?: boolean }) =>
@@ -132,7 +134,16 @@ function stubStoredHandle(handle: FakeDir, permission: PermissionState): void {
     removeEntry: (name: string) => handle.removeEntry(name),
     values: () => handle.values(),
   }
-  stubIndexedDb(stored)
+}
+
+/**
+ * Points the module's IndexedDB lookup at `handle` with the given permission
+ * state, so the file-backed area resolves without a real File System Access
+ * API. The resolved handle is cached module-wide, so callers must
+ * `resetStorageCache()` before and after.
+ */
+function stubStoredHandle(handle: FakeDir, permission: PermissionState): void {
+  stubIndexedDb(wrapHandle(handle, permission))
 }
 
 /** Same, but the handle exists while its permission sits at `'prompt'` — the
@@ -146,20 +157,42 @@ function stubGrantedDirectory(handle: FakeDir): void {
   stubStoredHandle(handle, 'granted')
 }
 
+/**
+ * Map-backed IndexedDB double. Reads answer from the `root` entry; `put`
+ * (used when a folder is picked) and `delete` land in the same map and report
+ * completion through `tx.oncomplete` — which callers assign only after the
+ * store call, hence the deferred completion.
+ */
 function stubIndexedDb(stored: unknown): void {
+  const handles = new Map<string, unknown>([['root', stored]])
   const db = {
-    transaction: () => ({
-      objectStore: () => ({
-        get: () => {
+    transaction: () => {
+      const store = {
+        get: (key: string) => {
           const request: { result: unknown; onsuccess: null | (() => void) } = {
-            result: stored,
+            result: handles.get(key),
             onsuccess: null,
           }
           setTimeout(() => request.onsuccess?.(), 0)
           return request
         },
-      }),
-    }),
+        put: (value: unknown, key: string) => {
+          handles.set(key, value)
+        },
+        delete: (key: string) => {
+          handles.delete(key)
+        },
+      }
+      // The transaction object callers assign `oncomplete` on must be the same
+      // one the deferred completion reads — hence `objectStore` on it.
+      const tx = {
+        oncomplete: null as null | (() => void),
+        onerror: null as null | (() => void),
+        objectStore: () => store,
+      }
+      setTimeout(() => tx.oncomplete?.(), 0)
+      return tx
+    },
   }
   vi.stubGlobal('indexedDB', {
     open: () => {
@@ -916,5 +949,206 @@ describe('content/config key routing', () => {
     expect(chrome.store.get('workflows')).toEqual([{ id: 'w1', name: 'Parked later' }])
     expect(chrome.store.has('fs-outbox')).toBe(false)
     expect([...chrome.store.keys()].some((key) => key.startsWith('fs-cache:'))).toBe(false)
+  })
+})
+
+describe('changing the storage directory', () => {
+  let chrome: ReturnType<typeof makeChromeMock>
+
+  beforeEach(() => {
+    chrome = makeChromeMock()
+    vi.stubGlobal('chrome', chrome)
+    resetStorageCache()
+  })
+
+  afterEach(() => {
+    resetStorageCache()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  /** Points the picker at `picked`, standing in for the user choosing it. */
+  function stubDirectoryPicker(picked: FakeDir): void {
+    vi.stubGlobal('window', {
+      showDirectoryPicker: vi.fn(async () => wrapHandle(picked, 'granted')),
+    })
+  }
+
+  it("carries the departing folder's data into the newly picked one", async () => {
+    // In file mode the departing folder's files are the only copy of the
+    // content — without this carry a folder change reads as "all my data is
+    // gone", which is exactly the state the user reported.
+    const departing = makeFakeRoot()
+    stubGrantedDirectory(departing.handle as FakeDir)
+    const departingFs = new FsDirectory(departing.handle as FileSystemDirectoryHandle)
+    const workflow = [{ id: 'w1', name: 'Daily', updatedAt: 100 }]
+    const transcript = [
+      { role: 'user', content: 'hi' },
+      { role: 'assistant', content: 'hello' },
+    ]
+    const checkpoint = [{ runId: 'r1', stepIndex: 0, status: 'done', variables: {}, at: 100 }]
+    await departingFs.writeText(['workflows.json'], JSON.stringify(workflow))
+    await departingFs.writeText(['conversations', 'abc.json'], JSON.stringify(transcript))
+    await departingFs.writeText(['checkpoints', 'r1.json'], JSON.stringify(checkpoint))
+    // A legacy config file from an era that migrated config into the folder:
+    // it must not travel — configuration never lives in the folder now.
+    await departingFs.writeText(['settings.json'], JSON.stringify({ locale: 'zh' }))
+    const skill: Skill = {
+      id: 'sk-1',
+      name: 'Review',
+      description: 'review code',
+      instructions: 'Check the diff.',
+      autoMatch: false,
+      createdAt: 1000,
+      updatedAt: 2000,
+    }
+    await syncSkillsToFiles([skill], departing.handle as FileSystemDirectoryHandle)
+    const agent: Agent = {
+      id: 'ag-1',
+      name: 'Scout',
+      role: 'specialist',
+      domain: 'search',
+      delegationHint: 'scan pages',
+      instructions: 'Scan the page.',
+      tools: [],
+      skillNames: [],
+      delegatable: false,
+      maxRounds: 8,
+      createdAt: 1000,
+      updatedAt: 2000,
+    }
+    await syncAgentsToFiles([agent], departing.handle as FileSystemDirectoryHandle)
+
+    const picked = makeFakeRoot()
+    stubDirectoryPicker(picked.handle as FakeDir)
+
+    expect(await pickStorageDirectory()).toBe('file')
+
+    const dir = dataDir(picked.node)
+    expect(JSON.parse((dir.children.get('workflows.json') as FileNode).content)).toEqual(workflow)
+    const convDir = dir.children.get('conversations') as Extract<Node, { kind: 'dir' }>
+    expect(JSON.parse((convDir.children.get('abc.json') as FileNode).content)).toEqual(transcript)
+    const cpDir = dir.children.get('checkpoints') as Extract<Node, { kind: 'dir' }>
+    expect(JSON.parse((cpDir.children.get('r1.json') as FileNode).content)).toEqual(checkpoint)
+    const skillsDir = dir.children.get('skills') as Extract<Node, { kind: 'dir' }>
+    const skillDir = skillsDir.children.get('Review') as Extract<Node, { kind: 'dir' }>
+    expect((skillDir.children.get('SKILL.md') as FileNode).content).toContain('name: Review')
+    const agentsDir = dir.children.get('agents') as Extract<Node, { kind: 'dir' }>
+    const agentDir = agentsDir.children.get('Scout') as Extract<Node, { kind: 'dir' }>
+    expect((agentDir.children.get('AGENT.md') as FileNode).content).toContain('name: Scout')
+    expect(dir.children.has('settings.json')).toBe(false)
+    // The picked folder is current now.
+    expect(await getStorageMode()).toBe('file')
+    expect(await getStorageDirectoryName()).toBe('picked')
+  })
+
+  it('merges with content the picked folder already holds', async () => {
+    const departing = makeFakeRoot()
+    stubGrantedDirectory(departing.handle as FakeDir)
+    const departingFs = new FsDirectory(departing.handle as FileSystemDirectoryHandle)
+    await departingFs.writeText(
+      ['workflows.json'],
+      JSON.stringify([
+        { id: 'w1', updatedAt: 100 },
+        { id: 'w2', updatedAt: 100 },
+      ]),
+    )
+    await departingFs.writeText(
+      ['conversations', 'x.json'],
+      JSON.stringify([
+        { role: 'user', content: 'hi' },
+        { role: 'assistant', content: 'hello' },
+      ]),
+    )
+    await syncSkillsToFiles(
+      [
+        {
+          id: 'sk-1',
+          name: 'Review',
+          description: 'review',
+          instructions: 'Carried.',
+          autoMatch: false,
+          createdAt: 1000,
+          updatedAt: 2000,
+        },
+      ],
+      departing.handle as FileSystemDirectoryHandle,
+    )
+
+    // The folder the user adopts already holds its own data — none of that may
+    // be lost either.
+    const picked = makeFakeRoot()
+    const pickedFs = new FsDirectory(picked.handle as FileSystemDirectoryHandle)
+    await pickedFs.writeText(
+      ['workflows.json'],
+      JSON.stringify([
+        { id: 'w1', updatedAt: 50 },
+        { id: 'w3', updatedAt: 300 },
+      ]),
+    )
+    await pickedFs.writeText(
+      ['conversations', 'x.json'],
+      JSON.stringify([{ role: 'user', content: 'old' }]),
+    )
+    await pickedFs.writeText(['history.json'], JSON.stringify([{ id: 'h1', at: 10 }]))
+    await syncSkillsToFiles(
+      [
+        {
+          id: 'sk-1',
+          name: 'Review',
+          description: 'review',
+          instructions: 'Adopted.',
+          autoMatch: false,
+          createdAt: 1000,
+          updatedAt: 1500,
+        },
+      ],
+      picked.handle as FileSystemDirectoryHandle,
+    )
+
+    stubDirectoryPicker(picked.handle as FakeDir)
+    expect(await pickStorageDirectory()).toBe('file')
+
+    const dir = dataDir(picked.node)
+    // Per-record merge: w1 keeps the newer (departing) copy, w2 travels, w3 stays.
+    expect(JSON.parse((dir.children.get('workflows.json') as FileNode).content)).toEqual([
+      { id: 'w1', updatedAt: 100 },
+      { id: 'w3', updatedAt: 300 },
+      { id: 'w2', updatedAt: 100 },
+    ])
+    // A transcript has no per-record stamps — the departing copy is taken
+    // whole, because the folder being left is the one that was in use.
+    const convDir = dir.children.get('conversations') as Extract<Node, { kind: 'dir' }>
+    expect(JSON.parse((convDir.children.get('x.json') as FileNode).content)).toEqual([
+      { role: 'user', content: 'hi' },
+      { role: 'assistant', content: 'hello' },
+    ])
+    // A key only the picked folder has is untouched.
+    expect(JSON.parse((dir.children.get('history.json') as FileNode).content)).toEqual([
+      { id: 'h1', at: 10 },
+    ])
+    // The same skill in both folders: the strictly newer carried copy wins.
+    const skillsDir = dir.children.get('skills') as Extract<Node, { kind: 'dir' }>
+    const reviewDir = skillsDir.children.get('Review') as Extract<Node, { kind: 'dir' }>
+    const md = (reviewDir.children.get('SKILL.md') as FileNode).content
+    expect(md).toContain('Carried.')
+    expect(md).toContain('updatedAt: 2000')
+  })
+
+  it('picks the new folder without carrying when the departing folder is unreachable', async () => {
+    // Permission pending (the post-update state): the files cannot be read,
+    // and re-granting would need the gesture the picker is about to consume.
+    // The pick itself must still go through — nothing readable, nothing
+    // carried; parked outbox writes reach the new folder through the sync.
+    const departing = makeFakeRoot()
+    const departingFs = new FsDirectory(departing.handle as FileSystemDirectoryHandle)
+    await departingFs.writeText(['workflows.json'], JSON.stringify([{ id: 'w1', updatedAt: 1 }]))
+    stubPendingDirectory(departing.handle as FakeDir)
+
+    const picked = makeFakeRoot()
+    stubDirectoryPicker(picked.handle as FakeDir)
+
+    expect(await pickStorageDirectory()).toBe('file')
+    expect(picked.node.children.has('browser-copilot')).toBe(false)
   })
 })
