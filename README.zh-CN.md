@@ -74,6 +74,8 @@ MCP 发来的工具调用。
 <img width="2497" height="2088" alt="image" src="https://github.com/user-attachments/assets/c116a923-0519-4621-a7bf-ebc5e1e3dcc4" />
 <img width="2497" height="2088" alt="image" src="https://github.com/user-attachments/assets/9de97b1d-aa3e-407b-9f27-c3f44ea3ae91" />
 
+### 插件安装和邮件批量发送工作流[演示地址](https://www.bilibili.com/video/BV1gfHN69En9/?vd_source=cc5bd9029a9b181a2119b592e955672c)
+
 ## 快速开始
 
 ### 1. 安装扩展
